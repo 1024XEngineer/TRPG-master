@@ -1,0 +1,1129 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ARKHAM CASE FILES — AI 守秘人 · CoC 智能跑团主持人</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+/* ============================================================
+   ARKHAM CASE FILES — AI Keeper
+   Light, readable, 1920s case-file aesthetic
+   ============================================================ */
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg-page:      #faf7f0;
+  --bg-panel:     #f5f0e6;
+  --bg-card:      #ffffff;
+  --bg-input:     #fefdfa;
+  --border-light: #e5ded0;
+  --border-mid:   #d4cbb8;
+  --text-primary: #2c2416;
+  --text-body:    #3d3628;
+  --text-muted:   #8a8276;
+  --text-dim:     #b0a898;
+  --brass:        #b8976a;
+  --brass-dark:   #8a6d40;
+  --rust:         #c04040;
+  --rust-bright:  #d45050;
+  --mold:         #4a8a4a;
+  --mold-bright:  #5aaa5a;
+  --ink-blue:     #4a7098;
+  --radius-sm: 4px; --radius-md: 8px;
+  --shadow-sm: 0 1px 4px rgba(0,0,0,0.04);
+  --shadow-md: 0 2px 12px rgba(0,0,0,0.06);
+  --transition: 0.2s ease;
+}
+
+html { font-size: 16px; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', 'Helvetica Neue', sans-serif;
+  background: var(--bg-page);
+  color: var(--text-body);
+  min-height: 100vh;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+}
+
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-mid); border-radius: 3px; }
+
+/* ========== APP SHELL ========== */
+.app-container {
+  max-width: 1320px;
+  margin: 0 auto;
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 290px 1fr 310px;
+  grid-template-rows: 50px 1fr;
+  grid-template-areas: "header header header" "left center right";
+  height: 100vh;
+}
+
+/* ========== HEADER ========== */
+.app-header {
+  grid-area: header;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border-light);
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 24px;
+  z-index: 10;
+}
+.header-brand { display: flex; align-items: center; gap: 10px; }
+.header-icon {
+  width: 28px; height: 28px;
+  background: var(--brass);
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 15px;
+}
+.header-title {
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-size: 1.1rem;
+  color: var(--text-primary);
+  letter-spacing: 0.03em;
+}
+.header-file {
+  font-family: 'JetBrains Mono', 'SF Mono', 'Courier New', monospace;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  letter-spacing: 0.05em;
+}
+.header-actions { display: flex; gap: 8px; align-items: center; }
+
+.btn {
+  padding: 7px 16px;
+  border: 1px solid var(--border-mid);
+  background: var(--bg-card);
+  color: var(--text-body);
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-size: 0.8rem;
+  font-weight: 500;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: var(--transition);
+  display: flex; align-items: center; gap: 5px;
+  white-space: nowrap;
+}
+.btn:hover { background: var(--bg-panel); border-color: var(--brass); }
+.btn-primary { background: var(--brass); color: #fff; border-color: var(--brass); font-weight: 600; }
+.btn-primary:hover { background: var(--brass-dark); border-color: var(--brass-dark); }
+
+/* ========== LEFT PANEL — Investigator ========== */
+.panel-left {
+  grid-area: left;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border-light);
+  overflow-y: auto;
+  padding: 18px 16px;
+  display: flex; flex-direction: column;
+  gap: 14px;
+}
+
+.inv-header { text-align: center; }
+.inv-photo {
+  width: 64px; height: 78px;
+  margin: 0 auto 6px;
+  background: linear-gradient(135deg, #e8e0d0, #d8cfb8);
+  border: 2px solid var(--brass);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 30px;
+}
+.inv-name {
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-size: 1.2rem;
+  color: var(--text-primary);
+}
+.inv-meta { font-size: 0.85rem; color: var(--text-muted); }
+
+/* Derived stats */
+.derived-row { display: flex; gap: 5px; }
+.derived-cell {
+  flex: 1;
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  padding: 7px 3px;
+  text-align: center;
+}
+.derived-cell.warn {
+  border-color: var(--rust);
+  background: #fef8f6;
+}
+.derived-label {
+  font-family: 'Inter', sans-serif;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.derived-val {
+  font-family: 'JetBrains Mono', 'SF Mono', 'Courier New', monospace;
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.derived-cell.warn .derived-val { color: var(--rust); }
+.derived-max { font-size: 0.7rem; color: var(--text-dim); font-family: 'JetBrains Mono', 'SF Mono', 'Courier New', monospace; }
+
+.san-bar-wrap { height: 3px; background: #eee; border-radius: 2px; overflow: hidden; margin-top: 3px; }
+.san-bar-fill {
+  height: 100%; border-radius: 2px;
+  background: linear-gradient(90deg, var(--rust) 0%, var(--brass) 40%, var(--mold) 75%, var(--ink-blue) 100%);
+  transition: width 0.6s ease;
+}
+
+/* Attributes */
+.attr-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.attr-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  padding: 5px 4px;
+  text-align: center;
+}
+.attr-abbr {
+  font-family: 'Inter', sans-serif;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+}
+.attr-val {
+  font-family: 'JetBrains Mono', 'SF Mono', 'Courier New', monospace;
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.attr-derive { font-size: 0.68rem; color: var(--text-dim); font-family: 'JetBrains Mono', 'SF Mono', 'Courier New', monospace; }
+
+/* Skills */
+.section-label {
+  font-family: 'Inter', sans-serif;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--border-light);
+  padding-bottom: 6px;
+  display: flex; align-items: center; gap: 6px;
+}
+.skill-list { display: flex; flex-direction: column; gap: 1px; flex-shrink: 0; min-height: 60px; max-height: 380px; overflow-y: auto; }
+.skill-row {
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 8px;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+  transition: var(--transition);
+}
+.skill-row:hover { background: rgba(184,151,106,0.1); }
+.skill-row.selected {
+  background: rgba(74,138,74,0.08);
+  border-left: 3px solid var(--mold);
+  padding-left: 5px;
+}
+.skill-name { flex: 1; color: var(--text-body); }
+.skill-val { font-family: 'JetBrains Mono', 'SF Mono', 'Courier New', monospace; font-size: 0.82rem; font-weight: 700; color: var(--text-primary); min-width: 30px; text-align: right; }
+.skill-tier { font-size: 0.65rem; color: var(--text-dim); font-family: 'Inter', sans-serif; min-width: 30px; text-align: right; }
+
+/* Equip */
+.equip-list { list-style: none; display: flex; flex-direction: column; gap: 2px; }
+.equip-item {
+  font-size: 0.85rem; color: var(--text-body);
+  padding: 4px 6px; border-radius: var(--radius-sm);
+  display: flex; align-items: center; gap: 6px;
+}
+.equip-icon { width: 18px; text-align: center; flex-shrink: 0; }
+
+/* ========== CENTER — Chat ========== */
+.panel-center {
+  grid-area: center;
+  background: var(--bg-card);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+
+.chat-header {
+  padding: 13px 24px;
+  border-bottom: 1px solid var(--border-light);
+  display: flex; align-items: center; justify-content: space-between;
+  background: #fefdfa;
+}
+.chat-scenario {
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-size: 0.95rem;
+  color: var(--text-primary);
+  display: flex; align-items: center; gap: 7px;
+}
+.chat-scenario-dot {
+  width: 6px; height: 6px;
+  background: var(--mold);
+  border-radius: 50%;
+  animation: pulse-dot 2.5s ease-in-out infinite;
+}
+@keyframes pulse-dot { 0%,100%{opacity:1} 50%{opacity:0.4} }
+.chat-meta {
+  font-family: 'JetBrains Mono', 'SF Mono', 'Courier New', monospace;
+  font-size: 0.7rem;
+  color: var(--text-dim);
+}
+
+/* Messages */
+.chat-messages {
+  flex: 1; overflow-y: auto; padding: 22px 28px;
+  display: flex; flex-direction: column; gap: 16px;
+}
+.message {
+  display: flex; gap: 12px;
+  animation: msg-in 0.35s ease;
+}
+@keyframes msg-in { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+
+.msg-avatar {
+  width: 36px; height: 36px; border-radius: 50%;
+  flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+  font-size: 17px;
+  border: 1px solid var(--border-mid);
+  background: var(--bg-panel);
+}
+.msg-avatar.keeper { border-color: var(--brass); background: #faf5eb; }
+.msg-avatar.player { border-color: var(--mold); background: #f2f7f0; }
+
+.msg-body { flex: 1; min-width: 0; }
+.msg-sender {
+  font-family: 'Inter', sans-serif;
+  font-size: 0.68rem; font-weight: 600;
+  margin-bottom: 3px; letter-spacing: 0.03em;
+}
+.msg-sender.keeper { color: var(--brass-dark); }
+.msg-sender.player { color: var(--mold); }
+
+.msg-content {
+  font-size: 0.92rem;
+  line-height: 1.75;
+  color: var(--text-body);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.msg-content.narration {
+  background: #fdfaf4;
+  border: 1px solid var(--border-light);
+  border-left: 3px solid var(--brass);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  padding: 14px 18px;
+  font-style: italic;
+}
+.msg-content .hl { color: var(--brass-dark); font-weight: 600; font-style: normal; }
+.msg-content .dice-ref { font-family: 'JetBrains Mono', 'SF Mono', 'Courier New', monospace; color: var(--rust); font-weight: 600; }
+.msg-content .success-text { color: var(--mold); font-weight: 600; }
+.msg-content .failure-text { color: var(--rust); font-weight: 600; }
+
+/* Typing */
+.typing-cue {
+  display: flex; gap: 12px; padding: 0;
+  animation: msg-in 0.3s ease;
+}
+.typing-dots { display: flex; gap: 4px; align-items: center; padding: 8px 0; }
+.typing-dots span {
+  width: 6px; height: 6px;
+  background: var(--brass);
+  border-radius: 50%;
+  animation: typing-bounce 1.4s ease-in-out infinite;
+}
+.typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+.typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes typing-bounce {
+  0%,60%,100%{transform:translateY(0);opacity:0.3}
+  30%{transform:translateY(-5px);opacity:1}
+}
+
+/* Input area */
+.chat-input-area {
+  border-top: 1px solid var(--border-light);
+  padding: 12px 24px;
+  display: flex; flex-direction: column; gap: 8px;
+  background: #fefdfa;
+}
+.quick-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.quick-btn {
+  padding: 5px 14px;
+  font-size: 0.78rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: 20px;
+  color: var(--text-body);
+  cursor: pointer;
+  transition: var(--transition);
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  white-space: nowrap;
+}
+.quick-btn:hover { background: var(--bg-panel); border-color: var(--brass); color: var(--brass-dark); }
+.input-row { display: flex; gap: 8px; }
+.chat-input {
+  flex: 1;
+  background: var(--bg-input);
+  border: 1px solid var(--border-mid);
+  border-radius: var(--radius-md);
+  padding: 11px 14px;
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-size: 0.9rem;
+  outline: none;
+  transition: var(--transition);
+  resize: none;
+}
+.chat-input:focus { border-color: var(--brass); box-shadow: 0 0 0 3px rgba(184,151,106,0.1); }
+.chat-input::placeholder { color: var(--text-dim); }
+.chat-submit {
+  padding: 11px 24px;
+  background: var(--brass);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-family: 'Inter', sans-serif;
+  font-size: 0.82rem;
+  font-weight: 600;
+  transition: var(--transition);
+  white-space: nowrap;
+  letter-spacing: 0.03em;
+}
+.chat-submit:hover { background: var(--brass-dark); }
+
+/* ========== RIGHT PANEL ========== */
+.panel-right {
+  grid-area: right;
+  background: var(--bg-panel);
+  border-left: 1px solid var(--border-light);
+  overflow-y: auto;
+  padding: 18px 16px;
+  display: flex; flex-direction: column;
+  gap: 16px;
+}
+
+/* Dice */
+.dice-display {
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  padding: 18px 14px;
+  text-align: center;
+  display: flex; flex-direction: column;
+  align-items: center; gap: 10px;
+}
+.dice-result {
+  font-family: 'JetBrains Mono', 'SF Mono', 'Courier New', monospace;
+  font-size: 3.6rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1;
+  min-height: 60px;
+  display: flex; align-items: center;
+  transition: color 0.2s;
+}
+.dice-result.roll-anim { animation: dice-shake 0.1s ease-in-out infinite; }
+@keyframes dice-shake {
+  0%,100%{transform:rotate(0)scale(1)}
+  25%{transform:rotate(-4deg)scale(1.05)}
+  75%{transform:rotate(4deg)scale(1.05)}
+}
+.dice-verdict {
+  font-family: 'Inter', sans-serif;
+  font-size: 0.72rem; font-weight: 600;
+  letter-spacing: 0.04em; min-height: 20px;
+}
+.v-crit    { color: #2a8a2a; }
+.v-extreme { color: #3a9a3a; }
+.v-hard    { color: #5aaa5a; }
+.v-regular { color: #6ab86a; }
+.v-fail    { color: var(--text-dim); }
+.v-fumble  { color: var(--rust-bright); }
+
+.dice-btns { display: flex; flex-wrap: wrap; gap: 4px; justify-content: center; }
+.dice-btn {
+  width: 40px; height: 40px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-mid);
+  background: var(--bg-card);
+  color: var(--text-body);
+  font-family: 'JetBrains Mono', 'SF Mono', 'Courier New', monospace;
+  font-size: 0.75rem; font-weight: 700;
+  cursor: pointer;
+  transition: var(--transition);
+}
+.dice-btn:hover { border-color: var(--brass); background: #faf5eb; transform: translateY(-1px); }
+.dice-btn.active-roll { border-color: var(--brass); background: #faf5eb; }
+.dice-info {
+  font-family: 'Inter', sans-serif;
+  font-size: 0.62rem; color: var(--text-dim);
+}
+
+/* Scenario cards */
+.scenario-cards { display: flex; flex-direction: column; gap: 5px; }
+.scenario-card {
+  padding: 10px 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: var(--transition);
+}
+.scenario-card:hover { border-color: var(--brass); box-shadow: var(--shadow-sm); }
+.scenario-card.active { border-color: var(--brass); background: #fdfaf4; }
+.sc-card-title { font-weight: 600; font-size: 0.84rem; color: var(--text-primary); }
+.sc-card-desc { font-size: 0.73rem; color: var(--text-muted); margin-top: 2px; line-height: 1.4; }
+.sc-card-meta { font-family: 'JetBrains Mono', 'SF Mono', 'Courier New', monospace; font-size: 0.63rem; color: var(--brass-dark); margin-top: 3px; }
+
+/* Log */
+.log-list { display: flex; flex-direction: column; gap: 2px; max-height: 160px; overflow-y: auto; }
+.log-entry {
+  font-size: 0.7rem; padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-family: 'JetBrains Mono', 'SF Mono', 'Courier New', monospace;
+  display: flex; gap: 6px;
+}
+.log-time { color: var(--text-dim); font-size: 0.63rem; flex-shrink: 0; }
+
+/* ========== SAN SHOCK ========== */
+.san-shock {
+  position: fixed; inset: 0;
+  background: rgba(30,20,10,0.9);
+  z-index: 200;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  pointer-events: none;
+  animation: shock-in 0.2s ease-out, shock-out 0.5s 1.4s ease-in forwards;
+}
+@keyframes shock-in { from{opacity:0} to{opacity:1} }
+@keyframes shock-out { from{opacity:1} to{opacity:0} }
+.san-shock-num {
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-size: 5rem;
+  color: #e06050;
+  text-shadow: 0 0 40px rgba(224,96,80,0.5);
+}
+.san-shock-label {
+  font-family: 'Inter', sans-serif;
+  font-size: 0.78rem;
+  color: #d0c8b8;
+  letter-spacing: 0.1em;
+  margin-top: 6px;
+  text-align: center;
+  max-width: 300px;
+}
+
+/* ========== MODAL ========== */
+.modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.4);
+  backdrop-filter: blur(3px);
+  z-index: 150;
+  display: flex; align-items: center; justify-content: center;
+  animation: fade-in 0.2s ease;
+}
+@keyframes fade-in { from{opacity:0} to{opacity:1} }
+.modal-box {
+  background: var(--bg-card);
+  border: 1px solid var(--border-mid);
+  border-radius: var(--radius-md);
+  max-width: 580px; width: 92%;
+  padding: 28px;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.15);
+}
+.modal-box h2 {
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-size: 1.05rem;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+.modal-sub {
+  font-family: 'JetBrains Mono', 'SF Mono', 'Courier New', monospace;
+  font-size: 0.63rem; color: var(--text-dim); margin-bottom: 16px;
+}
+.modal-body { color: var(--text-body); line-height: 1.75; font-size: 0.88rem; margin-bottom: 16px; }
+.modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+/* ========== RESPONSIVE ========== */
+@media (max-width: 1060px) {
+  .app-container { grid-template-columns: 260px 1fr 280px; }
+}
+@media (max-width: 820px) {
+  .app-container {
+    grid-template-columns: 1fr;
+    grid-template-rows: 48px 1fr;
+    grid-template-areas: "header" "center";
+  }
+  .panel-left, .panel-right {
+    position: fixed; top: 48px; bottom: 48px;
+    width: 280px; z-index: 50;
+    transition: transform 0.3s ease;
+    box-shadow: 2px 0 20px rgba(0,0,0,0.12);
+  }
+  .panel-left { left: 0; transform: translateX(-100%); }
+  .panel-left.open { transform: translateX(0); }
+  .panel-right { right: 0; transform: translateX(100%); }
+  .panel-right.open { transform: translateX(0); }
+  .mobile-nav { display: flex !important; }
+}
+@media (min-width: 821px) { .mobile-nav { display: none !important; } }
+
+.mobile-nav {
+  display: none;
+  position: fixed; bottom: 0; left: 0; right: 0;
+  background: var(--bg-card);
+  border-top: 1px solid var(--border-light);
+  z-index: 55;
+  padding: 4px 12px;
+  justify-content: space-around;
+}
+.mobile-nav-btn {
+  padding: 6px 14px; background: none; border: none;
+  color: var(--text-muted); font-size: 0.68rem; cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  font-family: 'Inter', sans-serif;
+}
+.mobile-nav-btn .m-icon { font-size: 1.05rem; }
+.mobile-nav-btn.active { color: var(--brass-dark); }
+.mobile-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.3); z-index: 45; }
+.mobile-overlay.show { display: block; }
+
+@media (prefers-reduced-motion: reduce) {
+  *,*::before,*::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+</style>
+</head>
+<body>
+
+<div class="app-container">
+  <!-- ====== HEADER ====== -->
+  <header class="app-header">
+    <div class="header-brand">
+      <div class="header-icon">🦑</div>
+      <span class="header-title">Arkham Case Files</span>
+      <span class="header-file">#1927-<span id="caseNum">03</span></span>
+    </div>
+    <div class="header-actions">
+      <button class="btn" onclick="openRules()">☥ 快速规则</button>
+      <button class="btn btn-primary" onclick="openScenarioModal()">📋 变更案件</button>
+    </div>
+  </header>
+
+  <!-- ====== LEFT: Investigator Dossier ====== -->
+  <aside class="panel-left" id="panelLeft">
+    <div class="inv-header">
+      <div class="inv-photo">🕵️</div>
+      <div class="inv-name" id="invName">亨利·阿米蒂奇</div>
+      <div class="inv-meta">38岁 · 男性 · 密斯卡塔尼克大学教授</div>
+    </div>
+
+    <div class="derived-row">
+      <div class="derived-cell"><div class="derived-label">HP 生命</div><div class="derived-val" id="dvHp">11</div><div class="derived-max">/ 11</div></div>
+      <div class="derived-cell warn" id="sanCell"><div class="derived-label">SAN 理智</div><div class="derived-val" id="dvSan">70</div><div class="derived-max">/ 99</div><div class="san-bar-wrap"><div class="san-bar-fill" id="sanBar" style="width:71%"></div></div></div>
+      <div class="derived-cell"><div class="derived-label">LUCK</div><div class="derived-val" id="dvLuck">55</div><div class="derived-max">/ 99</div></div>
+      <div class="derived-cell"><div class="derived-label">MP</div><div class="derived-val" id="dvMp">14</div><div class="derived-max">/ 14</div></div>
+    </div>
+
+    <div class="attr-grid" id="attrGrid"></div>
+
+    <div class="section-label">📋 核心技能 <span style="font-weight:400;font-size:0.58rem">点击选择检定</span></div>
+    <div class="skill-list" id="skillList"></div>
+
+    <div class="section-label" style="margin-top:2px">🎒 随身物品</div>
+    <ul class="equip-list">
+      <li class="equip-item"><span class="equip-icon">📓</span>笔记本与钢笔</li>
+      <li class="equip-item"><span class="equip-icon">🔦</span>手电筒</li>
+      <li class="equip-item"><span class="equip-icon">⏱️</span>怀表</li>
+      <li class="equip-item"><span class="equip-icon">👛</span>皮夹 ($12.50)</li>
+      <li class="equip-item"><span class="equip-icon">📜</span>《死灵书》抄本残页</li>
+      <li class="equip-item"><span class="equip-icon">🔫</span>左轮手枪 (.38)</li>
+    </ul>
+  </aside>
+
+  <!-- ====== CENTER: Chat ====== -->
+  <main class="panel-center">
+    <div class="chat-header">
+      <div class="chat-scenario"><span class="chat-scenario-dot"></span><span id="caseTitle">古宅幽影</span></div>
+      <div class="chat-meta" id="entryCounter">条目 1</div>
+    </div>
+
+    <div class="chat-messages" id="chatMessages"></div>
+
+    <div class="chat-input-area">
+      <div class="quick-row" id="quickActions">
+        <button class="quick-btn" onclick="act('我仔细观察周围的环境，不放过任何细节')">🔍 侦察</button>
+        <button class="quick-btn" onclick="act('我在书桌和书架上翻找文件与线索')">📚 图书馆使用</button>
+        <button class="quick-btn" onclick="act('我屏住呼吸，蹑手蹑脚地向前移动')">👤 潜行</button>
+        <button class="quick-btn" onclick="act('我试图说服对方说出所知的真相')">🗣️ 说服</button>
+        <button class="quick-btn" onclick="act('我检查眼前的超自然现象，试图用理性解释')">🧠 神秘学</button>
+        <button class="quick-btn" onclick="rollD100()">🎲 D100检定</button>
+      </div>
+      <div class="input-row">
+        <textarea class="chat-input" id="chatInput" rows="2"
+          placeholder="描述你的行动… （例：我推开吱呀作响的木门，举起手电筒照向黑暗深处…）"
+          onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();actFromInput();}"></textarea>
+        <button class="chat-submit" onclick="actFromInput()">▶ 行动</button>
+      </div>
+    </div>
+  </main>
+
+  <!-- ====== RIGHT: Dice + Scenarios + Log ====== -->
+  <aside class="panel-right" id="panelRight">
+    <div class="section-label">🎲 D100 检定</div>
+    <div class="dice-display">
+      <div class="dice-result" id="diceResult">—</div>
+      <div class="dice-verdict" id="diceVerdict"></div>
+      <div class="dice-btns">
+        <button class="dice-btn" onclick="rollD100()">D%</button>
+        <button class="dice-btn" onclick="rollDie(4)">D4</button>
+        <button class="dice-btn" onclick="rollDie(6)">D6</button>
+        <button class="dice-btn" onclick="rollDie(8)">D8</button>
+        <button class="dice-btn" onclick="rollDie(10)">D10</button>
+        <button class="dice-btn" onclick="rollDie(20)">D20</button>
+      </div>
+      <div class="dice-info" id="diceInfo">已选择「侦察」(65%)</div>
+    </div>
+
+    <div class="section-label">📜 案件记录</div>
+    <div class="log-list" id="logList"></div>
+
+    <div class="section-label">📋 待查案件</div>
+    <div class="scenario-cards" id="scenarioCards"></div>
+  </aside>
+</div>
+
+<!-- Mobile Nav -->
+<nav class="mobile-nav">
+  <button class="mobile-nav-btn active" onclick="mobileTab('center')"><span class="m-icon">📄</span>案件记录</button>
+  <button class="mobile-nav-btn" onclick="mobileTab('left')"><span class="m-icon">🕵️</span>调查员</button>
+  <button class="mobile-nav-btn" onclick="mobileTab('right')"><span class="m-icon">🎲</span>骰子</button>
+</nav>
+<div class="mobile-overlay" id="mobileOverlay" onclick="closeMobilePanels()"></div>
+
+<!-- Modals -->
+<div class="modal-overlay" id="scenarioModal" style="display:none">
+  <div class="modal-box">
+    <h2>📋 案件档案室</h2>
+    <div class="modal-sub">密斯卡塔尼克大学 — 特别收藏部</div>
+    <div id="modalScenarioCards"></div>
+    <div class="modal-actions"><button class="btn" onclick="closeScenarioModal()">关闭</button></div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="rulesModal" style="display:none">
+  <div class="modal-box" style="max-width:620px">
+    <h2>☥ 克苏鲁的呼唤 — 快速规则参考</h2>
+    <div class="modal-sub">第七版 · 核心机制</div>
+    <div class="modal-body">
+      <p><strong>D100 百分骰：</strong>投 D100 ≤ 技能值即为成功。等级：</p>
+      <p style="margin-left:1em;font-size:0.85rem;line-height:2.1">
+        <span style="color:#2a8a2a">● 大成功 01</span> ·
+        <span style="color:#3a9a3a">● 极限 ≤技能/5</span> ·
+        <span style="color:#5aaa5a">● 困难 ≤技能/2</span> ·
+        <span style="color:#6ab86a">● 常规 ≤技能</span><br>
+        <span style="color:#8a8276">● 失败 >技能</span> ·
+        <span style="color:#c04040">● 大失败 96-100</span>
+      </p>
+      <p style="margin-top:8px"><strong>SAN 理智：</strong>遭遇神话事件损失 SAN。单次 ≥5 触发暂时性疯狂。SAN=0 永久疯狂。</p>
+      <p><strong>战斗：</strong>极度致命。HP=(CON+SIZ)/10。逃跑往往是最佳选择。</p>
+      <p><strong>幸运：</strong>投 D100 ≤ 幸运值即可。使用后幸运值下降。</p>
+      <p style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border-light);font-style:italic;color:var(--text-muted)">
+        "人类最古老而强烈的情感是恐惧；而最古老而强烈的恐惧，是对未知的恐惧。" — H.P. 洛夫克拉夫特
+      </p>
+    </div>
+    <div class="modal-actions"><button class="btn btn-primary" onclick="closeRules()">明白了</button></div>
+  </div>
+</div>
+
+<script>
+// ============================================================================
+// GAME STATE
+// ============================================================================
+const state = {
+  scenarioId: 'mansion', entryCount: 0, selectedSkill: 'spot-hidden', logs: [],
+  investigator: {
+    name: '亨利·阿米蒂奇', age: 38, occupation: '密斯卡塔尼克大学教授',
+    str: 50, con: 55, siz: 60, dex: 65, app: 45, int: 80, pow: 70, edu: 85,
+    hp: 11, maxHp: 11, san: 70, maxSan: 99, luck: 55, mp: 14, maxMp: 14,
+    skills: {
+      'library-use':    { name: '图书馆使用',   val: 80 },
+      'spot-hidden':    { name: '侦察',         val: 65 },
+      'psychology':     { name: '心理学',       val: 55 },
+      'stealth':        { name: '潜行',         val: 40 },
+      'persuade':       { name: '说服',         val: 50 },
+      'fighting-brawl': { name: '格斗(斗殴)',   val: 35 },
+      'firearms':       { name: '射击(手枪)',   val: 30 },
+      'first-aid':      { name: '急救',         val: 60 },
+      'occult':         { name: '神秘学',       val: 45 },
+      'history':        { name: '历史',         val: 70 },
+      'dodge':          { name: '闪避',         val: 42 },
+      'listen':         { name: '聆听',         val: 55 },
+      'cthulhu-mythos': { name: '克苏鲁神话',   val: 8  },
+    }
+  },
+  scenes: { mansion:{flags:{}}, university:{flags:{}}, innsmouth:{flags:{}}, egypt:{flags:{}} }
+};
+
+// ============================================================================
+// SCENARIOS
+// ============================================================================
+const SCENARIOS = {
+  mansion: {
+    id: 'mansion', num: '03', title: '古宅幽影', subtitle: 'The Shadow Over Arkham',
+    desc: '阿卡姆郊外的惠特利老宅近来传出怪声。屋主三周前失踪，警方搜查无果。作为教授的旧友，你被家属请求前往调查。',
+    genre: '调查 · 恐怖 · 哥特', difficulty: '★★☆☆☆',
+    intro() { return `你站在惠特利老宅的铁门前。这座维多利亚式建筑已荒废了二十年，常春藤爬满了砖墙。天空是铅灰色的，最后一丝日光正在消失。\n\n铁门虚掩着。门廊上的煤气灯忽明忽灭。从屋内传来旧书与霉味混杂着某种化学品的气味。门廊地板上有新鲜的泥脚印——成年男性的尺码。` + (Math.random()<0.5?'\n\n突然，二楼窗户亮起蓝绿色磷光——只持续两三秒，一切又归于黑暗。':''); }
+  },
+  university: {
+    id: 'university', num: '07', title: '学院回响', subtitle: 'Echoes in the Library',
+    desc: '密斯卡塔尼克大学珍本部失窃——被盗的是拉丁文版《死灵书》残卷。当夜值班的图书管理员被发现时已神志不清，口中不断重复着"深渊中的眼睛"。',
+    genre: '调查 · 学术 · 心理恐怖', difficulty: '★★★☆☆',
+    intro() { return `你收到了一封紧急电报："速来图书馆。发生了可怕的事。"\n\n现在你站在珍本部大门前。门缝下渗出一滩暗色液体——像墨水，但闻起来像海水。馆内一片漆黑。手电筒光束扫过高耸的书架。空气中弥漫着臭氧的气味，以及某种更古老的东西。`; }
+  },
+  innsmouth: {
+    id: 'innsmouth', num: '12', title: '深海低语', subtitle: 'The Innsmouth Report',
+    desc: '马萨诸塞州沿海的印斯茅斯镇人口锐减。匿名举报信声称镇民正在发生"某种变化"。你前往这个被遗忘的渔村，却发现了比任何犯罪都可怕的东西。',
+    genre: '调查 · 生存 · 宇宙恐怖', difficulty: '★★★★★',
+    intro() { return `印斯茅斯。这个名字在官方地图上几乎不存在。巴士司机拒绝在天黑后前往，在距离镇界三英里的地方把你放下。\n\n你独自站在荒凉的滨海公路上。大西洋的灰色波涛拍打着礁石。空气中弥漫着浓烈的鱼腥——但比那更复杂。远处，歪斜的屋顶间有几点灯火在水面移动。一座旅馆的招牌在风中吱嘎作响："吉尔曼旅馆——有空房"。`; }
+  },
+  egypt: {
+    id: 'egypt', num: '21', title: '沙漠遗迹', subtitle: 'What the Sands Buried',
+    desc: '一队考古学家在埃及沙漠中发现了一座不属于任何已知文明的地下建筑。最后的电报提到了"非欧几里得的几何"和"永远不应打开的封印"。随后通讯完全中断。',
+    genre: '探索 · 考古 · 神话', difficulty: '★★★★☆',
+    intro() { return `你乘坐的吉普车在距离发掘现场两英里的地方抛锚了。司机拒绝前进——他说这里的沙漠"不对劲"。\n\n你徒步前行。考古队的营地：三顶帐篷、一辆卡车、散落一地的设备。但没有人。篝火还是温热的，咖啡只喝了一半。一把铲子插在沙中，旁边是深不见底的洞口。洞口边缘的岩石上刻着不属于任何文明的符号——在眼角余光里，它们似乎在蠕动。`; }
+  }
+};
+
+// ============================================================================
+// AI KEEPER
+// ============================================================================
+function aiKeeperRespond(input) {
+  const inp = input.toLowerCase();
+  const patterns = {
+    observe:  /观察|查看|侦察|仔细看|搜索|寻找|侦查|环顾|注意|检查|打量|审视/,
+    library:  /书|文献|笔记|资料|翻阅|查找|研究|记录|图书馆|档案|报纸|信件|日记|手稿/,
+    stealth:  /潜行|悄悄|隐藏|躲|无声|静悄悄|蹑手|隐匿|暗中|屏住/,
+    persuade: /说服|交涉|询问|问道|对话|谈判|打听|质问|告诉|商量|谎言|欺骗|假装/,
+    occult:   /神秘|魔法|咒语|符号|仪式|符文|异常|诡异|超自然|不可名状|祭坛|怪物|触手|深潜者|旧日/,
+    flee:     /逃跑|撤退|跑|逃离|离开|回去|退出|不敢|放弃/,
+    fight:    /开枪|射击|开火|击打|攻击|砸|砍|刺|搏斗|战斗|反抗|自卫/,
+    listen:   /听|声音|动静|声响|仔细听|侧耳|回声/,
+  };
+  let type = 'observe';
+  for (const [t, re] of Object.entries(patterns)) { if (re.test(inp)) { type = t; break; } }
+
+  const template = RESPONSES[state.scenarioId] || RESPONSES._default;
+  const options = template[type] || template.observe || template._fallback;
+  let text = options[Math.floor(Math.random() * options.length)];
+
+  const hints = { observe:'侦察', library:'图书馆使用', stealth:'潜行', persuade:'说服', occult:'神秘学', listen:'聆听', fight:'格斗或射击' };
+  if (hints[type] && Math.random() < 0.4) text += '\n\n🟡 请进行 <span class="dice-ref">' + hints[type] + '检定 — 投 D100</span>';
+
+  let sanCheck = null;
+  if (type === 'occult' && Math.random() < 0.3) sanCheck = { loss: Math.floor(Math.random()*4)+1, reason: '你瞥见了不应存在于这个世界的真相…' };
+  else if (state.scenarioId === 'innsmouth' && type === 'observe' && Math.random() < 0.25) sanCheck = { loss: Math.floor(Math.random()*5)+2, reason: '你终于看清了那些"人"的真面目…' };
+
+  state.scenes[state.scenarioId].flags._acts = (state.scenes[state.scenarioId].flags._acts || 0) + 1;
+  state.entryCount++;
+  return { text, sanCheck };
+}
+
+const RESPONSES = {
+  mansion: {
+    observe: [
+      '手电筒的光束扫过门厅。墙上的壁画已经褪色——画中人物的眼睛都被涂黑了。吊灯上挂满蛛网，灰尘中的脚印通向两个方向：会客室和通往二楼的楼梯。',
+      '你仔细检查了书房。惠特利教授的书桌上摊开着一本笔记本，钢笔搁在一旁，仿佛主人只是去了洗手间。最后一页用越来越潦草的字迹写着："它在敲门。它在敲门。它在敲门。"',
+      '在地下室入口，你发现了一个银质挂坠盒，里面有一缕头发和一张褪色照片。背面写着："致我最爱的伊丽莎白，1898年。"——奇怪的是，报告中说教授终身未婚。'
+    ],
+    library: [
+      '书房里有一本皮面日记。纸张泛黄但字迹可辨。日记主人是惠特利教授的祖父，记录了1863年在南太平洋的航行——提到了"海底的巨大石柱"和"非人类的建筑"。日记最后三分之一被撕掉了。',
+      '旧报纸堆中，惠特利家族在这个镇上已有两百年。每隔两代人，就有一个惠特利"英年早逝"或"移居海外"，从未找到尸体。'
+    ],
+    stealth: [
+      '你脱了鞋，悄无声息地走上楼梯。二楼走廊的木板发出轻微呻吟。走廊尽头的主卧室门缝下透出一线蓝绿色的光。有什么东西在门后缓慢而沉重地移动。',
+      '你屏住呼吸，躲在大衣柜后。几秒后，一个黑影从走廊飘过。当它经过时，你闻到了臭氧味，还有薰衣草的香气。'
+    ],
+    occult: [
+      '壁纸下面藏着符号。它们不匹配任何已知文字——更像是几何上的悖论。直角多于四个的四边形。光是看着它们，你的太阳穴就开始隐隐作痛。',
+      '地毯上那个焦黑的圆形印记不是火烧的——像是巨大重量压出来的。印记边缘残留着微弱辐射。一个画面突然闪过你的脑海：巨大的、蠕动的形体，发出磷光——然后消失了。你的心跳加速。'
+    ],
+    _fallback: ['老宅在风中发出低沉的呻吟。某处的百叶窗在拍打着。你继续深入。每扇门后都是一段被遗忘的历史。有些灰尘上留着清晰的指印——新鲜的。','走廊似乎比从外面看时更长。煤气灯闪烁着，将你的影子投射出好几个。你在想：惠特利教授究竟发现了什么？']
+  },
+  university: {
+    observe: [
+      '手电筒照亮了一排排高耸的书架，它们延伸到黑暗中如同巨兽的肋骨。地板上有拖拽痕迹——从门口到深处的阅览桌。桌上摊开着一本巨大的书，周围散落着烧了一半的蜡烛。',
+      '你发现了值班图书管理员的眼镜——镜片碎裂，镜架上有干涸的血迹。旁边有张便条，颤抖的笔迹写着："别看书。千万别看。"字迹在最后几乎无法辨认。'
+    ],
+    library: [
+      '你找到了《死灵书》残卷的目录卡片。过去五十年只有七个人借阅过。五个后来进了普罗维登斯精神病院。一个失踪。最后一个借阅者的名字被涂黑了——用的是某种黑色黏稠物质。',
+      '索引卡片柜中有一份1793年的秘密协议。大部分被墨水涂掉，但能辨认出："…深渊…守卫…每百年的祭品…"。签名都用红墨水。'
+    ],
+    occult: ['你小心翼翼地翻开那本巨书。纸张是用不认识的皮革装订的。书页上绘满诡异星图——不属于任何已知天文学体系。翻到某一页时，文字似乎在动，扭曲着，重组着。你猛合上书，大口喘气。但那些符号已刻在了视网膜上。'],
+    _fallback: ['图书馆的阴影在书架间聚集，仿佛拥有意志。远处传来轻微声响——像有人在自言自语。你继续调查。时间的流逝在这里似乎变模糊了。','走廊上有一串湿漉漉的脚印。不是人类的——像是蹼状。它们从珍本部出发，穿过走廊，消失在一面墙壁前。你敲了敲——回音不对。']
+  },
+  innsmouth: {
+    observe: [
+      '你观察吉尔曼旅馆的大堂。柜台后面的老妇人用让你不舒服的眼神打量你——她的眼睛间距比正常人宽得多，从不眨眼。墙上的照片没有一张晚于1846年。',
+      '码头附近有一座废弃的"教堂"——门上刻着的不是十字架，而是扭曲的三叉戟。内部长椅排列成同心圆，中央有一个深不见底的水池。池水发出微弱磷光。'
+    ],
+    stealth: ['你趁夜色潜入码头。一艘锈拖网渔船吃水很深——但现在是退潮。船上传来有节奏的声响。不是引擎。是一种吟唱。低沉、潮湿、充满喉音。你听不懂那些词句，但骨髓认出了它们。'],
+    occult: ['旧货店里有一本1850年代的航海日记。前几页正常，然后——"我们在大洋深处发现了那座岛。岛上有一座城。城里的东西不是人。他们从水里出来。但代价是——"后面的页面被海水泡烂了。最后一段："他们还在等着。星星位置正确的那一天，他们会回来。"'],
+    _fallback: ['印斯茅斯的街道在黄昏时空无一人。但你不觉得孤独。窗帘后有眼睛在注视。屋顶上的阴影比例不太对。海风带来鱼腥味和更深层的腐败气息。','镇民用一种你从未听过的方言交谈。口音模糊不清，辅音被喉音取代。偶尔你会听到一个词——"Ph\'nglui mglw\'nafh…"——这究竟是什么意思？']
+  },
+  egypt: {
+    observe: ['你仔细检查营地。物资完好，没有挣扎痕迹——考古队是自愿进入洞口的。有人帐篷里还放着留声机。按下播放键，贝多芬《月光奏鸣曲》响起。第三乐章中段，音乐被盖过了——取而代之的是一段来自地下的低沉号角声。这不是唱片上的录音。'],
+    occult: ['洞口的符号让你想起密斯卡塔尼克大学禁书区的东西——属于"旧日支配者"时代的文字，比人类早了亿万年的文明遗物。你用手指沿刻痕划过。石头冰冷得不像是被沙漠烈日暴晒过的。'],
+    _fallback: ['隧道以一种违背重力的方式向下延伸——你感觉像在水平前进，但身体告诉你正在下降。石壁上的符号越来越多，越来越密集。它们不是刻上去的——是长出来的。从石头里长出来的。','沙漠中升起热风。风沙的呼啸中隐约有声音——不是语言，而是嗡嗡的震动。来自脚下。很深。你想起一个古老传说："在沙漠之下，有一座黑色的城市。那些看见它的人，再也不会梦见别的东西。"']
+  },
+  _default: { _fallback: ['你继续调查着眼前的谜团。每一步都让你离真相更近——或者更远。这是克苏鲁的呼唤。真相往往比无知更加危险。'] }
+};
+
+// ============================================================================
+// DISPLAY
+// ============================================================================
+function addKeeperMsg(text) {
+  const log = document.getElementById('chatMessages');
+  const div = document.createElement('div'); div.className = 'message';
+  div.innerHTML = `<div class="msg-avatar keeper">📜</div><div class="msg-body"><div class="msg-sender keeper">AI 守秘人</div><div class="msg-content narration">${text}</div></div>`;
+  log.appendChild(div); log.scrollTop = log.scrollHeight;
+}
+function addPlayerMsg(text) {
+  const log = document.getElementById('chatMessages');
+  const div = document.createElement('div'); div.className = 'message';
+  div.innerHTML = `<div class="msg-avatar player">🕵️</div><div class="msg-body"><div class="msg-sender player">${state.investigator.name}</div><div class="msg-content">${text}</div></div>`;
+  log.appendChild(div); log.scrollTop = log.scrollHeight;
+}
+function showTyping() {
+  const log = document.getElementById('chatMessages');
+  const cue = document.createElement('div'); cue.className = 'typing-cue'; cue.id = 'typingCue';
+  cue.innerHTML = '<div class="msg-avatar keeper">📜</div><div class="typing-dots"><span></span><span></span><span></span></div>';
+  log.appendChild(cue); log.scrollTop = log.scrollHeight;
+}
+function hideTyping() { const c = document.getElementById('typingCue'); if (c) c.remove(); }
+
+// ============================================================================
+// DICE
+// ============================================================================
+function rollD100() {
+  const resultEl = document.getElementById('diceResult');
+  const verdictEl = document.getElementById('diceVerdict');
+  const infoEl = document.getElementById('diceInfo');
+  document.querySelectorAll('.dice-btn').forEach(b => { if (b.textContent==='D%') b.classList.add('active-roll'); });
+  setTimeout(() => document.querySelectorAll('.dice-btn').forEach(b => b.classList.remove('active-roll')), 700);
+
+  resultEl.className = 'dice-result roll-anim';
+  verdictEl.textContent = ''; verdictEl.className = 'dice-verdict';
+
+  let count = 0; const maxF = 14;
+  const animate = () => {
+    resultEl.textContent = String(Math.floor(Math.random()*100)+1).padStart(2,'0');
+    if (++count < maxF) { setTimeout(animate, 50 + count*10); return; }
+
+    const final = Math.floor(Math.random()*100)+1;
+    resultEl.textContent = String(final).padStart(2,'0');
+    resultEl.className = 'dice-result';
+
+    const skill = state.investigator.skills[state.selectedSkill];
+    const sName = skill ? skill.name : '未选择技能';
+    const sVal = skill ? skill.val : 50;
+    const roll = final;
+    let verdict, cssClass;
+
+    if (roll === 1)              { verdict = '大成功！'; cssClass = 'v-crit'; }
+    else if (roll <= sVal/5)     { verdict = '极限成功'; cssClass = 'v-extreme'; }
+    else if (roll <= sVal/2)     { verdict = '困难成功'; cssClass = 'v-hard'; }
+    else if (roll <= sVal)       { verdict = '常规成功'; cssClass = 'v-regular'; }
+    else if (roll >= 96 && sVal < 50) { verdict = '大失败！'; cssClass = 'v-fumble'; }
+    else                         { verdict = '失败'; cssClass = 'v-fail'; }
+
+    verdictEl.textContent = verdict;
+    verdictEl.className = 'dice-verdict ' + cssClass;
+    infoEl.textContent = `${sName}(${sVal}%) · ${verdict}`;
+    addLog(`🎲 D100=${String(roll).padStart(2,'0')} · ${sName}(${sVal}%) — ${verdict}`);
+
+    if (roll === 1) setTimeout(() => addKeeperMsg('大成功 — ✨ 命运在这一刻眷顾了你。你的行动堪称完美。即使是宇宙的冷漠，此刻也似乎对你网开一面。'), 500);
+    if (cssClass === 'v-fumble') setTimeout(() => addKeeperMsg('大失败 — 💀 你搞砸了。以最糟糕的方式。希望你有办法收拾残局。'), 500);
+  };
+  animate();
+}
+
+function rollDie(sides) {
+  const resultEl = document.getElementById('diceResult');
+  const verdictEl = document.getElementById('diceVerdict');
+  resultEl.className = 'dice-result roll-anim';
+  verdictEl.textContent = ''; verdictEl.className = 'dice-verdict';
+  let count = 0; const maxF = 10;
+  const anim = () => {
+    resultEl.textContent = Math.floor(Math.random()*sides)+1;
+    if (++count < maxF) { setTimeout(anim, 40+count*8); return; }
+    const f = Math.floor(Math.random()*sides)+1;
+    resultEl.textContent = f; resultEl.className = 'dice-result';
+    addLog(`🎲 D${sides} = ${f}`);
+  };
+  anim();
+}
+
+// ============================================================================
+// ACTIONS
+// ============================================================================
+function actFromInput() {
+  const inp = document.getElementById('chatInput');
+  const text = inp.value.trim();
+  if (!text) return;
+  inp.value = '';
+  doAct(text);
+}
+function act(text) { doAct(text); }
+function doAct(text) {
+  addPlayerMsg(text);
+  addLog(`🕵️ 行动: ${text.slice(0,40)}${text.length>40?'…':''}`);
+  showTyping();
+  setTimeout(() => {
+    hideTyping();
+    const resp = aiKeeperRespond(text);
+    addKeeperMsg(resp.text);
+    addLog('📜 守秘人回应');
+    if (resp.sanCheck) setTimeout(() => triggerSanLoss(resp.sanCheck.loss, resp.sanCheck.reason), 400);
+    updateUI();
+  }, 800 + Math.random()*1800);
+}
+
+// ============================================================================
+// SAN
+// ============================================================================
+function triggerSanLoss(amount, reason) {
+  const inv = state.investigator;
+  inv.san = Math.max(0, inv.san - amount);
+  if (amount >= 3) {
+    const shock = document.createElement('div'); shock.className = 'san-shock';
+    shock.innerHTML = `<div class="san-shock-num">-${amount} SAN</div><div class="san-shock-label">${reason}</div>`;
+    document.body.appendChild(shock);
+    setTimeout(() => shock.remove(), 2000);
+  }
+  let nar = `_理智损失：<span class="failure-text">-${amount} SAN</span>_\n\n${reason}\n\n当前 SAN：<span class="hl">${inv.san}</span>/${inv.maxSan}`;
+  if (amount >= 5) nar += '\n\n⚠️ 单次损失 ≥5 点 — **触发暂时性疯狂**。你的思维出现了一道裂缝。';
+  if (inv.san <= 0) nar += '\n\n💀 SAN 归零 — **永久疯狂**。不可名状的真相彻底摧毁了你的理性。';
+  addKeeperMsg(nar);
+  addLog(`🧠 SAN -${amount}: ${reason} (剩余 ${inv.san})`);
+  updateUI();
+}
+
+// ============================================================================
+// UI
+// ============================================================================
+function updateUI() {
+  const inv = state.investigator;
+  document.getElementById('dvHp').textContent = inv.hp;
+  document.getElementById('dvSan').textContent = inv.san;
+  document.getElementById('dvLuck').textContent = inv.luck;
+  document.getElementById('dvMp').textContent = inv.mp;
+  document.getElementById('sanBar').style.width = Math.round((inv.san/inv.maxSan)*100)+'%';
+  document.getElementById('sanCell').classList.toggle('warn', inv.san <= 20);
+  document.getElementById('entryCounter').textContent = '条目 ' + state.entryCount;
+
+  const attrs = [
+    ['STR','力量',inv.str],['CON','体质',inv.con],['SIZ','体型',inv.siz],['DEX','敏捷',inv.dex],
+    ['APP','外貌',inv.app],['INT','智力',inv.int],['POW','意志',inv.pow],['EDU','教育',inv.edu]
+  ];
+  document.getElementById('attrGrid').innerHTML = attrs.map(([abbr,name,val]) => `
+    <div class="attr-card"><div class="attr-abbr">${abbr} ${name}</div><div class="attr-val">${val}</div><div class="attr-derive">½=${Math.floor(val/2)} · ⅕=${Math.floor(val/5)}</div></div>`).join('');
+}
+
+function renderSkills() {
+  document.getElementById('skillList').innerHTML = Object.entries(state.investigator.skills).map(([id,s]) => `
+    <div class="skill-row ${id===state.selectedSkill?'selected':''}" onclick="selectSkill('${id}')">
+      <span class="skill-name">${s.name}</span><span class="skill-val">${s.val}%</span>
+      <span class="skill-tier">${s.val>=90?'大师':s.val>=70?'专家':s.val>=50?'熟练':s.val>=30?'业余':'入门'}</span>
+    </div>`).join('');
+}
+function selectSkill(id) {
+  state.selectedSkill = id;
+  renderSkills();
+  const s = state.investigator.skills[id];
+  document.getElementById('diceInfo').textContent = `已选择「${s.name}」(${s.val}%)`;
+  addLog(`🎯 切换技能: ${s.name} (${s.val}%)`);
+}
+
+function addLog(text) {
+  state.logs.unshift({ time: new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',second:'2-digit'}), text });
+  if (state.logs.length > 50) state.logs.length = 50;
+  document.getElementById('logList').innerHTML = state.logs.slice(0,15).map(l => `<div class="log-entry"><span class="log-time">${l.time}</span>${l.text}</div>`).join('');
+}
+
+// ============================================================================
+// SCENARIOS
+// ============================================================================
+function renderScenarioCards(targetId) {
+  const el = document.getElementById(targetId || 'scenarioCards');
+  el.innerHTML = Object.values(SCENARIOS).map(s => `
+    <div class="scenario-card ${s.id===state.scenarioId?'active':''}" onclick="${targetId?'switchScenario(\''+s.id+'\');closeScenarioModal();':'switchScenario(\''+s.id+'\')'}">
+      <div class="sc-card-title">#${s.num} ${s.title}</div><div class="sc-card-desc">${s.desc.slice(0,55)}…</div>
+      <div class="sc-card-meta">${s.genre} · ${s.difficulty}</div>
+    </div>`).join('');
+}
+function switchScenario(id) {
+  state.scenarioId = id; state.entryCount = 0; state.logs = [];
+  state.scenes[id] = { flags: {} };
+  state.selectedSkill = 'spot-hidden';
+  document.getElementById('caseNum').textContent = SCENARIOS[id].num;
+  document.getElementById('caseTitle').textContent = SCENARIOS[id].title;
+  document.getElementById('chatMessages').innerHTML = '';
+  renderScenarioCards(); renderScenarioCards('modalScenarioCards');
+  renderSkills(); updateUI();
+  const intro = SCENARIOS[id].intro();
+  addKeeperMsg(`_案件档案 #1927-${SCENARIOS[id].num}：**${SCENARIOS[id].title}**_\n_${SCENARIOS[id].subtitle}_\n\n---\n\n${intro}\n\n---\n\n🟡 你合上档案，整理好装备。调查开始了。你要做什么？`);
+  state.entryCount = 1;
+  addLog(`📋 开启案件 #${SCENARIOS[id].num}: ${SCENARIOS[id].title}`);
+  document.getElementById('diceInfo').textContent = '已选择「侦察」(65%)';
+  updateUI();
+}
+
+function openScenarioModal() { document.getElementById('scenarioModal').style.display='flex'; renderScenarioCards('modalScenarioCards'); }
+function closeScenarioModal() { document.getElementById('scenarioModal').style.display='none'; }
+function openRules() { document.getElementById('rulesModal').style.display='flex'; }
+function closeRules() { document.getElementById('rulesModal').style.display='none'; }
+document.addEventListener('click', e => { if (e.target.classList.contains('modal-overlay')) e.target.style.display='none'; });
+
+// ============================================================================
+// MOBILE
+// ============================================================================
+function mobileTab(tab) {
+  const left = document.getElementById('panelLeft');
+  const right = document.getElementById('panelRight');
+  const overlay = document.getElementById('mobileOverlay');
+  document.querySelectorAll('.mobile-nav-btn').forEach(b => b.classList.remove('active'));
+  if (tab === 'left') { left.classList.add('open'); right.classList.remove('open'); overlay.classList.add('show'); document.querySelectorAll('.mobile-nav-btn')[1].classList.add('active'); }
+  else if (tab === 'right') { right.classList.add('open'); left.classList.remove('open'); overlay.classList.add('show'); document.querySelectorAll('.mobile-nav-btn')[2].classList.add('active'); }
+  else { left.classList.remove('open'); right.classList.remove('open'); overlay.classList.remove('show'); document.querySelectorAll('.mobile-nav-btn')[0].classList.add('active'); }
+}
+function closeMobilePanels() {
+  document.getElementById('panelLeft').classList.remove('open');
+  document.getElementById('panelRight').classList.remove('open');
+  document.getElementById('mobileOverlay').classList.remove('show');
+  document.querySelectorAll('.mobile-nav-btn').forEach((b,i) => b.classList.toggle('active',i===0));
+}
+
+// ============================================================================
+// INIT
+// ============================================================================
+function init() {
+  renderSkills(); renderScenarioCards(); updateUI();
+  document.getElementById('caseNum').textContent = '03';
+  addKeeperMsg(`_案件档案 #1927-03：**古宅幽影**_\n_The Shadow Over Arkham_\n\n---\n\n${SCENARIOS.mansion.intro()}\n\n---\n\n🟡 你准备好了手电筒、笔记本和左轮手枪。但说实话——在真正的恐怖面前，这些东西可能都派不上什么用场。\n\n你要做什么？`);
+  state.entryCount = 1;
+  addLog('📋 案件档案已开启');
+  updateUI();
+  document.addEventListener('keydown', e => {
+    if ((e.ctrlKey||e.metaKey) && e.key==='Enter') { e.preventDefault(); actFromInput(); }
+    if ((e.ctrlKey||e.metaKey) && e.key==='d') { e.preventDefault(); rollD100(); }
+  });
+}
+init();
+</script>
+</body>
+</html>

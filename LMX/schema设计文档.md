@@ -534,39 +534,235 @@ State 是运行时唯一真相源。LLM 永远不直接改 State,只能通过工
 
 ### 5.9 人物卡(调查员)Schema
 
-人物卡是按钮系统和检定引擎的直接输入,字段要为二者服务:
+人物卡是按钮系统、检定引擎、成长系统和 LLM 角色演绎的共同输入。本文档的人物卡字段参考了 `LMX/COC7空白卡CY23Final.xlsx` 的"人物卡"、"简化卡 骰娘导入"、"职业列表"、"本职技能"、"技能注释"、"资产及物价参考"、"武器列表 战斗"、"防具表 载具表"、"疯狂表"等工作表,但**不照搬 Excel 布局**。
+
+Excel 同时承担录入、公式计算、展示和规则速查;系统 Schema 必须拆开这些职责:
+
+- **手填事实**:玩家输入或导入的角色设定,如姓名、职业、背景、技能点分配。
+- **引擎派生**:半值/五分之一值、HP 上限、MP 上限、MOV、DB、Build、重伤阈值等。
+- **运行时 State**:当前 HP/SAN/MP、状态、物品归属、经历增长、已触发疯狂等。
+- **展示/速查**:快速规则说明不属于人物卡事实源,应作为 D2 玩家规则引导从 Rule Module 投影。
+
+#### 5.9.1 调查员主结构
 
 ```json
 {
-  "name": "调查员姓名",
-  "occupation": "职业",
-  "attributes": { "STR": 50, "DEX": 60, "INT": 70, "EDU": 65, "POW": 55, "...": "" },
+  "id": "pc_001",
+  "identity": {
+    "name": "调查员姓名",
+    "player": "玩家名",
+    "era": "1920s",
+    "occupation": {
+      "id": "occupation_012",
+      "name": "古董商"
+    },
+    "age": 32,
+    "gender": "女",
+    "residence": "现居地",
+    "birthplace": "故乡",
+    "portrait_asset_id": "asset_portrait_001"
+  },
+  "creation": {
+    "age_adjustment": {},
+    "occupation_skill_refs": ["appraise", "library_use", "history"],
+    "occupation_points_total": 260,
+    "occupation_points_spent": 260,
+    "interest_points_total": 120,
+    "interest_points_spent": 120,
+    "custom_packages": []
+  },
+  "attributes": {
+    "STR": 50,
+    "CON": 60,
+    "SIZ": 55,
+    "DEX": 60,
+    "APP": 45,
+    "INT": 70,
+    "POW": 55,
+    "EDU": 65,
+    "LUCK": 50
+  },
+  "derived": {
+    "HP_max": 11,
+    "MP_max": 11,
+    "SAN_max": 99,
+    "MOV": 8,
+    "damage_bonus": "0",
+    "build": 0,
+    "major_wound_threshold": 6,
+    "attribute_thresholds": {
+      "STR": { "half": 25, "fifth": 10 },
+      "DEX": { "half": 30, "fifth": 12 }
+    }
+  },
   "resources": {
     "HP": { "current": 11, "max": 11 },
     "SAN": { "current": 55, "max": 99, "start": 55 },
     "MP": { "current": 11, "max": 11 },
-    "LUCK": 50
+    "LUCK": { "current": 50 },
+    "temporary_HP": 0,
+    "daily_SAN_loss": 0,
+    "used_MP": 0
   },
   "skills": [
     {
+      "id": "spot_hidden",
       "name": "侦查",
-      "value": 65,
       "category": "调查",
+      "base": 25,
+      "occupation_points": 20,
+      "interest_points": 20,
+      "growth_points": 0,
+      "total": 65,
+      "thresholds": { "regular": 65, "hard": 32, "extreme": 13 },
+      "occupation_skill": true,
+      "growth_checked": false,
       "check_ref": "coc_standard",
-      "growth_flag": false
+      "source": "standard"
     },
     {
+      "id": "science_astronomy",
       "category_type": "科学",
       "specialization": "天文学",
-      "value": 1,
       "category": "知识",
-      "check_ref": "coc_standard"
+      "base": 1,
+      "occupation_points": 0,
+      "interest_points": 30,
+      "growth_points": 0,
+      "total": 31,
+      "thresholds": { "regular": 31, "hard": 15, "extreme": 6 },
+      "occupation_skill": false,
+      "growth_checked": false,
+      "check_ref": "coc_standard",
+      "source": "specialized"
+    }
+  ],
+  "combat": {
+    "armor": {
+      "name": "无",
+      "value": 0,
+      "coverage": [],
+      "mov_penalty": 0
+    },
+    "weapons": [
+      {
+        "name": "徒手",
+        "type": "melee",
+        "skill_ref": "fighting_brawl",
+        "success_rate": 25,
+        "damage": "1d3+DB",
+        "range": null,
+        "impale": false,
+        "attacks_per_round": 1,
+        "ammo": null,
+        "malfunction": null
+      }
+    ]
+  },
+  "assets": {
+    "credit_rating": 40,
+    "living_standard": "普通",
+    "spending_level": 10,
+    "cash": { "amount": 50, "currency": "USD" },
+    "other_assets": "请在这里详述资产",
+    "asset_breakdown": {
+      "vehicle": "",
+      "residence": "",
+      "luxury": "",
+      "securities": "",
+      "other": ""
+    }
+  },
+  "inventory": [
+    {
+      "item_id": "old_key",
+      "name": "旧钥匙",
+      "carried": true,
+      "container": "随身"
+    }
+  ],
+  "background": {
+    "appearance": "形象描述",
+    "ideology_beliefs": "思想与信念",
+    "significant_people": [],
+    "meaningful_locations": [],
+    "treasured_possessions": [],
+    "traits": [],
+    "injuries_scars": [],
+    "phobias_manias": []
+  },
+  "conditions": [
+    {
+      "id": "major_wound",
+      "type": "physical",
+      "name": "重伤",
+      "active": false,
+      "source": "engine"
+    }
+  ],
+  "experience_log": [
+    {
+      "module": "毒汤",
+      "description": "SAN-6,HP-2,侦查+2",
+      "changes": [
+        { "target": "resources.SAN.current", "delta": -6 },
+        { "target": "skills.spot_hidden.growth_points", "delta": 2 }
+      ]
+    }
+  ],
+  "mythos_log": [
+    {
+      "contact": "米-戈",
+      "result": "克苏鲁+3,SAN-6",
+      "notes": "第一次神话疯狂,相信者规则激活",
+      "cumulative_san_loss": 6
+    }
+  ],
+  "spells": [
+    {
+      "id": "spell_gray_binding",
+      "name": "灰色束缚",
+      "cost": "8 MP + 1d6 SAN + 1h",
+      "effect": "可以控制死去的人,直到腐烂为止"
+    }
+  ],
+  "relationships": [
+    {
+      "name": "调查员伙伴",
+      "player": "玩家名",
+      "note": "一起出生入死",
+      "changed_by": "成为挚友",
+      "met_in_module": "卡森德拉..."
     }
   ]
 }
 ```
 
-**字段用途标注:** `value`/`check_ref` 给引擎;`category` 给按钮分组;`resources.SAN` 由 SAN 系统读写;`specialization` 需校验(见 §6)。
+#### 5.9.2 字段分工
+
+| 字段组 | 来源 | 主要用途 | 写入位置 |
+| --- | --- | --- | --- |
+| `identity` | 玩家手填 / 导入 | 展示、开局介绍、D3 模组导语 | Investigator |
+| `creation` | 建卡流程 / 职业表 | 审卡、重算职业技能点、年龄补正 | Investigator |
+| `attributes` | 玩家建卡 | 检定目标、派生值计算 | Investigator |
+| `derived` | COC Module 计算 | 展示、战斗、检定阈值 | 可缓存,可重算 |
+| `resources` | 建卡初值 + 运行时变化 | HP/SAN/MP/LUCK 读写 | Runtime State 为准 |
+| `skills` | 技能表 + 玩家分配 | 按钮生成、检定、成长 | Investigator + State |
+| `combat` | 武器/防具表 + 玩家装备 | 战斗结算 | Investigator + State |
+| `assets` / `inventory` | 玩家手填 / 装备库 | 购买力、携带物、物品约束 | Investigator + State |
+| `background` | 玩家手填 | LLM 扮演角色、长期记忆 | Investigator |
+| `conditions` | 引擎结算 / 玩家记录 | 疯狂、重伤、疾病、临时状态 | Runtime State |
+| `experience_log` / `mythos_log` | 跑团后增长 | 角色成长、长期历史 | Investigator 历史 |
+| `spells` | 法术库 + 剧情获得 | 法术展示、施法结算 | Investigator + Module |
+| `relationships` | 玩家手填 / 剧情变化 | LLM 关系演绎、伙伴记录 | Investigator 历史 |
+
+#### 5.9.3 设计纪律
+
+- **半值/五分之一值不要作为手填事实源。** 它们由 COC Module 根据 `attributes` 或 `skills.total` 派生,可缓存用于展示。
+- **技能点要拆分来源。** Excel 中有初始、成长、职业、兴趣四列;Schema 也应保留 `base`、`growth_points`、`occupation_points`、`interest_points`,否则无法审卡和回溯成长。
+- **当前资源以 Runtime State 为准。** 人物卡保存初始和结构,运行中 HP/SAN/MP/LUCK 的当前值由 State Store 记录。
+- **背景字段要进入 LLM 可见上下文,但按需裁剪。** 形象、信念、重要之人、宝贵之物、恐惧/躁狂等是角色扮演核心,但不应每轮全量塞入上下文。
+- **规则速查不进人物卡。** Excel 里的快速参考规则、理智参考规则、疯狂说明应作为 D2 玩家规则引导,由 Rule Module 投影展示。
 
 ---
 

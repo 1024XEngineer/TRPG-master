@@ -1,0 +1,27 @@
+[project]
+name = "aidm-backend"
+version = "0.1.0"
+description = "AI DM backend — walking skeleton (module split, MS1)"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.6",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "python-multipart>=0.0.9",
+    "sqlalchemy[asyncio]>=2.0",
+    "asyncpg>=0.31.0",
+    "alembic>=1.18.5",
+    "python-dotenv>=1.2.2",
+    "openai>=2.45.0",
+    "bcrypt>=5.0.0",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "packages"}
+
+[tool.setuptools.packages.find]
+where = ["packages"]

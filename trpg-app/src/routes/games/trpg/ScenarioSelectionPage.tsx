@@ -20,7 +20,7 @@ export default function ScenarioSelectionPage() {
   const setScene = useGameStore((s) => s.setScene)
   const setGame = useGameStore((s) => s.setGame)
   const setReturnFromGameSelect = useGameStore((s) => s.setReturnFromGameSelect)
-
+  const returnFromGameSelect = useGameStore((s) => s.returnFromGameSelect)
   const colors = SYSTEM_COLORS[systemId || '']
   const systemName = colors?.name || '未知系统'
   const IconComp = systemId === 'coc' ? Shield : Swords
@@ -28,8 +28,10 @@ export default function ScenarioSelectionPage() {
   const handleSelect = (scenario: Scenario) => {
     setScene(scenario.id)
     setGame(gameId || '', systemId || '')
-    setReturnFromGameSelect(false)
-    navigate('/create')
+    if (returnFromGameSelect) {
+      setReturnFromGameSelect(false)
+      navigate('/create')
+    }
   }
 
   return (

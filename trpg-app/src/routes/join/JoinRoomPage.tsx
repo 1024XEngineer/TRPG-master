@@ -10,7 +10,7 @@ export default function JoinRoomPage() {
   const handleJoin = () => {
     const code = roomCode.trim()
     if (code.length < 4) {
-      setError('请输入完整的房间号')
+      setError('请输入房间号')
       return
     }
     setError('')
@@ -39,10 +39,10 @@ export default function JoinRoomPage() {
               setRoomCode(v)
               setError('')
             }}
-            placeholder="输入 4-6 位房间号"
+            placeholder="输入 1-4 位房间号"
             inputMode="numeric"
             autoFocus
-            maxLength={6}
+            maxLength={4}
             className="w-full pl-11 pr-4 py-3.5 rounded-[8px] bg-input border border-border-light text-text-primary text-[18px] font-mono font-bold tracking-[0.12em] outline-none focus:border-brass focus:shadow-[0_0_0_3px_rgba(184,151,106,0.1)] placeholder:text-text-dim placeholder:font-normal placeholder:tracking-normal"
           />
         </div>
@@ -51,7 +51,7 @@ export default function JoinRoomPage() {
 
         <button
           onClick={handleJoin}
-          disabled={roomCode.length < 4}
+          disabled={roomCode.length < 1}
           className={`w-full max-w-[280px] py-3.5 rounded-sm text-sm font-semibold transition-all ${
             roomCode.length >= 4
               ? 'bg-brass text-white active:bg-brass-dark active:scale-[0.97]'

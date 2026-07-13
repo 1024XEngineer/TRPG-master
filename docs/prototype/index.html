@@ -1,0 +1,1247 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Arkham Case Files — AI 守秘人 · 原型</title>
+<script src="https://unpkg.com/lucide@latest"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+:root {
+  --bg-page: #faf7f0; --bg-panel: #f5f0e6; --bg-card: #ffffff;
+  --bg-input: #fefdfa; --border-light: #e5ded0; --border-mid: #d4cbb8;
+  --text-primary: #2c2416; --text-body: #3d3628; --text-muted: #8a8276;
+  --text-dim: #b0a898; --brass: #b8976a; --brass-dark: #8a6d40;
+  --rust: #c04040; --mold: #4a8a4a; --ink-blue: #4a7098;
+  --radius-sm: 6px; --radius-md: 10px;
+}
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', 'Helvetica Neue', sans-serif;
+  background: #e8e2d4; color: var(--text-body);
+  display: flex; justify-content: center; min-height: 100vh; -webkit-font-smoothing: antialiased; overflow-x: hidden;
+}
+.phone { width: 100%; max-width: 390px; min-height: 100vh; background: var(--bg-page); position: relative; overflow: hidden; }
+@media (min-width: 500px) {
+  body { padding: 20px 0; }
+  .phone { border-radius: 32px; border: 8px solid #2c2416; min-height: 820px; box-shadow: 0 20px 60px rgba(0,0,0,0.15); }
+}
+.status-bar { display: flex; justify-content: space-between; padding: 10px 20px 6px; font-size: 12px; font-weight: 600; color: var(--text-muted); background: var(--bg-page); position: sticky; top: 0; z-index: 100; }
+.screen { display: none; padding: 0 0 24px; animation: screenIn 0.4s ease; }
+.screen.active { display: block; }
+@keyframes screenIn { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+.mono { font-family: 'Courier New', 'SF Mono', monospace; }
+
+.page-header { display: flex; align-items: center; gap: 10px; padding: 4px 20px 12px; }
+.page-header .back { width: 34px; height: 34px; border-radius: 50%; background: var(--bg-card); border: 1px solid var(--border-light); display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; transition: 0.15s; }
+.page-header .back:active { background: var(--bg-panel); transform: scale(0.94); }
+.page-header .back i { width: 18px; height: 18px; color: var(--text-muted); stroke-width: 2.5; }
+.page-header h2 { font-size: 18px; font-weight: 700; color: var(--text-primary); }
+.page-header .spacer { flex: 1; }
+.page-sub { font-size: 13px; color: var(--text-muted); padding: 0 20px 16px; }
+
+.btn { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 14px 24px; border-radius: var(--radius-sm); font-size: 15px; font-weight: 600; cursor: pointer; transition: all 0.15s; border: none; font-family: inherit; -webkit-tap-highlight-color: transparent; }
+.btn:active { transform: scale(0.97); }
+.btn i { width: 18px; height: 18px; }
+.btn-primary { background: var(--brass); color: #fff; }
+.btn-primary:active { background: var(--brass-dark); }
+.btn-secondary { background: var(--bg-card); color: var(--text-body); border: 1px solid var(--border-mid); }
+.btn-secondary:active { background: var(--bg-panel); }
+.btn-outline { background: transparent; color: var(--brass-dark); border: 1px solid var(--brass); }
+.btn-sm { padding: 10px 16px; font-size: 13px; }
+.btn-block { width: 100%; }
+
+/* S1: Login */
+.login-brand { display: flex; flex-direction: column; align-items: center; padding: 72px 20px 40px; }
+.login-brand .app-icon { width: 80px; height: 80px; background: linear-gradient(145deg, #c6a87a, #8a6d40); border-radius: 22px; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 24px rgba(184,151,106,0.3); margin-bottom: 16px; }
+.login-brand .app-icon i { width: 40px; height: 40px; color: #faf7f0; stroke-width: 1.5; }
+.login-brand h1 { font-size: 26px; font-weight: 700; color: var(--text-primary); letter-spacing: 0.08em; }
+.login-brand .sub { font-size: 13px; color: var(--text-muted); letter-spacing: 0.12em; margin-top: 2px; }
+.login-brand .tagline { margin-top: 28px; text-align: center; max-width: 280px; }
+.login-brand .tagline span { display: block; font-size: 13px; color: var(--text-muted); line-height: 1.7; }
+.login-brand .tagline .mono-tag { font-family: 'Courier New', monospace; font-size: 11px; color: var(--brass-dark); background: rgba(184,151,106,0.1); display: inline-block; padding: 2px 12px; border-radius: 99px; margin-bottom: 8px; }
+.login-actions { padding: 0 20px; display: flex; flex-direction: column; gap: 10px; }
+.login-footer { text-align: center; padding: 24px 20px 0; }
+.login-footer a { color: var(--text-dim); font-size: 12px; text-decoration: none; }
+
+/* S2: Games */
+.game-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 0 20px; }
+.game-card { background: var(--bg-card); border: 1px solid var(--border-light); border-radius: var(--radius-md); padding: 22px 12px; text-align: center; cursor: pointer; transition: all 0.25s; position: relative; }
+.game-card:active { transform: scale(0.96); }
+.game-card .icon-box { width: 52px; height: 52px; border-radius: 14px; margin: 0 auto 10px; display: flex; align-items: center; justify-content: center; }
+.game-card .icon-box i { width: 26px; height: 26px; }
+.game-card .name { font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 3px; }
+.game-card .desc { font-size: 11px; color: var(--text-muted); line-height: 1.4; }
+.game-card .badge { display: inline-block; margin-top: 8px; padding: 2px 10px; border-radius: 99px; font-size: 10px; font-weight: 600; }
+.badge-rec { background: rgba(74,138,74,0.12); color: var(--mold); }
+.badge-wip { background: rgba(138,130,118,0.12); color: var(--text-muted); }
+.c-trpg { border-bottom: 3px solid #4a7098; } .c-wolf { border-bottom: 3px solid #c04040; } .c-blood { border-bottom: 3px solid #8a4070; } .c-murder { border-bottom: 3px solid #6a6050; }
+.icon-trpg { background: #eef3f8; } .icon-wolf { background: #f8eeee; } .icon-blood { background: #f5eef4; } .icon-murder { background: #f2f0ec; }
+.ic-trpg { color: #4a7098; } .ic-wolf { color: #c04040; } .ic-blood { color: #8a4070; } .ic-murder { color: #6a6050; }
+
+/* S3: System */
+.sys-cards { display: flex; flex-direction: column; gap: 14px; padding: 0 20px; }
+.sys-card { background: var(--bg-card); border: 1px solid var(--border-light); border-radius: var(--radius-md); padding: 20px; cursor: pointer; display: flex; align-items: center; gap: 16px; }
+.sys-card:active { transform: scale(0.98); }
+.sys-card .icon-box { width: 56px; height: 56px; border-radius: 14px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+.sys-card .icon-box i { width: 28px; height: 28px; }
+.sys-card .info { flex: 1; }
+.sys-card .info h3 { font-size: 17px; font-weight: 700; color: var(--text-primary); }
+.sys-card .info p { font-size: 12px; color: var(--text-muted); margin-top: 2px; line-height: 1.5; }
+.sys-card .info .tag-rec { display: inline-block; margin-top: 6px; padding: 2px 10px; border-radius: 99px; font-size: 10px; font-weight: 600; background: rgba(74,138,74,0.12); color: var(--mold); }
+.sys-card .arrow { color: var(--text-dim); } .sys-card .arrow i { width: 18px; height: 18px; }
+.sys-dnd { border-left: 4px solid #c08050; } .sys-coc { border-left: 4px solid #7050a0; }
+.i-dnd { background: #f8f2ec; } .i-coc { background: #f3eef8; }
+.ic-dnd { color: #c08050; } .ic-coc { color: #7050a0; }
+
+/* S4: Story */
+.story-screen { min-height: 100vh; display: flex; flex-direction: column; justify-content: center; padding: 40px 28px; background: linear-gradient(180deg, #1a1620 0%, #0d0b10 100%); color: #d4cfc8; position: relative; }
+.story-screen::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: radial-gradient(ellipse at 50% 30%, rgba(112,80,160,0.08) 0%, transparent 70%); pointer-events: none; }
+.story-label { font-family: 'Courier New', monospace; font-size: 11px; letter-spacing: 0.15em; color: #706090; margin-bottom: 20px; }
+.story-title { font-size: 28px; font-weight: 700; color: #eeead8; line-height: 1.25; margin-bottom: 8px; }
+.story-subtitle { font-family: 'Courier New', monospace; font-size: 13px; color: #9088a0; margin-bottom: 32px; letter-spacing: 0.05em; }
+.story-divider { width: 40px; height: 1px; background: #504860; margin-bottom: 28px; }
+.story-text { font-size: 15px; line-height: 1.9; color: #c8c0b8; opacity: 0; animation: fadeIn 2s ease 0.5s forwards; }
+.story-text p { margin-bottom: 16px; }
+.story-text .hl { color: #b0a0d0; font-style: italic; }
+.story-continue { opacity: 0; animation: fadeIn 1s ease 4s forwards; margin-top: 40px; }
+
+/* S5: Character */
+.char-progress { display: flex; gap: 6px; padding: 0 20px 16px; }
+.char-progress .step { flex: 1; height: 3px; border-radius: 99px; background: var(--border-light); transition: 0.3s; }
+.char-progress .step.active { background: var(--brass); } .char-progress .step.done { background: var(--brass-dark); }
+.char-section { background: var(--bg-card); border: 1px solid var(--border-light); border-radius: var(--radius-md); padding: 18px; margin: 0 20px 12px; }
+.char-section h4 { font-size: 12px; font-weight: 600; color: var(--brass-dark); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 14px; }
+.form-group { margin-bottom: 14px; } .form-group:last-child { margin-bottom: 0; }
+.form-group label { display: block; font-size: 12px; font-weight: 500; color: var(--text-muted); margin-bottom: 5px; }
+.form-group input, .form-group select { width: 100%; padding: 11px 13px; border-radius: var(--radius-sm); background: var(--bg-input); border: 1px solid var(--border-light); color: var(--text-primary); font-size: 15px; font-family: inherit; outline: none; }
+.form-group input:focus, .form-group select:focus { border-color: var(--brass); box-shadow: 0 0 0 3px rgba(184,151,106,0.1); }
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.occ-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.occ-item { padding: 14px 10px; background: var(--bg-input); border: 1px solid var(--border-light); border-radius: var(--radius-sm); text-align: center; cursor: pointer; }
+.occ-item:active { transform: scale(0.96); }
+.occ-item.selected { border-color: var(--brass); background: #fdfaf4; box-shadow: 0 0 0 2px rgba(184,151,106,0.15); }
+.occ-item .occ-icon { font-size: 22px; margin-bottom: 4px; }
+.occ-item .occ-name { font-size: 12px; font-weight: 600; color: var(--text-primary); }
+.stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.stat-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: var(--bg-input); border: 1px solid var(--border-light); }
+.stat-item .label { font-size: 11px; font-weight: 700; color: var(--text-muted); min-width: 30px; font-family: 'Courier New', monospace; }
+.stat-item .value { font-size: 15px; font-weight: 700; color: var(--text-primary); min-width: 26px; text-align: center; }
+.stat-item .adjust { width: 26px; height: 26px; border-radius: 50%; background: var(--bg-card); border: 1px solid var(--border-light); color: var(--text-muted); display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 15px; font-family: inherit; }
+.stat-item .adjust:active { background: var(--bg-panel); transform: scale(0.9); }
+.btn-bar { display: flex; gap: 10px; padding: 8px 20px 0; }
+.btn-bar .btn { flex: 1; }
+
+/* S6: Lobby */
+.lobby-room-code { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 20px 20px 4px; }
+.lobby-room-code .code { font-family: 'Courier New', monospace; font-size: 24px; font-weight: 700; color: var(--text-primary); letter-spacing: 0.15em; background: var(--bg-card); border: 1px dashed var(--border-mid); padding: 6px 16px; border-radius: var(--radius-sm); }
+.lobby-room-code .copy { color: var(--brass-dark); cursor: pointer; font-size: 12px; }
+.player-list { display: flex; flex-direction: column; gap: 8px; padding: 16px 20px 0; }
+.player-card { display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: var(--bg-card); border: 1px solid var(--border-light); border-radius: var(--radius-md); }
+.player-card .avatar { width: 40px; height: 40px; border-radius: 50%; background: var(--bg-panel); border: 1px solid var(--border-mid); display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; }
+.player-card .avatar.host { border-color: var(--brass); }
+.player-card .pinfo { flex: 1; }
+.player-card .pinfo .pname { font-size: 14px; font-weight: 600; color: var(--text-primary); }
+.player-card .pinfo .pchar { font-size: 12px; color: var(--text-muted); }
+.player-card .pstatus { font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 99px; }
+.pstatus.ready { background: rgba(74,138,74,0.12); color: var(--mold); }
+.pstatus.waiting { background: rgba(138,130,118,0.12); color: var(--text-muted); }
+.pstatus.bot { background: rgba(74,112,152,0.12); color: var(--ink-blue); }
+.lobby-actions { padding: 20px 20px 0; }
+
+/* S7: Chat */
+.chat-container { display: flex; flex-direction: column; height: 100vh; background: var(--bg-card); }
+.chat-header { padding: 10px 16px; border-bottom: 1px solid var(--border-light); display: flex; align-items: center; gap: 10px; background: var(--bg-page); flex-shrink: 0; }
+.chat-header .room-icon { width: 32px; height: 32px; border-radius: 50%; background: #f3eef8; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; }
+.chat-header .cinfo { flex: 1; }
+.chat-header .cinfo .ctitle { font-size: 14px; font-weight: 600; color: var(--text-primary); }
+.chat-header .cinfo .csub { font-size: 11px; color: var(--text-muted); }
+.chat-header .cactions { display: flex; gap: 6px; }
+.chat-header .cactions button { width: 32px; height: 32px; border-radius: 50%; background: var(--bg-card); border: 1px solid var(--border-light); display: flex; align-items: center; justify-content: center; cursor: pointer; }
+.chat-header .cactions button:active { background: var(--bg-panel); }
+.chat-header .cactions button i { width: 16px; height: 16px; color: var(--text-muted); stroke-width: 2.5; }
+.chat-messages { flex: 1; overflow-y: auto; padding: 16px 16px 8px; display: flex; flex-direction: column; gap: 12px; }
+.msg { display: flex; gap: 10px; animation: msgIn 0.3s ease; }
+@keyframes msgIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+.msg.self { flex-direction: row-reverse; }
+.msg-avatar { width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 15px; background: var(--bg-panel); border: 1px solid var(--border-light); }
+.msg-avatar.keeper { background: #faf5eb; border-color: var(--brass); }
+.msg-body { flex: 1; min-width: 0; }
+.msg-sender { font-size: 11px; font-weight: 600; color: var(--text-muted); margin-bottom: 3px; }
+.msg-sender.keeper { color: var(--brass-dark); }
+.msg-sender.self-name { text-align: right; color: var(--mold); }
+.msg-bubble { font-size: 14px; line-height: 1.65; color: var(--text-body); padding: 10px 14px; border-radius: var(--radius-md); background: var(--bg-panel); display: inline-block; max-width: 100%; }
+.msg.self .msg-bubble { background: #eef6ee; }
+.msg-bubble.narr { background: #fdfaf4; border-left: 3px solid var(--brass); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; font-style: italic; color: #4a4030; }
+.msg-bubble .hl { color: var(--brass-dark); font-weight: 600; font-style: normal; }
+.msg-time { font-size: 10px; color: var(--text-dim); margin-top: 2px; }
+.msg.self .msg-time { text-align: right; }
+.typing-indicator { display: flex; gap: 10px; padding: 0 16px; animation: msgIn 0.3s ease; }
+.typing-indicator .dots { display: flex; gap: 4px; align-items: center; padding: 14px 16px; }
+.typing-indicator .dots span { width: 6px; height: 6px; background: var(--brass); border-radius: 50%; animation: typingBounce 1.4s ease-in-out infinite; }
+.typing-indicator .dots span:nth-child(2) { animation-delay: 0.2s; } .typing-indicator .dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes typingBounce { 0%,60%,100%{transform:translateY(0);opacity:0.3} 30%{transform:translateY(-4px);opacity:1} }
+.sys-msg { text-align: center; padding: 6px 0; }
+.sys-msg span { font-size: 11px; color: var(--text-dim); background: var(--bg-panel); padding: 4px 14px; border-radius: 99px; font-family: 'Courier New', monospace; }
+.chat-bottom { height: 8px; }
+.action-bar { display: flex; background: var(--bg-card); border-top: 1px solid var(--border-light); flex-shrink: 0; }
+.action-bar button { flex: 1; padding: 6px 4px; background: none; border: none; color: var(--text-muted); font-size: 10px; font-weight: 500; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 3px; font-family: inherit; -webkit-tap-highlight-color: transparent; }
+.action-bar button:active { color: var(--brass-dark); background: var(--bg-panel); }
+.action-bar button i { width: 20px; height: 20px; stroke-width: 1.5; }
+.chat-input-area { border-top: 1px solid var(--border-light); padding: 6px 12px 12px; background: var(--bg-page); flex-shrink: 0; }
+.quick-row { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 6px; -webkit-overflow-scrolling: touch; }
+.quick-row::-webkit-scrollbar { display: none; }
+.quick-btn { padding: 4px 12px; font-size: 11px; background: var(--bg-card); border: 1px solid var(--border-light); border-radius: 20px; color: var(--text-muted); cursor: pointer; font-family: inherit; white-space: nowrap; flex-shrink: 0; }
+.quick-btn:active { background: var(--bg-panel); border-color: var(--brass); color: var(--brass-dark); }
+.input-row { display: flex; gap: 8px; align-items: flex-end; }
+.chat-input { flex: 1; background: var(--bg-input); border: 1px solid var(--border-mid); border-radius: 20px; padding: 10px 16px; color: var(--text-primary); font-family: inherit; font-size: 14px; outline: none; resize: none; min-height: 40px; max-height: 100px; }
+.chat-input:focus { border-color: var(--brass); }
+.chat-input::placeholder { color: var(--text-dim); }
+.send-btn { width: 40px; height: 40px; border-radius: 50%; background: var(--brass); border: none; color: #fff; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; transition: 0.15s; }
+.send-btn:active { transform: scale(0.92); }
+.send-btn i { width: 18px; height: 18px; stroke-width: 2.5; }
+
+/* ===== DICE SCREEN (full redesign) ===== */
+.dice-screen {
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  max-width: 390px; margin: 0 auto;
+  background: linear-gradient(180deg, #1a1620 0%, #0d0b10 100%);
+  z-index: 300; display: none; flex-direction: column;
+  animation: diceFadeIn 0.3s ease;
+}
+@keyframes diceFadeIn { from { opacity: 0; } to { opacity: 1; } }
+.dice-screen.active { display: flex; }
+
+.dice-top {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 16px; flex-shrink: 0;
+}
+.dice-top .back-btn { width: 34px; height: 34px; border-radius: 50%; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.12); display: flex; align-items: center; justify-content: center; cursor: pointer; color: #a09888; }
+.dice-top .back-btn:active { background: rgba(255,255,255,0.15); }
+.dice-top .back-btn i { width: 18px; height: 18px; stroke-width: 2.5; }
+.dice-top .title { font-size: 15px; font-weight: 600; color: #d4cfc8; letter-spacing: 0.05em; }
+.dice-top .spacer-d { width: 34px; }
+
+.dice-context {
+  text-align: center; padding: 8px 20px 4px; flex-shrink: 0;
+}
+.dice-context .skill-tag {
+  font-size: 13px; color: var(--brass); font-weight: 600;
+  background: rgba(184,151,106,0.12);
+  padding: 4px 16px; border-radius: 99px; display: inline-block;
+}
+.dice-context .target-show { font-family: 'Courier New', monospace; font-size: 14px; color: #9088a0; margin-top: 6px; }
+
+.dice-table {
+  flex: 1; position: relative; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  touch-action: none; user-select: none; cursor: grab;
+}
+.dice-table:active { cursor: grabbing; }
+.dice-table .table-texture {
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(ellipse at 50% 60%, rgba(60,50,40,0.4) 0%, transparent 70%),
+    repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(255,255,255,0.02) 2px, rgba(255,255,255,0.02) 3px);
+  pointer-events: none;
+}
+
+/* d10 Dice Shape */
+.die-d10 {
+  width: 72px; height: 84px;
+  position: relative;
+  clip-path: polygon(50% 0%, 96% 28%, 80% 100%, 20% 100%, 4% 28%);
+  background: linear-gradient(160deg, #f0e8d8 0%, #ddcfb4 40%, #c8b894 100%);
+  border-radius: 4px;
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'Courier New', monospace;
+  font-size: 28px; font-weight: 700;
+  color: #2c2416;
+  will-change: transform;
+  transition: none;
+  box-shadow:
+    2px 2px 8px rgba(0,0,0,0.3),
+    inset 0 1px 0 rgba(255,255,255,0.4),
+    inset 0 -2px 4px rgba(0,0,0,0.08);
+}
+.die-d10::after {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  clip-path: polygon(50% 4%, 92% 30%, 78% 96%, 22% 96%, 8% 30%);
+  background: linear-gradient(160deg, rgba(255,255,255,0.25) 0%, transparent 60%);
+  pointer-events: none;
+}
+.die-d10.grabbed {
+  box-shadow:
+    0 4px 20px rgba(184,151,106,0.3),
+    0 0 40px rgba(184,151,106,0.1),
+    2px 2px 8px rgba(0,0,0,0.3),
+    inset 0 1px 0 rgba(255,255,255,0.4);
+}
+
+/* D6 Cube shape */
+.die-d6 {
+  width: 80px; height: 80px;
+  background: linear-gradient(160deg, #f0e8d8 0%, #ddcfb4 40%, #c8b894 100%);
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'Courier New', monospace;
+  font-size: 32px; font-weight: 700;
+  color: #2c2416;
+  will-change: transform;
+  transition: none;
+  box-shadow:
+    2px 2px 8px rgba(0,0,0,0.3),
+    inset 0 1px 0 rgba(255,255,255,0.4),
+    inset 0 -2px 4px rgba(0,0,0,0.08);
+}
+.die-d6.grabbed {
+  box-shadow:
+    0 4px 20px rgba(184,151,106,0.3),
+    0 0 40px rgba(184,151,106,0.1),
+    2px 2px 8px rgba(0,0,0,0.3),
+    inset 0 1px 0 rgba(255,255,255,0.4);
+}
+/* Dots on D6 */
+.die-d6 .dots { position: absolute; inset: 0; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 12px; padding: 14px; pointer-events: none; }
+.die-d6 .dots .dot { width: 8px; height: 8px; border-radius: 50%; background: #2c2416; }
+
+/* D20 shape - approximating with polygon */
+.die-d20 {
+  width: 78px; height: 84px;
+  clip-path: polygon(50% 0%, 95% 25%, 95% 75%, 50% 100%, 5% 75%, 5% 25%);
+  background: linear-gradient(160deg, #f0e8d8 0%, #ddcfb4 40%, #c8b894 100%);
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'Courier New', monospace;
+  font-size: 28px; font-weight: 700;
+  color: #2c2416;
+  will-change: transform;
+  box-shadow:
+    2px 2px 8px rgba(0,0,0,0.3),
+    inset 0 1px 0 rgba(255,255,255,0.4),
+    inset 0 -2px 4px rgba(0,0,0,0.08);
+}
+.die-d20.grabbed {
+  box-shadow:
+    0 4px 20px rgba(184,151,106,0.3),
+    0 0 40px rgba(184,151,106,0.1),
+    2px 2px 8px rgba(0,0,0,0.3),
+    inset 0 1px 0 rgba(255,255,255,0.4);
+}
+
+/* Dice pair for D% */
+.dice-dual {
+  display: flex; gap: 20px; align-items: center;
+  position: relative;
+}
+.dice-dual .plus-sign {
+  font-family: 'Courier New', monospace;
+  font-size: 20px; color: rgba(255,255,255,0.15);
+  position: absolute; left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.dice-dual .die-label {
+  position: absolute; bottom: -24px;
+  font-family: 'Courier New', monospace;
+  font-size: 9px; color: rgba(255,255,255,0.2);
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+}
+.dice-dual .die-label.tens { left: 8px; }
+.dice-dual .die-label.ones { right: 8px; }
+
+/* Single die container */
+.dice-single {
+  position: relative;
+  display: flex; align-items: center; justify-content: center;
+}
+.dice-single .die-label-b {
+  position: absolute; bottom: -24px;
+  font-family: 'Courier New', monospace;
+  font-size: 9px; color: rgba(255,255,255,0.2);
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+}
+
+/* Shake ring */
+.shake-ring {
+  position: absolute; width: 200px; height: 200px;
+  border-radius: 50%;
+  border: 2px solid var(--brass);
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%) scale(0);
+  opacity: 0;
+  pointer-events: none;
+  transition: all 0.3s ease;
+}
+.shake-ring.active {
+  opacity: 0.1;
+  transform: translate(-50%, -50%) scale(1);
+}
+
+/* Result overlay */
+.dice-result-overlay {
+  position: absolute; inset: 0;
+  display: none; flex-direction: column;
+  align-items: center; justify-content: center;
+  background: radial-gradient(ellipse at center, rgba(0,0,0,0.5) 0%, rgba(0,0,0,0.85) 100%);
+  z-index: 20; animation: resultIn 0.4s ease;
+}
+@keyframes resultIn { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
+.dice-result-overlay.show { display: flex; }
+.dice-result-overlay .big-num {
+  font-family: 'Courier New', monospace;
+  font-size: 72px; font-weight: 700;
+  color: #eeead8;
+  text-shadow: 0 0 30px rgba(184,151,106,0.3);
+  line-height: 1;
+}
+.dice-result-overlay .big-num.crit { color: #5aaa5a; text-shadow: 0 0 40px rgba(74,138,74,0.3); }
+.dice-result-overlay .big-num.fumble { color: #d45050; text-shadow: 0 0 40px rgba(196,64,64,0.3); }
+.dice-result-overlay .dual-result {
+  display: flex; gap: 16px; align-items: center;
+}
+.dice-result-overlay .dual-result .small-die {
+  width: 56px; height: 64px;
+  clip-path: polygon(50% 0%, 96% 28%, 80% 100%, 20% 100%, 4% 28%);
+  background: linear-gradient(160deg, #f0e8d8, #c8b894);
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'Courier New', monospace;
+  font-size: 20px; font-weight: 700;
+  color: #2c2416;
+}
+.dice-result-overlay .dual-result .eq-sign { font-size: 28px; color: #9088a0; font-family: 'Courier New', monospace; }
+.dice-result-overlay .verdict {
+  font-size: 16px; font-weight: 600; margin-top: 8px;
+  padding: 4px 24px; border-radius: 99px;
+}
+.dice-result-overlay .verdict.success { color: #5aaa5a; background: rgba(74,138,74,0.15); }
+.dice-result-overlay .verdict.fail { color: #d0a090; background: rgba(196,64,64,0.12); }
+.dice-result-overlay .verdict.crit { color: #7acc7a; background: rgba(74,138,74,0.2); font-size: 18px; }
+.dice-result-overlay .verdict.fumble { color: #e06050; background: rgba(196,64,64,0.18); }
+.dice-result-overlay .detail-line { font-family: 'Courier New', monospace; font-size: 12px; color: #9088a0; margin-top: 4px; }
+
+.dice-bottom { padding: 16px 20px 32px; flex-shrink: 0; }
+.dice-dice-select { display: flex; gap: 8px; justify-content: center; padding-bottom: 12px; }
+.dice-dice-select button {
+  padding: 6px 18px; border-radius: 20px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.06); color: #9088a0;
+  font-family: 'Courier New', monospace;
+  font-size: 13px; font-weight: 600; cursor: pointer; transition: 0.2s;
+}
+.dice-dice-select button.active { background: var(--brass); color: #1a1620; border-color: var(--brass); }
+.dice-dice-select button:active { transform: scale(0.94); }
+.dice-hint { text-align: center; }
+.dice-hint span { font-size: 12px; color: rgba(255,255,255,0.25); font-family: 'Courier New', monospace; letter-spacing: 0.05em; }
+.shake-meter { display: flex; gap: 4px; justify-content: center; margin-top: 8px; }
+.shake-meter .bar-seg { width: 24px; height: 3px; border-radius: 99px; background: rgba(255,255,255,0.08); transition: all 0.15s; }
+.shake-meter .bar-seg.filled { background: var(--brass); }
+.shake-meter .bar-seg.filled.strong { background: #d4a853; }
+
+/* Chat dice button */
+.dice-roll-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 18px; background: var(--brass); color: #fff;
+  border: none; border-radius: 20px; font-size: 13px; font-weight: 600;
+  cursor: pointer; font-family: inherit; transition: 0.15s;
+}
+.dice-roll-btn:active { transform: scale(0.96); }
+.dice-roll-btn i { width: 16px; height: 16px; }
+
+/* Panels */
+.panel-backdrop {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.35);
+  z-index: 199; opacity: 0; pointer-events: none; transition: opacity 0.3s ease;
+}
+.panel-backdrop.show { opacity: 1; pointer-events: auto; }
+.panel-overlay {
+  position: fixed; bottom: 0; left: 0; right: 0;
+  max-width: 390px; margin: 0 auto; background: var(--bg-card);
+  border-radius: 16px 16px 0 0;
+  box-shadow: 0 -8px 32px rgba(0,0,0,0.12);
+  z-index: 200; transform: translateY(100%);
+  transition: transform 0.3s ease; max-height: 68vh;
+  overflow: hidden; display: flex; flex-direction: column;
+}
+.panel-overlay.open { transform: translateY(0); }
+.panel-overlay .handle { display: flex; justify-content: center; padding: 10px 0 4px; cursor: pointer; }
+.panel-overlay .handle .bar { width: 36px; height: 4px; border-radius: 99px; background: var(--border-mid); }
+.panel-overlay .pheader { display: flex; align-items: center; justify-content: space-between; padding: 4px 20px 12px; }
+.panel-overlay .pheader h3 { font-size: 16px; font-weight: 700; color: var(--text-primary); }
+.panel-overlay .pheader .close-btn { width: 28px; height: 28px; border-radius: 50%; background: var(--bg-panel); border: none; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+.panel-overlay .pheader .close-btn i { width: 16px; height: 16px; color: var(--text-muted); stroke-width: 2.5; }
+.panel-overlay .pscroll { flex: 1; overflow-y: auto; padding: 0 20px 24px; }
+.pc-summary { display: flex; gap: 10px; margin-bottom: 16px; }
+.pc-summary .pill { flex: 1; padding: 10px; background: var(--bg-panel); border-radius: var(--radius-sm); text-align: center; }
+.pc-summary .pill .pl { font-size: 10px; color: var(--text-muted); font-weight: 600; letter-spacing: 0.05em; margin-bottom: 2px; }
+.pc-summary .pill .pv { font-size: 18px; font-weight: 700; }
+.pc-summary .pill .pv.safe { color: var(--mold); }
+.pc-summary .pill .pv.accent { color: var(--brass-dark); }
+.pc-divider { height: 1px; background: var(--border-light); margin: 12px 0; }
+.pc-attrs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.pc-attrs .ai { display: flex; justify-content: space-between; padding: 6px 10px; background: var(--bg-panel); border-radius: var(--radius-sm); font-size: 13px; }
+.pc-attrs .ai .al { font-weight: 600; color: var(--text-muted); font-family: 'Courier New', monospace; font-size: 12px; }
+.pc-attrs .ai .av { font-weight: 700; color: var(--text-primary); }
+.pc-equip { list-style: none; }
+.pc-equip li { padding: 6px 0; font-size: 13px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--border-light); }
+.pc-equip li:last-child { border-bottom: none; }
+.psk-list { display: flex; flex-direction: column; gap: 6px; }
+.psk-row { display: flex; align-items: center; gap: 10px; }
+.psk-row .psn { flex: 1; font-size: 13px; color: var(--text-body); }
+.psk-row .pst { width: 100px; height: 5px; border-radius: 99px; background: var(--border-light); overflow: hidden; flex-shrink: 0; }
+.psk-row .pst .psf { height: 100%; border-radius: 99px; background: var(--brass); }
+.psk-row .psv { font-size: 12px; font-weight: 700; color: var(--text-primary); min-width: 30px; text-align: right; font-family: 'Courier New', monospace; }
+.map-box { width: 100%; height: 200px; background: var(--bg-panel); border: 2px dashed var(--border-light); border-radius: var(--radius-md); display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-dim); font-size: 13px; margin-bottom: 16px; }
+.map-box i { width: 44px; height: 44px; stroke-width: 1; margin-bottom: 8px; color: var(--border-mid); }
+.map-locs { list-style: none; }
+.map-locs li { padding: 8px 12px; font-size: 13px; display: flex; align-items: center; gap: 8px; border-left: 2px solid var(--border-light); margin-bottom: 6px; }
+.map-locs li.cur { border-left-color: var(--brass); background: rgba(184,151,106,0.06); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+.map-locs li .li { font-size: 16px; }
+.map-locs li .ln { font-weight: 600; color: var(--text-primary); }
+.map-locs li .ld { font-size: 11px; color: var(--text-muted); }
+.note-ta { width: 100%; min-height: 180px; padding: 14px; background: var(--bg-input); border: 1px solid var(--border-light); border-radius: var(--radius-sm); color: var(--text-primary); font-size: 14px; line-height: 1.7; font-family: inherit; resize: vertical; outline: none; }
+.note-ta:focus { border-color: var(--brass); }
+.note-foot { font-size: 11px; color: var(--text-dim); margin-top: 6px; text-align: right; }
+::-webkit-scrollbar { width: 0; }
+</style>
+</head>
+<body>
+<div class="phone" id="app">
+<div class="status-bar"><span>9:41</span><span>📶 🔋 98%</span></div>
+
+<!-- S1: LOGIN -->
+<div class="screen active" id="s-login">
+  <div class="login-brand">
+    <div class="app-icon"><i data-lucide="scroll-text"></i></div>
+    <h1>ARKHAM<br>CASE FILES</h1>
+    <p class="sub">AI 守秘人 · 智能跑团主持人</p>
+    <div class="tagline">
+      <span class="mono-tag">🐙 克苏鲁的呼唤 7th 相容</span>
+      <span>扫码上车 · AI 主持 · 即开即玩</span>
+    </div>
+  </div>
+  <div class="login-actions">
+    <button class="btn btn-primary btn-block" onclick="goTo('s-games')"><i data-lucide="qr-code"></i> 扫码加入房间</button>
+    <button class="btn btn-secondary btn-block" onclick="goTo('s-games')"><i data-lucide="plus-circle"></i> 创建新房间</button>
+    <button class="btn btn-outline btn-block btn-sm" onclick="goTo('s-games')" style="margin-top:4px;">浏览已有案件</button>
+  </div>
+  <div class="login-footer"><a href="#">v0.1 · Arkham Case Files</a></div>
+</div>
+
+<!-- S2: GAMES -->
+<div class="screen" id="s-games">
+  <div class="page-header" style="padding-top:4px;">
+    <div class="back" onclick="goTo('s-login')"><i data-lucide="chevron-left"></i></div><h2>选择游戏</h2><div class="spacer"></div>
+  </div>
+  <p class="page-sub">选择一个你想玩的游戏，AI 将自动担任主持人</p>
+  <div class="game-grid">
+    <div class="game-card c-trpg" onclick="goTo('s-system')">
+      <div class="icon-box icon-trpg"><i data-lucide="swords" class="ic-trpg"></i></div>
+      <div class="name">跑团</div><div class="desc">DND / 克苏鲁 · 经典 TRPG</div><span class="badge badge-rec">推荐</span>
+    </div>
+    <div class="game-card c-wolf"><div class="icon-box icon-wolf"><i data-lucide="users" class="ic-wolf"></i></div><div class="name">狼人杀</div><div class="desc">谁是狼人？经典社交推理</div><span class="badge badge-wip">开发中</span></div>
+    <div class="game-card c-blood"><div class="icon-box icon-blood"><i data-lucide="skull" class="ic-blood"></i></div><div class="name">血染钟楼</div><div class="desc">更复杂的社交推理游戏</div><span class="badge badge-wip">开发中</span></div>
+    <div class="game-card c-murder"><div class="icon-box icon-murder"><i data-lucide="scroll" class="ic-murder"></i></div><div class="name">剧本杀</div><div class="desc">沉浸式角色扮演推理</div><span class="badge badge-wip">开发中</span></div>
+  </div>
+</div>
+
+<!-- S3: SYSTEM -->
+<div class="screen" id="s-system">
+  <div class="page-header" style="padding-top:4px;"><div class="back" onclick="goTo('s-games')"><i data-lucide="chevron-left"></i></div><h2>选择世界</h2><div class="spacer"></div></div>
+  <p class="page-sub">选择跑团的背景规则世界</p>
+  <div class="sys-cards">
+    <div class="sys-card sys-dnd"><div class="icon-box i-dnd"><i data-lucide="dragon" class="ic-dnd"></i></div><div class="info"><h3>龙与地下城</h3><p>Dungeons &amp; Dragons 5e<br>剑与魔法的传奇冒险</p></div><div class="arrow"><i data-lucide="chevron-right"></i></div></div>
+    <div class="sys-card sys-coc" onclick="goTo('s-story')"><div class="icon-box i-coc"><i data-lucide="ghost" class="ic-coc"></i></div><div class="info"><h3>克苏鲁的呼唤</h3><p>Call of Cthulhu 7th<br>1920 年代 · 恐怖调查 · 不可名状</p><span class="tag-rec">推荐新手 · 已就绪</span></div><div class="arrow"><i data-lucide="chevron-right"></i></div></div>
+  </div>
+</div>
+
+<!-- S4: STORY -->
+<div class="screen" id="s-story">
+  <div class="story-screen">
+    <div class="story-label">ARKHAM CASE FILES · 案件档案 #1927-03</div>
+    <div class="story-title">古宅幽影</div><div class="story-subtitle">The Shadow Over Arkham</div><div class="story-divider"></div>
+    <div class="story-text">
+      <p>1927 年，马萨诸塞州，阿卡姆。</p>
+      <p>密斯卡塔尼克大学的<em class="hl">惠特利教授</em>失踪了。他在一周前离开办公室去调查城郊一座废弃的维多利亚式宅邸——此后再无人见过他。</p>
+      <p>警方在宅邸门口发现了教授的手杖和眼镜，但屋内空无一人。没有血迹，没有挣扎痕迹。锁匠声称门锁是从内部反锁的。</p>
+      <p>你们——几位调查员——被学校董事会雇佣，前往这座老宅查明真相。</p>
+      <p>镇上的人管它叫"<em class="hl">惠特利旧宅</em>"。他们说，晚上路过时，二楼窗户里有时会亮起<em class="hl">蓝绿色的光</em>。</p>
+    </div>
+    <div class="story-continue"><button class="btn btn-primary btn-block" onclick="goTo('s-character')"><i data-lucide="arrow-right"></i> 创建你的调查员</button></div>
+  </div>
+</div>
+
+<!-- S5: CHARACTER -->
+<div class="screen" id="s-character">
+  <div class="page-header" style="padding-top:4px;"><div class="back" onclick="goTo('s-story')"><i data-lucide="chevron-left"></i></div><h2>创建调查员</h2><div class="spacer"></div></div>
+  <p class="page-sub">克苏鲁的呼唤 · 选择你的职业并分配属性</p>
+  <div class="char-progress"><div class="step done"></div><div class="step active"></div><div class="step"></div><div class="step"></div></div>
+  <div class="char-section">
+    <h4>① 选择职业</h4>
+    <div class="occ-grid">
+      <div class="occ-item selected" onclick="selectOcc(this)"><div class="occ-icon">🔍</div><div class="occ-name">私家侦探</div></div>
+      <div class="occ-item" onclick="selectOcc(this)"><div class="occ-icon">📰</div><div class="occ-name">记者</div></div>
+      <div class="occ-item" onclick="selectOcc(this)"><div class="occ-icon">📚</div><div class="occ-name">大学教授</div></div>
+      <div class="occ-item" onclick="selectOcc(this)"><div class="occ-icon">💉</div><div class="occ-name">医生</div></div>
+      <div class="occ-item" onclick="selectOcc(this)"><div class="occ-icon">🔫</div><div class="occ-name">警察</div></div>
+      <div class="occ-item" onclick="selectOcc(this)"><div class="occ-icon">🏛️</div><div class="occ-name">古董商</div></div>
+    </div>
+  </div>
+  <div class="char-section">
+    <h4>② 基本信息</h4>
+    <div class="form-group"><label>调查员姓名</label><input type="text" placeholder="例如: 杰克·布朗" value="杰克·布朗"></div>
+    <div class="form-row"><div class="form-group"><label>年龄</label><input type="number" value="32"></div><div class="form-group"><label>出生地</label><input type="text" placeholder="例如: 波士顿" value="波士顿"></div></div>
+  </div>
+  <div class="char-section">
+    <h4>③ 基础属性</h4>
+    <div class="stat-grid">
+      <div class="stat-item"><span class="label">STR</span><button class="adjust" onclick="adjStat(this,-5)">−</button><span class="value">50</span><button class="adjust" onclick="adjStat(this,5)">+</button></div>
+      <div class="stat-item"><span class="label">CON</span><button class="adjust" onclick="adjStat(this,-5)">−</button><span class="value">60</span><button class="adjust" onclick="adjStat(this,5)">+</button></div>
+      <div class="stat-item"><span class="label">SIZ</span><button class="adjust" onclick="adjStat(this,-5)">−</button><span class="value">55</span><button class="adjust" onclick="adjStat(this,5)">+</button></div>
+      <div class="stat-item"><span class="label">DEX</span><button class="adjust" onclick="adjStat(this,-5)">−</button><span class="value">65</span><button class="adjust" onclick="adjStat(this,5)">+</button></div>
+      <div class="stat-item"><span class="label">INT</span><button class="adjust" onclick="adjStat(this,-5)">−</button><span class="value">70</span><button class="adjust" onclick="adjStat(this,5)">+</button></div>
+      <div class="stat-item"><span class="label">POW</span><button class="adjust" onclick="adjStat(this,-5)">−</button><span class="value">65</span><button class="adjust" onclick="adjStat(this,5)">+</button></div>
+      <div class="stat-item"><span class="label">APP</span><button class="adjust" onclick="adjStat(this,-5)">−</button><span class="value">60</span><button class="adjust" onclick="adjStat(this,5)">+</button></div>
+      <div class="stat-item"><span class="label">EDU</span><button class="adjust" onclick="adjStat(this,-5)">−</button><span class="value">70</span><button class="adjust" onclick="adjStat(this,5)">+</button></div>
+    </div>
+  </div>
+  <div class="btn-bar"><button class="btn btn-secondary btn-sm" onclick="alert('草稿已保存')">保存草稿</button><button class="btn btn-primary" onclick="goTo('s-lobby')">完成并加入</button></div>
+  <div style="height:24px;"></div>
+</div>
+
+<!-- S6: LOBBY -->
+<div class="screen" id="s-lobby">
+  <div class="page-header" style="padding-top:4px;"><div class="spacer"></div><h2>等待玩家</h2><div class="spacer"></div></div>
+  <div class="lobby-room-code"><span style="font-size:12px;color:var(--text-muted);">房间码</span><span class="code">AR-1927</span><span class="copy" onclick="alert('已复制房间码');">📋 复制</span></div>
+  <p style="text-align:center;font-size:12px;color:var(--text-dim);">分享房间码给好友，扫码或输入加入</p>
+  <div class="player-list">
+    <div class="player-card"><div class="avatar host">🕵️</div><div class="pinfo"><div class="pname">杰克·布朗 <span style="font-size:10px;color:var(--brass-dark);font-weight:600;">(房主)</span></div><div class="pchar">私家侦探 · STR 50 CON 60 SIZ 55 DEX 65</div></div><span class="pstatus ready">已就绪</span></div>
+    <div class="player-card"><div class="avatar">📰</div><div class="pinfo"><div class="pname">艾米丽·卡特</div><div class="pchar">记者 · 正在创建角色…</div></div><span class="pstatus waiting">车卡中</span></div>
+    <div class="player-card"><div class="avatar">📚</div><div class="pinfo"><div class="pname">托马斯·里德</div><div class="pchar">大学教授 · STR 40 CON 50 SIZ 60 INT 80</div></div><span class="pstatus ready">已就绪</span></div>
+    <div class="player-card"><div class="avatar" style="background:#f4f0ec;border-style:dashed;">?</div><div class="pinfo"><div class="pname">空位</div><div class="pchar">等待玩家加入…</div></div><span class="pstatus waiting">空闲</span></div>
+    <div class="player-card"><div class="avatar" style="background:#eef3f8;border-color:var(--ink-blue);">🤖</div><div class="pinfo"><div class="pname">AI 调查员</div><div class="pchar">人数不足时自动补位</div></div><span class="pstatus bot">AI</span></div>
+  </div>
+  <div class="lobby-actions"><button class="btn btn-primary btn-block" onclick="goTo('s-chat')"><i data-lucide="play"></i> 开始游戏 (3/3 人已就绪)</button><button class="btn btn-secondary btn-block btn-sm" style="margin-top:8px;" onclick="goTo('s-character')"><i data-lucide="edit"></i> 修改角色</button></div>
+</div>
+
+<!-- S7: CHAT -->
+<div class="screen" id="s-chat">
+  <div class="chat-container">
+    <div class="chat-header">
+      <div class="room-icon">🏚️</div>
+      <div class="cinfo"><div class="ctitle">古宅幽影</div><div class="csub">阿卡姆 — 1927 · 3 位调查员</div></div>
+      <div class="cactions"><button onclick="goTo('s-lobby')"><i data-lucide="users"></i></button><button onclick="alert('案件档案\n古宅幽影 #1927-03')"><i data-lucide="info"></i></button></div>
+    </div>
+    <div class="chat-messages" id="chatMsgs">
+      <div class="sys-msg"><span>案件档案已加载 · AI 守秘人在线</span></div>
+      <div class="msg"><div class="msg-avatar keeper">📜</div><div class="msg-body"><div class="msg-sender keeper">AI 守秘人</div><div class="msg-bubble narr">1927 年 10 月的一个傍晚。<br><br>你们三人站在惠特利旧宅的铁门前。铁锈爬满了铰链，门缝里透出腐败的木质气息。<br><br><span class="hl">你们的调查开始了。</span></div><div class="msg-time">19:03</div></div></div>
+      <div class="msg"><div class="msg-avatar keeper">📜</div><div class="msg-body"><div class="msg-sender keeper">AI 守秘人</div><div class="msg-bubble">🟡 你们要做什么？<br><span style="font-size:12px;color:var(--text-muted);">· 推开铁门进入前院</span><br><span style="font-size:12px;color:var(--text-muted);">· 绕到房子侧面看看</span></div><div class="msg-time">19:03</div></div></div>
+      <div class="msg self"><div class="msg-avatar" style="background:#eef6ee;">🔍</div><div class="msg-body"><div class="msg-sender self-name">杰克·布朗</div><div class="msg-bubble">我检查一下铁门和门锁，看看有没有被撬过的痕迹。</div><div class="msg-time">19:04</div></div></div>
+      <div class="msg"><div class="msg-avatar keeper">📜</div><div class="msg-body"><div class="msg-sender keeper">AI 守秘人</div><div class="msg-bubble"><span class="mono">🔎 请过 <strong>侦察 (Spot Hidden 65%)</strong></span></div><div class="msg-time">19:04</div></div></div>
+      <div class="msg self"><div class="msg-avatar" style="background:#eef6ee;">🔍</div><div class="msg-body"><div class="msg-sender self-name">杰克·布朗 · 掷骰</div><div class="msg-bubble"><span class="mono" style="font-size:18px;font-weight:700;">32</span><span class="mono" style="color:var(--text-dim);"> / 65</span><span style="color:var(--mold);font-weight:600;"> 成功</span></div><div class="msg-time">19:04</div></div></div>
+      <div class="msg"><div class="msg-avatar keeper">📜</div><div class="msg-body"><div class="msg-sender keeper">AI 守秘人</div><div class="msg-bubble narr">手电筒的光扫过铁门。锁孔周围的划痕是新的。你在门框缝隙里发现了一小片深灰色布料。<br><br>门没有锁。<br><br><span style="font-size:12px;color:var(--text-dim);">🔍 线索获得: <span class="hl">[布料碎片]</span></span></div><div class="msg-time">19:05</div></div></div>
+      <div class="msg"><div class="msg-avatar keeper">📜</div><div class="msg-body"><div class="msg-sender keeper">AI 守秘人</div><div class="msg-bubble">🔎 请通过侦察检定 <strong>(侦察 65%)</strong></div><div style="margin-top:8px;"><button class="dice-roll-btn" onclick="openDice()"><i data-lucide="dices"></i> 拿起骰子</button></div><div class="msg-time" style="margin-top:4px;">19:05</div></div></div>
+      <div class="typing-indicator"><div class="msg-avatar keeper">📜</div><div class="dots"><span></span><span></span><span></span></div></div>
+      <div class="chat-bottom"></div>
+    </div>
+    <div class="action-bar">
+      <button onclick="openPanel('sheet')"><i data-lucide="user"></i>角色卡</button>
+      <button onclick="openPanel('skills')"><i data-lucide="bar-chart-3"></i>技能</button>
+      <button onclick="openPanel('map')"><i data-lucide="map"></i>地图</button>
+      <button onclick="openPanel('notes')"><i data-lucide="file-text"></i>速记</button>
+    </div>
+    <div class="chat-input-area">
+      <div class="quick-row">
+        <button class="quick-btn" onclick="openDice()">🎲 掷骰</button>
+        <button class="quick-btn">🔍 侦查周围</button>
+        <button class="quick-btn">🗣️ 与队友商量</button>
+      </div>
+      <div class="input-row">
+        <textarea class="chat-input" rows="1" placeholder="输入你的行动…"></textarea>
+        <button class="send-btn"><i data-lucide="send"></i></button>
+      </div>
+    </div>
+  </div>
+</div>
+
+</div> <!-- end .phone -->
+
+<!-- ===== DICE SCREEN ===== -->
+<div class="dice-screen" id="diceScreen">
+  <div class="dice-top">
+    <div class="back-btn" onclick="closeDice()"><i data-lucide="x"></i></div>
+    <span class="title">🎲 掷骰</span>
+    <div class="spacer-d"></div>
+  </div>
+  <div class="dice-context">
+    <span class="skill-tag" id="diceSkillTag">🎯 侦察 (65%)</span>
+    <div class="target-show" id="diceTargetShow">目标: 65 · 需 ≤ 目标才能成功</div>
+  </div>
+  <div class="dice-table" id="diceTable">
+    <div class="table-texture"></div>
+    <div class="shake-ring" id="shakeRing"></div>
+
+    <!-- D% mode: two d10s -->
+    <div id="diceContainerDual" style="display:none;position:relative;" class="dice-dual">
+      <div class="die-d10" id="dieTens"></div>
+      <div class="die-d10" id="dieOnes"></div>
+      <div class="die-label tens">十位</div>
+      <div class="die-label ones">个位</div>
+    </div>
+
+    <!-- Single dice mode (D20 / D6) -->
+    <div id="diceContainerSingle" style="display:none;position:relative;" class="dice-single">
+      <div id="dieSingle"></div>
+      <div class="die-label-b" id="dieSingleLabel">D20</div>
+    </div>
+
+    <!-- Results -->
+    <div class="dice-result-overlay" id="diceResult">
+      <div id="resultDual" style="display:none;">
+        <div class="dual-result" id="dualResultContent">
+          <div class="small-die" id="resDieTens">0</div>
+          <span class="eq-sign">+</span>
+          <div class="small-die" id="resDieOnes">0</div>
+          <span class="eq-sign">=</span>
+          <div class="big-num" id="resTotal">00</div>
+        </div>
+      </div>
+      <div id="resultSingle" style="display:none;">
+        <div class="big-num" id="resSingleNum">0</div>
+      </div>
+      <div class="verdict" id="resultVerdict">成功</div>
+      <div class="detail-line" id="resultDetail">侦察 65% · 需求 ≤65</div>
+      <div style="margin-top:20px;display:flex;gap:12px;">
+        <button class="btn btn-outline btn-sm" style="border-color:rgba(255,255,255,0.15);color:#9088a0;" onclick="closeDiceResult();resetDice();">重新掷</button>
+        <button class="btn btn-primary btn-sm" onclick="confirmDiceResult()">确认结果</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="dice-bottom">
+    <div class="dice-dice-select">
+      <button class="active" data-dice="d100" onclick="selectDice('d100',this)">D%</button>
+      <button data-dice="d20" onclick="selectDice('d20',this)">D20</button>
+      <button data-dice="d6" onclick="selectDice('d6',this)">D6</button>
+    </div>
+    <div class="shake-meter" id="shakeMeter">
+      <div class="bar-seg" id="sm0"></div><div class="bar-seg" id="sm1"></div><div class="bar-seg" id="sm2"></div><div class="bar-seg" id="sm3"></div><div class="bar-seg" id="sm4"></div>
+    </div>
+    <div class="dice-hint"><span id="diceHint">👆 按住骰子来回拖动 · 摇动后松手</span></div>
+  </div>
+</div>
+
+<!-- Panel Backdrop -->
+<div class="panel-backdrop" id="panelBackdrop" onclick="closePanel()"></div>
+
+<!-- Panel: Sheet -->
+<div class="panel-overlay" id="panelSheet">
+  <div class="handle" onclick="closePanel()"><div class="bar"></div></div>
+  <div class="pheader"><h3>调查员 · 杰克·布朗</h3><button class="close-btn" onclick="closePanel()"><i data-lucide="x"></i></button></div>
+  <div class="pscroll">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
+      <div style="width:48px;height:56px;background:linear-gradient(135deg,#e8e0d0,#d8cfb8);border:2px solid var(--brass);display:flex;align-items:center;justify-content:center;font-size:24px;">🕵️</div>
+      <div><div style="font-size:13px;font-weight:600;color:var(--text-primary);">私家侦探 · 32 岁 · 波士顿</div><div style="font-size:11px;color:var(--text-muted);">STR 50 CON 60 SIZ 55 DEX 65 · INT 70 POW 65 APP 60 EDU 70</div></div>
+    </div>
+    <div class="pc-summary"><div class="pill"><div class="pl">生命 HP</div><div class="pv safe">12/14</div></div><div class="pill"><div class="pl">理智 SAN</div><div class="pv accent">65</div></div><div class="pill"><div class="pl">幸运</div><div class="pv">55</div></div></div>
+    <div class="pc-divider"></div>
+    <h4 style="font-size:12px;font-weight:600;color:var(--brass-dark);margin-bottom:10px;">基础属性</h4>
+    <div class="pc-attrs" style="margin-bottom:12px;">
+      <div class="ai"><span class="al">STR 力量</span><span class="av">50</span></div><div class="ai"><span class="al">CON 体质</span><span class="av">60</span></div>
+      <div class="ai"><span class="al">SIZ 体型</span><span class="av">55</span></div><div class="ai"><span class="al">DEX 敏捷</span><span class="av">65</span></div>
+      <div class="ai"><span class="al">INT 智力</span><span class="av">70</span></div><div class="ai"><span class="al">POW 意志</span><span class="av">65</span></div>
+      <div class="ai"><span class="al">APP 外貌</span><span class="av">60</span></div><div class="ai"><span class="al">EDU 教育</span><span class="av">70</span></div>
+    </div>
+    <div class="pc-divider"></div><h4 style="font-size:12px;font-weight:600;color:var(--brass-dark);margin-bottom:10px;">装备</h4>
+    <ul class="pc-equip"><li>🔦 手电筒</li><li>📓 笔记本 &amp; 钢笔</li><li>🔫 左轮手枪 (.38) · 6/6 发</li><li>🪪 私家侦探执照</li><li>💊 急救包</li></ul>
+  </div>
+</div>
+
+<!-- Panel: Skills -->
+<div class="panel-overlay" id="panelSkills">
+  <div class="handle" onclick="closePanel()"><div class="bar"></div></div>
+  <div class="pheader"><h3>技能</h3><button class="close-btn" onclick="closePanel()"><i data-lucide="x"></i></button></div>
+  <div class="pscroll">
+    <div class="psk-list">
+      <div class="psk-row"><span class="psn">侦察 (Spot Hidden)</span><div class="pst"><div class="psf" style="width:65%"></div></div><span class="psv">65%</span></div>
+      <div class="psk-row"><span class="psn">聆听 (Listen)</span><div class="pst"><div class="psf" style="width:50%"></div></div><span class="psv">50%</span></div>
+      <div class="psk-row"><span class="psn">图书馆 (Library Use)</span><div class="pst"><div class="psf" style="width:60%"></div></div><span class="psv">60%</span></div>
+      <div class="psk-row"><span class="psn">说服 (Persuade)</span><div class="pst"><div class="psf" style="width:45%"></div></div><span class="psv">45%</span></div>
+      <div class="psk-row"><span class="psn">斗殴 (Fighting)</span><div class="pst"><div class="psf" style="width:35%"></div></div><span class="psv">35%</span></div>
+      <div class="psk-row"><span class="psn">潜行 (Stealth)</span><div class="pst"><div class="psf" style="width:40%"></div></div><span class="psv">40%</span></div>
+      <div class="psk-row"><span class="psn">心理学 (Psychology)</span><div class="pst"><div class="psf" style="width:30%"></div></div><span class="psv">30%</span></div>
+      <div class="psk-row"><span class="psn">急救 (First Aid)</span><div class="pst"><div class="psf" style="width:40%"></div></div><span class="psv">40%</span></div>
+      <div class="psk-row"><span class="psn">神秘学 (Occult)</span><div class="pst"><div class="psf" style="width:25%"></div></div><span class="psv">25%</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- Panel: Map -->
+<div class="panel-overlay" id="panelMap">
+  <div class="handle" onclick="closePanel()"><div class="bar"></div></div>
+  <div class="pheader"><h3>地图</h3><button class="close-btn" onclick="closePanel()"><i data-lucide="x"></i></button></div>
+  <div class="pscroll">
+    <div class="map-box"><i data-lucide="map"></i><span>地图渲染区域</span><span style="font-size:11px;color:var(--text-dim);margin-top:4px;">惠特利旧宅 · 阿卡姆郊区</span></div>
+    <div class="pc-divider"></div>
+    <h4 style="font-size:12px;font-weight:600;color:var(--brass-dark);margin-bottom:10px;">已知地点</h4>
+    <ul class="map-locs">
+      <li class="cur"><span class="li">🏚️</span><div><div class="ln">惠特利旧宅 · 正门</div><div class="ld">当前所在 · 铁门虚掩</div></div><span style="font-size:10px;font-weight:600;color:var(--mold);margin-left:auto;">▶ 当前位置</span></li>
+      <li><span class="li">🌿</span><div><div class="ln">前院 · 花园</div><div class="ld">杂草丛生，喷泉干涸</div></div></li>
+      <li><span class="li">🚪</span><div><div class="ln">门厅</div><div class="ld">一楼入口，尚未探索</div></div></li>
+      <li><span class="li">📚</span><div><div class="ln">书房</div><div class="ld">教授最后出现的地点</div></div></li>
+      <li><span class="li">🪟</span><div><div class="ln">二楼走廊</div><div class="ld">蓝绿色光芒的来源</div></div></li>
+      <li><span class="li">🔻</span><div><div class="ln">地下室</div><div class="ld">门锁着，钥匙未知</div></div></li>
+    </ul>
+  </div>
+</div>
+
+<!-- Panel: Notes -->
+<div class="panel-overlay" id="panelNotes">
+  <div class="handle" onclick="closePanel()"><div class="bar"></div></div>
+  <div class="pheader"><h3>速记本</h3><button class="close-btn" onclick="closePanel()"><i data-lucide="x"></i></button></div>
+  <div class="pscroll">
+    <div style="display:flex;gap:8px;margin-bottom:12px;">
+      <button class="btn btn-sm" style="flex:1;background:var(--bg-panel);border:1px solid var(--border-light);color:var(--text-muted);" onclick="addNoteTag()">➕ 添加线索标签</button>
+      <button class="btn btn-sm" style="background:var(--brass);color:#fff;" onclick="saveNote()">💾 保存</button>
+    </div>
+    <textarea class="note-ta" id="noteContent">📋 案件笔记
+═══════════════════════════
+- 铁门锁孔有新鲜划痕
+- 发现深灰色布料碎片（西装料）
+- 门未上锁</textarea>
+    <div class="note-foot">最后编辑: 19:07 · 自动保存</div>
+  </div>
+</div>
+
+<script>
+// ===== NAVIGATION =====
+function goTo(id) { document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active')); document.getElementById(id).classList.add('active'); window.scrollTo({top:0,behavior:'smooth'}); closePanel(); }
+function selectOcc(el) { document.querySelectorAll('.occ-item').forEach(o=>o.classList.remove('selected')); el.classList.add('selected'); }
+function adjStat(btn,delta) { const v=btn.parentElement.querySelector('.value'); v.textContent=Math.max(15,Math.min(99,parseInt(v.textContent)+delta)); }
+
+// ===== DICE SYSTEM (v2 — dual d10 + shake animation) =====
+let diceType = 'd100';
+let isGrabbed = false;
+let grabX = 0, grabY = 0;
+let baseX = 0, baseY = 0;
+let velX = 0, velY = 0;
+let lastMoveTime = 0;
+let shakeLevel = 0;
+let directionChanges = 0;
+let lastDirX = 0, lastDirY = 0;
+let resultPending = false;
+let lastResult = null;
+let lastTens = 0, lastOnes = 0;
+let animFrameId = null;
+let grabbedEls = [];
+
+function openDice() {
+  document.getElementById('diceScreen').classList.add('active');
+  resetDice();
+  // Start shake animation loop
+  if (!animFrameId) shakeLoop();
+}
+function closeDice() {
+  document.getElementById('diceScreen').classList.remove('active');
+  closeDiceResult();
+  if (animFrameId) { cancelAnimationFrame(animFrameId); animFrameId = null; }
+}
+
+function selectDice(type, btn) {
+  diceType = type;
+  document.querySelectorAll('.dice-dice-select button').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  resetDice();
+}
+
+function createDieHTML(type, isTens) {
+  if (type === 'd100') {
+    const el = document.createElement('div');
+    el.className = 'die-d10';
+    const faces = isTens ? ['00','10','20','30','40','50','60','70','80','90'] : ['0','1','2','3','4','5','6','7','8','9'];
+    el.textContent = faces[Math.floor(Math.random()*10)];
+    el.dataset.value = isTens ? Math.floor(Math.random()*10)*10 : Math.floor(Math.random()*10);
+    el.dataset.isTens = isTens ? '1' : '0';
+    return el;
+  } else if (type === 'd20') {
+    const el = document.createElement('div');
+    el.className = 'die-d20';
+    el.textContent = Math.floor(Math.random()*20)+1;
+    el.dataset.value = Math.floor(Math.random()*20)+1;
+    return el;
+  } else {
+    const el = document.createElement('div');
+    el.className = 'die-d6';
+    const val = Math.floor(Math.random()*6)+1;
+    el.textContent = val;
+    el.dataset.value = val;
+    return el;
+  }
+}
+
+function resetDice() {
+  if (animFrameId) { cancelAnimationFrame(animFrameId); animFrameId = null; }
+  isGrabbed = false;
+  shakeLevel = 0; directionChanges = 0;
+  lastDirX = 0; lastDirY = 0;
+  resultPending = false; lastResult = null;
+  baseX = 0; baseY = 0;
+  grabbedEls = [];
+
+  const dual = document.getElementById('diceContainerDual');
+  const single = document.getElementById('diceContainerSingle');
+  const dieTens = document.getElementById('dieTens');
+  const dieOnes = document.getElementById('dieOnes');
+  const dieSingle = document.getElementById('dieSingle');
+
+  if (diceType === 'd100') {
+    dual.style.display = 'flex';
+    single.style.display = 'none';
+    dieTens.innerHTML = ''; dieOnes.innerHTML = '';
+    const t = createDieHTML('d100', true); dieTens.appendChild(t);
+    const o = createDieHTML('d100', false); dieOnes.appendChild(o);
+    lastTens = parseInt(t.dataset.value); lastOnes = parseInt(o.dataset.value);
+    document.getElementById('diceTargetShow').textContent = '目标: 65 · D% = 十位 + 个位';
+  } else if (diceType === 'd20') {
+    dual.style.display = 'none';
+    single.style.display = 'flex';
+    dieSingle.innerHTML = '';
+    const el = createDieHTML('d20', false);
+    el.style.width = '80px'; el.style.height = '86px';
+    // For d20 use hexagon clip
+    el.style.clipPath = 'polygon(50% 0%, 95% 25%, 95% 75%, 50% 100%, 5% 75%, 5% 25%)';
+    dieSingle.appendChild(el);
+    document.getElementById('diceTargetShow').textContent = 'D20 · 自由检定';
+  } else {
+    dual.style.display = 'none';
+    single.style.display = 'flex';
+    dieSingle.innerHTML = '';
+    const el = createDieHTML('d6', false);
+    el.style.width = '80px'; el.style.height = '80px';
+    el.style.borderRadius = '10px';
+    dieSingle.appendChild(el);
+    document.getElementById('diceTargetShow').textContent = 'D6 · 自由检定';
+  }
+
+  document.getElementById('diceResult').classList.remove('show');
+  updateShakeMeter(0);
+  document.getElementById('diceHint').textContent = '👆 按住骰子来回拖动 · 摇动后松手';
+  document.getElementById('shakeRing').classList.remove('active');
+}
+
+// Shake animation loop — makes dice vibrate/shake during drag
+function shakeLoop() {
+  if (isGrabbed && shakeLevel > 0) {
+    const intensity = shakeLevel / 5;
+    const speed = 0.015 + intensity * 0.025;
+    const amp = 1 + intensity * 4;
+    const rotAmp = 1 + intensity * 5;
+
+    if (diceType === 'd100') {
+      // Two dice shaking
+      const t = document.querySelector('#dieTens .die-d10');
+      const o = document.querySelector('#dieOnes .die-d10');
+      const tOff = Math.sin(Date.now() * speed) * amp;
+      const tRot = Math.sin(Date.now() * speed * 0.7) * rotAmp;
+      const oOff = Math.cos(Date.now() * speed * 0.85) * amp;
+      const oRot = Math.cos(Date.now() * speed * 0.6) * rotAmp;
+      if (t) t.style.transform = `translateY(${tOff}px) rotate(${tRot}deg)`;
+      if (o) o.style.transform = `translateY(${oOff}px) rotate(${oRot}deg)`;
+    } else {
+      const el = document.querySelector('#dieSingle > div');
+      if (el) {
+        const off = Math.sin(Date.now() * speed) * amp;
+        const rot = Math.sin(Date.now() * speed * 0.8) * rotAmp;
+        el.style.transform = `translateY(${off}px) rotate(${rot}deg)`;
+      }
+    }
+
+    // Update glow
+    const els = document.querySelectorAll('.die-d10, .die-d6, .die-d20');
+    const glow = 0.08 + intensity * 0.35;
+    els.forEach(e => {
+      e.style.boxShadow = `0 4px 20px rgba(184,151,106,${glow}), 0 0 ${30+intensity*40}px rgba(184,151,106,${glow*0.4}), inset 0 1px 0 rgba(255,255,255,0.3)`;
+    });
+  }
+  animFrameId = requestAnimationFrame(shakeLoop);
+}
+
+// Touch/mouse handlers
+function getPos(e) {
+  if (e.touches) return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  return { x: e.clientX, y: e.clientY };
+}
+
+function onGrab(e) {
+  if (resultPending) return;
+  e.preventDefault();
+  const pos = getPos(e);
+  grabX = pos.x; grabY = pos.y;
+  isGrabbed = true;
+  lastMoveTime = Date.now();
+  directionChanges = 0; lastDirX = 0; lastDirY = 0;
+
+  // Mark dice as grabbed
+  document.querySelectorAll('.die-d10, .die-d6, .die-d20').forEach(el => el.classList.add('grabbed'));
+  document.getElementById('diceHint').textContent = '💪 来回拖动！用力摇！';
+}
+
+function onMove(e) {
+  if (!isGrabbed) return;
+  e.preventDefault();
+  const pos = getPos(e);
+  const now = Date.now();
+  const dx = pos.x - grabX;
+  const dy = pos.y - grabY;
+
+  // Track position
+  baseX += dx * 0.3; baseY += dy * 0.3;
+  baseX = Math.max(-100, Math.min(100, baseX));
+  baseY = Math.max(-100, Math.min(100, baseY));
+
+  // Detect shake
+  const dirX = Math.sign(dx);
+  const dirY = Math.sign(dy);
+  if (now - lastMoveTime > 25) {
+    if (lastDirX !== 0 && dirX !== lastDirX) directionChanges++;
+    if (lastDirY !== 0 && dirY !== lastDirY) directionChanges++;
+    lastDirX = dirX; lastDirY = dirY;
+    lastMoveTime = now;
+  }
+
+  shakeLevel = Math.min(5, Math.floor(directionChanges / 2.5));
+  updateShakeMeter(shakeLevel);
+
+  // Move entire container
+  if (diceType === 'd100') {
+    document.getElementById('diceContainerDual').style.transform = `translate(${baseX}px, ${baseY}px)`;
+  } else {
+    document.getElementById('diceContainerSingle').style.transform = `translate(${baseX}px, ${baseY}px)`;
+  }
+
+  // Show ring at higher shake
+  const ring = document.getElementById('shakeRing');
+  if (shakeLevel >= 2) ring.classList.add('active');
+  else ring.classList.remove('active');
+
+  // Hint
+  if (shakeLevel >= 4) document.getElementById('diceHint').textContent = '🔥 松手！投出！';
+  else if (shakeLevel >= 2) document.getElementById('diceHint').textContent = '⚡ 再用力一点……';
+
+  grabX = pos.x; grabY = pos.y;
+}
+
+function onRelease(e) {
+  if (!isGrabbed) return;
+  isGrabbed = false;
+  document.querySelectorAll('.die-d10, .die-d6, .die-d20').forEach(el => el.classList.remove('grabbed'));
+  document.getElementById('shakeRing').classList.remove('active');
+  if (shakeLevel < 1) {
+    // Too little shake - still throw but low power
+    throwDice(1);
+  } else {
+    throwDice(shakeLevel);
+  }
+}
+
+function throwDice(power) {
+  document.getElementById('diceHint').textContent = '🎲 骰子飞出去了……';
+  const throwAngle = Math.atan2(baseY, baseX) + Math.PI + (Math.random()-0.5)*0.5;
+  const dist = 60 + power * 25;
+  const tX = Math.cos(throwAngle) * dist;
+  const tY = Math.sin(throwAngle) * dist;
+  const spin = 360 * (2 + power) + (Math.random()-0.5)*360;
+
+  // Generate results
+  let tensVal, onesVal, singleVal;
+  if (diceType === 'd100') {
+    tensVal = Math.floor(Math.random()*10);
+    onesVal = Math.floor(Math.random()*10);
+    lastTens = tensVal; lastOnes = onesVal;
+    lastResult = tensVal * 10 + onesVal;
+    if (lastResult === 0) lastResult = 100; // 00+0 = 100 in CoC
+  } else if (diceType === 'd20') {
+    singleVal = Math.floor(Math.random()*20)+1;
+    lastResult = singleVal;
+  } else {
+    singleVal = Math.floor(Math.random()*6)+1;
+    lastResult = singleVal;
+  }
+
+  resultPending = true;
+  const dur = 500 + power * 120;
+
+  // Throw animation
+  if (diceType === 'd100') {
+    const container = document.getElementById('diceContainerDual');
+    container.style.transition = `transform ${dur}ms cubic-bezier(0.1,0.7,0.3,1)`;
+    container.style.transform = `translate(${tX}px, ${tY}px)`;
+
+    // Flash numbers
+    const tEl = document.querySelector('#dieTens .die-d10');
+    const oEl = document.querySelector('#dieOnes .die-d10');
+    const tensFaces = ['00','10','20','30','40','50','60','70','80','90'];
+    const onesFaces = ['0','1','2','3','4','5','6','7','8','9'];
+    const flashInterval = setInterval(() => {
+      if (tEl) tEl.textContent = tensFaces[Math.floor(Math.random()*10)];
+      if (oEl) oEl.textContent = onesFaces[Math.floor(Math.random()*10)];
+    }, 70);
+
+    setTimeout(() => {
+      clearInterval(flashInterval);
+      if (tEl) tEl.textContent = tensFaces[tensVal];
+      if (oEl) oEl.textContent = onesFaces[onesVal];
+      showDiceResult(lastResult);
+      setTimeout(() => {
+        container.style.transition = 'all 0.3s ease';
+        container.style.transform = 'translate(0, 0)';
+        setTimeout(() => container.style.transition = '', 300);
+      }, 400);
+    }, dur);
+  } else {
+    const container = document.getElementById('diceContainerSingle');
+    container.style.transition = `transform ${dur}ms cubic-bezier(0.1,0.7,0.3,1)`;
+    container.style.transform = `translate(${tX}px, ${tY}px) rotate(${spin}deg)`;
+
+    const el = document.querySelector('#dieSingle > div');
+    const flashInterval = setInterval(() => {
+      if (el) {
+        if (diceType === 'd20') el.textContent = Math.floor(Math.random()*20)+1;
+        else el.textContent = Math.floor(Math.random()*6)+1;
+      }
+    }, 70);
+
+    setTimeout(() => {
+      clearInterval(flashInterval);
+      if (el) el.textContent = singleVal;
+      showDiceResult(lastResult);
+      setTimeout(() => {
+        container.style.transition = 'all 0.3s ease';
+        container.style.transform = 'translate(0, 0) rotate(0deg)';
+        setTimeout(() => container.style.transition = '', 300);
+      }, 400);
+    }, dur);
+  }
+
+  // Stop shake animation briefly
+  if (animFrameId) { cancelAnimationFrame(animFrameId); animFrameId = null; }
+}
+
+function showDiceResult(result) {
+  const overlay = document.getElementById('diceResult');
+  const showDual = document.getElementById('resultDual');
+  const showSingle = document.getElementById('resultSingle');
+  const verdictEl = document.getElementById('resultVerdict');
+  const detailEl = document.getElementById('resultDetail');
+
+  if (diceType === 'd100') {
+    showDual.style.display = 'block';
+    showSingle.style.display = 'none';
+    document.getElementById('resDieTens').textContent = lastTens * 10;
+    document.getElementById('resDieOnes').textContent = lastOnes;
+    document.getElementById('resTotal').textContent = result;
+    document.getElementById('resTotal').className = 'big-num';
+
+    const skillVal = 65;
+    let verdict, vClass;
+    if (result === 1) { verdict = '大成功！'; vClass = 'crit'; document.getElementById('resTotal').classList.add('crit'); }
+    else if (result === 100) { verdict = '大失败！'; vClass = 'fumble'; document.getElementById('resTotal').classList.add('fumble'); }
+    else if (result <= skillVal/5) { verdict = '极限成功'; vClass = 'crit'; document.getElementById('resTotal').classList.add('crit'); }
+    else if (result <= skillVal/2) { verdict = '困难成功'; vClass = 'success'; }
+    else if (result <= skillVal) { verdict = '成功'; vClass = 'success'; }
+    else { verdict = '失败'; vClass = 'fail'; }
+    verdictEl.textContent = verdict;
+    verdictEl.className = `verdict ${vClass}`;
+    detailEl.textContent = `侦察 65% · ${lastTens*10} + ${lastOnes} = ${result} · 需求 ≤${skillVal}`;
+  } else {
+    showDual.style.display = 'none';
+    showSingle.style.display = 'block';
+    document.getElementById('resSingleNum').textContent = result;
+    document.getElementById('resSingleNum').className = 'big-num';
+    verdictEl.textContent = `掷出 ${result}`;
+    verdictEl.className = 'verdict success';
+    detailEl.textContent = `${diceType.toUpperCase()} · 自由检定`;
+  }
+
+  overlay.classList.add('show');
+  document.getElementById('diceHint').textContent = '✅ 点击确认结果发送到聊天';
+}
+
+function closeDiceResult() {
+  document.getElementById('diceResult').classList.remove('show');
+  resultPending = false;
+  // Restart shake loop
+  if (!animFrameId) shakeLoop();
+}
+
+function confirmDiceResult() {
+  if (lastResult === null) return;
+  const msgs = document.getElementById('chatMsgs');
+  const div = document.createElement('div'); div.className = 'msg self';
+  const r = lastResult;
+  const s = r <= 65 ? '成功' : '失败';
+  const c = r <= 65 ? 'var(--mold)' : 'var(--rust)';
+
+  if (diceType === 'd100') {
+    div.innerHTML = `<div class="msg-avatar" style="background:#eef6ee;">🔍</div><div class="msg-body"><div class="msg-sender self-name">杰克·布朗 · 掷骰</div><div class="msg-bubble"><span class="mono" style="font-size:13px;color:var(--text-dim);">${String(lastTens*10).padStart(2,'0')} + ${lastOnes}</span><br><span class="mono" style="font-size:22px;font-weight:700;">${String(r).padStart(2,'0')}</span><span class="mono" style="color:var(--text-dim);"> / 65</span><span style="color:${c};font-weight:600;"> ${s}</span></div><div class="msg-time">${new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'})}</div></div>`;
+  } else {
+    div.innerHTML = `<div class="msg-avatar" style="background:#eef6ee;">🔍</div><div class="msg-body"><div class="msg-sender self-name">杰克·布朗 · ${diceType.toUpperCase()}</div><div class="msg-bubble"><span class="mono" style="font-size:22px;font-weight:700;">${r}</span></div><div class="msg-time">${new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'})}</div></div>`;
+  }
+
+  msgs.insertBefore(div, msgs.lastElementChild);
+  msgs.scrollTop = msgs.scrollHeight;
+  closeDice();
+}
+
+function updateShakeMeter(level) {
+  for (let i = 0; i < 5; i++) {
+    const seg = document.getElementById('sm'+i);
+    seg.className = 'bar-seg';
+    if (i < level) seg.classList.add('filled', i >= 3 ? 'strong' : 'filled');
+  }
+}
+
+// ===== EVENTS =====
+const dt = document.getElementById('diceTable');
+dt.addEventListener('mousedown', onGrab);
+dt.addEventListener('mousemove', onMove);
+dt.addEventListener('mouseup', onRelease);
+dt.addEventListener('mouseleave', onRelease);
+dt.addEventListener('touchstart', onGrab, { passive: false });
+dt.addEventListener('touchmove', onMove, { passive: false });
+dt.addEventListener('touchend', onRelease, { passive: false });
+
+// ===== PANELS =====
+function openPanel(name) {
+  document.querySelectorAll('.panel-overlay').forEach(p=>p.classList.remove('open'));
+  document.getElementById('panelBackdrop').classList.add('show');
+  const map = { sheet:'Sheet', skills:'Skills', map:'Map', notes:'Notes' };
+  document.getElementById('panel'+map[name]).classList.add('open');
+}
+function closePanel() {
+  document.querySelectorAll('.panel-overlay').forEach(p=>p.classList.remove('open'));
+  document.getElementById('panelBackdrop').classList.remove('show');
+}
+function addNoteTag() {
+  const ta=document.getElementById('noteContent');
+  ta.value+='\n\n[🔍 新线索 '+new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'})+' ]\n'; ta.focus();
+}
+function saveNote() { alert('笔记已保存 (本地)'); }
+
+// ===== INIT =====
+if (typeof lucide !== 'undefined') lucide.createIcons();
+document.querySelector('.chat-input')?.addEventListener('keydown', function(e) {
+  if ((e.metaKey||e.ctrlKey)&&e.key==='Enter') {
+    const t=this.value.trim();if(!t)return;
+    const m=document.getElementById('chatMsgs'),d=document.createElement('div');d.className='msg self';
+    d.innerHTML='<div class="msg-avatar" style="background:#eef6ee;">🔍</div><div class="msg-body"><div class="msg-sender self-name">杰克·布朗</div><div class="msg-bubble">'+t+'</div><div class="msg-time">'+new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'})+'</div></div>';
+    m.insertBefore(d,m.lastElementChild);m.scrollTop=m.scrollHeight;this.value='';
+  }
+});
+document.querySelector('.send-btn')?.addEventListener('click',function(){const ev=new KeyboardEvent('keydown',{metaKey:true,key:'Enter'});document.querySelector('.chat-input').dispatchEvent(ev);});
+</script>
+</body>
+</html>

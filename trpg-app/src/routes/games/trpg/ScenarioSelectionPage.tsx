@@ -18,6 +18,8 @@ export default function ScenarioSelectionPage() {
   const scenarios = getScenariosBySystem(systemId || '')
 
   const setScene = useGameStore((s) => s.setScene)
+  const setGame = useGameStore((s) => s.setGame)
+  const setReturnFromGameSelect = useGameStore((s) => s.setReturnFromGameSelect)
 
   const colors = SYSTEM_COLORS[systemId || '']
   const systemName = colors?.name || '未知系统'
@@ -25,7 +27,9 @@ export default function ScenarioSelectionPage() {
 
   const handleSelect = (scenario: Scenario) => {
     setScene(scenario.id)
-    navigate('/story')
+    setGame(gameId || '', systemId || '')
+    setReturnFromGameSelect(false)
+    navigate('/create')
   }
 
   return (

@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { QrCode, Plus, BookOpen } from 'lucide-react'
+import { Hash, Plus, BookOpen } from 'lucide-react'
 
 export default function LoginPage() {
   const navigate = useNavigate()
@@ -35,17 +35,17 @@ export default function LoginPage() {
       <div className="px-5 flex flex-col gap-2.5">
         <button
           className="flex items-center justify-center gap-2 px-6 py-3.5 w-full rounded-sm text-sm font-semibold cursor-pointer transition-all duration-150 border-none font-sans active:scale-[0.97] bg-brass text-white active:bg-brass-dark"
-          onClick={() => navigate('/games')}
+          onClick={() => navigate('/join')}
         >
-          <QrCode className="w-[18px] h-[18px]" />
-          扫码加入房间
+          <Hash className="w-[18px] h-[18px]" />
+          加入房间
         </button>
         <button
           className="flex items-center justify-center gap-2 px-6 py-3.5 w-full rounded-sm text-sm font-semibold cursor-pointer transition-all duration-150 border font-sans active:scale-[0.97] bg-card text-text-body border-border-mid active:bg-panel"
-          onClick={() => navigate('/games')}
+          onClick={() => navigate('/create')}
         >
           <Plus className="w-[18px] h-[18px]" />
-          创建新房间
+          创建房间
         </button>
         <button
           className="flex items-center justify-center gap-2 px-6 py-3.5 w-full rounded-sm text-sm font-semibold cursor-pointer transition-all duration-150 border font-sans active:scale-[0.97] bg-transparent text-brass-dark border-brass"

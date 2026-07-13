@@ -4,6 +4,7 @@ import { ArrowLeft, Plus, Minus, Search, Check, Shield, Heart, Brain, Zap, Eye, 
 import { ALL_OCCUPATIONS, OCCUPATION_GROUPS, getOccupationById } from '@/data/occupations'
 import { ALL_SKILLS, getSkillById, calculateBaseValue } from '@/data/skills'
 import { ATTRIBUTE_LABELS, calculateOccupationSkillPoints, calculateInterestSkillPoints, deriveStats, type Attributes, type InvestigatorInfo } from '@/data/character-model'
+import { useCharacterStore } from '@/stores/character-store'
 import type { OccupationDefinition, SkillDefinition } from '@/data/types'
 
 const ATTR_KEYS = ['str', 'con', 'pow', 'dex', 'app', 'siz', 'int', 'edu'] as const
@@ -161,10 +162,14 @@ export default function CharacterPage() {
   }
 
   const handleAttrChange = (key: keyof Attributes, delta: number) => {
-    setAttr(prev => ({
-      ...prev,
-      [key]: Math.max(15, Math.min(99, prev[key] + delta)),
-    }))
+    setAttr(prev => {
+      const newVal = Math.max(10, Math.min(90, prev[key] + delta))
+      if (delta > 0) {
+        const totalOthers = Object.entries(prev).filter(([k]) => k !== key).reduce((s, [, v]) => s + v, 0)
+        if (totalOthers + newVal > 480) return prev
+      }
+      return { ...prev, [key]: newVal }
+    })
   }
 
   const steps = [
@@ -205,13 +210,15 @@ export default function CharacterPage() {
             <div className="space-y-3">
               <input value={info.name} onChange={e => setInfo(i => ({ ...i, name: e.target.value }))}
                 placeholder="角色姓名" className="w-full px-3.5 py-2.5 rounded-[6px] bg-input border border-border-light text-text-primary text-[15px] outline-none focus:border-brass" />
-              <input value={info.playerName} onChange={e => setInfo(i => ({ ...i, playerName: e.target.value }))}
-                placeholder="玩家昵称" className="w-full px-3.5 py-2.5 rounded-[6px] bg-input border border-border-light text-text-primary text-[15px] outline-none focus:border-brass" />
               <div className="grid grid-cols-2 gap-2.5">
                 <div>
                   <label className="text-[11px] font-medium text-text-muted mb-1 block">年龄</label>
-                  <input value={info.age} onChange={e => setInfo(i => ({ ...i, age: e.target.value }))}
-                    className="w-full px-3.5 py-2.5 rounded-[6px] bg-input border border-border-light text-text-primary text-[15px] outline-none focus:border-brass" />
+                  <select value={info.age} onChange={e => setInfo(i => ({ ...i, age: e.target.value }))}
+                    className="w-full px-3.5 py-2.5 rounded-[6px] bg-input border border-border-light text-text-primary text-[15px] outline-none focus:border-brass">
+                    {Array.from({ length: 91 }, (_, i) => i + 10).map(a => (
+                      <option key={a} value={a}>{a}</option>
+                    ))}
+                  </select>
                 </div>
                 <div>
                   <label className="text-[11px] font-medium text-text-muted mb-1 block">性别</label>
@@ -321,7 +328,19 @@ export default function CharacterPage() {
         <div className="px-5 pb-20 animate-screen-in">
           <div className="bg-card border border-border-light rounded-md p-[18px]">
             <h4 className="text-[12px] font-semibold text-brass-dark uppercase tracking-[0.08em] mb-1.5">属性分配</h4>
-            <p className="text-[11px] text-text-muted mb-3.5">点击 +/- 调整属性值（范围 15-99，每次 ±5）</p>
+            <p className="text-[11px] text-text-muted mb-2">点击 +/- 调整属性值（范围 10-90，每次 ±5）</p>
+            <div className="bg-panel rounded-md px-3.5 py-2 mb-3 flex items-center gap-3">
+              <div className="flex-1">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[11px] font-medium text-text-muted">总点数</span>
+                  <span className="text-[12px] font-bold font-mono text-text-primary">{Object.values(attr).reduce((a, b) => a + b, 0)}<span className="text-text-dim font-normal">/480</span></span>
+                </div>
+                <div className="h-1.5 rounded-full bg-border-light overflow-hidden">
+                  <div className="h-full rounded-full bg-brass transition-all duration-300" style={{ width: `${Math.min(100, (Object.values(attr).reduce((a, b) => a + b, 0) / 480) * 100)}%` }} />
+                </div>
+              </div>
+              <span className="text-[10px] text-text-dim">{480 - Object.values(attr).reduce((a, b) => a + b, 0)} 点剩余</span>
+            </div>
             <div className="grid grid-cols-1 gap-2">
               {ATTR_KEYS.map(key => {
                 const label = ATTRIBUTE_LABELS[key]
@@ -478,57 +497,7 @@ export default function CharacterPage() {
               className="w-full px-3.5 py-2.5 rounded-[6px] bg-input border border-border-light text-text-primary text-[14px] outline-none focus:border-brass resize-none" />
           </div>
 
-          {/* Summary Card */}
-          <div className="bg-card border border-border-light rounded-md p-[18px]">
-            <h4 className="text-[12px] font-semibold text-brass-dark uppercase tracking-[0.08em] mb-3.5">角色概览</h4>
-            <div className="space-y-2.5 text-sm">
-              <div className="flex items-center gap-2.5">
-                <span className="text-[28px]">{selectedOcc?.icon || '❓'}</span>
-                <div>
-                  <div className="font-bold text-text-primary text-[17px]">{info.name || '未命名调查员'}</div>
-                  <div className="text-xs text-text-muted">{selectedOcc?.name || '未选择职业'} · {info.age}岁 · {info.gender}</div>
-                </div>
-              </div>
-              <div className="h-px bg-border-light" />
-              <div className="flex flex-wrap gap-x-4 gap-y-1.5 font-mono text-[12px] text-text-muted">
-                {ATTR_KEYS.map(key => (
-                  <span key={key}>{ATTRIBUTE_LABELS[key].short} <span className="font-bold text-text-primary">{attr[key]}</span></span>
-                ))}
-              </div>
-              <div className="flex gap-2">
-                {[
-                  { label: 'HP', value: `${derived.hp}`, color: 'text-mold' },
-                  { label: 'SAN', value: `${derived.san}`, color: 'text-[#7050a0]' },
-                  { label: 'MP', value: `${derived.mp}`, color: 'text-[#4a7098]' },
-                  { label: 'DB', value: derived.db, color: 'text-text-muted' },
-                  { label: 'MOV', value: `${derived.move}`, color: 'text-text-muted' },
-                ].map(pill => (
-                  <span key={pill.label} className={`text-[11px] ${pill.color} font-mono bg-panel px-2.5 py-1 rounded-full`}>
-                    {pill.label} {pill.value}
-                  </span>
-                ))}
-              </div>
-              <div className="h-px bg-border-light" />
-              <div>
-                <div className="text-[11px] text-text-muted mb-1.5">已分配技能</div>
-                <div className="flex flex-wrap gap-x-3 gap-y-1">
-                  {Object.entries(skillAlloc).filter(([, v]) => v > 0).map(([id, pts]) => {
-                    const skill = getSkillById(id)
-                    if (!skill) return null
-                    const base = calculateBaseValue(skill, attr)
-                    return (
-                      <span key={id} className="text-[11px] font-mono bg-panel px-2 py-0.5 rounded-full text-text-muted">
-                        {skill.name} {base + pts}%
-                      </span>
-                    )
-                  })}
-                  {Object.keys(skillAlloc).filter(k => (skillAlloc[k] || 0) > 0).length === 0 && (
-                    <span className="text-[11px] text-text-dim">暂无技能分配</span>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
+
         </div>
       )}
 
@@ -608,7 +577,16 @@ export default function CharacterPage() {
           </button>
           <button onClick={() => {
             if (step < 3) setStep(s => s + 1)
-            else navigate('/lobby')
+            else {
+              useCharacterStore.getState().setCharacter({
+                info: { ...info, playerName: info.playerName || info.name },
+                attr: { ...attr },
+                skillAlloc: { ...skillAlloc },
+                equipment, background, notes,
+                derived: { hp: derived.hp, san: derived.san, mp: derived.mp, db: derived.db, move: derived.move },
+              })
+              navigate('/lobby')
+            }
           }}
             className="flex-1 flex items-center justify-center gap-1.5 px-5 py-3 rounded-sm text-sm font-semibold transition-all bg-brass text-white active:bg-brass-dark active:scale-[0.97]">
             {step === 3 ? '完成创建' : '下一步'} →

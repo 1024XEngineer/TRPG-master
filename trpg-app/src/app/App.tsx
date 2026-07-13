@@ -3,6 +3,8 @@ import { lazy, Suspense } from 'react'
 import PhoneLayout from '@/shared/layouts/PhoneLayout'
 
 const LoginPage = lazy(() => import('@/routes/login/LoginPage'))
+const JoinRoomPage = lazy(() => import('@/routes/join/JoinRoomPage'))
+const CreateRoomPage = lazy(() => import('@/routes/create/CreateRoomPage'))
 const GameSelectionPage = lazy(() => import('@/routes/games/GameSelectionPage'))
 const SystemSelectionPage = lazy(() => import('@/routes/games/trpg/SystemSelectionPage'))
 const ScenarioSelectionPage = lazy(() => import('@/routes/games/trpg/ScenarioSelectionPage'))
@@ -26,6 +28,8 @@ function App() {
         <Routes>
           <Route path="/" element={<Navigate to="/login" replace />} />
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/join" element={<JoinRoomPage />} />
+          <Route path="/create" element={<CreateRoomPage />} />
           <Route path="/games" element={<GameSelectionPage />} />
           <Route path="/games/:gameId" element={<SystemSelectionPage />} />
           <Route path="/games/:gameId/scenarios/:systemId" element={<ScenarioSelectionPage />} />

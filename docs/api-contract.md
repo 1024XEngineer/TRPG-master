@@ -1,6 +1,6 @@
 # TRPG-master API 契约文档
 
-> 反向分析自前端项目 `trpg-app`，版本 v0.0.0
+> 反向分析自前端项目 `trpg-app`（LMH-1-Folder 分支，2026-07-13 更新）
 > 当前状态：Mock Mode（`VITE_MOCK_API=true`）
 
 ---
@@ -686,7 +686,29 @@ interface Attributes {
 | MOV (移动力) | 基于 STR+SIZ+DEX 计算 | - |
 | LUCK (幸运) | `3D6 * 5` | 15-90 |
 
-### 9.4 技能与职业
+### 9.4 完整角色卡
+
+```typescript
+interface CompletedCharacter {
+  info: InvestigatorInfo        // 基本信息
+  attr: Attributes              // 属性值
+  skillAlloc: Record<string, number>  // 技能分配 { "spot-hidden": 65, ... }
+  equipment: string             // 装备描述
+  background: string            // 背景故事
+  notes: string                 // 笔记
+  derived: {
+    hp: number                  // 生命值
+    san: number                 // 理智值
+    mp: number                  // 魔法值
+    db: string                  // 伤害加值
+    move: number                // 移动力
+  }
+}
+```
+
+由 `useCharacterStore` 管理，角色创建完成后存入。当前纯前端持有，尚未对接 `POST /character/save` 接口。
+
+### 9.5 技能与职业
 
 ```typescript
 interface SkillDefinition {

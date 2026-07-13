@@ -21,6 +21,7 @@ status: draft
    - **主链口**（Intent → Rules）：一切触碰 `entity_states`、D 类值、检定、战斗的变更；
    - **附带口**（Narrator 附带 ops，白名单限门 I 类）：equipment 来源字符串追加、`locked` 翻转等"拒绝无意义"的记账。
    两个口的产物都经引擎校验后才落 Event。
+4. **Agent 是被编排者，不是编排者。** 控制流（先调谁、走哪条分支、何时挂起）由确定性 Orchestrator 驱动，Agent 只在流程图的预留槽位里填内容。出场资格判据：**只有输入/输出是自然语言、或存在无法枚举的模糊判断的环节，才是 Agent 的位置**——其余一律是代码（详见 §5.2）。
 
 ---
 
@@ -35,7 +36,7 @@ status: draft
 | ModelRole | `intent` |
 | 模型档位 | 便宜小模型（每回合必调用，成本敏感） |
 | 触发 | 每次 `action.submit`（自由文本路径；快捷操作的结构化行动**跳过本 Agent** 直达 Rules） |
-| 输入 | `PlayerView`（类型级，拿不到 GameState）+ 玩家 utterance |
+| 输入 | `PlayerView`（类型级，拿不到 GameState）——一份**紧凑的结构化状态**：当前场景实体清单、角色技能表、equipment、可见 entity_states、pending_check；+ 滚动摘要（与 Narrator 共享同一份）+ 最近 2-3 回合 + 玩家 utterance |
 | 输出 | 结构化 Intent，含：行动类型与目标、**op 提议**（主链口）、**检定候选技能列表提议**、软判据枚举（如 `roleplay_tier ∈ {none, reasonable, excellent}`） |
 | 隔离约束 | 入参只收 `PlayerView`（通信铁律一）；输出中的变量/路径引用必须在 `VariableDef` / `entity_states` 键空间内，越界即打回 |
 | 降级 | 解析失败 / `unknown` → 脱本导回状态机（`unknownStreak` 分级，状态机本身由 Rules 维护，Agent 只按级别出话术） |
@@ -43,6 +44,7 @@ status: draft
 
 **职责边界备注**：
 
+- 本 Agent 需要背景，但需要的是**符号化的状态背景**，不是 Narrator 那套文学性演绎背景（人格/场景原文/完整旁白史）。指代消解靠结构化状态而非重读对话："画后面找到的那把"与 equipment 来源字符串**直接匹配**（[[数据模型设计]] §6.4 来源约定在此兑现）；"再试一次"靠最近 2-3 回合；长程指代靠滚动摘要。这就是"状态机器可读"设计的回报：理解局面是查表，不是重读小说。
 - 软判据求值（"表述精彩吗"）归本 Agent——输出枚举，引擎读枚举查难度表。**枚举硬、判据软**，不允许自造第四档。
 - 检定候选技能是**提议**：引擎负责与角色实际技能表求交集；若行动命中模组 `Checkpoint`，候选以模组定义（`@交涉` 类别展开）为准，本 Agent 的提议仅在自由行动时生效。
 - **难度、目标值、成功等级判定不接受本 Agent 输出**——这些是引擎的。
@@ -90,77 +92,39 @@ status: draft
 
 ---
 
-## 三、一回合的完整流程图（含检定分支）
+## 三、一次对话的数据流转
 
-> 🟠 橙色 = Agent（LLM）　🟦 蓝色 = 确定性系统　⬜ 白色 = 客户端/玩家
+> 🟠 = Agent（全链仅两处）　🟦 = 确定性系统　⬜ = 玩家/客户端
 >
-> 检定流程为本轮定稿的**统一时机**版：无预掷；`roll_mode='prompt'` 的检定弹窗两段式，`roll_mode='auto'`（含全部 `hidden=true`）由引擎静默掷。
+> 重点是**数据形态的三次转换**：自然语言 → 结构化提议 → 既成事实 → 自然语言。Agent 恰好站在语言与符号互相翻译的两个界面上，中间的纯符号变换全是代码。
 
 ```mermaid
-sequenceDiagram
-    actor P as ⬜ 玩家
-    participant GW as 🟦 Gateway
-    participant O as 🟦 Orchestrator
-    participant STT as 🟦 STT适配器
-    participant V as 🟦 ViewProjector
-    participant I as 🟠 Intent Agent
-    participant R as 🟦 Rules引擎
-    participant C as 🟦 CheckResolver
-    participant N as 🟠 Narrator Agent
-
-    P->>GW: 语音/文本："我装作若无其事跟守卫套话"
-    GW->>STT: (语音时) 转文本
-    GW->>O: submitAction(utterance)
-    Note over O: 快捷操作(结构化行动)在此分流，<br/>跳过 Intent 直达 Rules
-    O->>V: project(state, 玩家) → PlayerView
-    O->>I: 【Agent①意图解析】parseIntent(view, utterance)
-    I-->>O: Intent{行动, op提议, 候选技能["话术","魅惑","说服"], roleplay_tier}
-    O->>R: resolveAction(state, intent)
-
-    alt 需要检定 且 roll_mode='prompt'
-        R->>R: 候选 ∩ 角色技能表；命中Checkpoint则以模组定义为准<br/>难度=查表或读roleplay_tier枚举
-        R-->>O: 挂起 pending_check{options, difficulty}
-        O->>GW: check.request{options,...} 私密下发
-        GW-->>P: 弹出骰子界面(候选技能+成功线)
-        Note over O: Orchestrator 保持挂起态<br/>(handleTurn = 可挂起状态机)
-        P->>GW: 选技能，点"投掷"(仅是一个op)
-        GW->>O: check.submit{skill}
-        O->>C: roll() —— 🔴 随机数服务端产生
-        C-->>O: raw
-        O->>GW: 回显raw → 客户端播骰子动画
-        O->>R: 继续流水线：on_check_resolve(C类反转在此)
-    else 无检定 / roll_mode='auto'(含hidden暗骰)
-        R->>C: 引擎静默掷(hidden不弹窗、不下发结果)
-        R->>R: 跑hook流水线(B类on_scene_enter等)
-    end
-
-    R->>R: 校验op(refuse_ops/D类不变式)→append Event→更新物化视图
-    R-->>O: ActionResult(既成事实)
-    O->>V: 重投视角 project(state', 各玩家)
-    O->>N: 【Agent②叙事】narrate(人格, view', result, utterance)
-    N-->>O: 旁白(流式) + 门I类附带ops(白名单)
-    O->>R: 校验并执行门I ops(equipment字符串等)
-    O->>GW: 场景广播旁白 + 逐人私密下发view.private
-    GW-->>P: 旁白 + 各自私密视角
+flowchart LR
+    P1["⬜ 玩家<br/>自然语言"] --> I["🟠 Intent Agent<br/>结构化提议"]
+    I --> E["🟦 引擎<br/>裁决 · 掷骰 · hook<br/>产出既成事实"]
+    E --> N["🟠 Narrator Agent<br/>旁白（流式）"]
+    N --> P2["⬜ 玩家<br/>旁白 + 私密视角"]
+    E -.弹窗挂起 / 骰值回填.-> D["⬜ 骰子界面<br/>随机数仍在服务端"]
+    D -.-> E
+    style I fill:#FAEEDA,stroke:#BA7517
+    style N fill:#FAEEDA,stroke:#BA7517
+    style E fill:#E6F1FB,stroke:#185FA5
 ```
 
-**"哪部分是什么 Agent"——一句话版**：整条链上只有两处橙色。**理解玩家在说什么**（含候选技能提议、语气档位评估）是 **Intent Agent**；**把引擎算完的结果讲成故事**是 **Narrator Agent**。中间从难度计算、掷骰、hook 流水线、op 校验到事件落库，全部是确定性系统，没有任何 LLM 参与。摘要 Agent 不在主链上（异步触发），导入 Agent 不在运行时（离线管线）。
+全链由 Orchestrator 确定性驱动（分支判据全是数据，见 §5.2）。
 
-### 3.1 阶段归属对照表
+进 Intent 和进 Narrator 之前各经一次 ViewProjector 裁剪（权限唯一出口）；`hidden` 暗骰与 `roll_mode='auto'` 不走虚线分支，引擎静默掷。
 
-| 流程阶段 | 归属 | 说明 |
-|---|---|---|
-| 语音转文本 | 系统（STT 适配器） | 服务端处理，对协议不可见 |
-| 视角裁剪 | 系统（ViewProjector） | 权限唯一出口，两次调用（喂 Intent 前、喂 Narrator 前） |
-| 意图理解 / 候选技能提议 / 软判据求值 | **Intent Agent** | 输出全部是结构化提议，无执行权 |
-| 候选校验、难度确定、目标值 | 系统（Rules） | 不接受任何 LLM 输入 |
-| 骰子界面交互 | 客户端 | 点击"投掷"= 发一个 op，仪式感在客户端 |
-| 随机数产生 | 系统（CheckResolver） | **服务端权威**，带种子落 Event；客户端只播动画 |
-| 成功等级判定 / C 类反转 / B 类触发 / D 类不变式 | 系统（Rules，hook 流水线） | A/B/C/D 四类全部在此，LLM 的偏向在此被结构性纠正 |
-| 事件落库 / 物化视图 | 系统（EventLog + GameStateRepo） | 事件溯源，同一事务两写 |
-| 旁白 / NPC 对话 / 答疑 | **Narrator Agent** | 对既成事实的渲染，流式 |
-| 门 I 类记账 | Narrator 提议 + 系统校验 | 白名单见 §四 |
-| 广播与私密下发 | 系统（Gateway） | 听众按 `characters.location` 现算 |
+**每一段的归属与要点**：
+
+| 段 | 形态转换 | 归属 | 要点 |
+|---|---|---|---|
+| 玩家 → 结构化提议 | 自然语言 → 符号 | 🟠 **Intent Agent** | 理解、指代消解、候选技能提议、软判据枚举；**只有提议权，无执行权**。快捷操作（预结构化行动）跳过本段 |
+| 提议 → 既成事实 | 符号 → 符号 | 🟦 引擎（Rules / CheckResolver / EventLog） | 此段**没有自然语言、没有模糊判断**（均已被上游枚举化/设计期规则化），故无 Agent 资格；服务端出数、C 类反转、D 类不变式、事务落库全在此；瞬时、零 token |
+| 既成事实 → 旁白 | 符号 → 自然语言 | 🟠 **Narrator Agent** | 对已定结果的渲染，天然不与状态矛盾，故可安全流式；门 I 白名单附带记账（§四） |
+| 全程控制流 | — | 🟦 Orchestrator | 编排者永远是代码，Agent 是被编排者（§5.2） |
+
+摘要 Agent 在主链外异步触发，导入 Agent 完全离线，均不在本图中。
 
 ---
 
@@ -199,6 +163,25 @@ Idle → Resolving → [需弹窗检定] → AwaitingRoll(持有pending_check + 
 - `pending_check` 带 `expires_at`；超时策略是本设计引入的唯一新问题，落 `check_timeout` 事件，具体策略待产品定。
 - 回合模型（ADR-1 全局单一队列）不变——挂起的是回合内部的一步，不是让出回合。
 
+### 5.2 控制流为什么由确定性代码驱动（Agent 是被编排者）
+
+Agent 驱动控制流（agentic workflow：LLM 自己决定下一步调哪个模块、循环到自认为完成）只在**步骤序列无法预先枚举**的开放任务中才值得。一回合是**封闭流程**：project → parseIntent → resolveAction →（可能挂起等骰）→ narrate → 广播——这张图在设计期就完整，且六模组验证已证明其收敛（19 hook / 10 算子跑完未增）。**序列可枚举，就该硬编码。**
+
+流程中看似需要"判断"的分支，判据全部是数据，`if` 即走：
+
+| 分支点 | 判据 | 来源 |
+|---|---|---|
+| 需不需要检定 | Intent 输出有无检定提议 / 是否命中 Checkpoint | 上游 Agent 结构化输出 / 模组数据 |
+| 弹窗还是静默掷 | `roll_mode` + `hidden` | 模组数据 |
+| 脱本导回走到第几级 | `unknownStreak` 计数 | 引擎状态机 |
+| hook 上执行哪些规则、什么顺序 | `(hook, priority, mode)` | 导入时固化的规则数据 |
+
+即：**所有需要智能的路由决策已被前移**——设计期（模组作者与导入 Agent 固化成字段和规则）和回合上游（Intent 把模糊语言变成枚举）。这是"软判据前置、硬骨架执行"哲学在控制流上的重复。
+
+反面代价：若由 Agent 调度模块，它会概率性地跳过 `on_check_resolve`（C 类静默失效）、先广播后落 Event（事务性破）、忘记重投视角（铁律一穿）——**结构性约束被概率性执行**。控制流是全部不变式（不泄底/不污染/可回放）的最终执行者，执行者必须比被执行的约束更硬。附带 P0/P1 双损：多几次调度调用的 token 与延迟，且回放时无法复现"当时为何走了这条分支"。
+
+注意 tool-use 合并形态中 LLM 看似在"驱动"（发 tool call、收结果、继续生成）——那只是**会话形状**，不是控制权归属：哪些 tool 存在、result 何时回填、中间引擎跑哪些步、超时怎么办，全由 Orchestrator 定。LLM 只在流程图的两个预留槽位（意图参数、旁白文本）里填内容，从未获得"下一步做什么"的决定权。
+
 ---
 
 ## 六、模型路由与观测（对齐架构 §6.3/6.7/6.8）
@@ -212,13 +195,26 @@ Idle → Resolving → [需弹窗检定] → AwaitingRoll(持有pending_check + 
 
 每次调用打点 `role / provider+model / tokens / latency / 成本`，按房间汇总。换模型前对应 role 的 eval 基线必过。
 
-**物理合并选项（非默认）**：当某局配置中 `intent` 与 `narrator` 指向同一模型时，`ModelAdapter` 允许走单会话 tool-use 形态（一次会话两次生成，引擎执行夹在中间）——省连接开销、保玩家原话语气；但逻辑边界（各自的 prompt / eval / 降级 / 打点）不合并。MVP 不做。
+### 6.1 Intent 与 Narrator：逻辑必须两个角色，物理可以一次调用
+
+**不可合并的墙在 LLM 与引擎之间，不在两个 Agent 之间。** 只要引擎夹在中间（结构化输出 → 引擎执行 → 结果回填 → 继续生成），单一 tool-use 会话跑完整回合在正确性上完全成立——先裁决后叙事、写入口唯一、门 I 白名单一条不破。
+
+但**逻辑角色**（各自的 prompt / eval / 降级 / 打点 / 模型配置）必须保持两个，三条理由：
+
+1. **成本结构**。勘误：不对称**不在调用次数**——次数上意图与叙事按回合 1:1 顺序发生；不对称在**每次调用的重量与难度**：Intent 是"小模型 × 薄的符号化背景 × 短输出"（分类抽取，小模型单价约为强模型 1/10~1/30），Narrator 是"强模型 × 厚的文学背景 × 长输出"（创作）。合并到单一会话后，解析被迫按强模型计价并驮上叙事的完整上下文——一回合从"1 份贵的 + 1 份近乎免费的"变成"接近 2 份贵的"，几百回合乘上去即成本红线。延迟侧：骰子界面弹出速度取决于第一次生成的返回，小模型几百毫秒 vs 强模型 1-3 秒，且这段等待发生在任何内容出现之前，是体感最尖锐的空白（叙事慢可被流式遮住，解析慢是干等）。
+2. **Eval 分家**。ADR-6"持续换模型、不同功能不同模型"只有在 intent（客观准确率）与 narrator（rubric）各有独立基线时才安全；合并即每次换模型两个功能一起裸测。
+3. **裁判与说书人的利益卫生**。软判据（`roleplay_tier` 评级、自由行动候选提议）仍在 LLM 手里。持续对话会建立叙事惯性——陪玩家演了四十轮的说书人，评级先验会向 excellent 漂移；而 Intent 作为每次冷启动的分类器没有会话情感包袱。引擎只读枚举，枚举本身被污染它无从察觉——这是 §7.3"系统性偏向"论证在软判据上的延伸。
+
+**物理形态是配置项，两条路径都合法**：① 默认拆分（两次调用、两档模型）；② 加速路径——MVP 先用单一强模型 tool-use 形态跑通全链（工程最简），但**从第一天起按两个 ModelRole 分别打点、分开攒 eval 集**，待成本数据证明解析该降档时，拆分只是改一行配置。唯一禁止的是：因物理上合了，把 prompt / 评测 / 降级也搅成一锅——届时想拆就拆不动了。
+
+另注：本系统不存在有状态的持续会话——对话状态的权威在 EventLog，每次 Agent 调用都是从"摘要 + 最近 K 回合 + 本回合 View"重建上下文的无状态调用；唯一保持活会话的位置是检定挂起段（§五）。
 
 ---
 
 ## 七、待决事项
 
 - [ ] `check_timeout` 超时策略（产品定：默认掷 / 作废 / 催促升级）
+- [ ] Intent/Narrator 的物理形态选择（§6.1 两条路径：默认拆分 vs 单模型 tool-use 加速路径）——团队定，逻辑边界两条路径下均不合并
 - [ ] Intent 输出 schema 定稿：op 提议 + 候选技能 + 软判据枚举的完整结构（承接架构 §4.5 `parseIntent` 签名扩容）
 - [ ] 架构文档同步项：ModelRole 枚举补 `summarizer`/`importer`；§6.2 不变量改写为"Narrator 对 GameState 只读，可附带门 I 白名单 ops"；`narrate()` 入参补 utterance；Orchestrator 挂起态
 - [ ] 门 I 白名单的具体路径清单随首个模组导入实测后固化

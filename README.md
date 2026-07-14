@@ -1,53 +1,112 @@
-# TRPG-master
+<p align="center">
+  <img src="https://img.shields.io/badge/milestone-MS1-brass?style=flat-square" />
+  <img src="https://img.shields.io/badge/rules-CoC_7th-darkred?style=flat-square" />
+  <img src="https://img.shields.io/badge/frontend-React_19_|_TypeScript-61dafb?style=flat-square" />
+  <img src="https://img.shields.io/badge/backend-FastAPI_|_Python-teal?style=flat-square" />
+  <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" />
+</p>
 
-> AI 担任守秘人 · 手机端多人克苏鲁的呼唤跑团
+# 🎲 TRPG-master
 
-用大模型替代真人 KP，让 3-5 人的小团体打开手机就能跑一局 CoC。规则引擎硬编码执行 D100 检定，AI 不碰骰子。
+> **有人就能跑。** AI 担任守秘人，多人联机，打开手机就能跑一把克苏鲁的呼唤。
 
----
+TRPG-master 是一个手机端多人跑团应用。用大模型替代真人 KP（守秘人），解决跑团圈最大的痛点——**想玩，但没人愿意当主持人。**
 
-## MS1 状态
-
-**第 1-2 周 · 战略决策 + 首尾可跑版本**
-
-| 模块 | 状态 |
-|------|:--:|
-| 战略决策文档 | ✅ |
-| 产品提案 FullSpec | ✅ |
-| 窄提案 ×3（规则引擎 / AI 输出 / AI 叙事） | ✅ |
-| API 契约文档 | ✅ |
-| 前端 10 屏原型（React 19 + Vite） | ✅ |
-| 后端骨架（FastAPI + DeepSeek 集成） | ✅ |
-| 前后端联调贯通 | ✅ |
-| 路演准备 | 🚧 |
+规则引擎硬编码执行 D100 检定和 SAN 机制，保证骰子公平可验证。AI 只负责叙事和氛围——他不碰骰子。
 
 ---
 
-## 仓库导航
+## 进度
 
-| 位置 | 内容 |
-|------|------|
-| 本分支 `GJZ-1-Folder` | 产品文档、API 契约、工程规范 |
-| `LMH-1-Folder` | 前端 React 应用 |
-| `LWC-1-Folder` | 后端 FastAPI + AI 编排 |
+**MS1 / 第 1–2 周** — 方向锁定，并行开发中。
 
----
-
-## 产品文档
-
-| 文档 | 说明 |
-|------|------|
-| [战略决策 v1.0](战略决策-产品方向与范围-v1.0.md) | 动机、目标用户、竞品分析、范围边界 |
-| [产品提案 v1.0](产品提案-v1.0.md) | 关键决策、数据模型、规则引擎、AI 交互、验收标准 |
-| [API 契约](docs/api-contract.md) | 反向分析前端生成的接口规范 |
-| [规则引擎提案](docs/proposals/proposal-01-规则引擎.md) | D100 检定 / SAN 机制 |
-| [AI 输出格式提案](docs/proposals/proposal-02-AI输出格式.md) | 结构化 JSON vs 自由文本 |
-| [AI 叙事方案提案](docs/proposals/proposal-03-AI叙事方案.md) | 云端 LLM vs 本地 vs 无 AI |
+```
+产品方向 ✅ ── 战略决策文档 + 产品提案 + 三个窄提案
+原型设计 ✅ ── 纯 HTML 交互原型 + 前端 7 屏 React 应用
+架构设计 🚧 ── Schema 设计 + 四层数据模型 + 动态规则引擎
+后端开发 ⬜ ── FastAPI 骨架
+联调贯通 ⬜ ── 首尾可跑版本
+```
 
 ---
 
 ## 团队
 
-高俊周 (GJZ) · 凌铭辉 (LMH) · 李敏譞 (LMX) · 张家豪 (ZJH) · 黄女珊 (HNS) · 卢玮晨 (LWC) · 曹明鸣（导师）
+| 成员 | GitHub |
+|------|--------|
+| 高俊周 (GJZ) | [@WELT5350](https://github.com/WELT5350) |
+| 凌铭辉 (LMH) | [@LMH168](https://github.com/LMH168) |
+| 李敏譞 (LMX) | [@Ximaohu-LMX](https://github.com/Ximaohu-LMX) |
+| 张家豪 (ZJH) | [@JoshuaZ16](https://github.com/JoshuaZ16) |
+| 黄女珊 (HNS) | [@badadal](https://github.com/badadal) |
+| 卢玮晨 (LWC) | [@Lyltrum](https://github.com/Lyltrum) |
+| 曹明鸣 | [@mingmingtsao](https://github.com/mingmingtsao) |
 
-1024 XEngineer Camp · Season 6 · MIT
+---
+
+## 三个核心决策
+
+**1. 规则引擎硬编码**
+
+D100 六档检定（大成功 → 大失败）、SAN 机制、衍生属性——全部在后端代码中确定执行。AI 只建议"是否需要检定"，不碰判定的骰子。
+
+**2. AI 输出结构化 JSON**
+
+```json
+{
+  "narration": "走廊尽头的门缓缓打开...",
+  "skill_check": { "skill": "spot-hidden", "difficulty": "normal", "target": 50 },
+  "san_change": { "loss": "1d3" },
+  "private_info": { "targetPlayer": "player-2", "content": "你注意到墙上有一行血字..." },
+  "suggestions": ["调查门后的房间", "检查墙上的划痕"]
+}
+```
+
+叙事与规则解耦。AI 不能直接宣布"你成功了"——结果由引擎裁定后广播。
+
+**3. 云端 LLM 叙事**
+
+调用大模型 API 生成中文 CoC 恐怖叙事。多轮对话上下文管理（最近 6 轮 + 当前场景 + 角色状态 + 已获线索）。
+
+---
+
+## 技术栈
+
+| 层 | 技术 |
+|---|------|
+| 前端 | React 19 · TypeScript · Vite 8 · Tailwind CSS 3 · Zustand · React Router 7 |
+| 后端 | Python FastAPI（计划） |
+| AI | 云端 LLM API（待选定：DeepSeek / Claude） |
+| 数据库 | PostgreSQL（计划） |
+| PWA | vite-plugin-pwa |
+
+---
+
+## 快速开始
+
+```bash
+# 前端
+cd trpg-app
+npm install
+npm run dev        # → http://localhost:9877
+
+# Mock 模式默认开启，无需后端即可体验完整 UI 流程。
+# 对接真实后端：设置 VITE_MOCK_API=false
+```
+
+---
+
+## 路线图
+
+| 里程碑 | 时间 | 目标 |
+|--------|------|------|
+| **MS1** | 第 1–2 周 | 方向锁定 + 架构骨架 + 首尾可跑版本 |
+| **MS2** | 第 3–4 周 | MVP 深化：AI 叙事集成 + 真实后端 |
+| **MS3** | 第 5–6 周 | 功能闭环：多人在线 + 语音输入 |
+| **MS4** | 第 7–8 周 | 打磨、交付、发布 |
+
+---
+
+## 许可
+
+MIT · [1024 XEngineer Camp](https://github.com/1024XEngineer) Season 6

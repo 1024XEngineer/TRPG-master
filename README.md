@@ -1,37 +1,53 @@
-# 🦑 Arkham Case Files — AI 守秘人
+# TRPG-master
 
-AI 驱动的克苏鲁的呼唤（CoC 7th）多人跑团主持人。手机端 React Native 应用，AI 担任守秘人，玩家用手机加入房间，即开即玩。
+> AI 担任守秘人 · 手机端多人克苏鲁的呼唤跑团
 
-## 这是什么
+用大模型替代真人 KP，让 3-5 人的小团体打开手机就能跑一局 CoC。规则引擎硬编码执行 D100 检定，AI 不碰骰子。
 
-传统的 CoC 跑团需要一个真人守秘人（KP）——读规则书、准备模组、即兴叙事、执行检定。大多数想玩的人找不到 KP。
+---
 
-Arkham Case Files 用 AI 解决这个问题：玩家打开 App 进入房间，AI 自动主持游戏——推进剧情、执行 D100 检定、管理 SAN 值变化、分发私密线索。
+## MS1 状态
 
-## 技术栈
+**第 1-2 周 · 战略决策 + 首尾可跑版本**
 
-| 层 | 技术 |
-|---|------|
-| 前端 | React Native（TypeScript） |
-| 后端 | Python FastAPI |
-| AI | DeepSeek / Claude（待评估） |
-| 规则引擎 | CoC 7th，硬编码 |
+| 模块 | 状态 |
+|------|:--:|
+| 战略决策文档 | ✅ |
+| 产品提案 FullSpec | ✅ |
+| 窄提案 ×3（规则引擎 / AI 输出 / AI 叙事） | ✅ |
+| API 契约文档 | ✅ |
+| 前端 10 屏原型（React 19 + Vite） | ✅ |
+| 后端骨架（FastAPI + DeepSeek 集成） | ✅ |
+| 前后端联调贯通 | ✅ |
+| 路演准备 | 🚧 |
 
-## 开发状态
+---
 
-> **MS1（第 1-2 周）**：战略决策 + 首尾可跑版本
+## 仓库导航
 
-- [x] 战略决策文档 v1.0 + 产品提案 v1.0 + 3 份窄提案
-- [x] API 契约文档（反向分析前端生成）
-- [x] 前端 10 屏交互原型（React 19 + Vite 8，Mock 模式可用）
-- [x] 后端 FastAPI 骨架 + DeepSeek AI 叙事集成（LWC）
-- [x] 前后端联调贯通（注册→房间→角色→大厅→AI 对话）
-- [ ] MS1 路演准备
+| 位置 | 内容 |
+|------|------|
+| 本分支 `GJZ-1-Folder` | 产品文档、API 契约、工程规范 |
+| `LMH-1-Folder` | 前端 React 应用 |
+| `LWC-1-Folder` | 后端 FastAPI + AI 编排 |
+
+---
+
+## 产品文档
+
+| 文档 | 说明 |
+|------|------|
+| [战略决策 v1.0](战略决策-产品方向与范围-v1.0.md) | 动机、目标用户、竞品分析、范围边界 |
+| [产品提案 v1.0](产品提案-v1.0.md) | 关键决策、数据模型、规则引擎、AI 交互、验收标准 |
+| [API 契约](docs/api-contract.md) | 反向分析前端生成的接口规范 |
+| [规则引擎提案](docs/proposals/proposal-01-规则引擎.md) | D100 检定 / SAN 机制 |
+| [AI 输出格式提案](docs/proposals/proposal-02-AI输出格式.md) | 结构化 JSON vs 自由文本 |
+| [AI 叙事方案提案](docs/proposals/proposal-03-AI叙事方案.md) | 云端 LLM vs 本地 vs 无 AI |
+
+---
 
 ## 团队
 
-6 人 · 1024 Techcamp 第 6 期 · 2026 年 7–8 月
+高俊周 (GJZ) · 凌铭辉 (LMH) · 李敏譞 (LMX) · 张家豪 (ZJH) · 黄女珊 (HNS) · 卢玮晨 (LWC) · 曹明鸣（导师）
 
-## 许可
-
-MIT
+1024 XEngineer Camp · Season 6 · MIT

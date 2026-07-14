@@ -4,7 +4,10 @@ import { useState, useRef, useEffect, type FormEvent } from 'react'
 import { useRoomStore } from '@/stores/room-store'
 import { useAuthStore } from '@/stores/auth-store'
 import { useCharacterStore } from '@/stores/character-store'
-import { sendWsMessage, onWsMessage } from '@/services/api-client'
+import { connectWebSocket, waitForWsOpen, sendWsMessage, onWsMessage } from '@/services/api-client'
+import { getSkillById, calculateBaseValue } from '@/data/skills'
+import { ATTRIBUTE_LABELS } from '@/data/character-model'
+import { useRoomPlayers } from '@/hooks/useRoomPlayers'
 
 // ─── Types ───────────────────────────────────────────
 interface Message {
@@ -15,33 +18,9 @@ interface Message {
   isSelf?: boolean
 }
 
-interface StatItem { label: string; name: string; value: number; color: string }
-interface SkillItem { name: string; nameEn: string; value: number }
 interface MapLocation { icon: string; name: string; desc: string; isCurrent?: boolean }
 
-// ─── Sample data ─────────────────────────────────────
-const ATTRIBUTES: StatItem[] = [
-  { label: '力量', name: 'STR', value: 50, color: '#c04040' },
-  { label: '体质', name: 'CON', value: 60, color: '#c08050' },
-  { label: '体型', name: 'SIZ', value: 55, color: '#b8976a' },
-  { label: '敏捷', name: 'DEX', value: 65, color: '#4a8a4a' },
-  { label: '智力', name: 'INT', value: 70, color: '#4a7098' },
-  { label: '意志', name: 'POW', value: 65, color: '#7050a0' },
-  { label: '外貌', name: 'APP', value: 60, color: '#8a4070' },
-  { label: '教育', name: 'EDU', value: 70, color: '#6a6050' },
-]
-
-const SKILLS: SkillItem[] = [
-  { name: '侦察', nameEn: 'Spot Hidden', value: 65 },
-  { name: '聆听', nameEn: 'Listen', value: 50 },
-  { name: '图书馆', nameEn: 'Library Use', value: 60 },
-  { name: '说服', nameEn: 'Persuade', value: 45 },
-  { name: '斗殴', nameEn: 'Fighting', value: 35 },
-  { name: '潜行', nameEn: 'Stealth', value: 40 },
-  { name: '心理学', nameEn: 'Psychology', value: 30 },
-  { name: '急救', nameEn: 'First Aid', value: 40 },
-  { name: '神秘学', nameEn: 'Occult', value: 25 },
-]
+const ATTR_KEY_LIST = ['str', 'con', 'pow', 'dex', 'app', 'siz', 'int', 'edu'] as const
 
 const MAP_LOCATIONS: MapLocation[] = [
   { icon: '🏚️', name: '惠特利旧宅 · 正门', desc: '当前所在 · 铁门虚掩', isCurrent: true },
@@ -375,10 +354,13 @@ function DiceModal({ onClose, onResult }: { onClose: () => void; onResult: (resu
 // ─── Main RoomPage ───────────────────────────────────
 export default function RoomPage() {
   const navigate = useNavigate()
+  const roomId = useRoomStore((s) => s.roomId)
+  const roomCode = useRoomStore((s) => s.roomCode)
   const playerId = useRoomStore((s) => s.playerId)
   const nickname = useAuthStore((s) => s.nickname)
   const character = useCharacterStore((s) => s.character)
   const senderName = character?.info.name || nickname || '你'
+  const roomInfo = useRoomPlayers(roomCode)
   const [messages, setMessages] = useState<Message[]>([
     { type: 'system', content: '案件档案已加载 · 惠特利旧宅', time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) },
   ])
@@ -386,12 +368,35 @@ export default function RoomPage() {
   const [typing, setTyping] = useState(false)
   const [openPanel, setOpenPanel] = useState<string | null>(null)
   const [showDice, setShowDice] = useState(false)
-  const [notes, setNotes] = useState('📋 案件笔记\n═══════════════════════════')
+  const notesKey = roomId ? `aidm-notes-${roomId}` : null
+  const [notes, setNotes] = useState(
+    () => (notesKey && localStorage.getItem(notesKey)) || '📋 案件笔记\n═══════════════════════════'
+  )
+  const [lastSaved, setLastSaved] = useState<string | null>(() => (notesKey ? localStorage.getItem(notesKey) : null) ? new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
+
+  // ★ 访客走的是 /join → /character → /character-ready → /room，全程不经过
+  // /lobby——而 connectWebSocket 之前只在 LobbyPage 里调用过，导致访客的浏览器
+  // 从头到尾没建立过 WS 连接，发消息全部被静默丢弃（见 2026-07-13 多人测试报告
+  // P0）。这里补一次同样的连接+room.join，对已经连过的房主是幂等空操作。
+  useEffect(() => {
+    if (!roomId || !playerId) return
+    let cancelled = false
+    const ws = connectWebSocket(roomId)
+    waitForWsOpen(ws)
+      .then(() => {
+        if (cancelled) return
+        sendWsMessage('room.join', playerId, { roomCode, nickname: nickname || '玩家' })
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [roomId, playerId, roomCode, nickname])
 
   // 真实 AI 主持人回复：订阅 narration.push（不再是本地假打字模拟）
   useEffect(() => {
@@ -459,9 +464,14 @@ export default function RoomPage() {
         </div>
         <div className="flex-1 min-w-0">
           <div className="text-sm font-semibold text-text-primary">惠特利旧宅</div>
-          <div className="text-[11px] text-text-muted">3 位调查员 · 克苏鲁的呼唤</div>
+          <div className="text-[11px] text-text-muted">
+            {roomInfo ? `${roomInfo.players.length} 位调查员` : '克苏鲁的呼唤'}
+          </div>
         </div>
-        <button className="w-8 h-8 rounded-full bg-card border border-border-light flex items-center justify-center active:bg-panel">
+        <button
+          onClick={() => setOpenPanel(openPanel === 'members' ? null : 'members')}
+          className="w-8 h-8 rounded-full bg-card border border-border-light flex items-center justify-center active:bg-panel"
+        >
           <Users className="w-4 h-4 text-text-muted" strokeWidth={2.5} />
         </button>
       </div>
@@ -586,73 +596,80 @@ export default function RoomPage() {
 
       {/* ── Panels ── */}
 
-      {/* Panel: 角色卡 */}
-      <BottomPanel open={openPanel === 'sheet'} onClose={() => setOpenPanel(null)} title="调查员 · 杰克·布朗">
-        <div className="flex items-center gap-3 mb-3.5">
-          <div className="w-12 h-14 rounded-sm flex items-center justify-center text-2xl"
-            style={{ background: 'linear-gradient(135deg,#e8e0d0,#d8cfb8)', border: '2px solid #b8976a' }}>
-            🕵️
-          </div>
-          <div>
-            <div className="text-sm font-semibold text-text-primary">私家侦探 · 32 岁 · 波士顿</div>
-            <div className="text-[11px] text-text-muted font-mono">
-              STR 50 CON 60 SIZ 55 DEX 65 · INT 70 POW 65 APP 60 EDU 70
+      {/* Panel: 角色卡（真实建卡数据，不再是写死的示例角色） */}
+      <BottomPanel open={openPanel === 'sheet'} onClose={() => setOpenPanel(null)} title={`调查员 · ${character?.info.name || '未建卡'}`}>
+        {character ? (
+          <>
+            <div className="flex items-center gap-3 mb-3.5">
+              <div className="w-12 h-14 rounded-sm flex items-center justify-center text-2xl"
+                style={{ background: 'linear-gradient(135deg,#e8e0d0,#d8cfb8)', border: '2px solid #b8976a' }}>
+                🕵️
+              </div>
+              <div>
+                <div className="text-sm font-semibold text-text-primary">{character.info.name}</div>
+                <div className="text-[11px] text-text-muted">{character.info.age}岁 · {character.info.gender}</div>
+              </div>
             </div>
-          </div>
-        </div>
 
-        {/* HP / SAN / Luck */}
-        <div className="flex gap-2 mb-4">
-          {[
-            { label: '生命 HP', value: '12/14', color: 'text-mold' },
-            { label: '理智 SAN', value: '65', color: 'text-brass-dark' },
-            { label: '幸运', value: '55', color: 'text-text-primary' },
-          ].map((pill) => (
-            <div key={pill.label} className="flex-1 bg-panel rounded-md px-3 py-2 text-center">
-              <div className="text-[10px] text-text-muted font-medium">{pill.label}</div>
-              <div className={`text-base font-bold font-mono ${pill.color}`}>{pill.value}</div>
+            <div className="flex gap-2 mb-4">
+              {[
+                { label: 'HP', value: `${character.derived.hp}`, color: 'text-mold' },
+                { label: 'SAN', value: `${character.derived.san}`, color: 'text-[#7050a0]' },
+                { label: 'MP', value: `${character.derived.mp}`, color: 'text-[#4a7098]' },
+                { label: 'DB', value: character.derived.db, color: 'text-text-muted' },
+                { label: 'MOV', value: `${character.derived.move}`, color: 'text-text-muted' },
+              ].map((pill) => (
+                <div key={pill.label} className="flex-1 bg-panel rounded-md px-2.5 py-2 text-center">
+                  <div className="text-[10px] text-text-muted font-medium">{pill.label}</div>
+                  <div className={`text-base font-bold font-mono ${pill.color}`}>{pill.value}</div>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
 
-        <div className="h-px bg-border-light mb-3.5" />
+            <div className="h-px bg-border-light mb-3.5" />
 
-        <h4 className="text-xs font-semibold text-brass-dark mb-2.5">基础属性</h4>
-        <div className="grid grid-cols-2 gap-1.5 mb-4">
-          {ATTRIBUTES.map((attr) => (
-            <div key={attr.name} className="flex items-center justify-between bg-input border border-border-light rounded px-3 py-1.5">
-              <span className="font-mono text-[11px] font-bold text-text-muted">{attr.name}</span>
-              <span className="font-mono text-sm font-bold text-text-primary">{attr.value}</span>
+            <h4 className="text-xs font-semibold text-brass-dark mb-2.5">基础属性</h4>
+            <div className="grid grid-cols-2 gap-1.5 mb-4">
+              {ATTR_KEY_LIST.map((key) => (
+                <div key={key} className="flex items-center justify-between bg-input border border-border-light rounded px-3 py-1.5">
+                  <span className="font-mono text-[11px] font-bold text-text-muted">{ATTRIBUTE_LABELS[key].short}</span>
+                  <span className="font-mono text-sm font-bold text-text-primary">{character.attr[key]}</span>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
 
-        <div className="h-px bg-border-light mb-3.5" />
-        <h4 className="text-xs font-semibold text-brass-dark mb-2.5">装备</h4>
-        <ul className="space-y-1.5">
-          {['🔦 手电筒', '📓 笔记本 & 钢笔', '🔫 左轮手枪 (.38) · 6/6 发', '🪪 私家侦探执照', '💊 急救包'].map((item) => (
-            <li key={item} className="text-sm text-text-body flex items-center gap-2">
-              <span className="text-text-dim">·</span> {item}
-            </li>
-          ))}
-        </ul>
+            <div className="h-px bg-border-light mb-3.5" />
+            <h4 className="text-xs font-semibold text-brass-dark mb-2.5">装备</h4>
+            <p className="text-sm text-text-body leading-[1.7]">{character.equipment || '未填写装备'}</p>
+          </>
+        ) : (
+          <p className="text-sm text-text-dim py-6 text-center">还没有创建角色</p>
+        )}
       </BottomPanel>
 
-      {/* Panel: 技能 */}
+      {/* Panel: 技能（真实分配数据） */}
       <BottomPanel open={openPanel === 'skills'} onClose={() => setOpenPanel(null)} title="技能">
         <div className="space-y-2">
-          {SKILLS.map((skill) => (
-            <div key={skill.name} className="flex items-center gap-3 py-1.5">
+          {character ? Object.entries(character.skillAlloc).filter(([, pts]) => pts > 0).map(([id, pts]) => {
+            const skill = getSkillById(id)
+            if (!skill) return null
+            const value = calculateBaseValue(skill, character.attr) + pts
+            return (
+            <div key={id} className="flex items-center gap-3 py-1.5">
               <div className="flex-1 min-w-0">
                 <div className="text-sm font-medium text-text-primary">{skill.name}</div>
                 <div className="text-[10px] text-text-dim font-mono">{skill.nameEn}</div>
               </div>
               <div className="flex-1 h-2 rounded-full bg-border-light overflow-hidden">
-                <div className="h-full rounded-full bg-brass transition-all" style={{ width: `${skill.value}%` }} />
+                <div className="h-full rounded-full bg-brass transition-all" style={{ width: `${value}%` }} />
               </div>
-              <span className="text-xs font-bold font-mono text-text-muted min-w-[36px] text-right">{skill.value}%</span>
+              <span className="text-xs font-bold font-mono text-text-muted min-w-[36px] text-right">{value}%</span>
             </div>
-          ))}
+            )
+          }) : null}
+          {(!character || Object.values(character.skillAlloc).every((pts) => !pts)) && (
+            <p className="text-sm text-text-dim py-6 text-center">暂无已分配技能</p>
+          )}
         </div>
       </BottomPanel>
 
@@ -687,7 +704,11 @@ export default function RoomPage() {
             className="flex-1 py-2 rounded-sm bg-panel border border-border-light text-text-muted text-xs font-medium flex items-center justify-center gap-1 active:bg-border-light">
             <Plus className="w-3.5 h-3.5" /> 添加线索标签
           </button>
-          <button onClick={() => {/* would persist to localStorage */}}
+          <button onClick={() => {
+              if (!notesKey) return
+              localStorage.setItem(notesKey, notes)
+              setLastSaved(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }))
+            }}
             className="px-4 py-2 rounded-sm bg-brass text-white text-xs font-medium flex items-center justify-center gap-1 active:bg-brass-dark">
             <Save className="w-3.5 h-3.5" /> 保存
           </button>
@@ -697,7 +718,27 @@ export default function RoomPage() {
           onChange={(e) => setNotes(e.target.value)}
           className="w-full min-h-[180px] text-sm leading-[1.7] text-text-body bg-input border border-border-light rounded-md px-3.5 py-3 resize-none outline-none focus:border-brass transition-colors font-mono"
         />
-        <div className="text-[10px] text-text-dim mt-2 text-right">最后编辑: {new Date().toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit'})} · 自动保存</div>
+        <div className="text-[10px] text-text-dim mt-2 text-right">{lastSaved ? `最后保存: ${lastSaved}` : '尚未保存'}</div>
+      </BottomPanel>
+
+      {/* Panel: 房间成员 */}
+      <BottomPanel open={openPanel === 'members'} onClose={() => setOpenPanel(null)} title="房间成员">
+        {roomInfo ? (
+          <div className="space-y-1.5">
+            <p className="text-xs text-text-muted mb-2">{roomInfo.players.length}/{roomInfo.maxPlayers} 人</p>
+            {roomInfo.players.map((p) => (
+              <div key={p.playerId} className="flex items-center gap-3 px-3 py-2 bg-panel rounded-md">
+                <div className="w-8 h-8 rounded-full bg-card border border-border-light flex items-center justify-center text-sm flex-shrink-0">🔍</div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium text-text-primary">{p.nickname}</div>
+                  <div className="text-[11px] text-text-dim">{p.isHost ? '房主' : '玩家'}{p.playerId === playerId ? ' · 你' : ''}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-text-dim py-6 text-center">正在获取房间成员…</p>
+        )}
       </BottomPanel>
 
       {/* ── Dice Modal ── */}

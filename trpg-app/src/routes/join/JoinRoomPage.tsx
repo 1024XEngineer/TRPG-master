@@ -4,11 +4,13 @@ import { ArrowLeft, DoorOpen, Hash } from 'lucide-react'
 import { useAuthStore } from '@/stores/auth-store'
 import { useRoomStore } from '@/stores/room-store'
 import { joinRoomByCode } from '@/services/room'
+import { friendlyErrorMessage } from '@/services/api-client'
 
 export default function JoinRoomPage() {
   const navigate = useNavigate()
   const nickname = useAuthStore((s) => s.nickname)
   const setRoomIdentity = useRoomStore((s) => s.setRoomIdentity)
+  const setHost = useRoomStore((s) => s.setHost)
   const [roomCode, setRoomCode] = useState('')
   const [error, setError] = useState('')
   const [joining, setJoining] = useState(false)
@@ -24,9 +26,13 @@ export default function JoinRoomPage() {
     try {
       const room = await joinRoomByCode(code, nickname || undefined)
       setRoomIdentity(room)
-      navigate('/character')
+      setHost(false)
+      // ★ 访客也要先进大厅——所有玩家到齐、都准备好之后才能一起进入建卡
+      // 阶段，不能像以前那样直接跳过大厅、单独去建卡（见需求：全员到齐才能
+      // 开始游戏）。
+      navigate('/lobby')
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加入房间失败，请检查房间号')
+      setError(friendlyErrorMessage(err, '加入房间失败，请检查房间号'))
     } finally {
       setJoining(false)
     }
@@ -35,7 +41,7 @@ export default function JoinRoomPage() {
   return (
     <div className="animate-screen-in min-h-screen flex flex-col bg-page">
       <div className="flex items-center gap-2.5 px-5 pt-3 pb-2">
-        <button onClick={() => navigate('/login')} className="w-[34px] h-[34px] rounded-full bg-card border border-border-light flex items-center justify-center active:bg-panel active:scale-[0.94] transition-all">
+        <button onClick={() => navigate('/home')} className="w-[34px] h-[34px] rounded-full bg-card border border-border-light flex items-center justify-center active:bg-panel active:scale-[0.94] transition-all">
           <ArrowLeft className="w-[18px] h-[18px] text-text-muted" strokeWidth={2.5} />
         </button>
         <h2 className="text-lg font-bold text-text-primary">加入房间</h2>

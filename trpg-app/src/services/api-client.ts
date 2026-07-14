@@ -34,6 +34,24 @@ export class ApiError extends Error {
   }
 }
 
+// 把 ApiError/网络错误翻译成用户能看懂的提示——不要把原始 JSON/浏览器报错直接甩给用户。
+export function friendlyErrorMessage(err: unknown, fallback = '操作失败，请稍后重试'): string {
+  if (err instanceof ApiError) {
+    const detail = (err.body as { detail?: unknown } | null)?.detail
+    if (typeof detail === 'string' && detail) return detail
+    if (detail && typeof detail === 'object') {
+      const firstMessage = Object.values(detail as Record<string, unknown>)[0]
+      if (typeof firstMessage === 'string') return firstMessage
+    }
+    if (err.status === 404) return '没有找到对应的内容'
+    if (err.status === 409) return '操作冲突，请刷新后重试'
+    if (err.status >= 500) return '服务器开小差了，请稍后重试'
+    return fallback
+  }
+  if (err instanceof TypeError) return '网络连接失败，请检查网络后重试'
+  return fallback
+}
+
 export async function apiRequest<T>(
   path: string,
   options: RequestOptions = {}

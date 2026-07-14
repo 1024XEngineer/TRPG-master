@@ -2,11 +2,17 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { Shield, Swords, ChevronRight } from 'lucide-react'
 import { getGameById, SYSTEM_COLORS } from '@/config/games'
 import Badge from '@/shared/components/Badge'
+import { useGameStore } from '@/stores/game-store'
 
 export default function SystemSelectionPage() {
   const navigate = useNavigate()
   const { gameId } = useParams<{ gameId: string }>()
   const game = getGameById(gameId || '')
+  // ★ 只有从"创建房间→选择游戏"这条子流程进来（returnFromGameSelect）才允许
+  // 继续往下选模组/建卡；从登录页"浏览已有游戏"直接进来的，最多只能看到这一页
+  // ——建卡必须绑定一个真实房间，纯浏览模式走不到那一步（见需求：浏览入口不
+  // 应该能进入游戏流程）。
+  const canProceed = useGameStore((s) => s.returnFromGameSelect)
 
   if (!game || !game.systems) {
     return (
@@ -48,10 +54,16 @@ export default function SystemSelectionPage() {
       </div>
       <p className="text-xs text-text-muted px-5 pb-4">{game.name} · 选择规则系统</p>
 
+      {!canProceed && (
+        <div className="mx-5 mb-4 px-3.5 py-2.5 bg-[#fdf3e0] border border-[#e0c088] rounded-[6px] text-[12px] text-[#8a6a2a]">
+          浏览模式：创建或加入房间后才能继续选择模组、创建角色
+        </div>
+      )}
+
       <div className="px-5 flex flex-col gap-3.5">
         {systems.map((sys) => {
           const colors = SYSTEM_COLORS[sys.id]
-          const isReady = sys.status === 'ready'
+          const isReady = sys.status === 'ready' && canProceed
           const IconComp = sys.id === 'coc' ? Shield : Swords
 
           return (
@@ -62,9 +74,9 @@ export default function SystemSelectionPage() {
               }}
               className={`
                 bg-card border border-border-light rounded-md p-5
-                cursor-pointer flex items-center gap-4
+                flex items-center gap-4
                 active:scale-[0.98] transition-all duration-200
-                ${isReady ? '' : 'opacity-60'}
+                ${isReady ? 'cursor-pointer' : 'opacity-60'}
                 ${colors.border.replace('border-', 'border-l-4 border-l-')}
               `}
             >
@@ -75,10 +87,10 @@ export default function SystemSelectionPage() {
                 <h3 className="text-[17px] font-bold text-text-primary">{sys.name}</h3>
                 <p className="text-xs text-text-muted mt-0.5 leading-[1.5]">{sys.nameEn}</p>
                 <p className="text-[11px] text-text-muted mt-1 leading-[1.5] whitespace-pre-line">{sys.description}</p>
-                {isReady && (
+                {sys.status === 'ready' && (
                   <Badge variant="success">推荐新手 · 已就绪</Badge>
                 )}
-                {!isReady && (
+                {sys.status !== 'ready' && (
                   <Badge variant="default">开发中</Badge>
                 )}
               </div>

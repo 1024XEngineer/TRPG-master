@@ -4,10 +4,17 @@ import { useGameStore } from '@/stores/game-store'
 import { getScenarioById } from '@/config/games'
 import { useMemo } from 'react'
 
+// 访客走 /join 加入房间，从来不会经过"选择游戏/世界/模组"那几步，本地
+// game-store 里的 sceneId 天然是空的。后端目前也确实只有这一款真实落库的
+// 模组（惠特利旧宅，见 server/rest/lobby.py 的注释），不管房主当初在 UI 上
+// 选的是哪张模组卡，实际跑的都是它——所以访客没有 sceneId 时，直接兜底成
+// 这一款，跟后端的真实行为保持一致，而不是让访客看到"未选择模组"的空页面。
+const FALLBACK_SCENE_ID = 'whateley'
+
 export default function StoryPage() {
   const navigate = useNavigate()
   const sceneId = useGameStore((s) => s.sceneId)
-  const scenario = useMemo(() => getScenarioById(sceneId || ''), [sceneId])
+  const scenario = useMemo(() => getScenarioById(sceneId || FALLBACK_SCENE_ID), [sceneId])
 
   if (!scenario) {
     return (

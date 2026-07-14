@@ -9,7 +9,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from server.rest.schema import CamelModel
-from sqlalchemy import func, select
+from sqlalchemy import select
 
 from core.content.db_models import ModulePackRow
 from core.db import get_sessionmaker
@@ -165,6 +165,14 @@ async def join_room(
     )
 
 
+class PlayerSummary(CamelModel):
+    player_id: str
+    nickname: str
+    is_host: bool
+    ready: bool
+    has_character: bool
+
+
 class RoomPreview(CamelModel):
     room_id: str
     room_code: str
@@ -172,11 +180,14 @@ class RoomPreview(CamelModel):
     module_title: Optional[str]
     player_count: int
     max_players: int
+    players: list[PlayerSummary]
 
 
 @router.get("/rooms/{room_code}")
 async def preview_room(room_code: str) -> RoomPreview:
-    """不强制登录——供加入前预览。"""
+    """不强制登录——供加入前预览，也供已加入的玩家轮询房间/其他玩家的实时状态
+    （前端没有 WS 广播可用，室内成员列表/是否就绪/是否建完卡只能靠轮询这个
+    接口获取，见 2026-07-13 多人测试报告 P0）。"""
     async with get_sessionmaker()() as session:
         room = (
             await session.execute(select(RoomRow).where(RoomRow.room_code == room_code))
@@ -185,17 +196,29 @@ async def preview_room(room_code: str) -> RoomPreview:
             raise HTTPException(status_code=404, detail="房间不存在")
 
         module = await session.get(ModulePackRow, room.module_pack_id)
-        player_count = (
-            await session.execute(select(func.count()).select_from(PlayerRow).where(PlayerRow.room_id == room.id))
-        ).scalar_one()
+        player_rows = (
+            await session.execute(select(PlayerRow).where(PlayerRow.room_id == room.id))
+        ).scalars().all()
+
+        players = [
+            PlayerSummary(
+                player_id=p.id,
+                nickname=p.nickname,
+                is_host=p.id == room.host_player_id,
+                ready=p.ready,
+                has_character=p.character_id is not None,
+            )
+            for p in player_rows
+        ]
 
         return RoomPreview(
             room_id=room.id,
             room_code=room.room_code,
             phase=room.phase,
             module_title=module.title if module else None,
-            player_count=player_count,
+            player_count=len(players),
             max_players=module.players_max if module else 1,
+            players=players,
         )
 
 

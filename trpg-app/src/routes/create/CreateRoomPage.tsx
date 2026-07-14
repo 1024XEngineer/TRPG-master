@@ -1,11 +1,12 @@
 import { useNavigate } from 'react-router-dom'
-import { useState } from 'react'
-import { ArrowLeft, Plus, Hash } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { ArrowLeft, Plus } from 'lucide-react'
 import { GAME_REGISTRY, SYSTEM_COLORS, getScenarioById } from '@/config/games'
 import { useGameStore } from '@/stores/game-store'
 import { useAuthStore } from '@/stores/auth-store'
 import { useRoomStore } from '@/stores/room-store'
 import { createGameRoom, listModules, selectModule } from '@/services/room'
+import { friendlyErrorMessage } from '@/services/api-client'
 
 const MAX_PLAYERS = [2, 3, 4, 5, 6, 7, 8]
 
@@ -15,16 +16,12 @@ export default function CreateRoomPage() {
   const nickname = useAuthStore((s) => s.nickname)
   const setRoomIdentity = useRoomStore((s) => s.setRoomIdentity)
   const setStoreModuleId = useRoomStore((s) => s.setModuleId)
-  // ★ 房间名/房间号/最大人数存进 game-store（不是局部 useState）——这几个
-  // 字段要在"去 /games 选游戏再回来"、"下一页点返回"这类导航之间存活，局部
-  // state 在组件卸载重挂载时会被清空，这正是之前那个 bug 的根因。
-  const roomName = useGameStore((s) => s.roomNameDraft)
-  const setRoomName = useGameStore((s) => s.setRoomNameDraft)
-  const roomCode = useGameStore((s) => s.roomCodeDraft)
-  const setRoomCode = useGameStore((s) => s.setRoomCodeDraft)
-  const maxPlayers = useGameStore((s) => s.maxPlayersDraft)
-  const setMaxPlayers = useGameStore((s) => s.setMaxPlayersDraft)
-  const clearRoomDraft = useGameStore((s) => s.clearRoomDraft)
+  const setCreateForm = useRoomStore((s) => s.setCreateForm)
+  const setHost = useRoomStore((s) => s.setHost)
+  const savedRoomName = useRoomStore((s) => s.createFormRoomName)
+  const savedMaxPlayers = useRoomStore((s) => s.createFormMaxPlayers)
+  const [roomName, setRoomName] = useState(savedRoomName || '')
+  const [maxPlayers, setMaxPlayers] = useState(savedMaxPlayers || 4)
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState('')
 
@@ -34,7 +31,7 @@ export default function CreateRoomPage() {
   const hasSelection = !!(store.gameId && store.systemId && store.sceneId)
 
   const handleCreate = async () => {
-    if (!roomName.trim() || !roomCode.trim() || !hasSelection) return
+    if (!roomName.trim() || !hasSelection) return
     setCreating(true)
     setCreateError('')
     try {
@@ -46,24 +43,35 @@ export default function CreateRoomPage() {
       await selectModule(room.roomId, modules[0].id)
       setRoomIdentity(room)
       setStoreModuleId(modules[0].id)
-      clearRoomDraft()
-      navigate('/character')
+      setHost(true)
+      navigate('/lobby')
     } catch (err) {
-      setCreateError(err instanceof Error ? err.message : '创建房间失败')
+      setCreateError(friendlyErrorMessage(err, '创建房间失败'))
     } finally {
       setCreating(false)
     }
   }
 
-  const canCreate = roomName.trim().length > 0 && roomCode.trim().length >= 1 && hasSelection && !creating
+  useEffect(() => {
+    // 从选游戏页面返回时，清除已恢复的表单状态以免干扰下次创建
+    return () => {
+      if (store.returnFromGameSelect) {
+        setCreateForm({ roomName: '', maxPlayers: 4 })
+      }
+    }
+  }, [])
+
+  const canCreate = roomName.trim().length > 0 && hasSelection && !creating
 
   const handleSelectGame = () => {
+    setCreateForm({ roomName, maxPlayers })
     store.reset()
     store.setReturnFromGameSelect(true)
     navigate('/games')
   }
 
   const handleChangeGame = () => {
+    setCreateForm({ roomName, maxPlayers })
     store.reset()
     store.setReturnFromGameSelect(true)
     navigate('/games')
@@ -72,7 +80,7 @@ export default function CreateRoomPage() {
   return (
     <div className="animate-screen-in min-h-screen bg-page pb-24">
       <div className="flex items-center gap-2.5 px-5 pt-3 pb-2">
-        <button onClick={() => navigate('/login')} className="w-[34px] h-[34px] rounded-full bg-card border border-border-light flex items-center justify-center active:bg-panel active:scale-[0.94] transition-all">
+        <button onClick={() => navigate('/home')} className="w-[34px] h-[34px] rounded-full bg-card border border-border-light flex items-center justify-center active:bg-panel active:scale-[0.94] transition-all">
           <ArrowLeft className="w-[18px] h-[18px] text-text-muted" strokeWidth={2.5} />
         </button>
         <h2 className="text-lg font-bold text-text-primary">创建房间</h2>
@@ -87,18 +95,6 @@ export default function CreateRoomPage() {
               <label className="text-[11px] font-medium text-text-muted mb-1 block">房间名称</label>
               <input value={roomName} onChange={e => setRoomName(e.target.value)}
                 placeholder="例如：阿卡姆调查团" className="w-full px-3.5 py-2.5 rounded-[6px] bg-input border border-border-light text-text-primary text-[15px] outline-none focus:border-brass" />
-            </div>
-            <div>
-              <label className="text-[11px] font-medium text-text-muted mb-1 block">房间号（1-4 位数字）</label>
-              <div className="relative">
-                <Hash className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-text-dim" />
-                <input value={roomCode}
-                  onChange={e => setRoomCode(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                  placeholder="例如：1234"
-                  inputMode="numeric"
-                  maxLength={4}
-                  className="w-full pl-8 pr-3 py-2.5 rounded-[6px] bg-input border border-border-light text-text-primary text-[15px] font-mono font-bold tracking-[0.1em] outline-none focus:border-brass" />
-              </div>
             </div>
             <div>
               <label className="text-[11px] font-medium text-text-muted mb-1 block">最大人数</label>
@@ -152,10 +148,6 @@ export default function CreateRoomPage() {
             <div className="flex items-center justify-between">
               <span className="text-text-muted">房间名</span>
               <span className="font-semibold text-text-primary">{roomName || '未设置'}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-text-muted">房间号</span>
-              <span className="font-mono font-bold tracking-wider text-text-primary">{roomCode || '未设置'}</span>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-text-muted">游戏</span>

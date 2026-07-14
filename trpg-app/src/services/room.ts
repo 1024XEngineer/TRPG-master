@@ -48,6 +48,14 @@ export async function joinRoomByCode(roomCode: string, nickname?: string): Promi
   })
 }
 
+export interface RoomPlayerSummary {
+  playerId: string
+  nickname: string
+  isHost: boolean
+  ready: boolean
+  hasCharacter: boolean
+}
+
 export interface RoomPreview {
   roomId: string
   roomCode: string
@@ -55,6 +63,7 @@ export interface RoomPreview {
   moduleTitle: string | null
   playerCount: number
   maxPlayers: number
+  players: RoomPlayerSummary[]
 }
 
 // 获取房间信息（房间码预览）

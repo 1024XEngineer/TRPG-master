@@ -5,7 +5,7 @@ import path from 'path'
 
 export default defineConfig({
   server: {
-    port: 9877,
+    port: Number(process.env.PORT) || 9877,
     host: true,
   },
   plugins: [

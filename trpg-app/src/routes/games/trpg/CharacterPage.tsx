@@ -7,6 +7,7 @@ import { ATTRIBUTE_LABELS, calculateOccupationSkillPoints, calculateInterestSkil
 import { useCharacterStore } from '@/stores/character-store'
 import { useRoomStore } from '@/stores/room-store'
 import { createCharacterDraft, saveCharacter, completeCharacter } from '@/services/character/character-api'
+import { friendlyErrorMessage } from '@/services/api-client'
 import type { OccupationDefinition, SkillDefinition } from '@/data/types'
 
 const ATTR_KEYS = ['str', 'con', 'pow', 'dex', 'app', 'siz', 'int', 'edu'] as const
@@ -218,6 +219,14 @@ export default function CharacterPage() {
             }`} />
           ))}
         </div>
+        {/* ★ 提前告知"没有房间"这件事，不要等填完四步、点完成创建才在最后一刻
+            报错——之前"浏览已有游戏"这条路径就是这样把用户的输入全部作废的
+            （见 2026-07-13 测试报告）。 */}
+        {!roomId && (
+          <div className="mx-5 mb-3 px-3.5 py-2.5 bg-[#fdf3e0] border border-[#e0c088] rounded-[6px] text-[12px] text-[#8a6a2a]">
+            当前未加入房间，创建的角色不会被保存。请先返回创建或加入一个房间。
+          </div>
+        )}
       </div>
 
       {/* ═══════════════ Step 0: Info + Occupation ═══════════════ */}
@@ -627,9 +636,9 @@ export default function CharacterPage() {
                 equipment, background, notes,
                 derived: { hp: derived.hp, san: derived.san, mp: derived.mp, db: derived.db, move: derived.move },
               })
-              navigate('/lobby')
+              navigate('/character-ready')
             } catch (err) {
-              setSubmitError(err instanceof Error ? err.message : '建卡失败')
+              setSubmitError(friendlyErrorMessage(err, '建卡失败'))
             } finally {
               setSubmitting(false)
             }

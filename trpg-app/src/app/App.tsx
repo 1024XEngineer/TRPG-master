@@ -3,6 +3,7 @@ import { lazy, Suspense } from 'react'
 import PhoneLayout from '@/shared/layouts/PhoneLayout'
 
 const LoginPage = lazy(() => import('@/routes/login/LoginPage'))
+const HomePage = lazy(() => import('@/routes/home/HomePage'))
 const JoinRoomPage = lazy(() => import('@/routes/join/JoinRoomPage'))
 const CreateRoomPage = lazy(() => import('@/routes/create/CreateRoomPage'))
 const GameSelectionPage = lazy(() => import('@/routes/games/GameSelectionPage'))
@@ -11,6 +12,7 @@ const ScenarioSelectionPage = lazy(() => import('@/routes/games/trpg/ScenarioSel
 const StoryPage = lazy(() => import('@/routes/games/trpg/StoryPage'))
 const CharacterPage = lazy(() => import('@/routes/games/trpg/CharacterPage'))
 const LobbyPage = lazy(() => import('@/routes/lobby/LobbyPage'))
+const CharacterReadyPage = lazy(() => import('@/routes/character-ready/CharacterReadyPage'))
 const RoomPage = lazy(() => import('@/routes/games/trpg/RoomPage'))
 
 function LoadingFallback() {
@@ -28,6 +30,7 @@ function App() {
         <Routes>
           <Route path="/" element={<Navigate to="/login" replace />} />
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/home" element={<HomePage />} />
           <Route path="/join" element={<JoinRoomPage />} />
           <Route path="/create" element={<CreateRoomPage />} />
           <Route path="/games" element={<GameSelectionPage />} />
@@ -36,6 +39,7 @@ function App() {
           <Route path="/story" element={<StoryPage />} />
           <Route path="/character" element={<CharacterPage />} />
           <Route path="/lobby" element={<LobbyPage />} />
+          <Route path="/character-ready" element={<CharacterReadyPage />} />
           <Route path="/room" element={<RoomPage />} />
         </Routes>
       </Suspense>

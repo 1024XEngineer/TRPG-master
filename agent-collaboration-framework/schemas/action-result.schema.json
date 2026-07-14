@@ -1,0 +1,179 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "action-result.schema.json",
+  "$defs": {
+    "JsonValue": {},
+    "StateChange": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "from": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "to": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "cause": {
+          "title": "Cause",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "from",
+        "to",
+        "cause"
+      ],
+      "title": "StateChange",
+      "type": "object"
+    },
+    "StateModifiedEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "sequence": {
+          "minimum": 1,
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "type": {
+          "const": "state.modified",
+          "default": "state.modified",
+          "title": "Type",
+          "type": "string"
+        },
+        "room_id": {
+          "title": "Room Id",
+          "type": "string"
+        },
+        "actor_id": {
+          "title": "Actor Id",
+          "type": "string"
+        },
+        "client_action_id": {
+          "title": "Client Action Id",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "from": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "to": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "cause": {
+          "title": "Cause",
+          "type": "string"
+        },
+        "visibility": {
+          "default": "public",
+          "enum": [
+            "public",
+            "private",
+            "hidden"
+          ],
+          "title": "Visibility",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_id",
+        "sequence",
+        "room_id",
+        "actor_id",
+        "client_action_id",
+        "path",
+        "from",
+        "to",
+        "cause"
+      ],
+      "title": "StateModifiedEvent",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "success": {
+      "title": "Success",
+      "type": "boolean"
+    },
+    "resolution": {
+      "enum": [
+        "checkpoint",
+        "direct",
+        "blocked",
+        "unrecognized"
+      ],
+      "title": "Resolution",
+      "type": "string"
+    },
+    "confirmed_facts": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Confirmed Facts",
+      "type": "array"
+    },
+    "player_visible_information": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Player Visible Information",
+      "type": "array"
+    },
+    "state_changes": {
+      "items": {
+        "$ref": "#/$defs/StateChange"
+      },
+      "title": "State Changes",
+      "type": "array"
+    },
+    "narration_constraints": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Narration Constraints",
+      "type": "array"
+    },
+    "next_required_action": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Next Required Action"
+    },
+    "events": {
+      "items": {
+        "$ref": "#/$defs/StateModifiedEvent"
+      },
+      "title": "Events",
+      "type": "array"
+    },
+    "state_version": {
+      "default": 0,
+      "minimum": 0,
+      "title": "State Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "success",
+    "resolution"
+  ],
+  "title": "ActionResult",
+  "type": "object"
+}

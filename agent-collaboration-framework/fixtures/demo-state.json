@@ -1,0 +1,20 @@
+{
+  "room_id": "room_01",
+  "scene_id": "study",
+  "phase": "playing",
+  "ending_id": null,
+  "event_sequence": 0,
+  "actors": {
+    "pc_1": {
+      "player_id": "player_01",
+      "name": "调查员"
+    }
+  },
+  "entities": {
+    "butler": {"entered": true},
+    "bookshelf": {"key_found": false},
+    "cabinet": {"opened": false},
+    "document": {"obtained": false, "destroyed": false},
+    "window": {}
+  }
+}

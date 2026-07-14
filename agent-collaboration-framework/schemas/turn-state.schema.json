@@ -1,0 +1,675 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "turn-state.schema.json",
+  "$defs": {
+    "ActionResult": {
+      "additionalProperties": false,
+      "properties": {
+        "success": {
+          "title": "Success",
+          "type": "boolean"
+        },
+        "resolution": {
+          "enum": [
+            "checkpoint",
+            "direct",
+            "blocked",
+            "unrecognized"
+          ],
+          "title": "Resolution",
+          "type": "string"
+        },
+        "confirmed_facts": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Confirmed Facts",
+          "type": "array"
+        },
+        "player_visible_information": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Player Visible Information",
+          "type": "array"
+        },
+        "state_changes": {
+          "items": {
+            "$ref": "#/$defs/StateChange"
+          },
+          "title": "State Changes",
+          "type": "array"
+        },
+        "narration_constraints": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Narration Constraints",
+          "type": "array"
+        },
+        "next_required_action": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Next Required Action"
+        },
+        "events": {
+          "items": {
+            "$ref": "#/$defs/StateModifiedEvent"
+          },
+          "title": "Events",
+          "type": "array"
+        },
+        "state_version": {
+          "default": 0,
+          "minimum": 0,
+          "title": "State Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "success",
+        "resolution"
+      ],
+      "title": "ActionResult",
+      "type": "object"
+    },
+    "CheckpointOption": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "action": {
+          "title": "Action",
+          "type": "string"
+        },
+        "target_id": {
+          "title": "Target Id",
+          "type": "string"
+        },
+        "skills": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Skills",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "action",
+        "target_id"
+      ],
+      "title": "CheckpointOption",
+      "type": "object"
+    },
+    "DefaultCheck": {
+      "additionalProperties": false,
+      "properties": {
+        "route": {
+          "const": "default",
+          "default": "default",
+          "title": "Route",
+          "type": "string"
+        },
+        "proposed_skills": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Proposed Skills",
+          "type": "array"
+        }
+      },
+      "title": "DefaultCheck",
+      "type": "object"
+    },
+    "Intent": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "communicate",
+            "interact",
+            "unknown"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "action": {
+          "enum": [
+            "talk",
+            "investigate",
+            "open",
+            "smash",
+            "interact",
+            "unknown"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "target": {
+          "discriminator": {
+            "mapping": {
+              "False": "#/$defs/UnmatchedTarget",
+              "True": "#/$defs/MatchedTarget"
+            },
+            "propertyName": "matched"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/MatchedTarget"
+            },
+            {
+              "$ref": "#/$defs/UnmatchedTarget"
+            }
+          ],
+          "title": "Target"
+        },
+        "check": {
+          "discriminator": {
+            "mapping": {
+              "default": "#/$defs/DefaultCheck",
+              "module": "#/$defs/ModuleCheck",
+              "none": "#/$defs/NoCheck"
+            },
+            "propertyName": "route"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/NoCheck"
+            },
+            {
+              "$ref": "#/$defs/ModuleCheck"
+            },
+            {
+              "$ref": "#/$defs/DefaultCheck"
+            }
+          ],
+          "title": "Check"
+        },
+        "narrative_intent": {
+          "title": "Narrative Intent",
+          "type": "string"
+        },
+        "clarification_question": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Clarification Question"
+        }
+      },
+      "required": [
+        "kind",
+        "action",
+        "target",
+        "check",
+        "narrative_intent"
+      ],
+      "title": "Intent",
+      "type": "object"
+    },
+    "JsonValue": {},
+    "MatchedTarget": {
+      "additionalProperties": false,
+      "properties": {
+        "matched": {
+          "const": true,
+          "default": true,
+          "title": "Matched",
+          "type": "boolean"
+        },
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "MatchedTarget",
+      "type": "object"
+    },
+    "ModuleCheck": {
+      "additionalProperties": false,
+      "properties": {
+        "route": {
+          "const": "module",
+          "default": "module",
+          "title": "Route",
+          "type": "string"
+        },
+        "checkpoint_id": {
+          "minLength": 1,
+          "title": "Checkpoint Id",
+          "type": "string"
+        },
+        "proposed_skills": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Proposed Skills",
+          "type": "array"
+        }
+      },
+      "required": [
+        "checkpoint_id"
+      ],
+      "title": "ModuleCheck",
+      "type": "object"
+    },
+    "NarrationOutput": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "default": "narration",
+          "enum": [
+            "narration",
+            "clarification"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "claimed_fact_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Claimed Fact Ids",
+          "type": "array"
+        },
+        "suggested_actions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Suggested Actions",
+          "type": "array"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "NarrationOutput",
+      "type": "object"
+    },
+    "NoCheck": {
+      "additionalProperties": false,
+      "properties": {
+        "route": {
+          "const": "none",
+          "default": "none",
+          "title": "Route",
+          "type": "string"
+        }
+      },
+      "title": "NoCheck",
+      "type": "object"
+    },
+    "PlayerInput": {
+      "additionalProperties": false,
+      "properties": {
+        "room_id": {
+          "minLength": 1,
+          "title": "Room Id",
+          "type": "string"
+        },
+        "player_id": {
+          "minLength": 1,
+          "title": "Player Id",
+          "type": "string"
+        },
+        "actor_id": {
+          "minLength": 1,
+          "title": "Actor Id",
+          "type": "string"
+        },
+        "client_action_id": {
+          "minLength": 1,
+          "title": "Client Action Id",
+          "type": "string"
+        },
+        "utterance": {
+          "minLength": 1,
+          "title": "Utterance",
+          "type": "string"
+        }
+      },
+      "required": [
+        "room_id",
+        "player_id",
+        "actor_id",
+        "client_action_id",
+        "utterance"
+      ],
+      "title": "PlayerInput",
+      "type": "object"
+    },
+    "StateChange": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "from": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "to": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "cause": {
+          "title": "Cause",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "from",
+        "to",
+        "cause"
+      ],
+      "title": "StateChange",
+      "type": "object"
+    },
+    "StateModifiedEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "sequence": {
+          "minimum": 1,
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "type": {
+          "const": "state.modified",
+          "default": "state.modified",
+          "title": "Type",
+          "type": "string"
+        },
+        "room_id": {
+          "title": "Room Id",
+          "type": "string"
+        },
+        "actor_id": {
+          "title": "Actor Id",
+          "type": "string"
+        },
+        "client_action_id": {
+          "title": "Client Action Id",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "from": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "to": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "cause": {
+          "title": "Cause",
+          "type": "string"
+        },
+        "visibility": {
+          "default": "public",
+          "enum": [
+            "public",
+            "private",
+            "hidden"
+          ],
+          "title": "Visibility",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_id",
+        "sequence",
+        "room_id",
+        "actor_id",
+        "client_action_id",
+        "path",
+        "from",
+        "to",
+        "cause"
+      ],
+      "title": "StateModifiedEvent",
+      "type": "object"
+    },
+    "SummaryOperation": {
+      "additionalProperties": false,
+      "description": "Non-authoritative proposal returned to the host; it is not persisted here.",
+      "properties": {
+        "op": {
+          "const": "append_turn_summary",
+          "default": "append_turn_summary",
+          "title": "Op",
+          "type": "string"
+        },
+        "room_id": {
+          "title": "Room Id",
+          "type": "string"
+        },
+        "client_action_id": {
+          "title": "Client Action Id",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "source_event_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Source Event Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "room_id",
+        "client_action_id",
+        "text"
+      ],
+      "title": "SummaryOperation",
+      "type": "object"
+    },
+    "TurnContext": {
+      "additionalProperties": false,
+      "properties": {
+        "scene_id": {
+          "title": "Scene Id",
+          "type": "string"
+        },
+        "phase": {
+          "enum": [
+            "playing",
+            "ended"
+          ],
+          "title": "Phase",
+          "type": "string"
+        },
+        "visible_entities": {
+          "items": {
+            "$ref": "#/$defs/VisibleEntity"
+          },
+          "title": "Visible Entities",
+          "type": "array"
+        },
+        "checkpoint_options": {
+          "items": {
+            "$ref": "#/$defs/CheckpointOption"
+          },
+          "title": "Checkpoint Options",
+          "type": "array"
+        }
+      },
+      "required": [
+        "scene_id",
+        "phase"
+      ],
+      "title": "TurnContext",
+      "type": "object"
+    },
+    "UnmatchedTarget": {
+      "additionalProperties": false,
+      "properties": {
+        "matched": {
+          "const": false,
+          "default": false,
+          "title": "Matched",
+          "type": "boolean"
+        },
+        "raw": {
+          "title": "Raw",
+          "type": "string"
+        }
+      },
+      "required": [
+        "raw"
+      ],
+      "title": "UnmatchedTarget",
+      "type": "object"
+    },
+    "VisibleEntity": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "npc",
+            "object",
+            "location"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "aliases": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Aliases",
+          "type": "array"
+        },
+        "content": {
+          "title": "Content",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "name",
+        "content"
+      ],
+      "title": "VisibleEntity",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Ephemeral LangGraph state for exactly one player input.",
+  "properties": {
+    "player_input": {
+      "$ref": "#/$defs/PlayerInput"
+    },
+    "context": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TurnContext"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "intent": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Intent"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "action_result": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ActionResult"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "narration": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/NarrationOutput"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "summary_op": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SummaryOperation"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "status": {
+      "default": "running",
+      "enum": [
+        "running",
+        "clarification",
+        "completed"
+      ],
+      "title": "Status",
+      "type": "string"
+    }
+  },
+  "required": [
+    "player_input"
+  ],
+  "title": "TurnState",
+  "type": "object"
+}

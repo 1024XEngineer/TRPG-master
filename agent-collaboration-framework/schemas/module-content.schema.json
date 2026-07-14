@@ -1,0 +1,494 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "module-content.schema.json",
+  "$defs": {
+    "AllowOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "const": "allow",
+          "default": "allow",
+          "title": "Op",
+          "type": "string"
+        },
+        "action": {
+          "minLength": 1,
+          "title": "Action",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "title": "AllowOperation",
+      "type": "object"
+    },
+    "Checkpoint": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "scene_id": {
+          "minLength": 1,
+          "title": "Scene Id",
+          "type": "string"
+        },
+        "action": {
+          "minLength": 1,
+          "title": "Action",
+          "type": "string"
+        },
+        "target_id": {
+          "minLength": 1,
+          "title": "Target Id",
+          "type": "string"
+        },
+        "skills": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Skills",
+          "type": "array"
+        },
+        "difficulty": {
+          "enum": [
+            "regular",
+            "hard",
+            "extreme"
+          ],
+          "title": "Difficulty",
+          "type": "string"
+        },
+        "mvp_check_result": {
+          "default": "success",
+          "enum": [
+            "success",
+            "failure"
+          ],
+          "title": "Mvp Check Result",
+          "type": "string"
+        },
+        "outcomes": {
+          "$ref": "#/$defs/CheckpointOutcomes"
+        }
+      },
+      "required": [
+        "id",
+        "scene_id",
+        "action",
+        "target_id",
+        "skills",
+        "difficulty",
+        "outcomes"
+      ],
+      "title": "Checkpoint",
+      "type": "object"
+    },
+    "CheckpointOutcome": {
+      "additionalProperties": false,
+      "properties": {
+        "facts": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Facts",
+          "type": "array"
+        },
+        "player_visible_information": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Player Visible Information",
+          "type": "array"
+        },
+        "narration_constraints": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Narration Constraints",
+          "type": "array"
+        },
+        "ops": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "allow": "#/$defs/AllowOperation",
+                "modify": "#/$defs/ModifyOperation"
+              },
+              "propertyName": "op"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/AllowOperation"
+              },
+              {
+                "$ref": "#/$defs/ModifyOperation"
+              }
+            ]
+          },
+          "title": "Ops",
+          "type": "array"
+        }
+      },
+      "title": "CheckpointOutcome",
+      "type": "object"
+    },
+    "CheckpointOutcomes": {
+      "additionalProperties": false,
+      "properties": {
+        "success": {
+          "$ref": "#/$defs/CheckpointOutcome"
+        },
+        "failure": {
+          "$ref": "#/$defs/CheckpointOutcome"
+        }
+      },
+      "required": [
+        "success",
+        "failure"
+      ],
+      "title": "CheckpointOutcomes",
+      "type": "object"
+    },
+    "Condition": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "equals": {
+          "$ref": "#/$defs/JsonValue"
+        }
+      },
+      "required": [
+        "path",
+        "equals"
+      ],
+      "title": "Condition",
+      "type": "object"
+    },
+    "Entity": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "npc",
+            "object",
+            "location"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "aliases": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Aliases",
+          "type": "array"
+        },
+        "content": {
+          "title": "Content",
+          "type": "string"
+        },
+        "secrets": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Secrets"
+        },
+        "state": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "State",
+          "type": "object"
+        },
+        "refuse_ops": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Refuse Ops",
+          "type": "array"
+        },
+        "blocked_text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Blocked Text"
+        },
+        "direct_responses": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Direct Responses",
+          "type": "object"
+        },
+        "rules": {
+          "items": {
+            "$ref": "#/$defs/Rule"
+          },
+          "title": "Rules",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "name",
+        "content"
+      ],
+      "title": "Entity",
+      "type": "object"
+    },
+    "JsonValue": {},
+    "ModifyOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "const": "modify",
+          "default": "modify",
+          "title": "Op",
+          "type": "string"
+        },
+        "path": {
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "set": {
+          "$ref": "#/$defs/JsonValue"
+        }
+      },
+      "required": [
+        "path",
+        "set"
+      ],
+      "title": "ModifyOperation",
+      "type": "object"
+    },
+    "Rule": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "hook": {
+          "enum": [
+            "on_action",
+            "on_scene_enter",
+            "on_turn_end",
+            "on_check_resolve"
+          ],
+          "title": "Hook",
+          "type": "string"
+        },
+        "priority": {
+          "default": 0,
+          "title": "Priority",
+          "type": "integer"
+        },
+        "when": {
+          "$ref": "#/$defs/Condition"
+        },
+        "then": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "allow": "#/$defs/AllowOperation",
+                "modify": "#/$defs/ModifyOperation"
+              },
+              "propertyName": "op"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/AllowOperation"
+              },
+              {
+                "$ref": "#/$defs/ModifyOperation"
+              }
+            ]
+          },
+          "title": "Then",
+          "type": "array"
+        },
+        "facts": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Facts",
+          "type": "array"
+        },
+        "player_visible_information": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Player Visible Information",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "hook",
+        "when"
+      ],
+      "title": "Rule",
+      "type": "object"
+    },
+    "Scene": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "content": {
+          "title": "Content",
+          "type": "string"
+        },
+        "entity_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Entity Ids",
+          "type": "array"
+        },
+        "checkpoint_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Checkpoint Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "content"
+      ],
+      "title": "Scene",
+      "type": "object"
+    },
+    "WinCondition": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "when": {
+          "$ref": "#/$defs/Condition"
+        },
+        "fact": {
+          "title": "Fact",
+          "type": "string"
+        },
+        "player_visible_information": {
+          "title": "Player Visible Information",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "when",
+        "fact",
+        "player_visible_information"
+      ],
+      "title": "WinCondition",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "module_id": {
+      "minLength": 1,
+      "title": "Module Id",
+      "type": "string"
+    },
+    "version": {
+      "minLength": 1,
+      "title": "Version",
+      "type": "string"
+    },
+    "world_ref": {
+      "minLength": 1,
+      "title": "World Ref",
+      "type": "string"
+    },
+    "scenes": {
+      "items": {
+        "$ref": "#/$defs/Scene"
+      },
+      "title": "Scenes",
+      "type": "array"
+    },
+    "entities": {
+      "items": {
+        "$ref": "#/$defs/Entity"
+      },
+      "title": "Entities",
+      "type": "array"
+    },
+    "checkpoints": {
+      "items": {
+        "$ref": "#/$defs/Checkpoint"
+      },
+      "title": "Checkpoints",
+      "type": "array"
+    },
+    "win_conditions": {
+      "items": {
+        "$ref": "#/$defs/WinCondition"
+      },
+      "title": "Win Conditions",
+      "type": "array"
+    }
+  },
+  "required": [
+    "module_id",
+    "version",
+    "world_ref",
+    "scenes",
+    "entities",
+    "checkpoints",
+    "win_conditions"
+  ],
+  "title": "ModuleContent",
+  "type": "object"
+}

@@ -1,0 +1,253 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "engine-request.schema.json",
+  "$defs": {
+    "DefaultCheck": {
+      "additionalProperties": false,
+      "properties": {
+        "route": {
+          "const": "default",
+          "default": "default",
+          "title": "Route",
+          "type": "string"
+        },
+        "proposed_skills": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Proposed Skills",
+          "type": "array"
+        }
+      },
+      "title": "DefaultCheck",
+      "type": "object"
+    },
+    "Intent": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "communicate",
+            "interact",
+            "unknown"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "action": {
+          "enum": [
+            "talk",
+            "investigate",
+            "open",
+            "smash",
+            "interact",
+            "unknown"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "target": {
+          "discriminator": {
+            "mapping": {
+              "False": "#/$defs/UnmatchedTarget",
+              "True": "#/$defs/MatchedTarget"
+            },
+            "propertyName": "matched"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/MatchedTarget"
+            },
+            {
+              "$ref": "#/$defs/UnmatchedTarget"
+            }
+          ],
+          "title": "Target"
+        },
+        "check": {
+          "discriminator": {
+            "mapping": {
+              "default": "#/$defs/DefaultCheck",
+              "module": "#/$defs/ModuleCheck",
+              "none": "#/$defs/NoCheck"
+            },
+            "propertyName": "route"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/NoCheck"
+            },
+            {
+              "$ref": "#/$defs/ModuleCheck"
+            },
+            {
+              "$ref": "#/$defs/DefaultCheck"
+            }
+          ],
+          "title": "Check"
+        },
+        "narrative_intent": {
+          "title": "Narrative Intent",
+          "type": "string"
+        },
+        "clarification_question": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Clarification Question"
+        }
+      },
+      "required": [
+        "kind",
+        "action",
+        "target",
+        "check",
+        "narrative_intent"
+      ],
+      "title": "Intent",
+      "type": "object"
+    },
+    "MatchedTarget": {
+      "additionalProperties": false,
+      "properties": {
+        "matched": {
+          "const": true,
+          "default": true,
+          "title": "Matched",
+          "type": "boolean"
+        },
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "MatchedTarget",
+      "type": "object"
+    },
+    "ModuleCheck": {
+      "additionalProperties": false,
+      "properties": {
+        "route": {
+          "const": "module",
+          "default": "module",
+          "title": "Route",
+          "type": "string"
+        },
+        "checkpoint_id": {
+          "minLength": 1,
+          "title": "Checkpoint Id",
+          "type": "string"
+        },
+        "proposed_skills": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Proposed Skills",
+          "type": "array"
+        }
+      },
+      "required": [
+        "checkpoint_id"
+      ],
+      "title": "ModuleCheck",
+      "type": "object"
+    },
+    "NoCheck": {
+      "additionalProperties": false,
+      "properties": {
+        "route": {
+          "const": "none",
+          "default": "none",
+          "title": "Route",
+          "type": "string"
+        }
+      },
+      "title": "NoCheck",
+      "type": "object"
+    },
+    "PlayerInput": {
+      "additionalProperties": false,
+      "properties": {
+        "room_id": {
+          "minLength": 1,
+          "title": "Room Id",
+          "type": "string"
+        },
+        "player_id": {
+          "minLength": 1,
+          "title": "Player Id",
+          "type": "string"
+        },
+        "actor_id": {
+          "minLength": 1,
+          "title": "Actor Id",
+          "type": "string"
+        },
+        "client_action_id": {
+          "minLength": 1,
+          "title": "Client Action Id",
+          "type": "string"
+        },
+        "utterance": {
+          "minLength": 1,
+          "title": "Utterance",
+          "type": "string"
+        }
+      },
+      "required": [
+        "room_id",
+        "player_id",
+        "actor_id",
+        "client_action_id",
+        "utterance"
+      ],
+      "title": "PlayerInput",
+      "type": "object"
+    },
+    "UnmatchedTarget": {
+      "additionalProperties": false,
+      "properties": {
+        "matched": {
+          "const": false,
+          "default": false,
+          "title": "Matched",
+          "type": "boolean"
+        },
+        "raw": {
+          "title": "Raw",
+          "type": "string"
+        }
+      },
+      "required": [
+        "raw"
+      ],
+      "title": "UnmatchedTarget",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "player_input": {
+      "$ref": "#/$defs/PlayerInput"
+    },
+    "intent": {
+      "$ref": "#/$defs/Intent"
+    }
+  },
+  "required": [
+    "player_input",
+    "intent"
+  ],
+  "title": "EngineRequest",
+  "type": "object"
+}

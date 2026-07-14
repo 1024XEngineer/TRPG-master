@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "event.schema.json",
+  "$defs": {
+    "JsonValue": {}
+  },
+  "additionalProperties": false,
+  "properties": {
+    "event_id": {
+      "title": "Event Id",
+      "type": "string"
+    },
+    "sequence": {
+      "minimum": 1,
+      "title": "Sequence",
+      "type": "integer"
+    },
+    "type": {
+      "const": "state.modified",
+      "default": "state.modified",
+      "title": "Type",
+      "type": "string"
+    },
+    "room_id": {
+      "title": "Room Id",
+      "type": "string"
+    },
+    "actor_id": {
+      "title": "Actor Id",
+      "type": "string"
+    },
+    "client_action_id": {
+      "title": "Client Action Id",
+      "type": "string"
+    },
+    "path": {
+      "title": "Path",
+      "type": "string"
+    },
+    "from": {
+      "$ref": "#/$defs/JsonValue"
+    },
+    "to": {
+      "$ref": "#/$defs/JsonValue"
+    },
+    "cause": {
+      "title": "Cause",
+      "type": "string"
+    },
+    "visibility": {
+      "default": "public",
+      "enum": [
+        "public",
+        "private",
+        "hidden"
+      ],
+      "title": "Visibility",
+      "type": "string"
+    }
+  },
+  "required": [
+    "event_id",
+    "sequence",
+    "room_id",
+    "actor_id",
+    "client_action_id",
+    "path",
+    "from",
+    "to",
+    "cause"
+  ],
+  "title": "StateModifiedEvent",
+  "type": "object"
+}

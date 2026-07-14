@@ -90,8 +90,10 @@ cd trpg-app
 npm install
 npm run dev        # → http://localhost:9877
 
-# Mock 模式默认开启，无需后端即可体验完整 UI 流程。
-# 对接真实后端：设置 VITE_MOCK_API=false
+# 后端
+cd backend
+uv sync
+uv run uvicorn app.main:app --reload
 ```
 
 ---
@@ -110,4 +112,3 @@ npm run dev        # → http://localhost:9877
 ## 许可
 
 MIT · [1024 XEngineer Camp](https://github.com/1024XEngineer) Season 6
-

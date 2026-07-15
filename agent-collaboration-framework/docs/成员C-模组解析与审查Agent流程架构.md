@@ -292,10 +292,13 @@ unresolved_questions
 
 ### 6.3 `ModuleContent`
 
-MVP 顶层最小结构：
+MVP 顶层最小结构如下。它必须逐字段同步 Pydantic `ModuleContent`；自动生成的
+`schemas/module-content.schema.json` 是 JSON 校验产物，文档示例不是独立契约：
 
 ```json
 {
+  "module_id": "study-demo",
+  "version": "0.1.0",
   "world_ref": "coc-7e",
   "scenes": [],
   "entities": [],
@@ -303,6 +306,8 @@ MVP 顶层最小结构：
   "win_conditions": []
 }
 ```
+
+顶层不接受 `rules`；规则挂在 `Entity.rules`。
 
 Entity MVP 子集：
 

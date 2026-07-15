@@ -5,6 +5,7 @@
     "expected_kind": "communicate",
     "expected_action": "talk",
     "expected_target": "butler",
+    "expected_execution": "narrative",
     "expected_check_route": "none"
   },
   {
@@ -13,6 +14,7 @@
     "expected_kind": "communicate",
     "expected_action": "talk",
     "expected_target": "butler",
+    "expected_execution": "narrative",
     "expected_check_route": "none"
   },
   {
@@ -21,6 +23,7 @@
     "expected_kind": "interact",
     "expected_action": "investigate",
     "expected_target": "bookshelf",
+    "expected_execution": "engine",
     "expected_check_route": "module"
   },
   {
@@ -29,6 +32,7 @@
     "expected_kind": "interact",
     "expected_action": "investigate",
     "expected_target": "bookshelf",
+    "expected_execution": "engine",
     "expected_check_route": "module"
   },
   {
@@ -37,7 +41,8 @@
     "expected_kind": "interact",
     "expected_action": "open",
     "expected_target": "cabinet",
-    "expected_check_route": "default"
+    "expected_execution": "engine",
+    "expected_check_route": "none"
   },
   {
     "case_id": "open_cabinet_with_key",
@@ -45,7 +50,8 @@
     "expected_kind": "interact",
     "expected_action": "open",
     "expected_target": "cabinet",
-    "expected_check_route": "default"
+    "expected_execution": "engine",
+    "expected_check_route": "none"
   },
   {
     "case_id": "smash_cabinet",
@@ -53,6 +59,7 @@
     "expected_kind": "interact",
     "expected_action": "smash",
     "expected_target": "cabinet",
+    "expected_execution": "engine",
     "expected_check_route": "module"
   },
   {
@@ -61,6 +68,7 @@
     "expected_kind": "interact",
     "expected_action": "investigate",
     "expected_target": "window",
+    "expected_execution": "narrative",
     "expected_check_route": "none"
   },
   {
@@ -69,6 +77,7 @@
     "expected_kind": "interact",
     "expected_action": "investigate",
     "expected_target": "cabinet",
+    "expected_execution": "narrative",
     "expected_check_route": "none"
   },
   {
@@ -77,6 +86,7 @@
     "expected_kind": "interact",
     "expected_action": "interact",
     "expected_target": "cabinet",
+    "expected_execution": "narrative",
     "expected_check_route": "none"
   },
   {
@@ -85,6 +95,7 @@
     "expected_kind": "unknown",
     "expected_action": "unknown",
     "expected_target": null,
+    "expected_execution": "narrative",
     "expected_check_route": "none"
   },
   {
@@ -93,6 +104,7 @@
     "expected_kind": "unknown",
     "expected_action": "unknown",
     "expected_target": null,
+    "expected_execution": "narrative",
     "expected_check_route": "none"
   }
 ]

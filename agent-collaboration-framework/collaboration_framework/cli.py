@@ -1,4 +1,4 @@
-"""CLI demo: validated JSON in, one checkpointer-free graph turn out."""
+"""Developer CLI: validated JSON in, host-internal TurnOutput out."""
 
 from __future__ import annotations
 
@@ -27,7 +27,9 @@ def _load_model(path: str, model_type: type[ModelT]) -> ModelT:
 
 def build_parser(settings: AgentSettings | None = None) -> argparse.ArgumentParser:
     settings = settings or AgentSettings.from_env()
-    parser = argparse.ArgumentParser(description="Run one stateless LangGraph turn")
+    parser = argparse.ArgumentParser(
+        description="Run one stateless graph turn and print host-internal TurnOutput"
+    )
     parser.add_argument("--module", required=True, help="ModuleContent JSON")
     parser.add_argument("--state", required=True, help="Fake-engine GameState JSON")
     parser.add_argument("--input", required=True, help="PlayerInput JSON, or - for stdin")

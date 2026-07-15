@@ -60,16 +60,6 @@
           "title": "Client Action Id",
           "type": "string"
         },
-        "path": {
-          "title": "Path",
-          "type": "string"
-        },
-        "from": {
-          "$ref": "#/$defs/JsonValue"
-        },
-        "to": {
-          "$ref": "#/$defs/JsonValue"
-        },
         "cause": {
           "title": "Cause",
           "type": "string"
@@ -83,6 +73,9 @@
           ],
           "title": "Visibility",
           "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/StateModifiedPayload"
         }
       },
       "required": [
@@ -91,12 +84,33 @@
         "room_id",
         "actor_id",
         "client_action_id",
-        "path",
-        "from",
-        "to",
-        "cause"
+        "cause",
+        "payload"
       ],
       "title": "StateModifiedEvent",
+      "type": "object"
+    },
+    "StateModifiedPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "from": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "to": {
+          "$ref": "#/$defs/JsonValue"
+        }
+      },
+      "required": [
+        "path",
+        "from",
+        "to"
+      ],
+      "title": "StateModifiedPayload",
       "type": "object"
     }
   },

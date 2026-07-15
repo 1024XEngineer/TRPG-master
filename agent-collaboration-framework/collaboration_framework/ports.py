@@ -1,7 +1,7 @@
 """Framework-independent collaboration ports.
 
 Only Pydantic contracts appear in these signatures. LangGraph nodes are thin
-adapters around these four ports, so changing the orchestration framework does
+adapters around the runtime ports, so changing the orchestration framework does
 not require changes in component implementations.
 """
 
@@ -17,6 +17,7 @@ from .contracts import (
     NarrationOutput,
     NarrationRequest,
     PlayerInput,
+    SummaryOperation,
     TurnContext,
 )
 
@@ -37,3 +38,9 @@ class AtomicActionEngine(Protocol):
 
 class Narrator(Protocol):
     async def narrate(self, request: NarrationRequest) -> NarrationOutput: ...
+
+
+class SummaryOutbox(Protocol):
+    """Host-consumed boundary; intentionally not a LangGraph dependency."""
+
+    async def enqueue(self, operation: SummaryOperation) -> None: ...

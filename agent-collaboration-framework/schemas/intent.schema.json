@@ -107,6 +107,14 @@
   },
   "additionalProperties": false,
   "properties": {
+    "execution": {
+      "enum": [
+        "narrative",
+        "engine"
+      ],
+      "title": "Execution",
+      "type": "string"
+    },
     "kind": {
       "enum": [
         "communicate",
@@ -186,6 +194,7 @@
     }
   },
   "required": [
+    "execution",
     "kind",
     "action",
     "target",

@@ -11,6 +11,7 @@ from ..contracts import (
     Checkpoint,
     Condition,
     ContractError,
+    DefaultCheck,
     Entity,
     EngineRequest,
     GameState,
@@ -23,6 +24,7 @@ from ..contracts import (
     Rule,
     StateChange,
     StateModifiedEvent,
+    StateModifiedPayload,
     TurnContext,
     VisibleEntity,
 )
@@ -35,9 +37,6 @@ from ..contracts import (
 class _RuleKernel:
     """In-process demo kernel; LangGraph never calls its internal phases."""
 
-    def __init__(self) -> None:
-        self._completed_actions: dict[str, ActionResult] = {}
-
     def execute(
         self,
         *,
@@ -49,19 +48,11 @@ class _RuleKernel:
         module_content: ModuleContent,
         game_state: GameState,
     ) -> tuple[ActionResult, GameState, list[StateModifiedEvent]]:
-        if client_action_id in self._completed_actions:
-            return (
-                self._completed_actions[client_action_id].model_copy(deep=True),
-                game_state.model_copy(deep=True),
-                [],
-            )
-
         state = game_state.model_dump(mode="python", by_alias=True)
         self._validate_execution_context(room_id, player_id, actor_id, state)
 
         if intent.kind == "unknown" or not isinstance(intent.target, MatchedTarget):
-            return self._remember(
-                client_action_id,
+            return self._finalize(
                 self._result(
                     success=False,
                     resolution="unrecognized",
@@ -75,8 +66,7 @@ class _RuleKernel:
         scene = self._scene(module_content, str(state["scene_id"]))
         target_id = intent.target.id
         if target_id not in scene.entity_ids:
-            return self._remember(
-                client_action_id,
+            return self._finalize(
                 self._result(
                     success=False,
                     resolution="blocked",
@@ -96,8 +86,7 @@ class _RuleKernel:
 
         allowing_rule = self._allowing_rule(entity, action, state)
         if action in entity.refuse_ops and allowing_rule is None:
-            return self._remember(
-                client_action_id,
+            return self._finalize(
                 self._result(
                     success=False,
                     resolution="blocked",
@@ -135,6 +124,17 @@ class _RuleKernel:
             constraints.extend(outcome.narration_constraints)
             success = outcome_name == "success"
             resolution = "checkpoint"
+        elif isinstance(intent.check, DefaultCheck):
+            return self._finalize(
+                self._result(
+                    success=False,
+                    resolution="unrecognized",
+                    visible=["当前世界尚未提供可执行的默认检定。"],
+                    constraints=["不得把缺少定义的默认检定叙述为成功"],
+                ),
+                state,
+                [],
+            )
         else:
             if allowing_rule:
                 for operation in allowing_rule.then:
@@ -174,7 +174,7 @@ class _RuleKernel:
             state_changes=[self._event_to_change(event) for event in events],
             constraints=constraints,
         )
-        return self._remember(client_action_id, result, state, events)
+        return self._finalize(result, state, events)
 
     @staticmethod
     def _validate_execution_context(
@@ -314,10 +314,12 @@ class _RuleKernel:
                 room_id=room_id,
                 actor_id=actor_id,
                 client_action_id=client_action_id,
-                path=path,
-                from_value=before,
-                to=after,
                 cause=cause,
+                payload=StateModifiedPayload(
+                    path=path,
+                    from_value=before,
+                    to=after,
+                ),
             )
         )
 
@@ -366,9 +368,9 @@ class _RuleKernel:
     @staticmethod
     def _event_to_change(event: StateModifiedEvent) -> StateChange:
         return StateChange(
-            path=event.path,
-            from_value=event.from_value,
-            to=event.to,
+            path=event.payload.path,
+            from_value=event.payload.from_value,
+            to=event.payload.to,
             cause=event.cause,
         )
 
@@ -391,15 +393,13 @@ class _RuleKernel:
             narration_constraints=constraints or [],
         )
 
-    def _remember(
-        self,
-        client_action_id: str,
+    @staticmethod
+    def _finalize(
         result: ActionResult,
         state: dict[str, Any],
         events: list[StateModifiedEvent],
     ) -> tuple[ActionResult, GameState, list[StateModifiedEvent]]:
         validated_state = GameState.model_validate(state)
-        self._completed_actions[client_action_id] = result.model_copy(deep=True)
         return (
             result.model_copy(deep=True),
             validated_state,
@@ -418,6 +418,7 @@ class FakeAtomicEngine:
         self._module = module_content.model_copy(deep=True)
         self._state = initial_state.model_copy(deep=True)
         self._kernel = _RuleKernel()
+        self._completed_actions: dict[str, ActionResult] = {}
 
     async def assemble_context(self, player_input: PlayerInput) -> TurnContext:
         self._validate_identity(player_input)
@@ -457,6 +458,11 @@ class FakeAtomicEngine:
         """Represent the production engine's single atomic transaction call."""
 
         self._validate_identity(request.player_input)
+        client_action_id = request.player_input.client_action_id
+        cached = self._completed_actions.get(client_action_id)
+        if cached is not None:
+            return cached.model_copy(deep=True)
+
         # The kernel works on a detached snapshot. Publish the new state only after
         # the complete call and output validation succeed.
         result, new_state, events = self._kernel.execute(
@@ -472,7 +478,8 @@ class FakeAtomicEngine:
         payload.update(events=events, state_version=new_state.event_sequence)
         committed = ActionResult.model_validate(payload)
         self._state = new_state
-        return committed
+        self._completed_actions[client_action_id] = committed.model_copy(deep=True)
+        return committed.model_copy(deep=True)
 
     def snapshot(self) -> GameState:
         """Test/demo inspection only; production callers read a materialized view."""

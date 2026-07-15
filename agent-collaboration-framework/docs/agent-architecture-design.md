@@ -145,11 +145,11 @@ LLM / Agent：理解自然语言、进行语义判断、组织叙事
   ↓
 主持编排 Agent
   ↓
-ActionPlan / Check / Op 提议
-  ↓
-确定性规则引擎
-  ↓
-ConfirmedOutcome + GameState + EventLog
+Intent（execution + CheckProposal）
+  ├─ execution=narrative → 直接叙事
+  └─ execution=engine → 确定性规则引擎
+                         ↓
+                       ActionResult（GameState / EventLog 由引擎内部持有）
   ↓
 主持编排 Agent
   ↓
@@ -165,16 +165,17 @@ ConfirmedOutcome + GameState + EventLog
 模组解析 Agent 负责将模组原文转化为结构化 Content 数据，包括但不限于：
 
 ```text
-ModulePack
-Scene
-Entity
-Checkpoint
-SanTrigger
-WinCondition
-Rule
-Condition
-初始 Entity.state
+ModuleContent
+├── Scene
+├── Entity（含 Rule 与初始 state）
+├── Checkpoint
+└── WinCondition
 ```
+
+当前运行时输入契约以 `collaboration_framework/contracts.py` 中的 Pydantic
+`ModuleContent` 为唯一事实源，以自动生成的 `schemas/module-content.schema.json`
+作为 JSON 校验产物。更完整的 `ModulePack`、`SanTrigger` 等逻辑数据模型是导入流程
+内部的扩展设计，不能直接当作当前跨组件输入 JSON。
 
 它类似“编译器前端”：
 
@@ -319,12 +320,12 @@ MVP 阶段先采用一个主持编排 Agent 前后贯穿：
 1. 读取当前可见上下文
 2. 理解玩家意图
 3. 拆分复合动作
-4. 判断纯叙事行为或规则敏感行为
-5. 匹配 Checkpoint 或构造临时检定
+4. 提议 `execution=narrative|engine`
+5. 提议 `check.route=none|module|default`
 6. 选择一个或多个预设流水线
-7. 生成 ActionPlan / Op 提议
-8. 调用确定性引擎
-9. 读取 ConfirmedOutcome
+7. 生成 `Intent`
+8. `execution=narrative` 时直接进入叙事；`execution=engine` 时组装 `EngineRequest` 并调用确定性引擎
+9. 引擎分支读取 `ActionResult`
 10. 扮演 NPC、描述场景、组织节奏
 11. 输出玩家可见回复
 ```
@@ -450,7 +451,7 @@ Agent 提议 Action / Op
 - 匹配 Checkpoint；
 - 选择流水线；
 - 拆分复合动作；
-- 生成结构化 ActionPlan。
+- 生成结构化 `Intent`。
 
 #### 回复编排 Agent
 
@@ -602,8 +603,8 @@ narrative_freedom：允许自由发挥
 需要稳定定义：
 
 ```text
-ActionPlan
-ConfirmedOutcome
+Intent / EngineRequest
+ActionResult
 NarrationInput
 ```
 
@@ -639,46 +640,40 @@ NarrationInput
 
 即使 MVP 使用单 Agent，也应从一开始定义以下中间结构。
 
-### 12.1 ActionPlan
+### 12.1 Intent / EngineRequest
 
-表示玩家行为经过理解后的结构化方案。
+主持 Agent 输出 `Intent`；编排层再将可信 `PlayerInput` 与 `Intent`
+组装成 `EngineRequest`。身份和幂等字段不由模型写入 `Intent`。
 
 ```json
 {
-  "route": "engine",
-  "intent": "steal_item",
-  "target": "guard_key",
-  "pipeline": "check",
-  "checkpoint_id": null,
+  "execution": "engine",
+  "kind": "interact",
+  "action": "investigate",
+  "target": {"matched": true, "id": "bookshelf"},
   "check": {
-    "skill": "sleight_of_hand",
-    "difficulty": "regular"
+    "route": "module",
+    "checkpoint_id": "investigate_bookshelf",
+    "proposed_skills": ["spot_hidden"]
   },
-  "narrative_intent": {
-    "approach": "假装喝醉接近守卫",
-    "tone": "隐蔽、试探",
-    "fallback": "被发现后推开守卫逃跑"
-  }
+  "narrative_intent": "仔细调查书架",
+  "clarification_question": null
 }
 ```
 
-建议字段：
+`execution` 与 `check.route` 是两个独立维度：前者决定是否调用引擎，后者只决定
+引擎内的检定来源。`execution=engine + check.route=none` 表示进入完整规则流水线，
+但不调用检定解析器。
+
+`EngineRequest` 只是编排层的信任边界信封：
 
 ```text
-route
-intent
-target
-pipeline
-checkpoint_id
-subactions
-check
-proposed_ops
-narrative_intent
-confidence
-needs_clarification
+EngineRequest
+  player_input: PlayerInput
+  intent: Intent
 ```
 
-### 12.2 ConfirmedOutcome
+### 12.2 ActionResult
 
 表示引擎已经确定、不可由叙事层修改的结果。
 
@@ -723,17 +718,27 @@ next_required_action
 
 叙事层不得在 `state_claims` 中宣称未经引擎确认的关键事实。
 
+### 12.4 宿主输出与摘要 outbox
+
+`TurnOutput` 是宿主内部结果，包含 `PlayerInput`、`Intent`、`ActionResult`、
+`NarrationOutput` 和可选 `SummaryOperation`，不得整体发送给玩家。玩家通道只投影
+`NarrationOutput` 和 ViewProjector 明确允许公开的视图。
+
+`SummaryOperation` 是宿主在回合完成后投递的 outbox 命令，不是引擎 Op。消费者只可
+幂等更新非权威会话摘要，不能写 `GameState`、追加 Event 或绕过
+`AtomicActionEngine` 改变游戏事实。
+
 ---
 
 ## 13. 单 Agent 运行期建议流程
 
 ```text
 Step 1：读取玩家输入与当前可见上下文
-Step 2：生成 ActionPlan
-Step 3：若 route == narrative，直接生成回复
-Step 4：若 route == engine，调用确定性引擎
-Step 5：引擎返回 ConfirmedOutcome
-Step 6：基于玩家原话 + ActionPlan + ConfirmedOutcome 生成叙事
+Step 2：生成 Intent
+Step 3：根据 `Intent.execution` 进入澄清、直接叙事或引擎分支
+Step 4：需要引擎时，组装 EngineRequest 并调用确定性引擎
+Step 5：引擎返回 ActionResult
+Step 6：基于玩家原话 + Intent + ActionResult 生成叙事
 Step 7：检查叙事是否违反 confirmed_facts 或 narration_constraints
 Step 8：向玩家输出
 ```
@@ -867,4 +872,4 @@ Agent 可以辅助发现风险
 
 ## 18. 一句话总结
 
-> 顶层按生命周期划分模块，Agent 按上下文、权限、输出目标和失败模式划分。MVP 采用“解析 Agent + 审查 Agent + 主持编排 Agent + 确定性引擎”；游戏运行期先用一个主持编排 Agent 跑通闭环，同时通过 ActionPlan 和 ConfirmedOutcome 保留未来拆成双 Agent 的能力。
+> 顶层按生命周期划分模块，Agent 按上下文、权限、输出目标和失败模式划分。MVP 采用“解析 Agent + 审查 Agent + 主持编排 Agent + 确定性引擎”；游戏运行期先用一个主持编排 Agent 跑通闭环，同时通过 Intent、EngineRequest 和 ActionResult 保留未来拆成双 Agent 的能力。

@@ -298,6 +298,7 @@ CheckProposal = Annotated[
 
 
 class Intent(ContractModel):
+    execution: Literal["narrative", "engine"]
     kind: Literal["communicate", "interact", "unknown"]
     action: Literal["talk", "investigate", "open", "smash", "interact", "unknown"]
     target: IntentTarget
@@ -309,6 +310,8 @@ class Intent(ContractModel):
     def validate_routing_shape(self) -> Intent:
         unknown = self.kind == "unknown" or self.action == "unknown"
         if unknown:
+            if self.execution != "narrative":
+                raise ValueError("unknown Intent 只能进入 narrative 分支")
             if not isinstance(self.target, UnmatchedTarget):
                 raise ValueError("unknown Intent 必须使用 unmatched target")
             if not isinstance(self.check, NoCheck):
@@ -320,6 +323,8 @@ class Intent(ContractModel):
                 raise ValueError("可执行 Intent 必须使用 matched target")
             if self.clarification_question is not None:
                 raise ValueError("可执行 Intent 不得携带 clarification_question")
+        if self.execution == "narrative" and not isinstance(self.check, NoCheck):
+            raise ValueError("narrative 分支不能发起规则检定")
         return self
 
 
@@ -329,8 +334,8 @@ class EngineRequest(ContractModel):
 
     @model_validator(mode="after")
     def require_engine_route(self) -> EngineRequest:
-        if isinstance(self.intent.check, NoCheck):
-            raise ValueError("route=none 不应进入 engine_node")
+        if self.intent.execution != "engine":
+            raise ValueError("只有 execution=engine 才能组装 EngineRequest")
         return self
 
 
@@ -341,6 +346,12 @@ class StateChange(ContractModel):
     cause: str
 
 
+class StateModifiedPayload(ContractModel):
+    path: str = Field(min_length=1)
+    from_value: JsonValue = Field(alias="from")
+    to: JsonValue
+
+
 class StateModifiedEvent(ContractModel):
     event_id: str
     sequence: int = Field(ge=1)
@@ -348,11 +359,9 @@ class StateModifiedEvent(ContractModel):
     room_id: str
     actor_id: str
     client_action_id: str
-    path: str
-    from_value: JsonValue = Field(alias="from")
-    to: JsonValue
     cause: str
     visibility: Literal["public", "private", "hidden"] = "public"
+    payload: StateModifiedPayload
 
 
 class ActionResult(ContractModel):
@@ -375,8 +384,10 @@ class NarrationRequest(ContractModel):
 
     @model_validator(mode="after")
     def require_engine_result_when_routed(self) -> NarrationRequest:
-        if not isinstance(self.intent.check, NoCheck) and self.action_result is None:
-            raise ValueError("module/default 路由必须先取得 ActionResult")
+        if self.intent.execution == "engine" and self.action_result is None:
+            raise ValueError("execution=engine 必须先取得 ActionResult")
+        if self.intent.execution == "narrative" and self.action_result is not None:
+            raise ValueError("execution=narrative 不得携带 ActionResult")
         return self
 
 
@@ -388,7 +399,11 @@ class NarrationOutput(ContractModel):
 
 
 class SummaryOperation(ContractModel):
-    """Non-authoritative proposal returned to the host; it is not persisted here."""
+    """Host-side outbox command for a non-authoritative conversation summary.
+
+    A consumer may update only the summary store and must deduplicate by
+    ``(room_id, client_action_id)``. It must never write GameState or EventLog.
+    """
 
     op: Literal["append_turn_summary"] = "append_turn_summary"
     room_id: str
@@ -410,6 +425,8 @@ class TurnState(ContractModel):
 
 
 class TurnOutput(ContractModel):
+    """Host-internal turn result; never serialize this model to a player."""
+
     status: Literal["clarification", "completed"]
     player_input: PlayerInput
     intent: Intent
@@ -429,3 +446,8 @@ class TurnOutput(ContractModel):
             narration=state.narration,
             summary_op=state.summary_op,
         )
+
+    def to_player_output(self) -> NarrationOutput:
+        """Project the only currently supported player-facing output."""
+
+        return self.narration.model_copy(deep=True)

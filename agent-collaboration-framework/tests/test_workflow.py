@@ -15,6 +15,7 @@ from collaboration_framework.contracts import (
     Intent,
     InterpretRequest,
     ModuleContent,
+    NarrationOutput,
     NarrationRequest,
     PlayerInput,
     TurnState,
@@ -64,6 +65,7 @@ class CountingAgent:
         self.inner = FakeRuntimeAgent()
         self.interpret_calls = 0
         self.narrate_calls = 0
+        self.last_narration_request = None
 
     async def interpret(self, request):
         self.interpret_calls += 1
@@ -71,6 +73,7 @@ class CountingAgent:
 
     async def narrate(self, request):
         self.narrate_calls += 1
+        self.last_narration_request = request
         return await self.inner.narrate(request)
 
 
@@ -118,6 +121,48 @@ class LangGraphWorkflowTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             PlayerInput.model_validate(payload)
 
+    def test_execution_and_check_are_independent_contract_dimensions(self) -> None:
+        engine_no_check = Intent.model_validate(
+            {
+                "execution": "engine",
+                "kind": "interact",
+                "action": "open",
+                "target": {"matched": True, "id": "cabinet"},
+                "check": {"route": "none"},
+                "narrative_intent": "打开柜子",
+            }
+        )
+        request = EngineRequest(player_input=self.player_input, intent=engine_no_check)
+        self.assertEqual(request.intent.check.route, "none")
+
+        with self.assertRaises(ValidationError):
+            Intent.model_validate(
+                {
+                    "execution": "narrative",
+                    "kind": "interact",
+                    "action": "investigate",
+                    "target": {"matched": True, "id": "bookshelf"},
+                    "check": {
+                        "route": "module",
+                        "checkpoint_id": "investigate_bookshelf",
+                    },
+                    "narrative_intent": "调查书架",
+                }
+            )
+
+        narrative = Intent.model_validate(
+            {
+                "execution": "narrative",
+                "kind": "communicate",
+                "action": "talk",
+                "target": {"matched": True, "id": "butler"},
+                "check": {"route": "none"},
+                "narrative_intent": "和管家闲聊",
+            }
+        )
+        with self.assertRaises(ValidationError):
+            EngineRequest(player_input=self.player_input, intent=narrative)
+
     def test_graph_has_no_checkpointer(self) -> None:
         self.assertIsNone(TURN_GRAPH.checkpointer)
         self.assertNotIn("game_state", TurnState.model_json_schema()["properties"])
@@ -127,8 +172,9 @@ class LangGraphWorkflowTests(unittest.TestCase):
         output = run_turn_sync(self.player_input, deps)
 
         self.assertEqual(output.status, "completed")
+        self.assertEqual(output.intent.execution, "engine")
         self.assertEqual(output.intent.check.route, "module")
-        self.assertEqual(engine.context_calls, 1)
+        self.assertEqual(engine.context_calls, 2)
         self.assertEqual(engine.execute_calls, 1)
         self.assertEqual(agent.interpret_calls, 1)
         self.assertEqual(agent.narrate_calls, 1)
@@ -136,7 +182,43 @@ class LangGraphWorkflowTests(unittest.TestCase):
         self.assertEqual(len(output.action_result.events), 1)
         self.assertEqual(output.summary_op.source_event_ids, ["evt_0001"])
 
-    def test_none_route_skips_engine(self) -> None:
+        event_json = output.action_result.events[0].to_json_dict()
+        self.assertEqual(event_json["type"], "state.modified")
+        self.assertEqual(
+            event_json["payload"],
+            {
+                "path": "entities.bookshelf.key_found",
+                "from": False,
+                "to": True,
+            },
+        )
+        self.assertNotIn("path", event_json)
+        self.assertNotIn("from", event_json)
+        self.assertNotIn("to", event_json)
+
+        player_output = output.to_player_output()
+        self.assertIsInstance(player_output, NarrationOutput)
+        self.assertEqual(player_output, output.narration)
+        self.assertIsNot(player_output, output.narration)
+        self.assertNotIn("action_result", player_output.model_dump())
+        self.assertNotIn("summary_op", player_output.model_dump())
+
+    def test_engine_route_refreshes_context_before_narration(self) -> None:
+        deps, engine, agent = self.dependencies()
+        smash = with_input(
+            self.player_input,
+            action_id="smash_001",
+            utterance="我用力砸开柜子。",
+        )
+        output = run_turn_sync(smash, deps)
+
+        self.assertEqual(output.intent.check.route, "module")
+        self.assertEqual(engine.snapshot().phase, "ended")
+        self.assertEqual(engine.context_calls, 2)
+        self.assertIsNotNone(agent.last_narration_request)
+        self.assertEqual(agent.last_narration_request.context.phase, "ended")
+
+    def test_narrative_execution_skips_engine(self) -> None:
         deps, engine, agent = self.dependencies()
         talk = with_input(
             self.player_input,
@@ -145,6 +227,7 @@ class LangGraphWorkflowTests(unittest.TestCase):
         )
         output = run_turn_sync(talk, deps)
 
+        self.assertEqual(output.intent.execution, "narrative")
         self.assertEqual(output.intent.check.route, "none")
         self.assertEqual(engine.execute_calls, 0)
         self.assertEqual(agent.narrate_calls, 1)
@@ -164,7 +247,7 @@ class LangGraphWorkflowTests(unittest.TestCase):
         self.assertEqual(agent.narrate_calls, 0)
         self.assertIsNone(output.summary_op)
 
-    def test_default_route_still_uses_engine(self) -> None:
+    def test_engine_execution_with_no_check_still_uses_engine(self) -> None:
         deps, engine, _ = self.dependencies()
         open_cabinet = with_input(
             self.player_input,
@@ -173,7 +256,8 @@ class LangGraphWorkflowTests(unittest.TestCase):
         )
         output = run_turn_sync(open_cabinet, deps)
 
-        self.assertEqual(output.intent.check.route, "default")
+        self.assertEqual(output.intent.execution, "engine")
+        self.assertEqual(output.intent.check.route, "none")
         self.assertEqual(engine.execute_calls, 1)
         self.assertFalse(output.action_result.success)
         self.assertEqual(output.action_result.resolution, "blocked")
@@ -184,7 +268,12 @@ class LangGraphWorkflowTests(unittest.TestCase):
         second = run_turn_sync(self.player_input, deps)
 
         self.assertEqual(len(first.action_result.events), 1)
-        self.assertEqual(second.action_result.events, [])
+        self.assertEqual(second.action_result, first.action_result)
+        self.assertEqual(
+            [event.event_id for event in second.action_result.events],
+            [event.event_id for event in first.action_result.events],
+        )
+        self.assertEqual(second.summary_op, first.summary_op)
         self.assertEqual(engine.snapshot().event_sequence, 1)
 
     def test_fake_interpreter_matches_shared_route_examples(self) -> None:
@@ -205,6 +294,7 @@ class LangGraphWorkflowTests(unittest.TestCase):
             with self.subTest(case=case["case_id"]):
                 self.assertEqual(intent.kind, case["expected_kind"])
                 self.assertEqual(intent.action, case["expected_action"])
+                self.assertEqual(intent.execution, case["expected_execution"])
                 self.assertEqual(intent.check.route, case["expected_check_route"])
                 self.assertEqual(getattr(intent.target, "id", None), case["expected_target"])
 
@@ -220,6 +310,7 @@ class PydanticAIPortTests(unittest.TestCase):
         engine = FakeAtomicEngine(self.module, self.state)
         context = asyncio.run(engine.assemble_context(self.player_input))
         intent_payload = {
+            "execution": "engine",
             "kind": "interact",
             "action": "investigate",
             "target": {"matched": True, "id": "bookshelf"},

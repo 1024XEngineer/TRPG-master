@@ -7,7 +7,7 @@
 
 ## 1. 目标与系统定位
 
-成员 A 负责运行时主持 Agent、回合编排和服务端 WebSocket 接线。它位于玩家与确定性规则引擎之间：先把玩家自然语言转换为结构化 `Intent`，再调用成员 B 提供的 `ActionExecutor` 获得权威 `ActionResult`，最后只依据玩家可见事实生成叙事。
+成员 A 负责运行时主持 Agent、回合编排和服务端 WebSocket 接线。它位于玩家与确定性规则引擎之间：先把玩家自然语言转换为结构化 `Intent`，再将它与可信 `PlayerInput` 组装为 `EngineRequest`，调用成员 B 提供的 `AtomicActionEngine` 获得权威 `ActionResult`，最后只依据玩家可见事实生成叙事。
 
 成员 A 的核心目标不是“替代真人主持人自由裁决”，而是保证下面这条链路稳定、可追踪、不会越权：
 
@@ -33,7 +33,7 @@
 | 输入 | `ModuleContent` | 成员 C | 读取场景、实体、Checkpoint 和玩家可见内容 |
 | 输入 | `PlayerView`、`SceneActionMenu` | ViewProjector | 为 IntentParser 提供脱敏上下文和安全候选菜单 |
 | 输入 | `ActionResult` | 成员 B | 作为本回合已经确认的唯一事实边界 |
-| 输出 | `Intent` | 成员 A | 交给成员 B 的 `ActionExecutor` 复核和执行 |
+| 输出 | `Intent` | 成员 A | 由编排层与可信 `PlayerInput` 组装成 `EngineRequest` |
 | 输出 | `NarrationOutput` | 成员 A | 生成忠于裁决结果的玩家可见文本 |
 | 输出 | `narration.push`、`view.private` | WebSocket Gateway | 分别发送场景叙事和玩家私有视图 |
 
@@ -62,7 +62,8 @@ flowchart TB
         PARSER["IntentParser<br/>OpenAI Provider Adapter"]
         INTENT_OK{"Intent 是否通过<br/>严格 Schema 校验"}
         CLARIFY["返回澄清提示或 unknown<br/>不得产生状态变更"]
-        EXECUTOR["调用 ActionExecutor<br/>传入可信 room_id / player_id"]
+        EXEC_ROUTE{"Intent.execution<br/>narrative / engine"}
+        EXECUTOR["调用 AtomicActionEngine<br/>传入 EngineRequest"]
         REFRESH["裁决后重新投影 PlayerView"]
         CONTEXT["构造脱敏 NarrationContext<br/>移除秘密和内部求值信息"]
         NARRATOR["Narrator<br/>生成结构化 NarrationOutput"]
@@ -84,7 +85,9 @@ flowchart TB
     AUTH -->|"否"| REJECT
     AUTH -->|"是"| PROJECT --> PARSER --> INTENT_OK
     INTENT_OK -->|"否"| CLARIFY
-    INTENT_OK -->|"是"| EXECUTOR --> RULES --> RESULT
+    INTENT_OK -->|"是"| EXEC_ROUTE
+    EXEC_ROUTE -->|"narrative"| CONTEXT
+    EXEC_ROUTE -->|"engine"| EXECUTOR --> RULES --> RESULT
     RESULT --> REFRESH
     RESULT --> CONTEXT
     REFRESH --> CONTEXT --> NARRATOR --> NARRATION_OK
@@ -99,7 +102,7 @@ flowchart TB
     classDef failure fill:#fee2e2,stroke:#dc2626,color:#7f1d1d,stroke-width:2px;
 
     class PARSER,NARRATOR agent;
-    class GATEWAY,AUTH,PROJECT,INTENT_OK,EXECUTOR,REFRESH,CONTEXT,NARRATION_OK deterministic;
+    class GATEWAY,AUTH,PROJECT,INTENT_OK,EXEC_ROUTE,EXECUTOR,REFRESH,CONTEXT,NARRATION_OK deterministic;
     class RULES engine;
     class RESULT,PUSH,PRIVATE output;
     class REJECT,CLARIFY,FALLBACK failure;
@@ -127,32 +130,34 @@ flowchart TB
 
 1. IntentParser 通过 OpenAI Provider Adapter 调用模型，使用严格结构化输出。
 2. 输出采用判别式 `Intent`；无法匹配时显式返回 `unknown`，不能伪造目标 ID。
-3. `CheckProposal.route` 统一为：
+3. `Intent.execution` 统一为 `narrative|engine`，只决定是否进入 `AtomicActionEngine`。
+4. `CheckProposal.route` 统一为：
    - `none`：动作不主动要求检定；
    - `module`：提议使用当前场景中的模组 Checkpoint；
    - `default`：提议使用 World 默认检定。
-4. Parser 可以提议 `checkpoint_id`、`proposed_skills` 和 `narrative_intent`，但不能确定最终技能、难度、成功线、骰点或分支结果。
-5. 即使 `route="none"`，动作也必须进入统一 `ActionExecutor`，以便引擎复核身份、执行机制 A/B/C/D、记录 Event 和保证回放一致性。
+5. `execution` 与 `check.route` 独立：`engine+none` 表示进入完整规则流水线但不检定；`narrative` 只允许搭配 `none`。
+6. Parser 可以提议 `checkpoint_id`、`proposed_skills` 和 `narrative_intent`，但不能确定最终技能、难度、成功线、骰点或分支结果。
 
 ### 4.4 调用确定性规则引擎
 
 成员 A 只依赖稳定端口，不直接操纵 `RulesEngine`、`GameStateRepo` 或 `EventLog`：
 
 ```python
-async def execute(
-    room_id: str,
-    player_id: str,
-    intent: Intent,
+async def execute_action(
+    request: EngineRequest,
 ) -> ActionResult:
     ...
 ```
 
-`ActionExecutor` 内部由成员 B 负责加载房间状态、复核场景和角色、执行 auto 检定、写 Event、更新状态视图并返回 `ActionResult`。成员 A 不在引擎调用之后额外执行 `GameStateRepo.save(state)`。
+只有 `execution=engine` 才组装 `EngineRequest`。`AtomicActionEngine` 内部由成员 B
+负责从 `EngineRequest.player_input` 取得可信执行上下文，加载房间状态、复核场景和角色，
+按 `check.route` 选择直接解析或检定解析，写 Event、更新状态视图并返回 `ActionResult`。
+成员 A 不在引擎调用之后额外执行 `GameStateRepo.save(state)`。
 
 ### 4.5 重新投影并构造叙事上下文
 
-1. 引擎提交事务后，重新投影 `PlayerView`，不得复用裁决前的旧视图。
-2. 用 `ActionResult` 和新 `PlayerView` 构造专门的 `NarrationContext`。
+1. 引擎分支提交事务后重新投影 `PlayerView`，不得复用裁决前的旧视图；纯叙事分支不执行刷新。
+2. 引擎分支用 `ActionResult` 和新 `PlayerView` 构造 `NarrationContext`；纯叙事分支使用原安全上下文与 `Intent`，不伪造 `ActionResult`。
 3. `NarrationContext` 只包含玩家可以知道的事实、叙事约束、说话角色和建议动作。
 4. `ActionResult` 中用于审计或规则调试的隐藏字段不能直接进入 Narrator 提示词。
 
@@ -172,7 +177,7 @@ async def execute(
 - 玩家上下文组装、`PlayerView` 与 `SceneActionMenu` 消费。
 - 自然语言到判别式 `Intent` 的解析和结构校验。
 - Checkpoint、技能和动作类型的软提议。
-- 回合编排、`ActionExecutor` 调用和裁决后重新投影。
+- 回合编排、`EngineRequest` 组装、`AtomicActionEngine` 调用和裁决后重新投影。
 - `NarrationContext` 脱敏、最终旁白和 NPC 对话生成。
 - `action.submit`、`narration.push`、`view.private` 的服务端接线。
 - 模型超时、非法输出和叙事失败的降级策略。
@@ -205,6 +210,7 @@ async def execute(
 
 ```json
 {
+  "execution": "engine",
   "kind": "interact",
   "action": "open",
   "target": { "matched": true, "id": "cabinet" },
@@ -219,7 +225,9 @@ async def execute(
 
 约束：
 
-- 模型不输出可信 `actor_id`；执行者由 `ActionExecutor` 根据 `player_id` 绑定。
+- 模型不输出可信 `actor_id`；`actor_id/player_id/room_id/client_action_id` 由已认证的 `PlayerInput` 注入，引擎再复核绑定关系。
+- `execution` 只决定是否调用引擎；`check.route` 只决定检定来源，不能再用 `none` 表示直接叙事。
+- `execution=narrative` 只能搭配 `check.route=none`；`execution=engine` 可以搭配三种检定来源。
 - `checkpoint_id` 只是候选，成员 B 必须验证它属于当前 Scene。
 - `proposed_skills` 只是软判据，成员 B 必须与 Checkpoint 和角色技能求交集。
 - 模型无法把目标匹配到安全菜单时使用 `RefUnmatched`，不得猜测内部 ID。
@@ -257,6 +265,10 @@ async def execute(
 
 ### 6.5 `WebSocketEvent`
 
+`TurnOutput` 只在宿主内部流转，不能作为 WebSocket payload 整体发送。客户端只接收
+`NarrationOutput` 的玩家可见投影，以及 ViewProjector 明确允许公开的视图；
+`PlayerInput`、`Intent`、完整 `ActionResult` 和 `SummaryOperation` 都不直接下发。
+
 统一事件信封：
 
 ```json
@@ -275,6 +287,9 @@ async def execute(
 }
 ```
 
+`SummaryOperation` 是回合结束后交给宿主 `SummaryOutbox` 的非权威命令。它只能按
+`(room_id, client_action_id)` 幂等更新会话摘要，禁止写 `GameState` 或 `EventLog`。
+
 ## 7. 异常与降级路径
 
 | 异常 | 行为 | 状态影响 |
@@ -286,7 +301,7 @@ async def execute(
 | 引擎拒绝动作 | 使用 `ActionResult` 的失败事实生成叙事 | 只保留引擎明确记录的 Event |
 | Narrator 超时或不可用 | 使用确定性降级文本 | 不重试引擎，不重复执行动作 |
 | NarrationOutput 违背事实 | 丢弃模型文本，使用降级文本 | 已提交的引擎结果不回滚 |
-| 推送失败或断线 | 按事件 ID 补发视图/叙事 | 不重复调用 ActionExecutor |
+| 推送失败或断线 | 按事件 ID 补发视图/叙事 | 不重复调用 AtomicActionEngine |
 
 ## 8. 当前后端实现映射
 
@@ -296,7 +311,7 @@ async def execute(
 | --- | --- | --- |
 | Intent 解析 | `packages/core/ai/intent.py` | 已有判别式 Intent 和 `unknown` 保底；当前使用兼容 OpenAI SDK 的 Chat Completions/JSON 模式，尚未采用严格结构化输出和统一 `CheckProposal` |
 | 玩家视角与安全菜单 | `packages/core/view/` | 已有 `PlayerView` 和 `SceneActionMenu` 投影入口，可作为 Agent 的唯一上下文来源 |
-| 回合编排 | `packages/core/orchestrator/orchestrator.py` | 主链已存在；当前直接调用 `RulesEngine` 后执行 `GameStateRepo.save`，需改为单一 `ActionExecutor` 事务边界 |
+| 回合编排 | `packages/core/orchestrator/orchestrator.py` | 主链已存在；当前直接调用 `RulesEngine` 后执行 `GameStateRepo.save`，需改为单一 `AtomicActionEngine.execute_action(EngineRequest)` 事务边界 |
 | Narrator | `packages/core/ai/narrator.py` | 已有流式文本接口；当前直接消费 `ActionResult`，需增加脱敏 `NarrationContext` 和结构化事实校验 |
 | WebSocket | `packages/server/ws/gateway.py` | 已接通 `action.submit`、`narration.push`、`view.private`；当前仍信任信封中的玩家标识、整房广播并缓冲叙事，需要连接身份绑定、场景定向和统一事件信封 |
 
@@ -309,7 +324,7 @@ async def execute(
 - 提供已通过 Schema 校验的 `Intent`。
 - 传递可信 `room_id`、`player_id`，不传递可被模型伪造的身份。
 - 不要求 B 信任 `checkpoint_id` 或技能提议。
-- 使用统一 `ActionExecutor.execute(...) -> ActionResult`，测试期间由 FakeActionExecutor 保持并行开发。
+- 使用统一 `AtomicActionEngine.execute_action(EngineRequest) -> ActionResult`，测试期间由 `FakeAtomicEngine` 保持并行开发。
 
 ### 9.2 成员 B → 成员 A
 
@@ -325,10 +340,10 @@ async def execute(
 ## 10. MVP 交付顺序
 
 1. 冻结 `Intent`、`CheckProposal`、`ActionResult` 和 WebSocket 事件 Schema。
-2. 用 FakeActionExecutor 打通 `action.submit → Intent → ActionResult → NarrationOutput`。
+2. 用 `FakeAtomicEngine` 打通 `action.submit → Intent → EngineRequest → ActionResult → NarrationOutput`。
 3. 接入 OpenAI Provider Adapter 和严格结构化 Intent 输出。
 4. 建立 `NarrationContext` 脱敏和事实忠实度校验。
-5. 接入成员 B 的真实 ActionExecutor，移除编排层直接保存状态的路径。
+5. 接入成员 B 的真实 AtomicActionEngine，移除编排层直接保存状态的路径。
 6. 修复 WebSocket 身份绑定、场景定向和幂等处理。
 7. 接入成员 C 的书房 Demo，运行三人共同验收案例。
 
@@ -341,13 +356,13 @@ async def execute(
 - 调查书架生成合法 `investigate` Intent 并匹配书架。
 - 打开、砸坏、使用物品等交互动作生成合法判别式 Intent。
 - 模型提出不存在的实体时输出 unmatched/unknown，不伪造 ID。
-- `none/module/default` 三条检定提议能被稳定解析。
+- `narrative/engine` 两条执行路由与 `none/module/default` 三条检定提议能被独立解析。
 - 模型不能注入可信 `actor_id`、难度或骰点。
 
 ### 11.2 编排测试
 
-- 每个合法动作只调用一次 ActionExecutor。
-- `route="none"` 也不会绕过引擎。
+- 每个需要引擎的合法动作只调用一次 AtomicActionEngine。
+- `execution=engine + check.route="none"` 不会绕过引擎；只有 `execution=narrative` 直接进入 Narrator。
 - 编排器不调用 `GameStateRepo.save`，不直接追加 Event。
 - 引擎返回后重新投影视图，再生成叙事。
 - Narrator 失败不会导致同一动作再次执行。
@@ -371,5 +386,4 @@ async def execute(
 - **我负责什么**：玩家输入理解、运行时编排、OpenAI 适配、叙事生成、WebSocket 服务端接线和相关评测。
 - **我不负责什么**：规则裁决、状态写入、Event 权威存储、模组内容生产和规则审查。
 - **我向谁提供什么**：向成员 B 提供 `Intent`；向客户端提供 `NarrationOutput` 和 WebSocket 事件；向成员 C 提供解析与叙事评测反馈。
-- **我依赖谁提供什么**：依赖成员 B 提供 `ActionExecutor/ActionResult`；依赖成员 C 提供通过审查的 `ModuleContent`、Demo 和预期结果。
-
+- **我依赖谁提供什么**：依赖成员 B 提供 `AtomicActionEngine/ActionResult`；依赖成员 C 提供通过审查的 `ModuleContent`、Demo 和预期结果。

@@ -74,7 +74,7 @@ def route_after_interpret(
         raise ContractError("路由前缺少 Intent")
     if state.intent.clarification_question:
         return "clarification"
-    if state.intent.check.route == "none":
+    if state.intent.execution == "narrative":
         return "narrate"
     return "engine_node"
 
@@ -106,6 +106,18 @@ async def engine_node(
     return _validated_update(state, action_result=result)
 
 
+async def refresh_context_node(
+    state: TurnState,
+    runtime: Runtime[GraphDependencies],
+) -> dict[str, Any]:
+    """Re-project the player-visible context after the engine commits."""
+
+    if state.action_result is None:
+        raise ContractError("refresh_context 前缺少 ActionResult")
+    context = await runtime.context.context_assembler.assemble_context(state.player_input)
+    return _validated_update(state, context=context)
+
+
 async def narrate_node(
     state: TurnState,
     runtime: Runtime[GraphDependencies],
@@ -123,9 +135,9 @@ async def narrate_node(
     return _validated_update(state, narration=narration)
 
 
-async def summary_op_node(state: TurnState) -> dict[str, Any]:
+async def prepare_summary_outbox_node(state: TurnState) -> dict[str, Any]:
     if state.narration is None:
-        raise ContractError("summary_op 前缺少 NarrationOutput")
+        raise ContractError("prepare_summary_outbox 前缺少 NarrationOutput")
     events = state.action_result.events if state.action_result else []
     operation = SummaryOperation(
         room_id=state.player_input.room_id,
@@ -142,16 +154,18 @@ def build_turn_graph():
     builder.add_node("interpret", interpret_node)
     builder.add_node("clarification", clarification_node)
     builder.add_node("engine_node", engine_node)
+    builder.add_node("refresh_context", refresh_context_node)
     builder.add_node("narrate", narrate_node)
-    builder.add_node("summary_op", summary_op_node)
+    builder.add_node("prepare_summary_outbox", prepare_summary_outbox_node)
 
     builder.add_edge(START, "assemble_context")
     builder.add_edge("assemble_context", "interpret")
     builder.add_conditional_edges("interpret", route_after_interpret)
     builder.add_edge("clarification", END)
-    builder.add_edge("engine_node", "narrate")
-    builder.add_edge("narrate", "summary_op")
-    builder.add_edge("summary_op", END)
+    builder.add_edge("engine_node", "refresh_context")
+    builder.add_edge("refresh_context", "narrate")
+    builder.add_edge("narrate", "prepare_summary_outbox")
+    builder.add_edge("prepare_summary_outbox", END)
 
     # No checkpointer: every ainvoke is one disposable turn process.
     return builder.compile()

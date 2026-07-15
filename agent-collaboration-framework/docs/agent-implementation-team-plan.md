@@ -29,9 +29,9 @@
 
 ```text
 玩家输入
-→ 主持 Agent 生成 ActionPlan
+→ 主持 Agent 生成 Intent
 → 引擎执行动作并更新状态
-→ 引擎返回 ConfirmedOutcome
+→ 引擎返回 ActionResult
 → 主持 Agent 生成忠于结果的回复
 ```
 
@@ -94,10 +94,10 @@
 玩家：我仔细调查书架。
 
 主持 Agent：
-生成 inspect 类型的 ActionPlan。
+生成 `investigate` Intent。
 
 确定性引擎：
-执行调查检定，更新 has_key，写入 EventLog，返回 ConfirmedOutcome。
+执行调查检定，更新 has_key，写入 EventLog，返回 ActionResult。
 
 主持 Agent：
 你拨开积灰的书册，在书架后方摸到了一把冰凉的小钥匙。
@@ -178,9 +178,9 @@
 玩家输入
 → 读取当前场景和角色状态
 → 判断自由叙事还是规则行为
-→ 生成 ActionPlan
-→ 调用引擎
-→ 读取 ConfirmedOutcome
+→ 生成 Intent
+→ 组装 EngineRequest 并调用引擎
+→ 读取 ActionResult
 → 生成玩家回复
 ```
 
@@ -203,16 +203,16 @@
 collaboration_framework/agents/runtime_host.py
 collaboration_framework/workflow.py
 prompts/
-schemas/action-plan.schema.json
-schemas/narration.schema.json
+schemas/intent.schema.json
+schemas/narration-output.schema.json
 ```
 
 #### 成员 A 的第一阶段交付物
 
-- 玩家输入能够转换为最小 `ActionPlan`；
-- 能区分 `narrative` 和 `engine` 两条路由；
+- 玩家输入能够转换为最小 `Intent`；
+- 能根据 `Intent` 进入澄清、直接叙事或引擎分支；
 - 能调用假引擎；
-- 能根据模拟 `ConfirmedOutcome` 生成回复；
+- 能根据模拟 `ActionResult` 生成回复；
 - 引擎判定失败时，叙事不会擅自写成成功。
 
 ### 4.2 成员 B：确定性规则引擎与状态系统
@@ -220,13 +220,13 @@ schemas/narration.schema.json
 #### 成员 B 的主要职责
 
 ```text
-ActionPlan
+EngineRequest
 → 流水线执行
 → Rule 求值
 → 状态校验
 → GameState 更新
 → EventLog 写入
-→ 生成 ConfirmedOutcome
+→ 生成 ActionResult
 ```
 
 具体负责：
@@ -253,7 +253,7 @@ collaboration_framework/engine/pipelines/  # 后续拆分
 collaboration_framework/engine/rules/      # 后续拆分
 collaboration_framework/engine/state/      # 后续拆分
 collaboration_framework/engine/events/     # 后续拆分
-schemas/confirmed-outcome.schema.json
+schemas/action-result.schema.json
 ```
 
 #### 成员 B 的第一阶段交付物
@@ -262,7 +262,7 @@ schemas/confirmed-outcome.schema.json
 - 实现最简单的检定；
 - 实现 GameState 状态修改；
 - 写入 EventLog；
-- 返回最小 `ConfirmedOutcome`。
+- 返回最小 `ActionResult`。
 
 > 成员 B 当前不直接开发 Agent，但确定性引擎是整个 Agent 系统的规则地基。
 
@@ -324,8 +324,8 @@ evals/
 
 ```text
 ModuleContent
-ActionPlan
-ConfirmedOutcome
+Intent / EngineRequest
+ActionResult
 ```
 
 它们分别对应三个人之间的接口：
@@ -333,8 +333,8 @@ ConfirmedOutcome
 | 协议 | 解决的问题 | 主要生产方 | 主要消费方 |
 | --- | --- | --- | --- |
 | ModuleContent | 场景、实体、规则、检定和结局如何表示 | 成员 C | 成员 A、B |
-| ActionPlan | 主持 Agent 如何告诉引擎玩家要做什么 | 成员 A | 成员 B |
-| ConfirmedOutcome | 引擎如何告诉主持 Agent 最终发生了什么 | 成员 B | 成员 A |
+| Intent / EngineRequest | 主持 Agent 如何提议动作，编排层如何注入可信执行上下文 | 成员 A / 编排层 | 成员 B |
+| ActionResult | 引擎如何告诉主持 Agent 最终发生了什么 | 成员 B | 成员 A |
 
 如果这三个协议没有提前确定，三个人很容易分别实现三套互不兼容的数据结构。
 
@@ -350,7 +350,7 @@ fixtures/demo-cases.json
 所有模块都以同一份 Demo 数据测试，以便持续检查：
 
 - 模组数据能否被运行时读取；
-- ActionPlan 能否被引擎执行；
+- Intent 能否被组装为 EngineRequest 并由引擎执行；
 - 引擎结果能否被 Agent 正确叙述；
 - 状态变化和 EventLog 是否一致；
 - 结局条件是否按预期触发。
@@ -384,52 +384,74 @@ Narration
 
 ```json
 {
+  "module_id": "study-demo",
+  "version": "0.1.0",
+  "world_ref": "coc-7e",
   "scenes": [],
   "entities": [],
   "checkpoints": [],
-  "rules": [],
   "win_conditions": []
 }
 ```
 
-### 6.2 最小 ActionPlan
+这段示例必须与 Pydantic `ModuleContent` 及其自动生成的
+`schemas/module-content.schema.json` 同步。当前契约没有顶层 `rules`；模组实体规则
+放在 `Entity.rules`。Pydantic Model 是输入事实源，生成的 Schema 是 JSON 校验产物，
+两者都不由文档示例反向定义。
+
+### 6.2 最小 Intent / EngineRequest
 
 ```json
 {
-  "route": "engine",
-  "action_type": "inspect",
-  "actor_id": "pc_1",
-  "target_id": "bookshelf",
-  "checkpoint_id": "inspect_bookshelf",
-  "narrative_intent": "仔细检查书架"
+  "execution": "engine",
+  "kind": "interact",
+  "action": "investigate",
+  "target": {"matched": true, "id": "bookshelf"},
+  "check": {
+    "route": "module",
+    "checkpoint_id": "investigate_bookshelf",
+    "proposed_skills": ["spot_hidden"]
+  },
+  "narrative_intent": "仔细检查书架",
+  "clarification_question": null
 }
 ```
 
-推荐的最小枚举范围：
+`execution=narrative|engine` 决定是否调用引擎；`check.route=none|module|default`
+只表达检定来源。无检定的合法世界动作使用 `execution=engine + check.route=none`。
+
+编排层不让模型生成可信身份，而是组装如下信封：
 
 ```text
-route: narrative | engine
-action_type: talk | inspect | check | use_item | move
+EngineRequest
+  player_input: PlayerInput
+  intent: Intent
 ```
 
-### 6.3 最小 ConfirmedOutcome
+### 6.3 最小 ActionResult
 
 ```json
 {
   "success": true,
-  "facts": [
+  "resolution": "checkpoint",
+  "confirmed_facts": [
     "玩家发现了一把钥匙"
   ],
   "state_changes": [
     {
       "path": "pc_1.has_key",
       "from": false,
-      "to": true
+      "to": true,
+      "cause": "checkpoint:investigate_bookshelf"
     }
   ],
   "player_visible_information": [
     "书架后藏着一把小钥匙"
-  ]
+  ],
+  "narration_constraints": ["必须明确玩家已经发现钥匙"],
+  "next_required_action": null,
+  "events": [],
+  "state_version": 1
 }
 ```
 
@@ -474,8 +496,9 @@ project/
 │
 ├── schemas/
 │   ├── module-content.schema.json
-│   ├── action-plan.schema.json
-│   ├── confirmed-outcome.schema.json
+│   ├── intent.schema.json
+│   ├── engine-request.schema.json
+│   ├── action-result.schema.json
 │   └── narration.schema.json
 │
 ├── fixtures/
@@ -508,8 +531,8 @@ project/
 共同定义最小版本：
 
 - `ModuleContent`；
-- `ActionPlan`；
-- `ConfirmedOutcome`。
+- `Intent / EngineRequest`；
+- `ActionResult`。
 
 完成标准：
 
@@ -560,9 +583,8 @@ project/
 
 ```python
 def execute_action(
-    action_plan: ActionPlan,
-    game_state: GameState,
-) -> ConfirmedOutcome:
+    request: EngineRequest,
+) -> ActionResult:
     ...
 ```
 
@@ -582,9 +604,10 @@ inspect_bookshelf
 
 ```text
 玩家输入
-→ ActionPlan
+→ Intent
+→ EngineRequest
 → 假引擎
-→ ConfirmedOutcome
+→ ActionResult
 → 玩家回复
 ```
 
@@ -604,7 +627,7 @@ inspect_bookshelf
 我仔细调查书架。
 ```
 
-预期：生成 ActionPlan，调用引擎，再根据确定结果回复。
+预期：生成 Intent，组装 EngineRequest 并调用引擎，再根据 ActionResult 回复。
 
 这个阶段优先保证事实忠实度，而不是追求文采。必须避免：
 
@@ -686,9 +709,8 @@ inspect_bookshelf
 
 ```python
 def execute_action(
-    action_plan: ActionPlan,
-    game_state: GameState,
-) -> ConfirmedOutcome:
+    request: EngineRequest,
+) -> ActionResult:
     ...
 ```
 
@@ -703,20 +725,21 @@ def parse_module(source_text: str) -> ModuleContent:
 
 ```python
 def interpret_action(
-    player_input: str,
-    context: RuntimeContext,
-) -> ActionPlan:
+    request: InterpretRequest,
+) -> Intent:
     ...
 
 def compose_narration(
-    player_input: str,
-    action_plan: ActionPlan,
-    outcome: ConfirmedOutcome,
-) -> Narration:
+    request: NarrationRequest,
+) -> NarrationOutput:
     ...
 ```
 
 这些接口先稳定下来，内部可以从 Mock 逐步替换为真实实现。
+
+`run_turn()` 的 `TurnOutput` 是宿主内部聚合结果，不是玩家协议。玩家侧只投影
+`NarrationOutput` 和明确允许公开的视图。`SummaryOperation` 作为图外
+`SummaryOutbox` 命令消费，只能写非权威摘要存储，不能修改 `GameState` 或追加 Event。
 
 ### 9.2 每天至少集成一次主链路
 
@@ -748,7 +771,7 @@ def compose_narration(
 
 #### 成员 A 的测试
 
-输入玩家话语，检查 ActionPlan：
+输入玩家话语，检查 Intent：
 
 ```text
 我调查书架
@@ -756,11 +779,11 @@ def compose_narration(
 → target_id = bookshelf
 ```
 
-同时检查最终叙事是否遵守 `ConfirmedOutcome`。
+同时检查最终叙事是否遵守 `ActionResult`。
 
 #### 成员 B 的测试
 
-输入 ActionPlan 和 GameState，检查：
+输入 EngineRequest，检查：
 
 - 骰子结果；
 - Rule 执行；
@@ -798,15 +821,15 @@ def compose_narration(
 
 ### 第 2 天：准备标准输入输出
 
-- 成员 A：准备玩家输入到 ActionPlan 的示例；
-- 成员 B：准备 ActionPlan 到 ConfirmedOutcome 的 Mock；
+- 成员 A：准备玩家输入到 Intent 的示例；
+- 成员 B：准备 EngineRequest 到 ActionResult 的 Mock；
 - 成员 C：完成第一版 `demo-module.json` 和 `demo-cases.json`。
 
 当天结束前，三人共同检查三份数据能否对接。
 
 ### 第 3 天：接通假引擎闭环
 
-- 成员 A：实现 `narrative / engine` 路由和 ActionPlan 输出；
+- 成员 A：实现回合路由和 Intent 输出；
 - 成员 B：提供可调用的假引擎；
 - 成员 C：补充测试输入、非法操作和失败路径。
 
@@ -835,7 +858,7 @@ def compose_narration(
 - [ ] 玩家可以进入书房场景；
 - [ ] 玩家可以与管家自由对话；
 - [ ] 玩家可以调查书架；
-- [ ] 调查行为会生成合法 ActionPlan；
+- [ ] 调查行为会生成合法 Intent；
 - [ ] 引擎能够执行检定；
 - [ ] 成功时正确更新 `has_key`；
 - [ ] 状态变化被写入 EventLog；
@@ -846,8 +869,8 @@ def compose_narration(
 ### 11.2 协议和数据
 
 - [ ] `ModuleContent` Schema 已确定；
-- [ ] `ActionPlan` Schema 已确定；
-- [ ] `ConfirmedOutcome` Schema 已确定；
+- [ ] `Intent / EngineRequest` Schema 已确定；
+- [ ] `ActionResult` Schema 已确定；
 - [ ] `demo-module.json` 能通过 Schema 校验；
 - [ ] 上下游对同一字段的语义理解一致；
 - [ ] 协议变更有对应测试。
@@ -927,7 +950,7 @@ Agent A 和 Agent B 自由聊天
 
 ```text
 成员 A：运行时主持 Agent
-负责理解玩家、生成 ActionPlan、调用引擎并生成最终回复。
+负责理解玩家、生成 Intent、组装 EngineRequest、调用引擎并生成最终回复。
 
 成员 B：确定性规则引擎
 负责检定、规则、状态、事件、约束和结局。

@@ -8,7 +8,7 @@ from ..contracts import ModuleContent
 
 # TODO(module-publication): 将来源文档解析为 ModuleContent，补充来源引用、秘密隔离、可达性审查、
 # 人工批准与版本发布。只有通过 Pydantic 和确定性语义校验的版本才能交给 AtomicActionEngine；
-# 本模块不参与 LangGraph 回合状态，也不直接写游戏 EventLog。
+# 本模块不参与运行时回合状态，也不直接写游戏 EventLog。
 
 
 def validate_module(payload: ModuleContent | dict[str, Any]) -> ModuleContent:

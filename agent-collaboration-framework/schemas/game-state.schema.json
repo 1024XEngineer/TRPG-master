@@ -24,7 +24,7 @@
     "JsonValue": {}
   },
   "additionalProperties": false,
-  "description": "Authoritative state shape used by the fake engine, never graph state.",
+  "description": "Authoritative state shape used by the fake engine, never workflow state.",
   "properties": {
     "room_id": {
       "title": "Room Id",

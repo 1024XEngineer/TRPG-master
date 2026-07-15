@@ -1,7 +1,7 @@
 """Framework-neutral Pydantic contracts shared by all components.
 
-This module intentionally imports neither LangGraph nor a model provider.  The
-same models validate JSON at the process boundary, node-to-node data, and LLM
+This module intentionally imports neither an orchestration framework nor a model
+provider. The same models validate JSON at process and step boundaries plus LLM
 structured output.
 """
 
@@ -210,7 +210,7 @@ class ActorState(ContractModel):
 
 
 class GameState(ContractModel):
-    """Authoritative state shape used by the fake engine, never graph state."""
+    """Authoritative state shape used by the fake engine, never workflow state."""
 
     room_id: str
     scene_id: str
@@ -222,7 +222,7 @@ class GameState(ContractModel):
 
 
 # ---------------------------------------------------------------------------
-# Per-turn contracts. These contain no LangGraph types.
+# Per-turn contracts. These contain no orchestration-framework types.
 
 
 class PlayerInput(ContractModel):
@@ -431,7 +431,7 @@ class SummaryOperation(ContractModel):
 
 
 class TurnState(ContractModel):
-    """Ephemeral LangGraph state for exactly one player input."""
+    """Ephemeral workflow state for exactly one player input."""
 
     player_input: PlayerInput
     context: TurnContext | None = None
@@ -455,7 +455,7 @@ class TurnOutput(ContractModel):
     @classmethod
     def from_state(cls, state: TurnState) -> TurnOutput:
         if state.status == "running" or state.intent is None or state.narration is None:
-            raise ContractError("LangGraph 回合尚未到达终态")
+            raise ContractError("回合流程尚未到达终态")
         return cls(
             status=state.status,
             player_input=state.player_input,

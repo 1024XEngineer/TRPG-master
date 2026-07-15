@@ -1,8 +1,8 @@
 """Framework-independent collaboration ports.
 
-Only Pydantic contracts appear in these signatures. LangGraph nodes are thin
-adapters around the runtime ports, so changing the orchestration framework does
-not require changes in component implementations.
+Only Pydantic contracts appear in these signatures. Plain Python workflow steps
+are thin adapters around the runtime ports, so changing orchestration does not
+require changes in component implementations.
 """
 
 from __future__ import annotations
@@ -41,6 +41,6 @@ class Narrator(Protocol):
 
 
 class SummaryOutbox(Protocol):
-    """Host-consumed boundary; intentionally not a LangGraph dependency."""
+    """Host-consumed boundary; intentionally not a turn-workflow dependency."""
 
     async def enqueue(self, operation: SummaryOperation) -> None: ...

@@ -31,11 +31,11 @@ from ..contracts import (
 
 # TODO(atomic-engine): 实现 ContextAssembler 和 AtomicActionEngine 的正式适配器。
 # execute_action() 内必须一次完成权限/幂等/规则检定、append Event、更新物化视图和提交；
-# 事务绝不能拆成多个 LangGraph 节点，图也不得成为游戏状态的第二权威。
+# 事务绝不能拆成多个工作流步骤，TurnState 也不得成为游戏状态的第二权威。
 
 
 class _RuleKernel:
-    """In-process demo kernel; LangGraph never calls its internal phases."""
+    """In-process demo kernel; the workflow never calls its internal phases."""
 
     def execute(
         self,

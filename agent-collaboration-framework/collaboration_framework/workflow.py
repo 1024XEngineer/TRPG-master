@@ -1,17 +1,10 @@
-"""Stateless-per-turn LangGraph orchestration.
-
-LangGraph coordinates steps only. It owns neither game truth nor transaction
-phases. The graph is deliberately compiled without a checkpointer for MVP.
-"""
+"""Stateless per-turn orchestration implemented with plain Python functions."""
 
 from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from typing import Any, Literal
-
-from langgraph.graph import END, START, StateGraph
-from langgraph.runtime import Runtime
+from typing import Any
 
 from .contracts import (
     ContractError,
@@ -30,64 +23,48 @@ from .contracts import (
 from .ports import AtomicActionEngine, ContextAssembler, IntentInterpreter, Narrator
 from .routing import harden_intent_routing
 
-# TODO(orchestration): 节点必须保持为 ports 的薄包装。contracts/ports 禁止出现 LangGraph
-# 类型；MVP 禁用 checkpointer。第二阶段若引入 interrupt，先评审并保证 checkpointer
-# 只保存可丢弃的流程位置，不持有任何游戏事实的唯一副本。
-
 
 @dataclass(frozen=True)
-class GraphDependencies:
+class TurnDependencies:
     context_assembler: ContextAssembler
     interpreter: IntentInterpreter
     engine: AtomicActionEngine
     narrator: Narrator
 
 
-def _validated_update(state: TurnState, **updates: Any) -> dict[str, Any]:
-    """Validate every node update with the same Pydantic state contract."""
+def _updated_state(state: TurnState, **updates: Any) -> TurnState:
+    """Validate every workflow update with the shared Pydantic contract."""
 
     payload = state.model_dump(mode="python", by_alias=True)
     payload.update(updates)
-    return TurnState.model_validate(payload).model_dump(mode="python", by_alias=True)
+    return TurnState.model_validate(payload)
 
 
-async def assemble_context_node(
+async def _assemble_context(
     state: TurnState,
-    runtime: Runtime[GraphDependencies],
-) -> dict[str, Any]:
-    context = await runtime.context.context_assembler.assemble_context(state.player_input)
-    return _validated_update(state, context=context)
+    dependencies: TurnDependencies,
+) -> TurnState:
+    context = await dependencies.context_assembler.assemble_context(state.player_input)
+    return _updated_state(state, context=context)
 
 
-async def interpret_node(
+async def _interpret(
     state: TurnState,
-    runtime: Runtime[GraphDependencies],
-) -> dict[str, Any]:
+    dependencies: TurnDependencies,
+) -> TurnState:
     if state.context is None:
         raise ContractError("interpret 前缺少 TurnContext")
-    proposed_intent = await runtime.context.interpreter.interpret(
+    proposed_intent = await dependencies.interpreter.interpret(
         InterpretRequest(player_input=state.player_input, context=state.context)
     )
     intent = harden_intent_routing(proposed_intent, state.context)
-    return _validated_update(state, intent=intent)
+    return _updated_state(state, intent=intent)
 
 
-def route_after_interpret(
-    state: TurnState,
-) -> Literal["clarification", "engine_node", "narrate"]:
-    if state.intent is None:
-        raise ContractError("路由前缺少 Intent")
-    if state.intent.clarification_question:
-        return "clarification"
-    if state.intent.execution == "narrative":
-        return "narrate"
-    return "engine_node"
-
-
-async def clarification_node(state: TurnState) -> dict[str, Any]:
+def _clarify(state: TurnState) -> TurnState:
     if state.intent is None or not state.intent.clarification_question:
-        raise ContractError("clarification 节点缺少澄清问题")
-    return _validated_update(
+        raise ContractError("clarification 步骤缺少澄清问题")
+    return _updated_state(
         state,
         narration=NarrationOutput(
             kind="clarification",
@@ -97,30 +74,29 @@ async def clarification_node(state: TurnState) -> dict[str, Any]:
     )
 
 
-async def engine_node(
+async def _execute_engine(
     state: TurnState,
-    runtime: Runtime[GraphDependencies],
-) -> dict[str, Any]:
+    dependencies: TurnDependencies,
+) -> TurnState:
     if state.intent is None:
-        raise ContractError("engine_node 前缺少 Intent")
+        raise ContractError("engine 步骤前缺少 Intent")
     request = EngineRequest(player_input=state.player_input, intent=state.intent)
 
-    # This is intentionally the node's only engine call. The production method
-    # must keep rule validation + Event append + view update in one transaction.
-    result = await runtime.context.engine.execute_action(request)
-    return _validated_update(state, action_result=result)
+    # 原子引擎只调用一次；规则、Event、视图更新和事务不得拆到工作流中。
+    result = await dependencies.engine.execute_action(request)
+    return _updated_state(state, action_result=result)
 
 
-async def refresh_context_node(
+async def _refresh_context(
     state: TurnState,
-    runtime: Runtime[GraphDependencies],
-) -> dict[str, Any]:
+    dependencies: TurnDependencies,
+) -> TurnState:
     """Re-project the player-visible context after the engine commits."""
 
     if state.action_result is None:
         raise ContractError("refresh_context 前缺少 ActionResult")
-    context = await runtime.context.context_assembler.assemble_context(state.player_input)
-    return _validated_update(state, context=context)
+    context = await dependencies.context_assembler.assemble_context(state.player_input)
+    return _updated_state(state, context=context)
 
 
 def _stable_player_visible_fact_id(state: TurnState, index: int) -> str:
@@ -135,9 +111,7 @@ def _stable_player_visible_fact_id(state: TurnState, index: int) -> str:
         outcome = "success" if result.success else "failure"
         source = f"checkpoint:{state.intent.check.checkpoint_id}:{outcome}"
     else:
-        source = (
-            f"action:{state.player_input.client_action_id}:{result.resolution}"
-        )
+        source = f"action:{state.player_input.client_action_id}:{result.resolution}"
     return f"{source}:result:{index}"
 
 
@@ -177,19 +151,19 @@ def build_safe_narration_request(state: TurnState) -> NarrationRequest:
     )
 
 
-async def narrate_node(
+async def _narrate(
     state: TurnState,
-    runtime: Runtime[GraphDependencies],
-) -> dict[str, Any]:
+    dependencies: TurnDependencies,
+) -> TurnState:
     if state.context is None or state.intent is None:
         raise ContractError("narrate 前缺少 Context/Intent")
-    narration = await runtime.context.narrator.narrate(
+    narration = await dependencies.narrator.narrate(
         build_safe_narration_request(state)
     )
-    return _validated_update(state, narration=narration)
+    return _updated_state(state, narration=narration)
 
 
-async def prepare_summary_outbox_node(state: TurnState) -> dict[str, Any]:
+def _prepare_summary_outbox(state: TurnState) -> TurnState:
     if state.narration is None:
         raise ContractError("prepare_summary_outbox 前缺少 NarrationOutput")
     events = state.action_result.events if state.action_result else []
@@ -199,48 +173,35 @@ async def prepare_summary_outbox_node(state: TurnState) -> dict[str, Any]:
         text=state.narration.text,
         source_event_ids=[event.event_id for event in events],
     )
-    return _validated_update(state, summary_op=operation, status="completed")
-
-
-def build_turn_graph():
-    builder = StateGraph(TurnState, context_schema=GraphDependencies)
-    builder.add_node("assemble_context", assemble_context_node)
-    builder.add_node("interpret", interpret_node)
-    builder.add_node("clarification", clarification_node)
-    builder.add_node("engine_node", engine_node)
-    builder.add_node("refresh_context", refresh_context_node)
-    builder.add_node("narrate", narrate_node)
-    builder.add_node("prepare_summary_outbox", prepare_summary_outbox_node)
-
-    builder.add_edge(START, "assemble_context")
-    builder.add_edge("assemble_context", "interpret")
-    builder.add_conditional_edges("interpret", route_after_interpret)
-    builder.add_edge("clarification", END)
-    builder.add_edge("engine_node", "refresh_context")
-    builder.add_edge("refresh_context", "narrate")
-    builder.add_edge("narrate", "prepare_summary_outbox")
-    builder.add_edge("prepare_summary_outbox", END)
-
-    # No checkpointer: every ainvoke is one disposable turn process.
-    return builder.compile()
-
-
-TURN_GRAPH = build_turn_graph()
+    return _updated_state(state, summary_op=operation, status="completed")
 
 
 async def run_turn(
     player_input: PlayerInput,
-    dependencies: GraphDependencies,
+    dependencies: TurnDependencies,
 ) -> TurnOutput:
-    raw_state = await TURN_GRAPH.ainvoke(
-        TurnState(player_input=player_input),
-        context=dependencies,
-    )
-    return TurnOutput.from_state(TurnState.model_validate(raw_state))
+    """Execute one complete turn through an explicit Python call chain."""
+
+    state = TurnState(player_input=player_input)
+    state = await _assemble_context(state, dependencies)
+    state = await _interpret(state, dependencies)
+
+    if state.intent is None:
+        raise ContractError("路由前缺少 Intent")
+    if state.intent.clarification_question:
+        return TurnOutput.from_state(_clarify(state))
+
+    if state.intent.execution == "engine":
+        state = await _execute_engine(state, dependencies)
+        state = await _refresh_context(state, dependencies)
+
+    state = await _narrate(state, dependencies)
+    state = _prepare_summary_outbox(state)
+    return TurnOutput.from_state(state)
 
 
 def run_turn_sync(
     player_input: PlayerInput,
-    dependencies: GraphDependencies,
+    dependencies: TurnDependencies,
 ) -> TurnOutput:
     return asyncio.run(run_turn(player_input, dependencies))

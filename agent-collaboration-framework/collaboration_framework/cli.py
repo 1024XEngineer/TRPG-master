@@ -15,7 +15,7 @@ from .contracts import ContractError, ContractModel, GameState, ModuleContent, P
 from .agents import create_runtime_agent
 from .engine import FakeAtomicEngine
 from .settings import AgentSettings
-from .workflow import GraphDependencies, run_turn_sync
+from .workflow import TurnDependencies, run_turn_sync
 
 ModelT = TypeVar("ModelT", bound=ContractModel)
 
@@ -28,7 +28,7 @@ def _load_model(path: str, model_type: type[ModelT]) -> ModelT:
 def build_parser(settings: AgentSettings | None = None) -> argparse.ArgumentParser:
     settings = settings or AgentSettings.from_env()
     parser = argparse.ArgumentParser(
-        description="Run one stateless graph turn and print host-internal TurnOutput"
+        description="Run one stateless turn and print host-internal TurnOutput"
     )
     parser.add_argument("--module", required=True, help="ModuleContent JSON")
     parser.add_argument("--state", required=True, help="Fake-engine GameState JSON")
@@ -52,7 +52,7 @@ def main(argv: list[str] | None = None) -> int:
         engine = FakeAtomicEngine(module, state)
         output = run_turn_sync(
             player_input,
-            GraphDependencies(
+            TurnDependencies(
                 context_assembler=engine,
                 interpreter=agent,
                 engine=engine,

@@ -626,7 +626,7 @@
     }
   },
   "additionalProperties": false,
-  "description": "Ephemeral LangGraph state for exactly one player input.",
+  "description": "Ephemeral workflow state for exactly one player input.",
   "properties": {
     "player_input": {
       "$ref": "#/$defs/PlayerInput"

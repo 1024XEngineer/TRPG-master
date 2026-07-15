@@ -1,5 +1,5 @@
-"""Pydantic contracts + LangGraph orchestration skeleton."""
+"""Pydantic contracts + plain Python turn orchestration."""
 
-from .workflow import GraphDependencies, build_turn_graph, run_turn, run_turn_sync
+from .workflow import TurnDependencies, run_turn, run_turn_sync
 
-__all__ = ["GraphDependencies", "build_turn_graph", "run_turn", "run_turn_sync"]
+__all__ = ["TurnDependencies", "run_turn", "run_turn_sync"]

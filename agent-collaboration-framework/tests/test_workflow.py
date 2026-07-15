@@ -28,8 +28,7 @@ from collaboration_framework.agents import (
 from collaboration_framework.engine import FakeAtomicEngine
 from collaboration_framework.schema_export import rendered_schemas
 from collaboration_framework.workflow import (
-    GraphDependencies,
-    TURN_GRAPH,
+    TurnDependencies,
     build_safe_narration_request,
     run_turn_sync,
 )
@@ -120,7 +119,7 @@ class UnsafeNarrativeOpenAgent(CountingAgent):
         )
 
 
-class LangGraphWorkflowTests(unittest.TestCase):
+class PythonWorkflowTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.module = ModuleContent.model_validate_json(load_text("fixtures/demo-module.json"))
@@ -130,7 +129,7 @@ class LangGraphWorkflowTests(unittest.TestCase):
     def dependencies(self):
         engine = CountingEngine(FakeAtomicEngine(self.module, self.state))
         agent = CountingAgent()
-        deps = GraphDependencies(
+        deps = TurnDependencies(
             context_assembler=engine,
             interpreter=agent,
             engine=engine,
@@ -152,15 +151,15 @@ class LangGraphWorkflowTests(unittest.TestCase):
             with self.subTest(filename=filename):
                 self.assertEqual(load_text(f"schemas/{filename}"), content)
 
-    def test_contracts_and_ports_do_not_import_langgraph(self) -> None:
-        self.assertNotIn("from langgraph", load_text("collaboration_framework/contracts.py"))
-        self.assertNotIn("import langgraph", load_text("collaboration_framework/contracts.py"))
-        self.assertNotIn("from langgraph", load_text("collaboration_framework/ports.py"))
-        self.assertNotIn("import langgraph", load_text("collaboration_framework/ports.py"))
+    def test_runtime_code_has_no_langgraph_dependency(self) -> None:
+        for path in sorted((ROOT / "collaboration_framework").rglob("*.py")):
+            with self.subTest(path=path.relative_to(ROOT)):
+                self.assertNotIn("langgraph", path.read_text(encoding="utf-8").lower())
+        self.assertNotIn("langgraph", load_text("pyproject.toml").lower())
 
     def test_pydantic_rejects_unknown_fields(self) -> None:
         payload = self.player_input.to_json_dict()
-        payload["graph_thread_id"] = "must-not-exist"
+        payload["workflow_thread_id"] = "must-not-exist"
         with self.assertRaises(ValidationError):
             PlayerInput.model_validate(payload)
 
@@ -206,8 +205,7 @@ class LangGraphWorkflowTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             EngineRequest(player_input=self.player_input, intent=narrative)
 
-    def test_graph_has_no_checkpointer(self) -> None:
-        self.assertIsNone(TURN_GRAPH.checkpointer)
+    def test_turn_state_does_not_own_game_state(self) -> None:
         self.assertNotIn("game_state", TurnState.model_json_schema()["properties"])
 
     def test_module_route_calls_atomic_engine_once(self) -> None:
@@ -394,7 +392,7 @@ class LangGraphWorkflowTests(unittest.TestCase):
     def test_workflow_hardens_narrative_world_action_to_engine(self) -> None:
         engine = CountingEngine(FakeAtomicEngine(self.module, self.state))
         agent = UnsafeNarrativeOpenAgent()
-        deps = GraphDependencies(
+        deps = TurnDependencies(
             context_assembler=engine,
             interpreter=agent,
             engine=engine,

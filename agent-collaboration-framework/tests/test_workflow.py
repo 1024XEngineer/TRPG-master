@@ -352,6 +352,112 @@ class PydanticAIPortTests(unittest.TestCase):
         self.assertEqual(intent.check.route, "module")
         self.assertEqual(narration.text, "你检查了书架。")
 
+    def test_checkpoint_cannot_be_bypassed_by_other_routes(self) -> None:
+        engine = FakeAtomicEngine(self.module, self.state)
+        smash_input = with_input(
+            self.player_input,
+            action_id="smash_validator_001",
+            utterance="我用力砸开柜子。",
+        )
+        context = asyncio.run(engine.assemble_context(smash_input))
+        base_payload = {
+            "kind": "interact",
+            "action": "smash",
+            "target": {"matched": True, "id": "cabinet"},
+            "narrative_intent": "砸开柜子",
+            "clarification_question": None,
+        }
+        invalid_routes = {
+            "narrative_no_check": {
+                "execution": "narrative",
+                "check": {"route": "none"},
+            },
+            "engine_no_check": {
+                "execution": "engine",
+                "check": {"route": "none"},
+            },
+            "engine_default_check": {
+                "execution": "engine",
+                "check": {
+                    "route": "default",
+                    "proposed_skills": ["strength"],
+                },
+            },
+        }
+
+        for label, route_payload in invalid_routes.items():
+            payload = {**base_payload, **route_payload}
+            agent = PydanticAIRuntimeAgent(TestModel(custom_output_args=payload))
+            with self.subTest(route=label):
+                intent = asyncio.run(
+                    agent.interpret(
+                        InterpretRequest(player_input=smash_input, context=context)
+                    )
+                )
+                self.assertEqual(intent.kind, "unknown")
+                self.assertEqual(intent.execution, "narrative")
+                self.assertEqual(intent.check.route, "none")
+
+    def test_authoritative_action_without_checkpoint_requires_engine(self) -> None:
+        engine = FakeAtomicEngine(self.module, self.state)
+        open_input = with_input(
+            self.player_input,
+            action_id="open_validator_001",
+            utterance="我打开窗户。",
+        )
+        context = asyncio.run(engine.assemble_context(open_input))
+        payload = {
+            "execution": "narrative",
+            "kind": "interact",
+            "action": "open",
+            "target": {"matched": True, "id": "window"},
+            "check": {"route": "none"},
+            "narrative_intent": "打开窗户",
+            "clarification_question": None,
+        }
+        agent = PydanticAIRuntimeAgent(TestModel(custom_output_args=payload))
+
+        intent = asyncio.run(
+            agent.interpret(InterpretRequest(player_input=open_input, context=context))
+        )
+
+        self.assertEqual(intent.kind, "unknown")
+
+    def test_authoritative_no_check_and_pure_narrative_routes_remain_valid(self) -> None:
+        engine = FakeAtomicEngine(self.module, self.state)
+        context = asyncio.run(engine.assemble_context(self.player_input))
+        cases = {
+            "authoritative_no_check": {
+                "execution": "engine",
+                "kind": "interact",
+                "action": "open",
+                "target": {"matched": True, "id": "window"},
+                "check": {"route": "none"},
+                "narrative_intent": "打开窗户",
+                "clarification_question": None,
+            },
+            "pure_narrative": {
+                "execution": "narrative",
+                "kind": "communicate",
+                "action": "talk",
+                "target": {"matched": True, "id": "butler"},
+                "check": {"route": "none"},
+                "narrative_intent": "和管家闲聊",
+                "clarification_question": None,
+            },
+        }
+
+        for label, payload in cases.items():
+            agent = PydanticAIRuntimeAgent(TestModel(custom_output_args=payload))
+            with self.subTest(route=label):
+                intent = asyncio.run(
+                    agent.interpret(
+                        InterpretRequest(player_input=self.player_input, context=context)
+                    )
+                )
+                self.assertEqual(intent.execution, payload["execution"])
+                self.assertEqual(intent.check.route, "none")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -143,3 +143,33 @@ export interface MyRoomSummary {
   maxPlayers: number;
   updatedAt: number;
 }
+
+// ──────────────────────────────────────────────
+// 角色建卡（Character）模块 — 与后端 dto/character.py 手动保持同步
+// ──────────────────────────────────────────────
+
+/** 建卡向导提交的一件装备。 */
+export interface CharacterEquipmentItem {
+  name: string;
+}
+
+/** PATCH /api/v1/rooms/{roomId}/characters/{characterId} 请求体——建卡向导算好的完整角色数据。 */
+export interface UpdateCharacterInput {
+  name: string;
+  /** 属性键位用大写，如 STR/CON/POW/DEX/APP/SIZ/INT/EDU。 */
+  attributes: Record<string, number>;
+  /** 衍生值键位用大写，如 HP/SAN/MP。 */
+  derivedStats: Record<string, number>;
+  /** 技能名 -> 最终值。 */
+  skills: Record<string, number>;
+  equipment: CharacterEquipmentItem[];
+  occupation: string | null;
+  background: string;
+  notes: string;
+}
+
+/** POST /api/v1/rooms/{roomId}/characters 返回 */
+export interface CharacterDraftResult {
+  characterId: string;
+  status: string;
+}

@@ -9,6 +9,7 @@ from typing import NoReturn
 from fastapi import APIRouter, Header, status
 
 from app.core.errors import AppException, ErrorCode
+from app.dto.character import CharacterDraftResult, CharacterUpdateBody
 from app.dto.common import ApiResponse
 from app.dto.room import (
     JoinRoomBody,
@@ -108,6 +109,73 @@ async def end_game(
         room_service.RoomAuthenticationError,
         room_service.RoomAuthorizationError,
         room_service.RoomConflictError,
+    ) as exc:
+        _raise_service_error(exc)
+    return ApiResponse.ok(None)
+
+
+@router.post(
+    "/{room_id}/characters",
+    response_model=ApiResponse[CharacterDraftResult],
+    status_code=status.HTTP_201_CREATED,
+    tags=["characters"],
+)
+async def create_character(
+    room_id: str,
+    reconnect_token: str | None = Header(default=None, alias="X-Reconnect-Token"),
+) -> ApiResponse[CharacterDraftResult]:
+    """POST /api/v1/rooms/{roomId}/characters —— 玩家创建一份角色草稿。"""
+    try:
+        result = await room_service.create_character_draft(room_id, reconnect_token)
+    except (
+        room_service.RoomNotFoundError,
+        room_service.RoomAuthenticationError,
+        room_service.RoomAuthorizationError,
+    ) as exc:
+        _raise_service_error(exc)
+    return ApiResponse.ok(result)
+
+
+@router.patch(
+    "/{room_id}/characters/{character_id}",
+    response_model=ApiResponse[None],
+    tags=["characters"],
+)
+async def update_character(
+    room_id: str,
+    character_id: str,
+    payload: CharacterUpdateBody,
+    reconnect_token: str | None = Header(default=None, alias="X-Reconnect-Token"),
+) -> ApiResponse[None]:
+    """PATCH /api/v1/rooms/{roomId}/characters/{characterId} —— 保存建卡向导算好的完整角色数据。"""
+    try:
+        await room_service.update_character(room_id, character_id, payload, reconnect_token)
+    except (
+        room_service.RoomNotFoundError,
+        room_service.RoomAuthenticationError,
+        room_service.RoomAuthorizationError,
+    ) as exc:
+        _raise_service_error(exc)
+    return ApiResponse.ok(None)
+
+
+@router.post(
+    "/{room_id}/characters/{character_id}/complete",
+    response_model=ApiResponse[None],
+    tags=["characters"],
+)
+async def complete_character(
+    room_id: str,
+    character_id: str,
+    reconnect_token: str | None = Header(default=None, alias="X-Reconnect-Token"),
+) -> ApiResponse[None]:
+    """POST /api/v1/rooms/{roomId}/characters/{characterId}/complete —— 标记建卡完成。"""
+    try:
+        await room_service.complete_character(room_id, character_id, reconnect_token)
+    except (
+        room_service.RoomNotFoundError,
+        room_service.RoomAuthenticationError,
+        room_service.RoomAuthorizationError,
     ) as exc:
         _raise_service_error(exc)
     return ApiResponse.ok(None)

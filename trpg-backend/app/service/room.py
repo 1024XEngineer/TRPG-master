@@ -9,6 +9,7 @@ import string
 import uuid
 from datetime import UTC, datetime
 
+from app.dto.character import CharacterDraftResult, CharacterUpdateBody
 from app.dto.room import (
     JoinRoomBody,
     ModuleRead,
@@ -23,6 +24,7 @@ from app.dto.room import (
 # ── 内存数据存储（MS1 stub，后续替换为数据库） ──
 _rooms: dict[str, dict] = {}
 _players: dict[str, dict] = {}
+_characters: dict[str, dict] = {}
 
 # 内置模组（MS1 只有一款内置模拟模组）
 _BUILTIN_MODULES: list[ModuleRead] = [
@@ -249,6 +251,60 @@ async def list_my_rooms(reconnect_token: str | None) -> list[MyRoomSummary]:
             )
         )
     return summaries
+
+
+async def create_character_draft(room_id: str, reconnect_token: str | None) -> CharacterDraftResult:
+    """房间内玩家创建一份角色草稿。"""
+    room = _find_room_by_id(room_id)
+    player = _get_player_by_token(reconnect_token)
+    if player["room_id"] != room["id"]:
+        raise RoomAuthorizationError("你不在这个房间里")
+
+    character_id = str(uuid.uuid4())
+    _characters[character_id] = {
+        "id": character_id,
+        "room_id": room_id,
+        "player_id": player["id"],
+        "status": "draft",
+    }
+    return CharacterDraftResult(character_id=character_id, status="draft")
+
+
+def _get_own_character(room_id: str, character_id: str, reconnect_token: str | None) -> dict:
+    player = _get_player_by_token(reconnect_token)
+    character = _characters.get(character_id)
+    if character is None or character["room_id"] != room_id:
+        raise RoomNotFoundError("角色不存在")
+    if character["player_id"] != player["id"]:
+        raise RoomAuthorizationError("不能编辑其他玩家的角色")
+    return character
+
+
+async def update_character(
+    room_id: str,
+    character_id: str,
+    payload: CharacterUpdateBody,
+    reconnect_token: str | None,
+) -> None:
+    """保存建卡向导算好的完整角色数据。"""
+    character = _get_own_character(room_id, character_id, reconnect_token)
+    character["name"] = payload.name
+    character["attributes"] = payload.attributes
+    character["derived_stats"] = payload.derived_stats
+    character["skills"] = payload.skills
+    character["equipment"] = [item.name for item in payload.equipment]
+    character["occupation"] = payload.occupation
+    character["background"] = payload.background
+    character["notes"] = payload.notes
+
+
+async def complete_character(room_id: str, character_id: str, reconnect_token: str | None) -> None:
+    """标记建卡完成，同步把对应玩家的 has_character 置为 True。"""
+    character = _get_own_character(room_id, character_id, reconnect_token)
+    character["status"] = "complete"
+    player = _players.get(character["player_id"])
+    if player is not None:
+        player["has_character"] = True
 
 
 async def end_game(room_id: str, reconnect_token: str | None) -> None:

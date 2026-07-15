@@ -5,6 +5,7 @@
 
 import { ApiClient, type ApiClientOptions } from './client';
 import { AuthResource } from './resources/auth';
+import { CharactersResource } from './resources/characters';
 import { ExamplesResource } from './resources/examples';
 import { RoomsResource } from './resources/rooms';
 
@@ -20,12 +21,14 @@ export class TrpgSdk {
   readonly examples: ExamplesResource;
   readonly rooms: RoomsResource;
   readonly auth: AuthResource;
+  readonly characters: CharactersResource;
 
   constructor(options: ApiClientOptions) {
     const client = new ApiClient(options);
     this.examples = new ExamplesResource(client);
     this.rooms = new RoomsResource(client);
     this.auth = new AuthResource(client);
+    this.characters = new CharactersResource(client);
   }
 }
 

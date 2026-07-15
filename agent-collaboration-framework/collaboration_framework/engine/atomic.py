@@ -340,8 +340,10 @@ class _RuleKernel:
         for condition in module_content.win_conditions:
             if not self._condition_matches(condition.when, state):
                 continue
-            before = state.get("phase")
-            state["phase"] = "ended"
+            cause = f"win_condition:{condition.id}"
+
+            # 结局标识与阶段是两个独立的可重放状态路径，必须分别写入 Event。
+            before_ending = state.get("ending_id")
             state["ending_id"] = condition.id
             self._append_event(
                 state,
@@ -349,10 +351,24 @@ class _RuleKernel:
                 room_id=room_id,
                 actor_id=actor_id,
                 client_action_id=client_action_id,
+                path="ending_id",
+                before=before_ending,
+                after=condition.id,
+                cause=cause,
+            )
+
+            before_phase = state.get("phase")
+            state["phase"] = "ended"
+            self._append_event(
+                state,
+                events,
+                room_id=room_id,
+                actor_id=actor_id,
+                client_action_id=client_action_id,
                 path="phase",
-                before=before,
+                before=before_phase,
                 after="ended",
-                cause=f"win_condition:{condition.id}",
+                cause=cause,
             )
             facts.append(condition.fact or f"触发结局 {condition.id}")
             visible.append(condition.player_visible_information or "故事进入结局。")

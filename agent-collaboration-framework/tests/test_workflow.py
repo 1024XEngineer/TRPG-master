@@ -18,6 +18,7 @@ from collaboration_framework.contracts import (
     NarrationOutput,
     NarrationRequest,
     PlayerInput,
+    StateModifiedEvent,
     TurnState,
 )
 from collaboration_framework.agents import (
@@ -45,6 +46,26 @@ def with_input(base: PlayerInput, *, action_id: str, utterance: str) -> PlayerIn
     return base.model_copy(
         update={"client_action_id": action_id, "utterance": utterance}
     )
+
+
+def replay_events(
+    initial_state: GameState,
+    events: list[StateModifiedEvent],
+) -> GameState:
+    """从初始状态按序重放状态事件，重建物化视图。"""
+
+    payload = initial_state.model_dump(mode="python", by_alias=True)
+    for event in sorted(events, key=lambda item: item.sequence):
+        cursor = payload
+        parts = event.payload.path.split(".")
+        for part in parts[:-1]:
+            cursor = cursor[part]
+        leaf = parts[-1]
+        if cursor.get(leaf) != event.payload.from_value:
+            raise AssertionError(f"Event 重放前值不匹配: {event.payload.path}")
+        cursor[leaf] = event.payload.to
+        payload["event_sequence"] = event.sequence
+    return GameState.model_validate(payload)
 
 
 class CountingEngine:
@@ -222,6 +243,32 @@ class LangGraphWorkflowTests(unittest.TestCase):
         self.assertEqual(engine.context_calls, 2)
         self.assertIsNotNone(agent.last_narration_request)
         self.assertEqual(agent.last_narration_request.context.phase, "ended")
+
+    def test_all_events_rebuild_committed_snapshot(self) -> None:
+        deps, engine, _ = self.dependencies()
+        smash = with_input(
+            self.player_input,
+            action_id="smash_replay_001",
+            utterance="我用力砸开柜子。",
+        )
+        output = run_turn_sync(smash, deps)
+
+        self.assertEqual(
+            [event.payload.path for event in output.action_result.events],
+            [
+                "entities.cabinet.opened",
+                "entities.document.destroyed",
+                "ending_id",
+                "phase",
+            ],
+        )
+        ending_event = output.action_result.events[-2]
+        self.assertIsNone(ending_event.payload.from_value)
+        self.assertEqual(ending_event.payload.to, "ending_document_destroyed")
+        self.assertEqual(
+            replay_events(self.state, output.action_result.events),
+            engine.snapshot(),
+        )
 
     def test_narration_request_exposes_only_safe_projection(self) -> None:
         deps, _, agent = self.dependencies()

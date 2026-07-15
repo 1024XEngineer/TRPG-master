@@ -7,7 +7,6 @@
 import random
 import string
 import uuid
-from collections.abc import Sequence
 from datetime import UTC, datetime
 
 from app.dto.room import (

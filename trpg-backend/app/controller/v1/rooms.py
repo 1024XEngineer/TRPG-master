@@ -10,7 +10,6 @@ from app.core.errors import AppException, ErrorCode
 from app.dto.common import ApiResponse
 from app.dto.room import (
     JoinRoomBody,
-    MyRoomSummary,
     RoomCreate,
     RoomCreateResult,
     RoomPreview,

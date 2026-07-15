@@ -148,6 +148,13 @@
         "content": {
           "title": "Content",
           "type": "string"
+        },
+        "narrative_actions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Narrative Actions",
+          "type": "array"
         }
       },
       "required": [

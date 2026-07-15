@@ -455,6 +455,9 @@ class FakeAtomicEngine:
                     name=entities[entity_id].name,
                     aliases=entities[entity_id].aliases,
                     content=entities[entity_id].content,
+                    narrative_actions=self._narrative_actions(
+                        entities[entity_id], scene
+                    ),
                 )
                 for entity_id in scene.entity_ids
             ],
@@ -501,6 +504,24 @@ class FakeAtomicEngine:
         """Test/demo inspection only; production callers read a materialized view."""
 
         return self._state.model_copy(deep=True)
+
+    def _narrative_actions(self, entity: Entity, scene: Any) -> list[str]:
+        """Expose only actions proven safe to answer without engine execution."""
+
+        engine_actions = set(entity.refuse_ops)
+        engine_actions.update(
+            checkpoint.action
+            for checkpoint in self._module.checkpoints
+            if checkpoint.id in scene.checkpoint_ids
+            and checkpoint.target_id == entity.id
+        )
+        engine_actions.update(
+            operation.action
+            for rule in entity.rules
+            for operation in rule.then
+            if isinstance(operation, AllowOperation)
+        )
+        return sorted(set(entity.direct_responses) - engine_actions)
 
     def _validate_identity(self, player_input: PlayerInput) -> None:
         if player_input.room_id != self._state.room_id:

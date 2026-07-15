@@ -28,6 +28,7 @@ from .contracts import (
     TurnState,
 )
 from .ports import AtomicActionEngine, ContextAssembler, IntentInterpreter, Narrator
+from .routing import harden_intent_routing
 
 # TODO(orchestration): 节点必须保持为 ports 的薄包装。contracts/ports 禁止出现 LangGraph
 # 类型；MVP 禁用 checkpointer。第二阶段若引入 interrupt，先评审并保证 checkpointer
@@ -64,9 +65,10 @@ async def interpret_node(
 ) -> dict[str, Any]:
     if state.context is None:
         raise ContractError("interpret 前缺少 TurnContext")
-    intent = await runtime.context.interpreter.interpret(
+    proposed_intent = await runtime.context.interpreter.interpret(
         InterpretRequest(player_input=state.player_input, context=state.context)
     )
+    intent = harden_intent_routing(proposed_intent, state.context)
     return _validated_update(state, intent=intent)
 
 

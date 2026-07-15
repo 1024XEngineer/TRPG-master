@@ -239,6 +239,8 @@ class VisibleEntity(ContractModel):
     name: str
     aliases: list[str] = Field(default_factory=list)
     content: str
+    # 由可信 ContextAssembler 明确放行；未列出的已匹配动作默认进入引擎。
+    narrative_actions: list[str] = Field(default_factory=list)
 
 
 class CheckpointOption(ContractModel):

@@ -103,6 +103,23 @@ class CountingAgent:
         return await self.inner.narrate(request)
 
 
+class UnsafeNarrativeOpenAgent(CountingAgent):
+    """Interpreter double that tries to bypass the engine with NoCheck."""
+
+    async def interpret(self, request):
+        self.interpret_calls += 1
+        return Intent.model_validate(
+            {
+                "execution": "narrative",
+                "kind": "interact",
+                "action": "open",
+                "target": {"matched": True, "id": "cabinet"},
+                "check": {"route": "none"},
+                "narrative_intent": request.player_input.utterance,
+            }
+        )
+
+
 class LangGraphWorkflowTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -374,6 +391,29 @@ class LangGraphWorkflowTests(unittest.TestCase):
         self.assertFalse(output.action_result.success)
         self.assertEqual(output.action_result.resolution, "blocked")
 
+    def test_workflow_hardens_narrative_world_action_to_engine(self) -> None:
+        engine = CountingEngine(FakeAtomicEngine(self.module, self.state))
+        agent = UnsafeNarrativeOpenAgent()
+        deps = GraphDependencies(
+            context_assembler=engine,
+            interpreter=agent,
+            engine=engine,
+            narrator=agent,
+        )
+        open_cabinet = with_input(
+            self.player_input,
+            action_id="open_bypass_001",
+            utterance="我打开柜子。",
+        )
+
+        output = run_turn_sync(open_cabinet, deps)
+
+        self.assertEqual(output.intent.execution, "engine")
+        self.assertEqual(output.intent.check.route, "none")
+        self.assertEqual(engine.execute_calls, 1)
+        self.assertFalse(output.action_result.success)
+        self.assertEqual(output.action_result.resolution, "blocked")
+
     def test_replayed_action_does_not_duplicate_events(self) -> None:
         deps, engine, _ = self.dependencies()
         first = run_turn_sync(self.player_input, deps)
@@ -464,7 +504,7 @@ class PydanticAIPortTests(unittest.TestCase):
         self.assertEqual(intent.check.route, "module")
         self.assertEqual(narration.text, "你检查了书架。")
 
-    def test_checkpoint_cannot_be_bypassed_by_other_routes(self) -> None:
+    def test_checkpoint_route_is_hardened_from_other_proposals(self) -> None:
         engine = FakeAtomicEngine(self.module, self.state)
         smash_input = with_input(
             self.player_input,
@@ -506,9 +546,10 @@ class PydanticAIPortTests(unittest.TestCase):
                         InterpretRequest(player_input=smash_input, context=context)
                     )
                 )
-                self.assertEqual(intent.kind, "unknown")
-                self.assertEqual(intent.execution, "narrative")
-                self.assertEqual(intent.check.route, "none")
+                self.assertEqual(intent.kind, "interact")
+                self.assertEqual(intent.execution, "engine")
+                self.assertEqual(intent.check.route, "module")
+                self.assertEqual(intent.check.checkpoint_id, "smash_cabinet")
 
     def test_authoritative_action_without_checkpoint_requires_engine(self) -> None:
         engine = FakeAtomicEngine(self.module, self.state)
@@ -533,7 +574,9 @@ class PydanticAIPortTests(unittest.TestCase):
             agent.interpret(InterpretRequest(player_input=open_input, context=context))
         )
 
-        self.assertEqual(intent.kind, "unknown")
+        self.assertEqual(intent.kind, "interact")
+        self.assertEqual(intent.execution, "engine")
+        self.assertEqual(intent.check.route, "none")
 
     def test_authoritative_no_check_and_pure_narrative_routes_remain_valid(self) -> None:
         engine = FakeAtomicEngine(self.module, self.state)

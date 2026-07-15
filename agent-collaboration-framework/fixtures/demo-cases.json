@@ -86,7 +86,7 @@
     "expected_kind": "interact",
     "expected_action": "interact",
     "expected_target": "cabinet",
-    "expected_execution": "narrative",
+    "expected_execution": "engine",
     "expected_check_route": "none"
   },
   {

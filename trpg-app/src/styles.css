@@ -76,3 +76,75 @@ body {
   padding-left: 18px;
   color: #cfd8ea;
 }
+
+.example-form-row,
+.example-edit-form {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+  width: 100%;
+}
+
+.example-form-row input,
+.example-edit-form input {
+  flex: 1;
+  min-width: 160px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(143, 176, 255, 0.24);
+  background: rgba(9, 13, 22, 0.6);
+  color: inherit;
+  font: inherit;
+}
+
+.example-form-row button,
+.example-edit-form button,
+.example-actions button {
+  padding: 10px 16px;
+  border-radius: 6px;
+  border: 1px solid rgba(143, 176, 255, 0.32);
+  background: rgba(143, 176, 255, 0.14);
+  color: #e7ebf3;
+  font: inherit;
+  cursor: pointer;
+}
+
+.example-form-row button:hover,
+.example-actions button:hover {
+  background: rgba(143, 176, 255, 0.26);
+}
+
+.example-error {
+  margin: 12px 0 0;
+  color: #ff9d9d;
+}
+
+.example-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.example-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  border-radius: 6px;
+  border: 1px solid rgba(143, 176, 255, 0.16);
+  background: rgba(9, 13, 22, 0.4);
+}
+
+.example-desc {
+  color: #b7c2d9;
+}
+
+.example-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}

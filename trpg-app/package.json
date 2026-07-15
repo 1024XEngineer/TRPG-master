@@ -10,7 +10,8 @@
   },
   "dependencies": {
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "trpg-sdk": "file:../sdk"
   },
   "devDependencies": {
     "@types/react": "^19.1.0",

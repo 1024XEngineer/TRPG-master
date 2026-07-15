@@ -85,15 +85,22 @@ D100 六档检定（大成功 → 大失败）、SAN 机制、衍生属性——
 ## 快速开始
 
 ```bash
-# 前端
-cd trpg-app
-npm install
-npm run dev        # → http://localhost:9877
-
 # 后端
 cd backend
+cp .env.example .env
 uv sync
-uv run uvicorn app.main:app --reload
+uv run uvicorn app.main:app --reload   # → http://127.0.0.1:8000，本地默认开启 /docs
+
+# SDK（前端依赖它调用后端，需先构建一次）
+cd sdk
+npm install
+npm run build
+
+# 前端
+cd trpg-app
+cp .env.example .env
+npm install
+npm run dev        # → http://localhost:9877
 ```
 
 ---

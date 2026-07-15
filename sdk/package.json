@@ -1,0 +1,31 @@
+{
+  "name": "trpg-sdk",
+  "version": "0.0.0",
+  "description": "TRPG-master 前后端对接 SDK",
+  "type": "module",
+  "main": "dist/index.cjs.js",
+  "module": "dist/index.esm.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.esm.js",
+      "require": "./dist/index.cjs.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "rollup -c",
+    "dev": "rollup -c -w"
+  },
+  "devDependencies": {
+    "@rollup/plugin-node-resolve": "^15.3.0",
+    "@rollup/plugin-typescript": "^12.1.0",
+    "rollup": "^4.24.0",
+    "rollup-plugin-dts": "^6.1.1",
+    "tslib": "^2.7.0",
+    "typescript": "^5.8.0"
+  }
+}

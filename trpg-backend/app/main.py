@@ -18,6 +18,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.controller.v1.router import api_router
+from app.controller.ws import router as ws_router
 from app.core.config import get_settings
 from app.core.db import init_db
 from app.core.errors import AppException, ErrorCode
@@ -84,6 +85,7 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(api_router)
+    app.include_router(ws_router)
 
     # ---- 以下四个异常处理器，按"从具体到通用"的顺序注册 ----
     # FastAPI/Starlette 在分发异常时，会按抛出异常的实际类型去匹配"最具体"的

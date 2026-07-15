@@ -173,3 +173,40 @@ export interface CharacterDraftResult {
   characterId: string;
   status: string;
 }
+
+// ──────────────────────────────────────────────
+// WebSocket（issue #60）— 与后端 app/controller/ws.py 手动保持同步
+// 连接地址 `{wsBaseUrl}/ws/{roomId}?token=`，不走 ApiResponse 信封。
+// ──────────────────────────────────────────────
+
+/** room.join 事件 payload */
+export interface RoomJoinPayload {
+  roomCode: string;
+  nickname?: string;
+}
+
+/** player.ready 事件 payload */
+export interface PlayerReadyPayload {
+  ready: boolean;
+}
+
+/** action.submit 事件 payload */
+export interface ActionSubmitPayload {
+  utterance: string;
+}
+
+/** session.bound 推送 payload */
+export interface SessionBoundPayload {
+  roomId: string;
+  playerId: string;
+}
+
+/** narration.push 推送 payload */
+export interface NarrationPushPayload {
+  text: string;
+}
+
+/** 服务端推送的事件信封：`{type, payload}`。 */
+export type ServerToClientEvent =
+  | { type: 'session.bound'; payload: SessionBoundPayload }
+  | { type: 'narration.push'; payload: NarrationPushPayload };

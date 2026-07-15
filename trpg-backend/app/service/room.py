@@ -219,13 +219,45 @@ async def get_room_preview(room_code: str) -> RoomPreview | None:
 
 
 async def start_story(room_id: str, reconnect_token: str | None) -> None:
-    """房主开始游戏，将房间阶段推进到 InGame。"""
+    """房主在大厅点"开始游戏"，只推进到 Building（背景介绍 + 建卡）阶段。
+
+    真正的"正式开局"（phase 变成 InGame）由 issue #60 里 WS 的 game.start
+    事件触发（见 begin_game），必须等全员建完角色才能发生——大厅这一步只是
+    放行玩家进入背景介绍和建卡流程，两者是有意分开的两个阶段。
+    """
     room = _find_room_by_id(room_id)
     _require_host(room, reconnect_token)
     if room["phase"] != "Lobby":
         raise RoomConflictError("只有大厅阶段可以开始游戏")
     if room["module_id"] is None:
         raise RoomConflictError("请先选择模组")
+    room["phase"] = "Building"
+    room["updated_at"] = datetime.now(UTC)
+
+
+def get_player(player_id: str) -> dict | None:
+    """按 player_id 直接查玩家（WS 层用客户端声明的 playerId 校验绑定用）。"""
+    return _players.get(player_id)
+
+
+async def set_player_ready(player_id: str, ready: bool) -> None:
+    """WS player.ready 事件：切换大厅准备状态。"""
+    player = _players.get(player_id)
+    if player is not None:
+        player["ready"] = ready
+
+
+async def begin_game(room_id: str, player_id: str) -> None:
+    """WS game.start 事件：全员建完角色后，房主正式开局（Building → InGame）。"""
+    room = _find_room_by_id(room_id)
+    player = _players.get(player_id)
+    if player is None or player["room_id"] != room["id"] or player["id"] != room["host_player_id"]:
+        raise RoomAuthorizationError("仅房主可以开始游戏")
+    if room["phase"] != "Building":
+        raise RoomConflictError("只有背景介绍/建卡阶段可以正式开局")
+    room_players = [p for p in _players.values() if p["room_id"] == room["id"]]
+    if not room_players or not all(p["has_character"] for p in room_players):
+        raise RoomConflictError("还有玩家未完成建卡")
     room["phase"] = "InGame"
     room["updated_at"] = datetime.now(UTC)
 

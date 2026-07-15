@@ -395,13 +395,13 @@ class NarrationRequest(ContractModel):
 
     utterance: str = Field(min_length=1)
     context: TurnContext
-    visible_facts: list[NarrationFact] = Field(default_factory=list)
+    player_visible_facts: list[NarrationFact] = Field(default_factory=list)
     narration_constraints: list[str] = Field(default_factory=list)
     result_status: PublicResultStatus | None = None
 
     @model_validator(mode="after")
     def validate_safe_projection(self) -> NarrationRequest:
-        fact_ids = [fact.id for fact in self.visible_facts]
+        fact_ids = [fact.id for fact in self.player_visible_facts]
         if len(fact_ids) != len(set(fact_ids)):
             raise ValueError("NarrationFact.id 必须唯一")
         return self

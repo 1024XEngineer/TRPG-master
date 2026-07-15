@@ -171,11 +171,11 @@
     "context": {
       "$ref": "#/$defs/TurnContext"
     },
-    "visible_facts": {
+    "player_visible_facts": {
       "items": {
         "$ref": "#/$defs/NarrationFact"
       },
-      "title": "Visible Facts",
+      "title": "Player Visible Facts",
       "type": "array"
     },
     "narration_constraints": {

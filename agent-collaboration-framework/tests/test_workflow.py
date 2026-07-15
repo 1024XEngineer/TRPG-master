@@ -225,22 +225,33 @@ class LangGraphWorkflowTests(unittest.TestCase):
 
     def test_narration_request_exposes_only_safe_projection(self) -> None:
         deps, _, agent = self.dependencies()
-        first = run_turn_sync(self.player_input, deps)
+        smash = with_input(
+            self.player_input,
+            action_id="smash_fact_001",
+            utterance="我用力砸开柜子。",
+        )
+        first = run_turn_sync(smash, deps)
         first_request = agent.last_narration_request
 
         self.assertIsNotNone(first.action_result)
         self.assertIsNotNone(first_request)
-        self.assertEqual(first_request.utterance, self.player_input.utterance)
+        self.assertEqual(len(first.action_result.confirmed_facts), 3)
+        self.assertEqual(len(first.action_result.player_visible_information), 2)
+        self.assertEqual(first_request.utterance, smash.utterance)
         self.assertEqual(
-            [fact.text for fact in first_request.visible_facts],
+            [fact.text for fact in first_request.player_visible_facts],
             first.action_result.player_visible_information,
+        )
+        self.assertEqual(
+            [fact.id for fact in first_request.player_visible_facts],
+            [
+                "checkpoint:smash_cabinet:success:result:1",
+                "checkpoint:smash_cabinet:success:result:2",
+            ],
         )
         self.assertEqual(
             first_request.narration_constraints,
             first.action_result.narration_constraints,
-        )
-        self.assertTrue(
-            all(fact.id.startswith("fact_") for fact in first_request.visible_facts)
         )
 
         prompt_payload = first_request.model_dump_json()
@@ -252,9 +263,10 @@ class LangGraphWorkflowTests(unittest.TestCase):
             '"state_changes"',
             '"events"',
             '"visibility"',
-            "entities.bookshelf.key_found",
+            "entities.cabinet.opened",
             "evt_0001",
-            "玩家在书架后发现钥匙",
+            "玩家成功砸开柜门",
+            "ending_document_destroyed",
         ):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, prompt_payload)
@@ -264,9 +276,11 @@ class LangGraphWorkflowTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             NarrationRequest.model_validate(unsafe_payload)
 
-        first_fact_ids = [fact.id for fact in first_request.visible_facts]
-        run_turn_sync(self.player_input, deps)
-        replay_fact_ids = [fact.id for fact in agent.last_narration_request.visible_facts]
+        first_fact_ids = [fact.id for fact in first_request.player_visible_facts]
+        run_turn_sync(smash, deps)
+        replay_fact_ids = [
+            fact.id for fact in agent.last_narration_request.player_visible_facts
+        ]
         self.assertEqual(replay_fact_ids, first_fact_ids)
 
     def test_narrative_execution_skips_engine(self) -> None:

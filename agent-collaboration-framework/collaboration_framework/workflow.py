@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from hashlib import sha256
 from typing import Any, Literal
 
 from langgraph.graph import END, START, StateGraph
@@ -18,6 +17,7 @@ from .contracts import (
     ContractError,
     EngineRequest,
     InterpretRequest,
+    ModuleCheck,
     NarrationFact,
     NarrationOutput,
     NarrationRequest,
@@ -121,14 +121,22 @@ async def refresh_context_node(
     return _validated_update(state, context=context)
 
 
-def _stable_visible_fact_id(state: TurnState, index: int) -> str:
-    """生成跨重试与幂等重放保持一致、且不暴露内部标识的事实 ID。"""
+def _stable_player_visible_fact_id(state: TurnState, index: int) -> str:
+    """按裁决来源生成跨重试与幂等重放保持一致的玩家可见事实 ID。"""
 
-    source = (
-        f"{state.player_input.room_id}\0"
-        f"{state.player_input.client_action_id}\0{index}"
-    )
-    return f"fact_{sha256(source.encode('utf-8')).hexdigest()[:16]}"
+    result = state.action_result
+    if result is None:
+        raise ContractError("生成玩家可见事实 ID 前缺少 ActionResult")
+    if result.resolution == "checkpoint":
+        if state.intent is None or not isinstance(state.intent.check, ModuleCheck):
+            raise ContractError("Checkpoint 结果缺少对应 ModuleCheck")
+        outcome = "success" if result.success else "failure"
+        source = f"checkpoint:{state.intent.check.checkpoint_id}:{outcome}"
+    else:
+        source = (
+            f"action:{state.player_input.client_action_id}:{result.resolution}"
+        )
+    return f"{source}:result:{index}"
 
 
 def build_safe_narration_request(state: TurnState) -> NarrationRequest:
@@ -140,9 +148,9 @@ def build_safe_narration_request(state: TurnState) -> NarrationRequest:
         raise ContractError("构造安全 NarrationRequest 前缺少 ActionResult")
 
     result = state.action_result
-    visible_facts = [
+    player_visible_facts = [
         NarrationFact(
-            id=_stable_visible_fact_id(state, index),
+            id=_stable_player_visible_fact_id(state, index),
             text=text,
         )
         for index, text in enumerate(
@@ -161,7 +169,7 @@ def build_safe_narration_request(state: TurnState) -> NarrationRequest:
     return NarrationRequest(
         utterance=state.player_input.utterance,
         context=state.context,
-        visible_facts=visible_facts,
+        player_visible_facts=player_visible_facts,
         narration_constraints=result.narration_constraints if result else [],
         result_status=result_status,
     )

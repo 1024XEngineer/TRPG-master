@@ -49,10 +49,10 @@
 - 1～2 个 NPC；
 - 2～3 个可交互物体；
 - 普通对话与调查；
-- 1 种属性或技能检定；
-- 1 条特殊规则；
-- 1 个关键状态；
-- 1 个简单结局。
+- 1～2 种属性或技能检定；
+- A 类拒绝规则与 C 类成功反转规则各 1 条；
+- 3 个由引擎读取的关键状态；
+- 正常与失败结局各 1 个。
 
 ### 2.2 推荐 Demo：书房调查
 
@@ -68,15 +68,21 @@
 
 建议包含以下元素：
 
-| 类型 | 内容 |
-| --- | --- |
-| 场景 | 书房 |
-| NPC | 管家 |
-| 可交互实体 | 书架、钥匙、柜子、关键文件 |
-| Checkpoint | 调查书架 |
-| 关键状态 | `has_key`、`has_document` |
-| 特殊规则 | 没有钥匙时不能正常打开柜子 |
-| 结局条件 | 玩家获得关键文件 |
+| 类型 | 内容 | 数据落点 |
+| --- | --- | --- |
+| 场景 | 书房 | `Scene` |
+| NPC | 管家 | `Entity(kind="npc")` |
+| 可交互实体 | 书架、柜子、关键文件 | `Entity(kind="object")` |
+| Checkpoint | 调查书架；砸开柜子 | `Checkpoint` |
+| 关键状态（D 类） | `bookshelf.key_found`、`cabinet.opened`、`document.obtained/destroyed` | `Entity.state` → 运行时实体状态 |
+| A 类规则 | 柜子默认 `refuse_ops=["open"]`；发现钥匙后由 Rule 放行并取得文件 | `Entity.refuse_ops` + `Entity.rules` |
+| C 类规则 | 砸柜检定成功仍导致 `document.destroyed=true`，触发坏结局 | `Checkpoint.outcomes.success` + `on_check_resolve` 语义 |
+| B 类规则（可选） | 第 N 轮后管家必然进入书房查看 | 后续使用 `on_turn_end` 或 `on_scene_enter` |
+| 结局条件 | 文件被取得为正常结局；文件被毁为坏结局 | `WinCondition` |
+
+第一阶段至少验证 A/C/D 三类通道：无钥匙时引擎必须拒绝开柜；“砸开成功”必须仍能
+强制产生文件损毁的坏后果；所有会被规则或结局读取的键必须预先声明在 `Entity.state`
+中。B 类规则可以后置，但接口与 Hook 名称应保留演进位置。
 
 ### 2.3 最小闭环必须覆盖
 

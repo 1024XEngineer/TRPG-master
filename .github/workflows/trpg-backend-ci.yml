@@ -4,19 +4,19 @@ on:
   push:
     branches: [main]
     paths:
-      - "backend/**"
-      - ".github/workflows/backend-ci.yml"
+      - "trpg-backend/**"
+      - ".github/workflows/trpg-backend-ci.yml"
   pull_request:
     paths:
-      - "backend/**"
-      - ".github/workflows/backend-ci.yml"
+      - "trpg-backend/**"
+      - ".github/workflows/trpg-backend-ci.yml"
 
 jobs:
   test:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: backend
+        working-directory: trpg-backend
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -25,7 +25,7 @@ jobs:
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-          cache-dependency-glob: "backend/uv.lock"
+          cache-dependency-glob: "trpg-backend/uv.lock"
 
       - name: Set up Python
         run: uv python install

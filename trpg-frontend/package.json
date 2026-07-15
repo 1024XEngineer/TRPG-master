@@ -1,5 +1,5 @@
 {
-  "name": "trpg-app",
+  "name": "trpg-frontend",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -11,7 +11,7 @@
   "dependencies": {
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "trpg-sdk": "file:../sdk"
+    "trpg-sdk": "file:../trpg-sdk"
   },
   "devDependencies": {
     "@types/react": "^19.1.0",

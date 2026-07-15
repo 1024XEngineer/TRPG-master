@@ -2,10 +2,10 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "trpg-app",
+      "name": "trpg-frontend",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],
-      "cwd": "trpg-app",
+      "cwd": "trpg-frontend",
       "port": 9877
     }
   ]

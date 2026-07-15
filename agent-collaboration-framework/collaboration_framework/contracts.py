@@ -376,18 +376,34 @@ class ActionResult(ContractModel):
     state_version: int = Field(default=0, ge=0)
 
 
+class NarrationFact(ContractModel):
+    """允许 Narrator 引用的一条玩家可见事实。"""
+
+    id: str = Field(min_length=1)
+    text: str = Field(min_length=1)
+
+
+class PublicResultStatus(ContractModel):
+    """Narrator 为组织语气所需的最小公开裁决状态。"""
+
+    success: bool
+    resolution: Literal["checkpoint", "direct", "blocked", "unrecognized"]
+
+
 class NarrationRequest(ContractModel):
-    player_input: PlayerInput
+    """经过安全投影后才允许序列化给 Narrator 的输入。"""
+
+    utterance: str = Field(min_length=1)
     context: TurnContext
-    intent: Intent
-    action_result: ActionResult | None = None
+    visible_facts: list[NarrationFact] = Field(default_factory=list)
+    narration_constraints: list[str] = Field(default_factory=list)
+    result_status: PublicResultStatus | None = None
 
     @model_validator(mode="after")
-    def require_engine_result_when_routed(self) -> NarrationRequest:
-        if self.intent.execution == "engine" and self.action_result is None:
-            raise ValueError("execution=engine 必须先取得 ActionResult")
-        if self.intent.execution == "narrative" and self.action_result is not None:
-            raise ValueError("execution=narrative 不得携带 ActionResult")
+    def validate_safe_projection(self) -> NarrationRequest:
+        fact_ids = [fact.id for fact in self.visible_facts]
+        if len(fact_ids) != len(set(fact_ids)):
+            raise ValueError("NarrationFact.id 必须唯一")
         return self
 
 

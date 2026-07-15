@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from hashlib import sha256
 from typing import Any, Literal
 
 from langgraph.graph import END, START, StateGraph
@@ -17,9 +18,11 @@ from .contracts import (
     ContractError,
     EngineRequest,
     InterpretRequest,
+    NarrationFact,
     NarrationOutput,
     NarrationRequest,
     PlayerInput,
+    PublicResultStatus,
     SummaryOperation,
     TurnOutput,
     TurnState,
@@ -118,6 +121,52 @@ async def refresh_context_node(
     return _validated_update(state, context=context)
 
 
+def _stable_visible_fact_id(state: TurnState, index: int) -> str:
+    """生成跨重试与幂等重放保持一致、且不暴露内部标识的事实 ID。"""
+
+    source = (
+        f"{state.player_input.room_id}\0"
+        f"{state.player_input.client_action_id}\0{index}"
+    )
+    return f"fact_{sha256(source.encode('utf-8')).hexdigest()[:16]}"
+
+
+def build_safe_narration_request(state: TurnState) -> NarrationRequest:
+    """将内部回合状态投影为可以安全发送给 Narrator 的最小输入。"""
+
+    if state.context is None or state.intent is None:
+        raise ContractError("构造安全 NarrationRequest 前缺少 Context/Intent")
+    if state.intent.execution == "engine" and state.action_result is None:
+        raise ContractError("构造安全 NarrationRequest 前缺少 ActionResult")
+
+    result = state.action_result
+    visible_facts = [
+        NarrationFact(
+            id=_stable_visible_fact_id(state, index),
+            text=text,
+        )
+        for index, text in enumerate(
+            result.player_visible_information if result else [],
+            start=1,
+        )
+    ]
+    result_status = (
+        PublicResultStatus(
+            success=result.success,
+            resolution=result.resolution,
+        )
+        if result
+        else None
+    )
+    return NarrationRequest(
+        utterance=state.player_input.utterance,
+        context=state.context,
+        visible_facts=visible_facts,
+        narration_constraints=result.narration_constraints if result else [],
+        result_status=result_status,
+    )
+
+
 async def narrate_node(
     state: TurnState,
     runtime: Runtime[GraphDependencies],
@@ -125,12 +174,7 @@ async def narrate_node(
     if state.context is None or state.intent is None:
         raise ContractError("narrate 前缺少 Context/Intent")
     narration = await runtime.context.narrator.narrate(
-        NarrationRequest(
-            player_input=state.player_input,
-            context=state.context,
-            intent=state.intent,
-            action_result=state.action_result,
-        )
+        build_safe_narration_request(state)
     )
     return _validated_update(state, narration=narration)
 

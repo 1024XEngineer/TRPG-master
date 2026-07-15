@@ -26,7 +26,12 @@ from collaboration_framework.agents import (
 )
 from collaboration_framework.engine import FakeAtomicEngine
 from collaboration_framework.schema_export import rendered_schemas
-from collaboration_framework.workflow import GraphDependencies, TURN_GRAPH, run_turn_sync
+from collaboration_framework.workflow import (
+    GraphDependencies,
+    TURN_GRAPH,
+    build_safe_narration_request,
+    run_turn_sync,
+)
 
 models.ALLOW_MODEL_REQUESTS = False
 ROOT = Path(__file__).resolve().parents[1]
@@ -104,7 +109,7 @@ class LangGraphWorkflowTests(unittest.TestCase):
 
     def test_exported_schemas_match_pydantic_source(self) -> None:
         expected = rendered_schemas()
-        self.assertEqual(len(expected), 12)
+        self.assertEqual(len(expected), 13)
         for filename, content in expected.items():
             with self.subTest(filename=filename):
                 self.assertEqual(load_text(f"schemas/{filename}"), content)
@@ -217,6 +222,52 @@ class LangGraphWorkflowTests(unittest.TestCase):
         self.assertEqual(engine.context_calls, 2)
         self.assertIsNotNone(agent.last_narration_request)
         self.assertEqual(agent.last_narration_request.context.phase, "ended")
+
+    def test_narration_request_exposes_only_safe_projection(self) -> None:
+        deps, _, agent = self.dependencies()
+        first = run_turn_sync(self.player_input, deps)
+        first_request = agent.last_narration_request
+
+        self.assertIsNotNone(first.action_result)
+        self.assertIsNotNone(first_request)
+        self.assertEqual(first_request.utterance, self.player_input.utterance)
+        self.assertEqual(
+            [fact.text for fact in first_request.visible_facts],
+            first.action_result.player_visible_information,
+        )
+        self.assertEqual(
+            first_request.narration_constraints,
+            first.action_result.narration_constraints,
+        )
+        self.assertTrue(
+            all(fact.id.startswith("fact_") for fact in first_request.visible_facts)
+        )
+
+        prompt_payload = first_request.model_dump_json()
+        for forbidden in (
+            '"player_input"',
+            '"action_result"',
+            '"intent"',
+            '"confirmed_facts"',
+            '"state_changes"',
+            '"events"',
+            '"visibility"',
+            "entities.bookshelf.key_found",
+            "evt_0001",
+            "玩家在书架后发现钥匙",
+        ):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, prompt_payload)
+
+        unsafe_payload = first_request.to_json_dict()
+        unsafe_payload["action_result"] = first.action_result.to_json_dict()
+        with self.assertRaises(ValidationError):
+            NarrationRequest.model_validate(unsafe_payload)
+
+        first_fact_ids = [fact.id for fact in first_request.visible_facts]
+        run_turn_sync(self.player_input, deps)
+        replay_fact_ids = [fact.id for fact in agent.last_narration_request.visible_facts]
+        self.assertEqual(replay_fact_ids, first_fact_ids)
 
     def test_narrative_execution_skips_engine(self) -> None:
         deps, engine, agent = self.dependencies()
@@ -339,16 +390,16 @@ class PydanticAIPortTests(unittest.TestCase):
                 EngineRequest(player_input=self.player_input, intent=intent)
             )
         )
-        narration = asyncio.run(
-            agent.narrate(
-                NarrationRequest(
-                    player_input=self.player_input,
-                    context=context,
-                    intent=Intent.model_validate(intent),
-                    action_result=action_result,
-                )
+        refreshed_context = asyncio.run(engine.assemble_context(self.player_input))
+        narration_request = build_safe_narration_request(
+            TurnState(
+                player_input=self.player_input,
+                context=refreshed_context,
+                intent=Intent.model_validate(intent),
+                action_result=action_result,
             )
         )
+        narration = asyncio.run(agent.narrate(narration_request))
         self.assertEqual(intent.check.route, "module")
         self.assertEqual(narration.text, "你检查了书架。")
 

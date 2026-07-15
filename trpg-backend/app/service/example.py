@@ -13,6 +13,7 @@ import uuid
 from collections.abc import Sequence
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dto.example import ExampleCreate, ExampleUpdate
@@ -45,7 +46,7 @@ async def create_example(db: AsyncSession, payload: ExampleCreate) -> Example:
     """
     example = Example(id=str(uuid.uuid4()), name=payload.name, description=payload.description)
     db.add(example)
-    await db.commit()
+    await _commit_or_raise(db)
     # commit 之后重新从数据库读一次，拿到 updated_at 等由数据库/ORM 计算的最终值，
     # 保证返回给调用方的对象状态是"提交后的真实状态"。
     await db.refresh(example)
@@ -56,7 +57,7 @@ async def update_example(db: AsyncSession, example: Example, payload: ExampleUpd
     """全量更新一条已经查出来的记录（调用方负责先用 get_example 查到 example）。"""
     example.name = payload.name
     example.description = payload.description
-    await db.commit()
+    await _commit_or_raise(db)
     await db.refresh(example)
     return example
 
@@ -65,3 +66,19 @@ async def delete_example(db: AsyncSession, example: Example) -> None:
     """删除一条已经查出来的记录。"""
     await db.delete(example)
     await db.commit()
+
+
+async def _commit_or_raise(db: AsyncSession) -> None:
+    """commit，失败（比如撞上唯一约束）时回滚，再把 IntegrityError 原样抛给调用方。
+
+    `get_example_by_name` 判重只是"先查后写"，两步之间不是原子的：两个并发请求
+    都查到"名字可用"、都往下走到这里 commit 时，只有一个能提交成功，另一个会在
+    这里撞上数据库的 UNIQUE 约束——这是并发下唯一真正兜底的地方，前面的查重只是
+    为常见的顺序场景提供更快、更友好的报错路径。controller 层负责把这里抛出的
+    IntegrityError 翻译成 409（见 controller/v1/examples.py）。
+    """
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise

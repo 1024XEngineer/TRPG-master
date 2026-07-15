@@ -45,7 +45,11 @@ def configure_logging() -> None:
     # 开发环境：用 structlog 自带的彩色可读渲染器，终端里看着舒服。
     # 这一个开关就是本项目"统一走 structlog、按环境切换格式"的落地方式。
     if settings.app_env == "production":
-        renderer = structlog.processors.JSONRenderer()
+        # ensure_ascii=False：JSONRenderer 底层用 json.dumps，默认会把非 ASCII
+        # 字符（中文错误信息等）转义成 \uXXXX 序列——写日志采集系统没问题，但人
+        # 直接看 stdout 排障时全是转义字符，不可读。关掉这个默认行为，日志里
+        # 直接是原样的中文。
+        renderer = structlog.processors.JSONRenderer(ensure_ascii=False)
     else:
         renderer = structlog.dev.ConsoleRenderer()
 

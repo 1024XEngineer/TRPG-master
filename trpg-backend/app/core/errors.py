@@ -37,9 +37,13 @@ class AppException(Exception):
     main.py 里注册的 `app_exception_handler` 会捕获这个异常，把 code/message
     包进统一响应体 {success: false, data: null, error: {code, message}}，
     并用 status_code 作为 HTTP 状态码返回——业务代码本身不需要关心响应格式。
+
+    status_code 没有默认值：项目里目前所有调用点都是显式传状态码的，如果给
+    一个默认值（之前是 400），万一以后哪次调用忘了传，会悄悄退化成 400 而不是
+    报错提醒——不如直接让它变成必填参数，强制每次调用都想清楚该返回什么状态码。
     """
 
-    def __init__(self, code: ErrorCode, message: str, status_code: int = 400) -> None:
+    def __init__(self, code: ErrorCode, message: str, status_code: int) -> None:
         self.code = code
         self.message = message
         self.status_code = status_code

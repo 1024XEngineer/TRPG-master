@@ -5,7 +5,13 @@
 内存数据库，测试之间互不干扰，不需要手动清理数据。
 """
 
+import pytest
 from httpx import AsyncClient
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.dto.example import ExampleCreate
+from app.service import example as example_service
 
 BASE = "/api/v1/examples"
 
@@ -82,6 +88,71 @@ async def test_create_duplicate_name_returns_409(client: AsyncClient) -> None:
     second = await client.post(BASE, json=payload)
     assert second.status_code == 409
     assert second.json()["error"]["code"] == "CONFLICT"
+
+
+async def test_service_layer_raises_integrity_error_on_duplicate_commit(
+    db_session: AsyncSession,
+) -> None:
+    """直接测 service 层（跳过 controller 的 `_ensure_name_available` 提前查重），
+    验证真撞上数据库唯一约束时的行为：`_commit_or_raise` 捕获 IntegrityError、
+    回滚，再原样抛出，而不是让 session 卡在一个不可用的状态、或者被静默吞掉。
+
+    这是之前实际复现过的 bug 的根因所在：两个并发请求都可能通过前面的查重，
+    最终只有一个能提交成功，另一个原本会在这里抛出未被捕获的 IntegrityError，
+    被 main.py 的兜底 handler 转成 500；修复后这个异常会被 controller 转成 409
+    （见 controller/v1/examples.py 里 create_example/update_example 的 try/except）。
+
+    用同一个 db_session 连续调用两次来模拟"撞库"，而不是用 asyncio.gather 真的
+    并发发请求：测试用的内存 SQLite 是单连接的 StaticPool，多个 session 抢
+    同一个物理连接去跑真正并发的事务本身就不可靠，不是在测目标行为，而是在测
+    SQLite 测试夹具的极限。
+    """
+    payload = ExampleCreate(name="并发同名")
+    await example_service.create_example(db_session, payload)
+
+    with pytest.raises(IntegrityError):
+        await example_service.create_example(db_session, payload)
+
+    # 回滚之后 session 应该还能正常用（证明 _commit_or_raise 里的 rollback 生效了，
+    # 不会让后续操作也跟着炸）。
+    await db_session.rollback()
+    remaining = await example_service.list_examples(db_session)
+    assert len(remaining) == 1
+
+
+async def test_create_duplicate_name_via_http_returns_409(client: AsyncClient) -> None:
+    """顺序发两次同名创建请求（走完整 HTTP 链路）：第一次成功，第二次应该被
+    controller 的提前查重挡下来，返回 409，而不是让请求走到 commit 才失败。
+    跟上面 test_service_layer_... 合起来，两道防线（提前查重 + commit 时兜底）
+    各自都被验证到了。
+    """
+    payload = {"name": "顺序同名请求", "description": None}
+    first = await client.post(BASE, json=payload)
+    second = await client.post(BASE, json=payload)
+
+    assert first.status_code == 201
+    assert second.status_code == 409
+    assert second.json()["error"]["code"] == "CONFLICT"
+
+    list_res = await client.get(BASE)
+    assert len(list_res.json()["data"]) == 1
+
+
+async def test_create_with_blank_name_returns_422(client: AsyncClient) -> None:
+    """名称全是空格时应该被 DTO 层的 strip_whitespace 校验拦下来，
+    而不是被当成一个"看起来是空"的合法名称存进数据库。"""
+    response = await client.post(BASE, json={"name": "   "})
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+async def test_create_trims_surrounding_whitespace(client: AsyncClient) -> None:
+    """名称前后的空格应该被自动去掉再存库，而不是原样保留。"""
+    response = await client.post(BASE, json={"name": "  带空格的名称  "})
+
+    assert response.status_code == 201
+    assert response.json()["data"]["name"] == "带空格的名称"
 
 
 async def test_create_with_invalid_payload_returns_422(client: AsyncClient) -> None:

@@ -56,6 +56,16 @@ async def _prepare_database() -> AsyncGenerator[None, None]:
 
 
 @pytest.fixture
+async def db_session() -> AsyncGenerator[AsyncSession, None]:
+    """直接拿一个测试数据库的 session，跳过 HTTP 层，给需要绕开 controller
+    （比如 `_ensure_name_available` 的提前查重）、直接验证 service 层行为的
+    测试用（见 test_examples.py 里对 IntegrityError 处理的测试）。
+    """
+    async with TestSessionLocal() as session:
+        yield session
+
+
+@pytest.fixture
 async def client() -> AsyncGenerator[AsyncClient, None]:
     """给测试用例注入一个能直接调用 FastAPI app 的异步 HTTP 客户端。
 

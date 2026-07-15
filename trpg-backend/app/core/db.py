@@ -17,7 +17,11 @@ settings = get_settings()
 
 # echo=False：不把每条 SQL 打到日志里（调试连接问题时可以临时改 True）。
 # 这里创建的是"连接池"，不是单个连接——每次请求进来会从池里借一个连接，用完还回去。
-engine = create_async_engine(settings.database_url, echo=False)
+# pool_pre_ping=True：从池里借连接前先探活一下（轻量的 "SELECT 1"）。云数据库
+# 经常会主动断开长时间空闲的连接，没有这个选项的话，池子里借出的第一个失效连接
+# 会让请求直接报错；本地 SQLite 用不上，但换成线上 PostgreSQL 之后这个坑很常见，
+# 干脆一开始就打开，不用等真的踩到了再加。
+engine = create_async_engine(settings.database_url, echo=False, pool_pre_ping=True)
 
 # expire_on_commit=False：commit 之后，Python 对象里已经查出来的属性值不会被清空。
 # 如果不设这个，commit 之后再访问 example.name 之类的属性会触发一次隐式的重新查询，

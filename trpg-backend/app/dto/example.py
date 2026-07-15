@@ -7,26 +7,34 @@
 """
 
 from datetime import datetime
+from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+
+# strip_whitespace=True：校验前先去掉首尾空白，再判断 min_length——单纯
+# Field(min_length=1) 挡得住空字符串，挡不住一个或多个空格拼成的"看起来是空"
+# 的名称（前端有 .trim() 判断，但那只是客户端行为，直接绕过前端调接口就能
+# 建一条名称全是空格的记录）。这里在 DTO 层统一兜底，而不是依赖调用方守规矩。
+NameStr = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
 
 
 class ExampleCreate(BaseModel):
     """POST /api/v1/examples 的请求体。
 
-    Field(min_length=1, ...) 这些约束由 pydantic 在进入路由函数之前自动校验，
-    校验不过会被 FastAPI 转成 422，再经 main.py 里的 RequestValidationError
-    处理器包装成统一响应体——业务代码里完全不用手写"名称不能为空"这种判断。
+    Field(...)/StringConstraints(...) 这些约束由 pydantic 在进入路由函数之前
+    自动校验，校验不过会被 FastAPI 转成 422，再经 main.py 里的
+    RequestValidationError 处理器包装成统一响应体——业务代码里完全不用手写
+    "名称不能为空"这种判断。
     """
 
-    name: str = Field(min_length=1, max_length=200)
+    name: NameStr
     description: str | None = Field(default=None, max_length=2000)
 
 
 class ExampleUpdate(BaseModel):
     """PUT /api/v1/examples/{id} 的请求体，字段跟 Create 一样（全量更新）。"""
 
-    name: str = Field(min_length=1, max_length=200)
+    name: NameStr
     description: str | None = Field(default=None, max_length=2000)
 
 

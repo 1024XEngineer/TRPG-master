@@ -23,13 +23,13 @@
 | 角色 | CoC 风格建卡流程、属性与技能配置、装备和背景信息、完成建卡 |
 | 实时通信 | WebSocket 会话绑定、准备、开始游戏、提交行动、房间叙事广播 |
 | 游戏界面 | 对话区、角色卡、技能、地图、笔记和 D100/D20/D6 本地投骰交互 |
-| API SDK | 封装认证、房间、角色、示例资源和房间 WebSocket |
+| API SDK | 封装认证、房间、角色和房间 WebSocket；与后端 DTO 对应的类型由 `npm run codegen` 生成 |
 
 ### 当前限制
 
 - AI 尚未接入真实大模型。开始游戏和提交行动后返回的是后端固定占位叙事。
 - 账号、会话、房间、玩家和角色使用内存存储，后端重启后会丢失。
-- SQLite 与异步 SQLAlchemy 基础设施已经接入，但目前主要用于示例 CRUD；核心业务尚未完成数据库持久化。
+- SQLite 与异步 SQLAlchemy 基础设施已经接入（用于建表），但核心业务（账号、房间、角色）仍是内存存储，尚未接入实际的数据库读写路径。
 - 后端当前只提供一个内置模组「追书人」。前端展示的其他规则系统和场景中，部分仍是概念入口或静态数据。
 - 投骰目前在前端本地执行，尚未接入后端统一规则引擎。
 - 复盘摘要、完整事件记录、语音输入等能力尚未完成。
@@ -47,7 +47,7 @@ trpg-backend (FastAPI)
         ├── /api/v1/*       REST API
         ├── /ws/{roomId}    房间实时通道
         ├── 内存业务存储     账号、房间、角色、会话
-        └── SQLite          SQLAlchemy 示例数据
+        └── SQLite          SQLAlchemy 基础设施（已接入，业务尚未接数据库）
 ```
 
 统一 REST 响应格式如下：
@@ -80,7 +80,7 @@ TRPG-master/
 ├── trpg-frontend/        # 移动端 React 应用
 ├── trpg-sdk/             # 前后端通信 SDK，前端通过本地依赖引用
 ├── trpg-backend/         # FastAPI 服务、REST API、WebSocket 和测试
-├── .github/workflows/    # 后端 CI
+├── .github/workflows/    # 三个独立 CI：后端、SDK、前端
 └── README.md
 ```
 
@@ -166,7 +166,10 @@ npm run dev
 ```bash
 cd trpg-sdk
 npm ci
+npm run lint
+npm run typecheck
 npm run build
+npm test
 ```
 
 ### 前端
@@ -174,7 +177,8 @@ npm run build
 ```bash
 cd trpg-frontend
 npm ci
-npm run build
+npm run lint
+npm run build   # 内部先跑 tsc -b 做类型检查，再用 vite build 打包
 ```
 
 ### 后端
@@ -188,7 +192,43 @@ uv run ty check
 uv run pytest
 ```
 
-后端 CI 会在 `trpg-backend/**` 发生变更时执行以上静态检查、格式检查、类型检查和测试。
+## 类型生成（codegen）
+
+`trpg-sdk/src/generated/dto.ts` 里跟后端 DTO 对应的 TS 类型，是从
+`trpg-backend/app/dto/*.py` 的 Pydantic 模型自动生成的，不再手写。**改了后端
+DTO（REST 请求/响应体，或 `app/dto/ws.py` 里的 WebSocket 事件 payload）之后**，
+需要依次跑：
+
+```bash
+# 1. 后端：把 DTO 导出成 JSON Schema（临时中间产物，不进 git）
+cd trpg-backend
+uv run python scripts/export_schema.py
+
+# 2. SDK：从 JSON Schema 生成 TS 类型，写入 src/generated/dto.ts
+cd ../trpg-sdk
+npm run codegen
+```
+
+然后把 `trpg-sdk/src/generated/dto.ts` 的改动**跟 DTO 改动一起提交**——这个
+文件是生成产物但会进 git（跟 `dist/` 不同：`dist/` 的消费者是机器，这个文件
+的消费者是人和 CI，见 issue #75 的决策记录）。忘记重新生成会被 Backend CI 的
+`codegen-drift` job 拦下（见下面「持续集成」）。
+
+## 持续集成
+
+`.github/workflows/` 下有三个互相独立的 workflow，各自按路径过滤器触发，只有
+真正改到对应目录才会跑：
+
+| Workflow | 触发路径 | 检查内容 |
+| --- | --- | --- |
+| `trpg-backend-ci.yml`（Backend CI） | `trpg-backend/**`；另外 `trpg-sdk/scripts/generate-types.ts` 和 `trpg-sdk/src/generated/**` 也会触发（见下） | `ruff check`、`ruff format --check`、`ty check`、`pytest`；另有 `codegen-drift` job：重新跑一遍 DTO → JSON Schema → TS 生成管线，用 `git diff` 确认 `trpg-sdk/src/generated/` 跟提交的一致，不一致就报错 |
+| `trpg-sdk-ci.yml`（SDK CI） | `trpg-sdk/**` | `npm run lint`、`npm run typecheck`、`npm run build` |
+| `trpg-frontend-ci.yml`（Frontend CI） | `trpg-frontend/**` | `npm run lint`、`npm run build` |
+
+`codegen-drift` 放在 Backend CI 而不是 SDK CI：它要在"改了 DTO 却忘记重新
+生成"的那个 PR 上就亮红灯，而 SDK CI 只在 `trpg-sdk/**` 变化时触发——一个纯
+改后端 DTO 的 PR 根本不会碰 `trpg-sdk/**`，放在 SDK CI 里等于没测。这也是
+Backend CI 的路径过滤器额外加了两条 `trpg-sdk/` 路径的原因。
 
 ## 团队
 
@@ -205,7 +245,7 @@ uv run pytest
 
 - 通过 fork + Pull Request 提交变更，不直接向主仓库主分支提交。
 - Commit message 遵循 [Conventional Commits](https://www.conventionalcommits.org/zh-hans/v1.0.0/)。
-- 前后端接口类型发生变化时，需要同步更新 `trpg-sdk` 并重新构建。
+- 后端 DTO（REST 或 WebSocket）发生变化时，按上面「类型生成（codegen）」的步骤重新生成 `trpg-sdk` 的类型并把生成结果一起提交，不再手动改 `trpg-sdk/src/types.ts`。
 
 ---
 

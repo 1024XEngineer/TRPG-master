@@ -12,13 +12,20 @@ const PHASE_LABEL: Record<string, string> = {
   Completed: '已完成',
 }
 
-function formatTime(ts: number): string {
-  const diffMin = Math.round((Date.now() - ts) / 60000)
+// 后端 MyRoomSummary.updatedAt 是 ISO-8601 字符串（pydantic 的 datetime 序列化
+// 结果），不是数字时间戳。这里必须先 Date.parse 成毫秒再参与算术——直接拿字符串
+// 去减会得到 NaN，最终一路落到 new Date(NaN) 显示成 "Invalid Date"（issue #75
+// 引入 codegen 时发现的真实 bug：此前 SDK 手写类型误标成 number，与这里的错误
+// 用法互相掩盖，TS 一直没能报出来）。
+function formatTime(ts: string): string {
+  const parsed = Date.parse(ts)
+  if (Number.isNaN(parsed)) return '未知时间'
+  const diffMin = Math.round((Date.now() - parsed) / 60000)
   if (diffMin < 1) return '刚刚'
   if (diffMin < 60) return `${diffMin} 分钟前`
   const diffHour = Math.round(diffMin / 60)
   if (diffHour < 24) return `${diffHour} 小时前`
-  return new Date(ts).toLocaleDateString('zh-CN')
+  return new Date(parsed).toLocaleDateString('zh-CN')
 }
 
 export default function MyRoomsPage() {

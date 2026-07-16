@@ -6,7 +6,6 @@
 import { ApiClient, type ApiClientOptions } from './client';
 import { AuthResource } from './resources/auth';
 import { CharactersResource } from './resources/characters';
-import { ExamplesResource } from './resources/examples';
 import { RoomSocket } from './resources/room-socket';
 import { RoomsResource } from './resources/rooms';
 
@@ -29,10 +28,9 @@ function deriveWsBaseUrl(baseUrl: string): string {
 
 /**
  * SDK 的顶层门面：每种业务资源挂一个只读属性，
- * 调用方用 `sdk.rooms.create(...)` 或 `sdk.examples.list()` 的形式访问。
+ * 调用方用 `sdk.rooms.create(...)` 或 `sdk.auth.login(...)` 的形式访问。
  */
 export class TrpgSdk {
-  readonly examples: ExamplesResource;
   readonly rooms: RoomsResource;
   readonly auth: AuthResource;
   readonly characters: CharactersResource;
@@ -40,7 +38,6 @@ export class TrpgSdk {
 
   constructor(options: TrpgSdkOptions) {
     const client = new ApiClient(options);
-    this.examples = new ExamplesResource(client);
     this.rooms = new RoomsResource(client);
     this.auth = new AuthResource(client);
     this.characters = new CharactersResource(client);

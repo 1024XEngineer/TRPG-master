@@ -1,6 +1,7 @@
 """Room 模块的 pydantic 请求/响应模型。
 
-与 trpg-sdk/src/types.ts 手动保持同步。
+对应的 TS 类型由 trpg-sdk 的 codegen 脚本从这些模型生成（见 scripts/export_schema.py
+和 issue #75），不再需要手动同步 trpg-sdk/src/types.ts。
 
 命名约定：
 - 后端代码内统一使用 snake_case Python 命名
@@ -11,21 +12,14 @@
 
 from datetime import datetime
 
-from pydantic import AliasGenerator, BaseModel, ConfigDict, Field, field_validator
+from pydantic import AliasGenerator, ConfigDict, Field, field_validator
 from pydantic.alias_generators import to_camel
+
+from app.dto.common import CamelModel
 
 
 def _to_camel(snake: str) -> str:
     return to_camel(snake)
-
-
-class CamelModel(BaseModel):
-    """所有 Room DTO 的基类：JSON 层使用 camelCase，Python 层使用 snake_case。"""
-
-    model_config = ConfigDict(
-        alias_generator=AliasGenerator(alias=_to_camel),
-        populate_by_name=True,
-    )
 
 
 # ── 请求体 ──────────────────────────────────────

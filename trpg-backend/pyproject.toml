@@ -62,4 +62,4 @@ known-first-party = ["app"]
 python-version = "3.12"
 
 [tool.ty.src]
-include = ["app", "tests"]
+include = ["app", "tests", "scripts"]

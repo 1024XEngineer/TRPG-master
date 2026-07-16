@@ -1,212 +1,83 @@
-/** 对应后端 ErrorDetail：只在 success=false 时出现。 */
-export interface ErrorDetail {
-  code: string;
-  message: string;
-}
+// ──────────────────────────────────────────────
+// 与后端 DTO 一一对应的类型：全部 re-export 自 generated/dto.ts
+// （issue #75 —— 由 `npm run codegen` 从 trpg-backend/app/dto/*.py 的 pydantic
+// 模型生成，不再手写，也不再需要手动跟后端保持同步）。
+//
+// re-export 时按原有的公开类型名做了别名（比如后端类名 RoomCreate 对应这里的
+// CreateRoomInput）：一是保持 trpg-sdk 现有的公开 API 不变，
+// resources/*.ts、trpg-frontend 都不需要跟着改名；二是后端类名和 SDK 里
+// 已经用惯的名字本来就不总是一样（后端偏"动词+Body/Read/Result"，SDK 偏
+// "动词+Input/Result"），生成产物忠实反映后端类名，这一层负责做名字翻译。
+// ──────────────────────────────────────────────
 
-/** 对应后端 ApiResponse[T]：全项目统一的响应信封形状。 */
+import type { ErrorDetail, MyRoomSummary as GeneratedMyRoomSummary } from './generated/dto';
+
+export type {
+  ErrorDetail,
+  // 认证（Auth）模块 —— 对应后端 dto/auth.py
+  RegisterBody as RegisterInput,
+  LoginBody as LoginInput,
+  UpdateNicknameBody as UpdateNicknameInput,
+  AuthResult,
+  MeRead as Me,
+  // 房间（Room）模块 —— 对应后端 dto/room.py
+  RoomCreate as CreateRoomInput,
+  RoomCreateResult as CreateRoomResult,
+  ModuleRead as ModuleSummary,
+  SelectModuleBody as SelectModuleInput,
+  JoinRoomBody as JoinRoomInput,
+  RoomPlayerRead as RoomPlayerSummary,
+  RoomPreview,
+  // 角色建卡（Character）模块 —— 对应后端 dto/character.py
+  EquipmentItem as CharacterEquipmentItem,
+  CharacterUpdateBody as UpdateCharacterInput,
+  CharacterDraftResult,
+  // WebSocket（issue #60）事件 payload —— 对应后端 dto/ws.py
+  RoomJoinPayload,
+  PlayerReadyPayload,
+  ActionSubmitPayload,
+  GameStartPayload,
+  SessionBoundPayload,
+  NarrationPushPayload,
+} from './generated/dto';
+
+/** GET /api/v1/me/rooms 返回项。 */
+export type MyRoomSummary = GeneratedMyRoomSummary;
+
+// ──────────────────────────────────────────────
+// SDK 自有类型 —— 不对应任何单一后端 DTO，继续手写（issue #75 决策 2）
+// ──────────────────────────────────────────────
+
+/**
+ * 对应后端 ApiResponse[T]：全项目统一的响应信封形状。
+ *
+ * 没有生成：`T` 是 pydantic 的泛型类型参数，JSON Schema 没有办法忠实表达
+ * TS 泛型——导出出来的只会是某个具体 T 实例化后的样子，没法当成一个可复用
+ * 的泛型包装类型。这跟 TrpgSdkOptions/ApiError 一样，属于 SDK 自己的基础
+ * 设施类型，不是"后端 DTO 的镜像"。
+ */
 export interface ApiResponse<T> {
   success: boolean;
   data: T | null;
   error: ErrorDetail | null;
 }
 
-/** 对应后端 dto/example.py 里的 ExampleRead（GET/POST/PUT 的返回形状）。 */
-export interface Example {
-  id: string;
-  name: string;
-  description: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-/** 对应后端 ExampleCreate：POST 请求体。 */
-export interface ExampleCreateInput {
-  name: string;
-  description?: string | null;
-}
-
-/** 对应后端 ExampleUpdate：PUT 请求体。 */
-export interface ExampleUpdateInput {
-  name: string;
-  description?: string | null;
-}
-
 // ──────────────────────────────────────────────
-// 认证（Auth）模块 — 与后端 dto/auth.py 手动保持同步
-// ──────────────────────────────────────────────
-
-/** POST /api/v1/auth/register 请求体 */
-export interface RegisterInput {
-  account: string;
-  password: string;
-  nickname: string;
-}
-
-/** POST /api/v1/auth/login 请求体 */
-export interface LoginInput {
-  account: string;
-  password: string;
-}
-
-/** PATCH /api/v1/auth/me 请求体 */
-export interface UpdateNicknameInput {
-  nickname: string;
-}
-
-/** 注册 / 登录成功后的返回：登录凭证 + 用户信息。 */
-export interface AuthResult {
-  token: string;
-  userId: string;
-  nickname: string;
-}
-
-/** GET/PATCH /api/v1/auth/me 返回 */
-export interface Me {
-  userId: string;
-  account: string;
-  nickname: string;
-}
-
-// ──────────────────────────────────────────────
-// 房间（Room）模块 — 与后端 dto/room.py 手动保持同步
-// ──────────────────────────────────────────────
-
-/** POST /api/v1/rooms 请求体 */
-export interface CreateRoomInput {
-  nickname?: string;
-  roomName: string;
-  maxPlayers: number;
-}
-
-/** POST /api/v1/rooms 返回（创建者自动获得身份） */
-export interface CreateRoomResult {
-  roomId: string;
-  roomCode: string;
-  reconnectToken: string;
-  playerId: string;
-}
-
-/** GET /api/v1/modules 返回项 */
-export interface ModuleSummary {
-  id: string;
-  title: string;
-  version: string;
-  authors: string[];
-  playersMin: number;
-  playersMax: number;
-  difficulty: number;
-  estimatedDuration: string | null;
-}
-
-/** POST /api/v1/rooms/{roomId}/module 请求体 */
-export interface SelectModuleInput {
-  moduleId: string;
-  attributeGenMethod: string;
-}
-
-/** POST /api/v1/rooms/{roomCode}/join 请求体 */
-export interface JoinRoomInput {
-  nickname?: string;
-}
-
-/** 房间内的玩家摘要 */
-export interface RoomPlayerSummary {
-  playerId: string;
-  nickname: string;
-  isHost: boolean;
-  ready: boolean;
-  hasCharacter: boolean;
-}
-
-/** GET /api/v1/rooms/{roomCode} 返回 */
-export interface RoomPreview {
-  roomId: string;
-  roomCode: string;
-  roomName: string;
-  phase: string;
-  storyStarted: boolean;
-  moduleTitle: string | null;
-  playerCount: number;
-  maxPlayers: number;
-  players: RoomPlayerSummary[];
-}
-
-/** GET /api/v1/me/rooms 返回项 */
-export interface MyRoomSummary {
-  roomId: string;
-  roomCode: string;
-  roomName: string;
-  phase: string;
-  moduleTitle: string | null;
-  playerCount: number;
-  maxPlayers: number;
-  updatedAt: number;
-}
-
-// ──────────────────────────────────────────────
-// 角色建卡（Character）模块 — 与后端 dto/character.py 手动保持同步
-// ──────────────────────────────────────────────
-
-/** 建卡向导提交的一件装备。 */
-export interface CharacterEquipmentItem {
-  name: string;
-}
-
-/** PATCH /api/v1/rooms/{roomId}/characters/{characterId} 请求体——建卡向导算好的完整角色数据。 */
-export interface UpdateCharacterInput {
-  name: string;
-  /** 属性键位用大写，如 STR/CON/POW/DEX/APP/SIZ/INT/EDU。 */
-  attributes: Record<string, number>;
-  /** 衍生值键位用大写，如 HP/SAN/MP。 */
-  derivedStats: Record<string, number>;
-  /** 技能名 -> 最终值。 */
-  skills: Record<string, number>;
-  equipment: CharacterEquipmentItem[];
-  occupation: string | null;
-  background: string;
-  notes: string;
-}
-
-/** POST /api/v1/rooms/{roomId}/characters 返回 */
-export interface CharacterDraftResult {
-  characterId: string;
-  status: string;
-}
-
-// ──────────────────────────────────────────────
-// WebSocket（issue #60）— 与后端 app/controller/ws.py 手动保持同步
+// WebSocket（issue #60）—— 与后端 app/controller/ws.py 保持一致
 // 连接地址 `{wsBaseUrl}/ws/{roomId}?token=`，不走 ApiResponse 信封。
 // ──────────────────────────────────────────────
 
-/** room.join 事件 payload */
-export interface RoomJoinPayload {
-  roomCode: string;
-  nickname?: string;
-}
+import type { NarrationPushPayload, SessionBoundPayload } from './generated/dto';
 
-/** player.ready 事件 payload */
-export interface PlayerReadyPayload {
-  ready: boolean;
-}
-
-/** action.submit 事件 payload */
-export interface ActionSubmitPayload {
-  utterance: string;
-}
-
-/** session.bound 推送 payload */
-export interface SessionBoundPayload {
-  roomId: string;
-  playerId: string;
-}
-
-/** narration.push 推送 payload */
-export interface NarrationPushPayload {
-  text: string;
-}
-
-/** 服务端推送的事件信封：`{type, payload}`。 */
+/**
+ * 服务端推送的事件信封：`{type, payload}`。
+ *
+ * 没有生成：后端 dto/ws.py 只对 payload 建模，没有给"信封 + type 判别字段"
+ * 建对应的 pydantic 模型（type 是纯字符串字面量，一个信封模型没法表达
+ * "payload 形状取决于 type"这种判别关系，见 dto/ws.py 顶部说明）。这个
+ * 联合类型手写组合两个生成出来的 payload 类型，`type` 判别字段的字面量值
+ * 需要跟 ws.py 里实际发送的 "session.bound"/"narration.push" 手动保持一致。
+ */
 export type ServerToClientEvent =
   | { type: 'session.bound'; payload: SessionBoundPayload }
   | { type: 'narration.push'; payload: NarrationPushPayload };

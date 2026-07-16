@@ -1,7 +1,7 @@
 """Controller 层：`/api/v1/rooms` 路由 —— 房间 CRUD 和生命周期管理。
 
-MS1 使用内存 stub（app/service/room.py），后续接入数据库后照搬 examples.py
-的模式改为 SQLAlchemy 异步操作。
+MS1 使用内存 stub（app/service/room.py），后续接入数据库后改为 SQLAlchemy
+异步操作。
 """
 
 from typing import NoReturn

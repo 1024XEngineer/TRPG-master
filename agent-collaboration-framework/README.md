@@ -4,12 +4,13 @@
 
 ## 阅读入口
 
-日常开发只看两份文件：
+日常开发只看三份文件：
 
 1. 当前文件：项目入口、运行方法和目录总览。
 2. [`docs/architecture.md`](docs/architecture.md)：唯一现行架构文档，包含 16 项统一决议、依赖方向和接口边界。
+3. [`docs/数据模型设计.md`](docs/数据模型设计.md)：当前 Pydantic 模型、字段、所有权、revision 和幂等语义。
 
-`docs/archive/` 仅用于追溯讨论，不是实现依据。不要从归档文档开始阅读；归档内容与现行架构冲突时，以 `docs/architecture.md`、代码中的 Protocol 和自动生成的 JSON Schema 为准。
+`docs/archive/` 仅用于追溯讨论，不是实现依据。不要从归档文档开始阅读；归档内容与现行文档冲突时，以 `docs/architecture.md`、`docs/数据模型设计.md`、代码中的 Protocol 和自动生成的 JSON Schema 为准。
 
 ## 唯一回合主链
 

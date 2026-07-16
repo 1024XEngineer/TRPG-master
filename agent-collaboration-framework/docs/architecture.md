@@ -115,6 +115,14 @@ sequenceDiagram
 
 理由：A/Narrator 不应看到秘密状态或可误用的写入细节，WebSocket 更不能意外序列化这些字段。Event payload 和 StateChange 是 B 的内部执行/审计模型。
 
+#### 10.1 Revision 与幂等重放
+
+`ActionResult.view_revision` 表示当前响应结束后 A 必须刷新到的投影版本；B 内部 `EngineExecutionResult.state_version` 表示原始命令提交版本，两者不能混用。
+
+同一 request id 的合法重放必须保持原始 resolution、outcome、visible facts、narration constraints 和 Event refs，不重新执行规则或追加 Event。若重放前已有其他动作推进状态，返回结果的 `view_revision` 必须对齐当前投影，使 Orchestrator 的动作后 refresh 仍能完成；内部原始 `state_version` 保持不变。
+
+同一 request id 如果换成不同的 room/player/actor 或 Intent，B 必须拒绝，不能返回另一命令的缓存结果。完整字段语义见 [`数据模型设计.md`](数据模型设计.md#8-revision-与幂等重放)。
+
 ### 11. TurnState
 
 选择：属于 A 内部 Schema，不作为 A/B/C 公共契约导出。

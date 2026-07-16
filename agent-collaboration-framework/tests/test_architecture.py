@@ -74,6 +74,100 @@ class ArchitectureTests(unittest.TestCase):
         for token in forbidden:
             self.assertNotIn(token, project)
 
+    def test_current_documentation_has_two_authoritative_design_files(self) -> None:
+        docs = ROOT / "docs"
+        current = sorted(path.name for path in docs.glob("*.md"))
+        self.assertEqual(current, ["architecture.md", "数据模型设计.md"])
+
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn("docs/architecture.md", readme)
+        self.assertIn("docs/数据模型设计.md", readme)
+
+        archive_index = (docs / "archive" / "README.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("不是当前实现依据", archive_index)
+        self.assertIn("../数据模型设计.md", archive_index)
+
+    def test_data_model_document_covers_current_model_fields(self) -> None:
+        from collaboration_framework.contracts import (
+            ActionRequest,
+            ActionResult,
+            AllowOperationSpec,
+            CheckpointOutcomeSpec,
+            CheckpointOutcomesSpec,
+            CheckpointSpec,
+            ConditionSpec,
+            EntitySpec,
+            Intent,
+            ModifyOperationSpec,
+            ModuleContent,
+            PlayerInput,
+            PlayerView,
+            ProjectionSnapshot,
+            RuleSpec,
+            SceneSpec,
+            WinConditionSpec,
+        )
+        from collaboration_framework.engine.models import (
+            ActorState,
+            EngineExecutionResult,
+            GameState,
+            StateChange,
+            StateModifiedEvent,
+            StateModifiedPayload,
+        )
+        from collaboration_framework.host.schemas import (
+            IntentContext,
+            NarrationContext,
+            NarrationOutput,
+            PlayerTurnPayload,
+            TurnOutput,
+            TurnState,
+            WebSocketOutput,
+        )
+
+        models = (
+            PlayerInput,
+            ProjectionSnapshot,
+            PlayerView,
+            Intent,
+            ActionRequest,
+            ActionResult,
+            IntentContext,
+            NarrationContext,
+            NarrationOutput,
+            PlayerTurnPayload,
+            WebSocketOutput,
+            TurnOutput,
+            TurnState,
+            ActorState,
+            GameState,
+            StateChange,
+            StateModifiedPayload,
+            StateModifiedEvent,
+            EngineExecutionResult,
+            ConditionSpec,
+            AllowOperationSpec,
+            ModifyOperationSpec,
+            RuleSpec,
+            SceneSpec,
+            EntitySpec,
+            CheckpointOutcomeSpec,
+            CheckpointOutcomesSpec,
+            CheckpointSpec,
+            WinConditionSpec,
+            ModuleContent,
+        )
+        document = (ROOT / "docs" / "数据模型设计.md").read_text(
+            encoding="utf-8"
+        )
+        for model in models:
+            with self.subTest(model=model.__name__):
+                self.assertIn(model.__name__, document)
+                for field_name in model.model_fields:
+                    self.assertIn(field_name, document)
+
 
 if __name__ == "__main__":
     unittest.main()

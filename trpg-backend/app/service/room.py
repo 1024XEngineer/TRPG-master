@@ -102,6 +102,18 @@ async def _require_host(db: AsyncSession, room: Room, reconnect_token: str | Non
     return player
 
 
+async def require_room_member(
+    db: AsyncSession, room_id: str, reconnect_token: str | None
+) -> Player:
+    """校验 reconnect_token 对应的玩家确实属于这个房间——复盘/回放这类"只有
+    参与者能看"的接口用。否则 roomId 会被公开房间预览暴露，任何人凭 roomId 就
+    能把整局的事件日志拉走（PR #78 review 指出）。"""
+    player = await get_player_by_reconnect_token(db, reconnect_token)
+    if player.room_id != room_id:
+        raise RoomAuthorizationError("你不是这个房间的成员")
+    return player
+
+
 async def _module_title(db: AsyncSession, scenario_id: str | None) -> str | None:
     if scenario_id is None:
         return None
@@ -399,8 +411,14 @@ async def record_event(
     await db.commit()
 
 
-async def get_replay(db: AsyncSession, room_id: str) -> list[ReplayEventRead]:
-    """GET /api/v1/rooms/{roomId}/replay —— 逐条事件回放，按发生时间正序。"""
+async def get_replay(
+    db: AsyncSession, room_id: str, reconnect_token: str | None
+) -> list[ReplayEventRead]:
+    """GET /api/v1/rooms/{roomId}/replay —— 逐条事件回放，按发生时间正序。
+
+    先校验发起者是这个房间的成员（复盘是"只有参与者能看"的内容），再查事件。
+    """
+    await require_room_member(db, room_id, reconnect_token)
     result = await db.scalars(
         select(Event).where(Event.room_id == room_id).order_by(Event.created_at)
     )

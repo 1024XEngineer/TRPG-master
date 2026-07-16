@@ -174,10 +174,18 @@ async def get_room_summary(
 
 @router.get("/{room_id}/replay", response_model=ApiResponse[list[ReplayEventRead]])
 async def get_room_replay(
-    room_id: str, db: AsyncSession = Depends(get_db)
+    room_id: str,
+    reconnect_token: str | None = Header(default=None, alias="X-Reconnect-Token"),
+    db: AsyncSession = Depends(get_db),
 ) -> ApiResponse[list[ReplayEventRead]]:
-    """GET /api/v1/rooms/{roomId}/replay —— 逐条事件回放。"""
-    events = await room_service.get_replay(db, room_id)
+    """GET /api/v1/rooms/{roomId}/replay —— 逐条事件回放（仅本房间成员可查）。"""
+    try:
+        events = await room_service.get_replay(db, room_id, reconnect_token)
+    except (
+        room_service.RoomAuthenticationError,
+        room_service.RoomAuthorizationError,
+    ) as exc:
+        _raise_service_error(exc)
     return ApiResponse.ok(events)
 
 

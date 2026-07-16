@@ -105,3 +105,25 @@ async def test_room_text_fields_reject_whitespace(client: AsyncClient) -> None:
 
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+async def test_replay_requires_room_member_token(client: AsyncClient) -> None:
+    """回放是"只有参与者能看"的内容——没有有效的房间成员凭证不能拉（PR #78 review）。"""
+    room = await create_room(client)
+    room_id = room["roomId"]
+
+    # 无凭证 → 401
+    no_token = await client.get(f"{ROOMS_BASE}/{room_id}/replay")
+    assert no_token.status_code == 401
+
+    # 别的房间的成员凭证 → 403（凭证有效但不是这个房间的成员）
+    other = await create_room(client)
+    wrong_room = await client.get(
+        f"{ROOMS_BASE}/{room_id}/replay", headers=auth(other["reconnectToken"])
+    )
+    assert wrong_room.status_code == 403
+
+    # 本房间成员凭证 → 200
+    ok = await client.get(f"{ROOMS_BASE}/{room_id}/replay", headers=auth(room["reconnectToken"]))
+    assert ok.status_code == 200
+    assert ok.json()["data"] == []

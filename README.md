@@ -122,6 +122,12 @@ uv run uvicorn app.main:app --reload
 
 > 建表由 Alembic 迁移负责（不再由应用启动时自动 `create_all`）。跳过
 > `alembic upgrade head` 直接启动会因为表不存在、种子数据写入失败而崩溃。
+>
+> **如果你之前跑过旧版本、本地已有 `trpg-backend/app.db`**：旧版本靠应用启动时
+> `create_all` 建表、没有 Alembic 迁移历史，直接 `alembic upgrade head` 会因为
+> `rooms` 等表已存在而报错。旧版本的业务数据存在内存里（重启即丢），那个 `app.db`
+> 里只有空的历史表、没有真实数据，**直接删掉重新迁移即可**（`rm trpg-backend/app.db`
+> 再 `alembic upgrade head`）。
 
 后端默认地址：<http://127.0.0.1:8000>
 

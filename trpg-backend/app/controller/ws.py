@@ -19,7 +19,16 @@
 
 import structlog
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from pydantic import ValidationError
 
+from app.dto.ws import (
+    ActionSubmitPayload,
+    GameStartPayload,
+    NarrationPushPayload,
+    PlayerReadyPayload,
+    RoomJoinPayload,
+    SessionBoundPayload,
+)
 from app.service import auth as auth_service
 from app.service import room as room_service
 from app.service.ws_manager import manager
@@ -41,9 +50,11 @@ async def _handle_room_join(websocket: WebSocket, room_id: str, player_id: str |
     if player is None or player["room_id"] != room_id:
         await websocket.close(code=_NOT_FOUND_CLOSE_CODE)
         return False
+    assert player_id is not None  # 上面能走到这里，player_id 必然非空（见 get_player 调用）
     manager.add(room_id, websocket)
+    payload = SessionBoundPayload(room_id=room_id, player_id=player_id)
     await websocket.send_json(
-        {"type": "session.bound", "payload": {"roomId": room_id, "playerId": player_id}}
+        {"type": "session.bound", "payload": payload.model_dump(by_alias=True)}
     )
     return True
 
@@ -64,45 +75,59 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
             envelope = await websocket.receive_json()
             event_type = envelope.get("type")
             player_id = envelope.get("playerId")
-            payload = envelope.get("payload") or {}
+            raw_payload = envelope.get("payload") or {}
 
-            if event_type == "room.join":
-                if await _handle_room_join(websocket, room_id, player_id):
-                    bound_player_id = player_id
-                else:
-                    return
-                continue
-
-            if bound_player_id is None:
-                # 还没完成 room.join 绑定，忽略这条消息，不让未识别身份的
-                # 连接影响房间状态。
-                continue
-
-            if event_type == "player.ready":
-                await room_service.set_player_ready(bound_player_id, bool(payload.get("ready")))
-            elif event_type == "game.start":
-                try:
-                    await room_service.begin_game(room_id, bound_player_id)
-                except (
-                    room_service.RoomNotFoundError,
-                    room_service.RoomAuthorizationError,
-                    room_service.RoomConflictError,
-                ):
+            # 每条消息的 payload 校验包在这一层 try 里：一条格式不对的消息
+            # （比如 ready 传了个字符串而不是 bool）只应该丢弃这一条，不该
+            # 让 ValidationError 冒出这个循环、打断整条 WS 连接——跟决策 5
+            # 里 SDK 端"校验不过就丢弃，不断连"的立场一致。
+            try:
+                if event_type == "room.join":
+                    RoomJoinPayload.model_validate(raw_payload)
+                    if await _handle_room_join(websocket, room_id, player_id):
+                        bound_player_id = player_id
+                    else:
+                        return
                     continue
-                await manager.broadcast(
-                    room_id, {"type": "narration.push", "payload": {"text": _OPENING_NARRATION}}
-                )
-            elif event_type == "action.submit":
-                utterance = str(payload.get("utterance", "")).strip()
-                if not utterance:
+
+                if bound_player_id is None:
+                    # 还没完成 room.join 绑定，忽略这条消息，不让未识别身份的
+                    # 连接影响房间状态。
                     continue
-                await manager.broadcast(
-                    room_id,
-                    {
-                        "type": "narration.push",
-                        "payload": {"text": f"守秘人记下了你的行动：「{utterance}」……"},
-                    },
-                )
+
+                if event_type == "player.ready":
+                    ready_payload = PlayerReadyPayload.model_validate(raw_payload)
+                    await room_service.set_player_ready(bound_player_id, ready_payload.ready)
+                elif event_type == "game.start":
+                    GameStartPayload.model_validate(raw_payload)
+                    try:
+                        await room_service.begin_game(room_id, bound_player_id)
+                    except (
+                        room_service.RoomNotFoundError,
+                        room_service.RoomAuthorizationError,
+                        room_service.RoomConflictError,
+                    ):
+                        continue
+                    narration = NarrationPushPayload(text=_OPENING_NARRATION)
+                    await manager.broadcast(
+                        room_id,
+                        {"type": "narration.push", "payload": narration.model_dump(by_alias=True)},
+                    )
+                elif event_type == "action.submit":
+                    submit_payload = ActionSubmitPayload.model_validate(raw_payload)
+                    utterance = submit_payload.utterance.strip()
+                    if not utterance:
+                        continue
+                    narration = NarrationPushPayload(
+                        text=f"守秘人记下了你的行动：「{utterance}」……"
+                    )
+                    await manager.broadcast(
+                        room_id,
+                        {"type": "narration.push", "payload": narration.model_dump(by_alias=True)},
+                    )
+            except ValidationError as exc:
+                logger.warning("ws_invalid_payload", event_type=event_type, error=str(exc))
+                continue
     except WebSocketDisconnect:
         pass
     finally:

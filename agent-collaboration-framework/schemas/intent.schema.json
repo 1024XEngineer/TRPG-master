@@ -12,6 +12,7 @@
           "type": "string"
         },
         "proposed_skills": {
+          "default": [],
           "items": {
             "type": "string"
           },
@@ -58,6 +59,7 @@
           "type": "string"
         },
         "proposed_skills": {
+          "default": [],
           "items": {
             "type": "string"
           },
@@ -94,6 +96,7 @@
           "type": "boolean"
         },
         "raw": {
+          "minLength": 1,
           "title": "Raw",
           "type": "string"
         }
@@ -106,34 +109,20 @@
     }
   },
   "additionalProperties": false,
+  "description": "Host semantic proposal; every valid instance is sent to ActionExecutor.",
   "properties": {
-    "execution": {
-      "enum": [
-        "narrative",
-        "engine"
-      ],
-      "title": "Execution",
-      "type": "string"
-    },
     "kind": {
       "enum": [
-        "communicate",
-        "interact",
+        "action",
+        "dialogue",
         "unknown"
       ],
       "title": "Kind",
       "type": "string"
     },
-    "action": {
-      "enum": [
-        "talk",
-        "investigate",
-        "open",
-        "smash",
-        "interact",
-        "unknown"
-      ],
-      "title": "Action",
+    "verb": {
+      "minLength": 1,
+      "title": "Verb",
       "type": "string"
     },
     "target": {
@@ -176,8 +165,21 @@
       ],
       "title": "Check"
     },
-    "narrative_intent": {
-      "title": "Narrative Intent",
+    "approach": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Approach"
+    },
+    "summary": {
+      "minLength": 1,
+      "title": "Summary",
       "type": "string"
     },
     "clarification_question": {
@@ -194,12 +196,11 @@
     }
   },
   "required": [
-    "execution",
     "kind",
-    "action",
+    "verb",
     "target",
     "check",
-    "narrative_intent"
+    "summary"
   ],
   "title": "Intent",
   "type": "object"

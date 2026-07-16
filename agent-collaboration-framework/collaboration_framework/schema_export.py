@@ -1,42 +1,33 @@
-"""Generate JSON Schema from the framework-neutral Pydantic contracts."""
+"""Generate JSON Schema only for stable cross-boundary and player DTOs."""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-from .contracts import (
+from collaboration_framework.contracts import (
+    ActionRequest,
     ActionResult,
     ContractModel,
-    EngineRequest,
-    GameState,
     Intent,
     ModuleContent,
-    NarrationOutput,
-    NarrationRequest,
     PlayerInput,
-    StateModifiedEvent,
-    SummaryOperation,
-    TurnContext,
-    TurnOutput,
-    TurnState,
+    PlayerView,
+    ProjectionSnapshot,
 )
+from collaboration_framework.host.schemas import NarrationOutput, WebSocketOutput
 
 
 SCHEMA_MODELS: dict[str, type[ContractModel]] = {
     "module-content.schema.json": ModuleContent,
-    "game-state.schema.json": GameState,
     "player-input.schema.json": PlayerInput,
-    "turn-context.schema.json": TurnContext,
+    "projection-snapshot.schema.json": ProjectionSnapshot,
+    "player-view.schema.json": PlayerView,
     "intent.schema.json": Intent,
-    "engine-request.schema.json": EngineRequest,
+    "action-request.schema.json": ActionRequest,
     "action-result.schema.json": ActionResult,
-    "event.schema.json": StateModifiedEvent,
-    "narration-request.schema.json": NarrationRequest,
     "narration-output.schema.json": NarrationOutput,
-    "summary-operation.schema.json": SummaryOperation,
-    "turn-state.schema.json": TurnState,
-    "turn-output.schema.json": TurnOutput,
+    "websocket-output.schema.json": WebSocketOutput,
 }
 
 
@@ -55,7 +46,11 @@ def rendered_schemas() -> dict[str, str]:
 
 def export_schemas(directory: Path) -> None:
     directory.mkdir(parents=True, exist_ok=True)
-    for filename, content in rendered_schemas().items():
+    expected = rendered_schemas()
+    for path in directory.glob("*.schema.json"):
+        if path.name not in expected:
+            path.unlink()
+    for filename, content in expected.items():
         (directory / filename).write_text(content, encoding="utf-8")
 
 

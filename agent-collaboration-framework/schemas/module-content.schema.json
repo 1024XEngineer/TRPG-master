@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "module-content.schema.json",
   "$defs": {
-    "AllowOperation": {
+    "AllowOperationSpec": {
       "additionalProperties": false,
       "properties": {
         "op": {
@@ -20,10 +20,80 @@
       "required": [
         "action"
       ],
-      "title": "AllowOperation",
+      "title": "AllowOperationSpec",
       "type": "object"
     },
-    "Checkpoint": {
+    "CheckpointOutcomeSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "facts": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Facts",
+          "type": "array"
+        },
+        "player_visible_information": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Player Visible Information",
+          "type": "array"
+        },
+        "narration_constraints": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Narration Constraints",
+          "type": "array"
+        },
+        "ops": {
+          "default": [],
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "allow": "#/$defs/AllowOperationSpec",
+                "modify": "#/$defs/ModifyOperationSpec"
+              },
+              "propertyName": "op"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/AllowOperationSpec"
+              },
+              {
+                "$ref": "#/$defs/ModifyOperationSpec"
+              }
+            ]
+          },
+          "title": "Ops",
+          "type": "array"
+        }
+      },
+      "title": "CheckpointOutcomeSpec",
+      "type": "object"
+    },
+    "CheckpointOutcomesSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "success": {
+          "$ref": "#/$defs/CheckpointOutcomeSpec"
+        },
+        "failure": {
+          "$ref": "#/$defs/CheckpointOutcomeSpec"
+        }
+      },
+      "required": [
+        "success",
+        "failure"
+      ],
+      "title": "CheckpointOutcomesSpec",
+      "type": "object"
+    },
+    "CheckpointSpec": {
       "additionalProperties": false,
       "properties": {
         "id": {
@@ -73,7 +143,7 @@
           "type": "string"
         },
         "outcomes": {
-          "$ref": "#/$defs/CheckpointOutcomes"
+          "$ref": "#/$defs/CheckpointOutcomesSpec"
         }
       },
       "required": [
@@ -85,76 +155,10 @@
         "difficulty",
         "outcomes"
       ],
-      "title": "Checkpoint",
+      "title": "CheckpointSpec",
       "type": "object"
     },
-    "CheckpointOutcome": {
-      "additionalProperties": false,
-      "properties": {
-        "facts": {
-          "items": {
-            "type": "string"
-          },
-          "title": "Facts",
-          "type": "array"
-        },
-        "player_visible_information": {
-          "items": {
-            "type": "string"
-          },
-          "title": "Player Visible Information",
-          "type": "array"
-        },
-        "narration_constraints": {
-          "items": {
-            "type": "string"
-          },
-          "title": "Narration Constraints",
-          "type": "array"
-        },
-        "ops": {
-          "items": {
-            "discriminator": {
-              "mapping": {
-                "allow": "#/$defs/AllowOperation",
-                "modify": "#/$defs/ModifyOperation"
-              },
-              "propertyName": "op"
-            },
-            "oneOf": [
-              {
-                "$ref": "#/$defs/AllowOperation"
-              },
-              {
-                "$ref": "#/$defs/ModifyOperation"
-              }
-            ]
-          },
-          "title": "Ops",
-          "type": "array"
-        }
-      },
-      "title": "CheckpointOutcome",
-      "type": "object"
-    },
-    "CheckpointOutcomes": {
-      "additionalProperties": false,
-      "properties": {
-        "success": {
-          "$ref": "#/$defs/CheckpointOutcome"
-        },
-        "failure": {
-          "$ref": "#/$defs/CheckpointOutcome"
-        }
-      },
-      "required": [
-        "success",
-        "failure"
-      ],
-      "title": "CheckpointOutcomes",
-      "type": "object"
-    },
-    "Condition": {
+    "ConditionSpec": {
       "additionalProperties": false,
       "properties": {
         "path": {
@@ -170,10 +174,10 @@
         "path",
         "equals"
       ],
-      "title": "Condition",
+      "title": "ConditionSpec",
       "type": "object"
     },
-    "Entity": {
+    "EntitySpec": {
       "additionalProperties": false,
       "properties": {
         "id": {
@@ -196,6 +200,7 @@
           "type": "string"
         },
         "aliases": {
+          "default": [],
           "items": {
             "type": "string"
           },
@@ -226,6 +231,7 @@
           "type": "object"
         },
         "refuse_ops": {
+          "default": [],
           "items": {
             "type": "string"
           },
@@ -252,8 +258,9 @@
           "type": "object"
         },
         "rules": {
+          "default": [],
           "items": {
-            "$ref": "#/$defs/Rule"
+            "$ref": "#/$defs/RuleSpec"
           },
           "title": "Rules",
           "type": "array"
@@ -265,11 +272,11 @@
         "name",
         "content"
       ],
-      "title": "Entity",
+      "title": "EntitySpec",
       "type": "object"
     },
     "JsonValue": {},
-    "ModifyOperation": {
+    "ModifyOperationSpec": {
       "additionalProperties": false,
       "properties": {
         "op": {
@@ -291,10 +298,10 @@
         "path",
         "set"
       ],
-      "title": "ModifyOperation",
+      "title": "ModifyOperationSpec",
       "type": "object"
     },
-    "Rule": {
+    "RuleSpec": {
       "additionalProperties": false,
       "properties": {
         "id": {
@@ -318,23 +325,24 @@
           "type": "integer"
         },
         "when": {
-          "$ref": "#/$defs/Condition"
+          "$ref": "#/$defs/ConditionSpec"
         },
         "then": {
+          "default": [],
           "items": {
             "discriminator": {
               "mapping": {
-                "allow": "#/$defs/AllowOperation",
-                "modify": "#/$defs/ModifyOperation"
+                "allow": "#/$defs/AllowOperationSpec",
+                "modify": "#/$defs/ModifyOperationSpec"
               },
               "propertyName": "op"
             },
             "oneOf": [
               {
-                "$ref": "#/$defs/AllowOperation"
+                "$ref": "#/$defs/AllowOperationSpec"
               },
               {
-                "$ref": "#/$defs/ModifyOperation"
+                "$ref": "#/$defs/ModifyOperationSpec"
               }
             ]
           },
@@ -342,6 +350,7 @@
           "type": "array"
         },
         "facts": {
+          "default": [],
           "items": {
             "type": "string"
           },
@@ -349,6 +358,7 @@
           "type": "array"
         },
         "player_visible_information": {
+          "default": [],
           "items": {
             "type": "string"
           },
@@ -361,10 +371,10 @@
         "hook",
         "when"
       ],
-      "title": "Rule",
+      "title": "RuleSpec",
       "type": "object"
     },
-    "Scene": {
+    "SceneSpec": {
       "additionalProperties": false,
       "properties": {
         "id": {
@@ -382,6 +392,7 @@
           "type": "string"
         },
         "entity_ids": {
+          "default": [],
           "items": {
             "type": "string"
           },
@@ -389,6 +400,7 @@
           "type": "array"
         },
         "checkpoint_ids": {
+          "default": [],
           "items": {
             "type": "string"
           },
@@ -401,10 +413,10 @@
         "name",
         "content"
       ],
-      "title": "Scene",
+      "title": "SceneSpec",
       "type": "object"
     },
-    "WinCondition": {
+    "WinConditionSpec": {
       "additionalProperties": false,
       "properties": {
         "id": {
@@ -413,7 +425,7 @@
           "type": "string"
         },
         "when": {
-          "$ref": "#/$defs/Condition"
+          "$ref": "#/$defs/ConditionSpec"
         },
         "fact": {
           "title": "Fact",
@@ -430,11 +442,12 @@
         "fact",
         "player_visible_information"
       ],
-      "title": "WinCondition",
+      "title": "WinConditionSpec",
       "type": "object"
     }
   },
   "additionalProperties": false,
+  "description": "Validated, versioned module publication consumed by runtime components.",
   "properties": {
     "module_id": {
       "minLength": 1,
@@ -453,28 +466,28 @@
     },
     "scenes": {
       "items": {
-        "$ref": "#/$defs/Scene"
+        "$ref": "#/$defs/SceneSpec"
       },
       "title": "Scenes",
       "type": "array"
     },
     "entities": {
       "items": {
-        "$ref": "#/$defs/Entity"
+        "$ref": "#/$defs/EntitySpec"
       },
       "title": "Entities",
       "type": "array"
     },
     "checkpoints": {
       "items": {
-        "$ref": "#/$defs/Checkpoint"
+        "$ref": "#/$defs/CheckpointSpec"
       },
       "title": "Checkpoints",
       "type": "array"
     },
     "win_conditions": {
       "items": {
-        "$ref": "#/$defs/WinCondition"
+        "$ref": "#/$defs/WinConditionSpec"
       },
       "title": "Win Conditions",
       "type": "array"

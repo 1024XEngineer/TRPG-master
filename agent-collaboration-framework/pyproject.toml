@@ -1,11 +1,10 @@
 [project]
 name = "agent-collaboration-framework"
-version = "0.3.0"
-description = "Pydantic contracts + plain Python turn orchestration skeleton"
+version = "0.4.0"
+description = "Modular A/B/C contracts and explicit async host orchestration"
 requires-python = ">=3.11"
 dependencies = [
     "pydantic>=2.13,<3",
-    "pydantic-ai-slim[openai]>=2.8,<3",
 ]
 
 [project.scripts]

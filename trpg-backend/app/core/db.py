@@ -57,10 +57,14 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 async def init_db() -> None:
     """建表：把 Base.metadata 里登记的所有模型对应的表结构同步到数据库。
 
-    在 main.py 的 FastAPI lifespan（应用启动钩子）里调用一次。这里用的是最简单的
-    "有表就跳过、没表就建"策略，没有引入 Alembic 之类的迁移工具——因为模型还在
-    快速变动阶段；等真实业务表定下来、需要处理"字段增删改"这种迁移场景时，
-    再引入 Alembic 更合适。
+    issue #77 决策 9：本期引入 Alembic 之后，这个函数已经从 main.py 的 FastAPI
+    lifespan 里撤下，退为仅测试用——`create_all` 只有"没表就建、有表就跳过"
+    这一种语义，不处理字段增删改这类真正的迁移场景，继续在应用启动时调用
+    会让开发者拿到一个"代码以为字段存在、数据库其实没有"的坏状态。真实的
+    本地/生产建表交给 `alembic upgrade head`（见 README）。测试套件目前是
+    直接对着独立的内存 SQLite 引擎调 `Base.metadata.create_all`
+    （tests/conftest.py），没有反过来调用这个函数，但语义完全等价——每次
+    测试都从空库重新建表，不需要迁移历史。
     """
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

@@ -20,9 +20,10 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.controller.v1.router import api_router
 from app.controller.ws import router as ws_router
 from app.core.config import get_settings
-from app.core.db import init_db
+from app.core.db import async_session_factory
 from app.core.errors import AppException, ErrorCode
 from app.core.logging import configure_logging
+from app.core.seed import ensure_seed_content
 from app.dto.common import ApiResponse
 
 # 模块被导入时就把 structlog 配好（只需要配一次），后面直接用 structlog.get_logger()。
@@ -45,10 +46,19 @@ _HTTP_STATUS_ERROR_CODE: dict[int, ErrorCode] = {
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """FastAPI 的应用生命周期钩子：`yield` 之前的代码在启动时跑一次，
-    之后的代码在应用关闭时跑一次。这里用来在启动时建表（本地 SQLite 场景下
-    尤其重要，不然第一次访问会因为表不存在而报错）。
+    之后的代码在应用关闭时跑一次。
+
+    issue #77 决策 9：建表不再由这里的 `init_db()`（`create_all`）负责——
+    `create_all` 只会"没表就建、有表就跳过"，不会处理改名/加字段这类真实
+    迁移场景，本期把 `room_players` 改名成 `players`、给 `rooms` 加了一批
+    字段，继续用它会让开发者拿到一个"代码以为字段存在、数据库其实没有"的
+    坏状态。建表这一步交给 `alembic upgrade head`（见 README 启动步骤），
+    这里只负责插入内置模组这类种子数据（`ensure_seed_content` 是幂等的，
+    如果表还不存在——也就是忘了跑 alembic——会直接报错而不是静默跳过，
+    这是有意的，逼着开发者按新的启动步骤来）。
     """
-    await init_db()
+    async with async_session_factory() as db:
+        await ensure_seed_content(db)
     logger.info("app_started")
     yield
     logger.info("app_stopped")

@@ -19,6 +19,7 @@ dependencies = [
   "asyncpg>=0.29,<1.0",
   "structlog>=24.4,<25.0",
   "bcrypt>=4.2,<5.0",
+  "alembic>=1.13,<2.0",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -62,4 +63,4 @@ known-first-party = ["app"]
 python-version = "3.12"
 
 [tool.ty.src]
-include = ["app", "tests", "scripts"]
+include = ["app", "tests", "scripts", "alembic"]

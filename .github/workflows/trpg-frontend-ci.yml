@@ -29,6 +29,14 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
+          # 必须显式指定 lock 文件位置：cache: npm 默认只在仓库根目录找
+          # package-lock.json，而本仓库根目录没有 package.json（三个包各自
+          # 独立），不指定的话这一步会直接以 "Dependencies lock file is not
+          # found" 失败。这个 job 会依次安装 SDK 和前端两套依赖，所以两个
+          # lock 文件都要参与缓存 key 的计算。
+          cache-dependency-path: |
+            trpg-sdk/package-lock.json
+            trpg-frontend/package-lock.json
 
       # 前端 package.json 里 trpg-sdk 是 file:../trpg-sdk 本地依赖，
       # npm ci 解析它时要求 dist/ 已经存在（dist 是 gitignore 的，不会

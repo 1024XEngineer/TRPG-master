@@ -7,6 +7,36 @@ import type {
 
 export type RoomSocketHandler = (event: ServerToClientEvent) => void;
 
+/** `ServerToClientEvent` 联合类型里所有已知的 `type` 判别值，用于运行时校验
+ * 服务端推来的消息（见 isValidServerEvent）。跟 types.ts 里手写的
+ * ServerToClientEvent 字面量保持一致——新增 WS 事件时两边都要加。 */
+const KNOWN_EVENT_TYPES: ReadonlySet<ServerToClientEvent['type']> = new Set([
+  'session.bound',
+  'narration.push',
+]);
+
+/**
+ * 运行时校验服务端推来的消息是不是一个合法的 `ServerToClientEvent`
+ * （issue #75 决策 5）：只校验信封形状（有 `type`/`payload`）和 `type` 是
+ * 已知判别值，不校验 payload 内部字段——payload 内部字段级的一致性由
+ * codegen 的 CI 漂移检查保证，不需要在每条消息的运行时再校验一次。
+ * 这不是一个真正的类型守卫（没有对 payload 做逐字段检查），但作为运行时
+ * 防线，拦住"未知事件类型"和"结构完全不对"这两类真实会发生的失败模式已经够。
+ *
+ * 导出（而不是模块私有）是为了能在 room-socket.test.ts 里直接单元测试，
+ * 不用为了测这段校验逻辑真的起一个 WebSocket 连接。
+ */
+export function isValidServerEvent(value: unknown): value is ServerToClientEvent {
+  if (typeof value !== 'object' || value === null) return false;
+  const { type, payload } = value as { type?: unknown; payload?: unknown };
+  return (
+    typeof type === 'string' &&
+    KNOWN_EVENT_TYPES.has(type as ServerToClientEvent['type']) &&
+    typeof payload === 'object' &&
+    payload !== null
+  );
+}
+
 /**
  * `/ws/{roomId}` 的类型化封装（issue #60）。这条通道是独立于 REST API
  * 版本号的实时通道，不走 ApiClient 的 HTTP/`{success,data,error}` 信封，
@@ -40,10 +70,19 @@ export class RoomSocket {
     const url = `${this.wsBaseUrl}/ws/${roomId}?token=${encodeURIComponent(token)}`;
     const socket = new WebSocket(url);
     socket.onmessage = (event) => {
-      let parsed: ServerToClientEvent;
+      let parsed: unknown;
       try {
         parsed = JSON.parse(event.data);
       } catch {
+        console.warn('[RoomSocket] received malformed JSON, dropped', event.data);
+        return;
+      }
+      // 校验不过就丢弃 + warn，不 throw、不断开连接——一条格式不对的消息
+      // 不应该让整局游戏的连接挂掉（issue #75 决策 5）。之前这里直接把
+      // JSON.parse 的结果断言成 ServerToClientEvent，服务端推来的形状对不上
+      // 时会悄无声息地把错误数据当合法事件发给所有订阅者。
+      if (!isValidServerEvent(parsed)) {
+        console.warn('[RoomSocket] received event with unknown type or invalid shape, dropped', parsed);
         return;
       }
       this.handlers.forEach((handler) => handler(parsed));
@@ -57,7 +96,14 @@ export class RoomSocket {
     if (socket.readyState === WebSocket.OPEN) return Promise.resolve();
     return new Promise((resolve, reject) => {
       socket.addEventListener('open', () => resolve(), { once: true });
-      socket.addEventListener('error', (event) => reject(event), { once: true });
+      // 原来这里直接用 WebSocket 的 Event 对象 reject——不是 Error，下游写
+      // `.catch(e => e.message)` 只会拿到 undefined。改成传一个真正的
+      // Error，原始 Event 保留在 cause 里给需要排查细节的调用方用。
+      socket.addEventListener(
+        'error',
+        (event) => reject(new Error('WebSocket connection failed', { cause: event })),
+        { once: true }
+      );
     });
   }
 

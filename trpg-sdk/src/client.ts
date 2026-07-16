@@ -51,12 +51,21 @@ export class ApiClient {
    * 失败（`success:false`）或网络异常都会以抛异常的形式表现。
    */
   async request<T>(path: string, init?: RequestInit): Promise<T> {
+    // `HeadersInit` 有三种形态：Headers 实例 / string[][] / Record<string,string>。
+    // 之前这里写的 `{...init?.headers}` 只对 Record<string,string> 是对的——
+    // 展开 Headers 实例得到 `{}`（它没有可枚举自有属性），展开 string[][]
+    // 得到 `{0:[...],1:[...]}`，两种情况下调用方传的 header 都会静默失效、
+    // 不报错（issue #75 code review 时发现的真实 bug，见 client.test.ts）。
+    // `new Headers(...)` 本身就能正确解析这三种形态，这里委托给它，而不是
+    // 自己再判断一次调用方传的是哪种形态。
+    const headers = new Headers({ 'Content-Type': 'application/json' });
+    if (init?.headers) {
+      new Headers(init.headers).forEach((value, key) => headers.set(key, value));
+    }
+
     const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
       ...init,
-      headers: {
-        'Content-Type': 'application/json',
-        ...init?.headers
-      }
+      headers
     });
 
     const body = (await response.json()) as ApiResponse<T>;

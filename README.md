@@ -116,8 +116,12 @@ cd ..
 ```bash
 cd trpg-backend
 uv sync --locked
+uv run alembic upgrade head   # 建表：首次启动、以及之后表结构有变更时都要先跑
 uv run uvicorn app.main:app --reload
 ```
+
+> 建表由 Alembic 迁移负责（不再由应用启动时自动 `create_all`）。跳过
+> `alembic upgrade head` 直接启动会因为表不存在、种子数据写入失败而崩溃。
 
 后端默认地址：<http://127.0.0.1:8000>
 

@@ -1,16 +1,23 @@
 name: Backend CI
 
-# 只在 trpg-backend/ 目录或本工作流文件自身变化时触发，其他目录（前端/SDK）
-# 的改动不会跑这个 job，节省 CI 时间。
+# trpg-backend/ 目录、本工作流文件自身、或者跟 codegen 管线相关的 trpg-sdk
+# 路径（生成产物 + 生成脚本本身）变化时触发。后两个 trpg-sdk 路径是特意加的
+# （见下面 codegen-drift job 的说明）：只在 trpg-backend/** 上加 paths 过滤器
+# 的话，一个只改了 trpg-sdk/scripts/generate-types.ts 或手改了生成产物的 PR
+# 完全不会触发这个 workflow，漂移检查也就无从跑起。
 on:
   push:
     branches: [main]
     paths:
       - "trpg-backend/**"
+      - "trpg-sdk/scripts/generate-types.ts"
+      - "trpg-sdk/src/generated/**"
       - ".github/workflows/trpg-backend-ci.yml"
   pull_request:
     paths:
       - "trpg-backend/**"
+      - "trpg-sdk/scripts/generate-types.ts"
+      - "trpg-sdk/src/generated/**"
       - ".github/workflows/trpg-backend-ci.yml"
 
 jobs:
@@ -51,3 +58,61 @@ jobs:
 
       - name: Run tests
         run: uv run pytest
+
+  # 漂移检查（issue #75 决策 3）：重新跑一遍完整的 DTO -> JSON Schema -> TS
+  # 生成管线，用 git diff 确认 trpg-sdk/src/generated/ 跟刚生成的结果一致。
+  # 不一致说明有人改了后端 DTO（或手改了生成产物）却没有重新跑 codegen。
+  #
+  # 放在 backend CI 而不是 SDK CI：漂移检查要在"改坏契约的那个 PR"上就亮红灯
+  # （而不是等某天有人恰好碰了 trpg-sdk/** 才发现），这要求它跟着
+  # trpg-backend/** 的改动触发——SDK CI 的 paths 过滤器只认 trpg-sdk/**，一个
+  # 纯改后端 DTO、忘记重新生成的 PR 根本不会碰 trpg-sdk/** 里的任何文件，放
+  # 在 SDK CI 里根本不会触发，等于没测。代价是这个 job 需要同时装 Python(uv)
+  # 和 Node，比单纯的 backend 测试慢一点，但这是这条检查要成立的前提，省不掉。
+  codegen-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "trpg-backend/uv.lock"
+
+      - name: Set up Python
+        working-directory: trpg-backend
+        run: uv python install
+
+      - name: Install backend dependencies
+        working-directory: trpg-backend
+        run: uv sync --locked
+
+      - name: Export JSON Schema from backend DTOs
+        working-directory: trpg-backend
+        run: uv run python scripts/export_schema.py
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: trpg-sdk/package-lock.json
+
+      - name: Install SDK dependencies
+        working-directory: trpg-sdk
+        run: npm ci
+
+      - name: Generate TS types from JSON Schema
+        working-directory: trpg-sdk
+        run: npm run codegen
+
+      - name: Fail if generated types are out of date
+        run: |
+          if ! git diff --exit-code -- trpg-sdk/src/generated; then
+            echo "::error::trpg-sdk/src/generated/ 跟后端 DTO 不一致。改了 DTO 之后，" \
+              "记得在 trpg-backend/ 跑 'uv run python scripts/export_schema.py'，" \
+              "再在 trpg-sdk/ 跑 'npm run codegen'，把生成结果一并提交。"
+            exit 1
+          fi

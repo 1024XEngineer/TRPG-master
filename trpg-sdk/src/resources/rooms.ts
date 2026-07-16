@@ -7,6 +7,8 @@ import type {
   JoinRoomInput,
   RoomPreview,
   MyRoomSummary,
+  RoomSummary,
+  ReplayEvent,
 } from '../types';
 
 /**
@@ -74,6 +76,22 @@ export class RoomsResource {
     return this.client.post<null>(
       `/rooms/${roomId}/end`,
       null,
+      this.authenticated(reconnectToken)
+    );
+  }
+
+  /** GET /api/v1/rooms/{roomId}/summary — 复盘摘要（issue #77 新增，本期未实现） */
+  getSummary(roomId: string, reconnectToken: string): Promise<RoomSummary> {
+    return this.client.get<RoomSummary>(
+      `/rooms/${roomId}/summary`,
+      this.authenticated(reconnectToken)
+    );
+  }
+
+  /** GET /api/v1/rooms/{roomId}/replay — 逐条事件回放（issue #77 新增） */
+  getReplay(roomId: string, reconnectToken: string): Promise<ReplayEvent[]> {
+    return this.client.get<ReplayEvent[]>(
+      `/rooms/${roomId}/replay`,
       this.authenticated(reconnectToken)
     );
   }

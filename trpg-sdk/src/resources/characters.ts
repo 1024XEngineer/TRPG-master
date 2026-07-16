@@ -1,5 +1,5 @@
 import type { ApiClient } from '../client';
-import type { CharacterDraftResult, UpdateCharacterInput } from '../types';
+import type { CharacterDraftResult, RollAttributesResult, UpdateCharacterInput } from '../types';
 
 /**
  * `/api/v1/rooms/{roomId}/characters` 的类型化封装——房间内的建卡流程：
@@ -39,6 +39,20 @@ export class CharactersResource {
   complete(roomId: string, characterId: string, reconnectToken: string): Promise<null> {
     return this.client.post<null>(
       `/rooms/${roomId}/characters/${characterId}/complete`,
+      null,
+      this.authenticated(reconnectToken)
+    );
+  }
+
+  /** POST /api/v1/rooms/{roomId}/characters/{characterId}/roll-attributes —
+   * 服务端权威掷骰生成属性（issue #77 新增，本期未实现）。 */
+  rollAttributes(
+    roomId: string,
+    characterId: string,
+    reconnectToken: string
+  ): Promise<RollAttributesResult> {
+    return this.client.post<RollAttributesResult>(
+      `/rooms/${roomId}/characters/${characterId}/roll-attributes`,
       null,
       this.authenticated(reconnectToken)
     );

@@ -105,7 +105,7 @@ export class ApiClient {
     });
   }
 
-  delete<T>(path: string): Promise<T> {
-    return this.request<T>(path, { method: 'DELETE' });
+  delete<T>(path: string, init?: RequestInit): Promise<T> {
+    return this.request<T>(path, { ...init, method: 'DELETE' });
   }
 }

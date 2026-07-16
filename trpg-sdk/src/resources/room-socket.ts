@@ -1,7 +1,10 @@
 import type {
   ActionSubmitPayload,
+  CheckRollPayload,
   PlayerReadyPayload,
   RoomJoinPayload,
+  RoomRejoinPayload,
+  SanCheckRollPayload,
   ServerToClientEvent,
 } from '../types';
 
@@ -25,6 +28,28 @@ const PAYLOAD_VALIDATORS: {
 } = {
   'session.bound': (p) => typeof p.roomId === 'string' && typeof p.playerId === 'string',
   'narration.push': (p) => typeof p.text === 'string',
+  // issue #77 新增的 11 个 S→C 事件。只校验必填字段的类型（可空字段不校验）；
+  // 嵌套对象（players/player）只做「是不是对象/数组」的浅检查，不深入逐字段。
+  'room.state': (p) =>
+    typeof p.roomId === 'string' && typeof p.phase === 'string' && Array.isArray(p.players),
+  'player.joined': (p) => typeof p.player === 'object' && p.player !== null,
+  'turn.begin': (p) => typeof p.playerId === 'string',
+  'game.ended': () => true, // reason 可空，没有必填字段
+  'view.private': (p) => typeof p.playerId === 'string' && typeof p.text === 'string',
+  'check.request': (p) => typeof p.playerId === 'string' && typeof p.skill === 'string',
+  'check.result': (p) =>
+    typeof p.playerId === 'string' &&
+    typeof p.skill === 'string' &&
+    typeof p.rollValue === 'number' &&
+    typeof p.result === 'string',
+  'san.check.request': (p) => typeof p.playerId === 'string',
+  'san.check.result': (p) =>
+    typeof p.playerId === 'string' &&
+    typeof p.rollValue === 'number' &&
+    typeof p.sanLoss === 'number' &&
+    typeof p.result === 'string',
+  'clue.granted': (p) => typeof p.playerId === 'string' && typeof p.clueName === 'string',
+  error: (p) => typeof p.code === 'string' && typeof p.message === 'string',
 };
 
 /**
@@ -140,6 +165,22 @@ export class RoomSocket {
 
   submitAction(playerId: string, payload: ActionSubmitPayload): void {
     this.send('action.submit', playerId, payload);
+  }
+
+  /** check.roll —— 玩家请求做一次技能检定（issue #77 新增，后端本期回
+   * NOT_IMPLEMENTED 的 error 事件，真实服务端权威掷骰待规则引擎落地）。 */
+  rollCheck(playerId: string, payload: CheckRollPayload): void {
+    this.send('check.roll', playerId, payload);
+  }
+
+  /** san.check.roll —— 理智检定摇骰（issue #77 新增，后端本期回 NOT_IMPLEMENTED）。 */
+  rollSanCheck(playerId: string, payload: SanCheckRollPayload): void {
+    this.send('san.check.roll', playerId, payload);
+  }
+
+  /** room.rejoin —— 断线重连（issue #77 仅铺协议，后端本期回 NOT_IMPLEMENTED）。 */
+  rejoin(playerId: string, payload: RoomRejoinPayload): void {
+    this.send('room.rejoin', playerId, payload);
   }
 
   disconnect(): void {

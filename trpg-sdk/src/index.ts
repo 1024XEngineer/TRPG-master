@@ -5,7 +5,10 @@
 
 import { ApiClient, type ApiClientOptions } from './client';
 import { AuthResource } from './resources/auth';
+import { CharacterTemplatesResource } from './resources/character-templates';
 import { CharactersResource } from './resources/characters';
+import { GamesResource } from './resources/games';
+import { ModulesResource } from './resources/modules';
 import { RoomSocket } from './resources/room-socket';
 import { RoomsResource } from './resources/rooms';
 
@@ -34,6 +37,9 @@ export class TrpgSdk {
   readonly rooms: RoomsResource;
   readonly auth: AuthResource;
   readonly characters: CharactersResource;
+  readonly games: GamesResource;
+  readonly modules: ModulesResource;
+  readonly characterTemplates: CharacterTemplatesResource;
   readonly roomSocket: RoomSocket;
 
   constructor(options: TrpgSdkOptions) {
@@ -41,6 +47,9 @@ export class TrpgSdk {
     this.rooms = new RoomsResource(client);
     this.auth = new AuthResource(client);
     this.characters = new CharactersResource(client);
+    this.games = new GamesResource(client);
+    this.modules = new ModulesResource(client);
+    this.characterTemplates = new CharacterTemplatesResource(client);
     this.roomSocket = new RoomSocket(options.wsBaseUrl ?? deriveWsBaseUrl(options.baseUrl));
   }
 }

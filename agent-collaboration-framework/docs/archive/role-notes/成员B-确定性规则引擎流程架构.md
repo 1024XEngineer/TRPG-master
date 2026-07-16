@@ -1,7 +1,7 @@
 # 成员 B：确定性规则引擎边界
 
 > 当前代码是功能型 Fake，用来验证接口，不代表生产规则引擎实现。
-> 统一决议：[`architecture-alignment-decisions.md`](architecture-alignment-decisions.md)
+> 已归档。现行决议：[`../../architecture.md`](../../architecture.md)
 
 ## 1. B 的职责
 

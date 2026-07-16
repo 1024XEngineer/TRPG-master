@@ -2,7 +2,14 @@
 
 这是成员 A（主持编排）、成员 B（确定性规则引擎）和成员 C（模组解析/审查）共同使用的模块化单体骨架。当前版本只建立稳定边界和可运行的 Fake 纵切，不接 OpenAI、LangGraph 或真实规则引擎。
 
-最终架构决议见 [`docs/architecture-alignment-decisions.md`](docs/architecture-alignment-decisions.md)。它是当前基线；其他文档如与它冲突，以该文档和 Pydantic Schema 为准。
+## 阅读入口
+
+日常开发只看两份文件：
+
+1. 当前文件：项目入口、运行方法和目录总览。
+2. [`docs/architecture.md`](docs/architecture.md)：唯一现行架构文档，包含 16 项统一决议、依赖方向和接口边界。
+
+`docs/archive/` 仅用于追溯讨论，不是实现依据。不要从归档文档开始阅读；归档内容与现行架构冲突时，以 `docs/architecture.md`、代码中的 Protocol 和自动生成的 JSON Schema 为准。
 
 ## 唯一回合主链
 

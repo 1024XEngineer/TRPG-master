@@ -1,7 +1,7 @@
 # 成员 A：主持编排 Agent 流程架构
 
 > 当前状态：MVP 骨架；只使用显式 Python async 和 Fake 模型。
-> 统一决议：[`architecture-alignment-decisions.md`](architecture-alignment-decisions.md)
+> 已归档。现行决议：[`../../architecture.md`](../../architecture.md)
 
 ## 1. A 的职责
 

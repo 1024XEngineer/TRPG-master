@@ -1,7 +1,7 @@
 # 成员 C：模组解析与审查 Agent 边界
 
 > 当前只保留发布契约和薄校验入口，不实现真实解析 Agent。
-> 统一决议：[`architecture-alignment-decisions.md`](architecture-alignment-decisions.md)
+> 已归档。现行决议：[`../../architecture.md`](../../architecture.md)
 
 ## 1. C 的职责
 

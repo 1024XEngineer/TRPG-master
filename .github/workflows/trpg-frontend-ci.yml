@@ -1,0 +1,54 @@
+name: Frontend CI
+
+# trpg-frontend/** 之外，trpg-sdk/** 的改动也要触发这个 workflow——见
+# issue #73 决策 2：前端通过 file:../trpg-sdk 依赖 SDK，SDK 改一个类型就能
+# 让前端构建失败，只按前端目录过滤的话，一个纯 SDK 的 PR 可以在前端已经
+# 跑不起来的情况下绿灯合并，这正是 CI 应该拦住的问题。
+on:
+  push:
+    branches: [main]
+    paths:
+      - "trpg-frontend/**"
+      - "trpg-sdk/**"
+      - ".github/workflows/trpg-frontend-ci.yml"
+  pull_request:
+    paths:
+      - "trpg-frontend/**"
+      - "trpg-sdk/**"
+      - ".github/workflows/trpg-frontend-ci.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      # 前端 package.json 里 trpg-sdk 是 file:../trpg-sdk 本地依赖，
+      # npm ci 解析它时要求 dist/ 已经存在（dist 是 gitignore 的，不会
+      # 随仓库一起 checkout 出来），所以必须先在这里把 SDK 构建出来，
+      # 前端的 npm ci 才能装到一个真实可用的 trpg-sdk。
+      - name: Install and build SDK
+        working-directory: trpg-sdk
+        run: |
+          npm ci
+          npm run build
+
+      - name: Install frontend dependencies
+        working-directory: trpg-frontend
+        run: npm ci
+
+      - name: Lint
+        working-directory: trpg-frontend
+        run: npm run lint
+
+      # build 里已经含 tsc -b，类型检查和打包一步完成。
+      - name: Build
+        working-directory: trpg-frontend
+        run: npm run build

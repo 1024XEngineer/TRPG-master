@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from collaboration_framework.bootstrap import build_fake_application
 from collaboration_framework.contracts import (
     ActionResult,
+    ContractError,
     Intent,
     MatchedTarget,
     ModuleCheck,
@@ -306,6 +307,50 @@ class UnifiedWorkflowTests(unittest.TestCase):
         self.assertEqual(engine.snapshot().event_sequence, 1)
         self.assertEqual(engine.execute_calls, 2)
         self.assertEqual(len(engine.execution_for(self.player_input.client_action_id).events), 1)
+
+    def test_replayed_action_after_another_commit_uses_current_view_revision(self) -> None:
+        orchestrator, engine, _ = self.application()
+        first = self.run_turn(orchestrator)
+        intervening = with_input(
+            self.player_input,
+            action_id="intervening_smash_001",
+            utterance="我用力砸开柜子。",
+        )
+        self.run_turn(orchestrator, intervening)
+        revision_before_replay = str(engine.snapshot().event_sequence)
+
+        replay = self.run_turn(orchestrator)
+
+        self.assertEqual(replay.action_result.view_revision, revision_before_replay)
+        self.assertEqual(
+            replay.action_result,
+            first.action_result.model_copy(
+                update={"view_revision": revision_before_replay}
+            ),
+        )
+        self.assertEqual(str(engine.snapshot().event_sequence), revision_before_replay)
+        self.assertEqual(
+            len(engine.execution_for(self.player_input.client_action_id).events),
+            1,
+        )
+
+    def test_reused_request_id_with_a_different_intent_is_rejected(self) -> None:
+        orchestrator, engine, _ = self.application()
+        self.run_turn(orchestrator)
+        conflicting = with_input(
+            self.player_input,
+            action_id=self.player_input.client_action_id,
+            utterance="我用力砸开柜子。",
+        )
+
+        with self.assertRaisesRegex(ContractError, "request_id 已用于不同"):
+            self.run_turn(orchestrator, conflicting)
+
+        self.assertEqual(engine.snapshot().event_sequence, 1)
+        self.assertEqual(
+            len(engine.execution_for(self.player_input.client_action_id).events),
+            1,
+        )
 
     def test_websocket_output_is_player_safe(self) -> None:
         app = build_fake_application(self.module, self.state)

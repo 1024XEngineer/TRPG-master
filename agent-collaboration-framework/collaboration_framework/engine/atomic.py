@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from collaboration_framework.contracts import (
@@ -430,6 +431,12 @@ class _RuleKernel:
         return execution, validated_state
 
 
+@dataclass(frozen=True)
+class _CompletedAction:
+    request: ActionRequest
+    execution: EngineExecutionResult
+
+
 class FakeAtomicEngine:
     """B-owned functional fake implementing ActionExecutor and PlayerViewSource."""
 
@@ -437,7 +444,7 @@ class FakeAtomicEngine:
         self._module = module_content.model_copy(deep=True)
         self._state = initial_state.model_copy(deep=True)
         self._kernel = _RuleKernel()
-        self._completed_actions: dict[str, EngineExecutionResult] = {}
+        self._completed_actions: dict[str, _CompletedAction] = {}
 
     async def read(self, player_input) -> ProjectionSnapshot:
         self._validate_identity(
@@ -485,7 +492,7 @@ class FakeAtomicEngine:
         self._validate_identity(request.room_id, request.player_id, request.actor_id)
         cached = self._completed_actions.get(request.request_id)
         if cached is not None:
-            return cached.action_result.model_copy(deep=True)
+            return self._replay_result(request, cached)
         if request.source_view_revision != str(self._state.event_sequence):
             raise ContractError("ActionRequest 基于过期 PlayerView")
 
@@ -495,7 +502,10 @@ class FakeAtomicEngine:
             game_state=self._state.model_copy(deep=True),
         )
         self._state = new_state
-        self._completed_actions[request.request_id] = execution.model_copy(deep=True)
+        self._completed_actions[request.request_id] = _CompletedAction(
+            request=request.model_copy(deep=True),
+            execution=execution.model_copy(deep=True),
+        )
         return execution.action_result.model_copy(deep=True)
 
     def snapshot(self) -> GameState:
@@ -507,9 +517,36 @@ class FakeAtomicEngine:
         """B/integration-test inspection; not part of the ActionExecutor port."""
 
         try:
-            return self._completed_actions[request_id].model_copy(deep=True)
+            return self._completed_actions[request_id].execution.model_copy(deep=True)
         except KeyError as error:
             raise ContractError(f"动作尚未执行: {request_id}") from error
+
+    def _replay_result(
+        self,
+        request: ActionRequest,
+        completed: _CompletedAction,
+    ) -> ActionResult:
+        original = completed.request
+        if (
+            request.room_id,
+            request.player_id,
+            request.actor_id,
+            request.intent,
+        ) != (
+            original.room_id,
+            original.player_id,
+            original.actor_id,
+            original.intent,
+        ):
+            raise ContractError("request_id 已用于不同的动作请求")
+
+        # The semantic result and Event refs remain those of the original
+        # execution. view_revision is synchronization metadata for A's mandatory
+        # post-action refresh, so a later retry must point at the current view.
+        return completed.execution.action_result.model_copy(
+            update={"view_revision": str(self._state.event_sequence)},
+            deep=True,
+        )
 
     def _validate_identity(self, room_id: str, player_id: str, actor_id: str) -> None:
         if room_id != self._state.room_id:

@@ -1,7 +1,7 @@
 """Service 层：房间 + 模组的数据访问和业务操作。
 
 目前为 MS1 stub 实现，使用内存字典模拟数据，方便前端关闭 mock 后验证接口连通性。
-后续接入真实数据库后按照 examples.py service 的模式改为 SQLAlchemy 操作。
+后续接入真实数据库后改为 SQLAlchemy 异步操作。
 """
 
 import random

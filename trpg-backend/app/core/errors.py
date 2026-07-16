@@ -31,8 +31,8 @@ class ErrorCode(StrEnum):
 class AppException(Exception):
     """业务代码显式抛出的异常，携带错误码/状态码/用户可见信息。
 
-    用法示例（见 controller/v1/examples.py）：
-        raise AppException(ErrorCode.NOT_FOUND, "示例不存在", status.HTTP_404_NOT_FOUND)
+    用法示例（见 controller/v1/rooms.py）：
+        raise AppException(ErrorCode.NOT_FOUND, "房间不存在", status.HTTP_404_NOT_FOUND)
 
     main.py 里注册的 `app_exception_handler` 会捕获这个异常，把 code/message
     包进统一响应体 {success: false, data: null, error: {code, message}}，

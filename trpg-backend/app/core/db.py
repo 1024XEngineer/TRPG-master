@@ -2,7 +2,7 @@
 
 用 SQLAlchemy（异步）而不是原生 asyncpg/aiosqlite 手写 SQL，是因为数据模型
 还在演进期，ORM 能省掉大量手写 SQL 和字段映射的维护成本；同一套 `Base` 子类
-（见 models/example.py）不用改代码就能同时对接本地 SQLite 和线上 PostgreSQL，
+（见 models/room.py）不用改代码就能同时对接本地 SQLite 和线上 PostgreSQL，
 差异全部封装在 `DATABASE_URL` 这一个环境变量里。
 """
 
@@ -24,13 +24,13 @@ settings = get_settings()
 engine = create_async_engine(settings.database_url, echo=False, pool_pre_ping=True)
 
 # expire_on_commit=False：commit 之后，Python 对象里已经查出来的属性值不会被清空。
-# 如果不设这个，commit 之后再访问 example.name 之类的属性会触发一次隐式的重新查询，
+# 如果不设这个，commit 之后再访问 room.room_name 之类的属性会触发一次隐式的重新查询，
 # 在异步代码里这种"意外的隐式 IO"很容易踩坑（比如在没有 await 的地方悄悄发起数据库请求）。
 async_session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
 
 class Base(DeclarativeBase):
-    """所有 ORM 模型的基类（见 models/example.py 里的 `Example(Base)`）。
+    """所有 ORM 模型的基类（见 models/room.py 里的 `Room(Base)`）。
 
     SQLAlchemy 靠这个基类的 `metadata` 属性收集所有已定义的表结构，
     下面的 `init_db()` 就是靠 `Base.metadata.create_all` 把这些表建到数据库里。
@@ -58,9 +58,9 @@ async def init_db() -> None:
     """建表：把 Base.metadata 里登记的所有模型对应的表结构同步到数据库。
 
     在 main.py 的 FastAPI lifespan（应用启动钩子）里调用一次。这里用的是最简单的
-    "有表就跳过、没表就建"策略，没有引入 Alembic 之类的迁移工具——因为目前只有
-    一张示例表，模型还在快速变动阶段；等真实业务表定下来、需要处理"字段增删改"
-    这种迁移场景时，再引入 Alembic 更合适。
+    "有表就跳过、没表就建"策略，没有引入 Alembic 之类的迁移工具——因为模型还在
+    快速变动阶段；等真实业务表定下来、需要处理"字段增删改"这种迁移场景时，
+    再引入 Alembic 更合适。
     """
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

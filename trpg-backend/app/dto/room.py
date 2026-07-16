@@ -12,15 +12,9 @@
 
 from datetime import datetime
 
-from pydantic import AliasGenerator, ConfigDict, Field, field_validator
-from pydantic.alias_generators import to_camel
+from pydantic import Field, field_validator
 
 from app.dto.common import CamelModel
-
-
-def _to_camel(snake: str) -> str:
-    return to_camel(snake)
-
 
 # ── 请求体 ──────────────────────────────────────
 
@@ -79,13 +73,18 @@ class RoomCreateResult(CamelModel):
 
 
 class RoomPlayerRead(CamelModel):
-    """房间内玩家摘要"""
+    """房间内玩家摘要。
 
-    model_config = ConfigDict(
-        alias_generator=AliasGenerator(alias=_to_camel),
-        populate_by_name=True,
-        from_attributes=True,
-    )
+    注意 `player_id` 对应 ORM `Player` 的主键属性 `id`（名字不一样），所以不能直接
+    `model_validate(player_orm)`——调用方需要显式映射 `player_id=p.id`（见
+    service/room.py 的 _to_room_preview）。`from_attributes=True` 仍保留，方便
+    其余名字一致的字段。camelCase 别名生成、populate_by_name 继承自 `CamelModel`——
+    pydantic 的 `model_config` 在子类里是合并而非整体覆盖父类配置，这里不需要
+    重复声明（issue #77 审计发现 #1，原先这里重写了一份和父类一样的配置，是
+    #75 遗留的死代码）。
+    """
+
+    model_config = {"from_attributes": True}
     player_id: str
     nickname: str
     is_host: bool
@@ -94,8 +93,10 @@ class RoomPlayerRead(CamelModel):
 
 
 class ModuleRead(CamelModel):
-    """模组信息"""
+    """模组信息（对应内容库 `Scenario` 表，`from_attributes=True` 支持直接从
+    ORM 对象构造）。"""
 
+    model_config = {"from_attributes": True}
     id: str
     title: str
     version: str

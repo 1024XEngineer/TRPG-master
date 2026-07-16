@@ -27,6 +27,19 @@ class ErrorCode(StrEnum):
     CONFLICT = "CONFLICT"  # 资源冲突，比如同名记录已存在 → 409
     INTERNAL_ERROR = "INTERNAL_ERROR"  # 未预期的服务器内部错误 → 500
 
+    # ── 以下 9 个是 issue #77 §4 新增的业务语义码（架构文档定过、代码里原来
+    # 没有），跟上面 7 个工程通用码取并集，而不是互相替代——判据见 issue
+    # 决策 2：业务语义层的错误码以文档为准。
+    ROOM_NOT_FOUND = "ROOM_NOT_FOUND"  # 房间不存在（比通用 NOT_FOUND 更具体）→ 404
+    ROOM_FULL = "ROOM_FULL"  # 房间人数已满，无法加入 → 409
+    MODULE_VALIDATION_FAILED = "MODULE_VALIDATION_FAILED"  # 模组导入解析/校验失败 → 422
+    NOT_YOUR_TURN = "NOT_YOUR_TURN"  # 回合制约束：还没轮到这名玩家行动 → 409
+    CHARACTER_INCOMPLETE = "CHARACTER_INCOMPLETE"  # 角色卡未建完，无法进行需要角色的操作 → 409
+    MODULE_NOT_SELECTED = "MODULE_NOT_SELECTED"  # 房间还没选定模组 → 409
+    RECONNECT_TOKEN_EXPIRED = "RECONNECT_TOKEN_EXPIRED"  # 断线重连凭证失效（room.rejoin）→ 401
+    RATE_LIMITED = "RATE_LIMITED"  # 请求频率超限 → 429
+    NOT_IMPLEMENTED = "NOT_IMPLEMENTED"  # 协议位置已预留，真实业务逻辑本期未实现 → 501
+
 
 class AppException(Exception):
     """业务代码显式抛出的异常，携带错误码/状态码/用户可见信息。
@@ -48,3 +61,14 @@ class AppException(Exception):
         self.message = message
         self.status_code = status_code
         super().__init__(message)
+
+
+def not_implemented(message: str = "该功能本期尚未实现，接口协议已预留") -> AppException:
+    """协议位置已预留、真实业务逻辑本期未实现时统一抛出（issue #77 决策 7）。
+
+    用 501（Not Implemented）而不是 500/200+假成功：让客户端能明确区分
+    "服务器出 bug 了"和"这个功能确实还没做"，而不是把两者混进同一个
+    INTERNAL_ERROR，也不是悄悄返回一个看起来成功的空响应。本期有十来个
+    端点/WS 事件走这条路径，抽成一个函数避免每处重复拼 AppException。
+    """
+    return AppException(ErrorCode.NOT_IMPLEMENTED, message, 501)

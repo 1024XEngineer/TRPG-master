@@ -23,7 +23,7 @@ from pathlib import Path
 from pydantic import BaseModel
 from pydantic.json_schema import GenerateJsonSchema, models_json_schema
 
-from app.dto import auth, character, common, room, ws
+from app.dto import auth, character, common, game, module, replay, room, ws
 
 # 需要导出的模型清单：REST 请求/响应体 + WS 事件 payload。
 #
@@ -48,19 +48,48 @@ _MODELS: list[type[BaseModel]] = [
     room.ModuleRead,
     room.RoomPreview,
     room.MyRoomSummary,
-    # character（issue #59）
+    # character（issue #59 + issue #77 卡库）
     character.EquipmentItem,
     character.CharacterUpdateBody,
     character.CharacterDraftResult,
+    character.RollAttributesResult,
+    character.CharacterTemplateCreateBody,
+    character.CharacterTemplateRead,
+    # 游戏目录 / 规则数据（issue #77 新增）
+    game.GameRead,
+    game.GameSystemRead,
+    game.RulesetRead,
+    # 模组详情 / 导入（issue #77 新增）
+    module.ModuleDetailRead,
+    module.ModuleImportRequestBody,
+    module.ModuleImportJobRead,
+    # 复盘 / 回放（issue #77 新增）
+    replay.RoomSummaryRead,
+    replay.ReplayEventRead,
     # 通用响应信封里的错误详情（ApiResponse 本身手写，见上面的说明）
     common.ErrorDetail,
-    # WebSocket（issue #60 现有 6 个事件，issue #75 新补的模型）
+    # WebSocket 现有 6 个事件（issue #60/#75）
     ws.RoomJoinPayload,
     ws.PlayerReadyPayload,
     ws.GameStartPayload,
     ws.ActionSubmitPayload,
     ws.SessionBoundPayload,
     ws.NarrationPushPayload,
+    # WebSocket 新增 14 个事件（issue #77）：C→S 3 个 + S→C 11 个
+    ws.CheckRollPayload,
+    ws.SanCheckRollPayload,
+    ws.RoomRejoinPayload,
+    ws.RoomStatePayload,
+    ws.PlayerJoinedPayload,
+    ws.TurnBeginPayload,
+    ws.GameEndedPayload,
+    ws.ViewPrivatePayload,
+    ws.CheckRequestPayload,
+    ws.CheckResultPayload,
+    ws.SanCheckRequestPayload,
+    ws.SanCheckResultPayload,
+    ws.ClueGrantedPayload,
+    ws.ErrorPayload,
 ]
 
 _DEFAULT_OUT_PATH = Path(__file__).resolve().parent.parent / ".schema-export" / "models.schema.json"

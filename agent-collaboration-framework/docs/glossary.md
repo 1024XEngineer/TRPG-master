@@ -1,11 +1,22 @@
-# 最小术语表
+# 统一术语表
 
-- **Contract**：`contracts.py` 中框架无关的 Pydantic Model，是 JSON 与结构化输出的事实源。
-- **TurnState**：只在一次 LangGraph 调用中存在的过程状态，不是游戏事实仓库。
-- **GameState**：成员 B/后端拥有的权威状态；当前仅由 Fake 在内存模拟。
-- **ActionResult**：原子引擎调用完成后返回的已确认结果和 Event。
-- **execution=narrative**：纯叙事分支，不进入规则引擎，且 `check.route` 必须为 `none`。
-- **execution=engine**：进入唯一的 `engine_node`；`check.route` 可以是 `none/module/default`。
-- **check.route**：只表达检定来源；`none` 表示不检定，不表示绕过引擎。
-- **checkpointer**：LangGraph 流程持久化组件；MVP 禁用。
-- **interrupt**：第二阶段候选能力；启用前必须完成权威边界评审。
+- **PlayerInput**：由 Gateway 交给 A 的一回合输入；连接层必须先建立可信身份。
+- **ProjectionSnapshot**：B 通过只读端口提供给 A 的最小安全投影源；不等于 `GameState`。
+- **PlayerView**：A 面向当前玩家和模型构造的安全视图，包含可见事实、实体和可信 Checkpoint 候选。
+- **checkpoint option**：当前 PlayerView 中允许 A 做语义映射的可信候选；`action_hint` 不是封闭动词白名单。
+- **Intent**：A 从玩家自然语言解析出的结构化语义提议；不包含 `execution`。
+- **check.route=none**：A 没有提议检定，但动作仍必须进入 `ActionExecutor.execute()`。
+- **check.route=module**：A 从当前可信候选选择了模组 Checkpoint，并提供 `checkpoint_id` 与候选技能。
+- **check.route=default**：没有适用模组 Checkpoint时，A 提议由 B 的默认检定政策处理。
+- **ActionExecutor**：A/B 之间唯一可能引发权威状态副作用的命令端口，公开方法为 `execute()`。
+- **ActionRequest**：传给 ActionExecutor 的可信执行上下文和已校验 Intent。
+- **ActionResult**：B 返回给 A 的 player-safe 结果；不含 StateChange、完整 Event 或 GameState。
+- **EngineExecutionResult**：B 内部执行记录，可含 StateChange、Event 与状态版本；不跨到 A。
+- **NarrationOutput**：Narrator 对模型原始 JSON 完成 Pydantic 与事实引用校验后的 A 输出。
+- **WebSocketOutput**：Gateway 允许发送给玩家的最小消息信封。
+- **ModuleDraft**：C 的解析中间态，不得被 B 运行时加载。
+- **ModuleContent**：C 发布、B 消费的版本化模组契约；A 不直接消费。
+- **RuleSpec / CheckpointSpec**：`ModuleContent` 中的声明式内容语言；不是 B 的 Hook/执行期内部对象。
+- **GameState / Event / StateChange**：B 的权威运行时内部模型。
+- **TurnState**：A 当前编排实现的内部工作状态，不是三人公共契约。
+- **composition root**：唯一选择具体 Fake/生产实现并完成依赖装配的 `bootstrap/`。

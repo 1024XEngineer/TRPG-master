@@ -2,109 +2,97 @@
   {
     "case_id": "talk_butler",
     "utterance": "我和管家聊聊。",
-    "expected_kind": "communicate",
-    "expected_action": "talk",
+    "expected_kind": "dialogue",
+    "expected_verb": "talk",
     "expected_target": "butler",
-    "expected_execution": "narrative",
     "expected_check_route": "none"
   },
   {
     "case_id": "ask_butler",
     "utterance": "我问老管家最近发生了什么。",
-    "expected_kind": "communicate",
-    "expected_action": "talk",
+    "expected_kind": "dialogue",
+    "expected_verb": "talk",
     "expected_target": "butler",
-    "expected_execution": "narrative",
     "expected_check_route": "none"
   },
   {
     "case_id": "inspect_bookshelf",
     "utterance": "我仔细调查书架。",
-    "expected_kind": "interact",
-    "expected_action": "investigate",
+    "expected_kind": "action",
+    "expected_verb": "investigate",
     "expected_target": "bookshelf",
-    "expected_execution": "engine",
     "expected_check_route": "module"
   },
   {
     "case_id": "inspect_bookshelf_alias",
     "utterance": "我检查一下藏书架。",
-    "expected_kind": "interact",
-    "expected_action": "investigate",
+    "expected_kind": "action",
+    "expected_verb": "investigate",
     "expected_target": "bookshelf",
-    "expected_execution": "engine",
     "expected_check_route": "module"
   },
   {
     "case_id": "open_cabinet",
     "utterance": "我打开柜子。",
-    "expected_kind": "interact",
-    "expected_action": "open",
+    "expected_kind": "action",
+    "expected_verb": "open",
     "expected_target": "cabinet",
-    "expected_execution": "engine",
     "expected_check_route": "none"
   },
   {
     "case_id": "open_cabinet_with_key",
     "utterance": "我用钥匙打开木柜。",
-    "expected_kind": "interact",
-    "expected_action": "open",
+    "expected_kind": "action",
+    "expected_verb": "open",
     "expected_target": "cabinet",
-    "expected_execution": "engine",
     "expected_check_route": "none"
   },
   {
     "case_id": "smash_cabinet",
     "utterance": "我用力砸开柜子。",
-    "expected_kind": "interact",
-    "expected_action": "smash",
+    "expected_kind": "action",
+    "expected_verb": "smash",
     "expected_target": "cabinet",
-    "expected_execution": "engine",
     "expected_check_route": "module"
   },
   {
     "case_id": "inspect_window",
     "utterance": "我看看窗外。",
-    "expected_kind": "interact",
-    "expected_action": "investigate",
+    "expected_kind": "action",
+    "expected_verb": "investigate",
     "expected_target": "window",
-    "expected_execution": "narrative",
     "expected_check_route": "none"
   },
   {
     "case_id": "inspect_cabinet",
     "utterance": "我观察柜子的锁孔。",
-    "expected_kind": "interact",
-    "expected_action": "investigate",
+    "expected_kind": "action",
+    "expected_verb": "investigate",
     "expected_target": "cabinet",
-    "expected_execution": "narrative",
     "expected_check_route": "none"
   },
   {
     "case_id": "touch_cabinet",
     "utterance": "我摸摸柜子。",
-    "expected_kind": "interact",
-    "expected_action": "interact",
+    "expected_kind": "action",
+    "expected_verb": "interact",
     "expected_target": "cabinet",
-    "expected_execution": "engine",
     "expected_check_route": "none"
   },
   {
     "case_id": "unknown_target",
     "utterance": "我检查天花板上的暗门。",
     "expected_kind": "unknown",
-    "expected_action": "unknown",
+    "expected_verb": "unknown",
     "expected_target": null,
-    "expected_execution": "narrative",
     "expected_check_route": "none"
   },
   {
     "case_id": "unknown_free_action",
     "utterance": "我唱起一首歌。",
     "expected_kind": "unknown",
-    "expected_action": "unknown",
+    "expected_verb": "unknown",
     "expected_target": null,
-    "expected_execution": "narrative",
     "expected_check_route": "none"
   }
 ]

@@ -1,0 +1,136 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "projection-snapshot.schema.json",
+  "$defs": {
+    "ProjectionCheckpointOption": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "target_id": {
+          "minLength": 1,
+          "title": "Target Id",
+          "type": "string"
+        },
+        "action_hint": {
+          "minLength": 1,
+          "title": "Action Hint",
+          "type": "string"
+        },
+        "skills": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Skills",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "target_id",
+        "action_hint"
+      ],
+      "title": "ProjectionCheckpointOption",
+      "type": "object"
+    },
+    "ProjectionEntity": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "npc",
+            "object",
+            "location"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "aliases": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Aliases",
+          "type": "array"
+        },
+        "content": {
+          "title": "Content",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "name",
+        "content"
+      ],
+      "title": "ProjectionEntity",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Read-only, GameState-free source consumed by A's projector.",
+  "properties": {
+    "room_id": {
+      "minLength": 1,
+      "title": "Room Id",
+      "type": "string"
+    },
+    "scene_id": {
+      "minLength": 1,
+      "title": "Scene Id",
+      "type": "string"
+    },
+    "phase": {
+      "enum": [
+        "playing",
+        "ended"
+      ],
+      "title": "Phase",
+      "type": "string"
+    },
+    "revision": {
+      "minLength": 1,
+      "title": "Revision",
+      "type": "string"
+    },
+    "entities": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/ProjectionEntity"
+      },
+      "title": "Entities",
+      "type": "array"
+    },
+    "checkpoint_options": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/ProjectionCheckpointOption"
+      },
+      "title": "Checkpoint Options",
+      "type": "array"
+    }
+  },
+  "required": [
+    "room_id",
+    "scene_id",
+    "phase",
+    "revision"
+  ],
+  "title": "ProjectionSnapshot",
+  "type": "object"
+}

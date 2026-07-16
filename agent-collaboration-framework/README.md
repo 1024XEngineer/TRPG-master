@@ -1,139 +1,145 @@
-# Agent 协作框架
+# Agent Collaboration Framework
 
-核心代码按架构职责组织，不按当前成员编号组织。成员是可变化的维护者，目录和模块名
-则应持续表达系统边界，避免人员调整后出现 `member_a.py` 名称与实际职责不一致。
+这是成员 A（主持编排）、成员 B（确定性规则引擎）和成员 C（模组解析/审查）共同使用的模块化单体骨架。当前版本只建立稳定边界和可运行的 Fake 纵切，不接 OpenAI、LangGraph 或真实规则引擎。
 
-本框架采用以下技术与职责边界：
+最终架构决议见 [`docs/architecture-alignment-decisions.md`](docs/architecture-alignment-decisions.md)。它是当前基线；其他文档如与它冲突，以该文档和 Pydantic Schema 为准。
+
+## 唯一回合主链
 
 ```text
-Pydantic v2        JSON 契约、步骤数据校验、LLM 结构化输出
-Python 异步函数     单回合流程编排与条件分支
-PydanticAI         运行时主持 Agent 的可选 LLM 实现
-确定性规则引擎      游戏事实、Event 和事务的唯一执行权威
+PlayerInput
+  -> PlayerViewProjector.project()
+  -> ContextAssembler.for_intent()
+  -> IntentModelPort.generate()          # Fake 返回原始 JSON
+  -> IntentParser.parse()                # Pydantic + 可信候选校验
+  -> ActionExecutor.execute()            # 每个合法 Intent 恰好调用一次
+  -> PlayerViewProjector.refresh()
+  -> ContextAssembler.for_narration()
+  -> NarrationModelPort.generate()       # Fake 返回原始 JSON
+  -> Narrator.narrate()                  # Pydantic + 事实引用校验
+  -> WebSocketGateway.handle()
 ```
 
-不连接数据库。`FakeAtomicEngine` 只在内存中模拟权威状态，方便各组件并行开发。
+`Orchestrator.run()` 是成员 A 的稳定公开入口，MVP 内部采用普通 Python `async` 流程。当前没有 checkpoint、interrupt、resume、多阶段 Action 或 LangGraph。
 
-## 代码结构
+## 2、3、4 点的统一结论
+
+- `Intent` 不再包含 `execution`，不存在由主持层决定“绕过引擎”的分支。
+- 对话、未知意图、`check.route="none"` 和需要检定的动作，只要已通过 Schema 校验，均通过同一个 `ActionExecutor.execute()` 边界恰好一次。
+- `Intent` 保留 `check`、`checkpoint_id` 和 `proposed_skills`。主持 Agent 根据玩家语义，从当前 `PlayerView.checkpoint_options` 的可信候选中选择 Checkpoint。
+- Checkpoint 的 `action` 只是语义提示，不是穷举式动词白名单。规则引擎不以 `intent.verb == checkpoint.action` 作为合法性条件。
+- 规则引擎仍负责复核房间、Actor、视图版本、Scene、Target、Checkpoint 和技能候选，并独占状态修改、Event、骰子与确定性规则执行。
+
+这同时避免两种失败模式：主持层无法凭 `execution` 绕开权威执行边界；规则引擎也不需要用有限动词表重新理解玩家自由语言。
+
+## 模块边界
+
+```mermaid
+flowchart LR
+    WS["host/gateway<br/>WebSocket"] --> ORCH["host/application<br/>Orchestrator"]
+    ORCH --> HPORT["host/ports<br/>模型端口"]
+    ORCH --> XPORT["ports<br/>跨组件端口"]
+    ORCH --> CONTRACTS["contracts<br/>稳定数据契约"]
+    HFAKE["host/adapters/fakes"] --> HPORT
+    HFAKE --> CONTRACTS
+    ENGINE["engine<br/>B 内部实现"] --> XPORT
+    ENGINE --> CONTRACTS
+    MODULE["module<br/>C 的发布校验"] --> CONTRACTS
+    BOOT["bootstrap<br/>组合根"] --> WS
+    BOOT --> HFAKE
+    BOOT --> ENGINE
+    BOOT --> MODULE
+
+    style CONTRACTS fill:#eef,stroke:#446
+```
+
+依赖约束：
+
+- `contracts` 不依赖 A、B、C 的实现。
+- `host` 不 import `engine`、`module`、`GameState`、Event 或 `ModuleContent`。
+- `engine` 不 import `host`。
+- `module` 只负责把输入验证为发布契约，不参与运行时状态和 Event。
+- `bootstrap` 是唯一知道具体实现并完成装配的地方。
+
+## 目录
 
 ```text
 collaboration_framework/
-├── agents/                 # 使用模型或确定性替身完成理解与叙事
-│   └── runtime_host.py     # 运行时主持 Agent
-├── engine/
-│   └── atomic.py           # Context 组装与原子规则执行边界
-├── modules/
-│   └── validation.py       # 模组导入、校验与发布边界
-├── contracts.py            # 跨组件 Pydantic 数据契约
-├── ports.py                # 框架无关的组件接口
-├── routing.py              # 模型路由提议的确定性硬化
-└── workflow.py             # Python 异步函数单回合编排
+├── contracts/                 # 跨边界 Pydantic 数据契约
+│   ├── action.py              # Intent / ActionRequest / 安全 ActionResult
+│   ├── module.py              # B/C 共审的声明式 ModuleContent
+│   ├── player_view.py         # ProjectionSnapshot / PlayerView
+│   └── runtime.py             # PlayerInput
+├── ports/                     # A/B 跨组件端口
+│   ├── action_executor.py     # 唯一权威命令：execute()
+│   └── player_view_source.py  # 只读投影源：read()
+├── host/                      # 成员 A：主持编排
+│   ├── application/           # 普通 async 工作流与应用服务
+│   ├── ports/                 # Intent/Narration 模型抽象及 TurnPort
+│   ├── adapters/fakes/        # 无真实模型的离线 Fake
+│   ├── schemas/               # A 内部 Context/Turn/Narration Schema
+│   └── gateway/               # Player-safe WebSocket 输出
+├── engine/                    # 成员 B：确定性引擎 Fake 与内部模型
+├── module/                    # 成员 C：ModuleContent 发布校验入口
+├── bootstrap/                 # 组合根；装配 A/B/C 的具体实现
+├── schema_export.py           # 从 Pydantic 唯一事实源导出 JSON Schema
+└── cli.py                     # 完全离线的 Fake 演示入口
 ```
 
-`agents/` 只放真正承担 Agent 行为的实现；确定性引擎不为了对应某位成员而被命名成
-Agent。`engine/` 和 `modules/` 分别保留规则执行、模组处理的独立演进空间。
+## 关键所有权
 
-## 单回合流程
+| 契约/能力 | 所有者 | 消费者 | 说明 |
+|---|---|---|---|
+| `PlayerInput` | 协作层 | A | 可信连接身份在进入应用前建立 |
+| `ProjectionSnapshot` | A/B 共审 | A | B 提供的只读、无 `GameState` 投影源 |
+| `PlayerView` | A | A 的模型端口、Gateway | 只含当前玩家可见信息和可信候选 |
+| `Intent` | A/B 共审 | B | 语义提议；无 `execution` |
+| `ActionExecutor.execute()` | B 提供、A 消费 | A/B | 唯一可能产生权威副作用的命令边界 |
+| `ActionResult` | A/B 共审 | A | Player-safe；不暴露 StateChange/Event payload |
+| `EngineExecutionResult` | B | B | 内部含 StateChange、Event 和版本信息 |
+| `NarrationOutput` | A | Gateway | 模型原始 JSON 经 Pydantic 和事实引用校验后的输出 |
+| `ModuleContent`/`CheckpointSpec`/`RuleSpec` | B/C 共审 | B、C | 声明式内容语言；A 不直接消费 |
 
-```text
-run_turn -> _assemble_context -> _interpret + harden_intent_routing
-                                                  |-- 不明确 ----------> _clarify -> return
-                                                  |-- execution=narrative -> _narrate -> _prepare_summary_outbox -> return
-                                                  `-- execution=engine ---> _execute_engine
-                                                                              |
-                                                                              `-> _refresh_context -> _narrate -> _prepare_summary_outbox -> return
-```
+## ModuleContent 为什么在 `contracts/module.py`
 
-`Intent.execution` 和 `Intent.check` 都是解释器提议。`_interpret` 使用可信
-`TurnContext` 调用 `harden_intent_routing()`：只有列入目标 `narrative_actions` 的动作
-可以保留 `execution=narrative`，其他已匹配动作默认硬化为 `execution=engine`。
-硬化后的 `execution` 决定是否进入引擎；`check.route=none/module/default` 只决定引擎内
-是否检定以及检定来源。因此 `execution=engine + check.route=none` 是合法的确定性动作，
-不能因为“不检定”而绕过规则边界。
+`ModuleContent` 是 C 发布、B 执行的跨成员协议，而不是 C 的私有解析中间态，也不是 B 的运行时内部对象。把它与声明式 `CheckpointSpec`、`RuleSpec` 放在 `contracts/module.py`，可以让 B/C 共同评审和版本化同一个发布语言，并让 `module/validation.py` 保持为薄适配层。
 
-`run_turn()` 通过普通异步 Python 函数依次推进步骤，每次只处理一个玩家输入，结束后
-丢弃 `TurnState`。`TurnState` 只含 `PlayerInput / Context / Intent / ActionResult /
-Narration` 等过程数据，不含 `GameState`。
+这里的 `RuleSpec`/`CheckpointSpec` 只描述模组声明了什么；Hook 调度、骰子、状态迁移、Event 和执行期缓存仍属于 `engine/`。A 不 import `ModuleContent`，只从 `PlayerViewSource` 取得经过安全过滤的 `ProjectionSnapshot`，再自行构造 `PlayerView`。
 
-## 三条硬约束
+## 运行与验证
 
-1. **引擎是一个步骤、一个调用。** `_execute_engine` 只调用一次
-   `await engine.execute_action(request)`。生产实现必须在该调用内部完成权限、幂等、
-   规则检定、append Event、更新物化视图和事务提交。Python 工作流只编排步骤，不编排事务。
-   事务返回后，`_refresh_context` 只重新读取已提交的玩家可见投影，不参与规则执行或状态写入。
-   同一 `client_action_id` 重放时返回完全相同的 `ActionResult`（含原 Event 引用），
-   但不重复执行规则、追加 Event 或修改状态。
-2. **MVP 不使用图运行时或流程持久化。** EventLog 与物化视图仍是游戏事实的唯一权威，
-   普通 Python 工作流不持有可恢复的持久游戏状态。
-3. **第二阶段先评审 pending_check。** MVP 的引擎调用只返回 `ActionResult`，不实现流程
-   挂起与恢复；需要手动掷骰时，先将骰值作为下一回合输入。
-
-## 输出与 Summary outbox 边界
-
-`run_turn()` 返回的 `TurnOutput` 是宿主内部结果，含可信输入、Intent、ActionResult 和
-outbox 命令，禁止直接发送给玩家。当前玩家侧投影只使用
-`TurnOutput.to_player_output()` 返回的 `NarrationOutput`；后续可由 ViewProjector 另行
-附加允许公开的视图。
-
-`_prepare_summary_outbox` 只创建 `SummaryOperation`，不执行持久化。宿主在回合成功结束后
-通过 `SummaryOutbox` 投递它；消费者只能按 `(room_id, client_action_id)` 幂等更新非权威
-会话摘要，禁止写 `GameState` 或 `EventLog`。
-
-## 框架隔离
-
-[`contracts.py`](collaboration_framework/contracts.py)、
-[`ports.py`](collaboration_framework/ports.py) 和
-[`routing.py`](collaboration_framework/routing.py) 不依赖具体编排框架。五个公共 Protocol 是：
-
-- `ContextAssembler.assemble_context()`
-- `IntentInterpreter.interpret()`
-- `AtomicActionEngine.execute_action()`
-- `Narrator.narrate()`
-- `SummaryOutbox.enqueue()`（由宿主在回合函数外消费）
-
-[`workflow.py`](collaboration_framework/workflow.py) 使用普通 Python 函数封装这些接口与
-确定性路由策略。替换编排方式时，各组件实现、路由策略和 JSON 契约不需要改变。
-
-## 当前维护分工
-
-下面的表只记录当前人员涉及的文件，不参与包结构或导入路径设计。人员职责变化时更新
-本表，不重命名架构模块。
-
-| 成员 | 主要涉及的文件 | 当前职责 |
-| --- | --- | --- |
-| A | `collaboration_framework/agents/runtime_host.py`、`collaboration_framework/workflow.py` | Intent、Narration 与回合编排；不得写状态、Event 或决定骰值 |
-| B | `collaboration_framework/engine/atomic.py` | Context、原子规则引擎、幂等与未来数据库事务 |
-| C | `collaboration_framework/modules/validation.py`、`fixtures/` | ModuleContent 导入、来源/秘密/可达性审查、发布门与验收样例 |
-| 共同 | `collaboration_framework/contracts.py`、`collaboration_framework/ports.py`、`collaboration_framework/routing.py`、`tests/` | 先改契约与公共路由策略，再同步 Schema、Fixture 和测试 |
-
-## JSON 示例与运行
-
-安装依赖：
+要求 Python 3.11+：
 
 ```bash
-uv sync
+python -m collaboration_framework.schema_export
+python -m unittest discover -s tests -v
 ```
 
-无网络运行一个 `module` 路由回合：
+离线 Fake 演示：
 
 ```bash
-uv run agent-collab \
-  --agent-mode fake \
+python -m collaboration_framework.cli \
   --module fixtures/demo-module.json \
   --state fixtures/demo-state.json \
   --input fixtures/demo-turn.json
 ```
 
-澄清分支只需把输入替换为 `fixtures/clarification-turn.json`。正式模型模式使用
-`--agent-mode pydantic-ai --model <provider:model>`，并设置相应 API Key。
+Schema 文件由 Pydantic 模型自动生成，不应手工维护：
 
-生成 JSON Schema 与运行测试：
+- `schemas/module-content.schema.json`
+- `schemas/player-input.schema.json`
+- `schemas/projection-snapshot.schema.json`
+- `schemas/player-view.schema.json`
+- `schemas/intent.schema.json`
+- `schemas/action-request.schema.json`
+- `schemas/action-result.schema.json`
+- `schemas/narration-output.schema.json`
+- `schemas/websocket-output.schema.json`
 
-```bash
-uv run agent-collab-export-schemas
-uv run python -m unittest discover -s tests -v
-```
+## 当前明确不做
 
-`collaboration_framework/contracts.py` 中的 Pydantic `ModuleContent` 是当前模组输入的
-唯一事实源；`schemas/module-content.schema.json` 由它生成，不应手改。文档示例和
-`fixtures/demo-module.json` 都必须通过该模型校验。
+- 不连接真实 LLM 或编写 Prompt。
+- 不使用 LangGraph。
+- 不由主持层实现 Rule、Hook、Checkpoint 执行、Dice、GameState 修改或 Event 写入。
+- 不把 `TurnState`、`EngineExecutionResult`、Event 或摘要 Outbox 暴露为跨组件公共契约。
+- 不把 `components/` 当成第二套永久架构；统一代码直接按所有权进入上述模块。

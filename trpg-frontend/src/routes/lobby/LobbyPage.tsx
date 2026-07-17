@@ -3,7 +3,7 @@ import { useEffect, useState, useRef } from 'react'
 import { UserPlus, ArrowLeft } from 'lucide-react'
 import { useRoomStore } from '@/stores/room-store'
 import { useAuthStore } from '@/stores/auth-store'
-import { connectWebSocket, sendWsMessage, onWsMessage, waitForWsOpen, disconnectWebSocket } from '@/services/api-client'
+import { connectWebSocket, sdk, onWsMessage, waitForWsOpen, disconnectWebSocket } from '@/services/api-client'
 import { startStory } from '@/services/room'
 import { useRoomPlayers } from '@/hooks/useRoomPlayers'
 
@@ -41,7 +41,7 @@ export default function LobbyPage() {
     waitForWsOpen(ws)
       .then(() => {
         if (cancelled) return
-        sendWsMessage('room.join', playerId, {
+        sdk.roomSocket.joinRoom(playerId, {
           reconnectToken: reconnectToken || '',
           roomCode,
           nickname: nickname || '玩家',
@@ -88,7 +88,7 @@ export default function LobbyPage() {
     if (!playerId) return
     const next = !ready
     setReady(next)
-    sendWsMessage('player.ready', playerId, { ready: next })
+    sdk.roomSocket.setReady(playerId, { ready: next })
   }
 
   const handleLeave = () => {

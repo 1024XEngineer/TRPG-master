@@ -53,28 +53,6 @@ export function onWsMessage(handler: (envelope: ServerToClientEvent) => void): (
   return sdk.roomSocket.onMessage(handler);
 }
 
-export function sendWsMessage(type: string, playerId: string, payload: unknown) {
-  switch (type) {
-    case 'room.join':
-      sdk.roomSocket.joinRoom(
-        playerId,
-        payload as { reconnectToken: string; roomCode?: string; nickname?: string }
-      );
-      return;
-    case 'player.ready':
-      sdk.roomSocket.setReady(playerId, payload as { ready: boolean });
-      return;
-    case 'game.start':
-      sdk.roomSocket.startGame(playerId);
-      return;
-    case 'action.submit':
-      sdk.roomSocket.submitAction(playerId, payload as { utterance: string });
-      return;
-    default:
-      console.warn(`[WS] unknown event type: ${type}`, payload);
-  }
-}
-
 export function disconnectWebSocket() {
   sdk.roomSocket.disconnect();
 }

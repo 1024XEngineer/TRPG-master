@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, type FormEvent } from 'react'
 import { useRoomStore } from '@/stores/room-store'
 import { useAuthStore } from '@/stores/auth-store'
 import { useCharacterStore } from '@/stores/character-store'
-import { connectWebSocket, waitForWsOpen, sendWsMessage, onWsMessage, disconnectWebSocket, friendlyErrorMessage } from '@/services/api-client'
+import { connectWebSocket, waitForWsOpen, sdk, onWsMessage, disconnectWebSocket, friendlyErrorMessage } from '@/services/api-client'
 import { endGame } from '@/services/room'
 import { ALL_SKILLS, calculateBaseValue } from '@/data/skills'
 import { ATTRIBUTE_LABELS } from '@/data/character-model'
@@ -368,6 +368,7 @@ export default function RoomPage() {
   const roomId = useRoomStore((s) => s.roomId)
   const roomCode = useRoomStore((s) => s.roomCode)
   const playerId = useRoomStore((s) => s.playerId)
+  const reconnectToken = useRoomStore((s) => s.reconnectToken)
   const nickname = useAuthStore((s) => s.nickname)
   // 按房间取角色卡，而不是直接读 s.character——本地缓存不按房间区分的话，
   // 换房间会把上一个房间的角色数据错误地展示出来（见 PR #67 review）。
@@ -418,13 +419,13 @@ export default function RoomPage() {
     waitForWsOpen(ws)
       .then(() => {
         if (cancelled) return
-        sendWsMessage('room.join', playerId, { roomCode, nickname: nickname || '玩家' })
+        sdk.roomSocket.joinRoom(playerId, { reconnectToken: reconnectToken || '', roomCode, nickname: nickname || '玩家' })
       })
       .catch(() => {})
     return () => {
       cancelled = true
     }
-  }, [roomId, playerId, roomCode, nickname])
+  }, [roomId, playerId, roomCode, nickname, reconnectToken])
 
   // 真实 AI 主持人回复：订阅 narration.push（不再是本地假打字模拟）
   useEffect(() => {
@@ -450,7 +451,7 @@ export default function RoomPage() {
     }])
     setInput('')
     setTyping(true)
-    sendWsMessage('action.submit', playerId, { utterance: text })
+    sdk.roomSocket.submitAction(playerId, { utterance: text })
   }
 
   const handleDiceResult = (result: number, diceType: DiceType) => {

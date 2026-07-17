@@ -7,7 +7,7 @@ import { useAuthStore } from '@/stores/auth-store'
 import { ALL_SKILLS, calculateBaseValue } from '@/data/skills'
 import { ATTRIBUTE_LABELS } from '@/data/character-model'
 import { getOccupationById } from '@/data/occupations'
-import { connectWebSocket, disconnectWebSocket, sendWsMessage, waitForWsOpen } from '@/services/api-client'
+import { connectWebSocket, disconnectWebSocket, sdk, waitForWsOpen } from '@/services/api-client'
 import { useRoomPlayers } from '@/hooks/useRoomPlayers'
 
 const ATTR_KEY_LIST = ['str', 'con', 'pow', 'dex', 'app', 'siz', 'int', 'edu'] as const
@@ -181,18 +181,18 @@ export default function CharacterReadyPage() {
     try {
       // ★ 这个页面从来没有主动建立过 WS 连接（只有 LobbyPage 会连）——如果
       // 刷新过页面、或者从没经过 Lobby 直接落到这里，connectWebSocket 拿到
-      // 的连接是关闭的，sendWsMessage 会静默丢弃 game.start，后端 phase
+      // 的连接是关闭的，startGame 会静默丢弃 game.start，后端 phase
       // 永远停在 Building，其他玩家会一直卡在轮询里。这里跟 RoomPage 一样，
       // 发 game.start 前先确保连接是通的、且已经 room.join 过（对已经连过
       // 的情况是幂等空操作）。
       const ws = connectWebSocket(roomId)
       await waitForWsOpen(ws)
-      sendWsMessage('room.join', playerId, {
+      sdk.roomSocket.joinRoom(playerId, {
         reconnectToken: reconnectToken || '',
         roomCode,
         nickname: nickname || '玩家',
       })
-      sendWsMessage('game.start', playerId, {})
+      sdk.roomSocket.startGame(playerId)
     } catch {
       setStarting(false)
       return

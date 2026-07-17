@@ -27,7 +27,7 @@ export interface ApiClientOptions {
 
 /**
  * 最底层的 HTTP 封装：拼 URL、加公共 header、解析统一响应信封、
- * 把 `success:false` 转成 ApiError。上层的 `resources/*`（比如 ExamplesResource）
+ * 把 `success:false` 转成 ApiError。上层的 `resources/*`（比如 AuthResource）
  * 都是基于这个类的 get/post/put/delete 方法实现的，不直接碰 fetch。
  */
 export class ApiClient {

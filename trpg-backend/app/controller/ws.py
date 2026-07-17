@@ -82,14 +82,18 @@ async def _broadcast_narration(
 
 
 async def _handle_room_join(
-    db: AsyncSession, websocket: WebSocket, room_id: str, player_id: str | None
+    db: AsyncSession,
+    websocket: WebSocket,
+    room_id: str,
+    player_id: str | None,
+    reconnect_token: str,
 ) -> bool:
-    """处理 room.join：校验 playerId 属于这个房间，成功后登记连接并回 session.bound。
-
-    返回是否绑定成功。
+    """处理 room.join：校验 playerId 属于这个房间、且出示了该玩家的
+    reconnect_token（证明是本人，不是拿别人 playerId 冒充），成功后登记连接并回
+    session.bound。返回是否绑定成功。
     """
     player = await room_service.get_player(db, player_id) if player_id else None
-    if player is None or player.room_id != room_id:
+    if player is None or player.room_id != room_id or player.reconnect_token != reconnect_token:
         await websocket.close(code=_NOT_FOUND_CLOSE_CODE)
         return False
     assert player_id is not None  # 上面能走到这里，player_id 必然非空（见 get_player 调用）
@@ -139,8 +143,10 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
             async with async_session_factory() as db:
                 try:
                     if event_type == "room.join":
-                        RoomJoinPayload.model_validate(raw_payload)
-                        if await _handle_room_join(db, websocket, room_id, player_id):
+                        join_payload = RoomJoinPayload.model_validate(raw_payload)
+                        if await _handle_room_join(
+                            db, websocket, room_id, player_id, join_payload.reconnect_token
+                        ):
                             bound_player_id = player_id
                         else:
                             return

@@ -56,7 +56,10 @@ export function onWsMessage(handler: (envelope: ServerToClientEvent) => void): (
 export function sendWsMessage(type: string, playerId: string, payload: unknown) {
   switch (type) {
     case 'room.join':
-      sdk.roomSocket.joinRoom(playerId, payload as { roomCode: string; nickname?: string });
+      sdk.roomSocket.joinRoom(
+        playerId,
+        payload as { reconnectToken: string; roomCode?: string; nickname?: string }
+      );
       return;
     case 'player.ready':
       sdk.roomSocket.setReady(playerId, payload as { ready: boolean });

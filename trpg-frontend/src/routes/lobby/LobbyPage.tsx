@@ -18,6 +18,7 @@ export default function LobbyPage() {
   const isHost = useRoomStore((s) => s.isHost)
   const roomCode = useRoomStore((s) => s.roomCode)
   const playerId = useRoomStore((s) => s.playerId)
+  const reconnectToken = useRoomStore((s) => s.reconnectToken)
   const nickname = useAuthStore((s) => s.nickname)
   const [ready, setReady] = useState(false)
   const [joined, setJoined] = useState(false)
@@ -40,7 +41,11 @@ export default function LobbyPage() {
     waitForWsOpen(ws)
       .then(() => {
         if (cancelled) return
-        sendWsMessage('room.join', playerId, { roomCode, nickname: nickname || '玩家' })
+        sendWsMessage('room.join', playerId, {
+          reconnectToken: reconnectToken || '',
+          roomCode,
+          nickname: nickname || '玩家',
+        })
       })
       .catch(() => setError('WebSocket 连接失败'))
 
@@ -50,7 +55,7 @@ export default function LobbyPage() {
       // ★ 这里故意不 disconnectWebSocket()——连接要跨 LobbyPage→RoomPage 导航
       // 保持不断。connectWebSocket 本身是幂等的（同一 roomId 直接复用）。
     }
-  }, [roomId, playerId, roomCode, nickname])
+  }, [roomId, playerId, roomCode, nickname, reconnectToken])
 
   const players = info?.players ?? []
   // 房主在这个页面上没有"标记已就绪"按钮（只有"开始游戏"），他们用点击

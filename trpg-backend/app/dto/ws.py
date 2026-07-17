@@ -37,12 +37,17 @@ from app.dto.room import RoomPlayerRead
 class RoomJoinPayload(CamelModel):
     """room.join 事件 payload。
 
-    handler 目前不读取这里的任何字段——房间 ID 来自 URL 路径，玩家身份来自
-    信封的 playerId，roomCode/nickname 是前端沿用 trpg-app 原型习惯发送的
-    冗余字段。两个字段都设默认值，是因为现有测试/部分调用路径会发送空
-    payload（见 tests/test_ws.py），模型必须能校验通过。
+    `reconnect_token` 必填：它是玩家在这个房间里的身份密钥（`players.reconnect_token`，
+    建房/加入时下发给本人）。WS 连接握手只校验了「你是某个登录账号」，但连接
+    时带的 playerId 是任意的、而且被公开房间预览暴露——只认 playerId 会让任何
+    登录用户绑定成别人（冒充房主 game.start / 提交行动，PR #78 review 指出）。
+    绑定时要求出示该玩家的 reconnect_token，才能证明「你就是这个玩家本人」。
+
+    roomCode/nickname 是前端沿用原型习惯发送的冗余字段，服务端不读，保留可选
+    以免影响现有调用方。
     """
 
+    reconnect_token: str = Field(..., min_length=1)
     room_code: str | None = None
     nickname: str | None = None
 

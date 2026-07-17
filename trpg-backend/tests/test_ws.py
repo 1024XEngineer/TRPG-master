@@ -79,7 +79,11 @@ def test_room_join_binds_session(sync_client: TestClient) -> None:
             {
                 "type": "room.join",
                 "playerId": room["playerId"],
-                "payload": {"roomCode": room["roomCode"], "nickname": "房主"},
+                "payload": {
+                    "reconnectToken": room["reconnectToken"],
+                    "roomCode": room["roomCode"],
+                    "nickname": "房主",
+                },
             }
         )
         envelope = ws.receive_json()
@@ -98,8 +102,47 @@ def test_room_join_with_unknown_player_closes_connection(sync_client: TestClient
         pytest.raises(WebSocketDisconnect),
         sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws,
     ):
-        ws.send_json({"type": "room.join", "playerId": "not-a-real-player", "payload": {}})
+        ws.send_json(
+            {
+                "type": "room.join",
+                "playerId": "not-a-real-player",
+                "payload": {"reconnectToken": "whatever"},
+            }
+        )
         ws.receive_json()
+
+
+def test_room_join_rejects_wrong_reconnect_token(sync_client: TestClient) -> None:
+    """拿对的 playerId 但错的 reconnect_token 不能绑定——否则任何登录账号都能
+    用公开预览里暴露的 playerId 冒充别人（PR #78 review）。"""
+    host_token = register_and_login(sync_client, "host_real")
+    room = create_room(sync_client)
+    # 一个"攻击者"账号，登录态有效，但没有房主的 reconnect_token。
+    attacker_token = register_and_login(sync_client, "attacker")
+
+    with (
+        pytest.raises(WebSocketDisconnect),
+        sync_client.websocket_connect(f"/ws/{room['roomId']}?token={attacker_token}") as ws,
+    ):
+        ws.send_json(
+            {
+                "type": "room.join",
+                "playerId": room["playerId"],  # 房主的 playerId（预览里能拿到）
+                "payload": {"reconnectToken": "not-the-real-token"},
+            }
+        )
+        ws.receive_json()
+
+    # 房主本人用正确的 token 仍然能正常绑定。
+    with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={host_token}") as ws:
+        ws.send_json(
+            {
+                "type": "room.join",
+                "playerId": room["playerId"],
+                "payload": {"reconnectToken": room["reconnectToken"]},
+            }
+        )
+        assert ws.receive_json()["type"] == "session.bound"
 
 
 def test_player_ready_updates_room_state(sync_client: TestClient) -> None:
@@ -107,7 +150,13 @@ def test_player_ready_updates_room_state(sync_client: TestClient) -> None:
     room = create_room(sync_client)
 
     with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
-        ws.send_json({"type": "room.join", "playerId": room["playerId"], "payload": {}})
+        ws.send_json(
+            {
+                "type": "room.join",
+                "playerId": room["playerId"],
+                "payload": {"reconnectToken": room["reconnectToken"]},
+            }
+        )
         ws.receive_json()  # session.bound
         ws.send_json(
             {"type": "player.ready", "playerId": room["playerId"], "payload": {"ready": True}}
@@ -115,7 +164,13 @@ def test_player_ready_updates_room_state(sync_client: TestClient) -> None:
 
         # 让服务端处理完 player.ready 再去查——最简单的办法是紧接着发一条
         # room.join 强制走一次同步的事件处理再返回。
-        ws.send_json({"type": "room.join", "playerId": room["playerId"], "payload": {}})
+        ws.send_json(
+            {
+                "type": "room.join",
+                "playerId": room["playerId"],
+                "payload": {"reconnectToken": room["reconnectToken"]},
+            }
+        )
         ws.receive_json()
 
     preview = sync_client.get(f"{ROOMS_BASE}/{room['roomCode']}").json()["data"]
@@ -131,7 +186,13 @@ def test_game_start_pushes_opening_narration_and_advances_phase(
     complete_character(sync_client, room["roomId"], room["reconnectToken"])
 
     with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
-        ws.send_json({"type": "room.join", "playerId": room["playerId"], "payload": {}})
+        ws.send_json(
+            {
+                "type": "room.join",
+                "playerId": room["playerId"],
+                "payload": {"reconnectToken": room["reconnectToken"]},
+            }
+        )
         ws.receive_json()  # session.bound
         ws.send_json({"type": "game.start", "playerId": room["playerId"], "payload": {}})
         envelope = ws.receive_json()
@@ -156,7 +217,13 @@ def test_game_start_rejects_non_host(sync_client: TestClient) -> None:
     complete_character(sync_client, room["roomId"], guest["reconnectToken"])
 
     with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
-        ws.send_json({"type": "room.join", "playerId": guest["playerId"], "payload": {}})
+        ws.send_json(
+            {
+                "type": "room.join",
+                "playerId": guest["playerId"],
+                "payload": {"reconnectToken": guest["reconnectToken"]},
+            }
+        )
         ws.receive_json()  # session.bound
         ws.send_json({"type": "game.start", "playerId": guest["playerId"], "payload": {}})
 
@@ -181,9 +248,21 @@ def test_action_submit_broadcasts_narration_to_room_only(sync_client: TestClient
         sync_client.websocket_connect(f"/ws/{room_a['roomId']}?token={token_a}") as ws_a,
         sync_client.websocket_connect(f"/ws/{room_b['roomId']}?token={token_b}") as ws_b,
     ):
-        ws_a.send_json({"type": "room.join", "playerId": room_a["playerId"], "payload": {}})
+        ws_a.send_json(
+            {
+                "type": "room.join",
+                "playerId": room_a["playerId"],
+                "payload": {"reconnectToken": room_a["reconnectToken"]},
+            }
+        )
         ws_a.receive_json()  # session.bound
-        ws_b.send_json({"type": "room.join", "playerId": room_b["playerId"], "payload": {}})
+        ws_b.send_json(
+            {
+                "type": "room.join",
+                "playerId": room_b["playerId"],
+                "payload": {"reconnectToken": room_b["reconnectToken"]},
+            }
+        )
         ws_b.receive_json()  # session.bound
 
         ws_a.send_json(
@@ -197,7 +276,13 @@ def test_action_submit_broadcasts_narration_to_room_only(sync_client: TestClient
 
         # room_b 没有收到任何广播——发一条 room.join 触发一次同步交互，确认
         # 收到的仍然是它自己的 session.bound，而不是串过来的 narration。
-        ws_b.send_json({"type": "room.join", "playerId": room_b["playerId"], "payload": {}})
+        ws_b.send_json(
+            {
+                "type": "room.join",
+                "playerId": room_b["playerId"],
+                "payload": {"reconnectToken": room_b["reconnectToken"]},
+            }
+        )
         envelope_b = ws_b.receive_json()
 
     assert narration["type"] == "narration.push"

@@ -157,6 +157,7 @@ export default function CharacterReadyPage() {
   const roomCode = useRoomStore((s) => s.roomCode)
   const isHost = useRoomStore((s) => s.isHost)
   const playerId = useRoomStore((s) => s.playerId)
+  const reconnectToken = useRoomStore((s) => s.reconnectToken)
   const nickname = useAuthStore((s) => s.nickname)
   const hasCharacter = character !== null
   const info = useRoomPlayers(roomCode)
@@ -186,7 +187,11 @@ export default function CharacterReadyPage() {
       // 的情况是幂等空操作）。
       const ws = connectWebSocket(roomId)
       await waitForWsOpen(ws)
-      sendWsMessage('room.join', playerId, { roomCode, nickname: nickname || '玩家' })
+      sendWsMessage('room.join', playerId, {
+        reconnectToken: reconnectToken || '',
+        roomCode,
+        nickname: nickname || '玩家',
+      })
       sendWsMessage('game.start', playerId, {})
     } catch {
       setStarting(false)

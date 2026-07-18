@@ -204,8 +204,7 @@ def _validate_attributes(attributes: dict[str, int]) -> list[ValidationIssue]:
                     code="INVALID_ATTRIBUTES",
                     field=f"attributes.{key}",
                     message=(
-                        f"{key} 的值 {value} 不在合法范围 "
-                        f"[{ATTRIBUTE_MIN}, {ATTRIBUTE_MAX}] 内"
+                        f"{key} 的值 {value} 不在合法范围 [{ATTRIBUTE_MIN}, {ATTRIBUTE_MAX}] 内"
                     ),
                 )
             )

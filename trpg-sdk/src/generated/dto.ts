@@ -42,11 +42,39 @@ export interface AuthResult {
 }
 
 /**
+ * `compute_preview` 的响应结构：衍生值 + 两个技能点预算 + 全部技能的
+ * base/cap/当前值 + 校验报告。
+ */
+export interface CharacterComputeResult {
+  derivedStats: {
+    [k: string]: number | string;
+  };
+  occupationSkillPoints: SkillPointsBudgetView;
+  interestSkillPoints: SkillPointsBudgetView;
+  skillView: SkillComputeView[];
+  validation: ValidationIssueView[];
+}
+
+/**
  * POST /api/v1/rooms/{roomId}/characters 返回
  */
 export interface CharacterDraftResult {
   characterId: string;
   status: string;
+}
+
+/**
+ * POST /api/v1/systems/{systemId}/character/preview 请求体。
+ */
+export interface CharacterPreviewRequest {
+  attributes: {
+    [k: string]: number;
+  };
+  occupationId?: number | null;
+  skills?: {
+    [k: string]: number;
+  };
+  creditRating?: number | null;
 }
 
 /**
@@ -169,14 +197,24 @@ export type ErrorCode =
   | "MODULE_NOT_SELECTED"
   | "RECONNECT_TOKEN_EXPIRED"
   | "RATE_LIMITED"
-  | "NOT_IMPLEMENTED";
+  | "NOT_IMPLEMENTED"
+  | "CHARACTER_INVALID";
 
 /**
  * 错误信息的具体内容，只在 success=false 时出现在 error 字段里。
+ *
+ * `details` 是 issue #84 S2 新增的可选字段：装结构化的校验报告（比如建卡
+ * 校验失败时的一条条 {code, field, message}），大多数错误不需要它，默认
+ * None，不影响原有只有 code/message 的错误响应形状。
  */
 export interface ErrorDetail {
   code: ErrorCode;
   message: string;
+  details?:
+    | {
+        [k: string]: string;
+      }[]
+    | null;
 }
 
 /**
@@ -554,6 +592,26 @@ export interface SessionBoundPayload {
 }
 
 /**
+ * 一项技能的计算结果：基础值/已分配点数/当前值/上限。
+ */
+export interface SkillComputeView {
+  id: string;
+  base: number;
+  allocated: number;
+  current: number;
+  cap: number;
+}
+
+/**
+ * 一个技能点池（职业/兴趣）的预算/已用/剩余。
+ */
+export interface SkillPointsBudgetView {
+  budget: number;
+  spent: number;
+  remaining: number;
+}
+
+/**
  * 一项技能：基础值可以是固定数字，也可以是依赖属性的公式字符串
  * （比如闪避 `DEX/2`、母语 `EDU`）。
  */
@@ -578,6 +636,15 @@ export interface TurnBeginPayload {
  */
 export interface UpdateNicknameBody {
   nickname: string;
+}
+
+/**
+ * 一条结构化校验失败信息，空列表代表这张卡合法。
+ */
+export interface ValidationIssueView {
+  code: string;
+  field: string;
+  message: string;
 }
 
 /**

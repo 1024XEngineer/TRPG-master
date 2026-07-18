@@ -40,6 +40,10 @@ class ErrorCode(StrEnum):
     RATE_LIMITED = "RATE_LIMITED"  # 请求频率超限 → 429
     NOT_IMPLEMENTED = "NOT_IMPLEMENTED"  # 协议位置已预留，真实业务逻辑本期未实现 → 501
 
+    # issue #84 S2 新增：建卡数据未通过 COC7 权威校验（职业/兴趣技能点预算、
+    # 技能上限、信用评级区间等）→ 422，`AppException.details` 带结构化校验报告。
+    CHARACTER_INVALID = "CHARACTER_INVALID"
+
 
 class AppException(Exception):
     """业务代码显式抛出的异常，携带错误码/状态码/用户可见信息。
@@ -54,12 +58,23 @@ class AppException(Exception):
     status_code 没有默认值：项目里目前所有调用点都是显式传状态码的，如果给
     一个默认值（之前是 400），万一以后哪次调用忘了传，会悄悄退化成 400 而不是
     报错提醒——不如直接让它变成必填参数，强制每次调用都想清楚该返回什么状态码。
+
+    `details` 是 issue #84 S2 新增的可选字段：`CHARACTER_INVALID` 这类错误
+    需要把结构化的校验报告（一条条 code/field/message）带给前端，光一个
+    message 字符串不够用；不传就是 None，不影响原有只带 code/message 的用法。
     """
 
-    def __init__(self, code: ErrorCode, message: str, status_code: int) -> None:
+    def __init__(
+        self,
+        code: ErrorCode,
+        message: str,
+        status_code: int,
+        details: list[dict[str, str]] | None = None,
+    ) -> None:
         self.code = code
         self.message = message
         self.status_code = status_code
+        self.details = details
         super().__init__(message)
 
 

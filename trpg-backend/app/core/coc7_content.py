@@ -8,8 +8,9 @@
 - 属性：`ATTRIBUTE_LABELS`（8 项），生成公式取自 `character.py` 的
   `roll_attributes` 已有实现：STR/CON/DEX/APP/POW = 3d6*5，SIZ/INT/EDU =
   (2d6+6)*5。
-- 技能：`ALL_SKILLS`，实际 76 条（不是 COC7 规则书里常说的“79 项”——前端数据
-  本身就没有收录全部规则书技能，这里如实照抄前端现有的 76 条，不额外编造）。
+- 技能：`ALL_SKILLS`，前端原样照抄 76 条；issue #84 S2 发现有 3 个职业引用了
+  技能表里不存在的 id（navigate/carpentry/illusion，移植时的悬空引用），
+  补齐后共 79 条，跟 COC7 规则书常说的"79 项"数字一致纯属巧合。
 - 职业：`ALL_OCCUPATIONS`，实际 30 个（同样如实照抄，不是 32 个）。前端的
   `icon` 字段是纯 UI 展示用的 emoji，不属于规则数据，未移植。
 """
@@ -315,6 +316,23 @@ COC7_SKILLS: list[SkillSpec] = [
         name_en="Language (Foreign 3)",
         base=1,
         category="language",
+    ),
+    # issue #84 S2：S1 移植时发现工程师/艺术家两个职业引用了这 3 个不存在的
+    # 技能 id（悬空引用），补上缺失的技能定义。
+    SkillSpec(id="navigate", name="导航", name_en="Navigate", base=10, category="perception"),
+    SkillSpec(
+        id="carpentry",
+        name="艺术与手艺（木工）",
+        name_en="Art & Craft (Carpentry)",
+        base=5,
+        category="technical",
+    ),
+    SkillSpec(
+        id="illusion",
+        name="艺术与手艺（魔术）",
+        name_en="Art & Craft (Illusion)",
+        base=5,
+        category="technical",
     ),
 ]
 

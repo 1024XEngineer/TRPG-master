@@ -19,8 +19,9 @@ async def test_get_ruleset_returns_full_coc7_data(client: AsyncClient) -> None:
     assert attrs_by_key["STR"] == {"key": "STR", "label": "力量", "generation": "3d6*5"}
     assert attrs_by_key["SIZ"]["generation"] == "(2d6+6)*5"
 
-    # 76 项技能（前端 ALL_SKILLS 实际条数），固定值和公式值都要能原样带过来
-    assert len(data["skills"]) == 76
+    # 79 项技能（前端 ALL_SKILLS 原有 76 条 + issue #84 S2 补齐的 3 条悬空引用
+    # navigate/carpentry/illusion），固定值和公式值都要能原样带过来
+    assert len(data["skills"]) == 79
     skills_by_id = {s["id"]: s for s in data["skills"]}
     assert skills_by_id["spot-hidden"]["base"] == 25
     assert skills_by_id["dodge"]["base"] == "DEX/2"

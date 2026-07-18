@@ -108,7 +108,7 @@ def create_app() -> FastAPI:
         """业务代码主动抛出的 AppException（比如 404/409），直接按它自带的
         code/message/status_code 包装成统一响应体。"""
         logger.warning("app_exception", code=exc.code, message=exc.message, path=request.url.path)
-        body = ApiResponse.fail(exc.code, exc.message)
+        body = ApiResponse.fail(exc.code, exc.message, exc.details)
         return JSONResponse(status_code=exc.status_code, content=jsonable_encoder(body))
 
     @app.exception_handler(RequestValidationError)

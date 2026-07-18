@@ -36,6 +36,12 @@ export type {
   // 我的卡库（issue #77 决策 5）—— 对应后端 dto/character.py
   CharacterTemplateCreateBody as SaveCharacterTemplateInput,
   CharacterTemplateRead as CharacterTemplate,
+  // 建卡计算/校验预览（issue #84 S2）—— 对应后端 dto/character.py
+  CharacterPreviewRequest as PreviewCharacterInput,
+  CharacterComputeResult,
+  SkillPointsBudgetView,
+  SkillComputeView,
+  ValidationIssueView,
   // 游戏目录 / 规则数据（issue #77）—— 对应后端 dto/game.py
   GameRead as Game,
   GameSystemRead as GameSystem,

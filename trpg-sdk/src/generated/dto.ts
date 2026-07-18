@@ -24,6 +24,15 @@ export interface ActionSubmitPayload {
 }
 
 /**
+ * 一项基础属性：键名、显示名、COC7 生成公式。
+ */
+export interface AttributeSpec {
+  key: string;
+  label: string;
+  generation: string;
+}
+
+/**
  * 注册 / 登录成功后的返回：登录凭证 + 用户信息。
  */
 export interface AuthResult {
@@ -318,6 +327,19 @@ export interface NarrationPushPayload {
 }
 
 /**
+ * 一个职业：信用评级区间、职业技能点公式、职业技能清单。
+ */
+export interface OccupationSpec {
+  id: number;
+  name: string;
+  creditMin: number;
+  creditMax: number;
+  skillPointsFormula: string;
+  skillIds: string[];
+  description: string;
+}
+
+/**
  * player.joined 推送 payload（issue #77 新增，同上，本期不会真的发出）。
  */
 export interface PlayerJoinedPayload {
@@ -483,9 +505,9 @@ export interface RoomSummaryRead {
  * 建卡所需的规则数据：属性/技能/职业目录（`GET /systems/{systemId}/ruleset`）。
  */
 export interface RulesetRead {
-  attributes: string[];
-  skills: string[];
-  occupations: string[];
+  attributes: AttributeSpec[];
+  skills: SkillSpec[];
+  occupations: OccupationSpec[];
 }
 
 /**
@@ -529,6 +551,19 @@ export interface SelectModuleBody {
 export interface SessionBoundPayload {
   roomId: string;
   playerId: string;
+}
+
+/**
+ * 一项技能：基础值可以是固定数字，也可以是依赖属性的公式字符串
+ * （比如闪避 `DEX/2`、母语 `EDU`）。
+ */
+export interface SkillSpec {
+  id: string;
+  name: string;
+  nameEn?: string | null;
+  base: number | string;
+  category: string;
+  relatedAttr?: string | null;
 }
 
 /**

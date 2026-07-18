@@ -364,24 +364,22 @@ async def list_game_systems(db: AsyncSession, game_id: str) -> list[GameSystemRe
     return [GameSystemRead.model_validate(s) for s in result]
 
 
-# COC7 建卡目录的最小示例数据（没有真实的规则数据管理界面，写死一份保证
-# `GET /systems/{systemId}/ruleset` 有内容可用；GameSystem.ruleset 列如果
-# 填了真实数据会优先使用它）。
-_DEFAULT_COC7_RULESET = RulesetRead(
-    attributes=["STR", "CON", "SIZ", "DEX", "APP", "INT", "POW", "EDU"],
-    skills=["图书馆使用", "侦查", "聆听", "潜行", "闪避", "説服", "急救", "驾驶"],
-    occupations=["私家侦探", "记者", "医生", "教授", "警察", "古董商"],
-)
-
-
 async def get_ruleset(db: AsyncSession, system_id: str) -> RulesetRead:
-    """GET /api/v1/systems/{systemId}/ruleset —— 建卡所需规则数据。"""
+    """GET /api/v1/systems/{systemId}/ruleset —— 建卡所需规则数据。
+
+    真实数据来自 `GameSystem.ruleset`（`app/core/seed.py` seed 时用
+    `app/core/coc7_content.py` 的权威数据写入）。issue #84 S1 之前这里有一份
+    手写的三字符串数组兜底桩，加厚 schema 后跟 `RulesetRead` 新形状不兼容，
+    且 seed 已经保证 COC7 系统一定带 ruleset，故删除——没有 ruleset 数据的
+    系统（本期只有还没配置规则数据的自定义系统会出现这种情况）直接返回空
+    目录，而不是伪造一份看起来正常但内容不对的数据。
+    """
     system = await db.get(GameSystem, system_id)
     if system is None:
         raise ModuleNotFoundError("规则系统不存在")
     if system.ruleset:
         return RulesetRead.model_validate(system.ruleset)
-    return _DEFAULT_COC7_RULESET
+    return RulesetRead(attributes=[], skills=[], occupations=[])
 
 
 async def list_modules(db: AsyncSession) -> list[ModuleRead]:

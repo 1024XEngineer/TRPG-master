@@ -55,9 +55,12 @@ _MODELS: list[type[BaseModel]] = [
     character.RollAttributesResult,
     character.CharacterTemplateCreateBody,
     character.CharacterTemplateRead,
-    # 游戏目录 / 规则数据（issue #77 新增）
+    # 游戏目录 / 规则数据（issue #77 新增，issue #84 S1 加厚 ruleset 结构）
     game.GameRead,
     game.GameSystemRead,
+    game.AttributeSpec,
+    game.SkillSpec,
+    game.OccupationSpec,
     game.RulesetRead,
     # 模组详情 / 导入（issue #77 新增）
     module.ModuleDetailRead,

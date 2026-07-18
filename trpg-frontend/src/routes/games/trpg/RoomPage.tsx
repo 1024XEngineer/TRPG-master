@@ -6,10 +6,9 @@ import { useAuthStore } from '@/stores/auth-store'
 import { useCharacterStore } from '@/stores/character-store'
 import { connectWebSocket, waitForWsOpen, sdk, onWsMessage, disconnectWebSocket, friendlyErrorMessage } from '@/services/api-client'
 import { endGame } from '@/services/room'
-import { ALL_SKILLS, calculateBaseValue } from '@/data/skills'
 import { ATTRIBUTE_LABELS } from '@/data/character-model'
-import { getOccupationById } from '@/data/occupations'
 import { useRoomPlayers } from '@/hooks/useRoomPlayers'
+import { useRuleset } from '@/hooks/useRuleset'
 
 // ─── Types ───────────────────────────────────────────
 interface Message {
@@ -374,6 +373,7 @@ export default function RoomPage() {
   // 换房间会把上一个房间的角色数据错误地展示出来（见 PR #67 review）。
   const character = useCharacterStore((s) => (roomId ? s.getForRoom(roomId) : null))
   const senderName = character?.info.name || nickname || '你'
+  const { ruleset } = useRuleset()
   const roomInfo = useRoomPlayers(roomCode)
   const isHost = roomInfo?.players.find((p) => p.playerId === playerId)?.isHost ?? false
   const [confirmEnd, setConfirmEnd] = useState(false)
@@ -699,7 +699,7 @@ export default function RoomPage() {
                   <div>
                     <div className="text-sm font-semibold text-text-primary">{character.info.name}</div>
                     <div className="text-[11px] text-text-muted">
-                      {character.info.age}岁 · {character.info.gender} · {character.info.occupationId ? getOccupationById(character.info.occupationId)?.name : '未选择职业'}
+                      {character.info.age}岁 · {character.info.gender} · {character.info.occupationId ? ruleset?.occupations.find(o => o.id === character.info.occupationId)?.name : '未选择职业'}
                     </div>
                   </div>
                 </div>
@@ -777,12 +777,14 @@ export default function RoomPage() {
             </div>
             <div className="space-y-2">
               {(() => {
-                const occSkillIds = character.info.occupationId ? getOccupationById(character.info.occupationId)?.skillIds ?? [] : []
-                const list = ALL_SKILLS
+                const occSkillIds = character.info.occupationId
+                  ? ruleset?.occupations.find(o => o.id === character.info.occupationId)?.skillIds ?? []
+                  : []
+                const list = (ruleset?.skills ?? [])
                   .filter((skill) => skillsTab === 'occupation' ? occSkillIds.includes(skill.id) : !occSkillIds.includes(skill.id))
                   .map((skill) => ({
                     skill,
-                    value: calculateBaseValue(skill, character.attr) + (character.skillAlloc[skill.id] || 0),
+                    value: character.skillFinalValues?.[skill.id] ?? 0,
                   }))
                   .sort((a, b) => b.value - a.value)
                 return list.map(({ skill, value }) => (

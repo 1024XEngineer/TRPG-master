@@ -6,6 +6,11 @@ export interface CompletedCharacter {
   info: InvestigatorInfo
   attr: Attributes
   skillAlloc: Record<string, number>
+  // 全部技能的最终值（skillId -> 已经算好的 base+分配，来自建卡完成时后端
+  // previewCharacter 返回的权威计算结果），人物卡准备页/游戏内技能面板直接
+  // 渲染这份数据，不用再拿 skillAlloc 现场重算（issue #84 S3：规则计算全部
+  // 交给后端，前端只存/渲染结果）。
+  skillFinalValues: Record<string, number>
   equipment: string
   background: string
   notes: string

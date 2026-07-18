@@ -163,6 +163,27 @@ export default function CharacterPage() {
     return ruleset.occupations.find(o => o.id === info.occupationId) ?? null
   }, [ruleset, info.occupationId])
 
+  // 信用评级（credit-rating）是后端建成的必填技能，值须落在所选职业的
+  // [creditMin, creditMax] 内（后端 CREDIT_OUT_OF_RANGE）。这里给它一个专门
+  // 的默认值初始化：只在"职业真正发生变化"（ref 记的上一次处理过的职业 id
+  // 跟这次不一样）时才动，且只在当前值缺失或落在新职业区间外时才写入/夹紧，
+  // 不会覆盖玩家已经手动调过、且仍然合法的值——也不会覆盖编辑已有角色时
+  // 带进来的既有信用值。
+  const creditInitializedForOcc = useRef<number | null>(null)
+  useEffect(() => {
+    if (!selectedOcc) return
+    if (creditInitializedForOcc.current === selectedOcc.id) return
+    creditInitializedForOcc.current = selectedOcc.id
+    setSkillAlloc(prev => {
+      const current = prev['credit-rating']
+      const clamped = current == null
+        ? selectedOcc.creditMin
+        : Math.max(selectedOcc.creditMin, Math.min(selectedOcc.creditMax, current))
+      if (clamped === current) return prev
+      return { ...prev, 'credit-rating': clamped }
+    })
+  }, [selectedOcc])
+
   // Filter occupations by search and group
   const filteredOccupations = useMemo(() => {
     if (!ruleset) return []
@@ -188,7 +209,15 @@ export default function CharacterPage() {
   const occSkills = useMemo(() => {
     if (!ruleset) return []
     const bySkillId = new Map(ruleset.skills.map(s => [s.id, s]))
-    return occSkillIds.map(id => bySkillId.get(id)).filter((s): s is SkillSpec => !!s)
+    // credit-rating 有专门的信用评级卡片，不在这里重复出现。
+    return occSkillIds.map(id => bySkillId.get(id)).filter((s): s is SkillSpec => !!s && s.id !== 'credit-rating')
+  }, [ruleset, occSkillIds])
+
+  // 兴趣技能 tab 的技能清单：排除职业技能，也排除 credit-rating（同上，
+  // 有专门卡片）。单独抽出来，好让 tab 徽标数字和实际渲染列表长度一致。
+  const interestSkills = useMemo(() => {
+    if (!ruleset) return []
+    return ruleset.skills.filter(s => !occSkillIds.includes(s.id) && s.id !== 'credit-rating')
   }, [ruleset, occSkillIds])
 
   // ── 建卡计算预览（issue #84 S2 previewCharacter，路线乙的接缝）──────────
@@ -343,6 +372,18 @@ export default function CharacterPage() {
 
     setInterestAlloc(prev => ({ ...prev, [skillId]: newInterestPart }))
     setSkillAlloc(prev => ({ ...prev, [skillId]: newOccPart + newInterestPart }))
+  }
+
+  // 信用评级 +/- ：直接夹在所选职业的 [creditMin, creditMax] 内。信用的
+  // base 固定是 0（见后端 SkillSpec），所以 skillAlloc['credit-rating']
+  // 本身就是最终信用值，不需要像其它技能那样叠加 base。
+  const handleCreditChange = (delta: number) => {
+    if (!selectedOcc) return
+    setSkillAlloc(prev => {
+      const current = prev['credit-rating'] ?? selectedOcc.creditMin
+      const next = Math.max(selectedOcc.creditMin, Math.min(selectedOcc.creditMax, current + delta))
+      return { ...prev, 'credit-rating': next }
+    })
   }
 
   const [attrInputs, setAttrInputs] = useState<Record<string, string>>(
@@ -721,11 +762,43 @@ export default function CharacterPage() {
                 </div>
               </div>
 
+              {/* Credit Rating — 后端必填技能，值须落在所选职业信用区间内，
+                  单独给一张显眼卡片，不跟普通技能混在职业/兴趣两个 tab 里。 */}
+              {selectedOcc && (
+                <div className="bg-[#fdfaf4] border border-brass rounded-md p-3.5 mb-3">
+                  <div className="flex items-center justify-between mb-1">
+                    <h4 className="text-[12px] font-semibold text-brass-dark">
+                      信用评级 (Credit Rating) · <span className="text-[#c04040]">必填</span>
+                    </h4>
+                    <span className="text-[11px] text-text-muted font-mono">
+                      范围 {selectedOcc.creditMin}–{selectedOcc.creditMax}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3 mt-2">
+                    <button onClick={() => handleCreditChange(-1)}
+                      disabled={(skillAlloc['credit-rating'] ?? selectedOcc.creditMin) <= selectedOcc.creditMin}
+                      className="w-8 h-8 rounded-full bg-card border border-border-light text-text-muted flex items-center justify-center active:bg-panel active:scale-90 transition-all disabled:opacity-40 disabled:active:scale-100"
+                    >
+                      <Minus className="w-4 h-4" />
+                    </button>
+                    <div className="flex-1 text-center text-[20px] font-bold font-mono text-text-primary">
+                      {skillAlloc['credit-rating'] ?? selectedOcc.creditMin}
+                    </div>
+                    <button onClick={() => handleCreditChange(1)}
+                      disabled={(skillAlloc['credit-rating'] ?? selectedOcc.creditMin) >= selectedOcc.creditMax}
+                      className="w-8 h-8 rounded-full bg-card border border-border-light text-text-muted flex items-center justify-center active:bg-panel active:scale-90 transition-all disabled:opacity-40 disabled:active:scale-100"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* Tabs */}
               <div className="flex gap-2 mb-3">
                 {[
                   { key: 'occupation', label: '职业技能', count: occSkills.length },
-                  { key: 'interest', label: '兴趣技能', count: (ruleset?.skills.length ?? 0) - occSkillIds.length },
+                  { key: 'interest', label: '兴趣技能', count: interestSkills.length },
                 ].map(tab => (
                   <button key={tab.key} onClick={() => setSkillTab(tab.key as typeof skillTab)}
                     className={`flex-1 py-2 text-[12px] font-semibold rounded-[6px] transition-all ${
@@ -768,7 +841,7 @@ export default function CharacterPage() {
                 ) : (
                   // 兴趣技能页签只列非职业技能——职业技能那边已经能自动溢出用兴趣点数了，
                   // 不需要在这里重复出现。这里纯粹是兴趣点数池，加点只碰 interestAlloc。
-                  (ruleset?.skills ?? []).filter(s => !occSkillIds.includes(s.id)).map(skill => {
+                  interestSkills.map(skill => {
                     const interestAllocation = interestAlloc[skill.id] || 0
                     const compute = skillComputeMap.get(skill.id)
                     const base = compute?.base ?? (typeof skill.base === 'number' ? skill.base : 0)

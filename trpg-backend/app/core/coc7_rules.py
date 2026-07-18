@@ -117,15 +117,26 @@ def evaluate_skill_base(base: int | str, attributes: dict[str, int]) -> int:
 
 
 _SKILL_POINTS_TERM_RE = re.compile(r"^([A-Z]+)\*(\d+)$")
+_SKILL_POINTS_MAX_TERM_RE = re.compile(r"^MAX\(([A-Z]+(?:,[A-Z]+)+)\)\*(\d+)$")
 
 
 def evaluate_skill_points_formula(formula: str, attributes: dict[str, int]) -> int:
     """职业技能点预算公式求值，形如 `EDU*4`、`EDU*2+DEX*2`（属性*系数，
-    可以有多项相加）。格式不认识就报错，不悄悄兜底成 0——公式本身是权威
-    数据的一部分，解析不了应该在开发期就暴露，而不是让预算悄悄变成 0。"""
+    可以有多项相加），以及 `MAX(ATTR1,ATTR2[,ATTR3])*N`（取列出属性里的
+    最高值再乘系数，用于 COC7 规则书里"二选一/三选一"的职业公式，比如
+    `EDU*2+MAX(STR,DEX)*2`）。格式不认识就报错，不悄悄兜底成 0——公式本身
+    是权威数据的一部分，解析不了应该在开发期就暴露，而不是让预算悄悄变成
+    0。"""
     total = 0
     for term in formula.split("+"):
-        match = _SKILL_POINTS_TERM_RE.match(term.strip())
+        term = term.strip()
+        max_match = _SKILL_POINTS_MAX_TERM_RE.match(term)
+        if max_match is not None:
+            attrs, coefficient = max_match.group(1), max_match.group(2)
+            values = [attributes.get(attr, 0) for attr in attrs.split(",")]
+            total += max(values) * int(coefficient)
+            continue
+        match = _SKILL_POINTS_TERM_RE.match(term)
         if match is None:
             raise ValueError(f"无法解析的技能点公式: {formula!r}")
         attr, coefficient = match.group(1), match.group(2)

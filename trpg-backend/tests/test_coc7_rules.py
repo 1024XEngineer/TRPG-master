@@ -50,6 +50,18 @@ def test_evaluate_skill_points_formula_single_and_multi_term() -> None:
     assert evaluate_skill_points_formula("EDU*2+DEX*2", ATTRS) == 200
 
 
+def test_evaluate_skill_points_formula_max_term_takes_higher_attribute() -> None:
+    attrs = {**ATTRS, "STR": 40, "DEX": 60, "EDU": 50}
+    # EDU*2 + max(STR,DEX)*2 = 50*2 + 60*2 = 100 + 120 = 220（验证取较高的 DEX）
+    assert evaluate_skill_points_formula("EDU*2+MAX(STR,DEX)*2", attrs) == 220
+
+
+def test_evaluate_skill_points_formula_max_term_with_three_attributes() -> None:
+    attrs = {**ATTRS, "APP": 30, "DEX": 45, "STR": 70}
+    # EDU*2 + max(APP,DEX,STR)*2 = 50*2 + 70*2 = 100 + 140 = 240（三选一取 STR）
+    assert evaluate_skill_points_formula("EDU*2+MAX(APP,DEX,STR)*2", attrs) == 240
+
+
 def test_evaluate_skill_points_formula_rejects_unparseable_string() -> None:
     import pytest
 
@@ -123,6 +135,14 @@ def test_occupation_not_found_by_id_and_by_name() -> None:
 
     issues = validate_character(ATTRS, "不存在的职业", {})
     assert any(issue.code == "OCCUPATION_NOT_FOUND" for issue in issues)
+
+
+def test_occupation_skill_points_budget_uses_max_of_str_dex() -> None:
+    # 事务所侦探（id=30）公式是 EDU*2+MAX(STR,DEX)*2，STR40/DEX60 应按较高的
+    # DEX 算：EDU*2 + DEX*2 = 50*2 + 60*2 = 220，而不是误用 STR 算出的 180。
+    attrs = {**ATTRS, "STR": 40, "DEX": 60}
+    result = compute_preview(attrs, 30, {})
+    assert result.occupation_skill_points.budget == 220
 
 
 def test_no_occupation_selected_all_budget_is_interest_only() -> None:

@@ -358,8 +358,8 @@ COC7_OCCUPATIONS: list[OccupationSpec] = [
     OccupationSpec(
         id=2,
         name="考古学家",
-        credit_min=10,
-        credit_max=40,
+        credit_min=30,
+        credit_max=60,
         skill_points_formula="EDU*4",
         description="挖掘远古秘密的学者",
         skill_ids=[
@@ -394,9 +394,9 @@ COC7_OCCUPATIONS: list[OccupationSpec] = [
     OccupationSpec(
         id=4,
         name="艺术家",
-        credit_min=9,
-        credit_max=50,
-        skill_points_formula="EDU*2+DEX*2",
+        credit_min=10,
+        credit_max=40,
+        skill_points_formula="EDU*2+MAX(DEX,POW)*2",
         description="以创作表达内心的观察者",
         skill_ids=[
             "art-craft-1",
@@ -412,8 +412,8 @@ COC7_OCCUPATIONS: list[OccupationSpec] = [
     OccupationSpec(
         id=5,
         name="作家",
-        credit_min=9,
-        credit_max=30,
+        credit_min=10,
+        credit_max=40,
         skill_points_formula="EDU*4",
         description="用文字编织真相与虚构",
         skill_ids=[
@@ -449,7 +449,7 @@ COC7_OCCUPATIONS: list[OccupationSpec] = [
         id=7,
         name="医生",
         credit_min=30,
-        credit_max=80,
+        credit_max=70,
         skill_points_formula="EDU*4",
         description="医治身心创伤的专业人士",
         skill_ids=[
@@ -504,7 +504,7 @@ COC7_OCCUPATIONS: list[OccupationSpec] = [
         name="消防员",
         credit_min=9,
         credit_max=30,
-        skill_points_formula="EDU*2+STR*2",
+        skill_points_formula="EDU*2+MAX(STR,DEX)*2",
         description="冒着危险拯救生命的勇士",
         skill_ids=[
             "climb",
@@ -522,7 +522,7 @@ COC7_OCCUPATIONS: list[OccupationSpec] = [
         name="记者",
         credit_min=9,
         credit_max=30,
-        skill_points_formula="EDU*4",
+        skill_points_formula="EDU*2+MAX(APP,DEX)*2",
         description="追逐真相的新闻工作者",
         skill_ids=[
             "history",
@@ -556,7 +556,7 @@ COC7_OCCUPATIONS: list[OccupationSpec] = [
     OccupationSpec(
         id=13,
         name="律师",
-        credit_min=30,
+        credit_min=20,
         credit_max=80,
         skill_points_formula="EDU*4",
         description="在法庭上辩护的专业人士",
@@ -611,8 +611,8 @@ COC7_OCCUPATIONS: list[OccupationSpec] = [
         id=16,
         name="私家侦探",
         credit_min=9,
-        credit_max=30,
-        skill_points_formula="EDU*2+STR*2",
+        credit_max=40,
+        skill_points_formula="EDU*2+MAX(APP,DEX)*2",
         description="调查隐秘真相的独立探员",
         skill_ids=[
             "disguise",
@@ -629,7 +629,7 @@ COC7_OCCUPATIONS: list[OccupationSpec] = [
         id=17,
         name="教授",
         credit_min=20,
-        credit_max=70,
+        credit_max=50,
         skill_points_formula="EDU*4",
         description="研究与传授高深学问",
         skill_ids=[
@@ -646,8 +646,8 @@ COC7_OCCUPATIONS: list[OccupationSpec] = [
     OccupationSpec(
         id=18,
         name="科学家",
-        credit_min=9,
-        credit_max=50,
+        credit_min=10,
+        credit_max=60,
         skill_points_formula="EDU*4",
         description="探索自然规律的实验者",
         skill_ids=[
@@ -666,7 +666,7 @@ COC7_OCCUPATIONS: list[OccupationSpec] = [
         name="士兵",
         credit_min=9,
         credit_max=30,
-        skill_points_formula="EDU*2+STR*2",
+        skill_points_formula="EDU*2+MAX(STR,DEX)*2",
         description="受过战斗训练的职业军人",
         skill_ids=[
             "climb",
@@ -702,7 +702,7 @@ COC7_OCCUPATIONS: list[OccupationSpec] = [
         name="猎人",
         credit_min=20,
         credit_max=50,
-        skill_points_formula="EDU*2+STR*2",
+        skill_points_formula="EDU*2+MAX(STR,DEX)*2",
         description="追踪猎物的野外专家",
         skill_ids=[
             "climb",
@@ -720,7 +720,7 @@ COC7_OCCUPATIONS: list[OccupationSpec] = [
         name="音乐家",
         credit_min=9,
         credit_max=30,
-        skill_points_formula="EDU*2+DEX*2",
+        skill_points_formula="EDU*2+MAX(POW,DEX)*2",
         description="用乐器表达情感的艺术家",
         skill_ids=[
             "art-craft-1",
@@ -756,7 +756,7 @@ COC7_OCCUPATIONS: list[OccupationSpec] = [
         name="警察",
         credit_min=9,
         credit_max=30,
-        skill_points_formula="EDU*2+STR*2",
+        skill_points_formula="EDU*2+MAX(STR,DEX)*2",
         description="维护公共秩序的执法者",
         skill_ids=[
             "drive-auto",
@@ -790,9 +790,9 @@ COC7_OCCUPATIONS: list[OccupationSpec] = [
     OccupationSpec(
         id=26,
         name="罪犯",
-        credit_min=5,
-        credit_max=65,
-        skill_points_formula="EDU*2+APP*2",
+        credit_min=9,
+        credit_max=30,
+        skill_points_formula="EDU*2+MAX(APP,DEX,STR)*2",
         description="游走在法律边缘的危险分子",
         skill_ids=[
             "disguise",
@@ -828,7 +828,7 @@ COC7_OCCUPATIONS: list[OccupationSpec] = [
         name="间谍",
         credit_min=20,
         credit_max=60,
-        skill_points_formula="EDU*4",
+        skill_points_formula="EDU*2+MAX(APP,DEX)*2",
         description="在暗中收集情报的专家",
         skill_ids=[
             "disguise",
@@ -864,7 +864,7 @@ COC7_OCCUPATIONS: list[OccupationSpec] = [
         name="事务所侦探",
         credit_min=20,
         credit_max=45,
-        skill_points_formula="EDU*2+STR*2",
+        skill_points_formula="EDU*2+MAX(STR,DEX)*2",
         description="受雇调查案件的专业侦探",
         skill_ids=[
             "fighting-brawl",

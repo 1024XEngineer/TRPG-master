@@ -86,14 +86,22 @@ test('完整建卡流程：注册 → 建房 → 选模组 → 建卡 → 完成
 
   await page.getByRole('button', { name: /创建房间/ }).click()
 
-  // ── 大厅 → 建卡 ────────────────────────────────────────────────────
-  await expect(page).toHaveURL(/\/room\/(lobby|story|character)/, { timeout: 15_000 })
+  // ── 大厅 → 背景介绍 → 建卡 ─────────────────────────────────────────
+  await expect(page).toHaveURL(/\/room\/lobby/, { timeout: 15_000 })
 
-  // 房主要显式点「开始游戏」才推进到背景介绍/建卡（不是全员就绪自动跳）。
-  const startButton = page.getByRole('button', { name: /开始游戏/ })
-  if (await startButton.isVisible().catch(() => false)) {
-    await startButton.click()
-  }
+  /**
+   * 房主要显式点「开始游戏」才推进（不是全员就绪自动跳）。
+   *
+   * ⚠️ 这里**不要**写成 `if (await button.isVisible()) { click() }`。
+   * `isVisible()` 是即时检查、不等待：本地大厅渲染快，按钮已经在了；CI runner
+   * 慢一拍，这个判断就会在按钮出现之前返回 false，于是**静默跳过点击**，测试
+   * 一路卡到超时才报错，而且报的是「URL 不对」这种离根因很远的现象。
+   * （这个坑就是本 PR 在真 CI 上第一次跑挂时暴露出来的，本地跑 10 次都是绿的。）
+   *
+   * `click()` 本身就会自动等待元素可见可交互，直接点即可——需要「条件式」判断
+   * 的地方，通常说明流程本身不确定，那才是该先想清楚的问题。
+   */
+  await page.getByRole('button', { name: /开始游戏/ }).click()
 
   // 背景介绍页（StoryPage）：读完模组开场，点「继续」进建卡。
   await expect(page).toHaveURL(/\/room\/story/, { timeout: 15_000 })

@@ -1,0 +1,117 @@
+name: E2E CI
+
+# 端到端验证（issue #94）：跨三个包验证真实用户路径。
+#
+# paths 特意把 trpg-backend / trpg-sdk / trpg-frontend 三个包**全都**列进来——
+# 这条链路任何一层改动都可能把它打断，而这正是这套测试存在的意义：单包 CI
+# 各自绿灯、集成缝隙里出问题，是本项目反复出现过的情况（见 issue #94 正文里
+# 列的那批缺陷）。只挂 e2e/** 的话，真正会打断流程的后端/前端改动反而不触发。
+on:
+  push:
+    branches: [main]
+    paths:
+      - "trpg-backend/**"
+      - "trpg-sdk/**"
+      - "trpg-frontend/**"
+      - "e2e/**"
+      - ".github/workflows/e2e-ci.yml"
+  pull_request:
+    paths:
+      - "trpg-backend/**"
+      - "trpg-sdk/**"
+      - "trpg-frontend/**"
+      - "e2e/**"
+      - ".github/workflows/e2e-ci.yml"
+  # 允许在 GitHub 页面上手动点一次——leader 想随时自己跑一遍验证时用，
+  # 不必先推一个空提交。
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    # 正常一轮跑完约 2 分钟（含依赖安装和前端构建）；给足余量但不至于卡死队列。
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── 后端：uv sync 会在 trpg-backend/.venv 建出虚拟环境 ──────────
+      # Playwright 的 webServer 直接调 .venv/bin/alembic 和 .venv/bin/uvicorn，
+      # 不依赖 uv 本身在 PATH 上（本地开发机上 uv 常常就不在 PATH）。
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "trpg-backend/uv.lock"
+
+      - name: Set up Python
+        run: uv python install
+        working-directory: trpg-backend
+
+      - name: Install backend dependencies
+        run: uv sync --locked
+        working-directory: trpg-backend
+
+      # ── 前端与 SDK ────────────────────────────────────────────────
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          # 仓库根目录没有 package.json，必须显式列出每个包的 lock 文件，
+          # 否则 cache: npm 会直接以 "Dependencies lock file is not found" 失败。
+          cache-dependency-path: |
+            trpg-sdk/package-lock.json
+            trpg-frontend/package-lock.json
+            e2e/package-lock.json
+
+      # 前端把 trpg-sdk 作为 file:../trpg-sdk 本地依赖，而 dist/ 是 gitignore 的，
+      # 所以必须先把 SDK 构建出来，前端的 npm ci 才能装到一个真实可用的包。
+      - name: Install and build SDK
+        working-directory: trpg-sdk
+        run: |
+          npm ci
+          npm run build
+
+      # 只装依赖，不在这里构建：前端构建是由 Playwright 的 webServer 触发的
+      # （`npm run build && npm run preview`），这样本地跑一条命令和 CI 跑的
+      # 是同一套流程，不会出现「CI 绿本地红」这种两套路径的偏差。
+      - name: Install frontend dependencies
+        working-directory: trpg-frontend
+        run: npm ci
+
+      # ── E2E ───────────────────────────────────────────────────────
+      - name: Install e2e dependencies
+        working-directory: e2e
+        run: npm ci
+
+      # 类型检查放在跑测试之前：类型错误几秒就能报出来，
+      # 不必等装完浏览器、起完两个服务才发现。
+      - name: Typecheck e2e
+        working-directory: e2e
+        run: npm run typecheck
+
+      # 只装 chromium：配置里已经把浏览器内核显式固定成 chromium（见
+      # playwright.config.ts 里 projects 的说明），装全套只会拖慢 CI。
+      # --with-deps 负责补上 Linux runner 上缺的系统库。
+      - name: Install Playwright browser
+        working-directory: e2e
+        run: npx playwright install --with-deps chromium
+
+      - name: Run e2e tests
+        working-directory: e2e
+        run: npm run test:e2e
+
+      # 失败时把报告和 trace 传上来——这是 issue #94 的核心诉求：
+      # reviewer 能在 GitHub 上下载下来，用 `npx playwright show-trace` 回放
+      # 每一步的 DOM 和网络请求，自己判断挂在哪，而不是只能看一行报错。
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            e2e/playwright-report/
+            e2e/test-results/
+          retention-days: 7

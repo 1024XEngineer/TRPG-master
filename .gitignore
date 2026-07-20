@@ -15,6 +15,11 @@ __pycache__/
 # 下由它生成出来的 TS 类型），见 issue #75 决策 3b。
 .schema-export/
 
+# Playwright 的运行产物：报告、trace、失败截图/视频。CI 上是作为 artifact
+# 上传的（见 .github/workflows/e2e-ci.yml），不进 git。
+e2e/playwright-report/
+e2e/test-results/
+
 .env
 .env.*
 !.env.example

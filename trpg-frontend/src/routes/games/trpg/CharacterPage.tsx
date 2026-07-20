@@ -3,7 +3,7 @@ import { useState, useMemo, useEffect, useRef } from 'react'
 import { ArrowLeft, Plus, Minus, Search, Shield, Heart, Brain, Zap, Eye, Maximize2, Lightbulb, BookOpen, ChevronDown, X, Info, Clover } from 'lucide-react'
 import type { CharacterComputeResult, SkillComputeView } from 'trpg-sdk'
 import { OCCUPATION_ICONS, OCCUPATION_GROUPS } from '@/data/occupations'
-import { ATTRIBUTE_LABELS, type Attributes, type InvestigatorInfo } from '@/data/character-model'
+import { ATTRIBUTE_DEFAULTS, ATTRIBUTE_LABELS, type Attributes, type InvestigatorInfo } from '@/data/character-model'
 import { useCharacterStore } from '@/stores/character-store'
 import { useRoomStore } from '@/stores/room-store'
 import { createCharacterDraft, saveCharacter, completeCharacter, toUpperAttrs } from '@/services/character/character-api'
@@ -140,11 +140,15 @@ export default function CharacterPage() {
   // Attributes
   // luck 不在 ATTR_KEYS 里（COC7 幸运只能掷、不能用属性点买），所以它不出现在
   // 下面的点数购买网格，也不计入总点数预算，但要跟着一起提交给后端。
-  const [attr, setAttr] = useState<Attributes>(() => existingCharacter?.attr ?? {
-    str: 50, con: 50, pow: 50, dex: 50,
-    app: 50, siz: 50, int: 50, edu: 50,
-    luck: 50,
-  })
+  //
+  // 必须跟 ATTRIBUTE_DEFAULTS 合并、不能直接用 existingCharacter.attr：角色卡
+  // 是 persist 到 localStorage 的，加幸运之前存下的旧角色只有 8 个键，直接拿来
+  // 用会让 attr.luck 是 undefined，提交时 toUpperAttrs 产不出 LUCK，被后端的
+  // 9 键校验判成 INVALID_ATTRIBUTES，旧角色就再也编辑不了了。
+  const [attr, setAttr] = useState<Attributes>(() => ({
+    ...ATTRIBUTE_DEFAULTS,
+    ...existingCharacter?.attr,
+  }))
 
   // 属性总点数只统计可购买的 8 项（ATTR_KEYS），不能用 Object.values(attr)——
   // 那样会把不占点数预算的幸运也算进去，把 480 点撑爆。
@@ -738,7 +742,7 @@ export default function CharacterPage() {
                       {ATTRIBUTE_LABELS.luck.full}
                       <span className="text-[10px] font-mono text-text-dim font-normal">{ATTRIBUTE_LABELS.luck.short}</span>
                     </div>
-                    <div className="text-[10px] text-text-dim mt-0.5">独立掷骰 3d6×5，不占属性点数</div>
+                    <div className="text-[10px] text-text-dim mt-0.5">不占属性点数（规则为独立掷 3d6×5，掷骰生成待接入，暂为默认值）</div>
                   </div>
                   <span className="text-[17px] font-bold font-mono text-text-primary min-w-[36px] text-center">{attr.luck}</span>
                 </div>

@@ -75,6 +75,18 @@ async def _prepare_database() -> AsyncGenerator[None, None]:
 
 
 @pytest.fixture
+async def db_session() -> AsyncGenerator[AsyncSession, None]:
+    """给需要绕过 HTTP、直接读写数据库的用例用（多数用例走 `client` 就够了）。
+
+    注意别在测试模块里 `from tests.conftest import TestSessionLocal`——那会把
+    conftest 当成另一个模块再导入一次、连带新建一个引擎，表建在旧引擎上，
+    结果是 `no such table`。要拿 session 就用这个 fixture。
+    """
+    async with TestSessionLocal() as session:
+        yield session
+
+
+@pytest.fixture
 async def client() -> AsyncGenerator[AsyncClient, None]:
     """给测试用例注入一个能直接调用 FastAPI app 的异步 HTTP 客户端。
 

@@ -16,18 +16,32 @@ function uniqueSuffix(): string {
 }
 
 test('后端 ruleset 契约：COC7 返回 9 项属性且含幸运', async ({ request }) => {
-  // 先从 games → systems 反查内置 COC7 的 id，不写死 UUID：
-  // 种子数据的 id 是实现细节，写死会让这个用例在种子变更时假失败。
+  /**
+   * 从 games → systems 反查 COC7，不写死 UUID（种子数据的 id 是实现细节）。
+   *
+   * 注意是**遍历所有游戏**去找 COC7，而不是假定它在 `games[0]` 下面：
+   * `GET /games` 没有排序保证，以后多种一个游戏（比如 DND5e 那条线），
+   * 取第一个就可能翻错了系统列表，于是 COC7 明明是好的、测试却红——
+   * 这种假失败会很快消耗掉大家对这套测试的信任。
+   */
   const gamesResponse = await request.get(`${BACKEND}/games`)
   expect(gamesResponse.ok()).toBeTruthy()
   const games = (await gamesResponse.json()).data
-  expect(games.length).toBeGreaterThan(0)
+  expect(games.length, '种子数据里至少要有一个游戏').toBeGreaterThan(0)
 
-  const systemsResponse = await request.get(`${BACKEND}/games/${games[0].id}/systems`)
-  expect(systemsResponse.ok()).toBeTruthy()
-  const systems = (await systemsResponse.json()).data
-  const coc7 = systems.find((s: { name: string }) => s.name === 'COC7')
-  expect(coc7, ' 种子数据里应该有 COC7 规则系统').toBeTruthy()
+  let coc7: { id: string } | undefined
+  for (const game of games) {
+    const systemsResponse = await request.get(`${BACKEND}/games/${game.id}/systems`)
+    expect(systemsResponse.ok()).toBeTruthy()
+    const systems = (await systemsResponse.json()).data
+    coc7 = systems.find((s: { name: string }) => s.name === 'COC7')
+    if (coc7) break
+  }
+  // 用 throw 而不是 `expect(...).toBeTruthy()` + `coc7!`：前者能让 TS 真正收窄
+  // 类型，后者只是用 `!` 跟类型系统打包票，编译器信了但运行时并没有多一层保障。
+  if (!coc7) {
+    throw new Error('种子数据里应该有 COC7 规则系统，但遍历所有游戏都没找到')
+  }
 
   const rulesetResponse = await request.get(`${BACKEND}/systems/${coc7.id}/ruleset`)
   expect(rulesetResponse.ok()).toBeTruthy()
@@ -39,8 +53,19 @@ test('后端 ruleset 契约：COC7 返回 9 项属性且含幸运', async ({ req
   expect(luck, ' ruleset 里应该有 LUCK').toBeTruthy()
   expect(luck.generation).toBe('3d6*5')
 
-  // 幸运不参与任何职业技能点公式——这条规则约束在后端单测里也固化了，
-  // 这里再从对外契约的角度确认一次，防止公式数据被改坏后只有内部测试拦得住。
+  /**
+   * 幸运不参与任何职业技能点公式——这条规则约束在后端单测里也固化了，
+   * 这里再从对外契约的角度确认一次，防止公式数据被改坏后只有内部测试拦得住。
+   *
+   * ⚠️ 循环之前**必须先断言职业数量**：`for (const o of [])` 一次都不执行、
+   * 测试照样绿，也就是说 occupations 万一是空的或被截断，下面这圈断言会
+   * 「真空通过」，嘴上说守了 30 个公式、实际一个都没验到。
+   *
+   * 这里刻意断言精确的 30 而不是 `> 0`：职业目录后续要扩到 229（MS2 后续），
+   * 那时这行会红——这是有意的，扩目录的人应该顺手确认新导入的职业公式同样
+   * 不引用 LUCK，而不是让它悄悄溜过去。
+   */
+  expect(ruleset.occupations).toHaveLength(30)
   for (const occupation of ruleset.occupations) {
     expect(
       occupation.skillPointsFormula,

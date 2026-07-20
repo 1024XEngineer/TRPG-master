@@ -13,11 +13,13 @@ async def test_get_ruleset_returns_full_coc7_data(client: AsyncClient) -> None:
     assert response.status_code == 200
     data = response.json()["data"]
 
-    # 8 项基础属性，字段完整且带真实的 COC7 生成公式
-    assert len(data["attributes"]) == 8
+    # 9 项属性（8 项基础属性 + 幸运），字段完整且带真实的 COC7 生成公式
+    assert len(data["attributes"]) == 9
     attrs_by_key = {a["key"]: a for a in data["attributes"]}
     assert attrs_by_key["STR"] == {"key": "STR", "label": "力量", "generation": "3d6*5"}
     assert attrs_by_key["SIZ"]["generation"] == "(2d6+6)*5"
+    # 幸运独立掷 3d6*5，跟 STR 一组生成公式，不是 (2d6+6)*5 那一组
+    assert attrs_by_key["LUCK"] == {"key": "LUCK", "label": "幸运", "generation": "3d6*5"}
 
     # 80 项技能（前端 ALL_SKILLS 原有 76 条 + issue #84 S2 补齐的 3 条悬空引用
     # navigate/carpentry/illusion + PR #85 review 补的信用评级 credit-rating），

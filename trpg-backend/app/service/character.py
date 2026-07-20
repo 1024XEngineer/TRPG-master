@@ -160,7 +160,9 @@ async def roll_attributes(
     """POST /rooms/{roomId}/characters/{characterId}/roll-attributes —— 服务端
     权威掷骰生成属性（issue #77 新增，取代前端 `Math.random()` 本地算骰值）。
 
-    COC7 标准生成法：STR/CON/DEX/APP/POW = 3d6*5，SIZ/INT/EDU = (2d6+6)*5；
+    COC7 标准生成法：STR/CON/DEX/APP/POW/LUCK = 3d6*5，SIZ/INT/EDU = (2d6+6)*5；
+    幸运（LUCK）独立掷骰、不由属性推导，也不参与技能点公式，但它是游戏中可被
+    消耗的有状态属性，所以跟其余 8 项一起放在 `attributes` 里而非衍生值；
     衍生值按标准公式：HP = (CON+SIZ)/10 取整，MP = POW/5 取整，SAN = POW*5
     （起始理智等于 POW 的 5 倍，跟 POW 属性值本身相等，这里遵循 COC7 规则
     直接抄一份 POW*5 = 属性打点后的数值）。
@@ -180,6 +182,7 @@ async def roll_attributes(
         "SIZ": (_roll(2, 6) + 6) * 5,
         "INT": (_roll(2, 6) + 6) * 5,
         "EDU": (_roll(2, 6) + 6) * 5,
+        "LUCK": _roll(3, 6) * 5,
     }
     derived_stats = {
         "HP": (attributes["CON"] + attributes["SIZ"]) // 10,

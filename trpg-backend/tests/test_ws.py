@@ -48,6 +48,7 @@ def complete_character(client: TestClient, room_id: str, reconnect_token: str) -
                 "SIZ": 50,
                 "INT": 50,
                 "EDU": 50,
+                "LUCK": 50,
             },
             "derivedStats": {"HP": 12},
             "skills": {},

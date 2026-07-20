@@ -8,7 +8,17 @@ from app.core.seed import BUILTIN_SYSTEM_ID
 
 PREVIEW_URL = f"/api/v1/systems/{BUILTIN_SYSTEM_ID}/character/preview"
 
-ATTRS = {"STR": 50, "CON": 50, "POW": 50, "DEX": 50, "APP": 50, "SIZ": 50, "INT": 50, "EDU": 50}
+ATTRS = {
+    "STR": 50,
+    "CON": 50,
+    "POW": 50,
+    "DEX": 50,
+    "APP": 50,
+    "SIZ": 50,
+    "INT": 50,
+    "EDU": 50,
+    "LUCK": 50,
+}
 
 
 def bearer(token: str) -> dict[str, str]:

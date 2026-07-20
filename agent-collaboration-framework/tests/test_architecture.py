@@ -74,14 +74,18 @@ class ArchitectureTests(unittest.TestCase):
         for token in forbidden:
             self.assertNotIn(token, project)
 
-    def test_current_documentation_has_two_authoritative_design_files(self) -> None:
+    def test_current_documentation_has_three_authoritative_design_files(self) -> None:
         docs = ROOT / "docs"
         current = sorted(path.name for path in docs.glob("*.md"))
-        self.assertEqual(current, ["architecture.md", "数据模型设计.md"])
+        self.assertEqual(
+            current,
+            ["agent编排技术选型.md", "architecture.md", "数据模型设计.md"],
+        )
 
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn("docs/architecture.md", readme)
         self.assertIn("docs/数据模型设计.md", readme)
+        self.assertIn("docs/agent编排技术选型.md", readme)
 
         archive_index = (docs / "archive" / "README.md").read_text(
             encoding="utf-8"

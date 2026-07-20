@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "plain-python-tool-agent"
+version = "0.1.0"
+description = "A business-agnostic streaming tool-calling agent implemented with plain Python."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "openai>=2.46.0,<3",
+]
+
+[project.scripts]
+plain-tool-agent = "plain_python_tool_agent.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

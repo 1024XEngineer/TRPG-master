@@ -4,11 +4,10 @@ import { ArrowLeft, UserPlus, Swords, Eye } from 'lucide-react'
 import { useCharacterStore } from '@/stores/character-store'
 import { useRoomStore } from '@/stores/room-store'
 import { useAuthStore } from '@/stores/auth-store'
-import { ALL_SKILLS, calculateBaseValue } from '@/data/skills'
 import { ATTRIBUTE_LABELS } from '@/data/character-model'
-import { getOccupationById } from '@/data/occupations'
 import { connectWebSocket, disconnectWebSocket, sdk, waitForWsOpen } from '@/services/api-client'
 import { useRoomPlayers } from '@/hooks/useRoomPlayers'
+import { useRuleset } from '@/hooks/useRuleset'
 
 const ATTR_KEY_LIST = ['str', 'con', 'pow', 'dex', 'app', 'siz', 'int', 'edu'] as const
 
@@ -20,7 +19,10 @@ const SHEET_PAGES = [
 
 function CharacterSheetModal({ character, onClose }: { character: NonNullable<ReturnType<typeof useCharacterStore.getState>['character']>; onClose: () => void }) {
   const [page, setPage] = useState<typeof SHEET_PAGES[number]['key']>('info')
-  const occupation = character.info.occupationId ? getOccupationById(character.info.occupationId) : null
+  const { ruleset } = useRuleset()
+  const occupation = character.info.occupationId
+    ? ruleset?.occupations.find(o => o.id === character.info.occupationId)
+    : null
 
   return (
     <>
@@ -102,9 +104,9 @@ function CharacterSheetModal({ character, onClose }: { character: NonNullable<Re
             <div>
               <h4 className="text-[11px] font-semibold text-brass-dark mb-2">全部技能（按数值从高到低）</h4>
               <div className="space-y-1.5">
-                {ALL_SKILLS.map(skill => ({
+                {(ruleset?.skills ?? []).map(skill => ({
                   skill,
-                  value: calculateBaseValue(skill, character.attr) + (character.skillAlloc[skill.id] || 0),
+                  value: character.skillFinalValues?.[skill.id] ?? 0,
                 }))
                   .sort((a, b) => b.value - a.value)
                   .map(({ skill, value }) => (

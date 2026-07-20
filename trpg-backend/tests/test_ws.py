@@ -39,7 +39,16 @@ def complete_character(client: TestClient, room_id: str, reconnect_token: str) -
         f"{ROOMS_BASE}/{room_id}/characters/{character_id}",
         json={
             "name": "陈探员",
-            "attributes": {"STR": 50},
+            "attributes": {
+                "STR": 50,
+                "CON": 50,
+                "POW": 50,
+                "DEX": 50,
+                "APP": 50,
+                "SIZ": 50,
+                "INT": 50,
+                "EDU": 50,
+            },
             "derivedStats": {"HP": 12},
             "skills": {},
             "equipment": [],

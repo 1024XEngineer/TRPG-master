@@ -36,10 +36,16 @@ class CamelModel(BaseModel):
 
 
 class ErrorDetail(BaseModel):
-    """错误信息的具体内容，只在 success=false 时出现在 error 字段里。"""
+    """错误信息的具体内容，只在 success=false 时出现在 error 字段里。
+
+    `details` 是 issue #84 S2 新增的可选字段：装结构化的校验报告（比如建卡
+    校验失败时的一条条 {code, field, message}），大多数错误不需要它，默认
+    None，不影响原有只有 code/message 的错误响应形状。
+    """
 
     code: ErrorCode
     message: str
+    details: list[dict[str, str]] | None = None
 
 
 class ApiResponse[T](BaseModel):
@@ -61,9 +67,13 @@ class ApiResponse[T](BaseModel):
         return cls(success=True, data=data, error=None)
 
     @classmethod
-    def fail(cls, code: ErrorCode, message: str) -> Self:
+    def fail(
+        cls, code: ErrorCode, message: str, details: list[dict[str, str]] | None = None
+    ) -> Self:
         """构造一个失败响应。主要给 main.py 里的全局异常处理器调用，
         业务代码通常不需要手动调这个——直接 `raise AppException(...)`，
         异常处理器会自动转成这个格式。
         """
-        return cls(success=False, data=None, error=ErrorDetail(code=code, message=message))
+        return cls(
+            success=False, data=None, error=ErrorDetail(code=code, message=message, details=details)
+        )

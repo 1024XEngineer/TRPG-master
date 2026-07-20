@@ -15,7 +15,9 @@ export interface BuiltCharacter {
   notes: string;
 }
 
-function toUpperAttrs(attr: Record<string, number>): Record<string, number> {
+// 属性键位后端用大写（STR/CON/...），前端本地用小写——建卡向导调
+// previewCharacter 时也要做同样的转换，这里导出复用，不要在别处重复实现。
+export function toUpperAttrs(attr: Record<string, number>): Record<string, number> {
   const out: Record<string, number> = {};
   for (const [k, v] of Object.entries(attr)) {
     out[k.toUpperCase()] = v;

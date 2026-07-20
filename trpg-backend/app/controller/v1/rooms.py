@@ -260,9 +260,24 @@ async def complete_character(
     reconnect_token: str | None = Header(default=None, alias="X-Reconnect-Token"),
     db: AsyncSession = Depends(get_db),
 ) -> ApiResponse[None]:
-    """POST /api/v1/rooms/{roomId}/characters/{characterId}/complete —— 标记建卡完成。"""
+    """POST /api/v1/rooms/{roomId}/characters/{characterId}/complete —— 标记建卡完成。
+
+    issue #84 S2：落库前的权威校验没通过时，`character_service.complete_character`
+    抛 `CharacterInvalidError`，这里转成 422 + 结构化校验报告（`AppException.details`），
+    不走 `_raise_service_error`（那条路径只有 code/message，装不下校验报告）。
+    """
     try:
         await character_service.complete_character(db, room_id, character_id, reconnect_token)
+    except character_service.CharacterInvalidError as exc:
+        raise AppException(
+            ErrorCode.CHARACTER_INVALID,
+            str(exc),
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            details=[
+                {"code": issue.code, "field": issue.field, "message": issue.message}
+                for issue in exc.issues
+            ],
+        ) from exc
     except (
         character_service.CharacterNotFoundError,
         room_service.RoomAuthenticationError,

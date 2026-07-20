@@ -27,10 +27,19 @@ async def ensure_seed_content(db: AsyncSession) -> None:
     coc7_ruleset = build_coc7_ruleset().model_dump(mode="json")
 
     if existing is not None:
-        # 种子数据本身已经跑过，但 `ruleset` 是 issue #84 S1 才补上的字段——
-        # 旧库里已存在的 GameSystem 行可能还没有，这里顺带补全，不破坏幂等性。
+        # 内置系统的 ruleset 每次启动都跟代码对齐（不只是"为空时补"）。
+        #
+        # 原来只在 `not system.ruleset` 时写入，导致改了 `coc7_content.py` 之后
+        # 已存在的库永远不同步：规则引擎（裁定用）直接 import 代码里的常量，而
+        # `get_ruleset()`（前端渲染用）读这张表，两边会漂移。issue #87 加幸运时
+        # 就撞上了——后端要求 9 个属性键，旧库的 ruleset 却还是 8 项。
+        #
+        # 内置系统的规则是随代码发版的，代码那份就是权威，这里让 DB 里的副本
+        # 无条件跟随；比较一下再写是为了避免每次启动都产生一次无谓的 UPDATE。
+        # （更彻底的做法是内置系统压根不入库、`get_ruleset` 直接返回代码里的，
+        # 那是"规则数据存储归属"那个独立议题的事，本 PR 不抢跑。）
         system = await db.get(GameSystem, BUILTIN_SYSTEM_ID)
-        if system is not None and not system.ruleset:
+        if system is not None and system.ruleset != coc7_ruleset:
             system.ruleset = coc7_ruleset
             await db.commit()
         return

@@ -1,9 +1,9 @@
 import { useNavigate } from 'react-router-dom'
 import { useState, useMemo, useEffect, useRef } from 'react'
-import { ArrowLeft, Plus, Minus, Search, Shield, Heart, Brain, Zap, Eye, Maximize2, Lightbulb, BookOpen, ChevronDown, X, Info } from 'lucide-react'
+import { ArrowLeft, Plus, Minus, Search, Shield, Heart, Brain, Zap, Eye, Maximize2, Lightbulb, BookOpen, ChevronDown, X, Info, Clover } from 'lucide-react'
 import type { CharacterComputeResult, SkillComputeView } from 'trpg-sdk'
 import { OCCUPATION_ICONS, OCCUPATION_GROUPS } from '@/data/occupations'
-import { ATTRIBUTE_LABELS, type Attributes, type InvestigatorInfo } from '@/data/character-model'
+import { ATTRIBUTE_DEFAULTS, ATTRIBUTE_LABELS, type Attributes, type InvestigatorInfo } from '@/data/character-model'
 import { useCharacterStore } from '@/stores/character-store'
 import { useRoomStore } from '@/stores/room-store'
 import { createCharacterDraft, saveCharacter, completeCharacter, toUpperAttrs } from '@/services/character/character-api'
@@ -138,10 +138,21 @@ export default function CharacterPage() {
   })
 
   // Attributes
-  const [attr, setAttr] = useState<Attributes>(() => existingCharacter?.attr ?? {
-    str: 50, con: 50, pow: 50, dex: 50,
-    app: 50, siz: 50, int: 50, edu: 50,
-  })
+  // luck 不在 ATTR_KEYS 里（COC7 幸运只能掷、不能用属性点买），所以它不出现在
+  // 下面的点数购买网格，也不计入总点数预算，但要跟着一起提交给后端。
+  //
+  // 必须跟 ATTRIBUTE_DEFAULTS 合并、不能直接用 existingCharacter.attr：角色卡
+  // 是 persist 到 localStorage 的，加幸运之前存下的旧角色只有 8 个键，直接拿来
+  // 用会让 attr.luck 是 undefined，提交时 toUpperAttrs 产不出 LUCK，被后端的
+  // 9 键校验判成 INVALID_ATTRIBUTES，旧角色就再也编辑不了了。
+  const [attr, setAttr] = useState<Attributes>(() => ({
+    ...ATTRIBUTE_DEFAULTS,
+    ...existingCharacter?.attr,
+  }))
+
+  // 属性总点数只统计可购买的 8 项（ATTR_KEYS），不能用 Object.values(attr)——
+  // 那样会把不占点数预算的幸运也算进去，把 480 点撑爆。
+  const attrPointsTotal = ATTR_KEYS.reduce((sum, k) => sum + attr[k], 0)
 
   // Skill allocations: skillId -> points spent
   const [skillAlloc, setSkillAlloc] = useState<Record<string, number>>(() => existingCharacter ? { ...existingCharacter.skillAlloc } : {})
@@ -667,13 +678,13 @@ export default function CharacterPage() {
                   <div className="flex-1">
                     <div className="flex items-center justify-between mb-1">
                       <span className="text-[11px] font-medium text-text-muted">总点数</span>
-                      <span className="text-[12px] font-bold font-mono text-text-primary">{Object.values(attr).reduce((a, b) => a + b, 0)}<span className="text-text-dim font-normal">/480</span></span>
+                      <span className="text-[12px] font-bold font-mono text-text-primary">{attrPointsTotal}<span className="text-text-dim font-normal">/480</span></span>
                     </div>
                     <div className="h-1.5 rounded-full bg-border-light overflow-hidden">
-                      <div className="h-full rounded-full bg-brass transition-all duration-300" style={{ width: `${Math.min(100, (Object.values(attr).reduce((a, b) => a + b, 0) / 480) * 100)}%` }} />
+                      <div className="h-full rounded-full bg-brass transition-all duration-300" style={{ width: `${Math.min(100, (attrPointsTotal / 480) * 100)}%` }} />
                     </div>
                   </div>
-                  <span className="text-[10px] text-text-dim">{480 - Object.values(attr).reduce((a, b) => a + b, 0)} 点剩余</span>
+                  <span className="text-[10px] text-text-dim">{480 - attrPointsTotal} 点剩余</span>
                 </div>
                 <div className="grid grid-cols-1 gap-2">
                   {ATTR_KEYS.map(key => {
@@ -718,6 +729,22 @@ export default function CharacterPage() {
                       </div>
                     )
                   })}
+                </div>
+
+                {/* 幸运：COC7 里独立掷 3d6*5，不能用属性点购买，所以不在上面的
+                    加点网格里，这里只读展示（真实掷骰由服务端 roll-attributes 产出）。 */}
+                <div className="flex items-center gap-3 px-3 py-2.5 mt-2 bg-panel border border-border-light rounded-[6px]">
+                  <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: '#4a8a4a18' }}>
+                    <Clover className="w-4 h-4" style={{ color: '#4a8a4a' }} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[13px] font-semibold text-text-primary flex items-center gap-1.5">
+                      {ATTRIBUTE_LABELS.luck.full}
+                      <span className="text-[10px] font-mono text-text-dim font-normal">{ATTRIBUTE_LABELS.luck.short}</span>
+                    </div>
+                    <div className="text-[10px] text-text-dim mt-0.5">不占属性点数（规则为独立掷 3d6×5，掷骰生成待接入，暂为默认值）</div>
+                  </div>
+                  <span className="text-[17px] font-bold font-mono text-text-primary min-w-[36px] text-center">{attr.luck}</span>
                 </div>
               </div>
 

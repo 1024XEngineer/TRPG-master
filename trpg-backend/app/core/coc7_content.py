@@ -27,6 +27,10 @@ COC7_ATTRIBUTES: list[AttributeSpec] = [
     AttributeSpec(key="SIZ", label="体型", generation="(2d6+6)*5"),
     AttributeSpec(key="INT", label="智力", generation="(2d6+6)*5"),
     AttributeSpec(key="EDU", label="教育", generation="(2d6+6)*5"),
+    # 幸运：COC7 里独立掷 3d6*5，不由任何属性推导，也不参与职业技能点公式与
+    # 技能基础值；但它是有状态、游戏中可被 `luck.spend` 消耗的属性，所以归在
+    # 属性而不是衍生值里。
+    AttributeSpec(key="LUCK", label="幸运", generation="3d6*5"),
 ]
 
 COC7_SKILLS: list[SkillSpec] = [

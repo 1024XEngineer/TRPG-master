@@ -13,6 +13,7 @@ BUILT_CHARACTER = {
         "SIZ": 60,
         "INT": 70,
         "EDU": 80,
+        "LUCK": 50,
     },
     "derivedStats": {"HP": 12, "SAN": 55, "MP": 11},
     # 私家侦探（occupation id=16）的两项职业技能，用真实技能 id 键控、分配在

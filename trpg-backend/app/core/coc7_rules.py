@@ -24,7 +24,7 @@ from app.dto.game import OccupationSpec
 
 SKILL_CAP = 99
 
-COC7_ATTRIBUTE_KEYS = {"STR", "CON", "SIZ", "DEX", "APP", "INT", "POW", "EDU"}
+COC7_ATTRIBUTE_KEYS = {"STR", "CON", "SIZ", "DEX", "APP", "INT", "POW", "EDU", "LUCK"}
 ATTRIBUTE_MIN = 1
 ATTRIBUTE_MAX = 99
 

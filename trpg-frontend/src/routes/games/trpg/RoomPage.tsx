@@ -21,7 +21,9 @@ interface Message {
 
 interface MapLocation { icon: string; name: string; desc: string; isCurrent?: boolean }
 
-const ATTR_KEY_LIST = ['str', 'con', 'pow', 'dex', 'app', 'siz', 'int', 'edu'] as const
+// 角色卡是只读展示，幸运跟其余 8 项一起列出（建卡页才需要把它排除在加点
+// 网格外，因为 COC7 的幸运不能用属性点购买）。
+const ATTR_KEY_LIST = ['str', 'con', 'pow', 'dex', 'app', 'siz', 'int', 'edu', 'luck'] as const
 
 const MAP_LOCATIONS: MapLocation[] = [
   { icon: '🏚️', name: '惠特利旧宅 · 正门', desc: '当前所在 · 铁门虚掩', isCurrent: true },

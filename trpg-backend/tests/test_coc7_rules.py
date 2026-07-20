@@ -16,7 +16,17 @@ from app.core.coc7_rules import (
     validate_character,
 )
 
-ATTRS = {"STR": 50, "CON": 50, "POW": 50, "DEX": 50, "APP": 50, "SIZ": 50, "INT": 50, "EDU": 50}
+ATTRS = {
+    "STR": 50,
+    "CON": 50,
+    "POW": 50,
+    "DEX": 50,
+    "APP": 50,
+    "SIZ": 50,
+    "INT": 50,
+    "EDU": 50,
+    "LUCK": 50,
+}
 ACCOUNTANT_ID = 1
 ACCOUNTANT_NAME = "会计师"
 
@@ -207,6 +217,24 @@ def test_invalid_attributes_missing_key_rejected() -> None:
     issues = validate_character(attrs, ACCOUNTANT_NAME, {})
     codes = [issue.code for issue in issues]
     assert codes == ["INVALID_ATTRIBUTES"]
+
+
+def test_invalid_attributes_missing_luck_rejected() -> None:
+    """幸运是必填属性——建卡时必须掷出来，不能整项缺失。"""
+    attrs = {k: v for k, v in ATTRS.items() if k != "LUCK"}
+    issues = validate_character(attrs, ACCOUNTANT_NAME, {})
+    codes = [issue.code for issue in issues]
+    assert codes == ["INVALID_ATTRIBUTES"]
+
+
+def test_luck_does_not_affect_skill_point_budgets() -> None:
+    """幸运不参与任何职业技能点/兴趣技能点公式——改幸运值，两条预算都不动。
+    （COC7 里幸运是独立掷出的属性，只在游戏中被消耗，不换算成技能点。）"""
+    baseline = compute_preview(ATTRS, ACCOUNTANT_ID, {})
+    lucky = compute_preview({**ATTRS, "LUCK": 99}, ACCOUNTANT_ID, {})
+
+    assert lucky.occupation_skill_points.budget == baseline.occupation_skill_points.budget
+    assert lucky.interest_skill_points.budget == baseline.interest_skill_points.budget
 
 
 def test_invalid_attributes_extra_key_rejected() -> None:

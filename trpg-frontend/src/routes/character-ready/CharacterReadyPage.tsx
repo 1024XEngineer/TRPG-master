@@ -4,14 +4,9 @@ import { ArrowLeft, UserPlus, Swords, Eye } from 'lucide-react'
 import { useCharacterStore } from '@/stores/character-store'
 import { useRoomStore } from '@/stores/room-store'
 import { useAuthStore } from '@/stores/auth-store'
-import { ATTRIBUTE_LABELS } from '@/data/character-model'
 import { connectWebSocket, disconnectWebSocket, sdk, waitForWsOpen } from '@/services/api-client'
 import { useRoomPlayers } from '@/hooks/useRoomPlayers'
 import { useRuleset } from '@/hooks/useRuleset'
-
-// 角色卡是只读展示，幸运跟其余 8 项一起列出（建卡页才需要把它排除在加点
-// 网格外，因为 COC7 的幸运不能用属性点购买）。
-const ATTR_KEY_LIST = ['str', 'con', 'pow', 'dex', 'app', 'siz', 'int', 'edu', 'luck'] as const
 
 const SHEET_PAGES = [
   { key: 'info', label: '基本信息' },
@@ -91,10 +86,13 @@ function CharacterSheetModal({ character, onClose }: { character: NonNullable<Re
               <div>
                 <h4 className="text-[11px] font-semibold text-brass-dark mb-2">基础属性</h4>
                 <div className="grid grid-cols-2 gap-1.5">
-                  {ATTR_KEY_LIST.map(key => (
-                    <div key={key} className="flex items-center justify-between bg-input border border-border-light rounded px-3 py-1.5">
-                      <span className="font-mono text-[11px] font-bold text-text-muted">{ATTRIBUTE_LABELS[key].short}</span>
-                      <span className="font-mono text-sm font-bold text-text-primary">{character.attr[key]}</span>
+                  {/* 属性清单由后端 ruleset 驱动，前端不再自己维护一份名单——
+                      此前三处各硬编码一份，加幸运时漏改一处就导致角色卡看不到
+                      幸运值（issue #96）。 */}
+                  {(ruleset?.attributes ?? []).map(attribute => (
+                    <div key={attribute.key} className="flex items-center justify-between bg-input border border-border-light rounded px-3 py-1.5">
+                      <span className="font-mono text-[11px] font-bold text-text-muted">{attribute.key}</span>
+                      <span className="font-mono text-sm font-bold text-text-primary">{character.attr[attribute.key]}</span>
                     </div>
                   ))}
                 </div>

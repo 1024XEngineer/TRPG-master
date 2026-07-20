@@ -3,25 +3,26 @@ import { useState, useMemo, useEffect, useRef } from 'react'
 import { ArrowLeft, Plus, Minus, Search, Shield, Heart, Brain, Zap, Eye, Maximize2, Lightbulb, BookOpen, ChevronDown, X, Info, Clover } from 'lucide-react'
 import type { CharacterComputeResult, SkillComputeView } from 'trpg-sdk'
 import { OCCUPATION_ICONS, OCCUPATION_GROUPS } from '@/data/occupations'
-import { ATTRIBUTE_DEFAULTS, ATTRIBUTE_LABELS, type Attributes, type InvestigatorInfo } from '@/data/character-model'
+import type { Attributes, InvestigatorInfo } from '@/data/character-model'
 import { useCharacterStore } from '@/stores/character-store'
 import { useRoomStore } from '@/stores/room-store'
-import { createCharacterDraft, saveCharacter, completeCharacter, toUpperAttrs } from '@/services/character/character-api'
+import { createCharacterDraft, saveCharacter, completeCharacter, fetchCharacter } from '@/services/character/character-api'
 import { previewCharacter, translateCharacterValidationError } from '@/services/character/ruleset-api'
 import { friendlyErrorMessage } from '@/services/api-client'
 import { useRuleset } from '@/hooks/useRuleset'
 import type { OccupationSpec, SkillSpec } from '@/data/types'
 
-const ATTR_KEYS = ['str', 'con', 'pow', 'dex', 'app', 'siz', 'int', 'edu'] as const
-
+// 图标和配色是纯 UI 装饰，不是规则数据，留在前端；键用后端 ruleset 的属性键。
+// 「有哪些属性、哪些能加点、默认值多少、预算和上下限是什么」全部来自
+// `ruleset`，前端不再自己维护（issue #96）。
 const ATTR_ICONS: Record<string, typeof Heart> = {
-  str: Shield, con: Heart, pow: Brain, dex: Zap,
-  app: Eye, siz: Maximize2, int: Lightbulb, edu: BookOpen,
+  STR: Shield, CON: Heart, POW: Brain, DEX: Zap,
+  APP: Eye, SIZ: Maximize2, INT: Lightbulb, EDU: BookOpen,
 }
 
 const ATTR_COLORS: Record<string, string> = {
-  str: '#c04040', con: '#c08050', pow: '#7050a0', dex: '#4a8a4a',
-  app: '#8a4070', siz: '#b8976a', int: '#4a7098', edu: '#6a6050',
+  STR: '#c04040', CON: '#c08050', POW: '#7050a0', DEX: '#4a8a4a',
+  APP: '#8a4070', SIZ: '#b8976a', INT: '#4a7098', EDU: '#6a6050',
 }
 
 // 建卡阶段的衍生值面板用小写 key，后端 derivedStats 是 { HP, MP, SAN, DB,
@@ -45,7 +46,9 @@ function SkillRow({
 }: {
   skill: SkillSpec
   base: number
-  cap: number
+  // 后端还没返回权威计算结果时是 null——此时不允许加点，而不是前端自己编一个
+  // 上限（原来写死兜底 99，等于在后端沉默时凭空造了一条规则，issue #96 决策 4）。
+  cap: number | null
   poolAllocation: number
   otherPoolPoints: number
   onChange: (delta: number) => void
@@ -56,7 +59,7 @@ function SkillRow({
   // 总显示值 = 基础值 + 另一个点数池已经加的 + 当前这个池加的——另一个池的部分
   // 在这个 tab 里是只读的背景值，编辑只作用于当前池自己的那部分。
   const current = base + otherPoolPoints + poolAllocation
-  const canAdd = poolAllocation < maxPoints && current < cap
+  const canAdd = cap !== null && poolAllocation < maxPoints && current < cap
   const canSub = poolAllocation > minPoints
 
   // 手动输入这个技能的最终值——先允许自由打字，失焦时再校验：不能低于
@@ -68,6 +71,7 @@ function SkillRow({
   const commitInput = () => {
     const typed = parseInt(inputValue, 10)
     if (Number.isNaN(typed)) { setInputValue(String(current)); return }
+    if (cap === null) { setInputValue(String(current)); return }
     const maxAllocByCap = Math.min(maxPoints, cap - base - otherPoolPoints)
     const newAlloc = Math.max(minPoints, Math.min(maxAllocByCap, typed - base - otherPoolPoints))
     onSetAllocation(newAlloc)
@@ -138,21 +142,84 @@ export default function CharacterPage() {
   })
 
   // Attributes
-  // luck 不在 ATTR_KEYS 里（COC7 幸运只能掷、不能用属性点买），所以它不出现在
-  // 下面的点数购买网格，也不计入总点数预算，但要跟着一起提交给后端。
-  //
-  // 必须跟 ATTRIBUTE_DEFAULTS 合并、不能直接用 existingCharacter.attr：角色卡
-  // 是 persist 到 localStorage 的，加幸运之前存下的旧角色只有 8 个键，直接拿来
-  // 用会让 attr.luck 是 undefined，提交时 toUpperAttrs 产不出 LUCK，被后端的
-  // 9 键校验判成 INVALID_ATTRIBUTES，旧角色就再也编辑不了了。
-  const [attr, setAttr] = useState<Attributes>(() => ({
-    ...ATTRIBUTE_DEFAULTS,
-    ...existingCharacter?.attr,
-  }))
+  const [attr, setAttr] = useState<Attributes>(() => ({ ...existingCharacter?.attr }))
 
-  // 属性总点数只统计可购买的 8 项（ATTR_KEYS），不能用 Object.values(attr)——
-  // 那样会把不占点数预算的幸运也算进去，把 480 点撑爆。
-  const attrPointsTotal = ATTR_KEYS.reduce((sum, k) => sum + attr[k], 0)
+  // 可用点数购买的属性键（幸运不在其中——COC7 里它只能掷）。这份名单来自
+  // 后端 ruleset 的 pointBuy 标志，前端不再自己维护（issue #96）。
+  const pointBuyAttributes = useMemo(
+    () => (ruleset?.attributes ?? []).filter(a => a.pointBuy),
+    [ruleset]
+  )
+  const pointBuyRules = ruleset?.attributePointBuy ?? null
+
+  // 从后端读回已保存的角色卡（issue #96）。
+  //
+  // 后端是角色卡的唯一事实来源；本地那份 localStorage 缓存只是加速用的，不能
+  // 当权威源——它的结构会随后端 schema 演进而过期（PR #88 给属性加了幸运之后，
+  // 本地存的 8 键旧卡再打开就被后端的 9 键校验拒了，玩家的卡直接编辑不了）。
+  // 有 characterId 就以后端那份为准覆盖表单，清掉浏览器缓存也照样能继续编辑。
+  useEffect(() => {
+    const roomId = useRoomStore.getState().roomId
+    const characterId = useRoomStore.getState().characterId
+    if (!roomId || !characterId || !ruleset) return
+
+    let cancelled = false
+    fetchCharacter(roomId, characterId)
+      .then(saved => {
+        if (cancelled || !saved.attributes || Object.keys(saved.attributes).length === 0) return
+        setAttr({ ...saved.attributes })
+        if (saved.name) setInfo(prev => ({ ...prev, name: saved.name as string }))
+        if (saved.occupation) {
+          const matched = ruleset.occupations.find(o => o.name === saved.occupation)
+          if (matched) setInfo(prev => ({ ...prev, occupationId: matched.id }))
+        }
+        if (saved.background) setBackground(saved.background)
+        if (saved.notes) setNotes(saved.notes)
+        if (saved.equipment?.length) setEquipment(saved.equipment.join('、'))
+
+        // 后端存的是技能最终值，建卡向导要的是"加了多少点"——用 ruleset 的
+        // 基础值反推，而不是另存一份 alloc（那又会变成第二个数据源）。
+        const baseOf = new Map(ruleset.skills.map(sk => [sk.id, sk]))
+        const alloc: Record<string, number> = {}
+        for (const [skillId, finalValue] of Object.entries(saved.skills ?? {})) {
+          const spec = baseOf.get(skillId)
+          if (!spec) continue
+          const base = typeof spec.base === 'number' ? spec.base : 0
+          const spent = finalValue - base
+          if (spent > 0) alloc[skillId] = spent
+        }
+        if (Object.keys(alloc).length > 0) setSkillAlloc(alloc)
+      })
+      .catch(() => {
+        // 读不回来（比如还没建过草稿）就沿用本地缓存/空白表单，不打断建卡。
+      })
+    return () => { cancelled = true }
+  }, [ruleset])
+
+  // ruleset 到达后，把缺失的属性补上默认值。
+  //
+  // 不能在 useState 初始值里做：ruleset 是异步拉的，首次渲染时还没有。放在
+  // 这里还顺带解决了「本地存的旧角色少了新属性」——后端加了一项属性，旧卡缺
+  // 那个键时会在这里被补齐，而不是带着残缺结构提交上去被校验拒（PR #88 加
+  // 幸运后旧卡打不开就是这个问题）。
+  useEffect(() => {
+    if (!ruleset || !pointBuyRules) return
+    setAttr(prev => {
+      const filled = { ...prev }
+      let changed = false
+      for (const attribute of ruleset.attributes) {
+        if (typeof filled[attribute.key] !== 'number') {
+          filled[attribute.key] = pointBuyRules.defaultValue
+          changed = true
+        }
+      }
+      return changed ? filled : prev
+    })
+  }, [ruleset, pointBuyRules])
+
+  // 属性总点数只统计可购买的那几项，不能用 Object.values(attr)——那样会把不占
+  // 预算的幸运也算进去，凭空吃掉 50 点。
+  const attrPointsTotal = pointBuyAttributes.reduce((sum, a) => sum + (attr[a.key] ?? 0), 0)
 
   // Skill allocations: skillId -> points spent
   const [skillAlloc, setSkillAlloc] = useState<Record<string, number>>(() => existingCharacter ? { ...existingCharacter.skillAlloc } : {})
@@ -251,7 +318,7 @@ export default function CharacterPage() {
     const timer = setTimeout(() => {
       const gen = ++previewGenRef.current
       previewCharacter({
-        attributes: toUpperAttrs(attr),
+        attributes: attr,
         occupationId: info.occupationId,
         skills: {},
       })
@@ -405,31 +472,50 @@ export default function CharacterPage() {
     })
   }
 
-  const [attrInputs, setAttrInputs] = useState<Record<string, string>>(
-    () => Object.fromEntries(ATTR_KEYS.map(k => [k, String(attr[k])]))
-  )
+  // 输入框的字符串态跟 attr 同步（attr 会在 ruleset 到达时被补上默认值）。
+  const [attrInputs, setAttrInputs] = useState<Record<string, string>>({})
+  useEffect(() => {
+    setAttrInputs(Object.fromEntries(pointBuyAttributes.map(a => [a.key, String(attr[a.key] ?? '')])))
+    // 只在属性项集合变化时重建；单项数值的变化由各自的 onChange 维护，
+    // 否则每敲一个字都会被这里覆盖回去。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pointBuyAttributes])
 
-  const handleAttrChange = (key: keyof Attributes, delta: number) => {
+  // 只累加「可购买」的其余属性——之前这里用 Object.entries(prev) 把幸运也算了
+  // 进去，等于凭空占掉 50 点预算，加点上限实际卡在 430 而不是 480。
+  const sumOtherPointBuy = (values: Attributes, exceptKey: string) =>
+    pointBuyAttributes.reduce(
+      (sum, a) => (a.key === exceptKey ? sum : sum + (values[a.key] ?? 0)),
+      0
+    )
+
+  const handleAttrChange = (key: string, delta: number) => {
+    if (!pointBuyRules) return
     setAttr(prev => {
-      const newVal = Math.max(10, Math.min(90, prev[key] + delta))
-      if (delta > 0) {
-        const totalOthers = Object.entries(prev).filter(([k]) => k !== key).reduce((s, [, v]) => s + v, 0)
-        if (totalOthers + newVal > 480) return prev
-      }
+      const newVal = Math.max(
+        pointBuyRules.minValue,
+        Math.min(pointBuyRules.maxValue, (prev[key] ?? 0) + delta)
+      )
+      if (delta > 0 && sumOtherPointBuy(prev, key) + newVal > pointBuyRules.budget) return prev
       setAttrInputs(inputs => ({ ...inputs, [key]: String(newVal) }))
       return { ...prev, [key]: newVal }
     })
   }
 
   // 手动输入属性值——允许先清空再打字（不在每次按键就夹值，否则没法删了重打），
-  // 只在失焦时校验：范围 10-90，且不能让总点数超过 480（超了就按"其余属性剩多少
-  // 点"封顶，而不是直接拒绝，体验上比"打了数字却没反应"更清楚）。
-  const commitAttrInput = (key: keyof Attributes) => {
+  // 只在失焦时校验：范围和总预算都取自后端 ruleset。超出总预算时按"其余属性
+  // 还剩多少点"封顶，而不是直接拒绝，体验上比"打了数字却没反应"更清楚。
+  const commitAttrInput = (key: string) => {
+    if (!pointBuyRules) return
     const raw = parseInt(attrInputs[key], 10)
     setAttr(prev => {
-      const totalOthers = Object.entries(prev).filter(([k]) => k !== key).reduce((s, [, v]) => s + v, 0)
-      const maxAllowed = Math.min(90, 480 - totalOthers)
-      const clamped = Number.isNaN(raw) ? prev[key] : Math.max(10, Math.min(maxAllowed, raw))
+      const maxAllowed = Math.min(
+        pointBuyRules.maxValue,
+        pointBuyRules.budget - sumOtherPointBuy(prev, key)
+      )
+      const clamped = Number.isNaN(raw)
+        ? (prev[key] ?? pointBuyRules.defaultValue)
+        : Math.max(pointBuyRules.minValue, Math.min(maxAllowed, raw))
       setAttrInputs(inputs => ({ ...inputs, [key]: String(clamped) }))
       return { ...prev, [key]: clamped }
     })
@@ -461,7 +547,7 @@ export default function CharacterPage() {
         skillsPayload[id] = base + pts
       }
       const finalPreview = await previewCharacter({
-        attributes: toUpperAttrs(attr),
+        attributes: attr,
         occupationId: info.occupationId,
         skills: skillsPayload,
       })
@@ -673,25 +759,25 @@ export default function CharacterPage() {
             <div className="px-5 pb-20 animate-screen-in">
               <div className="bg-card border border-border-light rounded-md p-[18px]">
                 <h4 className="text-[12px] font-semibold text-brass-dark uppercase tracking-[0.08em] mb-1.5">属性分配</h4>
-                <p className="text-[11px] text-text-muted mb-2">点击 +/- 调整属性值（范围 10-90，每次 ±5）</p>
+                <p className="text-[11px] text-text-muted mb-2">点击 +/- 调整属性值（范围 {pointBuyRules?.minValue ?? '—'}-{pointBuyRules?.maxValue ?? '—'}，每次 ±5）</p>
                 <div className="bg-panel rounded-md px-3.5 py-2 mb-3 flex items-center gap-3">
                   <div className="flex-1">
                     <div className="flex items-center justify-between mb-1">
                       <span className="text-[11px] font-medium text-text-muted">总点数</span>
-                      <span className="text-[12px] font-bold font-mono text-text-primary">{attrPointsTotal}<span className="text-text-dim font-normal">/480</span></span>
+                      <span className="text-[12px] font-bold font-mono text-text-primary">{attrPointsTotal}<span className="text-text-dim font-normal">/{pointBuyRules?.budget ?? '—'}</span></span>
                     </div>
                     <div className="h-1.5 rounded-full bg-border-light overflow-hidden">
-                      <div className="h-full rounded-full bg-brass transition-all duration-300" style={{ width: `${Math.min(100, (attrPointsTotal / 480) * 100)}%` }} />
+                      <div className="h-full rounded-full bg-brass transition-all duration-300" style={{ width: `${pointBuyRules ? Math.min(100, (attrPointsTotal / pointBuyRules.budget) * 100) : 0}%` }} />
                     </div>
                   </div>
-                  <span className="text-[10px] text-text-dim">{480 - attrPointsTotal} 点剩余</span>
+                  <span className="text-[10px] text-text-dim">{pointBuyRules ? pointBuyRules.budget - attrPointsTotal : 0} 点剩余</span>
                 </div>
                 <div className="grid grid-cols-1 gap-2">
-                  {ATTR_KEYS.map(key => {
-                    const label = ATTRIBUTE_LABELS[key]
+                  {pointBuyAttributes.map(attribute => {
+                    const key = attribute.key
                     const Icon = ATTR_ICONS[key] || Shield
                     const color = ATTR_COLORS[key] || '#b8976a'
-                    const val = attr[key]
+                    const val = attr[key] ?? 0
                     return (
                       <div key={key} className="flex items-center gap-3 px-3 py-2.5 bg-input border border-border-light rounded-[6px]">
                         <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: color + '18' }}>
@@ -699,8 +785,8 @@ export default function CharacterPage() {
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="text-[13px] font-semibold text-text-primary flex items-center gap-1.5">
-                            {label.full}
-                            <span className="text-[10px] font-mono text-text-dim font-normal">{label.short}</span>
+                            {attribute.label}
+                            <span className="text-[10px] font-mono text-text-dim font-normal">{key}</span>
                           </div>
                           <div className="w-full h-1.5 rounded-full bg-border-light mt-1 overflow-hidden">
                             <div className="h-full rounded-full transition-all" style={{ width: `${Math.min(100, val)}%`, backgroundColor: color }} />
@@ -714,8 +800,8 @@ export default function CharacterPage() {
                         <input
                           type="number"
                           inputMode="numeric"
-                          min={10}
-                          max={90}
+                          min={pointBuyRules?.minValue}
+                          max={pointBuyRules?.maxValue}
                           value={attrInputs[key]}
                           onChange={e => setAttrInputs(inputs => ({ ...inputs, [key]: e.target.value }))}
                           onBlur={() => commitAttrInput(key)}
@@ -731,21 +817,23 @@ export default function CharacterPage() {
                   })}
                 </div>
 
-                {/* 幸运：COC7 里独立掷 3d6*5，不能用属性点购买，所以不在上面的
-                    加点网格里，这里只读展示（真实掷骰由服务端 roll-attributes 产出）。 */}
-                <div className="flex items-center gap-3 px-3 py-2.5 mt-2 bg-panel border border-border-light rounded-[6px]">
-                  <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: '#4a8a4a18' }}>
-                    <Clover className="w-4 h-4" style={{ color: '#4a8a4a' }} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-[13px] font-semibold text-text-primary flex items-center gap-1.5">
-                      {ATTRIBUTE_LABELS.luck.full}
-                      <span className="text-[10px] font-mono text-text-dim font-normal">{ATTRIBUTE_LABELS.luck.short}</span>
+                {/* 不参与点数购买的属性（COC7 里就是幸运：只能掷、不能用属性点买）。
+                    同样由 ruleset 驱动，不写死是哪一项——换个规则系统这里自然跟着变。 */}
+                {(ruleset?.attributes ?? []).filter(a => !a.pointBuy).map(attribute => (
+                  <div key={attribute.key} className="flex items-center gap-3 px-3 py-2.5 mt-2 bg-panel border border-border-light rounded-[6px]">
+                    <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: '#4a8a4a18' }}>
+                      <Clover className="w-4 h-4" style={{ color: '#4a8a4a' }} />
                     </div>
-                    <div className="text-[10px] text-text-dim mt-0.5">不占属性点数（规则为独立掷 3d6×5，掷骰生成待接入，暂为默认值）</div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[13px] font-semibold text-text-primary flex items-center gap-1.5">
+                        {attribute.label}
+                        <span className="text-[10px] font-mono text-text-dim font-normal">{attribute.key}</span>
+                      </div>
+                      <div className="text-[10px] text-text-dim mt-0.5">不占属性点数（规则为独立掷 {attribute.generation}，掷骰生成待接入，暂为默认值）</div>
+                    </div>
+                    <span className="text-[17px] font-bold font-mono text-text-primary min-w-[36px] text-center">{attr[attribute.key] ?? '—'}</span>
                   </div>
-                  <span className="text-[17px] font-bold font-mono text-text-primary min-w-[36px] text-center">{attr.luck}</span>
-                </div>
+                ))}
               </div>
 
               {/* Derived Stats */}
@@ -861,7 +949,7 @@ export default function CharacterPage() {
                     const interestRemaining = Math.max(0, interestPointsTotal - interestPointsSpent)
                     const compute = skillComputeMap.get(skill.id)
                     const base = compute?.base ?? (typeof skill.base === 'number' ? skill.base : 0)
-                    const cap = compute?.cap ?? 99
+                    const cap = compute?.cap ?? null
                     return (
                       <SkillRow key={skill.id} skill={skill} base={base} cap={cap}
                         poolAllocation={totalAllocation}
@@ -880,7 +968,7 @@ export default function CharacterPage() {
                     const interestAllocation = interestAlloc[skill.id] || 0
                     const compute = skillComputeMap.get(skill.id)
                     const base = compute?.base ?? (typeof skill.base === 'number' ? skill.base : 0)
-                    const cap = compute?.cap ?? 99
+                    const cap = compute?.cap ?? null
                     return (
                       <SkillRow key={skill.id} skill={skill} base={base} cap={cap}
                         poolAllocation={interestAllocation}

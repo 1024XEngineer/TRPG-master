@@ -9,7 +9,9 @@ import { connectWebSocket, disconnectWebSocket, sdk, waitForWsOpen } from '@/ser
 import { useRoomPlayers } from '@/hooks/useRoomPlayers'
 import { useRuleset } from '@/hooks/useRuleset'
 
-const ATTR_KEY_LIST = ['str', 'con', 'pow', 'dex', 'app', 'siz', 'int', 'edu'] as const
+// 角色卡是只读展示，幸运跟其余 8 项一起列出（建卡页才需要把它排除在加点
+// 网格外，因为 COC7 的幸运不能用属性点购买）。
+const ATTR_KEY_LIST = ['str', 'con', 'pow', 'dex', 'app', 'siz', 'int', 'edu', 'luck'] as const
 
 const SHEET_PAGES = [
   { key: 'info', label: '基本信息' },

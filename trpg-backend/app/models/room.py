@@ -127,6 +127,15 @@ class Character(Base):
     )
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
 
+    # 调查员基本信息。这几项此前只活在前端的本地状态里、从没进过后端，于是
+    # 「角色卡以后端为唯一事实来源」只做到了一半：清掉浏览器缓存后姓名/职业/
+    # 属性能从后端读回，年龄性别居住地却只是恰好等于表单默认值，看起来没丢、
+    # 其实早就丢了（issue #96）。
+    age: Mapped[int | None] = mapped_column(nullable=True)
+    gender: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    residence: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    birthplace: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
     # 属性是怎么生成的："pointbuy"（点数购买法）或 "roll"（服务端权威掷骰）。
     #
     # 必须记下来，因为两种方法的合法判据完全不同（issue #96 决策 1）：点数购买法

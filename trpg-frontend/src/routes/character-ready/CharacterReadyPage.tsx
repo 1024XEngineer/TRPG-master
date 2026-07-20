@@ -2,6 +2,7 @@ import { useNavigate } from 'react-router-dom'
 import { useEffect, useRef, useState } from 'react'
 import { ArrowLeft, UserPlus, Swords, Eye } from 'lucide-react'
 import { useCharacterStore } from '@/stores/character-store'
+import { fetchCharacter } from '@/services/character/character-api'
 import { useRoomStore } from '@/stores/room-store'
 import { useAuthStore } from '@/stores/auth-store'
 import { connectWebSocket, disconnectWebSocket, sdk, waitForWsOpen } from '@/services/api-client'
@@ -152,10 +153,60 @@ export default function CharacterReadyPage() {
   const [showSelfSheet, setShowSelfSheet] = useState(false)
   const [starting, setStarting] = useState(false)
   const roomId = useRoomStore((s) => s.roomId)
-  // 按房间取角色卡，而不是直接读 store 顶层的 character——本地缓存不按
-  // 房间区分的话，换房间会把上一个房间的角色数据错误地当成"已建卡"
-  // 展示出来（见 PR #67 review）。
-  const character = useCharacterStore((s) => (roomId ? s.getForRoom(roomId) : null))
+  const cachedCharacter = useCharacterStore((s) => (roomId ? s.getForRoom(roomId) : null))
+  const characterId = useRoomStore((s) => s.characterId)
+  const { ruleset: readyRuleset } = useRuleset()
+
+  // 角色卡以**后端**为准，本地缓存只作首屏占位（issue #96）。
+  //
+  // 之前这里只读 localStorage：清掉缓存（或换浏览器）后，明明后端有这张卡，
+  // 页面却显示成"还没建卡"。现在有了 GET 端点，就该以后端那份为准——本地缓存
+  // 保留是为了拉取回来之前不闪空白，不是权威源。
+  const [remoteCharacter, setRemoteCharacter] = useState<typeof cachedCharacter>(null)
+  useEffect(() => {
+    if (!roomId || !characterId || !readyRuleset) return
+    let cancelled = false
+    fetchCharacter(roomId, characterId)
+      .then((saved) => {
+        if (cancelled || !saved.name) return
+        const occupationId =
+          readyRuleset.occupations.find((o) => o.name === saved.occupation)?.id ?? null
+        const derived = saved.derivedStats ?? {}
+        const num = (v: unknown) => (typeof v === 'number' ? v : 0)
+        setRemoteCharacter({
+          info: {
+            name: saved.name,
+            playerName: '',
+            age: saved.age != null ? String(saved.age) : '',
+            gender: saved.gender ?? '',
+            residence: saved.residence ?? '',
+            birthplace: saved.birthplace ?? '',
+            occupationId,
+          },
+          attr: { ...saved.attributes },
+          skillAlloc: {},
+          skillFinalValues: { ...saved.skills },
+          equipment: (saved.equipment ?? []).join('、'),
+          background: saved.background ?? '',
+          notes: saved.notes ?? '',
+          derived: {
+            hp: num(derived.HP),
+            san: num(derived.SAN),
+            mp: num(derived.MP),
+            db: derived.DB == null ? '0' : String(derived.DB),
+            move: num(derived.MOV),
+          },
+        })
+      })
+      .catch(() => {
+        // 拉不到就沿用本地缓存（比如还没建过卡），不打断这个页面。
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [roomId, characterId, readyRuleset])
+
+  const character = remoteCharacter ?? cachedCharacter
   const roomCode = useRoomStore((s) => s.roomCode)
   const isHost = useRoomStore((s) => s.isHost)
   const playerId = useRoomStore((s) => s.playerId)

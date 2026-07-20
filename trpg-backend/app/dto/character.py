@@ -26,6 +26,10 @@ class CharacterUpdateBody(CamelModel):
     """PATCH /api/v1/rooms/{roomId}/characters/{characterId} 请求体"""
 
     name: str = Field(..., min_length=1, max_length=100)
+    age: int | None = None
+    gender: str | None = Field(default=None, max_length=20)
+    residence: str = Field(default="", max_length=100)
+    birthplace: str = Field(default="", max_length=100)
     attributes: dict[str, int]
     derived_stats: dict[str, int]
     skills: dict[str, int]
@@ -51,6 +55,10 @@ class CharacterRead(CamelModel):
     status: str
     generation_method: str
     name: str | None = None
+    age: int | None = None
+    gender: str | None = None
+    residence: str = ""
+    birthplace: str = ""
     attributes: dict[str, int] = Field(default_factory=dict)
     derived_stats: dict[str, int | str] = Field(default_factory=dict)
     skills: dict[str, int] = Field(default_factory=dict)

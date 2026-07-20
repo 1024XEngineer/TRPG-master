@@ -17,6 +17,7 @@
 """
 
 from app.dto.game import (
+    AgeRangeSpec,
     AttributePointBuyRules,
     AttributeSpec,
     OccupationSpec,
@@ -46,6 +47,9 @@ COC7_ATTRIBUTES: list[AttributeSpec] = [
 # 🔴 budget=480 是**本项目的自订规则（house rule）**，不是笔误——COC7 官方的
 # 点数购买法是 460 点分给 8 项属性。2026-07-20 明确拍板沿用 480，记在这里是
 # 为了避免以后有人把它当规则错误"修"回 460。
+# COC7 调查员年龄区间：年龄档从 15-19 起、到 80-89 止。
+COC7_AGE_RANGE = AgeRangeSpec(min_value=15, max_value=89)
+
 COC7_ATTRIBUTE_POINT_BUY = AttributePointBuyRules(
     budget=480,
     min_value=10,
@@ -917,6 +921,7 @@ def build_coc7_ruleset() -> RulesetRead:
     return RulesetRead(
         attributes=COC7_ATTRIBUTES,
         attribute_point_buy=COC7_ATTRIBUTE_POINT_BUY,
+        age_range=COC7_AGE_RANGE,
         skills=COC7_SKILLS,
         occupations=COC7_OCCUPATIONS,
     )

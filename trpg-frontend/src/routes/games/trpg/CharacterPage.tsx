@@ -168,7 +168,14 @@ export default function CharacterPage() {
       .then(saved => {
         if (cancelled || !saved.attributes || Object.keys(saved.attributes).length === 0) return
         setAttr({ ...saved.attributes })
-        if (saved.name) setInfo(prev => ({ ...prev, name: saved.name as string }))
+        setInfo(prev => ({
+          ...prev,
+          ...(saved.name ? { name: saved.name } : {}),
+          ...(saved.age != null ? { age: String(saved.age) } : {}),
+          ...(saved.gender ? { gender: saved.gender } : {}),
+          ...(saved.residence ? { residence: saved.residence } : {}),
+          ...(saved.birthplace ? { birthplace: saved.birthplace } : {}),
+        }))
         if (saved.occupation) {
           const matched = ruleset.occupations.find(o => o.name === saved.occupation)
           if (matched) setInfo(prev => ({ ...prev, occupationId: matched.id }))
@@ -559,6 +566,10 @@ export default function CharacterPage() {
       const characterId = await createCharacterDraft(roomId)
       await saveCharacter(roomId, characterId, {
         name: info.name,
+        age: info.age ? Number(info.age) : null,
+        gender: info.gender || null,
+        residence: info.residence,
+        birthplace: info.birthplace,
         attr,
         derived: { hp: finalDerived.hp, san: finalDerived.san, mp: finalDerived.mp },
         skillValues: skillsPayload,
@@ -644,7 +655,7 @@ export default function CharacterPage() {
                   <div className="grid grid-cols-2 gap-2.5">
                     <div>
                       <label className="text-[11px] font-medium text-text-muted mb-1 block">年龄</label>
-                      <input type="number" min={10} max={100} value={info.age}
+                      <input type="number" min={ruleset?.ageRange?.minValue} max={ruleset?.ageRange?.maxValue} value={info.age}
                         onChange={e => setInfo(i => ({ ...i, age: e.target.value }))}
                         onBlur={e => {
                           const v = Math.max(10, Math.min(100, parseInt(e.target.value, 10) || 10))

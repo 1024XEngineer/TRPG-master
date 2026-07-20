@@ -5,6 +5,12 @@ import { sdk } from '../api-client';
 
 export interface BuiltCharacter {
   name: string;
+  // 基本信息也要存后端：此前它们只活在前端本地状态里，清掉缓存就丢，
+  // 而「角色卡以后端为唯一事实来源」要求这些也归后端（issue #96）。
+  age: number | null;
+  gender: string | null;
+  residence: string;
+  birthplace: string;
   attr: Record<string, number>; // 后端属性键，如 { STR: 50, CON: 60, ... }
   derived: { hp: number; san: number; mp: number };
   skillValues: Record<string, number>; // skillId -> 最终值（base+分配）
@@ -36,6 +42,10 @@ export async function saveCharacter(
     characterId,
     {
       name: built.name,
+      age: built.age,
+      gender: built.gender,
+      residence: built.residence,
+      birthplace: built.birthplace,
       attributes: built.attr,
       derivedStats: { HP: built.derived.hp, SAN: built.derived.san, MP: built.derived.mp },
       skills: built.skillValues,

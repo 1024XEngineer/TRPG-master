@@ -20,6 +20,7 @@ import re
 from dataclasses import dataclass, field
 
 from app.core.coc7_content import (
+    COC7_AGE_RANGE,
     COC7_ATTRIBUTE_POINT_BUY,
     COC7_ATTRIBUTES,
     COC7_OCCUPATIONS,
@@ -254,6 +255,28 @@ def _validate_attributes(
                 )
             )
     return issues
+
+
+def validate_age(age: int | None) -> list[ValidationIssue]:
+    """年龄要落在 COC7 的合法区间 [15, 89] 内（年龄档从 15-19 起、到 80-89 止）。
+
+    没填年龄不拦——年龄是本期才开始入库的字段，迁移之前建的卡都没有，拿它
+    去拒绝那些卡等于用新规则追溯判旧数据非法。
+    """
+    if age is None:
+        return []
+    if not (COC7_AGE_RANGE.min_value <= age <= COC7_AGE_RANGE.max_value):
+        return [
+            ValidationIssue(
+                code="INVALID_AGE",
+                field="age",
+                message=(
+                    f"年龄 {age} 不在合法范围 "
+                    f"[{COC7_AGE_RANGE.min_value}, {COC7_AGE_RANGE.max_value}] 内"
+                ),
+            )
+        ]
+    return []
 
 
 def _compute(

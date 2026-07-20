@@ -24,6 +24,21 @@ export interface ActionSubmitPayload {
 }
 
 /**
+ * 调查员年龄的合法区间（issue #96）。
+ *
+ * COC7 的年龄档从 15-19 起、到 80-89 止，所以合法区间是 [15, 89]。此前前端
+ * 的输入框写死成 [10, 100]，两头都不符合规则。
+ *
+ * 注意本期只做区间约束，**不做年龄修正**（15-19 岁扣 STR/SIZ/EDU 各若干、
+ * 20-39 岁一次教育增强检定、40 岁起每十年 MOV -1 等）——那是一整套生成期
+ * 规则，要单独做。
+ */
+export interface AgeRangeSpec {
+  minValue: number;
+  maxValue: number;
+}
+
+/**
  * 点数购买法的约束（issue #96）。
  *
  * 这些数字此前只存在于前端代码里、后端既不校验也不暴露，导致 ①任何 SDK
@@ -116,6 +131,10 @@ export interface CharacterRead {
   status: string;
   generationMethod: string;
   name?: string | null;
+  age?: number | null;
+  gender?: string | null;
+  residence?: string;
+  birthplace?: string;
   attributes?: {
     [k: string]: number;
   };
@@ -161,6 +180,10 @@ export interface CharacterTemplateRead {
  */
 export interface CharacterUpdateBody {
   name: string;
+  age?: number | null;
+  gender?: string | null;
+  residence?: string;
+  birthplace?: string;
   attributes: {
     [k: string]: number;
   };
@@ -599,6 +622,7 @@ export interface RoomSummaryRead {
 export interface RulesetRead {
   attributes: AttributeSpec[];
   attributePointBuy?: AttributePointBuyRules | null;
+  ageRange?: AgeRangeSpec | null;
   skills: SkillSpec[];
   occupations: OccupationSpec[];
 }

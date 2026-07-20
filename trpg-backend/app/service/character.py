@@ -16,6 +16,7 @@ from app.core.coc7_rules import (
     ValidationIssue,
     compute_derived_stats,
     compute_preview,
+    validate_age,
     validate_character,
 )
 from app.core.errors import not_implemented
@@ -99,6 +100,10 @@ async def update_character(
     """保存建卡向导算好的完整角色数据。"""
     character = await _get_own_character(db, room_id, character_id, reconnect_token)
     character.name = payload.name
+    character.age = payload.age
+    character.gender = payload.gender
+    character.residence = payload.residence
+    character.birthplace = payload.birthplace
     character.attributes = payload.attributes
     character.derived_stats = payload.derived_stats
     character.skills = payload.skills
@@ -121,7 +126,7 @@ async def complete_character(
     `OCCUPATION_NOT_FOUND` 校验项，同样会被拒绝，不会静默放行。
     """
     character = await _get_own_character(db, room_id, character_id, reconnect_token)
-    issues = validate_character(
+    issues = validate_age(character.age) + validate_character(
         attributes=character.attributes or {},
         occupation_name=character.occupation,
         skills=character.skills or {},
@@ -156,6 +161,10 @@ async def get_character(
         status=character.status,
         generation_method=character.generation_method,
         name=character.name,
+        age=character.age,
+        gender=character.gender,
+        residence=character.residence or "",
+        birthplace=character.birthplace or "",
         attributes=character.attributes or {},
         derived_stats=character.derived_stats or {},
         skills=character.skills or {},

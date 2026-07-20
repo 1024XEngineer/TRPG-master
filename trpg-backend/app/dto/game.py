@@ -87,6 +87,21 @@ class OccupationSpec(CamelModel):
     description: str
 
 
+class AgeRangeSpec(CamelModel):
+    """调查员年龄的合法区间（issue #96）。
+
+    COC7 的年龄档从 15-19 起、到 80-89 止，所以合法区间是 [15, 89]。此前前端
+    的输入框写死成 [10, 100]，两头都不符合规则。
+
+    注意本期只做区间约束，**不做年龄修正**（15-19 岁扣 STR/SIZ/EDU 各若干、
+    20-39 岁一次教育增强检定、40 岁起每十年 MOV -1 等）——那是一整套生成期
+    规则，要单独做。
+    """
+
+    min_value: int
+    max_value: int
+
+
 class RulesetRead(CamelModel):
     """建卡所需的规则数据：属性/技能/职业目录（`GET /systems/{systemId}/ruleset`）。"""
 
@@ -95,5 +110,6 @@ class RulesetRead(CamelModel):
     # 而不是编一组 0/0/0——那种"看起来正常但内容不对"的数据会让客户端渲染出
     # 「0/0 点」这类无意义的界面（同 `get_ruleset` 里空目录兜底的取舍）。
     attribute_point_buy: AttributePointBuyRules | None = None
+    age_range: AgeRangeSpec | None = None
     skills: list[SkillSpec]
     occupations: list[OccupationSpec]

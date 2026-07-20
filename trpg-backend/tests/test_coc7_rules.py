@@ -325,3 +325,24 @@ def test_rolled_attribute_below_point_buy_min_is_allowed() -> None:
     不该拿点数购买法的下限去卡骰子结果。"""
     issues = validate_character({**ATTRS, "STR": 5}, ACCOUNTANT_NAME, {}, "roll")
     assert "INVALID_ATTRIBUTES" not in [issue.code for issue in issues]
+
+
+def test_age_outside_coc7_range_is_rejected() -> None:
+    """COC7 的年龄档从 15-19 起、到 80-89 止，区间外要拒。
+
+    前端此前把输入框写死成 [10, 100]，两头都不符合规则；现在区间由后端
+    ruleset 声明并裁决。
+    """
+    from app.core.coc7_rules import validate_age
+
+    assert [i.code for i in validate_age(10)] == ["INVALID_AGE"]
+    assert [i.code for i in validate_age(90)] == ["INVALID_AGE"]
+    assert validate_age(15) == []
+    assert validate_age(89) == []
+
+
+def test_age_not_filled_is_not_rejected() -> None:
+    """年龄是本期才入库的字段，迁移前的卡都没有——不能拿新规则追溯判它们非法。"""
+    from app.core.coc7_rules import validate_age
+
+    assert validate_age(None) == []

@@ -56,7 +56,17 @@ export const useRoomStore = create<RoomState>()(
       createFormMaxPlayers: 4,
       setRoom: (code, players) => set({ roomCode: code, players }),
       setRoomIdentity: ({ roomId, roomCode, playerId, reconnectToken }) =>
-        set({ roomId, roomCode, playerId, reconnectToken }),
+        set((state) => ({
+          roomId,
+          roomCode,
+          playerId,
+          reconnectToken,
+          // 换到别的房间就丢掉上一个房间的角色 id：角色卡是按房间隔离的
+          // （后端 `_get_own_character` 校验 `character.room_id`），带过去只会
+          // 404。创建房间那条路径本来就会先 reset()，但"加入房间"和"我的游戏
+          // →继续"不会，同一个标签页里换个房间就会留着上一局的 characterId。
+          ...(state.roomId !== roomId ? { characterId: null } : {}),
+        })),
       setModuleId: (moduleId) => set({ moduleId }),
       setCharacterId: (characterId) => set({ characterId }),
       addPlayer: (player) =>

@@ -2,27 +2,22 @@ import { useRoomStore } from '@/stores/room-store';
 import { sdk } from '../api-client';
 
 // 真实建卡流程对接：POST 建草稿 → PATCH 填数据 → POST complete 完成。
-// 属性键位后端用大写（STR/CON/...），前端本地用小写，这里做一次转换。
 
 export interface BuiltCharacter {
   name: string;
-  attr: Record<string, number>; // 小写 key，如 { str: 50, con: 60, ... }
+  // 基本信息也要存后端：此前它们只活在前端本地状态里，清掉缓存就丢，
+  // 而「角色卡以后端为唯一事实来源」要求这些也归后端（issue #96）。
+  age: number | null;
+  gender: string | null;
+  residence: string;
+  birthplace: string;
+  attr: Record<string, number>; // 后端属性键，如 { STR: 50, CON: 60, ... }
   derived: { hp: number; san: number; mp: number };
   skillValues: Record<string, number>; // skillId -> 最终值（base+分配）
   equipment: string;
   occupationName: string | null;
   background: string;
   notes: string;
-}
-
-// 属性键位后端用大写（STR/CON/...），前端本地用小写——建卡向导调
-// previewCharacter 时也要做同样的转换，这里导出复用，不要在别处重复实现。
-export function toUpperAttrs(attr: Record<string, number>): Record<string, number> {
-  const out: Record<string, number> = {};
-  for (const [k, v] of Object.entries(attr)) {
-    out[k.toUpperCase()] = v;
-  }
-  return out;
 }
 
 // 建卡接口跟房间模块一样，靠 X-Reconnect-Token 确认"你是这个房间里的哪个玩家"。
@@ -47,7 +42,11 @@ export async function saveCharacter(
     characterId,
     {
       name: built.name,
-      attributes: toUpperAttrs(built.attr),
+      age: built.age,
+      gender: built.gender,
+      residence: built.residence,
+      birthplace: built.birthplace,
+      attributes: built.attr,
       derivedStats: { HP: built.derived.hp, SAN: built.derived.san, MP: built.derived.mp },
       skills: built.skillValues,
       equipment: built.equipment
@@ -63,6 +62,17 @@ export async function saveCharacter(
     },
     requireReconnectToken()
   );
+}
+
+/**
+ * 从后端读回一张已保存的角色卡（issue #96）。
+ *
+ * 后端是角色卡的唯一事实来源。此前前端把整张卡存在 localStorage 里当权威源，
+ * 那份副本的结构会随后端 schema 演进而过期——PR #88 给属性加了幸运之后，本地
+ * 存的 8 键旧卡再打开就被后端的 9 键校验拒了，玩家的卡直接编辑不了。
+ */
+export async function fetchCharacter(roomId: string, characterId: string) {
+  return sdk.characters.get(roomId, characterId, requireReconnectToken());
 }
 
 export async function completeCharacter(roomId: string, characterId: string): Promise<void> {

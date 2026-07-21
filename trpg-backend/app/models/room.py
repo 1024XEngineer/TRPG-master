@@ -127,6 +127,23 @@ class Character(Base):
     )
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
 
+    # 调查员基本信息。这几项此前只活在前端的本地状态里、从没进过后端，于是
+    # 「角色卡以后端为唯一事实来源」只做到了一半：清掉浏览器缓存后姓名/职业/
+    # 属性能从后端读回，年龄性别居住地却只是恰好等于表单默认值，看起来没丢、
+    # 其实早就丢了（issue #96）。
+    age: Mapped[int | None] = mapped_column(nullable=True)
+    gender: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    residence: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    birthplace: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
+    # 属性是怎么生成的："pointbuy"（点数购买法）或 "roll"（服务端权威掷骰）。
+    #
+    # 必须记下来，因为两种方法的合法判据完全不同（issue #96 决策 1）：点数购买法
+    # 要校验「总点数不超预算」，而掷骰法本来就经常超——5 项 3d6*5 + 3 项
+    # (2d6+6)*5，8 项总和均值约 457、理论范围 195–720。不区分方法就无条件校验
+    # 预算的话，会把合法掷出来的角色卡判成非法，等于废掉 roll-attributes 端点。
+    generation_method: Mapped[str] = mapped_column(String(20), nullable=False, default="pointbuy")
+
     # 建卡三条路径的来源（都可空，互斥但不做数据库层面强制）：
     # ① based_on_pregen_id：套用模组作者预设角色；
     # ② based_on_template_id：复用玩家自己的常用卡（issue 决策 5，本期不实现）；

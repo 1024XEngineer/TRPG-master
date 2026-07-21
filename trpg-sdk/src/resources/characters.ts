@@ -1,5 +1,10 @@
 import type { ApiClient } from '../client';
-import type { CharacterDraftResult, RollAttributesResult, UpdateCharacterInput } from '../types';
+import type {
+  Character,
+  CharacterDraftResult,
+  RollAttributesResult,
+  UpdateCharacterInput,
+} from '../types';
 
 /**
  * `/api/v1/rooms/{roomId}/characters` 的类型化封装——房间内的建卡流程：
@@ -17,6 +22,18 @@ export class CharactersResource {
     return this.client.post<CharacterDraftResult>(
       `/rooms/${roomId}/characters`,
       null,
+      this.authenticated(reconnectToken)
+    );
+  }
+
+  /** GET /api/v1/rooms/{roomId}/characters/{characterId} — 读回自己的角色卡。
+   *
+   * 后端是角色卡的唯一事实来源，客户端不该把它存进本地当权威源——本地副本的
+   * 结构会随后端 schema 演进而过期（issue #96）。
+   */
+  get(roomId: string, characterId: string, reconnectToken: string): Promise<Character> {
+    return this.client.get<Character>(
+      `/rooms/${roomId}/characters/${characterId}`,
       this.authenticated(reconnectToken)
     );
   }

@@ -2,16 +2,12 @@ import { useNavigate } from 'react-router-dom'
 import { useEffect, useRef, useState } from 'react'
 import { ArrowLeft, UserPlus, Swords, Eye } from 'lucide-react'
 import { useCharacterStore } from '@/stores/character-store'
+import { fetchCharacter } from '@/services/character/character-api'
 import { useRoomStore } from '@/stores/room-store'
 import { useAuthStore } from '@/stores/auth-store'
-import { ATTRIBUTE_LABELS } from '@/data/character-model'
 import { connectWebSocket, disconnectWebSocket, sdk, waitForWsOpen } from '@/services/api-client'
 import { useRoomPlayers } from '@/hooks/useRoomPlayers'
 import { useRuleset } from '@/hooks/useRuleset'
-
-// 角色卡是只读展示，幸运跟其余 8 项一起列出（建卡页才需要把它排除在加点
-// 网格外，因为 COC7 的幸运不能用属性点购买）。
-const ATTR_KEY_LIST = ['str', 'con', 'pow', 'dex', 'app', 'siz', 'int', 'edu', 'luck'] as const
 
 const SHEET_PAGES = [
   { key: 'info', label: '基本信息' },
@@ -91,10 +87,13 @@ function CharacterSheetModal({ character, onClose }: { character: NonNullable<Re
               <div>
                 <h4 className="text-[11px] font-semibold text-brass-dark mb-2">基础属性</h4>
                 <div className="grid grid-cols-2 gap-1.5">
-                  {ATTR_KEY_LIST.map(key => (
-                    <div key={key} className="flex items-center justify-between bg-input border border-border-light rounded px-3 py-1.5">
-                      <span className="font-mono text-[11px] font-bold text-text-muted">{ATTRIBUTE_LABELS[key].short}</span>
-                      <span className="font-mono text-sm font-bold text-text-primary">{character.attr[key]}</span>
+                  {/* 属性清单由后端 ruleset 驱动，前端不再自己维护一份名单——
+                      此前三处各硬编码一份，加幸运时漏改一处就导致角色卡看不到
+                      幸运值（issue #96）。 */}
+                  {(ruleset?.attributes ?? []).map(attribute => (
+                    <div key={attribute.key} className="flex items-center justify-between bg-input border border-border-light rounded px-3 py-1.5">
+                      <span className="font-mono text-[11px] font-bold text-text-muted">{attribute.key}</span>
+                      <span className="font-mono text-sm font-bold text-text-primary">{character.attr[attribute.key]}</span>
                     </div>
                   ))}
                 </div>
@@ -154,10 +153,60 @@ export default function CharacterReadyPage() {
   const [showSelfSheet, setShowSelfSheet] = useState(false)
   const [starting, setStarting] = useState(false)
   const roomId = useRoomStore((s) => s.roomId)
-  // 按房间取角色卡，而不是直接读 store 顶层的 character——本地缓存不按
-  // 房间区分的话，换房间会把上一个房间的角色数据错误地当成"已建卡"
-  // 展示出来（见 PR #67 review）。
-  const character = useCharacterStore((s) => (roomId ? s.getForRoom(roomId) : null))
+  const cachedCharacter = useCharacterStore((s) => (roomId ? s.getForRoom(roomId) : null))
+  const characterId = useRoomStore((s) => s.characterId)
+  const { ruleset: readyRuleset } = useRuleset()
+
+  // 角色卡以**后端**为准，本地缓存只作首屏占位（issue #96）。
+  //
+  // 之前这里只读 localStorage：清掉缓存（或换浏览器）后，明明后端有这张卡，
+  // 页面却显示成"还没建卡"。现在有了 GET 端点，就该以后端那份为准——本地缓存
+  // 保留是为了拉取回来之前不闪空白，不是权威源。
+  const [remoteCharacter, setRemoteCharacter] = useState<typeof cachedCharacter>(null)
+  useEffect(() => {
+    if (!roomId || !characterId || !readyRuleset) return
+    let cancelled = false
+    fetchCharacter(roomId, characterId)
+      .then((saved) => {
+        if (cancelled || !saved.name) return
+        const occupationId =
+          readyRuleset.occupations.find((o) => o.name === saved.occupation)?.id ?? null
+        const derived = saved.derivedStats ?? {}
+        const num = (v: unknown) => (typeof v === 'number' ? v : 0)
+        setRemoteCharacter({
+          info: {
+            name: saved.name,
+            playerName: '',
+            age: saved.age != null ? String(saved.age) : '',
+            gender: saved.gender ?? '',
+            residence: saved.residence ?? '',
+            birthplace: saved.birthplace ?? '',
+            occupationId,
+          },
+          attr: { ...saved.attributes },
+          skillAlloc: {},
+          skillFinalValues: { ...saved.skills },
+          equipment: (saved.equipment ?? []).join('、'),
+          background: saved.background ?? '',
+          notes: saved.notes ?? '',
+          derived: {
+            hp: num(derived.HP),
+            san: num(derived.SAN),
+            mp: num(derived.MP),
+            db: derived.DB == null ? '0' : String(derived.DB),
+            move: num(derived.MOV),
+          },
+        })
+      })
+      .catch(() => {
+        // 拉不到就沿用本地缓存（比如还没建过卡），不打断这个页面。
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [roomId, characterId, readyRuleset])
+
+  const character = remoteCharacter ?? cachedCharacter
   const roomCode = useRoomStore((s) => s.roomCode)
   const isHost = useRoomStore((s) => s.isHost)
   const playerId = useRoomStore((s) => s.playerId)

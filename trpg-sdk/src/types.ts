@@ -45,6 +45,7 @@ export type {
   // 游戏目录 / 规则数据（issue #77）—— 对应后端 dto/game.py
   GameRead as Game,
   GameSystemRead as GameSystem,
+  CharacterRead as Character,
   RulesetRead as Ruleset,
   // 模组详情 / 导入（issue #77）—— 对应后端 dto/module.py
   ModuleDetailRead as ModuleDetail,

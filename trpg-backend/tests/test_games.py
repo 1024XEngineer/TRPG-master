@@ -18,10 +18,41 @@ async def test_get_ruleset_returns_full_coc7_data(client: AsyncClient) -> None:
     # 9 项属性（8 项基础属性 + 幸运），字段完整且带真实的 COC7 生成公式
     assert len(data["attributes"]) == 9
     attrs_by_key = {a["key"]: a for a in data["attributes"]}
-    assert attrs_by_key["STR"] == {"key": "STR", "label": "力量", "generation": "3d6*5"}
+    assert attrs_by_key["STR"] == {
+        "key": "STR",
+        "label": "力量",
+        "generation": "3d6*5",
+        "pointBuy": True,
+    }
     assert attrs_by_key["SIZ"]["generation"] == "(2d6+6)*5"
-    # 幸运独立掷 3d6*5，跟 STR 一组生成公式，不是 (2d6+6)*5 那一组
-    assert attrs_by_key["LUCK"] == {"key": "LUCK", "label": "幸运", "generation": "3d6*5"}
+    # 幸运独立掷 3d6*5（跟 STR 一组生成公式，不是 (2d6+6)*5 那一组），
+    # 且 pointBuy=False——COC7 里它只能掷、不能用属性点购买。客户端据此
+    # 决定哪些属性渲染成可加点，不用自己维护一份名单（issue #96）。
+    assert attrs_by_key["LUCK"] == {
+        "key": "LUCK",
+        "label": "幸运",
+        "generation": "3d6*5",
+        "pointBuy": False,
+    }
+    assert [a["key"] for a in data["attributes"] if a["pointBuy"]] == [
+        "STR",
+        "CON",
+        "POW",
+        "DEX",
+        "APP",
+        "SIZ",
+        "INT",
+        "EDU",
+    ]
+
+    # 点数购买法的约束必须由后端暴露，客户端不该再自己硬编码一份
+    # （issue #96：480/[10,90]/默认值此前只存在于前端代码里）。
+    assert data["attributePointBuy"] == {
+        "budget": 480,
+        "minValue": 10,
+        "maxValue": 90,
+        "defaultValue": 50,
+    }
 
     # 80 项技能（前端 ALL_SKILLS 原有 76 条 + issue #84 S2 补齐的 3 条悬空引用
     # navigate/carpentry/illusion + PR #85 review 补的信用评级 credit-rating），

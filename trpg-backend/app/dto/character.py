@@ -26,6 +26,10 @@ class CharacterUpdateBody(CamelModel):
     """PATCH /api/v1/rooms/{roomId}/characters/{characterId} 请求体"""
 
     name: str = Field(..., min_length=1, max_length=100)
+    age: int | None = None
+    gender: str | None = Field(default=None, max_length=20)
+    residence: str = Field(default="", max_length=100)
+    birthplace: str = Field(default="", max_length=100)
     attributes: dict[str, int]
     derived_stats: dict[str, int]
     skills: dict[str, int]
@@ -33,6 +37,35 @@ class CharacterUpdateBody(CamelModel):
     occupation: str | None = None
     background: str = Field(default="", max_length=4000)
     notes: str = Field(default="", max_length=4000)
+
+
+class CharacterRead(CamelModel):
+    """GET /api/v1/rooms/{roomId}/characters/{characterId} 返回（issue #96）。
+
+    补这个端点是为了让**后端成为角色卡的唯一事实来源**。此前只有
+    创建/保存/完成/掷属性四个写操作、没有任何读接口，前端因此只能把角色卡
+    存进 localStorage 当权威源——而那份副本的结构会随后端 schema 演进而过期
+    （PR #88 加幸运后，旧的 8 键角色卡就再也编辑不了了）。
+
+    `generation_method` 一并返回：客户端要据此知道这张卡该按点数购买法还是
+    掷骰法来渲染与校验。
+    """
+
+    id: str
+    status: str
+    generation_method: str
+    name: str | None = None
+    age: int | None = None
+    gender: str | None = None
+    residence: str = ""
+    birthplace: str = ""
+    attributes: dict[str, int] = Field(default_factory=dict)
+    derived_stats: dict[str, int | str] = Field(default_factory=dict)
+    skills: dict[str, int] = Field(default_factory=dict)
+    equipment: list[str] = Field(default_factory=list)
+    occupation: str | None = None
+    background: str = ""
+    notes: str = ""
 
 
 class CharacterCreateBody(CamelModel):

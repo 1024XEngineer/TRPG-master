@@ -12,9 +12,12 @@ from dataclasses import asdict
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.coc7_rules import (
+    GENERATION_POINT_BUY,
+    GENERATION_ROLL,
     ValidationIssue,
     compute_derived_stats,
     compute_preview,
+    validate_age,
     validate_character,
 )
 from app.core.errors import not_implemented
@@ -22,6 +25,7 @@ from app.dto.character import (
     CharacterComputeResult,
     CharacterDraftResult,
     CharacterPreviewRequest,
+    CharacterRead,
     CharacterTemplateCreateBody,
     CharacterTemplateRead,
     CharacterUpdateBody,
@@ -96,7 +100,23 @@ async def update_character(
 ) -> None:
     """保存建卡向导算好的完整角色数据。"""
     character = await _get_own_character(db, room_id, character_id, reconnect_token)
+
+    # PR #97 review [1]：`roll` 这个来源标记不能跨越「客户端自己重填了属性」。
+    # `roll_attributes` 会把它置成 roll，complete 时据此跳过 480 点预算校验
+    # （骰子结果本来就不受点数购买法约束）；但这个 PATCH 接受客户端任意属性，
+    # 标记原样留着的话，先掷一次、再把 8 项全顶到 90 提交，就能绕开预算过关。
+    # 属性跟掷出来那份不一致就说明是客户端填的，来源退回点数购买法。
+    if (
+        character.generation_method == GENERATION_ROLL
+        and payload.attributes != character.attributes
+    ):
+        character.generation_method = GENERATION_POINT_BUY
+
     character.name = payload.name
+    character.age = payload.age
+    character.gender = payload.gender
+    character.residence = payload.residence
+    character.birthplace = payload.birthplace
     character.attributes = payload.attributes
     character.derived_stats = payload.derived_stats
     character.skills = payload.skills
@@ -119,10 +139,11 @@ async def complete_character(
     `OCCUPATION_NOT_FOUND` 校验项，同样会被拒绝，不会静默放行。
     """
     character = await _get_own_character(db, room_id, character_id, reconnect_token)
-    issues = validate_character(
+    issues = validate_age(character.age) + validate_character(
         attributes=character.attributes or {},
         occupation_name=character.occupation,
         skills=character.skills or {},
+        generation_method=character.generation_method,
     )
     if issues:
         raise CharacterInvalidError(issues)
@@ -136,6 +157,35 @@ async def complete_character(
     if player is not None:
         player.has_character = True
     await db.commit()
+
+
+async def get_character(
+    db: AsyncSession, room_id: str, character_id: str, reconnect_token: str | None
+) -> CharacterRead:
+    """GET /rooms/{roomId}/characters/{characterId} —— 读回自己的角色卡
+    （issue #96）。
+
+    鉴权复用 `_get_own_character`：只能读自己那张，不能拿别人的角色卡——
+    角色卡里有背景故事、装备这些属于该玩家的信息，房间内其他人不该直接拉到。
+    """
+    character = await _get_own_character(db, room_id, character_id, reconnect_token)
+    return CharacterRead(
+        id=character.id,
+        status=character.status,
+        generation_method=character.generation_method,
+        name=character.name,
+        age=character.age,
+        gender=character.gender,
+        residence=character.residence or "",
+        birthplace=character.birthplace or "",
+        attributes=character.attributes or {},
+        derived_stats=character.derived_stats or {},
+        skills=character.skills or {},
+        equipment=list(character.equipment or []),
+        occupation=character.occupation,
+        background=character.background or "",
+        notes=character.notes or "",
+    )
 
 
 def compute_character_preview(payload: CharacterPreviewRequest) -> CharacterComputeResult:
@@ -192,6 +242,9 @@ async def roll_attributes(
 
     character.attributes = attributes
     character.derived_stats = derived_stats
+    # 标记这张卡的属性是掷出来的：complete 时不能拿点数购买法的总预算去卡它
+    # （8 项总和均值约 457、范围 195–720，经常超 480）。见 issue #96 决策 1。
+    character.generation_method = GENERATION_ROLL
     await db.commit()
     return RollAttributesResult(attributes=attributes, derived_stats=derived_stats)
 

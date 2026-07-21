@@ -106,7 +106,7 @@ def test_valid_card_has_empty_validation_report() -> None:
     assert validate_character(ATTRS, ACCOUNTANT_NAME, skills) == []
 
 
-def test_occupation_points_exceeded_alone() -> None:
+def test_skill_points_exceeded_alone() -> None:
     skills = {
         "accounting": 99,
         "law": 99,
@@ -116,7 +116,36 @@ def test_occupation_points_exceeded_alone() -> None:
     }
     issues = validate_character(ATTRS, ACCOUNTANT_NAME, skills)
     codes = [issue.code for issue in issues]
-    assert codes == ["OCCUPATION_POINTS_EXCEEDED"]
+    assert codes == ["SKILL_POINTS_EXCEEDED"]
+
+
+def test_occupation_skills_may_overflow_into_interest_points() -> None:
+    """🔴 职业技能上的点数超过职业预算是**合法**的，超出部分由兴趣点承担。
+
+    COC7 里兴趣点可以花在任何技能上（包括职业技能），所以「职业点单独超了」
+    不是拒绝理由——闸门是总预算。这条和上一条互为对照：上一条超的是总预算
+    必须拒，这一条只超职业池、总预算没超，必须放行。
+
+    少了这条的话，把闸门改成「按职业池单独卡」照样能让上一条通过，却会把
+    这种合法的卡判成非法（前端职业技能加点用完职业池后自动溢出到兴趣池，
+    走的正是这条路径）。
+    """
+    # 会计师：职业点 EDU*4 = 280，兴趣点 INT*2 = 100，总预算 380
+    skills = {
+        "accounting": 99,  # base 5  → 94
+        "law": 99,  # base 5  → 94
+        "library-use": 99,  # base 20 → 79
+        "credit-rating": 30,  # 下限，全额记职业点
+    }
+    result = compute_preview(attributes=ATTRS, occupation_id=ACCOUNTANT_ID, skills=skills)
+
+    # 职业池记账已经超了（267 + 信用下限 30 = 297 > 280），但总花费没超总预算
+    assert result.occupation_skill_points.spent > result.occupation_skill_points.budget
+    assert (
+        result.occupation_skill_points.spent + result.interest_skill_points.spent
+        <= result.occupation_skill_points.budget + result.interest_skill_points.budget
+    )
+    assert result.validation == []
 
 
 def test_interest_points_exceeded_alone() -> None:
@@ -281,3 +310,68 @@ def test_no_occupation_selected_all_budget_is_interest_only() -> None:
     assert result.occupation_skill_points == SkillPointsBudget(budget=0, spent=0, remaining=0)
     assert result.interest_skill_points == SkillPointsBudget(budget=100, spent=0, remaining=100)
     assert result.validation == []
+
+
+# ── 属性点预算：必须区分生成方法（issue #96 决策 1）────────────────────
+
+
+def test_point_buy_over_budget_is_rejected() -> None:
+    """点数购买法：8 项可购买属性的总和超过预算就拒。"""
+    attrs = {**ATTRS, "STR": 90, "CON": 90, "POW": 90, "DEX": 90, "APP": 90}
+    # 90*5 + 50*3 = 600 > 480
+    issues = validate_character(attrs, ACCOUNTANT_NAME, {}, generation_method="pointbuy")
+    assert "ATTRIBUTE_POINTS_EXCEEDED" in [issue.code for issue in issues]
+
+
+def test_rolled_attributes_over_point_buy_budget_are_allowed() -> None:
+    """🔴 掷骰法不受点数购买预算约束。
+
+    这条和上一条是一对：掷骰法 8 项总和均值约 457、理论范围 195–720，本来就
+    经常超过 480。如果不区分生成方法、无条件拿预算去卡，合法掷出来的角色卡
+    会被判成非法，等于废掉 roll-attributes 端点。
+    """
+    attrs = {**ATTRS, "STR": 90, "CON": 90, "POW": 90, "DEX": 90, "APP": 90}
+    issues = validate_character(attrs, ACCOUNTANT_NAME, {}, generation_method="roll")
+    assert "ATTRIBUTE_POINTS_EXCEEDED" not in [issue.code for issue in issues]
+
+
+def test_luck_is_excluded_from_the_attribute_point_budget() -> None:
+    """幸运不占属性点预算：把它拉满也不该让总预算超支。"""
+    attrs = {**ATTRS, "LUCK": 99}
+    issues = validate_character(attrs, ACCOUNTANT_NAME, {}, generation_method="pointbuy")
+    assert "ATTRIBUTE_POINTS_EXCEEDED" not in [issue.code for issue in issues]
+
+
+def test_point_buy_attribute_below_min_is_rejected() -> None:
+    """点数购买法下单项属性有 [10, 90] 区间，低于下限要拒——这个边界此前
+    只有前端在管，后端放行到 1。"""
+    issues = validate_character({**ATTRS, "STR": 5}, ACCOUNTANT_NAME, {}, "pointbuy")
+    assert "INVALID_ATTRIBUTES" in [issue.code for issue in issues]
+
+
+def test_rolled_attribute_below_point_buy_min_is_allowed() -> None:
+    """掷骰法不套 [10, 90]：3d6*5 最低能掷出 15，但兜底区间放到 [1, 99]，
+    不该拿点数购买法的下限去卡骰子结果。"""
+    issues = validate_character({**ATTRS, "STR": 5}, ACCOUNTANT_NAME, {}, "roll")
+    assert "INVALID_ATTRIBUTES" not in [issue.code for issue in issues]
+
+
+def test_age_outside_coc7_range_is_rejected() -> None:
+    """COC7 的年龄档从 15-19 起、到 80-89 止，区间外要拒。
+
+    前端此前把输入框写死成 [10, 100]，两头都不符合规则；现在区间由后端
+    ruleset 声明并裁决。
+    """
+    from app.core.coc7_rules import validate_age
+
+    assert [i.code for i in validate_age(10)] == ["INVALID_AGE"]
+    assert [i.code for i in validate_age(90)] == ["INVALID_AGE"]
+    assert validate_age(15) == []
+    assert validate_age(89) == []
+
+
+def test_age_not_filled_is_not_rejected() -> None:
+    """年龄是本期才入库的字段，迁移前的卡都没有——不能拿新规则追溯判它们非法。"""
+    from app.core.coc7_rules import validate_age
+
+    assert validate_age(None) == []

@@ -17,6 +17,7 @@ from app.core.errors import AppException, ErrorCode
 from app.dto.character import (
     CharacterCreateBody,
     CharacterDraftResult,
+    CharacterRead,
     CharacterUpdateBody,
     RollAttributesResult,
 )
@@ -221,6 +222,36 @@ async def create_character(
     ) as exc:
         _raise_service_error(exc)
     return ApiResponse.ok(result)
+
+
+@router.get(
+    "/{room_id}/characters/{character_id}",
+    response_model=ApiResponse[CharacterRead],
+    tags=["characters"],
+)
+async def get_character(
+    room_id: str,
+    character_id: str,
+    reconnect_token: str | None = Header(default=None, alias="X-Reconnect-Token"),
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[CharacterRead]:
+    """GET /api/v1/rooms/{roomId}/characters/{characterId} —— 读回自己的角色卡
+    （issue #96）。
+
+    补这个端点是为了让后端成为角色卡的唯一事实来源，客户端不必再把角色卡
+    存进本地当权威源（那份副本会随后端 schema 演进而过期）。
+    """
+    try:
+        character = await character_service.get_character(
+            db, room_id, character_id, reconnect_token
+        )
+    except (
+        character_service.CharacterNotFoundError,
+        room_service.RoomAuthenticationError,
+        room_service.RoomAuthorizationError,
+    ) as exc:
+        _raise_service_error(exc)
+    return ApiResponse.ok(character)
 
 
 @router.patch(

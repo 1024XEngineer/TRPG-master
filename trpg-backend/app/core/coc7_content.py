@@ -16,7 +16,14 @@
   `icon` 字段是纯 UI 展示用的 emoji，不属于规则数据，未移植。
 """
 
-from app.dto.game import AttributeSpec, OccupationSpec, RulesetRead, SkillSpec
+from app.dto.game import (
+    AgeRangeSpec,
+    AttributePointBuyRules,
+    AttributeSpec,
+    OccupationSpec,
+    RulesetRead,
+    SkillSpec,
+)
 
 COC7_ATTRIBUTES: list[AttributeSpec] = [
     AttributeSpec(key="STR", label="力量", generation="3d6*5"),
@@ -30,8 +37,25 @@ COC7_ATTRIBUTES: list[AttributeSpec] = [
     # 幸运：COC7 里独立掷 3d6*5，不由任何属性推导，也不参与职业技能点公式与
     # 技能基础值；但它是有状态、游戏中可被 `luck.spend` 消耗的属性，所以归在
     # 属性而不是衍生值里。
-    AttributeSpec(key="LUCK", label="幸运", generation="3d6*5"),
+    # point_buy=False：COC7 里幸运只能掷，不能用属性点购买，所以它不参与
+    # 点数购买法的预算与加点网格。
+    AttributeSpec(key="LUCK", label="幸运", generation="3d6*5", point_buy=False),
 ]
+
+# 点数购买法的约束（issue #96：此前只存在于前端代码里）。
+#
+# 🔴 budget=480 是**本项目的自订规则（house rule）**，不是笔误——COC7 官方的
+# 点数购买法是 460 点分给 8 项属性。2026-07-20 明确拍板沿用 480，记在这里是
+# 为了避免以后有人把它当规则错误"修"回 460。
+# COC7 调查员年龄区间：年龄档从 15-19 起、到 80-89 止。
+COC7_AGE_RANGE = AgeRangeSpec(min_value=15, max_value=89)
+
+COC7_ATTRIBUTE_POINT_BUY = AttributePointBuyRules(
+    budget=480,
+    min_value=10,
+    max_value=90,
+    default_value=50,
+)
 
 COC7_SKILLS: list[SkillSpec] = [
     SkillSpec(
@@ -896,6 +920,8 @@ def build_coc7_ruleset() -> RulesetRead:
     `get_ruleset` 兜底使用。"""
     return RulesetRead(
         attributes=COC7_ATTRIBUTES,
+        attribute_point_buy=COC7_ATTRIBUTE_POINT_BUY,
+        age_range=COC7_AGE_RANGE,
         skills=COC7_SKILLS,
         occupations=COC7_OCCUPATIONS,
     )

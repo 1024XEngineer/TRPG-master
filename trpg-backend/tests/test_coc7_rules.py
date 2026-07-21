@@ -106,7 +106,7 @@ def test_valid_card_has_empty_validation_report() -> None:
     assert validate_character(ATTRS, ACCOUNTANT_NAME, skills) == []
 
 
-def test_occupation_points_exceeded_alone() -> None:
+def test_skill_points_exceeded_alone() -> None:
     skills = {
         "accounting": 99,
         "law": 99,
@@ -116,7 +116,36 @@ def test_occupation_points_exceeded_alone() -> None:
     }
     issues = validate_character(ATTRS, ACCOUNTANT_NAME, skills)
     codes = [issue.code for issue in issues]
-    assert codes == ["OCCUPATION_POINTS_EXCEEDED"]
+    assert codes == ["SKILL_POINTS_EXCEEDED"]
+
+
+def test_occupation_skills_may_overflow_into_interest_points() -> None:
+    """🔴 职业技能上的点数超过职业预算是**合法**的，超出部分由兴趣点承担。
+
+    COC7 里兴趣点可以花在任何技能上（包括职业技能），所以「职业点单独超了」
+    不是拒绝理由——闸门是总预算。这条和上一条互为对照：上一条超的是总预算
+    必须拒，这一条只超职业池、总预算没超，必须放行。
+
+    少了这条的话，把闸门改成「按职业池单独卡」照样能让上一条通过，却会把
+    这种合法的卡判成非法（前端职业技能加点用完职业池后自动溢出到兴趣池，
+    走的正是这条路径）。
+    """
+    # 会计师：职业点 EDU*4 = 280，兴趣点 INT*2 = 100，总预算 380
+    skills = {
+        "accounting": 99,  # base 5  → 94
+        "law": 99,  # base 5  → 94
+        "library-use": 99,  # base 20 → 79
+        "credit-rating": 30,  # 下限，全额记职业点
+    }
+    result = compute_preview(attributes=ATTRS, occupation_id=ACCOUNTANT_ID, skills=skills)
+
+    # 职业池记账已经超了（267 + 信用下限 30 = 297 > 280），但总花费没超总预算
+    assert result.occupation_skill_points.spent > result.occupation_skill_points.budget
+    assert (
+        result.occupation_skill_points.spent + result.interest_skill_points.spent
+        <= result.occupation_skill_points.budget + result.interest_skill_points.budget
+    )
+    assert result.validation == []
 
 
 def test_interest_points_exceeded_alone() -> None:

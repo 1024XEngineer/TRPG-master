@@ -120,7 +120,7 @@ async def test_complete_character_rejects_invalid_card(client: AsyncClient) -> N
         **BUILT_CHARACTER,
         # 私家侦探的全部 8 项职业技能都拉满到上限 99，总花费（>600）远超
         # 职业预算 260 + 兴趣预算 140 = 400 的总预算，应该触发
-        # OCCUPATION_POINTS_EXCEEDED。
+        # SKILL_POINTS_EXCEEDED（查的是总预算，见 coc7_rules 那处注释）。
         "skills": {
             "disguise": 99,
             "drive-auto": 99,
@@ -149,7 +149,7 @@ async def test_complete_character_rejects_invalid_card(client: AsyncClient) -> N
     assert body["success"] is False
     assert body["error"]["code"] == "CHARACTER_INVALID"
     codes = [issue["code"] for issue in body["error"]["details"]]
-    assert "OCCUPATION_POINTS_EXCEEDED" in codes
+    assert "SKILL_POINTS_EXCEEDED" in codes
 
 
 # ── 角色卡读回：后端是唯一事实来源（issue #96）─────────────────────────

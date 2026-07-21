@@ -167,6 +167,9 @@ export default function CharacterPage() {
     fetchCharacter(roomId, characterId)
       .then(async saved => {
         if (cancelled || !saved.attributes || Object.keys(saved.attributes).length === 0) return
+        // 存成局部常量：下面几处在闭包里用到它，直接写 saved.attributes 会丢掉
+        // 上面这行的收窄，TS 认为它仍可能是 undefined。
+        const savedAttrs = saved.attributes
         const matched = saved.occupation
           ? (ruleset.occupations.find(o => o.name === saved.occupation) ?? null)
           : null
@@ -186,7 +189,7 @@ export default function CharacterPage() {
         // 就会把技能点清空覆盖回后端。所以改成先算后填：失败就整体不水合，
         // 退回本地缓存/空白表单，跟"压根没读回来"是同一种一致状态。
         const view = await previewCharacter({
-          attributes: saved.attributes,
+          attributes: savedAttrs,
           occupationId: matched?.id ?? null,
           skills: saved.skills ?? {},
         })
@@ -210,7 +213,19 @@ export default function CharacterPage() {
           if (!occIds.has(v.id)) interest[v.id] = v.allocated
         }
 
-        setAttr({ ...saved.attributes })
+        setAttr({ ...savedAttrs })
+        // 输入框的字符串镜像必须一起重建。它平时只在「属性项集合变化」时同步
+        // 一次（见下面 attrInputs 那个 effect：跟着 attr 走的话，每敲一个字都会
+        // 被覆盖回去），而水合是之后才异步到达的——不在这里补一次，清掉本地
+        // 缓存重进时 8 个属性输入框会**全是空白**，尽管背后的 attr 是对的
+        // （总点数条 400/480 和衍生值都正常，只有输入框空着）。
+        setAttrInputs(
+          Object.fromEntries(
+            ruleset.attributes
+              .filter(a => a.pointBuy)
+              .map(a => [a.key, String(savedAttrs[a.key] ?? '')])
+          )
+        )
         // 每个字段都无条件覆盖（PR #97 review [2]）：只在后端值非空时才赋值的话，
         // 服务端被清空的字段会保留本地缓存里的旧值，下一次保存又把它写回去——
         // 删掉的背景/笔记/装备会"复活"。后端是唯一事实来源，空值也是事实。
@@ -602,7 +617,11 @@ export default function CharacterPage() {
         finalPreview.skillView.map(v => [v.id, v.current])
       )
 
-      const characterId = await createCharacterDraft(roomId)
+      // 已经有草稿就复用，不要每次提交都新建一条。原来无条件 createCharacterDraft，
+      // 「编辑已有角色 → 再次完成创建」会在 characters 表里再插一行，上一条就成了
+      // 孤儿记录（改几次就攒几条），而房间里真正生效的只有最后那条。
+      const characterId =
+        useRoomStore.getState().characterId ?? (await createCharacterDraft(roomId))
       await saveCharacter(roomId, characterId, {
         name: info.name,
         age: info.age ? Number(info.age) : null,

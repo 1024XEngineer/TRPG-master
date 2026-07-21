@@ -393,12 +393,19 @@ def _compute(
             )
         )
 
+    # 这里查的是**总预算**，不是"职业点单独有没有超"——后者会误杀合法的卡。
+    # COC7 里兴趣点可以花在任何技能上（包括职业技能），职业点则只能花在职业
+    # 技能上。所以从最终值反推时，唯一能确定的约束是：
+    #   ①非职业技能只能由兴趣点买 → 上面那条 INTEREST_POINTS_EXCEEDED；
+    #   ②两个池加起来够不够 → 这一条。
+    # 职业技能上的点数超过职业预算是允许的（超出部分由兴趣点承担），所以
+    # `occupation_spent` 只是给前端渲染的记账，不作为闸门。
     total_spent = occupation_spent + interest_spent
     total_budget = occupation_budget + interest_budget
     if total_spent > total_budget:
         issues.append(
             ValidationIssue(
-                code="OCCUPATION_POINTS_EXCEEDED",
+                code="SKILL_POINTS_EXCEEDED",
                 field="skills",
                 message=f"技能总点数已用 {total_spent}，超过总预算 {total_budget}"
                 f"（职业 {occupation_budget} + 兴趣 {interest_budget}）",

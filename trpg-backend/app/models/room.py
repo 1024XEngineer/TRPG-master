@@ -11,7 +11,17 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text, Uuid
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    Uuid,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.db import Base
@@ -80,14 +90,23 @@ class Player(Base):
 
     __tablename__ = "players"
 
+    # 「一个账号在一个房间里只能有一名玩家」这条不变式必须由数据库保证，不能只靠
+    # service 层「先查再插」——那是 check-then-act，两个并发的重连/加入请求会同时
+    # 查到「不存在」然后各插一行，幂等承诺当场失效、房间人数还会虚增（PR #110
+    # review [2]）。约束放在这里，service 层配合捕获 IntegrityError 重查。
+    #
+    # `user_id` 可空，而 SQL 的唯一约束**不约束 NULL**（多行 NULL 互不冲突），
+    # 所以 AI 玩家（`is_ai=true`，无账号）和迁移前遗留的无账号行不受影响。
+    __table_args__ = (UniqueConstraint("room_id", "user_id", name="uq_players_room_user"),)
+
     id: Mapped[str] = mapped_column(
         Uuid(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4())
     )
     room_id: Mapped[str] = mapped_column(
         Uuid(as_uuid=False), ForeignKey("rooms.id"), nullable=False
     )
-    # 关联账号：可空，理由同 Room.host_user_id 的注释——本期 REST 创建/加入
-    # 房间不强制登录，只在调用方带了有效 Authorization 时才回填。
+    # 关联账号：REST 创建/加入房间自 issue #106 起要求登录、必定回填；仍保留可空
+    # 是为了 AI 玩家（`is_ai=true`）和迁移前的遗留行。
     user_id: Mapped[str | None] = mapped_column(
         Uuid(as_uuid=False), ForeignKey("users.id"), nullable=True, default=None
     )

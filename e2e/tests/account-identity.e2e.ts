@@ -69,6 +69,25 @@ test('🔴 游戏开始后：老成员能重连，新人被拒', async () => {
   )
 })
 
+test('🔴 换设备重连能拿回角色卡 id（否则会被引导重建一张）', async () => {
+  // PR #110 review [1]：客户端靠 `characterId` 才知道去拉哪张卡，而在此之前这个
+  // id 只在建卡那一刻由客户端自己存着——换台设备就永远拿不回来，已经建完卡的人
+  // 重连后会显示成「还没建卡」。这条正好补上「换设备重连」那条用例的缺口：光有
+  // 房间身份不够，角色身份也要能恢复。
+  const room = await createRoomWithModule('charid')
+  const guest = await registerPlayer('charidguest')
+  const joined = await guest.sdk.rooms.join(room.roomCode, { nickname: '访客' }, guest.token)
+  assert.equal(joined.characterId, null, '还没建卡时应该是 null')
+
+  const draft = await guest.sdk.characters.createDraft(room.roomId, joined.reconnectToken)
+
+  // 全新 SDK 实例 = 另一台设备，只有账号 token
+  const otherDevice = makeSdk()
+  const recovered = await otherDevice.rooms.join(room.roomCode, { nickname: '访客' }, guest.token)
+
+  assert.equal(recovered.characterId, draft.characterId)
+})
+
 test('我的游戏：按账号返回全部房间，且不泄漏别人的', async () => {
   const first = await createRoomWithModule('mine1')
   // 同一个账号再建一个房间——用它自己的 sdk/token

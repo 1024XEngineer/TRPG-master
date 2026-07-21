@@ -24,7 +24,13 @@ interface RoomState {
   createFormRoomName: string
   createFormMaxPlayers: number
   setRoom: (code: string, players: Player[]) => void
-  setRoomIdentity: (info: { roomId: string; roomCode: string; playerId: string; reconnectToken: string }) => void
+  setRoomIdentity: (info: {
+    roomId: string
+    roomCode: string
+    playerId: string
+    reconnectToken: string
+    characterId?: string | null
+  }) => void
   setModuleId: (moduleId: string) => void
   setCharacterId: (characterId: string) => void
   addPlayer: (player: Player) => void
@@ -55,17 +61,25 @@ export const useRoomStore = create<RoomState>()(
       createFormRoomName: '',
       createFormMaxPlayers: 4,
       setRoom: (code, players) => set({ roomCode: code, players }),
-      setRoomIdentity: ({ roomId, roomCode, playerId, reconnectToken }) =>
+      setRoomIdentity: ({ roomId, roomCode, playerId, reconnectToken, characterId }) =>
         set((state) => ({
           roomId,
           roomCode,
           playerId,
           reconnectToken,
-          // 换到别的房间就丢掉上一个房间的角色 id：角色卡是按房间隔离的
-          // （后端 `_get_own_character` 校验 `character.room_id`），带过去只会
-          // 404。创建房间那条路径本来就会先 reset()，但"加入房间"和"我的游戏
-          // →继续"不会，同一个标签页里换个房间就会留着上一局的 characterId。
-          ...(state.roomId !== roomId ? { characterId: null } : {}),
+          // characterId 以**服务端返回的为准**（PR #110 review [1]）：join 现在会
+          // 带上"这个房间里属于我的角色卡 id"。在此之前它只在建卡那一刻由客户端
+          // 自己存着——换台设备就永远拿不回来，已经建完卡的人重连后会显示成
+          // "还没建卡"、被引导去建第二张。
+          //
+          // 服务端没给（undefined，比如还没接这个字段的旧调用方）才退回原来的
+          // 行为：换房间就清空。角色卡是按房间隔离的（后端 `_get_own_character`
+          // 校验 `character.room_id`），把上一局的 id 带过去只会 404。
+          ...(characterId !== undefined
+            ? { characterId }
+            : state.roomId !== roomId
+              ? { characterId: null }
+              : {}),
         })),
       setModuleId: (moduleId) => set({ moduleId }),
       setCharacterId: (characterId) => set({ characterId }),

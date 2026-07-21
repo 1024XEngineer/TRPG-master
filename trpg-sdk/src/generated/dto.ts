@@ -529,6 +529,7 @@ export interface RoomCreateResult {
   roomCode: string;
   reconnectToken: string;
   playerId: string;
+  characterId?: string | null;
 }
 
 /**

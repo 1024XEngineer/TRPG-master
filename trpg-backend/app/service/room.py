@@ -10,7 +10,8 @@ import secrets
 import string
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import not_implemented
@@ -29,7 +30,7 @@ from app.dto.room import (
 )
 from app.models.content import Game, GameSystem, Scenario
 from app.models.event import Event
-from app.models.room import Player, Room
+from app.models.room import Character, Player, Room
 from app.models.user import User
 
 
@@ -114,6 +115,24 @@ async def require_room_member(
     return player
 
 
+async def _room_identity(db: AsyncSession, room: Room, player: Player) -> RoomCreateResult:
+    """组装「我在这个房间里是谁」——创建/加入/重连三条路径共用。
+
+    带上 `character_id` 是为了让**换设备重连**真正可用（PR #110 review [1]）：
+    客户端靠它才知道该去拉哪张角色卡，而在此之前这个 id 只在建卡那一刻由客户端
+    自己存着——换台设备就永远拿不回来了，已经建完卡的人重连后会显示成"还没建卡"、
+    被引导去建第二张。服务端本来就知道答案，直接给。
+    """
+    character = await db.scalar(select(Character).where(Character.player_id == player.id))
+    return RoomCreateResult(
+        room_id=room.id,
+        room_code=room.room_code,
+        reconnect_token=player.reconnect_token,
+        player_id=player.id,
+        character_id=character.id if character is not None else None,
+    )
+
+
 async def _module_title(db: AsyncSession, scenario_id: str | None) -> str | None:
     if scenario_id is None:
         return None
@@ -185,12 +204,7 @@ async def create_room(db: AsyncSession, payload: RoomCreate, user: User) -> Room
     room.host_player_id = player.id
     await db.commit()
 
-    return RoomCreateResult(
-        room_id=room.id,
-        room_code=room.room_code,
-        reconnect_token=player.reconnect_token,
-        player_id=player.id,
-    )
+    return await _room_identity(db, room, player)
 
 
 async def join_room(
@@ -221,12 +235,7 @@ async def join_room(
         select(Player).where(Player.room_id == room.id, Player.user_id == user.id)
     )
     if existing is not None:
-        return RoomCreateResult(
-            room_id=room.id,
-            room_code=room_code,
-            reconnect_token=existing.reconnect_token,
-            player_id=existing.id,
-        )
+        return await _room_identity(db, room, existing)
 
     # 到这里说明是新人。新人只能在大厅阶段加入：游戏已经开始/结束之后再放人
     # 进来，等于中途加入，本期不做。
@@ -245,15 +254,30 @@ async def join_room(
         is_host=False,
         joined_at=datetime.now(UTC),
     )
-    db.add(player)
-    await db.commit()
+    # 上面那段「先查有没有、没有才插」是 check-then-act，两个并发的重连/加入请求
+    # 会同时查到「不存在」然后各插一行（PR #110 review [2]）。真正的不变式由
+    # `players` 的 `uq_players_room_user` 唯一约束保证，这里负责把撞上约束的那一方
+    # **收敛成和先到者一样的结果**——毕竟两个请求想要的是同一件事。
+    #
+    # 🔴 必须用 SAVEPOINT（`begin_nested`）包住这次插入，不能直接 `commit()` 之后
+    # 捕获再 `rollback()`：那样整个事务连同连接一起废掉，紧接着的重查要重新建连接，
+    # 在异步驱动下会炸 `MissingGreenlet`——真实并发 curl 实测 10 个请求里有 2 个
+    # 因此返回 500（pytest 的 ASGITransport 装置压不出并发，测不到这条）。
+    # SAVEPOINT 只回滚到存档点，session 和连接都还活着，重查才做得下去。
+    try:
+        async with db.begin_nested():
+            db.add(player)
+            await db.flush()
+    except IntegrityError:
+        winner = await db.scalar(
+            select(Player).where(Player.room_id == room.id, Player.user_id == user.id)
+        )
+        if winner is None:
+            raise
+        return await _room_identity(db, room, winner)
 
-    return RoomCreateResult(
-        room_id=room.id,
-        room_code=room_code,
-        reconnect_token=player.reconnect_token,
-        player_id=player.id,
-    )
+    await db.commit()
+    return await _room_identity(db, room, player)
 
 
 async def get_room_preview(db: AsyncSession, room_code: str) -> RoomPreview | None:
@@ -350,31 +374,51 @@ async def list_my_rooms(db: AsyncSession, user: User) -> list[MyRoomSummary]:
     房间——所以「我的游戏」实际上是「这个浏览器的最后一个房间」，换台设备就什么
     都看不到。账号体系当初正是为「换设备找回游戏」引入的，这里按 `user_id` 查才
     兑现了那个目的。
+
+    ⚠️ 查询数量必须跟房间数**无关**。第一版在循环里逐个房间查人数、查模组标题，
+    N 个房间要发约 `2N+2` 条查询（PR #110 review [3]）——这个接口正是本 issue 让它
+    从「最多一个房间」变成「该账号全部房间」的，N 会真的长起来。下面改成先一次性
+    把人数和模组标题聚合出来，再拼结果，总共 4 条查询封顶。
     """
     players = await db.scalars(select(Player).where(Player.user_id == user.id))
     room_ids = [p.room_id for p in players]
     if not room_ids:
         return []
 
-    rooms = await db.scalars(
-        select(Room).where(Room.id.in_(room_ids)).order_by(Room.updated_at.desc())
+    rooms = list(
+        await db.scalars(select(Room).where(Room.id.in_(room_ids)).order_by(Room.updated_at.desc()))
     )
-    summaries: list[MyRoomSummary] = []
-    for room in rooms:
-        count_result = await db.scalars(select(Player).where(Player.room_id == room.id))
-        summaries.append(
-            MyRoomSummary(
-                room_id=room.id,
-                room_code=room.room_code,
-                room_name=room.room_name,
-                phase=room.phase,
-                module_title=await _module_title(db, room.scenario_id),
-                player_count=len(list(count_result)),
-                max_players=room.max_players,
-                updated_at=room.updated_at,
-            )
+
+    # 每个房间的人数：一条 GROUP BY，不是一房一查
+    count_rows = await db.execute(
+        select(Player.room_id, func.count(Player.id))
+        .where(Player.room_id.in_(room_ids))
+        .group_by(Player.room_id)
+    )
+    counts = dict(count_rows.tuples().all())
+
+    # 模组标题：把用到的 scenario_id 去重后一次查完
+    scenario_ids = {room.scenario_id for room in rooms if room.scenario_id is not None}
+    titles: dict[str, str] = {}
+    if scenario_ids:
+        title_rows = await db.execute(
+            select(Scenario.id, Scenario.title).where(Scenario.id.in_(scenario_ids))
         )
-    return summaries
+        titles = dict(title_rows.tuples().all())
+
+    return [
+        MyRoomSummary(
+            room_id=room.id,
+            room_code=room.room_code,
+            room_name=room.room_name,
+            phase=room.phase,
+            module_title=titles.get(room.scenario_id) if room.scenario_id else None,
+            player_count=counts.get(room.id, 0),
+            max_players=room.max_players,
+            updated_at=room.updated_at,
+        )
+        for room in rooms
+    ]
 
 
 async def end_game(db: AsyncSession, room_id: str, reconnect_token: str | None) -> None:

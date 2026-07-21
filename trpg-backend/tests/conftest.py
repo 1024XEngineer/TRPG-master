@@ -7,7 +7,7 @@
 """
 
 import tempfile
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Generator
 from pathlib import Path
 
 import pytest
@@ -84,6 +84,28 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
     """
     async with TestSessionLocal() as session:
         yield session
+
+
+@pytest.fixture
+def sql_counter() -> Generator[list[str], None, None]:
+    """记录这段测试期间真实执行的 SQL 语句，用来断言"查询数不随数据量增长"。
+
+    给 N+1 查询这类问题用：光看接口返回值是对的看不出它发了多少条查询，而 N+1
+    的症状要到数据量长起来才显现——那时候再发现就晚了。断言用"总数有上限"而不是
+    "等于某个具体值"，免得以后加一条无关查询就误报。
+    """
+    from sqlalchemy import event
+
+    executed: list[str] = []
+
+    def record(conn, cursor, statement, parameters, context, executemany) -> None:  # noqa: ANN001
+        executed.append(statement)
+
+    event.listen(test_engine.sync_engine, "before_cursor_execute", record)
+    try:
+        yield executed
+    finally:
+        event.remove(test_engine.sync_engine, "before_cursor_execute", record)
 
 
 @pytest.fixture

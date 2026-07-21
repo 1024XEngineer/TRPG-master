@@ -1,7 +1,12 @@
 from datetime import datetime
 
+import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.room import Player
 from tests.helpers import ROOMS_BASE, bearer, create_room, join_room, reconnect, register
 
 
@@ -112,6 +117,97 @@ async def test_rejoin_is_not_blocked_by_a_full_room(client: AsyncClient) -> None
 
     assert response.status_code == 200
     assert response.json()["data"]["playerId"] == joined["playerId"]
+
+
+async def test_unique_constraint_blocks_duplicate_player_rows(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """🔴 「一个账号在一个房间里只有一名玩家」必须由**数据库**保证（PR #110 review [2]）。
+
+    service 层那段「先查有没有、没有才插」是 check-then-act：两个并发请求会同时
+    查到「不存在」然后各插一行，幂等承诺当场失效、房间人数还会虚增。所以真正的
+    不变式落在 `players` 的 `uq_players_room_user` 唯一约束上，service 只负责捕获
+    `IntegrityError` 后把撞上的那一方收敛成和先到者一样的结果。
+
+    这里直接往库里插重复行来证明**约束真的会咬人**——只测 service 的话，约束漏建
+    了测试照样绿（service 那条 if 会先挡住），等真出现并发才暴露。
+    并发下的收敛行为用真实 HTTP 并发验证（见 PR 说明），测试装置里的
+    `ASGITransport` + aiosqlite 并发建连接会报 MissingGreenlet，测不了。
+    """
+    room = await create_room(client)
+    guest_token = await register(client)
+    joined = await join_room(client, room["roomCode"], guest_token)
+
+    player = await db_session.scalar(select(Player).where(Player.id == joined["playerId"]))
+    assert player is not None
+
+    db_session.add(
+        Player(
+            room_id=player.room_id,
+            user_id=player.user_id,
+            nickname="影子玩家",
+            is_host=False,
+        )
+    )
+    with pytest.raises(IntegrityError):
+        await db_session.commit()
+
+
+async def test_join_returns_existing_character_id_for_reconnect(client: AsyncClient) -> None:
+    """🔴 重连要能拿回自己那张角色卡的 id（PR #110 review [1]）。
+
+    客户端靠 `characterId` 才知道去拉哪张卡。在此之前这个 id 只在建卡那一刻由
+    客户端自己存着——**换台设备就永远拿不回来**，已经建完卡的人重连后会显示成
+    「还没建卡」、被引导去建第二张。服务端本来就知道答案，直接给。
+    """
+    room = await create_room(client)
+    guest_token = await register(client)
+    joined = await join_room(client, room["roomCode"], guest_token)
+    assert joined["characterId"] is None, "还没建卡时应该是 None"
+
+    draft = await client.post(
+        f"{ROOMS_BASE}/{room['roomId']}/characters",
+        headers=reconnect(joined["reconnectToken"]),
+    )
+    character_id = draft.json()["data"]["characterId"]
+
+    rejoined = await join_room(client, room["roomCode"], guest_token)
+
+    assert rejoined["characterId"] == character_id
+
+
+async def test_list_my_rooms_query_count_does_not_grow_with_rooms(
+    client: AsyncClient, sql_counter: list[str]
+) -> None:
+    """🔴 `/me/rooms` 的查询数必须跟房间数无关（PR #110 review [3]）。
+
+    第一版在循环里逐个房间查人数、查模组标题，N 个房间约 `2N+2` 条查询。这个接口
+    正是 #106 让它从「最多一个房间」变成「该账号全部房间」的，N 会真的长起来。
+
+    用 SQLAlchemy 的 `before_cursor_execute` 数真实 SQL 条数：断言"总数有上限"而
+    不是"等于某个具体值"，免得以后加一列无关的查询就误报。
+    """
+    token = await register(client, account="counter")
+    module_id = (await client.get("/api/v1/modules")).json()["data"][0]["id"]
+    for index in range(6):
+        room = await create_room(client, token=token, room_name=f"房间{index}")
+        # ⚠️ 必须真的选上模组：`_module_title` 在 `scenario_id` 为 NULL 时直接早退、
+        # 一条查询都不发。第一版没选模组，于是"每个房间查一次标题"这条 N+1 路径
+        # 根本没被触发——测试照样绿，是变异检验才发现的。
+        await client.post(
+            f"{ROOMS_BASE}/{room['roomId']}/module",
+            json={"moduleId": module_id, "attributeGenMethod": "point_buy"},
+            headers=reconnect(room["reconnectToken"]),
+        )
+
+    sql_counter.clear()  # 只数这一次请求的
+    response = await client.get("/api/v1/me/rooms", headers=bearer(token))
+
+    assert len(response.json()["data"]) == 6
+    assert len(sql_counter) <= 8, (
+        f"6 个房间发了 {len(sql_counter)} 条查询，说明查询数随房间数增长：\n"
+        + "\n".join(sql_counter)
+    )
 
 
 async def test_created_room_is_linked_to_the_account(client: AsyncClient) -> None:

@@ -9,7 +9,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-
 REQUIRED_TOP_LEVEL = {
     "package_schema_version",
     "package_id",
@@ -203,7 +202,10 @@ def validate(package: dict[str, Any]) -> list[str]:
     for index, clue in enumerate(content.get("clues", [])):
         check_effects(clue.get("effects"), f"content.clues[{index}].effects")
     for index, checkpoint in enumerate(content.get("checkpoints", [])):
-        check_conditions(checkpoint.get("prerequisites"), f"content.checkpoints[{index}].prerequisites")
+        check_conditions(
+            checkpoint.get("prerequisites"),
+            f"content.checkpoints[{index}].prerequisites",
+        )
         for field in ("on_success", "on_failure", "on_fumble"):
             check_effects(checkpoint.get(field), f"content.checkpoints[{index}].{field}")
     for index, trigger in enumerate(content.get("triggers", [])):

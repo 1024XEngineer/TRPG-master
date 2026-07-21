@@ -10,7 +10,6 @@
   由 pydantic 自动处理，业务代码无需关心
 """
 
-
 from pydantic import Field, field_validator
 
 from app.dto.common import CamelModel, UtcDatetime

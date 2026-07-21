@@ -6,7 +6,6 @@
 （issue 决策 7），这里只定义 DTO 形状占住协议位置。
 """
 
-
 from pydantic import Field
 
 from app.dto.common import CamelModel, UtcDatetime

@@ -11,7 +11,6 @@ RoomPlayer.has_character 标记为 True；但 issue #84 S2 起，`complete_chara
 `CharacterComputeResult`（`POST /systems/{systemId}/character/preview`）。
 """
 
-
 from pydantic import Field
 
 from app.dto.common import CamelModel, UtcDatetime

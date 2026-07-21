@@ -117,6 +117,17 @@ class UnifiedWorkflowTests(unittest.TestCase):
         )
         return orchestrator, engine, recording
 
+    def test_actor_character_snapshot_is_loaded_and_preserved(self) -> None:
+        actor = self.state.actors["pc_1"]
+        self.assertEqual(actor.source_character_id, "character_01")
+        self.assertEqual(actor.source_character_version, 1)
+        self.assertEqual(actor.state["hp"], 10)
+        self.assertEqual(actor.state["san"], 60)
+
+        orchestrator, engine, _ = self.application()
+        self.run_turn(orchestrator)
+        self.assertEqual(engine.snapshot().actors["pc_1"], actor)
+
     def run_turn(self, orchestrator, player_input=None):
         return asyncio.run(orchestrator.run(player_input or self.player_input))
 

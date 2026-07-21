@@ -135,9 +135,21 @@ ModuleContentCandidate
 
 `ModuleDraft` 不能直接被 Runtime 加载。只有解决 `review_items` 并通过验证后，才能生成正式 `ModuleContent`。
 
-## 4. 哪些内容需要入库
+## 4. 面向运行时的交付要求
 
-### 4.1 逐项映射
+Parser Agent 必须把模组原文转换成三类数据：
+
+```text
+叙事数据：告诉 AI 主持知道什么、能说什么、人物如何行动
+规则数据：告诉规则引擎何时判定、如何计算、产生什么效果
+编排数据：告诉系统对象如何引用、场景如何连接、状态如何变化
+```
+
+运行时只加载审核通过的 `ModuleContent`，不读取原始 PDF、`ModuleDraft` 或未解决的解析推断。详细字段、调用边界、检定示例和验收清单见 [`Parser Agent 运行时交付契约`](../parser-runtime-contract.md)。
+
+## 5. 哪些内容需要入库
+
+### 5.1 逐项映射
 
 | 解析内容 | 存储位置 | 存储方式 |
 |---|---|---|
@@ -154,7 +166,7 @@ ModuleContentCandidate
 | `facts/scenes/entities/clues/checkpoints` | `scenario_revisions.content_json` | JSONB 内部对象 |
 | `sanity_events/triggers/endings` | `scenario_revisions.content_json` | JSONB 内部对象 |
 
-### 4.2 必需数据库表
+### 5.2 必需数据库表
 
 #### `module_sources` - 原始上传文件
 
@@ -295,7 +307,7 @@ UNIQUE(scenario_id, checksum_sha256)
 | `generated_by_ai` | BOOLEAN | 是否由 AI 生成 |
 | `created_at` | TIMESTAMPTZ | 创建时间 |
 
-## 5. JSONB 和关系表的边界
+## 6. JSONB 和关系表的边界
 
 短期以 `scenario_revisions.content_json` 作为正式模组的唯一事实源，其中保存：
 
@@ -317,7 +329,7 @@ UNIQUE(scenario_id, checksum_sha256)
 
 当后台编辑器、搜索或统计出现明确需求时，可以增加 `scenario_scenes`、`module_entities`、`module_clues`、`module_triggers` 等投影表。投影必须由发布流程从 `content_json` 自动生成，不能和 JSON 分别手工维护。
 
-## 6. 发布校验
+## 7. 发布校验
 
 `ModuleDraft` 只有满足以下条件才能发布：
 
@@ -333,7 +345,7 @@ UNIQUE(scenario_id, checksum_sha256)
 
 本次《追书人》已经通过 JSON 合法性、重复 ID、场景引用和 `source_refs` 检查；尚未完成全部人工确认、正式 `ModuleContent` Schema 校验和模拟跑团，因此当前只能作为黄金 Draft，不能直接发布。
 
-## 7. 推荐实施顺序
+## 8. 推荐实施顺序
 
 1. 冻结 `ModuleDraft`、`ValidationReport` 和 `ModuleContent` 首版 Schema；
 2. 实现 `module_sources`、`module_import_jobs`、`module_import_artifacts` 和 `module_import_issues`；

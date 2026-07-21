@@ -1,6 +1,13 @@
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.seed import BUILTIN_GAME_ID
+from app.models.content import GameSystem
+from app.models.room import Room
 from tests.helpers import ROOMS_BASE, create_room, join_room, reconnect, register
+
+# 「存在但没配规则数据」的规则系统，只出现在测试里（见文件末尾用例的说明）。
+UNCONFIGURED_SYSTEM_ID = "00000000-0000-0000-0000-0000000000fe"
 
 BUILT_CHARACTER = {
     "name": "陈探员",
@@ -290,3 +297,47 @@ async def test_cannot_read_another_players_character(client: AsyncClient) -> Non
     )
 
     assert response.status_code == 403
+
+
+async def test_complete_character_rejects_unconfigured_ruleset(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """PR #113 review：房间的规则系统没有规则数据时，complete 必须拒绝。
+
+    这是参数注入引入的**回归**，不是既有缺陷：改之前属性键来自 `coc7_rules` 的
+    模块常量 `COC7_ATTRIBUTE_KEYS`（写死 9 项），空白角色卡必然触发"缺少 9 个
+    属性"；改成从传入的 `RulesetRead` 取之后，空目录退化成"零个约束"，
+    `validate_character` 一条问题都查不出来，整张空白卡会被标记成建卡完成。
+
+    用例特意让角色卡**完全空白**（不 PATCH 任何数据），因为这正是回归最严重的
+    形态：连名字属性职业都没有的卡被判合法。
+    """
+    room = await create_room(client)
+    draft = await client.post(
+        f"{ROOMS_BASE}/{room['roomId']}/characters", headers=reconnect(room["reconnectToken"])
+    )
+    character_id = draft.json()["data"]["characterId"]
+
+    # 把房间挂到一个没有规则数据的系统上。走不了 select_module（那要求模组存在
+    # 并绑定系统），直接改库——这条路径现实中来自"未来的自定义规则系统"，
+    # 而不是当前任何一个用户操作。
+    db_session.add(
+        GameSystem(
+            id=UNCONFIGURED_SYSTEM_ID,
+            game_id=BUILTIN_GAME_ID,
+            name="未配置规则的系统",
+            ruleset=None,
+        )
+    )
+    db_room = await db_session.get(Room, room["roomId"])
+    assert db_room is not None
+    db_room.system_id = UNCONFIGURED_SYSTEM_ID
+    await db_session.commit()
+
+    response = await client.post(
+        f"{ROOMS_BASE}/{room['roomId']}/characters/{character_id}/complete",
+        headers=reconnect(room["reconnectToken"]),
+    )
+
+    assert response.status_code == 409, response.text
+    assert response.json()["error"]["code"] == "RULESET_NOT_CONFIGURED"

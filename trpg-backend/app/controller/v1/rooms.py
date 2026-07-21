@@ -49,6 +49,10 @@ _ERROR_MAP: dict[type[Exception], tuple[ErrorCode, int]] = {
         ErrorCode.CHARACTER_INCOMPLETE,
         status.HTTP_409_CONFLICT,
     ),
+    room_service.RulesetNotConfiguredError: (
+        ErrorCode.RULESET_NOT_CONFIGURED,
+        status.HTTP_409_CONFLICT,
+    ),
     room_service.RoomConflictError: (ErrorCode.CONFLICT, status.HTTP_409_CONFLICT),
     room_service.RoomAuthenticationError: (ErrorCode.UNAUTHORIZED, status.HTTP_401_UNAUTHORIZED),
     room_service.RoomAuthorizationError: (ErrorCode.FORBIDDEN, status.HTTP_403_FORBIDDEN),
@@ -320,6 +324,7 @@ async def complete_character(
         character_service.CharacterNotFoundError,
         room_service.RoomAuthenticationError,
         room_service.RoomAuthorizationError,
+        room_service.RulesetNotConfiguredError,
     ) as exc:
         _raise_service_error(exc)
     return ApiResponse.ok(None)

@@ -66,6 +66,10 @@ class CharacterIncompleteError(RuntimeError):
     """还有玩家未完成建卡，无法正式开局。"""
 
 
+class RulesetNotConfiguredError(RuntimeError):
+    """规则系统存在，但没有可用的规则数据，无法据此裁决建卡。"""
+
+
 # ── 内部辅助 ──────────────────────────────────────
 
 
@@ -466,6 +470,29 @@ async def get_ruleset(db: AsyncSession, system_id: str) -> RulesetRead:
     if system.ruleset:
         return RulesetRead.model_validate(system.ruleset)
     return RulesetRead(attributes=[], skills=[], occupations=[])
+
+
+async def require_ruleset(db: AsyncSession, system_id: str) -> RulesetRead:
+    """裁决路径专用的取数：拿不到可用规则数据就直接拒绝，不返回空目录。
+
+    跟 `get_ruleset` 的区别是**用途**，不是数据源——两者读的是同一张表：
+
+    - `get_ruleset` 服务于 `GET /systems/{id}/ruleset`（前端渲染用）。规则数据
+      为空时返回空目录是合理的：前端拿到空目录就知道这个系统还没配规则。
+    - `require_ruleset` 服务于**裁决**（建卡 `complete` 校验、`preview` 计算）。
+      规则计算改参数注入后（issue #112），属性键/技能表/职业目录全部来自传入的
+      `RulesetRead`，空目录会让校验退化成"零个约束"——空白角色卡一条问题都查不出
+      来，`complete_character` 会把它标记成完成。校验闸门不能 fail-open，所以这里
+      宁可报错也不放行。
+
+    参数注入之前这条路径是安全的，因为属性键写死在 `coc7_rules` 的模块常量里，
+    与规则数据是否存在无关；把数据源变成参数之后，"没有数据"就成了一种必须显式
+    处理的输入。
+    """
+    ruleset = await get_ruleset(db, system_id)
+    if not ruleset.attributes or not ruleset.occupations:
+        raise RulesetNotConfiguredError("该规则系统尚未配置规则数据，无法建卡")
+    return ruleset
 
 
 async def list_modules(db: AsyncSession) -> list[ModuleRead]:

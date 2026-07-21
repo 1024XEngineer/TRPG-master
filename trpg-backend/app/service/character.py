@@ -38,7 +38,7 @@ from app.service.room import (
     RoomAuthorizationError,
     find_room_by_id,
     get_player_by_reconnect_token,
-    get_ruleset,
+    require_ruleset,
 )
 
 
@@ -139,9 +139,12 @@ async def _resolve_ruleset(db: AsyncSession, room: Room) -> RulesetRead:
     这里回落到内置 COC7——这是当前唯一内置的规则系统，默认值刻意放在这层
     组装代码里，而不是塞进 `coc7_rules.py`：规则核心保持对具体系统无知，
     正是 issue #112 参数注入的整个目的。
+
+    走 `require_ruleset` 而不是 `get_ruleset`：这是裁决路径，规则数据为空时
+    必须拒绝而不是当成"零个约束"放行（见 `require_ruleset` 的说明）。
     """
     if room.system_id is not None:
-        return await get_ruleset(db, room.system_id)
+        return await require_ruleset(db, room.system_id)
     return build_coc7_ruleset()
 
 

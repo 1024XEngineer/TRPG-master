@@ -5,8 +5,9 @@
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.seed import BUILTIN_SYSTEM_ID, ensure_seed_content
+from app.core.seed import BUILTIN_GAME_ID, BUILTIN_SYSTEM_ID, ensure_seed_content
 from app.models.content import GameSystem
+from tests.helpers import bearer, register
 
 
 async def test_get_ruleset_returns_full_coc7_data(client: AsyncClient) -> None:
@@ -109,3 +110,66 @@ async def test_seed_refreshes_stale_builtin_ruleset(
     attributes = response.json()["data"]["attributes"]
     assert len(attributes) == 9
     assert any(a["key"] == "LUCK" for a in attributes)
+
+
+UNCONFIGURED_SYSTEM_ID = "00000000-0000-0000-0000-0000000000ff"
+
+
+async def _add_unconfigured_system(db_session: AsyncSession) -> str:
+    """造一个"存在但没配规则数据"的规则系统。
+
+    现实里目前造不出来（没有任何写接口能建 GameSystem，seed 一定写入 ruleset），
+    所以只能直接插库。但它是 issue #112 之后必须守住的输入：规则数据变成参数
+    之后，"没有数据"就是一种合法调用形态，而不再是不可能发生的状态。
+    """
+    db_session.add(
+        GameSystem(
+            id=UNCONFIGURED_SYSTEM_ID,
+            game_id=BUILTIN_GAME_ID,
+            name="未配置规则的系统",
+            ruleset=None,
+        )
+    )
+    await db_session.commit()
+    return UNCONFIGURED_SYSTEM_ID
+
+
+async def test_get_ruleset_returns_empty_catalog_for_unconfigured_system(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """读路径（前端渲染用）对空规则数据保持宽松：返回空目录而不是报错。
+
+    跟下面裁决路径的用例是一对——同一份空数据，读的时候是"这个系统还没配规则"，
+    裁决的时候是"无法裁决"。这条钉住的是**区别本身**：如果哪天有人图省事把守卫
+    直接加进 `get_ruleset`，这条会红，提醒他两条路径的语义不一样。
+    """
+    system_id = await _add_unconfigured_system(db_session)
+
+    response = await client.get(f"/api/v1/systems/{system_id}/ruleset")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["attributes"] == []
+    assert data["skills"] == []
+    assert data["occupations"] == []
+
+
+async def test_preview_rejects_unconfigured_ruleset(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """裁决路径（PR #113 review）：规则数据为空时 preview 必须拒绝。
+
+    参数注入之前属性键写死在 `coc7_rules` 的模块常量里，空规则数据也算得出东西；
+    改成从 `RulesetRead` 取之后，空目录 = 零个约束 = 什么都不校验，必须显式拒绝。
+    """
+    token = await register(client)
+    system_id = await _add_unconfigured_system(db_session)
+
+    response = await client.post(
+        f"/api/v1/systems/{system_id}/character/preview",
+        json={"attributes": {}, "occupationId": None, "skills": {}},
+        headers=bearer(token),
+    )
+
+    assert response.status_code == 409, response.text
+    assert response.json()["error"]["code"] == "RULESET_NOT_CONFIGURED"

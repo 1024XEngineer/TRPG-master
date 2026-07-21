@@ -79,13 +79,18 @@ async def preview_character(
 
     鉴权要求登录（跟 `GET /me/character-templates` 一致），但不要求是房间
     成员——建卡向导在正式进房前也可能需要预览（且系统内规则数据本身跟房间
-    无关），systemId 只用来确认这个规则系统真实存在（复用 `get_ruleset`
-    已有的存在性校验），当前只有内置 COC7 一套规则实现，不按 systemId 分流。
+    无关），systemId 只用来确认这个规则系统真实存在且配了规则数据（复用
+    `require_ruleset` 的存在性 + 可用性校验），当前只有内置 COC7 一套规则实现，
+    不按 systemId 分流。
     """
     await _require_user_id(authorization, db)
     try:
-        ruleset = await room_service.get_ruleset(db, system_id)
+        ruleset = await room_service.require_ruleset(db, system_id)
     except room_service.ModuleNotFoundError as exc:
         raise AppException(ErrorCode.NOT_FOUND, str(exc), status.HTTP_404_NOT_FOUND) from exc
+    except room_service.RulesetNotConfiguredError as exc:
+        raise AppException(
+            ErrorCode.RULESET_NOT_CONFIGURED, str(exc), status.HTTP_409_CONFLICT
+        ) from exc
     result = character_service.compute_character_preview(ruleset, payload)
     return ApiResponse.ok(result)

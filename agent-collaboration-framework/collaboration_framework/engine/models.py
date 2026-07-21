@@ -10,8 +10,11 @@ from collaboration_framework.contracts import ActionResult, ContractModel
 
 
 class ActorState(ContractModel):
-    player_id: str
-    name: str
+    player_id: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+    source_character_id: str = Field(min_length=1)
+    source_character_version: int = Field(ge=1)
+    state: dict[str, JsonValue] = Field(default_factory=dict)
 
 
 class GameState(ContractModel):

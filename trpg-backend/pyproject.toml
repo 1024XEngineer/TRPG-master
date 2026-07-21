@@ -64,3 +64,8 @@ python-version = "3.12"
 
 [tool.ty.src]
 include = ["app", "tests", "scripts", "alembic"]
+# 一次性的规则数据导入工具（issue #114）。它读的 COC7 规则表不在仓库里，CI 上
+# 永远跑不了它，所以 openpyxl 也不该进依赖清单——装一个 CI 用不上的包只为让
+# 类型检查过，是本末倒置。产物（raw_occupations.json、生成的 coc7_content.py）
+# 都进 git，可审计性由产物保证，不依赖这个脚本能在 CI 里跑。
+exclude = ["scripts/coc7_occupations"]

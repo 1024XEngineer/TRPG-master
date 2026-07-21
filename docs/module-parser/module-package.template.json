@@ -1,5 +1,5 @@
 {
-  "package_schema_version": "1.0.0",
+  "package_schema_version": "1.1.0",
   "package_id": "<module-package-id>",
   "package_status": "template",
   "source_manifest": {
@@ -9,7 +9,19 @@
     "document_type": "<scenario-document-type>",
     "text_extraction": "<extraction-method>",
     "layout_reviewed": false,
-    "runtime_included": false
+    "runtime_included": false,
+    "segments": [],
+    "extraction_quality": {
+      "text_confidence": null,
+      "layout_confidence": null,
+      "asset_coverage": null
+    },
+    "rights": {
+      "declaration_status": "<declared|inferred|unknown>",
+      "commercial_use": "<allowed|restricted|not_cleared|unknown>",
+      "redistribution": "<allowed|restricted|not_cleared|unknown>",
+      "notes": null
+    }
   },
   "module": {
     "module_id": "<stable-module-id>",
@@ -33,8 +45,19 @@
       "investigators_max": 1,
       "keeper_count": 1
     },
+    "estimated_duration": null,
+    "character_setup": {
+      "creation_mode": "<custom|pregenerated|required_pregenerated|mixed>",
+      "requirements": [],
+      "recommended_skills": [],
+      "party_relationships": [],
+      "pregenerated_character_ids": [],
+      "personalization_slots": []
+    },
+    "content_advisories": [],
     "premise": "<player-facing-premise>",
-    "entry_scene_id": "<scene-id>"
+    "entry_scene_id": "<scene-id>",
+    "entry_points": []
   },
   "keeper_brief": {
     "core_truth": "<keeper-only-core-truth>",
@@ -46,16 +69,27 @@
   "runtime_defaults": {
     "clue_visibility": "locked_until_granted",
     "missing_checkpoint_outcome": "no_effect",
+    "unknown_action_policy": "adjudicate_without_state_change",
     "trigger_once": true,
-    "trigger_priority": 100
+    "trigger_priority": 100,
+    "track_transition_policy": "first_matching_priority",
+    "timeline_conflict_policy": "priority_then_source_order"
   },
   "content": {
     "facts": [],
     "scenes": [],
+    "locations": [],
     "entities": [],
+    "characters": [],
+    "resources": [],
     "clues": [],
     "checkpoints": [],
     "sanity_events": [],
+    "timelines": [],
+    "tracks": [],
+    "encounters": [],
+    "puzzles": [],
+    "tables": [],
     "triggers": [],
     "endings": []
   },
@@ -65,6 +99,10 @@
     "granted_clue_ids": [],
     "completed_checkpoint_ids": [],
     "fired_trigger_ids": [],
+    "active_timeline_ids": [],
+    "track_states": {},
+    "inventory_resource_ids": [],
+    "active_encounter_id": null,
     "active_ending_id": null,
     "clock": {
       "day": 0,
@@ -76,7 +114,7 @@
   "normalization_decisions": [],
   "validation": {
     "status": "pending",
-    "validator_version": "module-package-validator/0.1.0",
+    "validator_version": "module-package-validator/0.2.0",
     "checks": [],
     "errors": []
   }

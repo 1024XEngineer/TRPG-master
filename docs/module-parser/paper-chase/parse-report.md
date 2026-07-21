@@ -10,14 +10,17 @@
 
 ## 1. 当前结论
 
-《追书人》PDF 共 6 页，已经被整理为 `ModulePackage 1.0.0`。该包不再是等待玩家审核的 Draft，而是规则引擎、AI 主持和游戏编排器共同使用的第一个黄金预设模组。
+《追书人》PDF 共 6 页，已经被整理为 `ModulePackage 1.1.0`。该包不再是等待玩家审核的 Draft，而是规则引擎、AI 主持和游戏编排器共同使用的第一个黄金预设模组。
 
 它已经具备：
 
 - 明确的规则系统、人数和入口场景；
+- 文档分段、提取质量、权利状态和内容提示；
+- 自建角色要求、推荐技能和默认导入；
 - 玩家可见描述与 Keeper 私有说明；
 - NPC 知识、目标、行为和数值；
-- 线索、检定、SAN、Trigger 和 Ending；
+- 物理地点、地图连接、可交互资源和素材展示条件；
+- 线索、检定、SAN、时间线、遭遇、Trigger 和 Ending；
 - 可以直接创建游戏的 `initial_state`；
 - 已解决的原文歧义和自动验证摘要；
 - 稳定 ID、对象引用和来源页码。
@@ -32,13 +35,21 @@
 |---|---:|---|
 | 核心事实 | 5 | Keeper 真相及可见性 |
 | 场景 | 12 | 调查、冲突、地穴和最终对话 |
-| 实体 | 12 | NPC、群体、物品和地点 |
+| 地点 | 5 | 城镇、旧宅、墓地、墓碑和地穴入口 |
+| 实体 | 6 | NPC 和食尸鬼群体 |
+| 预生成角色 | 0 | 原文要求一名自建调查员 |
+| 资源 | 4 | 日记、窗户、酒瓶和一品脱酒 |
 | 线索 | 13 | 前提、支撑、路线、真相和结局线索 |
 | 检定 | 14 | 社交、调查、追踪、幸运、语言和力量 |
 | 理智事件 | 4 | 触发条件、损失公式和上限 |
+| 时间线 | 1 | 调查昼夜循环和夜间监视窗口 |
+| 状态轨道 | 0 | 原文没有感染、异变或怀疑阶段 |
+| 遭遇 | 1 | 道格拉斯对峙及其非敌对/暴力结果 |
+| 谜题 | 0 | 原文没有机关依赖图 |
+| 随机表 | 0 | 原文没有运行时随机表 |
 | Trigger | 7 | 移动、状态变化、SAN 和场景切换 |
 | Ending | 6 | 和平、失踪、疗养院、逃亡和被捕 |
-| 资源 | 2 | 道格拉斯插图和地点地图 |
+| 素材 | 2 | 道格拉斯插图和地点地图 |
 | 自动归一化决策 | 6 | 已全部解决，不需要玩家审核 |
 
 ### 2.2 模组真相和主持约束
@@ -74,9 +85,12 @@
 ```text
 player_description  可直接告诉玩家
 keeper_notes        只提供给 AI 主持
+location_ids        当前场景对应的物理地点
 entity_ids          当前可交互实体
+resource_ids        当前可阅读、持有或操作的资源
 clue_ids            当前可获得线索
 checkpoint_ids      可能触发的规则检定
+encounter_ids       当前可进入的遭遇
 trigger_ids         自动事件
 next_scene_ids      允许转场目标
 source_refs         原文来源
@@ -87,9 +101,13 @@ source_refs         原文来源
 规则引擎可以从包中读取：
 
 - `module.ruleset_ref`：CoC7 及所需规则能力；
+- `locations`：地点层级、连接、隐藏路线和地图绑定；
+- `resources`：日记、机关和物品状态；
 - NPC `stat_block`：属性、HP、攻击、护甲和 SAN 损失；
 - `checkpoints`：技能、难度、前置条件、重复方式、成本和结果；
 - `sanity_events`：成功/失败损失和累计上限；
+- `timelines`：昼夜推进及定时开放的事件；
+- `encounters`：参与者、可选行动、缩放和结束策略；
 - `triggers`：事件及 Effect；
 - `endings`：条件、优先级和结构化结果；
 - `initial_state`：入口场景、初始线索、时间和模组变量。
@@ -314,7 +332,7 @@ created_at TIMESTAMPTZ
 
 ## 6. JSONB 与关系表边界
 
-`scenario_revisions.package_json` 是正式模组的唯一事实源。Scene、Entity、Clue、Checkpoint、SanityEvent、Trigger 和 Ending 全部保存在其中。
+`scenario_revisions.package_json` 是正式模组的唯一事实源。Scene、Location、Entity、Character、Resource、Clue、Checkpoint、SanityEvent、Timeline、Track、Encounter、Puzzle、Table、Trigger 和 Ending 全部保存在其中。
 
 当前不拆分 Condition、Effect、NPC Goal 和 Clue Source 等多态子表。后续如编辑器或搜索需要，可以生成 Scene、Entity、Clue、Trigger 投影表；投影必须由 `package_json` 自动生成，不能手工维护两份内容。
 

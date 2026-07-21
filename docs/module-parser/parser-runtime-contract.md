@@ -1,56 +1,55 @@
 # Module Parser Agent 产物契约
 
-本文定义模组解析 Agent 的开发目标：把用户上传的模组自动转换为经过校验、可以被规则引擎、AI 主持和游戏编排器直接加载的 `ModulePackage`。
-
-空框架：[`module-package.template.json`](module-package.template.json)
+工作项：[Issue #98](https://github.com/1024XEngineer/TRPG-master/issues/98)
 
 黄金样例：[`paper-chase/module-package.json`](paper-chase/module-package.json)
 
-框架对照：[`module-package-review.md`](module-package-review.md)
+框架评审：[`module-package-review.md`](module-package-review.md)
 
 ## 1. 核心结论
 
-`ModuleDraft` 可以存在于 Agent 内部推理过程，但不是产品交付物。正式导入只有两种结果：
+`ModuleDraft` 只存在于 Agent 内部过程。正式导入只有两种结果：
 
 ```text
-ready  -> 输出可直接运行的 ModulePackage
+ready  -> 输出可直接运行的 ModulePackage 1.1
 failed -> 不创建可运行模组，返回结构化错误
 ```
 
-玩家不负责审核解析结果。解析 Agent 必须通过自动归一化、交叉检查、规则校验和修复循环解决问题。无法安全解决的 blocker 应导致导入失败，不能把开放的 `review_items` 带入运行时。
+玩家不负责审核解析结果。Agent 必须自动完成归一化、交叉检查、规则校验和有限次数修复；无法安全解决的 blocker 应使导入失败。
 
 ## 2. 完整产物链
 
-### 2.1 Agent 内部产物
-
-以下内容用于追踪和调试，可以存入 `module_import_artifacts`，但不被游戏运行时加载：
+### 2.1 内部产物
 
 | 产物 | 内容 |
 |---|---|
-| `SourceManifest` | 文件哈希、页码、语言、版权声明和提取方式 |
-| `ExtractedDocument` | 文本块、章节、表格、图片位置和 OCR 信息 |
-| `ModuleDraft` | 第一次结构化结果，可包含低置信度字段和待修复问题 |
-| `ValidationReport` | Schema、引用、规则、可见性、可达性和循环检查结果 |
-| `RepairTrace` | 自动修复前后差异、采用的策略和重试次数 |
+| `SourceManifest` | 文件哈希、文档分段、页码、语言、权利声明和提取质量 |
+| `ExtractedDocument` | 文本块、章节、表格、图片、地图标签、OCR 和版面信息 |
+| `ModuleDraft` | 第一次结构化结果，可带置信度和待修复诊断 |
+| `ValidationReport` | Schema、引用、规则、可见性、可达性、时间线和循环检查 |
+| `RepairTrace` | 自动修复前后差异、策略、模型和重试次数 |
 
-### 2.2 唯一正式产物
+这些产物可以进入 `module_import_artifacts`，但不被游戏运行时加载。
+
+### 2.2 正式产物
 
 `ModulePackage` 是唯一正式交付物，必须满足：
 
+- `package_schema_version = 1.1.0`；
 - `package_status = ready`；
-- 不包含开放问题或未决占位符；
-- 通过 Schema 和语义校验；
+- 不包含开放问题或占位符；
 - 固定规则系统及版本；
-- 具有完整初始状态；
-- 可以直接创建一局游戏；
+- 文档分段、来源引用和权利状态完整；
+- 具有可创建游戏的初始状态；
+- 通过 Schema、引用和规则能力校验；
 - 发布后不可原地修改，修改必须创建新 revision。
 
-## 3. `ModulePackage` 顶层结构
+## 3. 顶层结构
 
 ```json
 {
-  "package_schema_version": "1.0.0",
-  "package_id": "module-package.paper-chase-zh-coc7.v1",
+  "package_schema_version": "1.1.0",
+  "package_id": "module-package.paper-chase-zh-coc7.v2",
   "package_status": "ready",
   "source_manifest": {},
   "module": {},
@@ -59,10 +58,18 @@ failed -> 不创建可运行模组，返回结构化错误
   "content": {
     "facts": [],
     "scenes": [],
+    "locations": [],
     "entities": [],
+    "characters": [],
+    "resources": [],
     "clues": [],
     "checkpoints": [],
     "sanity_events": [],
+    "timelines": [],
+    "tracks": [],
+    "encounters": [],
+    "puzzles": [],
+    "tables": [],
     "triggers": [],
     "endings": []
   },
@@ -73,71 +80,97 @@ failed -> 不创建可运行模组，返回结构化错误
 }
 ```
 
-| 部分 | 必须包含什么 | 消费方 |
-|---|---|---|
-| `source_manifest` | 文件、页数、语言、提取方式；原文件不直接进入运行时 | 审计系统 |
-| `module` | 标题、规则版本、设定、人数、简介、入口场景 | 产品、编排器 |
-| `keeper_brief` | 核心真相、体验目标、基调、必须保持和禁止提前透露的内容 | AI 主持 |
-| `runtime_defaults` | 缺省可见性、Trigger 和未声明结果的确定性语义 | 编排器、规则引擎 |
-| `content` | 可执行的场景、实体、线索、检定、Trigger 和结局 | 全部运行时组件 |
-| `initial_state` | 当前场景、初始线索、计时器、变量和已执行对象 | 编排器、规则引擎 |
-| `assets` | 地图、立绘、音频及展示条件 | AI 主持、前端 |
-| `normalization_decisions` | Agent 已经自动解决的原文歧义及依据 | 审计、调试 |
-| `validation` | 自动门禁结果、验证器版本和错误列表 | 发布流程 |
+所有 `content` 集合必须存在但允许为空。空集合表示原文没有该玩法；Agent 必须通过来源覆盖检查证明不是漏解析。
 
-## 4. AI 主持所需内容
+## 4. 来源、分段和权利
 
-### 4.1 `keeper_brief`
+`source_manifest` 至少包含：
+
+```text
+filename / page_count / language / document_type
+text_extraction / layout_reviewed / runtime_included
+segments
+extraction_quality.text_confidence
+extraction_quality.layout_confidence
+extraction_quality.asset_coverage
+rights.declaration_status
+rights.commercial_use
+rights.redistribution
+```
+
+`segments` 必须区分模组正文、规则附录、预生成角色、玩家手册和其他模组。每个正式包只包含被选中的模组及其依赖分段。
+
+权利状态未知时可以作为私有导入或开发样例，但不能自动标记为允许商业发布。
+
+## 5. 模组与角色配置
+
+`module` 除身份、设定、人数和入口外，还必须包含：
+
+```json
+{
+  "estimated_duration": "<duration>",
+  "character_setup": {
+    "creation_mode": "custom",
+    "requirements": [],
+    "recommended_skills": [],
+    "party_relationships": [],
+    "pregenerated_character_ids": [],
+    "personalization_slots": []
+  },
+  "content_advisories": [],
+  "entry_scene_id": "scene.entry",
+  "entry_points": []
+}
+```
+
+`entry_scene_id` 是默认入口；`entry_points` 可以表达职业、委托或玩家背景不同造成的多个导入。预生成角色必须进入 `content.characters`，不能只作为 PDF 图片保存。
+
+## 6. AI 主持所需内容
+
+### 6.1 KeeperBrief
 
 必须明确：
 
-- `core_truth`：模组完整真相；
-- `experience_goal`：希望玩家获得的核心体验；
+- `core_truth`：完整真相；
+- `experience_goal`：目标体验；
 - `tone`：叙事基调；
-- `must_preserve`：AI 不能违反的剧情和人物约束；
-- `must_not_reveal_before_granted`：不能提前透露的 Fact ID。
+- `must_preserve`：不可违反的剧情和人物约束；
+- `must_not_reveal_before_granted`：禁止提前透露的 Fact ID。
 
-### 4.2 Scene
+### 6.2 Scene、Location 和 Entity
 
-每个 Scene 至少包含：
+Scene 保存叙事节点：
 
 ```text
-id
-name
-kind
-player_description
-keeper_notes
-entity_ids
-clue_ids
-checkpoint_ids
-trigger_ids
-next_scene_ids
-source_refs
+id / name / kind
+player_description / keeper_notes
+location_ids / entity_ids / resource_ids
+clue_ids / checkpoint_ids / encounter_ids / trigger_ids
+next_scene_ids / source_refs
 ```
 
-`player_description` 可以直接进入玩家上下文；`keeper_notes` 只能进入 AI 主持私有上下文。
+Location 保存物理世界：
 
-### 4.3 NPC Entity
+```text
+id / name / kind / parent_location_id
+scene_ids / connections / asset_ids
+initial_state / source_refs
+```
 
-NPC 至少应包含：
+Entity 保存 NPC、怪物或群体：
 
 ```text
 public_description / keeper_description
 knowledge_fact_ids / knowledge_clue_ids
-goals
-behavior.default_attitude
-behavior.will_not_initiate_combat
-behavior.conversation_constraints
-speech_style
-initial_state
-stat_block（需要规则判定时）
+goals / behavior / speech_style
+initial_state / stat_block / source_refs
 ```
 
-知识边界用于防止 NPC 说出自己不可能知道的事实；行为约束用于防止 AI 为推动剧情而改变人物动机。
+Scene 和 Location 必须分开。前者控制叙事和转场，后者控制空间层级、出口、隐藏路线和地图关联。
 
-### 4.4 Fact 和 Clue
+### 6.3 Fact 和 Clue
 
-Fact 保存真实世界状态及可见性；Clue 保存玩家如何获得事实。Clue 至少需要：
+Fact 保存真实世界状态及可见性。Clue 保存玩家如何获得事实，至少包含：
 
 ```text
 id
@@ -148,11 +181,84 @@ effects
 source_refs
 ```
 
-如果 Clue 没有单独声明可见性，必须由 `runtime_defaults.clue_visibility` 给出确定性规则。
+核心线索必须至少有一条可达路径；失败不能让主线永久中断，除非原文明确把它定义为结局。
 
-## 5. 规则引擎所需内容
+## 7. 可执行玩法对象
 
-### 5.1 规则绑定
+### 7.1 Resource
+
+`resources` 保存道具、手册、典籍、法术、机关、武器和消耗品。它可以声明：
+
+```text
+location_id / owner_entity_id
+charges / uses / study
+granted_clue_ids / granted_ability_ids
+initial_state / source_refs
+```
+
+资源的持有、消耗、阅读和破损状态必须写入 GameState，不能只出现在叙述中。
+
+### 7.2 Timeline
+
+`timelines` 保存外部时间推进：
+
+```text
+clock.unit / clock.phases
+events[].schedule
+events[].conditions
+events[].effects
+events[].scene_ids
+events[].available_checkpoint_ids
+```
+
+NPC 日程、每天固定事件和每若干回合发生的效果都属于 Timeline。
+
+### 7.3 Track
+
+`tracks` 保存阶段进度：
+
+```text
+scope / initial_state
+states[].id / states[].effects
+transitions[].from / transitions[].to
+transitions[].conditions / transitions[].effects / priority
+```
+
+感染、异变、怀疑、警戒和仪式进度使用同一套 Track。规则引擎执行转换，AI 主持只叙述结果。
+
+### 7.4 Encounter
+
+`encounters` 统一表达战斗、追逐、谈判、群体检定和环境挑战：
+
+```text
+id / name / kind
+scene_ids / participant_entity_ids
+start_conditions / scaling
+player_options / resolution
+on_start / on_end / source_refs
+```
+
+`scaling` 可以根据调查员人数、资源或 Track 状态调整敌人数量和难度。核心算法仍由 Ruleset 提供，模组只能声明参数和公式。
+
+### 7.5 Puzzle 和 Table
+
+Puzzle 至少表达：
+
+```text
+goal / nodes / dependencies
+interactions / hint_levels
+alternative_solutions / failure_policy
+```
+
+Table 至少表达：
+
+```text
+roll / selection_mode / entries
+```
+
+谜题节点引用 Resource、Checkpoint、Clue 和 Effect；随机表结果必须是结构化值或已注册 Effect，不能要求 AI 临时编造关键规则。
+
+## 8. 规则系统接口
 
 `module.ruleset_ref` 必须固定：
 
@@ -160,13 +266,13 @@ source_refs
 system_id
 version
 required_capabilities
+required_condition_types
+required_effect_types
 ```
 
-模组引用规则引擎已有能力，不能在模组中重新定义骰点和成功等级算法。技能、属性、Condition 和 Effect 必须使用规则系统注册的规范 ID。
+模组不能重新定义骰点、成功等级、伤害和战斗算法。技能、属性、Condition 和 Effect 必须使用规则系统注册的规范 ID。
 
-### 5.2 Checkpoint
-
-每个检定至少包含：
+Checkpoint 至少包含：
 
 ```json
 {
@@ -185,22 +291,9 @@ required_capabilities
 }
 ```
 
-某个结果未声明时，必须由 `runtime_defaults.missing_checkpoint_outcome` 定义，例如 `no_effect`，不能交给 AI 临场补写。
+SanityEvent、Timeline、Track、Encounter、Trigger 和 Ending 中的 Condition 与 Effect 同样必须注册。未声明结果使用 `runtime_defaults`，不能交给 AI 临场补写。
 
-### 5.3 SanityEvent、Trigger 和 Ending
-
-- `SanityEvent`：触发条件、成功/失败损失、累计上限和附加效果；
-- `Trigger`：事件、Condition、优先级、是否仅执行一次和 Effect；
-- `Ending`：条件、优先级、结构化结果和叙事摘要。
-
-Condition 和 Effect 使用受控类型，例如：
-
-```text
-Condition：state_eq、clue_owned、scene_is、player_choice、check_result
-Effect：set_state、grant_clue、request_check、request_san_check、damage、transition、trigger_ending
-```
-
-## 6. 初始状态
+## 9. 初始状态
 
 `initial_state` 必须足以直接创建游戏实例：
 
@@ -210,79 +303,86 @@ discovered_scene_ids
 granted_clue_ids
 completed_checkpoint_ids
 fired_trigger_ids
+active_timeline_ids
+track_states
+inventory_resource_ids
+active_encounter_id
 active_ending_id
 clock
 variables
 ```
 
-实体自身的初始位置、存活状态、合作态度和物品状态保存在对应 `Entity.initial_state` 中，由 Loader 合并成第一份 GameState。
+Location、Entity、Character 和 Resource 的初始状态由 Loader 合并进第一份 GameState。
 
-## 7. 自动处理歧义
+## 10. 素材语义
 
-解析 Agent 按以下优先级自动做决定：
-
-1. **明确原文优先**：原文有确定描述时不做产品层改写；
-2. **规则系统优先**：规则名、公式和难度映射到指定 Ruleset 的规范 ID；
-3. **保持作者意图**：结局和人物动机优先保持原模组体验；
-4. **保护玩家选择**：原文未规定唯一结果时，保留为运行时变量或玩家选择；
-5. **避免无依据推断**：地图距离、隐藏关系等无法证明的信息不自动生成；
-6. **保守降级**：非关键装饰信息不确定时可以省略，不得影响主线；
-7. **失败而非猜测**：规则版本、核心结局或关键线索无法确定时，导入状态设为 `failed`。
-
-所有自动决策写入 `normalization_decisions`，每项必须有 `status=resolved`、决策结果、策略和来源。`ready` 包中禁止出现 `review_items`、`TODO` 或 unresolved 决策。
-
-## 8. 自动解析流水线
+Asset 除文件元数据外，应根据类型声明：
 
 ```text
-上传文件
-  -> 文本/OCR/版面提取
-  -> 结构识别和来源绑定
-  -> 生成 ModuleDraft
-  -> 自动归一化规则和可见性
-  -> Schema 与语义校验
-  -> 自动修复并重新校验（限制次数）
-  -> ready ModulePackage 或 failed ImportJob
+linked_location_ids
+linked_entity_ids
+reveal_after_clue_ids
+source_page / source_bbox
+runtime_use
 ```
 
-玩家只看到成功导入的模组，或者“导入失败及原因”；不会被要求逐项审核解析内容。
+地图需要关联地点和标签；玩家手册需要关联 Clue 及展示条件；NPC 立绘需要关联 Entity 和防剧透条件。素材识别失败但影响运行时理解时，导入必须失败。
 
-## 9. 谁调用规则引擎
+## 11. 自动处理歧义
+
+解析 Agent 按以下顺序自动决策：
+
+1. 明确原文优先；
+2. Ruleset 规范优先；
+3. 保持作者意图；
+4. 保护玩家选择和多种解法；
+5. 不推断原文没有的地图距离、人物动机和规则效果；
+6. 非关键装饰信息可以保守省略；
+7. 关键规则、线索、结局或权利状态无法确定时失败而不是猜测。
+
+所有自动决策写入 `normalization_decisions`，必须包含 `status=resolved`、结果、策略和来源。
+
+## 12. 调用流程
 
 ```text
 玩家行动
-  -> AI 主持提出 action/checkpoint_id
-  -> 编排器检查当前场景、权限和 prerequisites
+  -> AI 主持选择候选 Scene、Checkpoint、Encounter 或自由叙事
+  -> 编排器校验地点、时间线、Track、权限和前置条件
   -> 规则引擎执行检定、Condition 和 Effect
-  -> 状态提交
+  -> 运行时提交 GameState
   -> AI 主持根据结构化结果生成叙事
 ```
 
-SanityEvent、Trigger、战斗效果和结局检查由编排器自动调用规则引擎。纯叙事对话无需调用。AI 主持不能修改骰点、绕过前置条件或自行写入状态。
+定时事件、Track 转换、SAN、Encounter 结束和 Ending 检查由编排器自动调用规则引擎。AI 主持不能绕过前置条件或直接写状态。
 
-## 10. 自动发布门禁
+## 13. 自动发布门禁
 
-一个包只有通过以下检查才能标记为 `ready`：
+一个包只有通过以下检查才能成为 `ready`：
 
-- [ ] 顶层结构符合 `ModulePackage` Schema；
-- [ ] 所有对象 ID 唯一且所有引用存在；
-- [ ] 入口场景和初始状态有效；
+- [ ] 顶层结构符合 `ModulePackage 1.1`；
+- [ ] 文档分段、来源覆盖和权利状态完整；
+- [ ] 所有对象 ID 唯一且引用存在；
+- [ ] 入口场景、角色配置和初始状态有效；
+- [ ] Scene 与 Location 连接一致，隐藏路线有发现条件；
 - [ ] 玩家描述不包含未解锁 Keeper Fact；
 - [ ] NPC 具有知识边界和关键行为约束；
-- [ ] 技能、难度、Condition 和 Effect 被目标 Ruleset 支持；
-- [ ] 核心线索至少有一条可达路径；
-- [ ] Trigger 不存在无限循环；
-- [ ] Ending 条件和优先级可以确定性结算；
-- [ ] 所有 `normalization_decisions` 已解决；
-- [ ] 包内不存在 `review_items`、TODO 或 unresolved 占位符；
-- [ ] Validator 输出 `validation.status=passed` 且 `errors=[]`。
+- [ ] 技能、Condition、Effect 和 Ruleset 能力均受支持；
+- [ ] 核心线索和关键结局可达；
+- [ ] Timeline、Track 和 Trigger 不存在无限循环；
+- [ ] Encounter 和 Puzzle 的关键结果确定；
+- [ ] 素材具有语义关联和展示条件；
+- [ ] 所有归一化决策已解决；
+- [ ] 不包含 `review_items`、TODO 或 unresolved 占位符；
+- [ ] Validator 为 `passed` 且 `errors=[]`。
 
-## 11. Parser Agent 的开发完成标准
+## 14. Parser Agent 完成标准
 
-针对任意受支持格式的模组，Parser Agent 应能够：
+针对受支持格式的任意模组，Parser Agent 应能够：
 
-1. 生成与黄金样例相同结构的 `ModulePackage`；
-2. 让 Loader 无需读取原文即可创建初始 GameState；
-3. 让 AI 主持只凭包内容完成场景描述、NPC 对话和信息控制；
-4. 让规则引擎只凭包内容发起检定、结算效果和判断结局；
-5. 对无法安全解析的模组返回结构化失败，而不是输出半可用模组；
-6. 保存来源和自动决策，使问题可以由开发者复现和调试。
+1. 识别一个文档中的模组、附录、手册、地图和角色卡边界；
+2. 生成与黄金样例相同协议版本的 `ModulePackage`；
+3. 让 Loader 无需读取原文即可创建 GameState；
+4. 让 AI 主持只凭包内容完成描述、NPC 对话、信息控制和候选行动选择；
+5. 让规则引擎只凭包内容执行检定、时间线、轨道、遭遇、效果和结局；
+6. 对无法安全解析的模组返回结构化失败；
+7. 保存来源、置信度和自动决策，使问题可以复现和调试。

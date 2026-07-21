@@ -248,7 +248,7 @@ test('不能读别人的角色卡', async () => {
   const draft = await room.host.sdk.characters.createDraft(room.roomId, room.reconnectToken)
 
   const intruder = await registerPlayer('intruder')
-  const joined = await intruder.sdk.rooms.join(room.roomCode, { nickname: '闯入者' })
+  const joined = await intruder.sdk.rooms.join(room.roomCode, { nickname: '闯入者' }, intruder.token)
 
   await assert.rejects(
     () =>

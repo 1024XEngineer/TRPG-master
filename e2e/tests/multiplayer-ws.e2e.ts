@@ -57,7 +57,7 @@ test('第二个玩家用房间码加入，房间预览里能看到两个人', as
   const room = await createRoomWithModule('mp')
   const guest = await registerPlayer('guest')
 
-  const joined = await guest.sdk.rooms.join(room.roomCode, { nickname: '访客' })
+  const joined = await guest.sdk.rooms.join(room.roomCode, { nickname: '访客' }, guest.token)
   assert.equal(joined.roomId, room.roomId)
 
   const preview = await room.host.sdk.rooms.getInfo(room.roomCode)
@@ -68,7 +68,7 @@ test('第二个玩家用房间码加入，房间预览里能看到两个人', as
 test('WS 生命周期：join → session.bound，全员建卡后房主可以 game.start', async () => {
   const room = await createRoomWithModule('ws')
   const guest = await registerPlayer('wsguest')
-  const joined = await guest.sdk.rooms.join(room.roomCode, { nickname: '访客' })
+  const joined = await guest.sdk.rooms.join(room.roomCode, { nickname: '访客' }, guest.token)
 
   // 房间生命周期是 Lobby →(start_story)→ Building →(game.start)→ InGame。
   // 少了 start_story 这步，房间还在 Lobby，game.start 会被拒——第一版就是漏了
@@ -107,7 +107,7 @@ test('WS 生命周期：join → session.bound，全员建卡后房主可以 gam
 test('提交行动会广播给房间里的所有人（不只是发起者）', async () => {
   const room = await createRoomWithModule('broadcast')
   const guest = await registerPlayer('bcguest')
-  const joined = await guest.sdk.rooms.join(room.roomCode, { nickname: '访客' })
+  const joined = await guest.sdk.rooms.join(room.roomCode, { nickname: '访客' }, guest.token)
 
   await buildCharacter(room.host.sdk, room.roomId, room.reconnectToken)
   await buildCharacter(guest.sdk, room.roomId, joined.reconnectToken)

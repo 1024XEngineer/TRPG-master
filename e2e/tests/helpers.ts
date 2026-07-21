@@ -40,14 +40,14 @@ export interface TestRoom {
 /** 建一个已经选好内置模组的房间，回到「可以开始建卡」的状态。 */
 export async function createRoomWithModule(prefix = 'e2e'): Promise<TestRoom> {
   const host = await registerPlayer(prefix)
-  // ⚠️ rooms.create 不接受 token——SDK 没给这个端点留鉴权入口，所以通过 SDK
-  // （以及走 SDK 的前端）创建的房间，Room.host_user_id 永远是 null。这是真实
-  // 的契约缺口，不是这里写错了；见本目录 README 的「已知缺口」。
-  const room = await host.sdk.rooms.create({
-    roomName: `${prefix} 房间`,
-    nickname: host.account,
-    maxPlayers: 6,
-  })
+  const room = await host.sdk.rooms.create(
+    {
+      roomName: `${prefix} 房间`,
+      nickname: host.account,
+      maxPlayers: 6,
+    },
+    host.token
+  )
   const modules = await host.sdk.rooms.listModules()
   await host.sdk.rooms.selectModule(
     room.roomId,

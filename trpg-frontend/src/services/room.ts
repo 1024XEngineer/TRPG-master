@@ -1,6 +1,6 @@
 import type { CreateRoomResult, ModuleSummary, MyRoomSummary, RoomPreview } from 'trpg-sdk';
 import { useRoomStore } from '@/stores/room-store';
-import { sdk } from './api-client';
+import { getAuthToken, sdk } from './api-client';
 
 export type { CreateRoomResult, ModuleSummary, MyRoomSummary, RoomPreview };
 
@@ -13,13 +13,25 @@ function requireReconnectToken(): string {
   return token;
 }
 
+// 创建/加入房间和「我的游戏」用的是**账号**凭证，不是上面那个房间凭证
+// （issue #106）。两者分工：账号解决跨设备/跨时间找回，reconnectToken 解决
+// 同一局进行中的快速重连。
+function requireAuthToken(): string {
+  const token = getAuthToken();
+  if (!token) throw new Error('请先登录');
+  return token;
+}
+
 // 创建房间（房主创建即加入，见 §5.2.5）
 export async function createGameRoom(
   nickname?: string,
   roomName?: string,
   maxPlayers?: number
 ): Promise<CreateRoomResult> {
-  return sdk.rooms.create({ nickname, roomName: roomName ?? '', maxPlayers: maxPlayers ?? 4 });
+  return sdk.rooms.create(
+    { nickname, roomName: roomName ?? '', maxPlayers: maxPlayers ?? 4 },
+    requireAuthToken()
+  );
 }
 
 // 拉取可用模组列表（本次没有做模组导入，只有一款内置模拟模组）
@@ -36,12 +48,15 @@ export async function selectModule(roomId: string, moduleId: string): Promise<vo
   );
 }
 
-// 访客用房间码加入（已是本房间玩家则幂等返回已有身份）
+// 用房间码加入房间。issue #106 起后端按**账号**幂等：已经是这个房间的成员时
+// 原样返回既有身份，所以这个函数同时承担「加入」和「掉线/换设备后重连」两个
+// 用途——之前那句「已是本房间玩家则幂等返回已有身份」的注释是假的，后端当时
+// 根本不检查，重复调用会给同一个人建重复玩家行。
 export async function joinRoomByCode(
   roomCode: string,
   nickname?: string
 ): Promise<CreateRoomResult> {
-  return sdk.rooms.join(roomCode, { nickname });
+  return sdk.rooms.join(roomCode, { nickname }, requireAuthToken());
 }
 
 // 获取房间信息（房间码预览）
@@ -54,11 +69,11 @@ export async function startStory(roomId: string): Promise<void> {
   await sdk.rooms.startStory(roomId, requireReconnectToken());
 }
 
-// 我的房间列表——用于「浏览已有游戏」入口。本期后端按重连凭证（而不是账号）
-// 识别玩家，只能看到当前会话里加入过的房间，还没建立跨会话的账号级房间历史
-// （已知限制）；这里在还没加入过任何房间时直接返回空列表，而不是报错。
+// 我的房间列表——用于「浏览已有游戏」入口。issue #106 起按**账号**返回该用户
+// 参与过的全部房间（换台设备登录同一账号也能看到），不再是「这个浏览器的最后
+// 一个房间」。没登录时返回空列表而不是报错：这个入口在未登录状态下也会被渲染。
 export async function listMyRooms(): Promise<MyRoomSummary[]> {
-  const token = useRoomStore.getState().reconnectToken;
+  const token = getAuthToken();
   if (!token) return [];
   return sdk.rooms.listMyRooms(token);
 }

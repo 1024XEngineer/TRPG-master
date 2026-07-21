@@ -444,6 +444,9 @@ export interface NarrationPushPayload {
 
 /**
  * 一个职业：信用评级区间、职业技能点公式、职业技能清单。
+ *
+ * 职业技能 = `skill_ids`（固定）+ `choice_slots`（自选，见 `SkillChoiceSlot`）。
+ * 两者都吃职业技能点；其余技能吃兴趣点。
  */
 export interface OccupationSpec {
   id: number;
@@ -452,6 +455,7 @@ export interface OccupationSpec {
   creditMax: number;
   skillPointsFormula: string;
   skillIds: string[];
+  choiceSlots?: SkillChoiceSlot[];
   description: string;
 }
 
@@ -670,6 +674,30 @@ export interface SelectModuleBody {
 export interface SessionBoundPayload {
   roomId: string;
   playerId: string;
+}
+
+/**
+ * 职业技能里的一个「自选槽」：从 `candidate_skill_ids` 里选 `count` 项，
+ * 选中的技能算**职业技能**（吃职业技能点），而不是兴趣技能（issue #114）。
+ *
+ * COC7 的职业技能不是一份固定清单，而是「固定技能 + N 个自选槽」，例如
+ * 私家侦探是「技艺（摄影），乔装，法律，图书馆，**一项社交技能**（取悦、
+ * 话术、恐吓、说服），心理学，侦查，**任意一项**其他个人或时代特长」。
+ * 229 个职业里有 210 个（91%）至少带一个槽。
+ *
+ * 此前数据模型只有固定 `skill_ids`，装不下槽，于是"一项社交技能（四选一）"
+ * 只能被压平成固定两项——这正是现有 30 个职业技能列表失真的原因（全部被
+ * 规整成恰好 8 项，而规则书里实际是 0–15 项），并且会**误杀合法角色卡**：
+ * 玩家把点数加在规则书认可、但被压平时丢掉的本职技能上，会被当成兴趣技能
+ * 计费而触发 `INTEREST_POINTS_EXCEEDED`。
+ *
+ * `candidate_skill_ids` 为 `None` 表示**任意技能**（规则书里的"任意 N 项
+ * 其他个人或时代特长"）；给出列表则表示限定候选集（如社交技能四选一）。
+ */
+export interface SkillChoiceSlot {
+  count: number;
+  candidateSkillIds?: string[] | null;
+  label: string;
 }
 
 /**

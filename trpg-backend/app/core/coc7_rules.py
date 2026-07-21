@@ -30,6 +30,17 @@ from app.dto.game import OccupationSpec, RulesetRead
 
 SKILL_CAP = 99
 
+# 建卡时不允许分配点数的技能（issue #114）。
+#
+# 规则依据（`COC7空白卡CY23Final.xlsx` 两处，第二处即本项目用作信用评级分账
+# 依据的那封 Chaosium 主编邮件）：
+#   `附表`：「没有调查员能在初始技能设定时给克苏鲁神话加点（除非被 KP 同意）」
+#   `更新说明`：「兴趣技能点可以添加到任意技能(不包含克苏鲁神话)上」
+#
+# 基础值本身（0）合法，只是不能往上加。"除非 KP 同意"那条例外本期不做——
+# 没有 KP 授权这个概念的落点，等有了再说。
+NON_ALLOCATABLE_SKILL_IDS = frozenset({"cthulhu-mythos"})
+
 # 掷骰法的属性只做宽松的合理性兜底：骰子结果本来就不受点数购买法的
 # [10, 90] 约束（(2d6+6)*5 最低就是 40，3d6*5 最低 15），而且服务端掷的骰子
 # 没什么可不信的，这里只拦明显越界的脏数据。
@@ -178,6 +189,68 @@ def find_occupation_by_name(
         return None, False
     match = next((o for o in occupations if o.name == name), None)
     return match, match is None
+
+
+def _assign_choice_slots(occupation: OccupationSpec | None, candidates: dict[str, int]) -> set[str]:
+    """决定哪些「非固定本职技能」占用了职业的自选槽，返回被占用的技能 id 集合。
+
+    `candidates` 是 {技能 id: 该技能分配到的点数}，只含加了点、且不在固定
+    `skill_ids` 里的技能。
+
+    ## 为什么要"最大化"而不是随便挑一种分配
+
+    合法性的判据是**存在一种可行的占槽方式**使这张卡成立，不是"我们碰巧挑的
+    那种"。举例：私家侦探有「一项社交技能（取悦/话术/恐吓/说服）」和「任意一项
+    特长」两个槽，玩家给「说服」和「攀爬」都加了点。攀爬只有自由槽收得下，
+    说服两个槽都收得下——先把说服塞进自由槽，攀爬就无处可去，被算成兴趣技能，
+    可能触发 `INTEREST_POINTS_EXCEEDED`，把一张合法卡判死。
+
+    非职业技能的花费 N 越小越容易合法（闸门是 N ≤ 兴趣预算），而
+    N = 总花费 − 占槽花费，总花费与分配方式无关，所以目标就是**最大化占槽的
+    点数总和**。
+
+    ## 为什么这样求解是最优的
+
+    「能被同时占槽的技能集合」构成一个横贯拟阵（transversal matroid），而拟阵
+    上按权重从大到小的贪心 + 增广路径就是最优解。所以下面按点数降序逐个尝试
+    加入，能加就加（必要时通过增广路径挤走别的技能重排），结果保证最优。
+
+    单纯"按最严格的槽优先"的贪心在候选集互相嵌套时才正确，这里不敢赌——
+    赌错的代价是玩家的合法角色卡被拒，而且现象是莫名其妙的点数超支。
+    """
+    if occupation is None or not occupation.choice_slots:
+        return set()
+
+    # 把每个槽按容量摊成若干个"槽位"，匹配问题就变成简单的二分图匹配。
+    # candidate_skill_ids 为 None 表示任意技能（规则书的"任意 N 项特长"）。
+    slot_units: list[frozenset[str] | None] = []
+    for slot in occupation.choice_slots:
+        allowed = frozenset(slot.candidate_skill_ids) if slot.candidate_skill_ids else None
+        slot_units.extend([allowed] * max(0, slot.count))
+
+    def accepts(unit: int, skill_id: str) -> bool:
+        allowed = slot_units[unit]
+        return allowed is None or skill_id in allowed
+
+    unit_taken_by: dict[int, str] = {}
+
+    def try_assign(skill_id: str, visited: set[int]) -> bool:
+        """标准增广路径：找一个空槽位，或挤走某个槽位上的技能让它另寻他处。"""
+        for unit in range(len(slot_units)):
+            if unit in visited or not accepts(unit, skill_id):
+                continue
+            visited.add(unit)
+            occupant = unit_taken_by.get(unit)
+            if occupant is None or try_assign(occupant, visited):
+                unit_taken_by[unit] = skill_id
+                return True
+        return False
+
+    # 点数降序：拟阵贪心要求先处理权重大的，这样得到的才是最大权解。
+    for skill_id, _points in sorted(candidates.items(), key=lambda kv: -kv[1]):
+        try_assign(skill_id, set())
+
+    return set(unit_taken_by.values())
 
 
 def _validate_attributes(
@@ -332,6 +405,18 @@ def _compute(
     interest_spent = 0
     skill_view: list[SkillView] = []
 
+    # 先把每项技能的分配量算出来，再决定自选槽归属，最后才记账——三件事必须
+    # 分开：占槽是个全局最优化问题（见 `_assign_choice_slots`），边遍历边定
+    # 归属等于用"先来后到"当分配策略，会把合法卡判死。
+    allocations: dict[str, int] = {}
+    for spec in ruleset.skills:
+        base = evaluate_skill_base(spec.base, attributes)
+        allocated = skills.get(spec.id, base) - base
+        if allocated > 0 and spec.id != "credit-rating" and spec.id not in occupation_skill_ids:
+            allocations[spec.id] = allocated
+
+    slot_occupied_ids = _assign_choice_slots(occupation, allocations)
+
     # 遍历技能表里的全部技能（不只是草稿里提到的那些），这样 `compute_preview`
     # 能一次性把完整的 base/cap 都带给前端渲染，草稿没提到的技能视为
     # 「未分配点数」（current 就是 base）。
@@ -340,6 +425,16 @@ def _compute(
         current = skills.get(spec.id, base)
         allocated = current - base
         is_credit = spec.id == "credit-rating"
+
+        # 克苏鲁神话等技能建卡时不可分配（规则明文禁止，见 NON_ALLOCATABLE_SKILL_IDS）。
+        if spec.id in NON_ALLOCATABLE_SKILL_IDS and allocated > 0:
+            issues.append(
+                ValidationIssue(
+                    code="SKILL_NOT_ALLOCATABLE",
+                    field=f"skills.{spec.id}",
+                    message=f"{spec.name} 在建卡阶段不能分配技能点",
+                )
+            )
 
         # 信用评级是特殊技能：用职业信用区间校验（见下方 CREDIT_OUT_OF_RANGE），
         # 不套常规的「不能低于基础值」「不能超过 99」这两条。
@@ -372,7 +467,8 @@ def _compute(
                 interest_spent += max(0, current - occupation.credit_min)
             else:
                 interest_spent += max(0, current)
-        elif spec.id in occupation_skill_ids:
+        elif spec.id in occupation_skill_ids or spec.id in slot_occupied_ids:
+            # 固定本职技能，或者占住了一个自选槽的技能——两者都吃职业技能点。
             occupation_spent += effective_allocated
         else:
             interest_spent += effective_allocated

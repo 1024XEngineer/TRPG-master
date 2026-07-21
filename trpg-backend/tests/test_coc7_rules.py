@@ -22,7 +22,13 @@ from app.core.coc7_rules import (
     evaluate_skill_points_formula,
     validate_character,
 )
-from app.dto.game import AttributeSpec, OccupationSpec, RulesetRead, SkillSpec
+from app.dto.game import (
+    AttributeSpec,
+    OccupationSpec,
+    RulesetRead,
+    SkillChoiceSlot,
+    SkillSpec,
+)
 
 RULESET = build_coc7_ruleset()
 
@@ -483,3 +489,132 @@ def test_coc7_rules_module_does_not_import_coc7_content() -> None:
             imported.extend(alias.name for alias in node.names)
 
     assert not [name for name in imported if "coc7_content" in name]
+
+
+# ── 职业技能自选槽（issue #114）────────────────────────────────────────
+
+
+def _detective_with_slots() -> tuple[RulesetRead, OccupationSpec]:
+    """借内置 COC7 规则数据，给私家侦探临时装上两个自选槽当夹具。
+
+    槽的声明顺序**故意是「自由槽在前、社交槽在后」**——这是能逼出重排的顺序，
+    见下面那条对拍用例的说明。
+
+    ⚠️ 必须 `model_copy(deep=True)`：`build_coc7_ruleset()` 每次返回的是**同一批**
+    `OccupationSpec` 对象（它直接引用 `coc7_content` 的模块常量，不做拷贝），
+    直接改 `choice_slots` 会改到全局，把同一进程里其他用例一起带坏——第一版
+    就是这么写的，一口气挂了 11 个不相干的测试。
+    """
+    ruleset = build_coc7_ruleset().model_copy(deep=True)
+    occupation = next(o for o in ruleset.occupations if o.name == "私家侦探")
+    occupation.choice_slots = [
+        SkillChoiceSlot(count=2, candidate_skill_ids=None, label="任意两项特长"),
+        SkillChoiceSlot(
+            count=1,
+            candidate_skill_ids=["charm", "fast-talk", "intimidate", "persuade"],
+            label="一项社交技能",
+        ),
+    ]
+    return ruleset, occupation
+
+
+SLOT_ATTRS = {
+    "STR": 50, "CON": 60, "POW": 55, "DEX": 45, "APP": 50,
+    "SIZ": 60, "INT": 70, "EDU": 80, "LUCK": 50,
+}  # fmt: skip
+
+
+def test_choice_slot_skills_count_as_occupation_points() -> None:
+    """占住自选槽的技能吃职业技能点，不是兴趣点。
+
+    攀爬不在私家侦探的固定本职技能里，但「任意两项特长」这个槽收得下它。
+    兴趣预算只有 INT*2=140，而这里非固定技能合计 150 点——如果槽没生效、
+    全按兴趣点计费，就会触发 INTEREST_POINTS_EXCEEDED。
+    """
+    ruleset, _ = _detective_with_slots()
+
+    issues = validate_character(
+        ruleset,
+        SLOT_ATTRS,
+        "私家侦探",
+        {"credit-rating": 25, "climb": 95, "swim": 95},
+    )
+
+    assert issues == []
+
+
+def test_choice_slot_assignment_is_optimal_not_first_come_first_served() -> None:
+    """🔴 占槽必须取「让职业技能覆盖最大」的分配，不能先来后到。
+
+    合法性的判据是**存在**一种可行占槽方式，不是我们碰巧挑中的那种。这里
+    persuade 社交槽和自由槽都收得下，climb/swim/ride 只有自由槽收得下，
+    而自由槽只有 2 个：
+
+    - 先来后到（按点数降序塞第一个能塞的槽）：persuade(80) 占掉自由槽①，
+      ride(90) 占自由槽②，climb/swim 无处可去 → 未占槽 150 点 > 兴趣预算 140
+      → 一张合法卡被 INTEREST_POINTS_EXCEEDED 判死。
+    - 最优：persuade 让给社交槽，自由槽留给 ride(90)+climb(75) → 未占槽只剩
+      swim 75 点 ≤ 140 → 合法。
+
+    槽的声明顺序是「自由槽在前」，正是为了让先来后到的实现在这里出错——顺序
+    反过来的话，persuade 先撞上社交槽，蒙对了，这条用例就失去区分力。
+    """
+    ruleset, _ = _detective_with_slots()
+
+    issues = validate_character(
+        ruleset,
+        SLOT_ATTRS,
+        "私家侦探",
+        {"credit-rating": 25, "persuade": 90, "climb": 95, "swim": 95, "ride": 95},
+    )
+
+    assert issues == []
+
+
+def test_skill_outside_every_slot_still_costs_interest_points() -> None:
+    """槽是有限的：塞不进任何槽的技能照样吃兴趣点，超了要拦。
+
+    跟上一条互为对照——上一条证明"该算职业点的别算成兴趣点"，这条证明
+    "槽不是无限的免费通行证"。这里 4 项非固定技能合计 320 点，槽最多吸收 3 项，
+    剩下的必然超 140。
+    """
+    ruleset, _ = _detective_with_slots()
+
+    issues = validate_character(
+        ruleset,
+        SLOT_ATTRS,
+        "私家侦探",
+        {"credit-rating": 25, "climb": 95, "swim": 95, "ride": 95, "jump": 95},
+    )
+
+    assert [i.code for i in issues] == ["INTEREST_POINTS_EXCEEDED"]
+
+
+def test_cthulhu_mythos_cannot_be_allocated_at_creation() -> None:
+    """克苏鲁神话建卡时不可加点（issue #114）。
+
+    规则依据（`COC7空白卡CY23Final.xlsx` 两处）：
+    - `附表`：「没有调查员能在初始技能设定时给克苏鲁神话加点（除非被 KP 同意）」
+    - `更新说明`：「兴趣技能点可以添加到任意技能(不包含克苏鲁神话)上」——即本
+      项目已用作信用评级分账依据的那封 Chaosium 主编邮件
+
+    修复前：给克苏鲁神话加 60 点，校验返回 0 条问题、直接放行。
+    """
+    ruleset = build_coc7_ruleset()
+
+    issues = validate_character(
+        ruleset, SLOT_ATTRS, "私家侦探", {"credit-rating": 25, "cthulhu-mythos": 60}
+    )
+
+    assert [i.code for i in issues] == ["SKILL_NOT_ALLOCATABLE"]
+
+
+def test_cthulhu_mythos_at_base_value_is_fine() -> None:
+    """基础值 0 本身合法——禁的是"加点"，不是"这项技能存在"。"""
+    ruleset = build_coc7_ruleset()
+
+    issues = validate_character(
+        ruleset, SLOT_ATTRS, "私家侦探", {"credit-rating": 25, "cthulhu-mythos": 0}
+    )
+
+    assert issues == []

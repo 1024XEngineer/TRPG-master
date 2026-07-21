@@ -463,10 +463,23 @@ def test_none_attribute_point_buy_and_age_range_skip_their_validations() -> None
 
 def test_coc7_rules_module_does_not_import_coc7_content() -> None:
     """钉死 issue #112 的目标状态：规则核心不再直接依赖具体系统的规则数据
-    模块，全部由调用方通过 `RulesetRead` 注入。"""
+    模块，全部由调用方通过 `RulesetRead` 注入。
+
+    查的是 **import 关系**（走 AST），不是源码里有没有出现这个词——注释和
+    文档字符串本来就该能自由地提到 `coc7_content` 解释这段历史，用子串匹配
+    会逼着文档绕开它把话说含糊。
+    """
+    import ast
     import pathlib
 
     import app.core.coc7_rules as coc7_rules_module
 
-    source = pathlib.Path(coc7_rules_module.__file__).read_text(encoding="utf-8")
-    assert "coc7_content" not in source
+    tree = ast.parse(pathlib.Path(coc7_rules_module.__file__).read_text(encoding="utf-8"))
+    imported: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module is not None:
+            imported.append(node.module)
+        elif isinstance(node, ast.Import):
+            imported.extend(alias.name for alias in node.names)
+
+    assert not [name for name in imported if "coc7_content" in name]

@@ -6,13 +6,12 @@
 `trpg-frontend/src/data/character-model.ts`（S3 之前前端本地那份实现，
 S2 阶段只读它核对公式，不依赖它是否存在）保持一致，不自创新公式。
 
-issue #112：此前本模块直接 import 权威规则数据模块（存放 COC7 属性/技能/
-职业目录的那个 `app/core/` 文件）的模块常量，规则核心因此写死只认识 COC7
-一种规则系统，也造成规则数据存在"规则引擎读代码常量、
-`GET /systems/{systemId}/ruleset` 读数据库"两个源、彼此没有同步机制（改了
-那份数据模块不删库不会生效）。改为由调用方传入 `RulesetRead` 后，本模块对
-具体是哪个规则系统无知，`app/service/character.py` 负责决定传哪份规则数据
-进来。
+issue #112：此前本模块直接 import `app/core/coc7_content.py` 的模块常量，
+规则核心因此写死只认识 COC7 一种规则系统，也造成规则数据存在"规则引擎读
+代码常量、`GET /systems/{systemId}/ruleset` 读数据库"两个源、彼此没有同步
+机制（改了 `coc7_content.py` 不删库不会生效）。改为由调用方传入
+`RulesetRead` 后，本模块对具体是哪个规则系统无知，`app/service/character.py`
+负责决定传哪份规则数据进来。
 
 对外两个入口：
 - `compute_preview(ruleset, ...)`：给 `POST /systems/{systemId}/character/preview`

@@ -658,7 +658,16 @@ export default function CharacterPage() {
                       <input type="number" min={ruleset?.ageRange?.minValue} max={ruleset?.ageRange?.maxValue} value={info.age}
                         onChange={e => setInfo(i => ({ ...i, age: e.target.value }))}
                         onBlur={e => {
-                          const v = Math.max(10, Math.min(100, parseInt(e.target.value, 10) || 10))
+                          // 夹值范围必须跟上面 input 的 min/max 用同一个数据源。
+                          // 之前这里写死 [10, 100]，属性改成消费后端之后没跟着改，
+                          // 结果是「显示的范围是 15-89、实际能填 12 和 90」——
+                          // 展示和生效的规则对不上，比两处都写死更难发现。
+                          const range = ruleset?.ageRange
+                          if (!range) return
+                          const typed = parseInt(e.target.value, 10)
+                          const v = Number.isNaN(typed)
+                            ? range.minValue
+                            : Math.max(range.minValue, Math.min(range.maxValue, typed))
                           setInfo(i => ({ ...i, age: String(v) }))
                         }}
                         className="w-full px-3.5 py-2.5 rounded-[6px] bg-input border border-border-light text-text-primary text-[15px] outline-none focus:border-brass" />

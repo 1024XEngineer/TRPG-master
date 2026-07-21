@@ -2,7 +2,7 @@
 
 状态：**Accepted**  
 适用基线：`agent-collaboration-framework`  
-讨论来源：[Issue #68](https://github.com/1024XEngineer/TRPG-master/issues/68)
+讨论来源：[Issue #68](https://github.com/1024XEngineer/TRPG-master/issues/68)、[Issue #108](https://github.com/1024XEngineer/TRPG-master/issues/108)
 
 本文记录三位成员已经达成的最终接口和所有权结论。它不是未来功能设计，而是当前协作代码的约束。若旧提案、旧图或旧示例与本文冲突，以本文、代码中的 Protocol 和自动生成的 JSON Schema 为准。
 
@@ -14,7 +14,7 @@
 - B 负责 Rule、Hook、Checkpoint 执行、Dice、GameState 修改、Event 写入和事务/幂等。
 - C 负责模组解析、审查和发布 `ModuleContent`。
 - A 只能通过 `ActionExecutor.execute()` 发出可能影响权威状态的动作。
-- MVP 只使用 Fake，不连接真实模型、LangGraph 或生产规则引擎。
+- 当前使用离线模型 Fake 和完整 `InMemoryEngineStore`，不连接真实模型、LangGraph、PostgreSQL 或 FastAPI。
 
 ## 2. 最终回合时序
 
@@ -135,11 +135,27 @@ sequenceDiagram
 
 理由：所有公共模型仍可从 `contracts/__init__.py` 导入，但评审、CODEOWNERS 和版本影响范围更清晰；也能阻止 A 因方便而依赖 B/C 不相关的模型。
 
-### 13. Fake 与纵向集成测试
+### 13. 持久化外壳与纵向集成测试
 
-选择：保留能修改 Fake GameState、生成内部 Event 并支持重放/幂等验证的 B Fake；端到端纵切归 B/集成测试共同维护。A 自己的模型 Fake 保持简单、离线、确定性。
+选择：`RuleEngineService` 实现现有 `ActionExecutor` 与 `PlayerViewSource`，每次按 `room_id` 从 B 私有 `EngineStore` 加载权威运行时。`RuleKernel` 只做确定性求值；`InMemoryEngineStore` 提供多房间、深拷贝、幂等、expected revision 和原子提交的完整离线实现。端到端纵切归 B/集成测试共同维护，A 的模型 Fake 保持简单、离线、确定性。
 
-理由：纯 `pass` Fake 无法验证边界是否真的连通。功能型 Fake 是接口的可执行规格，但不能被误认为生产规则引擎。
+理由：纯 `pass` Store 无法验证数据库接入真正需要的事务语义。完整 InMemory 实现是未来 `PostgresEngineStore` 的可执行契约，但不包含 ORM、迁移或 HTTP 接口。旧 `FakeAtomicEngine` 仅作为兼容适配器委托给同一个 Service/Store/Kernel，不再维护单独的状态和幂等实现。
+
+#### 13.1 B 内部运行时依赖
+
+```mermaid
+flowchart TD
+    HOST["Host / Orchestrator"] --> PORTS["ActionExecutor + PlayerViewSource"]
+    PORTS --> SERVICE["RuleEngineService"]
+    SERVICE --> KERNEL["RuleKernel<br/>无存储依赖"]
+    SERVICE --> STORE["EngineStore / EngineTransaction"]
+    STORE --> MEMORY["InMemoryEngineStore"]
+    STORE -. "后续替换" .-> POSTGRES["PostgresEngineStore #89"]
+```
+
+`RuleEngineService` 只持有可跨房间复用的 Store 和 Kernel，不持有 `_module`、`_state` 或 `_completed_actions`。首次执行在一个 room 级事务中固定完成：加载 runtime、查询 CompletedAction、校验身份/revision、调用 Kernel、提交 GameState/Event/CompletedAction。任一步失败都不得留下部分结果。
+
+`EngineStore` 与 `EngineTransaction` 位于 `engine/ports/`，是 B 私有端口，不进入顶层 A/B 跨组件 `ports/`。数据库实现只替换 Store adapter，Host、公共 Schema、RuleKernel 和 Orchestrator 均不感知数据库类型。
 
 ### 14. SummaryOutbox
 

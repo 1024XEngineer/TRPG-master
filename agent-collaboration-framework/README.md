@@ -1,6 +1,6 @@
 # Agent Collaboration Framework
 
-这是成员 A（主持编排）、成员 B（确定性规则引擎）和成员 C（模组解析/审查）共同使用的模块化单体骨架。当前版本只建立稳定边界和可运行的 Fake 纵切，不接 OpenAI、LangGraph 或真实规则引擎。
+这是成员 A（主持编排）、成员 B（确定性规则引擎）和成员 C（模组解析/审查）共同使用的模块化单体骨架。当前版本提供稳定边界、可运行的离线纵切，以及面向持久化的 `RuleEngineService + InMemoryEngineStore`；不接 OpenAI、LangGraph、PostgreSQL 或 FastAPI。
 
 ## 阅读入口
 
@@ -87,7 +87,11 @@ collaboration_framework/
 │   ├── adapters/fakes/        # 无真实模型的离线 Fake
 │   ├── schemas/               # A 内部 Context/Turn/Narration Schema
 │   └── gateway/               # Player-safe WebSocket 输出
-├── engine/                    # 成员 B：确定性引擎 Fake 与内部模型
+├── engine/                    # 成员 B：Service、Kernel、Store 端口/适配器与内部模型
+│   ├── service.py            # 跨房间复用的 ActionExecutor / PlayerViewSource
+│   ├── kernel.py             # 无存储依赖的确定性规则求值
+│   ├── ports/                # B 私有 EngineStore / Transaction 接缝
+│   └── adapters/             # 完整离线 InMemoryEngineStore
 ├── module/                    # 成员 C：ModuleContent 发布校验入口
 ├── bootstrap/                 # 组合根；装配 A/B/C 的具体实现
 ├── schema_export.py           # 从 Pydantic 唯一事实源导出 JSON Schema
@@ -105,6 +109,7 @@ collaboration_framework/
 | `ActionExecutor.execute()` | B 提供、A 消费 | A/B | 唯一可能产生权威副作用的命令边界 |
 | `ActionResult` | A/B 共审 | A | Player-safe；不暴露 StateChange/Event payload |
 | `EngineExecutionResult` | B | B | 内部含 StateChange、Event 和版本信息 |
+| `EngineRuntimeSnapshot`/`CompletedAction` | B | B | Store 加载快照与幂等执行记录 |
 | `NarrationOutput` | A | Gateway | 模型原始 JSON 经 Pydantic 和事实引用校验后的输出 |
 | `ModuleContent`/`CheckpointSpec`/`RuleSpec` | B/C 共审 | B、C | 声明式内容语言；A 不直接消费 |
 
@@ -123,7 +128,7 @@ python -m collaboration_framework.schema_export
 python -m unittest discover -s tests -v
 ```
 
-离线 Fake 演示：
+离线演示：
 
 ```bash
 python -m collaboration_framework.cli \
@@ -131,6 +136,8 @@ python -m collaboration_framework.cli \
   --state fixtures/demo-state.json \
   --input fixtures/demo-turn.json
 ```
+
+组合根会注册房间的 `ModuleContent + GameState`，并装配一个可服务多个房间的 `RuleEngineService`。后续数据库接入只需实现相同的 `EngineStore` / `EngineTransaction` 语义并替换 adapter；不修改 Host 端口、RuleKernel 或公共 Schema。
 
 Schema 文件由 Pydantic 模型自动生成，不应手工维护：
 

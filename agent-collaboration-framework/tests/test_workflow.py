@@ -60,8 +60,10 @@ def replay_events(initial_state: GameState, events) -> GameState:
 
 
 class CountingEngine:
-    def __init__(self, inner) -> None:
+    def __init__(self, inner, store, room_id: str) -> None:
         self.inner = inner
+        self.store = store
+        self.room_id = room_id
         self.read_calls = 0
         self.execute_calls = 0
 
@@ -74,10 +76,13 @@ class CountingEngine:
         return await self.inner.execute(request)
 
     def snapshot(self):
-        return self.inner.snapshot()
+        return self.store.inspect_state(self.room_id)
 
     def execution_for(self, request_id):
-        return self.inner.execution_for(request_id)
+        return self.store.inspect_completed_action(
+            self.room_id,
+            request_id,
+        ).execution
 
 
 class StaticIntentModel:
@@ -106,7 +111,11 @@ class UnifiedWorkflowTests(unittest.TestCase):
 
     def application(self, intent_model=None, narration_model=None):
         base = build_fake_application(self.module, self.state)
-        engine = CountingEngine(base.engine)
+        engine = CountingEngine(
+            base.engine,
+            base.engine_store,
+            self.state.room_id,
+        )
         recording = narration_model or RecordingNarrationModel()
         orchestrator = Orchestrator(
             context_assembler=ContextAssembler(),

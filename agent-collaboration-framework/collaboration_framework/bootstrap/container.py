@@ -3,7 +3,11 @@
 from dataclasses import dataclass
 
 from collaboration_framework.contracts import ModuleContent
-from collaboration_framework.engine import FakeAtomicEngine, GameState
+from collaboration_framework.engine import (
+    GameState,
+    InMemoryEngineStore,
+    RuleEngineService,
+)
 from collaboration_framework.host.adapters.fakes import (
     FakeIntentModel,
     FakeNarrationModel,
@@ -20,7 +24,8 @@ from collaboration_framework.host.gateway import WebSocketGateway
 
 @dataclass(frozen=True)
 class FakeApplication:
-    engine: FakeAtomicEngine
+    engine: RuleEngineService
+    engine_store: InMemoryEngineStore
     orchestrator: Orchestrator
     websocket_gateway: WebSocketGateway
 
@@ -29,7 +34,12 @@ def build_fake_application(
     module_content: ModuleContent,
     game_state: GameState,
 ) -> FakeApplication:
-    engine = FakeAtomicEngine(module_content, game_state)
+    engine_store = InMemoryEngineStore()
+    engine_store.register_room(
+        module_content=module_content,
+        initial_state=game_state,
+    )
+    engine = RuleEngineService(engine_store)
     orchestrator = Orchestrator(
         context_assembler=ContextAssembler(),
         intent_parser=IntentParser(FakeIntentModel()),
@@ -39,6 +49,7 @@ def build_fake_application(
     )
     return FakeApplication(
         engine=engine,
+        engine_store=engine_store,
         orchestrator=orchestrator,
         websocket_gateway=WebSocketGateway(orchestrator),
     )

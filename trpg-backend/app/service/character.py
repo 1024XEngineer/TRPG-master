@@ -12,6 +12,7 @@ from dataclasses import asdict
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.coc7_rules import (
+    GENERATION_POINT_BUY,
     GENERATION_ROLL,
     ValidationIssue,
     compute_derived_stats,
@@ -99,6 +100,18 @@ async def update_character(
 ) -> None:
     """保存建卡向导算好的完整角色数据。"""
     character = await _get_own_character(db, room_id, character_id, reconnect_token)
+
+    # PR #97 review [1]：`roll` 这个来源标记不能跨越「客户端自己重填了属性」。
+    # `roll_attributes` 会把它置成 roll，complete 时据此跳过 480 点预算校验
+    # （骰子结果本来就不受点数购买法约束）；但这个 PATCH 接受客户端任意属性，
+    # 标记原样留着的话，先掷一次、再把 8 项全顶到 90 提交，就能绕开预算过关。
+    # 属性跟掷出来那份不一致就说明是客户端填的，来源退回点数购买法。
+    if (
+        character.generation_method == GENERATION_ROLL
+        and payload.attributes != character.attributes
+    ):
+        character.generation_method = GENERATION_POINT_BUY
+
     character.name = payload.name
     character.age = payload.age
     character.gender = payload.gender

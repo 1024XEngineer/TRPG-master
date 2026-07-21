@@ -165,37 +165,73 @@ export default function CharacterPage() {
 
     let cancelled = false
     fetchCharacter(roomId, characterId)
-      .then(saved => {
+      .then(async saved => {
         if (cancelled || !saved.attributes || Object.keys(saved.attributes).length === 0) return
+        const matched = saved.occupation
+          ? (ruleset.occupations.find(o => o.name === saved.occupation) ?? null)
+          : null
+
+        // 🔴 两个请求都拿到结果之后才动 state，中途一律不落地。
+        //
+        // 技能点反推必须走后端的权威预览（PR #97 review [3]）：ruleset 里的
+        // base 有公式型（闪避 = DEX/2、母语 = EDU），前端把公式串当 0 处理会
+        // 把「基础 25 + 加 15」的闪避 40 误读成「加了 40 点」，提交时再叠一次
+        // base 变成 65。preview 的 skillView.allocated 是后端用同一份属性算
+        // 出来的，没有歧义。
+        //
+        // 但这就意味着水合要发两个请求，**顺序很要紧**：先把属性/基本信息填
+        // 进表单再去 await preview，一旦 preview 失败（token 过期、网络抖动、
+        // 后端 500），下面的 catch 只会静默吞掉，用户看到的是「属性来自后端、
+        // 技能却全是 0」这种半截状态——技能页还没有任何错误提示，此时点完成
+        // 就会把技能点清空覆盖回后端。所以改成先算后填：失败就整体不水合，
+        // 退回本地缓存/空白表单，跟"压根没读回来"是同一种一致状态。
+        const view = await previewCharacter({
+          attributes: saved.attributes,
+          occupationId: matched?.id ?? null,
+          skills: saved.skills ?? {},
+        })
+        if (cancelled) return
+
+        // skillAlloc 和 interestAlloc 两份状态都要重建（PR #97 review [4]）：
+        // 兴趣技能的行和计数器读的是 interestAlloc，只重建 skillAlloc 的话，
+        // 清掉本地缓存后兴趣技能显示成 0 点、兴趣预算 bar 也是空的。
+        // 拆分口径跟后端记账保持一致（coc7_rules：职业技能上的点数全算职业点、
+        // 其余全算兴趣点），所以从最终值可以无歧义地还原出这两份状态。
+        const occIds = new Set(matched?.skillIds ?? [])
+        const alloc: Record<string, number> = {}
+        const interest: Record<string, number> = {}
+        for (const v of view.skillView) {
+          if (v.allocated <= 0) continue
+          alloc[v.id] = v.allocated
+          // 信用评级不进 interestAlloc：它不在任何职业的 skillIds 里，但也不是
+          // 普通兴趣技能——两条 bar 是用 creditMin / 超出部分单独记它的账
+          // （见下面的 occPointsSpent / interestPointsSpent），放进来会重复计一遍。
+          if (v.id === 'credit-rating') continue
+          if (!occIds.has(v.id)) interest[v.id] = v.allocated
+        }
+
         setAttr({ ...saved.attributes })
+        // 每个字段都无条件覆盖（PR #97 review [2]）：只在后端值非空时才赋值的话，
+        // 服务端被清空的字段会保留本地缓存里的旧值，下一次保存又把它写回去——
+        // 删掉的背景/笔记/装备会"复活"。后端是唯一事实来源，空值也是事实。
         setInfo(prev => ({
           ...prev,
-          ...(saved.name ? { name: saved.name } : {}),
-          ...(saved.age != null ? { age: String(saved.age) } : {}),
-          ...(saved.gender ? { gender: saved.gender } : {}),
-          ...(saved.residence ? { residence: saved.residence } : {}),
-          ...(saved.birthplace ? { birthplace: saved.birthplace } : {}),
+          name: saved.name ?? '',
+          age: saved.age != null ? String(saved.age) : '',
+          gender: saved.gender ?? '',
+          residence: saved.residence ?? '',
+          birthplace: saved.birthplace ?? '',
+          // 职业名映射不回 ruleset（比如规则改版删了这个职业）时保持原样，
+          // 别把已选职业清成 null——那会连带清掉技能预算。
+          ...(matched ? { occupationId: matched.id } : {}),
         }))
-        if (saved.occupation) {
-          const matched = ruleset.occupations.find(o => o.name === saved.occupation)
-          if (matched) setInfo(prev => ({ ...prev, occupationId: matched.id }))
-        }
-        if (saved.background) setBackground(saved.background)
-        if (saved.notes) setNotes(saved.notes)
-        if (saved.equipment?.length) setEquipment(saved.equipment.join('、'))
-
-        // 后端存的是技能最终值，建卡向导要的是"加了多少点"——用 ruleset 的
-        // 基础值反推，而不是另存一份 alloc（那又会变成第二个数据源）。
-        const baseOf = new Map(ruleset.skills.map(sk => [sk.id, sk]))
-        const alloc: Record<string, number> = {}
-        for (const [skillId, finalValue] of Object.entries(saved.skills ?? {})) {
-          const spec = baseOf.get(skillId)
-          if (!spec) continue
-          const base = typeof spec.base === 'number' ? spec.base : 0
-          const spent = finalValue - base
-          if (spent > 0) alloc[skillId] = spent
-        }
-        if (Object.keys(alloc).length > 0) setSkillAlloc(alloc)
+        setBackground(saved.background ?? '')
+        setNotes(saved.notes ?? '')
+        setEquipment((saved.equipment ?? []).join('、'))
+        setSkillAlloc(alloc)
+        setInterestAlloc(interest)
+        // 后端那份已经是权威，别再让 localStorage 那条重建逻辑覆盖回去。
+        interestAllocInitialized.current = true
       })
       .catch(() => {
         // 读不回来（比如还没建过草稿）就沿用本地缓存/空白表单，不打断建卡。
@@ -370,6 +406,9 @@ export default function CharacterPage() {
     )
     const out: Record<string, number> = {}
     for (const [id, pts] of Object.entries(existingCharacter.skillAlloc)) {
+      // 信用评级由 creditMin / 超出部分单独记账，不能当普通兴趣技能算一遍
+      // （跟上面从后端重建那份保持同一个口径）。
+      if (id === 'credit-rating') continue
       if (!occIds.has(id)) out[id] = pts
     }
     setInterestAlloc(out)

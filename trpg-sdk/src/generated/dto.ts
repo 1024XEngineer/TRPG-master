@@ -275,7 +275,8 @@ export type ErrorCode =
   | "RECONNECT_TOKEN_EXPIRED"
   | "RATE_LIMITED"
   | "NOT_IMPLEMENTED"
-  | "CHARACTER_INVALID";
+  | "CHARACTER_INVALID"
+  | "RULESET_NOT_CONFIGURED";
 
 /**
  * 错误信息的具体内容，只在 success=false 时出现在 error 字段里。

@@ -44,6 +44,11 @@ class ErrorCode(StrEnum):
     # 技能上限、信用评级区间等）→ 422，`AppException.details` 带结构化校验报告。
     CHARACTER_INVALID = "CHARACTER_INVALID"
 
+    # issue #112 新增：规则系统没有可用的规则数据（属性/技能/职业目录为空），
+    # 无法据此裁决建卡 → 409。规则计算改参数注入后，"没有规则数据"在裁决路径上
+    # 会退化成"零个约束"从而放行空白角色卡，必须显式拒绝而不是当成无约束。
+    RULESET_NOT_CONFIGURED = "RULESET_NOT_CONFIGURED"
+
 
 class AppException(Exception):
     """业务代码显式抛出的异常，携带错误码/状态码/用户可见信息。

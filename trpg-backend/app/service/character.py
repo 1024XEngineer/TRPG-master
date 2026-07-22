@@ -11,6 +11,7 @@ from dataclasses import asdict
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.coc7_content import build_coc7_ruleset
 from app.core.coc7_rules import (
     GENERATION_POINT_BUY,
     GENERATION_ROLL,
@@ -31,11 +32,13 @@ from app.dto.character import (
     CharacterUpdateBody,
     RollAttributesResult,
 )
-from app.models.room import Character, Player
+from app.dto.game import RulesetRead
+from app.models.room import Character, Player, Room
 from app.service.room import (
     RoomAuthorizationError,
     find_room_by_id,
     get_player_by_reconnect_token,
+    require_ruleset,
 )
 
 
@@ -127,6 +130,24 @@ async def update_character(
     await db.commit()
 
 
+async def _resolve_ruleset(db: AsyncSession, room: Room) -> RulesetRead:
+    """决定这个房间的建卡该用哪份规则数据（issue #112：`coc7_rules` 本身对
+    具体是哪个规则系统无知，取数据这件事由 service 层负责）。
+
+    房间已经选了模组（`room.system_id` 有值）就用那个规则系统的 ruleset；
+    房间还没选模组（比如还在大厅、玩家提前建卡）时没有 `system_id` 可查，
+    这里回落到内置 COC7——这是当前唯一内置的规则系统，默认值刻意放在这层
+    组装代码里，而不是塞进 `coc7_rules.py`：规则核心保持对具体系统无知，
+    正是 issue #112 参数注入的整个目的。
+
+    走 `require_ruleset` 而不是 `get_ruleset`：这是裁决路径，规则数据为空时
+    必须拒绝而不是当成"零个约束"放行（见 `require_ruleset` 的说明）。
+    """
+    if room.system_id is not None:
+        return await require_ruleset(db, room.system_id)
+    return build_coc7_ruleset()
+
+
 async def complete_character(
     db: AsyncSession, room_id: str, character_id: str, reconnect_token: str | None
 ) -> None:
@@ -139,7 +160,10 @@ async def complete_character(
     `OCCUPATION_NOT_FOUND` 校验项，同样会被拒绝，不会静默放行。
     """
     character = await _get_own_character(db, room_id, character_id, reconnect_token)
-    issues = validate_age(character.age) + validate_character(
+    room = await find_room_by_id(db, room_id)
+    ruleset = await _resolve_ruleset(db, room)
+    issues = validate_age(ruleset, character.age) + validate_character(
+        ruleset,
         attributes=character.attributes or {},
         occupation_name=character.occupation,
         skills=character.skills or {},
@@ -188,11 +212,18 @@ async def get_character(
     )
 
 
-def compute_character_preview(payload: CharacterPreviewRequest) -> CharacterComputeResult:
+def compute_character_preview(
+    ruleset: RulesetRead, payload: CharacterPreviewRequest
+) -> CharacterComputeResult:
     """POST /api/v1/systems/{systemId}/character/preview —— 建卡过程中的权威
     计算预览（issue #84 S2，路线乙的接缝）：不碰数据库，纯函数式地把
-    `coc7_rules.compute_preview` 的结果转成 DTO。"""
+    `coc7_rules.compute_preview` 的结果转成 DTO。
+
+    `ruleset` 由调用方（controller）取好传入（issue #112）——它已经为了校验
+    systemId 存在而查过一次 `get_ruleset`，这里直接复用结果，不重新查一次。
+    """
     result = compute_preview(
+        ruleset,
         attributes=payload.attributes,
         occupation_id=payload.occupation_id,
         skills=payload.skills,

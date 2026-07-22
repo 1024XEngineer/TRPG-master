@@ -18,3 +18,9 @@ __pycache__/
 .env
 .env.*
 !.env.example
+
+# COC7 职业目录导入管线（issue #114）的中间产物：build_occupations.py 的输出，
+# 会被内联进 app/core/coc7_content.py（那才是提交进 git 的最终产物）。这个原始
+# 片段既不是独立可运行模块（引用 OccupationSpec 等未 import 的名字，ruff 会报
+# 一堆 F821），也跟 coc7_content.py 内容重复，所以不进 git。
+trpg-backend/scripts/coc7_occupations/generated_occupations.py

@@ -55,17 +55,23 @@ async def test_get_ruleset_returns_full_coc7_data(client: AsyncClient) -> None:
         "defaultValue": 50,
     }
 
-    # 80 项技能（前端 ALL_SKILLS 原有 76 条 + issue #84 S2 补齐的 3 条悬空引用
-    # navigate/carpentry/illusion + PR #85 review 补的信用评级 credit-rating），
-    # 固定值和公式值都要能原样带过来
-    assert len(data["skills"]) == 80
+    # 92 项技能。构成：前端 ALL_SKILLS 原有 76 条 + issue #84 S2 补齐的 3 条悬空
+    # 引用 + PR #85 review 补的信用评级；issue #114 扩充职业目录时又发现一批缺口：
+    # −1 重复的「导航」（navigate 与既有的 navigation 同名同基础值，S2 那次没查重，
+    # 把悬空引用修成了重复定义）、+8 规则书有而目录缺的技能（妙手/动物驯养/
+    # 精神分析/潜水/催眠/炮术/爆破/读唇）、+3 学识族编号槽（9 个职业引用它，
+    # 整族此前不存在）、+2 唯二用到而族内未枚举的专精（格斗：链锯、驾驶：热气球）。
+    # 固定值和公式值都要能原样带过来。
+    assert len(data["skills"]) == 76 + 3 + 1 - 1 + 8 + 3 + 2
     skills_by_id = {s["id"]: s for s in data["skills"]}
     assert skills_by_id["spot-hidden"]["base"] == 25
     assert skills_by_id["dodge"]["base"] == "DEX/2"
     assert skills_by_id["spot-hidden"]["category"] == "perception"
 
-    # 30 个职业（前端 ALL_OCCUPATIONS 实际条数），信用评级区间和技能点公式要拆解正确
-    assert len(data["occupations"]) == 30
+    # 229 个职业：issue #114 从 COC7 规则表完整导入（此前是移植前端时手工挑的
+    # 30 个 curated 子集，且技能列表被规整成整齐的 8 项、与规则书不符）。
+    # 信用评级区间和技能点公式要拆解正确。
+    assert len(data["occupations"]) == 229
     occs_by_id = {o["id"]: o for o in data["occupations"]}
     accountant = occs_by_id[1]
     assert accountant["name"] == "会计师"
@@ -73,6 +79,23 @@ async def test_get_ruleset_returns_full_coc7_data(client: AsyncClient) -> None:
     assert accountant["creditMax"] == 70
     assert accountant["skillPointsFormula"] == "EDU*4"
     assert "accounting" in accountant["skillIds"]
+    # 职业技能 = 固定项 + 自选槽。会计师按规则书是 6 项固定 + 「任意其他两项」，
+    # 不是此前那份被规整成 8 项固定的数据（issue #114）。
+    assert accountant["skillIds"] == [
+        "accounting",
+        "law",
+        "library-use",
+        "listen",
+        "persuade",
+        "spot-hidden",
+    ]
+    assert accountant["choiceSlots"] == [
+        {
+            "count": 2,
+            "candidateSkillIds": None,
+            "label": "任意其他两项个人或时代特长",
+        }
+    ]
 
 
 async def test_get_ruleset_unknown_system_returns_404(client: AsyncClient) -> None:

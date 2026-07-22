@@ -42,8 +42,8 @@ test('ruleset 契约：属性、点数购买约束、年龄区间都由后端下
   // COC7 年龄档从 15-19 起、到 80-89 止
   assert.deepEqual(ruleset.ageRange, { minValue: 15, maxValue: 89 })
 
-  // 幸运不参与任何职业技能点公式
-  assert.equal(ruleset.occupations.length, 30)
+  // 幸运不参与任何职业技能点公式（issue #114：职业目录从 30 扩到完整 229 项）
+  assert.equal(ruleset.occupations.length, 229)
   for (const occupation of ruleset.occupations) {
     assert.ok(
       !occupation.skillPointsFormula.includes('LUCK'),
@@ -255,4 +255,36 @@ test('不能读别人的角色卡', async () => {
       intruder.sdk.characters.get(room.roomId, draft.characterId, joined.reconnectToken),
     '角色卡含背景故事/装备等属于该玩家的信息，同房间的其他人也不该直接拉到'
   )
+})
+
+test('🔴 自选槽：占槽的技能算职业点，不撑爆兴趣预算（issue #114 端到端）', async () => {
+  // 私家侦探（EDU*2+MAX(STR,DEX)*2=200 职业点 / 100 兴趣点）有一个社交槽
+  // （取悦/话术/恐吓/说服 四选一）+ 一个开放槽（任意技能）。
+  //
+  // 话术 90（base 5 → 85 点）填社交槽、神秘学 90（base 5 → 85 点）填开放槽，
+  // 共 170 点。如果这两项被当成兴趣技能，170 > 100 兴趣预算 → 必被拒；只有当
+  // 它们被正确识别为「占了自选槽、算职业点」时（170 + 信用下限 9 = 179 ≤ 200
+  // 职业预算），这张卡才合法。这正是自选槽记账在端到端层面的守卫。
+  const room = await createRoomWithModule('slot')
+  const { sdk } = room.host
+  const draft = await sdk.characters.createDraft(room.roomId, room.reconnectToken)
+
+  const attributes = {
+    STR: 50, CON: 50, POW: 50, DEX: 50,
+    APP: 50, SIZ: 50, INT: 50, EDU: 50, LUCK: 50,
+  }
+  await sdk.characters.save(
+    room.roomId,
+    draft.characterId,
+    {
+      ...legalCharacterPayload(attributes),
+      occupation: '私家侦探',
+      // 私家侦探信用区间 [9, 30]，取下限
+      skills: { 'credit-rating': 9, 'fast-talk': 90, occult: 90 },
+    },
+    room.reconnectToken
+  )
+
+  // 占槽技能算职业点，两项共 170 落在 200 职业预算内 → complete 通过
+  await sdk.characters.complete(room.roomId, draft.characterId, room.reconnectToken)
 })

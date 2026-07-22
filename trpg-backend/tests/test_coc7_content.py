@@ -93,6 +93,36 @@ def test_all_choice_slots_are_structurally_sound() -> None:
     assert broken == [], f"存在结构不合法的自选槽: {broken}"
 
 
+def test_no_choice_slot_label_leaks_a_raw_skill_id() -> None:
+    """自选槽的 `label` 是给玩家看的中文描述，不能是内部技能 id（曾在 57 个槽上
+    发生过：构建脚本对「技艺（任一）」「外语（任一）」这类无具体文本的槽，把
+    label 兜底成了第一个候选 id 本身，比如 `label="art-craft-1"`——前端会把
+    这串内部 slug 直接渲染给玩家看）。"""
+    leaked: list[str] = []
+    for occupation in COC7_OCCUPATIONS:
+        for slot in occupation.choice_slots:
+            if slot.candidate_skill_ids and slot.label in slot.candidate_skill_ids:
+                leaked.append(f"{occupation.name}({occupation.id}) 槽 label={slot.label!r}")
+
+    assert leaked == [], f"自选槽 label 泄漏了内部技能 id: {leaked}"
+
+
+def test_no_occupation_has_duplicate_fixed_skill_ids() -> None:
+    """固定技能列表内不能有重复 id（曾在「绅士、淑女」上出现过：射击技能改名
+    合并两个中文名后，原本分属两个位置的引用没有去重，`firearm-rifle` 被列了
+    两遍——规则引擎里 `set(occupation.skill_ids)` 悄悄吞掉了重复，但前端直接
+    渲染 `skill_ids` 列表会看到同一项技能出现两次）。"""
+    dup: list[str] = []
+    for occupation in COC7_OCCUPATIONS:
+        seen = set()
+        for skill_id in occupation.skill_ids:
+            if skill_id in seen:
+                dup.append(f"{occupation.name}({occupation.id}) -> {skill_id}")
+            seen.add(skill_id)
+
+    assert dup == [], f"固定技能列表存在重复引用: {dup}"
+
+
 def test_occupation_ids_are_unique_and_contiguous() -> None:
     """229 项职业的 id 唯一，且是 1..229 连续编号（导入时按序号对齐，缺号/重号
     都说明提取或合并出了错）。"""

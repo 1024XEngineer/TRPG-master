@@ -1,10 +1,14 @@
 """COC7 建卡计算/校验模块（issue #84 S2；issue #112 改为参数注入）的单元测试：
 公式求值 + 一张合法卡返回空校验报告 + 六类非法各一条能被独立拦下。
 
-用「会计师」职业（id=1，`skill_points_formula="EDU*4"`，信用评级 [30,70]，
-职业技能含 accounting/law/library-use/listen/persuade/psychology/
-science-mathematics/spot-hidden）当固定夹具，8 项属性全部取 50 让预算数字
-好算：职业技能点预算 = EDU*4 = 200，兴趣技能点预算 = INT*2 = 100。
+用「会计师」职业（id=1，`skill_points_formula="EDU*4"`，信用评级 [30,70]）当
+固定夹具，8 项属性全部取 50 让预算数字好算：职业技能点预算 = EDU*4 = 200，
+兴趣技能点预算 = INT*2 = 100。
+
+⚠️ issue #114 之后会计师的职业技能是 **6 项固定**（accounting/law/library-use/
+listen/persuade/spot-hidden）**+ 一个「任意其他两项」自选槽**，跟规则书一致。
+此前是 8 项固定（多出 psychology/science-mathematics），那是移植时被规整出来的
+——所以凡是依赖「哪些技能算职业技能」的用例，数字都跟改动前不同，不是算错了。
 
 issue #112：这个模块的公开入口现在都要求调用方传入 `RulesetRead`，多数用例
 借用内置 COC7 的完整规则数据（`RULESET`）当夹具——这只是「借用一份趁手的规则
@@ -112,12 +116,15 @@ def test_valid_card_has_empty_validation_report() -> None:
     result = compute_preview(RULESET, ATTRS, ACCOUNTANT_ID, skills)
 
     assert result.validation == []
-    # 职业技能 200（accounting/law/library-use/listen 各分配 50）+ 信用下限 30 = 230
-    assert result.occupation_skill_points == SkillPointsBudget(budget=200, spent=230, remaining=-30)
-    # 兴趣技能 50（dodge/occult 各分配 25）+ 信用超出下限部分 20 = 70
-    assert result.interest_skill_points == SkillPointsBudget(budget=100, spent=70, remaining=30)
-    # 76 前端原有 +3 悬空引用补齐 +1 信用评级 −1 重复的导航 +8 目录缺口（issue #114）
-    assert len(result.skill_view) == 76 + 3 + 1 - 1 + 8
+    # 职业技能 200（accounting/law/library-use/listen 各分配 50）+ 信用下限 30
+    # + dodge/occult 各 25（issue #114：会计师按规则书带「任意其他两项」自选槽，
+    # 这两项非固定技能占住了槽，改吃职业点）= 280
+    assert result.occupation_skill_points == SkillPointsBudget(budget=200, spent=280, remaining=-80)
+    # 兴趣技能只剩信用超出下限的部分 20（dodge/occult 已被槽吸收）
+    assert result.interest_skill_points == SkillPointsBudget(budget=100, spent=20, remaining=80)
+    # 76 前端原有 +3 悬空引用补齐 +1 信用评级 −1 重复的导航
+    # +8 目录缺口 +3 学识族 +2 链锯/热气球（issue #114）
+    assert len(result.skill_view) == 76 + 3 + 1 - 1 + 8 + 3 + 2
 
     # complete_character 用的是按名字查职业的版本，结果应该一致
     assert validate_character(RULESET, ATTRS, ACCOUNTANT_NAME, skills) == []
@@ -166,7 +173,22 @@ def test_occupation_skills_may_overflow_into_interest_points() -> None:
 
 
 def test_interest_points_exceeded_alone() -> None:
-    skills = {"dodge": 95, "occult": 95, "credit-rating": 50}
+    """非职业技能花费超过兴趣预算。
+
+    issue #114 后要 5 项非职业技能才测得出来：会计师按规则书带「任意其他两项」
+    自选槽，最大的两项会被槽吸收、改吃职业点，只有剩下的才算兴趣点。此前用
+    2 项就能触发，是因为那时职业技能列表是编的、没有槽。
+    5 项各分配 54 点 → 吸收 108、剩 162 > 兴趣预算 100；总花费 300 = 总预算，
+    刚好不触发 SKILL_POINTS_EXCEEDED，保证只测出这一条。
+    """
+    skills = {
+        "dodge": 79,
+        "occult": 59,
+        "climb": 74,
+        "swim": 74,
+        "jump": 74,
+        "credit-rating": 30,
+    }
     issues = validate_character(RULESET, ATTRS, ACCOUNTANT_NAME, skills)
     codes = [issue.code for issue in issues]
     assert codes == ["INTEREST_POINTS_EXCEEDED"]
@@ -237,15 +259,17 @@ def test_credit_above_min_excess_counts_against_interest_points() -> None:
 
 
 def test_credit_excess_counts_against_interest_budget() -> None:
-    # 兴趣点数（预算 100）先花在两个非职业技能上正好用满，再额外给信用评级
-    # 分配 50 点（超出会计师信用下限 30 的部分是 20 点）——这 20 点现在应该
-    # 算进 interest_spent，导致超预算 20 点，触发 INTEREST_POINTS_EXCEEDED。
-    skills = {
-        "dodge": 99,  # 非职业技能，base 25，分配 74 点
-        "occult": 31,  # 非职业技能，base 5，分配 26 点
-        "credit-rating": 50,  # 会计师信用区间 [30,70]，下限 30 走职业点
-    }
-    issues = validate_character(RULESET, ATTRS, ACCOUNTANT_NAME, skills)
+    # 4 项非职业技能各分配 45 点，其中最大的两项被会计师的「任意其他两项」自选槽
+    # 吸收（改吃职业点），剩下 90 点算兴趣点——**还没超**预算 100。再给信用评级
+    # 分配 50 点，超出下限 30 的那 20 点也算兴趣点，总计 110 才超。
+    #
+    # 数值特意这么挑，是为了让这条用例真的在测「信用超出下限算兴趣点」：下面的
+    # 对照断言证明不加那 20 点时是合法的，所以断言的失败只可能来自信用这部分。
+    skills = {"dodge": 70, "occult": 50, "climb": 65, "swim": 65}
+    baseline = validate_character(RULESET, ATTRS, ACCOUNTANT_NAME, {**skills, "credit-rating": 30})
+    assert baseline == []
+
+    issues = validate_character(RULESET, ATTRS, ACCOUNTANT_NAME, {**skills, "credit-rating": 50})
     codes = [issue.code for issue in issues]
     assert codes == ["INTEREST_POINTS_EXCEEDED"]
 
@@ -619,3 +643,25 @@ def test_cthulhu_mythos_at_base_value_is_fine() -> None:
     )
 
     assert issues == []
+
+
+def test_private_investigator_rulebook_skills_not_rejected_as_interest() -> None:
+    """🔴 issue #114 回归用例：一张按规则书合法、但在旧实现下被
+    `INTEREST_POINTS_EXCEEDED` 误杀的私家侦探卡。
+
+    旧的 30 项 curated 目录里，私家侦探的技能列表是移植时手工编的——被规整成
+    恰好 8 项、且**漏了规则书里的图书馆使用和心理学**（塞进了汽车驾驶/格斗）。
+    于是玩家把点数加在心理学 / 图书馆（规则书认可的本职技能）上时，会被当成
+    兴趣技能计费而触发 `INTEREST_POINTS_EXCEEDED`。
+
+    这里把 80 + 70 = 150 点加在这两项上，远超兴趣预算 100——如果它们仍被算作
+    兴趣技能，就会被拒；只有当它们被正确识别为职业技能（吃 200 的职业预算），
+    这张卡才合法。
+    """
+    ruleset = build_coc7_ruleset()
+
+    # 心理学 base 10 → 90（+80）、图书馆 base 20 → 90（+70），信用取下限 9（职业点）
+    skills = {"psychology": 90, "library-use": 90, "credit-rating": 9}
+    issues = validate_character(ruleset, ATTRS, "私家侦探", skills)
+
+    assert issues == [], "私家侦探把点加在规则书本职技能（心理学/图书馆）上应当合法"

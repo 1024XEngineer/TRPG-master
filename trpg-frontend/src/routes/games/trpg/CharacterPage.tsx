@@ -376,6 +376,15 @@ export default function CharacterPage() {
   // setPreview/setPreviewError。
   const previewGenRef = useRef(0)
 
+  // 加点手感依赖同步反馈，但预算数字要等 preview 防抖+网络往返才更新——两者
+  // 之间有个窗口：连续快点"+"时，每次判断都在拿同一份还没反映最新点数的旧
+  // spent 算"剩余"，会被越过预算（AI review 抓出的真问题，issue #114 之前
+  // 是纯本地同步算账，不存在这个窗口）。这里记一个"已经落到本地状态、但
+  // 还没被最新一次 preview 确认"的净加点数，从两个池子的合计剩余里减掉，
+  // preview 一确认（非过期响应）就清零。只影响"还能不能继续加"的判断，不
+  // 影响两条 bar 本身的显示值（那两个数字仍然只读 preview.spent，见下）。
+  const [pendingDelta, setPendingDelta] = useState(0)
+
   useEffect(() => {
     if (!ruleset) return
     const timer = setTimeout(() => {
@@ -389,6 +398,7 @@ export default function CharacterPage() {
           if (gen !== previewGenRef.current) return
           setPreview(result)
           setPreviewError('')
+          setPendingDelta(0)
         })
         .catch((err) => {
           if (gen !== previewGenRef.current) return
@@ -449,6 +459,14 @@ export default function CharacterPage() {
   const occPointsSpent = preview?.occupationSkillPoints.spent ?? 0
   const interestPointsSpent = preview?.interestSkillPoints.spent ?? 0
 
+  // 两个池子合计还能再加多少——后端的真实闸门本来就是总预算（职业池单独超支
+  // 允许，由兴趣池补，见 SKILL_POINTS_EXCEEDED），所以这个合计值同时也是本地
+  // 能同步维护的、唯一需要精确的数字：加点会被拒当且仅当它 <= 0。
+  const totalPointsRemaining = Math.max(
+    0,
+    occPointsTotal + interestPointsTotal - occPointsSpent - interestPointsSpent - pendingDelta
+  )
+
   const derived = useMemo(() => normalizeDerivedStats(preview?.derivedStats), [preview])
 
   const roomId = useRoomStore((s) => s.roomId)
@@ -459,18 +477,26 @@ export default function CharacterPage() {
   // 兴趣技能页签（只列非职业技能）：单纯的兴趣点数池，逻辑简单，加/减只动
   // interestAlloc，skillAlloc 跟着同步——因为这些技能压根碰不到职业点数。
   const handleInterestSkillChange = (skillId: string, delta: number) => {
+    if (delta > 0 && totalPointsRemaining <= 0) return
     const prevInterest = interestAlloc[skillId] || 0
     const nextInterest = Math.max(0, prevInterest + delta)
     const appliedDelta = nextInterest - prevInterest
     setInterestAlloc(prev => ({ ...prev, [skillId]: nextInterest }))
     setSkillAlloc(prev => ({ ...prev, [skillId]: (prev[skillId] || 0) + appliedDelta }))
+    if (appliedDelta !== 0) setPendingDelta(d => Math.max(0, d + appliedDelta))
   }
 
   const handleInterestSkillSet = (skillId: string, newAllocation: number) => {
     const occPart = (skillAlloc[skillId] || 0) - (interestAlloc[skillId] || 0)
-    const clamped = Math.max(0, newAllocation)
+    const prevInterest = interestAlloc[skillId] || 0
+    let clamped = Math.max(0, newAllocation)
+    if (clamped > prevInterest) {
+      clamped = Math.min(clamped, prevInterest + totalPointsRemaining)
+    }
     setInterestAlloc(prev => ({ ...prev, [skillId]: clamped }))
     setSkillAlloc(prev => ({ ...prev, [skillId]: occPart + clamped }))
+    const appliedDelta = clamped - prevInterest
+    if (appliedDelta !== 0) setPendingDelta(d => Math.max(0, d + appliedDelta))
   }
 
   // 职业技能页签：加点优先扣职业点数池，职业点数用完了自动改扣兴趣点数池
@@ -479,22 +505,26 @@ export default function CharacterPage() {
   // 兴趣池占的部分（后加的先退），再退职业池的部分。
   const handleOccSkillChange = (skillId: string, delta: number) => {
     if (delta > 0) {
+      if (totalPointsRemaining <= 0) return
+      // 哪个池子出这一点只是本地展示用的分类（提交给后端的只有最终技能值，
+      // 真正的职业/兴趣归属由后端 _assign_choice_slots 权威决定），这里用的
+      // occRemaining 在连续快点时会暂时不准，但上面已经用 totalPointsRemaining
+      // 挡住了"总共能不能再加"，所以分到哪个池子不影响预算是否被越过。
       const occRemaining = occPointsTotal - occPointsSpent
       if (occRemaining > 0) {
         setSkillAlloc(prev => ({ ...prev, [skillId]: (prev[skillId] || 0) + 1 }))
-        return
-      }
-      const interestRemaining = interestPointsTotal - interestPointsSpent
-      if (interestRemaining > 0) {
+      } else {
         setInterestAlloc(prev => ({ ...prev, [skillId]: (prev[skillId] || 0) + 1 }))
         setSkillAlloc(prev => ({ ...prev, [skillId]: (prev[skillId] || 0) + 1 }))
       }
+      setPendingDelta(d => Math.max(0, d + 1))
     } else if (delta < 0) {
       const interestPart = interestAlloc[skillId] || 0
       if (interestPart > 0) {
         setInterestAlloc(prev => ({ ...prev, [skillId]: interestPart - 1 }))
       }
       setSkillAlloc(prev => ({ ...prev, [skillId]: Math.max(0, (prev[skillId] || 0) - 1) }))
+      setPendingDelta(d => Math.max(0, d - 1))
     }
   }
 
@@ -503,6 +533,7 @@ export default function CharacterPage() {
     const interestPart = interestAlloc[skillId] || 0
     const currentTotal = occPart + interestPart
     let delta = Math.max(0, newTotalAllocation) - currentTotal
+    if (delta > 0) delta = Math.min(delta, totalPointsRemaining)
     let newOccPart = occPart
     let newInterestPart = interestPart
 
@@ -511,8 +542,7 @@ export default function CharacterPage() {
       const occAdd = Math.min(delta, occRemaining)
       newOccPart += occAdd
       delta -= occAdd
-      const interestRemaining = Math.max(0, interestPointsTotal - interestPointsSpent)
-      newInterestPart += Math.min(delta, interestRemaining)
+      newInterestPart += delta
     } else if (delta < 0) {
       let remove = -delta
       const interestRemove = Math.min(remove, newInterestPart)
@@ -523,6 +553,8 @@ export default function CharacterPage() {
 
     setInterestAlloc(prev => ({ ...prev, [skillId]: newInterestPart }))
     setSkillAlloc(prev => ({ ...prev, [skillId]: newOccPart + newInterestPart }))
+    const appliedDelta = newOccPart + newInterestPart - occPart - interestPart
+    if (appliedDelta !== 0) setPendingDelta(d => Math.max(0, d + appliedDelta))
   }
 
   // 信用评级 +/- ：直接夹在所选职业的 [creditMin, creditMax] 内。信用的
@@ -1024,11 +1056,10 @@ export default function CharacterPage() {
                   ) : occSkills.map(skill => {
                     // 职业技能这一侧的"总加点"= 职业池部分 + 兴趣池部分（可能因为职业
                     // 点数用完了、自动溢出用了兴趣点数），两部分合并成一个数显示和编辑，
-                    // maxPoints 是两个池子剩余额度的总和，加点时由 handleOccSkillChange
-                    // /handleOccSkillSet 内部决定具体从哪个池子扣。
+                    // maxPoints 用 totalPointsRemaining（两池合计、已扣掉本次未确认加点
+                    // 的净剩余）而不是分别相加——分开算会在这个技能自己的分配值上重复
+                    // 加减、代数上抵消掉，导致连续快点时门槛形同虚设，见上方定义处注释。
                     const totalAllocation = skillAlloc[skill.id] || 0
-                    const occRemaining = Math.max(0, occPointsTotal - occPointsSpent)
-                    const interestRemaining = Math.max(0, interestPointsTotal - interestPointsSpent)
                     const compute = skillComputeMap.get(skill.id)
                     const base = compute?.base ?? (typeof skill.base === 'number' ? skill.base : 0)
                     const cap = compute?.cap ?? null
@@ -1038,7 +1069,7 @@ export default function CharacterPage() {
                         otherPoolPoints={0}
                         onChange={(d) => handleOccSkillChange(skill.id, d)}
                         onSetAllocation={(v) => handleOccSkillSet(skill.id, v)}
-                        maxPoints={occRemaining + interestRemaining + totalAllocation}
+                        maxPoints={totalAllocation + totalPointsRemaining}
                         minPoints={0}
                       />
                     )
@@ -1057,7 +1088,7 @@ export default function CharacterPage() {
                         otherPoolPoints={0}
                         onChange={(d) => handleInterestSkillChange(skill.id, d)}
                         onSetAllocation={(v) => handleInterestSkillSet(skill.id, v)}
-                        maxPoints={interestPointsTotal - interestPointsSpent + interestAllocation}
+                        maxPoints={interestAllocation + totalPointsRemaining}
                         minPoints={0}
                       />
                     )

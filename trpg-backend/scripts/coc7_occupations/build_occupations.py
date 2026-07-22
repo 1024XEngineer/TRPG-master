@@ -13,7 +13,9 @@
 `教育×2＋力量或敏捷×2`），确定性解析即可，让模型碰只会引入不必要的风险。
 模型只负责本职技能与自选槽——那部分才需要判断。
 
-两遍不一致、又没有裁定记录的条目会让脚本**报错退出**，不允许静默取其一。
+两遍不一致、又没有裁定记录的条目会让脚本**报错退出**，不允许静默取其一；
+两遍里任何一遍缺失或多出条目（相对 raw_occupations.json）同样报错退出，
+不允许被取交集悄悄丢掉。
 
 用法：
 
@@ -76,10 +78,32 @@ def parse_formula(raw: str) -> str:
     return "+".join(terms)
 
 
-def reconcile(pass1: dict, pass2: dict, resolutions: dict[int, str]) -> dict[int, dict]:
-    """两遍一致就直接采用；不一致则按裁定记录取其一，没有裁定就报错。"""
+def reconcile(
+    pass1: dict, pass2: dict, resolutions: dict[int, str], raw_indices: set[int]
+) -> dict[int, dict]:
+    """两遍一致就直接采用；不一致则按裁定记录取其一，没有裁定就报错。
+
+    覆盖率先于内容对拍检查：之前只取 `set(pass1) & set(pass2)` 的交集，某一遍
+    如果漏了一批（比如某次批处理中途失败），缺失的职业会被静默丢出结果、还
+    跟着重新编号——生成不会报错，只是职业数量比 229 少，且看不出是哪条丢了。
+    """
+    if set(pass1) != raw_indices or set(pass2) != raw_indices:
+        problems = []
+        if missing := raw_indices - set(pass1):
+            problems.append(f"pass1 缺失（相对 raw_occupations.json）: {sorted(missing)}")
+        if missing := raw_indices - set(pass2):
+            problems.append(f"pass2 缺失（相对 raw_occupations.json）: {sorted(missing)}")
+        if extra := set(pass1) - raw_indices:
+            problems.append(f"pass1 多出（raw_occupations.json 里没有）: {sorted(extra)}")
+        if extra := set(pass2) - raw_indices:
+            problems.append(f"pass2 多出（raw_occupations.json 里没有）: {sorted(extra)}")
+        raise SystemExit(
+            "两遍推导覆盖的职业集合和 raw_occupations.json 不一致，拒绝生成：\n"
+            + "\n".join(problems)
+        )
+
     merged, unresolved = {}, []
-    for index in sorted(set(pass1) & set(pass2)):
+    for index in sorted(raw_indices):
         if normalize(pass1[index]) == normalize(pass2[index]):
             merged[index] = pass1[index]
             continue
@@ -150,7 +174,9 @@ def main() -> None:
         r["index"]: r["take"]
         for r in json.loads(RESOLUTIONS.read_text(encoding="utf-8"))["resolutions"]
     }
-    merged = reconcile(load_pass(Path(sys.argv[1])), load_pass(Path(sys.argv[2])), resolutions)
+    merged = reconcile(
+        load_pass(Path(sys.argv[1])), load_pass(Path(sys.argv[2])), resolutions, set(raw)
+    )
 
     occupations = []
     for new_id, index in enumerate(sorted(merged), start=1):

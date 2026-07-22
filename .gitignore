@@ -2,10 +2,18 @@ node_modules/
 dist/
 .vite/
 *.tsbuildinfo
+.DS_Store
 
 .venv/
 __pycache__/
 .pytest_cache/
+.ruff_cache/
+*.db
+
+# scripts/export_schema.py 的输出：Python -> TS 类型生成管线的临时中间产物，
+# 不是需要跨机器/跨提交保持一致的东西（真正提交的是 trpg-sdk/src/generated/
+# 下由它生成出来的 TS 类型），见 issue #75 决策 3b。
+.schema-export/
 
 .env
 .env.*

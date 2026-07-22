@@ -1,0 +1,19 @@
+{
+  "name": "trpg-e2e",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "SDK → 后端 的端到端验证：用真实 SDK 打真实后端，验证契约与业务流程。不含浏览器，也不依赖前端。",
+  "scripts": {
+    "test:e2e": "tsx scripts/run-e2e.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  },
+  "dependencies": {
+    "trpg-sdk": "file:../trpg-sdk"
+  }
+}

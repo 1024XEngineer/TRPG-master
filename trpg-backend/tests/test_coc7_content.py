@@ -11,7 +11,7 @@ from app.core.coc7_rules import evaluate_skill_points_formula
 
 _VALID_SKILL_IDS = {skill.id for skill in COC7_SKILLS}
 # 求值只需要一份属性字典，取值无所谓——这里只验「公式能不能算出来」，不验数值。
-_DUMMY_ATTRS = {k: 50 for k in ("STR", "CON", "SIZ", "DEX", "APP", "INT", "POW", "EDU", "LUCK")}
+_DUMMY_ATTRS = dict.fromkeys(("STR", "CON", "SIZ", "DEX", "APP", "INT", "POW", "EDU", "LUCK"), 50)
 
 
 def test_all_occupation_fixed_skill_ids_exist_in_skill_table() -> None:
@@ -35,7 +35,9 @@ def test_all_choice_slot_candidate_skill_ids_exist_in_skill_table() -> None:
         for slot in occupation.choice_slots:
             for skill_id in slot.candidate_skill_ids or []:
                 if skill_id not in _VALID_SKILL_IDS:
-                    dangling.append(f"{occupation.name}({occupation.id}) 槽[{slot.label}] -> {skill_id}")
+                    dangling.append(
+                        f"{occupation.name}({occupation.id}) 槽[{slot.label}] -> {skill_id}"
+                    )
 
     assert dangling == [], f"自选槽候选技能存在悬空引用: {dangling}"
 
@@ -51,7 +53,9 @@ def test_all_occupation_formulas_are_evaluable() -> None:
         try:
             evaluate_skill_points_formula(occupation.skill_points_formula, _DUMMY_ATTRS)
         except ValueError as exc:
-            unparseable.append(f"{occupation.name}({occupation.id}) {occupation.skill_points_formula!r}: {exc}")
+            unparseable.append(
+                f"{occupation.name}({occupation.id}) {occupation.skill_points_formula!r}: {exc}"
+            )
 
     assert unparseable == [], f"存在不可求值的技能点公式: {unparseable}"
 
@@ -62,7 +66,8 @@ def test_all_occupation_credit_ranges_are_valid() -> None:
     for occupation in COC7_OCCUPATIONS:
         if not (0 <= occupation.credit_min <= occupation.credit_max <= 99):
             invalid.append(
-                f"{occupation.name}({occupation.id}) [{occupation.credit_min}, {occupation.credit_max}]"
+                f"{occupation.name}({occupation.id}) "
+                f"[{occupation.credit_min}, {occupation.credit_max}]"
             )
 
     assert invalid == [], f"存在非法的信用评级区间: {invalid}"
@@ -75,11 +80,14 @@ def test_all_choice_slots_are_structurally_sound() -> None:
     for occupation in COC7_OCCUPATIONS:
         for slot in occupation.choice_slots:
             if slot.count < 1:
-                broken.append(f"{occupation.name}({occupation.id}) 槽[{slot.label}] count={slot.count}")
+                broken.append(
+                    f"{occupation.name}({occupation.id}) 槽[{slot.label}] count={slot.count}"
+                )
             candidates = slot.candidate_skill_ids
             if candidates is not None and len(candidates) < slot.count:
                 broken.append(
-                    f"{occupation.name}({occupation.id}) 槽[{slot.label}] 候选 {len(candidates)} < 需选 {slot.count}"
+                    f"{occupation.name}({occupation.id}) 槽[{slot.label}] "
+                    f"候选 {len(candidates)} < 需选 {slot.count}"
                 )
 
     assert broken == [], f"存在结构不合法的自选槽: {broken}"

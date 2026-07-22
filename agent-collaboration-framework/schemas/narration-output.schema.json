@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "narration-output.schema.json",
+  "additionalProperties": false,
+  "properties": {
+    "kind": {
+      "default": "narration",
+      "enum": [
+        "narration",
+        "clarification"
+      ],
+      "title": "Kind",
+      "type": "string"
+    },
+    "text": {
+      "minLength": 1,
+      "title": "Text",
+      "type": "string"
+    },
+    "claimed_fact_ids": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Claimed Fact Ids",
+      "type": "array"
+    },
+    "suggested_actions": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Suggested Actions",
+      "type": "array"
+    }
+  },
+  "required": [
+    "text"
+  ],
+  "title": "NarrationOutput",
+  "type": "object"
+}

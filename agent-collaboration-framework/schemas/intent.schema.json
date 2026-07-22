@@ -1,0 +1,207 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "intent.schema.json",
+  "$defs": {
+    "DefaultCheck": {
+      "additionalProperties": false,
+      "properties": {
+        "route": {
+          "const": "default",
+          "default": "default",
+          "title": "Route",
+          "type": "string"
+        },
+        "proposed_skills": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Proposed Skills",
+          "type": "array"
+        }
+      },
+      "title": "DefaultCheck",
+      "type": "object"
+    },
+    "MatchedTarget": {
+      "additionalProperties": false,
+      "properties": {
+        "matched": {
+          "const": true,
+          "default": true,
+          "title": "Matched",
+          "type": "boolean"
+        },
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "MatchedTarget",
+      "type": "object"
+    },
+    "ModuleCheck": {
+      "additionalProperties": false,
+      "properties": {
+        "route": {
+          "const": "module",
+          "default": "module",
+          "title": "Route",
+          "type": "string"
+        },
+        "checkpoint_id": {
+          "minLength": 1,
+          "title": "Checkpoint Id",
+          "type": "string"
+        },
+        "proposed_skills": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Proposed Skills",
+          "type": "array"
+        }
+      },
+      "required": [
+        "checkpoint_id"
+      ],
+      "title": "ModuleCheck",
+      "type": "object"
+    },
+    "NoCheck": {
+      "additionalProperties": false,
+      "properties": {
+        "route": {
+          "const": "none",
+          "default": "none",
+          "title": "Route",
+          "type": "string"
+        }
+      },
+      "title": "NoCheck",
+      "type": "object"
+    },
+    "UnmatchedTarget": {
+      "additionalProperties": false,
+      "properties": {
+        "matched": {
+          "const": false,
+          "default": false,
+          "title": "Matched",
+          "type": "boolean"
+        },
+        "raw": {
+          "minLength": 1,
+          "title": "Raw",
+          "type": "string"
+        }
+      },
+      "required": [
+        "raw"
+      ],
+      "title": "UnmatchedTarget",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Host semantic proposal; every valid instance is sent to ActionExecutor.",
+  "properties": {
+    "kind": {
+      "enum": [
+        "action",
+        "dialogue",
+        "unknown"
+      ],
+      "title": "Kind",
+      "type": "string"
+    },
+    "verb": {
+      "minLength": 1,
+      "title": "Verb",
+      "type": "string"
+    },
+    "target": {
+      "discriminator": {
+        "mapping": {
+          "False": "#/$defs/UnmatchedTarget",
+          "True": "#/$defs/MatchedTarget"
+        },
+        "propertyName": "matched"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/MatchedTarget"
+        },
+        {
+          "$ref": "#/$defs/UnmatchedTarget"
+        }
+      ],
+      "title": "Target"
+    },
+    "check": {
+      "discriminator": {
+        "mapping": {
+          "default": "#/$defs/DefaultCheck",
+          "module": "#/$defs/ModuleCheck",
+          "none": "#/$defs/NoCheck"
+        },
+        "propertyName": "route"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/NoCheck"
+        },
+        {
+          "$ref": "#/$defs/ModuleCheck"
+        },
+        {
+          "$ref": "#/$defs/DefaultCheck"
+        }
+      ],
+      "title": "Check"
+    },
+    "approach": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Approach"
+    },
+    "summary": {
+      "minLength": 1,
+      "title": "Summary",
+      "type": "string"
+    },
+    "clarification_question": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Clarification Question"
+    }
+  },
+  "required": [
+    "kind",
+    "verb",
+    "target",
+    "check",
+    "summary"
+  ],
+  "title": "Intent",
+  "type": "object"
+}

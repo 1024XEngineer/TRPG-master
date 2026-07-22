@@ -1,0 +1,29 @@
+{
+  "room_id": "room_01",
+  "scene_id": "study",
+  "phase": "playing",
+  "ending_id": null,
+  "event_sequence": 0,
+  "actors": {
+    "pc_1": {
+      "player_id": "player_01",
+      "name": "调查员",
+      "source_character_id": "character_01",
+      "source_character_version": 1,
+      "state": {
+        "hp": 10,
+        "san": 60,
+        "skills": {},
+        "inventory": [],
+        "conditions": []
+      }
+    }
+  },
+  "entities": {
+    "butler": {"entered": true},
+    "bookshelf": {"key_found": false},
+    "cabinet": {"opened": false},
+    "document": {"obtained": false, "destroyed": false},
+    "window": {}
+  }
+}

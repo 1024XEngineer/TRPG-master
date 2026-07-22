@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "action-result.schema.json",
+  "$defs": {
+    "VisibleFact": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "text"
+      ],
+      "title": "VisibleFact",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Player-safe result; engine state changes and Event payloads are excluded.",
+  "properties": {
+    "request_id": {
+      "minLength": 1,
+      "title": "Request Id",
+      "type": "string"
+    },
+    "action_id": {
+      "minLength": 1,
+      "title": "Action Id",
+      "type": "string"
+    },
+    "resolution": {
+      "enum": [
+        "checkpoint",
+        "direct",
+        "blocked",
+        "unrecognized"
+      ],
+      "title": "Resolution",
+      "type": "string"
+    },
+    "outcome": {
+      "enum": [
+        "success",
+        "failure",
+        "not_applicable"
+      ],
+      "title": "Outcome",
+      "type": "string"
+    },
+    "visible_facts": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/VisibleFact"
+      },
+      "title": "Visible Facts",
+      "type": "array"
+    },
+    "narration_constraints": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Narration Constraints",
+      "type": "array"
+    },
+    "view_revision": {
+      "minLength": 1,
+      "title": "View Revision",
+      "type": "string"
+    },
+    "event_refs": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Event Refs",
+      "type": "array"
+    }
+  },
+  "required": [
+    "request_id",
+    "action_id",
+    "resolution",
+    "outcome",
+    "view_revision"
+  ],
+  "title": "ActionResult",
+  "type": "object"
+}

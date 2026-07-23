@@ -15,17 +15,21 @@ from app.models.content import (
     ScenarioScene,
     World,
 )
+from app.models.engine import ActionExecution, GameEvent, GameSession, ModuleVersion
 from app.models.event import CheckResult, Event
-from app.models.replay import ModuleImportJob, RoomSession, RoomSummary
+from app.models.replay import ModuleImportJob, RoomSummary
 from app.models.room import Character, Note, Player, Room
 from app.models.user import User, UserCharacterTemplate, UserSession
 
 __all__ = [
+    "ActionExecution",
     "CheckResult",
     "Character",
     "Entity",
     "Event",
     "Game",
+    "GameEvent",
+    "GameSession",
     "GameSystem",
     "ModuleAsset",
     "ModuleCheckpoint",
@@ -33,10 +37,10 @@ __all__ = [
     "ModulePregen",
     "ModuleSanTrigger",
     "ModuleWinCondition",
+    "ModuleVersion",
     "Note",
     "Player",
     "Room",
-    "RoomSession",
     "RoomSummary",
     "Scenario",
     "ScenarioScene",

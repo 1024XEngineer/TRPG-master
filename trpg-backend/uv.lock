@@ -3,6 +3,17 @@ revision = 3
 requires-python = ">=3.12"
 
 [[package]]
+name = "agent-collaboration-framework"
+version = "0.4.0"
+source = { editable = "../agent-collaboration-framework" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pydantic", specifier = ">=2.13,<3" }]
+
+[[package]]
 name = "aiosqlite"
 version = "0.22.1"
 source = { registry = "https://pypi.org/simple" }
@@ -737,6 +748,7 @@ name = "trpg-backend"
 version = "0.0.0"
 source = { editable = "." }
 dependencies = [
+    { name = "agent-collaboration-framework" },
     { name = "aiosqlite" },
     { name = "alembic" },
     { name = "asyncpg" },
@@ -760,6 +772,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "agent-collaboration-framework", editable = "../agent-collaboration-framework" },
     { name = "aiosqlite", specifier = ">=0.20,<1.0" },
     { name = "alembic", specifier = ">=1.13,<2.0" },
     { name = "asyncpg", specifier = ">=0.29,<1.0" },

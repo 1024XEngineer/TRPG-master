@@ -6,7 +6,12 @@ from typing import Literal
 
 from pydantic import Field, JsonValue
 
-from collaboration_framework.contracts import ActionResult, ContractModel
+from collaboration_framework.contracts import (
+    ActionRequest,
+    ActionResult,
+    ContractModel,
+    ModuleContent,
+)
 
 
 class ActorState(ContractModel):
@@ -18,7 +23,7 @@ class ActorState(ContractModel):
 
 
 class GameState(ContractModel):
-    """Authoritative state shape used only by the fake engine."""
+    """Authoritative room state loaded and committed only through EngineStore."""
 
     room_id: str
     scene_id: str
@@ -62,3 +67,20 @@ class EngineExecutionResult(ContractModel):
     state_changes: tuple[StateChange, ...] = ()
     events: tuple[StateModifiedEvent, ...] = ()
     state_version: int = Field(ge=0)
+
+
+class EngineRuntimeSnapshot(ContractModel):
+    """Deep-copied authoritative inputs loaded for one room transaction."""
+
+    module_id: str = Field(min_length=1)
+    module_version: str = Field(min_length=1)
+    module_content: ModuleContent
+    game_state: GameState
+    revision: str = Field(min_length=1)
+
+
+class CompletedAction(ContractModel):
+    """Original command and semantic result retained for idempotent replay."""
+
+    request: ActionRequest
+    execution: EngineExecutionResult

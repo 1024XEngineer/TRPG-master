@@ -1,9 +1,11 @@
-"""事件日志 ORM 模型（issue #77 §1，只增不改的 2 张表）。
+"""事件日志 ORM 模型（issue #77 §1、issue #89，只增不改的 2 张表）。
 
-- Event：房间内发生的所有事件的统一流水（叙事推送/玩家行动/未来的检定等），
+- Event：传输、叙事和回放流水（叙事推送/玩家行动/未来的检定等），
   `GET /rooms/{roomId}/replay` 直接顺序读这张表——是本期唯一一条"服务端真的
   在写、也真的在读"的事件日志闭环（ws.py 在 narration.push / action.submit
-  时插入行）。
+  时插入行）。它不是规则引擎的权威 Event，不参与 GameState 重建，也不提供
+  规则动作幂等；规则引擎状态变化单独保存在 ``game_events``。可空的
+  ``correlation_id`` 为动作产生的叙事提供持久化去重键。
 - CheckResult：检定结果记录（技能检定/理智检定），本期 `check.roll`/
   `san.check.roll` 走 NOT_IMPLEMENTED 桩，不会真的写入这张表，只铺表结构。
 """
@@ -11,7 +13,7 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Uuid
+from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base
@@ -19,6 +21,14 @@ from app.core.db import Base
 
 class Event(Base):
     __tablename__ = "events"
+    __table_args__ = (
+        UniqueConstraint(
+            "room_id",
+            "event_type",
+            "correlation_id",
+            name="uq_events_room_type_correlation",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(
         Uuid(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4())
@@ -30,6 +40,7 @@ class Event(Base):
         Uuid(as_uuid=False), ForeignKey("players.id"), nullable=True
     )
     event_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    correlation_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
     payload: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)

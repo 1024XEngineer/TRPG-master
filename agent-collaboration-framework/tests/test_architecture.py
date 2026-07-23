@@ -111,7 +111,9 @@ class ArchitectureTests(unittest.TestCase):
         )
         from collaboration_framework.engine.models import (
             ActorState,
+            CompletedAction,
             EngineExecutionResult,
+            EngineRuntimeSnapshot,
             GameState,
             StateChange,
             StateModifiedEvent,
@@ -147,6 +149,8 @@ class ArchitectureTests(unittest.TestCase):
             StateModifiedPayload,
             StateModifiedEvent,
             EngineExecutionResult,
+            EngineRuntimeSnapshot,
+            CompletedAction,
             ConditionSpec,
             AllowOperationSpec,
             ModifyOperationSpec,

@@ -115,8 +115,10 @@ test('🔴 属性点预算：点数购买法超预算被拒，掷骰法不受该
     '点数购买法超预算的卡必须被 complete 拒绝'
   )
 
-  // ② 掷骰法：服务端掷出来的属性总和可能远超 480，必须放行
-  const rolled = await sdk.characters.createDraft(room.roomId, room.reconnectToken)
+  // ② 掷骰法：复用校验失败后仍处于 draft 的同一张角色卡。Issue #89 从数据库层
+  // 保证一名玩家在一个房间只有一张 Character，不能再创建第二张草稿。
+  // 服务端掷出来的属性总和可能远超 480，必须放行。
+  const rolled = overBudget
   const rollResult = await sdk.characters.rollAttributes(
     room.roomId,
     rolled.characterId,

@@ -26,7 +26,7 @@ payload dict，再按 type 分支，把 payload dict 交给下面对应的具体
 
 from typing import Any
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from app.dto.common import CamelModel
 from app.dto.room import RoomPlayerRead
@@ -76,15 +76,20 @@ class GameStartPayload(CamelModel):
 class ActionSubmitPayload(CamelModel):
     """action.submit 事件 payload。
 
-    `utterance` 必填，理由同 PlayerReadyPayload.ready：一条不带行动内容的
-    action.submit 是畸形消息。给默认空串会让 SDK 侧变成 `utterance?: string`，
-    于是 `submitAction(playerId, {})` 类型检查通过、运行时静默无操作。
-
-    注意「必填」只管字段存在，空白内容（`""` / `"   "`）仍由下游的
-    `strip()` + 空值判断拦掉，两者不冲突。
+    `client_action_id` 是客户端为一次逻辑动作生成的稳定幂等键；网络重试必须
+    复用原值。两个字段都在契约层拒绝空白文本。
     """
 
-    utterance: str
+    client_action_id: str = Field(..., min_length=1, max_length=200)
+    utterance: str = Field(..., min_length=1)
+
+    @field_validator("client_action_id", "utterance")
+    @classmethod
+    def strip_non_empty(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("不能为空")
+        return stripped
 
 
 class CheckRollPayload(CamelModel):
@@ -233,6 +238,7 @@ class ErrorPayload(CamelModel):
 
     code: str
     message: str
+    correlation_id: str | None = None
 
 
 # ── 信封 ────────────────────────────────────────

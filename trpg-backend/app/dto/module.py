@@ -12,10 +12,19 @@ from app.dto.common import CamelModel, UtcDatetime
 from app.dto.room import ModuleRead
 
 
-class ModuleDetailRead(ModuleRead):
-    """GET /api/v1/modules/{moduleId} 返回——在 ModuleRead 基础上补充简介。"""
+class ModuleStoryPage(CamelModel):
+    """玩家开局前可见的一页故事介绍。"""
 
-    synopsis: str | None = None
+    title: str
+    content: str
+
+
+class ModuleDetailRead(ModuleRead):
+    """GET /api/v1/modules/{moduleId} 返回——增加故事页展示信息。"""
+
+    story_label: str | None = None
+    subtitle: str | None = None
+    story_pages: list[ModuleStoryPage]
 
 
 class ModuleImportRequestBody(CamelModel):

@@ -1,14 +1,106 @@
 import type {
   ActionSubmitPayload,
+  AgentPlayerView,
+  AgentTurnPayload,
   CheckRollPayload,
   PlayerReadyPayload,
   RoomJoinPayload,
   RoomRejoinPayload,
   SanCheckRollPayload,
   ServerToClientEvent,
+  TurnCompletedEvent,
 } from '../types';
 
 export type RoomSocketHandler = (event: ServerToClientEvent) => void;
+
+interface PendingAction {
+  promise: Promise<AgentTurnPayload>;
+  resolve: (payload: AgentTurnPayload) => void;
+  reject: (error: Error) => void;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string');
+}
+
+function isValidPlayerView(value: unknown): value is AgentPlayerView {
+  if (!isRecord(value)) return false;
+  const {
+    room_id,
+    player_id,
+    actor_id,
+    scene_id,
+    phase,
+    revision,
+    visible_facts,
+    visible_entities,
+    checkpoint_options,
+  } = value;
+  return (
+    typeof room_id === 'string' &&
+    typeof player_id === 'string' &&
+    typeof actor_id === 'string' &&
+    typeof scene_id === 'string' &&
+    (phase === 'playing' || phase === 'ended') &&
+    typeof revision === 'string' &&
+    Array.isArray(visible_facts) &&
+    visible_facts.every(
+      (fact) => isRecord(fact) && typeof fact.id === 'string' && typeof fact.text === 'string'
+    ) &&
+    Array.isArray(visible_entities) &&
+    visible_entities.every(
+      (entity) =>
+        isRecord(entity) &&
+        typeof entity.id === 'string' &&
+        (entity.kind === 'npc' || entity.kind === 'object' || entity.kind === 'location') &&
+        typeof entity.name === 'string' &&
+        isStringArray(entity.aliases) &&
+        typeof entity.content === 'string'
+    ) &&
+    Array.isArray(checkpoint_options) &&
+    checkpoint_options.every(
+      (option) =>
+        isRecord(option) &&
+        typeof option.id === 'string' &&
+        typeof option.target_id === 'string' &&
+        typeof option.action_hint === 'string' &&
+        isStringArray(option.skills)
+    )
+  );
+}
+
+export function isValidTurnCompleted(value: unknown): value is TurnCompletedEvent {
+  if (!isRecord(value)) return false;
+  const { protocol_version, message_type, correlation_id, payload } = value;
+  if (
+    protocol_version !== '1' ||
+    message_type !== 'turn.completed' ||
+    typeof correlation_id !== 'string' ||
+    !correlation_id ||
+    !isRecord(payload)
+  ) {
+    return false;
+  }
+  const { room_id, player_id, actor_id, narration, player_view } = payload;
+  return (
+    typeof room_id === 'string' &&
+    typeof player_id === 'string' &&
+    typeof actor_id === 'string' &&
+    isRecord(narration) &&
+    (narration.kind === 'narration' || narration.kind === 'clarification') &&
+    typeof narration.text === 'string' &&
+    isStringArray(narration.claimed_fact_ids) &&
+    isStringArray(narration.suggested_actions) &&
+    isValidPlayerView(player_view) &&
+    player_view.room_id === room_id &&
+    player_view.player_id === player_id &&
+    player_view.actor_id === actor_id
+  );
+}
 
 /**
  * 每个 S→C 事件各自的 payload 校验器。
@@ -77,8 +169,8 @@ export function isValidServerEvent(value: unknown): value is ServerToClientEvent
 /**
  * `/ws/{roomId}` 的类型化封装（issue #60）。这条通道是独立于 REST API
  * 版本号的实时通道，不走 ApiClient 的 HTTP/`{success,data,error}` 信封，
- * 地址和事件形状跟 trpg-app 原型 services/api-client.ts 的约定一致：
- * 客户端发送 `{type, playerId, payload}`，服务端推送 `{type, payload}`。
+ * 客户端发送 `{type, playerId, payload}`；常规服务端事件使用
+ * `{type, payload}`，动作完成使用 Agent framework 的 `WebSocketOutput`。
  *
  * 单例连接：同一个 roomId 重复调用 connect() 会复用已有（或正在建立中的）
  * 连接，页面切换时不需要关心是否已经连过——跟原型里"房间级单例连接"的
@@ -88,6 +180,8 @@ export class RoomSocket {
   private ws: WebSocket | null = null;
   private roomId: string | null = null;
   private readonly handlers = new Set<RoomSocketHandler>();
+  private readonly pendingActions = new Map<string, PendingAction>();
+  private playerView: AgentPlayerView | null = null;
 
   constructor(private readonly wsBaseUrl: string) {}
 
@@ -101,9 +195,11 @@ export class RoomSocket {
     ) {
       return this.ws;
     }
+    this.rejectPendingActions('WebSocket connection replaced');
     this.ws?.close();
 
     this.roomId = roomId;
+    this.playerView = null;
     const url = `${this.wsBaseUrl}/ws/${roomId}?token=${encodeURIComponent(token)}`;
     const socket = new WebSocket(url);
     socket.onmessage = (event) => {
@@ -114,6 +210,17 @@ export class RoomSocket {
         console.warn('[RoomSocket] received malformed JSON, dropped', event.data);
         return;
       }
+      if (isValidTurnCompleted(parsed)) {
+        const pending = this.pendingActions.get(parsed.correlation_id);
+        if (!pending) {
+          console.warn('[RoomSocket] received turn.completed without matching action, dropped', parsed);
+          return;
+        }
+        this.pendingActions.delete(parsed.correlation_id);
+        this.playerView = parsed.payload.player_view;
+        pending.resolve(parsed.payload);
+        return;
+      }
       // 校验不过就丢弃 + warn，不 throw、不断开连接——一条格式不对的消息
       // 不应该让整局游戏的连接挂掉（issue #75 决策 5）。之前这里直接把
       // JSON.parse 的结果断言成 ServerToClientEvent，服务端推来的形状对不上
@@ -121,6 +228,13 @@ export class RoomSocket {
       if (!isValidServerEvent(parsed)) {
         console.warn('[RoomSocket] received event with unknown type or invalid shape, dropped', parsed);
         return;
+      }
+      if (parsed.type === 'error' && parsed.payload.correlationId) {
+        const pending = this.pendingActions.get(parsed.payload.correlationId);
+        if (pending) {
+          this.pendingActions.delete(parsed.payload.correlationId);
+          pending.reject(new Error(parsed.payload.message));
+        }
       }
       this.handlers.forEach((handler) => handler(parsed));
     };
@@ -163,8 +277,29 @@ export class RoomSocket {
     this.send('game.start', playerId, {});
   }
 
-  submitAction(playerId: string, payload: ActionSubmitPayload): void {
-    this.send('action.submit', playerId, payload);
+  submitAction(playerId: string, payload: ActionSubmitPayload): Promise<AgentTurnPayload> {
+    const existing = this.pendingActions.get(payload.clientActionId);
+    if (existing) {
+      this.send('action.submit', playerId, payload);
+      return existing.promise;
+    }
+
+    let resolve!: (result: AgentTurnPayload) => void;
+    let reject!: (error: Error) => void;
+    const promise = new Promise<AgentTurnPayload>((resolveAction, rejectAction) => {
+      resolve = resolveAction;
+      reject = rejectAction;
+    });
+    this.pendingActions.set(payload.clientActionId, { promise, resolve, reject });
+    if (!this.send('action.submit', playerId, payload)) {
+      this.pendingActions.delete(payload.clientActionId);
+      reject(new Error('WebSocket is not connected'));
+    }
+    return promise;
+  }
+
+  getPlayerView(): AgentPlayerView | null {
+    return this.playerView;
   }
 
   /** check.roll —— 玩家请求做一次技能检定（issue #77 新增，后端本期回
@@ -184,16 +319,25 @@ export class RoomSocket {
   }
 
   disconnect(): void {
+    this.rejectPendingActions('WebSocket disconnected');
     this.ws?.close();
     this.ws = null;
     this.roomId = null;
   }
 
-  private send(type: string, playerId: string, payload: unknown): void {
+  private send(type: string, playerId: string, payload: unknown): boolean {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       console.warn(`[RoomSocket] not connected, dropped: ${type}`, payload);
-      return;
+      return false;
     }
     this.ws.send(JSON.stringify({ type, playerId, payload }));
+    return true;
+  }
+
+  private rejectPendingActions(message: string): void {
+    for (const pending of this.pendingActions.values()) {
+      pending.reject(new Error(message));
+    }
+    this.pendingActions.clear();
   }
 }

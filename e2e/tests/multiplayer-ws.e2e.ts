@@ -109,6 +109,7 @@ test('提交行动会广播给房间里的所有人（不只是发起者）', as
   const guest = await registerPlayer('bcguest')
   const joined = await guest.sdk.rooms.join(room.roomCode, { nickname: '访客' }, guest.token)
 
+  await room.host.sdk.rooms.startStory(room.roomId, room.reconnectToken)
   await buildCharacter(room.host.sdk, room.roomId, room.reconnectToken)
   await buildCharacter(guest.sdk, room.roomId, joined.reconnectToken)
 
@@ -130,13 +131,22 @@ test('提交行动会广播给房间里的所有人（不只是发起者）', as
     })
     await waitForEvent(guest.sdk, (e) => e.type === 'session.bound')
 
+    const hostOpening = waitForEvent(room.host.sdk, (e) => e.type === 'narration.push')
+    const guestOpening = waitForEvent(guest.sdk, (e) => e.type === 'narration.push')
+    room.host.sdk.roomSocket.startGame(room.hostPlayerId)
+    await Promise.all([hostOpening, guestOpening])
+
     // 房主提交行动，**访客**这一侧应该收到广播
-    const guestHears = waitForEvent(
-      guest.sdk,
-      (e) => e.type === 'narration.push' && String(e.payload?.text ?? '').includes('推开了门')
-    )
-    room.host.sdk.roomSocket.submitAction(room.hostPlayerId, { utterance: '我推开了门' })
-    await guestHears
+    const guestHears = waitForEvent(guest.sdk, (e) => e.type === 'narration.push')
+    const actionId = `e2e-action-${Date.now()}`
+    const completed = room.host.sdk.roomSocket.submitAction(room.hostPlayerId, {
+      clientActionId: actionId,
+      utterance: '我看看旧书店',
+    })
+    const [guestNarration, turn] = await Promise.all([guestHears, completed])
+    assert.equal(guestNarration.type, 'narration.push')
+    assert.equal(turn.player_id, room.hostPlayerId)
+    assert.equal(room.host.sdk.roomSocket.getPlayerView()?.player_id, room.hostPlayerId)
   } finally {
     room.host.sdk.roomSocket.disconnect()
     guest.sdk.roomSocket.disconnect()

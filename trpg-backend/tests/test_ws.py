@@ -47,7 +47,9 @@ def join_as(client: TestClient, room_code: str, account: str, nickname: str = "�
         headers={"Authorization": f"Bearer {token}"},
     )
     assert response.status_code == 200
-    return response.json()["data"]
+    result = response.json()["data"]
+    result["authToken"] = token
+    return result
 
 
 def complete_character(client: TestClient, room_id: str, reconnect_token: str) -> None:
@@ -90,6 +92,21 @@ def advance_to_building(client: TestClient, room: dict) -> None:
         headers=headers,
     )
     client.post(f"{ROOMS_BASE}/{room['roomId']}/start-story", headers=headers)
+
+
+def start_game(client: TestClient, room: dict, token: str) -> None:
+    with client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
+        ws.send_json(
+            {
+                "type": "room.join",
+                "playerId": room["playerId"],
+                "payload": {"reconnectToken": room["reconnectToken"]},
+            }
+        )
+        assert ws.receive_json()["type"] == "session.bound"
+        ws.send_json({"type": "game.start", "playerId": room["playerId"], "payload": {}})
+        assert ws.receive_json()["type"] == "narration.push"
+        assert ws.receive_json()["type"] == "room.state"
 
 
 def test_connect_without_token_is_rejected(sync_client: TestClient) -> None:
@@ -243,7 +260,7 @@ def test_game_start_rejects_non_host(sync_client: TestClient) -> None:
     complete_character(sync_client, room["roomId"], room["reconnectToken"])
     complete_character(sync_client, room["roomId"], guest["reconnectToken"])
 
-    with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
+    with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={guest['authToken']}") as ws:
         ws.send_json(
             {
                 "type": "room.join",
@@ -270,9 +287,17 @@ def test_action_submit_broadcasts_narration_to_room_only(sync_client: TestClient
     token_b = register_and_login(sync_client, "host_b")
     room_a = create_room(sync_client, token_a)
     room_b = create_room(sync_client, token_b)
+    guest = join_as(sync_client, room_a["roomCode"], "guest_a")
+    advance_to_building(sync_client, room_a)
+    complete_character(sync_client, room_a["roomId"], room_a["reconnectToken"])
+    complete_character(sync_client, room_a["roomId"], guest["reconnectToken"])
+    start_game(sync_client, room_a, token_a)
 
     with (
         sync_client.websocket_connect(f"/ws/{room_a['roomId']}?token={token_a}") as ws_a,
+        sync_client.websocket_connect(
+            f"/ws/{room_a['roomId']}?token={guest['authToken']}"
+        ) as ws_guest,
         sync_client.websocket_connect(f"/ws/{room_b['roomId']}?token={token_b}") as ws_b,
     ):
         ws_a.send_json(
@@ -283,6 +308,14 @@ def test_action_submit_broadcasts_narration_to_room_only(sync_client: TestClient
             }
         )
         ws_a.receive_json()  # session.bound
+        ws_guest.send_json(
+            {
+                "type": "room.join",
+                "playerId": guest["playerId"],
+                "payload": {"reconnectToken": guest["reconnectToken"]},
+            }
+        )
+        ws_guest.receive_json()  # session.bound
         ws_b.send_json(
             {
                 "type": "room.join",
@@ -295,11 +328,38 @@ def test_action_submit_broadcasts_narration_to_room_only(sync_client: TestClient
         ws_a.send_json(
             {
                 "type": "action.submit",
-                "playerId": room_a["playerId"],
-                "payload": {"utterance": "检查门锁"},
+                # 信封里的 playerId 不能切换身份，后端只使用已经绑定的 Player。
+                "playerId": guest["playerId"],
+                "payload": {
+                    "clientActionId": "action-broadcast-122",
+                    "utterance": "我看看旧书店",
+                },
             }
         )
+        completed = ws_a.receive_json()
         narration = ws_a.receive_json()
+        guest_narration = ws_guest.receive_json()
+
+        # 同一个动作重试可以再次收到技术确认，但不能再次产生叙事广播。
+        ws_a.send_json(
+            {
+                "type": "action.submit",
+                "playerId": room_a["playerId"],
+                "payload": {
+                    "clientActionId": "action-broadcast-122",
+                    "utterance": "我看看旧书店",
+                },
+            }
+        )
+        retried = ws_a.receive_json()
+        ws_a.send_json(
+            {
+                "type": "room.join",
+                "playerId": room_a["playerId"],
+                "payload": {"reconnectToken": room_a["reconnectToken"]},
+            }
+        )
+        next_after_retry = ws_a.receive_json()
 
         # room_b 没有收到任何广播——发一条 room.join 触发一次同步交互，确认
         # 收到的仍然是它自己的 session.bound，而不是串过来的 narration。
@@ -312,6 +372,162 @@ def test_action_submit_broadcasts_narration_to_room_only(sync_client: TestClient
         )
         envelope_b = ws_b.receive_json()
 
+    assert completed["protocol_version"] == "1"
+    assert completed["message_type"] == "turn.completed"
+    assert completed["correlation_id"] == "action-broadcast-122"
+    assert completed["payload"]["player_id"] == room_a["playerId"]
+    assert completed["payload"]["actor_id"] == "actor_1"
     assert narration["type"] == "narration.push"
-    assert "检查门锁" in narration["payload"]["text"]
+    assert guest_narration == narration
+    assert retried["message_type"] == "turn.completed"
+    assert next_after_retry["type"] == "session.bound"
     assert envelope_b["type"] == "session.bound"
+
+    replay = sync_client.get(
+        f"{ROOMS_BASE}/{room_a['roomId']}/replay",
+        headers={"X-Reconnect-Token": room_a["reconnectToken"]},
+    ).json()["data"]
+    action_narrations = [
+        event
+        for event in replay
+        if event["eventType"] == "narration.push"
+        and event["payload"]["text"] == narration["payload"]["text"]
+    ]
+    assert len(action_narrations) == 1
+
+
+def test_action_submit_requires_client_action_id_without_closing_socket(
+    sync_client: TestClient,
+) -> None:
+    token = register_and_login(sync_client, "missing_action_id")
+    room = create_room(sync_client, token)
+
+    with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
+        ws.send_json(
+            {
+                "type": "room.join",
+                "playerId": room["playerId"],
+                "payload": {"reconnectToken": room["reconnectToken"]},
+            }
+        )
+        ws.receive_json()
+        ws.send_json(
+            {
+                "type": "action.submit",
+                "playerId": room["playerId"],
+                "payload": {"utterance": "缺少幂等键"},
+            }
+        )
+        error = ws.receive_json()
+        ws.send_json(
+            {
+                "type": "room.join",
+                "playerId": room["playerId"],
+                "payload": {"reconnectToken": room["reconnectToken"]},
+            }
+        )
+        rebound = ws.receive_json()
+
+    assert error["type"] == "error"
+    assert error["payload"]["code"] == "INVALID_ACTION"
+    assert rebound["type"] == "session.bound"
+
+
+def test_clarification_is_sent_only_to_action_owner(sync_client: TestClient) -> None:
+    host_token = register_and_login(sync_client, "clarification_host")
+    room = create_room(sync_client, host_token)
+    guest = join_as(sync_client, room["roomCode"], "clarification_guest")
+    advance_to_building(sync_client, room)
+    complete_character(sync_client, room["roomId"], room["reconnectToken"])
+    complete_character(sync_client, room["roomId"], guest["reconnectToken"])
+    start_game(sync_client, room, host_token)
+
+    with (
+        sync_client.websocket_connect(f"/ws/{room['roomId']}?token={host_token}") as host_ws,
+        sync_client.websocket_connect(
+            f"/ws/{room['roomId']}?token={guest['authToken']}"
+        ) as guest_ws,
+    ):
+        host_ws.send_json(
+            {
+                "type": "room.join",
+                "playerId": room["playerId"],
+                "payload": {"reconnectToken": room["reconnectToken"]},
+            }
+        )
+        host_ws.receive_json()
+        guest_ws.send_json(
+            {
+                "type": "room.join",
+                "playerId": guest["playerId"],
+                "payload": {"reconnectToken": guest["reconnectToken"]},
+            }
+        )
+        guest_ws.receive_json()
+
+        host_ws.send_json(
+            {
+                "type": "action.submit",
+                "playerId": room["playerId"],
+                "payload": {
+                    "clientActionId": "clarification-122",
+                    "utterance": "我想做点什么",
+                },
+            }
+        )
+        completed = host_ws.receive_json()
+        clarification = host_ws.receive_json()
+
+        guest_ws.send_json(
+            {
+                "type": "room.join",
+                "playerId": guest["playerId"],
+                "payload": {"reconnectToken": guest["reconnectToken"]},
+            }
+        )
+        guest_next = guest_ws.receive_json()
+
+    assert completed["payload"]["narration"]["kind"] == "clarification"
+    assert clarification["type"] == "narration.push"
+    assert guest_next["type"] == "session.bound"
+
+
+def test_action_submit_maps_suspended_room_error(sync_client: TestClient) -> None:
+    token = register_and_login(sync_client, "suspended_action")
+    room = create_room(sync_client, token)
+    advance_to_building(sync_client, room)
+    complete_character(sync_client, room["roomId"], room["reconnectToken"])
+    start_game(sync_client, room, token)
+    suspended = sync_client.post(
+        f"{ROOMS_BASE}/{room['roomId']}/suspend",
+        headers={"X-Reconnect-Token": room["reconnectToken"]},
+    )
+    assert suspended.status_code == 200
+
+    with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
+        ws.send_json(
+            {
+                "type": "room.join",
+                "playerId": room["playerId"],
+                "payload": {"reconnectToken": room["reconnectToken"]},
+            }
+        )
+        ws.receive_json()
+        ws.send_json(
+            {
+                "type": "action.submit",
+                "playerId": room["playerId"],
+                "payload": {
+                    "clientActionId": "suspended-122",
+                    "utterance": "我看看旧书店",
+                },
+            }
+        )
+        error = ws.receive_json()
+
+    assert error["type"] == "error"
+    assert error["payload"] == {
+        "code": "ROOM_NOT_ACTIONABLE",
+        "message": "房间当前状态不允许提交动作",
+        "correlationId": "suspended-122",
+    }

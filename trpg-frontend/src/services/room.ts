@@ -1,8 +1,14 @@
-import type { CreateRoomResult, ModuleSummary, MyRoomSummary, RoomPreview } from 'trpg-sdk';
+import type {
+  CreateRoomResult,
+  ModuleDetail,
+  ModuleSummary,
+  MyRoomSummary,
+  RoomPreview,
+} from 'trpg-sdk';
 import { useRoomStore } from '@/stores/room-store';
 import { getAuthToken, sdk } from './api-client';
 
-export type { CreateRoomResult, ModuleSummary, MyRoomSummary, RoomPreview };
+export type { CreateRoomResult, ModuleDetail, ModuleSummary, MyRoomSummary, RoomPreview };
 
 // 房主/已加入玩家专属的操作（选模组/开始游戏/结束游戏/我的房间列表）需要
 // 后端的房间重连凭证（X-Reconnect-Token，issue #39），加入/创建房间时签发、
@@ -37,6 +43,10 @@ export async function createGameRoom(
 // 拉取可用模组列表（本次没有做模组导入，只有一款内置模拟模组）
 export async function listModules(): Promise<ModuleSummary[]> {
   return sdk.rooms.listModules();
+}
+
+export async function getModuleDetail(moduleId: string): Promise<ModuleDetail> {
+  return sdk.modules.getDetail(moduleId);
 }
 
 // 房主确定模组

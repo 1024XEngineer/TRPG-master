@@ -1,43 +1,47 @@
 import { useNavigate, useParams } from 'react-router-dom'
+import { useEffect, useState } from 'react'
 import { Shield, Swords, ChevronRight } from 'lucide-react'
-import { getGameById, SYSTEM_COLORS } from '@/config/games'
+import type { GameSystem } from 'trpg-sdk'
+import { getGameById, getSystemVisualKey, SYSTEM_COLORS } from '@/config/games'
 import Badge from '@/shared/components/Badge'
 import { useGameStore } from '@/stores/game-store'
+import { friendlyErrorMessage, sdk } from '@/services/api-client'
 
 export default function SystemSelectionPage() {
   const navigate = useNavigate()
   const { gameId } = useParams<{ gameId: string }>()
   const game = getGameById(gameId || '')
+  const [systems, setSystems] = useState<GameSystem[] | null>(null)
+  const [loadError, setLoadError] = useState('')
   // ★ 只有从"创建房间→选择游戏"这条子流程进来（returnFromGameSelect）才允许
   // 继续往下选模组/建卡；从登录页"浏览已有游戏"直接进来的，最多只能看到这一页
   // ——建卡必须绑定一个真实房间，纯浏览模式走不到那一步（见需求：浏览入口不
   // 应该能进入游戏流程）。
   const canProceed = useGameStore((s) => s.returnFromGameSelect)
 
-  if (!game || !game.systems) {
+  useEffect(() => {
+    let cancelled = false
+    sdk.games
+      .list()
+      .then(async (games) => {
+        const catalogs = await Promise.all(games.map((item) => sdk.games.listSystems(item.id)))
+        if (!cancelled) setSystems(catalogs.flat())
+      })
+      .catch((error) => {
+        if (!cancelled) setLoadError(friendlyErrorMessage(error, '加载规则系统失败'))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  if (!game) {
     return (
       <div className="animate-screen-in px-5 pt-10 text-center text-text-muted text-sm">
         未找到该游戏
       </div>
     )
   }
-
-  const systems = [
-    {
-      id: 'coc',
-      name: '克苏鲁的呼唤',
-      nameEn: 'Call of Cthulhu 7th',
-      description: '1920 年代调查员\n对抗宇宙恐怖的经典规则',
-      status: 'ready' as const,
-    },
-    {
-      id: 'dnd',
-      name: '龙与地下城',
-      nameEn: 'Dungeons & Dragons 5e',
-      description: '剑与魔法的奇幻冒险\n史诗级英雄传说',
-      status: 'wip' as const,
-    },
-  ]
 
   return (
     <div className="animate-screen-in">
@@ -61,10 +65,15 @@ export default function SystemSelectionPage() {
       )}
 
       <div className="px-5 flex flex-col gap-3.5">
-        {systems.map((sys) => {
-          const colors = SYSTEM_COLORS[sys.id]
-          const isReady = sys.status === 'ready' && canProceed
-          const IconComp = sys.id === 'coc' ? Shield : Swords
+        {systems === null && !loadError && (
+          <p className="text-center text-sm text-text-muted py-8">正在加载规则系统…</p>
+        )}
+        {loadError && <p className="text-center text-sm text-[#c04040] py-8">{loadError}</p>}
+        {systems?.map((sys) => {
+          const visualKey = getSystemVisualKey(sys.name)
+          const colors = SYSTEM_COLORS[visualKey]
+          const isReady = canProceed
+          const IconComp = visualKey === 'coc' ? Shield : Swords
 
           return (
             <div
@@ -85,14 +94,10 @@ export default function SystemSelectionPage() {
               </div>
               <div className="flex-1 min-w-0">
                 <h3 className="text-[17px] font-bold text-text-primary">{sys.name}</h3>
-                <p className="text-xs text-text-muted mt-0.5 leading-[1.5]">{sys.nameEn}</p>
-                <p className="text-[11px] text-text-muted mt-1 leading-[1.5] whitespace-pre-line">{sys.description}</p>
-                {sys.status === 'ready' && (
-                  <Badge variant="success">推荐新手 · 已就绪</Badge>
-                )}
-                {sys.status !== 'ready' && (
-                  <Badge variant="default">开发中</Badge>
-                )}
+                <p className="text-xs text-text-muted mt-0.5 leading-[1.5]">
+                  {sys.version || '当前版本'}
+                </p>
+                <Badge variant="success">已就绪</Badge>
               </div>
               {isReady && (
                 <div className="text-text-dim">

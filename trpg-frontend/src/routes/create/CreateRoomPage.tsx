@@ -1,11 +1,12 @@
 import { useNavigate } from 'react-router-dom'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import type { ModuleDetail } from 'trpg-sdk'
 import { ArrowLeft, Plus, Minus } from 'lucide-react'
-import { GAME_REGISTRY, SYSTEM_COLORS, getScenarioById } from '@/config/games'
+import { GAME_REGISTRY, getSystemVisualKey, SYSTEM_COLORS } from '@/config/games'
 import { useGameStore } from '@/stores/game-store'
 import { useAuthStore } from '@/stores/auth-store'
 import { useRoomStore } from '@/stores/room-store'
-import { createGameRoom, listModules, selectModule } from '@/services/room'
+import { createGameRoom, getModuleDetail, selectModule } from '@/services/room'
 import { friendlyErrorMessage } from '@/services/api-client'
 
 const MIN_PLAYERS = 1
@@ -31,9 +32,29 @@ export default function CreateRoomPage() {
   const [createError, setCreateError] = useState('')
 
   const selectedGame = store.gameId ? GAME_REGISTRY.find(g => g.id === store.gameId) : null
-  const sysColors = store.systemId ? SYSTEM_COLORS[store.systemId] : null
-  const selectedScenario = store.sceneId ? getScenarioById(store.sceneId) : null
+  const [selectedScenario, setSelectedScenario] = useState<ModuleDetail | null>(null)
+  const sysColors = store.systemId
+    ? SYSTEM_COLORS[getSystemVisualKey(selectedScenario?.gameSystemName || store.systemId)]
+    : null
   const hasSelection = !!(store.gameId && store.systemId && store.sceneId)
+
+  useEffect(() => {
+    if (!store.sceneId) {
+      setSelectedScenario(null)
+      return
+    }
+    let cancelled = false
+    getModuleDetail(store.sceneId)
+      .then((module) => {
+        if (!cancelled) setSelectedScenario(module)
+      })
+      .catch(() => {
+        if (!cancelled) setSelectedScenario(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [store.sceneId])
 
   const handleCreate = async () => {
     if (!roomName.trim() || !hasSelection) return
@@ -44,11 +65,9 @@ export default function CreateRoomPage() {
       // 必须先把房间身份（含 reconnectToken）写进 store，selectModule 等
       // 需要重连凭证的接口才能读到它——见 issue #66，真机联调时发现的顺序 bug。
       setRoomIdentity(room)
-      const modules = await listModules()
-      if (modules.length === 0) throw new Error('暂无可用模组')
-      // 目前只有一款内置模拟模组，不管前端选的是哪张模组卡都用它
-      await selectModule(room.roomId, modules[0].id)
-      setStoreModuleId(modules[0].id)
+      if (!store.sceneId) throw new Error('请先选择模组')
+      await selectModule(room.roomId, store.sceneId)
+      setStoreModuleId(store.sceneId)
       setHost(true)
       navigate('/room/lobby')
     } catch (err) {
@@ -154,7 +173,7 @@ export default function CreateRoomPage() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-semibold text-text-primary">{selectedGame?.name} · {sysColors?.name}</div>
-                  <div className="text-xs text-text-muted mt-0.5">模组：{selectedScenario?.name}</div>
+                  <div className="text-xs text-text-muted mt-0.5">模组：{selectedScenario?.title || store.sceneId}</div>
                 </div>
                 <button onClick={handleChangeGame}
                   className="text-[11px] text-text-dim underline whitespace-nowrap">更换</button>
@@ -191,7 +210,7 @@ export default function CreateRoomPage() {
             </div>
             <div className="flex items-center justify-between">
               <span className="text-text-muted">模组</span>
-              <span className="text-text-primary">{selectedScenario?.name || '未选择'}</span>
+              <span className="text-text-primary">{selectedScenario?.title || store.sceneId || '未选择'}</span>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-text-muted">人数上限</span>

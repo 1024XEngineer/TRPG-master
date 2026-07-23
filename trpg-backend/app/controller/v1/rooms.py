@@ -33,6 +33,7 @@ from app.dto.room import (
 from app.models.user import User
 from app.service import character as character_service
 from app.service import room as room_service
+from app.service.ws_events import broadcast_room_state
 
 router = APIRouter(prefix="/rooms", tags=["rooms"])
 
@@ -100,6 +101,7 @@ async def select_room_module(
         room_service.RoomConflictError,
     ) as exc:
         _raise_service_error(exc)
+    await broadcast_room_state(db, room_id)
     return ApiResponse.ok(None)
 
 
@@ -153,6 +155,7 @@ async def start_story(
         room_service.RoomConflictError,
     ) as exc:
         _raise_service_error(exc)
+    await broadcast_room_state(db, room_id)
     return ApiResponse.ok(None)
 
 
@@ -172,6 +175,7 @@ async def end_game(
         room_service.RoomConflictError,
     ) as exc:
         _raise_service_error(exc)
+    await broadcast_room_state(db, room_id)
     return ApiResponse.ok(None)
 
 
@@ -191,6 +195,7 @@ async def suspend_game(
         room_service.RoomConflictError,
     ) as exc:
         _raise_service_error(exc)
+    await broadcast_room_state(db, room_id)
     return ApiResponse.ok(None)
 
 
@@ -210,6 +215,7 @@ async def resume_game(
         room_service.RoomConflictError,
     ) as exc:
         _raise_service_error(exc)
+    await broadcast_room_state(db, room_id)
     return ApiResponse.ok(None)
 
 

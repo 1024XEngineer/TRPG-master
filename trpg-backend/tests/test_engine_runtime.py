@@ -182,6 +182,38 @@ def test_application_composes_sqlalchemy_engine_store() -> None:
     assert rule_engine_service._store is engine_store
 
 
+async def test_turn_application_resolves_actor_and_replays_one_execution(
+    db_session: AsyncSession,
+    engine_store_factory: Callable[..., SqlAlchemyEngineStore],
+) -> None:
+    from app.core.turn import build_turn_application
+
+    room, players, _ = await _start_room(db_session)
+    store = engine_store_factory()
+    application = build_turn_application(store, RuleEngineService(store))
+
+    first = await application.handle(
+        room_id=room.id,
+        player_id=players[0].id,
+        client_action_id="turn-application-122",
+        utterance="我看看旧书店",
+    )
+    replayed = await application.handle(
+        room_id=room.id,
+        player_id=players[0].id,
+        client_action_id="turn-application-122",
+        utterance="我看看旧书店",
+    )
+
+    _, action_count = await _counts(db_session, room.id)
+    assert first.message_type == replayed.message_type == "turn.completed"
+    assert first.correlation_id == replayed.correlation_id == "turn-application-122"
+    assert first.payload.player_id == players[0].id
+    assert first.payload.actor_id == "actor_1"
+    assert first.payload.player_view.revision == replayed.payload.player_view.revision
+    assert action_count == 1
+
+
 async def test_select_module_pins_recommended_published_version(
     client: AsyncClient,
     db_session: AsyncSession,

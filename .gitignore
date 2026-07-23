@@ -2,14 +2,25 @@ node_modules/
 dist/
 .vite/
 *.tsbuildinfo
+.DS_Store
 
 .venv/
 __pycache__/
 .pytest_cache/
+.ruff_cache/
+*.db
+
+# scripts/export_schema.py 的输出：Python -> TS 类型生成管线的临时中间产物，
+# 不是需要跨机器/跨提交保持一致的东西（真正提交的是 trpg-sdk/src/generated/
+# 下由它生成出来的 TS 类型），见 issue #75 决策 3b。
+.schema-export/
 
 .env
 .env.*
 !.env.example
 
-# macOS
-.DS_Store
+# COC7 职业目录导入管线（issue #114）的中间产物：build_occupations.py 的输出，
+# 会被内联进 app/core/coc7_content.py（那才是提交进 git 的最终产物）。这个原始
+# 片段既不是独立可运行模块（引用 OccupationSpec 等未 import 的名字，ruff 会报
+# 一堆 F821），也跟 coc7_content.py 内容重复，所以不进 git。
+trpg-backend/scripts/coc7_occupations/generated_occupations.py

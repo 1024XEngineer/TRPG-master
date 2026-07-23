@@ -1,0 +1,18 @@
+export const ROUTES = {
+  LOGIN: '/auth/login',
+  REGISTER: '/auth/register',
+  HOME: '/home',
+  JOIN: '/home/join',
+  CREATE: '/home/create',
+  GAMES: '/home/create/games',
+  SYSTEM: (gameId: string) => `/home/create/games/${gameId}`,
+  SCENARIOS: (gameId: string, systemId: string) => `/home/create/games/${gameId}/scenarios/${systemId}`,
+  MY_ROOMS: '/home/my-rooms',
+  REVIEW: (roomCode: string) => `/home/my-rooms/review/${roomCode}`,
+  PROFILE: '/home/profile',
+  LOBBY: '/room/lobby',
+  STORY: '/room/story',
+  CHARACTER: '/room/character',
+  CHARACTER_READY: '/room/ready',
+  ROOM: '/room/play',
+} as const

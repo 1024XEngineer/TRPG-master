@@ -1,0 +1,80 @@
+name: E2E CI
+
+# SDK → 后端 的端到端验证。
+#
+# paths 覆盖 trpg-backend 和 trpg-sdk 两个包——这条链路任意一层改动都可能打断
+# 它，而这正是它存在的意义。**不含 trpg-frontend**：这套测试根本不碰前端，
+# 前端改动不该触发它（这也是选 SDK 层而不是浏览器层的直接好处之一）。
+on:
+  push:
+    branches: [main]
+    paths:
+      - "trpg-backend/**"
+      - "trpg-sdk/**"
+      - "e2e/**"
+      - ".github/workflows/e2e-ci.yml"
+  pull_request:
+    paths:
+      - "trpg-backend/**"
+      - "trpg-sdk/**"
+      - "e2e/**"
+      - ".github/workflows/e2e-ci.yml"
+  # 允许在 GitHub 页面上手动点一次跑，不必先推一个空提交。
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 后端：uv sync 会在 trpg-backend/.venv 建出虚拟环境，e2e 脚本直接调
+      # .venv/bin/ 下的可执行文件，不额外要求 uv 在 PATH 上。
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "trpg-backend/uv.lock"
+
+      - name: Set up Python
+        run: uv python install
+        working-directory: trpg-backend
+
+      - name: Install backend dependencies
+        run: uv sync --locked
+        working-directory: trpg-backend
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          # 仓库根目录没有 package.json，必须显式列出每个包的 lock 文件，
+          # 否则 cache: npm 会以 "Dependencies lock file is not found" 失败。
+          cache-dependency-path: |
+            trpg-sdk/package-lock.json
+            e2e/package-lock.json
+
+      # e2e 把 trpg-sdk 作为 file:../trpg-sdk 本地依赖，而 dist/ 是 gitignore
+      # 的，所以必须先构建出来。
+      - name: Install and build SDK
+        working-directory: trpg-sdk
+        run: |
+          npm ci
+          npm run build
+
+      - name: Install e2e dependencies
+        working-directory: e2e
+        run: npm ci
+
+      # 类型检查放在跑测试之前：类型错几秒就报，不必等起完后端才发现。
+      - name: Typecheck
+        working-directory: e2e
+        run: npm run typecheck
+
+      - name: Run e2e tests
+        working-directory: e2e
+        run: npm run test:e2e

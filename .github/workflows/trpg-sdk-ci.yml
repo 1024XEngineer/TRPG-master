@@ -1,0 +1,48 @@
+name: SDK CI
+
+# 只在 trpg-sdk/ 目录或本工作流文件自身变化时触发，跟 trpg-backend-ci.yml
+# 一样按目录拆开独立 workflow，改哪个包只跑哪个包的检查。
+on:
+  push:
+    branches: [main]
+    paths:
+      - "trpg-sdk/**"
+      - ".github/workflows/trpg-sdk-ci.yml"
+  pull_request:
+    paths:
+      - "trpg-sdk/**"
+      - ".github/workflows/trpg-sdk-ci.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: trpg-sdk
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: trpg-sdk/package-lock.json
+
+      # ci 而不是 install：严格按 package-lock.json 安装，lock 文件跟
+      # package.json 不同步（比如改了依赖忘记 npm install）会直接报错。
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build

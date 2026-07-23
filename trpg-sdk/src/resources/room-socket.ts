@@ -28,7 +28,16 @@ const PAYLOAD_VALIDATORS: {
 } = {
   'session.bound': (p) => typeof p.roomId === 'string' && typeof p.playerId === 'string',
   'narration.push': (p) => typeof p.text === 'string',
-  // issue #77 新增的 11 个 S→C 事件。只校验必填字段的类型（可空字段不校验）；
+  'game.view': (p) =>
+    typeof p.roomId === 'string' &&
+    typeof p.roomSessionId === 'string' &&
+    typeof p.stateRevision === 'number' &&
+    typeof p.eventSequence === 'number' &&
+    typeof p.scene === 'object' &&
+    p.scene !== null &&
+    typeof p.actor === 'object' &&
+    p.actor !== null,
+  // 只校验必填字段的类型（可空字段不校验）；
   // 嵌套对象（players/player）只做「是不是对象/数组」的浅检查，不深入逐字段。
   'room.state': (p) =>
     typeof p.roomId === 'string' && typeof p.phase === 'string' && Array.isArray(p.players),
@@ -36,19 +45,43 @@ const PAYLOAD_VALIDATORS: {
   'turn.begin': (p) => typeof p.playerId === 'string',
   'game.ended': () => true, // reason 可空，没有必填字段
   'view.private': (p) => typeof p.playerId === 'string' && typeof p.text === 'string',
-  'check.request': (p) => typeof p.playerId === 'string' && typeof p.skill === 'string',
+  'check.request': (p) =>
+    typeof p.playerId === 'string' &&
+    typeof p.checkRequestId === 'string' &&
+    typeof p.checkpointId === 'string' &&
+    typeof p.skill === 'string' &&
+    typeof p.targetValue === 'number' &&
+    typeof p.difficulty === 'string' &&
+    typeof p.reason === 'string' &&
+    typeof p.stateRevision === 'number',
   'check.result': (p) =>
     typeof p.playerId === 'string' &&
+    typeof p.checkRequestId === 'string' &&
+    typeof p.checkpointId === 'string' &&
     typeof p.skill === 'string' &&
     typeof p.rollValue === 'number' &&
-    typeof p.result === 'string',
-  'san.check.request': (p) => typeof p.playerId === 'string',
+    typeof p.result === 'string' &&
+    typeof p.stateRevision === 'number',
+  'san.check.request': (p) =>
+    typeof p.playerId === 'string' &&
+    typeof p.checkRequestId === 'string' &&
+    typeof p.sanityEventId === 'string' &&
+    typeof p.currentSan === 'number' &&
+    typeof p.reason === 'string' &&
+    typeof p.stateRevision === 'number',
   'san.check.result': (p) =>
     typeof p.playerId === 'string' &&
+    typeof p.checkRequestId === 'string' &&
+    typeof p.sanityEventId === 'string' &&
     typeof p.rollValue === 'number' &&
     typeof p.sanLoss === 'number' &&
-    typeof p.result === 'string',
-  'clue.granted': (p) => typeof p.playerId === 'string' && typeof p.clueName === 'string',
+    typeof p.result === 'string' &&
+    typeof p.currentSan === 'number' &&
+    typeof p.stateRevision === 'number',
+  'clue.granted': (p) =>
+    typeof p.playerId === 'string' &&
+    typeof p.clueId === 'string' &&
+    typeof p.clueName === 'string',
   error: (p) => typeof p.code === 'string' && typeof p.message === 'string',
 };
 
@@ -167,18 +200,17 @@ export class RoomSocket {
     this.send('action.submit', playerId, payload);
   }
 
-  /** check.roll —— 玩家请求做一次技能检定（issue #77 新增，后端本期回
-   * NOT_IMPLEMENTED 的 error 事件，真实服务端权威掷骰待规则引擎落地）。 */
+  /** check.roll —— 玩家确认一次待处理技能检定；骰值只由服务端生成。 */
   rollCheck(playerId: string, payload: CheckRollPayload): void {
     this.send('check.roll', playerId, payload);
   }
 
-  /** san.check.roll —— 理智检定摇骰（issue #77 新增，后端本期回 NOT_IMPLEMENTED）。 */
+  /** san.check.roll —— 玩家确认一次待处理理智检定；骰值只由服务端生成。 */
   rollSanCheck(playerId: string, payload: SanCheckRollPayload): void {
     this.send('san.check.roll', playerId, payload);
   }
 
-  /** room.rejoin —— 断线重连（issue #77 仅铺协议，后端本期回 NOT_IMPLEMENTED）。 */
+  /** room.rejoin —— 恢复当前 GameView，并补发 lastEventSequence 之后的事件。 */
   rejoin(playerId: string, payload: RoomRejoinPayload): void {
     this.send('room.rejoin', playerId, payload);
   }

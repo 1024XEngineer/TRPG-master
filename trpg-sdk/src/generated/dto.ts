@@ -20,7 +20,24 @@
  * `strip()` + 空值判断拦掉，两者不冲突。
  */
 export interface ActionSubmitPayload {
+  clientActionId: string;
   utterance: string;
+  sourceRevision: number;
+}
+
+export interface ActorView {
+  actorId: string;
+  name: string;
+  occupation?: string | null;
+  attributes?: {
+    [k: string]: number;
+  };
+  skills?: {
+    [k: string]: number;
+  };
+  currentHp: number;
+  currentMp: number;
+  currentSan: number;
 }
 
 /**
@@ -92,6 +109,19 @@ export interface CharacterComputeResult {
   interestSkillPoints: SkillPointsBudgetView;
   skillView: SkillComputeView[];
   validation: ValidationIssueView[];
+}
+
+/**
+ * POST /api/v1/rooms/{roomId}/characters 请求体（issue #77 新增第三条建卡路径）。
+ *
+ * 整个请求体本身仍然可选（不传等价于从零建卡，路由层用 `Body(default=None)`
+ * 兜底），`based_on_template_id` 指向 `user_character_templates` 表——本期
+ * 只接住这个参数、校验它的形状，真正"复制模板数据进草稿"的读写没有实现
+ * （issue 决策 5：本期只铺表与接口），带了这个字段会直接收到 NOT_IMPLEMENTED。
+ */
+export interface CharacterCreateBody {
+  basedOnTemplateId?: string | null;
+  basedOnPregenId?: string | null;
 }
 
 /**
@@ -204,8 +234,13 @@ export interface CharacterUpdateBody {
  */
 export interface CheckRequestPayload {
   playerId: string;
+  checkRequestId: string;
+  checkpointId: string;
   skill: string;
-  targetValue?: number | null;
+  targetValue: number;
+  difficulty: string;
+  reason: string;
+  stateRevision: number;
 }
 
 /**
@@ -216,10 +251,13 @@ export interface CheckRequestPayload {
  */
 export interface CheckResultPayload {
   playerId: string;
+  checkRequestId: string;
+  checkpointId: string;
   skill: string;
   rollValue: number;
   targetValue?: number | null;
   result: string;
+  stateRevision: number;
 }
 
 /**
@@ -231,7 +269,15 @@ export interface CheckResultPayload {
  * 直接回 `error` 事件，不会真的掷骰或读写 `check_results` 表。
  */
 export interface CheckRollPayload {
-  skill: string;
+  clientActionId: string;
+  checkRequestId: string;
+  sourceRevision: number;
+}
+
+export interface CheckpointOption {
+  checkpointId: string;
+  skills: string[];
+  difficulty: string;
 }
 
 /**
@@ -239,6 +285,7 @@ export interface CheckRollPayload {
  */
 export interface ClueGrantedPayload {
   playerId: string;
+  clueId: string;
   clueName: string;
   description?: string | null;
 }
@@ -311,6 +358,10 @@ export interface ErrorPayload {
  */
 export interface GameEndedPayload {
   reason?: string | null;
+  endingId?: string | null;
+  outcome?: string | null;
+  summary?: string | null;
+  stateRevision?: number | null;
 }
 
 /**
@@ -341,6 +392,23 @@ export interface GameSystemRead {
 }
 
 /**
+ * 玩家安全的当前游戏投影；不包含完整 GameState 或 Keeper 内容。
+ */
+export interface GameViewPayload {
+  roomId: string;
+  roomSessionId: string;
+  stateRevision: number;
+  eventSequence: number;
+  scene: SceneView;
+  actor: ActorView;
+  visibleEntities?: VisibleEntity[];
+  clues?: VisibleClue[];
+  checkpointOptions?: CheckpointOption[];
+  pendingCheck?: PendingCheck | null;
+  activeEndingId?: string | null;
+}
+
+/**
  * POST /api/v1/rooms/{roomCode}/join 请求体
  */
 export interface JoinRoomBody {
@@ -365,18 +433,32 @@ export interface MeRead {
 }
 
 /**
- * GET /api/v1/modules/{moduleId} 返回——在 ModuleRead 基础上补充简介。
+ * 只包含玩家在开局前可以安全看到的 ModulePackage 投影。
  */
 export interface ModuleDetailRead {
   id: string;
+  gameSystemId: string;
   title: string;
+  originalTitle?: string | null;
   version: string;
   authors: string[];
   playersMin: number;
   playersMax: number;
   difficulty: number;
   estimatedDuration?: string | null;
+  runtimeStatus?: string;
+  developmentOnly?: boolean;
   synopsis?: string | null;
+  premise: string;
+  contentAdvisories?: string[];
+  entryScene: ModuleEntrySceneRead;
+  pregens?: ModulePregenRead[];
+}
+
+export interface ModuleEntrySceneRead {
+  sceneId: string;
+  name: string;
+  playerDescription: string;
 }
 
 /**
@@ -406,19 +488,40 @@ export interface ModuleImportRequestBody {
   sourceFilename: string;
 }
 
+export interface ModulePregenRead {
+  id: string;
+  sourceCharacterId: string;
+  name: string;
+  occupation?: string | null;
+  summary?: string | null;
+  attributes?: {
+    [k: string]: number;
+  };
+  derivedStats?: {
+    [k: string]: number;
+  };
+  skills?: {
+    [k: string]: number;
+  };
+}
+
 /**
  * 模组信息（对应内容库 `Scenario` 表，`from_attributes=True` 支持直接从
  * ORM 对象构造）。
  */
 export interface ModuleRead {
   id: string;
+  gameSystemId: string;
   title: string;
+  originalTitle?: string | null;
   version: string;
   authors: string[];
   playersMin: number;
   playersMax: number;
   difficulty: number;
   estimatedDuration?: string | null;
+  runtimeStatus?: string;
+  developmentOnly?: boolean;
 }
 
 /**
@@ -440,6 +543,8 @@ export interface MyRoomSummary {
  */
 export interface NarrationPushPayload {
   text: string;
+  requestId?: string | null;
+  stateRevision?: number | null;
 }
 
 /**
@@ -457,6 +562,18 @@ export interface OccupationSpec {
   skillIds: string[];
   choiceSlots?: SkillChoiceSlot[];
   description: string;
+}
+
+export interface PendingCheck {
+  checkRequestId: string;
+  kind: "skill" | "san";
+  actorId: string;
+  checkpointId?: string | null;
+  sanityEventId?: string | null;
+  skillId?: string | null;
+  targetValue: number;
+  difficulty?: string;
+  reason: string;
 }
 
 /**
@@ -498,6 +615,8 @@ export interface ReplayEventRead {
   payload: {
     [k: string]: unknown;
   };
+  sequence?: number | null;
+  stateRevision?: number | null;
   createdAt: string;
 }
 
@@ -583,6 +702,7 @@ export interface RoomPreview {
   roomName: string;
   phase: string;
   storyStarted: boolean;
+  moduleId?: string | null;
   moduleTitle?: string | null;
   playerCount: number;
   maxPlayers: number;
@@ -597,6 +717,7 @@ export interface RoomPreview {
  */
 export interface RoomRejoinPayload {
   reconnectToken: string;
+  lastEventSequence?: number | null;
 }
 
 /**
@@ -620,6 +741,11 @@ export interface RoomSummaryRead {
   roomId: string;
   summaryText?: string | null;
   highlights?: string[] | null;
+  endingId?: string | null;
+  outcome?: string | null;
+  structuredData?: {
+    [k: string]: unknown;
+  } | null;
 }
 
 /**
@@ -638,7 +764,11 @@ export interface RulesetRead {
  */
 export interface SanCheckRequestPayload {
   playerId: string;
-  currentSan?: number | null;
+  checkRequestId: string;
+  sanityEventId: string;
+  currentSan: number;
+  reason: string;
+  stateRevision: number;
 }
 
 /**
@@ -647,18 +777,27 @@ export interface SanCheckRequestPayload {
  */
 export interface SanCheckResultPayload {
   playerId: string;
+  checkRequestId: string;
+  sanityEventId: string;
   rollValue: number;
   sanLoss: number;
   result: string;
+  currentSan: number;
+  stateRevision: number;
 }
 
-/**
- * san.check.roll 事件 payload（issue #77 新增）。
- *
- * 定义一个空模型（而不是完全跳过校验）理由同 GameStartPayload：让它也走
- * 跟其它事件一致的"接收端过一次模型校验"路径。本期同样是 NOT_IMPLEMENTED 桩。
- */
-export interface SanCheckRollPayload {}
+export interface SanCheckRollPayload {
+  clientActionId: string;
+  checkRequestId: string;
+  sourceRevision: number;
+}
+
+export interface SceneView {
+  sceneId: string;
+  name: string;
+  playerDescription: string;
+  locationIds?: string[];
+}
 
 /**
  * POST /api/v1/rooms/{roomId}/module 请求体
@@ -766,4 +905,16 @@ export interface ValidationIssueView {
 export interface ViewPrivatePayload {
   playerId: string;
   text: string;
+}
+
+export interface VisibleClue {
+  clueId: string;
+  name: string;
+  text: string;
+}
+
+export interface VisibleEntity {
+  entityId: string;
+  name: string;
+  publicDescription?: string | null;
 }

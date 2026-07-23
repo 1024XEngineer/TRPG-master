@@ -2,6 +2,7 @@ import type { ApiClient } from '../client';
 import type {
   Character,
   CharacterDraftResult,
+  CreateCharacterInput,
   RollAttributesResult,
   UpdateCharacterInput,
 } from '../types';
@@ -18,10 +19,14 @@ export class CharactersResource {
   }
 
   /** POST /api/v1/rooms/{roomId}/characters — 创建一份角色草稿 */
-  createDraft(roomId: string, reconnectToken: string): Promise<CharacterDraftResult> {
+  createDraft(
+    roomId: string,
+    reconnectToken: string,
+    payload?: CreateCharacterInput
+  ): Promise<CharacterDraftResult> {
     return this.client.post<CharacterDraftResult>(
       `/rooms/${roomId}/characters`,
-      null,
+      payload ?? null,
       this.authenticated(reconnectToken)
     );
   }

@@ -29,6 +29,7 @@ export type {
   RoomPlayerRead as RoomPlayerSummary,
   RoomPreview,
   // 角色建卡（Character）模块 —— 对应后端 dto/character.py
+  CharacterCreateBody as CreateCharacterInput,
   EquipmentItem as CharacterEquipmentItem,
   CharacterUpdateBody as UpdateCharacterInput,
   CharacterDraftResult,
@@ -48,6 +49,8 @@ export type {
   CharacterRead as Character,
   RulesetRead as Ruleset,
   // 模组详情 / 导入（issue #77）—— 对应后端 dto/module.py
+  ModuleEntrySceneRead,
+  ModulePregenRead,
   ModuleDetailRead as ModuleDetail,
   ModuleImportRequestBody as ImportModuleInput,
   ModuleImportJobRead as ModuleImportJob,
@@ -61,6 +64,7 @@ export type {
   GameStartPayload,
   SessionBoundPayload,
   NarrationPushPayload,
+  GameViewPayload,
   // WebSocket 新增 14 个事件（issue #77）
   CheckRollPayload,
   SanCheckRollPayload,
@@ -110,6 +114,7 @@ import type {
   ClueGrantedPayload,
   ErrorPayload,
   GameEndedPayload,
+  GameViewPayload,
   NarrationPushPayload,
   PlayerJoinedPayload,
   RoomStatePayload,
@@ -134,9 +139,10 @@ import type {
  * issue #77 新增的 11 个 S→C 事件里，除 error 外本期都不会真的被后端发出
  * （协议槽位预留，见 issue"三处原型取舍"），但类型/校验器先铺好。
  */
-export type ServerToClientEvent =
+export type ServerToClientEvent = (
   | { type: 'session.bound'; payload: SessionBoundPayload }
   | { type: 'narration.push'; payload: NarrationPushPayload }
+  | { type: 'game.view'; payload: GameViewPayload }
   | { type: 'room.state'; payload: RoomStatePayload }
   | { type: 'player.joined'; payload: PlayerJoinedPayload }
   | { type: 'turn.begin'; payload: TurnBeginPayload }
@@ -147,4 +153,8 @@ export type ServerToClientEvent =
   | { type: 'san.check.request'; payload: SanCheckRequestPayload }
   | { type: 'san.check.result'; payload: SanCheckResultPayload }
   | { type: 'clue.granted'; payload: ClueGrantedPayload }
-  | { type: 'error'; payload: ErrorPayload };
+  | { type: 'error'; payload: ErrorPayload }
+) & {
+  eventId?: string | null;
+  sequence?: number | null;
+};

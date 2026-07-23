@@ -1,24 +1,31 @@
-"""Generate JSON Schema only for stable cross-boundary and player DTOs."""
+"""Generate JSON Schema for stable boundaries and host-private Agent DTOs."""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
+from pydantic import BaseModel
+
 from collaboration_framework.contracts import (
     ActionRequest,
     ActionResult,
-    ContractModel,
     Intent,
     ModuleContent,
     PlayerInput,
     PlayerView,
     ProjectionSnapshot,
 )
-from collaboration_framework.host.schemas import NarrationOutput, WebSocketOutput
+from collaboration_framework.host.schemas import (
+    HostAgentContext,
+    HostAgentEventSchema,
+    HostAgentUsage,
+    NarrationOutput,
+    WebSocketOutput,
+)
 
 
-SCHEMA_MODELS: dict[str, type[ContractModel]] = {
+SCHEMA_MODELS: dict[str, type[BaseModel]] = {
     "module-content.schema.json": ModuleContent,
     "player-input.schema.json": PlayerInput,
     "projection-snapshot.schema.json": ProjectionSnapshot,
@@ -28,6 +35,9 @@ SCHEMA_MODELS: dict[str, type[ContractModel]] = {
     "action-result.schema.json": ActionResult,
     "narration-output.schema.json": NarrationOutput,
     "websocket-output.schema.json": WebSocketOutput,
+    "host-agent-context.schema.json": HostAgentContext,
+    "host-agent-usage.schema.json": HostAgentUsage,
+    "host-agent-event.schema.json": HostAgentEventSchema,
 }
 
 

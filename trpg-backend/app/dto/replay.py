@@ -1,9 +1,7 @@
-"""复盘摘要 / 事件回放的 pydantic 响应模型（issue #77 §2 新增端点）。
+"""复盘摘要 / 事件回放的 pydantic 响应模型。
 
-`GET /rooms/{roomId}/summary` 依赖 AI 编排生成复盘内容（归 #48/#68），本期
-固定返回 `NOT_IMPLEMENTED`。`GET /rooms/{roomId}/replay` 则是真实实现——
-读的是 ws.py 在 narration.push / action.submit 时写入的 `events` 表，是本期
-少数"服务端真的在写、也真的在读"的完整数据闭环之一。
+`GET /rooms/{roomId}/summary` 返回规则引擎在结局时生成的结构化复盘，
+`GET /rooms/{roomId}/replay` 按事件序号返回玩家可见的房间事件。
 """
 
 from app.dto.common import CamelModel, UtcDatetime
@@ -15,6 +13,9 @@ class RoomSummaryRead(CamelModel):
     room_id: str
     summary_text: str | None = None
     highlights: list[str] | None = None
+    ending_id: str | None = None
+    outcome: str | None = None
+    structured_data: dict | None = None
 
 
 class ReplayEventRead(CamelModel):
@@ -25,4 +26,6 @@ class ReplayEventRead(CamelModel):
     player_id: str | None = None
     event_type: str
     payload: dict
+    sequence: int | None = None
+    state_revision: int | None = None
     created_at: UtcDatetime

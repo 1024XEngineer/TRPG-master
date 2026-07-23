@@ -9,7 +9,7 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text, Uuid
+from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base
@@ -93,6 +93,17 @@ class Scenario(Base):
     difficulty: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     estimated_duration: Mapped[str | None] = mapped_column(String(50), nullable=True)
     synopsis: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 指向当前可用于新房间的不可变 revision。旧房间由 RoomSession 固定自己的
+    # revision，不会因为这里切换而改变进行中的内容。
+    current_revision_id: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey(
+            "scenario_revisions.id",
+            name="fk_scenarios_current_revision",
+            use_alter=True,
+        ),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
@@ -100,6 +111,31 @@ class Scenario(Base):
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
+    )
+
+
+class ScenarioRevision(Base):
+    """一个发布后不可原地修改的 ModulePackage 快照。"""
+
+    __tablename__ = "scenario_revisions"
+    __table_args__ = (
+        UniqueConstraint("scenario_id", "checksum", name="uq_scenario_revisions_checksum"),
+    )
+
+    id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    scenario_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("scenarios.id"), nullable=False
+    )
+    package_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    schema_version: Mapped[str] = mapped_column(String(20), nullable=False)
+    checksum: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="ready")
+    rights_status: Mapped[str] = mapped_column(String(30), nullable=False)
+    package_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
 
 
@@ -217,6 +253,10 @@ class ModulePregen(Base):
     scenario_id: Mapped[str] = mapped_column(
         Uuid(as_uuid=False), ForeignKey("scenarios.id"), nullable=False
     )
+    revision_id: Mapped[str | None] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("scenario_revisions.id"), nullable=True
+    )
+    source_character_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(

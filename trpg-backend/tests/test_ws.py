@@ -1,3 +1,5 @@
+import uuid
+
 import pytest
 from starlette.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
@@ -117,10 +119,13 @@ def test_room_join_binds_session(sync_client: TestClient) -> None:
         )
         envelope = ws.receive_json()
 
-    assert envelope == {
-        "type": "session.bound",
-        "payload": {"roomId": room["roomId"], "playerId": room["playerId"]},
+    assert envelope["type"] == "session.bound"
+    assert envelope["payload"] == {
+        "roomId": room["roomId"],
+        "playerId": room["playerId"],
     }
+    assert envelope["eventId"]
+    assert envelope["sequence"] is None
 
 
 def test_room_join_with_unknown_player_closes_connection(sync_client: TestClient) -> None:
@@ -270,6 +275,10 @@ def test_action_submit_broadcasts_narration_to_room_only(sync_client: TestClient
     token_b = register_and_login(sync_client, "host_b")
     room_a = create_room(sync_client, token_a)
     room_b = create_room(sync_client, token_b)
+    advance_to_building(sync_client, room_a)
+    advance_to_building(sync_client, room_b)
+    complete_character(sync_client, room_a["roomId"], room_a["reconnectToken"])
+    complete_character(sync_client, room_b["roomId"], room_b["reconnectToken"])
 
     with (
         sync_client.websocket_connect(f"/ws/{room_a['roomId']}?token={token_a}") as ws_a,
@@ -283,6 +292,12 @@ def test_action_submit_broadcasts_narration_to_room_only(sync_client: TestClient
             }
         )
         ws_a.receive_json()  # session.bound
+        ws_a.send_json(
+            {"type": "game.start", "playerId": room_a["playerId"], "payload": {}}
+        )
+        ws_a.receive_json()  # opening narration
+        view_a = ws_a.receive_json()
+        assert view_a["type"] == "game.view"
         ws_b.send_json(
             {
                 "type": "room.join",
@@ -291,12 +306,22 @@ def test_action_submit_broadcasts_narration_to_room_only(sync_client: TestClient
             }
         )
         ws_b.receive_json()  # session.bound
+        ws_b.send_json(
+            {"type": "game.start", "playerId": room_b["playerId"], "payload": {}}
+        )
+        ws_b.receive_json()  # opening narration
+        view_b = ws_b.receive_json()
+        assert view_b["type"] == "game.view"
 
         ws_a.send_json(
             {
                 "type": "action.submit",
                 "playerId": room_a["playerId"],
-                "payload": {"utterance": "检查门锁"},
+                "payload": {
+                    "clientActionId": str(uuid.uuid4()),
+                    "utterance": "环顾四周并保持警惕",
+                    "sourceRevision": view_a["payload"]["stateRevision"],
+                },
             }
         )
         narration = ws_a.receive_json()
@@ -305,13 +330,16 @@ def test_action_submit_broadcasts_narration_to_room_only(sync_client: TestClient
         # 收到的仍然是它自己的 session.bound，而不是串过来的 narration。
         ws_b.send_json(
             {
-                "type": "room.join",
+                "type": "room.rejoin",
                 "playerId": room_b["playerId"],
-                "payload": {"reconnectToken": room_b["reconnectToken"]},
+                "payload": {
+                    "reconnectToken": room_b["reconnectToken"],
+                    "lastEventSequence": view_b["payload"]["eventSequence"],
+                },
             }
         )
         envelope_b = ws_b.receive_json()
 
     assert narration["type"] == "narration.push"
-    assert "检查门锁" in narration["payload"]["text"]
-    assert envelope_b["type"] == "session.bound"
+    assert narration["payload"]["text"]
+    assert envelope_b["type"] == "game.view"

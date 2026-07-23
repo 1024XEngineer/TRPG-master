@@ -177,10 +177,19 @@ async def end_game(
 
 @router.get("/{room_id}/summary", response_model=ApiResponse[RoomSummaryRead])
 async def get_room_summary(
-    room_id: str, db: AsyncSession = Depends(get_db)
+    room_id: str,
+    reconnect_token: str | None = Header(default=None, alias="X-Reconnect-Token"),
+    db: AsyncSession = Depends(get_db),
 ) -> ApiResponse[RoomSummaryRead]:
-    """GET /api/v1/rooms/{roomId}/summary —— 复盘摘要（本期未实现）。"""
-    summary = await room_service.get_summary(db, room_id)
+    """GET /api/v1/rooms/{roomId}/summary —— 结构化复盘。"""
+    try:
+        summary = await room_service.get_summary(db, room_id, reconnect_token)
+    except (
+        room_service.RoomAuthenticationError,
+        room_service.RoomAuthorizationError,
+        room_service.RoomConflictError,
+    ) as exc:
+        _raise_service_error(exc)
     return ApiResponse.ok(summary)
 
 
@@ -218,15 +227,19 @@ async def create_character(
 ) -> ApiResponse[CharacterDraftResult]:
     """POST /api/v1/rooms/{roomId}/characters —— 玩家创建一份角色草稿。
 
-    `basedOnTemplateId`（issue #77 新增第三条建卡路径，见 CharacterCreateBody
-    的说明）本期未实现，带了这个字段会直接收到 NOT_IMPLEMENTED。
+    `basedOnPregenId` 会复制房间所绑定模组 revision 中的预制调查员快照并直接
+    完成角色；`basedOnTemplateId` 仍是未实现的账号模板路径。
     """
-    based_on_template_id = payload.based_on_template_id if payload else None
     try:
         result = await character_service.create_character_draft(
-            db, room_id, reconnect_token, based_on_template_id
+            db,
+            room_id,
+            reconnect_token,
+            based_on_template_id=payload.based_on_template_id if payload else None,
+            based_on_pregen_id=payload.based_on_pregen_id if payload else None,
         )
     except (
+        character_service.CharacterNotFoundError,
         room_service.RoomNotFoundError,
         room_service.RoomAuthenticationError,
         room_service.RoomAuthorizationError,

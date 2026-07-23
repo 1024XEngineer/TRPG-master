@@ -50,6 +50,7 @@ _MODELS: list[type[BaseModel]] = [
     room.MyRoomSummary,
     # character（issue #59 + issue #77 卡库）
     character.EquipmentItem,
+    character.CharacterCreateBody,
     character.CharacterUpdateBody,
     character.CharacterDraftResult,
     character.CharacterRead,
@@ -71,6 +72,8 @@ _MODELS: list[type[BaseModel]] = [
     game.RulesetRead,
     # 模组详情 / 导入（issue #77 新增）
     module.ModuleDetailRead,
+    module.ModuleEntrySceneRead,
+    module.ModulePregenRead,
     module.ModuleImportRequestBody,
     module.ModuleImportJobRead,
     # 复盘 / 回放（issue #77 新增）
@@ -93,6 +96,7 @@ _MODELS: list[type[BaseModel]] = [
     ws.PlayerJoinedPayload,
     ws.TurnBeginPayload,
     ws.GameEndedPayload,
+    ws.GameViewPayload,
     ws.ViewPrivatePayload,
     ws.CheckRequestPayload,
     ws.CheckResultPayload,

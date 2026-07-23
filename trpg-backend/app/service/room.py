@@ -10,13 +10,12 @@ import secrets
 import string
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import not_implemented
 from app.dto.game import GameRead, GameSystemRead, RulesetRead
-from app.dto.module import ModuleDetailRead
+from app.dto.module import ModuleDetailRead, ModuleEntrySceneRead, ModulePregenRead
 from app.dto.replay import ReplayEventRead, RoomSummaryRead
 from app.dto.room import (
     JoinRoomBody,
@@ -28,10 +27,14 @@ from app.dto.room import (
     RoomPreview,
     SelectModuleBody,
 )
-from app.models.content import Game, GameSystem, Scenario
+from app.models.content import Game, GameSystem, ModulePregen, Scenario, ScenarioRevision
 from app.models.event import Event
+from app.models.replay import RoomSummary
 from app.models.room import Character, Player, Room
 from app.models.user import User
+from app.runtime.contracts import PlayerView
+from app.runtime.projector import PlayerViewProjector
+from app.runtime.store import SQLAlchemyGameStateStore
 
 
 class RoomNotFoundError(ValueError):
@@ -153,6 +156,7 @@ async def _to_room_preview(db: AsyncSession, room: Room) -> RoomPreview:
         room_name=room.room_name,
         phase=room.phase,
         story_started=room.phase != "Lobby",
+        module_id=room.scenario_id,
         module_title=await _module_title(db, room.scenario_id),
         player_count=len(room_players),
         max_players=room.max_players,
@@ -302,14 +306,18 @@ async def select_module(
         raise RoomConflictError("只能在大厅阶段选择模组")
 
     scenario = await db.get(Scenario, payload.module_id)
-    if scenario is None:
+    if scenario is None or scenario.current_revision_id is None:
         raise ModuleNotFoundError("模组不存在")
+    revision = await db.get(ScenarioRevision, scenario.current_revision_id)
+    if revision is None or revision.status != "ready":
+        raise ModuleNotFoundError("模组尚未准备好运行")
 
     room.scenario_id = scenario.id
     room.system_id = scenario.game_system_id
     system = await db.get(GameSystem, scenario.game_system_id)
     room.game_id = system.game_id if system is not None else None
     room.attribute_gen_method = payload.attribute_gen_method
+    room.max_players = min(room.max_players, scenario.players_max)
     await db.commit()
 
 
@@ -354,8 +362,8 @@ async def set_player_connected(db: AsyncSession, player_id: str, connected: bool
         await db.commit()
 
 
-async def begin_game(db: AsyncSession, room_id: str, player_id: str) -> None:
-    """WS game.start 事件：全员建完角色后，房主正式开局（Building → InGame）。"""
+async def begin_game(db: AsyncSession, room_id: str, player_id: str) -> PlayerView:
+    """正式开局并把房间固定到当前 ModulePackage revision。"""
     room = await find_room_by_id(db, room_id)
     player = await db.get(Player, player_id)
     if player is None or player.room_id != room.id or player.id != room.host_player_id:
@@ -366,9 +374,33 @@ async def begin_game(db: AsyncSession, room_id: str, player_id: str) -> None:
     room_players = list(result)
     if not room_players or not all(p.has_character for p in room_players):
         raise CharacterIncompleteError("还有玩家未完成建卡")
+    scenario = await db.get(Scenario, room.scenario_id) if room.scenario_id else None
+    if scenario is None:
+        raise ModuleNotSelectedError("请先选择模组")
+    if not scenario.players_min <= len(room_players) <= scenario.players_max:
+        raise RoomConflictError(
+            f"该模组要求 {scenario.players_min}-{scenario.players_max} 名调查员"
+        )
+    character = await db.scalar(
+        select(Character).where(
+            Character.player_id == player.id,
+            Character.room_id == room.id,
+            Character.status == "complete",
+        )
+    )
+    if character is None:
+        raise CharacterIncompleteError("房主尚未完成角色卡")
+
+    store = SQLAlchemyGameStateStore()
+    _, state, runtime_module = await store.start_room(
+        db, room=room, character=character
+    )
     room.phase = "InGame"
     room.started_at = datetime.now(UTC)
     await db.commit()
+    return PlayerViewProjector().project(
+        state, runtime_module, actor_id=character.id
+    )
 
 
 async def list_my_rooms(db: AsyncSession, user: User) -> list[MyRoomSummary]:
@@ -495,18 +527,92 @@ async def require_ruleset(db: AsyncSession, system_id: str) -> RulesetRead:
     return ruleset
 
 
+def _module_read(scenario: Scenario, revision: ScenarioRevision, package: dict) -> ModuleRead:
+    module = package["module"]
+    return ModuleRead(
+        id=scenario.id,
+        game_system_id=scenario.game_system_id,
+        title=module["title"],
+        original_title=module.get("original_title"),
+        version=scenario.version,
+        authors=scenario.authors,
+        players_min=module["player_count"]["investigators_min"],
+        players_max=module["player_count"]["investigators_max"],
+        difficulty=scenario.difficulty,
+        estimated_duration=module.get("estimated_duration"),
+        runtime_status=revision.status,
+        development_only=revision.rights_status != "cleared",
+    )
+
+
 async def list_modules(db: AsyncSession) -> list[ModuleRead]:
-    """获取可用模组列表。"""
-    result = await db.scalars(select(Scenario))
-    return [ModuleRead.model_validate(s) for s in result]
+    """只列出拥有 ready revision 的真实 ModulePackage。"""
+    rows = (
+        await db.execute(
+            select(Scenario, ScenarioRevision)
+            .join(ScenarioRevision, Scenario.current_revision_id == ScenarioRevision.id)
+            .where(ScenarioRevision.status == "ready")
+        )
+    ).all()
+    return [_module_read(scenario, revision, revision.package_json) for scenario, revision in rows]
 
 
 async def get_module_detail(db: AsyncSession, module_id: str) -> ModuleDetailRead | None:
-    """GET /api/v1/modules/{moduleId} —— 模组详情。"""
+    """返回从 ModulePackage 派生的玩家安全详情，绝不返回 keeper_brief。"""
     scenario = await db.get(Scenario, module_id)
-    if scenario is None:
+    if scenario is None or scenario.current_revision_id is None:
         return None
-    return ModuleDetailRead.model_validate(scenario)
+    revision = await db.get(ScenarioRevision, scenario.current_revision_id)
+    if revision is None or revision.status != "ready":
+        return None
+
+    package = revision.package_json
+    module = package["module"]
+    entry_scene_id = module["entry_scene_id"]
+    entry_scene = next(
+        (scene for scene in package["content"]["scenes"] if scene["id"] == entry_scene_id),
+        None,
+    )
+    if entry_scene is None:
+        return None
+
+    pregens = (
+        await db.scalars(
+            select(ModulePregen)
+            .where(
+                ModulePregen.scenario_id == scenario.id,
+                ModulePregen.revision_id == revision.id,
+            )
+            .order_by(ModulePregen.created_at)
+        )
+    ).all()
+    base = _module_read(scenario, revision, package)
+    return ModuleDetailRead(
+        **base.model_dump(),
+        synopsis=module.get("premise"),
+        premise=module["premise"],
+        content_advisories=module.get("content_advisories", []),
+        entry_scene=ModuleEntrySceneRead(
+            scene_id=entry_scene["id"],
+            name=entry_scene["name"],
+            player_description=entry_scene["player_description"],
+        ),
+        pregens=[
+            ModulePregenRead(
+                id=pregen.id,
+                source_character_id=pregen.source_character_id or "",
+                name=pregen.name,
+                occupation=(pregen.data or {}).get("occupation"),
+                summary=(pregen.data or {}).get("summary"),
+                attributes=(pregen.data or {}).get("stat_block", {}).get("attributes", {}),
+                derived_stats=(pregen.data or {})
+                .get("stat_block", {})
+                .get("derived_stats", {}),
+                skills=(pregen.data or {}).get("stat_block", {}).get("skills", {}),
+            )
+            for pregen in pregens
+        ],
+    )
 
 
 # ── 复盘 / 事件回放 ──────────────────────────────────────
@@ -529,17 +635,36 @@ async def get_replay(
 
     先校验发起者是这个房间的成员（复盘是"只有参与者能看"的内容），再查事件。
     """
-    await require_room_member(db, room_id, reconnect_token)
+    player = await require_room_member(db, room_id, reconnect_token)
     result = await db.scalars(
-        select(Event).where(Event.room_id == room_id).order_by(Event.created_at)
+        select(Event)
+        .where(
+            Event.room_id == room_id,
+            or_(
+                Event.visibility == "room",
+                (Event.visibility == "player") & (Event.player_id == player.id),
+            ),
+        )
+        .order_by(Event.sequence, Event.created_at)
     )
     return [ReplayEventRead.model_validate(e) for e in result]
 
 
-async def get_summary(db: AsyncSession, room_id: str) -> RoomSummaryRead:
-    """GET /api/v1/rooms/{roomId}/summary —— 复盘摘要。
-
-    复盘内容依赖 AI 编排生成（归 #48/#68），本期没有任何写入路径会真的填充
-    `room_summaries` 表，直接走 NOT_IMPLEMENTED（issue 决策 7）。
-    """
-    raise not_implemented("复盘摘要依赖 AI 编排生成，本期尚未实现")
+async def get_summary(
+    db: AsyncSession, room_id: str, reconnect_token: str | None
+) -> RoomSummaryRead:
+    """返回结局时由规则引擎生成的确定性结构化复盘。"""
+    await require_room_member(db, room_id, reconnect_token)
+    summary = await db.scalar(
+        select(RoomSummary).where(RoomSummary.room_id == room_id)
+    )
+    if summary is None:
+        raise RoomConflictError("本局尚未生成复盘")
+    return RoomSummaryRead(
+        room_id=room_id,
+        summary_text=summary.summary_text,
+        highlights=summary.highlights,
+        ending_id=summary.ending_id,
+        outcome=summary.outcome,
+        structured_data=summary.structured_data,
+    )

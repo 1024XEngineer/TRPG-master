@@ -30,6 +30,7 @@ from pydantic import Field
 
 from app.dto.common import CamelModel
 from app.dto.room import RoomPlayerRead
+from app.runtime.contracts import PlayerView
 
 # ── 客户端 → 服务端 ──────────────────────────────
 
@@ -84,37 +85,37 @@ class ActionSubmitPayload(CamelModel):
     `strip()` + 空值判断拦掉，两者不冲突。
     """
 
+    client_action_id: str = Field(..., min_length=1, max_length=100)
     utterance: str
+    source_revision: int = Field(..., ge=0)
 
 
 class CheckRollPayload(CamelModel):
-    """check.roll 事件 payload（issue #77 新增）——玩家请求做一次技能检定。
+    """check.roll：确认并结算规则引擎创建的待处理技能检定。
 
-    `skill` 必填：说清楚要检定哪个技能是这个动作本身的意义所在。这条链路
-    本期是 NOT_IMPLEMENTED 桩（见 issue"三处原型取舍"表格——真正的服务端
-    权威掷骰依赖规则引擎裁决，归 #48/#68），handler 校验完这个 payload 就
-    直接回 `error` 事件，不会真的掷骰或读写 `check_results` 表。
+    客户端只提交请求标识与状态版本，骰值由服务端权威生成。
     """
 
-    skill: str = Field(..., min_length=1)
+    client_action_id: str = Field(..., min_length=1, max_length=100)
+    check_request_id: str = Field(..., min_length=1)
+    source_revision: int = Field(..., ge=0)
 
 
 class SanCheckRollPayload(CamelModel):
-    """san.check.roll 事件 payload（issue #77 新增）。
-
-    定义一个空模型（而不是完全跳过校验）理由同 GameStartPayload：让它也走
-    跟其它事件一致的"接收端过一次模型校验"路径。本期同样是 NOT_IMPLEMENTED 桩。
-    """
+    client_action_id: str = Field(..., min_length=1, max_length=100)
+    check_request_id: str = Field(..., min_length=1)
+    source_revision: int = Field(..., ge=0)
 
 
 class RoomRejoinPayload(CamelModel):
-    """room.rejoin 事件 payload（issue #77 新增，仅铺协议，见决策 6）。
+    """room.rejoin：恢复当前 GameView，并补发指定序号之后的玩家可见事件。
 
     `reconnect_token` 是房间身份体系的重连凭证（`players.reconnect_token`，
-    不是账号登录 token），本期只校验格式、不做真实的断线重连逻辑。
+    不是账号登录 token）。
     """
 
     reconnect_token: str = Field(..., min_length=1)
+    last_event_sequence: int | None = Field(default=None, ge=0)
 
 
 # ── 服务端 → 客户端 ──────────────────────────────
@@ -131,6 +132,8 @@ class NarrationPushPayload(CamelModel):
     """narration.push 推送 payload。"""
 
     text: str
+    request_id: str | None = None
+    state_revision: int | None = None
 
 
 class RoomStatePayload(CamelModel):
@@ -160,9 +163,17 @@ class TurnBeginPayload(CamelModel):
 
 
 class GameEndedPayload(CamelModel):
-    """game.ended 推送 payload（issue #77 新增，触发复盘，本期不会真的发出）。"""
+    """game.ended 推送 payload；结局落库后携带结构化复盘摘要。"""
 
     reason: str | None = None
+    ending_id: str | None = None
+    outcome: str | None = None
+    summary: str | None = None
+    state_revision: int | None = None
+
+
+class GameViewPayload(PlayerView):
+    """玩家安全的当前游戏投影；不包含完整 GameState 或 Keeper 内容。"""
 
 
 class ViewPrivatePayload(CamelModel):
@@ -178,58 +189,69 @@ class ViewPrivatePayload(CamelModel):
 
 
 class CheckRequestPayload(CamelModel):
-    """check.request 推送 payload（issue #77 新增，本期不会真的发出）。"""
+    """check.request：规则引擎请求玩家确认一次技能检定。"""
 
     player_id: str
+    check_request_id: str
+    checkpoint_id: str
     skill: str
-    target_value: int | None = None
+    target_value: int
+    difficulty: str
+    reason: str
+    state_revision: int
 
 
 class CheckResultPayload(CamelModel):
     """check.result 推送 payload（issue #77 新增）。
 
-    直接返回终值，不做两段式初步结果（issue 决策 4：幸运消耗机制推迟，
-    协议一并简化）。本期不会真的发出。
+    直接返回服务端权威终值，不做幸运消耗的两段式初步结果。
     """
 
     player_id: str
+    check_request_id: str
+    checkpoint_id: str
     skill: str
     roll_value: int
     target_value: int | None = None
     result: str
+    state_revision: int
 
 
 class SanCheckRequestPayload(CamelModel):
-    """san.check.request 推送 payload（issue #77 新增，本期不会真的发出）。"""
+    """san.check.request：规则引擎请求玩家确认一次理智检定。"""
 
     player_id: str
-    current_san: int | None = None
+    check_request_id: str
+    sanity_event_id: str
+    current_san: int
+    reason: str
+    state_revision: int
 
 
 class SanCheckResultPayload(CamelModel):
-    """san.check.result 推送 payload（issue #77 新增，同 CheckResultPayload
-    直接返回终值，本期不会真的发出）。"""
+    """san.check.result：返回服务端权威骰值、损失与当前 SAN。"""
 
     player_id: str
+    check_request_id: str
+    sanity_event_id: str
     roll_value: int
     san_loss: int
     result: str
+    current_san: int
+    state_revision: int
 
 
 class ClueGrantedPayload(CamelModel):
-    """clue.granted 推送 payload（issue #77 新增，线索发现，本期不会真的发出）。"""
+    """clue.granted：只推送规则引擎已授予、对该玩家可见的线索。"""
 
     player_id: str
+    clue_id: str
     clue_name: str
     description: str | None = None
 
 
 class ErrorPayload(CamelModel):
-    """error 推送 payload（issue #77 新增）——本期唯一会被真的发出的新增
-    S→C 事件：`check.roll`/`san.check.roll`/`room.rejoin` 这三个 NOT_IMPLEMENTED
-    桩、以及原来 game.start 失败时被静默丢弃（`continue`，见 ws.py 旧逻辑）
-    的错误，都改成通过这个事件明确告知发起者，而不是让客户端干等。
-    """
+    """error：把协议校验、身份、版本冲突和规则执行错误明确返回发起者。"""
 
     code: str
     message: str
@@ -255,3 +277,5 @@ class ServerEnvelope(CamelModel):
 
     type: str
     payload: dict[str, Any]
+    event_id: str | None = None
+    sequence: int | None = None

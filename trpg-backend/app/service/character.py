@@ -33,6 +33,7 @@ from app.dto.character import (
     RollAttributesResult,
 )
 from app.dto.game import RulesetRead
+from app.models.content import ModulePregen
 from app.models.room import Character, Player, Room
 from app.service.room import (
     RoomAuthorizationError,
@@ -59,7 +60,12 @@ class CharacterInvalidError(ValueError):
 
 
 async def create_character_draft(
-    db: AsyncSession, room_id: str, reconnect_token: str | None, based_on_template_id: str | None
+    db: AsyncSession,
+    room_id: str,
+    reconnect_token: str | None,
+    *,
+    based_on_template_id: str | None,
+    based_on_pregen_id: str | None,
 ) -> CharacterDraftResult:
     """房间内玩家创建一份角色草稿。
 
@@ -68,6 +74,8 @@ async def create_character_draft(
     本期没有实现（决策 5 原文：本期只铺表与接口，不实现），直接 NOT_IMPLEMENTED，
     不创建任何草稿；不带这个字段则完全是原来"从零建卡"的行为，不受影响。
     """
+    if based_on_template_id is not None and based_on_pregen_id is not None:
+        raise RoomAuthorizationError("预制角色和常用角色卡不能同时选择")
     if based_on_template_id is not None:
         raise not_implemented("复用常用角色卡本期尚未实现")
 
@@ -76,7 +84,34 @@ async def create_character_draft(
     if player.room_id != room.id:
         raise RoomAuthorizationError("你不在这个房间里")
 
-    character = Character(room_id=room_id, player_id=player.id, status="draft")
+    if based_on_pregen_id is not None:
+        pregen = await db.get(ModulePregen, based_on_pregen_id)
+        if pregen is None or pregen.scenario_id != room.scenario_id:
+            raise CharacterNotFoundError("预制角色不存在或不属于当前模组")
+        data = pregen.data or {}
+        stat_block = data.get("stat_block", {})
+        character = Character(
+            room_id=room_id,
+            player_id=player.id,
+            status="complete",
+            generation_method="pregen",
+            based_on_pregen_id=pregen.id,
+            name=pregen.name,
+            age=stat_block.get("age"),
+            gender=stat_block.get("gender"),
+            residence=stat_block.get("residence"),
+            birthplace=stat_block.get("birthplace"),
+            occupation=data.get("occupation"),
+            attributes=stat_block.get("attributes", {}),
+            derived_stats=stat_block.get("derived_stats", {}),
+            skills=stat_block.get("skills", {}),
+            equipment=stat_block.get("equipment", []),
+            background=stat_block.get("background", ""),
+            notes="",
+        )
+        player.has_character = True
+    else:
+        character = Character(room_id=room_id, player_id=player.id, status="draft")
     db.add(character)
     await db.commit()
     return CharacterDraftResult(character_id=character.id, status=character.status)

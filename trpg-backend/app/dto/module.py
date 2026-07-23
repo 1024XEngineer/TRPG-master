@@ -12,10 +12,31 @@ from app.dto.common import CamelModel, UtcDatetime
 from app.dto.room import ModuleRead
 
 
+class ModuleEntrySceneRead(CamelModel):
+    scene_id: str
+    name: str
+    player_description: str
+
+
+class ModulePregenRead(CamelModel):
+    id: str
+    source_character_id: str
+    name: str
+    occupation: str | None = None
+    summary: str | None = None
+    attributes: dict[str, int] = Field(default_factory=dict)
+    derived_stats: dict[str, int] = Field(default_factory=dict)
+    skills: dict[str, int] = Field(default_factory=dict)
+
+
 class ModuleDetailRead(ModuleRead):
-    """GET /api/v1/modules/{moduleId} 返回——在 ModuleRead 基础上补充简介。"""
+    """只包含玩家在开局前可以安全看到的 ModulePackage 投影。"""
 
     synopsis: str | None = None
+    premise: str
+    content_advisories: list[str] = Field(default_factory=list)
+    entry_scene: ModuleEntrySceneRead
+    pregens: list[ModulePregenRead] = Field(default_factory=list)
 
 
 class ModuleImportRequestBody(CamelModel):

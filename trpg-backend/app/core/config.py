@@ -35,6 +35,17 @@ class Settings(BaseSettings):
     # structlog 的最低日志级别，比如 "DEBUG"/"INFO"/"WARNING"。
     log_level: str = "INFO"
 
+    # 授权未确认的模组只能作为开发/测试样例。production 默认拒绝；如确有
+    # 私有部署需求，需要显式打开这个开关，不能由 Loader 静默放行。
+    allow_uncleared_modules: bool = False
+
+    # AI 守秘人默认使用确定性 Fake，便于离线开发和 CI。启用 DeepSeek 时三项
+    # 连接配置都必须提供；仍通过 OpenAI-compatible Chat Completions 传输。
+    keeper_provider: Literal["fake", "deepseek"] = "fake"
+    keeper_model: str | None = None
+    keeper_base_url: str | None = None
+    keeper_api_key: str | None = None
+
     # 允许跨域请求的前端来源列表，交给 main.py 里的 CORSMiddleware 使用。
     # 本地默认放行 Vite 开发服务器的默认端口 9877。
     cors_origins: list[str] = ["http://localhost:9877"]

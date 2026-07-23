@@ -20,6 +20,7 @@ dependencies = [
   "structlog>=24.4,<25.0",
   "bcrypt>=4.2,<5.0",
   "alembic>=1.13,<2.0",
+  "openai-agents[sqlalchemy]>=0.18,<0.19",
 ]
 
 [tool.hatch.build.targets.wheel]

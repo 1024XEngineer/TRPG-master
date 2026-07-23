@@ -70,12 +70,12 @@ class CharacterCreateBody(CamelModel):
     """POST /api/v1/rooms/{roomId}/characters 请求体（issue #77 新增第三条建卡路径）。
 
     整个请求体本身仍然可选（不传等价于从零建卡，路由层用 `Body(default=None)`
-    兜底），`based_on_template_id` 指向 `user_character_templates` 表——本期
-    只接住这个参数、校验它的形状，真正"复制模板数据进草稿"的读写没有实现
-    （issue 决策 5：本期只铺表与接口），带了这个字段会直接收到 NOT_IMPLEMENTED。
+    兜底）。`based_on_pregen_id` 从房间绑定的模组 revision 复制预制调查员快照
+    并直接完成角色；`based_on_template_id` 仍是仅预留的账号模板路径。
     """
 
     based_on_template_id: str | None = Field(default=None, min_length=1)
+    based_on_pregen_id: str | None = Field(default=None, min_length=1)
 
 
 class CharacterDraftResult(CamelModel):

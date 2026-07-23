@@ -1,0 +1,776 @@
+{
+  "package_schema_version": "1.1.0",
+  "package_id": "module-package.paper-chase-zh-coc7.v3",
+  "package_status": "ready",
+  "source_manifest": {
+    "filename": "追书人.pdf",
+    "page_count": 6,
+    "language": "zh-CN",
+    "document_type": "scenario_pdf",
+    "text_extraction": "embedded_text",
+    "layout_reviewed": true,
+    "runtime_included": false,
+    "segments": [
+      {
+        "id": "segment.paper_chase",
+        "kind": "scenario",
+        "title": "追书人",
+        "page_start": 1,
+        "page_end": 6,
+        "included": true
+      }
+    ],
+    "extraction_quality": {
+      "text_confidence": 1.0,
+      "layout_confidence": 1.0,
+      "asset_coverage": 1.0
+    },
+    "rights": {
+      "declaration_status": "unknown",
+      "commercial_use": "not_cleared",
+      "redistribution": "not_cleared",
+      "notes": "当前仅作为仓库内开发和测试用黄金样例；商业发布前必须完成权利核验。"
+    }
+  },
+  "module": {
+    "module_id": "paper-chase-zh-coc7",
+    "title": "追书人",
+    "original_title": "Paper Chase",
+    "ruleset_ref": {
+      "system_id": "coc7",
+      "version": "7e",
+      "required_capabilities": [
+        "skill_check",
+        "repeat_check",
+        "check_bypass",
+        "time_cost",
+        "currency_cost",
+        "sanity_check",
+        "sanity_recovery",
+        "state_condition",
+        "state_effect",
+        "location_graph",
+        "timeline",
+        "encounter_resolution",
+        "resource_state",
+        "ending_resolution"
+      ],
+      "required_condition_types": [
+        "check_fumble",
+        "clue_not_owned",
+        "player_attacks",
+        "player_choice",
+        "state_eq",
+        "temporary_insanity_during_ghoul_crowd"
+      ],
+      "required_effect_types": [
+        "award_skill",
+        "conditional_hazard",
+        "conditional_state_change",
+        "fire_trigger",
+        "grant_clue",
+        "move_entity",
+        "recover_san",
+        "request_san_check",
+        "roll_cost",
+        "set_state",
+        "transition",
+        "trigger_ending"
+      ]
+    },
+    "setting": {
+      "era": "美国禁酒令时期",
+      "primary_location": "密歇根州阿诺兹堡",
+      "themes": ["失踪调查", "食尸鬼", "阅读", "人与非人生活的选择"],
+      "tone": ["调查", "惊悚", "悲伤", "低战斗倾向"]
+    },
+    "player_count": {
+      "investigators_min": 1,
+      "investigators_max": 1,
+      "keeper_count": 1
+    },
+    "estimated_duration": "1 session",
+    "character_setup": {
+      "creation_mode": "pregen",
+      "requirements": ["严格使用一名调查员", "调查员必须愿意接受托马斯的私人委托"],
+      "recommended_skills": ["spot_hidden", "library_use", "track", "social"],
+      "party_relationships": [],
+      "pregenerated_character_ids": [
+        "character.investigative_reporter",
+        "character.private_detective"
+      ],
+      "personalization_slots": []
+    },
+    "content_advisories": ["尸体与食尸鬼", "精神失常", "角色可能失踪或被收容"],
+    "premise": "托马斯委托调查员查明叔叔道格拉斯失踪的真相，并追回近期从旧宅书房失窃的五本书。",
+    "entry_scene_id": "scene.client_briefing",
+    "entry_points": [
+      {
+        "id": "entry.default",
+        "name": "接受托马斯的委托",
+        "scene_id": "scene.client_briefing",
+        "default": true
+      }
+    ]
+  },
+  "keeper_brief": {
+    "core_truth": "道格拉斯主动选择进入地下世界并逐渐成为食尸鬼；他回来只是为了取回自己的藏书。",
+    "experience_goal": "让调查员通过非线性调查发现真相，并决定是否尊重、隐瞒或暴力干预道格拉斯的选择。",
+    "tone": ["调查", "惊悚", "悲伤", "低战斗倾向"],
+    "must_preserve": [
+      "道格拉斯默认不主动攻击调查员",
+      "完整真相应通过日记、追踪或与道格拉斯对话逐步揭示",
+      "玩家可以通过多条调查路径抵达墓地和最终对话",
+      "暴力处理不是默认胜利路径"
+    ],
+    "must_not_reveal_before_granted": [
+      "fact.douglas_became_ghoul",
+      "fact.douglas_stole_books",
+      "fact.ghouls_closing_entrance",
+      "fact.underground_tunnels_exist"
+    ]
+  },
+  "runtime_defaults": {
+    "clue_visibility": "locked_until_granted",
+    "missing_checkpoint_outcome": "no_effect",
+    "unknown_action_policy": "adjudicate_without_state_change",
+    "trigger_once": true,
+    "trigger_priority": 100,
+    "track_transition_policy": "first_matching_priority",
+    "timeline_conflict_policy": "priority_then_source_order"
+  },
+  "content": {
+    "facts": [
+    {
+      "id": "fact.douglas_became_ghoul",
+      "content": "道格拉斯主动进入地下世界并逐渐成为食尸鬼。",
+      "classification": "keeper_only",
+      "confidence": 1.0,
+      "source_refs": [{"page": 1, "section": "背景信息"}]
+    },
+    {
+      "id": "fact.douglas_stole_books",
+      "content": "近期从金博尔宅取走书籍的人影就是道格拉斯；他想取回自己的藏书。",
+      "classification": "keeper_only",
+      "confidence": 1.0,
+      "source_refs": [{"page": 1, "section": "背景信息"}, {"page": 3, "section": "监视金博尔宅或公墓"}]
+    },
+    {
+      "id": "fact.douglas_not_hostile",
+      "content": "道格拉斯通常不会主动攻击调查员，只想带着书返回墓地。",
+      "classification": "keeper_only",
+      "confidence": 1.0,
+      "source_refs": [{"page": 3, "section": "监视金博尔宅或公墓"}, {"page": 5, "section": "道格拉斯数据"}]
+    },
+    {
+      "id": "fact.ghouls_closing_entrance",
+      "content": "食尸鬼群体准备关闭并放弃这处墓地入口，道格拉斯不会再次回来。",
+      "classification": "keeper_only",
+      "confidence": 1.0,
+      "source_refs": [{"page": 4, "section": "对话"}, {"page": 5, "section": "写在最后"}]
+    },
+    {
+      "id": "fact.underground_tunnels_exist",
+      "content": "公墓地下存在由食尸鬼活动的隧道网络。",
+      "classification": "keeper_only",
+      "confidence": 1.0,
+      "source_refs": [{"page": 3, "section": "金博尔宅"}]
+    }
+  ],
+  "locations": [
+    {
+      "id": "location.arnoldsburg",
+      "name": "阿诺兹堡",
+      "kind": "settlement",
+      "parent_location_id": null,
+      "scene_ids": ["scene.client_briefing", "scene.neighborhood", "scene.speakeasy", "scene.library", "scene.newspaper"],
+      "connections": [
+        {"location_id": "location.kimball_house", "kind": "local_travel"},
+        {"location_id": "location.cemetery", "kind": "local_travel"}
+      ],
+      "source_refs": [{"page": 1, "section": "玩家信息"}, {"page": 6, "section": "地图"}]
+    },
+    {
+      "id": "location.kimball_house",
+      "name": "金博尔宅",
+      "kind": "building",
+      "parent_location_id": "location.arnoldsburg",
+      "scene_ids": ["scene.kimball_house", "scene.surveillance", "scene.confrontation"],
+      "connections": [{"location_id": "location.cemetery", "kind": "road"}],
+      "asset_ids": ["asset.local_map"],
+      "source_refs": [{"page": 3, "section": "金博尔宅"}, {"page": 6, "section": "地图"}]
+    },
+    {
+      "id": "location.cemetery",
+      "name": "公共墓地",
+      "kind": "outdoor_site",
+      "parent_location_id": "location.arnoldsburg",
+      "scene_ids": ["scene.caretaker_interview", "scene.cemetery", "scene.surveillance", "scene.confrontation"],
+      "connections": [
+        {"location_id": "location.favorite_grave", "kind": "within_area"},
+        {"location_id": "location.crypt_entrance", "kind": "hidden_route", "discovery_clue_id": "clue.crypt_entrance"}
+      ],
+      "asset_ids": ["asset.local_map"],
+      "source_refs": [{"page": 2, "section": "墓地看守"}, {"page": 5, "section": "地穴"}, {"page": 6, "section": "地图"}]
+    },
+    {
+      "id": "location.favorite_grave",
+      "name": "道格拉斯常坐的低矮墓碑",
+      "kind": "landmark",
+      "parent_location_id": "location.cemetery",
+      "scene_ids": ["scene.cemetery", "scene.surveillance"],
+      "connections": [],
+      "initial_state": {"identified": false},
+      "source_refs": [{"page": 1, "section": "背景信息"}, {"page": 2, "section": "墓地看守"}]
+    },
+    {
+      "id": "location.crypt_entrance",
+      "name": "墓穴入口石板",
+      "kind": "hidden_entrance",
+      "parent_location_id": "location.cemetery",
+      "scene_ids": ["scene.crypt", "scene.douglas_conversation"],
+      "connections": [],
+      "asset_ids": ["asset.local_map"],
+      "initial_state": {"discovered": false, "open": false},
+      "source_refs": [{"page": 5, "section": "地穴"}, {"page": 6, "section": "地图"}]
+    }
+  ],
+  "scenes": [
+    {
+      "id": "scene.client_briefing",
+      "name": "托马斯的委托",
+      "kind": "briefing",
+      "summary": "托马斯说明五本书被盗及叔叔失踪一年的情况。",
+      "player_description": "托马斯·金博尔请你调查叔叔失踪一年的真相，并追回最近从旧宅书房失窃的五本书。",
+      "keeper_notes": "只说明委托和玩家已知事实，不提前透露偷书者身份。",
+      "location_ids": ["location.arnoldsburg"],
+      "entity_ids": ["npc.thomas"],
+      "clue_ids": ["clue.stolen_books", "clue.douglas_missing"],
+      "next_scene_ids": ["scene.neighborhood", "scene.library", "scene.newspaper", "scene.kimball_house", "scene.cemetery"],
+      "source_refs": [{"page": 1, "section": "玩家信息"}]
+    },
+    {
+      "id": "scene.neighborhood",
+      "name": "询问朋友和邻居",
+      "kind": "investigation",
+      "summary": "调查道格拉斯生前习惯及其与墓地的联系。",
+      "player_description": "附近居民或许还记得道格拉斯失踪前的生活习惯。",
+      "keeper_notes": "成功交涉后，由莱拉提供道格拉斯常带书去墓地的线索。",
+      "location_ids": ["location.arnoldsburg"],
+      "entity_ids": ["npc.lyla_odell"],
+      "clue_ids": ["clue.douglas_read_at_cemetery"],
+      "checkpoint_ids": ["check.social_neighbors"],
+      "next_scene_ids": ["scene.cemetery"],
+      "source_refs": [{"page": 2, "section": "询问朋友和邻居"}]
+    },
+    {
+      "id": "scene.caretaker_interview",
+      "name": "墓地看守",
+      "kind": "social",
+      "summary": "通过信用、观察、胁迫或贿赂从看守口中获取墓碑和夜间人影的信息。",
+      "player_description": "墓地看守梅洛迪亚斯显得紧张而戒备，似乎不愿主动谈论夜间的墓地。",
+      "keeper_notes": "信用、发现酒瓶后的胁迫或持酒贿赂都能取得不同线索。",
+      "location_ids": ["location.cemetery"],
+      "entity_ids": ["npc.melodias"],
+      "resource_ids": ["object.liquor_bottle"],
+      "clue_ids": ["clue.favorite_grave", "clue.night_silhouette"],
+      "checkpoint_ids": ["check.impress_caretaker", "check.notice_bottle", "check.intimidate_caretaker", "check.bribe_caretaker"],
+      "next_scene_ids": ["scene.cemetery", "scene.speakeasy"],
+      "source_refs": [{"page": 2, "section": "墓地看守"}]
+    },
+    {
+      "id": "scene.speakeasy",
+      "name": "地下酒吧",
+      "kind": "optional_resource",
+      "summary": "寻找并购买用于贿赂墓地看守的酒。",
+      "player_description": "禁酒令时期，寻找一处可以买到酒的地下场所本身就有风险。",
+      "keeper_notes": "成功获得一品脱酒；大失败触发被捕结局，适合背景可免检。",
+      "location_ids": ["location.arnoldsburg"],
+      "resource_ids": ["item.liquor"],
+      "checkpoint_ids": ["check.find_speakeasy"],
+      "next_scene_ids": ["scene.caretaker_interview"],
+      "source_refs": [{"page": 2, "section": "墓地看守"}]
+    },
+    {
+      "id": "scene.library",
+      "name": "当地图书馆",
+      "kind": "research",
+      "summary": "通过旧报纸索引发现十多年前墓地怪人聚集的报道。",
+      "player_description": "图书馆保存着当地旧报纸和历史资料，可以从中调查墓地的往事。",
+      "keeper_notes": "成功研究后授予旧墓地报道，不直接揭示道格拉斯现状。",
+      "location_ids": ["location.arnoldsburg"],
+      "clue_ids": ["clue.old_cemetery_report"],
+      "checkpoint_ids": ["check.library_research"],
+      "next_scene_ids": ["scene.newspaper"],
+      "source_refs": [{"page": 2, "section": "图书馆与历史"}]
+    },
+    {
+      "id": "scene.newspaper",
+      "name": "《阿诺兹堡广告报》档案室",
+      "kind": "research",
+      "summary": "查阅旧报道和希尔达关于墓地怪物的未刊陈述。",
+      "player_description": "报社档案室保存着旧报道底稿和未刊登的采访材料。",
+      "keeper_notes": "成功进入档案后提供希尔达证词；记者或作家可免检。",
+      "location_ids": ["location.arnoldsburg"],
+      "entity_ids": ["npc.hilda_ward"],
+      "clue_ids": ["clue.hilda_statement"],
+      "checkpoint_ids": ["check.access_newspaper_archive", "check.luck_find_report"],
+      "next_scene_ids": ["scene.cemetery"],
+      "source_refs": [{"page": 2, "section": "阿诺兹堡广告报"}, {"page": 3, "section": "未发表陈述"}]
+    },
+    {
+      "id": "scene.kimball_house",
+      "name": "金博尔宅与书房",
+      "kind": "investigation",
+      "summary": "检查旧宅书房、失窃现场和道格拉斯留下的日记。",
+      "player_description": "旧宅书房仍保留着道格拉斯生活过的痕迹，书架间留下了五本书被取走的空缺。",
+      "keeper_notes": "搜索至少消耗一天；找到并读懂日记后才揭示地下朋友和隧道信息。",
+      "location_ids": ["location.kimball_house"],
+      "entity_ids": ["npc.thomas"],
+      "resource_ids": ["object.study_window", "object.douglas_diary"],
+      "clue_ids": ["clue.diary_decision", "clue.diary_tunnels"],
+      "checkpoint_ids": ["check.search_study", "check.read_diary"],
+      "next_scene_ids": ["scene.cemetery", "scene.surveillance"],
+      "source_refs": [{"page": 3, "section": "金博尔宅"}]
+    },
+    {
+      "id": "scene.cemetery",
+      "name": "公共墓地",
+      "kind": "investigation",
+      "summary": "搜索道格拉斯常坐的墓碑、追踪异常足迹或进行夜间监视。",
+      "player_description": "公共墓地里排列着低矮墓碑，泥土和杂草间可能保留着不寻常的痕迹。",
+      "keeper_notes": "玩家可通过追踪找到入口，也可选择夜间监视绕过追踪失败。",
+      "location_ids": ["location.cemetery", "location.favorite_grave", "location.crypt_entrance"],
+      "clue_ids": ["clue.hoof_tracks", "clue.crypt_entrance"],
+      "checkpoint_ids": ["check.track_at_grave"],
+      "next_scene_ids": ["scene.crypt", "scene.surveillance", "scene.douglas_conversation"],
+      "source_refs": [{"page": 3, "section": "金博尔宅"}, {"page": 5, "section": "地穴"}]
+    },
+    {
+      "id": "scene.surveillance",
+      "name": "监视金博尔宅或公墓",
+      "kind": "timed_investigation",
+      "summary": "每晚监视并等待道格拉斯从墓地前往书房取书。",
+      "player_description": "夜色笼罩旧宅和墓地，你需要耐心等待那个神秘人影再次出现。",
+      "keeper_notes": "每晚执行一次幸运检定直到成功或玩家放弃；成功后触发取书事件。",
+      "location_ids": ["location.kimball_house", "location.cemetery"],
+      "entity_ids": ["npc.douglas"],
+      "resource_ids": ["object.study_window"],
+      "checkpoint_ids": ["check.nightly_surveillance"],
+      "trigger_ids": ["trigger.douglas_book_run"],
+      "next_scene_ids": ["scene.confrontation", "scene.cemetery"],
+      "source_refs": [{"page": 3, "section": "监视金博尔宅或公墓"}]
+    },
+    {
+      "id": "scene.confrontation",
+      "name": "与人影正面对抗",
+      "kind": "conflict",
+      "summary": "调查员可追赶、攻击、呼喊道格拉斯名字或放任其离开。",
+      "player_description": "一个佝偻的人影抱着书向墓地方向逃去，你可以追赶、呼喊、攻击或任其离开。",
+      "keeper_notes": "不要在身份确认前直接称其为道格拉斯；呼喊名字可以进入对话，暴力会招致严重后果。",
+      "location_ids": ["location.kimball_house", "location.cemetery"],
+      "entity_ids": ["npc.douglas", "group.ghouls"],
+      "encounter_ids": ["encounter.douglas_confrontation"],
+      "trigger_ids": ["trigger.douglas_killed", "trigger.call_douglas_name", "trigger.ghoul_crowd_appears"],
+      "next_scene_ids": ["scene.douglas_conversation", "scene.cemetery"],
+      "source_refs": [{"page": 3, "section": "监视金博尔宅或公墓"}, {"page": 4, "section": "道格拉斯和他的书籍"}]
+    },
+    {
+      "id": "scene.crypt",
+      "name": "地穴入口",
+      "kind": "hazard",
+      "summary": "移开墓穴石板，处理腐臭并决定是否进入地下。",
+      "player_description": "异常足迹消失在一块沉重的墓穴石板旁，石板下方似乎连着黑暗空间。",
+      "keeper_notes": "移开石板后触发腐臭；只有玩家提前声明屏住呼吸才能避免昏迷。",
+      "location_ids": ["location.crypt_entrance"],
+      "entity_ids": ["npc.douglas"],
+      "checkpoint_ids": ["check.move_crypt_slab"],
+      "trigger_ids": ["trigger.crypt_stench", "trigger.douglas_waits_at_crypt"],
+      "next_scene_ids": ["scene.douglas_conversation"],
+      "source_refs": [{"page": 5, "section": "地穴"}]
+    },
+    {
+      "id": "scene.douglas_conversation",
+      "name": "与道格拉斯对话",
+      "kind": "revelation",
+      "summary": "道格拉斯解释自己的选择，请求调查员保守秘密，并准备永久离开。",
+      "player_description": "眼前的非人生物仍保留着道格拉斯的记忆和语气，愿意在没有敌意时回答问题。",
+      "keeper_notes": "保持道格拉斯平静、坦率和非敌对；完成礼貌对话后依次结算真相、SAN 和奖励。",
+      "location_ids": ["location.cemetery", "location.crypt_entrance"],
+      "entity_ids": ["npc.douglas"],
+      "clue_ids": ["clue.douglas_truth", "clue.ghouls_leaving"],
+      "trigger_ids": ["trigger.talk_with_douglas"],
+      "next_scene_ids": [],
+      "source_refs": [{"page": 4, "section": "对话"}, {"page": 5, "section": "对话结尾"}]
+    }
+  ],
+  "entities": [
+    {
+      "id": "npc.thomas",
+      "kind": "npc",
+      "name": "托马斯·金博尔",
+      "role": "委托人和道格拉斯的侄子",
+      "public_description": "现居金博尔宅，希望查明失窃与叔叔失踪的真相。",
+      "knowledge_fact_ids": [],
+      "goals": ["追回五本书", "确认叔叔是否仍在人世"],
+      "initial_state": {"location": "scene.kimball_house", "cooperative": true},
+      "source_refs": [{"page": 1, "section": "玩家信息"}]
+    },
+    {
+      "id": "npc.douglas",
+      "kind": "npc",
+      "name": "道格拉斯·金博尔",
+      "role": "失踪者、追书的食尸鬼",
+      "public_description": "失踪一年的离群索居爱书人。",
+      "keeper_description": "已经成为食尸鬼，但保留理智、阅读爱好和人格。",
+      "knowledge_fact_ids": ["fact.douglas_became_ghoul", "fact.ghouls_closing_entrance", "fact.underground_tunnels_exist"],
+      "goals": ["取回自己的书", "不受人类社会干扰", "永久离开这处墓地", "隐藏自己仍然存在的事实"],
+      "behavior": {
+        "default_attitude": "non_hostile",
+        "speech_style": "平静、坦率、厌倦世俗",
+        "will_answer_polite_questions": true,
+        "will_not_initiate_combat": true,
+        "stops_attacking_after_escape_is_possible": true
+      },
+      "initial_state": {"location": "underground", "alive": true, "recognized": false, "conversation_completed": false},
+      "stat_block": {
+        "STR": 85,
+        "CON": 75,
+        "SIZ": 65,
+        "INT": 80,
+        "POW": 65,
+        "DEX": 40,
+        "EDU": 85,
+        "SAN": 0,
+        "HP": 14,
+        "MP": 13,
+        "damage_bonus": "1D4",
+        "build": 1,
+        "move": 9,
+        "attacks_per_round": 3,
+        "fighting": 40,
+        "fighting_damage": "1D6+DB",
+        "bite_damage_per_round": "1D4",
+        "armor": "火器和贯穿武器伤害减半，向下取整",
+        "san_loss_on_sight": "0/1D6"
+      },
+      "source_refs": [{"page": 4, "section": "对话"}, {"page": 5, "section": "角色数据"}]
+    },
+    {
+      "id": "npc.lyla_odell",
+      "kind": "npc",
+      "name": "莱拉·奥戴尔",
+      "role": "邻居",
+      "knowledge_clue_ids": ["clue.douglas_read_at_cemetery"],
+      "initial_state": {"cooperative_after_successful_social_check": true},
+      "source_refs": [{"page": 2, "section": "询问朋友和邻居"}]
+    },
+    {
+      "id": "npc.melodias",
+      "kind": "npc",
+      "name": "梅洛迪亚斯·杰弗逊",
+      "role": "墓地看守",
+      "knowledge_clue_ids": ["clue.favorite_grave", "clue.night_silhouette"],
+      "behavior": {"fearful_of_cemetery": true, "susceptible_to_alcohol_bribe": true},
+      "initial_state": {"cooperative": false, "bottle_exposed": true},
+      "source_refs": [{"page": 2, "section": "墓地看守"}]
+    },
+    {
+      "id": "npc.hilda_ward",
+      "kind": "npc_reference",
+      "name": "希尔达·沃德",
+      "role": "旧证词提供者",
+      "public_description": "64 岁、患有失眠症，现已搬往底特律。",
+      "knowledge_clue_ids": ["clue.hilda_statement"],
+      "source_refs": [{"page": 3, "section": "未发表陈述"}]
+    },
+    {
+      "id": "group.ghouls",
+      "kind": "npc_group",
+      "name": "食尸鬼群体",
+      "keeper_description": "在道格拉斯死亡或调查员坚持留下时出现；正准备废弃入口。",
+      "initial_state": {"hidden": true, "leaving_cemetery": true},
+      "source_refs": [{"page": 3, "section": "监视金博尔宅或公墓"}, {"page": 4, "section": "道格拉斯和他的书籍"}]
+    }
+  ],
+  "characters": [
+    {
+      "id": "character.investigative_reporter",
+      "kind": "pregen",
+      "name": "伊芙琳·摩尔",
+      "occupation": "记者(原作向)-调查记者",
+      "summary": "善于查阅档案、观察现场并让受访者开口的调查记者。",
+      "stat_block": {
+        "age": 31,
+        "gender": "女",
+        "residence": "密歇根州底特律",
+        "birthplace": "密歇根州兰辛",
+        "attributes": {
+          "STR": 45,
+          "CON": 55,
+          "DEX": 60,
+          "APP": 65,
+          "POW": 60,
+          "SIZ": 55,
+          "INT": 75,
+          "EDU": 70,
+          "LUCK": 55
+        },
+        "derived_stats": {"HP": 11, "MP": 12, "SAN": 60},
+        "skills": {
+          "library_use": 70,
+          "spot_hidden": 65,
+          "persuade": 60,
+          "charm": 55,
+          "fast_talk": 50,
+          "psychology": 50,
+          "language_english": 70,
+          "track": 30,
+          "credit_rating": 45,
+          "cthulhu_mythos": 0
+        },
+        "equipment": ["记者证", "笔记本与钢笔", "小型照相机", "手电筒"],
+        "background": "伊芙琳追踪过多起失踪案件，愿意接受托马斯的私人委托，并相信档案与证词总会留下可以相互印证的痕迹。"
+      },
+      "source_refs": [
+        {"kind": "runtime_supplement", "issue": 124}
+      ]
+    },
+    {
+      "id": "character.private_detective",
+      "kind": "pregen",
+      "name": "塞缪尔·里德",
+      "occupation": "私家侦探",
+      "summary": "擅长现场搜查、追踪足迹和识破隐瞒的私家侦探。",
+      "stat_block": {
+        "age": 38,
+        "gender": "男",
+        "residence": "密歇根州底特律",
+        "birthplace": "俄亥俄州托莱多",
+        "attributes": {
+          "STR": 60,
+          "CON": 60,
+          "DEX": 65,
+          "APP": 50,
+          "POW": 55,
+          "SIZ": 65,
+          "INT": 70,
+          "EDU": 60,
+          "LUCK": 60
+        },
+        "derived_stats": {"HP": 12, "MP": 11, "SAN": 55},
+        "skills": {
+          "spot_hidden": 70,
+          "track": 65,
+          "psychology": 60,
+          "intimidate": 55,
+          "persuade": 50,
+          "fast_talk": 45,
+          "library_use": 45,
+          "credit_rating": 40,
+          "cthulhu_mythos": 0
+        },
+        "equipment": ["皮制笔记本", "放大镜", "手电筒", "结实的外套"],
+        "background": "塞缪尔曾为失踪人口与财产纠纷奔走，习惯从足迹、门锁和说辞中的矛盾还原事件经过。"
+      },
+      "source_refs": [
+        {"kind": "runtime_supplement", "issue": 124}
+      ]
+    }
+  ],
+  "resources": [
+    {
+      "id": "object.douglas_diary",
+      "kind": "document",
+      "name": "道格拉斯的日记",
+      "location_id": "location.kimball_house",
+      "study": {
+        "checkpoint_id": "check.read_diary",
+        "granted_clue_ids": ["clue.diary_decision", "clue.diary_tunnels"]
+      },
+      "initial_state": {"found": false, "read": false},
+      "source_refs": [{"page": 3, "section": "金博尔宅"}]
+    },
+    {
+      "id": "object.study_window",
+      "kind": "interactable",
+      "name": "书房窗户",
+      "location_id": "location.kimball_house",
+      "initial_state": {"locked": false, "broken": false},
+      "source_refs": [{"page": 3, "section": "监视金博尔宅或公墓"}]
+    },
+    {
+      "id": "object.liquor_bottle",
+      "kind": "interactable",
+      "name": "看守口袋中的玻璃瓶",
+      "location_id": "location.cemetery",
+      "initial_state": {"noticed": false},
+      "source_refs": [{"page": 2, "section": "墓地看守"}]
+    },
+    {
+      "id": "item.liquor",
+      "kind": "consumable",
+      "name": "一品脱酒",
+      "uses": ["bribe_caretaker"],
+      "initial_state": {"owned": false, "cost": "1D3 USD"},
+      "source_refs": [{"page": 2, "section": "墓地看守"}]
+    }
+  ],
+  "clues": [
+    {"id": "clue.stolen_books", "summary": "五本价值不高但受道格拉斯珍爱的书近期被盗。", "criticality": "premise", "reveals_fact_ids": [], "source_refs": [{"page": 1, "section": "玩家信息"}]},
+    {"id": "clue.douglas_missing", "summary": "道格拉斯已失踪一年，没有留下踪迹。", "criticality": "premise", "reveals_fact_ids": [], "source_refs": [{"page": 1, "section": "玩家信息"}]},
+    {"id": "clue.douglas_read_at_cemetery", "summary": "邻居曾见道格拉斯带书前往公墓。", "criticality": "supporting", "reveals_fact_ids": [], "source_refs": [{"page": 2, "section": "询问朋友和邻居"}]},
+    {"id": "clue.favorite_grave", "summary": "看守知道道格拉斯常坐的具体墓碑。", "criticality": "route_unlock", "reveals_fact_ids": [], "effects": [{"type": "set_state", "path": "location.favorite_grave.identified", "value": true}], "source_refs": [{"page": 2, "section": "墓地看守"}]},
+    {"id": "clue.night_silhouette", "summary": "看守深夜看见有人影坐在那块墓碑上。", "criticality": "supporting", "reveals_fact_ids": ["fact.douglas_stole_books"], "source_refs": [{"page": 2, "section": "墓地看守"}]},
+    {"id": "clue.old_cemetery_report", "summary": "旧报道记载墓地中出现类人群体和形状怪异的足迹。", "criticality": "supporting", "reveals_fact_ids": ["fact.underground_tunnels_exist"], "source_refs": [{"page": 2, "section": "图书馆与历史"}]},
+    {"id": "clue.hilda_statement", "summary": "旧证词称墓地附近有犬类特征、蹄状足部、沾满腐土的类人生物。", "criticality": "supporting", "reveals_fact_ids": ["fact.douglas_became_ghoul"], "source_refs": [{"page": 3, "section": "未发表陈述"}]},
+    {"id": "clue.diary_decision", "summary": "最后一篇日记表示道格拉斯决定加入地下的朋友。", "criticality": "core", "reveals_fact_ids": ["fact.douglas_became_ghoul"], "source_refs": [{"page": 3, "section": "金博尔宅"}]},
+    {"id": "clue.diary_tunnels", "summary": "日记暗示公墓地下存在神秘生物居住的隧道网络。", "criticality": "route_unlock", "reveals_fact_ids": ["fact.underground_tunnels_exist"], "source_refs": [{"page": 3, "section": "金博尔宅"}]},
+    {"id": "clue.hoof_tracks", "summary": "墓地附近存在半足半蹄的足迹。", "criticality": "route_unlock", "reveals_fact_ids": ["fact.underground_tunnels_exist"], "source_refs": [{"page": 5, "section": "地穴"}]},
+    {"id": "clue.crypt_entrance", "summary": "足迹通向正确的墓穴入口石板。", "criticality": "route_unlock", "reveals_fact_ids": ["fact.underground_tunnels_exist"], "effects": [{"type": "set_state", "path": "location.crypt_entrance.discovered", "value": true}], "source_refs": [{"page": 5, "section": "地穴"}]},
+    {"id": "clue.douglas_truth", "summary": "道格拉斯主动选择食尸鬼生活，只希望自由阅读。", "criticality": "core", "reveals_fact_ids": ["fact.douglas_became_ghoul", "fact.douglas_not_hostile"], "source_refs": [{"page": 4, "section": "对话"}]},
+    {"id": "clue.ghouls_leaving", "summary": "食尸鬼将关闭入口，道格拉斯不会再回来。", "criticality": "resolution", "reveals_fact_ids": ["fact.ghouls_closing_entrance"], "source_refs": [{"page": 4, "section": "对话"}, {"page": 5, "section": "写在最后"}]}
+  ],
+  "checkpoints": [
+    {"id": "check.social_neighbors", "scene_id": "scene.neighborhood", "skills": ["fast_talk", "charm"], "difficulty": "regular", "on_success": [{"type": "grant_clue", "clue_id": "clue.douglas_read_at_cemetery"}], "source_refs": [{"page": 2, "section": "询问朋友和邻居"}]},
+    {"id": "check.impress_caretaker", "scene_id": "scene.caretaker_interview", "skills": ["credit_rating"], "difficulty": "regular", "on_success": [{"type": "grant_clue", "clue_id": "clue.favorite_grave"}], "source_refs": [{"page": 2, "section": "墓地看守"}]},
+    {"id": "check.notice_bottle", "scene_id": "scene.caretaker_interview", "skills": ["spot_hidden"], "difficulty": "regular", "on_success": [{"type": "set_state", "path": "object.liquor_bottle.noticed", "value": true}], "source_refs": [{"page": 2, "section": "墓地看守"}]},
+    {"id": "check.intimidate_caretaker", "scene_id": "scene.caretaker_interview", "skills": ["intimidate"], "difficulty": "regular", "prerequisites": [{"type": "state_eq", "path": "object.liquor_bottle.noticed", "value": true}], "on_success": [{"type": "grant_clue", "clue_id": "clue.night_silhouette"}], "source_refs": [{"page": 2, "section": "墓地看守"}]},
+    {"id": "check.bribe_caretaker", "scene_id": "scene.caretaker_interview", "skills": ["fast_talk", "charm", "credit_rating"], "difficulty": "regular", "prerequisites": [{"type": "state_eq", "path": "item.liquor.owned", "value": true}], "on_success": [{"type": "grant_clue", "clue_id": "clue.night_silhouette"}], "source_refs": [{"page": 2, "section": "墓地看守"}]},
+    {"id": "check.find_speakeasy", "scene_id": "scene.speakeasy", "skills": ["luck"], "difficulty": "regular", "bypass_hints": ["侦探、警察、黑帮成员或与酒有关的背景可由 Keeper 判定自动成功"], "on_success": [{"type": "set_state", "path": "item.liquor.owned", "value": true}, {"type": "roll_cost", "expression": "1D3", "currency": "USD"}], "on_fumble": [{"type": "trigger_ending", "ending_id": "ending.arrested"}], "source_refs": [{"page": 2, "section": "墓地看守"}]},
+    {"id": "check.library_research", "scene_id": "scene.library", "skills": ["library_use"], "difficulty": "regular", "on_success": [{"type": "grant_clue", "clue_id": "clue.old_cemetery_report"}], "source_refs": [{"page": 2, "section": "图书馆与历史"}]},
+    {"id": "check.access_newspaper_archive", "scene_id": "scene.newspaper", "skills": ["fast_talk", "charm", "persuade", "credit_rating"], "difficulty": "regular", "bypass_hints": ["记者或作家无需检定"], "on_success": [{"type": "grant_clue", "clue_id": "clue.hilda_statement"}], "source_refs": [{"page": 2, "section": "阿诺兹堡广告报"}, {"page": 3, "section": "未发表陈述"}]},
+    {"id": "check.luck_find_report", "scene_id": "scene.newspaper", "skills": ["luck"], "difficulty": "regular", "prerequisites": [{"type": "clue_not_owned", "clue_id": "clue.old_cemetery_report"}], "on_success": [{"type": "grant_clue", "clue_id": "clue.hilda_statement"}], "source_refs": [{"page": 3, "section": "阿诺兹堡广告报"}]},
+    {"id": "check.search_study", "scene_id": "scene.kimball_house", "skills": ["spot_hidden"], "difficulty": "regular", "time_cost": "1 day", "on_success": [{"type": "set_state", "path": "object.douglas_diary.found", "value": true}, {"type": "grant_clue", "clue_id": "clue.diary_decision"}], "source_refs": [{"page": 3, "section": "金博尔宅"}]},
+    {"id": "check.read_diary", "scene_id": "scene.kimball_house", "skills": ["language_english"], "difficulty": "regular", "prerequisites": [{"type": "state_eq", "path": "object.douglas_diary.found", "value": true}], "on_success": [{"type": "set_state", "path": "object.douglas_diary.read", "value": true}, {"type": "grant_clue", "clue_id": "clue.diary_tunnels"}], "source_refs": [{"page": 3, "section": "金博尔宅"}]},
+    {"id": "check.track_at_grave", "scene_id": "scene.cemetery", "skills": ["track"], "difficulty": "regular", "on_success": [{"type": "grant_clue", "clue_id": "clue.hoof_tracks"}, {"type": "grant_clue", "clue_id": "clue.crypt_entrance"}], "source_refs": [{"page": 3, "section": "金博尔宅"}, {"page": 5, "section": "地穴"}]},
+    {"id": "check.nightly_surveillance", "scene_id": "scene.surveillance", "skills": ["luck"], "difficulty": "regular", "repeat": {"interval": "1 night", "until": "success"}, "on_success": [{"type": "fire_trigger", "trigger_id": "trigger.douglas_book_run"}], "source_refs": [{"page": 3, "section": "监视金博尔宅或公墓"}]},
+    {"id": "check.move_crypt_slab", "scene_id": "scene.crypt", "skills": ["strength"], "difficulty": "regular", "on_success": [{"type": "set_state", "path": "location.crypt_entrance.open", "value": true}, {"type": "fire_trigger", "trigger_id": "trigger.crypt_stench"}], "source_refs": [{"page": 5, "section": "地穴"}]}
+  ],
+  "sanity_events": [
+    {"id": "san.see_douglas", "trigger": "first_direct_sight_of_douglas", "loss": {"success": "0", "failure": "1D6"}, "source_refs": [{"page": 4, "section": "对话"}, {"page": 5, "section": "地穴"}]},
+    {"id": "san.recognize_dead_douglas", "trigger": "douglas_killed_and_identified", "loss": {"success": "1", "failure": "1D8"}, "source_refs": [{"page": 3, "section": "监视金博尔宅或公墓"}]},
+    {"id": "san.see_ghoul_crowd", "trigger": "ghoul_crowd_appears", "loss": {"success": "0", "failure": "1D6"}, "caps": [{"scope": "combined_ghoul_sightings", "maximum": 6}], "source_refs": [{"page": 3, "section": "监视金博尔宅或公墓"}]},
+    {"id": "san.learn_douglas_truth", "trigger": "conversation_completed", "loss": {"success": "1D4", "failure": "1D4"}, "source_refs": [{"page": 5, "section": "对话结尾"}]}
+  ],
+  "timelines": [
+    {
+      "id": "timeline.investigation_cycle",
+      "name": "调查昼夜循环",
+      "clock": {"unit": "day", "phases": ["day", "night"]},
+      "events": [
+        {
+          "id": "event.night_surveillance_window",
+          "schedule": {"time_of_day": "night", "repeat": "daily"},
+          "scene_ids": ["scene.surveillance"],
+          "available_checkpoint_ids": ["check.nightly_surveillance"]
+        }
+      ],
+      "source_refs": [{"page": 3, "section": "监视金博尔宅或公墓"}]
+    }
+  ],
+  "tracks": [],
+  "encounters": [
+    {
+      "id": "encounter.douglas_confrontation",
+      "name": "追书人影对峙",
+      "kind": "social_or_conflict",
+      "scene_ids": ["scene.confrontation", "scene.douglas_conversation"],
+      "participant_entity_ids": ["npc.douglas", "group.ghouls"],
+      "start_conditions": [],
+      "scaling": {"mode": "fixed", "investigator_count": 1},
+      "player_options": ["call_name", "talk", "follow", "attack", "leave"],
+      "resolution": {
+        "preferred": "完成非敌对对话",
+        "combat_policy": "道格拉斯不主动攻击；攻击食尸鬼群不可作为可获胜战斗处理",
+        "ending_ids": ["ending.peaceful_resolution", "ending.follow_underground", "ending.overpowered_by_ghouls", "ending.flee_after_douglas_death"]
+      },
+      "source_refs": [{"page": 3, "section": "监视金博尔宅或公墓"}, {"page": 4, "section": "道格拉斯和他的书籍"}]
+    }
+  ],
+  "puzzles": [],
+  "tables": [],
+  "triggers": [
+    {"id": "trigger.douglas_book_run", "event": "surveillance_check_succeeded", "effects": [{"type": "move_entity", "entity_id": "npc.douglas", "scene_id": "scene.kimball_house"}, {"type": "conditional_state_change", "when": {"path": "object.study_window.locked", "equals": true}, "then": [{"type": "set_state", "path": "object.study_window.broken", "value": true}]}], "source_refs": [{"page": 3, "section": "监视金博尔宅或公墓"}]},
+    {"id": "trigger.call_douglas_name", "event": "player_calls_douglas_name", "effects": [{"type": "transition", "scene_id": "scene.douglas_conversation"}], "source_refs": [{"page": 4, "section": "道格拉斯和他的书籍"}]},
+    {"id": "trigger.douglas_killed", "event": "npc.douglas.alive_becomes_false", "effects": [{"type": "request_san_check", "sanity_event_id": "san.see_douglas"}, {"type": "request_san_check", "sanity_event_id": "san.recognize_dead_douglas"}, {"type": "fire_trigger", "trigger_id": "trigger.ghoul_crowd_appears"}], "source_refs": [{"page": 3, "section": "监视金博尔宅或公墓"}]},
+    {"id": "trigger.ghoul_crowd_appears", "event": "douglas_dead_or_player_waits", "effects": [{"type": "set_state", "path": "group.ghouls.hidden", "value": false}, {"type": "request_san_check", "sanity_event_id": "san.see_ghoul_crowd"}], "source_refs": [{"page": 3, "section": "监视金博尔宅或公墓"}]},
+    {"id": "trigger.crypt_stench", "event": "crypt_entrance_opened", "effects": [{"type": "conditional_hazard", "unless_player_declared": "hold_breath", "effect": "unconscious_until_night"}], "source_refs": [{"page": 5, "section": "地穴"}]},
+    {"id": "trigger.douglas_waits_at_crypt", "event": "player_enters_crypt_or_wakes_at_night", "effects": [{"type": "request_san_check", "sanity_event_id": "san.see_douglas"}, {"type": "transition", "scene_id": "scene.douglas_conversation"}], "source_refs": [{"page": 5, "section": "地穴"}]},
+    {"id": "trigger.talk_with_douglas", "event": "polite_conversation_completed", "effects": [{"type": "grant_clue", "clue_id": "clue.douglas_truth"}, {"type": "grant_clue", "clue_id": "clue.ghouls_leaving"}, {"type": "request_san_check", "sanity_event_id": "san.learn_douglas_truth"}, {"type": "award_skill", "skill_id": "cthulhu_mythos", "amount": 3}, {"type": "recover_san", "expression": "1D6"}, {"type": "set_state", "path": "npc.douglas.conversation_completed", "value": true}], "source_refs": [{"page": 4, "section": "对话"}, {"page": 5, "section": "写在最后"}]}
+  ],
+  "endings": [
+    {"id": "ending.peaceful_resolution", "priority": 100, "conditions": [{"type": "state_eq", "path": "npc.douglas.conversation_completed", "value": true}], "outcome": "resolved", "summary": "调查员理解道格拉斯的选择并得知道格拉斯不会再回来。", "source_refs": [{"page": 4, "section": "对话"}, {"page": 5, "section": "写在最后"}]},
+    {"id": "ending.follow_underground", "priority": 110, "conditions": [{"type": "player_choice", "value": "follow_douglas_underground"}], "outcome": "investigator_disappears", "summary": "调查员跟随道格拉斯进入地下，从外界失踪。", "source_refs": [{"page": 5, "section": "对话结尾"}]},
+    {"id": "ending.overpowered_by_ghouls", "priority": 120, "conditions": [{"type": "player_attacks", "target": "group.ghouls"}], "outcome": "investigator_disappears", "summary": "调查员被食尸鬼群制服并带入地下。", "source_refs": [{"page": 4, "section": "道格拉斯和他的书籍"}]},
+    {"id": "ending.asylum", "priority": 115, "conditions": [{"type": "temporary_insanity_during_ghoul_crowd"}], "outcome": "institutionalized", "summary": "调查员昏迷后在阿诺兹堡疗养院醒来。", "source_refs": [{"page": 4, "section": "道格拉斯和他的书籍"}]},
+    {"id": "ending.flee_after_douglas_death", "priority": 90, "conditions": [{"type": "state_eq", "path": "npc.douglas.alive", "value": false}, {"type": "player_choice", "value": "flee"}], "outcome": "survived_with_loss", "summary": "食尸鬼带走道格拉斯尸体，托马斯此后不再受扰。", "source_refs": [{"page": 4, "section": "道格拉斯和他的书籍"}]},
+    {"id": "ending.arrested", "priority": 80, "conditions": [{"type": "check_fumble", "checkpoint_id": "check.find_speakeasy"}], "outcome": "arrested", "summary": "寻找地下酒吧的尝试导致调查员被捕。", "source_refs": [{"page": 2, "section": "墓地看守"}]}
+    ]
+  },
+  "initial_state": {
+    "current_scene_id": "scene.client_briefing",
+    "discovered_scene_ids": ["scene.client_briefing"],
+    "granted_clue_ids": ["clue.stolen_books", "clue.douglas_missing"],
+    "completed_checkpoint_ids": [],
+    "fired_trigger_ids": [],
+    "active_timeline_ids": ["timeline.investigation_cycle"],
+    "track_states": {},
+    "inventory_resource_ids": [],
+    "active_encounter_id": null,
+    "active_ending_id": null,
+    "clock": {"day": 0, "time_of_day": "day"},
+    "variables": {
+      "books.disposition": "undecided"
+    }
+  },
+  "assets": [
+    {
+      "id": "asset.douglas_illustration",
+      "kind": "illustration",
+      "source_page": 4,
+      "description": "道格拉斯以食尸鬼形态坐在墓碑上阅读。",
+      "runtime_use": "npc_reveal",
+      "linked_entity_ids": ["npc.douglas"],
+      "reveal_after_clue_ids": ["clue.douglas_truth"]
+    },
+    {
+      "id": "asset.local_map",
+      "kind": "map",
+      "source_page": 6,
+      "description": "金博尔宅、道路、墓地及入口石板的示意地图，注明不按比例。",
+      "runtime_use": "location_map",
+      "linked_location_ids": ["location.kimball_house", "location.cemetery", "location.crypt_entrance"],
+      "detected_labels": ["道格拉斯·金博尔宅", "道路私宅", "墓地", "道格拉斯的入口石板"]
+    }
+  ],
+  "normalization_decisions": [
+    {"id": "decision.player_count", "status": "resolved", "decision": "严格按原模组限制为一名调查员。", "policy": "prefer_source_text", "source_refs": [{"page": 1, "section": "标题说明"}]},
+    {"id": "decision.ghoul_combat", "status": "resolved", "decision": "主动攻击食尸鬼群触发 ending.overpowered_by_ghouls，不进入可获胜的普通战斗。", "policy": "preserve_authored_outcome", "source_refs": [{"page": 4, "section": "道格拉斯和他的书籍"}]},
+    {"id": "decision.stench_rule", "status": "resolved", "decision": "打开地穴后，未提前声明屏住呼吸则自动昏迷到夜晚。", "policy": "prefer_explicit_rule", "source_refs": [{"page": 5, "section": "地穴"}]},
+    {"id": "decision.san_reward_timing", "status": "resolved", "decision": "先结算了解真相造成的 1D4 SAN 损失，再在确认威胁结束后回复 1D6 SAN。", "policy": "deterministic_sequence", "source_refs": [{"page": 5, "section": "对话结尾"}, {"page": 5, "section": "写在最后"}]},
+    {"id": "decision.books_resolution", "status": "resolved", "decision": "书籍归属由玩家最终选择写入 books.disposition，不作为和平结局成立的前置条件。", "policy": "preserve_player_choice", "source_refs": [{"page": 3, "section": "监视金博尔宅或公墓"}, {"page": 4, "section": "对话"}]},
+    {"id": "decision.map_graph", "status": "resolved", "decision": "地图仅作为不按比例的图片资源，不生成距离或移动耗时拓扑。", "policy": "avoid_unsupported_inference", "source_refs": [{"page": 6, "section": "地图"}]}
+  ],
+  "validation": {
+    "status": "passed",
+    "validator_version": "module-package-validator/0.2.0",
+    "checks": [
+      "required_sections",
+      "unique_ids",
+      "reference_integrity",
+      "source_refs",
+      "source_segments_and_rights",
+      "character_setup",
+      "location_graph",
+      "timeline_and_track_integrity",
+      "encounter_integrity",
+      "runtime_visibility",
+      "normalization_resolved",
+      "initial_state",
+      "trigger_cycles",
+      "ending_priorities"
+    ],
+    "errors": []
+  }
+}

@@ -194,25 +194,29 @@ def test_action_submit_private_returns_not_implemented(sync_client: TestClient) 
 
 def test_action_lock_semantics() -> None:
     """锁管理器本身的语义（不开 WS）：占用中拒绝、按房间隔离、释放后可得、
-    超时自动过期。
-
-    「有人持锁时另一个玩家的提交收到 ACTION_IN_PROGRESS」的端到端行为在
-    e2e 里验（需要同房间两个客户端，pytest 装置做不了，见文件头）。
+    超时自动过期、旧持有者不能误释放新持有者的锁（stale release 修复）。
     """
     manager = RoomActionLockManager()
 
-    assert manager.try_acquire("room-1") is True
-    assert manager.try_acquire("room-1") is False, "占用中必须拒绝"
-    assert manager.try_acquire("room-2") is True, "锁按房间隔离"
+    token1 = manager.try_acquire("room-1")
+    assert token1 is not None
+    assert manager.try_acquire("room-1") is None, "占用中必须拒绝"
+    assert manager.try_acquire("room-2") is not None, "锁按房间隔离"
 
-    manager.release("room-1")
-    assert manager.try_acquire("room-1") is True, "释放后必须可再次获取"
+    manager.release("room-1", token1)
+    token2 = manager.try_acquire("room-1")
+    assert token2 is not None, "释放后必须可再次获取"
+
+    # stale release：旧 token 不能释放新持有者的锁
+    manager.release("room-1", token1)  # token1 已过期，不匹配 token2
+    assert manager.try_acquire("room-1") is None, "旧 token release 不能误删新锁"
+    manager.release("room-1", token2)  # 正确 token 才能释放
 
     # 超时兜底：把到期时间人为拨到过去，模拟"拿了锁但 release 没被走到"。
-    manager._expiry["room-1"] = 0.0
-    assert manager.try_acquire("room-1") is True, "过期的锁必须能被抢占（防永久锁死）"
+    manager._locks["room-1"] = (0.0, "stale-token")
+    assert manager.try_acquire("room-1") is not None, "过期的锁必须能被抢占（防永久锁死）"
 
-    manager.release("room-does-not-exist")  # 释放不存在的锁是无害空操作
+    manager.release("room-does-not-exist", "any-token")  # 释放不存在的锁是无害空操作
 
 
 # ── 历史消息 REST ────────────────────────────────────

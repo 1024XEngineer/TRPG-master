@@ -95,7 +95,7 @@ class ActionSubmitPayload(CamelModel):
       当场就暴露了。
     """
 
-    utterance: str
+    utterance: str = Field(max_length=2000)
     summarized_from: list[str] | None = None
     visibility: Literal["public", "private"] | None = None
 

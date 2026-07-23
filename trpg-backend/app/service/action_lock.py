@@ -23,6 +23,7 @@ Redis，注释在此立此存照。
 """
 
 import time
+import uuid
 
 
 class RoomActionLockManager:
@@ -31,23 +32,28 @@ class RoomActionLockManager:
     LOCK_TIMEOUT_SECONDS = 60.0
 
     def __init__(self) -> None:
-        # room_id -> 锁的到期时刻（time.monotonic() 基准，不受系统时钟回拨影响）
-        self._expiry: dict[str, float] = {}
+        # room_id -> (到期时刻, token)
+        # token 用于所有权校验：A 超时后 B 拿到新 token，A 的 finally release
+        # 因 token 不匹配而成为空操作，不会误删 B 的锁。
+        self._locks: dict[str, tuple[float, str]] = {}
 
-    def try_acquire(self, room_id: str) -> bool:
-        """尝试拿锁：没人持有、或持有者已过期（超时兜底）→ 拿到，返回 True；
-        否则返回 False，调用方应拒绝这次提交。"""
+    def try_acquire(self, room_id: str) -> str | None:
+        """尝试拿锁：没人持有、或持有者已过期（超时兜底）→ 拿到，返回 token；
+        否则返回 None，调用方应拒绝这次提交。"""
         now = time.monotonic()
-        expiry = self._expiry.get(room_id)
-        if expiry is not None and now < expiry:
-            return False
-        self._expiry[room_id] = now + self.LOCK_TIMEOUT_SECONDS
-        return True
+        entry = self._locks.get(room_id)
+        if entry is not None and now < entry[0]:
+            return None
+        token = str(uuid.uuid4())
+        self._locks[room_id] = (now + self.LOCK_TIMEOUT_SECONDS, token)
+        return token
 
-    def release(self, room_id: str) -> None:
-        """释放锁。释放一个不存在/已过期的锁是无害的空操作——finally 里
-        无条件调用，不需要调用方判断状态。"""
-        self._expiry.pop(room_id, None)
+    def release(self, room_id: str, token: str) -> None:
+        """释放锁。只有持有匹配 token 的调用方才能真正释放——防止超时后旧持有者
+        误删新持有者的锁。token 不匹配或锁不存在均为无害空操作。"""
+        entry = self._locks.get(room_id)
+        if entry is not None and entry[1] == token:
+            del self._locks[room_id]
 
 
 action_lock_manager = RoomActionLockManager()

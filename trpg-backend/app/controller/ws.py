@@ -128,6 +128,15 @@ async def _handle_chat_send(
     player = await room_service.get_player(db, player_id)
     if player is None or player.room_id != room_id:
         return
+    # 游戏结束后禁止写入讨论消息——否则 /end 清理后仍存活的 WS 可以重新落库，
+    # 导致清理失效且无法再次调用 /end 清除。
+    try:
+        room = await room_service.find_room_by_id(db, room_id)
+        if room.phase == "Completed":
+            await _send_error(websocket, "FORBIDDEN", "游戏已结束，无法发送消息")
+            return
+    except room_service.RoomNotFoundError:
+        return
     message = await chat_service.save_chat_message(
         db, room_id, player_id, text, payload.client_message_id
     )
@@ -167,7 +176,8 @@ async def _handle_action_submit(
     - Narrator 失败（超时/网络/API 错）：只告诉发起者（error 不广播），
       其他人看到了原话但等不到回复，发起者重试即可。
     """
-    if not action_lock_manager.try_acquire(room_id):
+    lock_token = action_lock_manager.try_acquire(room_id)
+    if lock_token is None:
         await _send_error(websocket, "ACTION_IN_PROGRESS", "守秘人正在处理其他玩家的行动，请稍候")
         return
 
@@ -199,7 +209,7 @@ async def _handle_action_submit(
             return
         await _broadcast_narration(db, room_id, player_id, narration_text)
     finally:
-        action_lock_manager.release(room_id)
+        action_lock_manager.release(room_id, lock_token)
 
 
 @router.websocket("/ws/{room_id}")

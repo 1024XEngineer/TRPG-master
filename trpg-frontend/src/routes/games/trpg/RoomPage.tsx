@@ -503,13 +503,21 @@ export default function RoomPage() {
     e?.preventDefault()
     const text = input.trim()
     if (!text || !playerId) return
-    setInput('')
     if (channel === 'chat') {
-      // 讨论区：不本地乐观插入，等 chat.message 广播回显（跟主持人频道同一个
-      // 理由——所有人看到的都来自同一条广播，自己不搞特例）。
-      sdk.roomSocket.sendChat(playerId, { text, clientMessageId: crypto.randomUUID() })
+      // 讨论区：发送前生成稳定 ID，发送失败时恢复输入框内容——
+      // SDK 在 WS 非 OPEN 时静默丢弃，用户无感知；保留输入让用户重试，
+      // 同时复用同一个 clientMessageId 保证幂等（issue #107 review 修复）。
+      const clientMessageId = crypto.randomUUID()
+      const pendingText = text
+      setInput('')
+      try {
+        sdk.roomSocket.sendChat(playerId, { text: pendingText, clientMessageId })
+      } catch {
+        setInput(pendingText)
+      }
       return
     }
+    setInput('')
     setTyping(true)
     sdk.roomSocket.submitAction(playerId, { utterance: text })
   }

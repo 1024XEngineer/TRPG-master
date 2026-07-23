@@ -24,7 +24,7 @@ payload dict，再按 type 分支，把 payload dict 交给下面对应的具体
 （ServerToClientEvent）继续手写，见 trpg-sdk/src/types.ts。
 """
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import Field
 
@@ -74,7 +74,8 @@ class GameStartPayload(CamelModel):
 
 
 class ActionSubmitPayload(CamelModel):
-    """action.submit 事件 payload。
+    """action.submit 事件 payload——issue #107 定稿后玩家对 AI 主持人说的
+    **唯一**事件（行动或提问都走它，"是哪种"由 AI 判断，协议层不预分类）。
 
     `utterance` 必填，理由同 PlayerReadyPayload.ready：一条不带行动内容的
     action.submit 是畸形消息。给默认空串会让 SDK 侧变成 `utterance?: string`，
@@ -82,9 +83,21 @@ class ActionSubmitPayload(CamelModel):
 
     注意「必填」只管字段存在，空白内容（`""` / `"   "`）仍由下游的
     `strip()` + 空值判断拦掉，两者不冲突。
+
+    `summarized_from` / `visibility` 是 issue #107 铺的协议位：
+    - `summarized_from`：这次提交是从讨论区哪几条消息总结来的（消息 id 列表）。
+      本期只透传不消费——AI 编排（#48/#68）接手后决定怎么用。
+    - `visibility`：`"private"` 表示「我偷偷摸他口袋」这类不想让其他玩家看到
+      结果的私密行动。本期传 `private` 会收到 NOT_IMPLEMENTED 的 error——
+      真正的私密裁决需要 AI 知道「结果只给发起者且后续叙事不能泄露」，属于
+      编排层的活，硬做会做出一个会漏信息的假私密，比不做更糟（issue #107
+      关键决策）。**不静默当成 public 处理**：把玩家以为保密的行动广播出去，
+      当场就暴露了。
     """
 
     utterance: str
+    summarized_from: list[str] | None = None
+    visibility: Literal["public", "private"] | None = None
 
 
 class CheckRollPayload(CamelModel):

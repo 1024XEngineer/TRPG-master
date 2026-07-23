@@ -169,6 +169,29 @@ def test_lock_released_after_narrator_failure(sync_client: TestClient) -> None:
         assert ws.receive_json()["type"] == "narration.push"
 
 
+def test_action_submit_private_returns_not_implemented(sync_client: TestClient) -> None:
+    """visibility="private" 本期只铺协议位，明确回 NOT_IMPLEMENTED——绝不
+    静默当 public 广播出去（issue #107 验收标准：玩家以为保密的行动被广播
+    当场就暴露）。"""
+    token = register_and_login(sync_client, "priv_host")
+    room = create_room(sync_client, token)
+
+    with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
+        _join_ws(ws, room)
+        ws.send_json(
+            {
+                "type": "action.submit",
+                "playerId": room["playerId"],
+                "payload": {"utterance": "我偷偷摸他口袋", "visibility": "private"},
+            }
+        )
+        envelope = ws.receive_json()
+
+    # 收到的是 error，而不是 action.broadcast——原话没有被广播出去
+    assert envelope["type"] == "error"
+    assert envelope["payload"]["code"] == "NOT_IMPLEMENTED"
+
+
 def test_action_lock_semantics() -> None:
     """锁管理器本身的语义（不开 WS）：占用中拒绝、按房间隔离、释放后可得、
     超时自动过期。

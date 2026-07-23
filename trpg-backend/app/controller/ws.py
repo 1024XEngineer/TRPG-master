@@ -281,6 +281,14 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                         utterance = submit_payload.utterance.strip()
                         if not utterance:
                             continue
+                        # visibility="private"（私密行动，结果只给发起者）本期只铺
+                        # 协议位——真正的私密裁决要 AI 知道"这条不能在后续叙事里
+                        # 泄露"，属于编排层（issue #107）。明确回 NOT_IMPLEMENTED，
+                        # 绝不静默当 public 处理——否则玩家以为保密的行动被广播出去，
+                        # 当场暴露。
+                        if submit_payload.visibility == "private":
+                            await _send_error(websocket, "NOT_IMPLEMENTED", "私密行动本期尚未实现")
+                            continue
                         await _handle_action_submit(
                             db, websocket, room_id, bound_player_id, utterance
                         )

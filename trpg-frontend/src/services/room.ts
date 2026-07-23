@@ -1,8 +1,16 @@
-import type { CreateRoomResult, ModuleSummary, MyRoomSummary, RoomPreview } from 'trpg-sdk';
+import type {
+  CreateRoomResult,
+  ModuleDetail,
+  ModuleSummary,
+  MyRoomSummary,
+  ReplayEvent,
+  RoomPreview,
+  RoomSummary
+} from 'trpg-sdk';
 import { useRoomStore } from '@/stores/room-store';
 import { getAuthToken, sdk } from './api-client';
 
-export type { CreateRoomResult, ModuleSummary, MyRoomSummary, RoomPreview };
+export type { CreateRoomResult, ModuleDetail, ModuleSummary, MyRoomSummary, RoomPreview };
 
 // 房主/已加入玩家专属的操作（选模组/开始游戏/结束游戏/我的房间列表）需要
 // 后端的房间重连凭证（X-Reconnect-Token，issue #39），加入/创建房间时签发、
@@ -34,9 +42,14 @@ export async function createGameRoom(
   );
 }
 
-// 拉取可用模组列表（本次没有做模组导入，只有一款内置模拟模组）
+// 拉取后端 Loader 实际加载成功的模组列表。
 export async function listModules(): Promise<ModuleSummary[]> {
   return sdk.rooms.listModules();
+}
+
+// 玩家安全的模组详情，不包含 Keeper 真相、隐藏线索或完整 Package JSON。
+export async function getModuleDetail(moduleId: string): Promise<ModuleDetail> {
+  return sdk.modules.getDetail(moduleId);
 }
 
 // 房主确定模组
@@ -81,4 +94,12 @@ export async function listMyRooms(): Promise<MyRoomSummary[]> {
 // 房主结束游戏，房间转入「已完成」状态，之后只能查看复盘
 export async function endGame(roomId: string): Promise<void> {
   await sdk.rooms.endGame(roomId, requireReconnectToken());
+}
+
+export async function getRoomSummary(roomId: string): Promise<RoomSummary> {
+  return sdk.rooms.getSummary(roomId, requireReconnectToken());
+}
+
+export async function getRoomReplay(roomId: string): Promise<ReplayEvent[]> {
+  return sdk.rooms.getReplay(roomId, requireReconnectToken());
 }

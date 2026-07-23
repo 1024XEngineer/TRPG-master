@@ -63,7 +63,7 @@ export default function SystemSelectionPage() {
       <div className="px-5 flex flex-col gap-3.5">
         {systems.map((sys) => {
           const colors = SYSTEM_COLORS[sys.id]
-          const isReady = sys.status === 'ready' && canProceed
+          const isReady = canProceed
           const IconComp = sys.id === 'coc' ? Shield : Swords
 
           return (
@@ -88,10 +88,10 @@ export default function SystemSelectionPage() {
                 <p className="text-xs text-text-muted mt-0.5 leading-[1.5]">{sys.nameEn}</p>
                 <p className="text-[11px] text-text-muted mt-1 leading-[1.5] whitespace-pre-line">{sys.description}</p>
                 {sys.status === 'ready' && (
-                  <Badge variant="success">推荐新手 · 已就绪</Badge>
+                  <Badge variant="success">推荐新手 · 有可用模组</Badge>
                 )}
                 {sys.status !== 'ready' && (
-                  <Badge variant="default">开发中</Badge>
+                  <Badge variant="default">暂无可用模组</Badge>
                 )}
               </div>
               {isReady && (

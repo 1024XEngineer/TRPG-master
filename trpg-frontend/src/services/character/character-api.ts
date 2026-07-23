@@ -32,6 +32,18 @@ export async function createCharacterDraft(roomId: string): Promise<string> {
   return res.characterId;
 }
 
+export async function createCharacterFromPregen(
+  roomId: string,
+  pregenId: string
+): Promise<string> {
+  const res = await sdk.characters.createDraft(
+    roomId,
+    requireReconnectToken(),
+    { basedOnPregenId: pregenId }
+  );
+  return res.characterId;
+}
+
 export async function saveCharacter(
   roomId: string,
   characterId: string,

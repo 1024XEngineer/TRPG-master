@@ -1,11 +1,12 @@
 import { useNavigate } from 'react-router-dom'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ArrowLeft, Plus, Minus } from 'lucide-react'
-import { GAME_REGISTRY, SYSTEM_COLORS, getScenarioById } from '@/config/games'
+import type { ModuleDetail } from 'trpg-sdk'
+import { GAME_REGISTRY, SYSTEM_COLORS } from '@/config/games'
 import { useGameStore } from '@/stores/game-store'
 import { useAuthStore } from '@/stores/auth-store'
 import { useRoomStore } from '@/stores/room-store'
-import { createGameRoom, listModules, selectModule } from '@/services/room'
+import { createGameRoom, getModuleDetail, selectModule } from '@/services/room'
 import { friendlyErrorMessage } from '@/services/api-client'
 
 const MIN_PLAYERS = 1
@@ -32,8 +33,38 @@ export default function CreateRoomPage() {
 
   const selectedGame = store.gameId ? GAME_REGISTRY.find(g => g.id === store.gameId) : null
   const sysColors = store.systemId ? SYSTEM_COLORS[store.systemId] : null
-  const selectedScenario = store.sceneId ? getScenarioById(store.sceneId) : null
-  const hasSelection = !!(store.gameId && store.systemId && store.sceneId)
+  const [selectedModule, setSelectedModule] = useState<ModuleDetail | null>(null)
+  const hasSelection = !!(store.gameId && store.systemId && store.moduleId)
+
+  useEffect(() => {
+    if (!store.moduleId) {
+      setSelectedModule(null)
+      return
+    }
+    let cancelled = false
+    getModuleDetail(store.moduleId)
+      .then((module) => {
+        if (cancelled) return
+        setSelectedModule(module)
+        setMaxPlayers((current) => {
+          const limited = Math.min(
+            module.playersMax,
+            Math.max(module.playersMin, current)
+          )
+          setMaxPlayersInput(String(limited))
+          return limited
+        })
+      })
+      .catch(() => {
+        if (!cancelled) setSelectedModule(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [store.moduleId])
+
+  const minPlayers = selectedModule?.playersMin ?? MIN_PLAYERS
+  const maxAllowedPlayers = selectedModule?.playersMax ?? MAX_PLAYERS
 
   const handleCreate = async () => {
     if (!roomName.trim() || !hasSelection) return
@@ -44,11 +75,9 @@ export default function CreateRoomPage() {
       // 必须先把房间身份（含 reconnectToken）写进 store，selectModule 等
       // 需要重连凭证的接口才能读到它——见 issue #66，真机联调时发现的顺序 bug。
       setRoomIdentity(room)
-      const modules = await listModules()
-      if (modules.length === 0) throw new Error('暂无可用模组')
-      // 目前只有一款内置模拟模组，不管前端选的是哪张模组卡都用它
-      await selectModule(room.roomId, modules[0].id)
-      setStoreModuleId(modules[0].id)
+      if (!store.moduleId) throw new Error('请选择可用模组')
+      await selectModule(room.roomId, store.moduleId)
+      setStoreModuleId(store.moduleId)
       setHost(true)
       navigate('/room/lobby')
     } catch (err) {
@@ -98,11 +127,11 @@ export default function CreateRoomPage() {
               <div className="flex items-center gap-3">
                 <button
                   onClick={() => {
-                    const next = Math.max(MIN_PLAYERS, maxPlayers - 1)
+                    const next = Math.max(minPlayers, maxPlayers - 1)
                     setMaxPlayers(next)
                     setMaxPlayersInput(String(next))
                   }}
-                  disabled={maxPlayers <= MIN_PLAYERS}
+                  disabled={maxPlayers <= minPlayers}
                   className="w-10 h-10 rounded-[6px] bg-input border border-border-light text-text-muted flex items-center justify-center active:bg-panel disabled:opacity-40 disabled:cursor-not-allowed transition-all">
                   <Minus className="w-[16px] h-[16px]" />
                 </button>
@@ -110,15 +139,15 @@ export default function CreateRoomPage() {
                   <input
                     type="number"
                     inputMode="numeric"
-                    min={MIN_PLAYERS}
-                    max={MAX_PLAYERS}
+                    min={minPlayers}
+                    max={maxAllowedPlayers}
                     value={maxPlayersInput}
                     onChange={e => setMaxPlayersInput(e.target.value)}
                     onBlur={() => {
                       const v = parseInt(maxPlayersInput, 10)
                       const clamped = Number.isNaN(v)
                         ? maxPlayers
-                        : Math.min(MAX_PLAYERS, Math.max(MIN_PLAYERS, v))
+                        : Math.min(maxAllowedPlayers, Math.max(minPlayers, v))
                       setMaxPlayers(clamped)
                       setMaxPlayersInput(String(clamped))
                     }}
@@ -128,16 +157,18 @@ export default function CreateRoomPage() {
                 </div>
                 <button
                   onClick={() => {
-                    const next = Math.min(MAX_PLAYERS, maxPlayers + 1)
+                    const next = Math.min(maxAllowedPlayers, maxPlayers + 1)
                     setMaxPlayers(next)
                     setMaxPlayersInput(String(next))
                   }}
-                  disabled={maxPlayers >= MAX_PLAYERS}
+                  disabled={maxPlayers >= maxAllowedPlayers}
                   className="w-10 h-10 rounded-[6px] bg-input border border-border-light text-text-muted flex items-center justify-center active:bg-panel disabled:opacity-40 disabled:cursor-not-allowed transition-all">
                   <Plus className="w-[16px] h-[16px]" />
                 </button>
               </div>
-              <p className="text-[10px] text-text-dim mt-1.5">最多 {MAX_PLAYERS} 人</p>
+              <p className="text-[10px] text-text-dim mt-1.5">
+                支持 {minPlayers === maxAllowedPlayers ? `${minPlayers}` : `${minPlayers}-${maxAllowedPlayers}`} 人
+              </p>
             </div>
           </div>
         </div>
@@ -150,11 +181,11 @@ export default function CreateRoomPage() {
             <div>
               <div className="flex items-center gap-3 px-3.5 py-3 rounded-[6px] bg-[#fdfaf4] border border-brass mb-2">
                 <div className="w-10 h-10 rounded-[10px] bg-[#eef3f8] flex items-center justify-center text-lg">
-                  {selectedScenario?.nameEn?.charAt(0) || '🎮'}
+                  {selectedModule?.originalTitle?.charAt(0) || '🎮'}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-semibold text-text-primary">{selectedGame?.name} · {sysColors?.name}</div>
-                  <div className="text-xs text-text-muted mt-0.5">模组：{selectedScenario?.name}</div>
+                  <div className="text-xs text-text-muted mt-0.5">模组：{selectedModule?.title || '正在读取…'}</div>
                 </div>
                 <button onClick={handleChangeGame}
                   className="text-[11px] text-text-dim underline whitespace-nowrap">更换</button>
@@ -191,7 +222,7 @@ export default function CreateRoomPage() {
             </div>
             <div className="flex items-center justify-between">
               <span className="text-text-muted">模组</span>
-              <span className="text-text-primary">{selectedScenario?.name || '未选择'}</span>
+              <span className="text-text-primary">{selectedModule?.title || '未选择'}</span>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-text-muted">人数上限</span>

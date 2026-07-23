@@ -1,31 +1,81 @@
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useState } from 'react'
-import { ArrowLeft, BookOpen } from 'lucide-react'
+import { ArrowLeft, BookOpen, UserRound } from 'lucide-react'
+import type { ModuleDetail } from 'trpg-sdk'
+import { disconnectWebSocket, friendlyErrorMessage } from '@/services/api-client'
+import { createCharacterFromPregen } from '@/services/character/character-api'
+import { getModuleDetail, getRoomInfo } from '@/services/room'
 import { useGameStore } from '@/stores/game-store'
-import { getScenarioById } from '@/config/games'
-import { useMemo } from 'react'
-import { disconnectWebSocket } from '@/services/api-client'
-
-// 访客走 /join 加入房间，从来不会经过"选择游戏/世界/模组"那几步，本地
-// game-store 里的 sceneId 天然是空的。后端目前也确实只有这一款真实落库的
-// 模组（惠特利旧宅，见 server/rest/lobby.py 的注释），不管房主当初在 UI 上
-// 选的是哪张模组卡，实际跑的都是它——所以访客没有 sceneId 时，直接兜底成
-// 这一款，跟后端的真实行为保持一致，而不是让访客看到"未选择模组"的空页面。
-const FALLBACK_SCENE_ID = 'whateley'
+import { useRoomStore } from '@/stores/room-store'
 
 export default function StoryPage() {
   const navigate = useNavigate()
-  const sceneId = useGameStore((s) => s.sceneId)
-  const scenario = useMemo(() => getScenarioById(sceneId || FALLBACK_SCENE_ID), [sceneId])
-  // ★ 这里已经在"游戏进行中"的流程里了（大厅已经全员就绪、房主已经点了开始），
-  // 左上角不能再是无提示的 navigate(-1)——那样会悄悄把人退回一个其实已经走完
-  // 的大厅步骤，其他人可能都已经往下走了，状态会对不上。改成和 RoomPage 一致
-  // 的"退出确认"：退出只是这个人自己先走，房间保留，之后能从「我的游戏」继续。
+  const selectedModuleId = useGameStore((s) => s.moduleId)
+  const setSelectedModule = useGameStore((s) => s.setModule)
+  const roomId = useRoomStore((s) => s.roomId)
+  const roomCode = useRoomStore((s) => s.roomCode)
+  const roomModuleId = useRoomStore((s) => s.moduleId)
+  const setRoomModuleId = useRoomStore((s) => s.setModuleId)
+  const characterId = useRoomStore((s) => s.characterId)
+  const setCharacterId = useRoomStore((s) => s.setCharacterId)
+  const [module, setModule] = useState<ModuleDetail | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [choosingPregen, setChoosingPregen] = useState<string | null>(null)
   const [confirmExit, setConfirmExit] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    const resolveModuleId = async () => {
+      if (roomModuleId || selectedModuleId) return roomModuleId || selectedModuleId
+      if (!roomCode) return null
+      const room = await getRoomInfo(roomCode)
+      return room.moduleId ?? null
+    }
+
+    resolveModuleId()
+      .then(async (moduleId) => {
+        if (!moduleId) throw new Error('房间尚未选择模组')
+        const detail = await getModuleDetail(moduleId)
+        if (cancelled) return
+        setModule(detail)
+        setRoomModuleId(moduleId)
+        setSelectedModule(moduleId)
+      })
+      .catch((err) => {
+        if (!cancelled) setError(friendlyErrorMessage(err, '模组详情加载失败'))
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [
+    roomCode,
+    roomModuleId,
+    selectedModuleId,
+    setRoomModuleId,
+    setSelectedModule,
+  ])
 
   const handleExit = () => {
     disconnectWebSocket()
     navigate('/home')
+  }
+
+  const choosePregen = async (pregenId: string) => {
+    if (!roomId || choosingPregen) return
+    setChoosingPregen(pregenId)
+    setError('')
+    try {
+      const id = await createCharacterFromPregen(roomId, pregenId)
+      setCharacterId(id)
+      navigate('/room/ready')
+    } catch (err) {
+      setError(friendlyErrorMessage(err, '预制人物选择失败'))
+      setChoosingPregen(null)
+    }
   }
 
   const exitConfirm = confirmExit && (
@@ -33,12 +83,10 @@ export default function StoryPage() {
       <div className="bg-[#1a1620] border border-[rgba(255,255,255,0.12)] rounded-md p-5 w-full max-w-[300px]" onClick={(e) => e.stopPropagation()}>
         <p className="text-sm text-[#d4cfc8] text-center mb-4">确定要退出游戏吗？房间会保留，之后可以从「我的游戏」继续。</p>
         <div className="flex gap-2">
-          <button onClick={() => setConfirmExit(false)}
-            className="flex-1 py-2 rounded-sm bg-[rgba(255,255,255,0.08)] border border-[rgba(255,255,255,0.12)] text-[#a09888] text-xs font-medium">
+          <button onClick={() => setConfirmExit(false)} className="flex-1 py-2 rounded-sm bg-[rgba(255,255,255,0.08)] border border-[rgba(255,255,255,0.12)] text-[#a09888] text-xs font-medium">
             取消
           </button>
-          <button onClick={handleExit}
-            className="flex-1 py-2 rounded-sm bg-[#c04040] text-white text-xs font-medium active:bg-[#a03030]">
+          <button onClick={handleExit} className="flex-1 py-2 rounded-sm bg-[#c04040] text-white text-xs font-medium">
             确认退出
           </button>
         </div>
@@ -46,65 +94,81 @@ export default function StoryPage() {
     </div>
   )
 
-  if (!scenario) {
+  if (loading || !module) {
     return (
-      <div className="min-h-screen bg-gradient-to-b from-[#1a1620] to-[#0d0b10] flex flex-col justify-center px-7 py-10 relative">
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_50%_30%,rgba(112,80,160,0.08),transparent_70%)] pointer-events-none" />
+      <div className="min-h-screen bg-gradient-to-b from-[#1a1620] to-[#0d0b10] flex flex-col items-center justify-center px-7 text-center">
         {exitConfirm}
-        <button
-          onClick={() => setConfirmExit(true)}
-          className="absolute top-4 left-4 w-[34px] h-[34px] rounded-full bg-[rgba(255,255,255,0.08)] border border-[rgba(255,255,255,0.12)] flex items-center justify-center text-[#a09888] z-10"
-        >
+        <button onClick={() => setConfirmExit(true)} className="absolute top-4 left-4 w-[34px] h-[34px] rounded-full bg-[rgba(255,255,255,0.08)] border border-[rgba(255,255,255,0.12)] flex items-center justify-center text-[#a09888]">
           <ArrowLeft className="w-[18px] h-[18px]" />
         </button>
-        <div className="text-center text-[#9088a0]">
-          <BookOpen className="w-12 h-12 mx-auto mb-4 opacity-50" />
-          <p className="text-sm">未选择模组</p>
-          <button
-            onClick={() => navigate('/home/create/games')}
-            className="mt-6 px-5 py-2.5 rounded-sm bg-brass text-white text-xs font-semibold"
-          >
-            返回选择游戏
-          </button>
-        </div>
+        <BookOpen className="w-12 h-12 mb-4 text-[#706090]" />
+        <p className="text-sm text-[#9088a0]">{loading ? '正在读取模组…' : error}</p>
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-[#1a1620] to-[#0d0b10] flex flex-col justify-center px-7 py-10 relative">
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_50%_30%,rgba(112,80,160,0.08),transparent_70%)] pointer-events-none" />
+    <div className="min-h-screen bg-gradient-to-b from-[#1a1620] to-[#0d0b10] px-7 py-16 relative">
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_50%_20%,rgba(112,80,160,0.1),transparent_60%)] pointer-events-none" />
       {exitConfirm}
-      <button
-        onClick={() => setConfirmExit(true)}
-        className="absolute top-4 left-4 w-[34px] h-[34px] rounded-full bg-[rgba(255,255,255,0.08)] border border-[rgba(255,255,255,0.12)] flex items-center justify-center text-[#a09888] z-10"
-      >
+      <button onClick={() => setConfirmExit(true)} className="absolute top-4 left-4 w-[34px] h-[34px] rounded-full bg-[rgba(255,255,255,0.08)] border border-[rgba(255,255,255,0.12)] flex items-center justify-center text-[#a09888] z-10">
         <ArrowLeft className="w-[18px] h-[18px]" />
       </button>
 
-      <div className="font-mono text-[11px] tracking-[0.15em] text-[#706090] mb-5">
-        {scenario.storyLabel}
+      <div className="relative">
+        <div className="font-mono text-[11px] tracking-[0.15em] text-[#706090] mb-4">
+          {module.developmentOnly ? '开发样例 · 不可公开发布' : `VERSION ${module.version}`}
+        </div>
+        <h1 className="text-[28px] font-bold text-[#eeead8] leading-[1.25] mb-2">{module.title}</h1>
+        {module.originalTitle && (
+          <p className="font-mono text-xs text-[#9088a0] mb-6 tracking-[0.05em]">{module.originalTitle}</p>
+        )}
+        <div className="w-10 h-px bg-[#504860] mb-6" />
+        <p className="text-sm leading-[1.9] text-[#c8c0b8] mb-5">{module.premise}</p>
+        <div className="bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.08)] rounded-md p-4 mb-8">
+          <div className="text-xs font-semibold text-[#b0a0d0] mb-2">{module.entryScene.name}</div>
+          <p className="text-sm leading-[1.8] text-[#c8c0b8]">{module.entryScene.playerDescription}</p>
+        </div>
+
+        {characterId ? (
+          <button onClick={() => navigate('/room/ready')} className="w-full py-3.5 rounded-sm bg-brass text-white text-sm font-semibold">
+            查看已选人物 →
+          </button>
+        ) : (
+          <>
+            <h2 className="text-base font-bold text-[#eeead8] mb-2">选择预制调查员</h2>
+            <p className="text-xs text-[#9088a0] mb-4">选择后会复制一份人物快照并直接完成建卡。</p>
+            <div className="space-y-3">
+              {(module.pregens ?? []).map((pregen) => (
+                <button
+                  key={pregen.id}
+                  onClick={() => choosePregen(pregen.id)}
+                  disabled={choosingPregen !== null}
+                  className="w-full text-left bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.1)] rounded-md p-4 active:scale-[0.98] transition-all disabled:opacity-60"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-[rgba(112,80,160,0.2)] flex items-center justify-center">
+                      <UserRound className="w-5 h-5 text-[#b0a0d0]" />
+                    </div>
+                    <div className="flex-1">
+                      <div className="text-sm font-semibold text-[#eeead8]">{pregen.name}</div>
+                      {pregen.occupation && <div className="text-[11px] text-[#9088a0] mt-0.5">{pregen.occupation}</div>}
+                    </div>
+                    <span className="text-xs text-[#b0a0d0]">
+                      {choosingPregen === pregen.id ? '选择中…' : '选择'}
+                    </span>
+                  </div>
+                  {pregen.summary && <p className="text-xs leading-[1.7] text-[#a8a0a8] mt-3">{pregen.summary}</p>}
+                </button>
+              ))}
+            </div>
+            <button onClick={() => navigate('/room/character')} className="w-full mt-4 py-3 text-xs text-[#9088a0] border border-[rgba(255,255,255,0.1)] rounded-sm">
+              使用自定义建卡（完善中）
+            </button>
+          </>
+        )}
+        {error && <p className="text-xs text-[#d06060] text-center mt-4">{error}</p>}
       </div>
-      <h1 className="text-[28px] font-bold text-[#eeead8] leading-[1.25] mb-2">
-        {scenario.name}
-      </h1>
-      <p className="font-mono text-xs text-[#9088a0] mb-8 tracking-[0.05em]">
-        {scenario.nameEn}
-      </p>
-      <div className="w-10 h-px bg-[#504860] mb-7" />
-      <div className="text-sm leading-[1.9] text-[#c8c0b8]">
-        {scenario.storyPages.map((page, idx) => (
-          <p key={idx} className={idx < scenario.storyPages.length - 1 ? 'mb-4' : ''}
-            dangerouslySetInnerHTML={{ __html: page }}
-          />
-        ))}
-      </div>
-      <button
-        onClick={() => navigate('/room/character')}
-        className="mt-10 self-start px-6 py-3.5 rounded-sm bg-brass text-white text-sm font-semibold active:bg-brass-dark transition-all"
-      >
-        继续 →
-      </button>
     </div>
   )
 }

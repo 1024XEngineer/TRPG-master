@@ -23,6 +23,7 @@ from app.core.config import get_settings
 from app.core.db import async_session_factory
 from app.core.errors import AppException, ErrorCode
 from app.core.logging import configure_logging
+from app.core.narrator import build_narrator
 from app.core.seed import ensure_seed_content
 from app.dto.common import ApiResponse
 
@@ -83,6 +84,14 @@ def create_app() -> FastAPI:
         openapi_url="/openapi.json" if settings.enable_docs else None,
         lifespan=lifespan,
     )
+
+    # AI 主持人叙事生成器（issue #107）：按配置在真实 DeepSeek / 占位文案之间
+    # 二选一，挂在 app.state 上——ws.py 通过 websocket.app.state.narrator 取用，
+    # 测试直接覆盖这个属性注入 fake（不用 monkeypatch 模块内部）。放在这里而
+    # 不是 lifespan：构造 narrator 没有任何 IO，而测试用的 TestClient/
+    # ASGITransport 不一定会触发 lifespan——挂在 create_app 里保证"有 app
+    # 实例就一定有 narrator"。
+    app.state.narrator = build_narrator(settings)
 
     # 允许配置里列出的前端源发起跨域请求（本地开发场景下 Vite 默认跑在
     # 9877 端口，跟后端的 8000 端口不同源，没有这个中间件浏览器会拦截请求）。

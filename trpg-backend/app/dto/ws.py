@@ -28,7 +28,7 @@ from typing import Any
 
 from pydantic import Field
 
-from app.dto.common import CamelModel
+from app.dto.common import CamelModel, UtcDatetime
 from app.dto.room import RoomPlayerRead
 
 # ── 客户端 → 服务端 ──────────────────────────────
@@ -117,6 +117,22 @@ class RoomRejoinPayload(CamelModel):
     reconnect_token: str = Field(..., min_length=1)
 
 
+class ChatSendPayload(CamelModel):
+    """chat.send 事件 payload（issue #107）——玩家往**讨论区**发一条消息。
+
+    讨论区跟「对 AI 主持人说话」（action.submit）是两条完全独立的通道：
+    讨论区消息只在玩家之间广播，**永远不进任何 LLM 上下文**（成本 + 玩家
+    需要"AI 听不见"的商量空间，这是 #107 的立项理由）。
+
+    `client_message_id` 是客户端生成的去重键：断线重连后客户端可能重发同一条
+    消息，服务端靠 `(player_id, client_message_id)` 唯一约束保证只落一行、
+    重发拿到与第一次一致的广播。
+    """
+
+    text: str = Field(..., min_length=1, max_length=2000)
+    client_message_id: str = Field(..., min_length=1, max_length=64)
+
+
 # ── 服务端 → 客户端 ──────────────────────────────
 
 
@@ -131,6 +147,38 @@ class NarrationPushPayload(CamelModel):
     """narration.push 推送 payload。"""
 
     text: str
+
+
+class ChatMessagePayload(CamelModel):
+    """chat.message 推送 payload（issue #107）——讨论区消息的房间广播。
+
+    带 `client_message_id` 回传是为了让发送方把广播和自己本地乐观插入的
+    那条对上号（去重/替换本地占位），其他人直接按新消息渲染。
+    `sent_at` 用 UtcDatetime：所有对外时间字段必须带时区后缀，否则客户端
+    会把 UTC 当本地时间解析（UTC+8 上「4 分钟前」显示成「8 小时前」的真 bug）。
+    """
+
+    message_id: str
+    player_id: str
+    nickname: str
+    text: str
+    sent_at: UtcDatetime
+    client_message_id: str
+
+
+class ActionBroadcastPayload(CamelModel):
+    """action.broadcast 推送 payload（issue #107）——玩家对 AI 主持人说的
+    **原话**的房间广播。
+
+    修的是三人联机实测出的"聊天记录像被隔离"bug：此前玩家原话只在发送方
+    本地插入气泡，其他人只能从守秘人回复的转述里看到内容。现在 action.submit
+    先广播这条（谁、说了什么），再广播 AI 的叙事回复（narration.push），
+    所有人看到的时间线一致——就像牌桌上说话大家都听得见。
+    """
+
+    player_id: str
+    nickname: str
+    utterance: str
 
 
 class RoomStatePayload(CamelModel):

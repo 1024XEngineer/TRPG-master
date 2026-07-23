@@ -10,6 +10,21 @@
  */
 
 /**
+ * action.broadcast 推送 payload（issue #107）——玩家对 AI 主持人说的
+ * **原话**的房间广播。
+ *
+ * 修的是三人联机实测出的"聊天记录像被隔离"bug：此前玩家原话只在发送方
+ * 本地插入气泡，其他人只能从守秘人回复的转述里看到内容。现在 action.submit
+ * 先广播这条（谁、说了什么），再广播 AI 的叙事回复（narration.push），
+ * 所有人看到的时间线一致——就像牌桌上说话大家都听得见。
+ */
+export interface ActionBroadcastPayload {
+  playerId: string;
+  nickname: string;
+  utterance: string;
+}
+
+/**
  * action.submit 事件 payload。
  *
  * `utterance` 必填，理由同 PlayerReadyPayload.ready：一条不带行动内容的
@@ -200,6 +215,52 @@ export interface CharacterUpdateBody {
 }
 
 /**
+ * chat.message 推送 payload（issue #107）——讨论区消息的房间广播。
+ *
+ * 带 `client_message_id` 回传是为了让发送方把广播和自己本地乐观插入的
+ * 那条对上号（去重/替换本地占位），其他人直接按新消息渲染。
+ * `sent_at` 用 UtcDatetime：所有对外时间字段必须带时区后缀，否则客户端
+ * 会把 UTC 当本地时间解析（UTC+8 上「4 分钟前」显示成「8 小时前」的真 bug）。
+ */
+export interface ChatMessagePayload {
+  messageId: string;
+  playerId: string;
+  nickname: string;
+  text: string;
+  sentAt: string;
+  clientMessageId: string;
+}
+
+/**
+ * 讨论区一条消息。`sent_at` 用 UtcDatetime（对外时间字段的统一约定，
+ * 见 app/dto/common.py）。
+ */
+export interface ChatMessageRead {
+  messageId: string;
+  playerId: string;
+  nickname: string;
+  text: string;
+  sentAt: string;
+  clientMessageId: string;
+}
+
+/**
+ * chat.send 事件 payload（issue #107）——玩家往**讨论区**发一条消息。
+ *
+ * 讨论区跟「对 AI 主持人说话」（action.submit）是两条完全独立的通道：
+ * 讨论区消息只在玩家之间广播，**永远不进任何 LLM 上下文**（成本 + 玩家
+ * 需要"AI 听不见"的商量空间，这是 #107 的立项理由）。
+ *
+ * `client_message_id` 是客户端生成的去重键：断线重连后客户端可能重发同一条
+ * 消息，服务端靠 `(player_id, client_message_id)` 唯一约束保证只落一行、
+ * 重发拿到与第一次一致的广播。
+ */
+export interface ChatSendPayload {
+  text: string;
+  clientMessageId: string;
+}
+
+/**
  * check.request 推送 payload（issue #77 新增，本期不会真的发出）。
  */
 export interface CheckRequestPayload {
@@ -270,6 +331,7 @@ export type ErrorCode =
   | "ROOM_FULL"
   | "MODULE_VALIDATION_FAILED"
   | "NOT_YOUR_TURN"
+  | "ACTION_IN_PROGRESS"
   | "CHARACTER_INCOMPLETE"
   | "MODULE_NOT_SELECTED"
   | "RECONNECT_TOKEN_EXPIRED"

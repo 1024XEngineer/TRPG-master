@@ -8,7 +8,7 @@
 
 from typing import NoReturn
 
-from fastapi import APIRouter, Body, Depends, Header, status
+from fastapi import APIRouter, Body, Depends, Header, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.controller.dependencies import get_current_user
@@ -21,6 +21,7 @@ from app.dto.character import (
     CharacterUpdateBody,
     RollAttributesResult,
 )
+from app.dto.chat import ChatMessageRead
 from app.dto.common import ApiResponse
 from app.dto.replay import ReplayEventRead, RoomSummaryRead
 from app.dto.room import (
@@ -32,6 +33,7 @@ from app.dto.room import (
 )
 from app.models.user import User
 from app.service import character as character_service
+from app.service import chat as chat_service
 from app.service import room as room_service
 
 router = APIRouter(prefix="/rooms", tags=["rooms"])
@@ -199,6 +201,34 @@ async def get_room_replay(
     ) as exc:
         _raise_service_error(exc)
     return ApiResponse.ok(events)
+
+
+@router.get("/{room_id}/messages", response_model=ApiResponse[list[ChatMessageRead]])
+async def list_room_messages(
+    room_id: str,
+    before: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=100),
+    reconnect_token: str | None = Header(default=None, alias="X-Reconnect-Token"),
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[list[ChatMessageRead]]:
+    """GET /api/v1/rooms/{roomId}/messages —— 讨论区历史消息，倒序分页
+    （issue #107）。
+
+    刷新页面/断线重连后靠它拉回聊天历史（实时消息走 WS 的 chat.message
+    广播）。鉴权同 replay：讨论区内容只有本房间成员能看——roomId 会被公开
+    房间预览暴露，不能凭 roomId 白拿。`before` 传上一页最后一条的
+    messageId 继续往前翻。
+    """
+    try:
+        # 只为鉴权，成员身份本身不参与查询
+        await room_service.require_room_member(db, room_id, reconnect_token)
+    except (
+        room_service.RoomAuthenticationError,
+        room_service.RoomAuthorizationError,
+    ) as exc:
+        _raise_service_error(exc)
+    messages = await chat_service.list_chat_messages(db, room_id, before, limit)
+    return ApiResponse.ok(messages)
 
 
 # ── 角色（issue #59，本期切到 service/character.py） ──────────────────────────

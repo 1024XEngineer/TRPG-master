@@ -299,6 +299,9 @@ def test_action_submit_broadcasts_narration_to_room_only(sync_client: TestClient
                 "payload": {"utterance": "检查门锁"},
             }
         )
+        # issue #107 起 action.submit 先广播玩家原话（action.broadcast），
+        # 再广播守秘人回复（narration.push），两条按序到达。
+        action_echo = ws_a.receive_json()
         narration = ws_a.receive_json()
 
         # room_b 没有收到任何广播——发一条 room.join 触发一次同步交互，确认
@@ -312,6 +315,8 @@ def test_action_submit_broadcasts_narration_to_room_only(sync_client: TestClient
         )
         envelope_b = ws_b.receive_json()
 
+    assert action_echo["type"] == "action.broadcast"
+    assert action_echo["payload"]["utterance"] == "检查门锁"
     assert narration["type"] == "narration.push"
     assert "检查门锁" in narration["payload"]["text"]
     assert envelope_b["type"] == "session.bound"

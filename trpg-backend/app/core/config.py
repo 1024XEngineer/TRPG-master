@@ -44,6 +44,13 @@ class Settings(BaseSettings):
     # 环境不配这个变量，本地演示/线上环境按需配置。
     deepseek_api_key: str | None = None
 
+    # ⚠️ 测试专用（issue #107）：让叙事生成人为延迟 N 秒后再返回，生产永远保持 0。
+    # 存在的理由：无 key 时的占位叙事同步秒回，action.submit 的房间锁窗口只有
+    # 微秒级，e2e 两个客户端"同时提交"永远压不中 ACTION_IN_PROGRESS——锁的
+    # 并发拒绝路径会变成测不到的死代码。e2e 起后端时把它设成 1~2 秒，锁窗口
+    # 就能被稳定命中。
+    narrator_delay_seconds: float = 0.0
+
 
 @lru_cache
 def get_settings() -> Settings:

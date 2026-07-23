@@ -23,7 +23,7 @@ from pathlib import Path
 from pydantic import BaseModel
 from pydantic.json_schema import GenerateJsonSchema, models_json_schema
 
-from app.dto import auth, character, common, game, module, replay, room, ws
+from app.dto import auth, character, chat, common, game, module, replay, room, ws
 
 # 需要导出的模型清单：REST 请求/响应体 + WS 事件 payload。
 #
@@ -100,6 +100,12 @@ _MODELS: list[type[BaseModel]] = [
     ws.SanCheckResultPayload,
     ws.ClueGrantedPayload,
     ws.ErrorPayload,
+    # WebSocket 讨论区 + 行动广播（issue #107）：C→S 1 个 + S→C 2 个
+    ws.ChatSendPayload,
+    ws.ChatMessagePayload,
+    ws.ActionBroadcastPayload,
+    # 讨论区历史消息 REST（issue #107）
+    chat.ChatMessageRead,
 ]
 
 _DEFAULT_OUT_PATH = Path(__file__).resolve().parent.parent / ".schema-export" / "models.schema.json"

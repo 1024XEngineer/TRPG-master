@@ -22,6 +22,7 @@ from app.core.coc7_rules import (
     validate_character,
 )
 from app.core.errors import not_implemented
+from app.core.seed import BUILTIN_SYSTEM_ID
 from app.dto.character import (
     CharacterComputeResult,
     CharacterDraftResult,
@@ -34,6 +35,7 @@ from app.dto.character import (
 )
 from app.dto.game import RulesetRead
 from app.models.room import Character, Player, Room
+from app.models.user import UserCharacterTemplate
 from app.service.room import (
     RoomAuthorizationError,
     RoomConflictError,
@@ -63,6 +65,40 @@ def _require_character_editable(room: Room) -> None:
     """正式开局后 Character 已复制为 ActorState，源角色卡必须保持冻结。"""
     if room.phase not in {"Lobby", "Building"}:
         raise RoomConflictError("游戏已经正式开局，房间角色卡已锁定")
+
+
+async def _mark_character_modified(db: AsyncSession, character: Character) -> None:
+    """把一次房间建卡写入标记为尚未完成，并与旧用户卡解除关联。
+
+    已完成的用户卡不原地覆盖：玩家再次修改同一房间 Character 后，下一次
+    complete 会生成一条新的用户卡记录。当前从零建卡的主流程仍然只操作房间
+    Character，不要求前端感知用户卡库。
+    """
+    character.based_on_template_id = None
+    if character.status != "complete":
+        return
+    character.status = "draft"
+    player = await db.get(Player, character.player_id)
+    if player is not None:
+        player.has_character = False
+
+
+def _character_template_data(character: Character) -> dict[str, object]:
+    """提取可跨房间复用的建卡态字段，不保存任何局内 Actor 状态。"""
+    return {
+        "generation_method": character.generation_method,
+        "name": character.name,
+        "age": character.age,
+        "gender": character.gender,
+        "residence": character.residence or "",
+        "birthplace": character.birthplace or "",
+        "attributes": dict(character.attributes or {}),
+        "skills": dict(character.skills or {}),
+        "equipment": list(character.equipment or []),
+        "occupation": character.occupation,
+        "background": character.background or "",
+        "notes": character.notes or "",
+    }
 
 
 async def create_character_draft(
@@ -113,6 +149,7 @@ async def update_character(
     character = await _get_own_character(db, room_id, character_id, reconnect_token)
     room = await find_room_by_id(db, room_id)
     _require_character_editable(room)
+    await _mark_character_modified(db, character)
 
     # PR #97 review [1]：`roll` 这个来源标记不能跨越「客户端自己重填了属性」。
     # `roll_attributes` 会把它置成 roll，complete 时据此跳过 480 点预算校验
@@ -162,7 +199,7 @@ async def _resolve_ruleset(db: AsyncSession, room: Room) -> RulesetRead:
 async def complete_character(
     db: AsyncSession, room_id: str, character_id: str, reconnect_token: str | None
 ) -> None:
-    """标记建卡完成，同步把对应玩家的 has_character 置为 True。
+    """标记建卡完成，并在同一事务中保存一份当前用户的可复用角色卡。
 
     issue #84 S2：落库前先用 `coc7_rules.validate_character` 权威校验已保存的
     属性/职业/技能是否合法，不合法直接抛 `CharacterInvalidError` 拒绝——
@@ -187,13 +224,27 @@ async def complete_character(
     # PR #85 review #3：校验通过后属性一定合法，衍生值改成服务端权威重算
     # 并覆盖——不再信任客户端 PATCH 上来的 `derived_stats`，避免属性合法但
     # HP/SAN 被客户端乱填过关。
-    character.derived_stats = compute_derived_stats(character.attributes or {})
-    character.status = "complete"
-    character.version += 1
-    player = await db.get(Player, character.player_id)
-    if player is not None:
-        player.has_character = True
-    await db.commit()
+    try:
+        character.derived_stats = compute_derived_stats(character.attributes or {})
+        character.status = "complete"
+        character.version += 1
+        player = await db.get(Player, character.player_id)
+        if player is not None:
+            player.has_character = True
+            if player.user_id is not None and character.based_on_template_id is None:
+                template = UserCharacterTemplate(
+                    user_id=player.user_id,
+                    system_id=room.system_id or BUILTIN_SYSTEM_ID,
+                    name=character.name or "未命名角色",
+                    data=_character_template_data(character),
+                )
+                db.add(template)
+                await db.flush()
+                character.based_on_template_id = template.id
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
 
 
 async def get_character(
@@ -206,8 +257,6 @@ async def get_character(
     角色卡里有背景故事、装备这些属于该玩家的信息，房间内其他人不该直接拉到。
     """
     character = await _get_own_character(db, room_id, character_id, reconnect_token)
-    room = await find_room_by_id(db, room_id)
-    _require_character_editable(room)
     return CharacterRead(
         id=character.id,
         status=character.status,
@@ -268,6 +317,9 @@ async def roll_attributes(
     真实实现，不是 NOT_IMPLEMENTED 桩。
     """
     character = await _get_own_character(db, room_id, character_id, reconnect_token)
+    room = await find_room_by_id(db, room_id)
+    _require_character_editable(room)
+    await _mark_character_modified(db, character)
 
     attributes = {
         "STR": _roll(3, 6) * 5,
@@ -296,7 +348,7 @@ async def roll_attributes(
     return RollAttributesResult(attributes=attributes, derived_stats=derived_stats)
 
 
-# ── 我的常用角色卡库（issue 决策 5：本期只铺表与接口，不实现真实读写） ──
+# ── 我的常用角色卡库（完成建卡自动写入；显式 CRUD 仍留待后续） ──
 
 
 async def list_character_templates(db: AsyncSession, user_id: str) -> list[CharacterTemplateRead]:

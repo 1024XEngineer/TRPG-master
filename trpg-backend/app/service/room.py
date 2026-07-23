@@ -614,6 +614,15 @@ async def end_game(db: AsyncSession, room_id: str, reconnect_token: str | None) 
     now = datetime.now(UTC)
 
     try:
+        # 与 SqlAlchemyEngineStore.commit() 保持同一加锁顺序：先 Room，
+        # 后 GameSession。否则 PostgreSQL 上手动结束与规则动作并发时可能互相等待。
+        room_update = await db.execute(
+            update(Room)
+            .where(Room.id == room_id, Room.phase.in_(("InGame", "Suspended")))
+            .values(phase="Completed", ended_at=now, updated_at=now)
+        )
+        if getattr(room_update, "rowcount", None) != 1:
+            raise RoomConflictError("房间阶段已经变化，无法结束")
         state_update = await db.execute(
             update(GameSession)
             .where(
@@ -624,13 +633,6 @@ async def end_game(db: AsyncSession, room_id: str, reconnect_token: str | None) 
         )
         if getattr(state_update, "rowcount", None) != 1:
             raise RoomConflictError("GameState 已被并发更新，请重试结束操作")
-        room_update = await db.execute(
-            update(Room)
-            .where(Room.id == room_id, Room.phase.in_(("InGame", "Suspended")))
-            .values(phase="Completed", ended_at=now, updated_at=now)
-        )
-        if getattr(room_update, "rowcount", None) != 1:
-            raise RoomConflictError("房间阶段已经变化，无法结束")
         await db.commit()
     except Exception:
         await db.rollback()

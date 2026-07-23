@@ -1,9 +1,13 @@
+import pytest
 from httpx import AsyncClient
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.seed import BUILTIN_GAME_ID
+from app.core.seed import BUILTIN_GAME_ID, BUILTIN_SYSTEM_ID
 from app.models.content import GameSystem
-from app.models.room import Room
+from app.models.room import Character, Player, Room
+from app.models.user import UserCharacterTemplate
+from app.service import character as character_service
 from tests.helpers import ROOMS_BASE, create_room, join_room, reconnect, register
 
 # 「存在但没配规则数据」的规则系统，只出现在测试里（见文件末尾用例的说明）。
@@ -36,7 +40,9 @@ BUILT_CHARACTER = {
 }
 
 
-async def test_full_character_build_flow_marks_player_ready(client: AsyncClient) -> None:
+async def test_full_character_build_flow_marks_player_ready(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
     room = await create_room(client)
 
     draft = await client.post(
@@ -62,6 +68,118 @@ async def test_full_character_build_flow_marks_player_ready(client: AsyncClient)
     preview = await client.get(f"{ROOMS_BASE}/{room['roomCode']}")
     host = next(p for p in preview.json()["data"]["players"] if p["isHost"])
     assert host["hasCharacter"] is True
+
+    stored_character = await db_session.get(Character, character_id)
+    assert stored_character is not None
+    assert stored_character.based_on_template_id is not None
+    template = await db_session.get(UserCharacterTemplate, stored_character.based_on_template_id)
+    assert template is not None
+    assert template.system_id == BUILTIN_SYSTEM_ID
+    assert template.name == BUILT_CHARACTER["name"]
+    assert template.data["attributes"] == BUILT_CHARACTER["attributes"]
+    assert template.data["skills"] == BUILT_CHARACTER["skills"]
+    assert "derived_stats" not in template.data
+    await db_session.rollback()
+
+    # 网络重试或重复点击 complete 不应重复保存同一份用户卡。
+    repeated = await client.post(
+        f"{ROOMS_BASE}/{room['roomId']}/characters/{character_id}/complete",
+        headers=reconnect(room["reconnectToken"]),
+    )
+    assert repeated.status_code == 200
+    assert await db_session.scalar(select(func.count()).select_from(UserCharacterTemplate)) == 1
+
+
+async def test_editing_completed_character_saves_new_user_card(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    room = await create_room(client)
+    draft = await client.post(
+        f"{ROOMS_BASE}/{room['roomId']}/characters",
+        headers=reconnect(room["reconnectToken"]),
+    )
+    character_id = draft.json()["data"]["characterId"]
+    await client.patch(
+        f"{ROOMS_BASE}/{room['roomId']}/characters/{character_id}",
+        json=BUILT_CHARACTER,
+        headers=reconnect(room["reconnectToken"]),
+    )
+    await client.post(
+        f"{ROOMS_BASE}/{room['roomId']}/characters/{character_id}/complete",
+        headers=reconnect(room["reconnectToken"]),
+    )
+
+    stored_character = await db_session.get(Character, character_id)
+    assert stored_character is not None
+    first_template_id = stored_character.based_on_template_id
+    assert first_template_id is not None
+    await db_session.rollback()
+
+    modified = {**BUILT_CHARACTER, "name": "陈探员（新卡）"}
+    saved = await client.patch(
+        f"{ROOMS_BASE}/{room['roomId']}/characters/{character_id}",
+        json=modified,
+        headers=reconnect(room["reconnectToken"]),
+    )
+    assert saved.status_code == 200
+    completed = await client.post(
+        f"{ROOMS_BASE}/{room['roomId']}/characters/{character_id}/complete",
+        headers=reconnect(room["reconnectToken"]),
+    )
+    assert completed.status_code == 200
+
+    db_session.expire_all()
+    updated_character = await db_session.get(Character, character_id)
+    assert updated_character is not None
+    assert updated_character.based_on_template_id not in {None, first_template_id}
+    first_template = await db_session.get(UserCharacterTemplate, first_template_id)
+    second_template = await db_session.get(
+        UserCharacterTemplate, updated_character.based_on_template_id
+    )
+    assert first_template is not None
+    assert second_template is not None
+    assert first_template.name == BUILT_CHARACTER["name"]
+    assert second_template.name == modified["name"]
+
+
+async def test_user_card_save_failure_rolls_back_character_completion(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    room = await create_room(client)
+    draft = await client.post(
+        f"{ROOMS_BASE}/{room['roomId']}/characters",
+        headers=reconnect(room["reconnectToken"]),
+    )
+    character_id = draft.json()["data"]["characterId"]
+    await client.patch(
+        f"{ROOMS_BASE}/{room['roomId']}/characters/{character_id}",
+        json=BUILT_CHARACTER,
+        headers=reconnect(room["reconnectToken"]),
+    )
+
+    async def fail_user_card_flush(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("simulated user card save failure")
+
+    monkeypatch.setattr(db_session, "flush", fail_user_card_flush)
+    with pytest.raises(RuntimeError, match="simulated user card save failure"):
+        await character_service.complete_character(
+            db_session,
+            room["roomId"],
+            character_id,
+            room["reconnectToken"],
+        )
+
+    db_session.expire_all()
+    stored_character = await db_session.get(Character, character_id)
+    assert stored_character is not None
+    player = await db_session.get(Player, stored_character.player_id)
+    assert player is not None
+    assert stored_character.status == "draft"
+    assert stored_character.based_on_template_id is None
+    assert player.has_character is False
+    assert await db_session.scalar(select(func.count()).select_from(UserCharacterTemplate)) == 0
 
 
 async def test_create_character_requires_token(client: AsyncClient) -> None:
@@ -100,7 +218,9 @@ async def test_character_not_found_returns_404(client: AsyncClient) -> None:
     assert response.status_code == 404
 
 
-async def test_complete_character_rejects_invalid_card(client: AsyncClient) -> None:
+async def test_complete_character_rejects_invalid_card(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
     """issue #84 S2：complete 前用 coc7_rules 权威校验，非法卡（这里让职业
     技能点花费远超预算）直接被拒，返回结构化校验报告，而不是被静默放行。"""
     room = await create_room(client)
@@ -143,6 +263,7 @@ async def test_complete_character_rejects_invalid_card(client: AsyncClient) -> N
     assert body["error"]["code"] == "CHARACTER_INVALID"
     codes = [issue["code"] for issue in body["error"]["details"]]
     assert "SKILL_POINTS_EXCEEDED" in codes
+    assert await db_session.scalar(select(func.count()).select_from(UserCharacterTemplate)) == 0
 
 
 # ── 角色卡读回：后端是唯一事实来源（issue #96）─────────────────────────

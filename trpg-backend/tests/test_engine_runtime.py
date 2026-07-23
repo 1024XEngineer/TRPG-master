@@ -239,21 +239,37 @@ async def test_begin_game_creates_stable_actor_snapshots(
     )
 
 
-async def test_character_changes_return_conflict_after_game_start(
+async def test_character_reads_remain_available_and_writes_conflict_after_game_start(
     client: AsyncClient,
     db_session: AsyncSession,
 ) -> None:
     room, players, characters = await _start_room(db_session)
     original_version = characters[0].version
+    headers = {"X-Reconnect-Token": players[0].reconnect_token}
 
-    response = await client.patch(
+    read_response = await client.get(
+        f"/api/v1/rooms/{room.id}/characters/{characters[0].id}",
+        headers=headers,
+    )
+    assert read_response.status_code == 200
+
+    patch_response = await client.patch(
         f"/api/v1/rooms/{room.id}/characters/{characters[0].id}",
         json=_CHARACTER_PAYLOAD,
-        headers={"X-Reconnect-Token": players[0].reconnect_token},
+        headers=headers,
+    )
+    complete_response = await client.post(
+        f"/api/v1/rooms/{room.id}/characters/{characters[0].id}/complete",
+        headers=headers,
+    )
+    roll_response = await client.post(
+        f"/api/v1/rooms/{room.id}/characters/{characters[0].id}/roll-attributes",
+        headers=headers,
     )
 
-    assert response.status_code == 409
-    assert response.json()["error"]["code"] == "CONFLICT"
+    for response in (patch_response, complete_response, roll_response):
+        assert response.status_code == 409
+        assert response.json()["error"]["code"] == "CONFLICT"
     await db_session.refresh(characters[0])
     assert characters[0].version == original_version
 
@@ -306,9 +322,11 @@ async def test_suspend_blocks_new_actions_and_resume_allows_rule_ending(
 
 async def test_manual_end_from_suspended_syncs_room_and_game_state(
     db_session: AsyncSession,
+    sql_counter: list[str],
 ) -> None:
     room, players, _ = await _start_room(db_session)
     await room_service.suspend_game(db_session, room.id, players[0].reconnect_token)
+    sql_counter.clear()
     await room_service.end_game(db_session, room.id, players[0].reconnect_token)
 
     await db_session.refresh(room)
@@ -319,6 +337,20 @@ async def test_manual_end_from_suspended_syncs_room_and_game_state(
     assert state.phase == "ended"
     assert state.ending_id is None
     assert state.event_sequence == game_session.state_version == 0
+    updates = [
+        statement.lower().lstrip()
+        for statement in sql_counter
+        if statement.lower().lstrip().startswith("update ")
+    ]
+    room_update_index = next(
+        index for index, statement in enumerate(updates) if statement.startswith("update rooms ")
+    )
+    state_update_index = next(
+        index
+        for index, statement in enumerate(updates)
+        if statement.startswith("update game_sessions ")
+    )
+    assert room_update_index < state_update_index
 
     with pytest.raises(room_service.RoomConflictError):
         await room_service.resume_game(db_session, room.id, players[0].reconnect_token)

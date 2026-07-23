@@ -175,7 +175,8 @@ class Character(Base):
 
     # 建卡三条路径的来源（都可空，互斥但不做数据库层面强制）：
     # ① based_on_pregen_id：套用模组作者预设角色；
-    # ② based_on_template_id：复用玩家自己的常用卡（issue 决策 5，本期不实现）；
+    # ② based_on_template_id：当前房间卡关联的用户卡。首次完成时自动创建；后续
+    #    修改会解除关联，下一次完成另存为新卡，不覆盖历史卡；
     # ③ 都不填：从零选职业建卡，occupation 字段直接记职业名。
     based_on_pregen_id: Mapped[str | None] = mapped_column(
         Uuid(as_uuid=False), ForeignKey("module_pregens.id"), nullable=True

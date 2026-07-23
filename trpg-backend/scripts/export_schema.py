@@ -100,6 +100,7 @@ _MODELS: list[type[BaseModel]] = [
     ws.GameViewPayload,
     ws.ViewPrivatePayload,
     ws.CheckRequestPayload,
+    ws.CheckBypassedPayload,
     ws.CheckResultPayload,
     ws.SanCheckRequestPayload,
     ws.SanCheckResultPayload,

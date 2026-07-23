@@ -17,6 +17,7 @@ from app.runtime.contracts import (
 )
 from app.runtime.dice import FixedDiceRoller, SystemDiceRoller
 from app.runtime.engine import ActionExecutor, StaleRevisionError
+from app.runtime.orchestrator import TurnOrchestrator
 from app.runtime.projector import PlayerViewProjector
 from app.runtime.state import GameState
 from app.runtime.store import SQLAlchemyGameStateStore
@@ -102,7 +103,9 @@ def test_skill_and_san_checks_only_use_server_dice() -> None:
             skill_id="fast_talk",
         ),
         events,
+        narration_facts,
     )
+    assert pending is not None
 
     grade = executor._resolve_skill_check(state, runtime, actor, pending, events, narration_facts)
 
@@ -123,6 +126,93 @@ def test_skill_and_san_checks_only_use_server_dice() -> None:
     assert san_outcome == "san_failure"
     assert events[-1].payload["rollValue"] == 80
     assert events[-1].payload["sanLoss"] == 4
+
+
+def test_reporter_bypasses_newspaper_access_check() -> None:
+    runtime, state = _runtime_state()
+    state.current_scene_id = "scene.newspaper"
+    executor = ActionExecutor(dice=FixedDiceRoller([100]))
+    events: list[RuntimeEvent] = []
+    narration_facts: list[str] = []
+
+    pending = executor._execute_intent(
+        state,
+        runtime,
+        Intent(
+            kind="checkpoint",
+            summary="出示记者证申请查阅档案",
+            checkpoint_id="check.access_newspaper_archive",
+        ),
+        "我出示记者证申请查阅档案",
+        events,
+        narration_facts,
+    )
+
+    assert pending is None
+    assert state.last_check is not None
+    assert state.last_check["grade"] == "bypassed"
+    assert "clue.hilda_statement" in state.granted_clue_ids
+    assert any(event.event_type == "check.bypassed" for event in events)
+
+
+def test_player_view_contains_visible_map_without_hidden_locations() -> None:
+    runtime, state = _runtime_state()
+    state.current_scene_id = "scene.cemetery"
+    view = PlayerViewProjector().project(
+        state,
+        runtime,
+        actor_id="character-snapshot",
+    )
+
+    visible_ids = {location.location_id for location in view.locations}
+    assert visible_ids == {
+        "location.arnoldsburg",
+        "location.kimball_house",
+        "location.cemetery",
+    }
+    assert "location.crypt_entrance" not in view.model_dump_json()
+    cemetery = next(
+        location
+        for location in view.locations
+        if location.location_id == "location.cemetery"
+    )
+    assert cemetery.is_current is True
+    assert {link.location_id for link in cemetery.connections} == {
+        "location.arnoldsburg",
+        "location.kimball_house",
+    }
+
+    state.location_states["location.favorite_grave"]["identified"] = True
+    state.location_states["location.crypt_entrance"]["discovered"] = True
+    unlocked = PlayerViewProjector().project(
+        state,
+        runtime,
+        actor_id="character-snapshot",
+    )
+    unlocked_ids = {location.location_id for location in unlocked.locations}
+    assert "location.favorite_grave" in unlocked_ids
+    assert "location.crypt_entrance" in unlocked_ids
+
+
+def test_keeper_decision_context_contains_current_module_rules_but_view_does_not() -> None:
+    runtime, state = _runtime_state()
+    view = PlayerViewProjector().project(
+        state,
+        runtime,
+        actor_id="character-snapshot",
+    )
+
+    context = TurnOrchestrator._keeper_decision_context(state, runtime, view)
+
+    assert context["moduleGuidance"]["keeperBrief"]["core_truth"]
+    assert {scene["id"] for scene in context["reachableScenes"]} >= {
+        "scene.library",
+        "scene.kimball_house",
+        "scene.cemetery",
+    }
+    assert context["currentEntities"][0]["id"] == "npc.thomas"
+    assert "core_truth" not in view.model_dump_json()
+    assert "fact.douglas_became_ghoul" not in view.model_dump_json()
 
 
 def test_keeper_model_only_receives_player_safe_action_result() -> None:

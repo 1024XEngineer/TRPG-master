@@ -142,6 +142,12 @@ export default function RoomPage() {
           kind: 'check',
           text: `${envelope.payload.skill}：掷出 ${envelope.payload.rollValue}，结果为 ${envelope.payload.result}`,
         })
+      } else if (envelope.type === 'check.bypassed') {
+        appendOnce(envelope.eventId, {
+          id: nowId('check-bypassed'),
+          kind: 'system',
+          text: `${envelope.payload.label}：${envelope.payload.reason}`,
+        })
       } else if (envelope.type === 'san.check.result') {
         appendOnce(envelope.eventId, {
           id: nowId('san-result'),
@@ -271,6 +277,21 @@ export default function RoomPage() {
         {view?.scene.playerDescription && (
           <p className="text-xs text-text-muted leading-[1.7] mt-1">{view.scene.playerDescription}</p>
         )}
+        {view?.checkpointOptions?.length ? (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {view.checkpointOptions.map((option) => (
+              <span
+                key={option.checkpointId}
+                className="text-[10px] px-2 py-1 rounded-full bg-card border border-border-light text-text-muted"
+              >
+                {option.label}
+                {option.bypassReason
+                  ? ' · 职业免检'
+                  : ` · ${option.skills.join('/')}`}
+              </span>
+            ))}
+          </div>
+        ) : null}
       </div>
 
       <main className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-3">
@@ -429,7 +450,7 @@ export default function RoomPage() {
         )}
       </BottomPanel>
 
-      <BottomPanel open={panel === 'map'} title="当前场景" onClose={() => setPanel(null)}>
+      <BottomPanel open={panel === 'map'} title="地点与路线" onClose={() => setPanel(null)}>
         <div className="bg-panel rounded-md p-4">
           <div className="text-sm font-semibold text-text-primary">{view?.scene.name}</div>
           <p className="text-xs text-text-muted leading-[1.7] mt-1">{view?.scene.playerDescription}</p>
@@ -445,6 +466,35 @@ export default function RoomPage() {
             ))}
           </div>
         ) : null}
+        {view?.locations?.length ? (
+          <div className="mt-4 space-y-2">
+            <h4 className="text-xs font-semibold text-brass-dark">已知地点</h4>
+            {view.locations.map((location) => (
+              <div
+                key={location.locationId}
+                className={`px-3 py-2 border rounded ${
+                  location.isCurrent
+                    ? 'border-brass bg-[#fdfaf4]'
+                    : 'border-border-light bg-card'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-sm text-text-primary">{location.name}</div>
+                  {location.isCurrent && (
+                    <span className="text-[10px] text-brass-dark">当前位置</span>
+                  )}
+                </div>
+                {(location.connections?.length ?? 0) > 0 && (
+                  <p className="text-[11px] text-text-muted mt-1">
+                    可通往：{(location.connections ?? []).map((connection) => connection.name).join('、')}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-text-dim text-center py-6">尚未发现可显示的地点</p>
+        )}
       </BottomPanel>
 
       <BottomPanel open={panel === 'members'} title="房间成员" onClose={() => setPanel(null)}>

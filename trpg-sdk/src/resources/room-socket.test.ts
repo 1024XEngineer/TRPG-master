@@ -18,6 +18,19 @@ test('isValidServerEvent：接受已知类型的合法事件', () => {
     }),
     true
   );
+  assert.equal(
+    isValidServerEvent({
+      type: 'check.bypassed',
+      payload: {
+        playerId: 'p1',
+        checkpointId: 'check.archive',
+        label: '查阅档案',
+        reason: '记者身份无需检定',
+        stateRevision: 2,
+      },
+    }),
+    true
+  );
   assert.equal(isValidServerEvent({ type: 'narration.push', payload: { text: 'hi' } }), true);
 });
 

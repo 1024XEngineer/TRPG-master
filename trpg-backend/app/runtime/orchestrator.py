@@ -36,6 +36,49 @@ class TurnOrchestrator:
         self.projector = projector or PlayerViewProjector()
         self.keeper = keeper or FakeKeeper()
 
+    async def open_game(
+        self,
+        db: AsyncSession,
+        *,
+        room_id: str,
+        player_id: str,
+        actor_id: str,
+    ) -> tuple[str, PlayerView]:
+        session = await self.store.active_session(db, room_id)
+        if session is None:
+            raise ValueError("游戏会话不存在")
+        state = await self.store.load(db, session.id)
+        runtime_module = await self.store.module_for_session(db, session)
+        view = self.projector.project(state, runtime_module, actor_id=actor_id)
+        premise = runtime_module.package.module.premise
+        try:
+            narration = await self.keeper.opening(view, premise)
+        except Exception as exc:
+            logger.warning(
+                "keeper_opening_fallback",
+                room_session_id=session.id,
+                error_type=type(exc).__name__,
+                error=str(exc),
+            )
+            narration = await FakeKeeper().opening(view, premise)
+        player_input = PlayerInput(
+            request_id=f"opening:{session.id}",
+            room_id=room_id,
+            room_session_id=session.id,
+            player_id=player_id,
+            actor_id=actor_id,
+            source_revision=state.revision,
+            utterance="开始游戏",
+        )
+        view = await self._record_narration(
+            db,
+            state,
+            runtime_module,
+            player_input,
+            narration.text,
+        )
+        return narration.text, view
+
     async def run(self, db: AsyncSession, player_input: PlayerInput) -> TurnResult:
         session = await self.store.active_session(db, player_input.room_id)
         if session is None or session.id != player_input.room_session_id:
@@ -51,7 +94,13 @@ class TurnOrchestrator:
             )
             return await self.executor.execute(db, request)
 
-        action = await self.keeper.run_action(player_input, view, execute_action)
+        decision_context = self._keeper_decision_context(state, runtime_module, view)
+        action = await self.keeper.run_action(
+            player_input,
+            view,
+            decision_context,
+            execute_action,
+        )
         updated_state = await self.store.load(db, session.id)
         updated_view = self.projector.project(
             updated_state, runtime_module, actor_id=player_input.actor_id
@@ -75,6 +124,84 @@ class TurnOrchestrator:
             narration.text,
         )
         return TurnResult(action=action, narration=narration, view=updated_view)
+
+    @staticmethod
+    def _keeper_decision_context(
+        state: GameState,
+        runtime_module,
+        view: PlayerView,
+    ) -> dict:
+        current_scene = runtime_module.get("scenes", state.current_scene_id) or {}
+        reachable_scenes = [
+            runtime_module.get("scenes", scene_id)
+            for scene_id in current_scene.get("next_scene_ids", [])
+        ]
+        checkpoint_ids = [item.checkpoint_id for item in view.checkpoint_options]
+        entity_ids = current_scene.get("entity_ids", [])
+        entities = [
+            runtime_module.get("entities", entity_id)
+            for entity_id in entity_ids
+            if runtime_module.get("entities", entity_id) is not None
+        ]
+        knowledge_fact_ids = {
+            fact_id
+            for entity in entities
+            for fact_id in entity.get("knowledge_fact_ids", [])
+        }
+        knowledge_clue_ids = {
+            clue_id
+            for entity in entities
+            for clue_id in entity.get("knowledge_clue_ids", [])
+        }
+        trigger_ids = current_scene.get("trigger_ids", [])
+        active_timeline_ids = set(state.active_timeline_ids)
+        return {
+            "moduleGuidance": {
+                "title": runtime_module.package.module.title,
+                "premise": runtime_module.package.module.premise,
+                "keeperBrief": runtime_module.package.keeper_brief.model_dump(mode="json"),
+            },
+            "currentScene": current_scene,
+            "reachableScenes": [scene for scene in reachable_scenes if scene is not None],
+            "currentEntities": entities,
+            "entityKnowledge": {
+                "facts": [
+                    runtime_module.get("facts", fact_id)
+                    for fact_id in knowledge_fact_ids
+                    if runtime_module.get("facts", fact_id) is not None
+                ],
+                "clues": [
+                    runtime_module.get("clues", clue_id)
+                    for clue_id in knowledge_clue_ids
+                    if runtime_module.get("clues", clue_id) is not None
+                ],
+            },
+            "availableCheckpoints": [
+                runtime_module.get("checkpoints", checkpoint_id)
+                for checkpoint_id in checkpoint_ids
+            ],
+            "relevantTriggers": [
+                runtime_module.get("triggers", trigger_id)
+                for trigger_id in trigger_ids
+                if runtime_module.get("triggers", trigger_id) is not None
+            ],
+            "activeTimelines": [
+                timeline
+                for timeline in runtime_module.package.content.timelines
+                if timeline["id"] in active_timeline_ids
+            ],
+            "runtimeState": {
+                "clock": state.clock,
+                "grantedClueIds": state.granted_clue_ids,
+                "completedCheckpointIds": state.completed_checkpoint_ids,
+                "firedTriggerIds": state.fired_trigger_ids,
+                "locationStates": state.location_states,
+                "entityStates": state.entity_states,
+                "resourceStates": state.resource_states,
+                "lastIntent": state.last_intent,
+                "lastCheck": state.last_check,
+            },
+        }
 
     async def resolve_pending(
         self,

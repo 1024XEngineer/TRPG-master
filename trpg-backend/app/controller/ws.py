@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import async_session_factory
 from app.dto.ws import (
     ActionSubmitPayload,
+    CheckBypassedPayload,
     CheckRequestPayload,
     CheckResultPayload,
     CheckRollPayload,
@@ -142,6 +143,15 @@ def _runtime_event_envelope(
             state_revision=state_revision,
         )
         return _envelope("player.message", model, event_id=event_id, sequence=sequence)
+    elif event.event_type == "check.bypassed":
+        model = CheckBypassedPayload(
+            player_id=player_id,
+            checkpoint_id=str(payload["checkpointId"]),
+            label=str(payload["label"]),
+            reason=str(payload["reason"]),
+            state_revision=state_revision,
+        )
+        return _envelope("check.bypassed", model, event_id=event_id, sequence=sequence)
     elif event.event_type == "check.requested":
         model = CheckRequestPayload(
             player_id=player_id,
@@ -406,14 +416,21 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                     elif event_type == "game.start":
                         GameStartPayload.model_validate(raw_payload)
                         view = await room_service.begin_game(db, room_id, bound_player_id)
+                        opening_text, view = await get_turn_orchestrator().open_game(
+                            db,
+                            room_id=room_id,
+                            player_id=bound_player_id,
+                            actor_id=view.actor.actor_id,
+                        )
                         await manager.broadcast(
                             room_id,
                             _envelope(
                                 "narration.push",
                                 NarrationPushPayload(
-                                    text=view.scene.player_description,
+                                    text=opening_text,
                                     state_revision=view.state_revision,
                                 ),
+                                sequence=view.event_sequence,
                             ),
                         )
                         await manager.broadcast(

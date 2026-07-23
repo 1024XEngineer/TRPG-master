@@ -106,10 +106,27 @@ class VisibleClue(RuntimeModel):
     text: str
 
 
+class LocationConnectionView(RuntimeModel):
+    location_id: str
+    name: str
+    kind: str
+
+
+class VisibleLocation(RuntimeModel):
+    location_id: str
+    name: str
+    kind: str
+    parent_location_id: str | None = None
+    is_current: bool = False
+    connections: list[LocationConnectionView] = Field(default_factory=list)
+
+
 class CheckpointOption(RuntimeModel):
     checkpoint_id: str
+    label: str
     skills: list[str]
     difficulty: str
+    bypass_reason: str | None = None
 
 
 class PlayerView(RuntimeModel):
@@ -120,6 +137,7 @@ class PlayerView(RuntimeModel):
     scene: SceneView
     actor: ActorView
     visible_entities: list[VisibleEntity] = Field(default_factory=list)
+    locations: list[VisibleLocation] = Field(default_factory=list)
     clues: list[VisibleClue] = Field(default_factory=list)
     checkpoint_options: list[CheckpointOption] = Field(default_factory=list)
     pending_check: PendingCheck | None = None

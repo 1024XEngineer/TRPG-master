@@ -18,6 +18,12 @@ def sync_client() -> TestClient:
     return TestClient(app)
 
 
+@pytest.fixture(autouse=True)
+def use_fake_keeper(monkeypatch) -> None:
+    """WebSocket 测试不继承本地 .env 的真实模型配置，也不消耗外部 API。"""
+    monkeypatch.setattr(get_turn_orchestrator(), "keeper", FakeKeeper())
+
+
 def register_and_login(client: TestClient, account: str = "host1") -> str:
     response = client.post(
         "/api/v1/auth/register",
@@ -232,9 +238,26 @@ def test_game_start_pushes_opening_narration_and_advances_phase(
         ws.receive_json()  # session.bound
         ws.send_json({"type": "game.start", "playerId": room["playerId"], "payload": {}})
         envelope = ws.receive_json()
+        view = ws.receive_json()
+        ws.send_json(
+            {
+                "type": "room.rejoin",
+                "playerId": room["playerId"],
+                "payload": {
+                    "reconnectToken": room["reconnectToken"],
+                    "lastEventSequence": 0,
+                },
+            }
+        )
+        replayed_opening = ws.receive_json()
+        replayed_view = ws.receive_json()
 
     assert envelope["type"] == "narration.push"
-    assert envelope["payload"]["text"]
+    assert "你准备怎么做" in envelope["payload"]["text"]
+    assert view["type"] == "game.view"
+    assert replayed_opening["type"] == "narration.push"
+    assert replayed_opening["payload"]["text"] == envelope["payload"]["text"]
+    assert replayed_view["type"] == "game.view"
 
     preview = sync_client.get(f"{ROOMS_BASE}/{room['roomCode']}").json()["data"]
     assert preview["phase"] == "InGame"
@@ -272,11 +295,7 @@ def test_game_start_rejects_non_host(sync_client: TestClient) -> None:
     assert preview["phase"] == "Building"
 
 
-def test_action_submit_broadcasts_narration_to_room_only(
-    sync_client: TestClient, monkeypatch
-) -> None:
-    # 本地开发可能在 .env 启用了真实 DeepSeek；测试必须保持确定性且不能消耗 API。
-    monkeypatch.setattr(get_turn_orchestrator(), "keeper", FakeKeeper())
+def test_action_submit_broadcasts_narration_to_room_only(sync_client: TestClient) -> None:
     token_a = register_and_login(sync_client, "host_a")
     token_b = register_and_login(sync_client, "host_b")
     room_a = create_room(sync_client, token_a)

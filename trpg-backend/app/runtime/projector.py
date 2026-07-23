@@ -5,13 +5,16 @@ from __future__ import annotations
 from typing import Any
 
 from app.module_runtime import RuntimeModule
+from app.runtime.checkpoints import checkpoint_bypass_reason, checkpoint_label
 from app.runtime.contracts import (
     ActorView,
     CheckpointOption,
+    LocationConnectionView,
     PlayerView,
     SceneView,
     VisibleClue,
     VisibleEntity,
+    VisibleLocation,
 )
 from app.runtime.state import GameState
 
@@ -56,6 +59,76 @@ class PlayerViewProjector:
                 )
             )
 
+        visible_location_data = [
+            location
+            for location in runtime_module.package.content.locations
+            if self._location_is_visible(
+                state.location_states.get(str(location["id"]), {})
+            )
+        ]
+        visible_location_ids = {
+            str(location["id"]) for location in visible_location_data
+        }
+        current_location_ids = [
+            location_id
+            for location_id in scene.get("location_ids", [])
+            if location_id in visible_location_ids
+        ]
+        current_location_id_set = set(current_location_ids)
+        locations: list[VisibleLocation] = []
+        for location in visible_location_data:
+            connections: list[LocationConnectionView] = []
+            connection_candidates = list(location.get("connections", []))
+            parent_id = location.get("parent_location_id")
+            if parent_id:
+                connection_candidates.append(
+                    {"location_id": parent_id, "kind": "within_area"}
+                )
+            for other in visible_location_data:
+                other_id = str(other["id"])
+                if other.get("parent_location_id") == location["id"]:
+                    connection_candidates.append(
+                        {"location_id": other_id, "kind": "within_area"}
+                    )
+                for reverse in other.get("connections", []):
+                    if reverse.get("location_id") == location["id"]:
+                        connection_candidates.append(
+                            {
+                                "location_id": other_id,
+                                "kind": reverse.get("kind", "route"),
+                            }
+                        )
+            seen_connection_ids: set[str] = set()
+            for connection in connection_candidates:
+                target_id = str(connection["location_id"])
+                if (
+                    target_id not in visible_location_ids
+                    or target_id in seen_connection_ids
+                    or target_id == location["id"]
+                ):
+                    continue
+                target = runtime_module.get("locations", target_id)
+                if target is None:
+                    continue
+                seen_connection_ids.add(target_id)
+                connections.append(
+                    LocationConnectionView(
+                        location_id=target_id,
+                        name=str(target["name"]),
+                        kind=str(connection.get("kind", "route")),
+                    )
+                )
+            locations.append(
+                VisibleLocation(
+                    location_id=str(location["id"]),
+                    name=str(location["name"]),
+                    kind=str(location.get("kind", "location")),
+                    parent_location_id=location.get("parent_location_id"),
+                    is_current=str(location["id"]) in current_location_id_set,
+                    connections=connections,
+                )
+            )
+
         checkpoint_ids = list(scene.get("checkpoint_ids", []))
         for timeline_id in state.active_timeline_ids:
             timeline = runtime_module.get("timelines", timeline_id)
@@ -71,15 +144,21 @@ class PlayerViewProjector:
         options: list[CheckpointOption] = []
         for checkpoint_id in dict.fromkeys(checkpoint_ids):
             checkpoint = runtime_module.get("checkpoints", checkpoint_id)
-            if checkpoint is None or not self._prerequisites_met(
+            if (
+                checkpoint is None
+                or checkpoint_id in state.completed_checkpoint_ids
+                or not self._prerequisites_met(
                 state, checkpoint.get("prerequisites", [])
+                )
             ):
                 continue
             options.append(
                 CheckpointOption(
                     checkpoint_id=checkpoint_id,
+                    label=checkpoint_label(checkpoint),
                     skills=list(checkpoint["skills"]),
                     difficulty=str(checkpoint.get("difficulty", "regular")),
+                    bypass_reason=checkpoint_bypass_reason(actor, checkpoint),
                 )
             )
 
@@ -92,7 +171,7 @@ class PlayerViewProjector:
                 scene_id=str(scene["id"]),
                 name=str(scene["name"]),
                 player_description=str(scene["player_description"]),
-                location_ids=list(scene.get("location_ids", [])),
+                location_ids=current_location_ids,
             ),
             actor=ActorView(
                 actor_id=actor.actor_id,
@@ -105,11 +184,18 @@ class PlayerViewProjector:
                 current_san=actor.current_san,
             ),
             visible_entities=entities,
+            locations=locations,
             clues=clues,
             checkpoint_options=options,
             pending_check=state.pending_checks[0] if state.pending_checks else None,
             active_ending_id=state.active_ending_id,
         )
+
+    @staticmethod
+    def _location_is_visible(location_state: dict[str, Any]) -> bool:
+        if location_state.get("identified") is False:
+            return False
+        return location_state.get("discovered") is not False
 
     @staticmethod
     def _prerequisites_met(state: GameState, prerequisites: list[dict[str, Any]]) -> bool:

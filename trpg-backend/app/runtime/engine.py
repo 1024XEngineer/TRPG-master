@@ -20,6 +20,7 @@ from app.models.replay import (
 )
 from app.models.room import Room
 from app.module_runtime import RuntimeModule
+from app.runtime.checkpoints import checkpoint_bypass_reason, checkpoint_label
 from app.runtime.contracts import (
     ActionRequest,
     ActionResult,
@@ -225,7 +226,14 @@ class ActionExecutor:
         }
 
         if intent.kind == "checkpoint":
-            return self._request_checkpoint(state, runtime_module, actor, intent, events)
+            return self._request_checkpoint(
+                state,
+                runtime_module,
+                actor,
+                intent,
+                events,
+                narration_facts,
+            )
 
         if intent.kind == "choice":
             choice = intent.choice_id or intent.summary
@@ -283,7 +291,8 @@ class ActionExecutor:
         actor: ActorState,
         intent: Intent,
         events: list[RuntimeEvent],
-    ) -> PendingCheck:
+        narration_facts: list[str],
+    ) -> PendingCheck | None:
         if intent.checkpoint_id is None:
             raise RuntimeConflictError("Checkpoint 意图缺少 checkpoint_id")
         checkpoint = runtime_module.get("checkpoints", intent.checkpoint_id)
@@ -292,6 +301,43 @@ class ActionExecutor:
         if not self._conditions_met(checkpoint.get("prerequisites", []), state, runtime_module, {}):
             raise RuntimeConflictError("Checkpoint 前置条件尚未满足")
         skills = list(checkpoint["skills"])
+        bypass_reason = checkpoint_bypass_reason(actor, checkpoint)
+        if bypass_reason is not None:
+            state.last_check = {
+                "kind": "skill",
+                "checkpoint_id": intent.checkpoint_id,
+                "skill_id": None,
+                "grade": "bypassed",
+                "succeeded": True,
+                "bypass_reason": bypass_reason,
+            }
+            self._apply_effects(
+                state,
+                runtime_module,
+                checkpoint.get("on_success", []),
+                {
+                    "check": state.last_check,
+                    "intent": intent.model_dump(mode="json"),
+                    "utterance": intent.approach or intent.summary,
+                },
+                events,
+                narration_facts,
+            )
+            if intent.checkpoint_id not in state.completed_checkpoint_ids:
+                state.completed_checkpoint_ids.append(intent.checkpoint_id)
+            self._advance_time(state, checkpoint.get("time_cost"))
+            events.append(
+                RuntimeEvent(
+                    event_type="check.bypassed",
+                    payload={
+                        "checkpointId": intent.checkpoint_id,
+                        "label": checkpoint_label(checkpoint),
+                        "reason": bypass_reason,
+                    },
+                    visibility="player",
+                )
+            )
+            return None
         skill_id = intent.skill_id or skills[0]
         if skill_id not in skills:
             raise RuntimeConflictError("所选技能不在 Checkpoint 候选中")

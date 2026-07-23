@@ -76,6 +76,7 @@ export type {
   GameEndedPayload,
   ViewPrivatePayload,
   CheckRequestPayload,
+  CheckBypassedPayload,
   CheckResultPayload,
   SanCheckRequestPayload,
   SanCheckResultPayload,
@@ -110,6 +111,7 @@ export interface ApiResponse<T> {
 // ──────────────────────────────────────────────
 
 import type {
+  CheckBypassedPayload,
   CheckRequestPayload,
   CheckResultPayload,
   ClueGrantedPayload,
@@ -152,6 +154,7 @@ export type ServerToClientEvent = (
   | { type: 'game.ended'; payload: GameEndedPayload }
   | { type: 'view.private'; payload: ViewPrivatePayload }
   | { type: 'check.request'; payload: CheckRequestPayload }
+  | { type: 'check.bypassed'; payload: CheckBypassedPayload }
   | { type: 'check.result'; payload: CheckResultPayload }
   | { type: 'san.check.request'; payload: SanCheckRequestPayload }
   | { type: 'san.check.result'; payload: SanCheckResultPayload }

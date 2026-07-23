@@ -226,6 +226,14 @@ class CheckResultPayload(CamelModel):
     state_revision: int
 
 
+class CheckBypassedPayload(CamelModel):
+    player_id: str
+    checkpoint_id: str
+    label: str
+    reason: str
+    state_revision: int
+
+
 class SanCheckRequestPayload(CamelModel):
     """san.check.request：规则引擎请求玩家确认一次理智检定。"""
 

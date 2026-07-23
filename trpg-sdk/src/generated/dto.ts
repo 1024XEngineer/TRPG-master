@@ -228,6 +228,14 @@ export interface CharacterUpdateBody {
   notes?: string;
 }
 
+export interface CheckBypassedPayload {
+  playerId: string;
+  checkpointId: string;
+  label: string;
+  reason: string;
+  stateRevision: number;
+}
+
 /**
  * check.request：规则引擎请求玩家确认一次技能检定。
  */
@@ -271,8 +279,10 @@ export interface CheckRollPayload {
 
 export interface CheckpointOption {
   checkpointId: string;
+  label: string;
   skills: string[];
   difficulty: string;
+  bypassReason?: string | null;
 }
 
 /**
@@ -394,6 +404,7 @@ export interface GameViewPayload {
   scene: SceneView;
   actor: ActorView;
   visibleEntities?: VisibleEntity[];
+  locations?: VisibleLocation[];
   clues?: VisibleClue[];
   checkpointOptions?: CheckpointOption[];
   pendingCheck?: PendingCheck | null;
@@ -405,6 +416,12 @@ export interface GameViewPayload {
  */
 export interface JoinRoomBody {
   nickname?: string | null;
+}
+
+export interface LocationConnectionView {
+  locationId: string;
+  name: string;
+  kind: string;
 }
 
 /**
@@ -918,4 +935,13 @@ export interface VisibleEntity {
   entityId: string;
   name: string;
   publicDescription?: string | null;
+}
+
+export interface VisibleLocation {
+  locationId: string;
+  name: string;
+  kind: string;
+  parentLocationId?: string | null;
+  isCurrent?: boolean;
+  connections?: LocationConnectionView[];
 }

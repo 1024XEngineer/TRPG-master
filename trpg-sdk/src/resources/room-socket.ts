@@ -58,6 +58,12 @@ const PAYLOAD_VALIDATORS: {
     typeof p.difficulty === 'string' &&
     typeof p.reason === 'string' &&
     typeof p.stateRevision === 'number',
+  'check.bypassed': (p) =>
+    typeof p.playerId === 'string' &&
+    typeof p.checkpointId === 'string' &&
+    typeof p.label === 'string' &&
+    typeof p.reason === 'string' &&
+    typeof p.stateRevision === 'number',
   'check.result': (p) =>
     typeof p.playerId === 'string' &&
     typeof p.checkRequestId === 'string' &&

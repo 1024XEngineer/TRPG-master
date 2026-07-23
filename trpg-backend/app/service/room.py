@@ -8,9 +8,13 @@ issue #77 之前是内存字典 stub，本期切换为对 `rooms`/`players`/`gam
 
 import secrets
 import string
+from copy import deepcopy
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select
+from collaboration_framework.contracts import ModuleContent
+from collaboration_framework.engine import GameState
+from collaboration_framework.engine.models import ActorState
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,6 +33,7 @@ from app.dto.room import (
     SelectModuleBody,
 )
 from app.models.content import Game, GameSystem, Scenario
+from app.models.engine import GameSession, ModuleVersion
 from app.models.event import Event
 from app.models.room import Character, Player, Room
 from app.models.user import User
@@ -304,8 +309,12 @@ async def select_module(
     scenario = await db.get(Scenario, payload.module_id)
     if scenario is None:
         raise ModuleNotFoundError("模组不存在")
+    module_version = await db.get(ModuleVersion, (scenario.id, scenario.version))
+    if module_version is None:
+        raise ModuleNotFoundError("模组当前推荐版本尚未发布")
 
     room.scenario_id = scenario.id
+    room.module_version = module_version.version
     room.system_id = scenario.game_system_id
     system = await db.get(GameSystem, scenario.game_system_id)
     room.game_id = system.game_id if system is not None else None
@@ -355,19 +364,182 @@ async def set_player_connected(db: AsyncSession, player_id: str, connected: bool
 
 
 async def begin_game(db: AsyncSession, room_id: str, player_id: str) -> None:
-    """WS game.start 事件：全员建完角色后，房主正式开局（Building → InGame）。"""
+    """从固定 ModuleVersion 和完成的 Character 原子创建房间唯一 GameSession。"""
     room = await find_room_by_id(db, room_id)
     player = await db.get(Player, player_id)
     if player is None or player.room_id != room.id or player.id != room.host_player_id:
         raise RoomAuthorizationError("仅房主可以开始游戏")
     if room.phase != "Building":
         raise RoomConflictError("只有背景介绍/建卡阶段可以正式开局")
-    result = await db.scalars(select(Player).where(Player.room_id == room.id))
-    room_players = list(result)
-    if not room_players or not all(p.has_character for p in room_players):
+    if room.scenario_id is None or room.module_version is None:
+        raise ModuleNotSelectedError("房间没有固定可开局的模组版本")
+    if await db.get(GameSession, room.id) is not None:
+        raise RoomConflictError("该房间已经创建过 GameSession")
+
+    module_version = await db.get(
+        ModuleVersion,
+        (room.scenario_id, room.module_version),
+    )
+    if module_version is None:
+        raise ModuleNotSelectedError("房间固定的模组版本不存在")
+    try:
+        module_content = ModuleContent.model_validate(module_version.content_json)
+    except ValueError as exc:
+        raise RoomConflictError("房间固定的模组版本内容无效") from exc
+    if (
+        module_content.module_id != module_version.module_id
+        or module_content.version != module_version.version
+        or module_content.world_ref != module_version.world_ref
+    ):
+        raise RoomConflictError("模组发布内容与版本记录不一致")
+    if not module_content.scenes:
+        raise RoomConflictError("模组没有可作为初始场景的 Scene")
+
+    room_players = list(
+        await db.scalars(
+            select(Player).where(Player.room_id == room.id).order_by(Player.joined_at, Player.id)
+        )
+    )
+    characters = list(await db.scalars(select(Character).where(Character.room_id == room.id)))
+    character_by_player = {character.player_id: character for character in characters}
+    if (
+        not room_players
+        or not all(player.has_character for player in room_players)
+        or any(
+            (character := character_by_player.get(player.id)) is None
+            or character.status != "complete"
+            for player in room_players
+        )
+    ):
         raise CharacterIncompleteError("还有玩家未完成建卡")
-    room.phase = "InGame"
-    room.started_at = datetime.now(UTC)
+
+    actors = {
+        f"actor_{index}": ActorState(
+            player_id=room_player.id,
+            name=character_by_player[room_player.id].name or room_player.nickname,
+            source_character_id=character_by_player[room_player.id].id,
+            source_character_version=character_by_player[room_player.id].version,
+            state=_character_runtime_state(character_by_player[room_player.id]),
+        )
+        for index, room_player in enumerate(room_players, start=1)
+    }
+    initial_state = GameState(
+        room_id=room.id,
+        scene_id=module_content.scenes[0].id,
+        phase="playing",
+        ending_id=None,
+        event_sequence=0,
+        actors=actors,
+        entities={entity.id: deepcopy(entity.state) for entity in module_content.entities},
+    )
+    now = datetime.now(UTC)
+    db.add(
+        GameSession(
+            room_id=room.id,
+            module_id=module_version.module_id,
+            module_version=module_version.version,
+            state_schema_version=1,
+            state_json=initial_state.to_json_dict(),
+            state_version=0,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    try:
+        phase_update = await db.execute(
+            update(Room)
+            .where(Room.id == room.id, Room.phase == "Building")
+            .values(phase="InGame", started_at=now, updated_at=now)
+        )
+        if getattr(phase_update, "rowcount", None) != 1:
+            raise RoomConflictError("房间阶段已经变化，无法重复开局")
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise RoomConflictError("该房间已经创建过 GameSession") from exc
+    except Exception:
+        await db.rollback()
+        raise
+
+
+def _character_runtime_state(character: Character) -> dict:
+    """复制 Character 为与源卡解耦的局内 ActorState.state。"""
+    return {
+        "age": character.age,
+        "gender": character.gender,
+        "residence": character.residence,
+        "birthplace": character.birthplace,
+        "generation_method": character.generation_method,
+        "occupation": character.occupation,
+        "attributes": deepcopy(character.attributes or {}),
+        "derived_stats": deepcopy(character.derived_stats or {}),
+        "skills": deepcopy(character.skills or {}),
+        "equipment": list(character.equipment or []),
+        "background": character.background,
+        "notes": character.notes,
+    }
+
+
+async def _load_game_state(db: AsyncSession, room_id: str) -> tuple[GameSession, GameState]:
+    game_session = await db.get(GameSession, room_id)
+    if game_session is None:
+        raise RoomConflictError("房间尚未创建 GameSession")
+    try:
+        state = GameState.model_validate(game_session.state_json)
+    except ValueError as exc:
+        raise RoomConflictError("房间 GameState 数据无效") from exc
+    if state.room_id != room_id or state.event_sequence != game_session.state_version:
+        raise RoomConflictError("房间 GameState 与数据库版本不一致")
+    return game_session, state
+
+
+async def suspend_game(
+    db: AsyncSession,
+    room_id: str,
+    reconnect_token: str | None,
+) -> None:
+    """InGame → Suspended；规则世界仍保持 playing。"""
+    room = await find_room_by_id(db, room_id)
+    await _require_host(db, room, reconnect_token)
+    if room.phase != "InGame":
+        raise RoomConflictError("只有进行中的游戏可以挂起")
+    _, state = await _load_game_state(db, room_id)
+    if state.phase != "playing":
+        raise RoomConflictError("已经结束的 GameState 不能挂起")
+
+    result = await db.execute(
+        update(Room)
+        .where(Room.id == room_id, Room.phase == "InGame")
+        .values(phase="Suspended", updated_at=datetime.now(UTC))
+    )
+    if getattr(result, "rowcount", None) != 1:
+        await db.rollback()
+        raise RoomConflictError("房间阶段已经变化，无法挂起")
+    await db.commit()
+
+
+async def resume_game(
+    db: AsyncSession,
+    room_id: str,
+    reconnect_token: str | None,
+) -> None:
+    """Suspended → InGame；继续使用原 GameSession 和 GameState。"""
+    room = await find_room_by_id(db, room_id)
+    await _require_host(db, room, reconnect_token)
+    if room.phase != "Suspended":
+        raise RoomConflictError("只有已挂起的游戏可以恢复")
+    _, state = await _load_game_state(db, room_id)
+    if state.phase != "playing":
+        raise RoomConflictError("已经结束的 GameState 不能恢复")
+
+    result = await db.execute(
+        update(Room)
+        .where(Room.id == room_id, Room.phase == "Suspended")
+        .values(phase="InGame", updated_at=datetime.now(UTC))
+    )
+    if getattr(result, "rowcount", None) != 1:
+        await db.rollback()
+        raise RoomConflictError("房间阶段已经变化，无法恢复")
     await db.commit()
 
 
@@ -426,14 +598,45 @@ async def list_my_rooms(db: AsyncSession, user: User) -> list[MyRoomSummary]:
 
 
 async def end_game(db: AsyncSession, room_id: str, reconnect_token: str | None) -> None:
-    """房主结束游戏，房间状态标记为已完成。"""
+    """房主手动结束，同时将 Room 和 GameState 原子标记为结束。"""
     room = await find_room_by_id(db, room_id)
     await _require_host(db, room, reconnect_token)
-    if room.phase != "InGame":
-        raise RoomConflictError("只有进行中的游戏可以结束")
-    room.phase = "Completed"
-    room.ended_at = datetime.now(UTC)
-    await db.commit()
+    if room.phase not in {"InGame", "Suspended"}:
+        raise RoomConflictError("只有进行中或已挂起的游戏可以结束")
+    game_session, state = await _load_game_state(db, room_id)
+    ended_state = state.model_copy(
+        update={
+            "phase": "ended",
+            "ending_id": state.ending_id if state.phase == "ended" else None,
+        },
+        deep=True,
+    )
+    now = datetime.now(UTC)
+
+    try:
+        # 与 SqlAlchemyEngineStore.commit() 保持同一加锁顺序：先 Room，
+        # 后 GameSession。否则 PostgreSQL 上手动结束与规则动作并发时可能互相等待。
+        room_update = await db.execute(
+            update(Room)
+            .where(Room.id == room_id, Room.phase.in_(("InGame", "Suspended")))
+            .values(phase="Completed", ended_at=now, updated_at=now)
+        )
+        if getattr(room_update, "rowcount", None) != 1:
+            raise RoomConflictError("房间阶段已经变化，无法结束")
+        state_update = await db.execute(
+            update(GameSession)
+            .where(
+                GameSession.room_id == room_id,
+                GameSession.state_version == game_session.state_version,
+            )
+            .values(state_json=ended_state.to_json_dict(), updated_at=now)
+        )
+        if getattr(state_update, "rowcount", None) != 1:
+            raise RoomConflictError("GameState 已被并发更新，请重试结束操作")
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
 
 
 # ── 游戏 / 规则系统 / 模组目录 ──────────────────────────────

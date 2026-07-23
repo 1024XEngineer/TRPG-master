@@ -7,7 +7,7 @@
 """
 
 import tempfile
-from collections.abc import AsyncGenerator, Generator
+from collections.abc import AsyncGenerator, Callable, Generator
 from pathlib import Path
 
 import pytest
@@ -15,6 +15,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
+from app.adapters import SqlAlchemyEngineStore
 from app.controller import ws as ws_controller
 from app.core.db import Base, get_db
 from app.core.seed import ensure_seed_content
@@ -84,6 +85,16 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
     """
     async with TestSessionLocal() as session:
         yield session
+
+
+@pytest.fixture
+def engine_store_factory() -> Callable[..., SqlAlchemyEngineStore]:
+    """构造使用测试数据库的 SQLAlchemy EngineStore，可按需注入失败点。"""
+
+    def factory(**kwargs) -> SqlAlchemyEngineStore:  # noqa: ANN003
+        return SqlAlchemyEngineStore(TestSessionLocal, **kwargs)
+
+    return factory
 
 
 @pytest.fixture

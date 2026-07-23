@@ -1,8 +1,9 @@
-# 规则引擎持久化基础表
+# 规则引擎持久化与房间运行时
 
-Issue #89 只建立数据库结构、ORM、迁移和内置发布数据。`SqlAlchemyEngineStore`、
-正式开局时创建 `GameSession`、房间生命周期、WebSocket、SDK 与前端接入均由后续
-Issue 实现。
+Issue #89 建立数据库结构、ORM、迁移和内置发布数据；Issue #121 在不修改引擎
+Protocol 和 RuleKernel 的前提下，实现 `SqlAlchemyEngineStore`、完成角色卡自动
+存入用户卡库、正式开局和房间运行时生命周期。WebSocket `action.submit`、主持
+编排、用户卡库展示/复用、SDK 与前端接入仍由后续 Issue 实现。
 
 ## 模组目录与发布内容
 
@@ -21,10 +22,48 @@ Issue 实现。
 - `game_events`：按 `(room_id, sequence)` 保存规则引擎只追加的权威状态变化事件，
   并按 `(room_id, event_id)` 去重。
 - `action_executions`：按 `(room_id, request_id)` 保存首次完整 `ActionRequest` 和
-  `EngineExecutionResult`，供后续 Store 实现幂等重放。
+  `EngineExecutionResult`，供 Store 在服务重建后幂等重放。
 
 领域 JSON 均使用 SQLAlchemy 通用 `JSON`。ModuleContent、GameState、Event、
 ActionRequest 和 EngineExecutionResult 各自具有独立 schema version，首版为 `1`。
+
+## SQLAlchemy Store
+
+`SqlAlchemyEngineStore` 为每次规则引擎调用创建独立的异步数据库 Session，并在
+一个事务内：
+
+1. 加载并校验固定的 `ModuleContent`、`GameState` 和 revision；
+2. 查询 `(room_id, request_id)` 对应的 CompletedAction；
+3. 以 `WHERE state_version = expected_revision` 条件更新 GameSession；
+4. 追加 GameEvent 并保存 ActionExecution；
+5. 一并提交，任一步失败则全部回滚。
+
+Store 只允许 `InGame` 房间提交新动作。`Suspended` 房间仍可读取投影和重放已经
+完成的幂等请求，但新动作无法提交。规则结局把 GameState 和 Room 在同一事务中
+分别更新为 `ended` 与 `Completed`。
+
+## 开局与生命周期
+
+玩家完成房间 Character 时，后端在同一事务中将其建卡态字段自动保存到
+`user_character_templates`；保存失败时 Character 不会被部分标记为完成。重复完成
+同一份卡不会产生重复用户卡；完成后再次修改会在下次完成时另存为新卡，不覆盖旧卡。
+
+选择模组时，Room 同时固定 `scenario_id` 和当前已发布的 `module_version`。正式
+开局按稳定的 Player 加入顺序分配 `actor_1`、`actor_2` 等房间内 Actor ID，将
+完成的 Character 内容、ID 和版本复制到独立 ActorState，并以模组第一个 Scene
+和 Entity 初始状态创建唯一 GameSession。
+
+```text
+Lobby → Building → InGame ⇄ Suspended → Completed
+                         └──────────────→ Completed
+```
+
+- 开局、GameSession 创建和 Room 进入 `InGame` 原子提交；
+- 开局后 Character 的写操作冻结，读取仍然可用；修改、完成或重新掷骰均返回冲突；
+- `Suspended` 只改变 Room，GameState 保持 `playing`；
+- 恢复复用原 GameSession，不重建 Actor ID 或状态；
+- 房主手动结束同时将 GameState 设为 `ended`，允许 `ending_id = null`；
+- 已经 `Completed` 的房间不能恢复或重新开局。
 
 ## 两类 Event
 

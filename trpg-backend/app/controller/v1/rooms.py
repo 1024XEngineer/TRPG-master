@@ -175,6 +175,44 @@ async def end_game(
     return ApiResponse.ok(None)
 
 
+@router.post("/{room_id}/suspend", response_model=ApiResponse[None])
+async def suspend_game(
+    room_id: str,
+    reconnect_token: str | None = Header(default=None, alias="X-Reconnect-Token"),
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[None]:
+    """POST /api/v1/rooms/{roomId}/suspend —— 房主挂起进行中的游戏。"""
+    try:
+        await room_service.suspend_game(db, room_id, reconnect_token)
+    except (
+        room_service.RoomNotFoundError,
+        room_service.RoomAuthenticationError,
+        room_service.RoomAuthorizationError,
+        room_service.RoomConflictError,
+    ) as exc:
+        _raise_service_error(exc)
+    return ApiResponse.ok(None)
+
+
+@router.post("/{room_id}/resume", response_model=ApiResponse[None])
+async def resume_game(
+    room_id: str,
+    reconnect_token: str | None = Header(default=None, alias="X-Reconnect-Token"),
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[None]:
+    """POST /api/v1/rooms/{roomId}/resume —— 房主恢复已挂起的游戏。"""
+    try:
+        await room_service.resume_game(db, room_id, reconnect_token)
+    except (
+        room_service.RoomNotFoundError,
+        room_service.RoomAuthenticationError,
+        room_service.RoomAuthorizationError,
+        room_service.RoomConflictError,
+    ) as exc:
+        _raise_service_error(exc)
+    return ApiResponse.ok(None)
+
+
 @router.get("/{room_id}/summary", response_model=ApiResponse[RoomSummaryRead])
 async def get_room_summary(
     room_id: str, db: AsyncSession = Depends(get_db)
@@ -230,6 +268,7 @@ async def create_character(
         room_service.RoomNotFoundError,
         room_service.RoomAuthenticationError,
         room_service.RoomAuthorizationError,
+        room_service.RoomConflictError,
     ) as exc:
         _raise_service_error(exc)
     return ApiResponse.ok(result)
@@ -260,6 +299,7 @@ async def get_character(
         character_service.CharacterNotFoundError,
         room_service.RoomAuthenticationError,
         room_service.RoomAuthorizationError,
+        room_service.RoomConflictError,
     ) as exc:
         _raise_service_error(exc)
     return ApiResponse.ok(character)
@@ -286,6 +326,7 @@ async def update_character(
         character_service.CharacterNotFoundError,
         room_service.RoomAuthenticationError,
         room_service.RoomAuthorizationError,
+        room_service.RoomConflictError,
     ) as exc:
         _raise_service_error(exc)
     return ApiResponse.ok(None)
@@ -325,6 +366,7 @@ async def complete_character(
         room_service.RoomAuthenticationError,
         room_service.RoomAuthorizationError,
         room_service.RulesetNotConfiguredError,
+        room_service.RoomConflictError,
     ) as exc:
         _raise_service_error(exc)
     return ApiResponse.ok(None)
@@ -350,6 +392,7 @@ async def roll_attributes(
         character_service.CharacterNotFoundError,
         room_service.RoomAuthenticationError,
         room_service.RoomAuthorizationError,
+        room_service.RoomConflictError,
     ) as exc:
         _raise_service_error(exc)
     return ApiResponse.ok(result)

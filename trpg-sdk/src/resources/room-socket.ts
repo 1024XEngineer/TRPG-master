@@ -1,5 +1,6 @@
 import type {
   ActionSubmitPayload,
+  ChatSendPayload,
   CheckRollPayload,
   PlayerReadyPayload,
   RoomJoinPayload,
@@ -28,6 +29,18 @@ const PAYLOAD_VALIDATORS: {
 } = {
   'session.bound': (p) => typeof p.roomId === 'string' && typeof p.playerId === 'string',
   'narration.push': (p) => typeof p.text === 'string',
+  // issue #107：讨论区消息 + 玩家原话广播
+  'chat.message': (p) =>
+    typeof p.messageId === 'string' &&
+    typeof p.playerId === 'string' &&
+    typeof p.nickname === 'string' &&
+    typeof p.text === 'string' &&
+    typeof p.sentAt === 'string' &&
+    typeof p.clientMessageId === 'string',
+  'action.broadcast': (p) =>
+    typeof p.playerId === 'string' &&
+    typeof p.nickname === 'string' &&
+    typeof p.utterance === 'string',
   // issue #77 新增的 11 个 S→C 事件。只校验必填字段的类型（可空字段不校验）；
   // 嵌套对象（players/player）只做「是不是对象/数组」的浅检查，不深入逐字段。
   'room.state': (p) =>
@@ -165,6 +178,14 @@ export class RoomSocket {
 
   submitAction(playerId: string, payload: ActionSubmitPayload): void {
     this.send('action.submit', playerId, payload);
+  }
+
+  /** chat.send —— 往**玩家讨论区**发一条消息（issue #107）。跟 submitAction
+   * 是两条独立通道：讨论区消息只在玩家之间广播（chat.message），永远不进
+   * AI 上下文。`clientMessageId` 由调用方生成（如 crypto.randomUUID()），
+   * 重连重发同一条消息时服务端靠它去重。 */
+  sendChat(playerId: string, payload: ChatSendPayload): void {
+    this.send('chat.send', playerId, payload);
   }
 
   /** check.roll —— 玩家请求做一次技能检定（issue #77 新增，后端本期回

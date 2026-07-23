@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Users, Map, BookOpen, ScrollText, Star, X, SendHorizontal, Dice6, Plus, Save, FlagOff, Heart } from 'lucide-react'
+import { ArrowLeft, Users, Map, BookOpen, ScrollText, Star, X, SendHorizontal, Dice6, Plus, Save, FlagOff, Heart, Mic, MessagesSquare, Scroll } from 'lucide-react'
 import { useState, useRef, useEffect, type FormEvent } from 'react'
+import type { ChatMessage } from 'trpg-sdk'
 import { useRoomStore } from '@/stores/room-store'
 import { useAuthStore } from '@/stores/auth-store'
 import { useCharacterStore } from '@/stores/character-store'
@@ -8,6 +9,7 @@ import { connectWebSocket, waitForWsOpen, sdk, onWsMessage, disconnectWebSocket,
 import { endGame } from '@/services/room'
 import { useRoomPlayers } from '@/hooks/useRoomPlayers'
 import { useRuleset } from '@/hooks/useRuleset'
+import { useSpeechInput } from '@/hooks/useSpeechInput'
 
 // ─── Types ───────────────────────────────────────────
 interface Message {
@@ -380,6 +382,11 @@ export default function RoomPage() {
   const [messages, setMessages] = useState<Message[]>([
     { type: 'system', content: '案件档案已加载 · 惠特利旧宅', time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) },
   ])
+  // 两个独立界面（issue #107）：「主持人」是跟 AI 守秘人的对话（全房间广播、
+  // 进 AI 上下文），「讨论区」是玩家之间的商量（AI 完全看不见）。同一个输入框
+  // 按当前频道分流到 action.submit / chat.send 两条通道。
+  const [channel, setChannel] = useState<'dm' | 'chat'>('dm')
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [typing, setTyping] = useState(false)
   const [openPanel, setOpenPanel] = useState<string | null>(null)
@@ -403,7 +410,7 @@ export default function RoomPage() {
     // 一旦被带偏就会把整个 RoomPage 顶飞，见「继续游戏」跳转后的空白页 bug）。
     // 'nearest' 只调整真正需要滚的那个容器（消息列表自己），不会殃及无关祖先。
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
-  }, [messages])
+  }, [messages, chatMessages, channel])
 
   // ★ 访客走的是 /join → /character → /character-ready → /room，全程不经过
   // /lobby——而 connectWebSocket 之前只在 LobbyPage 里调用过，导致访客的浏览器
@@ -424,29 +431,85 @@ export default function RoomPage() {
     }
   }, [roomId, playerId, roomCode, nickname, reconnectToken])
 
-  // 真实 AI 主持人回复：订阅 narration.push（不再是本地假打字模拟）
+  // 服务端广播订阅（issue #107 起是四种事件）：
+  // - action.broadcast：任何玩家对守秘人说的**原话**。自己的那条也靠这条广播
+  //   回显，不再本地乐观插入——所有人（包括自己）看到的时间线完全一致，这就是
+  //   修"聊天记录像被隔离"bug 的方式。
+  // - narration.push：守秘人的叙事回复（全房间）。
+  // - chat.message：讨论区消息（全房间，AI 看不见这条通道）。
+  // - error：ACTION_IN_PROGRESS（有人正在等守秘人回应）等，转成友好的系统提示。
   useEffect(() => {
     const off = onWsMessage((envelope) => {
-      if (envelope.type === 'narration.push') {
+      const now = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+      if (envelope.type === 'action.broadcast') {
+        const isSelf = envelope.payload.playerId === playerId
+        setMessages(prev => [...prev, {
+          type: 'player',
+          sender: isSelf ? senderName : envelope.payload.nickname,
+          content: envelope.payload.utterance,
+          time: now,
+          isSelf,
+        }])
+      } else if (envelope.type === 'narration.push') {
         setTyping(false)
         setMessages(prev => [...prev, {
-          type: 'narr', sender: '守秘人',
-          content: envelope.payload.text,
-          time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+          type: 'narr', sender: '守秘人', content: envelope.payload.text, time: now,
         }])
+      } else if (envelope.type === 'chat.message') {
+        setChatMessages(prev =>
+          // 按 messageId 去重：断线重连后重发（相同 clientMessageId）会拿到
+          // 与第一次相同 messageId 的广播，直接丢弃即可。
+          prev.some(m => m.messageId === envelope.payload.messageId)
+            ? prev
+            : [...prev, envelope.payload]
+        )
+      } else if (envelope.type === 'error') {
+        setTyping(false)
+        const friendly =
+          envelope.payload.code === 'ACTION_IN_PROGRESS'
+            ? '守秘人正在处理其他玩家的行动，请稍候再试'
+            : envelope.payload.code === 'INTERNAL_ERROR'
+              ? '守秘人暂时无法回应，请稍后重试'
+              : null
+        if (friendly) {
+          setMessages(prev => [...prev, { type: 'system', content: friendly, time: now }])
+        }
       }
     })
     return off
-  }, [])
+  }, [playerId, senderName])
+
+  // 讨论区历史：进房拉一次（倒序返回，反转成时间正序渲染）。实时增量走上面
+  // 的 chat.message 广播，历史和增量之间的重复靠 messageId 去重兜住。
+  useEffect(() => {
+    if (!roomId || !reconnectToken) return
+    sdk.rooms
+      .listMessages(roomId, reconnectToken)
+      .then((history) => {
+        const ordered = [...history].reverse()
+        setChatMessages(prev => {
+          const known = new Set(prev.map(m => m.messageId))
+          return [...ordered.filter(m => !known.has(m.messageId)), ...prev]
+        })
+      })
+      .catch(() => {}) // 历史拉不到不阻塞进房，聊天区从空开始
+  }, [roomId, reconnectToken])
+
+  // 语音输入（issue #107）：转写文本追加进输入框，用户确认后照常点发送——
+  // 发送路径与手动打字完全一致，转写不直接发送（给用户一次改错的机会）。
+  const speech = useSpeechInput((text) => setInput(prev => (prev ? prev + text : text)))
 
   const sendMessage = (e?: FormEvent) => {
     e?.preventDefault()
     const text = input.trim()
     if (!text || !playerId) return
-    setMessages(prev => [...prev, {
-      type: 'player', sender: senderName, content: text, time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }), isSelf: true,
-    }])
     setInput('')
+    if (channel === 'chat') {
+      // 讨论区：不本地乐观插入，等 chat.message 广播回显（跟主持人频道同一个
+      // 理由——所有人看到的都来自同一条广播，自己不搞特例）。
+      sdk.roomSocket.sendChat(playerId, { text, clientMessageId: crypto.randomUUID() })
+      return
+    }
     setTyping(true)
     sdk.roomSocket.submitAction(playerId, { utterance: text })
   }
@@ -526,9 +589,60 @@ export default function RoomPage() {
         </div>
       )}
 
+      {/* 频道切换（issue #107）：主持人 = 跟 AI 的对话（全房间可见、进 AI 上下文）；
+          讨论区 = 玩家之间商量（AI 完全看不见）。两个独立界面共用下方输入框，
+          发送按当前频道分流。 */}
+      <div className="flex border-b border-border-light bg-page flex-shrink-0">
+        {([
+          { key: 'dm', label: '主持人', icon: Scroll },
+          { key: 'chat', label: '讨论区', icon: MessagesSquare },
+        ] as const).map((tab) => (
+          <button
+            key={tab.key}
+            onClick={() => setChannel(tab.key)}
+            className={`flex-1 py-2 text-[12px] font-semibold flex items-center justify-center gap-1.5 transition-colors border-b-2 ${
+              channel === tab.key
+                ? 'text-brass-dark border-brass'
+                : 'text-text-muted border-transparent'
+            }`}
+          >
+            <tab.icon className="w-3.5 h-3.5" strokeWidth={2} />
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-3" id="chatScroll">
-        {messages.map((msg, i) => {
+        {channel === 'chat' ? (
+          chatMessages.length === 0 ? (
+            <div className="text-center py-8 text-text-muted text-sm">
+              这里是玩家讨论区，商量对策吧——守秘人听不到这里的话
+            </div>
+          ) : (
+            chatMessages.map((msg) => {
+              const isSelf = msg.playerId === playerId
+              return (
+                <div key={msg.messageId} className={`flex gap-2.5 ${isSelf ? 'flex-row-reverse' : ''} animate-[msgIn_0.3s_ease]`}>
+                  <div className={`w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-sm border border-border-light ${isSelf ? 'bg-[#eef6ee]' : 'bg-panel'}`}>
+                    💬
+                  </div>
+                  <div className={`flex-1 min-w-0 ${isSelf ? 'text-right' : ''}`}>
+                    <div className={`text-[11px] font-semibold mb-0.5 ${isSelf ? 'text-mold' : 'text-text-muted'}`}>
+                      {msg.nickname}
+                    </div>
+                    <div className={`text-sm leading-[1.65] text-text-body inline-block max-w-full px-3.5 py-2.5 rounded-md ${isSelf ? 'bg-[#eef6ee]' : 'bg-panel'}`}>
+                      {msg.text}
+                    </div>
+                    <div className="text-[10px] text-text-dim mt-0.5">
+                      {new Date(msg.sentAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
+                    </div>
+                  </div>
+                </div>
+              )
+            })
+          )
+        ) : messages.map((msg, i) => {
           if (msg.type === 'system') {
             return (
               <div key={i} className="text-center py-1.5 animate-[fadeIn_0.3s_ease]">
@@ -580,8 +694,8 @@ export default function RoomPage() {
           )
         })}
 
-        {/* Typing indicator */}
-        {typing && (
+        {/* Typing indicator（只属于主持人频道——讨论区没有"守秘人正在输入"这回事） */}
+        {channel === 'dm' && typing && (
           <div className="flex gap-2.5 animate-[msgIn_0.3s_ease]">
             <div className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-sm bg-[#faf5eb] border border-brass">
               📜
@@ -643,20 +757,37 @@ export default function RoomPage() {
         </div>
       )}
 
-      {/* Input area */}
+      {/* Input area：同一个输入框按当前频道分流（主持人 → action.submit，
+          讨论区 → chat.send）。麦克风是语音输入（issue #107）：浏览器本地转写
+          成文字填进输入框，之后跟手动打字完全一样；浏览器不支持时按钮不渲染。 */}
       <div className="border-t border-border-light px-3 pb-3 pt-1.5 bg-page flex-shrink-0">
         <form onSubmit={sendMessage} className="flex gap-2 items-end">
-          <button
-            type="button"
-            onClick={() => setShowDice(true)}
-            className="w-10 h-10 rounded-full bg-card border border-border-light text-text-muted flex items-center justify-center flex-shrink-0 active:scale-[0.92] active:border-brass active:text-brass-dark transition-all"
-          >
-            <Dice6 className="w-[18px] h-[18px]" strokeWidth={2} />
-          </button>
+          {channel === 'dm' && (
+            <button
+              type="button"
+              onClick={() => setShowDice(true)}
+              className="w-10 h-10 rounded-full bg-card border border-border-light text-text-muted flex items-center justify-center flex-shrink-0 active:scale-[0.92] active:border-brass active:text-brass-dark transition-all"
+            >
+              <Dice6 className="w-[18px] h-[18px]" strokeWidth={2} />
+            </button>
+          )}
+          {speech.supported && (
+            <button
+              type="button"
+              onClick={() => (speech.listening ? speech.stop() : speech.start())}
+              className={`w-10 h-10 rounded-full border flex items-center justify-center flex-shrink-0 active:scale-[0.92] transition-all ${
+                speech.listening
+                  ? 'bg-mold border-mold text-white animate-pulse'
+                  : 'bg-card border-border-light text-text-muted active:border-brass active:text-brass-dark'
+              }`}
+            >
+              <Mic className="w-[18px] h-[18px]" strokeWidth={2} />
+            </button>
+          )}
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="输入行动…"
+            placeholder={channel === 'dm' ? '对守秘人说…' : '和队友讨论…'}
             className="flex-1 bg-input border border-border-mid rounded-[20px] px-4 py-2.5 text-sm text-text-primary font-sans outline-none min-h-[40px] placeholder:text-text-dim focus:border-brass transition-colors"
           />
           <button

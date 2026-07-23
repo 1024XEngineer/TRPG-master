@@ -1,5 +1,6 @@
 import type { ApiClient } from '../client';
 import type {
+  ChatMessage,
   CreateRoomInput,
   CreateRoomResult,
   ModuleSummary,
@@ -122,6 +123,28 @@ export class RoomsResource {
   getReplay(roomId: string, reconnectToken: string): Promise<ReplayEvent[]> {
     return this.client.get<ReplayEvent[]>(
       `/rooms/${roomId}/replay`,
+      this.roomAuth(reconnectToken)
+    );
+  }
+
+  /**
+   * GET /api/v1/rooms/{roomId}/messages — 讨论区历史消息，倒序分页（issue #107）
+   *
+   * 刷新页面/断线重连后靠它拉回聊天历史（实时消息走 WS 的 chat.message 广播）。
+   * `before` 传上一页最后一条的 messageId 继续往前翻；返回最新在前，渲染时
+   * 由前端自行反转成时间正序。仅本房间成员可查（房间凭证）。
+   */
+  listMessages(
+    roomId: string,
+    reconnectToken: string,
+    options?: { before?: string; limit?: number }
+  ): Promise<ChatMessage[]> {
+    const params = new URLSearchParams();
+    if (options?.before) params.set('before', options.before);
+    if (options?.limit !== undefined) params.set('limit', String(options.limit));
+    const query = params.size > 0 ? `?${params.toString()}` : '';
+    return this.client.get<ChatMessage[]>(
+      `/rooms/${roomId}/messages${query}`,
       this.roomAuth(reconnectToken)
     );
   }

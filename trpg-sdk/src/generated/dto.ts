@@ -12,14 +12,11 @@
 /**
  * action.submit 事件 payload。
  *
- * `utterance` 必填，理由同 PlayerReadyPayload.ready：一条不带行动内容的
- * action.submit 是畸形消息。给默认空串会让 SDK 侧变成 `utterance?: string`，
- * 于是 `submitAction(playerId, {})` 类型检查通过、运行时静默无操作。
- *
- * 注意「必填」只管字段存在，空白内容（`""` / `"   "`）仍由下游的
- * `strip()` + 空值判断拦掉，两者不冲突。
+ * `client_action_id` 是客户端为一次逻辑动作生成的稳定幂等键；网络重试必须
+ * 复用原值。两个字段都在契约层拒绝空白文本。
  */
 export interface ActionSubmitPayload {
+  clientActionId: string;
   utterance: string;
 }
 
@@ -304,6 +301,7 @@ export interface ErrorDetail {
 export interface ErrorPayload {
   code: string;
   message: string;
+  correlationId?: string | null;
 }
 
 /**
@@ -365,18 +363,25 @@ export interface MeRead {
 }
 
 /**
- * GET /api/v1/modules/{moduleId} 返回——在 ModuleRead 基础上补充简介。
+ * GET /api/v1/modules/{moduleId} 返回——增加故事页展示信息。
  */
 export interface ModuleDetailRead {
   id: string;
+  gameSystemId: string;
+  gameSystemName?: string | null;
   title: string;
+  nameEn?: string | null;
   version: string;
+  status: string;
   authors: string[];
   playersMin: number;
   playersMax: number;
   difficulty: number;
   estimatedDuration?: string | null;
   synopsis?: string | null;
+  storyLabel?: string | null;
+  subtitle?: string | null;
+  storyPages: ModuleStoryPage[];
 }
 
 /**
@@ -412,13 +417,26 @@ export interface ModuleImportRequestBody {
  */
 export interface ModuleRead {
   id: string;
+  gameSystemId: string;
+  gameSystemName?: string | null;
   title: string;
+  nameEn?: string | null;
   version: string;
+  status: string;
   authors: string[];
   playersMin: number;
   playersMax: number;
   difficulty: number;
   estimatedDuration?: string | null;
+  synopsis?: string | null;
+}
+
+/**
+ * 玩家开局前可见的一页故事介绍。
+ */
+export interface ModuleStoryPage {
+  title: string;
+  content: string;
 }
 
 /**
@@ -579,6 +597,7 @@ export interface RoomPreview {
   roomName: string;
   phase: string;
   storyStarted: boolean;
+  moduleId?: string | null;
   moduleTitle?: string | null;
   playerCount: number;
   maxPlayers: number;

@@ -11,6 +11,7 @@ from collections.abc import AsyncGenerator, Callable, Generator
 from pathlib import Path
 
 import pytest
+from collaboration_framework.engine import RuleEngineService
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
@@ -19,6 +20,7 @@ from app.adapters import SqlAlchemyEngineStore
 from app.controller import ws as ws_controller
 from app.core.db import Base, get_db
 from app.core.seed import ensure_seed_content
+from app.core.turn import build_turn_application
 from app.main import app
 
 # 用临时文件 SQLite，不用 ":memory:"+StaticPool。关键原因是并发模型：异步 HTTP
@@ -56,6 +58,11 @@ app.dependency_overrides[get_db] = override_get_db
 # 工厂也重绑到测试库，否则 WS 测试里 HTTP 请求写进的是内存测试库、WS 路由却
 # 去空的真实库里查 player，必然查不到而关连接。
 ws_controller.async_session_factory = TestSessionLocal  # type: ignore[assignment]
+_test_turn_store = SqlAlchemyEngineStore(TestSessionLocal)
+ws_controller.turn_application = build_turn_application(
+    _test_turn_store,
+    RuleEngineService(_test_turn_store),
+)
 
 
 @pytest.fixture(autouse=True)

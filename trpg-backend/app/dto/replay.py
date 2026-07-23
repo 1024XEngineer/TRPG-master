@@ -2,8 +2,8 @@
 
 `GET /rooms/{roomId}/summary` 依赖 AI 编排生成复盘内容（归 #48/#68），本期
 固定返回 `NOT_IMPLEMENTED`。`GET /rooms/{roomId}/replay` 则是真实实现——
-读的是 ws.py 在 narration.push / action.submit 时写入的 `events` 表，是本期
-少数"服务端真的在写、也真的在读"的完整数据闭环之一。
+读的是 ws.py 在发送 narration.push 时写入的 `events` 表，是服务端
+"真的在写、也真的在读"的完整数据闭环之一。
 """
 
 from app.dto.common import CamelModel, UtcDatetime

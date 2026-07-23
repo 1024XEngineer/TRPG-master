@@ -4,7 +4,36 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { isValidServerEvent, RoomSocket } from './room-socket';
+import type { TurnCompletedEvent } from '../types';
+import { isValidServerEvent, isValidTurnCompleted, RoomSocket } from './room-socket';
+
+const completedEvent = {
+  protocol_version: '1',
+  message_type: 'turn.completed',
+  correlation_id: 'action-123',
+  payload: {
+    room_id: 'room-1',
+    player_id: 'player-1',
+    actor_id: 'actor-1',
+    narration: {
+      kind: 'narration',
+      text: '规则已经确认了这次行动。',
+      claimed_fact_ids: [],
+      suggested_actions: [],
+    },
+    player_view: {
+      room_id: 'room-1',
+      player_id: 'player-1',
+      actor_id: 'actor-1',
+      scene_id: 'scene-1',
+      phase: 'playing',
+      revision: '1',
+      visible_facts: [],
+      visible_entities: [],
+      checkpoint_options: [],
+    },
+  },
+} satisfies TurnCompletedEvent;
 
 test('isValidServerEvent：接受已知类型的合法事件', () => {
   assert.equal(
@@ -39,6 +68,37 @@ test('isValidServerEvent：拒绝 payload 字段缺失或类型不对', () => {
   assert.equal(isValidServerEvent({ type: 'narration.push', payload: { text: 123 } }), false);
   assert.equal(
     isValidServerEvent({ type: 'session.bound', payload: { roomId: 'r1', playerId: 42 } }),
+    false
+  );
+});
+
+test('isValidTurnCompleted：接受 Agent v1 回合结果', () => {
+  assert.equal(isValidTurnCompleted(completedEvent), true);
+});
+
+test('isValidTurnCompleted：拒绝未知版本、身份不一致和非法 PlayerView', () => {
+  assert.equal(
+    isValidTurnCompleted({ ...completedEvent, protocol_version: '2' }),
+    false
+  );
+  assert.equal(
+    isValidTurnCompleted({
+      ...completedEvent,
+      payload: {
+        ...completedEvent.payload,
+        player_view: { ...completedEvent.payload.player_view, player_id: 'another-player' },
+      },
+    }),
+    false
+  );
+  assert.equal(
+    isValidTurnCompleted({
+      ...completedEvent,
+      payload: {
+        ...completedEvent.payload,
+        player_view: { ...completedEvent.payload.player_view, revision: 2 },
+      },
+    }),
     false
   );
 });

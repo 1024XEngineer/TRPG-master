@@ -6,6 +6,8 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.seed import BUILTIN_SCENARIO_ID, BUILTIN_SYSTEM_ID
+from app.models.content import Scenario
 from app.models.room import Player
 from tests.helpers import ROOMS_BASE, bearer, create_room, join_room, reconnect, register
 
@@ -258,6 +260,67 @@ async def test_select_module_validates_room_and_module(client: AsyncClient) -> N
 
     assert missing_room.status_code == 404
     assert missing_module.status_code == 404
+
+
+async def test_module_catalog_filters_hidden_and_rejects_wip_selection(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    wip_id = "00000000-0000-0000-0000-000000000091"
+    hidden_id = "00000000-0000-0000-0000-000000000092"
+    db_session.add_all(
+        [
+            Scenario(
+                id=wip_id,
+                game_system_id=BUILTIN_SYSTEM_ID,
+                title="开发中模组",
+                name_en="Work in Progress",
+                version="0.1.0",
+                status="wip",
+                authors=["测试作者"],
+                players_min=2,
+                players_max=4,
+                difficulty=2,
+                estimated_duration="待定",
+                synopsis="用于验证目录状态。",
+                story_pages=[],
+            ),
+            Scenario(
+                id=hidden_id,
+                game_system_id=BUILTIN_SYSTEM_ID,
+                title="隐藏模组",
+                version="1.0.0",
+                status="hidden",
+                authors=[],
+                story_pages=[],
+            ),
+        ]
+    )
+    await db_session.commit()
+
+    catalog = (await client.get("/api/v1/modules")).json()["data"]
+    ids = {module["id"] for module in catalog}
+    assert BUILTIN_SCENARIO_ID in ids
+    assert wip_id in ids
+    assert hidden_id not in ids
+    wip = next(module for module in catalog if module["id"] == wip_id)
+    assert wip["gameSystemId"] == BUILTIN_SYSTEM_ID
+    assert wip["status"] == "wip"
+    assert wip["nameEn"] == "Work in Progress"
+    assert wip["synopsis"] == "用于验证目录状态。"
+
+    detail = (await client.get(f"/api/v1/modules/{BUILTIN_SCENARIO_ID}")).json()["data"]
+    assert detail["status"] == "ready"
+    assert detail["storyPages"][0]["title"]
+    assert detail["storyPages"][0]["content"]
+
+    room = await create_room(client)
+    rejected = await client.post(
+        f"{ROOMS_BASE}/{room['roomId']}/module",
+        json={"moduleId": wip_id, "attributeGenMethod": "point_buy"},
+        headers=reconnect(room["reconnectToken"]),
+    )
+    assert rejected.status_code == 409
 
 
 async def test_create_and_join_require_login(client: AsyncClient) -> None:

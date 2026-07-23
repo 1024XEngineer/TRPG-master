@@ -158,6 +158,7 @@ async def _to_room_preview(db: AsyncSession, room: Room) -> RoomPreview:
         room_name=room.room_name,
         phase=room.phase,
         story_started=room.phase != "Lobby",
+        module_id=room.scenario_id,
         module_title=await _module_title(db, room.scenario_id),
         player_count=len(room_players),
         max_players=room.max_players,
@@ -309,6 +310,8 @@ async def select_module(
     scenario = await db.get(Scenario, payload.module_id)
     if scenario is None:
         raise ModuleNotFoundError("模组不存在")
+    if scenario.status != "ready":
+        raise RoomConflictError("只有 ready 状态的模组可以用于正式开局")
     module_version = await db.get(ModuleVersion, (scenario.id, scenario.version))
     if module_version is None:
         raise ModuleNotFoundError("模组当前推荐版本尚未发布")
@@ -699,9 +702,17 @@ async def require_ruleset(db: AsyncSession, system_id: str) -> RulesetRead:
 
 
 async def list_modules(db: AsyncSession) -> list[ModuleRead]:
-    """获取可用模组列表。"""
-    result = await db.scalars(select(Scenario))
-    return [ModuleRead.model_validate(s) for s in result]
+    """获取玩家可见模组目录；hidden 只对管理/发布流程可见。"""
+    result = await db.execute(
+        select(Scenario, GameSystem.name)
+        .join(GameSystem, GameSystem.id == Scenario.game_system_id)
+        .where(Scenario.status != "hidden")
+        .order_by(Scenario.title, Scenario.id)
+    )
+    return [
+        ModuleRead.model_validate(scenario).model_copy(update={"game_system_name": system_name})
+        for scenario, system_name in result.tuples()
+    ]
 
 
 async def get_module_detail(db: AsyncSession, module_id: str) -> ModuleDetailRead | None:
@@ -709,20 +720,56 @@ async def get_module_detail(db: AsyncSession, module_id: str) -> ModuleDetailRea
     scenario = await db.get(Scenario, module_id)
     if scenario is None:
         return None
-    return ModuleDetailRead.model_validate(scenario)
+    system = await db.get(GameSystem, scenario.game_system_id)
+    return ModuleDetailRead.model_validate(scenario).model_copy(
+        update={"game_system_name": system.name if system is not None else None}
+    )
 
 
 # ── 复盘 / 事件回放 ──────────────────────────────────────
 
 
 async def record_event(
-    db: AsyncSession, room_id: str, player_id: str | None, event_type: str, payload: dict
-) -> None:
+    db: AsyncSession,
+    room_id: str,
+    player_id: str | None,
+    event_type: str,
+    payload: dict,
+    *,
+    correlation_id: str | None = None,
+) -> bool:
     """写入一条房间事件（issue #77 才真正打通的闭环——原来"不记 EventLog"是
-    已知缺口，本期由 ws.py 在 narration.push / action.submit 时调用这个函数）。
+    已知缺口）。
+
+    动作叙事先通过 ``correlation_id`` 持久化抢占唯一闸门，再允许 WebSocket
+    发送。返回 ``False`` 表示同一动作的同类事件已经记录，调用方必须抑制重播。
     """
-    db.add(Event(room_id=room_id, player_id=player_id, event_type=event_type, payload=payload))
-    await db.commit()
+    db.add(
+        Event(
+            room_id=room_id,
+            player_id=player_id,
+            event_type=event_type,
+            correlation_id=correlation_id,
+            payload=payload,
+        )
+    )
+    try:
+        await db.commit()
+        return True
+    except IntegrityError:
+        await db.rollback()
+        if correlation_id is None:
+            raise
+        existing = await db.scalar(
+            select(Event.id).where(
+                Event.room_id == room_id,
+                Event.event_type == event_type,
+                Event.correlation_id == correlation_id,
+            )
+        )
+        if existing is None:
+            raise
+        return False
 
 
 async def get_replay(

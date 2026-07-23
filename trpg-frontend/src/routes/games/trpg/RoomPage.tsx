@@ -373,15 +373,18 @@ export default function RoomPage() {
   const { ruleset } = useRuleset()
   const roomInfo = useRoomPlayers(roomCode)
   const isHost = roomInfo?.players.find((p) => p.playerId === playerId)?.isHost ?? false
+  const [roomPhase, setRoomPhase] = useState<string | null>(null)
   const [confirmEnd, setConfirmEnd] = useState(false)
   const [ending, setEnding] = useState(false)
   const [endError, setEndError] = useState('')
   const [confirmExit, setConfirmExit] = useState(false)
   const [messages, setMessages] = useState<Message[]>([
-    { type: 'system', content: '案件档案已加载 · 惠特利旧宅', time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) },
+    { type: 'system', content: '案件档案已加载', time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) },
   ])
   const [input, setInput] = useState('')
   const [typing, setTyping] = useState(false)
+  const [pendingAction, setPendingAction] = useState<{ clientActionId: string; utterance: string } | null>(null)
+  const [actionError, setActionError] = useState('')
   const [openPanel, setOpenPanel] = useState<string | null>(null)
   const [sheetPage, setSheetPage] = useState<'info' | 'background'>('info')
   const [skillsTab, setSkillsTab] = useState<'occupation' | 'interest'>('occupation')
@@ -395,6 +398,11 @@ export default function RoomPage() {
   )
   const [lastSaved, setLastSaved] = useState<string | null>(() => (notesKey ? localStorage.getItem(notesKey) : null) ? new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const suspended = (roomPhase || roomInfo?.phase) === 'Suspended'
+
+  useEffect(() => {
+    if (roomInfo?.phase) setRoomPhase(roomInfo.phase)
+  }, [roomInfo?.phase])
 
   useEffect(() => {
     // ★ block: 'nearest' 很关键——默认的 scrollIntoView 会尝试把目标"居中"，
@@ -424,7 +432,8 @@ export default function RoomPage() {
     }
   }, [roomId, playerId, roomCode, nickname, reconnectToken])
 
-  // 真实 AI 主持人回复：订阅 narration.push（不再是本地假打字模拟）
+  // 服务端主持人回复：只订阅 narration.push，不从 turn.completed 或本地逻辑
+  // 生成主持叙述。
   useEffect(() => {
     const off = onWsMessage((envelope) => {
       if (envelope.type === 'narration.push') {
@@ -434,30 +443,50 @@ export default function RoomPage() {
           content: envelope.payload.text,
           time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
         }])
+      } else if (envelope.type === 'room.state') {
+        setRoomPhase(envelope.payload.phase)
+      } else if (envelope.type === 'error') {
+        setTyping(false)
+        setActionError(envelope.payload.message)
       }
     })
     return off
   }, [])
 
+  const submitPlayerAction = (action: { clientActionId: string; utterance: string }) => {
+    if (!playerId || suspended) return
+    setPendingAction(action)
+    setActionError('')
+    setTyping(true)
+    void sdk.roomSocket
+      .submitAction(playerId, action)
+      .then(() => {
+        setPendingAction((current) =>
+          current?.clientActionId === action.clientActionId ? null : current
+        )
+      })
+      .catch((error: unknown) => {
+        setTyping(false)
+        setActionError(friendlyErrorMessage(error, '行动提交失败，请重试'))
+      })
+  }
+
   const sendMessage = (e?: FormEvent) => {
     e?.preventDefault()
     const text = input.trim()
-    if (!text || !playerId) return
+    if (!text || !playerId || suspended) return
     setMessages(prev => [...prev, {
       type: 'player', sender: senderName, content: text, time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }), isSelf: true,
     }])
     setInput('')
-    setTyping(true)
-    sdk.roomSocket.submitAction(playerId, { utterance: text })
+    submitPlayerAction({ clientActionId: crypto.randomUUID(), utterance: text })
   }
 
   const handleDiceResult = (result: number, diceType: DiceType) => {
     const typeLabel = diceType.toUpperCase()
     const resultLabel = diceType === 'd100' ? (result <= 5 ? '极限成功' : result <= 65 ? '成功' : '失败') : `掷出 ${result}`
     setMessages(prev => [...prev, {
-      type: 'dice', sender: senderName, content: `${typeLabel} · ${result}`, time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }), isSelf: true,
-    }, {
-      type: 'narr', sender: '守秘人', content: `检定结果: ${resultLabel}`, time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+      type: 'dice', sender: senderName, content: `${typeLabel} · ${result} · ${resultLabel}`, time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }), isSelf: true,
     }])
   }
 
@@ -494,7 +523,7 @@ export default function RoomPage() {
           🏚️
         </div>
         <div className="flex-1 min-w-0">
-          <div className="text-sm font-semibold text-text-primary">惠特利旧宅</div>
+          <div className="text-sm font-semibold text-text-primary">{roomInfo?.moduleTitle || '当前模组'}</div>
           <div className="text-[11px] text-text-muted">
             {roomInfo ? `${roomInfo.players.length} 位调查员` : '克苏鲁的呼唤'}
           </div>
@@ -645,23 +674,45 @@ export default function RoomPage() {
 
       {/* Input area */}
       <div className="border-t border-border-light px-3 pb-3 pt-1.5 bg-page flex-shrink-0">
+        {suspended && (
+          <p className="text-[11px] text-[#9a6a30] text-center pb-1.5">
+            游戏已挂起，恢复后才能继续提交行动
+          </p>
+        )}
+        {actionError && !suspended && (
+          <div className="flex items-center justify-between gap-2 pb-1.5 px-1">
+            <p className="text-[11px] text-[#c04040]">{actionError}</p>
+            {pendingAction && (
+              <button
+                type="button"
+                onClick={() => submitPlayerAction(pendingAction)}
+                className="text-[11px] text-brass-dark underline flex-shrink-0"
+              >
+                使用原请求重试
+              </button>
+            )}
+          </div>
+        )}
         <form onSubmit={sendMessage} className="flex gap-2 items-end">
           <button
             type="button"
             onClick={() => setShowDice(true)}
-            className="w-10 h-10 rounded-full bg-card border border-border-light text-text-muted flex items-center justify-center flex-shrink-0 active:scale-[0.92] active:border-brass active:text-brass-dark transition-all"
+            disabled={suspended}
+            className="w-10 h-10 rounded-full bg-card border border-border-light text-text-muted flex items-center justify-center flex-shrink-0 active:scale-[0.92] active:border-brass active:text-brass-dark transition-all disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <Dice6 className="w-[18px] h-[18px]" strokeWidth={2} />
           </button>
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="输入行动…"
-            className="flex-1 bg-input border border-border-mid rounded-[20px] px-4 py-2.5 text-sm text-text-primary font-sans outline-none min-h-[40px] placeholder:text-text-dim focus:border-brass transition-colors"
+            disabled={suspended}
+            placeholder={suspended ? '游戏已挂起' : '输入行动…'}
+            className="flex-1 bg-input border border-border-mid rounded-[20px] px-4 py-2.5 text-sm text-text-primary font-sans outline-none min-h-[40px] placeholder:text-text-dim focus:border-brass transition-colors disabled:opacity-60"
           />
           <button
             type="submit"
-            className="w-10 h-10 rounded-full bg-brass border-none text-white flex items-center justify-center flex-shrink-0 active:scale-[0.92] transition-all hover:bg-brass-dark"
+            disabled={suspended || !input.trim()}
+            className="w-10 h-10 rounded-full bg-brass border-none text-white flex items-center justify-center flex-shrink-0 active:scale-[0.92] transition-all hover:bg-brass-dark disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <SendHorizontal className="w-[18px] h-[18px]" strokeWidth={2.5} />
           </button>

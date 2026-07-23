@@ -49,9 +49,11 @@ export async function createRoomWithModule(prefix = 'e2e'): Promise<TestRoom> {
     host.token
   )
   const modules = await host.sdk.rooms.listModules()
+  const selectedModule = modules.find((module) => module.status === 'ready')
+  if (!selectedModule) throw new Error('后端模组目录没有 ready 状态的可玩模组')
   await host.sdk.rooms.selectModule(
     room.roomId,
-    { moduleId: modules[0].id, attributeGenMethod: 'point_buy' },
+    { moduleId: selectedModule.id, attributeGenMethod: 'point_buy' },
     room.reconnectToken
   )
   return {

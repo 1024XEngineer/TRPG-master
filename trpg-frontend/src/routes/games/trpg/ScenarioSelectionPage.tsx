@@ -1,9 +1,18 @@
+import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { BookOpen, Clock, Users, ChevronRight, Upload } from 'lucide-react'
-import { getGameById, getScenariosBySystem, SYSTEM_COLORS } from '@/config/games'
+import type { ModuleSummary } from 'trpg-sdk'
+import { getGameById, getSystemVisualKey, SYSTEM_COLORS } from '@/config/games'
 import { useGameStore } from '@/stores/game-store'
+import { friendlyErrorMessage } from '@/services/api-client'
+import { listModules } from '@/services/room'
 import Badge from '@/shared/components/Badge'
-import type { Scenario } from '@/types/game'
+
+const difficultyLabel: Record<number, string> = {
+  1: '入门',
+  2: '进阶',
+  3: '挑战',
+}
 
 const difficultyStyles: Record<string, string> = {
   '入门': 'bg-[rgba(74,138,74,0.12)] text-[#4a8a4a]',
@@ -15,17 +24,35 @@ export default function ScenarioSelectionPage() {
   const navigate = useNavigate()
   const { gameId, systemId } = useParams<{ gameId: string; systemId: string }>()
   const game = getGameById(gameId || '')
-  const scenarios = getScenariosBySystem(systemId || '')
+  const [modules, setModules] = useState<ModuleSummary[] | null>(null)
+  const [loadError, setLoadError] = useState('')
 
   const setScene = useGameStore((s) => s.setScene)
   const setGame = useGameStore((s) => s.setGame)
   const setReturnFromGameSelect = useGameStore((s) => s.setReturnFromGameSelect)
   const returnFromGameSelect = useGameStore((s) => s.returnFromGameSelect)
-  const colors = SYSTEM_COLORS[systemId || '']
-  const systemName = colors?.name || '未知系统'
+  const systemName = modules?.[0]?.gameSystemName || '当前规则系统'
+  const colors = SYSTEM_COLORS[getSystemVisualKey(systemName)]
 
-  const handleSelect = (scenario: Scenario) => {
-    setScene(scenario.id)
+  useEffect(() => {
+    let cancelled = false
+    listModules()
+      .then((items) => {
+        if (!cancelled) {
+          setModules(items.filter((item) => item.gameSystemId === systemId))
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) setLoadError(friendlyErrorMessage(error, '加载模组目录失败'))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [systemId])
+
+  const handleSelect = (module: ModuleSummary) => {
+    if (module.status !== 'ready') return
+    setScene(module.id)
     setGame(gameId || '', systemId || '')
     if (returnFromGameSelect) {
       setReturnFromGameSelect(false)
@@ -53,67 +80,78 @@ export default function ScenarioSelectionPage() {
       </p>
 
       <div className="px-5 flex flex-col gap-3.5">
-        {scenarios.length === 0 && (
+        {modules === null && !loadError && (
+          <div className="text-center py-10 text-text-muted text-sm">正在加载模组…</div>
+        )}
+        {loadError && (
+          <div className="text-center py-10 text-[#c04040] text-sm">{loadError}</div>
+        )}
+        {modules?.length === 0 && (
           <div className="text-center py-10 text-text-muted text-sm">
             暂无预置模组，您可以自行导入
           </div>
         )}
 
-        {scenarios.map((scenario) => {
-          const diffStyle = difficultyStyles[scenario.difficulty] || difficultyStyles['入门']
+        {modules?.map((module) => {
+          const difficulty = difficultyLabel[module.difficulty] ?? `等级 ${module.difficulty}`
+          const diffStyle = difficultyStyles[difficulty] || difficultyStyles['进阶']
+          const isReady = module.status === 'ready'
 
           return (
-            <div
-              key={scenario.id}
-              onClick={() => handleSelect(scenario)}
-              className="bg-card border border-border-light rounded-md p-5 cursor-pointer active:scale-[0.98] transition-all duration-200"
+            <button
+              type="button"
+              key={module.id}
+              onClick={() => handleSelect(module)}
+              disabled={!isReady}
+              className={`text-left bg-card border border-border-light rounded-md p-5 transition-all duration-200 ${
+                isReady ? 'cursor-pointer active:scale-[0.98]' : 'cursor-not-allowed opacity-65'
+              }`}
             >
               <div className="flex items-start gap-3 mb-3">
-                <div className={`w-12 h-12 rounded-[12px] flex-shrink-0 flex items-center justify-center ${colors.iconBg}`}>
-                  <BookOpen className={`w-6 h-6 ${colors.iconColor}`} />
+                <div className={`w-12 h-12 rounded-[12px] flex-shrink-0 flex items-center justify-center ${colors?.iconBg ?? 'bg-panel'}`}>
+                  <BookOpen className={`w-6 h-6 ${colors?.iconColor ?? 'text-text-muted'}`} />
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <h3 className="text-[17px] font-bold text-text-primary">{scenario.name}</h3>
+                    <h3 className="text-[17px] font-bold text-text-primary">{module.title}</h3>
                     <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${diffStyle}`}>
-                      {scenario.difficulty}
+                      {difficulty}
                     </span>
                   </div>
                   <p className="text-xs text-text-muted mt-0.5 font-mono tracking-[0.03em]">
-                    {scenario.nameEn}
+                    {module.nameEn || `v${module.version}`}
                   </p>
                 </div>
-                <div className="text-text-dim flex-shrink-0 mt-1">
-                  <ChevronRight className="w-[18px] h-[18px]" />
-                </div>
+                {isReady && (
+                  <div className="text-text-dim flex-shrink-0 mt-1">
+                    <ChevronRight className="w-[18px] h-[18px]" />
+                  </div>
+                )}
               </div>
               <p className="text-xs text-text-muted leading-[1.7] line-clamp-2 mb-3">
-                {scenario.description}
+                {module.synopsis || '暂无故事简介'}
               </p>
               <div className="flex items-center gap-4 text-[11px] text-text-dim">
                 <span className="flex items-center gap-1">
                   <Users className="w-3.5 h-3.5" />
-                  {scenario.playerCount}
+                  {module.playersMin}-{module.playersMax} 人
                 </span>
                 <span className="flex items-center gap-1">
                   <Clock className="w-3.5 h-3.5" />
-                  {scenario.estimatedTime}
+                  {module.estimatedDuration || '时长待定'}
                 </span>
-                <Badge variant={scenario.status === 'ready' ? 'success' : 'default'}>
-                  {scenario.status === 'ready' ? '已就绪' : '开发中'}
+                <Badge variant={isReady ? 'success' : 'default'}>
+                  {isReady ? '已就绪' : '开发中'}
                 </Badge>
               </div>
-            </div>
+            </button>
           )
         })}
       </div>
 
-      {/* 自行导入模组 */}
       <div className="px-5 mt-5">
         <button
-          onClick={() => {
-            /* TODO: 导入模组的弹窗或页面 */
-          }}
+          type="button"
           className="w-full flex items-center justify-center gap-2 py-3.5 rounded-sm border border-dashed border-border-mid bg-transparent text-text-muted text-sm active:bg-panel transition-all duration-150"
         >
           <Upload className="w-[18px] h-[18px]" />

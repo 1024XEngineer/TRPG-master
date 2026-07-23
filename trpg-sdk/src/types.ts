@@ -148,3 +148,59 @@ export type ServerToClientEvent =
   | { type: 'san.check.result'; payload: SanCheckResultPayload }
   | { type: 'clue.granted'; payload: ClueGrantedPayload }
   | { type: 'error'; payload: ErrorPayload };
+
+// Agent framework 的回合结果使用独立信封，不套 `{type, payload}`。字段名按
+// framework 的稳定 JSON Schema 保持 snake_case，避免 SDK 私自改写协议。
+export interface AgentVisibleFact {
+  id: string;
+  text: string;
+}
+
+export interface AgentVisibleEntity {
+  id: string;
+  kind: 'npc' | 'object' | 'location';
+  name: string;
+  aliases: string[];
+  content: string;
+}
+
+export interface AgentCheckpointOption {
+  id: string;
+  target_id: string;
+  action_hint: string;
+  skills: string[];
+}
+
+export interface AgentPlayerView {
+  room_id: string;
+  player_id: string;
+  actor_id: string;
+  scene_id: string;
+  phase: 'playing' | 'ended';
+  revision: string;
+  visible_facts: AgentVisibleFact[];
+  visible_entities: AgentVisibleEntity[];
+  checkpoint_options: AgentCheckpointOption[];
+}
+
+export interface AgentNarration {
+  kind: 'narration' | 'clarification';
+  text: string;
+  claimed_fact_ids: string[];
+  suggested_actions: string[];
+}
+
+export interface AgentTurnPayload {
+  room_id: string;
+  player_id: string;
+  actor_id: string;
+  narration: AgentNarration;
+  player_view: AgentPlayerView;
+}
+
+export interface TurnCompletedEvent {
+  protocol_version: '1';
+  message_type: 'turn.completed';
+  correlation_id: string;
+  payload: AgentTurnPayload;
+}

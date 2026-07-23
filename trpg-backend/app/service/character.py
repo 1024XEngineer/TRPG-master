@@ -36,6 +36,7 @@ from app.dto.game import RulesetRead
 from app.models.room import Character, Player, Room
 from app.service.room import (
     RoomAuthorizationError,
+    RoomConflictError,
     find_room_by_id,
     get_player_by_reconnect_token,
     require_ruleset,
@@ -58,6 +59,12 @@ class CharacterInvalidError(ValueError):
         super().__init__(f"角色卡未通过校验：{summary}")
 
 
+def _require_character_editable(room: Room) -> None:
+    """正式开局后 Character 已复制为 ActorState，源角色卡必须保持冻结。"""
+    if room.phase not in {"Lobby", "Building"}:
+        raise RoomConflictError("游戏已经正式开局，房间角色卡已锁定")
+
+
 async def create_character_draft(
     db: AsyncSession, room_id: str, reconnect_token: str | None, based_on_template_id: str | None
 ) -> CharacterDraftResult:
@@ -72,6 +79,7 @@ async def create_character_draft(
         raise not_implemented("复用常用角色卡本期尚未实现")
 
     room = await find_room_by_id(db, room_id)
+    _require_character_editable(room)
     player = await get_player_by_reconnect_token(db, reconnect_token)
     if player.room_id != room.id:
         raise RoomAuthorizationError("你不在这个房间里")
@@ -103,6 +111,8 @@ async def update_character(
 ) -> None:
     """保存建卡向导算好的完整角色数据。"""
     character = await _get_own_character(db, room_id, character_id, reconnect_token)
+    room = await find_room_by_id(db, room_id)
+    _require_character_editable(room)
 
     # PR #97 review [1]：`roll` 这个来源标记不能跨越「客户端自己重填了属性」。
     # `roll_attributes` 会把它置成 roll，complete 时据此跳过 480 点预算校验
@@ -127,6 +137,7 @@ async def update_character(
     character.occupation = payload.occupation
     character.background = payload.background
     character.notes = payload.notes
+    character.version += 1
     await db.commit()
 
 
@@ -161,6 +172,7 @@ async def complete_character(
     """
     character = await _get_own_character(db, room_id, character_id, reconnect_token)
     room = await find_room_by_id(db, room_id)
+    _require_character_editable(room)
     ruleset = await _resolve_ruleset(db, room)
     issues = validate_age(ruleset, character.age) + validate_character(
         ruleset,
@@ -177,6 +189,7 @@ async def complete_character(
     # HP/SAN 被客户端乱填过关。
     character.derived_stats = compute_derived_stats(character.attributes or {})
     character.status = "complete"
+    character.version += 1
     player = await db.get(Player, character.player_id)
     if player is not None:
         player.has_character = True
@@ -193,6 +206,8 @@ async def get_character(
     角色卡里有背景故事、装备这些属于该玩家的信息，房间内其他人不该直接拉到。
     """
     character = await _get_own_character(db, room_id, character_id, reconnect_token)
+    room = await find_room_by_id(db, room_id)
+    _require_character_editable(room)
     return CharacterRead(
         id=character.id,
         status=character.status,
@@ -276,6 +291,7 @@ async def roll_attributes(
     # 标记这张卡的属性是掷出来的：complete 时不能拿点数购买法的总预算去卡它
     # （8 项总和均值约 457、范围 195–720，经常超 480）。见 issue #96 决策 1。
     character.generation_method = GENERATION_ROLL
+    character.version += 1
     await db.commit()
     return RollAttributesResult(attributes=attributes, derived_stats=derived_stats)
 

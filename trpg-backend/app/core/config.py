@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     # 本地默认放行 Vite 开发服务器的默认端口 9877。
     cors_origins: list[str] = ["http://localhost:9877"]
 
+    # DeepSeek API Key（issue #107 地基，`app/core/narrator.py`）：配了就走真实
+    # DeepSeek 生成叙事回应，不配（默认）自动回退到确定性的占位文案——CI/e2e
+    # 环境不配这个变量，本地演示/线上环境按需配置。
+    deepseek_api_key: str | None = None
+
 
 @lru_cache
 def get_settings() -> Settings:

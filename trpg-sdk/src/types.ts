@@ -64,6 +64,7 @@ export type {
   GameStartPayload,
   SessionBoundPayload,
   NarrationPushPayload,
+  PlayerMessagePayload,
   GameViewPayload,
   // WebSocket 新增 14 个事件（issue #77）
   CheckRollPayload,
@@ -116,6 +117,7 @@ import type {
   GameEndedPayload,
   GameViewPayload,
   NarrationPushPayload,
+  PlayerMessagePayload,
   PlayerJoinedPayload,
   RoomStatePayload,
   SanCheckRequestPayload,
@@ -141,6 +143,7 @@ import type {
  */
 export type ServerToClientEvent = (
   | { type: 'session.bound'; payload: SessionBoundPayload }
+  | { type: 'player.message'; payload: PlayerMessagePayload }
   | { type: 'narration.push'; payload: NarrationPushPayload }
   | { type: 'game.view'; payload: GameViewPayload }
   | { type: 'room.state'; payload: RoomStatePayload }

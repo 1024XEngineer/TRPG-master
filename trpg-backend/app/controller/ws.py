@@ -23,6 +23,7 @@ from app.dto.ws import (
     GameStartPayload,
     GameViewPayload,
     NarrationPushPayload,
+    PlayerMessagePayload,
     PlayerReadyPayload,
     RoomJoinPayload,
     RoomRejoinPayload,
@@ -133,7 +134,15 @@ def _runtime_event_envelope(
     sequence: int | None = None,
 ) -> dict | None:
     payload = event.payload
-    if event.event_type == "check.requested":
+    if event.event_type == "player.message":
+        model = PlayerMessagePayload(
+            player_id=player_id,
+            text=str(payload["text"]),
+            request_id=str(payload["requestId"]),
+            state_revision=state_revision,
+        )
+        return _envelope("player.message", model, event_id=event_id, sequence=sequence)
+    elif event.event_type == "check.requested":
         model = CheckRequestPayload(
             player_id=player_id,
             check_request_id=payload["check_request_id"],

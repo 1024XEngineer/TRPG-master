@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.keeper import FakeKeeper, KeeperAgentPort
@@ -17,6 +18,8 @@ from app.runtime.engine import ActionExecutor
 from app.runtime.projector import PlayerViewProjector
 from app.runtime.state import GameState
 from app.runtime.store import SQLAlchemyGameStateStore
+
+logger = structlog.get_logger()
 
 
 class TurnOrchestrator:
@@ -55,7 +58,14 @@ class TurnOrchestrator:
         )
         try:
             narration = await self.keeper.narrate(player_input, updated_view, action)
-        except Exception:
+        except Exception as exc:
+            logger.warning(
+                "keeper_narration_fallback",
+                room_session_id=player_input.room_session_id,
+                request_id=player_input.request_id,
+                error_type=type(exc).__name__,
+                error=str(exc),
+            )
             narration = await FakeKeeper().narrate(player_input, updated_view, action)
         updated_view = await self._record_narration(
             db,
@@ -95,7 +105,14 @@ class TurnOrchestrator:
         view = self.projector.project(state, runtime_module, actor_id=player_input.actor_id)
         try:
             narration = await self.keeper.narrate(player_input, view, action)
-        except Exception:
+        except Exception as exc:
+            logger.warning(
+                "keeper_narration_fallback",
+                room_session_id=player_input.room_session_id,
+                request_id=player_input.request_id,
+                error_type=type(exc).__name__,
+                error=str(exc),
+            )
             narration = await FakeKeeper().narrate(player_input, view, action)
         view = await self._record_narration(db, state, runtime_module, player_input, narration.text)
         return TurnResult(action=action, narration=narration, view=view)

@@ -4,7 +4,9 @@ import pytest
 from starlette.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
+from app.ai.keeper import FakeKeeper
 from app.main import app
+from app.runtime.bootstrap import get_turn_orchestrator
 
 ROOMS_BASE = "/api/v1/rooms"
 
@@ -270,7 +272,11 @@ def test_game_start_rejects_non_host(sync_client: TestClient) -> None:
     assert preview["phase"] == "Building"
 
 
-def test_action_submit_broadcasts_narration_to_room_only(sync_client: TestClient) -> None:
+def test_action_submit_broadcasts_narration_to_room_only(
+    sync_client: TestClient, monkeypatch
+) -> None:
+    # 本地开发可能在 .env 启用了真实 DeepSeek；测试必须保持确定性且不能消耗 API。
+    monkeypatch.setattr(get_turn_orchestrator(), "keeper", FakeKeeper())
     token_a = register_and_login(sync_client, "host_a")
     token_b = register_and_login(sync_client, "host_b")
     room_a = create_room(sync_client, token_a)
@@ -320,7 +326,23 @@ def test_action_submit_broadcasts_narration_to_room_only(sync_client: TestClient
                 },
             }
         )
+        player_message = ws_a.receive_json()
         narration = ws_a.receive_json()
+        updated_view = ws_a.receive_json()
+
+        ws_a.send_json(
+            {
+                "type": "room.rejoin",
+                "playerId": room_a["playerId"],
+                "payload": {
+                    "reconnectToken": room_a["reconnectToken"],
+                    "lastEventSequence": view_a["payload"]["eventSequence"],
+                },
+            }
+        )
+        replayed_player_message = ws_a.receive_json()
+        replayed_narration = ws_a.receive_json()
+        replayed_view = ws_a.receive_json()
 
         # room_b 没有收到任何广播——发一条 room.join 触发一次同步交互，确认
         # 收到的仍然是它自己的 session.bound，而不是串过来的 narration。
@@ -336,6 +358,13 @@ def test_action_submit_broadcasts_narration_to_room_only(sync_client: TestClient
         )
         envelope_b = ws_b.receive_json()
 
+    assert player_message["type"] == "player.message"
+    assert player_message["payload"]["text"] == "环顾四周并保持警惕"
     assert narration["type"] == "narration.push"
     assert narration["payload"]["text"]
+    assert updated_view["type"] == "game.view"
+    assert replayed_player_message["type"] == "player.message"
+    assert replayed_player_message["payload"]["requestId"] == player_message["payload"]["requestId"]
+    assert replayed_narration["type"] == "narration.push"
+    assert replayed_view["type"] == "game.view"
     assert envelope_b["type"] == "game.view"

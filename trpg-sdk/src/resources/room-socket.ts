@@ -27,6 +27,10 @@ const PAYLOAD_VALIDATORS: {
   [K in ServerToClientEvent['type']]: (payload: Record<string, unknown>) => boolean;
 } = {
   'session.bound': (p) => typeof p.roomId === 'string' && typeof p.playerId === 'string',
+  'player.message': (p) =>
+    typeof p.playerId === 'string' &&
+    typeof p.text === 'string' &&
+    typeof p.requestId === 'string',
   'narration.push': (p) => typeof p.text === 'string',
   'game.view': (p) =>
     typeof p.roomId === 'string' &&

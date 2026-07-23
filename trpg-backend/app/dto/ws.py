@@ -136,6 +136,15 @@ class NarrationPushPayload(CamelModel):
     state_revision: int | None = None
 
 
+class PlayerMessagePayload(CamelModel):
+    """player.message 推送 payload；持久化玩家发言供重连恢复。"""
+
+    player_id: str
+    text: str
+    request_id: str
+    state_revision: int | None = None
+
+
 class RoomStatePayload(CamelModel):
     """room.state 推送 payload（issue #77 新增，替代 HTTP 轮询伪广播）。
 

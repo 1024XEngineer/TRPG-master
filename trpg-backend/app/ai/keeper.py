@@ -263,9 +263,9 @@ class AgentsSDKKeeper:
             instructions=(
                 "根据玩家安全的 ActionResult 和 PlayerView，用简洁中文叙述结果。"
                 "不得补充输入中没有的真相、线索、骰值或状态变化。"
+                "只输出直接展示给玩家的叙事正文，不要输出 JSON、字段名或代码块。"
             ),
             model=self._model(),
-            output_type=NarrationOutput,
         )
         session = SQLAlchemySession(
             player_input.room_session_id,
@@ -283,4 +283,10 @@ class AgentsSDKKeeper:
             ),
             session=session,
         )
-        return NarrationOutput.model_validate(result.final_output)
+        # DeepSeek 的 OpenAI-compatible Chat Completions 当前不支持 Agents SDK
+        # 为 ``output_type`` 生成的 response_format。这里让模型返回普通文本，
+        # 再在服务端包装为稳定 DTO；玩家安全边界仍由上面的输入投影保证。
+        text = str(result.final_output or "").strip()
+        if not text:
+            raise RuntimeError("KeeperAgent 返回了空叙事")
+        return NarrationOutput(text=text)

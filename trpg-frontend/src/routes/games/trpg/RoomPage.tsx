@@ -118,6 +118,12 @@ export default function RoomPage() {
           kind: 'narration',
           text: envelope.payload.text,
         })
+      } else if (envelope.type === 'player.message') {
+        appendOnce(envelope.payload.requestId || envelope.eventId, {
+          id: nowId('player'),
+          kind: 'player',
+          text: envelope.payload.text,
+        })
       } else if (envelope.type === 'check.request') {
         appendOnce(envelope.eventId, {
           id: nowId('check-request'),
@@ -183,13 +189,14 @@ export default function RoomPage() {
     event?.preventDefault()
     const utterance = input.trim()
     if (!utterance || !playerId || !view || view.pendingCheck || view.activeEndingId) return
+    const clientActionId = crypto.randomUUID()
     appendOnce(null, {
-      id: nowId('player'),
+      id: clientActionId,
       kind: 'player',
       text: utterance,
     })
     sdk.roomSocket.submitAction(playerId, {
-      clientActionId: crypto.randomUUID(),
+      clientActionId,
       utterance,
       sourceRevision: view.stateRevision,
     })

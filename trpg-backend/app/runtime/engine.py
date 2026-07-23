@@ -90,6 +90,20 @@ class ActionExecutor:
             events,
             narration_facts,
         )
+        state_changed = bool(events or pending)
+        # 玩家发言与规则事件进入同一笔幂等事务，确保重连后能够按顺序恢复，
+        # 同一个 requestId 重试时也不会重复写入 EventLog。
+        events.insert(
+            0,
+            RuntimeEvent(
+                event_type="player.message",
+                payload={
+                    "text": request.utterance,
+                    "requestId": request.request_id,
+                },
+                visibility="room",
+            ),
+        )
         state.last_intent = request.intent.model_dump(mode="json")
         state.variables["last_utterance"] = request.utterance
         state.revision += 1
@@ -98,7 +112,7 @@ class ActionExecutor:
             resolution="pending_check" if pending else "resolved",
             outcome="awaiting_roll" if pending else "action_resolved",
             state_revision=state.revision,
-            state_changed=bool(events or pending),
+            state_changed=state_changed,
             pending_check=pending,
             events=events,
             narration_facts=narration_facts,

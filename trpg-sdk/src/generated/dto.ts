@@ -576,6 +576,16 @@ export interface PlayerJoinedPayload {
 }
 
 /**
+ * player.message 推送 payload；持久化玩家发言供重连恢复。
+ */
+export interface PlayerMessagePayload {
+  playerId: string;
+  text: string;
+  requestId: string;
+  stateRevision?: number | null;
+}
+
+/**
  * player.ready 事件 payload。
  *
  * `ready` 必填、不给默认值：协议上「设置准备状态」这个动作必须说清楚要设成

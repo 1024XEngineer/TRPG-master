@@ -1,0 +1,277 @@
+{
+  "module_id": "silver-lock",
+  "version": "0.1.0",
+  "world_ref": "coc-7e",
+  "scenes": [
+    {
+      "id": "room_awakening",
+      "name": "房间·醒来",
+      "content": "你在一个昏暗的房间中醒来，发现自己失去了这段时间的记忆，手脚被绳索紧紧捆住。",
+      "entity_ids": ["bed", "rope"],
+      "checkpoint_ids": ["untie_rope", "observe_room"],
+      "exits": []
+    },
+    {
+      "id": "desk_segment",
+      "name": "书桌",
+      "content": "一张旧书桌，抽屉半开。桌上有速写本和铅笔，还有一张字条。",
+      "entity_ids": ["desk", "drawer", "note", "sketchbook"],
+      "checkpoint_ids": ["open_drawer", "read_note", "tear_sketch", "draw_item"],
+      "exits": []
+    },
+    {
+      "id": "wardrobe_segment",
+      "name": "衣柜",
+      "content": "一个老旧的衣柜，里面挂着几件衣服，底层有一叠白纸。",
+      "entity_ids": ["wardrobe", "white_paper"],
+      "checkpoint_ids": ["open_wardrobe", "take_paper"],
+      "exits": []
+    },
+    {
+      "id": "vent_segment",
+      "name": "通风管",
+      "content": "墙上的通风管道盖子松动了。管道可能通向别的房间。",
+      "entity_ids": [],
+      "checkpoint_ids": ["enter_vent"],
+      "exits": ["corridor"]
+    },
+    {
+      "id": "door_segment",
+      "name": "房门",
+      "content": "一扇厚重的木门，锁孔很新。门把手冰冷。",
+      "entity_ids": ["door", "keys"],
+      "checkpoint_ids": ["unlock_door", "open_door"],
+      "exits": ["corridor"]
+    },
+    {
+      "id": "corridor",
+      "name": "走廊",
+      "content": "一条昏暗的走廊。银色的锁链装饰挂在墙上。一只猫蜷缩在角落。远处传来窸窣声。",
+      "entity_ids": ["cat", "kidnapper", "silver_lock"],
+      "checkpoint_ids": ["rescue_cat", "feed_cat", "confront_kidnapper", "escape"],
+      "exits": ["room_awakening"]
+    }
+  ],
+  "entities": [
+    {
+      "id": "cat",
+      "kind": "npc",
+      "name": "芭斯特",
+      "aliases": ["猫"],
+      "content": "一只玳瑁色的猫，正用明亮的眼睛注视着你。",
+      "secrets": "芭斯特知道如何破解银之锁。如果你救了她，她会帮助你。",
+      "state": { "alive": true, "rescued": false },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {
+        "talk": "猫轻柔地叫了一声，似乎在回应你。",
+        "investigate": "猫的脖子上有一个小小的银色铃铛，上面刻着古老的符号。"
+      },
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "kidnapper",
+      "kind": "npc",
+      "name": "绑架者",
+      "aliases": ["人面鼠", "怪物"],
+      "content": "一个身形矮小、面容可怖的生物。它的脸像是人类和鼠类的融合。",
+      "secrets": "绑架者是银之锁的守护者。只有解除银之锁才能打败它。",
+      "state": { "alive": true, "blinded": false },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": { "STR": 50, "CON": 50, "DEX": 60, "HP": 12, "armor": null, "move": 8 }
+    },
+    {
+      "id": "silver_lock",
+      "kind": "object",
+      "name": "银之锁",
+      "aliases": ["锁", "银色锁链"],
+      "content": "墙壁上挂着的银色锁链装饰，散发着微弱的光芒。",
+      "secrets": "银之锁是一种古老的法术束缚。芭斯特的牺牲可以解除它。",
+      "state": { "active": true },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": { "investigate": "银色的锁链上刻着你不认识的文字，摸上去异常冰冷。" },
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "sketchbook",
+      "kind": "object",
+      "name": "速写本",
+      "aliases": ["画本"],
+      "content": "一本速写本和一支铅笔。撕下来的纸可以用来画东西——画出来的东西会成真。",
+      "secrets": null,
+      "state": { "pages_remaining": 10 },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "keys",
+      "kind": "object",
+      "name": "钥匙",
+      "aliases": ["房门钥匙"],
+      "content": "一串钥匙，其中一把应该能打开房门。",
+      "secrets": null,
+      "state": { "desk_key": false, "door_key": false },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "note",
+      "kind": "object",
+      "name": "字条",
+      "aliases": [],
+      "content": "一张泛黄的字条，上面写着几行字：'银之锁困住的不只是你。找到猫。救她。她会帮助你。'",
+      "secrets": null,
+      "state": { "read": false },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": null
+    }
+  ],
+  "checkpoints": [
+    {
+      "id": "unlock_door",
+      "scene_id": "door_segment",
+      "action": "unlock",
+      "target_id": "door",
+      "skills": ["locksmith"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": ["房门解锁"],
+          "player_visible_information": [{ "text": "钥匙转动，锁芯发出清脆的咔嗒声。", "visibility": { "audience": "all" } }],
+          "narration_constraints": [],
+          "ops": []
+        },
+        "failure": {
+          "facts": ["解锁失败"],
+          "player_visible_information": [{ "text": "钥匙卡住了。可能需要再试一次。", "visibility": { "audience": "all" } }],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": null
+    },
+    {
+      "id": "rescue_cat",
+      "scene_id": "corridor",
+      "action": "rescue",
+      "target_id": "cat",
+      "skills": [],
+      "difficulty": null,
+      "outcomes": {
+        "success": {
+          "facts": ["猫被救出"],
+          "player_visible_information": [{ "text": "你解开猫身上的束缚。她蹭了蹭你的手，发出咕噜声。", "visibility": { "audience": "all" } }],
+          "narration_constraints": [],
+          "ops": [{ "op": "modify", "path": "entities.cat.rescued", "set": true }]
+        },
+        "failure": {
+          "facts": [],
+          "player_visible_information": [],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": null
+    },
+    {
+      "id": "draw_item",
+      "scene_id": "desk_segment",
+      "action": "draw",
+      "target_id": "sketchbook",
+      "skills": [],
+      "difficulty": null,
+      "outcomes": {
+        "success": {
+          "facts": [],
+          "player_visible_information": [
+            { "text": "你在纸上仔细画出物品的轮廓。随着最后一笔落下，纸张泛起微光——画中的东西出现在你的面前。", "visibility": { "audience": "all" } }
+          ],
+          "narration_constraints": ["物品仅限于能用平面表现构造的简单物品"],
+          "ops": [{ "op": "modify", "path": "entities.sketchbook.pages_remaining", "set": "entities.sketchbook.pages_remaining - 1" }]
+        },
+        "failure": {
+          "facts": [],
+          "player_visible_information": [],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": null
+    }
+  ],
+  "win_conditions": [
+    {
+      "id": "lock_broken",
+      "when": { "path": "entities.kidnapper.alive", "equals": false },
+      "fact": "银之锁解除，调查员重获自由",
+      "player_visible_information": "银色的锁链碎裂开来，化为尘埃。束缚你的力量消失了。你自由了。",
+      "is_ending": true
+    }
+  ],
+  "module_rules": [
+    {
+      "id": "area_bound",
+      "hook": "on_scene_enter",
+      "priority": 100,
+      "mode": "forbid",
+      "when": { "path": "entities.silver_lock.active", "equals": true },
+      "then": [{ "op": "forbid" }],
+      "facts": [],
+      "player_visible_information": []
+    },
+    {
+      "id": "cat_attack_kidnapper",
+      "hook": "on_scene_enter",
+      "priority": 90,
+      "mode": "append",
+      "when": { "path": "entities.cat.rescued", "equals": true },
+      "then": [{ "op": "trigger_rule", "rule_id": "kidnapper_kills_cat" }],
+      "facts": ["猫扑向绑架者，抓瞎了他的眼睛"],
+      "player_visible_information": [
+        { "text": "芭斯特飞身跃起，利爪划过绑架者的面部。一声惨叫回荡在走廊。", "visibility": { "audience": "all" } }
+      ]
+    },
+    {
+      "id": "kidnapper_kills_cat",
+      "hook": "on_state_change",
+      "priority": 80,
+      "mode": "append",
+      "when": { "path": "entities.kidnapper.blinded", "equals": true },
+      "then": [
+        { "op": "modify", "path": "entities.cat.alive", "set": false },
+        { "op": "trigger_rule", "rule_id": "lock_dissolves" }
+      ],
+      "facts": ["绑架者在剧痛中抓住猫，杀死了她"],
+      "player_visible_information": [
+        { "text": "绑架者疯狂地挥舞手臂，抓住了芭斯特。一声凄厉的猫叫后，一切都安静了。", "visibility": { "audience": "all" } }
+      ]
+    },
+    {
+      "id": "lock_dissolves",
+      "hook": "on_state_change",
+      "priority": 70,
+      "mode": "append",
+      "when": { "path": "entities.cat.alive", "equals": false },
+      "then": [{ "op": "modify", "path": "entities.silver_lock.active", "set": false }],
+      "facts": ["银之锁随猫的牺牲而解除"],
+      "player_visible_information": [
+        { "text": "芭斯特的血滴在银色锁链上。锁链开始碎裂——猫的牺牲解除了古老的束缚。", "visibility": { "audience": "all" } }
+      ]
+    }
+  ]
+}

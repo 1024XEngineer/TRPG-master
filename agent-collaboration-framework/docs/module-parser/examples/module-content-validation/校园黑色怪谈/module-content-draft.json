@@ -1,0 +1,314 @@
+{
+  "module_id": "black-campus",
+  "version": "0.1.0",
+  "world_ref": "coc-7e",
+  "scenes": [
+    {
+      "id": "teaching_building_1",
+      "name": "教学楼1",
+      "content": "五层教学楼。一层高一，二层高二，三层混班，四层高三，五楼天台和社团活动室。十三阶梯的怪谈就发生在这里。",
+      "entity_ids": ["classrooms_t1", "stairway_13"],
+      "checkpoint_ids": ["count_stairs", "investigate_3f_corridor"],
+      "exits": []
+    },
+    {
+      "id": "teaching_building_2",
+      "name": "教学楼2",
+      "content": "理化教室、音乐教室、美术教室和人体模型室都在这里。三个校园怪谈的发源地。",
+      "entity_ids": ["science_room", "music_room", "art_room", "model_room"],
+      "checkpoint_ids": ["investigate_science_room", "investigate_music_room", "investigate_art_room", "investigate_model_room"],
+      "exits": []
+    },
+    {
+      "id": "garden",
+      "name": "花园（围挡）",
+      "content": "设计漂亮的花坛，种满草和郁金香。外围有施工围挡，似乎在翻修。钢刺半埋在土里——不太像普通的园艺用品。",
+      "entity_ids": ["flowerbed", "steel_spikes", "buwen_body"],
+      "checkpoint_ids": ["climb_fence", "search_garden", "dig_flowerbed", "evade_guard"],
+      "exits": []
+    },
+    {
+      "id": "underground_chamber",
+      "name": "地下密室",
+      "content": "地下深处的一间密室。祭坛上刻着不可名状的符号。墙上挂满了古老的抄本。这是奈亚拉托提普信徒举行仪式的地方。",
+      "entity_ids": ["altar", "ancient_manuscripts", "cultists"],
+      "checkpoint_ids": ["investigate_chamber", "read_manuscripts", "deactivate_altar", "confront_cult"],
+      "exits": []
+    },
+    {
+      "id": "principal_office",
+      "name": "校长办公室",
+      "content": "史校长的办公室。书架上有一些不常见的古书。",
+      "entity_ids": ["principal_shi", "mythos_books"],
+      "checkpoint_ids": ["search_office", "confront_principal"],
+      "exits": []
+    },
+    {
+      "id": "julie_office",
+      "name": "朱莉办公室",
+      "content": "副校长的办公室。桌上堆着文件，角落里有一个上锁的柜子。墙上挂着几幅奇怪的画。",
+      "entity_ids": ["julie", "locked_cabinet"],
+      "checkpoint_ids": ["search_julie_office", "open_julie_cabinet"],
+      "exits": []
+    },
+    {
+      "id": "library",
+      "name": "图书馆",
+      "content": "学校的图书馆。历史区的旧档案可能记载了学校的历史。",
+      "entity_ids": ["archive_section", "busen_notebook"],
+      "checkpoint_ids": ["research_history", "find_busen_notebook", "read_busen_notebook"],
+      "exits": []
+    },
+    {
+      "id": "playground",
+      "name": "操场",
+      "content": "空旷的操场。体育器材室在角落里。",
+      "entity_ids": ["equipment_room"],
+      "checkpoint_ids": [],
+      "exits": []
+    }
+  ],
+  "entities": [
+    {
+      "id": "principal_shi",
+      "kind": "npc",
+      "name": "史校长",
+      "aliases": ["校长", "史建西"],
+      "content": "一位表面和蔼的中年男人，古城中学的校长。",
+      "secrets": "奈亚拉托提普的狂热信徒。重新发现了地下密室并重启了献祭。杀死了隐修堂的调查员布文杉。",
+      "state": { "corrupted": true, "aware_of_investigation": false },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": { "talk": "史校长温和地笑了笑：'学校一切都很好，你们不必担心。'" },
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "julie",
+      "kind": "npc",
+      "name": "朱莉",
+      "aliases": ["副校长"],
+      "content": "一位对学生和蔼可亲的女副校长。",
+      "secrets": "比史校长更加狂热。与奈亚拉托提普接触后留下了喜怒无常的后遗症。管理地下密室，知道所有失踪学生的下落。",
+      "state": { "corrupted": true },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {
+        "talk": "朱莉微笑着说：'史校长是我的导师。我当然是下任校长。'",
+        "investigate": "你注意到朱莉办公桌上有一本看起来相当古老的抄本，但她很快收了起来。"
+      },
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "wang_guiqiang",
+      "kind": "npc",
+      "name": "王贵强",
+      "aliases": ["王主任", "学区主任"],
+      "content": "一位正直的中年男人。学生失踪案后被调来古城中学调查。",
+      "secrets": "暗中调查过朱莉。曾与'隐修堂'的调查员布文杉有过交谈，知道他以教师身份潜伏。",
+      "state": { "suspicious": true },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {
+        "talk": "王主任压低声音：'这所学校有些事情不对劲。那个朱莉……你们小心一点。'"
+      },
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "buwen_shan",
+      "kind": "npc",
+      "name": "布文杉",
+      "aliases": ["隐修堂调查员", "死去的教师"],
+      "content": "一个已经不存在的'教师'。",
+      "secrets": "'隐修堂'派来调查学生失踪的卧底。被史校长发现并杀害，尸体埋在花坛下。",
+      "state": { "alive": false, "body_found": false },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "teachers",
+      "kind": "npc",
+      "name": "教师群体",
+      "aliases": ["老师们"],
+      "content": "学校的教师们。有些人看起来精神恍惚。",
+      "secrets": "大多数教师都或多或少接受了奈亚拉托提普的诱惑。",
+      "state": { "corrupted": "partial" },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "altar",
+      "kind": "object",
+      "name": "祭坛",
+      "aliases": ["奈亚祭坛", "石台"],
+      "content": "地下密室中央的石质祭坛。上面刻着不可名状的符号，似乎还在微微发光。",
+      "secrets": "这是献给奈亚拉托提普的祭坛。献祭仪式在这里举行。需要特定的仪式才能关闭。",
+      "state": { "active": true },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": { "investigate": "石台上的刻痕不是你认识的任何文字。光是看着它们就让你感到不安。" },
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "busen_notebook",
+      "kind": "object",
+      "name": "布森的笔记本",
+      "aliases": ["神话典籍", "手抄本"],
+      "content": "一本泛黄的手抄笔记本。最后几页与古城中学相关。",
+      "secrets": "这是一本神话典籍。作者是马卡拉·E·韦伯斯特。记录了奈亚拉托提普的相关知识。略读损失1d6 SAN，获取2%克苏鲁神话。",
+      "state": { "found": false, "read": false },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "buwen_gun",
+      "kind": "object",
+      "name": "布文杉的枪",
+      "aliases": [".32自动手枪"],
+      "content": "一把.32自动手枪，埋在花坛下布文杉的尸体旁边。",
+      "secrets": null,
+      "state": { "found": false },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": null
+    }
+  ],
+  "checkpoints": [
+    {
+      "id": "dig_flowerbed",
+      "scene_id": "garden",
+      "action": "dig",
+      "target_id": "flowerbed",
+      "skills": ["STR"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": ["调查员挖开了花坛的泥土", "发现了布文杉的尸体"],
+          "player_visible_information": [
+            { "text": "铁锹碰到了硬物。你小心地拨开泥土——一具已经开始腐烂的尸体出现在你面前。从衣着来看，死者曾是一位教师。", "visibility": { "audience": "all" } }
+          ],
+          "narration_constraints": [],
+          "ops": [
+            { "op": "modify", "path": "entities.buwen_shan.body_found", "set": true },
+            { "op": "modify", "path": "entities.buwen_gun.found", "set": true }
+          ]
+        },
+        "failure": {
+          "facts": ["花坛下没有发现异常"],
+          "player_visible_information": [{ "text": "你们挖了一阵，但花坛下似乎什么都没有。", "visibility": { "audience": "all" } }],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": { "audience": "all", "requires_discovery": true, "discovery_rule": "check.search_garden.success == true" }
+    },
+    {
+      "id": "evade_guard",
+      "scene_id": "garden",
+      "action": "evade",
+      "target_id": "garden",
+      "skills": ["stealth"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": ["调查员避开了巡逻保安"],
+          "player_visible_information": [],
+          "narration_constraints": [],
+          "ops": []
+        },
+        "failure": {
+          "facts": ["调查员与保安撞了个正着"],
+          "player_visible_information": [
+            { "text": "你刚走出围挡，就和巡逻的保安迎面撞上。他警惕地看着你。", "visibility": { "audience": "all" } }
+          ],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": { "audience": "keeper" }
+    },
+    {
+      "id": "read_busen_notebook",
+      "scene_id": "library",
+      "action": "read",
+      "target_id": "busen_notebook",
+      "skills": ["language-english"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": ["调查员理解了笔记本的内容"],
+          "player_visible_information": [
+            { "text": "那些充满奇幻色彩的词汇接连出现在你的脑中。你开始理解这所学校真正的历史——以及祭坛的意义。", "visibility": { "audience": "all" } }
+          ],
+          "narration_constraints": [],
+          "ops": [{ "op": "modify", "path": "entities.busen_notebook.read", "set": true }]
+        },
+        "failure": {
+          "facts": ["调查员无法理解笔记本内容"],
+          "player_visible_information": [
+            { "text": "笔记本上的文字太过晦涩。你只知道这是一位叫马卡拉·E·韦伯斯特的人制作的某本书的手抄本。", "visibility": { "audience": "all" } }
+          ],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": null
+    }
+  ],
+  "win_conditions": [
+    {
+      "id": "altar_deactivated",
+      "when": { "path": "entities.altar.active", "equals": false },
+      "fact": "祭坛被摧毁，奈亚拉托提普的仪式终止",
+      "player_visible_information": "祭坛上的光芒熄灭了。那股压抑的气息消散在空气中。学校得救了。",
+      "is_ending": true
+    },
+    {
+      "id": "investigator_sacrificed",
+      "when": { "path": "entities.altar.active", "equals": true },
+      "fact": "调查员未能阻止仪式",
+      "player_visible_information": "你感到一股不可抗力将你拖向祭坛。黑暗吞没了你。",
+      "is_ending": true
+    }
+  ],
+  "module_rules": [
+    {
+      "id": "corrupted_teachers_resist",
+      "hook": "on_interact",
+      "priority": 50,
+      "mode": "append",
+      "when": { "path": "entities.teachers.corrupted", "equals": "partial" },
+      "then": [],
+      "facts": ["受蛊惑的教师态度紧张"],
+      "player_visible_information": [
+        { "text": "这位老师看起来精神有些恍惚，回答问题时语无伦次。", "visibility": { "audience": "all" } }
+      ]
+    },
+    {
+      "id": "san_mythos_contact",
+      "hook": "on_scene_enter",
+      "priority": 100,
+      "mode": "append",
+      "when": { "path": "entities.altar.active", "equals": true },
+      "then": [],
+      "facts": ["调查员感受到奈亚拉托提普的注视"],
+      "player_visible_information": [
+        { "text": "一股寒意从脊背升起。你感觉到有什么东西正在注视着你——不是人类的眼睛。", "visibility": { "audience": "actor" } }
+      ]
+    }
+  ]
+}

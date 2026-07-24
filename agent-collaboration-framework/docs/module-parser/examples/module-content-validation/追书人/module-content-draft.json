@@ -1,0 +1,443 @@
+{
+  "module_id": "paper-chase-zh-coc7",
+  "version": "0.1.0",
+  "world_ref": "coc-7e",
+  "scenes": [
+    {
+      "id": "client_briefing",
+      "name": "托马斯的委托",
+      "content": "托马斯·金博尔联系了调查员。他的房屋遭了贼，失窃的是最近过世的叔叔珍藏的五本书。他希望调查员找到偷书的贼，追回书籍，并调查叔叔道格拉斯是否尚在人世。",
+      "entity_ids": ["thomas"],
+      "checkpoint_ids": [],
+      "exits": []
+    },
+    {
+      "id": "neighborhood",
+      "name": "询问朋友和邻居",
+      "content": "调查员在道格拉斯旧居附近走访邻居。莱拉·奥戴尔回忆起金博尔先生曾夹着书往公墓方向去。",
+      "entity_ids": ["lyla"],
+      "checkpoint_ids": ["social_neighbors"],
+      "exits": []
+    },
+    {
+      "id": "library",
+      "name": "当地图书馆",
+      "content": "当地图书馆收藏了《阿诺兹堡广告报》的旧刊。一篇十多年前的报道声称有人目击一群看似未着寸缕的人在公墓里跳舞。",
+      "entity_ids": [],
+      "checkpoint_ids": ["library_research"],
+      "exits": []
+    },
+    {
+      "id": "newspaper",
+      "name": "阿诺兹堡广告报",
+      "content": "报社档案室里保存着旧报道和希尔达关于墓地怪物的未刊陈述。",
+      "entity_ids": ["hilda"],
+      "checkpoint_ids": ["access_newspaper_archive", "luck_find_report"],
+      "exits": []
+    },
+    {
+      "id": "kimball_house",
+      "name": "金博尔宅",
+      "content": "道格拉斯的旧居，现在属于他的侄子托马斯。书房里有书架、柜子和一扇窗户。道格拉斯的日记可能还在这里。",
+      "entity_ids": ["bookshelf", "cabinet", "document", "window", "diary"],
+      "checkpoint_ids": ["investigate_bookshelf", "smash_cabinet", "search_study", "read_diary"],
+      "exits": []
+    },
+    {
+      "id": "speakeasy",
+      "name": "地下酒吧",
+      "content": "禁酒令时期的地下酒吧。在这里可以买到酒来贿赂看守。",
+      "entity_ids": ["liquor"],
+      "checkpoint_ids": ["find_speakeasy"],
+      "exits": []
+    },
+    {
+      "id": "cemetery",
+      "name": "公共墓地",
+      "content": "道格拉斯常坐的那块低矮墓碑就在这片公墓里。深夜有人影出没的传闻让看守不敢靠近。",
+      "entity_ids": ["melodias", "favorite_grave"],
+      "checkpoint_ids": ["impress_caretaker", "notice_bottle", "bribe_caretaker", "track_at_grave"],
+      "exits": []
+    },
+    {
+      "id": "crypt",
+      "name": "地穴入口",
+      "content": "石板滑动开来，露出一条通往地下的通道。腐臭的气味扑面而来。",
+      "entity_ids": ["douglas"],
+      "checkpoint_ids": ["move_crypt_slab", "confront_douglas"],
+      "exits": []
+    }
+  ],
+  "entities": [
+    {
+      "id": "thomas",
+      "kind": "npc",
+      "name": "托马斯·金博尔",
+      "aliases": ["委托人"],
+      "content": "一位神色忧虑的年轻人。他最近继承了叔叔的房产。",
+      "secrets": null,
+      "state": {},
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": { "talk": "托马斯详细描述了失窃的五本书和叔叔失踪的情况。" },
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "douglas",
+      "kind": "npc",
+      "name": "道格拉斯·金博尔",
+      "aliases": ["金博尔先生", "失踪者"],
+      "content": "一位离群索居的中年人，书籍和阅读是他生命的全部意义。",
+      "secrets": "道格拉斯跟随食尸鬼进入了地下世界，已经成为食尸鬼。他回来只为取回自己的藏书。他的样貌有细微改变，饮食口味大异于常人。",
+      "state": { "alive": true, "sighted": false, "hostile": false },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": {
+        "STR": 85, "CON": 75, "SIZ": 65, "INT": 80, "POW": 65, "DEX": 40, "EDU": 85,
+        "SAN": 0, "HP": 14, "MP": 13, "armor": "火器和贯穿武器伤害减半，舍去小数", "move": 9
+      }
+    },
+    {
+      "id": "lyla",
+      "kind": "npc",
+      "name": "莱拉·奥戴尔",
+      "aliases": ["邻居"],
+      "content": "道格拉斯的邻居，一位健谈的女士。",
+      "secrets": null,
+      "state": {},
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "melodias",
+      "kind": "npc",
+      "name": "梅洛迪亚斯·杰弗逊",
+      "aliases": ["墓地看守"],
+      "content": "公墓的看守，外套口袋微露一个玻璃瓶。他对公墓里的怪事感到害怕。",
+      "secrets": "瓶子里是酒。可以用这个胁迫他，或者买酒来贿赂他。",
+      "state": { "cooperative": false, "bottle_exposed": true },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "hilda",
+      "kind": "npc",
+      "name": "希尔达·沃德",
+      "aliases": ["报社工"],
+      "content": "一位年迈的报社档案管理员。",
+      "secrets": null,
+      "state": {},
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "bookshelf",
+      "kind": "object",
+      "name": "书架",
+      "aliases": ["书柜", "藏书架"],
+      "content": "积灰的书架上塞满了旧书。",
+      "secrets": "一把小钥匙藏在书架后方。",
+      "state": { "key_found": false },
+      "refuse_ops": [],
+      "blocked_text": "你暂时无法从书架上取得更多东西。",
+      "direct_responses": { "investigate": "你粗略扫过书脊，没有发现显眼的异常。" },
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "cabinet",
+      "kind": "object",
+      "name": "上锁的柜子",
+      "aliases": ["柜子", "木柜"],
+      "content": "一只带黄铜锁孔的年代久远的木柜。",
+      "secrets": "关键文件藏在柜中；强行砸开会毁坏文件。",
+      "state": { "opened": false },
+      "refuse_ops": ["open"],
+      "blocked_text": "柜门纹丝不动；没有合适的钥匙无法正常打开。",
+      "direct_responses": { "investigate": "黄铜锁孔很小，柜门边缘没有被撬动过的痕迹。" },
+      "rules": [
+        {
+          "id": "allow_open_with_key",
+          "hook": "on_interact",
+          "priority": 100,
+          "mode": "append",
+          "when": { "path": "entities.bookshelf.key_found", "equals": true },
+          "then": [
+            { "op": "allow", "action": "open" },
+            { "op": "modify", "path": "entities.cabinet.opened", "set": true },
+            { "op": "modify", "path": "entities.document.obtained", "set": true }
+          ],
+          "facts": ["玩家用钥匙打开柜子并取得关键文件"],
+          "player_visible_information": [
+            { "text": "小钥匙正好转动了锁芯；柜门打开，里面是一份关键文件。", "visibility": { "audience": "all" } }
+          ]
+        }
+      ],
+      "stat_block": null
+    },
+    {
+      "id": "document",
+      "kind": "object",
+      "name": "关键文件",
+      "aliases": ["文件", "档案"],
+      "content": "尚未取得的关键文件。",
+      "secrets": "文件记录了事件真相。",
+      "state": { "obtained": false, "destroyed": false },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "diary",
+      "kind": "object",
+      "name": "道格拉斯的日记",
+      "aliases": ["日记"],
+      "content": "一本陈旧的日记本，记录了道格拉斯的日常生活。",
+      "secrets": "日记中暗示了道格拉斯与食尸鬼的交往。",
+      "state": { "found": false, "read": false },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "liquor",
+      "kind": "object",
+      "name": "一品脱酒",
+      "aliases": ["酒"],
+      "content": "从地下酒吧买到的一品脱酒，可以用来贿赂看守。",
+      "secrets": null,
+      "state": { "obtained": false },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "window",
+      "kind": "object",
+      "name": "窗户",
+      "aliases": ["窗外", "玻璃窗"],
+      "content": "窗外只有被夜雨打湿的花园，没有明显异常。",
+      "secrets": null,
+      "state": {},
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": { "investigate": "你透过落灰的玻璃看去，夜雨中的花园一片寂静。" },
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "favorite_grave",
+      "kind": "location",
+      "name": "常坐的墓碑",
+      "aliases": ["低矮墓碑"],
+      "content": "一块低矮的墓碑，道格拉斯过去常在这里读书。",
+      "secrets": null,
+      "state": {},
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": null
+    }
+  ],
+  "checkpoints": [
+    {
+      "id": "investigate_bookshelf",
+      "scene_id": "kimball_house",
+      "action": "investigate",
+      "target_id": "bookshelf",
+      "skills": ["spot-hidden"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": ["玩家在书架后发现钥匙"],
+          "player_visible_information": [
+            { "text": "你拨开积灰的书册，在书架后方摸到了一把冰凉的小钥匙。", "visibility": { "audience": "all" } }
+          ],
+          "narration_constraints": ["必须明确玩家已经发现钥匙"],
+          "ops": [{ "op": "modify", "path": "entities.bookshelf.key_found", "set": true }]
+        },
+        "failure": {
+          "facts": ["玩家没有发现书架后的钥匙"],
+          "player_visible_information": [
+            { "text": "你检查了几排旧书，却没有找到有用的东西。", "visibility": { "audience": "all" } }
+          ],
+          "narration_constraints": ["不得声称玩家发现了钥匙"],
+          "ops": []
+        }
+      },
+      "visibility": null
+    },
+    {
+      "id": "smash_cabinet",
+      "scene_id": "kimball_house",
+      "action": "smash",
+      "target_id": "cabinet",
+      "skills": ["STR"],
+      "difficulty": "hard",
+      "outcomes": {
+        "success": {
+          "facts": ["玩家成功砸开柜门", "柜内文件被冲击毁坏"],
+          "player_visible_information": [
+            { "text": "柜门在撞击中弹开，但里面的文件也被震裂、撕碎，已经无法阅读。", "visibility": { "audience": "all" } }
+          ],
+          "narration_constraints": ["动作成功但后果很坏", "不得称文件完好"],
+          "ops": [
+            { "op": "modify", "path": "entities.cabinet.opened", "set": true },
+            { "op": "modify", "path": "entities.document.destroyed", "set": true }
+          ]
+        },
+        "failure": {
+          "facts": ["玩家没有砸开柜门"],
+          "player_visible_information": [
+            { "text": "撞击声在书房里回荡，柜门仍旧紧闭。", "visibility": { "audience": "all" } }
+          ],
+          "narration_constraints": ["不得声称柜门已打开"],
+          "ops": []
+        }
+      },
+      "visibility": null
+    },
+    {
+      "id": "track_at_grave",
+      "scene_id": "cemetery",
+      "action": "track",
+      "target_id": "favorite_grave",
+      "skills": ["track"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": ["玩家发现通往地穴的足迹"],
+          "player_visible_information": [
+            { "text": "你注意到墓碑旁的地面上有不寻常的足迹，它们通向公墓深处的石板。", "visibility": { "audience": "all" } }
+          ],
+          "narration_constraints": [],
+          "ops": []
+        },
+        "failure": {
+          "facts": ["玩家未能追踪到足迹"],
+          "player_visible_information": [{ "text": "泥土上的痕迹太过模糊，无法追踪。", "visibility": { "audience": "all" } }],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": {
+        "audience": "all",
+        "requires_discovery": true,
+        "discovery_rule": "check.track.success == true",
+        "discovery_shares_to_party": true
+      }
+    },
+    {
+      "id": "move_crypt_slab",
+      "scene_id": "crypt",
+      "action": "move",
+      "target_id": "crypt",
+      "skills": ["STR"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": ["玩家移开石板"],
+          "player_visible_information": [{ "text": "你用力推开石板，一股腐臭的气味扑面而来。", "visibility": { "audience": "all" } }],
+          "narration_constraints": [],
+          "ops": []
+        },
+        "failure": {
+          "facts": ["石板纹丝不动"],
+          "player_visible_information": [{ "text": "石板太重了，你无法移开它。", "visibility": { "audience": "all" } }],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": {
+        "audience": "all",
+        "requires_discovery": true,
+        "discovery_rule": "check.track_at_grave.success == true",
+        "discovery_shares_to_party": true
+      }
+    },
+    {
+      "id": "bribe_caretaker",
+      "scene_id": "cemetery",
+      "action": "social",
+      "target_id": "melodias",
+      "skills": ["charm", "fast-talk", "credit-rating"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": ["看守透露了道格拉斯常坐的墓碑位置"],
+          "player_visible_information": [
+            { "text": "看守收下酒，凑近告诉你那块墓碑的位置，并低声说他深夜见过人影。", "visibility": { "audience": "all" } }
+          ],
+          "narration_constraints": [],
+          "ops": []
+        },
+        "failure": {
+          "facts": ["看守拒绝合作"],
+          "player_visible_information": [{ "text": "看守拒绝透露更多信息。", "visibility": { "audience": "all" } }],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": null
+    }
+  ],
+  "win_conditions": [
+    {
+      "id": "ending_document_recovered",
+      "when": { "path": "entities.document.obtained", "equals": true },
+      "fact": "玩家取得关键文件，触发正常结局",
+      "player_visible_information": "文件中的记录让真相终于有了可以验证的证据。",
+      "is_ending": true
+    },
+    {
+      "id": "ending_document_destroyed",
+      "when": { "path": "entities.document.destroyed", "equals": true },
+      "fact": "关键文件被毁，触发坏结局",
+      "player_visible_information": "唯一的书面证据已经损毁，真相再次沉入阴影。",
+      "is_ending": true
+    }
+  ],
+  "module_rules": [
+    {
+      "id": "night_surveillance_enabler",
+      "hook": "on_time_elapsed",
+      "priority": 50,
+      "mode": "append",
+      "when": { "path": "clock.time_of_day", "equals": "night" },
+      "then": [],
+      "facts": [],
+      "player_visible_information": []
+    },
+    {
+      "id": "douglas_san_loss_on_sight",
+      "hook": "on_scene_enter",
+      "priority": 100,
+      "mode": "append",
+      "when": { "path": "entities.douglas.sighted", "equals": true },
+      "then": [],
+      "facts": ["调查员目击道格拉斯的真实形态"],
+      "player_visible_information": [
+        { "text": "你看到了道格拉斯的真实面貌——那已不再是人类的形态。", "visibility": { "audience": "actor" } }
+      ]
+    }
+  ]
+}

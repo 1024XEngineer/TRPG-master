@@ -1,0 +1,683 @@
+{
+  "_note": "ModuleContent v1 P2 Draft — 《幸福蛙蛙村》。此为 Contract Validation 阶段的示例映射，非可执行 JSON Schema。字段名使用当前 Contract 名称（scenes 而非 content_units）。",
+
+  "module_id": "happy-frog-village",
+  "version": "1.0.0",
+  "world_ref": "coc-7e",
+
+  "scenes": [
+    {
+      "id": "scene_manor",
+      "name": "莱恩庄园",
+      "content": "你们接到了一个找人的委托，来到了莱恩庄园，一位衣着华贵但面容憔悴的中年男人在管家的陪同下接待了你们。他是本市有名的企业家，理查德·莱恩先生。",
+      "entity_ids": ["richard_lane", "butler", "flyer", "james_photo"],
+      "checkpoint_ids": ["examine_flyer"],
+      "exits": []
+    },
+    {
+      "id": "scene_police_station",
+      "name": "警局接待处",
+      "content": "你们在警局处理文书工作时，被一阵焦急的争论声打断。一对衣着光鲜的夫妇——著名的企业家理查德·莱恩和他的夫人，正情绪激动地向你们的警长求助。",
+      "entity_ids": ["richard_lane", "lane_wife", "sheriff", "flyer", "james_photo"],
+      "checkpoint_ids": ["examine_flyer"],
+      "exits": []
+    },
+    {
+      "id": "scene_forest_edge",
+      "name": "老林地边缘",
+      "content": "在通往老林地的碎石路旁，一个身影蜷缩在一棵巨大的橡树下，浑身沾满泥泞。他看起来衣衫褴褛，正用双手死死捂住自己的耳朵，身体不住地颤抖。",
+      "entity_ids": ["ezra"],
+      "checkpoint_ids": ["spot_ezra", "calm_ezra"],
+      "exits": ["scene_resort_entrance"]
+    },
+    {
+      "id": "scene_resort_entrance",
+      "name": "蛙蛙度假村入口/接待处",
+      "content": "木制的牌匾上写着"蛙蛙度假村"，旁边画着一只可爱的卡通青蛙。空气清新湿润，隐约能听到悦耳的蛙鸣。一位身着修身女仆装、头戴蛙蛙发卡的年轻女性迎了上来。",
+      "entity_ids": ["emily", "messenger", "tom", "james", "samantha", "resort_map"],
+      "checkpoint_ids": ["psychology_emily", "psychology_messenger", "spot_staff_uniformity"],
+      "exits": ["scene_guest_room", "scene_dining_kitchen", "scene_pond", "scene_staff_area"]
+    },
+    {
+      "id": "scene_guest_room",
+      "name": "客房",
+      "content": "整洁舒适，床头柜上放着一本小册子，标题是《来一起拥抱幸福吧！》，里面充满了关于'放下自我，融入自然'、'幸福即在无忧的梦中'等箴言。",
+      "entity_ids": ["happiness_booklet", "guest_npc"],
+      "checkpoint_ids": ["read_booklet", "persuade_guests", "spot_guest_frog_features"],
+      "exits": []
+    },
+    {
+      "id": "scene_dining_kitchen",
+      "name": "用餐区和厨房",
+      "content": "常规食物（沙拉、汉堡、牛排等）本身没有问题。然而萨曼莎在烹饪之前总得洗菜。所有液体——饮用水、果汁、咖啡、汤品——其主要成分都是来自'蛙鸣泉'的池水。",
+      "entity_ids": ["samantha", "water_barrel"],
+      "checkpoint_ids": ["spot_water_source", "resist_drink"],
+      "exits": []
+    },
+    {
+      "id": "scene_pond",
+      "name": "池塘区（蛙鸣泉）",
+      "content": "这里是度假村的中心，青蛙的数量多得不正常。它们蹲在荷叶上、岸边，几乎一动不动。",
+      "entity_ids": ["dream_frog", "frog_pond", "dream_crystal"],
+      "checkpoint_ids": ["spot_frogs", "natural_history_frogs", "listen_frogs", "resist_pond_contact", "resist_pond_immersion", "dive_for_crystal", "dodge_frog_swarm"],
+      "exits": []
+    },
+    {
+      "id": "scene_staff_area",
+      "name": "员工区",
+      "content": "员工工作区，需要潜行或引开员工才能进入。",
+      "entity_ids": ["storage_key", "staff_uniforms", "unfinished_flyers", "handwritten_notes"],
+      "checkpoint_ids": ["stealth_staff_area", "find_storage_key", "find_notes"],
+      "exits": ["scene_storage_room"]
+    },
+    {
+      "id": "scene_storage_room",
+      "name": "二楼杂物间",
+      "content": "杂物间里堆满了散发着甜腻气味的'营养液'桶。如果调查员选择尝一口，便会直接倒地睡觉。",
+      "entity_ids": ["nutrient_barrel"],
+      "checkpoint_ids": [],
+      "exits": []
+    },
+    {
+      "id": "scene_boss_bedroom",
+      "name": "老板卧室",
+      "content": "你会在里面发现一个笔记。",
+      "entity_ids": ["messenger_notes"],
+      "checkpoint_ids": ["read_messenger_notes"],
+      "exits": []
+    },
+    {
+      "id": "scene_night_pond",
+      "name": "夜间池塘",
+      "content": "她深夜独自来到池塘边，跪在水边，双手浸入水中，身体发出微弱的磷光。池塘里的青蛙则如同朝圣般面向她，微微颤动。",
+      "entity_ids": ["messenger", "dream_crystal", "dream_frog"],
+      "checkpoint_ids": ["track_messenger_night", "night_con_check"],
+      "exits": []
+    }
+  ],
+
+  "entities": [
+    {
+      "id": "messenger",
+      "kind": "npc",
+      "name": "幸福信使",
+      "aliases": ["信使", "信使大人", "白头发的女孩"],
+      "content": "一位看起来年纪不过十六七岁的少女，拥有一头不自然的纯白色长发，身披一件像是用透明雨衣材质做成的、流光溢彩的绿色斗篷。她的笑容灿烂却显得有些空洞。",
+      "secrets": "来自异维度的存在，本体是一团纯粹的能量和意识。少女形象只是幻象。其逻辑是纯粹功利主义的'幸福最大化'：将生命转化为低耗能的青蛙形态并让他们永驻美梦。",
+      "state": {
+        "defeated": false,
+        "belief_shaken": false,
+        "hostile": false
+      },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {
+        "ask_about_anomalies": "信使会很诚实地如数说出，并且告诉他们为什么要这么做。",
+        "ask_about_ezra": "这样的在现实和永恒幸福里反复徘徊的人，当然会感到很痛苦了。但是因为她没有下决定，所以我也无法帮助她。"
+      },
+      "rules": [],
+      "stat_block": {
+        "STR": 40, "CON": 90, "SIZ": 55, "DEX": 65,
+        "APP": 90, "INT": 85, "POW": 120, "EDU": 70,
+        "HP": 14, "MP": 24, "MOV": 8
+      }
+    },
+    {
+      "id": "emily",
+      "kind": "npc",
+      "name": "艾米丽",
+      "aliases": ["女仆", "接待员"],
+      "content": "身着修身女仆装、头戴蛙蛙发卡、笑容得体的年轻女性。",
+      "secrets": "被信使完全'感化'的人类，思维已被深度同化，将信使视为救世主。不像人一样无法被看透。",
+      "state": { "converted": true },
+      "refuse_ops": [],
+      "stat_block": {
+        "STR": 55, "CON": 60, "SIZ": 60, "DEX": 50,
+        "APP": 65, "INT": 50, "POW": 10, "EDU": 50,
+        "HP": 12, "MOV": 8
+      }
+    },
+    {
+      "id": "james",
+      "kind": "npc",
+      "name": "詹姆斯",
+      "aliases": ["詹姆斯·莱恩", "向导", "失踪青年"],
+      "content": "负责带领自然漫步的向导，同时也是接了委托的玩家要找的青年。笑容开朗的二十来岁青年。",
+      "secrets": "已向信使表白，被完全同化。认为这里才是家。与父亲关系紧张。",
+      "state": {
+        "converted": true,
+        "free_will": false,
+        "location": "resort"
+      },
+      "stat_block": {
+        "STR": 55, "CON": 60, "SIZ": 60, "DEX": 50,
+        "APP": 65, "INT": 50, "POW": 10, "EDU": 50,
+        "HP": 12, "MOV": 8
+      }
+    },
+    {
+      "id": "samantha",
+      "kind": "npc",
+      "name": "萨曼莎",
+      "aliases": ["厨师"],
+      "content": "总是微笑着询问菜品是否合口的厨师。",
+      "secrets": "被同化的员工。用池水烹饪，认为这是'幸福之水'。希望带给更多人幸福。",
+      "state": { "converted": true },
+      "stat_block": {
+        "STR": 55, "CON": 60, "SIZ": 60, "DEX": 50,
+        "APP": 65, "INT": 50, "POW": 10, "EDU": 50,
+        "HP": 12, "MOV": 8
+      }
+    },
+    {
+      "id": "tom",
+      "kind": "npc",
+      "name": "汤姆",
+      "aliases": ["客房管家"],
+      "content": "健谈的客房管家。",
+      "secrets": "被同化的员工。",
+      "state": { "converted": true },
+      "stat_block": {
+        "STR": 55, "CON": 60, "SIZ": 60, "DEX": 50,
+        "APP": 65, "INT": 50, "POW": 10, "EDU": 50,
+        "HP": 12, "MOV": 8
+      }
+    },
+    {
+      "id": "ezra",
+      "kind": "npc",
+      "name": "埃兹拉",
+      "aliases": ["幸存者", "推销员"],
+      "content": "一个身影蜷缩在一棵巨大的橡树下，浑身沾满泥泞。衣衫褴褛，眼睛布满血丝，瞳孔不规则地缩放。指间可以看到明显的、尚未完全消退的淡绿色蹼膜。",
+      "secrets": "曾进入度假村、开始变异后又逃脱的幸存者。精神已崩溃。",
+      "state": {
+        "calmed": false,
+        "fled": false,
+        "mutation_stage": 1
+      }
+    },
+    {
+      "id": "richard_lane",
+      "kind": "npc",
+      "name": "理查德·莱恩",
+      "aliases": ["莱恩先生", "委托人"],
+      "content": "一位衣着华贵但面容憔悴的中年男人，本市有名的企业家。",
+      "state": { "at_resort": false, "paid_reward": false },
+      "stat_block": null
+    },
+    {
+      "id": "mutant_frog",
+      "kind": "npc",
+      "name": "变异仆从青蛙",
+      "aliases": ["巨型青蛙怪", "融合青蛙"],
+      "content": "几百只青蛙融合成的巨型青蛙怪，具有攻击性的生物兵器。",
+      "secrets": "由梦游青蛙出于本能融合而成，守护幸福。被击败后会分解成一滩粘液和几百只普通的梦游青蛙。",
+      "state": { "spawned": false },
+      "stat_block": {
+        "STR": 80, "CON": 70, "SIZ": 100, "DEX": 80,
+        "HP": 30, "MOV": 8
+      }
+    },
+    {
+      "id": "dream_frog",
+      "kind": "npc",
+      "name": "梦游青蛙",
+      "aliases": ["青蛙"],
+      "content": "被完全转化的受害者，沉浸在永恒的美梦中。眼神呆滞，即使靠近也几乎不躲闪。",
+      "secrets": "曾是人类。杀死一只需进行 SC 0/1。当信使的力量消失时会变回人类。",
+      "state": { "count": 300 },
+      "stat_block": {
+        "STR": 5, "CON": 30, "SIZ": 5, "DEX": 40,
+        "HP": 4, "MOV": 4
+      }
+    },
+    {
+      "id": "flyer",
+      "kind": "object",
+      "name": "传单",
+      "aliases": ["蛙蛙度假村传单", "宣传单"],
+      "content": "设计精美的传单：【蛙蛙度假村——寻觅你遗失的幸福】。散发着一股子'青蛙'味。不是传统印刷，而是手绘的。",
+      "secrets": null,
+      "state": { "examined": false, "hand_drawn_discovered": false },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": []
+    },
+    {
+      "id": "happiness_booklet",
+      "kind": "object",
+      "name": "《来一起拥抱幸福吧！》",
+      "aliases": ["小册子", "幸福手册"],
+      "content": "充满了关于'放下自我，融入自然'、'幸福即在无忧的梦中'等箴言。",
+      "state": { "read": false }
+    },
+    {
+      "id": "dream_crystal",
+      "kind": "object",
+      "name": "湖底水晶",
+      "aliases": ["水晶", "美梦之石"],
+      "content": "一个可以让人沉沦美梦的透明色石头。把它放在某种媒介里（例如水、香炉等），可以让触碰媒介的生物开始做美梦。还具备安定心神的力量，可以让附近5米的生物免疫心灵伤害，抑制其恐慌。",
+      "secrets": "信使每天晚上从水里掏出水晶注入能量。",
+      "state": { "retrieved": false, "understood": false },
+      "refuse_ops": ["retrieve_without_diving"],
+      "blocked_text": "水晶在池塘深处，不用潜水装备无法到达。"
+    },
+    {
+      "id": "messenger_notes",
+      "kind": "object",
+      "name": "信使笔记",
+      "aliases": ["笔记"],
+      "content": "记录了幸福信使的真实身份和动机。幸福信使是来自遥远世界的外星生物，她希望给所有人带来幸福。她把做梦的人变成了她最喜欢的青蛙，这样消耗的魔力就会少很多。",
+      "state": { "read": false }
+    },
+    {
+      "id": "nutrient_barrel",
+      "kind": "object",
+      "name": "营养液桶",
+      "aliases": ["营养液"],
+      "content": "散发着甜腻气味的'营养液'桶。尝一口会直接倒地睡觉。",
+      "state": {}
+    },
+    {
+      "id": "frog_pond",
+      "kind": "location",
+      "name": "蛙鸣泉",
+      "aliases": ["池塘", "池塘区"],
+      "content": "度假村中心的池塘，青蛙数量多得不正常。池水带有微弱的磷光。",
+      "secrets": "池水蕴含信使的力量，是变异催化剂和幻觉触发媒介。",
+      "state": { "crystal_present": true }
+    },
+    {
+      "id": "resort",
+      "kind": "location",
+      "name": "蛙蛙度假村",
+      "aliases": ["度假村", "蛙蛙村"],
+      "content": "被精心打理过的田园风光，木制的牌匾上写着'蛙蛙度假村'。",
+      "secrets": "信使的领域。在度假村范围内她能感知到强烈的敌意和清醒的意志。",
+      "state": { "active": true, "destroyed": false }
+    }
+  ],
+
+  "module_rules": [
+    {
+      "id": "drink_trigger",
+      "hook": "on_interact",
+      "priority": 100,
+      "mode": "append",
+      "when": { "expr": "action.target.kind == 'liquid'" },
+      "then": [
+        { "op": "force", "action": "resist_drink" }
+      ],
+      "facts": ["drink_consumed"],
+      "player_visible_information": []
+    },
+    {
+      "id": "pond_contact_trigger",
+      "hook": "on_scene_enter",
+      "priority": 100,
+      "mode": "append",
+      "when": { "path": "scenes.scene_pond.active", "equals": true },
+      "then": [
+        { "op": "force", "action": "resist_pond_contact" }
+      ],
+      "facts": ["pond_contact_occurred"],
+      "player_visible_information": []
+    },
+    {
+      "id": "cumulative_dependency",
+      "hook": "on_state_change",
+      "priority": 50,
+      "mode": "append",
+      "when": { "expr": "self.drink_failures >= 2" },
+      "then": [
+        { "op": "apply_condition", "condition": "psychological_dependency" }
+      ],
+      "facts": ["dependency_established"],
+      "player_visible_information": ["你开始对这里的水产生了一种难以言喻的渴望……"]
+    },
+    {
+      "id": "mutation_stage_2",
+      "hook": "on_state_change",
+      "priority": 80,
+      "mode": "append",
+      "when": { "expr": "self.mutation_stage == 1 && self.time_in_resort >= 24" },
+      "then": [
+        { "op": "add", "path": "self.mutation_stage", "value": 1 },
+        { "op": "add", "path": "self.attr.jump", "value": "4d6" },
+        { "op": "add", "path": "self.attr.appearance", "value": "-2d6" }
+      ],
+      "facts": ["mutation_stage_2_reached"],
+      "player_visible_information": ["你感觉自己的皮肤变得格外湿滑清凉，喉咙也有些发痒，仿佛渴望发出某种声音……"]
+    },
+    {
+      "id": "mutation_stage_3",
+      "hook": "on_state_change",
+      "priority": 80,
+      "mode": "append",
+      "when": { "expr": "self.mutation_stage >= 2 && self.time_in_resort >= 48" },
+      "then": [
+        { "op": "set", "path": "self.mutation_stage", "value": 3 },
+        { "op": "set", "path": "self.attr.appearance", "value": 25 },
+        { "op": "set", "path": "self.attr.jump", "value": 85 }
+      ],
+      "facts": ["mutation_stage_3_reached"],
+      "player_visible_information": ["你长出了一颗青蛙脑袋……你开始出现大量幻觉……"]
+    },
+    {
+      "id": "mutation_stage_4",
+      "hook": "on_state_change",
+      "priority": 80,
+      "mode": "append",
+      "when": { "expr": "self.mutation_stage >= 3 && self.time_in_resort >= 72" },
+      "then": [
+        { "op": "apply_condition", "condition": "full_transformation" },
+        { "op": "trigger_ending", "ending_id": "ending_transformed" }
+      ],
+      "facts": ["full_transformation_complete"],
+      "player_visible_information": ["你的身体缩小，变成了一只青蛙，跳入了池塘……"]
+    },
+    {
+      "id": "frog_harmed_retaliation",
+      "hook": "on_interact",
+      "priority": 200,
+      "mode": "override",
+      "when": { "expr": "action.target.kind == 'frog' && action.type == 'harm'" },
+      "then": [
+        { "op": "force", "action": "summon_mutant_frog" }
+      ],
+      "facts": ["frog_harmed"],
+      "player_visible_information": ["池塘里的几百只青蛙开始融合成一个巨型怪物……"]
+    },
+    {
+      "id": "night_con_mutation",
+      "hook": "on_time_elapsed",
+      "priority": 70,
+      "mode": "append",
+      "when": { "expr": "clock.time_of_day == 'night'" },
+      "then": [
+        { "op": "force", "action": "night_con_check" }
+      ],
+      "facts": ["night_check_triggered"],
+      "player_visible_information": []
+    },
+    {
+      "id": "james_withdrawal",
+      "hook": "on_state_change",
+      "priority": 90,
+      "mode": "append",
+      "when": { "expr": "entity.james.location != 'resort'" },
+      "then": [
+        { "op": "apply_condition", "condition": "withdrawal_symptoms" }
+      ],
+      "facts": ["james_withdrawal_started"],
+      "player_visible_information": ["詹姆斯开始呕吐、痉挛，身体异常虚弱……"]
+    },
+    {
+      "id": "james_suicide",
+      "hook": "on_state_change",
+      "priority": 90,
+      "mode": "append",
+      "when": { "expr": "entity.james.location != 'resort' && entity.james.free_will == true" },
+      "then": [
+        { "op": "force", "action": "james_bite_tongue" }
+      ],
+      "facts": ["james_dead"],
+      "player_visible_information": ["詹姆斯趁着大家都没注意直接咬舌自尽了……"]
+    },
+    {
+      "id": "richard_accelerated_mutation",
+      "hook": "on_state_change",
+      "priority": 60,
+      "mode": "append",
+      "when": { "path": "entity.richard_lane.at_resort", "equals": true },
+      "then": [
+        { "op": "add", "path": "entity.richard_lane.mutation_rate", "value": 2 }
+      ],
+      "facts": ["richard_mutating_fast"],
+      "player_visible_information": ["理查德喝了一口詹姆斯递来的水后，手指间竟然已经出现了淡淡的绿色蹼膜……"]
+    }
+  ],
+
+  "checkpoints": [
+    {
+      "id": "calm_ezra",
+      "scene_id": "scene_forest_edge",
+      "action": "treat",
+      "target_id": "ezra",
+      "skills": ["psychoanalysis"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": ["ezra_identified", "messenger_not_human", "dreams_devour"],
+          "player_visible_information": [
+            {
+              "text": "我……我叫埃兹拉……我是个推销员。我收到了传单，我以为只是个普通的度假村……",
+              "visibility": { "audience": "all" }
+            },
+            {
+              "text": "那个白头发的女孩……她不是人！她笑着问你'幸福吗？'……然后你就会开始做梦，梦见你最想见的人……",
+              "visibility": { "audience": "all" }
+            },
+            {
+              "text": "但是梦会吃掉你！你的身体会先变化，变得喜欢水，皮肤变得黏滑……像我一样……",
+              "visibility": { "audience": "all" }
+            }
+          ],
+          "narration_constraints": ["埃兹拉紧紧抓住调查员的胳膊，用颤抖的声音说出信息"],
+          "ops": [
+            { "op": "modify", "path": "entity.ezra.state.calmed", "set": true }
+          ]
+        },
+        "failure": {
+          "facts": ["ezra_fled"],
+          "player_visible_information": [
+            {
+              "text": "他无法被安抚，突然挣脱，尖叫着'我不能想！我会变回去的！'疯狂地逃进树林深处。",
+              "visibility": { "audience": "all" }
+            }
+          ],
+          "narration_constraints": ["埃兹拉尖叫着逃进树林深处"],
+          "ops": [
+            { "op": "modify", "path": "entity.ezra.state.fled", "set": true }
+          ]
+        },
+        "hard_success": {
+          "facts": ["ezra_identified", "messenger_not_human", "dreams_devour", "physical_transformation_witnessed"],
+          "player_visible_information": [
+            {
+              "text": "你的身体会先变化，变得喜欢水，皮肤变得黏滑……像我一样……（他展示自己带有蹼膜的手，然后迅速藏起来）",
+              "visibility": { "audience": "all" }
+            }
+          ],
+          "narration_constraints": [],
+          "ops": []
+        },
+        "extreme_success": {
+          "facts": ["ezra_identified", "messenger_not_human", "dreams_devour", "physical_transformation_witnessed", "pond_frogs_danger"],
+          "player_visible_information": [
+            {
+              "text": "池塘里的青蛙！那些青蛙！不要靠近它们！它们……它们都是怪物！跟那个白色小女孩是一伙的！",
+              "visibility": { "audience": "all" }
+            }
+          ],
+          "narration_constraints": [],
+          "ops": []
+        },
+        "critical_success": null,
+        "regular_success": null,
+        "fumble": null
+      },
+      "visibility": null
+    },
+    {
+      "id": "persuade_messenger",
+      "scene_id": "scene_resort_entrance",
+      "action": "persuade",
+      "target_id": "messenger",
+      "skills": ["persuade", "charm"],
+      "difficulty": null,
+      "outcomes": {
+        "success": {
+          "facts": ["messenger_belief_shattered", "souls_released"],
+          "player_visible_information": [
+            {
+              "text": "信使的信念崩溃，她痛哭流涕：'我……我错了……'她释放了所有被束缚的灵魂，度假村的力量消散。",
+              "visibility": { "audience": "all" }
+            }
+          ],
+          "narration_constraints": [
+            "必须先让玩家选择闪避或不闪避",
+            "不闪避或闪避失败→信使亲吻脸颊→幸运永久+2D6",
+            "信使随后化作一阵光点消失"
+          ],
+          "ops": [
+            { "op": "trigger_ending", "ending_id": "ending_persuade_messenger" },
+            { "op": "modify", "path": "entity.messenger.state.belief_shaken", "set": true }
+          ]
+        },
+        "failure": {
+          "facts": ["messenger_unconvinced"],
+          "player_visible_information": [
+            {
+              "text": "信使露出悲伤而困惑的表情：'为什么你们要抗拒呢？现实的躯壳充满痛苦，我只是在帮你们解脱。'",
+              "visibility": { "audience": "all" }
+            }
+          ],
+          "narration_constraints": [],
+          "ops": []
+        },
+        "critical_success": null,
+        "extreme_success": null,
+        "hard_success": null,
+        "regular_success": null,
+        "fumble": null
+      },
+      "visibility": null
+    },
+    {
+      "id": "resist_drink",
+      "scene_id": "scene_dining_kitchen",
+      "action": "resist",
+      "target_id": "frog_pond",
+      "skills": ["pow"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": ["drink_resisted"],
+          "player_visible_information": [
+            {
+              "text": "你感到一股强烈的、不自然的舒适感席卷全身，仿佛微醺状态。你能清晰地意识到这种感受来自外部，并产生强烈的警惕。你注意到水中有一股淡淡的、清甜的、像是雨后青苔的余味。",
+              "visibility": { "audience": "all" }
+            }
+          ],
+          "narration_constraints": [],
+          "ops": [
+            { "op": "add", "path": "actors.pc.drink_successes", "value": 1 }
+          ]
+        },
+        "failure": {
+          "facts": ["hallucination_triggered"],
+          "player_visible_information": [
+            {
+              "text": "你喝下那碗汤，温暖的滋味从喉咙滑到胃里。一瞬间，餐厅里其他人的交谈声变得遥远而模糊。你看到你一直想挽回的爱人就坐在你对面，正微笑着为你切牛排……",
+              "visibility": { "audience": "all" }
+            }
+          ],
+          "narration_constraints": ["持续约5-10分钟的温和幻觉", "SC 0/1"],
+          "ops": [
+            { "op": "add", "path": "actors.pc.drink_failures", "value": 1 },
+            { "op": "modify", "path": "actors.pc.sanity", "set": "pc.sanity - 1" }
+          ]
+        },
+        "critical_success": null,
+        "extreme_success": null,
+        "hard_success": null,
+        "regular_success": null,
+        "fumble": null
+      },
+      "visibility": null
+    },
+    {
+      "id": "dive_for_crystal",
+      "scene_id": "scene_pond",
+      "action": "dive",
+      "target_id": "dream_crystal",
+      "skills": ["diving"],
+      "difficulty": "hard",
+      "outcomes": {
+        "success": {
+          "facts": ["crystal_retrieved"],
+          "player_visible_information": [
+            {
+              "text": "你成功从湖底捞起了那颗透明的水晶。它在你的手中微微发光。",
+              "visibility": { "audience": "all" }
+            }
+          ],
+          "narration_constraints": ["玩家需要过智力检定理解水晶的用法"],
+          "ops": [
+            { "op": "modify", "path": "entity.dream_crystal.state.retrieved", "set": true }
+          ]
+        },
+        "failure": {
+          "facts": ["crystal_attempt_failed", "drowning_risk"],
+          "player_visible_information": [
+            {
+              "text": "你被青蛙群阻止了，身体开始溺水。你感觉自己的皮肤开始变得湿滑……",
+              "visibility": { "audience": "all" }
+            }
+          ],
+          "narration_constraints": ["陷入溺水状态，身体开始变青蛙"],
+          "ops": [
+            { "op": "apply_condition", "condition": "drowning" },
+            { "op": "add", "path": "actors.pc.mutation_stage", "value": 1 }
+          ]
+        },
+        "critical_success": null,
+        "extreme_success": null,
+        "hard_success": null,
+        "regular_success": null,
+        "fumble": null
+      },
+      "visibility": null
+    }
+  ],
+
+  "win_conditions": [
+    {
+      "id": "ending_escape",
+      "when": { "expr": "party.location != 'resort' && ending_triggered == false" },
+      "fact": "调查员逃离了蛙蛙度假村，后视镜中的度假村逐渐被雾气笼罩。",
+      "player_visible_information": "几天后，你们在报纸上看到一则小新闻：'城郊神秘雾气散去，疑似海市蜃楼景观消失。'而过一阵子，你们或你们的朋友，可能会在另一个城市收到关于'幸福蛙蛙村'的宣传单。",
+      "is_ending": true
+    },
+    {
+      "id": "ending_persuade_messenger",
+      "when": { "path": "entity.messenger.state.belief_shaken", "equals": true },
+      "fact": "信使的信念崩溃，释放了所有被束缚的灵魂，度假村的力量消散。所有变异停止。",
+      "player_visible_information": "信使化作一阵光点消失。所有员工也都变回正常人，其中的詹姆斯也跟随你们回到了莱恩庄园，你们领取了丰厚的酬劳。",
+      "is_ending": true
+    },
+    {
+      "id": "ending_defeat_messenger",
+      "when": { "path": "entity.messenger.state.defeated", "equals": true },
+      "fact": "信使被击败，整个度假村如同泡影般瓦解。数百名赤身裸体、茫然无措的人出现在空地上。",
+      "player_visible_information": "你们发现自己站在一片荒地上，而身边的池塘里，无数青蛙在光芒中变回人类！现场充斥着哭喊、尖叫和混乱。",
+      "is_ending": true
+    },
+    {
+      "id": "ending_transformed",
+      "when": { "expr": "all_party.mutation_stage >= 4" },
+      "fact": "调查员的身体彻底软化、缩小，皮肤变成绿色，跳入池塘，成为蛙群的一员。在信使编织的集体美梦中，获得了永远的'幸福'。",
+      "player_visible_information": "你感觉一切都变得遥远而安宁……水包围着你，温暖而舒适……你听到了其他青蛙的叫声，像是在欢迎你回家……",
+      "is_ending": true
+    },
+    {
+      "id": "ending_surrender",
+      "when": { "path": "party.surrendered", "equals": true },
+      "fact": "调查员被招募为蛙蛙村员工，穿上蛙蛙工作服上街发传单。",
+      "player_visible_information": "信使微笑着递给你一套崭新合身的蛙蛙工作服：'欢迎加入我们！一起去给更多人带来幸福吧！'",
+      "is_ending": true
+    }
+  ]
+}

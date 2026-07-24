@@ -20,6 +20,17 @@ from .output import (
     WebSocketOutput,
 )
 from .turn import TurnState
+from .tools import (
+    GetVisibleEntityArgs,
+    GetVisibleEntityResult,
+    SearchVisibleEntitiesArgs,
+    SearchVisibleEntitiesResult,
+    ToolError,
+    ToolErrorCode,
+    ToolErrorResult,
+    VisibleEntitySummary,
+    make_tool_error,
+)
 
 __all__ = [
     "HostAgentCompleted",
@@ -34,11 +45,20 @@ __all__ = [
     "HostAgentToolCompleted",
     "HostAgentToolStarted",
     "HostAgentUsage",
+    "GetVisibleEntityArgs",
+    "GetVisibleEntityResult",
     "IntentContext",
     "NarrationContext",
     "NarrationOutput",
     "PlayerTurnPayload",
+    "SearchVisibleEntitiesArgs",
+    "SearchVisibleEntitiesResult",
+    "ToolError",
+    "ToolErrorCode",
+    "ToolErrorResult",
     "TurnOutput",
     "TurnState",
+    "VisibleEntitySummary",
     "WebSocketOutput",
+    "make_tool_error",
 ]

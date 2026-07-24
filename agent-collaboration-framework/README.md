@@ -36,10 +36,13 @@ PlayerInput
 `astream(HostAgentContext)` 流式入口：接收可信 `PlayerInput` 和 B 已去密的 `PlayerView`，可产生零到多个脱敏的工具进度事件，
 最后必须以且仅以一个 `agent.completed` 或 `agent.failed` 结束。
 
-`agent.completed.raw_output` 只是普通、不可信的 JSON candidate；后续仍必须由 `IntentParser` 做确定性校验。当前离线
-`FakeHostAgent` 只用于锁定 Adapter 共同契约，尚未接入上面的 `Orchestrator` 主链，也不执行真实 AI、真实工具、规则动作或状态写入。
-真实只读工具与 SDK Adapter 分别由 [Issue #117](https://github.com/1024XEngineer/TRPG-master/issues/117) 和
-[Issue #118](https://github.com/1024XEngineer/TRPG-master/issues/118) 跟踪。
+`agent.completed.raw_output` 只是普通、不可信的 JSON candidate；后续仍必须由 `IntentParser` 做确定性校验。当前已有
+`host/tools` 中绑定 `HostAgentContext.player_view` 的两个只读工具，以及拒绝模型自行传入身份作用域的框架无关
+`ToolRegistry`。它们只搜索/读取当前 `PlayerView`，不访问引擎、数据库或完整模组。
+
+`FakeHostAgent` 和这些工具尚未接入上面的 `Orchestrator` 主链，也不执行真实 AI、规则动作或状态写入。OpenAI Agents SDK
+与 Qwen Adapter 以及工具预算、timeout 和事件桥接由 [Issue #118](https://github.com/1024XEngineer/TRPG-master/issues/118)
+跟踪。
 
 ## 2、3、4 点的统一结论
 
@@ -97,6 +100,7 @@ collaboration_framework/
 │   ├── ports/                 # Intent/Narration/Host Agent 模型抽象及 TurnPort
 │   ├── adapters/fakes/        # 无网络、无 API Key 的离线 Fake
 │   ├── schemas/               # A 内部 Agent/Context/Turn/Narration Schema
+│   ├── tools/                 # 绑定当前 PlayerView 的 player-safe 只读工具
 │   └── gateway/               # Player-safe WebSocket 输出
 ├── engine/                    # 成员 B：Service、Kernel、Store 端口/适配器与内部模型
 │   ├── service.py            # 跨房间复用的 ActionExecutor / PlayerViewSource
@@ -123,6 +127,7 @@ collaboration_framework/
 | `EngineRuntimeSnapshot`/`CompletedAction` | B | B | Store 加载快照与幂等执行记录 |
 | `NarrationOutput` | A | Gateway | 模型原始 JSON 经 Pydantic 和事实引用校验后的输出 |
 | `HostAgentContext`/`HostAgentEvent`/`HostAgentUsage` | A | A 的 Host Agent Adapter | A 内部、框架无关；不是 A/B/C 共享契约，也尚未接入 Orchestrator |
+| `ToolRegistry` 与 player-safe 工具 | A | A 的 Host Agent Adapter | 绑定当前 Context，只读；参数/结果均由项目 Schema 校验 |
 | `ModuleContent`/`CheckpointSpec`/`RuleSpec` | B/C 共审 | B、C | 声明式内容语言；A 不直接消费 |
 
 ## ModuleContent 为什么在 `contracts/module.py`
@@ -166,10 +171,14 @@ Schema 文件由 Pydantic 模型自动生成，不应手工维护：
 - `schemas/host-agent-usage.schema.json`（A 内部 Adapter 边界）
 - `schemas/host-agent-event.schema.json`（A 内部 Adapter 边界）
 
+工具参数与结果不额外生成一组仓库级 Schema 文件。`ToolDefinition.arguments_json_schema()` /
+`result_json_schema()` 直接从对应的严格 Pydantic 模型产生 Adapter 可消费的 Schema，避免第二份手写协议。
+
 ## 当前明确不做
 
 - 不连接真实 LLM 或编写 Prompt。
-- 不实现或注册 Host Agent 真实工具，不引入模型 SDK，也不把 Host Agent 接入 Orchestrator。
+- 不引入模型 SDK，也不把 Host Agent 或只读工具接入 Orchestrator。
+- 不实现工具预算、timeout、并行调用、数据库/RAG/网络搜索或任何写工具。
 - 不使用 LangGraph。
 - 不由主持层实现 Rule、Hook、Checkpoint 执行、Dice、GameState 修改或 Event 写入。
 - 不把 `TurnState`、`EngineExecutionResult`、Event 或摘要 Outbox 暴露为跨组件公共契约。

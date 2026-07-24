@@ -1,0 +1,12 @@
+{
+  "module_id": "invalid",
+  "version": "0.1.0",
+  "world_ref": "coc-7e",
+  "scenes": [],
+  "entities": [{
+    "id": "door", "kind": "object", "name": "Door", "content": "", "state": {"open": false},
+    "rules": [{"id": "bad", "hook": "on_unknown", "when": {"path": "entities.door.open", "equals": false}}]
+  }],
+  "checkpoints": [],
+  "win_conditions": []
+}

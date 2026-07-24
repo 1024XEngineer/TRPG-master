@@ -1,0 +1,19 @@
+[project]
+name = "agent-collaboration-framework"
+version = "0.4.0"
+description = "Modular A/B/C contracts and explicit async host orchestration"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.13,<3",
+]
+
+[project.scripts]
+agent-collab = "collaboration_framework.cli:main"
+agent-collab-export-schemas = "collaboration_framework.schema_export:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["collaboration_framework*"]

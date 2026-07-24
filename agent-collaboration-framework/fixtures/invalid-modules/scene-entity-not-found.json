@@ -1,0 +1,11 @@
+{
+  "module_id": "invalid",
+  "version": "0.1.0",
+  "world_ref": "coc-7e",
+  "scenes": [
+    {"id": "room", "name": "Room", "content": "", "entity_ids": ["ghost"]}
+  ],
+  "entities": [],
+  "checkpoints": [],
+  "win_conditions": []
+}

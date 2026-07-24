@@ -1,0 +1,55 @@
+{
+  "module_id": "capability-rule-hook-on-scene-enter",
+  "version": "0.1.0",
+  "world_ref": "coc-7e",
+  "scenes": [
+    {
+      "id": "study",
+      "name": "书房",
+      "content": "用于审计 action 流程是否错误执行 on_scene_enter Rule。",
+      "entity_ids": ["cabinet"],
+      "checkpoint_ids": []
+    }
+  ],
+  "entities": [
+    {
+      "id": "cabinet",
+      "kind": "object",
+      "name": "柜子",
+      "aliases": ["木柜"],
+      "content": "一只上锁的柜子。",
+      "state": {
+        "scene_ready": true,
+        "opened": false
+      },
+      "refuse_ops": ["open"],
+      "blocked_text": "柜子仍然上锁。",
+      "rules": [
+        {
+          "id": "scene_enter_rule_must_not_allow_action",
+          "hook": "on_scene_enter",
+          "priority": 100,
+          "when": {
+            "path": "entities.cabinet.scene_ready",
+            "equals": true
+          },
+          "then": [
+            {
+              "op": "allow",
+              "action": "open"
+            },
+            {
+              "op": "modify",
+              "path": "entities.cabinet.opened",
+              "set": true
+            }
+          ],
+          "facts": ["这条场景进入规则不应由 action 流程执行"],
+          "player_visible_information": ["这条信息不应在打开动作中出现。"]
+        }
+      ]
+    }
+  ],
+  "checkpoints": [],
+  "win_conditions": []
+}

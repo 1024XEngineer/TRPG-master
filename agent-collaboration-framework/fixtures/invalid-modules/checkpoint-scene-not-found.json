@@ -1,0 +1,21 @@
+{
+  "module_id": "invalid",
+  "version": "0.1.0",
+  "world_ref": "coc-7e",
+  "scenes": [],
+  "entities": [
+    {"id": "target", "kind": "object", "name": "Target", "content": ""}
+  ],
+  "checkpoints": [
+    {
+      "id": "check",
+      "scene_id": "missing",
+      "action": "inspect",
+      "target_id": "target",
+      "skills": ["spot-hidden"],
+      "difficulty": "regular",
+      "outcomes": {"success": {}, "failure": {}}
+    }
+  ],
+  "win_conditions": []
+}

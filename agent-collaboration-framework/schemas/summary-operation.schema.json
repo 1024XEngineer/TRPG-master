@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "summary-operation.schema.json",
+  "additionalProperties": false,
+  "description": "Host-side outbox command for a non-authoritative conversation summary.\n\nA consumer may update only the summary store and must deduplicate by\n``(room_id, client_action_id)``. It must never write GameState or EventLog.",
+  "properties": {
+    "op": {
+      "const": "append_turn_summary",
+      "default": "append_turn_summary",
+      "title": "Op",
+      "type": "string"
+    },
+    "room_id": {
+      "title": "Room Id",
+      "type": "string"
+    },
+    "client_action_id": {
+      "title": "Client Action Id",
+      "type": "string"
+    },
+    "text": {
+      "title": "Text",
+      "type": "string"
+    },
+    "source_event_ids": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Source Event Ids",
+      "type": "array"
+    }
+  },
+  "required": [
+    "room_id",
+    "client_action_id",
+    "text"
+  ],
+  "title": "SummaryOperation",
+  "type": "object"
+}

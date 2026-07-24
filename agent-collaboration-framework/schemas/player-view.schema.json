@@ -1,0 +1,177 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "player-view.schema.json",
+  "$defs": {
+    "CheckpointOption": {
+      "additionalProperties": false,
+      "description": "Trusted candidate menu exposed to the host semantic matcher.",
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "target_id": {
+          "minLength": 1,
+          "title": "Target Id",
+          "type": "string"
+        },
+        "action_hint": {
+          "minLength": 1,
+          "title": "Action Hint",
+          "type": "string"
+        },
+        "skills": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Skills",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "target_id",
+        "action_hint"
+      ],
+      "title": "CheckpointOption",
+      "type": "object"
+    },
+    "VisibleEntity": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "npc",
+            "object",
+            "location"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "aliases": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Aliases",
+          "type": "array"
+        },
+        "content": {
+          "title": "Content",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "name",
+        "content"
+      ],
+      "title": "VisibleEntity",
+      "type": "object"
+    },
+    "VisibleFact": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "text"
+      ],
+      "title": "VisibleFact",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "room_id": {
+      "minLength": 1,
+      "title": "Room Id",
+      "type": "string"
+    },
+    "player_id": {
+      "minLength": 1,
+      "title": "Player Id",
+      "type": "string"
+    },
+    "actor_id": {
+      "minLength": 1,
+      "title": "Actor Id",
+      "type": "string"
+    },
+    "scene_id": {
+      "minLength": 1,
+      "title": "Scene Id",
+      "type": "string"
+    },
+    "phase": {
+      "enum": [
+        "playing",
+        "ended"
+      ],
+      "title": "Phase",
+      "type": "string"
+    },
+    "revision": {
+      "minLength": 1,
+      "title": "Revision",
+      "type": "string"
+    },
+    "visible_facts": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/VisibleFact"
+      },
+      "title": "Visible Facts",
+      "type": "array"
+    },
+    "visible_entities": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/VisibleEntity"
+      },
+      "title": "Visible Entities",
+      "type": "array"
+    },
+    "checkpoint_options": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/CheckpointOption"
+      },
+      "title": "Checkpoint Options",
+      "type": "array"
+    }
+  },
+  "required": [
+    "room_id",
+    "player_id",
+    "actor_id",
+    "scene_id",
+    "phase",
+    "revision"
+  ],
+  "title": "PlayerView",
+  "type": "object"
+}

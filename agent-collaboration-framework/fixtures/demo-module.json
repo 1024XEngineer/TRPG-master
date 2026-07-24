@@ -1,0 +1,207 @@
+{
+  "module_id": "study-demo",
+  "version": "0.1.0",
+  "world_ref": "coc-7e",
+  "scenes": [
+    {
+      "id": "study",
+      "name": "书房",
+      "content": "昏黄灯光下，书架、木柜与一扇落灰的窗户围住了安静的房间。",
+      "entity_ids": ["butler", "bookshelf", "cabinet", "document", "window"],
+      "checkpoint_ids": ["investigate_bookshelf", "smash_cabinet"]
+    }
+  ],
+  "entities": [
+    {
+      "id": "butler",
+      "kind": "npc",
+      "name": "管家",
+      "aliases": ["老管家"],
+      "content": "一位神色谨慎的老管家站在门边。",
+      "secrets": "他知道柜中藏有文件，但不会主动说明。",
+      "state": {
+        "entered": true
+      },
+      "refuse_ops": [],
+      "direct_responses": {
+        "talk": "管家压低声音说：老爷最近总在书架旁停留。"
+      },
+      "rules": []
+    },
+    {
+      "id": "bookshelf",
+      "kind": "object",
+      "name": "书架",
+      "aliases": ["书柜", "藏书架"],
+      "content": "积灰的书架上塞满了旧书。",
+      "secrets": "一把小钥匙藏在书架后方。",
+      "state": {
+        "key_found": false
+      },
+      "refuse_ops": [],
+      "blocked_text": "你暂时无法从书架上取得更多东西。",
+      "direct_responses": {
+        "investigate": "你粗略扫过书脊，没有发现显眼的异常。"
+      },
+      "rules": []
+    },
+    {
+      "id": "cabinet",
+      "kind": "object",
+      "name": "上锁的柜子",
+      "aliases": ["柜子", "木柜"],
+      "content": "一只带黄铜锁孔的年代久远的木柜。",
+      "secrets": "关键文件藏在柜中；强行砸开会毁坏文件。",
+      "state": {
+        "opened": false
+      },
+      "refuse_ops": ["open"],
+      "blocked_text": "柜门纹丝不动；没有合适的钥匙无法正常打开。",
+      "direct_responses": {
+        "investigate": "黄铜锁孔很小，柜门边缘没有被撬动过的痕迹。"
+      },
+      "rules": [
+        {
+          "id": "allow_open_with_key",
+          "hook": "on_action",
+          "priority": 100,
+          "when": {
+            "path": "entities.bookshelf.key_found",
+            "equals": true
+          },
+          "then": [
+            {
+              "op": "allow",
+              "action": "open"
+            },
+            {
+              "op": "modify",
+              "path": "entities.cabinet.opened",
+              "set": true
+            },
+            {
+              "op": "modify",
+              "path": "entities.document.obtained",
+              "set": true
+            }
+          ],
+          "facts": ["玩家用钥匙打开柜子并取得关键文件"],
+          "player_visible_information": ["小钥匙正好转动了锁芯；柜门打开，里面是一份关键文件。"]
+        }
+      ]
+    },
+    {
+      "id": "document",
+      "kind": "object",
+      "name": "关键文件",
+      "aliases": ["文件", "档案"],
+      "content": "尚未取得的关键文件。",
+      "secrets": "文件记录了事件真相。",
+      "state": {
+        "obtained": false,
+        "destroyed": false
+      },
+      "refuse_ops": [],
+      "direct_responses": {},
+      "rules": []
+    },
+    {
+      "id": "window",
+      "kind": "object",
+      "name": "窗户",
+      "aliases": ["窗外", "玻璃窗"],
+      "content": "窗外只有被夜雨打湿的花园，没有明显异常。",
+      "state": {},
+      "refuse_ops": [],
+      "direct_responses": {
+        "investigate": "你透过落灰的玻璃看去，夜雨中的花园一片寂静。"
+      },
+      "rules": []
+    }
+  ],
+  "checkpoints": [
+    {
+      "id": "investigate_bookshelf",
+      "scene_id": "study",
+      "action": "investigate",
+      "target_id": "bookshelf",
+      "skills": ["spot-hidden"],
+      "difficulty": "regular",
+      "mvp_check_result": "success",
+      "outcomes": {
+        "success": {
+          "facts": ["玩家在书架后发现钥匙"],
+          "player_visible_information": ["你拨开积灰的书册，在书架后方摸到了一把冰凉的小钥匙。"],
+          "narration_constraints": ["必须明确玩家已经发现钥匙"],
+          "ops": [
+            {
+              "op": "modify",
+              "path": "entities.bookshelf.key_found",
+              "set": true
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["玩家没有发现书架后的钥匙"],
+          "player_visible_information": ["你检查了几排旧书，却没有找到有用的东西。"],
+          "narration_constraints": ["不得声称玩家发现了钥匙"],
+          "ops": []
+        }
+      }
+    },
+    {
+      "id": "smash_cabinet",
+      "scene_id": "study",
+      "action": "smash",
+      "target_id": "cabinet",
+      "skills": ["STR"],
+      "difficulty": "hard",
+      "mvp_check_result": "success",
+      "outcomes": {
+        "success": {
+          "facts": ["玩家成功砸开柜门", "柜内文件被冲击毁坏"],
+          "player_visible_information": ["柜门在撞击中弹开，但里面的文件也被震裂、撕碎，已经无法阅读。"],
+          "narration_constraints": ["动作成功但后果很坏", "不得称文件完好"],
+          "ops": [
+            {
+              "op": "modify",
+              "path": "entities.cabinet.opened",
+              "set": true
+            },
+            {
+              "op": "modify",
+              "path": "entities.document.destroyed",
+              "set": true
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["玩家没有砸开柜门"],
+          "player_visible_information": ["撞击声在书房里回荡，柜门仍旧紧闭。"],
+          "narration_constraints": ["不得声称柜门已打开"],
+          "ops": []
+        }
+      }
+    }
+  ],
+  "win_conditions": [
+    {
+      "id": "ending_document_recovered",
+      "when": {
+        "path": "entities.document.obtained",
+        "equals": true
+      },
+      "fact": "玩家取得关键文件，触发正常结局",
+      "player_visible_information": "文件中的记录让真相终于有了可以验证的证据。"
+    },
+    {
+      "id": "ending_document_destroyed",
+      "when": {
+        "path": "entities.document.destroyed",
+        "equals": true
+      },
+      "fact": "关键文件被毁，触发坏结局",
+      "player_visible_information": "唯一的书面证据已经损毁，真相再次沉入阴影。"
+    }
+  ]
+}

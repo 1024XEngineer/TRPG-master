@@ -1,0 +1,10 @@
+{
+  "module_id": "invalid",
+  "version": "0.1.0",
+  "world_ref": "coc-7e",
+  "scenes": [],
+  "entities": [],
+  "checkpoints": [],
+  "win_conditions": [],
+  "unexpected": true
+}

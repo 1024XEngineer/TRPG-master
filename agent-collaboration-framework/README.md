@@ -30,6 +30,17 @@ PlayerInput
 
 `Orchestrator.run()` 是成员 A 的稳定公开入口，MVP 内部采用普通 Python `async` 流程。当前没有 checkpoint、interrupt、resume、多阶段 Action 或 LangGraph。
 
+## Host Agent 契约（尚未接入主链）
+
+`host/ports/HostAgentPort` 是成员 A 在规则引擎之前进行意图理解的内部端口，不是新的 A/B/C 共享业务契约。它只有一个
+`astream(HostAgentContext)` 流式入口：接收可信 `PlayerInput` 和 B 已去密的 `PlayerView`，可产生零到多个脱敏的工具进度事件，
+最后必须以且仅以一个 `agent.completed` 或 `agent.failed` 结束。
+
+`agent.completed.raw_output` 只是普通、不可信的 JSON candidate；后续仍必须由 `IntentParser` 做确定性校验。当前离线
+`FakeHostAgent` 只用于锁定 Adapter 共同契约，尚未接入上面的 `Orchestrator` 主链，也不执行真实 AI、真实工具、规则动作或状态写入。
+真实只读工具与 SDK Adapter 分别由 [Issue #117](https://github.com/1024XEngineer/TRPG-master/issues/117) 和
+[Issue #118](https://github.com/1024XEngineer/TRPG-master/issues/118) 跟踪。
+
 ## 2、3、4 点的统一结论
 
 - `Intent` 不再包含 `execution`，不存在由主持层决定“绕过引擎”的分支。
@@ -83,9 +94,9 @@ collaboration_framework/
 │   └── player_view_source.py  # 只读投影源：read()
 ├── host/                      # 成员 A：主持编排
 │   ├── application/           # 普通 async 工作流与应用服务
-│   ├── ports/                 # Intent/Narration 模型抽象及 TurnPort
-│   ├── adapters/fakes/        # 无真实模型的离线 Fake
-│   ├── schemas/               # A 内部 Context/Turn/Narration Schema
+│   ├── ports/                 # Intent/Narration/Host Agent 模型抽象及 TurnPort
+│   ├── adapters/fakes/        # 无网络、无 API Key 的离线 Fake
+│   ├── schemas/               # A 内部 Agent/Context/Turn/Narration Schema
 │   └── gateway/               # Player-safe WebSocket 输出
 ├── engine/                    # 成员 B：Service、Kernel、Store 端口/适配器与内部模型
 │   ├── service.py            # 跨房间复用的 ActionExecutor / PlayerViewSource
@@ -111,6 +122,7 @@ collaboration_framework/
 | `EngineExecutionResult` | B | B | 内部含 StateChange、Event 和版本信息 |
 | `EngineRuntimeSnapshot`/`CompletedAction` | B | B | Store 加载快照与幂等执行记录 |
 | `NarrationOutput` | A | Gateway | 模型原始 JSON 经 Pydantic 和事实引用校验后的输出 |
+| `HostAgentContext`/`HostAgentEvent`/`HostAgentUsage` | A | A 的 Host Agent Adapter | A 内部、框架无关；不是 A/B/C 共享契约，也尚未接入 Orchestrator |
 | `ModuleContent`/`CheckpointSpec`/`RuleSpec` | B/C 共审 | B、C | 声明式内容语言；A 不直接消费 |
 
 ## ModuleContent 为什么在 `contracts/module.py`
@@ -150,10 +162,14 @@ Schema 文件由 Pydantic 模型自动生成，不应手工维护：
 - `schemas/action-result.schema.json`
 - `schemas/narration-output.schema.json`
 - `schemas/websocket-output.schema.json`
+- `schemas/host-agent-context.schema.json`（A 内部 Adapter 边界）
+- `schemas/host-agent-usage.schema.json`（A 内部 Adapter 边界）
+- `schemas/host-agent-event.schema.json`（A 内部 Adapter 边界）
 
 ## 当前明确不做
 
 - 不连接真实 LLM 或编写 Prompt。
+- 不实现或注册 Host Agent 真实工具，不引入模型 SDK，也不把 Host Agent 接入 Orchestrator。
 - 不使用 LangGraph。
 - 不由主持层实现 Rule、Hook、Checkpoint 执行、Dice、GameState 修改或 Event 写入。
 - 不把 `TurnState`、`EngineExecutionResult`、Event 或摘要 Outbox 暴露为跨组件公共契约。

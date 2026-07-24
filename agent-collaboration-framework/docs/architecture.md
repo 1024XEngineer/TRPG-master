@@ -10,7 +10,7 @@
 
 当前采用一个模块化单体仓库，但按所有权建立稳定边界：
 
-- A 负责 PlayerView 投影、IntentParser、显式 async Orchestrator、Narrator 和 WebSocket 输出。
+- A 负责 PlayerView 投影、Host Agent 内部端口、IntentParser、显式 async Orchestrator、Narrator 和 WebSocket 输出。
 - B 负责 Rule、Hook、Checkpoint 执行、Dice、GameState 修改、Event 写入和事务/幂等。
 - C 负责模组解析、审查和发布 `ModuleContent`。
 - A 只能通过 `ActionExecutor.execute()` 发出可能影响权威状态的动作。
@@ -329,6 +329,13 @@ A 输出/内部边界 Schema：
 - `TurnOutput`
 - `WebSocketOutput`
 - `TurnState`（A 内部，不导出 JSON Schema）
+- `HostAgentContext`（A 内部；导出 JSON Schema 供 Adapter 对齐）
+- `HostAgentUsage`（A 内部；导出 JSON Schema 供 Adapter 对齐）
+- `HostAgentEvent`（A 内部可判别事件联合；导出 JSON Schema 供 Adapter 对齐）
+
+`HostAgentPort.astream()` 是 A 在规则引擎之前的框架无关意图理解边界，只接收可信 `PlayerInput` 与 player-safe
+`PlayerView`。它当前只有离线 Fake，尚未接入 `Orchestrator`；completed 的 raw JSON 仍须交给 `IntentParser`，
+且该 Port 不得调用 `ActionExecutor`。上述三个 Host Agent Schema 虽然导出为 JSON Schema，但不因此成为 A/B/C 共享业务契约。
 
 B 内部模型（不属于跨组件 Schema）：
 
@@ -347,3 +354,5 @@ B 内部模型（不属于跨组件 Schema）：
 6. C 的发布器可输出 `ModuleContent`，但解析草稿不得被运行时直接消费。
 7. 每次 Schema 修改必须重新运行 exporter，并提交生成文件和兼容性说明。
 8. 若未来迁移 LangGraph，先用同一测试套件证明 `run()`、执行一次语义和 WebSocket 输出未变，再替换实现。
+9. 修改 `HostAgentContext`、`HostAgentUsage`、`HostAgentEvent` 或 `HostAgentPort` 由 A 评审，并同步其契约测试、生成 Schema
+   和现行文档；SDK 类型只能存在于未来的 Adapter，不能进入这些稳定业务字段。

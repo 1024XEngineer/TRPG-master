@@ -70,6 +70,18 @@ class HostAgentPortContractMixin:
         ]
         self.assertEqual(len(terminals), 1)
         self.assertEqual(terminals[0][0], len(events) - 1)
+
+        started = {
+            event.call_id: event.tool_name
+            for event in events
+            if isinstance(event, HostAgentToolStarted)
+        }
+        completed = {
+            event.call_id: event.tool_name
+            for event in events
+            if isinstance(event, HostAgentToolCompleted)
+        }
+        self.assertEqual(started, completed)
         return events
 
 

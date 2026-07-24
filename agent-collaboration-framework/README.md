@@ -1,6 +1,6 @@
 # Agent Collaboration Framework
 
-这是成员 A（主持编排）、成员 B（确定性规则引擎）和成员 C（模组解析/审查）共同使用的模块化单体骨架。当前版本提供稳定边界、可运行的离线纵切，以及面向持久化的 `RuleEngineService + InMemoryEngineStore`；不接 OpenAI、LangGraph、PostgreSQL 或 FastAPI。
+这是成员 A（主持编排）、成员 B（确定性规则引擎）和成员 C（模组解析/审查）共同使用的模块化单体骨架。当前版本提供稳定边界、可运行的离线纵切、面向持久化的 `RuleEngineService + InMemoryEngineStore`，以及尚未接入主链的 OpenAI Agents SDK + Qwen Host Agent Adapter；不接 LangGraph、PostgreSQL 或 FastAPI。
 
 ## 阅读入口
 
@@ -40,9 +40,28 @@ PlayerInput
 `host/tools` 中绑定 `HostAgentContext.player_view` 的两个只读工具，以及拒绝模型自行传入身份作用域的框架无关
 `ToolRegistry`。它们只搜索/读取当前 `PlayerView`，不访问引擎、数据库或完整模组。
 
-`FakeHostAgent` 和这些工具尚未接入上面的 `Orchestrator` 主链，也不执行真实 AI、规则动作或状态写入。OpenAI Agents SDK
-与 Qwen Adapter 以及工具预算、timeout 和事件桥接由 [Issue #118](https://github.com/1024XEngineer/TRPG-master/issues/118)
-跟踪。
+`host/adapters/openai_agents/QwenHostAgentAdapter` 通过 OpenAI-compatible Chat Completions 运行 Qwen，并使用
+OpenAI Agents SDK 自带的 model/tool 循环。每次 `astream()` 独立绑定当前 Context 与两个只读工具；Adapter 负责
+最大模型轮数、工具调用预算、单工具/整轮 timeout、脱敏事件、部分 usage 和严格 final JSON 对象边界。SDK/Qwen
+类型只存在于该私有 Adapter 和 bootstrap 组合根。
+
+`FakeHostAgent`、真实 Adapter 和这些工具都尚未接入上面的 `Orchestrator` 主链。Adapter 不调用
+`ActionExecutor`，不执行规则动作或状态写入；它的 `agent.completed.raw_output` 仍必须交给 `IntentParser`。
+
+显式构造 Qwen Adapter 时，由调用方在 bootstrap 阶段提供以下环境变量；模块 import 不读取环境或创建网络客户端：
+
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
+| `HOST_AGENT_API_KEY` | 无 | 必填；错误、日志和 `repr` 不输出明文 |
+| `HOST_AGENT_BASE_URL` | `https://dashscope.aliyuncs.com/compatible-mode/v1` | 必须是 HTTP(S) URL |
+| `HOST_AGENT_MODEL` | `qwen-plus` | 非空模型名 |
+| `HOST_AGENT_MAX_TURNS` | `6` | SDK Runner 最大轮数 |
+| `HOST_AGENT_MAX_TOOL_CALLS` | `8` | 第 9 次尝试在调用 handler 前失败 |
+| `HOST_AGENT_TOOL_TIMEOUT_SECONDS` | `5` | 单工具 timeout，安全回填 `TOOL_TIMEOUT` |
+| `HOST_AGENT_TIMEOUT_SECONDS` | `30` | 整轮 timeout |
+
+复制 `.env.example` 只用于准备非敏感默认项；项目不会在 import 时自动加载 `.env`。调用
+`bootstrap.host_agent.build_qwen_host_agent()` 才会验证配置并构造客户端。
 
 ## 2、3、4 点的统一结论
 
@@ -99,6 +118,7 @@ collaboration_framework/
 │   ├── application/           # 普通 async 工作流与应用服务
 │   ├── ports/                 # Intent/Narration/Host Agent 模型抽象及 TurnPort
 │   ├── adapters/fakes/        # 无网络、无 API Key 的离线 Fake
+│   ├── adapters/openai_agents/# 私有 OpenAI Agents SDK + Qwen Adapter
 │   ├── schemas/               # A 内部 Agent/Context/Turn/Narration Schema
 │   ├── tools/                 # 绑定当前 PlayerView 的 player-safe 只读工具
 │   └── gateway/               # Player-safe WebSocket 输出
@@ -176,9 +196,9 @@ Schema 文件由 Pydantic 模型自动生成，不应手工维护：
 
 ## 当前明确不做
 
-- 不连接真实 LLM 或编写 Prompt。
-- 不引入模型 SDK，也不把 Host Agent 或只读工具接入 Orchestrator。
-- 不实现工具预算、timeout、并行调用、数据库/RAG/网络搜索或任何写工具。
+- 不把真实 Host Agent、FakeHostAgent 或只读工具接入 `Orchestrator`。
+- 不让 Host Agent 调用 `ActionExecutor`、决定规则结果或修改权威状态。
+- 不实现数据库/RAG/网络搜索、并行工具调用或任何写工具。
 - 不使用 LangGraph。
 - 不由主持层实现 Rule、Hook、Checkpoint 执行、Dice、GameState 修改或 Event 写入。
 - 不把 `TurnState`、`EngineExecutionResult`、Event 或摘要 Outbox 暴露为跨组件公共契约。

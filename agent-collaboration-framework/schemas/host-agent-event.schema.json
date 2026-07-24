@@ -1,0 +1,232 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "host-agent-event.schema.json",
+  "$defs": {
+    "HostAgentCompleted": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "agent.completed",
+          "title": "Type",
+          "type": "string"
+        },
+        "raw_output": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Raw Output",
+          "type": "object"
+        },
+        "usage": {
+          "$ref": "#/$defs/HostAgentUsage"
+        }
+      },
+      "required": [
+        "type",
+        "raw_output",
+        "usage"
+      ],
+      "title": "HostAgentCompleted",
+      "type": "object"
+    },
+    "HostAgentFailed": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "agent.failed",
+          "title": "Type",
+          "type": "string"
+        },
+        "code": {
+          "enum": [
+            "HOST_AGENT_MAX_TURNS",
+            "HOST_AGENT_TIMEOUT",
+            "HOST_AGENT_INVALID_OUTPUT",
+            "HOST_AGENT_TOOL_BUDGET_EXCEEDED",
+            "HOST_AGENT_INTERNAL_ERROR"
+          ],
+          "title": "Code",
+          "type": "string"
+        },
+        "retryable": {
+          "title": "Retryable",
+          "type": "boolean"
+        },
+        "usage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HostAgentUsage"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "type",
+        "code",
+        "retryable"
+      ],
+      "title": "HostAgentFailed",
+      "type": "object"
+    },
+    "HostAgentToolCompleted": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "tool.completed",
+          "title": "Type",
+          "type": "string"
+        },
+        "call_id": {
+          "minLength": 1,
+          "title": "Call Id",
+          "type": "string"
+        },
+        "tool_name": {
+          "minLength": 1,
+          "title": "Tool Name",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "success",
+            "error"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "call_id",
+        "tool_name",
+        "status"
+      ],
+      "title": "HostAgentToolCompleted",
+      "type": "object"
+    },
+    "HostAgentToolStarted": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "tool.started",
+          "title": "Type",
+          "type": "string"
+        },
+        "call_id": {
+          "minLength": 1,
+          "title": "Call Id",
+          "type": "string"
+        },
+        "tool_name": {
+          "minLength": 1,
+          "title": "Tool Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "call_id",
+        "tool_name"
+      ],
+      "title": "HostAgentToolStarted",
+      "type": "object"
+    },
+    "HostAgentUsage": {
+      "additionalProperties": false,
+      "description": "Provider-neutral measurements for one Host Agent invocation.\n\n``None`` means the provider did not report that token metric. A reported zero\nremains ``0`` so missing data is never silently converted into measured usage.",
+      "properties": {
+        "model_rounds": {
+          "minimum": 0,
+          "title": "Model Rounds",
+          "type": "integer"
+        },
+        "tool_calls": {
+          "minimum": 0,
+          "title": "Tool Calls",
+          "type": "integer"
+        },
+        "input_tokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Input Tokens"
+        },
+        "output_tokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Output Tokens"
+        },
+        "duration_ms": {
+          "minimum": 0,
+          "title": "Duration Ms",
+          "type": "integer"
+        },
+        "termination_reason": {
+          "enum": [
+            "completed",
+            "max_turns",
+            "timeout",
+            "invalid_output",
+            "tool_budget_exceeded",
+            "internal_error"
+          ],
+          "title": "Termination Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "model_rounds",
+        "tool_calls",
+        "duration_ms",
+        "termination_reason"
+      ],
+      "title": "HostAgentUsage",
+      "type": "object"
+    },
+    "JsonValue": {}
+  },
+  "description": "Schema-export root for the discriminated ``HostAgentEvent`` union.",
+  "discriminator": {
+    "mapping": {
+      "agent.completed": "#/$defs/HostAgentCompleted",
+      "agent.failed": "#/$defs/HostAgentFailed",
+      "tool.completed": "#/$defs/HostAgentToolCompleted",
+      "tool.started": "#/$defs/HostAgentToolStarted"
+    },
+    "propertyName": "type"
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/HostAgentToolStarted"
+    },
+    {
+      "$ref": "#/$defs/HostAgentToolCompleted"
+    },
+    {
+      "$ref": "#/$defs/HostAgentCompleted"
+    },
+    {
+      "$ref": "#/$defs/HostAgentFailed"
+    }
+  ],
+  "title": "HostAgentEvent"
+}

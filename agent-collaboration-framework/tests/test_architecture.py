@@ -56,6 +56,38 @@ class ArchitectureTests(unittest.TestCase):
                     f"{path.relative_to(PACKAGE)}: {imported}",
                 )
 
+    def test_host_agent_port_is_host_private_and_sdk_independent(self) -> None:
+        from collaboration_framework.host.ports import HostAgentPort
+
+        self.assertFalse((PACKAGE / "ports" / "host_agent.py").exists())
+        self.assertTrue((PACKAGE / "host" / "ports" / "host_agent.py").is_file())
+        self.assertEqual(
+            {
+                name
+                for name in HostAgentPort.__dict__
+                if not name.startswith("_")
+            },
+            {"astream"},
+        )
+
+        stable_host_agent_files = (
+            PACKAGE / "host" / "schemas" / "agent.py",
+            PACKAGE / "host" / "ports" / "host_agent.py",
+        )
+        forbidden_prefixes = (
+            "agents",
+            "openai",
+            "collaboration_framework.engine",
+            "collaboration_framework.module",
+            "collaboration_framework.ports",
+        )
+        for path in stable_host_agent_files:
+            for imported in imports_for(path):
+                self.assertFalse(
+                    imported.startswith(forbidden_prefixes),
+                    f"{path.relative_to(PACKAGE)}: {imported}",
+                )
+
     def test_engine_does_not_import_host(self) -> None:
         for path in (PACKAGE / "engine").rglob("*.py"):
             for imported in imports_for(path):
@@ -120,6 +152,12 @@ class ArchitectureTests(unittest.TestCase):
             StateModifiedPayload,
         )
         from collaboration_framework.host.schemas import (
+            HostAgentCompleted,
+            HostAgentContext,
+            HostAgentFailed,
+            HostAgentToolCompleted,
+            HostAgentToolStarted,
+            HostAgentUsage,
             IntentContext,
             NarrationContext,
             NarrationOutput,
@@ -139,6 +177,12 @@ class ArchitectureTests(unittest.TestCase):
             IntentContext,
             NarrationContext,
             NarrationOutput,
+            HostAgentContext,
+            HostAgentUsage,
+            HostAgentToolStarted,
+            HostAgentToolCompleted,
+            HostAgentCompleted,
+            HostAgentFailed,
             PlayerTurnPayload,
             WebSocketOutput,
             TurnOutput,

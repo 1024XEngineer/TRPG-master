@@ -15,6 +15,7 @@ ToolErrorCode: TypeAlias = Literal[
     "ENTITY_NOT_VISIBLE",
     "INVALID_TOOL_RESULT",
     "TOOL_INTERNAL_ERROR",
+    "TOOL_TIMEOUT",
 ]
 
 
@@ -64,6 +65,7 @@ _ERROR_MESSAGES: dict[ToolErrorCode, str] = {
     ),
     "INVALID_TOOL_RESULT": "The tool returned an invalid result.",
     "TOOL_INTERNAL_ERROR": "The tool could not complete the request.",
+    "TOOL_TIMEOUT": "The tool timed out before completing the request.",
 }
 
 

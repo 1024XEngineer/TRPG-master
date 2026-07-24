@@ -14,7 +14,7 @@
 - B 负责 Rule、Hook、Checkpoint 执行、Dice、GameState 修改、Event 写入和事务/幂等。
 - C 负责模组解析、审查和发布 `ModuleContent`。
 - A 只能通过 `ActionExecutor.execute()` 发出可能影响权威状态的动作。
-- 当前使用离线模型 Fake、player-safe 只读工具和完整 `InMemoryEngineStore`，不连接真实模型、LangGraph、PostgreSQL 或 FastAPI。
+- 当前使用离线模型 Fake、player-safe 只读工具、完整 `InMemoryEngineStore`，并提供尚未接入 `Orchestrator` 的 OpenAI Agents SDK + Qwen Host Agent Adapter；不接 LangGraph、PostgreSQL 或 FastAPI。
 
 ## 2. 最终回合时序
 
@@ -165,9 +165,12 @@ flowchart TD
 
 ### 15. 真实模型依赖
 
-选择：移除 PydanticAI、OpenAI 和 Prompt 依赖，只保留模型 Protocol 与 Fake adapter。
+选择：PydanticAI 与 LangGraph 保持移除；OpenAI Agents SDK、OpenAI 客户端、Qwen 配置和版本化 Prompt 只允许进入
+`host/adapters/openai_agents/` 与 bootstrap 组合根。稳定 Host Schema/Port、application、tools、Engine 和 Module
+继续与 SDK/provider 无关。
 
-理由：本阶段目标是稳定工程骨架，不是模型效果。真实 SDK 以后放入 adapter，不进入 contracts/application 核心。
+理由：第三方 SDK 是可替换基础设施。真实 Adapter 可以履行同一 `HostAgentPort`，但其类型、运行循环、客户端和
+供应商配置不能进入 contracts/application 核心，也不能改变 `IntentParser` 的确定性校验职责。
 
 ### 16. ModuleContent 与验证边界
 
@@ -230,7 +233,7 @@ flowchart LR
 
 ### `host/adapters/`
 
-1. 为什么需要：承载 Fake 和未来真实模型等可替换外部实现。
+1. 为什么需要：承载 Fake 和真实模型等可替换外部实现。
 2. 如果没有：基础设施细节会进入 parser/narrator/orchestrator。
 3. 边界：实现 host 端口；不能制定权威规则或绕过 Pydantic 校验。
 4. 类型：基础设施。
@@ -349,10 +352,21 @@ A 输出/内部边界 Schema：
 
 `HostAgentPort.astream()` 是 A 在规则引擎之前的框架无关意图理解边界，只接收可信 `PlayerInput` 与 player-safe
 `PlayerView`。`ToolRegistry.bind(context)` 把工具调用固定到这一 Context，模型参数中没有 room/player/actor 身份入口。
-当前两个工具只搜索 `visible_entities` 或返回其中一个实体及其当前 checkpoint 候选；它们与离线 Fake 均尚未接入
-`Orchestrator`。completed 的 raw JSON 仍须交给 `IntentParser`，且该 Port/Registry 都不得调用 `ActionExecutor`。
+当前两个工具只搜索 `visible_entities` 或返回其中一个实体及其当前 checkpoint 候选；真实 Adapter、工具与离线 Fake
+均尚未接入 `Orchestrator`。completed 的 raw JSON 仍须交给 `IntentParser`，且该 Port/Registry/Adapter 都不得调用
+`ActionExecutor`。
 上述三个 Host Agent Schema 虽然导出为仓库级 JSON Schema，但不因此成为 A/B/C 共享业务契约；工具定义则直接从
 参数/结果 Pydantic 模型生成 Adapter Schema，不维护重复文件。
+
+`QwenHostAgentAdapter` 位于 `host/adapters/openai_agents/`。每次调用建立独立 SDK Agent、绑定 Registry 和运行计数；
+SDK Runner 负责 `model -> tool -> model -> final` 循环，项目只负责权限、预算、timeout、安全事件和最终 JSON
+边界。模型设置固定为 `temperature=0`、串行工具、usage streaming 与关闭 thinking；每次 run 显式关闭 tracing 和
+敏感 trace data。默认限制为 6 轮模型、8 次工具、单工具 5 秒、整轮 30 秒。单工具 timeout 回填稳定
+`TOOL_TIMEOUT`，其余受控失败映射为项目 `HostAgentFailed`，不透传 provider 异常。
+
+真实客户端只能由 `bootstrap.host_agent.build_qwen_host_agent()` 显式构造；import 时不读取 `.env`/环境变量或创建客户端。
+API Key 必填且使用秘密类型，默认 endpoint 为 DashScope 北京 OpenAI-compatible `/v1`，默认模型为 `qwen-plus`。
+主链 bootstrap 继续装配 Fake，不会自动把该 Adapter 注入 `Orchestrator`。
 
 B 内部模型（不属于跨组件 Schema）：
 
@@ -372,6 +386,6 @@ B 内部模型（不属于跨组件 Schema）：
 7. 每次 Schema 修改必须重新运行 exporter，并提交生成文件和兼容性说明。
 8. 若未来迁移 LangGraph，先用同一测试套件证明 `run()`、执行一次语义和 WebSocket 输出未变，再替换实现。
 9. 修改 `HostAgentContext`、`HostAgentUsage`、`HostAgentEvent` 或 `HostAgentPort` 由 A 评审，并同步其契约测试、生成 Schema
-   和现行文档；SDK 类型只能存在于未来的 Adapter，不能进入这些稳定业务字段。
+   和现行文档；SDK 类型只能存在于 `host/adapters/openai_agents/` 与 bootstrap 组合根，不能进入这些稳定业务字段。
 10. 修改 `ToolRegistry` 或 Host 工具由 A 评审；参数/结果必须经过项目 Pydantic Schema，工具只能绑定当前
     `HostAgentContext`，所有工具保持只读，运行预算与 timeout 由 Adapter 的单一运行配置执行。

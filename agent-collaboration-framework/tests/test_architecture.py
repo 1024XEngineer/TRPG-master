@@ -130,12 +130,41 @@ class ArchitectureTests(unittest.TestCase):
                     f"{path.relative_to(PACKAGE)}: {imported}",
                 )
 
-    def test_core_has_no_model_or_langgraph_dependency(self) -> None:
-        forbidden = ("pydantic_ai", "openai", "langgraph")
+    def test_provider_sdks_are_isolated_to_adapter_and_bootstrap(self) -> None:
+        adapter_root = (
+            PACKAGE / "host" / "adapters" / "openai_agents"
+        )
+        bootstrap_file = PACKAGE / "bootstrap" / "host_agent.py"
+        provider_prefixes = ("agents", "openai")
+
         for path in PACKAGE.rglob("*.py"):
-            text = path.read_text(encoding="utf-8").lower()
-            for token in forbidden:
-                self.assertNotIn(token, text, f"{token} in {path.relative_to(ROOT)}")
+            provider_imports = {
+                imported
+                for imported in imports_for(path)
+                if imported.startswith(provider_prefixes)
+            }
+            if not provider_imports:
+                continue
+            self.assertTrue(
+                path.is_relative_to(adapter_root) or path == bootstrap_file,
+                (
+                    f"provider SDK import outside private adapter/bootstrap: "
+                    f"{path.relative_to(ROOT)}: {sorted(provider_imports)}"
+                ),
+            )
+
+        project = (ROOT / "pyproject.toml").read_text(encoding="utf-8").lower()
+        self.assertIn('"openai==2.44.0"', project)
+        self.assertIn('"openai-agents==0.8.4"', project)
+
+    def test_pydantic_ai_and_langgraph_remain_globally_forbidden(self) -> None:
+        forbidden = ("pydantic_ai", "langgraph")
+        for path in PACKAGE.rglob("*.py"):
+            for imported in imports_for(path):
+                self.assertFalse(
+                    imported.startswith(forbidden),
+                    f"{path.relative_to(PACKAGE)}: {imported}",
+                )
         project = (ROOT / "pyproject.toml").read_text(encoding="utf-8").lower()
         for token in forbidden:
             self.assertNotIn(token, project)

@@ -14,7 +14,7 @@
 - B 负责 Rule、Hook、Checkpoint 执行、Dice、GameState 修改、Event 写入和事务/幂等。
 - C 负责模组解析、审查和发布 `ModuleContent`。
 - A 只能通过 `ActionExecutor.execute()` 发出可能影响权威状态的动作。
-- 当前使用离线模型 Fake 和完整 `InMemoryEngineStore`，不连接真实模型、LangGraph、PostgreSQL 或 FastAPI。
+- 当前使用离线模型 Fake、player-safe 只读工具和完整 `InMemoryEngineStore`，不连接真实模型、LangGraph、PostgreSQL 或 FastAPI。
 
 ## 2. 最终回合时序
 
@@ -244,6 +244,14 @@ flowchart LR
 4. 类型：A 内部应用数据模型。
 5. LangGraph 迁移：`TurnState` 可能变化；Narration Context/Output 通常可复用。
 
+### `host/tools/`
+
+1. 为什么需要：给 Host Agent 提供只读取当前玩家安全视图的确定性检索能力。
+2. 如果没有：SDK Adapter 会自行定义参数、权限和返回形态，形成供应商绑定和越权风险。
+3. 边界：工具只能读取调用时绑定的 `HostAgentContext.player_view`；不得访问引擎、数据库、完整模组、其他玩家数据或写入口。
+4. 类型：A 的框架无关只读能力；`ToolRegistry` 负责注册、Context 绑定、参数/结果校验和脱敏错误。
+5. LangGraph 迁移：不需要修改；任何 Agent Runtime 都消费同一 Registry 和 Pydantic Schema。
+
 ### `host/gateway/`
 
 1. 为什么需要：把连接协议和 player-safe 输出与回合用例分开。
@@ -288,8 +296,11 @@ flowchart TD
     HAPP --> HSCHEMA
     HAPP --> XPORTS
     HAPP --> CONTRACTS
+    HTOOLS["host/tools"] --> HAPP
+    HTOOLS --> HSCHEMA
     HADAPTER["host/adapters"] --> HPORTS
     HADAPTER --> HSCHEMA
+    HADAPTER --> HTOOLS
     GATEWAY["host/gateway"] --> HPORTS
     GATEWAY --> HSCHEMA
     ENGINE["engine"] --> XPORTS
@@ -332,10 +343,16 @@ A 输出/内部边界 Schema：
 - `HostAgentContext`（A 内部；导出 JSON Schema 供 Adapter 对齐）
 - `HostAgentUsage`（A 内部；导出 JSON Schema 供 Adapter 对齐）
 - `HostAgentEvent`（A 内部可判别事件联合；导出 JSON Schema 供 Adapter 对齐）
+- `SearchVisibleEntitiesArgs` / `SearchVisibleEntitiesResult`（A 内部工具参数/结果）
+- `GetVisibleEntityArgs` / `GetVisibleEntityResult`（A 内部工具参数/结果）
+- `ToolError` / `ToolErrorResult`（A 内部稳定脱敏工具错误）
 
 `HostAgentPort.astream()` 是 A 在规则引擎之前的框架无关意图理解边界，只接收可信 `PlayerInput` 与 player-safe
-`PlayerView`。它当前只有离线 Fake，尚未接入 `Orchestrator`；completed 的 raw JSON 仍须交给 `IntentParser`，
-且该 Port 不得调用 `ActionExecutor`。上述三个 Host Agent Schema 虽然导出为 JSON Schema，但不因此成为 A/B/C 共享业务契约。
+`PlayerView`。`ToolRegistry.bind(context)` 把工具调用固定到这一 Context，模型参数中没有 room/player/actor 身份入口。
+当前两个工具只搜索 `visible_entities` 或返回其中一个实体及其当前 checkpoint 候选；它们与离线 Fake 均尚未接入
+`Orchestrator`。completed 的 raw JSON 仍须交给 `IntentParser`，且该 Port/Registry 都不得调用 `ActionExecutor`。
+上述三个 Host Agent Schema 虽然导出为仓库级 JSON Schema，但不因此成为 A/B/C 共享业务契约；工具定义则直接从
+参数/结果 Pydantic 模型生成 Adapter Schema，不维护重复文件。
 
 B 内部模型（不属于跨组件 Schema）：
 
@@ -356,3 +373,5 @@ B 内部模型（不属于跨组件 Schema）：
 8. 若未来迁移 LangGraph，先用同一测试套件证明 `run()`、执行一次语义和 WebSocket 输出未变，再替换实现。
 9. 修改 `HostAgentContext`、`HostAgentUsage`、`HostAgentEvent` 或 `HostAgentPort` 由 A 评审，并同步其契约测试、生成 Schema
    和现行文档；SDK 类型只能存在于未来的 Adapter，不能进入这些稳定业务字段。
+10. 修改 `ToolRegistry` 或 Host 工具由 A 评审；参数/结果必须经过项目 Pydantic Schema，工具只能绑定当前
+    `HostAgentContext`，所有工具保持只读，运行预算与 timeout 由 Adapter 的单一运行配置执行。

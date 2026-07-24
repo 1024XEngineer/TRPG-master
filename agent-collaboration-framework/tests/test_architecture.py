@@ -88,6 +88,40 @@ class ArchitectureTests(unittest.TestCase):
                     f"{path.relative_to(PACKAGE)}: {imported}",
                 )
 
+    def test_host_agent_tools_are_read_only_and_authority_independent(self) -> None:
+        from collaboration_framework.host.tools import (
+            build_player_view_tool_registry,
+        )
+
+        tool_paths = (
+            PACKAGE / "host" / "application" / "tool_registry.py",
+            PACKAGE / "host" / "schemas" / "tools.py",
+            PACKAGE / "host" / "tools" / "visible_entities.py",
+        )
+        forbidden_prefixes = (
+            "agents",
+            "openai",
+            "collaboration_framework.engine",
+            "collaboration_framework.module",
+            "collaboration_framework.ports",
+        )
+        for path in tool_paths:
+            self.assertTrue(path.is_file(), path)
+            for imported in imports_for(path):
+                self.assertFalse(
+                    imported.startswith(forbidden_prefixes),
+                    f"{path.relative_to(PACKAGE)}: {imported}",
+                )
+
+        definitions = build_player_view_tool_registry().definitions
+        self.assertEqual(
+            {definition.name for definition in definitions},
+            {"search_visible_entities", "get_visible_entity"},
+        )
+        self.assertTrue(
+            all(definition.access == "read_only" for definition in definitions)
+        )
+
     def test_engine_does_not_import_host(self) -> None:
         for path in (PACKAGE / "engine").rglob("*.py"):
             for imported in imports_for(path):
@@ -152,6 +186,8 @@ class ArchitectureTests(unittest.TestCase):
             StateModifiedPayload,
         )
         from collaboration_framework.host.schemas import (
+            GetVisibleEntityArgs,
+            GetVisibleEntityResult,
             HostAgentCompleted,
             HostAgentContext,
             HostAgentFailed,
@@ -162,8 +198,13 @@ class ArchitectureTests(unittest.TestCase):
             NarrationContext,
             NarrationOutput,
             PlayerTurnPayload,
+            SearchVisibleEntitiesArgs,
+            SearchVisibleEntitiesResult,
+            ToolError,
+            ToolErrorResult,
             TurnOutput,
             TurnState,
+            VisibleEntitySummary,
             WebSocketOutput,
         )
 
@@ -183,6 +224,13 @@ class ArchitectureTests(unittest.TestCase):
             HostAgentToolCompleted,
             HostAgentCompleted,
             HostAgentFailed,
+            SearchVisibleEntitiesArgs,
+            VisibleEntitySummary,
+            SearchVisibleEntitiesResult,
+            GetVisibleEntityArgs,
+            GetVisibleEntityResult,
+            ToolError,
+            ToolErrorResult,
             PlayerTurnPayload,
             WebSocketOutput,
             TurnOutput,

@@ -4,7 +4,7 @@
 - 状态：Accepted
 - 日期：2026-07-23
 - 决策范围：Module Parser Agent 的完整链路、技术选型和模块边界
-- 替代：`important_docs/unified-trpg-data-contract-adr.md`、`docs/architecture/data-model-alignment-rfc.md`（两者内容已吸收进本文）
+- 替代：早期统一数据契约 ADR 与数据模型对齐 RFC；其有效结论已吸收进本文
 
 ---
 
@@ -187,7 +187,7 @@ agent-collaboration-framework（本仓库）
 
 ---
 
-## 8. P1 完成标准
+## 8. 当前交付完成标准
 
 ```
 ✅ 完整链路已冻结（DocumentAdapter → SourceFragment → Parser → Validation → Publish → Runtime）

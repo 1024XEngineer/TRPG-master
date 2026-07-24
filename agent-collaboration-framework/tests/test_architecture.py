@@ -154,7 +154,7 @@ class ArchitectureTests(unittest.TestCase):
         for token in forbidden:
             self.assertNotIn(token, project)
 
-    def test_current_documentation_has_two_authoritative_design_files(self) -> None:
+    def test_current_documentation_keeps_only_authoritative_decisions(self) -> None:
         docs = ROOT / "docs"
         current = sorted(path.name for path in docs.glob("*.md"))
         self.assertEqual(current, ["architecture.md", "数据模型设计.md"])
@@ -162,12 +162,26 @@ class ArchitectureTests(unittest.TestCase):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn("docs/architecture.md", readme)
         self.assertIn("docs/数据模型设计.md", readme)
+        self.assertFalse((docs / "archive").exists())
 
-        archive_index = (docs / "archive" / "README.md").read_text(
-            encoding="utf-8"
+        architecture_decisions = sorted(
+            path.name for path in (docs / "architecture").glob("*.md")
         )
-        self.assertIn("不是当前实现依据", archive_index)
-        self.assertIn("../数据模型设计.md", archive_index)
+        self.assertEqual(
+            architecture_decisions,
+            ["adr-module-parser-architecture.md"],
+        )
+
+        module_decisions = sorted(
+            path.name for path in (docs / "module-parser").glob("*.md")
+        )
+        self.assertEqual(
+            module_decisions,
+            [
+                "MODULECONTENT-README.md",
+                "module-content-field-decisions.md",
+            ],
+        )
 
     def test_data_model_document_covers_current_model_fields(self) -> None:
         from collaboration_framework.contracts import (

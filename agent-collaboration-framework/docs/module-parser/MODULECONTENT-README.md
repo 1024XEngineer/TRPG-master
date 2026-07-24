@@ -1,6 +1,6 @@
 # ModuleContent 字段决策：给团队的同步说明
 
-> 详细文档：`module-content-field-decisions.md`
+> 最终契约：[module-content-field-decisions.md](module-content-field-decisions.md)
 > 本文用追书人（书房 Demo）的例子解释每个字段的作用。
 
 ---
@@ -73,9 +73,9 @@ Rule = 什么时候（hook） + 条件是什么（when） + 做什么（then） 
 | `id` | `"allow_open_with_key"` | 唯一标识 |
 | `hook` | `"on_interact"` | 什么时候检查。当前发布契约允许 20 个 Hook；占位内核只消费其中一部分 |
 | `priority` | `100` | 同 hook 上多条规则时排先后 |
-| `mode`（P0） | `"append"` | 怎么相处。append=追加，override=覆盖系统默认，forbid=整个 hook 跳过 |
+| `mode` | `"append"` | 怎么相处。append=追加，override=覆盖系统默认，forbid=整个 hook 跳过 |
 | `when` | `{path:"entities.bookshelf.key_found", equals:true}` | 条件判断。当前契约接受 path/equals 或 expr；完整 Expression 求值器待实现 |
-| `then` | `[allow("open"), modify("cabinet.opened", true)]` | 有序操作列表。当前契约声明约 11 种 Operation；占位内核只执行基础状态操作 |
+| `then` | `[allow("open"), modify("cabinet.opened", true)]` | 有序操作列表。当前契约声明 12 种 Operation；占位内核只执行基础状态操作 |
 | `facts` | `["玩家用钥匙打开柜子"]` | 引擎内部确认事实 |
 | `player_visible_information` | `["钥匙正好转动了锁芯..."]` | 给玩家看的信息 |
 
@@ -102,7 +102,7 @@ Rule(
 | `action` | `"investigate"` | 语义提示——不是白名单，只是告诉 A "这是调查类动作" |
 | `target_id` | `"bookshelf"` | 针对哪个实体 |
 | `skills` | `["spot-hidden"]` | 可用技能 |
-| `difficulty`（P0 可空） | `"regular"` | 难度。None 表示运行时决定（蛙蛙村软判据） |
+| `difficulty`（可空） | `"regular"` | 难度。None 表示运行时决定（蛙蛙村软判据） |
 | `outcomes` | `{success: {...}, failure: {...}}` | 成功/失败及可选分级后果（大成功/极难成功/普通成功等） |
 | `visibility` | `None` | 谁能看到 + 是否需要先发现。None = 全员可见无需发现。地穴入口需追踪检定后出现 |
 

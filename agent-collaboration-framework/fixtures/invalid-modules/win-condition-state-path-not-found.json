@@ -1,0 +1,17 @@
+{
+  "module_id": "invalid",
+  "version": "0.1.0",
+  "world_ref": "coc-7e",
+  "background": "无效模组测试背景。",
+  "scenes": [],
+  "entities": [],
+  "checkpoints": [],
+  "win_conditions": [
+    {
+      "id": "bad-ending",
+      "when": {"path": "entities.target.missing", "equals": true},
+      "fact": "bad",
+      "player_visible_information": "bad"
+    }
+  ]
+}

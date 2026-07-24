@@ -1,0 +1,27 @@
+{
+  "module_id": "invalid",
+  "version": "0.1.0",
+  "world_ref": "coc-7e",
+  "background": "无效模组测试背景。",
+  "scenes": [{"id": "room", "name": "Room", "content": "", "entity_ids": ["missing_entity"], "checkpoint_ids": ["missing_checkpoint"]}],
+  "entities": [{
+    "id": "door", "kind": "object", "name": "Door", "content": "", "state": {"open": false},
+    "rules": [{
+      "id": "bad_rule", "hook": "on_action",
+      "when": {"path": "entities.door.missing", "equals": false},
+      "then": [{"op": "modify", "path": "entities.door.other_missing", "set": true}]
+    }]
+  }],
+  "checkpoints": [{
+    "id": "check", "scene_id": "missing_scene", "action": "open", "target_id": "missing_target",
+    "skills": ["not_a_skill"], "difficulty": "regular",
+    "outcomes": {
+      "success": {"ops": [{"op": "modify", "path": "entities.door.operation_missing", "set": true}]},
+      "failure": {}
+    }
+  }],
+  "win_conditions": [{
+    "id": "bad_ending", "when": {"path": "entities.door.ending_missing", "equals": true},
+    "fact": "", "player_visible_information": ""
+  }]
+}

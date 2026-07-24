@@ -130,6 +130,20 @@ class ArchitectureTests(unittest.TestCase):
                     f"{path.relative_to(PACKAGE)}: {imported}",
                 )
 
+    def test_parser_draft_stays_inside_module_boundary(self) -> None:
+        for directory in ("contracts", "engine", "host", "ports"):
+            for path in (PACKAGE / directory).rglob("*.py"):
+                self.assertNotIn(
+                    "ModuleDraft",
+                    path.read_text(encoding="utf-8"),
+                    str(path.relative_to(PACKAGE)),
+                )
+
+        public_module_api = (PACKAGE / "module" / "__init__.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("ModuleDraft", public_module_api)
+
     def test_core_has_no_model_or_langgraph_dependency(self) -> None:
         forbidden = ("pydantic_ai", "openai", "langgraph")
         for path in PACKAGE.rglob("*.py"):

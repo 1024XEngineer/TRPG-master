@@ -1,0 +1,58 @@
+{
+  "module_id": "capability-checkpoint-failure",
+  "version": "0.1.0",
+  "world_ref": "coc-7e",
+  "background": "用于验证 Checkpoint 失败分支的测试背景。",
+  "scenes": [
+    {
+      "id": "study",
+      "name": "书房",
+      "content": "用于验证 Checkpoint failure 分支消费的最小场景。",
+      "entity_ids": ["bookshelf"],
+      "checkpoint_ids": ["failed_search"]
+    }
+  ],
+  "entities": [
+    {
+      "id": "bookshelf",
+      "kind": "object",
+      "name": "书架",
+      "aliases": ["藏书架"],
+      "content": "积灰的书架。",
+      "state": {
+        "searched": false
+      }
+    }
+  ],
+  "checkpoints": [
+    {
+      "id": "failed_search",
+      "scene_id": "study",
+      "action": "investigate",
+      "target_id": "bookshelf",
+      "skills": ["spot-hidden"],
+      "difficulty": "hard",
+      "outcomes": {
+        "success": {
+          "facts": ["不应消费的成功事实"],
+          "player_visible_information": ["不应显示的成功信息。"],
+          "narration_constraints": ["不应使用的成功叙事约束"],
+          "ops": []
+        },
+        "failure": {
+          "facts": ["玩家搜索了书架但没有找到线索"],
+          "player_visible_information": ["你翻查了书架，却没有找到有用的线索。"],
+          "narration_constraints": ["不得声称玩家发现了隐藏线索"],
+          "ops": [
+            {
+              "op": "modify",
+              "path": "entities.bookshelf.searched",
+              "set": true
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "win_conditions": []
+}

@@ -7,6 +7,7 @@ from collaboration_framework.engine import (
     GameState,
     InMemoryEngineStore,
     RuleEngineService,
+    RuleKernel,
 )
 from collaboration_framework.host.adapters.fakes import (
     FakeIntentModel,
@@ -33,15 +34,17 @@ class FakeApplication:
 def build_fake_application(
     module_content: ModuleContent,
     game_state: GameState,
+    *,
+    rule_kernel: RuleKernel | None = None,
 ) -> FakeApplication:
     engine_store = InMemoryEngineStore()
     engine_store.register_room(
         module_content=module_content,
         initial_state=game_state,
     )
-    engine = RuleEngineService(engine_store)
+    engine = RuleEngineService(engine_store, kernel=rule_kernel)
     orchestrator = Orchestrator(
-        context_assembler=ContextAssembler(),
+        context_assembler=ContextAssembler(module_content.background),
         intent_parser=IntentParser(FakeIntentModel()),
         action_executor=engine,
         player_view_projector=PlayerViewProjector(engine),

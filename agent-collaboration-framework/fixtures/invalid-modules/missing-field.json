@@ -1,0 +1,9 @@
+{
+  "module_id": "invalid",
+  "version": "0.1.0",
+  "background": "用于验证缺失字段错误的测试背景。",
+  "scenes": [],
+  "entities": [],
+  "checkpoints": [],
+  "win_conditions": []
+}

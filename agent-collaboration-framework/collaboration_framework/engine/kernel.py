@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Callable
+from typing import Any, Literal, TypeAlias
 
 from collaboration_framework.contracts import (
     ActionRequest,
     ActionResult,
+    AddOperationSpec,
     AllowOperationSpec,
     CheckpointSpec,
     ConditionSpec,
@@ -17,7 +19,10 @@ from collaboration_framework.contracts import (
     ModifyOperationSpec,
     ModuleCheck,
     ModuleContent,
+    OperationSpec,
     RuleSpec,
+    SetOperationSpec,
+    TransitionSpec,
     VisibleFact,
 )
 
@@ -29,9 +34,37 @@ from .models import (
     StateModifiedPayload,
 )
 
+CheckOutcomeName: TypeAlias = Literal[
+    "success",
+    "failure",
+    "critical_success",
+    "extreme_success",
+    "hard_success",
+    "regular_success",
+    "fumble",
+]
+CheckOutcomeResolver: TypeAlias = Callable[
+    [ActionRequest, CheckpointSpec],
+    CheckOutcomeName,
+]
+
 
 class RuleKernel:
-    """Evaluate one action without reading storage or owning room lifecycle."""
+    """Placeholder evaluator without storage or room-lifecycle ownership.
+
+    The B/C contract intentionally exposes more hooks, expressions, and
+    operations than this temporary kernel executes. Unsupported declarations
+    remain loadable and fail explicitly only if the placeholder reaches them.
+    """
+
+    def __init__(
+        self,
+        check_outcome_resolver: CheckOutcomeResolver | None = None,
+    ) -> None:
+        self._check_outcome_resolver = (
+            check_outcome_resolver
+            or (lambda _request, _checkpoint: "success")
+        )
 
     def execute(
         self,
@@ -77,7 +110,12 @@ class RuleKernel:
         visible: list[str] = []
         constraints: list[str] = []
 
-        allowing_rule = self._allowing_rule(entity, verb, state)
+        allowing_rule = self._allowing_rule(
+            module_content,
+            entity,
+            verb,
+            state,
+        )
         if verb in entity.refuse_ops and allowing_rule is None:
             return self._finalize(
                 request=request,
@@ -99,8 +137,14 @@ class RuleKernel:
                 target_id=target_id,
                 proposed_skills=intent.check.proposed_skills,
             )
-            outcome_name = checkpoint.mvp_check_result
+            outcome_name = self._check_outcome_resolver(request, checkpoint)
             checkpoint_outcome = getattr(checkpoint.outcomes, outcome_name)
+            if checkpoint_outcome is None:
+                checkpoint_outcome = (
+                    checkpoint.outcomes.failure
+                    if outcome_name == "fumble"
+                    else checkpoint.outcomes.success
+                )
             for operation in checkpoint_outcome.ops:
                 self._apply_operation(
                     operation,
@@ -112,10 +156,18 @@ class RuleKernel:
                     cause=f"checkpoint:{checkpoint.id}",
                 )
             facts.extend(checkpoint_outcome.facts)
-            visible.extend(checkpoint_outcome.player_visible_information)
+            visible.extend(
+                information.text
+                for information in checkpoint_outcome.player_visible_information
+                if information.visibility.audience != "keeper"
+            )
             constraints.extend(checkpoint_outcome.narration_constraints)
             resolution = "checkpoint"
-            outcome = "success" if outcome_name == "success" else "failure"
+            outcome = (
+                "failure"
+                if outcome_name in {"failure", "fumble"}
+                else "success"
+            )
             fact_source = f"checkpoint:{checkpoint.id}:{outcome_name}"
         elif isinstance(intent.check, DefaultCheck):
             return self._finalize(
@@ -142,7 +194,11 @@ class RuleKernel:
                             cause=f"rule:{allowing_rule.id}",
                         )
                 facts.extend(allowing_rule.facts)
-                visible.extend(allowing_rule.player_visible_information)
+                visible.extend(
+                    information.text
+                    for information in allowing_rule.player_visible_information
+                    if information.visibility.audience != "keeper"
+                )
                 outcome = "success"
             else:
                 facts.append(f"{request.actor_id} 对 {target_id} 执行 {verb}")
@@ -224,12 +280,18 @@ class RuleKernel:
 
     def _allowing_rule(
         self,
+        module_content: ModuleContent,
         entity: EntitySpec,
         verb: str,
         state: dict[str, Any],
     ) -> RuleSpec | None:
-        rules = sorted(entity.rules, key=lambda item: -item.priority)
+        rules = sorted(
+            (*module_content.module_rules, *entity.rules),
+            key=lambda item: -item.priority,
+        )
         for rule in rules:
+            if rule.hook != "on_interact" or rule.mode == "forbid":
+                continue
             allows_action = any(
                 isinstance(operation, AllowOperationSpec)
                 and operation.action == verb
@@ -253,11 +315,22 @@ class RuleKernel:
         condition: ConditionSpec,
         state: dict[str, Any],
     ) -> bool:
-        return self._read_path(state, condition.path) == condition.equals
+        if condition.expr is not None:
+            # Expression parsing belongs to the future deterministic runtime.
+            return False
+        try:
+            return (
+                self._read_path(state, self._runtime_path(condition.path))
+                == condition.equals
+            )
+        except ContractError:
+            # Built-in variable catalogs (clock/party/action/self/...) are part
+            # of the publication language but not this placeholder state.
+            return False
 
     def _apply_operation(
         self,
-        operation: ModifyOperationSpec,
+        operation: OperationSpec,
         state: dict[str, Any],
         events: list[StateModifiedEvent],
         *,
@@ -266,11 +339,34 @@ class RuleKernel:
         client_action_id: str,
         cause: str,
     ) -> None:
-        if not isinstance(operation, ModifyOperationSpec):
-            raise ContractError(f"演示规则内核不支持 Op: {operation}")
-        path = operation.path
+        path: str
+        after: Any
+        if isinstance(operation, ModifyOperationSpec):
+            path = self._runtime_path(operation.path)
+            after = operation.set
+        elif isinstance(operation, SetOperationSpec):
+            path = self._runtime_path(operation.path)
+            after = operation.value
+        elif isinstance(operation, AddOperationSpec):
+            path = self._runtime_path(operation.path)
+            before = self._read_path(state, path)
+            if not isinstance(before, (int, float)) or not isinstance(
+                operation.value,
+                (int, float),
+            ):
+                raise ContractError("占位内核只支持数值 Add Operation")
+            after = before + operation.value
+        elif isinstance(operation, TransitionSpec):
+            path = "scene_id"
+            after = operation.scene_id
+        else:
+            raise ContractError(
+                f"占位 RuleKernel 尚未实现 Operation: {operation.op}"
+            )
         parts = path.split(".")
-        if len(parts) < 2 or parts[0] not in {"entities", "actors"}:
+        if path != "scene_id" and (
+            len(parts) < 2 or parts[0] not in {"entities", "actors"}
+        ):
             raise ContractError(f"状态路径不在 MVP 白名单中: {path}")
         parent: Any = state
         for part in parts[:-1]:
@@ -281,7 +377,6 @@ class RuleKernel:
         if not isinstance(parent, dict) or leaf not in parent:
             raise ContractError(f"状态路径不存在: {path}")
         before = parent[leaf]
-        after = operation.set
         if before == after:
             return
         parent[leaf] = after
@@ -296,6 +391,17 @@ class RuleKernel:
             after=after,
             cause=cause,
         )
+
+    @staticmethod
+    def _runtime_path(path: str) -> str:
+        """Map publication entity paths onto the placeholder GameState shape."""
+
+        parts = path.split(".")
+        if len(parts) >= 4 and parts[0] == "entity" and parts[2] == "state":
+            return ".".join(("entities", parts[1], *parts[3:]))
+        if len(parts) >= 3 and parts[0] == "entity":
+            return ".".join(("entities", *parts[1:]))
+        return path
 
     @staticmethod
     def _append_event(
@@ -346,37 +452,38 @@ class RuleKernel:
             if not self._condition_matches(condition.when, state):
                 continue
             cause = f"win_condition:{condition.id}"
-            before_ending = state.get("ending_id")
-            state["ending_id"] = condition.id
-            self._append_event(
-                state,
-                events,
-                room_id=room_id,
-                actor_id=actor_id,
-                client_action_id=client_action_id,
-                path="ending_id",
-                before=before_ending,
-                after=condition.id,
-                cause=cause,
-            )
-            before_phase = state.get("phase")
-            state["phase"] = "ended"
-            self._append_event(
-                state,
-                events,
-                room_id=room_id,
-                actor_id=actor_id,
-                client_action_id=client_action_id,
-                path="phase",
-                before=before_phase,
-                after="ended",
-                cause=cause,
-            )
             facts.append(condition.fact or f"触发结局 {condition.id}")
             visible.append(
                 condition.player_visible_information or "故事进入结局。"
             )
-            return
+            if condition.is_ending:
+                before_ending = state.get("ending_id")
+                state["ending_id"] = condition.id
+                self._append_event(
+                    state,
+                    events,
+                    room_id=room_id,
+                    actor_id=actor_id,
+                    client_action_id=client_action_id,
+                    path="ending_id",
+                    before=before_ending,
+                    after=condition.id,
+                    cause=cause,
+                )
+                before_phase = state.get("phase")
+                state["phase"] = "ended"
+                self._append_event(
+                    state,
+                    events,
+                    room_id=room_id,
+                    actor_id=actor_id,
+                    client_action_id=client_action_id,
+                    path="phase",
+                    before=before_phase,
+                    after="ended",
+                    cause=cause,
+                )
+                return
 
     @staticmethod
     def _direct_visible_text(entity: EntitySpec, verb: str) -> str:

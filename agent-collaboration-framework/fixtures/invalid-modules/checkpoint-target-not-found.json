@@ -1,0 +1,22 @@
+{
+  "module_id": "invalid",
+  "version": "0.1.0",
+  "world_ref": "coc-7e",
+  "background": "无效模组测试背景。",
+  "scenes": [
+    {"id": "room", "name": "Room", "content": "", "checkpoint_ids": ["check"]}
+  ],
+  "entities": [],
+  "checkpoints": [
+    {
+      "id": "check",
+      "scene_id": "room",
+      "action": "inspect",
+      "target_id": "missing",
+      "skills": ["spot-hidden"],
+      "difficulty": "regular",
+      "outcomes": {"success": {}, "failure": {}}
+    }
+  ],
+  "win_conditions": []
+}

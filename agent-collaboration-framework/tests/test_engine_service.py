@@ -35,7 +35,7 @@ def checkpoint_request(
     revision: str = "0",
     target_id: str = "bookshelf",
     checkpoint_id: str = "investigate_bookshelf",
-    skill: str = "spot_hidden",
+    skill: str = "spot-hidden",
 ) -> ActionRequest:
     return ActionRequest(
         request_id=request_id,
@@ -119,7 +119,7 @@ class RuleEngineServiceTests(unittest.IsolatedAsyncioTestCase):
             revision="1",
             target_id="cabinet",
             checkpoint_id="smash_cabinet",
-            skill="strength",
+            skill="STR",
         )
         await self.service.execute(later)
 
@@ -138,7 +138,7 @@ class RuleEngineServiceTests(unittest.IsolatedAsyncioTestCase):
             request_id="collision_001",
             target_id="cabinet",
             checkpoint_id="smash_cabinet",
-            skill="strength",
+            skill="STR",
         )
 
         with self.assertRaisesRegex(ContractError, "request_id 已用于不同"):

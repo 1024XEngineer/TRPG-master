@@ -2,13 +2,15 @@
   "module_id": "study-demo",
   "version": "0.1.0",
   "world_ref": "coc-7e",
+  "background": "当代书房调查演示；叙事保持克制、清晰，并只描述已确认的玩家可见事实。",
   "scenes": [
     {
       "id": "study",
       "name": "书房",
       "content": "昏黄灯光下，书架、木柜与一扇落灰的窗户围住了安静的房间。",
       "entity_ids": ["butler", "bookshelf", "cabinet", "document", "window"],
-      "checkpoint_ids": ["investigate_bookshelf", "smash_cabinet"]
+      "checkpoint_ids": ["investigate_bookshelf", "smash_cabinet"],
+      "exits": []
     }
   ],
   "entities": [
@@ -63,8 +65,9 @@
       "rules": [
         {
           "id": "allow_open_with_key",
-          "hook": "on_action",
+          "hook": "on_interact",
           "priority": 100,
+          "mode": "append",
           "when": {
             "path": "entities.bookshelf.key_found",
             "equals": true
@@ -86,7 +89,12 @@
             }
           ],
           "facts": ["玩家用钥匙打开柜子并取得关键文件"],
-          "player_visible_information": ["小钥匙正好转动了锁芯；柜门打开，里面是一份关键文件。"]
+          "player_visible_information": [
+            {
+              "text": "小钥匙正好转动了锁芯；柜门打开，里面是一份关键文件。",
+              "visibility": {"audience": "all"}
+            }
+          ]
         }
       ]
     },
@@ -125,13 +133,18 @@
       "scene_id": "study",
       "action": "investigate",
       "target_id": "bookshelf",
-      "skills": ["spot_hidden"],
+      "skills": ["spot-hidden"],
       "difficulty": "regular",
-      "mvp_check_result": "success",
+      "visibility": {"audience": "all"},
       "outcomes": {
         "success": {
           "facts": ["玩家在书架后发现钥匙"],
-          "player_visible_information": ["你拨开积灰的书册，在书架后方摸到了一把冰凉的小钥匙。"],
+          "player_visible_information": [
+            {
+              "text": "你拨开积灰的书册，在书架后方摸到了一把冰凉的小钥匙。",
+              "visibility": {"audience": "all"}
+            }
+          ],
           "narration_constraints": ["必须明确玩家已经发现钥匙"],
           "ops": [
             {
@@ -143,7 +156,12 @@
         },
         "failure": {
           "facts": ["玩家没有发现书架后的钥匙"],
-          "player_visible_information": ["你检查了几排旧书，却没有找到有用的东西。"],
+          "player_visible_information": [
+            {
+              "text": "你检查了几排旧书，却没有找到有用的东西。",
+              "visibility": {"audience": "all"}
+            }
+          ],
           "narration_constraints": ["不得声称玩家发现了钥匙"],
           "ops": []
         }
@@ -154,13 +172,18 @@
       "scene_id": "study",
       "action": "smash",
       "target_id": "cabinet",
-      "skills": ["strength"],
+      "skills": ["STR"],
       "difficulty": "hard",
-      "mvp_check_result": "success",
+      "visibility": {"audience": "all"},
       "outcomes": {
         "success": {
           "facts": ["玩家成功砸开柜门", "柜内文件被冲击毁坏"],
-          "player_visible_information": ["柜门在撞击中弹开，但里面的文件也被震裂、撕碎，已经无法阅读。"],
+          "player_visible_information": [
+            {
+              "text": "柜门在撞击中弹开，但里面的文件也被震裂、撕碎，已经无法阅读。",
+              "visibility": {"audience": "all"}
+            }
+          ],
           "narration_constraints": ["动作成功但后果很坏", "不得称文件完好"],
           "ops": [
             {
@@ -177,7 +200,12 @@
         },
         "failure": {
           "facts": ["玩家没有砸开柜门"],
-          "player_visible_information": ["撞击声在书房里回荡，柜门仍旧紧闭。"],
+          "player_visible_information": [
+            {
+              "text": "撞击声在书房里回荡，柜门仍旧紧闭。",
+              "visibility": {"audience": "all"}
+            }
+          ],
           "narration_constraints": ["不得声称柜门已打开"],
           "ops": []
         }
@@ -192,7 +220,8 @@
         "equals": true
       },
       "fact": "玩家取得关键文件，触发正常结局",
-      "player_visible_information": "文件中的记录让真相终于有了可以验证的证据。"
+      "player_visible_information": "文件中的记录让真相终于有了可以验证的证据。",
+      "is_ending": true
     },
     {
       "id": "ending_document_destroyed",
@@ -201,7 +230,16 @@
         "equals": true
       },
       "fact": "关键文件被毁，触发坏结局",
-      "player_visible_information": "唯一的书面证据已经损毁，真相再次沉入阴影。"
+      "player_visible_information": "唯一的书面证据已经损毁，真相再次沉入阴影。",
+      "is_ending": true
+    }
+  ],
+  "module_rules": [],
+  "information_items": [
+    {
+      "id": "document_truth",
+      "content": "关键文件记录了事件真相。",
+      "visibility": {"audience": "keeper"}
     }
   ]
 }

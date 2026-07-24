@@ -5,7 +5,7 @@
 
 ---
 
-## 一、整体结构：7 个集合
+## 一、整体结构：8 个集合
 
 ```
 ModuleContent
@@ -14,7 +14,8 @@ ModuleContent
 ├── entities[]                       —— 有哪些东西
 ├── checkpoints[]                    —— 能做哪些动作
 ├── win_conditions[]                 —— 什么时候结束
-└── module_rules[]                   —— 全局规则（P1）
+├── module_rules[]                   —— 全局规则（P1）
+└── information_items[]              —— 可引用的事实（P1）
 ```
 
 ---
@@ -125,6 +126,20 @@ Rule(
 
 ---
 
+### InformationItem（P1）—— "有什么事实"
+
+| 字段 | 值示例 | 作用 |
+|------|--------|------|
+| `id` | `"buwen_identity"` | 唯一标识，可被 Rule/Condition 引用 |
+| `content` | `"布文杉是隐修堂派来调查学生失踪的卧底"` | 事实正文 |
+| `visibility` | `{audience:"keeper"}` | 静态可见性声明。获取后可由 Outcome 的 Effect 切换 |
+
+**作用**：给 `facts` 裸字符串加 ID。调查模组的信息链——"尸体 → 布文杉身份 → 隐修堂 → 地下秘密"——每条事实有稳定 ID 后，Rule 的 Condition 可以写 `when: information_known("buwen_identity")`。
+
+**只负责**：事实本体的静态声明。**不负责**：信息获取过程（InformationAcquisition，Deferred）、玩家知识状态（KnowledgeState，Deferred）。
+
+---
+
 ## 三、一个完整来回
 
 ```
@@ -143,5 +158,5 @@ Rule(
 ## 四、P0/P1/P2
 
 - **P0**：4 处小改动（mode/expr/difficulty 可空/is_ending），不 break 任何测试
-- **P1**：3 个新字段（module_rules/exits/stat_block），等 B 确认消费者后加。SAN 不设专用对象
+- **P1**：4 个新字段/集合（module_rules/information_items/exits/stat_block），等 B 确认消费者后加。SAN 不设专用对象
 - **P2**：扩四张表（Hook 20/Expression 完整/Op ~11/内建变量 ~15），不新增顶层集合。Track/Timeline/Encounter 全部由 Rule 组合表达

@@ -171,16 +171,22 @@ flowchart TD
 
 ### 16. ModuleContent 与验证边界
 
-选择：`ModuleContent`、声明式 `CheckpointSpec` 和 `RuleSpec` 放在 `contracts/module.py`，由 B/C 共同评审。C 的 `module/validation.py` 只负责把发布输入解析/验证为 `ModuleContent`；B 消费它执行规则；A 不消费它。
+选择：`ModuleContent`、声明式 `CheckpointSpec`、`RuleSpec`、Visibility 和 Operation catalog
+放在 `contracts/module.py`，由 B/C 共同评审。C 的私有 `ModuleDraft` 不导出给 Runtime；
+`module/validation.py` 是 Draft 转换为正式 `ModuleContent` 的唯一入口。B 消费正式发布内容；
+A 和后端仍只通过既有 Engine Service/Store/Port 边界交互。
 
-理由：它们是 C 到 B 的发布协议。若留在 C 私有目录，B 只能依赖 C 实现；若放进 B 内部目录，C 的发布器只能反向依赖运行时。公共契约解决的是“模组能声明什么”，不包含“引擎怎样执行”。
+理由：它们是 C 到 B 的发布协议。公共契约解决“模组能声明什么”，不固定 Engine Service、
+事务存储、GameState 或 Host 编排接口。占位 RuleKernel 可以只实现 catalog 的一个子集，
+但不得反向删减 Parser 已获准发布的声明语言。
 
 ## 4. ModuleContent 的三层边界
 
 ```mermaid
 flowchart LR
-    RAW["C 私有输入/ModuleDraft"] --> PARSE["C 解析与审查"]
-    PARSE --> CONTRACT["contracts/module.py<br/>ModuleContent + 声明式 Specs"]
+    RAW["Raw JSON / LLM Output"] --> DRAFT["C 私有 ModuleDraft"]
+    DRAFT --> VALIDATE["C Validation<br/>语义校验 + 唯一转换入口"]
+    VALIDATE --> CONTRACT["contracts/module.py<br/>ModuleContent + 声明式 Catalog"]
     CONTRACT --> ENGINE["B engine<br/>编译/匹配/执行"]
     ENGINE --> STATE["B 内部<br/>GameState + Event"]
     ENGINE --> SNAP["ProjectionSnapshot"]
@@ -189,10 +195,14 @@ flowchart LR
     style CONTRACT fill:#eef,stroke:#446
 ```
 
-- C 私有：原文、解析草稿、证据位置、审查报告、人工批准流程。
+- C 私有：原文、`ModuleDraft`、证据位置、审查报告、人工批准流程。
 - B/C 公共：发布后模组的结构、引用关系和声明式条件/操作。
-- B 私有：编译后的 Rule、Hook 注册表、随机源、状态变更、Event、事务和缓存。
+- B 私有：编译后的 Rule、Hook/Expression/Operation 消费器、随机源、状态变更、Event、事务和缓存。
 - A 私有：玩家可见投影政策、意图/叙事上下文、回合工作状态和 Gateway DTO。
+
+依赖方向固定为
+`Raw Input -> ModuleDraft -> Validation -> ModuleContent -> RuleEngineService/RuleKernel`。
+Runtime、Host 和后端不得直接依赖 `ModuleDraft`。
 
 ## 5. 每个目录的五问
 

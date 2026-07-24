@@ -1,0 +1,1657 @@
+{
+  "module_id": "silver-lock",
+  "version": "1.0.0",
+  "world_ref": "coc-7e",
+  "background": "故事发生在当代的一处来历不明的封闭空间。调查员在昏暗的银色房间中醒来，失去了近段时间的记忆，手脚被绳索捆住，只能借助房内物件、个人经历的投影和有限线索寻找出路。叙事应维持幽闭、失忆与超现实谜题交织的基调，先强调灯管、银漆、束缚感和感官细节，再逐步显露神话色彩；猫、速写与料理等元素可以替换为调查员真正珍视、容易产生共感的事物。银之锁的原理、猫的身份及绑架者真相不得在调查员发现相应线索前直接揭示。",
+  "scenes": [
+    {
+      "id": "sealed_room",
+      "name": "银色房间",
+      "content": "陈旧发黄的灯管在天花板上闪烁。调查员在约十平方米、墙壁刷着银漆的房间里醒来，失去这段时间的记忆，手脚都被细绳捆住；房内有单人床、挂画、通风管、书桌、立式衣柜和带显示器的银白色房门。",
+      "entity_ids": [
+        "bindings",
+        "pencil_knife",
+        "bed",
+        "bed_key",
+        "cat_painting",
+        "painting_key",
+        "air_vent",
+        "rat_thing",
+        "vent_key",
+        "desk",
+        "initial_note",
+        "sketchbook",
+        "flashlight",
+        "warning_note",
+        "white_paper",
+        "temporal_drawer",
+        "wardrobe",
+        "cat_bast",
+        "door_monitor",
+        "silver_door",
+        "silver_lock"
+      ],
+      "checkpoint_ids": [
+        "inspect_bed",
+        "cut_bindings",
+        "look_under_bed",
+        "move_bed",
+        "inspect_cat_painting",
+        "listen_at_vent",
+        "inspect_vent_with_flashlight",
+        "unlock_top_drawer",
+        "tear_flashlight_page",
+        "draw_simple_item",
+        "unlock_middle_drawer",
+        "unlock_bottom_drawer",
+        "exchange_note_with_bast",
+        "listen_at_wardrobe",
+        "cut_wardrobe_chain",
+        "rescue_bast",
+        "feed_bast",
+        "inspect_door_monitor",
+        "listen_at_silver_door",
+        "ask_bast_to_open_door"
+      ],
+      "exits": ["corridor"]
+    },
+    {
+      "id": "corridor",
+      "name": "银锁长廊",
+      "content": "银白色房门外是一条长廊，左手尽头有一扇透着光的门。调查员向前走一小段就会触及银之锁的范围边缘；绑架者会在倒地后从身后持匕首走来。",
+      "entity_ids": [
+        "cat_bast",
+        "silver_lock",
+        "kidnapper",
+        "kidnapper_dagger",
+        "bright_exit"
+      ],
+      "checkpoint_ids": [
+        "spot_approaching_kidnapper",
+        "escape_through_bright_door"
+      ],
+      "exits": ["sealed_room", "outside"]
+    },
+    {
+      "id": "outside",
+      "name": "银之锁范围之外",
+      "content": "长廊尽头的门通往束缚范围之外。只有银之锁解除后，调查员才真正获得自由。",
+      "entity_ids": [],
+      "checkpoint_ids": [],
+      "exits": []
+    }
+  ],
+  "entities": [
+    {
+      "id": "bindings",
+      "kind": "object",
+      "name": "手脚上的细绳",
+      "aliases": ["绳索", "细绳", "束缚"],
+      "content": "看起来很细，却无法仅凭蛮力挣断的绳索，把调查员的手脚紧紧捆住。",
+      "state": {
+        "removed": false
+      },
+      "refuse_ops": ["break"],
+      "blocked_text": "细绳勒得更紧了，单靠力量无法挣断。"
+    },
+    {
+      "id": "pencil_knife",
+      "kind": "object",
+      "name": "铅笔刀",
+      "aliases": ["随身铅笔刀", "小刀"],
+      "content": "调查员醒来后唯一没有被拿走的随身物品。",
+      "state": {
+        "available": true
+      }
+    },
+    {
+      "id": "bed",
+      "kind": "object",
+      "name": "单人床",
+      "aliases": ["床", "木床"],
+      "content": "调查员醒来时正倒在这张单人床上。",
+      "secrets": "床角包裹的铁皮翻起了锋利边缘；床下墙角掉着一把钥匙，手够不到，需要移动床或采用其他办法。",
+      "state": {
+        "sharp_corner_found": false,
+        "under_bed_key_seen": false,
+        "moved": false
+      }
+    },
+    {
+      "id": "bed_key",
+      "kind": "object",
+      "name": "床底钥匙",
+      "aliases": ["中间抽屉钥匙", "墙角钥匙"],
+      "content": "掉在床下墙角、徒手够不到的一把小钥匙。",
+      "secrets": "可以打开书桌中间的抽屉。",
+      "state": {
+        "found": false
+      }
+    },
+    {
+      "id": "cat_painting",
+      "kind": "object",
+      "name": "猫与桂花糯米糖粥挂画",
+      "aliases": ["挂画", "大画", "猫画"],
+      "content": "书桌对面的墙上挂着一幅很大的画，上面画着一只猫和一碗桂花糯米糖粥。",
+      "secrets": "挂画不能取下；掀开后可看见墙内暗格与一把钥匙。",
+      "state": {
+        "compartment_found": false
+      }
+    },
+    {
+      "id": "painting_key",
+      "kind": "object",
+      "name": "挂画暗格钥匙",
+      "aliases": ["上层抽屉钥匙", "暗格钥匙"],
+      "content": "藏在挂画后墙面暗格中的一把钥匙。",
+      "secrets": "可以打开书桌最上面的抽屉。",
+      "state": {
+        "found": false
+      }
+    },
+    {
+      "id": "air_vent",
+      "kind": "location",
+      "name": "天花板通风管",
+      "aliases": ["通风管", "管道口"],
+      "content": "天花板上的通风管道很高，即使站在椅子上也难以爬进去。",
+      "secrets": "人面鼠躲在里面监视调查员，管道口还有一枚小钥匙。普通聆听听见风声，困难成功会听见无法解释的声音。",
+      "state": {
+        "strange_sound_heard": false,
+        "rat_seen": false,
+        "key_seen": false
+      }
+    },
+    {
+      "id": "rat_thing",
+      "kind": "npc",
+      "name": "人面鼠",
+      "aliases": ["怪鼠", "通风管里的东西"],
+      "content": "土黄色、形似老鼠的生物，细小前爪像猴子，头部却是一张长着黄色獠牙的微缩人脸。",
+      "secrets": "它在通风管里监视调查员。强行扯下它会让调查员额外损失 1d3 HP；其攻击伤害 1d4-2，闪避 45，潜行 75，聆听 50。",
+      "state": {
+        "hidden": true,
+        "pulled_down": false
+      }
+    },
+    {
+      "id": "vent_key",
+      "kind": "object",
+      "name": "通风管钥匙",
+      "aliases": ["下层抽屉钥匙", "管道口钥匙"],
+      "content": "放在通风管口的一枚小钥匙，需要光源才能可靠发现。",
+      "secrets": "可以打开书桌最下面的抽屉。",
+      "state": {
+        "found": false
+      }
+    },
+    {
+      "id": "desk",
+      "kind": "object",
+      "name": "原木书桌与三个抽屉",
+      "aliases": ["书桌", "抽屉"],
+      "content": "原木书桌有三个均被锁住的抽屉，桌面放着一张被铅笔压住的字条。",
+      "secrets": "挂画钥匙开上层抽屉，床底钥匙开中层抽屉，通风管钥匙开下层抽屉。",
+      "state": {
+        "top_drawer_open": false,
+        "middle_drawer_open": false,
+        "bottom_drawer_open": false
+      }
+    },
+    {
+      "id": "initial_note",
+      "kind": "object",
+      "name": "桌面字条",
+      "aliases": ["铅笔压着的字条", "第一张字条"],
+      "content": "字条写着：“不要妄想离开这里了，你已经被［锁住］了。”",
+      "information_item_ids": ["initial_lock_warning"],
+      "state": {
+        "read": false
+      },
+      "direct_responses": {
+        "read": "不要妄想离开这里了，你已经被［锁住］了。"
+      }
+    },
+    {
+      "id": "sketchbook",
+      "kind": "object",
+      "name": "剩下四页的速写本",
+      "aliases": ["速写本", "手写本", "画本"],
+      "content": "一本只剩四页的速写本，中间夹着写有“用法：撕下。请节约使用”的纸条；第一页画着一柄手电。",
+      "secrets": "从纸上撕下的无生命物会实体化，但必须是能够用平面表现出构造的简单物品。原文建议钢钳与桂花糯米糖粥。",
+      "information_item_ids": ["sketchbook_rule"],
+      "state": {
+        "obtained": false,
+        "pages_remaining": 4,
+        "flashlight_page_present": true
+      }
+    },
+    {
+      "id": "flashlight",
+      "kind": "object",
+      "name": "速写本手电",
+      "aliases": ["手电", "手电筒"],
+      "content": "撕下速写本第一页后实体化的一柄手电。",
+      "state": {
+        "manifested": false
+      }
+    },
+    {
+      "id": "warning_note",
+      "kind": "object",
+      "name": "危险警告字条",
+      "aliases": ["第二张字条", "中层抽屉字条"],
+      "content": "字条写着：“当你以为安全的时候，就是你最危险的时候。”",
+      "information_item_ids": ["corridor_danger_warning"],
+      "state": {
+        "found": false,
+        "read": false
+      },
+      "direct_responses": {
+        "read": "当你以为安全的时候，就是你最危险的时候。"
+      }
+    },
+    {
+      "id": "white_paper",
+      "kind": "object",
+      "name": "空白纸",
+      "aliases": ["白纸", "交流纸"],
+      "content": "放在书桌中间抽屉里的一张白纸。",
+      "secrets": "救出芭斯特后，可以把纸放进时空抽屉与她交流；若没有拿到，可以用一页速写本替代。",
+      "state": {
+        "obtained": false,
+        "message_sent": false
+      }
+    },
+    {
+      "id": "temporal_drawer",
+      "kind": "object",
+      "name": "临时时空箱抽屉",
+      "aliases": ["下层抽屉", "时空箱"],
+      "content": "书桌最下面的抽屉。放入物品后关上，物品会消失；再次打开时，可能出现另一端放入的东西。",
+      "secrets": "这是一个临时构建的时空箱，能够让调查员通过纸张与获救的芭斯特交流。",
+      "state": {
+        "active": false,
+        "bast_contacted": false
+      }
+    },
+    {
+      "id": "wardrobe",
+      "kind": "object",
+      "name": "锁链衣柜",
+      "aliases": ["立式衣柜", "衣柜", "锁链"],
+      "content": "柜门带有漂亮花纹的立式衣柜，门把手上缠着手指粗的锁链。",
+      "secrets": "里面传来呻吟与沙沙声；剪开锁链后会发现口和四肢都被封住的猫芭斯特。",
+      "state": {
+        "sound_heard": false,
+        "chain_cut": false,
+        "opened": false
+      },
+      "refuse_ops": ["open"],
+      "blocked_text": "手指粗的锁链把柜门牢牢缠住。"
+    },
+    {
+      "id": "cat_bast",
+      "kind": "npc",
+      "name": "芭斯特",
+      "aliases": ["猫", "衣柜里的猫"],
+      "content": "被关在衣柜里、口和四肢都被封住的一只猫。",
+      "secrets": "银之锁以活着的芭斯特为核心束缚调查员。获救后她可通过时空抽屉给出提示并帮助开门；糖粥会让她信任并跟随调查员。进入长廊后她会扑向绑架者、抓瞎其双眼，随后被匕首杀死，银之锁因此解除。",
+      "information_item_ids": ["silver_lock_principle"],
+      "state": {
+        "alive": true,
+        "rescued": false,
+        "fed": false,
+        "following": false,
+        "sacrificed_in_corridor": false
+      }
+    },
+    {
+      "id": "door_monitor",
+      "kind": "object",
+      "name": "房门显示器",
+      "aliases": ["门铃显示器", "监控屏"],
+      "content": "与门铃配套的显示器，可以查看房门外的情况。",
+      "secrets": "第一次观察会看到一个站在门口的鬼魂虚影，触发 SAN 1/1d3。",
+      "state": {
+        "ghost_seen": false
+      }
+    },
+    {
+      "id": "silver_door",
+      "kind": "object",
+      "name": "银白色金属房门",
+      "aliases": ["房门", "银色门", "不锈钢门"],
+      "content": "银白色、看起来像不锈钢制成的房门。",
+      "secrets": "原文没有房门钥匙。救出芭斯特后，她会帮助调查员打开房门。",
+      "state": {
+        "opened": false
+      },
+      "refuse_ops": ["open"],
+      "blocked_text": "银白色房门没有可供普通钥匙开启的锁孔。"
+    },
+    {
+      "id": "silver_lock",
+      "kind": "object",
+      "name": "银之锁法术",
+      "aliases": ["银之锁", "区域束缚"],
+      "content": "一种把调查员限制在房间与长廊局部范围内的无形束缚。",
+      "secrets": "法术以活着的芭斯特为核心。触及范围边缘时，调查员左脚踝会被锁住并向前摔倒；核心死亡后法术解除。",
+      "information_item_ids": ["silver_lock_principle"],
+      "state": {
+        "active": true,
+        "boundary_triggered": false
+      }
+    },
+    {
+      "id": "kidnapper",
+      "kind": "npc",
+      "name": "绑架者",
+      "aliases": ["绑架调查员的人", "持匕首的 NPC"],
+      "content": "调查员在长廊倒地后从身后走来的持匕首者。",
+      "secrets": "这是属性整体高于调查员的 NPC，并非通风管里的人面鼠。若芭斯特未获救，调查员会被重新抓回房间；若芭斯特在场，她会抓瞎绑架者，而绑架者会用匕首杀死她。",
+      "state": {
+        "alive": true,
+        "blinded": false,
+        "approached": false
+      }
+    },
+    {
+      "id": "kidnapper_dagger",
+      "kind": "object",
+      "name": "绑架者的匕首",
+      "aliases": ["匕首", "绑架者武器"],
+      "content": "绑架者手中握着的匕首。银之锁解除后，调查员可以设法夺取它反击。",
+      "state": {
+        "available_to_player": false
+      }
+    },
+    {
+      "id": "bright_exit",
+      "kind": "location",
+      "name": "长廊尽头的亮门",
+      "aliases": ["出口", "透光的门"],
+      "content": "长廊左手尽头透出光亮的门，位于银之锁束缚范围之外。",
+      "state": {
+        "reached": false
+      }
+    },
+    {
+      "id": "escape_tracker",
+      "kind": "object",
+      "name": "逃脱进程",
+      "aliases": [],
+      "content": "用于记录银色房间逃脱过程的运行时状态。",
+      "secrets": "运行时状态容器，不作为场景内可见物体。",
+      "state": {
+        "corridor_entered": false,
+        "recaptured_count": 0,
+        "escaped": false
+      }
+    }
+  ],
+  "checkpoints": [
+    {
+      "id": "inspect_bed",
+      "scene_id": "sealed_room",
+      "action": "observe",
+      "target_id": "bed",
+      "skills": ["spot-hidden"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": ["调查员发现床角翻起的锋利铁皮"],
+          "player_visible_information": [
+            {
+              "text": "床角包着的铁皮翻起一片锋利边缘，足以割断细绳。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.bed.state.sharp_corner_found",
+              "value": true
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["调查员没有发现床角的锋利铁皮"],
+          "player_visible_information": [
+            {
+              "text": "你暂时没在床边找到能割绳的东西。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": []
+        }
+      }
+    },
+    {
+      "id": "cut_bindings",
+      "scene_id": "sealed_room",
+      "action": "cut",
+      "target_id": "bindings",
+      "skills": [],
+      "difficulty": null,
+      "outcomes": {
+        "success": {
+          "facts": ["调查员割断手脚上的细绳"],
+          "player_visible_information": [
+            {
+              "text": "细绳被锋利边缘或铅笔刀一点点割断，你终于能自由活动。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": ["必须已经找到床角锋利铁皮，或使用醒来时仍随身携带的铅笔刀。"],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.bindings.state.removed",
+              "value": true
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["调查员尚无可行的割绳方法"],
+          "player_visible_information": [
+            {
+              "text": "你还没有把刀刃可靠地移到绳结旁。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": {
+        "audience": "actor",
+        "requires_discovery": true,
+        "discovery_rule": "entity.bed.state.sharp_corner_found == true || entity.pencil_knife.state.available == true",
+        "discovery_shares_to_party": false
+      }
+    },
+    {
+      "id": "look_under_bed",
+      "scene_id": "sealed_room",
+      "action": "observe",
+      "target_id": "bed",
+      "skills": ["spot-hidden"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": ["调查员看见床下墙角的钥匙"],
+          "player_visible_information": [
+            {
+              "text": "床下墙角躺着一把钥匙，但手伸不过去。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.bed.state.under_bed_key_seen",
+              "value": true
+            }
+          ]
+        },
+        "failure": {
+          "facts": [],
+          "player_visible_information": [],
+          "narration_constraints": [],
+          "ops": []
+        }
+      }
+    },
+    {
+      "id": "move_bed",
+      "scene_id": "sealed_room",
+      "action": "move",
+      "target_id": "bed",
+      "skills": ["STR"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": ["调查员移动床并取得床底钥匙"],
+          "player_visible_information": [
+            {
+              "text": "床被挪开，你终于捡到墙角的钥匙。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": ["玩家提出其他合理巧思时可以免检定取得钥匙。"],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.bed.state.moved",
+              "value": true
+            },
+            {
+              "op": "set",
+              "path": "entity.bed_key.state.found",
+              "value": true
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["调查员没能移动床"],
+          "player_visible_information": [
+            {
+              "text": "床脚摩擦地面，却没有移开足够距离。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": ["允许用非力量的合理办法取得钥匙。"],
+          "ops": []
+        }
+      },
+      "visibility": {
+        "audience": "all",
+        "requires_discovery": true,
+        "discovery_rule": "entity.bed.state.under_bed_key_seen == true",
+        "discovery_shares_to_party": true
+      }
+    },
+    {
+      "id": "inspect_cat_painting",
+      "scene_id": "sealed_room",
+      "action": "inspect",
+      "target_id": "cat_painting",
+      "skills": [],
+      "difficulty": null,
+      "outcomes": {
+        "success": {
+          "facts": ["调查员掀开挂画并取得暗格钥匙"],
+          "player_visible_information": [
+            {
+              "text": "挂画后藏着墙面暗格，里面放着一把小钥匙。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": ["挂画不可取下；若玩家没想到掀开，守秘人可给予提示。"],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.cat_painting.state.compartment_found",
+              "value": true
+            },
+            {
+              "op": "set",
+              "path": "entity.painting_key.state.found",
+              "value": true
+            }
+          ]
+        },
+        "failure": {
+          "facts": [],
+          "player_visible_information": [],
+          "narration_constraints": [],
+          "ops": []
+        }
+      }
+    },
+    {
+      "id": "listen_at_vent",
+      "scene_id": "sealed_room",
+      "action": "listen",
+      "target_id": "air_vent",
+      "skills": ["listen"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": ["调查员听到通风管里的风声"],
+          "player_visible_information": [
+            {
+              "text": "通风管里传来持续的风声。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": []
+        },
+        "failure": {
+          "facts": ["调查员没有听清管道里的声音"],
+          "player_visible_information": [],
+          "narration_constraints": [],
+          "ops": []
+        },
+        "hard_success": {
+          "facts": ["调查员听见风声之外的神秘动静"],
+          "player_visible_information": [
+            {
+              "text": "风声深处还夹着某种无法解释的细小动静，像有什么东西正在里面呼吸。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.air_vent.state.strange_sound_heard",
+              "value": true
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "inspect_vent_with_flashlight",
+      "scene_id": "sealed_room",
+      "action": "illuminate",
+      "target_id": "air_vent",
+      "skills": ["spot-hidden"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": ["调查员看到人面鼠和通风管钥匙"],
+          "player_visible_information": [
+            {
+              "text": "光束照出一只有猴爪、人脸和黄色獠牙的怪鼠；管道口还放着一枚小钥匙。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": ["目击人面鼠触发 SAN 0/1d6。"],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.air_vent.state.rat_seen",
+              "value": true
+            },
+            {
+              "op": "set",
+              "path": "entity.air_vent.state.key_seen",
+              "value": true
+            },
+            {
+              "op": "set",
+              "path": "entity.rat_thing.state.hidden",
+              "value": false
+            },
+            {
+              "op": "set",
+              "path": "entity.vent_key.state.found",
+              "value": true
+            },
+            {
+              "op": "force",
+              "action": "coc7.san_check(0,1d6)"
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["光线没有照清通风管深处"],
+          "player_visible_information": [
+            {
+              "text": "光束在狭窄管道中晃动，你没有看清里面有什么。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": {
+        "audience": "actor",
+        "requires_discovery": true,
+        "discovery_rule": "entity.flashlight.state.manifested == true",
+        "discovery_shares_to_party": false
+      }
+    },
+    {
+      "id": "unlock_top_drawer",
+      "scene_id": "sealed_room",
+      "action": "unlock",
+      "target_id": "desk",
+      "skills": [],
+      "difficulty": null,
+      "outcomes": {
+        "success": {
+          "facts": ["调查员用挂画钥匙打开上层抽屉并取得速写本"],
+          "player_visible_information": [
+            {
+              "text": "上层抽屉里只有一本剩下四页的速写本，夹条写着：“用法：撕下。请节约使用。”",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.desk.state.top_drawer_open",
+              "value": true
+            },
+            {
+              "op": "set",
+              "path": "entity.sketchbook.state.obtained",
+              "value": true
+            }
+          ]
+        },
+        "failure": {
+          "facts": [],
+          "player_visible_information": [],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": {
+        "audience": "all",
+        "requires_discovery": true,
+        "discovery_rule": "entity.painting_key.state.found == true",
+        "discovery_shares_to_party": true
+      }
+    },
+    {
+      "id": "tear_flashlight_page",
+      "scene_id": "sealed_room",
+      "action": "tear",
+      "target_id": "sketchbook",
+      "skills": [],
+      "difficulty": null,
+      "outcomes": {
+        "success": {
+          "facts": ["速写本第一页的手电实体化"],
+          "player_visible_information": [
+            {
+              "text": "画着手电的纸离开本子后，图画像有重量般落入手中，变成一柄真正的手电。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": [
+            {
+              "op": "add",
+              "path": "entity.sketchbook.state.pages_remaining",
+              "value": -1
+            },
+            {
+              "op": "set",
+              "path": "entity.sketchbook.state.flashlight_page_present",
+              "value": false
+            },
+            {
+              "op": "set",
+              "path": "entity.flashlight.state.manifested",
+              "value": true
+            }
+          ]
+        },
+        "failure": {
+          "facts": [],
+          "player_visible_information": [],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": {
+        "audience": "all",
+        "requires_discovery": true,
+        "discovery_rule": "entity.sketchbook.state.obtained == true && entity.sketchbook.state.flashlight_page_present == true",
+        "discovery_shares_to_party": true
+      }
+    },
+    {
+      "id": "draw_simple_item",
+      "scene_id": "sealed_room",
+      "action": "draw",
+      "target_id": "sketchbook",
+      "skills": [],
+      "difficulty": null,
+      "outcomes": {
+        "success": {
+          "facts": ["调查员用一页速写本实体化了符合规则的物品"],
+          "player_visible_information": [
+            {
+              "text": "纸上的简单物品在被撕下后获得了重量与质感，成为真正可以使用的东西。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": [
+            "只允许无生命、能够用平面图表现构造的简单物品。",
+            "原文推荐钢钳或桂花糯米糖粥；其他物品由守秘人裁量。",
+            "速写本没有足够页数时不得执行。"
+          ],
+          "ops": [
+            {
+              "op": "add",
+              "path": "entity.sketchbook.state.pages_remaining",
+              "value": -1
+            },
+            {
+              "op": "force",
+              "action": "materialize_keeper_approved_drawn_item"
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["所画物品不符合速写本的实体化规则"],
+          "player_visible_information": [
+            {
+              "text": "纸张没有发生变化；这个物品无法由简单平面结构表现。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": ["失败是否消耗纸页由守秘人依据玩家是否已经撕下决定。"],
+          "ops": []
+        }
+      },
+      "visibility": {
+        "audience": "all",
+        "requires_discovery": true,
+        "discovery_rule": "entity.sketchbook.state.obtained == true && entity.sketchbook.state.pages_remaining > 0",
+        "discovery_shares_to_party": true
+      }
+    },
+    {
+      "id": "unlock_middle_drawer",
+      "scene_id": "sealed_room",
+      "action": "unlock",
+      "target_id": "desk",
+      "skills": [],
+      "difficulty": null,
+      "outcomes": {
+        "success": {
+          "facts": ["调查员取得危险警告字条和白纸"],
+          "player_visible_information": [
+            {
+              "text": "中层抽屉里有一张白纸和一句警告：“当你以为安全的时候，就是你最危险的时候。”",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.desk.state.middle_drawer_open",
+              "value": true
+            },
+            {
+              "op": "set",
+              "path": "entity.warning_note.state.found",
+              "value": true
+            },
+            {
+              "op": "set",
+              "path": "entity.white_paper.state.obtained",
+              "value": true
+            }
+          ]
+        },
+        "failure": {
+          "facts": [],
+          "player_visible_information": [],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": {
+        "audience": "all",
+        "requires_discovery": true,
+        "discovery_rule": "entity.bed_key.state.found == true",
+        "discovery_shares_to_party": true
+      }
+    },
+    {
+      "id": "unlock_bottom_drawer",
+      "scene_id": "sealed_room",
+      "action": "unlock",
+      "target_id": "temporal_drawer",
+      "skills": [],
+      "difficulty": null,
+      "outcomes": {
+        "success": {
+          "facts": ["调查员打开并确认下层抽屉是临时时空箱"],
+          "player_visible_information": [
+            {
+              "text": "放进抽屉的东西会在关闭后消失；再次拉开时，另一端似乎也能把东西送回来。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.desk.state.bottom_drawer_open",
+              "value": true
+            },
+            {
+              "op": "set",
+              "path": "entity.temporal_drawer.state.active",
+              "value": true
+            }
+          ]
+        },
+        "failure": {
+          "facts": [],
+          "player_visible_information": [],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": {
+        "audience": "all",
+        "requires_discovery": true,
+        "discovery_rule": "entity.vent_key.state.found == true",
+        "discovery_shares_to_party": true
+      }
+    },
+    {
+      "id": "exchange_note_with_bast",
+      "scene_id": "sealed_room",
+      "action": "communicate",
+      "target_id": "temporal_drawer",
+      "skills": [],
+      "difficulty": null,
+      "outcomes": {
+        "success": {
+          "facts": ["芭斯特通过时空抽屉向调查员提供提示", "silver_lock_principle"],
+          "player_visible_information": [
+            {
+              "text": "纸张从抽屉另一端回来，上面多了芭斯特的答复；最后几行刚提到“银之锁”就被干扰截断。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": [
+            "守秘人可以借芭斯特之口提供合理提示。",
+            "原文允许提示杀死猫就能解除银之锁，但建议谨慎用于养猫角色。"
+          ],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.white_paper.state.message_sent",
+              "value": true
+            },
+            {
+              "op": "set",
+              "path": "entity.temporal_drawer.state.bast_contacted",
+              "value": true
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["时空抽屉另一端没有传回答复"],
+          "player_visible_information": [
+            {
+              "text": "纸张消失了，但这一次没有东西返回。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": {
+        "audience": "actor",
+        "requires_discovery": true,
+        "discovery_rule": "entity.temporal_drawer.state.active == true && entity.cat_bast.state.rescued == true && (entity.white_paper.state.obtained == true || entity.sketchbook.state.pages_remaining > 0)",
+        "discovery_shares_to_party": false
+      }
+    },
+    {
+      "id": "listen_at_wardrobe",
+      "scene_id": "sealed_room",
+      "action": "listen",
+      "target_id": "wardrobe",
+      "skills": ["listen"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": ["调查员听见衣柜中的呻吟和沙沙声"],
+          "player_visible_information": [
+            {
+              "text": "锁链后的衣柜里传出微弱呻吟与抓挠般的沙沙声。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.wardrobe.state.sound_heard",
+              "value": true
+            }
+          ]
+        },
+        "failure": {
+          "facts": [],
+          "player_visible_information": [],
+          "narration_constraints": [],
+          "ops": []
+        }
+      }
+    },
+    {
+      "id": "cut_wardrobe_chain",
+      "scene_id": "sealed_room",
+      "action": "cut",
+      "target_id": "wardrobe",
+      "skills": [],
+      "difficulty": null,
+      "outcomes": {
+        "success": {
+          "facts": ["调查员剪断衣柜锁链并发现被封住的猫"],
+          "player_visible_information": [
+            {
+              "text": "钢钳剪断锁链。衣柜里蜷缩着一只口和四肢都被封住的猫。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": ["需要实体化钢钳或提出其他足以剪断手指粗锁链的合理方法。"],
+          "ops": [
+            {
+              "op": "allow",
+              "action": "open"
+            },
+            {
+              "op": "set",
+              "path": "entity.wardrobe.state.chain_cut",
+              "value": true
+            },
+            {
+              "op": "set",
+              "path": "entity.wardrobe.state.opened",
+              "value": true
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["现有工具不足以剪断锁链"],
+          "player_visible_information": [
+            {
+              "text": "手指粗的锁链没有被破坏。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": {
+        "audience": "all",
+        "requires_discovery": true,
+        "discovery_rule": "inventory.has('bolt_cutters') || action.proposes_equivalent_tool == true",
+        "discovery_shares_to_party": true
+      }
+    },
+    {
+      "id": "rescue_bast",
+      "scene_id": "sealed_room",
+      "action": "rescue",
+      "target_id": "cat_bast",
+      "skills": [],
+      "difficulty": null,
+      "outcomes": {
+        "success": {
+          "facts": ["调查员解开芭斯特口部与四肢的束缚"],
+          "player_visible_information": [
+            {
+              "text": "猫终于能活动和发声。她警惕地看着你，却没有逃开。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.cat_bast.state.rescued",
+              "value": true
+            }
+          ]
+        },
+        "failure": {
+          "facts": [],
+          "player_visible_information": [],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": {
+        "audience": "all",
+        "requires_discovery": true,
+        "discovery_rule": "entity.wardrobe.state.opened == true",
+        "discovery_shares_to_party": true
+      }
+    },
+    {
+      "id": "feed_bast",
+      "scene_id": "sealed_room",
+      "action": "feed",
+      "target_id": "cat_bast",
+      "skills": [],
+      "difficulty": null,
+      "outcomes": {
+        "success": {
+          "facts": ["桂花糯米糖粥取得芭斯特信任"],
+          "player_visible_information": [
+            {
+              "text": "芭斯特吃下糖粥后不再戒备，开始主动跟着你。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": ["必须先用速写本实体化挂画中出现的桂花糯米糖粥。"],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.cat_bast.state.fed",
+              "value": true
+            },
+            {
+              "op": "set",
+              "path": "entity.cat_bast.state.following",
+              "value": true
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["调查员没有合适食物取得猫的信任"],
+          "player_visible_information": [
+            {
+              "text": "芭斯特没有接受你拿出的东西。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": {
+        "audience": "all",
+        "requires_discovery": true,
+        "discovery_rule": "entity.cat_bast.state.rescued == true && inventory.has('osmanthus_glutinous_rice_porridge')",
+        "discovery_shares_to_party": true
+      }
+    },
+    {
+      "id": "inspect_door_monitor",
+      "scene_id": "sealed_room",
+      "action": "observe",
+      "target_id": "door_monitor",
+      "skills": [],
+      "difficulty": null,
+      "outcomes": {
+        "success": {
+          "facts": ["调查员第一次查看显示器时看到门外鬼魂虚影"],
+          "player_visible_information": [
+            {
+              "text": "显示器里，一个鬼魂般的虚影正站在房门外。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": ["第一次观察触发 SAN 1/1d3；后续观察不重复触发。"],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.door_monitor.state.ghost_seen",
+              "value": true
+            },
+            {
+              "op": "force",
+              "action": "coc7.san_check(1,1d3)"
+            }
+          ]
+        },
+        "failure": {
+          "facts": [],
+          "player_visible_information": [],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": {
+        "audience": "actor",
+        "requires_discovery": true,
+        "discovery_rule": "entity.door_monitor.state.ghost_seen == false",
+        "discovery_shares_to_party": false
+      }
+    },
+    {
+      "id": "listen_at_silver_door",
+      "scene_id": "sealed_room",
+      "action": "listen",
+      "target_id": "silver_door",
+      "skills": ["listen"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": ["调查员听见门外很远处传来人声"],
+          "player_visible_information": [
+            {
+              "text": "门外隐约有人说话，但声音像从很远的地方传来。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": []
+        },
+        "failure": {
+          "facts": [],
+          "player_visible_information": [],
+          "narration_constraints": [],
+          "ops": []
+        }
+      }
+    },
+    {
+      "id": "ask_bast_to_open_door",
+      "scene_id": "sealed_room",
+      "action": "open",
+      "target_id": "silver_door",
+      "skills": [],
+      "difficulty": null,
+      "outcomes": {
+        "success": {
+          "facts": ["获救的芭斯特帮助调查员打开银白色房门"],
+          "player_visible_information": [
+            {
+              "text": "芭斯特靠近房门，不知触动了什么，银白色门扉终于打开，露出外面的长廊。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": ["原文明确由获救的猫开门，不得改写成房门钥匙。"],
+          "ops": [
+            {
+              "op": "allow",
+              "action": "open"
+            },
+            {
+              "op": "set",
+              "path": "entity.silver_door.state.opened",
+              "value": true
+            },
+            {
+              "op": "set",
+              "path": "entity.escape_tracker.state.corridor_entered",
+              "value": true
+            },
+            {
+              "op": "transition",
+              "scene_id": "corridor"
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["没有芭斯特帮助，房门无法按此方法打开"],
+          "player_visible_information": [
+            {
+              "text": "银白色房门仍然封闭。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": {
+        "audience": "all",
+        "requires_discovery": true,
+        "discovery_rule": "entity.cat_bast.state.rescued == true",
+        "discovery_shares_to_party": true
+      }
+    },
+    {
+      "id": "spot_approaching_kidnapper",
+      "scene_id": "corridor",
+      "action": "observe",
+      "target_id": "kidnapper",
+      "skills": ["spot-hidden"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": ["调查员倒地后看见绑架者持匕首从身后走来"],
+          "player_visible_information": [
+            {
+              "text": "你回头看见绑架者手持匕首，正从银色房门方向一步步走近。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": ["绑架者属性高于 PC，但原文没有给出固定数值，不得编造 StatBlock。"],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.kidnapper.state.approached",
+              "value": true
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["调查员没有及时发现身后的绑架者"],
+          "player_visible_information": [
+            {
+              "text": "倒地的冲击让你没能立刻注意身后。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.kidnapper.state.approached",
+              "value": true
+            }
+          ]
+        }
+      },
+      "visibility": {
+        "audience": "actor",
+        "requires_discovery": true,
+        "discovery_rule": "entity.silver_lock.state.boundary_triggered == true",
+        "discovery_shares_to_party": false
+      }
+    },
+    {
+      "id": "escape_through_bright_door",
+      "scene_id": "corridor",
+      "action": "escape",
+      "target_id": "bright_exit",
+      "skills": [],
+      "difficulty": null,
+      "outcomes": {
+        "success": {
+          "facts": ["调查员在银之锁解除后逃出长廊"],
+          "player_visible_information": [
+            {
+              "text": "脚踝上的无形束缚已经消失。你冲向亮门，终于离开了这片银色牢笼。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.bright_exit.state.reached",
+              "value": true
+            },
+            {
+              "op": "set",
+              "path": "entity.escape_tracker.state.escaped",
+              "value": true
+            },
+            {
+              "op": "transition",
+              "scene_id": "outside"
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["银之锁仍在阻止调查员接近出口"],
+          "player_visible_information": [
+            {
+              "text": "左脚踝再次被无形力量锁住，你无法接近亮门。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": {
+        "audience": "all",
+        "requires_discovery": true,
+        "discovery_rule": "entity.silver_lock.state.active == false",
+        "discovery_shares_to_party": true
+      }
+    }
+  ],
+  "win_conditions": [
+    {
+      "id": "ending_escape",
+      "when": {
+        "path": "entity.escape_tracker.state.escaped",
+        "equals": true
+      },
+      "fact": "调查员在芭斯特牺牲、银之锁解除后逃出长廊",
+      "player_visible_information": "银之锁的束缚已经消失。你穿过长廊尽头的亮门，终于重获自由。",
+      "is_ending": true
+    },
+    {
+      "id": "ending_kidnapper_killed",
+      "when": {
+        "expr": "entity.silver_lock.state.active == false && entity.kidnapper.state.alive == false"
+      },
+      "fact": "调查员在银之锁解除后杀死绑架者",
+      "player_visible_information": "芭斯特的牺牲让银之锁碎裂。你夺取匕首结束了绑架者的威胁，通往外界的路已经打开。",
+      "is_ending": true
+    }
+  ],
+  "module_rules": [
+    {
+      "id": "pulling_rat_thing_causes_injury",
+      "hook": "on_interact",
+      "priority": 120,
+      "mode": "override",
+      "when": {
+        "expr": "action.target_id == 'rat_thing' && action.type == 'pull_down'"
+      },
+      "then": [
+        {
+          "op": "set",
+          "path": "entity.rat_thing.state.pulled_down",
+          "value": true
+        },
+        {
+          "op": "force",
+          "action": "coc7.hp_loss(1d3)"
+        },
+        {
+          "op": "force",
+          "action": "rat_thing_attack(1d4-2)"
+        }
+      ],
+      "facts": ["调查员强行扯下人面鼠并额外受伤"],
+      "player_visible_information": [
+        {
+          "text": "你强行把人面鼠从管道里扯下，尖锐边缘和怪物的挣扎立刻撕伤了你。",
+          "visibility": {"audience": "actor"}
+        }
+      ]
+    },
+    {
+      "id": "silver_lock_trips_at_boundary",
+      "hook": "on_scene_enter",
+      "priority": 200,
+      "mode": "append",
+      "when": {
+        "expr": "scene.id == 'corridor' && entity.silver_lock.state.active == true && entity.silver_lock.state.boundary_triggered == false"
+      },
+      "then": [
+        {
+          "op": "set",
+          "path": "entity.silver_lock.state.boundary_triggered",
+          "value": true
+        },
+        {
+          "op": "force",
+          "action": "trip_actor_at_silver_lock_boundary"
+        },
+        {
+          "op": "force",
+          "action": "keeper_remove_overpowered_equipment_if_applicable"
+        }
+      ],
+      "facts": ["调查员左脚踝在银之锁边缘被束缚并向前摔倒"],
+      "player_visible_information": [
+        {
+          "text": "刚走出一小段，左脚踝突然像被锁住一样停在原地，你整个人向前摔倒。",
+          "visibility": {"audience": "actor"}
+        }
+      ]
+    },
+    {
+      "id": "cat_attacks_kidnapper",
+      "hook": "on_state_change",
+      "priority": 180,
+      "mode": "append",
+      "when": {
+        "expr": "entity.silver_lock.state.boundary_triggered == true && entity.cat_bast.state.alive == true && entity.cat_bast.state.rescued == true && entity.kidnapper.state.blinded == false"
+      },
+      "then": [
+        {
+          "op": "set",
+          "path": "entity.kidnapper.state.blinded",
+          "value": true
+        },
+        {
+          "op": "trigger_rule",
+          "rule_id": "kidnapper_kills_bast"
+        }
+      ],
+      "facts": ["芭斯特跳到绑架者脸上抓瞎其双眼"],
+      "player_visible_information": [
+        {
+          "text": "芭斯特突然跃上绑架者的脸，利爪划过双眼，惨叫声在长廊中炸开。",
+          "visibility": {"audience": "all"}
+        }
+      ]
+    },
+    {
+      "id": "kidnapper_kills_bast",
+      "hook": "on_state_change",
+      "priority": 170,
+      "mode": "append",
+      "when": {
+        "expr": "entity.kidnapper.state.blinded == true && entity.cat_bast.state.alive == true"
+      },
+      "then": [
+        {
+          "op": "set",
+          "path": "entity.cat_bast.state.sacrificed_in_corridor",
+          "value": true
+        },
+        {
+          "op": "set",
+          "path": "entity.cat_bast.state.alive",
+          "value": false
+        },
+        {
+          "op": "set",
+          "path": "entity.kidnapper_dagger.state.available_to_player",
+          "value": true
+        },
+        {
+          "op": "trigger_rule",
+          "rule_id": "silver_lock_dissolves"
+        }
+      ],
+      "facts": ["绑架者用匕首杀死芭斯特"],
+      "player_visible_information": [
+        {
+          "text": "失明的绑架者疯狂挥动匕首。芭斯特的叫声戛然而止，鲜血落在银色地面上。",
+          "visibility": {"audience": "all"}
+        }
+      ]
+    },
+    {
+      "id": "silver_lock_dissolves",
+      "hook": "on_state_change",
+      "priority": 160,
+      "mode": "append",
+      "when": {
+        "expr": "entity.cat_bast.state.alive == false && entity.silver_lock.state.active == true"
+      },
+      "then": [
+        {
+          "op": "set",
+          "path": "entity.silver_lock.state.active",
+          "value": false
+        }
+      ],
+      "facts": ["作为法术核心的芭斯特死亡，银之锁解除"],
+      "player_visible_information": [
+        {
+          "text": "芭斯特停止呼吸的瞬间，锁住脚踝的无形力量彻底消失了。",
+          "visibility": {"audience": "all"}
+        }
+      ]
+    },
+    {
+      "id": "kidnapper_recaptures_unprotected_actor",
+      "hook": "on_state_change",
+      "priority": 150,
+      "mode": "append",
+      "when": {
+        "expr": "entity.silver_lock.state.boundary_triggered == true && entity.silver_lock.state.active == true && (entity.cat_bast.state.rescued == false || (entity.cat_bast.state.alive == false && entity.cat_bast.state.sacrificed_in_corridor == false))"
+      },
+      "then": [
+        {
+          "op": "add",
+          "path": "entity.escape_tracker.state.recaptured_count",
+          "value": 1
+        },
+        {
+          "op": "set",
+          "path": "entity.silver_lock.state.boundary_triggered",
+          "value": false
+        },
+        {
+          "op": "set",
+          "path": "entity.silver_door.state.opened",
+          "value": false
+        },
+        {
+          "op": "transition",
+          "scene_id": "sealed_room"
+        },
+        {
+          "op": "force",
+          "action": "reset_room_attempt"
+        }
+      ],
+      "facts": ["没有芭斯特保护时，绑架者把调查员重新抓回房间"],
+      "player_visible_information": [
+        {
+          "text": "绑架者轻易制服了倒地的你。再次恢复意识时，你又回到了那间银色房间。",
+          "visibility": {"audience": "actor"}
+        }
+      ]
+    },
+    {
+      "id": "record_kidnapper_death",
+      "hook": "on_death",
+      "priority": 100,
+      "mode": "append",
+      "when": {
+        "expr": "target.id == 'kidnapper'"
+      },
+      "then": [
+        {
+          "op": "set",
+          "path": "entity.kidnapper.state.alive",
+          "value": false
+        }
+      ],
+      "facts": ["调查员杀死绑架者"],
+      "player_visible_information": [
+        {
+          "text": "绑架者倒在长廊中，再也无法阻止你离开。",
+          "visibility": {"audience": "all"}
+        }
+      ]
+    }
+  ],
+  "information_items": [
+    {
+      "id": "initial_lock_warning",
+      "content": "桌面字条写着：“不要妄想离开这里了，你已经被［锁住］了。”",
+      "visibility": {"audience": "keeper"}
+    },
+    {
+      "id": "sketchbook_rule",
+      "content": "速写本撕下的画页能把无生命物实体化，但物品必须是可以用平面表现构造的简单物品；全本只剩四页。",
+      "visibility": {"audience": "keeper"}
+    },
+    {
+      "id": "corridor_danger_warning",
+      "content": "中间抽屉的字条警告：“当你以为安全的时候，就是你最危险的时候。”",
+      "visibility": {"audience": "keeper"}
+    },
+    {
+      "id": "silver_lock_principle",
+      "content": "银之锁以活着的芭斯特为核心，把调查员束缚在特定区域；核心死亡时法术解除。",
+      "visibility": {"audience": "keeper"}
+    }
+  ]
+}

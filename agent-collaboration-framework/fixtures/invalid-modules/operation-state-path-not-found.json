@@ -1,0 +1,31 @@
+{
+  "module_id": "invalid",
+  "version": "0.1.0",
+  "world_ref": "coc-7e",
+  "background": "无效模组测试背景。",
+  "scenes": [
+    {"id": "room", "name": "Room", "content": "", "entity_ids": ["target"], "checkpoint_ids": ["check"]}
+  ],
+  "entities": [
+    {"id": "target", "kind": "object", "name": "Target", "content": ""}
+  ],
+  "checkpoints": [
+    {
+      "id": "check",
+      "scene_id": "room",
+      "action": "inspect",
+      "target_id": "target",
+      "skills": ["spot-hidden"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "ops": [
+            {"op": "modify", "path": "entities.target.missing", "set": true}
+          ]
+        },
+        "failure": {}
+      }
+    }
+  ],
+  "win_conditions": []
+}

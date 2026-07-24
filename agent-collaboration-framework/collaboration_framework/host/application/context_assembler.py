@@ -5,6 +5,9 @@ from collaboration_framework.host.schemas import IntentContext, NarrationContext
 
 
 class ContextAssembler:
+    def __init__(self, background: str) -> None:
+        self._background = background
+
     def for_intent(
         self,
         player_input: PlayerInput,
@@ -20,6 +23,7 @@ class ContextAssembler:
         player_view: PlayerView,
     ) -> NarrationContext:
         return NarrationContext(
+            background=self._background,
             player_input=player_input,
             intent=intent,
             action_result=action_result,

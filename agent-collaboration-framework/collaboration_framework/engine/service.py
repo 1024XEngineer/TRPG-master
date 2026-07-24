@@ -5,6 +5,7 @@ from __future__ import annotations
 from collaboration_framework.contracts import (
     ActionRequest,
     ActionResult,
+    CheckpointSpec,
     ContractError,
     PlayerInput,
     ProjectionCheckpointOption,
@@ -146,5 +147,17 @@ class RuleEngineService:
                 )
                 for checkpoint in module.checkpoints
                 if checkpoint.id in scene.checkpoint_ids
+                and RuleEngineService._checkpoint_is_visible(checkpoint)
             ),
         )
+
+    @staticmethod
+    def _checkpoint_is_visible(checkpoint: CheckpointSpec) -> bool:
+        """Conservative placeholder projection for the new visibility contract."""
+
+        policy = checkpoint.visibility
+        if policy is None:
+            return True
+        if policy.audience in {"keeper", "ho"}:
+            return False
+        return not policy.requires_discovery

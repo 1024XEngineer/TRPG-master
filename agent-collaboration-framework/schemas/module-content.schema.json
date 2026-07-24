@@ -2,6 +2,58 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "module-content.schema.json",
   "$defs": {
+    "AbsorbOperationSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "const": "absorb",
+          "default": "absorb",
+          "title": "Op",
+          "type": "string"
+        },
+        "amount": {
+          "minLength": 1,
+          "title": "Amount",
+          "type": "string"
+        },
+        "decrement": {
+          "minLength": 1,
+          "title": "Decrement",
+          "type": "string"
+        }
+      },
+      "required": [
+        "amount",
+        "decrement"
+      ],
+      "title": "AbsorbOperationSpec",
+      "type": "object"
+    },
+    "AddOperationSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "const": "add",
+          "default": "add",
+          "title": "Op",
+          "type": "string"
+        },
+        "path": {
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "value": {
+          "$ref": "#/$defs/JsonValue"
+        }
+      },
+      "required": [
+        "path",
+        "value"
+      ],
+      "title": "AddOperationSpec",
+      "type": "object"
+    },
     "AllowOperationSpec": {
       "additionalProperties": false,
       "properties": {
@@ -23,6 +75,27 @@
       "title": "AllowOperationSpec",
       "type": "object"
     },
+    "ApplyConditionSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "const": "apply_condition",
+          "default": "apply_condition",
+          "title": "Op",
+          "type": "string"
+        },
+        "condition": {
+          "minLength": 1,
+          "title": "Condition",
+          "type": "string"
+        }
+      },
+      "required": [
+        "condition"
+      ],
+      "title": "ApplyConditionSpec",
+      "type": "object"
+    },
     "CheckpointOutcomeSpec": {
       "additionalProperties": false,
       "properties": {
@@ -37,7 +110,7 @@
         "player_visible_information": {
           "default": [],
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/VisibleInformation"
           },
           "title": "Player Visible Information",
           "type": "array"
@@ -55,8 +128,18 @@
           "items": {
             "discriminator": {
               "mapping": {
+                "absorb": "#/$defs/AbsorbOperationSpec",
+                "add": "#/$defs/AddOperationSpec",
                 "allow": "#/$defs/AllowOperationSpec",
-                "modify": "#/$defs/ModifyOperationSpec"
+                "apply_condition": "#/$defs/ApplyConditionSpec",
+                "forbid": "#/$defs/ForbidOperationSpec",
+                "force": "#/$defs/ForceOperationSpec",
+                "modify": "#/$defs/ModifyOperationSpec",
+                "scale": "#/$defs/ScaleOperationSpec",
+                "set": "#/$defs/SetOperationSpec",
+                "transition": "#/$defs/TransitionSpec",
+                "trigger_ending": "#/$defs/TriggerEndingSpec",
+                "trigger_rule": "#/$defs/TriggerRuleSpec"
               },
               "propertyName": "op"
             },
@@ -66,6 +149,36 @@
               },
               {
                 "$ref": "#/$defs/ModifyOperationSpec"
+              },
+              {
+                "$ref": "#/$defs/SetOperationSpec"
+              },
+              {
+                "$ref": "#/$defs/ScaleOperationSpec"
+              },
+              {
+                "$ref": "#/$defs/AddOperationSpec"
+              },
+              {
+                "$ref": "#/$defs/AbsorbOperationSpec"
+              },
+              {
+                "$ref": "#/$defs/ForbidOperationSpec"
+              },
+              {
+                "$ref": "#/$defs/ForceOperationSpec"
+              },
+              {
+                "$ref": "#/$defs/ApplyConditionSpec"
+              },
+              {
+                "$ref": "#/$defs/TriggerEndingSpec"
+              },
+              {
+                "$ref": "#/$defs/TriggerRuleSpec"
+              },
+              {
+                "$ref": "#/$defs/TransitionSpec"
               }
             ]
           },
@@ -84,6 +197,61 @@
         },
         "failure": {
           "$ref": "#/$defs/CheckpointOutcomeSpec"
+        },
+        "critical_success": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CheckpointOutcomeSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "extreme_success": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CheckpointOutcomeSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "hard_success": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CheckpointOutcomeSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "regular_success": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CheckpointOutcomeSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "fumble": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CheckpointOutcomeSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -117,33 +285,43 @@
           "type": "string"
         },
         "skills": {
+          "default": [],
           "items": {
             "type": "string"
           },
-          "minItems": 1,
           "title": "Skills",
           "type": "array"
         },
         "difficulty": {
-          "enum": [
-            "regular",
-            "hard",
-            "extreme"
+          "anyOf": [
+            {
+              "enum": [
+                "regular",
+                "hard",
+                "extreme"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
           ],
-          "title": "Difficulty",
-          "type": "string"
-        },
-        "mvp_check_result": {
-          "default": "success",
-          "enum": [
-            "success",
-            "failure"
-          ],
-          "title": "Mvp Check Result",
-          "type": "string"
+          "default": null,
+          "title": "Difficulty"
         },
         "outcomes": {
           "$ref": "#/$defs/CheckpointOutcomesSpec"
+        },
+        "visibility": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/VisibilityPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -151,8 +329,6 @@
         "scene_id",
         "action",
         "target_id",
-        "skills",
-        "difficulty",
         "outcomes"
       ],
       "title": "CheckpointSpec",
@@ -160,20 +336,37 @@
     },
     "ConditionSpec": {
       "additionalProperties": false,
+      "description": "Exactly one of ``path + equals`` or ``expr``.",
       "properties": {
         "path": {
-          "minLength": 1,
+          "default": "",
           "title": "Path",
           "type": "string"
         },
         "equals": {
-          "$ref": "#/$defs/JsonValue"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/JsonValue"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "expr": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expr"
         }
       },
-      "required": [
-        "path",
-        "equals"
-      ],
       "title": "ConditionSpec",
       "type": "object"
     },
@@ -223,6 +416,14 @@
           "default": null,
           "title": "Secrets"
         },
+        "information_item_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Information Item Ids",
+          "type": "array"
+        },
         "state": {
           "additionalProperties": {
             "$ref": "#/$defs/JsonValue"
@@ -264,6 +465,17 @@
           },
           "title": "Rules",
           "type": "array"
+        },
+        "stat_block": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StatBlock"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -273,6 +485,63 @@
         "content"
       ],
       "title": "EntitySpec",
+      "type": "object"
+    },
+    "ForbidOperationSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "const": "forbid",
+          "default": "forbid",
+          "title": "Op",
+          "type": "string"
+        }
+      },
+      "title": "ForbidOperationSpec",
+      "type": "object"
+    },
+    "ForceOperationSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "const": "force",
+          "default": "force",
+          "title": "Op",
+          "type": "string"
+        },
+        "action": {
+          "minLength": 1,
+          "title": "Action",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "title": "ForceOperationSpec",
+      "type": "object"
+    },
+    "InformationItem": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "content": {
+          "title": "Content",
+          "type": "string"
+        },
+        "visibility": {
+          "$ref": "#/$defs/VisibilityPolicy"
+        }
+      },
+      "required": [
+        "id",
+        "content"
+      ],
+      "title": "InformationItem",
       "type": "object"
     },
     "JsonValue": {},
@@ -311,10 +580,26 @@
         },
         "hook": {
           "enum": [
-            "on_action",
-            "on_scene_enter",
+            "on_attack_declare",
+            "on_difficulty_calc",
+            "on_attack_roll",
+            "on_dodge_declare",
+            "on_dodge_roll",
+            "on_hit_resolve",
+            "on_damage_roll",
+            "on_armor_apply",
+            "on_hp_write",
+            "on_major_wound",
+            "on_death",
             "on_turn_end",
-            "on_check_resolve"
+            "on_check_declare",
+            "on_check_roll",
+            "on_check_resolve",
+            "on_scene_enter",
+            "on_scene_exit",
+            "on_interact",
+            "on_state_change",
+            "on_time_elapsed"
           ],
           "title": "Hook",
           "type": "string"
@@ -324,6 +609,16 @@
           "title": "Priority",
           "type": "integer"
         },
+        "mode": {
+          "default": "append",
+          "enum": [
+            "append",
+            "override",
+            "forbid"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
         "when": {
           "$ref": "#/$defs/ConditionSpec"
         },
@@ -332,8 +627,18 @@
           "items": {
             "discriminator": {
               "mapping": {
+                "absorb": "#/$defs/AbsorbOperationSpec",
+                "add": "#/$defs/AddOperationSpec",
                 "allow": "#/$defs/AllowOperationSpec",
-                "modify": "#/$defs/ModifyOperationSpec"
+                "apply_condition": "#/$defs/ApplyConditionSpec",
+                "forbid": "#/$defs/ForbidOperationSpec",
+                "force": "#/$defs/ForceOperationSpec",
+                "modify": "#/$defs/ModifyOperationSpec",
+                "scale": "#/$defs/ScaleOperationSpec",
+                "set": "#/$defs/SetOperationSpec",
+                "transition": "#/$defs/TransitionSpec",
+                "trigger_ending": "#/$defs/TriggerEndingSpec",
+                "trigger_rule": "#/$defs/TriggerRuleSpec"
               },
               "propertyName": "op"
             },
@@ -343,6 +648,36 @@
               },
               {
                 "$ref": "#/$defs/ModifyOperationSpec"
+              },
+              {
+                "$ref": "#/$defs/SetOperationSpec"
+              },
+              {
+                "$ref": "#/$defs/ScaleOperationSpec"
+              },
+              {
+                "$ref": "#/$defs/AddOperationSpec"
+              },
+              {
+                "$ref": "#/$defs/AbsorbOperationSpec"
+              },
+              {
+                "$ref": "#/$defs/ForbidOperationSpec"
+              },
+              {
+                "$ref": "#/$defs/ForceOperationSpec"
+              },
+              {
+                "$ref": "#/$defs/ApplyConditionSpec"
+              },
+              {
+                "$ref": "#/$defs/TriggerEndingSpec"
+              },
+              {
+                "$ref": "#/$defs/TriggerRuleSpec"
+              },
+              {
+                "$ref": "#/$defs/TransitionSpec"
               }
             ]
           },
@@ -360,7 +695,7 @@
         "player_visible_information": {
           "default": [],
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/VisibleInformation"
           },
           "title": "Player Visible Information",
           "type": "array"
@@ -372,6 +707,42 @@
         "when"
       ],
       "title": "RuleSpec",
+      "type": "object"
+    },
+    "ScaleOperationSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "const": "scale",
+          "default": "scale",
+          "title": "Op",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value",
+          "type": "number"
+        },
+        "round": {
+          "anyOf": [
+            {
+              "enum": [
+                "floor",
+                "ceil"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Round"
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "title": "ScaleOperationSpec",
       "type": "object"
     },
     "SceneSpec": {
@@ -406,6 +777,14 @@
           },
           "title": "Checkpoint Ids",
           "type": "array"
+        },
+        "exits": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Exits",
+          "type": "array"
         }
       },
       "required": [
@@ -414,6 +793,338 @@
         "content"
       ],
       "title": "SceneSpec",
+      "type": "object"
+    },
+    "SetOperationSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "const": "set",
+          "default": "set",
+          "title": "Op",
+          "type": "string"
+        },
+        "path": {
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "value": {
+          "$ref": "#/$defs/JsonValue"
+        }
+      },
+      "required": [
+        "path",
+        "value"
+      ],
+      "title": "SetOperationSpec",
+      "type": "object"
+    },
+    "StatBlock": {
+      "additionalProperties": false,
+      "properties": {
+        "STR": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Str"
+        },
+        "CON": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Con"
+        },
+        "SIZ": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Siz"
+        },
+        "INT": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Int"
+        },
+        "POW": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pow"
+        },
+        "DEX": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Dex"
+        },
+        "APP": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "App"
+        },
+        "EDU": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Edu"
+        },
+        "SAN": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "San"
+        },
+        "HP": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Hp"
+        },
+        "MP": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mp"
+        },
+        "MOV": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mov"
+        },
+        "armor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Armor"
+        },
+        "move": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Move"
+        }
+      },
+      "title": "StatBlock",
+      "type": "object"
+    },
+    "TransitionSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "const": "transition",
+          "default": "transition",
+          "title": "Op",
+          "type": "string"
+        },
+        "scene_id": {
+          "minLength": 1,
+          "title": "Scene Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scene_id"
+      ],
+      "title": "TransitionSpec",
+      "type": "object"
+    },
+    "TriggerEndingSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "const": "trigger_ending",
+          "default": "trigger_ending",
+          "title": "Op",
+          "type": "string"
+        },
+        "ending_id": {
+          "minLength": 1,
+          "title": "Ending Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ending_id"
+      ],
+      "title": "TriggerEndingSpec",
+      "type": "object"
+    },
+    "TriggerRuleSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "const": "trigger_rule",
+          "default": "trigger_rule",
+          "title": "Op",
+          "type": "string"
+        },
+        "rule_id": {
+          "minLength": 1,
+          "title": "Rule Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "rule_id"
+      ],
+      "title": "TriggerRuleSpec",
+      "type": "object"
+    },
+    "VisibilityPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "audience": {
+          "default": "all",
+          "enum": [
+            "all",
+            "actor",
+            "ho",
+            "keeper"
+          ],
+          "title": "Audience",
+          "type": "string"
+        },
+        "ho_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ho Ref"
+        },
+        "requires_discovery": {
+          "default": false,
+          "title": "Requires Discovery",
+          "type": "boolean"
+        },
+        "discovery_rule": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Discovery Rule"
+        },
+        "discovery_shares_to_party": {
+          "default": true,
+          "title": "Discovery Shares To Party",
+          "type": "boolean"
+        }
+      },
+      "title": "VisibilityPolicy",
+      "type": "object"
+    },
+    "VisibleInformation": {
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "visibility": {
+          "$ref": "#/$defs/VisibilityPolicy"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "VisibleInformation",
       "type": "object"
     },
     "WinConditionSpec": {
@@ -434,6 +1145,11 @@
         "player_visible_information": {
           "title": "Player Visible Information",
           "type": "string"
+        },
+        "is_ending": {
+          "default": true,
+          "title": "Is Ending",
+          "type": "boolean"
         }
       },
       "required": [
@@ -464,6 +1180,12 @@
       "title": "World Ref",
       "type": "string"
     },
+    "background": {
+      "description": "面向叙述 Agent 的时代、地点、玩家侧故事前提与叙事基调。",
+      "minLength": 1,
+      "title": "Background",
+      "type": "string"
+    },
     "scenes": {
       "items": {
         "$ref": "#/$defs/SceneSpec"
@@ -491,12 +1213,29 @@
       },
       "title": "Win Conditions",
       "type": "array"
+    },
+    "module_rules": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/RuleSpec"
+      },
+      "title": "Module Rules",
+      "type": "array"
+    },
+    "information_items": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/InformationItem"
+      },
+      "title": "Information Items",
+      "type": "array"
     }
   },
   "required": [
     "module_id",
     "version",
     "world_ref",
+    "background",
     "scenes",
     "entities",
     "checkpoints",

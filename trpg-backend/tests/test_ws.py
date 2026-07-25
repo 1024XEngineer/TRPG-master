@@ -332,7 +332,7 @@ def test_action_submit_broadcasts_narration_to_room_only(sync_client: TestClient
                 "playerId": guest["playerId"],
                 "payload": {
                     "clientActionId": "action-broadcast-122",
-                    "utterance": "我看看旧书店",
+                    "utterance": "我看看托马斯",
                 },
             }
         )
@@ -347,7 +347,7 @@ def test_action_submit_broadcasts_narration_to_room_only(sync_client: TestClient
                 "playerId": room_a["playerId"],
                 "payload": {
                     "clientActionId": "action-broadcast-122",
-                    "utterance": "我看看旧书店",
+                    "utterance": "我看看托马斯",
                 },
             }
         )

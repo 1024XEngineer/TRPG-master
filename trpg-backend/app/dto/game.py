@@ -26,6 +26,7 @@ class GameSystemRead(CamelModel):
     model_config = {"from_attributes": True}
     id: str
     game_id: str
+    world_ref: str
     name: str
     version: str | None = None
 

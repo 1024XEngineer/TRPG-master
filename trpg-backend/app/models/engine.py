@@ -45,7 +45,7 @@ class ModuleVersion(Base):
     )
 
     module_id: Mapped[str] = mapped_column(
-        Uuid(as_uuid=False), ForeignKey("scenarios.id"), nullable=False
+        String(200), ForeignKey("scenarios.module_id"), nullable=False
     )
     version: Mapped[str] = mapped_column(String(50), nullable=False)
     world_ref: Mapped[str] = mapped_column(String(200), nullable=False)
@@ -79,7 +79,7 @@ class GameSession(Base):
     room_id: Mapped[str] = mapped_column(
         Uuid(as_uuid=False), ForeignKey("rooms.id"), primary_key=True
     )
-    module_id: Mapped[str] = mapped_column(Uuid(as_uuid=False), nullable=False)
+    module_id: Mapped[str] = mapped_column(String(200), nullable=False)
     module_version: Mapped[str] = mapped_column(String(50), nullable=False)
     state_schema_version: Mapped[int] = mapped_column(
         Integer, nullable=False, default=1, server_default="1"

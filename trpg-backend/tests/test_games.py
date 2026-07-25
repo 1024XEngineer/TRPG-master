@@ -5,7 +5,12 @@
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.seed import BUILTIN_GAME_ID, BUILTIN_SYSTEM_ID, ensure_seed_content
+from app.core.seed import (
+    BUILTIN_GAME_ID,
+    BUILTIN_SYSTEM_ID,
+    BUILTIN_WORLD_REF,
+    ensure_seed_content,
+)
 from app.models.content import GameSystem
 from tests.helpers import bearer, register
 
@@ -81,6 +86,15 @@ async def test_get_ruleset_unknown_system_returns_404(client: AsyncClient) -> No
     assert response.status_code == 404
 
 
+async def test_game_system_catalog_returns_stable_world_ref(client: AsyncClient) -> None:
+    response = await client.get(f"/api/v1/games/{BUILTIN_GAME_ID}/systems")
+
+    assert response.status_code == 200
+    systems = response.json()["data"]
+    assert systems[0]["id"] == BUILTIN_SYSTEM_ID
+    assert systems[0]["worldRef"] == BUILTIN_WORLD_REF
+
+
 async def test_seed_refreshes_stale_builtin_ruleset(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
@@ -126,6 +140,7 @@ async def _add_unconfigured_system(db_session: AsyncSession) -> str:
         GameSystem(
             id=UNCONFIGURED_SYSTEM_ID,
             game_id=BUILTIN_GAME_ID,
+            world_ref="test-unconfigured",
             name="未配置规则的系统",
             ruleset=None,
         )

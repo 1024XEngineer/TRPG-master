@@ -5,7 +5,15 @@ from pathlib import Path
 
 import httpx
 import pytest
-from collaboration_framework.contracts import Intent, ModuleContent
+from collaboration_framework.contracts import (
+    ActionResult,
+    Intent,
+    ModuleContent,
+    PlayerInput,
+    PlayerView,
+    VisibleEntity,
+    VisibleFact,
+)
 from collaboration_framework.engine import (
     ActorResources,
     ActorState,
@@ -15,6 +23,7 @@ from collaboration_framework.engine import (
     RuleKernel,
     SequenceDiceSource,
 )
+from collaboration_framework.host.schemas import IntentContext, NarrationContext
 from pydantic import ValidationError
 
 from app.adapters.openai_models import (
@@ -22,6 +31,7 @@ from app.adapters.openai_models import (
     PromptIntentModel,
     PromptNarrationModel,
 )
+from app.adapters.qwen_models import QwenChatCompletionsJsonClient
 from app.core.config import Settings
 from app.core.turn import build_turn_application
 
@@ -108,6 +118,109 @@ class ScriptedStructuredClient:
         }
 
 
+class ImmersionPromptCaptureClient:
+    def __init__(self) -> None:
+        self.instructions: dict[str, str] = {}
+        self.inputs: dict[str, dict] = {}
+
+    async def generate(
+        self,
+        *,
+        schema_name: str,
+        schema: dict,
+        instructions: str,
+        input_payload: dict,
+    ) -> dict:
+        assert schema
+        self.instructions[schema_name] = instructions
+        self.inputs[schema_name] = input_payload
+        if schema_name == "trpg_intent":
+            return {
+                "kind": "unknown",
+                "verb": "orient",
+                "target": {"matched": False, "raw": "我在哪里"},
+                "check": {"route": "none"},
+                "approach": None,
+                "declarations": [],
+                "initiated_by_target": False,
+                "summary": "询问当前处境",
+                "clarification_question": "请描述我此刻所处的环境。",
+            }
+        return {
+            "kind": "narration",
+            "text": "托马斯·金博尔就在你面前，安静地等着你的答复。",
+            "claimed_fact_ids": [],
+            "suggested_actions": [],
+        }
+
+
+async def test_prompts_treat_scene_orientation_as_narration_not_form_validation() -> None:
+    player_input = PlayerInput(
+        room_id="room_prompt",
+        player_id="player_1",
+        actor_id="actor_1",
+        client_action_id="where-am-i",
+        utterance="我在哪里",
+    )
+    player_view = PlayerView(
+        room_id="room_prompt",
+        player_id="player_1",
+        actor_id="actor_1",
+        scene_id="client_briefing",
+        phase="playing",
+        revision="0",
+        visible_entities=(
+            VisibleEntity(
+                id="thomas",
+                kind="npc",
+                name="托马斯·金博尔",
+                aliases=("托马斯",),
+                content="委托调查员寻找五本失窃藏书。",
+            ),
+        ),
+    )
+    client = ImmersionPromptCaptureClient()
+    intent_payload = await PromptIntentModel(client).generate(
+        IntentContext(player_input=player_input, player_view=player_view)
+    )
+    intent = Intent.model_validate(intent_payload)
+    narration = await PromptNarrationModel(client).generate(
+        NarrationContext(
+            background="禁酒令时期的密歇根州；叙事安静、克制。",
+            player_input=player_input,
+            intent=intent,
+            action_result=ActionResult(
+                request_id="where-am-i",
+                action_id="action:where-am-i",
+                resolution="unrecognized",
+                outcome="not_applicable",
+                visible_facts=(
+                    VisibleFact(
+                        id="action:where-am-i:unrecognized:result:1",
+                        text="没有找到与该说法对应的当前场景目标。",
+                    ),
+                ),
+                narration_constraints=("不得编造目标或状态变化。",),
+                view_revision="0",
+            ),
+            player_view=player_view,
+        )
+    )
+
+    intent_instructions = client.instructions["trpg_intent"]
+    narration_instructions = client.instructions["trpg_narration"]
+    assert "属于场景定位" in intent_instructions
+    assert "感知请求" in intent_instructions
+    assert "不要称它为元游戏问题" in intent_instructions
+    assert "根据 PlayerView 直接给出" in narration_instructions
+    assert "一段场景描述" in narration_instructions
+    assert "不要要求玩家先指定目标或先做检定" in narration_instructions
+    assert "不得借此创造门窗、出口、人物、物品、路线" in narration_instructions
+    assert client.inputs["trpg_narration"]["player_view"]["visible_entities"][0]["id"] == "thomas"
+    assert narration["kind"] == "narration"
+    assert narration["claimed_fact_ids"] == []
+
+
 async def test_prompt_models_complete_paper_chase_ending_without_state_access() -> None:
     module = load_paper_chase()
     state = conversation_state(module)
@@ -191,12 +304,76 @@ async def test_responses_client_posts_strict_schema_and_parses_output() -> None:
     assert captured["text"]["format"]["strict"] is True
 
 
+async def test_qwen_client_posts_json_mode_with_schema_in_instructions() -> None:
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["authorization"] = request.headers["Authorization"]
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": '{"kind":"unknown"}',
+                        }
+                    }
+                ]
+            },
+        )
+
+    client = QwenChatCompletionsJsonClient(
+        api_key="test-key",
+        base_url="https://dashscope.example/compatible-mode/v1/",
+        model="qwen3.7-plus",
+        timeout_seconds=1,
+        transport=httpx.MockTransport(handler),
+    )
+    schema = {
+        "type": "object",
+        "properties": {"kind": {"type": "string"}},
+        "required": ["kind"],
+        "additionalProperties": False,
+    }
+
+    result = await client.generate(
+        schema_name="test_schema",
+        schema=schema,
+        instructions="Return the structured result.",
+        input_payload={"safe": True},
+    )
+
+    body = captured["body"]
+    assert result == {"kind": "unknown"}
+    assert captured["url"].endswith("/compatible-mode/v1/chat/completions")
+    assert captured["authorization"] == "Bearer test-key"
+    assert body["model"] == "qwen3.7-plus"
+    assert body["response_format"] == {"type": "json_object"}
+    assert body["enable_thinking"] is False
+    assert "test_schema" in body["messages"][0]["content"]
+    assert '"additionalProperties":false' in body["messages"][0]["content"]
+    assert json.loads(body["messages"][1]["content"]) == {"safe": True}
+
+
 def test_openai_provider_requires_api_key() -> None:
     with pytest.raises(ValidationError, match="OPENAI_API_KEY"):
         Settings.model_validate(
             {
                 "host_model_provider": "openai",
                 "openai_api_key": None,
+            }
+        )
+
+
+def test_qwen_provider_requires_api_key() -> None:
+    with pytest.raises(ValidationError, match="QWEN_API_KEY"):
+        Settings.model_validate(
+            {
+                "host_model_provider": "qwen",
+                "qwen_api_key": None,
             }
         )
 

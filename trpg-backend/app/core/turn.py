@@ -22,6 +22,7 @@ from app.adapters import (
     OpenAIResponsesJsonClient,
     PromptIntentModel,
     PromptNarrationModel,
+    QwenChatCompletionsJsonClient,
 )
 from app.core.config import Settings, get_settings
 from app.core.engine import engine_store, rule_engine_service
@@ -114,14 +115,24 @@ def _configured_models(
 ) -> tuple[IntentModelPort, NarrationModelPort]:
     if settings.host_model_provider == "fake":
         return FakeIntentModel(), FakeNarrationModel()
-    if settings.openai_api_key is None:
-        raise ValueError("OpenAI Host 模型缺少 API key")
-    client = OpenAIResponsesJsonClient(
-        api_key=settings.openai_api_key.get_secret_value(),
-        base_url=settings.openai_base_url,
-        model=settings.openai_model,
-        timeout_seconds=settings.openai_timeout_seconds,
-    )
+    if settings.host_model_provider == "qwen":
+        if settings.qwen_api_key is None:
+            raise ValueError("Qwen Host 模型缺少 API key")
+        client = QwenChatCompletionsJsonClient(
+            api_key=settings.qwen_api_key.get_secret_value(),
+            base_url=settings.qwen_base_url,
+            model=settings.qwen_model,
+            timeout_seconds=settings.qwen_timeout_seconds,
+        )
+    else:
+        if settings.openai_api_key is None:
+            raise ValueError("OpenAI Host 模型缺少 API key")
+        client = OpenAIResponsesJsonClient(
+            api_key=settings.openai_api_key.get_secret_value(),
+            base_url=settings.openai_base_url,
+            model=settings.openai_model,
+            timeout_seconds=settings.openai_timeout_seconds,
+        )
     return PromptIntentModel(client), PromptNarrationModel(client)
 
 

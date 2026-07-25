@@ -42,9 +42,9 @@ class Settings(BaseSettings):
     # 本地默认放行 Vite 开发服务器的默认端口 9877。
     cors_origins: list[str] = ["http://localhost:9877"]
 
-    # 默认使用确定性的离线 Fake，便于本地启动和测试；显式切到 openai 后，
-    # Host/Narrator 才会调用 Responses API。base_url 可指向兼容服务。
-    host_model_provider: Literal["fake", "openai"] = "fake"
+    # 默认使用确定性的离线 Fake，便于本地启动和测试；显式切到 openai 或 qwen
+    # 后，Host/Narrator 才会调用远程模型。
+    host_model_provider: Literal["fake", "openai", "qwen"] = "fake"
     openai_api_key: SecretStr | None = None
     openai_base_url: str = Field(
         default="https://api.openai.com/v1",
@@ -52,6 +52,13 @@ class Settings(BaseSettings):
     )
     openai_model: str = Field(default="gpt-5.6-luna", min_length=1)
     openai_timeout_seconds: float = Field(default=30.0, gt=0, le=120)
+    qwen_api_key: SecretStr | None = None
+    qwen_base_url: str = Field(
+        default="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        min_length=1,
+    )
+    qwen_model: str = Field(default="qwen3.7-plus", min_length=1)
+    qwen_timeout_seconds: float = Field(default=30.0, gt=0, le=120)
 
     @model_validator(mode="after")
     def validate_host_model(self) -> Settings:
@@ -59,6 +66,10 @@ class Settings(BaseSettings):
             self.openai_api_key is None or not self.openai_api_key.get_secret_value().strip()
         ):
             raise ValueError("HOST_MODEL_PROVIDER=openai 时必须设置 OPENAI_API_KEY")
+        if self.host_model_provider == "qwen" and (
+            self.qwen_api_key is None or not self.qwen_api_key.get_secret_value().strip()
+        ):
+            raise ValueError("HOST_MODEL_PROVIDER=qwen 时必须设置 QWEN_API_KEY")
         return self
 
 

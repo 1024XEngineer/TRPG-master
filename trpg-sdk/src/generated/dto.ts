@@ -334,6 +334,7 @@ export interface GameStartPayload {}
 export interface GameSystemRead {
   id: string;
   gameId: string;
+  worldRef: string;
   name: string;
   version?: string | null;
 }

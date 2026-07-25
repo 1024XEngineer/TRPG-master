@@ -71,7 +71,10 @@ def build_turn_application(
     """装配唯一的主持编排纵切；模型端口后续可原位替换为 #111 的生产 Adapter。"""
 
     orchestrator = Orchestrator(
-        context_assembler=ContextAssembler(),
+        # ContextAssembler 从 ModuleContent v1 起要求显式背景；当前后端组合根仍是
+        # 全局单例，按房间注入真实背景属于后续 Host Agent 组合改造。本期先提供
+        # 非空占位，真实 ModuleContent 仍由 EngineStore 按房间完整加载。
+        context_assembler=ContextAssembler("当前房间的模组背景与叙事基调。"),
         intent_parser=IntentParser(FakeIntentModel()),
         action_executor=engine,
         player_view_projector=PlayerViewProjector(engine),

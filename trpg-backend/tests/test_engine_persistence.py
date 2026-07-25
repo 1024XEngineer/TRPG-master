@@ -1,21 +1,24 @@
 """Issue #89 的 ORM、约束与内置 ModuleVersion 测试。"""
 
 from collaboration_framework.contracts import ModuleContent
-from sqlalchemy import CheckConstraint, PrimaryKeyConstraint, UniqueConstraint
+from sqlalchemy import CheckConstraint, PrimaryKeyConstraint, String, UniqueConstraint, delete
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import Base
 from app.core.seed import (
-    BUILTIN_MODULE_CONTENT,
+    BUILTIN_MODULE_ID,
     BUILTIN_MODULE_VERSION,
     BUILTIN_SCENARIO_ID,
+    BUILTIN_SYSTEM_ID,
+    BUILTIN_WORLD_REF,
     ensure_seed_content,
 )
-from app.models.content import Scenario
+from app.models.content import GameSystem, Scenario
 from app.models.engine import ActionExecution, GameEvent, GameSession, ModuleVersion
 from app.models.event import Event
 from app.models.room import Character, Player, Room
+from app.service.paper_chase_loader import load_paper_chase
 
 
 def _constraint_names(table_name: str, constraint_type: type) -> set[str]:
@@ -44,6 +47,26 @@ def test_engine_tables_and_constraints_are_registered() -> None:
         if isinstance(constraint, PrimaryKeyConstraint)
     )
     assert [column.name for column in module_pk.columns] == ["module_id", "version"]
+    assert isinstance(module_versions.c.module_id.type, String)
+    assert {
+        (foreign_key.parent.name, foreign_key.target_fullname)
+        for foreign_key in module_versions.foreign_keys
+    } == {("module_id", "scenarios.module_id")}
+
+    scenarios = Base.metadata.tables["scenarios"]
+    game_systems = Base.metadata.tables["game_systems"]
+    assert scenarios.c.module_id.nullable is False
+    assert game_systems.c.world_ref.nullable is False
+    assert ("module_id",) in {
+        tuple(constraint.columns.keys())
+        for constraint in scenarios.constraints
+        if isinstance(constraint, UniqueConstraint)
+    }
+    assert ("world_ref",) in {
+        tuple(constraint.columns.keys())
+        for constraint in game_systems.constraints
+        if isinstance(constraint, UniqueConstraint)
+    }
 
     game_sessions = Base.metadata.tables["game_sessions"]
     assert [column.name for column in game_sessions.primary_key.columns] == ["room_id"]
@@ -65,25 +88,52 @@ def test_engine_tables_and_constraints_are_registered() -> None:
     assert Base.metadata.tables["events"].c.correlation_id.nullable
 
 
-async def test_seed_persists_valid_playable_module_version(db_session: AsyncSession) -> None:
+async def test_seed_only_creates_wip_catalog_and_ruleset(db_session: AsyncSession) -> None:
+    await db_session.execute(delete(ModuleVersion))
+    await db_session.execute(delete(Scenario))
+    await db_session.commit()
+
+    await ensure_seed_content(db_session)
+
     scenario = await db_session.get(Scenario, BUILTIN_SCENARIO_ID)
     module_version = await db_session.get(
         ModuleVersion,
-        (BUILTIN_SCENARIO_ID, BUILTIN_MODULE_VERSION),
+        (BUILTIN_MODULE_ID, BUILTIN_MODULE_VERSION),
     )
+    system = await db_session.get(GameSystem, BUILTIN_SYSTEM_ID)
 
     assert scenario is not None
-    assert scenario.status == "ready"
+    assert scenario.module_id == BUILTIN_MODULE_ID
+    assert scenario.status == "wip"
     assert scenario.version == BUILTIN_MODULE_VERSION
     assert scenario.story_pages
+    assert system is not None
+    assert system.world_ref == BUILTIN_WORLD_REF
+    assert module_version is None
 
+
+async def test_loader_persists_valid_playable_module_version(db_session: AsyncSession) -> None:
+    scenario = await db_session.get(Scenario, BUILTIN_SCENARIO_ID)
+    module_version = await db_session.get(
+        ModuleVersion,
+        (BUILTIN_MODULE_ID, BUILTIN_MODULE_VERSION),
+    )
+    assert scenario is not None
+    assert scenario.status == "ready"
     assert module_version is not None
     publication = ModuleContent.model_validate(module_version.content_json)
+    assert publication.module_id == BUILTIN_MODULE_ID
     assert publication.module_id == module_version.module_id
     assert publication.version == module_version.version
     assert publication.world_ref == module_version.world_ref
-    assert publication.scenes
-    assert publication.to_json_dict() == BUILTIN_MODULE_CONTENT
+    assert publication.world_ref == BUILTIN_WORLD_REF
+    assert len(publication.scenes) == 11
+    assert len(publication.entities) == 16
+    assert publication.background
+
+    await db_session.commit()
+    repeated = await load_paper_chase(db_session)
+    assert repeated.outcome == "unchanged"
 
 
 async def test_seed_does_not_overwrite_published_module_content(
@@ -92,16 +142,16 @@ async def test_seed_does_not_overwrite_published_module_content(
     """重复 seed 可更新目录数据，但不能原地修改已发布版本。"""
     module_version = await db_session.get(
         ModuleVersion,
-        (BUILTIN_SCENARIO_ID, BUILTIN_MODULE_VERSION),
+        (BUILTIN_MODULE_ID, BUILTIN_MODULE_VERSION),
     )
     assert module_version is not None
     existing_publication = dict(module_version.content_json)
-    existing_publication["scenes"] = [
-        {
-            **existing_publication["scenes"][0],
-            "content": "已经发布、不得被 seed 覆盖的内容。",
-        }
-    ]
+    scenes = list(existing_publication["scenes"])
+    scenes[0] = {
+        **scenes[0],
+        "content": "已经发布、不得被 seed 覆盖的内容。",
+    }
+    existing_publication["scenes"] = scenes
     ModuleContent.model_validate(existing_publication)
     module_version.content_json = existing_publication
     await db_session.commit()

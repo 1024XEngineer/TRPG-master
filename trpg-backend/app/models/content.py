@@ -45,6 +45,7 @@ class GameSystem(Base):
     game_id: Mapped[str] = mapped_column(
         Uuid(as_uuid=False), ForeignKey("games.id"), nullable=False
     )
+    world_ref: Mapped[str] = mapped_column(String(200), nullable=False, unique=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     version: Mapped[str | None] = mapped_column(String(50), nullable=True)
     ruleset: Mapped[dict | None] = mapped_column(JSON, nullable=True)
@@ -89,6 +90,7 @@ class Scenario(Base):
     id: Mapped[str] = mapped_column(
         Uuid(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4())
     )
+    module_id: Mapped[str] = mapped_column(String(200), nullable=False, unique=True)
     world_id: Mapped[str | None] = mapped_column(
         Uuid(as_uuid=False), ForeignKey("worlds.id"), nullable=True
     )

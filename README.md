@@ -129,6 +129,19 @@ uv run uvicorn app.main:app --reload
 > 里只有空的历史表、没有真实数据，**直接删掉重新迁移即可**（`rm trpg-backend/app.db`
 > 再 `alembic upgrade head`）。
 
+首次启动后，应用 Seed 只会创建 COC7 规则系统和 `wip` 状态的追书人目录，不会
+内嵌简化版模组内容。在另一个终端执行固定的本地加载命令，将仓库中的追书人
+ModuleContent 经过 Validation 后原子写入数据库，并把目录标记为 `ready`：
+
+```bash
+cd trpg-backend
+uv run python scripts/load_paper_chase.py
+```
+
+该命令只读取
+`agent-collaboration-framework/docs/module-parser/examples/module-content-validation/追书人/module-content-draft.json`。
+重复执行相同内容会返回 `unchanged`；同一版本已有不同内容时会拒绝覆盖。
+
 后端默认地址：<http://127.0.0.1:8000>
 
 - 健康检查：<http://127.0.0.1:8000/api/v1/health>

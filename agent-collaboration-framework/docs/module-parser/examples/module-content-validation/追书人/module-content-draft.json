@@ -811,7 +811,7 @@
       "scene_id": "kimball_house",
       "action": "read",
       "target_id": "douglas_diary",
-      "skills": ["language-english"],
+      "skills": ["language-foreign-1"],
       "difficulty": "regular",
       "outcomes": {
         "success": {

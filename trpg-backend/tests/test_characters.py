@@ -446,6 +446,7 @@ async def test_complete_character_rejects_unconfigured_ruleset(
         GameSystem(
             id=UNCONFIGURED_SYSTEM_ID,
             game_id=BUILTIN_GAME_ID,
+            world_ref="test-unconfigured",
             name="未配置规则的系统",
             ruleset=None,
         )

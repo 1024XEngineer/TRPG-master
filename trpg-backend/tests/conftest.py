@@ -22,6 +22,7 @@ from app.core.db import Base, get_db
 from app.core.seed import ensure_seed_content
 from app.core.turn import build_turn_application
 from app.main import app
+from app.service.paper_chase_loader import load_paper_chase
 
 # 用临时文件 SQLite，不用 ":memory:"+StaticPool。关键原因是并发模型：异步 HTTP
 # 测试跑在 pytest-asyncio 的事件循环里，而同步 TestClient 的 WebSocket 跑在它
@@ -77,6 +78,7 @@ async def _prepare_database() -> AsyncGenerator[None, None]:
     # 依赖内置模组的用例（建房选模组、GET /modules 等）会因为库里没有模组而失败。
     async with TestSessionLocal() as session:
         await ensure_seed_content(session)
+        await load_paper_chase(session)
     yield
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)

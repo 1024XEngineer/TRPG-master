@@ -2,6 +2,75 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "action-result.schema.json",
   "$defs": {
+    "RuleCheckResult": {
+      "additionalProperties": false,
+      "description": "Player-safe evidence for one authoritative percentile check.",
+      "properties": {
+        "checkpoint_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Checkpoint Id"
+        },
+        "skill_id": {
+          "minLength": 1,
+          "title": "Skill Id",
+          "type": "string"
+        },
+        "target_value": {
+          "minimum": 0,
+          "title": "Target Value",
+          "type": "integer"
+        },
+        "roll_value": {
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Roll Value",
+          "type": "integer"
+        },
+        "difficulty": {
+          "enum": [
+            "regular",
+            "hard",
+            "extreme"
+          ],
+          "title": "Difficulty",
+          "type": "string"
+        },
+        "success_level": {
+          "enum": [
+            "critical",
+            "extreme",
+            "hard",
+            "regular",
+            "failure",
+            "fumble"
+          ],
+          "title": "Success Level",
+          "type": "string"
+        },
+        "passed": {
+          "title": "Passed",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "skill_id",
+        "target_value",
+        "roll_value",
+        "difficulty",
+        "success_level",
+        "passed"
+      ],
+      "title": "RuleCheckResult",
+      "type": "object"
+    },
     "VisibleFact": {
       "additionalProperties": false,
       "properties": {
@@ -55,6 +124,17 @@
       ],
       "title": "Outcome",
       "type": "string"
+    },
+    "check_result": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RuleCheckResult"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "visible_facts": {
       "default": [],

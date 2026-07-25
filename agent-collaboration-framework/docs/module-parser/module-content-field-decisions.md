@@ -198,8 +198,8 @@ Operation 使用 `op` discriminator，当前固定为 12 种：
 | `trigger_rule` | `rule_id` | 触发已声明 Rule |
 | `transition` | `scene_id` | 转移到已声明 Scene |
 
-发布契约允许的 Operation 不等于占位内核已经完整执行的 Operation。Runtime 不得静默
-改写不支持的操作；应明确拒绝、报告能力缺口或由已批准的兼容层处理。
+发布契约允许的 Operation 不等于当前内核已经完整执行的 Operation。Runtime 在开局和
+执行前运行能力审计，不得静默改写不支持的操作；应明确拒绝并报告能力缺口。
 
 ## 6. 可见性
 

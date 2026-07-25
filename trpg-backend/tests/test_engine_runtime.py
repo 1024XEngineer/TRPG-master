@@ -191,6 +191,7 @@ def test_application_composes_sqlalchemy_engine_store() -> None:
 
     assert isinstance(engine_store, SqlAlchemyEngineStore)
     assert rule_engine_service._store is engine_store
+    assert rule_engine_service._kernel._allow_legacy_missing_skill is False
 
 
 async def test_turn_application_resolves_actor_and_replays_one_execution(
@@ -274,6 +275,8 @@ async def test_begin_game_creates_stable_actor_snapshots(
     assert state.actors["actor_1"].source_character_version == characters[0].version
     assert "actor_1" not in {character.id for character in characters}
     assert state.actors["actor_1"].state["attributes"] == {"HP_SOURCE": 1}
+    assert state.actors["actor_1"].resources.hp == 11
+    assert state.actors["actor_1"].resources.san is None
     assert state.entities["thomas"]["case_open"] is True
     assert state.entities["case_tracker"]["investigator_disappeared"] is False
 

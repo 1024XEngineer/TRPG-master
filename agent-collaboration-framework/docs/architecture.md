@@ -165,9 +165,11 @@ flowchart TD
 
 ### 15. 真实模型依赖
 
-选择：移除 PydanticAI、OpenAI 和 Prompt 依赖，只保留模型 Protocol 与 Fake adapter。
+选择：contracts/application 核心只保留模型 Protocol 与 Fake adapter；后端基础设施层提供
+可配置的最小 Responses API 结构化输出 Adapter。
 
-理由：本阶段目标是稳定工程骨架，不是模型效果。真实 SDK 以后放入 adapter，不进入 contracts/application 核心。
+理由：模型调用和 Prompt 不得进入稳定核心。后端未显式启用或远程模型失败时回退到确定性
+Fake；启用后 Host/Narrator 仍只能消费玩家安全 Context，并继续经过 Pydantic 与可信候选校验。
 
 ### 16. ModuleContent 与验证边界
 
@@ -177,8 +179,8 @@ flowchart TD
 A 和后端仍只通过既有 Engine Service/Store/Port 边界交互。
 
 理由：它们是 C 到 B 的发布协议。公共契约解决“模组能声明什么”，不固定 Engine Service、
-事务存储、GameState 或 Host 编排接口。占位 RuleKernel 可以只实现 catalog 的一个子集，
-但不得反向删减 Parser 已获准发布的声明语言。
+事务存储、GameState 或 Host 编排接口。RuleKernel 可以只实现 catalog 的一个子集，但开局
+和执行前必须通过能力审计；未支持声明不得被静默忽略，也不得反向删减发布语言。
 
 ## 4. ModuleContent 的三层边界
 

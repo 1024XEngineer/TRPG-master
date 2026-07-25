@@ -11,9 +11,13 @@ import string
 from copy import deepcopy
 from datetime import UTC, datetime
 
-from collaboration_framework.contracts import ModuleContent
-from collaboration_framework.engine import GameState
-from collaboration_framework.engine.models import ActorState
+from collaboration_framework.contracts import ContractError, ModuleContent
+from collaboration_framework.engine import (
+    ActorResources,
+    ActorState,
+    GameState,
+    require_runtime_capabilities,
+)
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -413,6 +417,10 @@ async def begin_game(db: AsyncSession, room_id: str, player_id: str) -> None:
         raise RoomConflictError("模组发布内容与版本记录不一致")
     if not module_content.scenes:
         raise RoomConflictError("模组没有可作为初始场景的 Scene")
+    try:
+        require_runtime_capabilities(module_content)
+    except ContractError as exc:
+        raise RoomConflictError("模组包含当前规则运行时尚未支持的能力") from exc
 
     room_players = list(
         await db.scalars(
@@ -439,6 +447,7 @@ async def begin_game(db: AsyncSession, room_id: str, player_id: str) -> None:
             source_character_id=character_by_player[room_player.id].id,
             source_character_version=character_by_player[room_player.id].version,
             state=_character_runtime_state(character_by_player[room_player.id]),
+            resources=_character_runtime_resources(character_by_player[room_player.id]),
         )
         for index, room_player in enumerate(room_players, start=1)
     }
@@ -497,6 +506,23 @@ def _character_runtime_state(character: Character) -> dict:
         "background": character.background,
         "notes": character.notes,
     }
+
+
+def _character_runtime_resources(character: Character) -> ActorResources:
+    """将局内可变资源从不可变的角色卡快照中分离出来。"""
+
+    derived = character.derived_stats or {}
+    attributes = character.attributes or {}
+    return ActorResources(
+        hp=_optional_int(derived.get("HP")),
+        san=_optional_int(derived.get("SAN")),
+        mp=_optional_int(derived.get("MP")),
+        luck=_optional_int(attributes.get("LUCK")),
+    )
+
+
+def _optional_int(value: object) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
 async def _load_game_state(db: AsyncSession, room_id: str) -> tuple[GameSession, GameState]:

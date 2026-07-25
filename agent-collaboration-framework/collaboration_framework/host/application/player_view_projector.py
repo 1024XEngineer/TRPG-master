@@ -39,6 +39,7 @@ class PlayerViewProjector:
             scene_id=snapshot.scene_id,
             phase=snapshot.phase,
             revision=snapshot.revision,
+            visible_facts=snapshot.visible_facts,
             visible_entities=tuple(
                 VisibleEntity(
                     id=item.id,

@@ -80,6 +80,7 @@ def checkpoint_request(
     target_id: str,
     checkpoint_id: str,
     skills: tuple[str, ...] = (),
+    roll_value: int | None = None,
 ) -> ActionRequest:
     return ActionRequest(
         request_id=request_id,
@@ -97,6 +98,7 @@ def checkpoint_request(
             ),
             summary=f"{verb} {target_id}",
         ),
+        roll_value=roll_value,
     )
 
 
@@ -185,6 +187,33 @@ class Coc7RuleKernelTests(unittest.TestCase):
         self.assertEqual(execution.action_result.outcome, "success")
         self.assertTrue(updated.entities["lyla"]["interviewed"])
         self.assertIn("lyla_cemetery_sighting", updated.discovered_facts)
+
+    def test_percentile_check_uses_player_submitted_roll_value(self) -> None:
+        state = paper_chase_state(self.module, scene_id="neighborhood")
+        kernel = RuleKernel(
+            dice_source=SequenceDiceSource([99]),
+            allow_legacy_missing_skill=False,
+        )
+
+        execution, _ = kernel.execute(
+            request=checkpoint_request(
+                request_id="submitted_roll",
+                revision="0",
+                verb="interview",
+                target_id="lyla",
+                checkpoint_id="question_neighbors",
+                skills=("fast-talk",),
+                roll_value=12,
+            ),
+            module_content=self.module,
+            game_state=state,
+        )
+
+        check = execution.action_result.check_result
+        self.assertIsNotNone(check)
+        assert check is not None
+        self.assertEqual(check.roll_value, 12)
+        self.assertEqual(check.success_level, "extreme")
 
     def test_fumble_uses_checkpoint_failure_without_state_write(self) -> None:
         state = paper_chase_state(self.module, scene_id="neighborhood")

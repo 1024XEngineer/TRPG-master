@@ -2,6 +2,111 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "projection-snapshot.schema.json",
   "$defs": {
+    "JsonValue": {},
+    "ProjectionActorResource": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "value"
+      ],
+      "title": "ProjectionActorResource",
+      "type": "object"
+    },
+    "ProjectionActorValue": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Value"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "value"
+      ],
+      "title": "ProjectionActorValue",
+      "type": "object"
+    },
+    "ProjectionAvailableExit": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "aliases": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Aliases",
+          "type": "array"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "destination": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProjectionExitDestination"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "title": "ProjectionAvailableExit",
+      "type": "object"
+    },
     "ProjectionCheckpointOption": {
       "additionalProperties": false,
       "properties": {
@@ -27,6 +132,23 @@
           },
           "title": "Skills",
           "type": "array"
+        },
+        "difficulty": {
+          "anyOf": [
+            {
+              "enum": [
+                "regular",
+                "hard",
+                "extreme"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Difficulty"
         }
       },
       "required": [
@@ -67,21 +189,50 @@
           "title": "Aliases",
           "type": "array"
         },
-        "content": {
-          "title": "Content",
+        "description": {
+          "title": "Description",
           "type": "string"
+        },
+        "observable_state": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ProjectionObservableState"
+          },
+          "title": "Observable State",
+          "type": "array"
         }
       },
       "required": [
         "id",
         "kind",
         "name",
-        "content"
+        "description"
       ],
       "title": "ProjectionEntity",
       "type": "object"
     },
-    "VisibleFact": {
+    "ProjectionExitDestination": {
+      "additionalProperties": false,
+      "properties": {
+        "scene_id": {
+          "minLength": 1,
+          "title": "Scene Id",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scene_id",
+        "name"
+      ],
+      "title": "ProjectionExitDestination",
+      "type": "object"
+    },
+    "ProjectionKnownInformation": {
       "additionalProperties": false,
       "properties": {
         "id": {
@@ -89,17 +240,244 @@
           "title": "Id",
           "type": "string"
         },
-        "text": {
+        "title": {
           "minLength": 1,
-          "title": "Text",
+          "title": "Title",
+          "type": "string"
+        },
+        "summary": {
+          "minLength": 1,
+          "title": "Summary",
+          "type": "string"
+        },
+        "content": {
+          "minLength": 1,
+          "title": "Content",
+          "type": "string"
+        },
+        "related_entities": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Related Entities",
+          "type": "array"
+        },
+        "related_scenes": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Related Scenes",
+          "type": "array"
+        },
+        "scope": {
+          "enum": [
+            "actor",
+            "party"
+          ],
+          "title": "Scope",
           "type": "string"
         }
       },
       "required": [
         "id",
-        "text"
+        "title",
+        "summary",
+        "content",
+        "scope"
       ],
-      "title": "VisibleFact",
+      "title": "ProjectionKnownInformation",
+      "type": "object"
+    },
+    "ProjectionObservableState": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "minLength": 1,
+          "title": "Key",
+          "type": "string"
+        },
+        "label": {
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "value": {
+          "$ref": "#/$defs/JsonValue"
+        }
+      },
+      "required": [
+        "key",
+        "label",
+        "value"
+      ],
+      "title": "ProjectionObservableState",
+      "type": "object"
+    },
+    "ProjectionScene": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "time": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Time"
+        },
+        "visible_entities": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ProjectionEntity"
+          },
+          "title": "Visible Entities",
+          "type": "array"
+        },
+        "visible_actors": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ProjectionVisibleActor"
+          },
+          "title": "Visible Actors",
+          "type": "array"
+        },
+        "available_exits": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ProjectionAvailableExit"
+          },
+          "title": "Available Exits",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "description"
+      ],
+      "title": "ProjectionScene",
+      "type": "object"
+    },
+    "ProjectionSelfActor": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "occupation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Occupation"
+        },
+        "attributes": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ProjectionActorValue"
+          },
+          "title": "Attributes",
+          "type": "array"
+        },
+        "skills": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ProjectionActorValue"
+          },
+          "title": "Skills",
+          "type": "array"
+        },
+        "resources": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ProjectionActorResource"
+          },
+          "title": "Resources",
+          "type": "array"
+        },
+        "conditions": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Conditions",
+          "type": "array"
+        },
+        "equipment": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Equipment",
+          "type": "array"
+        },
+        "background_summary": {
+          "default": "",
+          "title": "Background Summary",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "title": "ProjectionSelfActor",
+      "type": "object"
+    },
+    "ProjectionVisibleActor": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "status_summary": {
+          "default": "",
+          "title": "Status Summary",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "title": "ProjectionVisibleActor",
       "type": "object"
     }
   },
@@ -109,6 +487,16 @@
     "room_id": {
       "minLength": 1,
       "title": "Room Id",
+      "type": "string"
+    },
+    "player_id": {
+      "minLength": 1,
+      "title": "Player Id",
+      "type": "string"
+    },
+    "actor_id": {
+      "minLength": 1,
+      "title": "Actor Id",
       "type": "string"
     },
     "scene_id": {
@@ -129,20 +517,18 @@
       "title": "Revision",
       "type": "string"
     },
-    "visible_facts": {
-      "default": [],
-      "items": {
-        "$ref": "#/$defs/VisibleFact"
-      },
-      "title": "Visible Facts",
-      "type": "array"
+    "self_actor": {
+      "$ref": "#/$defs/ProjectionSelfActor"
     },
-    "entities": {
+    "scene": {
+      "$ref": "#/$defs/ProjectionScene"
+    },
+    "known_information": {
       "default": [],
       "items": {
-        "$ref": "#/$defs/ProjectionEntity"
+        "$ref": "#/$defs/ProjectionKnownInformation"
       },
-      "title": "Entities",
+      "title": "Known Information",
       "type": "array"
     },
     "checkpoint_options": {
@@ -156,9 +542,13 @@
   },
   "required": [
     "room_id",
+    "player_id",
+    "actor_id",
     "scene_id",
     "phase",
-    "revision"
+    "revision",
+    "self_actor",
+    "scene"
   ],
   "title": "ProjectionSnapshot",
   "type": "object"

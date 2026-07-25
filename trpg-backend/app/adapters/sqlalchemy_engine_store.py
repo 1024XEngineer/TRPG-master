@@ -22,6 +22,8 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.core.runtime_state import hydrate_actor_state_from_ruleset
+from app.models.content import GameSystem
 from app.models.engine import ActionExecution, GameEvent, GameSession, ModuleVersion
 from app.models.room import Room
 
@@ -100,6 +102,32 @@ class _SqlAlchemyEngineTransaction(EngineTransaction):
             raise ContractError("GameSession 与 state_json 的 room_id 不一致")
         if game_state.event_sequence != game_session.state_version:
             raise ContractError("GameSession state_version 与 GameState event_sequence 不一致")
+
+        system = await self._session.scalar(
+            select(GameSystem).where(GameSystem.world_ref == module_version.world_ref)
+        )
+        game_state, hydrated = _hydrate_game_state_actor_skills(
+            game_state,
+            ruleset=system.ruleset if system is not None else None,
+        )
+        if hydrated:
+            state_update = await self._session.execute(
+                update(GameSession)
+                .where(
+                    GameSession.room_id == self._room_id,
+                    GameSession.state_version == game_session.state_version,
+                )
+                .values(
+                    state_json=game_state.to_json_dict(),
+                    updated_at=datetime.now(UTC),
+                )
+                .execution_options(synchronize_session=False)
+            )
+            if getattr(state_update, "rowcount", None) != 1:
+                raise RevisionConflictError(
+                    f"房间 {self._room_id} 在运行时技能回填期间发生了并发更新"
+                )
+            await self._session.refresh(game_session)
 
         return EngineRuntimeSnapshot(
             module_id=module_version.module_id,
@@ -326,3 +354,24 @@ class _SqlAlchemyEngineTransaction(EngineTransaction):
                 raise ContractError("Event 与 CompletedAction request_id 不一致")
             if event.actor_id != request.actor_id:
                 raise ContractError("Event 与 CompletedAction actor_id 不一致")
+
+
+def _hydrate_game_state_actor_skills(
+    game_state: GameState,
+    *,
+    ruleset: dict | None,
+) -> tuple[GameState, bool]:
+    actors = dict(game_state.actors)
+    changed = False
+    for actor_id, actor in game_state.actors.items():
+        actor_state, actor_changed = hydrate_actor_state_from_ruleset(
+            actor.state,
+            ruleset,
+        )
+        if not actor_changed:
+            continue
+        actors[actor_id] = actor.model_copy(update={"state": actor_state})
+        changed = True
+    if not changed:
+        return game_state, False
+    return game_state.model_copy(update={"actors": actors}), True

@@ -8,6 +8,8 @@
       "id": "study",
       "name": "书房",
       "content": "昏黄灯光下，书架、木柜与一扇落灰的窗户围住了安静的房间。",
+      "player_visible_name": "书房",
+      "player_visible_description": "昏黄灯光下，书架、木柜与一扇落灰的窗户围住了安静的房间。",
       "entity_ids": ["butler", "bookshelf", "cabinet", "document", "window"],
       "checkpoint_ids": ["investigate_bookshelf", "smash_cabinet"],
       "exits": []
@@ -36,6 +38,17 @@
       "name": "书架",
       "aliases": ["书柜", "藏书架"],
       "content": "积灰的书架上塞满了旧书。",
+      "observable_state": [
+        {
+          "key": "key_found",
+          "label": "是否已找到书架后的物品",
+          "visibility": {
+            "audience": "all",
+            "requires_discovery": true,
+            "discovery_rule": "entity.bookshelf.state.key_found == true"
+          }
+        }
+      ],
       "secrets": "一把小钥匙藏在书架后方。",
       "state": {
         "key_found": false
@@ -53,6 +66,12 @@
       "name": "上锁的柜子",
       "aliases": ["柜子", "木柜"],
       "content": "一只带黄铜锁孔的年代久远的木柜。",
+      "observable_state": [
+        {
+          "key": "opened",
+          "label": "柜门是否打开"
+        }
+      ],
       "secrets": "关键文件藏在柜中；强行砸开会毁坏文件。",
       "state": {
         "opened": false
@@ -104,6 +123,17 @@
       "name": "关键文件",
       "aliases": ["文件", "档案"],
       "content": "尚未取得的关键文件。",
+      "visibility": {
+        "audience": "all",
+        "requires_discovery": true,
+        "discovery_rule": "entity.document.state.obtained == true"
+      },
+      "observable_state": [
+        {
+          "key": "destroyed",
+          "label": "文件是否损坏"
+        }
+      ],
       "secrets": "文件记录了事件真相。",
       "state": {
         "obtained": false,
@@ -238,6 +268,8 @@
   "information_items": [
     {
       "id": "document_truth",
+      "title": "关键文件的真相",
+      "summary": "关键文件记录了事件背后的真相。",
       "content": "关键文件记录了事件真相。",
       "visibility": {"audience": "keeper"}
     }

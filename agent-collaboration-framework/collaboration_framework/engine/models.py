@@ -54,6 +54,7 @@ class GameState(ContractModel):
     entities: dict[str, dict[str, JsonValue]]
     clock: ClockState = Field(default_factory=ClockState)
     discovered_facts: tuple[str, ...] = ()
+    actor_discovered_facts: dict[str, tuple[str, ...]] = Field(default_factory=dict)
 
 
 class StateChange(ContractModel):

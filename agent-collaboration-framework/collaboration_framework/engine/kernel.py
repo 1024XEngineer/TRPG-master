@@ -172,9 +172,64 @@ class _Execution:
 
         self.target_id = intent.target.id
         current_scene = self._scene(str(self.state["scene_id"]))
+        available_exit = next(
+            (
+                item
+                for item in current_scene.available_exits
+                if item.id == self.target_id
+            ),
+            None,
+        )
+        if available_exit is not None and isinstance(intent.check, DefaultCheck):
+            destination_scene_id = None
+            if intent.verb in {"travel", "move", "go"}:
+                if (
+                    current_scene.exits
+                    and available_exit.destination_scene_id not in current_scene.exits
+                ):
+                    raise ContractError("Player-visible exit is outside Scene.exits")
+                destination_scene_id = available_exit.destination_scene_id
+            return self._complete_default_check(
+                entity=None,
+                destination_scene_id=destination_scene_id,
+            )
+        if available_exit is not None and intent.verb in {"travel", "move", "go"}:
+            if (
+                current_scene.exits
+                and available_exit.destination_scene_id not in current_scene.exits
+            ):
+                raise ContractError("Player-visible exit is outside Scene.exits")
+            self._transition(
+                available_exit.destination_scene_id,
+                cause=f"action:{self.request.request_id}",
+            )
+            return self._complete_turn(resolution="direct", outcome="success")
+
         target_scene = self._scene_or_none(self.target_id)
+        if target_scene is not None and isinstance(intent.check, DefaultCheck):
+            destination_scene_id = None
+            if (
+                target_scene.id != current_scene.id
+                and current_scene.exits
+                and target_scene.id not in current_scene.exits
+            ):
+                return self._finalize(
+                    resolution="blocked",
+                    outcome="not_applicable",
+                    visible=("当前场景没有通向该地点的出口。",),
+                    constraints=("不得声称玩家已经影响或到达不可接触的场景。",),
+                )
+            if (
+                intent.verb in {"travel", "move", "go"}
+                and target_scene.id != current_scene.id
+            ):
+                destination_scene_id = target_scene.id
+            return self._complete_default_check(
+                entity=None,
+                destination_scene_id=destination_scene_id,
+            )
         if target_scene is not None and intent.verb in {"travel", "move", "go"}:
-            if target_scene.id not in current_scene.exits:
+            if current_scene.exits and target_scene.id not in current_scene.exits:
                 return self._finalize(
                     resolution="blocked",
                     outcome="not_applicable",
@@ -223,6 +278,12 @@ class _Execution:
                 constraints=("不得声称被拒绝的状态变化已经发生。",),
             )
 
+        if isinstance(intent.check, DefaultCheck) and intent.verb not in _ATTACK_VERBS:
+            # Ordinary checks are descriptive rule resolutions.  They respect
+            # entity-level forbids, but do not execute module interaction or
+            # checkpoint operations that could advance the plot.
+            return self._complete_default_check(entity=entity)
+
         self._apply_rules("on_interact", selected_rules)
         if interaction_plan == "override":
             return self._complete_turn(resolution="direct", outcome="success")
@@ -257,16 +318,6 @@ class _Execution:
                 outcome="failure" if outcome in {"failure", "fumble"} else "success",
                 fact_source=(f"checkpoint:{intent.check.checkpoint_id}:{outcome}"),
             )
-        if isinstance(intent.check, DefaultCheck):
-            outcome = self._resolve_default_check(entity)
-            self.facts.append(
-                f"{self.request.actor_id} 对 {self.target_id} 执行 {intent.verb}"
-            )
-            self.visible.append(self._direct_visible_text(entity, intent.verb))
-            return self._complete_turn(
-                resolution="direct",
-                outcome="failure" if outcome in {"failure", "fumble"} else "success",
-            )
 
         self.facts.append(
             f"{self.request.actor_id} 对 {self.target_id} 执行 {intent.verb}"
@@ -298,6 +349,49 @@ class _Execution:
             resolution=resolution,
             outcome=outcome,
             fact_source=fact_source,
+        )
+
+    def _complete_default_check(
+        self,
+        *,
+        entity: EntitySpec | None,
+        destination_scene_id: str | None = None,
+    ) -> tuple[EngineExecutionResult, GameState]:
+        outcome = self._resolve_default_check()
+        passed = outcome not in {"failure", "fumble"}
+        self.facts.append(
+            f"{self.request.actor_id} 对 {self.target_id} 执行 "
+            f"{self.request.intent.verb}（普通检定{'通过' if passed else '未通过'}）"
+        )
+        if passed and entity is not None:
+            self.visible.append(
+                self._direct_visible_text(entity, self.request.intent.verb)
+            )
+        elif passed:
+            self.visible.append("你在这次尝试中充分发挥了相应技巧。")
+        else:
+            self.visible.append("你在这次尝试中没能充分发挥相应技巧。")
+        self.constraints.append(
+            "这是普通检定；不得把结果扩展为未执行的模组检查点、"
+            "未公开线索或额外状态变化。"
+        )
+        if passed:
+            self.constraints.append(
+                "检定已通过；只能使用 ActionResult.visible_facts 与动作后的 "
+                "PlayerView 描述即时效果。"
+            )
+        else:
+            self.constraints.append(
+                "检定未通过；不得声称发现新的隐藏信息或取得依赖该检定的额外效果。"
+            )
+        if destination_scene_id is not None:
+            self._transition(
+                destination_scene_id,
+                cause=f"action:{self.request.request_id}",
+            )
+        return self._complete_turn(
+            resolution="direct",
+            outcome="success" if passed else "failure",
         )
 
     def _validate_execution_context(self) -> None:
@@ -354,22 +448,23 @@ class _Execution:
         self._apply_hook("on_check_resolve", entity)
         return resolved
 
-    def _resolve_default_check(self, entity: EntitySpec) -> CheckOutcomeName:
+    def _resolve_default_check(self) -> CheckOutcomeName:
         check = self.request.intent.check
         if not isinstance(check, DefaultCheck):
             raise AssertionError("default resolution requires DefaultCheck")
         if not check.proposed_skills:
             raise ContractError("Default check requires at least one proposed skill")
-        self._apply_hook("on_check_declare", entity)
-        resolved = self._roll_check(
+        if any(
+            self._actor_check_value(skill_id) is None
+            for skill_id in check.proposed_skills
+        ):
+            raise ContractError("Default check skills must belong to the current Actor")
+        return self._roll_check(
             checkpoint_id=None,
             candidate_skills=check.proposed_skills,
             allowed_skills=check.proposed_skills,
             difficulty="regular",
         )
-        self._apply_hook("on_check_roll", entity)
-        self._apply_hook("on_check_resolve", entity)
-        return resolved
 
     def _roll_check(
         self,
@@ -393,7 +488,11 @@ class _Execution:
                 return "success"
             raise ContractError("Actor has no value for the proposed check skills")
         target_value, skill_id = max(candidates)
-        roll_value = self.dice.percentile()
+        roll_value = (
+            self.request.roll_value
+            if self.request.roll_value is not None
+            else self.dice.percentile()
+        )
         level = coc7_success_level(target_value, roll_value)
         passed = passes_difficulty(level, difficulty)
         self.check_result = RuleCheckResult(
@@ -417,7 +516,7 @@ class _Execution:
             value = actor.get("resources", {}).get("luck")
             if value is None:
                 value = attributes.get("LUCK")
-        elif skill_id.isupper():
+        elif skill_id in attributes:
             value = attributes.get(skill_id)
         else:
             value = skills.get(skill_id)
@@ -430,6 +529,13 @@ class _Execution:
         check = self.request.intent.check
         if isinstance(check, DefaultCheck) and check.proposed_skills:
             candidate_skills = check.proposed_skills
+            if any(
+                self._actor_check_value(skill_id) is None
+                for skill_id in candidate_skills
+            ):
+                raise ContractError(
+                    "Attack check skills must belong to the current Actor"
+                )
         else:
             candidate_skills = ("fighting-brawl",)
         resolved = self._roll_check(
@@ -727,16 +833,40 @@ class _Execution:
         for fact in facts:
             if fact not in self.facts:
                 self.facts.append(fact)
-        information_ids = {item.id for item in self.module.information_items}
-        discovered = tuple(self.state.get("discovered_facts", ()))
-        additions = tuple(
-            fact for fact in facts if fact in information_ids and fact not in discovered
-        )
-        if additions:
+        information = {item.id: item for item in self.module.information_items}
+        party_discovered = tuple(self.state.get("discovered_facts", ()))
+        actor_discovered_by_id = dict(self.state.get("actor_discovered_facts", {}))
+        actor_discovered = tuple(actor_discovered_by_id.get(self.request.actor_id, ()))
+        party_additions: list[str] = []
+        actor_additions: list[str] = []
+        for fact in facts:
+            item = information.get(fact)
+            if item is None:
+                continue
+            actor_scoped = (
+                item.visibility.audience == "actor"
+                or not item.visibility.discovery_shares_to_party
+            )
+            if actor_scoped:
+                if fact not in actor_discovered and fact not in actor_additions:
+                    actor_additions.append(fact)
+            elif fact not in party_discovered and fact not in party_additions:
+                party_additions.append(fact)
+        if party_additions:
             self._write(
                 "discovered_facts",
-                (*discovered, *additions),
+                (*party_discovered, *party_additions),
                 f"{cause}:discover",
+            )
+        if actor_additions:
+            actor_discovered_by_id[self.request.actor_id] = (
+                *actor_discovered,
+                *actor_additions,
+            )
+            self._write(
+                "actor_discovered_facts",
+                actor_discovered_by_id,
+                f"{cause}:discover-private",
             )
 
     def _apply_win_conditions(self) -> None:
@@ -772,6 +902,7 @@ class _Execution:
             "ending_id",
             "phase",
             "discovered_facts",
+            "actor_discovered_facts",
         }:
             raise ContractError(f"State path is outside the runtime whitelist: {path}")
         parent: Any = self.state

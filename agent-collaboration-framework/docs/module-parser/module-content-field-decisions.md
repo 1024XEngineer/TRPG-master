@@ -76,10 +76,12 @@ Module Parser 先产生私有 `ModuleDraft`，再经过确定性 Validation 构�
 
 | 字段 | 决议 |
 |---|---|
-| `id` / `name` / `content` | 场景身份、显示名和叙事内容 |
+| `id` / `name` / `content` | 场景身份和模组内部完整内容；不直接进入 PlayerView |
+| `player_visible_name` / `player_visible_description` | 玩家安全名称与当前可感知描述；不得自动复制 `content` |
 | `entity_ids` | 场景内实体引用 |
 | `checkpoint_ids` | 场景内可用 Checkpoint 引用 |
-| `exits` | 可到达的 Scene 引用；空数组表示契约不施加出口限制 |
+| `exits` | 可到达 Scene 限制；空数组表示不限制，非空时只允许列出的 Scene |
+| `available_exits` | 可选的玩家安全展示覆盖；省略时运行时直接由 `exits` 派生 |
 
 ### 4.2 `EntitySpec`
 
@@ -88,6 +90,8 @@ Module Parser 先产生私有 `ModuleDraft`，再经过确定性 Validation 构�
 | `id` / `name` / `aliases` | 稳定身份与语义匹配名称 |
 | `kind` | 仅允许 `npc`、`object`、`location` |
 | `content` | 玩家可见的基础描述 |
+| `visibility` | 实体自身的受众和发现策略 |
+| `observable_state` | 可观察动态状态 allow-list；每项含 `key/label/visibility` |
 | `secrets` | KP 私密描述，不进入玩家安全投影 |
 | `information_item_ids` | 关联的 `InformationItem` 引用 |
 | `state` | 声明可被规则引用的合法状态键 |
@@ -129,8 +133,9 @@ Rule Engine 的 `GameState` 管理。
 
 ### 4.5 `InformationItem`
 
-`InformationItem` 是可稳定引用的信息事实，包含 `id`、`content` 和静态
-`visibility`。动态发现流程必须由 Checkpoint、Rule 和 Outcome 表达，因此
+`InformationItem` 是可稳定引用、可检索的信息事实，包含 `id/title/summary/content`、
+`related_entities/related_scenes` 和静态 `visibility`。动态发现流程必须由
+Checkpoint、Rule 和 Outcome 表达，因此
 `InformationItem.visibility.requires_discovery` 必须为 `false`。
 
 ## 5. 规则语言
@@ -222,11 +227,13 @@ Validation 必须至少保证：
 2. 模组级与实体级 Rule ID 在整个 ModuleContent 内唯一；
 3. Scene 引用的 Entity、Checkpoint 和出口均存在；
 4. Checkpoint 的 Scene 和 Target 均存在，且同时列在对应 Scene 中；
-5. Entity 引用的 InformationItem 存在；
-6. Rule、WinCondition 和状态 Operation 使用的实体状态路径已声明；
-7. `transition`、`trigger_ending` 和 `trigger_rule` 的目标存在；
-8. 所有可见性组合满足受众与发现规则约束；
-9. Parser 使用的技能 ID 可在注入的 Ruleset 快照中解析。
+5. Scene 可选的 `available_exits` 使用局部唯一安全 ID；`exits` 非空时，目的地必须列入其中，空数组按自由移动处理；
+6. Entity 引用的 InformationItem 存在，`observable_state` key 已在 Entity state 声明；
+7. InformationItem 的相关 Entity/Scene 引用存在；
+8. Rule、WinCondition 和状态 Operation 使用的实体状态路径已声明；
+9. `transition`、`trigger_ending` 和 `trigger_rule` 的目标存在；
+10. 所有可见性组合满足受众与发现规则约束；
+11. Parser 使用的技能 ID 可在注入的 Ruleset 快照中解析。
 
 Validation 收集稳定错误码并返回 `pass`、`needs_revision` 或 `blocked`，不得用 LLM
 判断替代确定性检查。只有 `pass` 可以进入 Publish。

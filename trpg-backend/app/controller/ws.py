@@ -16,9 +16,9 @@
 - `action.submit` 必须携带 `clientActionId`，由 TurnApplication 完成身份绑定、
   编排、幂等去重和 PlayerView 投影；框架回包只发给动作发起者，普通叙事广播
   全房间，需要澄清的叙事只发给发起者；
-- `check.roll`/`san.check.roll`/`room.rejoin` 三个新增 C→S 事件校验完
-  payload 后统一回一条 `error` 事件（`NOT_IMPLEMENTED`），不做真实的服务端
-  权威掷骰/断线重连（issue #77"三处原型取舍"表格 + 决策 6）。
+- `action.submit` 需要检定时先回 `check.request`；玩家用 `check.roll`
+  选择技能并提交 D100 点数后，引擎才结算状态、返回 `check.result` 和叙述。
+- `san.check.roll`/`room.rejoin` 仍是 `NOT_IMPLEMENTED` 协议桩。
 - 每条实际发送的 `narration.push` 都会同步写一行 `events` 表；动作叙事用
   `clientActionId` 做持久化去重，`GET /rooms/{roomId}/replay` 直接读它。
 
@@ -31,6 +31,7 @@ WebSocket 可能存活很久，用一个 session 包住整条连接会在这期�
 import structlog
 from collaboration_framework.contracts import ContractError
 from collaboration_framework.engine import RevisionConflictError
+from collaboration_framework.host.schemas import TurnOutput
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 from sqlalchemy.exc import SQLAlchemyError
@@ -38,10 +39,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.websockets import WebSocketState
 
 from app.core.db import async_session_factory
-from app.core.turn import ActorResolutionError, turn_application
+from app.core.turn import ActorResolutionError, PreparedTurn, turn_application
 from app.dto.ws import (
     ActionSubmitPayload,
+    CheckRequestPayload,
+    CheckResultPayload,
     CheckRollPayload,
+    CheckSkillOptionPayload,
     ClientEnvelope,
     ErrorPayload,
     GameStartPayload,
@@ -124,6 +128,54 @@ async def _deliver_turn_narration(
         await manager.broadcast(room_id, message)
 
 
+async def _send_check_request(
+    websocket: WebSocket,
+    player_id: str,
+    prepared: PreparedTurn,
+) -> None:
+    payload = CheckRequestPayload(
+        player_id=player_id,
+        client_action_id=prepared.player_input.client_action_id,
+        summary=prepared.intent.summary,
+        difficulty=prepared.difficulty,
+        skills=[
+            CheckSkillOptionPayload(
+                id=candidate.id,
+                name=candidate.name,
+                target_value=candidate.target_value,
+            )
+            for candidate in prepared.candidates
+        ],
+    )
+    envelope = ServerEnvelope(
+        type="check.request",
+        payload=payload.model_dump(by_alias=True),
+    )
+    await websocket.send_json(envelope.model_dump(by_alias=True))
+
+
+async def _send_completed_turn(
+    db: AsyncSession,
+    websocket: WebSocket,
+    room_id: str,
+    player_id: str,
+    output: TurnOutput,
+) -> None:
+    websocket_output = output.to_websocket_output()
+    await websocket.send_json(websocket_output.to_json_dict())
+    await _deliver_turn_narration(
+        db,
+        websocket,
+        room_id,
+        player_id,
+        client_action_id=output.player_input.client_action_id,
+        text=output.narration.text,
+        clarification=output.narration.kind == "clarification",
+    )
+    if output.player_view.phase == "ended":
+        await broadcast_room_state(db, room_id)
+
+
 def _map_turn_error(exc: Exception) -> tuple[str, str]:
     if isinstance(exc, ActorResolutionError):
         return "ACTOR_NOT_CONTROLLED", "当前玩家没有可控制的局内角色"
@@ -193,6 +245,7 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
 
     await websocket.accept()
     bound_player_id: str | None = None
+    pending_turn: PreparedTurn | None = None
 
     try:
         while True:
@@ -281,24 +334,51 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                             )
                             continue
                         try:
-                            output = await turn_application.handle(
+                            if pending_turn is not None:
+                                same_action = (
+                                    pending_turn.player_input.client_action_id
+                                    == submit_payload.client_action_id
+                                    and pending_turn.player_input.utterance
+                                    == submit_payload.utterance
+                                )
+                                if same_action:
+                                    await _send_check_request(
+                                        websocket,
+                                        bound_player_id,
+                                        pending_turn,
+                                    )
+                                else:
+                                    await _send_error(
+                                        websocket,
+                                        "CHECK_PENDING",
+                                        "请先完成当前待处理的技能检定",
+                                        correlation_id=submit_payload.client_action_id,
+                                    )
+                                continue
+
+                            prepared = await turn_application.prepare(
                                 room_id=room_id,
                                 player_id=bound_player_id,
                                 client_action_id=submit_payload.client_action_id,
                                 utterance=submit_payload.utterance,
                             )
-                            await websocket.send_json(output.to_json_dict())
-                            await _deliver_turn_narration(
+                            if prepared.candidates:
+                                pending_turn = prepared
+                                await _send_check_request(
+                                    websocket,
+                                    bound_player_id,
+                                    prepared,
+                                )
+                                continue
+
+                            output = await turn_application.complete(prepared)
+                            await _send_completed_turn(
                                 db,
                                 websocket,
                                 room_id,
                                 bound_player_id,
-                                client_action_id=submit_payload.client_action_id,
-                                text=output.payload.narration.text,
-                                clarification=output.payload.narration.kind == "clarification",
+                                output,
                             )
-                            if output.payload.player_view.phase == "ended":
-                                await broadcast_room_state(db, room_id)
                         except Exception as exc:
                             code, message = _map_turn_error(exc)
                             logger.warning(
@@ -315,10 +395,85 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                             )
                             continue
                     elif event_type == "check.roll":
-                        CheckRollPayload.model_validate(raw_payload)
-                        await _send_error(
-                            websocket, "NOT_IMPLEMENTED", "服务端权威技能检定本期尚未实现"
-                        )
+                        roll_payload = CheckRollPayload.model_validate(raw_payload)
+                        if pending_turn is None:
+                            await _send_error(
+                                websocket,
+                                "CHECK_NOT_PENDING",
+                                "当前没有等待投掷的技能检定",
+                                correlation_id=roll_payload.client_action_id,
+                            )
+                            continue
+                        if (
+                            pending_turn.player_input.client_action_id
+                            != roll_payload.client_action_id
+                        ):
+                            await _send_error(
+                                websocket,
+                                "CHECK_ACTION_MISMATCH",
+                                "检定结果与当前待处理动作不匹配",
+                                correlation_id=roll_payload.client_action_id,
+                            )
+                            continue
+                        try:
+                            output = await turn_application.complete(
+                                pending_turn,
+                                selected_skill=roll_payload.skill,
+                                roll_value=roll_payload.roll_value,
+                            )
+                            check_result = output.action_result.check_result
+                            if check_result is None:
+                                raise ContractError(
+                                    "Completed skill check did not return a check result"
+                                )
+                            candidate = next(
+                                item
+                                for item in pending_turn.candidates
+                                if item.id == check_result.skill_id
+                            )
+                            result_payload = CheckResultPayload(
+                                player_id=bound_player_id,
+                                client_action_id=roll_payload.client_action_id,
+                                skill=check_result.skill_id,
+                                skill_name=candidate.name,
+                                roll_value=check_result.roll_value,
+                                target_value=check_result.target_value,
+                                difficulty=check_result.difficulty,
+                                success_level=check_result.success_level,
+                                passed=check_result.passed,
+                                result=check_result.success_level,
+                            )
+                            pending_turn = None
+                            result_envelope = ServerEnvelope(
+                                type="check.result",
+                                payload=result_payload.model_dump(by_alias=True),
+                            )
+                            await manager.broadcast(
+                                room_id,
+                                result_envelope.model_dump(by_alias=True),
+                            )
+                            await _send_completed_turn(
+                                db,
+                                websocket,
+                                room_id,
+                                bound_player_id,
+                                output,
+                            )
+                        except Exception as exc:
+                            code, message = _map_turn_error(exc)
+                            logger.warning(
+                                "ws_check_failed",
+                                code=code,
+                                correlation_id=roll_payload.client_action_id,
+                                error=str(exc),
+                            )
+                            await _send_error(
+                                websocket,
+                                code,
+                                message,
+                                correlation_id=roll_payload.client_action_id,
+                            )
+                            continue
                     elif event_type == "san.check.roll":
                         SanCheckRollPayload.model_validate(raw_payload)
                         await _send_error(

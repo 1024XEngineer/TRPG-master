@@ -11,12 +11,30 @@
       "source_character_id": "character_01",
       "source_character_version": 1,
       "state": {
+        "occupation": "私家侦探",
         "hp": 10,
         "san": 60,
+        "attributes": {},
+        "attribute_labels": {},
         "skills": {},
-        "inventory": [],
+        "skill_labels": {},
+        "equipment": [
+          {
+            "name": "手电筒"
+          }
+        ],
+        "background": "曾任警探，擅长从细节中寻找线索。",
+        "notes": "只属于玩家的私人笔记，绝不能进入 PlayerView。",
         "conditions": []
-      }
+      },
+      "resources": {
+        "hp": 10,
+        "san": 60,
+        "mp": 10,
+        "luck": 50,
+        "mythos": 0
+      },
+      "conditions": []
     }
   },
   "entities": {

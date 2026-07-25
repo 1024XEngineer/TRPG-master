@@ -23,6 +23,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import not_implemented
+from app.core.runtime_state import ruleset_labels, ruleset_skill_values
 from app.dto.game import GameRead, GameSystemRead, RulesetRead
 from app.dto.module import ModuleDetailRead
 from app.dto.replay import ReplayEventRead, RoomSummaryRead
@@ -446,7 +447,10 @@ async def begin_game(db: AsyncSession, room_id: str, player_id: str) -> None:
             name=character_by_player[room_player.id].name or room_player.nickname,
             source_character_id=character_by_player[room_player.id].id,
             source_character_version=character_by_player[room_player.id].version,
-            state=_character_runtime_state(character_by_player[room_player.id]),
+            state=_character_runtime_state(
+                character_by_player[room_player.id],
+                ruleset=system.ruleset,
+            ),
             resources=_character_runtime_resources(character_by_player[room_player.id]),
         )
         for index, room_player in enumerate(room_players, start=1)
@@ -490,8 +494,19 @@ async def begin_game(db: AsyncSession, room_id: str, player_id: str) -> None:
         raise
 
 
-def _character_runtime_state(character: Character) -> dict:
+def _character_runtime_state(
+    character: Character,
+    *,
+    ruleset: dict | None = None,
+) -> dict:
     """复制 Character 为与源卡解耦的局内 ActorState.state。"""
+    ruleset = ruleset or {}
+    attributes = deepcopy(character.attributes or {})
+    skills = ruleset_skill_values(
+        ruleset.get("skills"),
+        attributes=attributes,
+    )
+    skills.update(deepcopy(character.skills or {}))
     return {
         "age": character.age,
         "gender": character.gender,
@@ -499,9 +514,19 @@ def _character_runtime_state(character: Character) -> dict:
         "birthplace": character.birthplace,
         "generation_method": character.generation_method,
         "occupation": character.occupation,
-        "attributes": deepcopy(character.attributes or {}),
+        "attributes": attributes,
+        "attribute_labels": ruleset_labels(
+            ruleset.get("attributes"),
+            id_field="key",
+            name_field="label",
+        ),
         "derived_stats": deepcopy(character.derived_stats or {}),
-        "skills": deepcopy(character.skills or {}),
+        "skills": skills,
+        "skill_labels": ruleset_labels(
+            ruleset.get("skills"),
+            id_field="id",
+            name_field="name",
+        ),
         "equipment": list(character.equipment or []),
         "background": character.background,
         "notes": character.notes,

@@ -8,6 +8,8 @@
       "id": "client_briefing",
       "name": "托马斯的委托",
       "content": "托马斯·金博尔请调查员寻找从叔叔旧居失窃的五本书，并查明一年前失踪的叔叔道格拉斯是否还活着。书本本身并不值钱，却曾被道格拉斯视若珍宝。",
+      "player_visible_name": "托马斯的会客室",
+      "player_visible_description": "托马斯·金博尔坐在你面前，正等待你回应寻找失窃藏书和叔叔下落的委托。",
       "entity_ids": ["thomas", "missing_books"],
       "checkpoint_ids": [],
       "exits": []
@@ -16,6 +18,8 @@
       "id": "neighborhood",
       "name": "询问朋友和邻居",
       "content": "调查员可以走访道格拉斯旧居附近的邻居。莱拉·奥戴尔记得道格拉斯曾夹着书往公墓方向走，不过他本来就走到哪里都带着书。",
+      "player_visible_name": "金博尔宅附近",
+      "player_visible_description": "道格拉斯旧居周围是安静的街区，熟悉他的邻居仍在这里生活。",
       "entity_ids": ["lyla"],
       "checkpoint_ids": ["question_neighbors"],
       "exits": []
@@ -24,6 +28,8 @@
       "id": "cemetery",
       "name": "阿诺兹堡公共墓地",
       "content": "梅洛迪亚斯·杰弗逊看守着这片公共墓地。道格拉斯从前常坐在一块低矮墓碑上读书；到了深夜，墓地中偶尔仍会出现一个坐在那里的人影。",
+      "player_visible_name": "阿诺兹堡公共墓地",
+      "player_visible_description": "成排墓碑立在寂静的公共墓地中，守墓人的住处位于不远处。",
       "entity_ids": [
         "melodias",
         "caretaker_bottle",
@@ -43,6 +49,8 @@
       "id": "library",
       "name": "当地图书馆",
       "content": "图书馆保存着《阿诺兹堡广告报》的旧刊。十多年前的一篇报道提到，有人曾在公共墓地目击一群形似裸体的人跳舞，警方只找到形状怪异的脚印。",
+      "player_visible_name": "阿诺兹堡图书馆",
+      "player_visible_description": "安静的图书馆里整齐保存着当地报纸与历史资料的旧刊。",
       "entity_ids": ["newspaper_archive"],
       "checkpoint_ids": ["research_library_archive"],
       "exits": []
@@ -51,6 +59,8 @@
       "id": "newspaper_office",
       "name": "《阿诺兹堡广告报》",
       "content": "报社档案室保存着那篇墓地旧闻及相关材料，其中包括希尔达·沃德从未发表的陈述。记者或作家可以直接进入档案室，其他人需要先取得许可。",
+      "player_visible_name": "《阿诺兹堡广告报》报社",
+      "player_visible_description": "报社里电话声与打字声此起彼伏，存放旧闻材料的档案室位于里面。",
       "entity_ids": ["newspaper_archive", "hilda"],
       "checkpoint_ids": [
         "access_newspaper_archive",
@@ -62,6 +72,8 @@
       "id": "kimball_house",
       "name": "金博尔宅与书房",
       "content": "托马斯已经搬进叔叔的旧居，但书房仍几乎保持原状。大小、形制与题材各异的藏书塞满房间，每一本都保养得很好；完整搜索至少需要一天。",
+      "player_visible_name": "金博尔宅书房",
+      "player_visible_description": "大小、形制与题材各异的藏书塞满书房，每一本都保养得很好。",
       "entity_ids": [
         "thomas",
         "kimball_study",
@@ -79,6 +91,8 @@
       "id": "speakeasy",
       "name": "地下酒吧",
       "content": "禁酒令时期，要买到一品脱酒需要先找到一家地下酒吧。找到后通常要花费 1d3 美元，职业与背景合适的调查员可以由守秘人直接引导到熟悉的酒吧。",
+      "player_visible_name": "地下酒吧",
+      "player_visible_description": "隐蔽入口后是灯光昏暗、压低交谈声不断的地下酒吧。",
       "entity_ids": ["liquor"],
       "checkpoint_ids": ["find_speakeasy"],
       "exits": []
@@ -87,6 +101,8 @@
       "id": "night_surveillance",
       "name": "夜间监视",
       "content": "调查员可以在金博尔宅或公墓外安排人手，每晚等待那条从墓地前往书房取书的人影。若书房窗户上锁，人影会撞坏木条与玻璃闯入。",
+      "player_visible_name": "夜间监视点",
+      "player_visible_description": "夜色笼罩着金博尔宅与通往公墓的道路，你可以在阴影中观察周围动静。",
       "entity_ids": [
         "douglas",
         "study_window",
@@ -103,6 +119,8 @@
       "id": "crypt",
       "name": "地穴入口",
       "content": "半足半蹄的脚印通向正确的坟墓。一块沉重石板盖着地下通道，石板移开后会涌出足以让人昏厥的腐臭。",
+      "player_visible_name": "地穴入口",
+      "player_visible_description": "一块沉重石板盖着向下的通道，周围空气阴冷而浑浊。",
       "entity_ids": ["crypt_entrance", "douglas"],
       "checkpoint_ids": [
         "move_crypt_slab",
@@ -114,6 +132,8 @@
       "id": "conversation",
       "name": "与道格拉斯交谈",
       "content": "若调查员喊出道格拉斯的名字、跟随他来到墓碑旁，或从地穴入口见到他，道格拉斯会在自己最喜欢的墓碑上讲述过去。只要受到礼貌询问，他就会回答任何疑问。",
+      "player_visible_name": "墓碑旁",
+      "player_visible_description": "道格拉斯停在一块低矮墓碑旁，正面对着你，周围只有夜风掠过墓地。",
       "entity_ids": ["douglas", "favorite_grave", "crypt_entrance"],
       "checkpoint_ids": [
         "talk_to_douglas",
@@ -126,6 +146,8 @@
       "id": "ghoul_confrontation",
       "name": "食尸鬼群现身",
       "content": "如果道格拉斯被杀，几十只食尸鬼会从夜幕中缓缓现身。逃走者不会被追赶；试图与它们搏斗的人则会被制服并带进地下洞穴。",
+      "player_visible_name": "墓地中的包围",
+      "player_visible_description": "许多模糊身影从夜幕与墓碑之间出现，正在无声地聚拢。",
       "entity_ids": ["douglas", "ghoul_crowd"],
       "checkpoint_ids": ["flee_ghoul_crowd"],
       "exits": []

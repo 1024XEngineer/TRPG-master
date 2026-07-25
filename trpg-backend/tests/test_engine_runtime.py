@@ -10,6 +10,7 @@ from collaboration_framework.contracts import (
     ActionRequest,
     ContractError,
     Intent,
+    JsonObject,
     MatchedTarget,
     ModuleCheck,
     PlayerInput,
@@ -21,6 +22,8 @@ from collaboration_framework.engine import (
     RuleEngineService,
     RuleKernel,
 )
+from collaboration_framework.host.adapters.fakes import FakeNarrationModel
+from collaboration_framework.host.schemas import IntentContext
 from httpx import AsyncClient
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -61,6 +64,23 @@ _CHARACTER_PAYLOAD = {
     "background": "",
     "notes": "",
 }
+
+
+class _CandidateIntentModel:
+    async def generate(self, context: IntentContext) -> JsonObject:
+        return {
+            "kind": "action",
+            "verb": "investigate",
+            "target": {
+                "matched": True,
+                "id": context.player_view.scene.id,
+            },
+            "check": {
+                "route": "default",
+                "proposed_skills": ["spot-hidden", "stealth"],
+            },
+            "summary": context.player_input.utterance,
+        }
 
 
 def _uuid(prefix: int, value: int) -> str:
@@ -226,6 +246,53 @@ async def test_turn_application_resolves_actor_and_replays_one_execution(
     assert action_count == 1
 
 
+async def test_turn_application_waits_for_selected_skill_and_submitted_roll(
+    db_session: AsyncSession,
+    engine_store_factory: Callable[..., SqlAlchemyEngineStore],
+) -> None:
+    from app.core.turn import build_turn_application
+
+    room, players, _ = await _start_room(
+        db_session,
+        room_number=2,
+        prepare_checkpoint=False,
+    )
+    store = engine_store_factory()
+    application = build_turn_application(
+        store,
+        RuleEngineService(store),
+        intent_model=_CandidateIntentModel(),
+        narration_model=FakeNarrationModel(),
+    )
+
+    prepared = await application.prepare(
+        room_id=room.id,
+        player_id=players[0].id,
+        client_action_id="selected-skill-roll-146",
+        utterance="尝试潜行观察周围",
+    )
+
+    assert [candidate.id for candidate in prepared.candidates] == [
+        "spot-hidden",
+        "stealth",
+    ]
+    assert await _counts(db_session, room.id) == (0, 0)
+
+    output = await application.complete(
+        prepared,
+        selected_skill="stealth",
+        roll_value=7,
+    )
+
+    check = output.action_result.check_result
+    assert check is not None
+    assert check.skill_id == "stealth"
+    assert check.roll_value == 7
+    assert check.target_value == 20
+    assert check.passed
+    assert await _counts(db_session, room.id) == (0, 1)
+
+
 async def test_select_module_pins_recommended_published_version(
     client: AsyncClient,
     db_session: AsyncSession,
@@ -275,6 +342,11 @@ async def test_begin_game_creates_stable_actor_snapshots(
     assert state.actors["actor_1"].source_character_version == characters[0].version
     assert "actor_1" not in {character.id for character in characters}
     assert state.actors["actor_1"].state["attributes"] == {"HP_SOURCE": 1}
+    actor_skills = state.actors["actor_1"].state["skills"]
+    assert isinstance(actor_skills, dict)
+    assert actor_skills["library-use"] == 20
+    assert actor_skills["credit-rating"] == 0
+    assert actor_skills["spot-hidden"] == 51
     assert state.actors["actor_1"].resources.hp == 11
     assert state.actors["actor_1"].resources.san is None
     assert state.entities["thomas"]["case_open"] is True
@@ -288,6 +360,70 @@ async def test_begin_game_creates_stable_actor_snapshots(
         )
         == 1
     )
+
+
+async def test_load_runtime_backfills_ruleset_skills_for_legacy_actor(
+    db_session: AsyncSession,
+    engine_store_factory: Callable[..., SqlAlchemyEngineStore],
+) -> None:
+    room, players, _ = await _start_room(
+        db_session,
+        prepare_checkpoint=False,
+    )
+    room_id = room.id
+    game_session = await db_session.get(GameSession, room_id)
+    assert game_session is not None
+    state = GameState.model_validate(game_session.state_json)
+    actor = state.actors["actor_1"]
+    legacy_actor_state = dict(actor.state)
+    legacy_actor_state["skills"] = {
+        "library-use": 44,
+        "spot-hidden": 51,
+        "persuade": 35,
+        "credit-rating": 10,
+    }
+    legacy_actor_state.pop("skill_labels", None)
+    legacy_state = state.model_copy(
+        update={
+            "actors": {
+                **state.actors,
+                "actor_1": actor.model_copy(update={"state": legacy_actor_state}),
+            }
+        }
+    )
+    game_session.state_json = legacy_state.to_json_dict()
+    await db_session.commit()
+
+    store = engine_store_factory()
+    async with store.transaction(room_id) as transaction:
+        runtime = await transaction.load_runtime()
+
+    actor_state = runtime.game_state.actors["actor_1"].state
+    assert len(actor_state["skills"]) > 4
+    assert actor_state["skills"]["stealth"] == 20
+    assert actor_state["skills"]["library-use"] == 44
+    assert actor_state["skill_labels"]["stealth"] == "潜行"
+    assert runtime.revision == "0"
+
+    projection = await RuleEngineService(store).read(
+        PlayerInput(
+            room_id=room_id,
+            player_id=players[0].id,
+            actor_id="actor_1",
+            client_action_id="legacy-skill-projection-146",
+            utterance="尝试潜行",
+        )
+    )
+    stealth = next(skill for skill in projection.self_actor.skills if skill.id == "stealth")
+    assert stealth.value == 20
+    assert stealth.name == "潜行"
+
+    db_session.expire_all()
+    persisted = await db_session.get(GameSession, room_id)
+    assert persisted is not None
+    persisted_state = GameState.model_validate(persisted.state_json)
+    assert persisted.state_version == 0
+    assert persisted_state.actors["actor_1"].state["skills"]["stealth"] == 20
 
 
 async def test_character_reads_remain_available_and_writes_conflict_after_game_start(

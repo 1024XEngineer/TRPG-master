@@ -41,11 +41,13 @@ ModuleContent
 | 字段 | 值示例 | 作用 |
 |------|--------|------|
 | `id` | `"study"` | 唯一标识 |
-| `name` | `"书房"` | 显示名 |
-| `content` | `"昏黄灯光下，书架、木柜..."` | 场景描述，给 A 做叙事上下文 |
+| `name` / `content` | `"书房"` / `"KP 场景说明..."` | 模组内部名称和完整内容，不直接进入 PlayerView |
+| `player_visible_name` | `"书房"` | 玩家安全的场景名称 |
+| `player_visible_description` | `"昏黄灯光下，书架、木柜..."` | 玩家当前可感知描述；不得从 `content` 自动兜底 |
 | `entity_ids` | `["butler","bookshelf","cabinet"]` | 索引：这个场景里有哪些实体。B 的引擎据此决定 PlayerView 展示什么 |
 | `checkpoint_ids` | `["investigate_bookshelf","smash_cabinet"]` | 索引：这个场景里能做什么动作。A 的 IntentParser 据此匹配玩家语义 |
-| `exits` | `[]` | 可以直接移动到的其他场景；空表示没有可用的直接出口 |
+| `exits` | `["garden"]` | 可达 Scene 限制；空数组表示可自由前往其他 Scene，非空时只允许列出的 Scene |
+| `available_exits` | `[{"id":"north-door",...}]` | 可选的出口展示/可见性覆盖；省略时由 `exits` 和 Scene 安全名称自动派生 |
 
 ### EntitySpec —— "有什么东西"
 
@@ -55,6 +57,8 @@ ModuleContent
 | `kind` | `"object"` | npc / object / location 三种 |
 | `name` / `aliases` | `"上锁的柜子"` / `["柜子","木柜"]` | A 做语义匹配——玩家说"打开柜子"能匹配到 |
 | `content` | `"一只带黄铜锁孔的年代久远的木柜"` | 玩家可见描述 → 进入 PlayerView |
+| `visibility` | `{"audience":"all",...}` | 实体自身的受众与发现策略 |
+| `observable_state` | `[{"key":"opened","label":"柜门是否打开"}]` | 动态状态 allow-list；不复制原始 Entity state |
 | `secrets` | `"文件藏在柜中；强行砸开会毁坏文件"` | KP 私密信息 → 不进入 A 的上下文。信息隔离边界 |
 | `state` | `{"opened": false}` | 声明合法状态键及初始值；开局时复制到独立的 GameState |
 | `refuse_ops` | `["open"]` | 静态拒绝列表：不管什么条件，默认不能 open。需要 Rule 动态解封 |
@@ -157,6 +161,6 @@ Rule(
 
 ## 四、当前落地状态
 
-- **发布契约已落地**：`mode`、`expr`、可空 `difficulty`、`is_ending`、`module_rules`、`information_items`、`exits`、`stat_block`、分级结果、可见性、20 个 Hook 与 Operation 联合类型。
+- **发布契约已落地**：`mode`、`expr`、可空 `difficulty`、`is_ending`、`module_rules`、结构化 `information_items`、内部 `exits`、玩家安全 `available_exits`、`observable_state`、`stat_block`、分级结果、可见性、20 个 Hook 与 Operation 联合类型。
 - **《追书人》运行时已落地**：安全 Expression、Hook 优先级与模式、状态级联、COC7 百分骰/SAN/最小战斗、时间、场景、结局、投影和固定随机源测试。
 - **扩展策略**：发布契约仍大于当前运行能力；`scale/absorb`、完整 COC7 战斗/追逐等后续能力通过 Runtime 扩展，不修改 B/C 发布字段形状，未支持能力必须 fail closed。

@@ -194,13 +194,28 @@ class RuleSpec(ContractModel):
         return value
 
 
+class SceneExitSpec(ContractModel):
+    """Optional player-safe presentation override for one reachable route."""
+
+    id: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+    aliases: tuple[str, ...] = ()
+    description: str = ""
+    destination_scene_id: str = Field(min_length=1)
+    reveal_destination: bool = False
+    visibility: VisibilityPolicy = Field(default_factory=VisibilityPolicy)
+
+
 class SceneSpec(ContractModel):
     id: str = Field(min_length=1)
     name: str = Field(min_length=1)
     content: str
+    player_visible_name: str = ""
+    player_visible_description: str = ""
     entity_ids: tuple[str, ...] = ()
     checkpoint_ids: tuple[str, ...] = ()
     exits: tuple[str, ...] = ()
+    available_exits: tuple[SceneExitSpec, ...] = ()
 
 
 class StatBlock(ContractModel):
@@ -220,12 +235,22 @@ class StatBlock(ContractModel):
     move: int | None = None
 
 
+class ObservableStateSpec(ContractModel):
+    """Allow-list one runtime entity-state field for player projection."""
+
+    key: str = Field(min_length=1)
+    label: str = Field(min_length=1)
+    visibility: VisibilityPolicy = Field(default_factory=VisibilityPolicy)
+
+
 class EntitySpec(ContractModel):
     id: str = Field(min_length=1)
     kind: Literal["npc", "object", "location"]
     name: str = Field(min_length=1)
     aliases: tuple[str, ...] = ()
     content: str
+    visibility: VisibilityPolicy = Field(default_factory=VisibilityPolicy)
+    observable_state: tuple[ObservableStateSpec, ...] = ()
     secrets: str | None = None
     information_item_ids: tuple[str, ...] = ()
     state: dict[str, JsonValue] = Field(default_factory=dict)
@@ -283,7 +308,11 @@ class WinConditionSpec(ContractModel):
 
 class InformationItem(ContractModel):
     id: str = Field(min_length=1)
+    title: str = ""
+    summary: str = ""
     content: str
+    related_entities: tuple[str, ...] = ()
+    related_scenes: tuple[str, ...] = ()
     visibility: VisibilityPolicy = Field(default_factory=VisibilityPolicy)
 
     @model_validator(mode="after")
@@ -342,18 +371,54 @@ class ModuleContent(ContractModel):
 
         for scene in self.scenes:
             if missing := set(scene.entity_ids) - entity_ids:
-                raise ValueError(f"Scene {scene.id} 引用了不存在的 Entity: {sorted(missing)}")
+                raise ValueError(
+                    f"Scene {scene.id} 引用了不存在的 Entity: {sorted(missing)}"
+                )
             if missing := set(scene.checkpoint_ids) - checkpoint_ids:
                 raise ValueError(
                     f"Scene {scene.id} 引用了不存在的 Checkpoint: {sorted(missing)}"
                 )
             if missing := set(scene.exits) - scene_ids:
-                raise ValueError(f"Scene {scene.id} 引用了不存在的 exit: {sorted(missing)}")
+                raise ValueError(
+                    f"Scene {scene.id} 引用了不存在的 exit: {sorted(missing)}"
+                )
+            exit_ids = [item.id for item in scene.available_exits]
+            if len(exit_ids) != len(set(exit_ids)):
+                raise ValueError(f"Scene {scene.id} 的 available exit id 必须唯一")
+            for available_exit in scene.available_exits:
+                if (
+                    scene.exits
+                    and available_exit.destination_scene_id not in scene.exits
+                ):
+                    raise ValueError(
+                        f"Scene {scene.id} 的 available exit {available_exit.id} "
+                        "必须指向 exits 中声明的 Scene"
+                    )
 
         for entity in self.entities:
             if missing := set(entity.information_item_ids) - information_item_ids:
                 raise ValueError(
                     f"Entity {entity.id} 引用了不存在的 InformationItem: {sorted(missing)}"
+                )
+            observable_keys = [item.key for item in entity.observable_state]
+            if len(observable_keys) != len(set(observable_keys)):
+                raise ValueError(f"Entity {entity.id} 的 observable state key 必须唯一")
+            if missing := set(observable_keys) - set(entity.state):
+                raise ValueError(
+                    f"Entity {entity.id} 的 observable state 未在 state 声明: "
+                    f"{sorted(missing)}"
+                )
+
+        for information in self.information_items:
+            if missing := set(information.related_entities) - entity_ids:
+                raise ValueError(
+                    f"InformationItem {information.id} 引用了不存在的 Entity: "
+                    f"{sorted(missing)}"
+                )
+            if missing := set(information.related_scenes) - scene_ids:
+                raise ValueError(
+                    f"InformationItem {information.id} 引用了不存在的 Scene: "
+                    f"{sorted(missing)}"
                 )
 
         for checkpoint in self.checkpoints:
@@ -441,9 +506,7 @@ class ModuleContent(ContractModel):
                 isinstance(operation, TriggerRuleSpec)
                 and operation.rule_id not in rule_ids
             ):
-                raise ValueError(
-                    f"{owner} 触发不存在的 Rule {operation.rule_id}"
-                )
+                raise ValueError(f"{owner} 触发不存在的 Rule {operation.rule_id}")
 
     @staticmethod
     def _validate_state_path(

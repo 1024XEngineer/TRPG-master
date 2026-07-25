@@ -248,6 +248,20 @@
     },
     "intent": {
       "$ref": "#/$defs/Intent"
+    },
+    "roll_value": {
+      "anyOf": [
+        {
+          "maximum": 100,
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Roll Value"
     }
   },
   "required": [

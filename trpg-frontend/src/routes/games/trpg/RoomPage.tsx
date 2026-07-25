@@ -1,4 +1,5 @@
 import { useNavigate } from 'react-router-dom'
+import type { CheckRequestPayload } from 'trpg-sdk'
 import { ArrowLeft, Users, Map, BookOpen, ScrollText, Star, X, SendHorizontal, Dice6, Plus, Save, FlagOff, Heart } from 'lucide-react'
 import { useState, useRef, useEffect, type FormEvent } from 'react'
 import { useRoomStore } from '@/stores/room-store'
@@ -86,8 +87,19 @@ function BottomPanel({ open, onClose, title, children, heightVh }: { open: boole
 // 不再是独立的全屏深色页面。面板现在跟其他面板一样常驻挂载、靠 open 控制
 // 滑入滑出，所以每次重新打开都要把上一次投骰的结果清空，不然会看到上一轮
 // 的结果还留着。
-function DiceModal({ open, onClose, onResult }: { open: boolean; onClose: () => void; onResult: (result: number, diceType: DiceType) => void }) {
+function DiceModal({
+  open,
+  onClose,
+  onResult,
+  checkRequest,
+}: {
+  open: boolean
+  onClose: () => void
+  onResult: (result: number, diceType: DiceType, skillId?: string) => void
+  checkRequest: CheckRequestPayload | null
+}) {
   const [diceType, setDiceType] = useState<DiceType>('d100')
+  const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null)
   const [shakeLevel, setShakeLevel] = useState(0)
   const [result, setResult] = useState<number | null>(null)
   const [rolling, setRolling] = useState(false)
@@ -103,12 +115,17 @@ function DiceModal({ open, onClose, onResult }: { open: boolean; onClose: () => 
   useEffect(() => {
     if (open) {
       setDiceType('d100')
+      setSelectedSkillId(checkRequest?.skills[0]?.id ?? null)
       setResult(null)
       setShowResult(false)
       setRolling(false)
       setShakeLevel(0)
     }
-  }, [open])
+  }, [open, checkRequest])
+
+  const selectedSkill =
+    checkRequest?.skills.find((skill) => skill.id === selectedSkillId) ?? null
+  const targetValue = selectedSkill?.targetValue ?? 65
 
   const roll = (power: number) => {
     setRolling(true)
@@ -181,7 +198,8 @@ function DiceModal({ open, onClose, onResult }: { open: boolean; onClose: () => 
 
   const confirmResult = () => {
     if (result === null) return
-    onResult(result, diceType)
+    if (checkRequest && !selectedSkillId) return
+    onResult(result, diceType, selectedSkillId ?? undefined)
     onClose()
   }
 
@@ -229,10 +247,10 @@ function DiceModal({ open, onClose, onResult }: { open: boolean; onClose: () => 
 
   const getVerdict = (): { label: string; color: string } | null => {
     if (result === null || diceType !== 'd100') return null
-    const skill = 65
-    if (result <= 5) return { label: '极限成功', color: DIFFICULTY_COLORS.crit }
-    if (result <= 33) return { label: '困难成功', color: DIFFICULTY_COLORS.success }
-    if (result <= skill) return { label: '成功', color: DIFFICULTY_COLORS.success }
+    if (result === 1) return { label: '大成功', color: DIFFICULTY_COLORS.crit }
+    if (result <= Math.floor(targetValue / 5)) return { label: '极难成功', color: DIFFICULTY_COLORS.success }
+    if (result <= Math.floor(targetValue / 2)) return { label: '困难成功', color: DIFFICULTY_COLORS.success }
+    if (result <= targetValue) return { label: '成功', color: DIFFICULTY_COLORS.success }
     return { label: '失败', color: DIFFICULTY_COLORS.fail }
   }
 
@@ -241,27 +259,55 @@ function DiceModal({ open, onClose, onResult }: { open: boolean; onClose: () => 
   return (
     <BottomPanel open={open} onClose={onClose} title="骰子检定">
       {/* Dice type selector */}
-      <div className="flex gap-1.5 mb-3.5">
-        {DICE_OPTIONS.map((opt) => (
-          <button
-            key={opt.id}
-            onClick={() => { if (!rolling) { setDiceType(opt.id); setResult(null); setShowResult(false); setShakeLevel(0) } }}
-            className={`flex-1 text-center text-[12px] font-semibold py-1.5 rounded-[99px] border transition-all ${
-              diceType === opt.id ? 'bg-brass text-white border-brass' : 'bg-panel text-text-muted border-border-light'
-            }`}
-          >
-            {opt.label}
-          </button>
-        ))}
-      </div>
+      {!checkRequest && (
+        <div className="flex gap-1.5 mb-3.5">
+          {DICE_OPTIONS.map((opt) => (
+            <button
+              key={opt.id}
+              onClick={() => { if (!rolling) { setDiceType(opt.id); setResult(null); setShowResult(false); setShakeLevel(0) } }}
+              className={`flex-1 text-center text-[12px] font-semibold py-1.5 rounded-[99px] border transition-all ${
+                diceType === opt.id ? 'bg-brass text-white border-brass' : 'bg-panel text-text-muted border-border-light'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {checkRequest && checkRequest.skills.length > 1 && (
+        <div className="flex flex-wrap gap-2 mb-3.5">
+          {checkRequest.skills.map((skill) => (
+            <button
+              key={skill.id}
+              disabled={rolling}
+              onClick={() => {
+                setSelectedSkillId(skill.id)
+                setResult(null)
+                setShowResult(false)
+                setShakeLevel(0)
+              }}
+              className={`px-3 py-1.5 rounded-full border text-xs font-semibold transition-all ${
+                selectedSkillId === skill.id
+                  ? 'bg-brass text-white border-brass'
+                  : 'bg-panel text-text-muted border-border-light'
+              }`}
+            >
+              {skill.name} {skill.targetValue}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Dice context info */}
       <div className="text-center mb-3">
         <span className="text-xs text-brass-dark font-semibold bg-brass/10 px-4 py-1 rounded-full inline-block">
-          侦察
+          {selectedSkill?.name ?? '自由掷骰'}
         </span>
         <div className="font-mono text-xs text-text-muted mt-1">
-          {diceType === 'd100' ? '目标: 65 · D% = 十位 + 个位' : '自由检定'}
+          {diceType === 'd100'
+            ? `目标: ${targetValue} · D% = 十位 + 个位`
+            : '自由检定'}
         </div>
       </div>
 
@@ -331,7 +377,7 @@ function DiceModal({ open, onClose, onResult }: { open: boolean; onClose: () => 
                   <span>{ones}</span>
                   <span>=</span>
                 </div>
-                <div className={`text-[44px] font-bold font-mono ${result <= 5 ? 'text-[#5aaa5a]' : result > 65 ? 'text-[#d45050]' : 'text-[#4a8a4a]'}`}>
+                <div className={`text-[44px] font-bold font-mono ${result === 1 ? 'text-[#5aaa5a]' : result > targetValue ? 'text-[#d45050]' : 'text-[#4a8a4a]'}`}>
                   {String(result).padStart(2, '0')}
                 </div>
               </>
@@ -342,7 +388,9 @@ function DiceModal({ open, onClose, onResult }: { open: boolean; onClose: () => 
               <div className="text-base font-bold mt-1" style={{ color: verdict.color }}>{verdict.label}</div>
             )}
             <div className="text-xs text-text-dim mt-1 font-mono">
-              {diceType === 'd100' ? `侦察 65% · 需求 ≤65` : `${diceType.toUpperCase()} · 自由检定`}
+              {diceType === 'd100'
+                ? `${selectedSkill?.name ?? '自由检定'} ${targetValue}% · 需求 ≤${targetValue}`
+                : `${diceType.toUpperCase()} · 自由检定`}
             </div>
           </div>
 
@@ -384,6 +432,7 @@ export default function RoomPage() {
   const [input, setInput] = useState('')
   const [typing, setTyping] = useState(false)
   const [pendingAction, setPendingAction] = useState<{ clientActionId: string; utterance: string } | null>(null)
+  const [pendingCheck, setPendingCheck] = useState<CheckRequestPayload | null>(null)
   const [actionError, setActionError] = useState('')
   const [openPanel, setOpenPanel] = useState<string | null>(null)
   const [sheetPage, setSheetPage] = useState<'info' | 'background'>('info')
@@ -445,13 +494,47 @@ export default function RoomPage() {
         }])
       } else if (envelope.type === 'room.state') {
         setRoomPhase(envelope.payload.phase)
+      } else if (envelope.type === 'check.request') {
+        setTyping(false)
+        setPendingCheck(envelope.payload)
+        setShowDice(true)
+      } else if (envelope.type === 'check.result') {
+        const levelLabels: Record<string, string> = {
+          critical: '大成功',
+          extreme: '极难成功',
+          hard: '困难成功',
+          regular: '成功',
+          failure: '失败',
+          fumble: '大失败',
+        }
+        const difficultyLabels: Record<string, string> = {
+          regular: '常规',
+          hard: '困难',
+          extreme: '极难',
+        }
+        const levelLabel =
+          levelLabels[envelope.payload.successLevel] ?? envelope.payload.result
+        const outcomeLabel = envelope.payload.passed
+          ? levelLabel
+          : `${levelLabel}（未通过${difficultyLabels[envelope.payload.difficulty] ?? ''}检定）`
+        setMessages(prev => [...prev, {
+          type: 'dice',
+          sender: envelope.payload.playerId === playerId ? senderName : '玩家',
+          content: `${envelope.payload.skillName} ${envelope.payload.targetValue}% · D100 ${envelope.payload.rollValue} · ${outcomeLabel}`,
+          time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+          isSelf: envelope.payload.playerId === playerId,
+        }])
+        setPendingCheck(current =>
+          current?.clientActionId === envelope.payload.clientActionId ? null : current
+        )
+        if (envelope.payload.playerId === playerId) setShowDice(false)
       } else if (envelope.type === 'error') {
         setTyping(false)
         setActionError(envelope.payload.message)
       }
     })
     return off
-  }, [])
+  }, [playerId, senderName])
 
   const submitPlayerAction = (action: { clientActionId: string; utterance: string }) => {
     if (!playerId || suspended) return
@@ -482,7 +565,17 @@ export default function RoomPage() {
     submitPlayerAction({ clientActionId: crypto.randomUUID(), utterance: text })
   }
 
-  const handleDiceResult = (result: number, diceType: DiceType) => {
+  const handleDiceResult = (result: number, diceType: DiceType, skillId?: string) => {
+    if (pendingCheck) {
+      if (!playerId || diceType !== 'd100' || !skillId) return
+      setTyping(true)
+      sdk.roomSocket.rollCheck(playerId, {
+        clientActionId: pendingCheck.clientActionId,
+        skill: skillId,
+        rollValue: result,
+      })
+      return
+    }
     const typeLabel = diceType.toUpperCase()
     const resultLabel = diceType === 'd100' ? (result <= 5 ? '极限成功' : result <= 65 ? '成功' : '失败') : `掷出 ${result}`
     setMessages(prev => [...prev, {
@@ -954,7 +1047,12 @@ export default function RoomPage() {
       </BottomPanel>
 
       {/* ── Dice Modal ── */}
-      <DiceModal open={showDice} onClose={() => setShowDice(false)} onResult={handleDiceResult} />
+      <DiceModal
+        open={showDice}
+        onClose={() => setShowDice(false)}
+        onResult={handleDiceResult}
+        checkRequest={pendingCheck}
+      />
     </div>
   )
 }

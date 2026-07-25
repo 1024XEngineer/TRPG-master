@@ -34,6 +34,12 @@ PlayerInput
 
 `Orchestrator.run()` 是成员 A 的稳定公开入口，MVP 内部采用普通 Python `async` 流程。当前没有 checkpoint、interrupt、resume、多阶段 Action 或 LangGraph。
 
+当前 `IntentContext` 会把完整 PlayerView v2 交给一次
+`IntentModelPort.generate()`：其中包含同一 revision 的 `self_actor`、安全 `scene`
+（实体、人物、出口）、`known_information` 与可信 `checkpoint_options`。后端的
+OpenAI/Qwen Prompt Adapter 直接序列化这份 Context；不会附加 GameState、数据库记录
+或完整 ModuleContent。未来 Host Agent 及其只读工具也绑定同一 PlayerView。
+
 ## Host Agent 契约（尚未接入主链）
 
 `host/ports/HostAgentPort` 是成员 A 在规则引擎之前进行意图理解的内部端口，不是新的 A/B/C 共享业务契约。它只有一个
@@ -123,7 +129,7 @@ collaboration_framework/
 |---|---|---|---|
 | `PlayerInput` | 协作层 | A | 可信连接身份在进入应用前建立 |
 | `ProjectionSnapshot` | A/B 共审 | A | B 提供的只读、无 `GameState` 投影源 |
-| `PlayerView` | A | A 的模型端口、Gateway | 只含当前玩家可见信息和可信候选 |
+| `PlayerView` | A | A 的模型端口、Gateway | 完整、不可变、revision-bound 的玩家安全角色/场景/知识快照和可信候选 |
 | `Intent` | A/B 共审 | B | 语义提议；无 `execution` |
 | `ActionExecutor.execute()` | B 提供、A 消费 | A/B | 唯一可能产生权威副作用的命令边界 |
 | `ActionResult` | A/B 共审 | A | Player-safe；不暴露 StateChange/Event payload |

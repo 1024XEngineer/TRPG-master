@@ -73,6 +73,7 @@
     },
     "VisibleFact": {
       "additionalProperties": false,
+      "description": "One fact confirmed for the current action result.",
       "properties": {
         "id": {
           "minLength": 1,

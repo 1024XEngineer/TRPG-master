@@ -404,6 +404,17 @@
           "title": "Content",
           "type": "string"
         },
+        "visibility": {
+          "$ref": "#/$defs/VisibilityPolicy"
+        },
+        "observable_state": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ObservableStateSpec"
+          },
+          "title": "Observable State",
+          "type": "array"
+        },
         "secrets": {
           "anyOf": [
             {
@@ -529,9 +540,35 @@
           "title": "Id",
           "type": "string"
         },
+        "title": {
+          "default": "",
+          "title": "Title",
+          "type": "string"
+        },
+        "summary": {
+          "default": "",
+          "title": "Summary",
+          "type": "string"
+        },
         "content": {
           "title": "Content",
           "type": "string"
+        },
+        "related_entities": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Related Entities",
+          "type": "array"
+        },
+        "related_scenes": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Related Scenes",
+          "type": "array"
         },
         "visibility": {
           "$ref": "#/$defs/VisibilityPolicy"
@@ -568,6 +605,31 @@
         "set"
       ],
       "title": "ModifyOperationSpec",
+      "type": "object"
+    },
+    "ObservableStateSpec": {
+      "additionalProperties": false,
+      "description": "Allow-list one runtime entity-state field for player projection.",
+      "properties": {
+        "key": {
+          "minLength": 1,
+          "title": "Key",
+          "type": "string"
+        },
+        "label": {
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "visibility": {
+          "$ref": "#/$defs/VisibilityPolicy"
+        }
+      },
+      "required": [
+        "key",
+        "label"
+      ],
+      "title": "ObservableStateSpec",
       "type": "object"
     },
     "RuleSpec": {
@@ -745,6 +807,55 @@
       "title": "ScaleOperationSpec",
       "type": "object"
     },
+    "SceneExitSpec": {
+      "additionalProperties": false,
+      "description": "Optional player-safe presentation override for one reachable route.",
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "aliases": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Aliases",
+          "type": "array"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "destination_scene_id": {
+          "minLength": 1,
+          "title": "Destination Scene Id",
+          "type": "string"
+        },
+        "reveal_destination": {
+          "default": false,
+          "title": "Reveal Destination",
+          "type": "boolean"
+        },
+        "visibility": {
+          "$ref": "#/$defs/VisibilityPolicy"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "destination_scene_id"
+      ],
+      "title": "SceneExitSpec",
+      "type": "object"
+    },
     "SceneSpec": {
       "additionalProperties": false,
       "properties": {
@@ -760,6 +871,16 @@
         },
         "content": {
           "title": "Content",
+          "type": "string"
+        },
+        "player_visible_name": {
+          "default": "",
+          "title": "Player Visible Name",
+          "type": "string"
+        },
+        "player_visible_description": {
+          "default": "",
+          "title": "Player Visible Description",
           "type": "string"
         },
         "entity_ids": {
@@ -784,6 +905,14 @@
             "type": "string"
           },
           "title": "Exits",
+          "type": "array"
+        },
+        "available_exits": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/SceneExitSpec"
+          },
+          "title": "Available Exits",
           "type": "array"
         }
       },

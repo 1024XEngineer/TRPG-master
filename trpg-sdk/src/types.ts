@@ -151,9 +151,42 @@ export type ServerToClientEvent =
 
 // Agent framework 的回合结果使用独立信封，不套 `{type, payload}`。字段名按
 // framework 的稳定 JSON Schema 保持 snake_case，避免 SDK 私自改写协议。
-export interface AgentVisibleFact {
+export type AgentJsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | AgentJsonValue[]
+  | { [key: string]: AgentJsonValue };
+
+export interface AgentActorValue {
   id: string;
-  text: string;
+  name: string;
+  value: number;
+}
+
+export interface AgentActorResource {
+  id: string;
+  name: string;
+  value: number;
+}
+
+export interface AgentSelfActor {
+  id: string;
+  name: string;
+  occupation: string | null;
+  attributes: AgentActorValue[];
+  skills: AgentActorValue[];
+  resources: AgentActorResource[];
+  conditions: string[];
+  equipment: string[];
+  background_summary: string;
+}
+
+export interface AgentObservableState {
+  key: string;
+  label: string;
+  value: AgentJsonValue;
 }
 
 export interface AgentVisibleEntity {
@@ -161,7 +194,47 @@ export interface AgentVisibleEntity {
   kind: 'npc' | 'object' | 'location';
   name: string;
   aliases: string[];
+  description: string;
+  observable_state: AgentObservableState[];
+}
+
+export interface AgentVisibleActor {
+  id: string;
+  name: string;
+  status_summary: string;
+}
+
+export interface AgentExitDestination {
+  scene_id: string;
+  name: string;
+}
+
+export interface AgentAvailableExit {
+  id: string;
+  name: string;
+  aliases: string[];
+  description: string;
+  destination: AgentExitDestination | null;
+}
+
+export interface AgentSceneView {
+  id: string;
+  name: string;
+  description: string;
+  time: string | null;
+  visible_entities: AgentVisibleEntity[];
+  visible_actors: AgentVisibleActor[];
+  available_exits: AgentAvailableExit[];
+}
+
+export interface AgentKnownInformation {
+  id: string;
+  title: string;
+  summary: string;
   content: string;
+  related_entities: string[];
+  related_scenes: string[];
+  scope: 'actor' | 'party';
 }
 
 export interface AgentCheckpointOption {
@@ -169,6 +242,7 @@ export interface AgentCheckpointOption {
   target_id: string;
   action_hint: string;
   skills: string[];
+  difficulty: 'regular' | 'hard' | 'extreme' | null;
 }
 
 export interface AgentPlayerView {
@@ -178,8 +252,9 @@ export interface AgentPlayerView {
   scene_id: string;
   phase: 'playing' | 'ended';
   revision: string;
-  visible_facts: AgentVisibleFact[];
-  visible_entities: AgentVisibleEntity[];
+  self_actor: AgentSelfActor;
+  scene: AgentSceneView;
+  known_information: AgentKnownInformation[];
   checkpoint_options: AgentCheckpointOption[];
 }
 

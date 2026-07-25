@@ -27,6 +27,96 @@ function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === 'string');
 }
 
+function isJsonValue(value: unknown): boolean {
+  if (
+    value === null ||
+    typeof value === 'string' ||
+    typeof value === 'boolean' ||
+    (typeof value === 'number' && Number.isFinite(value))
+  ) {
+    return true;
+  }
+  if (Array.isArray(value)) return value.every(isJsonValue);
+  return isRecord(value) && Object.values(value).every(isJsonValue);
+}
+
+function isActorValue(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    typeof value.id === 'string' &&
+    typeof value.name === 'string' &&
+    typeof value.value === 'number' &&
+    Number.isFinite(value.value)
+  );
+}
+
+function isValidSelfActor(value: unknown, actorId: string): boolean {
+  if (!isRecord(value)) return false;
+  return (
+    value.id === actorId &&
+    typeof value.name === 'string' &&
+    (value.occupation === null || typeof value.occupation === 'string') &&
+    Array.isArray(value.attributes) &&
+    value.attributes.every(isActorValue) &&
+    Array.isArray(value.skills) &&
+    value.skills.every(isActorValue) &&
+    Array.isArray(value.resources) &&
+    value.resources.every(isActorValue) &&
+    isStringArray(value.conditions) &&
+    isStringArray(value.equipment) &&
+    typeof value.background_summary === 'string'
+  );
+}
+
+function isValidScene(value: unknown, sceneId: string): boolean {
+  if (!isRecord(value)) return false;
+  return (
+    value.id === sceneId &&
+    typeof value.name === 'string' &&
+    typeof value.description === 'string' &&
+    (value.time === null || typeof value.time === 'string') &&
+    Array.isArray(value.visible_entities) &&
+    value.visible_entities.every(
+      (entity) =>
+        isRecord(entity) &&
+        typeof entity.id === 'string' &&
+        (entity.kind === 'npc' || entity.kind === 'object' || entity.kind === 'location') &&
+        typeof entity.name === 'string' &&
+        isStringArray(entity.aliases) &&
+        typeof entity.description === 'string' &&
+        Array.isArray(entity.observable_state) &&
+        entity.observable_state.every(
+          (field) =>
+            isRecord(field) &&
+            typeof field.key === 'string' &&
+            typeof field.label === 'string' &&
+            isJsonValue(field.value)
+        )
+    ) &&
+    Array.isArray(value.visible_actors) &&
+    value.visible_actors.every(
+      (actor) =>
+        isRecord(actor) &&
+        typeof actor.id === 'string' &&
+        typeof actor.name === 'string' &&
+        typeof actor.status_summary === 'string'
+    ) &&
+    Array.isArray(value.available_exits) &&
+    value.available_exits.every(
+      (exit) =>
+        isRecord(exit) &&
+        typeof exit.id === 'string' &&
+        typeof exit.name === 'string' &&
+        isStringArray(exit.aliases) &&
+        typeof exit.description === 'string' &&
+        (exit.destination === null ||
+          (isRecord(exit.destination) &&
+            typeof exit.destination.scene_id === 'string' &&
+            typeof exit.destination.name === 'string'))
+    )
+  );
+}
+
 function isValidPlayerView(value: unknown): value is AgentPlayerView {
   if (!isRecord(value)) return false;
   const {
@@ -36,8 +126,9 @@ function isValidPlayerView(value: unknown): value is AgentPlayerView {
     scene_id,
     phase,
     revision,
-    visible_facts,
-    visible_entities,
+    self_actor,
+    scene,
+    known_information,
     checkpoint_options,
   } = value;
   return (
@@ -47,19 +138,19 @@ function isValidPlayerView(value: unknown): value is AgentPlayerView {
     typeof scene_id === 'string' &&
     (phase === 'playing' || phase === 'ended') &&
     typeof revision === 'string' &&
-    Array.isArray(visible_facts) &&
-    visible_facts.every(
-      (fact) => isRecord(fact) && typeof fact.id === 'string' && typeof fact.text === 'string'
-    ) &&
-    Array.isArray(visible_entities) &&
-    visible_entities.every(
-      (entity) =>
-        isRecord(entity) &&
-        typeof entity.id === 'string' &&
-        (entity.kind === 'npc' || entity.kind === 'object' || entity.kind === 'location') &&
-        typeof entity.name === 'string' &&
-        isStringArray(entity.aliases) &&
-        typeof entity.content === 'string'
+    isValidSelfActor(self_actor, actor_id) &&
+    isValidScene(scene, scene_id) &&
+    Array.isArray(known_information) &&
+    known_information.every(
+      (information) =>
+        isRecord(information) &&
+        typeof information.id === 'string' &&
+        typeof information.title === 'string' &&
+        typeof information.summary === 'string' &&
+        typeof information.content === 'string' &&
+        isStringArray(information.related_entities) &&
+        isStringArray(information.related_scenes) &&
+        (information.scope === 'actor' || information.scope === 'party')
     ) &&
     Array.isArray(checkpoint_options) &&
     checkpoint_options.every(
@@ -68,7 +159,11 @@ function isValidPlayerView(value: unknown): value is AgentPlayerView {
         typeof option.id === 'string' &&
         typeof option.target_id === 'string' &&
         typeof option.action_hint === 'string' &&
-        isStringArray(option.skills)
+        isStringArray(option.skills) &&
+        (option.difficulty === null ||
+          option.difficulty === 'regular' ||
+          option.difficulty === 'hard' ||
+          option.difficulty === 'extreme')
     )
   );
 }
@@ -128,11 +223,30 @@ const PAYLOAD_VALIDATORS: {
   'turn.begin': (p) => typeof p.playerId === 'string',
   'game.ended': () => true, // reason 可空，没有必填字段
   'view.private': (p) => typeof p.playerId === 'string' && typeof p.text === 'string',
-  'check.request': (p) => typeof p.playerId === 'string' && typeof p.skill === 'string',
+  'check.request': (p) =>
+    typeof p.playerId === 'string' &&
+    typeof p.clientActionId === 'string' &&
+    typeof p.summary === 'string' &&
+    typeof p.difficulty === 'string' &&
+    Array.isArray(p.skills) &&
+    p.skills.every(
+      (skill) =>
+        typeof skill === 'object' &&
+        skill !== null &&
+        typeof skill.id === 'string' &&
+        typeof skill.name === 'string' &&
+        typeof skill.targetValue === 'number',
+    ),
   'check.result': (p) =>
     typeof p.playerId === 'string' &&
+    typeof p.clientActionId === 'string' &&
     typeof p.skill === 'string' &&
+    typeof p.skillName === 'string' &&
     typeof p.rollValue === 'number' &&
+    typeof p.targetValue === 'number' &&
+    typeof p.difficulty === 'string' &&
+    typeof p.successLevel === 'string' &&
+    typeof p.passed === 'boolean' &&
     typeof p.result === 'string',
   'san.check.request': (p) => typeof p.playerId === 'string',
   'san.check.result': (p) =>
@@ -302,8 +416,7 @@ export class RoomSocket {
     return this.playerView;
   }
 
-  /** check.roll —— 玩家请求做一次技能检定（issue #77 新增，后端本期回
-   * NOT_IMPLEMENTED 的 error 事件，真实服务端权威掷骰待规则引擎落地）。 */
+  /** check.roll —— 为当前 check.request 提交玩家选择的技能和 D100 点数。 */
   rollCheck(playerId: string, payload: CheckRollPayload): void {
     this.send('check.roll', playerId, payload);
   }

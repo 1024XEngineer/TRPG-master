@@ -86,6 +86,7 @@ class ActionRequest(ContractModel):
     actor_id: str = Field(min_length=1)
     source_view_revision: str = Field(min_length=1)
     intent: Intent
+    roll_value: int | None = Field(default=None, ge=1, le=100)
 
 
 ActionResolution: TypeAlias = Literal[

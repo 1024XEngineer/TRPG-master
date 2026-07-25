@@ -36,6 +36,7 @@ class ProjectionSnapshot(ContractModel):
     scene_id: str = Field(min_length=1)
     phase: Literal["playing", "ended"]
     revision: str = Field(min_length=1)
+    visible_facts: tuple[VisibleFact, ...] = ()
     entities: tuple[ProjectionEntity, ...] = ()
     checkpoint_options: tuple[ProjectionCheckpointOption, ...] = ()
 

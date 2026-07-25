@@ -80,6 +80,27 @@
       ],
       "title": "ProjectionEntity",
       "type": "object"
+    },
+    "VisibleFact": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "text"
+      ],
+      "title": "VisibleFact",
+      "type": "object"
     }
   },
   "additionalProperties": false,
@@ -107,6 +128,14 @@
       "minLength": 1,
       "title": "Revision",
       "type": "string"
+    },
+    "visible_facts": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/VisibleFact"
+      },
+      "title": "Visible Facts",
+      "type": "array"
     },
     "entities": {
       "default": [],

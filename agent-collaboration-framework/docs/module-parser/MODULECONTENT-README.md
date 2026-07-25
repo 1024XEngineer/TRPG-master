@@ -9,7 +9,8 @@
 
 当前 B/C 发布契约包含 4 个必需集合（`scenes`、`entities`、`checkpoints`、
 `win_conditions`）和 2 个默认空集合（`module_rules`、`information_items`）。
-规则引擎已能加载这套声明；具体 Hook、Expression 与 Operation 的执行覆盖仍是占位实现。
+规则引擎已能加载这套声明，并在运行前审计实际使用的 Hook、Expression、Operation 与
+`world_ref`；当前确定性内核完整覆盖《追书人》纵切，其他发布能力会明确报告为不支持。
 
 ```
 ModuleContent
@@ -44,7 +45,7 @@ ModuleContent
 | `content` | `"昏黄灯光下，书架、木柜..."` | 场景描述，给 A 做叙事上下文 |
 | `entity_ids` | `["butler","bookshelf","cabinet"]` | 索引：这个场景里有哪些实体。B 的引擎据此决定 PlayerView 展示什么 |
 | `checkpoint_ids` | `["investigate_bookshelf","smash_cabinet"]` | 索引：这个场景里能做什么动作。A 的 IntentParser 据此匹配玩家语义 |
-| `exits` | `[]` | 可以去的其他场景。空 = 无空间约束，玩家自由移动。银之锁的房间→走廊则有约束 |
+| `exits` | `[]` | 可以直接移动到的其他场景；空表示没有可用的直接出口 |
 
 ### EntitySpec —— "有什么东西"
 
@@ -55,7 +56,7 @@ ModuleContent
 | `name` / `aliases` | `"上锁的柜子"` / `["柜子","木柜"]` | A 做语义匹配——玩家说"打开柜子"能匹配到 |
 | `content` | `"一只带黄铜锁孔的年代久远的木柜"` | 玩家可见描述 → 进入 PlayerView |
 | `secrets` | `"文件藏在柜中；强行砸开会毁坏文件"` | KP 私密信息 → 不进入 A 的上下文。信息隔离边界 |
-| `state` | `{"opened": false}` | 声明合法状态键。**初始值不用于运行时**——B 从 GameState 初始化 |
+| `state` | `{"opened": false}` | 声明合法状态键及初始值；开局时复制到独立的 GameState |
 | `refuse_ops` | `["open"]` | 静态拒绝列表：不管什么条件，默认不能 open。需要 Rule 动态解封 |
 | `blocked_text` | `"柜门纹丝不动"` | 操作被拒绝时给玩家的提示 |
 | `direct_responses` | `{"investigate":"黄铜锁孔很小..."}` | 无检定交互的直接回应——"我看一眼柜子"不需要掷骰 |
@@ -71,11 +72,11 @@ Rule = 什么时候（hook） + 条件是什么（when） + 做什么（then） 
 | 字段 | 值示例 | 作用 |
 |------|--------|------|
 | `id` | `"allow_open_with_key"` | 唯一标识 |
-| `hook` | `"on_interact"` | 什么时候检查。当前发布契约允许 20 个 Hook；占位内核只消费其中一部分 |
+| `hook` | `"on_interact"` | 什么时候检查。发布契约允许 20 个 Hook；内核消费《追书人》所需子集并在运行前审计 |
 | `priority` | `100` | 同 hook 上多条规则时排先后 |
 | `mode` | `"append"` | 怎么相处。append=追加，override=覆盖系统默认，forbid=整个 hook 跳过 |
-| `when` | `{path:"entities.bookshelf.key_found", equals:true}` | 条件判断。当前契约接受 path/equals 或 expr；完整 Expression 求值器待实现 |
-| `then` | `[allow("open"), modify("cabinet.opened", true)]` | 有序操作列表。当前契约声明 12 种 Operation；占位内核只执行基础状态操作 |
+| `when` | `{path:"entities.bookshelf.key_found", equals:true}` | 条件判断。支持 path/equals 与受限 AST Expression，不执行任意代码 |
+| `then` | `[allow("open"), modify("cabinet.opened", true)]` | 有序操作列表。当前内核支持《追书人》所需的 10 种 Operation |
 | `facts` | `["玩家用钥匙打开柜子"]` | 引擎内部确认事实 |
 | `player_visible_information` | `["钥匙正好转动了锁芯..."]` | 给玩家看的信息 |
 
@@ -157,5 +158,5 @@ Rule(
 ## 四、当前落地状态
 
 - **发布契约已落地**：`mode`、`expr`、可空 `difficulty`、`is_ending`、`module_rules`、`information_items`、`exits`、`stat_block`、分级结果、可见性、20 个 Hook 与 Operation 联合类型。
-- **运行时部分落地**：Engine Service/Store、Host 与 Backend 接口保持 Agent 架构分支不变；占位 `RuleKernel` 仅消费基础交互规则和状态修改。
-- **待实现**：完整 Expression 求值、全部 Hook 调度、全部 Operation 执行和 Ruleset 检定算法；这些属于 Runtime，不再修改 B/C 发布字段形状。
+- **《追书人》运行时已落地**：安全 Expression、Hook 优先级与模式、状态级联、COC7 百分骰/SAN/最小战斗、时间、场景、结局、投影和固定随机源测试。
+- **扩展策略**：发布契约仍大于当前运行能力；`scale/absorb`、完整 COC7 战斗/追逐等后续能力通过 Runtime 扩展，不修改 B/C 发布字段形状，未支持能力必须 fail closed。

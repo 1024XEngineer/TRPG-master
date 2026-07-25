@@ -6,13 +6,17 @@ from collaboration_framework.contracts import (
     ActionRequest,
     ActionResult,
     CheckpointSpec,
+    ConditionSpec,
     ContractError,
     PlayerInput,
     ProjectionCheckpointOption,
     ProjectionEntity,
     ProjectionSnapshot,
+    VisibilityPolicy,
+    VisibleFact,
 )
 
+from .capabilities import require_runtime_capabilities
 from .kernel import RuleKernel
 from .models import CompletedAction, EngineRuntimeSnapshot
 from .ports import EngineStore
@@ -37,7 +41,11 @@ class RuleEngineService:
                 player_id=player_input.player_id,
                 actor_id=player_input.actor_id,
             )
-            return self._project(runtime)
+            return self._project(
+                runtime,
+                player_id=player_input.player_id,
+                actor_id=player_input.actor_id,
+            )
 
     async def execute(self, request: ActionRequest) -> ActionResult:
         async with self._store.transaction(request.room_id) as transaction:
@@ -57,6 +65,7 @@ class RuleEngineService:
                 )
             if request.source_view_revision != runtime.revision:
                 raise ContractError("ActionRequest 基于过期 PlayerView")
+            require_runtime_capabilities(runtime.module_content)
 
             execution, new_state = self._kernel.execute(
                 request=request,
@@ -113,7 +122,12 @@ class RuleEngineService:
         )
 
     @staticmethod
-    def _project(runtime: EngineRuntimeSnapshot) -> ProjectionSnapshot:
+    def _project(
+        runtime: EngineRuntimeSnapshot,
+        *,
+        player_id: str,
+        actor_id: str,
+    ) -> ProjectionSnapshot:
         module = runtime.module_content
         state = runtime.game_state
         scene = next(
@@ -123,11 +137,20 @@ class RuleEngineService:
         if scene is None:
             raise ContractError(f"当前 Scene 不存在: {state.scene_id}")
         entities = {item.id: item for item in module.entities}
+        information_items = {item.id: item for item in module.information_items}
         return ProjectionSnapshot(
             room_id=state.room_id,
             scene_id=scene.id,
             phase=state.phase,
             revision=runtime.revision,
+            visible_facts=tuple(
+                VisibleFact(id=fact_id, text=information_items[fact_id].content)
+                for fact_id in state.discovered_facts
+                if fact_id in information_items
+                and RuleEngineService._is_visible_to_actor(
+                    information_items[fact_id].visibility,
+                )
+            ),
             entities=tuple(
                 ProjectionEntity(
                     id=entities[entity_id].id,
@@ -147,17 +170,55 @@ class RuleEngineService:
                 )
                 for checkpoint in module.checkpoints
                 if checkpoint.id in scene.checkpoint_ids
-                and RuleEngineService._checkpoint_is_visible(checkpoint)
+                and RuleEngineService._checkpoint_is_visible(
+                    checkpoint,
+                    runtime=runtime,
+                    player_id=player_id,
+                    actor_id=actor_id,
+                )
             ),
         )
 
     @staticmethod
-    def _checkpoint_is_visible(checkpoint: CheckpointSpec) -> bool:
-        """Conservative placeholder projection for the new visibility contract."""
+    def _checkpoint_is_visible(
+        checkpoint: CheckpointSpec,
+        *,
+        runtime: EngineRuntimeSnapshot,
+        player_id: str,
+        actor_id: str,
+    ) -> bool:
+        """Evaluate discovery rules over a read-only snapshot."""
 
         policy = checkpoint.visibility
         if policy is None:
             return True
-        if policy.audience in {"keeper", "ho"}:
+        if not RuleEngineService._is_visible_to_actor(policy):
             return False
-        return not policy.requires_discovery
+        if not policy.requires_discovery:
+            return True
+        if policy.discovery_rule is None:
+            return False
+        synthetic_request = ActionRequest(
+            request_id="projection",
+            room_id=runtime.game_state.room_id,
+            player_id=player_id,
+            actor_id=actor_id,
+            source_view_revision=runtime.revision,
+            intent={
+                "kind": "action",
+                "verb": "project",
+                "target": {"matched": True, "id": checkpoint.target_id},
+                "check": {"route": "none"},
+                "summary": "project visible checkpoint",
+            },
+        )
+        return RuleKernel.condition_matches(
+            ConditionSpec(expr=policy.discovery_rule),
+            runtime.game_state,
+            request=synthetic_request,
+            target_id=checkpoint.target_id,
+        )
+
+    @staticmethod
+    def _is_visible_to_actor(policy: VisibilityPolicy) -> bool:
+        return policy.audience not in {"keeper", "ho"}

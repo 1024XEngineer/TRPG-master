@@ -107,5 +107,5 @@ def _public_failure_message(code: str) -> str:
     if code == "HOST_AGENT_TOOL_BUDGET_EXCEEDED":
         return "主持 Agent 查询次数超出限制，请缩小行动范围后重试"
     if code == "HOST_AGENT_INVALID_OUTPUT":
-        return "主持 Agent 返回的行动意图无效，请重试"
+        return "守秘人一时没能准确理解这次行动。请结合眼前的人物或物品，换一种说法。"
     return "主持 Agent 运行失败，请重试"

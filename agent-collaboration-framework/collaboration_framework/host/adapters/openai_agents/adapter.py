@@ -175,7 +175,7 @@ class QwenHostAgentAdapter:
 
 
 def parse_raw_output(value: object) -> dict[str, JsonValue]:
-    """Accept one finite JSON object with at most one exact JSON fence wrapper."""
+    """Accept one finite JSON object, optionally from one fenced model answer."""
 
     try:
         if isinstance(value, str):
@@ -209,22 +209,39 @@ def parse_raw_output(value: object) -> dict[str, JsonValue]:
 
 
 def _unwrap_single_json_fence(value: str) -> str:
-    """Normalize Qwen's post-tool JSON fence without accepting surrounding prose."""
+    """Extract one JSON fence while deterministically discarding model preamble.
+
+    Qwen occasionally explains its choice before emitting the requested JSON,
+    especially after a tool call.  The explanation remains untrusted and is
+    deliberately ignored; the extracted object still passes the strict JSON
+    decoder and the deterministic IntentParser boundary.
+    """
 
     stripped = value.strip()
-    if not stripped.startswith("```"):
+    marker_positions: list[int] = []
+    cursor = 0
+    while True:
+        marker = stripped.find("```", cursor)
+        if marker < 0:
+            break
+        marker_positions.append(marker)
+        cursor = marker + 3
+
+    if not marker_positions:
         return value
-    lines = stripped.splitlines()
-    if (
-        len(lines) < 3
-        or lines[0].casefold() not in {"```", "```json"}
-        or lines[-1] != "```"
-    ):
+    if len(marker_positions) != 2:
+        raise InvalidHostAgentOutput(
+            "multiple or incomplete JSON fences are not allowed"
+        )
+
+    opening, closing = marker_positions
+    header_end = stripped.find("\n", opening + 3)
+    if header_end < 0 or header_end >= closing:
         raise InvalidHostAgentOutput("invalid JSON fence wrapper")
-    body = "\n".join(lines[1:-1]).strip()
-    if "```" in body:
-        raise InvalidHostAgentOutput("multiple JSON fences are not allowed")
-    return body
+    language = stripped[opening + 3 : header_end].strip().casefold()
+    if language not in {"", "json"}:
+        raise InvalidHostAgentOutput("invalid JSON fence wrapper")
+    return stripped[header_end + 1 : closing].strip()
 
 
 def _reject_json_constant(value: str) -> None:

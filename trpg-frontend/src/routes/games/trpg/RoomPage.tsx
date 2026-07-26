@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import type { AgentPlayerView, AgentTurnPhase, CheckRequestPayload } from 'trpg-sdk'
+import { TurnFailedError, type AgentPlayerView, type AgentTurnPhase, type CheckRequestPayload } from 'trpg-sdk'
 import { ArrowLeft, Users, Map, BookOpen, ScrollText, Star, X, SendHorizontal, Dice6, Plus, Save, FlagOff, Heart } from 'lucide-react'
 import { useState, useRef, useEffect, type FormEvent } from 'react'
 import { useRoomStore } from '@/stores/room-store'
@@ -484,6 +484,8 @@ export default function RoomPage() {
   })
   const [progressLabel, setProgressLabel] = useState<string | null>(null)
   const [actionError, setActionError] = useState('')
+  const [actionErrorRetryable, setActionErrorRetryable] = useState(false)
+  const [actionErrorIsGuidance, setActionErrorIsGuidance] = useState(false)
   const [openPanel, setOpenPanel] = useState<string | null>(null)
   const [sheetPage, setSheetPage] = useState<'info' | 'background'>('info')
   const [skillsTab, setSkillsTab] = useState<'occupation' | 'interest'>('occupation')
@@ -612,6 +614,8 @@ export default function RoomPage() {
         setTyping(false)
         setProgressLabel(null)
         setActionError(envelope.payload.publicMessage)
+        setActionErrorRetryable(envelope.payload.retryable)
+        setActionErrorIsGuidance(envelope.payload.code === 'HOST_AGENT_INVALID_OUTPUT')
       } else if (envelope.type === 'view.updated') {
         if (envelope.payload.playerId === playerId) {
           setPlayerView(envelope.payload.playerView)
@@ -629,6 +633,8 @@ export default function RoomPage() {
     if (!playerId || suspended) return
     setPendingAction(action)
     setActionError('')
+    setActionErrorRetryable(false)
+    setActionErrorIsGuidance(false)
     setTyping(true)
     void sdk.roomSocket
       .submitAction(playerId, action)
@@ -642,6 +648,12 @@ export default function RoomPage() {
         setTyping(false)
         setProgressLabel(null)
         setActionError(friendlyErrorMessage(error, '行动提交失败，请重试'))
+        setActionErrorRetryable(
+          error instanceof TurnFailedError ? error.retryable : true
+        )
+        setActionErrorIsGuidance(
+          error instanceof TurnFailedError && error.code === 'HOST_AGENT_INVALID_OUTPUT'
+        )
       })
   }
 
@@ -870,8 +882,10 @@ export default function RoomPage() {
         )}
         {actionError && !suspended && (
           <div className="flex items-center justify-between gap-2 pb-1.5 px-1">
-            <p className="text-[11px] text-[#c04040]">{actionError}</p>
-            {pendingAction && (
+            <p className={`text-[11px] ${actionErrorIsGuidance ? 'text-[#8a642d]' : 'text-[#c04040]'}`}>
+              {actionErrorIsGuidance ? `守秘人提示：${actionError}` : actionError}
+            </p>
+            {pendingAction && actionErrorRetryable && (
               <button
                 type="button"
                 onClick={() => submitPlayerAction(pendingAction)}

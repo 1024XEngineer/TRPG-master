@@ -375,13 +375,25 @@ class RawOutputTests(unittest.TestCase):
             parse_raw_output('```json\n{"kind":"unknown"}\n```'),
             {"kind": "unknown"},
         )
+        self.assertEqual(
+            parse_raw_output(
+                "I checked the visible target first.\n"
+                "```json\n"
+                '{"kind":"dialogue","target":{"matched":true,"id":"thomas"}}\n'
+                "```\n"
+                "This is the selected intent."
+            ),
+            {
+                "kind": "dialogue",
+                "target": {"matched": True, "id": "thomas"},
+            },
+        )
         self.assertEqual(parse_raw_output({"count": 0}), {"count": 0})
 
         invalid_values = (
             "not-json",
-            "explanation\n```json\n{}\n```",
-            "```json\n{}\n```\ntrailing",
             "```python\n{}\n```",
+            "explanation\n```json\n{}\n",
             "```json\n{}\n```\n```json\n{}\n```",
             "[]",
             "NaN",

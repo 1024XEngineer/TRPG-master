@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
 import json
 import time
+from collections.abc import AsyncIterator
 from typing import Any, cast
 
 from agents import Agent, ModelSettings, RunConfig, Runner
@@ -32,7 +32,6 @@ from .tool_adapter import (
     ToolRunState,
     build_sdk_tools,
 )
-
 
 _FAILURE_REASON_BY_CODE: dict[
     HostAgentFailureCode,
@@ -163,7 +162,7 @@ class QwenHostAgentAdapter:
                 retryable=False,
             ):
                 yield event
-        except Exception:
+        except Exception:  # noqa: BLE001 - normalize arbitrary SDK/provider failures
             _cancel_result(result)
             async for event in _failure_events(
                 observation=observation,
@@ -176,10 +175,11 @@ class QwenHostAgentAdapter:
 
 
 def parse_raw_output(value: object) -> dict[str, JsonValue]:
-    """Accept one plain, finite JSON object and reject provider-native values."""
+    """Accept one finite JSON object with at most one exact JSON fence wrapper."""
 
     try:
         if isinstance(value, str):
+            value = _unwrap_single_json_fence(value)
             decoded = json.loads(
                 value,
                 parse_constant=_reject_json_constant,
@@ -206,6 +206,25 @@ def parse_raw_output(value: object) -> dict[str, JsonValue]:
     if not isinstance(decoded, dict):
         raise InvalidHostAgentOutput("final output must be a JSON object")
     return cast(dict[str, JsonValue], decoded)
+
+
+def _unwrap_single_json_fence(value: str) -> str:
+    """Normalize Qwen's post-tool JSON fence without accepting surrounding prose."""
+
+    stripped = value.strip()
+    if not stripped.startswith("```"):
+        return value
+    lines = stripped.splitlines()
+    if (
+        len(lines) < 3
+        or lines[0].casefold() not in {"```", "```json"}
+        or lines[-1] != "```"
+    ):
+        raise InvalidHostAgentOutput("invalid JSON fence wrapper")
+    body = "\n".join(lines[1:-1]).strip()
+    if "```" in body:
+        raise InvalidHostAgentOutput("multiple JSON fences are not allowed")
+    return body
 
 
 def _reject_json_constant(value: str) -> None:

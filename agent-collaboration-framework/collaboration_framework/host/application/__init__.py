@@ -1,4 +1,9 @@
 from .context_assembler import ContextAssembler
+from .host_agent_intent_resolver import (
+    HostAgentEventObserver,
+    HostAgentIntentResolver,
+    TurnExecutionError,
+)
 from .intent_parser import IntentParser, validate_intent_against_view
 from .narrator import Narrator
 from .orchestrator import Orchestrator
@@ -12,8 +17,10 @@ from .tool_registry import (
 )
 
 __all__ = [
-    "ContextAssembler",
     "BoundToolRegistry",
+    "ContextAssembler",
+    "HostAgentEventObserver",
+    "HostAgentIntentResolver",
     "IntentParser",
     "Narrator",
     "Orchestrator",
@@ -22,5 +29,6 @@ __all__ = [
     "ToolDefinition",
     "ToolHandler",
     "ToolRegistry",
+    "TurnExecutionError",
     "validate_intent_against_view",
 ]

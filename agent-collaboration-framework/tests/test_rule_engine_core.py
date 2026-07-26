@@ -395,7 +395,10 @@ class PaperChaseRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 "follow_douglas_underground",
             },
         )
-        self.assertEqual(projected.visible_facts, ())
+        self.assertEqual(
+            {fact.id for fact in projected.visible_facts},
+            {"douglas_true_nature", "douglas_confession"},
+        )
 
         ending = await service.execute(
             checkpoint_request(

@@ -1,22 +1,21 @@
-"""Application-level Pydantic validation and trusted-candidate hardening."""
+"""Deterministic validation boundary for untrusted Host Agent output."""
 
 from collaboration_framework.contracts import (
     ContractError,
     DefaultCheck,
     Intent,
+    JsonObject,
     MatchedTarget,
     ModuleCheck,
 )
-from collaboration_framework.host.ports import IntentModelPort
 from collaboration_framework.host.schemas import IntentContext
 
 
 class IntentParser:
-    def __init__(self, model: IntentModelPort) -> None:
-        self._model = model
+    """Parse one raw JSON object without invoking a model or mutating state."""
 
-    async def parse(self, context: IntentContext) -> Intent:
-        raw = await self._model.generate(context)
+    @staticmethod
+    def parse(raw: JsonObject, context: IntentContext) -> Intent:
         intent = Intent.model_validate(raw)
         return validate_intent_against_view(intent, context)
 

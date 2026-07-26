@@ -620,8 +620,13 @@ export default function CharacterPage() {
       // 已经有草稿就复用，不要每次提交都新建一条。原来无条件 createCharacterDraft，
       // 「编辑已有角色 → 再次完成创建」会在 characters 表里再插一行，上一条就成了
       // 孤儿记录（改几次就攒几条），而房间里真正生效的只有最后那条。
-      const characterId =
-        useRoomStore.getState().characterId ?? (await createCharacterDraft(roomId))
+      let characterId = useRoomStore.getState().characterId
+      if (!characterId) {
+        characterId = await createCharacterDraft(roomId)
+        // Persist the draft identity before PATCH/complete. If either later
+        // request fails, the next submission resumes this same server draft.
+        setCharacterId(characterId)
+      }
       await saveCharacter(roomId, characterId, {
         name: info.name,
         age: info.age ? Number(info.age) : null,
@@ -637,7 +642,6 @@ export default function CharacterPage() {
         notes,
       })
       await completeCharacter(roomId, characterId)
-      setCharacterId(characterId)
       useCharacterStore.getState().setCharacter(
         {
           info: { ...info, playerName: info.playerName || info.name },

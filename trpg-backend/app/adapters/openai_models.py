@@ -1,14 +1,8 @@
-"""Minimal structured-output Host and Narrator adapters.
-
-The adapter only receives the framework's player-safe contexts. Network or
-model failures fall back to deterministic offline models before an Intent or
-NarrationOutput crosses the application validation boundary.
-"""
+"""Minimal structured-output compatibility Host and strict Narrator adapters."""
 
 from __future__ import annotations
 
 import json
-import logging
 from typing import Protocol
 
 import httpx
@@ -19,10 +13,6 @@ from collaboration_framework.contracts import (
     ModuleCheck,
     NoCheck,
 )
-from collaboration_framework.host.adapters.fakes import (
-    FakeIntentModel,
-    FakeNarrationModel,
-)
 from collaboration_framework.host.application.intent_parser import (
     validate_intent_against_view,
 )
@@ -31,8 +21,6 @@ from collaboration_framework.host.schemas import (
     NarrationContext,
     NarrationOutput,
 )
-
-logger = logging.getLogger(__name__)
 
 _CANONICAL_VERBS = {
     "check": "investigate",
@@ -218,35 +206,19 @@ class OpenAIResponsesJsonClient:
 
 
 class PromptIntentModel:
-    def __init__(
-        self,
-        client: StructuredJsonClient,
-        *,
-        fallback: FakeIntentModel | None = None,
-    ) -> None:
+    def __init__(self, client: StructuredJsonClient) -> None:
         self._client = client
-        self._fallback = fallback or FakeIntentModel()
 
     async def generate(self, context: IntentContext) -> JsonObject:
-        try:
-            raw = await self._client.generate(
-                schema_name="trpg_intent",
-                schema=Intent.model_json_schema(mode="serialization"),
-                instructions=_INTENT_INSTRUCTIONS,
-                input_payload=context.to_json_dict(),
-            )
-            intent = _canonicalize_intent(Intent.model_validate(raw), context)
-            intent = validate_intent_against_view(
-                intent,
-                context,
-            )
-            return intent.to_json_dict()
-        except Exception as exc:
-            logger.warning(
-                "Intent model failed; using deterministic fallback (%s)",
-                type(exc).__name__,
-            )
-            return await self._fallback.generate(context)
+        raw = await self._client.generate(
+            schema_name="trpg_intent",
+            schema=Intent.model_json_schema(mode="serialization"),
+            instructions=_INTENT_INSTRUCTIONS,
+            input_payload=context.to_json_dict(),
+        )
+        intent = _canonicalize_intent(Intent.model_validate(raw), context)
+        intent = validate_intent_against_view(intent, context)
+        return intent.to_json_dict()
 
 
 def _canonicalize_intent(intent: Intent, context: IntentContext) -> Intent:
@@ -326,34 +298,21 @@ def _is_travel_text(text: str) -> bool:
 
 
 class PromptNarrationModel:
-    def __init__(
-        self,
-        client: StructuredJsonClient,
-        *,
-        fallback: FakeNarrationModel | None = None,
-    ) -> None:
+    def __init__(self, client: StructuredJsonClient) -> None:
         self._client = client
-        self._fallback = fallback or FakeNarrationModel()
 
     async def generate(self, context: NarrationContext) -> JsonObject:
-        try:
-            raw = await self._client.generate(
-                schema_name="trpg_narration",
-                schema=NarrationOutput.model_json_schema(mode="serialization"),
-                instructions=_NARRATION_INSTRUCTIONS,
-                input_payload=context.to_json_dict(),
-            )
-            output = NarrationOutput.model_validate(raw)
-            allowed_ids = {fact.id for fact in context.action_result.visible_facts}
-            if not set(output.claimed_fact_ids).issubset(allowed_ids):
-                raise ValueError("Narration claimed a fact outside ActionResult")
-            return output.to_json_dict()
-        except Exception as exc:
-            logger.warning(
-                "Narration model failed; using deterministic fallback (%s)",
-                type(exc).__name__,
-            )
-            return await self._fallback.generate(context)
+        raw = await self._client.generate(
+            schema_name="trpg_narration",
+            schema=NarrationOutput.model_json_schema(mode="serialization"),
+            instructions=_NARRATION_INSTRUCTIONS,
+            input_payload=context.to_json_dict(),
+        )
+        output = NarrationOutput.model_validate(raw)
+        allowed_ids = {fact.id for fact in context.action_result.visible_facts}
+        if not set(output.claimed_fact_ids).issubset(allowed_ids):
+            raise ValueError("Narration claimed a fact outside ActionResult")
+        return output.to_json_dict()
 
 
 def _response_output_text(payload: object) -> str:

@@ -85,6 +85,12 @@ _MODELS: list[type[BaseModel]] = [
     ws.ActionSubmitPayload,
     ws.SessionBoundPayload,
     ws.NarrationPushPayload,
+    ws.TurnStartedPayload,
+    ws.TurnPhaseChangedPayload,
+    ws.ToolStartedPayload,
+    ws.ToolCompletedPayload,
+    ws.TurnFailedPayload,
+    ws.ViewUpdatedPayload,
     # WebSocket 新增 14 个事件（issue #77）：C→S 3 个 + S→C 11 个
     ws.CheckRollPayload,
     ws.SanCheckRollPayload,

@@ -20,6 +20,18 @@ export interface ActionSubmitPayload {
   utterance: string;
 }
 
+export interface ActorResourceView {
+  id: string;
+  name: string;
+  value: number;
+}
+
+export interface ActorValueView {
+  id: string;
+  name: string;
+  value: number;
+}
+
 /**
  * 调查员年龄的合法区间（issue #96）。
  *
@@ -75,6 +87,14 @@ export interface AuthResult {
   token: string;
   userId: string;
   nickname: string;
+}
+
+export interface AvailableExitView {
+  id: string;
+  name: string;
+  aliases?: string[];
+  description?: string;
+  destination?: ExitDestinationView | null;
 }
 
 /**
@@ -245,6 +265,17 @@ export interface CheckSkillOptionPayload {
 }
 
 /**
+ * Trusted candidate menu exposed to the host semantic matcher.
+ */
+export interface CheckpointOption {
+  id: string;
+  target_id: string;
+  action_hint: string;
+  skills?: string[];
+  difficulty?: ("regular" | "hard" | "extreme") | null;
+}
+
+/**
  * clue.granted 推送 payload（issue #77 新增，线索发现，本期不会真的发出）。
  */
 export interface ClueGrantedPayload {
@@ -317,6 +348,11 @@ export interface ErrorPayload {
   correlationId?: string | null;
 }
 
+export interface ExitDestinationView {
+  scene_id: string;
+  name: string;
+}
+
 /**
  * game.ended 推送 payload（issue #77 新增，触发复盘，本期不会真的发出）。
  */
@@ -357,6 +393,20 @@ export interface GameSystemRead {
  */
 export interface JoinRoomBody {
   nickname?: string | null;
+}
+
+export interface JsonValue {
+  [k: string]: unknown;
+}
+
+export interface KnownInformationView {
+  id: string;
+  title: string;
+  summary: string;
+  content: string;
+  related_entities?: string[];
+  related_scenes?: string[];
+  scope: "actor" | "party";
 }
 
 /**
@@ -474,6 +524,12 @@ export interface NarrationPushPayload {
   text: string;
 }
 
+export interface ObservableStateView {
+  key: string;
+  label: string;
+  value: JsonValue;
+}
+
 /**
  * 一个职业：信用评级区间、职业技能点公式、职业技能清单。
  */
@@ -505,6 +561,22 @@ export interface PlayerJoinedPayload {
  */
 export interface PlayerReadyPayload {
   ready: boolean;
+}
+
+/**
+ * Complete player-safe world snapshot used by one model/Agent run.
+ */
+export interface PlayerView {
+  room_id: string;
+  player_id: string;
+  actor_id: string;
+  scene_id: string;
+  phase: "playing" | "ended";
+  revision: string;
+  self_actor: SelfActorView;
+  scene: SceneView;
+  known_information?: KnownInformationView[];
+  checkpoint_options?: CheckpointOption[];
 }
 
 /**
@@ -689,12 +761,34 @@ export interface SanCheckResultPayload {
  */
 export interface SanCheckRollPayload {}
 
+export interface SceneView {
+  id: string;
+  name: string;
+  description: string;
+  time?: string | null;
+  visible_entities?: VisibleEntity[];
+  visible_actors?: VisibleActorView[];
+  available_exits?: AvailableExitView[];
+}
+
 /**
  * POST /api/v1/rooms/{roomId}/module 请求体
  */
 export interface SelectModuleBody {
   moduleId: string;
   attributeGenMethod?: string;
+}
+
+export interface SelfActorView {
+  id: string;
+  name: string;
+  occupation?: string | null;
+  attributes?: ActorValueView[];
+  skills?: ActorValueView[];
+  resources?: ActorResourceView[];
+  conditions?: string[];
+  equipment?: string[];
+  background_summary?: string;
 }
 
 /**
@@ -738,11 +832,45 @@ export interface SkillSpec {
   relatedAttr?: string | null;
 }
 
+export interface ToolCompletedPayload {
+  correlationId: string;
+  toolName: string;
+  status: "success" | "error";
+}
+
+export interface ToolStartedPayload {
+  correlationId: string;
+  toolName: string;
+  publicProgressLabel: string;
+}
+
 /**
  * turn.begin 推送 payload（issue #77 新增，回合制约束，本期不会真的发出）。
  */
 export interface TurnBeginPayload {
   playerId: string;
+}
+
+export interface TurnFailedPayload {
+  correlationId: string;
+  code: string;
+  publicMessage: string;
+  retryable: boolean;
+}
+
+export interface TurnPhaseChangedPayload {
+  correlationId: string;
+  phase:
+    | "reading_player_view"
+    | "understanding_action"
+    | "waiting_for_check"
+    | "executing_action"
+    | "refreshing_player_view"
+    | "generating_narration";
+}
+
+export interface TurnStartedPayload {
+  correlationId: string;
 }
 
 /**
@@ -771,4 +899,24 @@ export interface ValidationIssueView {
 export interface ViewPrivatePayload {
   playerId: string;
   text: string;
+}
+
+export interface ViewUpdatedPayload {
+  playerId: string;
+  playerView: PlayerView;
+}
+
+export interface VisibleActorView {
+  id: string;
+  name: string;
+  status_summary?: string;
+}
+
+export interface VisibleEntity {
+  id: string;
+  kind: "npc" | "object" | "location";
+  name: string;
+  aliases?: string[];
+  description: string;
+  observable_state?: ObservableStateView[];
 }

@@ -5,9 +5,10 @@ import json
 import unittest
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from collaboration_framework.bootstrap import build_fake_application
 from collaboration_framework.contracts import (
-    ActionResult,
     ContractError,
     Intent,
     MatchedTarget,
@@ -16,19 +17,21 @@ from collaboration_framework.contracts import (
     PlayerInput,
 )
 from collaboration_framework.engine import GameState
+from collaboration_framework.host.adapters import OneShotHostAgentAdapter
 from collaboration_framework.host.adapters.fakes import (
     FakeIntentModel,
     FakeNarrationModel,
 )
 from collaboration_framework.host.application import (
     ContextAssembler,
+    HostAgentIntentResolver,
     IntentParser,
     Narrator,
     Orchestrator,
     PlayerViewProjector,
+    TurnExecutionError,
 )
 from collaboration_framework.schema_export import rendered_schemas
-from pydantic import ValidationError
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -104,9 +107,13 @@ class RecordingNarrationModel(FakeNarrationModel):
 class UnifiedWorkflowTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.module = ModuleContent.model_validate_json(load_text("fixtures/demo-module.json"))
+        cls.module = ModuleContent.model_validate_json(
+            load_text("fixtures/demo-module.json")
+        )
         cls.state = GameState.model_validate_json(load_text("fixtures/demo-state.json"))
-        cls.player_input = PlayerInput.model_validate_json(load_text("fixtures/demo-turn.json"))
+        cls.player_input = PlayerInput.model_validate_json(
+            load_text("fixtures/demo-turn.json")
+        )
 
     def application(self, intent_model=None, narration_model=None):
         base = build_fake_application(self.module, self.state)
@@ -118,7 +125,9 @@ class UnifiedWorkflowTests(unittest.TestCase):
         recording = narration_model or RecordingNarrationModel()
         orchestrator = Orchestrator(
             context_assembler=ContextAssembler(self.module.background),
-            intent_parser=IntentParser(intent_model or FakeIntentModel()),
+            host_intent_resolver=HostAgentIntentResolver(
+                OneShotHostAgentAdapter(intent_model or FakeIntentModel())
+            ),
             action_executor=engine,
             player_view_projector=PlayerViewProjector(engine),
             narrator=Narrator(recording),
@@ -228,7 +237,9 @@ class UnifiedWorkflowTests(unittest.TestCase):
 
     def test_unknown_intent_also_goes_through_executor_then_clarifies(self) -> None:
         orchestrator, engine, _ = self.application()
-        unclear = PlayerInput.model_validate_json(load_text("fixtures/clarification-turn.json"))
+        unclear = PlayerInput.model_validate_json(
+            load_text("fixtures/clarification-turn.json")
+        )
         output = self.run_turn(orchestrator, unclear)
 
         self.assertEqual(output.intent.kind, "unknown")
@@ -237,7 +248,9 @@ class UnifiedWorkflowTests(unittest.TestCase):
         self.assertEqual(output.status, "clarification")
         self.assertEqual(output.narration.kind, "clarification")
 
-    def test_host_semantic_checkpoint_choice_is_not_rejected_by_verb_equality(self) -> None:
+    def test_host_semantic_checkpoint_choice_is_not_rejected_by_verb_equality(
+        self,
+    ) -> None:
         payload = {
             "kind": "action",
             "verb": "force_open_with_my_shoulder",
@@ -275,7 +288,10 @@ class UnifiedWorkflowTests(unittest.TestCase):
             "summary": "调查书架",
         }
         orchestrator, engine, _ = self.application(StaticIntentModel(payload))
-        with self.assertRaisesRegex(ValueError, "checkpoint 不在可信候选"):
+        with self.assertRaisesRegex(
+            TurnExecutionError,
+            "行动意图未通过安全校验",
+        ):
             self.run_turn(orchestrator)
         self.assertEqual(engine.execute_calls, 0)
 
@@ -300,7 +316,9 @@ class UnifiedWorkflowTests(unittest.TestCase):
         self.assertNotIn("events", narration_payload)
         self.assertNotIn("confirmed_facts", narration_payload)
 
-    def test_events_rebuild_committed_snapshot_without_crossing_host_contract(self) -> None:
+    def test_events_rebuild_committed_snapshot_without_crossing_host_contract(
+        self,
+    ) -> None:
         orchestrator, engine, _ = self.application()
         smash = with_input(
             self.player_input,
@@ -329,9 +347,13 @@ class UnifiedWorkflowTests(unittest.TestCase):
         self.assertEqual(first.action_result, second.action_result)
         self.assertEqual(engine.snapshot().event_sequence, 1)
         self.assertEqual(engine.execute_calls, 2)
-        self.assertEqual(len(engine.execution_for(self.player_input.client_action_id).events), 1)
+        self.assertEqual(
+            len(engine.execution_for(self.player_input.client_action_id).events), 1
+        )
 
-    def test_replayed_action_after_another_commit_uses_current_view_revision(self) -> None:
+    def test_replayed_action_after_another_commit_uses_current_view_revision(
+        self,
+    ) -> None:
         orchestrator, engine, _ = self.application()
         first = self.run_turn(orchestrator)
         intervening = with_input(
@@ -387,8 +409,11 @@ class UnifiedWorkflowTests(unittest.TestCase):
 
     def test_fake_intent_model_matches_versioned_cases(self) -> None:
         app = build_fake_application(self.module, self.state)
-        view = asyncio.run(app.orchestrator._player_view_projector.project(self.player_input))
-        parser = IntentParser(FakeIntentModel())
+        view = asyncio.run(
+            app.orchestrator._player_view_projector.project(self.player_input)
+        )
+        model = FakeIntentModel()
+        parser = IntentParser()
         assembler = ContextAssembler(self.module.background)
         for case in json.loads(load_text("fixtures/demo-cases.json")):
             player_input = with_input(
@@ -396,7 +421,9 @@ class UnifiedWorkflowTests(unittest.TestCase):
                 action_id=case["case_id"],
                 utterance=case["utterance"],
             )
-            intent = asyncio.run(parser.parse(assembler.for_intent(player_input, view)))
+            context = assembler.for_intent(player_input, view)
+            raw = asyncio.run(model.generate(context))
+            intent = parser.parse(raw, context)
             with self.subTest(case=case["case_id"]):
                 self.assertEqual(intent.kind, case["expected_kind"])
                 self.assertEqual(intent.verb, case["expected_verb"])

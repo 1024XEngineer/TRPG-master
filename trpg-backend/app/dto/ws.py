@@ -26,6 +26,7 @@ payload dict，再按 type 分支，把 payload dict 交给下面对应的具体
 
 from typing import Any, Literal
 
+from collaboration_framework.contracts import PlayerView
 from pydantic import Field, field_validator
 
 from app.dto.common import CamelModel
@@ -132,6 +133,46 @@ class NarrationPushPayload(CamelModel):
     """narration.push 推送 payload。"""
 
     text: str
+
+
+class TurnStartedPayload(CamelModel):
+    correlation_id: str
+
+
+class TurnPhaseChangedPayload(CamelModel):
+    correlation_id: str
+    phase: Literal[
+        "reading_player_view",
+        "understanding_action",
+        "waiting_for_check",
+        "executing_action",
+        "refreshing_player_view",
+        "generating_narration",
+    ]
+
+
+class ToolStartedPayload(CamelModel):
+    correlation_id: str
+    tool_name: str
+    public_progress_label: str
+
+
+class ToolCompletedPayload(CamelModel):
+    correlation_id: str
+    tool_name: str
+    status: Literal["success", "error"]
+
+
+class TurnFailedPayload(CamelModel):
+    correlation_id: str
+    code: str
+    public_message: str
+    retryable: bool
+
+
+class ViewUpdatedPayload(CamelModel):
+    player_id: str
+    player_view: PlayerView
 
 
 class RoomStatePayload(CamelModel):

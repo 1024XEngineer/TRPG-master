@@ -67,6 +67,8 @@ class FakeIntentModel:
             kind, verb = "action", "smash"
         elif any(word in text for word in ("打开", "开柜", "用钥匙")):
             kind, verb = "action", "open"
+        elif any(word in text for word in ("研究", "查阅", "检索", "翻阅", "查找")):
+            kind, verb = "action", "research"
         elif any(word in text for word in ("调查", "检查", "观察", "看看", "看")):
             kind, verb = "action", "investigate"
         else:

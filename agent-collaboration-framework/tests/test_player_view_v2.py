@@ -114,6 +114,18 @@ def player_view_module() -> ModuleContent:
                     "discovery_shares_to_party": False,
                 },
             },
+            {
+                "id": "released_keeper_clue",
+                "title": "已确认的旧闻",
+                "summary": "规则结算已经向玩家释放这条事实。",
+                "content": "这条内容在被规则结果发现后可以进入玩家已知信息。",
+                "visibility": {"audience": "keeper"},
+            },
+            {
+                "id": "unreleased_keeper_clue",
+                "content": "尚未被规则结果发现的守秘人秘密。",
+                "visibility": {"audience": "keeper"},
+            },
         ]
     )
     return ModuleContent.model_validate(payload)
@@ -190,7 +202,7 @@ def player_view_state() -> GameState:
         update={
             "actors": {"pc_1": self_actor, "pc_2": other_actor},
             "entities": entities,
-            "discovered_facts": ("party_clue",),
+            "discovered_facts": ("party_clue", "released_keeper_clue"),
             "actor_discovered_facts": {
                 "pc_1": ("private_clue",),
                 "pc_2": ("other_private_clue",),
@@ -285,9 +297,17 @@ class PlayerViewV2Tests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             [(item.id, item.scope) for item in view.known_information],
-            [("party_clue", "party"), ("private_clue", "actor")],
+            [
+                ("party_clue", "party"),
+                ("private_clue", "actor"),
+                ("released_keeper_clue", "party"),
+            ],
         )
         self.assertIn("bookshelf", view.known_information[0].related_entities)
+        self.assertNotIn(
+            "unreleased_keeper_clue",
+            {item.id for item in view.known_information},
+        )
 
         for secret in (
             KEEPER_SECRET,
@@ -305,7 +325,11 @@ class PlayerViewV2Tests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             [(item.id, item.scope) for item in other.known_information],
-            [("party_clue", "party"), ("other_private_clue", "actor")],
+            [
+                ("party_clue", "party"),
+                ("other_private_clue", "actor"),
+                ("released_keeper_clue", "party"),
+            ],
         )
         self.assertNotIn(
             "private_clue",
@@ -440,7 +464,8 @@ class PlayerViewV2Tests(unittest.IsolatedAsyncioTestCase):
             player_view=view,
         )
 
-        intent = await IntentParser(FakeIntentModel()).parse(context)
+        raw = await FakeIntentModel().generate(context)
+        intent = IntentParser.parse(raw, context)
 
         assert isinstance(intent.target, MatchedTarget)
         self.assertEqual(intent.target.id, "cabinet")

@@ -137,6 +137,12 @@ import type {
 export type ServerToClientEvent =
   | { type: 'session.bound'; payload: SessionBoundPayload }
   | { type: 'narration.push'; payload: NarrationPushPayload }
+  | { type: 'turn.started'; payload: TurnStartedPayload }
+  | { type: 'turn.phase_changed'; payload: TurnPhaseChangedPayload }
+  | { type: 'tool.started'; payload: ToolStartedPayload }
+  | { type: 'tool.completed'; payload: ToolCompletedPayload }
+  | { type: 'turn.failed'; payload: TurnFailedPayload }
+  | { type: 'view.updated'; payload: ViewUpdatedPayload }
   | { type: 'room.state'; payload: RoomStatePayload }
   | { type: 'player.joined'; payload: PlayerJoinedPayload }
   | { type: 'turn.begin'; payload: TurnBeginPayload }
@@ -148,6 +154,47 @@ export type ServerToClientEvent =
   | { type: 'san.check.result'; payload: SanCheckResultPayload }
   | { type: 'clue.granted'; payload: ClueGrantedPayload }
   | { type: 'error'; payload: ErrorPayload };
+
+export type AgentTurnPhase =
+  | 'reading_player_view'
+  | 'understanding_action'
+  | 'waiting_for_check'
+  | 'executing_action'
+  | 'refreshing_player_view'
+  | 'generating_narration';
+
+export interface TurnStartedPayload {
+  correlationId: string;
+}
+
+export interface TurnPhaseChangedPayload {
+  correlationId: string;
+  phase: AgentTurnPhase;
+}
+
+export interface ToolStartedPayload {
+  correlationId: string;
+  toolName: string;
+  publicProgressLabel: string;
+}
+
+export interface ToolCompletedPayload {
+  correlationId: string;
+  toolName: string;
+  status: 'success' | 'error';
+}
+
+export interface TurnFailedPayload {
+  correlationId: string;
+  code: string;
+  publicMessage: string;
+  retryable: boolean;
+}
+
+export interface ViewUpdatedPayload {
+  playerId: string;
+  playerView: AgentPlayerView;
+}
 
 // Agent framework 的回合结果使用独立信封，不套 `{type, payload}`。字段名按
 // framework 的稳定 JSON Schema 保持 snake_case，避免 SDK 私自改写协议。

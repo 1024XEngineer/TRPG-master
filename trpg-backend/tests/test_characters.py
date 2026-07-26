@@ -69,6 +69,53 @@ async def test_full_character_build_flow_marks_player_ready(
     host = next(p for p in preview.json()["data"]["players"] if p["isHost"])
     assert host["hasCharacter"] is True
 
+
+async def test_create_character_draft_is_idempotent_before_and_after_complete(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    room = await create_room(client)
+    headers = reconnect(room["reconnectToken"])
+
+    first = await client.post(
+        f"{ROOMS_BASE}/{room['roomId']}/characters",
+        headers=headers,
+    )
+    second = await client.post(
+        f"{ROOMS_BASE}/{room['roomId']}/characters",
+        headers=headers,
+    )
+    assert first.status_code == second.status_code == 201
+    assert first.json()["data"] == second.json()["data"]
+
+    character_id = first.json()["data"]["characterId"]
+    await client.patch(
+        f"{ROOMS_BASE}/{room['roomId']}/characters/{character_id}",
+        json=BUILT_CHARACTER,
+        headers=headers,
+    )
+    completed = await client.post(
+        f"{ROOMS_BASE}/{room['roomId']}/characters/{character_id}/complete",
+        headers=headers,
+    )
+    assert completed.status_code == 200
+
+    replayed = await client.post(
+        f"{ROOMS_BASE}/{room['roomId']}/characters",
+        headers=headers,
+    )
+    assert replayed.status_code == 201
+    assert replayed.json()["data"] == {
+        "characterId": character_id,
+        "status": "complete",
+    }
+    assert (
+        await db_session.scalar(
+            select(func.count()).select_from(Character).where(Character.room_id == room["roomId"])
+        )
+        == 1
+    )
+
     stored_character = await db_session.get(Character, character_id)
     assert stored_character is not None
     assert stored_character.based_on_template_id is not None

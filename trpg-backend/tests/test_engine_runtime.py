@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from typing import cast
 
 import pytest
 from collaboration_framework.contracts import (
@@ -399,10 +400,12 @@ async def test_load_runtime_backfills_ruleset_skills_for_legacy_actor(
         runtime = await transaction.load_runtime()
 
     actor_state = runtime.game_state.actors["actor_1"].state
-    assert len(actor_state["skills"]) > 4
-    assert actor_state["skills"]["stealth"] == 20
-    assert actor_state["skills"]["library-use"] == 44
-    assert actor_state["skill_labels"]["stealth"] == "潜行"
+    skills = cast(dict[str, int], actor_state["skills"])
+    skill_labels = cast(dict[str, str], actor_state["skill_labels"])
+    assert len(skills) > 4
+    assert skills["stealth"] == 20
+    assert skills["library-use"] == 44
+    assert skill_labels["stealth"] == "潜行"
     assert runtime.revision == "0"
 
     projection = await RuleEngineService(store).read(
@@ -422,8 +425,12 @@ async def test_load_runtime_backfills_ruleset_skills_for_legacy_actor(
     persisted = await db_session.get(GameSession, room_id)
     assert persisted is not None
     persisted_state = GameState.model_validate(persisted.state_json)
+    persisted_skills = cast(
+        dict[str, int],
+        persisted_state.actors["actor_1"].state["skills"],
+    )
     assert persisted.state_version == 0
-    assert persisted_state.actors["actor_1"].state["skills"]["stealth"] == 20
+    assert persisted_skills["stealth"] == 20
 
 
 async def test_character_reads_remain_available_and_writes_conflict_after_game_start(

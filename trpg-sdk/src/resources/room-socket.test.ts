@@ -60,6 +60,35 @@ test('isValidServerEvent：接受已知类型的合法事件', () => {
     true
   );
   assert.equal(isValidServerEvent({ type: 'narration.push', payload: { text: 'hi' } }), true);
+  assert.equal(
+    isValidServerEvent({
+      type: 'turn.phase_changed',
+      payload: { correlationId: 'a1', phase: 'understanding_action' },
+    }),
+    true
+  );
+  assert.equal(
+    isValidServerEvent({
+      type: 'turn.failed',
+      payload: {
+        correlationId: 'a1',
+        code: 'HOST_AGENT_TIMEOUT',
+        publicMessage: '请重试',
+        retryable: true,
+      },
+    }),
+    true
+  );
+  assert.equal(
+    isValidServerEvent({
+      type: 'view.updated',
+      payload: {
+        playerId: 'player-1',
+        playerView: completedEvent.payload.player_view,
+      },
+    }),
+    true
+  );
 });
 
 test('isValidServerEvent：拒绝未知 type', () => {
@@ -137,5 +166,72 @@ test('waitForOpen：连接失败时 reject 的是 Error，且 cause 是原始 Ev
     );
   } finally {
     ws.close();
+  }
+});
+
+test('turn.failed reject pending action，view.updated 更新同一份缓存', async () => {
+  class FakeWebSocket {
+    static readonly OPEN = 1;
+    static readonly CONNECTING = 0;
+    readonly readyState = FakeWebSocket.OPEN;
+    onmessage: ((event: { data: string }) => void) | null = null;
+    sent: string[] = [];
+
+    constructor(readonly url: string) {}
+
+    send(data: string) {
+      this.sent.push(data);
+    }
+
+    close() {}
+
+    addEventListener() {}
+
+    emit(value: unknown) {
+      this.onmessage?.({ data: JSON.stringify(value) });
+    }
+  }
+
+  const original = globalThis.WebSocket;
+  Object.defineProperty(globalThis, 'WebSocket', {
+    configurable: true,
+    value: FakeWebSocket,
+  });
+  try {
+    const socket = new RoomSocket('ws://example.test');
+    const transport = socket.connect('room-1', 'token') as unknown as FakeWebSocket;
+    transport.emit({
+      type: 'view.updated',
+      payload: {
+        playerId: 'player-1',
+        playerView: completedEvent.payload.player_view,
+      },
+    });
+    assert.deepEqual(socket.getPlayerView(), completedEvent.payload.player_view);
+
+    const pending = socket.submitAction('player-1', {
+      clientActionId: 'failed-action',
+      utterance: '调查书架',
+    });
+    transport.emit({
+      type: 'turn.failed',
+      payload: {
+        correlationId: 'failed-action',
+        code: 'HOST_AGENT_TIMEOUT',
+        publicMessage: '主持 Agent 响应超时，请重试',
+        retryable: true,
+      },
+    });
+    await assert.rejects(
+      pending,
+      (error: unknown) =>
+        error instanceof Error &&
+        error.message === '主持 Agent 响应超时，请重试'
+    );
+  } finally {
+    Object.defineProperty(globalThis, 'WebSocket', {
+      configurable: true,
+      value: original,
+    });
   }
 });

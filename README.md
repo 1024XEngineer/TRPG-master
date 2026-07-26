@@ -11,7 +11,7 @@
 
 当前仓库是一个已经完成前后端联调的 **MS1 可运行版本**，包含 React 前端、TypeScript SDK 和 FastAPI 后端。用户可以完成注册登录、创建或加入房间、选择模组、创建角色、进入大厅、开始游戏和房间内互动等基础流程。
 
-当前版本仍属于阶段性实现：主持人意图理解与叙事支持离线 Fake、OpenAI 和阿里云百炼千问三种模式，默认使用不访问网络的 Fake；复盘摘要和部分游戏数据仍使用占位内容。账号、房间与角色等核心业务数据暂存在后端内存中，后端重启后会被清空。
+当前版本仍属于阶段性实现：主持人意图理解与叙事支持离线 Fake、OpenAI 和阿里云百炼千问三种模式，默认使用不访问网络的 Fake；复盘摘要等非主链能力仍未实现。账号、房间、角色、模组内容、规则 Runtime、事件和已完成动作均由 SQL Store 持久化。
 
 ## 当前功能
 
@@ -28,11 +28,10 @@
 
 ### 当前限制
 
-- 默认 `HOST_MODEL_PROVIDER=fake`，不会访问真实大模型；远程模型调用失败、返回无效 JSON 或越过玩家可见边界时，也会自动回退到确定性的离线模型。
-- 账号、会话、房间、玩家和角色使用内存存储，后端重启后会丢失。
-- SQLite 与异步 SQLAlchemy 基础设施已经接入（用于建表），但核心业务（账号、房间、角色）仍是内存存储，尚未接入实际的数据库读写路径。
-- 后端当前只提供一个内置模组「追书人」。前端展示的其他规则系统和场景中，部分仍是概念入口或静态数据。
-- 投骰目前在前端本地执行，尚未接入后端统一规则引擎。
+- 默认 `HOST_MODEL_PROVIDER=fake`，不会访问真实大模型；远程 Host Agent 或 Narrator 失败时当前回合安全中止并允许重试，不会静默回退到 Fake。
+- 当前唯一承诺可运行的模组是「追书人」；另外三个示例 JSON 只用于解析与 Schema 回归，不会自动写入运行数据库。
+- 技能检定保留 `check.request → check.roll → check.result` 两阶段协议；玩家提交 D100 点数，后端规则引擎权威结算并持久化结果。
+- Director、世界知识检索、长期记忆、主动剧情推进、RAG、持久即兴内容和完整重连恢复不在当前阶段。
 - 复盘摘要、完整事件记录、语音输入等能力尚未完成。
 
 ## 系统结构
@@ -47,10 +46,9 @@ trpg-sdk (REST + WebSocket)
 trpg-backend (FastAPI)
         ├── /api/v1/*       REST API
         ├── /ws/{roomId}    房间实时通道
-        ├── Host Orchestrator 意图理解 → 规则执行 → 安全叙事
-        ├── 模型适配器       Fake / OpenAI Responses / 千问 JSON Mode
-        ├── 内存业务存储     账号、房间、角色、会话
-        └── SQLite          SQLAlchemy 基础设施（已接入，业务尚未接数据库）
+        ├── TurnApplication   Host Agent → 两阶段检定 → RuleEngine → Narrator
+        ├── 模型适配器        Fake / OpenAI Responses / Qwen Agents SDK
+        └── SQL Store         业务数据、模组、Runtime、事件与幂等记录
 ```
 
 统一 REST 响应格式如下：
@@ -133,8 +131,8 @@ uv run uvicorn app.main:app --reload
 > 里只有空的历史表、没有真实数据，**直接删掉重新迁移即可**（`rm trpg-backend/app.db`
 > 再 `alembic upgrade head`）。
 
-首次启动后，应用 Seed 只会创建 COC7 规则系统和 `wip` 状态的追书人目录，不会
-内嵌简化版模组内容。在另一个终端执行固定的本地加载命令，将仓库中的追书人
+应用 Seed 只会创建 COC7 规则系统和 `wip` 状态的追书人目录，不会内嵌简化版
+模组内容。执行固定的本地加载命令，将仓库中的追书人
 ModuleContent 经过 Validation 后原子写入数据库，并把目录标记为 `ready`：
 
 ```bash
@@ -144,7 +142,8 @@ uv run python scripts/load_paper_chase.py
 
 该命令只读取
 `agent-collaboration-framework/docs/module-parser/examples/module-content-validation/追书人/module-content-draft.json`。
-重复执行相同内容会返回 `unchanged`；同一版本已有不同内容时会拒绝覆盖。
+脚本可直接在刚迁移的空数据库运行：缺少 Seed 时会先执行同一套幂等 Seed。重复
+执行相同内容会返回 `unchanged`；同一版本已有不同内容时会拒绝覆盖。
 
 后端默认地址：<http://127.0.0.1:8000>
 
@@ -188,6 +187,10 @@ npm run dev
 | `QWEN_BASE_URL` | `https://dashscope.aliyuncs.com/compatible-mode/v1` | 千问 OpenAI 兼容接口根地址 |
 | `QWEN_MODEL` | `qwen3.7-plus` | 千问模型名称 |
 | `QWEN_TIMEOUT_SECONDS` | `30` | 千问请求超时秒数 |
+| `HOST_AGENT_MAX_TURNS` | `6` | 单次 Host Agent 最大模型轮数 |
+| `HOST_AGENT_MAX_TOOL_CALLS` | `8` | 单次 Host Agent 最大工具调用数 |
+| `HOST_AGENT_TOOL_TIMEOUT_SECONDS` | `5` | 单工具超时秒数 |
+| `HOST_AGENT_TIMEOUT_SECONDS` | `30` | Host Agent 整轮超时秒数 |
 
 ### 主持模型配置
 
@@ -241,14 +244,14 @@ npm run dev
    uv run uvicorn app.main:app --reload
    ```
 
-健康检查只能确认后端存活，不会调用模型。请进入房间提交一次自然语言行动进行验证。如果后端日志出现下面任一信息，表示远程请求或结构化校验失败，当前回合已经回退到离线模型：
+健康检查只能确认后端存活，不会调用模型。请进入房间提交一次自然语言行动进行验证。
+Qwen 模式缺少 Key 时后端启动失败；Host Agent 超时、预算耗尽、非法输出或越权候选
+会发送玩家安全的 `turn.failed`，规则引擎不会执行。Narrator 失败不会重跑 Host
+Agent、重新掷骰或重复写入状态；使用同一 `clientActionId` 重试只会复用已提交结果。
 
-```text
-Intent model failed; using deterministic fallback (...)
-Narration model failed; using deterministic fallback (...)
-```
-
-离线回退要求玩家文本中包含当前可见目标的名称或别名；缺少明确目标时，界面可能重复显示“你想对当前场景中的哪个目标做什么？”。这通常不是前端缓存，而是模型请求失败后的安全回退。
+公共 WebSocket 只发送安全进度：`turn.started`、`turn.phase_changed`、
+`tool.started`、`tool.completed`、`turn.failed` 和 `view.updated`。内部 call id、
+工具参数/结果、Prompt、raw model output、reasoning、异常栈和模组秘密不会进入浏览器。
 
 ### 前端 `trpg-frontend/.env`
 

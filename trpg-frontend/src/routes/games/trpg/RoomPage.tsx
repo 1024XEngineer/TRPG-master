@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import type { CheckRequestPayload } from 'trpg-sdk'
+import type { AgentPlayerView, AgentTurnPhase, CheckRequestPayload } from 'trpg-sdk'
 import { ArrowLeft, Users, Map, BookOpen, ScrollText, Star, X, SendHorizontal, Dice6, Plus, Save, FlagOff, Heart } from 'lucide-react'
 import { useState, useRef, useEffect, type FormEvent } from 'react'
 import { useRoomStore } from '@/stores/room-store'
@@ -19,16 +19,63 @@ interface Message {
   isSelf?: boolean
 }
 
-interface MapLocation { icon: string; name: string; desc: string; isCurrent?: boolean }
+interface MapLocation {
+  id: string
+  icon: string
+  name: string
+  desc: string
+  isCurrent?: boolean
+}
 
-const MAP_LOCATIONS: MapLocation[] = [
-  { icon: '🏚️', name: '惠特利旧宅 · 正门', desc: '当前所在 · 铁门虚掩', isCurrent: true },
-  { icon: '🌿', name: '前院 · 花园', desc: '杂草丛生，喷泉干涸' },
-  { icon: '🚪', name: '门厅', desc: '一楼入口，尚未探索' },
-  { icon: '📚', name: '书房', desc: '教授最后出现的地点' },
-  { icon: '🪟', name: '二楼走廊', desc: '蓝绿色光芒的来源' },
-  { icon: '🔻', name: '地下室', desc: '门锁着，钥匙未知' },
-]
+function mapLocationsFromPlayerView(playerView: AgentPlayerView | null): MapLocation[] {
+  if (!playerView) {
+    return [{
+      id: 'waiting-for-view',
+      icon: '📍',
+      name: '等待场景同步',
+      desc: '进入游戏后由规则引擎提供当前位置',
+      isCurrent: true,
+    }]
+  }
+  const current: MapLocation = {
+    id: playerView.scene.id,
+    icon: '📍',
+    name: playerView.scene.name,
+    desc: playerView.scene.description || '当前所在场景',
+    isCurrent: true,
+  }
+  const seen = new Set([current.id])
+  const exits = playerView.scene.available_exits.flatMap((exit): MapLocation[] => {
+    const id = exit.destination?.scene_id ?? `exit:${exit.id}`
+    if (seen.has(id)) return []
+    seen.add(id)
+    return [{
+      id,
+      icon: exit.destination ? '🧭' : '🚪',
+      name: exit.destination?.name ?? exit.name,
+      desc: exit.description || `可经「${exit.name}」到达`,
+    }]
+  })
+  return [current, ...exits]
+}
+
+const PHASE_LABELS: Record<AgentTurnPhase, string> = {
+  reading_player_view: '守秘人正在查看当前场景',
+  understanding_action: '守秘人正在理解你的行动',
+  waiting_for_check: '等待你选择技能并掷骰',
+  executing_action: '规则引擎正在结算行动',
+  refreshing_player_view: '正在更新场景与已知信息',
+  generating_narration: '守秘人正在组织叙事',
+}
+
+function resourceValue(playerView: AgentPlayerView | null, id: string): number | null {
+  const normalized = id.toLocaleLowerCase()
+  const resource = playerView?.self_actor.resources.find((item) =>
+    item.id.toLocaleLowerCase() === normalized ||
+    item.name.toLocaleLowerCase() === normalized
+  )
+  return resource?.value ?? null
+}
 
 const DICE_OPTIONS = [
   { id: 'd100', label: 'D100' },
@@ -426,13 +473,16 @@ export default function RoomPage() {
   const [ending, setEnding] = useState(false)
   const [endError, setEndError] = useState('')
   const [confirmExit, setConfirmExit] = useState(false)
-  const [messages, setMessages] = useState<Message[]>([
-    { type: 'system', content: '案件档案已加载', time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) },
-  ])
+  const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [typing, setTyping] = useState(false)
   const [pendingAction, setPendingAction] = useState<{ clientActionId: string; utterance: string } | null>(null)
   const [pendingCheck, setPendingCheck] = useState<CheckRequestPayload | null>(null)
+  const [playerView, setPlayerView] = useState<AgentPlayerView | null>(() => {
+    const cached = sdk.roomSocket.getPlayerView()
+    return cached?.room_id === roomId ? cached : null
+  })
+  const [progressLabel, setProgressLabel] = useState<string | null>(null)
   const [actionError, setActionError] = useState('')
   const [openPanel, setOpenPanel] = useState<string | null>(null)
   const [sheetPage, setSheetPage] = useState<'info' | 'background'>('info')
@@ -448,10 +498,24 @@ export default function RoomPage() {
   const [lastSaved, setLastSaved] = useState<string | null>(() => (notesKey ? localStorage.getItem(notesKey) : null) ? new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const suspended = (roomPhase || roomInfo?.phase) === 'Suspended'
+  const mapLocations = mapLocationsFromPlayerView(playerView)
+  const currentHp = resourceValue(playerView, 'hp') ?? character?.derived.hp ?? null
+  const currentSan = resourceValue(playerView, 'san') ?? character?.derived.san ?? null
 
   useEffect(() => {
     if (roomInfo?.phase) setRoomPhase(roomInfo.phase)
   }, [roomInfo?.phase])
+
+  useEffect(() => {
+    if (!playerView) return
+    const openingText = `${playerView.scene.name}\n${playerView.scene.description}`
+    setMessages(prev => prev.length > 0 ? prev : [{
+      type: 'narr',
+      sender: '守秘人',
+      content: openingText,
+      time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+    }])
+  }, [playerView])
 
   useEffect(() => {
     // ★ block: 'nearest' 很关键——默认的 scrollIntoView 会尝试把目标"居中"，
@@ -468,6 +532,8 @@ export default function RoomPage() {
   // P0）。这里补一次同样的连接+room.join，对已经连过的房主是幂等空操作。
   useEffect(() => {
     if (!roomId || !playerId) return
+    const cached = sdk.roomSocket.getPlayerView()
+    setPlayerView(cached?.room_id === roomId ? cached : null)
     let cancelled = false
     const ws = connectWebSocket(roomId)
     waitForWsOpen(ws)
@@ -487,15 +553,20 @@ export default function RoomPage() {
     const off = onWsMessage((envelope) => {
       if (envelope.type === 'narration.push') {
         setTyping(false)
-        setMessages(prev => [...prev, {
-          type: 'narr', sender: '守秘人',
-          content: envelope.payload.text,
-          time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
-        }])
+        setProgressLabel(null)
+        setMessages(prev => {
+          if (prev.at(-1)?.content === envelope.payload.text) return prev
+          return [...prev, {
+            type: 'narr', sender: '守秘人',
+            content: envelope.payload.text,
+            time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+          }]
+        })
       } else if (envelope.type === 'room.state') {
         setRoomPhase(envelope.payload.phase)
       } else if (envelope.type === 'check.request') {
         setTyping(false)
+        setProgressLabel(null)
         setPendingCheck(envelope.payload)
         setShowDice(true)
       } else if (envelope.type === 'check.result') {
@@ -528,8 +599,26 @@ export default function RoomPage() {
           current?.clientActionId === envelope.payload.clientActionId ? null : current
         )
         if (envelope.payload.playerId === playerId) setShowDice(false)
+      } else if (envelope.type === 'turn.started') {
+        setTyping(true)
+        setProgressLabel('守秘人正在查看当前场景')
+      } else if (envelope.type === 'turn.phase_changed') {
+        setTyping(envelope.payload.phase !== 'waiting_for_check')
+        setProgressLabel(PHASE_LABELS[envelope.payload.phase])
+      } else if (envelope.type === 'tool.started') {
+        setTyping(true)
+        setProgressLabel(envelope.payload.publicProgressLabel)
+      } else if (envelope.type === 'turn.failed') {
+        setTyping(false)
+        setProgressLabel(null)
+        setActionError(envelope.payload.publicMessage)
+      } else if (envelope.type === 'view.updated') {
+        if (envelope.payload.playerId === playerId) {
+          setPlayerView(envelope.payload.playerView)
+        }
       } else if (envelope.type === 'error') {
         setTyping(false)
+        setProgressLabel(null)
         setActionError(envelope.payload.message)
       }
     })
@@ -543,13 +632,15 @@ export default function RoomPage() {
     setTyping(true)
     void sdk.roomSocket
       .submitAction(playerId, action)
-      .then(() => {
+      .then((result) => {
+        setPlayerView(result.player_view)
         setPendingAction((current) =>
           current?.clientActionId === action.clientActionId ? null : current
         )
       })
       .catch((error: unknown) => {
         setTyping(false)
+        setProgressLabel(null)
         setActionError(friendlyErrorMessage(error, '行动提交失败，请重试'))
       })
   }
@@ -618,7 +709,7 @@ export default function RoomPage() {
         <div className="flex-1 min-w-0">
           <div className="text-sm font-semibold text-text-primary">{roomInfo?.moduleTitle || '当前模组'}</div>
           <div className="text-[11px] text-text-muted">
-            {roomInfo ? `${roomInfo.players.length} 位调查员` : '克苏鲁的呼唤'}
+            {playerView?.scene.name || (roomInfo ? `${roomInfo.players.length} 位调查员` : '克苏鲁的呼唤')}
           </div>
         </div>
         <button
@@ -708,11 +799,16 @@ export default function RoomPage() {
             <div className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-sm bg-[#faf5eb] border border-brass">
               📜
             </div>
-            <div className="bg-panel inline-flex gap-1 items-center px-4 py-3 rounded-md">
-              {[0, 1, 2].map((i) => (
-                <span key={i} className="w-1.5 h-1.5 bg-brass rounded-full animate-bounce"
-                  style={{ animationDelay: `${i * 0.2}s`, animationDuration: '1.4s' }} />
-              ))}
+            <div className="bg-panel inline-flex gap-2 items-center px-4 py-3 rounded-md">
+              <div className="inline-flex gap-1">
+                {[0, 1, 2].map((i) => (
+                  <span key={i} className="w-1.5 h-1.5 bg-brass rounded-full animate-bounce"
+                    style={{ animationDelay: `${i * 0.2}s`, animationDuration: '1.4s' }} />
+                ))}
+              </div>
+              {progressLabel && (
+                <span className="text-[11px] text-text-muted">{progressLabel}</span>
+              )}
             </div>
           </div>
         )}
@@ -745,7 +841,7 @@ export default function RoomPage() {
           瞄一眼当前状态不用点开面板。HP 目前没有"当前值/上限值"两套数字（还没
           做受伤扣血的机制，见已知局限），先按"当前即满值"画满条，以后接了扣血
           机制这里会自然跟着变化。 */}
-      {character && (
+      {currentHp !== null && currentSan !== null && (
         <div className="flex items-center gap-4 px-4 py-2 border-t border-border-light bg-page flex-shrink-0">
           <div className="flex items-center gap-1.5 flex-1 min-w-0">
             <Heart className="w-3 h-3 text-mold flex-shrink-0" strokeWidth={2.5} />
@@ -753,14 +849,14 @@ export default function RoomPage() {
             <div className="flex-1 h-1.5 rounded-full bg-border-light overflow-hidden">
               <div className="h-full rounded-full bg-mold" style={{ width: '100%' }} />
             </div>
-            <span className="text-[11px] font-bold font-mono text-mold flex-shrink-0">{character.derived.hp}</span>
+            <span className="text-[11px] font-bold font-mono text-mold flex-shrink-0">{currentHp}</span>
           </div>
           <div className="flex items-center gap-1.5 flex-1 min-w-0">
             <span className="text-[10px] font-semibold text-text-muted flex-shrink-0">SAN</span>
             <div className="flex-1 h-1.5 rounded-full bg-border-light overflow-hidden">
-              <div className="h-full rounded-full bg-[#7050a0]" style={{ width: `${Math.min(100, character.derived.san)}%` }} />
+              <div className="h-full rounded-full bg-[#7050a0]" style={{ width: `${Math.min(100, currentSan)}%` }} />
             </div>
-            <span className="text-[11px] font-bold font-mono text-[#7050a0] flex-shrink-0">{character.derived.san}</span>
+            <span className="text-[11px] font-bold font-mono text-[#7050a0] flex-shrink-0">{currentSan}</span>
           </div>
         </div>
       )}
@@ -955,13 +1051,18 @@ export default function RoomPage() {
       <BottomPanel open={openPanel === 'map'} onClose={() => setOpenPanel(null)} title="地图">
         <div className="bg-[#f2efe8] rounded-md flex flex-col items-center justify-center py-10 mb-4 border border-border-light">
           <Map className="w-10 h-10 text-text-dim mb-2" />
-          <span className="text-xs text-text-dim">惠特利旧宅 · 阿卡姆郊区</span>
+          <span className="text-xs text-text-dim">
+            {playerView?.scene.name || '等待规则引擎同步当前场景'}
+          </span>
+          {playerView?.scene.time && (
+            <span className="text-[10px] text-text-dim mt-1">{playerView.scene.time}</span>
+          )}
         </div>
         <div className="h-px bg-border-light mb-3.5" />
-        <h4 className="text-xs font-semibold text-brass-dark mb-2.5">已知地点</h4>
+        <h4 className="text-xs font-semibold text-brass-dark mb-2.5">当前位置与可达地点</h4>
         <div className="space-y-1.5">
-          {MAP_LOCATIONS.map((loc) => (
-            <div key={loc.name} className={`flex items-center gap-3 px-3 py-2 rounded ${
+          {mapLocations.map((loc) => (
+            <div key={loc.id} className={`flex items-center gap-3 px-3 py-2 rounded ${
               loc.isCurrent ? 'bg-[rgba(74,138,74,0.06)] border border-[rgba(74,138,74,0.15)]' : 'hover:bg-panel'
             }`}>
               <span className="text-lg">{loc.icon}</span>
@@ -973,6 +1074,24 @@ export default function RoomPage() {
             </div>
           ))}
         </div>
+        {playerView && playerView.known_information.length > 0 && (
+          <>
+            <div className="h-px bg-border-light my-3.5" />
+            <h4 className="text-xs font-semibold text-brass-dark mb-2.5">已知信息</h4>
+            <div className="space-y-2">
+              {playerView.known_information.map((information) => (
+                <div key={information.id} className="rounded-md bg-panel px-3 py-2">
+                  <div className="text-sm font-medium text-text-primary">
+                    {information.title}
+                  </div>
+                  <div className="text-[11px] leading-relaxed text-text-muted mt-0.5">
+                    {information.summary}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
       </BottomPanel>
 
       {/* Panel: 速记 */}

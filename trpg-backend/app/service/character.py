@@ -9,6 +9,8 @@
 import random
 from dataclasses import asdict
 
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.coc7_content import build_coc7_ruleset
@@ -120,9 +122,39 @@ async def create_character_draft(
     if player.room_id != room.id:
         raise RoomAuthorizationError("你不在这个房间里")
 
+    existing = await db.scalar(
+        select(Character).where(
+            Character.room_id == room_id,
+            Character.player_id == player.id,
+        )
+    )
+    if existing is not None:
+        return CharacterDraftResult(
+            character_id=existing.id,
+            status=existing.status,
+        )
+
     character = Character(room_id=room_id, player_id=player.id, status="draft")
     db.add(character)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        # A concurrent request may have won the unique (room, player) insert.
+        # Roll back the failed transaction, then return that same authoritative
+        # row instead of leaking a database exception as HTTP 500.
+        await db.rollback()
+        existing = await db.scalar(
+            select(Character).where(
+                Character.room_id == room_id,
+                Character.player_id == player.id,
+            )
+        )
+        if existing is None:
+            raise
+        return CharacterDraftResult(
+            character_id=existing.id,
+            status=existing.status,
+        )
     return CharacterDraftResult(character_id=character.id, status=character.status)
 
 

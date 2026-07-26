@@ -1,6 +1,6 @@
 # Agent Collaboration Framework
 
-这是成员 A（主持编排）、成员 B（确定性规则引擎）和成员 C（模组解析/审查）共同使用的模块化单体骨架。当前版本提供稳定边界、可运行的离线纵切、面向持久化的 `RuleEngineService + InMemoryEngineStore`，以及尚未接入主链的 OpenAI Agents SDK + Qwen Host Agent Adapter；不接 LangGraph、PostgreSQL 或 FastAPI。
+这是成员 A（主持编排）、成员 B（确定性规则引擎）和成员 C（模组解析/审查）共同使用的模块化单体骨架。当前版本提供稳定边界、可运行的离线纵切、面向持久化的 `RuleEngineService + InMemoryEngineStore`，以及已经接入统一 Host 意图阶段的 OpenAI Agents SDK + Qwen Host Agent Adapter；不接 LangGraph、PostgreSQL 或 FastAPI。
 
 ## 阅读入口
 
@@ -21,9 +21,9 @@ Proposal、RFC、对比报告或阶段性讨论。
 ```text
 PlayerInput
   -> PlayerViewProjector.project()
-  -> ContextAssembler.for_intent()
-  -> IntentModelPort.generate()          # Fake 返回原始 JSON
-  -> IntentParser.parse()                # Pydantic + 可信候选校验
+  -> HostAgentIntentResolver.resolve()
+       -> HostAgentPort.astream()        # Fake / Qwen / OneShot
+       -> IntentParser.parse()           # Pydantic + 可信候选校验
   -> ActionExecutor.execute()            # 每个合法 Intent 恰好调用一次
   -> PlayerViewProjector.refresh()
   -> ContextAssembler.for_narration()
@@ -32,15 +32,17 @@ PlayerInput
   -> WebSocketGateway.handle()
 ```
 
-`Orchestrator.run()` 是成员 A 的稳定公开入口，MVP 内部采用普通 Python `async` 流程。当前没有 checkpoint、interrupt、resume、多阶段 Action 或 LangGraph。
+`Orchestrator.run()` 是离线演示和契约测试的兼容入口，复用同一个
+`HostAgentIntentResolver`，但不是 FastAPI 的生产主链。生产环境由 backend 的
+`TurnApplication.prepare()/complete()` 负责 SQL Runtime、持久化幂等和两阶段检定；
+禁止再复制第三套完整回合流程。
 
-当前 `IntentContext` 会把完整 PlayerView v2 交给一次
-`IntentModelPort.generate()`：其中包含同一 revision 的 `self_actor`、安全 `scene`
+当前 `HostAgentContext` 会把完整 PlayerView v2 交给一次 Host Agent run：其中包含同一 revision 的 `self_actor`、安全 `scene`
 （实体、人物、出口）、`known_information` 与可信 `checkpoint_options`。后端的
 OpenAI/Qwen Prompt Adapter 直接序列化这份 Context；不会附加 GameState、数据库记录
-或完整 ModuleContent。未来 Host Agent 及其只读工具也绑定同一 PlayerView。
+或完整 ModuleContent。Host Agent 的只读工具也只绑定这一份 PlayerView。
 
-## Host Agent 契约（尚未接入主链）
+## Host Agent 契约
 
 `host/ports/HostAgentPort` 是成员 A 在规则引擎之前进行意图理解的内部端口，不是新的 A/B/C 共享业务契约。它只有一个
 `astream(HostAgentContext)` 流式入口：接收可信 `PlayerInput` 和 B 已去密的 `PlayerView`，可产生零到多个脱敏的工具进度事件，
@@ -55,8 +57,11 @@ OpenAI Agents SDK 自带的 model/tool 循环。每次 `astream()` 独立绑定�
 最大模型轮数、工具调用预算、单工具/整轮 timeout、脱敏事件、部分 usage 和严格 final JSON 对象边界。SDK/Qwen
 类型只存在于该私有 Adapter 和 bootstrap 组合根。
 
-`FakeHostAgent`、真实 Adapter 和这些工具都尚未接入上面的 `Orchestrator` 主链。Adapter 不调用
-`ActionExecutor`，不执行规则动作或状态写入；它的 `agent.completed.raw_output` 仍必须交给 `IntentParser`。
+`FakeHostAgent`、真实 Adapter 和无工具的一次性模型兼容 Adapter 都通过
+`HostAgentIntentResolver` 进入同一意图阶段。Resolver 要求流中恰好一个终止事件，
+并将 `agent.completed.raw_output` 交给纯确定性的 `IntentParser`；失败、缺失/重复
+终止或非法输出全部 fail closed。Adapter 和 Resolver 都不调用 `ActionExecutor`，
+不执行规则动作或状态写入。
 
 显式构造 Qwen Adapter 时，由调用方在 bootstrap 阶段提供以下环境变量；模块 import 不读取环境或创建网络客户端：
 
@@ -156,7 +161,7 @@ collaboration_framework/
 | `EngineExecutionResult` | B | B | 内部含 StateChange、Event 和版本信息 |
 | `EngineRuntimeSnapshot`/`CompletedAction` | B | B | Store 加载快照与幂等执行记录 |
 | `NarrationOutput` | A | Gateway | 模型原始 JSON 经 Pydantic 和事实引用校验后的输出 |
-| `HostAgentContext`/`HostAgentEvent`/`HostAgentUsage` | A | A 的 Host Agent Adapter | A 内部、框架无关；不是 A/B/C 共享契约，也尚未接入 Orchestrator |
+| `HostAgentContext`/`HostAgentEvent`/`HostAgentUsage` | A | A 的 Host Agent Adapter | A 内部、框架无关；经 Resolver 接入意图阶段，不成为 A/B/C 共享契约 |
 | `ToolRegistry` 与 player-safe 工具 | A | A 的 Host Agent Adapter | 绑定当前 Context，只读；参数/结果均由项目 Schema 校验 |
 | `ModuleContent`/`CheckpointSpec`/`RuleSpec` | B/C 共审 | B、C | 声明式内容语言；A 不直接消费 |
 
@@ -206,7 +211,6 @@ Schema 文件由 Pydantic 模型自动生成，不应手工维护：
 
 ## 当前明确不做
 
-- 不把真实 Host Agent、FakeHostAgent 或只读工具接入 `Orchestrator`。
 - 不让 Host Agent 调用 `ActionExecutor`、决定规则结果或修改权威状态。
 - 不实现数据库/RAG/网络搜索、并行工具调用或任何写工具。
 - 不使用 LangGraph。

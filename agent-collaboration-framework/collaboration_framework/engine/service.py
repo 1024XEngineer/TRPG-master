@@ -285,8 +285,7 @@ class RuleEngineService:
                         ProjectionExitDestination(
                             scene_id=destination.id,
                             name=(
-                                destination.player_visible_name
-                                or available_exit.name
+                                destination.player_visible_name or available_exit.name
                             ),
                         )
                         if available_exit.reveal_destination
@@ -436,8 +435,10 @@ class RuleEngineService:
                 scope = "actor"
             else:
                 continue
-            if not RuleEngineService._is_visible_to_actor(policy):
-                continue
+            # Discovery lists are written only by the authoritative RuleKernel
+            # after an outcome releases a fact. Module authors may keep the
+            # source information item keeper-only before discovery; once its id
+            # is present here, the fact itself is player-safe by definition.
             projected.append(
                 ProjectionKnownInformation(
                     id=information.id,

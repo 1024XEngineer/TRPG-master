@@ -1,11 +1,11 @@
 """Explicit async MVP workflow with one stable class entry point."""
 
 from collaboration_framework.contracts import ActionRequest, PlayerInput
-from collaboration_framework.host.schemas import TurnOutput
+from collaboration_framework.host.schemas import HostAgentContext, TurnOutput
 from collaboration_framework.ports import ActionExecutor
 
 from .context_assembler import ContextAssembler
-from .intent_parser import IntentParser
+from .host_agent_intent_resolver import HostAgentIntentResolver
 from .narrator import Narrator
 from .player_view_projector import PlayerViewProjector
 
@@ -15,21 +15,25 @@ class Orchestrator:
         self,
         *,
         context_assembler: ContextAssembler,
-        intent_parser: IntentParser,
+        host_intent_resolver: HostAgentIntentResolver,
         action_executor: ActionExecutor,
         player_view_projector: PlayerViewProjector,
         narrator: Narrator,
     ) -> None:
         self._context_assembler = context_assembler
-        self._intent_parser = intent_parser
+        self._host_intent_resolver = host_intent_resolver
         self._action_executor = action_executor
         self._player_view_projector = player_view_projector
         self._narrator = narrator
 
     async def run(self, player_input: PlayerInput) -> TurnOutput:
         view_before = await self._player_view_projector.project(player_input)
-        intent_context = self._context_assembler.for_intent(player_input, view_before)
-        intent = await self._intent_parser.parse(intent_context)
+        intent = await self._host_intent_resolver.resolve(
+            HostAgentContext(
+                player_input=player_input,
+                player_view=view_before,
+            )
+        )
 
         # Every schema-valid Intent, including unknown/dialogue/no-check, crosses
         # the same authoritative command boundary exactly once.

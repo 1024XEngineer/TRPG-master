@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
+import unittest
 from collections.abc import Callable
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
-import json
-import logging
 from types import SimpleNamespace
 from typing import Any
-import unittest
 
 from agents.models.interface import Model, ModelResponse
 from agents.usage import Usage
@@ -27,7 +27,13 @@ from collaboration_framework.bootstrap.host_agent import (
     HostAgentConfigurationError,
     build_qwen_host_agent,
 )
-from collaboration_framework.contracts import PlayerInput, PlayerView, VisibleEntity
+from collaboration_framework.contracts import (
+    PlayerInput,
+    PlayerView,
+    SceneView,
+    SelfActorView,
+    VisibleEntity,
+)
 from collaboration_framework.host.adapters.openai_agents import (
     QwenHostAgentAdapter,
     QwenHostAgentConfig,
@@ -52,7 +58,6 @@ from collaboration_framework.host.schemas import (
 )
 from collaboration_framework.host.tools import build_player_view_tool_registry
 from tests.test_host_agent_contract import HostAgentPortContractMixin
-
 
 UNKNOWN_INTENT = {
     "kind": "unknown",
@@ -81,13 +86,19 @@ def make_context(*, utterance: str = "检查红色书架") -> HostAgentContext:
             scene_id="library",
             phase="playing",
             revision="7",
-            visible_entities=(
-                VisibleEntity(
-                    id="entity_dynamic_7f3a",
-                    kind="object",
-                    name="红色书架",
-                    aliases=("书架",),
-                    content="一个玩家可见的红色木书架。",
+            self_actor=SelfActorView(id="actor_001", name="调查员"),
+            scene=SceneView(
+                id="library",
+                name="图书馆",
+                description="一间玩家可见的图书馆。",
+                visible_entities=(
+                    VisibleEntity(
+                        id="entity_dynamic_7f3a",
+                        kind="object",
+                        name="红色书架",
+                        aliases=("书架",),
+                        description="一个玩家可见的红色木书架。",
+                    ),
                 ),
             ),
         ),
@@ -107,9 +118,13 @@ def make_config(**updates: object) -> QwenHostAgentConfig:
 
 
 def final_message(value: object) -> ResponseOutputMessage:
-    text = value if isinstance(value, str) else json.dumps(
-        value,
-        ensure_ascii=False,
+    text = (
+        value
+        if isinstance(value, str)
+        else json.dumps(
+            value,
+            ensure_ascii=False,
+        )
     )
     return ResponseOutputMessage(
         id="message_001",
@@ -286,7 +301,7 @@ async def collect(adapter: QwenHostAgentAdapter) -> tuple[object, ...]:
 def terminal(events: tuple[object, ...]) -> HostAgentCompleted | HostAgentFailed:
     value = events[-1]
     if not isinstance(value, (HostAgentCompleted, HostAgentFailed)):
-        raise AssertionError("missing terminal Host Agent event")
+        raise TypeError("missing terminal Host Agent event")
     return value
 
 
@@ -310,9 +325,8 @@ class QwenConfigAndBootstrapTests(unittest.TestCase):
             {"timeout_seconds": 0},
         )
         for updates in invalid_updates:
-            with self.subTest(updates=updates):
-                with self.assertRaises(ValidationError):
-                    make_config(**updates)
+            with self.subTest(updates=updates), self.assertRaises(ValidationError):
+                make_config(**updates)
 
     def test_bootstrap_requires_safe_explicit_configuration(self) -> None:
         with self.assertRaisesRegex(
@@ -322,17 +336,20 @@ class QwenConfigAndBootstrapTests(unittest.TestCase):
             build_qwen_host_agent({})
 
         secret_stream = StringIO()
-        with redirect_stdout(secret_stream), redirect_stderr(secret_stream):
-            with self.assertRaisesRegex(
+        with (
+            redirect_stdout(secret_stream),
+            redirect_stderr(secret_stream),
+            self.assertRaisesRegex(
                 HostAgentConfigurationError,
                 "configuration is invalid",
-            ):
-                build_qwen_host_agent(
-                    {
-                        "HOST_AGENT_API_KEY": SECRET,
-                        "HOST_AGENT_MAX_TURNS": "not-an-int",
-                    }
-                )
+            ),
+        ):
+            build_qwen_host_agent(
+                {
+                    "HOST_AGENT_API_KEY": SECRET,
+                    "HOST_AGENT_MAX_TURNS": "not-an-int",
+                }
+            )
         self.assertNotIn(SECRET, secret_stream.getvalue())
 
     def test_bootstrap_builds_adapter_without_network_access(self) -> None:
@@ -352,13 +369,20 @@ class QwenConfigAndBootstrapTests(unittest.TestCase):
 
 
 class RawOutputTests(unittest.TestCase):
-    def test_accepts_only_plain_finite_json_objects(self) -> None:
+    def test_accepts_one_finite_json_object_with_optional_exact_fence(self) -> None:
         self.assertEqual(parse_raw_output('{"kind":"unknown"}'), {"kind": "unknown"})
+        self.assertEqual(
+            parse_raw_output('```json\n{"kind":"unknown"}\n```'),
+            {"kind": "unknown"},
+        )
         self.assertEqual(parse_raw_output({"count": 0}), {"count": 0})
 
         invalid_values = (
             "not-json",
-            "```json\n{}\n```",
+            "explanation\n```json\n{}\n```",
+            "```json\n{}\n```\ntrailing",
+            "```python\n{}\n```",
+            "```json\n{}\n```\n```json\n{}\n```",
             "[]",
             "NaN",
             '{"score": NaN}',
@@ -367,9 +391,8 @@ class RawOutputTests(unittest.TestCase):
             SimpleNamespace(value={}),
         )
         for value in invalid_values:
-            with self.subTest(value=value):
-                with self.assertRaises(InvalidHostAgentOutput):
-                    parse_raw_output(value)
+            with self.subTest(value=value), self.assertRaises(InvalidHostAgentOutput):
+                parse_raw_output(value)
 
 
 class QwenHostAgentAdapterTests(
@@ -407,7 +430,7 @@ class QwenHostAgentAdapterTests(
         self.assertTrue(settings.include_usage)
         self.assertEqual(settings.extra_body, {"enable_thinking": False})
         self.assertEqual(settings.tool_choice, "auto")
-        self.assertIn("trpg-host-intent-v1", call["system_instructions"])
+        self.assertIn("trpg-host-intent-v2", call["system_instructions"])
         self.assertNotIn("GameState", call["input"])
         self.assertNotIn("ModuleContent", call["input"])
         self.assertFalse(call["tracing"].include_data())
@@ -849,9 +872,7 @@ class QwenHostAgentAdapterTests(
         root_logger = logging.getLogger()
         root_logger.addHandler(handler)
         try:
-            events = await collect(
-                make_adapter(ScriptedStreamingModel(fail_provider))
-            )
+            events = await collect(make_adapter(ScriptedStreamingModel(fail_provider)))
         finally:
             root_logger.removeHandler(handler)
 
@@ -888,7 +909,7 @@ class QwenHostAgentAdapterTests(
         invalid_outputs = (
             "not-json",
             "[]",
-            "```json\n{}\n```",
+            "```json\n[]\n```",
             '{"score":NaN}',
         )
         for value in invalid_outputs:

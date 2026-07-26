@@ -34,7 +34,7 @@ E2E_ONLY=tests/character-build.e2e.ts npm run test:e2e
 | 文件 | 内容 |
 |---|---|
 | `character-build.e2e.ts` | ruleset 契约（9 属性 / `pointBuy` 标志 / 点数购买约束 / 年龄区间）、建卡全流程（草稿→保存→**读回**→完成）、**属性点预算按生成方法分流**、**掷骰来源被伪造时退回点数购买法**、年龄区间、信用必填、角色卡隐私 |
-| `multiplayer-ws.e2e.ts` | 第二个玩家加入、WS `join → session.bound`、`game.start`、**行动广播到另一个客户端** |
+| `multiplayer-ws.e2e.ts` | 第二个玩家加入、WS `join → session.bound`、`game.start`、行动广播，以及追书人首场景→托马斯→图书馆→旧报检定→规则事实→PlayerView 更新的完整纵切 |
 | `not-implemented.e2e.ts` | 钉住目前还是桩的接口（复盘摘要 / 常用卡库），并确认 replay 是真实现 |
 
 ## 写用例的约定
@@ -43,6 +43,7 @@ E2E_ONLY=tests/character-build.e2e.ts npm run test:e2e
 - **禁止固定 `sleep`。** 等事件用带超时的 `waitForEvent`，等后端就绪用轮询。
 - **WS 一定要在 `finally` 里 `disconnect()`。** 用例失败时漏掉的话，WS 句柄会让 node 进程不退出，表现成「测试跑完了但命令挂住」——踩过。
 - **每次跑用全新 `e2e.db`**，且不碰开发用的 `app.db`。
+- 每次迁移空库后由脚本直接运行幂等 Seed + 追书人 loader，不依赖先启动一次 FastAPI。
 - **🔴 加了用例要做一次变异检验**：故意把它该守住的东西改坏，确认它**红得起来**。
 
   它还会顺带体检整套装置：本目录第一次做变异检验时，后端明明改坏了、13 条却全绿——原因是当时用 8000 端口，本地开着开发后端，脚本 spawn 的 uvicorn 绑不上端口秒退，而就绪探测只看「这个端口能不能应答」，于是**整套用例静默跑在了开发后端 + 开发库 `app.db` 上**。已改用 8099 + 端口占用直接报错 + 检测子进程退出。**HTTP 能应答，不代表应答的是你刚起的那个进程。**

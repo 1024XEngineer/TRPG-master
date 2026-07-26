@@ -13,21 +13,28 @@ from collaboration_framework.host.schemas import (
     HostAgentTerminalEvent,
     HostAgentToolCompleted,
     HostAgentToolStarted,
+    HostAgentUsage,
+    IntentContext,
 )
+
+from .intent_model import FakeIntentModel
 
 
 class FakeHostAgent:
-    """Emit an optional fake tool pair and one caller-supplied terminal event."""
+    """Deterministic offline HostAgentPort and configurable contract fixture."""
 
     def __init__(
         self,
-        terminal_event: HostAgentTerminalEvent,
+        terminal_event: HostAgentTerminalEvent | None = None,
         *,
         tool_name: str | None = "search_visible_entities",
         call_id: str = "fake_tool_call_001",
         tool_status: Literal["success", "error"] = "success",
     ) -> None:
-        if not isinstance(terminal_event, (HostAgentCompleted, HostAgentFailed)):
+        if terminal_event is not None and not isinstance(
+            terminal_event,
+            (HostAgentCompleted, HostAgentFailed),
+        ):
             raise TypeError(
                 "FakeHostAgent terminal_event 必须为 agent.completed 或 agent.failed"
             )
@@ -40,9 +47,8 @@ class FakeHostAgent:
         self,
         context: HostAgentContext,
     ) -> AsyncIterator[HostAgentEvent]:
-        # The fake deliberately has no authority-bearing dependency and only
-        # accepts the already validated context required by HostAgentPort.
-        del context
+        # The fake has no authority-bearing dependency and consumes only the
+        # already validated player-safe context required by HostAgentPort.
         if self._tool_name is not None:
             yield HostAgentToolStarted(
                 type="tool.started",
@@ -55,4 +61,22 @@ class FakeHostAgent:
                 tool_name=self._tool_name,
                 status=self._tool_status,
             )
-        yield self._terminal_event
+        if self._terminal_event is not None:
+            yield self._terminal_event
+            return
+        raw = await FakeIntentModel().generate(
+            IntentContext(
+                player_input=context.player_input,
+                player_view=context.player_view,
+            )
+        )
+        yield HostAgentCompleted(
+            type="agent.completed",
+            raw_output=raw,
+            usage=HostAgentUsage(
+                model_rounds=1,
+                tool_calls=0,
+                duration_ms=0,
+                termination_reason="completed",
+            ),
+        )

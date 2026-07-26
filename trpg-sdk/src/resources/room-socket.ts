@@ -19,6 +19,17 @@ interface PendingAction {
   reject: (error: Error) => void;
 }
 
+export class TurnFailedError extends Error {
+  constructor(
+    message: string,
+    readonly code: string,
+    readonly retryable: boolean,
+  ) {
+    super(message);
+    this.name = 'TurnFailedError';
+  }
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -215,6 +226,32 @@ const PAYLOAD_VALIDATORS: {
 } = {
   'session.bound': (p) => typeof p.roomId === 'string' && typeof p.playerId === 'string',
   'narration.push': (p) => typeof p.text === 'string',
+  'turn.started': (p) => typeof p.correlationId === 'string',
+  'turn.phase_changed': (p) =>
+    typeof p.correlationId === 'string' &&
+    (p.phase === 'reading_player_view' ||
+      p.phase === 'understanding_action' ||
+      p.phase === 'waiting_for_check' ||
+      p.phase === 'executing_action' ||
+      p.phase === 'refreshing_player_view' ||
+      p.phase === 'generating_narration'),
+  'tool.started': (p) =>
+    typeof p.correlationId === 'string' &&
+    typeof p.toolName === 'string' &&
+    typeof p.publicProgressLabel === 'string',
+  'tool.completed': (p) =>
+    typeof p.correlationId === 'string' &&
+    typeof p.toolName === 'string' &&
+    (p.status === 'success' || p.status === 'error'),
+  'turn.failed': (p) =>
+    typeof p.correlationId === 'string' &&
+    typeof p.code === 'string' &&
+    typeof p.publicMessage === 'string' &&
+    typeof p.retryable === 'boolean',
+  'view.updated': (p) =>
+    typeof p.playerId === 'string' &&
+    isValidPlayerView(p.playerView) &&
+    p.playerView.player_id === p.playerId,
   // issue #77 新增的 11 个 S→C 事件。只校验必填字段的类型（可空字段不校验）；
   // 嵌套对象（players/player）只做「是不是对象/数组」的浅检查，不深入逐字段。
   'room.state': (p) =>
@@ -325,13 +362,13 @@ export class RoomSocket {
         return;
       }
       if (isValidTurnCompleted(parsed)) {
+        this.playerView = parsed.payload.player_view;
         const pending = this.pendingActions.get(parsed.correlation_id);
         if (!pending) {
           console.warn('[RoomSocket] received turn.completed without matching action, dropped', parsed);
           return;
         }
         this.pendingActions.delete(parsed.correlation_id);
-        this.playerView = parsed.payload.player_view;
         pending.resolve(parsed.payload);
         return;
       }
@@ -349,6 +386,22 @@ export class RoomSocket {
           this.pendingActions.delete(parsed.payload.correlationId);
           pending.reject(new Error(parsed.payload.message));
         }
+      }
+      if (parsed.type === 'turn.failed') {
+        const pending = this.pendingActions.get(parsed.payload.correlationId);
+        if (pending) {
+          this.pendingActions.delete(parsed.payload.correlationId);
+          pending.reject(
+            new TurnFailedError(
+              parsed.payload.publicMessage,
+              parsed.payload.code,
+              parsed.payload.retryable,
+            )
+          );
+        }
+      }
+      if (parsed.type === 'view.updated') {
+        this.playerView = parsed.payload.playerView;
       }
       this.handlers.forEach((handler) => handler(parsed));
     };

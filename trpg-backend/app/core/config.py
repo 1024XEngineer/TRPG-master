@@ -59,6 +59,10 @@ class Settings(BaseSettings):
     )
     qwen_model: str = Field(default="qwen3.7-plus", min_length=1)
     qwen_timeout_seconds: float = Field(default=30.0, gt=0, le=120)
+    host_agent_max_turns: int = Field(default=6, gt=0, le=20)
+    host_agent_max_tool_calls: int = Field(default=8, gt=0, le=50)
+    host_agent_tool_timeout_seconds: float = Field(default=5.0, gt=0, le=30)
+    host_agent_timeout_seconds: float = Field(default=30.0, gt=0, le=120)
 
     @model_validator(mode="after")
     def validate_host_model(self) -> Settings:

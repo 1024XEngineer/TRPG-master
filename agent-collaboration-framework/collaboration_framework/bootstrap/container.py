@@ -10,12 +10,12 @@ from collaboration_framework.engine import (
     RuleKernel,
 )
 from collaboration_framework.host.adapters.fakes import (
-    FakeIntentModel,
+    FakeHostAgent,
     FakeNarrationModel,
 )
 from collaboration_framework.host.application import (
     ContextAssembler,
-    IntentParser,
+    HostAgentIntentResolver,
     Narrator,
     Orchestrator,
     PlayerViewProjector,
@@ -45,7 +45,7 @@ def build_fake_application(
     engine = RuleEngineService(engine_store, kernel=rule_kernel)
     orchestrator = Orchestrator(
         context_assembler=ContextAssembler(module_content.background),
-        intent_parser=IntentParser(FakeIntentModel()),
+        host_intent_resolver=HostAgentIntentResolver(FakeHostAgent()),
         action_executor=engine,
         player_view_projector=PlayerViewProjector(engine),
         narrator=Narrator(FakeNarrationModel()),

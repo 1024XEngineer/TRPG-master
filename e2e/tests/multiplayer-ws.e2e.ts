@@ -141,7 +141,7 @@ test('提交行动会广播给房间里的所有人（不只是发起者）', as
     const actionId = `e2e-action-${Date.now()}`
     const completed = room.host.sdk.roomSocket.submitAction(room.hostPlayerId, {
       clientActionId: actionId,
-      utterance: '我看看旧书店',
+      utterance: '我询问托马斯藏书的情况',
     })
     const [guestNarration, turn] = await Promise.all([guestHears, completed])
     assert.equal(guestNarration.type, 'narration.push')
@@ -150,5 +150,102 @@ test('提交行动会广播给房间里的所有人（不只是发起者）', as
   } finally {
     room.host.sdk.roomSocket.disconnect()
     guest.sdk.roomSocket.disconnect()
+  }
+})
+
+test('追书人纵切：首场景 → 托马斯 → 图书馆 → 旧报检定 → 视图更新', async () => {
+  const room = await createRoomWithModule('vertical')
+  await room.host.sdk.rooms.startStory(room.roomId, room.reconnectToken)
+  await buildCharacter(room.host.sdk, room.roomId, room.reconnectToken)
+
+  const socket = room.host.sdk.roomSocket.connect(room.roomId, room.host.token)
+  const observed: ServerToClientEvent[] = []
+  const off = room.host.sdk.roomSocket.onMessage((event) => observed.push(event))
+  try {
+    await room.host.sdk.roomSocket.waitForOpen(socket)
+    const bound = waitForEvent(room.host.sdk, (event) => event.type === 'session.bound')
+    room.host.sdk.roomSocket.joinRoom(room.hostPlayerId, {
+      reconnectToken: room.reconnectToken,
+    })
+    await bound
+
+    const openingView = waitForEvent(room.host.sdk, (event) => event.type === 'view.updated')
+    const openingNarration = waitForEvent(
+      room.host.sdk,
+      (event) => event.type === 'narration.push'
+    )
+    room.host.sdk.roomSocket.startGame(room.hostPlayerId)
+    const [initialView] = await Promise.all([openingView, openingNarration])
+    assert.equal(initialView.type, 'view.updated')
+    assert.equal(initialView.payload.playerView.scene.name, '托马斯的会客室')
+    assert.ok(
+      initialView.payload.playerView.scene.available_exits.some(
+        (exit) => exit.id === 'library'
+      )
+    )
+
+    await room.host.sdk.roomSocket.submitAction(room.hostPlayerId, {
+      clientActionId: `ask-thomas-${Date.now()}`,
+      utterance: '我询问托马斯失踪藏书和叔叔的情况',
+    })
+
+    const travelled = await room.host.sdk.roomSocket.submitAction(room.hostPlayerId, {
+      clientActionId: `travel-library-${Date.now()}`,
+      utterance: '我前往阿诺兹堡图书馆',
+    })
+    assert.equal(travelled.player_view.scene.id, 'library')
+    assert.equal(room.host.sdk.roomSocket.getPlayerView()?.scene.id, 'library')
+
+    const checkActionId = `research-newspaper-${Date.now()}`
+    const checkRequested = waitForEvent(
+      room.host.sdk,
+      (event) =>
+        event.type === 'check.request' &&
+        event.payload.clientActionId === checkActionId
+    )
+    const completed = room.host.sdk.roomSocket.submitAction(room.hostPlayerId, {
+      clientActionId: checkActionId,
+      utterance: '我查阅墓地旧闻档案，研究当地报纸的旧刊',
+    })
+    const request = await checkRequested
+    assert.equal(request.type, 'check.request')
+    assert.deepEqual(request.payload.skills.map((skill) => skill.id), ['library-use'])
+
+    const checkResult = waitForEvent(
+      room.host.sdk,
+      (event) =>
+        event.type === 'check.result' &&
+        event.payload.clientActionId === checkActionId
+    )
+    room.host.sdk.roomSocket.rollCheck(room.hostPlayerId, {
+      clientActionId: checkActionId,
+      skill: 'library-use',
+      rollValue: 1,
+    })
+    const [result, turn] = await Promise.all([checkResult, completed])
+    assert.equal(result.type, 'check.result')
+    assert.equal(result.payload.passed, true)
+    assert.equal(turn.player_view.scene.id, 'library')
+    assert.ok(
+      turn.player_view.known_information.some((item) =>
+        `${item.summary}${item.content}`.includes('公墓跳舞')
+      ),
+      JSON.stringify(turn.player_view.known_information)
+    )
+    assert.equal(
+      room.host.sdk.roomSocket.getPlayerView()?.revision,
+      turn.player_view.revision
+    )
+
+    const publicProgress = observed.filter(
+      (event) => event.type === 'tool.started' || event.type === 'tool.completed'
+    )
+    assert.ok(publicProgress.length >= 2)
+    const serializedProgress = JSON.stringify(publicProgress)
+    assert.equal(serializedProgress.includes('fake_tool_call_001'), false)
+    assert.equal(serializedProgress.includes('墓地旧闻档案'), false)
+  } finally {
+    off()
+    room.host.sdk.roomSocket.disconnect()
   }
 })

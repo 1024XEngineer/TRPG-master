@@ -6,7 +6,7 @@
  * 问题。
  */
 import { spawn, type ChildProcess } from 'node:child_process'
-import { rmSync } from 'node:fs'
+import { existsSync, rmSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -44,7 +44,11 @@ const backendEnv = {
  * 建出这个虚拟环境（CI 和本地都一样），这样不额外要求 `uv` 本身在 PATH 上——
  * 开发机上它经常就不在，写成 `uv run` 会直接 command not found。
  */
-const VENV_BIN = resolve(BACKEND_DIR, '.venv/bin')
+const BACKEND_VENV_BIN = resolve(BACKEND_DIR, '.venv/bin')
+const ROOT_VENV_BIN = resolve(BACKEND_DIR, '../.venv/bin')
+const VENV_BIN = existsSync(resolve(BACKEND_VENV_BIN, 'alembic'))
+  ? BACKEND_VENV_BIN
+  : ROOT_VENV_BIN
 
 function run(command: string, args: string[], label: string): Promise<void> {
   return new Promise((resolvePromise, rejectPromise) => {
@@ -113,6 +117,7 @@ async function main(): Promise<number> {
   await assertPortFree(PORT)
   rmSync(DB_FILE, { force: true })
   await run(`${VENV_BIN}/alembic`, ['upgrade', 'head'], 'alembic')
+  await run(`${VENV_BIN}/python`, ['scripts/load_paper_chase.py'], '追书人 loader')
 
   backend = spawn(
     `${VENV_BIN}/uvicorn`,

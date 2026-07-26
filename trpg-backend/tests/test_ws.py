@@ -124,8 +124,21 @@ def start_game(client: TestClient, room: dict, token: str) -> None:
         )
         assert ws.receive_json()["type"] == "session.bound"
         ws.send_json({"type": "game.start", "playerId": room["playerId"], "payload": {}})
+        view = ws.receive_json()
+        assert view["type"] == "view.updated"
+        assert view["payload"]["playerId"] == room["playerId"]
         assert ws.receive_json()["type"] == "narration.push"
         assert ws.receive_json()["type"] == "room.state"
+
+
+def receive_until(ws, predicate, *, limit: int = 24):
+    seen = []
+    for _ in range(limit):
+        message = ws.receive_json()
+        seen.append(message)
+        if predicate(message):
+            return message, seen
+    raise AssertionError(f"expected WebSocket event not found; seen={seen!r}")
 
 
 def test_connect_without_token_is_rejected(sync_client: TestClient) -> None:
@@ -174,6 +187,7 @@ def test_room_join_with_unknown_player_closes_connection(sync_client: TestClient
                 "payload": {"reconnectToken": "whatever"},
             }
         )
+        ws.receive_json()
         ws.receive_json()
 
 
@@ -260,10 +274,13 @@ def test_game_start_pushes_opening_narration_and_advances_phase(
         )
         ws.receive_json()  # session.bound
         ws.send_json({"type": "game.start", "playerId": room["playerId"], "payload": {}})
+        view = ws.receive_json()
         envelope = ws.receive_json()
 
+    assert view["type"] == "view.updated"
+    assert view["payload"]["playerView"]["scene"]["name"] == "托马斯的会客室"
     assert envelope["type"] == "narration.push"
-    assert envelope["payload"]["text"]
+    assert "托马斯的会客室" in envelope["payload"]["text"]
 
     preview = sync_client.get(f"{ROOMS_BASE}/{room['roomCode']}").json()["data"]
     assert preview["phase"] == "InGame"
@@ -327,6 +344,7 @@ def test_action_submit_broadcasts_narration_to_room_only(sync_client: TestClient
             }
         )
         ws_a.receive_json()  # session.bound
+        ws_a.receive_json()  # current view.updated
         ws_guest.send_json(
             {
                 "type": "room.join",
@@ -335,6 +353,7 @@ def test_action_submit_broadcasts_narration_to_room_only(sync_client: TestClient
             }
         )
         ws_guest.receive_json()  # session.bound
+        ws_guest.receive_json()  # current view.updated
         ws_b.send_json(
             {
                 "type": "room.join",
@@ -355,9 +374,18 @@ def test_action_submit_broadcasts_narration_to_room_only(sync_client: TestClient
                 },
             }
         )
-        completed = ws_a.receive_json()
-        narration = ws_a.receive_json()
-        guest_narration = ws_guest.receive_json()
+        completed, progress = receive_until(
+            ws_a,
+            lambda message: message.get("message_type") == "turn.completed",
+        )
+        narration, _ = receive_until(
+            ws_a,
+            lambda message: message.get("type") == "narration.push",
+        )
+        guest_narration, _ = receive_until(
+            ws_guest,
+            lambda message: message.get("type") == "narration.push",
+        )
 
         # 同一个动作重试可以再次收到技术确认，但不能再次产生叙事广播。
         ws_a.send_json(
@@ -370,7 +398,10 @@ def test_action_submit_broadcasts_narration_to_room_only(sync_client: TestClient
                 },
             }
         )
-        retried = ws_a.receive_json()
+        retried, _ = receive_until(
+            ws_a,
+            lambda message: message.get("message_type") == "turn.completed",
+        )
         ws_a.send_json(
             {
                 "type": "room.join",
@@ -378,7 +409,10 @@ def test_action_submit_broadcasts_narration_to_room_only(sync_client: TestClient
                 "payload": {"reconnectToken": room_a["reconnectToken"]},
             }
         )
-        next_after_retry = ws_a.receive_json()
+        next_after_retry, _ = receive_until(
+            ws_a,
+            lambda message: message.get("type") == "session.bound",
+        )
 
         # room_b 没有收到任何广播——发一条 room.join 触发一次同步交互，确认
         # 收到的仍然是它自己的 session.bound，而不是串过来的 narration。
@@ -401,6 +435,11 @@ def test_action_submit_broadcasts_narration_to_room_only(sync_client: TestClient
     assert retried["message_type"] == "turn.completed"
     assert next_after_retry["type"] == "session.bound"
     assert envelope_b["type"] == "session.bound"
+    for event in progress:
+        rendered = str(event)
+        assert "call_id" not in rendered
+        assert "arguments" not in rendered
+        assert "raw_output" not in rendered
 
     replay = sync_client.get(
         f"{ROOMS_BASE}/{room_a['roomId']}/replay",
@@ -445,6 +484,7 @@ def test_skill_check_waits_for_player_selection_and_roll(
             }
         )
         assert ws.receive_json()["type"] == "session.bound"
+        assert ws.receive_json()["type"] == "view.updated"
         ws.send_json(
             {
                 "type": "action.submit",
@@ -455,7 +495,10 @@ def test_skill_check_waits_for_player_selection_and_roll(
                 },
             }
         )
-        request = ws.receive_json()
+        request, prepare_events = receive_until(
+            ws,
+            lambda message: message.get("type") == "check.request",
+        )
         ws.send_json(
             {
                 "type": "check.roll",
@@ -467,9 +510,18 @@ def test_skill_check_waits_for_player_selection_and_roll(
                 },
             }
         )
-        result = ws.receive_json()
-        completed = ws.receive_json()
-        narration = ws.receive_json()
+        result, complete_events = receive_until(
+            ws,
+            lambda message: message.get("type") == "check.result",
+        )
+        completed, _ = receive_until(
+            ws,
+            lambda message: message.get("message_type") == "turn.completed",
+        )
+        narration, _ = receive_until(
+            ws,
+            lambda message: message.get("type") == "narration.push",
+        )
 
     assert request["type"] == "check.request"
     assert request["payload"]["clientActionId"] == "ws-skill-check-146"
@@ -483,6 +535,17 @@ def test_skill_check_waits_for_player_selection_and_roll(
     assert completed["message_type"] == "turn.completed"
     assert completed["correlation_id"] == "ws-skill-check-146"
     assert narration["type"] == "narration.push"
+    assert [event["type"] for event in prepare_events if "type" in event] == [
+        "turn.started",
+        "turn.phase_changed",
+        "turn.phase_changed",
+        "turn.phase_changed",
+        "check.request",
+    ]
+    assert [event["type"] for event in complete_events if "type" in event] == [
+        "turn.phase_changed",
+        "check.result",
+    ]
 
 
 def test_action_submit_requires_client_action_id_without_closing_socket(
@@ -545,6 +608,7 @@ def test_clarification_is_sent_only_to_action_owner(sync_client: TestClient) -> 
             }
         )
         host_ws.receive_json()
+        host_ws.receive_json()
         guest_ws.send_json(
             {
                 "type": "room.join",
@@ -552,6 +616,7 @@ def test_clarification_is_sent_only_to_action_owner(sync_client: TestClient) -> 
                 "payload": {"reconnectToken": guest["reconnectToken"]},
             }
         )
+        guest_ws.receive_json()
         guest_ws.receive_json()
 
         host_ws.send_json(
@@ -564,8 +629,14 @@ def test_clarification_is_sent_only_to_action_owner(sync_client: TestClient) -> 
                 },
             }
         )
-        completed = host_ws.receive_json()
-        clarification = host_ws.receive_json()
+        completed, _ = receive_until(
+            host_ws,
+            lambda message: message.get("message_type") == "turn.completed",
+        )
+        clarification, _ = receive_until(
+            host_ws,
+            lambda message: message.get("type") == "narration.push",
+        )
 
         guest_ws.send_json(
             {
@@ -574,7 +645,10 @@ def test_clarification_is_sent_only_to_action_owner(sync_client: TestClient) -> 
                 "payload": {"reconnectToken": guest["reconnectToken"]},
             }
         )
-        guest_next = guest_ws.receive_json()
+        guest_next, _ = receive_until(
+            guest_ws,
+            lambda message: message.get("type") == "session.bound",
+        )
 
     assert completed["payload"]["narration"]["kind"] == "clarification"
     assert clarification["type"] == "narration.push"
@@ -602,6 +676,7 @@ def test_action_submit_maps_suspended_room_error(sync_client: TestClient) -> Non
             }
         )
         ws.receive_json()
+        ws.receive_json()
         ws.send_json(
             {
                 "type": "action.submit",
@@ -612,11 +687,15 @@ def test_action_submit_maps_suspended_room_error(sync_client: TestClient) -> Non
                 },
             }
         )
-        error = ws.receive_json()
+        error, _ = receive_until(
+            ws,
+            lambda message: message.get("type") == "turn.failed",
+        )
 
-    assert error["type"] == "error"
+    assert error["type"] == "turn.failed"
     assert error["payload"] == {
         "code": "ROOM_NOT_ACTIONABLE",
-        "message": "房间当前状态不允许提交动作",
         "correlationId": "suspended-122",
+        "publicMessage": "房间当前状态不允许提交动作",
+        "retryable": False,
     }

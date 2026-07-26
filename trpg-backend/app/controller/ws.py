@@ -26,11 +26,18 @@
 WebSocket 可能存活很久，用一个 session 包住整条连接会在这期间一直占着一个
 数据库连接/事务，跟并发的 HTTP 请求争抢 SQLite 的锁（测试里表现为死锁）。
 鉴权单独用一个短 session，之后每条消息各开各的，消息之间等待时不持有连接。
+连接取消时短 session 的 close/rollback 会在 shield 中完成，避免遗留锁。
 """
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from functools import partial
+
+import anyio
 import structlog
-from collaboration_framework.contracts import ContractError
+from collaboration_framework.contracts import ActionResult, ContractError, PlayerView
 from collaboration_framework.engine import RevisionConflictError
+from collaboration_framework.host.application import TurnExecutionError
 from collaboration_framework.host.schemas import TurnOutput
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
@@ -40,6 +47,14 @@ from starlette.websockets import WebSocketState
 
 from app.core.db import async_session_factory
 from app.core.turn import ActorResolutionError, PreparedTurn, turn_application
+from app.core.turn_events import (
+    TurnEvent,
+    TurnFailed,
+    TurnPhaseChanged,
+    TurnStarted,
+    TurnToolCompleted,
+    TurnToolStarted,
+)
 from app.dto.ws import (
     ActionSubmitPayload,
     CheckRequestPayload,
@@ -56,6 +71,12 @@ from app.dto.ws import (
     SanCheckRollPayload,
     ServerEnvelope,
     SessionBoundPayload,
+    ToolCompletedPayload,
+    ToolStartedPayload,
+    TurnFailedPayload,
+    TurnPhaseChangedPayload,
+    TurnStartedPayload,
+    ViewUpdatedPayload,
 )
 from app.service import auth as auth_service
 from app.service import room as room_service
@@ -67,7 +88,18 @@ logger = structlog.get_logger()
 
 _UNAUTHORIZED_CLOSE_CODE = 4401
 _NOT_FOUND_CLOSE_CODE = 4404
-_OPENING_NARRATION = "案件已加载。守秘人整理好了开场的场景描述，故事即将开始……"
+
+
+@asynccontextmanager
+async def _short_db_session() -> AsyncIterator[AsyncSession]:
+    """Always finish SQLAlchemy cleanup even when a WebSocket task is cancelled."""
+
+    session = async_session_factory()
+    try:
+        yield session
+    finally:
+        with anyio.CancelScope(shield=True):
+            await session.close()
 
 
 async def _send_error(
@@ -81,6 +113,83 @@ async def _send_error(
     这次请求怎么了"，不是房间广播内容（issue #77 新增）。"""
     payload = ErrorPayload(code=code, message=message, correlation_id=correlation_id)
     envelope = ServerEnvelope(type="error", payload=payload.model_dump(by_alias=True))
+    await websocket.send_json(envelope.model_dump(by_alias=True))
+
+
+async def _send_turn_event(
+    websocket: WebSocket,
+    event: TurnEvent,
+) -> None:
+    payload: (
+        TurnStartedPayload
+        | TurnPhaseChangedPayload
+        | ToolStartedPayload
+        | ToolCompletedPayload
+        | TurnFailedPayload
+    )
+    if isinstance(event, TurnStarted):
+        payload = TurnStartedPayload(correlation_id=event.correlation_id)
+    elif isinstance(event, TurnPhaseChanged):
+        payload = TurnPhaseChangedPayload(
+            correlation_id=event.correlation_id,
+            phase=event.phase,
+        )
+    elif isinstance(event, TurnToolStarted):
+        payload = ToolStartedPayload(
+            correlation_id=event.correlation_id,
+            tool_name=event.tool_name,
+            public_progress_label=event.public_progress_label,
+        )
+    elif isinstance(event, TurnToolCompleted):
+        payload = ToolCompletedPayload(
+            correlation_id=event.correlation_id,
+            tool_name=event.tool_name,
+            status=event.status,
+        )
+    else:
+        payload = TurnFailedPayload(
+            correlation_id=event.correlation_id,
+            code=event.code,
+            public_message=event.public_message,
+            retryable=event.retryable,
+        )
+    envelope = ServerEnvelope(
+        type=event.type,
+        payload=payload.model_dump(by_alias=True),
+    )
+    await websocket.send_json(envelope.model_dump(by_alias=True))
+
+
+async def _send_turn_failed(
+    websocket: WebSocket,
+    correlation_id: str,
+    exc: Exception,
+) -> None:
+    code, public_message, retryable = _map_turn_error(exc)
+    await _send_turn_event(
+        websocket,
+        TurnFailed(
+            correlation_id=correlation_id,
+            code=code,
+            public_message=public_message,
+            retryable=retryable,
+        ),
+    )
+
+
+async def _send_view_updated(
+    websocket: WebSocket,
+    player_id: str,
+    player_view: PlayerView,
+) -> None:
+    payload = ViewUpdatedPayload(
+        player_id=player_id,
+        player_view=player_view,
+    )
+    envelope = ServerEnvelope(
+        type="view.updated",
+        payload=payload.model_dump(by_alias=True),
+    )
     await websocket.send_json(envelope.model_dump(by_alias=True))
 
 
@@ -154,6 +263,35 @@ async def _send_check_request(
     await websocket.send_json(envelope.model_dump(by_alias=True))
 
 
+async def _send_check_result(
+    websocket: WebSocket,
+    player_id: str,
+    prepared: PreparedTurn,
+    action_result: ActionResult,
+) -> None:
+    check_result = action_result.check_result
+    if check_result is None:
+        raise ContractError("Completed skill check did not return a check result")
+    candidate = next(item for item in prepared.candidates if item.id == check_result.skill_id)
+    payload = CheckResultPayload(
+        player_id=player_id,
+        client_action_id=prepared.player_input.client_action_id,
+        skill=check_result.skill_id,
+        skill_name=candidate.name,
+        roll_value=check_result.roll_value,
+        target_value=check_result.target_value,
+        difficulty=check_result.difficulty,
+        success_level=check_result.success_level,
+        passed=check_result.passed,
+        result=check_result.success_level,
+    )
+    envelope = ServerEnvelope(
+        type="check.result",
+        payload=payload.model_dump(by_alias=True),
+    )
+    await websocket.send_json(envelope.model_dump(by_alias=True))
+
+
 async def _send_completed_turn(
     db: AsyncSession,
     websocket: WebSocket,
@@ -163,6 +301,7 @@ async def _send_completed_turn(
 ) -> None:
     websocket_output = output.to_websocket_output()
     await websocket.send_json(websocket_output.to_json_dict())
+    await _send_view_updated(websocket, player_id, output.player_view)
     await _deliver_turn_narration(
         db,
         websocket,
@@ -176,28 +315,30 @@ async def _send_completed_turn(
         await broadcast_room_state(db, room_id)
 
 
-def _map_turn_error(exc: Exception) -> tuple[str, str]:
+def _map_turn_error(exc: Exception) -> tuple[str, str, bool]:
+    if isinstance(exc, TurnExecutionError):
+        return exc.code, exc.public_message, exc.retryable
     if isinstance(exc, ActorResolutionError):
-        return "ACTOR_NOT_CONTROLLED", "当前玩家没有可控制的局内角色"
+        return "ACTOR_NOT_CONTROLLED", "当前玩家没有可控制的局内角色", False
     if isinstance(exc, RevisionConflictError):
-        return "REVISION_CONFLICT", "房间状态已被其他动作更新，请重试"
+        return "REVISION_CONFLICT", "房间状态已被其他动作更新，请重试", True
     if isinstance(exc, SQLAlchemyError):
-        return "DATABASE_CONFLICT", "动作提交发生数据库并发冲突，请重试"
+        return "DATABASE_CONFLICT", "动作提交发生数据库并发冲突，请重试", True
 
     message = str(exc)
     if "运行时不存在" in message:
-        return "ROOM_RUNTIME_NOT_FOUND", "房间尚未建立可用的游戏运行时"
+        return "ROOM_RUNTIME_NOT_FOUND", "房间尚未建立可用的游戏运行时", True
     if "不是可提交动作的 InGame" in message:
-        return "ROOM_NOT_ACTIONABLE", "房间当前状态不允许提交动作"
+        return "ROOM_NOT_ACTIONABLE", "房间当前状态不允许提交动作", False
     if "request_id 已用于不同" in message:
-        return "ACTION_ID_CONFLICT", "clientActionId 已被另一动作占用"
+        return "ACTION_ID_CONFLICT", "clientActionId 已被另一动作占用", False
     if "过期 PlayerView" in message:
-        return "SOURCE_REVISION_STALE", "动作基于过期的玩家视图，请重试"
+        return "SOURCE_REVISION_STALE", "动作基于过期的玩家视图，请重试", True
     if "player_id/actor_id" in message:
-        return "ACTOR_NOT_CONTROLLED", "当前玩家不能控制该局内角色"
+        return "ACTOR_NOT_CONTROLLED", "当前玩家不能控制该局内角色", False
     if isinstance(exc, (ContractError, ValidationError)):
-        return "TURN_CONTRACT_INVALID", "本次动作未通过主持编排契约校验"
-    return "TURN_INTERNAL_ERROR", "本次动作处理失败，请稍后重试"
+        return "TURN_CONTRACT_INVALID", "本次动作未通过主持编排契约校验", False
+    return "TURN_INTERNAL_ERROR", "本次动作处理失败，请稍后重试", True
 
 
 async def _handle_room_join(
@@ -236,7 +377,7 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
     # 的生命周期**——那样会在整个 WebSocket 存续期间一直占着一个数据库连接/
     # 事务，跟并发的 HTTP 请求争抢 SQLite 的锁（在测试里表现为 HTTP 请求、或者
     # 用例结束时的建表/删表拿不到连接而死锁）。下面每条消息各开各的短 session。
-    async with async_session_factory() as db:
+    async with _short_db_session() as db:
         try:
             authenticated_user = await auth_service.get_me(db, token)
         except auth_service.AuthenticationError:
@@ -257,7 +398,11 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                 client_envelope = ClientEnvelope.model_validate(raw)
             except ValidationError as exc:
                 bad_type = raw.get("type") if isinstance(raw, dict) else None
-                logger.warning("ws_invalid_message", event_type=bad_type, error=str(exc))
+                logger.warning(
+                    "ws_invalid_message",
+                    event_type=bad_type,
+                    validation_error_count=exc.error_count(),
+                )
                 continue
 
             event_type = client_envelope.type
@@ -266,7 +411,7 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
 
             # 每条消息各开一个短 session，处理完立刻释放——WebSocket 在两条消息
             # 之间等待（receive_json 阻塞）时不持有任何数据库连接。
-            async with async_session_factory() as db:
+            async with _short_db_session() as db:
                 try:
                     if event_type == "room.join":
                         join_payload = RoomJoinPayload.model_validate(raw_payload)
@@ -279,6 +424,23 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                             authenticated_user.user_id,
                         ):
                             bound_player_id = player_id
+                            assert bound_player_id is not None
+                            try:
+                                current_view = await turn_application.current_player_view(
+                                    room_id=room_id,
+                                    player_id=bound_player_id,
+                                )
+                            except Exception:
+                                # Lobby/Building rooms do not have an Engine
+                                # runtime yet. Joining remains valid; game.start
+                                # will send the initial view once it exists.
+                                pass
+                            else:
+                                await _send_view_updated(
+                                    websocket,
+                                    bound_player_id,
+                                    current_view,
+                                )
                         else:
                             return
                         continue
@@ -310,7 +472,21 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                         ) as exc:
                             await _send_error(websocket, "CONFLICT", str(exc))
                             continue
-                        await _broadcast_narration(db, room_id, bound_player_id, _OPENING_NARRATION)
+                        initial_view = await turn_application.current_player_view(
+                            room_id=room_id,
+                            player_id=bound_player_id,
+                        )
+                        await _send_view_updated(
+                            websocket,
+                            bound_player_id,
+                            initial_view,
+                        )
+                        await _broadcast_narration(
+                            db,
+                            room_id,
+                            bound_player_id,
+                            (f"{initial_view.scene.name}\n{initial_view.scene.description}"),
+                        )
                         await broadcast_room_state(db, room_id)
                     elif event_type == "action.submit":
                         try:
@@ -324,7 +500,7 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                             logger.warning(
                                 "ws_invalid_action",
                                 correlation_id=correlation_id,
-                                error=str(exc),
+                                validation_error_count=exc.error_count(),
                             )
                             await _send_error(
                                 websocket,
@@ -361,6 +537,10 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 player_id=bound_player_id,
                                 client_action_id=submit_payload.client_action_id,
                                 utterance=submit_payload.utterance,
+                                on_event=lambda event: _send_turn_event(
+                                    websocket,
+                                    event,
+                                ),
                             )
                             if prepared.candidates:
                                 pending_turn = prepared
@@ -371,7 +551,13 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 )
                                 continue
 
-                            output = await turn_application.complete(prepared)
+                            output = await turn_application.complete(
+                                prepared,
+                                on_event=lambda event: _send_turn_event(
+                                    websocket,
+                                    event,
+                                ),
+                            )
                             await _send_completed_turn(
                                 db,
                                 websocket,
@@ -380,18 +566,17 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 output,
                             )
                         except Exception as exc:
-                            code, message = _map_turn_error(exc)
+                            code, _, _ = _map_turn_error(exc)
                             logger.warning(
                                 "ws_turn_failed",
                                 code=code,
                                 correlation_id=submit_payload.client_action_id,
-                                error=str(exc),
+                                error_type=type(exc).__name__,
                             )
-                            await _send_error(
+                            await _send_turn_failed(
                                 websocket,
-                                code,
-                                message,
-                                correlation_id=submit_payload.client_action_id,
+                                submit_payload.client_action_id,
+                                exc,
                             )
                             continue
                     elif event_type == "check.roll":
@@ -420,38 +605,18 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 pending_turn,
                                 selected_skill=roll_payload.skill,
                                 roll_value=roll_payload.roll_value,
-                            )
-                            check_result = output.action_result.check_result
-                            if check_result is None:
-                                raise ContractError(
-                                    "Completed skill check did not return a check result"
-                                )
-                            candidate = next(
-                                item
-                                for item in pending_turn.candidates
-                                if item.id == check_result.skill_id
-                            )
-                            result_payload = CheckResultPayload(
-                                player_id=bound_player_id,
-                                client_action_id=roll_payload.client_action_id,
-                                skill=check_result.skill_id,
-                                skill_name=candidate.name,
-                                roll_value=check_result.roll_value,
-                                target_value=check_result.target_value,
-                                difficulty=check_result.difficulty,
-                                success_level=check_result.success_level,
-                                passed=check_result.passed,
-                                result=check_result.success_level,
+                                on_event=lambda event: _send_turn_event(
+                                    websocket,
+                                    event,
+                                ),
+                                on_action_result=partial(
+                                    _send_check_result,
+                                    websocket,
+                                    bound_player_id,
+                                    pending_turn,
+                                ),
                             )
                             pending_turn = None
-                            result_envelope = ServerEnvelope(
-                                type="check.result",
-                                payload=result_payload.model_dump(by_alias=True),
-                            )
-                            await manager.broadcast(
-                                room_id,
-                                result_envelope.model_dump(by_alias=True),
-                            )
                             await _send_completed_turn(
                                 db,
                                 websocket,
@@ -460,18 +625,19 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 output,
                             )
                         except Exception as exc:
-                            code, message = _map_turn_error(exc)
+                            code, _, _ = _map_turn_error(exc)
+                            if code == "NARRATOR_FAILED":
+                                pending_turn = None
                             logger.warning(
                                 "ws_check_failed",
                                 code=code,
                                 correlation_id=roll_payload.client_action_id,
-                                error=str(exc),
+                                error_type=type(exc).__name__,
                             )
-                            await _send_error(
+                            await _send_turn_failed(
                                 websocket,
-                                code,
-                                message,
-                                correlation_id=roll_payload.client_action_id,
+                                roll_payload.client_action_id,
+                                exc,
                             )
                             continue
                     elif event_type == "san.check.roll":
@@ -485,7 +651,11 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                 except ValidationError as exc:
                     # payload 层校验失败（信封 OK 但具体事件 payload 形状不对），
                     # 同样只丢弃这一条。event_type 此时必然已赋值。
-                    logger.warning("ws_invalid_message", event_type=event_type, error=str(exc))
+                    logger.warning(
+                        "ws_invalid_message",
+                        event_type=event_type,
+                        validation_error_count=exc.error_count(),
+                    )
                     continue
     except WebSocketDisconnect:
         pass
@@ -500,5 +670,6 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
         # 断线清理另开一个短 session：上面每条消息用的 db 作用域已经结束，
         # 这里要把玩家标记为已断开，需要一个新的会话。
         if bound_player_id is not None:
-            async with async_session_factory() as db:
-                await room_service.set_player_connected(db, bound_player_id, False)
+            with anyio.CancelScope(shield=True):
+                async with _short_db_session() as db:
+                    await room_service.set_player_connected(db, bound_player_id, False)

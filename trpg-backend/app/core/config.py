@@ -40,7 +40,7 @@ class Settings(BaseSettings):
 
     # 允许跨域请求的前端来源列表，交给 main.py 里的 CORSMiddleware 使用。
     # 本地默认放行 Vite 开发服务器的默认端口 9877。
-    cors_origins: list[str] = ["http://localhost:9877"]
+    cors_origins: list[str] = ["http://localhost:9877", "http://127.0.0.1:9877"]
 
     # 默认使用确定性的离线 Fake，便于本地启动和测试；显式切到 openai 或 qwen
     # 后，Host/Narrator 才会调用远程模型。
@@ -63,6 +63,11 @@ class Settings(BaseSettings):
     host_agent_max_tool_calls: int = Field(default=8, gt=0, le=50)
     host_agent_tool_timeout_seconds: float = Field(default=5.0, gt=0, le=30)
     host_agent_timeout_seconds: float = Field(default=30.0, gt=0, le=120)
+
+    # 讨论区/Narrator 主线的兼容配置：未配置时使用确定性占位叙事，测试可通过
+    # 延迟钩子稳定覆盖行动锁并发分支。
+    deepseek_api_key: str | None = None
+    narrator_delay_seconds: float = Field(default=0.0, ge=0, le=120)
 
     @model_validator(mode="after")
     def validate_host_model(self) -> Settings:

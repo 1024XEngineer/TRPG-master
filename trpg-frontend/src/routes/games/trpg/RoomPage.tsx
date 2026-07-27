@@ -13,6 +13,8 @@ import { useRuleset } from '@/hooks/useRuleset'
 // ─── Types ───────────────────────────────────────────
 interface Message {
   type: 'system' | 'narr' | 'player' | 'dice'
+  channel?: 'action' | 'discussion'
+  messageId?: string
   sender?: string
   content: string
   time: string
@@ -474,6 +476,7 @@ export default function RoomPage() {
   const [endError, setEndError] = useState('')
   const [confirmExit, setConfirmExit] = useState(false)
   const [messages, setMessages] = useState<Message[]>([])
+  const [channel, setChannel] = useState<'action' | 'discussion'>('action')
   const [input, setInput] = useState('')
   const [typing, setTyping] = useState(false)
   const [pendingAction, setPendingAction] = useState<{ clientActionId: string; utterance: string } | null>(null)
@@ -509,10 +512,29 @@ export default function RoomPage() {
   }, [roomInfo?.phase])
 
   useEffect(() => {
+    if (!roomId || !reconnectToken) return
+    let cancelled = false
+    void sdk.rooms.listMessages(roomId, reconnectToken, { limit: 100 }).then((history) => {
+      if (cancelled) return
+      const restored: Message[] = history.reverse().map((message) => ({
+        type: 'player', channel: 'discussion', messageId: message.messageId,
+        sender: message.nickname, content: message.text,
+        time: new Date(message.sentAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+        isSelf: message.playerId === playerId,
+      }))
+      setMessages((current) => {
+        const ids = new Set(current.flatMap((item) => item.messageId ? [item.messageId] : []))
+        return [...restored.filter((item) => !item.messageId || !ids.has(item.messageId)), ...current]
+      })
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }, [roomId, reconnectToken, playerId])
+
+  useEffect(() => {
     if (!playerView) return
     const openingText = `${playerView.scene.name}\n${playerView.scene.description}`
     setMessages(prev => prev.length > 0 ? prev : [{
-      type: 'narr',
+      type: 'narr', channel: 'action',
       sender: '守秘人',
       content: openingText,
       time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
@@ -559,13 +581,30 @@ export default function RoomPage() {
         setMessages(prev => {
           if (prev.at(-1)?.content === envelope.payload.text) return prev
           return [...prev, {
-            type: 'narr', sender: '守秘人',
+            type: 'narr', channel: 'action', sender: '守秘人',
             content: envelope.payload.text,
             time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
           }]
         })
       } else if (envelope.type === 'room.state') {
         setRoomPhase(envelope.payload.phase)
+      } else if (envelope.type === 'chat.message') {
+        setMessages((prev) => {
+          if (prev.some((item) => item.messageId === envelope.payload.messageId)) return prev
+          return [...prev, {
+            type: 'player', channel: 'discussion', messageId: envelope.payload.messageId,
+            sender: envelope.payload.nickname, content: envelope.payload.text,
+            time: new Date(envelope.payload.sentAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+            isSelf: envelope.payload.playerId === playerId,
+          }]
+        })
+      } else if (envelope.type === 'action.broadcast') {
+        setMessages((prev) => [...prev, {
+          type: 'player', channel: 'action', sender: envelope.payload.nickname,
+          content: envelope.payload.utterance,
+          time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+          isSelf: envelope.payload.playerId === playerId,
+        }])
       } else if (envelope.type === 'check.request') {
         setTyping(false)
         setProgressLabel(null)
@@ -591,7 +630,7 @@ export default function RoomPage() {
           ? levelLabel
           : `${levelLabel}（未通过${difficultyLabels[envelope.payload.difficulty] ?? ''}检定）`
         setMessages(prev => [...prev, {
-          type: 'dice',
+          type: 'dice', channel: 'action',
           sender: envelope.payload.playerId === playerId ? senderName : '玩家',
           content: `${envelope.payload.skillName} ${envelope.payload.targetValue}% · D100 ${envelope.payload.rollValue} · ${outcomeLabel}`,
           time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
@@ -661,11 +700,12 @@ export default function RoomPage() {
     e?.preventDefault()
     const text = input.trim()
     if (!text || !playerId || suspended) return
-    setMessages(prev => [...prev, {
-      type: 'player', sender: senderName, content: text, time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }), isSelf: true,
-    }])
     setInput('')
-    submitPlayerAction({ clientActionId: crypto.randomUUID(), utterance: text })
+    if (channel === 'discussion') {
+      sdk.roomSocket.sendChat(playerId, { text, clientMessageId: crypto.randomUUID() })
+    } else {
+      submitPlayerAction({ clientActionId: crypto.randomUUID(), utterance: text })
+    }
   }
 
   const handleDiceResult = (result: number, diceType: DiceType, skillId?: string) => {
@@ -682,7 +722,7 @@ export default function RoomPage() {
     const typeLabel = diceType.toUpperCase()
     const resultLabel = diceType === 'd100' ? (result <= 5 ? '极限成功' : result <= 65 ? '成功' : '失败') : `掷出 ${result}`
     setMessages(prev => [...prev, {
-      type: 'dice', sender: senderName, content: `${typeLabel} · ${result} · ${resultLabel}`, time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }), isSelf: true,
+      type: 'dice', channel: 'action', sender: senderName, content: `${typeLabel} · ${result} · ${resultLabel}`, time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }), isSelf: true,
     }])
   }
 
@@ -752,8 +792,15 @@ export default function RoomPage() {
       )}
 
       {/* Messages */}
+      <div className="flex items-center gap-1 px-3 py-2 border-b border-border-light bg-page">
+        {([{ id: 'action', label: '行动' }, { id: 'discussion', label: '讨论区' }] as const).map((item) => (
+          <button key={item.id} type="button" onClick={() => setChannel(item.id)} className={`flex-1 py-1.5 text-xs font-semibold rounded-md ${channel === item.id ? 'bg-brass text-white' : 'text-text-muted bg-panel'}`}>
+            {item.label}
+          </button>
+        ))}
+      </div>
       <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-3" id="chatScroll">
-        {messages.map((msg, i) => {
+        {messages.filter((msg) => (msg.channel ?? 'action') === channel).map((msg, i) => {
           if (msg.type === 'system') {
             return (
               <div key={i} className="text-center py-1.5 animate-[fadeIn_0.3s_ease]">

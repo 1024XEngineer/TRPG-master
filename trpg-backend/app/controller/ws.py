@@ -56,7 +56,10 @@ from app.core.turn_events import (
     TurnToolStarted,
 )
 from app.dto.ws import (
+    ActionBroadcastPayload,
     ActionSubmitPayload,
+    ChatMessagePayload,
+    ChatSendPayload,
     CheckRequestPayload,
     CheckResultPayload,
     CheckRollPayload,
@@ -79,7 +82,9 @@ from app.dto.ws import (
     ViewUpdatedPayload,
 )
 from app.service import auth as auth_service
+from app.service import chat as chat_service
 from app.service import room as room_service
+from app.service.action_lock import action_lock_manager
 from app.service.ws_events import broadcast_room_state
 from app.service.ws_manager import manager
 
@@ -341,6 +346,69 @@ def _map_turn_error(exc: Exception) -> tuple[str, str, bool]:
     return "TURN_INTERNAL_ERROR", "本次动作处理失败，请稍后重试", True
 
 
+async def _broadcast_action_utterance(
+    db: AsyncSession,
+    room_id: str,
+    player_id: str,
+    utterance: str,
+) -> None:
+    """广播玩家原话，但不把讨论区消息混入叙事事件历史。"""
+
+    player = await room_service.get_player(db, player_id)
+    nickname = player.nickname if player is not None else "玩家"
+    payload = ActionBroadcastPayload(
+        player_id=player_id,
+        nickname=nickname,
+        utterance=utterance,
+    )
+    envelope = ServerEnvelope(
+        type="action.broadcast",
+        payload=payload.model_dump(by_alias=True),
+    )
+    await manager.broadcast(room_id, envelope.model_dump(by_alias=True))
+
+
+async def _handle_chat_send(
+    db: AsyncSession,
+    websocket: WebSocket,
+    room_id: str,
+    player_id: str,
+    payload: ChatSendPayload,
+) -> None:
+    """落库并广播讨论区消息；该消息永远不进入 Host Agent 上下文。"""
+
+    text = payload.text.strip()
+    if not text:
+        return
+    player = await room_service.get_player(db, player_id)
+    if player is None or player.room_id != room_id:
+        return
+    room = await room_service.find_room_by_id(db, room_id)
+    if room.phase == "Completed":
+        await _send_error(websocket, "FORBIDDEN", "游戏已结束，无法发送消息")
+        return
+    message = await chat_service.save_chat_message(
+        db,
+        room_id,
+        player_id,
+        text,
+        payload.client_message_id,
+    )
+    chat_payload = ChatMessagePayload(
+        message_id=message.id,
+        player_id=message.player_id,
+        nickname=player.nickname,
+        text=message.text,
+        sent_at=message.created_at,
+        client_message_id=message.client_message_id,
+    )
+    envelope = ServerEnvelope(
+        type="chat.message",
+        payload=chat_payload.model_dump(by_alias=True, mode="json"),
+    )
+    await manager.broadcast(room_id, envelope.model_dump(by_alias=True))
+
+
 async def _handle_room_join(
     db: AsyncSession,
     websocket: WebSocket,
@@ -488,6 +556,15 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                             (f"{initial_view.scene.name}\n{initial_view.scene.description}"),
                         )
                         await broadcast_room_state(db, room_id)
+                    elif event_type == "chat.send":
+                        chat_payload = ChatSendPayload.model_validate(raw_payload)
+                        await _handle_chat_send(
+                            db,
+                            websocket,
+                            room_id,
+                            bound_player_id,
+                            chat_payload,
+                        )
                     elif event_type == "action.submit":
                         try:
                             submit_payload = ActionSubmitPayload.model_validate(raw_payload)
@@ -507,6 +584,23 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 "INVALID_ACTION",
                                 "action.submit 必须包含非空 clientActionId 和 utterance",
                                 correlation_id=correlation_id,
+                            )
+                            continue
+                        if submit_payload.visibility == "private":
+                            await _send_error(
+                                websocket,
+                                "NOT_IMPLEMENTED",
+                                "私密行动本期尚未实现",
+                                correlation_id=submit_payload.client_action_id,
+                            )
+                            continue
+                        lock_token = action_lock_manager.try_acquire(room_id)
+                        if lock_token is None:
+                            await _send_error(
+                                websocket,
+                                "ACTION_IN_PROGRESS",
+                                "守秘人正在处理其他玩家的行动，请稍候",
+                                correlation_id=submit_payload.client_action_id,
                             )
                             continue
                         try:
@@ -531,6 +625,13 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                         correlation_id=submit_payload.client_action_id,
                                     )
                                 continue
+
+                            await _broadcast_action_utterance(
+                                db,
+                                room_id,
+                                bound_player_id,
+                                submit_payload.utterance,
+                            )
 
                             prepared = await turn_application.prepare(
                                 room_id=room_id,
@@ -579,6 +680,8 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 exc,
                             )
                             continue
+                        finally:
+                            action_lock_manager.release(room_id, lock_token)
                     elif event_type == "check.roll":
                         roll_payload = CheckRollPayload.model_validate(raw_payload)
                         if pending_turn is None:
@@ -597,6 +700,15 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 websocket,
                                 "CHECK_ACTION_MISMATCH",
                                 "检定结果与当前待处理动作不匹配",
+                                correlation_id=roll_payload.client_action_id,
+                            )
+                            continue
+                        lock_token = action_lock_manager.try_acquire(room_id)
+                        if lock_token is None:
+                            await _send_error(
+                                websocket,
+                                "ACTION_IN_PROGRESS",
+                                "守秘人正在处理其他玩家的行动，请稍候",
                                 correlation_id=roll_payload.client_action_id,
                             )
                             continue
@@ -640,6 +752,8 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 exc,
                             )
                             continue
+                        finally:
+                            action_lock_manager.release(room_id, lock_token)
                     elif event_type == "san.check.roll":
                         SanCheckRollPayload.model_validate(raw_payload)
                         await _send_error(

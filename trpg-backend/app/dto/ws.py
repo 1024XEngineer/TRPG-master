@@ -29,7 +29,7 @@ from typing import Any, Literal
 from collaboration_framework.contracts import PlayerView
 from pydantic import Field, field_validator
 
-from app.dto.common import CamelModel
+from app.dto.common import CamelModel, UtcDatetime
 from app.dto.room import RoomPlayerRead
 
 # ── 客户端 → 服务端 ──────────────────────────────
@@ -82,7 +82,9 @@ class ActionSubmitPayload(CamelModel):
     """
 
     client_action_id: str = Field(..., min_length=1, max_length=200)
-    utterance: str = Field(..., min_length=1)
+    utterance: str = Field(..., min_length=1, max_length=2000)
+    summarized_from: list[str] | None = None
+    visibility: Literal["public", "private"] | None = None
 
     @field_validator("client_action_id", "utterance")
     @classmethod
@@ -119,6 +121,13 @@ class RoomRejoinPayload(CamelModel):
     reconnect_token: str = Field(..., min_length=1)
 
 
+class ChatSendPayload(CamelModel):
+    """chat.send 讨论区消息；该通道不会进入 Host Agent 上下文。"""
+
+    text: str = Field(..., min_length=1, max_length=2000)
+    client_message_id: str = Field(..., min_length=1, max_length=64)
+
+
 # ── 服务端 → 客户端 ──────────────────────────────
 
 
@@ -133,6 +142,25 @@ class NarrationPushPayload(CamelModel):
     """narration.push 推送 payload。"""
 
     text: str
+
+
+class ChatMessagePayload(CamelModel):
+    """chat.message 讨论区广播 payload。"""
+
+    message_id: str
+    player_id: str
+    nickname: str
+    text: str
+    sent_at: UtcDatetime
+    client_message_id: str
+
+
+class ActionBroadcastPayload(CamelModel):
+    """action.submit 原话广播 payload。"""
+
+    player_id: str
+    nickname: str
+    utterance: str
 
 
 class TurnStartedPayload(CamelModel):

@@ -42,6 +42,7 @@ from app.models.engine import GameSession, ModuleVersion
 from app.models.event import Event
 from app.models.room import Character, Player, Room
 from app.models.user import User
+from app.service import chat as chat_service
 
 
 class RoomNotFoundError(ValueError):
@@ -703,6 +704,7 @@ async def end_game(db: AsyncSession, room_id: str, reconnect_token: str | None) 
         )
         if getattr(state_update, "rowcount", None) != 1:
             raise RoomConflictError("GameState 已被并发更新，请重试结束操作")
+        await chat_service.clear_room_chat(db, room_id)
         await db.commit()
     except Exception:
         await db.rollback()

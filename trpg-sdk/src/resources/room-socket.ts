@@ -1,5 +1,6 @@
 import type {
   ActionSubmitPayload,
+  ChatSendPayload,
   AgentPlayerView,
   AgentTurnPayload,
   CheckRollPayload,
@@ -285,6 +286,17 @@ const PAYLOAD_VALIDATORS: {
     typeof p.successLevel === 'string' &&
     typeof p.passed === 'boolean' &&
     typeof p.result === 'string',
+  'chat.message': (p) =>
+    typeof p.messageId === 'string' &&
+    typeof p.playerId === 'string' &&
+    typeof p.nickname === 'string' &&
+    typeof p.text === 'string' &&
+    typeof p.sentAt === 'string' &&
+    typeof p.clientMessageId === 'string',
+  'action.broadcast': (p) =>
+    typeof p.playerId === 'string' &&
+    typeof p.nickname === 'string' &&
+    typeof p.utterance === 'string',
   'san.check.request': (p) => typeof p.playerId === 'string',
   'san.check.result': (p) =>
     typeof p.playerId === 'string' &&
@@ -472,6 +484,11 @@ export class RoomSocket {
   /** check.roll —— 为当前 check.request 提交玩家选择的技能和 D100 点数。 */
   rollCheck(playerId: string, payload: CheckRollPayload): void {
     this.send('check.roll', playerId, payload);
+  }
+
+  /** chat.send —— 发送讨论区消息；不会进入 Host Agent 上下文。 */
+  sendChat(playerId: string, payload: ChatSendPayload): void {
+    this.send('chat.send', playerId, payload);
   }
 
   /** san.check.roll —— 理智检定摇骰（issue #77 新增，后端本期回 NOT_IMPLEMENTED）。 */

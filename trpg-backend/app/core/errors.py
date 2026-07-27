@@ -34,6 +34,7 @@ class ErrorCode(StrEnum):
     ROOM_FULL = "ROOM_FULL"  # 房间人数已满，无法加入 → 409
     MODULE_VALIDATION_FAILED = "MODULE_VALIDATION_FAILED"  # 模组导入解析/校验失败 → 422
     NOT_YOUR_TURN = "NOT_YOUR_TURN"  # 回合制约束：还没轮到这名玩家行动 → 409
+    ACTION_IN_PROGRESS = "ACTION_IN_PROGRESS"  # 房间内已有人在等 AI 主持人回应，他人提交被拒 → 409
     CHARACTER_INCOMPLETE = "CHARACTER_INCOMPLETE"  # 角色卡未建完，无法进行需要角色的操作 → 409
     MODULE_NOT_SELECTED = "MODULE_NOT_SELECTED"  # 房间还没选定模组 → 409
     RECONNECT_TOKEN_EXPIRED = "RECONNECT_TOKEN_EXPIRED"  # 断线重连凭证失效（room.rejoin）→ 401

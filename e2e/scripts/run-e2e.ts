@@ -37,6 +37,14 @@ const DB_FILE = resolve(BACKEND_DIR, 'e2e.db')
 const backendEnv = {
   ...process.env,
   DATABASE_URL: 'sqlite+aiosqlite:///./e2e.db',
+  // 叙事生成人为延迟 1 秒（issue #107 测试钩子，生产恒为 0）：占位 narrator
+  // 同步秒回，action.submit 的房间锁窗口只有微秒级，两个客户端"同时提交"
+  // 永远压不中 ACTION_IN_PROGRESS——没有这 1 秒，锁的并发拒绝路径在 e2e 里
+  // 是测不到的死代码。代价是每次 action.submit 的用例多等 1 秒。
+  // ⚠️ 显式确保 DEEPSEEK_API_KEY 不透传：开发机 shell 里可能配了它，e2e 一旦
+  // 走真实大模型就变成"结果取决于外部服务"的 flaky 源，且烧钱。
+  NARRATOR_DELAY_SECONDS: '1',
+  DEEPSEEK_API_KEY: '',
 }
 
 /**

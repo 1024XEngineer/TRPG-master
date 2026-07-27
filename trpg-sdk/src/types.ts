@@ -58,6 +58,7 @@ export type {
   RoomJoinPayload,
   PlayerReadyPayload,
   ActionSubmitPayload,
+  ActionBroadcastPayload,
   GameStartPayload,
   SessionBoundPayload,
   NarrationPushPayload,
@@ -72,6 +73,9 @@ export type {
   ViewPrivatePayload,
   CheckRequestPayload,
   CheckResultPayload,
+  ChatMessagePayload,
+  ChatMessageRead as ChatMessage,
+  ChatSendPayload,
   SanCheckRequestPayload,
   SanCheckResultPayload,
   ClueGrantedPayload,
@@ -105,6 +109,8 @@ export interface ApiResponse<T> {
 // ──────────────────────────────────────────────
 
 import type {
+  ActionBroadcastPayload,
+  ChatMessagePayload,
   CheckRequestPayload,
   CheckResultPayload,
   ClueGrantedPayload,
@@ -150,6 +156,8 @@ export type ServerToClientEvent =
   | { type: 'view.private'; payload: ViewPrivatePayload }
   | { type: 'check.request'; payload: CheckRequestPayload }
   | { type: 'check.result'; payload: CheckResultPayload }
+  | { type: 'chat.message'; payload: ChatMessagePayload }
+  | { type: 'action.broadcast'; payload: ActionBroadcastPayload }
   | { type: 'san.check.request'; payload: SanCheckRequestPayload }
   | { type: 'san.check.result'; payload: SanCheckResultPayload }
   | { type: 'clue.granted'; payload: ClueGrantedPayload }

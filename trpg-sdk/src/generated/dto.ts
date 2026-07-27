@@ -197,38 +197,51 @@ export interface CharacterUpdateBody {
 }
 
 /**
- * check.request 推送 payload（issue #77 新增，本期不会真的发出）。
+ * 向动作发起者推送经 Actor 技能值过滤后的可用检定项。
  */
 export interface CheckRequestPayload {
   playerId: string;
-  skill: string;
-  targetValue?: number | null;
+  clientActionId: string;
+  summary: string;
+  difficulty: "regular" | "hard" | "extreme";
+  skills: CheckSkillOptionPayload[];
 }
 
 /**
  * check.result 推送 payload（issue #77 新增）。
  *
  * 直接返回终值，不做两段式初步结果（issue 决策 4：幸运消耗机制推迟，
- * 协议一并简化）。本期不会真的发出。
+ * 协议一并简化）。
  */
 export interface CheckResultPayload {
   playerId: string;
+  clientActionId: string;
   skill: string;
+  skillName: string;
   rollValue: number;
-  targetValue?: number | null;
+  targetValue: number;
+  difficulty: "regular" | "hard" | "extreme";
+  successLevel: "critical" | "extreme" | "hard" | "regular" | "failure" | "fumble";
+  passed: boolean;
   result: string;
 }
 
 /**
- * check.roll 事件 payload（issue #77 新增）——玩家请求做一次技能检定。
- *
- * `skill` 必填：说清楚要检定哪个技能是这个动作本身的意义所在。这条链路
- * 本期是 NOT_IMPLEMENTED 桩（见 issue"三处原型取舍"表格——真正的服务端
- * 权威掷骰依赖规则引擎裁决，归 #48/#68），handler 校验完这个 payload 就
- * 直接回 `error` 事件，不会真的掷骰或读写 `check_results` 表。
+ * 为待处理动作提交玩家选择的技能与 D100 结果。
  */
 export interface CheckRollPayload {
+  clientActionId: string;
   skill: string;
+  rollValue: number;
+}
+
+/**
+ * A player-owned skill that may be selected for the pending check.
+ */
+export interface CheckSkillOptionPayload {
+  id: string;
+  name: string;
+  targetValue: number;
 }
 
 /**
@@ -334,6 +347,7 @@ export interface GameStartPayload {}
 export interface GameSystemRead {
   id: string;
   gameId: string;
+  worldRef: string;
   name: string;
   version?: string | null;
 }

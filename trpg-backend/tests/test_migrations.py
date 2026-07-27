@@ -8,7 +8,8 @@ from pathlib import Path
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 PREVIOUS_REVISION = "1a02058345ee"
-HEAD_REVISION = "9c4e7a2b1d6f"
+ENGINE_IDENTITY_PREVIOUS_REVISION = "9c4e7a2b1d6f"
+HEAD_REVISION = "b7e4c2d1a6f9"
 
 
 def _run_alembic(database: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -55,6 +56,14 @@ def _unique_column_sets(database: Path, table: str) -> set[tuple[str, ...]]:
         }
 
 
+def _foreign_keys(database: Path, table: str) -> set[tuple[str, str, str]]:
+    with sqlite3.connect(database) as connection:
+        return {
+            (row[3], row[2], row[4])
+            for row in connection.execute(f"PRAGMA foreign_key_list('{table}')")
+        }
+
+
 def test_migration_upgrades_empty_sqlite_and_round_trips(tmp_path: Path) -> None:
     database = tmp_path / "round-trip.db"
 
@@ -70,6 +79,15 @@ def test_migration_upgrades_empty_sqlite_and_round_trips(tmp_path: Path) -> None
     assert {"status", "name_en", "story_label", "subtitle", "story_pages"}.issubset(
         _column_names(database, "scenarios")
     )
+    assert "module_id" in _column_names(database, "scenarios")
+    assert "world_ref" in _column_names(database, "game_systems")
+    assert ("module_id",) in _unique_column_sets(database, "scenarios")
+    assert ("world_ref",) in _unique_column_sets(database, "game_systems")
+    assert ("module_id", "scenarios", "module_id") in _foreign_keys(database, "module_versions")
+    assert {
+        ("module_id", "module_versions", "module_id"),
+        ("module_version", "module_versions", "version"),
+    }.issubset(_foreign_keys(database, "game_sessions"))
     assert "module_version" in _column_names(database, "rooms")
     assert "version" in _column_names(database, "characters")
     assert "correlation_id" in _column_names(database, "events")
@@ -150,3 +168,40 @@ def test_migration_rejects_nonempty_room_sessions_before_ddl(tmp_path: Path) -> 
     assert "room_sessions 存在历史数据" in result.stdout + result.stderr
     assert "room_sessions" in _table_names(database)
     assert "status" not in _column_names(database, "scenarios")
+
+
+def test_module_identity_migration_rejects_existing_catalog_data(tmp_path: Path) -> None:
+    database = tmp_path / "existing-catalog.db"
+    _upgrade_or_fail(database, ENGINE_IDENTITY_PREVIOUS_REVISION)
+
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            """
+            INSERT INTO games (id, name, created_at)
+            VALUES (?, ?, ?)
+            """,
+            (
+                "40000000-0000-0000-0000-000000000001",
+                "历史游戏",
+                "2026-07-25 00:00:00",
+            ),
+        )
+        connection.execute(
+            """
+            INSERT INTO game_systems (id, game_id, name, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                "40000000-0000-0000-0000-000000000002",
+                "40000000-0000-0000-0000-000000000001",
+                "历史规则系统",
+                "2026-07-25 00:00:00",
+            ),
+        )
+
+    result = _run_alembic(database, "upgrade", "head")
+
+    assert result.returncode != 0
+    assert "game_systems 存在历史数据" in result.stdout + result.stderr
+    assert "world_ref" not in _column_names(database, "game_systems")
+    assert "module_id" not in _column_names(database, "scenarios")

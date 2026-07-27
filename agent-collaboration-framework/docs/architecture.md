@@ -109,6 +109,16 @@ sequenceDiagram
 
 理由：B 知道权威状态，但不能把完整 GameState/秘密泄漏给 A 的模型上下文；A 知道当前玩家需要看到什么。中间快照让两种职责都能独立演进。A 不 import `GameState` 或 `ModuleContent`。
 
+PlayerView v2 是当前单次 `IntentModelPort.generate(IntentContext)` 与未来
+`HostAgentPort.astream(HostAgentContext)` 的统一、完整、revision-bound 数据源：
+
+- `self_actor` 只从局内 `ActorState` 白名单投影，不回读 Character，也不包含 notes；
+- `scene` 只使用显式 `player_visible_name/player_visible_description`，不复制 `SceneSpec.content`；
+- Entity 动态状态只按 `observable_state` allow-list 输出；
+- `exits` 为空时运行时派生全部其他 Scene，非空时只派生列出的 Scene；可选的 `available_exits` 可覆盖展示和可见性；
+- `known_information` 按 actor/party 发现作用域过滤；
+- 同一次模型或 Agent 调用不再拼接数据库、完整模组或其他 revision 的补充数据。
+
 ### 10. ActionResult 与 B 内部执行结果
 
 选择：跨边界 `ActionResult` 只含 player-safe 事实、叙事约束、视图版本和不透明 Event 引用；B 内部 `EngineExecutionResult` 可含 StateChange、完整 Event、状态版本和确认事实。
@@ -165,25 +175,34 @@ flowchart TD
 
 ### 15. 真实模型依赖
 
-选择：PydanticAI 与 LangGraph 保持移除；OpenAI Agents SDK、OpenAI 客户端、Qwen 配置和版本化 Prompt 只允许进入
-`host/adapters/openai_agents/` 与 bootstrap 组合根。稳定 Host Schema/Port、application、tools、Engine 和 Module
-继续与 SDK/provider 无关。
+选择：contracts/application 核心只保留模型 Protocol 与 Fake adapter。Host Agent 的 OpenAI Agents SDK、
+OpenAI 客户端、Qwen 配置和版本化 Prompt 只允许进入 `host/adapters/openai_agents/` 与 bootstrap 组合根；
+后端基础设施层另行提供可配置的最小 Responses API 结构化输出 Adapter。稳定 Host Schema/Port、
+application、tools、Engine 和 Module 继续与 SDK/provider 无关，PydanticAI 与 LangGraph 保持移除。
 
-理由：第三方 SDK 是可替换基础设施。真实 Adapter 可以履行同一 `HostAgentPort`，但其类型、运行循环、客户端和
-供应商配置不能进入 contracts/application 核心，也不能改变 `IntentParser` 的确定性校验职责。
+理由：第三方 SDK、模型调用和 Prompt 都是可替换基础设施。真实 Host Adapter 可以履行同一
+`HostAgentPort`，但其类型、运行循环、客户端和供应商配置不能进入 contracts/application 核心，也不能改变
+`IntentParser` 的确定性校验职责。后端未显式启用或远程模型失败时回退到确定性 Fake；启用后
+Host/Narrator 仍只能消费玩家安全 Context，并继续经过 Pydantic 与可信候选校验。
 
 ### 16. ModuleContent 与验证边界
 
-选择：`ModuleContent`、声明式 `CheckpointSpec` 和 `RuleSpec` 放在 `contracts/module.py`，由 B/C 共同评审。C 的 `module/validation.py` 只负责把发布输入解析/验证为 `ModuleContent`；B 消费它执行规则；A 不消费它。
+选择：`ModuleContent`、声明式 `CheckpointSpec`、`RuleSpec`、Visibility 和 Operation catalog
+放在 `contracts/module.py`，由 B/C 共同评审。C 的私有 `ModuleDraft` 不导出给 Runtime；
+`module/validation.py` 是 Draft 转换为正式 `ModuleContent` 的唯一入口。B 消费正式发布内容；
+A 和后端仍只通过既有 Engine Service/Store/Port 边界交互。
 
-理由：它们是 C 到 B 的发布协议。若留在 C 私有目录，B 只能依赖 C 实现；若放进 B 内部目录，C 的发布器只能反向依赖运行时。公共契约解决的是“模组能声明什么”，不包含“引擎怎样执行”。
+理由：它们是 C 到 B 的发布协议。公共契约解决“模组能声明什么”，不固定 Engine Service、
+事务存储、GameState 或 Host 编排接口。RuleKernel 可以只实现 catalog 的一个子集，但开局
+和执行前必须通过能力审计；未支持声明不得被静默忽略，也不得反向删减发布语言。
 
 ## 4. ModuleContent 的三层边界
 
 ```mermaid
 flowchart LR
-    RAW["C 私有输入/ModuleDraft"] --> PARSE["C 解析与审查"]
-    PARSE --> CONTRACT["contracts/module.py<br/>ModuleContent + 声明式 Specs"]
+    RAW["Raw JSON / LLM Output"] --> DRAFT["C 私有 ModuleDraft"]
+    DRAFT --> VALIDATE["C Validation<br/>语义校验 + 唯一转换入口"]
+    VALIDATE --> CONTRACT["contracts/module.py<br/>ModuleContent + 声明式 Catalog"]
     CONTRACT --> ENGINE["B engine<br/>编译/匹配/执行"]
     ENGINE --> STATE["B 内部<br/>GameState + Event"]
     ENGINE --> SNAP["ProjectionSnapshot"]
@@ -192,10 +211,14 @@ flowchart LR
     style CONTRACT fill:#eef,stroke:#446
 ```
 
-- C 私有：原文、解析草稿、证据位置、审查报告、人工批准流程。
+- C 私有：原文、`ModuleDraft`、证据位置、审查报告、人工批准流程。
 - B/C 公共：发布后模组的结构、引用关系和声明式条件/操作。
-- B 私有：编译后的 Rule、Hook 注册表、随机源、状态变更、Event、事务和缓存。
+- B 私有：编译后的 Rule、Hook/Expression/Operation 消费器、随机源、状态变更、Event、事务和缓存。
 - A 私有：玩家可见投影政策、意图/叙事上下文、回合工作状态和 Gateway DTO。
+
+依赖方向固定为
+`Raw Input -> ModuleDraft -> Validation -> ModuleContent -> RuleEngineService/RuleKernel`。
+Runtime、Host 和后端不得直接依赖 `ModuleDraft`。
 
 ## 5. 每个目录的五问
 
@@ -352,9 +375,9 @@ A 输出/内部边界 Schema：
 
 `HostAgentPort.astream()` 是 A 在规则引擎之前的框架无关意图理解边界，只接收可信 `PlayerInput` 与 player-safe
 `PlayerView`。`ToolRegistry.bind(context)` 把工具调用固定到这一 Context，模型参数中没有 room/player/actor 身份入口。
-当前两个工具只搜索 `visible_entities` 或返回其中一个实体及其当前 checkpoint 候选；真实 Adapter、工具与离线 Fake
-均尚未接入 `Orchestrator`。completed 的 raw JSON 仍须交给 `IntentParser`，且该 Port/Registry/Adapter 都不得调用
-`ActionExecutor`。
+当前两个工具只搜索 `scene.visible_entities` 或返回其中一个实体及其当前 checkpoint 候选；真实 Adapter、工具与离线
+Fake 均尚未接入 `Orchestrator`。completed 的 raw JSON 仍须交给 `IntentParser`，且该 Port/Registry/Adapter 都不得
+调用 `ActionExecutor`。
 上述三个 Host Agent Schema 虽然导出为仓库级 JSON Schema，但不因此成为 A/B/C 共享业务契约；工具定义则直接从
 参数/结果 Pydantic 模型生成 Adapter Schema，不维护重复文件。
 

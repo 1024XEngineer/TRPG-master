@@ -11,6 +11,8 @@ from collaboration_framework.contracts import (
     ContractModel,
     PlayerInput,
     PlayerView,
+    SceneView,
+    SelfActorView,
     VisibleEntity,
 )
 from collaboration_framework.host.application import ToolDefinition, ToolRegistry
@@ -44,44 +46,50 @@ def make_context() -> HostAgentContext:
             scene_id="library",
             phase="playing",
             revision="7",
-            visible_entities=(
-                VisibleEntity(
-                    id="entity_b",
-                    kind="object",
-                    name="Ancient Shelf",
-                    aliases=("Bookcase",),
-                    content="Old oak furniture.",
-                ),
-                VisibleEntity(
-                    id="entity_a",
-                    kind="location",
-                    name="Shelf Door",
-                    content="A narrow exit.",
-                ),
-                VisibleEntity(
-                    id="entity_c",
-                    kind="object",
-                    name="Locked Cabinet",
-                    aliases=("Book Shelf",),
-                    content="Its doors are locked.",
-                ),
-                VisibleEntity(
-                    id="entity_d",
-                    kind="npc",
-                    name="Curator",
-                    content="Dust from a shelf marks their coat.",
-                ),
-                VisibleEntity(
-                    id="entity_e",
-                    kind="location",
-                    name="ＲＥＤ   Door",
-                    content="A painted doorway.",
-                ),
-                VisibleEntity(
-                    id="entity_f",
-                    kind="object",
-                    name="Reading Desk",
-                    content="A plain writing desk.",
+            self_actor=SelfActorView(id="actor_001", name="Investigator"),
+            scene=SceneView(
+                id="library",
+                name="Library",
+                description="A player-safe library.",
+                visible_entities=(
+                    VisibleEntity(
+                        id="entity_b",
+                        kind="object",
+                        name="Ancient Shelf",
+                        aliases=("Bookcase",),
+                        description="Old oak furniture.",
+                    ),
+                    VisibleEntity(
+                        id="entity_a",
+                        kind="location",
+                        name="Shelf Door",
+                        description="A narrow exit.",
+                    ),
+                    VisibleEntity(
+                        id="entity_c",
+                        kind="object",
+                        name="Locked Cabinet",
+                        aliases=("Book Shelf",),
+                        description="Its doors are locked.",
+                    ),
+                    VisibleEntity(
+                        id="entity_d",
+                        kind="npc",
+                        name="Curator",
+                        description="Dust from a shelf marks their coat.",
+                    ),
+                    VisibleEntity(
+                        id="entity_e",
+                        kind="location",
+                        name="ＲＥＤ   Door",
+                        description="A painted doorway.",
+                    ),
+                    VisibleEntity(
+                        id="entity_f",
+                        kind="object",
+                        name="Reading Desk",
+                        description="A plain writing desk.",
+                    ),
                 ),
             ),
             checkpoint_options=(
@@ -160,19 +168,25 @@ class ToolRegistryTests(unittest.IsolatedAsyncioTestCase):
             public_progress_label="正在执行已知工具",
             handler=counted_handler,
         )
-        result = await ToolRegistry((definition,)).bind(make_context()).ainvoke(
-            "unknown_tool",
-            {"query": "shelf"},
+        result = (
+            await ToolRegistry((definition,))
+            .bind(make_context())
+            .ainvoke(
+                "unknown_tool",
+                {"query": "shelf"},
+            )
         )
 
         self.assertEqual(error_code(result), "TOOL_NOT_FOUND")
         self.assertEqual(calls, 0)
 
-        non_string_result = await ToolRegistry((definition,)).bind(
-            make_context()
-        ).ainvoke(
-            ["known_tool"],  # type: ignore[arg-type]
-            {"query": "shelf"},
+        non_string_result = (
+            await ToolRegistry((definition,))
+            .bind(make_context())
+            .ainvoke(
+                ["known_tool"],  # type: ignore[arg-type]
+                {"query": "shelf"},
+            )
         )
         self.assertEqual(error_code(non_string_result), "TOOL_NOT_FOUND")
         self.assertEqual(calls, 0)
@@ -203,11 +217,7 @@ class ToolRegistryTests(unittest.IsolatedAsyncioTestCase):
             _context: HostAgentContext,
             _arguments: ContractModel,
         ) -> object:
-            return {
-                "matches": [
-                    {"id": "", "kind": "object", "name": "Invalid"}
-                ]
-            }
+            return {"matches": [{"id": "", "kind": "object", "name": "Invalid"}]}
 
         definition = ToolDefinition(
             name="malformed_tool",
@@ -217,9 +227,13 @@ class ToolRegistryTests(unittest.IsolatedAsyncioTestCase):
             public_progress_label="正在验证工具结果",
             handler=malformed_handler,
         )
-        result = await ToolRegistry((definition,)).bind(make_context()).ainvoke(
-            "malformed_tool",
-            {"query": "shelf"},
+        result = (
+            await ToolRegistry((definition,))
+            .bind(make_context())
+            .ainvoke(
+                "malformed_tool",
+                {"query": "shelf"},
+            )
         )
 
         self.assertEqual(error_code(result), "INVALID_TOOL_RESULT")
@@ -239,9 +253,13 @@ class ToolRegistryTests(unittest.IsolatedAsyncioTestCase):
             public_progress_label="正在验证失败脱敏",
             handler=failing_handler,
         )
-        result = await ToolRegistry((definition,)).bind(make_context()).ainvoke(
-            "failing_tool",
-            {"query": "shelf"},
+        result = (
+            await ToolRegistry((definition,))
+            .bind(make_context())
+            .ainvoke(
+                "failing_tool",
+                {"query": "shelf"},
+            )
         )
 
         self.assertEqual(error_code(result), "TOOL_INTERNAL_ERROR")
@@ -267,9 +285,13 @@ class ToolRegistryTests(unittest.IsolatedAsyncioTestCase):
             handler=stopping_handler,
         )
         with self.assertRaises(StopRun):
-            await ToolRegistry((definition,)).bind(make_context()).ainvoke(
-                "stopping_tool",
-                {"query": "shelf"},
+            await (
+                ToolRegistry((definition,))
+                .bind(make_context())
+                .ainvoke(
+                    "stopping_tool",
+                    {"query": "shelf"},
+                )
             )
 
     def test_adapter_schemas_are_json_safe_and_scope_free(self) -> None:
@@ -308,7 +330,7 @@ class VisibleEntityToolTests(unittest.IsolatedAsyncioTestCase):
             id="hidden_entity",
             kind="object",
             name=SECRET,
-            content=f"Hidden content: {SECRET}",
+            description=f"Hidden content: {SECRET}",
         )
 
     async def search(self, **arguments: object) -> SearchVisibleEntitiesResult:

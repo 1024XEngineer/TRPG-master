@@ -57,6 +57,8 @@ class Intent(ContractModel):
     target: IntentTarget
     check: CheckProposal
     approach: str | None = None
+    declarations: tuple[str, ...] = ()
+    initiated_by_target: bool = False
     summary: str = Field(min_length=1)
     clarification_question: str | None = None
 
@@ -84,6 +86,7 @@ class ActionRequest(ContractModel):
     actor_id: str = Field(min_length=1)
     source_view_revision: str = Field(min_length=1)
     intent: Intent
+    roll_value: int | None = Field(default=None, ge=1, le=100)
 
 
 ActionResolution: TypeAlias = Literal[
@@ -95,6 +98,28 @@ ActionResolution: TypeAlias = Literal[
 ActionOutcome: TypeAlias = Literal["success", "failure", "not_applicable"]
 
 
+CheckSuccessLevel: TypeAlias = Literal[
+    "critical",
+    "extreme",
+    "hard",
+    "regular",
+    "failure",
+    "fumble",
+]
+
+
+class RuleCheckResult(ContractModel):
+    """Player-safe evidence for one authoritative percentile check."""
+
+    checkpoint_id: str | None = None
+    skill_id: str = Field(min_length=1)
+    target_value: int = Field(ge=0)
+    roll_value: int = Field(ge=1, le=100)
+    difficulty: Literal["regular", "hard", "extreme"]
+    success_level: CheckSuccessLevel
+    passed: bool
+
+
 class ActionResult(ContractModel):
     """Player-safe result; engine state changes and Event payloads are excluded."""
 
@@ -102,6 +127,7 @@ class ActionResult(ContractModel):
     action_id: str = Field(min_length=1)
     resolution: ActionResolution
     outcome: ActionOutcome
+    check_result: RuleCheckResult | None = None
     visible_facts: tuple[VisibleFact, ...] = ()
     narration_constraints: tuple[str, ...] = ()
     view_revision: str = Field(min_length=1)

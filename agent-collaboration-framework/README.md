@@ -4,13 +4,17 @@
 
 ## 阅读入口
 
-日常开发只看三份文件：
+核心阅读入口：
 
 1. 当前文件：项目入口、运行方法和目录总览。
 2. [`docs/architecture.md`](docs/architecture.md)：唯一现行架构文档，包含 16 项统一决议、依赖方向和接口边界。
 3. [`docs/数据模型设计.md`](docs/数据模型设计.md)：当前 Pydantic 模型、字段、所有权、revision 和幂等语义。
+4. [`docs/module-parser/MODULECONTENT-README.md`](docs/module-parser/MODULECONTENT-README.md)：B/C 发布语言、字段设计和 Parser 验证入口。
+5. [`docs/module-parser/module-content-field-decisions.md`](docs/module-parser/module-content-field-decisions.md)：ModuleContent v1 当前生效的完整契约决议。
+6. [`docs/architecture/adr-module-parser-architecture.md`](docs/architecture/adr-module-parser-architecture.md)：已接受的 Module Parser 实施架构。
 
-`docs/archive/` 仅用于追溯讨论，不是实现依据。不要从归档文档开始阅读；归档内容与现行文档冲突时，以 `docs/architecture.md`、`docs/数据模型设计.md`、代码中的 Protocol 和自动生成的 JSON Schema 为准。
+`docs/` 只保留当前生效的决议、使用说明和四个模组的验证产物，不保留已被吸收的
+Proposal、RFC、对比报告或阶段性讨论。
 
 ## 唯一回合主链
 
@@ -29,6 +33,12 @@ PlayerInput
 ```
 
 `Orchestrator.run()` 是成员 A 的稳定公开入口，MVP 内部采用普通 Python `async` 流程。当前没有 checkpoint、interrupt、resume、多阶段 Action 或 LangGraph。
+
+当前 `IntentContext` 会把完整 PlayerView v2 交给一次
+`IntentModelPort.generate()`：其中包含同一 revision 的 `self_actor`、安全 `scene`
+（实体、人物、出口）、`known_information` 与可信 `checkpoint_options`。后端的
+OpenAI/Qwen Prompt Adapter 直接序列化这份 Context；不会附加 GameState、数据库记录
+或完整 ModuleContent。未来 Host Agent 及其只读工具也绑定同一 PlayerView。
 
 ## Host Agent 契约（尚未接入主链）
 
@@ -139,7 +149,7 @@ collaboration_framework/
 |---|---|---|---|
 | `PlayerInput` | 协作层 | A | 可信连接身份在进入应用前建立 |
 | `ProjectionSnapshot` | A/B 共审 | A | B 提供的只读、无 `GameState` 投影源 |
-| `PlayerView` | A | A 的模型端口、Gateway | 只含当前玩家可见信息和可信候选 |
+| `PlayerView` | A | A 的模型端口、Gateway | 完整、不可变、revision-bound 的玩家安全角色/场景/知识快照和可信候选 |
 | `Intent` | A/B 共审 | B | 语义提议；无 `execution` |
 | `ActionExecutor.execute()` | B 提供、A 消费 | A/B | 唯一可能产生权威副作用的命令边界 |
 | `ActionResult` | A/B 共审 | A | Player-safe；不暴露 StateChange/Event payload |

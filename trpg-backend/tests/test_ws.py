@@ -1,10 +1,29 @@
 import pytest
+from collaboration_framework.contracts import JsonObject
+from collaboration_framework.host.adapters.fakes import FakeNarrationModel
+from collaboration_framework.host.schemas import IntentContext
 from starlette.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
+from app.controller import ws as ws_controller
+from app.core.turn import build_turn_application
 from app.main import app
 
 ROOMS_BASE = "/api/v1/rooms"
+
+
+class _WsCandidateIntentModel:
+    async def generate(self, context: IntentContext) -> JsonObject:
+        return {
+            "kind": "action",
+            "verb": "investigate",
+            "target": {"matched": True, "id": context.player_view.scene.id},
+            "check": {
+                "route": "default",
+                "proposed_skills": ["library-use", "stealth"],
+            },
+            "summary": context.player_input.utterance,
+        }
 
 
 @pytest.fixture
@@ -332,7 +351,7 @@ def test_action_submit_broadcasts_narration_to_room_only(sync_client: TestClient
                 "playerId": guest["playerId"],
                 "payload": {
                     "clientActionId": "action-broadcast-122",
-                    "utterance": "我看看旧书店",
+                    "utterance": "我看看托马斯",
                 },
             }
         )
@@ -347,7 +366,7 @@ def test_action_submit_broadcasts_narration_to_room_only(sync_client: TestClient
                 "playerId": room_a["playerId"],
                 "payload": {
                     "clientActionId": "action-broadcast-122",
-                    "utterance": "我看看旧书店",
+                    "utterance": "我看看托马斯",
                 },
             }
         )
@@ -394,6 +413,76 @@ def test_action_submit_broadcasts_narration_to_room_only(sync_client: TestClient
         and event["payload"]["text"] == narration["payload"]["text"]
     ]
     assert len(action_narrations) == 1
+
+
+def test_skill_check_waits_for_player_selection_and_roll(
+    sync_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    token = register_and_login(sync_client, "skill_check_host")
+    room = create_room(sync_client, token)
+    advance_to_building(sync_client, room)
+    complete_character(sync_client, room["roomId"], room["reconnectToken"])
+    start_game(sync_client, room, token)
+    current_application = ws_controller.turn_application
+    monkeypatch.setattr(
+        ws_controller,
+        "turn_application",
+        build_turn_application(
+            current_application.store,
+            current_application.engine,
+            intent_model=_WsCandidateIntentModel(),
+            narration_model=FakeNarrationModel(),
+        ),
+    )
+
+    with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
+        ws.send_json(
+            {
+                "type": "room.join",
+                "playerId": room["playerId"],
+                "payload": {"reconnectToken": room["reconnectToken"]},
+            }
+        )
+        assert ws.receive_json()["type"] == "session.bound"
+        ws.send_json(
+            {
+                "type": "action.submit",
+                "playerId": room["playerId"],
+                "payload": {
+                    "clientActionId": "ws-skill-check-146",
+                    "utterance": "尝试潜行查找资料",
+                },
+            }
+        )
+        request = ws.receive_json()
+        ws.send_json(
+            {
+                "type": "check.roll",
+                "playerId": room["playerId"],
+                "payload": {
+                    "clientActionId": "ws-skill-check-146",
+                    "skill": "stealth",
+                    "rollValue": 7,
+                },
+            }
+        )
+        result = ws.receive_json()
+        completed = ws.receive_json()
+        narration = ws.receive_json()
+
+    assert request["type"] == "check.request"
+    assert request["payload"]["clientActionId"] == "ws-skill-check-146"
+    assert [skill["id"] for skill in request["payload"]["skills"]] == [
+        "library-use",
+        "stealth",
+    ]
+    assert result["type"] == "check.result"
+    assert result["payload"]["skill"] == "stealth"
+    assert result["payload"]["rollValue"] == 7
+    assert completed["message_type"] == "turn.completed"
+    assert completed["correlation_id"] == "ws-skill-check-146"
+    assert narration["type"] == "narration.push"
 
 
 def test_action_submit_requires_client_action_id_without_closing_socket(

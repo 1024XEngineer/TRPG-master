@@ -6,9 +6,12 @@ IDE 能补全，写错类型（比如 ENABLE_DOCS 传了个不是 true/false 的
 就报错，而不是运行到一半才炸。
 """
 
+from __future__ import annotations
+
 from functools import lru_cache
 from typing import Literal
 
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -38,6 +41,36 @@ class Settings(BaseSettings):
     # 允许跨域请求的前端来源列表，交给 main.py 里的 CORSMiddleware 使用。
     # 本地默认放行 Vite 开发服务器的默认端口 9877。
     cors_origins: list[str] = ["http://localhost:9877"]
+
+    # 默认使用确定性的离线 Fake，便于本地启动和测试；显式切到 openai 或 qwen
+    # 后，Host/Narrator 才会调用远程模型。
+    host_model_provider: Literal["fake", "openai", "qwen"] = "fake"
+    openai_api_key: SecretStr | None = None
+    openai_base_url: str = Field(
+        default="https://api.openai.com/v1",
+        min_length=1,
+    )
+    openai_model: str = Field(default="gpt-5.6-luna", min_length=1)
+    openai_timeout_seconds: float = Field(default=30.0, gt=0, le=120)
+    qwen_api_key: SecretStr | None = None
+    qwen_base_url: str = Field(
+        default="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        min_length=1,
+    )
+    qwen_model: str = Field(default="qwen3.7-plus", min_length=1)
+    qwen_timeout_seconds: float = Field(default=30.0, gt=0, le=120)
+
+    @model_validator(mode="after")
+    def validate_host_model(self) -> Settings:
+        if self.host_model_provider == "openai" and (
+            self.openai_api_key is None or not self.openai_api_key.get_secret_value().strip()
+        ):
+            raise ValueError("HOST_MODEL_PROVIDER=openai 时必须设置 OPENAI_API_KEY")
+        if self.host_model_provider == "qwen" and (
+            self.qwen_api_key is None or not self.qwen_api_key.get_secret_value().strip()
+        ):
+            raise ValueError("HOST_MODEL_PROVIDER=qwen 时必须设置 QWEN_API_KEY")
+        return self
 
 
 @lru_cache

@@ -11,14 +11,19 @@ import string
 from copy import deepcopy
 from datetime import UTC, datetime
 
-from collaboration_framework.contracts import ModuleContent
-from collaboration_framework.engine import GameState
-from collaboration_framework.engine.models import ActorState
+from collaboration_framework.contracts import ContractError, ModuleContent
+from collaboration_framework.engine import (
+    ActorResources,
+    ActorState,
+    GameState,
+    require_runtime_capabilities,
+)
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import not_implemented
+from app.core.runtime_state import ruleset_labels, ruleset_skill_values
 from app.dto.game import GameRead, GameSystemRead, RulesetRead
 from app.dto.module import ModuleDetailRead
 from app.dto.replay import ReplayEventRead, RoomSummaryRead
@@ -149,6 +154,13 @@ async def _module_title(db: AsyncSession, scenario_id: str | None) -> str | None
     return scenario.title if scenario is not None else None
 
 
+async def _module_identity(db: AsyncSession, scenario_id: str | None) -> str | None:
+    if scenario_id is None:
+        return None
+    scenario = await db.get(Scenario, scenario_id)
+    return scenario.module_id if scenario is not None else None
+
+
 async def _to_room_preview(db: AsyncSession, room: Room) -> RoomPreview:
     result = await db.scalars(select(Player).where(Player.room_id == room.id))
     room_players = list(result)
@@ -158,7 +170,7 @@ async def _to_room_preview(db: AsyncSession, room: Room) -> RoomPreview:
         room_name=room.room_name,
         phase=room.phase,
         story_started=room.phase != "Lobby",
-        module_id=room.scenario_id,
+        module_id=await _module_identity(db, room.scenario_id),
         module_title=await _module_title(db, room.scenario_id),
         player_count=len(room_players),
         max_players=room.max_players,
@@ -307,20 +319,23 @@ async def select_module(
     if room.phase != "Lobby":
         raise RoomConflictError("只能在大厅阶段选择模组")
 
-    scenario = await db.get(Scenario, payload.module_id)
+    scenario = await db.scalar(select(Scenario).where(Scenario.module_id == payload.module_id))
     if scenario is None:
         raise ModuleNotFoundError("模组不存在")
     if scenario.status != "ready":
         raise RoomConflictError("只有 ready 状态的模组可以用于正式开局")
-    module_version = await db.get(ModuleVersion, (scenario.id, scenario.version))
+    module_version = await db.get(ModuleVersion, (scenario.module_id, scenario.version))
     if module_version is None:
         raise ModuleNotFoundError("模组当前推荐版本尚未发布")
+
+    system = await db.get(GameSystem, scenario.game_system_id)
+    if system is None or system.world_ref != module_version.world_ref:
+        raise RoomConflictError("模组版本引用的规则系统不存在或不匹配")
 
     room.scenario_id = scenario.id
     room.module_version = module_version.version
     room.system_id = scenario.game_system_id
-    system = await db.get(GameSystem, scenario.game_system_id)
-    room.game_id = system.game_id if system is not None else None
+    room.game_id = system.game_id
     room.attribute_gen_method = payload.attribute_gen_method
     await db.commit()
 
@@ -379,12 +394,18 @@ async def begin_game(db: AsyncSession, room_id: str, player_id: str) -> None:
     if await db.get(GameSession, room.id) is not None:
         raise RoomConflictError("该房间已经创建过 GameSession")
 
+    scenario = await db.get(Scenario, room.scenario_id)
+    if scenario is None:
+        raise ModuleNotSelectedError("房间引用的模组目录不存在")
     module_version = await db.get(
         ModuleVersion,
-        (room.scenario_id, room.module_version),
+        (scenario.module_id, room.module_version),
     )
     if module_version is None:
         raise ModuleNotSelectedError("房间固定的模组版本不存在")
+    system = await db.get(GameSystem, scenario.game_system_id)
+    if system is None or system.world_ref != module_version.world_ref:
+        raise RoomConflictError("房间固定的模组版本与规则系统不匹配")
     try:
         module_content = ModuleContent.model_validate(module_version.content_json)
     except ValueError as exc:
@@ -397,6 +418,10 @@ async def begin_game(db: AsyncSession, room_id: str, player_id: str) -> None:
         raise RoomConflictError("模组发布内容与版本记录不一致")
     if not module_content.scenes:
         raise RoomConflictError("模组没有可作为初始场景的 Scene")
+    try:
+        require_runtime_capabilities(module_content)
+    except ContractError as exc:
+        raise RoomConflictError("模组包含当前规则运行时尚未支持的能力") from exc
 
     room_players = list(
         await db.scalars(
@@ -422,7 +447,11 @@ async def begin_game(db: AsyncSession, room_id: str, player_id: str) -> None:
             name=character_by_player[room_player.id].name or room_player.nickname,
             source_character_id=character_by_player[room_player.id].id,
             source_character_version=character_by_player[room_player.id].version,
-            state=_character_runtime_state(character_by_player[room_player.id]),
+            state=_character_runtime_state(
+                character_by_player[room_player.id],
+                ruleset=system.ruleset,
+            ),
+            resources=_character_runtime_resources(character_by_player[room_player.id]),
         )
         for index, room_player in enumerate(room_players, start=1)
     }
@@ -465,8 +494,19 @@ async def begin_game(db: AsyncSession, room_id: str, player_id: str) -> None:
         raise
 
 
-def _character_runtime_state(character: Character) -> dict:
+def _character_runtime_state(
+    character: Character,
+    *,
+    ruleset: dict | None = None,
+) -> dict:
     """复制 Character 为与源卡解耦的局内 ActorState.state。"""
+    ruleset = ruleset or {}
+    attributes = deepcopy(character.attributes or {})
+    skills = ruleset_skill_values(
+        ruleset.get("skills"),
+        attributes=attributes,
+    )
+    skills.update(deepcopy(character.skills or {}))
     return {
         "age": character.age,
         "gender": character.gender,
@@ -474,13 +514,40 @@ def _character_runtime_state(character: Character) -> dict:
         "birthplace": character.birthplace,
         "generation_method": character.generation_method,
         "occupation": character.occupation,
-        "attributes": deepcopy(character.attributes or {}),
+        "attributes": attributes,
+        "attribute_labels": ruleset_labels(
+            ruleset.get("attributes"),
+            id_field="key",
+            name_field="label",
+        ),
         "derived_stats": deepcopy(character.derived_stats or {}),
-        "skills": deepcopy(character.skills or {}),
+        "skills": skills,
+        "skill_labels": ruleset_labels(
+            ruleset.get("skills"),
+            id_field="id",
+            name_field="name",
+        ),
         "equipment": list(character.equipment or []),
         "background": character.background,
         "notes": character.notes,
     }
+
+
+def _character_runtime_resources(character: Character) -> ActorResources:
+    """将局内可变资源从不可变的角色卡快照中分离出来。"""
+
+    derived = character.derived_stats or {}
+    attributes = character.attributes or {}
+    return ActorResources(
+        hp=_optional_int(derived.get("HP")),
+        san=_optional_int(derived.get("SAN")),
+        mp=_optional_int(derived.get("MP")),
+        luck=_optional_int(attributes.get("LUCK")),
+    )
+
+
+def _optional_int(value: object) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
 async def _load_game_state(db: AsyncSession, room_id: str) -> tuple[GameSession, GameState]:
@@ -710,19 +777,27 @@ async def list_modules(db: AsyncSession) -> list[ModuleRead]:
         .order_by(Scenario.title, Scenario.id)
     )
     return [
-        ModuleRead.model_validate(scenario).model_copy(update={"game_system_name": system_name})
+        ModuleRead.model_validate(scenario).model_copy(
+            update={
+                "id": scenario.module_id,
+                "game_system_name": system_name,
+            }
+        )
         for scenario, system_name in result.tuples()
     ]
 
 
 async def get_module_detail(db: AsyncSession, module_id: str) -> ModuleDetailRead | None:
     """GET /api/v1/modules/{moduleId} —— 模组详情。"""
-    scenario = await db.get(Scenario, module_id)
+    scenario = await db.scalar(select(Scenario).where(Scenario.module_id == module_id))
     if scenario is None:
         return None
     system = await db.get(GameSystem, scenario.game_system_id)
     return ModuleDetailRead.model_validate(scenario).model_copy(
-        update={"game_system_name": system.name if system is not None else None}
+        update={
+            "id": scenario.module_id,
+            "game_system_name": system.name if system is not None else None,
+        }
     )
 
 

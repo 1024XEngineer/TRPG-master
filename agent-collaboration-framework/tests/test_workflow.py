@@ -5,8 +5,6 @@ import json
 import unittest
 from pathlib import Path
 
-from pydantic import ValidationError
-
 from collaboration_framework.bootstrap import build_fake_application
 from collaboration_framework.contracts import (
     ActionResult,
@@ -30,6 +28,7 @@ from collaboration_framework.host.application import (
     PlayerViewProjector,
 )
 from collaboration_framework.schema_export import rendered_schemas
+from pydantic import ValidationError
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -118,7 +117,7 @@ class UnifiedWorkflowTests(unittest.TestCase):
         )
         recording = narration_model or RecordingNarrationModel()
         orchestrator = Orchestrator(
-            context_assembler=ContextAssembler(),
+            context_assembler=ContextAssembler(self.module.background),
             intent_parser=IntentParser(intent_model or FakeIntentModel()),
             action_executor=engine,
             player_view_projector=PlayerViewProjector(engine),
@@ -169,7 +168,7 @@ class UnifiedWorkflowTests(unittest.TestCase):
                 "check": {
                     "route": "module",
                     "checkpoint_id": "investigate_bookshelf",
-                    "proposed_skills": ["spot_hidden"],
+                    "proposed_skills": ["spot-hidden"],
                 },
                 "approach": "慢慢翻查书背",
                 "summary": "调查书架",
@@ -209,6 +208,7 @@ class UnifiedWorkflowTests(unittest.TestCase):
         self.assertEqual(output.action_result.event_refs, ("evt_0001",))
         self.assertEqual(output.player_view.revision, "1")
         self.assertIsNotNone(narrator.last_context)
+        self.assertEqual(narrator.last_context.background, self.module.background)
 
     def test_dialogue_also_goes_through_executor_once(self) -> None:
         orchestrator, engine, _ = self.application()
@@ -245,7 +245,7 @@ class UnifiedWorkflowTests(unittest.TestCase):
             "check": {
                 "route": "module",
                 "checkpoint_id": "smash_cabinet",
-                "proposed_skills": ["strength"],
+                "proposed_skills": ["STR"],
             },
             "approach": "用肩膀猛撞柜门",
             "summary": "强行撞开柜子",
@@ -270,7 +270,7 @@ class UnifiedWorkflowTests(unittest.TestCase):
             "check": {
                 "route": "module",
                 "checkpoint_id": "invented_checkpoint",
-                "proposed_skills": ["spot_hidden"],
+                "proposed_skills": ["spot-hidden"],
             },
             "summary": "调查书架",
         }
@@ -389,7 +389,7 @@ class UnifiedWorkflowTests(unittest.TestCase):
         app = build_fake_application(self.module, self.state)
         view = asyncio.run(app.orchestrator._player_view_projector.project(self.player_input))
         parser = IntentParser(FakeIntentModel())
-        assembler = ContextAssembler()
+        assembler = ContextAssembler(self.module.background)
         for case in json.loads(load_text("fixtures/demo-cases.json")):
             player_input = with_input(
                 self.player_input,

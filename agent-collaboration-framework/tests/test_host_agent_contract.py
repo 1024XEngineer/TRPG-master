@@ -5,7 +5,12 @@ import unittest
 
 from pydantic import TypeAdapter, ValidationError
 
-from collaboration_framework.contracts import PlayerInput, PlayerView
+from collaboration_framework.contracts import (
+    PlayerInput,
+    PlayerView,
+    SceneView,
+    SelfActorView,
+)
 from collaboration_framework.host.adapters.fakes import FakeHostAgent
 from collaboration_framework.host.ports import HostAgentPort
 from collaboration_framework.host.schemas import (
@@ -29,6 +34,23 @@ RAW_INTENT_CANDIDATE = {
     "summary": "不清楚的行动",
     "clarification_question": "你想做什么？",
 }
+
+
+def make_player_view() -> PlayerView:
+    return PlayerView(
+        room_id="room_001",
+        player_id="player_001",
+        actor_id="actor_001",
+        scene_id="library",
+        phase="playing",
+        revision="7",
+        self_actor=SelfActorView(id="actor_001", name="Investigator"),
+        scene=SceneView(
+            id="library",
+            name="Library",
+            description="A player-safe library.",
+        ),
+    )
 
 
 def make_usage(
@@ -94,14 +116,7 @@ class HostAgentSchemaTests(unittest.TestCase):
             client_action_id="action_001",
             utterance="检查书架",
         )
-        self.player_view = PlayerView(
-            room_id="room_001",
-            player_id="player_001",
-            actor_id="actor_001",
-            scene_id="library",
-            phase="playing",
-            revision="7",
-        )
+        self.player_view = make_player_view()
 
     def test_context_accepts_only_matching_trusted_scope(self) -> None:
         context = HostAgentContext(
@@ -264,13 +279,9 @@ class HostAgentSchemaTests(unittest.TestCase):
         ).to_json_dict()
 
         with self.assertRaises(ValidationError):
-            adapter.validate_python(
-                {**completed, "code": "HOST_AGENT_INTERNAL_ERROR"}
-            )
+            adapter.validate_python({**completed, "code": "HOST_AGENT_INTERNAL_ERROR"})
         with self.assertRaises(ValidationError):
-            adapter.validate_python(
-                {**failed, "raw_output": RAW_INTENT_CANDIDATE}
-            )
+            adapter.validate_python({**failed, "raw_output": RAW_INTENT_CANDIDATE})
 
     def test_terminal_usage_reason_must_match_terminal_semantics(self) -> None:
         with self.assertRaisesRegex(ValidationError, "必须为 completed"):
@@ -338,14 +349,7 @@ class FakeHostAgentTests(
                 client_action_id="action_001",
                 utterance="检查书架",
             ),
-            player_view=PlayerView(
-                room_id="room_001",
-                player_id="player_001",
-                actor_id="actor_001",
-                scene_id="library",
-                phase="playing",
-                revision="7",
-            ),
+            player_view=make_player_view(),
         )
 
     async def test_fake_emits_tool_progress_then_completed(self) -> None:

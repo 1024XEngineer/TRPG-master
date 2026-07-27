@@ -7,10 +7,12 @@ from collaboration_framework.host.schemas import IntentContext
 class FakeIntentModel:
     async def generate(self, context: IntentContext) -> JsonObject:
         text = context.player_input.utterance.lower()
+        visible_entities = context.player_view.scene.visible_entities
+        available_exits = context.player_view.scene.available_exits
         target = next(
             (
                 entity
-                for entity in context.player_view.visible_entities
+                for entity in (*visible_entities, *available_exits)
                 if any(
                     candidate and candidate.lower() in text
                     for candidate in (entity.id, entity.name, *entity.aliases)
@@ -18,6 +20,30 @@ class FakeIntentModel:
             ),
             None,
         )
+        if target is None and any(
+            word in text for word in ("前往", "进入", "走到", "抵达", "移动到", "去")
+        ):
+            destination_text = text
+            for word in ("前往", "进入", "走到", "抵达", "移动到", "去往", "去"):
+                destination_text = destination_text.replace(word, "")
+            destination_text = destination_text.strip(" ，。！？,.!?")
+            target = next(
+                (
+                    available_exit
+                    for available_exit in available_exits
+                    if destination_text
+                    and any(
+                        destination_text in candidate.lower()
+                        for candidate in (
+                            available_exit.id,
+                            available_exit.name,
+                            *available_exit.aliases,
+                        )
+                        if candidate
+                    )
+                ),
+                None,
+            )
         if target is None:
             return {
                 "kind": "unknown",
@@ -29,7 +55,13 @@ class FakeIntentModel:
                 "clarification_question": "你想对当前场景中的哪个目标做什么？",
             }
 
-        if any(word in text for word in ("聊", "问", "交谈", "说")):
+        exit_ids = {
+            available_exit.id
+            for available_exit in context.player_view.scene.available_exits
+        }
+        if target.id in exit_ids:
+            kind, verb = "action", "go"
+        elif any(word in text for word in ("聊", "问", "交谈", "说")):
             kind, verb = "dialogue", "talk"
         elif any(word in text for word in ("砸", "撞", "破坏")):
             kind, verb = "action", "smash"

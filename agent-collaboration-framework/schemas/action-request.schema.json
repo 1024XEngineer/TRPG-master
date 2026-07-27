@@ -93,6 +93,19 @@
           "default": null,
           "title": "Approach"
         },
+        "declarations": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Declarations",
+          "type": "array"
+        },
+        "initiated_by_target": {
+          "default": false,
+          "title": "Initiated By Target",
+          "type": "boolean"
+        },
         "summary": {
           "minLength": 1,
           "title": "Summary",
@@ -235,6 +248,20 @@
     },
     "intent": {
       "$ref": "#/$defs/Intent"
+    },
+    "roll_value": {
+      "anyOf": [
+        {
+          "maximum": 100,
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Roll Value"
     }
   },
   "required": [

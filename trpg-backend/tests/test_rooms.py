@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.seed import BUILTIN_SCENARIO_ID, BUILTIN_SYSTEM_ID
+from app.core.seed import BUILTIN_MODULE_ID, BUILTIN_SYSTEM_ID
 from app.models.content import Scenario
 from app.models.room import Player
 from tests.helpers import ROOMS_BASE, bearer, create_room, join_room, reconnect, register
@@ -272,6 +272,7 @@ async def test_module_catalog_filters_hidden_and_rejects_wip_selection(
         [
             Scenario(
                 id=wip_id,
+                module_id="test-wip-module",
                 game_system_id=BUILTIN_SYSTEM_ID,
                 title="开发中模组",
                 name_en="Work in Progress",
@@ -287,6 +288,7 @@ async def test_module_catalog_filters_hidden_and_rejects_wip_selection(
             ),
             Scenario(
                 id=hidden_id,
+                module_id="test-hidden-module",
                 game_system_id=BUILTIN_SYSTEM_ID,
                 title="隐藏模组",
                 version="1.0.0",
@@ -300,16 +302,16 @@ async def test_module_catalog_filters_hidden_and_rejects_wip_selection(
 
     catalog = (await client.get("/api/v1/modules")).json()["data"]
     ids = {module["id"] for module in catalog}
-    assert BUILTIN_SCENARIO_ID in ids
-    assert wip_id in ids
-    assert hidden_id not in ids
-    wip = next(module for module in catalog if module["id"] == wip_id)
+    assert BUILTIN_MODULE_ID in ids
+    assert "test-wip-module" in ids
+    assert "test-hidden-module" not in ids
+    wip = next(module for module in catalog if module["id"] == "test-wip-module")
     assert wip["gameSystemId"] == BUILTIN_SYSTEM_ID
     assert wip["status"] == "wip"
     assert wip["nameEn"] == "Work in Progress"
     assert wip["synopsis"] == "用于验证目录状态。"
 
-    detail = (await client.get(f"/api/v1/modules/{BUILTIN_SCENARIO_ID}")).json()["data"]
+    detail = (await client.get(f"/api/v1/modules/{BUILTIN_MODULE_ID}")).json()["data"]
     assert detail["status"] == "ready"
     assert detail["storyPages"][0]["title"]
     assert detail["storyPages"][0]["content"]
@@ -317,7 +319,7 @@ async def test_module_catalog_filters_hidden_and_rejects_wip_selection(
     room = await create_room(client)
     rejected = await client.post(
         f"{ROOMS_BASE}/{room['roomId']}/module",
-        json={"moduleId": wip_id, "attributeGenMethod": "point_buy"},
+        json={"moduleId": "test-wip-module", "attributeGenMethod": "point_buy"},
         headers=reconnect(room["reconnectToken"]),
     )
     assert rejected.status_code == 409

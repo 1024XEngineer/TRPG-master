@@ -11,7 +11,7 @@
 
 当前仓库是一个已经完成前后端联调的 **MS1 可运行版本**，包含 React 前端、TypeScript SDK 和 FastAPI 后端。用户可以完成注册登录、创建或加入房间、选择模组、创建角色、进入大厅、开始游戏和房间内互动等基础流程。
 
-当前版本仍属于阶段性实现：AI 叙事、复盘摘要和部分游戏数据使用占位内容，账号、房间与角色等核心业务数据暂存在后端内存中。后端重启后，这些数据会被清空。
+当前版本仍属于阶段性实现：主持人意图理解与叙事支持离线 Fake、OpenAI 和阿里云百炼千问三种模式，默认使用不访问网络的 Fake；复盘摘要和部分游戏数据仍使用占位内容。账号、房间与角色等核心业务数据暂存在后端内存中，后端重启后会被清空。
 
 ## 当前功能
 
@@ -22,12 +22,13 @@
 | 房间 | 房主选择模组、玩家列表、准备状态、房主开始与结束游戏 |
 | 角色 | CoC 风格建卡流程、属性与技能配置、装备和背景信息、完成建卡 |
 | 实时通信 | WebSocket 会话绑定、准备、开始游戏、提交行动、房间叙事广播 |
+| AI 主持 | 玩家安全上下文、结构化意图解析、确定性规则执行、结果叙事；支持 OpenAI 与千问 3.7 Plus |
 | 游戏界面 | 对话区、角色卡、技能、地图、笔记和 D100/D20/D6 本地投骰交互 |
 | API SDK | 封装认证、房间、角色和房间 WebSocket；与后端 DTO 对应的类型由 `npm run codegen` 生成 |
 
 ### 当前限制
 
-- AI 尚未接入真实大模型。开始游戏和提交行动后返回的是后端固定占位叙事。
+- 默认 `HOST_MODEL_PROVIDER=fake`，不会访问真实大模型；远程模型调用失败、返回无效 JSON 或越过玩家可见边界时，也会自动回退到确定性的离线模型。
 - 账号、会话、房间、玩家和角色使用内存存储，后端重启后会丢失。
 - SQLite 与异步 SQLAlchemy 基础设施已经接入（用于建表），但核心业务（账号、房间、角色）仍是内存存储，尚未接入实际的数据库读写路径。
 - 后端当前只提供一个内置模组「追书人」。前端展示的其他规则系统和场景中，部分仍是概念入口或静态数据。
@@ -46,6 +47,8 @@ trpg-sdk (REST + WebSocket)
 trpg-backend (FastAPI)
         ├── /api/v1/*       REST API
         ├── /ws/{roomId}    房间实时通道
+        ├── Host Orchestrator 意图理解 → 规则执行 → 安全叙事
+        ├── 模型适配器       Fake / OpenAI Responses / 千问 JSON Mode
         ├── 内存业务存储     账号、房间、角色、会话
         └── SQLite          SQLAlchemy 基础设施（已接入，业务尚未接数据库）
 ```
@@ -70,6 +73,7 @@ WebSocket 使用独立事件信封：客户端发送 `{ "type", "playerId", "pay
 | SDK | TypeScript、Rollup 4 |
 | 后端 | Python 3.12+、FastAPI、Pydantic 2、SQLAlchemy Async、Uvicorn |
 | 实时通信 | WebSocket |
+| AI 主持 | Host Orchestrator、OpenAI Responses API、阿里云百炼千问 JSON Mode |
 | 数据与安全 | SQLite、PostgreSQL 异步驱动、bcrypt |
 | 工程质量 | pytest、ruff、ty、GitHub Actions |
 
@@ -129,6 +133,19 @@ uv run uvicorn app.main:app --reload
 > 里只有空的历史表、没有真实数据，**直接删掉重新迁移即可**（`rm trpg-backend/app.db`
 > 再 `alembic upgrade head`）。
 
+首次启动后，应用 Seed 只会创建 COC7 规则系统和 `wip` 状态的追书人目录，不会
+内嵌简化版模组内容。在另一个终端执行固定的本地加载命令，将仓库中的追书人
+ModuleContent 经过 Validation 后原子写入数据库，并把目录标记为 `ready`：
+
+```bash
+cd trpg-backend
+uv run python scripts/load_paper_chase.py
+```
+
+该命令只读取
+`agent-collaboration-framework/docs/module-parser/examples/module-content-validation/追书人/module-content-draft.json`。
+重复执行相同内容会返回 `unchanged`；同一版本已有不同内容时会拒绝覆盖。
+
 后端默认地址：<http://127.0.0.1:8000>
 
 - 健康检查：<http://127.0.0.1:8000/api/v1/health>
@@ -162,6 +179,76 @@ npm run dev
 | `ENABLE_DOCS` | `true` | 是否开放 `/docs`、`/redoc` 和 `/openapi.json` |
 | `LOG_LEVEL` | `INFO` | 后端日志级别 |
 | `CORS_ORIGINS` | `["http://localhost:9877"]` | 允许跨域访问的前端来源列表 |
+| `HOST_MODEL_PROVIDER` | `fake` | 主持模型：`fake`、`openai` 或 `qwen` |
+| `OPENAI_API_KEY` | 空 | `openai` 提供商的 API 密钥 |
+| `OPENAI_BASE_URL` | `https://api.openai.com/v1` | OpenAI Responses API 根地址 |
+| `OPENAI_MODEL` | `gpt-5.6-luna` | OpenAI 模型名称 |
+| `OPENAI_TIMEOUT_SECONDS` | `30` | OpenAI 请求超时秒数 |
+| `QWEN_API_KEY` | 空 | 阿里云百炼 API 密钥 |
+| `QWEN_BASE_URL` | `https://dashscope.aliyuncs.com/compatible-mode/v1` | 千问 OpenAI 兼容接口根地址 |
+| `QWEN_MODEL` | `qwen3.7-plus` | 千问模型名称 |
+| `QWEN_TIMEOUT_SECONDS` | `30` | 千问请求超时秒数 |
+
+### 主持模型配置
+
+`HOST_MODEL_PROVIDER` 决定意图理解和结果叙事使用的模型路径：
+
+| 值 | 请求方式 | 适用场景 |
+| --- | --- | --- |
+| `fake` | 不发送网络请求 | 默认值；本地开发、自动化测试和无密钥运行 |
+| `openai` | OpenAI Responses API + 严格 JSON Schema | 使用原生支持 `text.format=json_schema` 的模型 |
+| `qwen` | 千问 Chat Completions JSON Mode + 本地 Pydantic 校验 | 阿里云百炼千问 3.7 Plus |
+
+无论使用哪种远程模型，模型只负责提出结构化意图或叙事候选；目标、场景、技能和事实引用仍会在应用边界重新校验，最终状态只由规则引擎修改。
+
+#### 使用千问 3.7 Plus
+
+1. 在[阿里云百炼控制台](https://bailian.console.aliyun.com/)创建 API Key，并取得业务空间的 `WorkspaceId`。
+2. 复制本地配置文件：
+
+   ```bash
+   cd trpg-backend
+   cp .env.example .env
+   ```
+
+   PowerShell 可使用：
+
+   ```powershell
+   Copy-Item .env.example .env
+   ```
+
+3. 只在本地 `.env` 中填写以下配置：
+
+   ```dotenv
+   HOST_MODEL_PROVIDER=qwen
+   QWEN_API_KEY=你的百炼_API_Key
+   QWEN_BASE_URL=https://你的WorkspaceId.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
+   QWEN_MODEL=qwen3.7-plus
+   QWEN_TIMEOUT_SECONDS=30
+   ```
+
+   新加坡地域将地址替换为：
+
+   ```dotenv
+   QWEN_BASE_URL=https://你的WorkspaceId.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1
+   ```
+
+   其他地域及最新端点以[阿里云百炼 OpenAI 兼容接口文档](https://help.aliyun.com/zh/model-studio/qwen-api-via-openai-responses)为准。`.env` 已被 Git 忽略；不要把真实密钥写入 `.env.example`、README 或提交记录。
+
+4. 重启后端使配置生效：
+
+   ```bash
+   uv run uvicorn app.main:app --reload
+   ```
+
+健康检查只能确认后端存活，不会调用模型。请进入房间提交一次自然语言行动进行验证。如果后端日志出现下面任一信息，表示远程请求或结构化校验失败，当前回合已经回退到离线模型：
+
+```text
+Intent model failed; using deterministic fallback (...)
+Narration model failed; using deterministic fallback (...)
+```
+
+离线回退要求玩家文本中包含当前可见目标的名称或别名；缺少明确目标时，界面可能重复显示“你想对当前场景中的哪个目标做什么？”。这通常不是前端缓存，而是模型请求失败后的安全回退。
 
 ### 前端 `trpg-frontend/.env`
 

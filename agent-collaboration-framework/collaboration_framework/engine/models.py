@@ -14,12 +14,32 @@ from collaboration_framework.contracts import (
 )
 
 
+class ActorResources(ContractModel):
+    """Mutable in-session resources, detached from the source character sheet."""
+
+    hp: int | None = None
+    san: int | None = Field(default=None, ge=0)
+    mp: int | None = Field(default=None, ge=0)
+    luck: int | None = Field(default=None, ge=0)
+    mythos: int = Field(default=0, ge=0)
+
+
 class ActorState(ContractModel):
     player_id: str = Field(min_length=1)
     name: str = Field(min_length=1)
     source_character_id: str = Field(min_length=1)
     source_character_version: int = Field(ge=1)
     state: dict[str, JsonValue] = Field(default_factory=dict)
+    resources: ActorResources = Field(default_factory=ActorResources)
+    conditions: tuple[str, ...] = ()
+
+
+class ClockState(ContractModel):
+    """Small deterministic clock used by module expressions and time hooks."""
+
+    elapsed_minutes: int = Field(default=0, ge=0)
+    time_of_day: Literal["day", "night"] = "day"
+    turn: int = Field(default=0, ge=0)
 
 
 class GameState(ContractModel):
@@ -32,6 +52,9 @@ class GameState(ContractModel):
     event_sequence: int = Field(default=0, ge=0)
     actors: dict[str, ActorState]
     entities: dict[str, dict[str, JsonValue]]
+    clock: ClockState = Field(default_factory=ClockState)
+    discovered_facts: tuple[str, ...] = ()
+    actor_discovered_facts: dict[str, tuple[str, ...]] = Field(default_factory=dict)
 
 
 class StateChange(ContractModel):

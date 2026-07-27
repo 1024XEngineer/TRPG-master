@@ -10,6 +10,7 @@ from collaboration_framework.contracts import (
     ActionRequest,
     ContractError,
     Intent,
+    JsonObject,
     MatchedTarget,
     ModuleCheck,
     PlayerInput,
@@ -21,12 +22,15 @@ from collaboration_framework.engine import (
     RuleEngineService,
     RuleKernel,
 )
+from collaboration_framework.host.adapters.fakes import FakeNarrationModel
+from collaboration_framework.host.schemas import IntentContext
 from httpx import AsyncClient
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapters import SqlAlchemyEngineStore
 from app.core.seed import (
+    BUILTIN_MODULE_ID,
     BUILTIN_MODULE_VERSION,
     BUILTIN_SCENARIO_ID,
     BUILTIN_SYSTEM_ID,
@@ -60,6 +64,23 @@ _CHARACTER_PAYLOAD = {
     "background": "",
     "notes": "",
 }
+
+
+class _CandidateIntentModel:
+    async def generate(self, context: IntentContext) -> JsonObject:
+        return {
+            "kind": "action",
+            "verb": "investigate",
+            "target": {
+                "matched": True,
+                "id": context.player_view.scene.id,
+            },
+            "check": {
+                "route": "default",
+                "proposed_skills": ["spot-hidden", "stealth"],
+            },
+            "summary": context.player_input.utterance,
+        }
 
 
 def _uuid(prefix: int, value: int) -> str:
@@ -129,6 +150,7 @@ async def _start_room(
     *,
     room_number: int = 1,
     player_count: int = 1,
+    prepare_checkpoint: bool = True,
 ) -> tuple[Room, list[Player], list[Character]]:
     room, players, characters = await _create_building_room(
         db,
@@ -136,6 +158,15 @@ async def _start_room(
         player_count=player_count,
     )
     await room_service.begin_game(db, room.id, players[0].id)
+    if prepare_checkpoint:
+        game_session = await db.get(GameSession, room.id)
+        assert game_session is not None
+        state = GameState.model_validate(game_session.state_json)
+        game_session.state_json = state.model_copy(
+            update={"scene_id": "conversation"},
+            deep=True,
+        ).to_json_dict()
+        await db.commit()
     return room, players, characters
 
 
@@ -154,13 +185,13 @@ def _checkpoint_request(
         source_view_revision=revision,
         intent=Intent(
             kind="action",
-            verb="search",
-            target=MatchedTarget(id="location-old-bookshop"),
+            verb="follow",
+            target=MatchedTarget(id="douglas"),
             check=ModuleCheck(
-                checkpoint_id="checkpoint-search-ledger",
-                proposed_skills=("spot-hidden",),
+                checkpoint_id="follow_douglas_underground",
+                proposed_skills=(),
             ),
-            summary="搜索旧书店账本",
+            summary="跟随道格拉斯进入地下",
         ),
     )
 
@@ -180,6 +211,7 @@ def test_application_composes_sqlalchemy_engine_store() -> None:
 
     assert isinstance(engine_store, SqlAlchemyEngineStore)
     assert rule_engine_service._store is engine_store
+    assert rule_engine_service._kernel._allow_legacy_missing_skill is False
 
 
 async def test_turn_application_resolves_actor_and_replays_one_execution(
@@ -196,13 +228,13 @@ async def test_turn_application_resolves_actor_and_replays_one_execution(
         room_id=room.id,
         player_id=players[0].id,
         client_action_id="turn-application-122",
-        utterance="我看看旧书店",
+        utterance="我看看道格拉斯",
     )
     replayed = await application.handle(
         room_id=room.id,
         player_id=players[0].id,
         client_action_id="turn-application-122",
-        utterance="我看看旧书店",
+        utterance="我看看道格拉斯",
     )
 
     _, action_count = await _counts(db_session, room.id)
@@ -214,6 +246,53 @@ async def test_turn_application_resolves_actor_and_replays_one_execution(
     assert action_count == 1
 
 
+async def test_turn_application_waits_for_selected_skill_and_submitted_roll(
+    db_session: AsyncSession,
+    engine_store_factory: Callable[..., SqlAlchemyEngineStore],
+) -> None:
+    from app.core.turn import build_turn_application
+
+    room, players, _ = await _start_room(
+        db_session,
+        room_number=2,
+        prepare_checkpoint=False,
+    )
+    store = engine_store_factory()
+    application = build_turn_application(
+        store,
+        RuleEngineService(store),
+        intent_model=_CandidateIntentModel(),
+        narration_model=FakeNarrationModel(),
+    )
+
+    prepared = await application.prepare(
+        room_id=room.id,
+        player_id=players[0].id,
+        client_action_id="selected-skill-roll-146",
+        utterance="尝试潜行观察周围",
+    )
+
+    assert [candidate.id for candidate in prepared.candidates] == [
+        "spot-hidden",
+        "stealth",
+    ]
+    assert await _counts(db_session, room.id) == (0, 0)
+
+    output = await application.complete(
+        prepared,
+        selected_skill="stealth",
+        roll_value=7,
+    )
+
+    check = output.action_result.check_result
+    assert check is not None
+    assert check.skill_id == "stealth"
+    assert check.roll_value == 7
+    assert check.target_value == 20
+    assert check.passed
+    assert await _counts(db_session, room.id) == (0, 1)
+
+
 async def test_select_module_pins_recommended_published_version(
     client: AsyncClient,
     db_session: AsyncSession,
@@ -222,7 +301,7 @@ async def test_select_module_pins_recommended_published_version(
     response = await client.post(
         f"/api/v1/rooms/{room['roomId']}/module",
         json={
-            "moduleId": BUILTIN_SCENARIO_ID,
+            "moduleId": BUILTIN_MODULE_ID,
             "attributeGenMethod": "point_buy",
         },
         headers=reconnect(room["reconnectToken"]),
@@ -238,7 +317,11 @@ async def test_select_module_pins_recommended_published_version(
 async def test_begin_game_creates_stable_actor_snapshots(
     db_session: AsyncSession,
 ) -> None:
-    room, players, characters = await _start_room(db_session, player_count=2)
+    room, players, characters = await _start_room(
+        db_session,
+        player_count=2,
+        prepare_checkpoint=False,
+    )
 
     game_session = await db_session.get(GameSession, room.id)
     assert game_session is not None
@@ -247,10 +330,10 @@ async def test_begin_game_creates_stable_actor_snapshots(
 
     assert room.phase == "InGame"
     assert room.started_at is not None
-    assert game_session.module_id == BUILTIN_SCENARIO_ID
+    assert game_session.module_id == BUILTIN_MODULE_ID
     assert game_session.module_version == BUILTIN_MODULE_VERSION
     assert game_session.state_version == state.event_sequence == 0
-    assert state.scene_id == "scene-old-bookshop"
+    assert state.scene_id == "client_briefing"
     assert state.phase == "playing"
     assert list(state.actors) == ["actor_1", "actor_2"]
     assert state.actors["actor_1"].player_id == players[0].id
@@ -259,7 +342,15 @@ async def test_begin_game_creates_stable_actor_snapshots(
     assert state.actors["actor_1"].source_character_version == characters[0].version
     assert "actor_1" not in {character.id for character in characters}
     assert state.actors["actor_1"].state["attributes"] == {"HP_SOURCE": 1}
-    assert state.entities["location-old-bookshop"]["ledger_found"] is False
+    actor_skills = state.actors["actor_1"].state["skills"]
+    assert isinstance(actor_skills, dict)
+    assert actor_skills["library-use"] == 20
+    assert actor_skills["credit-rating"] == 0
+    assert actor_skills["spot-hidden"] == 51
+    assert state.actors["actor_1"].resources.hp == 11
+    assert state.actors["actor_1"].resources.san is None
+    assert state.entities["thomas"]["case_open"] is True
+    assert state.entities["case_tracker"]["investigator_disappeared"] is False
 
     with pytest.raises(room_service.RoomConflictError):
         await room_service.begin_game(db_session, room.id, players[0].id)
@@ -269,6 +360,70 @@ async def test_begin_game_creates_stable_actor_snapshots(
         )
         == 1
     )
+
+
+async def test_load_runtime_backfills_ruleset_skills_for_legacy_actor(
+    db_session: AsyncSession,
+    engine_store_factory: Callable[..., SqlAlchemyEngineStore],
+) -> None:
+    room, players, _ = await _start_room(
+        db_session,
+        prepare_checkpoint=False,
+    )
+    room_id = room.id
+    game_session = await db_session.get(GameSession, room_id)
+    assert game_session is not None
+    state = GameState.model_validate(game_session.state_json)
+    actor = state.actors["actor_1"]
+    legacy_actor_state = dict(actor.state)
+    legacy_actor_state["skills"] = {
+        "library-use": 44,
+        "spot-hidden": 51,
+        "persuade": 35,
+        "credit-rating": 10,
+    }
+    legacy_actor_state.pop("skill_labels", None)
+    legacy_state = state.model_copy(
+        update={
+            "actors": {
+                **state.actors,
+                "actor_1": actor.model_copy(update={"state": legacy_actor_state}),
+            }
+        }
+    )
+    game_session.state_json = legacy_state.to_json_dict()
+    await db_session.commit()
+
+    store = engine_store_factory()
+    async with store.transaction(room_id) as transaction:
+        runtime = await transaction.load_runtime()
+
+    actor_state = runtime.game_state.actors["actor_1"].state
+    assert len(actor_state["skills"]) > 4
+    assert actor_state["skills"]["stealth"] == 20
+    assert actor_state["skills"]["library-use"] == 44
+    assert actor_state["skill_labels"]["stealth"] == "潜行"
+    assert runtime.revision == "0"
+
+    projection = await RuleEngineService(store).read(
+        PlayerInput(
+            room_id=room_id,
+            player_id=players[0].id,
+            actor_id="actor_1",
+            client_action_id="legacy-skill-projection-146",
+            utterance="尝试潜行",
+        )
+    )
+    stealth = next(skill for skill in projection.self_actor.skills if skill.id == "stealth")
+    assert stealth.value == 20
+    assert stealth.name == "潜行"
+
+    db_session.expire_all()
+    persisted = await db_session.get(GameSession, room_id)
+    assert persisted is not None
+    persisted_state = GameState.model_validate(persisted.state_json)
+    assert persisted.state_version == 0
+    assert persisted_state.actors["actor_1"].state["skills"]["stealth"] == 20
 
 
 async def test_character_reads_remain_available_and_writes_conflict_after_game_start(
@@ -347,7 +502,7 @@ async def test_suspend_blocks_new_actions_and_resume_allows_rule_ending(
     assert completed_session is not None
     completed_state = GameState.model_validate(completed_session.state_json)
     assert completed_state.phase == "ended"
-    assert completed_state.ending_id == "ending-ledger-found"
+    assert completed_state.ending_id == "ending_followed_underground"
     assert completed_room.phase == "Completed"
     assert completed_room.ended_at is not None
 
@@ -418,13 +573,13 @@ async def test_loaded_runtime_is_deep_copy_isolated(
 
     async with store.transaction(room.id) as transaction:
         runtime = await transaction.load_runtime()
-        runtime.game_state.entities["location-old-bookshop"]["ledger_found"] = True
+        runtime.game_state.entities["case_tracker"]["investigator_disappeared"] = True
         runtime.module_content.entities[0].direct_responses["invented"] = "泄漏"
 
     async with store.transaction(room.id) as transaction:
         reloaded = await transaction.load_runtime()
 
-    assert reloaded.game_state.entities["location-old-bookshop"]["ledger_found"] is False
+    assert reloaded.game_state.entities["case_tracker"]["investigator_disappeared"] is False
     assert "invented" not in reloaded.module_content.entities[0].direct_responses
 
 

@@ -31,7 +31,7 @@ async def search_visible_entities(
     query = normalize_search_text(arguments.query)
     ranked: list[tuple[int, str, VisibleEntitySummary]] = []
 
-    for entity in context.player_view.visible_entities:
+    for entity in context.player_view.scene.visible_entities:
         if arguments.kind is not None and entity.kind != arguments.kind:
             continue
 
@@ -39,7 +39,7 @@ async def search_visible_entities(
         normalized_aliases = tuple(
             normalize_search_text(alias) for alias in entity.aliases
         )
-        normalized_content = normalize_search_text(entity.content)
+        normalized_content = normalize_search_text(entity.description)
 
         if query in normalized_name:
             rank = 0
@@ -75,7 +75,7 @@ async def get_visible_entity(
     entity = next(
         (
             visible_entity
-            for visible_entity in context.player_view.visible_entities
+            for visible_entity in context.player_view.scene.visible_entities
             if visible_entity.id == arguments.entity_id
         ),
         None,
@@ -98,7 +98,8 @@ async def get_visible_entity(
         kind=entity.kind,
         name=entity.name,
         aliases=entity.aliases,
-        content=entity.content,
+        description=entity.description,
+        observable_state=entity.observable_state,
         checkpoint_options=checkpoint_options,
     )
 

@@ -94,6 +94,7 @@ _MODELS: list[type[BaseModel]] = [
     ws.TurnBeginPayload,
     ws.GameEndedPayload,
     ws.ViewPrivatePayload,
+    ws.CheckSkillOptionPayload,
     ws.CheckRequestPayload,
     ws.CheckResultPayload,
     ws.SanCheckRequestPayload,

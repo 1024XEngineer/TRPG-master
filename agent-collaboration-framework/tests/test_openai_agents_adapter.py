@@ -27,7 +27,13 @@ from collaboration_framework.bootstrap.host_agent import (
     HostAgentConfigurationError,
     build_qwen_host_agent,
 )
-from collaboration_framework.contracts import PlayerInput, PlayerView, VisibleEntity
+from collaboration_framework.contracts import (
+    PlayerInput,
+    PlayerView,
+    SceneView,
+    SelfActorView,
+    VisibleEntity,
+)
 from collaboration_framework.host.adapters.openai_agents import (
     QwenHostAgentAdapter,
     QwenHostAgentConfig,
@@ -81,13 +87,22 @@ def make_context(*, utterance: str = "检查红色书架") -> HostAgentContext:
             scene_id="library",
             phase="playing",
             revision="7",
-            visible_entities=(
-                VisibleEntity(
-                    id="entity_dynamic_7f3a",
-                    kind="object",
-                    name="红色书架",
-                    aliases=("书架",),
-                    content="一个玩家可见的红色木书架。",
+            self_actor=SelfActorView(
+                id="actor_001",
+                name="调查员",
+            ),
+            scene=SceneView(
+                id="library",
+                name="图书馆",
+                description="一间玩家当前可见的图书馆。",
+                visible_entities=(
+                    VisibleEntity(
+                        id="entity_dynamic_7f3a",
+                        kind="object",
+                        name="红色书架",
+                        aliases=("书架",),
+                        description="一个玩家可见的红色木书架。",
+                    ),
                 ),
             ),
         ),

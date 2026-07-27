@@ -11,6 +11,8 @@ from collaboration_framework.contracts import (
     CheckpointOption,
     PlayerInput,
     PlayerView,
+    SceneView,
+    SelfActorView,
     VisibleEntity,
 )
 from collaboration_framework.host.schemas import (
@@ -41,13 +43,22 @@ def make_context(utterance: str) -> HostAgentContext:
             scene_id="smoke_library",
             phase="playing",
             revision="1",
-            visible_entities=(
-                VisibleEntity(
-                    id="smoke_bookshelf_42",
-                    kind="object",
-                    name="红色书架",
-                    aliases=("书架",),
-                    content="一个玩家当前可见的红色木书架。",
+            self_actor=SelfActorView(
+                id="smoke_actor",
+                name="冒烟测试调查员",
+            ),
+            scene=SceneView(
+                id="smoke_library",
+                name="冒烟测试图书馆",
+                description="一个只包含玩家安全信息的测试场景。",
+                visible_entities=(
+                    VisibleEntity(
+                        id="smoke_bookshelf_42",
+                        kind="object",
+                        name="红色书架",
+                        aliases=("书架",),
+                        description="一个玩家当前可见的红色木书架。",
+                    ),
                 ),
             ),
             checkpoint_options=(

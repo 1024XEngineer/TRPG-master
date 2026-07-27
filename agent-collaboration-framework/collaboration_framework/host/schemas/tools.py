@@ -6,7 +6,11 @@ from typing import Literal, TypeAlias
 
 from pydantic import Field
 
-from collaboration_framework.contracts import CheckpointOption, ContractModel
+from collaboration_framework.contracts import (
+    CheckpointOption,
+    ContractModel,
+    ObservableStateView,
+)
 
 
 ToolErrorCode: TypeAlias = Literal[
@@ -44,7 +48,8 @@ class GetVisibleEntityResult(ContractModel):
     kind: Literal["npc", "object", "location"]
     name: str = Field(min_length=1)
     aliases: tuple[str, ...] = ()
-    content: str
+    description: str
+    observable_state: tuple[ObservableStateView, ...] = ()
     checkpoint_options: tuple[CheckpointOption, ...] = ()
 
 

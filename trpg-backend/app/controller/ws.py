@@ -737,8 +737,8 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 output,
                             )
                         except Exception as exc:
-                            code, _, _ = _map_turn_error(exc)
-                            if code == "NARRATOR_FAILED":
+                            code, _, retryable = _map_turn_error(exc)
+                            if code == "NARRATOR_FAILED" or not retryable:
                                 pending_turn = None
                             logger.warning(
                                 "ws_check_failed",

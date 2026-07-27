@@ -26,6 +26,32 @@ class _WsCandidateIntentModel:
         }
 
 
+class _WsAttackThenPlainIntentModel:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def generate(self, context: IntentContext) -> JsonObject:
+        self.calls += 1
+        if self.calls == 1:
+            return {
+                "kind": "action",
+                "verb": "attack",
+                "target": {"matched": True, "id": "thomas"},
+                "check": {
+                    "route": "default",
+                    "proposed_skills": ["fighting-brawl"],
+                },
+                "summary": context.player_input.utterance,
+            }
+        return {
+            "kind": "action",
+            "verb": "talk",
+            "target": {"matched": True, "id": "thomas"},
+            "check": {"route": "none"},
+            "summary": context.player_input.utterance,
+        }
+
+
 @pytest.fixture
 def sync_client() -> TestClient:
     # 用同一个 app 实例的同步 TestClient——HTTP 部分照常发请求准备房间/角色
@@ -536,6 +562,7 @@ def test_skill_check_waits_for_player_selection_and_roll(
     assert completed["correlation_id"] == "ws-skill-check-146"
     assert narration["type"] == "narration.push"
     assert [event["type"] for event in prepare_events if "type" in event] == [
+        "action.broadcast",
         "turn.started",
         "turn.phase_changed",
         "turn.phase_changed",
@@ -546,6 +573,100 @@ def test_skill_check_waits_for_player_selection_and_roll(
         "turn.phase_changed",
         "check.result",
     ]
+
+
+def test_terminal_attack_check_failure_releases_pending_turn(
+    sync_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    token = register_and_login(sync_client, "terminal_attack_host")
+    room = create_room(sync_client, token)
+    advance_to_building(sync_client, room)
+    complete_character(sync_client, room["roomId"], room["reconnectToken"])
+    start_game(sync_client, room, token)
+    current_application = ws_controller.turn_application
+    monkeypatch.setattr(
+        ws_controller,
+        "turn_application",
+        build_turn_application(
+            current_application.store,
+            current_application.engine,
+            intent_model=_WsAttackThenPlainIntentModel(),
+            narration_model=FakeNarrationModel(),
+        ),
+    )
+
+    with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
+        ws.send_json(
+            {
+                "type": "room.join",
+                "playerId": room["playerId"],
+                "payload": {"reconnectToken": room["reconnectToken"]},
+            }
+        )
+        assert ws.receive_json()["type"] == "session.bound"
+        assert ws.receive_json()["type"] == "view.updated"
+
+        ws.send_json(
+            {
+                "type": "action.submit",
+                "playerId": room["playerId"],
+                "payload": {
+                    "clientActionId": "attack-thomas-153",
+                    "utterance": "我想打一顿托马斯",
+                },
+            }
+        )
+        request, _ = receive_until(
+            ws,
+            lambda message: message.get("type") == "check.request",
+        )
+        assert request["payload"]["clientActionId"] == "attack-thomas-153"
+
+        ws.send_json(
+            {
+                "type": "check.roll",
+                "playerId": room["playerId"],
+                "payload": {
+                    "clientActionId": "attack-thomas-153",
+                    "skill": "fighting-brawl",
+                    "rollValue": 1,
+                },
+            }
+        )
+        check_result, _ = receive_until(
+            ws,
+            lambda message: message.get("type") == "check.result",
+        )
+        assert check_result["payload"]["clientActionId"] == "attack-thomas-153"
+        completed, _ = receive_until(
+            ws,
+            lambda message: message.get("message_type") == "turn.completed",
+        )
+        assert completed["correlation_id"] == "attack-thomas-153"
+        blocked_narration, _ = receive_until(
+            ws,
+            lambda message: message.get("type") == "narration.push",
+        )
+        assert "战斗数据" in blocked_narration["payload"]["text"]
+        assert "契约校验" not in blocked_narration["payload"]["text"]
+
+        ws.send_json(
+            {
+                "type": "action.submit",
+                "playerId": room["playerId"],
+                "payload": {
+                    "clientActionId": "after-attack-153",
+                    "utterance": "我继续和托马斯交谈",
+                },
+            }
+        )
+        next_turn, _ = receive_until(
+            ws,
+            lambda message: message.get("message_type") == "turn.completed",
+        )
+
+    assert next_turn["correlation_id"] == "after-attack-153"
 
 
 def test_action_submit_requires_client_action_id_without_closing_socket(

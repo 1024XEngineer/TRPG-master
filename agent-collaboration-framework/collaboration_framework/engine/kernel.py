@@ -299,15 +299,20 @@ class _Execution:
                 )
             if attack_plan == "override":
                 attack_outcome: ActionOutcome = "success"
+                attack_resolution: ActionResolution = "direct"
             else:
-                self._resolve_attack(entity)
+                attack_resolution = self._resolve_attack(entity)
                 attack_outcome = (
-                    "success"
-                    if self.check_result and self.check_result.passed
-                    else "failure"
+                    "not_applicable"
+                    if attack_resolution == "blocked"
+                    else (
+                        "success"
+                        if self.check_result and self.check_result.passed
+                        else "failure"
+                    )
                 )
             return self._complete_turn(
-                resolution="direct",
+                resolution=attack_resolution,
                 outcome=attack_outcome,
             )
 
@@ -522,10 +527,7 @@ class _Execution:
             value = skills.get(skill_id)
         return value if isinstance(value, int) and not isinstance(value, bool) else None
 
-    def _resolve_attack(self, entity: EntitySpec) -> None:
-        stat_block = entity.stat_block
-        if stat_block is None or stat_block.HP is None:
-            raise ContractError("Attack target has no runtime stat block")
+    def _resolve_attack(self, entity: EntitySpec) -> ActionResolution:
         check = self.request.intent.check
         if isinstance(check, DefaultCheck) and check.proposed_skills:
             candidate_skills = check.proposed_skills
@@ -544,9 +546,16 @@ class _Execution:
             allowed_skills=candidate_skills,
             difficulty="regular",
         )
+        stat_block = entity.stat_block
+        if stat_block is None or stat_block.HP is None:
+            self.visible.append("该目标没有可用的战斗数据，攻击未执行。")
+            self.constraints.append(
+                "目标缺少可用战斗数据；不得声称攻击命中、造成伤害或改变目标状态。"
+            )
+            return "blocked"
         if resolved in {"failure", "fumble"}:
             self.visible.append("攻击没有命中目标。")
-            return
+            return "direct"
         hp_path = f"entities.{entity.id}.hp"
         if self.state["entities"][entity.id].get("hp") is None:
             self._write(hp_path, stat_block.HP, cause=f"combat:{entity.id}:hydrate")
@@ -565,6 +574,7 @@ class _Execution:
                     cause=f"combat:{self.request.request_id}:death",
                 )
             self._apply_hook("on_death", entity)
+        return "direct"
 
     def _advance_time(self, verb: str) -> None:
         elapsed = int(self.state["clock"]["elapsed_minutes"])

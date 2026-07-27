@@ -249,3 +249,66 @@ test('追书人纵切：首场景 → 托马斯 → 图书馆 → 旧报检定 �
     room.host.sdk.roomSocket.disconnect()
   }
 })
+
+test('终止性攻击检定失败后仍可继续提交行动', async () => {
+  const room = await createRoomWithModule('terminal-check')
+  await room.host.sdk.rooms.startStory(room.roomId, room.reconnectToken)
+  await buildCharacter(room.host.sdk, room.roomId, room.reconnectToken)
+
+  const socket = room.host.sdk.roomSocket.connect(room.roomId, room.host.token)
+  try {
+    await room.host.sdk.roomSocket.waitForOpen(socket)
+    room.host.sdk.roomSocket.joinRoom(room.hostPlayerId, {
+      reconnectToken: room.reconnectToken,
+    })
+    await waitForEvent(room.host.sdk, (event) => event.type === 'session.bound')
+
+    const openingView = waitForEvent(room.host.sdk, (event) => event.type === 'view.updated')
+    const openingNarration = waitForEvent(
+      room.host.sdk,
+      (event) => event.type === 'narration.push'
+    )
+    room.host.sdk.roomSocket.startGame(room.hostPlayerId)
+    await Promise.all([openingView, openingNarration])
+
+    const attackActionId = `attack-thomas-${Date.now()}`
+    const checkRequested = waitForEvent(
+      room.host.sdk,
+      (event) =>
+        event.type === 'check.request' &&
+        event.payload.clientActionId === attackActionId
+    )
+    const blockedAction = room.host.sdk.roomSocket.submitAction(room.hostPlayerId, {
+      clientActionId: attackActionId,
+      utterance: '我想打一顿托马斯',
+    })
+    const request = await checkRequested
+    assert.equal(request.type, 'check.request')
+    assert.deepEqual(request.payload.skills.map((skill) => skill.id), ['fighting-brawl'])
+
+    const checkResult = waitForEvent(
+      room.host.sdk,
+      (event) =>
+        event.type === 'check.result' &&
+        event.payload.clientActionId === attackActionId
+    )
+    room.host.sdk.roomSocket.rollCheck(room.hostPlayerId, {
+      clientActionId: attackActionId,
+      skill: 'fighting-brawl',
+      rollValue: 1,
+    })
+    const [result, turn] = await Promise.all([checkResult, blockedAction])
+    assert.equal(result.type, 'check.result')
+    assert.equal(result.payload.passed, true)
+    assert.match(turn.narration.text, /战斗数据/)
+
+    const nextTurn = await room.host.sdk.roomSocket.submitAction(room.hostPlayerId, {
+      clientActionId: `after-attack-${Date.now()}`,
+      utterance: '我继续和托马斯交谈',
+    })
+    assert.equal(nextTurn.player_id, room.hostPlayerId)
+    assert.doesNotMatch(nextTurn.narration.text, /CHECK_PENDING|契约校验/)
+  } finally {
+    room.host.sdk.roomSocket.disconnect()
+  }
+})

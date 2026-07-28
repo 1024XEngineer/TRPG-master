@@ -23,7 +23,7 @@ from app.dto.character import (
 )
 from app.dto.chat import ChatMessageRead
 from app.dto.common import ApiResponse
-from app.dto.replay import ReplayEventRead, RoomSummaryRead
+from app.dto.replay import ReplayEventRead, RoomConversationEventRead, RoomSummaryRead
 from app.dto.room import (
     JoinRoomBody,
     RoomCreate,
@@ -243,6 +243,26 @@ async def get_room_replay(
     """GET /api/v1/rooms/{roomId}/replay —— 逐条事件回放（仅本房间成员可查）。"""
     try:
         events = await room_service.get_replay(db, room_id, reconnect_token)
+    except (
+        room_service.RoomAuthenticationError,
+        room_service.RoomAuthorizationError,
+    ) as exc:
+        _raise_service_error(exc)
+    return ApiResponse.ok(events)
+
+
+@router.get(
+    "/{room_id}/conversation",
+    response_model=ApiResponse[list[RoomConversationEventRead]],
+)
+async def list_room_conversation(
+    room_id: str,
+    reconnect_token: str | None = Header(default=None, alias="X-Reconnect-Token"),
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[list[RoomConversationEventRead]]:
+    """GET /api/v1/rooms/{roomId}/conversation —— 重入房间时恢复对话历史。"""
+    try:
+        events = await room_service.list_conversation_events(db, room_id, reconnect_token)
     except (
         room_service.RoomAuthenticationError,
         room_service.RoomAuthorizationError,

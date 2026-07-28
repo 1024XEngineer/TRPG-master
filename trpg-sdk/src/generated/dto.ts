@@ -14,6 +14,7 @@
  */
 export interface ActionBroadcastPayload {
   playerId: string;
+  clientActionId: string;
   nickname: string;
   utterance: string;
 }
@@ -669,6 +670,19 @@ export interface RollAttributesResult {
   derivedStats: {
     [k: string]: number;
   };
+}
+
+/**
+ * GET /api/v1/rooms/{roomId}/conversation 返回项。
+ */
+export interface RoomConversationEventRead {
+  id: string;
+  type: "chat.message" | "action.broadcast" | "narration.push" | "check.result";
+  channel: "discussion" | "action";
+  payload: {
+    [k: string]: unknown;
+  };
+  createdAt: string;
 }
 
 /**

@@ -26,7 +26,7 @@ from app.core.errors import not_implemented
 from app.core.runtime_state import ruleset_labels, ruleset_skill_values
 from app.dto.game import GameRead, GameSystemRead, RulesetRead
 from app.dto.module import ModuleDetailRead
-from app.dto.replay import ReplayEventRead, RoomSummaryRead
+from app.dto.replay import ReplayEventRead, RoomConversationEventRead, RoomSummaryRead
 from app.dto.room import (
     JoinRoomBody,
     ModuleRead,
@@ -37,6 +37,7 @@ from app.dto.room import (
     RoomPreview,
     SelectModuleBody,
 )
+from app.models.chat import ChatMessage
 from app.models.content import Game, GameSystem, Scenario, World
 from app.models.engine import GameSession, ModuleVersion
 from app.models.event import Event
@@ -938,6 +939,69 @@ async def get_replay(
         select(Event).where(Event.room_id == room_id).order_by(Event.created_at)
     )
     return [ReplayEventRead.model_validate(e) for e in result]
+
+
+async def list_conversation_events(
+    db: AsyncSession, room_id: str, reconnect_token: str | None
+) -> list[RoomConversationEventRead]:
+    """房间对话历史，按发生时间正序返回。
+
+    讨论区来自 ``chat_messages``，行动频道来自 ``events``。技能检定结果沿用当前
+    WebSocket 可见性，只返回给检定发起者本人。
+    """
+
+    member = await require_room_member(db, room_id, reconnect_token)
+    chat_rows = (
+        await db.execute(
+            select(ChatMessage, Player.nickname)
+            .join(Player, ChatMessage.player_id == Player.id)
+            .where(ChatMessage.room_id == room_id)
+        )
+    ).all()
+    events = await db.scalars(
+        select(Event)
+        .where(
+            Event.room_id == room_id,
+            Event.event_type.in_(
+                ("action.broadcast", "narration.push", "check.result")
+            ),
+        )
+        .order_by(Event.created_at, Event.id)
+    )
+
+    items: list[RoomConversationEventRead] = []
+    for message, nickname in chat_rows:
+        items.append(
+            RoomConversationEventRead(
+                id=message.id,
+                type="chat.message",
+                channel="discussion",
+                payload={
+                    "messageId": message.id,
+                    "playerId": message.player_id,
+                    "nickname": nickname,
+                    "text": message.text,
+                    "sentAt": message.created_at,
+                    "clientMessageId": message.client_message_id,
+                },
+                created_at=message.created_at,
+            )
+        )
+
+    for event in events:
+        if event.event_type == "check.result" and event.player_id != member.id:
+            continue
+        items.append(
+            RoomConversationEventRead(
+                id=event.id,
+                type=event.event_type,
+                channel="discussion" if event.event_type == "chat.message" else "action",
+                payload=event.payload,
+                created_at=event.created_at,
+            )
+        )
+
+    return sorted(items, key=lambda item: (item.created_at, item.id))
 
 
 async def get_summary(db: AsyncSession, room_id: str) -> RoomSummaryRead:

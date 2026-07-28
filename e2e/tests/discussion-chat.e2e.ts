@@ -178,6 +178,59 @@ test('🔴 所有人都能看到发起者的原话 + 守秘人回复（修"聊�
   }
 })
 
+test('🔴 退出后返回可恢复讨论、行动原话和主持回复历史（issue #166）', async () => {
+  const room = await createRoomWithModule('resume166')
+
+  await room.host.sdk.rooms.startStory(room.roomId, room.reconnectToken)
+  await buildCharacter(room.host.sdk, room.roomId, room.reconnectToken)
+
+  try {
+    await bindSocket(
+      room.host.sdk, room.roomId, room.host.token, room.hostPlayerId, room.reconnectToken
+    )
+
+    const opening = waitForEvent(room.host.sdk, (e) => e.type === 'narration.push')
+    room.host.sdk.roomSocket.startGame(room.hostPlayerId)
+    await opening
+
+    const chat = waitForEvent(
+      room.host.sdk,
+      (e) => e.type === 'chat.message' && e.payload.text === '先确认线索'
+    )
+    room.host.sdk.roomSocket.sendChat(room.hostPlayerId, {
+      text: '先确认线索',
+      clientMessageId: randomUUID(),
+    })
+    await chat
+
+    const echo = waitForEvent(
+      room.host.sdk,
+      (e) => e.type === 'action.broadcast' && e.payload.utterance === '我检查书桌'
+    )
+    const narration = waitForEvent(room.host.sdk, (e) => e.type === 'narration.push')
+    await room.host.sdk.roomSocket.submitAction(room.hostPlayerId, {
+      clientActionId: 'issue-166-resume-action',
+      utterance: '我检查书桌',
+    })
+    await Promise.all([echo, narration])
+    room.host.sdk.roomSocket.disconnect()
+
+    const history = await room.host.sdk.rooms.listConversation(room.roomId, room.reconnectToken)
+    assert.ok(
+      history.some((event) => event.type === 'chat.message' && event.payload.text === '先确认线索')
+    )
+    assert.ok(
+      history.some(
+        (event) =>
+          event.type === 'action.broadcast' && event.payload.utterance === '我检查书桌'
+      )
+    )
+    assert.ok(history.some((event) => event.type === 'narration.push'))
+  } finally {
+    room.host.sdk.roomSocket.disconnect()
+  }
+})
+
 test('🔴 行动锁：处理中他人提交被拒（ACTION_IN_PROGRESS），完成后恢复', async () => {
   const room = await createRoomWithModule('lock', 2)
   const guest = await registerPlayer('lockguest')

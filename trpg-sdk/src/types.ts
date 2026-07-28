@@ -54,6 +54,7 @@ export type {
   // 复盘 / 回放（issue #77）—— 对应后端 dto/replay.py
   RoomSummaryRead as RoomSummary,
   ReplayEventRead as ReplayEvent,
+  RoomConversationEventRead as RoomConversationEvent,
   // WebSocket 现有 6 个事件（issue #60）—— 对应后端 dto/ws.py
   RoomJoinPayload,
   PlayerReadyPayload,

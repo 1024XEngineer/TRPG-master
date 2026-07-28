@@ -56,12 +56,17 @@ def _send_chat(ws, player: dict, text: str, client_message_id: str) -> None:
     )
 
 
-def _submit_action(ws, player: dict, utterance: str) -> None:
+def _submit_action(
+    ws, player: dict, utterance: str, client_action_id: str | None = None
+) -> None:
     ws.send_json(
         {
             "type": "action.submit",
             "playerId": player["playerId"],
-            "payload": {"clientActionId": str(uuid4()), "utterance": utterance},
+            "payload": {
+                "clientActionId": client_action_id or str(uuid4()),
+                "utterance": utterance,
+            },
         }
     )
 
@@ -261,6 +266,70 @@ def test_messages_rejects_non_member(sync_client: TestClient) -> None:
         headers={"X-Reconnect-Token": other_room["reconnectToken"]},
     )
     assert response.status_code == 403
+
+
+def test_conversation_rejects_non_member(sync_client: TestClient) -> None:
+    token = register_and_login(sync_client, "conversation_member_host")
+    room = create_room(sync_client, token)
+    other_token = register_and_login(sync_client, "conversation_outsider")
+    other_room = create_room(sync_client, other_token)
+
+    response = sync_client.get(
+        f"{ROOMS_BASE}/{room['roomId']}/conversation",
+        headers={"X-Reconnect-Token": other_room["reconnectToken"]},
+    )
+
+    assert response.status_code == 403
+
+
+def test_conversation_restores_discussion_action_and_narration(
+    sync_client: TestClient,
+) -> None:
+    from tests.test_ws import advance_to_building, complete_character, receive_until, start_game
+
+    token = register_and_login(sync_client, "conversation_host")
+    room = create_room(sync_client, token)
+    headers = {"X-Reconnect-Token": room["reconnectToken"]}
+    advance_to_building(sync_client, room)
+    complete_character(sync_client, room["roomId"], room["reconnectToken"])
+    start_game(sync_client, room, token)
+
+    with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
+        _join_ws(ws, room)
+        _send_chat(ws, room, "讨论区历史", "conversation-chat-1")
+        receive_until(ws, lambda message: message.get("type") == "chat.message")
+        _submit_action(
+            ws,
+            room,
+            "我检查书桌上的便笺",
+            client_action_id="conversation-action-1",
+        )
+        receive_until(ws, lambda message: message.get("type") == "action.broadcast")
+        receive_until(ws, lambda message: message.get("type") == "narration.push")
+
+    history = sync_client.get(
+        f"{ROOMS_BASE}/{room['roomId']}/conversation",
+        headers=headers,
+    ).json()["data"]
+
+    event_types = [event["type"] for event in history]
+    assert "chat.message" in event_types
+    assert "action.broadcast" in event_types
+    assert "narration.push" in event_types
+    chat = next(event for event in history if event["type"] == "chat.message")
+    action = next(
+        event
+        for event in history
+        if event["type"] == "action.broadcast"
+        and event["payload"]["utterance"] == "我检查书桌上的便笺"
+    )
+    narration = history[-1]
+    assert chat["channel"] == "discussion"
+    assert chat["payload"]["text"] == "讨论区历史"
+    assert action["channel"] == "action"
+    assert action["payload"]["nickname"] == "房主"
+    assert narration["type"] == "narration.push"
+    assert event_types.index("chat.message") < event_types.index("action.broadcast")
 
 
 # ── 退房清理 / 复盘纯净 ──────────────────────────────

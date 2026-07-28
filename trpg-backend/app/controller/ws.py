@@ -269,7 +269,9 @@ async def _send_check_request(
 
 
 async def _send_check_result(
+    db: AsyncSession,
     websocket: WebSocket,
+    room_id: str,
     player_id: str,
     prepared: PreparedTurn,
     action_result: ActionResult,
@@ -294,6 +296,16 @@ async def _send_check_result(
         type="check.result",
         payload=payload.model_dump(by_alias=True),
     )
+    recorded = await room_service.record_event(
+        db,
+        room_id,
+        player_id,
+        "check.result",
+        payload.model_dump(by_alias=True, mode="json"),
+        correlation_id=prepared.player_input.client_action_id,
+    )
+    if not recorded:
+        return
     await websocket.send_json(envelope.model_dump(by_alias=True))
 
 
@@ -350,6 +362,7 @@ async def _broadcast_action_utterance(
     db: AsyncSession,
     room_id: str,
     player_id: str,
+    client_action_id: str,
     utterance: str,
 ) -> None:
     """广播玩家原话，但不把讨论区消息混入叙事事件历史。"""
@@ -358,9 +371,20 @@ async def _broadcast_action_utterance(
     nickname = player.nickname if player is not None else "玩家"
     payload = ActionBroadcastPayload(
         player_id=player_id,
+        client_action_id=client_action_id,
         nickname=nickname,
         utterance=utterance,
     )
+    recorded = await room_service.record_event(
+        db,
+        room_id,
+        player_id,
+        "action.broadcast",
+        payload.model_dump(by_alias=True, mode="json"),
+        correlation_id=client_action_id,
+    )
+    if not recorded:
+        return
     envelope = ServerEnvelope(
         type="action.broadcast",
         payload=payload.model_dump(by_alias=True),
@@ -630,6 +654,7 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 db,
                                 room_id,
                                 bound_player_id,
+                                submit_payload.client_action_id,
                                 submit_payload.utterance,
                             )
 
@@ -723,7 +748,9 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 ),
                                 on_action_result=partial(
                                     _send_check_result,
+                                    db,
                                     websocket,
+                                    room_id,
                                     bound_player_id,
                                     pending_turn,
                                 ),

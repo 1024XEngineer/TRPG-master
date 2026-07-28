@@ -589,6 +589,79 @@ def test_skill_check_waits_for_player_selection_and_roll(
     ]
 
 
+def test_conversation_check_result_visible_only_to_actor(
+    sync_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    token = register_and_login(sync_client, "conversation_check_host")
+    room = create_room(sync_client, token, max_players=2)
+    guest = join_as(sync_client, room["roomCode"], "conversation_check_guest")
+    advance_to_building(sync_client, room)
+    complete_character(sync_client, room["roomId"], room["reconnectToken"])
+    complete_character(sync_client, room["roomId"], guest["reconnectToken"])
+    start_game(sync_client, room, token)
+    current_application = ws_controller.turn_application
+    monkeypatch.setattr(
+        ws_controller,
+        "turn_application",
+        build_turn_application(
+            current_application.store,
+            current_application.engine,
+            intent_model=_WsCandidateIntentModel(),
+            narration_model=FakeNarrationModel(),
+        ),
+    )
+
+    with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
+        ws.send_json(
+            {
+                "type": "room.join",
+                "playerId": room["playerId"],
+                "payload": {"reconnectToken": room["reconnectToken"]},
+            }
+        )
+        assert ws.receive_json()["type"] == "session.bound"
+        assert ws.receive_json()["type"] == "view.updated"
+        ws.send_json(
+            {
+                "type": "action.submit",
+                "playerId": room["playerId"],
+                "payload": {
+                    "clientActionId": "conversation-check-1",
+                    "utterance": "尝试潜行查找资料",
+                },
+            }
+        )
+        receive_until(ws, lambda message: message.get("type") == "check.request")
+        ws.send_json(
+            {
+                "type": "check.roll",
+                "playerId": room["playerId"],
+                "payload": {
+                    "clientActionId": "conversation-check-1",
+                    "skill": "stealth",
+                    "rollValue": 7,
+                },
+            }
+        )
+        receive_until(ws, lambda message: message.get("type") == "check.result")
+        receive_until(ws, lambda message: message.get("type") == "narration.push")
+
+    host_history = sync_client.get(
+        f"{ROOMS_BASE}/{room['roomId']}/conversation",
+        headers={"X-Reconnect-Token": room["reconnectToken"]},
+    ).json()["data"]
+    guest_history = sync_client.get(
+        f"{ROOMS_BASE}/{room['roomId']}/conversation",
+        headers={"X-Reconnect-Token": guest["reconnectToken"]},
+    ).json()["data"]
+
+    assert any(event["type"] == "check.result" for event in host_history)
+    assert not any(event["type"] == "check.result" for event in guest_history)
+    assert any(event["type"] == "action.broadcast" for event in guest_history)
+    assert any(event["type"] == "narration.push" for event in guest_history)
+
+
 def test_terminal_attack_check_failure_releases_pending_turn(
     sync_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,

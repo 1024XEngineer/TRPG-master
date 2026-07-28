@@ -10,6 +10,7 @@ import type {
   MyRoomSummary,
   RoomSummary,
   ReplayEvent,
+  RoomConversationEvent,
 } from '../types';
 
 /**
@@ -123,6 +124,14 @@ export class RoomsResource {
   getReplay(roomId: string, reconnectToken: string): Promise<ReplayEvent[]> {
     return this.client.get<ReplayEvent[]>(
       `/rooms/${roomId}/replay`,
+      this.roomAuth(reconnectToken)
+    );
+  }
+
+  /** GET /api/v1/rooms/{roomId}/conversation — 房间重入时恢复对话历史（issue #166） */
+  listConversation(roomId: string, reconnectToken: string): Promise<RoomConversationEvent[]> {
+    return this.client.get<RoomConversationEvent[]>(
+      `/rooms/${roomId}/conversation`,
       this.roomAuth(reconnectToken)
     );
   }

@@ -1,10 +1,12 @@
-"""复盘摘要 / 事件回放的 pydantic 响应模型（issue #77 §2 新增端点）。
+"""复盘摘要 / 事件回放 / 房间对话历史的 pydantic 响应模型。
 
 `GET /rooms/{roomId}/summary` 依赖 AI 编排生成复盘内容（归 #48/#68），本期
 固定返回 `NOT_IMPLEMENTED`。`GET /rooms/{roomId}/replay` 则是真实实现——
 读的是 ws.py 在发送 narration.push 时写入的 `events` 表，是服务端
 "真的在写、也真的在读"的完整数据闭环之一。
 """
+
+from typing import Literal
 
 from app.dto.common import CamelModel, UtcDatetime
 
@@ -24,5 +26,15 @@ class ReplayEventRead(CamelModel):
     id: str
     player_id: str | None = None
     event_type: str
+    payload: dict
+    created_at: UtcDatetime
+
+
+class RoomConversationEventRead(CamelModel):
+    """GET /api/v1/rooms/{roomId}/conversation 返回项。"""
+
+    id: str
+    type: Literal["chat.message", "action.broadcast", "narration.push", "check.result"]
+    channel: Literal["discussion", "action"]
     payload: dict
     created_at: UtcDatetime

@@ -105,9 +105,7 @@ class DeepSeekNarrator(Narrator):
         timeout_seconds: float = _REQUEST_TIMEOUT_SECONDS,
     ) -> None:
         self._model = model
-        self._client = AsyncOpenAI(
-            api_key=api_key, base_url=base_url, timeout=timeout_seconds
-        )
+        self._client = AsyncOpenAI(api_key=api_key, base_url=base_url, timeout=timeout_seconds)
 
     async def narrate(self, context: NarrationContext) -> str:
         response = await self._client.chat.completions.create(

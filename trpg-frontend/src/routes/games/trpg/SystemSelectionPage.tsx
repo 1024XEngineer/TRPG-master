@@ -54,7 +54,7 @@ export default function SystemSelectionPage() {
             <path d="M19 12H5M12 19l-7-7 7-7" />
           </svg>
         </button>
-        <h2 className="text-lg font-bold text-text-primary">选择世界</h2>
+        <h2 className="text-lg font-bold text-text-primary">选择规则系统</h2>
       </div>
       <p className="text-xs text-text-muted px-5 pb-4">{game.name} · 选择规则系统</p>
 
@@ -97,6 +97,14 @@ export default function SystemSelectionPage() {
                 <p className="text-xs text-text-muted mt-0.5 leading-[1.5]">
                   {sys.version || '当前版本'}
                 </p>
+                {sys.worldName && (
+                  <p className="text-xs text-text-primary mt-2">世界观：{sys.worldName}</p>
+                )}
+                {sys.worldDescription && (
+                  <p className="text-xs text-text-muted mt-1 leading-[1.6] line-clamp-2">
+                    {sys.worldDescription}
+                  </p>
+                )}
                 <Badge variant="success">已就绪</Badge>
               </div>
               {isReady && (

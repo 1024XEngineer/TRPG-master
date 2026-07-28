@@ -29,6 +29,9 @@ class GameSystemRead(CamelModel):
     world_ref: str
     name: str
     version: str | None = None
+    world_name: str | None = None
+    world_description: str | None = None
+    game_description: str | None = None
 
 
 class AttributeSpec(CamelModel):

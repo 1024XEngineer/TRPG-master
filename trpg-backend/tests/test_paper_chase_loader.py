@@ -32,7 +32,11 @@ async def test_loader_is_idempotent_and_reports_real_content(
     assert result.win_condition_count == 4
     assert "result: unchanged" in result.summary_lines()
 
-
+    scenario = await db_session.get(Scenario, BUILTIN_SCENARIO_ID)
+    assert scenario is not None
+    assert scenario.title == "追书人"
+    assert scenario.story_pages[0]["title"] == "托马斯的会客室"
+    assert "失窃藏书" in scenario.story_pages[0]["content"]
 async def test_loader_rejects_other_identity_without_database_changes(
     db_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,

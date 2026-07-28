@@ -149,6 +149,16 @@ async def test_seed_refreshes_stale_builtin_ruleset(
     assert any(a["key"] == "LUCK" for a in attributes)
 
 
+async def test_system_catalog_exposes_builtin_world_setting(client: AsyncClient) -> None:
+    response = await client.get(f"/api/v1/games/{BUILTIN_GAME_ID}/systems")
+
+    assert response.status_code == 200
+    system = response.json()["data"][0]
+    assert system["worldName"] == "禁酒令时期的阿诺兹堡"
+    assert "密歇根州" in system["worldDescription"]
+    assert "调查" in system["gameDescription"]
+
+
 UNCONFIGURED_SYSTEM_ID = "00000000-0000-0000-0000-0000000000ff"
 
 

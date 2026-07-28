@@ -37,7 +37,7 @@ from app.dto.room import (
     RoomPreview,
     SelectModuleBody,
 )
-from app.models.content import Game, GameSystem, Scenario
+from app.models.content import Game, GameSystem, Scenario, World
 from app.models.engine import GameSession, ModuleVersion
 from app.models.event import Event
 from app.models.room import Character, Player, Room
@@ -726,7 +726,22 @@ async def list_game_systems(db: AsyncSession, game_id: str) -> list[GameSystemRe
     if game is None:
         raise ModuleNotFoundError("游戏大类不存在")
     result = await db.scalars(select(GameSystem).where(GameSystem.game_id == game_id))
-    return [GameSystemRead.model_validate(s) for s in result]
+    world = await db.scalar(
+        select(World).where(World.game_id == game_id).order_by(World.created_at)
+    )
+    return [
+        GameSystemRead(
+            id=system.id,
+            game_id=system.game_id,
+            world_ref=system.world_ref,
+            name=system.name,
+            version=system.version,
+            world_name=world.name if world else None,
+            world_description=world.description if world else None,
+            game_description=game.description,
+        )
+        for system in result
+    ]
 
 
 async def get_ruleset(db: AsyncSession, system_id: str) -> RulesetRead:

@@ -160,6 +160,17 @@ async def load_paper_chase(
 
         scenario.version = PAPER_CHASE_VERSION
         scenario.status = "ready"
+        scenario.synopsis = (
+            "调查员受托寻找五本失窃旧书，并查明道格拉斯一年前的失踪案；"
+            "线索将带你走访旧宅、图书馆与公共墓地。"
+        )
+        scenario.story_pages = [
+            {
+                "title": scene.player_visible_name or scene.name,
+                "content": scene.player_visible_description or scene.content,
+            }
+            for scene in content.scenes
+        ]
         await db.flush()
         if _before_commit is not None:
             _before_commit()

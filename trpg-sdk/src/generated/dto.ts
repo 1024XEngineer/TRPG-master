@@ -431,6 +431,9 @@ export interface GameSystemRead {
   worldRef: string;
   name: string;
   version?: string | null;
+  worldName?: string | null;
+  worldDescription?: string | null;
+  gameDescription?: string | null;
 }
 
 /**

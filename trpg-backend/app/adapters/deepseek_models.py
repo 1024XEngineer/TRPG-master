@@ -1,12 +1,4 @@
-"""Qwen-compatible structured JSON client.
-
-Alibaba Cloud Model Studio exposes an OpenAI-compatible API, but its
-Responses endpoint does not currently document OpenAI's strict
-``text.format=json_schema`` parameter. Qwen's Chat Completions endpoint does
-support JSON mode, so this adapter embeds the authoritative JSON Schema in the
-system message, requests a JSON object, and leaves deterministic schema
-validation to the existing Pydantic application boundary.
-"""
+"""DeepSeek OpenAI-compatible structured JSON client."""
 
 from __future__ import annotations
 
@@ -16,10 +8,11 @@ import httpx
 from collaboration_framework.contracts import JsonObject
 
 from app.adapters.openai_models import StructuredJsonClient
+from app.adapters.qwen_models import chat_completion_output_text
 
 
-class QwenChatCompletionsJsonClient(StructuredJsonClient):
-    """Generate a JSON candidate through Qwen's OpenAI-compatible JSON mode."""
+class DeepSeekChatCompletionsJsonClient(StructuredJsonClient):
+    """Generate a JSON candidate through DeepSeek Chat Completions JSON mode."""
 
     def __init__(
         self,
@@ -61,8 +54,6 @@ class QwenChatCompletionsJsonClient(StructuredJsonClient):
                 },
             ],
             "response_format": {"type": "json_object"},
-            # JSON mode is most reliable when Qwen emits only the final answer.
-            "enable_thinking": False,
         }
         async with httpx.AsyncClient(
             headers={
@@ -78,29 +69,14 @@ class QwenChatCompletionsJsonClient(StructuredJsonClient):
             )
             response.raise_for_status()
 
-        output_text = chat_completion_output_text(response.json(), provider_name="Qwen")
+        output_text = chat_completion_output_text(
+            response.json(),
+            provider_name="DeepSeek",
+        )
         parsed = json.loads(output_text)
         if not isinstance(parsed, dict):
-            raise ValueError("Qwen structured output must be a JSON object")
+            raise ValueError("DeepSeek structured output must be a JSON object")
         return parsed
 
 
-def chat_completion_output_text(payload: object, *, provider_name: str) -> str:
-    if not isinstance(payload, dict):
-        raise ValueError(f"{provider_name} Chat Completions payload must be an object")
-    choices = payload.get("choices")
-    if not isinstance(choices, list) or not choices:
-        raise ValueError(f"{provider_name} Chat Completions payload has no choices")
-    first = choices[0]
-    if not isinstance(first, dict):
-        raise ValueError(f"{provider_name} Chat Completions choice must be an object")
-    message = first.get("message")
-    if not isinstance(message, dict):
-        raise ValueError(f"{provider_name} Chat Completions choice has no message")
-    content = message.get("content")
-    if not isinstance(content, str) or not content.strip():
-        raise ValueError(f"{provider_name} Chat Completions message has no text content")
-    return content
-
-
-__all__ = ["QwenChatCompletionsJsonClient", "chat_completion_output_text"]
+__all__ = ["DeepSeekChatCompletionsJsonClient"]

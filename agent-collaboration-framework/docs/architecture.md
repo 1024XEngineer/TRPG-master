@@ -14,7 +14,7 @@
 - B 负责 Rule、Hook、Checkpoint 执行、Dice、GameState 修改、Event 写入和事务/幂等。
 - C 负责模组解析、审查和发布 `ModuleContent`。
 - A 只能通过 `ActionExecutor.execute()` 发出可能影响权威状态的动作。
-- 当前使用离线模型 Fake、player-safe 只读工具、完整 `InMemoryEngineStore`，并提供尚未接入 `Orchestrator` 的 OpenAI Agents SDK + Qwen Host Agent Adapter；不接 LangGraph、PostgreSQL 或 FastAPI。
+- 当前使用离线模型 Fake、player-safe 只读工具、完整 `InMemoryEngineStore`，并提供尚未接入 `Orchestrator` 的 OpenAI Agents SDK + OpenAI-compatible Host Agent Adapter；不接 LangGraph、PostgreSQL 或 FastAPI。
 
 ## 2. 最终回合时序
 
@@ -175,7 +175,7 @@ flowchart TD
 
 ### 15. 真实模型依赖
 
-选择：PydanticAI 与 LangGraph 保持移除；OpenAI Agents SDK、OpenAI 客户端、Qwen 配置和版本化 Prompt 只允许进入
+选择：PydanticAI 与 LangGraph 保持移除；OpenAI Agents SDK、OpenAI 客户端、compatible provider 配置和版本化 Prompt 只允许进入
 `host/adapters/openai_agents/` 与 bootstrap 组合根。稳定 Host Schema/Port、application、tools、Engine 和 Module
 继续与 SDK/provider 无关。
 
@@ -378,14 +378,14 @@ A 输出/内部边界 Schema：
 上述三个 Host Agent Schema 虽然导出为仓库级 JSON Schema，但不因此成为 A/B/C 共享业务契约；工具定义则直接从
 参数/结果 Pydantic 模型生成 Adapter Schema，不维护重复文件。
 
-`QwenHostAgentAdapter` 位于 `host/adapters/openai_agents/`。每次调用建立独立 SDK Agent、绑定 Registry 和运行计数；
+`OpenAICompatibleHostAgentAdapter` 位于 `host/adapters/openai_agents/`。每次调用建立独立 SDK Agent、绑定 Registry 和运行计数；
 SDK Runner 负责 `model -> tool -> model -> final` 循环，项目只负责权限、预算、timeout、安全事件和最终 JSON
 边界。模型设置固定为 `temperature=0`、串行工具、usage streaming 与关闭 thinking；每次 run 显式关闭 tracing 和
 敏感 trace data。默认限制为 6 轮模型、8 次工具、单工具 5 秒、整轮 30 秒。单工具 timeout 回填稳定
 `TOOL_TIMEOUT`，其余受控失败映射为项目 `HostAgentFailed`，不透传 provider 异常。
 
-真实客户端只能由 `bootstrap.host_agent.build_qwen_host_agent()` 显式构造；import 时不读取 `.env`/环境变量或创建客户端。
-API Key 必填且使用秘密类型，默认 endpoint 为 DashScope 北京 OpenAI-compatible `/v1`，默认模型为 `qwen-plus`。
+真实客户端只能由 `bootstrap.host_agent.build_qwen_host_agent()` 或 `build_deepseek_host_agent()` 显式构造；import 时不读取 `.env`/环境变量或创建客户端。
+API Key 必填且使用秘密类型；provider endpoint 和模型由组合根显式传入，Qwen 和 DeepSeek 的 provider-specific 请求字段不会泄漏到通用 adapter。
 主链 bootstrap 继续装配 Fake，不会自动把该 Adapter 注入 `Orchestrator`。
 
 B 内部模型（不属于跨组件 Schema）：

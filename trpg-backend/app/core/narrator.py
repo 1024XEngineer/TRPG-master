@@ -134,7 +134,7 @@ def build_narrator(settings: Settings) -> Narrator:
     docstring），生产配置保持 0、不受影响。
     """
     narrator: Narrator = (
-        DeepSeekNarrator(settings.deepseek_api_key)
+        DeepSeekNarrator(settings.deepseek_api_key.get_secret_value())
         if settings.deepseek_api_key
         else FallbackNarrator()
     )

@@ -33,6 +33,7 @@ from collaboration_framework.host.application import PlayerViewProjector
 from collaboration_framework.host.schemas import IntentContext, NarrationContext
 from pydantic import ValidationError
 
+from app.adapters.deepseek_models import DeepSeekChatCompletionsJsonClient
 from app.adapters.openai_models import (
     OpenAIResponsesJsonClient,
     PromptIntentModel,
@@ -593,6 +594,51 @@ async def test_qwen_client_posts_json_mode_with_schema_in_instructions() -> None
     assert json.loads(body["messages"][1]["content"]) == {"safe": True}
 
 
+async def test_deepseek_client_posts_compatible_json_mode_without_qwen_fields() -> None:
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["authorization"] = request.headers["Authorization"]
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": '{"kind":"unknown"}',
+                        }
+                    }
+                ]
+            },
+        )
+
+    client = DeepSeekChatCompletionsJsonClient(
+        api_key="test-key",
+        base_url="https://api.deepseek.example/v1/",
+        model="deepseek-chat",
+        timeout_seconds=1,
+        transport=httpx.MockTransport(handler),
+    )
+    result = await client.generate(
+        schema_name="test_schema",
+        schema={"type": "object"},
+        instructions="Return the structured result.",
+        input_payload={"safe": True},
+    )
+
+    body = captured["body"]
+    assert result == {"kind": "unknown"}
+    assert captured["url"].endswith("/v1/chat/completions")
+    assert captured["authorization"] == "Bearer test-key"
+    assert body["model"] == "deepseek-chat"
+    assert body["response_format"] == {"type": "json_object"}
+    assert "enable_thinking" not in body
+    assert "test_schema" in body["messages"][0]["content"]
+
+
 def test_openai_provider_requires_api_key() -> None:
     with pytest.raises(ValidationError, match="OPENAI_API_KEY"):
         Settings.model_validate(
@@ -609,6 +655,16 @@ def test_qwen_provider_requires_api_key() -> None:
             {
                 "host_model_provider": "qwen",
                 "qwen_api_key": None,
+            }
+        )
+
+
+def test_deepseek_provider_requires_api_key() -> None:
+    with pytest.raises(ValidationError, match="DEEPSEEK_API_KEY"):
+        Settings.model_validate(
+            {
+                "host_model_provider": "deepseek",
+                "deepseek_api_key": None,
             }
         )
 

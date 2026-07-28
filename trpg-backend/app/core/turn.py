@@ -8,7 +8,10 @@ from dataclasses import dataclass
 from typing import Literal
 
 import structlog
-from collaboration_framework.bootstrap.host_agent import build_qwen_host_agent
+from collaboration_framework.bootstrap.host_agent import (
+    build_deepseek_host_agent,
+    build_qwen_host_agent,
+)
 from collaboration_framework.contracts import (
     ActionRequest,
     ActionResult,
@@ -46,6 +49,7 @@ from collaboration_framework.host.schemas import (
 )
 
 from app.adapters import (
+    DeepSeekChatCompletionsJsonClient,
     OpenAIResponsesJsonClient,
     PromptIntentModel,
     PromptNarrationModel,
@@ -552,6 +556,34 @@ def _configured_models(
             HostAgentIntentResolver(FakeHostAgent()),
             FakeNarrationModel(),
             HostModelMetadata(provider="fake", model="deterministic"),
+        )
+    if settings.host_model_provider == "deepseek":
+        if settings.deepseek_api_key is None:
+            raise ValueError("DeepSeek Host 模型缺少 API key")
+        host_agent = build_deepseek_host_agent(
+            {
+                "HOST_AGENT_API_KEY": settings.deepseek_api_key.get_secret_value(),
+                "HOST_AGENT_BASE_URL": settings.deepseek_base_url,
+                "HOST_AGENT_MODEL": settings.deepseek_model,
+                "HOST_AGENT_MAX_TURNS": str(settings.host_agent_max_turns),
+                "HOST_AGENT_MAX_TOOL_CALLS": str(settings.host_agent_max_tool_calls),
+                "HOST_AGENT_TOOL_TIMEOUT_SECONDS": str(settings.host_agent_tool_timeout_seconds),
+                "HOST_AGENT_TIMEOUT_SECONDS": str(settings.host_agent_timeout_seconds),
+            }
+        )
+        client = DeepSeekChatCompletionsJsonClient(
+            api_key=settings.deepseek_api_key.get_secret_value(),
+            base_url=settings.deepseek_base_url,
+            model=settings.deepseek_model,
+            timeout_seconds=settings.deepseek_timeout_seconds,
+        )
+        return (
+            HostAgentIntentResolver(host_agent),
+            PromptNarrationModel(client),
+            HostModelMetadata(
+                provider="deepseek",
+                model=settings.deepseek_model,
+            ),
         )
     if settings.host_model_provider == "qwen":
         if settings.qwen_api_key is None:

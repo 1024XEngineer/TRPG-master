@@ -1,17 +1,17 @@
-"""Provider-private configuration for the Qwen Host Agent adapter."""
+"""Provider-private configuration for OpenAI-compatible Host Agent adapters."""
 
 from __future__ import annotations
 
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, SecretStr, field_validator
 
 
 DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 DEFAULT_MODEL = "qwen-plus"
 
 
-class QwenHostAgentConfig(BaseModel):
+class OpenAICompatibleHostAgentConfig(BaseModel):
     """Validated settings passed explicitly by the composition root."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -23,6 +23,7 @@ class QwenHostAgentConfig(BaseModel):
     max_tool_calls: int = Field(default=8, gt=0)
     tool_timeout_seconds: float = Field(default=5, gt=0)
     timeout_seconds: float = Field(default=30, gt=0)
+    model_settings_extra_body: dict[str, JsonValue] | None = {"enable_thinking": False}
 
     @field_validator("api_key")
     @classmethod
@@ -47,3 +48,7 @@ class QwenHostAgentConfig(BaseModel):
         if not normalized:
             raise ValueError("model must not be empty")
         return normalized
+
+
+# Keep the provider-specific name for existing Qwen callers and tests.
+QwenHostAgentConfig = OpenAICompatibleHostAgentConfig

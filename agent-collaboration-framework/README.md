@@ -1,6 +1,6 @@
 # Agent Collaboration Framework
 
-这是成员 A（主持编排）、成员 B（确定性规则引擎）和成员 C（模组解析/审查）共同使用的模块化单体骨架。当前版本提供稳定边界、可运行的离线纵切、面向持久化的 `RuleEngineService + InMemoryEngineStore`，以及已经接入统一 Host 意图阶段的 OpenAI Agents SDK + Qwen Host Agent Adapter；不接 LangGraph、PostgreSQL 或 FastAPI。
+这是成员 A（主持编排）、成员 B（确定性规则引擎）和成员 C（模组解析/审查）共同使用的模块化单体骨架。当前版本提供稳定边界、可运行的离线纵切、面向持久化的 `RuleEngineService + InMemoryEngineStore`，以及已经接入统一 Host 意图阶段的 OpenAI Agents SDK + OpenAI-compatible Host Agent Adapter；不接 LangGraph、PostgreSQL 或 FastAPI。
 
 ## 阅读入口
 
@@ -22,7 +22,7 @@ Proposal、RFC、对比报告或阶段性讨论。
 PlayerInput
   -> PlayerViewProjector.project()
   -> HostAgentIntentResolver.resolve()
-       -> HostAgentPort.astream()        # Fake / Qwen / OneShot
+       -> HostAgentPort.astream()        # Fake / compatible provider / OneShot
        -> IntentParser.parse()           # Pydantic + 可信候选校验
   -> ActionExecutor.execute()            # 每个合法 Intent 恰好调用一次
   -> PlayerViewProjector.refresh()
@@ -39,7 +39,7 @@ PlayerInput
 
 当前 `HostAgentContext` 会把完整 PlayerView v2 交给一次 Host Agent run：其中包含同一 revision 的 `self_actor`、安全 `scene`
 （实体、人物、出口）、`known_information` 与可信 `checkpoint_options`。后端的
-OpenAI/Qwen Prompt Adapter 直接序列化这份 Context；不会附加 GameState、数据库记录
+OpenAI-compatible Prompt Adapter 直接序列化这份 Context；不会附加 GameState、数据库记录
 或完整 ModuleContent。Host Agent 的只读工具也只绑定这一份 PlayerView。
 
 ## Host Agent 契约
@@ -52,9 +52,9 @@ OpenAI/Qwen Prompt Adapter 直接序列化这份 Context；不会附加 GameStat
 `host/tools` 中绑定 `HostAgentContext.player_view` 的两个只读工具，以及拒绝模型自行传入身份作用域的框架无关
 `ToolRegistry`。它们只搜索/读取当前 `PlayerView`，不访问引擎、数据库或完整模组。
 
-`host/adapters/openai_agents/QwenHostAgentAdapter` 通过 OpenAI-compatible Chat Completions 运行 Qwen，并使用
+`host/adapters/openai_agents/OpenAICompatibleHostAgentAdapter` 通过 OpenAI-compatible Chat Completions 运行兼容 provider，并使用
 OpenAI Agents SDK 自带的 model/tool 循环。每次 `astream()` 独立绑定当前 Context 与两个只读工具；Adapter 负责
-最大模型轮数、工具调用预算、单工具/整轮 timeout、脱敏事件、部分 usage 和严格 final JSON 对象边界。SDK/Qwen
+最大模型轮数、工具调用预算、单工具/整轮 timeout、脱敏事件、部分 usage 和严格 final JSON 对象边界。SDK/provider
 类型只存在于该私有 Adapter 和 bootstrap 组合根。
 
 `FakeHostAgent`、真实 Adapter 和无工具的一次性模型兼容 Adapter 都通过
@@ -63,7 +63,7 @@ OpenAI Agents SDK 自带的 model/tool 循环。每次 `astream()` 独立绑定�
 终止或非法输出全部 fail closed。Adapter 和 Resolver 都不调用 `ActionExecutor`，
 不执行规则动作或状态写入。
 
-显式构造 Qwen Adapter 时，由调用方在 bootstrap 阶段提供以下环境变量；模块 import 不读取环境或创建网络客户端：
+显式构造 compatible Adapter 时，由调用方在 bootstrap 阶段提供以下环境变量；模块 import 不读取环境或创建网络客户端：
 
 | 环境变量 | 默认值 | 说明 |
 |---|---|---|
@@ -76,7 +76,7 @@ OpenAI Agents SDK 自带的 model/tool 循环。每次 `astream()` 独立绑定�
 | `HOST_AGENT_TIMEOUT_SECONDS` | `30` | 整轮 timeout |
 
 复制 `.env.example` 只用于准备非敏感默认项；项目不会在 import 时自动加载 `.env`。调用
-`bootstrap.host_agent.build_qwen_host_agent()` 才会验证配置并构造客户端。
+`bootstrap.host_agent.build_qwen_host_agent()` 或 `build_deepseek_host_agent()` 才会验证配置并构造客户端。
 
 ## 2、3、4 点的统一结论
 
@@ -133,7 +133,7 @@ collaboration_framework/
 │   ├── application/           # 普通 async 工作流与应用服务
 │   ├── ports/                 # Intent/Narration/Host Agent 模型抽象及 TurnPort
 │   ├── adapters/fakes/        # 无网络、无 API Key 的离线 Fake
-│   ├── adapters/openai_agents/# 私有 OpenAI Agents SDK + Qwen Adapter
+│   ├── adapters/openai_agents/# 私有 OpenAI Agents SDK + compatible Adapter
 │   ├── schemas/               # A 内部 Agent/Context/Turn/Narration Schema
 │   ├── tools/                 # 绑定当前 PlayerView 的 player-safe 只读工具
 │   └── gateway/               # Player-safe WebSocket 输出

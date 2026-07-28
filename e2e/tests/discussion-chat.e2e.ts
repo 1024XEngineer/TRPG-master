@@ -154,6 +154,7 @@ test('🔴 所有人都能看到发起者的原话 + 守秘人回复（修"聊�
     )
     const guestSeesNarration = waitForEvent(guest.sdk, (e) => e.type === 'narration.push')
     room.host.sdk.roomSocket.submitAction(room.hostPlayerId, {
+      clientActionId: 'discussion-echo-host',
       utterance: '我推开吱呀作响的木门',
     })
     const echo = await guestSeesUtterance
@@ -183,7 +184,10 @@ test('🔴 行动锁：处理中他人提交被拒（ACTION_IN_PROGRESS），完
     // 开着。等到原话广播到达（证明房主的提交已被受理、锁已被持有）再让访客抢。
     const hostNarration = waitForEvent(room.host.sdk, (e) => e.type === 'narration.push')
     const hostEcho = waitForEvent(room.host.sdk, (e) => e.type === 'action.broadcast')
-    room.host.sdk.roomSocket.submitAction(room.hostPlayerId, { utterance: '我搜查书架' })
+    room.host.sdk.roomSocket.submitAction(room.hostPlayerId, {
+      clientActionId: 'action-lock-host',
+      utterance: '我搜查书架',
+    })
     await hostEcho
 
     // 访客在锁窗口内提交 → 被拒，且 error 只发给访客自己
@@ -191,7 +195,10 @@ test('🔴 行动锁：处理中他人提交被拒（ACTION_IN_PROGRESS），完
       guest.sdk,
       (e) => e.type === 'error' && e.payload.code === 'ACTION_IN_PROGRESS'
     )
-    guest.sdk.roomSocket.submitAction(joined.playerId, { utterance: '我翻抽屉' })
+    guest.sdk.roomSocket.submitAction(joined.playerId, {
+      clientActionId: 'action-lock-guest-rejected',
+      utterance: '我翻抽屉',
+    })
     await guestRejected
 
     // 房主的叙事回复到达后访客再提交。⚠️ 用重试而不是一次命中：锁的释放在
@@ -207,7 +214,10 @@ test('🔴 行动锁：处理中他人提交被拒（ACTION_IN_PROGRESS），完
           (e.type === 'action.broadcast' && e.payload.utterance === '我再翻抽屉') ||
           (e.type === 'error' && e.payload.code === 'ACTION_IN_PROGRESS')
       )
-      guest.sdk.roomSocket.submitAction(joined.playerId, { utterance: '我再翻抽屉' })
+      guest.sdk.roomSocket.submitAction(joined.playerId, {
+        clientActionId: `action-lock-guest-retry-${attempt}`,
+        utterance: '我再翻抽屉',
+      })
       const event = await outcome
       if (event.type === 'action.broadcast') {
         accepted = true

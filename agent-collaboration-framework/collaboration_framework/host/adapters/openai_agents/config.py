@@ -9,6 +9,8 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, SecretStr, field_v
 
 DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 DEFAULT_MODEL = "qwen-plus"
+DEEPSEEK_BASE_URL = "https://api.deepseek.com"
+DEEPSEEK_MODEL = "deepseek-chat"
 
 
 class OpenAICompatibleHostAgentConfig(BaseModel):

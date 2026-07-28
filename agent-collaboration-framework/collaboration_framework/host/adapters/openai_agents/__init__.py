@@ -4,6 +4,8 @@ from .adapter import OpenAICompatibleHostAgentAdapter, QwenHostAgentAdapter
 from .config import (
     DEFAULT_BASE_URL,
     DEFAULT_MODEL,
+    DEEPSEEK_BASE_URL,
+    DEEPSEEK_MODEL,
     OpenAICompatibleHostAgentConfig,
     QwenHostAgentConfig,
 )
@@ -11,6 +13,8 @@ from .config import (
 __all__ = [
     "DEFAULT_BASE_URL",
     "DEFAULT_MODEL",
+    "DEEPSEEK_BASE_URL",
+    "DEEPSEEK_MODEL",
     "OpenAICompatibleHostAgentAdapter",
     "OpenAICompatibleHostAgentConfig",
     "QwenHostAgentAdapter",

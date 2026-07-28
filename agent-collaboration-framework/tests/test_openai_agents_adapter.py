@@ -384,6 +384,12 @@ class QwenConfigAndBootstrapTests(unittest.TestCase):
         self.assertIsNone(adapter._config.model_settings_extra_body)
         self.assertNotIn(SECRET, repr(adapter))
 
+    def test_deepseek_bootstrap_uses_deepseek_defaults(self) -> None:
+        adapter = build_deepseek_host_agent({"HOST_AGENT_API_KEY": SECRET})
+
+        self.assertEqual(adapter._config.base_url, "https://api.deepseek.com")
+        self.assertEqual(adapter._config.model, "deepseek-chat")
+
 
 class RawOutputTests(unittest.TestCase):
     def test_accepts_one_finite_json_object_with_optional_exact_fence(self) -> None:

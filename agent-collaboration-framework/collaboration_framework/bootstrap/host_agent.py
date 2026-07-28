@@ -12,6 +12,8 @@ from pydantic import ValidationError
 from collaboration_framework.host.adapters.openai_agents import (
     DEFAULT_BASE_URL,
     DEFAULT_MODEL,
+    DEEPSEEK_BASE_URL,
+    DEEPSEEK_MODEL,
     OpenAICompatibleHostAgentAdapter,
     OpenAICompatibleHostAgentConfig,
 )
@@ -34,6 +36,8 @@ def build_qwen_host_agent(
         environ,
         tool_registry=tool_registry,
         model_settings_extra_body={"enable_thinking": False},
+        default_base_url=DEFAULT_BASE_URL,
+        default_model=DEFAULT_MODEL,
     )
 
 
@@ -48,6 +52,8 @@ def build_deepseek_host_agent(
         environ,
         tool_registry=tool_registry,
         model_settings_extra_body=None,
+        default_base_url=DEEPSEEK_BASE_URL,
+        default_model=DEEPSEEK_MODEL,
     )
 
 
@@ -56,6 +62,8 @@ def _build_host_agent(
     *,
     tool_registry: ToolRegistry | None,
     model_settings_extra_body: dict[str, bool] | None,
+    default_base_url: str,
+    default_model: str,
 ) -> OpenAICompatibleHostAgentAdapter:
     """Build a validated OpenAI-compatible Chat Completions Host Agent."""
 
@@ -67,8 +75,8 @@ def _build_host_agent(
     try:
         config = OpenAICompatibleHostAgentConfig(
             api_key=api_key,
-            base_url=source.get("HOST_AGENT_BASE_URL", DEFAULT_BASE_URL),
-            model=source.get("HOST_AGENT_MODEL", DEFAULT_MODEL),
+            base_url=source.get("HOST_AGENT_BASE_URL", default_base_url),
+            model=source.get("HOST_AGENT_MODEL", default_model),
             max_turns=_read_int(source, "HOST_AGENT_MAX_TURNS", 6),
             max_tool_calls=_read_int(source, "HOST_AGENT_MAX_TOOL_CALLS", 8),
             tool_timeout_seconds=_read_float(

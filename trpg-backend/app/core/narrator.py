@@ -96,14 +96,22 @@ class DeepSeekNarrator(Narrator):
     事件），职责不在这里。
     """
 
-    def __init__(self, api_key: str) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        *,
+        base_url: str = DEEPSEEK_BASE_URL,
+        model: str = DEEPSEEK_MODEL,
+        timeout_seconds: float = _REQUEST_TIMEOUT_SECONDS,
+    ) -> None:
+        self._model = model
         self._client = AsyncOpenAI(
-            api_key=api_key, base_url=DEEPSEEK_BASE_URL, timeout=_REQUEST_TIMEOUT_SECONDS
+            api_key=api_key, base_url=base_url, timeout=timeout_seconds
         )
 
     async def narrate(self, context: NarrationContext) -> str:
         response = await self._client.chat.completions.create(
-            model=DEEPSEEK_MODEL,
+            model=self._model,
             messages=_build_messages(context),
         )
         return response.choices[0].message.content or ""
@@ -134,7 +142,12 @@ def build_narrator(settings: Settings) -> Narrator:
     docstring），生产配置保持 0、不受影响。
     """
     narrator: Narrator = (
-        DeepSeekNarrator(settings.deepseek_api_key.get_secret_value())
+        DeepSeekNarrator(
+            settings.deepseek_api_key.get_secret_value(),
+            base_url=settings.deepseek_base_url,
+            model=settings.deepseek_model,
+            timeout_seconds=settings.deepseek_timeout_seconds,
+        )
         if settings.deepseek_api_key
         else FallbackNarrator()
     )

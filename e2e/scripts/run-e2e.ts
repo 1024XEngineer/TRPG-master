@@ -8,7 +8,7 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync, rmSync } from 'node:fs'
 import { createServer } from 'node:net'
-import { dirname, resolve } from 'node:path'
+import { delimiter, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -25,6 +25,8 @@ const BACKEND_DIR = resolve(HERE, '../../trpg-backend')
  */
 const PORT = Number(process.env.E2E_PORT ?? 8099)
 const BASE_URL = `http://127.0.0.1:${PORT}`
+const TSX_CLI = resolve(HERE, '../node_modules/tsx/dist/cli.mjs')
+const TEST_PATTERN = process.argv[2] ?? process.env.E2E_ONLY ?? 'tests/*.e2e.ts'
 
 /**
  * 每次跑都用**全新的 e2e.db**。
@@ -37,6 +39,10 @@ const DB_FILE = resolve(BACKEND_DIR, 'e2e.db')
 const backendEnv = {
   ...process.env,
   DATABASE_URL: 'sqlite+aiosqlite:///./e2e.db',
+  PYTHONPATH: [
+    resolve(BACKEND_DIR, '../agent-collaboration-framework'),
+    process.env.PYTHONPATH,
+  ].filter(Boolean).join(delimiter),
   // 叙事生成人为延迟 1 秒（issue #107 测试钩子，生产恒为 0）：占位 narrator
   // 同步秒回，action.submit 的房间锁窗口只有微秒级，两个客户端"同时提交"
   // 永远压不中 ACTION_IN_PROGRESS——没有这 1 秒，锁的并发拒绝路径在 e2e 里
@@ -52,11 +58,17 @@ const backendEnv = {
  * 建出这个虚拟环境（CI 和本地都一样），这样不额外要求 `uv` 本身在 PATH 上——
  * 开发机上它经常就不在，写成 `uv run` 会直接 command not found。
  */
-const BACKEND_VENV_BIN = resolve(BACKEND_DIR, '.venv/bin')
-const ROOT_VENV_BIN = resolve(BACKEND_DIR, '../.venv/bin')
-const VENV_BIN = existsSync(resolve(BACKEND_VENV_BIN, 'alembic'))
+const VENV_FOLDER = process.platform === 'win32' ? 'Scripts' : 'bin'
+const EXECUTABLE_SUFFIX = process.platform === 'win32' ? '.exe' : ''
+const BACKEND_VENV_BIN = resolve(BACKEND_DIR, '.venv', VENV_FOLDER)
+const ROOT_VENV_BIN = resolve(BACKEND_DIR, '..', '.venv', VENV_FOLDER)
+const VENV_BIN = existsSync(resolve(BACKEND_VENV_BIN, `alembic${EXECUTABLE_SUFFIX}`))
   ? BACKEND_VENV_BIN
   : ROOT_VENV_BIN
+
+function venvExecutable(name: string): string {
+  return resolve(VENV_BIN, `${name}${EXECUTABLE_SUFFIX}`)
+}
 
 function run(command: string, args: string[], label: string): Promise<void> {
   return new Promise((resolvePromise, rejectPromise) => {
@@ -124,11 +136,11 @@ let backendExitCode: number | undefined
 async function main(): Promise<number> {
   await assertPortFree(PORT)
   rmSync(DB_FILE, { force: true })
-  await run(`${VENV_BIN}/alembic`, ['upgrade', 'head'], 'alembic')
-  await run(`${VENV_BIN}/python`, ['scripts/load_paper_chase.py'], '追书人 loader')
+  await run(venvExecutable('alembic'), ['upgrade', 'head'], 'alembic')
+  await run(venvExecutable('python'), ['scripts/load_paper_chase.py'], '追书人 loader')
 
   backend = spawn(
-    `${VENV_BIN}/uvicorn`,
+    venvExecutable('uvicorn'),
     ['app.main:app', '--host', '127.0.0.1', '--port', String(PORT)],
     { cwd: BACKEND_DIR, env: backendEnv, stdio: ['ignore', 'ignore', 'inherit'] }
   )
@@ -139,11 +151,19 @@ async function main(): Promise<number> {
 
   return await new Promise<number>((resolvePromise) => {
     const tests = spawn(
-      'npx',
-      ['tsx', '--test', '--test-reporter=spec', process.env.E2E_ONLY ?? 'tests/*.e2e.ts'],
-      { cwd: resolve(HERE, '..'), env: { ...process.env, E2E_BASE_URL: BASE_URL }, stdio: 'inherit' }
+      process.execPath,
+      [TSX_CLI, '--test', '--test-reporter=spec', TEST_PATTERN],
+      {
+        cwd: resolve(HERE, '..'),
+        env: { ...process.env, E2E_BASE_URL: BASE_URL },
+        stdio: 'inherit',
+      }
     )
     tests.on('exit', (code) => resolvePromise(code ?? 1))
+    tests.on('error', (error) => {
+      console.error(error)
+      resolvePromise(1)
+    })
   })
 }
 

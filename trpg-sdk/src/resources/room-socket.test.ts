@@ -5,7 +5,14 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import type { TurnCompletedEvent } from '../types';
-import { isValidServerEvent, isValidTurnCompleted, RoomSocket } from './room-socket';
+import {
+  isValidServerEvent,
+  isValidTurnCompleted,
+  RoomSocket,
+  RoomSocketServerError,
+  RoomSocketTransportError,
+  TurnFailedError,
+} from './room-socket';
 
 const completedEvent = {
   protocol_version: '1',
@@ -159,7 +166,7 @@ test('waitForOpen：连接失败时 reject 的是 Error，且 cause 是原始 Ev
     await assert.rejects(
       () => socket.waitForOpen(ws),
       (err: unknown) => {
-        assert.ok(err instanceof Error);
+        assert.ok(err instanceof RoomSocketTransportError);
         assert.ok(err.cause instanceof Event);
         return true;
       }
@@ -175,6 +182,7 @@ test('turn.failed reject pending action，view.updated 更新同一份缓存', a
     static readonly CONNECTING = 0;
     readonly readyState = FakeWebSocket.OPEN;
     onmessage: ((event: { data: string }) => void) | null = null;
+    onclose: (() => void) | null = null;
     sent: string[] = [];
 
     constructor(readonly url: string) {}
@@ -189,6 +197,10 @@ test('turn.failed reject pending action，view.updated 更新同一份缓存', a
 
     emit(value: unknown) {
       this.onmessage?.({ data: JSON.stringify(value) });
+    }
+
+    emitClose() {
+      this.onclose?.();
     }
   }
 
@@ -225,8 +237,53 @@ test('turn.failed reject pending action，view.updated 更新同一份缓存', a
     await assert.rejects(
       pending,
       (error: unknown) =>
-        error instanceof Error &&
-        error.message === '主持 Agent 响应超时，请重试'
+        error instanceof TurnFailedError &&
+        error.message === '主持 Agent 响应超时，请重试' &&
+        error.code === 'HOST_AGENT_TIMEOUT' &&
+        error.retryable
+    );
+
+    const rejectedAction = socket.submitAction('player-1', {
+      clientActionId: 'busy-action',
+      utterance: '继续调查书架',
+    });
+    transport.emit({
+      type: 'error',
+      payload: {
+        code: 'ACTION_IN_PROGRESS',
+        message: '守秘人正在处理其他行动，请稍候',
+        correlationId: 'busy-action',
+      },
+    });
+    await assert.rejects(
+      rejectedAction,
+      (error: unknown) =>
+        error instanceof RoomSocketServerError &&
+        error.code === 'ACTION_IN_PROGRESS' &&
+        error.correlationId === 'busy-action'
+    );
+
+    const retriedAction = socket.submitAction('player-1', {
+      clientActionId: 'busy-action',
+      utterance: '继续调查书架',
+    });
+    assert.notEqual(retriedAction, rejectedAction);
+    transport.emit({
+      ...completedEvent,
+      correlation_id: 'busy-action',
+    });
+    await assert.doesNotReject(retriedAction);
+
+    const interruptedAction = socket.submitAction('player-1', {
+      clientActionId: 'interrupted-action',
+      utterance: '查看门外',
+    });
+    transport.emitClose();
+    await assert.rejects(
+      interruptedAction,
+      (error: unknown) =>
+        error instanceof RoomSocketTransportError &&
+        error.message === 'WebSocket connection closed'
     );
   } finally {
     Object.defineProperty(globalThis, 'WebSocket', {
@@ -234,4 +291,17 @@ test('turn.failed reject pending action，view.updated 更新同一份缓存', a
       value: original,
     });
   }
+});
+
+test('未连接时 submitAction reject RoomSocketTransportError', async () => {
+  const socket = new RoomSocket('ws://example.test');
+  await assert.rejects(
+    socket.submitAction('player-1', {
+      clientActionId: 'not-connected',
+      utterance: '调查书架',
+    }),
+    (error: unknown) =>
+      error instanceof RoomSocketTransportError &&
+      error.message === 'WebSocket is not connected'
+  );
 });

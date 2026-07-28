@@ -31,6 +31,24 @@ export class TurnFailedError extends Error {
   }
 }
 
+export class RoomSocketServerError extends Error {
+  constructor(
+    message: string,
+    readonly code: string,
+    readonly correlationId: string | null,
+  ) {
+    super(message);
+    this.name = 'RoomSocketServerError';
+  }
+}
+
+export class RoomSocketTransportError extends Error {
+  constructor(message: string, cause?: unknown) {
+    super(message, cause === undefined ? undefined : { cause });
+    this.name = 'RoomSocketTransportError';
+  }
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -358,8 +376,10 @@ export class RoomSocket {
     ) {
       return this.ws;
     }
-    this.rejectPendingActions('WebSocket connection replaced');
-    this.ws?.close();
+    const previousSocket = this.ws;
+    this.ws = null;
+    this.rejectPendingActions(new RoomSocketTransportError('WebSocket connection replaced'));
+    previousSocket?.close();
 
     this.roomId = roomId;
     this.playerView = null;
@@ -396,7 +416,13 @@ export class RoomSocket {
         const pending = this.pendingActions.get(parsed.payload.correlationId);
         if (pending) {
           this.pendingActions.delete(parsed.payload.correlationId);
-          pending.reject(new Error(parsed.payload.message));
+          pending.reject(
+            new RoomSocketServerError(
+              parsed.payload.message,
+              parsed.payload.code,
+              parsed.payload.correlationId,
+            ),
+          );
         }
       }
       if (parsed.type === 'turn.failed') {
@@ -417,6 +443,12 @@ export class RoomSocket {
       }
       this.handlers.forEach((handler) => handler(parsed));
     };
+    socket.onclose = () => {
+      if (this.ws !== socket) return;
+      this.ws = null;
+      this.roomId = null;
+      this.rejectPendingActions(new RoomSocketTransportError('WebSocket connection closed'));
+    };
     this.ws = socket;
     return socket;
   }
@@ -425,13 +457,29 @@ export class RoomSocket {
   waitForOpen(socket: WebSocket): Promise<void> {
     if (socket.readyState === WebSocket.OPEN) return Promise.resolve();
     return new Promise((resolve, reject) => {
-      socket.addEventListener('open', () => resolve(), { once: true });
+      let settled = false;
+      const succeed = () => {
+        if (settled) return;
+        settled = true;
+        resolve();
+      };
+      const fail = (error: RoomSocketTransportError) => {
+        if (settled) return;
+        settled = true;
+        reject(error);
+      };
+      socket.addEventListener('open', succeed, { once: true });
       // 原来这里直接用 WebSocket 的 Event 对象 reject——不是 Error，下游写
       // `.catch(e => e.message)` 只会拿到 undefined。改成传一个真正的
       // Error，原始 Event 保留在 cause 里给需要排查细节的调用方用。
       socket.addEventListener(
         'error',
-        (event) => reject(new Error('WebSocket connection failed', { cause: event })),
+        (event) => fail(new RoomSocketTransportError('WebSocket connection failed', event)),
+        { once: true }
+      );
+      socket.addEventListener(
+        'close',
+        (event) => fail(new RoomSocketTransportError('WebSocket closed before opening', event)),
         { once: true }
       );
     });
@@ -472,7 +520,7 @@ export class RoomSocket {
     this.pendingActions.set(payload.clientActionId, { promise, resolve, reject });
     if (!this.send('action.submit', playerId, payload)) {
       this.pendingActions.delete(payload.clientActionId);
-      reject(new Error('WebSocket is not connected'));
+      reject(new RoomSocketTransportError('WebSocket is not connected'));
     }
     return promise;
   }
@@ -502,10 +550,11 @@ export class RoomSocket {
   }
 
   disconnect(): void {
-    this.rejectPendingActions('WebSocket disconnected');
-    this.ws?.close();
+    const socket = this.ws;
     this.ws = null;
     this.roomId = null;
+    this.rejectPendingActions(new RoomSocketTransportError('WebSocket disconnected'));
+    socket?.close();
   }
 
   private send(type: string, playerId: string, payload: unknown): boolean {
@@ -513,13 +562,18 @@ export class RoomSocket {
       console.warn(`[RoomSocket] not connected, dropped: ${type}`, payload);
       return false;
     }
-    this.ws.send(JSON.stringify({ type, playerId, payload }));
+    try {
+      this.ws.send(JSON.stringify({ type, playerId, payload }));
+    } catch (error) {
+      console.warn(`[RoomSocket] send failed, dropped: ${type}`, error);
+      return false;
+    }
     return true;
   }
 
-  private rejectPendingActions(message: string): void {
+  private rejectPendingActions(error: RoomSocketTransportError): void {
     for (const pending of this.pendingActions.values()) {
-      pending.reject(new Error(message));
+      pending.reject(error);
     }
     this.pendingActions.clear();
   }

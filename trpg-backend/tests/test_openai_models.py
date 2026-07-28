@@ -177,8 +177,7 @@ class EquivalentVerbClient:
         assert schema
         assert instructions
         assert (
-            input_payload["player_view"]["scene"]["visible_entities"][0]["id"]
-            == "cemetery_figure"
+            input_payload["player_view"]["scene"]["visible_entities"][0]["id"] == "cemetery_figure"
         )
         return {
             "kind": "action",

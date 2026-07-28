@@ -6,6 +6,8 @@
 "真的在写、也真的在读"的完整数据闭环之一。
 """
 
+from typing import Literal
+
 from app.dto.common import CamelModel, UtcDatetime
 
 
@@ -24,5 +26,20 @@ class ReplayEventRead(CamelModel):
     id: str
     player_id: str | None = None
     event_type: str
+    payload: dict
+    created_at: UtcDatetime
+
+
+class RoomConversationEventRead(CamelModel):
+    """GET /api/v1/rooms/{roomId}/conversation 返回项。
+
+    它面向房间页恢复当前对话 UI：讨论区消息继续来自 `chat_messages`，行动频道
+    的玩家原话、主持叙事和检定结果来自 `events`。这不是 replay 的替代品；
+    讨论区仍然不进入 replay，也仍然会在结束游戏时按既有语义清理。
+    """
+
+    id: str
+    type: Literal["chat.message", "action.broadcast", "narration.push", "check.result"]
+    channel: Literal["discussion", "action"]
     payload: dict
     created_at: UtcDatetime

@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { TurnFailedError, type AgentPlayerView, type AgentTurnPhase, type CheckRequestPayload } from 'trpg-sdk'
+import { TurnFailedError, type AgentPlayerView, type AgentTurnPhase, type CheckRequestPayload, type RoomConversationEvent } from 'trpg-sdk'
 import { ArrowLeft, Users, Map, BookOpen, ScrollText, Star, X, SendHorizontal, Dice6, Plus, Save, FlagOff, Heart } from 'lucide-react'
 import { useState, useRef, useEffect, type FormEvent } from 'react'
 import { useRoomStore } from '@/stores/room-store'
@@ -77,6 +77,120 @@ function resourceValue(playerView: AgentPlayerView | null, id: string): number |
     item.name.toLocaleLowerCase() === normalized
   )
   return resource?.value ?? null
+}
+
+function formatRoomTime(value: string | Date): string {
+  return new Date(value).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+}
+
+function conversationMessageId(type: RoomConversationEvent['type'], id: string): string {
+  return `history:${type}:${id}`
+}
+
+function mergeHistoricalMessages(current: Message[], history: Message[]): Message[] {
+  const ids = new Set(current.flatMap((item) => (item.messageId ? [item.messageId] : [])))
+  return [...history.filter((item) => !item.messageId || !ids.has(item.messageId)), ...current]
+}
+
+function appendLiveMessage(current: Message[], message: Message): Message[] {
+  if (message.messageId && current.some((item) => item.messageId === message.messageId)) {
+    return current
+  }
+  return [...current, message]
+}
+
+function conversationEventToMessage(
+  event: RoomConversationEvent,
+  selfPlayerId: string | null,
+  senderName: string,
+): Message | null {
+  if (event.type === 'chat.message') {
+    const payload = event.payload as {
+      messageId: string
+      playerId: string
+      nickname: string
+      text: string
+      sentAt: string
+      clientMessageId: string
+    }
+    return {
+      type: 'player',
+      channel: 'discussion',
+      messageId: conversationMessageId(event.type, event.id),
+      sender: payload.nickname,
+      content: payload.text,
+      time: formatRoomTime(payload.sentAt),
+      isSelf: payload.playerId === selfPlayerId,
+    }
+  }
+  if (event.type === 'action.broadcast') {
+    const payload = event.payload as {
+      playerId: string
+      clientActionId: string
+      nickname: string
+      utterance: string
+    }
+    return {
+      type: 'player',
+      channel: 'action',
+      messageId: conversationMessageId(event.type, event.id),
+      sender: payload.nickname,
+      content: payload.utterance,
+      time: formatRoomTime(event.createdAt),
+      isSelf: payload.playerId === selfPlayerId,
+    }
+  }
+  if (event.type === 'narration.push') {
+    const payload = event.payload as { text: string }
+    return {
+      type: 'narr',
+      channel: 'action',
+      messageId: conversationMessageId(event.type, event.id),
+      sender: '守秘人',
+      content: payload.text,
+      time: formatRoomTime(event.createdAt),
+    }
+  }
+  if (event.type === 'check.result') {
+    const payload = event.payload as {
+      playerId: string
+      clientActionId: string
+      skillName: string
+      targetValue: number
+      rollValue: number
+      difficulty: string
+      successLevel: string
+      passed: boolean
+      result: string
+    }
+    const levelLabels: Record<string, string> = {
+      critical: '大成功',
+      extreme: '极难成功',
+      hard: '困难成功',
+      regular: '成功',
+      failure: '失败',
+      fumble: '大失败',
+    }
+    const difficultyLabels: Record<string, string> = {
+      regular: '常规',
+      hard: '困难',
+      extreme: '极难',
+    }
+    const levelLabel = levelLabels[payload.successLevel] ?? payload.result
+    const outcomeLabel = payload.passed
+      ? levelLabel
+      : `${levelLabel}（未通过${difficultyLabels[payload.difficulty] ?? ''}检定）`
+    return {
+      type: 'dice',
+      channel: 'action',
+      messageId: conversationMessageId(event.type, event.id),
+      sender: payload.playerId === selfPlayerId ? senderName : '玩家',
+      content: `${payload.skillName} ${payload.targetValue}% · D100 ${payload.rollValue} · ${outcomeLabel}`,
+      time: formatRoomTime(event.createdAt),
+      isSelf: payload.playerId === selfPlayerId,
+    }
+  }
+  return null
 }
 
 const DICE_OPTIONS = [
@@ -502,6 +616,7 @@ export default function RoomPage() {
   )
   const [lastSaved, setLastSaved] = useState<string | null>(() => (notesKey ? localStorage.getItem(notesKey) : null) ? new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const pendingNarrationActionIdRef = useRef<string | null>(null)
   const suspended = (roomPhase || roomInfo?.phase) === 'Suspended'
   const mapLocations = mapLocationsFromPlayerView(playerView)
   const currentHp = resourceValue(playerView, 'hp') ?? character?.derived.hp ?? null
@@ -514,21 +629,15 @@ export default function RoomPage() {
   useEffect(() => {
     if (!roomId || !reconnectToken) return
     let cancelled = false
-    void sdk.rooms.listMessages(roomId, reconnectToken, { limit: 100 }).then((history) => {
+    void sdk.rooms.listConversation(roomId, reconnectToken).then((history) => {
       if (cancelled) return
-      const restored: Message[] = history.reverse().map((message) => ({
-        type: 'player', channel: 'discussion', messageId: message.messageId,
-        sender: message.nickname, content: message.text,
-        time: new Date(message.sentAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
-        isSelf: message.playerId === playerId,
-      }))
-      setMessages((current) => {
-        const ids = new Set(current.flatMap((item) => item.messageId ? [item.messageId] : []))
-        return [...restored.filter((item) => !item.messageId || !ids.has(item.messageId)), ...current]
-      })
+      const restored = history
+        .map((event) => conversationEventToMessage(event, playerId, senderName))
+        .filter((item): item is Message => item !== null)
+      setMessages((current) => mergeHistoricalMessages(current, restored))
     }).catch(() => {})
     return () => { cancelled = true }
-  }, [roomId, reconnectToken, playerId])
+  }, [roomId, reconnectToken, playerId, senderName])
 
   useEffect(() => {
     if (!playerView) return
@@ -579,32 +688,50 @@ export default function RoomPage() {
         setTyping(false)
         setProgressLabel(null)
         setMessages(prev => {
-          if (prev.at(-1)?.content === envelope.payload.text) return prev
-          return [...prev, {
-            type: 'narr', channel: 'action', sender: '守秘人',
+          const messageId = pendingNarrationActionIdRef.current
+            ? conversationMessageId('narration.push', pendingNarrationActionIdRef.current)
+            : undefined
+          if (messageId && prev.some((item) => item.messageId === messageId)) {
+            pendingNarrationActionIdRef.current = null
+            return prev
+          }
+          if (!messageId && prev.at(-1)?.content === envelope.payload.text) return prev
+          pendingNarrationActionIdRef.current = null
+          return appendLiveMessage(prev, {
+            type: 'narr',
+            channel: 'action',
+            messageId,
+            sender: '守秘人',
             content: envelope.payload.text,
-            time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
-          }]
+            time: formatRoomTime(new Date()),
+          })
         })
       } else if (envelope.type === 'room.state') {
         setRoomPhase(envelope.payload.phase)
       } else if (envelope.type === 'chat.message') {
         setMessages((prev) => {
-          if (prev.some((item) => item.messageId === envelope.payload.messageId)) return prev
-          return [...prev, {
-            type: 'player', channel: 'discussion', messageId: envelope.payload.messageId,
-            sender: envelope.payload.nickname, content: envelope.payload.text,
-            time: new Date(envelope.payload.sentAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+          const messageId = conversationMessageId('chat.message', envelope.payload.messageId)
+          if (prev.some((item) => item.messageId === messageId)) return prev
+          return appendLiveMessage(prev, {
+            type: 'player',
+            channel: 'discussion',
+            messageId,
+            sender: envelope.payload.nickname,
+            content: envelope.payload.text,
+            time: formatRoomTime(envelope.payload.sentAt),
             isSelf: envelope.payload.playerId === playerId,
-          }]
+          })
         })
       } else if (envelope.type === 'action.broadcast') {
-        setMessages((prev) => [...prev, {
-          type: 'player', channel: 'action', sender: envelope.payload.nickname,
+        setMessages((prev) => appendLiveMessage(prev, {
+          type: 'player',
+          channel: 'action',
+          messageId: conversationMessageId('action.broadcast', envelope.payload.clientActionId),
+          sender: envelope.payload.nickname,
           content: envelope.payload.utterance,
-          time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+          time: formatRoomTime(new Date()),
           isSelf: envelope.payload.playerId === playerId,
-        }])
+        }))
       } else if (envelope.type === 'check.request') {
         setTyping(false)
         setProgressLabel(null)
@@ -629,13 +756,15 @@ export default function RoomPage() {
         const outcomeLabel = envelope.payload.passed
           ? levelLabel
           : `${levelLabel}（未通过${difficultyLabels[envelope.payload.difficulty] ?? ''}检定）`
-        setMessages(prev => [...prev, {
-          type: 'dice', channel: 'action',
+        setMessages(prev => appendLiveMessage(prev, {
+          type: 'dice',
+          channel: 'action',
+          messageId: conversationMessageId('check.result', envelope.payload.clientActionId),
           sender: envelope.payload.playerId === playerId ? senderName : '玩家',
           content: `${envelope.payload.skillName} ${envelope.payload.targetValue}% · D100 ${envelope.payload.rollValue} · ${outcomeLabel}`,
-          time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+          time: formatRoomTime(new Date()),
           isSelf: envelope.payload.playerId === playerId,
-        }])
+        }))
         setPendingCheck(current =>
           current?.clientActionId === envelope.payload.clientActionId ? null : current
         )
@@ -655,6 +784,7 @@ export default function RoomPage() {
         setActionError(envelope.payload.publicMessage)
         setActionErrorRetryable(envelope.payload.retryable)
         setActionErrorIsGuidance(envelope.payload.code === 'HOST_AGENT_INVALID_OUTPUT')
+        pendingNarrationActionIdRef.current = null
       } else if (envelope.type === 'view.updated') {
         if (envelope.payload.playerId === playerId) {
           setPlayerView(envelope.payload.playerView)
@@ -663,6 +793,7 @@ export default function RoomPage() {
         setTyping(false)
         setProgressLabel(null)
         setActionError(envelope.payload.message)
+        pendingNarrationActionIdRef.current = null
       }
     })
     return off
@@ -670,6 +801,7 @@ export default function RoomPage() {
 
   const submitPlayerAction = (action: { clientActionId: string; utterance: string }) => {
     if (!playerId || suspended) return
+    pendingNarrationActionIdRef.current = action.clientActionId
     setPendingAction(action)
     setActionError('')
     setActionErrorRetryable(false)
@@ -693,6 +825,7 @@ export default function RoomPage() {
         setActionErrorIsGuidance(
           error instanceof TurnFailedError && error.code === 'HOST_AGENT_INVALID_OUTPUT'
         )
+        pendingNarrationActionIdRef.current = null
       })
   }
 

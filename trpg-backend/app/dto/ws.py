@@ -159,6 +159,7 @@ class ActionBroadcastPayload(CamelModel):
     """action.submit 原话广播 payload。"""
 
     player_id: str
+    client_action_id: str
     nickname: str
     utterance: str
 

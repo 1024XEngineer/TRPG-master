@@ -313,6 +313,7 @@ const PAYLOAD_VALIDATORS: {
     typeof p.clientMessageId === 'string',
   'action.broadcast': (p) =>
     typeof p.playerId === 'string' &&
+    typeof p.clientActionId === 'string' &&
     typeof p.nickname === 'string' &&
     typeof p.utterance === 'string',
   'san.check.request': (p) => typeof p.playerId === 'string',

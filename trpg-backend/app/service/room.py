@@ -26,7 +26,7 @@ from app.core.errors import not_implemented
 from app.core.runtime_state import ruleset_labels, ruleset_skill_values
 from app.dto.game import GameRead, GameSystemRead, RulesetRead
 from app.dto.module import ModuleDetailRead
-from app.dto.replay import ReplayEventRead, RoomSummaryRead
+from app.dto.replay import ReplayEventRead, RoomConversationEventRead, RoomSummaryRead
 from app.dto.room import (
     JoinRoomBody,
     ModuleRead,
@@ -37,6 +37,7 @@ from app.dto.room import (
     RoomPreview,
     SelectModuleBody,
 )
+from app.models.chat import ChatMessage
 from app.models.content import Game, GameSystem, Scenario, World
 from app.models.engine import GameSession, ModuleVersion
 from app.models.event import Event
@@ -938,6 +939,92 @@ async def get_replay(
         select(Event).where(Event.room_id == room_id).order_by(Event.created_at)
     )
     return [ReplayEventRead.model_validate(e) for e in result]
+
+
+async def list_conversation_events(
+    db: AsyncSession, room_id: str, reconnect_token: str | None
+) -> list[RoomConversationEventRead]:
+    """GET /api/v1/rooms/{roomId}/conversation —— 房间对话历史。
+
+    这是给房间页"重进恢复聊天记录"用的服务端权威视图：
+
+    - 讨论区消息继续从 `chat_messages` 读；
+    - `action.broadcast`、`narration.push`、`check.result` 从 `events` 读；
+    - `check.result` 只返回给对应玩家，避免把原本只发给本人的结果扩大成全房间可见；
+    - 按创建时间正序合并，前端直接按顺序渲染即可。
+    """
+    player = await require_room_member(db, room_id, reconnect_token)
+
+    chat_rows = (
+        await db.execute(
+            select(ChatMessage, Player.nickname)
+            .join(Player, ChatMessage.player_id == Player.id)
+            .where(ChatMessage.room_id == room_id)
+            .order_by(ChatMessage.created_at, ChatMessage.id)
+        )
+    ).all()
+    conversation: list[RoomConversationEventRead] = [
+        RoomConversationEventRead(
+            id=message.id,
+            type="chat.message",
+            channel="discussion",
+            payload={
+                "messageId": message.id,
+                "playerId": message.player_id,
+                "nickname": nickname,
+                "text": message.text,
+                "sentAt": message.created_at,
+                "clientMessageId": message.client_message_id,
+            },
+            created_at=message.created_at,
+        )
+        for message, nickname in chat_rows
+    ]
+
+    event_rows = (
+        await db.execute(
+            select(Event)
+            .where(
+                Event.room_id == room_id,
+                Event.event_type.in_(["action.broadcast", "narration.push", "check.result"]),
+            )
+            .order_by(Event.created_at, Event.id)
+        )
+    ).scalars()
+    for event in event_rows:
+        if event.event_type == "action.broadcast":
+            conversation.append(
+                RoomConversationEventRead(
+                    id=event.correlation_id or event.id,
+                    type="action.broadcast",
+                    channel="action",
+                    payload=event.payload,
+                    created_at=event.created_at,
+                )
+            )
+        elif event.event_type == "narration.push":
+            conversation.append(
+                RoomConversationEventRead(
+                    id=event.correlation_id or event.id,
+                    type="narration.push",
+                    channel="action",
+                    payload=event.payload,
+                    created_at=event.created_at,
+                )
+            )
+        elif event.event_type == "check.result" and event.player_id == player.id:
+            conversation.append(
+                RoomConversationEventRead(
+                    id=event.correlation_id or event.id,
+                    type="check.result",
+                    channel="action",
+                    payload=event.payload,
+                    created_at=event.created_at,
+                )
+            )
+
+    conversation.sort(key=lambda item: (item.created_at, item.id))
+    return conversation
 
 
 async def get_summary(db: AsyncSession, room_id: str) -> RoomSummaryRead:

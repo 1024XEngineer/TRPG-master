@@ -61,7 +61,7 @@ async function previewWithAllocations(
 
 // ─── SkillRow Component ──────────────────────────────
 function SkillRow({
-  skill, base, cap, poolAllocation, otherPoolPoints, onChange, onSetAllocation, maxPoints, minPoints
+  skill, base, cap, poolAllocation, onChange, onSetAllocation, maxPoints, minPoints
 }: {
   skill: SkillSpec
   base: number
@@ -69,15 +69,12 @@ function SkillRow({
   // 上限（原来写死兜底 99，等于在后端沉默时凭空造了一条规则，issue #96 决策 4）。
   cap: number | null
   poolAllocation: number
-  otherPoolPoints: number
   onChange: (delta: number) => void
   onSetAllocation: (allocation: number) => void
   maxPoints: number
   minPoints: number
 }) {
-  // 总显示值 = 基础值 + 另一个点数池已经加的 + 当前这个池加的——另一个池的部分
-  // 在这个 tab 里是只读的背景值，编辑只作用于当前池自己的那部分。
-  const current = base + otherPoolPoints + poolAllocation
+  const current = base + poolAllocation
   const canAdd = cap !== null && poolAllocation < maxPoints && current < cap
   const canSub = poolAllocation > minPoints
 
@@ -91,10 +88,10 @@ function SkillRow({
     const typed = parseInt(inputValue, 10)
     if (Number.isNaN(typed)) { setInputValue(String(current)); return }
     if (cap === null) { setInputValue(String(current)); return }
-    const maxAllocByCap = Math.min(maxPoints, cap - base - otherPoolPoints)
-    const newAlloc = Math.max(minPoints, Math.min(maxAllocByCap, typed - base - otherPoolPoints))
+    const maxAllocByCap = Math.min(maxPoints, cap - base)
+    const newAlloc = Math.max(minPoints, Math.min(maxAllocByCap, typed - base))
     onSetAllocation(newAlloc)
-    setInputValue(String(base + otherPoolPoints + newAlloc))
+    setInputValue(String(base + newAlloc))
   }
 
   return (
@@ -107,6 +104,7 @@ function SkillRow({
         {base}%
       </div>
       <button
+        aria-label={`${skill.name} 减少技能点`}
         onClick={() => onChange(-1)}
         className={`w-6 h-6 rounded-full flex items-center justify-center transition-all ${
           canSub ? 'bg-card border border-border-light text-text-muted active:bg-panel active:scale-90' : 'bg-transparent text-border-light cursor-not-allowed'
@@ -116,6 +114,7 @@ function SkillRow({
         <Minus className="w-3 h-3" />
       </button>
       <input
+        aria-label={`${skill.name} 技能点`}
         type="number"
         inputMode="numeric"
         value={inputValue}
@@ -124,6 +123,7 @@ function SkillRow({
         className="text-[15px] font-bold font-mono text-text-primary min-w-[28px] w-[34px] text-center bg-transparent outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
       />
       <button
+        aria-label={`${skill.name} 增加技能点`}
         onClick={() => onChange(1)}
         className={`w-6 h-6 rounded-full flex items-center justify-center transition-all ${
           canAdd ? 'bg-card border border-border-light text-text-muted active:bg-panel active:scale-90' : 'bg-transparent text-border-light cursor-not-allowed'
@@ -388,6 +388,7 @@ export default function CharacterPage() {
   // interestSkillPoints.spent。代价是加点后数字有 ~400ms 防抖延迟。
   const [preview, setPreview] = useState<CharacterComputeResult | null>(null)
   const [previewError, setPreviewError] = useState('')
+  const [previewStatus, setPreviewStatus] = useState<'idle' | 'pending' | 'ready' | 'error'>('idle')
 
   // 请求代次守卫：清 debounce 的 timer 只能取消"还没发出"的下一次调用，取消
   // 不了已经在飞的那次网络请求——如果旧请求比新请求慢返回，会用过期数据
@@ -397,15 +398,15 @@ export default function CharacterPage() {
 
   // 加点手感依赖同步反馈，但预算数字要等 preview 防抖+网络往返才更新——两者
   // 之间有个窗口：连续快点"+"时，每次判断都在拿同一份还没反映最新点数的旧
-  // spent 算"剩余"，会被越过预算（AI review 抓出的真问题，issue #114 之前
-  // 是纯本地同步算账，不存在这个窗口）。这里记一个"已经落到本地状态、但
-  // 还没被最新一次 preview 确认"的净加点数，从两个池子的合计剩余里减掉，
-  // preview 一确认（非过期响应）就清零。只影响"还能不能继续加"的判断，不
-  // 影响两条 bar 本身的显示值（那两个数字仍然只读 preview.spent，见下）。
-  const [pendingDelta, setPendingDelta] = useState(0)
+  // spent 算"剩余"，会被越过预算。这里按预算池分别记一个"已落到本地状态、
+  // 但还没被最新一次 preview 确认"的净加点数，只影响还能不能继续加，不影响
+  // 两条 bar 本身的显示值（那两个数字仍然只读 preview.spent，见下）。
+  const [pendingOccupationDelta, setPendingOccupationDelta] = useState(0)
+  const [pendingInterestDelta, setPendingInterestDelta] = useState(0)
 
   useEffect(() => {
     if (!ruleset) return
+    setPreviewStatus('pending')
     const timer = setTimeout(() => {
       const gen = ++previewGenRef.current
       previewWithAllocations(attr, info.occupationId, skillAlloc)
@@ -413,11 +414,14 @@ export default function CharacterPage() {
           if (gen !== previewGenRef.current) return
           setPreview(result)
           setPreviewError('')
-          setPendingDelta(0)
+          setPreviewStatus('ready')
+          setPendingOccupationDelta(0)
+          setPendingInterestDelta(0)
         })
         .catch((err) => {
           if (gen !== previewGenRef.current) return
           setPreviewError(friendlyErrorMessage(err, '规则计算失败'))
+          setPreviewStatus('error')
         })
     }, 400)
     return () => clearTimeout(timer)
@@ -432,11 +436,9 @@ export default function CharacterPage() {
   const occPointsTotal = preview?.occupationSkillPoints.budget ?? 0
   const interestPointsTotal = preview?.interestSkillPoints.budget ?? 0
 
-  // 职业点数只能花在职业技能列表里；兴趣点数可以花在任何技能上（包括职业技能，
-  // COC7 规则本来就允许兴趣点数给职业技能"加成"）。所以同一个技能的总加点
-  // （skillAlloc，提交给后端用的那份）可能是职业点数和兴趣点数两部分凑出来
-  // 的，这里单独记一份"这个技能里有多少是兴趣点数"，职业点数部分就是
-  // 总数减掉这部分，不需要再单独存。
+  const previewValidationIssues = preview?.validation ?? []
+
+  // 本期建卡页按分类独立记账：职业技能只吃职业池，兴趣技能只吃兴趣池。
   const [interestAlloc, setInterestAlloc] = useState<Record<string, number>>({})
   const interestAllocInitialized = useRef(false)
 
@@ -461,26 +463,14 @@ export default function CharacterPage() {
 
   // 两条预算 bar 的"已花"直接取后端 preview 的权威记账，**不在前端本地重算**。
   //
-  // issue #114 之前这里是本地按「occSkillIds（仅固定本职技能）算职业点、其余算
-  // 兴趣点」+ 手动补信用分账。但职业技能 = 固定 + 自选槽，占槽的技能（尤其是
-  // 「任意 N 项」的开放槽，任何技能都可能占）该算职业点还是兴趣点，取决于后端
-  // 的全局最优占槽（coc7_rules._assign_choice_slots），前端无法在不复刻规则的
-  // 前提下算对——那正是路线乙 / issue #96 要避免的「前端本地做规则记账」。
-  //
-  // 后端 compute_preview 返回的 spent 已经把固定技能、占槽技能、信用分账全算
-  // 进去了（见 coc7_rules._compute），前端只渲染，不叠加。代价是数字随 preview
-  // 防抖有轻微延迟——但预算总额、技能 base/cap 本来就是 preview 驱动的，这里
-  // 只是让 spent 跟它们同源，不是新增的延迟面。
+  // 后端 compute_preview 返回的 spent 已经把固定技能、信用分账全算进去了（见
+  // coc7_rules._compute），前端只渲染，不叠加。预算闸门仍然走 preview 的总
+  // 结果，但每个技能的编辑只会作用于自己所在的那个池。
   const occPointsSpent = preview?.occupationSkillPoints.spent ?? 0
   const interestPointsSpent = preview?.interestSkillPoints.spent ?? 0
 
-  // 两个池子合计还能再加多少——后端的真实闸门本来就是总预算（职业池单独超支
-  // 允许，由兴趣池补，见 SKILL_POINTS_EXCEEDED），所以这个合计值同时也是本地
-  // 能同步维护的、唯一需要精确的数字：加点会被拒当且仅当它 <= 0。
-  const totalPointsRemaining = Math.max(
-    0,
-    occPointsTotal + interestPointsTotal - occPointsSpent - interestPointsSpent - pendingDelta
-  )
+  const occupationPointsRemaining = Math.max(0, occPointsTotal - occPointsSpent - pendingOccupationDelta)
+  const interestPointsRemaining = Math.max(0, interestPointsTotal - interestPointsSpent - pendingInterestDelta)
 
   const derived = useMemo(() => normalizeDerivedStats(preview?.derivedStats), [preview])
 
@@ -488,100 +478,89 @@ export default function CharacterPage() {
   const setCharacterId = useRoomStore((s) => s.setCharacterId)
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
+  const [validationAttempted, setValidationAttempted] = useState(false)
 
-  // 兴趣技能页签（只列非职业技能）：单纯的兴趣点数池，逻辑简单，加/减只动
-  // interestAlloc，skillAlloc 跟着同步——因为这些技能压根碰不到职业点数。
+  useEffect(() => {
+    setValidationAttempted(false)
+  }, [step])
+
+  // 兴趣技能页签（只列非职业技能）：只动兴趣点数池。
   const handleInterestSkillChange = (skillId: string, delta: number) => {
-    if (delta > 0 && totalPointsRemaining <= 0) return
+    if (delta > 0 && interestPointsRemaining <= 0) return
     const prevInterest = interestAlloc[skillId] || 0
     const nextInterest = Math.max(0, prevInterest + delta)
     const appliedDelta = nextInterest - prevInterest
     setInterestAlloc(prev => ({ ...prev, [skillId]: nextInterest }))
     setSkillAlloc(prev => ({ ...prev, [skillId]: (prev[skillId] || 0) + appliedDelta }))
-    if (appliedDelta !== 0) setPendingDelta(d => Math.max(0, d + appliedDelta))
+    if (appliedDelta !== 0) setPendingInterestDelta(d => Math.max(0, d + appliedDelta))
   }
 
   const handleInterestSkillSet = (skillId: string, newAllocation: number) => {
-    const occPart = (skillAlloc[skillId] || 0) - (interestAlloc[skillId] || 0)
     const prevInterest = interestAlloc[skillId] || 0
     let clamped = Math.max(0, newAllocation)
-    if (clamped > prevInterest) {
-      clamped = Math.min(clamped, prevInterest + totalPointsRemaining)
-    }
+    if (clamped > prevInterest) clamped = Math.min(clamped, prevInterest + interestPointsRemaining)
     setInterestAlloc(prev => ({ ...prev, [skillId]: clamped }))
-    setSkillAlloc(prev => ({ ...prev, [skillId]: occPart + clamped }))
+    setSkillAlloc(prev => ({ ...prev, [skillId]: clamped }))
     const appliedDelta = clamped - prevInterest
-    if (appliedDelta !== 0) setPendingDelta(d => Math.max(0, d + appliedDelta))
+    if (appliedDelta !== 0) setPendingInterestDelta(d => Math.max(0, d + appliedDelta))
   }
 
-  // 职业技能页签：加点优先扣职业点数池，职业点数用完了自动改扣兴趣点数池
-  // （这是本轮用户明确要的行为——不是要手动切到兴趣页签才能给职业技能
-  // 补点，职业技能这一侧自己就该会"溢出"到兴趣池）。减点则反过来，先退
-  // 兴趣池占的部分（后加的先退），再退职业池的部分。
+  // 职业技能页签：只动职业点数池，不再让职业技能自动借兴趣池。
   const handleOccSkillChange = (skillId: string, delta: number) => {
     if (delta > 0) {
-      if (totalPointsRemaining <= 0) return
-      // 哪个池子出这一点只是本地展示用的分类（提交给后端的只有最终技能值，
-      // 真正的职业/兴趣归属由后端 _assign_choice_slots 权威决定），这里用的
-      // occRemaining 在连续快点时会暂时不准，但上面已经用 totalPointsRemaining
-      // 挡住了"总共能不能再加"，所以分到哪个池子不影响预算是否被越过。
-      const occRemaining = occPointsTotal - occPointsSpent
-      if (occRemaining > 0) {
-        setSkillAlloc(prev => ({ ...prev, [skillId]: (prev[skillId] || 0) + 1 }))
-      } else {
-        setInterestAlloc(prev => ({ ...prev, [skillId]: (prev[skillId] || 0) + 1 }))
-        setSkillAlloc(prev => ({ ...prev, [skillId]: (prev[skillId] || 0) + 1 }))
-      }
-      setPendingDelta(d => Math.max(0, d + 1))
+      if (occupationPointsRemaining <= 0) return
+      setSkillAlloc(prev => ({ ...prev, [skillId]: (prev[skillId] || 0) + 1 }))
+      setPendingOccupationDelta(d => Math.max(0, d + 1))
     } else if (delta < 0) {
-      const interestPart = interestAlloc[skillId] || 0
-      if (interestPart > 0) {
-        setInterestAlloc(prev => ({ ...prev, [skillId]: interestPart - 1 }))
-      }
       setSkillAlloc(prev => ({ ...prev, [skillId]: Math.max(0, (prev[skillId] || 0) - 1) }))
-      setPendingDelta(d => Math.max(0, d - 1))
+      setPendingOccupationDelta(d => Math.max(0, d - 1))
     }
   }
 
   const handleOccSkillSet = (skillId: string, newTotalAllocation: number) => {
-    const occPart = (skillAlloc[skillId] || 0) - (interestAlloc[skillId] || 0)
-    const interestPart = interestAlloc[skillId] || 0
-    const currentTotal = occPart + interestPart
-    let delta = Math.max(0, newTotalAllocation) - currentTotal
-    if (delta > 0) delta = Math.min(delta, totalPointsRemaining)
-    let newOccPart = occPart
-    let newInterestPart = interestPart
-
-    if (delta > 0) {
-      const occRemaining = Math.max(0, occPointsTotal - occPointsSpent)
-      const occAdd = Math.min(delta, occRemaining)
-      newOccPart += occAdd
-      delta -= occAdd
-      newInterestPart += delta
-    } else if (delta < 0) {
-      let remove = -delta
-      const interestRemove = Math.min(remove, newInterestPart)
-      newInterestPart -= interestRemove
-      remove -= interestRemove
-      newOccPart -= Math.min(remove, newOccPart)
-    }
-
-    setInterestAlloc(prev => ({ ...prev, [skillId]: newInterestPart }))
-    setSkillAlloc(prev => ({ ...prev, [skillId]: newOccPart + newInterestPart }))
-    const appliedDelta = newOccPart + newInterestPart - occPart - interestPart
-    if (appliedDelta !== 0) setPendingDelta(d => Math.max(0, d + appliedDelta))
+    const prevOcc = skillAlloc[skillId] || 0
+    let clamped = Math.max(0, newTotalAllocation)
+    if (clamped > prevOcc) clamped = Math.min(clamped, prevOcc + occupationPointsRemaining)
+    setSkillAlloc(prev => ({ ...prev, [skillId]: clamped }))
+    const appliedDelta = clamped - prevOcc
+    if (appliedDelta !== 0) setPendingOccupationDelta(d => Math.max(0, d + appliedDelta))
   }
 
   // 信用评级 +/- ：直接夹在所选职业的 [creditMin, creditMax] 内。信用的
   // base 固定是 0（见后端 SkillSpec），所以 skillAlloc['credit-rating']
   // 本身就是最终信用值，不需要像其它技能那样叠加 base。
+  const creditRating = selectedOcc
+    ? (skillAlloc['credit-rating'] ?? selectedOcc.creditMin)
+    : null
+
   const handleCreditChange = (delta: number) => {
     if (!selectedOcc) return
+    const current = creditRating ?? selectedOcc.creditMin
+    const next = Math.max(selectedOcc.creditMin, Math.min(selectedOcc.creditMax, current + delta))
     setSkillAlloc(prev => {
-      const current = prev['credit-rating'] ?? selectedOcc.creditMin
-      const next = Math.max(selectedOcc.creditMin, Math.min(selectedOcc.creditMax, current + delta))
       return { ...prev, 'credit-rating': next }
     })
+    setCreditInput(String(next))
+  }
+
+  const [creditInput, setCreditInput] = useState('')
+  useEffect(() => {
+    if (!selectedOcc) {
+      setCreditInput('')
+      return
+    }
+    setCreditInput(String(creditRating))
+  }, [creditRating, selectedOcc])
+
+  const commitCreditInput = () => {
+    if (!selectedOcc) return
+    const typed = parseInt(creditInput, 10)
+    const current = creditRating ?? selectedOcc.creditMin
+    const next = Number.isNaN(typed)
+      ? current
+      : Math.max(selectedOcc.creditMin, Math.min(selectedOcc.creditMax, typed))
+    setSkillAlloc(prev => ({ ...prev, 'credit-rating': next }))
+    setCreditInput(String(next))
   }
 
   // 输入框的字符串态跟 attr 同步（attr 会在 ruleset 到达时被补上默认值）。
@@ -638,13 +617,54 @@ export default function CharacterPage() {
     { label: '完成', key: 'done', done: step > 3 },
   ]
 
+  const getBlockingIssues = (targetStep: number) => {
+    const issues: string[] = []
+    if (!info.name.trim()) issues.push('角色姓名不能为空')
+    if (info.occupationId == null) issues.push('请选择职业')
+    const needsReadyPreview = targetStep >= 1 && info.name.trim() && info.occupationId != null
+    if (needsReadyPreview) {
+      if (previewStatus === 'pending') {
+        issues.push('规则预览尚未准备好，请稍后')
+      } else if (previewStatus === 'error') {
+        issues.push(previewError || '规则预览失败，请重试')
+      } else if (previewStatus !== 'ready') {
+        issues.push('规则预览尚未准备好，请稍后')
+      } else {
+        issues.push(...previewValidationIssues.map(issue => issue.message))
+      }
+    }
+    return issues
+  }
+
+  const handlePrimaryAction = () => {
+    const targetStep = step < 3 ? step + 1 : 4
+    const issues = getBlockingIssues(targetStep)
+    if (issues.length > 0) {
+      setValidationAttempted(true)
+      return
+    }
+    setValidationAttempted(false)
+    setSubmitError('')
+    if (step < 3) {
+      setStep(s => s + 1)
+      return
+    }
+    void handleSubmit()
+  }
+
   const handleSubmit = async () => {
     if (!roomId) {
       setSubmitError('房间信息丢失，请重新创建/加入房间')
       return
     }
     if (!ruleset) return
+    const issues = getBlockingIssues(4)
+    if (issues.length > 0) {
+      setValidationAttempted(true)
+      return
+    }
     setSubmitting(true)
+    setValidationAttempted(false)
     setSubmitError('')
     try {
       // 最终提交前再拉一次权威计算：用当前 base（来自 skillComputeMap）把
@@ -701,6 +721,18 @@ export default function CharacterPage() {
     }
   }
 
+  const currentNavigationIssues = validationAttempted ? getBlockingIssues(step < 3 ? step + 1 : 4) : []
+  const previewIssuesBanner = previewStatus === 'ready' && previewValidationIssues.length > 0 ? (
+    <div className="mt-3 rounded-[6px] border border-[#e0a0a0] bg-[#fff5f5] px-3 py-2 text-[11px] text-[#c04040]">
+      <div className="font-semibold mb-1">当前人物卡有校验问题</div>
+      <div className="space-y-0.5">
+        {previewValidationIssues.map((issue) => (
+          <div key={`${issue.field}-${issue.code}`}>{issue.message}</div>
+        ))}
+      </div>
+    </div>
+  ) : null
+
   return (
     <div className="animate-screen-in min-h-screen bg-page">
       {rulesetLoading ? (
@@ -753,7 +785,13 @@ export default function CharacterPage() {
                 <h4 className="text-[12px] font-semibold text-brass-dark uppercase tracking-[0.08em] mb-3.5">调查员信息</h4>
                 <div className="space-y-3">
                   <input value={info.name} onChange={e => setInfo(i => ({ ...i, name: e.target.value }))}
-                    placeholder="角色姓名" className="w-full px-3.5 py-2.5 rounded-[6px] bg-input border border-border-light text-text-primary text-[15px] outline-none focus:border-brass" />
+                    placeholder="角色姓名"
+                    className={`w-full px-3.5 py-2.5 rounded-[6px] bg-input text-text-primary text-[15px] outline-none focus:border-brass border ${
+                      validationAttempted && !info.name.trim() ? 'border-[#c04040]' : 'border-border-light'
+                    }`} />
+                  {validationAttempted && !info.name.trim() && (
+                    <p className="mt-1 text-[11px] text-[#c04040]">角色姓名不能为空</p>
+                  )}
                   <div className="grid grid-cols-2 gap-2.5">
                     <div>
                       <label className="text-[11px] font-medium text-text-muted mb-1 block">年龄</label>
@@ -872,6 +910,9 @@ export default function CharacterPage() {
                     )
                   })}
                 </div>
+                {validationAttempted && info.occupationId == null && (
+                  <p className="mt-2 text-[11px] text-[#c04040]">请选择职业后再继续</p>
+                )}
               </div>
             </div>
           )}
@@ -976,6 +1017,7 @@ export default function CharacterPage() {
                     </div>
                   ))}
                 </div>
+                {previewIssuesBanner}
               </div>
             </div>
           )}
@@ -1006,6 +1048,7 @@ export default function CharacterPage() {
                   </div>
                 </div>
               </div>
+              {previewIssuesBanner}
 
               {/* Credit Rating — 后端必填技能，值须落在所选职业信用区间内，
                   单独给一张显眼卡片，不跟普通技能混在职业/兴趣两个 tab 里。 */}
@@ -1021,16 +1064,24 @@ export default function CharacterPage() {
                   </div>
                   <div className="flex items-center gap-3 mt-2">
                     <button onClick={() => handleCreditChange(-1)}
-                      disabled={(skillAlloc['credit-rating'] ?? selectedOcc.creditMin) <= selectedOcc.creditMin}
+                      aria-label="减少信用评级"
+                      disabled={(creditRating ?? selectedOcc.creditMin) <= selectedOcc.creditMin}
                       className="w-8 h-8 rounded-full bg-card border border-border-light text-text-muted flex items-center justify-center active:bg-panel active:scale-90 transition-all disabled:opacity-40 disabled:active:scale-100"
                     >
                       <Minus className="w-4 h-4" />
                     </button>
-                    <div className="flex-1 text-center text-[20px] font-bold font-mono text-text-primary">
-                      {skillAlloc['credit-rating'] ?? selectedOcc.creditMin}
-                    </div>
+                    <input
+                      aria-label="信用评级"
+                      type="number"
+                      inputMode="numeric"
+                      value={creditInput}
+                      onChange={e => setCreditInput(e.target.value)}
+                      onBlur={commitCreditInput}
+                      className="flex-1 min-w-0 text-center text-[20px] font-bold font-mono text-text-primary bg-transparent outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                    />
                     <button onClick={() => handleCreditChange(1)}
-                      disabled={(skillAlloc['credit-rating'] ?? selectedOcc.creditMin) >= selectedOcc.creditMax}
+                      aria-label="增加信用评级"
+                      disabled={(creditRating ?? selectedOcc.creditMin) >= selectedOcc.creditMax}
                       className="w-8 h-8 rounded-full bg-card border border-border-light text-text-muted flex items-center justify-center active:bg-panel active:scale-90 transition-all disabled:opacity-40 disabled:active:scale-100"
                     >
                       <Plus className="w-4 h-4" />
@@ -1062,11 +1113,7 @@ export default function CharacterPage() {
                       请先在上一步中选择职业
                     </div>
                   ) : occSkills.map(skill => {
-                    // 职业技能这一侧的"总加点"= 职业池部分 + 兴趣池部分（可能因为职业
-                    // 点数用完了、自动溢出用了兴趣点数），两部分合并成一个数显示和编辑，
-                    // maxPoints 用 totalPointsRemaining（两池合计、已扣掉本次未确认加点
-                    // 的净剩余）而不是分别相加——分开算会在这个技能自己的分配值上重复
-                    // 加减、代数上抵消掉，导致连续快点时门槛形同虚设，见上方定义处注释。
+                    // 职业技能现在只记职业池，不再允许跨池溢出。
                     const totalAllocation = skillAlloc[skill.id] || 0
                     const compute = skillComputeMap.get(skill.id)
                     const base = compute?.base ?? (typeof skill.base === 'number' ? skill.base : 0)
@@ -1074,10 +1121,9 @@ export default function CharacterPage() {
                     return (
                       <SkillRow key={skill.id} skill={skill} base={base} cap={cap}
                         poolAllocation={totalAllocation}
-                        otherPoolPoints={0}
                         onChange={(d) => handleOccSkillChange(skill.id, d)}
                         onSetAllocation={(v) => handleOccSkillSet(skill.id, v)}
-                        maxPoints={totalAllocation + totalPointsRemaining}
+                        maxPoints={totalAllocation + occupationPointsRemaining}
                         minPoints={0}
                       />
                     )
@@ -1093,10 +1139,9 @@ export default function CharacterPage() {
                     return (
                       <SkillRow key={skill.id} skill={skill} base={base} cap={cap}
                         poolAllocation={interestAllocation}
-                        otherPoolPoints={0}
                         onChange={(d) => handleInterestSkillChange(skill.id, d)}
                         onSetAllocation={(v) => handleInterestSkillSet(skill.id, v)}
-                        maxPoints={interestAllocation + totalPointsRemaining}
+                        maxPoints={interestAllocation + interestPointsRemaining}
                         minPoints={0}
                       />
                     )
@@ -1206,19 +1251,17 @@ export default function CharacterPage() {
 
           {/* ═══════════════ Bottom action bar ═══════════════ */}
           <div className="fixed bottom-0 left-0 right-0 bg-page border-t border-border-light px-5 py-3 max-w-[430px] mx-auto z-20">
-            {submitError && <p className="text-[11px] text-[#c04040] text-center mb-2">{submitError}</p>}
+            {(currentNavigationIssues[0] || (step === 3 ? submitError : '')) && (
+              <p className="text-[11px] text-[#c04040] text-center mb-2">
+                {currentNavigationIssues[0] || submitError}
+              </p>
+            )}
             <div className="flex gap-2.5">
               <button onClick={() => step > 0 ? setStep(s => s - 1) : navigate(-1)}
                 className="flex-1 flex items-center justify-center gap-1.5 px-5 py-3 rounded-sm text-sm font-semibold transition-all border border-border-mid bg-card text-text-body active:bg-panel active:scale-[0.97]">
                 上一步
               </button>
-              <button onClick={() => {
-                if (step < 3) {
-                  setStep(s => s + 1)
-                  return
-                }
-                void handleSubmit()
-              }}
+              <button onClick={handlePrimaryAction}
                 disabled={submitting}
                 className="flex-1 flex items-center justify-center gap-1.5 px-5 py-3 rounded-sm text-sm font-semibold transition-all bg-brass text-white active:bg-brass-dark active:scale-[0.97] disabled:opacity-60">
                 {submitting ? '提交中…' : step === 3 ? '完成创建' : '下一步'} →

@@ -248,10 +248,7 @@ class EntitySpec(ContractModel):
     kind: Literal["npc", "object", "location"]
     name: str = Field(min_length=1)
     aliases: tuple[str, ...] = ()
-    player_visible_name: str = ""
-    player_visible_aliases: tuple[str, ...] = ()
     content: str
-    narrative_details: tuple[dict[str, JsonValue], ...] = ()
     visibility: VisibilityPolicy = Field(default_factory=VisibilityPolicy)
     observable_state: tuple[ObservableStateSpec, ...] = ()
     secrets: str | None = None
@@ -266,7 +263,6 @@ class EntitySpec(ContractModel):
 
 class CheckpointOutcomeSpec(ContractModel):
     facts: tuple[str, ...] = ()
-    discover_information_ids: tuple[str, ...] = ()
     player_visible_information: tuple[VisibleInformation, ...] = ()
     narration_constraints: tuple[str, ...] = ()
     ops: tuple[OperationSpec, ...] = ()
@@ -367,7 +363,6 @@ class ModuleContent(ContractModel):
         description="面向叙述 Agent 的时代、地点、玩家侧故事前提与叙事基调。",
     )
     presentation: ModulePresentation | None = None
-    initial_scene_id: str | None = None
     scenes: tuple[SceneSpec, ...]
     entities: tuple[EntitySpec, ...]
     checkpoints: tuple[CheckpointSpec, ...]

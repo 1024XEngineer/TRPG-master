@@ -36,7 +36,6 @@ class ModuleDraft(ContractModel):
         min_length=1,
         description="面向叙述 Agent 的时代、地点、玩家侧故事前提与叙事基调。",
     )
-    initial_scene_id: str | None = None
     scenes: tuple[SceneSpec, ...]
     entities: tuple[EntitySpec, ...]
     checkpoints: tuple[CheckpointSpec, ...]

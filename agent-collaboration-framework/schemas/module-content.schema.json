@@ -107,14 +107,6 @@
           "title": "Facts",
           "type": "array"
         },
-        "discover_information_ids": {
-          "default": [],
-          "items": {
-            "type": "string"
-          },
-          "title": "Discover Information Ids",
-          "type": "array"
-        },
         "player_visible_information": {
           "default": [],
           "items": {
@@ -408,33 +400,9 @@
           "title": "Aliases",
           "type": "array"
         },
-        "player_visible_name": {
-          "default": "",
-          "title": "Player Visible Name",
-          "type": "string"
-        },
-        "player_visible_aliases": {
-          "default": [],
-          "items": {
-            "type": "string"
-          },
-          "title": "Player Visible Aliases",
-          "type": "array"
-        },
         "content": {
           "title": "Content",
           "type": "string"
-        },
-        "narrative_details": {
-          "default": [],
-          "items": {
-            "additionalProperties": {
-              "$ref": "#/$defs/JsonValue"
-            },
-            "type": "object"
-          },
-          "title": "Narrative Details",
-          "type": "array"
         },
         "visibility": {
           "$ref": "#/$defs/VisibilityPolicy"
@@ -1486,18 +1454,6 @@
         }
       ],
       "default": null
-    },
-    "initial_scene_id": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "title": "Initial Scene Id"
     },
     "scenes": {
       "items": {

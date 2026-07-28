@@ -529,9 +529,13 @@ export default function CharacterPage() {
   // 信用评级 +/- ：直接夹在所选职业的 [creditMin, creditMax] 内。信用的
   // base 固定是 0（见后端 SkillSpec），所以 skillAlloc['credit-rating']
   // 本身就是最终信用值，不需要像其它技能那样叠加 base。
+  const creditRating = selectedOcc
+    ? (skillAlloc['credit-rating'] ?? selectedOcc.creditMin)
+    : null
+
   const handleCreditChange = (delta: number) => {
     if (!selectedOcc) return
-    const current = skillAlloc['credit-rating'] ?? selectedOcc.creditMin
+    const current = creditRating ?? selectedOcc.creditMin
     const next = Math.max(selectedOcc.creditMin, Math.min(selectedOcc.creditMax, current + delta))
     setSkillAlloc(prev => {
       return { ...prev, 'credit-rating': next }
@@ -545,13 +549,13 @@ export default function CharacterPage() {
       setCreditInput('')
       return
     }
-    setCreditInput(String(skillAlloc['credit-rating'] ?? selectedOcc.creditMin))
-  }, [selectedOcc, skillAlloc['credit-rating']])
+    setCreditInput(String(creditRating))
+  }, [creditRating, selectedOcc])
 
   const commitCreditInput = () => {
     if (!selectedOcc) return
     const typed = parseInt(creditInput, 10)
-    const current = skillAlloc['credit-rating'] ?? selectedOcc.creditMin
+    const current = creditRating ?? selectedOcc.creditMin
     const next = Number.isNaN(typed)
       ? current
       : Math.max(selectedOcc.creditMin, Math.min(selectedOcc.creditMax, typed))
@@ -1067,7 +1071,7 @@ export default function CharacterPage() {
                   <div className="flex items-center gap-3 mt-2">
                     <button onClick={() => handleCreditChange(-1)}
                       aria-label="减少信用评级"
-                      disabled={(skillAlloc['credit-rating'] ?? selectedOcc.creditMin) <= selectedOcc.creditMin}
+                      disabled={(creditRating ?? selectedOcc.creditMin) <= selectedOcc.creditMin}
                       className="w-8 h-8 rounded-full bg-card border border-border-light text-text-muted flex items-center justify-center active:bg-panel active:scale-90 transition-all disabled:opacity-40 disabled:active:scale-100"
                     >
                       <Minus className="w-4 h-4" />
@@ -1083,7 +1087,7 @@ export default function CharacterPage() {
                     />
                     <button onClick={() => handleCreditChange(1)}
                       aria-label="增加信用评级"
-                      disabled={(skillAlloc['credit-rating'] ?? selectedOcc.creditMin) >= selectedOcc.creditMax}
+                      disabled={(creditRating ?? selectedOcc.creditMin) >= selectedOcc.creditMax}
                       className="w-8 h-8 rounded-full bg-card border border-border-light text-text-muted flex items-center justify-center active:bg-panel active:scale-90 transition-all disabled:opacity-40 disabled:active:scale-100"
                     >
                       <Plus className="w-4 h-4" />

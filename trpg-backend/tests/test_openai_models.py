@@ -64,7 +64,7 @@ def load_paper_chase() -> ModuleContent:
 
 def conversation_state(module: ModuleContent) -> GameState:
     entities = {entity.id: dict(entity.state) for entity in module.entities}
-    entities["douglas"]["willing_to_talk"] = True
+    entities["cemetery_figure"]["willing_to_talk"] = True
     return GameState(
         room_id="room_llm",
         scene_id="conversation",
@@ -103,11 +103,11 @@ class ScriptedStructuredClient:
                 checkpoint_id = "let_douglas_leave"
             else:
                 verb = "talk"
-                checkpoint_id = "talk_to_douglas"
+                checkpoint_id = "talk_to_figure"
             return {
                 "kind": "action",
                 "verb": verb,
-                "target": {"matched": True, "id": "douglas"},
+                "target": {"matched": True, "id": "cemetery_figure"},
                 "check": {
                     "route": "module",
                     "checkpoint_id": checkpoint_id,
@@ -177,11 +177,13 @@ class EquivalentVerbClient:
         assert schema_name == "trpg_intent"
         assert schema
         assert instructions
-        assert input_payload["player_view"]["scene"]["visible_entities"][0]["id"] == "douglas"
+        assert (
+            input_payload["player_view"]["scene"]["visible_entities"][0]["id"] == "cemetery_figure"
+        )
         return {
             "kind": "action",
             "verb": next(self.verbs),
-            "target": {"matched": True, "id": "douglas"},
+            "target": {"matched": True, "id": "cemetery_figure"},
             "check": {"route": "none"},
             "approach": None,
             "summary": "观察道格拉斯",
@@ -227,6 +229,7 @@ async def test_prompt_intent_canonicalizes_equivalent_model_verbs() -> None:
         room_id="room_prompt",
         player_id="player_1",
         actor_id="actor_1",
+        background="玩家可见的测试背景。",
         scene_id="conversation",
         phase="playing",
         revision="0",
@@ -237,7 +240,7 @@ async def test_prompt_intent_canonicalizes_equivalent_model_verbs() -> None:
             description="道格拉斯停在墓碑旁。",
             visible_entities=(
                 VisibleEntity(
-                    id="douglas",
+                    id="cemetery_figure",
                     kind="npc",
                     name="道格拉斯·金博尔",
                     aliases=("道格拉斯",),
@@ -304,6 +307,7 @@ async def test_prompts_treat_scene_orientation_as_narration_not_form_validation(
         room_id="room_prompt",
         player_id="player_1",
         actor_id="actor_1",
+        background="玩家可见的测试背景。",
         scene_id="client_briefing",
         phase="playing",
         revision="0",
@@ -390,6 +394,7 @@ async def test_narration_receives_authoritative_default_check_result() -> None:
         room_id="room_prompt",
         player_id="player_1",
         actor_id="actor_1",
+        background="玩家可见的测试背景。",
         scene_id="quiet_room",
         phase="playing",
         revision="0",

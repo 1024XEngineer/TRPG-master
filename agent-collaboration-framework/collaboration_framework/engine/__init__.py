@@ -8,6 +8,7 @@ from .capabilities import (
     require_runtime_capabilities,
 )
 from .dice import DiceRoller, SequenceDiceSource, SystemDiceSource
+from .initialization import create_initial_game_state
 from .kernel import RuleKernel
 from .models import (
     ActorResources,
@@ -43,5 +44,6 @@ __all__ = [
     "StateModifiedEvent",
     "SystemDiceSource",
     "audit_runtime_capabilities",
+    "create_initial_game_state",
     "require_runtime_capabilities",
 ]

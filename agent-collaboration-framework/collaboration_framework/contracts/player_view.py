@@ -52,12 +52,25 @@ class ProjectionObservableState(ContractModel):
     value: JsonValue
 
 
+class ProjectionNarrativeDetail(ContractModel):
+    id: str = Field(min_length=1)
+    kind: Literal[
+        "description",
+        "sensory",
+        "atmosphere",
+        "pacing",
+        "foreshadowing",
+    ]
+    text: str = Field(min_length=1)
+
+
 class ProjectionEntity(ContractModel):
     id: str = Field(min_length=1)
     kind: Literal["npc", "object", "location"]
     name: str = Field(min_length=1)
     aliases: tuple[str, ...] = ()
     description: str
+    narrative_details: tuple[ProjectionNarrativeDetail, ...] = ()
     observable_state: tuple[ProjectionObservableState, ...] = ()
 
 
@@ -79,6 +92,7 @@ class ProjectionScene(ContractModel):
     name: str
     description: str
     time: str | None = None
+    narrative_details: tuple[ProjectionNarrativeDetail, ...] = ()
     visible_entities: tuple[ProjectionEntity, ...] = ()
     visible_actors: tuple[ProjectionVisibleActor, ...] = ()
     available_exits: tuple[ProjectionAvailableExit, ...] = ()
@@ -108,6 +122,7 @@ class ProjectionSnapshot(ContractModel):
     room_id: str = Field(min_length=1)
     player_id: str = Field(min_length=1)
     actor_id: str = Field(min_length=1)
+    background: str = Field(min_length=1)
     scene_id: str = Field(min_length=1)
     phase: Literal["playing", "ended"]
     revision: str = Field(min_length=1)
@@ -167,12 +182,25 @@ class ObservableStateView(ContractModel):
     value: JsonValue
 
 
+class NarrativeDetailView(ContractModel):
+    id: str = Field(min_length=1)
+    kind: Literal[
+        "description",
+        "sensory",
+        "atmosphere",
+        "pacing",
+        "foreshadowing",
+    ]
+    text: str = Field(min_length=1)
+
+
 class VisibleEntity(ContractModel):
     id: str = Field(min_length=1)
     kind: Literal["npc", "object", "location"]
     name: str = Field(min_length=1)
     aliases: tuple[str, ...] = ()
     description: str
+    narrative_details: tuple[NarrativeDetailView, ...] = ()
     observable_state: tuple[ObservableStateView, ...] = ()
 
 
@@ -194,6 +222,7 @@ class SceneView(ContractModel):
     name: str
     description: str
     time: str | None = None
+    narrative_details: tuple[NarrativeDetailView, ...] = ()
     visible_entities: tuple[VisibleEntity, ...] = ()
     visible_actors: tuple[VisibleActorView, ...] = ()
     available_exits: tuple[AvailableExitView, ...] = ()
@@ -225,6 +254,7 @@ class PlayerView(ContractModel):
     room_id: str = Field(min_length=1)
     player_id: str = Field(min_length=1)
     actor_id: str = Field(min_length=1)
+    background: str = Field(min_length=1)
     scene_id: str = Field(min_length=1)
     phase: Literal["playing", "ended"]
     revision: str = Field(min_length=1)

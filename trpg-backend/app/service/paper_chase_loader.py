@@ -18,7 +18,8 @@ from app.models.content import GameSystem, Scenario
 from app.models.engine import ModuleVersion
 
 PAPER_CHASE_MODULE_ID = "paper-chase-zh-coc7"
-PAPER_CHASE_VERSION = "1.0.1"
+PAPER_CHASE_VERSION = "1.0.2"
+PAPER_CHASE_CONTENT_SCHEMA_VERSION = 2
 PAPER_CHASE_WORLD_REF = "coc-7e"
 PAPER_CHASE_SOURCE_PATH = (
     Path(__file__).resolve().parents[3]
@@ -114,7 +115,11 @@ async def load_paper_chase(
         except ValidationError as exc:
             raise PaperChaseLoadError("coc-7e GameSystem 的 Ruleset 无法构造技能目录") from exc
 
-        report = validate_module_json(payload, skill_catalog=_check_catalog(ruleset))
+        report = validate_module_json(
+            payload,
+            skill_catalog=_check_catalog(ruleset),
+            content_schema_version=PAPER_CHASE_CONTENT_SCHEMA_VERSION,
+        )
         if report.status != "pass" or report.content is None:
             issues = "; ".join(f"{issue.code}@{issue.path}" for issue in report.errors)
             raise PaperChaseLoadError(
@@ -155,14 +160,14 @@ async def load_paper_chase(
                 module_id=PAPER_CHASE_MODULE_ID,
                 version=PAPER_CHASE_VERSION,
                 world_ref=PAPER_CHASE_WORLD_REF,
-                content_schema_version=1,
+                content_schema_version=PAPER_CHASE_CONTENT_SCHEMA_VERSION,
                 content_json=normalized_content,
             )
             db.add(module_version)
             outcome = "inserted"
         elif (
             module_version.world_ref == PAPER_CHASE_WORLD_REF
-            and module_version.content_schema_version == 1
+            and module_version.content_schema_version == PAPER_CHASE_CONTENT_SCHEMA_VERSION
             and module_version.content_json == normalized_content
         ):
             outcome = "unchanged"
@@ -188,17 +193,6 @@ async def load_paper_chase(
         scenario.estimated_duration = presentation.estimated_duration
         scenario.synopsis = presentation.synopsis
         scenario.status = "ready"
-        scenario.synopsis = (
-            "调查员受托寻找五本失窃旧书，并查明道格拉斯一年前的失踪案；"
-            "线索将带你走访旧宅、图书馆与公共墓地。"
-        )
-        scenario.story_pages = [
-            {
-                "title": scene.player_visible_name or scene.name,
-                "content": scene.player_visible_description or scene.content,
-            }
-            for scene in content.scenes
-        ]
         await db.flush()
         if _before_commit is not None:
             _before_commit()

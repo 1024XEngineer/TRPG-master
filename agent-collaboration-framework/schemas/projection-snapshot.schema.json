@@ -193,6 +193,14 @@
           "title": "Description",
           "type": "string"
         },
+        "narrative_details": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ProjectionNarrativeDetail"
+          },
+          "title": "Narrative Details",
+          "type": "array"
+        },
         "observable_state": {
           "default": [],
           "items": {
@@ -290,6 +298,39 @@
       "title": "ProjectionKnownInformation",
       "type": "object"
     },
+    "ProjectionNarrativeDetail": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "description",
+            "sensory",
+            "atmosphere",
+            "pacing",
+            "foreshadowing"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "text"
+      ],
+      "title": "ProjectionNarrativeDetail",
+      "type": "object"
+    },
     "ProjectionObservableState": {
       "additionalProperties": false,
       "properties": {
@@ -342,6 +383,14 @@
           ],
           "default": null,
           "title": "Time"
+        },
+        "narrative_details": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ProjectionNarrativeDetail"
+          },
+          "title": "Narrative Details",
+          "type": "array"
         },
         "visible_entities": {
           "default": [],
@@ -499,6 +548,11 @@
       "title": "Actor Id",
       "type": "string"
     },
+    "background": {
+      "minLength": 1,
+      "title": "Background",
+      "type": "string"
+    },
     "scene_id": {
       "minLength": 1,
       "title": "Scene Id",
@@ -544,6 +598,7 @@
     "room_id",
     "player_id",
     "actor_id",
+    "background",
     "scene_id",
     "phase",
     "revision",

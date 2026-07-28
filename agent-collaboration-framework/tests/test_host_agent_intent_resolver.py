@@ -39,6 +39,7 @@ def context() -> HostAgentContext:
             room_id="room",
             player_id="player",
             actor_id="actor",
+            background="玩家可见的测试背景。",
             scene_id="library",
             phase="playing",
             revision="4",

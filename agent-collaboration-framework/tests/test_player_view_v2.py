@@ -450,6 +450,8 @@ class PlayerViewV2Tests(unittest.IsolatedAsyncioTestCase):
         )
         cabinet["name"] = "通往花园的门"
         cabinet["aliases"] = ["花园门"]
+        cabinet["player_visible_name"] = "通往花园的门"
+        cabinet["player_visible_aliases"] = ["花园门"]
         checkpoint = next(
             item for item in payload["checkpoints"] if item["id"] == "smash_cabinet"
         )

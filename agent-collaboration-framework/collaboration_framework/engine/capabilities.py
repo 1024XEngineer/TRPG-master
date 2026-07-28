@@ -108,6 +108,42 @@ def audit_runtime_capabilities(
                         checkpoint_outcome.ops,
                     )
                 )
+    for scene in module_content.scenes:
+        for detail in scene.narrative_details:
+            issues.extend(
+                _visibility_issues(
+                    f"scene:{scene.id}:detail:{detail.id}",
+                    detail.visibility.discovery_rule,
+                )
+            )
+        for available_exit in scene.available_exits:
+            issues.extend(
+                _visibility_issues(
+                    f"scene:{scene.id}:exit:{available_exit.id}",
+                    available_exit.visibility.discovery_rule,
+                )
+            )
+    for entity in module_content.entities:
+        issues.extend(
+            _visibility_issues(
+                f"entity:{entity.id}:visibility",
+                entity.visibility.discovery_rule,
+            )
+        )
+        for detail in entity.narrative_details:
+            issues.extend(
+                _visibility_issues(
+                    f"entity:{entity.id}:detail:{detail.id}",
+                    detail.visibility.discovery_rule,
+                )
+            )
+        for observable in entity.observable_state:
+            issues.extend(
+                _visibility_issues(
+                    f"entity:{entity.id}:state:{observable.key}",
+                    observable.visibility.discovery_rule,
+                )
+            )
     for win_condition in module_content.win_conditions:
         if win_condition.when.expr is not None:
             issues.extend(
@@ -181,3 +217,10 @@ def _expression_issues(
             )
         ]
     return []
+
+
+def _visibility_issues(
+    owner: str,
+    expression: str | None,
+) -> list[RuntimeCapabilityIssue]:
+    return _expression_issues(owner, expression) if expression is not None else []

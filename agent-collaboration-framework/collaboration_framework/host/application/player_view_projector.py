@@ -9,6 +9,7 @@ from collaboration_framework.contracts import (
     ContractError,
     ExitDestinationView,
     KnownInformationView,
+    NarrativeDetailView,
     ObservableStateView,
     PlayerInput,
     PlayerView,
@@ -50,6 +51,7 @@ class PlayerViewProjector:
             room_id=player_input.room_id,
             player_id=player_input.player_id,
             actor_id=player_input.actor_id,
+            background=snapshot.background,
             scene_id=snapshot.scene_id,
             phase=snapshot.phase,
             revision=snapshot.revision,
@@ -78,6 +80,14 @@ class PlayerViewProjector:
                 name=snapshot.scene.name,
                 description=snapshot.scene.description,
                 time=snapshot.scene.time,
+                narrative_details=tuple(
+                    NarrativeDetailView(
+                        id=item.id,
+                        kind=item.kind,
+                        text=item.text,
+                    )
+                    for item in snapshot.scene.narrative_details
+                ),
                 visible_entities=tuple(
                     VisibleEntity(
                         id=item.id,
@@ -85,6 +95,14 @@ class PlayerViewProjector:
                         name=item.name,
                         aliases=item.aliases,
                         description=item.description,
+                        narrative_details=tuple(
+                            NarrativeDetailView(
+                                id=detail.id,
+                                kind=detail.kind,
+                                text=detail.text,
+                            )
+                            for detail in item.narrative_details
+                        ),
                         observable_state=tuple(
                             ObservableStateView(
                                 key=field.key,

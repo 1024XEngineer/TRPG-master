@@ -16,6 +16,7 @@ from collaboration_framework.engine import (
     ActorResources,
     ActorState,
     GameState,
+    create_initial_game_state,
     require_runtime_capabilities,
 )
 from sqlalchemy import func, select, update
@@ -473,14 +474,10 @@ async def begin_game(db: AsyncSession, room_id: str, player_id: str) -> None:
         )
         for index, room_player in enumerate(room_players, start=1)
     }
-    initial_state = GameState(
+    initial_state = create_initial_game_state(
+        module_content,
         room_id=room.id,
-        scene_id=module_content.scenes[0].id,
-        phase="playing",
-        ending_id=None,
-        event_sequence=0,
         actors=actors,
-        entities={entity.id: deepcopy(entity.state) for entity in module_content.entities},
     )
     now = datetime.now(UTC)
     db.add(

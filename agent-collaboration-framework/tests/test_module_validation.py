@@ -167,6 +167,65 @@ class ModuleValidationTests(unittest.TestCase):
         self.assertEqual(report.errors[0].path, "module_id")
         self.assertNotIn("string_type", report.errors[0].message)
 
+    def test_content_schema_v2_requires_explicit_player_identity_and_initial_scene(
+        self,
+    ) -> None:
+        path = PARSER_EXAMPLES / "追书人" / "module-content-draft.json"
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload.pop("initial_scene_id")
+        payload["entities"][0].pop("player_visible_name")
+
+        report = validate_module(
+            payload,
+            content_schema_version=2,
+        )
+
+        self.assertEqual(report.status, "needs_revision")
+        self.assertEqual(
+            {issue.path for issue in report.errors},
+            {"initial_scene_id", "entities[0].player_visible_name"},
+        )
+
+    def test_content_schema_v2_rejects_unreachable_or_private_state_gates(
+        self,
+    ) -> None:
+        path = PARSER_EXAMPLES / "追书人" / "module-content-draft.json"
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        diary = next(
+            entity for entity in payload["entities"] if entity["id"] == "douglas_diary"
+        )
+        diary["state"]["never_revealed"] = False
+        diary["visibility"]["discovery_rule"] = (
+            "entity.douglas_diary.state.never_revealed == true"
+        )
+        diary["visibility"]["audience"] = "actor"
+
+        report = validate_module(
+            payload,
+            content_schema_version=2,
+        )
+
+        codes = {issue.code for issue in report.errors}
+        self.assertIn("visibility.scope.not_room_shared", codes)
+        self.assertIn("visibility.discovery_rule.unreachable", codes)
+
+    def test_content_schema_v2_rejects_information_id_used_as_fact(self) -> None:
+        path = PARSER_EXAMPLES / "追书人" / "module-content-draft.json"
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload["checkpoints"][0]["outcomes"]["success"]["facts"] = [
+            "lyla_cemetery_sighting"
+        ]
+
+        report = validate_module(
+            payload,
+            content_schema_version=2,
+        )
+
+        self.assertIn(
+            "information.id_used_as_fact",
+            {issue.code for issue in report.errors},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -7,7 +7,9 @@ validation constructs ``contracts.ModuleContent``.
 
 from __future__ import annotations
 
-from pydantic import Field
+from typing import Any
+
+from pydantic import Field, model_validator
 
 from collaboration_framework.contracts import (
     CheckpointSpec,
@@ -36,6 +38,7 @@ class ModuleDraft(ContractModel):
         min_length=1,
         description="面向叙述 Agent 的时代、地点、玩家侧故事前提与叙事基调。",
     )
+    initial_scene_id: str = ""
     scenes: tuple[SceneSpec, ...]
     entities: tuple[EntitySpec, ...]
     checkpoints: tuple[CheckpointSpec, ...]
@@ -43,3 +46,23 @@ class ModuleDraft(ContractModel):
     module_rules: tuple[RuleSpec, ...] = ()
     information_items: tuple[InformationItem, ...] = ()
     presentation: ModulePresentation | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def populate_legacy_initial_scene(cls, value: Any) -> Any:
+        if not isinstance(value, dict) or "initial_scene_id" in value:
+            return value
+        scenes = value.get("scenes")
+        if not isinstance(scenes, (list, tuple)) or not scenes:
+            return value
+        first_scene = scenes[0]
+        scene_id = (
+            first_scene.get("id")
+            if isinstance(first_scene, dict)
+            else getattr(first_scene, "id", None)
+        )
+        if not scene_id:
+            return value
+        normalized = dict(value)
+        normalized["initial_scene_id"] = scene_id
+        return normalized

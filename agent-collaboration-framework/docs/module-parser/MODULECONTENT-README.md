@@ -16,6 +16,7 @@
 ModuleContent
 ├── module_id, version, world_ref    —— 身份和规则系统
 ├── background                       —— 时代、故事前提与叙事基调
+├── initial_scene_id                 —— 显式开局场景
 ├── scenes[]                         —— 有哪些空间
 ├── entities[]                       —— 有哪些东西
 ├── checkpoints[]                    —— 能做哪些动作
@@ -31,8 +32,8 @@ ModuleContent
 ### ModuleContent.background —— “这个故事应当是什么气质”
 
 `background` 是顶层必填的模组级叙述上下文，提炼原文开头的时代、地点、
-玩家侧故事前提和叙事基调。组合根会把它放入每一次 `NarrationContext`，但它不会
-进入玩家可见的 WebSocket 输出，也不能代替 `visible_facts` 成为可直接公开的事实。
+玩家侧故事前提和叙事基调。规则投影会先把它放入 `PlayerView`，主持编排再从
+`PlayerView` 构造 `NarrationContext`；它不能代替已发现信息成为新的调查事实。
 未揭示的幕后真相必须继续放在 `secrets` 或受可见性约束的信息项中，不得写入
 `background`。
 
@@ -44,6 +45,7 @@ ModuleContent
 | `name` / `content` | `"书房"` / `"KP 场景说明..."` | 模组内部名称和完整内容，不直接进入 PlayerView |
 | `player_visible_name` | `"书房"` | 玩家安全的场景名称 |
 | `player_visible_description` | `"昏黄灯光下，书架、木柜..."` | 玩家当前可感知描述；不得从 `content` 自动兜底 |
+| `narrative_details` | `[{"id":"opened-cabinet",...}]` | 通过状态门后持续投影的安全细节 |
 | `entity_ids` | `["butler","bookshelf","cabinet"]` | 索引：这个场景里有哪些实体。B 的引擎据此决定 PlayerView 展示什么 |
 | `checkpoint_ids` | `["investigate_bookshelf","smash_cabinet"]` | 索引：这个场景里能做什么动作。A 的 IntentParser 据此匹配玩家语义 |
 | `exits` | `["garden"]` | 可达 Scene 限制；空数组表示可自由前往其他 Scene，非空时只允许列出的 Scene |
@@ -55,8 +57,10 @@ ModuleContent
 |------|--------|------|
 | `id` | `"cabinet"` | 唯一标识，其他字段引用它 |
 | `kind` | `"object"` | npc / object / location 三种 |
-| `name` / `aliases` | `"上锁的柜子"` / `["柜子","木柜"]` | A 做语义匹配——玩家说"打开柜子"能匹配到 |
+| `name` / `aliases` | `"密件柜"` / `["目标容器"]` | 内部身份与 KP 语义，不进入 PlayerView |
+| `player_visible_name` / `player_visible_aliases` | `"上锁的柜子"` / `["柜子","木柜"]` | 玩家可见身份，也是 Host 的安全语义匹配来源 |
 | `content` | `"一只带黄铜锁孔的年代久远的木柜"` | 玩家可见描述 → 进入 PlayerView |
+| `narrative_details` | `[{"id":"keyhole",...}]` | 状态成立后才进入 PlayerView 的持续细节 |
 | `visibility` | `{"audience":"all",...}` | 实体自身的受众与发现策略 |
 | `observable_state` | `[{"key":"opened","label":"柜门是否打开"}]` | 动态状态 allow-list；不复制原始 Entity state |
 | `secrets` | `"文件藏在柜中；强行砸开会毁坏文件"` | KP 私密信息 → 不进入 A 的上下文。信息隔离边界 |
@@ -116,6 +120,7 @@ Rule(
 | 字段 | 值示例 | 作用 |
 |------|--------|------|
 | `facts` | `["玩家在书架后发现钥匙"]` | 引擎确认事实 |
+| `discover_information_ids` | `["hidden_document_location"]` | 把长期事实写入玩家/队伍已发现信息 |
 | `player_visible_information` | `[{"text":"你拨开积灰的书册..."}]` | 给玩家看的内容；字符串输入也会兼容归一为 `VisibleInformation` |
 | `narration_constraints` | `["必须明确玩家已经发现钥匙"]` | 硬约束：A 的 Narrator 不能乱说 |
 | `ops` | `[modify("key_found", true)]` | 引擎可执行的操作——**Parser 最难的活**：把"找到钥匙"翻译成 `modify key_found = true` |

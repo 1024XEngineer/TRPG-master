@@ -205,7 +205,7 @@ test('追书人纵切：首场景 → 托马斯 → 图书馆 → 旧报检定 �
     )
     const completed = room.host.sdk.roomSocket.submitAction(room.hostPlayerId, {
       clientActionId: checkActionId,
-      utterance: '我查阅墓地旧闻档案，研究当地报纸的旧刊',
+      utterance: '我查阅当地旧报档案，研究报纸旧刊',
     })
     const request = await checkRequested
     assert.equal(request.type, 'check.request')

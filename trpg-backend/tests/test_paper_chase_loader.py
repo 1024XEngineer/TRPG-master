@@ -23,7 +23,7 @@ async def test_loader_is_idempotent_and_reports_real_content(
 
     assert result.outcome == "unchanged"
     assert result.module_id == BUILTIN_MODULE_ID
-    assert result.version == "1.0.1"
+    assert result.version == "1.0.2"
     assert result.world_ref == "coc-7e"
     assert result.scene_count == 11
     assert result.entity_count == 16
@@ -35,25 +35,28 @@ async def test_loader_is_idempotent_and_reports_real_content(
     scenario = await db_session.get(Scenario, BUILTIN_SCENARIO_ID)
     assert scenario is not None
     assert scenario.title == "追书人"
-    assert scenario.story_pages[0]["title"] == "托马斯的会客室"
-    assert "失窃藏书" in scenario.story_pages[0]["content"]
+    assert scenario.story_pages[0]["title"] == "调查委托"
+    assert "被盗的五本珍藏旧书" in scenario.story_pages[0]["content"]
 
 
-async def test_paper_chase_hides_caretaker_bottle_until_discovered() -> None:
+async def test_paper_chase_models_caretaker_bottle_as_conditional_detail() -> None:
     payload = json.loads(loader.PAPER_CHASE_SOURCE_PATH.read_text(encoding="utf-8"))
-    assert payload["version"] == "1.0.1"
+    assert payload["version"] == "1.0.2"
+    assert payload["initial_scene_id"] == "client_briefing"
     entities = {entity["id"]: entity for entity in payload["entities"]}
     checkpoints = {checkpoint["id"]: checkpoint for checkpoint in payload["checkpoints"]}
 
-    bottle = entities["caretaker_bottle"]
-    assert bottle["visibility"] == {
+    assert "caretaker_bottle" not in entities
+    detail = entities["melodias"]["narrative_details"][0]
+    assert detail["id"] == "melodias_pocket_bottle"
+    assert detail["visibility"] == {
         "audience": "all",
         "requires_discovery": True,
-        "discovery_rule": "entity.caretaker_bottle.state.noticed == true",
+        "discovery_rule": "entity.melodias.state.bottle_noticed == true",
         "discovery_shares_to_party": True,
     }
     assert "玻璃瓶" not in entities["melodias"]["content"]
-    assert checkpoints["notice_caretaker_bottle"]["target_id"] == "melodias"
+    assert checkpoints["observe_caretaker"]["target_id"] == "melodias"
 
 
 async def test_loader_projects_player_safe_presentation_to_catalog(
@@ -90,6 +93,7 @@ async def test_loader_rejects_other_identity_without_database_changes(
     )
     assert scenario is not None
     assert module_version is not None
+    assert module_version.content_schema_version == 2
     original_content = module_version.content_json
     await db_session.commit()
 
@@ -164,15 +168,14 @@ async def test_loader_preserves_rooms_pinned_legacy_version(
         (BUILTIN_MODULE_ID, BUILTIN_MODULE_VERSION),
     )
     assert current is not None
-    legacy_content = dict(current.content_json)
-    legacy_content["version"] = "1.0.0"
-    legacy_content["background"] = "旧房间固定内容，不得被新发布改写"
+    legacy_path = loader.PAPER_CHASE_SOURCE_PATH.with_name("module-content-1.0.1.json")
+    legacy_content = json.loads(legacy_path.read_text(encoding="utf-8"))
     db_session.add(
         ModuleVersion(
             module_id=BUILTIN_MODULE_ID,
-            version="1.0.0",
+            version="1.0.1",
             world_ref=current.world_ref,
-            content_schema_version=current.content_schema_version,
+            content_schema_version=1,
             content_json=legacy_content,
         )
     )
@@ -180,8 +183,8 @@ async def test_loader_preserves_rooms_pinned_legacy_version(
 
     result = await loader.load_paper_chase(db_session)
 
-    assert result.version == "1.0.1"
-    legacy = await db_session.get(ModuleVersion, (BUILTIN_MODULE_ID, "1.0.0"))
+    assert result.version == "1.0.2"
+    legacy = await db_session.get(ModuleVersion, (BUILTIN_MODULE_ID, "1.0.1"))
     assert legacy is not None
     assert legacy.content_json == legacy_content
 

@@ -182,7 +182,7 @@ npm run dev
 | `ENABLE_DOCS` | `true` | 是否开放 `/docs`、`/redoc` 和 `/openapi.json` |
 | `LOG_LEVEL` | `INFO` | 后端日志级别 |
 | `CORS_ORIGINS` | `["http://localhost:9877"]` | 允许跨域访问的前端来源列表 |
-| `HOST_MODEL_PROVIDER` | `fake` | 主持模型：`fake`、`openai` 或 `qwen` |
+| `HOST_MODEL_PROVIDER` | `fake` | 主持模型：`fake`、`openai`、`qwen` 或 `deepseek` |
 | `OPENAI_API_KEY` | 空 | `openai` 提供商的 API 密钥 |
 | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | OpenAI Responses API 根地址 |
 | `OPENAI_MODEL` | `gpt-5.6-luna` | OpenAI 模型名称 |
@@ -191,6 +191,10 @@ npm run dev
 | `QWEN_BASE_URL` | `https://dashscope.aliyuncs.com/compatible-mode/v1` | 千问 OpenAI 兼容接口根地址 |
 | `QWEN_MODEL` | `qwen3.7-plus` | 千问模型名称 |
 | `QWEN_TIMEOUT_SECONDS` | `30` | 千问请求超时秒数 |
+| `DEEPSEEK_API_KEY` | 空 | DeepSeek 或其他兼容 provider 的 API 密钥 |
+| `DEEPSEEK_BASE_URL` | `https://api.deepseek.com` | OpenAI-compatible Chat Completions 根地址 |
+| `DEEPSEEK_MODEL` | `deepseek-chat` | DeepSeek 模型名称 |
+| `DEEPSEEK_TIMEOUT_SECONDS` | `30` | DeepSeek 请求超时秒数 |
 | `HOST_AGENT_MAX_TURNS` | `6` | 单次 Host Agent 最大模型轮数 |
 | `HOST_AGENT_MAX_TOOL_CALLS` | `8` | 单次 Host Agent 最大工具调用数 |
 | `HOST_AGENT_TOOL_TIMEOUT_SECONDS` | `5` | 单工具超时秒数 |
@@ -205,6 +209,7 @@ npm run dev
 | `fake` | 不发送网络请求 | 默认值；本地开发、自动化测试和无密钥运行 |
 | `openai` | OpenAI Responses API + 严格 JSON Schema | 使用原生支持 `text.format=json_schema` 的模型 |
 | `qwen` | 千问 Chat Completions JSON Mode + 本地 Pydantic 校验 | 阿里云百炼千问 3.7 Plus |
+| `deepseek` | OpenAI-compatible Chat Completions + JSON Mode + 本地 Pydantic 校验 | DeepSeek；兼容同一协议的 provider 可复用 |
 
 无论使用哪种远程模型，模型只负责提出结构化意图或叙事候选；目标、场景、技能和事实引用仍会在应用边界重新校验，最终状态只由规则引擎修改。
 
@@ -249,9 +254,25 @@ npm run dev
    ```
 
 健康检查只能确认后端存活，不会调用模型。请进入房间提交一次自然语言行动进行验证。
-Qwen 模式缺少 Key 时后端启动失败；Host Agent 超时、预算耗尽、非法输出或越权候选
+远程 provider 模式缺少 Key 时后端启动失败；Host Agent 超时、预算耗尽、非法输出或越权候选
 会发送玩家安全的 `turn.failed`，规则引擎不会执行。Narrator 失败不会重跑 Host
 Agent、重新掷骰或重复写入状态；使用同一 `clientActionId` 重试只会复用已提交结果。
+
+#### 使用 DeepSeek 或兼容 provider
+
+复制 `trpg-backend/.env.example` 为 `.env`，填写：
+
+```dotenv
+HOST_MODEL_PROVIDER=deepseek
+DEEPSEEK_API_KEY=你的_API_Key
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEEPSEEK_MODEL=deepseek-chat
+DEEPSEEK_TIMEOUT_SECONDS=30
+```
+
+Host Agent 工具调用和结构化 Narrator 都使用 OpenAI-compatible Chat Completions。
+其他厂商如果遵循同一协议，可复用这组配置和 adapter；使用私有协议时应新增独立
+provider adapter，而不是把私有字段混入通用请求。
 
 公共 WebSocket 只发送安全进度：`turn.started`、`turn.phase_changed`、
 `tool.started`、`tool.completed`、`turn.failed` 和 `view.updated`。内部 call id、

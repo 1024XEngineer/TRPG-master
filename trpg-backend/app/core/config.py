@@ -42,9 +42,9 @@ class Settings(BaseSettings):
     # 本地默认放行 Vite 开发服务器的默认端口 9877。
     cors_origins: list[str] = ["http://localhost:9877", "http://127.0.0.1:9877"]
 
-    # 默认使用确定性的离线 Fake，便于本地启动和测试；显式切到 openai 或 qwen
+    # 默认使用确定性的离线 Fake，便于本地启动和测试；显式切到远程 provider
     # 后，Host/Narrator 才会调用远程模型。
-    host_model_provider: Literal["fake", "openai", "qwen"] = "fake"
+    host_model_provider: Literal["fake", "openai", "qwen", "deepseek"] = "fake"
     openai_api_key: SecretStr | None = None
     openai_base_url: str = Field(
         default="https://api.openai.com/v1",
@@ -59,6 +59,13 @@ class Settings(BaseSettings):
     )
     qwen_model: str = Field(default="qwen3.7-plus", min_length=1)
     qwen_timeout_seconds: float = Field(default=30.0, gt=0, le=120)
+    deepseek_api_key: SecretStr | None = None
+    deepseek_base_url: str = Field(
+        default="https://api.deepseek.com",
+        min_length=1,
+    )
+    deepseek_model: str = Field(default="deepseek-chat", min_length=1)
+    deepseek_timeout_seconds: float = Field(default=30.0, gt=0, le=120)
     host_agent_max_turns: int = Field(default=6, gt=0, le=20)
     host_agent_max_tool_calls: int = Field(default=8, gt=0, le=50)
     host_agent_tool_timeout_seconds: float = Field(default=5.0, gt=0, le=30)
@@ -66,7 +73,6 @@ class Settings(BaseSettings):
 
     # 讨论区/Narrator 主线的兼容配置：未配置时使用确定性占位叙事，测试可通过
     # 延迟钩子稳定覆盖行动锁并发分支。
-    deepseek_api_key: str | None = None
     narrator_delay_seconds: float = Field(default=0.0, ge=0, le=120)
 
     @model_validator(mode="after")
@@ -79,6 +85,10 @@ class Settings(BaseSettings):
             self.qwen_api_key is None or not self.qwen_api_key.get_secret_value().strip()
         ):
             raise ValueError("HOST_MODEL_PROVIDER=qwen 时必须设置 QWEN_API_KEY")
+        if self.host_model_provider == "deepseek" and (
+            self.deepseek_api_key is None or not self.deepseek_api_key.get_secret_value().strip()
+        ):
+            raise ValueError("HOST_MODEL_PROVIDER=deepseek 时必须设置 DEEPSEEK_API_KEY")
         return self
 
 

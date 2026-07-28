@@ -32,9 +32,19 @@ def test_build_narrator_falls_back_without_api_key() -> None:
 
 
 def test_build_narrator_uses_deepseek_with_api_key() -> None:
-    settings = Settings(deepseek_api_key="sk-test-key")
+    settings = Settings(
+        host_model_provider="deepseek",
+        deepseek_api_key="sk-test-key",
+        deepseek_base_url="https://provider.example/v1",
+        deepseek_model="deepseek-custom",
+        deepseek_timeout_seconds=12,
+    )
 
-    assert isinstance(build_narrator(settings), DeepSeekNarrator)
+    narrator = build_narrator(settings)
+    assert isinstance(narrator, DeepSeekNarrator)
+    assert narrator._model == "deepseek-custom"
+    assert str(narrator._client.base_url) == "https://provider.example/v1/"
+    assert narrator._timeout_seconds == 12
 
 
 def test_build_messages_includes_module_title_history_and_utterance() -> None:

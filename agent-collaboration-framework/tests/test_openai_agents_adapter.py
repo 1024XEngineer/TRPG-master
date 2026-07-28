@@ -24,6 +24,7 @@ from openai.types.responses import (
 from pydantic import ValidationError
 
 from collaboration_framework.bootstrap.host_agent import (
+    build_deepseek_host_agent,
     HostAgentConfigurationError,
     build_qwen_host_agent,
 )
@@ -365,7 +366,29 @@ class QwenConfigAndBootstrapTests(unittest.TestCase):
             }
         )
         self.assertIsInstance(adapter, QwenHostAgentAdapter)
+        self.assertEqual(
+            adapter._config.model_settings_extra_body,
+            {"enable_thinking": False},
+        )
         self.assertNotIn(SECRET, repr(adapter))
+
+    def test_deepseek_bootstrap_omits_qwen_only_request_fields(self) -> None:
+        adapter = build_deepseek_host_agent(
+            {
+                "HOST_AGENT_API_KEY": SECRET,
+                "HOST_AGENT_BASE_URL": "https://api.deepseek.example/v1",
+                "HOST_AGENT_MODEL": "deepseek-chat",
+            }
+        )
+        self.assertIsInstance(adapter, QwenHostAgentAdapter)
+        self.assertIsNone(adapter._config.model_settings_extra_body)
+        self.assertNotIn(SECRET, repr(adapter))
+
+    def test_deepseek_bootstrap_uses_deepseek_defaults(self) -> None:
+        adapter = build_deepseek_host_agent({"HOST_AGENT_API_KEY": SECRET})
+
+        self.assertEqual(adapter._config.base_url, "https://api.deepseek.com")
+        self.assertEqual(adapter._config.model, "deepseek-chat")
 
 
 class RawOutputTests(unittest.TestCase):

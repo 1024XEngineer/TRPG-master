@@ -1,4 +1,4 @@
-"""OpenAI Agents SDK HostAgentPort implementation backed by Qwen."""
+"""OpenAI Agents SDK HostAgentPort implementation for compatible providers."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ from collaboration_framework.host.schemas import (
     HostAgentUsage,
 )
 
-from .config import QwenHostAgentConfig
+from .config import OpenAICompatibleHostAgentConfig
 from .event_mapper import EventObservation, SDKEventMappingError
 from .prompt import SYSTEM_PROMPT, build_agent_input
 from .tool_adapter import (
@@ -49,15 +49,15 @@ class InvalidHostAgentOutput(ValueError):
     """The model's final output was not one finite JSON object."""
 
 
-class QwenHostAgentAdapter:
-    """Run Qwen through the SDK while exposing only project-owned events."""
+class OpenAICompatibleHostAgentAdapter:
+    """Run a compatible chat model while exposing only project-owned events."""
 
     def __init__(
         self,
         *,
         model: Model,
         tool_registry: ToolRegistry,
-        config: QwenHostAgentConfig,
+        config: OpenAICompatibleHostAgentConfig,
         runner: Any = Runner,
     ) -> None:
         self._model = model
@@ -88,7 +88,7 @@ class QwenHostAgentAdapter:
                     temperature=0,
                     parallel_tool_calls=False,
                     include_usage=True,
-                    extra_body={"enable_thinking": False},
+                    extra_body=self._config.model_settings_extra_body,
                     tool_choice="auto",
                 ),
             )
@@ -172,6 +172,10 @@ class QwenHostAgentAdapter:
                 retryable=False,
             ):
                 yield event
+
+
+# Backward-compatible name for existing Qwen composition and tests.
+QwenHostAgentAdapter = OpenAICompatibleHostAgentAdapter
 
 
 def parse_raw_output(value: object) -> dict[str, JsonValue]:

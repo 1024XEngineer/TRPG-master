@@ -18,26 +18,27 @@ issue #141 起，``Scenario`` 只保存目录和展示信息。规则引擎消�
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.coc7_content import build_coc7_ruleset
-from app.models.content import Game, GameSystem, Scenario
+from app.models.content import Game, GameSystem, Scenario, World
+from app.service.paper_chase_loader import (
+    PAPER_CHASE_MODULE_ID,
+    PAPER_CHASE_VERSION,
+    PAPER_CHASE_WORLD_REF,
+    read_paper_chase_presentation,
+)
 
 BUILTIN_GAME_ID = "00000000-0000-0000-0000-000000000001"
 BUILTIN_SYSTEM_ID = "00000000-0000-0000-0000-000000000002"
 BUILTIN_SCENARIO_ID = "00000000-0000-0000-0000-000000000003"
-BUILTIN_MODULE_ID = "paper-chase-zh-coc7"
-BUILTIN_MODULE_VERSION = "1.0.0"
-BUILTIN_WORLD_REF = "coc-7e"
-
-BUILTIN_STORY_PAGES = [
-    {
-        "title": "失踪的藏书",
-        "content": "一本从未公开编目的旧书离奇失踪，最后的线索指向城南的一间旧书店。",
-    }
-]
+BUILTIN_WORLD_ID = "00000000-0000-0000-0000-000000000004"
+BUILTIN_MODULE_ID = PAPER_CHASE_MODULE_ID
+BUILTIN_MODULE_VERSION = PAPER_CHASE_VERSION
+BUILTIN_WORLD_REF = PAPER_CHASE_WORLD_REF
 
 
 async def ensure_seed_content(db: AsyncSession) -> None:
     """插入内置的"克苏鲁的呼唤 / COC7 / 追书人"种子数据（如果还不存在）。"""
     coc7_ruleset = build_coc7_ruleset().model_dump(mode="json")
+    presentation = read_paper_chase_presentation()
 
     game = await db.get(Game, BUILTIN_GAME_ID)
     if game is None:
@@ -45,7 +46,32 @@ async def ensure_seed_content(db: AsyncSession) -> None:
             Game(
                 id=BUILTIN_GAME_ID,
                 name="克苏鲁的呼唤",
-                description="COC 内置游戏大类（种子数据）",
+                description=(
+                    "在熟悉的现实世界表层之下，调查员通过走访、检索与推理接触不可名状的宇宙恐怖；"
+                    "重视调查、角色扮演与理智风险，正面战斗通常不是首选。"
+                ),
+                tags=["1920年代", "调查悬疑", "宇宙恐怖"],
+            )
+        )
+    else:
+        game.name = "克苏鲁的呼唤"
+        game.description = (
+            "在熟悉的现实世界表层之下，调查员通过走访、检索与推理接触不可名状的宇宙恐怖；"
+            "重视调查、角色扮演与理智风险，正面战斗通常不是首选。"
+        )
+        game.tags = ["1920年代", "调查悬疑", "宇宙恐怖"]
+
+    world = await db.get(World, BUILTIN_WORLD_ID)
+    if world is None:
+        db.add(
+            World(
+                id=BUILTIN_WORLD_ID,
+                game_id=BUILTIN_GAME_ID,
+                name="禁酒令时期的阿诺兹堡",
+                description=(
+                    "1920 年代美国密歇根州的小城。旧书、失踪案与不可名状的恐怖交织，"
+                    "调查员需要依靠走访、观察和谨慎判断逐步还原真相。"
+                ),
             )
         )
 
@@ -71,28 +97,37 @@ async def ensure_seed_content(db: AsyncSession) -> None:
         scenario = Scenario(
             id=BUILTIN_SCENARIO_ID,
             module_id=BUILTIN_MODULE_ID,
+            world_id=BUILTIN_WORLD_ID,
             game_system_id=BUILTIN_SYSTEM_ID,
-            title="追书人（内置）",
+            title=presentation.title,
             version=BUILTIN_MODULE_VERSION,
-            authors=["TRPG-master"],
-            players_min=1,
-            players_max=6,
-            difficulty=1,
-            estimated_duration="2-3 小时",
-            synopsis="内置模拟模组，供 MS1 骨架联调使用。",
+            authors=list(presentation.authors),
+            players_min=presentation.players_min,
+            players_max=presentation.players_max,
+            difficulty=presentation.difficulty,
+            estimated_duration=presentation.estimated_duration,
+            synopsis=presentation.synopsis,
             status="wip",
-            name_en="The Book Seeker",
-            story_label="CASE-001",
-            subtitle="失踪藏书留下的最后线索",
-            story_pages=BUILTIN_STORY_PAGES,
+            name_en=presentation.name_en,
+            story_label=presentation.story_label,
+            subtitle=presentation.subtitle,
+            story_pages=[],
         )
         db.add(scenario)
     else:
-        # 目录展示信息可以随应用更新；加载器写入的推荐版本和 ready 状态必须保留。
+        # 已发布目录由加载器和不可变 ModuleVersion 更新；Seed 不得把旧 ready
+        # 版本改成与尚未加载的新版本不一致的展示数据。
         scenario.module_id = BUILTIN_MODULE_ID
-        scenario.name_en = "The Book Seeker"
-        scenario.story_label = "CASE-001"
-        scenario.subtitle = "失踪藏书留下的最后线索"
-        scenario.story_pages = BUILTIN_STORY_PAGES
+        scenario.world_id = BUILTIN_WORLD_ID
+        if scenario.status != "ready":
+            scenario.title = presentation.title
+            scenario.name_en = presentation.name_en
+            scenario.players_min = presentation.players_min
+            scenario.players_max = presentation.players_max
+            scenario.difficulty = presentation.difficulty
+            scenario.estimated_duration = presentation.estimated_duration
+            scenario.synopsis = presentation.synopsis
+            scenario.story_label = presentation.story_label
+            scenario.subtitle = presentation.subtitle
 
     await db.commit()

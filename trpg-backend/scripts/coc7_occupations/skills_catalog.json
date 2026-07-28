@@ -1,0 +1,554 @@
+[
+  {
+    "id": "fighting-brawl",
+    "name": "格斗：斗殴",
+    "base": 25,
+    "category": "combat"
+  },
+  {
+    "id": "fighting-sword",
+    "name": "格斗：剑",
+    "base": 20,
+    "category": "combat"
+  },
+  {
+    "id": "fighting-axe",
+    "name": "格斗：斧",
+    "base": 15,
+    "category": "combat"
+  },
+  {
+    "id": "fighting-spear",
+    "name": "格斗：矛",
+    "base": 20,
+    "category": "combat"
+  },
+  {
+    "id": "fighting-whip",
+    "name": "格斗：鞭",
+    "base": 5,
+    "category": "combat"
+  },
+  {
+    "id": "fighting-chain",
+    "name": "格斗：链枷",
+    "base": 10,
+    "category": "combat"
+  },
+  {
+    "id": "fighting-knife",
+    "name": "格斗：刀",
+    "base": 25,
+    "category": "combat"
+  },
+  {
+    "id": "firearm-handgun",
+    "name": "射击：手枪",
+    "base": 20,
+    "category": "combat"
+  },
+  {
+    "id": "firearm-rifle",
+    "name": "射击：步枪/霰弹枪",
+    "base": 25,
+    "category": "combat"
+  },
+  {
+    "id": "firearm-smg",
+    "name": "射击：冲锋枪",
+    "base": 15,
+    "category": "combat"
+  },
+  {
+    "id": "firearm-machine-gun",
+    "name": "射击：机枪",
+    "base": 10,
+    "category": "combat"
+  },
+  {
+    "id": "firearm-bow",
+    "name": "射击：弓",
+    "base": 15,
+    "category": "combat"
+  },
+  {
+    "id": "firearm-flamethrower",
+    "name": "射击：火焰喷射器",
+    "base": 10,
+    "category": "combat"
+  },
+  {
+    "id": "dodge",
+    "name": "闪避",
+    "base": "DEX/2",
+    "category": "combat"
+  },
+  {
+    "id": "throw",
+    "name": "投掷",
+    "base": 20,
+    "category": "combat"
+  },
+  {
+    "id": "charm",
+    "name": "取悦",
+    "base": 15,
+    "category": "social"
+  },
+  {
+    "id": "fast-talk",
+    "name": "话术",
+    "base": 5,
+    "category": "social"
+  },
+  {
+    "id": "intimidate",
+    "name": "恐吓",
+    "base": 15,
+    "category": "social"
+  },
+  {
+    "id": "persuade",
+    "name": "说服",
+    "base": 10,
+    "category": "social"
+  },
+  {
+    "id": "psychology",
+    "name": "心理学",
+    "base": 10,
+    "category": "social"
+  },
+  {
+    "id": "disguise",
+    "name": "乔装",
+    "base": 5,
+    "category": "social"
+  },
+  {
+    "id": "credit-rating",
+    "name": "信用评级",
+    "base": 0,
+    "category": "social"
+  },
+  {
+    "id": "accounting",
+    "name": "会计",
+    "base": 5,
+    "category": "knowledge"
+  },
+  {
+    "id": "anthropology",
+    "name": "人类学",
+    "base": 1,
+    "category": "knowledge"
+  },
+  {
+    "id": "appraise",
+    "name": "估价",
+    "base": 5,
+    "category": "knowledge"
+  },
+  {
+    "id": "archaeology",
+    "name": "考古学",
+    "base": 1,
+    "category": "knowledge"
+  },
+  {
+    "id": "history",
+    "name": "历史",
+    "base": 5,
+    "category": "knowledge"
+  },
+  {
+    "id": "law",
+    "name": "法律",
+    "base": 5,
+    "category": "knowledge"
+  },
+  {
+    "id": "library-use",
+    "name": "图书馆使用",
+    "base": 20,
+    "category": "knowledge"
+  },
+  {
+    "id": "medicine",
+    "name": "医学",
+    "base": 1,
+    "category": "knowledge"
+  },
+  {
+    "id": "occult",
+    "name": "神秘学",
+    "base": 5,
+    "category": "knowledge"
+  },
+  {
+    "id": "science-pharmacy",
+    "name": "科学：药学",
+    "base": 1,
+    "category": "knowledge"
+  },
+  {
+    "id": "science-biology",
+    "name": "科学：生物学",
+    "base": 1,
+    "category": "knowledge"
+  },
+  {
+    "id": "science-chemistry",
+    "name": "科学：化学",
+    "base": 1,
+    "category": "knowledge"
+  },
+  {
+    "id": "science-physics",
+    "name": "科学：物理学",
+    "base": 1,
+    "category": "knowledge"
+  },
+  {
+    "id": "science-geology",
+    "name": "科学：地质学",
+    "base": 1,
+    "category": "knowledge"
+  },
+  {
+    "id": "science-astronomy",
+    "name": "科学：天文学",
+    "base": 1,
+    "category": "knowledge"
+  },
+  {
+    "id": "science-forensics",
+    "name": "科学：法医学",
+    "base": 1,
+    "category": "knowledge"
+  },
+  {
+    "id": "science-mathematics",
+    "name": "科学：数学",
+    "base": 10,
+    "category": "knowledge"
+  },
+  {
+    "id": "science-engineering",
+    "name": "科学：工程学",
+    "base": 1,
+    "category": "knowledge"
+  },
+  {
+    "id": "science-botany",
+    "name": "科学：植物学",
+    "base": 1,
+    "category": "knowledge"
+  },
+  {
+    "id": "science-zoology",
+    "name": "科学：动物学",
+    "base": 1,
+    "category": "knowledge"
+  },
+  {
+    "id": "science-cryptography",
+    "name": "科学：密码学",
+    "base": 1,
+    "category": "knowledge"
+  },
+  {
+    "id": "science-metallurgy",
+    "name": "科学：冶金学",
+    "base": 1,
+    "category": "knowledge"
+  },
+  {
+    "id": "science-meteorology",
+    "name": "科学：气象学",
+    "base": 1,
+    "category": "knowledge"
+  },
+  {
+    "id": "natural-world",
+    "name": "博物学",
+    "base": 10,
+    "category": "knowledge"
+  },
+  {
+    "id": "navigation",
+    "name": "导航",
+    "base": 10,
+    "category": "knowledge"
+  },
+  {
+    "id": "cthulhu-mythos",
+    "name": "克苏鲁神话",
+    "base": 0,
+    "category": "knowledge"
+  },
+  {
+    "id": "listen",
+    "name": "聆听",
+    "base": 20,
+    "category": "perception"
+  },
+  {
+    "id": "spot-hidden",
+    "name": "侦察",
+    "base": 25,
+    "category": "perception"
+  },
+  {
+    "id": "track",
+    "name": "追踪",
+    "base": 10,
+    "category": "perception"
+  },
+  {
+    "id": "climb",
+    "name": "攀爬",
+    "base": 20,
+    "category": "physical"
+  },
+  {
+    "id": "jump",
+    "name": "跳跃",
+    "base": 20,
+    "category": "physical"
+  },
+  {
+    "id": "swim",
+    "name": "游泳",
+    "base": 20,
+    "category": "physical"
+  },
+  {
+    "id": "ride",
+    "name": "骑术",
+    "base": 5,
+    "category": "physical"
+  },
+  {
+    "id": "stealth",
+    "name": "潜行",
+    "base": 20,
+    "category": "physical"
+  },
+  {
+    "id": "drive-auto",
+    "name": "汽车驾驶",
+    "base": 20,
+    "category": "physical"
+  },
+  {
+    "id": "drive-carriage",
+    "name": "驾驶：马车",
+    "base": 5,
+    "category": "physical"
+  },
+  {
+    "id": "pilot-aircraft",
+    "name": "驾驶：飞行器",
+    "base": 1,
+    "category": "physical"
+  },
+  {
+    "id": "pilot-boat",
+    "name": "驾驶：船舶",
+    "base": 1,
+    "category": "physical"
+  },
+  {
+    "id": "pilot-spacecraft",
+    "name": "驾驶：航天器",
+    "base": 1,
+    "category": "physical"
+  },
+  {
+    "id": "survival",
+    "name": "生存",
+    "base": 10,
+    "category": "physical"
+  },
+  {
+    "id": "first-aid",
+    "name": "急救",
+    "base": 30,
+    "category": "technical"
+  },
+  {
+    "id": "heavy-machinery",
+    "name": "操作重型机械",
+    "base": 1,
+    "category": "technical"
+  },
+  {
+    "id": "electrical-repair",
+    "name": "电气维修",
+    "base": 10,
+    "category": "technical"
+  },
+  {
+    "id": "mechanical-repair",
+    "name": "机械维修",
+    "base": 10,
+    "category": "technical"
+  },
+  {
+    "id": "lock-smith",
+    "name": "锁匠",
+    "base": 1,
+    "category": "technical"
+  },
+  {
+    "id": "art-craft-1",
+    "name": "艺术与手艺①",
+    "base": 5,
+    "category": "technical"
+  },
+  {
+    "id": "art-craft-2",
+    "name": "艺术与手艺②",
+    "base": 5,
+    "category": "technical"
+  },
+  {
+    "id": "art-craft-3",
+    "name": "艺术与手艺③",
+    "base": 5,
+    "category": "technical"
+  },
+  {
+    "id": "computer-use",
+    "name": "计算机使用",
+    "base": 5,
+    "category": "technical"
+  },
+  {
+    "id": "electronics",
+    "name": "电子学",
+    "base": 1,
+    "category": "technical"
+  },
+  {
+    "id": "photography",
+    "name": "摄影",
+    "base": 5,
+    "category": "technical"
+  },
+  {
+    "id": "language-native",
+    "name": "母语",
+    "base": "EDU",
+    "category": "language"
+  },
+  {
+    "id": "language-foreign-1",
+    "name": "外语①",
+    "base": 1,
+    "category": "language"
+  },
+  {
+    "id": "language-foreign-2",
+    "name": "外语②",
+    "base": 1,
+    "category": "language"
+  },
+  {
+    "id": "language-foreign-3",
+    "name": "外语③",
+    "base": 1,
+    "category": "language"
+  },
+  {
+    "id": "carpentry",
+    "name": "艺术与手艺（木工）",
+    "base": 5,
+    "category": "technical"
+  },
+  {
+    "id": "illusion",
+    "name": "艺术与手艺（魔术）",
+    "base": 5,
+    "category": "technical"
+  },
+  {
+    "id": "sleight-of-hand",
+    "name": "妙手",
+    "base": 10,
+    "category": "technical"
+  },
+  {
+    "id": "animal-handling",
+    "name": "动物驯养",
+    "base": 5,
+    "category": "technical"
+  },
+  {
+    "id": "psychoanalysis",
+    "name": "精神分析",
+    "base": 1,
+    "category": "knowledge"
+  },
+  {
+    "id": "diving",
+    "name": "潜水",
+    "base": 1,
+    "category": "technical"
+  },
+  {
+    "id": "hypnosis",
+    "name": "催眠",
+    "base": 1,
+    "category": "knowledge"
+  },
+  {
+    "id": "artillery",
+    "name": "炮术",
+    "base": 1,
+    "category": "combat"
+  },
+  {
+    "id": "demolitions",
+    "name": "爆破",
+    "base": 1,
+    "category": "technical"
+  },
+  {
+    "id": "read-lips",
+    "name": "读唇",
+    "base": 1,
+    "category": "perception"
+  },
+  {
+    "id": "fighting-chainsaw",
+    "name": "格斗：链锯",
+    "base": 10,
+    "category": "combat"
+  },
+  {
+    "id": "pilot-balloon",
+    "name": "驾驶：热气球",
+    "base": 1,
+    "category": "technical"
+  },
+  {
+    "id": "lore-1",
+    "name": "学识①",
+    "base": 1,
+    "category": "knowledge"
+  },
+  {
+    "id": "lore-2",
+    "name": "学识②",
+    "base": 1,
+    "category": "knowledge"
+  },
+  {
+    "id": "lore-3",
+    "name": "学识③",
+    "base": 1,
+    "category": "knowledge"
+  }
+]

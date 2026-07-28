@@ -244,6 +244,75 @@ class Coc7RuleKernelTests(unittest.TestCase):
         self.assertFalse(updated.entities["lyla"]["interviewed"])
         self.assertEqual(updated.event_sequence, 0)
 
+    def test_attack_without_stat_block_is_blocked_after_recording_check(self) -> None:
+        state = paper_chase_state(self.module, scene_id="client_briefing")
+        before_target = state.entities["thomas"].copy()
+
+        execution, updated = RuleKernel(
+            dice_source=SequenceDiceSource([1]),
+            allow_legacy_missing_skill=False,
+        ).execute(
+            request=direct_request(
+                request_id="attack_thomas_without_stats",
+                revision="0",
+                verb="attack",
+                target_id="thomas",
+            ),
+            module_content=self.module,
+            game_state=state,
+        )
+
+        self.assertEqual(execution.action_result.resolution, "blocked")
+        self.assertEqual(execution.action_result.outcome, "not_applicable")
+        self.assertIsNotNone(execution.action_result.check_result)
+        self.assertEqual(execution.events, ())
+        self.assertEqual(updated.event_sequence, state.event_sequence)
+        self.assertEqual(updated.entities["thomas"], before_target)
+        self.assertIn(
+            "战斗数据",
+            "".join(item.text for item in execution.action_result.visible_facts),
+        )
+
+    def test_attack_with_missing_hp_is_blocked_without_state_change(self) -> None:
+        module = self.module.model_copy(
+            update={
+                "entities": tuple(
+                    entity.model_copy(
+                        update={
+                            "stat_block": entity.stat_block.model_copy(
+                                update={"HP": None}
+                            )
+                        }
+                    )
+                    if entity.id == "douglas"
+                    else entity
+                    for entity in self.module.entities
+                )
+            }
+        )
+        state = paper_chase_state(module, scene_id="night_surveillance")
+        before_target = state.entities["douglas"].copy()
+
+        execution, updated = RuleKernel(
+            dice_source=SequenceDiceSource([1]),
+            allow_legacy_missing_skill=False,
+        ).execute(
+            request=direct_request(
+                request_id="attack_douglas_without_hp",
+                revision="0",
+                verb="attack",
+                target_id="douglas",
+            ),
+            module_content=module,
+            game_state=state,
+        )
+
+        self.assertEqual(execution.action_result.resolution, "blocked")
+        self.assertEqual(execution.action_result.outcome, "not_applicable")
+        self.assertEqual(execution.events, ())
+        self.assertEqual(updated.event_sequence, state.event_sequence)
+        self.assertEqual(updated.entities["douglas"], before_target)
+
     def test_state_change_hook_resolves_first_sight_sanity_check(self) -> None:
         state = paper_chase_state(self.module, scene_id="night_surveillance")
         state.entities["douglas"]["visit_observed"] = True
@@ -336,6 +405,38 @@ class Coc7RuleKernelTests(unittest.TestCase):
 
 
 class PaperChaseRuntimeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_blocked_attack_is_idempotently_persisted_without_state_change(
+        self,
+    ) -> None:
+        module = load_paper_chase()
+        state = paper_chase_state(module, scene_id="client_briefing")
+        store = InMemoryEngineStore()
+        store.register_room(module_content=module, initial_state=state)
+        service = RuleEngineService(
+            store,
+            kernel=RuleKernel(
+                dice_source=SequenceDiceSource([1]),
+                allow_legacy_missing_skill=False,
+            ),
+        )
+        request = direct_request(
+            request_id="persisted_blocked_attack",
+            revision="0",
+            verb="attack",
+            target_id="thomas",
+        )
+
+        first = await service.execute(request)
+        replay = await service.execute(request)
+
+        self.assertEqual(first.resolution, "blocked")
+        self.assertEqual(first.outcome, "not_applicable")
+        self.assertEqual(replay, first)
+        self.assertIsNotNone(
+            store.inspect_completed_action(state.room_id, request.request_id)
+        )
+        self.assertEqual(store.inspect_state(state.room_id).event_sequence, 0)
+
     async def test_conversation_updates_resources_projection_and_ending(self) -> None:
         module = load_paper_chase()
         state = paper_chase_state(module, scene_id="conversation")

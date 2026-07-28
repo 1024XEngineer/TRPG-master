@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from collaboration_framework.contracts import ModulePresentation
 from collaboration_framework.module import validate_module_json
 from pydantic import ValidationError
 from sqlalchemy import select
@@ -16,7 +18,7 @@ from app.models.content import GameSystem, Scenario
 from app.models.engine import ModuleVersion
 
 PAPER_CHASE_MODULE_ID = "paper-chase-zh-coc7"
-PAPER_CHASE_VERSION = "1.0.0"
+PAPER_CHASE_VERSION = "1.0.1"
 PAPER_CHASE_WORLD_REF = "coc-7e"
 PAPER_CHASE_SOURCE_PATH = (
     Path(__file__).resolve().parents[3]
@@ -28,6 +30,16 @@ PAPER_CHASE_SOURCE_PATH = (
     / "追书人"
     / "module-content-draft.json"
 )
+
+
+def read_paper_chase_presentation() -> ModulePresentation:
+    """Read the player-safe presentation from the same source as the loader."""
+
+    try:
+        payload = json.loads(PAPER_CHASE_SOURCE_PATH.read_text(encoding="utf-8"))
+        return ModulePresentation.model_validate(payload["presentation"])
+    except (OSError, KeyError, TypeError, ValueError) as exc:
+        raise PaperChaseLoadError("追书人文件缺少有效的玩家可见 presentation") from exc
 
 
 class PaperChaseLoadError(RuntimeError):
@@ -130,6 +142,8 @@ async def load_paper_chase(
             )
         if scenario.game_system_id != system.id:
             raise PaperChaseLoadError("追书人 Scenario 与 coc-7e GameSystem 不匹配")
+        if content.presentation is None:
+            raise PaperChaseLoadError("追书人发布内容缺少玩家可见 presentation")
 
         normalized_content = content.to_json_dict()
         module_version = await db.get(
@@ -158,8 +172,33 @@ async def load_paper_chase(
                 "请调整版本或重建本地数据库，加载器不会静默覆盖"
             )
 
+        presentation = content.presentation
+        scenario.title = presentation.title
+        scenario.name_en = presentation.name_en
+        scenario.story_label = presentation.story_label
+        scenario.subtitle = presentation.subtitle
+        scenario.story_pages = [
+            page.model_dump(mode="json") for page in presentation.player_intro_pages
+        ]
         scenario.version = PAPER_CHASE_VERSION
+        scenario.authors = list(presentation.authors)
+        scenario.players_min = presentation.players_min
+        scenario.players_max = presentation.players_max
+        scenario.difficulty = presentation.difficulty
+        scenario.estimated_duration = presentation.estimated_duration
+        scenario.synopsis = presentation.synopsis
         scenario.status = "ready"
+        scenario.synopsis = (
+            "调查员受托寻找五本失窃旧书，并查明道格拉斯一年前的失踪案；"
+            "线索将带你走访旧宅、图书馆与公共墓地。"
+        )
+        scenario.story_pages = [
+            {
+                "title": scene.player_visible_name or scene.name,
+                "content": scene.player_visible_description or scene.content,
+            }
+            for scene in content.scenes
+        ]
         await db.flush()
         if _before_commit is not None:
             _before_commit()

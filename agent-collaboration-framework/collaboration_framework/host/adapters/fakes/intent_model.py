@@ -61,6 +61,8 @@ class FakeIntentModel:
         }
         if target.id in exit_ids:
             kind, verb = "action", "go"
+        elif any(word in text for word in ("攻击", "打一顿", "打人", "揍", "殴打")):
+            kind, verb = "action", "attack"
         elif any(word in text for word in ("聊", "问", "交谈", "说")):
             kind, verb = "dialogue", "talk"
         elif any(word in text for word in ("砸", "撞", "破坏")):
@@ -85,7 +87,12 @@ class FakeIntentModel:
             None,
         )
         check: JsonObject
-        if checkpoint is None:
+        if verb == "attack":
+            check = {
+                "route": "default",
+                "proposed_skills": ["fighting-brawl"],
+            }
+        elif checkpoint is None:
             check = {"route": "none"}
         else:
             check = {

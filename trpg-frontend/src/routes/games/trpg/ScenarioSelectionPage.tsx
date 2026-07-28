@@ -129,16 +129,18 @@ export default function ScenarioSelectionPage() {
                 )}
               </div>
               <p className="text-xs text-text-muted leading-[1.7] line-clamp-2 mb-3">
-                {module.synopsis || '暂无故事简介'}
+                {module.synopsis}
               </p>
               <div className="flex items-center gap-4 text-[11px] text-text-dim">
                 <span className="flex items-center gap-1">
                   <Users className="w-3.5 h-3.5" />
-                  {module.playersMin}-{module.playersMax} 人
+                  {module.playersMin === module.playersMax
+                    ? `${module.playersMin} 人`
+                    : `${module.playersMin}-${module.playersMax} 人`}
                 </span>
                 <span className="flex items-center gap-1">
                   <Clock className="w-3.5 h-3.5" />
-                  {module.estimatedDuration || '时长待定'}
+                  {module.estimatedDuration}
                 </span>
                 <Badge variant={isReady ? 'success' : 'default'}>
                   {isReady ? '已就绪' : '开发中'}

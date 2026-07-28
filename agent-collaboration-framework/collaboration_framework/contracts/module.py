@@ -322,6 +322,36 @@ class InformationItem(ContractModel):
         return self
 
 
+class ModuleStoryPage(ContractModel):
+    """A player-safe page shown before character creation."""
+
+    title: str = ""
+    content: str = Field(min_length=1)
+
+
+class ModulePresentation(ContractModel):
+    """Player-facing publication metadata, separate from keeper context."""
+
+    title: str = Field(min_length=1)
+    name_en: str | None = None
+    synopsis: str = Field(min_length=1)
+    players_min: int = Field(ge=1)
+    players_max: int = Field(ge=1)
+    difficulty: int = Field(ge=1, le=3)
+    estimated_duration: str = Field(min_length=1)
+    story_label: str | None = None
+    subtitle: str | None = None
+    authors: tuple[str, ...] = ()
+    tags: tuple[str, ...] = ()
+    player_intro_pages: tuple[ModuleStoryPage, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_player_range(self) -> ModulePresentation:
+        if self.players_min > self.players_max:
+            raise ValueError("players_min 不能大于 players_max")
+        return self
+
+
 class ModuleContent(ContractModel):
     """Validated, versioned module publication consumed by runtime components."""
 
@@ -332,6 +362,7 @@ class ModuleContent(ContractModel):
         min_length=1,
         description="面向叙述 Agent 的时代、地点、玩家侧故事前提与叙事基调。",
     )
+    presentation: ModulePresentation | None = None
     scenes: tuple[SceneSpec, ...]
     entities: tuple[EntitySpec, ...]
     checkpoints: tuple[CheckpointSpec, ...]

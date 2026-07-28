@@ -607,6 +607,135 @@
       "title": "ModifyOperationSpec",
       "type": "object"
     },
+    "ModulePresentation": {
+      "additionalProperties": false,
+      "description": "Player-facing publication metadata, separate from keeper context.",
+      "properties": {
+        "title": {
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "name_en": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name En"
+        },
+        "synopsis": {
+          "minLength": 1,
+          "title": "Synopsis",
+          "type": "string"
+        },
+        "players_min": {
+          "minimum": 1,
+          "title": "Players Min",
+          "type": "integer"
+        },
+        "players_max": {
+          "minimum": 1,
+          "title": "Players Max",
+          "type": "integer"
+        },
+        "difficulty": {
+          "maximum": 3,
+          "minimum": 1,
+          "title": "Difficulty",
+          "type": "integer"
+        },
+        "estimated_duration": {
+          "minLength": 1,
+          "title": "Estimated Duration",
+          "type": "string"
+        },
+        "story_label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Story Label"
+        },
+        "subtitle": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Subtitle"
+        },
+        "authors": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Authors",
+          "type": "array"
+        },
+        "tags": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Tags",
+          "type": "array"
+        },
+        "player_intro_pages": {
+          "items": {
+            "$ref": "#/$defs/ModuleStoryPage"
+          },
+          "minItems": 1,
+          "title": "Player Intro Pages",
+          "type": "array"
+        }
+      },
+      "required": [
+        "title",
+        "synopsis",
+        "players_min",
+        "players_max",
+        "difficulty",
+        "estimated_duration",
+        "player_intro_pages"
+      ],
+      "title": "ModulePresentation",
+      "type": "object"
+    },
+    "ModuleStoryPage": {
+      "additionalProperties": false,
+      "description": "A player-safe page shown before character creation.",
+      "properties": {
+        "title": {
+          "default": "",
+          "title": "Title",
+          "type": "string"
+        },
+        "content": {
+          "minLength": 1,
+          "title": "Content",
+          "type": "string"
+        }
+      },
+      "required": [
+        "content"
+      ],
+      "title": "ModuleStoryPage",
+      "type": "object"
+    },
     "ObservableStateSpec": {
       "additionalProperties": false,
       "description": "Allow-list one runtime entity-state field for player projection.",
@@ -1314,6 +1443,17 @@
       "minLength": 1,
       "title": "Background",
       "type": "string"
+    },
+    "presentation": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ModulePresentation"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "scenes": {
       "items": {

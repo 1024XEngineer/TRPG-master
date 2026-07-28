@@ -298,7 +298,7 @@ async def test_select_module_pins_recommended_published_version(
     client: AsyncClient,
     db_session: AsyncSession,
 ) -> None:
-    room = await create_room(client)
+    room = await create_room(client, max_players=1)
     response = await client.post(
         f"/api/v1/rooms/{room['roomId']}/module",
         json={

@@ -106,7 +106,7 @@ async def test_seed_only_creates_wip_catalog_and_ruleset(db_session: AsyncSessio
     assert scenario.module_id == BUILTIN_MODULE_ID
     assert scenario.status == "wip"
     assert scenario.version == BUILTIN_MODULE_VERSION
-    assert scenario.story_pages
+    assert scenario.story_pages == []
     assert system is not None
     assert system.world_ref == BUILTIN_WORLD_REF
     assert module_version is None
@@ -130,6 +130,9 @@ async def test_loader_persists_valid_playable_module_version(db_session: AsyncSe
     assert len(publication.scenes) == 11
     assert len(publication.entities) == 16
     assert publication.background
+    assert publication.presentation is not None
+    assert publication.presentation.players_min == 1
+    assert publication.presentation.players_max == 1
 
     await db_session.commit()
     repeated = await load_paper_chase(db_session)

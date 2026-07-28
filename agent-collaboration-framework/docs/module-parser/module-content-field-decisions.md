@@ -45,6 +45,7 @@ Module Parser 先产生私有 `ModuleDraft`，再经过确定性 Validation 构�
 | `version` | 是 | 模组内容版本 |
 | `world_ref` | 是 | 当前规则系统引用 |
 | `background` | 是 | 时代、地点、玩家侧故事前提与叙事基调 |
+| `presentation` | 否（ready 模组必填） | 玩家安全的目录元数据与开局简介；不得从 `background` 自动生成 |
 | `scenes` | 是 | 场景声明 |
 | `entities` | 是 | NPC、物件和地点实体声明 |
 | `checkpoints` | 是 | 玩家可尝试动作与结果声明 |
@@ -68,6 +69,13 @@ Module Parser 先产生私有 `ModuleDraft`，再经过确定性 Validation 构�
 
 它会进入每一次 `NarrationContext`，用来稳定整场叙述的语气和时代感，但不会直接
 进入玩家可见的 WebSocket 输出，也不能替代 `visible_facts` 成为已揭示事实。
+
+### 3.1 `presentation` 的内容与传播
+
+`presentation` 面向玩家，包含目录元数据和 `player_intro_pages`。它只能描述车卡前
+应当知道的事实、调查前提和安全的行动建议；守秘人秘密、未发现线索、基调约束和内部
+叙事内容必须留在 `background` 或受可见性约束的运行时对象中。模组发布为 `ready`
+前必须存在至少一页非空开局简介，并满足玩家人数范围与难度约束。
 幕后真相、NPC 秘密和未发现线索必须继续放在 `secrets` 或带可见性约束的信息结构中。
 
 ## 4. 内容对象

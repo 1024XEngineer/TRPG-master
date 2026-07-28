@@ -26,6 +26,32 @@ class _WsCandidateIntentModel:
         }
 
 
+class _WsAttackThenPlainIntentModel:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def generate(self, context: IntentContext) -> JsonObject:
+        self.calls += 1
+        if self.calls == 1:
+            return {
+                "kind": "action",
+                "verb": "attack",
+                "target": {"matched": True, "id": "thomas"},
+                "check": {
+                    "route": "default",
+                    "proposed_skills": ["fighting-brawl"],
+                },
+                "summary": context.player_input.utterance,
+            }
+        return {
+            "kind": "action",
+            "verb": "talk",
+            "target": {"matched": True, "id": "thomas"},
+            "check": {"route": "none"},
+            "summary": context.player_input.utterance,
+        }
+
+
 @pytest.fixture
 def sync_client() -> TestClient:
     # 用同一个 app 实例的同步 TestClient——HTTP 部分照常发请求准备房间/角色
@@ -42,11 +68,15 @@ def register_and_login(client: TestClient, account: str = "host1") -> str:
     return response.json()["data"]["token"]
 
 
-def create_room(client: TestClient, token: str) -> dict:
+def create_room(client: TestClient, token: str, max_players: int = 1) -> dict:
     """建房（issue #106 起要求登录，房间会关联到这个账号）。"""
     response = client.post(
         ROOMS_BASE,
-        json={"roomName": "WS测试房间", "nickname": "房主", "maxPlayers": 4},
+        json={
+            "roomName": "WS测试房间",
+            "nickname": "房主",
+            "maxPlayers": max_players,
+        },
         headers={"Authorization": f"Bearer {token}"},
     )
     assert response.status_code == 200
@@ -104,7 +134,14 @@ def complete_character(client: TestClient, room_id: str, reconnect_token: str) -
 
 def advance_to_building(client: TestClient, room: dict) -> None:
     headers = {"X-Reconnect-Token": room["reconnectToken"]}
-    module_id = client.get("/api/v1/modules").json()["data"][0]["id"]
+    preview = client.get(f"{ROOMS_BASE}/{room['roomCode']}").json()["data"]
+    max_players = preview["maxPlayers"]
+    modules = client.get("/api/v1/modules").json()["data"]
+    module_id = next(
+        module["id"]
+        for module in modules
+        if module["playersMin"] <= max_players <= module["playersMax"]
+    )
     client.post(
         f"{ROOMS_BASE}/{room['roomId']}/module",
         json={"moduleId": module_id, "attributeGenMethod": "point_buy"},
@@ -276,11 +313,14 @@ def test_game_start_pushes_opening_narration_and_advances_phase(
         ws.send_json({"type": "game.start", "playerId": room["playerId"], "payload": {}})
         view = ws.receive_json()
         envelope = ws.receive_json()
+        room_state = ws.receive_json()
 
     assert view["type"] == "view.updated"
     assert view["payload"]["playerView"]["scene"]["name"] == "托马斯的会客室"
     assert envelope["type"] == "narration.push"
     assert "托马斯的会客室" in envelope["payload"]["text"]
+    assert room_state["type"] == "room.state"
+    assert room_state["payload"]["phase"] == "InGame"
 
     preview = sync_client.get(f"{ROOMS_BASE}/{room['roomCode']}").json()["data"]
     assert preview["phase"] == "InGame"
@@ -288,7 +328,7 @@ def test_game_start_pushes_opening_narration_and_advances_phase(
 
 def test_game_start_rejects_non_host(sync_client: TestClient) -> None:
     token = register_and_login(sync_client)
-    room = create_room(sync_client, token)
+    room = create_room(sync_client, token, max_players=2)
     # 访客必须在 Lobby 阶段加入（join_room 只在这个阶段放行），所以先加入
     # 再推进到 Building，两人都建完卡后再让访客尝试 game.start。
     guest = join_as(sync_client, room["roomCode"], "guest_non_host")
@@ -321,7 +361,7 @@ def test_game_start_rejects_non_host(sync_client: TestClient) -> None:
 def test_action_submit_broadcasts_narration_to_room_only(sync_client: TestClient) -> None:
     token_a = register_and_login(sync_client, "host_a")
     token_b = register_and_login(sync_client, "host_b")
-    room_a = create_room(sync_client, token_a)
+    room_a = create_room(sync_client, token_a, max_players=2)
     room_b = create_room(sync_client, token_b)
     guest = join_as(sync_client, room_a["roomCode"], "guest_a")
     advance_to_building(sync_client, room_a)
@@ -536,6 +576,7 @@ def test_skill_check_waits_for_player_selection_and_roll(
     assert completed["correlation_id"] == "ws-skill-check-146"
     assert narration["type"] == "narration.push"
     assert [event["type"] for event in prepare_events if "type" in event] == [
+        "action.broadcast",
         "turn.started",
         "turn.phase_changed",
         "turn.phase_changed",
@@ -546,6 +587,100 @@ def test_skill_check_waits_for_player_selection_and_roll(
         "turn.phase_changed",
         "check.result",
     ]
+
+
+def test_terminal_attack_check_failure_releases_pending_turn(
+    sync_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    token = register_and_login(sync_client, "terminal_attack_host")
+    room = create_room(sync_client, token)
+    advance_to_building(sync_client, room)
+    complete_character(sync_client, room["roomId"], room["reconnectToken"])
+    start_game(sync_client, room, token)
+    current_application = ws_controller.turn_application
+    monkeypatch.setattr(
+        ws_controller,
+        "turn_application",
+        build_turn_application(
+            current_application.store,
+            current_application.engine,
+            intent_model=_WsAttackThenPlainIntentModel(),
+            narration_model=FakeNarrationModel(),
+        ),
+    )
+
+    with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
+        ws.send_json(
+            {
+                "type": "room.join",
+                "playerId": room["playerId"],
+                "payload": {"reconnectToken": room["reconnectToken"]},
+            }
+        )
+        assert ws.receive_json()["type"] == "session.bound"
+        assert ws.receive_json()["type"] == "view.updated"
+
+        ws.send_json(
+            {
+                "type": "action.submit",
+                "playerId": room["playerId"],
+                "payload": {
+                    "clientActionId": "attack-thomas-153",
+                    "utterance": "我想打一顿托马斯",
+                },
+            }
+        )
+        request, _ = receive_until(
+            ws,
+            lambda message: message.get("type") == "check.request",
+        )
+        assert request["payload"]["clientActionId"] == "attack-thomas-153"
+
+        ws.send_json(
+            {
+                "type": "check.roll",
+                "playerId": room["playerId"],
+                "payload": {
+                    "clientActionId": "attack-thomas-153",
+                    "skill": "fighting-brawl",
+                    "rollValue": 1,
+                },
+            }
+        )
+        check_result, _ = receive_until(
+            ws,
+            lambda message: message.get("type") == "check.result",
+        )
+        assert check_result["payload"]["clientActionId"] == "attack-thomas-153"
+        completed, _ = receive_until(
+            ws,
+            lambda message: message.get("message_type") == "turn.completed",
+        )
+        assert completed["correlation_id"] == "attack-thomas-153"
+        blocked_narration, _ = receive_until(
+            ws,
+            lambda message: message.get("type") == "narration.push",
+        )
+        assert "战斗数据" in blocked_narration["payload"]["text"]
+        assert "契约校验" not in blocked_narration["payload"]["text"]
+
+        ws.send_json(
+            {
+                "type": "action.submit",
+                "playerId": room["playerId"],
+                "payload": {
+                    "clientActionId": "after-attack-153",
+                    "utterance": "我继续和托马斯交谈",
+                },
+            }
+        )
+        next_turn, _ = receive_until(
+            ws,
+            lambda message: message.get("message_type") == "turn.completed",
+        )
+
+    assert next_turn["correlation_id"] == "after-attack-153"
 
 
 def test_action_submit_requires_client_action_id_without_closing_socket(
@@ -587,7 +722,7 @@ def test_action_submit_requires_client_action_id_without_closing_socket(
 
 def test_clarification_is_sent_only_to_action_owner(sync_client: TestClient) -> None:
     host_token = register_and_login(sync_client, "clarification_host")
-    room = create_room(sync_client, host_token)
+    room = create_room(sync_client, host_token, max_players=2)
     guest = join_as(sync_client, room["roomCode"], "clarification_guest")
     advance_to_building(sync_client, room)
     complete_character(sync_client, room["roomId"], room["reconnectToken"])

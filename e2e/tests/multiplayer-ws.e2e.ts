@@ -54,7 +54,7 @@ async function buildCharacter(
 }
 
 test('第二个玩家用房间码加入，房间预览里能看到两个人', async () => {
-  const room = await createRoomWithModule('mp')
+  const room = await createRoomWithModule('mp', 2)
   const guest = await registerPlayer('guest')
 
   const joined = await guest.sdk.rooms.join(room.roomCode, { nickname: '访客' }, guest.token)
@@ -66,7 +66,7 @@ test('第二个玩家用房间码加入，房间预览里能看到两个人', as
 })
 
 test('WS 生命周期：join → session.bound，全员建卡后房主可以 game.start', async () => {
-  const room = await createRoomWithModule('ws')
+  const room = await createRoomWithModule('ws', 2)
   const guest = await registerPlayer('wsguest')
   const joined = await guest.sdk.rooms.join(room.roomCode, { nickname: '访客' }, guest.token)
 
@@ -105,7 +105,7 @@ test('WS 生命周期：join → session.bound，全员建卡后房主可以 gam
 })
 
 test('提交行动会广播给房间里的所有人（不只是发起者）', async () => {
-  const room = await createRoomWithModule('broadcast')
+  const room = await createRoomWithModule('broadcast', 2)
   const guest = await registerPlayer('bcguest')
   const joined = await guest.sdk.rooms.join(room.roomCode, { nickname: '访客' }, guest.token)
 
@@ -246,6 +246,69 @@ test('追书人纵切：首场景 → 托马斯 → 图书馆 → 旧报检定 �
     assert.equal(serializedProgress.includes('墓地旧闻档案'), false)
   } finally {
     off()
+    room.host.sdk.roomSocket.disconnect()
+  }
+})
+
+test('终止性攻击检定失败后仍可继续提交行动', async () => {
+  const room = await createRoomWithModule('terminal-check')
+  await room.host.sdk.rooms.startStory(room.roomId, room.reconnectToken)
+  await buildCharacter(room.host.sdk, room.roomId, room.reconnectToken)
+
+  const socket = room.host.sdk.roomSocket.connect(room.roomId, room.host.token)
+  try {
+    await room.host.sdk.roomSocket.waitForOpen(socket)
+    room.host.sdk.roomSocket.joinRoom(room.hostPlayerId, {
+      reconnectToken: room.reconnectToken,
+    })
+    await waitForEvent(room.host.sdk, (event) => event.type === 'session.bound')
+
+    const openingView = waitForEvent(room.host.sdk, (event) => event.type === 'view.updated')
+    const openingNarration = waitForEvent(
+      room.host.sdk,
+      (event) => event.type === 'narration.push'
+    )
+    room.host.sdk.roomSocket.startGame(room.hostPlayerId)
+    await Promise.all([openingView, openingNarration])
+
+    const attackActionId = `attack-thomas-${Date.now()}`
+    const checkRequested = waitForEvent(
+      room.host.sdk,
+      (event) =>
+        event.type === 'check.request' &&
+        event.payload.clientActionId === attackActionId
+    )
+    const blockedAction = room.host.sdk.roomSocket.submitAction(room.hostPlayerId, {
+      clientActionId: attackActionId,
+      utterance: '我想打一顿托马斯',
+    })
+    const request = await checkRequested
+    assert.equal(request.type, 'check.request')
+    assert.deepEqual(request.payload.skills.map((skill) => skill.id), ['fighting-brawl'])
+
+    const checkResult = waitForEvent(
+      room.host.sdk,
+      (event) =>
+        event.type === 'check.result' &&
+        event.payload.clientActionId === attackActionId
+    )
+    room.host.sdk.roomSocket.rollCheck(room.hostPlayerId, {
+      clientActionId: attackActionId,
+      skill: 'fighting-brawl',
+      rollValue: 1,
+    })
+    const [result, turn] = await Promise.all([checkResult, blockedAction])
+    assert.equal(result.type, 'check.result')
+    assert.equal(result.payload.passed, true)
+    assert.match(turn.narration.text, /战斗数据/)
+
+    const nextTurn = await room.host.sdk.roomSocket.submitAction(room.hostPlayerId, {
+      clientActionId: `after-attack-${Date.now()}`,
+      utterance: '我继续和托马斯交谈',
+    })
+    assert.equal(nextTurn.player_id, room.hostPlayerId)
+    assert.doesNotMatch(nextTurn.narration.text, /CHECK_PENDING|契约校验/)
+  } finally {
     room.host.sdk.roomSocket.disconnect()
   }
 })

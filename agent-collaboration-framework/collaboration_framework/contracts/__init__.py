@@ -40,6 +40,8 @@ from .module import (
     ModifyOperation,
     ModifyOperationSpec,
     ModuleContent,
+    ModulePresentation,
+    ModuleStoryPage,
     ObservableStateSpec,
     Operation,
     OperationSpec,

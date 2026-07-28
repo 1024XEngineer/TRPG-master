@@ -11,7 +11,7 @@ import { test } from 'node:test'
 import { createRoomWithModule, makeSdk, registerPlayer } from './helpers.ts'
 
 test('🔴 老成员重连：同一账号再次 join 拿回同一个身份，人数不变', async () => {
-  const room = await createRoomWithModule('rejoin')
+  const room = await createRoomWithModule('rejoin', 2)
   const guest = await registerPlayer('rejoinguest')
 
   const first = await guest.sdk.rooms.join(room.roomCode, { nickname: '访客' }, guest.token)
@@ -29,7 +29,7 @@ test('🔴 老成员重连：同一账号再次 join 拿回同一个身份，人
 test('🔴 换设备重连：新的客户端实例只凭账号 token 就能拿回房间身份', async () => {
   // 这条是账号体系存在的理由本身。`reconnectToken` 存在浏览器会话里，换设备就
   // 没了；只有按账号幂等，才谈得上「换台设备继续这局」。
-  const room = await createRoomWithModule('device')
+  const room = await createRoomWithModule('device', 2)
   const guest = await registerPlayer('deviceguest')
   const original = await guest.sdk.rooms.join(room.roomCode, { nickname: '访客' }, guest.token)
 
@@ -49,7 +49,7 @@ test('🔴 游戏开始后：老成员能重连，新人被拒', async () => {
   // 一对互为对照的断言。改动前这里是一刀切 `if phase != Lobby: 409`，把「中途
   // 加入」和「掉线重连」当成同一件事拒掉——只测其中一边的话，「一刀切拒绝」和
   // 「一刀切放行」各能通过一条。
-  const room = await createRoomWithModule('phase')
+  const room = await createRoomWithModule('phase', 2)
   const guest = await registerPlayer('phaseguest')
   const joined = await guest.sdk.rooms.join(room.roomCode, { nickname: '访客' }, guest.token)
 
@@ -74,7 +74,7 @@ test('🔴 换设备重连能拿回角色卡 id（否则会被引导重建一张
   // id 只在建卡那一刻由客户端自己存着——换台设备就永远拿不回来，已经建完卡的人
   // 重连后会显示成「还没建卡」。这条正好补上「换设备重连」那条用例的缺口：光有
   // 房间身份不够，角色身份也要能恢复。
-  const room = await createRoomWithModule('charid')
+  const room = await createRoomWithModule('charid', 2)
   const guest = await registerPlayer('charidguest')
   const joined = await guest.sdk.rooms.join(room.roomCode, { nickname: '访客' }, guest.token)
   assert.equal(joined.characterId, null, '还没建卡时应该是 null')

@@ -14,6 +14,7 @@ from collaboration_framework.contracts import (
     ContractModel,
     EntitySpec,
     InformationItem,
+    ModulePresentation,
     RuleSpec,
     SceneSpec,
     WinConditionSpec,
@@ -41,3 +42,4 @@ class ModuleDraft(ContractModel):
     win_conditions: tuple[WinConditionSpec, ...]
     module_rules: tuple[RuleSpec, ...] = ()
     information_items: tuple[InformationItem, ...] = ()
+    presentation: ModulePresentation | None = None

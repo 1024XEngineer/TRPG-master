@@ -1,8 +1,31 @@
 {
   "module_id": "paper-chase-zh-coc7",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "world_ref": "coc-7e",
   "background": "时代与地点为美国禁酒令时期的密歇根州阿诺兹堡。调查员受托马斯·金博尔委托，从五本失窃的旧书和叔叔道格拉斯一年前的失踪案入手，走访旧宅、图书馆与公共墓地。叙事应保持安静、克制而带哥特气息，以夜色、旧书、墓园和孤独感作为反复意象；面对异常时不要急于渲染纯粹敌意，应为同情、选择与淡淡哀伤保留空间。任何尚未由线索确认的真相都不得提前告知玩家。",
+  "presentation": {
+    "title": "追书人",
+    "name_en": "Paper Chase",
+    "synopsis": "禁酒令时期的阿诺兹堡，调查员受托找回五本失窃藏书，并调查藏书家一年前的失踪。",
+    "players_min": 1,
+    "players_max": 1,
+    "difficulty": 1,
+    "estimated_duration": "1-2 小时",
+    "story_label": "PAPER CHASE",
+    "subtitle": "五本失窃藏书与一年前的失踪案",
+    "authors": [],
+    "tags": ["1920年代", "调查悬疑", "宇宙恐怖"],
+    "player_intro_pages": [
+      {
+        "title": "调查委托",
+        "content": "故事发生在禁酒令时期的美国密歇根州阿诺兹堡。托马斯·金博尔请你调查叔叔道格拉斯一年前的失踪，以及最近从叔叔旧居被盗的五本珍藏旧书。你需要寻找窃贼、尽可能追回书籍，并确认道格拉斯是否尚在人世。"
+      },
+      {
+        "title": "调查员准备",
+        "content": "本模组由一名调查员进行，调查将以走访、资料检索和现场观察为主。擅长交涉、侦查或图书馆使用的调查员可能更容易推进调查，但这些能力并非必需。"
+      }
+    ]
+  },
   "scenes": [
     {
       "id": "client_briefing",
@@ -222,7 +245,7 @@
       "kind": "npc",
       "name": "梅洛迪亚斯·杰弗逊",
       "aliases": ["梅洛迪亚斯", "杰弗逊", "墓地看守", "看守"],
-      "content": "公共墓地的看守，外套口袋里常露出一截玻璃瓶。",
+      "content": "公共墓地的看守，神情疲惫，负责照看墓园。",
       "secrets": "瓶里装着酒。他深夜见过一个人影坐在道格拉斯常用的墓碑上，却因害怕而没有靠近。",
       "information_item_ids": ["melodias_night_sighting"],
       "state": {
@@ -295,6 +318,12 @@
       "aliases": ["玻璃瓶", "酒瓶"],
       "content": "梅洛迪亚斯外套口袋里微微露出一截玻璃瓶。",
       "secrets": "瓶里装的是酒，可作为恐吓他的把柄。",
+      "visibility": {
+        "audience": "all",
+        "requires_discovery": true,
+        "discovery_rule": "entity.caretaker_bottle.state.noticed == true",
+        "discovery_shares_to_party": true
+      },
       "state": {
         "noticed": false
       }
@@ -468,7 +497,7 @@
       "id": "notice_caretaker_bottle",
       "scene_id": "cemetery",
       "action": "observe",
-      "target_id": "caretaker_bottle",
+      "target_id": "melodias",
       "skills": ["spot-hidden"],
       "difficulty": "regular",
       "outcomes": {

@@ -1,5 +1,5 @@
 /**
- * 本文件由 npm run codegen 从后端 pydantic 模型自动生成，请勿手改。
+ * 本文件由 `npm run codegen` 从后端 pydantic 模型自动生成，请勿手改。
  *
  * 源头：trpg-backend/app/dto/{auth,room,character,common,ws}.py
  * 重新生成：

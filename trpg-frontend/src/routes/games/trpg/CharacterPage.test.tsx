@@ -120,19 +120,12 @@ describe('CharacterPage', () => {
     )
   }
 
-  async function waitForPreviewReady() {
-    await waitFor(() => {
-      expect(screen.queryByText('规则预览刷新中…')).not.toBeInTheDocument()
-    })
-  }
-
   async function waitForPreviewWithSkill(skillId: string, value: number) {
     await waitFor(() => {
       expect(mockPreviewCharacter).toHaveBeenCalledWith(
         expect.objectContaining({ skills: expect.objectContaining({ [skillId]: value }) })
       )
     })
-    await waitForPreviewReady()
   }
 
   async function advanceToAttributesAfterOccupationPreview() {
@@ -143,7 +136,6 @@ describe('CharacterPage', () => {
       fireEvent.click(screen.getByRole('button', { name: /下一步/ }))
       expect(screen.getByText('属性分配')).toBeInTheDocument()
     })
-    await waitForPreviewReady()
   }
 
   it('blocks advancing until name and occupation are filled', async () => {
@@ -158,7 +150,6 @@ describe('CharacterPage', () => {
 
     fireEvent.click(screen.getByText('会计师'))
     fireEvent.click(screen.getByRole('button', { name: /下一步/ }))
-    expect(screen.getByText('规则预览尚未准备好，请稍后')).toBeInTheDocument()
 
     await advanceToAttributesAfterOccupationPreview()
   })

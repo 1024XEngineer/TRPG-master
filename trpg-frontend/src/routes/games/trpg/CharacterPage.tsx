@@ -1003,9 +1003,6 @@ export default function CharacterPage() {
               <div className="bg-card border border-border-light rounded-md p-[18px] mt-3">
                 <h4 className="text-[12px] font-semibold text-brass-dark uppercase tracking-[0.08em] mb-3">衍生属性</h4>
                 {previewError && <p className="text-[11px] text-[#c04040] mb-2">{previewError}</p>}
-                {previewStatus === 'pending' && (
-                  <p className="text-[11px] text-text-muted mb-2">规则预览刷新中…</p>
-                )}
                 <div className="flex gap-2">
                   {[
                     { label: 'HP', value: `${derived.hp}`, color: '#4a8a4a' },
@@ -1051,9 +1048,6 @@ export default function CharacterPage() {
                   </div>
                 </div>
               </div>
-              {previewStatus === 'pending' && (
-                <p className="mb-3 text-[11px] text-text-muted">规则预览刷新中…</p>
-              )}
               {previewIssuesBanner}
 
               {/* Credit Rating — 后端必填技能，值须落在所选职业信用区间内，

@@ -15,6 +15,10 @@ const MIN_PLAYERS = 1
 // PR #67 review）。
 const MAX_PLAYERS = 20
 
+export function clampPlayerCount(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value))
+}
+
 export default function CreateRoomPage() {
   const navigate = useNavigate()
   const store = useGameStore()
@@ -37,6 +41,8 @@ export default function CreateRoomPage() {
     ? SYSTEM_COLORS[getSystemVisualKey(selectedScenario?.gameSystemName || store.systemId)]
     : null
   const hasSelection = !!(store.gameId && store.systemId && store.sceneId)
+  const playerMin = selectedScenario?.playersMin ?? MIN_PLAYERS
+  const playerMax = selectedScenario?.playersMax ?? MAX_PLAYERS
 
   useEffect(() => {
     if (!store.sceneId) {
@@ -56,8 +62,15 @@ export default function CreateRoomPage() {
     }
   }, [store.sceneId])
 
+  useEffect(() => {
+    if (!selectedScenario) return
+    const next = clampPlayerCount(maxPlayers, selectedScenario.playersMin, selectedScenario.playersMax)
+    setMaxPlayers(next)
+    setMaxPlayersInput(String(next))
+  }, [maxPlayers, selectedScenario])
+
   const handleCreate = async () => {
-    if (!roomName.trim() || !hasSelection) return
+    if (!roomName.trim() || !hasSelection || !selectedScenario) return
     setCreating(true)
     setCreateError('')
     try {
@@ -77,7 +90,7 @@ export default function CreateRoomPage() {
     }
   }
 
-  const canCreate = roomName.trim().length > 0 && hasSelection && !creating
+  const canCreate = roomName.trim().length > 0 && hasSelection && !!selectedScenario && !creating
 
   const handleSelectGame = () => {
     setCreateForm({ roomName, maxPlayers })
@@ -116,12 +129,13 @@ export default function CreateRoomPage() {
               <label className="text-[11px] font-medium text-text-muted mb-1 block">最大人数</label>
               <div className="flex items-center gap-3">
                 <button
+                  aria-label="减少人数"
                   onClick={() => {
-                    const next = Math.max(MIN_PLAYERS, maxPlayers - 1)
+                    const next = Math.max(playerMin, maxPlayers - 1)
                     setMaxPlayers(next)
                     setMaxPlayersInput(String(next))
                   }}
-                  disabled={maxPlayers <= MIN_PLAYERS}
+                  disabled={maxPlayers <= playerMin}
                   className="w-10 h-10 rounded-[6px] bg-input border border-border-light text-text-muted flex items-center justify-center active:bg-panel disabled:opacity-40 disabled:cursor-not-allowed transition-all">
                   <Minus className="w-[16px] h-[16px]" />
                 </button>
@@ -129,15 +143,15 @@ export default function CreateRoomPage() {
                   <input
                     type="number"
                     inputMode="numeric"
-                    min={MIN_PLAYERS}
-                    max={MAX_PLAYERS}
+                    min={playerMin}
+                    max={playerMax}
                     value={maxPlayersInput}
                     onChange={e => setMaxPlayersInput(e.target.value)}
                     onBlur={() => {
                       const v = parseInt(maxPlayersInput, 10)
                       const clamped = Number.isNaN(v)
                         ? maxPlayers
-                        : Math.min(MAX_PLAYERS, Math.max(MIN_PLAYERS, v))
+                        : clampPlayerCount(v, playerMin, playerMax)
                       setMaxPlayers(clamped)
                       setMaxPlayersInput(String(clamped))
                     }}
@@ -146,17 +160,22 @@ export default function CreateRoomPage() {
                   <span className="text-sm text-text-muted">人</span>
                 </div>
                 <button
+                  aria-label="增加人数"
                   onClick={() => {
-                    const next = Math.min(MAX_PLAYERS, maxPlayers + 1)
+                    const next = Math.min(playerMax, maxPlayers + 1)
                     setMaxPlayers(next)
                     setMaxPlayersInput(String(next))
                   }}
-                  disabled={maxPlayers >= MAX_PLAYERS}
+                  disabled={maxPlayers >= playerMax}
                   className="w-10 h-10 rounded-[6px] bg-input border border-border-light text-text-muted flex items-center justify-center active:bg-panel disabled:opacity-40 disabled:cursor-not-allowed transition-all">
                   <Plus className="w-[16px] h-[16px]" />
                 </button>
               </div>
-              <p className="text-[10px] text-text-dim mt-1.5">最多 {MAX_PLAYERS} 人</p>
+              <p className="text-[10px] text-text-dim mt-1.5">
+                {selectedScenario
+                  ? `本模组要求 ${playerMin === playerMax ? playerMin : `${playerMin}-${playerMax}`} 人`
+                  : `最多 ${MAX_PLAYERS} 人`}
+              </p>
             </div>
           </div>
         </div>

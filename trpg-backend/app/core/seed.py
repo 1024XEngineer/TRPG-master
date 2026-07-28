@@ -19,36 +19,47 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.coc7_content import build_coc7_ruleset
 from app.models.content import Game, GameSystem, Scenario, World
+from app.service.paper_chase_loader import (
+    PAPER_CHASE_MODULE_ID,
+    PAPER_CHASE_VERSION,
+    PAPER_CHASE_WORLD_REF,
+    read_paper_chase_presentation,
+)
 
 BUILTIN_GAME_ID = "00000000-0000-0000-0000-000000000001"
 BUILTIN_SYSTEM_ID = "00000000-0000-0000-0000-000000000002"
 BUILTIN_SCENARIO_ID = "00000000-0000-0000-0000-000000000003"
 BUILTIN_WORLD_ID = "00000000-0000-0000-0000-000000000004"
-BUILTIN_MODULE_ID = "paper-chase-zh-coc7"
-BUILTIN_MODULE_VERSION = "1.0.1"
-BUILTIN_WORLD_REF = "coc-7e"
-
-BUILTIN_STORY_PAGES = [
-    {
-        "title": "托马斯的委托",
-        "content": (
-            "1920 年代的密歇根州阿诺兹堡，托马斯·金博尔请你寻找从叔叔旧居"
-            "失窃的五本旧书，并查明叔叔道格拉斯一年前的失踪案。"
-        ),
-    }
-]
+BUILTIN_MODULE_ID = PAPER_CHASE_MODULE_ID
+BUILTIN_MODULE_VERSION = PAPER_CHASE_VERSION
+BUILTIN_WORLD_REF = PAPER_CHASE_WORLD_REF
 
 
 async def ensure_seed_content(db: AsyncSession) -> None:
     """插入内置的"克苏鲁的呼唤 / COC7 / 追书人"种子数据（如果还不存在）。"""
     coc7_ruleset = build_coc7_ruleset().model_dump(mode="json")
+    presentation = read_paper_chase_presentation()
 
     game = await db.get(Game, BUILTIN_GAME_ID)
     if game is None:
-        game = Game(id=BUILTIN_GAME_ID, name="克苏鲁的呼唤")
-        db.add(game)
-    game.name = "克苏鲁的呼唤"
-    game.description = "以调查、线索和理智为核心的现代恐怖角色扮演游戏；本目录采用第七版规则。"
+        db.add(
+            Game(
+                id=BUILTIN_GAME_ID,
+                name="克苏鲁的呼唤",
+                description=(
+                    "在熟悉的现实世界表层之下，调查员通过走访、检索与推理接触不可名状的宇宙恐怖；"
+                    "重视调查、角色扮演与理智风险，正面战斗通常不是首选。"
+                ),
+                tags=["1920年代", "调查悬疑", "宇宙恐怖"],
+            )
+        )
+    else:
+        game.name = "克苏鲁的呼唤"
+        game.description = (
+            "在熟悉的现实世界表层之下，调查员通过走访、检索与推理接触不可名状的宇宙恐怖；"
+            "重视调查、角色扮演与理智风险，正面战斗通常不是首选。"
+        )
+        game.tags = ["1920年代", "调查悬疑", "宇宙恐怖"]
 
     world = await db.get(World, BUILTIN_WORLD_ID)
     if world is None:
@@ -58,7 +69,7 @@ async def ensure_seed_content(db: AsyncSession) -> None:
                 game_id=BUILTIN_GAME_ID,
                 name="禁酒令时期的阿诺兹堡",
                 description=(
-                    "1920 年代美国密歇根州的小城。旧书、墓园与失踪案交织在一起，"
+                    "1920 年代美国密歇根州的小城。旧书、失踪案与不可名状的恐怖交织，"
                     "调查员需要依靠走访、观察和谨慎判断逐步还原真相。"
                 ),
             )
@@ -88,37 +99,35 @@ async def ensure_seed_content(db: AsyncSession) -> None:
             module_id=BUILTIN_MODULE_ID,
             world_id=BUILTIN_WORLD_ID,
             game_system_id=BUILTIN_SYSTEM_ID,
-            title="追书人",
+            title=presentation.title,
             version=BUILTIN_MODULE_VERSION,
-            authors=["TRPG-master"],
-            players_min=2,
-            players_max=5,
-            difficulty=2,
-            estimated_duration="3-4 小时",
-            synopsis="调查员受托寻找五本失窃旧书，并查明道格拉斯一年前的失踪案；线索将带你走访旧宅、图书馆与公共墓地。",
+            authors=list(presentation.authors),
+            players_min=presentation.players_min,
+            players_max=presentation.players_max,
+            difficulty=presentation.difficulty,
+            estimated_duration=presentation.estimated_duration,
+            synopsis=presentation.synopsis,
             status="wip",
-            name_en="The Book Seeker",
-            story_label="CASE-001",
-            subtitle="失踪藏书留下的最后线索",
-            story_pages=BUILTIN_STORY_PAGES,
+            name_en=presentation.name_en,
+            story_label=presentation.story_label,
+            subtitle=presentation.subtitle,
+            story_pages=[],
         )
         db.add(scenario)
     else:
-        # 目录展示信息可以随应用更新；加载器写入的推荐版本和 ready 状态必须保留。
+        # 已发布目录由加载器和不可变 ModuleVersion 更新；Seed 不得把旧 ready
+        # 版本改成与尚未加载的新版本不一致的展示数据。
         scenario.module_id = BUILTIN_MODULE_ID
         scenario.world_id = BUILTIN_WORLD_ID
-        scenario.title = "追书人"
-        scenario.players_min = 2
-        scenario.players_max = 5
-        scenario.difficulty = 2
-        scenario.estimated_duration = "3-4 小时"
-        scenario.synopsis = (
-            "调查员受托寻找五本失窃旧书，并查明道格拉斯一年前的失踪案；"
-            "线索将带你走访旧宅、图书馆与公共墓地。"
-        )
-        scenario.name_en = "The Book Seeker"
-        scenario.story_label = "CASE-001"
-        scenario.subtitle = "失踪藏书留下的最后线索"
-        scenario.story_pages = BUILTIN_STORY_PAGES
+        if scenario.status != "ready":
+            scenario.title = presentation.title
+            scenario.name_en = presentation.name_en
+            scenario.players_min = presentation.players_min
+            scenario.players_max = presentation.players_max
+            scenario.difficulty = presentation.difficulty
+            scenario.estimated_duration = presentation.estimated_duration
+            scenario.synopsis = presentation.synopsis
+            scenario.story_label = presentation.story_label
+            scenario.subtitle = presentation.subtitle
 
     await db.commit()

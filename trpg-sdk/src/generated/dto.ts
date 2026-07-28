@@ -358,6 +358,7 @@ export type ErrorCode =
   | "ACTION_IN_PROGRESS"
   | "CHARACTER_INCOMPLETE"
   | "MODULE_NOT_SELECTED"
+  | "MODULE_PLAYER_COUNT_MISMATCH"
   | "RECONNECT_TOKEN_EXPIRED"
   | "RATE_LIMITED"
   | "NOT_IMPLEMENTED"
@@ -412,6 +413,7 @@ export interface GameRead {
   id: string;
   name: string;
   description?: string | null;
+  tags?: string[];
 }
 
 /**

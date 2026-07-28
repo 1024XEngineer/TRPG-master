@@ -40,6 +40,8 @@ const backendEnv = {
   ...process.env,
   DATABASE_URL: 'sqlite+aiosqlite:///./e2e.db',
   PYTHONPATH: [
+    BACKEND_DIR,
+    resolve(BACKEND_DIR, 'tests'),
     resolve(BACKEND_DIR, '../agent-collaboration-framework'),
     process.env.PYTHONPATH,
   ].filter(Boolean).join(delimiter),
@@ -138,6 +140,11 @@ async function main(): Promise<number> {
   rmSync(DB_FILE, { force: true })
   await run(venvExecutable('alembic'), ['upgrade', 'head'], 'alembic')
   await run(venvExecutable('python'), ['scripts/load_paper_chase.py'], '追书人 loader')
+  await run(
+    venvExecutable('python'),
+    [resolve(HERE, 'seed_multiplayer_fixture.py')],
+    'E2E 多人模组夹具'
+  )
 
   backend = spawn(
     venvExecutable('uvicorn'),

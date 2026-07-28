@@ -1,7 +1,7 @@
 import { useNavigate, useParams } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import { Shield, Swords, ChevronRight } from 'lucide-react'
-import type { GameSystem } from 'trpg-sdk'
+import type { Game, GameSystem } from 'trpg-sdk'
 import { getGameById, getSystemVisualKey, SYSTEM_COLORS } from '@/config/games'
 import Badge from '@/shared/components/Badge'
 import { useGameStore } from '@/stores/game-store'
@@ -11,7 +11,7 @@ export default function SystemSelectionPage() {
   const navigate = useNavigate()
   const { gameId } = useParams<{ gameId: string }>()
   const game = getGameById(gameId || '')
-  const [systems, setSystems] = useState<GameSystem[] | null>(null)
+  const [systems, setSystems] = useState<Array<{ system: GameSystem; game: Game }> | null>(null)
   const [loadError, setLoadError] = useState('')
   // ★ 只有从"创建房间→选择游戏"这条子流程进来（returnFromGameSelect）才允许
   // 继续往下选模组/建卡；从登录页"浏览已有游戏"直接进来的，最多只能看到这一页
@@ -24,7 +24,11 @@ export default function SystemSelectionPage() {
     sdk.games
       .list()
       .then(async (games) => {
-        const catalogs = await Promise.all(games.map((item) => sdk.games.listSystems(item.id)))
+        const catalogs = await Promise.all(
+          games.map(async (item) =>
+            (await sdk.games.listSystems(item.id)).map((system) => ({ system, game: item }))
+          )
+        )
         if (!cancelled) setSystems(catalogs.flat())
       })
       .catch((error) => {
@@ -56,7 +60,7 @@ export default function SystemSelectionPage() {
         </button>
         <h2 className="text-lg font-bold text-text-primary">选择规则系统</h2>
       </div>
-      <p className="text-xs text-text-muted px-5 pb-4">{game.name} · 选择规则系统</p>
+      <p className="text-xs text-text-muted px-5 pb-4">{game.name} · 世界观与适用规则</p>
 
       {!canProceed && (
         <div className="mx-5 mb-4 px-3.5 py-2.5 bg-[#fdf3e0] border border-[#e0c088] rounded-[6px] text-[12px] text-[#8a6a2a]">
@@ -69,7 +73,7 @@ export default function SystemSelectionPage() {
           <p className="text-center text-sm text-text-muted py-8">正在加载规则系统…</p>
         )}
         {loadError && <p className="text-center text-sm text-[#c04040] py-8">{loadError}</p>}
-        {systems?.map((sys) => {
+        {systems?.map(({ system: sys, game: catalogGame }) => {
           const visualKey = getSystemVisualKey(sys.name)
           const colors = SYSTEM_COLORS[visualKey]
           const isReady = canProceed
@@ -93,18 +97,19 @@ export default function SystemSelectionPage() {
                 <IconComp className={`w-7 h-7 ${colors.iconColor}`} />
               </div>
               <div className="flex-1 min-w-0">
-                <h3 className="text-[17px] font-bold text-text-primary">{sys.name}</h3>
-                <p className="text-xs text-text-muted mt-0.5 leading-[1.5]">
-                  {sys.version || '当前版本'}
-                </p>
-                {sys.worldName && (
-                  <p className="text-xs text-text-primary mt-2">世界观：{sys.worldName}</p>
+                <h3 className="text-[17px] font-bold text-text-primary">{catalogGame.name}</h3>
+                <p className="text-xs text-text-muted mt-0.5 leading-[1.5]">{sys.name} · {sys.version || '当前版本'}</p>
+                {catalogGame.description && (
+                  <p className="text-[11px] text-text-muted mt-1 leading-[1.55]">{catalogGame.description}</p>
                 )}
-                {sys.worldDescription && (
-                  <p className="text-xs text-text-muted mt-1 leading-[1.6] line-clamp-2">
-                    {sys.worldDescription}
-                  </p>
+                {!!catalogGame.tags?.length && (
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {catalogGame.tags.map((tag) => (
+                      <span key={tag} className="px-1.5 py-0.5 rounded-full bg-panel text-[10px] text-text-muted">{tag}</span>
+                    ))}
+                  </div>
                 )}
+                <p className="text-[10px] text-text-dim mt-2">适用规则：{sys.name} {sys.version || ''}</p>
                 <Badge variant="success">已就绪</Badge>
               </div>
               {isReady && (

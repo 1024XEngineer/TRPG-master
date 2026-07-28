@@ -71,7 +71,7 @@ async function buildCharacter(
 }
 
 test('🔴 讨论区消息广播给房间所有人（issue #107 端到端）', async () => {
-  const room = await createRoomWithModule('chatbc')
+  const room = await createRoomWithModule('chatbc', 2)
   const guest = await registerPlayer('chatbcguest')
   const joined = await guest.sdk.rooms.join(room.roomCode, { nickname: '话痨访客' }, guest.token)
 
@@ -135,7 +135,7 @@ test('🔴 重发相同 clientMessageId 不产生重复记录（重连去重）'
 })
 
 test('🔴 所有人都能看到发起者的原话 + 守秘人回复（修"聊天像被隔离"bug）', async () => {
-  const room = await createRoomWithModule('actbc')
+  const room = await createRoomWithModule('actbc', 2)
   const guest = await registerPlayer('actbcguest')
   const joined = await guest.sdk.rooms.join(room.roomCode, { nickname: '围观访客' }, guest.token)
 
@@ -179,7 +179,7 @@ test('🔴 所有人都能看到发起者的原话 + 守秘人回复（修"聊�
 })
 
 test('🔴 行动锁：处理中他人提交被拒（ACTION_IN_PROGRESS），完成后恢复', async () => {
-  const room = await createRoomWithModule('lock')
+  const room = await createRoomWithModule('lock', 2)
   const guest = await registerPlayer('lockguest')
   const joined = await guest.sdk.rooms.join(room.roomCode, { nickname: '抢话访客' }, guest.token)
 

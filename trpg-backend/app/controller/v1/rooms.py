@@ -48,6 +48,10 @@ _ERROR_MAP: dict[type[Exception], tuple[ErrorCode, int]] = {
     room_service.ModuleNotFoundError: (ErrorCode.NOT_FOUND, status.HTTP_404_NOT_FOUND),
     room_service.RoomFullError: (ErrorCode.ROOM_FULL, status.HTTP_409_CONFLICT),
     room_service.ModuleNotSelectedError: (ErrorCode.MODULE_NOT_SELECTED, status.HTTP_409_CONFLICT),
+    room_service.ModulePlayerCountMismatchError: (
+        ErrorCode.MODULE_PLAYER_COUNT_MISMATCH,
+        status.HTTP_409_CONFLICT,
+    ),
     room_service.CharacterIncompleteError: (
         ErrorCode.CHARACTER_INCOMPLETE,
         status.HTTP_409_CONFLICT,

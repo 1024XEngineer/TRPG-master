@@ -16,6 +16,15 @@ from pydantic import ValidationError
 ROOT = Path(__file__).resolve().parents[1]
 DEMO_MODULE = ROOT / "fixtures" / "demo-module.json"
 CATALOG_MODULE = ROOT / "fixtures" / "module-content-v1-catalog.json"
+PAPER_CHASE_MODULE = (
+    ROOT
+    / "docs"
+    / "module-parser"
+    / "examples"
+    / "module-content-validation"
+    / "追书人"
+    / "module-content-draft.json"
+)
 
 
 def demo_payload() -> dict:
@@ -109,6 +118,41 @@ class ModuleContentContractSmokeTests(unittest.TestCase):
             VisibleInformation,
         )
         self.assertFalse(content.win_conditions[0].is_ending)
+
+    def test_player_presentation_round_trips_without_exposing_background(self) -> None:
+        content = ModuleContent.model_validate_json(PAPER_CHASE_MODULE.read_text(encoding="utf-8"))
+
+        self.assertIsNotNone(content.presentation)
+        assert content.presentation is not None
+        self.assertEqual(content.presentation.players_min, 1)
+        self.assertEqual(content.presentation.players_max, 1)
+        self.assertEqual(len(content.presentation.player_intro_pages), 2)
+        public_text = " ".join(page.content for page in content.presentation.player_intro_pages)
+        self.assertNotIn("食尸鬼", public_text)
+        self.assertNotIn("地穴", public_text)
+        self.assertEqual(
+            ModuleContent.model_validate(content.model_dump(mode="json")),
+            content,
+        )
+
+    def test_player_presentation_rejects_invalid_range_and_empty_intro(self) -> None:
+        payload = demo_payload()
+        payload["presentation"] = {
+            "title": "测试模组",
+            "synopsis": "测试简介",
+            "players_min": 3,
+            "players_max": 1,
+            "difficulty": 1,
+            "estimated_duration": "1 小时",
+            "player_intro_pages": [{"title": "", "content": "开场"}],
+        }
+        with self.assertRaises(ValidationError):
+            ModuleContent.model_validate(payload)
+
+        payload["presentation"]["players_max"] = 3
+        payload["presentation"]["player_intro_pages"] = []
+        with self.assertRaises(ValidationError):
+            ModuleContent.model_validate(payload)
 
     def test_expr_condition_round_trips_through_contract_dump(self) -> None:
         content = ModuleContent.model_validate_json(

@@ -246,7 +246,7 @@ test('信用评级必填：不填会被 CREDIT_OUT_OF_RANGE 拦下', async () =>
 })
 
 test('不能读别人的角色卡', async () => {
-  const room = await createRoomWithModule('privacy')
+  const room = await createRoomWithModule('privacy', 2)
   const draft = await room.host.sdk.characters.createDraft(room.roomId, room.reconnectToken)
 
   const intruder = await registerPlayer('intruder')

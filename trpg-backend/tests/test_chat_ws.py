@@ -16,11 +16,12 @@ app.state 上（而不是模块内部单例）正是为了让测试不需要 mon
 """
 
 from collections.abc import Iterator
+from uuid import uuid4
 
 import pytest
 from starlette.testclient import TestClient
 
-from app.core.narrator import FallbackNarrator, NarrationContext, Narrator
+from app.core.narrator import FallbackNarrator
 from app.main import app
 from app.service.action_lock import RoomActionLockManager
 from tests.test_ws import ROOMS_BASE, create_room, register_and_login
@@ -60,7 +61,7 @@ def _submit_action(ws, player: dict, utterance: str) -> None:
         {
             "type": "action.submit",
             "playerId": player["playerId"],
-            "payload": {"utterance": utterance},
+            "payload": {"clientActionId": str(uuid4()), "utterance": utterance},
         }
     )
 
@@ -121,12 +122,17 @@ def test_action_submit_broadcasts_utterance_then_narration(sync_client: TestClie
     （narration.push）。双客户端的"对方也能看到"断言在 e2e（见文件头说明）。"""
     token = register_and_login(sync_client, "act_host")
     room = create_room(sync_client, token)
+    from tests.test_ws import advance_to_building, complete_character, receive_until, start_game
+
+    advance_to_building(sync_client, room)
+    complete_character(sync_client, room["roomId"], room["reconnectToken"])
+    start_game(sync_client, room, token)
 
     with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
         _join_ws(ws, room)
         _submit_action(ws, room, "我推开吱呀作响的木门")
-        echo = ws.receive_json()
-        narration = ws.receive_json()
+        echo, _ = receive_until(ws, lambda message: message.get("type") == "action.broadcast")
+        narration, _ = receive_until(ws, lambda message: message.get("type") == "narration.push")
 
     assert echo["type"] == "action.broadcast"
     assert echo["payload"]["utterance"] == "我推开吱呀作响的木门"
@@ -139,34 +145,27 @@ def test_action_submit_broadcasts_utterance_then_narration(sync_client: TestClie
 # ── 行动锁 ───────────────────────────────────────────
 
 
-class _FailingNarrator(Narrator):
-    async def narrate(self, context: NarrationContext) -> str:
-        raise RuntimeError("模拟 AI 服务超时/失败")
-
-
 def test_lock_released_after_narrator_failure(sync_client: TestClient) -> None:
     """AI 调用失败后锁必须释放（finally 兜底），否则房间永久锁死——issue #107
     验收标准。失败只告诉发起者（error 不广播），其他人只看到原话没有回复。"""
-    app.state.narrator = _FailingNarrator()
-
     token = register_and_login(sync_client, "fail_host")
     room = create_room(sync_client, token)
+    from tests.test_ws import receive_until
 
     with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
         _join_ws(ws, room)
 
         _submit_action(ws, room, "我尝试翻译古籍")
         assert ws.receive_json()["type"] == "action.broadcast"
-        failure = ws.receive_json()
-        assert failure["type"] == "error"
-        assert failure["payload"]["code"] == "INTERNAL_ERROR"
+        failure, _ = receive_until(ws, lambda message: message["type"] == "turn.failed")
+        assert failure["payload"]["code"] == "ROOM_RUNTIME_NOT_FOUND"
 
         # 换一个能正常返回的 narrator，立刻重试——若锁没被释放，这里会收到
         # ACTION_IN_PROGRESS 而不是 action.broadcast。
-        app.state.narrator = FallbackNarrator()
         _submit_action(ws, room, "我再次尝试翻译")
         assert ws.receive_json()["type"] == "action.broadcast"
-        assert ws.receive_json()["type"] == "narration.push"
+        failure, _ = receive_until(ws, lambda message: message["type"] == "turn.failed")
+        assert failure["payload"]["code"] == "ROOM_RUNTIME_NOT_FOUND"
 
 
 def test_action_submit_private_returns_not_implemented(sync_client: TestClient) -> None:
@@ -182,7 +181,11 @@ def test_action_submit_private_returns_not_implemented(sync_client: TestClient) 
             {
                 "type": "action.submit",
                 "playerId": room["playerId"],
-                "payload": {"utterance": "我偷偷摸他口袋", "visibility": "private"},
+                "payload": {
+                    "clientActionId": str(uuid4()),
+                    "utterance": "我偷偷摸他口袋",
+                    "visibility": "private",
+                },
             }
         )
         envelope = ws.receive_json()
@@ -277,9 +280,11 @@ def test_end_game_clears_chat_and_replay_stays_clean(sync_client: TestClient) ->
     with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
         _join_ws(ws, room)
         ws.send_json({"type": "game.start", "playerId": room["playerId"], "payload": {}})
-        ws.receive_json()  # 开场 narration
+        from tests.test_ws import receive_until
+
+        receive_until(ws, lambda message: message.get("type") == "narration.push")
         _send_chat(ws, room, "这句话不该进复盘", "end-1")
-        ws.receive_json()
+        receive_until(ws, lambda message: message.get("type") == "chat.message")
 
     # 聊天在 end 之前查得到
     assert (

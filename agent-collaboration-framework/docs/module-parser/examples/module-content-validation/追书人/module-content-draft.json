@@ -1,9 +1,31 @@
 {
   "module_id": "paper-chase-zh-coc7",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "world_ref": "coc-7e",
   "background": "时代与地点为美国禁酒令时期的密歇根州阿诺兹堡。调查员受托马斯·金博尔委托，从五本失窃的旧书和叔叔道格拉斯一年前的失踪案入手，走访旧宅、图书馆与公共墓地。叙事应保持安静、克制而带哥特气息，以夜色、旧书、墓园和孤独感作为反复意象；面对异常时不要急于渲染纯粹敌意，应为同情、选择与淡淡哀伤保留空间。任何尚未由线索确认的真相都不得提前告知玩家。",
-  "initial_scene_id": "client_briefing",
+  "presentation": {
+    "title": "追书人",
+    "name_en": "Paper Chase",
+    "synopsis": "禁酒令时期的阿诺兹堡，调查员受托找回五本失窃藏书，并调查藏书家一年前的失踪。",
+    "players_min": 1,
+    "players_max": 1,
+    "difficulty": 1,
+    "estimated_duration": "1-2 小时",
+    "story_label": "PAPER CHASE",
+    "subtitle": "五本失窃藏书与一年前的失踪案",
+    "authors": [],
+    "tags": ["1920年代", "调查悬疑", "宇宙恐怖"],
+    "player_intro_pages": [
+      {
+        "title": "调查委托",
+        "content": "故事发生在禁酒令时期的美国密歇根州阿诺兹堡。托马斯·金博尔请你调查叔叔道格拉斯一年前的失踪，以及最近从叔叔旧居被盗的五本珍藏旧书。你需要寻找窃贼、尽可能追回书籍，并确认道格拉斯是否尚在人世。"
+      },
+      {
+        "title": "调查员准备",
+        "content": "本模组由一名调查员进行，调查将以走访、资料检索和现场观察为主。擅长交涉、侦查或图书馆使用的调查员可能更容易推进调查，但这些能力并非必需。"
+      }
+    ]
+  },
   "scenes": [
     {
       "id": "client_briefing",
@@ -13,29 +35,17 @@
       "player_visible_description": "托马斯·金博尔坐在你面前，正等待你回应寻找失窃藏书和叔叔下落的委托。",
       "entity_ids": ["thomas", "missing_books"],
       "checkpoint_ids": [],
-      "exits": [
-        "neighborhood",
-        "cemetery",
-        "library",
-        "newspaper_office",
-        "kimball_house"
-      ]
+      "exits": []
     },
     {
       "id": "neighborhood",
       "name": "询问朋友和邻居",
-      "content": "调查员可以走访道格拉斯旧居附近的邻居。莱拉·奥戴尔是其中一人。",
+      "content": "调查员可以走访道格拉斯旧居附近的邻居。莱拉·奥戴尔记得道格拉斯曾夹着书往公墓方向走，不过他本来就走到哪里都带着书。",
       "player_visible_name": "金博尔宅附近",
       "player_visible_description": "道格拉斯旧居周围是安静的街区，熟悉他的邻居仍在这里生活。",
       "entity_ids": ["lyla"],
       "checkpoint_ids": ["question_neighbors"],
-      "exits": [
-        "client_briefing",
-        "cemetery",
-        "library",
-        "newspaper_office",
-        "kimball_house"
-      ]
+      "exits": []
     },
     {
       "id": "cemetery",
@@ -45,70 +55,18 @@
       "player_visible_description": "成排墓碑立在寂静的公共墓地中，守墓人的住处位于不远处。",
       "entity_ids": [
         "melodias",
+        "caretaker_bottle",
         "favorite_grave",
         "crypt_entrance"
       ],
       "checkpoint_ids": [
         "impress_caretaker",
-        "observe_caretaker",
+        "notice_caretaker_bottle",
         "intimidate_caretaker",
         "bribe_caretaker",
-        "follow_graveyard_tracks"
+        "track_crypt_entrance"
       ],
-      "exits": [
-        "client_briefing",
-        "neighborhood",
-        "library",
-        "newspaper_office",
-        "kimball_house",
-        "speakeasy",
-        "night_surveillance",
-        "crypt"
-      ],
-      "available_exits": [
-        {
-          "id": "seek_liquor_contacts",
-          "name": "寻找购买酒的门路",
-          "aliases": ["寻找酒", "购买酒"],
-          "description": "在禁酒令下寻找愿意卖酒的人。",
-          "destination_scene_id": "speakeasy",
-          "reveal_destination": false,
-          "visibility": {
-            "audience": "all",
-            "requires_discovery": true,
-            "discovery_rule": "entity.melodias.state.bottle_noticed == true",
-            "discovery_shares_to_party": true
-          }
-        },
-        {
-          "id": "begin_cemetery_watch",
-          "name": "开始夜间监视",
-          "aliases": ["监视墓地", "夜间监视"],
-          "description": "在墓地与金博尔宅之间选择一处隐蔽位置等待。",
-          "destination_scene_id": "night_surveillance",
-          "reveal_destination": false,
-          "visibility": {
-            "audience": "all",
-            "requires_discovery": true,
-            "discovery_rule": "entity.case_tracker.state.surveillance_available == true",
-            "discovery_shares_to_party": true
-          }
-        },
-        {
-          "id": "approach_discovered_slab",
-          "name": "前往发现的入口石板",
-          "aliases": ["前往石板", "查看入口"],
-          "description": "沿着已经确认的痕迹前往那块沉重石板。",
-          "destination_scene_id": "crypt",
-          "reveal_destination": false,
-          "visibility": {
-            "audience": "all",
-            "requires_discovery": true,
-            "discovery_rule": "entity.crypt_entrance.state.discovered == true",
-            "discovery_shares_to_party": true
-          }
-        }
-      ]
+      "exits": []
     },
     {
       "id": "library",
@@ -118,13 +76,7 @@
       "player_visible_description": "安静的图书馆里整齐保存着当地报纸与历史资料的旧刊。",
       "entity_ids": ["newspaper_archive"],
       "checkpoint_ids": ["research_library_archive"],
-      "exits": [
-        "client_briefing",
-        "neighborhood",
-        "cemetery",
-        "newspaper_office",
-        "kimball_house"
-      ]
+      "exits": []
     },
     {
       "id": "newspaper_office",
@@ -137,13 +89,7 @@
         "access_newspaper_archive",
         "luck_find_newspaper_report"
       ],
-      "exits": [
-        "client_briefing",
-        "neighborhood",
-        "cemetery",
-        "library",
-        "kimball_house"
-      ]
+      "exits": []
     },
     {
       "id": "kimball_house",
@@ -162,40 +108,17 @@
         "search_kimball_study",
         "read_douglas_diary"
       ],
-      "exits": [
-        "client_briefing",
-        "neighborhood",
-        "cemetery",
-        "library",
-        "newspaper_office",
-        "night_surveillance"
-      ],
-      "available_exits": [
-        {
-          "id": "begin_house_watch",
-          "name": "开始夜间监视",
-          "aliases": ["监视书房", "夜间监视"],
-          "description": "在书房附近寻找一处隐蔽位置等待。",
-          "destination_scene_id": "night_surveillance",
-          "reveal_destination": false,
-          "visibility": {
-            "audience": "all",
-            "requires_discovery": true,
-            "discovery_rule": "entity.case_tracker.state.surveillance_available == true",
-            "discovery_shares_to_party": true
-          }
-        }
-      ]
+      "exits": []
     },
     {
       "id": "speakeasy",
-      "name": "寻找地下酒吧",
+      "name": "地下酒吧",
       "content": "禁酒令时期，要买到一品脱酒需要先找到一家地下酒吧。找到后通常要花费 1d3 美元，职业与背景合适的调查员可以由守秘人直接引导到熟悉的酒吧。",
-      "player_visible_name": "寻找酒的门路",
-      "player_visible_description": "禁酒令下，购买酒需要先在街区中谨慎打听。",
+      "player_visible_name": "地下酒吧",
+      "player_visible_description": "隐蔽入口后是灯光昏暗、压低交谈声不断的地下酒吧。",
       "entity_ids": ["liquor"],
       "checkpoint_ids": ["find_speakeasy"],
-      "exits": ["neighborhood", "cemetery", "kimball_house"]
+      "exits": []
     },
     {
       "id": "night_surveillance",
@@ -204,17 +127,16 @@
       "player_visible_name": "夜间监视点",
       "player_visible_description": "夜色笼罩着金博尔宅与通往公墓的道路，你可以在阴影中观察周围动静。",
       "entity_ids": [
-        "surveillance_area",
-        "cemetery_figure",
+        "douglas",
         "study_window",
         "missing_books",
         "favorite_grave"
       ],
       "checkpoint_ids": [
-        "keep_night_watch",
-        "call_to_figure"
+        "watch_for_douglas",
+        "call_douglas_by_name"
       ],
-      "exits": ["cemetery", "kimball_house"]
+      "exits": []
     },
     {
       "id": "crypt",
@@ -222,26 +144,26 @@
       "content": "半足半蹄的脚印通向正确的坟墓。一块沉重石板盖着地下通道，石板移开后会涌出足以让人昏厥的腐臭。",
       "player_visible_name": "地穴入口",
       "player_visible_description": "一块沉重石板盖着向下的通道，周围空气阴冷而浑浊。",
-      "entity_ids": ["crypt_entrance", "cemetery_figure"],
+      "entity_ids": ["crypt_entrance", "douglas"],
       "checkpoint_ids": [
         "move_crypt_slab",
         "enter_crypt"
       ],
-      "exits": ["cemetery"]
+      "exits": []
     },
     {
       "id": "conversation",
       "name": "与道格拉斯交谈",
       "content": "若调查员喊出道格拉斯的名字、跟随他来到墓碑旁，或从地穴入口见到他，道格拉斯会在自己最喜欢的墓碑上讲述过去。只要受到礼貌询问，他就会回答任何疑问。",
       "player_visible_name": "墓碑旁",
-      "player_visible_description": "那个瘦削的人影停在一块低矮墓碑旁，正面对着你，周围只有夜风掠过墓地。",
-      "entity_ids": ["cemetery_figure", "favorite_grave", "crypt_entrance"],
+      "player_visible_description": "道格拉斯停在一块低矮墓碑旁，正面对着你，周围只有夜风掠过墓地。",
+      "entity_ids": ["douglas", "favorite_grave", "crypt_entrance"],
       "checkpoint_ids": [
-        "talk_to_figure",
+        "talk_to_douglas",
         "let_douglas_leave",
         "follow_douglas_underground"
       ],
-      "exits": ["cemetery"]
+      "exits": []
     },
     {
       "id": "ghoul_confrontation",
@@ -249,9 +171,9 @@
       "content": "如果道格拉斯被杀，几十只食尸鬼会从夜幕中缓缓现身。逃走者不会被追赶；试图与它们搏斗的人则会被制服并带进地下洞穴。",
       "player_visible_name": "墓地中的包围",
       "player_visible_description": "许多模糊身影从夜幕与墓碑之间出现，正在无声地聚拢。",
-      "entity_ids": ["cemetery_figure", "ghoul_crowd"],
+      "entity_ids": ["douglas", "ghoul_crowd"],
       "checkpoint_ids": ["flee_ghoul_crowd"],
-      "exits": ["cemetery"]
+      "exits": []
     }
   ],
   "entities": [
@@ -268,24 +190,16 @@
       }
     },
     {
-      "id": "cemetery_figure",
+      "id": "douglas",
       "kind": "npc",
       "name": "道格拉斯·金博尔",
       "aliases": ["道格拉斯", "墓地人影", "追书的食尸鬼"],
-      "player_visible_name": "墓地中的人影",
-      "player_visible_aliases": ["人影", "夜行者"],
-      "content": "夜色中一条瘦削的人影，怀里似乎夹着一本书。",
+      "content": "一年前失踪的离群中年爱书人。有人影在夜间夹着书往返于金博尔宅与公共墓地。",
       "secrets": "五年前，道格拉斯在墓地结识食尸鬼，后来跟随它们进入地下并逐渐转化。他仍保留记忆、人格与阅读欲望，不会主动攻击调查员；被堵住去路时才会反击，赶走对手后便停止攻击并携书离开。地下族群即将封闭这处入口，因此这是他最后一次回来取书。每回合可攻击 3 次；格斗 40%，伤害 1d6+1d4；咬住为战技，每回合造成 1d4 伤害。",
       "information_item_ids": [
         "douglas_true_nature",
         "douglas_confession"
       ],
-      "visibility": {
-        "audience": "all",
-        "requires_discovery": true,
-        "discovery_rule": "entity.cemetery_figure.state.sighted == true || entity.cemetery_figure.state.willing_to_talk == true || entity.cemetery_figure.state.true_form_seen == true || entity.cemetery_figure.state.corpse_identified == true",
-        "discovery_shares_to_party": true
-      },
       "state": {
         "alive": true,
         "sighted": false,
@@ -295,6 +209,10 @@
         "truth_told": false,
         "corpse_identified": false,
         "left_forever": false
+      },
+      "direct_responses": {
+        "polite_question": "道格拉斯愿意回答任何礼貌提出的问题，并解释自己为何选择地下生活。",
+        "cement_crypt": "封住这座坟墓不会困住食尸鬼；它们本来就准备废弃这里。"
       },
       "stat_block": {
         "STR": 85,
@@ -312,16 +230,6 @@
       }
     },
     {
-      "id": "surveillance_area",
-      "kind": "location",
-      "name": "夜间监视区域",
-      "aliases": ["监视点", "道路"],
-      "player_visible_name": "夜间监视区域",
-      "player_visible_aliases": ["监视点", "道路"],
-      "content": "金博尔宅、书房窗户与通往公墓的道路都在监视范围内。",
-      "state": {}
-    },
-    {
       "id": "lyla",
       "kind": "npc",
       "name": "莱拉·奥戴尔",
@@ -337,23 +245,8 @@
       "kind": "npc",
       "name": "梅洛迪亚斯·杰弗逊",
       "aliases": ["梅洛迪亚斯", "杰弗逊", "墓地看守", "看守"],
-      "player_visible_name": "梅洛迪亚斯·杰弗逊",
-      "player_visible_aliases": ["梅洛迪亚斯", "墓地看守", "看守"],
-      "content": "公共墓地的看守，穿着一件旧外套，看起来有些紧张。",
-      "narrative_details": [
-        {
-          "id": "melodias_pocket_bottle",
-          "kind": "description",
-          "text": "他的外套口袋里露出一截玻璃瓶。",
-          "visibility": {
-            "audience": "all",
-            "requires_discovery": true,
-            "discovery_rule": "entity.melodias.state.bottle_noticed == true",
-            "discovery_shares_to_party": true
-          }
-        }
-      ],
-      "secrets": "外套口袋里露出一截玻璃瓶，瓶里装着酒。他深夜见过一个人影坐在道格拉斯常用的墓碑上，却因害怕而没有靠近。",
+      "content": "公共墓地的看守，神情疲惫，负责照看墓园。",
+      "secrets": "瓶里装着酒。他深夜见过一个人影坐在道格拉斯常用的墓碑上，却因害怕而没有靠近。",
       "information_item_ids": ["melodias_night_sighting"],
       "state": {
         "impressed": false,
@@ -369,12 +262,6 @@
       "content": "一位已经搬去底特律的老妇人，曾向报社留下关于墓地的陈述。",
       "secrets": "她多年来看到的“恶魔子嗣”实际是食尸鬼。",
       "information_item_ids": ["hilda_ghoul_statement"],
-      "visibility": {
-        "audience": "all",
-        "requires_discovery": true,
-        "discovery_rule": "entity.newspaper_archive.state.hilda_statement_found == true",
-        "discovery_shares_to_party": true
-      },
       "state": {}
     },
     {
@@ -393,17 +280,9 @@
       "kind": "object",
       "name": "道格拉斯的日记",
       "aliases": ["日记", "旧日记"],
-      "player_visible_name": "道格拉斯的旧日记",
-      "player_visible_aliases": ["日记", "旧日记"],
       "content": "一本记录零碎、字迹难读的日记，最后一条写于道格拉斯失踪前一天。",
       "secrets": "末条记录说他决定加入“我在地下的朋友们”；通读后可发现公墓地下存在神秘生物居住的隧道网络。",
       "information_item_ids": ["diary_tunnel_clue"],
-      "visibility": {
-        "audience": "all",
-        "requires_discovery": true,
-        "discovery_rule": "entity.douglas_diary.state.found == true",
-        "discovery_shares_to_party": true
-      },
       "state": {
         "found": false,
         "read": false
@@ -414,7 +293,7 @@
       "kind": "object",
       "name": "书房窗户",
       "aliases": ["窗户", "书房的窗"],
-      "content": "书房墙上的一扇木框玻璃窗，窗框和玻璃目前完好无损。",
+      "content": "道格拉斯会从这扇窗进入旧书房。托马斯平时并不上锁。",
       "secrets": "若调查员把窗锁上，道格拉斯会用肩膀顶坏木条并撞碎玻璃。",
       "state": {
         "locked": false,
@@ -433,11 +312,28 @@
       }
     },
     {
+      "id": "caretaker_bottle",
+      "kind": "object",
+      "name": "看守口袋里的玻璃瓶",
+      "aliases": ["玻璃瓶", "酒瓶"],
+      "content": "梅洛迪亚斯外套口袋里微微露出一截玻璃瓶。",
+      "secrets": "瓶里装的是酒，可作为恐吓他的把柄。",
+      "visibility": {
+        "audience": "all",
+        "requires_discovery": true,
+        "discovery_rule": "entity.caretaker_bottle.state.noticed == true",
+        "discovery_shares_to_party": true
+      },
+      "state": {
+        "noticed": false
+      }
+    },
+    {
       "id": "liquor",
       "kind": "object",
       "name": "一品脱酒",
       "aliases": ["酒", "贿赂用酒"],
-      "content": "调查员正在寻找的一品脱酒，在禁酒令下通常需要花费 1d3 美元。",
+      "content": "禁酒令时期从地下酒吧买到的一品脱酒，通常花费 1d3 美元。",
       "state": {
         "obtained": false,
         "given_to_caretaker": false
@@ -448,9 +344,7 @@
       "kind": "object",
       "name": "墓地旧闻档案",
       "aliases": ["《阿诺兹堡广告报》旧刊", "报社档案", "墓地报道"],
-      "player_visible_name": "当地旧报档案",
-      "player_visible_aliases": ["旧报", "报社档案", "当地档案"],
-      "content": "当地报纸与历史资料的旧档案。",
+      "content": "关于公共墓地异常事件的旧报纸与未刊材料。",
       "information_item_ids": [
         "cemetery_dance_report",
         "hilda_ghoul_statement"
@@ -468,12 +362,6 @@
       "aliases": ["低矮墓碑", "常坐的坟墓", "最喜欢的墓碑"],
       "content": "道格拉斯过去常坐在这里连续读上数小时。",
       "secrets": "半足半蹄的脚印会从这里通向真正的地穴入口。",
-      "visibility": {
-        "audience": "all",
-        "requires_discovery": true,
-        "discovery_rule": "entity.favorite_grave.state.identified == true || entity.douglas_diary.state.read == true",
-        "discovery_shares_to_party": true
-      },
       "state": {
         "identified": false,
         "tracks_found": false
@@ -486,12 +374,6 @@
       "aliases": ["地穴", "入口石板", "坟墓入口"],
       "content": "一块沉重石板遮住了向下的通道，缝隙附近有难闻气味。",
       "secrets": "通道通往食尸鬼的地下世界。入口开启后，未声明屏住呼吸的人会被腐臭熏昏。",
-      "visibility": {
-        "audience": "all",
-        "requires_discovery": true,
-        "discovery_rule": "entity.crypt_entrance.state.discovered == true",
-        "discovery_shares_to_party": true
-      },
       "state": {
         "discovered": false,
         "slab_moved": false,
@@ -505,12 +387,6 @@
       "aliases": ["几十只食尸鬼", "墓地怪物"],
       "content": "夜幕下传来密集细碎的脚步声，几十个近似人形的轮廓逐渐从墓碑之间现身。",
       "secrets": "它们会取走道格拉斯的尸体；不会追赶逃走者，却会制服并带走主动攻击它们的人。",
-      "visibility": {
-        "audience": "all",
-        "requires_discovery": true,
-        "discovery_rule": "entity.ghoul_crowd.state.revealed == true",
-        "discovery_shares_to_party": true
-      },
       "state": {
         "revealed": false,
         "hostile": false
@@ -545,8 +421,7 @@
       "difficulty": "regular",
       "outcomes": {
         "success": {
-          "facts": ["莱拉回忆起道格拉斯曾夹着书往公墓方向走。"],
-          "discover_information_ids": ["lyla_cemetery_sighting"],
+          "facts": ["lyla_cemetery_sighting"],
           "player_visible_information": [
             {
               "text": "莱拉记得道格拉斯曾夹着一本书从窗前经过，往公墓方向走去。",
@@ -619,7 +494,7 @@
       }
     },
     {
-      "id": "observe_caretaker",
+      "id": "notice_caretaker_bottle",
       "scene_id": "cemetery",
       "action": "observe",
       "target_id": "melodias",
@@ -627,7 +502,7 @@
       "difficulty": "regular",
       "outcomes": {
         "success": {
-          "facts": ["调查员注意到梅洛迪亚斯口袋中的玻璃瓶。"],
+          "facts": ["调查员注意到看守口袋中的酒瓶"],
           "player_visible_information": [
             {
               "text": "梅洛迪亚斯的外套口袋里露出一截玻璃瓶，看起来装着酒。",
@@ -636,6 +511,11 @@
           ],
           "narration_constraints": [],
           "ops": [
+            {
+              "op": "set",
+              "path": "entity.caretaker_bottle.state.noticed",
+              "value": true
+            },
             {
               "op": "set",
               "path": "entity.melodias.state.bottle_noticed",
@@ -660,8 +540,7 @@
       "difficulty": "regular",
       "outcomes": {
         "success": {
-          "facts": ["梅洛迪亚斯承认深夜在墓地见过一个坐在旧墓碑上的人影。"],
-          "discover_information_ids": ["melodias_night_sighting"],
+          "facts": ["melodias_night_sighting"],
           "player_visible_information": [
             {
               "text": "梅洛迪亚斯承认，他曾在深夜看到一个人影坐在那块墓碑上，但因为害怕没有上前。",
@@ -692,7 +571,7 @@
       "visibility": {
         "audience": "all",
         "requires_discovery": true,
-        "discovery_rule": "entity.melodias.state.bottle_noticed == true",
+        "discovery_rule": "entity.caretaker_bottle.state.noticed == true",
         "discovery_shares_to_party": true
       }
     },
@@ -705,8 +584,7 @@
       "difficulty": "regular",
       "outcomes": {
         "success": {
-          "facts": ["梅洛迪亚斯承认深夜在墓地见过一个坐在旧墓碑上的人影。"],
-          "discover_information_ids": ["melodias_night_sighting"],
+          "facts": ["melodias_night_sighting"],
           "player_visible_information": [
             {
               "text": "收下酒后，梅洛迪亚斯承认深夜在墓地看到了仍坐在旧墓碑上的人影。",
@@ -755,8 +633,7 @@
       "difficulty": "regular",
       "outcomes": {
         "success": {
-          "facts": ["旧报报道了十多年前墓地里的异常舞蹈和怪异脚印。"],
-          "discover_information_ids": ["cemetery_dance_report"],
+          "facts": ["cemetery_dance_report"],
           "player_visible_information": [
             {
               "text": "旧报报道曾有人目击一群近似裸体的人在公墓跳舞；警方没找到人，却留下了怪异脚印。",
@@ -794,8 +671,7 @@
       "difficulty": "regular",
       "outcomes": {
         "success": {
-          "facts": ["调查员获准查阅墓地报道的相关档案，并找到希尔达·沃德的未刊陈述。"],
-          "discover_information_ids": ["hilda_ghoul_statement"],
+          "facts": ["调查员获准查阅墓地报道的相关档案", "hilda_ghoul_statement"],
           "player_visible_information": [
             {
               "text": "报社让你查阅相关材料，其中有希尔达·沃德关于犬脸、蹄足怪物的未刊陈述。",
@@ -838,11 +714,7 @@
       "difficulty": "regular",
       "outcomes": {
         "success": {
-          "facts": ["调查员在档案中找到墓地旧闻和希尔达·沃德的未刊陈述。"],
-          "discover_information_ids": [
-            "cemetery_dance_report",
-            "hilda_ghoul_statement"
-          ],
+          "facts": ["cemetery_dance_report", "hilda_ghoul_statement"],
           "player_visible_information": [
             {
               "text": "你在保存不善的档案中碰巧翻出了墓地旧闻和希尔达·沃德的未刊陈述。",
@@ -994,8 +866,7 @@
       "difficulty": "regular",
       "outcomes": {
         "success": {
-          "facts": ["调查员读懂日记中关于地下朋友和隧道的记录。"],
-          "discover_information_ids": ["diary_tunnel_clue"],
+          "facts": ["diary_tunnel_clue"],
           "player_visible_information": [
             {
               "text": "最后一条日记说，道格拉斯决定加入“我在地下的朋友们”；零碎记录还暗示公墓下存在隧道网络。",
@@ -1031,10 +902,10 @@
       }
     },
     {
-      "id": "keep_night_watch",
+      "id": "watch_for_douglas",
       "scene_id": "night_surveillance",
       "action": "surveil",
-      "target_id": "surveillance_area",
+      "target_id": "douglas",
       "skills": ["luck"],
       "difficulty": "regular",
       "outcomes": {
@@ -1046,16 +917,16 @@
               "visibility": {"audience": "all"}
             }
           ],
-          "narration_constraints": ["若窗户上锁，必须描述人影撞坏木条与玻璃。若未受攻击，人影会带书返回墓地；不得在身份确认前称其为道格拉斯。"],
+          "narration_constraints": ["若窗户上锁，必须描述人影撞坏木条与玻璃。若未受攻击，道格拉斯会带书返回墓地。"],
           "ops": [
             {
               "op": "set",
-              "path": "entity.cemetery_figure.state.sighted",
+              "path": "entity.douglas.state.sighted",
               "value": true
             },
             {
               "op": "set",
-              "path": "entity.cemetery_figure.state.visit_observed",
+              "path": "entity.douglas.state.visit_observed",
               "value": true
             }
           ]
@@ -1080,15 +951,15 @@
       }
     },
     {
-      "id": "call_to_figure",
+      "id": "call_douglas_by_name",
       "scene_id": "night_surveillance",
       "action": "call_name",
-      "target_id": "cemetery_figure",
+      "target_id": "douglas",
       "skills": [],
       "difficulty": null,
       "outcomes": {
         "success": {
-          "facts": ["人影听见调查员喊出的名字后放慢速度并愿意交谈"],
+          "facts": ["道格拉斯听见名字后放慢速度并愿意交谈"],
           "player_visible_information": [
             {
               "text": "听见自己的名字后，人影放慢脚步，在最喜欢的墓碑旁停下来等待你。",
@@ -1099,12 +970,12 @@
           "ops": [
             {
               "op": "set",
-              "path": "entity.cemetery_figure.state.willing_to_talk",
+              "path": "entity.douglas.state.willing_to_talk",
               "value": true
             },
             {
               "op": "set",
-              "path": "entity.cemetery_figure.state.true_form_seen",
+              "path": "entity.douglas.state.true_form_seen",
               "value": true
             },
             {
@@ -1123,12 +994,12 @@
       "visibility": {
         "audience": "all",
         "requires_discovery": true,
-        "discovery_rule": "entity.cemetery_figure.state.visit_observed == true",
+        "discovery_rule": "entity.douglas.state.visit_observed == true",
         "discovery_shares_to_party": true
       }
     },
     {
-      "id": "follow_graveyard_tracks",
+      "id": "track_crypt_entrance",
       "scene_id": "cemetery",
       "action": "track",
       "target_id": "favorite_grave",
@@ -1229,10 +1100,10 @@
       "difficulty": null,
       "outcomes": {
         "success": {
-          "facts": ["调查员屏住呼吸进入地穴并见到等待的人影"],
+          "facts": ["调查员屏住呼吸进入地穴并见到等待的道格拉斯"],
           "player_visible_information": [
             {
-              "text": "你屏住呼吸钻入通道，那个瘦削的人影正在黑暗中等待你。",
+              "text": "你屏住呼吸钻入通道，道格拉斯正在黑暗中等待你。",
               "visibility": {"audience": "all"}
             }
           ],
@@ -1245,17 +1116,17 @@
             },
             {
               "op": "set",
-              "path": "entity.cemetery_figure.state.sighted",
+              "path": "entity.douglas.state.sighted",
               "value": true
             },
             {
               "op": "set",
-              "path": "entity.cemetery_figure.state.true_form_seen",
+              "path": "entity.douglas.state.true_form_seen",
               "value": true
             },
             {
               "op": "set",
-              "path": "entity.cemetery_figure.state.willing_to_talk",
+              "path": "entity.douglas.state.willing_to_talk",
               "value": true
             },
             {
@@ -1272,7 +1143,7 @@
               "visibility": {"audience": "all"}
             }
           ],
-          "narration_constraints": ["若入口已打开但调查员不下去，那个人影会在夜间到其房间拜访并进入对话；不得在身份确认前称其为道格拉斯。"],
+          "narration_constraints": ["若入口已打开但调查员不下去，道格拉斯会在夜间到其房间拜访并进入对话。"],
           "ops": []
         }
       },
@@ -1284,19 +1155,15 @@
       }
     },
     {
-      "id": "talk_to_figure",
+      "id": "talk_to_douglas",
       "scene_id": "conversation",
       "action": "talk",
-      "target_id": "cemetery_figure",
+      "target_id": "douglas",
       "skills": [],
       "difficulty": null,
       "outcomes": {
         "success": {
-          "facts": ["道格拉斯说明自己已经选择地下生活，并请求调查员替他保守秘密。"],
-          "discover_information_ids": [
-            "douglas_true_nature",
-            "douglas_confession"
-          ],
+          "facts": ["douglas_true_nature", "douglas_confession"],
           "player_visible_information": [
             {
               "text": "道格拉斯承认自己厌倦了人类社会，只想不受打扰地阅读。地下生活令他满足，而食尸鬼即将永远关闭这处入口。",
@@ -1311,7 +1178,7 @@
           "ops": [
             {
               "op": "set",
-              "path": "entity.cemetery_figure.state.truth_told",
+              "path": "entity.douglas.state.truth_told",
               "value": true
             },
             {
@@ -1348,7 +1215,7 @@
       "visibility": {
         "audience": "all",
         "requires_discovery": true,
-        "discovery_rule": "entity.cemetery_figure.state.willing_to_talk == true",
+        "discovery_rule": "entity.douglas.state.willing_to_talk == true",
         "discovery_shares_to_party": true
       }
     },
@@ -1356,7 +1223,7 @@
       "id": "let_douglas_leave",
       "scene_id": "conversation",
       "action": "let_leave",
-      "target_id": "cemetery_figure",
+      "target_id": "douglas",
       "skills": [],
       "difficulty": null,
       "outcomes": {
@@ -1372,7 +1239,7 @@
           "ops": [
             {
               "op": "set",
-              "path": "entity.cemetery_figure.state.left_forever",
+              "path": "entity.douglas.state.left_forever",
               "value": true
             }
           ]
@@ -1387,7 +1254,7 @@
       "visibility": {
         "audience": "all",
         "requires_discovery": true,
-        "discovery_rule": "entity.cemetery_figure.state.truth_told == true",
+        "discovery_rule": "entity.douglas.state.truth_told == true",
         "discovery_shares_to_party": true
       }
     },
@@ -1395,7 +1262,7 @@
       "id": "follow_douglas_underground",
       "scene_id": "conversation",
       "action": "follow",
-      "target_id": "cemetery_figure",
+      "target_id": "douglas",
       "skills": [],
       "difficulty": null,
       "outcomes": {
@@ -1426,7 +1293,7 @@
       "visibility": {
         "audience": "all",
         "requires_discovery": true,
-        "discovery_rule": "entity.cemetery_figure.state.truth_told == true",
+        "discovery_rule": "entity.douglas.state.truth_told == true",
         "discovery_shares_to_party": true
       }
     },
@@ -1479,7 +1346,7 @@
     {
       "id": "ending_douglas_departs",
       "when": {
-        "expr": "entity.cemetery_figure.state.truth_told == true && entity.cemetery_figure.state.left_forever == true && entity.case_tracker.state.investigator_disappeared == false"
+        "expr": "entity.douglas.state.truth_told == true && entity.douglas.state.left_forever == true && entity.case_tracker.state.investigator_disappeared == false"
       },
       "fact": "调查员与道格拉斯交谈并确认他不会再返回",
       "player_visible_information": "道格拉斯带着最后的藏书回到地下，食尸鬼封闭入口。托马斯此后再也没有受到打扰。",
@@ -1508,7 +1375,7 @@
     {
       "id": "ending_douglas_killed_and_recovered",
       "when": {
-        "expr": "entity.cemetery_figure.state.alive == false && entity.case_tracker.state.douglas_body_removed == true && entity.case_tracker.state.investigation_resolved == true"
+        "expr": "entity.douglas.state.alive == false && entity.case_tracker.state.douglas_body_removed == true && entity.case_tracker.state.investigation_resolved == true"
       },
       "fact": "道格拉斯被杀，调查员逃离，食尸鬼群收走尸体",
       "player_visible_information": "食尸鬼把道格拉斯的尸体带回墓地深处。托马斯的生活恢复平静，但真相只留下恐怖的记忆。",
@@ -1540,7 +1407,7 @@
       "priority": 80,
       "mode": "append",
       "when": {
-        "expr": "entity.cemetery_figure.state.visit_observed == true && entity.study_window.state.locked == true && entity.study_window.state.broken == false"
+        "expr": "entity.douglas.state.visit_observed == true && entity.study_window.state.locked == true && entity.study_window.state.broken == false"
       },
       "then": [
         {
@@ -1549,7 +1416,7 @@
           "value": true
         }
       ],
-      "facts": ["墓地中的人影撞坏上锁的书房窗户"],
+      "facts": ["道格拉斯撞坏上锁的书房窗户"],
       "player_visible_information": [
         {
           "text": "人影用肩膀顶坏木条，玻璃碎裂后闯进了书房。",
@@ -1563,7 +1430,7 @@
       "priority": 120,
       "mode": "append",
       "when": {
-        "expr": "entity.cemetery_figure.state.true_form_seen == true && entity.case_tracker.state.first_ghoul_sight_resolved == false"
+        "expr": "entity.douglas.state.true_form_seen == true && entity.case_tracker.state.first_ghoul_sight_resolved == false"
       },
       "then": [
         {
@@ -1576,10 +1443,10 @@
           "action": "coc7.san_check(0,1d6)"
         }
       ],
-      "facts": ["调查员直视人影显露出的非人形态"],
+      "facts": ["调查员直视食尸鬼形态的道格拉斯"],
       "player_visible_information": [
         {
-          "text": "人影转过身来；月光下显露出的面孔已经不再属于人类。",
+          "text": "人影转过身来；那张脸仍像道格拉斯，却已经不再属于人类。",
           "visibility": {"audience": "actor"}
         }
       ]
@@ -1590,10 +1457,10 @@
       "priority": 100,
       "mode": "forbid",
       "when": {
-        "expr": "action.actor_id == 'cemetery_figure' && action.initiated_by_target == false"
+        "expr": "action.actor_id == 'douglas' && action.initiated_by_target == false"
       },
       "then": [],
-      "facts": ["墓地中的人影不会主动攻击调查员"],
+      "facts": ["道格拉斯不会主动攻击调查员"],
       "player_visible_information": []
     },
     {
@@ -1602,22 +1469,22 @@
       "priority": 200,
       "mode": "append",
       "when": {
-        "expr": "target.id == 'cemetery_figure' && entity.cemetery_figure.state.corpse_identified == false"
+        "expr": "target.id == 'douglas' && entity.douglas.state.corpse_identified == false"
       },
       "then": [
         {
           "op": "set",
-          "path": "entity.cemetery_figure.state.alive",
+          "path": "entity.douglas.state.alive",
           "value": false
         },
         {
           "op": "set",
-          "path": "entity.cemetery_figure.state.corpse_identified",
+          "path": "entity.douglas.state.corpse_identified",
           "value": true
         },
         {
           "op": "set",
-          "path": "entity.cemetery_figure.state.true_form_seen",
+          "path": "entity.douglas.state.true_form_seen",
           "value": true
         },
         {
@@ -1748,12 +1615,12 @@
         },
         {
           "op": "set",
-          "path": "entity.cemetery_figure.state.sighted",
+          "path": "entity.douglas.state.sighted",
           "value": true
         },
         {
           "op": "set",
-          "path": "entity.cemetery_figure.state.willing_to_talk",
+          "path": "entity.douglas.state.willing_to_talk",
           "value": true
         },
         {
@@ -1764,7 +1631,7 @@
       "facts": ["未屏住呼吸的调查员被地穴腐臭熏昏，夜间在墓碑旁醒来"],
       "player_visible_information": [
         {
-          "text": "腐臭灌入肺中，你当场失去意识；夜里醒来时，那个瘦削的人影正坐在旁边的墓碑上看着你。",
+          "text": "腐臭灌入肺中，你当场失去意识；夜里醒来时，道格拉斯正坐在旁边的墓碑上看着你。",
           "visibility": {"audience": "actor"}
         }
       ]

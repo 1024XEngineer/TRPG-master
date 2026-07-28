@@ -23,7 +23,7 @@ async def test_loader_is_idempotent_and_reports_real_content(
 
     assert result.outcome == "unchanged"
     assert result.module_id == BUILTIN_MODULE_ID
-    assert result.version == BUILTIN_MODULE_VERSION
+    assert result.version == "1.0.1"
     assert result.world_ref == "coc-7e"
     assert result.scene_count == 11
     assert result.entity_count == 16
@@ -54,6 +54,22 @@ async def test_paper_chase_hides_caretaker_bottle_until_discovered() -> None:
     }
     assert "玻璃瓶" not in entities["melodias"]["content"]
     assert checkpoints["notice_caretaker_bottle"]["target_id"] == "melodias"
+
+
+async def test_loader_projects_player_safe_presentation_to_catalog(
+    db_session: AsyncSession,
+) -> None:
+    scenario = await db_session.get(Scenario, BUILTIN_SCENARIO_ID)
+    assert scenario is not None
+    assert scenario.status == "ready"
+    assert scenario.title == "追书人"
+    assert scenario.name_en == "Paper Chase"
+    assert scenario.players_min == 1
+    assert scenario.players_max == 1
+    assert scenario.story_pages
+    text = " ".join(page["content"] for page in scenario.story_pages)
+    assert "食尸鬼" not in text
+    assert "地穴" not in text
 
 
 async def test_loader_rejects_other_identity_without_database_changes(
@@ -138,6 +154,36 @@ async def test_loader_does_not_overwrite_different_immutable_version(
     )
     assert unchanged is not None
     assert unchanged.content_json == changed_content
+
+
+async def test_loader_preserves_rooms_pinned_legacy_version(
+    db_session: AsyncSession,
+) -> None:
+    current = await db_session.get(
+        ModuleVersion,
+        (BUILTIN_MODULE_ID, BUILTIN_MODULE_VERSION),
+    )
+    assert current is not None
+    legacy_content = dict(current.content_json)
+    legacy_content["version"] = "1.0.0"
+    legacy_content["background"] = "旧房间固定内容，不得被新发布改写"
+    db_session.add(
+        ModuleVersion(
+            module_id=BUILTIN_MODULE_ID,
+            version="1.0.0",
+            world_ref=current.world_ref,
+            content_schema_version=current.content_schema_version,
+            content_json=legacy_content,
+        )
+    )
+    await db_session.commit()
+
+    result = await loader.load_paper_chase(db_session)
+
+    assert result.version == "1.0.1"
+    legacy = await db_session.get(ModuleVersion, (BUILTIN_MODULE_ID, "1.0.0"))
+    assert legacy is not None
+    assert legacy.content_json == legacy_content
 
 
 async def test_loader_rolls_back_module_and_ready_status_together(

@@ -54,7 +54,7 @@ async function buildCharacter(
 }
 
 test('第二个玩家用房间码加入，房间预览里能看到两个人', async () => {
-  const room = await createRoomWithModule('mp')
+  const room = await createRoomWithModule('mp', 2)
   const guest = await registerPlayer('guest')
 
   const joined = await guest.sdk.rooms.join(room.roomCode, { nickname: '访客' }, guest.token)
@@ -66,7 +66,7 @@ test('第二个玩家用房间码加入，房间预览里能看到两个人', as
 })
 
 test('WS 生命周期：join → session.bound，全员建卡后房主可以 game.start', async () => {
-  const room = await createRoomWithModule('ws')
+  const room = await createRoomWithModule('ws', 2)
   const guest = await registerPlayer('wsguest')
   const joined = await guest.sdk.rooms.join(room.roomCode, { nickname: '访客' }, guest.token)
 
@@ -105,7 +105,7 @@ test('WS 生命周期：join → session.bound，全员建卡后房主可以 gam
 })
 
 test('提交行动会广播给房间里的所有人（不只是发起者）', async () => {
-  const room = await createRoomWithModule('broadcast')
+  const room = await createRoomWithModule('broadcast', 2)
   const guest = await registerPlayer('bcguest')
   const joined = await guest.sdk.rooms.join(room.roomCode, { nickname: '访客' }, guest.token)
 

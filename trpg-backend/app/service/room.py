@@ -65,6 +65,10 @@ class RoomConflictError(RuntimeError):
     """房间状态不允许当前操作（通用冲突，没有更具体的业务错误码可用时兜底）。"""
 
 
+class ModulePlayerCountMismatchError(RoomConflictError):
+    """房间人数不在已发布模组的玩家范围内。"""
+
+
 class RoomFullError(RuntimeError):
     """房间人数已满，无法加入。"""
 
@@ -332,6 +336,18 @@ async def select_module(
     system = await db.get(GameSystem, scenario.game_system_id)
     if system is None or system.world_ref != module_version.world_ref:
         raise RoomConflictError("模组版本引用的规则系统不存在或不匹配")
+    try:
+        module_content = ModuleContent.model_validate(module_version.content_json)
+    except ValueError as exc:
+        raise RoomConflictError("模组发布内容无效") from exc
+    presentation = module_content.presentation
+    if presentation is None:
+        raise RoomConflictError("模组发布内容缺少玩家可见 presentation")
+    if not presentation.players_min <= room.max_players <= presentation.players_max:
+        raise ModulePlayerCountMismatchError(
+            f"该模组要求 {presentation.players_min}-{presentation.players_max} 名玩家，"
+            f"当前房间设置为 {room.max_players} 名"
+        )
 
     room.scenario_id = scenario.id
     room.module_version = module_version.version
@@ -786,35 +802,81 @@ async def require_ruleset(db: AsyncSession, system_id: str) -> RulesetRead:
 
 
 async def list_modules(db: AsyncSession) -> list[ModuleRead]:
-    """获取玩家可见模组目录；hidden 只对管理/发布流程可见。"""
+    """获取具有完整玩家展示内容的已发布模组目录。"""
     result = await db.execute(
         select(Scenario, GameSystem.name)
         .join(GameSystem, GameSystem.id == Scenario.game_system_id)
-        .where(Scenario.status != "hidden")
+        .where(Scenario.status == "ready")
         .order_by(Scenario.title, Scenario.id)
     )
-    return [
-        ModuleRead.model_validate(scenario).model_copy(
-            update={
-                "id": scenario.module_id,
-                "game_system_name": system_name,
-            }
+    modules: list[ModuleRead] = []
+    for scenario, system_name in result.tuples():
+        module_version = await db.get(ModuleVersion, (scenario.module_id, scenario.version))
+        if module_version is None:
+            continue
+        try:
+            content = ModuleContent.model_validate(module_version.content_json)
+        except ValueError:
+            continue
+        presentation = content.presentation
+        if presentation is None:
+            continue
+        modules.append(
+            ModuleRead(
+                id=scenario.module_id,
+                game_system_id=scenario.game_system_id,
+                game_system_name=system_name,
+                title=presentation.title,
+                name_en=presentation.name_en,
+                version=content.version,
+                status=scenario.status,
+                authors=list(presentation.authors),
+                players_min=presentation.players_min,
+                players_max=presentation.players_max,
+                difficulty=presentation.difficulty,
+                estimated_duration=presentation.estimated_duration,
+                synopsis=presentation.synopsis,
+            )
         )
-        for scenario, system_name in result.tuples()
-    ]
+    return modules
 
 
 async def get_module_detail(db: AsyncSession, module_id: str) -> ModuleDetailRead | None:
     """GET /api/v1/modules/{moduleId} —— 模组详情。"""
     scenario = await db.scalar(select(Scenario).where(Scenario.module_id == module_id))
-    if scenario is None:
+    if scenario is None or scenario.status != "ready":
         return None
     system = await db.get(GameSystem, scenario.game_system_id)
-    return ModuleDetailRead.model_validate(scenario).model_copy(
-        update={
-            "id": scenario.module_id,
-            "game_system_name": system.name if system is not None else None,
-        }
+    module_version = await db.get(ModuleVersion, (scenario.module_id, scenario.version))
+    if module_version is None:
+        return None
+    try:
+        content = ModuleContent.model_validate(module_version.content_json)
+    except ValueError:
+        return None
+    presentation = content.presentation
+    if presentation is None:
+        return None
+    return ModuleDetailRead(
+        id=scenario.module_id,
+        game_system_id=scenario.game_system_id,
+        game_system_name=system.name if system is not None else None,
+        title=presentation.title,
+        name_en=presentation.name_en,
+        version=content.version,
+        status=scenario.status,
+        authors=list(presentation.authors),
+        players_min=presentation.players_min,
+        players_max=presentation.players_max,
+        difficulty=presentation.difficulty,
+        estimated_duration=presentation.estimated_duration,
+        synopsis=presentation.synopsis,
+        story_label=presentation.story_label,
+        subtitle=presentation.subtitle,
+        story_pages=[
+            {"title": page.title, "content": page.content}
+            for page in presentation.player_intro_pages
+        ],
     )
 
 

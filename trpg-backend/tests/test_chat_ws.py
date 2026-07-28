@@ -19,12 +19,24 @@ from collections.abc import Iterator
 from uuid import uuid4
 
 import pytest
+from collaboration_framework.host.adapters.fakes import FakeNarrationModel
 from starlette.testclient import TestClient
 
+from app.controller import ws as ws_controller
 from app.core.narrator import FallbackNarrator
+from app.core.turn import build_turn_application
 from app.main import app
 from app.service.action_lock import RoomActionLockManager
-from tests.test_ws import ROOMS_BASE, create_room, register_and_login
+from tests.test_ws import (
+    ROOMS_BASE,
+    advance_to_building,
+    complete_character,
+    create_room,
+    join_as,
+    receive_until,
+    register_and_login,
+    start_game,
+)
 
 
 @pytest.fixture
@@ -63,6 +75,34 @@ def _submit_action(ws, player: dict, utterance: str) -> None:
             "playerId": player["playerId"],
             "payload": {"clientActionId": str(uuid4()), "utterance": utterance},
         }
+    )
+
+
+class _ConversationCheckIntentModel:
+    async def generate(self, context):  # noqa: ANN001
+        return {
+            "kind": "action",
+            "verb": "investigate",
+            "target": {"matched": True, "id": context.player_view.scene.id},
+            "check": {
+                "route": "default",
+                "proposed_skills": ["library-use", "stealth"],
+            },
+            "summary": context.player_input.utterance,
+        }
+
+
+def _use_candidate_turn_application(monkeypatch: pytest.MonkeyPatch) -> None:
+    current_application = ws_controller.turn_application
+    monkeypatch.setattr(
+        ws_controller,
+        "turn_application",
+        build_turn_application(
+            current_application.store,
+            current_application.engine,
+            intent_model=_ConversationCheckIntentModel(),
+            narration_model=FakeNarrationModel(),
+        ),
     )
 
 
@@ -310,3 +350,142 @@ def test_end_game_clears_chat_and_replay_stays_clean(sync_client: TestClient) ->
         "data"
     ]
     assert "这句话不该进复盘" not in str(replay)
+
+
+def test_conversation_restores_action_discussion_and_narration(
+    sync_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    token = register_and_login(sync_client, "conversation_host")
+    room = create_room(sync_client, token)
+    advance_to_building(sync_client, room)
+    complete_character(sync_client, room["roomId"], room["reconnectToken"])
+    start_game(sync_client, room, token)
+    _use_candidate_turn_application(monkeypatch)
+
+    with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
+        ws.send_json(
+            {
+                "type": "room.join",
+                "playerId": room["playerId"],
+                "payload": {"reconnectToken": room["reconnectToken"]},
+            }
+        )
+        assert ws.receive_json()["type"] == "session.bound"
+        assert ws.receive_json()["type"] == "view.updated"
+        _send_chat(ws, room, "先在讨论区确认路线", "conv-chat-1")
+        assert ws.receive_json()["type"] == "chat.message"
+        ws.send_json(
+            {
+                "type": "action.submit",
+                "playerId": room["playerId"],
+                "payload": {
+                    "clientActionId": "conv-action-1",
+                    "utterance": "我查看图书馆的目录",
+                },
+            }
+        )
+        assert ws.receive_json()["type"] == "action.broadcast"
+        assert ws.receive_json()["type"] == "turn.started"
+        assert ws.receive_json()["type"] == "turn.phase_changed"
+        assert ws.receive_json()["type"] == "turn.phase_changed"
+        assert ws.receive_json()["type"] == "turn.phase_changed"
+        check_request, _ = receive_until(ws, lambda message: message.get("type") == "check.request")
+        ws.send_json(
+            {
+                "type": "check.roll",
+                "playerId": room["playerId"],
+                "payload": {
+                    "clientActionId": "conv-action-1",
+                    "skill": "library-use",
+                    "rollValue": 18,
+                },
+            }
+        )
+        check_result, _ = receive_until(ws, lambda message: message.get("type") == "check.result")
+        assert check_request["payload"]["clientActionId"] == "conv-action-1"
+        assert check_result["payload"]["clientActionId"] == "conv-action-1"
+        completed, _ = receive_until(
+            ws, lambda message: message.get("message_type") == "turn.completed"
+        )
+        narration, _ = receive_until(ws, lambda message: message.get("type") == "narration.push")
+
+    assert completed["correlation_id"] == "conv-action-1"
+    assert narration["type"] == "narration.push"
+
+    conversation = sync_client.get(
+        f"{ROOMS_BASE}/{room['roomId']}/conversation",
+        headers={"X-Reconnect-Token": room["reconnectToken"]},
+    ).json()["data"]
+    assert [event["type"] for event in conversation] == [
+        "narration.push",
+        "chat.message",
+        "action.broadcast",
+        "check.result",
+        "narration.push",
+    ]
+    assert conversation[1]["channel"] == "discussion"
+    assert conversation[2]["channel"] == "action"
+    assert conversation[3]["payload"]["clientActionId"] == "conv-action-1"
+    assert conversation[4]["payload"]["text"]
+
+
+def test_check_result_stays_hidden_from_other_members(
+    sync_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    token = register_and_login(sync_client, "conversation_host_hidden")
+    room = create_room(sync_client, token, max_players=2)
+    guest = join_as(sync_client, room["roomCode"], "conversation_guest_hidden", "访客")
+    advance_to_building(sync_client, room)
+    complete_character(sync_client, room["roomId"], room["reconnectToken"])
+    complete_character(sync_client, room["roomId"], guest["reconnectToken"])
+    start_game(sync_client, room, token)
+    _use_candidate_turn_application(monkeypatch)
+
+    with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
+        ws.send_json(
+            {
+                "type": "room.join",
+                "playerId": room["playerId"],
+                "payload": {"reconnectToken": room["reconnectToken"]},
+            }
+        )
+        assert ws.receive_json()["type"] == "session.bound"
+        assert ws.receive_json()["type"] == "view.updated"
+        ws.send_json(
+            {
+                "type": "action.submit",
+                "playerId": room["playerId"],
+                "payload": {
+                    "clientActionId": "conv-action-hidden",
+                    "utterance": "我再检查一次线索",
+                },
+            }
+        )
+        assert ws.receive_json()["type"] == "action.broadcast"
+        assert ws.receive_json()["type"] == "turn.started"
+        assert ws.receive_json()["type"] == "turn.phase_changed"
+        assert ws.receive_json()["type"] == "turn.phase_changed"
+        assert ws.receive_json()["type"] == "turn.phase_changed"
+        receive_until(ws, lambda message: message.get("type") == "check.request")
+        ws.send_json(
+            {
+                "type": "check.roll",
+                "playerId": room["playerId"],
+                "payload": {
+                    "clientActionId": "conv-action-hidden",
+                    "skill": "stealth",
+                    "rollValue": 22,
+                },
+            }
+        )
+        receive_until(ws, lambda message: message.get("type") == "check.result")
+        receive_until(ws, lambda message: message.get("message_type") == "turn.completed")
+        receive_until(ws, lambda message: message.get("type") == "narration.push")
+
+    guest_conversation = sync_client.get(
+        f"{ROOMS_BASE}/{room['roomId']}/conversation",
+        headers={"X-Reconnect-Token": guest["reconnectToken"]},
+    ).json()["data"]
+    assert [event["type"] for event in guest_conversation].count("check.result") == 0

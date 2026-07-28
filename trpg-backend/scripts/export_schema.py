@@ -76,6 +76,7 @@ _MODELS: list[type[BaseModel]] = [
     # 复盘 / 回放（issue #77 新增）
     replay.RoomSummaryRead,
     replay.ReplayEventRead,
+    replay.RoomConversationEventRead,
     # 通用响应信封里的错误详情（ApiResponse 本身手写，见上面的说明）
     common.ErrorDetail,
     # WebSocket 现有 6 个事件（issue #60/#75）

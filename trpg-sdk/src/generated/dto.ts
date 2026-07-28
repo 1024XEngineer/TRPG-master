@@ -14,6 +14,7 @@
  */
 export interface ActionBroadcastPayload {
   playerId: string;
+  clientActionId: string;
   nickname: string;
   utterance: string;
 }
@@ -669,6 +670,23 @@ export interface RollAttributesResult {
   derivedStats: {
     [k: string]: number;
   };
+}
+
+/**
+ * GET /api/v1/rooms/{roomId}/conversation 返回项。
+ *
+ * 它面向房间页恢复当前对话 UI：讨论区消息继续来自 `chat_messages`，行动频道
+ * 的玩家原话、主持叙事和检定结果来自 `events`。这不是 replay 的替代品；
+ * 讨论区仍然不进入 replay，也仍然会在结束游戏时按既有语义清理。
+ */
+export interface RoomConversationEventRead {
+  id: string;
+  type: "chat.message" | "action.broadcast" | "narration.push" | "check.result";
+  channel: "discussion" | "action";
+  payload: {
+    [k: string]: unknown;
+  };
+  createdAt: string;
 }
 
 /**

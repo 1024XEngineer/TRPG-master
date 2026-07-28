@@ -163,8 +163,16 @@ async def _start_room(
         game_session = await db.get(GameSession, room.id)
         assert game_session is not None
         state = GameState.model_validate(game_session.state_json)
+        cemetery_figure = dict(state.entities["cemetery_figure"])
+        cemetery_figure.update(willing_to_talk=True, truth_told=True)
         game_session.state_json = state.model_copy(
-            update={"scene_id": "conversation"},
+            update={
+                "scene_id": "conversation",
+                "entities": {
+                    **state.entities,
+                    "cemetery_figure": cemetery_figure,
+                },
+            },
             deep=True,
         ).to_json_dict()
         await db.commit()
@@ -187,7 +195,7 @@ def _checkpoint_request(
         intent=Intent(
             kind="action",
             verb="follow",
-            target=MatchedTarget(id="douglas"),
+            target=MatchedTarget(id="cemetery_figure"),
             check=ModuleCheck(
                 checkpoint_id="follow_douglas_underground",
                 proposed_skills=(),

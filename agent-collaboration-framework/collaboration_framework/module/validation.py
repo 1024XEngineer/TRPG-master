@@ -6,6 +6,8 @@ publication contract.  It does not execute rules or depend on engine internals.
 
 from __future__ import annotations
 
+import json
+import re
 from collections.abc import Collection
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -21,6 +23,7 @@ from collaboration_framework.contracts import (
     TransitionSpec,
     TriggerEndingSpec,
     TriggerRuleSpec,
+    VisibilityPolicy,
 )
 
 from .models import ModuleDraft
@@ -50,9 +53,14 @@ def validate_module(
     payload: ModuleContent | ModuleDraft | dict[str, Any],
     *,
     skill_catalog: Collection[str] | None = None,
+    content_schema_version: int = 1,
 ) -> ValidationReport:
     if isinstance(payload, ModuleDraft):
-        return validate_draft(payload, skill_catalog=skill_catalog)
+        return validate_draft(
+            payload,
+            skill_catalog=skill_catalog,
+            content_schema_version=content_schema_version,
+        )
     raw_payload = (
         payload.model_dump(mode="python")
         if isinstance(payload, ModuleContent)
@@ -62,25 +70,42 @@ def validate_module(
         draft = ModuleDraft.model_validate(raw_payload)
     except ValidationError as error:
         return _schema_failure(error)
-    return validate_draft(draft, skill_catalog=skill_catalog)
+    if content_schema_version >= 2:
+        if issues := _check_v2_explicit_fields(raw_payload):
+            return ValidationReport(status="needs_revision", errors=issues)
+    return validate_draft(
+        draft,
+        skill_catalog=skill_catalog,
+        content_schema_version=content_schema_version,
+    )
 
 
 def validate_module_json(
     payload: str | bytes,
     *,
     skill_catalog: Collection[str] | None = None,
+    content_schema_version: int = 1,
 ) -> ValidationReport:
     try:
         draft = ModuleDraft.model_validate_json(payload)
     except ValidationError as error:
         return _schema_failure(error)
-    return validate_draft(draft, skill_catalog=skill_catalog)
+    if content_schema_version >= 2:
+        raw_payload = json.loads(payload)
+        if issues := _check_v2_explicit_fields(raw_payload):
+            return ValidationReport(status="needs_revision", errors=issues)
+    return validate_draft(
+        draft,
+        skill_catalog=skill_catalog,
+        content_schema_version=content_schema_version,
+    )
 
 
 def validate_draft(
     draft: ModuleDraft,
     *,
     skill_catalog: Collection[str] | None = None,
+    content_schema_version: int = 1,
 ) -> ValidationReport:
     """Collect reference and integrity issues without fail-fast behavior."""
 
@@ -102,6 +127,16 @@ def validate_draft(
         *(rule for entity in draft.entities for rule in entity.rules),
     ]
     rule_ids = {rule.id for rule in rules}
+    information_item_ids = {item.id for item in draft.information_items}
+
+    if draft.initial_scene_id and draft.initial_scene_id not in scene_ids:
+        errors.append(
+            _error(
+                "module.ref.initial_scene_not_found",
+                "initial_scene_id",
+                "initial_scene_id 引用了不存在的 Scene。",
+            )
+        )
 
     for scene_index, scene in enumerate(draft.scenes):
         for entity_index, entity_id in enumerate(scene.entity_ids):
@@ -181,6 +216,15 @@ def validate_draft(
         for outcome_name, outcome in checkpoint.outcomes:
             if outcome is None:
                 continue
+            _check_discovered_information(
+                owner=f"Checkpoint {checkpoint.id}.{outcome_name}",
+                facts=outcome.facts,
+                discover_information_ids=outcome.discover_information_ids,
+                information_item_ids=information_item_ids,
+                path=f"{checkpoint_path}.outcomes.{outcome_name}",
+                errors=errors,
+                reject_id_facts=content_schema_version >= 2,
+            )
             _check_operations(
                 outcome.ops,
                 f"{checkpoint_path}.outcomes.{outcome_name}.ops",
@@ -193,6 +237,15 @@ def validate_draft(
 
     for rule_index, rule in enumerate(draft.module_rules):
         rule_path = f"module_rules[{rule_index}]"
+        _check_discovered_information(
+            owner=f"Rule {rule.id}",
+            facts=rule.facts,
+            discover_information_ids=rule.discover_information_ids,
+            information_item_ids=information_item_ids,
+            path=rule_path,
+            errors=errors,
+            reject_id_facts=content_schema_version >= 2,
+        )
         _check_condition(
             rule.when,
             f"{rule_path}.when",
@@ -213,6 +266,15 @@ def validate_draft(
     for entity_index, entity in enumerate(draft.entities):
         for rule_index, rule in enumerate(entity.rules):
             rule_path = f"entities[{entity_index}].rules[{rule_index}]"
+            _check_discovered_information(
+                owner=f"Rule {rule.id}",
+                facts=rule.facts,
+                discover_information_ids=rule.discover_information_ids,
+                information_item_ids=information_item_ids,
+                path=rule_path,
+                errors=errors,
+                reject_id_facts=content_schema_version >= 2,
+            )
             _check_condition(
                 rule.when,
                 f"{rule_path}.when",
@@ -238,6 +300,9 @@ def validate_draft(
             errors,
             code="win_condition.ref.state_path_not_found",
         )
+
+    if content_schema_version >= 2:
+        _check_v2_visibility(draft, errors)
 
     if errors:
         return ValidationReport(
@@ -317,6 +382,196 @@ def _check_duplicate_ids(
             )
         else:
             first_rule_path[rule.id] = path
+
+
+def _check_v2_explicit_fields(payload: Any) -> tuple[ValidationIssue, ...]:
+    if not isinstance(payload, dict):
+        return ()
+    issues: list[ValidationIssue] = []
+    if not payload.get("initial_scene_id"):
+        issues.append(
+            _error(
+                "schema.missing_field",
+                "initial_scene_id",
+                "content schema 2 必须显式提供 initial_scene_id。",
+            )
+        )
+    entities = payload.get("entities")
+    if not isinstance(entities, list):
+        return tuple(issues)
+    required = ("player_visible_name", "player_visible_aliases", "secrets")
+    for index, entity in enumerate(entities):
+        if not isinstance(entity, dict):
+            continue
+        for field in required:
+            if field not in entity:
+                issues.append(
+                    _error(
+                        "schema.missing_field",
+                        f"entities[{index}].{field}",
+                        f"content schema 2 的 Entity 必须显式提供 {field}。",
+                    )
+                )
+    return tuple(issues)
+
+
+def _check_discovered_information(
+    *,
+    owner: str,
+    facts: tuple[str, ...],
+    discover_information_ids: tuple[str, ...],
+    information_item_ids: set[str],
+    path: str,
+    errors: list[ValidationIssue],
+    reject_id_facts: bool,
+) -> None:
+    if missing := set(discover_information_ids) - information_item_ids:
+        errors.append(
+            _error(
+                "information.ref.not_found",
+                f"{path}.discover_information_ids",
+                f"{owner} 引用了不存在的 InformationItem: {sorted(missing)}。",
+            )
+        )
+    if reject_id_facts and (leaked_ids := set(facts) & information_item_ids):
+        errors.append(
+            _error(
+                "information.id_used_as_fact",
+                f"{path}.facts",
+                f"{owner} 的 facts 必须是自然语言，不能使用 InformationItem ID: "
+                f"{sorted(leaked_ids)}。",
+            )
+        )
+
+
+_ENTITY_STATE_REFERENCE = re.compile(
+    r"\bentit(?:y|ies)\.([A-Za-z0-9_-]+)(?:\.state)?\.([A-Za-z0-9_-]+)\b"
+)
+
+
+def _check_v2_visibility(
+    draft: ModuleDraft,
+    errors: list[ValidationIssue],
+) -> None:
+    state_keys = {entity.id: set(entity.state) for entity in draft.entities}
+    written_paths = _written_entity_state_paths(draft)
+    policies: list[tuple[str, VisibilityPolicy]] = []
+    for scene_index, scene in enumerate(draft.scenes):
+        policies.extend(
+            (
+                f"scenes[{scene_index}].narrative_details[{detail_index}].visibility",
+                detail.visibility,
+            )
+            for detail_index, detail in enumerate(scene.narrative_details)
+        )
+        policies.extend(
+            (
+                f"scenes[{scene_index}].available_exits[{exit_index}].visibility",
+                available_exit.visibility,
+            )
+            for exit_index, available_exit in enumerate(scene.available_exits)
+        )
+    for entity_index, entity in enumerate(draft.entities):
+        policies.append((f"entities[{entity_index}].visibility", entity.visibility))
+        policies.extend(
+            (
+                f"entities[{entity_index}].narrative_details[{detail_index}].visibility",
+                detail.visibility,
+            )
+            for detail_index, detail in enumerate(entity.narrative_details)
+        )
+        policies.extend(
+            (
+                f"entities[{entity_index}].observable_state[{state_index}].visibility",
+                observable.visibility,
+            )
+            for state_index, observable in enumerate(entity.observable_state)
+        )
+    policies.extend(
+        (f"checkpoints[{index}].visibility", checkpoint.visibility)
+        for index, checkpoint in enumerate(draft.checkpoints)
+        if checkpoint.visibility is not None
+    )
+
+    for path, policy in policies:
+        if not policy.requires_discovery:
+            continue
+        if policy.discovery_rule is None:
+            errors.append(
+                _error(
+                    "visibility.discovery_rule.missing",
+                    f"{path}.discovery_rule",
+                    "requires_discovery=true 时必须提供 discovery_rule。",
+                )
+            )
+            continue
+        if policy.audience != "all" or not policy.discovery_shares_to_party:
+            errors.append(
+                _error(
+                    "visibility.scope.not_room_shared",
+                    path,
+                    "Entity/detail/checkpoint/exit 的状态门是房间共享的，不能声明为 actor-private。",
+                )
+            )
+        references = set(_ENTITY_STATE_REFERENCE.findall(policy.discovery_rule))
+        if not references:
+            errors.append(
+                _error(
+                    "visibility.discovery_rule.not_entity_state",
+                    f"{path}.discovery_rule",
+                    "content schema 2 的可见性门必须引用房间共享 Entity.state。",
+                )
+            )
+            continue
+        for entity_id, state_key in references:
+            state_path = (entity_id, state_key)
+            if entity_id not in state_keys or state_key not in state_keys[entity_id]:
+                errors.append(
+                    _error(
+                        "visibility.discovery_rule.state_not_found",
+                        f"{path}.discovery_rule",
+                        f"discovery_rule 引用了未声明状态 entity.{entity_id}.state.{state_key}。",
+                    )
+                )
+            elif state_path not in written_paths:
+                errors.append(
+                    _error(
+                        "visibility.discovery_rule.unreachable",
+                        f"{path}.discovery_rule",
+                        f"没有 Rule/Checkpoint 写入 entity.{entity_id}.state.{state_key}。",
+                    )
+                )
+
+
+def _written_entity_state_paths(draft: ModuleDraft) -> set[tuple[str, str]]:
+    operations = [
+        *(
+            operation
+            for rule in draft.module_rules
+            for operation in rule.then
+        ),
+        *(
+            operation
+            for entity in draft.entities
+            for rule in entity.rules
+            for operation in rule.then
+        ),
+        *(
+            operation
+            for checkpoint in draft.checkpoints
+            for _, outcome in checkpoint.outcomes
+            if outcome is not None
+            for operation in outcome.ops
+        ),
+    ]
+    paths: set[tuple[str, str]] = set()
+    for operation in operations:
+        if not isinstance(operation, (ModifyOperationSpec, SetOperationSpec, AddOperationSpec)):
+            continue
+        match = _ENTITY_STATE_REFERENCE.fullmatch(operation.path)
+        if match is not None:
+            paths.add((match.group(1), match.group(2)))
+    return paths
 
 
 def _check_condition(

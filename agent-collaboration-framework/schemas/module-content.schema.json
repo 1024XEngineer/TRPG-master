@@ -107,6 +107,14 @@
           "title": "Facts",
           "type": "array"
         },
+        "discover_information_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Discover Information Ids",
+          "type": "array"
+        },
         "player_visible_information": {
           "default": [],
           "items": {
@@ -400,9 +408,29 @@
           "title": "Aliases",
           "type": "array"
         },
+        "player_visible_name": {
+          "minLength": 1,
+          "title": "Player Visible Name",
+          "type": "string"
+        },
+        "player_visible_aliases": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Player Visible Aliases",
+          "type": "array"
+        },
         "content": {
           "title": "Content",
           "type": "string"
+        },
+        "narrative_details": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/NarrativeDetailSpec"
+          },
+          "title": "Narrative Details",
+          "type": "array"
         },
         "visibility": {
           "$ref": "#/$defs/VisibilityPolicy"
@@ -493,6 +521,8 @@
         "id",
         "kind",
         "name",
+        "player_visible_name",
+        "player_visible_aliases",
         "content"
       ],
       "title": "EntitySpec",
@@ -736,6 +766,43 @@
       "title": "ModuleStoryPage",
       "type": "object"
     },
+    "NarrativeDetailSpec": {
+      "additionalProperties": false,
+      "description": "One source-grounded narration cue projected only when player-safe.",
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "default": "description",
+          "enum": [
+            "description",
+            "sensory",
+            "atmosphere",
+            "pacing",
+            "foreshadowing"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "visibility": {
+          "$ref": "#/$defs/VisibilityPolicy"
+        }
+      },
+      "required": [
+        "id",
+        "text"
+      ],
+      "title": "NarrativeDetailSpec",
+      "type": "object"
+    },
     "ObservableStateSpec": {
       "additionalProperties": false,
       "description": "Allow-list one runtime entity-state field for player projection.",
@@ -883,6 +950,14 @@
           "title": "Facts",
           "type": "array"
         },
+        "discover_information_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Discover Information Ids",
+          "type": "array"
+        },
         "player_visible_information": {
           "default": [],
           "items": {
@@ -1011,6 +1086,14 @@
           "default": "",
           "title": "Player Visible Description",
           "type": "string"
+        },
+        "narrative_details": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/NarrativeDetailSpec"
+          },
+          "title": "Narrative Details",
+          "type": "array"
         },
         "entity_ids": {
           "default": [],
@@ -1455,6 +1538,11 @@
       ],
       "default": null
     },
+    "initial_scene_id": {
+      "minLength": 1,
+      "title": "Initial Scene Id",
+      "type": "string"
+    },
     "scenes": {
       "items": {
         "$ref": "#/$defs/SceneSpec"
@@ -1505,6 +1593,7 @@
     "version",
     "world_ref",
     "background",
+    "initial_scene_id",
     "scenes",
     "entities",
     "checkpoints",

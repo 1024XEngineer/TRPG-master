@@ -83,6 +83,7 @@ def make_context(*, utterance: str = "检查红色书架") -> HostAgentContext:
             room_id="room_001",
             player_id="player_001",
             actor_id="actor_001",
+            background="玩家可见的测试背景。",
             scene_id="library",
             phase="playing",
             revision="7",

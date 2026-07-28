@@ -9,6 +9,7 @@ from pydantic import Field
 from collaboration_framework.contracts import (
     CheckpointOption,
     ContractModel,
+    NarrativeDetailView,
     ObservableStateView,
 )
 
@@ -49,6 +50,7 @@ class GetVisibleEntityResult(ContractModel):
     name: str = Field(min_length=1)
     aliases: tuple[str, ...] = ()
     description: str
+    narrative_details: tuple[NarrativeDetailView, ...] = ()
     observable_state: tuple[ObservableStateView, ...] = ()
     checkpoint_options: tuple[CheckpointOption, ...] = ()
 

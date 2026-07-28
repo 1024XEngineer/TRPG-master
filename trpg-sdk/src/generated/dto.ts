@@ -1,5 +1,5 @@
 /**
- * 本文件由 `npm run codegen` 从后端 pydantic 模型自动生成，请勿手改。
+ * 本文件由 npm run codegen 从后端 pydantic 模型自动生成，请勿手改。
  *
  * 源头：trpg-backend/app/dto/{auth,room,character,common,ws}.py
  * 重新生成：
@@ -574,6 +574,12 @@ export interface NarrationPushPayload {
   text: string;
 }
 
+export interface NarrativeDetailView {
+  id: string;
+  kind: "description" | "sensory" | "atmosphere" | "pacing" | "foreshadowing";
+  text: string;
+}
+
 export interface ObservableStateView {
   key: string;
   label: string;
@@ -624,6 +630,7 @@ export interface PlayerView {
   room_id: string;
   player_id: string;
   actor_id: string;
+  background: string;
   scene_id: string;
   phase: "playing" | "ended";
   revision: string;
@@ -820,6 +827,7 @@ export interface SceneView {
   name: string;
   description: string;
   time?: string | null;
+  narrative_details?: NarrativeDetailView[];
   visible_entities?: VisibleEntity[];
   visible_actors?: VisibleActorView[];
   available_exits?: AvailableExitView[];
@@ -996,5 +1004,6 @@ export interface VisibleEntity {
   name: string;
   aliases?: string[];
   description: string;
+  narrative_details?: NarrativeDetailView[];
   observable_state?: ObservableStateView[];
 }

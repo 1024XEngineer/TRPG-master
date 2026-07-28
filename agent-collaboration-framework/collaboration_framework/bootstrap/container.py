@@ -44,7 +44,7 @@ def build_fake_application(
     )
     engine = RuleEngineService(engine_store, kernel=rule_kernel)
     orchestrator = Orchestrator(
-        context_assembler=ContextAssembler(module_content.background),
+        context_assembler=ContextAssembler(),
         host_intent_resolver=HostAgentIntentResolver(FakeHostAgent()),
         action_executor=engine,
         player_view_projector=PlayerViewProjector(engine),

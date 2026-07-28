@@ -239,6 +239,39 @@
       "title": "KnownInformationView",
       "type": "object"
     },
+    "NarrativeDetailView": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "description",
+            "sensory",
+            "atmosphere",
+            "pacing",
+            "foreshadowing"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "text"
+      ],
+      "title": "NarrativeDetailView",
+      "type": "object"
+    },
     "ObservableStateView": {
       "additionalProperties": false,
       "properties": {
@@ -322,6 +355,11 @@
           "title": "Actor Id",
           "type": "string"
         },
+        "background": {
+          "minLength": 1,
+          "title": "Background",
+          "type": "string"
+        },
         "scene_id": {
           "minLength": 1,
           "title": "Scene Id",
@@ -367,6 +405,7 @@
         "room_id",
         "player_id",
         "actor_id",
+        "background",
         "scene_id",
         "phase",
         "revision",
@@ -403,6 +442,14 @@
           ],
           "default": null,
           "title": "Time"
+        },
+        "narrative_details": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/NarrativeDetailView"
+          },
+          "title": "Narrative Details",
+          "type": "array"
         },
         "visible_entities": {
           "default": [],
@@ -574,6 +621,14 @@
         "description": {
           "title": "Description",
           "type": "string"
+        },
+        "narrative_details": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/NarrativeDetailView"
+          },
+          "title": "Narrative Details",
+          "type": "array"
         },
         "observable_state": {
           "default": [],

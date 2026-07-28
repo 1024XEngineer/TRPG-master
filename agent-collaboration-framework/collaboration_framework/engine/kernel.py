@@ -32,6 +32,7 @@ from collaboration_framework.contracts import (
     TransitionSpec,
     TriggerEndingSpec,
     TriggerRuleSpec,
+    VisibilityPolicy,
     VisibleFact,
 )
 
@@ -177,6 +178,10 @@ class _Execution:
                 item
                 for item in current_scene.available_exits
                 if item.id == self.target_id
+                and self._visibility_is_active(
+                    item.visibility,
+                    target_id=item.destination_scene_id,
+                )
             ),
             None,
         )
@@ -206,6 +211,29 @@ class _Execution:
             return self._complete_turn(resolution="direct", outcome="success")
 
         target_scene = self._scene_or_none(self.target_id)
+        if target_scene is not None and target_scene.id != current_scene.id:
+            route_policies = tuple(
+                item.visibility
+                for item in current_scene.available_exits
+                if item.destination_scene_id == target_scene.id
+            )
+            if route_policies and not any(
+                self._visibility_is_active(policy, target_id=target_scene.id)
+                for policy in route_policies
+            ):
+                return self._finalize(
+                    resolution="blocked",
+                    outcome="not_applicable",
+                    visible=("当前还没有发现通往该地点的路线。",),
+                    constraints=("不得声称玩家已经到达尚未发现的场景。",),
+                )
+        if (
+            target_scene is not None
+            and target_scene.id == current_scene.id
+            and intent.verb in _TIME_VERBS
+        ):
+            self._advance_time(intent.verb)
+            return self._complete_turn(resolution="direct", outcome="success")
         if target_scene is not None and isinstance(intent.check, DefaultCheck):
             destination_scene_id = None
             if (
@@ -247,6 +275,13 @@ class _Execution:
                 constraints=("不得声称动作已经执行。",),
             )
         entity = self._entity(self.target_id)
+        if not self._visibility_is_active(entity.visibility, target_id=entity.id):
+            return self._finalize(
+                resolution="blocked",
+                outcome="not_applicable",
+                visible=("当前场景中没有可接触的这个目标。",),
+                constraints=("不得声称玩家已经观察或影响尚未发现的目标。",),
+            )
 
         interaction_rules = self._matching_rules("on_interact", entity)
         interaction_plan, selected_rules = self._select_rules(
@@ -443,6 +478,10 @@ class _Execution:
             )
         self._record_facts(
             checkpoint_outcome.facts, cause=f"checkpoint:{checkpoint.id}"
+        )
+        self._discover_information(
+            checkpoint_outcome.discover_information_ids,
+            cause=f"checkpoint:{checkpoint.id}",
         )
         self.visible.extend(
             information.text
@@ -659,6 +698,10 @@ class _Execution:
             for operation in rule.then:
                 self._apply_operation(operation, cause=f"rule:{rule.id}")
             self._record_facts(rule.facts, cause=f"rule:{rule.id}")
+            self._discover_information(
+                rule.discover_information_ids,
+                cause=f"rule:{rule.id}",
+            )
             self.visible.extend(
                 information.text
                 for information in rule.player_visible_information
@@ -843,14 +886,26 @@ class _Execution:
         for fact in facts:
             if fact not in self.facts:
                 self.facts.append(fact)
+        # Schema-v1 modules used InformationItem IDs as facts. Keep those
+        # publications executable while schema-v2 uses explicit discovery IDs.
+        information = {item.id: item for item in self.module.information_items}
+        legacy_information_ids = tuple(fact for fact in facts if fact in information)
+        self._discover_information(legacy_information_ids, cause=cause)
+
+    def _discover_information(
+        self,
+        information_ids: tuple[str, ...],
+        *,
+        cause: str,
+    ) -> None:
         information = {item.id: item for item in self.module.information_items}
         party_discovered = tuple(self.state.get("discovered_facts", ()))
         actor_discovered_by_id = dict(self.state.get("actor_discovered_facts", {}))
         actor_discovered = tuple(actor_discovered_by_id.get(self.request.actor_id, ()))
         party_additions: list[str] = []
         actor_additions: list[str] = []
-        for fact in facts:
-            item = information.get(fact)
+        for information_id in information_ids:
+            item = information.get(information_id)
             if item is None:
                 continue
             actor_scoped = (
@@ -858,10 +913,16 @@ class _Execution:
                 or not item.visibility.discovery_shares_to_party
             )
             if actor_scoped:
-                if fact not in actor_discovered and fact not in actor_additions:
-                    actor_additions.append(fact)
-            elif fact not in party_discovered and fact not in party_additions:
-                party_additions.append(fact)
+                if (
+                    information_id not in actor_discovered
+                    and information_id not in actor_additions
+                ):
+                    actor_additions.append(information_id)
+            elif (
+                information_id not in party_discovered
+                and information_id not in party_additions
+            ):
+                party_additions.append(information_id)
         if party_additions:
             self._write(
                 "discovered_facts",
@@ -962,12 +1023,36 @@ class _Execution:
                 raise ContractError(
                     "Checkpoint does not match current scene and target"
                 )
+            if checkpoint.visibility is not None and not self._visibility_is_active(
+                checkpoint.visibility,
+                target_id=target_id,
+            ):
+                raise ContractError("Checkpoint is not currently visible")
             if not set(proposed_skills).issubset(checkpoint.skills):
                 raise ContractError(
                     "Proposed skills are outside the checkpoint catalog"
                 )
             return checkpoint
         raise ContractError(f"Checkpoint does not exist: {checkpoint_id}")
+
+    def _visibility_is_active(
+        self,
+        policy: VisibilityPolicy,
+        *,
+        target_id: str,
+    ) -> bool:
+        if policy.audience in {"keeper", "ho"}:
+            return False
+        if not policy.requires_discovery:
+            return True
+        if policy.discovery_rule is None:
+            return False
+        return RuleKernel.condition_matches(
+            ConditionSpec(expr=policy.discovery_rule),
+            self.state,
+            request=self.request,
+            target_id=target_id,
+        )
 
     def _scene(self, scene_id: str):
         scene = self._scene_or_none(scene_id)

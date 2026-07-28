@@ -284,24 +284,25 @@ class Coc7RuleKernelTests(unittest.TestCase):
                             )
                         }
                     )
-                    if entity.id == "douglas"
+                    if entity.id == "cemetery_figure"
                     else entity
                     for entity in self.module.entities
                 )
             }
         )
         state = paper_chase_state(module, scene_id="night_surveillance")
-        before_target = state.entities["douglas"].copy()
+        state.entities["cemetery_figure"]["sighted"] = True
+        before_target = state.entities["cemetery_figure"].copy()
 
         execution, updated = RuleKernel(
             dice_source=SequenceDiceSource([1]),
             allow_legacy_missing_skill=False,
         ).execute(
             request=direct_request(
-                request_id="attack_douglas_without_hp",
+                request_id="attack_cemetery_figure_without_hp",
                 revision="0",
                 verb="attack",
-                target_id="douglas",
+                target_id="cemetery_figure",
             ),
             module_content=module,
             game_state=state,
@@ -311,11 +312,12 @@ class Coc7RuleKernelTests(unittest.TestCase):
         self.assertEqual(execution.action_result.outcome, "not_applicable")
         self.assertEqual(execution.events, ())
         self.assertEqual(updated.event_sequence, state.event_sequence)
-        self.assertEqual(updated.entities["douglas"], before_target)
+        self.assertEqual(updated.entities["cemetery_figure"], before_target)
 
     def test_state_change_hook_resolves_first_sight_sanity_check(self) -> None:
         state = paper_chase_state(self.module, scene_id="night_surveillance")
-        state.entities["douglas"]["visit_observed"] = True
+        state.entities["cemetery_figure"]["visit_observed"] = True
+        state.entities["cemetery_figure"]["sighted"] = True
         kernel = RuleKernel(
             dice_source=SequenceDiceSource([30]),
             allow_legacy_missing_skill=False,
@@ -323,11 +325,11 @@ class Coc7RuleKernelTests(unittest.TestCase):
 
         execution, updated = kernel.execute(
             request=checkpoint_request(
-                request_id="call_douglas",
+                request_id="call_figure",
                 revision="0",
                 verb="call_name",
-                target_id="douglas",
-                checkpoint_id="call_douglas_by_name",
+                target_id="cemetery_figure",
+                checkpoint_id="call_to_figure",
             ),
             module_content=self.module,
             game_state=state,
@@ -335,12 +337,13 @@ class Coc7RuleKernelTests(unittest.TestCase):
 
         self.assertEqual(execution.action_result.outcome, "success")
         self.assertEqual(updated.scene_id, "conversation")
-        self.assertTrue(updated.entities["douglas"]["true_form_seen"])
+        self.assertTrue(updated.entities["cemetery_figure"]["true_form_seen"])
         self.assertTrue(updated.entities["case_tracker"]["first_ghoul_sight_resolved"])
         self.assertEqual(updated.actors["pc_1"].resources.san, 60)
 
     def test_interaction_override_and_attack_override_are_authoritative(self) -> None:
         crypt_state = paper_chase_state(self.module, scene_id="crypt")
+        crypt_state.entities["crypt_entrance"]["discovered"] = True
         kernel = RuleKernel(allow_legacy_missing_skill=False)
         crypt_execution, after_crypt = kernel.execute(
             request=direct_request(
@@ -364,6 +367,7 @@ class Coc7RuleKernelTests(unittest.TestCase):
             self.module,
             scene_id="ghoul_confrontation",
         )
+        crowd_state.entities["ghoul_crowd"]["revealed"] = True
         crowd_execution, after_crowd = kernel.execute(
             request=direct_request(
                 request_id="attack_crowd",
@@ -440,7 +444,7 @@ class PaperChaseRuntimeTests(unittest.IsolatedAsyncioTestCase):
     async def test_conversation_updates_resources_projection_and_ending(self) -> None:
         module = load_paper_chase()
         state = paper_chase_state(module, scene_id="conversation")
-        state.entities["douglas"]["willing_to_talk"] = True
+        state.entities["cemetery_figure"]["willing_to_talk"] = True
         store = InMemoryEngineStore()
         store.register_room(module_content=module, initial_state=state)
         service = RuleEngineService(
@@ -461,21 +465,21 @@ class PaperChaseRuntimeTests(unittest.IsolatedAsyncioTestCase):
         before = await service.read(player_input)
         self.assertEqual(
             {option.id for option in before.checkpoint_options},
-            {"talk_to_douglas"},
+            {"talk_to_figure"},
         )
 
         talk_request = checkpoint_request(
             request_id="talk",
             revision=before.revision,
             verb="talk",
-            target_id="douglas",
-            checkpoint_id="talk_to_douglas",
+            target_id="cemetery_figure",
+            checkpoint_id="talk_to_figure",
         )
         talk = await service.execute(talk_request)
         after_talk = store.inspect_state(state.room_id)
         self.assertEqual(after_talk.actors["pc_1"].resources.san, 58)
         self.assertEqual(after_talk.actors["pc_1"].resources.mythos, 3)
-        self.assertTrue(after_talk.entities["douglas"]["truth_told"])
+        self.assertTrue(after_talk.entities["cemetery_figure"]["truth_told"])
         self.assertTrue(after_talk.entities["case_tracker"]["investigation_resolved"])
         self.assertIn("douglas_true_nature", after_talk.discovered_facts)
         self.assertTrue(talk.visible_facts)
@@ -491,7 +495,7 @@ class PaperChaseRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             {option.id for option in projected.checkpoint_options},
             {
-                "talk_to_douglas",
+                "talk_to_figure",
                 "let_douglas_leave",
                 "follow_douglas_underground",
             },
@@ -506,7 +510,7 @@ class PaperChaseRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 request_id="leave",
                 revision=projected.revision,
                 verb="let_leave",
-                target_id="douglas",
+                target_id="cemetery_figure",
                 checkpoint_id="let_douglas_leave",
             )
         )

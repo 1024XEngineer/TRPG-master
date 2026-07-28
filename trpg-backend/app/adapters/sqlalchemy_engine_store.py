@@ -84,7 +84,7 @@ class _SqlAlchemyEngineTransaction(EngineTransaction):
         )
         if module_version is None:
             raise ContractError("GameSession 引用的 ModuleVersion 不存在")
-        if module_version.content_schema_version != 1:
+        if module_version.content_schema_version not in {1, 2}:
             raise ContractError(
                 f"不支持的 ModuleContent schema version: {module_version.content_schema_version}"
             )

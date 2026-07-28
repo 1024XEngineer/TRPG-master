@@ -124,7 +124,7 @@ class UnifiedWorkflowTests(unittest.TestCase):
         )
         recording = narration_model or RecordingNarrationModel()
         orchestrator = Orchestrator(
-            context_assembler=ContextAssembler(self.module.background),
+            context_assembler=ContextAssembler(),
             host_intent_resolver=HostAgentIntentResolver(
                 OneShotHostAgentAdapter(intent_model or FakeIntentModel())
             ),
@@ -414,7 +414,7 @@ class UnifiedWorkflowTests(unittest.TestCase):
         )
         model = FakeIntentModel()
         parser = IntentParser()
-        assembler = ContextAssembler(self.module.background)
+        assembler = ContextAssembler()
         for case in json.loads(load_text("fixtures/demo-cases.json")):
             player_input = with_input(
                 self.player_input,

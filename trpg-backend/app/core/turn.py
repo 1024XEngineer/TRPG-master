@@ -92,7 +92,6 @@ class SkillCheckCandidate:
 @dataclass(frozen=True)
 class PreparedTurn:
     player_input: PlayerInput
-    background: str
     view_before: PlayerView
     intent: Intent
     candidates: tuple[SkillCheckCandidate, ...]
@@ -118,8 +117,7 @@ class TurnApplication:
     host_metadata: HostModelMetadata
 
     async def resolve_actor_id(self, room_id: str, player_id: str) -> str:
-        actor_id, _ = await self._load_turn_scope(room_id, player_id)
-        return actor_id
+        return await self._load_turn_scope(room_id, player_id)
 
     async def current_player_view(
         self,
@@ -129,7 +127,7 @@ class TurnApplication:
     ) -> PlayerView:
         """Project the initial/current player-safe view without creating an action."""
 
-        actor_id, _ = await self._load_turn_scope(room_id, player_id)
+        actor_id = await self._load_turn_scope(room_id, player_id)
         bootstrap_input = PlayerInput(
             room_id=room_id,
             player_id=player_id,
@@ -143,7 +141,7 @@ class TurnApplication:
         self,
         room_id: str,
         player_id: str,
-    ) -> tuple[str, str]:
+    ) -> str:
         async with self.store.transaction(room_id) as transaction:
             runtime = await transaction.load_runtime()
         actor_ids = [
@@ -153,7 +151,7 @@ class TurnApplication:
         ]
         if len(actor_ids) != 1:
             raise ActorResolutionError("当前玩家没有唯一绑定的局内 Actor")
-        return actor_ids[0], runtime.module_content.background
+        return actor_ids[0]
 
     async def handle(
         self,
@@ -198,7 +196,7 @@ class TurnApplication:
                 phase="reading_player_view",
             ),
         )
-        actor_id, background = await self._load_turn_scope(room_id, player_id)
+        actor_id = await self._load_turn_scope(room_id, player_id)
         player_input = PlayerInput(
             room_id=room_id,
             player_id=player_id,
@@ -277,7 +275,6 @@ class TurnApplication:
                 )
         return PreparedTurn(
             player_input=player_input,
-            background=background,
             view_before=view_before,
             intent=intent,
             candidates=candidates,
@@ -356,7 +353,7 @@ class TurnApplication:
                 phase="generating_narration",
             ),
         )
-        narration_context = ContextAssembler(prepared.background).for_narration(
+        narration_context = ContextAssembler().for_narration(
             prepared.player_input,
             intent,
             action_result,

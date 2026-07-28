@@ -93,6 +93,21 @@ class VisibleInformation(ContractModel):
         return value
 
 
+class NarrativeDetailSpec(ContractModel):
+    """One source-grounded narration cue projected only when player-safe."""
+
+    id: str = Field(min_length=1)
+    kind: Literal[
+        "description",
+        "sensory",
+        "atmosphere",
+        "pacing",
+        "foreshadowing",
+    ] = "description"
+    text: str = Field(min_length=1)
+    visibility: VisibilityPolicy = Field(default_factory=VisibilityPolicy)
+
+
 class AllowOperationSpec(ContractModel):
     op: Literal["allow"] = "allow"
     action: str = Field(min_length=1)
@@ -182,6 +197,7 @@ class RuleSpec(ContractModel):
     when: ConditionSpec
     then: tuple[OperationSpec, ...] = ()
     facts: tuple[str, ...] = ()
+    discover_information_ids: tuple[str, ...] = ()
     player_visible_information: tuple[VisibleInformation, ...] = ()
 
     @model_validator(mode="before")
@@ -212,6 +228,7 @@ class SceneSpec(ContractModel):
     content: str
     player_visible_name: str = ""
     player_visible_description: str = ""
+    narrative_details: tuple[NarrativeDetailSpec, ...] = ()
     entity_ids: tuple[str, ...] = ()
     checkpoint_ids: tuple[str, ...] = ()
     exits: tuple[str, ...] = ()
@@ -248,7 +265,10 @@ class EntitySpec(ContractModel):
     kind: Literal["npc", "object", "location"]
     name: str = Field(min_length=1)
     aliases: tuple[str, ...] = ()
+    player_visible_name: str = Field(min_length=1)
+    player_visible_aliases: tuple[str, ...]
     content: str
+    narrative_details: tuple[NarrativeDetailSpec, ...] = ()
     visibility: VisibilityPolicy = Field(default_factory=VisibilityPolicy)
     observable_state: tuple[ObservableStateSpec, ...] = ()
     secrets: str | None = None
@@ -260,9 +280,24 @@ class EntitySpec(ContractModel):
     rules: tuple[RuleSpec, ...] = ()
     stat_block: StatBlock | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def populate_legacy_player_identity(cls, value: Any) -> Any:
+        """Keep schema-v1 modules loadable while v2 output is explicit."""
+
+        if not isinstance(value, dict):
+            return value
+        normalized = dict(value)
+        if "player_visible_name" not in normalized and "name" in normalized:
+            normalized["player_visible_name"] = normalized["name"]
+        if "player_visible_aliases" not in normalized:
+            normalized["player_visible_aliases"] = normalized.get("aliases", ())
+        return normalized
+
 
 class CheckpointOutcomeSpec(ContractModel):
     facts: tuple[str, ...] = ()
+    discover_information_ids: tuple[str, ...] = ()
     player_visible_information: tuple[VisibleInformation, ...] = ()
     narration_constraints: tuple[str, ...] = ()
     ops: tuple[OperationSpec, ...] = ()
@@ -363,12 +398,35 @@ class ModuleContent(ContractModel):
         description="面向叙述 Agent 的时代、地点、玩家侧故事前提与叙事基调。",
     )
     presentation: ModulePresentation | None = None
+    initial_scene_id: str = Field(min_length=1)
     scenes: tuple[SceneSpec, ...]
     entities: tuple[EntitySpec, ...]
     checkpoints: tuple[CheckpointSpec, ...]
     win_conditions: tuple[WinConditionSpec, ...]
     module_rules: tuple[RuleSpec, ...] = ()
     information_items: tuple[InformationItem, ...] = ()
+
+    @model_validator(mode="before")
+    @classmethod
+    def populate_legacy_initial_scene(cls, value: Any) -> Any:
+        """Keep schema-v1 modules loadable while v2 output is explicit."""
+
+        if not isinstance(value, dict) or "initial_scene_id" in value:
+            return value
+        scenes = value.get("scenes")
+        if not isinstance(scenes, (list, tuple)) or not scenes:
+            return value
+        first_scene = scenes[0]
+        scene_id = (
+            first_scene.get("id")
+            if isinstance(first_scene, dict)
+            else getattr(first_scene, "id", None)
+        )
+        if not scene_id:
+            return value
+        normalized = dict(value)
+        normalized["initial_scene_id"] = scene_id
+        return normalized
 
     @model_validator(mode="after")
     def validate_references(self) -> ModuleContent:
@@ -392,6 +450,10 @@ class ModuleContent(ContractModel):
             raise ValueError("Rule id 必须在 ModuleContent 内唯一")
 
         scene_ids = set(collections["Scene"])
+        if self.initial_scene_id not in scene_ids:
+            raise ValueError(
+                f"initial_scene_id 引用了不存在的 Scene {self.initial_scene_id}"
+            )
         entity_ids = set(collections["Entity"])
         checkpoint_ids = set(collections["Checkpoint"])
         ending_ids = set(collections["WinCondition"])
@@ -401,6 +463,11 @@ class ModuleContent(ContractModel):
         entities_by_id = {entity.id: entity for entity in self.entities}
 
         for scene in self.scenes:
+            detail_ids = [detail.id for detail in scene.narrative_details]
+            if len(detail_ids) != len(set(detail_ids)):
+                raise ValueError(
+                    f"Scene {scene.id} 的 narrative detail id 必须唯一"
+                )
             if missing := set(scene.entity_ids) - entity_ids:
                 raise ValueError(
                     f"Scene {scene.id} 引用了不存在的 Entity: {sorted(missing)}"
@@ -427,6 +494,11 @@ class ModuleContent(ContractModel):
                     )
 
         for entity in self.entities:
+            detail_ids = [detail.id for detail in entity.narrative_details]
+            if len(detail_ids) != len(set(detail_ids)):
+                raise ValueError(
+                    f"Entity {entity.id} 的 narrative detail id 必须唯一"
+                )
             if missing := set(entity.information_item_ids) - information_item_ids:
                 raise ValueError(
                     f"Entity {entity.id} 引用了不存在的 InformationItem: {sorted(missing)}"
@@ -467,6 +539,11 @@ class ModuleContent(ContractModel):
                 )
 
         for rule in rules:
+            if missing := set(rule.discover_information_ids) - information_item_ids:
+                raise ValueError(
+                    f"Rule {rule.id} 引用了不存在的 InformationItem: "
+                    f"{sorted(missing)}"
+                )
             self._validate_condition(rule.when, entities_by_id, f"Rule {rule.id}")
             self._validate_operations(
                 rule.then,
@@ -480,6 +557,15 @@ class ModuleContent(ContractModel):
             for outcome_name, outcome in checkpoint.outcomes:
                 if outcome is None:
                     continue
+                if (
+                    missing := set(outcome.discover_information_ids)
+                    - information_item_ids
+                ):
+                    raise ValueError(
+                        f"Checkpoint {checkpoint.id}.{outcome_name} "
+                        "引用了不存在的 InformationItem: "
+                        f"{sorted(missing)}"
+                    )
                 self._validate_operations(
                     outcome.ops,
                     entities_by_id,

@@ -8,6 +8,7 @@ from collaboration_framework.contracts import (
     CheckpointSpec,
     ConditionSpec,
     ContractError,
+    NarrativeDetailSpec,
     PlayerInput,
     ProjectionActorResource,
     ProjectionActorValue,
@@ -16,6 +17,7 @@ from collaboration_framework.contracts import (
     ProjectionEntity,
     ProjectionExitDestination,
     ProjectionKnownInformation,
+    ProjectionNarrativeDetail,
     ProjectionObservableState,
     ProjectionScene,
     ProjectionSelfActor,
@@ -154,9 +156,16 @@ class RuleEngineService:
             ProjectionEntity(
                 id=entity.id,
                 kind=entity.kind,
-                name=entity.name,
-                aliases=entity.aliases,
+                name=entity.player_visible_name,
+                aliases=entity.player_visible_aliases,
                 description=entity.content,
+                narrative_details=RuleEngineService._project_narrative_details(
+                    entity.narrative_details,
+                    runtime=runtime,
+                    player_id=player_id,
+                    actor_id=actor_id,
+                    target_id=entity.id,
+                ),
                 observable_state=tuple(
                     ProjectionObservableState(
                         key=field.key,
@@ -196,6 +205,7 @@ class RuleEngineService:
             room_id=state.room_id,
             player_id=player_id,
             actor_id=actor_id,
+            background=module.background,
             scene_id=scene.id,
             phase=state.phase,
             revision=runtime.revision,
@@ -205,6 +215,13 @@ class RuleEngineService:
                 name=scene.player_visible_name,
                 description=scene.player_visible_description,
                 time=state.clock.time_of_day,
+                narrative_details=RuleEngineService._project_narrative_details(
+                    scene.narrative_details,
+                    runtime=runtime,
+                    player_id=player_id,
+                    actor_id=actor_id,
+                    target_id=scene.id,
+                ),
                 visible_entities=visible_entities,
                 visible_actors=tuple(
                     ProjectionVisibleActor(
@@ -471,6 +488,31 @@ class RuleEngineService:
             player_id=player_id,
             actor_id=actor_id,
             target_id=checkpoint.target_id,
+        )
+
+    @staticmethod
+    def _project_narrative_details(
+        details: tuple[NarrativeDetailSpec, ...],
+        *,
+        runtime: EngineRuntimeSnapshot,
+        player_id: str,
+        actor_id: str,
+        target_id: str,
+    ) -> tuple[ProjectionNarrativeDetail, ...]:
+        return tuple(
+            ProjectionNarrativeDetail(
+                id=detail.id,
+                kind=detail.kind,
+                text=detail.text,
+            )
+            for detail in details
+            if RuleEngineService._policy_is_visible(
+                detail.visibility,
+                runtime=runtime,
+                player_id=player_id,
+                actor_id=actor_id,
+                target_id=target_id,
+            )
         )
 
     @staticmethod

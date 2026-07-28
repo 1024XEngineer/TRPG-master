@@ -46,6 +46,7 @@ def make_context(utterance: str) -> HostAgentContext:
             room_id="smoke_room",
             player_id="smoke_player",
             actor_id="smoke_actor",
+            background="玩家可见的测试背景。",
             scene_id="smoke_library",
             phase="playing",
             revision="1",

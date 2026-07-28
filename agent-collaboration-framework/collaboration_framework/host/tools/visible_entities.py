@@ -99,6 +99,7 @@ async def get_visible_entity(
         name=entity.name,
         aliases=entity.aliases,
         description=entity.description,
+        narrative_details=entity.narrative_details,
         observable_state=entity.observable_state,
         checkpoint_options=checkpoint_options,
     )

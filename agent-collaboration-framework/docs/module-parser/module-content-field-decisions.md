@@ -46,6 +46,7 @@ Module Parser 先产生私有 `ModuleDraft`，再经过确定性 Validation 构�
 | `world_ref` | 是 | 当前规则系统引用 |
 | `background` | 是 | 时代、地点、玩家侧故事前提与叙事基调 |
 | `presentation` | 否（ready 模组必填） | 玩家安全的目录元数据与开局简介；不得从 `background` 自动生成 |
+| `initial_scene_id` | 是 | 显式开局 Scene；schema 1 读取时兼容首场景回退 |
 | `scenes` | 是 | 场景声明 |
 | `entities` | 是 | NPC、物件和地点实体声明 |
 | `checkpoints` | 是 | 玩家可尝试动作与结果声明 |
@@ -67,8 +68,8 @@ Module Parser 先产生私有 `ModuleDraft`，再经过确定性 Validation 构�
 - 故事类型、气氛和叙事基调；
 - 不泄密的世界状态或社会背景。
 
-它会进入每一次 `NarrationContext`，用来稳定整场叙述的语气和时代感，但不会直接
-进入玩家可见的 WebSocket 输出，也不能替代 `visible_facts` 成为已揭示事实。
+它先由规则侧投影进入 `PlayerView`，主持编排只从安全投影构造
+`NarrationContext`。它不能替代已发现 InformationItem 成为调查事实。
 
 ### 3.1 `presentation` 的内容与传播
 
@@ -86,6 +87,7 @@ Module Parser 先产生私有 `ModuleDraft`，再经过确定性 Validation 构�
 |---|---|
 | `id` / `name` / `content` | 场景身份和模组内部完整内容；不直接进入 PlayerView |
 | `player_visible_name` / `player_visible_description` | 玩家安全名称与当前可感知描述；不得自动复制 `content` |
+| `narrative_details` | 带可见性策略的持续场景细节 |
 | `entity_ids` | 场景内实体引用 |
 | `checkpoint_ids` | 场景内可用 Checkpoint 引用 |
 | `exits` | 可到达 Scene 限制；空数组表示不限制，非空时只允许列出的 Scene |
@@ -95,9 +97,11 @@ Module Parser 先产生私有 `ModuleDraft`，再经过确定性 Validation 构�
 
 | 字段 | 决议 |
 |---|---|
-| `id` / `name` / `aliases` | 稳定身份与语义匹配名称 |
+| `id` / `name` / `aliases` | 内部稳定身份与 KP 名称，不进入 PlayerView |
+| `player_visible_name` / `player_visible_aliases` | 玩家安全身份与 Host 语义匹配名称 |
 | `kind` | 仅允许 `npc`、`object`、`location` |
 | `content` | 玩家可见的基础描述 |
+| `narrative_details` | 状态门成立后持续投影的玩家安全细节 |
 | `visibility` | 实体自身的受众和发现策略 |
 | `observable_state` | 可观察动态状态 allow-list；每项含 `key/label/visibility` |
 | `secrets` | KP 私密描述，不进入玩家安全投影 |
@@ -129,6 +133,7 @@ Rule Engine 的 `GameState` 管理。
 每个 `CheckpointOutcomeSpec` 可包含：
 
 - `facts`：确定性执行确认事实；
+- `discover_information_ids`：释放为长期玩家知识的 InformationItem ID；
 - `player_visible_information`：可向指定受众展示的信息；
 - `narration_constraints`：Narrator 必须遵守的表达约束；
 - `ops`：有序 Operation 列表。

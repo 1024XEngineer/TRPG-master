@@ -313,11 +313,14 @@ def test_game_start_pushes_opening_narration_and_advances_phase(
         ws.send_json({"type": "game.start", "playerId": room["playerId"], "payload": {}})
         view = ws.receive_json()
         envelope = ws.receive_json()
+        room_state = ws.receive_json()
 
     assert view["type"] == "view.updated"
     assert view["payload"]["playerView"]["scene"]["name"] == "托马斯的会客室"
     assert envelope["type"] == "narration.push"
     assert "托马斯的会客室" in envelope["payload"]["text"]
+    assert room_state["type"] == "room.state"
+    assert room_state["payload"]["phase"] == "InGame"
 
     preview = sync_client.get(f"{ROOMS_BASE}/{room['roomCode']}").json()["data"]
     assert preview["phase"] == "InGame"

@@ -37,6 +37,25 @@ async def test_loader_is_idempotent_and_reports_real_content(
     assert scenario.title == "追书人"
     assert scenario.story_pages[0]["title"] == "托马斯的会客室"
     assert "失窃藏书" in scenario.story_pages[0]["content"]
+
+
+async def test_paper_chase_hides_caretaker_bottle_until_discovered() -> None:
+    payload = json.loads(loader.PAPER_CHASE_SOURCE_PATH.read_text(encoding="utf-8"))
+    assert payload["version"] == "1.0.1"
+    entities = {entity["id"]: entity for entity in payload["entities"]}
+    checkpoints = {checkpoint["id"]: checkpoint for checkpoint in payload["checkpoints"]}
+
+    bottle = entities["caretaker_bottle"]
+    assert bottle["visibility"] == {
+        "audience": "all",
+        "requires_discovery": True,
+        "discovery_rule": "entity.caretaker_bottle.state.noticed == true",
+        "discovery_shares_to_party": True,
+    }
+    assert "玻璃瓶" not in entities["melodias"]["content"]
+    assert checkpoints["notice_caretaker_bottle"]["target_id"] == "melodias"
+
+
 async def test_loader_rejects_other_identity_without_database_changes(
     db_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,

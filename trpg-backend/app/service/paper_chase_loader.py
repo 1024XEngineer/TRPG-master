@@ -16,7 +16,7 @@ from app.models.content import GameSystem, Scenario
 from app.models.engine import ModuleVersion
 
 PAPER_CHASE_MODULE_ID = "paper-chase-zh-coc7"
-PAPER_CHASE_VERSION = "1.0.0"
+PAPER_CHASE_VERSION = "1.0.1"
 PAPER_CHASE_WORLD_REF = "coc-7e"
 PAPER_CHASE_SOURCE_PATH = (
     Path(__file__).resolve().parents[3]

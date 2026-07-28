@@ -40,6 +40,25 @@ function normalizeDerivedStats(d: CharacterComputeResult['derivedStats'] | undef
   }
 }
 
+async function previewWithAllocations(
+  attributes: Attributes,
+  occupationId: number | null,
+  allocations: Record<string, number>,
+) {
+  const basePreview = await previewCharacter({ attributes, occupationId, skills: {} })
+  const allocatedSkills = Object.entries(allocations).filter(([, points]) => points > 0)
+  if (allocatedSkills.length === 0) {
+    return { preview: basePreview, skillValues: {} }
+  }
+
+  const baseBySkill = new Map(basePreview.skillView.map(skill => [skill.id, skill.base]))
+  const skillValues = Object.fromEntries(
+    allocatedSkills.map(([id, points]) => [id, (baseBySkill.get(id) ?? 0) + points])
+  )
+  const preview = await previewCharacter({ attributes, occupationId, skills: skillValues })
+  return { preview, skillValues }
+}
+
 // ─── SkillRow Component ──────────────────────────────
 function SkillRow({
   skill, base, cap, poolAllocation, otherPoolPoints, onChange, onSetAllocation, maxPoints, minPoints
@@ -389,12 +408,8 @@ export default function CharacterPage() {
     if (!ruleset) return
     const timer = setTimeout(() => {
       const gen = ++previewGenRef.current
-      previewCharacter({
-        attributes: attr,
-        occupationId: info.occupationId,
-        skills: skillAlloc,
-      })
-        .then((result) => {
+      previewWithAllocations(attr, info.occupationId, skillAlloc)
+        .then(({ preview: result }) => {
           if (gen !== previewGenRef.current) return
           setPreview(result)
           setPreviewError('')
@@ -573,10 +588,8 @@ export default function CharacterPage() {
   const [attrInputs, setAttrInputs] = useState<Record<string, string>>({})
   useEffect(() => {
     setAttrInputs(Object.fromEntries(pointBuyAttributes.map(a => [a.key, String(attr[a.key] ?? '')])))
-    // 只在属性项集合变化时重建；单项数值的变化由各自的 onChange 维护，
-    // 否则每敲一个字都会被这里覆盖回去。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pointBuyAttributes])
+    // 输入时只更新 attrInputs；attr 会在失焦或 +/- 后才更新。
+  }, [pointBuyAttributes, attr])
 
   // 只累加「可购买」的其余属性——之前这里用 Object.entries(prev) 把幸运也算了
   // 进去，等于凭空占掉 50 点预算，加点上限实际卡在 430 而不是 480。
@@ -637,17 +650,8 @@ export default function CharacterPage() {
       // 最终提交前再拉一次权威计算：用当前 base（来自 skillComputeMap）把
       // 已分配点数换算成"最终值"，连同属性/职业一起发给后端拿回完整的
       // skillView（79 项技能的最终值）和衍生值，两边都以这次结果为准落库。
-      const skillsPayload: Record<string, number> = {}
-      for (const [id, pts] of Object.entries(skillAlloc)) {
-        if (!pts) continue
-        const base = skillComputeMap.get(id)?.base ?? 0
-        skillsPayload[id] = base + pts
-      }
-      const finalPreview = await previewCharacter({
-        attributes: attr,
-        occupationId: info.occupationId,
-        skills: skillsPayload,
-      })
+      const { preview: finalPreview, skillValues: skillsPayload } =
+        await previewWithAllocations(attr, info.occupationId, skillAlloc)
       const finalDerived = normalizeDerivedStats(finalPreview.derivedStats)
       const skillFinalValues = Object.fromEntries(
         finalPreview.skillView.map(v => [v.id, v.current])

@@ -21,6 +21,17 @@ export interface ActionBroadcastPayload {
 }
 
 /**
+ * Player-safe declaration id and semantic cues supplied by one checkpoint.
+ */
+export interface ActionDeclarationOption {
+  id: string;
+  /**
+   * @minItems 1
+   */
+  semantic_hints: [string, ...string[]];
+}
+
+/**
  * action.submit 事件 payload。
  *
  * `client_action_id` 是客户端为一次逻辑动作生成的稳定幂等键；网络重试必须
@@ -320,6 +331,7 @@ export interface CheckpointOption {
   action_hint: string;
   skills?: string[];
   difficulty?: ("regular" | "hard" | "extreme") | null;
+  declaration_options?: ActionDeclarationOption[];
 }
 
 /**

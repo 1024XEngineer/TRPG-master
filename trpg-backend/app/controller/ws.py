@@ -29,6 +29,7 @@ WebSocket 可能存活很久，用一个 session 包住整条连接会在这期�
 连接取消时短 session 的 close/rollback 会在 shield 中完成，避免遗留锁。
 """
 
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from functools import partial
@@ -54,6 +55,13 @@ from app.core.turn_events import (
     TurnStarted,
     TurnToolCompleted,
     TurnToolStarted,
+)
+from app.core.turn_observability import (
+    log_check_result,
+    log_narration_output,
+    log_player_input,
+    log_turn_completed,
+    log_turn_failed,
 )
 from app.dto.ws import (
     ActionBroadcastPayload,
@@ -208,6 +216,12 @@ async def _broadcast_narration(
     narration = NarrationPushPayload(text=text)
     envelope = ServerEnvelope(type="narration.push", payload=narration.model_dump(by_alias=True))
     await room_service.record_event(db, room_id, player_id, "narration.push", {"text": text})
+    log_narration_output(
+        room_id=room_id,
+        correlation_id=None,
+        text=text,
+        clarification=False,
+    )
     await manager.broadcast(room_id, envelope.model_dump(by_alias=True))
 
 
@@ -220,7 +234,7 @@ async def _deliver_turn_narration(
     client_action_id: str,
     text: str,
     clarification: bool,
-) -> None:
+) -> bool:
     """持久化去重成功后才发送一次动作叙事。"""
 
     recorded = await room_service.record_event(
@@ -232,7 +246,7 @@ async def _deliver_turn_narration(
         correlation_id=client_action_id,
     )
     if not recorded:
-        return
+        return False
     narration = NarrationPushPayload(text=text)
     envelope = ServerEnvelope(type="narration.push", payload=narration.model_dump(by_alias=True))
     message = envelope.model_dump(by_alias=True)
@@ -240,6 +254,13 @@ async def _deliver_turn_narration(
         await websocket.send_json(message)
     else:
         await manager.broadcast(room_id, message)
+    log_narration_output(
+        room_id=room_id,
+        correlation_id=client_action_id,
+        text=text,
+        clarification=clarification,
+    )
+    return True
 
 
 async def _send_check_request(
@@ -304,6 +325,17 @@ async def _send_check_result(
     )
     if not recorded:
         return
+    log_check_result(
+        room_id=room_id,
+        correlation_id=prepared.player_input.client_action_id,
+        character_name=character_name,
+        skill_name=candidate.name,
+        target_value=check_result.target_value,
+        roll_value=check_result.roll_value,
+        difficulty=check_result.difficulty,
+        success_level=check_result.success_level,
+        passed=check_result.passed,
+    )
     envelope = ServerEnvelope(
         type="check.result",
         payload=payload.model_dump(by_alias=True),
@@ -317,11 +349,11 @@ async def _send_completed_turn(
     room_id: str,
     player_id: str,
     output: TurnOutput,
-) -> None:
+) -> bool:
     websocket_output = output.to_websocket_output()
     await websocket.send_json(websocket_output.to_json_dict())
     await _send_view_updated(websocket, player_id, output.player_view)
-    await _deliver_turn_narration(
+    narration_sent = await _deliver_turn_narration(
         db,
         websocket,
         room_id,
@@ -332,6 +364,7 @@ async def _send_completed_turn(
     )
     if output.player_view.phase == "ended":
         await broadcast_room_state(db, room_id)
+    return narration_sent
 
 
 def _map_turn_error(exc: Exception) -> tuple[str, str, bool]:
@@ -389,6 +422,13 @@ async def _broadcast_action_utterance(
     )
     if not recorded:
         return
+    log_player_input(
+        room_id=room_id,
+        player_id=player_id,
+        character_name=character_name,
+        correlation_id=client_action_id,
+        utterance=utterance,
+    )
     envelope = ServerEnvelope(
         type="action.broadcast",
         payload=payload.model_dump(by_alias=True),
@@ -631,6 +671,7 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 correlation_id=submit_payload.client_action_id,
                             )
                             continue
+                        turn_started_at = time.monotonic()
                         try:
                             if pending_turn is not None:
                                 same_action = (
@@ -688,17 +729,30 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                     event,
                                 ),
                             )
-                            await _send_completed_turn(
+                            narration_sent = await _send_completed_turn(
                                 db,
                                 websocket,
                                 room_id,
                                 bound_player_id,
                                 output,
                             )
+                            log_turn_completed(
+                                room_id=room_id,
+                                correlation_id=output.player_input.client_action_id,
+                                intent_summary=output.intent.summary,
+                                resolution=output.action_result.resolution,
+                                outcome=output.action_result.outcome,
+                                revision=output.action_result.view_revision,
+                                duration_ms=int(
+                                    (time.monotonic() - turn_started_at) * 1000
+                                ),
+                                narration_sent=narration_sent,
+                            )
                         except Exception as exc:
                             code, _, _ = _map_turn_error(exc)
-                            logger.warning(
-                                "ws_turn_failed",
+                            log_turn_failed(
+                                room_id=room_id,
+                                stage="行动处理",
                                 code=code,
                                 correlation_id=submit_payload.client_action_id,
                                 error_type=type(exc).__name__,
@@ -741,6 +795,7 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 correlation_id=roll_payload.client_action_id,
                             )
                             continue
+                        turn_started_at = time.monotonic()
                         try:
                             output = await turn_application.complete(
                                 pending_turn,
@@ -760,19 +815,32 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 ),
                             )
                             pending_turn = None
-                            await _send_completed_turn(
+                            narration_sent = await _send_completed_turn(
                                 db,
                                 websocket,
                                 room_id,
                                 bound_player_id,
                                 output,
                             )
+                            log_turn_completed(
+                                room_id=room_id,
+                                correlation_id=output.player_input.client_action_id,
+                                intent_summary=output.intent.summary,
+                                resolution=output.action_result.resolution,
+                                outcome=output.action_result.outcome,
+                                revision=output.action_result.view_revision,
+                                duration_ms=int(
+                                    (time.monotonic() - turn_started_at) * 1000
+                                ),
+                                narration_sent=narration_sent,
+                            )
                         except Exception as exc:
                             code, _, retryable = _map_turn_error(exc)
                             if code in {"NARRATOR_FAILED", "NARRATION_INVALID"} or not retryable:
                                 pending_turn = None
-                            logger.warning(
-                                "ws_check_failed",
+                            log_turn_failed(
+                                room_id=room_id,
+                                stage="检定结算",
                                 code=code,
                                 correlation_id=roll_payload.client_action_id,
                                 error_type=type(exc).__name__,

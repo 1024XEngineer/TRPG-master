@@ -7,11 +7,61 @@ key=value 字段」（比如 logger.warning("app_exception", code=..., path=...)
 """
 
 import logging
+import re
 import sys
 
 import structlog
 
 from app.core.config import get_settings
+
+_ROOM_POLL_PATH = re.compile(r"^/api/v1/rooms/[A-Z0-9]{6}(?:\?.*)?$")
+_CONVERSATION_PATH = re.compile(
+    r"^/api/v1/rooms/[0-9a-fA-F-]{32,36}/conversation(?:\?.*)?$"
+)
+_HEALTH_PATHS = {"/health", "/api/v1/health"}
+
+
+class AccessNoiseFilter(logging.Filter):
+    """隐藏成功的高频访问噪声，但始终保留错误响应。
+
+    Uvicorn 的访问日志使用固定参数：
+    ``(client_addr, method, path, http_version, status_code)``。这里只过滤
+    浏览器 CORS 预检、房间状态轮询、对话历史恢复和健康检查的成功响应；
+    同一路径一旦返回 4xx/5xx 仍然会原样输出，避免真正的问题被隐藏。
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        request = _access_request(record)
+        if request is None:
+            return True
+        method, path, status_code = request
+        if status_code >= 400:
+            return True
+        if method == "OPTIONS":
+            return False
+        path_without_query = path.split("?", 1)[0]
+        if method == "GET" and path_without_query in _HEALTH_PATHS:
+            return False
+        return not (
+            method == "GET"
+            and (
+                _ROOM_POLL_PATH.fullmatch(path)
+                or _CONVERSATION_PATH.fullmatch(path)
+            )
+        )
+
+
+def _access_request(record: logging.LogRecord) -> tuple[str, str, int] | None:
+    args = record.args
+    if (
+        isinstance(args, tuple)
+        and len(args) >= 5
+        and isinstance(args[1], str)
+        and isinstance(args[2], str)
+        and isinstance(args[4], int)
+    ):
+        return args[1], args[2], args[4]
+    return None
 
 
 def configure_logging() -> None:
@@ -65,3 +115,13 @@ def configure_logging() -> None:
         # 缓存每个 logger 实例，避免每次 get_logger() 都重新构建一遍 processor 链。
         cache_logger_on_first_use=True,
     )
+
+    # Uvicorn 访问日志走标准库 logging，不经过上面的 structlog processors。
+    # Filter 直接挂在 uvicorn.access logger 上；--reload 的工作进程导入应用时
+    # 会再次执行这里，而 isinstance 检查保证同一进程不会重复安装。
+    access_logger = logging.getLogger("uvicorn.access")
+    if not any(isinstance(item, AccessNoiseFilter) for item in access_logger.filters):
+        access_logger.addFilter(AccessNoiseFilter())
+
+
+__all__ = ["AccessNoiseFilter", "configure_logging"]

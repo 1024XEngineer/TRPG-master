@@ -2,6 +2,7 @@ from .context_assembler import ContextAssembler
 from .host_agent_intent_resolver import (
     HostAgentEventObserver,
     HostAgentIntentResolver,
+    IntentResolution,
     TurnExecutionError,
 )
 from .intent_aligner import (
@@ -29,6 +30,7 @@ __all__ = [
     "CORE_ENGINE_ACTIONS",
     "HostAgentEventObserver",
     "HostAgentIntentResolver",
+    "IntentResolution",
     "IntentParser",
     "NarrationValidationError",
     "Narrator",

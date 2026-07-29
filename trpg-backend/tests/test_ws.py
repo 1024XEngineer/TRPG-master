@@ -1,5 +1,5 @@
 import pytest
-from collaboration_framework.contracts import JsonObject
+from collaboration_framework.contracts import ContractError, JsonObject
 from collaboration_framework.host.adapters.fakes import FakeNarrationModel
 from collaboration_framework.host.schemas import IntentContext, NarrationContext
 from starlette.testclient import TestClient
@@ -1150,3 +1150,12 @@ def test_action_submit_maps_suspended_room_error(sync_client: TestClient) -> Non
         "publicMessage": "房间当前状态不允许提交动作",
         "retryable": False,
     }
+
+
+def test_turn_error_reason_keeps_contract_error_message_bounded() -> None:
+    reason = ws_controller._turn_error_reason(
+        ContractError("checkpoint 不在可信候选中\nwith extra whitespace")
+    )
+
+    assert reason == "checkpoint 不在可信候选中 with extra whitespace"
+    assert "\n" not in reason

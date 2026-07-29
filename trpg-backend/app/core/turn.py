@@ -31,6 +31,7 @@ from collaboration_framework.host.adapters.openai_agents import PROMPT_VERSION
 from collaboration_framework.host.application import (
     ContextAssembler,
     HostAgentIntentResolver,
+    IntentResolution,
     NarrationValidationError,
     Narrator,
     PlayerViewProjector,
@@ -49,6 +50,7 @@ from collaboration_framework.host.schemas import (
     HostAgentFailed,
     HostAgentToolCompleted,
     HostAgentToolStarted,
+    NarrationOutput,
     RecentHistoryBudget,
     RecentTurnContext,
     TurnOutput,
@@ -116,6 +118,7 @@ class PreparedTurn:
     difficulty: CheckDifficulty
     stored_roll_value: int | None = None
     completed_action_result: ActionResult | None = None
+    recovered_intent: bool = False
 
 
 @dataclass(frozen=True)
@@ -290,6 +293,7 @@ class TurnApplication:
         )
         async with self.store.transaction(room_id) as transaction:
             completed = await transaction.find_completed_action(client_action_id)
+        recovered_intent = False
         if completed is not None:
             if (
                 completed.request.room_id != room_id
@@ -339,7 +343,7 @@ class TurnApplication:
                 )
 
             try:
-                intent = await self.intent_resolver.resolve(
+                resolution: IntentResolution = await self.intent_resolver.resolve_with_metadata(
                     HostAgentContext(
                         player_input=player_input,
                         player_view=view_before,
@@ -347,6 +351,8 @@ class TurnApplication:
                     ),
                     on_event=observe_host_event,
                 )
+                intent = resolution.intent
+                recovered_intent = resolution.recovered
             except TurnExecutionError as exc:
                 self._log_host_run(
                     room_id=room_id,
@@ -383,6 +389,7 @@ class TurnApplication:
             difficulty=difficulty,
             stored_roll_value=stored_roll_value,
             completed_action_result=completed_action_result,
+            recovered_intent=recovered_intent,
         )
 
     async def complete(
@@ -492,17 +499,23 @@ class TurnApplication:
                         retryable=True,
                     ) from exc
             except Exception as exc:
+                if action_result.resolution == "unrecognized":
+                    narration = _fallback_clarification(prepared.intent, view_after)
+                    break
                 raise TurnExecutionError(
                     "NARRATOR_FAILED",
                     "规则结果已安全保存，但叙事生成失败，请重试原动作",
                     retryable=True,
                 ) from exc
         if narration is None:
-            raise TurnExecutionError(
-                "NARRATOR_FAILED",
-                "规则结果已安全保存，但叙事生成失败，请重试原动作",
-                retryable=True,
-            )
+            if prepared.recovered_intent and action_result.resolution == "unrecognized":
+                narration = _fallback_clarification(prepared.intent, view_after)
+            else:
+                raise TurnExecutionError(
+                    "NARRATOR_FAILED",
+                    "规则结果已安全保存，但叙事生成失败，请重试原动作",
+                    retryable=True,
+                )
         return TurnOutput(
             status="clarification" if narration.kind == "clarification" else "completed",
             player_input=prepared.player_input,
@@ -661,6 +674,20 @@ class TurnApplication:
                 )
             )
         return tuple(candidates), difficulty
+
+
+def _fallback_clarification(intent: Intent, view: PlayerView) -> NarrationOutput:
+    suggestions = tuple(
+        [
+            *(f"观察{entity.name}" for entity in view.scene.visible_entities[:2]),
+            *(f"前往{available_exit.name}" for available_exit in view.scene.available_exits[:1]),
+        ][:3]
+    )
+    return NarrationOutput(
+        kind="clarification",
+        text=(intent.clarification_question or "我还不能确定你想做什么，请说明目标和行动。"),
+        suggested_actions=suggestions,
+    )
 
 
 def build_turn_application(

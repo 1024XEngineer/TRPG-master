@@ -9,6 +9,12 @@ import httpx
 from collaboration_framework.contracts import (
     Intent,
     JsonObject,
+    MatchedTarget,
+    ModuleCheck,
+    NoCheck,
+)
+from collaboration_framework.host.application.intent_parser import (
+    coerce_intent_payload,
 )
 from collaboration_framework.host.application import IntentParser
 from collaboration_framework.host.schemas import (
@@ -31,11 +37,13 @@ _INTENT_INSTRUCTIONS = """\
    选择 module checkpoint；proposed_skills 必须是该候选 skills 的子集。模组检定
    优先于普通检定，不能用 default check 绕过已经匹配的 checkpoint。
 3. 没有匹配的 checkpoint，但玩家正在尝试结果不确定、明显依赖角色能力的行动时，
-   选择 default check。例如仔细搜索使用 spot-hidden、侧耳倾听使用 listen、隐藏或
-   悄然行动使用 stealth。只选择 player_view.self_actor.attributes 或 skills 中
-   实际存在且最相关的一个 id。针对具体对象时使用 visible_entity 或 available_exit
-   的 id；观察、聆听或隐藏等场景范围行动可使用 player_view.scene.id。仅阅读已经
-   可见的文字、查看显而易见的物体或进行没有风险的动作时使用 no check。
+   选择 default check。default check 必须提供一个当前 Actor 已拥有的具体技能或
+   属性，禁止输出空的 proposed_skills。例如仔细搜索使用 spot-hidden、侧耳倾听
+   使用 listen、隐藏或悄然行动使用 stealth。只选择
+   player_view.self_actor.attributes 或 skills 中实际存在且最相关的一个 id。
+   针对具体对象时使用 visible_entity 或 available_exit 的 id；观察、聆听或隐藏等
+   场景范围行动可使用 player_view.scene.id。仅阅读已经可见的文字、查看显而易见
+   的物体、前往 PlayerView 中已可见的出口或进行没有风险的动作时使用 no check。
 4. “我在哪里”“现在什么情况”“描述周围”“我能看到什么”等属于场景定位或
    感知请求，不是必须针对单个实体的动作。若协议无法无损表示它，返回 unknown，
    交给叙事器根据 PlayerView 直接回答；不要称它为元游戏问题，也不要反问玩家要
@@ -189,6 +197,7 @@ class PromptIntentModel:
             instructions=_INTENT_INSTRUCTIONS,
             input_payload=context.to_json_dict(),
         )
+        raw = coerce_intent_payload(raw, context)
         intent = IntentParser.parse(raw, context)
         return intent.to_json_dict()
 

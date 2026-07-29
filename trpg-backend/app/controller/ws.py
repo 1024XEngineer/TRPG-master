@@ -432,6 +432,19 @@ def _map_turn_error(exc: Exception) -> tuple[str, str, bool]:
     return "TURN_INTERNAL_ERROR", "本次动作处理失败，请稍后重试", True
 
 
+def _turn_error_reason(exc: Exception) -> str:
+    """Return a stable internal reason without logging model/player payloads."""
+
+    if isinstance(exc, ValidationError):
+        issues = exc.errors(include_url=False, include_context=False, include_input=False)
+        return "; ".join(
+            f"{'.'.join(str(part) for part in issue.get('loc', ()))}:{issue.get('type', 'unknown')}"
+            for issue in issues
+        )[:512]
+    reason = " ".join(str(exc).split())
+    return (reason or type(exc).__name__)[:512]
+
+
 async def _broadcast_action_utterance(
     db: AsyncSession,
     player_input: PlayerInput,
@@ -796,6 +809,7 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 code=code,
                                 correlation_id=submit_payload.client_action_id,
                                 error_type=type(exc).__name__,
+                                error_reason=_turn_error_reason(exc),
                             )
                             await _send_turn_failed(
                                 websocket,
@@ -882,6 +896,7 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 code=code,
                                 correlation_id=roll_payload.client_action_id,
                                 error_type=type(exc).__name__,
+                                error_reason=_turn_error_reason(exc),
                             )
                             await _send_turn_failed(
                                 websocket,

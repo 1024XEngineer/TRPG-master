@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import json
+import logging
 from collections.abc import AsyncIterator
 
 import pytest
@@ -16,6 +16,7 @@ from collaboration_framework.host.schemas import (
     NarrationContext,
     RecentTurnContext,
 )
+import json
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 from structlog.testing import capture_logs
@@ -221,6 +222,19 @@ class InvalidThenTimeoutNarration(InvalidThenSafeNarration):
         raise TimeoutError("provider timeout")
 
 
+class AlwaysFailNarration:
+    async def generate(self, context: NarrationContext):
+        raise TimeoutError("provider timeout")
+
+
+class AlwaysNarration:
+    async def generate(self, context: NarrationContext):
+        return {
+            "kind": "narration",
+            "text": "错误地把恢复回合当成普通叙事。",
+            "claimed_fact_ids": [],
+            "suggested_actions": [],
+        }
 def application(host_agent, narration_model):
     module = load_paper_chase()
     state = conversation_state(module).model_copy(update={"scene_id": "client_briefing"})
@@ -587,40 +601,70 @@ async def test_provider_failure_after_invalid_retry_maps_to_narrator_failed() ->
 
 
 @pytest.mark.asyncio
-async def test_invisible_target_fails_before_authoritative_engine_boundary() -> None:
+async def test_invisible_target_becomes_state_free_clarification() -> None:
     host = CountingHostAgent(target_id="module-secret-entity")
-    app, store, state, _ = application(host, FakeNarrationModel())
+    app, store, state = application(host, AlwaysFailNarration())
 
-    with pytest.raises(TurnExecutionError) as failed:
-        await app.prepare(
-            room_id=state.room_id,
-            player_id="player_1",
-            client_action_id="invalid-target",
-            utterance="调查秘密目标",
-        )
+    prepared = await app.prepare(
+        room_id=state.room_id,
+        player_id="player_1",
+        client_action_id="invalid-target",
+        utterance="调查秘密目标",
+    )
+    output = await app.complete(prepared)
 
-    assert failed.value.code == "HOST_AGENT_INVALID_OUTPUT"
+    assert output.intent.kind == "unknown"
+    assert output.action_result.resolution == "unrecognized"
+    assert output.status == "clarification"
+    assert output.narration.kind == "clarification"
     assert host.calls == 1
-    with pytest.raises(ContractError, match="动作尚未执行"):
-        store.inspect_completed_action(state.room_id, "invalid-target")
+    assert store.inspect_completed_action(state.room_id, "invalid-target") is not None
     assert store.inspect_state(state.room_id).event_sequence == 0
 
 
 @pytest.mark.asyncio
-async def test_host_observability_is_metadata_only_and_records_rejection_code() -> None:
+async def test_recovered_intent_forces_deterministic_clarification() -> None:
+    host = CountingHostAgent(target_id="module-secret-entity")
+    app, _, state = application(host, AlwaysNarration())
+
+    prepared = await app.prepare(
+        room_id=state.room_id,
+        player_id="player_1",
+        client_action_id="forced-clarification",
+        utterance="调查秘密目标",
+    )
+    output = await app.complete(prepared)
+
+    assert output.intent.kind == "unknown"
+    assert output.action_result.resolution == "unrecognized"
+    assert output.status == "clarification"
+    assert output.narration.kind == "clarification"
+    assert output.narration.text == "你想对当前场景中的哪个人物、物品或地点做什么？"
+    assert output.narration.suggested_actions
+
+
+@pytest.mark.asyncio
+async def test_host_observability_records_recovery_without_leaking_model_output(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     host = CountingHostAgent(target_id="module-secret-entity")
     app, _, state, _ = application(host, FakeNarrationModel())
 
-    with capture_logs() as logs, pytest.raises(TurnExecutionError):
-        await app.prepare(
+    with caplog.at_level(logging.WARNING):
+        await app.handle(
             room_id=state.room_id,
             player_id="player_1",
             client_action_id="safe-observability",
             utterance=SECRET_SENTINEL,
         )
 
-    encoded = json.dumps(logs, ensure_ascii=False)
+    encoded = caplog.text
     assert SECRET_SENTINEL not in encoded
     assert "module-secret-entity" not in encoded
-    assert "HOST_AGENT_INVALID_OUTPUT" in encoded
-    assert "safe-observability" in encoded
+    assert "host_agent_intent_recovered" in encoded
+    recovery_records = [
+        record for record in caplog.records if record.message == "host_agent_intent_recovered"
+    ]
+    assert recovery_records
+    assert recovery_records[-1].failure_reason == "target_not_visible_or_ambiguous"
+    assert recovery_records[-1].recovery_path == "unknown_intent_clarification"

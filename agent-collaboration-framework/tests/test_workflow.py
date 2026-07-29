@@ -28,7 +28,6 @@ from collaboration_framework.host.application import (
     Narrator,
     Orchestrator,
     PlayerViewProjector,
-    TurnExecutionError,
 )
 from collaboration_framework.host.schemas import RecentTurnContext
 from collaboration_framework.schema_export import rendered_schemas
@@ -357,7 +356,7 @@ class UnifiedWorkflowTests(unittest.TestCase):
     def test_checkpoint_must_still_come_from_trusted_player_view(self) -> None:
         payload = {
             "kind": "action",
-            "verb": "investigate",
+            "verb": "dance",
             "target": {"matched": True, "id": "bookshelf"},
             "check": {
                 "route": "module",
@@ -367,12 +366,11 @@ class UnifiedWorkflowTests(unittest.TestCase):
             "summary": "调查书架",
         }
         orchestrator, engine, _ = self.application(StaticIntentModel(payload))
-        with self.assertRaisesRegex(
-            TurnExecutionError,
-            "行动意图未通过安全校验",
-        ):
-            self.run_turn(orchestrator)
-        self.assertEqual(engine.execute_calls, 0)
+        output = self.run_turn(orchestrator)
+        self.assertEqual(output.intent.kind, "unknown")
+        self.assertEqual(output.action_result.resolution, "unrecognized")
+        self.assertEqual(output.status, "clarification")
+        self.assertEqual(engine.execute_calls, 1)
 
     def test_public_action_result_excludes_engine_internal_payloads(self) -> None:
         orchestrator, engine, narrator = self.application()

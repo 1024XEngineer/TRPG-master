@@ -3,11 +3,37 @@ from __future__ import annotations
 import unittest
 
 from collaboration_framework.host.application.narrator import (
+    normalize_narration_text,
     narration_text_rejection_reason,
 )
 
 
 class NarrationTextPolicyTests(unittest.TestCase):
+    def test_normalizes_literal_newline_escapes_without_general_decoding(self) -> None:
+        cases = {
+            "第一段\\n第二段": "第一段\n第二段",
+            "第一段\\r\\n第二段": "第一段\n第二段",
+            "第一段\\r第二段": "第一段\n第二段",
+            "第一段\\n\\n第二段": "第一段\n\n第二段",
+            "第一段\n第二段": "第一段\n第二段",
+            "制表符\\t保持原样": "制表符\\t保持原样",
+            "C:\\temp\\file.txt": "C:\\temp\\file.txt",
+            "普通反斜杠\\\\保持原样": "普通反斜杠\\\\保持原样",
+        }
+
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                normalized = normalize_narration_text(text)
+                self.assertEqual(normalized, expected)
+                self.assertEqual(normalize_narration_text(normalized), expected)
+
+    def test_normalizes_before_protocol_tail_detection(self) -> None:
+        normalized = normalize_narration_text(
+            "托马斯说完便沉默。\\nclaimed_fact_ids: []"
+        )
+
+        self.assertEqual(narration_text_rejection_reason(normalized), "protocol_tail")
+
     def test_rejects_protocol_field_assignments_and_json_tails(self) -> None:
         cases = {
             "托马斯看着你。 claimed_fact_ids: [],": "protocol_tail",

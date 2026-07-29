@@ -82,6 +82,16 @@ class _WsInvalidTwiceThenSafeNarration:
         return await self._fake.generate(context)
 
 
+class _WsEscapedNewlineNarration:
+    async def generate(self, context: NarrationContext) -> JsonObject:
+        return {
+            "kind": "narration",
+            "text": "第一段\\r\\n第二段\\n第三段",
+            "claimed_fact_ids": [],
+            "suggested_actions": [],
+        }
+
+
 @pytest.fixture
 def sync_client() -> TestClient:
     # 用同一个 app 实例的同步 TestClient——HTTP 部分照常发请求准备房间/角色
@@ -636,6 +646,71 @@ def test_invalid_narration_fails_closed_then_original_request_recovers(
     assert len(narration_events) == 1
     assert narration_events[0]["payload"]["text"] == narration["payload"]["text"]
     assert narration_model.leaked_text not in str(replay)
+
+
+def test_narration_newlines_are_normalized_before_turn_and_push(
+    sync_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    token = register_and_login(sync_client, "narration_newline_host")
+    room = create_room(sync_client, token)
+    advance_to_building(sync_client, room)
+    complete_character(sync_client, room["roomId"], room["reconnectToken"])
+    start_game(sync_client, room, token)
+    current_application = ws_controller.turn_application
+    monkeypatch.setattr(
+        ws_controller,
+        "turn_application",
+        build_turn_application(
+            current_application.store,
+            current_application.engine,
+            intent_model=_WsPlainIntentModel(),
+            narration_model=_WsEscapedNewlineNarration(),
+        ),
+    )
+
+    with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
+        ws.send_json(
+            {
+                "type": "room.join",
+                "playerId": room["playerId"],
+                "payload": {"reconnectToken": room["reconnectToken"]},
+            }
+        )
+        assert ws.receive_json()["type"] == "session.bound"
+        assert ws.receive_json()["type"] == "view.updated"
+        ws.send_json(
+            {
+                "type": "action.submit",
+                "playerId": room["playerId"],
+                "payload": {
+                    "clientActionId": "ws-narration-newline-188",
+                    "utterance": "我继续询问托马斯",
+                },
+            }
+        )
+        completed, _ = receive_until(
+            ws,
+            lambda message: message.get("message_type") == "turn.completed",
+        )
+        narration, _ = receive_until(
+            ws,
+            lambda message: message.get("type") == "narration.push",
+        )
+
+    expected = "第一段\n第二段\n第三段"
+    assert completed["payload"]["narration"]["text"] == expected
+    assert narration["payload"]["text"] == expected
+    replay = sync_client.get(
+        f"{ROOMS_BASE}/{room['roomId']}/replay",
+        headers={"X-Reconnect-Token": room["reconnectToken"]},
+    ).json()["data"]
+    persisted = [
+        event
+        for event in replay
+        if event["eventType"] == "narration.push" and event["payload"]["text"] == expected
+    ]
+    assert len(persisted) == 1
 
 
 def test_skill_check_waits_for_player_selection_and_roll(

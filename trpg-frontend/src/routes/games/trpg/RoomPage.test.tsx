@@ -219,6 +219,39 @@ describe('RoomPage conversation history', () => {
     })
   })
 
+  it('preserves real newlines in historical and realtime narration', async () => {
+    mockListConversation.mockResolvedValue([
+      {
+        id: 'narration-history-1',
+        type: 'narration.push',
+        channel: 'action',
+        payload: { text: '历史第一段\n历史第二段' },
+        createdAt: '2026-07-28T10:03:00Z',
+      },
+    ])
+
+    renderRoomPage()
+
+    const historical = await screen.findByText(
+      (_content, element) =>
+        element?.classList.contains('whitespace-pre-wrap') === true &&
+        element.textContent === '历史第一段\n历史第二段',
+    )
+    expect(historical).toHaveClass('whitespace-pre-wrap')
+
+    emitWsMessage({
+      type: 'narration.push',
+      payload: { text: '实时第一段\n实时第二段' },
+    })
+
+    const realtime = await screen.findByText(
+      (_content, element) =>
+        element?.classList.contains('whitespace-pre-wrap') === true &&
+        element.textContent === '实时第一段\n实时第二段',
+    )
+    expect(realtime).toHaveClass('whitespace-pre-wrap')
+  })
+
   it('falls back for legacy payloads when characterName is missing', async () => {
     useCharacterStore.getState().setCharacter(
       {

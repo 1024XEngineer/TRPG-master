@@ -1163,7 +1163,7 @@ export default function RoomPage() {
                 <div className={`
                   text-sm leading-[1.65] text-text-body inline-block max-w-full px-3.5 py-2.5
                   ${isPlayer ? 'bg-[#eef6ee] rounded-md' : ''}
-                  ${isNarr ? 'bg-[#fdfaf4] border-l-[3px] border-brass rounded-r-sm rounded-l-none italic text-[#4a4030] text-left' : ''}
+                  ${isNarr ? 'bg-[#fdfaf4] border-l-[3px] border-brass rounded-r-sm rounded-l-none italic text-[#4a4030] text-left whitespace-pre-wrap' : ''}
                   ${!isPlayer && !isNarr ? 'bg-panel rounded-md' : ''}
                 `}>
                   {msg.content}

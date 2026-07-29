@@ -616,11 +616,7 @@ class TurnApplication:
             for item in (
                 *player_view.self_actor.attributes,
                 *player_view.self_actor.skills,
-                *(
-                    item
-                    for item in player_view.self_actor.resources
-                    if item.id == "luck"
-                ),
+                *(item for item in player_view.self_actor.resources if item.id == "luck"),
             )
             if isinstance(item.value, int) and not isinstance(item.value, bool)
         }

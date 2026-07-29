@@ -19,13 +19,13 @@ from collaboration_framework.host.schemas import (
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 from structlog.testing import capture_logs
-from tests.test_openai_models import conversation_state, load_paper_chase
 
 from app.adapters import SqlAlchemyRecentHistorySource
 from app.core.config import Settings
 from app.core.turn import build_turn_application
 from app.models.event import Event
 from app.models.room import Player, Room
+from tests.test_openai_models import conversation_state, load_paper_chase
 
 SECRET_SENTINEL = "SECRET_SENTINEL_DO_NOT_LEAK"
 

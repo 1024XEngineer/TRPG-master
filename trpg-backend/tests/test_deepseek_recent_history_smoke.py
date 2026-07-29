@@ -39,12 +39,8 @@ def build_host_agent(settings: Settings):
             "HOST_AGENT_MODEL": settings.deepseek_model,
             "HOST_AGENT_MAX_TURNS": str(settings.host_agent_max_turns),
             "HOST_AGENT_MAX_TOOL_CALLS": str(settings.host_agent_max_tool_calls),
-            "HOST_AGENT_TOOL_TIMEOUT_SECONDS": str(
-                settings.host_agent_tool_timeout_seconds
-            ),
-            "HOST_AGENT_TIMEOUT_SECONDS": str(
-                settings.host_agent_timeout_seconds
-            ),
+            "HOST_AGENT_TOOL_TIMEOUT_SECONDS": str(settings.host_agent_tool_timeout_seconds),
+            "HOST_AGENT_TIMEOUT_SECONDS": str(settings.host_agent_timeout_seconds),
         }
     )
 

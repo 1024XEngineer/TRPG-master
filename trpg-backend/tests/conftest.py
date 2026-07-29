@@ -15,7 +15,6 @@ from collaboration_framework.engine import RuleEngineService
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
-from tests.content_fixtures import publish_multiplayer_module
 
 from app.adapters import SqlAlchemyEngineStore, SqlAlchemyRecentHistorySource
 from app.controller import ws as ws_controller
@@ -24,6 +23,7 @@ from app.core.seed import ensure_seed_content
 from app.core.turn import build_turn_application
 from app.main import app
 from app.service.paper_chase_loader import load_paper_chase
+from tests.content_fixtures import publish_multiplayer_module
 
 # 用临时文件 SQLite，不用 ":memory:"+StaticPool。关键原因是并发模型：异步 HTTP
 # 测试跑在 pytest-asyncio 的事件循环里，而同步 TestClient 的 WebSocket 跑在它

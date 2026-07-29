@@ -21,12 +21,6 @@ from uuid import uuid4
 import pytest
 from collaboration_framework.host.adapters.fakes import FakeNarrationModel
 from starlette.testclient import TestClient
-
-from app.controller import ws as ws_controller
-from app.core.narrator import FallbackNarrator
-from app.core.turn import build_turn_application
-from app.main import app
-from app.service.action_lock import RoomActionLockManager
 from tests.test_ws import (
     ROOMS_BASE,
     advance_to_building,
@@ -37,6 +31,12 @@ from tests.test_ws import (
     register_and_login,
     start_game,
 )
+
+from app.controller import ws as ws_controller
+from app.core.narrator import FallbackNarrator
+from app.core.turn import build_turn_application
+from app.main import app
+from app.service.action_lock import RoomActionLockManager
 
 
 @pytest.fixture

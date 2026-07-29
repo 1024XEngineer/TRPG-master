@@ -116,6 +116,7 @@ export interface AuthResult {
 export interface AvailableExitView {
   id: string;
   name: string;
+  target_id?: string | null;
   aliases?: string[];
   description?: string;
   destination?: ExitDestinationView | null;

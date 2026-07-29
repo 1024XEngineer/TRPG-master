@@ -9,14 +9,11 @@ import httpx
 from collaboration_framework.contracts import (
     Intent,
     JsonObject,
-    MatchedTarget,
-    ModuleCheck,
-    NoCheck,
 )
+from collaboration_framework.host.application import IntentParser
 from collaboration_framework.host.application.intent_parser import (
     coerce_intent_payload,
 )
-from collaboration_framework.host.application import IntentParser
 from collaboration_framework.host.schemas import (
     IntentContext,
     NarrationContext,

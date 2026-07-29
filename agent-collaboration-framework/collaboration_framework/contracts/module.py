@@ -213,6 +213,7 @@ class SceneExitSpec(ContractModel):
 
     id: str = Field(min_length=1)
     name: str = Field(min_length=1)
+    target_id: str | None = None
     aliases: tuple[str, ...] = ()
     description: str = ""
     destination_scene_id: str = Field(min_length=1)
@@ -513,6 +514,13 @@ class ModuleContent(ContractModel):
                     raise ValueError(
                         f"Scene {scene.id} 的 available exit {available_exit.id} "
                         "必须指向 exits 中声明的 Scene"
+                    )
+                if available_exit.target_id is not None and (
+                    available_exit.target_id not in scene.entity_ids
+                ):
+                    raise ValueError(
+                        f"Scene {scene.id} 的 available exit {available_exit.id} "
+                        "target_id 必须引用当前 Scene 的 Entity"
                     )
 
         for entity in self.entities:

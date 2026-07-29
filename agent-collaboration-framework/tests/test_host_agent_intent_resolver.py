@@ -237,9 +237,7 @@ def test_parser_normalizes_visible_names_and_skill_labels() -> None:
             "check": {"route": "default", "proposed_skills": ["侦察"]},
             "summary": "调查书架",
         },
-        IntentContext(
-            player_input=context().player_input, player_view=context().player_view
-        ),
+        IntentContext(player_input=context().player_input, player_view=context().player_view),
     )
 
     assert parsed.target.id == "shelf"
@@ -256,9 +254,7 @@ def test_parser_normalizes_visible_alias_and_attribute_label() -> None:
             "check": {"route": "default", "proposed_skills": ["力量"]},
             "summary": "用力量推开看守",
         },
-        IntentContext(
-            player_input=context().player_input, player_view=context().player_view
-        ),
+        IntentContext(player_input=context().player_input, player_view=context().player_view),
     )
 
     assert parsed.target.id == "caretaker"
@@ -296,7 +292,29 @@ def test_empty_default_travel_check_normalizes_visible_exit_alias() -> None:
     )
 
     assert parsed.target.id == "cemetery_exit"
+    assert parsed.verb == "go"
     assert parsed.check.route == "none"
+
+
+def test_enter_exit_is_canonicalized_to_go_without_dropping_explicit_check() -> None:
+    base = context()
+    parsed = IntentParser.parse(
+        {
+            "kind": "action",
+            "verb": "进入",
+            "target": {"matched": True, "id": "cemetery_exit"},
+            "check": {"route": "default", "proposed_skills": ["STR"]},
+            "approach": "用力前进",
+            "summary": "进入墓地",
+        },
+        IntentContext(player_input=base.player_input, player_view=base.player_view),
+    )
+
+    assert parsed.target.id == "cemetery_exit"
+    assert parsed.verb == "go"
+    assert isinstance(parsed.check, DefaultCheck)
+    assert parsed.check.proposed_skills == ("STR",)
+    assert parsed.approach == "用力前进"
 
 
 def test_parser_normalizes_checkpoint_and_skill_labels() -> None:
@@ -332,3 +350,131 @@ def test_parser_normalizes_checkpoint_and_skill_labels() -> None:
     assert isinstance(parsed.check, ModuleCheck)
     assert parsed.check.checkpoint_id == "inspect_shelf"
     assert parsed.check.proposed_skills == ("spot-hidden",)
+
+
+def test_travel_entity_reference_is_canonicalized_to_matching_exit() -> None:
+    base = context()
+    view = base.player_view.model_copy(
+        update={
+            "scene": base.player_view.scene.model_copy(
+                update={
+                    "available_exits": (
+                        AvailableExitView(
+                            id="cemetery_exit",
+                            name="公共墓地入口",
+                            target_id="caretaker",
+                        ),
+                    )
+                }
+            )
+        }
+    )
+    parsed = IntentParser.parse(
+        {
+            "kind": "action",
+            "verb": "靠近",
+            "target": {"matched": True, "id": "caretaker"},
+            "check": {"route": "none"},
+            "summary": "靠近它",
+        },
+        IntentContext(player_input=base.player_input, player_view=view),
+    )
+
+    assert parsed.target.id == "cemetery_exit"
+    assert parsed.check.route == "none"
+
+
+def test_matching_checkpoint_promotes_default_check_to_module_check() -> None:
+    base = context()
+    view = base.player_view.model_copy(
+        update={
+            "checkpoint_options": (
+                CheckpointOption(
+                    id="move_slab",
+                    target_id="shelf",
+                    action_hint="move",
+                    skills=("STR",),
+                ),
+            )
+        }
+    )
+    parsed = IntentParser.parse(
+        {
+            "kind": "action",
+            "verb": "移动",
+            "target": {"matched": True, "id": "shelf"},
+            "check": {"route": "default", "proposed_skills": ["STR"]},
+            "summary": "移动书架",
+        },
+        IntentContext(player_input=base.player_input, player_view=view),
+    )
+
+    assert isinstance(parsed.check, ModuleCheck)
+    assert parsed.check.checkpoint_id == "move_slab"
+    assert parsed.verb == "move"
+
+
+def test_enter_checkpoint_overrides_default_dodge_check() -> None:
+    base = context()
+    view = base.player_view.model_copy(
+        update={
+            "checkpoint_options": (
+                CheckpointOption(
+                    id="move_slab",
+                    target_id="shelf",
+                    action_hint="move",
+                    skills=("STR",),
+                ),
+                CheckpointOption(
+                    id="enter_crypt",
+                    target_id="shelf",
+                    action_hint="enter",
+                ),
+            )
+        }
+    )
+    parsed = IntentParser.parse(
+        {
+            "kind": "action",
+            "verb": "穿过缝隙进入洞中",
+            "target": {"matched": True, "id": "shelf"},
+            "check": {"route": "default", "proposed_skills": ["spot-hidden"]},
+            "summary": "穿过缝隙进入洞中",
+        },
+        IntentContext(player_input=base.player_input, player_view=view),
+    )
+
+    assert isinstance(parsed.check, ModuleCheck)
+    assert parsed.check.checkpoint_id == "enter_crypt"
+    assert parsed.check.proposed_skills == ()
+    assert parsed.verb == "enter"
+
+
+def test_default_check_is_blocked_when_target_has_no_matching_checkpoint() -> None:
+    base = context()
+    view = base.player_view.model_copy(
+        update={
+            "checkpoint_options": (
+                CheckpointOption(
+                    id="enter_crypt",
+                    target_id="shelf",
+                    action_hint="enter",
+                ),
+            )
+        }
+    )
+    parsed = IntentParser.parse(
+        {
+            "kind": "action",
+            "verb": "调查",
+            "target": {"matched": True, "id": "shelf"},
+            "check": {"route": "default", "proposed_skills": ["spot-hidden"]},
+            "summary": "调查书架",
+        },
+        IntentContext(player_input=base.player_input, player_view=view),
+    )
+
+    assert parsed.kind == "unknown"
+    assert parsed.target.raw == "书架"
+    assert parsed.check.route == "none"
+    assert parsed.clarification_question == "你想如何处理书架？"

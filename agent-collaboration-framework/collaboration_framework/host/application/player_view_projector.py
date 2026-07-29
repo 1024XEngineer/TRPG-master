@@ -127,6 +127,7 @@ class PlayerViewProjector:
                     AvailableExitView(
                         id=item.id,
                         name=item.name,
+                        target_id=item.target_id,
                         aliases=item.aliases,
                         description=item.description,
                         destination=(

@@ -82,6 +82,7 @@ class ProjectionExitDestination(ContractModel):
 class ProjectionAvailableExit(ContractModel):
     id: str = Field(min_length=1)
     name: str = Field(min_length=1)
+    target_id: str | None = None
     aliases: tuple[str, ...] = ()
     description: str = ""
     destination: ProjectionExitDestination | None = None
@@ -228,6 +229,7 @@ class ExitDestinationView(ContractModel):
 class AvailableExitView(ContractModel):
     id: str = Field(min_length=1)
     name: str = Field(min_length=1)
+    target_id: str | None = None
     aliases: tuple[str, ...] = ()
     description: str = ""
     destination: ExitDestinationView | None = None

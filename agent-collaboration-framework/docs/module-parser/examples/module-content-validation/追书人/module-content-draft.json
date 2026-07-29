@@ -140,6 +140,7 @@
         {
           "id": "approach_discovered_slab",
           "name": "前往发现的入口石板",
+          "target_id": "crypt_entrance",
           "aliases": [
             "前往石板",
             "查看入口"

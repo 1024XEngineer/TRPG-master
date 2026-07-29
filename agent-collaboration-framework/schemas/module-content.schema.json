@@ -1058,6 +1058,18 @@
           "title": "Name",
           "type": "string"
         },
+        "target_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target Id"
+        },
         "aliases": {
           "default": [],
           "items": {

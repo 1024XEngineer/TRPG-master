@@ -11,6 +11,8 @@ from collaboration_framework.contracts import (
     JsonObject,
     MatchedTarget,
     ModuleCheck,
+    NoCheck,
+    UnmatchedTarget,
 )
 from collaboration_framework.contracts.player_view import (
     AvailableExitView,
@@ -88,6 +90,58 @@ def normalize_intent_against_view(
         if target_id is not None:
             intent = intent.model_copy(update={"target": MatchedTarget(id=target_id)})
 
+    # A player can refer to the visible thing at the end of a route ("靠近它")
+    # instead of repeating the route label ("前往入口").  The model may bind
+    # that phrase to the entity, but the authoritative action must target the
+    # visible exit so the engine performs the scene transition.
+    if isinstance(intent.target, MatchedTarget) and _action_family(intent.verb) in {
+        "travel",
+        "enter",
+        "move_object",
+    }:
+        matching_exits = tuple(
+            item for item in view.scene.available_exits if item.target_id == intent.target.id
+        )
+        if len(matching_exits) == 1:
+            intent = intent.model_copy(update={"target": MatchedTarget(id=matching_exits[0].id)})
+
+    # The engine accepts only canonical travel verbs for an exit target.  Keep
+    # any explicit check/approach, but make the authoritative transition verb
+    # provider- and language-independent.
+    if (
+        isinstance(intent.target, MatchedTarget)
+        and _action_family(intent.verb) in {"travel", "enter", "move_object"}
+        and any(item.id == intent.target.id for item in view.scene.available_exits)
+    ):
+        intent = intent.model_copy(update={"verb": "go"})
+
+    target_checkpoints = _checkpoints_for_target(intent, view)
+    checkpoint = _matching_checkpoint_for_intent(intent, target_checkpoints)
+    if checkpoint is not None and not isinstance(intent.check, ModuleCheck):
+        proposed_skills = ()
+        if isinstance(intent.check, DefaultCheck):
+            normalized = _normalize_skills(
+                intent.check.proposed_skills,
+                checkpoint.skills,
+                view,
+            )
+            if set(normalized).issubset(checkpoint.skills):
+                proposed_skills = normalized
+        intent = intent.model_copy(
+            update={
+                "verb": checkpoint.action_hint,
+                "check": ModuleCheck(
+                    checkpoint_id=checkpoint.id,
+                    proposed_skills=proposed_skills,
+                ),
+            }
+        )
+    elif target_checkpoints and isinstance(intent.check, DefaultCheck):
+        # A visible module checkpoint owns uncertain actions against its target.
+        # A generic skill check must not bypass that rule boundary when the
+        # proposed action is unsupported or still ambiguous.
+        return _checkpoint_clarification(intent, view)
+
     if isinstance(intent.check, ModuleCheck):
         option = _match_checkpoint(intent, view)
         if option is not None:
@@ -124,16 +178,62 @@ def normalize_intent_against_view(
     return intent
 
 
+def _matching_checkpoint_for_intent(
+    intent: Intent,
+    candidates: tuple[CheckpointOption, ...],
+) -> CheckpointOption | None:
+    semantic_matches = tuple(
+        option for option in candidates if _action_matches(intent.verb, option.action_hint)
+    )
+    return semantic_matches[0] if len(semantic_matches) == 1 else None
+
+
+def _checkpoints_for_target(
+    intent: Intent,
+    view: PlayerView,
+) -> tuple[CheckpointOption, ...]:
+    if not isinstance(intent.target, MatchedTarget):
+        return ()
+    return tuple(
+        option for option in view.checkpoint_options if option.target_id == intent.target.id
+    )
+
+
+def _checkpoint_clarification(intent: Intent, view: PlayerView) -> Intent:
+    assert isinstance(intent.target, MatchedTarget)
+    target_name = next(
+        (
+            item.name
+            for item in (
+                *view.scene.visible_entities,
+                *view.scene.available_exits,
+            )
+            if item.id == intent.target.id
+        ),
+        intent.target.id,
+    )
+    return Intent(
+        kind="unknown",
+        verb=intent.verb,
+        target=UnmatchedTarget(raw=target_name),
+        check=NoCheck(),
+        approach=intent.approach,
+        declarations=intent.declarations,
+        initiated_by_target=intent.initiated_by_target,
+        summary=intent.summary,
+        clarification_question=f"你想如何处理{target_name}？",
+    )
+
+
 def _looks_like_no_check_action(raw: JsonObject, context: IntentContext) -> bool:
     verb = str(raw.get("verb", ""))
     family = _action_family(verb)
     target = raw.get("target")
-    if family == "travel" and isinstance(target, dict):
+    if family in {"travel", "enter"} and isinstance(target, dict):
         target_id = target.get("id")
         if target.get("matched") is True and isinstance(target_id, str):
             exit_candidates = [
-                (item.id, _labels(item))
-                for item in context.player_view.scene.available_exits
+                (item.id, _labels(item)) for item in context.player_view.scene.available_exits
             ]
             if _unique_match(target_id, exit_candidates) is not None:
                 return True
@@ -151,13 +251,11 @@ def _looks_like_no_check_action(raw: JsonObject, context: IntentContext) -> bool
     if family != "perception":
         return False
     if any(
-        _label_key(marker) in text
-        for marker in ("搜索", "寻找", "隐藏", "暗格", "仔细", "调查")
+        _label_key(marker) in text for marker in ("搜索", "寻找", "隐藏", "暗格", "仔细", "调查")
     ):
         return False
     return any(
-        _label_key(marker) in text
-        for marker in ("查看", "看看", "阅读", "观察", "描述周围")
+        _label_key(marker) in text for marker in ("查看", "看看", "阅读", "观察", "描述周围")
     )
 
 
@@ -173,11 +271,7 @@ def _infer_default_skill_id(raw: JsonObject, context: IntentContext) -> str | No
     }
     actor_ids = _actor_value_ids(context.player_view)
     return next(
-        (
-            candidate
-            for candidate in candidates_by_family.get(family, ())
-            if candidate in actor_ids
-        ),
+        (candidate for candidate in candidates_by_family.get(family, ()) if candidate in actor_ids),
         None,
     )
 
@@ -203,9 +297,7 @@ def validate_intent_against_view(
     if not isinstance(intent.target, MatchedTarget):
         return intent
 
-    visible_entity_ids = {
-        item.id for item in context.player_view.scene.visible_entities
-    }
+    visible_entity_ids = {item.id for item in context.player_view.scene.visible_entities}
     available_exit_ids = {item.id for item in context.player_view.scene.available_exits}
     trusted_target_ids = visible_entity_ids | available_exit_ids
     if isinstance(intent.check, DefaultCheck):
@@ -317,9 +409,7 @@ def _normalize_skills(
 
 
 def _actor_value_ids(view: PlayerView) -> set[str]:
-    return {
-        value.id for value in (*view.self_actor.attributes, *view.self_actor.skills)
-    }
+    return {value.id for value in (*view.self_actor.attributes, *view.self_actor.skills)}
 
 
 _ACTOR_VALUE_ALIASES: dict[str, tuple[str, ...]] = {
@@ -365,7 +455,36 @@ _ACTION_FAMILY_ALIASES: dict[str, tuple[str, ...]] = {
     "social": ("social", "talk", "speak", "persuade", "交涉", "交谈", "说服", "沟通"),
     "intimidate": ("intimidate", "threaten", "恐吓", "威胁"),
     "bribe": ("bribe", "贿赂", "买通"),
-    "travel": ("go", "move", "travel", "前往", "进入", "移动", "去", "走到"),
+    "travel": (
+        "go",
+        "travel",
+        "approach",
+        "前往",
+        "靠近",
+        "接近",
+        "走向",
+        "走近",
+        "去",
+        "走到",
+    ),
+    "enter": (
+        "enter",
+        "进入",
+        "进去",
+        "走进",
+        "穿过",
+        "钻入",
+        "挤进",
+        "下去",
+    ),
+    "move_object": (
+        "move",
+        "移动",
+        "移开",
+        "推开",
+        "挪开",
+        "搬开",
+    ),
     "open": ("open", "打开", "开启"),
     "attack": ("attack", "fight", "shoot", "strike", "攻击", "殴打", "破坏"),
 }
@@ -386,9 +505,7 @@ def _labels(value: VisibleEntity | AvailableExitView) -> tuple[str, ...]:
     return (value.id, value.name, *value.aliases)
 
 
-def _unique_match(
-    raw: str, candidates: list[tuple[str, tuple[str, ...]]]
-) -> str | None:
+def _unique_match(raw: str, candidates: list[tuple[str, tuple[str, ...]]]) -> str | None:
     matches = {
         candidate_id
         for candidate_id, labels in candidates
@@ -406,6 +523,5 @@ def _label_key(value: str) -> str:
     return "".join(
         character
         for character in normalized
-        if not character.isspace()
-        and not unicodedata.category(character).startswith(("P", "S"))
+        if not character.isspace() and not unicodedata.category(character).startswith(("P", "S"))
     )

@@ -306,6 +306,7 @@ class RuleEngineService:
                 ProjectionAvailableExit(
                     id=available_exit.id,
                     name=available_exit.name,
+                    target_id=available_exit.target_id,
                     aliases=available_exit.aliases,
                     description=available_exit.description,
                     destination=(

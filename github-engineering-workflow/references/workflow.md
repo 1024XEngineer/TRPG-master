@@ -181,8 +181,9 @@ Attach all work for an iteration to its Milestone. State the iteration goal, use
 ### Bug Issue
 
 ```markdown
-## Bug 描述
+## 背景
 
+## Bug 描述
 <!-- 一句话说明在什么条件下发生了什么异常。 -->
 
 ## 复现过程
@@ -192,6 +193,10 @@ Attach all work for an iteration to its Milestone. State the iteration goal, use
 2.
 3.
 
+## 目标
+
+## 范围
+
 ## 补充信息（可选）
 
 <!-- 可按需补充环境、预期与实际行为、影响、频率、日志、截图、原因分析、修复目标或关联资料。 -->
@@ -199,6 +204,11 @@ Attach all work for an iteration to its Milestone. State the iteration goal, use
 ## 安全检查
 
 - [ ] 该问题不涉及需要私下报告的安全漏洞
+
+## 验收标准
+
+- [ ]
+- [ ]
 ```
 
 ### Pull Request

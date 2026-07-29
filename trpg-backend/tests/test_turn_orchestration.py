@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import AsyncIterator
 
@@ -16,7 +17,6 @@ from collaboration_framework.host.schemas import (
     NarrationContext,
     RecentTurnContext,
 )
-import json
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 from structlog.testing import capture_logs
@@ -235,6 +235,8 @@ class AlwaysNarration:
             "claimed_fact_ids": [],
             "suggested_actions": [],
         }
+
+
 def application(host_agent, narration_model):
     module = load_paper_chase()
     state = conversation_state(module).model_copy(update={"scene_id": "client_briefing"})

@@ -415,6 +415,283 @@
       "title": "PlayerView",
       "type": "object"
     },
+    "RecentSafeResult": {
+      "additionalProperties": false,
+      "description": "The deliberately small, player-safe projection of an ActionResult.",
+      "properties": {
+        "resolution": {
+          "enum": [
+            "checkpoint",
+            "direct",
+            "blocked",
+            "unrecognized"
+          ],
+          "title": "Resolution",
+          "type": "string"
+        },
+        "outcome": {
+          "enum": [
+            "success",
+            "failure",
+            "not_applicable"
+          ],
+          "title": "Outcome",
+          "type": "string"
+        },
+        "check_result": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RuleCheckResult"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "visible_facts": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/VisibleFact"
+          },
+          "title": "Visible Facts",
+          "type": "array"
+        }
+      },
+      "required": [
+        "resolution",
+        "outcome"
+      ],
+      "title": "RecentSafeResult",
+      "type": "object"
+    },
+    "RecentTurn": {
+      "additionalProperties": false,
+      "description": "One prior action and only the evidence safe for the current viewer.",
+      "properties": {
+        "correlation_id": {
+          "minLength": 1,
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "source_player_id": {
+          "minLength": 1,
+          "title": "Source Player Id",
+          "type": "string"
+        },
+        "source_actor_id": {
+          "minLength": 1,
+          "title": "Source Actor Id",
+          "type": "string"
+        },
+        "scene_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Scene Id"
+        },
+        "source_view_revision": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source View Revision"
+        },
+        "committed_view_revision": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Committed View Revision"
+        },
+        "participants": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Participants",
+          "type": "array"
+        },
+        "player_utterance": {
+          "$ref": "#/$defs/VisibleHistoryText"
+        },
+        "accepted_intent_summary": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Accepted Intent Summary"
+        },
+        "player_safe_result": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecentSafeResult"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "published_narration": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/VisibleHistoryText"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "evidence_refs": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Evidence Refs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "correlation_id",
+        "source_player_id",
+        "source_actor_id",
+        "player_utterance"
+      ],
+      "title": "RecentTurn",
+      "type": "object"
+    },
+    "RecentTurnContext": {
+      "additionalProperties": false,
+      "description": "A revision-bound sequence of recent turns visible to one player.",
+      "properties": {
+        "room_id": {
+          "minLength": 1,
+          "title": "Room Id",
+          "type": "string"
+        },
+        "viewer_player_id": {
+          "minLength": 1,
+          "title": "Viewer Player Id",
+          "type": "string"
+        },
+        "as_of_revision": {
+          "minLength": 1,
+          "title": "As Of Revision",
+          "type": "string"
+        },
+        "turns": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/RecentTurn"
+          },
+          "title": "Turns",
+          "type": "array"
+        }
+      },
+      "required": [
+        "room_id",
+        "viewer_player_id",
+        "as_of_revision"
+      ],
+      "title": "RecentTurnContext",
+      "type": "object"
+    },
+    "RuleCheckResult": {
+      "additionalProperties": false,
+      "description": "Player-safe evidence for one authoritative percentile check.",
+      "properties": {
+        "checkpoint_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Checkpoint Id"
+        },
+        "skill_id": {
+          "minLength": 1,
+          "title": "Skill Id",
+          "type": "string"
+        },
+        "target_value": {
+          "minimum": 0,
+          "title": "Target Value",
+          "type": "integer"
+        },
+        "roll_value": {
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Roll Value",
+          "type": "integer"
+        },
+        "difficulty": {
+          "enum": [
+            "regular",
+            "hard",
+            "extreme"
+          ],
+          "title": "Difficulty",
+          "type": "string"
+        },
+        "success_level": {
+          "enum": [
+            "critical",
+            "extreme",
+            "hard",
+            "regular",
+            "failure",
+            "fumble"
+          ],
+          "title": "Success Level",
+          "type": "string"
+        },
+        "passed": {
+          "title": "Passed",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "skill_id",
+        "target_value",
+        "roll_value",
+        "difficulty",
+        "success_level",
+        "passed"
+      ],
+      "title": "RuleCheckResult",
+      "type": "object"
+    },
     "SceneView": {
       "additionalProperties": false,
       "properties": {
@@ -647,6 +924,53 @@
       ],
       "title": "VisibleEntity",
       "type": "object"
+    },
+    "VisibleFact": {
+      "additionalProperties": false,
+      "description": "One fact confirmed for the current action result.",
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "text"
+      ],
+      "title": "VisibleFact",
+      "type": "object"
+    },
+    "VisibleHistoryText": {
+      "additionalProperties": false,
+      "description": "Text already visible to the current viewer at publication time.",
+      "properties": {
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "visibility": {
+          "enum": [
+            "public",
+            "player_scoped"
+          ],
+          "title": "Visibility",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "visibility"
+      ],
+      "title": "VisibleHistoryText",
+      "type": "object"
     }
   },
   "additionalProperties": false,
@@ -657,11 +981,15 @@
     },
     "player_view": {
       "$ref": "#/$defs/PlayerView"
+    },
+    "recent_history": {
+      "$ref": "#/$defs/RecentTurnContext"
     }
   },
   "required": [
     "player_input",
-    "player_view"
+    "player_view",
+    "recent_history"
   ],
   "title": "HostAgentContext",
   "type": "object"

@@ -19,7 +19,7 @@ from collaboration_framework.engine import (
     create_initial_game_state,
     require_runtime_capabilities,
 )
-from sqlalchemy import func, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -915,6 +915,10 @@ async def record_event(
     event_type: str,
     payload: dict,
     *,
+    visibility: str,
+    actor_id: str | None,
+    scene_id: str | None,
+    view_revision: str | None,
     correlation_id: str | None = None,
 ) -> bool:
     """写入一条房间事件（issue #77 才真正打通的闭环——原来"不记 EventLog"是
@@ -929,6 +933,10 @@ async def record_event(
             player_id=player_id,
             event_type=event_type,
             correlation_id=correlation_id,
+            visibility=visibility,
+            actor_id=actor_id,
+            scene_id=scene_id,
+            view_revision=view_revision,
             payload=payload,
         )
     )
@@ -958,9 +966,20 @@ async def get_replay(
 
     先校验发起者是这个房间的成员（复盘是"只有参与者能看"的内容），再查事件。
     """
-    await require_room_member(db, room_id, reconnect_token)
+    player = await require_room_member(db, room_id, reconnect_token)
     result = await db.scalars(
-        select(Event).where(Event.room_id == room_id).order_by(Event.created_at)
+        select(Event)
+        .where(
+            Event.room_id == room_id,
+            or_(
+                Event.visibility == "public",
+                and_(
+                    Event.visibility == "player_scoped",
+                    Event.player_id == player.id,
+                ),
+            ),
+        )
+        .order_by(Event.created_at)
     )
     return [ReplayEventRead.model_validate(e) for e in result]
 
@@ -1011,6 +1030,13 @@ async def list_conversation_events(
             .where(
                 Event.room_id == room_id,
                 Event.event_type.in_(["action.broadcast", "narration.push", "check.result"]),
+                or_(
+                    Event.visibility == "public",
+                    and_(
+                        Event.visibility == "player_scoped",
+                        Event.player_id == player.id,
+                    ),
+                ),
             )
             .order_by(Event.created_at, Event.id)
         )
@@ -1036,7 +1062,7 @@ async def list_conversation_events(
                     created_at=event.created_at,
                 )
             )
-        elif event.event_type == "check.result" and event.player_id == player.id:
+        elif event.event_type == "check.result":
             conversation.append(
                 RoomConversationEventRead(
                     id=event.correlation_id or event.id,

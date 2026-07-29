@@ -8,7 +8,7 @@ from typing import Annotated, Literal, TypeAlias
 from pydantic import ConfigDict, Field, JsonValue, RootModel, model_validator
 
 from collaboration_framework.contracts import ContractModel, PlayerInput, PlayerView
-
+from collaboration_framework.host.schemas.history import RecentTurnContext
 
 HostAgentTerminationReason: TypeAlias = Literal[
     "completed",
@@ -33,6 +33,7 @@ class HostAgentContext(ContractModel):
 
     player_input: PlayerInput
     player_view: PlayerView
+    recent_history: RecentTurnContext
 
     @model_validator(mode="after")
     def validate_scope(self) -> HostAgentContext:
@@ -43,9 +44,11 @@ class HostAgentContext(ContractModel):
             != getattr(self.player_view, field_name)
         ]
         if mismatches:
-            raise ValueError(
-                "HostAgentContext scope 不一致: " + ", ".join(mismatches)
-            )
+            raise ValueError("HostAgentContext scope 不一致: " + ", ".join(mismatches))
+        self.recent_history.validate_for(
+            player_input=self.player_input,
+            player_view=self.player_view,
+        )
         return self
 
 
@@ -113,9 +116,7 @@ class HostAgentFailed(ContractModel):
             return self
         expected_reason = _FAILURE_REASON_BY_CODE[self.code]
         if self.usage.termination_reason != expected_reason:
-            raise ValueError(
-                "agent.failed code 与 usage.termination_reason 不一致"
-            )
+            raise ValueError("agent.failed code 与 usage.termination_reason 不一致")
         return self
 
 

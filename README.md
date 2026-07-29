@@ -200,6 +200,9 @@ npm run dev
 | `HOST_AGENT_MAX_TOOL_CALLS` | `8` | 单次 Host Agent 最大工具调用数 |
 | `HOST_AGENT_TOOL_TIMEOUT_SECONDS` | `5` | 单工具超时秒数 |
 | `HOST_AGENT_TIMEOUT_SECONDS` | `30` | Host Agent 整轮超时秒数 |
+| `RECENT_HISTORY_ENABLED` | `true` | 是否向 Host/Narrator 提供玩家安全的近期回合 |
+| `RECENT_HISTORY_MAX_TURNS` | `6` | 近期历史最多保留的回合数 |
+| `RECENT_HISTORY_MAX_CHARS` | `6000` | 近期历史文本总字符预算 |
 
 ### 主持模型配置
 

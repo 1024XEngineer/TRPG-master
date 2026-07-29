@@ -12,7 +12,17 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, UniqueConstraint, Uuid
+from sqlalchemy import (
+    JSON,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+    Uuid,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base
@@ -27,6 +37,22 @@ class Event(Base):
             "correlation_id",
             name="uq_events_room_type_correlation",
         ),
+        CheckConstraint(
+            "visibility IN ('public', 'player_scoped')",
+            name="ck_events_visibility",
+        ),
+        CheckConstraint(
+            "visibility != 'player_scoped' OR player_id IS NOT NULL",
+            name="ck_events_player_scoped_owner",
+        ),
+        Index("ix_events_room_created", "room_id", "created_at"),
+        Index(
+            "ix_events_room_visibility_player_created",
+            "room_id",
+            "visibility",
+            "player_id",
+            "created_at",
+        ),
     )
 
     id: Mapped[str] = mapped_column(
@@ -40,6 +66,10 @@ class Event(Base):
     )
     event_type: Mapped[str] = mapped_column(String(50), nullable=False)
     correlation_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    visibility: Mapped[str] = mapped_column(String(20), nullable=False)
+    actor_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    scene_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    view_revision: Mapped[str | None] = mapped_column(String(200), nullable=True)
     payload: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)

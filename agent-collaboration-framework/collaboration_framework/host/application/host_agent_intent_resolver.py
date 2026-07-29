@@ -88,6 +88,7 @@ class HostAgentIntentResolver:
         intent_context = IntentContext(
             player_input=context.player_input,
             player_view=context.player_view,
+            recent_history=context.recent_history,
         )
         try:
             return IntentParser.parse(terminal.raw_output, intent_context)

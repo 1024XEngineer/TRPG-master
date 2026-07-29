@@ -92,6 +92,18 @@ class _ConversationCheckIntentModel:
         }
 
 
+class _ConversationClarificationIntentModel:
+    async def generate(self, context):  # noqa: ANN001
+        return {
+            "kind": "unknown",
+            "verb": "unknown",
+            "target": {"matched": False, "raw": context.player_input.utterance},
+            "check": {"route": "none"},
+            "summary": "需要澄清",
+            "clarification_question": "你指的是哪一本书？",
+        }
+
+
 def _use_candidate_turn_application(monkeypatch: pytest.MonkeyPatch) -> None:
     current_application = ws_controller.turn_application
     monkeypatch.setattr(
@@ -188,7 +200,7 @@ def test_action_submit_broadcasts_utterance_then_narration(sync_client: TestClie
 
 def test_lock_released_after_narrator_failure(sync_client: TestClient) -> None:
     """AI 调用失败后锁必须释放（finally 兜底），否则房间永久锁死——issue #107
-    验收标准。失败只告诉发起者（error 不广播），其他人只看到原话没有回复。"""
+    验收标准。PlayerView 尚不存在时输入不会被接受或广播。"""
     token = register_and_login(sync_client, "fail_host")
     room = create_room(sync_client, token)
     from tests.test_ws import receive_until
@@ -197,14 +209,11 @@ def test_lock_released_after_narrator_failure(sync_client: TestClient) -> None:
         _join_ws(ws, room)
 
         _submit_action(ws, room, "我尝试翻译古籍")
-        assert ws.receive_json()["type"] == "action.broadcast"
         failure, _ = receive_until(ws, lambda message: message["type"] == "turn.failed")
         assert failure["payload"]["code"] == "ROOM_RUNTIME_NOT_FOUND"
 
-        # 换一个能正常返回的 narrator，立刻重试——若锁没被释放，这里会收到
-        # ACTION_IN_PROGRESS 而不是 action.broadcast。
+        # 立刻重试——若锁没被释放，这里会收到 ACTION_IN_PROGRESS。
         _submit_action(ws, room, "我再次尝试翻译")
-        assert ws.receive_json()["type"] == "action.broadcast"
         failure, _ = receive_until(ws, lambda message: message["type"] == "turn.failed")
         assert failure["payload"]["code"] == "ROOM_RUNTIME_NOT_FOUND"
 
@@ -493,3 +502,72 @@ def test_check_result_stays_hidden_from_other_members(
         headers={"X-Reconnect-Token": guest["reconnectToken"]},
     ).json()["data"]
     assert [event["type"] for event in guest_conversation].count("check.result") == 0
+
+
+def test_private_clarification_is_restored_only_for_its_player(
+    sync_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    token = register_and_login(sync_client, "clarification_host")
+    room = create_room(sync_client, token, max_players=2)
+    guest = join_as(sync_client, room["roomCode"], "clarification_guest", "访客")
+    advance_to_building(sync_client, room)
+    complete_character(sync_client, room["roomId"], room["reconnectToken"])
+    complete_character(sync_client, room["roomId"], guest["reconnectToken"])
+    start_game(sync_client, room, token)
+    current_application = ws_controller.turn_application
+    monkeypatch.setattr(
+        ws_controller,
+        "turn_application",
+        build_turn_application(
+            current_application.store,
+            current_application.engine,
+            intent_model=_ConversationClarificationIntentModel(),
+            narration_model=FakeNarrationModel(),
+        ),
+    )
+
+    with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
+        ws.send_json(
+            {
+                "type": "room.join",
+                "playerId": room["playerId"],
+                "payload": {"reconnectToken": room["reconnectToken"]},
+            }
+        )
+        assert ws.receive_json()["type"] == "session.bound"
+        assert ws.receive_json()["type"] == "view.updated"
+        ws.send_json(
+            {
+                "type": "action.submit",
+                "playerId": room["playerId"],
+                "payload": {
+                    "clientActionId": "private-clarification",
+                    "utterance": "我去拿那一本",
+                },
+            }
+        )
+        clarification, _ = receive_until(
+            ws,
+            lambda message: message.get("type") == "narration.push",
+        )
+        assert clarification["payload"]["text"] == "你指的是哪一本书？"
+
+    host_history = sync_client.get(
+        f"{ROOMS_BASE}/{room['roomId']}/conversation",
+        headers={"X-Reconnect-Token": room["reconnectToken"]},
+    ).json()["data"]
+    guest_history = sync_client.get(
+        f"{ROOMS_BASE}/{room['roomId']}/conversation",
+        headers={"X-Reconnect-Token": guest["reconnectToken"]},
+    ).json()["data"]
+
+    assert any(
+        event["type"] == "narration.push" and event["payload"]["text"] == "你指的是哪一本书？"
+        for event in host_history
+    )
+    assert all(
+        not (event["type"] == "narration.push" and event["payload"]["text"] == "你指的是哪一本书？")
+        for event in guest_history
+    )
+    assert any(event["type"] == "action.broadcast" for event in guest_history)

@@ -28,6 +28,7 @@ from collaboration_framework.host.adapters.fakes import FakeHostAgent, FakeNarra
 from collaboration_framework.host.application import (
     ContextAssembler,
     HostAgentIntentResolver,
+    NarrationValidationError,
     Narrator,
     PlayerViewProjector,
     TurnExecutionError,
@@ -80,6 +81,7 @@ _PUBLIC_TOOL_LABELS = {
     "search_visible_entities": "守秘人正在查看当前场景",
     "get_visible_entity": "守秘人正在确认可见目标",
 }
+_MAX_NARRATION_ATTEMPTS = 2
 
 
 def _public_tool_label(tool_name: str) -> str:
@@ -101,6 +103,7 @@ class PreparedTurn:
     candidates: tuple[SkillCheckCandidate, ...]
     difficulty: CheckDifficulty
     stored_roll_value: int | None = None
+    completed_action_result: ActionResult | None = None
 
 
 @dataclass(frozen=True)
@@ -213,12 +216,20 @@ class TurnApplication:
         async with self.store.transaction(room_id) as transaction:
             completed = await transaction.find_completed_action(client_action_id)
         if completed is not None:
-            if completed.request.player_id != player_id or completed.request.actor_id != actor_id:
+            if (
+                completed.request.room_id != room_id
+                or completed.request.player_id != player_id
+                or completed.request.actor_id != actor_id
+            ):
                 raise ContractError("client_action_id belongs to another actor")
             intent = completed.request.intent
             candidates: tuple[SkillCheckCandidate, ...] = ()
             difficulty: CheckDifficulty = "regular"
             stored_roll_value = completed.request.roll_value
+            completed_action_result = completed.execution.action_result.model_copy(
+                update={"view_revision": view_before.revision},
+                deep=True,
+            )
         else:
             await emit_turn_event(
                 on_event,
@@ -269,6 +280,7 @@ class TurnApplication:
             )
             candidates, difficulty = self._check_candidates(intent, view_before)
             stored_roll_value = None
+            completed_action_result = None
             if candidates:
                 await emit_turn_event(
                     on_event,
@@ -284,6 +296,7 @@ class TurnApplication:
             candidates=candidates,
             difficulty=difficulty,
             stored_roll_value=stored_roll_value,
+            completed_action_result=completed_action_result,
         )
 
     async def complete(
@@ -297,6 +310,8 @@ class TurnApplication:
     ) -> TurnOutput:
         if (selected_skill is None) != (roll_value is None):
             raise ContractError("selected_skill and roll_value must be supplied together")
+        if prepared.completed_action_result is not None and selected_skill is not None:
+            raise ContractError("Completed action cannot accept another skill check")
 
         intent = prepared.intent
         if selected_skill is not None:
@@ -315,21 +330,24 @@ class TurnApplication:
                 phase="executing_action",
             ),
         )
-        action_result = await self.engine.execute(
-            ActionRequest(
-                request_id=prepared.player_input.client_action_id,
-                room_id=prepared.player_input.room_id,
-                player_id=prepared.player_input.player_id,
-                actor_id=prepared.player_input.actor_id,
-                source_view_revision=prepared.view_before.revision,
-                intent=intent,
-                roll_value=(
-                    roll_value if selected_skill is not None else prepared.stored_roll_value
-                ),
+        if prepared.completed_action_result is None:
+            action_result = await self.engine.execute(
+                ActionRequest(
+                    request_id=prepared.player_input.client_action_id,
+                    room_id=prepared.player_input.room_id,
+                    player_id=prepared.player_input.player_id,
+                    actor_id=prepared.player_input.actor_id,
+                    source_view_revision=prepared.view_before.revision,
+                    intent=intent,
+                    roll_value=(
+                        roll_value if selected_skill is not None else prepared.stored_roll_value
+                    ),
+                )
             )
-        )
-        if on_action_result is not None:
-            await on_action_result(action_result)
+            if on_action_result is not None:
+                await on_action_result(action_result)
+        else:
+            action_result = prepared.completed_action_result.model_copy(deep=True)
         await emit_turn_event(
             on_event,
             TurnPhaseChanged(
@@ -363,14 +381,39 @@ class TurnApplication:
             action_result,
             view_after,
         )
-        try:
-            narration = await Narrator(self.narration_model).narrate(narration_context)
-        except Exception as exc:
+        narrator = Narrator(self.narration_model)
+        narration = None
+        for attempt in range(1, _MAX_NARRATION_ATTEMPTS + 1):
+            try:
+                narration = await narrator.narrate(narration_context)
+                break
+            except NarrationValidationError as exc:
+                will_retry = attempt < _MAX_NARRATION_ATTEMPTS
+                logger.warning(
+                    "narration_validation_rejected",
+                    correlation_id=prepared.player_input.client_action_id,
+                    attempt=attempt,
+                    will_retry=will_retry,
+                    rejection_reason=exc.reason,
+                )
+                if not will_retry:
+                    raise TurnExecutionError(
+                        "NARRATION_INVALID",
+                        "规则结果已安全保存，但叙事未通过安全校验，请使用原请求重试",
+                        retryable=True,
+                    ) from exc
+            except Exception as exc:
+                raise TurnExecutionError(
+                    "NARRATOR_FAILED",
+                    "规则结果已安全保存，但叙事生成失败，请重试原动作",
+                    retryable=True,
+                ) from exc
+        if narration is None:
             raise TurnExecutionError(
                 "NARRATOR_FAILED",
                 "规则结果已安全保存，但叙事生成失败，请重试原动作",
                 retryable=True,
-            ) from exc
+            )
         return TurnOutput(
             status="clarification" if narration.kind == "clarification" else "completed",
             player_input=prepared.player_input,

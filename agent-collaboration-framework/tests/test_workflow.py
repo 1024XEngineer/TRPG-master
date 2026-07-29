@@ -5,8 +5,6 @@ import json
 import unittest
 from pathlib import Path
 
-from pydantic import ValidationError
-
 from collaboration_framework.bootstrap import build_fake_application
 from collaboration_framework.contracts import (
     ContractError,
@@ -26,12 +24,14 @@ from collaboration_framework.host.application import (
     ContextAssembler,
     HostAgentIntentResolver,
     IntentParser,
+    NarrationValidationError,
     Narrator,
     Orchestrator,
     PlayerViewProjector,
     TurnExecutionError,
 )
 from collaboration_framework.schema_export import rendered_schemas
+from pydantic import ValidationError
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -88,6 +88,14 @@ class CountingEngine:
 
 
 class StaticIntentModel:
+    def __init__(self, payload) -> None:
+        self.payload = payload
+
+    async def generate(self, context):
+        return self.payload
+
+
+class StaticNarrationModel:
     def __init__(self, payload) -> None:
         self.payload = payload
 
@@ -247,6 +255,44 @@ class UnifiedWorkflowTests(unittest.TestCase):
         self.assertEqual(output.action_result.resolution, "unrecognized")
         self.assertEqual(output.status, "clarification")
         self.assertEqual(output.narration.kind, "clarification")
+
+    def test_narrator_classifies_invalid_outer_schema_at_application_boundary(
+        self,
+    ) -> None:
+        narrator = StaticNarrationModel(
+            {
+                "kind": "narration",
+                "text": "",
+                "claimed_fact_ids": [],
+                "suggested_actions": [],
+            }
+        )
+        orchestrator, engine, _ = self.application(narration_model=narrator)
+
+        with self.assertRaises(NarrationValidationError) as failed:
+            self.run_turn(orchestrator)
+
+        self.assertEqual(failed.exception.reason, "outer_schema")
+        self.assertEqual(engine.execute_calls, 1)
+
+    def test_narrator_classifies_unconfirmed_fact_at_application_boundary(
+        self,
+    ) -> None:
+        narrator = StaticNarrationModel(
+            {
+                "kind": "narration",
+                "text": "书架后传来一声轻响。",
+                "claimed_fact_ids": ["fact-not-confirmed"],
+                "suggested_actions": [],
+            }
+        )
+        orchestrator, engine, _ = self.application(narration_model=narrator)
+
+        with self.assertRaises(NarrationValidationError) as failed:
+            self.run_turn(orchestrator)
+
+        self.assertEqual(failed.exception.reason, "fact_scope")
+        self.assertEqual(engine.execute_calls, 1)
 
     def test_host_semantic_checkpoint_choice_is_not_rejected_by_verb_equality(
         self,

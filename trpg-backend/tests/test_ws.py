@@ -1,7 +1,7 @@
 import pytest
 from collaboration_framework.contracts import JsonObject
 from collaboration_framework.host.adapters.fakes import FakeNarrationModel
-from collaboration_framework.host.schemas import IntentContext
+from collaboration_framework.host.schemas import IntentContext, NarrationContext
 from starlette.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
@@ -50,6 +50,36 @@ class _WsAttackThenPlainIntentModel:
             "check": {"route": "none"},
             "summary": context.player_input.utterance,
         }
+
+
+class _WsPlainIntentModel:
+    async def generate(self, context: IntentContext) -> JsonObject:
+        return {
+            "kind": "dialogue",
+            "verb": "talk",
+            "target": {"matched": True, "id": "thomas"},
+            "check": {"route": "none"},
+            "summary": context.player_input.utterance,
+        }
+
+
+class _WsInvalidTwiceThenSafeNarration:
+    leaked_text = "托马斯看着你。 claimed_fact_ids: [],"
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self._fake = FakeNarrationModel()
+
+    async def generate(self, context: NarrationContext) -> JsonObject:
+        self.calls += 1
+        if self.calls <= 2:
+            return {
+                "kind": "narration",
+                "text": self.leaked_text,
+                "claimed_fact_ids": [],
+                "suggested_actions": [],
+            }
+        return await self._fake.generate(context)
 
 
 @pytest.fixture
@@ -494,6 +524,92 @@ def test_action_submit_broadcasts_narration_to_room_only(sync_client: TestClient
     assert len(action_narrations) == 1
 
 
+def test_invalid_narration_fails_closed_then_original_request_recovers(
+    sync_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    token = register_and_login(sync_client, "narration_policy_host")
+    room = create_room(sync_client, token)
+    advance_to_building(sync_client, room)
+    complete_character(sync_client, room["roomId"], room["reconnectToken"])
+    start_game(sync_client, room, token)
+    narration_model = _WsInvalidTwiceThenSafeNarration()
+    current_application = ws_controller.turn_application
+    monkeypatch.setattr(
+        ws_controller,
+        "turn_application",
+        build_turn_application(
+            current_application.store,
+            current_application.engine,
+            intent_model=_WsPlainIntentModel(),
+            narration_model=narration_model,
+        ),
+    )
+    action = {
+        "type": "action.submit",
+        "playerId": room["playerId"],
+        "payload": {
+            "clientActionId": "ws-narration-invalid-167",
+            "utterance": "我继续询问托马斯",
+        },
+    }
+
+    with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
+        ws.send_json(
+            {
+                "type": "room.join",
+                "playerId": room["playerId"],
+                "payload": {"reconnectToken": room["reconnectToken"]},
+            }
+        )
+        assert ws.receive_json()["type"] == "session.bound"
+        assert ws.receive_json()["type"] == "view.updated"
+
+        ws.send_json(action)
+        failed, first_attempt_events = receive_until(
+            ws,
+            lambda message: message.get("type") == "turn.failed",
+        )
+
+        assert failed["payload"]["code"] == "NARRATION_INVALID"
+        assert failed["payload"]["retryable"] is True
+        assert all(
+            message.get("message_type") != "turn.completed"
+            and message.get("type") not in {"view.updated", "narration.push"}
+            for message in first_attempt_events
+        )
+        assert narration_model.leaked_text not in str(first_attempt_events)
+
+        ws.send_json(action)
+        completed, retry_events = receive_until(
+            ws,
+            lambda message: message.get("message_type") == "turn.completed",
+        )
+        narration, _ = receive_until(
+            ws,
+            lambda message: message.get("type") == "narration.push",
+        )
+
+    assert completed["correlation_id"] == "ws-narration-invalid-167"
+    assert all(message.get("type") != "turn.failed" for message in retry_events)
+    assert narration_model.calls == 3
+    assert narration["payload"]["text"] != narration_model.leaked_text
+
+    replay = sync_client.get(
+        f"{ROOMS_BASE}/{room['roomId']}/replay",
+        headers={"X-Reconnect-Token": room["reconnectToken"]},
+    ).json()["data"]
+    narration_events = [
+        event
+        for event in replay
+        if event["eventType"] == "narration.push"
+        and event["payload"]["text"] == narration["payload"]["text"]
+    ]
+    assert len(narration_events) == 1
+    assert narration_events[0]["payload"]["text"] == narration["payload"]["text"]
+    assert narration_model.leaked_text not in str(replay)
+
+
 def test_skill_check_waits_for_player_selection_and_roll(
     sync_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
@@ -587,6 +703,103 @@ def test_skill_check_waits_for_player_selection_and_roll(
         "turn.phase_changed",
         "check.result",
     ]
+
+
+def test_invalid_check_narration_clears_pending_turn_and_reuses_completed_action(
+    sync_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    token = register_and_login(sync_client, "narration_check_retry_host")
+    room = create_room(sync_client, token)
+    advance_to_building(sync_client, room)
+    complete_character(sync_client, room["roomId"], room["reconnectToken"])
+    start_game(sync_client, room, token)
+    narration_model = _WsInvalidTwiceThenSafeNarration()
+    current_application = ws_controller.turn_application
+    monkeypatch.setattr(
+        ws_controller,
+        "turn_application",
+        build_turn_application(
+            current_application.store,
+            current_application.engine,
+            intent_model=_WsCandidateIntentModel(),
+            narration_model=narration_model,
+        ),
+    )
+    action = {
+        "type": "action.submit",
+        "playerId": room["playerId"],
+        "payload": {
+            "clientActionId": "ws-check-narration-invalid-167",
+            "utterance": "尝试潜行查找资料",
+        },
+    }
+
+    with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
+        ws.send_json(
+            {
+                "type": "room.join",
+                "playerId": room["playerId"],
+                "payload": {"reconnectToken": room["reconnectToken"]},
+            }
+        )
+        assert ws.receive_json()["type"] == "session.bound"
+        assert ws.receive_json()["type"] == "view.updated"
+
+        ws.send_json(action)
+        request, _ = receive_until(
+            ws,
+            lambda message: message.get("type") == "check.request",
+        )
+        ws.send_json(
+            {
+                "type": "check.roll",
+                "playerId": room["playerId"],
+                "payload": {
+                    "clientActionId": request["payload"]["clientActionId"],
+                    "skill": "stealth",
+                    "rollValue": 7,
+                },
+            }
+        )
+        failed, failed_events = receive_until(
+            ws,
+            lambda message: message.get("type") == "turn.failed",
+        )
+
+        assert failed["payload"]["code"] == "NARRATION_INVALID"
+        assert sum(
+            message.get("type") == "check.result" for message in failed_events
+        ) == 1
+
+        ws.send_json(action)
+        completed, retry_events = receive_until(
+            ws,
+            lambda message: message.get("message_type") == "turn.completed",
+        )
+        narration, _ = receive_until(
+            ws,
+            lambda message: message.get("type") == "narration.push",
+        )
+
+    assert completed["correlation_id"] == "ws-check-narration-invalid-167"
+    assert all(message.get("type") != "check.request" for message in retry_events)
+    assert all(message.get("type") != "check.result" for message in retry_events)
+    assert narration_model.calls == 3
+    assert narration["payload"]["text"] != narration_model.leaked_text
+
+    replay = sync_client.get(
+        f"{ROOMS_BASE}/{room['roomId']}/replay",
+        headers={"X-Reconnect-Token": room["reconnectToken"]},
+    ).json()["data"]
+    check_results = [
+        event
+        for event in replay
+        if event["eventType"] == "check.result"
+        and event["payload"]["clientActionId"] == "ws-check-narration-invalid-167"
+    ]
+    assert len(check_results) == 1
+    assert narration_model.leaked_text not in str(replay)
 
 
 def test_terminal_attack_check_failure_releases_pending_turn(

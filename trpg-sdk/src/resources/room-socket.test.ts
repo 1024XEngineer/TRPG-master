@@ -281,7 +281,8 @@ test('turn.failed reject pending action，view.updated 更新同一份缓存', a
         error instanceof TurnFailedError &&
         error.message === '主持 Agent 响应超时，请重试' &&
         error.code === 'HOST_AGENT_TIMEOUT' &&
-        error.retryable
+        error.retryable &&
+        error.correlationId === 'failed-action'
     );
 
     const rejectedAction = socket.submitAction('player-1', {

@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { TurnFailedError, type AgentPlayerView, type AgentTurnPhase, type CheckRequestPayload, type RoomConversationEvent } from 'trpg-sdk'
+import { RoomSocketServerError, TurnFailedError, type AgentPlayerView, type AgentTurnPhase, type CheckRequestPayload, type RoomConversationEvent } from 'trpg-sdk'
 import { ArrowLeft, Users, Map, BookOpen, ScrollText, Star, X, SendHorizontal, Dice6, Plus, Save, FlagOff, Heart } from 'lucide-react'
 import { useState, useRef, useEffect, type Dispatch, type FormEvent, type SetStateAction } from 'react'
 import { useRoomStore } from '@/stores/room-store'
@@ -757,6 +757,8 @@ export default function RoomPage() {
   const [actionError, setActionError] = useState('')
   const [actionErrorRetryable, setActionErrorRetryable] = useState(false)
   const [actionErrorIsGuidance, setActionErrorIsGuidance] = useState(false)
+  const [actionErrorCode, setActionErrorCode] = useState<string | null>(null)
+  const [actionErrorCorrelationId, setActionErrorCorrelationId] = useState<string | null>(null)
   const [openPanel, setOpenPanel] = useState<string | null>(null)
   const [sheetPage, setSheetPage] = useState<'info' | 'background'>('info')
   const [skillsTab, setSkillsTab] = useState<'occupation' | 'interest'>('occupation')
@@ -949,6 +951,8 @@ export default function RoomPage() {
         setActionError(envelope.payload.publicMessage)
         setActionErrorRetryable(envelope.payload.retryable)
         setActionErrorIsGuidance(envelope.payload.code === 'HOST_AGENT_INVALID_OUTPUT')
+        setActionErrorCode(envelope.payload.code)
+        setActionErrorCorrelationId(envelope.payload.correlationId)
         pendingNarrationActionIdRef.current = null
       } else if (envelope.type === 'view.updated') {
         if (envelope.payload.playerId === playerId) {
@@ -958,6 +962,10 @@ export default function RoomPage() {
         setTyping(false)
         setProgressLabel(null)
         setActionError(envelope.payload.message)
+        setActionErrorRetryable(false)
+        setActionErrorIsGuidance(false)
+        setActionErrorCode(envelope.payload.code)
+        setActionErrorCorrelationId(envelope.payload.correlationId ?? null)
         pendingNarrationActionIdRef.current = null
       }
     })
@@ -971,6 +979,8 @@ export default function RoomPage() {
     setActionError('')
     setActionErrorRetryable(false)
     setActionErrorIsGuidance(false)
+    setActionErrorCode(null)
+    setActionErrorCorrelationId(null)
     setTyping(true)
     void sdk.roomSocket
       .submitAction(playerId, action)
@@ -983,12 +993,26 @@ export default function RoomPage() {
       .catch((error: unknown) => {
         setTyping(false)
         setProgressLabel(null)
-        setActionError(friendlyErrorMessage(error, '行动提交失败，请重试'))
+        setActionError(
+          error instanceof TurnFailedError || error instanceof RoomSocketServerError
+            ? error.message
+            : friendlyErrorMessage(error, '行动提交失败，请重试')
+        )
         setActionErrorRetryable(
           error instanceof TurnFailedError ? error.retryable : true
         )
         setActionErrorIsGuidance(
           error instanceof TurnFailedError && error.code === 'HOST_AGENT_INVALID_OUTPUT'
+        )
+        setActionErrorCode(
+          error instanceof TurnFailedError || error instanceof RoomSocketServerError
+            ? error.code
+            : 'CLIENT_TRANSPORT_ERROR'
+        )
+        setActionErrorCorrelationId(
+          error instanceof TurnFailedError || error instanceof RoomSocketServerError
+            ? error.correlationId
+            : action.clientActionId
         )
         pendingNarrationActionIdRef.current = null
       })
@@ -1226,17 +1250,32 @@ export default function RoomPage() {
           </p>
         )}
         {actionError && !suspended && (
-          <div className="flex items-center justify-between gap-2 pb-1.5 px-1">
-            <p className={`text-[11px] ${actionErrorIsGuidance ? 'text-[#8a642d]' : 'text-[#c04040]'}`}>
-              {actionErrorIsGuidance ? `守秘人提示：${actionError}` : actionError}
-            </p>
-            {pendingAction && actionErrorRetryable && (
+          <div className="pb-1.5 px-1">
+            <div className="flex items-center justify-between gap-2">
+              <p className={`text-[11px] ${actionErrorIsGuidance ? 'text-[#8a642d]' : 'text-[#c04040]'}`}>
+                {actionErrorIsGuidance ? `守秘人提示：${actionError}` : actionError}
+              </p>
+              {pendingAction && actionErrorRetryable && (
+                <button
+                  type="button"
+                  onClick={() => submitPlayerAction(pendingAction)}
+                  className="text-[11px] text-brass-dark underline flex-shrink-0"
+                >
+                  使用原请求重试
+                </button>
+              )}
+            </div>
+            {actionErrorCode && actionErrorCorrelationId && (
               <button
                 type="button"
-                onClick={() => submitPlayerAction(pendingAction)}
-                className="text-[11px] text-brass-dark underline flex-shrink-0"
+                aria-label="复制错误详情"
+                title="复制完整错误码和定位号"
+                onClick={() => void navigator.clipboard?.writeText(
+                  `${actionErrorCode} · ${actionErrorCorrelationId}`
+                )}
+                className="mt-1 text-[10px] font-mono text-text-dim underline decoration-dotted"
               >
-                使用原请求重试
+                错误码 {actionErrorCode} · 定位号 {actionErrorCorrelationId.slice(0, 8)}
               </button>
             )}
           </div>

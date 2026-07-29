@@ -25,6 +25,7 @@ export class TurnFailedError extends Error {
     message: string,
     readonly code: string,
     readonly retryable: boolean,
+    readonly correlationId: string,
   ) {
     super(message);
     this.name = 'TurnFailedError';
@@ -441,6 +442,7 @@ export class RoomSocket {
               parsed.payload.publicMessage,
               parsed.payload.code,
               parsed.payload.retryable,
+              parsed.payload.correlationId,
             )
           );
         }

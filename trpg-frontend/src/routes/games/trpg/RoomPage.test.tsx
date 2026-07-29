@@ -14,6 +14,7 @@ const {
   mockListConversation,
   mockOnWsMessage,
   mockRollCheck,
+  mockSubmitAction,
   mockWaitForWsOpen,
   wsHandlers,
 } = vi.hoisted(() => {
@@ -31,6 +32,7 @@ const {
       handlers.add(handler)
       return () => handlers.delete(handler)
     }),
+    mockSubmitAction: vi.fn(),
     mockWaitForWsOpen: vi.fn(() => Promise.resolve()),
   }
 })
@@ -50,7 +52,7 @@ vi.mock('@/services/api-client', () => ({
       joinRoom: mockJoinRoom,
       rollCheck: mockRollCheck,
       sendChat: vi.fn(),
-      submitAction: vi.fn(),
+      submitAction: mockSubmitAction,
     },
   },
 }))
@@ -169,6 +171,7 @@ describe('RoomPage conversation history', () => {
     useAuthStore.getState().login('token-1', 'user-1', '陈探员')
     mockGetPlayerView.mockReturnValue(null)
     mockListConversation.mockResolvedValue([])
+    mockSubmitAction.mockReturnValue(new Promise(() => undefined))
   })
 
   afterEach(() => {
@@ -407,5 +410,75 @@ describe('RoomPage conversation history', () => {
 
     randomSpy.mockRestore()
     vi.useRealTimers()
+  })
+
+  it('shows copyable diagnostics and only offers retry for retryable failures', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    })
+    renderRoomPage()
+
+    const input = screen.getByPlaceholderText('输入行动…')
+    fireEvent.change(input, { target: { value: '我调查书架' } })
+    fireEvent.submit(input.closest('form')!)
+    await waitFor(() => expect(mockSubmitAction).toHaveBeenCalledTimes(1))
+
+    act(() => emitWsMessage({
+      type: 'turn.failed',
+      payload: {
+        correlationId: 'timeout-correlation',
+        code: 'HOST_AGENT_TIMEOUT',
+        publicMessage: '主持 Agent 响应超时，请重试',
+        retryable: true,
+      },
+    }))
+
+    expect(screen.getByText('主持 Agent 响应超时，请重试')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '使用原请求重试' })).toBeInTheDocument()
+    const copyButton = screen.getByRole('button', { name: '复制错误详情' })
+    expect(copyButton).toHaveTextContent(
+      '错误码 HOST_AGENT_TIMEOUT · 定位号 timeout-',
+    )
+    fireEvent.click(copyButton)
+    expect(writeText).toHaveBeenCalledWith(
+      'HOST_AGENT_TIMEOUT · timeout-correlation',
+    )
+
+    act(() => emitWsMessage({
+      type: 'turn.failed',
+      payload: {
+        correlationId: 'contract-correlation',
+        code: 'TURN_CONTRACT_INVALID',
+        publicMessage: '本次动作未通过主持编排契约校验',
+        retryable: false,
+      },
+    }))
+
+    expect(screen.getByText('本次动作未通过主持编排契约校验')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '使用原请求重试' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '复制错误详情' })).toHaveTextContent(
+      'TURN_CONTRACT_INVALID',
+    )
+  })
+
+  it('renders invalid Agent output as keeper guidance', () => {
+    renderRoomPage()
+
+    act(() => emitWsMessage({
+      type: 'turn.failed',
+      payload: {
+        correlationId: 'invalid-output-correlation',
+        code: 'HOST_AGENT_INVALID_OUTPUT',
+        publicMessage: '请结合眼前的人物或物品，换一种说法。',
+        retryable: false,
+      },
+    }))
+
+    expect(
+      screen.getByText('守秘人提示：请结合眼前的人物或物品，换一种说法。'),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '使用原请求重试' })).not.toBeInTheDocument()
   })
 })

@@ -668,5 +668,5 @@ async def test_host_observability_records_recovery_without_leaking_model_output(
         record for record in caplog.records if record.message == "host_agent_intent_recovered"
     ]
     assert recovery_records
-    assert recovery_records[-1].failure_reason == "target_not_visible_or_ambiguous"
-    assert recovery_records[-1].recovery_path == "unknown_intent_clarification"
+    assert getattr(recovery_records[-1], "failure_reason", "") == "target_not_visible_or_ambiguous"
+    assert getattr(recovery_records[-1], "recovery_path", "") == "unknown_intent_clarification"

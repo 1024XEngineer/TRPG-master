@@ -248,6 +248,7 @@ async def test_event_correlation_deduplicates_action_narration_only(
             room_id=room_id,
             event_type="narration.push",
             correlation_id="client-action-89",
+            visibility="public",
             payload={"content": "首次叙事"},
         )
     )
@@ -259,6 +260,7 @@ async def test_event_correlation_deduplicates_action_narration_only(
             room_id=room_id,
             event_type="narration.push",
             correlation_id="client-action-89",
+            visibility="public",
             payload={"content": "不得重复的叙事"},
         )
     )
@@ -275,6 +277,7 @@ async def test_event_correlation_deduplicates_action_narration_only(
                 room_id=room_id,
                 event_type="narration.push",
                 correlation_id=None,
+                visibility="public",
                 payload={"content": "普通叙事一"},
             ),
             Event(
@@ -282,6 +285,7 @@ async def test_event_correlation_deduplicates_action_narration_only(
                 room_id=room_id,
                 event_type="narration.push",
                 correlation_id=None,
+                visibility="public",
                 payload={"content": "普通叙事二"},
             ),
         ]

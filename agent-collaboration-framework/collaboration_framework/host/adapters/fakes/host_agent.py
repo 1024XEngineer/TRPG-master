@@ -68,6 +68,7 @@ class FakeHostAgent:
             IntentContext(
                 player_input=context.player_input,
                 player_view=context.player_view,
+                recent_history=context.recent_history,
             )
         )
         yield HostAgentCompleted(

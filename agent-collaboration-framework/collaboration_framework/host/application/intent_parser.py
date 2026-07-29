@@ -10,6 +10,8 @@ from collaboration_framework.contracts import (
 )
 from collaboration_framework.host.schemas import IntentContext
 
+from .intent_aligner import align_intent_for_engine
+
 
 class IntentParser:
     """Parse one raw JSON object without invoking a model or mutating state."""
@@ -17,7 +19,8 @@ class IntentParser:
     @staticmethod
     def parse(raw: JsonObject, context: IntentContext) -> Intent:
         intent = Intent.model_validate(raw)
-        return validate_intent_against_view(intent, context)
+        validated = validate_intent_against_view(intent, context)
+        return align_intent_for_engine(validated, context)
 
 
 def validate_intent_against_view(
@@ -58,13 +61,30 @@ def validate_intent_against_view(
         if not set(intent.check.proposed_skills).issubset(option.skills):
             raise ContractError("Intent proposed_skills 不属于 Checkpoint 候选技能")
     elif isinstance(intent.check, DefaultCheck):
-        actor_candidates = {
-            item.id
-            for item in (
-                *context.player_view.self_actor.attributes,
-                *context.player_view.self_actor.skills,
-            )
-        }
+        if not intent.check.proposed_skills:
+            raise ContractError("Default Check 至少需要一个候选属性或技能")
+        actor_candidates = _actor_check_candidates(context)
         if not set(intent.check.proposed_skills).issubset(actor_candidates):
-            raise ContractError("Default Check 只能使用当前 Actor 的属性或技能")
+            raise ContractError(
+                "Default Check 只能使用当前 Actor 的整数属性、技能或 luck"
+            )
     return intent
+
+
+def _actor_check_candidates(context: IntentContext) -> set[str]:
+    candidates = {
+        item.id
+        for item in (
+            *context.player_view.self_actor.attributes,
+            *context.player_view.self_actor.skills,
+        )
+        if isinstance(item.value, int) and not isinstance(item.value, bool)
+    }
+    candidates.update(
+        item.id
+        for item in context.player_view.self_actor.resources
+        if item.id == "luck"
+        and isinstance(item.value, int)
+        and not isinstance(item.value, bool)
+    )
+    return candidates

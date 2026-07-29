@@ -30,7 +30,11 @@ from collaboration_framework.engine import (
     SequenceDiceSource,
 )
 from collaboration_framework.host.application import PlayerViewProjector
-from collaboration_framework.host.schemas import IntentContext, NarrationContext
+from collaboration_framework.host.schemas import (
+    IntentContext,
+    NarrationContext,
+    RecentTurnContext,
+)
 from pydantic import ValidationError
 
 from app.adapters.deepseek_models import DeepSeekChatCompletionsJsonClient
@@ -190,7 +194,7 @@ class EquivalentVerbClient:
         }
 
 
-class UnknownTravelClient:
+class ChineseTravelVerbClient:
     async def generate(
         self,
         *,
@@ -207,17 +211,16 @@ class UnknownTravelClient:
             for item in input_payload["player_view"]["scene"]["available_exits"]
         )
         return {
-            "kind": "unknown",
-            "verb": "unknown",
-            "target": {"matched": False, "raw": "图书馆"},
+            "kind": "action",
+            "verb": "前往",
+            "target": {"matched": True, "id": "library"},
             "check": {"route": "none"},
             "approach": None,
             "summary": "前往图书馆",
-            "clarification_question": "你想去哪里？",
         }
 
 
-async def test_prompt_intent_canonicalizes_equivalent_model_verbs() -> None:
+async def test_prompt_intent_keeps_distinct_module_actions_canonical() -> None:
     player_input = PlayerInput(
         room_id="room_prompt",
         player_id="player_1",
@@ -250,12 +253,19 @@ async def test_prompt_intent_canonicalizes_equivalent_model_verbs() -> None:
         ),
     )
     model = PromptIntentModel(EquivalentVerbClient())
-    context = IntentContext(player_input=player_input, player_view=player_view)
+    context = IntentContext(
+        player_input=player_input,
+        player_view=player_view,
+        recent_history=RecentTurnContext.empty(
+            player_input=player_input,
+            player_view=player_view,
+        ),
+    )
 
     first = Intent.model_validate(await model.generate(context))
     second = Intent.model_validate(await model.generate(context))
 
-    assert first.verb == second.verb == "investigate"
+    assert first.verb == second.verb == "observe"
 
 
 async def test_paper_chase_empty_exits_allow_free_travel_to_named_scene() -> None:
@@ -274,8 +284,17 @@ async def test_paper_chase_empty_exits_allow_free_travel_to_named_scene() -> Non
     view = await PlayerViewProjector(engine).project(player_input)
 
     assert "library" in {item.id for item in view.scene.available_exits}
-    context = IntentContext(player_input=player_input, player_view=view)
-    intent = Intent.model_validate(await PromptIntentModel(UnknownTravelClient()).generate(context))
+    context = IntentContext(
+        player_input=player_input,
+        player_view=view,
+        recent_history=RecentTurnContext.empty(
+            player_input=player_input,
+            player_view=view,
+        ),
+    )
+    intent = Intent.model_validate(
+        await PromptIntentModel(ChineseTravelVerbClient()).generate(context)
+    )
     assert isinstance(intent.target, MatchedTarget)
     assert intent.target.id == "library"
     assert intent.verb == "go"
@@ -333,7 +352,14 @@ async def test_prompts_treat_scene_orientation_as_narration_not_form_validation(
     )
     client = ImmersionPromptCaptureClient()
     intent_payload = await PromptIntentModel(client).generate(
-        IntentContext(player_input=player_input, player_view=player_view)
+        IntentContext(
+            player_input=player_input,
+            player_view=player_view,
+            recent_history=RecentTurnContext.empty(
+                player_input=player_input,
+                player_view=player_view,
+            ),
+        )
     )
     intent = Intent.model_validate(intent_payload)
     narration = await PromptNarrationModel(client).generate(
@@ -356,6 +382,10 @@ async def test_prompts_treat_scene_orientation_as_narration_not_form_validation(
                 view_revision="0",
             ),
             player_view=player_view,
+            recent_history=RecentTurnContext.empty(
+                player_input=player_input,
+                player_view=player_view,
+            ),
         )
     )
 
@@ -448,6 +478,10 @@ async def test_narration_receives_authoritative_default_check_result() -> None:
             intent=intent,
             action_result=action_result,
             player_view=player_view,
+            recent_history=RecentTurnContext.empty(
+                player_input=player_input,
+                player_view=player_view,
+            ),
         )
     )
 

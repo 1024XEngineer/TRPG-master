@@ -12,20 +12,9 @@ from typing import Any
 
 from agents.models.interface import Model, ModelResponse
 from agents.usage import Usage
-from openai.types.responses import (
-    Response,
-    ResponseCompletedEvent,
-    ResponseFunctionToolCall,
-    ResponseOutputItemDoneEvent,
-    ResponseOutputMessage,
-    ResponseOutputText,
-    ResponseUsage,
-)
-from pydantic import ValidationError
-
 from collaboration_framework.bootstrap.host_agent import (
-    build_deepseek_host_agent,
     HostAgentConfigurationError,
+    build_deepseek_host_agent,
     build_qwen_host_agent,
 )
 from collaboration_framework.contracts import (
@@ -53,11 +42,23 @@ from collaboration_framework.host.schemas import (
     HostAgentFailed,
     HostAgentToolCompleted,
     HostAgentToolStarted,
+    RecentTurnContext,
     SearchVisibleEntitiesArgs,
     SearchVisibleEntitiesResult,
     VisibleEntitySummary,
 )
 from collaboration_framework.host.tools import build_player_view_tool_registry
+from openai.types.responses import (
+    Response,
+    ResponseCompletedEvent,
+    ResponseFunctionToolCall,
+    ResponseOutputItemDoneEvent,
+    ResponseOutputMessage,
+    ResponseOutputText,
+    ResponseUsage,
+)
+from pydantic import ValidationError
+
 from tests.test_host_agent_contract import HostAgentPortContractMixin
 
 UNKNOWN_INTENT = {
@@ -72,37 +73,43 @@ SECRET = "SECRET_SENTINEL_DO_NOT_LEAK"
 
 
 def make_context(*, utterance: str = "检查红色书架") -> HostAgentContext:
-    return HostAgentContext(
-        player_input=PlayerInput(
-            room_id="room_001",
-            player_id="player_001",
-            actor_id="actor_001",
-            client_action_id="action_001",
-            utterance=utterance,
-        ),
-        player_view=PlayerView(
-            room_id="room_001",
-            player_id="player_001",
-            actor_id="actor_001",
-            background="玩家可见的测试背景。",
-            scene_id="library",
-            phase="playing",
-            revision="7",
-            self_actor=SelfActorView(id="actor_001", name="调查员"),
-            scene=SceneView(
-                id="library",
-                name="图书馆",
-                description="一间玩家可见的图书馆。",
-                visible_entities=(
-                    VisibleEntity(
-                        id="entity_dynamic_7f3a",
-                        kind="object",
-                        name="红色书架",
-                        aliases=("书架",),
-                        description="一个玩家可见的红色木书架。",
-                    ),
+    player_input = PlayerInput(
+        room_id="room_001",
+        player_id="player_001",
+        actor_id="actor_001",
+        client_action_id="action_001",
+        utterance=utterance,
+    )
+    player_view = PlayerView(
+        room_id="room_001",
+        player_id="player_001",
+        actor_id="actor_001",
+        background="玩家可见的测试背景。",
+        scene_id="library",
+        phase="playing",
+        revision="7",
+        self_actor=SelfActorView(id="actor_001", name="调查员"),
+        scene=SceneView(
+            id="library",
+            name="图书馆",
+            description="一间玩家可见的图书馆。",
+            visible_entities=(
+                VisibleEntity(
+                    id="entity_dynamic_7f3a",
+                    kind="object",
+                    name="红色书架",
+                    aliases=("书架",),
+                    description="一个玩家可见的红色木书架。",
                 ),
             ),
+        ),
+    )
+    return HostAgentContext(
+        player_input=player_input,
+        player_view=player_view,
+        recent_history=RecentTurnContext.empty(
+            player_input=player_input,
+            player_view=player_view,
         ),
     )
 
@@ -466,9 +473,16 @@ class QwenHostAgentAdapterTests(
         self.assertTrue(settings.include_usage)
         self.assertEqual(settings.extra_body, {"enable_thinking": False})
         self.assertEqual(settings.tool_choice, "auto")
-        self.assertIn("trpg-host-intent-v2", call["system_instructions"])
-        self.assertNotIn("GameState", call["input"])
-        self.assertNotIn("ModuleContent", call["input"])
+        self.assertIn("trpg-host-intent-v4", call["system_instructions"])
+        payload = json.loads(call["input"][0]["content"])
+        self.assertIn("engine_intent_contract", payload)
+        self.assertIn(
+            "module_action_vocabulary",
+            payload["engine_intent_contract"],
+        )
+        serialized_input = json.dumps(payload, ensure_ascii=False)
+        self.assertNotIn("GameState", serialized_input)
+        self.assertNotIn("ModuleContent", serialized_input)
         self.assertFalse(call["tracing"].include_data())
 
     async def test_single_tool_call_round_trips_safe_result(self) -> None:

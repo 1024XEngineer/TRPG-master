@@ -4,7 +4,7 @@ import { test } from 'node:test'
 
 import { makeSdk, registerPlayer } from './helpers.ts'
 
-test('世界标签、追书人发布元数据和玩家安全开局简介来自 1.0.2', async () => {
+test('世界标签、追书人发布元数据和玩家安全开局简介来自 1.0.3', async () => {
   const sdk = makeSdk()
   const games = await sdk.games.list()
   const coc = games.find((game) => game.name === '克苏鲁的呼唤')
@@ -19,7 +19,7 @@ test('世界标签、追书人发布元数据和玩家安全开局简介来自 1
   assert.ok(paperChase)
   assert.equal(paperChase.title, '追书人')
   assert.equal(paperChase.nameEn, 'Paper Chase')
-  assert.equal(paperChase.version, '1.0.2')
+  assert.equal(paperChase.version, '1.0.3')
   assert.equal(paperChase.playersMin, 1)
   assert.equal(paperChase.playersMax, 1)
   assert.equal(paperChase.estimatedDuration, '1-2 小时')

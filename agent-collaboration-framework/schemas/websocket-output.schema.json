@@ -2,6 +2,31 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "websocket-output.schema.json",
   "$defs": {
+    "ActionDeclarationOption": {
+      "additionalProperties": false,
+      "description": "Player-safe declaration id and semantic cues supplied by one checkpoint.",
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "semantic_hints": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Semantic Hints",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "semantic_hints"
+      ],
+      "title": "ActionDeclarationOption",
+      "type": "object"
+    },
     "ActorResourceView": {
       "additionalProperties": false,
       "properties": {
@@ -149,6 +174,14 @@
           ],
           "default": null,
           "title": "Difficulty"
+        },
+        "declaration_options": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ActionDeclarationOption"
+          },
+          "title": "Declaration Options",
+          "type": "array"
         }
       },
       "required": [

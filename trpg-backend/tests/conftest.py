@@ -16,7 +16,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from app.adapters import SqlAlchemyEngineStore
+from app.adapters import SqlAlchemyEngineStore, SqlAlchemyRecentHistorySource
 from app.controller import ws as ws_controller
 from app.core.db import Base, get_db
 from app.core.seed import ensure_seed_content
@@ -106,6 +106,11 @@ def engine_store_factory() -> Callable[..., SqlAlchemyEngineStore]:
         return SqlAlchemyEngineStore(TestSessionLocal, **kwargs)
 
     return factory
+
+
+@pytest.fixture
+def recent_history_source() -> SqlAlchemyRecentHistorySource:
+    return SqlAlchemyRecentHistorySource(TestSessionLocal)
 
 
 @pytest.fixture

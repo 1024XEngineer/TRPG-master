@@ -30,6 +30,7 @@ from collaboration_framework.host.application import (
     PlayerViewProjector,
     TurnExecutionError,
 )
+from collaboration_framework.host.schemas import RecentTurnContext
 from collaboration_framework.schema_export import rendered_schemas
 from pydantic import ValidationError
 
@@ -163,7 +164,7 @@ class UnifiedWorkflowTests(unittest.TestCase):
 
     def test_exported_schemas_match_pydantic_source(self) -> None:
         expected = rendered_schemas()
-        self.assertEqual(len(expected), 12)
+        self.assertEqual(len(expected), 13)
         self.assertIn("host-agent-context.schema.json", expected)
         self.assertIn("host-agent-usage.schema.json", expected)
         self.assertIn("host-agent-event.schema.json", expected)
@@ -499,7 +500,14 @@ class UnifiedWorkflowTests(unittest.TestCase):
                 action_id=case["case_id"],
                 utterance=case["utterance"],
             )
-            context = assembler.for_intent(player_input, view)
+            context = assembler.for_intent(
+                player_input,
+                view,
+                RecentTurnContext.empty(
+                    player_input=player_input,
+                    player_view=view,
+                ),
+            )
             raw = asyncio.run(model.generate(context))
             intent = parser.parse(raw, context)
             with self.subTest(case=case["case_id"]):

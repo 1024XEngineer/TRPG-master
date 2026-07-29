@@ -1,7 +1,16 @@
 """Pure assembly of model-visible contexts from already safe contracts."""
 
-from collaboration_framework.contracts import ActionResult, Intent, PlayerInput, PlayerView
-from collaboration_framework.host.schemas import IntentContext, NarrationContext
+from collaboration_framework.contracts import (
+    ActionResult,
+    Intent,
+    PlayerInput,
+    PlayerView,
+)
+from collaboration_framework.host.schemas import (
+    IntentContext,
+    NarrationContext,
+    RecentTurnContext,
+)
 
 
 class ContextAssembler:
@@ -9,8 +18,13 @@ class ContextAssembler:
         self,
         player_input: PlayerInput,
         player_view: PlayerView,
+        recent_history: RecentTurnContext,
     ) -> IntentContext:
-        return IntentContext(player_input=player_input, player_view=player_view)
+        return IntentContext(
+            player_input=player_input,
+            player_view=player_view,
+            recent_history=recent_history,
+        )
 
     def for_narration(
         self,
@@ -18,6 +32,7 @@ class ContextAssembler:
         intent: Intent,
         action_result: ActionResult,
         player_view: PlayerView,
+        recent_history: RecentTurnContext,
     ) -> NarrationContext:
         return NarrationContext(
             background=player_view.background,
@@ -25,4 +40,5 @@ class ContextAssembler:
             intent=intent,
             action_result=action_result,
             player_view=player_view,
+            recent_history=recent_history,
         )

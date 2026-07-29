@@ -53,13 +53,34 @@ class Intent(ContractModel):
     """Host semantic proposal; every valid instance is sent to ActionExecutor."""
 
     kind: IntentKind
-    verb: str = Field(min_length=1)
+    verb: str = Field(
+        min_length=1,
+        description=(
+            "Rule Engine action id. For a module check, copy the trusted "
+            "checkpoint action_hint exactly; never translate it."
+        ),
+    )
     target: IntentTarget
     check: CheckProposal
     approach: str | None = None
-    declarations: tuple[str, ...] = ()
-    initiated_by_target: bool = False
-    summary: str = Field(min_length=1)
+    declarations: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "Exact declaration option ids selected from the current trusted "
+            "module checkpoint; empty for non-module actions."
+        ),
+    )
+    initiated_by_target: bool = Field(
+        default=False,
+        description=(
+            "Authority-bearing Engine flag. It is always false for "
+            "player-submitted Intent."
+        ),
+    )
+    summary: str = Field(
+        min_length=1,
+        description="Short semantic summary; it is not an authoritative game fact.",
+    )
     clarification_question: str | None = None
 
     @model_validator(mode="after")

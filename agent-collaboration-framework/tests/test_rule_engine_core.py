@@ -80,6 +80,7 @@ def checkpoint_request(
     target_id: str,
     checkpoint_id: str,
     skills: tuple[str, ...] = (),
+    declarations: tuple[str, ...] = (),
     roll_value: int | None = None,
 ) -> ActionRequest:
     return ActionRequest(
@@ -96,6 +97,7 @@ def checkpoint_request(
                 checkpoint_id=checkpoint_id,
                 proposed_skills=skills,
             ),
+            declarations=declarations,
             summary=f"{verb} {target_id}",
         ),
         roll_value=roll_value,
@@ -362,6 +364,57 @@ class Coc7RuleKernelTests(unittest.TestCase):
             "unconscious_until_night",
             after_crypt.actors["pc_1"].conditions,
         )
+
+        prepared_state = paper_chase_state(self.module, scene_id="crypt")
+        prepared_state.entities["crypt_entrance"].update(
+            {
+                "discovered": True,
+                "slab_moved": True,
+            }
+        )
+        prepared_execution, after_prepared_entry = kernel.execute(
+            request=checkpoint_request(
+                request_id="enter_crypt_prepared",
+                revision="0",
+                verb="enter",
+                target_id="crypt_entrance",
+                checkpoint_id="enter_crypt",
+                declarations=("hold_breath",),
+            ),
+            module_content=self.module,
+            game_state=prepared_state,
+        )
+
+        self.assertEqual(prepared_execution.action_result.outcome, "success")
+        self.assertEqual(after_prepared_entry.scene_id, "conversation")
+        self.assertNotIn(
+            "unconscious_until_night",
+            after_prepared_entry.actors["pc_1"].conditions,
+        )
+
+        unauthorized_state = paper_chase_state(self.module, scene_id="crypt")
+        unauthorized_state.entities["crypt_entrance"].update(
+            {
+                "discovered": True,
+                "slab_moved": True,
+            }
+        )
+        with self.assertRaisesRegex(
+            ContractError,
+            "outside the checkpoint catalog",
+        ):
+            kernel.execute(
+                request=checkpoint_request(
+                    request_id="enter_crypt_unauthorized",
+                    revision="0",
+                    verb="enter",
+                    target_id="crypt_entrance",
+                    checkpoint_id="enter_crypt",
+                    declarations=("cover_nose",),
+                ),
+                module_content=self.module,
+                game_state=unauthorized_state,
+            )
 
         crowd_state = paper_chase_state(
             self.module,

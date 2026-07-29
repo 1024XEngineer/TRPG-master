@@ -120,10 +120,11 @@ Rule Engine 的 `GameState` 管理。
 | 字段 | 决议 |
 |---|---|
 | `id` / `scene_id` | Checkpoint 身份及所属场景 |
-| `action` | IntentParser 的语义提示，不是封闭动词白名单 |
+| `action` | 当前 Checkpoint 的 Engine 动作 id；投影为 `action_hint` 后由模型原样选择 |
 | `target_id` | 当前场景内的目标 Entity |
 | `skills` | 允许的标准技能 ID |
 | `difficulty` | `regular`、`hard`、`extreme` 或 `null`；`null` 表示运行时裁量 |
+| `declaration_options` | 当前 Checkpoint 可接受的动作声明；每项包含稳定 id 与玩家安全的 `semantic_hints` |
 | `outcomes` | 必须有 `success` 和 `failure`，可覆盖分级结果 |
 | `visibility` | Checkpoint 的受众和发现政策 |
 

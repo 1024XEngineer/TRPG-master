@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 
 import pytest
-
 from collaboration_framework.contracts import (
     PlayerInput,
     PlayerView,
@@ -23,40 +22,47 @@ from collaboration_framework.host.schemas import (
     HostAgentToolCompleted,
     HostAgentToolStarted,
     HostAgentUsage,
+    RecentTurnContext,
 )
 
 
 def context() -> HostAgentContext:
-    return HostAgentContext(
-        player_input=PlayerInput(
-            room_id="room",
-            player_id="player",
-            actor_id="actor",
-            client_action_id="action",
-            utterance="调查书架",
-        ),
-        player_view=PlayerView(
-            room_id="room",
-            player_id="player",
-            actor_id="actor",
-            background="玩家可见的测试背景。",
-            scene_id="library",
-            phase="playing",
-            revision="4",
-            self_actor=SelfActorView(id="actor", name="调查员"),
-            scene=SceneView(
-                id="library",
-                name="图书馆",
-                description="安静的图书馆。",
-                visible_entities=(
-                    VisibleEntity(
-                        id="shelf",
-                        kind="object",
-                        name="书架",
-                        description="一排旧书。",
-                    ),
+    player_input = PlayerInput(
+        room_id="room",
+        player_id="player",
+        actor_id="actor",
+        client_action_id="action",
+        utterance="调查书架",
+    )
+    player_view = PlayerView(
+        room_id="room",
+        player_id="player",
+        actor_id="actor",
+        background="玩家可见的测试背景。",
+        scene_id="library",
+        phase="playing",
+        revision="4",
+        self_actor=SelfActorView(id="actor", name="调查员"),
+        scene=SceneView(
+            id="library",
+            name="图书馆",
+            description="安静的图书馆。",
+            visible_entities=(
+                VisibleEntity(
+                    id="shelf",
+                    kind="object",
+                    name="书架",
+                    description="一排旧书。",
                 ),
             ),
+        ),
+    )
+    return HostAgentContext(
+        player_input=player_input,
+        player_view=player_view,
+        recent_history=RecentTurnContext.empty(
+            player_input=player_input,
+            player_view=player_view,
         ),
     )
 

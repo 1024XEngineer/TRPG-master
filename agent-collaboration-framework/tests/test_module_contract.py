@@ -134,6 +134,37 @@ class ModuleContentContractSmokeTests(unittest.TestCase):
             ModuleContent.model_validate(content.model_dump(mode="json")),
             content,
         )
+        enter_crypt = next(
+            item for item in content.checkpoints if item.id == "enter_crypt"
+        )
+        self.assertEqual(
+            [
+                (item.id, item.semantic_hints)
+                for item in enter_crypt.declaration_options
+            ],
+            [
+                (
+                    "hold_breath",
+                    ("屏住呼吸", "憋气", "hold breath"),
+                )
+            ],
+        )
+
+    def test_legacy_rule_declaration_without_checkpoint_option_remains_loadable(
+        self,
+    ) -> None:
+        payload = json.loads(PAPER_CHASE_MODULE.read_text(encoding="utf-8"))
+        enter_crypt = next(
+            item for item in payload["checkpoints"] if item["id"] == "enter_crypt"
+        )
+        enter_crypt["declaration_options"] = []
+
+        content = ModuleContent.model_validate(payload)
+
+        legacy_checkpoint = next(
+            item for item in content.checkpoints if item.id == "enter_crypt"
+        )
+        self.assertEqual(legacy_checkpoint.declaration_options, ())
 
     def test_player_presentation_rejects_invalid_range_and_empty_intro(self) -> None:
         payload = demo_payload()

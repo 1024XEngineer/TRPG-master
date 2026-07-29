@@ -3,8 +3,6 @@ from __future__ import annotations
 import json
 import unittest
 
-from pydantic import TypeAdapter, ValidationError
-
 from collaboration_framework.contracts import (
     PlayerInput,
     PlayerView,
@@ -22,9 +20,10 @@ from collaboration_framework.host.schemas import (
     HostAgentToolCompleted,
     HostAgentToolStarted,
     HostAgentUsage,
+    RecentTurnContext,
 )
 from collaboration_framework.schema_export import rendered_schemas
-
+from pydantic import TypeAdapter, ValidationError
 
 RAW_INTENT_CANDIDATE = {
     "kind": "unknown",
@@ -123,14 +122,18 @@ class HostAgentSchemaTests(unittest.TestCase):
         context = HostAgentContext(
             player_input=self.player_input,
             player_view=self.player_view,
+            recent_history=RecentTurnContext.empty(
+                player_input=self.player_input,
+                player_view=self.player_view,
+            ),
         )
         self.assertEqual(
             set(HostAgentContext.model_fields),
-            {"player_input", "player_view"},
+            {"player_input", "player_view", "recent_history"},
         )
         self.assertEqual(
             set(context.to_json_dict()),
-            {"player_input", "player_view"},
+            {"player_input", "player_view", "recent_history"},
         )
 
         with self.assertRaises(ValidationError):
@@ -138,6 +141,10 @@ class HostAgentSchemaTests(unittest.TestCase):
                 {
                     "player_input": self.player_input,
                     "player_view": self.player_view,
+                    "recent_history": RecentTurnContext.empty(
+                        player_input=self.player_input,
+                        player_view=self.player_view,
+                    ),
                     "game_state": {},
                 }
             )
@@ -152,6 +159,10 @@ class HostAgentSchemaTests(unittest.TestCase):
                     HostAgentContext(
                         player_input=self.player_input,
                         player_view=mismatched_view,
+                        recent_history=RecentTurnContext.empty(
+                            player_input=self.player_input,
+                            player_view=self.player_view,
+                        ),
                     )
 
     def test_usage_distinguishes_unreported_tokens_from_reported_zero(self) -> None:
@@ -316,8 +327,9 @@ class HostAgentSchemaTests(unittest.TestCase):
         self.assertFalse(context_schema["additionalProperties"])
         self.assertEqual(
             set(context_schema["properties"]),
-            {"player_input", "player_view"},
+            {"player_input", "player_view", "recent_history"},
         )
+        self.assertIn("recent-turn-context.schema.json", schemas)
 
         usage_schema = json.loads(schemas["host-agent-usage.schema.json"])
         self.assertIsNone(usage_schema["properties"]["input_tokens"]["default"])
@@ -342,15 +354,21 @@ class FakeHostAgentTests(
     unittest.IsolatedAsyncioTestCase,
 ):
     def setUp(self) -> None:
+        player_input = PlayerInput(
+            room_id="room_001",
+            player_id="player_001",
+            actor_id="actor_001",
+            client_action_id="action_001",
+            utterance="检查书架",
+        )
+        player_view = make_player_view()
         self.context = HostAgentContext(
-            player_input=PlayerInput(
-                room_id="room_001",
-                player_id="player_001",
-                actor_id="actor_001",
-                client_action_id="action_001",
-                utterance="检查书架",
+            player_input=player_input,
+            player_view=player_view,
+            recent_history=RecentTurnContext.empty(
+                player_input=player_input,
+                player_view=player_view,
             ),
-            player_view=make_player_view(),
         )
 
     async def test_fake_emits_tool_progress_then_completed(self) -> None:

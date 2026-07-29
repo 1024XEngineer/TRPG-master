@@ -108,12 +108,28 @@ class ProjectionKnownInformation(ContractModel):
     scope: Literal["actor", "party"]
 
 
+class ProjectionActionDeclarationOption(ContractModel):
+    id: str = Field(min_length=1)
+    semantic_hints: tuple[str, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_semantic_hints(self) -> ProjectionActionDeclarationOption:
+        _validate_semantic_hints(self.semantic_hints)
+        return self
+
+
 class ProjectionCheckpointOption(ContractModel):
     id: str = Field(min_length=1)
     target_id: str = Field(min_length=1)
     action_hint: str = Field(min_length=1)
     skills: tuple[str, ...] = ()
     difficulty: Literal["regular", "hard", "extreme"] | None = None
+    declaration_options: tuple[ProjectionActionDeclarationOption, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_declaration_options(self) -> ProjectionCheckpointOption:
+        _validate_declaration_option_ids(self.declaration_options)
+        return self
 
 
 class ProjectionSnapshot(ContractModel):
@@ -238,6 +254,18 @@ class KnownInformationView(ContractModel):
     scope: Literal["actor", "party"]
 
 
+class ActionDeclarationOption(ContractModel):
+    """Player-safe declaration id and semantic cues supplied by one checkpoint."""
+
+    id: str = Field(min_length=1)
+    semantic_hints: tuple[str, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_semantic_hints(self) -> ActionDeclarationOption:
+        _validate_semantic_hints(self.semantic_hints)
+        return self
+
+
 class CheckpointOption(ContractModel):
     """Trusted candidate menu exposed to the host semantic matcher."""
 
@@ -246,6 +274,12 @@ class CheckpointOption(ContractModel):
     action_hint: str = Field(min_length=1)
     skills: tuple[str, ...] = ()
     difficulty: Literal["regular", "hard", "extreme"] | None = None
+    declaration_options: tuple[ActionDeclarationOption, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_declaration_options(self) -> CheckpointOption:
+        _validate_declaration_option_ids(self.declaration_options)
+        return self
 
 
 class PlayerView(ContractModel):
@@ -276,3 +310,17 @@ class PlayerView(ContractModel):
         if self.self_actor.id != self.actor_id or self.scene.id != self.scene_id:
             raise ValueError("PlayerView actor/scene scope 不一致")
         return self
+
+
+def _validate_semantic_hints(hints: tuple[str, ...]) -> None:
+    normalized = [item.strip().casefold() for item in hints]
+    if any(not item for item in normalized):
+        raise ValueError("Action declaration semantic_hints 不得为空")
+    if len(normalized) != len(set(normalized)):
+        raise ValueError("Action declaration semantic_hints 必须唯一")
+
+
+def _validate_declaration_option_ids(options: tuple[object, ...]) -> None:
+    ids = [getattr(item, "id", None) for item in options]
+    if len(ids) != len(set(ids)):
+        raise ValueError("Checkpoint declaration option id 必须唯一")

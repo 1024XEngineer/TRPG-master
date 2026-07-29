@@ -29,6 +29,31 @@
       "title": "AbsorbOperationSpec",
       "type": "object"
     },
+    "ActionDeclarationOptionSpec": {
+      "additionalProperties": false,
+      "description": "Player-safe semantic candidate that an Intent may explicitly declare.",
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "semantic_hints": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Semantic Hints",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "semantic_hints"
+      ],
+      "title": "ActionDeclarationOptionSpec",
+      "type": "object"
+    },
     "AddOperationSpec": {
       "additionalProperties": false,
       "properties": {
@@ -316,6 +341,14 @@
           ],
           "default": null,
           "title": "Difficulty"
+        },
+        "declaration_options": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ActionDeclarationOptionSpec"
+          },
+          "title": "Declaration Options",
+          "type": "array"
         },
         "outcomes": {
           "$ref": "#/$defs/CheckpointOutcomesSpec"

@@ -21,9 +21,9 @@ from collaboration_framework.host.schemas import (
     HostAgentEventSchema,
     HostAgentUsage,
     NarrationOutput,
+    RecentTurnContext,
     WebSocketOutput,
 )
-
 
 SCHEMA_MODELS: dict[str, type[BaseModel]] = {
     "module-content.schema.json": ModuleContent,
@@ -38,6 +38,7 @@ SCHEMA_MODELS: dict[str, type[BaseModel]] = {
     "host-agent-context.schema.json": HostAgentContext,
     "host-agent-usage.schema.json": HostAgentUsage,
     "host-agent-event.schema.json": HostAgentEventSchema,
+    "recent-turn-context.schema.json": RecentTurnContext,
 }
 
 

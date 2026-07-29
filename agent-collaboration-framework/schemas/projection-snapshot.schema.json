@@ -3,6 +3,30 @@
   "$id": "projection-snapshot.schema.json",
   "$defs": {
     "JsonValue": {},
+    "ProjectionActionDeclarationOption": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "semantic_hints": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Semantic Hints",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "semantic_hints"
+      ],
+      "title": "ProjectionActionDeclarationOption",
+      "type": "object"
+    },
     "ProjectionActorResource": {
       "additionalProperties": false,
       "properties": {
@@ -149,6 +173,14 @@
           ],
           "default": null,
           "title": "Difficulty"
+        },
+        "declaration_options": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ProjectionActionDeclarationOption"
+          },
+          "title": "Declaration Options",
+          "type": "array"
         }
       },
       "required": [

@@ -9,7 +9,7 @@ from pathlib import Path
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 PREVIOUS_REVISION = "1a02058345ee"
 ENGINE_IDENTITY_PREVIOUS_REVISION = "9c4e7a2b1d6f"
-HEAD_REVISION = "2e4d6c7a8b90"
+HEAD_REVISION = "3f8a1c2d4e5f"
 
 
 def _run_alembic(database: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -92,6 +92,12 @@ def test_migration_upgrades_empty_sqlite_and_round_trips(tmp_path: Path) -> None
     assert "module_version" in _column_names(database, "rooms")
     assert "version" in _column_names(database, "characters")
     assert "correlation_id" in _column_names(database, "events")
+    assert {
+        "visibility",
+        "actor_id",
+        "scene_id",
+        "view_revision",
+    }.issubset(_column_names(database, "events"))
     assert ("room_id", "event_type", "correlation_id") in _unique_column_sets(database, "events")
 
     downgrade = _run_alembic(database, "downgrade", PREVIOUS_REVISION)
@@ -105,6 +111,70 @@ def test_migration_upgrades_empty_sqlite_and_round_trips(tmp_path: Path) -> None
     with sqlite3.connect(database) as connection:
         revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
     assert revision == (HEAD_REVISION,)
+
+
+def test_recent_history_migration_backfills_visibility_conservatively(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "recent-history-backfill.db"
+    _upgrade_or_fail(database, "2e4d6c7a8b90")
+    rows = [
+        ("70000000-0000-0000-0000-000000000001", "action.broadcast", "a", "player-1"),
+        ("70000000-0000-0000-0000-000000000002", "check.result", "b", "player-1"),
+        ("70000000-0000-0000-0000-000000000003", "narration.push", None, None),
+        ("70000000-0000-0000-0000-000000000004", "narration.push", "c", "player-1"),
+        ("70000000-0000-0000-0000-000000000005", "unknown", "d", "player-1"),
+        ("70000000-0000-0000-0000-000000000006", "unknown", "e", None),
+    ]
+    with sqlite3.connect(database) as connection:
+        connection.executemany(
+            """
+            INSERT INTO events (
+                id, room_id, player_id, event_type, correlation_id, payload, created_at
+            ) VALUES (?, 'room-1', ?, ?, ?, '{}', '2026-07-29 00:00:00')
+            """,
+            [
+                (event_id, player_id, event_type, correlation_id)
+                for event_id, event_type, correlation_id, player_id in rows
+            ],
+        )
+
+    _upgrade_or_fail(database, "head")
+    with sqlite3.connect(database) as connection:
+        visibility = dict(
+            connection.execute("SELECT id, visibility FROM events ORDER BY id").fetchall()
+        )
+        indexes = {row[1] for row in connection.execute("PRAGMA index_list('events')")}
+        try:
+            connection.execute(
+                """
+                INSERT INTO events (
+                    id, room_id, player_id, event_type, correlation_id,
+                    visibility, payload, created_at
+                ) VALUES (
+                    '70000000-0000-0000-0000-000000000007',
+                    'room-1', NULL, 'check.result', 'f',
+                    'player_scoped', '{}', '2026-07-29 00:00:00'
+                )
+                """
+            )
+        except sqlite3.IntegrityError:
+            pass
+        else:
+            raise AssertionError("player_scoped event without player_id must fail")
+
+    assert list(visibility.values()) == [
+        "public",
+        "player_scoped",
+        "public",
+        "player_scoped",
+        "player_scoped",
+        "public",
+    ]
+    assert {
+        "ix_events_room_created",
+        "ix_events_room_visibility_player_created",
+    }.issubset(indexes)
 
 
 def test_migration_rejects_duplicate_characters_before_ddl(tmp_path: Path) -> None:

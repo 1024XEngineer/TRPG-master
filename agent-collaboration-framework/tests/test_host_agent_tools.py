@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError
-from io import StringIO
 import json
 import logging
 import unittest
+from dataclasses import FrozenInstanceError
+from io import StringIO
 
 from collaboration_framework.contracts import (
+    ActionDeclarationOption,
     CheckpointOption,
     ContractModel,
     PlayerInput,
@@ -20,99 +21,111 @@ from collaboration_framework.host.schemas import (
     GetVisibleEntityArgs,
     GetVisibleEntityResult,
     HostAgentContext,
+    RecentTurnContext,
     SearchVisibleEntitiesArgs,
     SearchVisibleEntitiesResult,
     ToolErrorResult,
 )
 from collaboration_framework.host.tools import build_player_view_tool_registry
 
-
 SECRET = "SECRET_SENTINEL_DO_NOT_LEAK"
 
 
 def make_context() -> HostAgentContext:
-    return HostAgentContext(
-        player_input=PlayerInput(
-            room_id="room_001",
-            player_id="player_001",
-            actor_id="actor_001",
-            client_action_id="action_001",
-            utterance="检查书架",
+    player_input = PlayerInput(
+        room_id="room_001",
+        player_id="player_001",
+        actor_id="actor_001",
+        client_action_id="action_001",
+        utterance="检查书架",
+    )
+    player_view = PlayerView(
+        room_id="room_001",
+        player_id="player_001",
+        actor_id="actor_001",
+        background="玩家可见的测试背景。",
+        scene_id="library",
+        phase="playing",
+        revision="7",
+        self_actor=SelfActorView(id="actor_001", name="Investigator"),
+        scene=SceneView(
+            id="library",
+            name="Library",
+            description="A player-safe library.",
+            visible_entities=(
+                VisibleEntity(
+                    id="entity_b",
+                    kind="object",
+                    name="Ancient Shelf",
+                    aliases=("Bookcase",),
+                    description="Old oak furniture.",
+                ),
+                VisibleEntity(
+                    id="entity_a",
+                    kind="location",
+                    name="Shelf Door",
+                    description="A narrow exit.",
+                ),
+                VisibleEntity(
+                    id="entity_c",
+                    kind="object",
+                    name="Locked Cabinet",
+                    aliases=("Book Shelf",),
+                    description="Its doors are locked.",
+                ),
+                VisibleEntity(
+                    id="entity_d",
+                    kind="npc",
+                    name="Curator",
+                    description="Dust from a shelf marks their coat.",
+                ),
+                VisibleEntity(
+                    id="entity_e",
+                    kind="location",
+                    name="ＲＥＤ   Door",
+                    description="A painted doorway.",
+                ),
+                VisibleEntity(
+                    id="entity_f",
+                    kind="object",
+                    name="Reading Desk",
+                    description="A plain writing desk.",
+                ),
+            ),
         ),
-        player_view=PlayerView(
-            room_id="room_001",
-            player_id="player_001",
-            actor_id="actor_001",
-            background="玩家可见的测试背景。",
-            scene_id="library",
-            phase="playing",
-            revision="7",
-            self_actor=SelfActorView(id="actor_001", name="Investigator"),
-            scene=SceneView(
-                id="library",
-                name="Library",
-                description="A player-safe library.",
-                visible_entities=(
-                    VisibleEntity(
-                        id="entity_b",
-                        kind="object",
-                        name="Ancient Shelf",
-                        aliases=("Bookcase",),
-                        description="Old oak furniture.",
-                    ),
-                    VisibleEntity(
-                        id="entity_a",
-                        kind="location",
-                        name="Shelf Door",
-                        description="A narrow exit.",
-                    ),
-                    VisibleEntity(
-                        id="entity_c",
-                        kind="object",
-                        name="Locked Cabinet",
-                        aliases=("Book Shelf",),
-                        description="Its doors are locked.",
-                    ),
-                    VisibleEntity(
-                        id="entity_d",
-                        kind="npc",
-                        name="Curator",
-                        description="Dust from a shelf marks their coat.",
-                    ),
-                    VisibleEntity(
-                        id="entity_e",
-                        kind="location",
-                        name="ＲＥＤ   Door",
-                        description="A painted doorway.",
-                    ),
-                    VisibleEntity(
-                        id="entity_f",
-                        kind="object",
-                        name="Reading Desk",
-                        description="A plain writing desk.",
+        checkpoint_options=(
+            CheckpointOption(
+                id="checkpoint_z",
+                target_id="entity_b",
+                action_hint="inspect",
+                skills=("spot_hidden",),
+                declaration_options=(
+                    ActionDeclarationOption(
+                        id="use_magnifier",
+                        semantic_hints=("使用放大镜", "借助放大镜"),
                     ),
                 ),
             ),
-            checkpoint_options=(
-                CheckpointOption(
-                    id="checkpoint_z",
-                    target_id="entity_b",
-                    action_hint="inspect",
-                    skills=("spot_hidden",),
-                ),
-                CheckpointOption(
-                    id="checkpoint_other",
-                    target_id="entity_c",
-                    action_hint="open",
-                    skills=("lockpick",),
-                ),
-                CheckpointOption(
-                    id="checkpoint_a",
-                    target_id="entity_b",
-                    action_hint="search",
-                    skills=("investigation",),
-                ),
+            CheckpointOption(
+                id="checkpoint_other",
+                target_id="entity_c",
+                action_hint="open",
+                skills=("lockpick",),
             ),
+            CheckpointOption(
+                id="checkpoint_a",
+                target_id="entity_b",
+                action_hint="search",
+                skills=("investigation",),
+            ),
+        ),
+    )
+    return HostAgentContext(
+        player_input=player_input,
+        player_view=player_view,
+        recent_history=RecentTurnContext.empty(
+            player_input=player_input,
+            player_view=player_view,
         ),
     )
 
@@ -401,6 +414,9 @@ class VisibleEntityToolTests(unittest.IsolatedAsyncioTestCase):
             [option.id for option in result.checkpoint_options],
             ["checkpoint_a", "checkpoint_z"],
         )
+        declaration = result.checkpoint_options[1].declaration_options[0]
+        self.assertEqual(declaration.id, "use_magnifier")
+        self.assertEqual(declaration.semantic_hints, ("使用放大镜", "借助放大镜"))
         self.assertNotIn("checkpoint_other", result.model_dump_json())
 
     async def test_get_rejects_scope_fields_and_missing_id(self) -> None:

@@ -10,6 +10,7 @@ from collaboration_framework.contracts import (
     ContractError,
     NarrativeDetailSpec,
     PlayerInput,
+    ProjectionActionDeclarationOption,
     ProjectionActorResource,
     ProjectionActorValue,
     ProjectionAvailableExit,
@@ -249,6 +250,13 @@ class RuleEngineService:
                     action_hint=checkpoint.action,
                     skills=checkpoint.skills,
                     difficulty=checkpoint.difficulty,
+                    declaration_options=tuple(
+                        ProjectionActionDeclarationOption(
+                            id=declaration.id,
+                            semantic_hints=declaration.semantic_hints,
+                        )
+                        for declaration in checkpoint.declaration_options
+                    ),
                 )
                 for checkpoint in module.checkpoints
                 if checkpoint.id in scene.checkpoint_ids

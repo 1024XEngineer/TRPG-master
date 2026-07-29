@@ -19,6 +19,7 @@ from collaboration_framework.engine import (
     create_initial_game_state,
     require_runtime_capabilities,
 )
+from collaboration_framework.host.application import normalize_narration_text
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -908,6 +909,15 @@ async def get_module_detail(db: AsyncSession, module_id: str) -> ModuleDetailRea
 # ── 复盘 / 事件回放 ──────────────────────────────────────
 
 
+def _player_visible_event_payload(event_type: str, payload: dict) -> dict:
+    """Return a display-safe copy without rewriting the stored event payload."""
+
+    visible_payload = deepcopy(payload)
+    if event_type == "narration.push" and isinstance(visible_payload.get("text"), str):
+        visible_payload["text"] = normalize_narration_text(visible_payload["text"])
+    return visible_payload
+
+
 async def record_event(
     db: AsyncSession,
     room_id: str,
@@ -962,7 +972,15 @@ async def get_replay(
     result = await db.scalars(
         select(Event).where(Event.room_id == room_id).order_by(Event.created_at)
     )
-    return [ReplayEventRead.model_validate(e) for e in result]
+    replay: list[ReplayEventRead] = []
+    for event in result:
+        item = ReplayEventRead.model_validate(event)
+        replay.append(
+            item.model_copy(
+                update={"payload": _player_visible_event_payload(event.event_type, event.payload)}
+            )
+        )
+    return replay
 
 
 async def list_conversation_events(
@@ -1032,7 +1050,7 @@ async def list_conversation_events(
                     id=event.correlation_id or event.id,
                     type="narration.push",
                     channel="action",
-                    payload=event.payload,
+                    payload=_player_visible_event_payload(event.event_type, event.payload),
                     created_at=event.created_at,
                 )
             )

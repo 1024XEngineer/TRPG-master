@@ -93,6 +93,12 @@ class NarrationValidationError(ContractError):
         self.reason = reason
 
 
+def normalize_narration_text(text: str) -> str:
+    """Convert model-emitted literal newline escapes to canonical LF characters."""
+
+    return text.replace("\\r\\n", "\n").replace("\\n", "\n").replace("\\r", "\n")
+
+
 def narration_text_rejection_reason(
     text: str,
 ) -> Literal["protocol_tail", "schema_fragment"] | None:
@@ -133,6 +139,8 @@ class Narrator:
 
     async def narrate(self, context: NarrationContext) -> NarrationOutput:
         raw = await self._model.generate(context)
+        if isinstance(raw, dict) and isinstance(raw.get("text"), str):
+            raw = {**raw, "text": normalize_narration_text(raw["text"])}
         try:
             output = NarrationOutput.model_validate(raw)
         except (TypeError, ValueError) as exc:

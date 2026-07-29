@@ -38,7 +38,10 @@ import anyio
 import structlog
 from collaboration_framework.contracts import ActionResult, ContractError, PlayerView
 from collaboration_framework.engine import RevisionConflictError
-from collaboration_framework.host.application import TurnExecutionError
+from collaboration_framework.host.application import (
+    TurnExecutionError,
+    normalize_narration_text,
+)
 from collaboration_framework.host.schemas import TurnOutput
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
@@ -213,6 +216,7 @@ async def _broadcast_narration(
     /rooms/{roomId}/replay` 读的就是这里写入的数据（issue #77 才打通的
     EventLog 闭环，此前"不记 EventLog"是已知缺口）。
     """
+    text = normalize_narration_text(text)
     narration = NarrationPushPayload(text=text)
     envelope = ServerEnvelope(type="narration.push", payload=narration.model_dump(by_alias=True))
     await room_service.record_event(db, room_id, player_id, "narration.push", {"text": text})
@@ -237,6 +241,7 @@ async def _deliver_turn_narration(
 ) -> bool:
     """持久化去重成功后才发送一次动作叙事。"""
 
+    text = normalize_narration_text(text)
     recorded = await room_service.record_event(
         db,
         room_id,

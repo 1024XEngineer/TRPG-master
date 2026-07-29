@@ -5,7 +5,7 @@ from .host_agent_intent_resolver import (
     TurnExecutionError,
 )
 from .intent_parser import IntentParser, validate_intent_against_view
-from .narrator import NarrationValidationError, Narrator
+from .narrator import NarrationValidationError, Narrator, normalize_narration_text
 from .orchestrator import Orchestrator
 from .player_view_projector import PlayerViewProjector
 from .tool_registry import (
@@ -31,5 +31,6 @@ __all__ = [
     "ToolHandler",
     "ToolRegistry",
     "TurnExecutionError",
+    "normalize_narration_text",
     "validate_intent_against_view",
 ]

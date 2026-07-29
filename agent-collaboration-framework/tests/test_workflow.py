@@ -294,6 +294,38 @@ class UnifiedWorkflowTests(unittest.TestCase):
         self.assertEqual(failed.exception.reason, "fact_scope")
         self.assertEqual(engine.execute_calls, 1)
 
+    def test_narrator_normalizes_literal_newlines_before_returning_output(self) -> None:
+        narrator = StaticNarrationModel(
+            {
+                "kind": "narration",
+                "text": "第一段\\r\\n第二段\\n第三段\\r第四段",
+                "claimed_fact_ids": [],
+                "suggested_actions": [],
+            }
+        )
+        orchestrator, _, _ = self.application(narration_model=narrator)
+
+        output = self.run_turn(orchestrator)
+
+        self.assertEqual(output.narration.text, "第一段\n第二段\n第三段\n第四段")
+
+    def test_narrator_checks_protocol_tail_after_newline_normalization(self) -> None:
+        narrator = StaticNarrationModel(
+            {
+                "kind": "narration",
+                "text": "托马斯说完便沉默。\\nclaimed_fact_ids: []",
+                "claimed_fact_ids": [],
+                "suggested_actions": [],
+            }
+        )
+        orchestrator, engine, _ = self.application(narration_model=narrator)
+
+        with self.assertRaises(NarrationValidationError) as failed:
+            self.run_turn(orchestrator)
+
+        self.assertEqual(failed.exception.reason, "protocol_tail")
+        self.assertEqual(engine.execute_calls, 1)
+
     def test_host_semantic_checkpoint_choice_is_not_rejected_by_verb_equality(
         self,
     ) -> None:

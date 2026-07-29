@@ -1,7 +1,7 @@
 import { useNavigate } from 'react-router-dom'
 import { TurnFailedError, type AgentPlayerView, type AgentTurnPhase, type CheckRequestPayload, type RoomConversationEvent } from 'trpg-sdk'
 import { ArrowLeft, Users, Map, BookOpen, ScrollText, Star, X, SendHorizontal, Dice6, Plus, Save, FlagOff, Heart } from 'lucide-react'
-import { useState, useRef, useEffect, type FormEvent } from 'react'
+import { useState, useRef, useEffect, type Dispatch, type FormEvent, type SetStateAction } from 'react'
 import { useRoomStore } from '@/stores/room-store'
 import { useAuthStore } from '@/stores/auth-store'
 import { useCharacterStore } from '@/stores/character-store'
@@ -214,6 +214,32 @@ const DICE_OPTIONS = [
 
 type DiceType = typeof DICE_OPTIONS[number]['id']
 
+type PendingCheckDiceState = {
+  clientActionId: string
+  selectedSkillId: string | null
+  shakeLevel: number
+  result: number | null
+  rolling: boolean
+  showResult: boolean
+  tens: number
+  ones: number
+  submitted: boolean
+}
+
+function createPendingCheckDiceState(checkRequest: CheckRequestPayload): PendingCheckDiceState {
+  return {
+    clientActionId: checkRequest.clientActionId,
+    selectedSkillId: checkRequest.skills[0]?.id ?? null,
+    shakeLevel: 0,
+    result: null,
+    rolling: false,
+    showResult: false,
+    tens: 0,
+    ones: 0,
+    submitted: false,
+  }
+}
+
 const DIFFICULTY_COLORS: Record<string, string> = {
   crit: '#5aaa5a',
   success: '#4a8a4a',
@@ -246,7 +272,7 @@ function BottomPanel({ open, onClose, title, children, heightVh }: { open: boole
         </div>
         <div className="flex items-center justify-between px-5 pt-2 pb-3">
           <h3 className="text-base font-bold text-text-primary">{title}</h3>
-          <button onClick={onClose} className="w-7 h-7 rounded-full bg-panel flex items-center justify-center active:scale-90 transition-transform">
+          <button aria-label="关闭面板" onClick={onClose} className="w-7 h-7 rounded-full bg-panel flex items-center justify-center active:scale-90 transition-transform">
             <X className="w-4 h-4 text-text-muted" strokeWidth={2.5} />
           </button>
         </div>
@@ -268,56 +294,128 @@ function DiceModal({
   onClose,
   onResult,
   checkRequest,
+  checkDiceState,
+  setCheckDiceState,
 }: {
   open: boolean
   onClose: () => void
   onResult: (result: number, diceType: DiceType, skillId?: string) => void
   checkRequest: CheckRequestPayload | null
+  checkDiceState: PendingCheckDiceState | null
+  setCheckDiceState: Dispatch<SetStateAction<PendingCheckDiceState | null>>
 }) {
-  const [diceType, setDiceType] = useState<DiceType>('d100')
-  const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null)
-  const [shakeLevel, setShakeLevel] = useState(0)
-  const [result, setResult] = useState<number | null>(null)
-  const [rolling, setRolling] = useState(false)
-  const [showResult, setShowResult] = useState(false)
-  const [tens, setTens] = useState(0)
-  const [ones, setOnes] = useState(0)
+  const [freeDiceType, setFreeDiceType] = useState<DiceType>('d100')
+  const [freeShakeLevel, setFreeShakeLevel] = useState(0)
+  const [freeResult, setFreeResult] = useState<number | null>(null)
+  const [freeRolling, setFreeRolling] = useState(false)
+  const [freeShowResult, setFreeShowResult] = useState(false)
+  const [freeTens, setFreeTens] = useState(0)
+  const [freeOnes, setFreeOnes] = useState(0)
   const tableRef = useRef<HTMLDivElement>(null)
   const isGrabbed = useRef(false)
   const directionChanges = useRef(0)
   const lastDirX = useRef(0)
   const lastDirY = useRef(0)
+  const submitLockRef = useRef(false)
 
   useEffect(() => {
-    if (open) {
-      setDiceType('d100')
-      setSelectedSkillId(checkRequest?.skills[0]?.id ?? null)
-      setResult(null)
-      setShowResult(false)
-      setRolling(false)
-      setShakeLevel(0)
+    if (!checkRequest) {
+      submitLockRef.current = false
+      return
+    }
+    if (!checkDiceState || checkDiceState.clientActionId !== checkRequest.clientActionId) {
+      setCheckDiceState(createPendingCheckDiceState(checkRequest))
+      submitLockRef.current = false
+      return
+    }
+    submitLockRef.current = checkDiceState.submitted
+  }, [checkRequest, checkDiceState, setCheckDiceState])
+
+  useEffect(() => {
+    if (open && !checkRequest) {
+      setFreeDiceType('d100')
+      setFreeShakeLevel(0)
+      setFreeResult(null)
+      setFreeRolling(false)
+      setFreeShowResult(false)
+      setFreeTens(0)
+      setFreeOnes(0)
+      submitLockRef.current = false
     }
   }, [open, checkRequest])
 
+  const isCheckMode = Boolean(checkRequest)
+  const activeCheckDice = checkRequest ? checkDiceState : null
+  const activeDiceType: DiceType = isCheckMode ? 'd100' : freeDiceType
+  const activeShakeLevel = isCheckMode ? activeCheckDice?.shakeLevel ?? 0 : freeShakeLevel
+  const activeResult = isCheckMode ? activeCheckDice?.result ?? null : freeResult
+  const activeRolling = isCheckMode ? activeCheckDice?.rolling ?? false : freeRolling
+  const activeShowResult = isCheckMode ? activeCheckDice?.showResult ?? false : freeShowResult
+  const activeTens = isCheckMode ? activeCheckDice?.tens ?? 0 : freeTens
+  const activeOnes = isCheckMode ? activeCheckDice?.ones ?? 0 : freeOnes
+  const activeSelectedSkillId = isCheckMode
+    ? activeCheckDice?.selectedSkillId ?? checkRequest?.skills[0]?.id ?? null
+    : null
   const selectedSkill =
-    checkRequest?.skills.find((skill) => skill.id === selectedSkillId) ?? null
+    checkRequest?.skills.find((skill) => skill.id === activeSelectedSkillId) ?? null
   const targetValue = selectedSkill?.targetValue ?? 65
+  const canEditCheck = isCheckMode && !activeRolling && !activeShowResult && activeResult === null && !activeCheckDice?.submitted
+
+  const updateCheckDiceState = (updater: (current: PendingCheckDiceState) => PendingCheckDiceState) => {
+    if (!checkRequest) return
+    setCheckDiceState((current) => {
+      if (!current || current.clientActionId !== checkRequest.clientActionId) return current
+      return updater(current)
+    })
+  }
 
   const roll = (power: number) => {
-    setRolling(true)
-    setShowResult(false)
+    if (isCheckMode) {
+      if (!checkRequest || !activeCheckDice || activeCheckDice.result !== null || activeCheckDice.submitted || activeCheckDice.rolling) return
+      const requestId = checkRequest.clientActionId
+      updateCheckDiceState((current) => ({
+        ...current,
+        rolling: true,
+        showResult: false,
+      }))
+
+      const tens = Math.floor(Math.random() * 10)
+      const ones = Math.floor(Math.random() * 10)
+      let finalResult = tens * 10 + ones
+      if (finalResult === 0) finalResult = 100
+
+      const dur = 500 + power * 100
+      setTimeout(() => {
+        setCheckDiceState((current) => {
+          if (!current || current.clientActionId !== requestId) return current
+          return {
+            ...current,
+            result: finalResult,
+            showResult: true,
+            rolling: false,
+            tens,
+            ones,
+          }
+        })
+      }, dur)
+      return
+    }
+
+    setFreeRolling(true)
+    setFreeShowResult(false)
 
     let finalResult: number
-    let t = 0, o = 0
+    let tens = 0
+    let ones = 0
 
-    if (diceType === 'd100') {
-      t = Math.floor(Math.random() * 10)
-      o = Math.floor(Math.random() * 10)
-      finalResult = t * 10 + o
+    if (freeDiceType === 'd100') {
+      tens = Math.floor(Math.random() * 10)
+      ones = Math.floor(Math.random() * 10)
+      finalResult = tens * 10 + ones
       if (finalResult === 0) finalResult = 100
-      setTens(t)
-      setOnes(o)
-    } else if (diceType === 'd20') {
+      setFreeTens(tens)
+      setFreeOnes(ones)
+    } else if (freeDiceType === 'd20') {
       finalResult = Math.floor(Math.random() * 20) + 1
     } else {
       finalResult = Math.floor(Math.random() * 6) + 1
@@ -325,19 +423,26 @@ function DiceModal({
 
     const dur = 500 + power * 100
     setTimeout(() => {
-      setResult(finalResult)
-      setShowResult(true)
-      setRolling(false)
+      setFreeResult(finalResult)
+      setFreeShowResult(true)
+      setFreeRolling(false)
     }, dur)
   }
 
   const handleMouseDown = () => {
-    if (rolling || showResult) return
+    if (activeRolling || activeShowResult || (isCheckMode && activeResult !== null)) return
     isGrabbed.current = true
     directionChanges.current = 0
     lastDirX.current = 0
     lastDirY.current = 0
-    setShakeLevel(0)
+    if (isCheckMode) {
+      updateCheckDiceState((current) => ({
+        ...current,
+        shakeLevel: 0,
+      }))
+    } else {
+      setFreeShakeLevel(0)
+    }
   }
 
   const handleMouseMove = (e: React.MouseEvent | React.TouchEvent) => {
@@ -358,43 +463,62 @@ function DiceModal({
       lastDirY.current = dirY
 
       const level = Math.min(5, Math.floor(directionChanges.current / 2.5))
-      setShakeLevel(level)
+      if (isCheckMode) {
+        updateCheckDiceState((current) => ({
+          ...current,
+          shakeLevel: level,
+        }))
+      } else {
+        setFreeShakeLevel(level)
+      }
     }
   }
 
   const handleMouseUp = () => {
     if (!isGrabbed.current) return
     isGrabbed.current = false
-    if (shakeLevel >= 1) {
-      roll(shakeLevel)
+    if (activeShakeLevel >= 1) {
+      roll(activeShakeLevel)
     } else {
       roll(1)
     }
   }
 
   const confirmResult = () => {
-    if (result === null) return
-    if (checkRequest && !selectedSkillId) return
-    onResult(result, diceType, selectedSkillId ?? undefined)
+    if (isCheckMode) {
+      if (!checkRequest || !activeCheckDice || activeResult === null || !activeSelectedSkillId) return
+      if (submitLockRef.current || activeCheckDice.submitted) return
+      submitLockRef.current = true
+      setCheckDiceState((current) => {
+        if (!current || current.clientActionId !== checkRequest.clientActionId) return current
+        return { ...current, submitted: true }
+      })
+      onResult(activeResult, 'd100', activeSelectedSkillId)
+      onClose()
+      return
+    }
+
+    if (activeResult === null) return
+    onResult(activeResult, activeDiceType, undefined)
     onClose()
   }
 
   const renderDiceDisplay = () => {
-    const glow = rolling ? 'opacity-40' : ''
+    const glow = activeRolling ? 'opacity-40' : ''
     return (
       <div ref={tableRef} className={`relative w-full h-48 flex items-center justify-center select-none ${isGrabbed.current ? 'cursor-grabbing' : 'cursor-grab'} ${glow}`}>
-        {diceType === 'd100' ? (
+        {activeDiceType === 'd100' ? (
           <div className="flex items-center gap-6">
             <div className="text-center">
-              <div className={`text-[42px] font-bold font-mono tracking-wider ${tens === 0 ? 'text-[#c8c0b8]' : 'text-[#eeead8]'} transition-colors`}>
-                {String(tens * 10).padStart(2, '0')}
+              <div className={`text-[42px] font-bold font-mono tracking-wider ${activeTens === 0 ? 'text-[#c8c0b8]' : 'text-[#eeead8]'} transition-colors`}>
+                {String(activeTens * 10).padStart(2, '0')}
               </div>
               <div className="text-[10px] text-[#9088a0] mt-1 font-mono">十位</div>
             </div>
             <div className="text-[28px] text-[#9088a0] font-mono">+</div>
             <div className="text-center">
-              <div className={`text-[42px] font-bold font-mono ${ones === 0 ? 'text-[#c8c0b8]' : 'text-[#eeead8]'} transition-colors`}>
-                {ones}
+              <div className={`text-[42px] font-bold font-mono ${activeOnes === 0 ? 'text-[#c8c0b8]' : 'text-[#eeead8]'} transition-colors`}>
+                {activeOnes}
               </div>
               <div className="text-[10px] text-[#9088a0] mt-1 font-mono">个位</div>
             </div>
@@ -403,18 +527,18 @@ function DiceModal({
           <div
             className={`text-[64px] font-bold font-mono text-[#eeead8] ${isGrabbed.current ? 'scale-105' : ''} transition-transform duration-150`}
             style={{
-              clipPath: diceType === 'd20' ? 'polygon(50% 0%, 95% 25%, 95% 75%, 50% 100%, 5% 75%, 5% 25%)' : undefined,
+              clipPath: activeDiceType === 'd20' ? 'polygon(50% 0%, 95% 25%, 95% 75%, 50% 100%, 5% 75%, 5% 25%)' : undefined,
               background: 'linear-gradient(145deg, #2a2630, #1a1620)',
-              width: diceType === 'd20' ? '90px' : '80px',
-              height: diceType === 'd20' ? '96px' : '80px',
+              width: activeDiceType === 'd20' ? '90px' : '80px',
+              height: activeDiceType === 'd20' ? '96px' : '80px',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              borderRadius: diceType === 'd6' ? '12px' : undefined,
+              borderRadius: activeDiceType === 'd6' ? '12px' : undefined,
               border: '1px solid rgba(255,255,255,0.08)',
             }}
           >
-            {rolling ? (diceType === 'd20' ? Math.floor(Math.random() * 20) + 1 : Math.floor(Math.random() * 6) + 1) : result || '-'}
+            {activeRolling ? (activeDiceType === 'd20' ? Math.floor(Math.random() * 20) + 1 : Math.floor(Math.random() * 6) + 1) : activeResult || '-'}
           </div>
         )}
       </div>
@@ -422,11 +546,11 @@ function DiceModal({
   }
 
   const getVerdict = (): { label: string; color: string } | null => {
-    if (result === null || diceType !== 'd100') return null
-    if (result === 1) return { label: '大成功', color: DIFFICULTY_COLORS.crit }
-    if (result <= Math.floor(targetValue / 5)) return { label: '极难成功', color: DIFFICULTY_COLORS.success }
-    if (result <= Math.floor(targetValue / 2)) return { label: '困难成功', color: DIFFICULTY_COLORS.success }
-    if (result <= targetValue) return { label: '成功', color: DIFFICULTY_COLORS.success }
+    if (activeResult === null || activeDiceType !== 'd100') return null
+    if (activeResult === 1) return { label: '大成功', color: DIFFICULTY_COLORS.crit }
+    if (activeResult <= Math.floor(targetValue / 5)) return { label: '极难成功', color: DIFFICULTY_COLORS.success }
+    if (activeResult <= Math.floor(targetValue / 2)) return { label: '困难成功', color: DIFFICULTY_COLORS.success }
+    if (activeResult <= targetValue) return { label: '成功', color: DIFFICULTY_COLORS.success }
     return { label: '失败', color: DIFFICULTY_COLORS.fail }
   }
 
@@ -434,15 +558,23 @@ function DiceModal({
 
   return (
     <BottomPanel open={open} onClose={onClose} title="骰子检定">
-      {/* Dice type selector */}
-      {!checkRequest && (
+      {!isCheckMode && (
         <div className="flex gap-1.5 mb-3.5">
           {DICE_OPTIONS.map((opt) => (
             <button
               key={opt.id}
-              onClick={() => { if (!rolling) { setDiceType(opt.id); setResult(null); setShowResult(false); setShakeLevel(0) } }}
+              onClick={() => {
+                if (!freeRolling) {
+                  setFreeDiceType(opt.id)
+                  setFreeResult(null)
+                  setFreeShowResult(false)
+                  setFreeShakeLevel(0)
+                  setFreeTens(0)
+                  setFreeOnes(0)
+                }
+              }}
               className={`flex-1 text-center text-[12px] font-semibold py-1.5 rounded-[99px] border transition-all ${
-                diceType === opt.id ? 'bg-brass text-white border-brass' : 'bg-panel text-text-muted border-border-light'
+                freeDiceType === opt.id ? 'bg-brass text-white border-brass' : 'bg-panel text-text-muted border-border-light'
               }`}
             >
               {opt.label}
@@ -451,20 +583,32 @@ function DiceModal({
         </div>
       )}
 
-      {checkRequest && checkRequest.skills.length > 1 && (
+      {isCheckMode && checkRequest && checkRequest.skills.length > 1 && (
         <div className="flex flex-wrap gap-2 mb-3.5">
           {checkRequest.skills.map((skill) => (
             <button
               key={skill.id}
-              disabled={rolling}
+              disabled={!canEditCheck}
               onClick={() => {
-                setSelectedSkillId(skill.id)
-                setResult(null)
-                setShowResult(false)
-                setShakeLevel(0)
+                if (!canEditCheck) return
+                setCheckDiceState((current) => {
+                  if (!current || current.clientActionId !== checkRequest.clientActionId) return current
+                  return {
+                    ...current,
+                    selectedSkillId: skill.id,
+                    result: null,
+                    showResult: false,
+                    shakeLevel: 0,
+                    tens: 0,
+                    ones: 0,
+                    submitted: false,
+                    rolling: false,
+                  }
+                })
+                submitLockRef.current = false
               }}
               className={`px-3 py-1.5 rounded-full border text-xs font-semibold transition-all ${
-                selectedSkillId === skill.id
+                activeSelectedSkillId === skill.id
                   ? 'bg-brass text-white border-brass'
                   : 'bg-panel text-text-muted border-border-light'
               }`}
@@ -475,21 +619,19 @@ function DiceModal({
         </div>
       )}
 
-      {/* Dice context info */}
       <div className="text-center mb-3">
         <span className="text-xs text-brass-dark font-semibold bg-brass/10 px-4 py-1 rounded-full inline-block">
           {selectedSkill?.name ?? '自由掷骰'}
         </span>
         <div className="font-mono text-xs text-text-muted mt-1">
-          {diceType === 'd100'
+          {activeDiceType === 'd100'
             ? `目标: ${targetValue} · D% = 十位 + 个位`
             : '自由检定'}
         </div>
       </div>
 
-      {/* Dice table——保留深色"赌桌"质感，作为浅色面板里的一个独立区块，
-          不再是撑满整个屏幕的深色页面 */}
       <div
+        data-testid="dice-table"
         className="rounded-md bg-[#1a1620] px-4 pt-5 pb-4 flex flex-col items-center relative overflow-hidden"
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
@@ -499,80 +641,78 @@ function DiceModal({
         onTouchMove={handleMouseMove}
         onTouchEnd={handleMouseUp}
       >
-        {/* Shake glow ring */}
-        {shakeLevel >= 2 && !rolling && !showResult && (
+        {activeShakeLevel >= 2 && !activeRolling && !activeShowResult && (
           <div
             className="absolute w-52 h-52 rounded-full pointer-events-none transition-all duration-200"
             style={{
-              background: `radial-gradient(circle, rgba(184,151,106,${0.04 + shakeLevel * 0.04}) 0%, transparent 70%)`,
-              transform: `scale(${1 + shakeLevel * 0.05})`,
+              background: `radial-gradient(circle, rgba(184,151,106,${0.04 + activeShakeLevel * 0.04}) 0%, transparent 70%)`,
+              transform: `scale(${1 + activeShakeLevel * 0.05})`,
             }}
           />
         )}
 
         {renderDiceDisplay()}
 
-        {!rolling && !showResult && (
+        {!activeRolling && !activeShowResult && (
           <div className="text-center mt-2">
             <span className="text-xs text-[#9088a0]">
-              {shakeLevel === 0 ? '👆 按住这里来回拖动 · 摇动后松手' :
-               shakeLevel <= 2 ? '⚡ 再用力一点……' :
-               shakeLevel <= 4 ? '🔥 快了！' :
+              {activeShakeLevel === 0 ? '👆 按住这里来回拖动 · 摇动后松手' :
+               activeShakeLevel <= 2 ? '⚡ 再用力一点……' :
+               activeShakeLevel <= 4 ? '🔥 快了！' :
                '💥 松手投出！'}
             </span>
           </div>
         )}
 
-        {/* Shake meter */}
-        {!rolling && !showResult && (
+        {!activeRolling && !activeShowResult && (
           <div className="flex gap-1 mt-3">
             {[0, 1, 2, 3, 4].map((i) => (
               <div key={i} className={`w-6 h-1 rounded-full transition-all duration-200 ${
-                i < shakeLevel ? (i >= 3 ? 'bg-brass' : 'bg-[rgba(184,151,106,0.5)]') : 'bg-[rgba(255,255,255,0.08)]'
+                i < activeShakeLevel ? (i >= 3 ? 'bg-brass' : 'bg-[rgba(184,151,106,0.5)]') : 'bg-[rgba(255,255,255,0.08)]'
               }`} />
             ))}
           </div>
         )}
 
-        {rolling && (
+        {activeRolling && (
           <div className="text-center mt-2 text-xs text-[#9088a0] animate-pulse">
             🎲 骰子飞出去了……
           </div>
         )}
       </div>
 
-      {/* Result */}
-      {showResult && result !== null && (
+      {activeShowResult && activeResult !== null && (
         <div className="flex flex-col items-center pt-4 gap-3 animate-[fadeIn_0.3s_ease]">
           <div className="text-center">
-            {diceType === 'd100' ? (
+            {activeDiceType === 'd100' ? (
               <>
                 <div className="flex items-center justify-center gap-2 text-text-dim font-mono text-sm">
-                  <span>{String(tens * 10).padStart(2, '0')}</span>
+                  <span>{String(activeTens * 10).padStart(2, '0')}</span>
                   <span>+</span>
-                  <span>{ones}</span>
+                  <span>{activeOnes}</span>
                   <span>=</span>
                 </div>
-                <div className={`text-[44px] font-bold font-mono ${result === 1 ? 'text-[#5aaa5a]' : result > targetValue ? 'text-[#d45050]' : 'text-[#4a8a4a]'}`}>
-                  {String(result).padStart(2, '0')}
+                <div className={`text-[44px] font-bold font-mono ${activeResult === 1 ? 'text-[#5aaa5a]' : activeResult > targetValue ? 'text-[#d45050]' : 'text-[#4a8a4a]'}`}>
+                  {String(activeResult).padStart(2, '0')}
                 </div>
               </>
             ) : (
-              <div className="text-[44px] font-bold font-mono text-text-primary">{result}</div>
+              <div className="text-[44px] font-bold font-mono text-text-primary">{activeResult}</div>
             )}
             {verdict && (
               <div className="text-base font-bold mt-1" style={{ color: verdict.color }}>{verdict.label}</div>
             )}
             <div className="text-xs text-text-dim mt-1 font-mono">
-              {diceType === 'd100'
+              {activeDiceType === 'd100'
                 ? `${selectedSkill?.name ?? '自由检定'} ${targetValue}% · 需求 ≤${targetValue}`
-                : `${diceType.toUpperCase()} · 自由检定`}
+                : `${activeDiceType.toUpperCase()} · 自由检定`}
             </div>
           </div>
 
           <button
             onClick={confirmResult}
-            className="w-full py-3 rounded-sm bg-brass text-white text-sm font-semibold active:bg-brass-dark active:scale-[0.97] transition-all"
+            disabled={isCheckMode && !!activeCheckDice?.submitted}
+            className="w-full py-3 rounded-sm bg-brass text-white text-sm font-semibold active:bg-brass-dark active:scale-[0.97] transition-all disabled:opacity-60"
           >
             确认并发送
           </button>
@@ -608,6 +748,7 @@ export default function RoomPage() {
   const [typing, setTyping] = useState(false)
   const [pendingAction, setPendingAction] = useState<{ clientActionId: string; utterance: string } | null>(null)
   const [pendingCheck, setPendingCheck] = useState<CheckRequestPayload | null>(null)
+  const [pendingCheckDice, setPendingCheckDice] = useState<PendingCheckDiceState | null>(null)
   const [playerView, setPlayerView] = useState<AgentPlayerView | null>(() => {
     const cached = sdk.roomSocket.getPlayerView()
     return cached?.room_id === roomId ? cached : null
@@ -749,6 +890,11 @@ export default function RoomPage() {
         setTyping(false)
         setProgressLabel(null)
         setPendingCheck(envelope.payload)
+        setPendingCheckDice((current) =>
+          current?.clientActionId === envelope.payload.clientActionId
+            ? current
+            : createPendingCheckDiceState(envelope.payload)
+        )
         setShowDice(true)
       } else if (envelope.type === 'check.result') {
         const levelLabels: Record<string, string> = {
@@ -782,6 +928,9 @@ export default function RoomPage() {
           isSelf: envelope.payload.playerId === playerId,
         }))
         setPendingCheck(current =>
+          current?.clientActionId === envelope.payload.clientActionId ? null : current
+        )
+        setPendingCheckDice(current =>
           current?.clientActionId === envelope.payload.clientActionId ? null : current
         )
         if (envelope.payload.playerId === playerId) setShowDice(false)
@@ -859,7 +1008,7 @@ export default function RoomPage() {
 
   const handleDiceResult = (result: number, diceType: DiceType, skillId?: string) => {
     if (pendingCheck) {
-      if (!playerId || diceType !== 'd100' || !skillId) return
+      if (!playerId || diceType !== 'd100' || !skillId || pendingCheckDice?.submitted) return
       setTyping(true)
       sdk.roomSocket.rollCheck(playerId, {
         clientActionId: pendingCheck.clientActionId,
@@ -1095,6 +1244,7 @@ export default function RoomPage() {
         <form onSubmit={sendMessage} className="flex gap-2 items-end">
           <button
             type="button"
+            aria-label="骰子"
             onClick={() => setShowDice(true)}
             disabled={suspended}
             className="w-10 h-10 rounded-full bg-card border border-border-light text-text-muted flex items-center justify-center flex-shrink-0 active:scale-[0.92] active:border-brass active:text-brass-dark transition-all disabled:opacity-40 disabled:cursor-not-allowed"
@@ -1381,6 +1531,8 @@ export default function RoomPage() {
         onClose={() => setShowDice(false)}
         onResult={handleDiceResult}
         checkRequest={pendingCheck}
+        checkDiceState={pendingCheckDice}
+        setCheckDiceState={setPendingCheckDice}
       />
     </div>
   )

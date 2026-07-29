@@ -23,6 +23,7 @@ dependencies = [
   "alembic>=1.13,<2.0",
   "openai==2.44.0",
   "httpx>=0.27,<1.0",
+  "cryptography==48.0.1 ; platform_machine == 'x86_64' and sys_platform == 'darwin'",
 ]
 
 [tool.uv.sources]

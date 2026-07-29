@@ -101,14 +101,19 @@ def join_as(client: TestClient, room_code: str, account: str, nickname: str = "�
     return result
 
 
-def complete_character(client: TestClient, room_id: str, reconnect_token: str) -> None:
+def complete_character(
+    client: TestClient,
+    room_id: str,
+    reconnect_token: str,
+    name: str = "陈探员",
+) -> None:
     headers = {"X-Reconnect-Token": reconnect_token}
     draft = client.post(f"{ROOMS_BASE}/{room_id}/characters", headers=headers)
     character_id = draft.json()["data"]["characterId"]
     client.patch(
         f"{ROOMS_BASE}/{room_id}/characters/{character_id}",
         json={
-            "name": "陈探员",
+            "name": name,
             "attributes": {
                 "STR": 50,
                 "CON": 50,
@@ -572,6 +577,7 @@ def test_skill_check_waits_for_player_selection_and_roll(
     assert result["type"] == "check.result"
     assert result["payload"]["skill"] == "stealth"
     assert result["payload"]["rollValue"] == 7
+    assert result["payload"]["characterName"] == "陈探员"
     assert completed["message_type"] == "turn.completed"
     assert completed["correlation_id"] == "ws-skill-check-146"
     assert narration["type"] == "narration.push"
@@ -653,6 +659,7 @@ def test_terminal_attack_check_failure_releases_pending_turn(
             lambda message: message.get("type") == "check.result",
         )
         assert check_result["payload"]["clientActionId"] == "attack-thomas-153"
+        assert check_result["payload"]["characterName"] == "陈探员"
         completed, _ = receive_until(
             ws,
             lambda message: message.get("message_type") == "turn.completed",

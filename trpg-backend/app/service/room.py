@@ -117,6 +117,33 @@ async def get_player_by_reconnect_token(db: AsyncSession, reconnect_token: str |
     return player
 
 
+async def get_player_character_name(
+    db: AsyncSession,
+    player_id: str,
+    fallback: str = "玩家",
+) -> str:
+    """解析玩家在行动频道里应显示的局内名字。
+
+    规则：已完成角色卡优先，其次回退到房间昵称，最后回退到通用占位名。
+    """
+    row = await db.execute(
+        select(Character.name, Character.status, Player.nickname)
+        .join(Player, Character.player_id == Player.id)
+        .where(Player.id == player_id)
+    )
+    result = row.first()
+    if result is None:
+        return fallback
+    character_name, status, nickname = result
+    if status == "complete" and isinstance(character_name, str):
+        stripped = character_name.strip()
+        if stripped:
+            return stripped
+    if isinstance(nickname, str) and nickname.strip():
+        return nickname
+    return fallback
+
+
 async def _require_host(db: AsyncSession, room: Room, reconnect_token: str | None) -> Player:
     player = await get_player_by_reconnect_token(db, reconnect_token)
     if player.room_id != room.id or player.id != room.host_player_id:

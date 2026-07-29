@@ -298,6 +298,9 @@ const PAYLOAD_VALIDATORS: {
     typeof p.clientActionId === 'string' &&
     typeof p.skill === 'string' &&
     typeof p.skillName === 'string' &&
+    (typeof p.characterName === 'string' ||
+      p.characterName === null ||
+      p.characterName === undefined) &&
     typeof p.rollValue === 'number' &&
     typeof p.targetValue === 'number' &&
     typeof p.difficulty === 'string' &&
@@ -315,6 +318,9 @@ const PAYLOAD_VALIDATORS: {
     typeof p.playerId === 'string' &&
     typeof p.clientActionId === 'string' &&
     typeof p.nickname === 'string' &&
+    (typeof p.characterName === 'string' ||
+      p.characterName === null ||
+      p.characterName === undefined) &&
     typeof p.utterance === 'string',
   'san.check.request': (p) => typeof p.playerId === 'string',
   'san.check.result': (p) =>

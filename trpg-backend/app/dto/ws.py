@@ -161,6 +161,7 @@ class ActionBroadcastPayload(CamelModel):
     player_id: str
     client_action_id: str
     nickname: str
+    character_name: str | None = None
     utterance: str
 
 
@@ -277,6 +278,7 @@ class CheckResultPayload(CamelModel):
     client_action_id: str
     skill: str
     skill_name: str
+    character_name: str | None = None
     roll_value: int
     target_value: int
     difficulty: Literal["regular", "hard", "extreme"]

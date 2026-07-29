@@ -170,8 +170,16 @@ test('🔴 所有人都能看到发起者的原话 + 守秘人回复（修"聊�
     if (echo.type === 'action.broadcast') {
       assert.equal(echo.payload.playerId, room.hostPlayerId)
       assert.ok(echo.payload.nickname.length > 0)
+      assert.equal(echo.payload.characterName, 'E2E 调查员')
     }
     await Promise.all([guestSeesNarration, completed])
+
+    const conversation = await room.host.sdk.rooms.listConversation(room.roomId, room.reconnectToken)
+    const action = conversation.find((event) => event.type === 'action.broadcast')
+    assert.ok(action)
+    if (action?.type === 'action.broadcast') {
+      assert.equal(action.payload.characterName, 'E2E 调查员')
+    }
   } finally {
     room.host.sdk.roomSocket.disconnect()
     guest.sdk.roomSocket.disconnect()

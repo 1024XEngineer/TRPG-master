@@ -99,6 +99,14 @@ function appendLiveMessage(current: Message[], message: Message): Message[] {
   return [...current, message]
 }
 
+function displayName(...candidates: Array<string | null | undefined>): string {
+  for (const candidate of candidates) {
+    const trimmed = candidate?.trim()
+    if (trimmed) return trimmed
+  }
+  return '玩家'
+}
+
 function conversationEventToMessage(
   event: RoomConversationEvent,
   selfPlayerId: string | null,
@@ -128,13 +136,14 @@ function conversationEventToMessage(
       playerId: string
       clientActionId: string
       nickname: string
+      characterName?: string | null
       utterance: string
     }
     return {
       type: 'player',
       channel: 'action',
       messageId: conversationMessageId(event.type, event.id),
-      sender: payload.nickname,
+      sender: displayName(payload.characterName, payload.nickname),
       content: payload.utterance,
       time: formatRoomTime(event.createdAt),
       isSelf: payload.playerId === selfPlayerId,
@@ -156,6 +165,7 @@ function conversationEventToMessage(
       playerId: string
       clientActionId: string
       skillName: string
+      characterName?: string | null
       targetValue: number
       rollValue: number
       difficulty: string
@@ -184,7 +194,10 @@ function conversationEventToMessage(
       type: 'dice',
       channel: 'action',
       messageId: conversationMessageId(event.type, event.id),
-      sender: payload.playerId === selfPlayerId ? senderName : '玩家',
+      sender: displayName(
+        payload.characterName,
+        payload.playerId === selfPlayerId ? senderName : null,
+      ),
       content: `${payload.skillName} ${payload.targetValue}% · D100 ${payload.rollValue} · ${outcomeLabel}`,
       time: formatRoomTime(event.createdAt),
       isSelf: payload.playerId === selfPlayerId,
@@ -727,7 +740,7 @@ export default function RoomPage() {
           type: 'player',
           channel: 'action',
           messageId: conversationMessageId('action.broadcast', envelope.payload.clientActionId),
-          sender: envelope.payload.nickname,
+          sender: displayName(envelope.payload.characterName, envelope.payload.nickname),
           content: envelope.payload.utterance,
           time: formatRoomTime(new Date()),
           isSelf: envelope.payload.playerId === playerId,
@@ -760,7 +773,10 @@ export default function RoomPage() {
           type: 'dice',
           channel: 'action',
           messageId: conversationMessageId('check.result', envelope.payload.clientActionId),
-          sender: envelope.payload.playerId === playerId ? senderName : '玩家',
+          sender: displayName(
+            envelope.payload.characterName,
+            envelope.payload.playerId === playerId ? senderName : null,
+          ),
           content: `${envelope.payload.skillName} ${envelope.payload.targetValue}% · D100 ${envelope.payload.rollValue} · ${outcomeLabel}`,
           time: formatRoomTime(new Date()),
           isSelf: envelope.payload.playerId === playerId,

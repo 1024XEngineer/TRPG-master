@@ -113,6 +113,7 @@ function conversationHistory(): RoomConversationEvent[] {
         playerId: 'player-1',
         clientActionId: 'act-1',
         nickname: '陈探员',
+        characterName: '杜调查员',
         utterance: '我查看书架',
       },
       createdAt: '2026-07-28T10:01:00Z',
@@ -125,6 +126,7 @@ function conversationHistory(): RoomConversationEvent[] {
         playerId: 'player-1',
         clientActionId: 'act-1',
         skillName: '图书馆使用',
+        characterName: '杜调查员',
         targetValue: 50,
         rollValue: 23,
         difficulty: 'regular',
@@ -179,6 +181,7 @@ describe('RoomPage conversation history', () => {
     expect(await screen.findByText('我查看书架')).toBeInTheDocument()
     expect(screen.getByText('你发现书架后有一个暗格。')).toBeInTheDocument()
     expect(screen.getByText('图书馆使用 50% · D100 23 · 成功')).toBeInTheDocument()
+    expect(screen.getByText('杜调查员 · 掷骰')).toBeInTheDocument()
     expect(mockListConversation).toHaveBeenCalledWith('room-1', 'reconnect-1')
 
     fireEvent.click(screen.getByRole('button', { name: '讨论区' }))
@@ -201,6 +204,7 @@ describe('RoomPage conversation history', () => {
         playerId: 'player-1',
         clientActionId: 'act-1',
         nickname: '陈探员',
+        characterName: '杜调查员',
         utterance: '我查看书架',
       },
     })
@@ -208,5 +212,61 @@ describe('RoomPage conversation history', () => {
     await waitFor(() => {
       expect(screen.getAllByText('我查看书架')).toHaveLength(1)
     })
+  })
+
+  it('falls back for legacy payloads when characterName is missing', async () => {
+    useCharacterStore.getState().setCharacter(
+      {
+        info: {
+          name: '杜调查员',
+          playerName: '陈探员',
+          age: '32',
+          gender: '男',
+          residence: '阿卡姆',
+          birthplace: '波士顿',
+          occupationId: null,
+        },
+        attr: {},
+        skillAlloc: {},
+        skillFinalValues: {},
+        equipment: '',
+        background: '',
+        notes: '',
+        derived: { hp: 10, san: 60, db: '0', move: 8 },
+      } as never,
+      'room-1',
+    )
+    mockListConversation.mockResolvedValue([])
+
+    renderRoomPage()
+
+    emitWsMessage({
+      type: 'action.broadcast',
+      payload: {
+        playerId: 'player-1',
+        clientActionId: 'legacy-act-1',
+        nickname: '房主',
+        utterance: '我查看书架',
+      },
+    })
+    expect(await screen.findByText('房主')).toBeInTheDocument()
+
+    emitWsMessage({
+      type: 'check.result',
+      payload: {
+        playerId: 'player-1',
+        clientActionId: 'legacy-act-2',
+        skill: 'library-use',
+        skillName: '图书馆使用',
+        targetValue: 50,
+        rollValue: 23,
+        difficulty: 'regular',
+        successLevel: 'regular',
+        passed: true,
+        result: 'regular',
+      },
+    })
+
+    expect(await screen.findByText('杜调查员 · 掷骰')).toBeInTheDocument()
   })
 })

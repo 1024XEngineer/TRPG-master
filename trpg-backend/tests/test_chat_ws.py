@@ -177,6 +177,7 @@ def test_action_submit_broadcasts_utterance_then_narration(sync_client: TestClie
     assert echo["type"] == "action.broadcast"
     assert echo["payload"]["utterance"] == "我推开吱呀作响的木门"
     assert echo["payload"]["nickname"] == "房主"
+    assert echo["payload"]["characterName"] == "陈探员"
     assert echo["payload"]["playerId"] == room["playerId"]
     assert narration["type"] == "narration.push"
     assert narration["payload"]["text"]
@@ -405,6 +406,7 @@ def test_conversation_restores_action_discussion_and_narration(
         check_result, _ = receive_until(ws, lambda message: message.get("type") == "check.result")
         assert check_request["payload"]["clientActionId"] == "conv-action-1"
         assert check_result["payload"]["clientActionId"] == "conv-action-1"
+        assert check_result["payload"]["characterName"] == "陈探员"
         completed, _ = receive_until(
             ws, lambda message: message.get("message_type") == "turn.completed"
         )
@@ -426,7 +428,9 @@ def test_conversation_restores_action_discussion_and_narration(
     ]
     assert conversation[1]["channel"] == "discussion"
     assert conversation[2]["channel"] == "action"
+    assert conversation[2]["payload"]["characterName"] == "陈探员"
     assert conversation[3]["payload"]["clientActionId"] == "conv-action-1"
+    assert conversation[3]["payload"]["characterName"] == "陈探员"
     assert conversation[4]["payload"]["text"]
 
 

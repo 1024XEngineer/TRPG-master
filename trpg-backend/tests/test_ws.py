@@ -768,9 +768,7 @@ def test_invalid_check_narration_clears_pending_turn_and_reuses_completed_action
         )
 
         assert failed["payload"]["code"] == "NARRATION_INVALID"
-        assert sum(
-            message.get("type") == "check.result" for message in failed_events
-        ) == 1
+        assert sum(message.get("type") == "check.result" for message in failed_events) == 1
 
         ws.send_json(action)
         completed, retry_events = receive_until(

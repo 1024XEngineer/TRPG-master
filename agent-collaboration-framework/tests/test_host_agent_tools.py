@@ -7,6 +7,7 @@ from dataclasses import FrozenInstanceError
 from io import StringIO
 
 from collaboration_framework.contracts import (
+    ActionDeclarationOption,
     CheckpointOption,
     ContractModel,
     PlayerInput,
@@ -98,6 +99,12 @@ def make_context() -> HostAgentContext:
                 target_id="entity_b",
                 action_hint="inspect",
                 skills=("spot_hidden",),
+                declaration_options=(
+                    ActionDeclarationOption(
+                        id="use_magnifier",
+                        semantic_hints=("使用放大镜", "借助放大镜"),
+                    ),
+                ),
             ),
             CheckpointOption(
                 id="checkpoint_other",
@@ -407,6 +414,9 @@ class VisibleEntityToolTests(unittest.IsolatedAsyncioTestCase):
             [option.id for option in result.checkpoint_options],
             ["checkpoint_a", "checkpoint_z"],
         )
+        declaration = result.checkpoint_options[1].declaration_options[0]
+        self.assertEqual(declaration.id, "use_magnifier")
+        self.assertEqual(declaration.semantic_hints, ("使用放大镜", "借助放大镜"))
         self.assertNotIn("checkpoint_other", result.model_dump_json())
 
     async def test_get_rejects_scope_fields_and_missing_id(self) -> None:

@@ -194,7 +194,7 @@ class EquivalentVerbClient:
         }
 
 
-class UnknownTravelClient:
+class ChineseTravelVerbClient:
     async def generate(
         self,
         *,
@@ -211,17 +211,16 @@ class UnknownTravelClient:
             for item in input_payload["player_view"]["scene"]["available_exits"]
         )
         return {
-            "kind": "unknown",
-            "verb": "unknown",
-            "target": {"matched": False, "raw": "图书馆"},
+            "kind": "action",
+            "verb": "前往",
+            "target": {"matched": True, "id": "library"},
             "check": {"route": "none"},
             "approach": None,
             "summary": "前往图书馆",
-            "clarification_question": "你想去哪里？",
         }
 
 
-async def test_prompt_intent_canonicalizes_equivalent_model_verbs() -> None:
+async def test_prompt_intent_keeps_distinct_module_actions_canonical() -> None:
     player_input = PlayerInput(
         room_id="room_prompt",
         player_id="player_1",
@@ -266,7 +265,7 @@ async def test_prompt_intent_canonicalizes_equivalent_model_verbs() -> None:
     first = Intent.model_validate(await model.generate(context))
     second = Intent.model_validate(await model.generate(context))
 
-    assert first.verb == second.verb == "investigate"
+    assert first.verb == second.verb == "observe"
 
 
 async def test_paper_chase_empty_exits_allow_free_travel_to_named_scene() -> None:
@@ -293,7 +292,9 @@ async def test_paper_chase_empty_exits_allow_free_travel_to_named_scene() -> Non
             player_view=view,
         ),
     )
-    intent = Intent.model_validate(await PromptIntentModel(UnknownTravelClient()).generate(context))
+    intent = Intent.model_validate(
+        await PromptIntentModel(ChineseTravelVerbClient()).generate(context)
+    )
     assert isinstance(intent.target, MatchedTarget)
     assert intent.target.id == "library"
     assert intent.verb == "go"

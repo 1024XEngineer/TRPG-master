@@ -1,13 +1,16 @@
-"""Versioned, provider-neutral intent prompt for the Qwen adapter."""
+"""Versioned, provider-neutral intent prompt used by the DeepSeek host agent."""
 
 from __future__ import annotations
 
 import json
 
 from collaboration_framework.contracts import Intent
+from collaboration_framework.host.application.intent_aligner import (
+    intent_action_contract,
+)
 from collaboration_framework.host.schemas import HostAgentContext
 
-PROMPT_VERSION = "trpg-host-intent-v3"
+PROMPT_VERSION = "trpg-host-intent-v4"
 
 SYSTEM_PROMPT = f"""You are the TRPG Host Agent for intent understanding only.
 Prompt contract version: {PROMPT_VERSION}.
@@ -32,10 +35,26 @@ that target; use an available exit only when the player is actually travelling.
 
 Use a module check only when one player_view.checkpoint_options entry matches both
 the selected target and action semantics. Its checkpoint_id must be that exact
-entry id, and proposed_skills must be a subset of that entry's skills. Otherwise,
-use a default check only for an uncertain action that depends on one attribute or
-skill present in player_view.self_actor. Obvious observation, reading already
-visible text, harmless interaction, and ordinary travel use no check.
+entry id, verb must copy that entry's action_hint exactly without translation,
+and proposed_skills must be a subset of that entry's skills. Otherwise, use a
+default check only for an uncertain action that depends on one integer-valued
+attribute, skill, or the luck resource present in player_view.self_actor. A
+default check must contain at least one proposed skill. Obvious observation,
+reading already visible text, harmless interaction, and ordinary travel use no
+check.
+
+verb is a Rule Engine action id, not natural-language prose. For an available
+exit use go; for any attack/fight/shoot/strike use attack; for an ordinary
+wait/rest use wait; and use wait_until_night only when the player explicitly
+waits until night. Keep distinct module action ids distinct because inspect,
+observe, investigate, search, talk, question, and similar ids may trigger
+different module rules. Use engine_intent_contract as the canonical vocabulary.
+
+declarations must be empty unless a selected module checkpoint exposes matching
+declaration_options. When the current player utterance semantically matches one
+of their semantic_hints, copy that declaration option's id exactly; never
+translate it or infer an option that the selected checkpoint does not expose.
+Player-submitted Intent must always set initiated_by_target to false.
 
 The current scene id, visible entity ids, available exit ids, actor attributes and
 skills, and checkpoint ids are opaque identifiers: copy them exactly. If no trusted
@@ -55,6 +74,7 @@ def build_agent_input(context: HostAgentContext) -> str:
 
     payload = {
         "prompt_version": PROMPT_VERSION,
+        "engine_intent_contract": intent_action_contract(),
         "host_agent_context": context.to_json_dict(),
         "intent_json_schema": Intent.model_json_schema(
             by_alias=True,

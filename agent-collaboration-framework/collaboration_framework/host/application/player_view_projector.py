@@ -1,6 +1,7 @@
 """Member-A deterministic projection over a GameState-free read snapshot."""
 
 from collaboration_framework.contracts import (
+    ActionDeclarationOption,
     ActionResult,
     ActorResourceView,
     ActorValueView,
@@ -159,6 +160,13 @@ class PlayerViewProjector:
                     action_hint=item.action_hint,
                     skills=item.skills,
                     difficulty=item.difficulty,
+                    declaration_options=tuple(
+                        ActionDeclarationOption(
+                            id=declaration.id,
+                            semantic_hints=declaration.semantic_hints,
+                        )
+                        for declaration in item.declaration_options
+                    ),
                 )
                 for item in snapshot.checkpoint_options
             ),

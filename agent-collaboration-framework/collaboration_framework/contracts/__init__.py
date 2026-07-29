@@ -20,6 +20,7 @@ from .action import (
 from .common import ContractError, ContractModel, JsonObject
 from .module import (
     AbsorbOperationSpec,
+    ActionDeclarationOptionSpec,
     AddOperationSpec,
     AllowOperation,
     AllowOperationSpec,
@@ -64,6 +65,7 @@ from .module import (
     WinConditionSpec,
 )
 from .player_view import (
+    ActionDeclarationOption,
     ActorResourceView,
     ActorValueView,
     AvailableExitView,
@@ -73,6 +75,7 @@ from .player_view import (
     NarrativeDetailView,
     ObservableStateView,
     PlayerView,
+    ProjectionActionDeclarationOption,
     ProjectionActorResource,
     ProjectionActorValue,
     ProjectionAvailableExit,

@@ -172,6 +172,36 @@ class PaperChaseVisibilityTests(unittest.IsolatedAsyncioTestCase):
             {"diary_tunnel_clue"},
         )
 
+    async def test_visible_crypt_checkpoint_projects_declaration_options(
+        self,
+    ) -> None:
+        crypt = await self.view(
+            "crypt",
+            updates={
+                "crypt_entrance": {
+                    "discovered": True,
+                    "slab_moved": True,
+                }
+            },
+        )
+
+        option = next(
+            item for item in crypt.checkpoint_options if item.id == "enter_crypt"
+        )
+        self.assertEqual(option.action_hint, "enter")
+        self.assertEqual(
+            [
+                (item.id, item.semantic_hints)
+                for item in option.declaration_options
+            ],
+            [
+                (
+                    "hold_breath",
+                    ("屏住呼吸", "憋气", "hold breath"),
+                )
+            ],
+        )
+
     async def test_night_watch_and_ghoul_reveal_matrix(self) -> None:
         waiting = await self.view(
             "night_surveillance",

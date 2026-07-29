@@ -473,9 +473,16 @@ class QwenHostAgentAdapterTests(
         self.assertTrue(settings.include_usage)
         self.assertEqual(settings.extra_body, {"enable_thinking": False})
         self.assertEqual(settings.tool_choice, "auto")
-        self.assertIn("trpg-host-intent-v3", call["system_instructions"])
-        self.assertNotIn("GameState", call["input"])
-        self.assertNotIn("ModuleContent", call["input"])
+        self.assertIn("trpg-host-intent-v4", call["system_instructions"])
+        payload = json.loads(call["input"][0]["content"])
+        self.assertIn("engine_intent_contract", payload)
+        self.assertIn(
+            "module_action_vocabulary",
+            payload["engine_intent_contract"],
+        )
+        serialized_input = json.dumps(payload, ensure_ascii=False)
+        self.assertNotIn("GameState", serialized_input)
+        self.assertNotIn("ModuleContent", serialized_input)
         self.assertFalse(call["tracing"].include_data())
 
     async def test_single_tool_call_round_trips_safe_result(self) -> None:

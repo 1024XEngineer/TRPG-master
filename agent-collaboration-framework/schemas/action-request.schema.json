@@ -37,6 +37,7 @@
           "type": "string"
         },
         "verb": {
+          "description": "Rule Engine action id. For a module check, copy the trusted checkpoint action_hint exactly; never translate it.",
           "minLength": 1,
           "title": "Verb",
           "type": "string"
@@ -95,6 +96,7 @@
         },
         "declarations": {
           "default": [],
+          "description": "Exact declaration option ids selected from the current trusted module checkpoint; empty for non-module actions.",
           "items": {
             "type": "string"
           },
@@ -103,10 +105,12 @@
         },
         "initiated_by_target": {
           "default": false,
+          "description": "Authority-bearing Engine flag. It is always false for player-submitted Intent.",
           "title": "Initiated By Target",
           "type": "boolean"
         },
         "summary": {
+          "description": "Short semantic summary; it is not an authoritative game fact.",
           "minLength": 1,
           "title": "Summary",
           "type": "string"

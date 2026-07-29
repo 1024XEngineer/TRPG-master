@@ -36,8 +36,6 @@ RuleHook: TypeAlias = Literal[
     "on_state_change",
     "on_time_elapsed",
 ]
-
-
 class ConditionSpec(ContractModel):
     """Exactly one of ``path + equals`` or ``expr``."""
 
@@ -313,6 +311,22 @@ class CheckpointOutcomesSpec(ContractModel):
     fumble: CheckpointOutcomeSpec | None = None
 
 
+class ActionDeclarationOptionSpec(ContractModel):
+    """Player-safe semantic candidate that an Intent may explicitly declare."""
+
+    id: str = Field(min_length=1)
+    semantic_hints: tuple[str, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_semantic_hints(self) -> ActionDeclarationOptionSpec:
+        normalized = [item.strip().casefold() for item in self.semantic_hints]
+        if any(not item for item in normalized):
+            raise ValueError("Action declaration semantic_hints 不得为空")
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("Action declaration semantic_hints 必须唯一")
+        return self
+
+
 class CheckpointSpec(ContractModel):
     id: str = Field(min_length=1)
     scene_id: str = Field(min_length=1)
@@ -320,6 +334,7 @@ class CheckpointSpec(ContractModel):
     target_id: str = Field(min_length=1)
     skills: tuple[str, ...] = ()
     difficulty: Literal["regular", "hard", "extreme"] | None = None
+    declaration_options: tuple[ActionDeclarationOptionSpec, ...] = ()
     outcomes: CheckpointOutcomesSpec
     visibility: VisibilityPolicy | None = None
 
@@ -331,6 +346,13 @@ class CheckpointSpec(ContractModel):
             normalized.pop("mvp_check_result", None)
             return normalized
         return value
+
+    @model_validator(mode="after")
+    def validate_declaration_options(self) -> CheckpointSpec:
+        ids = [item.id for item in self.declaration_options]
+        if len(ids) != len(set(ids)):
+            raise ValueError("Checkpoint declaration option id 必须唯一")
+        return self
 
 
 class WinConditionSpec(ContractModel):

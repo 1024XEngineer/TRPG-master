@@ -5,13 +5,17 @@ import os
 import pytest
 from collaboration_framework.bootstrap.host_agent import build_deepseek_host_agent
 from collaboration_framework.contracts import (
+    ActionDeclarationOption,
     AvailableExitView,
+    CheckpointOption,
     ExitDestinationView,
     MatchedTarget,
+    ModuleCheck,
     PlayerInput,
     PlayerView,
     SceneView,
     SelfActorView,
+    VisibleEntity,
 )
 from collaboration_framework.host.application import HostAgentIntentResolver
 from collaboration_framework.host.schemas import (
@@ -24,6 +28,25 @@ from collaboration_framework.host.schemas import (
 from app.core.config import Settings
 
 RUN_DEEPSEEK_HISTORY_SMOKE = os.getenv("RUN_DEEPSEEK_HISTORY_SMOKE") == "1"
+
+
+def build_host_agent(settings: Settings):
+    assert settings.deepseek_api_key is not None
+    return build_deepseek_host_agent(
+        {
+            "HOST_AGENT_API_KEY": settings.deepseek_api_key.get_secret_value(),
+            "HOST_AGENT_BASE_URL": settings.deepseek_base_url,
+            "HOST_AGENT_MODEL": settings.deepseek_model,
+            "HOST_AGENT_MAX_TURNS": str(settings.host_agent_max_turns),
+            "HOST_AGENT_MAX_TOOL_CALLS": str(settings.host_agent_max_tool_calls),
+            "HOST_AGENT_TOOL_TIMEOUT_SECONDS": str(
+                settings.host_agent_tool_timeout_seconds
+            ),
+            "HOST_AGENT_TIMEOUT_SECONDS": str(
+                settings.host_agent_timeout_seconds
+            ),
+        }
+    )
 
 
 @pytest.mark.skipif(
@@ -100,19 +123,7 @@ async def test_deepseek_resolves_reference_from_recent_history() -> None:
             ),
         ),
     )
-    host_agent = build_deepseek_host_agent(
-        {
-            "HOST_AGENT_API_KEY": settings.deepseek_api_key.get_secret_value(),
-            "HOST_AGENT_BASE_URL": settings.deepseek_base_url,
-            "HOST_AGENT_MODEL": settings.deepseek_model,
-            "HOST_AGENT_MAX_TURNS": str(settings.host_agent_max_turns),
-            "HOST_AGENT_MAX_TOOL_CALLS": str(settings.host_agent_max_tool_calls),
-            "HOST_AGENT_TOOL_TIMEOUT_SECONDS": str(settings.host_agent_tool_timeout_seconds),
-            "HOST_AGENT_TIMEOUT_SECONDS": str(settings.host_agent_timeout_seconds),
-        }
-    )
-
-    intent = await HostAgentIntentResolver(host_agent).resolve(
+    intent = await HostAgentIntentResolver(build_host_agent(settings)).resolve(
         HostAgentContext(
             player_input=player_input,
             player_view=player_view,
@@ -123,3 +134,76 @@ async def test_deepseek_resolves_reference_from_recent_history() -> None:
     assert intent.kind == "action"
     assert isinstance(intent.target, MatchedTarget)
     assert intent.target.id == "exit_to_library"
+    assert intent.verb == "go"
+
+
+@pytest.mark.skipif(
+    not RUN_DEEPSEEK_HISTORY_SMOKE,
+    reason="set RUN_DEEPSEEK_HISTORY_SMOKE=1 to run the real DeepSeek declaration smoke test",
+)
+@pytest.mark.asyncio
+async def test_deepseek_selects_checkpoint_declaration_by_semantics() -> None:
+    settings = Settings()
+    assert settings.host_model_provider == "deepseek"
+
+    player_input = PlayerInput(
+        room_id="declaration_smoke_room",
+        player_id="declaration_smoke_player",
+        actor_id="declaration_smoke_actor",
+        client_action_id="declaration_smoke_action",
+        utterance="我屏住呼吸，进入墓穴。",
+    )
+    checkpoint = CheckpointOption(
+        id="enter_crypt",
+        target_id="crypt_entrance",
+        action_hint="enter",
+        declaration_options=(
+            ActionDeclarationOption(
+                id="hold_breath",
+                semantic_hints=("屏住呼吸", "憋气", "hold breath"),
+            ),
+        ),
+    )
+    player_view = PlayerView(
+        room_id=player_input.room_id,
+        player_id=player_input.player_id,
+        actor_id=player_input.actor_id,
+        background="现代都市中的克苏鲁调查故事。",
+        scene_id="crypt",
+        phase="playing",
+        revision="1",
+        self_actor=SelfActorView(id=player_input.actor_id, name="调查员"),
+        scene=SceneView(
+            id="crypt",
+            name="地穴入口",
+            description="移开的石板下露出一条空气浑浊的黑暗通道。",
+            visible_entities=(
+                VisibleEntity(
+                    id="crypt_entrance",
+                    kind="location",
+                    name="地穴入口",
+                    description="一条向下延伸的黑暗通道。",
+                ),
+            ),
+        ),
+        checkpoint_options=(checkpoint,),
+    )
+
+    intent = await HostAgentIntentResolver(build_host_agent(settings)).resolve(
+        HostAgentContext(
+            player_input=player_input,
+            player_view=player_view,
+            recent_history=RecentTurnContext.empty(
+                player_input=player_input,
+                player_view=player_view,
+            ),
+        )
+    )
+
+    assert intent.kind == "action"
+    assert isinstance(intent.target, MatchedTarget)
+    assert intent.target.id == "crypt_entrance"
+    assert intent.verb == "enter"
+    assert isinstance(intent.check, ModuleCheck)
+    assert intent.check.checkpoint_id == "enter_crypt"
+    assert intent.declarations == ("hold_breath",)

@@ -440,6 +440,30 @@ class _Execution:
         actor = self.state.get("actors", {}).get(self.request.actor_id)
         if not actor or actor.get("player_id") != self.request.player_id:
             raise ContractError("player_id/actor_id is not bound to the room")
+        intent = self.request.intent
+        if not isinstance(intent.check, ModuleCheck):
+            if intent.declarations:
+                raise ContractError(
+                    "Only a module checkpoint may authorize declarations"
+                )
+            return
+        checkpoint = next(
+            (
+                item
+                for item in self.module.checkpoints
+                if item.id == intent.check.checkpoint_id
+            ),
+            None,
+        )
+        allowed_declarations = (
+            {item.id for item in checkpoint.declaration_options}
+            if checkpoint is not None
+            else set()
+        )
+        if not set(intent.declarations).issubset(allowed_declarations):
+            raise ContractError(
+                "Intent declarations are outside the checkpoint catalog"
+            )
 
     def _resolve_checkpoint(self, entity: EntitySpec) -> CheckOutcomeName:
         check = self.request.intent.check

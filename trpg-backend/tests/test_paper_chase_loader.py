@@ -23,7 +23,7 @@ async def test_loader_is_idempotent_and_reports_real_content(
 
     assert result.outcome == "unchanged"
     assert result.module_id == BUILTIN_MODULE_ID
-    assert result.version == "1.0.2"
+    assert result.version == "1.0.3"
     assert result.world_ref == "coc-7e"
     assert result.scene_count == 11
     assert result.entity_count == 16
@@ -41,7 +41,7 @@ async def test_loader_is_idempotent_and_reports_real_content(
 
 async def test_paper_chase_models_caretaker_bottle_as_conditional_detail() -> None:
     payload = json.loads(loader.PAPER_CHASE_SOURCE_PATH.read_text(encoding="utf-8"))
-    assert payload["version"] == "1.0.2"
+    assert payload["version"] == "1.0.3"
     assert payload["initial_scene_id"] == "client_briefing"
     entities = {entity["id"]: entity for entity in payload["entities"]}
     checkpoints = {checkpoint["id"]: checkpoint for checkpoint in payload["checkpoints"]}
@@ -183,7 +183,7 @@ async def test_loader_preserves_rooms_pinned_legacy_version(
 
     result = await loader.load_paper_chase(db_session)
 
-    assert result.version == "1.0.2"
+    assert result.version == "1.0.3"
     legacy = await db_session.get(ModuleVersion, (BUILTIN_MODULE_ID, "1.0.1"))
     assert legacy is not None
     assert legacy.content_json == legacy_content

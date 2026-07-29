@@ -9,54 +9,12 @@ import httpx
 from collaboration_framework.contracts import (
     Intent,
     JsonObject,
-    MatchedTarget,
-    ModuleCheck,
-    NoCheck,
 )
-from collaboration_framework.host.application.intent_parser import (
-    validate_intent_against_view,
-)
+from collaboration_framework.host.application import IntentParser
 from collaboration_framework.host.schemas import (
     IntentContext,
     NarrationContext,
     NarrationOutput,
-)
-
-_CANONICAL_VERBS = {
-    "check": "investigate",
-    "examine": "investigate",
-    "inspect": "investigate",
-    "investigate": "investigate",
-    "look": "investigate",
-    "observe": "investigate",
-    "查看": "investigate",
-    "检查": "investigate",
-    "看看": "investigate",
-    "看": "investigate",
-    "观察": "investigate",
-    "调查": "investigate",
-    "ask": "talk",
-    "chat": "talk",
-    "dialogue": "talk",
-    "speak": "talk",
-    "talk": "talk",
-    "交谈": "talk",
-    "对话": "talk",
-    "询问": "talk",
-}
-
-_TRAVEL_WORDS = (
-    "前往",
-    "进入",
-    "走到",
-    "抵达",
-    "移动到",
-    "去往",
-    "去",
-    "travel",
-    "move",
-    "go to",
-    "enter",
 )
 
 _INTENT_INSTRUCTIONS = """\
@@ -231,85 +189,8 @@ class PromptIntentModel:
             instructions=_INTENT_INSTRUCTIONS,
             input_payload=context.to_json_dict(),
         )
-        intent = _canonicalize_intent(Intent.model_validate(raw), context)
-        intent = validate_intent_against_view(intent, context)
+        intent = IntentParser.parse(raw, context)
         return intent.to_json_dict()
-
-
-def _canonicalize_intent(intent: Intent, context: IntentContext) -> Intent:
-    """Stabilize equivalent model wording before the idempotency boundary."""
-
-    if not isinstance(intent.target, MatchedTarget):
-        available_exit = _match_available_exit(context)
-        if available_exit is not None:
-            return Intent(
-                kind="action",
-                verb="go",
-                target=MatchedTarget(id=available_exit.id),
-                check=NoCheck(),
-                approach=intent.approach,
-                declarations=intent.declarations,
-                initiated_by_target=False,
-                summary=intent.summary,
-            )
-        return intent
-
-    if isinstance(intent.check, ModuleCheck):
-        option = next(
-            (
-                candidate
-                for candidate in context.player_view.checkpoint_options
-                if candidate.id == intent.check.checkpoint_id
-            ),
-            None,
-        )
-        if option is not None:
-            return intent.model_copy(update={"verb": option.action_hint})
-
-    if any(
-        candidate.id == intent.target.id for candidate in context.player_view.scene.available_exits
-    ):
-        if intent.verb.strip().casefold() in {"travel", "move", "go"} or _is_travel_text(
-            context.player_input.utterance
-        ):
-            return intent.model_copy(update={"verb": "go"})
-        return intent
-
-    canonical = _CANONICAL_VERBS.get(intent.verb.strip().casefold())
-    if canonical is None or canonical == intent.verb:
-        return intent
-    return intent.model_copy(update={"verb": canonical})
-
-
-def _match_available_exit(context: IntentContext):
-    text = context.player_input.utterance.strip().casefold()
-    if not _is_travel_text(text):
-        return None
-    destination_text = text
-    for word in _TRAVEL_WORDS:
-        destination_text = destination_text.replace(word, "")
-    destination_text = destination_text.strip(" ，。！？,.!?")
-    for available_exit in context.player_view.scene.available_exits:
-        candidates = (
-            available_exit.id,
-            available_exit.name,
-            *available_exit.aliases,
-        )
-        if any(
-            candidate
-            and (
-                candidate.casefold() in text
-                or (destination_text and destination_text in candidate.casefold())
-            )
-            for candidate in candidates
-        ):
-            return available_exit
-    return None
-
-
-def _is_travel_text(text: str) -> bool:
-    normalized = text.casefold()
-    return any(word in normalized for word in _TRAVEL_WORDS)
 
 
 class PromptNarrationModel:

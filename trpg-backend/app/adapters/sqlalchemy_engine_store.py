@@ -23,6 +23,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.runtime_state import hydrate_actor_state_from_ruleset
+from app.core.turn_observability import log_state_changes
 from app.models.content import GameSystem
 from app.models.engine import ActionExecution, GameEvent, GameSession, ModuleVersion
 from app.models.room import Room
@@ -42,16 +43,18 @@ class SqlAlchemyEngineStore(EngineStore):
 
     @asynccontextmanager
     async def transaction(self, room_id: str) -> AsyncIterator[EngineTransaction]:
-        async with self._session_factory() as session, session.begin():
+        async with self._session_factory() as session:
             transaction = _SqlAlchemyEngineTransaction(
                 room_id=room_id,
                 session=session,
                 before_commit=self._before_commit,
             )
             try:
-                yield transaction
+                async with session.begin():
+                    yield transaction
             finally:
                 transaction.close()
+            transaction.log_committed_state_changes()
 
 
 class _SqlAlchemyEngineTransaction(EngineTransaction):
@@ -67,6 +70,8 @@ class _SqlAlchemyEngineTransaction(EngineTransaction):
         self._before_commit = before_commit
         self._closed = False
         self._committed = False
+        self._committed_events: tuple[StateModifiedEvent, ...] = ()
+        self._committed_request_id: str | None = None
 
     async def load_runtime(self) -> EngineRuntimeSnapshot:
         self._ensure_active()
@@ -290,10 +295,23 @@ class _SqlAlchemyEngineTransaction(EngineTransaction):
 
         if self._before_commit is not None:
             self._before_commit(self._room_id)
+        self._committed_events = events
+        self._committed_request_id = request.request_id
         self._committed = True
 
     def close(self) -> None:
         self._closed = True
+
+    def log_committed_state_changes(self) -> None:
+        """仅在 SQLAlchemy 事务真正提交成功后输出状态修改。"""
+
+        if not self._committed or self._committed_request_id is None:
+            return
+        log_state_changes(
+            room_id=self._room_id,
+            correlation_id=self._committed_request_id,
+            events=self._committed_events,
+        )
 
     def _ensure_active(self) -> None:
         if self._closed:

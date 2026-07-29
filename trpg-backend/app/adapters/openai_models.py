@@ -88,6 +88,12 @@ _INTENT_INSTRUCTIONS = """\
 
 保留玩家明确声明的方式和目的，不要补写声明。你只提出语义，不裁定骰点、结果或
 状态变化，不泄露隐藏信息，也不叙述行动结果。
+
+recent_history 仅用于解析“是的”“继续”“他”“那些书”等指代和对话承接。
+其中 player_utterance 是未经证实的玩家主张，accepted_intent_summary 只是已校验
+的语义解释，player_safe_result 才是过去的玩家可见权威结果，
+published_narration 只是玩家见过的表达层文本。历史不得新增事实、覆盖当前
+player_view、泄露他人私有信息或授权本回合状态变化。
 """
 
 _NARRATION_INSTRUCTIONS = """\
@@ -102,6 +108,9 @@ _NARRATION_INSTRUCTIONS = """\
 - player_view.self_actor：当前角色的属性、技能、资源、状态、装备和安全背景摘要。
 - player_view.known_information：玩家已经获得且允许当前作用域读取的信息。
 - background：只用于时代、地点、玩家侧故事前提和叙事基调。
+- recent_history：只用于承接玩家已经看到的近期对话和指代。旧玩家原话仍是主张，
+  accepted_intent_summary 只是语义解释，旧 Narration 只是表达层文本；只有其中
+  player_safe_result 才是过去的玩家可见权威结果，而且也不能授权本回合状态变化。
 - action_result.narration_constraints：必须逐条遵守。
 不要推断隐藏状态、守秘人信息、未公开线索、骰点或未提交的状态变化。允许添加少量
 不产生玩法信息的氛围纹理，例如语气、停顿、寂静或与 background 一致的泛化感官

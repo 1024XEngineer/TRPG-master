@@ -36,7 +36,12 @@ from functools import partial
 
 import anyio
 import structlog
-from collaboration_framework.contracts import ActionResult, ContractError, PlayerView
+from collaboration_framework.contracts import (
+    ActionResult,
+    ContractError,
+    PlayerInput,
+    PlayerView,
+)
 from collaboration_framework.engine import RevisionConflictError
 from collaboration_framework.host.application import (
     TurnExecutionError,
@@ -210,7 +215,11 @@ async def _send_view_updated(
 
 
 async def _broadcast_narration(
-    db: AsyncSession, room_id: str, player_id: str | None, text: str
+    db: AsyncSession,
+    room_id: str,
+    player_id: str | None,
+    text: str,
+    player_view: PlayerView,
 ) -> None:
     """广播一条 narration.push，并同步写一行 `events` 表——`GET
     /rooms/{roomId}/replay` 读的就是这里写入的数据（issue #77 才打通的
@@ -219,7 +228,17 @@ async def _broadcast_narration(
     text = normalize_narration_text(text)
     narration = NarrationPushPayload(text=text)
     envelope = ServerEnvelope(type="narration.push", payload=narration.model_dump(by_alias=True))
-    await room_service.record_event(db, room_id, player_id, "narration.push", {"text": text})
+    await room_service.record_event(
+        db,
+        room_id,
+        player_id,
+        "narration.push",
+        {"text": text},
+        visibility="public",
+        actor_id=player_view.actor_id,
+        scene_id=player_view.scene_id,
+        view_revision=player_view.revision,
+    )
     log_narration_output(
         room_id=room_id,
         correlation_id=None,
@@ -238,6 +257,9 @@ async def _deliver_turn_narration(
     client_action_id: str,
     text: str,
     clarification: bool,
+    actor_id: str,
+    scene_id: str,
+    view_revision: str,
 ) -> bool:
     """持久化去重成功后才发送一次动作叙事。"""
 
@@ -248,10 +270,20 @@ async def _deliver_turn_narration(
         player_id,
         "narration.push",
         {"text": text},
+        visibility="player_scoped" if clarification else "public",
+        actor_id=actor_id,
+        scene_id=scene_id,
+        view_revision=view_revision,
         correlation_id=client_action_id,
     )
     if not recorded:
         return False
+    log_narration_output(
+        room_id=room_id,
+        correlation_id=client_action_id,
+        text=text,
+        clarification=clarification,
+    )
     narration = NarrationPushPayload(text=text)
     envelope = ServerEnvelope(type="narration.push", payload=narration.model_dump(by_alias=True))
     message = envelope.model_dump(by_alias=True)
@@ -259,12 +291,6 @@ async def _deliver_turn_narration(
         await websocket.send_json(message)
     else:
         await manager.broadcast(room_id, message)
-    log_narration_output(
-        room_id=room_id,
-        correlation_id=client_action_id,
-        text=text,
-        clarification=clarification,
-    )
     return True
 
 
@@ -301,6 +327,7 @@ async def _send_check_result(
     player_id: str,
     prepared: PreparedTurn,
     action_result: ActionResult,
+    player_view: PlayerView,
 ) -> None:
     check_result = action_result.check_result
     if check_result is None:
@@ -326,6 +353,10 @@ async def _send_check_result(
         player_id,
         "check.result",
         payload.model_dump(by_alias=True, mode="json"),
+        visibility="player_scoped",
+        actor_id=prepared.player_input.actor_id,
+        scene_id=player_view.scene_id,
+        view_revision=player_view.revision,
         correlation_id=prepared.player_input.client_action_id,
     )
     if not recorded:
@@ -366,6 +397,9 @@ async def _send_completed_turn(
         client_action_id=output.player_input.client_action_id,
         text=output.narration.text,
         clarification=output.narration.kind == "clarification",
+        actor_id=output.player_input.actor_id,
+        scene_id=output.player_view.scene_id,
+        view_revision=output.player_view.revision,
     )
     if output.player_view.phase == "ended":
         await broadcast_room_state(db, room_id)
@@ -400,45 +434,51 @@ def _map_turn_error(exc: Exception) -> tuple[str, str, bool]:
 
 async def _broadcast_action_utterance(
     db: AsyncSession,
-    room_id: str,
-    player_id: str,
-    client_action_id: str,
-    utterance: str,
+    player_input: PlayerInput,
+    player_view: PlayerView,
 ) -> None:
     """广播玩家原话，但不把讨论区消息混入叙事事件历史。"""
 
-    player = await room_service.get_player(db, player_id)
+    player = await room_service.get_player(db, player_input.player_id)
     nickname = player.nickname if player is not None else "玩家"
-    character_name = await room_service.get_player_character_name(db, player_id, fallback=nickname)
+    character_name = await room_service.get_player_character_name(
+        db,
+        player_input.player_id,
+        fallback=nickname,
+    )
     payload = ActionBroadcastPayload(
-        player_id=player_id,
-        client_action_id=client_action_id,
+        player_id=player_input.player_id,
+        client_action_id=player_input.client_action_id,
         nickname=nickname,
         character_name=character_name,
-        utterance=utterance,
+        utterance=player_input.utterance,
     )
     recorded = await room_service.record_event(
         db,
-        room_id,
-        player_id,
+        player_input.room_id,
+        player_input.player_id,
         "action.broadcast",
         payload.model_dump(by_alias=True, mode="json"),
-        correlation_id=client_action_id,
+        visibility="public",
+        actor_id=player_input.actor_id,
+        scene_id=player_view.scene_id,
+        view_revision=player_view.revision,
+        correlation_id=player_input.client_action_id,
     )
     if not recorded:
         return
     log_player_input(
-        room_id=room_id,
-        player_id=player_id,
+        room_id=player_input.room_id,
+        player_id=player_input.player_id,
         character_name=character_name,
-        correlation_id=client_action_id,
-        utterance=utterance,
+        correlation_id=player_input.client_action_id,
+        utterance=player_input.utterance,
     )
     envelope = ServerEnvelope(
         type="action.broadcast",
         payload=payload.model_dump(by_alias=True),
     )
-    await manager.broadcast(room_id, envelope.model_dump(by_alias=True))
+    await manager.broadcast(player_input.room_id, envelope.model_dump(by_alias=True))
 
 
 async def _handle_chat_send(
@@ -627,6 +667,7 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                             room_id,
                             bound_player_id,
                             (f"{initial_view.scene.name}\n{initial_view.scene.description}"),
+                            initial_view,
                         )
                         await broadcast_room_state(db, room_id)
                     elif event_type == "chat.send":
@@ -700,14 +741,6 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                     )
                                 continue
 
-                            await _broadcast_action_utterance(
-                                db,
-                                room_id,
-                                bound_player_id,
-                                submit_payload.client_action_id,
-                                submit_payload.utterance,
-                            )
-
                             prepared = await turn_application.prepare(
                                 room_id=room_id,
                                 player_id=bound_player_id,
@@ -716,6 +749,10 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 on_event=lambda event: _send_turn_event(
                                     websocket,
                                     event,
+                                ),
+                                on_input_accepted=partial(
+                                    _broadcast_action_utterance,
+                                    db,
                                 ),
                             )
                             if prepared.candidates:

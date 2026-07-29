@@ -23,6 +23,7 @@ from collaboration_framework.host.schemas import (
     HostAgentFailed,
     HostAgentToolCompleted,
     HostAgentToolStarted,
+    RecentTurnContext,
     make_tool_error,
 )
 from collaboration_framework.host.tools import (
@@ -34,45 +35,51 @@ RUN_QWEN_SMOKE = os.getenv("RUN_QWEN_SMOKE") == "1"
 
 
 def make_context(utterance: str) -> HostAgentContext:
-    return HostAgentContext(
-        player_input=PlayerInput(
-            room_id="smoke_room",
-            player_id="smoke_player",
-            actor_id="smoke_actor",
-            client_action_id="smoke_action",
-            utterance=utterance,
+    player_input = PlayerInput(
+        room_id="smoke_room",
+        player_id="smoke_player",
+        actor_id="smoke_actor",
+        client_action_id="smoke_action",
+        utterance=utterance,
+    )
+    player_view = PlayerView(
+        room_id="smoke_room",
+        player_id="smoke_player",
+        actor_id="smoke_actor",
+        background="玩家可见的测试背景。",
+        scene_id="smoke_library",
+        phase="playing",
+        revision="1",
+        self_actor=SelfActorView(id="smoke_actor", name="调查员"),
+        scene=SceneView(
+            id="smoke_library",
+            name="图书馆",
+            description="一间玩家当前可见的图书馆。",
+            visible_entities=(
+                VisibleEntity(
+                    id="smoke_bookshelf_42",
+                    kind="object",
+                    name="红色书架",
+                    aliases=("书架",),
+                    description="一个玩家当前可见的红色木书架。",
+                ),
+            ),
         ),
-        player_view=PlayerView(
-            room_id="smoke_room",
-            player_id="smoke_player",
-            actor_id="smoke_actor",
-            background="玩家可见的测试背景。",
-            scene_id="smoke_library",
-            phase="playing",
-            revision="1",
-            self_actor=SelfActorView(id="smoke_actor", name="调查员"),
-            scene=SceneView(
-                id="smoke_library",
-                name="图书馆",
-                description="一间玩家当前可见的图书馆。",
-                visible_entities=(
-                    VisibleEntity(
-                        id="smoke_bookshelf_42",
-                        kind="object",
-                        name="红色书架",
-                        aliases=("书架",),
-                        description="一个玩家当前可见的红色木书架。",
-                    ),
-                ),
+        checkpoint_options=(
+            CheckpointOption(
+                id="smoke_checkpoint_search",
+                target_id="smoke_bookshelf_42",
+                action_hint="仔细检查书架",
+                skills=("侦查",),
             ),
-            checkpoint_options=(
-                CheckpointOption(
-                    id="smoke_checkpoint_search",
-                    target_id="smoke_bookshelf_42",
-                    action_hint="仔细检查书架",
-                    skills=("侦查",),
-                ),
-            ),
+        ),
+    )
+    return HostAgentContext(
+        player_input=player_input,
+        player_view=player_view,
+        recent_history=RecentTurnContext.empty(
+            player_input=player_input,
+            player_view=player_view,
         ),
     )
 

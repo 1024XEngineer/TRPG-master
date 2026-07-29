@@ -30,13 +30,24 @@ from collaboration_framework.host.application import (
     PlayerViewProjector,
     validate_intent_against_view,
 )
-from collaboration_framework.host.schemas import IntentContext
+from collaboration_framework.host.schemas import IntentContext, RecentTurnContext
 
 ROOT = Path(__file__).resolve().parents[1]
 KEEPER_SECRET = "KEEPER_ONLY_SCENE_INSTRUCTIONS"
 RAW_STATE_SECRET = "RAW_ENTITY_STATE_SECRET"
 OTHER_CARD_SECRET = "OTHER_ACTOR_PRIVATE_CARD"
 PRIVATE_NOTE = "PLAYER_PRIVATE_NOTE"
+
+
+def intent_context(*, player_input: PlayerInput, player_view) -> IntentContext:
+    return IntentContext(
+        player_input=player_input,
+        player_view=player_view,
+        recent_history=RecentTurnContext.empty(
+            player_input=player_input,
+            player_view=player_view,
+        ),
+    )
 
 
 def player_view_module() -> ModuleContent:
@@ -347,7 +358,7 @@ class PlayerViewV2Tests(unittest.IsolatedAsyncioTestCase):
             check=NoCheck(),
             summary="从北侧门离开",
         )
-        context = IntentContext(
+        context = intent_context(
             player_input=player_input(utterance="从北侧门离开"),
             player_view=view,
         )
@@ -384,7 +395,7 @@ class PlayerViewV2Tests(unittest.IsolatedAsyncioTestCase):
             check=NoCheck(),
             summary="前往阁楼",
         )
-        context = IntentContext(
+        context = intent_context(
             player_input=player_input(utterance="前往阁楼"),
             player_view=view,
         )
@@ -421,7 +432,7 @@ class PlayerViewV2Tests(unittest.IsolatedAsyncioTestCase):
             check=NoCheck(),
             summary="前往阁楼",
         )
-        context = IntentContext(
+        context = intent_context(
             player_input=player_input(utterance="前往阁楼"),
             player_view=view,
         )
@@ -461,7 +472,7 @@ class PlayerViewV2Tests(unittest.IsolatedAsyncioTestCase):
         store.register_room(module_content=module, initial_state=self.state)
         service = RuleEngineService(store)
         view = await PlayerViewProjector(service).project(player_input())
-        context = IntentContext(
+        context = intent_context(
             player_input=player_input(utterance="打开花园门"),
             player_view=view,
         )
@@ -478,7 +489,7 @@ class PlayerViewV2Tests(unittest.IsolatedAsyncioTestCase):
 
     async def test_default_check_only_accepts_current_actor_candidates(self) -> None:
         view = await PlayerViewProjector(self.service).project(player_input())
-        context = IntentContext(player_input=player_input(), player_view=view)
+        context = intent_context(player_input=player_input(), player_view=view)
         valid = Intent(
             kind="action",
             verb="inspect",
@@ -518,7 +529,7 @@ class PlayerViewV2Tests(unittest.IsolatedAsyncioTestCase):
             check=DefaultCheck(proposed_skills=("spot-hidden",)),
             summary="仔细观察整个房间",
         )
-        context = IntentContext(
+        context = intent_context(
             player_input=player_input(utterance="我仔细观察整个房间"),
             player_view=view,
         )
@@ -619,7 +630,7 @@ class PlayerViewV2Tests(unittest.IsolatedAsyncioTestCase):
             approach="保持隐蔽",
             summary="潜行穿过北侧门",
         )
-        context = IntentContext(
+        context = intent_context(
             player_input=player_input(utterance="我潜行穿过北侧门"),
             player_view=view,
         )

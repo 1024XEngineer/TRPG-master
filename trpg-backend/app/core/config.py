@@ -70,6 +70,9 @@ class Settings(BaseSettings):
     host_agent_max_tool_calls: int = Field(default=8, gt=0, le=50)
     host_agent_tool_timeout_seconds: float = Field(default=5.0, gt=0, le=30)
     host_agent_timeout_seconds: float = Field(default=30.0, gt=0, le=120)
+    recent_history_enabled: bool = True
+    recent_history_max_turns: int = Field(default=6, ge=1, le=24)
+    recent_history_max_chars: int = Field(default=6000, ge=2)
 
     # 讨论区/Narrator 主线的兼容配置：未配置时使用确定性占位叙事，测试可通过
     # 延迟钩子稳定覆盖行动锁并发分支。

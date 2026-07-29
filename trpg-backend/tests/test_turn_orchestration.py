@@ -14,10 +14,17 @@ from collaboration_framework.host.schemas import (
     HostAgentEvent,
     HostAgentUsage,
     NarrationContext,
+    RecentTurnContext,
 )
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.ext.asyncio import AsyncSession
 from structlog.testing import capture_logs
 
+from app.adapters import SqlAlchemyRecentHistorySource
+from app.core.config import Settings
 from app.core.turn import build_turn_application
+from app.models.event import Event
+from app.models.room import Player, Room
 from tests.test_openai_models import conversation_state, load_paper_chase
 
 SECRET_SENTINEL = "SECRET_SENTINEL_DO_NOT_LEAK"
@@ -79,6 +86,90 @@ class CountingEngine(RuleEngineService):
     async def execute(self, request):
         self.execute_calls += 1
         return await super().execute(request)
+
+
+class CapturingHistoryHost(CountingHostAgent):
+    def __init__(self) -> None:
+        super().__init__()
+        self.contexts: list[HostAgentContext] = []
+
+    async def astream(self, context: HostAgentContext) -> AsyncIterator[HostAgentEvent]:
+        self.contexts.append(context)
+        async for event in super().astream(context):
+            yield event
+
+
+class InvalidHistorySource:
+    async def read(self, *, player_input, player_view, **_):  # noqa: ANN001
+        return RecentTurnContext.model_construct(
+            room_id=player_input.room_id,
+            viewer_player_id="another-player",
+            as_of_revision=player_view.revision,
+            turns=(),
+        )
+
+
+class UnavailableHistorySource:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def read(self, **_):  # noqa: ANN003
+        self.calls += 1
+        raise OperationalError("SELECT recent history", {}, Exception("offline"))
+
+
+class PaperChaseHistoryHost(CountingHostAgent):
+    def __init__(self) -> None:
+        super().__init__(target_id="thomas")
+        self.contexts: list[HostAgentContext] = []
+
+    async def astream(self, context: HostAgentContext) -> AsyncIterator[HostAgentEvent]:
+        self.contexts.append(context)
+        self.calls += 1
+        if context.player_input.utterance == "是的":
+            previous = context.recent_history.turns[-1]
+            summary = "确认上一轮关于五本书是否都被叔叔带走的问题"
+            assert "五本书" in previous.player_utterance.text
+            assert previous.published_narration is not None
+            assert "确定" in previous.published_narration.text
+        else:
+            summary = context.player_input.utterance
+        yield HostAgentCompleted(
+            type="agent.completed",
+            raw_output={
+                "kind": "dialogue",
+                "verb": "talk",
+                "target": {"matched": True, "id": "thomas"},
+                "check": {"route": "none"},
+                "summary": summary,
+            },
+            usage=HostAgentUsage(
+                model_rounds=1,
+                tool_calls=0,
+                duration_ms=1,
+                termination_reason="completed",
+            ),
+        )
+
+
+class PaperChaseHistoryNarration:
+    def __init__(self) -> None:
+        self.contexts: list[NarrationContext] = []
+
+    async def generate(self, context: NarrationContext):
+        self.contexts.append(context)
+        if "五本书" in context.player_input.utterance:
+            text = "托马斯皱起眉头：你确定五本书都被叔叔一起带走了吗？"
+        elif context.player_input.utterance == "是的":
+            text = "托马斯缓缓点头，把这项说法记了下来。"
+        else:
+            text = "托马斯安静地听着，没有把你的说法当作既定事实。"
+        return {
+            "kind": "narration",
+            "text": text,
+            "claimed_fact_ids": [],
+            "suggested_actions": [],
+        }
 
 
 class InvalidThenSafeNarration:
@@ -143,6 +234,195 @@ def application(host_agent, narration_model):
         narration_model=narration_model,
     )
     return app, store, state, engine
+
+
+@pytest.mark.asyncio
+async def test_invalid_recent_history_fails_before_host_and_executor() -> None:
+    host = CapturingHistoryHost()
+    module = load_paper_chase()
+    state = conversation_state(module).model_copy(update={"scene_id": "client_briefing"})
+    store = InMemoryEngineStore()
+    store.register_room(module_content=module, initial_state=state)
+    engine = CountingEngine(store)
+    app = build_turn_application(
+        store,
+        engine,
+        host_agent=host,
+        narration_model=FakeNarrationModel(),
+        recent_history_source=InvalidHistorySource(),
+    )
+
+    with pytest.raises(TurnExecutionError) as failed:
+        await app.prepare(
+            room_id=state.room_id,
+            player_id="player_1",
+            client_action_id="invalid-history",
+            utterance="继续",
+        )
+
+    assert failed.value.code == "RECENT_HISTORY_INVALID"
+    assert host.calls == 0
+    assert engine.execute_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_unavailable_recent_history_degrades_to_empty_single_turn_flow() -> None:
+    host = CapturingHistoryHost()
+    source = UnavailableHistorySource()
+    module = load_paper_chase()
+    state = conversation_state(module).model_copy(update={"scene_id": "client_briefing"})
+    store = InMemoryEngineStore()
+    store.register_room(module_content=module, initial_state=state)
+    engine = CountingEngine(store)
+    app = build_turn_application(
+        store,
+        engine,
+        host_agent=host,
+        narration_model=FakeNarrationModel(),
+        recent_history_source=source,
+    )
+
+    output = await app.handle(
+        room_id=state.room_id,
+        player_id="player_1",
+        client_action_id="degraded-history",
+        utterance="我询问托马斯",
+    )
+
+    assert output.correlation_id == "degraded-history"
+    assert source.calls == 1
+    assert host.contexts[0].recent_history.turns == ()
+    assert engine.execute_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_disabled_recent_history_keeps_required_empty_contract_without_reading() -> None:
+    host = CapturingHistoryHost()
+    source = UnavailableHistorySource()
+    module = load_paper_chase()
+    state = conversation_state(module).model_copy(update={"scene_id": "client_briefing"})
+    store = InMemoryEngineStore()
+    store.register_room(module_content=module, initial_state=state)
+    engine = CountingEngine(store)
+    app = build_turn_application(
+        store,
+        engine,
+        settings=Settings(recent_history_enabled=False),
+        host_agent=host,
+        narration_model=FakeNarrationModel(),
+        recent_history_source=source,
+    )
+
+    await app.handle(
+        room_id=state.room_id,
+        player_id="player_1",
+        client_action_id="disabled-history",
+        utterance="我询问托马斯",
+    )
+
+    assert source.calls == 0
+    assert host.contexts[0].recent_history.turns == ()
+
+
+@pytest.mark.asyncio
+async def test_paper_chase_three_turn_recent_continuity_uses_published_history(
+    db_session: AsyncSession,
+    recent_history_source: SqlAlchemyRecentHistorySource,
+) -> None:
+    room_id = "80000000-0000-0000-0000-000000000001"
+    player_id = "80000000-0000-0000-0000-000000000002"
+    db_session.add(Room(id=room_id, room_code="RH0170", room_name="追书人历史", max_players=1))
+    db_session.add(
+        Player(
+            id=player_id,
+            room_id=room_id,
+            nickname="调查员",
+            reconnect_token="80000000-0000-0000-0000-000000000012",
+        )
+    )
+    await db_session.commit()
+
+    module = load_paper_chase()
+    original_state = conversation_state(module).model_copy(update={"scene_id": "client_briefing"})
+    actor = original_state.actors["actor_1"].model_copy(update={"player_id": player_id})
+    state = original_state.model_copy(update={"room_id": room_id, "actors": {"actor_1": actor}})
+    store = InMemoryEngineStore()
+    store.register_room(module_content=module, initial_state=state)
+    engine = CountingEngine(store)
+    host = PaperChaseHistoryHost()
+    narration = PaperChaseHistoryNarration()
+    app = build_turn_application(
+        store,
+        engine,
+        host_agent=host,
+        narration_model=narration,
+        recent_history_source=recent_history_source,
+    )
+
+    async def persist_action(player_input, player_view):  # noqa: ANN001
+        db_session.add(
+            Event(
+                room_id=room_id,
+                player_id=player_id,
+                event_type="action.broadcast",
+                correlation_id=player_input.client_action_id,
+                visibility="public",
+                actor_id=player_input.actor_id,
+                scene_id=player_view.scene_id,
+                view_revision=player_view.revision,
+                payload={"utterance": player_input.utterance},
+            )
+        )
+        await db_session.commit()
+
+    utterances = (
+        "我告诉托马斯，叔叔去了很远的地方",
+        "五本书被叔叔一起带走",
+        "是的",
+    )
+    outputs = []
+    for index, utterance in enumerate(utterances, start=1):
+        prepared = await app.prepare(
+            room_id=room_id,
+            player_id=player_id,
+            client_action_id=f"paper-chase-{index}",
+            utterance=utterance,
+            on_input_accepted=persist_action,
+        )
+        output = await app.complete(prepared)
+        outputs.append(output)
+        db_session.add(
+            Event(
+                room_id=room_id,
+                player_id=player_id,
+                event_type="narration.push",
+                correlation_id=prepared.player_input.client_action_id,
+                visibility="public",
+                actor_id=prepared.player_input.actor_id,
+                scene_id=output.player_view.scene_id,
+                view_revision=output.player_view.revision,
+                payload={"text": output.narration.text},
+            )
+        )
+        await db_session.commit()
+
+    assert [turn.player_utterance.text for turn in host.contexts[1].recent_history.turns] == [
+        utterances[0]
+    ]
+    assert [turn.player_utterance.text for turn in host.contexts[2].recent_history.turns] == list(
+        utterances[:2]
+    )
+    assert host.contexts[2].recent_history.turns[-1].published_narration is not None
+    assert outputs[2].intent.kind == "dialogue"
+    assert outputs[2].intent.summary.startswith("确认上一轮")
+    assert "确定五本书" not in outputs[2].narration.text
+    assert engine.execute_calls == 3
+    known_information = json.dumps(
+        [item.to_json_dict() for item in outputs[2].player_view.known_information],
+        ensure_ascii=False,
+    )
+    assert "叔叔去了很远的地方" not in known_information
+    assert "五本书被叔叔一起带走" not in known_information
 
 
 @pytest.mark.asyncio
@@ -211,7 +491,7 @@ async def test_two_invalid_narrations_fail_closed_and_manual_retry_skips_executo
     app, store, state, engine = application(host, narration)
     action_result_calls = 0
 
-    async def record_action_result(_):
+    async def record_action_result(_, __):
         nonlocal action_result_calls
         action_result_calls += 1
 

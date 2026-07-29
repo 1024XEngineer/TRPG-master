@@ -13,13 +13,20 @@ from .agent import (
     HostAgentUsage,
 )
 from .context import IntentContext, NarrationContext
+from .history import (
+    HistoryVisibility,
+    RecentHistoryBudget,
+    RecentSafeResult,
+    RecentTurn,
+    RecentTurnContext,
+    VisibleHistoryText,
+)
 from .output import (
     NarrationOutput,
     PlayerTurnPayload,
     TurnOutput,
     WebSocketOutput,
 )
-from .turn import TurnState
 from .tools import (
     GetVisibleEntityArgs,
     GetVisibleEntityResult,
@@ -31,6 +38,7 @@ from .tools import (
     VisibleEntitySummary,
     make_tool_error,
 )
+from .turn import TurnState
 
 __all__ = [
     "HostAgentCompleted",
@@ -48,9 +56,14 @@ __all__ = [
     "GetVisibleEntityArgs",
     "GetVisibleEntityResult",
     "IntentContext",
+    "HistoryVisibility",
     "NarrationContext",
     "NarrationOutput",
     "PlayerTurnPayload",
+    "RecentHistoryBudget",
+    "RecentSafeResult",
+    "RecentTurn",
+    "RecentTurnContext",
     "SearchVisibleEntitiesArgs",
     "SearchVisibleEntitiesResult",
     "ToolError",
@@ -59,6 +72,7 @@ __all__ = [
     "TurnOutput",
     "TurnState",
     "VisibleEntitySummary",
+    "VisibleHistoryText",
     "WebSocketOutput",
     "make_tool_error",
 ]

@@ -27,6 +27,7 @@ from collaboration_framework.contracts import (
 from collaboration_framework.engine import EngineStore, RuleEngineService
 from collaboration_framework.host.adapters import OneShotHostAgentAdapter
 from collaboration_framework.host.adapters.fakes import FakeHostAgent, FakeNarrationModel
+from collaboration_framework.host.adapters.openai_agents import PROMPT_VERSION
 from collaboration_framework.host.application import (
     ContextAssembler,
     HostAgentIntentResolver,
@@ -39,6 +40,7 @@ from collaboration_framework.host.ports import (
     HostAgentPort,
     IntentModelPort,
     NarrationModelPort,
+    RecentHistorySource,
 )
 from collaboration_framework.host.schemas import (
     HostAgentCompleted,
@@ -47,9 +49,13 @@ from collaboration_framework.host.schemas import (
     HostAgentFailed,
     HostAgentToolCompleted,
     HostAgentToolStarted,
+    RecentHistoryBudget,
+    RecentTurnContext,
     TurnOutput,
     WebSocketOutput,
 )
+from pydantic import ValidationError
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.adapters import (
     DeepSeekChatCompletionsJsonClient,
@@ -57,8 +63,10 @@ from app.adapters import (
     PromptIntentModel,
     PromptNarrationModel,
     QwenChatCompletionsJsonClient,
+    SqlAlchemyRecentHistorySource,
 )
 from app.core.config import Settings, get_settings
+from app.core.db import async_session_factory
 from app.core.engine import engine_store, rule_engine_service
 from app.core.turn_events import (
     TurnEventSink,
@@ -77,7 +85,8 @@ class ActorResolutionError(ContractError):
 
 
 CheckDifficulty = Literal["regular", "hard", "extreme"]
-ActionResultSink = Callable[[ActionResult], Awaitable[None]]
+ActionResultSink = Callable[[ActionResult, PlayerView], Awaitable[None]]
+TurnInputAcceptedSink = Callable[[PlayerInput, PlayerView], Awaitable[None]]
 
 _PUBLIC_TOOL_LABELS = {
     "search_visible_entities": "守秘人正在查看当前场景",
@@ -101,6 +110,7 @@ class SkillCheckCandidate:
 class PreparedTurn:
     player_input: PlayerInput
     view_before: PlayerView
+    recent_history: RecentTurnContext
     intent: Intent
     candidates: tuple[SkillCheckCandidate, ...]
     difficulty: CheckDifficulty
@@ -112,7 +122,24 @@ class PreparedTurn:
 class HostModelMetadata:
     provider: str
     model: str
-    prompt_version: str = "trpg-host-intent-v2"
+    prompt_version: str = PROMPT_VERSION
+
+
+@dataclass(frozen=True)
+class EmptyRecentHistorySource:
+    async def read(
+        self,
+        *,
+        player_input: PlayerInput,
+        player_view: PlayerView,
+        exclude_correlation_id: str,
+        budget: RecentHistoryBudget,
+    ) -> RecentTurnContext:
+        del exclude_correlation_id, budget
+        return RecentTurnContext.empty(
+            player_input=player_input,
+            player_view=player_view,
+        )
 
 
 @dataclass(frozen=True)
@@ -124,6 +151,9 @@ class TurnApplication:
     intent_resolver: HostAgentIntentResolver
     narration_model: NarrationModelPort
     host_metadata: HostModelMetadata
+    recent_history_source: RecentHistorySource
+    recent_history_budget: RecentHistoryBudget
+    recent_history_enabled: bool
 
     async def resolve_actor_id(self, room_id: str, player_id: str) -> str:
         return await self._load_turn_scope(room_id, player_id)
@@ -170,6 +200,7 @@ class TurnApplication:
         client_action_id: str,
         utterance: str,
         on_event: TurnEventSink | None = None,
+        on_input_accepted: TurnInputAcceptedSink | None = None,
     ) -> WebSocketOutput:
         prepared = await self.prepare(
             room_id=room_id,
@@ -177,6 +208,7 @@ class TurnApplication:
             client_action_id=client_action_id,
             utterance=utterance,
             on_event=on_event,
+            on_input_accepted=on_input_accepted,
         )
         return (
             await self.complete(
@@ -193,7 +225,20 @@ class TurnApplication:
         client_action_id: str,
         utterance: str,
         on_event: TurnEventSink | None = None,
+        on_input_accepted: TurnInputAcceptedSink | None = None,
     ) -> PreparedTurn:
+        actor_id = await self._load_turn_scope(room_id, player_id)
+        player_input = PlayerInput(
+            room_id=room_id,
+            player_id=player_id,
+            actor_id=actor_id,
+            client_action_id=client_action_id,
+            utterance=utterance,
+        )
+        projector = PlayerViewProjector(self.engine)
+        view_before = await projector.project(player_input)
+        if on_input_accepted is not None:
+            await on_input_accepted(player_input, view_before)
         await emit_turn_event(
             on_event,
             TurnStarted(correlation_id=client_action_id),
@@ -205,16 +250,44 @@ class TurnApplication:
                 phase="reading_player_view",
             ),
         )
-        actor_id = await self._load_turn_scope(room_id, player_id)
-        player_input = PlayerInput(
-            room_id=room_id,
-            player_id=player_id,
-            actor_id=actor_id,
-            client_action_id=client_action_id,
-            utterance=utterance,
+        recent_history = RecentTurnContext.empty(
+            player_input=player_input,
+            player_view=view_before,
         )
-        projector = PlayerViewProjector(self.engine)
-        view_before = await projector.project(player_input)
+        history_degraded = False
+        if self.recent_history_enabled:
+            try:
+                recent_history = await self.recent_history_source.read(
+                    player_input=player_input,
+                    player_view=view_before,
+                    exclude_correlation_id=client_action_id,
+                    budget=self.recent_history_budget,
+                )
+                recent_history.validate_for(
+                    player_input=player_input,
+                    player_view=view_before,
+                )
+            except (ValidationError, ContractError, ValueError) as exc:
+                raise TurnExecutionError(
+                    "RECENT_HISTORY_INVALID",
+                    "近期历史未通过安全校验，本次动作未执行",
+                    retryable=False,
+                ) from exc
+            except (SQLAlchemyError, OSError, TimeoutError) as exc:
+                history_degraded = True
+                logger.warning(
+                    "recent_history_degraded",
+                    room_ref=hashlib.sha256(room_id.encode("utf-8")).hexdigest()[:12],
+                    correlation_id=client_action_id,
+                    degraded=True,
+                    error_type=type(exc).__name__,
+                )
+        self._log_recent_history(
+            room_id=room_id,
+            correlation_id=client_action_id,
+            recent_history=recent_history,
+            degraded=history_degraded,
+        )
         async with self.store.transaction(room_id) as transaction:
             completed = await transaction.find_completed_action(client_action_id)
         if completed is not None:
@@ -270,6 +343,7 @@ class TurnApplication:
                     HostAgentContext(
                         player_input=player_input,
                         player_view=view_before,
+                        recent_history=recent_history,
                     ),
                     on_event=observe_host_event,
                 )
@@ -303,6 +377,7 @@ class TurnApplication:
         return PreparedTurn(
             player_input=player_input,
             view_before=view_before,
+            recent_history=recent_history,
             intent=intent,
             candidates=candidates,
             difficulty=difficulty,
@@ -341,6 +416,7 @@ class TurnApplication:
                 phase="executing_action",
             ),
         )
+        executed_now = prepared.completed_action_result is None
         if prepared.completed_action_result is None:
             action_result = await self.engine.execute(
                 ActionRequest(
@@ -356,17 +432,8 @@ class TurnApplication:
                     ),
                 )
             )
-            if on_action_result is not None:
-                await on_action_result(action_result)
         else:
             action_result = prepared.completed_action_result.model_copy(deep=True)
-        await emit_turn_event(
-            on_event,
-            TurnPhaseChanged(
-                correlation_id=prepared.player_input.client_action_id,
-                phase="refreshing_player_view",
-            ),
-        )
         projector = PlayerViewProjector(self.engine)
         view_after = await projector.refresh(prepared.player_input, action_result)
         if (
@@ -380,6 +447,15 @@ class TurnApplication:
                 "规则结果与玩家视图版本不一致，请重试",
                 retryable=True,
             )
+        if executed_now and on_action_result is not None:
+            await on_action_result(action_result, view_after)
+        await emit_turn_event(
+            on_event,
+            TurnPhaseChanged(
+                correlation_id=prepared.player_input.client_action_id,
+                phase="refreshing_player_view",
+            ),
+        )
         await emit_turn_event(
             on_event,
             TurnPhaseChanged(
@@ -392,6 +468,7 @@ class TurnApplication:
             intent,
             action_result,
             view_after,
+            prepared.recent_history.model_copy(update={"as_of_revision": view_after.revision}),
         )
         narrator = Narrator(self.narration_model)
         narration = None
@@ -495,6 +572,40 @@ class TurnApplication:
         else:
             logger.warning("host_agent_run_failed", **fields)
 
+    def _log_recent_history(
+        self,
+        *,
+        room_id: str,
+        correlation_id: str,
+        recent_history: RecentTurnContext,
+        degraded: bool,
+    ) -> None:
+        character_count = sum(
+            len(turn.player_utterance.text)
+            + len(turn.accepted_intent_summary or "")
+            + (len(turn.published_narration.text) if turn.published_narration is not None else 0)
+            + sum(
+                len(fact.text)
+                for fact in (
+                    turn.player_safe_result.visible_facts
+                    if turn.player_safe_result is not None
+                    else ()
+                )
+            )
+            for turn in recent_history.turns
+        )
+        logger.info(
+            "recent_history_selected",
+            room_ref=hashlib.sha256(room_id.encode("utf-8")).hexdigest()[:12],
+            correlation_id=correlation_id,
+            selected_turn_count=len(recent_history.turns),
+            character_count=character_count,
+            degraded=degraded,
+            provider=self.host_metadata.provider,
+            model=self.host_metadata.model,
+            prompt_version=self.host_metadata.prompt_version,
+        )
+
     @staticmethod
     def _check_candidates(
         intent: Intent,
@@ -561,9 +672,11 @@ def build_turn_application(
     intent_model: IntentModelPort | None = None,
     narration_model: NarrationModelPort | None = None,
     host_metadata: HostModelMetadata | None = None,
+    recent_history_source: RecentHistorySource | None = None,
 ) -> TurnApplication:
     """Compose the sole production turn path around one HostAgentPort."""
 
+    resolved_settings = settings or get_settings()
     resolver_inputs = sum(
         value is not None for value in (host_agent, intent_resolver, intent_model)
     )
@@ -572,9 +685,7 @@ def build_turn_application(
     if narration_model is None:
         if resolver_inputs:
             raise ValueError("自定义 Host Agent 时必须同时提供 narration_model")
-        intent_resolver, narration_model, host_metadata = _configured_models(
-            settings or get_settings()
-        )
+        intent_resolver, narration_model, host_metadata = _configured_models(resolved_settings)
     elif intent_resolver is None:
         if host_agent is not None:
             intent_resolver = HostAgentIntentResolver(host_agent)
@@ -593,6 +704,12 @@ def build_turn_application(
         intent_resolver=intent_resolver,
         narration_model=narration_model,
         host_metadata=host_metadata,
+        recent_history_source=recent_history_source or EmptyRecentHistorySource(),
+        recent_history_budget=RecentHistoryBudget(
+            max_turns=resolved_settings.recent_history_max_turns,
+            max_chars=resolved_settings.recent_history_max_chars,
+        ),
+        recent_history_enabled=resolved_settings.recent_history_enabled,
     )
 
 
@@ -684,7 +801,11 @@ def _configured_models(
         )
 
 
-turn_application = build_turn_application(engine_store, rule_engine_service)
+turn_application = build_turn_application(
+    engine_store,
+    rule_engine_service,
+    recent_history_source=SqlAlchemyRecentHistorySource(async_session_factory),
+)
 
 __all__ = [
     "ActorResolutionError",

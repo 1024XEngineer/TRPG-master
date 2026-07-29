@@ -5,7 +5,11 @@ from collaboration_framework.contracts import (
     PlayerInput,
     player_input_fingerprint,
 )
-from collaboration_framework.host.schemas import HostAgentContext, TurnOutput
+from collaboration_framework.host.schemas import (
+    HostAgentContext,
+    RecentTurnContext,
+    TurnOutput,
+)
 from collaboration_framework.ports import ActionExecutor
 
 from .context_assembler import ContextAssembler
@@ -32,10 +36,15 @@ class Orchestrator:
 
     async def run(self, player_input: PlayerInput) -> TurnOutput:
         view_before = await self._player_view_projector.project(player_input)
+        recent_history = RecentTurnContext.empty(
+            player_input=player_input,
+            player_view=view_before,
+        )
         intent = await self._host_intent_resolver.resolve(
             HostAgentContext(
                 player_input=player_input,
                 player_view=view_before,
+                recent_history=recent_history,
             )
         )
 
@@ -61,6 +70,7 @@ class Orchestrator:
             intent,
             action_result,
             view_after,
+            recent_history.model_copy(update={"as_of_revision": view_after.revision}),
         )
         narration = await self._narrator.narrate(narration_context)
         status = "clarification" if narration.kind == "clarification" else "completed"

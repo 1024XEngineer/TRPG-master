@@ -8,6 +8,7 @@ from app.adapters.openai_models import (
 )
 from app.adapters.qwen_models import QwenChatCompletionsJsonClient
 from app.adapters.sqlalchemy_engine_store import SqlAlchemyEngineStore
+from app.adapters.sqlalchemy_recent_history import SqlAlchemyRecentHistorySource
 
 __all__ = [
     "OpenAIResponsesJsonClient",
@@ -16,4 +17,5 @@ __all__ = [
     "PromptNarrationModel",
     "QwenChatCompletionsJsonClient",
     "SqlAlchemyEngineStore",
+    "SqlAlchemyRecentHistorySource",
 ]

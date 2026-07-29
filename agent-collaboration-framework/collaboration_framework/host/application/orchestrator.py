@@ -1,6 +1,10 @@
 """Explicit async MVP workflow with one stable class entry point."""
 
-from collaboration_framework.contracts import ActionRequest, PlayerInput
+from collaboration_framework.contracts import (
+    ActionRequest,
+    PlayerInput,
+    player_input_fingerprint,
+)
 from collaboration_framework.host.schemas import HostAgentContext, TurnOutput
 from collaboration_framework.ports import ActionExecutor
 
@@ -44,6 +48,7 @@ class Orchestrator:
                 player_id=player_input.player_id,
                 actor_id=player_input.actor_id,
                 source_view_revision=view_before.revision,
+                input_fingerprint=player_input_fingerprint(player_input),
                 intent=intent,
             )
         )

@@ -580,6 +580,29 @@ def test_invalid_narration_fails_closed_then_original_request_recovers(
         )
         assert narration_model.leaked_text not in str(first_attempt_events)
 
+        ws.send_json(
+            {
+                **action,
+                "payload": {
+                    **action["payload"],
+                    "utterance": "我攻击托马斯",
+                },
+            }
+        )
+        conflict, conflict_events = receive_until(
+            ws,
+            lambda message: message.get("type") == "turn.failed",
+        )
+
+        assert conflict["payload"]["code"] == "ACTION_ID_CONFLICT"
+        assert conflict["payload"]["retryable"] is False
+        assert all(
+            message.get("message_type") != "turn.completed"
+            and message.get("type") not in {"check.request", "check.result", "narration.push"}
+            for message in conflict_events
+        )
+        assert narration_model.calls == 2
+
         ws.send_json(action)
         completed, retry_events = receive_until(
             ws,

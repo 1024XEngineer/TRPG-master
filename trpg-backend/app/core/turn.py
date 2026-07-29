@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Literal
@@ -21,6 +22,7 @@ from collaboration_framework.contracts import (
     ModuleCheck,
     PlayerInput,
     PlayerView,
+    player_input_fingerprint,
 )
 from collaboration_framework.engine import EngineStore, RuleEngineService
 from collaboration_framework.host.adapters import OneShotHostAgentAdapter
@@ -222,6 +224,15 @@ class TurnApplication:
                 or completed.request.actor_id != actor_id
             ):
                 raise ContractError("client_action_id belongs to another actor")
+            original_fingerprint = completed.request.input_fingerprint
+            submitted_fingerprint = player_input_fingerprint(player_input)
+            # Legacy records without a fingerprint cannot prove that a new payload is
+            # the original request, so the fast recovery path fails closed.
+            if original_fingerprint is None or not hmac.compare_digest(
+                original_fingerprint,
+                submitted_fingerprint,
+            ):
+                raise ContractError("request_id 已用于不同的动作请求")
             intent = completed.request.intent
             candidates: tuple[SkillCheckCandidate, ...] = ()
             difficulty: CheckDifficulty = "regular"
@@ -338,6 +349,7 @@ class TurnApplication:
                     player_id=prepared.player_input.player_id,
                     actor_id=prepared.player_input.actor_id,
                     source_view_revision=prepared.view_before.revision,
+                    input_fingerprint=player_input_fingerprint(prepared.player_input),
                     intent=intent,
                     roll_value=(
                         roll_value if selected_skill is not None else prepared.stored_roll_value

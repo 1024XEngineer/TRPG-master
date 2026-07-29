@@ -16,32 +16,34 @@ NarrationRejectionReason = Literal[
     "schema_fragment",
 ]
 
-_PROTOCOL_FIELD = (
+_NARRATION_FIELD = (
     r"(?<![A-Za-z0-9_])"
-    r"(?:claimed_fact_ids|claimedFactIds|suggested_actions|suggestedActions)"
+    r"(?:kind|text|claimed_fact_ids|claimedFactIds|suggested_actions|suggestedActions)"
     r"(?![A-Za-z0-9_])"
 )
-_QUOTED_PROTOCOL_FIELD = rf"""(?:"|')?{_PROTOCOL_FIELD}(?:"|')?"""
+_QUOTED_NARRATION_FIELD = rf"""(?:"|')?{_NARRATION_FIELD}(?:"|')?"""
 _STRUCTURED_VALUE = r"(?:\[[\s\S]*?\]|\{[\s\S]*?\}|null)"
+_QUOTED_STRING_VALUE = r"""(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')"""
+_NARRATION_FIELD_VALUE = rf"(?:{_STRUCTURED_VALUE}|{_QUOTED_STRING_VALUE}|narration|clarification)"
 
-_STANDALONE_PROTOCOL_FIELD_RE = re.compile(
+_STANDALONE_NARRATION_FIELD_RE = re.compile(
     rf"""
     ^[ \t]*[{{,]?[ \t]*
-    {_QUOTED_PROTOCOL_FIELD}
+    {_QUOTED_NARRATION_FIELD}
     [ \t]*[:：][ \t]*
-    {_STRUCTURED_VALUE}
+    (?:{_NARRATION_FIELD_VALUE})?
     [ \t]*[,}}]?[ \t]*(?:\r?\n[ \t]*```)?[ \t]*$
     """,
     re.IGNORECASE | re.MULTILINE | re.VERBOSE,
 )
 
-_TRAILING_PROTOCOL_FIELD_RE = re.compile(
+_TRAILING_NARRATION_FIELD_RE = re.compile(
     rf"""
     (?:^|[\r\n]|[。！？.!?]|(?<=\s))[ \t]*
     [{{,]?[ \t]*
-    {_QUOTED_PROTOCOL_FIELD}
+    {_QUOTED_NARRATION_FIELD}
     [ \t]*[:：][ \t]*
-    {_STRUCTURED_VALUE}
+    (?:{_NARRATION_FIELD_VALUE})?
     [ \t]*[,}}]*[ \t]*(?:\r?\n[ \t]*```)?[ \t]*$
     """,
     re.IGNORECASE | re.DOTALL | re.VERBOSE,
@@ -96,9 +98,9 @@ def narration_text_rejection_reason(
 ) -> Literal["protocol_tail", "schema_fragment"] | None:
     """Return a safe category for obvious Narration protocol residue."""
 
-    if _STANDALONE_PROTOCOL_FIELD_RE.search(text):
+    if _STANDALONE_NARRATION_FIELD_RE.search(text):
         return "protocol_tail"
-    if _TRAILING_PROTOCOL_FIELD_RE.search(text):
+    if _TRAILING_NARRATION_FIELD_RE.search(text):
         return "protocol_tail"
 
     object_match = _TRAILING_OBJECT_FRAGMENT_RE.search(text)

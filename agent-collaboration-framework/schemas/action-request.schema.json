@@ -246,6 +246,20 @@
       "title": "Source View Revision",
       "type": "string"
     },
+    "input_fingerprint": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Opaque SHA-256 identity of the normalized PlayerInput that created this command; used to reject request_id reuse with different input.",
+      "title": "Input Fingerprint"
+    },
     "intent": {
       "$ref": "#/$defs/Intent"
     },

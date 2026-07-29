@@ -85,6 +85,14 @@ class ActionRequest(ContractModel):
     player_id: str = Field(min_length=1)
     actor_id: str = Field(min_length=1)
     source_view_revision: str = Field(min_length=1)
+    input_fingerprint: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+        description=(
+            "Opaque SHA-256 identity of the normalized PlayerInput that created "
+            "this command; used to reject request_id reuse with different input."
+        ),
+    )
     intent: Intent
     roll_value: int | None = Field(default=None, ge=1, le=100)
 

@@ -17,6 +17,14 @@ class NarrationTextPolicyTests(unittest.TestCase):
             "'claimedFactIds'：null": "protocol_tail",
             '他说完便沉默下来。\n"suggestedActions": []': "protocol_tail",
             "他说完便沉默下来。\n```json\nclaimed_fact_ids: []\n```": "protocol_tail",
+            '托马斯沉默。\ntext: "托马斯沉默。"': "protocol_tail",
+            "托马斯沉默。\nkind: narration": "protocol_tail",
+            "'text'：'托马斯沉默。'": "protocol_tail",
+            '"kind"：clarification': "protocol_tail",
+            "托马斯沉默。\ntext:": "protocol_tail",
+            "托马斯沉默。\nkind:": "protocol_tail",
+            "托马斯沉默。\nclaimed_fact_ids:": "protocol_tail",
+            "托马斯沉默。\n```json\nsuggestedActions:\n```": "protocol_tail",
             (
                 '{"kind":"narration","text":"托马斯看着你。",'
                 '"claimed_fact_ids":[]}'
@@ -53,6 +61,8 @@ class NarrationTextPolicyTests(unittest.TestCase):
             "他问你 claimed_fact_ids 是什么意思。",
             "纸上写着 claimed_fact_ids: []，旁边说明这是一个空列表。",
             "日志中的 not_claimed_fact_ids: [] 是另一个测试字段。",
+            '纸上写着 text: "叙事"，旁边说明这是正文字段。',
+            "手册把 kind: narration 称为叙事类型。",
             '终端显示 {"status":"ok","items":[]}，没有更多提示。',
             '她念出 {"kind":"artifact","name":"旧铜钥匙"}，随后合上笔记。',
         )

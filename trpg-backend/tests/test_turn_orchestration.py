@@ -4,7 +4,7 @@ import json
 from collections.abc import AsyncIterator
 
 import pytest
-from collaboration_framework.contracts import ContractError
+from collaboration_framework.contracts import ContractError, player_input_fingerprint
 from collaboration_framework.engine import InMemoryEngineStore, RuleEngineService
 from collaboration_framework.host.adapters.fakes import FakeNarrationModel
 from collaboration_framework.host.application import TurnExecutionError
@@ -249,6 +249,40 @@ async def test_two_invalid_narrations_fail_closed_and_manual_retry_skips_executo
     assert host.calls == 1
     assert engine.execute_calls == 1
     assert action_result_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_completed_action_rejects_same_id_with_different_player_input() -> None:
+    host = CountingHostAgent()
+    narration = InvalidTwiceThenSafeNarration()
+    app, store, state, engine = application(host, narration)
+
+    prepared = await app.prepare(
+        room_id=state.room_id,
+        player_id="player_1",
+        client_action_id="narration-conflicting-retry",
+        utterance="我询问托马斯藏书的情况",
+    )
+    with pytest.raises(TurnExecutionError, match="叙事未通过安全校验"):
+        await app.complete(prepared)
+
+    completed = store.inspect_completed_action(
+        state.room_id,
+        "narration-conflicting-retry",
+    )
+    assert completed.request.input_fingerprint == player_input_fingerprint(prepared.player_input)
+
+    with pytest.raises(ContractError, match="request_id 已用于不同"):
+        await app.prepare(
+            room_id=state.room_id,
+            player_id="player_1",
+            client_action_id="narration-conflicting-retry",
+            utterance="我攻击托马斯",
+        )
+
+    assert host.calls == 1
+    assert engine.execute_calls == 1
+    assert narration.calls == 2
 
 
 @pytest.mark.asyncio

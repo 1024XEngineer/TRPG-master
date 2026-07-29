@@ -605,7 +605,7 @@ async def test_provider_failure_after_invalid_retry_maps_to_narrator_failed() ->
 @pytest.mark.asyncio
 async def test_invisible_target_becomes_state_free_clarification() -> None:
     host = CountingHostAgent(target_id="module-secret-entity")
-    app, store, state = application(host, AlwaysFailNarration())
+    app, store, state, _ = application(host, AlwaysFailNarration())
 
     prepared = await app.prepare(
         room_id=state.room_id,
@@ -627,7 +627,7 @@ async def test_invisible_target_becomes_state_free_clarification() -> None:
 @pytest.mark.asyncio
 async def test_recovered_intent_forces_deterministic_clarification() -> None:
     host = CountingHostAgent(target_id="module-secret-entity")
-    app, _, state = application(host, AlwaysNarration())
+    app, _, state, _ = application(host, AlwaysNarration())
 
     prepared = await app.prepare(
         room_id=state.room_id,

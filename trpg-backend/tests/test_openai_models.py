@@ -374,6 +374,10 @@ async def test_prompts_treat_scene_orientation_as_narration_not_form_validation(
     assert "一段场景描述" in narration_instructions
     assert "不要要求玩家先指定目标或先做检定" in narration_instructions
     assert "不得借此创造门窗、出口、人物、物品、路线" in narration_instructions
+    assert "text 只能包含玩家可见的角色内叙事" in narration_instructions
+    assert "claimed_fact_ids" in narration_instructions
+    assert "JSON/schema 片段" in narration_instructions
+    assert "Markdown JSON 代码块" in narration_instructions
     serialized_view = client.inputs["trpg_narration"]["player_view"]
     assert serialized_view["scene"]["visible_entities"][0]["id"] == "thomas"
     assert serialized_view["scene"]["description"] == "托马斯坐在你面前，等待你回应他的委托。"
@@ -597,6 +601,78 @@ async def test_qwen_client_posts_json_mode_with_schema_in_instructions() -> None
     assert "test_schema" in body["messages"][0]["content"]
     assert '"additionalProperties":false' in body["messages"][0]["content"]
     assert json.loads(body["messages"][1]["content"]) == {"safe": True}
+
+
+async def test_qwen_style_protocol_leak_is_retried_offline() -> None:
+    narration_calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal narration_calls
+        body = json.loads(request.content)
+        instructions = body["messages"][0]["content"]
+        if 'named "trpg_intent"' in instructions:
+            output = {
+                "kind": "dialogue",
+                "verb": "talk",
+                "target": {"matched": True, "id": "cemetery_figure"},
+                "check": {"route": "none"},
+                "summary": "我询问眼前人的情况",
+            }
+        else:
+            assert 'named "trpg_narration"' in instructions
+            narration_calls += 1
+            output = {
+                "kind": "narration",
+                "text": (
+                    "眼前的人压低了声音。 claimed_fact_ids: [],"
+                    if narration_calls == 1
+                    else "眼前的人压低声音，谨慎地回答了你的问题。"
+                ),
+                "claimed_fact_ids": [],
+                "suggested_actions": [],
+            }
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": json.dumps(output, ensure_ascii=False),
+                        }
+                    }
+                ]
+            },
+        )
+
+    client = QwenChatCompletionsJsonClient(
+        api_key="offline-test-key",
+        base_url="https://dashscope.example/compatible-mode/v1/",
+        model="qwen3.7-plus",
+        timeout_seconds=1,
+        transport=httpx.MockTransport(handler),
+    )
+    module = load_paper_chase()
+    state = conversation_state(module)
+    store = InMemoryEngineStore()
+    store.register_room(module_content=module, initial_state=state)
+    application = build_turn_application(
+        store,
+        RuleEngineService(store),
+        intent_model=PromptIntentModel(client),
+        narration_model=PromptNarrationModel(client),
+    )
+
+    output = await application.handle(
+        room_id=state.room_id,
+        player_id="player_1",
+        client_action_id="qwen-protocol-leak",
+        utterance="我询问眼前人的情况",
+    )
+
+    assert narration_calls == 2
+    assert output.payload.narration.text == "眼前的人压低声音，谨慎地回答了你的问题。"
+    assert "claimed_fact_ids" not in output.payload.narration.text
 
 
 async def test_deepseek_client_posts_compatible_json_mode_without_qwen_fields() -> None:

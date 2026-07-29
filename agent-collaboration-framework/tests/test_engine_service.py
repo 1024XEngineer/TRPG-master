@@ -146,6 +146,20 @@ class RuleEngineServiceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(self.store.inspect_events("room_01")), 1)
 
+    async def test_same_request_id_with_different_input_fingerprint_is_rejected(
+        self,
+    ) -> None:
+        request = checkpoint_request(request_id="fingerprint_collision").model_copy(
+            update={"input_fingerprint": "a" * 64}
+        )
+        await self.service.execute(request)
+        conflicting = request.model_copy(update={"input_fingerprint": "b" * 64})
+
+        with self.assertRaisesRegex(ContractError, "request_id 已用于不同"):
+            await self.service.execute(conflicting)
+
+        self.assertEqual(len(self.store.inspect_events("room_01")), 1)
+
     async def test_concurrent_stale_actions_cannot_overwrite_new_state(self) -> None:
         results = await asyncio.gather(
             self.service.execute(checkpoint_request(request_id="race_001")),

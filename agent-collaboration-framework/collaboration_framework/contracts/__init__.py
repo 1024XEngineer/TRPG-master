@@ -92,6 +92,6 @@ from .player_view import (
     VisibleEntity,
     VisibleFact,
 )
-from .runtime import PlayerInput
+from .runtime import PlayerInput, player_input_fingerprint
 
 __all__ = [name for name in globals() if not name.startswith("_")]

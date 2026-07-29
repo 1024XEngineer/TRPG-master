@@ -118,12 +118,14 @@ class RuleEngineService:
             request.room_id,
             request.player_id,
             request.actor_id,
+            request.input_fingerprint,
             request.intent,
             request.roll_value,
         ) != (
             original.room_id,
             original.player_id,
             original.actor_id,
+            original.input_fingerprint,
             original.intent,
             original.roll_value,
         ):

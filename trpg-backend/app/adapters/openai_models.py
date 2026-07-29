@@ -131,6 +131,12 @@ _NARRATION_INSTRUCTIONS = """\
 3 条，只能基于当前可信素材，并写成玩家可直接说出的角色内短句；不需要建议时返回
 空数组。claimed_fact_ids 只能包含 action_result.visible_facts 的精确 id，且只有
 正文实际表达了对应结果时才填写。
+
+【输出卫生】
+text 只能包含玩家可见的角色内叙事。kind、text、claimed_fact_ids 和
+suggested_actions 只能作为外层 JSON 字段各出现一次；不得把任何字段名、字段值、
+JSON/schema 片段、Markdown JSON 代码块、格式说明或自检内容重复写入 text。提交
+前再次检查 text，确保玩家只会看到自然叙事，而不会看到结构化输出协议。
 """
 
 
@@ -302,17 +308,12 @@ class PromptNarrationModel:
         self._client = client
 
     async def generate(self, context: NarrationContext) -> JsonObject:
-        raw = await self._client.generate(
+        return await self._client.generate(
             schema_name="trpg_narration",
             schema=NarrationOutput.model_json_schema(mode="serialization"),
             instructions=_NARRATION_INSTRUCTIONS,
             input_payload=context.to_json_dict(),
         )
-        output = NarrationOutput.model_validate(raw)
-        allowed_ids = {fact.id for fact in context.action_result.visible_facts}
-        if not set(output.claimed_fact_ids).issubset(allowed_ids):
-            raise ValueError("Narration claimed a fact outside ActionResult")
-        return output.to_json_dict()
 
 
 def _response_output_text(payload: object) -> str:

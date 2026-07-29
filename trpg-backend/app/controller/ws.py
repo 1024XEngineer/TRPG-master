@@ -280,11 +280,13 @@ async def _send_check_result(
     if check_result is None:
         raise ContractError("Completed skill check did not return a check result")
     candidate = next(item for item in prepared.candidates if item.id == check_result.skill_id)
+    character_name = await room_service.get_player_character_name(db, player_id)
     payload = CheckResultPayload(
         player_id=player_id,
         client_action_id=prepared.player_input.client_action_id,
         skill=check_result.skill_id,
         skill_name=candidate.name,
+        character_name=character_name,
         roll_value=check_result.roll_value,
         target_value=check_result.target_value,
         difficulty=check_result.difficulty,
@@ -369,10 +371,12 @@ async def _broadcast_action_utterance(
 
     player = await room_service.get_player(db, player_id)
     nickname = player.nickname if player is not None else "玩家"
+    character_name = await room_service.get_player_character_name(db, player_id, fallback=nickname)
     payload = ActionBroadcastPayload(
         player_id=player_id,
         client_action_id=client_action_id,
         nickname=nickname,
+        character_name=character_name,
         utterance=utterance,
     )
     recorded = await room_service.record_event(

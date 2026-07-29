@@ -16,6 +16,7 @@ export interface ActionBroadcastPayload {
   playerId: string;
   clientActionId: string;
   nickname: string;
+  characterName?: string | null;
   utterance: string;
 }
 
@@ -283,6 +284,7 @@ export interface CheckResultPayload {
   clientActionId: string;
   skill: string;
   skillName: string;
+  characterName?: string | null;
   rollValue: number;
   targetValue: number;
   difficulty: "regular" | "hard" | "extreme";

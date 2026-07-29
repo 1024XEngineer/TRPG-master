@@ -66,6 +66,19 @@ test('isValidServerEvent：接受已知类型的合法事件', () => {
     isValidServerEvent({ type: 'session.bound', payload: { roomId: 'r1', playerId: 'p1' } }),
     true
   );
+  assert.equal(
+    isValidServerEvent({
+      type: 'action.broadcast',
+      payload: {
+        playerId: 'player-1',
+        clientActionId: 'action-1',
+        nickname: '房主',
+        characterName: '陈探员',
+        utterance: '我查看书架',
+      },
+    }),
+    true
+  );
   assert.equal(isValidServerEvent({ type: 'narration.push', payload: { text: 'hi' } }), true);
   assert.equal(
     isValidServerEvent({
@@ -102,6 +115,21 @@ test('isValidServerEvent：拒绝未知 type', () => {
   assert.equal(isValidServerEvent({ type: 'not.a.real.event', payload: {} }), false);
 });
 
+test('isValidServerEvent：接受缺少 characterName 的旧 action.broadcast', () => {
+  assert.equal(
+    isValidServerEvent({
+      type: 'action.broadcast',
+      payload: {
+        playerId: 'player-1',
+        clientActionId: 'action-1',
+        nickname: '房主',
+        utterance: '我查看书架',
+      },
+    }),
+    true
+  );
+});
+
 test('isValidServerEvent：拒绝缺 payload / payload 不是对象 / 顶层不是对象', () => {
   assert.equal(isValidServerEvent({ type: 'session.bound' }), false);
   assert.equal(isValidServerEvent({ type: 'session.bound', payload: 'nope' }), false);
@@ -123,6 +151,19 @@ test('isValidServerEvent：拒绝 payload 字段缺失或类型不对', () => {
   assert.equal(isValidServerEvent({ type: 'narration.push', payload: { text: 123 } }), false);
   assert.equal(
     isValidServerEvent({ type: 'session.bound', payload: { roomId: 'r1', playerId: 42 } }),
+    false
+  );
+  assert.equal(
+    isValidServerEvent({
+      type: 'action.broadcast',
+      payload: {
+        playerId: 'player-1',
+        clientActionId: 'action-1',
+        nickname: '房主',
+        characterName: 42,
+        utterance: '我查看书架',
+      },
+    }),
     false
   );
 });

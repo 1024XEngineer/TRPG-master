@@ -743,9 +743,7 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 resolution=output.action_result.resolution,
                                 outcome=output.action_result.outcome,
                                 revision=output.action_result.view_revision,
-                                duration_ms=int(
-                                    (time.monotonic() - turn_started_at) * 1000
-                                ),
+                                duration_ms=int((time.monotonic() - turn_started_at) * 1000),
                                 narration_sent=narration_sent,
                             )
                         except Exception as exc:
@@ -829,9 +827,7 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 resolution=output.action_result.resolution,
                                 outcome=output.action_result.outcome,
                                 revision=output.action_result.view_revision,
-                                duration_ms=int(
-                                    (time.monotonic() - turn_started_at) * 1000
-                                ),
+                                duration_ms=int((time.monotonic() - turn_started_at) * 1000),
                                 narration_sent=narration_sent,
                             )
                         except Exception as exc:

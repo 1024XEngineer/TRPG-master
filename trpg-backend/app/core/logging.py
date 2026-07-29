@@ -15,9 +15,7 @@ import structlog
 from app.core.config import get_settings
 
 _ROOM_POLL_PATH = re.compile(r"^/api/v1/rooms/[A-Z0-9]{6}(?:\?.*)?$")
-_CONVERSATION_PATH = re.compile(
-    r"^/api/v1/rooms/[0-9a-fA-F-]{32,36}/conversation(?:\?.*)?$"
-)
+_CONVERSATION_PATH = re.compile(r"^/api/v1/rooms/[0-9a-fA-F-]{32,36}/conversation(?:\?.*)?$")
 _HEALTH_PATHS = {"/health", "/api/v1/health"}
 
 
@@ -44,10 +42,7 @@ class AccessNoiseFilter(logging.Filter):
             return False
         return not (
             method == "GET"
-            and (
-                _ROOM_POLL_PATH.fullmatch(path)
-                or _CONVERSATION_PATH.fullmatch(path)
-            )
+            and (_ROOM_POLL_PATH.fullmatch(path) or _CONVERSATION_PATH.fullmatch(path))
         )
 
 

@@ -1,0 +1,7 @@
+interface:
+  display_name: "GitHub 工程协作规范"
+  short_description: "按需执行 Issue、PR、Commit 与 Review 规范"
+  default_prompt: "使用 $github-engineering-workflow 按规范管理本次开发任务。"
+
+policy:
+  allow_implicit_invocation: false

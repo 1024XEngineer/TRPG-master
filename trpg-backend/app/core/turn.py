@@ -508,14 +508,13 @@ class TurnApplication:
                     retryable=True,
                 ) from exc
         if narration is None:
-            if prepared.recovered_intent and action_result.resolution == "unrecognized":
-                narration = _fallback_clarification(prepared.intent, view_after)
-            else:
-                raise TurnExecutionError(
-                    "NARRATOR_FAILED",
-                    "规则结果已安全保存，但叙事生成失败，请重试原动作",
-                    retryable=True,
-                )
+            raise TurnExecutionError(
+                "NARRATOR_FAILED",
+                "规则结果已安全保存，但叙事生成失败，请重试原动作",
+                retryable=True,
+            )
+        if prepared.recovered_intent and action_result.resolution == "unrecognized":
+            narration = _fallback_clarification(prepared.intent, view_after)
         return TurnOutput(
             status="clarification" if narration.kind == "clarification" else "completed",
             player_input=prepared.player_input,

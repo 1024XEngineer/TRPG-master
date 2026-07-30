@@ -107,7 +107,7 @@ class SkillChoiceSlot(CamelModel):
 
 
 class OccupationSpec(CamelModel):
-    """一个职业：信用评级区间、职业技能点公式、职业技能清单。
+    """一个职业：信用评级区间、职业技能点公式、职业技能清单与展示元数据。
 
     职业技能 = `skill_ids`（固定）+ `choice_slots`（自选，见 `SkillChoiceSlot`）。
     两者都吃职业技能点；其余技能吃兴趣点。
@@ -121,6 +121,15 @@ class OccupationSpec(CamelModel):
     skill_ids: list[str]
     choice_slots: list[SkillChoiceSlot] = []
     description: str
+    icon: str | None = None
+    categories: list[str] = Field(default_factory=list)
+
+
+class OccupationCategorySpec(CamelModel):
+    """职业选择器里的展示分类。规则目录决定分类与顺序，前端只负责渲染。"""
+
+    label: str
+    icon: str
 
 
 class AgeRangeSpec(CamelModel):
@@ -149,3 +158,4 @@ class RulesetRead(CamelModel):
     age_range: AgeRangeSpec | None = None
     skills: list[SkillSpec]
     occupations: list[OccupationSpec]
+    occupation_categories: list[OccupationCategorySpec] = Field(default_factory=list)

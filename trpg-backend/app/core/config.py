@@ -16,6 +16,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 def secret_value(value: str | SecretStr) -> str:
+    if isinstance(value, str):
+        return value
     return getattr(value, "get_secret_value")()  # noqa: B009
 
 

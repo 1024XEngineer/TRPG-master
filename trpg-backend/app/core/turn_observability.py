@@ -158,6 +158,7 @@ def log_turn_failed(
     stage: str,
     code: str,
     error_type: str,
+    error_reason: str = "",
 ) -> None:
     logger.warning(
         "【回合失败】",
@@ -166,6 +167,7 @@ def log_turn_failed(
         stage=stage,
         code=code,
         error_type=error_type,
+        error_reason=error_reason,
     )
 
 

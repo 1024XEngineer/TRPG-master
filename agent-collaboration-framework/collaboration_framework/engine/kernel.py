@@ -156,12 +156,18 @@ class _Execution:
     def run(self) -> tuple[EngineExecutionResult, GameState]:
         self._validate_execution_context()
         intent = self.request.intent
-        if intent.kind == "unknown" or not isinstance(intent.target, MatchedTarget):
+        if intent.kind == "unknown":
             return self._finalize(
                 resolution="unrecognized",
                 outcome="not_applicable",
                 visible=("没有找到与该说法对应的当前场景目标。",),
                 constraints=("不得编造目标或状态变化。",),
+            )
+        if not isinstance(intent.target, MatchedTarget):
+            # Targetless dialogue is a state-free conversational turn.
+            return self._finalize(
+                resolution="direct",
+                outcome="not_applicable",
             )
         if self.state.get("phase") != "playing":
             return self._finalize(

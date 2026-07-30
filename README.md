@@ -145,7 +145,7 @@ uv run python scripts/load_paper_chase.py
 脚本可直接在刚迁移的空数据库运行：缺少 Seed 时会先执行同一套幂等 Seed。重复
 执行相同内容会返回 `unchanged`；同一版本已有不同内容时会拒绝覆盖。
 
-追书人当前发布版本为 `1.0.2`，使用 `content_schema_version=2`；原始 `1.0.1`
+追书人当前发布版本为 `1.0.3`，使用 `content_schema_version=2`；原始 `1.0.1`
 归档仍可供已固定版本的房间读取。玩家可见的模组简介、推荐人数和开局页来自发布内容的
 `presentation` 字段，不读取面向叙述 Agent 的 `background`；升级旧数据库后需要重新执行
 上述加载命令，已有固定到旧版本的游戏不会被改写。

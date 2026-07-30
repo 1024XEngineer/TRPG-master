@@ -28,7 +28,6 @@ from collaboration_framework.host.application import (
     Narrator,
     Orchestrator,
     PlayerViewProjector,
-    TurnExecutionError,
 )
 from collaboration_framework.host.schemas import RecentTurnContext
 from collaboration_framework.schema_export import rendered_schemas
@@ -244,6 +243,32 @@ class UnifiedWorkflowTests(unittest.TestCase):
         self.assertEqual(output.action_result.resolution, "direct")
         self.assertEqual(output.action_result.outcome, "not_applicable")
 
+    def test_targetless_acknowledgement_becomes_state_free_narration(self) -> None:
+        intent_model = StaticIntentModel(
+            {
+                "kind": "dialogue",
+                "verb": "acknowledge",
+                "target": {"matched": False, "raw": "好的，谢谢"},
+                "check": {"route": "none"},
+                "summary": "确认并致谢",
+            }
+        )
+        orchestrator, engine, _ = self.application(intent_model=intent_model)
+        acknowledgement = with_input(
+            self.player_input,
+            action_id="ack_001",
+            utterance="好的，谢谢",
+        )
+        output = self.run_turn(orchestrator, acknowledgement)
+
+        self.assertEqual(output.intent.kind, "dialogue")
+        self.assertFalse(output.intent.target.matched)
+        self.assertEqual(output.action_result.resolution, "direct")
+        self.assertEqual(output.action_result.outcome, "not_applicable")
+        self.assertEqual(output.status, "completed")
+        self.assertEqual(output.narration.kind, "narration")
+        self.assertEqual(engine.snapshot(), self.state)
+
     def test_unknown_intent_also_goes_through_executor_then_clarifies(self) -> None:
         orchestrator, engine, _ = self.application()
         unclear = PlayerInput.model_validate_json(
@@ -357,7 +382,7 @@ class UnifiedWorkflowTests(unittest.TestCase):
     def test_checkpoint_must_still_come_from_trusted_player_view(self) -> None:
         payload = {
             "kind": "action",
-            "verb": "investigate",
+            "verb": "dance",
             "target": {"matched": True, "id": "bookshelf"},
             "check": {
                 "route": "module",
@@ -367,12 +392,11 @@ class UnifiedWorkflowTests(unittest.TestCase):
             "summary": "调查书架",
         }
         orchestrator, engine, _ = self.application(StaticIntentModel(payload))
-        with self.assertRaisesRegex(
-            TurnExecutionError,
-            "行动意图未通过安全校验",
-        ):
-            self.run_turn(orchestrator)
-        self.assertEqual(engine.execute_calls, 0)
+        output = self.run_turn(orchestrator)
+        self.assertEqual(output.intent.kind, "unknown")
+        self.assertEqual(output.action_result.resolution, "unrecognized")
+        self.assertEqual(output.status, "clarification")
+        self.assertEqual(engine.execute_calls, 1)
 
     def test_public_action_result_excludes_engine_internal_payloads(self) -> None:
         orchestrator, engine, narrator = self.application()

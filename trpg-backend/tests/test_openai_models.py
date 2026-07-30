@@ -398,12 +398,19 @@ async def test_prompts_treat_scene_orientation_as_narration_not_form_validation(
     assert "只选择" in intent_instructions
     assert "最相关的一个 id" in intent_instructions
     assert "不要称它为元游戏问题" in intent_instructions
+    assert "确认、感谢或承接语" in intent_instructions
+    assert "kind=dialogue" in intent_instructions
+    assert "当前连续场景期间的 published_narration" in intent_instructions
     assert "根据 PlayerView 直接给出" in narration_instructions
     assert "check_result 不为空" in narration_instructions
     assert "普通检定不能代替或补触发" in narration_instructions
     assert "一段场景描述" in narration_instructions
     assert "不要要求玩家先指定目标或先做检定" in narration_instructions
     assert "不得借此创造门窗、出口、人物、物品、路线" in narration_instructions
+    assert "无动作的对话承接" in narration_instructions
+    assert "不要追问" in narration_instructions
+    assert "这项限制同样适用于角色对白" in narration_instructions
+    assert "检定失败时尤其不得用对白补发新事实" in narration_instructions
     assert "text 只能包含玩家可见的角色内叙事" in narration_instructions
     assert "claimed_fact_ids" in narration_instructions
     assert "JSON/schema 片段" in narration_instructions

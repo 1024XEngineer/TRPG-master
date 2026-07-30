@@ -143,6 +143,7 @@ def test_turn_failure_log_has_stable_diagnostics() -> None:
             "stage": "检定结算",
             "code": "DATABASE_CONFLICT",
             "error_type": "OperationalError",
+            "error_reason": "",
             "event": "【回合失败】",
             "log_level": "warning",
         }

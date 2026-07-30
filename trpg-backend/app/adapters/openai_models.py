@@ -11,6 +11,9 @@ from collaboration_framework.contracts import (
     JsonObject,
 )
 from collaboration_framework.host.application import IntentParser
+from collaboration_framework.host.application.intent_parser import (
+    coerce_intent_payload,
+)
 from collaboration_framework.host.schemas import (
     IntentContext,
     NarrationContext,
@@ -31,11 +34,13 @@ _INTENT_INSTRUCTIONS = """\
    选择 module checkpoint；proposed_skills 必须是该候选 skills 的子集。模组检定
    优先于普通检定，不能用 default check 绕过已经匹配的 checkpoint。
 3. 没有匹配的 checkpoint，但玩家正在尝试结果不确定、明显依赖角色能力的行动时，
-   选择 default check。例如仔细搜索使用 spot-hidden、侧耳倾听使用 listen、隐藏或
-   悄然行动使用 stealth。只选择 player_view.self_actor.attributes 或 skills 中
-   实际存在且最相关的一个 id。针对具体对象时使用 visible_entity 或 available_exit
-   的 id；观察、聆听或隐藏等场景范围行动可使用 player_view.scene.id。仅阅读已经
-   可见的文字、查看显而易见的物体或进行没有风险的动作时使用 no check。
+   选择 default check。default check 必须提供一个当前 Actor 已拥有的具体技能或
+   属性，禁止输出空的 proposed_skills。例如仔细搜索使用 spot-hidden、侧耳倾听
+   使用 listen、隐藏或悄然行动使用 stealth。只选择
+   player_view.self_actor.attributes 或 skills 中实际存在且最相关的一个 id。
+   针对具体对象时使用 visible_entity 或 available_exit 的 id；观察、聆听或隐藏等
+   场景范围行动可使用 player_view.scene.id。仅阅读已经可见的文字、查看显而易见
+   的物体、前往 PlayerView 中已可见的出口或进行没有风险的动作时使用 no check。
 4. “我在哪里”“现在什么情况”“描述周围”“我能看到什么”等属于场景定位或
    感知请求，不是必须针对单个实体的动作。若协议无法无损表示它，返回 unknown，
    交给叙事器根据 PlayerView 直接回答；不要称它为元游戏问题，也不要反问玩家要
@@ -43,6 +48,14 @@ _INTENT_INSTRUCTIONS = """\
 5. 玩家想前往、打开或操作 PlayerView 中不存在或无法唯一确定的地点/物体时，
    返回 unknown。不要虚构花园、门、出口等；clarification_question 使用自然、
    简短的角色内措辞。
+6. “好的”“谢谢”“收到”“明白了”“嗯”等确认、感谢或承接语，没有新的行动
+   目标时，返回 kind=dialogue、verb=acknowledge、target 为 unmatched、check
+   为 none，不要发起检定，也不要提出澄清问题。结合 recent_history 让叙事器自然
+   接话，并邀请玩家继续下一步。
+7. 玩家观察或搜索仅在当前连续场景期间的 published_narration 中出现的具体细节时，不要
+   为它创造实体 ID，也不要把叙事文本当成权威事实。将当前 player_view.scene.id
+   作为场景范围 target，并只选一个语义明确且 Actor 实际拥有的感知技能；无法安全
+   确定时返回 unknown。
 
 保留玩家明确声明的方式和目的，不要补写声明。你只提出语义，不裁定骰点、结果或
 状态变化，不泄露隐藏信息，也不叙述行动结果。
@@ -73,6 +86,8 @@ _NARRATION_INSTRUCTIONS = """\
 不要推断隐藏状态、守秘人信息、未公开线索、骰点或未提交的状态变化。允许添加少量
 不产生玩法信息的氛围纹理，例如语气、停顿、寂静或与 background 一致的泛化感官
 描写；不得借此创造门窗、出口、人物、物品、路线、天气、线索或行动结果。
+这项限制同样适用于角色对白：即使 NPC 在说话，也不得让其透露可信素材中没有的
+具体地标、行动习惯、藏匿位置或可交互对象。检定失败时尤其不得用对白补发新事实。
 
 【叙事策略】
 1. 已识别并结算的行动：先写玩家立刻感受到的结果，再补一两个具体细节。忠实转述
@@ -91,6 +106,9 @@ _NARRATION_INSTRUCTIONS = """\
    clarification。不要给“选项 A / 选项 B”式菜单。
 5. 其他真正不明确的输入：同样先给场景内反馈，再进行一次最小澄清。澄清也必须像
    守秘人在主持故事，而不是系统在校验表单。
+6. kind=dialogue 且 target 为 unmatched 时，这是无动作的对话承接（例如“好的”或
+   “谢谢”）：自然回应玩家，承接最近对话或当前场景，最后用一句角色内话语邀请
+   玩家继续；不要追问“要对哪个人物、物品或地点做什么”。
 
 输出通常为 1 至 2 个短段落，优先使用具体名词和动作，避免空泛总结。不得对玩家说
 “元游戏问题”“当前场景目标”“PlayerView”“checkpoint”“未识别动作”
@@ -189,6 +207,7 @@ class PromptIntentModel:
             instructions=_INTENT_INSTRUCTIONS,
             input_payload=context.to_json_dict(),
         )
+        raw = coerce_intent_payload(raw, context)
         intent = IntentParser.parse(raw, context)
         return intent.to_json_dict()
 

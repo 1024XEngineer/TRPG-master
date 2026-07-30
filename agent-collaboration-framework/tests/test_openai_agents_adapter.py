@@ -473,7 +473,10 @@ class QwenHostAgentAdapterTests(
         self.assertTrue(settings.include_usage)
         self.assertEqual(settings.extra_body, {"enable_thinking": False})
         self.assertEqual(settings.tool_choice, "auto")
-        self.assertIn("trpg-host-intent-v4", call["system_instructions"])
+        self.assertIn("trpg-host-intent-v5", call["system_instructions"])
+        self.assertIn("kind=dialogue", call["system_instructions"])
+        self.assertIn("acknowledge", call["system_instructions"])
+        self.assertIn("current uninterrupted scene visit", call["system_instructions"])
         payload = json.loads(call["input"][0]["content"])
         self.assertIn("engine_intent_contract", payload)
         self.assertIn(

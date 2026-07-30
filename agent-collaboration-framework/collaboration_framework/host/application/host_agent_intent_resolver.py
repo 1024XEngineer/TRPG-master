@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 
 from pydantic import ValidationError
 
-from collaboration_framework.contracts import ContractError, Intent
+from collaboration_framework.contracts import (
+    ContractError,
+    Intent,
+    NoCheck,
+    UnmatchedTarget,
+)
 from collaboration_framework.host.ports import HostAgentPort
 from collaboration_framework.host.schemas import (
     HostAgentCompleted,
@@ -20,6 +27,13 @@ from collaboration_framework.host.schemas import (
 from .intent_parser import IntentParser
 
 HostAgentEventObserver = Callable[[HostAgentEvent], Awaitable[None]]
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class IntentResolution:
+    intent: Intent
+    recovered: bool = False
 
 
 class TurnExecutionError(RuntimeError):
@@ -50,6 +64,14 @@ class HostAgentIntentResolver:
         *,
         on_event: HostAgentEventObserver | None = None,
     ) -> Intent:
+        return (await self.resolve_with_metadata(context, on_event=on_event)).intent
+
+    async def resolve_with_metadata(
+        self,
+        context: HostAgentContext,
+        *,
+        on_event: HostAgentEventObserver | None = None,
+    ) -> IntentResolution:
         terminal: HostAgentTerminalEvent | None = None
         try:
             async for event in self._host_agent.astream(context):
@@ -79,6 +101,18 @@ class HostAgentIntentResolver:
                 retryable=True,
             )
         if isinstance(terminal, HostAgentFailed):
+            if terminal.code == "HOST_AGENT_INVALID_OUTPUT":
+                logger.warning(
+                    "host_agent_intent_recovered",
+                    extra={
+                        "room_id": context.player_input.room_id,
+                        "player_id": context.player_input.player_id,
+                        "view_revision": context.player_view.revision,
+                        "failure_reason": "adapter_invalid_output",
+                        "recovery_path": "unknown_intent_clarification",
+                    },
+                )
+                return IntentResolution(_clarification_intent(context), recovered=True)
             raise TurnExecutionError(
                 terminal.code,
                 _public_failure_message(terminal.code),
@@ -91,13 +125,50 @@ class HostAgentIntentResolver:
             recent_history=context.recent_history,
         )
         try:
-            return IntentParser.parse(terminal.raw_output, intent_context)
+            return IntentResolution(
+                IntentParser.parse(terminal.raw_output, intent_context)
+            )
         except (ContractError, ValidationError, TypeError, ValueError) as exc:
-            raise TurnExecutionError(
-                "HOST_AGENT_INVALID_OUTPUT",
-                "主持 Agent 返回的行动意图未通过安全校验，请重试",
-                retryable=True,
-            ) from exc
+            logger.warning(
+                "host_agent_intent_recovered",
+                extra={
+                    "room_id": context.player_input.room_id,
+                    "player_id": context.player_input.player_id,
+                    "view_revision": context.player_view.revision,
+                    "failure_reason": _recovery_reason(exc),
+                    "recovery_path": "unknown_intent_clarification",
+                },
+            )
+            return IntentResolution(_clarification_intent(context), recovered=True)
+
+
+def _clarification_intent(context: HostAgentContext) -> Intent:
+    """Return a state-free Intent so one bad model response cannot stop a turn."""
+
+    utterance = context.player_input.utterance.strip() or "这次行动"
+    return Intent(
+        kind="unknown",
+        verb="unknown",
+        target=UnmatchedTarget(raw=utterance),
+        check=NoCheck(),
+        summary=utterance,
+        clarification_question="你想对当前场景中的哪个人物、物品或地点做什么？",
+    )
+
+
+def _recovery_reason(exc: Exception) -> str:
+    if isinstance(exc, ValidationError):
+        return "intent_schema_invalid"
+    if isinstance(exc, ContractError):
+        message = str(exc)
+        if "target" in message:
+            return "target_not_visible_or_ambiguous"
+        if "checkpoint" in message:
+            return "checkpoint_not_available_or_mismatched"
+        if "skill" in message or "技能" in message:
+            return "skill_not_allowed"
+        return "intent_contract_invalid"
+    return "intent_validation_failed"
 
 
 def _public_failure_message(code: str) -> str:

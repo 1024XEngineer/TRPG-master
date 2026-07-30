@@ -848,16 +848,6 @@ export default function CharacterPage() {
               {/* Occupation */}
               <div className="bg-card border border-border-light rounded-md p-[18px]">
                 <h4 className="text-[12px] font-semibold text-brass-dark uppercase tracking-[0.08em] mb-3.5">选择职业</h4>
-                {info.occupationId && selectedOcc && (
-                  <div className="mb-3.5 px-3 py-2.5 bg-[#fdfaf4] border border-brass rounded-[6px] flex items-center gap-2.5">
-                    <span className="text-xl">{occupationIcon(selectedOcc)}</span>
-                    <div className="flex-1">
-                      <div className="text-sm font-semibold text-text-primary">{selectedOcc.name}</div>
-                      <div className="text-[11px] text-text-muted">信用 {selectedOcc.creditMin}-{selectedOcc.creditMax} · {selectedOcc.skillPointsFormula}</div>
-                    </div>
-                    <button onClick={() => setInfo(i => ({ ...i, occupationId: null }))} className="text-[11px] text-text-dim underline">更换</button>
-                  </div>
-                )}
 
                 {/* Search + Group filter */}
                 <div className="flex gap-2 mb-3">
@@ -897,7 +887,7 @@ export default function CharacterPage() {
                     const selected = info.occupationId === occ.id
                     return (
                       <div key={occ.id}
-                        className={`group relative px-2.5 py-3 bg-input border rounded-[6px] text-center cursor-pointer active:scale-[0.96] transition-all ${
+                        className={`group relative min-h-[82px] px-2.5 py-3 bg-input border rounded-[6px] text-center cursor-pointer active:scale-[0.96] transition-all ${
                           selected ? 'border-brass bg-[#fdfaf4] shadow-[0_0_0_2px_rgba(184,151,106,0.15)]' : 'border-border-light'
                         }`}>
                         <button
@@ -906,10 +896,9 @@ export default function CharacterPage() {
                         >
                           <Info className="w-3 h-3" />
                         </button>
-                        <div onClick={() => setInfo(i => ({ ...i, occupationId: occ.id }))}>
+                        <div onClick={() => setInfo(i => ({ ...i, occupationId: occ.id }))} className="h-full flex flex-col items-center justify-center">
                           <div className="text-[20px] mb-1">{occupationIcon(occ)}</div>
-                          <div className="text-[12px] font-semibold text-text-primary">{occ.name}</div>
-                          <div className="text-[9px] text-text-dim mt-0.5 leading-[1.3]">{occ.description}</div>
+                          <div className="text-[12px] font-semibold text-text-primary leading-[1.3]">{occ.name}</div>
                           {selected && (
                             <div className="mt-1 inline-block px-2 py-0.5 bg-brass/10 text-brass-dark text-[9px] rounded-full font-semibold">
                               已选择
@@ -920,6 +909,24 @@ export default function CharacterPage() {
                     )
                   })}
                 </div>
+                {selectedOcc && (
+                  <div className="mt-3.5 px-3 py-3 bg-[#fdfaf4] border border-brass rounded-[6px]">
+                    <div className="flex items-start gap-2.5">
+                      <span className="text-2xl leading-none">{occupationIcon(selectedOcc)}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="text-sm font-semibold text-text-primary">{selectedOcc.name}</div>
+                          <button onClick={() => setInfo(i => ({ ...i, occupationId: null }))}
+                            className="text-[11px] text-text-dim underline flex-shrink-0">
+                            取消选择
+                          </button>
+                        </div>
+                        <div className="mt-1 text-[11px] text-text-muted">信用 {selectedOcc.creditMin}-{selectedOcc.creditMax} · {selectedOcc.skillPointsFormula}</div>
+                        <p className="mt-2 text-[12px] leading-relaxed text-text-body">{selectedOcc.description}</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
                 {validationAttempted && info.occupationId == null && (
                   <p className="mt-2 text-[11px] text-[#c04040]">请选择职业后再继续</p>
                 )}

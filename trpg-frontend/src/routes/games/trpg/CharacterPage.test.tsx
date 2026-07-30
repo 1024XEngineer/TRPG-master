@@ -185,6 +185,17 @@ describe('CharacterPage', () => {
     expect(screen.queryByText('会计师')).not.toBeInTheDocument()
   })
 
+  it('keeps occupation descriptions out of the grid until an occupation is selected', () => {
+    renderPage()
+
+    expect(screen.queryByText('测试用职业')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('会计师'))
+
+    expect(screen.getByText('测试用职业')).toBeInTheDocument()
+    expect(screen.getByText(/信用 0-70/)).toBeInTheDocument()
+  })
+
   it('lets credit be typed directly and keeps occupation and interest pools separate', async () => {
     renderPage()
 

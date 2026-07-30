@@ -48,6 +48,9 @@ def coerce_intent_payload(raw: JsonObject, context: IntentContext) -> JsonObject
 
     if not isinstance(raw, dict):
         return raw
+    narrated_detail_search = _recover_same_scene_narrated_detail_search(raw, context)
+    if narrated_detail_search is not None:
+        return narrated_detail_search
     check = raw.get("check")
     if not isinstance(check, dict) or check.get("route") != "default":
         return raw
@@ -65,6 +68,130 @@ def coerce_intent_payload(raw: JsonObject, context: IntentContext) -> JsonObject
             "check": {**check, "proposed_skills": [fallback_skill]},
         }
     return _clarification_payload(context)
+
+
+def _recover_same_scene_narrated_detail_search(
+    raw: JsonObject,
+    context: IntentContext,
+) -> JsonObject | None:
+    """Turn a same-scene narration-only reference into a safe scene search.
+
+    Published narration is presentation text, not authority for a new Entity. If
+    the player immediately searches a concrete detail they already saw there, the
+    safe recovery target is the current Scene: it supports a descriptive default
+    check without promoting the detail or firing an Entity checkpoint.
+    """
+
+    adjacent = context.recent_history.turns[-1] if context.recent_history.turns else None
+    if (
+        adjacent is None
+        or adjacent.scene_id != context.player_view.scene_id
+        or adjacent.published_narration is None
+    ):
+        return None
+
+    target = raw.get("target")
+    if not isinstance(target, dict):
+        return None
+    raw_target = target.get("raw") if target.get("matched") is False else target.get("id")
+    if not isinstance(raw_target, str) or not raw_target.strip():
+        return None
+    if _match_target_id(raw_target, context.player_view) is not None:
+        return None
+
+    utterance = context.player_input.utterance
+    if not _shares_specific_narrated_anchor(
+        raw_target=raw_target,
+        utterance=utterance,
+        narration=adjacent.published_narration.text,
+    ):
+        return None
+    skill_id = _specific_perception_skill_id(utterance, context)
+    if skill_id is None:
+        return None
+
+    summary = raw.get("summary")
+    return {
+        "kind": "action",
+        "verb": "search" if skill_id == "spot-hidden" else "listen",
+        "target": {"matched": True, "id": context.player_view.scene.id},
+        "check": {"route": "default", "proposed_skills": [skill_id]},
+        "approach": raw.get("approach") if isinstance(raw.get("approach"), str) else None,
+        "declarations": [],
+        "initiated_by_target": False,
+        "summary": (
+            summary
+            if isinstance(summary, str) and summary.strip()
+            else utterance.strip() or "在当前场景寻找先前提到的细节"
+        ),
+    }
+
+
+def _shares_specific_narrated_anchor(
+    *,
+    raw_target: str,
+    utterance: str,
+    narration: str,
+) -> bool:
+    narration_key = _label_key(narration)
+    target_key = _label_key(raw_target)
+    if len(target_key) >= 2 and target_key in narration_key:
+        return True
+
+    utterance_key = _label_key(utterance)
+    ignored = {
+        "那我",
+        "我要",
+        "我去",
+        "一下",
+        "看看",
+        "看一",
+        "找一",
+        "有没",
+        "没有",
+        "什么",
+        "线索",
+        "这个",
+        "那个",
+        "那里",
+        "这里",
+        "观察",
+        "调查",
+        "搜索",
+        "搜查",
+    }
+    max_width = min(12, len(utterance_key))
+    for width in range(max_width, 1, -1):
+        for start in range(len(utterance_key) - width + 1):
+            candidate = utterance_key[start : start + width]
+            if candidate not in ignored and candidate in narration_key:
+                return True
+    return False
+
+
+def _specific_perception_skill_id(
+    utterance: str,
+    context: IntentContext,
+) -> str | None:
+    text = _label_key(utterance)
+    actor_candidates = _actor_check_candidates(context)
+    if any(marker in text for marker in ("听", "聆听", "倾听")):
+        return "listen" if "listen" in actor_candidates else None
+    if any(
+        marker in text
+        for marker in (
+            "看",
+            "找",
+            "搜索",
+            "搜查",
+            "观察",
+            "检查",
+            "调查",
+            "线索",
+        )
+    ):
+        return "spot-hidden" if "spot-hidden" in actor_candidates else None
+    return None
 
 
 def normalize_intent_against_view(

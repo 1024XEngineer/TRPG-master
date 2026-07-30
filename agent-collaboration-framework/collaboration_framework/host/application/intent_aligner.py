@@ -178,6 +178,9 @@ _TRAVEL_TEXT_MARKERS = (
     "我去",
     "我要去",
     "我想去",
+    "先去",
+    "先前往",
+    "先走到",
     "去往",
     "回到",
     "想去",
@@ -190,6 +193,14 @@ _TRAVEL_TEXT_MARKERS = (
     "直接去",
     "返回",
     "进入",
+)
+
+_TRAVEL_SUFFIXES = (
+    "看一下",
+    "看一看",
+    "看看",
+    "查看一下",
+    "去看看",
 )
 
 # Localized model output is normalized only when one canonical id is
@@ -392,6 +403,12 @@ def _match_available_exit(context: IntentContext):
     for marker in sorted(_TRAVEL_TEXT_MARKERS, key=len, reverse=True):
         destination_text = destination_text.replace(marker, "")
     destination_text = destination_text.strip(" ，。！？,.!?")
+    for suffix in _TRAVEL_SUFFIXES:
+        if destination_text.endswith(suffix):
+            destination_text = destination_text[: -len(suffix)].strip(
+                " ，。！？,.!?"
+            )
+            break
     matches = []
     for available_exit in context.player_view.scene.available_exits:
         candidates = [
@@ -408,17 +425,65 @@ def _match_available_exit(context: IntentContext):
             )
         if any(
             candidate
-            and (
-                candidate.casefold() in utterance
-                or (
-                    destination_text
-                    and destination_text in candidate.casefold()
-                )
+            and _travel_label_matches(
+                query=destination_text,
+                candidate=candidate,
+                utterance=utterance,
             )
             for candidate in candidates
         ):
             matches.append(available_exit)
     return matches[0] if len(matches) == 1 else None
+
+
+def recover_travel_intent(context: IntentContext) -> Intent | None:
+    """Recover only an unambiguous, no-check travel action from player input."""
+
+    available_exit = _match_available_exit(context)
+    if available_exit is None:
+        return None
+    return Intent(
+        kind="action",
+        verb="go",
+        target=MatchedTarget(id=available_exit.id),
+        check=NoCheck(),
+        summary=context.player_input.utterance.strip() or "前往当前可见出口",
+    )
+
+
+def is_scene_query_utterance(utterance: str) -> bool:
+    """Recognize read-only scene-location requests for narration fallback."""
+
+    normalized = utterance.strip().casefold()
+    return any(
+        marker in normalized
+        for marker in (
+            "我在哪",
+            "我现在在哪",
+            "当前位置",
+            "描述周围",
+            "周围有什么",
+            "我能看到什么",
+            "现在什么情况",
+        )
+    )
+
+
+def _travel_label_matches(*, query: str, candidate: str, utterance: str) -> bool:
+    candidate_key = candidate.casefold()
+    if candidate_key in utterance:
+        return True
+    if not query:
+        return False
+    query_key = query.casefold()
+    if query_key in candidate_key:
+        return True
+    # Conservative colloquial matching: every character must occur in order,
+    # and a two-character minimum prevents single-character false positives.
+    if len(query_key) < 2:
+        return False
+    candidate_iter = iter(candidate_key)
+    return all(any(character == current for current in candidate_iter) for character in query_key)
 
 
 def _has_travel_semantics(verb: str, utterance: str) -> bool:

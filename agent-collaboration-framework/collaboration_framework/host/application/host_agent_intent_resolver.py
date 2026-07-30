@@ -24,7 +24,8 @@ from collaboration_framework.host.schemas import (
     IntentContext,
 )
 
-from .intent_parser import IntentParser
+from .intent_aligner import is_scene_query_utterance, recover_travel_intent
+from .intent_parser import IntentParser, validate_intent_against_view
 
 HostAgentEventObserver = Callable[[HostAgentEvent], Awaitable[None]]
 logger = logging.getLogger(__name__)
@@ -102,17 +103,18 @@ class HostAgentIntentResolver:
             )
         if isinstance(terminal, HostAgentFailed):
             if terminal.code == "HOST_AGENT_INVALID_OUTPUT":
+                intent, recovery_path = _recover_after_failure(context)
                 logger.warning(
                     "host_agent_intent_recovered",
                     extra={
                         "room_id": context.player_input.room_id,
                         "player_id": context.player_input.player_id,
                         "view_revision": context.player_view.revision,
-                        "failure_reason": "adapter_invalid_output",
-                        "recovery_path": "unknown_intent_clarification",
+                        "failure_reason": "json_invalid",
+                        "recovery_path": recovery_path,
                     },
                 )
-                return IntentResolution(_clarification_intent(context), recovered=True)
+                return IntentResolution(intent, recovered=True)
             raise TurnExecutionError(
                 terminal.code,
                 _public_failure_message(terminal.code),
@@ -129,6 +131,7 @@ class HostAgentIntentResolver:
                 IntentParser.parse(terminal.raw_output, intent_context)
             )
         except (ContractError, ValidationError, TypeError, ValueError) as exc:
+            intent, recovery_path = _recover_after_failure(context)
             logger.warning(
                 "host_agent_intent_recovered",
                 extra={
@@ -136,10 +139,10 @@ class HostAgentIntentResolver:
                     "player_id": context.player_input.player_id,
                     "view_revision": context.player_view.revision,
                     "failure_reason": _recovery_reason(exc),
-                    "recovery_path": "unknown_intent_clarification",
+                    "recovery_path": recovery_path,
                 },
             )
-            return IntentResolution(_clarification_intent(context), recovered=True)
+            return IntentResolution(intent, recovered=True)
 
 
 def _clarification_intent(context: HostAgentContext) -> Intent:
@@ -154,6 +157,30 @@ def _clarification_intent(context: HostAgentContext) -> Intent:
         summary=utterance,
         clarification_question="你想对当前场景中的哪个人物、物品或地点做什么？",
     )
+
+
+def _recover_after_failure(context: HostAgentContext) -> tuple[Intent, str]:
+    """Recover only actions that can be proven from the current PlayerView."""
+
+    intent_context = IntentContext(
+        player_input=context.player_input,
+        player_view=context.player_view,
+        recent_history=context.recent_history,
+    )
+    travel_intent = recover_travel_intent(intent_context)
+    if travel_intent is not None:
+        try:
+            return (
+                validate_intent_against_view(travel_intent, intent_context),
+                "unique_exit_travel",
+            )
+        except (ContractError, ValidationError, TypeError, ValueError):
+            # The recovery candidate still passes through the same trusted-view
+            # boundary as model-produced intents.
+            pass
+    if is_scene_query_utterance(context.player_input.utterance):
+        return _clarification_intent(context), "scene_query_narration"
+    return _clarification_intent(context), "unknown_intent_clarification"
 
 
 def _recovery_reason(exc: Exception) -> str:

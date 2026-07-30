@@ -663,7 +663,7 @@ async def test_invisible_target_becomes_state_free_clarification() -> None:
 
 
 @pytest.mark.asyncio
-async def test_recovered_intent_forces_deterministic_clarification() -> None:
+async def test_recovered_intent_keeps_contextual_narration() -> None:
     host = CountingHostAgent(target_id="module-secret-entity")
     app, _, state, _ = application(host, AlwaysNarration())
 
@@ -677,10 +677,9 @@ async def test_recovered_intent_forces_deterministic_clarification() -> None:
 
     assert output.intent.kind == "unknown"
     assert output.action_result.resolution == "unrecognized"
-    assert output.status == "clarification"
-    assert output.narration.kind == "clarification"
-    assert output.narration.text == "你想对当前场景中的哪个人物、物品或地点做什么？"
-    assert output.narration.suggested_actions
+    assert output.status == "completed"
+    assert output.narration.kind == "narration"
+    assert output.narration.text == "错误地把恢复回合当成普通叙事。"
 
 
 @pytest.mark.asyncio

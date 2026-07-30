@@ -36,6 +36,7 @@ from collaboration_framework.host.application import (
     Narrator,
     PlayerViewProjector,
     TurnExecutionError,
+    is_scene_query_utterance,
 )
 from collaboration_framework.host.ports import (
     HostAgentPort,
@@ -500,7 +501,11 @@ class TurnApplication:
                     ) from exc
             except Exception as exc:
                 if action_result.resolution == "unrecognized":
-                    narration = _fallback_clarification(prepared.intent, view_after)
+                    narration = (
+                        _fallback_scene_query(view_after)
+                        if is_scene_query_utterance(prepared.player_input.utterance)
+                        else _fallback_clarification(prepared.intent, view_after)
+                    )
                     break
                 raise TurnExecutionError(
                     "NARRATOR_FAILED",
@@ -513,8 +518,6 @@ class TurnApplication:
                 "规则结果已安全保存，但叙事生成失败，请重试原动作",
                 retryable=True,
             )
-        if prepared.recovered_intent and action_result.resolution == "unrecognized":
-            narration = _fallback_clarification(prepared.intent, view_after)
         return TurnOutput(
             status="clarification" if narration.kind == "clarification" else "completed",
             player_input=prepared.player_input,
@@ -686,6 +689,18 @@ def _fallback_clarification(intent: Intent, view: PlayerView) -> NarrationOutput
         kind="clarification",
         text=(intent.clarification_question or "我还不能确定你想做什么，请说明目标和行动。"),
         suggested_actions=suggestions,
+    )
+
+
+def _fallback_scene_query(view: PlayerView) -> NarrationOutput:
+    description = view.scene.description.strip()
+    text = f"你现在位于{view.scene.name}。"
+    if description:
+        text = f"{text}{description}"
+    return NarrationOutput(
+        kind="narration",
+        text=text,
+        suggested_actions=(),
     )
 
 

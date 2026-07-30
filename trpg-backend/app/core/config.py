@@ -15,7 +15,7 @@ from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-def secret_value(value: str) -> str:
+def secret_value(value: str | SecretStr) -> str:
     return getattr(value, "get_secret_value")()  # noqa: B009
 
 

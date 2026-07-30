@@ -92,6 +92,13 @@ class Intent(ContractModel):
                 raise ValueError("unknown Intent 不能提议检定")
             if not self.clarification_question:
                 raise ValueError("unknown Intent 必须提供 clarification_question")
+        elif self.kind == "dialogue" and isinstance(self.target, UnmatchedTarget):
+            if not isinstance(self.check, NoCheck):
+                raise ValueError("无目标 dialogue Intent 不能提议检定")
+            if self.clarification_question is not None:
+                raise ValueError(
+                    "无目标 dialogue Intent 不得携带 clarification_question"
+                )
         else:
             if not isinstance(self.target, MatchedTarget):
                 raise ValueError("可执行 Intent 必须使用 matched target")

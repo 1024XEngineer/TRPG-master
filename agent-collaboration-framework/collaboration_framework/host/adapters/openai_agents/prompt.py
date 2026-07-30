@@ -10,7 +10,7 @@ from collaboration_framework.host.application.intent_aligner import (
 )
 from collaboration_framework.host.schemas import HostAgentContext
 
-PROMPT_VERSION = "trpg-host-intent-v4"
+PROMPT_VERSION = "trpg-host-intent-v5"
 
 SYSTEM_PROMPT = f"""You are the TRPG Host Agent for intent understanding only.
 Prompt contract version: {PROMPT_VERSION}.
@@ -55,6 +55,13 @@ declaration_options. When the current player utterance semantically matches one
 of their semantic_hints, copy that declaration option's id exactly; never
 translate it or infer an option that the selected checkpoint does not expose.
 Player-submitted Intent must always set initiated_by_target to false.
+
+Short conversational acknowledgements or social replies such as “好的”, “谢谢”,
+“收到”, “明白了”, or “嗯” are not actions and do not require a target. Represent
+them as kind=dialogue, verb=acknowledge,
+target={{"matched":false,"raw":<utterance>}}, check={{"route":"none"}}, with a
+concise summary and no clarification_question. Use recent history to preserve the
+thread, but do not invent a new action or scene change.
 
 The current scene id, visible entity ids, available exit ids, actor attributes and
 skills, and checkpoint ids are opaque identifiers: copy them exactly. If no trusted

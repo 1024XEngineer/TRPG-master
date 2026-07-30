@@ -117,6 +117,20 @@ def completed(target_id: str = "shelf") -> HostAgentCompleted:
     )
 
 
+def dialogue_acknowledgement() -> HostAgentCompleted:
+    return HostAgentCompleted(
+        type="agent.completed",
+        raw_output={
+            "kind": "dialogue",
+            "verb": "acknowledge",
+            "target": {"matched": False, "raw": "好的，谢谢"},
+            "check": {"route": "none"},
+            "summary": "确认并致谢",
+        },
+        usage=usage(),
+    )
+
+
 class ScriptedPort:
     def __init__(self, events: tuple[HostAgentEvent, ...]) -> None:
         self.events = events
@@ -163,6 +177,18 @@ async def test_resolver_forwards_safe_progress_and_parses_one_terminal() -> None
     assert port.calls == 1
     assert intent.target.id == "shelf"
     assert observed == ["tool.started", "tool.completed", "agent.completed"]
+
+
+@pytest.mark.asyncio
+async def test_resolver_accepts_targetless_dialogue_acknowledgement() -> None:
+    port = ScriptedPort((dialogue_acknowledgement(),))
+    intent = await HostAgentIntentResolver(port).resolve(context())
+
+    assert intent.kind == "dialogue"
+    assert intent.target.matched is False
+    assert intent.target.raw == "好的，谢谢"
+    assert intent.check.route == "none"
+    assert intent.clarification_question is None
 
 
 @pytest.mark.asyncio
@@ -237,7 +263,9 @@ def test_parser_normalizes_visible_names_and_skill_labels() -> None:
             "check": {"route": "default", "proposed_skills": ["侦察"]},
             "summary": "调查书架",
         },
-        IntentContext(player_input=context().player_input, player_view=context().player_view),
+        IntentContext(
+            player_input=context().player_input, player_view=context().player_view
+        ),
     )
 
     assert parsed.target.id == "shelf"
@@ -254,7 +282,9 @@ def test_parser_normalizes_visible_alias_and_attribute_label() -> None:
             "check": {"route": "default", "proposed_skills": ["力量"]},
             "summary": "用力量推开看守",
         },
-        IntentContext(player_input=context().player_input, player_view=context().player_view),
+        IntentContext(
+            player_input=context().player_input, player_view=context().player_view
+        ),
     )
 
     assert parsed.target.id == "caretaker"

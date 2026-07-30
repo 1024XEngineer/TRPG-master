@@ -62,6 +62,32 @@ class CountingHostAgent:
         )
 
 
+class AcknowledgementHostAgent:
+    async def astream(
+        self,
+        context: HostAgentContext,
+    ) -> AsyncIterator[HostAgentEvent]:
+        yield HostAgentCompleted(
+            type="agent.completed",
+            raw_output={
+                "kind": "dialogue",
+                "verb": "acknowledge",
+                "target": {
+                    "matched": False,
+                    "raw": context.player_input.utterance,
+                },
+                "check": {"route": "none"},
+                "summary": "确认并致谢",
+            },
+            usage=HostAgentUsage(
+                model_rounds=1,
+                tool_calls=0,
+                duration_ms=1,
+                termination_reason="completed",
+            ),
+        )
+
+
 class FailOnceNarration:
     def __init__(self) -> None:
         self.calls = 0
@@ -234,6 +260,18 @@ class AlwaysNarration:
             "text": "错误地把恢复回合当成普通叙事。",
             "claimed_fact_ids": [],
             "suggested_actions": [],
+        }
+
+
+class AcknowledgementNarration:
+    async def generate(self, context: NarrationContext):
+        assert context.intent.kind == "dialogue"
+        assert context.intent.target.matched is False
+        return {
+            "kind": "narration",
+            "text": "托马斯点点头，示意你继续说下去。",
+            "claimed_fact_ids": [],
+            "suggested_actions": ["继续追问托马斯", "转向下一个线索"],
         }
 
 
@@ -643,6 +681,31 @@ async def test_recovered_intent_forces_deterministic_clarification() -> None:
     assert output.narration.kind == "clarification"
     assert output.narration.text == "你想对当前场景中的哪个人物、物品或地点做什么？"
     assert output.narration.suggested_actions
+
+
+@pytest.mark.asyncio
+async def test_targetless_acknowledgement_gets_contextual_narration() -> None:
+    app, store, state, engine = application(
+        AcknowledgementHostAgent(),
+        AcknowledgementNarration(),
+    )
+
+    prepared = await app.prepare(
+        room_id=state.room_id,
+        player_id="player_1",
+        client_action_id="dialogue-ack",
+        utterance="好的，谢谢",
+    )
+    output = await app.complete(prepared)
+
+    assert output.intent.kind == "dialogue"
+    assert output.action_result.resolution == "direct"
+    assert output.action_result.outcome == "not_applicable"
+    assert output.status == "completed"
+    assert output.narration.kind == "narration"
+    assert output.narration.text == "托马斯点点头，示意你继续说下去。"
+    assert engine.execute_calls == 1
+    assert store.inspect_state(state.room_id).event_sequence == state.event_sequence
 
 
 @pytest.mark.asyncio

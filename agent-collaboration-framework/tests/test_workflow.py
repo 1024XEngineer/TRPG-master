@@ -243,6 +243,32 @@ class UnifiedWorkflowTests(unittest.TestCase):
         self.assertEqual(output.action_result.resolution, "direct")
         self.assertEqual(output.action_result.outcome, "not_applicable")
 
+    def test_targetless_acknowledgement_becomes_state_free_narration(self) -> None:
+        intent_model = StaticIntentModel(
+            {
+                "kind": "dialogue",
+                "verb": "acknowledge",
+                "target": {"matched": False, "raw": "好的，谢谢"},
+                "check": {"route": "none"},
+                "summary": "确认并致谢",
+            }
+        )
+        orchestrator, engine, _ = self.application(intent_model=intent_model)
+        acknowledgement = with_input(
+            self.player_input,
+            action_id="ack_001",
+            utterance="好的，谢谢",
+        )
+        output = self.run_turn(orchestrator, acknowledgement)
+
+        self.assertEqual(output.intent.kind, "dialogue")
+        self.assertFalse(output.intent.target.matched)
+        self.assertEqual(output.action_result.resolution, "direct")
+        self.assertEqual(output.action_result.outcome, "not_applicable")
+        self.assertEqual(output.status, "completed")
+        self.assertEqual(output.narration.kind, "narration")
+        self.assertEqual(engine.snapshot(), self.state)
+
     def test_unknown_intent_also_goes_through_executor_then_clarifies(self) -> None:
         orchestrator, engine, _ = self.application()
         unclear = PlayerInput.model_validate_json(

@@ -6,6 +6,13 @@ from collaboration_framework.host.schemas import NarrationContext
 
 class FakeNarrationModel:
     async def generate(self, context: NarrationContext) -> JsonObject:
+        if context.intent.kind == "dialogue" and not context.intent.target.matched:
+            return {
+                "kind": "narration",
+                "text": "守秘人点了点头，眼前的场景仍在等你继续。",
+                "claimed_fact_ids": [],
+                "suggested_actions": [],
+            }
         if context.action_result.resolution == "unrecognized":
             return {
                 "kind": "clarification",
@@ -17,7 +24,9 @@ class FakeNarrationModel:
         if context.action_result.visible_facts:
             return {
                 "kind": "narration",
-                "text": " ".join(fact.text for fact in context.action_result.visible_facts),
+                "text": " ".join(
+                    fact.text for fact in context.action_result.visible_facts
+                ),
                 "claimed_fact_ids": [
                     fact.id for fact in context.action_result.visible_facts
                 ],

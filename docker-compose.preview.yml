@@ -47,6 +47,16 @@ services:
       DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-chat}
     expose:
       - "8000"
+    # `docker compose up -d` 只保证容器"被创建/启动"，不代表 entrypoint 里
+    # 的迁移/种子加载/uvicorn 真的跑成功了——镜像坏了或启动即崩溃，之前的
+    # 写法照样会在几秒后把预览评论成"已部署"（review 抓到的真问题）。
+    # python:3.13-slim 镜像没有 curl/wget，用内置 urllib 探活，不用额外装包。
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health', timeout=3)"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
 
   frontend:
     image: ${FRONTEND_IMAGE:-trpg-frontend-preview:local}
@@ -54,6 +64,13 @@ services:
       context: .
       dockerfile: trpg-frontend/Dockerfile
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     ports:
       - "${PREVIEW_PORT:-8080}:80"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:80/"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+      start_period: 3s

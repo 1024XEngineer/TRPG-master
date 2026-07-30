@@ -752,22 +752,6 @@ async def end_game(db: AsyncSession, room_id: str, reconnect_token: str | None) 
     except Exception:
         await db.rollback()
         raise
-    """房主结束游戏，房间状态标记为已完成。
-
-    顺带清空该房间的讨论区聊天记录（issue #107）：聊天是临时工作记忆，不进
-    复盘、随房间结束销毁；`end` 是目前房间唯一的后端终结点（没有单独的
-    "退出房间"接口，见 #106 本期不做），清理只能挂在这里。
-    """
-    room = await find_room_by_id(db, room_id)
-    await _require_host(db, room, reconnect_token)
-    if room.phase != "InGame":
-        raise RoomConflictError("只有进行中的游戏可以结束")
-    room.phase = "Completed"
-    room.ended_at = datetime.now(UTC)
-    await chat_service.clear_room_chat(db, room.id)
-    await db.commit()
-
-
 # ── 游戏 / 规则系统 / 模组目录 ──────────────────────────────
 
 

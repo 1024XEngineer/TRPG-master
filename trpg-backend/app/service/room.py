@@ -752,6 +752,8 @@ async def end_game(db: AsyncSession, room_id: str, reconnect_token: str | None) 
     except Exception:
         await db.rollback()
         raise
+
+
 # ── 游戏 / 规则系统 / 模组目录 ──────────────────────────────
 
 

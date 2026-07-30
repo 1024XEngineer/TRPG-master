@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
 
-from app.core.config import Settings
+from app.core.config import Settings, secret_value
 
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 DEEPSEEK_MODEL = "deepseek-chat"
@@ -142,7 +142,7 @@ def build_narrator(settings: Settings) -> Narrator:
     """
     narrator: Narrator = (
         DeepSeekNarrator(
-            settings.deepseek_api_key.get_secret_value(),
+            secret_value(settings.deepseek_api_key),
             base_url=settings.deepseek_base_url,
             model=settings.deepseek_model,
             timeout_seconds=settings.deepseek_timeout_seconds,

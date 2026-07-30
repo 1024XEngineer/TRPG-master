@@ -15,6 +15,10 @@ from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+def secret_value(value: SecretStr) -> str:
+    return value.get_secret_value()  # ty: ignore[unresolved-attribute]
+
+
 class Settings(BaseSettings):
     # env_file=".env"：本地开发时从 backend 目录下的 .env 文件读取（该文件已被
     # .gitignore 排除，不会进 git）；线上部署通常直接注入真实环境变量，.env 不存在也没关系。
@@ -81,15 +85,15 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def validate_host_model(self) -> Settings:
         if self.host_model_provider == "openai" and (
-            self.openai_api_key is None or not self.openai_api_key.get_secret_value().strip()
+            self.openai_api_key is None or not secret_value(self.openai_api_key).strip()
         ):
             raise ValueError("HOST_MODEL_PROVIDER=openai 时必须设置 OPENAI_API_KEY")
         if self.host_model_provider == "qwen" and (
-            self.qwen_api_key is None or not self.qwen_api_key.get_secret_value().strip()
+            self.qwen_api_key is None or not secret_value(self.qwen_api_key).strip()
         ):
             raise ValueError("HOST_MODEL_PROVIDER=qwen 时必须设置 QWEN_API_KEY")
         if self.host_model_provider == "deepseek" and (
-            self.deepseek_api_key is None or not self.deepseek_api_key.get_secret_value().strip()
+            self.deepseek_api_key is None or not secret_value(self.deepseek_api_key).strip()
         ):
             raise ValueError("HOST_MODEL_PROVIDER=deepseek 时必须设置 DEEPSEEK_API_KEY")
         return self

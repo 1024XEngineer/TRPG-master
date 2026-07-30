@@ -67,7 +67,7 @@ from app.adapters import (
     QwenChatCompletionsJsonClient,
     SqlAlchemyRecentHistorySource,
 )
-from app.core.config import Settings, get_settings
+from app.core.config import Settings, get_settings, secret_value
 from app.core.db import async_session_factory
 from app.core.engine import engine_store, rule_engine_service
 from app.core.turn_events import (
@@ -758,7 +758,7 @@ def _configured_models(
             raise ValueError("DeepSeek Host 模型缺少 API key")
         host_agent = build_deepseek_host_agent(
             {
-                "HOST_AGENT_API_KEY": settings.deepseek_api_key.get_secret_value(),
+                "HOST_AGENT_API_KEY": secret_value(settings.deepseek_api_key),
                 "HOST_AGENT_BASE_URL": settings.deepseek_base_url,
                 "HOST_AGENT_MODEL": settings.deepseek_model,
                 "HOST_AGENT_MAX_TURNS": str(settings.host_agent_max_turns),
@@ -768,7 +768,7 @@ def _configured_models(
             }
         )
         client = DeepSeekChatCompletionsJsonClient(
-            api_key=settings.deepseek_api_key.get_secret_value(),
+            api_key=secret_value(settings.deepseek_api_key),
             base_url=settings.deepseek_base_url,
             model=settings.deepseek_model,
             timeout_seconds=settings.deepseek_timeout_seconds,
@@ -786,7 +786,7 @@ def _configured_models(
             raise ValueError("Qwen Host 模型缺少 API key")
         host_agent = build_qwen_host_agent(
             {
-                "HOST_AGENT_API_KEY": settings.qwen_api_key.get_secret_value(),
+                "HOST_AGENT_API_KEY": secret_value(settings.qwen_api_key),
                 "HOST_AGENT_BASE_URL": settings.qwen_base_url,
                 "HOST_AGENT_MODEL": settings.qwen_model,
                 "HOST_AGENT_MAX_TURNS": str(settings.host_agent_max_turns),
@@ -796,7 +796,7 @@ def _configured_models(
             }
         )
         client = QwenChatCompletionsJsonClient(
-            api_key=settings.qwen_api_key.get_secret_value(),
+            api_key=secret_value(settings.qwen_api_key),
             base_url=settings.qwen_base_url,
             model=settings.qwen_model,
             timeout_seconds=settings.qwen_timeout_seconds,
@@ -813,7 +813,7 @@ def _configured_models(
         if settings.openai_api_key is None:
             raise ValueError("OpenAI Host 模型缺少 API key")
         client = OpenAIResponsesJsonClient(
-            api_key=settings.openai_api_key.get_secret_value(),
+            api_key=secret_value(settings.openai_api_key),
             base_url=settings.openai_base_url,
             model=settings.openai_model,
             timeout_seconds=settings.openai_timeout_seconds,

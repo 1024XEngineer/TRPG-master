@@ -25,7 +25,7 @@ from collaboration_framework.host.schemas import (
     VisibleHistoryText,
 )
 
-from app.core.config import Settings
+from app.core.config import Settings, secret_value
 
 RUN_DEEPSEEK_HISTORY_SMOKE = os.getenv("RUN_DEEPSEEK_HISTORY_SMOKE") == "1"
 
@@ -34,7 +34,7 @@ def build_host_agent(settings: Settings):
     assert settings.deepseek_api_key is not None
     return build_deepseek_host_agent(
         {
-            "HOST_AGENT_API_KEY": settings.deepseek_api_key.get_secret_value(),
+            "HOST_AGENT_API_KEY": secret_value(settings.deepseek_api_key),
             "HOST_AGENT_BASE_URL": settings.deepseek_base_url,
             "HOST_AGENT_MODEL": settings.deepseek_model,
             "HOST_AGENT_MAX_TURNS": str(settings.host_agent_max_turns),

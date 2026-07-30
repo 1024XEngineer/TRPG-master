@@ -15,8 +15,8 @@ from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-def secret_value(value: SecretStr) -> str:
-    return value.get_secret_value()  # ty: ignore[unresolved-attribute]
+def secret_value(value: str) -> str:
+    return getattr(value, "get_secret_value")()  # noqa: B009
 
 
 class Settings(BaseSettings):

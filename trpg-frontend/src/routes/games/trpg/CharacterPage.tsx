@@ -881,6 +881,25 @@ export default function CharacterPage() {
                   </div>
                 </div>
 
+                {selectedOcc && (
+                  <div className="mb-3.5 px-3 py-3 bg-[#fdfaf4] border border-brass rounded-[6px]">
+                    <div className="flex items-start gap-2.5">
+                      <span className="text-2xl leading-none">{occupationIcon(selectedOcc)}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="text-sm font-semibold text-text-primary">{selectedOcc.name}</div>
+                          <button onClick={() => setInfo(i => ({ ...i, occupationId: null }))}
+                            className="text-[11px] text-text-dim underline flex-shrink-0">
+                            取消选择
+                          </button>
+                        </div>
+                        <div className="mt-1 text-[11px] text-text-muted">信用 {selectedOcc.creditMin}-{selectedOcc.creditMax} · {selectedOcc.skillPointsFormula}</div>
+                        <p className="mt-2 text-[12px] leading-relaxed text-text-body">{selectedOcc.description}</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {/* Occupation grid */}
                 <div className="grid grid-cols-2 gap-2 max-h-[320px] overflow-y-auto pr-0.5">
                   {filteredOccupations.map(occ => {
@@ -909,24 +928,6 @@ export default function CharacterPage() {
                     )
                   })}
                 </div>
-                {selectedOcc && (
-                  <div className="mt-3.5 px-3 py-3 bg-[#fdfaf4] border border-brass rounded-[6px]">
-                    <div className="flex items-start gap-2.5">
-                      <span className="text-2xl leading-none">{occupationIcon(selectedOcc)}</span>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="text-sm font-semibold text-text-primary">{selectedOcc.name}</div>
-                          <button onClick={() => setInfo(i => ({ ...i, occupationId: null }))}
-                            className="text-[11px] text-text-dim underline flex-shrink-0">
-                            取消选择
-                          </button>
-                        </div>
-                        <div className="mt-1 text-[11px] text-text-muted">信用 {selectedOcc.creditMin}-{selectedOcc.creditMax} · {selectedOcc.skillPointsFormula}</div>
-                        <p className="mt-2 text-[12px] leading-relaxed text-text-body">{selectedOcc.description}</p>
-                      </div>
-                    </div>
-                  </div>
-                )}
                 {validationAttempted && info.occupationId == null && (
                   <p className="mt-2 text-[11px] text-[#c04040]">请选择职业后再继续</p>
                 )}

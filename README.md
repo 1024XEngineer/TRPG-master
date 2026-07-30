@@ -203,6 +203,13 @@ npm run dev
 | `RECENT_HISTORY_ENABLED` | `true` | 是否向 Host/Narrator 提供玩家安全的近期回合 |
 | `RECENT_HISTORY_MAX_TURNS` | `6` | 近期历史最多保留的回合数 |
 | `RECENT_HISTORY_MAX_CHARS` | `6000` | 近期历史文本总字符预算 |
+| `CHARACTER_PORTRAIT_ENABLED` | `false` | 是否开启建卡完成后的可选角色生图 |
+| `PORTRAIT_PROMPT_PROVIDER` | `deterministic` | 提示词生成：`deterministic` 或 `deepseek` |
+| `PORTRAIT_IMAGE_PROVIDER` | `mock` | 图片 provider：`mock` 或 `dashscope` |
+| `DASHSCOPE_API_KEY` | 空 | 阿里云百炼 API Key；只存在后端环境变量中 |
+| `DASHSCOPE_BASE_URL` | `https://dashscope.aliyuncs.com/api/v1` | 通义万相 API 根地址 |
+| `DASHSCOPE_IMAGE_MODEL` | `wan2.2-t2i-flash` | 通义万相文生图模型 |
+| `PORTRAIT_GENERATION_TIMEOUT_SECONDS` | `120` | 图片生成和任务轮询的总超时秒数 |
 
 ### 主持模型配置
 
@@ -287,6 +294,7 @@ provider adapter，而不是把私有字段混入通用请求。
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `VITE_API_BASE_URL` | `http://127.0.0.1:8000/api/v1` | REST API 根地址；WebSocket 地址由 SDK 自动推导 |
+| `VITE_ENABLE_CHARACTER_PORTRAIT` | `false` | 是否在建卡完成后的等待页显示生图入口 |
 
 ## 构建与检查
 

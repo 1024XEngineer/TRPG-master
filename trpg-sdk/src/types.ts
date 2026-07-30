@@ -42,6 +42,9 @@ export type {
   SkillPointsBudgetView,
   SkillComputeView,
   ValidationIssueView,
+  // 建卡完成后的可选角色生图（issue #199）
+  PortraitGenerationRequest as GeneratePortraitInput,
+  PortraitGenerationResult,
   // 游戏目录 / 规则数据（issue #77）—— 对应后端 dto/game.py
   GameRead as Game,
   GameSystemRead as GameSystem,

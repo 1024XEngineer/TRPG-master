@@ -379,7 +379,12 @@ export type ErrorCode =
   | "RATE_LIMITED"
   | "NOT_IMPLEMENTED"
   | "CHARACTER_INVALID"
-  | "RULESET_NOT_CONFIGURED";
+  | "RULESET_NOT_CONFIGURED"
+  | "PORTRAIT_GENERATION_DISABLED"
+  | "PORTRAIT_GENERATION_IN_PROGRESS"
+  | "PORTRAIT_CONTENT_REJECTED"
+  | "PORTRAIT_GENERATION_FAILED"
+  | "PORTRAIT_GENERATION_TIMEOUT";
 
 /**
  * 错误信息的具体内容，只在 success=false 时出现在 error 字段里。
@@ -664,6 +669,21 @@ export interface PlayerView {
   scene: SceneView;
   known_information?: KnownInformationView[];
   checkpoint_options?: CheckpointOption[];
+}
+
+export interface PortraitGenerationRequest {
+  style?: "realistic";
+  size?: "1024x1024";
+}
+
+export interface PortraitGenerationResult {
+  generationId: string;
+  status?: "completed";
+  imageUrl: string;
+  prompt: string;
+  negativePrompt: string;
+  promptSummary: string;
+  promptSource: "deepseek" | "deterministic" | "deterministic_fallback";
 }
 
 /**

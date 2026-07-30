@@ -80,6 +80,19 @@ class Settings(BaseSettings):
     recent_history_max_turns: int = Field(default=6, ge=1, le=24)
     recent_history_max_chars: int = Field(default=6000, ge=2)
 
+    # 角色生图是建卡完成后的可选扩展。默认关闭且使用离线 provider，
+    # 只有显式开启并切换 provider 才会调用 DeepSeek / 阿里云。
+    character_portrait_enabled: bool = False
+    portrait_prompt_provider: Literal["deterministic", "deepseek"] = "deterministic"
+    portrait_image_provider: Literal["mock", "dashscope"] = "mock"
+    dashscope_api_key: SecretStr | None = None
+    dashscope_base_url: str = Field(
+        default="https://dashscope.aliyuncs.com/api/v1",
+        min_length=1,
+    )
+    dashscope_image_model: str = Field(default="wan2.2-t2i-flash", min_length=1)
+    portrait_generation_timeout_seconds: float = Field(default=120.0, gt=0, le=300)
+
     # 讨论区/Narrator 主线的兼容配置：未配置时使用确定性占位叙事，测试可通过
     # 延迟钩子稳定覆盖行动锁并发分支。
     narrator_delay_seconds: float = Field(default=0.0, ge=0, le=120)
@@ -98,20 +111,19 @@ class Settings(BaseSettings):
             self.deepseek_api_key is None or not secret_value(self.deepseek_api_key).strip()
         ):
             raise ValueError("HOST_MODEL_PROVIDER=deepseek 时必须设置 DEEPSEEK_API_KEY")
+        if (
+            self.character_portrait_enabled
+            and self.portrait_prompt_provider == "deepseek"
+            and (self.deepseek_api_key is None or not secret_value(self.deepseek_api_key).strip())
+        ):
+            raise ValueError("角色生图使用 DeepSeek 时必须设置 DEEPSEEK_API_KEY")
+        if (
+            self.character_portrait_enabled
+            and self.portrait_image_provider == "dashscope"
+            and (self.dashscope_api_key is None or not secret_value(self.dashscope_api_key).strip())
+        ):
+            raise ValueError("角色生图使用 DashScope 时必须设置 DASHSCOPE_API_KEY")
         return self
-
-    # DeepSeek API Key（issue #107 地基，`app/core/narrator.py`）：配了就走真实
-    # DeepSeek 生成叙事回应，不配（默认）自动回退到确定性的占位文案——CI/e2e
-    # 环境不配这个变量，本地演示/线上环境按需配置。
-    deepseek_api_key: str | None = None
-
-    # ⚠️ 测试专用（issue #107）：让叙事生成人为延迟 N 秒后再返回，生产永远保持 0。
-    # 存在的理由：无 key 时的占位叙事同步秒回，action.submit 的房间锁窗口只有
-    # 微秒级，e2e 两个客户端"同时提交"永远压不中 ACTION_IN_PROGRESS——锁的
-    # 并发拒绝路径会变成测不到的死代码。e2e 起后端时把它设成 1~2 秒，锁窗口
-    # 就能被稳定命中。
-    narrator_delay_seconds: float = 0.0
-
 
 @lru_cache
 def get_settings() -> Settings:

@@ -23,7 +23,7 @@ from pathlib import Path
 from pydantic import BaseModel
 from pydantic.json_schema import GenerateJsonSchema, models_json_schema
 
-from app.dto import auth, character, chat, common, game, module, replay, room, ws
+from app.dto import auth, character, chat, common, game, module, portrait, replay, room, ws
 
 # 需要导出的模型清单：REST 请求/响应体 + WS 事件 payload。
 #
@@ -62,6 +62,9 @@ _MODELS: list[type[BaseModel]] = [
     character.SkillComputeView,
     character.ValidationIssueView,
     character.CharacterComputeResult,
+    # 建卡完成后的角色生图（issue #199）
+    portrait.PortraitGenerationRequest,
+    portrait.PortraitGenerationResult,
     # 游戏目录 / 规则数据（issue #77 新增，issue #84 S1 加厚 ruleset 结构）
     game.GameRead,
     game.GameSystemRead,

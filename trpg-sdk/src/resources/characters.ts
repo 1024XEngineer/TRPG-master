@@ -2,6 +2,8 @@ import type { ApiClient } from '../client';
 import type {
   Character,
   CharacterDraftResult,
+  GeneratePortraitInput,
+  PortraitGenerationResult,
   RollAttributesResult,
   UpdateCharacterInput,
 } from '../types';
@@ -57,6 +59,21 @@ export class CharactersResource {
     return this.client.post<null>(
       `/rooms/${roomId}/characters/${characterId}/complete`,
       null,
+      this.authenticated(reconnectToken)
+    );
+  }
+
+  /** POST /api/v1/rooms/{roomId}/characters/{characterId}/portrait-generations —
+   * 玩家主动为已完成的本人角色生成图片。 */
+  generatePortrait(
+    roomId: string,
+    characterId: string,
+    payload: GeneratePortraitInput,
+    reconnectToken: string
+  ): Promise<PortraitGenerationResult> {
+    return this.client.post<PortraitGenerationResult>(
+      `/rooms/${roomId}/characters/${characterId}/portrait-generations`,
+      payload,
       this.authenticated(reconnectToken)
     );
   }

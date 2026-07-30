@@ -104,17 +104,22 @@ jobs:
         env:
           SSH_KEY: ${{ secrets.PREVIEW_SSH_KEY }}
           SSH_HOST: ${{ secrets.PREVIEW_SSH_HOST }}
+          # 端口本身也算基础设施信息，跟 host/user 一样走 secret，不写进
+          # 这个公开可读的 workflow 文件里（即使不是密钥，也不该在公开仓库
+          # 明文暴露服务器的真实拓扑）。
+          SSH_PORT: ${{ secrets.PREVIEW_SSH_PORT }}
         run: |
           mkdir -p ~/.ssh
           echo "$SSH_KEY" > ~/.ssh/preview_deploy_key
           chmod 600 ~/.ssh/preview_deploy_key
-          ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          ssh-keyscan -H -p "$SSH_PORT" "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
 
       - if: github.event.action != 'closed'
         name: 部署到预览服务器
         env:
           SSH_HOST: ${{ secrets.PREVIEW_SSH_HOST }}
           SSH_USER: ${{ secrets.PREVIEW_SSH_USER }}
+          SSH_PORT: ${{ secrets.PREVIEW_SSH_PORT }}
           BACKEND_IMAGE: ${{ steps.meta.outputs.backend_image }}
           FRONTEND_IMAGE: ${{ steps.meta.outputs.frontend_image }}
           PORT: ${{ steps.meta.outputs.internal_port }}
@@ -133,7 +138,7 @@ jobs:
             HOST_MODEL_PROVIDER=fake
           fi
 
-          scp -o StrictHostKeyChecking=no -i ~/.ssh/preview_deploy_key \
+          scp -P "$SSH_PORT" -o StrictHostKeyChecking=no -i ~/.ssh/preview_deploy_key \
             docker-compose.preview.yml \
             "$SSH_USER@$SSH_HOST:/tmp/pr-$PR-compose.yml"
 
@@ -143,7 +148,7 @@ jobs:
           # 环境变量（多数服务器的 sshd_config 默认不转发任意环境变量，
           # `ssh host VAR=x cmd` 那种写法在很多服务器上根本不生效）。
           # actionlint/shellcheck 的 SC2087 提示的是这一点，这里是有意为之。
-          ssh -o StrictHostKeyChecking=no -i ~/.ssh/preview_deploy_key "$SSH_USER@$SSH_HOST" bash -s <<EOF
+          ssh -p "$SSH_PORT" -o StrictHostKeyChecking=no -i ~/.ssh/preview_deploy_key "$SSH_USER@$SSH_HOST" bash -s <<EOF
             set -e
             mkdir -p ~/trpg-previews/pr-$PR
             mv /tmp/pr-$PR-compose.yml ~/trpg-previews/pr-$PR/docker-compose.yml
@@ -163,12 +168,13 @@ jobs:
         env:
           SSH_HOST: ${{ secrets.PREVIEW_SSH_HOST }}
           SSH_USER: ${{ secrets.PREVIEW_SSH_USER }}
+          SSH_PORT: ${{ secrets.PREVIEW_SSH_PORT }}
           PR: ${{ github.event.pull_request.number }}
         run: |
           # 同上一步：故意不加引号，$PR 要在 runner 这一侧展开（这里没有
           # secret，纯粹是为了跟上面部署脚本保持同一套写法，别人读两处时
           # 不用切换心智模型猜"这处是本地展开还是远端展开"）。
-          ssh -o StrictHostKeyChecking=no -i ~/.ssh/preview_deploy_key "$SSH_USER@$SSH_HOST" bash -s <<EOF
+          ssh -p "$SSH_PORT" -o StrictHostKeyChecking=no -i ~/.ssh/preview_deploy_key "$SSH_USER@$SSH_HOST" bash -s <<EOF
             set -e
             if [ -d ~/trpg-previews/pr-$PR ]; then
               cd ~/trpg-previews/pr-$PR

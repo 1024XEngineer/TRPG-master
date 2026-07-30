@@ -7862,8 +7862,6 @@ def build_coc7_ruleset() -> RulesetRead:
         attribute_point_buy=COC7_ATTRIBUTE_POINT_BUY,
         age_range=COC7_AGE_RANGE,
         skills=COC7_SKILLS,
-        occupations=[
-            _occupation_with_ui_metadata(occupation) for occupation in COC7_OCCUPATIONS
-        ],
+        occupations=[_occupation_with_ui_metadata(occupation) for occupation in COC7_OCCUPATIONS],
         occupation_categories=COC7_OCCUPATION_CATEGORIES,
     )

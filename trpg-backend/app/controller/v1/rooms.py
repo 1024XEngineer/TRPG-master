@@ -23,7 +23,7 @@ from app.dto.character import (
 )
 from app.dto.chat import ChatMessageRead
 from app.dto.common import ApiResponse
-from app.dto.replay import ReplayEventRead, RoomSummaryRead
+from app.dto.replay import ReplayEventRead, RoomConversationEventRead, RoomSummaryRead
 from app.dto.room import (
     JoinRoomBody,
     RoomCreate,
@@ -35,6 +35,7 @@ from app.models.user import User
 from app.service import character as character_service
 from app.service import chat as chat_service
 from app.service import room as room_service
+from app.service.ws_events import broadcast_room_state
 
 router = APIRouter(prefix="/rooms", tags=["rooms"])
 
@@ -47,6 +48,10 @@ _ERROR_MAP: dict[type[Exception], tuple[ErrorCode, int]] = {
     room_service.ModuleNotFoundError: (ErrorCode.NOT_FOUND, status.HTTP_404_NOT_FOUND),
     room_service.RoomFullError: (ErrorCode.ROOM_FULL, status.HTTP_409_CONFLICT),
     room_service.ModuleNotSelectedError: (ErrorCode.MODULE_NOT_SELECTED, status.HTTP_409_CONFLICT),
+    room_service.ModulePlayerCountMismatchError: (
+        ErrorCode.MODULE_PLAYER_COUNT_MISMATCH,
+        status.HTTP_409_CONFLICT,
+    ),
     room_service.CharacterIncompleteError: (
         ErrorCode.CHARACTER_INCOMPLETE,
         status.HTTP_409_CONFLICT,
@@ -102,6 +107,7 @@ async def select_room_module(
         room_service.RoomConflictError,
     ) as exc:
         _raise_service_error(exc)
+    await broadcast_room_state(db, room_id)
     return ApiResponse.ok(None)
 
 
@@ -155,6 +161,7 @@ async def start_story(
         room_service.RoomConflictError,
     ) as exc:
         _raise_service_error(exc)
+    await broadcast_room_state(db, room_id)
     return ApiResponse.ok(None)
 
 
@@ -174,6 +181,47 @@ async def end_game(
         room_service.RoomConflictError,
     ) as exc:
         _raise_service_error(exc)
+    await broadcast_room_state(db, room_id)
+    return ApiResponse.ok(None)
+
+
+@router.post("/{room_id}/suspend", response_model=ApiResponse[None])
+async def suspend_game(
+    room_id: str,
+    reconnect_token: str | None = Header(default=None, alias="X-Reconnect-Token"),
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[None]:
+    """POST /api/v1/rooms/{roomId}/suspend —— 房主挂起进行中的游戏。"""
+    try:
+        await room_service.suspend_game(db, room_id, reconnect_token)
+    except (
+        room_service.RoomNotFoundError,
+        room_service.RoomAuthenticationError,
+        room_service.RoomAuthorizationError,
+        room_service.RoomConflictError,
+    ) as exc:
+        _raise_service_error(exc)
+    await broadcast_room_state(db, room_id)
+    return ApiResponse.ok(None)
+
+
+@router.post("/{room_id}/resume", response_model=ApiResponse[None])
+async def resume_game(
+    room_id: str,
+    reconnect_token: str | None = Header(default=None, alias="X-Reconnect-Token"),
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[None]:
+    """POST /api/v1/rooms/{roomId}/resume —— 房主恢复已挂起的游戏。"""
+    try:
+        await room_service.resume_game(db, room_id, reconnect_token)
+    except (
+        room_service.RoomNotFoundError,
+        room_service.RoomAuthenticationError,
+        room_service.RoomAuthorizationError,
+        room_service.RoomConflictError,
+    ) as exc:
+        _raise_service_error(exc)
+    await broadcast_room_state(db, room_id)
     return ApiResponse.ok(None)
 
 
@@ -195,6 +243,26 @@ async def get_room_replay(
     """GET /api/v1/rooms/{roomId}/replay —— 逐条事件回放（仅本房间成员可查）。"""
     try:
         events = await room_service.get_replay(db, room_id, reconnect_token)
+    except (
+        room_service.RoomAuthenticationError,
+        room_service.RoomAuthorizationError,
+    ) as exc:
+        _raise_service_error(exc)
+    return ApiResponse.ok(events)
+
+
+@router.get("/{room_id}/conversation", response_model=ApiResponse[list[RoomConversationEventRead]])
+async def list_room_conversation(
+    room_id: str,
+    reconnect_token: str | None = Header(default=None, alias="X-Reconnect-Token"),
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[list[RoomConversationEventRead]]:
+    """GET /api/v1/rooms/{roomId}/conversation —— 房间对话历史。
+
+    给房间页重进恢复用；只允许房间成员读取。
+    """
+    try:
+        events = await room_service.list_conversation_events(db, room_id, reconnect_token)
     except (
         room_service.RoomAuthenticationError,
         room_service.RoomAuthorizationError,
@@ -260,6 +328,7 @@ async def create_character(
         room_service.RoomNotFoundError,
         room_service.RoomAuthenticationError,
         room_service.RoomAuthorizationError,
+        room_service.RoomConflictError,
     ) as exc:
         _raise_service_error(exc)
     return ApiResponse.ok(result)
@@ -290,6 +359,7 @@ async def get_character(
         character_service.CharacterNotFoundError,
         room_service.RoomAuthenticationError,
         room_service.RoomAuthorizationError,
+        room_service.RoomConflictError,
     ) as exc:
         _raise_service_error(exc)
     return ApiResponse.ok(character)
@@ -316,6 +386,7 @@ async def update_character(
         character_service.CharacterNotFoundError,
         room_service.RoomAuthenticationError,
         room_service.RoomAuthorizationError,
+        room_service.RoomConflictError,
     ) as exc:
         _raise_service_error(exc)
     return ApiResponse.ok(None)
@@ -355,6 +426,7 @@ async def complete_character(
         room_service.RoomAuthenticationError,
         room_service.RoomAuthorizationError,
         room_service.RulesetNotConfiguredError,
+        room_service.RoomConflictError,
     ) as exc:
         _raise_service_error(exc)
     return ApiResponse.ok(None)
@@ -380,6 +452,7 @@ async def roll_attributes(
         character_service.CharacterNotFoundError,
         room_service.RoomAuthenticationError,
         room_service.RoomAuthorizationError,
+        room_service.RoomConflictError,
     ) as exc:
         _raise_service_error(exc)
     return ApiResponse.ok(result)

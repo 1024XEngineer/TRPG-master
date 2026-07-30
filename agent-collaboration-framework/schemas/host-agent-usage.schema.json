@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "host-agent-usage.schema.json",
+  "additionalProperties": false,
+  "description": "Provider-neutral measurements for one Host Agent invocation.\n\n``None`` means the provider did not report that token metric. A reported zero\nremains ``0`` so missing data is never silently converted into measured usage.",
+  "properties": {
+    "model_rounds": {
+      "minimum": 0,
+      "title": "Model Rounds",
+      "type": "integer"
+    },
+    "tool_calls": {
+      "minimum": 0,
+      "title": "Tool Calls",
+      "type": "integer"
+    },
+    "input_tokens": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Input Tokens"
+    },
+    "output_tokens": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Output Tokens"
+    },
+    "duration_ms": {
+      "minimum": 0,
+      "title": "Duration Ms",
+      "type": "integer"
+    },
+    "termination_reason": {
+      "enum": [
+        "completed",
+        "max_turns",
+        "timeout",
+        "invalid_output",
+        "tool_budget_exceeded",
+        "internal_error"
+      ],
+      "title": "Termination Reason",
+      "type": "string"
+    }
+  },
+  "required": [
+    "model_rounds",
+    "tool_calls",
+    "duration_ms",
+    "termination_reason"
+  ],
+  "title": "HostAgentUsage",
+  "type": "object"
+}

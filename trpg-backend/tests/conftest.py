@@ -7,18 +7,23 @@
 """
 
 import tempfile
-from collections.abc import AsyncGenerator, Generator
+from collections.abc import AsyncGenerator, Callable, Generator
 from pathlib import Path
 
 import pytest
+from collaboration_framework.engine import RuleEngineService
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
+from app.adapters import SqlAlchemyEngineStore, SqlAlchemyRecentHistorySource
 from app.controller import ws as ws_controller
 from app.core.db import Base, get_db
 from app.core.seed import ensure_seed_content
+from app.core.turn import build_turn_application
 from app.main import app
+from app.service.paper_chase_loader import load_paper_chase
+from tests.content_fixtures import publish_multiplayer_module
 
 # 用临时文件 SQLite，不用 ":memory:"+StaticPool。关键原因是并发模型：异步 HTTP
 # 测试跑在 pytest-asyncio 的事件循环里，而同步 TestClient 的 WebSocket 跑在它
@@ -55,6 +60,11 @@ app.dependency_overrides[get_db] = override_get_db
 # 工厂也重绑到测试库，否则 WS 测试里 HTTP 请求写进的是内存测试库、WS 路由却
 # 去空的真实库里查 player，必然查不到而关连接。
 ws_controller.async_session_factory = TestSessionLocal  # type: ignore[assignment]
+_test_turn_store = SqlAlchemyEngineStore(TestSessionLocal)
+ws_controller.turn_application = build_turn_application(
+    _test_turn_store,
+    RuleEngineService(_test_turn_store),
+)
 
 
 @pytest.fixture(autouse=True)
@@ -69,6 +79,8 @@ async def _prepare_database() -> AsyncGenerator[None, None]:
     # 依赖内置模组的用例（建房选模组、GET /modules 等）会因为库里没有模组而失败。
     async with TestSessionLocal() as session:
         await ensure_seed_content(session)
+        await load_paper_chase(session)
+        await publish_multiplayer_module(session)
     yield
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
@@ -84,6 +96,21 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
     """
     async with TestSessionLocal() as session:
         yield session
+
+
+@pytest.fixture
+def engine_store_factory() -> Callable[..., SqlAlchemyEngineStore]:
+    """构造使用测试数据库的 SQLAlchemy EngineStore，可按需注入失败点。"""
+
+    def factory(**kwargs) -> SqlAlchemyEngineStore:  # noqa: ANN003
+        return SqlAlchemyEngineStore(TestSessionLocal, **kwargs)
+
+    return factory
+
+
+@pytest.fixture
+def recent_history_source() -> SqlAlchemyRecentHistorySource:
+    return SqlAlchemyRecentHistorySource(TestSessionLocal)
 
 
 @pytest.fixture

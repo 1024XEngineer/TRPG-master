@@ -54,10 +54,12 @@ export type {
   // 复盘 / 回放（issue #77）—— 对应后端 dto/replay.py
   RoomSummaryRead as RoomSummary,
   ReplayEventRead as ReplayEvent,
+  RoomConversationEventRead as RoomConversationEvent,
   // WebSocket 现有 6 个事件（issue #60）—— 对应后端 dto/ws.py
   RoomJoinPayload,
   PlayerReadyPayload,
   ActionSubmitPayload,
+  ActionBroadcastPayload,
   GameStartPayload,
   SessionBoundPayload,
   NarrationPushPayload,
@@ -72,15 +74,13 @@ export type {
   ViewPrivatePayload,
   CheckRequestPayload,
   CheckResultPayload,
+  ChatMessagePayload,
+  ChatMessageRead as ChatMessage,
+  ChatSendPayload,
   SanCheckRequestPayload,
   SanCheckResultPayload,
   ClueGrantedPayload,
   ErrorPayload,
-  // 讨论区 + 行动广播（issue #107）—— 对应后端 dto/ws.py 与 dto/chat.py
-  ChatSendPayload,
-  ChatMessagePayload,
-  ActionBroadcastPayload,
-  ChatMessageRead as ChatMessage,
 } from './generated/dto';
 
 /** GET /api/v1/me/rooms 返回项。 */
@@ -144,9 +144,12 @@ import type {
 export type ServerToClientEvent =
   | { type: 'session.bound'; payload: SessionBoundPayload }
   | { type: 'narration.push'; payload: NarrationPushPayload }
-  // issue #107：讨论区消息广播 + 玩家对 AI 说的原话广播（后端真实发出）
-  | { type: 'chat.message'; payload: ChatMessagePayload }
-  | { type: 'action.broadcast'; payload: ActionBroadcastPayload }
+  | { type: 'turn.started'; payload: TurnStartedPayload }
+  | { type: 'turn.phase_changed'; payload: TurnPhaseChangedPayload }
+  | { type: 'tool.started'; payload: ToolStartedPayload }
+  | { type: 'tool.completed'; payload: ToolCompletedPayload }
+  | { type: 'turn.failed'; payload: TurnFailedPayload }
+  | { type: 'view.updated'; payload: ViewUpdatedPayload }
   | { type: 'room.state'; payload: RoomStatePayload }
   | { type: 'player.joined'; payload: PlayerJoinedPayload }
   | { type: 'turn.begin'; payload: TurnBeginPayload }
@@ -154,7 +157,181 @@ export type ServerToClientEvent =
   | { type: 'view.private'; payload: ViewPrivatePayload }
   | { type: 'check.request'; payload: CheckRequestPayload }
   | { type: 'check.result'; payload: CheckResultPayload }
+  | { type: 'chat.message'; payload: ChatMessagePayload }
+  | { type: 'action.broadcast'; payload: ActionBroadcastPayload }
   | { type: 'san.check.request'; payload: SanCheckRequestPayload }
   | { type: 'san.check.result'; payload: SanCheckResultPayload }
   | { type: 'clue.granted'; payload: ClueGrantedPayload }
   | { type: 'error'; payload: ErrorPayload };
+
+export type AgentTurnPhase =
+  | 'reading_player_view'
+  | 'understanding_action'
+  | 'waiting_for_check'
+  | 'executing_action'
+  | 'refreshing_player_view'
+  | 'generating_narration';
+
+export interface TurnStartedPayload {
+  correlationId: string;
+}
+
+export interface TurnPhaseChangedPayload {
+  correlationId: string;
+  phase: AgentTurnPhase;
+}
+
+export interface ToolStartedPayload {
+  correlationId: string;
+  toolName: string;
+  publicProgressLabel: string;
+}
+
+export interface ToolCompletedPayload {
+  correlationId: string;
+  toolName: string;
+  status: 'success' | 'error';
+}
+
+export interface TurnFailedPayload {
+  correlationId: string;
+  code: string;
+  publicMessage: string;
+  retryable: boolean;
+}
+
+export interface ViewUpdatedPayload {
+  playerId: string;
+  playerView: AgentPlayerView;
+}
+
+// Agent framework 的回合结果使用独立信封，不套 `{type, payload}`。字段名按
+// framework 的稳定 JSON Schema 保持 snake_case，避免 SDK 私自改写协议。
+export type AgentJsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | AgentJsonValue[]
+  | { [key: string]: AgentJsonValue };
+
+export interface AgentActorValue {
+  id: string;
+  name: string;
+  value: number;
+}
+
+export interface AgentActorResource {
+  id: string;
+  name: string;
+  value: number;
+}
+
+export interface AgentSelfActor {
+  id: string;
+  name: string;
+  occupation: string | null;
+  attributes: AgentActorValue[];
+  skills: AgentActorValue[];
+  resources: AgentActorResource[];
+  conditions: string[];
+  equipment: string[];
+  background_summary: string;
+}
+
+export interface AgentObservableState {
+  key: string;
+  label: string;
+  value: AgentJsonValue;
+}
+
+export interface AgentVisibleEntity {
+  id: string;
+  kind: 'npc' | 'object' | 'location';
+  name: string;
+  aliases: string[];
+  description: string;
+  observable_state: AgentObservableState[];
+}
+
+export interface AgentVisibleActor {
+  id: string;
+  name: string;
+  status_summary: string;
+}
+
+export interface AgentExitDestination {
+  scene_id: string;
+  name: string;
+}
+
+export interface AgentAvailableExit {
+  id: string;
+  name: string;
+  aliases: string[];
+  description: string;
+  destination: AgentExitDestination | null;
+}
+
+export interface AgentSceneView {
+  id: string;
+  name: string;
+  description: string;
+  time: string | null;
+  visible_entities: AgentVisibleEntity[];
+  visible_actors: AgentVisibleActor[];
+  available_exits: AgentAvailableExit[];
+}
+
+export interface AgentKnownInformation {
+  id: string;
+  title: string;
+  summary: string;
+  content: string;
+  related_entities: string[];
+  related_scenes: string[];
+  scope: 'actor' | 'party';
+}
+
+export interface AgentCheckpointOption {
+  id: string;
+  target_id: string;
+  action_hint: string;
+  skills: string[];
+  difficulty: 'regular' | 'hard' | 'extreme' | null;
+}
+
+export interface AgentPlayerView {
+  room_id: string;
+  player_id: string;
+  actor_id: string;
+  scene_id: string;
+  phase: 'playing' | 'ended';
+  revision: string;
+  self_actor: AgentSelfActor;
+  scene: AgentSceneView;
+  known_information: AgentKnownInformation[];
+  checkpoint_options: AgentCheckpointOption[];
+}
+
+export interface AgentNarration {
+  kind: 'narration' | 'clarification';
+  text: string;
+  claimed_fact_ids: string[];
+  suggested_actions: string[];
+}
+
+export interface AgentTurnPayload {
+  room_id: string;
+  player_id: string;
+  actor_id: string;
+  narration: AgentNarration;
+  player_view: AgentPlayerView;
+}
+
+export interface TurnCompletedEvent {
+  protocol_version: '1';
+  message_type: 'turn.completed';
+  correlation_id: string;
+  payload: AgentTurnPayload;
+}

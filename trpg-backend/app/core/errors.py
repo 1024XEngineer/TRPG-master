@@ -37,6 +37,7 @@ class ErrorCode(StrEnum):
     ACTION_IN_PROGRESS = "ACTION_IN_PROGRESS"  # 房间内已有人在等 AI 主持人回应，他人提交被拒 → 409
     CHARACTER_INCOMPLETE = "CHARACTER_INCOMPLETE"  # 角色卡未建完，无法进行需要角色的操作 → 409
     MODULE_NOT_SELECTED = "MODULE_NOT_SELECTED"  # 房间还没选定模组 → 409
+    MODULE_PLAYER_COUNT_MISMATCH = "MODULE_PLAYER_COUNT_MISMATCH"  # 房间人数不符合模组要求 → 409
     RECONNECT_TOKEN_EXPIRED = "RECONNECT_TOKEN_EXPIRED"  # 断线重连凭证失效（room.rejoin）→ 401
     RATE_LIMITED = "RATE_LIMITED"  # 请求频率超限 → 429
     NOT_IMPLEMENTED = "NOT_IMPLEMENTED"  # 协议位置已预留，真实业务逻辑本期未实现 → 501

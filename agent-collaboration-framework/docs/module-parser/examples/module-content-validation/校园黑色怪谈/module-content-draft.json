@@ -1,0 +1,4035 @@
+{
+  "module_id": "black-campus",
+  "version": "1.0.0",
+  "world_ref": "coc-7e",
+  "background": "默认时代与地点为 2020 年 4 月 9 日的现代中国古城中学，也可本地化到其他现代国家。这所重点中学的历史可追溯至 20 世纪 40 年代，近期却持续发生学生失踪；调查员以普通人的身份进入校园，寻找失踪者或查明事件起因。叙事应采用开放、非线性的校园调查基调，让熟悉的课堂、办公室、花坛和学生传闻逐渐显出压抑与宇宙恐怖；教师的异常应含蓄流露，校园怪谈用于营造气氛且不必全部为真。学校的隐藏历史、失踪原因和幕后人物只能随调查取得的证据逐步揭示。",
+  "scenes": [
+    {
+      "id": "school_gate",
+      "name": "古城中学校门",
+      "content": "2020 年 4 月 9 日，调查员因学生连续失踪事件来到古城中学。校门口贴着校园地图，史建西亲自迎接众人，随后与德育主任朱莉一同离开。",
+      "entity_ids": ["principal_shi", "julie"],
+      "checkpoint_ids": ["observe_principal_at_arrival"],
+      "exits": []
+    },
+    {
+      "id": "garden",
+      "name": "翻修中的花坛",
+      "content": "地图上标作花坛的区域被施工围挡封锁。围挡周围散落着翻修挖出的泥土，从门缝里只能看见草、郁金香和尚未贴完瓷砖的花坛壁。",
+      "entity_ids": [
+        "garden_enclosure",
+        "flowerbed",
+        "buwen_shan",
+        "buwen_teacher_manual",
+        "buwen_gun",
+        "busen_notebook",
+        "campus_guard"
+      ],
+      "checkpoint_ids": [
+        "inspect_garden_renovation",
+        "enter_garden_enclosure",
+        "avoid_garden_spikes",
+        "search_garden_corner",
+        "excavate_flowerbed",
+        "inspect_buwen_body",
+        "garden_guard_listens",
+        "dismiss_garden_guard"
+      ],
+      "exits": []
+    },
+    {
+      "id": "teaching_building_1",
+      "name": "教学楼一",
+      "content": "五层教学楼：一层是高一，二层可通往实验楼，三层可找到悬疑社社长马树，四层可遇到杜海凡，五层有上锁的社团教室和天台。",
+      "entity_ids": [
+        "jiang_xuewen",
+        "ma_shu",
+        "du_haifan",
+        "mystery_club_flyer",
+        "rooftop_camera",
+        "byakhee"
+      ],
+      "checkpoint_ids": [
+        "assess_jiang_after_outburst",
+        "gain_du_haifan_trust",
+        "persuade_du_haifan_to_join",
+        "search_mystery_club_room",
+        "search_rooftop",
+        "recall_byakhee_lore"
+      ],
+      "exits": []
+    },
+    {
+      "id": "old_teaching_building",
+      "name": "废弃的老教学楼",
+      "content": "建校时期就存在的两层旧楼已经废弃，所有教室都被几重厚重铁链锁住，地面灰尘里留着同一个人的许多脚印。",
+      "entity_ids": ["failed_ritual_trace", "silver_ring", "principal_shi"],
+      "checkpoint_ids": [
+        "track_old_building_footprints",
+        "unlock_old_classroom",
+        "resist_old_classroom_incense",
+        "analyze_failed_ritual",
+        "chase_principal_shadow"
+      ],
+      "exits": []
+    },
+    {
+      "id": "playground",
+      "name": "操场",
+      "content": "空旷的操场上，年迈校工张宸正在清扫金黄色落叶。操场一侧偶尔传来模糊的电话声。",
+      "entity_ids": ["zhang_chen", "wang_guiqiang"],
+      "checkpoint_ids": [
+        "gain_zhang_chen_trust",
+        "overhear_wang_guiqiang_call",
+        "approach_wang_guiqiang_call"
+      ],
+      "exits": []
+    },
+    {
+      "id": "library",
+      "name": "图书馆",
+      "content": "总务楼一层的图书馆保存着历年校报与采访文章，可以用图书馆或校内电脑查阅学校公开历史。",
+      "entity_ids": ["school_archives"],
+      "checkpoint_ids": ["research_school_history"],
+      "exits": []
+    },
+    {
+      "id": "general_affairs_office",
+      "name": "总务处办公室",
+      "content": "总务处办公室里弥漫着一股淡淡熏香。张宸会在这里接待调查员；闻过老教学楼浓香的人会觉得两处气味十分相似。",
+      "entity_ids": ["zhang_chen", "incense_sample"],
+      "checkpoint_ids": [
+        "resist_general_affairs_incense",
+        "request_incense_sample"
+      ],
+      "exits": []
+    },
+    {
+      "id": "general_affairs_storage",
+      "name": "总务处储存室",
+      "content": "上锁的储存室正对门摆着三个大铁柜，右侧有办公桌和两个木质储物柜，房间中央堆着许多纸箱，空气中的香气比办公室浓得多。",
+      "entity_ids": [
+        "incense_sample",
+        "bloodstained_cabinet",
+        "animal_remains",
+        "incense_crates",
+        "black_man"
+      ],
+      "checkpoint_ids": [
+        "resist_storage_incense",
+        "inspect_bloodstained_cabinet",
+        "inspect_animal_remains",
+        "open_incense_crates",
+        "look_out_storage_window"
+      ],
+      "exits": []
+    },
+    {
+      "id": "school_history_museum",
+      "name": "校史馆",
+      "content": "积满灰尘的校史馆装修华丽，墙上挂着建校时期的照片，原木地板上方是后来更换的铝制天花板。",
+      "entity_ids": ["missionary_photo", "hidden_newspapers"],
+      "checkpoint_ids": [
+        "inspect_missionary_photo",
+        "find_hidden_newspapers"
+      ],
+      "exits": []
+    },
+    {
+      "id": "cafeteria",
+      "name": "食堂",
+      "content": "中午可以在食堂找到杜海凡和其他学生；调查员也可以请已经信任自己的杜海凡使用随身电脑提供黑客协助。",
+      "entity_ids": ["du_haifan", "school_computers"],
+      "checkpoint_ids": ["hack_school_leadership_computers"],
+      "exits": []
+    },
+    {
+      "id": "underground_parking",
+      "name": "实验楼地下停车场",
+      "content": "停用的地下停车场没有一丝亮光，厚厚积尘表明这里很久无人进入，空荡车位中只停着一辆上锁的黑色旧 SUV。",
+      "entity_ids": ["suv_contract"],
+      "checkpoint_ids": ["inspect_abandoned_suv"],
+      "exits": []
+    },
+    {
+      "id": "principal_office",
+      "name": "史建西办公室",
+      "content": "办公室内有茶几、沙发、书架、电脑和资料柜。上午史建西与朱莉会在这里谈话；下午房门由电子锁封闭。",
+      "entity_ids": [
+        "principal_shi",
+        "julie",
+        "sussex_manuscript",
+        "principal_records",
+        "lab_master_keycard",
+        "principal_gun",
+        "school_computers"
+      ],
+      "checkpoint_ids": [
+        "expose_principal_lie",
+        "find_lab_master_keycard",
+        "read_sussex_manuscript",
+        "search_principal_records",
+        "hack_principal_desktop",
+        "find_principal_gun"
+      ],
+      "exits": []
+    },
+    {
+      "id": "julie_office",
+      "name": "朱莉办公室",
+      "content": "德育主任办公室里有办公桌、茶几、椅子和两个书架，其中一个书架格外宽大而崭新。办公室房门没有上锁。",
+      "entity_ids": ["julie", "secret_passage"],
+      "checkpoint_ids": ["move_julie_bookcase"],
+      "exits": []
+    },
+    {
+      "id": "district_office",
+      "name": "学区主任办公室",
+      "content": "学区主任王贵强在这里办公。他说话谨慎，总会把话题引向教师因学生失踪而疲惫烦躁。",
+      "entity_ids": ["wang_guiqiang", "buwen_teacher_manual", "busen_notebook"],
+      "checkpoint_ids": ["gain_wang_guiqiang_trust"],
+      "exits": []
+    },
+    {
+      "id": "laboratories",
+      "name": "生物与理化实验室",
+      "content": "生物与理化实验室没有明显异常，实验设备很新，看起来近期才整体更换过一次。",
+      "entity_ids": ["incense_sample", "animal_remains"],
+      "checkpoint_ids": ["analyze_incense_composition"],
+      "exits": []
+    },
+    {
+      "id": "psychology_room",
+      "name": "心理咨询室",
+      "content": "配备完善的心理咨询室里有许多学生电脑，其中只有一台电脑看起来稍新，而且没有设置密码。",
+      "entity_ids": ["school_computers", "du_haifan"],
+      "checkpoint_ids": ["recover_inspiration_results"],
+      "exits": []
+    },
+    {
+      "id": "office_building",
+      "name": "教师办公楼",
+      "content": "教师办公楼的语文办公室里，姜学文正低头在一本笔记上书写；询问时，他声称那只是教案。",
+      "entity_ids": ["jiang_xuewen", "jiang_manuscript"],
+      "checkpoint_ids": [
+        "assess_jiang_in_office",
+        "search_jiang_desk"
+      ],
+      "exits": []
+    },
+    {
+      "id": "dormitory",
+      "name": "学生宿舍与旧地道",
+      "content": "四层学生宿舍由男女两区组成，一层地面明显比周围墙壁古老，像是翻修时保留了另一个年代的地基。",
+      "entity_ids": ["dorm_tunnel", "elder_sign"],
+      "checkpoint_ids": [
+        "hear_hollow_dorm_floor",
+        "survive_dorm_tunnel_trap",
+        "activate_elder_sign"
+      ],
+      "exits": []
+    },
+    {
+      "id": "underground_chamber",
+      "name": "马卡拉的地下密室",
+      "content": "十米见方的地下密室阴暗、潮湿且弥漫异臭。人造光源下可以看见中央石桌与银匣、地面石板、角落黑布、顶部复杂图案和另一扇上锁石门。",
+      "entity_ids": [
+        "principal_shi",
+        "julie",
+        "wang_bo",
+        "silver_box",
+        "sacrificial_slab",
+        "bone_pile",
+        "ritual_circle",
+        "wang_bo_cell",
+        "black_man"
+      ],
+      "checkpoint_ids": [
+        "inspect_silver_box",
+        "inspect_sacrificial_slab",
+        "inspect_bone_pile",
+        "analyze_ritual_circle",
+        "unlock_wang_bo_cell"
+      ],
+      "exits": []
+    }
+  ],
+  "entities": [
+    {
+      "id": "principal_shi",
+      "kind": "npc",
+      "name": "史建西",
+      "aliases": ["史校长", "校长"],
+      "content": "古城中学校长，表面热情而有学者气质，身体瘦弱，谈话时偶尔咳嗽。",
+      "secrets": "独有能力：掌握黑色之人通神术、枯萎术及拜亚基召唤与束缚术。",
+      "information_item_ids": [
+        "missing_students_timeline",
+        "buwen_identity",
+        "school_cult_truth",
+        "inspiration_selection_method",
+        "weekly_sacrifice_cycle"
+      ],
+      "state": {
+        "corrupted": true,
+        "aware_of_investigation": false,
+        "incapacitated": false,
+        "escaped": false
+      },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {
+        "talk": "史建西热情地表示学校会全力配合调查，但细微的烦躁从神情中一闪而过。"
+      },
+      "rules": [],
+      "stat_block": {
+        "STR": 60,
+        "CON": 70,
+        "SIZ": 55,
+        "INT": 75,
+        "POW": 75,
+        "DEX": 60,
+        "APP": 45,
+        "EDU": 70,
+        "SAN": 22,
+        "HP": 12,
+        "MP": 15,
+        "MOV": 9
+      }
+    },
+    {
+      "id": "julie",
+      "kind": "npc",
+      "name": "朱莉",
+      "aliases": ["德育主任", "朱主任"],
+      "content": "对学生表现得和蔼可亲的德育主任，自称是史建西钦定的下任校长。",
+      "secrets": "史建西的情妇与更狂热的共犯。她把失踪学生带往地下密室，办公室藏着密道；与奈亚拉托提普接触后变得喜怒无常。",
+      "information_item_ids": [
+        "missing_students_timeline",
+        "school_cult_truth",
+        "inspiration_selection_method",
+        "weekly_sacrifice_cycle"
+      ],
+      "state": {
+        "corrupted": true,
+        "office_hostile": false,
+        "incapacitated": false,
+        "escaped": false
+      },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {
+        "talk": "朱莉微笑着解释，她与史校长亲近只是因为自己被选作下任校长。"
+      },
+      "rules": [],
+      "stat_block": {
+        "STR": 45,
+        "CON": 60,
+        "SIZ": 50,
+        "INT": 70,
+        "POW": 65,
+        "DEX": 65,
+        "APP": 65,
+        "EDU": 70,
+        "SAN": 44,
+        "HP": 11,
+        "MP": 12,
+        "MOV": 8
+      }
+    },
+    {
+      "id": "wang_guiqiang",
+      "kind": "npc",
+      "name": "王贵强",
+      "aliases": ["王主任", "学区主任"],
+      "content": "为人正直的学区主任，在失踪案后被派来调查学校，常用装傻掩饰自己的警觉。",
+      "secrets": "曾与布文杉合作，正调查朱莉与异常资金流动；电话另一端是与调查相关的人。",
+      "information_item_ids": ["buwen_identity"],
+      "state": {
+        "call_overheard": false,
+        "trusted_investigators": false,
+        "allied": false
+      },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {
+        "talk": "王贵强避重就轻地说，最近学生失踪让老师们都很烦躁。"
+      },
+      "rules": [],
+      "stat_block": {
+        "STR": 60,
+        "CON": 55,
+        "SIZ": 60,
+        "INT": 55,
+        "POW": 50,
+        "DEX": 70,
+        "APP": 45,
+        "EDU": 65,
+        "SAN": 47,
+        "HP": 11,
+        "MP": 10,
+        "MOV": 8
+      }
+    },
+    {
+      "id": "jiang_xuewen",
+      "kind": "npc",
+      "name": "姜学文",
+      "aliases": ["姜老师", "语文老师"],
+      "content": "任教二十年的语文教师，近期经常喜怒无常，对未获提拔长期心怀怨恨。",
+      "secrets": "被史建西故意泄露的传言诱惑而信奉奈亚拉托提普。听到神名会陷入疯狂并无差别攻击。",
+      "state": {
+        "corrupted": true,
+        "hostile": false,
+        "defeated": false
+      },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {
+        "talk": "姜学文紧张地声称自己只是在写教案。"
+      },
+      "rules": [],
+      "stat_block": {
+        "STR": 75,
+        "CON": 60,
+        "SIZ": 80,
+        "INT": 55,
+        "POW": 45,
+        "DEX": 60,
+        "APP": 50,
+        "EDU": 60,
+        "SAN": 32,
+        "HP": 14,
+        "MP": 9,
+        "MOV": 7
+      }
+    },
+    {
+      "id": "buwen_shan",
+      "kind": "npc",
+      "name": "布文杉",
+      "aliases": ["布森", "历史教师", "隐修堂调查员"],
+      "content": "曾短暂在古城中学任教的历史教师，如今已经失踪。",
+      "secrets": "暴露原因：忽视朱莉并低估教师洗脑程度。",
+      "information_item_ids": ["buwen_identity"],
+      "state": {
+        "alive": false,
+        "body_found": false,
+        "identified": false,
+        "corpse_shock_resolved": false
+      },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "du_haifan",
+      "kind": "npc",
+      "name": "杜海凡",
+      "aliases": ["年轻黑客", "王博的朋友"],
+      "content": "抱着笔记本电脑、言谈畏缩的学生，希望找回好友王博。",
+      "secrets": "自学黑客技术，可入侵个人服务器或恢复被删除的灵感评测；知道失踪学生资料，但不了解校领导真相。",
+      "state": {
+        "trusted_investigators": false,
+        "accompanying": false
+      },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": {
+        "STR": 40,
+        "CON": 55,
+        "SIZ": 40,
+        "INT": 65,
+        "POW": 55,
+        "DEX": 60,
+        "APP": 70,
+        "EDU": 40,
+        "SAN": 55,
+        "HP": 9,
+        "MP": 11,
+        "MOV": 9
+      }
+    },
+    {
+      "id": "ma_shu",
+      "kind": "npc",
+      "name": "马树",
+      "aliases": ["悬疑社社长"],
+      "content": "痴迷神秘学的悬疑社社长，对相信校园怪谈的人非常友善。",
+      "secrets": "悬疑社散布了六大怪谈并印过小册子，校方销毁册子却没有处罚他们；他查到建校初期也曾发生学生失踪。",
+      "information_item_ids": [
+        "campus_six_rumors",
+        "school_1948_disappearances"
+      ],
+      "state": {
+        "rumors_shared": false
+      },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {
+        "talk": "马树主动谈起校园六大怪谈，并建议去图书馆查建校初期的资料。"
+      },
+      "rules": [],
+      "stat_block": {
+        "STR": 65,
+        "CON": 55,
+        "SIZ": 50,
+        "INT": 70,
+        "POW": 40,
+        "DEX": 55,
+        "APP": 50,
+        "EDU": 35,
+        "SAN": 40,
+        "HP": 10,
+        "MP": 11,
+        "MOV": 9
+      }
+    },
+    {
+      "id": "zhang_chen",
+      "kind": "npc",
+      "name": "张宸",
+      "aliases": ["老校工", "总务处处长"],
+      "content": "年过半百、说话略有口吃的老校工，急切希望校园恢复正常。",
+      "secrets": "参加过花园翻修，知道花坛原本没有损坏；掌握老教学楼钥匙和校园建筑沿革，确认领导也持有旧楼钥匙。",
+      "state": {
+        "trusted_investigators": false,
+        "old_building_key_given": false
+      },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": {
+        "STR": 50,
+        "CON": 55,
+        "SIZ": 65,
+        "INT": 40,
+        "POW": 55,
+        "DEX": 50,
+        "APP": 35,
+        "EDU": 40,
+        "SAN": 55,
+        "HP": 13,
+        "MP": 11,
+        "MOV": 7
+      }
+    },
+    {
+      "id": "wang_bo",
+      "kind": "npc",
+      "name": "王博",
+      "aliases": ["最后失踪的男学生"],
+      "content": "最后一名失踪学生，杜海凡的好友。",
+      "secrets": "被囚禁在地下密室，亲眼目睹史建西施法粉碎巨石，因恐怖经历形成极端人际依赖，会依赖第一个见到的调查员。",
+      "information_item_ids": ["missing_students_timeline"],
+      "state": {
+        "alive": true,
+        "imprisoned": true,
+        "rescued": false,
+        "dependent_on": null
+      },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": {
+        "STR": 40,
+        "CON": 35,
+        "SIZ": 45,
+        "INT": 55,
+        "POW": 45,
+        "DEX": 25,
+        "APP": 65,
+        "EDU": 45,
+        "SAN": 37,
+        "HP": 4,
+        "MP": 0,
+        "MOV": 7
+      }
+    },
+    {
+      "id": "campus_guard",
+      "kind": "npc",
+      "name": "巡逻保安",
+      "aliases": ["保安"],
+      "content": "负责施工围挡附近巡逻的保安。",
+      "secrets": "挖掘结束后以聆听 70 进行暗骰；若发现调查员且无法被合理借口支开，史建西会获知尸体可能暴露。",
+      "state": {
+        "alerted": false,
+        "dismissed": false
+      },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "byakhee",
+      "kind": "npc",
+      "name": "拜亚基",
+      "aliases": ["天台怪物", "星间骏马"],
+      "content": "隐藏在天台废弃桌椅后的有翼星界生物。",
+      "secrets": "被教团召唤并驯服。调查员在天台无法回避战斗；目睹时 SAN 1/1d6。",
+      "state": {
+        "alive": true,
+        "encountered": false,
+        "lore_known": false
+      },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": {
+        "STR": 100,
+        "CON": 50,
+        "SIZ": 80,
+        "INT": 55,
+        "POW": 50,
+        "DEX": 70,
+        "HP": 13,
+        "MP": 10,
+        "MOV": 16,
+        "armor": "2（毛发与坚韧兽皮）"
+      }
+    },
+    {
+      "id": "black_man",
+      "kind": "npc",
+      "name": "黑色之人",
+      "aliases": ["黑衣人", "奈亚拉托提普的化身"],
+      "content": "身着黑风衣和黑帽、无法看清面容的男子；即使看不清脸，旁观者仍能明确感到祂正在微笑。",
+      "secrets": "奈亚拉托提普的化身，热衷于愚弄调查员。不会主动帮助教徒作战；若化身被击败或遭主动攻击，可能显露真正的恐怖。",
+      "state": {
+        "manifested": false,
+        "attacked": false,
+        "avatar_defeated": false
+      },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": {
+        "STR": 60,
+        "CON": 95,
+        "SIZ": 55,
+        "INT": 430,
+        "POW": 500,
+        "DEX": 95,
+        "APP": 90,
+        "HP": 15,
+        "MP": 100,
+        "MOV": 12,
+        "armor": "0"
+      }
+    },
+    {
+      "id": "teachers",
+      "kind": "npc",
+      "name": "古城中学教师群体",
+      "aliases": ["老师们", "教职工"],
+      "content": "不少教师显得疲惫、紧张或语无伦次。",
+      "secrets": "大多数教师都或多或少受到了史建西传播的奈亚拉托提普信仰与致幻熏香影响，但具体程度由 KP 判断。",
+      "state": {
+        "influence": "partial"
+      },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "garden_enclosure",
+      "kind": "location",
+      "name": "花坛施工围挡",
+      "aliases": ["围挡", "花园"],
+      "content": "门上挂锁的施工围挡，周围散落着翻出的泥土。",
+      "secrets": "围挡内布置了半埋钢刺；施工只是史建西掩埋布文杉尸体的借口。",
+      "state": {
+        "accessed": false
+      },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "flowerbed",
+      "kind": "object",
+      "name": "郁金香花坛",
+      "aliases": ["花坛", "翻修花园"],
+      "content": "新修好的花坛，只剩外壁瓷砖尚未贴完。",
+      "secrets": "角落藏有绣着“森”字的领带；地下埋着布文杉尸体。挖掘需累计 6 次力量成功，每次 5 分钟。",
+      "state": {
+        "tie_found": false,
+        "excavation_progress": 0,
+        "dug": false
+      },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "buwen_teacher_manual",
+      "kind": "object",
+      "name": "布文杉的教工手册",
+      "aliases": ["教工手册"],
+      "content": "贴有布文杉照片和姓名的教工手册。",
+      "secrets": "尸体挖出后若总耗时少于 45 分钟，调查员可仔细检查并确认死者身份。",
+      "state": {
+        "found": false
+      },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "buwen_gun",
+      "kind": "object",
+      "name": "布文杉的 .32 自动手枪",
+      "aliases": [".32 自动手枪", "布文杉的枪"],
+      "content": "填满子弹的 .32 自动手枪。",
+      "secrets": "伤害 1d8，基础射程 15，每轮 1（3）发，弹数 8，故障 99。",
+      "state": {
+        "found": false
+      },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "busen_notebook",
+      "kind": "object",
+      "name": "布森的笔记本",
+      "aliases": ["布文杉的笔记本", "神话笔记"],
+      "content": "掌心大小、皮革封面龟裂、内页泛黄的笔记本，第一页写着“布森”。",
+      "secrets": "尸体旁的遗物，最近数页记录古城中学调查；同时是神话典籍。完整阅读 4 周，SAN 1d6+1，CMI+2，CMF+7，MR17。",
+      "state": {
+        "found": false,
+        "skimmed": false,
+        "studied": false
+      },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "mystery_club_flyer",
+      "kind": "object",
+      "name": "悬疑社宣传单",
+      "aliases": ["悬疑社传单"],
+      "content": "介绍校园怪谈的悬疑社宣传单。",
+      "secrets": "藏在五楼右侧环形社团教室的桌子抽屉里。",
+      "state": {
+        "found": false
+      },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "rooftop_camera",
+      "kind": "object",
+      "name": "天台摄像头",
+      "aliases": ["摄像头"],
+      "content": "正对天台的监控摄像头。",
+      "secrets": "线缆被人为剪断。",
+      "state": {
+        "broken": true,
+        "noticed": false
+      },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "failed_ritual_trace",
+      "kind": "object",
+      "name": "失败的仪式痕迹",
+      "aliases": ["白色法阵", "粉笔痕迹"],
+      "content": "旧教学楼一楼空教室中央残留的白色痕迹。",
+      "secrets": "危险通神术的一部分，但没有成功施展；房间内熏香会诱发幻觉。",
+      "state": {
+        "found": false,
+        "room_accessed": false,
+        "analyzed": false
+      },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "silver_ring",
+      "kind": "object",
+      "name": "绳子上的银戒指",
+      "aliases": ["银戒指"],
+      "content": "串在细绳上的戒指。",
+      "secrets": "史建西从旧教学楼二楼绳梯逃走时遗落；附录记载史建西持有银戒指。",
+      "state": {
+        "found": false
+      },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "school_archives",
+      "kind": "object",
+      "name": "校报与采访档案",
+      "aliases": ["学校档案", "校报"],
+      "content": "图书馆保存的校报和采访资料。",
+      "secrets": "包含 1947 年建校、地下稀有金属、校方压制怪谈，以及灵感评测活动信息。",
+      "information_item_ids": [
+        "school_public_history",
+        "campus_six_rumors",
+        "inspiration_selection_method"
+      ],
+      "state": {
+        "researched": false
+      },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "incense_sample",
+      "kind": "object",
+      "name": "暗红色熏香",
+      "aliases": ["熏香", "锥形香"],
+      "content": "学校元旦发给教师、要求逐步增加用量的南亚式锥形熏香。",
+      "secrets": "含多种植物与化学致幻成分，混有人类红细胞；张宸的用量已接近成瘾。",
+      "information_item_ids": ["incense_composition"],
+      "state": {
+        "obtained": false,
+        "analyzed": false
+      },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "bloodstained_cabinet",
+      "kind": "object",
+      "name": "有黑色污渍的储物柜",
+      "aliases": ["左侧木柜"],
+      "content": "看似空无一物的木质储物柜，隔板上有黑色污渍。",
+      "secrets": "污渍是约两个月前留下的人血。",
+      "state": {
+        "blood_identified": false
+      },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "animal_remains",
+      "kind": "object",
+      "name": "动物干尸",
+      "aliases": ["动物尸体", "右侧木柜"],
+      "content": "柜中堆放着狗、猫和蜥蜴等小动物干尸。",
+      "secrets": "动物被放血而死，伤口类似邪教生祭；克苏鲁神话知识可判断动物祭祀失败。",
+      "state": {
+        "examined": false
+      },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "incense_crates",
+      "kind": "object",
+      "name": "熏香纸箱",
+      "aliases": ["纸箱", "香薰箱"],
+      "content": "装着数量惊人的熏香，每箱约有五百支。",
+      "secrets": "开箱时巨型蜘蛛扑出；箱底藏有便条纸。",
+      "state": {
+        "opened": false,
+        "spider_defeated": false,
+        "note_found": false
+      },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "missionary_photo",
+      "kind": "object",
+      "name": "马卡拉神父照片",
+      "aliases": ["建校者照片", "传教士照片"],
+      "content": "照片中的白发神父是学校创建时的投资者马卡拉。",
+      "secrets": "观看者会感到照片眼睛随自己移动。",
+      "state": {
+        "examined": false
+      },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "hidden_newspapers",
+      "kind": "object",
+      "name": "藏在天花板上的旧报纸",
+      "aliases": ["1948 年旧报纸"],
+      "content": "关于古城中学早期失踪案的三篇旧报道。",
+      "secrets": "1948 年近三个月内有十二名学生失踪，事件停止后建校者马卡拉也在校内失踪。",
+      "information_item_ids": ["school_1948_disappearances"],
+      "state": {
+        "found": false
+      },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "school_computers",
+      "kind": "object",
+      "name": "学校电脑与灵感评测数据",
+      "aliases": ["校领导电脑", "心理咨询室电脑"],
+      "content": "校领导与心理咨询室使用的电脑系统。",
+      "secrets": "独有细节：史建西与朱莉秘密通信；王贵强电脑防护异常专业。",
+      "information_item_ids": ["inspiration_selection_method"],
+      "state": {
+        "leadership_hacked": false,
+        "inspiration_results_recovered": false
+      },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "suv_contract",
+      "kind": "object",
+      "name": "黑色 SUV 与购销合同",
+      "aliases": ["黑色 SUV", "二手车合同"],
+      "content": "停车场中唯一一辆积灰的 2011 年旧 SUV。",
+      "secrets": "车门上锁，副驾驶储物箱内有说明书和二手车购销合同。",
+      "state": {
+        "contract_found": false
+      },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "sussex_manuscript",
+      "kind": "object",
+      "name": "《萨塞克斯手稿（手抄版）》",
+      "aliases": ["无封皮英文书", "神话典籍"],
+      "content": "被错误封皮包住、以英文花体字抄写的残缺神话典籍。",
+      "secrets": "马卡拉·E·韦伯斯特手抄的《死灵之书》残缺译本。略读 SAN 1d6、克苏鲁神话 +2%；可能造成对书籍的终身痴迷。",
+      "state": {
+        "found": false,
+        "skimmed": false
+      },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "principal_records",
+      "kind": "object",
+      "name": "学校账本与教职工档案",
+      "aliases": ["资料柜", "学校账本"],
+      "content": "史建西资料柜中整齐保存的学校重要资料。",
+      "secrets": "账本显示大量资金以“校园建设”名义支出；教职工档案唯独没有布文杉。",
+      "state": {
+        "finances_found": false,
+        "buwen_absence_confirmed": false
+      },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "lab_master_keycard",
+      "kind": "object",
+      "name": "实验楼万能 IC 卡",
+      "aliases": ["万能门卡", "磁卡"],
+      "content": "写着“实验楼万能 IC 卡”的磁卡。",
+      "secrets": "可能落在史建西办公室沙发缝隙里，可开启实验楼所有门及地下车库。",
+      "state": {
+        "found": false
+      },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "principal_gun",
+      "kind": "object",
+      "name": "史建西藏起的手枪",
+      "aliases": ["资料柜暗格手枪"],
+      "content": "藏在资料柜暗格中的手枪。",
+      "secrets": "原文地点描述称贝瑞塔 M9，附录人物数据列为 .45 自动手枪；具体武器数据发布前需编辑确认。",
+      "state": {
+        "found": false
+      },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "secret_passage",
+      "kind": "location",
+      "name": "朱莉办公室密道",
+      "aliases": ["书架后的洞口", "软绳梯"],
+      "content": "大书架下方的一平方米洞口，软绳梯伸向地下。",
+      "secrets": "直接通往地下密室；下午朱莉会守在办公室并攻击被她认定已知情的调查员。",
+      "state": {
+        "discovered": false
+      },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "jiang_manuscript",
+      "kind": "object",
+      "name": "《黑色之人及其诸事》",
+      "aliases": ["姜学文手抄本"],
+      "content": "写满奈亚拉托提普相关内容的手抄本。",
+      "secrets": "浏览损失 1d3 SAN，并揭示学校每隔一周献祭合适祭品以呼唤黑色之人。完整阅读一周，SAN 1d4，CMI+1，CMF+3，MR15。",
+      "information_item_ids": ["weekly_sacrifice_cycle"],
+      "state": {
+        "found": false,
+        "skimmed": false
+      },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "dorm_tunnel",
+      "kind": "location",
+      "name": "宿舍地板下的旧地道",
+      "aliases": ["战争地道"],
+      "content": "隐藏在男生宿舍地砖与木板下的狭窄地道。",
+      "secrets": "体格大于 0 的角色无法进入；内有钢刺机关，伤脚后敏捷、闪避、潜行、跳跃和攀爬检定受惩罚。",
+      "state": {
+        "opened": false,
+        "trap_triggered": false
+      },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "elder_sign",
+      "kind": "object",
+      "name": "刻有旧印的石砖",
+      "aliases": ["旧印", "石门机关"],
+      "content": "地道尽头一块纹路不同、隐约刻有记号的石砖。",
+      "secrets": "触碰并通过灵感后显现宇宙异象，SAN 1/1d5；克苏鲁神话成功可识别旧印并获得 1d2 神话技能。随后石墙开启。",
+      "state": {
+        "activated": false
+      },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "silver_box",
+      "kind": "object",
+      "name": "银质匣子与干涸心脏",
+      "aliases": ["银匣", "心脏祭品"],
+      "content": "石桌上的银匣，装饰着奇怪纹路。",
+      "secrets": "内有一颗带干涸血迹、约一周前放入的人类心脏；取出时 SAN 0/1d3。",
+      "state": {
+        "opened": false,
+        "heart_identified": false
+      },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "sacrificial_slab",
+      "kind": "object",
+      "name": "染血石板",
+      "aliases": ["屠宰石板"],
+      "content": "遍布黑色与褐色痕迹的两米见方石板。",
+      "secrets": "痕迹是干涸血液，神秘学可确认它用于屠宰生祭。",
+      "state": {
+        "examined": false
+      },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "bone_pile",
+      "kind": "object",
+      "name": "黑布下的骨堆",
+      "aliases": ["骨骼堆"],
+      "content": "被黑布盖住的大量人类与动物骨骼。",
+      "secrets": "人骨多为约十八岁的学生，最老可追溯至五十多年前，最新在近几周留下；兽骨较新。",
+      "information_item_ids": [
+        "school_1948_disappearances",
+        "missing_students_timeline"
+      ],
+      "state": {
+        "examined": false
+      },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "ritual_circle",
+      "kind": "object",
+      "name": "顶部通神法阵",
+      "aliases": ["接触法阵", "黑色之人法阵"],
+      "content": "密室顶部石板上刻画的复杂图案。",
+      "secrets": "用于与黑色之人沟通的法阵。若史建西或朱莉一人倒下，另一人会用两轮完成通神术。",
+      "information_item_ids": [
+        "school_cult_truth",
+        "weekly_sacrifice_cycle"
+      ],
+      "state": {
+        "analyzed": false,
+        "contact_started": false,
+        "contact_completed": false
+      },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": null
+    },
+    {
+      "id": "wang_bo_cell",
+      "kind": "location",
+      "name": "囚禁王博的石门",
+      "aliases": ["上锁石门", "囚室"],
+      "content": "地下密室角落里另一扇上锁的石门。",
+      "secrets": "门后是虚弱而精神失常的王博。",
+      "state": {
+        "opened": false
+      },
+      "refuse_ops": [],
+      "blocked_text": null,
+      "direct_responses": {},
+      "rules": [],
+      "stat_block": null
+    }
+  ],
+  "checkpoints": [
+    {
+      "id": "observe_principal_at_arrival",
+      "scene_id": "school_gate",
+      "action": "observe",
+      "target_id": "principal_shi",
+      "skills": ["psychology"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": ["史建西的热情并不真诚，他对调查员到来感到烦躁"],
+          "player_visible_information": [
+            {
+              "text": "史建西脸上的欢迎笑容很得体，但不时流露出的烦躁并没有逃过你的眼睛。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": ["不得在此时直接揭示史建西是信徒"],
+          "ops": []
+        },
+        "failure": {
+          "facts": ["调查员没有看出史建西的异常"],
+          "player_visible_information": [
+            {
+              "text": "史校长表现得热情而配合。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": null
+    },
+    {
+      "id": "inspect_garden_renovation",
+      "scene_id": "garden",
+      "action": "investigate",
+      "target_id": "garden_enclosure",
+      "skills": ["spot-hidden"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": ["围挡周围有大量新翻出的泥土"],
+          "player_visible_information": [
+            {
+              "text": "围挡周围散落着大量新土，工程显然动过花坛深处。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": []
+        },
+        "failure": {
+          "facts": [],
+          "player_visible_information": [
+            {
+              "text": "你只能确认花坛正在翻修。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": null
+    },
+    {
+      "id": "enter_garden_enclosure",
+      "scene_id": "garden",
+      "action": "enter",
+      "target_id": "garden_enclosure",
+      "skills": ["locksmith", "STR", "climb"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": ["调查员进入了施工围挡"],
+          "player_visible_information": [
+            {
+              "text": "你越过挂锁或围挡，进入了翻修中的花园。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.garden_enclosure.state.accessed",
+              "value": true
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["调查员进入围挡时引起了注意"],
+          "player_visible_information": [
+            {
+              "text": "你在处理挂锁或翻越围挡时弄出了明显的动静。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.campus_guard.state.alerted",
+              "value": true
+            }
+          ]
+        }
+      },
+      "visibility": null
+    },
+    {
+      "id": "avoid_garden_spikes",
+      "scene_id": "garden",
+      "action": "cross",
+      "target_id": "garden_enclosure",
+      "skills": ["luck"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": ["调查员避开了半埋的钢刺"],
+          "player_visible_information": [
+            {
+              "text": "你及时看见土里的寒光，绕开了半埋的钢刺。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": []
+        },
+        "failure": {
+          "facts": ["调查员被钢刺划伤，损失 1d3 HP"],
+          "player_visible_information": [
+            {
+              "text": "半埋的钢刺刺中了你，伤口立刻渗出血来。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": ["伤害由 CoC Ruleset 结算为 1d3"],
+          "ops": [
+            {
+              "op": "apply_condition",
+              "condition": "garden_spike_wound"
+            }
+          ]
+        }
+      },
+      "visibility": {
+        "audience": "actor",
+        "requires_discovery": true,
+        "discovery_rule": "进入围挡后由走在最前面的调查员进行幸运检定",
+        "discovery_shares_to_party": false
+      }
+    },
+    {
+      "id": "search_garden_corner",
+      "scene_id": "garden",
+      "action": "search",
+      "target_id": "flowerbed",
+      "skills": ["spot-hidden"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": ["调查员找到背面绣有“森”字的领带"],
+          "player_visible_information": [
+            {
+              "text": "围挡角落里压着一条领带，背面绣着一个“森”字。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": ["每次搜索消耗 5 分钟"],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.flowerbed.state.tie_found",
+              "value": true
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["本次五分钟搜索没有找到线索"],
+          "player_visible_information": [
+            {
+              "text": "五分钟过去了，你没有找到有意义的东西。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": ["允许再次搜索，但每次都推进 5 分钟"],
+          "ops": []
+        }
+      },
+      "visibility": null
+    },
+    {
+      "id": "excavate_flowerbed",
+      "scene_id": "garden",
+      "action": "dig",
+      "target_id": "flowerbed",
+      "skills": ["STR"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": ["花坛挖掘累计一次力量成功"],
+          "player_visible_information": [
+            {
+              "text": "泥土被继续掘开，花坛深处似乎埋着什么。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": [
+            "每次检定代表 5 分钟",
+            "累计 6 次成功才完成挖掘，合适工具可由 KP 减少耗时"
+          ],
+          "ops": [
+            {
+              "op": "add",
+              "path": "entity.flowerbed.state.excavation_progress",
+              "value": 1
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["本轮挖掘没有取得有效进展"],
+          "player_visible_information": [
+            {
+              "text": "这五分钟的挖掘没有明显进展。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": ["仍消耗 5 分钟"],
+          "ops": []
+        }
+      },
+      "visibility": {
+        "audience": "all",
+        "requires_discovery": true,
+        "discovery_rule": "调查员明确提出挖开花坛泥土",
+        "discovery_shares_to_party": true
+      }
+    },
+    {
+      "id": "inspect_buwen_body",
+      "scene_id": "garden",
+      "action": "inspect",
+      "target_id": "buwen_shan",
+      "skills": ["spot-hidden", "idea"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": [
+            "死者被确认为布文杉",
+            "调查员找到了教工手册、填满子弹的手枪和布森笔记本"
+          ],
+          "player_visible_information": [
+            {
+              "text": "教工手册上的照片确认死者是布文杉；他的口袋里还有一把装满子弹的手枪和一本第一页写着“布森”的旧笔记。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": [
+            "只有挖掘总耗时少于 45 分钟才有充足时间仔细检查",
+            "见过布文杉或照片者可用灵感确认身份"
+          ],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.buwen_shan.state.identified",
+              "value": true
+            },
+            {
+              "op": "set",
+              "path": "entity.buwen_teacher_manual.state.found",
+              "value": true
+            },
+            {
+              "op": "set",
+              "path": "entity.buwen_gun.state.found",
+              "value": true
+            },
+            {
+              "op": "set",
+              "path": "entity.busen_notebook.state.found",
+              "value": true
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["调查员只看清了尸体惨白的脸"],
+          "player_visible_information": [
+            {
+              "text": "时间或视线不足以仔细搜查，你只看清了尸体惨白的脸。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": ["不得在失败时授予枪、笔记本或身份确认"],
+          "ops": []
+        }
+      },
+      "visibility": {
+        "audience": "all",
+        "requires_discovery": true,
+        "discovery_rule": "entity.buwen_shan.state.body_found == true",
+        "discovery_shares_to_party": true
+      }
+    },
+    {
+      "id": "garden_guard_listens",
+      "scene_id": "garden",
+      "action": "listen",
+      "target_id": "campus_guard",
+      "skills": ["listen"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": ["巡逻保安听到了围挡内的可疑动静"],
+          "player_visible_information": [
+            {
+              "text": "巡逻保安注意到了围挡内的动静。",
+              "visibility": {"audience": "keeper"}
+            }
+          ],
+          "narration_constraints": ["这是保安聆听 70 的暗骰"],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.campus_guard.state.alerted",
+              "value": true
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["巡逻保安没有注意到围挡内的调查员"],
+          "player_visible_information": [],
+          "narration_constraints": ["不得向玩家暴露发生过暗骰"],
+          "ops": []
+        }
+      },
+      "visibility": {
+        "audience": "keeper",
+        "requires_discovery": false,
+        "discovery_rule": null,
+        "discovery_shares_to_party": false
+      }
+    },
+    {
+      "id": "dismiss_garden_guard",
+      "scene_id": "garden",
+      "action": "persuade",
+      "target_id": "campus_guard",
+      "skills": ["fast-talk", "charm", "intimidate", "credit-rating"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": ["调查员用合理借口支开了保安"],
+          "player_visible_information": [
+            {
+              "text": "保安虽然仍有疑虑，最终还是离开了围挡。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.campus_guard.state.dismissed",
+              "value": true
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["保安不接受解释，史建西将得知调查员在花坛出现"],
+          "player_visible_information": [
+            {
+              "text": "保安不接受你的说法，并表示会立刻报告校方。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.principal_shi.state.aware_of_investigation",
+              "value": true
+            }
+          ]
+        }
+      },
+      "visibility": {
+        "audience": "all",
+        "requires_discovery": true,
+        "discovery_rule": "entity.campus_guard.state.alerted == true",
+        "discovery_shares_to_party": true
+      }
+    },
+    {
+      "id": "assess_jiang_after_outburst",
+      "scene_id": "teaching_building_1",
+      "action": "observe",
+      "target_id": "jiang_xuewen",
+      "skills": ["psychoanalysis", "psychology", "anthropology"],
+      "difficulty": "hard",
+      "outcomes": {
+        "success": {
+          "facts": ["姜学文的愤怒中隐藏着不自然的兴奋"],
+          "player_visible_information": [
+            {
+              "text": "姜学文虽然在发怒，神色里却隐约透着兴奋，这种情绪很不正常。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": []
+        },
+        "failure": {
+          "facts": [],
+          "player_visible_information": [
+            {
+              "text": "你只看到一个刚对学生发过火的中年教师。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": {
+        "audience": "actor",
+        "requires_discovery": true,
+        "discovery_rule": "教学楼二层聆听成功并赶到尽头教室",
+        "discovery_shares_to_party": true
+      }
+    },
+    {
+      "id": "gain_du_haifan_trust",
+      "scene_id": "teaching_building_1",
+      "action": "reassure",
+      "target_id": "du_haifan",
+      "skills": ["credit-rating", "fast-talk", "persuade"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": [
+            "杜海凡愿意说明自己与王博的关系以及失踪学生资料",
+            "杜海凡可以在后续提供黑客协助"
+          ],
+          "player_visible_information": [
+            {
+              "text": "杜海凡逐渐放松下来。他承认王博是自己的好友，并愿意帮你调查学校电脑。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": ["恐吓会使杜海凡逃走，不应按普通成功处理"],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.du_haifan.state.trusted_investigators",
+              "value": true
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["杜海凡仍然畏缩，不愿深入交谈"],
+          "player_visible_information": [
+            {
+              "text": "杜海凡抱紧电脑，回答得更加语无伦次。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": null
+    },
+    {
+      "id": "persuade_du_haifan_to_join",
+      "scene_id": "teaching_building_1",
+      "action": "recruit",
+      "target_id": "du_haifan",
+      "skills": ["persuade"],
+      "difficulty": "hard",
+      "outcomes": {
+        "success": {
+          "facts": ["杜海凡同意与调查员同行"],
+          "player_visible_information": [
+            {
+              "text": "杜海凡犹豫许久，最终抱着电脑跟上了你们。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.du_haifan.state.accompanying",
+              "value": true
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["杜海凡拒绝同行，但说明中午和之后可找到他的地点"],
+          "player_visible_information": [
+            {
+              "text": "杜海凡不敢同行，但答应中午在食堂、其他时候在四楼教室等你。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": {
+        "audience": "all",
+        "requires_discovery": true,
+        "discovery_rule": "entity.du_haifan.state.trusted_investigators == true",
+        "discovery_shares_to_party": true
+      }
+    },
+    {
+      "id": "search_mystery_club_room",
+      "scene_id": "teaching_building_1",
+      "action": "search",
+      "target_id": "mystery_club_flyer",
+      "skills": ["locksmith", "STR", "spot-hidden"],
+      "difficulty": "hard",
+      "outcomes": {
+        "success": {
+          "facts": ["调查员进入五楼右侧环形教室并找到悬疑社宣传单"],
+          "player_visible_information": [
+            {
+              "text": "桌子抽屉里留着一张悬疑社宣传单，上面详细介绍了校园怪谈。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.mystery_club_flyer.state.found",
+              "value": true
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["调查员未能打开或有效搜索社团教室"],
+          "player_visible_information": [
+            {
+              "text": "老式钢锁和空荡教室没有交出线索。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": null
+    },
+    {
+      "id": "search_rooftop",
+      "scene_id": "teaching_building_1",
+      "action": "search",
+      "target_id": "rooftop_camera",
+      "skills": ["spot-hidden"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": [
+            "调查员发现废弃桌椅后的拜亚基",
+            "天台摄像头线缆被人为剪断"
+          ],
+          "player_visible_information": [
+            {
+              "text": "桌椅后方有什么有翼的东西动了起来；旁边摄像头的线缆也明显被人剪断。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": [
+            "这是原文规定无法逃脱的强制战斗",
+            "目睹拜亚基触发 SAN 1/1d6"
+          ],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.rooftop_camera.state.noticed",
+              "value": true
+            },
+            {
+              "op": "set",
+              "path": "entity.byakhee.state.encountered",
+              "value": true
+            },
+            {
+              "op": "force",
+              "action": "start_combat:byakhee"
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["调查员被拜亚基先一步逼入战斗"],
+          "player_visible_information": [
+            {
+              "text": "桌椅后的怪物突然扑出，你已经没有退路。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": ["仍进入拜亚基强制战斗并触发 SAN 1/1d6"],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.byakhee.state.encountered",
+              "value": true
+            },
+            {
+              "op": "force",
+              "action": "start_combat:byakhee"
+            }
+          ]
+        }
+      },
+      "visibility": null
+    },
+    {
+      "id": "recall_byakhee_lore",
+      "scene_id": "teaching_building_1",
+      "action": "research",
+      "target_id": "byakhee",
+      "skills": ["idea"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": ["布森笔记本指出拜亚基可能是百面之神教团召来的仆从"],
+          "player_visible_information": [
+            {
+              "text": "笔记中相似的描述把拜亚基、百面之神与奈亚拉托提普的教团联系在一起。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": ["翻阅内容触发 SAN 1/1d4"],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.byakhee.state.lore_known",
+              "value": true
+            },
+            {
+              "op": "force",
+              "action": "coc7.san_check(1,1d4)"
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["调查员没能从笔记中想起对应记载"],
+          "player_visible_information": [],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": {
+        "audience": "all",
+        "requires_discovery": true,
+        "discovery_rule": "entity.busen_notebook.state.found == true && entity.byakhee.state.encountered == true",
+        "discovery_shares_to_party": true
+      }
+    },
+    {
+      "id": "track_old_building_footprints",
+      "scene_id": "old_teaching_building",
+      "action": "track",
+      "target_id": "failed_ritual_trace",
+      "skills": ["spot-hidden", "track"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": ["同一人的脚印通向一楼仪式教室"],
+          "player_visible_information": [
+            {
+              "text": "地面上的一串脚印来自同一个人，并一直通向一楼某间上锁教室。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.failed_ritual_trace.state.found",
+              "value": true
+            }
+          ]
+        },
+        "failure": {
+          "facts": [],
+          "player_visible_information": [
+            {
+              "text": "旧楼周围只有杂乱灰尘。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": null
+    },
+    {
+      "id": "unlock_old_classroom",
+      "scene_id": "old_teaching_building",
+      "action": "unlock",
+      "target_id": "failed_ritual_trace",
+      "skills": ["locksmith", "STR"],
+      "difficulty": "hard",
+      "outcomes": {
+        "success": {
+          "facts": ["调查员打开了旧教学楼教室的铁链锁"],
+          "player_visible_information": [
+            {
+              "text": "厚重铁链终于松开，一股浓重香味从空教室里涌出。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": ["持有张宸交出的旧楼钥匙时无需检定"],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.failed_ritual_trace.state.room_accessed",
+              "value": true
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["调查员未能打开铁链锁"],
+          "player_visible_information": [
+            {
+              "text": "几重铁链仍牢牢锁着教室。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": null
+    },
+    {
+      "id": "resist_old_classroom_incense",
+      "scene_id": "old_teaching_building",
+      "action": "resist",
+      "target_id": "failed_ritual_trace",
+      "skills": ["POW"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": ["调查员抵抗了旧教室熏香造成的幻觉"],
+          "player_visible_information": [
+            {
+              "text": "浓香让你短暂眩晕，但你很快稳住了意识。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": []
+        },
+        "failure": {
+          "facts": ["调查员看到异形生物与惨叫笼罩教室的幻觉"],
+          "player_visible_information": [
+            {
+              "text": "异形生物与撕心裂肺的惨叫突然塞满教室；回过神来，一切又消失了。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": ["触发 SAN 1/1d4"],
+          "ops": [
+            {
+              "op": "force",
+              "action": "coc7.san_check(1,1d4)"
+            }
+          ]
+        }
+      },
+      "visibility": {
+        "audience": "actor",
+        "requires_discovery": true,
+        "discovery_rule": "entity.failed_ritual_trace.state.room_accessed == true",
+        "discovery_shares_to_party": false
+      }
+    },
+    {
+      "id": "analyze_failed_ritual",
+      "scene_id": "old_teaching_building",
+      "action": "analyze",
+      "target_id": "failed_ritual_trace",
+      "skills": ["occult", "cthulhu-mythos"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": ["白色痕迹是没有成功施展的危险通神术的一部分"],
+          "player_visible_information": [
+            {
+              "text": "白色痕迹组成了通神法阵的一部分，但仪式似乎从未完成。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": ["只有克苏鲁神话成功才确认其危险与通神用途"],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.failed_ritual_trace.state.analyzed",
+              "value": true
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["调查员无法判断白色痕迹的用途"],
+          "player_visible_information": [
+            {
+              "text": "这些痕迹像某种法阵，但你无法判断用途。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": null
+    },
+    {
+      "id": "chase_principal_shadow",
+      "scene_id": "old_teaching_building",
+      "action": "chase",
+      "target_id": "silver_ring",
+      "skills": ["listen", "climb", "spot-hidden", "idea"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": ["黑影是成年男性并从二楼绳梯逃走", "调查员找到一枚串在绳子上的银戒指"],
+          "player_visible_information": [
+            {
+              "text": "黑影从二楼绳梯逃走，地面上遗落了一枚串在细绳上的银戒指。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": ["黑影实际是对调查员起疑的史建西，但当场不自动确认身份"],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.silver_ring.state.found",
+              "value": true
+            },
+            {
+              "op": "set",
+              "path": "entity.principal_shi.state.aware_of_investigation",
+              "value": true
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["黑影成功逃走"],
+          "player_visible_information": [
+            {
+              "text": "等你追到二楼，黑影已经从窗边消失。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.principal_shi.state.aware_of_investigation",
+              "value": true
+            }
+          ]
+        }
+      },
+      "visibility": {
+        "audience": "all",
+        "requires_discovery": true,
+        "discovery_rule": "调查结束准备离开时聆听成功",
+        "discovery_shares_to_party": true
+      }
+    },
+    {
+      "id": "gain_zhang_chen_trust",
+      "scene_id": "playground",
+      "action": "reassure",
+      "target_id": "zhang_chen",
+      "skills": ["persuade", "fast-talk"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": [
+            "张宸确认花坛原本没有损坏",
+            "张宸说明旧教学楼历史并交出钥匙",
+            "张宸指出实验楼曾有地下停车场"
+          ],
+          "player_visible_information": [
+            {
+              "text": "张宸终于相信你们，交出老教学楼钥匙，并说花坛翻修前根本没有损坏。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": ["本校学生同行有利，教师身份反而会引起张宸不信任"],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.zhang_chen.state.trusted_investigators",
+              "value": true
+            },
+            {
+              "op": "set",
+              "path": "entity.zhang_chen.state.old_building_key_given",
+              "value": true
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["张宸仍不信任调查员"],
+          "player_visible_information": [
+            {
+              "text": "张宸谨慎地摇头，不愿继续谈学校领导。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": null
+    },
+    {
+      "id": "overhear_wang_guiqiang_call",
+      "scene_id": "playground",
+      "action": "listen",
+      "target_id": "wang_guiqiang",
+      "skills": ["listen"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": ["王贵强电话中提到失踪、调查、尚未得手以及学校不止一人有问题"],
+          "player_visible_information": [
+            {
+              "text": "你听见王贵强说：学生失踪案还没有眉目，学校里不止一个人有问题，而“他”现在还没有得手。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": ["见过王贵强者可再用灵感从声音确认身份"],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.wang_guiqiang.state.call_overheard",
+              "value": true
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["调查员只听到零散的电话声"],
+          "player_visible_information": [
+            {
+              "text": "远处有人打电话，但你听不清内容。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": {
+        "audience": "actor",
+        "requires_discovery": true,
+        "discovery_rule": "与张宸谈话结束后触发",
+        "discovery_shares_to_party": false
+      }
+    },
+    {
+      "id": "approach_wang_guiqiang_call",
+      "scene_id": "playground",
+      "action": "approach",
+      "target_id": "wang_guiqiang",
+      "skills": ["stealth"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": ["调查员看见王贵强面色凝重地打电话并听到完整内容"],
+          "player_visible_information": [
+            {
+              "text": "你潜行靠近，确认打电话的人是王贵强，并听到了他对学校暗流的完整判断。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.wang_guiqiang.state.call_overheard",
+              "value": true
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["调查员没能在不被察觉的情况下靠近"],
+          "player_visible_information": [
+            {
+              "text": "你靠近前，电话已经结束了。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": null
+    },
+    {
+      "id": "research_school_history",
+      "scene_id": "library",
+      "action": "research",
+      "target_id": "school_archives",
+      "skills": ["library-use", "computer-use"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": [
+            "古城中学建立于 1947 年",
+            "学校地下延续着稀有金属矿脉",
+            "校方曾公开压制校园怪谈传言",
+            "学校近期举办过包含异常题目的灵感评测"
+          ],
+          "player_visible_information": [
+            {
+              "text": "档案把建校历史、地下矿脉、被压制的怪谈与近期“灵感评测”活动连在了一起。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.school_archives.state.researched",
+              "value": true
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["调查员没能从大量校报中筛出关键记录"],
+          "player_visible_information": [
+            {
+              "text": "校报数量太多，你暂时没找到有用记录。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": null
+    },
+    {
+      "id": "resist_general_affairs_incense",
+      "scene_id": "general_affairs_office",
+      "action": "resist",
+      "target_id": "incense_sample",
+      "skills": ["POW"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": ["调查员抵抗了总务处办公室熏香造成的幻觉"],
+          "player_visible_information": [
+            {
+              "text": "香气令人眩晕，但你仍能分辨眼前是真实。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": []
+        },
+        "failure": {
+          "facts": ["调查员把张宸看成了鳞片与脓液覆盖的怪物"],
+          "player_visible_information": [
+            {
+              "text": "眼前和蔼的老人突然长出墨绿鳞片与脓包；下一瞬，幻象又消失了。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": ["触发 SAN 1/1d4"],
+          "ops": [
+            {
+              "op": "force",
+              "action": "coc7.san_check(1,1d4)"
+            }
+          ]
+        }
+      },
+      "visibility": null
+    },
+    {
+      "id": "request_incense_sample",
+      "scene_id": "general_affairs_office",
+      "action": "request",
+      "target_id": "zhang_chen",
+      "skills": [],
+      "difficulty": null,
+      "outcomes": {
+        "success": {
+          "facts": ["张宸把学校发给教师的一包熏香交给调查员"],
+          "player_visible_information": [
+            {
+              "text": "张宸虽然觉得奇怪，还是拿出一包学校元旦发给教师的暗红色锥形熏香。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": ["张宸说明用量按包装要求逐步增加，据称可以安神并提升精力。"],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.incense_sample.state.obtained",
+              "value": true
+            }
+          ]
+        },
+        "failure": {
+          "facts": [],
+          "player_visible_information": [],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": null
+    },
+    {
+      "id": "resist_storage_incense",
+      "scene_id": "general_affairs_storage",
+      "action": "resist",
+      "target_id": "incense_sample",
+      "skills": ["POW"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": ["调查员抵抗了储存室浓重熏香造成的幻觉"],
+          "player_visible_information": [
+            {
+              "text": "储存室里的浓香让你短暂眩晕，但意识仍保持清醒。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": ["仅对先前没有闻过这种熏香的调查员触发。"],
+          "ops": []
+        },
+        "failure": {
+          "facts": ["储存室浓香使调查员产生恐怖幻觉"],
+          "player_visible_information": [
+            {
+              "text": "浓香扭曲了储存室的轮廓，恐怖景象压过现实；片刻后你才惊醒。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": [
+            "仅对先前没有闻过这种熏香的调查员触发。",
+            "触发 SAN 1/1d4。"
+          ],
+          "ops": [
+            {
+              "op": "force",
+              "action": "coc7.san_check(1,1d4)"
+            }
+          ]
+        }
+      },
+      "visibility": {
+        "audience": "actor",
+        "requires_discovery": true,
+        "discovery_rule": "actor.has_previously_smelt_school_incense == false",
+        "discovery_shares_to_party": false
+      }
+    },
+    {
+      "id": "inspect_bloodstained_cabinet",
+      "scene_id": "general_affairs_storage",
+      "action": "inspect",
+      "target_id": "bloodstained_cabinet",
+      "skills": ["spot-hidden", "medicine", "idea"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": ["柜中黑色污渍是约两个月前留下的人血"],
+          "player_visible_information": [
+            {
+              "text": "隔板上的黑色污渍是干涸人血，而且大约已有两个月。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": ["困难医学才确定年代与人类来源"],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.bloodstained_cabinet.state.blood_identified",
+              "value": true
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["调查员注意到污渍但无法辨认"],
+          "player_visible_information": [
+            {
+              "text": "空柜隔板上沾着一些来源不明的黑色污渍。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": null
+    },
+    {
+      "id": "inspect_animal_remains",
+      "scene_id": "general_affairs_storage",
+      "action": "inspect",
+      "target_id": "animal_remains",
+      "skills": ["occult", "cthulhu-mythos", "medicine", "biology"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": ["动物干尸是失败生祭的遗留物，并且因放血死亡"],
+          "player_visible_information": [
+            {
+              "text": "这些小动物被放血而死，伤口形式与邪教生祭极为相似。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": ["开启柜门本身触发 SAN 1/1d4"],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.animal_remains.state.examined",
+              "value": true
+            },
+            {
+              "op": "force",
+              "action": "coc7.san_check(1,1d4)"
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["调查员只确认柜中堆满腐臭动物干尸"],
+          "player_visible_information": [
+            {
+              "text": "恶臭与动物干尸令你胃里翻腾。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": ["仍触发 SAN 1/1d4"],
+          "ops": [
+            {
+              "op": "force",
+              "action": "coc7.san_check(1,1d4)"
+            }
+          ]
+        }
+      },
+      "visibility": null
+    },
+    {
+      "id": "open_incense_crates",
+      "scene_id": "general_affairs_storage",
+      "action": "open",
+      "target_id": "incense_crates",
+      "skills": ["dodge", "fight-brawl", "spot-hidden"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": [
+            "调查员避开并打死了扑出的巨型蜘蛛",
+            "蜘蛛尸体透明化并化作泡沫消失",
+            "调查员找到熏香箱底的便条"
+          ],
+          "player_visible_information": [
+            {
+              "text": "巨型蜘蛛被击中后变得透明，化作细小泡沫消失；纸箱底还压着一张便条。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": ["目睹蜘蛛消失触发 SAN 0/1d3"],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.incense_crates.state.opened",
+              "value": true
+            },
+            {
+              "op": "set",
+              "path": "entity.incense_crates.state.spider_defeated",
+              "value": true
+            },
+            {
+              "op": "set",
+              "path": "entity.incense_crates.state.note_found",
+              "value": true
+            },
+            {
+              "op": "force",
+              "action": "coc7.san_check(0,1d3)"
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["调查员被巨型蜘蛛咬伤，损失 1d3 HP"],
+          "player_visible_information": [
+            {
+              "text": "纸箱里突然扑出一只手掌大的蜘蛛，尖牙咬进了你的皮肤。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": ["伤害由 CoC Ruleset 结算为 1d3"],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.incense_crates.state.opened",
+              "value": true
+            },
+            {
+              "op": "apply_condition",
+              "condition": "giant_spider_bite"
+            }
+          ]
+        }
+      },
+      "visibility": null
+    },
+    {
+      "id": "look_out_storage_window",
+      "scene_id": "general_affairs_storage",
+      "action": "look",
+      "target_id": "black_man",
+      "skills": ["POW", "idea", "spot-hidden"],
+      "difficulty": null,
+      "outcomes": {
+        "success": {
+          "facts": ["调查员经历操场燃烧幻觉并看见黑色之人"],
+          "player_visible_information": [
+            {
+              "text": "操场在幻觉中燃烧，学生在火里挣扎；清醒后，你看见一个无法看清脸的黑衣人正对你微笑。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": [
+            "火焰幻觉触发 SAN 1/1d6",
+            "普通社交技能无法看透黑色之人"
+          ],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.black_man.state.manifested",
+              "value": true
+            },
+            {
+              "op": "force",
+              "action": "coc7.san_check(1,1d6)"
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["调查员被操场燃烧幻觉压倒，并错过黑衣人的踪迹"],
+          "player_visible_information": [
+            {
+              "text": "你从燃烧学生的幻象中惊醒，再向操场看去时，那里已经空无一人。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": ["仍触发 SAN 1/1d6"],
+          "ops": [
+            {
+              "op": "force",
+              "action": "coc7.san_check(1,1d6)"
+            }
+          ]
+        }
+      },
+      "visibility": null
+    },
+    {
+      "id": "inspect_missionary_photo",
+      "scene_id": "school_history_museum",
+      "action": "inspect",
+      "target_id": "missionary_photo",
+      "skills": ["idea", "history"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": ["照片中的马卡拉神父是古城中学建校投资者"],
+          "player_visible_information": [
+            {
+              "text": "照片说明白发神父马卡拉是学校创建时的投资者；他的眼睛仿佛一直追随着你。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": ["眼睛追随的体验触发 SAN 0/1d2"],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.missionary_photo.state.examined",
+              "value": true
+            },
+            {
+              "op": "force",
+              "action": "coc7.san_check(0,1d2)"
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["调查员只知道照片人物与建校有关"],
+          "player_visible_information": [
+            {
+              "text": "这是一张建校时期的神父照片。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": null
+    },
+    {
+      "id": "find_hidden_newspapers",
+      "scene_id": "school_history_museum",
+      "action": "search",
+      "target_id": "hidden_newspapers",
+      "skills": ["spot-hidden"],
+      "difficulty": "hard",
+      "outcomes": {
+        "success": {
+          "facts": [
+            "1948 年近三个月内有十二名学生失踪",
+            "学生失踪停止后建校者马卡拉也在校内失踪"
+          ],
+          "player_visible_information": [
+            {
+              "text": "藏在天花板上的旧报纸记录了 1948 年十二名学生连续失踪，以及随后马卡拉本人在校内消失。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": ["主动声明推开天花板时可直接发现"],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.hidden_newspapers.state.found",
+              "value": true
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["调查员没有发现藏在天花板上的旧报纸"],
+          "player_visible_information": [
+            {
+              "text": "灰尘覆盖的校史馆没有更多显眼资料。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": null
+    },
+    {
+      "id": "hack_school_leadership_computers",
+      "scene_id": "cafeteria",
+      "action": "hack",
+      "target_id": "school_computers",
+      "skills": ["computer-use"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": [
+            "史建西与朱莉通过 Churryzzz 邮箱秘密通信",
+            "失踪学生按失踪顺序位于灵感评测最低分人群",
+            "王贵强电脑具有专业级防护"
+          ],
+          "player_visible_information": [
+            {
+              "text": "杜海凡确认史建西与朱莉秘密通信；朱莉保存的灵感评测中，失踪学生恰好依次落在最低分人群。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": ["不得声称杜海凡成功攻破了王贵强的电脑"],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.school_computers.state.leadership_hacked",
+              "value": true
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["本次黑客尝试没有取得有效数据"],
+          "player_visible_information": [
+            {
+              "text": "学校电脑的防护或残缺数据阻止了这次调查。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": {
+        "audience": "all",
+        "requires_discovery": true,
+        "discovery_rule": "entity.du_haifan.state.trusted_investigators == true",
+        "discovery_shares_to_party": true
+      }
+    },
+    {
+      "id": "inspect_abandoned_suv",
+      "scene_id": "underground_parking",
+      "action": "inspect",
+      "target_id": "suv_contract",
+      "skills": ["electronics", "locksmith", "STR"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": ["调查员打开黑色 SUV 并找到说明书与二手车购销合同"],
+          "player_visible_information": [
+            {
+              "text": "副驾驶储物箱里放着车辆说明书和一份二手车购销合同。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.suv_contract.state.contract_found",
+              "value": true
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["调查员未能打开 SUV"],
+          "player_visible_information": [
+            {
+              "text": "积灰的车门仍然锁着。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": null
+    },
+    {
+      "id": "expose_principal_lie",
+      "scene_id": "principal_office",
+      "action": "observe",
+      "target_id": "principal_shi",
+      "skills": ["psychology"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": ["史建西与朱莉并非只在商谈普通学校工作"],
+          "player_visible_information": [
+            {
+              "text": "史建西解释得很自然，但他的表情说明他正在隐瞒两人真正商谈的内容。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": []
+        },
+        "failure": {
+          "facts": [],
+          "player_visible_information": [],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": null
+    },
+    {
+      "id": "find_lab_master_keycard",
+      "scene_id": "principal_office",
+      "action": "search",
+      "target_id": "lab_master_keycard",
+      "skills": ["luck"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": ["调查员在沙发缝隙找到实验楼万能 IC 卡"],
+          "player_visible_information": [
+            {
+              "text": "沙发坐垫缝里卡着一张写有“实验楼万能 IC 卡”的磁卡。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.lab_master_keycard.state.found",
+              "value": true
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["调查员没有找到门卡"],
+          "player_visible_information": [],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": null
+    },
+    {
+      "id": "read_sussex_manuscript",
+      "scene_id": "principal_office",
+      "action": "read",
+      "target_id": "sussex_manuscript",
+      "skills": ["language-english"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": [
+            "调查员确认书是马卡拉手抄的《萨塞克斯手稿》",
+            "略读者获得 2% 克苏鲁神话并损失 1d6 SAN"
+          ],
+          "player_visible_information": [
+            {
+              "text": "英文花体字像自行进入脑海；这是马卡拉手抄的残缺神话典籍。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": ["疯狂时可能获得对书的隐性痴迷与终身总结症状"],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.sussex_manuscript.state.found",
+              "value": true
+            },
+            {
+              "op": "set",
+              "path": "entity.sussex_manuscript.state.skimmed",
+              "value": true
+            },
+            {
+              "op": "force",
+              "action": "coc7.san_loss(1d6)"
+            },
+            {
+              "op": "apply_condition",
+              "condition": "mythos_book_obsession_if_insane"
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["调查员只能认出作者是马卡拉·E·韦伯斯特"],
+          "player_visible_information": [
+            {
+              "text": "你无法读懂正文，只能辨认出制作者名为马卡拉·E·韦伯斯特。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": ["失败时不授予克苏鲁神话技能"],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.sussex_manuscript.state.found",
+              "value": true
+            }
+          ]
+        }
+      },
+      "visibility": null
+    },
+    {
+      "id": "search_principal_records",
+      "scene_id": "principal_office",
+      "action": "research",
+      "target_id": "principal_records",
+      "skills": ["library-use"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": [
+            "学校近期以“校园建设”名义花费大量资金",
+            "教职工档案唯独没有布文杉"
+          ],
+          "player_visible_information": [
+            {
+              "text": "账本里的大额支出只有“校园建设”一项笼统说明，而教职工档案中完全找不到布文杉。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.principal_records.state.finances_found",
+              "value": true
+            },
+            {
+              "op": "set",
+              "path": "entity.principal_records.state.buwen_absence_confirmed",
+              "value": true
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["调查员没能从资料柜中整理出关键异常"],
+          "player_visible_information": [],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": null
+    },
+    {
+      "id": "hack_principal_desktop",
+      "scene_id": "principal_office",
+      "action": "hack",
+      "target_id": "school_computers",
+      "skills": ["computer-use"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": ["调查员访问史建西电脑并确认其与朱莉的秘密邮件往来"],
+          "player_visible_information": [
+            {
+              "text": "史建西频繁与 Churryzzz@gz.edu.com 通信，邮件内容刻意写得隐晦。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.school_computers.state.leadership_hacked",
+              "value": true
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["调查员没有破解史建西电脑密码"],
+          "player_visible_information": [
+            {
+              "text": "电脑密码阻止了访问。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": ["杜海凡同行时可代为打开"],
+          "ops": []
+        }
+      },
+      "visibility": null
+    },
+    {
+      "id": "find_principal_gun",
+      "scene_id": "principal_office",
+      "action": "search",
+      "target_id": "principal_gun",
+      "skills": ["luck"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": ["调查员发现资料柜暗格中的手枪"],
+          "player_visible_information": [
+            {
+              "text": "资料柜暗格里藏着一把手枪。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": ["武器型号在正文与附录之间存在冲突，发布前需编辑确认"],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.principal_gun.state.found",
+              "value": true
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["调查员没有发现资料柜暗格"],
+          "player_visible_information": [],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": null
+    },
+    {
+      "id": "move_julie_bookcase",
+      "scene_id": "julie_office",
+      "action": "move",
+      "target_id": "secret_passage",
+      "skills": ["STR", "climb"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": ["调查员移开书架并发现通向地下密室的软绳梯"],
+          "player_visible_information": [
+            {
+              "text": "大书架下面露出一平方米见方的洞口，软绳梯一直伸向漆黑深处。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": ["攀爬有奖励骰；失败下落时损失 1d3 HP"],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.secret_passage.state.discovered",
+              "value": true
+            },
+            {
+              "op": "transition",
+              "scene_id": "underground_chamber"
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["调查员未能安全通过书架后的洞口"],
+          "player_visible_information": [
+            {
+              "text": "你在软绳梯上失手，重重摔向下方。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": ["由 CoC Ruleset 结算 1d3 HP 伤害"],
+          "ops": [
+            {
+              "op": "apply_condition",
+              "condition": "passage_fall"
+            }
+          ]
+        }
+      },
+      "visibility": null
+    },
+    {
+      "id": "gain_wang_guiqiang_trust",
+      "scene_id": "district_office",
+      "action": "reveal_evidence",
+      "target_id": "wang_guiqiang",
+      "skills": [],
+      "difficulty": null,
+      "outcomes": {
+        "success": {
+          "facts": [
+            "王贵强确认布文杉属于势力强大的组织",
+            "布文杉失踪前曾请求王贵强次日协助",
+            "王贵强说明史建西和朱莉、资金与纸箱均有异常"
+          ],
+          "player_visible_information": [
+            {
+              "text": "看到布文杉遗物后，王贵强不再隐瞒：布文杉为调查失踪案伪造身份潜入学校，失踪前还曾向他求助。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": ["持有并展示布文杉遗物时无需社交检定"],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.wang_guiqiang.state.trusted_investigators",
+              "value": true
+            },
+            {
+              "op": "set",
+              "path": "entity.wang_guiqiang.state.allied",
+              "value": true
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["调查员没有证据取得王贵强完全信任"],
+          "player_visible_information": [
+            {
+              "text": "王贵强只承认最近的老师们都很烦躁。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": {
+        "audience": "all",
+        "requires_discovery": true,
+        "discovery_rule": "持有布文杉教工手册、枪或布森笔记本之一",
+        "discovery_shares_to_party": true
+      }
+    },
+    {
+      "id": "analyze_incense_composition",
+      "scene_id": "laboratories",
+      "action": "analyze",
+      "target_id": "incense_sample",
+      "skills": ["chemistry", "biology", "botany", "natural-world"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": [
+            "熏香含多种致幻植物和化学成分",
+            "熏香粉末中混有残损红细胞"
+          ],
+          "player_visible_information": [
+            {
+              "text": "联合检测确认熏香充满致幻成分，显微镜下还能看见残损的红细胞。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": ["原文要求化学与生物学/植物学/博物学联合检定"],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.incense_sample.state.analyzed",
+              "value": true
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["调查员未能完整分析熏香成分"],
+          "player_visible_information": [
+            {
+              "text": "样本显然不只是普通熏香，但成分仍无法确认。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": {
+        "audience": "all",
+        "requires_discovery": true,
+        "discovery_rule": "entity.incense_sample.state.obtained == true",
+        "discovery_shares_to_party": true
+      }
+    },
+    {
+      "id": "recover_inspiration_results",
+      "scene_id": "psychology_room",
+      "action": "recover",
+      "target_id": "school_computers",
+      "skills": ["computer-use", "idea"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": ["被删除的灵感评测显示失踪学生依次位于最低分人群"],
+          "player_visible_information": [
+            {
+              "text": "恢复的数据表明，失踪学生按照失踪顺序，恰好是灵感评测中得分最低的几人。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": ["杜海凡在场时由他进行计算机使用"],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.school_computers.state.inspiration_results_recovered",
+              "value": true
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["灵感评测文件已删除且本次无法恢复"],
+          "player_visible_information": [
+            {
+              "text": "名为“灵感检定评测”的文件夹已经被清空。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": null
+    },
+    {
+      "id": "assess_jiang_in_office",
+      "scene_id": "office_building",
+      "action": "observe",
+      "target_id": "jiang_xuewen",
+      "skills": ["psychology", "anthropology"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": ["姜学文谎称自己只是在写教案"],
+          "player_visible_information": [
+            {
+              "text": "姜学文对笔记内容的解释十有八九是谎话。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": []
+        },
+        "failure": {
+          "facts": [],
+          "player_visible_information": [],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": null
+    },
+    {
+      "id": "search_jiang_desk",
+      "scene_id": "office_building",
+      "action": "search",
+      "target_id": "jiang_manuscript",
+      "skills": ["spot-hidden"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": [
+            "调查员找到《黑色之人及其诸事》",
+            "学校正在每隔一周献祭合适祭品以呼唤奈亚拉托提普"
+          ],
+          "player_visible_information": [
+            {
+              "text": "姜学文抽屉里的手抄本写明：学校正以每周一次的活祭呼唤黑色之人。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": ["浏览触发 1d3 SAN 损失"],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.jiang_manuscript.state.found",
+              "value": true
+            },
+            {
+              "op": "set",
+              "path": "entity.jiang_manuscript.state.skimmed",
+              "value": true
+            },
+            {
+              "op": "force",
+              "action": "coc7.san_loss(1d3)"
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["调查员没有找到姜学文隐藏的手抄本"],
+          "player_visible_information": [],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": {
+        "audience": "all",
+        "requires_discovery": true,
+        "discovery_rule": "entity.jiang_xuewen.state.defeated == true",
+        "discovery_shares_to_party": true
+      }
+    },
+    {
+      "id": "hear_hollow_dorm_floor",
+      "scene_id": "dormitory",
+      "action": "listen",
+      "target_id": "dorm_tunnel",
+      "skills": ["listen"],
+      "difficulty": "hard",
+      "outcomes": {
+        "success": {
+          "facts": ["男生宿舍一楼地板下存在空洞与旧木板结构"],
+          "player_visible_information": [
+            {
+              "text": "脚步声听起来不对，地砖下不是水泥，而是遮盖着空洞的旧木板。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": ["女生宿舍没有此线索"],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.dorm_tunnel.state.opened",
+              "value": true
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["调查员没有察觉宿舍地板下的地道"],
+          "player_visible_information": [
+            {
+              "text": "一楼地面虽然比墙壁古老，但没有显出更多异常。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": null
+    },
+    {
+      "id": "survive_dorm_tunnel_trap",
+      "scene_id": "dormitory",
+      "action": "traverse",
+      "target_id": "dorm_tunnel",
+      "skills": ["luck", "DEX"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": ["调查员避开了旧地道中的钢刺机关"],
+          "player_visible_information": [
+            {
+              "text": "你谨慎穿过低矮地道，没有触动隐藏机关。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": ["体格大于 0 的调查员无法进入"],
+          "ops": []
+        },
+        "failure": {
+          "facts": ["调查员触发钢刺机关并伤到脚底"],
+          "player_visible_information": [
+            {
+              "text": "地面钢刺刺伤脚底，接下来的敏捷行动都会受影响。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": [
+            "伤害 1d3",
+            "敏捷、闪避、潜行、跳跃和攀爬获得一个惩罚骰"
+          ],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.dorm_tunnel.state.trap_triggered",
+              "value": true
+            },
+            {
+              "op": "apply_condition",
+              "condition": "injured_foot"
+            }
+          ]
+        }
+      },
+      "visibility": {
+        "audience": "actor",
+        "requires_discovery": true,
+        "discovery_rule": "entity.dorm_tunnel.state.opened == true",
+        "discovery_shares_to_party": false
+      }
+    },
+    {
+      "id": "activate_elder_sign",
+      "scene_id": "dormitory",
+      "action": "touch",
+      "target_id": "elder_sign",
+      "skills": ["idea", "cthulhu-mythos", "spot-hidden", "luck"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": [
+            "石砖纹路显现并被识别为旧印",
+            "石墙开启通向地下密室"
+          ],
+          "player_visible_information": [
+            {
+              "text": "纹路发光，宇宙深处的异象闪过脑海；随后石墙像推拉门般打开。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": [
+            "触发 SAN 1/1d5",
+            "克苏鲁神话成功额外获得 1d2 技能并等量降低理智上限"
+          ],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.elder_sign.state.activated",
+              "value": true
+            },
+            {
+              "op": "force",
+              "action": "coc7.san_check(1,1d5)"
+            },
+            {
+              "op": "transition",
+              "scene_id": "underground_chamber"
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["调查员没有激活石砖上的纹路"],
+          "player_visible_information": [
+            {
+              "text": "你触碰石砖，却什么也没有看到。",
+              "visibility": {"audience": "actor"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": {
+        "audience": "actor",
+        "requires_discovery": true,
+        "discovery_rule": "穿过地道并通过侦查或幸运找到特殊砖块",
+        "discovery_shares_to_party": true
+      }
+    },
+    {
+      "id": "inspect_silver_box",
+      "scene_id": "underground_chamber",
+      "action": "open",
+      "target_id": "silver_box",
+      "skills": ["medicine", "biology"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": ["银匣中是一颗约一周前取下的人类心脏"],
+          "player_visible_information": [
+            {
+              "text": "银匣里是一颗表面带着干涸血迹的人类心脏，腐坏程度约有一周。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": ["取出心脏触发 SAN 0/1d3"],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.silver_box.state.opened",
+              "value": true
+            },
+            {
+              "op": "set",
+              "path": "entity.silver_box.state.heart_identified",
+              "value": true
+            },
+            {
+              "op": "force",
+              "action": "coc7.san_check(0,1d3)"
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["调查员看见银匣中的带血心脏但无法进一步判断"],
+          "player_visible_information": [
+            {
+              "text": "银匣内躺着一颗带着干涸血迹的心脏。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": ["取出心脏仍触发 SAN 0/1d3"],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.silver_box.state.opened",
+              "value": true
+            },
+            {
+              "op": "force",
+              "action": "coc7.san_check(0,1d3)"
+            }
+          ]
+        }
+      },
+      "visibility": null
+    },
+    {
+      "id": "inspect_sacrificial_slab",
+      "scene_id": "underground_chamber",
+      "action": "inspect",
+      "target_id": "sacrificial_slab",
+      "skills": ["medicine", "biology", "occult"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": ["石板上的黑褐色痕迹是血，并且石板用于屠宰生祭"],
+          "player_visible_information": [
+            {
+              "text": "石板上满是干涸血迹，形制与痕迹都说明它专用于屠宰生祭。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": ["神秘学成功才确认生祭用途"],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.sacrificial_slab.state.examined",
+              "value": true
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["调查员只看出石板上有大量污迹"],
+          "player_visible_information": [
+            {
+              "text": "石板遍布难以辨认的黑色与褐色痕迹。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": null
+    },
+    {
+      "id": "inspect_bone_pile",
+      "scene_id": "underground_chamber",
+      "action": "inspect",
+      "target_id": "bone_pile",
+      "skills": ["medicine", "biology", "natural-world"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": [
+            "骨堆绝大多数是约十八岁的人骨",
+            "人骨年代从五十多年前延续到近几周",
+            "兽骨较新且多来自猫狗"
+          ],
+          "player_visible_information": [
+            {
+              "text": "骨堆大多属于约十八岁的人类，最老的已存在五十多年，最新的才留下几周。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": ["只有医学成功才给出精确年代与年龄"],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.bone_pile.state.examined",
+              "value": true
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["调查员确认骨堆中存在人类头骨"],
+          "player_visible_information": [
+            {
+              "text": "黑布下的骨堆里清楚混着人类头骨。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": null
+    },
+    {
+      "id": "analyze_ritual_circle",
+      "scene_id": "underground_chamber",
+      "action": "analyze",
+      "target_id": "ritual_circle",
+      "skills": ["idea", "occult", "cthulhu-mythos"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": ["顶部图案是召唤或接触黑色之人的法阵"],
+          "player_visible_information": [
+            {
+              "text": "顶部石板刻着接触类法阵；结合神话典籍，可以确认它用于与黑色之人沟通。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": ["读过姜学文手抄本或《萨塞克斯手稿》时可确认具体对象"],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.ritual_circle.state.analyzed",
+              "value": true
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["调查员只看出顶部图案类似魔法阵"],
+          "player_visible_information": [
+            {
+              "text": "顶部的复杂图案像某种魔法阵，但用途无法确定。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": null
+    },
+    {
+      "id": "unlock_wang_bo_cell",
+      "scene_id": "underground_chamber",
+      "action": "unlock",
+      "target_id": "wang_bo_cell",
+      "skills": ["locksmith", "STR"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": ["调查员打开石门并救出虚弱的王博"],
+          "player_visible_information": [
+            {
+              "text": "石门后是面容憔悴的王博。他还活着，但精神与身体都极度虚弱。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": ["王博会依赖第一个见到的调查员"],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.wang_bo_cell.state.opened",
+              "value": true
+            },
+            {
+              "op": "set",
+              "path": "entity.wang_bo.state.imprisoned",
+              "value": false
+            },
+            {
+              "op": "set",
+              "path": "entity.wang_bo.state.rescued",
+              "value": true
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["调查员未能打开囚禁王博的石门"],
+          "player_visible_information": [
+            {
+              "text": "上锁石门仍然紧闭，你只能听见门后微弱的动静。",
+              "visibility": {"audience": "all"}
+            }
+          ],
+          "narration_constraints": [],
+          "ops": []
+        }
+      },
+      "visibility": null
+    }
+  ],
+  "win_conditions": [
+    {
+      "id": "death_by_byakhee",
+      "when": {
+        "expr": "actor.dead == true && actor.death_cause == 'byakhee'"
+      },
+      "fact": "调查员被拜亚基杀死",
+      "player_visible_information": "扭曲的漆黑利爪贯穿身体，意识在怪物撕裂血肉前迅速远去。",
+      "is_ending": true
+    },
+    {
+      "id": "death_in_final_battle",
+      "when": {
+        "expr": "actor.dead == true && actor.death_cause == 'final_battle'"
+      },
+      "fact": "调查员在最终战斗中死亡",
+      "player_visible_information": "血液从伤口不断流出，身体渐渐冰冷，同伴的呼唤也越来越远。",
+      "is_ending": true
+    },
+    {
+      "id": "death_fighting_black_man",
+      "when": {
+        "expr": "actor.dead == true && actor.death_cause == 'black_man'"
+      },
+      "fact": "调查员因主动攻击黑色之人而死亡",
+      "player_visible_information": "黑衣人的刀锋悄无声息地划过脖颈，整齐的伤口里甚至没有流出一滴血。",
+      "is_ending": true
+    },
+    {
+      "id": "bad_end_lurking_chaos",
+      "when": {
+        "expr": "module.investigation_abandoned == true && module.plot_exposed == false"
+      },
+      "fact": "调查员没能揭穿史建西的阴谋",
+      "player_visible_information": "你以为这里只是一起连环绑架案。直到某天，一个眼熟的黑衣人从街上经过，恐惧从此进入每一场梦。",
+      "is_ending": true
+    },
+    {
+      "id": "normal_end_wang_bo_missing",
+      "when": {
+        "expr": "module.final_battle_over == true && module.plot_exposed == true && entity.wang_bo.state.rescued == false"
+      },
+      "fact": "史建西的阴谋被揭穿，但王博仍被遗留在地下囚室",
+      "player_visible_information": "地下室即将被毁时，你突然想起那扇没能开启的石门——但已经太晚了。",
+      "is_ending": true
+    },
+    {
+      "id": "good_end_return_to_calm",
+      "when": {
+        "expr": "module.final_battle_over == true && module.plot_exposed == true && entity.wang_bo.state.rescued == true"
+      },
+      "fact": "调查员摧毁了史建西的阴谋并救出王博",
+      "player_visible_information": "一切终于结束。王博在医院休养数月后逐渐恢复，古城中学也重新归于平静。",
+      "is_ending": true
+    }
+  ],
+  "module_rules": [
+    {
+      "id": "teachers_show_partial_influence",
+      "hook": "on_interact",
+      "priority": 20,
+      "mode": "append",
+      "when": {
+        "path": "entity.teachers.state.influence",
+        "equals": "partial"
+      },
+      "then": [],
+      "facts": ["学校教师群体受到程度不一的蛊惑"],
+      "player_visible_information": [
+        {
+          "text": "这名教师回答时显得疲惫、紧张，甚至有些语无伦次。",
+          "visibility": {"audience": "actor"}
+        }
+      ]
+    },
+    {
+      "id": "flowerbed_excavation_complete",
+      "hook": "on_state_change",
+      "priority": 100,
+      "mode": "append",
+      "when": {
+        "expr": "entity.flowerbed.state.excavation_progress >= 6 && entity.flowerbed.state.dug == false"
+      },
+      "then": [
+        {
+          "op": "set",
+          "path": "entity.flowerbed.state.dug",
+          "value": true
+        },
+        {
+          "op": "set",
+          "path": "entity.buwen_shan.state.body_found",
+          "value": true
+        }
+      ],
+      "facts": ["调查员完成挖掘并发现布文杉尸体"],
+      "player_visible_information": [
+        {
+          "text": "铁锹碰到硬物。拨开泥土后，一具已经开始腐烂、穿着教师服装的尸体露了出来。",
+          "visibility": {"audience": "all"}
+        }
+      ]
+    },
+    {
+      "id": "buwen_body_causes_sanity_check",
+      "hook": "on_state_change",
+      "priority": 90,
+      "mode": "append",
+      "when": {
+        "expr": "entity.buwen_shan.state.body_found == true && entity.buwen_shan.state.corpse_shock_resolved == false"
+      },
+      "then": [
+        {
+          "op": "set",
+          "path": "entity.buwen_shan.state.corpse_shock_resolved",
+          "value": true
+        },
+        {
+          "op": "force",
+          "action": "coc7.san_check(1,1d4)"
+        }
+      ],
+      "facts": ["参与挖掘者意识到双手接触过冰冷尸体"],
+      "player_visible_information": [
+        {
+          "text": "你突然意识到，刚才翻土时双手已经碰过这具冰冷的尸体。",
+          "visibility": {"audience": "actor"}
+        }
+      ]
+    },
+    {
+      "id": "jiang_attacks_when_god_is_named",
+      "hook": "on_interact",
+      "priority": 200,
+      "mode": "override",
+      "when": {
+        "expr": "action.target_id == 'jiang_xuewen' && action.mentions('奈亚拉托提普') && entity.jiang_xuewen.state.defeated == false"
+      },
+      "then": [
+        {
+          "op": "set",
+          "path": "entity.jiang_xuewen.state.hostile",
+          "value": true
+        },
+        {
+          "op": "force",
+          "action": "start_combat:jiang_xuewen"
+        }
+      ],
+      "facts": ["姜学文因听到神名陷入疯狂并无差别攻击"],
+      "player_visible_information": [
+        {
+          "text": "神名出口的瞬间，姜学文的恐慌扭曲成狂怒，他突然扑向身边的人。",
+          "visibility": {"audience": "all"}
+        }
+      ]
+    },
+    {
+      "id": "principal_escalates_after_evidence",
+      "hook": "on_state_change",
+      "priority": 60,
+      "mode": "append",
+      "when": {
+        "expr": "module.evidence_count >= 3 && entity.principal_shi.state.aware_of_investigation == false"
+      },
+      "then": [
+        {
+          "op": "set",
+          "path": "entity.principal_shi.state.aware_of_investigation",
+          "value": true
+        }
+      ],
+      "facts": ["调查过深使史建西开始准备误导、转化或清除调查员"],
+      "player_visible_information": [
+        {
+          "text": "学校里开始出现刻意的阻挠，似乎有人已经意识到你们接近了真相。",
+          "visibility": {"audience": "all"}
+        }
+      ]
+    },
+    {
+      "id": "surviving_cultist_begins_contact",
+      "hook": "on_state_change",
+      "priority": 200,
+      "mode": "append",
+      "when": {
+        "expr": "module.final_battle_active == true && ((entity.principal_shi.state.incapacitated == true && entity.julie.state.incapacitated == false) || (entity.julie.state.incapacitated == true && entity.principal_shi.state.incapacitated == false))"
+      },
+      "then": [
+        {
+          "op": "set",
+          "path": "entity.ritual_circle.state.contact_started",
+          "value": true
+        },
+        {
+          "op": "force",
+          "action": "begin_two_round_black_man_contact"
+        }
+      ],
+      "facts": ["幸存的教徒开始用两轮吟唱呼唤黑色之人"],
+      "player_visible_information": [
+        {
+          "text": "剩下的教徒不顾一切地开始吟唱，顶部法阵随之亮起。",
+          "visibility": {"audience": "all"}
+        }
+      ]
+    },
+    {
+      "id": "black_man_manifests_after_contact",
+      "hook": "on_state_change",
+      "priority": 190,
+      "mode": "append",
+      "when": {
+        "expr": "entity.ritual_circle.state.contact_completed == true && entity.black_man.state.manifested == false"
+      },
+      "then": [
+        {
+          "op": "set",
+          "path": "entity.black_man.state.manifested",
+          "value": true
+        }
+      ],
+      "facts": ["黑色之人现身旁观战斗"],
+      "player_visible_information": [
+        {
+          "text": "无法看清面容的黑衣人出现在法阵旁，带着笑意旁观这场厮杀。",
+          "visibility": {"audience": "all"}
+        }
+      ]
+    },
+    {
+      "id": "attacking_black_man_reveals_true_horror",
+      "hook": "on_attack_declare",
+      "priority": 300,
+      "mode": "override",
+      "when": {
+        "expr": "action.target_id == 'black_man'"
+      },
+      "then": [
+        {
+          "op": "set",
+          "path": "entity.black_man.state.attacked",
+          "value": true
+        },
+        {
+          "op": "force",
+          "action": "start_combat:black_man"
+        }
+      ],
+      "facts": ["调查员主动攻击奈亚拉托提普化身"],
+      "player_visible_information": [
+        {
+          "text": "黑衣人从容避开攻击，祂的笑容让你意识到自己挑战的是无法理解的存在。",
+          "visibility": {"audience": "all"}
+        }
+      ]
+    },
+    {
+      "id": "wang_bo_binds_to_first_rescuer",
+      "hook": "on_state_change",
+      "priority": 50,
+      "mode": "append",
+      "when": {
+        "expr": "entity.wang_bo.state.rescued == true && entity.wang_bo.state.dependent_on == null"
+      },
+      "then": [
+        {
+          "op": "force",
+          "action": "bind_wang_bo_to_first_seen_actor"
+        }
+      ],
+      "facts": ["王博因创伤依赖第一个见到的调查员"],
+      "player_visible_information": [
+        {
+          "text": "王博紧紧跟着第一个靠近他的人，不断重复呼唤那个人的名字。",
+          "visibility": {"audience": "all"}
+        }
+      ]
+    }
+  ],
+  "information_items": [
+    {
+      "id": "student_entry_hook",
+      "content": "学生身份开场：学校最近流传“十三阶梯、生物实验室幽灵、接连失踪的学生、美术教室画像、音乐教室回音、无人的社团”六大怪谈。",
+      "visibility": {
+        "audience": "ho",
+        "ho_ref": "student",
+        "requires_discovery": false,
+        "discovery_rule": null,
+        "discovery_shares_to_party": false
+      }
+    },
+    {
+      "id": "law_investigator_entry_hook",
+      "content": "警察、侦探或政府调查身份开场：端木修、吴益达、陈淼淼、王凌子和王博在 3 月 12 日至 4 月 8 日间依序失踪；社会关系调查未发现共同点。",
+      "visibility": {
+        "audience": "ho",
+        "ho_ref": "law_investigator",
+        "requires_discovery": false,
+        "discovery_rule": null,
+        "discovery_shares_to_party": false
+      }
+    },
+    {
+      "id": "parent_entry_hook",
+      "content": "学生家长身份开场：孩子近期反复抱怨学校教师疲倦、上课常犯低级错误。",
+      "visibility": {
+        "audience": "ho",
+        "ho_ref": "parent",
+        "requires_discovery": false,
+        "discovery_rule": null,
+        "discovery_shares_to_party": false
+      }
+    },
+    {
+      "id": "government_entry_hook",
+      "content": "政府机构身份开场：王贵强于 3 月 15 日被派往学校；布文杉 3 月 20 日受聘、4 月 5 日离职，事后发现其身份与教师资格均为伪造。",
+      "visibility": {
+        "audience": "ho",
+        "ho_ref": "government",
+        "requires_discovery": false,
+        "discovery_rule": null,
+        "discovery_shares_to_party": false
+      }
+    },
+    {
+      "id": "campus_six_rumors",
+      "content": "古城中学六大怪谈是十三阶梯、生物实验室幽灵、接连失踪的学生、美术教室画像、音乐教室回音和无人的社团。它们是调查入口和气氛材料，不等于六个机制都真实发生。",
+      "visibility": {
+        "audience": "keeper",
+        "requires_discovery": false,
+        "discovery_rule": null,
+        "discovery_shares_to_party": true
+      }
+    },
+    {
+      "id": "school_public_history",
+      "content": "公开档案记载古城中学建于 1947 年，学校地底延续着稀有金属矿脉；校方曾公开压制校园怪谈，并组织包含异常题目的“灵感评测”活动。",
+      "visibility": {
+        "audience": "keeper",
+        "requires_discovery": false,
+        "discovery_rule": null,
+        "discovery_shares_to_party": true
+      }
+    },
+    {
+      "id": "school_1948_disappearances",
+      "content": "1948 年，古城中学近三个月内连续失踪十二名学生；学生失踪停止后，建校投资者马卡拉神父也在校内失踪。",
+      "visibility": {
+        "audience": "keeper",
+        "requires_discovery": false,
+        "discovery_rule": null,
+        "discovery_shares_to_party": true
+      }
+    },
+    {
+      "id": "missing_students_timeline",
+      "content": "端木修（3/12）、吴益达（3/19）、陈淼淼（3/28）、王凌子（4/3）已被献祭；王博（4/8）因外界调查压力尚未被献祭，被关在地下密室。",
+      "visibility": {
+        "audience": "keeper",
+        "requires_discovery": false,
+        "discovery_rule": null,
+        "discovery_shares_to_party": true
+      }
+    },
+    {
+      "id": "buwen_identity",
+      "content": "布文杉本名布森，是隐修堂派来调查学生失踪案的资深调查员。他被史建西杀死，尸体和遗物埋在花坛。",
+      "visibility": {
+        "audience": "keeper",
+        "requires_discovery": false,
+        "discovery_rule": null,
+        "discovery_shares_to_party": true
+      }
+    },
+    {
+      "id": "school_cult_truth",
+      "content": "古城中学由信奉奈亚拉托提普的传教士马卡拉建成，原本就是挑选学生作为祭品的“养殖场”；史建西发现地下密室后重启献祭。",
+      "visibility": {
+        "audience": "keeper",
+        "requires_discovery": false,
+        "discovery_rule": null,
+        "discovery_shares_to_party": true
+      }
+    },
+    {
+      "id": "inspiration_selection_method",
+      "content": "学校借“学生创造力学习交流活动”进行异常灵感评测。史建西按低分顺序挑选灵感超常者作为祭品。",
+      "visibility": {
+        "audience": "keeper",
+        "requires_discovery": false,
+        "discovery_rule": null,
+        "discovery_shares_to_party": true
+      }
+    },
+    {
+      "id": "incense_composition",
+      "content": "学校发给教师的暗红熏香含多种致幻植物与化学成分，粉末中混有残损红细胞；按要求逐步加量会使使用者接近成瘾。",
+      "visibility": {
+        "audience": "keeper",
+        "requires_discovery": false,
+        "discovery_rule": null,
+        "discovery_shares_to_party": true
+      }
+    },
+    {
+      "id": "weekly_sacrifice_cycle",
+      "content": "《黑色之人及其诸事》表明，学校正在每隔一周献祭一件合适祭品，以呼唤奈亚拉托提普的化身黑色之人。",
+      "visibility": {
+        "audience": "keeper",
+        "requires_discovery": false,
+        "discovery_rule": null,
+        "discovery_shares_to_party": true
+      }
+    },
+    {
+      "id": "possible_massacre_event",
+      "content": "可选事件“大开杀戒”：逃离终战的史建西或朱莉会试图屠杀学生。调查员移开堵塞书柜所用轮数决定全员获救、少量伤亡、大量伤亡或教学楼爆炸四档结果。",
+      "visibility": {
+        "audience": "keeper",
+        "requires_discovery": false,
+        "discovery_rule": null,
+        "discovery_shares_to_party": true
+      }
+    }
+  ]
+}

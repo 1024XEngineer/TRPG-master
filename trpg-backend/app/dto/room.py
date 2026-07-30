@@ -102,13 +102,18 @@ class ModuleRead(CamelModel):
 
     model_config = {"from_attributes": True}
     id: str
+    game_system_id: str
+    game_system_name: str | None = None
     title: str
+    name_en: str | None = None
     version: str
+    status: str
     authors: list[str]
     players_min: int
     players_max: int
     difficulty: int
     estimated_duration: str | None = None
+    synopsis: str | None = None
 
 
 class RoomPreview(CamelModel):
@@ -119,6 +124,7 @@ class RoomPreview(CamelModel):
     room_name: str
     phase: str
     story_started: bool
+    module_id: str | None = None
     module_title: str | None = None
     player_count: int
     max_players: int

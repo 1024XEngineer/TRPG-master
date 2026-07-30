@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "player-input.schema.json",
+  "additionalProperties": false,
+  "properties": {
+    "room_id": {
+      "minLength": 1,
+      "title": "Room Id",
+      "type": "string"
+    },
+    "player_id": {
+      "minLength": 1,
+      "title": "Player Id",
+      "type": "string"
+    },
+    "actor_id": {
+      "minLength": 1,
+      "title": "Actor Id",
+      "type": "string"
+    },
+    "client_action_id": {
+      "minLength": 1,
+      "title": "Client Action Id",
+      "type": "string"
+    },
+    "utterance": {
+      "minLength": 1,
+      "title": "Utterance",
+      "type": "string"
+    }
+  },
+  "required": [
+    "room_id",
+    "player_id",
+    "actor_id",
+    "client_action_id",
+    "utterance"
+  ],
+  "title": "PlayerInput",
+  "type": "object"
+}

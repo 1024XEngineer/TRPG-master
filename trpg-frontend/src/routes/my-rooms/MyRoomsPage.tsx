@@ -8,7 +8,9 @@ import { useRoomStore } from '@/stores/room-store'
 
 const PHASE_LABEL: Record<string, string> = {
   Lobby: '大厅等待中',
+  Building: '角色准备中',
   InGame: '游戏进行中',
+  Suspended: '已挂起',
   Completed: '已完成',
 }
 
@@ -37,12 +39,14 @@ const RESUME_ROUTE: Record<string, string> = {
   Lobby: '/room/lobby',
   Building: '/room/ready',
   InGame: '/room/play',
+  Suspended: '/room/play',
 }
 
 export default function MyRoomsPage() {
   const navigate = useNavigate()
   const nickname = useAuthStore((s) => s.nickname)
   const setRoomIdentity = useRoomStore((s) => s.setRoomIdentity)
+  const setModuleId = useRoomStore((s) => s.setModuleId)
   const setHost = useRoomStore((s) => s.setHost)
   const [rooms, setRooms] = useState<MyRoomSummary[] | null>(null)
   const [error, setError] = useState('')
@@ -65,6 +69,7 @@ export default function MyRoomsPage() {
       const info = await getRoomInfo(room.roomCode)
       const me = info.players.find((p) => p.playerId === identity.playerId)
       setRoomIdentity(identity)
+      if (info.moduleId) setModuleId(info.moduleId)
       setHost(me?.isHost ?? false)
       // 按房间阶段回到对应的页面。原来只区分 InGame / 其它，Building 阶段
       // （已经过了大厅、正在建卡）会被送回大厅——而大厅的"开始游戏"在这个阶段

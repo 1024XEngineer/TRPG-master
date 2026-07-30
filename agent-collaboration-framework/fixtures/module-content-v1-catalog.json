@@ -1,0 +1,164 @@
+{
+  "module_id": "module-content-v1-catalog",
+  "version": "1.0.0",
+  "world_ref": "coc-7e",
+  "background": "用于覆盖 ModuleContent v1 字段能力的古钟密室测试背景。",
+  "scenes": [
+    {
+      "id": "clock-room",
+      "name": "钟室",
+      "content": "一座停止走动的古钟占据了房间中央。",
+      "entity_ids": ["ancient-clock"],
+      "checkpoint_ids": ["inspect-clock"],
+      "exits": []
+    }
+  ],
+  "entities": [
+    {
+      "id": "ancient-clock",
+      "kind": "object",
+      "name": "古钟",
+      "aliases": ["钟"],
+      "content": "黄铜指针停在午夜。",
+      "secrets": "第三次摆动指针会唤醒钟内的意志。",
+      "state": {
+        "active": false,
+        "inspection_count": 0
+      },
+      "rules": [
+        {
+          "id": "clock-awakens",
+          "hook": "on_state_change",
+          "priority": 100,
+          "mode": "append",
+          "when": {
+            "expr": "self.inspection_count >= 3"
+          },
+          "then": [
+            {
+              "op": "set",
+              "path": "entity.ancient-clock.state.active",
+              "value": true
+            },
+            {
+              "op": "trigger_ending",
+              "ending_id": "clock-awakened"
+            }
+          ],
+          "facts": ["古钟已经苏醒"],
+          "player_visible_information": [
+            {
+              "text": "钟摆自行开始晃动。",
+              "visibility": {
+                "audience": "all"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "checkpoints": [
+    {
+      "id": "inspect-clock",
+      "scene_id": "clock-room",
+      "action": "investigate",
+      "target_id": "ancient-clock",
+      "skills": [],
+      "difficulty": null,
+      "visibility": {
+        "audience": "actor",
+        "requires_discovery": true,
+        "discovery_rule": "进入钟室后仔细观察",
+        "discovery_shares_to_party": false
+      },
+      "outcomes": {
+        "success": {
+          "facts": ["调查员检查了古钟"],
+          "player_visible_information": [
+            {
+              "text": "你发现指针可以被手动拨动。",
+              "visibility": {
+                "audience": "actor"
+              }
+            }
+          ],
+          "narration_constraints": ["不得提前说明古钟已经苏醒"],
+          "ops": [
+            {
+              "op": "add",
+              "path": "entity.ancient-clock.state.inspection_count",
+              "value": 1
+            }
+          ]
+        },
+        "failure": {
+          "facts": [],
+          "player_visible_information": [],
+          "narration_constraints": [],
+          "ops": []
+        },
+        "critical_success": {
+          "facts": ["调查员看穿了古钟的机关"],
+          "player_visible_information": [
+            {
+              "text": "齿轮之间刻着三道重复的警告。",
+              "visibility": {
+                "audience": "actor"
+              }
+            }
+          ],
+          "narration_constraints": [],
+          "ops": [
+            {
+              "op": "set",
+              "path": "entity.ancient-clock.state.inspection_count",
+              "value": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "win_conditions": [
+    {
+      "id": "clock-awakened",
+      "when": {
+        "path": "entity.ancient-clock.state.active",
+        "equals": true
+      },
+      "fact": "古钟内的意志已经苏醒",
+      "player_visible_information": "午夜钟声响起，但故事仍在继续。",
+      "is_ending": false
+    }
+  ],
+  "module_rules": [
+    {
+      "id": "midnight-pulse",
+      "hook": "on_time_elapsed",
+      "priority": 10,
+      "mode": "append",
+      "when": {
+        "expr": "clock.time_of_day == 'midnight'"
+      },
+      "then": [
+        {
+          "op": "add",
+          "path": "entity.ancient-clock.state.inspection_count",
+          "value": 1
+        }
+      ],
+      "facts": [],
+      "player_visible_information": []
+    }
+  ],
+  "information_items": [
+    {
+      "id": "clock-secret",
+      "content": "古钟会在第三次触碰后苏醒。",
+      "visibility": {
+        "audience": "keeper"
+      }
+    }
+  ]
+}

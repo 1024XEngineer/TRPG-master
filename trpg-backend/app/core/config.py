@@ -6,10 +6,19 @@ IDE 能补全，写错类型（比如 ENABLE_DOCS 传了个不是 true/false 的
 就报错，而不是运行到一半才炸。
 """
 
+from __future__ import annotations
+
 from functools import lru_cache
 from typing import Literal
 
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def secret_value(value: str | SecretStr) -> str:
+    if isinstance(value, str):
+        return value
+    return getattr(value, "get_secret_value")()  # noqa: B009
 
 
 class Settings(BaseSettings):
@@ -37,7 +46,59 @@ class Settings(BaseSettings):
 
     # 允许跨域请求的前端来源列表，交给 main.py 里的 CORSMiddleware 使用。
     # 本地默认放行 Vite 开发服务器的默认端口 9877。
-    cors_origins: list[str] = ["http://localhost:9877"]
+    cors_origins: list[str] = ["http://localhost:9877", "http://127.0.0.1:9877"]
+
+    # 默认使用确定性的离线 Fake，便于本地启动和测试；显式切到远程 provider
+    # 后，Host/Narrator 才会调用远程模型。
+    host_model_provider: Literal["fake", "openai", "qwen", "deepseek"] = "fake"
+    openai_api_key: SecretStr | None = None
+    openai_base_url: str = Field(
+        default="https://api.openai.com/v1",
+        min_length=1,
+    )
+    openai_model: str = Field(default="gpt-5.6-luna", min_length=1)
+    openai_timeout_seconds: float = Field(default=30.0, gt=0, le=120)
+    qwen_api_key: SecretStr | None = None
+    qwen_base_url: str = Field(
+        default="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        min_length=1,
+    )
+    qwen_model: str = Field(default="qwen3.7-plus", min_length=1)
+    qwen_timeout_seconds: float = Field(default=30.0, gt=0, le=120)
+    deepseek_api_key: SecretStr | None = None
+    deepseek_base_url: str = Field(
+        default="https://api.deepseek.com",
+        min_length=1,
+    )
+    deepseek_model: str = Field(default="deepseek-chat", min_length=1)
+    deepseek_timeout_seconds: float = Field(default=30.0, gt=0, le=120)
+    host_agent_max_turns: int = Field(default=6, gt=0, le=20)
+    host_agent_max_tool_calls: int = Field(default=8, gt=0, le=50)
+    host_agent_tool_timeout_seconds: float = Field(default=5.0, gt=0, le=30)
+    host_agent_timeout_seconds: float = Field(default=30.0, gt=0, le=120)
+    recent_history_enabled: bool = True
+    recent_history_max_turns: int = Field(default=6, ge=1, le=24)
+    recent_history_max_chars: int = Field(default=6000, ge=2)
+
+    # 讨论区/Narrator 主线的兼容配置：未配置时使用确定性占位叙事，测试可通过
+    # 延迟钩子稳定覆盖行动锁并发分支。
+    narrator_delay_seconds: float = Field(default=0.0, ge=0, le=120)
+
+    @model_validator(mode="after")
+    def validate_host_model(self) -> Settings:
+        if self.host_model_provider == "openai" and (
+            self.openai_api_key is None or not secret_value(self.openai_api_key).strip()
+        ):
+            raise ValueError("HOST_MODEL_PROVIDER=openai 时必须设置 OPENAI_API_KEY")
+        if self.host_model_provider == "qwen" and (
+            self.qwen_api_key is None or not secret_value(self.qwen_api_key).strip()
+        ):
+            raise ValueError("HOST_MODEL_PROVIDER=qwen 时必须设置 QWEN_API_KEY")
+        if self.host_model_provider == "deepseek" and (
+            self.deepseek_api_key is None or not secret_value(self.deepseek_api_key).strip()
+        ):
+            raise ValueError("HOST_MODEL_PROVIDER=deepseek 时必须设置 DEEPSEEK_API_KEY")
+        return self
 
     # DeepSeek API Key（issue #107 地基，`app/core/narrator.py`）：配了就走真实
     # DeepSeek 生成叙事回应，不配（默认）自动回退到确定性的占位文案——CI/e2e

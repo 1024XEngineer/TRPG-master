@@ -8,17 +8,28 @@ issue #77 之前是内存字典 stub，本期切换为对 `rooms`/`players`/`gam
 
 import secrets
 import string
+from copy import deepcopy
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select
+from collaboration_framework.contracts import ContractError, ModuleContent
+from collaboration_framework.engine import (
+    ActorResources,
+    ActorState,
+    GameState,
+    create_initial_game_state,
+    require_runtime_capabilities,
+)
+from collaboration_framework.host.application import normalize_narration_text
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import not_implemented
 from app.core.narrator import NarrationContext
+from app.core.runtime_state import ruleset_labels, ruleset_skill_values
 from app.dto.game import GameRead, GameSystemRead, RulesetRead
 from app.dto.module import ModuleDetailRead
-from app.dto.replay import ReplayEventRead, RoomSummaryRead
+from app.dto.replay import ReplayEventRead, RoomConversationEventRead, RoomSummaryRead
 from app.dto.room import (
     JoinRoomBody,
     ModuleRead,
@@ -29,7 +40,9 @@ from app.dto.room import (
     RoomPreview,
     SelectModuleBody,
 )
-from app.models.content import Game, GameSystem, Scenario
+from app.models.chat import ChatMessage
+from app.models.content import Game, GameSystem, Scenario, World
+from app.models.engine import GameSession, ModuleVersion
 from app.models.event import Event
 from app.models.room import Character, Player, Room
 from app.models.user import User
@@ -54,6 +67,10 @@ class RoomAuthorizationError(PermissionError):
 
 class RoomConflictError(RuntimeError):
     """房间状态不允许当前操作（通用冲突，没有更具体的业务错误码可用时兜底）。"""
+
+
+class ModulePlayerCountMismatchError(RoomConflictError):
+    """房间人数不在已发布模组的玩家范围内。"""
 
 
 class RoomFullError(RuntimeError):
@@ -102,6 +119,33 @@ async def get_player_by_reconnect_token(db: AsyncSession, reconnect_token: str |
     return player
 
 
+async def get_player_character_name(
+    db: AsyncSession,
+    player_id: str,
+    fallback: str = "玩家",
+) -> str:
+    """解析玩家在行动频道里应显示的局内名字。
+
+    规则：已完成角色卡优先，其次回退到房间昵称，最后回退到通用占位名。
+    """
+    row = await db.execute(
+        select(Character.name, Character.status, Player.nickname)
+        .join(Player, Character.player_id == Player.id)
+        .where(Player.id == player_id)
+    )
+    result = row.first()
+    if result is None:
+        return fallback
+    character_name, status, nickname = result
+    if status == "complete" and isinstance(character_name, str):
+        stripped = character_name.strip()
+        if stripped:
+            return stripped
+    if isinstance(nickname, str) and nickname.strip():
+        return nickname
+    return fallback
+
+
 async def _require_host(db: AsyncSession, room: Room, reconnect_token: str | None) -> Player:
     player = await get_player_by_reconnect_token(db, reconnect_token)
     if player.room_id != room.id or player.id != room.host_player_id:
@@ -146,6 +190,13 @@ async def _module_title(db: AsyncSession, scenario_id: str | None) -> str | None
     return scenario.title if scenario is not None else None
 
 
+async def _module_identity(db: AsyncSession, scenario_id: str | None) -> str | None:
+    if scenario_id is None:
+        return None
+    scenario = await db.get(Scenario, scenario_id)
+    return scenario.module_id if scenario is not None else None
+
+
 async def _to_room_preview(db: AsyncSession, room: Room) -> RoomPreview:
     result = await db.scalars(select(Player).where(Player.room_id == room.id))
     room_players = list(result)
@@ -155,6 +206,7 @@ async def _to_room_preview(db: AsyncSession, room: Room) -> RoomPreview:
         room_name=room.room_name,
         phase=room.phase,
         story_started=room.phase != "Lobby",
+        module_id=await _module_identity(db, room.scenario_id),
         module_title=await _module_title(db, room.scenario_id),
         player_count=len(room_players),
         max_players=room.max_players,
@@ -303,14 +355,35 @@ async def select_module(
     if room.phase != "Lobby":
         raise RoomConflictError("只能在大厅阶段选择模组")
 
-    scenario = await db.get(Scenario, payload.module_id)
+    scenario = await db.scalar(select(Scenario).where(Scenario.module_id == payload.module_id))
     if scenario is None:
         raise ModuleNotFoundError("模组不存在")
+    if scenario.status != "ready":
+        raise RoomConflictError("只有 ready 状态的模组可以用于正式开局")
+    module_version = await db.get(ModuleVersion, (scenario.module_id, scenario.version))
+    if module_version is None:
+        raise ModuleNotFoundError("模组当前推荐版本尚未发布")
+
+    system = await db.get(GameSystem, scenario.game_system_id)
+    if system is None or system.world_ref != module_version.world_ref:
+        raise RoomConflictError("模组版本引用的规则系统不存在或不匹配")
+    try:
+        module_content = ModuleContent.model_validate(module_version.content_json)
+    except ValueError as exc:
+        raise RoomConflictError("模组发布内容无效") from exc
+    presentation = module_content.presentation
+    if presentation is None:
+        raise RoomConflictError("模组发布内容缺少玩家可见 presentation")
+    if not presentation.players_min <= room.max_players <= presentation.players_max:
+        raise ModulePlayerCountMismatchError(
+            f"该模组要求 {presentation.players_min}-{presentation.players_max} 名玩家，"
+            f"当前房间设置为 {room.max_players} 名"
+        )
 
     room.scenario_id = scenario.id
+    room.module_version = module_version.version
     room.system_id = scenario.game_system_id
-    system = await db.get(GameSystem, scenario.game_system_id)
-    room.game_id = system.game_id if system is not None else None
+    room.game_id = system.game_id
     room.attribute_gen_method = payload.attribute_gen_method
     await db.commit()
 
@@ -357,19 +430,230 @@ async def set_player_connected(db: AsyncSession, player_id: str, connected: bool
 
 
 async def begin_game(db: AsyncSession, room_id: str, player_id: str) -> None:
-    """WS game.start 事件：全员建完角色后，房主正式开局（Building → InGame）。"""
+    """从固定 ModuleVersion 和完成的 Character 原子创建房间唯一 GameSession。"""
     room = await find_room_by_id(db, room_id)
     player = await db.get(Player, player_id)
     if player is None or player.room_id != room.id or player.id != room.host_player_id:
         raise RoomAuthorizationError("仅房主可以开始游戏")
     if room.phase != "Building":
         raise RoomConflictError("只有背景介绍/建卡阶段可以正式开局")
-    result = await db.scalars(select(Player).where(Player.room_id == room.id))
-    room_players = list(result)
-    if not room_players or not all(p.has_character for p in room_players):
+    if room.scenario_id is None or room.module_version is None:
+        raise ModuleNotSelectedError("房间没有固定可开局的模组版本")
+    if await db.get(GameSession, room.id) is not None:
+        raise RoomConflictError("该房间已经创建过 GameSession")
+
+    scenario = await db.get(Scenario, room.scenario_id)
+    if scenario is None:
+        raise ModuleNotSelectedError("房间引用的模组目录不存在")
+    module_version = await db.get(
+        ModuleVersion,
+        (scenario.module_id, room.module_version),
+    )
+    if module_version is None:
+        raise ModuleNotSelectedError("房间固定的模组版本不存在")
+    system = await db.get(GameSystem, scenario.game_system_id)
+    if system is None or system.world_ref != module_version.world_ref:
+        raise RoomConflictError("房间固定的模组版本与规则系统不匹配")
+    try:
+        module_content = ModuleContent.model_validate(module_version.content_json)
+    except ValueError as exc:
+        raise RoomConflictError("房间固定的模组版本内容无效") from exc
+    if (
+        module_content.module_id != module_version.module_id
+        or module_content.version != module_version.version
+        or module_content.world_ref != module_version.world_ref
+    ):
+        raise RoomConflictError("模组发布内容与版本记录不一致")
+    if not module_content.scenes:
+        raise RoomConflictError("模组没有可作为初始场景的 Scene")
+    try:
+        require_runtime_capabilities(module_content)
+    except ContractError as exc:
+        raise RoomConflictError("模组包含当前规则运行时尚未支持的能力") from exc
+
+    room_players = list(
+        await db.scalars(
+            select(Player).where(Player.room_id == room.id).order_by(Player.joined_at, Player.id)
+        )
+    )
+    characters = list(await db.scalars(select(Character).where(Character.room_id == room.id)))
+    character_by_player = {character.player_id: character for character in characters}
+    if (
+        not room_players
+        or not all(player.has_character for player in room_players)
+        or any(
+            (character := character_by_player.get(player.id)) is None
+            or character.status != "complete"
+            for player in room_players
+        )
+    ):
         raise CharacterIncompleteError("还有玩家未完成建卡")
-    room.phase = "InGame"
-    room.started_at = datetime.now(UTC)
+
+    actors = {
+        f"actor_{index}": ActorState(
+            player_id=room_player.id,
+            name=character_by_player[room_player.id].name or room_player.nickname,
+            source_character_id=character_by_player[room_player.id].id,
+            source_character_version=character_by_player[room_player.id].version,
+            state=_character_runtime_state(
+                character_by_player[room_player.id],
+                ruleset=system.ruleset,
+            ),
+            resources=_character_runtime_resources(character_by_player[room_player.id]),
+        )
+        for index, room_player in enumerate(room_players, start=1)
+    }
+    initial_state = create_initial_game_state(
+        module_content,
+        room_id=room.id,
+        actors=actors,
+    )
+    now = datetime.now(UTC)
+    db.add(
+        GameSession(
+            room_id=room.id,
+            module_id=module_version.module_id,
+            module_version=module_version.version,
+            state_schema_version=1,
+            state_json=initial_state.to_json_dict(),
+            state_version=0,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    try:
+        phase_update = await db.execute(
+            update(Room)
+            .where(Room.id == room.id, Room.phase == "Building")
+            .values(phase="InGame", started_at=now, updated_at=now)
+        )
+        if getattr(phase_update, "rowcount", None) != 1:
+            raise RoomConflictError("房间阶段已经变化，无法重复开局")
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise RoomConflictError("该房间已经创建过 GameSession") from exc
+    except Exception:
+        await db.rollback()
+        raise
+
+
+def _character_runtime_state(
+    character: Character,
+    *,
+    ruleset: dict | None = None,
+) -> dict:
+    """复制 Character 为与源卡解耦的局内 ActorState.state。"""
+    ruleset = ruleset or {}
+    attributes = deepcopy(character.attributes or {})
+    skills = ruleset_skill_values(
+        ruleset.get("skills"),
+        attributes=attributes,
+    )
+    skills.update(deepcopy(character.skills or {}))
+    return {
+        "age": character.age,
+        "gender": character.gender,
+        "residence": character.residence,
+        "birthplace": character.birthplace,
+        "generation_method": character.generation_method,
+        "occupation": character.occupation,
+        "attributes": attributes,
+        "attribute_labels": ruleset_labels(
+            ruleset.get("attributes"),
+            id_field="key",
+            name_field="label",
+        ),
+        "derived_stats": deepcopy(character.derived_stats or {}),
+        "skills": skills,
+        "skill_labels": ruleset_labels(
+            ruleset.get("skills"),
+            id_field="id",
+            name_field="name",
+        ),
+        "equipment": list(character.equipment or []),
+        "background": character.background,
+        "notes": character.notes,
+    }
+
+
+def _character_runtime_resources(character: Character) -> ActorResources:
+    """将局内可变资源从不可变的角色卡快照中分离出来。"""
+
+    derived = character.derived_stats or {}
+    attributes = character.attributes or {}
+    return ActorResources(
+        hp=_optional_int(derived.get("HP")),
+        san=_optional_int(derived.get("SAN")),
+        mp=_optional_int(derived.get("MP")),
+        luck=_optional_int(attributes.get("LUCK")),
+    )
+
+
+def _optional_int(value: object) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+async def _load_game_state(db: AsyncSession, room_id: str) -> tuple[GameSession, GameState]:
+    game_session = await db.get(GameSession, room_id)
+    if game_session is None:
+        raise RoomConflictError("房间尚未创建 GameSession")
+    try:
+        state = GameState.model_validate(game_session.state_json)
+    except ValueError as exc:
+        raise RoomConflictError("房间 GameState 数据无效") from exc
+    if state.room_id != room_id or state.event_sequence != game_session.state_version:
+        raise RoomConflictError("房间 GameState 与数据库版本不一致")
+    return game_session, state
+
+
+async def suspend_game(
+    db: AsyncSession,
+    room_id: str,
+    reconnect_token: str | None,
+) -> None:
+    """InGame → Suspended；规则世界仍保持 playing。"""
+    room = await find_room_by_id(db, room_id)
+    await _require_host(db, room, reconnect_token)
+    if room.phase != "InGame":
+        raise RoomConflictError("只有进行中的游戏可以挂起")
+    _, state = await _load_game_state(db, room_id)
+    if state.phase != "playing":
+        raise RoomConflictError("已经结束的 GameState 不能挂起")
+
+    result = await db.execute(
+        update(Room)
+        .where(Room.id == room_id, Room.phase == "InGame")
+        .values(phase="Suspended", updated_at=datetime.now(UTC))
+    )
+    if getattr(result, "rowcount", None) != 1:
+        await db.rollback()
+        raise RoomConflictError("房间阶段已经变化，无法挂起")
+    await db.commit()
+
+
+async def resume_game(
+    db: AsyncSession,
+    room_id: str,
+    reconnect_token: str | None,
+) -> None:
+    """Suspended → InGame；继续使用原 GameSession 和 GameState。"""
+    room = await find_room_by_id(db, room_id)
+    await _require_host(db, room, reconnect_token)
+    if room.phase != "Suspended":
+        raise RoomConflictError("只有已挂起的游戏可以恢复")
+    _, state = await _load_game_state(db, room_id)
+    if state.phase != "playing":
+        raise RoomConflictError("已经结束的 GameState 不能恢复")
+
+    result = await db.execute(
+        update(Room)
+        .where(Room.id == room_id, Room.phase == "Suspended")
+        .values(phase="InGame", updated_at=datetime.now(UTC))
+    )
+    if getattr(result, "rowcount", None) != 1:
+        await db.rollback()
+        raise RoomConflictError("房间阶段已经变化，无法恢复")
     await db.commit()
 
 
@@ -428,20 +712,46 @@ async def list_my_rooms(db: AsyncSession, user: User) -> list[MyRoomSummary]:
 
 
 async def end_game(db: AsyncSession, room_id: str, reconnect_token: str | None) -> None:
-    """房主结束游戏，房间状态标记为已完成。
-
-    顺带清空该房间的讨论区聊天记录（issue #107）：聊天是临时工作记忆，不进
-    复盘、随房间结束销毁；`end` 是目前房间唯一的后端终结点（没有单独的
-    "退出房间"接口，见 #106 本期不做），清理只能挂在这里。
-    """
+    """房主手动结束，同时将 Room 和 GameState 原子标记为结束。"""
     room = await find_room_by_id(db, room_id)
     await _require_host(db, room, reconnect_token)
-    if room.phase != "InGame":
-        raise RoomConflictError("只有进行中的游戏可以结束")
-    room.phase = "Completed"
-    room.ended_at = datetime.now(UTC)
-    await chat_service.clear_room_chat(db, room.id)
-    await db.commit()
+    if room.phase not in {"InGame", "Suspended"}:
+        raise RoomConflictError("只有进行中或已挂起的游戏可以结束")
+    game_session, state = await _load_game_state(db, room_id)
+    ended_state = state.model_copy(
+        update={
+            "phase": "ended",
+            "ending_id": state.ending_id if state.phase == "ended" else None,
+        },
+        deep=True,
+    )
+    now = datetime.now(UTC)
+
+    try:
+        # 与 SqlAlchemyEngineStore.commit() 保持同一加锁顺序：先 Room，
+        # 后 GameSession。否则 PostgreSQL 上手动结束与规则动作并发时可能互相等待。
+        room_update = await db.execute(
+            update(Room)
+            .where(Room.id == room_id, Room.phase.in_(("InGame", "Suspended")))
+            .values(phase="Completed", ended_at=now, updated_at=now)
+        )
+        if getattr(room_update, "rowcount", None) != 1:
+            raise RoomConflictError("房间阶段已经变化，无法结束")
+        state_update = await db.execute(
+            update(GameSession)
+            .where(
+                GameSession.room_id == room_id,
+                GameSession.state_version == game_session.state_version,
+            )
+            .values(state_json=ended_state.to_json_dict(), updated_at=now)
+        )
+        if getattr(state_update, "rowcount", None) != 1:
+            raise RoomConflictError("GameState 已被并发更新，请重试结束操作")
+        await chat_service.clear_room_chat(db, room_id)
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
 
 
 # ── 游戏 / 规则系统 / 模组目录 ──────────────────────────────
@@ -459,7 +769,22 @@ async def list_game_systems(db: AsyncSession, game_id: str) -> list[GameSystemRe
     if game is None:
         raise ModuleNotFoundError("游戏大类不存在")
     result = await db.scalars(select(GameSystem).where(GameSystem.game_id == game_id))
-    return [GameSystemRead.model_validate(s) for s in result]
+    world = await db.scalar(
+        select(World).where(World.game_id == game_id).order_by(World.created_at)
+    )
+    return [
+        GameSystemRead(
+            id=system.id,
+            game_id=system.game_id,
+            world_ref=system.world_ref,
+            name=system.name,
+            version=system.version,
+            world_name=world.name if world else None,
+            world_description=world.description if world else None,
+            game_description=game.description,
+        )
+        for system in result
+    ]
 
 
 async def get_ruleset(db: AsyncSession, system_id: str) -> RulesetRead:
@@ -504,30 +829,145 @@ async def require_ruleset(db: AsyncSession, system_id: str) -> RulesetRead:
 
 
 async def list_modules(db: AsyncSession) -> list[ModuleRead]:
-    """获取可用模组列表。"""
-    result = await db.scalars(select(Scenario))
-    return [ModuleRead.model_validate(s) for s in result]
+    """获取具有完整玩家展示内容的已发布模组目录。"""
+    result = await db.execute(
+        select(Scenario, GameSystem.name)
+        .join(GameSystem, GameSystem.id == Scenario.game_system_id)
+        .where(Scenario.status == "ready")
+        .order_by(Scenario.title, Scenario.id)
+    )
+    modules: list[ModuleRead] = []
+    for scenario, system_name in result.tuples():
+        module_version = await db.get(ModuleVersion, (scenario.module_id, scenario.version))
+        if module_version is None:
+            continue
+        try:
+            content = ModuleContent.model_validate(module_version.content_json)
+        except ValueError:
+            continue
+        presentation = content.presentation
+        if presentation is None:
+            continue
+        modules.append(
+            ModuleRead(
+                id=scenario.module_id,
+                game_system_id=scenario.game_system_id,
+                game_system_name=system_name,
+                title=presentation.title,
+                name_en=presentation.name_en,
+                version=content.version,
+                status=scenario.status,
+                authors=list(presentation.authors),
+                players_min=presentation.players_min,
+                players_max=presentation.players_max,
+                difficulty=presentation.difficulty,
+                estimated_duration=presentation.estimated_duration,
+                synopsis=presentation.synopsis,
+            )
+        )
+    return modules
 
 
 async def get_module_detail(db: AsyncSession, module_id: str) -> ModuleDetailRead | None:
     """GET /api/v1/modules/{moduleId} —— 模组详情。"""
-    scenario = await db.get(Scenario, module_id)
-    if scenario is None:
+    scenario = await db.scalar(select(Scenario).where(Scenario.module_id == module_id))
+    if scenario is None or scenario.status != "ready":
         return None
-    return ModuleDetailRead.model_validate(scenario)
+    system = await db.get(GameSystem, scenario.game_system_id)
+    module_version = await db.get(ModuleVersion, (scenario.module_id, scenario.version))
+    if module_version is None:
+        return None
+    try:
+        content = ModuleContent.model_validate(module_version.content_json)
+    except ValueError:
+        return None
+    presentation = content.presentation
+    if presentation is None:
+        return None
+    return ModuleDetailRead(
+        id=scenario.module_id,
+        game_system_id=scenario.game_system_id,
+        game_system_name=system.name if system is not None else None,
+        title=presentation.title,
+        name_en=presentation.name_en,
+        version=content.version,
+        status=scenario.status,
+        authors=list(presentation.authors),
+        players_min=presentation.players_min,
+        players_max=presentation.players_max,
+        difficulty=presentation.difficulty,
+        estimated_duration=presentation.estimated_duration,
+        synopsis=presentation.synopsis,
+        story_label=presentation.story_label,
+        subtitle=presentation.subtitle,
+        story_pages=[
+            {"title": page.title, "content": page.content}
+            for page in presentation.player_intro_pages
+        ],
+    )
 
 
 # ── 复盘 / 事件回放 ──────────────────────────────────────
 
 
+def _player_visible_event_payload(event_type: str, payload: dict) -> dict:
+    """Return a display-safe copy without rewriting the stored event payload."""
+
+    visible_payload = deepcopy(payload)
+    if event_type == "narration.push" and isinstance(visible_payload.get("text"), str):
+        visible_payload["text"] = normalize_narration_text(visible_payload["text"])
+    return visible_payload
+
+
 async def record_event(
-    db: AsyncSession, room_id: str, player_id: str | None, event_type: str, payload: dict
-) -> None:
+    db: AsyncSession,
+    room_id: str,
+    player_id: str | None,
+    event_type: str,
+    payload: dict,
+    *,
+    visibility: str,
+    actor_id: str | None,
+    scene_id: str | None,
+    view_revision: str | None,
+    correlation_id: str | None = None,
+) -> bool:
     """写入一条房间事件（issue #77 才真正打通的闭环——原来"不记 EventLog"是
-    已知缺口，本期由 ws.py 在 narration.push / action.submit 时调用这个函数）。
+    已知缺口）。
+
+    动作叙事先通过 ``correlation_id`` 持久化抢占唯一闸门，再允许 WebSocket
+    发送。返回 ``False`` 表示同一动作的同类事件已经记录，调用方必须抑制重播。
     """
-    db.add(Event(room_id=room_id, player_id=player_id, event_type=event_type, payload=payload))
-    await db.commit()
+    db.add(
+        Event(
+            room_id=room_id,
+            player_id=player_id,
+            event_type=event_type,
+            correlation_id=correlation_id,
+            visibility=visibility,
+            actor_id=actor_id,
+            scene_id=scene_id,
+            view_revision=view_revision,
+            payload=payload,
+        )
+    )
+    try:
+        await db.commit()
+        return True
+    except IntegrityError:
+        await db.rollback()
+        if correlation_id is None:
+            raise
+        existing = await db.scalar(
+            select(Event.id).where(
+                Event.room_id == room_id,
+                Event.event_type == event_type,
+                Event.correlation_id == correlation_id,
+            )
+        )
+        if existing is None:
+            raise
+        return False
 
 
 # 叙事上下文里带多少条行动历史。取值权衡：太少 AI 上文接不住，太多白白烧
@@ -597,11 +1037,123 @@ async def get_replay(
 
     先校验发起者是这个房间的成员（复盘是"只有参与者能看"的内容），再查事件。
     """
-    await require_room_member(db, room_id, reconnect_token)
+    player = await require_room_member(db, room_id, reconnect_token)
     result = await db.scalars(
-        select(Event).where(Event.room_id == room_id).order_by(Event.created_at)
+        select(Event)
+        .where(
+            Event.room_id == room_id,
+            or_(
+                Event.visibility == "public",
+                and_(
+                    Event.visibility == "player_scoped",
+                    Event.player_id == player.id,
+                ),
+            ),
+        )
+        .order_by(Event.created_at)
     )
-    return [ReplayEventRead.model_validate(e) for e in result]
+    replay: list[ReplayEventRead] = []
+    for event in result:
+        item = ReplayEventRead.model_validate(event)
+        replay.append(
+            item.model_copy(
+                update={"payload": _player_visible_event_payload(event.event_type, event.payload)}
+            )
+        )
+    return replay
+
+
+async def list_conversation_events(
+    db: AsyncSession, room_id: str, reconnect_token: str | None
+) -> list[RoomConversationEventRead]:
+    """GET /api/v1/rooms/{roomId}/conversation —— 房间对话历史。
+
+    这是给房间页"重进恢复聊天记录"用的服务端权威视图：
+
+    - 讨论区消息继续从 `chat_messages` 读；
+    - `action.broadcast`、`narration.push`、`check.result` 从 `events` 读；
+    - `check.result` 只返回给对应玩家，避免把原本只发给本人的结果扩大成全房间可见；
+    - 按创建时间正序合并，前端直接按顺序渲染即可。
+    """
+    player = await require_room_member(db, room_id, reconnect_token)
+
+    chat_rows = (
+        await db.execute(
+            select(ChatMessage, Player.nickname)
+            .join(Player, ChatMessage.player_id == Player.id)
+            .where(ChatMessage.room_id == room_id)
+            .order_by(ChatMessage.created_at, ChatMessage.id)
+        )
+    ).all()
+    conversation: list[RoomConversationEventRead] = [
+        RoomConversationEventRead(
+            id=message.id,
+            type="chat.message",
+            channel="discussion",
+            payload={
+                "messageId": message.id,
+                "playerId": message.player_id,
+                "nickname": nickname,
+                "text": message.text,
+                "sentAt": message.created_at,
+                "clientMessageId": message.client_message_id,
+            },
+            created_at=message.created_at,
+        )
+        for message, nickname in chat_rows
+    ]
+
+    event_rows = (
+        await db.execute(
+            select(Event)
+            .where(
+                Event.room_id == room_id,
+                Event.event_type.in_(["action.broadcast", "narration.push", "check.result"]),
+                or_(
+                    Event.visibility == "public",
+                    and_(
+                        Event.visibility == "player_scoped",
+                        Event.player_id == player.id,
+                    ),
+                ),
+            )
+            .order_by(Event.created_at, Event.id)
+        )
+    ).scalars()
+    for event in event_rows:
+        if event.event_type == "action.broadcast":
+            conversation.append(
+                RoomConversationEventRead(
+                    id=event.correlation_id or event.id,
+                    type="action.broadcast",
+                    channel="action",
+                    payload=event.payload,
+                    created_at=event.created_at,
+                )
+            )
+        elif event.event_type == "narration.push":
+            conversation.append(
+                RoomConversationEventRead(
+                    id=event.correlation_id or event.id,
+                    type="narration.push",
+                    channel="action",
+                    payload=_player_visible_event_payload(event.event_type, event.payload),
+                    created_at=event.created_at,
+                )
+            )
+        elif event.event_type == "check.result":
+            conversation.append(
+                RoomConversationEventRead(
+                    id=event.correlation_id or event.id,
+                    type="check.result",
+                    channel="action",
+                    payload=event.payload,
+                    created_at=event.created_at,
+                )
+            )
+
+    conversation.sort(key=lambda item: (item.created_at, item.id))
+    return conversation
 
 
 async def get_summary(db: AsyncSession, room_id: str) -> RoomSummaryRead:

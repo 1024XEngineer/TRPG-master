@@ -1,0 +1,91 @@
+{
+  "module_id": "capability-rule-allow-after-state-change",
+  "version": "0.1.0",
+  "world_ref": "coc-7e",
+  "background": "用于验证状态变化后规则解锁动作的测试背景。",
+  "scenes": [
+    {
+      "id": "study",
+      "name": "书房",
+      "content": "用于验证状态变化后 Rule 解锁动作的最小场景。",
+      "entity_ids": ["bookshelf", "cabinet"],
+      "checkpoint_ids": ["find_key"]
+    }
+  ],
+  "entities": [
+    {
+      "id": "bookshelf",
+      "kind": "object",
+      "name": "书架",
+      "aliases": ["藏书架"],
+      "content": "书架后藏着一把钥匙。",
+      "state": {
+        "key_found": false
+      }
+    },
+    {
+      "id": "cabinet",
+      "kind": "object",
+      "name": "柜子",
+      "aliases": ["木柜"],
+      "content": "一只上锁的柜子。",
+      "state": {
+        "opened": false
+      },
+      "refuse_ops": ["open"],
+      "blocked_text": "没有钥匙，柜子无法打开。",
+      "rules": [
+        {
+          "id": "allow_open_after_key_found",
+          "hook": "on_action",
+          "priority": 100,
+          "when": {
+            "path": "entities.bookshelf.key_found",
+            "equals": true
+          },
+          "then": [
+            {
+              "op": "allow",
+              "action": "open"
+            },
+            {
+              "op": "modify",
+              "path": "entities.cabinet.opened",
+              "set": true
+            }
+          ],
+          "facts": ["玩家找到钥匙后打开了柜子"],
+          "player_visible_information": ["钥匙转动锁芯，柜门随即打开。"]
+        }
+      ]
+    }
+  ],
+  "checkpoints": [
+    {
+      "id": "find_key",
+      "scene_id": "study",
+      "action": "investigate",
+      "target_id": "bookshelf",
+      "skills": ["spot-hidden"],
+      "difficulty": "regular",
+      "outcomes": {
+        "success": {
+          "facts": ["玩家找到了钥匙"],
+          "player_visible_information": ["你在书架后找到一把钥匙。"],
+          "ops": [
+            {
+              "op": "modify",
+              "path": "entities.bookshelf.key_found",
+              "set": true
+            }
+          ]
+        },
+        "failure": {
+          "facts": ["玩家没有找到钥匙"],
+          "player_visible_information": ["你没有发现有用的东西。"]
+        }
+      }
+    }
+  ],
+  "win_conditions": []
+}

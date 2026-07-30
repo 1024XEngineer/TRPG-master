@@ -18,6 +18,7 @@ __pycache__/
 .env
 .env.*
 !.env.example
+.npm-cache/
 
 # COC7 职业目录导入管线（issue #114）的中间产物：build_occupations.py 的输出，
 # 会被内联进 app/core/coc7_content.py（那才是提交进 git 的最终产物）。这个原始

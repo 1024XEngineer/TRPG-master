@@ -10,6 +10,7 @@ requires-python = ">=3.12"
 # 运行时依赖：aiosqlite 给本地 SQLite 用、asyncpg 给线上 PostgreSQL 用，
 # 两个驱动都装上，靠 DATABASE_URL 这一个环境变量决定实际连哪个。
 dependencies = [
+  "agent-collaboration-framework",
   "fastapi>=0.115,<1.0",
   "uvicorn[standard]>=0.30,<1.0",
   "pydantic>=2.9,<3.0",
@@ -20,8 +21,13 @@ dependencies = [
   "structlog>=24.4,<25.0",
   "bcrypt>=4.2,<5.0",
   "alembic>=1.13,<2.0",
-  "openai>=1.50,<2.0",
+  "openai==2.44.0",
+  "httpx>=0.27,<1.0",
+  "cryptography==48.0.1 ; platform_machine == 'x86_64' and sys_platform == 'darwin'",
 ]
+
+[tool.uv.sources]
+agent-collaboration-framework = { path = "../agent-collaboration-framework", editable = true }
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
@@ -62,6 +68,7 @@ known-first-party = ["app"]
 
 [tool.ty.environment]
 python-version = "3.12"
+extra-paths = ["../agent-collaboration-framework"]
 
 [tool.ty.src]
 include = ["app", "tests", "scripts", "alembic"]

@@ -9,7 +9,7 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text, Uuid
+from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, Integer, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base
@@ -25,6 +25,7 @@ class Game(Base):
     )
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tags: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list, server_default="[]")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
@@ -45,6 +46,7 @@ class GameSystem(Base):
     game_id: Mapped[str] = mapped_column(
         Uuid(as_uuid=False), ForeignKey("games.id"), nullable=False
     )
+    world_ref: Mapped[str] = mapped_column(String(200), nullable=False, unique=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     version: Mapped[str | None] = mapped_column(String(50), nullable=True)
     ruleset: Mapped[dict | None] = mapped_column(JSON, nullable=True)
@@ -72,13 +74,24 @@ class World(Base):
 
 
 class Scenario(Base):
-    """模组（对应前端/DTO 里的"模组" ModuleRead），房间选定的就是这里的一行。"""
+    """模组目录身份与展示信息。
+
+    这里不保存规则引擎的权威内容；经过校验且不可变的完整发布内容保存在
+    ``module_versions``。``version`` 只是目录当前推荐的发布版本。
+    """
 
     __tablename__ = "scenarios"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('wip', 'ready', 'hidden')",
+            name="ck_scenarios_status",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(
         Uuid(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4())
     )
+    module_id: Mapped[str] = mapped_column(String(200), nullable=False, unique=True)
     world_id: Mapped[str | None] = mapped_column(
         Uuid(as_uuid=False), ForeignKey("worlds.id"), nullable=True
     )
@@ -86,6 +99,15 @@ class Scenario(Base):
         Uuid(as_uuid=False), ForeignKey("game_systems.id"), nullable=False
     )
     title: Mapped[str] = mapped_column(String(200), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="wip", server_default="wip"
+    )
+    name_en: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    story_label: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    subtitle: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    story_pages: Mapped[list[dict]] = mapped_column(
+        JSON, nullable=False, default=list, server_default="[]"
+    )
     version: Mapped[str] = mapped_column(String(50), nullable=False, default="1.0.0")
     authors: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     players_min: Mapped[int] = mapped_column(Integer, nullable=False, default=1)

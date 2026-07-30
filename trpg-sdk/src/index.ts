@@ -15,7 +15,12 @@ import { RoomsResource } from './resources/rooms';
 export * from './types';
 export { ApiClient, ApiError } from './client';
 export type { ApiClientOptions } from './client';
-export { RoomSocket } from './resources/room-socket';
+export {
+  RoomSocket,
+  RoomSocketServerError,
+  RoomSocketTransportError,
+  TurnFailedError,
+} from './resources/room-socket';
 export type { RoomSocketHandler } from './resources/room-socket';
 
 export interface TrpgSdkOptions extends ApiClientOptions {

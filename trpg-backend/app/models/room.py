@@ -13,7 +13,9 @@ from datetime import UTC, datetime
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Integer,
@@ -60,6 +62,9 @@ class Room(Base):
     scenario_id: Mapped[str | None] = mapped_column(
         Uuid(as_uuid=False), ForeignKey("scenarios.id"), nullable=True, default=None
     )
+    # 与 scenario_id 一起固定房间选择的不可变 ModuleVersion。历史房间迁移后
+    # 保持 NULL，由正式开局流程（后续 Issue）负责校验并使用明确版本。
+    module_version: Mapped[str | None] = mapped_column(String(50), nullable=True, default=None)
     attribute_gen_method: Mapped[str | None] = mapped_column(
         String(20), nullable=True, default=None
     )
@@ -134,6 +139,10 @@ class Character(Base):
     """房间内的角色卡（原本挂在 service/room.py 的 `_characters` 内存字典里）。"""
 
     __tablename__ = "characters"
+    __table_args__ = (
+        UniqueConstraint("room_id", "player_id", name="uq_characters_room_player"),
+        CheckConstraint("version >= 1", name="ck_characters_version_positive"),
+    )
 
     id: Mapped[str] = mapped_column(
         Uuid(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4())
@@ -145,6 +154,7 @@ class Character(Base):
         Uuid(as_uuid=False), ForeignKey("players.id"), nullable=False
     )
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
+    version: Mapped[int] = mapped_column(BigInteger, nullable=False, default=1, server_default="1")
 
     # 调查员基本信息。这几项此前只活在前端的本地状态里、从没进过后端，于是
     # 「角色卡以后端为唯一事实来源」只做到了一半：清掉浏览器缓存后姓名/职业/
@@ -165,7 +175,8 @@ class Character(Base):
 
     # 建卡三条路径的来源（都可空，互斥但不做数据库层面强制）：
     # ① based_on_pregen_id：套用模组作者预设角色；
-    # ② based_on_template_id：复用玩家自己的常用卡（issue 决策 5，本期不实现）；
+    # ② based_on_template_id：当前房间卡关联的用户卡。首次完成时自动创建；后续
+    #    修改会解除关联，下一次完成另存为新卡，不覆盖历史卡；
     # ③ 都不填：从零选职业建卡，occupation 字段直接记职业名。
     based_on_pregen_id: Mapped[str | None] = mapped_column(
         Uuid(as_uuid=False), ForeignKey("module_pregens.id"), nullable=True

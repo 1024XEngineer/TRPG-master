@@ -12,7 +12,7 @@ import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { test } from 'node:test'
 
-import type { ServerToClientEvent } from 'trpg-sdk'
+import { RoomSocketServerError, type ServerToClientEvent } from 'trpg-sdk'
 
 import { createRoomWithModule, legalCharacterPayload, registerPlayer } from './helpers.ts'
 
@@ -71,7 +71,7 @@ async function buildCharacter(
 }
 
 test('🔴 讨论区消息广播给房间所有人（issue #107 端到端）', async () => {
-  const room = await createRoomWithModule('chatbc')
+  const room = await createRoomWithModule('chatbc', 2)
   const guest = await registerPlayer('chatbcguest')
   const joined = await guest.sdk.rooms.join(room.roomCode, { nickname: '话痨访客' }, guest.token)
 
@@ -135,9 +135,13 @@ test('🔴 重发相同 clientMessageId 不产生重复记录（重连去重）'
 })
 
 test('🔴 所有人都能看到发起者的原话 + 守秘人回复（修"聊天像被隔离"bug）', async () => {
-  const room = await createRoomWithModule('actbc')
+  const room = await createRoomWithModule('actbc', 2)
   const guest = await registerPlayer('actbcguest')
   const joined = await guest.sdk.rooms.join(room.roomCode, { nickname: '围观访客' }, guest.token)
+
+  await room.host.sdk.rooms.startStory(room.roomId, room.reconnectToken)
+  await buildCharacter(room.host.sdk, room.roomId, room.reconnectToken)
+  await buildCharacter(guest.sdk, room.roomId, joined.reconnectToken)
 
   try {
     await bindSocket(
@@ -145,23 +149,37 @@ test('🔴 所有人都能看到发起者的原话 + 守秘人回复（修"聊�
     )
     await bindSocket(guest.sdk, room.roomId, guest.token, joined.playerId, joined.reconnectToken)
 
+    const hostOpening = waitForEvent(room.host.sdk, (e) => e.type === 'narration.push')
+    const guestOpening = waitForEvent(guest.sdk, (e) => e.type === 'narration.push')
+    room.host.sdk.roomSocket.startGame(room.hostPlayerId)
+    await Promise.all([hostOpening, guestOpening])
+
     // 房主提交行动，**访客**应该先看到房主的原话（action.broadcast，
     // 此前只在发送方本地显示，其他人只能看到守秘人转述——三人联机实测
     // 的"隔离"bug），再看到守秘人回复（narration.push）。
     const guestSeesUtterance = waitForEvent(
       guest.sdk,
-      (e) => e.type === 'action.broadcast' && e.payload.utterance === '我推开吱呀作响的木门'
+      (e) => e.type === 'action.broadcast' && e.payload.utterance === '我与托马斯交谈'
     )
     const guestSeesNarration = waitForEvent(guest.sdk, (e) => e.type === 'narration.push')
-    room.host.sdk.roomSocket.submitAction(room.hostPlayerId, {
-      utterance: '我推开吱呀作响的木门',
+    const completed = room.host.sdk.roomSocket.submitAction(room.hostPlayerId, {
+      clientActionId: 'discussion-echo-host',
+      utterance: '我与托马斯交谈',
     })
     const echo = await guestSeesUtterance
     if (echo.type === 'action.broadcast') {
       assert.equal(echo.payload.playerId, room.hostPlayerId)
       assert.ok(echo.payload.nickname.length > 0)
+      assert.equal(echo.payload.characterName, 'E2E 调查员')
     }
-    await guestSeesNarration
+    await Promise.all([guestSeesNarration, completed])
+
+    const conversation = await room.host.sdk.rooms.listConversation(room.roomId, room.reconnectToken)
+    const action = conversation.find((event) => event.type === 'action.broadcast')
+    assert.ok(action)
+    if (action?.type === 'action.broadcast') {
+      assert.equal(action.payload.characterName, 'E2E 调查员')
+    }
   } finally {
     room.host.sdk.roomSocket.disconnect()
     guest.sdk.roomSocket.disconnect()
@@ -169,9 +187,13 @@ test('🔴 所有人都能看到发起者的原话 + 守秘人回复（修"聊�
 })
 
 test('🔴 行动锁：处理中他人提交被拒（ACTION_IN_PROGRESS），完成后恢复', async () => {
-  const room = await createRoomWithModule('lock')
+  const room = await createRoomWithModule('lock', 2)
   const guest = await registerPlayer('lockguest')
   const joined = await guest.sdk.rooms.join(room.roomCode, { nickname: '抢话访客' }, guest.token)
+
+  await room.host.sdk.rooms.startStory(room.roomId, room.reconnectToken)
+  await buildCharacter(room.host.sdk, room.roomId, room.reconnectToken)
+  await buildCharacter(guest.sdk, room.roomId, joined.reconnectToken)
 
   try {
     await bindSocket(
@@ -179,11 +201,19 @@ test('🔴 行动锁：处理中他人提交被拒（ACTION_IN_PROGRESS），完
     )
     await bindSocket(guest.sdk, room.roomId, guest.token, joined.playerId, joined.reconnectToken)
 
+    const hostOpening = waitForEvent(room.host.sdk, (e) => e.type === 'narration.push')
+    const guestOpening = waitForEvent(guest.sdk, (e) => e.type === 'narration.push')
+    room.host.sdk.roomSocket.startGame(room.hostPlayerId)
+    await Promise.all([hostOpening, guestOpening])
+
     // 房主提交——narrator 有 1 秒人为延迟（NARRATOR_DELAY_SECONDS），锁窗口
     // 开着。等到原话广播到达（证明房主的提交已被受理、锁已被持有）再让访客抢。
     const hostNarration = waitForEvent(room.host.sdk, (e) => e.type === 'narration.push')
     const hostEcho = waitForEvent(room.host.sdk, (e) => e.type === 'action.broadcast')
-    room.host.sdk.roomSocket.submitAction(room.hostPlayerId, { utterance: '我搜查书架' })
+    const hostCompleted = room.host.sdk.roomSocket.submitAction(room.hostPlayerId, {
+      clientActionId: 'action-lock-host',
+      utterance: '我与托马斯交谈',
+    })
     await hostEcho
 
     // 访客在锁窗口内提交 → 被拒，且 error 只发给访客自己
@@ -191,27 +221,49 @@ test('🔴 行动锁：处理中他人提交被拒（ACTION_IN_PROGRESS），完
       guest.sdk,
       (e) => e.type === 'error' && e.payload.code === 'ACTION_IN_PROGRESS'
     )
-    guest.sdk.roomSocket.submitAction(joined.playerId, { utterance: '我翻抽屉' })
-    await guestRejected
+    const rejectedAction = guest.sdk.roomSocket.submitAction(joined.playerId, {
+      clientActionId: 'action-lock-guest-rejected',
+      utterance: '我翻抽屉',
+    })
+    const rejected = assert.rejects(
+      rejectedAction,
+      (error: unknown) =>
+        error instanceof RoomSocketServerError && error.code === 'ACTION_IN_PROGRESS'
+    )
+    await Promise.all([guestRejected, rejected])
 
     // 房主的叙事回复到达后访客再提交。⚠️ 用重试而不是一次命中：锁的释放在
     // narration 广播**之后**的 finally 里，两者之间有毫秒级窗口——真人手速
     // 不可能踩中，但 e2e 代码速度可以，首发正好撞上就又吃一次
     // ACTION_IN_PROGRESS（这本来就是产品行为：被拒了稍后重试即可）。
-    await hostNarration
+    await Promise.all([hostNarration, hostCompleted])
     let accepted = false
     for (let attempt = 0; attempt < 10 && !accepted; attempt++) {
       const outcome = waitForEvent(
         guest.sdk,
         (e) =>
-          (e.type === 'action.broadcast' && e.payload.utterance === '我再翻抽屉') ||
+          (e.type === 'action.broadcast' && e.payload.utterance === '我查看托马斯') ||
           (e.type === 'error' && e.payload.code === 'ACTION_IN_PROGRESS')
       )
-      guest.sdk.roomSocket.submitAction(joined.playerId, { utterance: '我再翻抽屉' })
+      const submitted = guest.sdk.roomSocket.submitAction(joined.playerId, {
+        clientActionId: 'action-lock-guest-retry',
+        utterance: '我查看托马斯',
+      })
+      let submitError: unknown
+      const settled = submitted.catch((error: unknown) => {
+        submitError = error
+        return null
+      })
       const event = await outcome
+      await settled
       if (event.type === 'action.broadcast') {
+        assert.equal(submitError, undefined)
         accepted = true
       } else {
+        assert.ok(
+          submitError instanceof RoomSocketServerError &&
+          submitError.code === 'ACTION_IN_PROGRESS'
+        )
         await new Promise((r) => setTimeout(r, 100))
       }
     }

@@ -26,7 +26,8 @@ payload dict，再按 type 分支，把 payload dict 交给下面对应的具体
 
 from typing import Any, Literal
 
-from pydantic import Field
+from collaboration_framework.contracts import PlayerView
+from pydantic import Field, field_validator
 
 from app.dto.common import CamelModel, UtcDatetime
 from app.dto.room import RoomPlayerRead
@@ -74,42 +75,32 @@ class GameStartPayload(CamelModel):
 
 
 class ActionSubmitPayload(CamelModel):
-    """action.submit 事件 payload——issue #107 定稿后玩家对 AI 主持人说的
-    **唯一**事件（行动或提问都走它，"是哪种"由 AI 判断，协议层不预分类）。
+    """action.submit 事件 payload。
 
-    `utterance` 必填，理由同 PlayerReadyPayload.ready：一条不带行动内容的
-    action.submit 是畸形消息。给默认空串会让 SDK 侧变成 `utterance?: string`，
-    于是 `submitAction(playerId, {})` 类型检查通过、运行时静默无操作。
-
-    注意「必填」只管字段存在，空白内容（`""` / `"   "`）仍由下游的
-    `strip()` + 空值判断拦掉，两者不冲突。
-
-    `summarized_from` / `visibility` 是 issue #107 铺的协议位：
-    - `summarized_from`：这次提交是从讨论区哪几条消息总结来的（消息 id 列表）。
-      本期只透传不消费——AI 编排（#48/#68）接手后决定怎么用。
-    - `visibility`：`"private"` 表示「我偷偷摸他口袋」这类不想让其他玩家看到
-      结果的私密行动。本期传 `private` 会收到 NOT_IMPLEMENTED 的 error——
-      真正的私密裁决需要 AI 知道「结果只给发起者且后续叙事不能泄露」，属于
-      编排层的活，硬做会做出一个会漏信息的假私密，比不做更糟（issue #107
-      关键决策）。**不静默当成 public 处理**：把玩家以为保密的行动广播出去，
-      当场就暴露了。
+    `client_action_id` 是客户端为一次逻辑动作生成的稳定幂等键；网络重试必须
+    复用原值。两个字段都在契约层拒绝空白文本。
     """
 
-    utterance: str = Field(max_length=2000)
+    client_action_id: str = Field(..., min_length=1, max_length=200)
+    utterance: str = Field(..., min_length=1, max_length=2000)
     summarized_from: list[str] | None = None
     visibility: Literal["public", "private"] | None = None
 
+    @field_validator("client_action_id", "utterance")
+    @classmethod
+    def strip_non_empty(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("不能为空")
+        return stripped
+
 
 class CheckRollPayload(CamelModel):
-    """check.roll 事件 payload（issue #77 新增）——玩家请求做一次技能检定。
+    """为待处理动作提交玩家选择的技能与 D100 结果。"""
 
-    `skill` 必填：说清楚要检定哪个技能是这个动作本身的意义所在。这条链路
-    本期是 NOT_IMPLEMENTED 桩（见 issue"三处原型取舍"表格——真正的服务端
-    权威掷骰依赖规则引擎裁决，归 #48/#68），handler 校验完这个 payload 就
-    直接回 `error` 事件，不会真的掷骰或读写 `check_results` 表。
-    """
-
+    client_action_id: str = Field(..., min_length=1, max_length=200)
     skill: str = Field(..., min_length=1)
+    roll_value: int = Field(..., ge=1, le=100)
 
 
 class SanCheckRollPayload(CamelModel):
@@ -131,16 +122,7 @@ class RoomRejoinPayload(CamelModel):
 
 
 class ChatSendPayload(CamelModel):
-    """chat.send 事件 payload（issue #107）——玩家往**讨论区**发一条消息。
-
-    讨论区跟「对 AI 主持人说话」（action.submit）是两条完全独立的通道：
-    讨论区消息只在玩家之间广播，**永远不进任何 LLM 上下文**（成本 + 玩家
-    需要"AI 听不见"的商量空间，这是 #107 的立项理由）。
-
-    `client_message_id` 是客户端生成的去重键：断线重连后客户端可能重发同一条
-    消息，服务端靠 `(player_id, client_message_id)` 唯一约束保证只落一行、
-    重发拿到与第一次一致的广播。
-    """
+    """chat.send 讨论区消息；该通道不会进入 Host Agent 上下文。"""
 
     text: str = Field(..., min_length=1, max_length=2000)
     client_message_id: str = Field(..., min_length=1, max_length=64)
@@ -163,13 +145,7 @@ class NarrationPushPayload(CamelModel):
 
 
 class ChatMessagePayload(CamelModel):
-    """chat.message 推送 payload（issue #107）——讨论区消息的房间广播。
-
-    带 `client_message_id` 回传是为了让发送方把广播和自己本地乐观插入的
-    那条对上号（去重/替换本地占位），其他人直接按新消息渲染。
-    `sent_at` 用 UtcDatetime：所有对外时间字段必须带时区后缀，否则客户端
-    会把 UTC 当本地时间解析（UTC+8 上「4 分钟前」显示成「8 小时前」的真 bug）。
-    """
+    """chat.message 讨论区广播 payload。"""
 
     message_id: str
     player_id: str
@@ -180,18 +156,53 @@ class ChatMessagePayload(CamelModel):
 
 
 class ActionBroadcastPayload(CamelModel):
-    """action.broadcast 推送 payload（issue #107）——玩家对 AI 主持人说的
-    **原话**的房间广播。
-
-    修的是三人联机实测出的"聊天记录像被隔离"bug：此前玩家原话只在发送方
-    本地插入气泡，其他人只能从守秘人回复的转述里看到内容。现在 action.submit
-    先广播这条（谁、说了什么），再广播 AI 的叙事回复（narration.push），
-    所有人看到的时间线一致——就像牌桌上说话大家都听得见。
-    """
+    """action.submit 原话广播 payload。"""
 
     player_id: str
+    client_action_id: str
     nickname: str
+    character_name: str | None = None
     utterance: str
+
+
+class TurnStartedPayload(CamelModel):
+    correlation_id: str
+
+
+class TurnPhaseChangedPayload(CamelModel):
+    correlation_id: str
+    phase: Literal[
+        "reading_player_view",
+        "understanding_action",
+        "waiting_for_check",
+        "executing_action",
+        "refreshing_player_view",
+        "generating_narration",
+    ]
+
+
+class ToolStartedPayload(CamelModel):
+    correlation_id: str
+    tool_name: str
+    public_progress_label: str
+
+
+class ToolCompletedPayload(CamelModel):
+    correlation_id: str
+    tool_name: str
+    status: Literal["success", "error"]
+
+
+class TurnFailedPayload(CamelModel):
+    correlation_id: str
+    code: str
+    public_message: str
+    retryable: bool
+
+
+class ViewUpdatedPayload(CamelModel):
+    player_id: str
+    player_view: PlayerView
 
 
 class RoomStatePayload(CamelModel):
@@ -238,25 +249,48 @@ class ViewPrivatePayload(CamelModel):
     text: str
 
 
+class CheckSkillOptionPayload(CamelModel):
+    """A player-owned skill that may be selected for the pending check."""
+
+    id: str
+    name: str
+    target_value: int = Field(..., ge=0)
+
+
 class CheckRequestPayload(CamelModel):
-    """check.request 推送 payload（issue #77 新增，本期不会真的发出）。"""
+    """向动作发起者推送经 Actor 技能值过滤后的可用检定项。"""
 
     player_id: str
-    skill: str
-    target_value: int | None = None
+    client_action_id: str
+    summary: str
+    difficulty: Literal["regular", "hard", "extreme"]
+    skills: list[CheckSkillOptionPayload]
 
 
 class CheckResultPayload(CamelModel):
     """check.result 推送 payload（issue #77 新增）。
 
     直接返回终值，不做两段式初步结果（issue 决策 4：幸运消耗机制推迟，
-    协议一并简化）。本期不会真的发出。
+    协议一并简化）。
     """
 
     player_id: str
+    client_action_id: str
     skill: str
+    skill_name: str
+    character_name: str | None = None
     roll_value: int
-    target_value: int | None = None
+    target_value: int
+    difficulty: Literal["regular", "hard", "extreme"]
+    success_level: Literal[
+        "critical",
+        "extreme",
+        "hard",
+        "regular",
+        "failure",
+        "fumble",
+    ]
+    passed: bool
     result: str
 
 
@@ -294,6 +328,7 @@ class ErrorPayload(CamelModel):
 
     code: str
     message: str
+    correlation_id: str | None = None
 
 
 # ── 信封 ────────────────────────────────────────

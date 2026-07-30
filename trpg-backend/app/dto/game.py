@@ -8,6 +8,8 @@ issue #84 S1 把 `ruleset` 从三个字符串数组加厚成结构化的属性/�
 权威数据，seed 时写入 `GameSystem.ruleset`。
 """
 
+from pydantic import Field
+
 from app.dto.common import CamelModel
 
 
@@ -18,6 +20,7 @@ class GameRead(CamelModel):
     id: str
     name: str
     description: str | None = None
+    tags: list[str] = Field(default_factory=list)
 
 
 class GameSystemRead(CamelModel):
@@ -26,8 +29,12 @@ class GameSystemRead(CamelModel):
     model_config = {"from_attributes": True}
     id: str
     game_id: str
+    world_ref: str
     name: str
     version: str | None = None
+    world_name: str | None = None
+    world_description: str | None = None
+    game_description: str | None = None
 
 
 class AttributeSpec(CamelModel):

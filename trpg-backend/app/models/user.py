@@ -1,9 +1,9 @@
 """账号相关 ORM 模型（issue #77 §1，运行时状态库的一部分）。
 
 `User`/`UserSession` 承接 issue #58 之前用内存字典（`_users`/`_accounts`/
-`_tokens`）实现的账号+会话逻辑；`UserCharacterTemplate` 是本期新增的"我的
-常用角色卡库"（issue 决策 5），本期只铺表与接口，不实现真实读写（详见
-service/character.py）。
+`_tokens`）实现的账号+会话逻辑；`UserCharacterTemplate` 是"我的常用角色卡库"。
+Issue #121 起，完成房间 Character 会自动写入该表；卡库列表、加载和手工管理接口
+仍留待后续实现。
 """
 
 import uuid
@@ -62,8 +62,8 @@ class UserCharacterTemplate(Base):
 
     `system_id` 约束死了这张卡只能用于同一个规则系统（COC7 的卡不能拿去玩
     DND5e）；只存建卡态字段（放在 `data` 里），不带任何单局才有的状态
-    （HP/理智/疯狂），复用时天然不会把上一局的状态带进新局。本期只铺表与
-    接口，不实现真实读写（service 层直接返回 NOT_IMPLEMENTED）。
+    （HP/理智/疯狂），复用时天然不会把上一局的状态带进新局。Issue #121 只实现
+    完成建卡时的自动保存，卡库 CRUD 端点仍返回 NOT_IMPLEMENTED。
     """
 
     __tablename__ = "user_character_templates"

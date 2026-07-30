@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
 
-from app.core.config import Settings
+from app.core.config import Settings, secret_value
 
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 DEEPSEEK_MODEL = "deepseek-chat"
@@ -96,14 +96,21 @@ class DeepSeekNarrator(Narrator):
     事件），职责不在这里。
     """
 
-    def __init__(self, api_key: str) -> None:
-        self._client = AsyncOpenAI(
-            api_key=api_key, base_url=DEEPSEEK_BASE_URL, timeout=_REQUEST_TIMEOUT_SECONDS
-        )
+    def __init__(
+        self,
+        api_key: str,
+        *,
+        base_url: str = DEEPSEEK_BASE_URL,
+        model: str = DEEPSEEK_MODEL,
+        timeout_seconds: float = _REQUEST_TIMEOUT_SECONDS,
+    ) -> None:
+        self._model = model
+        self._timeout_seconds = timeout_seconds
+        self._client = AsyncOpenAI(api_key=api_key, base_url=base_url, timeout=timeout_seconds)
 
     async def narrate(self, context: NarrationContext) -> str:
         response = await self._client.chat.completions.create(
-            model=DEEPSEEK_MODEL,
+            model=self._model,
             messages=_build_messages(context),
         )
         return response.choices[0].message.content or ""
@@ -134,7 +141,12 @@ def build_narrator(settings: Settings) -> Narrator:
     docstring），生产配置保持 0、不受影响。
     """
     narrator: Narrator = (
-        DeepSeekNarrator(settings.deepseek_api_key)
+        DeepSeekNarrator(
+            secret_value(settings.deepseek_api_key),
+            base_url=settings.deepseek_base_url,
+            model=settings.deepseek_model,
+            timeout_seconds=settings.deepseek_timeout_seconds,
+        )
         if settings.deepseek_api_key
         else FallbackNarrator()
     )

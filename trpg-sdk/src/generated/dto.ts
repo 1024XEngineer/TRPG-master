@@ -10,45 +10,50 @@
  */
 
 /**
- * action.broadcast 推送 payload（issue #107）——玩家对 AI 主持人说的
- * **原话**的房间广播。
- *
- * 修的是三人联机实测出的"聊天记录像被隔离"bug：此前玩家原话只在发送方
- * 本地插入气泡，其他人只能从守秘人回复的转述里看到内容。现在 action.submit
- * 先广播这条（谁、说了什么），再广播 AI 的叙事回复（narration.push），
- * 所有人看到的时间线一致——就像牌桌上说话大家都听得见。
+ * action.submit 原话广播 payload。
  */
 export interface ActionBroadcastPayload {
   playerId: string;
+  clientActionId: string;
   nickname: string;
+  characterName?: string | null;
   utterance: string;
 }
 
 /**
- * action.submit 事件 payload——issue #107 定稿后玩家对 AI 主持人说的
- * **唯一**事件（行动或提问都走它，"是哪种"由 AI 判断，协议层不预分类）。
+ * Player-safe declaration id and semantic cues supplied by one checkpoint.
+ */
+export interface ActionDeclarationOption {
+  id: string;
+  /**
+   * @minItems 1
+   */
+  semantic_hints: [string, ...string[]];
+}
+
+/**
+ * action.submit 事件 payload。
  *
- * `utterance` 必填，理由同 PlayerReadyPayload.ready：一条不带行动内容的
- * action.submit 是畸形消息。给默认空串会让 SDK 侧变成 `utterance?: string`，
- * 于是 `submitAction(playerId, {})` 类型检查通过、运行时静默无操作。
- *
- * 注意「必填」只管字段存在，空白内容（`""` / `"   "`）仍由下游的
- * `strip()` + 空值判断拦掉，两者不冲突。
- *
- * `summarized_from` / `visibility` 是 issue #107 铺的协议位：
- * - `summarized_from`：这次提交是从讨论区哪几条消息总结来的（消息 id 列表）。
- *   本期只透传不消费——AI 编排（#48/#68）接手后决定怎么用。
- * - `visibility`：`"private"` 表示「我偷偷摸他口袋」这类不想让其他玩家看到
- *   结果的私密行动。本期传 `private` 会收到 NOT_IMPLEMENTED 的 error——
- *   真正的私密裁决需要 AI 知道「结果只给发起者且后续叙事不能泄露」，属于
- *   编排层的活，硬做会做出一个会漏信息的假私密，比不做更糟（issue #107
- *   关键决策）。**不静默当成 public 处理**：把玩家以为保密的行动广播出去，
- *   当场就暴露了。
+ * `client_action_id` 是客户端为一次逻辑动作生成的稳定幂等键；网络重试必须
+ * 复用原值。两个字段都在契约层拒绝空白文本。
  */
 export interface ActionSubmitPayload {
+  clientActionId: string;
   utterance: string;
   summarizedFrom?: string[] | null;
   visibility?: ("public" | "private") | null;
+}
+
+export interface ActorResourceView {
+  id: string;
+  name: string;
+  value: number;
+}
+
+export interface ActorValueView {
+  id: string;
+  name: string;
+  value: number;
 }
 
 /**
@@ -106,6 +111,15 @@ export interface AuthResult {
   token: string;
   userId: string;
   nickname: string;
+}
+
+export interface AvailableExitView {
+  id: string;
+  name: string;
+  target_id?: string | null;
+  aliases?: string[];
+  description?: string;
+  destination?: ExitDestinationView | null;
 }
 
 /**
@@ -228,12 +242,7 @@ export interface CharacterUpdateBody {
 }
 
 /**
- * chat.message 推送 payload（issue #107）——讨论区消息的房间广播。
- *
- * 带 `client_message_id` 回传是为了让发送方把广播和自己本地乐观插入的
- * 那条对上号（去重/替换本地占位），其他人直接按新消息渲染。
- * `sent_at` 用 UtcDatetime：所有对外时间字段必须带时区后缀，否则客户端
- * 会把 UTC 当本地时间解析（UTC+8 上「4 分钟前」显示成「8 小时前」的真 bug）。
+ * chat.message 讨论区广播 payload。
  */
 export interface ChatMessagePayload {
   messageId: string;
@@ -258,15 +267,7 @@ export interface ChatMessageRead {
 }
 
 /**
- * chat.send 事件 payload（issue #107）——玩家往**讨论区**发一条消息。
- *
- * 讨论区跟「对 AI 主持人说话」（action.submit）是两条完全独立的通道：
- * 讨论区消息只在玩家之间广播，**永远不进任何 LLM 上下文**（成本 + 玩家
- * 需要"AI 听不见"的商量空间，这是 #107 的立项理由）。
- *
- * `client_message_id` 是客户端生成的去重键：断线重连后客户端可能重发同一条
- * 消息，服务端靠 `(player_id, client_message_id)` 唯一约束保证只落一行、
- * 重发拿到与第一次一致的广播。
+ * chat.send 讨论区消息；该通道不会进入 Host Agent 上下文。
  */
 export interface ChatSendPayload {
   text: string;
@@ -274,38 +275,64 @@ export interface ChatSendPayload {
 }
 
 /**
- * check.request 推送 payload（issue #77 新增，本期不会真的发出）。
+ * 向动作发起者推送经 Actor 技能值过滤后的可用检定项。
  */
 export interface CheckRequestPayload {
   playerId: string;
-  skill: string;
-  targetValue?: number | null;
+  clientActionId: string;
+  summary: string;
+  difficulty: "regular" | "hard" | "extreme";
+  skills: CheckSkillOptionPayload[];
 }
 
 /**
  * check.result 推送 payload（issue #77 新增）。
  *
  * 直接返回终值，不做两段式初步结果（issue 决策 4：幸运消耗机制推迟，
- * 协议一并简化）。本期不会真的发出。
+ * 协议一并简化）。
  */
 export interface CheckResultPayload {
   playerId: string;
+  clientActionId: string;
   skill: string;
+  skillName: string;
+  characterName?: string | null;
   rollValue: number;
-  targetValue?: number | null;
+  targetValue: number;
+  difficulty: "regular" | "hard" | "extreme";
+  successLevel: "critical" | "extreme" | "hard" | "regular" | "failure" | "fumble";
+  passed: boolean;
   result: string;
 }
 
 /**
- * check.roll 事件 payload（issue #77 新增）——玩家请求做一次技能检定。
- *
- * `skill` 必填：说清楚要检定哪个技能是这个动作本身的意义所在。这条链路
- * 本期是 NOT_IMPLEMENTED 桩（见 issue"三处原型取舍"表格——真正的服务端
- * 权威掷骰依赖规则引擎裁决，归 #48/#68），handler 校验完这个 payload 就
- * 直接回 `error` 事件，不会真的掷骰或读写 `check_results` 表。
+ * 为待处理动作提交玩家选择的技能与 D100 结果。
  */
 export interface CheckRollPayload {
+  clientActionId: string;
   skill: string;
+  rollValue: number;
+}
+
+/**
+ * A player-owned skill that may be selected for the pending check.
+ */
+export interface CheckSkillOptionPayload {
+  id: string;
+  name: string;
+  targetValue: number;
+}
+
+/**
+ * Trusted candidate menu exposed to the host semantic matcher.
+ */
+export interface CheckpointOption {
+  id: string;
+  target_id: string;
+  action_hint: string;
+  skills?: string[];
+  difficulty?: ("regular" | "hard" | "extreme") | null;
+  declaration_options?: ActionDeclarationOption[];
 }
 
 /**
@@ -347,6 +374,7 @@ export type ErrorCode =
   | "ACTION_IN_PROGRESS"
   | "CHARACTER_INCOMPLETE"
   | "MODULE_NOT_SELECTED"
+  | "MODULE_PLAYER_COUNT_MISMATCH"
   | "RECONNECT_TOKEN_EXPIRED"
   | "RATE_LIMITED"
   | "NOT_IMPLEMENTED"
@@ -379,6 +407,12 @@ export interface ErrorDetail {
 export interface ErrorPayload {
   code: string;
   message: string;
+  correlationId?: string | null;
+}
+
+export interface ExitDestinationView {
+  scene_id: string;
+  name: string;
 }
 
 /**
@@ -395,6 +429,7 @@ export interface GameRead {
   id: string;
   name: string;
   description?: string | null;
+  tags?: string[];
 }
 
 /**
@@ -411,8 +446,12 @@ export interface GameStartPayload {}
 export interface GameSystemRead {
   id: string;
   gameId: string;
+  worldRef: string;
   name: string;
   version?: string | null;
+  worldName?: string | null;
+  worldDescription?: string | null;
+  gameDescription?: string | null;
 }
 
 /**
@@ -420,6 +459,20 @@ export interface GameSystemRead {
  */
 export interface JoinRoomBody {
   nickname?: string | null;
+}
+
+export interface JsonValue {
+  [k: string]: unknown;
+}
+
+export interface KnownInformationView {
+  id: string;
+  title: string;
+  summary: string;
+  content: string;
+  related_entities?: string[];
+  related_scenes?: string[];
+  scope: "actor" | "party";
 }
 
 /**
@@ -440,18 +493,25 @@ export interface MeRead {
 }
 
 /**
- * GET /api/v1/modules/{moduleId} 返回——在 ModuleRead 基础上补充简介。
+ * GET /api/v1/modules/{moduleId} 返回——增加故事页展示信息。
  */
 export interface ModuleDetailRead {
   id: string;
+  gameSystemId: string;
+  gameSystemName?: string | null;
   title: string;
+  nameEn?: string | null;
   version: string;
+  status: string;
   authors: string[];
   playersMin: number;
   playersMax: number;
   difficulty: number;
   estimatedDuration?: string | null;
   synopsis?: string | null;
+  storyLabel?: string | null;
+  subtitle?: string | null;
+  storyPages: ModuleStoryPage[];
 }
 
 /**
@@ -487,13 +547,26 @@ export interface ModuleImportRequestBody {
  */
 export interface ModuleRead {
   id: string;
+  gameSystemId: string;
+  gameSystemName?: string | null;
   title: string;
+  nameEn?: string | null;
   version: string;
+  status: string;
   authors: string[];
   playersMin: number;
   playersMax: number;
   difficulty: number;
   estimatedDuration?: string | null;
+  synopsis?: string | null;
+}
+
+/**
+ * 玩家开局前可见的一页故事介绍。
+ */
+export interface ModuleStoryPage {
+  title: string;
+  content: string;
 }
 
 /**
@@ -515,6 +588,18 @@ export interface MyRoomSummary {
  */
 export interface NarrationPushPayload {
   text: string;
+}
+
+export interface NarrativeDetailView {
+  id: string;
+  kind: "description" | "sensory" | "atmosphere" | "pacing" | "foreshadowing";
+  text: string;
+}
+
+export interface ObservableStateView {
+  key: string;
+  label: string;
+  value: JsonValue;
 }
 
 /**
@@ -555,6 +640,23 @@ export interface PlayerReadyPayload {
 }
 
 /**
+ * Complete player-safe world snapshot used by one model/Agent run.
+ */
+export interface PlayerView {
+  room_id: string;
+  player_id: string;
+  actor_id: string;
+  background: string;
+  scene_id: string;
+  phase: "playing" | "ended";
+  revision: string;
+  self_actor: SelfActorView;
+  scene: SceneView;
+  known_information?: KnownInformationView[];
+  checkpoint_options?: CheckpointOption[];
+}
+
+/**
  * POST /api/v1/auth/register 请求体
  */
 export interface RegisterBody {
@@ -590,6 +692,23 @@ export interface RollAttributesResult {
   derivedStats: {
     [k: string]: number;
   };
+}
+
+/**
+ * GET /api/v1/rooms/{roomId}/conversation 返回项。
+ *
+ * 它面向房间页恢复当前对话 UI：讨论区消息继续来自 `chat_messages`，行动频道
+ * 的玩家原话、主持叙事和检定结果来自 `events`。这不是 replay 的替代品；
+ * 讨论区仍然不进入 replay，也仍然会在结束游戏时按既有语义清理。
+ */
+export interface RoomConversationEventRead {
+  id: string;
+  type: "chat.message" | "action.broadcast" | "narration.push" | "check.result";
+  channel: "discussion" | "action";
+  payload: {
+    [k: string]: unknown;
+  };
+  createdAt: string;
 }
 
 /**
@@ -658,6 +777,7 @@ export interface RoomPreview {
   roomName: string;
   phase: string;
   storyStarted: boolean;
+  moduleId?: string | null;
   moduleTitle?: string | null;
   playerCount: number;
   maxPlayers: number;
@@ -735,12 +855,35 @@ export interface SanCheckResultPayload {
  */
 export interface SanCheckRollPayload {}
 
+export interface SceneView {
+  id: string;
+  name: string;
+  description: string;
+  time?: string | null;
+  narrative_details?: NarrativeDetailView[];
+  visible_entities?: VisibleEntity[];
+  visible_actors?: VisibleActorView[];
+  available_exits?: AvailableExitView[];
+}
+
 /**
  * POST /api/v1/rooms/{roomId}/module 请求体
  */
 export interface SelectModuleBody {
   moduleId: string;
   attributeGenMethod?: string;
+}
+
+export interface SelfActorView {
+  id: string;
+  name: string;
+  occupation?: string | null;
+  attributes?: ActorValueView[];
+  skills?: ActorValueView[];
+  resources?: ActorResourceView[];
+  conditions?: string[];
+  equipment?: string[];
+  background_summary?: string;
 }
 
 /**
@@ -808,11 +951,45 @@ export interface SkillSpec {
   relatedAttr?: string | null;
 }
 
+export interface ToolCompletedPayload {
+  correlationId: string;
+  toolName: string;
+  status: "success" | "error";
+}
+
+export interface ToolStartedPayload {
+  correlationId: string;
+  toolName: string;
+  publicProgressLabel: string;
+}
+
 /**
  * turn.begin 推送 payload（issue #77 新增，回合制约束，本期不会真的发出）。
  */
 export interface TurnBeginPayload {
   playerId: string;
+}
+
+export interface TurnFailedPayload {
+  correlationId: string;
+  code: string;
+  publicMessage: string;
+  retryable: boolean;
+}
+
+export interface TurnPhaseChangedPayload {
+  correlationId: string;
+  phase:
+    | "reading_player_view"
+    | "understanding_action"
+    | "waiting_for_check"
+    | "executing_action"
+    | "refreshing_player_view"
+    | "generating_narration";
+}
+
+export interface TurnStartedPayload {
+  correlationId: string;
 }
 
 /**
@@ -841,4 +1018,25 @@ export interface ValidationIssueView {
 export interface ViewPrivatePayload {
   playerId: string;
   text: string;
+}
+
+export interface ViewUpdatedPayload {
+  playerId: string;
+  playerView: PlayerView;
+}
+
+export interface VisibleActorView {
+  id: string;
+  name: string;
+  status_summary?: string;
+}
+
+export interface VisibleEntity {
+  id: string;
+  kind: "npc" | "object" | "location";
+  name: string;
+  aliases?: string[];
+  description: string;
+  narrative_details?: NarrativeDetailView[];
+  observable_state?: ObservableStateView[];
 }

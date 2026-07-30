@@ -43,6 +43,10 @@ function occupationIcon(occupation: Pick<OccupationSpec, 'icon'>): string {
   return occupation.icon ?? '·'
 }
 
+function occupationSkillLabel(skillId: string, skills: SkillSpec[]): string {
+  return skills.find(skill => skill.id === skillId)?.name ?? skillId
+}
+
 async function previewWithAllocations(
   attributes: Attributes,
   occupationId: number | null,
@@ -320,6 +324,13 @@ export default function CharacterPage() {
     if (!ruleset || info.occupationId == null) return null
     return ruleset.occupations.find(o => o.id === info.occupationId) ?? null
   }, [ruleset, info.occupationId])
+
+  const selectedOccupationSkillPreview = useMemo(() => {
+    if (!ruleset || !selectedOcc) return []
+    const fixed = selectedOcc.skillIds.map(id => occupationSkillLabel(id, ruleset.skills))
+    const slots = (selectedOcc.choiceSlots ?? []).map(slot => slot.label)
+    return [...fixed, ...slots]
+  }, [ruleset, selectedOcc])
 
   // 信用评级（credit-rating）是后端建成的必填技能，值须落在所选职业的
   // [creditMin, creditMax] 内（后端 CREDIT_OUT_OF_RANGE）。这里给它一个专门
@@ -888,13 +899,33 @@ export default function CharacterPage() {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between gap-2">
                           <div className="text-sm font-semibold text-text-primary">{selectedOcc.name}</div>
-                          <button onClick={() => setInfo(i => ({ ...i, occupationId: null }))}
-                            className="text-[11px] text-text-dim underline flex-shrink-0">
-                            取消选择
-                          </button>
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            <button onClick={() => setDetailOcc(selectedOcc)}
+                              className="text-[11px] text-brass-dark underline">
+                              详情
+                            </button>
+                            <button onClick={() => setInfo(i => ({ ...i, occupationId: null }))}
+                              className="text-[11px] text-text-dim underline">
+                              取消选择
+                            </button>
+                          </div>
                         </div>
-                        <div className="mt-1 text-[11px] text-text-muted">信用 {selectedOcc.creditMin}-{selectedOcc.creditMax} · {selectedOcc.skillPointsFormula}</div>
-                        <p className="mt-2 text-[12px] leading-relaxed text-text-body">{selectedOcc.description}</p>
+                        <div className="mt-1 text-[11px] text-text-muted">
+                          信用 {selectedOcc.creditMin}-{selectedOcc.creditMax} · {selectedOcc.skillPointsFormula}
+                          {selectedOcc.categories?.length ? ` · ${selectedOcc.categories.join(' / ')}` : ''}
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {selectedOccupationSkillPreview.slice(0, 8).map((label, index) => (
+                            <span key={`${label}-${index}`} className="px-2 py-1 bg-card border border-border-light rounded-[4px] text-[10px] text-text-body">
+                              {label}
+                            </span>
+                          ))}
+                          {selectedOccupationSkillPreview.length > 8 && (
+                            <span className="px-2 py-1 text-[10px] text-text-dim">
+                              +{selectedOccupationSkillPreview.length - 8} 项
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>

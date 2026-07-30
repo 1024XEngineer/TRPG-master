@@ -159,3 +159,21 @@ def test_occupation_ui_metadata_covers_all_coc7_occupations() -> None:
     assert missing_icon == [], f"职业缺少图标: {missing_icon}"
     assert missing_categories == [], f"职业缺少分类: {missing_categories}"
     assert unknown_categories == [], f"职业引用了未知分类: {unknown_categories}"
+
+
+def test_placeholder_occupation_descriptions_are_enriched_for_display() -> None:
+    """导入源里的来源提示不能原样作为玩家看到的职业简介（issue #196 追补）。"""
+    ruleset = build_coc7_ruleset()
+    placeholder_descriptions = [
+        f"{occupation.name}({occupation.id})"
+        for occupation in ruleset.occupations
+        if occupation.description.endswith("职业，使用前请征得KP同意。")
+    ]
+    gaslight_socialite = next(
+        occupation for occupation in ruleset.occupations if occupation.id == 204
+    )
+
+    assert placeholder_descriptions == [], f"职业简介仍是占位来源提示: {placeholder_descriptions}"
+    assert gaslight_socialite.name == "交际花"
+    assert "《克苏鲁煤气灯》1980s职业" in gaslight_socialite.description
+    assert "人际关系" in gaslight_socialite.description

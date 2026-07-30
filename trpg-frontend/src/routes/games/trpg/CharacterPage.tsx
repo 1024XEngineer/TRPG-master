@@ -403,12 +403,6 @@ export default function CharacterPage() {
   // 两条 bar 本身的显示值（那两个数字仍然只读 preview.spent，见下）。
   const [pendingOccupationDelta, setPendingOccupationDelta] = useState(0)
   const [pendingInterestDelta, setPendingInterestDelta] = useState(0)
-  // spent 算"剩余"，会被越过预算（AI review 抓出的真问题，issue #114 之前
-  // 是纯本地同步算账，不存在这个窗口）。这里记一个"已经落到本地状态、但
-  // 还没被最新一次 preview 确认"的净加点数，从两个池子的合计剩余里减掉，
-  // preview 一确认（非过期响应）就清零。只影响"还能不能继续加"的判断，不
-  // 影响两条 bar 本身的显示值（那两个数字仍然只读 preview.spent，见下）。
-  const [pendingDelta, setPendingDelta] = useState(0)
 
   useEffect(() => {
     if (!ruleset) return
@@ -423,16 +417,6 @@ export default function CharacterPage() {
           setPreviewStatus('ready')
           setPendingOccupationDelta(0)
           setPendingInterestDelta(0)
-      previewCharacter({
-        attributes: attr,
-        occupationId: info.occupationId,
-        skills: skillAlloc,
-      })
-        .then((result) => {
-          if (gen !== previewGenRef.current) return
-          setPreview(result)
-          setPreviewError('')
-          setPendingDelta(0)
         })
         .catch((err) => {
           if (gen !== previewGenRef.current) return
@@ -487,26 +471,6 @@ export default function CharacterPage() {
 
   const occupationPointsRemaining = Math.max(0, occPointsTotal - occPointsSpent - pendingOccupationDelta)
   const interestPointsRemaining = Math.max(0, interestPointsTotal - interestPointsSpent - pendingInterestDelta)
-  // issue #114 之前这里是本地按「occSkillIds（仅固定本职技能）算职业点、其余算
-  // 兴趣点」+ 手动补信用分账。但职业技能 = 固定 + 自选槽，占槽的技能（尤其是
-  // 「任意 N 项」的开放槽，任何技能都可能占）该算职业点还是兴趣点，取决于后端
-  // 的全局最优占槽（coc7_rules._assign_choice_slots），前端无法在不复刻规则的
-  // 前提下算对——那正是路线乙 / issue #96 要避免的「前端本地做规则记账」。
-  //
-  // 后端 compute_preview 返回的 spent 已经把固定技能、占槽技能、信用分账全算
-  // 进去了（见 coc7_rules._compute），前端只渲染，不叠加。代价是数字随 preview
-  // 防抖有轻微延迟——但预算总额、技能 base/cap 本来就是 preview 驱动的，这里
-  // 只是让 spent 跟它们同源，不是新增的延迟面。
-  const occPointsSpent = preview?.occupationSkillPoints.spent ?? 0
-  const interestPointsSpent = preview?.interestSkillPoints.spent ?? 0
-
-  // 两个池子合计还能再加多少——后端的真实闸门本来就是总预算（职业池单独超支
-  // 允许，由兴趣池补，见 SKILL_POINTS_EXCEEDED），所以这个合计值同时也是本地
-  // 能同步维护的、唯一需要精确的数字：加点会被拒当且仅当它 <= 0。
-  const totalPointsRemaining = Math.max(
-    0,
-    occPointsTotal + interestPointsTotal - occPointsSpent - interestPointsSpent - pendingDelta
-  )
 
   const derived = useMemo(() => normalizeDerivedStats(preview?.derivedStats), [preview])
 
@@ -523,7 +487,6 @@ export default function CharacterPage() {
   // 兴趣技能页签（只列非职业技能）：只动兴趣点数池。
   const handleInterestSkillChange = (skillId: string, delta: number) => {
     if (delta > 0 && interestPointsRemaining <= 0) return
-    if (delta > 0 && totalPointsRemaining <= 0) return
     const prevInterest = interestAlloc[skillId] || 0
     const nextInterest = Math.max(0, prevInterest + delta)
     const appliedDelta = nextInterest - prevInterest
@@ -540,20 +503,6 @@ export default function CharacterPage() {
     setSkillAlloc(prev => ({ ...prev, [skillId]: clamped }))
     const appliedDelta = clamped - prevInterest
     if (appliedDelta !== 0) setPendingInterestDelta(d => Math.max(0, d + appliedDelta))
-    if (appliedDelta !== 0) setPendingDelta(d => Math.max(0, d + appliedDelta))
-  }
-
-  const handleInterestSkillSet = (skillId: string, newAllocation: number) => {
-    const occPart = (skillAlloc[skillId] || 0) - (interestAlloc[skillId] || 0)
-    const prevInterest = interestAlloc[skillId] || 0
-    let clamped = Math.max(0, newAllocation)
-    if (clamped > prevInterest) {
-      clamped = Math.min(clamped, prevInterest + totalPointsRemaining)
-    }
-    setInterestAlloc(prev => ({ ...prev, [skillId]: clamped }))
-    setSkillAlloc(prev => ({ ...prev, [skillId]: occPart + clamped }))
-    const appliedDelta = clamped - prevInterest
-    if (appliedDelta !== 0) setPendingDelta(d => Math.max(0, d + appliedDelta))
   }
 
   // 职业技能页签：只动职业点数池，不再让职业技能自动借兴趣池。
@@ -562,23 +511,9 @@ export default function CharacterPage() {
       if (occupationPointsRemaining <= 0) return
       setSkillAlloc(prev => ({ ...prev, [skillId]: (prev[skillId] || 0) + 1 }))
       setPendingOccupationDelta(d => Math.max(0, d + 1))
-      if (totalPointsRemaining <= 0) return
-      // 哪个池子出这一点只是本地展示用的分类（提交给后端的只有最终技能值，
-      // 真正的职业/兴趣归属由后端 _assign_choice_slots 权威决定），这里用的
-      // occRemaining 在连续快点时会暂时不准，但上面已经用 totalPointsRemaining
-      // 挡住了"总共能不能再加"，所以分到哪个池子不影响预算是否被越过。
-      const occRemaining = occPointsTotal - occPointsSpent
-      if (occRemaining > 0) {
-        setSkillAlloc(prev => ({ ...prev, [skillId]: (prev[skillId] || 0) + 1 }))
-      } else {
-        setInterestAlloc(prev => ({ ...prev, [skillId]: (prev[skillId] || 0) + 1 }))
-        setSkillAlloc(prev => ({ ...prev, [skillId]: (prev[skillId] || 0) + 1 }))
-      }
-      setPendingDelta(d => Math.max(0, d + 1))
     } else if (delta < 0) {
       setSkillAlloc(prev => ({ ...prev, [skillId]: Math.max(0, (prev[skillId] || 0) - 1) }))
       setPendingOccupationDelta(d => Math.max(0, d - 1))
-      setPendingDelta(d => Math.max(0, d - 1))
     }
   }
 
@@ -589,32 +524,6 @@ export default function CharacterPage() {
     setSkillAlloc(prev => ({ ...prev, [skillId]: clamped }))
     const appliedDelta = clamped - prevOcc
     if (appliedDelta !== 0) setPendingOccupationDelta(d => Math.max(0, d + appliedDelta))
-    const occPart = (skillAlloc[skillId] || 0) - (interestAlloc[skillId] || 0)
-    const interestPart = interestAlloc[skillId] || 0
-    const currentTotal = occPart + interestPart
-    let delta = Math.max(0, newTotalAllocation) - currentTotal
-    if (delta > 0) delta = Math.min(delta, totalPointsRemaining)
-    let newOccPart = occPart
-    let newInterestPart = interestPart
-
-    if (delta > 0) {
-      const occRemaining = Math.max(0, occPointsTotal - occPointsSpent)
-      const occAdd = Math.min(delta, occRemaining)
-      newOccPart += occAdd
-      delta -= occAdd
-      newInterestPart += delta
-    } else if (delta < 0) {
-      let remove = -delta
-      const interestRemove = Math.min(remove, newInterestPart)
-      newInterestPart -= interestRemove
-      remove -= interestRemove
-      newOccPart -= Math.min(remove, newOccPart)
-    }
-
-    setInterestAlloc(prev => ({ ...prev, [skillId]: newInterestPart }))
-    setSkillAlloc(prev => ({ ...prev, [skillId]: newOccPart + newInterestPart }))
-    const appliedDelta = newOccPart + newInterestPart - occPart - interestPart
-    if (appliedDelta !== 0) setPendingDelta(d => Math.max(0, d + appliedDelta))
   }
 
   // 信用评级 +/- ：直接夹在所选职业的 [creditMin, creditMax] 内。信用的
@@ -1205,11 +1114,6 @@ export default function CharacterPage() {
                     </div>
                   ) : occSkills.map(skill => {
                     // 职业技能现在只记职业池，不再允许跨池溢出。
-                    // 职业技能这一侧的"总加点"= 职业池部分 + 兴趣池部分（可能因为职业
-                    // 点数用完了、自动溢出用了兴趣点数），两部分合并成一个数显示和编辑，
-                    // maxPoints 用 totalPointsRemaining（两池合计、已扣掉本次未确认加点
-                    // 的净剩余）而不是分别相加——分开算会在这个技能自己的分配值上重复
-                    // 加减、代数上抵消掉，导致连续快点时门槛形同虚设，见上方定义处注释。
                     const totalAllocation = skillAlloc[skill.id] || 0
                     const compute = skillComputeMap.get(skill.id)
                     const base = compute?.base ?? (typeof skill.base === 'number' ? skill.base : 0)
@@ -1220,7 +1124,6 @@ export default function CharacterPage() {
                         onChange={(d) => handleOccSkillChange(skill.id, d)}
                         onSetAllocation={(v) => handleOccSkillSet(skill.id, v)}
                         maxPoints={totalAllocation + occupationPointsRemaining}
-                        maxPoints={totalAllocation + totalPointsRemaining}
                         minPoints={0}
                       />
                     )
@@ -1239,7 +1142,6 @@ export default function CharacterPage() {
                         onChange={(d) => handleInterestSkillChange(skill.id, d)}
                         onSetAllocation={(v) => handleInterestSkillSet(skill.id, v)}
                         maxPoints={interestAllocation + interestPointsRemaining}
-                        maxPoints={interestAllocation + totalPointsRemaining}
                         minPoints={0}
                       />
                     )

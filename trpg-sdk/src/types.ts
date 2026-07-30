@@ -81,11 +81,6 @@ export type {
   SanCheckResultPayload,
   ClueGrantedPayload,
   ErrorPayload,
-  // 讨论区 + 行动广播（issue #107）—— 对应后端 dto/ws.py 与 dto/chat.py
-  ChatSendPayload,
-  ChatMessagePayload,
-  ActionBroadcastPayload,
-  ChatMessageRead as ChatMessage,
 } from './generated/dto';
 
 /** GET /api/v1/me/rooms 返回项。 */
@@ -155,9 +150,6 @@ export type ServerToClientEvent =
   | { type: 'tool.completed'; payload: ToolCompletedPayload }
   | { type: 'turn.failed'; payload: TurnFailedPayload }
   | { type: 'view.updated'; payload: ViewUpdatedPayload }
-  // issue #107：讨论区消息广播 + 玩家对 AI 说的原话广播（后端真实发出）
-  | { type: 'chat.message'; payload: ChatMessagePayload }
-  | { type: 'action.broadcast'; payload: ActionBroadcastPayload }
   | { type: 'room.state'; payload: RoomStatePayload }
   | { type: 'player.joined'; payload: PlayerJoinedPayload }
   | { type: 'turn.begin'; payload: TurnBeginPayload }

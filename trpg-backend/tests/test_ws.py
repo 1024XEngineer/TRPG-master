@@ -498,6 +498,10 @@ def test_action_submit_broadcasts_narration_to_room_only(sync_client: TestClient
             ws_a,
             lambda message: message.get("type") == "session.bound",
         )
+        # issue #107 起 action.submit 先广播玩家原话（action.broadcast），
+        # 再广播守秘人回复（narration.push），两条按序到达。
+        action_echo = ws_a.receive_json()
+        narration = ws_a.receive_json()
 
         # room_b 没有收到任何广播——发一条 room.join 触发一次同步交互，确认
         # 收到的仍然是它自己的 session.bound，而不是串过来的 narration。
@@ -515,6 +519,8 @@ def test_action_submit_broadcasts_narration_to_room_only(sync_client: TestClient
     assert completed["correlation_id"] == "action-broadcast-122"
     assert completed["payload"]["player_id"] == room_a["playerId"]
     assert completed["payload"]["actor_id"] == "actor_1"
+    assert action_echo["type"] == "action.broadcast"
+    assert action_echo["payload"]["utterance"] == "检查门锁"
     assert narration["type"] == "narration.push"
     assert guest_narration == narration
     assert retried["message_type"] == "turn.completed"

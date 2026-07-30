@@ -17,6 +17,17 @@ export interface ActionBroadcastPayload {
   clientActionId: string;
   nickname: string;
   characterName?: string | null;
+ * action.broadcast 推送 payload（issue #107）——玩家对 AI 主持人说的
+ * **原话**的房间广播。
+ *
+ * 修的是三人联机实测出的"聊天记录像被隔离"bug：此前玩家原话只在发送方
+ * 本地插入气泡，其他人只能从守秘人回复的转述里看到内容。现在 action.submit
+ * 先广播这条（谁、说了什么），再广播 AI 的叙事回复（narration.push），
+ * 所有人看到的时间线一致——就像牌桌上说话大家都听得见。
+ */
+export interface ActionBroadcastPayload {
+  playerId: string;
+  nickname: string;
   utterance: string;
 }
 
@@ -36,6 +47,25 @@ export interface ActionDeclarationOption {
  *
  * `client_action_id` 是客户端为一次逻辑动作生成的稳定幂等键；网络重试必须
  * 复用原值。两个字段都在契约层拒绝空白文本。
+ * action.submit 事件 payload——issue #107 定稿后玩家对 AI 主持人说的
+ * **唯一**事件（行动或提问都走它，"是哪种"由 AI 判断，协议层不预分类）。
+ *
+ * `utterance` 必填，理由同 PlayerReadyPayload.ready：一条不带行动内容的
+ * action.submit 是畸形消息。给默认空串会让 SDK 侧变成 `utterance?: string`，
+ * 于是 `submitAction(playerId, {})` 类型检查通过、运行时静默无操作。
+ *
+ * 注意「必填」只管字段存在，空白内容（`""` / `"   "`）仍由下游的
+ * `strip()` + 空值判断拦掉，两者不冲突。
+ *
+ * `summarized_from` / `visibility` 是 issue #107 铺的协议位：
+ * - `summarized_from`：这次提交是从讨论区哪几条消息总结来的（消息 id 列表）。
+ *   本期只透传不消费——AI 编排（#48/#68）接手后决定怎么用。
+ * - `visibility`：`"private"` 表示「我偷偷摸他口袋」这类不想让其他玩家看到
+ *   结果的私密行动。本期传 `private` 会收到 NOT_IMPLEMENTED 的 error——
+ *   真正的私密裁决需要 AI 知道「结果只给发起者且后续叙事不能泄露」，属于
+ *   编排层的活，硬做会做出一个会漏信息的假私密，比不做更糟（issue #107
+ *   关键决策）。**不静默当成 public 处理**：把玩家以为保密的行动广播出去，
+ *   当场就暴露了。
  */
 export interface ActionSubmitPayload {
   clientActionId: string;
@@ -243,6 +273,12 @@ export interface CharacterUpdateBody {
 
 /**
  * chat.message 讨论区广播 payload。
+ * chat.message 推送 payload（issue #107）——讨论区消息的房间广播。
+ *
+ * 带 `client_message_id` 回传是为了让发送方把广播和自己本地乐观插入的
+ * 那条对上号（去重/替换本地占位），其他人直接按新消息渲染。
+ * `sent_at` 用 UtcDatetime：所有对外时间字段必须带时区后缀，否则客户端
+ * 会把 UTC 当本地时间解析（UTC+8 上「4 分钟前」显示成「8 小时前」的真 bug）。
  */
 export interface ChatMessagePayload {
   messageId: string;
@@ -268,6 +304,15 @@ export interface ChatMessageRead {
 
 /**
  * chat.send 讨论区消息；该通道不会进入 Host Agent 上下文。
+ * chat.send 事件 payload（issue #107）——玩家往**讨论区**发一条消息。
+ *
+ * 讨论区跟「对 AI 主持人说话」（action.submit）是两条完全独立的通道：
+ * 讨论区消息只在玩家之间广播，**永远不进任何 LLM 上下文**（成本 + 玩家
+ * 需要"AI 听不见"的商量空间，这是 #107 的立项理由）。
+ *
+ * `client_message_id` 是客户端生成的去重键：断线重连后客户端可能重发同一条
+ * 消息，服务端靠 `(player_id, client_message_id)` 唯一约束保证只落一行、
+ * 重发拿到与第一次一致的广播。
  */
 export interface ChatSendPayload {
   text: string;
@@ -276,6 +321,7 @@ export interface ChatSendPayload {
 
 /**
  * 向动作发起者推送经 Actor 技能值过滤后的可用检定项。
+ * check.request 推送 payload（issue #77 新增，本期不会真的发出）。
  */
 export interface CheckRequestPayload {
   playerId: string;

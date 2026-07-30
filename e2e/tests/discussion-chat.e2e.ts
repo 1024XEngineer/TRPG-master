@@ -13,6 +13,7 @@ import { randomUUID } from 'node:crypto'
 import { test } from 'node:test'
 
 import { RoomSocketServerError, type ServerToClientEvent } from 'trpg-sdk'
+import type { ServerToClientEvent } from 'trpg-sdk'
 
 import { createRoomWithModule, legalCharacterPayload, registerPlayer } from './helpers.ts'
 
@@ -72,6 +73,7 @@ async function buildCharacter(
 
 test('🔴 讨论区消息广播给房间所有人（issue #107 端到端）', async () => {
   const room = await createRoomWithModule('chatbc', 2)
+  const room = await createRoomWithModule('chatbc')
   const guest = await registerPlayer('chatbcguest')
   const joined = await guest.sdk.rooms.join(room.roomCode, { nickname: '话痨访客' }, guest.token)
 
@@ -143,6 +145,10 @@ test('🔴 所有人都能看到发起者的原话 + 守秘人回复（修"聊�
   await buildCharacter(room.host.sdk, room.roomId, room.reconnectToken)
   await buildCharacter(guest.sdk, room.roomId, joined.reconnectToken)
 
+  const room = await createRoomWithModule('actbc')
+  const guest = await registerPlayer('actbcguest')
+  const joined = await guest.sdk.rooms.join(room.roomCode, { nickname: '围观访客' }, guest.token)
+
   try {
     await bindSocket(
       room.host.sdk, room.roomId, room.host.token, room.hostPlayerId, room.reconnectToken
@@ -165,6 +171,11 @@ test('🔴 所有人都能看到发起者的原话 + 守秘人回复（修"聊�
     const completed = room.host.sdk.roomSocket.submitAction(room.hostPlayerId, {
       clientActionId: 'discussion-echo-host',
       utterance: '我与托马斯交谈',
+      (e) => e.type === 'action.broadcast' && e.payload.utterance === '我推开吱呀作响的木门'
+    )
+    const guestSeesNarration = waitForEvent(guest.sdk, (e) => e.type === 'narration.push')
+    room.host.sdk.roomSocket.submitAction(room.hostPlayerId, {
+      utterance: '我推开吱呀作响的木门',
     })
     const echo = await guestSeesUtterance
     if (echo.type === 'action.broadcast') {
@@ -180,6 +191,8 @@ test('🔴 所有人都能看到发起者的原话 + 守秘人回复（修"聊�
     if (action?.type === 'action.broadcast') {
       assert.equal(action.payload.characterName, 'E2E 调查员')
     }
+    }
+    await guestSeesNarration
   } finally {
     room.host.sdk.roomSocket.disconnect()
     guest.sdk.roomSocket.disconnect()
@@ -194,6 +207,10 @@ test('🔴 行动锁：处理中他人提交被拒（ACTION_IN_PROGRESS），完
   await room.host.sdk.rooms.startStory(room.roomId, room.reconnectToken)
   await buildCharacter(room.host.sdk, room.roomId, room.reconnectToken)
   await buildCharacter(guest.sdk, room.roomId, joined.reconnectToken)
+
+  const room = await createRoomWithModule('lock')
+  const guest = await registerPlayer('lockguest')
+  const joined = await guest.sdk.rooms.join(room.roomCode, { nickname: '抢话访客' }, guest.token)
 
   try {
     await bindSocket(
@@ -214,6 +231,7 @@ test('🔴 行动锁：处理中他人提交被拒（ACTION_IN_PROGRESS），完
       clientActionId: 'action-lock-host',
       utterance: '我与托马斯交谈',
     })
+    room.host.sdk.roomSocket.submitAction(room.hostPlayerId, { utterance: '我搜查书架' })
     await hostEcho
 
     // 访客在锁窗口内提交 → 被拒，且 error 只发给访客自己
@@ -231,12 +249,15 @@ test('🔴 行动锁：处理中他人提交被拒（ACTION_IN_PROGRESS），完
         error instanceof RoomSocketServerError && error.code === 'ACTION_IN_PROGRESS'
     )
     await Promise.all([guestRejected, rejected])
+    guest.sdk.roomSocket.submitAction(joined.playerId, { utterance: '我翻抽屉' })
+    await guestRejected
 
     // 房主的叙事回复到达后访客再提交。⚠️ 用重试而不是一次命中：锁的释放在
     // narration 广播**之后**的 finally 里，两者之间有毫秒级窗口——真人手速
     // 不可能踩中，但 e2e 代码速度可以，首发正好撞上就又吃一次
     // ACTION_IN_PROGRESS（这本来就是产品行为：被拒了稍后重试即可）。
     await Promise.all([hostNarration, hostCompleted])
+    await hostNarration
     let accepted = false
     for (let attempt = 0; attempt < 10 && !accepted; attempt++) {
       const outcome = waitForEvent(
@@ -264,6 +285,14 @@ test('🔴 行动锁：处理中他人提交被拒（ACTION_IN_PROGRESS），完
           submitError instanceof RoomSocketServerError &&
           submitError.code === 'ACTION_IN_PROGRESS'
         )
+          (e.type === 'action.broadcast' && e.payload.utterance === '我再翻抽屉') ||
+          (e.type === 'error' && e.payload.code === 'ACTION_IN_PROGRESS')
+      )
+      guest.sdk.roomSocket.submitAction(joined.playerId, { utterance: '我再翻抽屉' })
+      const event = await outcome
+      if (event.type === 'action.broadcast') {
+        accepted = true
+      } else {
         await new Promise((r) => setTimeout(r, 100))
       }
     }

@@ -41,6 +41,7 @@ import sys
 from pathlib import Path
 
 import openpyxl  # ty: ignore[unresolved-import] - 可选离线提取工具，见模块说明
+import openpyxl
 
 DEFAULT_XLSX = Path("/Users/apple/Developer/work/rules/COC7空白卡CY23Final.xlsx")
 OUTPUT = Path(__file__).parent / "raw_occupations.json"

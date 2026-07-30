@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import not_implemented
 from app.core.runtime_state import ruleset_labels, ruleset_skill_values
+from app.core.narrator import NarrationContext
 from app.dto.game import GameRead, GameSystemRead, RulesetRead
 from app.dto.module import ModuleDetailRead
 from app.dto.replay import ReplayEventRead, RoomConversationEventRead, RoomSummaryRead
@@ -751,6 +752,20 @@ async def end_game(db: AsyncSession, room_id: str, reconnect_token: str | None) 
     except Exception:
         await db.rollback()
         raise
+    """房主结束游戏，房间状态标记为已完成。
+
+    顺带清空该房间的讨论区聊天记录（issue #107）：聊天是临时工作记忆，不进
+    复盘、随房间结束销毁；`end` 是目前房间唯一的后端终结点（没有单独的
+    "退出房间"接口，见 #106 本期不做），清理只能挂在这里。
+    """
+    room = await find_room_by_id(db, room_id)
+    await _require_host(db, room, reconnect_token)
+    if room.phase != "InGame":
+        raise RoomConflictError("只有进行中的游戏可以结束")
+    room.phase = "Completed"
+    room.ended_at = datetime.now(UTC)
+    await chat_service.clear_room_chat(db, room.id)
+    await db.commit()
 
 
 # ── 游戏 / 规则系统 / 模组目录 ──────────────────────────────
@@ -967,6 +982,66 @@ async def record_event(
         if existing is None:
             raise
         return False
+
+
+# 叙事上下文里带多少条行动历史。取值权衡：太少 AI 上文接不住，太多白白烧
+# token——单轮生成（非编排）的定位下 6 条足够撑起"延续刚才的场景"。
+_NARRATION_HISTORY_LIMIT = 6
+
+
+async def build_narration_context(
+    db: AsyncSession, room_id: str, player_id: str, utterance: str
+) -> NarrationContext:
+    """为一次 action.submit 组装叙事生成的上下文（issue #107）。
+
+    数据来源只有两处：房间关联的模组标题 + `events` 表里最近几条
+    `action.submit`（**不读聊天表**——讨论区内容永远不进 LLM 上下文，这是
+    #107 跟 AI 编排对齐的第 1 条约定，靠这里的代码结构保证）。
+
+    ⚠️ 调用时序约定：ws.py 必须在 `record_event` 写入当前这条 action.submit
+    **之前**调用本函数——这样查出来的历史天然不含当前这条（它会作为"玩家刚
+    说的话"单独出现在 prompt 末尾，不该在历史里重复）。靠时序排除比靠
+    "player_id+内容匹配"过滤可靠：玩家完全可能重复说过一模一样的话。
+
+    Narrator（app/core/narrator.py）自己不查库，所有字段由这里备好传入。
+    """
+    player = await db.get(Player, player_id)
+    nickname = player.nickname if player is not None else "玩家"
+
+    room = await db.get(Room, room_id)
+    module_title = await _module_title(db, room.scenario_id) if room is not None else None
+
+    # 最近 N 条行动：按倒序取再反转成时间正序喂给模型。
+    result = await db.execute(
+        select(Event)
+        .where(Event.room_id == room_id, Event.event_type == "action.submit")
+        .order_by(Event.created_at.desc(), Event.id.desc())
+        .limit(_NARRATION_HISTORY_LIMIT)
+    )
+    history = list(result.scalars())
+    history.reverse()
+
+    # 批量查昵称，不在循环里逐条查（N+1 的教训，PR #110 review [3]）
+    speaker_ids = {e.player_id for e in history if e.player_id is not None}
+    nicknames: dict[str, str] = {}
+    if speaker_ids:
+        rows = await db.execute(
+            select(Player.id, Player.nickname).where(Player.id.in_(speaker_ids))
+        )
+        # Row 是 tuple 的子类但类型上不是 tuple[str, str]，直接喂 dict() 过不了
+        # 类型检查——用 .tuples() 显式转成类型化元组再构造。
+        nicknames = dict(rows.tuples().all())
+
+    recent_actions = [
+        f"{nicknames.get(e.player_id or '', '玩家')}: {e.payload.get('utterance', '')}"
+        for e in history
+    ]
+    return NarrationContext(
+        utterance=utterance,
+        player_nickname=nickname,
+        module_title=module_title,
+        recent_actions=recent_actions,
+    )
 
 
 async def get_replay(

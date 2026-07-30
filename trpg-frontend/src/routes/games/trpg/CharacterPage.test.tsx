@@ -26,6 +26,10 @@ const { mockRuleset, mockPreviewCharacter, mockCharacterApi } = vi.hoisted(() =>
       { id: 'stealth', name: '潜行', nameEn: 'stealth', base: 0, category: 'interest' },
       { id: 'credit-rating', name: '信用评级', nameEn: 'credit-rating', base: 0, category: 'special' },
     ],
+    occupationCategories: [
+      { label: '法律金融', icon: '⚖️' },
+      { label: '犯罪边缘', icon: '🕶️' },
+    ],
     occupations: [
       {
         id: 1,
@@ -35,6 +39,19 @@ const { mockRuleset, mockPreviewCharacter, mockCharacterApi } = vi.hoisted(() =>
         skillPointsFormula: 'EDU*4',
         skillIds: ['accounting'],
         description: '测试用职业',
+        icon: '📊',
+        categories: ['法律金融'],
+      },
+      {
+        id: 31,
+        name: '罪犯-欺诈师',
+        creditMin: 10,
+        creditMax: 65,
+        skillPointsFormula: 'EDU*2+APP*2',
+        skillIds: ['stealth'],
+        description: 'id 大于旧图标表范围的测试职业',
+        icon: '🕶️',
+        categories: ['犯罪边缘'],
       },
     ],
   }
@@ -152,6 +169,36 @@ describe('CharacterPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /下一步/ }))
 
     await advanceToAttributesAfterOccupationPreview()
+  })
+
+  it('renders occupation icons and filters from backend ruleset metadata', () => {
+    renderPage()
+
+    expect(screen.getByText('📊')).toBeInTheDocument()
+    expect(screen.getByText('🕶️')).toBeInTheDocument()
+    expect(screen.queryByText('❔')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /全部分类/ }))
+    fireEvent.click(screen.getByRole('button', { name: /犯罪边缘/ }))
+
+    expect(screen.getByText('罪犯-欺诈师')).toBeInTheDocument()
+    expect(screen.queryByText('会计师')).not.toBeInTheDocument()
+  })
+
+  it('shows occupation skills first and keeps descriptions in detail view', () => {
+    renderPage()
+
+    expect(screen.queryByText('测试用职业')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('会计师'))
+
+    expect(screen.getByText('会计')).toBeInTheDocument()
+    expect(screen.queryByText('测试用职业')).not.toBeInTheDocument()
+    expect(screen.getByText(/信用 0-70/)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '详情' }))
+
+    expect(screen.getByText('测试用职业')).toBeInTheDocument()
   })
 
   it('lets credit be typed directly and keeps occupation and interest pools separate', async () => {

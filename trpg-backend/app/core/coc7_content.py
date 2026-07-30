@@ -20,6 +20,7 @@ from app.dto.game import (
     AgeRangeSpec,
     AttributePointBuyRules,
     AttributeSpec,
+    OccupationCategorySpec,
     OccupationSpec,
     RulesetRead,
     SkillChoiceSlot,
@@ -7555,6 +7556,339 @@ COC7_OCCUPATIONS: list[OccupationSpec] = [
 ]
 
 
+COC7_OCCUPATION_CATEGORIES: list[OccupationCategorySpec] = [
+    OccupationCategorySpec(label="学术研究", icon="📚"),
+    OccupationCategorySpec(label="法律金融", icon="⚖️"),
+    OccupationCategorySpec(label="医疗保健", icon="🏥"),
+    OccupationCategorySpec(label="执法安全", icon="🔍"),
+    OccupationCategorySpec(label="文化艺术", icon="🎨"),
+    OccupationCategorySpec(label="新闻出版", icon="📰"),
+    OccupationCategorySpec(label="工程技术", icon="⚙️"),
+    OccupationCategorySpec(label="宗教神秘", icon="🔮"),
+    OccupationCategorySpec(label="户外生存", icon="🧭"),
+    OccupationCategorySpec(label="社交服务", icon="🤝"),
+    OccupationCategorySpec(label="军事战争", icon="🎖️"),
+    OccupationCategorySpec(label="犯罪边缘", icon="🕶️"),
+    OccupationCategorySpec(label="运动娱乐", icon="🎪"),
+    OccupationCategorySpec(label="海事航空", icon="⚓"),
+    OccupationCategorySpec(label="其他", icon="📌"),
+]
+
+_COC7_OCCUPATION_CATEGORY_IDS: dict[str, tuple[int, ...]] = {
+    "学术研究": (
+        8,
+        10,
+        18,
+        67,
+        72,
+        77,
+        82,
+        91,
+        96,
+        100,
+        105,
+        137,
+        150,
+        166,
+        176,
+        184,
+        205,
+        224,
+        225,
+    ),
+    "法律金融": (1, 49, 66, 71, 112, 115, 121, 132, 149, 206, 221),
+    "医疗保健": (
+        6,
+        13,
+        43,
+        57,
+        79,
+        83,
+        94,
+        95,
+        108,
+        133,
+        134,
+        135,
+        153,
+        154,
+        170,
+        173,
+        174,
+        175,
+        222,
+    ),
+    "执法安全": (5, 19, 54, 55, 88, 89, 90, 104, 156, 181, 202, 211, 218, 223, 229),
+    "文化艺术": (
+        3,
+        4,
+        12,
+        15,
+        40,
+        41,
+        48,
+        51,
+        56,
+        64,
+        65,
+        78,
+        84,
+        85,
+        125,
+        127,
+        138,
+        142,
+        144,
+        148,
+        152,
+        178,
+        179,
+        185,
+        186,
+        187,
+        188,
+        189,
+        190,
+        191,
+        192,
+        193,
+        194,
+        207,
+        208,
+        214,
+        215,
+        219,
+    ),
+    "新闻出版": (15, 48, 56, 64, 65, 84, 85, 125, 127, 144, 185, 190, 192, 208, 219),
+    "工程技术": (11, 23, 24, 26, 50, 73, 151, 153, 176, 197, 199, 203, 212),
+    "宗教神秘": (
+        22,
+        38,
+        39,
+        75,
+        80,
+        82,
+        113,
+        122,
+        123,
+        124,
+        145,
+        158,
+        159,
+        160,
+        161,
+        163,
+        164,
+        165,
+        195,
+        196,
+        210,
+    ),
+    "户外生存": (17, 25, 42, 52, 53, 76, 81, 92, 107, 116, 150, 155, 169, 177, 217),
+    "社交服务": (
+        16,
+        21,
+        44,
+        58,
+        61,
+        62,
+        63,
+        93,
+        99,
+        101,
+        102,
+        109,
+        110,
+        120,
+        126,
+        145,
+        146,
+        147,
+        167,
+        171,
+        172,
+        198,
+        201,
+        204,
+        226,
+        227,
+    ),
+    "军事战争": (74, 97, 103, 180, 182, 183, 200, 216, 228, 229),
+    "犯罪边缘": (
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        59,
+        60,
+        104,
+        121,
+        128,
+        129,
+        130,
+        131,
+        132,
+        157,
+        167,
+        175,
+        199,
+        213,
+    ),
+    "运动娱乐": (
+        2,
+        3,
+        4,
+        7,
+        14,
+        20,
+        51,
+        78,
+        106,
+        114,
+        116,
+        117,
+        118,
+        119,
+        138,
+        140,
+        142,
+        143,
+        148,
+        152,
+        178,
+        186,
+        187,
+        188,
+        189,
+        190,
+        191,
+        192,
+        193,
+        194,
+        203,
+        215,
+    ),
+    "海事航空": (42, 86, 87, 97, 98, 116, 141, 143, 169, 180, 181),
+    "其他": (45, 46, 47, 68, 69, 70, 111, 136, 162, 168, 209, 220),
+}
+
+_COC7_OCCUPATION_ICON_OVERRIDES: dict[int, str] = {
+    1: "📊",
+    2: "🤸",
+    3: "🎭",
+    4: "🎬",
+    7: "🐾",
+    11: "🏛️",
+    14: "🏅",
+    17: "🏹",
+    18: "📖",
+    20: "🥊",
+    23: "💻",
+    24: "💻",
+    42: "🤿",
+    55: "🚒",
+    58: "🎲",
+    78: "🎵",
+    84: "📷",
+    85: "📷",
+    86: "✈️",
+    87: "✈️",
+    97: "⚓",
+    98: "⚓",
+    116: "🏊",
+    117: "⛳",
+    118: "🎾",
+    119: "🏃",
+    133: "🦷",
+    143: "🏎️",
+    168: "🤼",
+    169: "🎣",
+    178: "💃",
+    187: "🎤",
+    197: "🔧",
+    198: "🍳",
+    203: "🎮",
+    209: "🐎",
+}
+
+_COC7_OCCUPATION_CATEGORY_ICONS = {
+    category.label: category.icon for category in COC7_OCCUPATION_CATEGORIES
+}
+
+
+def _build_occupation_categories_by_id() -> dict[int, list[str]]:
+    categories_by_id: dict[int, list[str]] = {}
+    for category, occupation_ids in _COC7_OCCUPATION_CATEGORY_IDS.items():
+        for occupation_id in occupation_ids:
+            categories_by_id.setdefault(occupation_id, [])
+            if category not in categories_by_id[occupation_id]:
+                categories_by_id[occupation_id].append(category)
+    return categories_by_id
+
+
+_COC7_OCCUPATION_CATEGORIES_BY_ID = _build_occupation_categories_by_id()
+
+
+_COC7_OCCUPATION_CATEGORY_DESCRIPTION_HINTS: dict[str, str] = {
+    "学术研究": "围绕研究、资料整理与专业知识展开，适合承担调查中的分析与考证工作。",
+    "法律金融": "围绕制度、金钱与契约关系展开，适合处理账目、谈判、法律或上层社会线索。",
+    "医疗保健": "围绕诊断、急救与照护展开，适合在伤病、精神状态和医学线索上提供支持。",
+    "执法安全": "围绕侦查、追踪与秩序维护展开，适合处理现场、证词和危险局面。",
+    "文化艺术": "围绕创作、表演与公众表达展开，适合接触媒体、社交圈和文化场景。",
+    "新闻出版": "围绕采访、写作与信息传播展开，适合追踪传闻、档案和公众事件。",
+    "工程技术": "围绕设备、维修与技术判断展开，适合处理机械、电气和现代工具相关难题。",
+    "宗教神秘": "围绕信仰、仪式与民俗知识展开，适合接触异常传说、宗教社群和神秘线索。",
+    "户外生存": "围绕旅行、自然环境与体能行动展开，适合荒野、远行和危险地形中的调查。",
+    "社交服务": "围绕人际关系、服务业与日常接触展开，适合打听消息、进入社区和观察人物。",
+    "军事战争": "围绕纪律、武器与战场经验展开，适合面对冲突、护卫和高压行动。",
+    "犯罪边缘": "围绕地下渠道、欺骗与风险交易展开，适合接触黑市、帮派和隐秘行动。",
+    "运动娱乐": "围绕体能、表演与公众活动展开，适合舞台、赛场和需要敏捷身手的场景。",
+    "海事航空": "围绕船只、飞行与长途交通展开，适合港口、航线和跨地域调查。",
+    "其他": "适合补足特定时代或模组需要的社会身份，使用前建议与 KP 确认适配性。",
+}
+
+
+def _is_placeholder_description(description: str) -> bool:
+    return "使用前请征得KP同意" in description
+
+
+def _occupation_description(occupation: OccupationSpec, categories: list[str]) -> str:
+    if not _is_placeholder_description(occupation.description):
+        return occupation.description
+    category = categories[0] if categories else "其他"
+    hint = _COC7_OCCUPATION_CATEGORY_DESCRIPTION_HINTS.get(
+        category, _COC7_OCCUPATION_CATEGORY_DESCRIPTION_HINTS["其他"]
+    )
+    source = occupation.description.split("职业", maxsplit=1)[0]
+    return f"{occupation.name}是{source}职业。{hint}使用前请与 KP 确认时代、地区与模组适配性。"
+
+
+def _occupation_icon(occupation_id: int, categories: list[str]) -> str:
+    if occupation_id in _COC7_OCCUPATION_ICON_OVERRIDES:
+        return _COC7_OCCUPATION_ICON_OVERRIDES[occupation_id]
+    if categories:
+        return _COC7_OCCUPATION_CATEGORY_ICONS[categories[0]]
+    return _COC7_OCCUPATION_CATEGORY_ICONS["其他"]
+
+
+def _occupation_with_ui_metadata(occupation: OccupationSpec) -> OccupationSpec:
+    categories = _COC7_OCCUPATION_CATEGORIES_BY_ID.get(occupation.id, ["其他"])
+    return occupation.model_copy(
+        update={
+            "icon": _occupation_icon(occupation.id, categories),
+            "categories": categories,
+            "description": _occupation_description(occupation, categories),
+        }
+    )
+
+
 def build_coc7_ruleset() -> RulesetRead:
     """组装成 `RulesetRead`，供 seed 写入 `GameSystem.ruleset` /
     `get_ruleset` 兜底使用。"""
@@ -7563,5 +7897,6 @@ def build_coc7_ruleset() -> RulesetRead:
         attribute_point_buy=COC7_ATTRIBUTE_POINT_BUY,
         age_range=COC7_AGE_RANGE,
         skills=COC7_SKILLS,
-        occupations=COC7_OCCUPATIONS,
+        occupations=[_occupation_with_ui_metadata(occupation) for occupation in COC7_OCCUPATIONS],
+        occupation_categories=COC7_OCCUPATION_CATEGORIES,
     )

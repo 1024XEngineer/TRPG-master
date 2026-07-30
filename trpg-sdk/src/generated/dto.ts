@@ -603,7 +603,15 @@ export interface ObservableStateView {
 }
 
 /**
- * 一个职业：信用评级区间、职业技能点公式、职业技能清单。
+ * 职业选择器里的展示分类。规则目录决定分类与顺序，前端只负责渲染。
+ */
+export interface OccupationCategorySpec {
+  label: string;
+  icon: string;
+}
+
+/**
+ * 一个职业：信用评级区间、职业技能点公式、职业技能清单与展示元数据。
  *
  * 职业技能 = `skill_ids`（固定）+ `choice_slots`（自选，见 `SkillChoiceSlot`）。
  * 两者都吃职业技能点；其余技能吃兴趣点。
@@ -617,6 +625,8 @@ export interface OccupationSpec {
   skillIds: string[];
   choiceSlots?: SkillChoiceSlot[];
   description: string;
+  icon?: string | null;
+  categories?: string[];
 }
 
 /**
@@ -826,6 +836,7 @@ export interface RulesetRead {
   ageRange?: AgeRangeSpec | null;
   skills: SkillSpec[];
   occupations: OccupationSpec[];
+  occupationCategories?: OccupationCategorySpec[];
 }
 
 /**

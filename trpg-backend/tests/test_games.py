@@ -77,9 +77,28 @@ async def test_get_ruleset_returns_full_coc7_data(client: AsyncClient) -> None:
     # 30 个 curated 子集，且技能列表被规整成整齐的 8 项、与规则书不符）。
     # 信用评级区间和技能点公式要拆解正确。
     assert len(data["occupations"]) == 229
+    assert data["occupationCategories"] == [
+        {"label": "学术研究", "icon": "📚"},
+        {"label": "法律金融", "icon": "⚖️"},
+        {"label": "医疗保健", "icon": "🏥"},
+        {"label": "执法安全", "icon": "🔍"},
+        {"label": "文化艺术", "icon": "🎨"},
+        {"label": "新闻出版", "icon": "📰"},
+        {"label": "工程技术", "icon": "⚙️"},
+        {"label": "宗教神秘", "icon": "🔮"},
+        {"label": "户外生存", "icon": "🧭"},
+        {"label": "社交服务", "icon": "🤝"},
+        {"label": "军事战争", "icon": "🎖️"},
+        {"label": "犯罪边缘", "icon": "🕶️"},
+        {"label": "运动娱乐", "icon": "🎪"},
+        {"label": "海事航空", "icon": "⚓"},
+        {"label": "其他", "icon": "📌"},
+    ]
     occs_by_id = {o["id"]: o for o in data["occupations"]}
     accountant = occs_by_id[1]
     assert accountant["name"] == "会计师"
+    assert accountant["icon"] == "📊"
+    assert accountant["categories"] == ["法律金融"]
     assert accountant["creditMin"] == 30
     assert accountant["creditMax"] == 70
     assert accountant["skillPointsFormula"] == "EDU*4"
@@ -101,6 +120,10 @@ async def test_get_ruleset_returns_full_coc7_data(client: AsyncClient) -> None:
             "label": "任意其他两项个人或时代特长",
         }
     ]
+    acrobat = occs_by_id[2]
+    assert acrobat["name"] == "杂技演员"
+    assert acrobat["icon"] == "🤸"
+    assert acrobat["categories"] == ["运动娱乐"]
 
 
 async def test_get_ruleset_unknown_system_returns_404(client: AsyncClient) -> None:

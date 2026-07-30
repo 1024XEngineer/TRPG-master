@@ -6,7 +6,7 @@
 里靠抽查是抽不出来的（PR #85 记者/间谍公式被误设 EDU*4 就是靠人肉对照才发现）。
 """
 
-from app.core.coc7_content import COC7_OCCUPATIONS, COC7_SKILLS
+from app.core.coc7_content import COC7_OCCUPATIONS, COC7_SKILLS, build_coc7_ruleset
 from app.core.coc7_rules import evaluate_skill_points_formula
 
 _VALID_SKILL_IDS = {skill.id for skill in COC7_SKILLS}
@@ -129,3 +129,51 @@ def test_occupation_ids_are_unique_and_contiguous() -> None:
     ids = sorted(o.id for o in COC7_OCCUPATIONS)
     assert len(ids) == len(set(ids)), "职业 id 有重复"
     assert ids == list(range(1, len(COC7_OCCUPATIONS) + 1)), "职业 id 不是 1..N 连续编号"
+
+
+def test_occupation_ui_metadata_covers_all_coc7_occupations() -> None:
+    """职业展示元数据也必须跟完整 229 项目录对齐（issue #196）。
+
+    前端职业选择器不再用本地 id 映射表兜底；如果后端漏了 icon/categories，就会在
+    建卡页显示无意义占位或无法按分类筛选。
+    """
+    ruleset = build_coc7_ruleset()
+    category_labels = [category.label for category in ruleset.occupation_categories]
+    category_label_set = set(category_labels)
+    missing_icon: list[str] = []
+    missing_categories: list[str] = []
+    unknown_categories: list[str] = []
+
+    assert len(category_labels) == len(category_label_set), "职业分类 label 有重复"
+    assert len(ruleset.occupations) == len(COC7_OCCUPATIONS)
+
+    for occupation in ruleset.occupations:
+        if not occupation.icon:
+            missing_icon.append(f"{occupation.name}({occupation.id})")
+        if not occupation.categories:
+            missing_categories.append(f"{occupation.name}({occupation.id})")
+        for category in occupation.categories:
+            if category not in category_label_set:
+                unknown_categories.append(f"{occupation.name}({occupation.id}) -> {category}")
+
+    assert missing_icon == [], f"职业缺少图标: {missing_icon}"
+    assert missing_categories == [], f"职业缺少分类: {missing_categories}"
+    assert unknown_categories == [], f"职业引用了未知分类: {unknown_categories}"
+
+
+def test_placeholder_occupation_descriptions_are_enriched_for_display() -> None:
+    """导入源里的来源提示不能原样作为玩家看到的职业简介（issue #196 追补）。"""
+    ruleset = build_coc7_ruleset()
+    placeholder_descriptions = [
+        f"{occupation.name}({occupation.id})"
+        for occupation in ruleset.occupations
+        if occupation.description.endswith("职业，使用前请征得KP同意。")
+    ]
+    gaslight_socialite = next(
+        occupation for occupation in ruleset.occupations if occupation.id == 204
+    )
+
+    assert placeholder_descriptions == [], f"职业简介仍是占位来源提示: {placeholder_descriptions}"
+    assert gaslight_socialite.name == "交际花"
+    assert "《克苏鲁煤气灯》1980s职业" in gaslight_socialite.description
+    assert "人际关系" in gaslight_socialite.description

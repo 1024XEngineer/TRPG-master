@@ -2,7 +2,6 @@ import { useNavigate } from 'react-router-dom'
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { ArrowLeft, Plus, Minus, Search, Shield, Heart, Brain, Zap, Eye, Maximize2, Lightbulb, BookOpen, ChevronDown, X, Info, Clover } from 'lucide-react'
 import type { CharacterComputeResult, SkillComputeView } from 'trpg-sdk'
-import { OCCUPATION_ICONS, OCCUPATION_GROUPS } from '@/data/occupations'
 import type { Attributes, InvestigatorInfo } from '@/data/character-model'
 import { useCharacterStore } from '@/stores/character-store'
 import { useRoomStore } from '@/stores/room-store'
@@ -38,6 +37,14 @@ function normalizeDerivedStats(d: CharacterComputeResult['derivedStats'] | undef
     db: str(d?.DB),
     move: num(d?.MOV),
   }
+}
+
+function occupationIcon(occupation: Pick<OccupationSpec, 'icon'>): string {
+  return occupation.icon ?? '·'
+}
+
+function occupationSkillLabel(skillId: string, skills: SkillSpec[]): string {
+  return skills.find(skill => skill.id === skillId)?.name ?? skillId
 }
 
 async function previewWithAllocations(
@@ -318,6 +325,13 @@ export default function CharacterPage() {
     return ruleset.occupations.find(o => o.id === info.occupationId) ?? null
   }, [ruleset, info.occupationId])
 
+  const selectedOccupationSkillPreview = useMemo(() => {
+    if (!ruleset || !selectedOcc) return []
+    const fixed = selectedOcc.skillIds.map(id => occupationSkillLabel(id, ruleset.skills))
+    const slots = (selectedOcc.choiceSlots ?? []).map(slot => slot.label)
+    return [...fixed, ...slots]
+  }, [ruleset, selectedOcc])
+
   // 信用评级（credit-rating）是后端建成的必填技能，值须落在所选职业的
   // [creditMin, creditMax] 内（后端 CREDIT_OUT_OF_RANGE）。这里给它一个专门
   // 的默认值初始化：只在"职业真正发生变化"（ref 记的上一次处理过的职业 id
@@ -339,14 +353,21 @@ export default function CharacterPage() {
     })
   }, [selectedOcc])
 
+  const occupationCategories = useMemo(() => {
+    if (!ruleset) return []
+    if (ruleset.occupationCategories?.length) return ruleset.occupationCategories
+    const labels = Array.from(
+      new Set(ruleset.occupations.flatMap(occupation => occupation.categories ?? []))
+    )
+    return labels.map(label => ({ label, icon: '' }))
+  }, [ruleset])
+
   // Filter occupations by search and group
   const filteredOccupations = useMemo(() => {
     if (!ruleset) return []
     let list = ruleset.occupations
     if (activeGroup) {
-      const group = OCCUPATION_GROUPS.find(g => g.label === activeGroup)
-      const ids = new Set(group?.ids ?? [])
-      list = list.filter(o => ids.has(o.id))
+      list = list.filter(o => (o.categories ?? []).includes(activeGroup))
     }
     if (search.trim()) {
       const q = search.toLowerCase()
@@ -838,16 +859,6 @@ export default function CharacterPage() {
               {/* Occupation */}
               <div className="bg-card border border-border-light rounded-md p-[18px]">
                 <h4 className="text-[12px] font-semibold text-brass-dark uppercase tracking-[0.08em] mb-3.5">选择职业</h4>
-                {info.occupationId && selectedOcc && (
-                  <div className="mb-3.5 px-3 py-2.5 bg-[#fdfaf4] border border-brass rounded-[6px] flex items-center gap-2.5">
-                    <span className="text-xl">{OCCUPATION_ICONS[selectedOcc.id] ?? '❔'}</span>
-                    <div className="flex-1">
-                      <div className="text-sm font-semibold text-text-primary">{selectedOcc.name}</div>
-                      <div className="text-[11px] text-text-muted">信用 {selectedOcc.creditMin}-{selectedOcc.creditMax} · {selectedOcc.skillPointsFormula}</div>
-                    </div>
-                    <button onClick={() => setInfo(i => ({ ...i, occupationId: null }))} className="text-[11px] text-text-dim underline">更换</button>
-                  </div>
-                )}
 
                 {/* Search + Group filter */}
                 <div className="flex gap-2 mb-3">
@@ -869,10 +880,10 @@ export default function CharacterPage() {
                             className="w-full text-left px-3.5 py-2 text-[12px] text-text-primary hover:bg-panel">
                             全部分类
                           </button>
-                          {OCCUPATION_GROUPS.map(g => (
+                          {occupationCategories.map(g => (
                             <button key={g.label} onClick={() => { setActiveGroup(g.label); setShowGroupPicker(false) }}
                               className="w-full text-left px-3.5 py-2 text-[12px] text-text-primary hover:bg-panel flex items-center gap-2">
-                              <span>{g.icon}</span> {g.label}
+                              {g.icon && <span>{g.icon}</span>} {g.label}
                             </button>
                           ))}
                         </div>
@@ -881,13 +892,52 @@ export default function CharacterPage() {
                   </div>
                 </div>
 
+                {selectedOcc && (
+                  <div className="mb-3.5 px-3 py-3 bg-[#fdfaf4] border border-brass rounded-[6px]">
+                    <div className="flex items-start gap-2.5">
+                      <span className="text-2xl leading-none">{occupationIcon(selectedOcc)}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="text-sm font-semibold text-text-primary">{selectedOcc.name}</div>
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            <button onClick={() => setDetailOcc(selectedOcc)}
+                              className="text-[11px] text-brass-dark underline">
+                              详情
+                            </button>
+                            <button onClick={() => setInfo(i => ({ ...i, occupationId: null }))}
+                              className="text-[11px] text-text-dim underline">
+                              取消选择
+                            </button>
+                          </div>
+                        </div>
+                        <div className="mt-1 text-[11px] text-text-muted">
+                          信用 {selectedOcc.creditMin}-{selectedOcc.creditMax} · {selectedOcc.skillPointsFormula}
+                          {selectedOcc.categories?.length ? ` · ${selectedOcc.categories.join(' / ')}` : ''}
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {selectedOccupationSkillPreview.slice(0, 8).map((label, index) => (
+                            <span key={`${label}-${index}`} className="px-2 py-1 bg-card border border-border-light rounded-[4px] text-[10px] text-text-body">
+                              {label}
+                            </span>
+                          ))}
+                          {selectedOccupationSkillPreview.length > 8 && (
+                            <span className="px-2 py-1 text-[10px] text-text-dim">
+                              +{selectedOccupationSkillPreview.length - 8} 项
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {/* Occupation grid */}
                 <div className="grid grid-cols-2 gap-2 max-h-[320px] overflow-y-auto pr-0.5">
                   {filteredOccupations.map(occ => {
                     const selected = info.occupationId === occ.id
                     return (
                       <div key={occ.id}
-                        className={`group relative px-2.5 py-3 bg-input border rounded-[6px] text-center cursor-pointer active:scale-[0.96] transition-all ${
+                        className={`group relative min-h-[82px] px-2.5 py-3 bg-input border rounded-[6px] text-center cursor-pointer active:scale-[0.96] transition-all ${
                           selected ? 'border-brass bg-[#fdfaf4] shadow-[0_0_0_2px_rgba(184,151,106,0.15)]' : 'border-border-light'
                         }`}>
                         <button
@@ -896,10 +946,9 @@ export default function CharacterPage() {
                         >
                           <Info className="w-3 h-3" />
                         </button>
-                        <div onClick={() => setInfo(i => ({ ...i, occupationId: occ.id }))}>
-                          <div className="text-[20px] mb-1">{OCCUPATION_ICONS[occ.id] ?? '❔'}</div>
-                          <div className="text-[12px] font-semibold text-text-primary">{occ.name}</div>
-                          <div className="text-[9px] text-text-dim mt-0.5 leading-[1.3]">{occ.description}</div>
+                        <div onClick={() => setInfo(i => ({ ...i, occupationId: occ.id }))} className="h-full flex flex-col items-center justify-center">
+                          <div className="text-[20px] mb-1">{occupationIcon(occ)}</div>
+                          <div className="text-[12px] font-semibold text-text-primary leading-[1.3]">{occ.name}</div>
                           {selected && (
                             <div className="mt-1 inline-block px-2 py-0.5 bg-brass/10 text-brass-dark text-[9px] rounded-full font-semibold">
                               已选择
@@ -1190,7 +1239,7 @@ export default function CharacterPage() {
                 <div className="bg-page border border-border-light rounded-t-xl px-5 pt-5 pb-8 max-h-[80vh] overflow-y-auto">
                   <div className="flex items-start justify-between mb-5">
                     <div className="flex items-center gap-3">
-                      <span className="text-[32px]">{OCCUPATION_ICONS[detailOcc.id] ?? '❔'}</span>
+                      <span className="text-[32px]">{occupationIcon(detailOcc)}</span>
                       <div>
                         <h3 className="text-[18px] font-bold text-text-primary">{detailOcc.name}</h3>
                         <p className="text-xs text-text-muted font-mono">{detailOcc.description}</p>

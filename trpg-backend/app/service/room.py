@@ -25,8 +25,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import not_implemented
-from app.core.runtime_state import ruleset_labels, ruleset_skill_values
 from app.core.narrator import NarrationContext
+from app.core.runtime_state import ruleset_labels, ruleset_skill_values
 from app.dto.game import GameRead, GameSystemRead, RulesetRead
 from app.dto.module import ModuleDetailRead
 from app.dto.replay import ReplayEventRead, RoomConversationEventRead, RoomSummaryRead

@@ -503,9 +503,7 @@ class TurnApplication:
                 if action_result.resolution == "unrecognized":
                     narration = (
                         _fallback_scene_query(view_after)
-                        if is_scene_query_utterance(
-                            prepared.player_input.utterance
-                        )
+                        if is_scene_query_utterance(prepared.player_input.utterance)
                         else _fallback_clarification(prepared.intent, view_after)
                     )
                     break

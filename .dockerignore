@@ -1,0 +1,30 @@
+# CI Preview 用（issue #200）。构建上下文是仓库根目录，这里挡掉不该进镜像的
+# 东西——尤其是 .env（真实密钥）和 .git（体积大且完全不需要）。docker build
+# 默认不认 .gitignore，必须单独维护这份。
+
+.git/
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+.DS_Store
+
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.db
+
+.schema-export/
+
+# 真实密钥绝不能进构建上下文——即使镜像层之后被删，历史层里仍能挖出来。
+# Preview 用的密钥统一通过容器 `environment:` 在运行时注入，不通过 COPY。
+.env
+.env.*
+!.env.example
+
+# 第三方模组正文与其运行产物：版权红线，见根 .gitignore 同名条目。
+模组资料/
+e2e/artifacts/
+
+trpg-backend/scripts/coc7_occupations/generated_occupations.py

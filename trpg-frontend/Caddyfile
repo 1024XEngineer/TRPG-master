@@ -1,0 +1,27 @@
+# CI Preview 用（issue #200）。同一个端口对外提供：
+#   - 前端静态产物（SPA，未命中的路径回退到 index.html）
+#   - /api、/ws 反代到同一 compose network 里的 backend 容器
+# 全部走同源，前端不需要在构建期知道外部端口/域名，也不需要处理跨域。
+#
+# 用 `handle` 块显式排序，不依赖 Caddy 对指令的隐式优先级排序——实测踩过坑：
+# `try_files` 在 Caddy 的执行顺序里排在 `reverse_proxy` 之前，会把命中不到
+# 静态文件的路径（比如 /api/v1/health）先重写成 /index.html，等 reverse_proxy
+# 那一步再看，路径已经变成 /index.html 了，@api 矩阵匹配落空，实测请求
+# /api/v1/health 收到的是前端页面而不是 JSON。`handle` 块按书写顺序匹配、
+# 命中即短路，不会有这个问题。
+:80 {
+	handle /api/* {
+		reverse_proxy backend:8000
+	}
+
+	handle /ws/* {
+		reverse_proxy backend:8000
+	}
+
+	handle {
+		root * /srv
+		encode gzip
+		file_server
+		try_files {path} /index.html
+	}
+}

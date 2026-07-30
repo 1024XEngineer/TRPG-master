@@ -1,0 +1,219 @@
+name: PR Preview
+
+# CI Preview（issue #200）：PR 开/更新时自动构建 backend+frontend 镜像、部署到
+# 预览服务器、在 PR 上评论访问链接；PR 关闭时自动回收。
+#
+# 只在会影响运行时的目录变化时触发——纯文档改动不需要重新起一套预览。
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+    paths:
+      - "trpg-backend/**"
+      - "trpg-frontend/**"
+      - "trpg-sdk/**"
+      - "agent-collaboration-framework/**"
+      - "docker-compose.preview.yml"
+      - ".github/workflows/pr-preview.yml"
+
+# 同一个 PR 连续 push 多次时，只让最新一次的部署跑完；旧的排队部署没有意义
+# （反正会被新的覆盖），取消掉省 runner 时间。
+concurrency:
+  group: pr-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    # fork 来的 PR 触发 `pull_request` 时，GITHUB_TOKEN 平台级强制降级成只读
+    # ——不管这里声明多少 permissions 都没用，push 镜像到 GHCR、在 PR 上评论
+    # 这两步必然失败。与其让每个 fork PR 都红一次，不如直接跳过整个 job：
+    # 见 issue #200「本期不做 · fork PR 的真实 AI 预览」，这里把范围收紧到
+    # "fork PR 完全不跑 Preview"，比"跑起来但降级"更准确地反映了 GitHub
+    # 的实际限制。
+    if: |
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 计算镜像 tag 与预览端口
+        id: meta
+        run: |
+          PR=${{ github.event.pull_request.number }}
+          OWNER_LOWER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          {
+            echo "backend_image=ghcr.io/$OWNER_LOWER/trpg-master-backend:pr-$PR"
+            echo "frontend_image=ghcr.io/$OWNER_LOWER/trpg-master-frontend:pr-$PR"
+            # 20000-24999 段，按 PR 号取模分配。同一个 PR 号在生命周期内端口
+            # 固定，重新部署（push 新 commit）不会换端口，评论里的链接不用改。
+            echo "port=$((20000 + PR % 5000))"
+          } >> "$GITHUB_OUTPUT"
+
+      - if: github.event.action != 'closed'
+        name: 登录 GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - if: github.event.action != 'closed'
+        uses: docker/setup-buildx-action@v3
+
+      - if: github.event.action != 'closed'
+        name: 构建并推送 backend 镜像
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: trpg-backend/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.backend_image }}
+          cache-from: type=gha,scope=preview-backend
+          cache-to: type=gha,mode=max,scope=preview-backend
+
+      - if: github.event.action != 'closed'
+        name: 构建并推送 frontend 镜像
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: trpg-frontend/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.frontend_image }}
+          cache-from: type=gha,scope=preview-frontend
+          cache-to: type=gha,mode=max,scope=preview-frontend
+
+      - name: 准备 SSH
+        env:
+          SSH_KEY: ${{ secrets.PREVIEW_SSH_KEY }}
+          SSH_HOST: ${{ secrets.PREVIEW_SSH_HOST }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/preview_deploy_key
+          chmod 600 ~/.ssh/preview_deploy_key
+          ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - if: github.event.action != 'closed'
+        name: 部署到预览服务器
+        env:
+          SSH_HOST: ${{ secrets.PREVIEW_SSH_HOST }}
+          SSH_USER: ${{ secrets.PREVIEW_SSH_USER }}
+          BACKEND_IMAGE: ${{ steps.meta.outputs.backend_image }}
+          FRONTEND_IMAGE: ${{ steps.meta.outputs.frontend_image }}
+          PORT: ${{ steps.meta.outputs.port }}
+          PR: ${{ github.event.pull_request.number }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_ACTOR: ${{ github.actor }}
+          # Preview 专用 key，跟本地/生产用的 key 分开管理，方便单独限额/吊销。
+          DEEPSEEK_API_KEY: ${{ secrets.PREVIEW_DEEPSEEK_API_KEY }}
+        run: |
+          # 远程 provider 模式缺 key 时后端会启动失败（不是优雅降级，
+          # README「主持模型配置」一节已说明）——这个判断必须在部署前做，
+          # 不能让 compose 直接把空字符串当 key 传给 deepseek provider。
+          if [ -n "$DEEPSEEK_API_KEY" ]; then
+            HOST_MODEL_PROVIDER=deepseek
+          else
+            HOST_MODEL_PROVIDER=fake
+          fi
+
+          scp -o StrictHostKeyChecking=no -i ~/.ssh/preview_deploy_key \
+            docker-compose.preview.yml \
+            "$SSH_USER@$SSH_HOST:/tmp/pr-$PR-compose.yml"
+
+          # heredoc 故意不加引号（<<EOF 不是 <<'EOF'）：所有 $VAR 都要在
+          # runner 这一侧被展开成真实值，再把展开后的纯文本脚本整个发给远端
+          # bash 执行——secret 只经这台 runner 之手，不依赖远端 sshd 转发
+          # 环境变量（多数服务器的 sshd_config 默认不转发任意环境变量，
+          # `ssh host VAR=x cmd` 那种写法在很多服务器上根本不生效）。
+          # actionlint/shellcheck 的 SC2087 提示的是这一点，这里是有意为之。
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/preview_deploy_key "$SSH_USER@$SSH_HOST" bash -s <<EOF
+            set -e
+            mkdir -p ~/trpg-previews/pr-$PR
+            mv /tmp/pr-$PR-compose.yml ~/trpg-previews/pr-$PR/docker-compose.yml
+            cd ~/trpg-previews/pr-$PR
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_ACTOR" --password-stdin
+            export BACKEND_IMAGE="$BACKEND_IMAGE"
+            export FRONTEND_IMAGE="$FRONTEND_IMAGE"
+            export PREVIEW_PORT="$PORT"
+            export HOST_MODEL_PROVIDER="$HOST_MODEL_PROVIDER"
+            export DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY"
+            docker compose -p pr-$PR pull
+            docker compose -p pr-$PR up -d --force-recreate --remove-orphans
+          EOF
+
+      - if: github.event.action == 'closed'
+        name: 回收预览环境
+        env:
+          SSH_HOST: ${{ secrets.PREVIEW_SSH_HOST }}
+          SSH_USER: ${{ secrets.PREVIEW_SSH_USER }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          # 同上一步：故意不加引号，$PR 要在 runner 这一侧展开（这里没有
+          # secret，纯粹是为了跟上面部署脚本保持同一套写法，别人读两处时
+          # 不用切换心智模型猜"这处是本地展开还是远端展开"）。
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/preview_deploy_key "$SSH_USER@$SSH_HOST" bash -s <<EOF
+            set -e
+            if [ -d ~/trpg-previews/pr-$PR ]; then
+              cd ~/trpg-previews/pr-$PR
+              docker compose -p pr-$PR down -v --remove-orphans || true
+              cd ~
+              rm -rf ~/trpg-previews/pr-$PR
+            fi
+          EOF
+
+      - if: github.event.action != 'closed'
+        name: 在 PR 上评论预览链接
+        uses: actions/github-script@v7
+        env:
+          PORT: ${{ steps.meta.outputs.port }}
+          SSH_HOST: ${{ secrets.PREVIEW_SSH_HOST }}
+        with:
+          script: |
+            const marker = '<!-- pr-preview-comment -->';
+            const url = `http://${process.env.SSH_HOST}:${process.env.PORT}`;
+            const body = `${marker}\n### 🔍 CI Preview\n\n预览环境已部署：${url}\n\n> 未配置 Preview 专用 DeepSeek key 时，守秘人回复会是确定性占位文案，不影响其余功能验证。\n\n_最新一次 push 会自动更新这个预览，不需要重新打开链接。_`;
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find((c) => c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+      - if: github.event.action == 'closed'
+        name: 在 PR 上更新评论为已回收
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const marker = '<!-- pr-preview-comment -->';
+            const body = `${marker}\n### 🔍 CI Preview\n\n预览环境已回收。`;
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find((c) => c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            }

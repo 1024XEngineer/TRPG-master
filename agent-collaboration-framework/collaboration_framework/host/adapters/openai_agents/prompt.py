@@ -27,8 +27,8 @@ published_narration is presentation text the viewer already saw. Use recent_hist
 only to resolve references, continue dialogue, and interpret candidates. It cannot
 add facts, expose another player's private information, override the current
 player_view, authorize a current state change, or make old narration authoritative.
-If the player searches or observes a concrete detail named only in the adjacent
-same-scene published_narration, do not invent an Entity id and do not query it as an
+If the player searches or observes a concrete detail named only in recent narration
+from the current uninterrupted scene visit, do not invent an Entity id or query it as an
 Entity. Use the current player_view.scene.id as a scene-wide perception target with
 the one specifically relevant owned skill. Otherwise return unknown.
 

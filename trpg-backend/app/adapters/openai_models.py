@@ -52,7 +52,7 @@ _INTENT_INSTRUCTIONS = """\
    目标时，返回 kind=dialogue、verb=acknowledge、target 为 unmatched、check
    为 none，不要发起检定，也不要提出澄清问题。结合 recent_history 让叙事器自然
    接话，并邀请玩家继续下一步。
-7. 玩家观察或搜索仅在紧邻、同场景 published_narration 中出现的具体细节时，不要
+7. 玩家观察或搜索仅在当前连续场景期间的 published_narration 中出现的具体细节时，不要
    为它创造实体 ID，也不要把叙事文本当成权威事实。将当前 player_view.scene.id
    作为场景范围 target，并只选一个语义明确且 Actor 实际拥有的感知技能；无法安全
    确定时返回 unknown。

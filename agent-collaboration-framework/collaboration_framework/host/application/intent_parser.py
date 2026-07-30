@@ -38,12 +38,14 @@ class IntentParser:
 
 
 def coerce_intent_payload(raw: JsonObject, context: IntentContext) -> JsonObject:
-    """Repair an empty default check before strict Intent validation.
+    """Safely normalize recoverable model output before strict validation.
 
     The model sometimes emits ``route=default`` without a skill.  That is not
     an executable contract: safe observations should be ``no check``; actions
     that clearly need a check must name an available actor skill.  Ambiguous
-    cases become a clarification instead of a WebSocket contract failure.
+    cases become a clarification instead of a WebSocket contract failure. A
+    search for a narration-only detail may become a state-free current-Scene
+    perception check, but never a new authoritative Entity.
     """
 
     if not isinstance(raw, dict):
@@ -77,34 +79,35 @@ def _recover_same_scene_narrated_detail_search(
     """Turn a same-scene narration-only reference into a safe scene search.
 
     Published narration is presentation text, not authority for a new Entity. If
-    the player immediately searches a concrete detail they already saw there, the
+    the player searches a concrete detail they recently saw there, the
     safe recovery target is the current Scene: it supports a descriptive default
     check without promoting the detail or firing an Entity checkpoint.
     """
 
-    adjacent = context.recent_history.turns[-1] if context.recent_history.turns else None
-    if (
-        adjacent is None
-        or adjacent.scene_id != context.player_view.scene_id
-        or adjacent.published_narration is None
-    ):
-        return None
-
     target = raw.get("target")
     if not isinstance(target, dict):
         return None
-    raw_target = target.get("raw") if target.get("matched") is False else target.get("id")
+    raw_target = (
+        target.get("raw") if target.get("matched") is False else target.get("id")
+    )
     if not isinstance(raw_target, str) or not raw_target.strip():
         return None
     if _match_target_id(raw_target, context.player_view) is not None:
         return None
 
     utterance = context.player_input.utterance
-    if not _shares_specific_narrated_anchor(
-        raw_target=raw_target,
-        utterance=utterance,
-        narration=adjacent.published_narration.text,
-    ):
+    narrated_turn = None
+    for turn in reversed(context.recent_history.turns):
+        if turn.scene_id != context.player_view.scene_id:
+            break
+        if turn.published_narration is not None and _shares_specific_narrated_anchor(
+            raw_target=raw_target,
+            utterance=utterance,
+            narration=turn.published_narration.text,
+        ):
+            narrated_turn = turn
+            break
+    if narrated_turn is None:
         return None
     skill_id = _specific_perception_skill_id(utterance, context)
     if skill_id is None:
@@ -116,7 +119,9 @@ def _recover_same_scene_narrated_detail_search(
         "verb": "search" if skill_id == "spot-hidden" else "listen",
         "target": {"matched": True, "id": context.player_view.scene.id},
         "check": {"route": "default", "proposed_skills": [skill_id]},
-        "approach": raw.get("approach") if isinstance(raw.get("approach"), str) else None,
+        "approach": raw.get("approach")
+        if isinstance(raw.get("approach"), str)
+        else None,
         "declarations": [],
         "initiated_by_target": False,
         "summary": (
@@ -227,10 +232,14 @@ def normalize_intent_against_view(
         "move_object",
     }:
         matching_exits = tuple(
-            item for item in view.scene.available_exits if item.target_id == intent.target.id
+            item
+            for item in view.scene.available_exits
+            if item.target_id == intent.target.id
         )
         if len(matching_exits) == 1:
-            intent = intent.model_copy(update={"target": MatchedTarget(id=matching_exits[0].id)})
+            intent = intent.model_copy(
+                update={"target": MatchedTarget(id=matching_exits[0].id)}
+            )
 
     # The engine accepts only canonical travel verbs for an exit target.  Keep
     # any explicit check/approach, but make the authoritative transition verb
@@ -310,7 +319,9 @@ def _matching_checkpoint_for_intent(
     candidates: tuple[CheckpointOption, ...],
 ) -> CheckpointOption | None:
     semantic_matches = tuple(
-        option for option in candidates if _action_matches(intent.verb, option.action_hint)
+        option
+        for option in candidates
+        if _action_matches(intent.verb, option.action_hint)
     )
     return semantic_matches[0] if len(semantic_matches) == 1 else None
 
@@ -322,7 +333,9 @@ def _checkpoints_for_target(
     if not isinstance(intent.target, MatchedTarget):
         return ()
     return tuple(
-        option for option in view.checkpoint_options if option.target_id == intent.target.id
+        option
+        for option in view.checkpoint_options
+        if option.target_id == intent.target.id
     )
 
 
@@ -360,7 +373,8 @@ def _looks_like_no_check_action(raw: JsonObject, context: IntentContext) -> bool
         target_id = target.get("id")
         if target.get("matched") is True and isinstance(target_id, str):
             exit_candidates = [
-                (item.id, _labels(item)) for item in context.player_view.scene.available_exits
+                (item.id, _labels(item))
+                for item in context.player_view.scene.available_exits
             ]
             if _unique_match(target_id, exit_candidates) is not None:
                 return True
@@ -378,11 +392,13 @@ def _looks_like_no_check_action(raw: JsonObject, context: IntentContext) -> bool
     if family != "perception":
         return False
     if any(
-        _label_key(marker) in text for marker in ("搜索", "寻找", "隐藏", "暗格", "仔细", "调查")
+        _label_key(marker) in text
+        for marker in ("搜索", "寻找", "隐藏", "暗格", "仔细", "调查")
     ):
         return False
     return any(
-        _label_key(marker) in text for marker in ("查看", "看看", "阅读", "观察", "描述周围")
+        _label_key(marker) in text
+        for marker in ("查看", "看看", "阅读", "观察", "描述周围")
     )
 
 
@@ -398,7 +414,11 @@ def _infer_default_skill_id(raw: JsonObject, context: IntentContext) -> str | No
     }
     actor_ids = _actor_value_ids(context.player_view)
     return next(
-        (candidate for candidate in candidates_by_family.get(family, ()) if candidate in actor_ids),
+        (
+            candidate
+            for candidate in candidates_by_family.get(family, ())
+            if candidate in actor_ids
+        ),
         None,
     )
 
@@ -424,7 +444,9 @@ def validate_intent_against_view(
     if not isinstance(intent.target, MatchedTarget):
         return intent
 
-    visible_entity_ids = {item.id for item in context.player_view.scene.visible_entities}
+    visible_entity_ids = {
+        item.id for item in context.player_view.scene.visible_entities
+    }
     available_exit_ids = {item.id for item in context.player_view.scene.available_exits}
     trusted_target_ids = visible_entity_ids | available_exit_ids
     if isinstance(intent.check, DefaultCheck):
@@ -536,7 +558,9 @@ def _normalize_skills(
 
 
 def _actor_value_ids(view: PlayerView) -> set[str]:
-    return {value.id for value in (*view.self_actor.attributes, *view.self_actor.skills)}
+    return {
+        value.id for value in (*view.self_actor.attributes, *view.self_actor.skills)
+    }
 
 
 _ACTOR_VALUE_ALIASES: dict[str, tuple[str, ...]] = {
@@ -632,7 +656,9 @@ def _labels(value: VisibleEntity | AvailableExitView) -> tuple[str, ...]:
     return (value.id, value.name, *value.aliases)
 
 
-def _unique_match(raw: str, candidates: list[tuple[str, tuple[str, ...]]]) -> str | None:
+def _unique_match(
+    raw: str, candidates: list[tuple[str, tuple[str, ...]]]
+) -> str | None:
     matches = {
         candidate_id
         for candidate_id, labels in candidates
@@ -650,5 +676,6 @@ def _label_key(value: str) -> str:
     return "".join(
         character
         for character in normalized
-        if not character.isspace() and not unicodedata.category(character).startswith(("P", "S"))
+        if not character.isspace()
+        and not unicodedata.category(character).startswith(("P", "S"))
     )

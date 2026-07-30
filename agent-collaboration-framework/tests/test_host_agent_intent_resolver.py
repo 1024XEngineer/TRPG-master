@@ -8,6 +8,7 @@ from collaboration_framework.contracts import (
     AvailableExitView,
     CheckpointOption,
     DefaultCheck,
+    JsonObject,
     ModuleCheck,
     PlayerInput,
     PlayerView,
@@ -30,7 +31,9 @@ from collaboration_framework.host.schemas import (
     HostAgentToolStarted,
     HostAgentUsage,
     IntentContext,
+    RecentTurn,
     RecentTurnContext,
+    VisibleHistoryText,
 )
 
 
@@ -191,6 +194,146 @@ async def test_resolver_accepts_targetless_dialogue_acknowledgement() -> None:
     assert intent.clarification_question is None
 
 
+@pytest.mark.parametrize(
+    "raw",
+    (
+        {
+            "kind": "unknown",
+            "verb": "unknown",
+            "target": {
+                "matched": False,
+                "raw": "那我去老橡那看一下有没有什么线索",
+            },
+            "check": {"route": "none"},
+            "summary": "那我去老橡那看一下有没有什么线索",
+            "clarification_question": "你想对当前场景中的哪个人物、物品或地点做什么？",
+        },
+        {
+            "kind": "action",
+            "verb": "search",
+            "target": {"matched": True, "id": "old_oak"},
+            "check": {"route": "default", "proposed_skills": ["spot-hidden"]},
+            "summary": "在老橡树附近寻找线索",
+        },
+    ),
+)
+def test_same_scene_narration_only_detail_becomes_safe_scene_search(
+    raw: JsonObject,
+) -> None:
+    base = context()
+    player_input = base.player_input.model_copy(
+        update={"utterance": "那我去老橡那看一下有没有什么线索"}
+    )
+    recent_history = RecentTurnContext(
+        room_id=base.player_view.room_id,
+        viewer_player_id=base.player_view.player_id,
+        as_of_revision=base.player_view.revision,
+        turns=(
+            RecentTurn(
+                correlation_id="prior-turn",
+                source_player_id=base.player_view.player_id,
+                source_actor_id=base.player_view.actor_id,
+                scene_id=base.player_view.scene_id,
+                player_utterance=VisibleHistoryText(
+                    text="询问道格拉斯以前常去哪里",
+                    visibility="public",
+                ),
+                published_narration=VisibleHistoryText(
+                    text="守墓人说，道格拉斯以前常坐在北边那棵老橡树下看书。",
+                    visibility="public",
+                ),
+            ),
+            RecentTurn(
+                correlation_id="clarification-turn",
+                source_player_id=base.player_view.player_id,
+                source_actor_id=base.player_view.actor_id,
+                scene_id=base.player_view.scene_id,
+                player_utterance=VisibleHistoryText(
+                    text="那我去老橡那看一下有没有什么线索",
+                    visibility="public",
+                ),
+                published_narration=VisibleHistoryText(
+                    text="你想对当前场景中的哪个人物、物品或地点做什么？",
+                    visibility="player_scoped",
+                ),
+            ),
+        ),
+    )
+    parsed = IntentParser.parse(
+        raw,
+        IntentContext(
+            player_input=player_input,
+            player_view=base.player_view,
+            recent_history=recent_history,
+        ),
+    )
+
+    assert parsed.kind == "action"
+    assert parsed.target.id == base.player_view.scene.id
+    assert parsed.check.route == "default"
+    assert parsed.check.proposed_skills == ("spot-hidden",)
+
+
+def test_narration_only_detail_is_not_recovered_across_scene_boundary() -> None:
+    base = context()
+    player_input = base.player_input.model_copy(
+        update={"utterance": "那我去老橡那看一下有没有什么线索"}
+    )
+    recent_history = RecentTurnContext(
+        room_id=base.player_view.room_id,
+        viewer_player_id=base.player_view.player_id,
+        as_of_revision=base.player_view.revision,
+        turns=(
+            RecentTurn(
+                correlation_id="prior-visit",
+                source_player_id=base.player_view.player_id,
+                source_actor_id=base.player_view.actor_id,
+                scene_id=base.player_view.scene_id,
+                player_utterance=VisibleHistoryText(
+                    text="询问道格拉斯以前常去哪里",
+                    visibility="public",
+                ),
+                published_narration=VisibleHistoryText(
+                    text="守墓人说，道格拉斯以前常坐在北边那棵老橡树下看书。",
+                    visibility="public",
+                ),
+            ),
+            RecentTurn(
+                correlation_id="different-scene",
+                source_player_id=base.player_view.player_id,
+                source_actor_id=base.player_view.actor_id,
+                scene_id="cemetery",
+                player_utterance=VisibleHistoryText(
+                    text="去墓园转了一圈又回来",
+                    visibility="public",
+                ),
+                published_narration=VisibleHistoryText(
+                    text="你重新回到了图书馆。",
+                    visibility="public",
+                ),
+            ),
+        ),
+    )
+    raw = {
+        "kind": "action",
+        "verb": "search",
+        "target": {"matched": True, "id": "old_oak"},
+        "check": {"route": "default", "proposed_skills": ["spot-hidden"]},
+        "summary": "在老橡树附近寻找线索",
+    }
+
+    coerced = coerce_intent_payload(
+        raw,
+        IntentContext(
+            player_input=player_input,
+            player_view=base.player_view,
+            recent_history=recent_history,
+        ),
+    )
+
+    assert coerced == raw
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("events", "code"),
@@ -255,6 +398,7 @@ async def test_resolver_recovers_adapter_invalid_output_failure() -> None:
 
 
 def test_parser_normalizes_visible_names_and_skill_labels() -> None:
+    base = context()
     parsed = IntentParser.parse(
         {
             "kind": "action",
@@ -264,7 +408,9 @@ def test_parser_normalizes_visible_names_and_skill_labels() -> None:
             "summary": "调查书架",
         },
         IntentContext(
-            player_input=context().player_input, player_view=context().player_view
+            player_input=base.player_input,
+            player_view=base.player_view,
+            recent_history=base.recent_history,
         ),
     )
 
@@ -274,6 +420,7 @@ def test_parser_normalizes_visible_names_and_skill_labels() -> None:
 
 
 def test_parser_normalizes_visible_alias_and_attribute_label() -> None:
+    base = context()
     parsed = IntentParser.parse(
         {
             "kind": "action",
@@ -283,7 +430,9 @@ def test_parser_normalizes_visible_alias_and_attribute_label() -> None:
             "summary": "用力量推开看守",
         },
         IntentContext(
-            player_input=context().player_input, player_view=context().player_view
+            player_input=base.player_input,
+            player_view=base.player_view,
+            recent_history=base.recent_history,
         ),
     )
 
@@ -302,7 +451,11 @@ def test_empty_default_check_gets_a_visible_actor_skill() -> None:
             "check": {"route": "default", "proposed_skills": []},
             "summary": "调查书架",
         },
-        IntentContext(player_input=base.player_input, player_view=base.player_view),
+        IntentContext(
+            player_input=base.player_input,
+            player_view=base.player_view,
+            recent_history=base.recent_history,
+        ),
     )
 
     assert payload["check"]["proposed_skills"] == ["spot-hidden"]
@@ -318,7 +471,11 @@ def test_empty_default_travel_check_normalizes_visible_exit_alias() -> None:
             "check": {"route": "default", "proposed_skills": []},
             "summary": "前往墓地",
         },
-        IntentContext(player_input=base.player_input, player_view=base.player_view),
+        IntentContext(
+            player_input=base.player_input,
+            player_view=base.player_view,
+            recent_history=base.recent_history,
+        ),
     )
 
     assert parsed.target.id == "cemetery_exit"
@@ -337,7 +494,11 @@ def test_enter_exit_is_canonicalized_to_go_without_dropping_explicit_check() -> 
             "approach": "用力前进",
             "summary": "进入墓地",
         },
-        IntentContext(player_input=base.player_input, player_view=base.player_view),
+        IntentContext(
+            player_input=base.player_input,
+            player_view=base.player_view,
+            recent_history=base.recent_history,
+        ),
     )
 
     assert parsed.target.id == "cemetery_exit"
@@ -373,7 +534,11 @@ def test_parser_normalizes_checkpoint_and_skill_labels() -> None:
             },
             "summary": "侦察书架",
         },
-        IntentContext(player_input=base.player_input, player_view=view),
+        IntentContext(
+            player_input=base.player_input,
+            player_view=view,
+            recent_history=base.recent_history,
+        ),
     )
 
     assert parsed.target.id == "shelf"
@@ -407,7 +572,11 @@ def test_travel_entity_reference_is_canonicalized_to_matching_exit() -> None:
             "check": {"route": "none"},
             "summary": "靠近它",
         },
-        IntentContext(player_input=base.player_input, player_view=view),
+        IntentContext(
+            player_input=base.player_input,
+            player_view=view,
+            recent_history=base.recent_history,
+        ),
     )
 
     assert parsed.target.id == "cemetery_exit"
@@ -436,7 +605,11 @@ def test_matching_checkpoint_promotes_default_check_to_module_check() -> None:
             "check": {"route": "default", "proposed_skills": ["STR"]},
             "summary": "移动书架",
         },
-        IntentContext(player_input=base.player_input, player_view=view),
+        IntentContext(
+            player_input=base.player_input,
+            player_view=view,
+            recent_history=base.recent_history,
+        ),
     )
 
     assert isinstance(parsed.check, ModuleCheck)
@@ -471,7 +644,11 @@ def test_enter_checkpoint_overrides_default_dodge_check() -> None:
             "check": {"route": "default", "proposed_skills": ["spot-hidden"]},
             "summary": "穿过缝隙进入洞中",
         },
-        IntentContext(player_input=base.player_input, player_view=view),
+        IntentContext(
+            player_input=base.player_input,
+            player_view=view,
+            recent_history=base.recent_history,
+        ),
     )
 
     assert isinstance(parsed.check, ModuleCheck)
@@ -501,7 +678,11 @@ def test_default_check_is_blocked_when_target_has_no_matching_checkpoint() -> No
             "check": {"route": "default", "proposed_skills": ["spot-hidden"]},
             "summary": "调查书架",
         },
-        IntentContext(player_input=base.player_input, player_view=view),
+        IntentContext(
+            player_input=base.player_input,
+            player_view=view,
+            recent_history=base.recent_history,
+        ),
     )
 
     assert parsed.kind == "unknown"

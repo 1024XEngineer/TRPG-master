@@ -10,7 +10,9 @@ from .intent_aligner import (
     REFERENCE_MODULE_ACTIONS,
     RULE_ENGINE_ACTION_VOCABULARY,
     align_intent_for_engine,
+    is_scene_query_utterance,
     intent_action_contract,
+    recover_travel_intent,
 )
 from .intent_parser import IntentParser, validate_intent_against_view
 from .narrator import NarrationValidationError, Narrator, normalize_narration_text
@@ -44,7 +46,9 @@ __all__ = [
     "ToolRegistry",
     "TurnExecutionError",
     "align_intent_for_engine",
+    "is_scene_query_utterance",
     "intent_action_contract",
     "normalize_narration_text",
+    "recover_travel_intent",
     "validate_intent_against_view",
 ]

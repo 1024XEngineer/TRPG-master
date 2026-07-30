@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator
 
 import pytest
@@ -378,6 +379,14 @@ async def test_resolver_recovers_invalid_intent_as_clarification() -> None:
 
 @pytest.mark.asyncio
 async def test_resolver_recovers_adapter_invalid_output_failure() -> None:
+    base = context()
+    travel_context = base.model_copy(
+        update={
+            "player_input": base.player_input.model_copy(
+                update={"utterance": "我先去墓地看看"}
+            )
+        }
+    )
     resolution = await HostAgentIntentResolver(
         ScriptedPort(
             (
@@ -389,12 +398,51 @@ async def test_resolver_recovers_adapter_invalid_output_failure() -> None:
                 ),
             )
         )
-    ).resolve_with_metadata(context())
+    ).resolve_with_metadata(travel_context)
     intent = resolution.intent
 
     assert resolution.recovered is True
-    assert intent.kind == "unknown"
-    assert intent.clarification_question
+    assert intent.kind == "action"
+    assert intent.verb == "go"
+    assert intent.target.id == "cemetery_exit"
+    assert intent.check.route == "none"
+
+
+@pytest.mark.asyncio
+async def test_resolver_marks_scene_query_recovery_separately(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    base = context()
+    scene_query_context = base.model_copy(
+        update={
+            "player_input": base.player_input.model_copy(
+                update={"utterance": "我在哪"}
+            )
+        }
+    )
+    with caplog.at_level(logging.WARNING):
+        resolution = await HostAgentIntentResolver(
+            ScriptedPort(
+                (
+                    HostAgentFailed(
+                        type="agent.failed",
+                        code="HOST_AGENT_INVALID_OUTPUT",
+                        retryable=False,
+                        usage=usage("invalid_output"),
+                    ),
+                )
+            )
+        ).resolve_with_metadata(scene_query_context)
+
+    assert resolution.recovered is True
+    assert resolution.intent.kind == "unknown"
+    record = next(
+        item
+        for item in reversed(caplog.records)
+        if item.message == "host_agent_intent_recovered"
+    )
+    assert getattr(record, "failure_reason", None) == "json_invalid"
+    assert getattr(record, "recovery_path", None) == "scene_query_narration"
 
 
 def test_parser_normalizes_visible_names_and_skill_labels() -> None:

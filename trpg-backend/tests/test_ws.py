@@ -393,6 +393,7 @@ def test_game_start_pushes_opening_narration_and_advances_phase(
             ws,
             lambda message: message.get("type") == "session.bound",
         )
+        retry_join_view = ws.receive_json()
 
     view = next(message for message in progress if message.get("type") == "view.updated")
     room_state = next(message for message in progress if message.get("type") == "room.state")
@@ -406,6 +407,7 @@ def test_game_start_pushes_opening_narration_and_advances_phase(
     assert any(message.get("type") == "opening.started" for message in progress)
     assert any(message.get("type") == "view.updated" for message in retry_progress)
     assert any(message.get("type") == "room.state" for message in retry_progress)
+    assert retry_join_view["type"] == "view.updated"
     assert not any(
         message.get("type") in {"opening.started", "narration.push"} for message in retry_progress
     )
@@ -606,6 +608,7 @@ def test_action_submit_broadcasts_narration_to_room_only(sync_client: TestClient
             ws_a,
             lambda message: message.get("type") == "session.bound",
         )
+        view_after_retry = ws_a.receive_json()
         # room_b 没有收到任何广播——发一条 room.join 触发一次同步交互，确认
         # 收到的仍然是它自己的 session.bound，而不是串过来的 narration。
         ws_b.send_json(
@@ -629,6 +632,7 @@ def test_action_submit_broadcasts_narration_to_room_only(sync_client: TestClient
     assert guest_narration == narration
     assert retried["message_type"] == "turn.completed"
     assert next_after_retry["type"] == "session.bound"
+    assert view_after_retry["type"] == "view.updated"
     assert envelope_b["type"] == "session.bound"
     for event in progress:
         rendered = str(event)

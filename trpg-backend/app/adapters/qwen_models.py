@@ -15,7 +15,7 @@ import json
 import httpx
 from collaboration_framework.contracts import JsonObject
 
-from app.adapters.openai_models import StructuredJsonClient
+from app.adapters.openai_models import StructuredJsonClient, _log_structured_usage
 
 
 class QwenChatCompletionsJsonClient(StructuredJsonClient):
@@ -78,7 +78,17 @@ class QwenChatCompletionsJsonClient(StructuredJsonClient):
             )
             response.raise_for_status()
 
-        output_text = chat_completion_output_text(response.json(), provider_name="Qwen")
+        response_payload = response.json()
+        _log_structured_usage(
+            response_payload,
+            provider="qwen",
+            model=self._model,
+            schema_name=schema_name,
+        )
+        output_text = chat_completion_output_text(
+            response_payload,
+            provider_name="Qwen",
+        )
         parsed = json.loads(output_text)
         if not isinstance(parsed, dict):
             raise ValueError("Qwen structured output must be a JSON object")

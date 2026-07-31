@@ -141,7 +141,14 @@ class SessionBoundPayload(CamelModel):
 class NarrationPushPayload(CamelModel):
     """narration.push 推送 payload。"""
 
+    message_id: str | None = Field(default=None, min_length=1)
     text: str
+
+
+class OpeningStartedPayload(CamelModel):
+    """权威开场正在由 Host 模型生成；模板模式不会发送。"""
+
+    message_id: str = Field(..., min_length=1)
 
 
 class ChatMessagePayload(CamelModel):

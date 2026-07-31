@@ -6,6 +6,7 @@ import json
 from typing import Protocol
 
 import httpx
+import structlog
 from collaboration_framework.contracts import (
     Intent,
     JsonObject,
@@ -18,7 +19,10 @@ from collaboration_framework.host.schemas import (
     IntentContext,
     NarrationContext,
     NarrationOutput,
+    OpeningNarrationContext,
 )
+
+logger = structlog.get_logger()
 
 _INTENT_INSTRUCTIONS = """\
 你是桌面角色扮演游戏的“玩家意图解析器”，不是客服，也不负责叙事。玩家输入是
@@ -124,6 +128,21 @@ JSON/schema 片段、Markdown JSON 代码块、格式说明或自检内容重复
 前再次检查 text，确保玩家只会看到自然叙事，而不会看到结构化输出协议。
 """
 
+_OPENING_NARRATION_INSTRUCTIONS = """\
+你是桌面角色扮演游戏的守秘人。只返回所要求的 JSON，并根据输入中已经过玩家安全
+投影的信息，写一段简洁、有画面感的公共开场。
+
+正文必须自然提及 participants 中每一位角色的完整姓名，并可使用其 occupation 与
+status_summary。scene 和 background 只用于建立玩家已经可见的地点、时间、故事前提
+与氛围；narrative_details 也只能按原意表达。只有单人开场才可能提供
+solo_background_summary，多人开场不得推断或补写任何角色的私密背景。
+
+不得创造门窗、路线、人物、物品、线索、秘密、规则结果或玩家行动，不得暗示角色已
+作出选择。输出 kind 必须为 narration，claimed_fact_ids 和 suggested_actions 必须
+为空数组。text 只能包含自然的角色内叙事，不得包含 JSON、schema、字段名、Markdown
+代码块、协议说明或自检内容。
+"""
+
 
 class StructuredJsonClient(Protocol):
     async def generate(
@@ -189,7 +208,14 @@ class OpenAIResponsesJsonClient:
                 json=request_payload,
             )
             response.raise_for_status()
-        output_text = _response_output_text(response.json())
+        response_payload = response.json()
+        _log_structured_usage(
+            response_payload,
+            provider="openai",
+            model=self._model,
+            schema_name=schema_name,
+        )
+        output_text = _response_output_text(response_payload)
         parsed = json.loads(output_text)
         if not isinstance(parsed, dict):
             raise ValueError("Structured model output must be a JSON object")
@@ -223,6 +249,46 @@ class PromptNarrationModel:
             instructions=_NARRATION_INSTRUCTIONS,
             input_payload=context.to_json_dict(),
         )
+
+
+class PromptOpeningNarrationModel:
+    """Structured, provider-neutral model adapter for the public game opening."""
+
+    def __init__(self, client: StructuredJsonClient) -> None:
+        self._client = client
+
+    async def generate(self, context: OpeningNarrationContext) -> JsonObject:
+        return await self._client.generate(
+            schema_name="trpg_opening_narration",
+            schema=NarrationOutput.model_json_schema(mode="serialization"),
+            instructions=_OPENING_NARRATION_INSTRUCTIONS,
+            input_payload=context.to_json_dict(),
+        )
+
+
+def _log_structured_usage(
+    payload: object,
+    *,
+    provider: str,
+    model: str,
+    schema_name: str,
+) -> None:
+    if schema_name != "trpg_opening_narration" or not isinstance(payload, dict):
+        return
+    usage = payload.get("usage")
+    if not isinstance(usage, dict):
+        return
+    prompt_tokens = usage.get("prompt_tokens", usage.get("input_tokens"))
+    completion_tokens = usage.get("completion_tokens", usage.get("output_tokens"))
+    total_tokens = usage.get("total_tokens")
+    logger.info(
+        "opening_narration_model_usage",
+        provider=provider,
+        model=model,
+        prompt_tokens=prompt_tokens if isinstance(prompt_tokens, int) else None,
+        completion_tokens=(completion_tokens if isinstance(completion_tokens, int) else None),
+        total_tokens=total_tokens if isinstance(total_tokens, int) else None,
+    )
 
 
 def _response_output_text(payload: object) -> str:

@@ -429,18 +429,26 @@ async def set_player_connected(db: AsyncSession, player_id: str, connected: bool
         await db.commit()
 
 
-async def begin_game(db: AsyncSession, room_id: str, player_id: str) -> None:
-    """从固定 ModuleVersion 和完成的 Character 原子创建房间唯一 GameSession。"""
+async def begin_game(db: AsyncSession, room_id: str, player_id: str) -> bool:
+    """原子创建唯一 GameSession；已进入 InGame 的房主调用用于恢复开场流程。
+
+    返回 ``True`` 表示本次创建会话，``False`` 表示会话此前已成功创建。
+    """
     room = await find_room_by_id(db, room_id)
     player = await db.get(Player, player_id)
     if player is None or player.room_id != room.id or player.id != room.host_player_id:
         raise RoomAuthorizationError("仅房主可以开始游戏")
+    existing_session = await db.get(GameSession, room.id)
+    if room.phase == "InGame":
+        if existing_session is not None:
+            return False
+        raise RoomConflictError("房间已在游戏中但缺少 GameSession")
     if room.phase != "Building":
         raise RoomConflictError("只有背景介绍/建卡阶段可以正式开局")
     if room.scenario_id is None or room.module_version is None:
         raise ModuleNotSelectedError("房间没有固定可开局的模组版本")
-    if await db.get(GameSession, room.id) is not None:
-        raise RoomConflictError("该房间已经创建过 GameSession")
+    if existing_session is not None:
+        raise RoomConflictError("房间阶段与已有 GameSession 不一致")
 
     scenario = await db.get(Scenario, room.scenario_id)
     if scenario is None:
@@ -528,11 +536,29 @@ async def begin_game(db: AsyncSession, room_id: str, player_id: str) -> None:
             .values(phase="InGame", started_at=now, updated_at=now)
         )
         if getattr(phase_update, "rowcount", None) != 1:
+            await db.rollback()
+            current_room = await db.get(Room, room.id)
+            current_session = await db.get(GameSession, room.id)
+            if (
+                current_room is not None
+                and current_room.phase == "InGame"
+                and current_session is not None
+            ):
+                return False
             raise RoomConflictError("房间阶段已经变化，无法重复开局")
         await db.commit()
-    except IntegrityError as exc:
+        return True
+    except IntegrityError:
         await db.rollback()
-        raise RoomConflictError("该房间已经创建过 GameSession") from exc
+        current_room = await db.get(Room, room.id)
+        current_session = await db.get(GameSession, room.id)
+        if (
+            current_room is not None
+            and current_room.phase == "InGame"
+            and current_session is not None
+        ):
+            return False
+        raise RoomConflictError("该房间已经创建过 GameSession") from None
     except Exception:
         await db.rollback()
         raise
@@ -968,6 +994,23 @@ async def record_event(
         if existing is None:
             raise
         return False
+
+
+async def get_correlated_event(
+    db: AsyncSession,
+    room_id: str,
+    event_type: str,
+    correlation_id: str,
+) -> Event | None:
+    """Read the winner of an idempotent event correlation."""
+
+    return await db.scalar(
+        select(Event).where(
+            Event.room_id == room_id,
+            Event.event_type == event_type,
+            Event.correlation_id == correlation_id,
+        )
+    )
 
 
 # 叙事上下文里带多少条行动历史。取值权衡：太少 AI 上文接不住，太多白白烧

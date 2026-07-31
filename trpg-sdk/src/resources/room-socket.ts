@@ -1,3 +1,7 @@
+/**
+ * Stateful WebSocket client: validates server events, tracks the latest
+ * player-safe view/progress state, and resolves action promises by correlation ID.
+ */
 import type {
   ActionSubmitPayload,
   ChatSendPayload,
@@ -95,7 +99,9 @@ function isValidSelfActor(value: unknown, actorId: string): boolean {
     value.resources.every(isActorValue) &&
     isStringArray(value.conditions) &&
     isStringArray(value.equipment) &&
-    typeof value.background_summary === 'string'
+    typeof value.background_summary === 'string' &&
+    (value.public_status_summary === undefined ||
+      typeof value.public_status_summary === 'string')
   );
 }
 
@@ -130,6 +136,9 @@ function isValidScene(value: unknown, sceneId: string): boolean {
         isRecord(actor) &&
         typeof actor.id === 'string' &&
         typeof actor.name === 'string' &&
+        (actor.occupation === undefined ||
+          actor.occupation === null ||
+          typeof actor.occupation === 'string') &&
         typeof actor.status_summary === 'string'
     ) &&
     Array.isArray(value.available_exits) &&
@@ -245,7 +254,13 @@ const PAYLOAD_VALIDATORS: {
   [K in ServerToClientEvent['type']]: (payload: Record<string, unknown>) => boolean;
 } = {
   'session.bound': (p) => typeof p.roomId === 'string' && typeof p.playerId === 'string',
-  'narration.push': (p) => typeof p.text === 'string',
+  'narration.push': (p) =>
+    typeof p.text === 'string' &&
+    (p.messageId === undefined ||
+      p.messageId === null ||
+      (typeof p.messageId === 'string' && p.messageId.length > 0)),
+  'opening.started': (p) =>
+    typeof p.messageId === 'string' && p.messageId.length > 0,
   'turn.started': (p) => typeof p.correlationId === 'string',
   'turn.phase_changed': (p) =>
     typeof p.correlationId === 'string' &&
@@ -371,6 +386,7 @@ export class RoomSocket {
   private readonly handlers = new Set<RoomSocketHandler>();
   private readonly pendingActions = new Map<string, PendingAction>();
   private playerView: AgentPlayerView | null = null;
+  private openingMessageId: string | null = null;
 
   constructor(private readonly wsBaseUrl: string) {}
 
@@ -391,6 +407,7 @@ export class RoomSocket {
 
     this.roomId = roomId;
     this.playerView = null;
+    this.openingMessageId = null;
     const url = `${this.wsBaseUrl}/ws/${roomId}?token=${encodeURIComponent(token)}`;
     const socket = new WebSocket(url);
     socket.onmessage = (event) => {
@@ -450,12 +467,23 @@ export class RoomSocket {
       if (parsed.type === 'view.updated') {
         this.playerView = parsed.payload.playerView;
       }
+      if (parsed.type === 'opening.started') {
+        this.openingMessageId = parsed.payload.messageId;
+      } else if (
+        parsed.type === 'narration.push' &&
+        parsed.payload.messageId === this.openingMessageId
+      ) {
+        this.openingMessageId = null;
+      } else if (parsed.type === 'error') {
+        this.openingMessageId = null;
+      }
       this.handlers.forEach((handler) => handler(parsed));
     };
     socket.onclose = () => {
       if (this.ws !== socket) return;
       this.ws = null;
       this.roomId = null;
+      this.openingMessageId = null;
       this.rejectPendingActions(new RoomSocketTransportError('WebSocket connection closed'));
     };
     this.ws = socket;
@@ -538,6 +566,11 @@ export class RoomSocket {
     return this.playerView;
   }
 
+  /** Return a transient opening progress marker even if it arrived before UI subscription. */
+  getOpeningMessageId(): string | null {
+    return this.openingMessageId;
+  }
+
   /** check.roll —— 为当前 check.request 提交玩家选择的技能和 D100 点数。 */
   rollCheck(playerId: string, payload: CheckRollPayload): void {
     this.send('check.roll', playerId, payload);
@@ -562,6 +595,7 @@ export class RoomSocket {
     const socket = this.ws;
     this.ws = null;
     this.roomId = null;
+    this.openingMessageId = null;
     this.rejectPendingActions(new RoomSocketTransportError('WebSocket disconnected'));
     socket?.close();
   }

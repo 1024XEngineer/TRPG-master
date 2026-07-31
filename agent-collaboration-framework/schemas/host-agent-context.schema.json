@@ -808,6 +808,7 @@
     },
     "SelfActorView": {
       "additionalProperties": false,
+      "description": "The requesting player's actor; only public_status_summary may be shared.",
       "properties": {
         "id": {
           "minLength": 1,
@@ -875,6 +876,11 @@
           "default": "",
           "title": "Background Summary",
           "type": "string"
+        },
+        "public_status_summary": {
+          "default": "",
+          "title": "Public Status Summary",
+          "type": "string"
         }
       },
       "required": [
@@ -886,6 +892,7 @@
     },
     "VisibleActorView": {
       "additionalProperties": false,
+      "description": "Another actor currently visible to this player, with public fields only.",
       "properties": {
         "id": {
           "minLength": 1,
@@ -896,6 +903,18 @@
           "minLength": 1,
           "title": "Name",
           "type": "string"
+        },
+        "occupation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Occupation"
         },
         "status_summary": {
           "default": "",

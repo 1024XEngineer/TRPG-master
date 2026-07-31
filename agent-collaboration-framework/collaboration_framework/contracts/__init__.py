@@ -75,6 +75,7 @@ from .player_view import (
     NarrativeDetailView,
     ObservableStateView,
     PlayerView,
+    PlayerViewScope,
     ProjectionActionDeclarationOption,
     ProjectionActorResource,
     ProjectionActorValue,

@@ -14,6 +14,7 @@ from collaboration_framework.contracts import (
     ObservableStateView,
     PlayerInput,
     PlayerView,
+    PlayerViewScope,
     SceneView,
     SelfActorView,
     VisibleActorView,
@@ -27,31 +28,42 @@ class PlayerViewProjector:
         self._source = source
 
     async def project(self, player_input: PlayerInput) -> PlayerView:
-        return await self._read(player_input)
+        return await self.project_scope(
+            PlayerViewScope(
+                room_id=player_input.room_id,
+                player_id=player_input.player_id,
+                actor_id=player_input.actor_id,
+            )
+        )
+
+    async def project_scope(self, scope: PlayerViewScope) -> PlayerView:
+        """Project a view for a read-only scope without fabricating a PlayerInput."""
+
+        return await self._read(scope)
 
     async def refresh(
         self,
         player_input: PlayerInput,
         action_result: ActionResult,
     ) -> PlayerView:
-        view = await self._read(player_input)
+        view = await self.project(player_input)
         if view.revision != action_result.view_revision:
             raise ContractError("动作后 PlayerView revision 与 ActionResult 不一致")
         return view
 
-    async def _read(self, player_input: PlayerInput) -> PlayerView:
-        snapshot = await self._source.read(player_input)
-        if snapshot.room_id != player_input.room_id:
-            raise ContractError("ProjectionSnapshot 与 PlayerInput 房间不一致")
+    async def _read(self, scope: PlayerViewScope) -> PlayerView:
+        snapshot = await self._source.read(scope)
+        if snapshot.room_id != scope.room_id:
+            raise ContractError("ProjectionSnapshot 与 PlayerViewScope 房间不一致")
         if (
-            snapshot.player_id != player_input.player_id
-            or snapshot.actor_id != player_input.actor_id
+            snapshot.player_id != scope.player_id
+            or snapshot.actor_id != scope.actor_id
         ):
-            raise ContractError("ProjectionSnapshot 与 PlayerInput 身份作用域不一致")
+            raise ContractError("ProjectionSnapshot 与 PlayerViewScope 身份作用域不一致")
         return PlayerView(
-            room_id=player_input.room_id,
-            player_id=player_input.player_id,
-            actor_id=player_input.actor_id,
+            room_id=scope.room_id,
+            player_id=scope.player_id,
+            actor_id=scope.actor_id,
             background=snapshot.background,
             scene_id=snapshot.scene_id,
             phase=snapshot.phase,
@@ -75,6 +87,7 @@ class PlayerViewProjector:
                 conditions=snapshot.self_actor.conditions,
                 equipment=snapshot.self_actor.equipment,
                 background_summary=snapshot.self_actor.background_summary,
+                public_status_summary=snapshot.self_actor.public_status_summary,
             ),
             scene=SceneView(
                 id=snapshot.scene.id,
@@ -119,6 +132,7 @@ class PlayerViewProjector:
                     VisibleActorView(
                         id=item.id,
                         name=item.name,
+                        occupation=item.occupation,
                         status_summary=item.status_summary,
                     )
                     for item in snapshot.scene.visible_actors

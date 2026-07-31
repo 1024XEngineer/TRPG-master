@@ -1,3 +1,5 @@
+"""PlayerView v2 projection, identity-scope, and revision-contract tests."""
+
 from __future__ import annotations
 
 import json
@@ -14,6 +16,7 @@ from collaboration_framework.contracts import (
     ModuleContent,
     NoCheck,
     PlayerInput,
+    PlayerViewScope,
 )
 from collaboration_framework.engine import (
     ActorResources,
@@ -183,6 +186,7 @@ def player_view_state() -> GameState:
                     "stealth": "潜行",
                 },
                 "notes": PRIVATE_NOTE,
+                "public_status": "衣着整洁。",
             },
             "resources": ActorResources(hp=9, san=54, mp=8, luck=45, mythos=2),
             "conditions": ("wounded",),
@@ -196,6 +200,7 @@ def player_view_state() -> GameState:
         state={
             "attributes": {"STR": 99},
             "skills": {OTHER_CARD_SECRET: 99},
+            "occupation": "医生",
             "background": OTHER_CARD_SECRET,
             "notes": OTHER_CARD_SECRET,
             "public_status": "手臂受伤，但仍能行动。",
@@ -256,8 +261,13 @@ class PlayerViewV2Tests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_projection_is_complete_revision_bound_and_player_safe(self) -> None:
-        snapshot = await self.service.read(player_input())
-        view = await PlayerViewProjector(self.service).project(player_input())
+        scope = PlayerViewScope(
+            room_id="room_01",
+            player_id="player_01",
+            actor_id="pc_1",
+        )
+        snapshot = await self.service.read(scope)
+        view = await PlayerViewProjector(self.service).project_scope(scope)
         encoded = view.model_dump_json()
 
         self.assertEqual(snapshot.revision, view.revision)
@@ -280,6 +290,7 @@ class PlayerViewV2Tests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(view.self_actor.conditions, ("wounded",))
         self.assertEqual(view.self_actor.equipment, ("手电筒",))
+        self.assertEqual(view.self_actor.public_status_summary, "衣着整洁。")
 
         self.assertEqual(view.scene.id, view.scene_id)
         self.assertEqual(view.scene.name, "安全书房")
@@ -298,10 +309,10 @@ class PlayerViewV2Tests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(
             [
-                (item.id, item.name, item.status_summary)
+                (item.id, item.name, item.occupation, item.status_summary)
                 for item in view.scene.visible_actors
             ],
-            [("pc_2", "同伴", "手臂受伤，但仍能行动。")],
+            [("pc_2", "同伴", "医生", "手臂受伤，但仍能行动。")],
         )
         self.assertEqual(view.scene.available_exits[0].id, "north_door")
         self.assertIsNone(view.scene.available_exits[0].destination)

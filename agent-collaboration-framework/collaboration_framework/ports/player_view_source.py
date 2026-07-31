@@ -2,8 +2,8 @@
 
 from typing import Protocol
 
-from collaboration_framework.contracts import PlayerInput, ProjectionSnapshot
+from collaboration_framework.contracts import PlayerViewScope, ProjectionSnapshot
 
 
 class PlayerViewSource(Protocol):
-    async def read(self, player_input: PlayerInput) -> ProjectionSnapshot: ...
+    async def read(self, scope: PlayerViewScope) -> ProjectionSnapshot: ...

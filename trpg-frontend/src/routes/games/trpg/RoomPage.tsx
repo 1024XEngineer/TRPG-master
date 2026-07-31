@@ -10,6 +10,23 @@ import { endGame } from '@/services/room'
 import { useRoomPlayers } from '@/hooks/useRoomPlayers'
 import { useRuleset } from '@/hooks/useRuleset'
 
+// `crypto.randomUUID()` 要求安全上下文（HTTPS 或 localhost）——CI Preview
+// 部署在纯 HTTP 的 IP:端口上（issue #200，域名/HTTPS 明确列在本期不做），
+// `isSecureContext` 为 false 时 `crypto.randomUUID` 整个是 `undefined`，
+// 调用直接抛 TypeError。这行抛出发生在 sendMessage 的参数求值阶段——
+// 比 submitPlayerAction 函数体还早，异常不会被任何 .catch() 接住，界面上
+// 不会有任何提示，行为是"点发送后什么都没发生"。`crypto.getRandomValues`
+// 不受这条限制（只有 `subtle`/`randomUUID` 这类更高层的 API 被安全上下文
+// 网关挡住），用它手搓一个符合 RFC4122 v4 格式的 UUID 作为兜底。
+function randomActionId(): string {
+  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID()
+  const bytes = crypto.getRandomValues(new Uint8Array(16))
+  bytes[6] = (bytes[6] & 0x0f) | 0x40
+  bytes[8] = (bytes[8] & 0x3f) | 0x80
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
+
 // ─── Types ───────────────────────────────────────────
 interface Message {
   type: 'system' | 'narr' | 'player' | 'dice'
@@ -1024,9 +1041,9 @@ export default function RoomPage() {
     if (!text || !playerId || suspended) return
     setInput('')
     if (channel === 'discussion') {
-      sdk.roomSocket.sendChat(playerId, { text, clientMessageId: crypto.randomUUID() })
+      sdk.roomSocket.sendChat(playerId, { text, clientMessageId: randomActionId() })
     } else {
-      submitPlayerAction({ clientActionId: crypto.randomUUID(), utterance: text })
+      submitPlayerAction({ clientActionId: randomActionId(), utterance: text })
     }
   }
 

@@ -1,0 +1,311 @@
+name: PR Preview
+
+# CI Preview（issue #200）：PR 开/更新时自动构建 backend+frontend 镜像、部署到
+# 预览服务器、在 PR 上评论访问链接；PR 关闭时自动回收。
+#
+# 顶层不再用 paths 过滤（跟旧版的关键差异）：paths 过滤器是基于"这个事件
+# 触发时 PR 的完整 diff"判断的——如果 PR 曾经改过 trpg-backend/** 触发了
+# 部署，后续又把这些改动全部撤销、最终 diff 只剩不在监视列表里的文件，
+# 后续 synchronize 甚至最终的 closed 事件都不会再匹配 paths，已部署的容器
+# 和目录会永久遗留、PR 评论也不会更新成"已回收"（fennoai review 抓到的
+# 真问题）。改成 workflow 本身总是对 opened/synchronize/reopened/closed
+# 触发，路径判断挪到 job 内部（见 changes job），只门控是否需要真的构建
+# 部署；teardown job 不受这个判断影响，只要事件是 closed 就一定跑。
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+
+# 按 PR 号分组只能防止"同一个 PR 的两次 push 互相打架"，防不了"两个不同
+# PR 算出同一个端口槽位、同时部署互相抢占同一个宿主机端口"（fennoai review
+# 抓到的真问题：docker compose 对同一个端口第二次 up 会直接报
+# "port is already allocated" 失败，不是"后部署的把先部署的挤掉"）。改成
+# 全仓库级别的单一队列——预览部署这种操作频率本来就不高，排队执行换来
+# 正确性，比并发换来的那点速度更值。
+concurrency:
+  group: pr-preview-deploy-lock
+  cancel-in-progress: false
+
+jobs:
+  changes:
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    outputs:
+      relevant: ${{ steps.filter.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            relevant:
+              - "trpg-backend/**"
+              - "trpg-frontend/**"
+              - "trpg-sdk/**"
+              - "agent-collaboration-framework/**"
+              - "docker-compose.preview.yml"
+              - ".github/workflows/pr-preview.yml"
+
+  deploy:
+    needs: changes
+    # fork 来的 PR 触发 `pull_request` 时，GITHUB_TOKEN 平台级强制降级成只读
+    # ——不管这里声明多少 permissions 都没用，push 镜像到 GHCR、在 PR 上评论
+    # 这两步必然失败。与其让每个 fork PR 都红一次，不如直接跳过整个 job：
+    # 见 issue #200「本期不做 · fork PR 的真实 AI 预览」，这里把范围收紧到
+    # "fork PR 完全不跑 Preview"，比"跑起来但降级"更准确地反映了 GitHub
+    # 的实际限制。
+    if: |
+      github.event.action != 'closed' &&
+      needs.changes.outputs.relevant == 'true' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 计算镜像 tag 与预览端口
+        id: meta
+        run: |
+          PR=${{ github.event.pull_request.number }}
+          OWNER_LOWER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+
+          # 预览服务器是 PortForward 网关（没有独立公网 IP），不是想开多少
+          # 端口就能开多少——只有网关那边显式配置过的端口才能从外部访问。
+          # 主分支持久预览固定占用 80→10005，PR 预览不能复用这个入口。
+          # 剩余显式配置了 4 对（内部端口 → 外部端口）：
+          #   12500→10496  5010→10497  5000→10498  9091→10499
+          # 用 PR 号取模从这 4 对里选一对：内部端口是 docker-compose 里
+          # frontend 服务实际绑定的宿主机端口，外部端口是评论里给出的访问
+          # 链接。这意味着**同时最多 4 个 PR 能有预览**——超过 4 个同时开着
+          # 的 PR 会撞进同一个槽位；"部署到预览服务器"那一步会显式检测这种
+          # 冲突并直接失败（不是静默覆盖），见下面的说明。真需要更多并发
+          # 槽位得找网关加映射。
+          INTERNAL_PORTS=(12500 5010 5000 9091)
+          EXTERNAL_PORTS=(10496 10497 10498 10499)
+          SLOT=$((PR % 4))
+
+          {
+            echo "backend_image=ghcr.io/$OWNER_LOWER/trpg-master-backend:pr-$PR"
+            echo "frontend_image=ghcr.io/$OWNER_LOWER/trpg-master-frontend:pr-$PR"
+            # 同一个 PR 号在生命周期内槽位固定，重新部署（push 新 commit）
+            # 不会换端口，评论里的链接不用改。
+            echo "internal_port=${INTERNAL_PORTS[$SLOT]}"
+            echo "external_port=${EXTERNAL_PORTS[$SLOT]}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: 登录 GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: 构建并推送 backend 镜像
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: trpg-backend/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.backend_image }}
+          cache-from: type=gha,scope=preview-backend
+          cache-to: type=gha,mode=max,scope=preview-backend
+
+      - name: 构建并推送 frontend 镜像
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: trpg-frontend/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.frontend_image }}
+          cache-from: type=gha,scope=preview-frontend
+          cache-to: type=gha,mode=max,scope=preview-frontend
+
+      - name: 准备 SSH
+        env:
+          SSH_KEY: ${{ secrets.PREVIEW_SSH_KEY }}
+          # 固定服务器 host key，不做运行时 ssh-keyscan：运行时 keyscan 拿到
+          # 的公钥没有可信来源，网络中的攻击者可以在 runner 和预览服务器之间
+          # 冒充服务器、拿到随后发送的 GHCR token 和 DeepSeek key（review
+          # 抓到的真问题）。这里写的是我直接从服务器本机 `ssh-keyscan`
+          # 出来、经过 SSH 连接亲自核实过指纹的三条 host key，作为 secret
+          # 存着（不是密钥，只是拓扑信息，但同样不写进这个公开文件）。
+          KNOWN_HOSTS: ${{ secrets.PREVIEW_SSH_KNOWN_HOSTS }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/preview_deploy_key
+          chmod 600 ~/.ssh/preview_deploy_key
+          echo "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: 部署到预览服务器
+        env:
+          SSH_HOST: ${{ secrets.PREVIEW_SSH_HOST }}
+          SSH_USER: ${{ secrets.PREVIEW_SSH_USER }}
+          SSH_PORT: ${{ secrets.PREVIEW_SSH_PORT }}
+          BACKEND_IMAGE: ${{ steps.meta.outputs.backend_image }}
+          FRONTEND_IMAGE: ${{ steps.meta.outputs.frontend_image }}
+          PORT: ${{ steps.meta.outputs.internal_port }}
+          PR: ${{ github.event.pull_request.number }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_ACTOR: ${{ github.actor }}
+          # Preview 专用 key，跟本地/生产用的 key 分开管理，方便单独限额/吊销。
+          DEEPSEEK_API_KEY: ${{ secrets.PREVIEW_DEEPSEEK_API_KEY }}
+        run: |
+          # 远程 provider 模式缺 key 时后端会启动失败（不是优雅降级，
+          # README「主持模型配置」一节已说明）——这个判断必须在部署前做，
+          # 不能让 compose 直接把空字符串当 key 传给 deepseek provider。
+          if [ -n "$DEEPSEEK_API_KEY" ]; then
+            HOST_MODEL_PROVIDER=deepseek
+          else
+            HOST_MODEL_PROVIDER=fake
+          fi
+
+          # 注意这里不再 scp 仓库里的 docker-compose.preview.yml——PR 分支
+          # 能修改这个文件的内容，而部署账号在 docker 组里（等同宿主机
+          # root）。如果直接执行 PR 自己带来的 compose 文件，任何有权限
+          # 给这个仓库开同仓库 PR 的人都能在 compose 里加宿主机根目录/
+          # docker.sock 挂载或 privileged 容器，从而拿到预览服务器的
+          # root（review 抓到的真问题，五条里最严重的一条）。改成部署脚本
+          # 只把镜像引用和端口当参数传给服务器上早就放好、PR 完全碰不到的
+          # 固定 compose 模板（~/trpg-previews/compose-template/，这份文件
+          # 只由有服务器访问权限的人手动维护，不经过 CI）——PR 能决定"用
+          # 哪个镜像"，决定不了"以什么权限、挂载什么运行这个镜像"。
+          ssh -p "$SSH_PORT" -i ~/.ssh/preview_deploy_key "$SSH_USER@$SSH_HOST" bash -s <<EOF
+            set -e
+            mkdir -p ~/trpg-previews/pr-$PR
+
+            # 端口槽位冲突检测：这个内部端口如果已经被别的 PR 的容器占着，
+            # docker compose up 只会报 "port is already allocated" 失败，
+            # 不会像旧注释说的那样"后部署的把先部署的挤掉"（review 抓到的
+            # 真问题）。这里显式查出占用者是谁，是自己就放行（重新部署），
+            # 是别人就直接失败并给出清楚的原因，不静默、也不驱逐别人的预览。
+            OCCUPANT=\$(docker ps --format '{{.Names}}\t{{.Ports}}' | grep ":$PORT->" | awk '{print \$1}' | head -1 || true)
+            if [ -n "\$OCCUPANT" ]; then
+              OCCUPANT_PR=\$(echo "\$OCCUPANT" | sed -E 's/^pr-([0-9]+)-.*/\1/')
+              if [ "\$OCCUPANT_PR" != "$PR" ]; then
+                echo "端口槽位（内部 $PORT）当前被 PR #\$OCCUPANT_PR 的预览占用，本次 PR #$PR 部署中止。" >&2
+                echo "预览服务器目前只有 4 个 PR 槽位（另有 1 个主分支持久预览槽位），同时开着的 PR 超过 4 个时会撞车——等 PR #\$OCCUPANT_PR 关闭回收后再重试，或者手动清理它的预览。" >&2
+                exit 1
+              fi
+            fi
+
+            cp ~/trpg-previews/compose-template/docker-compose.yml ~/trpg-previews/pr-$PR/docker-compose.yml
+            cd ~/trpg-previews/pr-$PR
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_ACTOR" --password-stdin
+            export BACKEND_IMAGE="$BACKEND_IMAGE"
+            export FRONTEND_IMAGE="$FRONTEND_IMAGE"
+            export PREVIEW_PORT="$PORT"
+            export HOST_MODEL_PROVIDER="$HOST_MODEL_PROVIDER"
+            export DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY"
+            docker compose -p pr-$PR pull
+            # --wait：等 healthcheck 真的通过再算这一步成功，镜像坏了/
+            # entrypoint 启动即崩溃会让这里失败，而不是"容器建起来了"就
+            # 当作部署成功、去发一条骗人的"已部署"评论（review 抓到的真
+            # 问题）。healthcheck 定义在 compose 模板里。
+            docker compose -p pr-$PR up -d --force-recreate --remove-orphans --wait --wait-timeout 90
+          EOF
+
+      - name: 在 PR 上评论预览链接
+        uses: actions/github-script@v7
+        env:
+          # 评论里给用户点的必须是外部端口（网关对外映射的那个），不是
+          # docker-compose 实际绑定的内部端口——这两个数字不一样，见上面
+          # "计算镜像 tag 与预览端口" 步骤的说明。上一步用 --wait 确认过
+          # 健康检查通过才会走到这里，失败时 GitHub Actions 默认跳过后续
+          # 步骤，不会执行到这条评论。
+          EXTERNAL_PORT: ${{ steps.meta.outputs.external_port }}
+          SSH_HOST: ${{ secrets.PREVIEW_SSH_HOST }}
+        with:
+          script: |
+            const marker = '<!-- pr-preview-comment -->';
+            const url = `http://${process.env.SSH_HOST}:${process.env.EXTERNAL_PORT}`;
+            const body = `${marker}\n### 🔍 CI Preview\n\n预览环境已部署：${url}\n\n> 未配置 Preview 专用 DeepSeek key 时，守秘人回复会是确定性占位文案，不影响其余功能验证。\n\n_最新一次 push 会自动更新这个预览，不需要重新打开链接。_`;
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find((c) => c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+  teardown:
+    # 不依赖 changes job（那个 job 对 closed 事件根本不跑），也不看
+    # paths——只要是 closed 事件就一定尝试回收，见文件顶部的说明。
+    if: github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: 计算槽位归属（仅用于按 PR 号定位目录，不涉及部署）
+        id: meta
+        run: |
+          echo "pr=${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
+
+      - name: 准备 SSH
+        env:
+          SSH_KEY: ${{ secrets.PREVIEW_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.PREVIEW_SSH_KNOWN_HOSTS }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/preview_deploy_key
+          chmod 600 ~/.ssh/preview_deploy_key
+          echo "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: 回收预览环境
+        env:
+          SSH_HOST: ${{ secrets.PREVIEW_SSH_HOST }}
+          SSH_USER: ${{ secrets.PREVIEW_SSH_USER }}
+          SSH_PORT: ${{ secrets.PREVIEW_SSH_PORT }}
+          PR: ${{ steps.meta.outputs.pr }}
+        run: |
+          # 同上：故意不加引号，$PR 要在 runner 这一侧展开（这里没有
+          # secret，纯粹是为了跟部署脚本保持同一套写法）。
+          ssh -p "$SSH_PORT" -i ~/.ssh/preview_deploy_key "$SSH_USER@$SSH_HOST" bash -s <<EOF
+            set -e
+            if [ -d ~/trpg-previews/pr-$PR ]; then
+              cd ~/trpg-previews/pr-$PR
+              docker compose -p pr-$PR down -v --remove-orphans || true
+              cd ~
+              rm -rf ~/trpg-previews/pr-$PR
+            fi
+          EOF
+
+      - name: 在 PR 上更新评论为已回收
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const marker = '<!-- pr-preview-comment -->';
+            const body = `${marker}\n### 🔍 CI Preview\n\n预览环境已回收。`;
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find((c) => c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            }

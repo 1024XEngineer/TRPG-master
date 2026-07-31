@@ -286,9 +286,7 @@ def _log_structured_usage(
         provider=provider,
         model=model,
         prompt_tokens=prompt_tokens if isinstance(prompt_tokens, int) else None,
-        completion_tokens=(
-            completion_tokens if isinstance(completion_tokens, int) else None
-        ),
+        completion_tokens=(completion_tokens if isinstance(completion_tokens, int) else None),
         total_tokens=total_tokens if isinstance(total_tokens, int) else None,
     )
 

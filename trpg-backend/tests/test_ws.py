@@ -407,8 +407,7 @@ def test_game_start_pushes_opening_narration_and_advances_phase(
     assert any(message.get("type") == "view.updated" for message in retry_progress)
     assert any(message.get("type") == "room.state" for message in retry_progress)
     assert not any(
-        message.get("type") in {"opening.started", "narration.push"}
-        for message in retry_progress
+        message.get("type") in {"opening.started", "narration.push"} for message in retry_progress
     )
 
     preview = sync_client.get(f"{ROOMS_BASE}/{room['roomCode']}").json()["data"]
@@ -420,8 +419,7 @@ def test_game_start_pushes_opening_narration_and_advances_phase(
     openings = [
         event
         for event in conversation
-        if event["type"] == "narration.push"
-        and event["payload"].get("messageId") == "game-opening"
+        if event["type"] == "narration.push" and event["payload"].get("messageId") == "game-opening"
     ]
     assert len(openings) == 1
     assert openings[0]["id"] == "game-opening"

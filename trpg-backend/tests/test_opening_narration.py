@@ -130,9 +130,7 @@ async def test_opening_model_failures_use_player_safe_template(
     outcome: str,
     failure_category: str,
 ) -> None:
-    result = await application(CandidateOpeningModel(outcome)).generate_opening(
-        opening_view()
-    )
+    result = await application(CandidateOpeningModel(outcome)).generate_opening(opening_view())
 
     assert result.result == "fallback"
     assert result.failure_category == failure_category
@@ -142,9 +140,7 @@ async def test_opening_model_failures_use_player_safe_template(
 
 
 async def test_valid_model_opening_mentions_every_public_participant() -> None:
-    result = await application(CandidateOpeningModel("valid")).generate_opening(
-        opening_view()
-    )
+    result = await application(CandidateOpeningModel("valid")).generate_opening(opening_view())
 
     assert result.result == "model"
     assert result.failure_category is None

@@ -218,9 +218,7 @@ class TurnApplication:
         else:
             try:
                 with anyio.fail_after(self.opening_narration_timeout_seconds):
-                    narration = await OpeningNarrator(
-                        self.opening_narration_model
-                    ).narrate(context)
+                    narration = await OpeningNarrator(self.opening_narration_model).narrate(context)
                 result = "model"
             except Exception as exc:  # the opening must never prevent entering InGame
                 failure_category = _opening_failure_category(exc)
@@ -828,9 +826,7 @@ def build_turn_application(
         else:
             raise ValueError("必须提供 Host Agent 意图解析依赖")
     assert intent_resolver is not None
-    opening_narration_model = (
-        opening_narration_model or FakeOpeningNarrationModel()
-    )
+    opening_narration_model = opening_narration_model or FakeOpeningNarrationModel()
     host_metadata = host_metadata or HostModelMetadata(
         provider="custom",
         model="custom",
@@ -843,9 +839,7 @@ def build_turn_application(
         opening_narration_model=opening_narration_model,
         host_metadata=host_metadata,
         opening_narration_mode=resolved_settings.opening_narration_mode,
-        opening_narration_timeout_seconds=(
-            resolved_settings.opening_narration_timeout_seconds
-        ),
+        opening_narration_timeout_seconds=(resolved_settings.opening_narration_timeout_seconds),
         recent_history_source=recent_history_source or EmptyRecentHistorySource(),
         recent_history_budget=RecentHistoryBudget(
             max_turns=resolved_settings.recent_history_max_turns,

@@ -20,9 +20,8 @@
 `main` 有新提交（包括 PR 合并）后会自动更新持久预览环境，前端入口固定使用
 网关端口 `10005`，地址不会随着部署变化：
 
-- [TRPG-master 持久预览](http://PREVIEW_SSH_HOST:10005)
+- [TRPG-master 持久预览](http://218.11.5.114:10005)
 
-将链接中的 `<PREVIEW_SSH_HOST>` 替换为仓库 secret `PREVIEW_SSH_HOST` 的值。
 该环境只保留面向用户的前端入口，`/api` 和 `/ws` 由 Caddy 反向代理到后端；
 数据库随容器重建而重置，未配置 Preview 专用 DeepSeek key 时使用 Fake Provider。
 

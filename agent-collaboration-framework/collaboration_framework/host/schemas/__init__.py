@@ -12,7 +12,13 @@ from .agent import (
     HostAgentToolStarted,
     HostAgentUsage,
 )
-from .context import IntentContext, NarrationContext
+from .context import (
+    IntentContext,
+    NarrationContext,
+    OpeningNarrationContext,
+    OpeningParticipant,
+    OpeningSceneContext,
+)
 from .history import (
     HistoryVisibility,
     RecentHistoryBudget,
@@ -59,6 +65,9 @@ __all__ = [
     "HistoryVisibility",
     "NarrationContext",
     "NarrationOutput",
+    "OpeningNarrationContext",
+    "OpeningParticipant",
+    "OpeningSceneContext",
     "PlayerTurnPayload",
     "RecentHistoryBudget",
     "RecentSafeResult",

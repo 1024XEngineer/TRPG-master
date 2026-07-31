@@ -1,7 +1,13 @@
+from dataclasses import replace
+
 import pytest
 from collaboration_framework.contracts import ContractError, JsonObject
 from collaboration_framework.host.adapters.fakes import FakeNarrationModel
-from collaboration_framework.host.schemas import IntentContext, NarrationContext
+from collaboration_framework.host.schemas import (
+    IntentContext,
+    NarrationContext,
+    OpeningNarrationContext,
+)
 from starlette.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
@@ -87,6 +93,17 @@ class _WsEscapedNewlineNarration:
         return {
             "kind": "narration",
             "text": "第一段\\r\\n第二段\\n第三段",
+            "claimed_fact_ids": [],
+            "suggested_actions": [],
+        }
+
+
+class _WsMissingParticipantOpening:
+    async def generate(self, context: OpeningNarrationContext) -> JsonObject:
+        del context
+        return {
+            "kind": "narration",
+            "text": "这段模型输出遗漏了所有在场角色姓名。",
             "claimed_fact_ids": [],
             "suggested_actions": [],
         }
@@ -206,11 +223,15 @@ def start_game(client: TestClient, room: dict, token: str) -> None:
         )
         assert ws.receive_json()["type"] == "session.bound"
         ws.send_json({"type": "game.start", "playerId": room["playerId"], "payload": {}})
-        view = ws.receive_json()
+        narration, progress = receive_until(
+            ws,
+            lambda message: message.get("type") == "narration.push",
+        )
+        view = next(message for message in progress if message.get("type") == "view.updated")
         assert view["type"] == "view.updated"
         assert view["payload"]["playerId"] == room["playerId"]
-        assert ws.receive_json()["type"] == "narration.push"
-        assert ws.receive_json()["type"] == "room.state"
+        assert narration["payload"]["messageId"] == "game-opening"
+        assert any(message.get("type") == "room.state" for message in progress)
 
 
 def receive_until(ws, predicate, *, limit: int = 24):
@@ -356,19 +377,105 @@ def test_game_start_pushes_opening_narration_and_advances_phase(
         )
         ws.receive_json()  # session.bound
         ws.send_json({"type": "game.start", "playerId": room["playerId"], "payload": {}})
-        view = ws.receive_json()
-        envelope = ws.receive_json()
-        room_state = ws.receive_json()
+        envelope, progress = receive_until(
+            ws,
+            lambda message: message.get("type") == "narration.push",
+        )
+        ws.send_json({"type": "game.start", "playerId": room["playerId"], "payload": {}})
+        ws.send_json(
+            {
+                "type": "room.join",
+                "playerId": room["playerId"],
+                "payload": {"reconnectToken": room["reconnectToken"]},
+            }
+        )
+        _, retry_progress = receive_until(
+            ws,
+            lambda message: message.get("type") == "session.bound",
+        )
 
+    view = next(message for message in progress if message.get("type") == "view.updated")
+    room_state = next(message for message in progress if message.get("type") == "room.state")
     assert view["type"] == "view.updated"
     assert view["payload"]["playerView"]["scene"]["name"] == "托马斯的会客室"
     assert envelope["type"] == "narration.push"
+    assert envelope["payload"]["messageId"] == "game-opening"
     assert "托马斯的会客室" in envelope["payload"]["text"]
     assert room_state["type"] == "room.state"
     assert room_state["payload"]["phase"] == "InGame"
+    assert any(message.get("type") == "opening.started" for message in progress)
+    assert any(message.get("type") == "view.updated" for message in retry_progress)
+    assert any(message.get("type") == "room.state" for message in retry_progress)
+    assert not any(
+        message.get("type") in {"opening.started", "narration.push"}
+        for message in retry_progress
+    )
 
     preview = sync_client.get(f"{ROOMS_BASE}/{room['roomCode']}").json()["data"]
     assert preview["phase"] == "InGame"
+    conversation = sync_client.get(
+        f"{ROOMS_BASE}/{room['roomId']}/conversation",
+        headers={"X-Reconnect-Token": room["reconnectToken"]},
+    ).json()["data"]
+    openings = [
+        event
+        for event in conversation
+        if event["type"] == "narration.push"
+        and event["payload"].get("messageId") == "game-opening"
+    ]
+    assert len(openings) == 1
+    assert openings[0]["id"] == "game-opening"
+    replay = sync_client.get(
+        f"{ROOMS_BASE}/{room['roomId']}/replay",
+        headers={"X-Reconnect-Token": room["reconnectToken"]},
+    ).json()["data"]
+    persisted_opening = next(
+        event
+        for event in replay
+        if event["eventType"] == "narration.push"
+        and event["payload"].get("messageId") == "game-opening"
+    )
+    assert persisted_opening["playerId"] is None
+    assert persisted_opening["payload"] == envelope["payload"]
+
+
+def test_invalid_opening_model_falls_back_after_room_enters_in_game(
+    sync_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    token = register_and_login(sync_client, "opening_fallback_host")
+    room = create_room(sync_client, token)
+    advance_to_building(sync_client, room)
+    complete_character(sync_client, room["roomId"], room["reconnectToken"])
+    monkeypatch.setattr(
+        ws_controller,
+        "turn_application",
+        replace(
+            ws_controller.turn_application,
+            opening_narration_model=_WsMissingParticipantOpening(),
+        ),
+    )
+
+    with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
+        ws.send_json(
+            {
+                "type": "room.join",
+                "playerId": room["playerId"],
+                "payload": {"reconnectToken": room["reconnectToken"]},
+            }
+        )
+        ws.receive_json()
+        ws.send_json({"type": "game.start", "playerId": room["playerId"], "payload": {}})
+        opening, progress = receive_until(
+            ws,
+            lambda message: message.get("type") == "narration.push",
+        )
+
+    assert opening["payload"]["messageId"] == "game-opening"
+    assert "托马斯的会客室" in opening["payload"]["text"]
+    assert "陈探员" in opening["payload"]["text"]
+    room_state = next(message for message in progress if message.get("type") == "room.state")
+    assert room_state["payload"]["phase"] == "InGame"
 
 
 def test_game_start_rejects_non_host(sync_client: TestClient) -> None:
@@ -520,6 +627,7 @@ def test_action_submit_broadcasts_narration_to_room_only(sync_client: TestClient
     assert action_echo["type"] == "action.broadcast"
     assert action_echo["payload"]["utterance"] == "我看看托马斯"
     assert narration["type"] == "narration.push"
+    assert narration["payload"]["messageId"] == "action-broadcast-122"
     assert guest_narration == narration
     assert retried["message_type"] == "turn.completed"
     assert next_after_retry["type"] == "session.bound"
@@ -541,6 +649,7 @@ def test_action_submit_broadcasts_narration_to_room_only(sync_client: TestClient
         and event["payload"]["text"] == narration["payload"]["text"]
     ]
     assert len(action_narrations) == 1
+    assert action_narrations[0]["payload"]["messageId"] == "action-broadcast-122"
 
 
 def test_invalid_narration_fails_closed_then_original_request_recovers(

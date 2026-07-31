@@ -84,6 +84,7 @@ from app.dto.ws import (
     ErrorPayload,
     GameStartPayload,
     NarrationPushPayload,
+    OpeningStartedPayload,
     PlayerReadyPayload,
     RoomJoinPayload,
     RoomRejoinPayload,
@@ -109,6 +110,7 @@ logger = structlog.get_logger()
 
 _UNAUTHORIZED_CLOSE_CODE = 4401
 _NOT_FOUND_CLOSE_CODE = 4404
+_OPENING_MESSAGE_ID = "game-opening"
 
 
 @asynccontextmanager
@@ -214,38 +216,61 @@ async def _send_view_updated(
     await websocket.send_json(envelope.model_dump(by_alias=True))
 
 
-async def _broadcast_narration(
+async def _ensure_opening_narration(
     db: AsyncSession,
     room_id: str,
-    player_id: str | None,
-    text: str,
     player_view: PlayerView,
-) -> None:
-    """广播一条 narration.push，并同步写一行 `events` 表——`GET
-    /rooms/{roomId}/replay` 读的就是这里写入的数据（issue #77 才打通的
-    EventLog 闭环，此前"不记 EventLog"是已知缺口）。
-    """
-    text = normalize_narration_text(text)
-    narration = NarrationPushPayload(text=text)
-    envelope = ServerEnvelope(type="narration.push", payload=narration.model_dump(by_alias=True))
-    await room_service.record_event(
+) -> bool:
+    """Persist and broadcast the room's single authoritative opening."""
+
+    existing = await room_service.get_correlated_event(
         db,
         room_id,
-        player_id,
         "narration.push",
-        {"text": text},
+        _OPENING_MESSAGE_ID,
+    )
+    if existing is not None:
+        return False
+
+    if turn_application.opening_narration_mode == "model":
+        started = OpeningStartedPayload(message_id=_OPENING_MESSAGE_ID)
+        await manager.broadcast(
+            room_id,
+            ServerEnvelope(
+                type="opening.started",
+                payload=started.model_dump(by_alias=True),
+            ).model_dump(by_alias=True),
+        )
+
+    generated = await turn_application.generate_opening(player_view)
+    narration = NarrationPushPayload(
+        message_id=_OPENING_MESSAGE_ID,
+        text=normalize_narration_text(generated.narration.text),
+    )
+    payload = narration.model_dump(by_alias=True)
+    recorded = await room_service.record_event(
+        db,
+        room_id,
+        None,
+        "narration.push",
+        payload,
         visibility="public",
-        actor_id=player_view.actor_id,
+        actor_id=None,
         scene_id=player_view.scene_id,
         view_revision=player_view.revision,
+        correlation_id=_OPENING_MESSAGE_ID,
     )
-    log_narration_output(
-        room_id=room_id,
-        correlation_id=None,
-        text=text,
-        clarification=False,
-    )
+    if not recorded:
+        await room_service.get_correlated_event(
+            db,
+            room_id,
+            "narration.push",
+            _OPENING_MESSAGE_ID,
+        )
+        return False
+    envelope = ServerEnvelope(type="narration.push", payload=payload)
     await manager.broadcast(room_id, envelope.model_dump(by_alias=True))
+    return True
 
 
 async def _deliver_turn_narration(
@@ -264,12 +289,17 @@ async def _deliver_turn_narration(
     """持久化去重成功后才发送一次动作叙事。"""
 
     text = normalize_narration_text(text)
+    narration = NarrationPushPayload(
+        message_id=client_action_id,
+        text=text,
+    )
+    payload = narration.model_dump(by_alias=True)
     recorded = await room_service.record_event(
         db,
         room_id,
         player_id,
         "narration.push",
-        {"text": text},
+        payload,
         visibility="player_scoped" if clarification else "public",
         actor_id=actor_id,
         scene_id=scene_id,
@@ -284,8 +314,7 @@ async def _deliver_turn_narration(
         text=text,
         clarification=clarification,
     )
-    narration = NarrationPushPayload(text=text)
-    envelope = ServerEnvelope(type="narration.push", payload=narration.model_dump(by_alias=True))
+    envelope = ServerEnvelope(type="narration.push", payload=payload)
     message = envelope.model_dump(by_alias=True)
     if clarification:
         await websocket.send_json(message)
@@ -675,14 +704,12 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                             bound_player_id,
                             initial_view,
                         )
-                        await _broadcast_narration(
+                        await broadcast_room_state(db, room_id)
+                        await _ensure_opening_narration(
                             db,
                             room_id,
-                            bound_player_id,
-                            (f"{initial_view.scene.name}\n{initial_view.scene.description}"),
                             initial_view,
                         )
-                        await broadcast_room_state(db, room_id)
                     elif event_type == "chat.send":
                         chat_payload = ChatSendPayload.model_validate(raw_payload)
                         await _handle_chat_send(

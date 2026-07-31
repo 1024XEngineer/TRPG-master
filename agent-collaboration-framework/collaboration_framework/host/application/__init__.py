@@ -16,6 +16,11 @@ from .intent_aligner import (
 )
 from .intent_parser import IntentParser, validate_intent_against_view
 from .narrator import NarrationValidationError, Narrator, normalize_narration_text
+from .opening_narrator import (
+    OpeningNarrationValidationError,
+    OpeningNarrator,
+    deterministic_opening_narration,
+)
 from .orchestrator import Orchestrator
 from .player_view_projector import PlayerViewProjector
 from .tool_registry import (
@@ -36,6 +41,8 @@ __all__ = [
     "IntentParser",
     "NarrationValidationError",
     "Narrator",
+    "OpeningNarrationValidationError",
+    "OpeningNarrator",
     "Orchestrator",
     "PlayerViewProjector",
     "REFERENCE_MODULE_ACTIONS",
@@ -49,6 +56,7 @@ __all__ = [
     "is_scene_query_utterance",
     "intent_action_contract",
     "normalize_narration_text",
+    "deterministic_opening_narration",
     "recover_travel_intent",
     "validate_intent_against_view",
 ]

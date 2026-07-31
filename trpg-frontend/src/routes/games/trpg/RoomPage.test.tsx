@@ -1,7 +1,11 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { RoomConversationEvent, ServerToClientEvent } from 'trpg-sdk'
+import type {
+  AgentPlayerView,
+  RoomConversationEvent,
+  ServerToClientEvent,
+} from 'trpg-sdk'
 import RoomPage from './RoomPage'
 import { useAuthStore } from '@/stores/auth-store'
 import { useCharacterStore } from '@/stores/character-store'
@@ -9,6 +13,7 @@ import { useRoomStore } from '@/stores/room-store'
 
 const {
   emitWsMessage,
+  mockGetOpeningMessageId,
   mockGetPlayerView,
   mockJoinRoom,
   mockListConversation,
@@ -24,6 +29,7 @@ const {
     emitWsMessage: (event: ServerToClientEvent) => {
       for (const handler of handlers) handler(event)
     },
+    mockGetOpeningMessageId: vi.fn(),
     mockGetPlayerView: vi.fn(),
     mockJoinRoom: vi.fn(),
     mockListConversation: vi.fn(),
@@ -48,6 +54,7 @@ vi.mock('@/services/api-client', () => ({
       listConversation: mockListConversation,
     },
     roomSocket: {
+      getOpeningMessageId: mockGetOpeningMessageId,
       getPlayerView: mockGetPlayerView,
       joinRoom: mockJoinRoom,
       rollCheck: mockRollCheck,
@@ -91,6 +98,40 @@ function renderRoomPage() {
       <RoomPage />
     </MemoryRouter>,
   )
+}
+
+function playerViewFixture(): AgentPlayerView {
+  return {
+    room_id: 'room-1',
+    player_id: 'player-1',
+    actor_id: 'actor-1',
+    scene_id: 'scene-1',
+    phase: 'playing',
+    revision: 'revision-1',
+    self_actor: {
+      id: 'actor-1',
+      name: '杜调查员',
+      occupation: '记者',
+      attributes: [],
+      skills: [],
+      resources: [],
+      conditions: [],
+      equipment: [],
+      background_summary: '仅本人可见',
+      public_status_summary: '神色警觉',
+    },
+    scene: {
+      id: 'scene-1',
+      name: '旧宅门厅',
+      description: '仅用于确认视图不会生成开场的场景描述',
+      time: '深夜',
+      visible_entities: [],
+      visible_actors: [],
+      available_exits: [],
+    },
+    known_information: [],
+    checkpoint_options: [],
+  }
 }
 
 function conversationHistory(): RoomConversationEvent[] {
@@ -170,6 +211,7 @@ describe('RoomPage conversation history', () => {
     })
     useAuthStore.getState().login('token-1', 'user-1', '陈探员')
     mockGetPlayerView.mockReturnValue(null)
+    mockGetOpeningMessageId.mockReturnValue(null)
     mockListConversation.mockResolvedValue([])
     mockSubmitAction.mockReturnValue(new Promise(() => undefined))
   })
@@ -216,6 +258,116 @@ describe('RoomPage conversation history', () => {
 
     await waitFor(() => {
       expect(screen.getAllByText('我查看书架')).toHaveLength(1)
+    })
+  })
+
+  it('does not create an opening from view.updated alone', async () => {
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    emitWsMessage({
+      type: 'view.updated',
+      payload: {
+        playerId: 'player-1',
+        playerView: playerViewFixture(),
+      },
+    })
+
+    await waitFor(() => {
+      expect(
+        screen.queryByText('仅用于确认视图不会生成开场的场景描述'),
+      ).not.toBeInTheDocument()
+    })
+  })
+
+  it('deduplicates game-opening when history arrives before realtime', async () => {
+    mockListConversation.mockResolvedValue([
+      {
+        id: 'game-opening',
+        type: 'narration.push',
+        channel: 'action',
+        payload: {
+          messageId: 'game-opening',
+          text: '唯一的权威开场',
+        },
+        createdAt: '2026-07-28T10:03:00Z',
+      },
+    ])
+    renderRoomPage()
+    expect(await screen.findByText('唯一的权威开场')).toBeInTheDocument()
+
+    emitWsMessage({
+      type: 'narration.push',
+      payload: {
+        messageId: 'game-opening',
+        text: '唯一的权威开场',
+      },
+    })
+
+    await waitFor(() => {
+      expect(screen.getAllByText('唯一的权威开场')).toHaveLength(1)
+    })
+  })
+
+  it('deduplicates game-opening when realtime arrives before history', async () => {
+    let resolveHistory!: (events: RoomConversationEvent[]) => void
+    mockListConversation.mockReturnValue(
+      new Promise<RoomConversationEvent[]>((resolve) => {
+        resolveHistory = resolve
+      }),
+    )
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    emitWsMessage({
+      type: 'narration.push',
+      payload: {
+        messageId: 'game-opening',
+        text: '实时先到的权威开场',
+      },
+    })
+    expect(await screen.findByText('实时先到的权威开场')).toBeInTheDocument()
+
+    await act(async () => {
+      resolveHistory([
+        {
+          id: 'game-opening',
+          type: 'narration.push',
+          channel: 'action',
+          payload: {
+            messageId: 'game-opening',
+            text: '实时先到的权威开场',
+          },
+          createdAt: '2026-07-28T10:03:00Z',
+        },
+      ])
+    })
+
+    await waitFor(() => {
+      expect(screen.getAllByText('实时先到的权威开场')).toHaveLength(1)
+    })
+  })
+
+  it('shows opening progress and clears it when the opening arrives', async () => {
+    mockGetOpeningMessageId.mockReturnValue('game-opening')
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    expect(
+      await screen.findByText('守秘人正在生成开场叙事'),
+    ).toBeInTheDocument()
+
+    emitWsMessage({
+      type: 'narration.push',
+      payload: {
+        messageId: 'game-opening',
+        text: '生成完成的开场',
+      },
+    })
+    await waitFor(() => {
+      expect(
+        screen.queryByText('守秘人正在生成开场叙事'),
+      ).not.toBeInTheDocument()
     })
   })
 

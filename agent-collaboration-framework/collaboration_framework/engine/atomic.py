@@ -6,7 +6,7 @@ from collaboration_framework.contracts import (
     ActionRequest,
     ActionResult,
     ModuleContent,
-    PlayerInput,
+    PlayerViewScope,
     ProjectionSnapshot,
 )
 
@@ -27,8 +27,8 @@ class FakeAtomicEngine:
         )
         self._service = RuleEngineService(self._store)
 
-    async def read(self, player_input: PlayerInput) -> ProjectionSnapshot:
-        return await self._service.read(player_input)
+    async def read(self, scope: PlayerViewScope) -> ProjectionSnapshot:
+        return await self._service.read(scope)
 
     async def execute(self, request: ActionRequest) -> ActionResult:
         return await self._service.execute(request)

@@ -63,6 +63,7 @@ export type {
   GameStartPayload,
   SessionBoundPayload,
   NarrationPushPayload,
+  OpeningStartedPayload,
   // WebSocket 新增 14 个事件（issue #77）
   CheckRollPayload,
   SanCheckRollPayload,
@@ -118,6 +119,7 @@ import type {
   ErrorPayload,
   GameEndedPayload,
   NarrationPushPayload,
+  OpeningStartedPayload,
   PlayerJoinedPayload,
   RoomStatePayload,
   SanCheckRequestPayload,
@@ -144,6 +146,7 @@ import type {
 export type ServerToClientEvent =
   | { type: 'session.bound'; payload: SessionBoundPayload }
   | { type: 'narration.push'; payload: NarrationPushPayload }
+  | { type: 'opening.started'; payload: OpeningStartedPayload }
   | { type: 'turn.started'; payload: TurnStartedPayload }
   | { type: 'turn.phase_changed'; payload: TurnPhaseChangedPayload }
   | { type: 'tool.started'; payload: ToolStartedPayload }
@@ -237,6 +240,7 @@ export interface AgentSelfActor {
   conditions: string[];
   equipment: string[];
   background_summary: string;
+  public_status_summary?: string;
 }
 
 export interface AgentObservableState {
@@ -257,6 +261,7 @@ export interface AgentVisibleEntity {
 export interface AgentVisibleActor {
   id: string;
   name: string;
+  occupation?: string | null;
   status_summary: string;
 }
 

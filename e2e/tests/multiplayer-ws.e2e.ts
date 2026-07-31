@@ -41,13 +41,14 @@ function waitForEvent(
 async function buildCharacter(
   sdk: Awaited<ReturnType<typeof registerPlayer>>['sdk'],
   roomId: string,
-  reconnectToken: string
+  reconnectToken: string,
+  characterName = 'E2E 调查员',
 ): Promise<void> {
   const draft = await sdk.characters.createDraft(roomId, reconnectToken)
   await sdk.characters.save(
     roomId,
     draft.characterId,
-    legalCharacterPayload(LEGAL_ATTRIBUTES),
+    { ...legalCharacterPayload(LEGAL_ATTRIBUTES), name: characterName },
     reconnectToken
   )
   await sdk.characters.complete(roomId, draft.characterId, reconnectToken)
@@ -76,8 +77,18 @@ test('WS 生命周期：join → session.bound，全员建卡后房主可以 gam
   await room.host.sdk.rooms.startStory(room.roomId, room.reconnectToken)
 
   // 两人各自建卡——game.start 要求全员建完
-  await buildCharacter(room.host.sdk, room.roomId, room.reconnectToken)
-  await buildCharacter(guest.sdk, room.roomId, joined.reconnectToken)
+  await buildCharacter(
+    room.host.sdk,
+    room.roomId,
+    room.reconnectToken,
+    '房主调查员',
+  )
+  await buildCharacter(
+    guest.sdk,
+    room.roomId,
+    joined.reconnectToken,
+    '访客调查员',
+  )
 
   // ⚠️ `try` 必须从 **connect() 之后的第一行**就开始，把 waitForOpen 和绑定
   // 阶段也罩进去。这两步同样会失败/超时，而句柄那时已经建立了——漏在 try 外面
@@ -99,6 +110,22 @@ test('WS 生命周期：join → session.bound，全员建卡后房主可以 gam
     room.host.sdk.roomSocket.startGame(room.hostPlayerId)
     const narrationEvent = await narration
     assert.equal(narrationEvent.type, 'narration.push')
+    assert.equal(narrationEvent.payload.messageId, 'game-opening')
+    assert.match(narrationEvent.payload.text, /房主调查员/)
+    assert.match(narrationEvent.payload.text, /访客调查员/)
+    assert.match(narrationEvent.payload.text, /会计师/)
+
+    const conversation = await room.host.sdk.rooms.listConversation(
+      room.roomId,
+      room.reconnectToken,
+    )
+    const openings = conversation.filter(
+      (event) =>
+        event.type === 'narration.push' &&
+        event.payload.messageId === 'game-opening',
+    )
+    assert.equal(openings.length, 1)
+    assert.equal(openings[0]?.id, 'game-opening')
   } finally {
     room.host.sdk.roomSocket.disconnect()
   }
@@ -134,7 +161,18 @@ test('提交行动会广播给房间里的所有人（不只是发起者）', as
     const hostOpening = waitForEvent(room.host.sdk, (e) => e.type === 'narration.push')
     const guestOpening = waitForEvent(guest.sdk, (e) => e.type === 'narration.push')
     room.host.sdk.roomSocket.startGame(room.hostPlayerId)
-    await Promise.all([hostOpening, guestOpening])
+    const [hostOpeningEvent, guestOpeningEvent] = await Promise.all([
+      hostOpening,
+      guestOpening,
+    ])
+    if (
+      hostOpeningEvent.type === 'narration.push' &&
+      guestOpeningEvent.type === 'narration.push'
+    ) {
+      assert.equal(hostOpeningEvent.payload.messageId, 'game-opening')
+      assert.equal(guestOpeningEvent.payload.messageId, 'game-opening')
+      assert.deepEqual(guestOpeningEvent.payload, hostOpeningEvent.payload)
+    }
 
     // 房主提交行动，**访客**这一侧应该收到广播
     const guestHears = waitForEvent(guest.sdk, (e) => e.type === 'narration.push')
@@ -175,8 +213,16 @@ test('追书人纵切：首场景 → 托马斯 → 图书馆 → 旧报检定 �
       (event) => event.type === 'narration.push'
     )
     room.host.sdk.roomSocket.startGame(room.hostPlayerId)
-    const [initialView] = await Promise.all([openingView, openingNarration])
+    const [initialView, opening] = await Promise.all([
+      openingView,
+      openingNarration,
+    ])
     assert.equal(initialView.type, 'view.updated')
+    assert.equal(opening.type, 'narration.push')
+    assert.equal(opening.payload.messageId, 'game-opening')
+    assert.match(opening.payload.text, /托马斯的会客室/)
+    assert.match(opening.payload.text, /E2E 调查员/)
+    assert.match(opening.payload.text, /会计师/)
     assert.equal(initialView.payload.playerView.scene.name, '托马斯的会客室')
     assert.ok(
       initialView.payload.playerView.scene.available_exits.some(

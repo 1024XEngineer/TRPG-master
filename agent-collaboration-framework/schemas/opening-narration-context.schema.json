@@ -1,0 +1,155 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "opening-narration-context.schema.json",
+  "$defs": {
+    "NarrativeDetailView": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "description",
+            "sensory",
+            "atmosphere",
+            "pacing",
+            "foreshadowing"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "text"
+      ],
+      "title": "NarrativeDetailView",
+      "type": "object"
+    },
+    "OpeningParticipant": {
+      "additionalProperties": false,
+      "properties": {
+        "actor_id": {
+          "minLength": 1,
+          "title": "Actor Id",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "occupation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Occupation"
+        },
+        "status_summary": {
+          "default": "",
+          "title": "Status Summary",
+          "type": "string"
+        }
+      },
+      "required": [
+        "actor_id",
+        "name"
+      ],
+      "title": "OpeningParticipant",
+      "type": "object"
+    },
+    "OpeningSceneContext": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "time": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Time"
+        },
+        "narrative_details": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/NarrativeDetailView"
+          },
+          "title": "Narrative Details",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "description"
+      ],
+      "title": "OpeningSceneContext",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Player-safe context for one authoritative public game opening.",
+  "properties": {
+    "background": {
+      "description": "玩家可知的时代、地点、故事前提与叙事基调。",
+      "minLength": 1,
+      "title": "Background",
+      "type": "string"
+    },
+    "scene": {
+      "$ref": "#/$defs/OpeningSceneContext"
+    },
+    "participants": {
+      "items": {
+        "$ref": "#/$defs/OpeningParticipant"
+      },
+      "minItems": 1,
+      "title": "Participants",
+      "type": "array"
+    },
+    "solo_background_summary": {
+      "default": "",
+      "title": "Solo Background Summary",
+      "type": "string"
+    }
+  },
+  "required": [
+    "background",
+    "scene",
+    "participants"
+  ],
+  "title": "OpeningNarrationContext",
+  "type": "object"
+}

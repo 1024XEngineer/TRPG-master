@@ -538,6 +538,11 @@
           "default": "",
           "title": "Background Summary",
           "type": "string"
+        },
+        "public_status_summary": {
+          "default": "",
+          "title": "Public Status Summary",
+          "type": "string"
         }
       },
       "required": [
@@ -559,6 +564,18 @@
           "minLength": 1,
           "title": "Name",
           "type": "string"
+        },
+        "occupation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Occupation"
         },
         "status_summary": {
           "default": "",

@@ -167,11 +167,11 @@ function conversationEventToMessage(
     }
   }
   if (event.type === 'narration.push') {
-    const payload = event.payload as { text: string }
+    const payload = event.payload as { messageId?: string | null; text: string }
     return {
       type: 'narr',
       channel: 'action',
-      messageId: conversationMessageId(event.type, event.id),
+      messageId: conversationMessageId(event.type, payload.messageId || event.id),
       sender: '守秘人',
       content: payload.text,
       time: formatRoomTime(event.createdAt),
@@ -808,20 +808,18 @@ export default function RoomPage() {
         .map((event) => conversationEventToMessage(event, playerId, senderName))
         .filter((item): item is Message => item !== null)
       setMessages((current) => mergeHistoricalMessages(current, restored))
+      if (
+        restored.some(
+          (item) =>
+            item.messageId === conversationMessageId('narration.push', 'game-opening'),
+        )
+      ) {
+        setTyping(false)
+        setProgressLabel(null)
+      }
     }).catch(() => {})
     return () => { cancelled = true }
   }, [roomId, reconnectToken, playerId, senderName])
-
-  useEffect(() => {
-    if (!playerView) return
-    const openingText = `${playerView.scene.name}\n${playerView.scene.description}`
-    setMessages(prev => prev.length > 0 ? prev : [{
-      type: 'narr', channel: 'action',
-      sender: '守秘人',
-      content: openingText,
-      time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
-    }])
-  }, [playerView])
 
   useEffect(() => {
     // ★ block: 'nearest' 很关键——默认的 scrollIntoView 会尝试把目标"居中"，
@@ -861,9 +859,15 @@ export default function RoomPage() {
         setTyping(false)
         setProgressLabel(null)
         setMessages(prev => {
-          const messageId = pendingNarrationActionIdRef.current
-            ? conversationMessageId('narration.push', pendingNarrationActionIdRef.current)
-            : undefined
+          const authoritativeId = envelope.payload.messageId?.trim()
+          const messageId = authoritativeId
+            ? conversationMessageId('narration.push', authoritativeId)
+            : pendingNarrationActionIdRef.current
+              ? conversationMessageId(
+                  'narration.push',
+                  pendingNarrationActionIdRef.current,
+                )
+              : undefined
           if (messageId && prev.some((item) => item.messageId === messageId)) {
             pendingNarrationActionIdRef.current = null
             return prev
@@ -879,6 +883,9 @@ export default function RoomPage() {
             time: formatRoomTime(new Date()),
           })
         })
+      } else if (envelope.type === 'opening.started') {
+        setTyping(true)
+        setProgressLabel('守秘人正在生成开场叙事')
       } else if (envelope.type === 'room.state') {
         setRoomPhase(envelope.payload.phase)
       } else if (envelope.type === 'chat.message') {
@@ -986,6 +993,10 @@ export default function RoomPage() {
         pendingNarrationActionIdRef.current = null
       }
     })
+    if (sdk.roomSocket.getOpeningMessageId() === 'game-opening') {
+      setTyping(true)
+      setProgressLabel('守秘人正在生成开场叙事')
+    }
     return off
   }, [playerId, senderName])
 

@@ -42,6 +42,8 @@ services:
       # 宽松值只是兜底（比如直接拿后端端口调试），不依赖它生效。
       CORS_ORIGINS: '["*"]'
       HOST_MODEL_PROVIDER: ${HOST_MODEL_PROVIDER:-fake}
+      OPENING_NARRATION_MODE: ${OPENING_NARRATION_MODE:-model}
+      OPENING_NARRATION_TIMEOUT_SECONDS: ${OPENING_NARRATION_TIMEOUT_SECONDS:-10}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
       DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-chat}

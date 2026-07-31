@@ -14,7 +14,7 @@ from collaboration_framework.contracts import (
     JsonObject,
     MatchedTarget,
     ModuleCheck,
-    PlayerInput,
+    PlayerViewScope,
 )
 from collaboration_framework.engine import (
     CompletedAction,
@@ -361,8 +361,7 @@ async def test_begin_game_creates_stable_actor_snapshots(
     assert state.entities["thomas"]["case_open"] is True
     assert state.entities["case_tracker"]["investigator_disappeared"] is False
 
-    with pytest.raises(room_service.RoomConflictError):
-        await room_service.begin_game(db_session, room.id, players[0].id)
+    assert await room_service.begin_game(db_session, room.id, players[0].id) is False
     assert (
         await db_session.scalar(
             select(func.count()).select_from(GameSession).where(GameSession.room_id == room.id)
@@ -417,12 +416,10 @@ async def test_load_runtime_backfills_ruleset_skills_for_legacy_actor(
     assert runtime.revision == "0"
 
     projection = await RuleEngineService(store).read(
-        PlayerInput(
+        PlayerViewScope(
             room_id=room_id,
             player_id=players[0].id,
             actor_id="actor_1",
-            client_action_id="legacy-skill-projection-146",
-            utterance="尝试潜行",
         )
     )
     stealth = next(skill for skill in projection.self_actor.skills if skill.id == "stealth")
@@ -492,12 +489,10 @@ async def test_suspend_blocks_new_actions_and_resume_allows_rule_ending(
     assert GameState.model_validate(game_session.state_json).phase == "playing"
 
     projection = await service.read(
-        PlayerInput(
+        PlayerViewScope(
             room_id=room.id,
             player_id=players[0].id,
             actor_id="actor_1",
-            client_action_id="read-suspended",
-            utterance="查看房间",
         )
     )
     assert projection.revision == "0"

@@ -5,7 +5,12 @@ import logging
 from collections.abc import AsyncIterator
 
 import pytest
-from collaboration_framework.contracts import ContractError, player_input_fingerprint
+from collaboration_framework.contracts import (
+    ContractError,
+    PlayerViewScope,
+    ProjectionSnapshot,
+    player_input_fingerprint,
+)
 from collaboration_framework.engine import InMemoryEngineStore, RuleEngineService
 from collaboration_framework.host.adapters.fakes import FakeNarrationModel
 from collaboration_framework.host.application import TurnExecutionError
@@ -106,9 +111,9 @@ class CountingEngine(RuleEngineService):
         self.read_calls = 0
         self.execute_calls = 0
 
-    async def read(self, player_input):
+    async def read(self, scope: PlayerViewScope) -> ProjectionSnapshot:
         self.read_calls += 1
-        return await super().read(player_input)
+        return await super().read(scope)
 
     async def execute(self, request):
         self.execute_calls += 1

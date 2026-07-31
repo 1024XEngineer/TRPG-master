@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Literal
 
+import anyio
+import httpx
 import structlog
 from collaboration_framework.bootstrap.host_agent import (
     build_deepseek_host_agent,
@@ -22,11 +26,16 @@ from collaboration_framework.contracts import (
     ModuleCheck,
     PlayerInput,
     PlayerView,
+    PlayerViewScope,
     player_input_fingerprint,
 )
 from collaboration_framework.engine import EngineStore, RuleEngineService
 from collaboration_framework.host.adapters import OneShotHostAgentAdapter
-from collaboration_framework.host.adapters.fakes import FakeHostAgent, FakeNarrationModel
+from collaboration_framework.host.adapters.fakes import (
+    FakeHostAgent,
+    FakeNarrationModel,
+    FakeOpeningNarrationModel,
+)
 from collaboration_framework.host.adapters.openai_agents import PROMPT_VERSION
 from collaboration_framework.host.application import (
     ContextAssembler,
@@ -34,14 +43,18 @@ from collaboration_framework.host.application import (
     IntentResolution,
     NarrationValidationError,
     Narrator,
+    OpeningNarrationValidationError,
+    OpeningNarrator,
     PlayerViewProjector,
     TurnExecutionError,
+    deterministic_opening_narration,
     is_scene_query_utterance,
 )
 from collaboration_framework.host.ports import (
     HostAgentPort,
     IntentModelPort,
     NarrationModelPort,
+    OpeningNarrationModelPort,
     RecentHistorySource,
 )
 from collaboration_framework.host.schemas import (
@@ -65,6 +78,7 @@ from app.adapters import (
     OpenAIResponsesJsonClient,
     PromptIntentModel,
     PromptNarrationModel,
+    PromptOpeningNarrationModel,
     QwenChatCompletionsJsonClient,
     SqlAlchemyRecentHistorySource,
 )
@@ -130,6 +144,13 @@ class HostModelMetadata:
 
 
 @dataclass(frozen=True)
+class OpeningGenerationResult:
+    narration: NarrationOutput
+    result: Literal["model", "template", "fallback"]
+    failure_category: str | None = None
+
+
+@dataclass(frozen=True)
 class EmptyRecentHistorySource:
     async def read(
         self,
@@ -154,7 +175,10 @@ class TurnApplication:
     engine: RuleEngineService
     intent_resolver: HostAgentIntentResolver
     narration_model: NarrationModelPort
+    opening_narration_model: OpeningNarrationModelPort
     host_metadata: HostModelMetadata
+    opening_narration_mode: Literal["model", "template"]
+    opening_narration_timeout_seconds: float
     recent_history_source: RecentHistorySource
     recent_history_budget: RecentHistoryBudget
     recent_history_enabled: bool
@@ -171,14 +195,60 @@ class TurnApplication:
         """Project the initial/current player-safe view without creating an action."""
 
         actor_id = await self._load_turn_scope(room_id, player_id)
-        bootstrap_input = PlayerInput(
+        scope = PlayerViewScope(
             room_id=room_id,
             player_id=player_id,
             actor_id=actor_id,
-            client_action_id="view-projection",
-            utterance="读取当前场景",
         )
-        return await PlayerViewProjector(self.engine).project(bootstrap_input)
+        return await PlayerViewProjector(self.engine).project_scope(scope)
+
+    async def generate_opening(
+        self,
+        player_view: PlayerView,
+    ) -> OpeningGenerationResult:
+        """Generate a validated opening, with a deterministic public fallback."""
+
+        context = ContextAssembler().for_opening(player_view)
+        started_at = time.perf_counter()
+        failure_category: str | None = None
+        result: Literal["model", "template", "fallback"]
+        if self.opening_narration_mode == "template":
+            narration = deterministic_opening_narration(context)
+            result = "template"
+        else:
+            try:
+                with anyio.fail_after(self.opening_narration_timeout_seconds):
+                    narration = await OpeningNarrator(
+                        self.opening_narration_model
+                    ).narrate(context)
+                result = "model"
+            except Exception as exc:  # the opening must never prevent entering InGame
+                failure_category = _opening_failure_category(exc)
+                narration = deterministic_opening_narration(context)
+                result = "fallback"
+
+        elapsed_ms = round((time.perf_counter() - started_at) * 1000, 2)
+        input_chars = len(
+            json.dumps(context.to_json_dict(), ensure_ascii=False, separators=(",", ":"))
+        )
+        logger.info(
+            "opening_narration_completed",
+            room_ref=hashlib.sha256(player_view.room_id.encode()).hexdigest()[:12],
+            message_id="game-opening",
+            provider=self.host_metadata.provider,
+            model=self.host_metadata.model,
+            mode=self.opening_narration_mode,
+            elapsed_ms=elapsed_ms,
+            result=result,
+            failure_category=failure_category,
+            input_chars=input_chars,
+            output_chars=len(narration.text),
+        )
+        return OpeningGenerationResult(
+            narration=narration,
+            result=result,
+            failure_category=failure_category,
+        )
 
     async def _load_turn_scope(
         self,
@@ -704,6 +774,22 @@ def _fallback_scene_query(view: PlayerView) -> NarrationOutput:
     )
 
 
+def _opening_failure_category(exc: Exception) -> str:
+    if isinstance(exc, TimeoutError | httpx.TimeoutException):
+        return "timeout"
+    if isinstance(exc, httpx.ConnectError):
+        return "connection"
+    if isinstance(exc, httpx.HTTPStatusError):
+        return "http_status"
+    if isinstance(exc, json.JSONDecodeError):
+        return "invalid_json"
+    if isinstance(exc, OpeningNarrationValidationError):
+        return f"validation_{exc.reason}"
+    if isinstance(exc, ValidationError):
+        return "pydantic_validation"
+    return "unexpected"
+
+
 def build_turn_application(
     store: EngineStore,
     engine: RuleEngineService,
@@ -713,6 +799,7 @@ def build_turn_application(
     intent_resolver: HostAgentIntentResolver | None = None,
     intent_model: IntentModelPort | None = None,
     narration_model: NarrationModelPort | None = None,
+    opening_narration_model: OpeningNarrationModelPort | None = None,
     host_metadata: HostModelMetadata | None = None,
     recent_history_source: RecentHistorySource | None = None,
 ) -> TurnApplication:
@@ -727,7 +814,12 @@ def build_turn_application(
     if narration_model is None:
         if resolver_inputs:
             raise ValueError("自定义 Host Agent 时必须同时提供 narration_model")
-        intent_resolver, narration_model, host_metadata = _configured_models(resolved_settings)
+        (
+            intent_resolver,
+            narration_model,
+            opening_narration_model,
+            host_metadata,
+        ) = _configured_models(resolved_settings)
     elif intent_resolver is None:
         if host_agent is not None:
             intent_resolver = HostAgentIntentResolver(host_agent)
@@ -736,6 +828,9 @@ def build_turn_application(
         else:
             raise ValueError("必须提供 Host Agent 意图解析依赖")
     assert intent_resolver is not None
+    opening_narration_model = (
+        opening_narration_model or FakeOpeningNarrationModel()
+    )
     host_metadata = host_metadata or HostModelMetadata(
         provider="custom",
         model="custom",
@@ -745,7 +840,12 @@ def build_turn_application(
         engine=engine,
         intent_resolver=intent_resolver,
         narration_model=narration_model,
+        opening_narration_model=opening_narration_model,
         host_metadata=host_metadata,
+        opening_narration_mode=resolved_settings.opening_narration_mode,
+        opening_narration_timeout_seconds=(
+            resolved_settings.opening_narration_timeout_seconds
+        ),
         recent_history_source=recent_history_source or EmptyRecentHistorySource(),
         recent_history_budget=RecentHistoryBudget(
             max_turns=resolved_settings.recent_history_max_turns,
@@ -760,12 +860,14 @@ def _configured_models(
 ) -> tuple[
     HostAgentIntentResolver,
     NarrationModelPort,
+    OpeningNarrationModelPort,
     HostModelMetadata,
 ]:
     if settings.host_model_provider == "fake":
         return (
             HostAgentIntentResolver(FakeHostAgent()),
             FakeNarrationModel(),
+            FakeOpeningNarrationModel(),
             HostModelMetadata(provider="fake", model="deterministic"),
         )
     if settings.host_model_provider == "deepseek":
@@ -791,6 +893,7 @@ def _configured_models(
         return (
             HostAgentIntentResolver(host_agent),
             PromptNarrationModel(client),
+            PromptOpeningNarrationModel(client),
             HostModelMetadata(
                 provider="deepseek",
                 model=settings.deepseek_model,
@@ -819,6 +922,7 @@ def _configured_models(
         return (
             HostAgentIntentResolver(host_agent),
             PromptNarrationModel(client),
+            PromptOpeningNarrationModel(client),
             HostModelMetadata(
                 provider="qwen",
                 model=settings.qwen_model,
@@ -836,6 +940,7 @@ def _configured_models(
         return (
             HostAgentIntentResolver(OneShotHostAgentAdapter(PromptIntentModel(client))),
             PromptNarrationModel(client),
+            PromptOpeningNarrationModel(client),
             HostModelMetadata(
                 provider="openai",
                 model=settings.openai_model,
@@ -851,6 +956,7 @@ turn_application = build_turn_application(
 
 __all__ = [
     "ActorResolutionError",
+    "OpeningGenerationResult",
     "TurnApplication",
     "build_turn_application",
     "turn_application",

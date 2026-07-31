@@ -592,6 +592,7 @@ export interface MyRoomSummary {
  * narration.push 推送 payload。
  */
 export interface NarrationPushPayload {
+  messageId?: string | null;
   text: string;
 }
 
@@ -632,6 +633,13 @@ export interface OccupationSpec {
   description: string;
   icon?: string | null;
   categories?: string[];
+}
+
+/**
+ * 权威开场正在由 Host 模型生成；模板模式不会发送。
+ */
+export interface OpeningStartedPayload {
+  messageId: string;
 }
 
 /**
@@ -905,6 +913,9 @@ export interface SelectModuleBody {
   attributeGenMethod?: string;
 }
 
+/**
+ * The requesting player's actor; only public_status_summary may be shared.
+ */
 export interface SelfActorView {
   id: string;
   name: string;
@@ -915,6 +926,7 @@ export interface SelfActorView {
   conditions?: string[];
   equipment?: string[];
   background_summary?: string;
+  public_status_summary?: string;
 }
 
 /**
@@ -1056,9 +1068,13 @@ export interface ViewUpdatedPayload {
   playerView: PlayerView;
 }
 
+/**
+ * Another actor currently visible to this player, with public fields only.
+ */
 export interface VisibleActorView {
   id: string;
   name: string;
+  occupation?: string | null;
   status_summary?: string;
 }
 

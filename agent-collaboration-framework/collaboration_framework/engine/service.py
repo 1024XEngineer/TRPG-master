@@ -9,7 +9,7 @@ from collaboration_framework.contracts import (
     ConditionSpec,
     ContractError,
     NarrativeDetailSpec,
-    PlayerInput,
+    PlayerViewScope,
     ProjectionActionDeclarationOption,
     ProjectionActorResource,
     ProjectionActorValue,
@@ -45,18 +45,18 @@ class RuleEngineService:
         self._store = store
         self._kernel = kernel or RuleKernel()
 
-    async def read(self, player_input: PlayerInput) -> ProjectionSnapshot:
-        async with self._store.transaction(player_input.room_id) as transaction:
+    async def read(self, scope: PlayerViewScope) -> ProjectionSnapshot:
+        async with self._store.transaction(scope.room_id) as transaction:
             runtime = await transaction.load_runtime()
             self._validate_identity(
                 runtime,
-                player_id=player_input.player_id,
-                actor_id=player_input.actor_id,
+                player_id=scope.player_id,
+                actor_id=scope.actor_id,
             )
             return self._project(
                 runtime,
-                player_id=player_input.player_id,
-                actor_id=player_input.actor_id,
+                player_id=scope.player_id,
+                actor_id=scope.actor_id,
             )
 
     async def execute(self, request: ActionRequest) -> ActionResult:
@@ -230,6 +230,9 @@ class RuleEngineService:
                     ProjectionVisibleActor(
                         id=other_actor_id,
                         name=other_actor.name,
+                        occupation=RuleEngineService._optional_text(
+                            other_actor.state.get("occupation")
+                        ),
                         status_summary=RuleEngineService._public_status_summary(
                             other_actor.state
                         ),
@@ -387,6 +390,7 @@ class RuleEngineService:
             background_summary=(
                 RuleEngineService._optional_text(actor_state.get("background")) or ""
             ),
+            public_status_summary=RuleEngineService._public_status_summary(actor_state),
         )
 
     @staticmethod

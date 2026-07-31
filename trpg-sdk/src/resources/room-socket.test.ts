@@ -82,6 +82,20 @@ test('isValidServerEvent：接受已知类型的合法事件', () => {
   assert.equal(isValidServerEvent({ type: 'narration.push', payload: { text: 'hi' } }), true);
   assert.equal(
     isValidServerEvent({
+      type: 'narration.push',
+      payload: { messageId: 'game-opening', text: 'hi' },
+    }),
+    true
+  );
+  assert.equal(
+    isValidServerEvent({
+      type: 'opening.started',
+      payload: { messageId: 'game-opening' },
+    }),
+    true
+  );
+  assert.equal(
+    isValidServerEvent({
       type: 'turn.phase_changed',
       payload: { correlationId: 'a1', phase: 'understanding_action' },
     }),
@@ -149,6 +163,18 @@ test('isValidServerEvent：拒绝 payload 字段缺失或类型不对', () => {
   assert.equal(isValidServerEvent({ type: 'session.bound', payload: { roomId: 'r1' } }), false);
   // 字段类型不对
   assert.equal(isValidServerEvent({ type: 'narration.push', payload: { text: 123 } }), false);
+  assert.equal(
+    isValidServerEvent({ type: 'narration.push', payload: { messageId: '', text: 'hi' } }),
+    false
+  );
+  assert.equal(
+    isValidServerEvent({ type: 'narration.push', payload: { messageId: 42, text: 'hi' } }),
+    false
+  );
+  assert.equal(
+    isValidServerEvent({ type: 'opening.started', payload: { messageId: '' } }),
+    false
+  );
   assert.equal(
     isValidServerEvent({ type: 'session.bound', payload: { roomId: 'r1', playerId: 42 } }),
     false
@@ -261,6 +287,27 @@ test('turn.failed reject pending action，view.updated 更新同一份缓存', a
       },
     });
     assert.deepEqual(socket.getPlayerView(), completedEvent.payload.player_view);
+
+    transport.emit({
+      type: 'opening.started',
+      payload: { messageId: 'game-opening' },
+    });
+    assert.equal(socket.getOpeningMessageId(), 'game-opening');
+    transport.emit({
+      type: 'narration.push',
+      payload: { messageId: 'game-opening', text: '权威开场' },
+    });
+    assert.equal(socket.getOpeningMessageId(), null);
+
+    transport.emit({
+      type: 'opening.started',
+      payload: { messageId: 'game-opening' },
+    });
+    transport.emit({
+      type: 'error',
+      payload: { code: 'OPENING_FAILED', message: '开场失败' },
+    });
+    assert.equal(socket.getOpeningMessageId(), null);
 
     const pending = socket.submitAction('player-1', {
       clientActionId: 'failed-action',

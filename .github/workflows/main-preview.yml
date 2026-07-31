@@ -1,0 +1,101 @@
+name: Main Preview
+
+# main 有新提交（包括 PR 合并）后，使用最新代码更新持久预览环境。这个入口
+# 不回收，端口和访问地址始终不变，适合作为 README 中给用户的演示链接。
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: pr-preview-deploy-lock
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 计算镜像 tag
+        id: meta
+        run: |
+          OWNER_LOWER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          {
+            echo "backend_image=ghcr.io/$OWNER_LOWER/trpg-master-backend:main"
+            echo "frontend_image=ghcr.io/$OWNER_LOWER/trpg-master-frontend:main"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: 登录 GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: 构建并推送 backend 镜像
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: trpg-backend/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.backend_image }}
+          cache-from: type=gha,scope=main-preview-backend
+          cache-to: type=gha,mode=max,scope=main-preview-backend
+
+      - name: 构建并推送 frontend 镜像
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: trpg-frontend/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.frontend_image }}
+          cache-from: type=gha,scope=main-preview-frontend
+          cache-to: type=gha,mode=max,scope=main-preview-frontend
+
+      - name: 准备 SSH
+        env:
+          SSH_KEY: ${{ secrets.PREVIEW_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.PREVIEW_SSH_KNOWN_HOSTS }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/preview_deploy_key
+          chmod 600 ~/.ssh/preview_deploy_key
+          echo "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: 部署持久预览
+        env:
+          SSH_HOST: ${{ secrets.PREVIEW_SSH_HOST }}
+          SSH_USER: ${{ secrets.PREVIEW_SSH_USER }}
+          SSH_PORT: ${{ secrets.PREVIEW_SSH_PORT }}
+          BACKEND_IMAGE: ${{ steps.meta.outputs.backend_image }}
+          FRONTEND_IMAGE: ${{ steps.meta.outputs.frontend_image }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_ACTOR: ${{ github.actor }}
+          DEEPSEEK_API_KEY: ${{ secrets.PREVIEW_DEEPSEEK_API_KEY }}
+        run: |
+          if [ -n "$DEEPSEEK_API_KEY" ]; then
+            HOST_MODEL_PROVIDER=deepseek
+          else
+            HOST_MODEL_PROVIDER=fake
+          fi
+
+          ssh -p "$SSH_PORT" -i ~/.ssh/preview_deploy_key "$SSH_USER@$SSH_HOST" bash -s <<EOF
+            set -e
+            mkdir -p ~/trpg-previews/main
+            cp ~/trpg-previews/compose-template/docker-compose.yml ~/trpg-previews/main/docker-compose.yml
+            cd ~/trpg-previews/main
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_ACTOR" --password-stdin
+            export BACKEND_IMAGE="$BACKEND_IMAGE"
+            export FRONTEND_IMAGE="$FRONTEND_IMAGE"
+            export PREVIEW_PORT=80
+            export HOST_MODEL_PROVIDER="$HOST_MODEL_PROVIDER"
+            export DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY"
+            docker compose -p main-preview pull
+            docker compose -p main-preview up -d --force-recreate --remove-orphans --wait --wait-timeout 90
+          EOF

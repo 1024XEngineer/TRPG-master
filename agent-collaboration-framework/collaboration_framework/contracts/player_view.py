@@ -16,6 +16,14 @@ class VisibleFact(ContractModel):
     text: str = Field(min_length=1)
 
 
+class PlayerViewScope(ContractModel):
+    """Read-only identity scope for projecting a PlayerView without inventing an action."""
+
+    room_id: str = Field(min_length=1)
+    player_id: str = Field(min_length=1)
+    actor_id: str = Field(min_length=1)
+
+
 class ProjectionActorValue(ContractModel):
     id: str = Field(min_length=1)
     name: str = Field(min_length=1)
@@ -38,11 +46,13 @@ class ProjectionSelfActor(ContractModel):
     conditions: tuple[str, ...] = ()
     equipment: tuple[str, ...] = ()
     background_summary: str = ""
+    public_status_summary: str = ""
 
 
 class ProjectionVisibleActor(ContractModel):
     id: str = Field(min_length=1)
     name: str = Field(min_length=1)
+    occupation: str | None = None
     status_summary: str = ""
 
 
@@ -153,7 +163,8 @@ class ProjectionSnapshot(ContractModel):
         """Compatibility view for callers migrating to structured known information."""
 
         return tuple(
-            VisibleFact(id=item.id, text=item.content) for item in self.known_information
+            VisibleFact(id=item.id, text=item.content)
+            for item in self.known_information
         )
 
     @model_validator(mode="after")
@@ -176,6 +187,8 @@ class ActorResourceView(ContractModel):
 
 
 class SelfActorView(ContractModel):
+    """The requesting player's actor; only public_status_summary may be shared."""
+
     id: str = Field(min_length=1)
     name: str = Field(min_length=1)
     occupation: str | None = None
@@ -185,11 +198,15 @@ class SelfActorView(ContractModel):
     conditions: tuple[str, ...] = ()
     equipment: tuple[str, ...] = ()
     background_summary: str = ""
+    public_status_summary: str = ""
 
 
 class VisibleActorView(ContractModel):
+    """Another actor currently visible to this player, with public fields only."""
+
     id: str = Field(min_length=1)
     name: str = Field(min_length=1)
+    occupation: str | None = None
     status_summary: str = ""
 
 
@@ -304,7 +321,8 @@ class PlayerView(ContractModel):
         """Compatibility view for callers migrating to structured known information."""
 
         return tuple(
-            VisibleFact(id=item.id, text=item.content) for item in self.known_information
+            VisibleFact(id=item.id, text=item.content)
+            for item in self.known_information
         )
 
     @model_validator(mode="after")

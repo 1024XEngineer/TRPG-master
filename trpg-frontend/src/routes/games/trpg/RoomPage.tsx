@@ -10,6 +10,23 @@ import { endGame } from '@/services/room'
 import { useRoomPlayers } from '@/hooks/useRoomPlayers'
 import { useRuleset } from '@/hooks/useRuleset'
 
+// `crypto.randomUUID()` 要求安全上下文（HTTPS 或 localhost）——CI Preview
+// 部署在纯 HTTP 的 IP:端口上（issue #200，域名/HTTPS 明确列在本期不做），
+// `isSecureContext` 为 false 时 `crypto.randomUUID` 整个是 `undefined`，
+// 调用直接抛 TypeError。这行抛出发生在 sendMessage 的参数求值阶段——
+// 比 submitPlayerAction 函数体还早，异常不会被任何 .catch() 接住，界面上
+// 不会有任何提示，行为是"点发送后什么都没发生"。`crypto.getRandomValues`
+// 不受这条限制（只有 `subtle`/`randomUUID` 这类更高层的 API 被安全上下文
+// 网关挡住），用它手搓一个符合 RFC4122 v4 格式的 UUID 作为兜底。
+function randomActionId(): string {
+  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID()
+  const bytes = crypto.getRandomValues(new Uint8Array(16))
+  bytes[6] = (bytes[6] & 0x0f) | 0x40
+  bytes[8] = (bytes[8] & 0x3f) | 0x80
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
+
 // ─── Types ───────────────────────────────────────────
 interface Message {
   type: 'system' | 'narr' | 'player' | 'dice'
@@ -150,11 +167,11 @@ function conversationEventToMessage(
     }
   }
   if (event.type === 'narration.push') {
-    const payload = event.payload as { text: string }
+    const payload = event.payload as { messageId?: string | null; text: string }
     return {
       type: 'narr',
       channel: 'action',
-      messageId: conversationMessageId(event.type, event.id),
+      messageId: conversationMessageId(event.type, payload.messageId || event.id),
       sender: '守秘人',
       content: payload.text,
       time: formatRoomTime(event.createdAt),
@@ -791,20 +808,18 @@ export default function RoomPage() {
         .map((event) => conversationEventToMessage(event, playerId, senderName))
         .filter((item): item is Message => item !== null)
       setMessages((current) => mergeHistoricalMessages(current, restored))
+      if (
+        restored.some(
+          (item) =>
+            item.messageId === conversationMessageId('narration.push', 'game-opening'),
+        )
+      ) {
+        setTyping(false)
+        setProgressLabel(null)
+      }
     }).catch(() => {})
     return () => { cancelled = true }
   }, [roomId, reconnectToken, playerId, senderName])
-
-  useEffect(() => {
-    if (!playerView) return
-    const openingText = `${playerView.scene.name}\n${playerView.scene.description}`
-    setMessages(prev => prev.length > 0 ? prev : [{
-      type: 'narr', channel: 'action',
-      sender: '守秘人',
-      content: openingText,
-      time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
-    }])
-  }, [playerView])
 
   useEffect(() => {
     // ★ block: 'nearest' 很关键——默认的 scrollIntoView 会尝试把目标"居中"，
@@ -844,9 +859,15 @@ export default function RoomPage() {
         setTyping(false)
         setProgressLabel(null)
         setMessages(prev => {
-          const messageId = pendingNarrationActionIdRef.current
-            ? conversationMessageId('narration.push', pendingNarrationActionIdRef.current)
-            : undefined
+          const authoritativeId = envelope.payload.messageId?.trim()
+          const messageId = authoritativeId
+            ? conversationMessageId('narration.push', authoritativeId)
+            : pendingNarrationActionIdRef.current
+              ? conversationMessageId(
+                  'narration.push',
+                  pendingNarrationActionIdRef.current,
+                )
+              : undefined
           if (messageId && prev.some((item) => item.messageId === messageId)) {
             pendingNarrationActionIdRef.current = null
             return prev
@@ -862,6 +883,9 @@ export default function RoomPage() {
             time: formatRoomTime(new Date()),
           })
         })
+      } else if (envelope.type === 'opening.started') {
+        setTyping(true)
+        setProgressLabel('守秘人正在生成开场叙事')
       } else if (envelope.type === 'room.state') {
         setRoomPhase(envelope.payload.phase)
       } else if (envelope.type === 'chat.message') {
@@ -969,6 +993,10 @@ export default function RoomPage() {
         pendingNarrationActionIdRef.current = null
       }
     })
+    if (sdk.roomSocket.getOpeningMessageId() === 'game-opening') {
+      setTyping(true)
+      setProgressLabel('守秘人正在生成开场叙事')
+    }
     return off
   }, [playerId, senderName])
 
@@ -1024,9 +1052,9 @@ export default function RoomPage() {
     if (!text || !playerId || suspended) return
     setInput('')
     if (channel === 'discussion') {
-      sdk.roomSocket.sendChat(playerId, { text, clientMessageId: crypto.randomUUID() })
+      sdk.roomSocket.sendChat(playerId, { text, clientMessageId: randomActionId() })
     } else {
-      submitPlayerAction({ clientActionId: crypto.randomUUID(), utterance: text })
+      submitPlayerAction({ clientActionId: randomActionId(), utterance: text })
     }
   }
 

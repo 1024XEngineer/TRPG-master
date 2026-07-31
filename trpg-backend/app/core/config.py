@@ -76,6 +76,8 @@ class Settings(BaseSettings):
     host_agent_max_tool_calls: int = Field(default=8, gt=0, le=50)
     host_agent_tool_timeout_seconds: float = Field(default=5.0, gt=0, le=30)
     host_agent_timeout_seconds: float = Field(default=30.0, gt=0, le=120)
+    opening_narration_mode: Literal["model", "template"] = "model"
+    opening_narration_timeout_seconds: float = Field(default=10.0, gt=0, le=60)
     recent_history_enabled: bool = True
     recent_history_max_turns: int = Field(default=6, ge=1, le=24)
     recent_history_max_chars: int = Field(default=6000, ge=2)

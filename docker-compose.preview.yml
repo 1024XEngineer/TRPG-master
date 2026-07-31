@@ -1,0 +1,79 @@
+# CI Preview 用（issue #200）。一份文件两种用法：
+#
+#   本地直接复现（构建上下文是仓库根目录里的源码）：
+#     docker compose -f docker-compose.preview.yml up --build
+#
+#   服务器上部署（workflow 在部署前已经把镜像 build 好推到 GHCR，只 pull
+#   预置好的 BACKEND_IMAGE/FRONTEND_IMAGE，不在服务器上跑 build——见
+#   issue #200「决策 2」，不占用生产服务器的算力编译）：
+#     BACKEND_IMAGE=ghcr.io/.../trpg-master-backend:pr-123 \
+#     FRONTEND_IMAGE=ghcr.io/.../trpg-master-frontend:pr-123 \
+#     docker compose -f docker-compose.preview.yml pull
+#     docker compose -f docker-compose.preview.yml up -d
+#
+#   `image:` 和 `build:` 在同一个 service 里可以共存：`up --build` 用
+#   build 产物打上 `image:` 里那个 tag；不传 --build 时 `pull`/`up` 只认
+#   `image:`，不会碰 build 那部分——这就是两种用法不用拆两份文件的原因。
+#
+# 数据库故意用容器内 SQLite（不挂宿主机 volume）：预览环境的数据没有留存
+# 价值，容器销毁即丢，完全不碰生产/开发用的 Postgres——见 issue #200
+# 「决策 5」。
+#
+# HOST_MODEL_PROVIDER / DEEPSEEK_API_KEY 从宿主环境变量透传：同仓库 PR 由
+# workflow 注入真实 key；fork PR 因 GitHub Actions 平台限制拿不到 secrets、
+# 甚至连这个 workflow 的部署 job 都不会跑（见 pr-preview.yml 里的 job
+# 条件），本文件里的 fallback 只覆盖"本地跑、不传任何 key"这一种情况——
+# 远程 provider 模式缺 key 时后端会启动失败，不是优雅降级，所以本地不传
+# key 时必须落到 fake，不能让 HOST_MODEL_PROVIDER 意外等于 deepseek。
+
+services:
+  backend:
+    image: ${BACKEND_IMAGE:-trpg-backend-preview:local}
+    build:
+      context: .
+      dockerfile: trpg-backend/Dockerfile
+    environment:
+      APP_ENV: production
+      DATABASE_URL: sqlite+aiosqlite:///./app.db
+      ENABLE_DOCS: "true"
+      LOG_LEVEL: INFO
+      # 前端是同源反代（Caddy 转发 /api、/ws 到这个服务），浏览器请求走的是
+      # 前端自己的 origin，不是这个容器的地址——理论上不需要 CORS；保留一个
+      # 宽松值只是兜底（比如直接拿后端端口调试），不依赖它生效。
+      CORS_ORIGINS: '["*"]'
+      HOST_MODEL_PROVIDER: ${HOST_MODEL_PROVIDER:-fake}
+      # 开场超时独立于 Provider HTTP 超时，便于预览环境快速降级到安全模板。
+      OPENING_NARRATION_MODE: ${OPENING_NARRATION_MODE:-model}
+      OPENING_NARRATION_TIMEOUT_SECONDS: ${OPENING_NARRATION_TIMEOUT_SECONDS:-10}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-chat}
+    expose:
+      - "8000"
+    # `docker compose up -d` 只保证容器"被创建/启动"，不代表 entrypoint 里
+    # 的迁移/种子加载/uvicorn 真的跑成功了——镜像坏了或启动即崩溃，之前的
+    # 写法照样会在几秒后把预览评论成"已部署"（review 抓到的真问题）。
+    # python:3.13-slim 镜像没有 curl/wget，用内置 urllib 探活，不用额外装包。
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health', timeout=3)"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+  frontend:
+    image: ${FRONTEND_IMAGE:-trpg-frontend-preview:local}
+    build:
+      context: .
+      dockerfile: trpg-frontend/Dockerfile
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${PREVIEW_PORT:-8080}:80"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:80/"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+      start_period: 3s

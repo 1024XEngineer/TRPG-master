@@ -7,7 +7,7 @@ import json
 import httpx
 from collaboration_framework.contracts import JsonObject
 
-from app.adapters.openai_models import StructuredJsonClient
+from app.adapters.openai_models import StructuredJsonClient, _log_structured_usage
 from app.adapters.qwen_models import chat_completion_output_text
 
 
@@ -68,8 +68,15 @@ class DeepSeekChatCompletionsJsonClient(StructuredJsonClient):
             )
             response.raise_for_status()
 
+        response_payload = response.json()
+        _log_structured_usage(
+            response_payload,
+            provider="deepseek",
+            model=self._model,
+            schema_name=schema_name,
+        )
         output_text = chat_completion_output_text(
-            response.json(),
+            response_payload,
             provider_name="DeepSeek",
         )
         parsed = json.loads(output_text)

@@ -33,6 +33,7 @@ from tests.test_ws import (
     complete_character,
     create_room,
     join_as,
+    receive_replayed_opening,
     receive_until,
     register_and_login,
     start_game,
@@ -383,6 +384,7 @@ def test_conversation_restores_action_discussion_and_narration(
         )
         assert ws.receive_json()["type"] == "session.bound"
         assert ws.receive_json()["type"] == "view.updated"
+        receive_replayed_opening(ws)
         _send_chat(ws, room, "先在讨论区确认路线", "conv-chat-1")
         assert ws.receive_json()["type"] == "chat.message"
         ws.send_json(
@@ -466,6 +468,7 @@ def test_check_result_stays_hidden_from_other_members(
         )
         assert ws.receive_json()["type"] == "session.bound"
         assert ws.receive_json()["type"] == "view.updated"
+        receive_replayed_opening(ws)
         ws.send_json(
             {
                 "type": "action.submit",
@@ -537,6 +540,7 @@ def test_private_clarification_is_restored_only_for_its_player(
         )
         assert ws.receive_json()["type"] == "session.bound"
         assert ws.receive_json()["type"] == "view.updated"
+        receive_replayed_opening(ws)
         ws.send_json(
             {
                 "type": "action.submit",

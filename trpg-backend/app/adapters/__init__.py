@@ -5,6 +5,7 @@ from app.adapters.openai_models import (
     OpenAIResponsesJsonClient,
     PromptIntentModel,
     PromptNarrationModel,
+    PromptOpeningNarrationModel,
 )
 from app.adapters.qwen_models import QwenChatCompletionsJsonClient
 from app.adapters.sqlalchemy_engine_store import SqlAlchemyEngineStore
@@ -15,6 +16,7 @@ __all__ = [
     "DeepSeekChatCompletionsJsonClient",
     "PromptIntentModel",
     "PromptNarrationModel",
+    "PromptOpeningNarrationModel",
     "QwenChatCompletionsJsonClient",
     "SqlAlchemyEngineStore",
     "SqlAlchemyRecentHistorySource",

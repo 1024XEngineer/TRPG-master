@@ -15,6 +15,16 @@
 
 ## 当前功能
 
+### 在线体验
+
+`main` 有新提交（包括 PR 合并）后会自动更新持久预览环境，前端入口固定使用
+网关端口 `10005`，地址不会随着部署变化：
+
+- [TRPG-master 持久预览](http://218.11.5.114:10005)
+
+该环境只保留面向用户的前端入口，`/api` 和 `/ws` 由 Caddy 反向代理到后端；
+数据库随容器重建而重置，未配置 Preview 专用 DeepSeek key 时使用 Fake Provider。
+
 | 模块 | 当前实现 |
 | --- | --- |
 | 账号 | 注册、登录、退出登录、获取个人信息、修改昵称 |
@@ -200,6 +210,8 @@ npm run dev
 | `HOST_AGENT_MAX_TOOL_CALLS` | `8` | 单次 Host Agent 最大工具调用数 |
 | `HOST_AGENT_TOOL_TIMEOUT_SECONDS` | `5` | 单工具超时秒数 |
 | `HOST_AGENT_TIMEOUT_SECONDS` | `30` | Host Agent 整轮超时秒数 |
+| `OPENING_NARRATION_MODE` | `model` | 权威开场生成方式：`model` 或确定性 `template` |
+| `OPENING_NARRATION_TIMEOUT_SECONDS` | `10` | 开场模型生成的独立总超时秒数；失败后使用安全模板 |
 | `RECENT_HISTORY_ENABLED` | `true` | 是否向 Host/Narrator 提供玩家安全的近期回合 |
 | `RECENT_HISTORY_MAX_TURNS` | `6` | 近期历史最多保留的回合数 |
 | `RECENT_HISTORY_MAX_CHARS` | `6000` | 近期历史文本总字符预算 |
@@ -353,7 +365,7 @@ npm run codegen
 
 ## 持续集成
 
-`.github/workflows/` 下有三个互相独立的 workflow，各自按路径过滤器触发，只有
+`.github/workflows/` 下有多个互相独立的 workflow，各自按路径过滤器触发，只有
 真正改到对应目录才会跑：
 
 | Workflow | 触发路径 | 检查内容 |
@@ -361,6 +373,8 @@ npm run codegen
 | `trpg-backend-ci.yml`（Backend CI） | `trpg-backend/**`；另外 `trpg-sdk/scripts/generate-types.ts` 和 `trpg-sdk/src/generated/**` 也会触发（见下） | `ruff check`、`ruff format --check`、`ty check`、`pytest`；另有 `codegen-drift` job：重新跑一遍 DTO → JSON Schema → TS 生成管线，用 `git diff` 确认 `trpg-sdk/src/generated/` 跟提交的一致，不一致就报错 |
 | `trpg-sdk-ci.yml`（SDK CI） | `trpg-sdk/**` | `npm run lint`、`npm run typecheck`、`npm run build` |
 | `trpg-frontend-ci.yml`（Frontend CI） | `trpg-frontend/**` | `npm run lint`、`npm run build` |
+| `pr-preview.yml`（PR Preview） | PR 打开、更新、重开、关闭 | 部署或回收 PR 专属预览环境 |
+| `main-preview.yml`（Main Preview） | PR 合并到 `main` | 更新固定端口的持久预览环境 |
 
 `codegen-drift` 放在 Backend CI 而不是 SDK CI：它要在"改了 DTO 却忘记重新
 生成"的那个 PR 上就亮红灯，而 SDK CI 只在 `trpg-sdk/**` 变化时触发——一个纯

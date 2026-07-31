@@ -125,6 +125,7 @@ class Settings(BaseSettings):
             raise ValueError("角色生图使用 DashScope 时必须设置 DASHSCOPE_API_KEY")
         return self
 
+
 @lru_cache
 def get_settings() -> Settings:
     """获取全局唯一的 Settings 实例。

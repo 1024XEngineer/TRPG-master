@@ -1,6 +1,7 @@
 import asyncio
 import json
 from collections.abc import Callable, Generator
+from typing import cast
 
 import httpx
 import pytest
@@ -9,6 +10,7 @@ from httpx import AsyncClient
 from app.adapters.image_generation import DashScopeImageProvider, MockImageProvider
 from app.adapters.portrait_prompt import DeepSeekPortraitPromptComposer
 from app.core.coc7_content import build_coc7_ruleset
+from app.core.seed import BUILTIN_MODULE_ID
 from app.dto.portrait import CharacterPortraitSnapshot, PortraitPrompt, PortraitSkillSnapshot
 from app.main import app
 from app.models.room import Character
@@ -19,6 +21,7 @@ from app.service.portrait_generation import (
     PortraitImageContentRejectedError,
     PortraitImageGenerationError,
     PortraitImageTimeoutError,
+    _visual_traits,
     build_character_portrait_snapshot,
 )
 from tests.helpers import ROOMS_BASE, create_room, join_room, reconnect, register
@@ -37,6 +40,7 @@ ATTRIBUTES = {
 SKILLS = {"law": 55, "spot-hidden": 75, "credit-rating": 25}
 EQUIPMENT = [{"name": "左轮手枪"}, {"name": "手电筒"}]
 BACKGROUND = "黑色短发，右眉有一道浅色伤疤，总是穿着深色风衣。"
+MODULE_BACKGROUND = "禁酒令时期的密歇根州，安静克制并带有哥特气息。"
 PRIVATE_NOTES = "这是玩家私人备忘，不得发给模型。"
 BUILT_CHARACTER: dict[str, object] = {
     "name": "陈探员",
@@ -78,9 +82,7 @@ class RecordingImageProvider:
     async def generate(
         self, *, prompt: str, negative_prompt: str, size: str
     ) -> ImageGenerationOutput:
-        self.calls.append(
-            {"prompt": prompt, "negative_prompt": negative_prompt, "size": size}
-        )
+        self.calls.append({"prompt": prompt, "negative_prompt": negative_prompt, "size": size})
         return ImageGenerationOutput(image_url="https://images.example/portrait.png")
 
 
@@ -170,7 +172,11 @@ def test_snapshot_uses_actual_allocations_and_excludes_notes() -> None:
         notes=PRIVATE_NOTES,
     )
 
-    snapshot = build_character_portrait_snapshot(character, build_coc7_ruleset())
+    snapshot = build_character_portrait_snapshot(
+        character,
+        build_coc7_ruleset(),
+        module_background=MODULE_BACKGROUND,
+    )
     serialized = snapshot.model_dump_json()
 
     assert [skill.id for skill in snapshot.prominent_skills] == [
@@ -180,10 +186,35 @@ def test_snapshot_uses_actual_allocations_and_excludes_notes() -> None:
     ]
     assert snapshot.prominent_skills[0].allocated == 50
     assert "体格强健，肌肉感明显" in snapshot.visual_traits
-    assert "外貌出众，仪表考究" in snapshot.visual_traits
+    assert "外貌与人格吸引力突出" in snapshot.visual_traits
     assert snapshot.occupation_description
     assert BACKGROUND in serialized
+    assert snapshot.module_background == MODULE_BACKGROUND
     assert PRIVATE_NOTES not in serialized
+
+
+def test_visual_traits_keep_attribute_meanings_separate() -> None:
+    traits = _visual_traits(
+        {
+            "STR": 20,
+            "CON": 80,
+            "SIZ": 80,
+            "DEX": 20,
+            "APP": 20,
+            "POW": 80,
+            "INT": 99,
+            "EDU": 99,
+            "LUCK": 99,
+        }
+    )
+
+    assert "肌肉感不明显，力量感较弱" in traits
+    assert "气色健康，精力充沛" in traits
+    assert "体型较大，身形高大" in traits
+    assert "动作略显僵硬，身体控制力较弱" in traits
+    assert "外在吸引力较弱，气质朴素低调" in traits
+    assert "目光坚定，意志感强烈" in traits
+    assert len(traits) == 6
 
 
 async def test_deterministic_prompt_changes_with_portrait_relevant_attributes() -> None:
@@ -193,6 +224,7 @@ async def test_deterministic_prompt_changes_with_portrait_relevant_attributes() 
     variants = [
         base.model_copy(update={"occupation": "记者"}),
         base.model_copy(update={"background": "黑色短发，眉间有一道浅色伤疤"}),
+        base.model_copy(update={"module_background": MODULE_BACKGROUND}),
         base.model_copy(update={"equipment": ["相机"]}),
         base.model_copy(
             update={"attributes": {"STR": 80}, "visual_traits": ["体格强健，肌肉感明显"]}
@@ -217,6 +249,8 @@ async def test_deepseek_prompt_composer_validates_structured_output() -> None:
     class FakeClient:
         async def generate(self, **kwargs: object) -> dict:
             assert "notes" not in json.dumps(kwargs, ensure_ascii=False)
+            input_payload = cast(dict[str, object], kwargs["input_payload"])
+            assert input_payload["moduleBackground"] == MODULE_BACKGROUND
             return {
                 "positivePrompt": "一名写实风格的私家侦探半身肖像",
                 "negativePrompt": "文字，水印",
@@ -224,7 +258,11 @@ async def test_deepseek_prompt_composer_validates_structured_output() -> None:
             }
 
     result = await DeepSeekPortraitPromptComposer(FakeClient()).compose(  # type: ignore[arg-type]
-        CharacterPortraitSnapshot(character_id="character-1", name="陈探员")
+        CharacterPortraitSnapshot(
+            character_id="character-1",
+            name="陈探员",
+            module_background=MODULE_BACKGROUND,
+        )
     )
 
     assert result.source == "deepseek"
@@ -267,7 +305,13 @@ async def test_completed_character_generates_real_provider_result_and_prompt_fal
     client: AsyncClient,
     install_portrait_service: Callable[[PortraitGenerationService], None],
 ) -> None:
-    room = await create_room(client)
+    room = await create_room(client, max_players=1)
+    selected = await client.post(
+        f"{ROOMS_BASE}/{room['roomId']}/module",
+        json={"moduleId": BUILTIN_MODULE_ID, "attributeGenMethod": "point_buy"},
+        headers=reconnect(room["reconnectToken"]),
+    )
+    assert selected.status_code == 200
     character_id = await create_character(client, room, complete=True)
     service, composer, image_provider = make_service(prompt_error=prompt_error)
     install_portrait_service(service)
@@ -287,6 +331,7 @@ async def test_completed_character_generates_real_provider_result_and_prompt_fal
     assert data["promptSource"] == "deterministic_fallback"
     assert image_provider.calls[0]["size"] == "1024x1024"
     assert composer.snapshots[0].background == BACKGROUND
+    assert "禁酒令时期" in composer.snapshots[0].module_background
     assert PRIVATE_NOTES not in composer.snapshots[0].model_dump_json()
 
 

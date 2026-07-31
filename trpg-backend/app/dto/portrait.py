@@ -34,6 +34,7 @@ class CharacterPortraitSnapshot(CamelModel):
     prominent_skills: list[PortraitSkillSnapshot] = Field(default_factory=list)
     equipment: list[str] = Field(default_factory=list)
     background: str = ""
+    module_background: str = ""
 
 
 class PortraitPromptDraft(CamelModel):

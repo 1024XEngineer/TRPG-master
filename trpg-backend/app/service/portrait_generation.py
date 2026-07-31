@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 import structlog
+from collaboration_framework.contracts import ModuleContent
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.coc7_content import build_coc7_ruleset
@@ -21,7 +22,9 @@ from app.dto.portrait import (
     PortraitPrompt,
     PortraitSkillSnapshot,
 )
-from app.models.room import Character
+from app.models.content import Scenario
+from app.models.engine import ModuleVersion
+from app.models.room import Character, Room
 from app.service.room import (
     RoomAuthorizationError,
     find_room_by_id,
@@ -78,12 +81,12 @@ class ImageGenerationProvider(Protocol):
 def _visual_traits(attributes: dict[str, int]) -> list[str]:
     traits: list[str] = []
     mappings = {
-        "APP": ("面容饱经风霜，外表朴素低调", "外貌出众，仪表考究"),
-        "SIZ": ("身形小巧紧凑", "身形高大，具有压迫感"),
-        "STR": ("体格清瘦", "体格强健，肌肉感明显"),
-        "CON": ("面色疲惫，体质显得较弱", "气色健康，体格健壮"),
-        "DEX": ("姿态沉稳克制", "姿态敏捷从容"),
-        "POW": ("气质内敛", "气场强烈，意志坚定"),
+        "APP": ("外在吸引力较弱，气质朴素低调", "外貌与人格吸引力突出"),
+        "SIZ": ("身形小巧紧凑", "体型较大，身形高大"),
+        "STR": ("肌肉感不明显，力量感较弱", "体格强健，肌肉感明显"),
+        "CON": ("面色疲惫，体质显得较弱", "气色健康，精力充沛"),
+        "DEX": ("动作略显僵硬，身体控制力较弱", "姿态灵敏，动作控制精准"),
+        "POW": ("神情略显犹疑，气场较弱", "目光坚定，意志感强烈"),
     }
     for key, (low_trait, high_trait) in mappings.items():
         value = attributes.get(key)
@@ -97,7 +100,10 @@ def _visual_traits(attributes: dict[str, int]) -> list[str]:
 
 
 def build_character_portrait_snapshot(
-    character: Character, ruleset: RulesetRead
+    character: Character,
+    ruleset: RulesetRead,
+    *,
+    module_background: str = "",
 ) -> CharacterPortraitSnapshot:
     """Build the stable, visual-only input passed to prompt composers."""
     attributes = dict(character.attributes or {})
@@ -140,7 +146,30 @@ def build_character_portrait_snapshot(
         prominent_skills=skills[:5],
         equipment=list(character.equipment or []),
         background=character.background or "",
+        module_background=module_background,
     )
+
+
+async def _load_module_background(db: AsyncSession, room: Room) -> str:
+    scenario_id = room.scenario_id
+    module_version_name = room.module_version
+    if not scenario_id or not module_version_name:
+        return ""
+
+    scenario = await db.get(Scenario, scenario_id)
+    if scenario is None:
+        return ""
+    module_version = await db.get(
+        ModuleVersion,
+        (scenario.module_id, module_version_name),
+    )
+    if module_version is None:
+        return ""
+    try:
+        module = ModuleContent.model_validate(module_version.content_json)
+    except ValueError:
+        return ""
+    return module.background
 
 
 class DeterministicPromptComposer:
@@ -167,8 +196,10 @@ class DeterministicPromptComposer:
                 "地域背景：" + "、".join(filter(None, [snapshot.birthplace, snapshot.residence]))
             )
         if snapshot.background:
+            facts.append("人物背景与明确形象描述（最高优先级）：" + snapshot.background[:1200])
+        if snapshot.module_background:
             facts.append(
-                "人物背景与明确形象描述（最高优先级）：" + snapshot.background[:1200]
+                "模组故事背景（只用于时代、地点和氛围）：" + snapshot.module_background[:1200]
             )
 
         positive = (
@@ -196,6 +227,8 @@ class DeterministicPromptComposer:
             summary_parts.append("装备：" + "、".join(snapshot.equipment))
         if snapshot.background:
             summary_parts.append("已优先参考背景故事中的形象描述")
+        if snapshot.module_background:
+            summary_parts.append("已参考当前模组的时代、地点与叙事氛围")
         summary = "；".join(summary_parts) or "根据角色基本信息生成写实肖像"
         return PortraitPrompt(
             positive_prompt=positive[:3000],
@@ -255,7 +288,12 @@ class PortraitGenerationService:
             self._in_flight.add(key)
 
         try:
-            snapshot = build_character_portrait_snapshot(character, ruleset)
+            module_background = await _load_module_background(db, room)
+            snapshot = build_character_portrait_snapshot(
+                character,
+                ruleset,
+                module_background=module_background,
+            )
             try:
                 prompt = await self._prompt_composer.compose(snapshot)
             except Exception as exc:

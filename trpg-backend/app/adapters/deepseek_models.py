@@ -41,7 +41,7 @@ class DeepSeekChatCompletionsJsonClient(StructuredJsonClient):
         system_message = (
             f"{instructions}\n\n"
             "只返回一个 JSON 对象，不要使用 Markdown 代码围栏，也不要添加解释文字。"
-            f'返回对象必须符合下面名为“{schema_name}”的 schema：\n{schema_json}'
+            f"返回对象必须符合下面名为“{schema_name}”的 schema：\n{schema_json}"
         )
         request_payload = {
             "model": self._model,

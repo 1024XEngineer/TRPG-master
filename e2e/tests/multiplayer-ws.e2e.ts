@@ -66,7 +66,7 @@ test('第二个玩家用房间码加入，房间预览里能看到两个人', as
   assert.equal(preview.players.filter((p) => p.isHost).length, 1, '有且只有一个房主')
 })
 
-test('WS 生命周期：join → session.bound，全员建卡后房主可以 game.start', async () => {
+test('WS 生命周期：开局后重连会重放同一条权威开场', async () => {
   const room = await createRoomWithModule('ws', 2)
   const guest = await registerPlayer('wsguest')
   const joined = await guest.sdk.rooms.join(room.roomCode, { nickname: '访客' }, guest.token)
@@ -114,6 +114,24 @@ test('WS 生命周期：join → session.bound，全员建卡后房主可以 gam
     assert.match(narrationEvent.payload.text, /房主调查员/)
     assert.match(narrationEvent.payload.text, /访客调查员/)
     assert.match(narrationEvent.payload.text, /会计师/)
+
+    // 刻意不先请求 conversation：即使一次历史请求恰好读在开场提交之前，
+    // 新连接的 room.join 也必须直接收到数据库里同一个 game-opening。
+    room.host.sdk.roomSocket.disconnect()
+    const reconnected = room.host.sdk.roomSocket.connect(room.roomId, room.host.token)
+    await room.host.sdk.roomSocket.waitForOpen(reconnected)
+    const replayedOpening = waitForEvent(
+      room.host.sdk,
+      (event) =>
+        event.type === 'narration.push' &&
+        event.payload.messageId === 'game-opening',
+    )
+    room.host.sdk.roomSocket.joinRoom(room.hostPlayerId, {
+      reconnectToken: room.reconnectToken,
+    })
+    const replayedOpeningEvent = await replayedOpening
+    assert.equal(replayedOpeningEvent.type, 'narration.push')
+    assert.deepEqual(replayedOpeningEvent.payload, narrationEvent.payload)
 
     const conversation = await room.host.sdk.rooms.listConversation(
       room.roomId,

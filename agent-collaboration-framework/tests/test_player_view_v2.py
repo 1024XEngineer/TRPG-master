@@ -1,3 +1,5 @@
+"""PlayerView v2 projection, identity-scope, and revision-contract tests."""
+
 from __future__ import annotations
 
 import json

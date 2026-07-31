@@ -163,7 +163,8 @@ class ProjectionSnapshot(ContractModel):
         """Compatibility view for callers migrating to structured known information."""
 
         return tuple(
-            VisibleFact(id=item.id, text=item.content) for item in self.known_information
+            VisibleFact(id=item.id, text=item.content)
+            for item in self.known_information
         )
 
     @model_validator(mode="after")
@@ -186,6 +187,8 @@ class ActorResourceView(ContractModel):
 
 
 class SelfActorView(ContractModel):
+    """The requesting player's actor; only public_status_summary may be shared."""
+
     id: str = Field(min_length=1)
     name: str = Field(min_length=1)
     occupation: str | None = None
@@ -199,6 +202,8 @@ class SelfActorView(ContractModel):
 
 
 class VisibleActorView(ContractModel):
+    """Another actor currently visible to this player, with public fields only."""
+
     id: str = Field(min_length=1)
     name: str = Field(min_length=1)
     occupation: str | None = None
@@ -316,7 +321,8 @@ class PlayerView(ContractModel):
         """Compatibility view for callers migrating to structured known information."""
 
         return tuple(
-            VisibleFact(id=item.id, text=item.content) for item in self.known_information
+            VisibleFact(id=item.id, text=item.content)
+            for item in self.known_information
         )
 
     @model_validator(mode="after")

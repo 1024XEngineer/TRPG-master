@@ -1,3 +1,5 @@
+"""Host-owned dependency ports implemented by provider and persistence adapters."""
+
 from .host_agent import HostAgentPort
 from .intent_model import IntentModelPort
 from .narration_model import NarrationModelPort

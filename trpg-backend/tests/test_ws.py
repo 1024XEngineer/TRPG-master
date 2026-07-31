@@ -1,8 +1,13 @@
+"""WebSocket protocol, authorization, persistence, and reconnect regression tests."""
+
 from dataclasses import replace
 
 import pytest
 from collaboration_framework.contracts import ContractError, JsonObject
-from collaboration_framework.host.adapters.fakes import FakeNarrationModel
+from collaboration_framework.host.adapters.fakes import (
+    FakeNarrationModel,
+    FakeOpeningNarrationModel,
+)
 from collaboration_framework.host.schemas import (
     IntentContext,
     NarrationContext,
@@ -107,6 +112,18 @@ class _WsMissingParticipantOpening:
             "claimed_fact_ids": [],
             "suggested_actions": [],
         }
+
+
+class _WsCountingOpening:
+    """Count model calls while returning the deterministic valid opening."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self._fake = FakeOpeningNarrationModel()
+
+    async def generate(self, context: OpeningNarrationContext) -> JsonObject:
+        self.calls += 1
+        return await self._fake.generate(context)
 
 
 @pytest.fixture
@@ -242,6 +259,15 @@ def receive_until(ws, predicate, *, limit: int = 24):
         if predicate(message):
             return message, seen
     raise AssertionError(f"expected WebSocket event not found; seen={seen!r}")
+
+
+def receive_replayed_opening(ws) -> dict:
+    """Consume and validate the persisted opening sent after an in-game join."""
+
+    opening = ws.receive_json()
+    assert opening["type"] == "narration.push"
+    assert opening["payload"]["messageId"] == "game-opening"
+    return opening
 
 
 def test_connect_without_token_is_rejected(sync_client: TestClient) -> None:
@@ -394,6 +420,7 @@ def test_game_start_pushes_opening_narration_and_advances_phase(
             lambda message: message.get("type") == "session.bound",
         )
         retry_join_view = ws.receive_json()
+        retry_join_opening = receive_replayed_opening(ws)
 
     view = next(message for message in progress if message.get("type") == "view.updated")
     room_state = next(message for message in progress if message.get("type") == "room.state")
@@ -408,6 +435,7 @@ def test_game_start_pushes_opening_narration_and_advances_phase(
     assert any(message.get("type") == "view.updated" for message in retry_progress)
     assert any(message.get("type") == "room.state" for message in retry_progress)
     assert retry_join_view["type"] == "view.updated"
+    assert retry_join_opening["payload"] == envelope["payload"]
     assert not any(
         message.get("type") in {"opening.started", "narration.push"} for message in retry_progress
     )
@@ -437,6 +465,53 @@ def test_game_start_pushes_opening_narration_and_advances_phase(
     )
     assert persisted_opening["playerId"] is None
     assert persisted_opening["payload"] == envelope["payload"]
+
+
+def test_room_join_replays_persisted_opening_without_regenerating(
+    sync_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A reconnect gets the stored opening even if its history request was stale."""
+
+    token = register_and_login(sync_client, "opening_reconnect_host")
+    room = create_room(sync_client, token)
+    advance_to_building(sync_client, room)
+    complete_character(sync_client, room["roomId"], room["reconnectToken"])
+    opening_model = _WsCountingOpening()
+    monkeypatch.setattr(
+        ws_controller,
+        "turn_application",
+        replace(
+            ws_controller.turn_application,
+            opening_narration_model=opening_model,
+        ),
+    )
+
+    start_game(sync_client, room, token)
+
+    # Do not call GET /conversation here. This models the failure side of the
+    # race: history returned before the opening commit, so WebSocket rejoin must
+    # independently replay the authoritative persisted event.
+    with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
+        ws.send_json(
+            {
+                "type": "room.join",
+                "playerId": room["playerId"],
+                "payload": {"reconnectToken": room["reconnectToken"]},
+            }
+        )
+        opening, progress = receive_until(
+            ws,
+            lambda message: message.get("type") == "narration.push",
+        )
+
+    assert [message["type"] for message in progress[:2]] == [
+        "session.bound",
+        "view.updated",
+    ]
+    assert opening["payload"]["messageId"] == "game-opening"
+    assert "托马斯的会客室" in opening["payload"]["text"]
+    assert opening_model.calls == 1
 
 
 def test_invalid_opening_model_falls_back_after_room_enters_in_game(
@@ -537,6 +612,7 @@ def test_action_submit_broadcasts_narration_to_room_only(sync_client: TestClient
         )
         ws_a.receive_json()  # session.bound
         ws_a.receive_json()  # current view.updated
+        receive_replayed_opening(ws_a)
         ws_guest.send_json(
             {
                 "type": "room.join",
@@ -546,6 +622,7 @@ def test_action_submit_broadcasts_narration_to_room_only(sync_client: TestClient
         )
         ws_guest.receive_json()  # session.bound
         ws_guest.receive_json()  # current view.updated
+        receive_replayed_opening(ws_guest)
         ws_b.send_json(
             {
                 "type": "room.join",
@@ -609,6 +686,7 @@ def test_action_submit_broadcasts_narration_to_room_only(sync_client: TestClient
             lambda message: message.get("type") == "session.bound",
         )
         view_after_retry = ws_a.receive_json()
+        opening_after_retry = receive_replayed_opening(ws_a)
         # room_b 没有收到任何广播——发一条 room.join 触发一次同步交互，确认
         # 收到的仍然是它自己的 session.bound，而不是串过来的 narration。
         ws_b.send_json(
@@ -633,6 +711,7 @@ def test_action_submit_broadcasts_narration_to_room_only(sync_client: TestClient
     assert retried["message_type"] == "turn.completed"
     assert next_after_retry["type"] == "session.bound"
     assert view_after_retry["type"] == "view.updated"
+    assert opening_after_retry["payload"]["messageId"] == "game-opening"
     assert envelope_b["type"] == "session.bound"
     for event in progress:
         rendered = str(event)
@@ -694,6 +773,7 @@ def test_invalid_narration_fails_closed_then_original_request_recovers(
         )
         assert ws.receive_json()["type"] == "session.bound"
         assert ws.receive_json()["type"] == "view.updated"
+        receive_replayed_opening(ws)
 
         ws.send_json(action)
         failed, first_attempt_events = receive_until(
@@ -794,6 +874,7 @@ def test_narration_newlines_are_normalized_before_turn_and_push(
         )
         assert ws.receive_json()["type"] == "session.bound"
         assert ws.receive_json()["type"] == "view.updated"
+        receive_replayed_opening(ws)
         ws.send_json(
             {
                 "type": "action.submit",
@@ -859,6 +940,7 @@ def test_skill_check_waits_for_player_selection_and_roll(
         )
         assert ws.receive_json()["type"] == "session.bound"
         assert ws.receive_json()["type"] == "view.updated"
+        receive_replayed_opening(ws)
         ws.send_json(
             {
                 "type": "action.submit",

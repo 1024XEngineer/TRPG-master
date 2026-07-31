@@ -1,3 +1,5 @@
+"""Backend opening configuration, provider failure, timeout, and logging tests."""
+
 from __future__ import annotations
 
 import json

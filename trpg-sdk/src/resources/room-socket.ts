@@ -1,3 +1,7 @@
+/**
+ * Stateful WebSocket client: validates server events, tracks the latest
+ * player-safe view/progress state, and resolves action promises by correlation ID.
+ */
 import type {
   ActionSubmitPayload,
   ChatSendPayload,

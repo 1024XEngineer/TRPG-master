@@ -37,6 +37,7 @@
     },
     "OpeningParticipant": {
       "additionalProperties": false,
+      "description": "Public identity and status allowed in the shared opening narration.",
       "properties": {
         "actor_id": {
           "minLength": 1,
@@ -75,6 +76,7 @@
     },
     "OpeningSceneContext": {
       "additionalProperties": false,
+      "description": "Only the player-visible portion of the initial shared scene.",
       "properties": {
         "id": {
           "minLength": 1,

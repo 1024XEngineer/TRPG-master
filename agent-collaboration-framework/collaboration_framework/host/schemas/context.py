@@ -30,6 +30,8 @@ class IntentContext(ContractModel):
 
 
 class OpeningSceneContext(ContractModel):
+    """Only the player-visible portion of the initial shared scene."""
+
     id: str = Field(min_length=1)
     name: str
     description: str
@@ -38,6 +40,8 @@ class OpeningSceneContext(ContractModel):
 
 
 class OpeningParticipant(ContractModel):
+    """Public identity and status allowed in the shared opening narration."""
+
     actor_id: str = Field(min_length=1)
     name: str = Field(min_length=1)
     occupation: str | None = None

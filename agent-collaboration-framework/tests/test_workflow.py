@@ -1,3 +1,5 @@
+"""End-to-end collaboration-framework Host workflow contract tests."""
+
 from __future__ import annotations
 
 import asyncio

@@ -1,3 +1,7 @@
+/**
+ * RoomPage regressions for authoritative history/live message ownership and
+ * opening-progress cleanup. Network and WebSocket boundaries are mocked here.
+ */
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'

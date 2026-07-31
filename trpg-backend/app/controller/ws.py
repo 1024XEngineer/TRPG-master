@@ -216,6 +216,43 @@ async def _send_view_updated(
     await websocket.send_json(envelope.model_dump(by_alias=True))
 
 
+async def _send_persisted_opening(
+    db: AsyncSession,
+    websocket: WebSocket,
+    room_id: str,
+) -> bool:
+    """Replay the authoritative opening to one authenticated room connection.
+
+    This direct replay closes the hand-off race between the frontend's one-shot
+    conversation request and WebSocket registration: a socket registered before
+    the opening commit receives the later broadcast, while a socket registered
+    after the commit receives this persisted copy. Delivery may overlap at the
+    boundary, so clients still deduplicate by the stable ``game-opening`` ID.
+    """
+
+    existing = await room_service.get_correlated_event(
+        db,
+        room_id,
+        "narration.push",
+        _OPENING_MESSAGE_ID,
+    )
+    if existing is None:
+        return False
+    persisted = NarrationPushPayload.model_validate(existing.payload)
+    narration = persisted.model_copy(
+        update={
+            "message_id": _OPENING_MESSAGE_ID,
+            "text": normalize_narration_text(persisted.text),
+        }
+    )
+    envelope = ServerEnvelope(
+        type="narration.push",
+        payload=narration.model_dump(by_alias=True),
+    )
+    await websocket.send_json(envelope.model_dump(by_alias=True))
+    return True
+
+
 async def _ensure_opening_narration(
     db: AsyncSession,
     room_id: str,
@@ -664,6 +701,11 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                     bound_player_id,
                                     current_view,
                                 )
+                            # Registering the socket happens inside _handle_room_join
+                            # before this lookup. Together with broadcast-after-commit,
+                            # that ordering guarantees a reconnecting client receives
+                            # either the live opening or this persisted replay.
+                            await _send_persisted_opening(db, websocket, room_id)
                         else:
                             return
                         continue

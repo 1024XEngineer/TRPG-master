@@ -6,7 +6,10 @@ from typing import Literal
 
 from collaboration_framework.contracts import ContractError
 from collaboration_framework.host.ports import OpeningNarrationModelPort
-from collaboration_framework.host.schemas import OpeningNarrationContext, NarrationOutput
+from collaboration_framework.host.schemas import (
+    OpeningNarrationContext,
+    NarrationOutput,
+)
 
 from .narrator import narration_text_rejection_reason, normalize_narration_text
 
@@ -20,16 +23,22 @@ OpeningRejectionReason = Literal[
 
 
 class OpeningNarrationValidationError(ContractError):
+    """Stable rejection category for an unsafe or malformed opening candidate."""
+
     def __init__(self, reason: OpeningRejectionReason) -> None:
         super().__init__("Opening NarrationOutput 未通过玩家可见输出安全校验")
         self.reason = reason
 
 
 class OpeningNarrator:
+    """Validate an untrusted provider candidate before it becomes player-visible."""
+
     def __init__(self, model: OpeningNarrationModelPort) -> None:
         self._model = model
 
     async def narrate(self, context: OpeningNarrationContext) -> NarrationOutput:
+        """Require a narration-only result that names every public participant."""
+
         raw = await self._model.generate(context)
         if isinstance(raw, dict) and isinstance(raw.get("text"), str):
             raw = {**raw, "text": normalize_narration_text(raw["text"])}
@@ -46,7 +55,9 @@ class OpeningNarrator:
         rejection_reason = narration_text_rejection_reason(output.text)
         if rejection_reason is not None:
             raise OpeningNarrationValidationError(rejection_reason)
-        if any(participant.name not in output.text for participant in context.participants):
+        if any(
+            participant.name not in output.text for participant in context.participants
+        ):
             raise OpeningNarrationValidationError("participant_coverage")
         return output
 

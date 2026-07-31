@@ -1,3 +1,5 @@
+"""Deterministic Host-side adapters used by tests and offline development."""
+
 from .host_agent import FakeHostAgent
 from .intent_model import FakeIntentModel
 from .narration_model import FakeNarrationModel

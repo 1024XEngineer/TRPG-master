@@ -1,3 +1,5 @@
+"""Structured Host inputs, outputs, progress events, and recent-history schemas."""
+
 from .agent import (
     HostAgentCompleted,
     HostAgentContext,

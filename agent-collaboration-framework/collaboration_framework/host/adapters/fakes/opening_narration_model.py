@@ -7,4 +7,6 @@ from collaboration_framework.host.schemas import OpeningNarrationContext
 
 class FakeOpeningNarrationModel:
     async def generate(self, context: OpeningNarrationContext) -> JsonObject:
+        """Return the same contract-safe template used by production fallback."""
+
         return deterministic_opening_narration(context).to_json_dict()

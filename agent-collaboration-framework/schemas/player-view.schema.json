@@ -413,6 +413,7 @@
     },
     "SelfActorView": {
       "additionalProperties": false,
+      "description": "The requesting player's actor; only public_status_summary may be shared.",
       "properties": {
         "id": {
           "minLength": 1,
@@ -496,6 +497,7 @@
     },
     "VisibleActorView": {
       "additionalProperties": false,
+      "description": "Another actor currently visible to this player, with public fields only.",
       "properties": {
         "id": {
           "minLength": 1,

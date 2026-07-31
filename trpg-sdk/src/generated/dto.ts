@@ -893,6 +893,9 @@ export interface SelectModuleBody {
   attributeGenMethod?: string;
 }
 
+/**
+ * The requesting player's actor; only public_status_summary may be shared.
+ */
 export interface SelfActorView {
   id: string;
   name: string;
@@ -1045,6 +1048,9 @@ export interface ViewUpdatedPayload {
   playerView: PlayerView;
 }
 
+/**
+ * Another actor currently visible to this player, with public fields only.
+ */
 export interface VisibleActorView {
   id: string;
   name: string;

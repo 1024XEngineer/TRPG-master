@@ -1,3 +1,5 @@
+"""Opening context privacy, fallback rendering, and output-policy tests."""
+
 from __future__ import annotations
 
 import unittest
@@ -76,7 +78,9 @@ def player_view(*, multiplayer: bool) -> PlayerView:
 
 
 class OpeningContextTests(unittest.TestCase):
-    def test_solo_context_contains_only_player_safe_identity_and_background(self) -> None:
+    def test_solo_context_contains_only_player_safe_identity_and_background(
+        self,
+    ) -> None:
         context = ContextAssembler().for_opening(player_view(multiplayer=False))
 
         self.assertEqual(context.participants[0].name, "杜明")
@@ -91,7 +95,10 @@ class OpeningContextTests(unittest.TestCase):
         encoded = context.model_dump_json()
 
         self.assertEqual(
-            [(item.name, item.occupation, item.status_summary) for item in context.participants],
+            [
+                (item.name, item.occupation, item.status_summary)
+                for item in context.participants
+            ],
             [
                 ("杜明", "记者", "衣角沾着雨水。"),
                 ("林夏", "医生", "提着急救箱。"),
@@ -191,7 +198,9 @@ class OpeningNarratorTests(unittest.IsolatedAsyncioTestCase):
         for candidate in candidates:
             with self.subTest(candidate=candidate):
                 with self.assertRaises(OpeningNarrationValidationError):
-                    await OpeningNarrator(CandidateOpeningModel(candidate)).narrate(context)
+                    await OpeningNarrator(CandidateOpeningModel(candidate)).narrate(
+                        context
+                    )
 
     def test_deterministic_opening_mentions_scene_and_every_participant(self) -> None:
         context = ContextAssembler().for_opening(player_view(multiplayer=True))

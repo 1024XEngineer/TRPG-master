@@ -42,6 +42,7 @@ services:
       # 宽松值只是兜底（比如直接拿后端端口调试），不依赖它生效。
       CORS_ORIGINS: '["*"]'
       HOST_MODEL_PROVIDER: ${HOST_MODEL_PROVIDER:-fake}
+      # 开场超时独立于 Provider HTTP 超时，便于预览环境快速降级到安全模板。
       OPENING_NARRATION_MODE: ${OPENING_NARRATION_MODE:-model}
       OPENING_NARRATION_TIMEOUT_SECONDS: ${OPENING_NARRATION_TIMEOUT_SECONDS:-10}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}

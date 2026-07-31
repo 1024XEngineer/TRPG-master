@@ -1,3 +1,5 @@
+"""Public Host application services and validation boundaries."""
+
 from .context_assembler import ContextAssembler
 from .host_agent_intent_resolver import (
     HostAgentEventObserver,

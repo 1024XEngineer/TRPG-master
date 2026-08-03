@@ -479,6 +479,15 @@ describe('RoomPage conversation history', () => {
     expect(await screen.findByText('历史主持人叙事')).toBeInTheDocument()
     expect(spoken).toHaveLength(0)
 
+    emitWsMessage({
+      type: 'narration.push',
+      payload: { messageId: 'history-narration', text: '历史主持人叙事' },
+    })
+    await waitFor(() => {
+      expect(screen.getAllByText('历史主持人叙事')).toHaveLength(1)
+      expect(spoken).toHaveLength(0)
+    })
+
     fireEvent.click(screen.getByRole('button', { name: '重新朗读' }))
     expect(spoken).toHaveLength(1)
     expect(spoken[0]?.text).toBe('历史主持人叙事')

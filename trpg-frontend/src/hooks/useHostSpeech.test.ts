@@ -129,6 +129,20 @@ describe('useHostSpeech', () => {
     expect(result.current.queueLength).toBe(0)
   })
 
+  it('does not enqueue message ids already restored from history', () => {
+    const { spoken } = installSpeechApi()
+    const { result } = renderHook(() => useHostSpeech())
+
+    act(() => {
+      result.current.markSeen(['message-from-history'])
+      result.current.setEnabled(true)
+      result.current.enqueue('message-from-history', '历史消息的实时重放')
+    })
+
+    expect(spoken).toHaveLength(0)
+    expect(result.current.status).toBe('idle')
+  })
+
   it('allows manual replay while automatic speech is disabled', () => {
     const { spoken } = installSpeechApi()
     const { result } = renderHook(() => useHostSpeech())

@@ -756,6 +756,7 @@ export default function RoomPage() {
   const roomInfo = useRoomPlayers(roomCode)
   const hostSpeech = useHostSpeech()
   const enqueueHostSpeech = hostSpeech.enqueue
+  const markHostSpeechSeen = hostSpeech.markSeen
   const isHost = roomInfo?.players.find((p) => p.playerId === playerId)?.isHost ?? false
   const [roomPhase, setRoomPhase] = useState<string | null>(null)
   const [confirmEnd, setConfirmEnd] = useState(false)
@@ -810,6 +811,11 @@ export default function RoomPage() {
       const restored = history
         .map((event) => conversationEventToMessage(event, playerId, senderName))
         .filter((item): item is Message => item !== null)
+      markHostSpeechSeen(
+        restored.flatMap((item) =>
+          item.type === 'narr' && item.messageId ? [item.messageId] : [],
+        ),
+      )
       setMessages((current) => mergeHistoricalMessages(current, restored))
       if (
         restored.some(
@@ -822,7 +828,7 @@ export default function RoomPage() {
       }
     }).catch(() => {})
     return () => { cancelled = true }
-  }, [roomId, reconnectToken, playerId, senderName])
+  }, [markHostSpeechSeen, roomId, reconnectToken, playerId, senderName])
 
   useEffect(() => {
     // ★ block: 'nearest' 很关键——默认的 scrollIntoView 会尝试把目标"居中"，

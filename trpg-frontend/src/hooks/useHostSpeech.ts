@@ -166,6 +166,13 @@ export function useHostSpeech() {
     selectedVoiceURIRef.current = voiceURI || null
   }, [])
 
+  const markSeen = useCallback((messageIds: readonly string[]) => {
+    for (const messageId of messageIds) {
+      const trimmed = messageId.trim()
+      if (trimmed) seenMessageIdsRef.current.add(trimmed)
+    }
+  }, [])
+
   const enqueue = useCallback((messageId: string | undefined, text: string) => {
     const trimmed = text.trim()
     if (!supportedRef.current || !enabledRef.current || !messageId || !trimmed) return
@@ -231,6 +238,7 @@ export function useHostSpeech() {
     setEnabled,
     selectedVoiceURI,
     setSelectedVoiceURI,
+    markSeen,
     status,
     queueLength,
     enqueue,

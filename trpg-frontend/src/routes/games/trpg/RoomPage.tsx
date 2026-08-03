@@ -1599,7 +1599,7 @@ export default function RoomPage() {
                 <h4 className="text-xs font-semibold text-brass-dark mb-2.5">装备</h4>
                 <p className="text-sm text-text-body leading-[1.7] mb-4">{character.equipment || '未填写装备'}</p>
                 <h4 className="text-xs font-semibold text-brass-dark mb-2.5">背景故事</h4>
-                <p className="text-sm text-text-body leading-[1.7] mb-4">{character.background || '未填写背景故事'}</p>
+                <p className="text-sm text-text-body leading-[1.7] mb-4 whitespace-pre-wrap">{character.background || '未填写背景故事'}</p>
                 <h4 className="text-xs font-semibold text-brass-dark mb-2.5">备注</h4>
                 <p className="text-sm text-text-body leading-[1.7]">{character.notes || '未填写备注'}</p>
               </>

@@ -111,6 +111,10 @@ vi.mock('@/services/character/character-api', () => mockCharacterApi)
 describe('CharacterPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockCharacterApi.createCharacterDraft.mockResolvedValue('draft-1')
+    mockCharacterApi.saveCharacter.mockResolvedValue(undefined)
+    mockCharacterApi.completeCharacter.mockResolvedValue(undefined)
+    mockCharacterApi.fetchCharacter.mockResolvedValue({ attributes: {}, skills: {} })
     useRoomStore.getState().reset()
     useCharacterStore.getState().clear()
     useRoomStore.setState({
@@ -153,6 +157,18 @@ describe('CharacterPage', () => {
       fireEvent.click(screen.getByRole('button', { name: /下一步/ }))
       expect(screen.getByText('属性分配')).toBeInTheDocument()
     })
+  }
+
+  async function advanceToBackgroundStep() {
+    fireEvent.change(screen.getByPlaceholderText('角色姓名'), { target: { value: '张三' } })
+    fireEvent.click(screen.getByText('会计师'))
+    fireEvent.click(screen.getByRole('button', { name: /下一步/ }))
+    await advanceToAttributesAfterOccupationPreview()
+
+    fireEvent.click(screen.getByRole('button', { name: /下一步/ }))
+    expect(await screen.findByLabelText('信用评级')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /下一步/ }))
+    expect(await screen.findByText('背景故事')).toBeInTheDocument()
   }
 
   it('blocks advancing until name and occupation are filled', async () => {
@@ -234,5 +250,103 @@ describe('CharacterPage', () => {
     fireEvent.click(occPlus)
     expect(screen.getByLabelText('会计 技能点')).toHaveValue(2)
     expect(occPlus).toBeDisabled()
+  })
+
+  it('renders all categorized background fields', async () => {
+    renderPage()
+    await advanceToBackgroundStep()
+
+    expect(screen.getByLabelText('形象描述')).toBeInTheDocument()
+    expect(screen.getByLabelText('恐惧症和躁狂症')).toBeInTheDocument()
+    expect(screen.getByLabelText('其他')).toBeInTheDocument()
+    expect(screen.queryByText('关键联结')).not.toBeInTheDocument()
+  })
+
+  it('submits and caches the same prefixed background string', async () => {
+    renderPage()
+    await advanceToBackgroundStep()
+
+    fireEvent.change(screen.getByLabelText('形象描述'), { target: { value: '穿着旧风衣' } })
+    fireEvent.change(screen.getByLabelText('重要之人'), { target: { value: '导师亨利' } })
+    fireEvent.change(screen.getByLabelText('其他'), { target: { value: '随身携带笔记本' } })
+    fireEvent.click(screen.getByRole('button', { name: /完成创建/ }))
+
+    const expectedBackground = [
+      '形象描述：穿着旧风衣',
+      '重要之人：导师亨利',
+      '其他：随身携带笔记本',
+    ].join('\n')
+    await waitFor(() => {
+      expect(mockCharacterApi.saveCharacter).toHaveBeenCalledWith(
+        'room-1',
+        'draft-1',
+        expect.objectContaining({ background: expectedBackground })
+      )
+    })
+    await waitFor(() => {
+      expect(useCharacterStore.getState().getForRoom('room-1')?.background).toBe(expectedBackground)
+    })
+  })
+
+  it('loads a legacy background into other and blocks an overlong submission', async () => {
+    useCharacterStore.getState().setCharacter(
+      {
+        info: {
+          name: '', playerName: '', age: '28', gender: '男',
+          residence: '阿卡姆', birthplace: '阿卡姆', occupationId: null,
+        },
+        attr: {},
+        skillAlloc: {},
+        skillFinalValues: {},
+        equipment: '',
+        background: '没有分类前缀的旧背景',
+        notes: '',
+        derived: { hp: 0, san: 0, mp: 0, db: '0', move: 0 },
+      },
+      'room-1'
+    )
+
+    renderPage()
+    await advanceToBackgroundStep()
+    expect(screen.getByLabelText('其他')).toHaveValue('没有分类前缀的旧背景')
+
+    fireEvent.change(screen.getByLabelText('其他'), { target: { value: '字'.repeat(4000) } })
+    expect(screen.getByText(/背景故事不能超过 4000 个字符/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /完成创建/ }))
+    expect(mockCharacterApi.saveCharacter).not.toHaveBeenCalled()
+  })
+
+  it('hydrates categorized background fields from the backend character', async () => {
+    useRoomStore.setState({ characterId: 'character-1' })
+    mockCharacterApi.fetchCharacter.mockResolvedValue({
+      name: '后端调查员',
+      age: 30,
+      gender: '女',
+      residence: '阿卡姆',
+      birthplace: '波士顿',
+      occupation: '会计师',
+      attributes: Object.fromEntries(mockRuleset.attributes.map(attribute => [attribute.key, 50])),
+      derivedStats: { HP: 10, SAN: 50, MP: 10, DB: '0', MOV: 8 },
+      skills: {},
+      equipment: [],
+      background: '思想与信念：真相总会留下痕迹\n其他：来自旧报社',
+      notes: '',
+    })
+
+    renderPage()
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('角色姓名')).toHaveValue('后端调查员')
+    })
+    await waitFor(() => {
+      expect(mockPreviewCharacter).toHaveBeenCalledWith(expect.objectContaining({ occupationId: 1 }))
+    })
+
+    await advanceToAttributesAfterOccupationPreview()
+    fireEvent.click(screen.getByRole('button', { name: /下一步/ }))
+    expect(await screen.findByLabelText('信用评级')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /下一步/ }))
+
+    expect(await screen.findByLabelText('思想与信念')).toHaveValue('真相总会留下痕迹')
+    expect(screen.getByLabelText('其他')).toHaveValue('来自旧报社')
   })
 })

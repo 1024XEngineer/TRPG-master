@@ -10,6 +10,13 @@ import { previewCharacter, translateCharacterValidationError } from '@/services/
 import { friendlyErrorMessage } from '@/services/api-client'
 import { useRuleset } from '@/hooks/useRuleset'
 import type { OccupationSpec, SkillSpec } from '@/data/types'
+import {
+  BACKGROUND_SECTION_DEFINITIONS,
+  CHARACTER_BACKGROUND_MAX_LENGTH,
+  parseCharacterBackground,
+  serializeCharacterBackground,
+} from '@/data/character-background'
+import type { BackgroundSectionKey } from '@/data/character-background'
 
 // 图标和配色是纯 UI 装饰，不是规则数据，留在前端；键用后端 ruleset 的属性键。
 // 「有哪些属性、哪些能加点、默认值多少、预算和上下限是什么」全部来自
@@ -22,6 +29,17 @@ const ATTR_ICONS: Record<string, typeof Heart> = {
 const ATTR_COLORS: Record<string, string> = {
   STR: '#c04040', CON: '#c08050', POW: '#7050a0', DEX: '#4a8a4a',
   APP: '#8a4070', SIZ: '#b8976a', INT: '#4a7098', EDU: '#6a6050',
+}
+
+const BACKGROUND_PLACEHOLDERS: Record<BackgroundSectionKey, string> = {
+  personalDescription: '外貌、衣着、举止或给人的第一印象……',
+  ideologyBeliefs: '角色坚持的原则、信仰或世界观……',
+  significantPeople: '对角色影响深远的人，以及彼此的关系……',
+  meaningfulLocations: '承载重要回忆或意义的地点……',
+  treasuredPossessions: '角色珍视的物品及其来历……',
+  traits: '性格特点、习惯或待人处事方式……',
+  injuriesScars: '身体或心理上留下的伤痕……',
+  phobiasManias: '角色恐惧、执着或难以控制的倾向……',
 }
 
 // 建卡阶段的衍生值面板用小写 key，后端 derivedStats 是 { HP, MP, SAN, DB,
@@ -266,7 +284,7 @@ export default function CharacterPage() {
           // 别把已选职业清成 null——那会连带清掉技能预算。
           ...(matched ? { occupationId: matched.id } : {}),
         }))
-        setBackground(saved.background ?? '')
+        setBackgroundForm(parseCharacterBackground(saved.background ?? ''))
         setNotes(saved.notes ?? '')
         setEquipment((saved.equipment ?? []).join('、'))
         setSkillAlloc(alloc)
@@ -310,8 +328,21 @@ export default function CharacterPage() {
 
   // Equipment & background
   const [equipment, setEquipment] = useState(existingCharacter?.equipment ?? '')
-  const [background, setBackground] = useState(existingCharacter?.background ?? '')
+  const [backgroundForm, setBackgroundForm] = useState(() =>
+    parseCharacterBackground(existingCharacter?.background ?? '')
+  )
   const [notes, setNotes] = useState(existingCharacter?.notes ?? '')
+  const serializedBackground = useMemo(
+    () => serializeCharacterBackground(backgroundForm),
+    [backgroundForm]
+  )
+
+  const updateBackgroundSection = (key: BackgroundSectionKey, value: string) => {
+    setBackgroundForm(previous => ({
+      ...previous,
+      sections: { ...previous.sections, [key]: value },
+    }))
+  }
 
   // UI state
   const [search, setSearch] = useState('')
@@ -642,6 +673,9 @@ export default function CharacterPage() {
     const issues: string[] = []
     if (!info.name.trim()) issues.push('角色姓名不能为空')
     if (info.occupationId == null) issues.push('请选择职业')
+    if (targetStep >= 4 && serializedBackground.length > CHARACTER_BACKGROUND_MAX_LENGTH) {
+      issues.push(`背景故事不能超过 ${CHARACTER_BACKGROUND_MAX_LENGTH} 个字符`)
+    }
     const needsReadyPreview = targetStep >= 1 && info.name.trim() && info.occupationId != null
     if (needsReadyPreview) {
       if (previewStatus === 'pending') {
@@ -719,7 +753,7 @@ export default function CharacterPage() {
         skillValues: skillsPayload,
         equipment,
         occupationName: selectedOcc?.name ?? null,
-        background,
+        background: serializedBackground,
         notes,
       })
       await completeCharacter(roomId, characterId)
@@ -729,7 +763,7 @@ export default function CharacterPage() {
           attr: { ...attr },
           skillAlloc: { ...skillAlloc },
           skillFinalValues,
-          equipment, background, notes,
+          equipment, background: serializedBackground, notes,
           derived: finalDerived,
         },
         roomId
@@ -1213,10 +1247,60 @@ export default function CharacterPage() {
 
               {/* Background */}
               <div className="bg-card border border-border-light rounded-md p-[18px] mb-3">
-                <h4 className="text-[12px] font-semibold text-brass-dark uppercase tracking-[0.08em] mb-3">背景故事</h4>
-                <textarea value={background} onChange={e => setBackground(e.target.value)}
-                  placeholder="简单描述你的角色背景…" rows={4}
-                  className="w-full px-3.5 py-2.5 rounded-[6px] bg-input border border-border-light text-text-primary text-[14px] outline-none focus:border-brass resize-none" />
+                <div className="flex items-start justify-between gap-3 mb-1.5">
+                  <h4 className="text-[12px] font-semibold text-brass-dark uppercase tracking-[0.08em]">背景故事</h4>
+                  <span className={`text-[11px] font-mono ${
+                    serializedBackground.length > CHARACTER_BACKGROUND_MAX_LENGTH
+                      ? 'text-[#c04040] font-semibold'
+                      : 'text-text-muted'
+                  }`}>
+                    {serializedBackground.length}/{CHARACTER_BACKGROUND_MAX_LENGTH}
+                  </span>
+                </div>
+                <p className="text-[11px] text-text-muted leading-relaxed mb-3">
+                  分项填写调查员的经历，所有内容均为选填。
+                </p>
+                <div className="space-y-2.5">
+                  {BACKGROUND_SECTION_DEFINITIONS.map(section => {
+                    const value = backgroundForm.sections[section.key]
+                    return (
+                      <div key={section.key} className="rounded-[6px] bg-input border border-border-light p-3">
+                        <label htmlFor={`background-${section.key}`} className="block text-[13px] font-semibold text-text-primary mb-2">
+                          {section.label}
+                        </label>
+                        <textarea
+                          id={`background-${section.key}`}
+                          aria-label={section.label}
+                          value={value}
+                          onChange={event => updateBackgroundSection(section.key, event.target.value)}
+                          placeholder={BACKGROUND_PLACEHOLDERS[section.key]}
+                          rows={2}
+                          className="w-full px-3 py-2 rounded-[6px] bg-card border border-border-light text-text-primary text-[14px] outline-none focus:border-brass resize-y"
+                        />
+                      </div>
+                    )
+                  })}
+
+                  <div className="rounded-[6px] bg-input border border-border-light p-3">
+                    <label htmlFor="background-other" className="block text-[13px] font-semibold text-text-primary mb-2">
+                      其他
+                    </label>
+                    <textarea
+                      id="background-other"
+                      aria-label="其他"
+                      value={backgroundForm.other}
+                      onChange={event => setBackgroundForm(previous => ({ ...previous, other: event.target.value }))}
+                      placeholder="未归类的背景补充；旧版背景故事也会显示在这里……"
+                      rows={3}
+                      className="w-full px-3 py-2 rounded-[6px] bg-card border border-border-light text-text-primary text-[14px] outline-none focus:border-brass resize-y"
+                    />
+                  </div>
+                </div>
+                {serializedBackground.length > CHARACTER_BACKGROUND_MAX_LENGTH && (
+                  <p className="mt-2 text-[11px] text-[#c04040] font-medium">
+                    背景故事不能超过 {CHARACTER_BACKGROUND_MAX_LENGTH} 个字符，请精简后再完成建卡。
+                  </p>
+                )}
               </div>
 
               {/* Notes */}

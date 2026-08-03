@@ -270,6 +270,28 @@ def receive_replayed_opening(ws) -> dict:
     return opening
 
 
+def receive_narration_stream(ws, *, limit: int = 60) -> tuple[dict, list[dict]]:
+    """Receive up to the authoritative `narration.push`, returning it with its chunks."""
+
+    push, seen = receive_until(
+        ws,
+        lambda message: message.get("type") == "narration.push",
+        limit=limit,
+    )
+    chunks = [message for message in seen if message.get("type") == "narration.chunk"]
+    return push, chunks
+
+
+def assert_chunks_reconstruct_push(push: dict, chunks: list[dict]) -> None:
+    """The progressive chunks must rebuild the authoritative text exactly (issue #203)."""
+
+    assert chunks, "expected progressive narration chunks before the authoritative push"
+    message_id = push["payload"]["messageId"]
+    assert [chunk["payload"]["messageId"] for chunk in chunks] == [message_id] * len(chunks)
+    assert [chunk["payload"]["sequence"] for chunk in chunks] == list(range(len(chunks)))
+    assert "".join(chunk["payload"]["text"] for chunk in chunks) == push["payload"]["text"]
+
+
 def test_connect_without_token_is_rejected(sync_client: TestClient) -> None:
     room = create_room(sync_client, register_and_login(sync_client))
 
@@ -1356,3 +1378,107 @@ def test_turn_error_reason_keeps_contract_error_message_bounded() -> None:
 
     assert reason == "checkpoint 不在可信候选中 with extra whitespace"
     assert "\n" not in reason
+
+
+def test_opening_narration_streams_chunks_before_the_authoritative_push(
+    sync_client: TestClient,
+) -> None:
+    token = register_and_login(sync_client, "opening_stream")
+    room = create_room(sync_client, token)
+    advance_to_building(sync_client, room)
+    complete_character(sync_client, room["roomId"], room["reconnectToken"])
+
+    with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
+        ws.send_json(
+            {
+                "type": "room.join",
+                "playerId": room["playerId"],
+                "payload": {"reconnectToken": room["reconnectToken"]},
+            }
+        )
+        ws.receive_json()  # session.bound
+        ws.send_json({"type": "game.start", "playerId": room["playerId"], "payload": {}})
+        push, chunks = receive_narration_stream(ws)
+
+    assert push["payload"]["messageId"] == "game-opening"
+    assert_chunks_reconstruct_push(push, chunks)
+
+
+def test_action_narration_chunks_reach_every_player_in_the_room(
+    sync_client: TestClient,
+) -> None:
+    host_token = register_and_login(sync_client, "chunk_host")
+    room = create_room(sync_client, host_token, max_players=2)
+    guest = join_as(sync_client, room["roomCode"], "chunk_guest")
+    advance_to_building(sync_client, room)
+    complete_character(sync_client, room["roomId"], room["reconnectToken"])
+    complete_character(sync_client, room["roomId"], guest["reconnectToken"])
+    start_game(sync_client, room, host_token)
+
+    with (
+        sync_client.websocket_connect(f"/ws/{room['roomId']}?token={host_token}") as host_ws,
+        sync_client.websocket_connect(
+            f"/ws/{room['roomId']}?token={guest['authToken']}"
+        ) as guest_ws,
+    ):
+        host_ws.send_json(
+            {
+                "type": "room.join",
+                "playerId": room["playerId"],
+                "payload": {"reconnectToken": room["reconnectToken"]},
+            }
+        )
+        host_ws.receive_json()  # session.bound
+        host_ws.receive_json()  # current view.updated
+        receive_replayed_opening(host_ws)
+        guest_ws.send_json(
+            {
+                "type": "room.join",
+                "playerId": guest["playerId"],
+                "payload": {"reconnectToken": guest["reconnectToken"]},
+            }
+        )
+        guest_ws.receive_json()  # session.bound
+        guest_ws.receive_json()  # current view.updated
+        receive_replayed_opening(guest_ws)
+
+        host_ws.send_json(
+            {
+                "type": "action.submit",
+                "playerId": room["playerId"],
+                "payload": {
+                    "clientActionId": "chunk-broadcast-203",
+                    "utterance": "我看看托马斯",
+                },
+            }
+        )
+        host_push, host_chunks = receive_narration_stream(host_ws)
+        guest_push, guest_chunks = receive_narration_stream(guest_ws)
+
+    assert host_push["payload"]["messageId"] == "chunk-broadcast-203"
+    assert_chunks_reconstruct_push(host_push, host_chunks)
+    assert_chunks_reconstruct_push(guest_push, guest_chunks)
+
+
+def test_replayed_opening_sends_no_chunks(sync_client: TestClient) -> None:
+    """历史恢复只发权威消息：重新进房不该再放一遍渐进片段（issue #203）。"""
+
+    token = register_and_login(sync_client, "replay_no_chunk")
+    room = create_room(sync_client, token)
+    advance_to_building(sync_client, room)
+    complete_character(sync_client, room["roomId"], room["reconnectToken"])
+    start_game(sync_client, room, token)
+
+    with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
+        ws.send_json(
+            {
+                "type": "room.join",
+                "playerId": room["playerId"],
+                "payload": {"reconnectToken": room["reconnectToken"]},
+            }
+        )
+        ws.receive_json()  # session.bound
+        ws.receive_json()  # current view.updated
+        opening = receive_replayed_opening(ws)
+
+    assert opening["payload"]["messageId"] == "game-opening"

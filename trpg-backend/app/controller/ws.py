@@ -21,6 +21,9 @@
 - `san.check.roll`/`room.rejoin` 仍是 `NOT_IMPLEMENTED` 协议桩。
 - 每条实际发送的 `narration.push` 都会同步写一行 `events` 表；动作叙事用
   `clientActionId` 做持久化去重，`GET /rooms/{roomId}/replay` 直接读它。
+- 落库去重成功后、发出权威 `narration.push` 之前，同一条叙事会先按句切成
+  `narration.chunk` 下发用于渐进展示（issue #203）。片段不落库、不构成权威
+  历史，拼接结果与最终 `narration.push` 完全一致。
 
 数据库会话按"每条消息一个短 session"处理，而不是整条连接复用一个：一个
 WebSocket 可能存活很久，用一个 session 包住整条连接会在这期间一直占着一个
@@ -30,7 +33,7 @@ WebSocket 可能存活很久，用一个 session 包住整条连接会在这期�
 """
 
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from functools import partial
 
@@ -46,6 +49,7 @@ from collaboration_framework.engine import RevisionConflictError
 from collaboration_framework.host.application import (
     TurnExecutionError,
     normalize_narration_text,
+    split_narration_chunks,
 )
 from collaboration_framework.host.schemas import TurnOutput
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -83,6 +87,7 @@ from app.dto.ws import (
     ClientEnvelope,
     ErrorPayload,
     GameStartPayload,
+    NarrationChunkPayload,
     NarrationPushPayload,
     OpeningStartedPayload,
     PlayerReadyPayload,
@@ -216,6 +221,39 @@ async def _send_view_updated(
     await websocket.send_json(envelope.model_dump(by_alias=True))
 
 
+async def _stream_narration_chunks(
+    send: Callable[[dict], Awaitable[None]],
+    *,
+    message_id: str,
+    text: str,
+) -> None:
+    """把一条已校验、已落库的叙事按句切片，作为渐进展示先行下发（issue #203）。
+
+    调用前提有两条，缺一条都不能调：完整叙事已经过 `Narrator` 的 Schema 与
+    事实引用校验；并且 `record_event()` 去重成功。片段本身**没有**独立的安全
+    保证，也不落库——它只是同一条 `narration.push` 的展示形式，历史恢复、
+    复盘和语音朗读一律只认随后发出的权威 `narration.push`。
+
+    只切出一段时直接返回：单片段没有渐进可言，再发一轮 chunk 只是白白多一次
+    往返，前端收到最终 `narration.push` 的时机完全一样。
+    """
+
+    chunks = split_narration_chunks(text)
+    if len(chunks) < 2:
+        return
+    for sequence, chunk in enumerate(chunks):
+        payload = NarrationChunkPayload(
+            message_id=message_id,
+            sequence=sequence,
+            text=chunk,
+        )
+        envelope = ServerEnvelope(
+            type="narration.chunk",
+            payload=payload.model_dump(by_alias=True),
+        )
+        await send(envelope.model_dump(by_alias=True))
+
+
 async def _send_persisted_opening(
     db: AsyncSession,
     websocket: WebSocket,
@@ -305,6 +343,11 @@ async def _ensure_opening_narration(
             _OPENING_MESSAGE_ID,
         )
         return False
+    await _stream_narration_chunks(
+        partial(manager.broadcast, room_id),
+        message_id=_OPENING_MESSAGE_ID,
+        text=narration.text,
+    )
     envelope = ServerEnvelope(type="narration.push", payload=payload)
     await manager.broadcast(room_id, envelope.model_dump(by_alias=True))
     return True
@@ -351,12 +394,16 @@ async def _deliver_turn_narration(
         text=text,
         clarification=clarification,
     )
+    # 澄清叙事只对发起者可见，它的渐进片段必须走同一条投递通道，
+    # 否则片段会广播给全房间、泄露只该给一个人看的内容。
+    send = websocket.send_json if clarification else partial(manager.broadcast, room_id)
+    await _stream_narration_chunks(
+        send,
+        message_id=client_action_id,
+        text=text,
+    )
     envelope = ServerEnvelope(type="narration.push", payload=payload)
-    message = envelope.model_dump(by_alias=True)
-    if clarification:
-        await websocket.send_json(message)
-    else:
-        await manager.broadcast(room_id, message)
+    await send(envelope.model_dump(by_alias=True))
     return True
 
 

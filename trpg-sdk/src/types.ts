@@ -66,6 +66,7 @@ export type {
   GameStartPayload,
   SessionBoundPayload,
   NarrationPushPayload,
+  NarrationChunkPayload,
   OpeningStartedPayload,
   // WebSocket 新增 14 个事件（issue #77）
   CheckRollPayload,
@@ -121,6 +122,7 @@ import type {
   ClueGrantedPayload,
   ErrorPayload,
   GameEndedPayload,
+  NarrationChunkPayload,
   NarrationPushPayload,
   OpeningStartedPayload,
   PlayerJoinedPayload,
@@ -149,6 +151,7 @@ import type {
 export type ServerToClientEvent =
   | { type: 'session.bound'; payload: SessionBoundPayload }
   | { type: 'narration.push'; payload: NarrationPushPayload }
+  | { type: 'narration.chunk'; payload: NarrationChunkPayload }
   | { type: 'opening.started'; payload: OpeningStartedPayload }
   | { type: 'turn.started'; payload: TurnStartedPayload }
   | { type: 'turn.phase_changed'; payload: TurnPhaseChangedPayload }

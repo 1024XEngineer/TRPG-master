@@ -259,6 +259,16 @@ const PAYLOAD_VALIDATORS: {
     (p.messageId === undefined ||
       p.messageId === null ||
       (typeof p.messageId === 'string' && p.messageId.length > 0)),
+  // 片段只是 narration.push 的渐进展示形式，不是权威消息（issue #203）：
+  // messageId 用来归组、sequence 用来排序去重，拼接结果必须等于最终 push 的
+  // text。下游不得把拼接内容当成权威历史。
+  'narration.chunk': (p) =>
+    typeof p.messageId === 'string' &&
+    p.messageId.length > 0 &&
+    typeof p.sequence === 'number' &&
+    Number.isInteger(p.sequence) &&
+    p.sequence >= 0 &&
+    typeof p.text === 'string',
   'opening.started': (p) =>
     typeof p.messageId === 'string' && p.messageId.length > 0,
   'turn.started': (p) => typeof p.correlationId === 'string',

@@ -17,7 +17,12 @@ from .intent_aligner import (
     recover_travel_intent,
 )
 from .intent_parser import IntentParser, validate_intent_against_view
-from .narrator import NarrationValidationError, Narrator, normalize_narration_text
+from .narrator import (
+    NarrationValidationError,
+    Narrator,
+    normalize_narration_text,
+    split_narration_chunks,
+)
 from .opening_narrator import (
     OpeningNarrationValidationError,
     OpeningNarrator,
@@ -60,5 +65,6 @@ __all__ = [
     "normalize_narration_text",
     "deterministic_opening_narration",
     "recover_travel_intent",
+    "split_narration_chunks",
     "validate_intent_against_view",
 ]

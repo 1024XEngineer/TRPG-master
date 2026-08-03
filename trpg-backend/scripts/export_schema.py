@@ -89,6 +89,7 @@ _MODELS: list[type[BaseModel]] = [
     ws.ActionSubmitPayload,
     ws.SessionBoundPayload,
     ws.NarrationPushPayload,
+    ws.NarrationChunkPayload,
     ws.OpeningStartedPayload,
     ws.TurnStartedPayload,
     ws.TurnPhaseChangedPayload,

@@ -37,6 +37,28 @@ function waitForEvent(
   })
 }
 
+/** 收集事件直到出现终止事件，返回这期间收到的全部事件（含终止事件本身）。 */
+function collectUntil(
+  socketOwner: { roomSocket: { onMessage: (h: (e: ServerToClientEvent) => void) => () => void } },
+  terminal: (event: ServerToClientEvent) => boolean,
+  timeoutMs = 5_000
+): Promise<ServerToClientEvent[]> {
+  return new Promise((resolve, reject) => {
+    const seen: ServerToClientEvent[] = []
+    const timer = setTimeout(() => {
+      off()
+      reject(new Error(`等待终止事件超时（${timeoutMs}ms）；已收到 ${seen.length} 条`))
+    }, timeoutMs)
+    const off = socketOwner.roomSocket.onMessage((event) => {
+      seen.push(event)
+      if (!terminal(event)) return
+      clearTimeout(timer)
+      off()
+      resolve(seen)
+    })
+  })
+}
+
 /** 建好角色卡并标记完成——`game.start` 要求全员建完卡。 */
 async function buildCharacter(
   sdk: Awaited<ReturnType<typeof registerPlayer>>['sdk'],
@@ -372,6 +394,65 @@ test('终止性攻击检定失败后仍可继续提交行动', async () => {
     })
     assert.equal(nextTurn.player_id, room.hostPlayerId)
     assert.doesNotMatch(nextTurn.narration.text, /CHECK_PENDING|契约校验/)
+  } finally {
+    room.host.sdk.roomSocket.disconnect()
+  }
+})
+
+test('渐进叙事：开场片段按序到达且拼接结果等于权威 narration.push', async () => {
+  const room = await createRoomWithModule('chunk')
+  await room.host.sdk.rooms.startStory(room.roomId, room.reconnectToken)
+  await buildCharacter(room.host.sdk, room.roomId, room.reconnectToken, '片段调查员')
+
+  const socket = room.host.sdk.roomSocket.connect(room.roomId, room.host.token)
+  try {
+    await room.host.sdk.roomSocket.waitForOpen(socket)
+
+    const bound = waitForEvent(room.host.sdk, (e) => e.type === 'session.bound')
+    room.host.sdk.roomSocket.joinRoom(room.hostPlayerId, {
+      reconnectToken: room.reconnectToken,
+    })
+    await bound
+
+    const streamed = collectUntil(
+      room.host.sdk,
+      (event) =>
+        event.type === 'narration.push' && event.payload.messageId === 'game-opening'
+    )
+    room.host.sdk.roomSocket.startGame(room.hostPlayerId)
+    const events = await streamed
+
+    const push = events.at(-1)
+    assert.equal(push?.type, 'narration.push')
+    const chunks = events.filter((event) => event.type === 'narration.chunk')
+    assert.ok(chunks.length > 0, '开场应当先下发渐进片段')
+
+    // 片段全部属于同一条消息，序号从 0 连续递增。
+    assert.deepEqual(
+      chunks.map((chunk) => chunk.payload.messageId),
+      chunks.map(() => 'game-opening')
+    )
+    assert.deepEqual(
+      chunks.map((chunk) => chunk.payload.sequence),
+      chunks.map((_chunk, index) => index)
+    )
+
+    // 这条断言是本用例的核心：客户端把片段拼起来，必须与服务端持久化并推送的
+    // 权威文本逐字一致，否则渐进展示会跟最终历史对不上。
+    assert.equal(
+      chunks.map((chunk) => chunk.payload.text).join(''),
+      push?.type === 'narration.push' ? push.payload.text : ''
+    )
+
+    // 片段不进权威历史：会话历史里只有一条 game-opening。
+    const conversation = await room.host.sdk.rooms.listConversation(
+      room.roomId,
+      room.reconnectToken
+    )
+    assert.equal(
+      conversation.filter((event) => event.id === 'game-opening').length,
+      1
+    )
   } finally {
     room.host.sdk.roomSocket.disconnect()
   }

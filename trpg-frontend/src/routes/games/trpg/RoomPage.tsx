@@ -1,7 +1,7 @@
 import { useNavigate } from 'react-router-dom'
-import { RoomSocketServerError, TurnFailedError, type AgentPlayerView, type AgentTurnPhase, type CheckRequestPayload, type RoomConversationEvent } from 'trpg-sdk'
-import { ArrowLeft, Users, Map, BookOpen, ScrollText, Star, X, SendHorizontal, Dice6, Plus, Save, FlagOff, Heart } from 'lucide-react'
-import { useState, useRef, useEffect, type Dispatch, type FormEvent, type SetStateAction } from 'react'
+import { RoomSocketServerError, TurnFailedError, type AgentPlayerView, type AgentTurnPhase, type CheckRequestPayload, type NarrationPushPayload, type RoomConversationEvent } from 'trpg-sdk'
+import { ArrowLeft, Users, Map, BookOpen, ScrollText, Star, X, SendHorizontal, Dice6, Plus, Save, FlagOff, Heart, Volume2, Pause, Play, Square, RotateCcw } from 'lucide-react'
+import { useCallback, useState, useRef, useEffect, type Dispatch, type FormEvent, type SetStateAction } from 'react'
 import { useRoomStore } from '@/stores/room-store'
 import { useAuthStore } from '@/stores/auth-store'
 import { useCharacterStore } from '@/stores/character-store'
@@ -9,6 +9,7 @@ import { connectWebSocket, waitForWsOpen, sdk, onWsMessage, disconnectWebSocket,
 import { endGame } from '@/services/room'
 import { useRoomPlayers } from '@/hooks/useRoomPlayers'
 import { useRuleset } from '@/hooks/useRuleset'
+import { useHostSpeech } from '@/hooks/useHostSpeech'
 
 // `crypto.randomUUID()` 要求安全上下文（HTTPS 或 localhost）——CI Preview
 // 部署在纯 HTTP 的 IP:端口上（issue #200，域名/HTTPS 明确列在本期不做），
@@ -103,6 +104,61 @@ function formatRoomTime(value: string | Date): string {
 function conversationMessageId(type: RoomConversationEvent['type'], id: string): string {
   return `history:${type}:${id}`
 }
+
+/**
+ * 一条主持叙事正在渐进到达时的临时拼装状态（issue #203）。
+ *
+ * 它**不是**权威历史：片段不落库，最终以服务端持久化的 `narration.push` 为准。
+ * 收到同一 `messageId` 的 push 后这份状态立即丢弃，由权威消息接管；刷新或重新
+ * 进房只会拿到 push，不会重放片段。
+ */
+interface StreamingNarration {
+  messageId: string
+  chunks: Record<number, string>
+  /** 已揭示的字符数。片段几乎同时到达，靠它把文字按节奏放出来。 */
+  revealed: number
+}
+
+/**
+ * 按 `sequence` 收片段。同一序号重复到达（重连/重试）不会重复拼接，换了
+ * `messageId` 说明是新的一条叙事，连揭示进度一起从头开始。
+ */
+export function accumulateNarrationChunk(
+  current: StreamingNarration | null,
+  chunk: { messageId: string; sequence: number; text: string },
+): StreamingNarration {
+  const base =
+    current?.messageId === chunk.messageId
+      ? current
+      : { messageId: chunk.messageId, chunks: {}, revealed: 0 }
+  if (chunk.sequence in base.chunks) return base
+  return {
+    ...base,
+    chunks: { ...base.chunks, [chunk.sequence]: chunk.text },
+  }
+}
+
+/** 按序号升序拼接已到达的片段；乱序到达也能得到正确文本。 */
+export function streamingNarrationText(state: StreamingNarration): string {
+  return Object.keys(state.chunks)
+    .map(Number)
+    .sort((a, b) => a - b)
+    .map((sequence) => state.chunks[sequence])
+    .join('')
+}
+
+/**
+ * 逐字揭示的节奏参数（issue #203）。
+ *
+ * 服务端是在完整叙事生成并校验之后才切片的，所有片段会在毫秒级内一起到达
+ * （实测三帧间隔 0.5–0.7ms）。所以「渐进」必须由前端控制节奏，否则玩家看到的
+ * 仍然是整段瞬间弹出。这是展示层的节奏，不是真的增量生成——真增量要等可独立
+ * 校验的 ValidatedNarrationChunk 协议。
+ *
+ * 长文本按比例加快，保证总时长不超过 REVEAL_MAX_MS；短文本自然更快结束。
+ */
+const REVEAL_TICK_MS = 30
+const REVEAL_MAX_MS = 2400
 
 function mergeHistoricalMessages(current: Message[], history: Message[]): Message[] {
   const ids = new Set(current.flatMap((item) => (item.messageId ? [item.messageId] : [])))
@@ -753,6 +809,9 @@ export default function RoomPage() {
   const senderName = character?.info.name || nickname || '你'
   const { ruleset } = useRuleset()
   const roomInfo = useRoomPlayers(roomCode)
+  const hostSpeech = useHostSpeech()
+  const enqueueHostSpeech = hostSpeech.enqueue
+  const markHostSpeechSeen = hostSpeech.markSeen
   const isHost = roomInfo?.players.find((p) => p.playerId === playerId)?.isHost ?? false
   const [roomPhase, setRoomPhase] = useState<string | null>(null)
   const [confirmEnd, setConfirmEnd] = useState(false)
@@ -771,6 +830,11 @@ export default function RoomPage() {
     return cached?.room_id === roomId ? cached : null
   })
   const [progressLabel, setProgressLabel] = useState<string | null>(null)
+  const [streamingNarration, setStreamingNarration] = useState<StreamingNarration | null>(null)
+  // 队列而不是单槽：揭示窗口最长 REVEAL_MAX_MS，这期间完全可能再来一条叙事
+  // （无片段的叙事后端会跳过切片，直接发 push）。用单槽的话后到的会把前一条
+  // 顶掉，被顶掉的那条既不进 messages 也不朗读，只能靠刷新走历史恢复。
+  const [pendingNarrations, setPendingNarrations] = useState<NarrationPushPayload[]>([])
   const [actionError, setActionError] = useState('')
   const [actionErrorRetryable, setActionErrorRetryable] = useState(false)
   const [actionErrorIsGuidance, setActionErrorIsGuidance] = useState(false)
@@ -807,6 +871,11 @@ export default function RoomPage() {
       const restored = history
         .map((event) => conversationEventToMessage(event, playerId, senderName))
         .filter((item): item is Message => item !== null)
+      markHostSpeechSeen(
+        restored.flatMap((item) =>
+          item.type === 'narr' && item.messageId ? [item.messageId] : [],
+        ),
+      )
       setMessages((current) => mergeHistoricalMessages(current, restored))
       if (
         restored.some(
@@ -819,7 +888,7 @@ export default function RoomPage() {
       }
     }).catch(() => {})
     return () => { cancelled = true }
-  }, [roomId, reconnectToken, playerId, senderName])
+  }, [markHostSpeechSeen, roomId, reconnectToken, playerId, senderName])
 
   useEffect(() => {
     // ★ block: 'nearest' 很关键——默认的 scrollIntoView 会尝试把目标"居中"，
@@ -851,38 +920,102 @@ export default function RoomPage() {
     }
   }, [roomId, playerId, roomCode, nickname, reconnectToken])
 
+  /** 把权威叙事落成正式消息，并交给语音朗读。只有它产出权威历史。 */
+  const commitNarration = useCallback((payload: NarrationPushPayload) => {
+    const authoritativeId = payload.messageId?.trim()
+    const messageId = authoritativeId
+      ? conversationMessageId('narration.push', authoritativeId)
+      : pendingNarrationActionIdRef.current
+        ? conversationMessageId('narration.push', pendingNarrationActionIdRef.current)
+        : undefined
+    enqueueHostSpeech(messageId, payload.text)
+    setMessages((prev) => {
+      if (messageId && prev.some((item) => item.messageId === messageId)) {
+        pendingNarrationActionIdRef.current = null
+        return prev
+      }
+      if (!messageId && prev.at(-1)?.content === payload.text) return prev
+      pendingNarrationActionIdRef.current = null
+      return appendLiveMessage(prev, {
+        type: 'narr',
+        channel: 'action',
+        messageId,
+        sender: '守秘人',
+        content: payload.text,
+        time: formatRoomTime(new Date()),
+      })
+    })
+  }, [enqueueHostSpeech])
+
+  // 逐字揭示：片段几乎同时到达，节奏由这里控制。长文本按比例加快，总时长
+  // 不超过 REVEAL_MAX_MS。
+  useEffect(() => {
+    if (!streamingNarration) return
+    const full = streamingNarrationText(streamingNarration)
+    if (streamingNarration.revealed >= full.length) return
+    const step = Math.max(1, Math.ceil(full.length / (REVEAL_MAX_MS / REVEAL_TICK_MS)))
+    const timer = setTimeout(() => {
+      setStreamingNarration((current) =>
+        current === null
+          ? current
+          : {
+              ...current,
+              revealed: Math.min(
+                streamingNarrationText(current).length,
+                current.revealed + step,
+              ),
+            },
+      )
+    }, REVEAL_TICK_MS)
+    return () => clearTimeout(timer)
+  }, [streamingNarration])
+
+  // 权威消息何时接管：按到达顺序逐条提交，队首那条还没揭示完就等着。
+  //
+  // 严格按队首处理（而不是跳过它先提交后面的）是为了保持叙事顺序：后到的
+  // 叙事最多被队首多等一个揭示周期，但不会插到前一条之前，也不会把它挤掉。
+  useEffect(() => {
+    const next = pendingNarrations[0]
+    if (!next) return
+    const belongsToStream =
+      streamingNarration !== null &&
+      next.messageId != null &&
+      streamingNarration.messageId ===
+        conversationMessageId('narration.push', next.messageId)
+    if (
+      belongsToStream &&
+      streamingNarration.revealed < streamingNarrationText(streamingNarration).length
+    ) {
+      return
+    }
+    commitNarration(next)
+    setPendingNarrations((current) => current.slice(1))
+    // 只清掉刚提交的这条对应的片段状态。别的叙事还在揭示时不能顺手清空，
+    // 否则它的文字会凭空消失。
+    if (belongsToStream) setStreamingNarration(null)
+  }, [commitNarration, pendingNarrations, streamingNarration])
+
   // 服务端主持人回复：只订阅 narration.push，不从 turn.completed 或本地逻辑
   // 生成主持叙述。
   useEffect(() => {
     const off = onWsMessage((envelope) => {
-      if (envelope.type === 'narration.push') {
+      if (envelope.type === 'narration.chunk') {
+        // 已经有文字在往外走，就不要再同时显示"正在思考"的点点了。
         setTyping(false)
         setProgressLabel(null)
-        setMessages(prev => {
-          const authoritativeId = envelope.payload.messageId?.trim()
-          const messageId = authoritativeId
-            ? conversationMessageId('narration.push', authoritativeId)
-            : pendingNarrationActionIdRef.current
-              ? conversationMessageId(
-                  'narration.push',
-                  pendingNarrationActionIdRef.current,
-                )
-              : undefined
-          if (messageId && prev.some((item) => item.messageId === messageId)) {
-            pendingNarrationActionIdRef.current = null
-            return prev
-          }
-          if (!messageId && prev.at(-1)?.content === envelope.payload.text) return prev
-          pendingNarrationActionIdRef.current = null
-          return appendLiveMessage(prev, {
-            type: 'narr',
-            channel: 'action',
-            messageId,
-            sender: '守秘人',
-            content: envelope.payload.text,
-            time: formatRoomTime(new Date()),
-          })
-        })
+        setStreamingNarration((current) =>
+          accumulateNarrationChunk(current, {
+            messageId: conversationMessageId('narration.push', envelope.payload.messageId),
+            sequence: envelope.payload.sequence,
+            text: envelope.payload.text,
+          }),
+        )
+      } else if (envelope.type === 'narration.push') {
+        setTyping(false)
+        setProgressLabel(null)
+        // 不在这里直接落地：权威消息比最后一个片段只晚到半毫秒，立刻接管会让
+        // 刚开始的渐进展示当场被整段覆盖。入队，交给上面的 effect 按序裁决。
+        setPendingNarrations((current) => [...current, envelope.payload])
       } else if (envelope.type === 'opening.started') {
         setTyping(true)
         setProgressLabel('守秘人正在生成开场叙事')
@@ -972,6 +1105,12 @@ export default function RoomPage() {
       } else if (envelope.type === 'turn.failed') {
         setTyping(false)
         setProgressLabel(null)
+        // 片段只在叙事落库成功后才会下发，回合失败时不存在对应的权威消息——
+        // 留着半截文字会让玩家以为那是这回合的结果。
+        //
+        // 只中止揭示，不清待提交队列：队列里的都是已经落库的权威消息（push 紧跟
+        // 片段到达），清掉等于丢服务端认定已发生的叙事。中止后它们会立即落地。
+        setStreamingNarration(null)
         setActionError(envelope.payload.publicMessage)
         setActionErrorRetryable(envelope.payload.retryable)
         setActionErrorIsGuidance(envelope.payload.code === 'HOST_AGENT_INVALID_OUTPUT')
@@ -985,6 +1124,7 @@ export default function RoomPage() {
       } else if (envelope.type === 'error') {
         setTyping(false)
         setProgressLabel(null)
+        setStreamingNarration(null)
         setActionError(envelope.payload.message)
         setActionErrorRetryable(false)
         setActionErrorIsGuidance(false)
@@ -998,7 +1138,7 @@ export default function RoomPage() {
       setProgressLabel('守秘人正在生成开场叙事')
     }
     return off
-  }, [playerId, senderName])
+  }, [enqueueHostSpeech, playerId, senderName])
 
   const submitPlayerAction = (action: { clientActionId: string; utterance: string }) => {
     if (!playerId || suspended) return
@@ -1083,6 +1223,7 @@ export default function RoomPage() {
     setEndError('')
     try {
       await endGame(roomId)
+      hostSpeech.stop()
       disconnectWebSocket()
       navigate('/home')
     } catch (err) {
@@ -1094,6 +1235,7 @@ export default function RoomPage() {
   // 退出（不是结束游戏）——只是自己离开，房间对其他人继续存在、phase 不变，
   // 之后可以从「我的游戏」用同一个身份重新进来（见 MyRoomsPage 的继续逻辑）。
   const handleExit = () => {
+    hostSpeech.stop()
     disconnectWebSocket()
     navigate('/home')
   }
@@ -1115,7 +1257,17 @@ export default function RoomPage() {
           </div>
         </div>
         <button
+          onClick={() => setOpenPanel(openPanel === 'speech' ? null : 'speech')}
+          aria-label="主持人语音"
+          title="主持人语音"
+          className={`w-8 h-8 rounded-full bg-card border border-border-light flex items-center justify-center active:bg-panel ${hostSpeech.status === 'speaking' ? 'text-brass-dark' : 'text-text-muted'}`}
+        >
+          <Volume2 className="w-4 h-4" strokeWidth={2.5} />
+        </button>
+        <button
           onClick={() => setOpenPanel(openPanel === 'members' ? null : 'members')}
+          aria-label="房间成员"
+          title="房间成员"
           className="w-8 h-8 rounded-full bg-card border border-border-light flex items-center justify-center active:bg-panel"
         >
           <Users className="w-4 h-4 text-text-muted" strokeWidth={2.5} />
@@ -1197,13 +1349,44 @@ export default function RoomPage() {
                   {msg.content}
                 </div>
                 <div className="text-[10px] text-text-dim mt-0.5">{msg.time}</div>
+                {isNarr && (
+                  <button
+                    type="button"
+                    aria-label="重新朗读"
+                    title="重新朗读"
+                    disabled={!hostSpeech.supported}
+                    onClick={() => hostSpeech.replay(msg.content)}
+                    className="mt-1 inline-flex items-center gap-1 text-[10px] text-text-muted disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <RotateCcw className="w-3 h-3" strokeWidth={2} />
+                    重播
+                  </button>
+                )}
               </div>
             </div>
           )
         })}
 
-        {/* Typing indicator */}
-        {typing && (
+        {/* 渐进到达的主持叙事（issue #203）。没有"重播"按钮：它还不是权威
+            消息，语音朗读只认最终 narration.push。*/}
+        {streamingNarration && streamingNarration.revealed > 0 && (
+          <div className="flex gap-2.5 animate-[msgIn_0.3s_ease]">
+            <div className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-sm bg-[#faf5eb] border border-brass">
+              📜
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-[11px] font-semibold text-brass-dark mb-0.5">守秘人</div>
+              <div className="text-sm leading-[1.65] inline-block max-w-full px-3.5 py-2.5 bg-[#fdfaf4] border-l-[3px] border-brass rounded-r-sm rounded-l-none italic text-[#4a4030] text-left whitespace-pre-wrap">
+                {streamingNarrationText(streamingNarration).slice(0, streamingNarration.revealed)}
+              </div>
+              <div className="text-[10px] text-text-dim mt-0.5">生成中…</div>
+            </div>
+          </div>
+        )}
+
+        {/* Typing indicator。第一个片段到达后还没揭示出字的那一瞬间也留着它，
+            避免出现一个空气泡。*/}
+        {(typing || (streamingNarration !== null && streamingNarration.revealed === 0)) && (
           <div className="flex gap-2.5 animate-[msgIn_0.3s_ease]">
             <div className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-sm bg-[#faf5eb] border border-brass">
               📜
@@ -1544,6 +1727,96 @@ export default function RoomPage() {
           className="w-full min-h-[180px] text-sm leading-[1.7] text-text-body bg-input border border-border-light rounded-md px-3.5 py-3 resize-none outline-none focus:border-brass transition-colors font-mono placeholder:text-text-dim"
         />
         <div className="text-[10px] text-text-dim mt-2 text-right">{lastSaved ? `最后保存: ${lastSaved}` : '尚未保存'}</div>
+      </BottomPanel>
+
+      {/* Panel: 主持人语音 */}
+      <BottomPanel open={openPanel === 'speech'} onClose={() => setOpenPanel(null)} title="主持人语音">
+        {!hostSpeech.supported ? (
+          <p className="text-sm text-text-dim py-6 text-center">
+            当前浏览器不支持语音朗读，文本消息仍可正常使用
+          </p>
+        ) : (
+          <div className="space-y-4">
+            <label className="flex items-center justify-between gap-3">
+              <span>
+                <span className="block text-sm font-semibold text-text-primary">主持人语音朗读</span>
+                <span className="block text-[11px] text-text-muted mt-0.5">新产生的最终主持人消息自动播放</span>
+              </span>
+              <input
+                type="checkbox"
+                role="switch"
+                aria-label="主持人语音朗读"
+                checked={hostSpeech.enabled}
+                onChange={(event) => hostSpeech.setEnabled(event.target.checked)}
+                className="h-5 w-9 accent-brass"
+              />
+            </label>
+
+            <label className="block">
+              <span className="block text-xs font-semibold text-text-muted mb-1.5">音色</span>
+              <select
+                aria-label="主持人音色"
+                value={hostSpeech.selectedVoiceURI ?? ''}
+                onChange={(event) => hostSpeech.setSelectedVoiceURI(event.target.value)}
+                disabled={hostSpeech.voices.length === 0}
+                className="w-full bg-input border border-border-light rounded-md px-3 py-2 text-sm text-text-primary disabled:opacity-50"
+              >
+                {hostSpeech.voices.length === 0 ? (
+                  <option value="">正在加载音色…</option>
+                ) : (
+                  hostSpeech.voices.map((voice) => (
+                    <option key={voice.voiceURI} value={voice.voiceURI}>
+                      {voice.name} · {voice.lang}
+                    </option>
+                  ))
+                )}
+              </select>
+            </label>
+
+            <div className="flex items-center justify-between text-[11px] text-text-muted">
+              <span>
+                {hostSpeech.status === 'speaking' ? '正在朗读' : hostSpeech.status === 'paused' ? '已暂停' : '空闲'}
+              </span>
+              <span>待播放 {hostSpeech.queueLength} 条</span>
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                type="button"
+                aria-label="暂停朗读"
+                title="暂停朗读"
+                onClick={hostSpeech.pause}
+                disabled={hostSpeech.status !== 'speaking'}
+                className="flex-1 py-2 rounded-sm bg-panel border border-border-light text-text-muted text-xs font-medium flex items-center justify-center gap-1 disabled:opacity-40"
+              >
+                <Pause className="w-3.5 h-3.5" />
+                暂停
+              </button>
+              <button
+                type="button"
+                aria-label="继续朗读"
+                title="继续朗读"
+                onClick={hostSpeech.resume}
+                disabled={hostSpeech.status !== 'paused'}
+                className="flex-1 py-2 rounded-sm bg-panel border border-border-light text-text-muted text-xs font-medium flex items-center justify-center gap-1 disabled:opacity-40"
+              >
+                <Play className="w-3.5 h-3.5" />
+                继续
+              </button>
+              <button
+                type="button"
+                aria-label="停止朗读"
+                title="停止朗读"
+                onClick={hostSpeech.stop}
+                disabled={hostSpeech.status === 'idle' && hostSpeech.queueLength === 0}
+                className="flex-1 py-2 rounded-sm bg-panel border border-border-light text-text-muted text-xs font-medium flex items-center justify-center gap-1 disabled:opacity-40"
+              >
+                <Square className="w-3.5 h-3.5" />
+                停止
+              </button>
+            </div>
+          </div>
+        )}
       </BottomPanel>
 
       {/* Panel: 房间成员 */}

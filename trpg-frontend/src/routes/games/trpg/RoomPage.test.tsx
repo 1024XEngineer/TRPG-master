@@ -15,6 +15,37 @@ import { useAuthStore } from '@/stores/auth-store'
 import { useCharacterStore } from '@/stores/character-store'
 import { useRoomStore } from '@/stores/room-store'
 
+class RoomSpeechUtterance {
+  text: string
+  voice: SpeechSynthesisVoice | null = null
+  lang = ''
+  rate = 0
+  pitch = 0
+  volume = 0
+  onend: (() => void) | null = null
+  onerror: (() => void) | null = null
+
+  constructor(text: string) {
+    this.text = text
+  }
+}
+
+function installRoomSpeechApi() {
+  const spoken: RoomSpeechUtterance[] = []
+  const synthesis = {
+    getVoices: vi.fn(() => [] as SpeechSynthesisVoice[]),
+    speak: vi.fn((utterance: RoomSpeechUtterance) => spoken.push(utterance)),
+    cancel: vi.fn(),
+    pause: vi.fn(),
+    resume: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  }
+  Object.defineProperty(window, 'speechSynthesis', { configurable: true, value: synthesis })
+  Object.defineProperty(window, 'SpeechSynthesisUtterance', { configurable: true, value: RoomSpeechUtterance })
+  return { synthesis, spoken }
+}
+
 const {
   emitWsMessage,
   mockGetOpeningMessageId,
@@ -201,6 +232,8 @@ describe('RoomPage conversation history', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     wsHandlers.clear()
+    Object.defineProperty(window, 'speechSynthesis', { configurable: true, value: undefined })
+    Object.defineProperty(window, 'SpeechSynthesisUtterance', { configurable: true, value: undefined })
     window.HTMLElement.prototype.scrollIntoView = vi.fn()
     localStorage.clear()
     sessionStorage.clear()
@@ -406,6 +439,290 @@ describe('RoomPage conversation history', () => {
         element.textContent === '实时第一段\n实时第二段',
     )
     expect(realtime).toHaveClass('whitespace-pre-wrap')
+  })
+
+  it('reveals narration chunks gradually instead of dumping the whole text', async () => {
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    const full = '雨点敲打着窗框。屋里只剩壁炉燃烧的细响。'
+    emitWsMessage({
+      type: 'narration.chunk',
+      payload: { messageId: 'action-203', sequence: 0, text: '雨点敲打着窗框。' },
+    })
+    emitWsMessage({
+      type: 'narration.chunk',
+      payload: { messageId: 'action-203', sequence: 1, text: '屋里只剩壁炉燃烧的细响。' },
+    })
+
+    // 这是本用例的核心：片段同时到达，但不能立刻整段显示。
+    await waitFor(
+      () => {
+        const shown =
+          screen
+            .getByText('生成中…')
+            .parentElement?.querySelector('.whitespace-pre-wrap')?.textContent ?? ''
+        expect(shown.length).toBeGreaterThan(0)
+        expect(full.startsWith(shown)).toBe(true)
+        expect(shown).not.toBe(full)
+      },
+      { timeout: 2000 },
+    )
+  })
+
+  it('holds the authoritative push until the reveal finishes, then hands over once', async () => {
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    const full = '雨点敲打着窗框。屋里只剩壁炉燃烧的细响。'
+    emitWsMessage({
+      type: 'narration.chunk',
+      payload: { messageId: 'action-203', sequence: 0, text: '雨点敲打着窗框。' },
+    })
+    emitWsMessage({
+      type: 'narration.chunk',
+      payload: { messageId: 'action-203', sequence: 1, text: '屋里只剩壁炉燃烧的细响。' },
+    })
+    // 权威消息紧跟着片段到达（真实间隔约 0.5ms），但不能当场接管。
+    emitWsMessage({
+      type: 'narration.push',
+      payload: { messageId: 'action-203', text: full },
+    })
+
+    // 两段式等待：先确认揭示真的开始了，再等它交接完成。只断言"全文出现一次"
+    // 是不够的——揭示到全文、权威消息还没接管的那一帧同样满足，命中的是临时
+    // 气泡而不是权威消息。
+    await screen.findByText('生成中…')
+    await waitFor(
+      () => expect(screen.queryByText('生成中…')).not.toBeInTheDocument(),
+      { timeout: 4000 },
+    )
+    // 交接完成后全文在，且只有一份——临时气泡没有和权威消息并存。
+    expect(screen.getAllByText(full)).toHaveLength(1)
+  })
+
+  // 回归：待提交槽位原本是单个，揭示 A 的过程中到达的 B 会把 A 顶掉，A 既不
+  // 进消息列表也不朗读，只能靠刷新走历史恢复（PR #213 review 指出）。
+  it('keeps an earlier narration when another push lands mid-reveal', async () => {
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    const first = '第一条叙事的前半句。第一条叙事的后半句。'
+    emitWsMessage({
+      type: 'narration.chunk',
+      payload: { messageId: 'action-A', sequence: 0, text: '第一条叙事的前半句。' },
+    })
+    emitWsMessage({
+      type: 'narration.chunk',
+      payload: { messageId: 'action-A', sequence: 1, text: '第一条叙事的后半句。' },
+    })
+    emitWsMessage({ type: 'narration.push', payload: { messageId: 'action-A', text: first } })
+    // A 还在揭示时，另一条没有片段的叙事直接到达。
+    emitWsMessage({
+      type: 'narration.push',
+      payload: { messageId: 'action-B', text: '第二条叙事直接落地。' },
+    })
+
+    // 两条都要落地，且顺序不能颠倒——队列按到达顺序提交。
+    await waitFor(
+      () => {
+        expect(screen.getByText(first)).toBeInTheDocument()
+        expect(screen.getByText('第二条叙事直接落地。')).toBeInTheDocument()
+      },
+      { timeout: 4000 },
+    )
+    const rendered = screen.getAllByText(/第[一二]条叙事/).map((node) => node.textContent)
+    expect(rendered).toEqual([first, '第二条叙事直接落地。'])
+  })
+
+  it('deduplicates repeated chunks and tolerates out-of-order arrival', async () => {
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    const full = '第一段落在这里。第二段落在这里。'
+    emitWsMessage({
+      type: 'narration.chunk',
+      payload: { messageId: 'action-204', sequence: 1, text: '第二段落在这里。' },
+    })
+    emitWsMessage({
+      type: 'narration.chunk',
+      payload: { messageId: 'action-204', sequence: 0, text: '第一段落在这里。' },
+    })
+    // 重连重放同一个片段不得让文字出现两次。
+    emitWsMessage({
+      type: 'narration.chunk',
+      payload: { messageId: 'action-204', sequence: 1, text: '第二段落在这里。' },
+    })
+    emitWsMessage({
+      type: 'narration.push',
+      payload: { messageId: 'action-204', text: full },
+    })
+
+    await screen.findByText('生成中…')
+    await waitFor(
+      () => expect(screen.queryByText('生成中…')).not.toBeInTheDocument(),
+      { timeout: 4000 },
+    )
+    expect(screen.getAllByText(full)).toHaveLength(1)
+  })
+
+  it('drops streamed chunks when the turn fails', async () => {
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    emitWsMessage({
+      type: 'narration.chunk',
+      payload: { messageId: 'action-205', sequence: 0, text: '半截叙事片段。' },
+    })
+    expect(await screen.findByText('生成中…')).toBeInTheDocument()
+
+    emitWsMessage({
+      type: 'turn.failed',
+      payload: {
+        correlationId: 'action-205',
+        code: 'HOST_AGENT_TIMEOUT',
+        publicMessage: '守秘人没能完成这次回合，请重试。',
+        retryable: true,
+      },
+    })
+    await waitFor(() => expect(screen.queryByText('生成中…')).not.toBeInTheDocument())
+    expect(screen.queryByText('半截叙事片段。')).not.toBeInTheDocument()
+  })
+
+  it('speaks the narration only once the authoritative push has landed', async () => {
+    const { spoken } = installRoomSpeechApi()
+    localStorage.setItem(
+      'aidm-host-speech-settings',
+      JSON.stringify({ enabled: true, voiceURI: null }),
+    )
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    const full = '渐进片段一号。渐进片段二号。'
+    emitWsMessage({
+      type: 'narration.chunk',
+      payload: { messageId: 'action-206', sequence: 0, text: '渐进片段一号。' },
+    })
+    emitWsMessage({
+      type: 'narration.chunk',
+      payload: { messageId: 'action-206', sequence: 1, text: '渐进片段二号。' },
+    })
+    expect(await screen.findByText('生成中…')).toBeInTheDocument()
+    // 揭示途中不能出声：片段不是权威消息。
+    expect(spoken).toHaveLength(0)
+
+    emitWsMessage({
+      type: 'narration.push',
+      payload: { messageId: 'action-206', text: full },
+    })
+    await waitFor(() => expect(spoken).toHaveLength(1), { timeout: 4000 })
+    expect(spoken[0]?.text).toBe(full)
+  })
+
+  it('commits immediately when a narration arrives without any chunks', async () => {
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    emitWsMessage({
+      type: 'narration.push',
+      payload: { messageId: 'action-207', text: '单片段叙事直接落地。' },
+    })
+
+    expect(await screen.findByText('单片段叙事直接落地。')).toBeInTheDocument()
+    expect(screen.queryByText('生成中…')).not.toBeInTheDocument()
+  })
+
+  it('automatically speaks new final narration once by message id', async () => {
+    const { spoken } = installRoomSpeechApi()
+    localStorage.setItem('aidm-host-speech-settings', JSON.stringify({ enabled: true, voiceURI: null }))
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    emitWsMessage({
+      type: 'narration.push',
+      payload: { messageId: 'narration-1', text: '新的主持人叙事' },
+    })
+    expect(await screen.findByText('新的主持人叙事')).toBeInTheDocument()
+    expect(spoken).toHaveLength(1)
+    expect(spoken[0]?.text).toBe('新的主持人叙事')
+
+    emitWsMessage({
+      type: 'narration.push',
+      payload: { messageId: 'narration-1', text: '新的主持人叙事' },
+    })
+    await waitFor(() => expect(spoken).toHaveLength(1))
+  })
+
+  it('does not auto-speak restored history but supports manual replay', async () => {
+    const { spoken } = installRoomSpeechApi()
+    localStorage.setItem('aidm-host-speech-settings', JSON.stringify({ enabled: true, voiceURI: null }))
+    mockListConversation.mockResolvedValue([
+      {
+        id: 'history-narration',
+        type: 'narration.push',
+        channel: 'action',
+        payload: { messageId: 'history-narration', text: '历史主持人叙事' },
+        createdAt: '2026-07-28T10:03:00Z',
+      },
+    ])
+
+    renderRoomPage()
+    expect(await screen.findByText('历史主持人叙事')).toBeInTheDocument()
+    expect(spoken).toHaveLength(0)
+
+    emitWsMessage({
+      type: 'narration.push',
+      payload: { messageId: 'history-narration', text: '历史主持人叙事' },
+    })
+    await waitFor(() => {
+      expect(screen.getAllByText('历史主持人叙事')).toHaveLength(1)
+      expect(spoken).toHaveLength(0)
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: '重新朗读' }))
+    expect(spoken).toHaveLength(1)
+    expect(spoken[0]?.text).toBe('历史主持人叙事')
+  })
+
+  it('exposes speech controls and stops the queue when disabled', async () => {
+    const { spoken, synthesis } = installRoomSpeechApi()
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    fireEvent.click(screen.getByRole('button', { name: '主持人语音' }))
+    const toggle = screen.getByRole('switch', { name: '主持人语音朗读' })
+    fireEvent.click(toggle)
+    expect(toggle).toBeChecked()
+
+    emitWsMessage({
+      type: 'narration.push',
+      payload: { messageId: 'narration-controls-1', text: '控制面板测试' },
+    })
+    expect(await screen.findByText('控制面板测试')).toBeInTheDocument()
+    expect(spoken).toHaveLength(1)
+
+    fireEvent.click(screen.getByRole('button', { name: '暂停朗读' }))
+    expect(synthesis.pause).toHaveBeenCalledTimes(1)
+    fireEvent.click(screen.getByRole('button', { name: '继续朗读' }))
+    expect(synthesis.resume).toHaveBeenCalledTimes(1)
+    fireEvent.click(toggle)
+    expect(toggle).not.toBeChecked()
+    expect(synthesis.cancel).toHaveBeenCalled()
+  })
+
+  it('keeps text readable and disables replay when speech is unsupported', async () => {
+    mockListConversation.mockResolvedValue([
+      {
+        id: 'unsupported-narration',
+        type: 'narration.push',
+        channel: 'action',
+        payload: { messageId: 'unsupported-narration', text: '纯文本主持人叙事' },
+        createdAt: '2026-07-28T10:03:00Z',
+      },
+    ])
+    renderRoomPage()
+    expect(await screen.findByText('纯文本主持人叙事')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '重新朗读' })).toBeDisabled()
   })
 
   it('falls back for legacy payloads when characterName is missing', async () => {

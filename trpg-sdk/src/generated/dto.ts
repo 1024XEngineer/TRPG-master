@@ -589,6 +589,21 @@ export interface MyRoomSummary {
 }
 
 /**
+ * narration.chunk 推送 payload（issue #203）。
+ *
+ * 片段只是同一条 `narration.push` 的渐进展示形式，不是权威消息：服务端先
+ * 生成并校验完整叙事、落库去重成功，才按句切片下发，最后再发权威的
+ * `narration.push`。客户端按 `messageId` 归组、按 `sequence` 排序去重，
+ * 拼接结果必须与最终 `narration.push` 的 `text` 完全一致；历史恢复和持久化
+ * 始终只认 `narration.push`，临时拼接内容不得写入权威历史。
+ */
+export interface NarrationChunkPayload {
+  messageId: string;
+  sequence: number;
+  text: string;
+}
+
+/**
  * narration.push 推送 payload。
  */
 export interface NarrationPushPayload {

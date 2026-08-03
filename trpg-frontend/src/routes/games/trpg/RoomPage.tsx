@@ -1,7 +1,7 @@
 import { useNavigate } from 'react-router-dom'
-import { RoomSocketServerError, TurnFailedError, type AgentPlayerView, type AgentTurnPhase, type CheckRequestPayload, type RoomConversationEvent } from 'trpg-sdk'
+import { RoomSocketServerError, TurnFailedError, type AgentPlayerView, type AgentTurnPhase, type CheckRequestPayload, type NarrationPushPayload, type RoomConversationEvent } from 'trpg-sdk'
 import { ArrowLeft, Users, Map, BookOpen, ScrollText, Star, X, SendHorizontal, Dice6, Plus, Save, FlagOff, Heart, Volume2, Pause, Play, Square, RotateCcw } from 'lucide-react'
-import { useState, useRef, useEffect, type Dispatch, type FormEvent, type SetStateAction } from 'react'
+import { useCallback, useState, useRef, useEffect, type Dispatch, type FormEvent, type SetStateAction } from 'react'
 import { useRoomStore } from '@/stores/room-store'
 import { useAuthStore } from '@/stores/auth-store'
 import { useCharacterStore } from '@/stores/character-store'
@@ -115,21 +115,25 @@ function conversationMessageId(type: RoomConversationEvent['type'], id: string):
 interface StreamingNarration {
   messageId: string
   chunks: Record<number, string>
+  /** 已揭示的字符数。片段几乎同时到达，靠它把文字按节奏放出来。 */
+  revealed: number
 }
 
 /**
  * 按 `sequence` 收片段。同一序号重复到达（重连/重试）不会重复拼接，换了
- * `messageId` 说明是新的一条叙事，直接从头开始。
+ * `messageId` 说明是新的一条叙事，连揭示进度一起从头开始。
  */
 export function accumulateNarrationChunk(
   current: StreamingNarration | null,
   chunk: { messageId: string; sequence: number; text: string },
 ): StreamingNarration {
   const base =
-    current?.messageId === chunk.messageId ? current : { messageId: chunk.messageId, chunks: {} }
+    current?.messageId === chunk.messageId
+      ? current
+      : { messageId: chunk.messageId, chunks: {}, revealed: 0 }
   if (chunk.sequence in base.chunks) return base
   return {
-    messageId: base.messageId,
+    ...base,
     chunks: { ...base.chunks, [chunk.sequence]: chunk.text },
   }
 }
@@ -142,6 +146,19 @@ export function streamingNarrationText(state: StreamingNarration): string {
     .map((sequence) => state.chunks[sequence])
     .join('')
 }
+
+/**
+ * 逐字揭示的节奏参数（issue #203）。
+ *
+ * 服务端是在完整叙事生成并校验之后才切片的，所有片段会在毫秒级内一起到达
+ * （实测三帧间隔 0.5–0.7ms）。所以「渐进」必须由前端控制节奏，否则玩家看到的
+ * 仍然是整段瞬间弹出。这是展示层的节奏，不是真的增量生成——真增量要等可独立
+ * 校验的 ValidatedNarrationChunk 协议。
+ *
+ * 长文本按比例加快，保证总时长不超过 REVEAL_MAX_MS；短文本自然更快结束。
+ */
+const REVEAL_TICK_MS = 30
+const REVEAL_MAX_MS = 2400
 
 function mergeHistoricalMessages(current: Message[], history: Message[]): Message[] {
   const ids = new Set(current.flatMap((item) => (item.messageId ? [item.messageId] : [])))
@@ -814,6 +831,7 @@ export default function RoomPage() {
   })
   const [progressLabel, setProgressLabel] = useState<string | null>(null)
   const [streamingNarration, setStreamingNarration] = useState<StreamingNarration | null>(null)
+  const [pendingNarration, setPendingNarration] = useState<NarrationPushPayload | null>(null)
   const [actionError, setActionError] = useState('')
   const [actionErrorRetryable, setActionErrorRetryable] = useState(false)
   const [actionErrorIsGuidance, setActionErrorIsGuidance] = useState(false)
@@ -899,6 +917,71 @@ export default function RoomPage() {
     }
   }, [roomId, playerId, roomCode, nickname, reconnectToken])
 
+  /** 把权威叙事落成正式消息，并交给语音朗读。只有它产出权威历史。 */
+  const commitNarration = useCallback((payload: NarrationPushPayload) => {
+    const authoritativeId = payload.messageId?.trim()
+    const messageId = authoritativeId
+      ? conversationMessageId('narration.push', authoritativeId)
+      : pendingNarrationActionIdRef.current
+        ? conversationMessageId('narration.push', pendingNarrationActionIdRef.current)
+        : undefined
+    enqueueHostSpeech(messageId, payload.text)
+    setMessages((prev) => {
+      if (messageId && prev.some((item) => item.messageId === messageId)) {
+        pendingNarrationActionIdRef.current = null
+        return prev
+      }
+      if (!messageId && prev.at(-1)?.content === payload.text) return prev
+      pendingNarrationActionIdRef.current = null
+      return appendLiveMessage(prev, {
+        type: 'narr',
+        channel: 'action',
+        messageId,
+        sender: '守秘人',
+        content: payload.text,
+        time: formatRoomTime(new Date()),
+      })
+    })
+  }, [enqueueHostSpeech])
+
+  // 逐字揭示：片段几乎同时到达，节奏由这里控制。长文本按比例加快，总时长
+  // 不超过 REVEAL_MAX_MS。
+  useEffect(() => {
+    if (!streamingNarration) return
+    const full = streamingNarrationText(streamingNarration)
+    if (streamingNarration.revealed >= full.length) return
+    const step = Math.max(1, Math.ceil(full.length / (REVEAL_MAX_MS / REVEAL_TICK_MS)))
+    const timer = setTimeout(() => {
+      setStreamingNarration((current) =>
+        current === null
+          ? current
+          : {
+              ...current,
+              revealed: Math.min(
+                streamingNarrationText(current).length,
+                current.revealed + step,
+              ),
+            },
+      )
+    }, REVEAL_TICK_MS)
+    return () => clearTimeout(timer)
+  }, [streamingNarration])
+
+  // 权威消息何时接管：同一条叙事还没揭示完就等着，否则立即落地。
+  useEffect(() => {
+    if (!pendingNarration) return
+    const stillRevealing =
+      streamingNarration !== null &&
+      pendingNarration.messageId != null &&
+      streamingNarration.messageId ===
+        conversationMessageId('narration.push', pendingNarration.messageId) &&
+      streamingNarration.revealed < streamingNarrationText(streamingNarration).length
+    if (stillRevealing) return
+    commitNarration(pendingNarration)
+    setPendingNarration(null)
+    setStreamingNarration(null)
+  }, [commitNarration, pendingNarration, streamingNarration])
+
   // 服务端主持人回复：只订阅 narration.push，不从 turn.completed 或本地逻辑
   // 生成主持叙述。
   useEffect(() => {
@@ -917,34 +1000,9 @@ export default function RoomPage() {
       } else if (envelope.type === 'narration.push') {
         setTyping(false)
         setProgressLabel(null)
-        // 权威消息一到就丢弃临时拼装：显示的文字从此只来自持久化记录。
-        setStreamingNarration(null)
-        const authoritativeId = envelope.payload.messageId?.trim()
-        const messageId = authoritativeId
-          ? conversationMessageId('narration.push', authoritativeId)
-          : pendingNarrationActionIdRef.current
-            ? conversationMessageId(
-                'narration.push',
-                pendingNarrationActionIdRef.current,
-              )
-            : undefined
-        enqueueHostSpeech(messageId, envelope.payload.text)
-        setMessages(prev => {
-          if (messageId && prev.some((item) => item.messageId === messageId)) {
-            pendingNarrationActionIdRef.current = null
-            return prev
-          }
-          if (!messageId && prev.at(-1)?.content === envelope.payload.text) return prev
-          pendingNarrationActionIdRef.current = null
-          return appendLiveMessage(prev, {
-            type: 'narr',
-            channel: 'action',
-            messageId,
-            sender: '守秘人',
-            content: envelope.payload.text,
-            time: formatRoomTime(new Date()),
-          })
-        })
+        // 不在这里直接落地：权威消息比最后一个片段只晚到半毫秒，立刻接管会让
+        // 刚开始的渐进展示当场被整段覆盖。交给下面的 effect 裁决何时提交。
+        setPendingNarration(envelope.payload)
       } else if (envelope.type === 'opening.started') {
         setTyping(true)
         setProgressLabel('守秘人正在生成开场叙事')
@@ -1037,6 +1095,7 @@ export default function RoomPage() {
         // 片段只在叙事落库成功后才会下发，回合失败时不存在对应的权威消息——
         // 留着半截文字会让玩家以为那是这回合的结果。
         setStreamingNarration(null)
+        setPendingNarration(null)
         setActionError(envelope.payload.publicMessage)
         setActionErrorRetryable(envelope.payload.retryable)
         setActionErrorIsGuidance(envelope.payload.code === 'HOST_AGENT_INVALID_OUTPUT')
@@ -1051,6 +1110,7 @@ export default function RoomPage() {
         setTyping(false)
         setProgressLabel(null)
         setStreamingNarration(null)
+        setPendingNarration(null)
         setActionError(envelope.payload.message)
         setActionErrorRetryable(false)
         setActionErrorIsGuidance(false)
@@ -1295,7 +1355,7 @@ export default function RoomPage() {
 
         {/* 渐进到达的主持叙事（issue #203）。没有"重播"按钮：它还不是权威
             消息，语音朗读只认最终 narration.push。*/}
-        {streamingNarration && (
+        {streamingNarration && streamingNarration.revealed > 0 && (
           <div className="flex gap-2.5 animate-[msgIn_0.3s_ease]">
             <div className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-sm bg-[#faf5eb] border border-brass">
               📜
@@ -1303,15 +1363,16 @@ export default function RoomPage() {
             <div className="flex-1 min-w-0">
               <div className="text-[11px] font-semibold text-brass-dark mb-0.5">守秘人</div>
               <div className="text-sm leading-[1.65] inline-block max-w-full px-3.5 py-2.5 bg-[#fdfaf4] border-l-[3px] border-brass rounded-r-sm rounded-l-none italic text-[#4a4030] text-left whitespace-pre-wrap">
-                {streamingNarrationText(streamingNarration)}
+                {streamingNarrationText(streamingNarration).slice(0, streamingNarration.revealed)}
               </div>
               <div className="text-[10px] text-text-dim mt-0.5">生成中…</div>
             </div>
           </div>
         )}
 
-        {/* Typing indicator */}
-        {typing && !streamingNarration && (
+        {/* Typing indicator。第一个片段到达后还没揭示出字的那一瞬间也留着它，
+            避免出现一个空气泡。*/}
+        {(typing || (streamingNarration !== null && streamingNarration.revealed === 0)) && (
           <div className="flex gap-2.5 animate-[msgIn_0.3s_ease]">
             <div className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-sm bg-[#faf5eb] border border-brass">
               📜

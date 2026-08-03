@@ -441,58 +441,95 @@ describe('RoomPage conversation history', () => {
     expect(realtime).toHaveClass('whitespace-pre-wrap')
   })
 
-  it('renders narration chunks progressively and replaces them with the authoritative push', async () => {
+  it('reveals narration chunks gradually instead of dumping the whole text', async () => {
     renderRoomPage()
     await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
 
+    const full = '雨点敲打着窗框。屋里只剩壁炉燃烧的细响。'
     emitWsMessage({
       type: 'narration.chunk',
       payload: { messageId: 'action-203', sequence: 0, text: '雨点敲打着窗框。' },
     })
-    expect(await screen.findByText('雨点敲打着窗框。')).toBeInTheDocument()
-    expect(screen.getByText('生成中…')).toBeInTheDocument()
-
     emitWsMessage({
       type: 'narration.chunk',
       payload: { messageId: 'action-203', sequence: 1, text: '屋里只剩壁炉燃烧的细响。' },
     })
-    expect(
-      await screen.findByText('雨点敲打着窗框。屋里只剩壁炉燃烧的细响。'),
-    ).toBeInTheDocument()
 
+    // 这是本用例的核心：片段同时到达，但不能立刻整段显示。
+    await waitFor(
+      () => {
+        const shown =
+          screen
+            .getByText('生成中…')
+            .parentElement?.querySelector('.whitespace-pre-wrap')?.textContent ?? ''
+        expect(shown.length).toBeGreaterThan(0)
+        expect(full.startsWith(shown)).toBe(true)
+        expect(shown).not.toBe(full)
+      },
+      { timeout: 2000 },
+    )
+  })
+
+  it('holds the authoritative push until the reveal finishes, then hands over once', async () => {
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    const full = '雨点敲打着窗框。屋里只剩壁炉燃烧的细响。'
+    emitWsMessage({
+      type: 'narration.chunk',
+      payload: { messageId: 'action-203', sequence: 0, text: '雨点敲打着窗框。' },
+    })
+    emitWsMessage({
+      type: 'narration.chunk',
+      payload: { messageId: 'action-203', sequence: 1, text: '屋里只剩壁炉燃烧的细响。' },
+    })
+    // 权威消息紧跟着片段到达（真实间隔约 0.5ms），但不能当场接管。
     emitWsMessage({
       type: 'narration.push',
-      payload: {
-        messageId: 'action-203',
-        text: '雨点敲打着窗框。屋里只剩壁炉燃烧的细响。',
-      },
+      payload: { messageId: 'action-203', text: full },
     })
-    await waitFor(() => expect(screen.queryByText('生成中…')).not.toBeInTheDocument())
-    // 权威消息接管后文字仍在，且只剩一份（临时气泡已丢弃）。
-    expect(
-      screen.getAllByText('雨点敲打着窗框。屋里只剩壁炉燃烧的细响。'),
-    ).toHaveLength(1)
+
+    // 两段式等待：先确认揭示真的开始了，再等它交接完成。只断言"全文出现一次"
+    // 是不够的——揭示到全文、权威消息还没接管的那一帧同样满足，命中的是临时
+    // 气泡而不是权威消息。
+    await screen.findByText('生成中…')
+    await waitFor(
+      () => expect(screen.queryByText('生成中…')).not.toBeInTheDocument(),
+      { timeout: 4000 },
+    )
+    // 交接完成后全文在，且只有一份——临时气泡没有和权威消息并存。
+    expect(screen.getAllByText(full)).toHaveLength(1)
   })
 
   it('deduplicates repeated chunks and tolerates out-of-order arrival', async () => {
     renderRoomPage()
     await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
 
+    const full = '第一段落在这里。第二段落在这里。'
     emitWsMessage({
       type: 'narration.chunk',
-      payload: { messageId: 'action-204', sequence: 1, text: '第二段。' },
+      payload: { messageId: 'action-204', sequence: 1, text: '第二段落在这里。' },
     })
     emitWsMessage({
       type: 'narration.chunk',
-      payload: { messageId: 'action-204', sequence: 0, text: '第一段。' },
+      payload: { messageId: 'action-204', sequence: 0, text: '第一段落在这里。' },
     })
     // 重连重放同一个片段不得让文字出现两次。
     emitWsMessage({
       type: 'narration.chunk',
-      payload: { messageId: 'action-204', sequence: 1, text: '第二段。' },
+      payload: { messageId: 'action-204', sequence: 1, text: '第二段落在这里。' },
+    })
+    emitWsMessage({
+      type: 'narration.push',
+      payload: { messageId: 'action-204', text: full },
     })
 
-    expect(await screen.findByText('第一段。第二段。')).toBeInTheDocument()
+    await screen.findByText('生成中…')
+    await waitFor(
+      () => expect(screen.queryByText('生成中…')).not.toBeInTheDocument(),
+      { timeout: 4000 },
+    )
+    expect(screen.getAllByText(full)).toHaveLength(1)
   })
 
   it('drops streamed chunks when the turn fails', async () => {
@@ -503,7 +540,7 @@ describe('RoomPage conversation history', () => {
       type: 'narration.chunk',
       payload: { messageId: 'action-205', sequence: 0, text: '半截叙事片段。' },
     })
-    expect(await screen.findByText('半截叙事片段。')).toBeInTheDocument()
+    expect(await screen.findByText('生成中…')).toBeInTheDocument()
 
     emitWsMessage({
       type: 'turn.failed',
@@ -514,10 +551,11 @@ describe('RoomPage conversation history', () => {
         retryable: true,
       },
     })
-    await waitFor(() => expect(screen.queryByText('半截叙事片段。')).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByText('生成中…')).not.toBeInTheDocument())
+    expect(screen.queryByText('半截叙事片段。')).not.toBeInTheDocument()
   })
 
-  it('does not auto-speak narration chunks, only the final push', async () => {
+  it('speaks the narration only once the authoritative push has landed', async () => {
     const { spoken } = installRoomSpeechApi()
     localStorage.setItem(
       'aidm-host-speech-settings',
@@ -526,19 +564,38 @@ describe('RoomPage conversation history', () => {
     renderRoomPage()
     await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
 
+    const full = '渐进片段一号。渐进片段二号。'
     emitWsMessage({
       type: 'narration.chunk',
-      payload: { messageId: 'action-206', sequence: 0, text: '渐进片段。' },
+      payload: { messageId: 'action-206', sequence: 0, text: '渐进片段一号。' },
     })
-    expect(await screen.findByText('渐进片段。')).toBeInTheDocument()
+    emitWsMessage({
+      type: 'narration.chunk',
+      payload: { messageId: 'action-206', sequence: 1, text: '渐进片段二号。' },
+    })
+    expect(await screen.findByText('生成中…')).toBeInTheDocument()
+    // 揭示途中不能出声：片段不是权威消息。
     expect(spoken).toHaveLength(0)
 
     emitWsMessage({
       type: 'narration.push',
-      payload: { messageId: 'action-206', text: '渐进片段。' },
+      payload: { messageId: 'action-206', text: full },
     })
-    await waitFor(() => expect(spoken).toHaveLength(1))
-    expect(spoken[0]?.text).toBe('渐进片段。')
+    await waitFor(() => expect(spoken).toHaveLength(1), { timeout: 4000 })
+    expect(spoken[0]?.text).toBe(full)
+  })
+
+  it('commits immediately when a narration arrives without any chunks', async () => {
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    emitWsMessage({
+      type: 'narration.push',
+      payload: { messageId: 'action-207', text: '单片段叙事直接落地。' },
+    })
+
+    expect(await screen.findByText('单片段叙事直接落地。')).toBeInTheDocument()
+    expect(screen.queryByText('生成中…')).not.toBeInTheDocument()
   })
 
   it('automatically speaks new final narration once by message id', async () => {

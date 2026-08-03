@@ -781,6 +781,39 @@ describe('RoomPage conversation history', () => {
     expect(await screen.findByText('杜调查员 · 掷骰')).toBeInTheDocument()
   })
 
+  it('preserves categorized background line breaks in the character sheet', async () => {
+    const background = '形象描述：穿着旧风衣\n重要之人：导师亨利'
+    useCharacterStore.getState().setCharacter(
+      {
+        info: {
+          name: '杜调查员',
+          playerName: '陈探员',
+          age: '32',
+          gender: '男',
+          residence: '阿卡姆',
+          birthplace: '波士顿',
+          occupationId: null,
+        },
+        attr: {},
+        skillAlloc: {},
+        skillFinalValues: {},
+        equipment: '',
+        background,
+        notes: '',
+        derived: { hp: 10, san: 60, mp: 10, db: '0', move: 8 },
+      },
+      'room-1',
+    )
+    mockListConversation.mockResolvedValue([])
+
+    renderRoomPage()
+    fireEvent.click(screen.getByRole('button', { name: '角色卡' }))
+    fireEvent.click(screen.getByRole('button', { name: '背景装备' }))
+
+    const renderedBackground = screen.getByText((_, element) => element?.textContent === background)
+    expect(renderedBackground).toHaveClass('whitespace-pre-wrap')
+  })
+
   it('keeps the first check result when reopening the modal before confirming', async () => {
     renderRoomPage()
     await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())

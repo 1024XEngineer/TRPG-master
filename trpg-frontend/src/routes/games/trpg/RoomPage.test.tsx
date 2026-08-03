@@ -501,6 +501,40 @@ describe('RoomPage conversation history', () => {
     expect(screen.getAllByText(full)).toHaveLength(1)
   })
 
+  // 回归：待提交槽位原本是单个，揭示 A 的过程中到达的 B 会把 A 顶掉，A 既不
+  // 进消息列表也不朗读，只能靠刷新走历史恢复（PR #213 review 指出）。
+  it('keeps an earlier narration when another push lands mid-reveal', async () => {
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    const first = '第一条叙事的前半句。第一条叙事的后半句。'
+    emitWsMessage({
+      type: 'narration.chunk',
+      payload: { messageId: 'action-A', sequence: 0, text: '第一条叙事的前半句。' },
+    })
+    emitWsMessage({
+      type: 'narration.chunk',
+      payload: { messageId: 'action-A', sequence: 1, text: '第一条叙事的后半句。' },
+    })
+    emitWsMessage({ type: 'narration.push', payload: { messageId: 'action-A', text: first } })
+    // A 还在揭示时，另一条没有片段的叙事直接到达。
+    emitWsMessage({
+      type: 'narration.push',
+      payload: { messageId: 'action-B', text: '第二条叙事直接落地。' },
+    })
+
+    // 两条都要落地，且顺序不能颠倒——队列按到达顺序提交。
+    await waitFor(
+      () => {
+        expect(screen.getByText(first)).toBeInTheDocument()
+        expect(screen.getByText('第二条叙事直接落地。')).toBeInTheDocument()
+      },
+      { timeout: 4000 },
+    )
+    const rendered = screen.getAllByText(/第[一二]条叙事/).map((node) => node.textContent)
+    expect(rendered).toEqual([first, '第二条叙事直接落地。'])
+  })
+
   it('deduplicates repeated chunks and tolerates out-of-order arrival', async () => {
     renderRoomPage()
     await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())

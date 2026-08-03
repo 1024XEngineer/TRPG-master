@@ -831,7 +831,10 @@ export default function RoomPage() {
   })
   const [progressLabel, setProgressLabel] = useState<string | null>(null)
   const [streamingNarration, setStreamingNarration] = useState<StreamingNarration | null>(null)
-  const [pendingNarration, setPendingNarration] = useState<NarrationPushPayload | null>(null)
+  // 队列而不是单槽：揭示窗口最长 REVEAL_MAX_MS，这期间完全可能再来一条叙事
+  // （无片段的叙事后端会跳过切片，直接发 push）。用单槽的话后到的会把前一条
+  // 顶掉，被顶掉的那条既不进 messages 也不朗读，只能靠刷新走历史恢复。
+  const [pendingNarrations, setPendingNarrations] = useState<NarrationPushPayload[]>([])
   const [actionError, setActionError] = useState('')
   const [actionErrorRetryable, setActionErrorRetryable] = useState(false)
   const [actionErrorIsGuidance, setActionErrorIsGuidance] = useState(false)
@@ -967,20 +970,30 @@ export default function RoomPage() {
     return () => clearTimeout(timer)
   }, [streamingNarration])
 
-  // 权威消息何时接管：同一条叙事还没揭示完就等着，否则立即落地。
+  // 权威消息何时接管：按到达顺序逐条提交，队首那条还没揭示完就等着。
+  //
+  // 严格按队首处理（而不是跳过它先提交后面的）是为了保持叙事顺序：后到的
+  // 叙事最多被队首多等一个揭示周期，但不会插到前一条之前，也不会把它挤掉。
   useEffect(() => {
-    if (!pendingNarration) return
-    const stillRevealing =
+    const next = pendingNarrations[0]
+    if (!next) return
+    const belongsToStream =
       streamingNarration !== null &&
-      pendingNarration.messageId != null &&
+      next.messageId != null &&
       streamingNarration.messageId ===
-        conversationMessageId('narration.push', pendingNarration.messageId) &&
+        conversationMessageId('narration.push', next.messageId)
+    if (
+      belongsToStream &&
       streamingNarration.revealed < streamingNarrationText(streamingNarration).length
-    if (stillRevealing) return
-    commitNarration(pendingNarration)
-    setPendingNarration(null)
-    setStreamingNarration(null)
-  }, [commitNarration, pendingNarration, streamingNarration])
+    ) {
+      return
+    }
+    commitNarration(next)
+    setPendingNarrations((current) => current.slice(1))
+    // 只清掉刚提交的这条对应的片段状态。别的叙事还在揭示时不能顺手清空，
+    // 否则它的文字会凭空消失。
+    if (belongsToStream) setStreamingNarration(null)
+  }, [commitNarration, pendingNarrations, streamingNarration])
 
   // 服务端主持人回复：只订阅 narration.push，不从 turn.completed 或本地逻辑
   // 生成主持叙述。
@@ -1001,8 +1014,8 @@ export default function RoomPage() {
         setTyping(false)
         setProgressLabel(null)
         // 不在这里直接落地：权威消息比最后一个片段只晚到半毫秒，立刻接管会让
-        // 刚开始的渐进展示当场被整段覆盖。交给下面的 effect 裁决何时提交。
-        setPendingNarration(envelope.payload)
+        // 刚开始的渐进展示当场被整段覆盖。入队，交给上面的 effect 按序裁决。
+        setPendingNarrations((current) => [...current, envelope.payload])
       } else if (envelope.type === 'opening.started') {
         setTyping(true)
         setProgressLabel('守秘人正在生成开场叙事')
@@ -1094,8 +1107,10 @@ export default function RoomPage() {
         setProgressLabel(null)
         // 片段只在叙事落库成功后才会下发，回合失败时不存在对应的权威消息——
         // 留着半截文字会让玩家以为那是这回合的结果。
+        //
+        // 只中止揭示，不清待提交队列：队列里的都是已经落库的权威消息（push 紧跟
+        // 片段到达），清掉等于丢服务端认定已发生的叙事。中止后它们会立即落地。
         setStreamingNarration(null)
-        setPendingNarration(null)
         setActionError(envelope.payload.publicMessage)
         setActionErrorRetryable(envelope.payload.retryable)
         setActionErrorIsGuidance(envelope.payload.code === 'HOST_AGENT_INVALID_OUTPUT')
@@ -1110,7 +1125,6 @@ export default function RoomPage() {
         setTyping(false)
         setProgressLabel(null)
         setStreamingNarration(null)
-        setPendingNarration(null)
         setActionError(envelope.payload.message)
         setActionErrorRetryable(false)
         setActionErrorIsGuidance(false)

@@ -15,6 +15,37 @@ import { useAuthStore } from '@/stores/auth-store'
 import { useCharacterStore } from '@/stores/character-store'
 import { useRoomStore } from '@/stores/room-store'
 
+class RoomSpeechUtterance {
+  text: string
+  voice: SpeechSynthesisVoice | null = null
+  lang = ''
+  rate = 0
+  pitch = 0
+  volume = 0
+  onend: (() => void) | null = null
+  onerror: (() => void) | null = null
+
+  constructor(text: string) {
+    this.text = text
+  }
+}
+
+function installRoomSpeechApi() {
+  const spoken: RoomSpeechUtterance[] = []
+  const synthesis = {
+    getVoices: vi.fn(() => [] as SpeechSynthesisVoice[]),
+    speak: vi.fn((utterance: RoomSpeechUtterance) => spoken.push(utterance)),
+    cancel: vi.fn(),
+    pause: vi.fn(),
+    resume: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  }
+  Object.defineProperty(window, 'speechSynthesis', { configurable: true, value: synthesis })
+  Object.defineProperty(window, 'SpeechSynthesisUtterance', { configurable: true, value: RoomSpeechUtterance })
+  return { synthesis, spoken }
+}
+
 const {
   emitWsMessage,
   mockGetOpeningMessageId,
@@ -201,6 +232,8 @@ describe('RoomPage conversation history', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     wsHandlers.clear()
+    Object.defineProperty(window, 'speechSynthesis', { configurable: true, value: undefined })
+    Object.defineProperty(window, 'SpeechSynthesisUtterance', { configurable: true, value: undefined })
     window.HTMLElement.prototype.scrollIntoView = vi.fn()
     localStorage.clear()
     sessionStorage.clear()
@@ -406,6 +439,90 @@ describe('RoomPage conversation history', () => {
         element.textContent === '实时第一段\n实时第二段',
     )
     expect(realtime).toHaveClass('whitespace-pre-wrap')
+  })
+
+  it('automatically speaks new final narration once by message id', async () => {
+    const { spoken } = installRoomSpeechApi()
+    localStorage.setItem('aidm-host-speech-settings', JSON.stringify({ enabled: true, voiceURI: null }))
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    emitWsMessage({
+      type: 'narration.push',
+      payload: { messageId: 'narration-1', text: '新的主持人叙事' },
+    })
+    expect(await screen.findByText('新的主持人叙事')).toBeInTheDocument()
+    expect(spoken).toHaveLength(1)
+    expect(spoken[0]?.text).toBe('新的主持人叙事')
+
+    emitWsMessage({
+      type: 'narration.push',
+      payload: { messageId: 'narration-1', text: '新的主持人叙事' },
+    })
+    await waitFor(() => expect(spoken).toHaveLength(1))
+  })
+
+  it('does not auto-speak restored history but supports manual replay', async () => {
+    const { spoken } = installRoomSpeechApi()
+    localStorage.setItem('aidm-host-speech-settings', JSON.stringify({ enabled: true, voiceURI: null }))
+    mockListConversation.mockResolvedValue([
+      {
+        id: 'history-narration',
+        type: 'narration.push',
+        channel: 'action',
+        payload: { messageId: 'history-narration', text: '历史主持人叙事' },
+        createdAt: '2026-07-28T10:03:00Z',
+      },
+    ])
+
+    renderRoomPage()
+    expect(await screen.findByText('历史主持人叙事')).toBeInTheDocument()
+    expect(spoken).toHaveLength(0)
+
+    fireEvent.click(screen.getByRole('button', { name: '重新朗读' }))
+    expect(spoken).toHaveLength(1)
+    expect(spoken[0]?.text).toBe('历史主持人叙事')
+  })
+
+  it('exposes speech controls and stops the queue when disabled', async () => {
+    const { spoken, synthesis } = installRoomSpeechApi()
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    fireEvent.click(screen.getByRole('button', { name: '主持人语音' }))
+    const toggle = screen.getByRole('switch', { name: '主持人语音朗读' })
+    fireEvent.click(toggle)
+    expect(toggle).toBeChecked()
+
+    emitWsMessage({
+      type: 'narration.push',
+      payload: { messageId: 'narration-controls-1', text: '控制面板测试' },
+    })
+    expect(await screen.findByText('控制面板测试')).toBeInTheDocument()
+    expect(spoken).toHaveLength(1)
+
+    fireEvent.click(screen.getByRole('button', { name: '暂停朗读' }))
+    expect(synthesis.pause).toHaveBeenCalledTimes(1)
+    fireEvent.click(screen.getByRole('button', { name: '继续朗读' }))
+    expect(synthesis.resume).toHaveBeenCalledTimes(1)
+    fireEvent.click(toggle)
+    expect(toggle).not.toBeChecked()
+    expect(synthesis.cancel).toHaveBeenCalled()
+  })
+
+  it('keeps text readable and disables replay when speech is unsupported', async () => {
+    mockListConversation.mockResolvedValue([
+      {
+        id: 'unsupported-narration',
+        type: 'narration.push',
+        channel: 'action',
+        payload: { messageId: 'unsupported-narration', text: '纯文本主持人叙事' },
+        createdAt: '2026-07-28T10:03:00Z',
+      },
+    ])
+    renderRoomPage()
+    expect(await screen.findByText('纯文本主持人叙事')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '重新朗读' })).toBeDisabled()
   })
 
   it('falls back for legacy payloads when characterName is missing', async () => {

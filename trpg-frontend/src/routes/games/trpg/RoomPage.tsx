@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import { RoomSocketServerError, TurnFailedError, type AgentPlayerView, type AgentTurnPhase, type CheckRequestPayload, type RoomConversationEvent } from 'trpg-sdk'
-import { ArrowLeft, Users, Map, BookOpen, ScrollText, Star, X, SendHorizontal, Dice6, Plus, Save, FlagOff, Heart } from 'lucide-react'
+import { ArrowLeft, Users, Map, BookOpen, ScrollText, Star, X, SendHorizontal, Dice6, Plus, Save, FlagOff, Heart, Volume2, Pause, Play, Square, RotateCcw } from 'lucide-react'
 import { useState, useRef, useEffect, type Dispatch, type FormEvent, type SetStateAction } from 'react'
 import { useRoomStore } from '@/stores/room-store'
 import { useAuthStore } from '@/stores/auth-store'
@@ -9,6 +9,7 @@ import { connectWebSocket, waitForWsOpen, sdk, onWsMessage, disconnectWebSocket,
 import { endGame } from '@/services/room'
 import { useRoomPlayers } from '@/hooks/useRoomPlayers'
 import { useRuleset } from '@/hooks/useRuleset'
+import { useHostSpeech } from '@/hooks/useHostSpeech'
 
 // `crypto.randomUUID()` 要求安全上下文（HTTPS 或 localhost）——CI Preview
 // 部署在纯 HTTP 的 IP:端口上（issue #200，域名/HTTPS 明确列在本期不做），
@@ -753,6 +754,8 @@ export default function RoomPage() {
   const senderName = character?.info.name || nickname || '你'
   const { ruleset } = useRuleset()
   const roomInfo = useRoomPlayers(roomCode)
+  const hostSpeech = useHostSpeech()
+  const enqueueHostSpeech = hostSpeech.enqueue
   const isHost = roomInfo?.players.find((p) => p.playerId === playerId)?.isHost ?? false
   const [roomPhase, setRoomPhase] = useState<string | null>(null)
   const [confirmEnd, setConfirmEnd] = useState(false)
@@ -858,16 +861,17 @@ export default function RoomPage() {
       if (envelope.type === 'narration.push') {
         setTyping(false)
         setProgressLabel(null)
+        const authoritativeId = envelope.payload.messageId?.trim()
+        const messageId = authoritativeId
+          ? conversationMessageId('narration.push', authoritativeId)
+          : pendingNarrationActionIdRef.current
+            ? conversationMessageId(
+                'narration.push',
+                pendingNarrationActionIdRef.current,
+              )
+            : undefined
+        enqueueHostSpeech(messageId, envelope.payload.text)
         setMessages(prev => {
-          const authoritativeId = envelope.payload.messageId?.trim()
-          const messageId = authoritativeId
-            ? conversationMessageId('narration.push', authoritativeId)
-            : pendingNarrationActionIdRef.current
-              ? conversationMessageId(
-                  'narration.push',
-                  pendingNarrationActionIdRef.current,
-                )
-              : undefined
           if (messageId && prev.some((item) => item.messageId === messageId)) {
             pendingNarrationActionIdRef.current = null
             return prev
@@ -998,7 +1002,7 @@ export default function RoomPage() {
       setProgressLabel('守秘人正在生成开场叙事')
     }
     return off
-  }, [playerId, senderName])
+  }, [enqueueHostSpeech, playerId, senderName])
 
   const submitPlayerAction = (action: { clientActionId: string; utterance: string }) => {
     if (!playerId || suspended) return
@@ -1083,6 +1087,7 @@ export default function RoomPage() {
     setEndError('')
     try {
       await endGame(roomId)
+      hostSpeech.stop()
       disconnectWebSocket()
       navigate('/home')
     } catch (err) {
@@ -1094,6 +1099,7 @@ export default function RoomPage() {
   // 退出（不是结束游戏）——只是自己离开，房间对其他人继续存在、phase 不变，
   // 之后可以从「我的游戏」用同一个身份重新进来（见 MyRoomsPage 的继续逻辑）。
   const handleExit = () => {
+    hostSpeech.stop()
     disconnectWebSocket()
     navigate('/home')
   }
@@ -1115,7 +1121,17 @@ export default function RoomPage() {
           </div>
         </div>
         <button
+          onClick={() => setOpenPanel(openPanel === 'speech' ? null : 'speech')}
+          aria-label="主持人语音"
+          title="主持人语音"
+          className={`w-8 h-8 rounded-full bg-card border border-border-light flex items-center justify-center active:bg-panel ${hostSpeech.status === 'speaking' ? 'text-brass-dark' : 'text-text-muted'}`}
+        >
+          <Volume2 className="w-4 h-4" strokeWidth={2.5} />
+        </button>
+        <button
           onClick={() => setOpenPanel(openPanel === 'members' ? null : 'members')}
+          aria-label="房间成员"
+          title="房间成员"
           className="w-8 h-8 rounded-full bg-card border border-border-light flex items-center justify-center active:bg-panel"
         >
           <Users className="w-4 h-4 text-text-muted" strokeWidth={2.5} />
@@ -1197,6 +1213,19 @@ export default function RoomPage() {
                   {msg.content}
                 </div>
                 <div className="text-[10px] text-text-dim mt-0.5">{msg.time}</div>
+                {isNarr && (
+                  <button
+                    type="button"
+                    aria-label="重新朗读"
+                    title="重新朗读"
+                    disabled={!hostSpeech.supported}
+                    onClick={() => hostSpeech.replay(msg.content)}
+                    className="mt-1 inline-flex items-center gap-1 text-[10px] text-text-muted disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <RotateCcw className="w-3 h-3" strokeWidth={2} />
+                    重播
+                  </button>
+                )}
               </div>
             </div>
           )
@@ -1544,6 +1573,96 @@ export default function RoomPage() {
           className="w-full min-h-[180px] text-sm leading-[1.7] text-text-body bg-input border border-border-light rounded-md px-3.5 py-3 resize-none outline-none focus:border-brass transition-colors font-mono placeholder:text-text-dim"
         />
         <div className="text-[10px] text-text-dim mt-2 text-right">{lastSaved ? `最后保存: ${lastSaved}` : '尚未保存'}</div>
+      </BottomPanel>
+
+      {/* Panel: 主持人语音 */}
+      <BottomPanel open={openPanel === 'speech'} onClose={() => setOpenPanel(null)} title="主持人语音">
+        {!hostSpeech.supported ? (
+          <p className="text-sm text-text-dim py-6 text-center">
+            当前浏览器不支持语音朗读，文本消息仍可正常使用
+          </p>
+        ) : (
+          <div className="space-y-4">
+            <label className="flex items-center justify-between gap-3">
+              <span>
+                <span className="block text-sm font-semibold text-text-primary">主持人语音朗读</span>
+                <span className="block text-[11px] text-text-muted mt-0.5">新产生的最终主持人消息自动播放</span>
+              </span>
+              <input
+                type="checkbox"
+                role="switch"
+                aria-label="主持人语音朗读"
+                checked={hostSpeech.enabled}
+                onChange={(event) => hostSpeech.setEnabled(event.target.checked)}
+                className="h-5 w-9 accent-brass"
+              />
+            </label>
+
+            <label className="block">
+              <span className="block text-xs font-semibold text-text-muted mb-1.5">音色</span>
+              <select
+                aria-label="主持人音色"
+                value={hostSpeech.selectedVoiceURI ?? ''}
+                onChange={(event) => hostSpeech.setSelectedVoiceURI(event.target.value)}
+                disabled={hostSpeech.voices.length === 0}
+                className="w-full bg-input border border-border-light rounded-md px-3 py-2 text-sm text-text-primary disabled:opacity-50"
+              >
+                {hostSpeech.voices.length === 0 ? (
+                  <option value="">正在加载音色…</option>
+                ) : (
+                  hostSpeech.voices.map((voice) => (
+                    <option key={voice.voiceURI} value={voice.voiceURI}>
+                      {voice.name} · {voice.lang}
+                    </option>
+                  ))
+                )}
+              </select>
+            </label>
+
+            <div className="flex items-center justify-between text-[11px] text-text-muted">
+              <span>
+                {hostSpeech.status === 'speaking' ? '正在朗读' : hostSpeech.status === 'paused' ? '已暂停' : '空闲'}
+              </span>
+              <span>待播放 {hostSpeech.queueLength} 条</span>
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                type="button"
+                aria-label="暂停朗读"
+                title="暂停朗读"
+                onClick={hostSpeech.pause}
+                disabled={hostSpeech.status !== 'speaking'}
+                className="flex-1 py-2 rounded-sm bg-panel border border-border-light text-text-muted text-xs font-medium flex items-center justify-center gap-1 disabled:opacity-40"
+              >
+                <Pause className="w-3.5 h-3.5" />
+                暂停
+              </button>
+              <button
+                type="button"
+                aria-label="继续朗读"
+                title="继续朗读"
+                onClick={hostSpeech.resume}
+                disabled={hostSpeech.status !== 'paused'}
+                className="flex-1 py-2 rounded-sm bg-panel border border-border-light text-text-muted text-xs font-medium flex items-center justify-center gap-1 disabled:opacity-40"
+              >
+                <Play className="w-3.5 h-3.5" />
+                继续
+              </button>
+              <button
+                type="button"
+                aria-label="停止朗读"
+                title="停止朗读"
+                onClick={hostSpeech.stop}
+                disabled={hostSpeech.status === 'idle' && hostSpeech.queueLength === 0}
+                className="flex-1 py-2 rounded-sm bg-panel border border-border-light text-text-muted text-xs font-medium flex items-center justify-center gap-1 disabled:opacity-40"
+              >
+                <Square className="w-3.5 h-3.5" />
+                停止
+              </button>
+            </div>
+          </div>
+        )}
       </BottomPanel>
 
       {/* Panel: 房间成员 */}

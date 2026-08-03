@@ -144,6 +144,50 @@ test('isValidServerEvent：接受缺少 characterName 的旧 action.broadcast', 
   );
 });
 
+test('isValidServerEvent：narration.chunk 需要非空 messageId、非负整数 sequence 和字符串 text', () => {
+  assert.equal(
+    isValidServerEvent({
+      type: 'narration.chunk',
+      payload: { messageId: 'game-opening', sequence: 0, text: '雨点敲打着窗框。' },
+    }),
+    true
+  );
+  // 空 messageId 无法把片段归到某一条消息上。
+  assert.equal(
+    isValidServerEvent({
+      type: 'narration.chunk',
+      payload: { messageId: '', sequence: 0, text: '雨点敲打着窗框。' },
+    }),
+    false
+  );
+  // sequence 决定拼接顺序，小数或负数都会让去重与排序失去意义。
+  assert.equal(
+    isValidServerEvent({
+      type: 'narration.chunk',
+      payload: { messageId: 'game-opening', sequence: 1.5, text: '片段' },
+    }),
+    false
+  );
+  assert.equal(
+    isValidServerEvent({
+      type: 'narration.chunk',
+      payload: { messageId: 'game-opening', sequence: -1, text: '片段' },
+    }),
+    false
+  );
+  assert.equal(
+    isValidServerEvent({
+      type: 'narration.chunk',
+      payload: { messageId: 'game-opening', sequence: 0, text: 42 },
+    }),
+    false
+  );
+  assert.equal(
+    isValidServerEvent({ type: 'narration.chunk', payload: { messageId: 'game-opening' } }),
+    false
+  );
+});
+
 test('isValidServerEvent：拒绝缺 payload / payload 不是对象 / 顶层不是对象', () => {
   assert.equal(isValidServerEvent({ type: 'session.bound' }), false);
   assert.equal(isValidServerEvent({ type: 'session.bound', payload: 'nope' }), false);

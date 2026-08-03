@@ -105,6 +105,44 @@ function conversationMessageId(type: RoomConversationEvent['type'], id: string):
   return `history:${type}:${id}`
 }
 
+/**
+ * 一条主持叙事正在渐进到达时的临时拼装状态（issue #203）。
+ *
+ * 它**不是**权威历史：片段不落库，最终以服务端持久化的 `narration.push` 为准。
+ * 收到同一 `messageId` 的 push 后这份状态立即丢弃，由权威消息接管；刷新或重新
+ * 进房只会拿到 push，不会重放片段。
+ */
+interface StreamingNarration {
+  messageId: string
+  chunks: Record<number, string>
+}
+
+/**
+ * 按 `sequence` 收片段。同一序号重复到达（重连/重试）不会重复拼接，换了
+ * `messageId` 说明是新的一条叙事，直接从头开始。
+ */
+export function accumulateNarrationChunk(
+  current: StreamingNarration | null,
+  chunk: { messageId: string; sequence: number; text: string },
+): StreamingNarration {
+  const base =
+    current?.messageId === chunk.messageId ? current : { messageId: chunk.messageId, chunks: {} }
+  if (chunk.sequence in base.chunks) return base
+  return {
+    messageId: base.messageId,
+    chunks: { ...base.chunks, [chunk.sequence]: chunk.text },
+  }
+}
+
+/** 按序号升序拼接已到达的片段；乱序到达也能得到正确文本。 */
+export function streamingNarrationText(state: StreamingNarration): string {
+  return Object.keys(state.chunks)
+    .map(Number)
+    .sort((a, b) => a - b)
+    .map((sequence) => state.chunks[sequence])
+    .join('')
+}
+
 function mergeHistoricalMessages(current: Message[], history: Message[]): Message[] {
   const ids = new Set(current.flatMap((item) => (item.messageId ? [item.messageId] : [])))
   return [...history.filter((item) => !item.messageId || !ids.has(item.messageId)), ...current]
@@ -775,6 +813,7 @@ export default function RoomPage() {
     return cached?.room_id === roomId ? cached : null
   })
   const [progressLabel, setProgressLabel] = useState<string | null>(null)
+  const [streamingNarration, setStreamingNarration] = useState<StreamingNarration | null>(null)
   const [actionError, setActionError] = useState('')
   const [actionErrorRetryable, setActionErrorRetryable] = useState(false)
   const [actionErrorIsGuidance, setActionErrorIsGuidance] = useState(false)
@@ -864,9 +903,22 @@ export default function RoomPage() {
   // 生成主持叙述。
   useEffect(() => {
     const off = onWsMessage((envelope) => {
-      if (envelope.type === 'narration.push') {
+      if (envelope.type === 'narration.chunk') {
+        // 已经有文字在往外走，就不要再同时显示"正在思考"的点点了。
         setTyping(false)
         setProgressLabel(null)
+        setStreamingNarration((current) =>
+          accumulateNarrationChunk(current, {
+            messageId: conversationMessageId('narration.push', envelope.payload.messageId),
+            sequence: envelope.payload.sequence,
+            text: envelope.payload.text,
+          }),
+        )
+      } else if (envelope.type === 'narration.push') {
+        setTyping(false)
+        setProgressLabel(null)
+        // 权威消息一到就丢弃临时拼装：显示的文字从此只来自持久化记录。
+        setStreamingNarration(null)
         const authoritativeId = envelope.payload.messageId?.trim()
         const messageId = authoritativeId
           ? conversationMessageId('narration.push', authoritativeId)
@@ -982,6 +1034,9 @@ export default function RoomPage() {
       } else if (envelope.type === 'turn.failed') {
         setTyping(false)
         setProgressLabel(null)
+        // 片段只在叙事落库成功后才会下发，回合失败时不存在对应的权威消息——
+        // 留着半截文字会让玩家以为那是这回合的结果。
+        setStreamingNarration(null)
         setActionError(envelope.payload.publicMessage)
         setActionErrorRetryable(envelope.payload.retryable)
         setActionErrorIsGuidance(envelope.payload.code === 'HOST_AGENT_INVALID_OUTPUT')
@@ -995,6 +1050,7 @@ export default function RoomPage() {
       } else if (envelope.type === 'error') {
         setTyping(false)
         setProgressLabel(null)
+        setStreamingNarration(null)
         setActionError(envelope.payload.message)
         setActionErrorRetryable(false)
         setActionErrorIsGuidance(false)
@@ -1237,8 +1293,25 @@ export default function RoomPage() {
           )
         })}
 
+        {/* 渐进到达的主持叙事（issue #203）。没有"重播"按钮：它还不是权威
+            消息，语音朗读只认最终 narration.push。*/}
+        {streamingNarration && (
+          <div className="flex gap-2.5 animate-[msgIn_0.3s_ease]">
+            <div className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-sm bg-[#faf5eb] border border-brass">
+              📜
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-[11px] font-semibold text-brass-dark mb-0.5">守秘人</div>
+              <div className="text-sm leading-[1.65] inline-block max-w-full px-3.5 py-2.5 bg-[#fdfaf4] border-l-[3px] border-brass rounded-r-sm rounded-l-none italic text-[#4a4030] text-left whitespace-pre-wrap">
+                {streamingNarrationText(streamingNarration)}
+              </div>
+              <div className="text-[10px] text-text-dim mt-0.5">生成中…</div>
+            </div>
+          </div>
+        )}
+
         {/* Typing indicator */}
-        {typing && (
+        {typing && !streamingNarration && (
           <div className="flex gap-2.5 animate-[msgIn_0.3s_ease]">
             <div className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-sm bg-[#faf5eb] border border-brass">
               📜

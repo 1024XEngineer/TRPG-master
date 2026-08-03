@@ -441,6 +441,106 @@ describe('RoomPage conversation history', () => {
     expect(realtime).toHaveClass('whitespace-pre-wrap')
   })
 
+  it('renders narration chunks progressively and replaces them with the authoritative push', async () => {
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    emitWsMessage({
+      type: 'narration.chunk',
+      payload: { messageId: 'action-203', sequence: 0, text: '雨点敲打着窗框。' },
+    })
+    expect(await screen.findByText('雨点敲打着窗框。')).toBeInTheDocument()
+    expect(screen.getByText('生成中…')).toBeInTheDocument()
+
+    emitWsMessage({
+      type: 'narration.chunk',
+      payload: { messageId: 'action-203', sequence: 1, text: '屋里只剩壁炉燃烧的细响。' },
+    })
+    expect(
+      await screen.findByText('雨点敲打着窗框。屋里只剩壁炉燃烧的细响。'),
+    ).toBeInTheDocument()
+
+    emitWsMessage({
+      type: 'narration.push',
+      payload: {
+        messageId: 'action-203',
+        text: '雨点敲打着窗框。屋里只剩壁炉燃烧的细响。',
+      },
+    })
+    await waitFor(() => expect(screen.queryByText('生成中…')).not.toBeInTheDocument())
+    // 权威消息接管后文字仍在，且只剩一份（临时气泡已丢弃）。
+    expect(
+      screen.getAllByText('雨点敲打着窗框。屋里只剩壁炉燃烧的细响。'),
+    ).toHaveLength(1)
+  })
+
+  it('deduplicates repeated chunks and tolerates out-of-order arrival', async () => {
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    emitWsMessage({
+      type: 'narration.chunk',
+      payload: { messageId: 'action-204', sequence: 1, text: '第二段。' },
+    })
+    emitWsMessage({
+      type: 'narration.chunk',
+      payload: { messageId: 'action-204', sequence: 0, text: '第一段。' },
+    })
+    // 重连重放同一个片段不得让文字出现两次。
+    emitWsMessage({
+      type: 'narration.chunk',
+      payload: { messageId: 'action-204', sequence: 1, text: '第二段。' },
+    })
+
+    expect(await screen.findByText('第一段。第二段。')).toBeInTheDocument()
+  })
+
+  it('drops streamed chunks when the turn fails', async () => {
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    emitWsMessage({
+      type: 'narration.chunk',
+      payload: { messageId: 'action-205', sequence: 0, text: '半截叙事片段。' },
+    })
+    expect(await screen.findByText('半截叙事片段。')).toBeInTheDocument()
+
+    emitWsMessage({
+      type: 'turn.failed',
+      payload: {
+        correlationId: 'action-205',
+        code: 'HOST_AGENT_TIMEOUT',
+        publicMessage: '守秘人没能完成这次回合，请重试。',
+        retryable: true,
+      },
+    })
+    await waitFor(() => expect(screen.queryByText('半截叙事片段。')).not.toBeInTheDocument())
+  })
+
+  it('does not auto-speak narration chunks, only the final push', async () => {
+    const { spoken } = installRoomSpeechApi()
+    localStorage.setItem(
+      'aidm-host-speech-settings',
+      JSON.stringify({ enabled: true, voiceURI: null }),
+    )
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    emitWsMessage({
+      type: 'narration.chunk',
+      payload: { messageId: 'action-206', sequence: 0, text: '渐进片段。' },
+    })
+    expect(await screen.findByText('渐进片段。')).toBeInTheDocument()
+    expect(spoken).toHaveLength(0)
+
+    emitWsMessage({
+      type: 'narration.push',
+      payload: { messageId: 'action-206', text: '渐进片段。' },
+    })
+    await waitFor(() => expect(spoken).toHaveLength(1))
+    expect(spoken[0]?.text).toBe('渐进片段。')
+  })
+
   it('automatically speaks new final narration once by message id', async () => {
     const { spoken } = installRoomSpeechApi()
     localStorage.setItem('aidm-host-speech-settings', JSON.stringify({ enabled: true, voiceURI: null }))

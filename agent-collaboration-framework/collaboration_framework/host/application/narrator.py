@@ -99,6 +99,51 @@ def normalize_narration_text(text: str) -> str:
     return text.replace("\\r\\n", "\n").replace("\\n", "\n").replace("\\r", "\n")
 
 
+_SENTENCE_END_CHARS = "。！？!?…"
+_SENTENCE_CLOSING_CHARS = "」』”’\"')）】"
+
+_NARRATION_PIECE_RE = re.compile(
+    rf"[^{_SENTENCE_END_CHARS}]*[{_SENTENCE_END_CHARS}]+[{_SENTENCE_CLOSING_CHARS}]*\s*"
+    rf"|[^{_SENTENCE_END_CHARS}]+"
+)
+
+# 只用来挡住"……"、"好。"这种退化片段。定得再高会把正常的短句（"陈探员此刻
+# 就在这里。"）并进前一段，短叙事会整段塌成单片、退回非流式。
+_MIN_CHUNK_CHARS = 6
+
+
+def split_narration_chunks(text: str, *, min_chars: int = _MIN_CHUNK_CHARS) -> tuple[str, ...]:
+    """Split already-validated narration text at sentence boundaries.
+
+    Only for progressive delivery of text that has *already* passed
+    ``Narrator.narrate()``. Never use it to emit unvalidated model output: a
+    fragment carries no independent safety guarantee, so the caller must have
+    validated the whole narration first.
+
+    Concatenating the result reproduces ``text`` byte for byte — clients that
+    accumulate chunks must end up with exactly the persisted narration. Pieces
+    shorter than ``min_chars`` are merged forward so a stray "……" does not
+    become its own chunk.
+    """
+
+    if not text:
+        return ()
+
+    chunks: list[str] = []
+    buffer = ""
+    for match in _NARRATION_PIECE_RE.finditer(text):
+        buffer += match.group(0)
+        if len(buffer.strip()) >= min_chars:
+            chunks.append(buffer)
+            buffer = ""
+    if buffer:
+        if chunks:
+            chunks[-1] += buffer
+        else:
+            chunks.append(buffer)
+    return tuple(chunks)
+
+
 def narration_text_rejection_reason(
     text: str,
 ) -> Literal["protocol_tail", "schema_fragment"] | None:

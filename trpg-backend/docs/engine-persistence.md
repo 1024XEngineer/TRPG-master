@@ -24,6 +24,11 @@ Protocol 和 RuleKernel 的前提下，实现 `SqlAlchemyEngineStore`、完成�
 - `action_executions`：按 `(room_id, request_id)` 保存首次完整 `ActionRequest` 和
   `EngineExecutionResult`，供 Store 在服务重建后幂等重放。
 
+ModuleContent v3 单意图裁决另使用 `pending_check_decisions`、`check_runs` 和
+`adjudication_command_executions` 保存待选技能、权威骰点/检定后选项及每一步命令的
+幂等结果。详见 [`rule-engine-v3.md`](rule-engine-v3.md)。这些记录与对应领域 Event、
+GameState revision 在同一事务提交，不能退化为 WebSocket 连接内存。
+
 领域 JSON 均使用 SQLAlchemy 通用 `JSON`。ModuleContent、GameState、Event、
 ActionRequest 和 EngineExecutionResult 各自具有独立 schema version，首版为 `1`。
 

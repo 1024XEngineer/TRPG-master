@@ -7,11 +7,20 @@ from typing import Literal
 from pydantic import Field, JsonValue
 
 from collaboration_framework.contracts import (
+    ActionAdjudication,
     ActionRequest,
     ActionResult,
+    AdjudicationExecution,
+    CheckDecisionRequest,
     ContractModel,
     ModuleContent,
+    PendingCheckDecisionView,
+    PendingCheckOption,
+    PostRollDecisionRequest,
+    PostRollOption,
+    SubmitAdjudicationRequest,
 )
+from collaboration_framework.contracts.adjudication import CheckRoll
 
 
 class ActorResources(ContractModel):
@@ -55,6 +64,11 @@ class GameState(ContractModel):
     clock: ClockState = Field(default_factory=ClockState)
     discovered_facts: tuple[str, ...] = ()
     actor_discovered_facts: dict[str, tuple[str, ...]] = Field(default_factory=dict)
+    runtime_locations: dict[str, dict[str, JsonValue]] = Field(default_factory=dict)
+    runtime_entities: dict[str, dict[str, JsonValue]] = Field(default_factory=dict)
+    visibility_overrides: dict[str, bool] = Field(default_factory=dict)
+    core_resolved: bool = False
+    ending_available: bool = False
 
 
 class StateChange(ContractModel):
@@ -80,6 +94,75 @@ class StateModifiedEvent(ContractModel):
     cause: str
     visibility: Literal["public", "private", "hidden"] = "public"
     payload: StateModifiedPayload
+
+
+class DomainEvent(ContractModel):
+    """Append-only v3 event; provisional check events carry no gameplay effects."""
+
+    event_id: str = Field(min_length=1)
+    sequence: int = Field(ge=1)
+    type: str = Field(min_length=1)
+    room_id: str = Field(min_length=1)
+    actor_id: str = Field(min_length=1)
+    client_action_id: str = Field(min_length=1)
+    cause: str = Field(min_length=1)
+    visibility: Literal["public", "private", "hidden"] = "public"
+    payload: dict[str, JsonValue] = Field(default_factory=dict)
+
+
+class PendingCheckDecision(ContractModel):
+    decision_id: str = Field(min_length=1)
+    room_id: str = Field(min_length=1)
+    player_id: str = Field(min_length=1)
+    actor_id: str = Field(min_length=1)
+    action_request_id: str = Field(min_length=1)
+    source_revision: str = Field(min_length=1)
+    decision_version: int = Field(default=1, ge=1)
+    status: Literal["awaiting_skill_choice", "rolled", "resolved", "cancelled"]
+    adjudication: ActionAdjudication
+    options: tuple[PendingCheckOption, ...] = Field(min_length=1)
+
+    def player_view(self) -> PendingCheckDecisionView:
+        if self.status != "awaiting_skill_choice":
+            raise ValueError("只有 awaiting_skill_choice 决策可以投影为待选择视图")
+        return PendingCheckDecisionView(
+            decision_id=self.decision_id,
+            action_request_id=self.action_request_id,
+            source_revision=self.source_revision,
+            decision_version=self.decision_version,
+            actor_id=self.actor_id,
+            summary=self.adjudication.summary,
+            options=self.options,
+        )
+
+
+class CheckRun(ContractModel):
+    check_id: str = Field(min_length=1)
+    room_id: str = Field(min_length=1)
+    player_id: str = Field(min_length=1)
+    actor_id: str = Field(min_length=1)
+    decision_id: str = Field(min_length=1)
+    action_request_id: str = Field(min_length=1)
+    selected_candidate_id: str = Field(min_length=1)
+    selected_skill_id: str = Field(min_length=1)
+    difficulty: Literal["regular", "hard", "extreme"]
+    target_value: int = Field(ge=0, le=100)
+    status: Literal["awaiting_post_roll_decision", "resolved"]
+    version: int = Field(default=1, ge=1)
+    roll_count: int = Field(ge=1, le=2)
+    roll: CheckRoll
+    post_roll_options: tuple[PostRollOption, ...] = ()
+    final_result: CheckRoll | None = None
+    adjudication: ActionAdjudication
+
+
+WorkflowRequest = SubmitAdjudicationRequest | CheckDecisionRequest | PostRollDecisionRequest
+
+
+class CompletedAdjudicationCommand(ContractModel):
+    request_id: str = Field(min_length=1)
+    request: WorkflowRequest
+    execution: AdjudicationExecution
 
 
 class EngineExecutionResult(ContractModel):

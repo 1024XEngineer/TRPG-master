@@ -347,6 +347,48 @@ async def test_get_character_reads_back_saved_card(client: AsyncClient) -> None:
     assert data["occupation"] == BUILT_CHARACTER["occupation"]
     # 默认是点数购买法——迁移前建的卡和前端建卡向导走的都是这条路径
     assert data["generationMethod"] == "pointbuy"
+    assert data["occupationChoiceSkillIds"] is None
+
+
+async def test_character_persists_explicit_occupation_choices(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    room = await create_room(client)
+    headers = reconnect(room["reconnectToken"])
+    draft = await client.post(
+        f"{ROOMS_BASE}/{room['roomId']}/characters",
+        headers=headers,
+    )
+    character_id = draft.json()["data"]["characterId"]
+    payload = {
+        **BUILT_CHARACTER,
+        "occupationChoiceSkillIds": ["charm", "climb"],
+    }
+
+    saved = await client.patch(
+        f"{ROOMS_BASE}/{room['roomId']}/characters/{character_id}",
+        json=payload,
+        headers=headers,
+    )
+    completed = await client.post(
+        f"{ROOMS_BASE}/{room['roomId']}/characters/{character_id}/complete",
+        headers=headers,
+    )
+    response = await client.get(
+        f"{ROOMS_BASE}/{room['roomId']}/characters/{character_id}",
+        headers=headers,
+    )
+
+    assert saved.status_code == 200
+    assert completed.status_code == 200
+    assert response.json()["data"]["occupationChoiceSkillIds"] == ["charm", "climb"]
+    stored_character = await db_session.get(Character, character_id)
+    assert stored_character is not None
+    assert stored_character.based_on_template_id is not None
+    template = await db_session.get(UserCharacterTemplate, stored_character.based_on_template_id)
+    assert template is not None
+    assert template.data["occupation_choice_skill_ids"] == ["charm", "climb"]
 
 
 async def test_roll_attributes_marks_card_as_rolled(client: AsyncClient) -> None:

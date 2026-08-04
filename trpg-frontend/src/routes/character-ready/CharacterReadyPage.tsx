@@ -8,6 +8,7 @@ import { useAuthStore } from '@/stores/auth-store'
 import { connectWebSocket, disconnectWebSocket, sdk, waitForWsOpen } from '@/services/api-client'
 import { useRoomPlayers } from '@/hooks/useRoomPlayers'
 import { useRuleset } from '@/hooks/useRuleset'
+import { DERIVED_STAT_DEFINITIONS, normalizeDerivedStats } from '@/data/derived-stats'
 
 const SHEET_PAGES = [
   { key: 'info', label: '基本信息' },
@@ -70,17 +71,15 @@ function CharacterSheetModal({ character, onClose }: { character: NonNullable<Re
                   <span className="text-sm font-medium text-text-primary">{character.info.birthplace || '—'}</span>
                 </div>
               </div>
-              <div className="flex gap-2">
-                {[
-                  { label: 'HP', value: `${character.derived.hp}`, color: 'text-mold' },
-                  { label: 'SAN', value: `${character.derived.san}`, color: 'text-[#7050a0]' },
-                  { label: 'MP', value: `${character.derived.mp}`, color: 'text-[#4a7098]' },
-                  { label: 'DB', value: character.derived.db, color: 'text-text-muted' },
-                  { label: 'MOV', value: `${character.derived.move}`, color: 'text-text-muted' },
-                ].map(pill => (
-                  <div key={pill.label} className="flex-1 bg-panel rounded-md px-2.5 py-2 text-center">
-                    <div className="text-[10px] text-text-muted font-semibold">{pill.label}</div>
-                    <div className={`text-[16px] font-bold font-mono ${pill.color}`}>{pill.value}</div>
+              <div className="grid grid-cols-3 gap-2" data-testid="derived-stats-grid">
+                {DERIVED_STAT_DEFINITIONS.map(definition => (
+                  <div key={definition.key} className="bg-panel rounded-md px-2.5 py-2 text-center">
+                    <div className="text-[10px] text-text-muted font-semibold">
+                      {definition.label} <span className="font-mono text-text-dim">{definition.abbreviation}</span>
+                    </div>
+                    <div className="text-[16px] font-bold font-mono" style={{ color: definition.color }}>
+                      {character.derived[definition.key] ?? '—'}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -171,8 +170,7 @@ export default function CharacterReadyPage() {
         if (cancelled || !saved.name) return
         const occupationId =
           readyRuleset.occupations.find((o) => o.name === saved.occupation)?.id ?? null
-        const derived = saved.derivedStats ?? {}
-        const num = (v: unknown) => (typeof v === 'number' ? v : 0)
+        const derived = normalizeDerivedStats(saved.derivedStats ?? {})
         setRemoteCharacter({
           info: {
             name: saved.name,
@@ -186,16 +184,11 @@ export default function CharacterReadyPage() {
           attr: { ...saved.attributes },
           skillAlloc: {},
           skillFinalValues: { ...saved.skills },
+          occupationChoiceSkillIds: saved.occupationChoiceSkillIds ?? [],
           equipment: (saved.equipment ?? []).join('、'),
           background: saved.background ?? '',
           notes: saved.notes ?? '',
-          derived: {
-            hp: num(derived.HP),
-            san: num(derived.SAN),
-            mp: num(derived.MP),
-            db: derived.DB == null ? '0' : String(derived.DB),
-            move: num(derived.MOV),
-          },
+          derived,
         })
       })
       .catch(() => {

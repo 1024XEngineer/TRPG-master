@@ -10,6 +10,7 @@ import { endGame } from '@/services/room'
 import { useRoomPlayers } from '@/hooks/useRoomPlayers'
 import { useRuleset } from '@/hooks/useRuleset'
 import { useHostSpeech } from '@/hooks/useHostSpeech'
+import { DERIVED_STAT_DEFINITIONS } from '@/data/derived-stats'
 
 // `crypto.randomUUID()` 要求安全上下文（HTTPS 或 localhost）——CI Preview
 // 部署在纯 HTTP 的 IP:端口上（issue #200，域名/HTTPS 明确列在本期不做），
@@ -1437,14 +1438,14 @@ export default function RoomPage() {
         <div className="flex items-center gap-4 px-4 py-2 border-t border-border-light bg-page flex-shrink-0">
           <div className="flex items-center gap-1.5 flex-1 min-w-0">
             <Heart className="w-3 h-3 text-mold flex-shrink-0" strokeWidth={2.5} />
-            <span className="text-[10px] font-semibold text-text-muted flex-shrink-0">HP</span>
+            <span className="text-[10px] font-semibold text-text-muted flex-shrink-0">生命</span>
             <div className="flex-1 h-1.5 rounded-full bg-border-light overflow-hidden">
               <div className="h-full rounded-full bg-mold" style={{ width: '100%' }} />
             </div>
             <span className="text-[11px] font-bold font-mono text-mold flex-shrink-0">{currentHp}</span>
           </div>
           <div className="flex items-center gap-1.5 flex-1 min-w-0">
-            <span className="text-[10px] font-semibold text-text-muted flex-shrink-0">SAN</span>
+            <span className="text-[10px] font-semibold text-text-muted flex-shrink-0">理智</span>
             <div className="flex-1 h-1.5 rounded-full bg-border-light overflow-hidden">
               <div className="h-full rounded-full bg-[#7050a0]" style={{ width: `${Math.min(100, currentSan)}%` }} />
             </div>
@@ -1562,17 +1563,15 @@ export default function RoomPage() {
                   </div>
                 </div>
 
-                <div className="flex gap-2 mb-4">
-                  {[
-                    { label: 'HP', value: `${character.derived.hp}`, color: 'text-mold' },
-                    { label: 'SAN', value: `${character.derived.san}`, color: 'text-[#7050a0]' },
-                    { label: 'MP', value: `${character.derived.mp}`, color: 'text-[#4a7098]' },
-                    { label: 'DB', value: character.derived.db, color: 'text-text-muted' },
-                    { label: 'MOV', value: `${character.derived.move}`, color: 'text-text-muted' },
-                  ].map((pill) => (
-                    <div key={pill.label} className="flex-1 bg-panel rounded-md px-2.5 py-2 text-center">
-                      <div className="text-[10px] text-text-muted font-medium">{pill.label}</div>
-                      <div className={`text-base font-bold font-mono ${pill.color}`}>{pill.value}</div>
+                <div className="grid grid-cols-3 gap-2 mb-4" data-testid="derived-stats-grid">
+                  {DERIVED_STAT_DEFINITIONS.map((definition) => (
+                    <div key={definition.key} className="bg-panel rounded-md px-2.5 py-2 text-center">
+                      <div className="text-[10px] text-text-muted font-medium">
+                        {definition.label} <span className="font-mono text-text-dim">{definition.abbreviation}</span>
+                      </div>
+                      <div className="text-base font-bold font-mono" style={{ color: definition.color }}>
+                        {character.derived[definition.key] ?? '—'}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1628,7 +1627,10 @@ export default function RoomPage() {
             <div className="space-y-2">
               {(() => {
                 const occSkillIds = character.info.occupationId
-                  ? ruleset?.occupations.find(o => o.id === character.info.occupationId)?.skillIds ?? []
+                  ? [
+                      ...(ruleset?.occupations.find(o => o.id === character.info.occupationId)?.skillIds ?? []),
+                      ...(character.occupationChoiceSkillIds ?? []),
+                    ]
                   : []
                 const list = (ruleset?.skills ?? [])
                   .filter((skill) => skillsTab === 'occupation' ? occSkillIds.includes(skill.id) : !occSkillIds.includes(skill.id))

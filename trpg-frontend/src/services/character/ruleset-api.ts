@@ -77,6 +77,7 @@ const VALIDATION_FIELD_LABELS: Record<string, string> = {
   skills: '技能',
   equipment: '装备',
   occupation: '职业',
+  occupationChoiceSkillIds: '职业自选技能',
   background: '背景故事',
   notes: '备注',
 }

@@ -26,7 +26,7 @@ issue #112：此前本模块直接 import `app/core/coc7_content.py` 的模块�
 import re
 from dataclasses import dataclass, field
 
-from app.dto.game import OccupationSpec, RulesetRead
+from app.dto.game import OccupationSpec, RulesetRead, SkillSpec
 
 SKILL_CAP = 99
 
@@ -84,6 +84,7 @@ class ComputeResult:
     occupation_skill_points: SkillPointsBudget
     interest_skill_points: SkillPointsBudget
     skill_view: list[SkillView] = field(default_factory=list)
+    resolved_occupation_choice_skill_ids: list[str] = field(default_factory=list)
     validation: list[ValidationIssue] = field(default_factory=list)
 
 
@@ -191,11 +192,14 @@ def find_occupation_by_name(
     return match, match is None
 
 
-def _assign_choice_slots(occupation: OccupationSpec | None, candidates: dict[str, int]) -> set[str]:
-    """决定哪些「非固定本职技能」占用了职业的自选槽，返回被占用的技能 id 集合。
+def _match_choice_slots(
+    occupation: OccupationSpec | None, candidates: list[tuple[str, int]]
+) -> list[str]:
+    """把候选技能匹配到职业槽位，按展开后的槽位顺序返回技能 id。
 
-    `candidates` 是 {技能 id: 该技能分配到的点数}，只含加了点、且不在固定
-    `skill_ids` 里的技能。
+    `candidates` 是 ``[(技能 id, 权重)]``。旧角色传已加点技能并用分配点作
+    权重，得到使职业点覆盖最大的兼容结果；显式选择传相同权重，匹配只负责
+    判断整组选择是否能装入槽位。
 
     ## 为什么要"最大化"而不是随便挑一种分配
 
@@ -219,7 +223,7 @@ def _assign_choice_slots(occupation: OccupationSpec | None, candidates: dict[str
     赌错的代价是玩家的合法角色卡被拒，而且现象是莫名其妙的点数超支。
     """
     if occupation is None or not occupation.choice_slots:
-        return set()
+        return []
 
     # 把每个槽按容量摊成若干个"槽位"，匹配问题就变成简单的二分图匹配。
     # candidate_skill_ids 为 None 表示任意技能（规则书的"任意 N 项特长"）。
@@ -236,21 +240,115 @@ def _assign_choice_slots(occupation: OccupationSpec | None, candidates: dict[str
 
     def try_assign(skill_id: str, visited: set[int]) -> bool:
         """标准增广路径：找一个空槽位，或挤走某个槽位上的技能让它另寻他处。"""
+        # 先取直接可用的空槽，避免多个等价槽之间无意义地反复换位；没有空槽时
+        # 再走增广路径重排，仍然保持最大匹配能力。
+        for unit in range(len(slot_units)):
+            if unit in visited or not accepts(unit, skill_id) or unit in unit_taken_by:
+                continue
+            visited.add(unit)
+            unit_taken_by[unit] = skill_id
+            return True
         for unit in range(len(slot_units)):
             if unit in visited or not accepts(unit, skill_id):
                 continue
             visited.add(unit)
-            occupant = unit_taken_by.get(unit)
-            if occupant is None or try_assign(occupant, visited):
+            occupant = unit_taken_by[unit]
+            if try_assign(occupant, visited):
                 unit_taken_by[unit] = skill_id
                 return True
         return False
 
     # 点数降序：拟阵贪心要求先处理权重大的，这样得到的才是最大权解。
-    for skill_id, _points in sorted(candidates.items(), key=lambda kv: -kv[1]):
+    for skill_id, _points in sorted(candidates, key=lambda kv: -kv[1]):
         try_assign(skill_id, set())
 
-    return set(unit_taken_by.values())
+    return [unit_taken_by[unit] for unit in sorted(unit_taken_by)]
+
+
+def _resolve_explicit_choice_slots(
+    occupation: OccupationSpec | None,
+    choice_skill_ids: list[str],
+    skills_by_id: dict[str, SkillSpec],
+) -> tuple[set[str], list[str], list[ValidationIssue]]:
+    """校验并解析新版角色显式提交的职业自选技能。"""
+    issues: list[ValidationIssue] = []
+    expected_count = (
+        sum(max(0, slot.count) for slot in occupation.choice_slots) if occupation is not None else 0
+    )
+
+    seen: set[str] = set()
+    valid_candidates: list[tuple[str, int]] = []
+    fixed_ids = set(occupation.skill_ids) if occupation is not None else set()
+    for skill_id in choice_skill_ids:
+        if skill_id in seen:
+            issues.append(
+                ValidationIssue(
+                    code="OCCUPATION_CHOICE_DUPLICATE",
+                    field="occupationChoiceSkillIds",
+                    message=f"职业自选技能不能重复选择：{skill_id}",
+                )
+            )
+            continue
+        seen.add(skill_id)
+        if occupation is None:
+            issues.append(
+                ValidationIssue(
+                    code="OCCUPATION_CHOICE_INVALID",
+                    field="occupationChoiceSkillIds",
+                    message="未选择职业时不能设置职业自选技能",
+                )
+            )
+        elif skill_id not in skills_by_id:
+            issues.append(
+                ValidationIssue(
+                    code="OCCUPATION_CHOICE_INVALID",
+                    field="occupationChoiceSkillIds",
+                    message=f"未知的职业自选技能：{skill_id}",
+                )
+            )
+        elif skill_id in fixed_ids:
+            issues.append(
+                ValidationIssue(
+                    code="OCCUPATION_CHOICE_INVALID",
+                    field="occupationChoiceSkillIds",
+                    message=f"{skill_id} 已经是固定职业技能，不能重复占用自选槽",
+                )
+            )
+        elif skill_id == "credit-rating" or skill_id in NON_ALLOCATABLE_SKILL_IDS:
+            issues.append(
+                ValidationIssue(
+                    code="OCCUPATION_CHOICE_INVALID",
+                    field="occupationChoiceSkillIds",
+                    message=f"{skill_id} 不能作为职业自选技能",
+                )
+            )
+        else:
+            valid_candidates.append((skill_id, 0))
+
+    resolved = _match_choice_slots(occupation, valid_candidates)
+    unmatched = {skill_id for skill_id, _ in valid_candidates} - set(resolved)
+    for skill_id in sorted(unmatched):
+        issues.append(
+            ValidationIssue(
+                code="OCCUPATION_CHOICE_INVALID",
+                field="occupationChoiceSkillIds",
+                message=f"{skill_id} 不符合当前职业的自选槽范围",
+            )
+        )
+
+    if len(choice_skill_ids) != expected_count:
+        issues.append(
+            ValidationIssue(
+                code="OCCUPATION_CHOICES_INCOMPLETE",
+                field="occupationChoiceSkillIds",
+                message=(
+                    f"职业自选技能需要选择 {expected_count} 项，"
+                    f"当前已选择 {len(choice_skill_ids)} 项"
+                ),
+            )
+        )
+
+    return set(resolved), resolved, issues
 
 
 def _validate_attributes(
@@ -367,6 +465,7 @@ def _compute(
     *,
     occupation_not_found: bool,
     generation_method: str = GENERATION_POINT_BUY,
+    occupation_choice_skill_ids: list[str] | None = None,
 ) -> ComputeResult:
     issues: list[ValidationIssue] = []
     if occupation_not_found:
@@ -386,6 +485,7 @@ def _compute(
             occupation_skill_points=SkillPointsBudget(budget=0, spent=0, remaining=0),
             interest_skill_points=SkillPointsBudget(budget=0, spent=0, remaining=0),
             skill_view=[],
+            resolved_occupation_choice_skill_ids=[],
             validation=issues,
         )
 
@@ -406,7 +506,7 @@ def _compute(
     skill_view: list[SkillView] = []
 
     # 先把每项技能的分配量算出来，再决定自选槽归属，最后才记账——三件事必须
-    # 分开：占槽是个全局最优化问题（见 `_assign_choice_slots`），边遍历边定
+    # 分开：占槽是个全局最优化问题（见 `_match_choice_slots`），边遍历边定
     # 归属等于用"先来后到"当分配策略，会把合法卡判死。
     allocations: dict[str, int] = {}
     for spec in ruleset.skills:
@@ -415,7 +515,20 @@ def _compute(
         if allocated > 0 and spec.id != "credit-rating" and spec.id not in occupation_skill_ids:
             allocations[spec.id] = allocated
 
-    slot_occupied_ids = _assign_choice_slots(occupation, allocations)
+    if occupation_choice_skill_ids is None:
+        resolved_choice_skill_ids = _match_choice_slots(occupation, list(allocations.items()))
+        slot_occupied_ids = set(resolved_choice_skill_ids)
+    else:
+        (
+            slot_occupied_ids,
+            resolved_choice_skill_ids,
+            choice_issues,
+        ) = _resolve_explicit_choice_slots(
+            occupation,
+            occupation_choice_skill_ids,
+            skills_by_id,
+        )
+        issues.extend(choice_issues)
 
     # 遍历技能表里的全部技能（不只是草稿里提到的那些），这样 `compute_preview`
     # 能一次性把完整的 base/cap 都带给前端渲染，草稿没提到的技能视为
@@ -546,6 +659,7 @@ def _compute(
             remaining=interest_budget - interest_spent,
         ),
         skill_view=skill_view,
+        resolved_occupation_choice_skill_ids=resolved_choice_skill_ids,
         validation=issues,
     )
 
@@ -556,6 +670,7 @@ def compute_preview(
     occupation_id: int | None,
     skills: dict[str, int],
     generation_method: str = GENERATION_POINT_BUY,
+    occupation_choice_skill_ids: list[str] | None = None,
 ) -> ComputeResult:
     """`POST /systems/{systemId}/character/preview` 的计算核心：职业按 id 查。
 
@@ -574,6 +689,7 @@ def compute_preview(
         skills,
         occupation_not_found=not_found,
         generation_method=generation_method,
+        occupation_choice_skill_ids=occupation_choice_skill_ids,
     )
 
 
@@ -583,6 +699,7 @@ def validate_character(
     occupation_name: str | None,
     skills: dict[str, int],
     generation_method: str = GENERATION_POINT_BUY,
+    occupation_choice_skill_ids: list[str] | None = None,
 ) -> list[ValidationIssue]:
     """`complete_character` 的校验核心：角色卡存的是职业名字符串，按名字查。
 
@@ -599,4 +716,5 @@ def validate_character(
         skills,
         occupation_not_found=not_found,
         generation_method=generation_method,
+        occupation_choice_skill_ids=occupation_choice_skill_ids,
     ).validation

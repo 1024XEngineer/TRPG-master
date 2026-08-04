@@ -8,13 +8,18 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from collaboration_framework.contracts import (
+    ActionAdjudication,
     ActionRequest,
     ActionResult,
+    AdjudicationExecution,
+    CheckDecisionRequest,
     Intent,
     ModuleContent,
     PlayerInput,
     PlayerView,
+    PostRollDecisionRequest,
     ProjectionSnapshot,
+    SubmitAdjudicationRequest,
 )
 from collaboration_framework.host.schemas import (
     HostAgentContext,
@@ -34,6 +39,11 @@ SCHEMA_MODELS: dict[str, type[BaseModel]] = {
     "intent.schema.json": Intent,
     "action-request.schema.json": ActionRequest,
     "action-result.schema.json": ActionResult,
+    "action-adjudication.schema.json": ActionAdjudication,
+    "submit-adjudication-request.schema.json": SubmitAdjudicationRequest,
+    "check-decision-request.schema.json": CheckDecisionRequest,
+    "post-roll-decision-request.schema.json": PostRollDecisionRequest,
+    "adjudication-execution.schema.json": AdjudicationExecution,
     "narration-output.schema.json": NarrationOutput,
     "opening-narration-context.schema.json": OpeningNarrationContext,
     "websocket-output.schema.json": WebSocketOutput,

@@ -70,9 +70,10 @@ def validate_module(
         draft = ModuleDraft.model_validate(raw_payload)
     except ValidationError as error:
         return _schema_failure(error)
-    if content_schema_version >= 2:
-        if issues := _check_v2_explicit_fields(raw_payload):
-            return ValidationReport(status="needs_revision", errors=issues)
+    if content_schema_version >= 2 and (
+        issues := _check_v2_explicit_fields(raw_payload)
+    ):
+        return ValidationReport(status="needs_revision", errors=issues)
     return validate_draft(
         draft,
         skill_catalog=skill_catalog,
@@ -370,6 +371,10 @@ def _check_duplicate_ids(
             for entity_index, entity in enumerate(draft.entities)
             for rule_index, rule in enumerate(entity.rules)
         ),
+        *(
+            (f"event_rules[{index}].id", rule)
+            for index, rule in enumerate(draft.event_rules)
+        ),
     ]
     for path, rule in located_rules:
         if rule.id in first_rule_path:
@@ -510,7 +515,8 @@ def _check_v2_visibility(
                 _error(
                     "visibility.scope.not_room_shared",
                     path,
-                    "Entity/detail/checkpoint/exit 的状态门是房间共享的，不能声明为 actor-private。",
+                    "Entity/detail/checkpoint/exit 的状态门是房间共享的，"
+                    "不能声明为 actor-private。",
                 )
             )
         references = set(_ENTITY_STATE_REFERENCE.findall(policy.discovery_rule))

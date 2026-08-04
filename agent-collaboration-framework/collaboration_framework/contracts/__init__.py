@@ -1,5 +1,7 @@
 """Public data contracts grouped by ownership instead of one giant module."""
 
+# ruff: noqa: F401 -- this module intentionally re-exports the public contract API.
+
 from .action import (
     ActionOutcome,
     ActionRequest,
@@ -16,6 +18,48 @@ from .action import (
     NoCheck,
     RuleCheckResult,
     UnmatchedTarget,
+)
+from .adjudication import (
+    AcceptResultOption,
+    ActionAdjudication,
+    ActionEffect,
+    ActionMethod,
+    ActionTarget,
+    AdjudicationCheck,
+    AdjudicationExecution,
+    AdvanceTimeEffect,
+    CancelCheckChoice,
+    ChangeEntityStateEffect,
+    CheckDecisionRequest,
+    CheckDegree,
+    CheckDifficulty,
+    CheckRoll,
+    CheckRunView,
+    CommitTerminalEndingEffect,
+    ConsumeEntityEffect,
+    EnsureRuntimeEntityEffect,
+    EnsureRuntimeLocationEffect,
+    EnterLocationEffect,
+    HideInformationEffect,
+    MarkCoreResolvedEffect,
+    MoveEntityEffect,
+    NarrativeOnlyEffect,
+    NoAdjudicationCheck,
+    PendingCheckDecisionView,
+    PendingCheckOption,
+    PlayerChoiceAdjudicationCheck,
+    PostRollDecisionRequest,
+    PostRollOption,
+    PushAdjudication,
+    PushOption,
+    RequiredAdjudicationCheck,
+    RevealInformationEffect,
+    SelectCheckChoice,
+    SetEndingAvailabilityEffect,
+    SetVisibilityEffect,
+    SkillCheckCandidate,
+    SpendResourceOption,
+    SubmitAdjudicationRequest,
 )
 from .common import ContractError, ContractModel, JsonObject
 from .module import (
@@ -35,6 +79,7 @@ from .module import (
     ConditionSpec,
     Entity,
     EntitySpec,
+    EventRuleSpec,
     ForbidOperationSpec,
     ForceOperationSpec,
     InformationItem,

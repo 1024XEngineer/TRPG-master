@@ -596,6 +596,118 @@ def test_choice_slot_assignment_is_optimal_not_first_come_first_served() -> None
     assert issues == []
 
 
+def test_explicit_choice_slots_are_resolved_and_charge_occupation_points() -> None:
+    ruleset, occupation = _detective_with_slots()
+    choices = ["climb", "swim", "persuade"]
+
+    result = compute_preview(
+        ruleset,
+        SLOT_ATTRS,
+        occupation.id,
+        {"credit-rating": 25, "climb": 95},
+        occupation_choice_skill_ids=choices,
+    )
+
+    assert result.validation == []
+    assert result.resolved_occupation_choice_skill_ids == choices
+    assert result.occupation_skill_points.spent == 9 + 75
+    assert result.interest_skill_points.spent == 25 - 9
+
+
+def test_explicit_choice_slots_require_all_slots_to_be_filled() -> None:
+    ruleset, occupation = _detective_with_slots()
+
+    result = compute_preview(
+        ruleset,
+        SLOT_ATTRS,
+        occupation.id,
+        {"credit-rating": 25},
+        occupation_choice_skill_ids=["climb"],
+    )
+
+    assert [issue.code for issue in result.validation] == ["OCCUPATION_CHOICES_INCOMPLETE"]
+
+
+def test_explicit_choice_slots_reject_duplicate_fixed_and_non_allocatable_skills() -> None:
+    ruleset, occupation = _detective_with_slots()
+
+    duplicate = compute_preview(
+        ruleset,
+        SLOT_ATTRS,
+        occupation.id,
+        {"credit-rating": 25},
+        occupation_choice_skill_ids=["climb", "climb", "persuade"],
+    )
+    fixed = compute_preview(
+        ruleset,
+        SLOT_ATTRS,
+        occupation.id,
+        {"credit-rating": 25},
+        occupation_choice_skill_ids=["psychology", "climb", "persuade"],
+    )
+    forbidden = compute_preview(
+        ruleset,
+        SLOT_ATTRS,
+        occupation.id,
+        {"credit-rating": 25},
+        occupation_choice_skill_ids=["cthulhu-mythos", "climb", "persuade"],
+    )
+    unknown = compute_preview(
+        ruleset,
+        SLOT_ATTRS,
+        occupation.id,
+        {"credit-rating": 25},
+        occupation_choice_skill_ids=["not-a-skill", "climb", "persuade"],
+    )
+
+    assert "OCCUPATION_CHOICE_DUPLICATE" in [issue.code for issue in duplicate.validation]
+    assert "OCCUPATION_CHOICE_INVALID" in [issue.code for issue in fixed.validation]
+    assert "OCCUPATION_CHOICE_INVALID" in [issue.code for issue in forbidden.validation]
+    assert "OCCUPATION_CHOICE_INVALID" in [issue.code for issue in unknown.validation]
+
+
+def test_explicit_choice_slots_reject_skill_outside_constrained_slot() -> None:
+    ruleset, occupation = _detective_with_slots()
+    occupation.choice_slots = [
+        SkillChoiceSlot(
+            count=1,
+            candidate_skill_ids=["charm", "fast-talk", "intimidate", "persuade"],
+            label="一项社交技能",
+        )
+    ]
+
+    result = compute_preview(
+        ruleset,
+        SLOT_ATTRS,
+        occupation.id,
+        {"credit-rating": 25},
+        occupation_choice_skill_ids=["climb"],
+    )
+
+    assert [issue.code for issue in result.validation] == ["OCCUPATION_CHOICE_INVALID"]
+
+
+def test_legacy_null_choices_keep_automatic_weighted_assignment() -> None:
+    ruleset, occupation = _detective_with_slots()
+
+    result = compute_preview(
+        ruleset,
+        SLOT_ATTRS,
+        occupation.id,
+        {
+            "credit-rating": 25,
+            "persuade": 90,
+            "climb": 95,
+            "swim": 95,
+            "ride": 95,
+        },
+        occupation_choice_skill_ids=None,
+    )
+
+    assert result.validation == []
+    assert set(result.resolved_occupation_choice_skill_ids) == {"persuade", "climb", "ride"}
+
+
 def test_skill_outside_every_slot_still_costs_interest_points() -> None:
     """槽是有限的：塞不进任何槽的技能照样吃兴趣点，超了要拦。
 

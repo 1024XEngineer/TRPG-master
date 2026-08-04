@@ -146,7 +146,24 @@ vi.mock('@/hooks/useRoomPlayers', () => ({
 
 vi.mock('@/hooks/useRuleset', () => ({
   useRuleset: () => ({
-    ruleset: { attributes: [], skills: [], occupations: [] },
+    ruleset: {
+      attributes: [],
+      skills: [
+        { id: 'accounting', name: '会计', nameEn: 'accounting', base: 5, category: 'occupation' },
+        { id: 'charm', name: '取悦', nameEn: 'charm', base: 15, category: 'social' },
+        { id: 'stealth', name: '潜行', nameEn: 'stealth', base: 20, category: 'interest' },
+      ],
+      occupations: [{
+        id: 1,
+        name: '记者',
+        creditMin: 0,
+        creditMax: 70,
+        skillPointsFormula: 'EDU*4',
+        skillIds: ['accounting'],
+        choiceSlots: [{ count: 1, candidateSkillIds: null, label: '任意一项技能' }],
+        description: '',
+      }],
+    },
     loading: false,
     error: '',
   }),
@@ -818,15 +835,16 @@ describe('RoomPage conversation history', () => {
           gender: '男',
           residence: '阿卡姆',
           birthplace: '波士顿',
-          occupationId: null,
+          occupationId: 1,
         },
         attr: {},
         skillAlloc: {},
-        skillFinalValues: {},
+        skillFinalValues: { accounting: 40, charm: 50, stealth: 30 },
+        occupationChoiceSkillIds: ['charm'],
         equipment: '',
         background,
         notes: '',
-        derived: { hp: 10, san: 60, mp: 10, db: '0', move: 8 },
+        derived: { hp: 10, san: 60, mp: 10, db: '0', build: '0', move: 8 },
       },
       'room-1',
     )
@@ -834,6 +852,9 @@ describe('RoomPage conversation history', () => {
 
     renderRoomPage()
     fireEvent.click(screen.getByRole('button', { name: '角色卡' }))
+    for (const label of ['生命值', '理智值', '魔法值', '伤害加值', '体格', '移动力']) {
+      expect(screen.getByText(new RegExp(label))).toBeInTheDocument()
+    }
     fireEvent.click(screen.getByRole('button', { name: '背景装备' }))
 
     const renderedBackground = screen.getByText((_, element) => element?.textContent === background)
@@ -904,6 +925,37 @@ describe('RoomPage conversation history', () => {
     expect(screen.getByRole('button', { name: '确认并发送' })).toBeInTheDocument()
     // 已经退回 2D 展示。
     expect(screen.queryByTestId('dice-3d-stage')).not.toBeInTheDocument()
+  })
+
+  it('shows explicit occupation choice skills in the occupation tab', () => {
+    useCharacterStore.getState().setCharacter(
+      {
+        info: {
+          name: '杜调查员', playerName: '陈探员', age: '32', gender: '男',
+          residence: '阿卡姆', birthplace: '波士顿', occupationId: 1,
+        },
+        attr: {},
+        skillAlloc: {},
+        skillFinalValues: { accounting: 40, charm: 50, stealth: 30 },
+        occupationChoiceSkillIds: ['charm'],
+        equipment: '',
+        background: '',
+        notes: '',
+        derived: { hp: 10, san: 60, mp: 10, db: '0', build: '0', move: 8 },
+      },
+      'room-1',
+    )
+    mockListConversation.mockResolvedValue([])
+
+    renderRoomPage()
+    fireEvent.click(screen.getByRole('button', { name: '技能' }))
+    expect(screen.getByText('会计')).toBeInTheDocument()
+    expect(screen.getByText('取悦')).toBeInTheDocument()
+    expect(screen.queryByText('潜行')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '兴趣技能' }))
+    expect(screen.getByText('潜行')).toBeInTheDocument()
+    expect(screen.queryByText('取悦')).not.toBeInTheDocument()
   })
 
   it('keeps the first check result when reopening the modal before confirming', async () => {

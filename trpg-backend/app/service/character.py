@@ -96,6 +96,11 @@ def _character_template_data(character: Character) -> dict[str, object]:
         "birthplace": character.birthplace or "",
         "attributes": dict(character.attributes or {}),
         "skills": dict(character.skills or {}),
+        "occupation_choice_skill_ids": (
+            list(character.occupation_choice_skill_ids)
+            if character.occupation_choice_skill_ids is not None
+            else None
+        ),
         "equipment": list(character.equipment or []),
         "occupation": character.occupation,
         "background": character.background or "",
@@ -202,6 +207,7 @@ async def update_character(
     character.attributes = payload.attributes
     character.derived_stats = payload.derived_stats
     character.skills = payload.skills
+    character.occupation_choice_skill_ids = payload.occupation_choice_skill_ids
     character.equipment = [item.name for item in payload.equipment]
     character.occupation = payload.occupation
     character.background = payload.background
@@ -248,6 +254,7 @@ async def complete_character(
         attributes=character.attributes or {},
         occupation_name=character.occupation,
         skills=character.skills or {},
+        occupation_choice_skill_ids=character.occupation_choice_skill_ids,
         generation_method=character.generation_method,
     )
     if issues:
@@ -301,6 +308,7 @@ async def get_character(
         attributes=character.attributes or {},
         derived_stats=character.derived_stats or {},
         skills=character.skills or {},
+        occupation_choice_skill_ids=character.occupation_choice_skill_ids,
         equipment=list(character.equipment or []),
         occupation=character.occupation,
         background=character.background or "",
@@ -323,6 +331,7 @@ def compute_character_preview(
         attributes=payload.attributes,
         occupation_id=payload.occupation_id,
         skills=payload.skills,
+        occupation_choice_skill_ids=payload.occupation_choice_skill_ids,
     )
     return CharacterComputeResult(**asdict(result))
 

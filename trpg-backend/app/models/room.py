@@ -190,6 +190,9 @@ class Character(Base):
     attributes: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     derived_stats: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     skills: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # None 表示 issue #140 之前创建、仍使用“按已加点技能自动占槽”的旧角色；
+    # list 表示玩家已经显式确认的职业自选技能（空列表对无自选槽职业合法）。
+    occupation_choice_skill_ids: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     equipment: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     background: Mapped[str] = mapped_column(Text, nullable=False, default="")
     notes: Mapped[str] = mapped_column(Text, nullable=False, default="")

@@ -23,7 +23,7 @@ async def test_loader_is_idempotent_and_reports_real_content(
 
     assert result.outcome == "unchanged"
     assert result.module_id == BUILTIN_MODULE_ID
-    assert result.version == "1.0.4"
+    assert result.version == "1.0.5"
     assert result.world_ref == "coc-7e"
     assert result.scene_count == 11
     assert result.entity_count == 16
@@ -41,7 +41,8 @@ async def test_loader_is_idempotent_and_reports_real_content(
 
 async def test_paper_chase_models_caretaker_bottle_as_conditional_detail() -> None:
     payload = json.loads(loader.PAPER_CHASE_SOURCE_PATH.read_text(encoding="utf-8"))
-    assert payload["version"] == "1.0.4"
+    assert payload["version"] == "1.0.5"
+    assert payload["event_rules"] == []
     assert payload["initial_scene_id"] == "client_briefing"
     entities = {entity["id"]: entity for entity in payload["entities"]}
     checkpoints = {checkpoint["id"]: checkpoint for checkpoint in payload["checkpoints"]}
@@ -57,6 +58,18 @@ async def test_paper_chase_models_caretaker_bottle_as_conditional_detail() -> No
     }
     assert "玻璃瓶" not in entities["melodias"]["content"]
     assert checkpoints["observe_caretaker"]["target_id"] == "melodias"
+
+
+def test_paper_chase_keeps_previous_1_0_4_snapshot() -> None:
+    current = json.loads(loader.PAPER_CHASE_SOURCE_PATH.read_text(encoding="utf-8"))
+    previous_path = loader.PAPER_CHASE_SOURCE_PATH.with_name("module-content-1.0.4.json")
+    previous = json.loads(previous_path.read_text(encoding="utf-8"))
+
+    assert current["version"] == "1.0.5"
+    assert current["event_rules"] == []
+    assert previous["version"] == "1.0.4"
+    assert "event_rules" not in previous
+    assert previous["module_id"] == current["module_id"]
 
 
 async def test_loader_projects_player_safe_presentation_to_catalog(
@@ -183,7 +196,7 @@ async def test_loader_preserves_rooms_pinned_legacy_version(
 
     result = await loader.load_paper_chase(db_session)
 
-    assert result.version == "1.0.4"
+    assert result.version == "1.0.5"
     legacy = await db_session.get(ModuleVersion, (BUILTIN_MODULE_ID, "1.0.1"))
     assert legacy is not None
     assert legacy.content_json == legacy_content

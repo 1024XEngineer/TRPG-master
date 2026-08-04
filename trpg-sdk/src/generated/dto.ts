@@ -133,6 +133,7 @@ export interface CharacterComputeResult {
   occupationSkillPoints: SkillPointsBudgetView;
   interestSkillPoints: SkillPointsBudgetView;
   skillView: SkillComputeView[];
+  resolvedOccupationChoiceSkillIds?: string[];
   validation: ValidationIssueView[];
 }
 
@@ -155,6 +156,7 @@ export interface CharacterPreviewRequest {
   skills?: {
     [k: string]: number;
   };
+  occupationChoiceSkillIds?: string[] | null;
 }
 
 /**
@@ -186,6 +188,7 @@ export interface CharacterRead {
   skills?: {
     [k: string]: number;
   };
+  occupationChoiceSkillIds?: string[] | null;
   equipment?: string[];
   occupation?: string | null;
   background?: string;
@@ -235,6 +238,7 @@ export interface CharacterUpdateBody {
   skills: {
     [k: string]: number;
   };
+  occupationChoiceSkillIds?: string[] | null;
   equipment?: EquipmentItem[];
   occupation?: string | null;
   background?: string;

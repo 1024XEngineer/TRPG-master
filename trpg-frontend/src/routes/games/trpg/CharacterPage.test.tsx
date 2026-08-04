@@ -24,6 +24,9 @@ const { mockRuleset, mockPreviewCharacter, mockCharacterApi } = vi.hoisted(() =>
     skills: [
       { id: 'accounting', name: '会计', nameEn: 'accounting', base: 0, category: 'occupation' },
       { id: 'stealth', name: '潜行', nameEn: 'stealth', base: 0, category: 'interest' },
+      { id: 'charm', name: '取悦', nameEn: 'charm', base: 0, category: 'social' },
+      { id: 'climb', name: '攀爬', nameEn: 'climb', base: 0, category: 'physical' },
+      { id: 'cthulhu-mythos', name: '克苏鲁神话', nameEn: 'cthulhu mythos', base: 0, category: 'special' },
       { id: 'credit-rating', name: '信用评级', nameEn: 'credit-rating', base: 0, category: 'special' },
     ],
     occupationCategories: [
@@ -43,6 +46,21 @@ const { mockRuleset, mockPreviewCharacter, mockCharacterApi } = vi.hoisted(() =>
         categories: ['法律金融'],
       },
       {
+        id: 2,
+        name: '记者',
+        creditMin: 0,
+        creditMax: 70,
+        skillPointsFormula: 'EDU*4',
+        skillIds: ['accounting'],
+        choiceSlots: [
+          { count: 1, candidateSkillIds: ['charm'], label: '一项社交技能' },
+          { count: 1, candidateSkillIds: null, label: '任意一项其他技能' },
+        ],
+        description: '带职业自选槽的测试职业',
+        icon: '📰',
+        categories: ['法律金融'],
+      },
+      {
         id: 31,
         name: '罪犯-欺诈师',
         creditMin: 10,
@@ -56,13 +74,21 @@ const { mockRuleset, mockPreviewCharacter, mockCharacterApi } = vi.hoisted(() =>
     ],
   }
 
-  const mockPreviewCharacter = vi.fn(async ({ occupationId, skills }: { occupationId: number | null; skills: Record<string, number> }) => {
+  const mockPreviewCharacter = vi.fn(async ({
+    occupationId,
+    skills,
+    occupationChoiceSkillIds,
+  }: {
+    occupationId: number | null
+    skills: Record<string, number>
+    occupationChoiceSkillIds?: string[] | null
+  }) => {
     const accounting = skills.accounting ?? 0
     const stealth = skills.stealth ?? 0
     const credit = skills['credit-rating'] ?? 0
     const creditMin = occupationId === 1 ? 0 : 0
     return {
-      derivedStats: { HP: 10, SAN: 50, MP: 10, DB: '0', MOV: 8 },
+      derivedStats: { HP: 10, SAN: 50, MP: 10, DB: '0', Build: '0', MOV: 8 },
       occupationSkillPoints: {
         budget: 2,
         spent: accounting + creditMin,
@@ -80,7 +106,14 @@ const { mockRuleset, mockPreviewCharacter, mockCharacterApi } = vi.hoisted(() =>
         current: skills[skill.id] ?? 0,
         cap: skill.id === 'credit-rating' ? 70 : 99,
       })),
-      validation: [],
+      resolvedOccupationChoiceSkillIds: occupationChoiceSkillIds ?? [],
+      validation: occupationId === 2 && (occupationChoiceSkillIds?.length ?? 0) < 2
+        ? [{
+            code: 'OCCUPATION_CHOICES_INCOMPLETE',
+            field: 'occupationChoiceSkillIds',
+            message: '职业自选技能需要选择 2 项',
+          }]
+        : [],
     }
   })
 
@@ -171,6 +204,21 @@ describe('CharacterPage', () => {
     expect(await screen.findByText('背景故事')).toBeInTheDocument()
   }
 
+  async function advanceToReporterSkills() {
+    fireEvent.change(screen.getByPlaceholderText('角色姓名'), { target: { value: '张三' } })
+    fireEvent.click(screen.getByText('记者'))
+    fireEvent.click(screen.getByRole('button', { name: /下一步/ }))
+    await waitFor(() => {
+      expect(mockPreviewCharacter).toHaveBeenCalledWith(expect.objectContaining({ occupationId: 2 }))
+    })
+    await waitFor(() => {
+      fireEvent.click(screen.getByRole('button', { name: /下一步/ }))
+      expect(screen.getByText('属性分配')).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByRole('button', { name: /下一步/ }))
+    expect(await screen.findByTestId('occupation-choice-panel')).toBeInTheDocument()
+  }
+
   it('blocks advancing until name and occupation are filled', async () => {
     renderPage()
 
@@ -215,6 +263,118 @@ describe('CharacterPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '详情' }))
 
     expect(screen.getByText('测试用职业')).toBeInTheDocument()
+  })
+
+  it('renders all six derived stats in a three-column grid', async () => {
+    renderPage()
+    fireEvent.change(screen.getByPlaceholderText('角色姓名'), { target: { value: '张三' } })
+    fireEvent.click(screen.getByText('会计师'))
+    fireEvent.click(screen.getByRole('button', { name: /下一步/ }))
+    await advanceToAttributesAfterOccupationPreview()
+
+    const grid = screen.getByTestId('derived-stats-grid')
+    expect(grid).toHaveClass('grid-cols-3')
+    for (const label of ['生命值', '理智值', '魔法值', '伤害加值', '体格', '移动力']) {
+      expect(screen.getByText(new RegExp(label))).toBeInTheDocument()
+    }
+  })
+
+  it('selects, submits, and caches explicit occupation choice skills', async () => {
+    renderPage()
+    await advanceToReporterSkills()
+
+    fireEvent.click(screen.getAllByRole('button', { name: /选择技能/ })[0])
+    fireEvent.click(screen.getByRole('button', { name: /取悦/ }))
+    fireEvent.click(screen.getByRole('button', { name: /选择技能/ }))
+    expect(screen.queryByText('克苏鲁神话')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /攀爬/ }))
+
+    expect(screen.getByLabelText('取悦 技能点')).toBeInTheDocument()
+    expect(screen.getByLabelText('攀爬 技能点')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(mockPreviewCharacter).toHaveBeenCalledWith(expect.objectContaining({
+        occupationChoiceSkillIds: ['charm', 'climb'],
+      }))
+    })
+    await waitFor(() => {
+      fireEvent.click(screen.getByRole('button', { name: /下一步/ }))
+      expect(screen.getByText('背景故事')).toBeInTheDocument()
+    })
+    expect(await screen.findByText('背景故事')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /完成创建/ }))
+
+    await waitFor(() => {
+      expect(mockCharacterApi.saveCharacter).toHaveBeenCalledWith(
+        'room-1',
+        'draft-1',
+        expect.objectContaining({ occupationChoiceSkillIds: ['charm', 'climb'] }),
+      )
+    })
+    expect(useCharacterStore.getState().getForRoom('room-1')?.occupationChoiceSkillIds)
+      .toEqual(['charm', 'climb'])
+  })
+
+  it('hydrates legacy automatic choices from the preview result', async () => {
+    const inferredPreview = await mockPreviewCharacter({
+      occupationId: 2,
+      skills: { charm: 40, climb: 30 },
+      occupationChoiceSkillIds: ['charm', 'climb'],
+    })
+    mockPreviewCharacter.mockClear()
+    mockPreviewCharacter.mockResolvedValueOnce({
+      ...inferredPreview,
+      resolvedOccupationChoiceSkillIds: ['charm', 'climb'],
+      validation: [],
+    })
+    useRoomStore.setState({ characterId: 'legacy-character' })
+    mockCharacterApi.fetchCharacter.mockResolvedValue({
+      name: '旧卡调查员',
+      age: 30,
+      gender: '男',
+      residence: '阿卡姆',
+      birthplace: '波士顿',
+      occupation: '记者',
+      attributes: Object.fromEntries(mockRuleset.attributes.map(attribute => [attribute.key, 50])),
+      derivedStats: { HP: 10, SAN: 50, MP: 10 },
+      skills: { charm: 40, climb: 30 },
+      occupationChoiceSkillIds: null,
+      equipment: [],
+      background: '',
+      notes: '',
+    })
+
+    renderPage()
+    await waitFor(() => expect(screen.getByPlaceholderText('角色姓名')).toHaveValue('旧卡调查员'))
+    await waitFor(() => {
+      expect(mockPreviewCharacter).toHaveBeenCalledWith(expect.objectContaining({
+        occupationId: 2,
+        occupationChoiceSkillIds: null,
+      }))
+    })
+    await waitFor(() => {
+      fireEvent.click(screen.getByRole('button', { name: /下一步/ }))
+      expect(screen.getByText('属性分配')).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByRole('button', { name: /下一步/ }))
+
+    expect(await screen.findByLabelText('取消职业自选技能 取悦')).toBeInTheDocument()
+    expect(screen.getByLabelText('取消职业自选技能 攀爬')).toBeInTheDocument()
+  })
+
+  it('requires allocated occupation choice skills to be cleared before removal', async () => {
+    renderPage()
+    await advanceToReporterSkills()
+    fireEvent.click(screen.getAllByRole('button', { name: /选择技能/ })[0])
+    fireEvent.click(screen.getByRole('button', { name: /取悦/ }))
+
+    fireEvent.click(screen.getByLabelText('取悦 增加技能点'))
+    fireEvent.click(screen.getByLabelText('取消职业自选技能 取悦'))
+    expect(screen.getByText('请先将「取悦」的加点清零')).toBeInTheDocument()
+    expect(screen.getByLabelText('取消职业自选技能 取悦')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByLabelText('取悦 减少技能点'))
+    fireEvent.click(screen.getByLabelText('取消职业自选技能 取悦'))
+    expect(screen.queryByLabelText('取消职业自选技能 取悦')).not.toBeInTheDocument()
   })
 
   it('lets credit be typed directly and keeps occupation and interest pools separate', async () => {

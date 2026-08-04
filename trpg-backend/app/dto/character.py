@@ -31,6 +31,7 @@ class CharacterUpdateBody(CamelModel):
     attributes: dict[str, int]
     derived_stats: dict[str, int]
     skills: dict[str, int]
+    occupation_choice_skill_ids: list[str] | None = None
     equipment: list[EquipmentItem] = Field(default_factory=list)
     occupation: str | None = None
     background: str = Field(default="", max_length=4000)
@@ -60,6 +61,7 @@ class CharacterRead(CamelModel):
     attributes: dict[str, int] = Field(default_factory=dict)
     derived_stats: dict[str, int | str] = Field(default_factory=dict)
     skills: dict[str, int] = Field(default_factory=dict)
+    occupation_choice_skill_ids: list[str] | None = None
     equipment: list[str] = Field(default_factory=list)
     occupation: str | None = None
     background: str = ""
@@ -131,6 +133,7 @@ class CharacterPreviewRequest(CamelModel):
     attributes: dict[str, int]
     occupation_id: int | None = None
     skills: dict[str, int] = Field(default_factory=dict)
+    occupation_choice_skill_ids: list[str] | None = None
 
 
 class SkillPointsBudgetView(CamelModel):
@@ -167,4 +170,5 @@ class CharacterComputeResult(CamelModel):
     occupation_skill_points: SkillPointsBudgetView
     interest_skill_points: SkillPointsBudgetView
     skill_view: list[SkillComputeView]
+    resolved_occupation_choice_skill_ids: list[str] = Field(default_factory=list)
     validation: list[ValidationIssueView]

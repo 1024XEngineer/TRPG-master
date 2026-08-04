@@ -814,6 +814,31 @@ describe('RoomPage conversation history', () => {
     expect(renderedBackground).toHaveClass('whitespace-pre-wrap')
   })
 
+  // jsdom 没有 WebGL，supports3DDice() 为 false —— 正好覆盖降级路径：
+  // 渲染能力缺失时不能把检定卡住（issue #217）。
+  it('falls back to the 2D dice display when WebGL is unavailable', async () => {
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    await act(async () => {
+      emitWsMessage({
+        type: 'check.request',
+        payload: {
+          playerId: 'player-1',
+          clientActionId: 'check-fallback',
+          summary: '检查旧报纸',
+          difficulty: 'regular',
+          skills: [{ id: 'library', name: '图书馆使用', targetValue: 60 }],
+        },
+      })
+    })
+
+    expect(await screen.findByText('图书馆使用')).toBeInTheDocument()
+    expect(screen.queryByTestId('dice-3d-stage')).not.toBeInTheDocument()
+    expect(screen.getByText('十位')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '掷骰' })).toBeInTheDocument()
+  })
+
   it('keeps the first check result when reopening the modal before confirming', async () => {
     renderRoomPage()
     await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
@@ -841,11 +866,10 @@ describe('RoomPage conversation history', () => {
       .mockReturnValueOnce(0.2)
       .mockReturnValueOnce(0.3)
 
-    fireEvent.mouseDown(screen.getByTestId('dice-table'))
-    fireEvent.mouseUp(screen.getByTestId('dice-table'))
+    fireEvent.click(screen.getByRole('button', { name: '掷骰' }))
 
     await act(async () => {
-      vi.advanceTimersByTime(600)
+      vi.advanceTimersByTime(800)
     })
 
     expect(screen.getByText('23')).toBeInTheDocument()
@@ -896,11 +920,10 @@ describe('RoomPage conversation history', () => {
       .mockReturnValueOnce(0.4)
       .mockReturnValueOnce(0.1)
 
-    fireEvent.mouseDown(screen.getByTestId('dice-table'))
-    fireEvent.mouseUp(screen.getByTestId('dice-table'))
+    fireEvent.click(screen.getByRole('button', { name: '掷骰' }))
 
     await act(async () => {
-      vi.advanceTimersByTime(600)
+      vi.advanceTimersByTime(800)
     })
 
     fireEvent.click(screen.getByRole('button', { name: '确认并发送' }))
@@ -938,11 +961,10 @@ describe('RoomPage conversation history', () => {
     })
 
     expect(screen.getByText('侦查')).toBeInTheDocument()
-    fireEvent.mouseDown(screen.getByTestId('dice-table'))
-    fireEvent.mouseUp(screen.getByTestId('dice-table'))
+    fireEvent.click(screen.getByRole('button', { name: '掷骰' }))
 
     await act(async () => {
-      vi.advanceTimersByTime(600)
+      vi.advanceTimersByTime(800)
     })
 
     expect(screen.getByText('41')).toBeInTheDocument()

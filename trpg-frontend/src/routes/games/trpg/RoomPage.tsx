@@ -443,8 +443,18 @@ function DiceModal({
     })
   }
 
+  /**
+   * 已经交给 3D、但还没定格的那次掷骰。
+   *
+   * 用 ref 而不是读 state：3D 失败回调可能与 `roll()` 在同一个同步流程里发生，
+   * 那时 `rolling` 的 setState 还没生效，读 state 会拿到旧值、判断成"没有掷骰
+   * 在进行"，等于没修。
+   */
+  const inFlight3DRollRef = useRef<{ requestId: string | null } | null>(null)
+
   /** 结果落地：3D 由动画定格回调进来，2D 由本地随机 + 定时器进来，两条路共用。 */
   const settle = (value: number, requestId: string | null) => {
+    inFlight3DRollRef.current = null
     const { tens, ones } = activeDiceType === 'd100' ? splitD100(value) : { tens: 0, ones: 0 }
     if (requestId !== null) {
       setCheckDiceState((current) => {
@@ -460,25 +470,10 @@ function DiceModal({
     setFreeRolling(false)
   }
 
-  const roll = () => {
-    const requestId = isCheckMode ? checkRequest?.clientActionId ?? null : null
-    if (isCheckMode) {
-      if (!checkRequest || !activeCheckDice || activeCheckDice.result !== null || activeCheckDice.submitted || activeCheckDice.rolling) return
-      updateCheckDiceState((current) => ({ ...current, rolling: true, showResult: false }))
-    } else {
-      if (freeRolling) return
-      setFreeRolling(true)
-      setFreeShowResult(false)
-    }
+  const currentRequestId = () => (isCheckMode ? checkRequest?.clientActionId ?? null : null)
 
-    // 3D：值来自物理定格后朝上的那一面（面上的点数已由 Fisher–Yates 均匀洗过），
-    // 所以这里不预先取值，等 onSettled 回调。
-    if (use3D) {
-      dice3dRef.current?.roll()
-      return
-    }
-
-    // 2D 回退：本地随机 + 固定时长的假动画，与改造前一致。
+  /** 2D 回退掷骰：本地随机 + 固定时长的假动画，与改造前一致。 */
+  const roll2D = (requestId: string | null) => {
     let finalResult: number
     if (activeDiceType === 'd100') {
       const tens = Math.floor(Math.random() * 10)
@@ -491,6 +486,42 @@ function DiceModal({
       finalResult = Math.floor(Math.random() * 6) + 1
     }
     setTimeout(() => settle(finalResult, requestId), 700)
+  }
+
+  const roll = () => {
+    const requestId = currentRequestId()
+    if (isCheckMode) {
+      if (!checkRequest || !activeCheckDice || activeCheckDice.result !== null || activeCheckDice.submitted || activeCheckDice.rolling) return
+      updateCheckDiceState((current) => ({ ...current, rolling: true, showResult: false }))
+    } else {
+      if (freeRolling) return
+      setFreeRolling(true)
+      setFreeShowResult(false)
+    }
+
+    // 3D：值来自物理定格后朝上的那一面（面上的点数已由 Fisher–Yates 均匀洗过），
+    // 所以这里不预先取值，等 onSettled 回调。
+    if (use3D) {
+      inFlight3DRollRef.current = { requestId }
+      dice3dRef.current?.roll()
+      return
+    }
+    roll2D(requestId)
+  }
+
+  /**
+   * 3D 不可用。可能在掷骰之前（环境不支持），也可能在掷骰之后——懒加载 chunk
+   * 是一个网络请求，移动端抖一下就会失败。
+   *
+   * 后者必须把这一次掷骰补完：`roll()` 已经置了 rolling 并走 3D 分支返回，没有
+   * 排任何定时器。只翻 use3D 的话 rolling 永远不清，检定会卡在"骰子还在滚"，
+   * 既没有结果也没有重掷入口——恰好是这套降级本该防住的情况（PR #219 review）。
+   */
+  const handle3DUnsupported = () => {
+    const pending = inFlight3DRollRef.current
+    inFlight3DRollRef.current = null
+    setUse3D(false)
+    if (pending) roll2D(pending.requestId)
   }
 
   const canRoll = !activeRolling && !activeShowResult && activeResult === null && !activeCheckDice?.submitted
@@ -521,8 +552,8 @@ function DiceModal({
           ref={dice3dRef}
           kind={activeDiceType}
           className="w-full h-48"
-          onSettled={(value) => settle(value, isCheckMode ? checkRequest?.clientActionId ?? null : null)}
-          onUnsupported={() => setUse3D(false)}
+          onSettled={(value) => settle(value, currentRequestId())}
+          onUnsupported={handle3DUnsupported}
         />
       )
     }

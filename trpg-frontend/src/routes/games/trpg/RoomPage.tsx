@@ -652,7 +652,14 @@ function DiceModal({
 
       <div
         data-testid="dice-table"
-        className="rounded-md bg-[#1a1620] px-4 pt-5 pb-4 flex flex-col items-center relative overflow-hidden"
+        className="rounded-md px-4 pt-5 pb-4 flex flex-col items-center relative overflow-hidden"
+        style={{
+          // 暖调骰盘而不是冷近黑：骰子是亮面树脂材质，深底才有对比；
+          // 中心略亮、边缘压暗，配合内阴影读起来像一个打着光的托盘。
+          background:
+            'radial-gradient(120% 95% at 50% 30%, #3d3327 0%, #262019 55%, #171310 100%)',
+          boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06), inset 0 -14px 28px rgba(0,0,0,0.45)',
+        }}
       >
         {renderDiceDisplay()}
 

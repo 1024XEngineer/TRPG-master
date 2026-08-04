@@ -294,11 +294,17 @@ export function createDiceStage({ container, kind, onSettled }: DiceStageOptions
   let lastFrame = performance.now()
   let disposed = false
 
+  // 让 three 同时写 canvas 的 CSS 尺寸（setSize 的第三参默认 true）。
+  // 原型里用的是 setSize(w, h, false)，靠它自己页面的 CSS 把 canvas 拉成 100%；
+  // 这里没有那段 CSS，不写 style 的话 canvas 会按绘制缓冲尺寸当 CSS 像素显示
+  // ——在 dpr=2 的屏上就是 2 倍大小，父容器 overflow-hidden 只露出左上四分之一。
+  renderer.domElement.style.display = 'block'
+
   const resize = () => {
     const w = container.clientWidth
     const h = container.clientHeight
     if (w === 0 || h === 0) return
-    renderer.setSize(w, h, false)
+    renderer.setSize(w, h)
     camera.aspect = w / h
     camera.updateProjectionMatrix()
   }

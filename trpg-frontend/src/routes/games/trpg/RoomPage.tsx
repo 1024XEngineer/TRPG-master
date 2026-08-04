@@ -1201,7 +1201,7 @@ export default function RoomPage() {
   return (
     <div className="h-full flex flex-col bg-card relative max-w-[430px] mx-auto">
       {/* Header */}
-      <div className="flex items-center gap-2.5 px-4 py-2.5 border-b border-border-light bg-page flex-shrink-0">
+      <div data-onboarding-target="scene-header" className="flex items-center gap-2.5 px-4 py-2.5 border-b border-border-light bg-page flex-shrink-0">
         <button onClick={() => setConfirmExit(true)} className="w-8 h-8 rounded-full bg-card border border-border-light flex items-center justify-center active:bg-panel">
           <ArrowLeft className="w-4 h-4 text-text-muted" strokeWidth={2.5} />
         </button>
@@ -1259,7 +1259,7 @@ export default function RoomPage() {
           </button>
         ))}
       </div>
-      <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-3" id="chatScroll">
+      <div data-onboarding-target="narration-feed" className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-3" id="chatScroll">
         {messages.filter((msg) => (msg.channel ?? 'action') === channel).map((msg, i) => {
           if (msg.type === 'system') {
             return (
@@ -1367,7 +1367,7 @@ export default function RoomPage() {
       </div>
 
       {/* Action Bar */}
-      <div className="flex bg-card border-t border-border-light flex-shrink-0">
+      <div data-onboarding-target="tool-bar" className="flex bg-card border-t border-border-light flex-shrink-0">
         {[
           { icon: ScrollText, label: '角色卡', key: 'sheet' },
           { icon: Star, label: '技能', key: 'skills' },
@@ -1449,10 +1449,11 @@ export default function RoomPage() {
             )}
           </div>
         )}
-        <form onSubmit={sendMessage} className="flex gap-2 items-end">
+        <form data-onboarding-target="action-input" onSubmit={sendMessage} className="flex gap-2 items-end">
           <button
             type="button"
             aria-label="骰子"
+            data-onboarding-target="dice-button"
             onClick={() => setShowDice(true)}
             disabled={suspended}
             className="w-10 h-10 rounded-full bg-card border border-border-light text-text-muted flex items-center justify-center flex-shrink-0 active:scale-[0.92] active:border-brass active:text-brass-dark transition-all disabled:opacity-40 disabled:cursor-not-allowed"

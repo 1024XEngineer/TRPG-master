@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { useEffect, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
+import { OnboardingLayer } from '@/features/onboarding'
 
 interface PhoneLayoutProps {
   children: ReactNode
@@ -18,6 +19,9 @@ export default function PhoneLayout({ children }: PhoneLayoutProps) {
   }, [pathname])
 
   return (
+    <>
       <main ref={mainRef} className="animate-screen-in h-full overflow-y-auto overflow-x-hidden">{children}</main>
+      <OnboardingLayer />
+    </>
   )
 }

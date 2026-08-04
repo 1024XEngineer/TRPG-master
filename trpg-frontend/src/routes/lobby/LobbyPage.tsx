@@ -151,7 +151,7 @@ export default function LobbyPage() {
       </p>
       {error && <p className="text-center text-xs text-[#c04040] mb-3">{error}</p>}
 
-      <div className="flex flex-col gap-2">
+      <div data-onboarding-target="lobby-players" className="flex flex-col gap-2">
         {players.length === 0 && (
           <div className="text-center py-6 text-xs text-text-dim">正在获取房间成员…</div>
         )}
@@ -190,6 +190,7 @@ export default function LobbyPage() {
         <button
           onClick={handleStartStory}
           disabled={!allReady || starting}
+          data-onboarding-target="lobby-start-story"
           className={`w-full mt-3 px-6 py-3 rounded-sm text-sm font-semibold transition-all flex items-center justify-center gap-2 ${
             allReady && !starting
               ? 'bg-brass text-white active:bg-brass-dark active:scale-[0.97]'
@@ -201,6 +202,7 @@ export default function LobbyPage() {
       ) : (
         <button
           onClick={toggleReady}
+          data-onboarding-target="lobby-ready"
           className="w-full mt-3 px-6 py-3 rounded-sm border border-border-mid bg-card text-text-body text-sm font-semibold active:bg-panel transition-all flex items-center justify-center gap-2"
         >
           <UserPlus className="w-4 h-4" />

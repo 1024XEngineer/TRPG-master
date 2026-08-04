@@ -107,14 +107,23 @@ export default function StoryPage() {
       <div className="w-10 h-px bg-[#504860] mb-7" />
       <div className="text-sm leading-[1.9] text-[#c8c0b8]">
         {module.storyPages.map((page, idx) => (
-          <section key={`${page.title}-${idx}`} className={idx < module.storyPages.length - 1 ? 'mb-5' : ''}>
-            {page.title && <h2 className="font-semibold text-[#ded8cc] mb-1">{page.title}</h2>}
+          <section
+            key={`${page.title}-${idx}`}
+            data-onboarding-target={idx === 0 ? 'story-content' : undefined}
+            className={idx < module.storyPages.length - 1 ? 'mb-5' : ''}
+          >
+            {page.title && (
+              <h2 className="font-semibold text-[#ded8cc] mb-1">
+                {page.title}
+              </h2>
+            )}
             <p>{page.content}</p>
           </section>
         ))}
       </div>
       <button
         onClick={() => navigate('/room/character')}
+        data-onboarding-target="story-continue"
         className="mt-10 self-start px-6 py-3.5 rounded-sm bg-brass text-white text-sm font-semibold active:bg-brass-dark transition-all"
       >
         继续 →

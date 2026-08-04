@@ -1002,7 +1002,7 @@ export default function CharacterPage() {
               <h2 className="text-lg font-bold text-text-primary">创建角色</h2>
             </div>
             {/* Progress */}
-            <div className="flex gap-1.5 px-5 py-3">
+            <div data-onboarding-target="character-progress" className="flex gap-1.5 px-5 py-3">
               {steps.map((s, i) => (
                 <div key={i} className={`flex-1 h-[3px] rounded-[99px] transition-all duration-300 ${
                   s.done ? 'bg-brass-dark' : i === step ? 'bg-brass' : 'bg-border-light'
@@ -1023,7 +1023,7 @@ export default function CharacterPage() {
           {step === 0 && (
             <div className="px-5 pb-20 animate-screen-in">
               {/* Basic Info */}
-              <div className="bg-card border border-border-light rounded-md p-[18px] mb-3">
+              <div data-onboarding-target="character-info" className="bg-card border border-border-light rounded-md p-[18px] mb-3">
                 <h4 className="text-[12px] font-semibold text-brass-dark uppercase tracking-[0.08em] mb-3.5">调查员信息</h4>
                 <div className="space-y-3">
                   <input value={info.name} onChange={e => setInfo(i => ({ ...i, name: e.target.value }))}
@@ -1078,7 +1078,7 @@ export default function CharacterPage() {
               </div>
 
               {/* Occupation */}
-              <div className="bg-card border border-border-light rounded-md p-[18px]">
+              <div data-onboarding-target="occupation-picker" className="bg-card border border-border-light rounded-md p-[18px]">
                 <h4 className="text-[12px] font-semibold text-brass-dark uppercase tracking-[0.08em] mb-3.5">选择职业</h4>
 
                 {/* Search + Group filter */}
@@ -1190,7 +1190,7 @@ export default function CharacterPage() {
           {/* ═══════════════ Step 1: Attributes ═══════════════ */}
           {step === 1 && (
             <div className="px-5 pb-20 animate-screen-in">
-              <div className="bg-card border border-border-light rounded-md p-[18px]">
+              <div data-onboarding-target="attribute-editor" className="bg-card border border-border-light rounded-md p-[18px]">
                 <h4 className="text-[12px] font-semibold text-brass-dark uppercase tracking-[0.08em] mb-1.5">属性分配</h4>
                 <p className="text-[11px] text-text-muted mb-2">点击 +/- 调整属性值（范围 {pointBuyRules?.minValue ?? '—'}-{pointBuyRules?.maxValue ?? '—'}，每次 ±5）</p>
                 <div className="bg-panel rounded-md px-3.5 py-2 mb-3 flex items-center gap-3">
@@ -1294,7 +1294,7 @@ export default function CharacterPage() {
           {step === 2 && (
             <div className="px-5 pb-20 animate-screen-in">
               {/* Point counters */}
-              <div className="flex gap-2.5 mb-3">
+              <div data-onboarding-target="skill-editor" className="flex gap-2.5 mb-3">
                 <div className="flex-1 bg-card border border-border-light rounded-md p-3">
                   <div className="text-[10px] text-text-muted font-semibold mb-1">
                     职业技能 <span className="text-text-dim">({selectedOcc?.skillPointsFormula || '—'})</span>
@@ -1486,7 +1486,7 @@ export default function CharacterPage() {
 
           {/* ═══════════════ Step 3: Summary ═══════════════ */}
           {step === 3 && (
-            <div className="px-5 pb-20 animate-screen-in">
+            <div data-onboarding-target="background-editor" className="px-5 pb-20 animate-screen-in">
               {/* Equipment */}
               <div className="bg-card border border-border-light rounded-md p-[18px] mb-3">
                 <h4 className="text-[12px] font-semibold text-brass-dark uppercase tracking-[0.08em] mb-3">装备与物品</h4>
@@ -1700,6 +1700,7 @@ export default function CharacterPage() {
               </button>
               <button onClick={handlePrimaryAction}
                 disabled={submitting}
+                data-onboarding-target={step === 3 ? 'character-submit' : undefined}
                 className="flex-1 flex items-center justify-center gap-1.5 px-5 py-3 rounded-sm text-sm font-semibold transition-all bg-brass text-white active:bg-brass-dark active:scale-[0.97] disabled:opacity-60">
                 {submitting ? '提交中…' : step === 3 ? '完成创建' : '下一步'} →
               </button>

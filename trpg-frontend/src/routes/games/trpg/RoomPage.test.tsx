@@ -57,10 +57,12 @@ const {
   mockSubmitAction,
   mockWaitForWsOpen,
   wsHandlers,
+  dice3dSupported,
 } = vi.hoisted(() => {
   const handlers = new Set<(event: ServerToClientEvent) => void>()
   return {
     wsHandlers: handlers,
+    dice3dSupported: { value: false },
     emitWsMessage: (event: ServerToClientEvent) => {
       for (const handler of handlers) handler(event)
     },
@@ -102,6 +104,29 @@ vi.mock('@/services/api-client', () => ({
 vi.mock('@/services/room', () => ({
   endGame: vi.fn(),
 }))
+
+/**
+ * 3D 骰子在 jsdom 里跑不了（没有 WebGL），默认按"不支持"处理，与真实 jsdom
+ * 行为一致，不影响其余用例。
+ *
+ * `dice3dSupported` 置 true 时启用一个只做一件事的假舞台：被调用 roll() 就触发
+ * `onUnsupported` —— 模拟"玩家已经点了掷骰、引擎 chunk 这时才加载失败"。
+ */
+vi.mock('@/features/dice3d', async () => {
+  const { forwardRef, useImperativeHandle } = await import('react')
+  return {
+    supports3DDice: () => dice3dSupported.value,
+    Dice3DStage: forwardRef(
+      (
+        { onUnsupported }: { onUnsupported?: () => void },
+        ref: React.Ref<{ roll: () => void }>,
+      ) => {
+        useImperativeHandle(ref, () => ({ roll: () => onUnsupported?.() }), [onUnsupported])
+        return <div data-testid="dice-3d-stage" />
+      },
+    ),
+  }
+})
 
 vi.mock('@/hooks/useRoomPlayers', () => ({
   useRoomPlayers: () => ({
@@ -249,6 +274,7 @@ describe('RoomPage conversation history', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     wsHandlers.clear()
+    dice3dSupported.value = false
     Object.defineProperty(window, 'speechSynthesis', { configurable: true, value: undefined })
     Object.defineProperty(window, 'SpeechSynthesisUtterance', { configurable: true, value: undefined })
     window.HTMLElement.prototype.scrollIntoView = vi.fn()
@@ -835,6 +861,72 @@ describe('RoomPage conversation history', () => {
     expect(renderedBackground).toHaveClass('whitespace-pre-wrap')
   })
 
+  // jsdom 没有 WebGL，supports3DDice() 为 false —— 正好覆盖降级路径：
+  // 渲染能力缺失时不能把检定卡住（issue #217）。
+  it('falls back to the 2D dice display when WebGL is unavailable', async () => {
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    await act(async () => {
+      emitWsMessage({
+        type: 'check.request',
+        payload: {
+          playerId: 'player-1',
+          clientActionId: 'check-fallback',
+          summary: '检查旧报纸',
+          difficulty: 'regular',
+          skills: [{ id: 'library', name: '图书馆使用', targetValue: 60 }],
+        },
+      })
+    })
+
+    expect(await screen.findByText('图书馆使用')).toBeInTheDocument()
+    expect(screen.queryByTestId('dice-3d-stage')).not.toBeInTheDocument()
+    expect(screen.getByText('十位')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '掷骰' })).toBeInTheDocument()
+  })
+
+  // 回归：3D 引擎在玩家点了「掷骰」之后才加载失败时，只翻 use3D 会让 rolling
+  // 永远不清 —— 检定卡在「骰子还在滚」，既没有结果也没有重掷入口，恰好是这套
+  // 降级本该防住的情况（PR #219 review 指出）。
+  it('completes the roll when the 3D engine fails to load after the tap', async () => {
+    dice3dSupported.value = true
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    await act(async () => {
+      emitWsMessage({
+        type: 'check.request',
+        payload: {
+          playerId: 'player-1',
+          clientActionId: 'check-3d-fail',
+          summary: '检查旧报纸',
+          difficulty: 'regular',
+          skills: [{ id: 'library', name: '图书馆使用', targetValue: 60 }],
+        },
+      })
+    })
+    expect(await screen.findByText('图书馆使用')).toBeInTheDocument()
+    expect(screen.getByTestId('dice-3d-stage')).toBeInTheDocument()
+
+    vi.useFakeTimers()
+    vi.spyOn(Math, 'random').mockReturnValueOnce(0.2).mockReturnValueOnce(0.3)
+
+    // 点击掷骰 → 假舞台立刻触发 onUnsupported，模拟 chunk 加载失败。
+    fireEvent.click(screen.getByRole('button', { name: '掷骰' }))
+    await act(async () => {
+      vi.advanceTimersByTime(800)
+    })
+    vi.useRealTimers()
+
+    // 这一次掷骰必须被补完：结果出来、能确认发送，而不是永远停在"骰子还在滚"。
+    expect(screen.getByText('23')).toBeInTheDocument()
+    expect(screen.queryByText('🎲 骰子还在滚……')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '确认并发送' })).toBeInTheDocument()
+    // 已经退回 2D 展示。
+    expect(screen.queryByTestId('dice-3d-stage')).not.toBeInTheDocument()
+  })
+
   it('shows explicit occupation choice skills in the occupation tab', () => {
     useCharacterStore.getState().setCharacter(
       {
@@ -893,11 +985,10 @@ describe('RoomPage conversation history', () => {
       .mockReturnValueOnce(0.2)
       .mockReturnValueOnce(0.3)
 
-    fireEvent.mouseDown(screen.getByTestId('dice-table'))
-    fireEvent.mouseUp(screen.getByTestId('dice-table'))
+    fireEvent.click(screen.getByRole('button', { name: '掷骰' }))
 
     await act(async () => {
-      vi.advanceTimersByTime(600)
+      vi.advanceTimersByTime(800)
     })
 
     expect(screen.getByText('23')).toBeInTheDocument()
@@ -948,11 +1039,10 @@ describe('RoomPage conversation history', () => {
       .mockReturnValueOnce(0.4)
       .mockReturnValueOnce(0.1)
 
-    fireEvent.mouseDown(screen.getByTestId('dice-table'))
-    fireEvent.mouseUp(screen.getByTestId('dice-table'))
+    fireEvent.click(screen.getByRole('button', { name: '掷骰' }))
 
     await act(async () => {
-      vi.advanceTimersByTime(600)
+      vi.advanceTimersByTime(800)
     })
 
     fireEvent.click(screen.getByRole('button', { name: '确认并发送' }))
@@ -990,11 +1080,10 @@ describe('RoomPage conversation history', () => {
     })
 
     expect(screen.getByText('侦查')).toBeInTheDocument()
-    fireEvent.mouseDown(screen.getByTestId('dice-table'))
-    fireEvent.mouseUp(screen.getByTestId('dice-table'))
+    fireEvent.click(screen.getByRole('button', { name: '掷骰' }))
 
     await act(async () => {
-      vi.advanceTimersByTime(600)
+      vi.advanceTimersByTime(800)
     })
 
     expect(screen.getByText('41')).toBeInTheDocument()

@@ -15,6 +15,7 @@
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-router-dom": "^7.18.1",
+    "three": "^0.185.1",
     "trpg-sdk": "file:../trpg-sdk",
     "zustand": "^5.0.14"
   },
@@ -24,6 +25,7 @@
     "@testing-library/react": "^16.3.2",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
+    "@types/three": "^0.185.3",
     "@vitejs/plugin-react": "^5.1.0",
     "autoprefixer": "^10.5.2",
     "eslint": "^9.39.5",

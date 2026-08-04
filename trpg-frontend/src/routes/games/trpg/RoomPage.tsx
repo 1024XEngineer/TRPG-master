@@ -10,6 +10,7 @@ import { endGame } from '@/services/room'
 import { useRoomPlayers } from '@/hooks/useRoomPlayers'
 import { useRuleset } from '@/hooks/useRuleset'
 import { useHostSpeech } from '@/hooks/useHostSpeech'
+import { Dice3DStage, supports3DDice, type Dice3DHandle } from '@/features/dice3d'
 import { DERIVED_STAT_DEFINITIONS } from '@/data/derived-stats'
 
 // `crypto.randomUUID()` 要求安全上下文（HTTPS 或 localhost）——CI Preview
@@ -291,7 +292,6 @@ type DiceType = typeof DICE_OPTIONS[number]['id']
 type PendingCheckDiceState = {
   clientActionId: string
   selectedSkillId: string | null
-  shakeLevel: number
   result: number | null
   rolling: boolean
   showResult: boolean
@@ -304,7 +304,6 @@ function createPendingCheckDiceState(checkRequest: CheckRequestPayload): Pending
   return {
     clientActionId: checkRequest.clientActionId,
     selectedSkillId: checkRequest.skills[0]?.id ?? null,
-    shakeLevel: 0,
     result: null,
     rolling: false,
     showResult: false,
@@ -312,6 +311,12 @@ function createPendingCheckDiceState(checkRequest: CheckRequestPayload): Pending
     ones: 0,
     submitted: false,
   }
+}
+
+/** D100 结果拆成十位/个位用于展示。100 由「00 + 0」得来，两位都是 0。 */
+function splitD100(value: number): { tens: number; ones: number } {
+  if (value === 100) return { tens: 0, ones: 0 }
+  return { tens: Math.floor(value / 10), ones: value % 10 }
 }
 
 const DIFFICULTY_COLORS: Record<string, string> = {
@@ -379,18 +384,16 @@ function DiceModal({
   setCheckDiceState: Dispatch<SetStateAction<PendingCheckDiceState | null>>
 }) {
   const [freeDiceType, setFreeDiceType] = useState<DiceType>('d100')
-  const [freeShakeLevel, setFreeShakeLevel] = useState(0)
   const [freeResult, setFreeResult] = useState<number | null>(null)
   const [freeRolling, setFreeRolling] = useState(false)
   const [freeShowResult, setFreeShowResult] = useState(false)
   const [freeTens, setFreeTens] = useState(0)
   const [freeOnes, setFreeOnes] = useState(0)
-  const tableRef = useRef<HTMLDivElement>(null)
-  const isGrabbed = useRef(false)
-  const directionChanges = useRef(0)
-  const lastDirX = useRef(0)
-  const lastDirY = useRef(0)
   const submitLockRef = useRef(false)
+  const dice3dRef = useRef<Dice3DHandle>(null)
+  // 3D 不可用（无 WebGL / 用户要求减少动效 / 引擎加载失败）时退回原来的 2D 展示。
+  // 检定是主流程的一环，不能因为渲染能力缺失就卡住。
+  const [use3D, setUse3D] = useState(() => supports3DDice())
 
   useEffect(() => {
     if (!checkRequest) {
@@ -408,7 +411,6 @@ function DiceModal({
   useEffect(() => {
     if (open && !checkRequest) {
       setFreeDiceType('d100')
-      setFreeShakeLevel(0)
       setFreeResult(null)
       setFreeRolling(false)
       setFreeShowResult(false)
@@ -421,7 +423,6 @@ function DiceModal({
   const isCheckMode = Boolean(checkRequest)
   const activeCheckDice = checkRequest ? checkDiceState : null
   const activeDiceType: DiceType = isCheckMode ? 'd100' : freeDiceType
-  const activeShakeLevel = isCheckMode ? activeCheckDice?.shakeLevel ?? 0 : freeShakeLevel
   const activeResult = isCheckMode ? activeCheckDice?.result ?? null : freeResult
   const activeRolling = isCheckMode ? activeCheckDice?.rolling ?? false : freeRolling
   const activeShowResult = isCheckMode ? activeCheckDice?.showResult ?? false : freeShowResult
@@ -443,120 +444,88 @@ function DiceModal({
     })
   }
 
-  const roll = (power: number) => {
-    if (isCheckMode) {
-      if (!checkRequest || !activeCheckDice || activeCheckDice.result !== null || activeCheckDice.submitted || activeCheckDice.rolling) return
-      const requestId = checkRequest.clientActionId
-      updateCheckDiceState((current) => ({
-        ...current,
-        rolling: true,
-        showResult: false,
-      }))
+  /**
+   * 已经交给 3D、但还没定格的那次掷骰。
+   *
+   * 用 ref 而不是读 state：3D 失败回调可能与 `roll()` 在同一个同步流程里发生，
+   * 那时 `rolling` 的 setState 还没生效，读 state 会拿到旧值、判断成"没有掷骰
+   * 在进行"，等于没修。
+   */
+  const inFlight3DRollRef = useRef<{ requestId: string | null } | null>(null)
 
-      const tens = Math.floor(Math.random() * 10)
-      const ones = Math.floor(Math.random() * 10)
-      let finalResult = tens * 10 + ones
-      if (finalResult === 0) finalResult = 100
-
-      const dur = 500 + power * 100
-      setTimeout(() => {
-        setCheckDiceState((current) => {
-          if (!current || current.clientActionId !== requestId) return current
-          return {
-            ...current,
-            result: finalResult,
-            showResult: true,
-            rolling: false,
-            tens,
-            ones,
-          }
-        })
-      }, dur)
+  /** 结果落地：3D 由动画定格回调进来，2D 由本地随机 + 定时器进来，两条路共用。 */
+  const settle = (value: number, requestId: string | null) => {
+    inFlight3DRollRef.current = null
+    const { tens, ones } = activeDiceType === 'd100' ? splitD100(value) : { tens: 0, ones: 0 }
+    if (requestId !== null) {
+      setCheckDiceState((current) => {
+        if (!current || current.clientActionId !== requestId) return current
+        return { ...current, result: value, showResult: true, rolling: false, tens, ones }
+      })
       return
     }
+    setFreeTens(tens)
+    setFreeOnes(ones)
+    setFreeResult(value)
+    setFreeShowResult(true)
+    setFreeRolling(false)
+  }
 
-    setFreeRolling(true)
-    setFreeShowResult(false)
+  const currentRequestId = () => (isCheckMode ? checkRequest?.clientActionId ?? null : null)
 
+  /** 2D 回退掷骰：本地随机 + 固定时长的假动画，与改造前一致。 */
+  const roll2D = (requestId: string | null) => {
     let finalResult: number
-    let tens = 0
-    let ones = 0
-
-    if (freeDiceType === 'd100') {
-      tens = Math.floor(Math.random() * 10)
-      ones = Math.floor(Math.random() * 10)
+    if (activeDiceType === 'd100') {
+      const tens = Math.floor(Math.random() * 10)
+      const ones = Math.floor(Math.random() * 10)
       finalResult = tens * 10 + ones
       if (finalResult === 0) finalResult = 100
-      setFreeTens(tens)
-      setFreeOnes(ones)
-    } else if (freeDiceType === 'd20') {
+    } else if (activeDiceType === 'd20') {
       finalResult = Math.floor(Math.random() * 20) + 1
     } else {
       finalResult = Math.floor(Math.random() * 6) + 1
     }
-
-    const dur = 500 + power * 100
-    setTimeout(() => {
-      setFreeResult(finalResult)
-      setFreeShowResult(true)
-      setFreeRolling(false)
-    }, dur)
+    setTimeout(() => settle(finalResult, requestId), 700)
   }
 
-  const handleMouseDown = () => {
-    if (activeRolling || activeShowResult || (isCheckMode && activeResult !== null)) return
-    isGrabbed.current = true
-    directionChanges.current = 0
-    lastDirX.current = 0
-    lastDirY.current = 0
+  const roll = () => {
+    const requestId = currentRequestId()
     if (isCheckMode) {
-      updateCheckDiceState((current) => ({
-        ...current,
-        shakeLevel: 0,
-      }))
+      if (!checkRequest || !activeCheckDice || activeCheckDice.result !== null || activeCheckDice.submitted || activeCheckDice.rolling) return
+      updateCheckDiceState((current) => ({ ...current, rolling: true, showResult: false }))
     } else {
-      setFreeShakeLevel(0)
+      if (freeRolling) return
+      setFreeRolling(true)
+      setFreeShowResult(false)
     }
+
+    // 3D：值来自物理定格后朝上的那一面（面上的点数已由 Fisher–Yates 均匀洗过），
+    // 所以这里不预先取值，等 onSettled 回调。
+    if (use3D) {
+      inFlight3DRollRef.current = { requestId }
+      dice3dRef.current?.roll()
+      return
+    }
+    roll2D(requestId)
   }
 
-  const handleMouseMove = (e: React.MouseEvent | React.TouchEvent) => {
-    if (!isGrabbed.current) return
-    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX
-    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY
-
-    if (tableRef.current) {
-      const rect = tableRef.current.getBoundingClientRect()
-      const dx = clientX - (rect.left + rect.width / 2)
-      const dy = clientY - (rect.top + rect.height / 2)
-      const dirX = Math.sign(dx)
-      const dirY = Math.sign(dy)
-
-      if (lastDirX.current !== 0 && dirX !== lastDirX.current) directionChanges.current++
-      if (lastDirY.current !== 0 && dirY !== lastDirY.current) directionChanges.current++
-      lastDirX.current = dirX
-      lastDirY.current = dirY
-
-      const level = Math.min(5, Math.floor(directionChanges.current / 2.5))
-      if (isCheckMode) {
-        updateCheckDiceState((current) => ({
-          ...current,
-          shakeLevel: level,
-        }))
-      } else {
-        setFreeShakeLevel(level)
-      }
-    }
+  /**
+   * 3D 不可用。可能在掷骰之前（环境不支持），也可能在掷骰之后——懒加载 chunk
+   * 是一个网络请求，移动端抖一下就会失败。
+   *
+   * 后者必须把这一次掷骰补完：`roll()` 已经置了 rolling 并走 3D 分支返回，没有
+   * 排任何定时器。只翻 use3D 的话 rolling 永远不清，检定会卡在"骰子还在滚"，
+   * 既没有结果也没有重掷入口——恰好是这套降级本该防住的情况（PR #219 review）。
+   */
+  const handle3DUnsupported = () => {
+    const pending = inFlight3DRollRef.current
+    inFlight3DRollRef.current = null
+    setUse3D(false)
+    if (pending) roll2D(pending.requestId)
   }
 
-  const handleMouseUp = () => {
-    if (!isGrabbed.current) return
-    isGrabbed.current = false
-    if (activeShakeLevel >= 1) {
-      roll(activeShakeLevel)
-    } else {
-      roll(1)
-    }
-  }
+  const canRoll = !activeRolling && !activeShowResult && activeResult === null && !activeCheckDice?.submitted
 
   const confirmResult = () => {
     if (isCheckMode) {
@@ -578,9 +547,20 @@ function DiceModal({
   }
 
   const renderDiceDisplay = () => {
+    if (use3D) {
+      return (
+        <Dice3DStage
+          ref={dice3dRef}
+          kind={activeDiceType}
+          className="w-full h-48"
+          onSettled={(value) => settle(value, currentRequestId())}
+          onUnsupported={handle3DUnsupported}
+        />
+      )
+    }
     const glow = activeRolling ? 'opacity-40' : ''
     return (
-      <div ref={tableRef} className={`relative w-full h-48 flex items-center justify-center select-none ${isGrabbed.current ? 'cursor-grabbing' : 'cursor-grab'} ${glow}`}>
+      <div className={`relative w-full h-48 flex items-center justify-center select-none ${glow}`}>
         {activeDiceType === 'd100' ? (
           <div className="flex items-center gap-6">
             <div className="text-center">
@@ -599,7 +579,7 @@ function DiceModal({
           </div>
         ) : (
           <div
-            className={`text-[64px] font-bold font-mono text-[#eeead8] ${isGrabbed.current ? 'scale-105' : ''} transition-transform duration-150`}
+            className="text-[64px] font-bold font-mono text-[#eeead8] transition-transform duration-150"
             style={{
               clipPath: activeDiceType === 'd20' ? 'polygon(50% 0%, 95% 25%, 95% 75%, 50% 100%, 5% 75%, 5% 25%)' : undefined,
               background: 'linear-gradient(145deg, #2a2630, #1a1620)',
@@ -642,7 +622,6 @@ function DiceModal({
                   setFreeDiceType(opt.id)
                   setFreeResult(null)
                   setFreeShowResult(false)
-                  setFreeShakeLevel(0)
                   setFreeTens(0)
                   setFreeOnes(0)
                 }
@@ -672,7 +651,6 @@ function DiceModal({
                     selectedSkillId: skill.id,
                     result: null,
                     showResult: false,
-                    shakeLevel: 0,
                     tens: 0,
                     ones: 0,
                     submitted: false,
@@ -706,51 +684,30 @@ function DiceModal({
 
       <div
         data-testid="dice-table"
-        className="rounded-md bg-[#1a1620] px-4 pt-5 pb-4 flex flex-col items-center relative overflow-hidden"
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
-        onTouchStart={handleMouseDown}
-        onTouchMove={handleMouseMove}
-        onTouchEnd={handleMouseUp}
+        className="rounded-md px-4 pt-5 pb-4 flex flex-col items-center relative overflow-hidden"
+        style={{
+          // 暖调骰盘而不是冷近黑：骰子是亮面树脂材质，深底才有对比；
+          // 中心略亮、边缘压暗，配合内阴影读起来像一个打着光的托盘。
+          background:
+            'radial-gradient(120% 95% at 50% 30%, #3d3327 0%, #262019 55%, #171310 100%)',
+          boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06), inset 0 -14px 28px rgba(0,0,0,0.45)',
+        }}
       >
-        {activeShakeLevel >= 2 && !activeRolling && !activeShowResult && (
-          <div
-            className="absolute w-52 h-52 rounded-full pointer-events-none transition-all duration-200"
-            style={{
-              background: `radial-gradient(circle, rgba(184,151,106,${0.04 + activeShakeLevel * 0.04}) 0%, transparent 70%)`,
-              transform: `scale(${1 + activeShakeLevel * 0.05})`,
-            }}
-          />
-        )}
-
         {renderDiceDisplay()}
 
-        {!activeRolling && !activeShowResult && (
-          <div className="text-center mt-2">
-            <span className="text-xs text-[#9088a0]">
-              {activeShakeLevel === 0 ? '👆 按住这里来回拖动 · 摇动后松手' :
-               activeShakeLevel <= 2 ? '⚡ 再用力一点……' :
-               activeShakeLevel <= 4 ? '🔥 快了！' :
-               '💥 松手投出！'}
-            </span>
-          </div>
-        )}
-
-        {!activeRolling && !activeShowResult && (
-          <div className="flex gap-1 mt-3">
-            {[0, 1, 2, 3, 4].map((i) => (
-              <div key={i} className={`w-6 h-1 rounded-full transition-all duration-200 ${
-                i < activeShakeLevel ? (i >= 3 ? 'bg-brass' : 'bg-[rgba(184,151,106,0.5)]') : 'bg-[rgba(255,255,255,0.08)]'
-              }`} />
-            ))}
-          </div>
+        {canRoll && (
+          <button
+            type="button"
+            onClick={roll}
+            className="mt-3 px-8 py-2.5 rounded-sm bg-brass text-white text-sm font-semibold active:bg-brass-dark active:scale-[0.97] transition-all"
+          >
+            掷骰
+          </button>
         )}
 
         {activeRolling && (
-          <div className="text-center mt-2 text-xs text-[#9088a0] animate-pulse">
-            🎲 骰子飞出去了……
+          <div className="text-center mt-3 text-xs text-[#9088a0] animate-pulse">
+            🎲 骰子还在滚……
           </div>
         )}
       </div>

@@ -1482,3 +1482,91 @@ def test_replayed_opening_sends_no_chunks(sync_client: TestClient) -> None:
         opening = receive_replayed_opening(ws)
 
     assert opening["payload"]["messageId"] == "game-opening"
+
+
+def test_action_plan_submit_emits_safe_progress_and_one_parent_completion(
+    sync_client: TestClient,
+) -> None:
+    token = register_and_login(sync_client, "action_plan_ws")
+    room = create_room(sync_client, token)
+    advance_to_building(sync_client, room)
+    complete_character(sync_client, room["roomId"], room["reconnectToken"])
+    start_game(sync_client, room, token)
+
+    with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
+        ws.send_json(
+            {
+                "type": "room.join",
+                "playerId": room["playerId"],
+                "payload": {"reconnectToken": room["reconnectToken"]},
+            }
+        )
+        ws.receive_json()  # session.bound
+        ws.receive_json()  # current view.updated
+        receive_replayed_opening(ws)
+        ws.send_json(
+            {
+                "type": "action.plan.submit",
+                "playerId": room["playerId"],
+                "payload": {
+                    "clientActionId": "parent-plan-ws-225",
+                    "utterance": "先观察房间，然后询问眼前的人",
+                },
+            }
+        )
+        completed, seen = receive_until(
+            ws,
+            lambda message: message.get("message_type") == "turn.completed",
+        )
+
+    progress = [message for message in seen if message.get("type", "").startswith("plan.")]
+    assert completed["correlation_id"] == "parent-plan-ws-225"
+    assert completed["payload"]["narration"]["kind"] == "narration"
+    assert any(message["type"] == "plan.started" for message in progress)
+    assert sum(message.get("message_type") == "turn.completed" for message in seen) == 1
+    assert all("semanticGoal" not in str(message) for message in progress)
+
+
+def test_legacy_action_submit_is_blocked_while_plan_is_active(
+    sync_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    token = register_and_login(sync_client, "legacy_plan_gate_ws")
+    room = create_room(sync_client, token)
+    advance_to_building(sync_client, room)
+    complete_character(sync_client, room["roomId"], room["reconnectToken"])
+    start_game(sync_client, room, token)
+
+    with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
+        ws.send_json(
+            {
+                "type": "room.join",
+                "playerId": room["playerId"],
+                "payload": {"reconnectToken": room["reconnectToken"]},
+            }
+        )
+        ws.receive_json()  # session.bound
+        ws.receive_json()  # current view.updated
+        receive_replayed_opening(ws)
+
+        async def active_for_room(_room_id: str) -> object:
+            return object()
+
+        monkeypatch.setattr(
+            ws_controller.action_plan_turn_application,
+            "active_for_room",
+            active_for_room,
+        )
+        ws.send_json(
+            {
+                "type": "action.submit",
+                "playerId": room["playerId"],
+                "payload": {
+                    "clientActionId": "legacy-during-plan",
+                    "utterance": "查看房间",
+                },
+            }
+        )
+        error, _ = receive_until(ws, lambda message: message.get("type") == "error")
+
+    assert error["payload"]["code"] == "ACTION_IN_PROGRESS"

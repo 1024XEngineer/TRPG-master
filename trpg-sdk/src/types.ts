@@ -10,7 +10,12 @@
 // "动词+Input/Result"），生成产物忠实反映后端类名，这一层负责做名字翻译。
 // ──────────────────────────────────────────────
 
-import type { ErrorDetail, MyRoomSummary as GeneratedMyRoomSummary } from './generated/dto';
+import type {
+  AdjudicationPendingPayload,
+  ErrorDetail,
+  MyRoomSummary as GeneratedMyRoomSummary,
+  PlanProgressPayload,
+} from './generated/dto';
 
 export type {
   ErrorDetail,
@@ -59,12 +64,17 @@ export type {
   RoomJoinPayload,
   PlayerReadyPayload,
   ActionSubmitPayload,
+  ActionPlanCancelPayload,
+  AdjudicationChoicePayload,
+  AdjudicationPendingPayload,
+  AdjudicationPostRollPayload,
   ActionBroadcastPayload,
   GameStartPayload,
   SessionBoundPayload,
   NarrationPushPayload,
   NarrationChunkPayload,
   OpeningStartedPayload,
+  PlanProgressPayload,
   // WebSocket 新增 14 个事件（issue #77）
   CheckRollPayload,
   SanCheckRollPayload,
@@ -155,6 +165,11 @@ export type ServerToClientEvent =
   | { type: 'tool.started'; payload: ToolStartedPayload }
   | { type: 'tool.completed'; payload: ToolCompletedPayload }
   | { type: 'turn.failed'; payload: TurnFailedPayload }
+  | { type: 'plan.started'; payload: PlanProgressPayload }
+  | { type: 'plan.step_changed'; payload: PlanProgressPayload }
+  | { type: 'plan.stopped'; payload: PlanProgressPayload }
+  | { type: 'plan.completed'; payload: PlanProgressPayload }
+  | { type: 'adjudication.pending'; payload: AdjudicationPendingPayload }
   | { type: 'view.updated'; payload: ViewUpdatedPayload }
   | { type: 'room.state'; payload: RoomStatePayload }
   | { type: 'player.joined'; payload: PlayerJoinedPayload }

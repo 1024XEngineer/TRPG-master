@@ -38,6 +38,11 @@ class EngineTransaction(Protocol):
         request_id: str,
     ) -> CompletedAdjudicationCommand | None: ...
 
+    async def find_latest_adjudication_command_by_action(
+        self,
+        action_request_id: str,
+    ) -> CompletedAdjudicationCommand | None: ...
+
     async def find_pending_check_by_action(
         self,
         action_request_id: str,

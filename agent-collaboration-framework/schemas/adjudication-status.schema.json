@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "adjudication-execution.schema.json",
+  "$id": "adjudication-status.schema.json",
   "$defs": {
     "AcceptResultOption": {
       "additionalProperties": false,
@@ -21,6 +21,93 @@
         "option_id"
       ],
       "title": "AcceptResultOption",
+      "type": "object"
+    },
+    "AdjudicationExecution": {
+      "additionalProperties": false,
+      "properties": {
+        "request_id": {
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "action_request_id": {
+          "minLength": 1,
+          "title": "Action Request Id",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "awaiting_skill_choice",
+            "awaiting_post_roll_decision",
+            "resolved",
+            "cancelled"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "view_revision": {
+          "minLength": 1,
+          "title": "View Revision",
+          "type": "string"
+        },
+        "outcome": {
+          "enum": [
+            "success",
+            "failure",
+            "cancelled",
+            "pending"
+          ],
+          "title": "Outcome",
+          "type": "string"
+        },
+        "pending_decision": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PendingCheckDecisionView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "check_run": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CheckRunView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "event_refs": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Event Refs",
+          "type": "array"
+        },
+        "public_event_refs": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Public Event Refs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "request_id",
+        "action_request_id",
+        "status",
+        "view_revision",
+        "outcome"
+      ],
+      "title": "AdjudicationExecution",
       "type": "object"
     },
     "CheckRoll": {
@@ -350,12 +437,8 @@
     }
   },
   "additionalProperties": false,
+  "description": "Player-safe recovery projection for one single-intent adjudication.",
   "properties": {
-    "request_id": {
-      "minLength": 1,
-      "title": "Request Id",
-      "type": "string"
-    },
     "action_request_id": {
       "minLength": 1,
       "title": "Action Request Id",
@@ -363,6 +446,7 @@
     },
     "status": {
       "enum": [
+        "not_submitted",
         "awaiting_skill_choice",
         "awaiting_post_roll_decision",
         "resolved",
@@ -371,67 +455,22 @@
       "title": "Status",
       "type": "string"
     },
-    "view_revision": {
-      "minLength": 1,
-      "title": "View Revision",
-      "type": "string"
-    },
-    "outcome": {
-      "enum": [
-        "success",
-        "failure",
-        "cancelled",
-        "pending"
-      ],
-      "title": "Outcome",
-      "type": "string"
-    },
-    "pending_decision": {
+    "execution": {
       "anyOf": [
         {
-          "$ref": "#/$defs/PendingCheckDecisionView"
+          "$ref": "#/$defs/AdjudicationExecution"
         },
         {
           "type": "null"
         }
       ],
       "default": null
-    },
-    "check_run": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/CheckRunView"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null
-    },
-    "event_refs": {
-      "default": [],
-      "items": {
-        "type": "string"
-      },
-      "title": "Event Refs",
-      "type": "array"
-    },
-    "public_event_refs": {
-      "default": [],
-      "items": {
-        "type": "string"
-      },
-      "title": "Public Event Refs",
-      "type": "array"
     }
   },
   "required": [
-    "request_id",
     "action_request_id",
-    "status",
-    "view_revision",
-    "outcome"
+    "status"
   ],
-  "title": "AdjudicationExecution",
+  "title": "AdjudicationStatusView",
   "type": "object"
 }

@@ -96,6 +96,9 @@ _MODELS: list[type[BaseModel]] = [
     ws.ViewUpdatedPayload,
     # WebSocket 新增 14 个事件（issue #77）：C→S 3 个 + S→C 11 个
     ws.CheckRollPayload,
+    ws.AdjudicationChoicePayload,
+    ws.AdjudicationPostRollPayload,
+    ws.ActionPlanCancelPayload,
     ws.SanCheckRollPayload,
     ws.RoomRejoinPayload,
     ws.RoomStatePayload,
@@ -110,6 +113,8 @@ _MODELS: list[type[BaseModel]] = [
     ws.SanCheckResultPayload,
     ws.ClueGrantedPayload,
     ws.ErrorPayload,
+    ws.PlanProgressPayload,
+    ws.AdjudicationPendingPayload,
     # WebSocket 讨论区 + 行动广播（issue #107）：C→S 1 个 + S→C 2 个
     ws.ChatSendPayload,
     ws.ChatMessagePayload,

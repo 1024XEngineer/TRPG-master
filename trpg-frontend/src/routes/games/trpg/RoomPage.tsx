@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { RoomSocketServerError, TurnFailedError, type AgentPlayerView, type AgentTurnPhase, type CheckRequestPayload, type NarrationPushPayload, type RoomConversationEvent } from 'trpg-sdk'
+import { RoomSocketServerError, TurnFailedError, type AdjudicationPendingPayload, type AgentPlayerView, type AgentTurnPhase, type CheckRequestPayload, type NarrationPushPayload, type RoomConversationEvent } from 'trpg-sdk'
 import { ArrowLeft, Users, Map, BookOpen, ScrollText, Star, X, SendHorizontal, Dice6, Plus, Save, FlagOff, Heart, Volume2, Pause, Play, Square, RotateCcw } from 'lucide-react'
 import { useCallback, useState, useRef, useEffect, type Dispatch, type FormEvent, type SetStateAction } from 'react'
 import { useRoomStore } from '@/stores/room-store'
@@ -12,6 +12,11 @@ import { useRuleset } from '@/hooks/useRuleset'
 import { useHostSpeech } from '@/hooks/useHostSpeech'
 import { Dice3DStage, supports3DDice, type Dice3DHandle } from '@/features/dice3d'
 import { DERIVED_STAT_DEFINITIONS } from '@/data/derived-stats'
+import { CheckWorkflowPanel } from '@/features/adjudication'
+import type {
+  CheckRunView as UiCheckRunView,
+  PendingCheckDecisionView as UiPendingCheckDecisionView,
+} from '@/features/adjudication'
 
 // `crypto.randomUUID()` 要求安全上下文（HTTPS 或 localhost）——CI Preview
 // 部署在纯 HTTP 的 IP:端口上（issue #200，域名/HTTPS 明确列在本期不做），
@@ -28,6 +33,46 @@ function randomActionId(): string {
   bytes[8] = (bytes[8] & 0x3f) | 0x80
   const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
+
+function pendingDecisionForUi(
+  pending: AdjudicationPendingPayload | null,
+): UiPendingCheckDecisionView | null {
+  const decision = pending?.pendingDecision
+  if (!decision) return null
+  return {
+    ...decision,
+    status: decision.status ?? 'awaiting_skill_choice',
+    allow_cancel: decision.allow_cancel ?? true,
+  }
+}
+
+function checkRunForUi(
+  pending: AdjudicationPendingPayload | null,
+): UiCheckRunView | null {
+  const checkRun = pending?.checkRun
+  if (!checkRun) return null
+  return {
+    ...checkRun,
+    final_result: checkRun.final_result ?? null,
+    post_roll_options: (checkRun.post_roll_options ?? []).map((option) => {
+      if ('resource_id' in option) {
+        return {
+          ...option,
+          kind: 'spend_resource' as const,
+          resource_id: 'luck' as const,
+        }
+      }
+      if ('requires_revised_method' in option) {
+        return {
+          ...option,
+          kind: 'push' as const,
+          requires_revised_method: true as const,
+        }
+      }
+      return { ...option, kind: 'accept_result' as const }
+    }),
+  }
 }
 
 // ─── Types ───────────────────────────────────────────
@@ -782,6 +827,9 @@ export default function RoomPage() {
   const [typing, setTyping] = useState(false)
   const [pendingAction, setPendingAction] = useState<{ clientActionId: string; utterance: string } | null>(null)
   const [pendingCheck, setPendingCheck] = useState<CheckRequestPayload | null>(null)
+  const [pendingAdjudication, setPendingAdjudication] =
+    useState<AdjudicationPendingPayload | null>(null)
+  const [activePlanId, setActivePlanId] = useState<string | null>(null)
   const [pendingCheckDice, setPendingCheckDice] = useState<PendingCheckDiceState | null>(null)
   const [playerView, setPlayerView] = useState<AgentPlayerView | null>(() => {
     const cached = sdk.roomSocket.getPlayerView()
@@ -1051,6 +1099,35 @@ export default function RoomPage() {
           current?.clientActionId === envelope.payload.clientActionId ? null : current
         )
         if (envelope.payload.playerId === playerId) setShowDice(false)
+      } else if (envelope.type === 'adjudication.pending') {
+        setTyping(false)
+        setProgressLabel('等待你决定检定方式')
+        setPendingAdjudication(envelope.payload)
+      } else if (
+        envelope.type === 'plan.started' ||
+        envelope.type === 'plan.step_changed' ||
+        envelope.type === 'plan.stopped' ||
+        envelope.type === 'plan.completed'
+      ) {
+        // A plan step change supersedes any prior check decision. The server
+        // sends a fresh adjudication.pending when the new step is waiting for
+        // the player; clearing first prevents stale decision IDs from being
+        // submitted during the transition or after a terminal event.
+        setPendingAdjudication(null)
+        setActivePlanId(
+          envelope.type === 'plan.completed' || envelope.type === 'plan.stopped'
+            ? null
+            : envelope.payload.correlationId,
+        )
+        setTyping(
+          envelope.payload.phase !== 'waiting_for_player' &&
+            envelope.payload.phase !== 'stopped' &&
+            envelope.payload.phase !== 'completed',
+        )
+        setProgressLabel(
+          envelope.payload.publicProgressLabel ??
+            `正在处理第 ${envelope.payload.currentStep}/${envelope.payload.totalSteps} 步`,
+        )
       } else if (envelope.type === 'turn.started') {
         setTyping(true)
         setProgressLabel('守秘人正在查看当前场景')
@@ -1063,6 +1140,7 @@ export default function RoomPage() {
       } else if (envelope.type === 'turn.failed') {
         setTyping(false)
         setProgressLabel(null)
+        setPendingAdjudication(null)
         // 片段只在叙事落库成功后才会下发，回合失败时不存在对应的权威消息——
         // 留着半截文字会让玩家以为那是这回合的结果。
         //
@@ -1082,6 +1160,7 @@ export default function RoomPage() {
       } else if (envelope.type === 'error') {
         setTyping(false)
         setProgressLabel(null)
+        setPendingAdjudication(null)
         setStreamingNarration(null)
         setActionError(envelope.payload.message)
         setActionErrorRetryable(false)
@@ -1108,8 +1187,7 @@ export default function RoomPage() {
     setActionErrorCode(null)
     setActionErrorCorrelationId(null)
     setTyping(true)
-    void sdk.roomSocket
-      .submitAction(playerId, action)
+    void sdk.roomSocket.submitPlannedAction(playerId, action)
       .then((result) => {
         setPlayerView(result.player_view)
         setPendingAction((current) =>
@@ -1825,6 +1903,61 @@ export default function RoomPage() {
       </BottomPanel>
 
       {/* ── Dice Modal ── */}
+      {activePlanId && playerId && (
+        <div className="mx-4 mb-3">
+          <button
+            type="button"
+            className="w-full rounded-lg border border-border-light bg-white px-3 py-2 text-xs text-text-muted"
+            onClick={() => sdk.roomSocket.cancelActionPlan(playerId, {
+              clientActionId: activePlanId,
+              requestId: randomActionId(),
+            })}
+          >
+            停止后续行动（已完成步骤会保留）
+          </button>
+        </div>
+      )}
+      <CheckWorkflowPanel
+        decision={pendingDecisionForUi(pendingAdjudication)}
+        checkRun={checkRunForUi(pendingAdjudication)}
+        onSelectSkill={(candidateId) => {
+          if (!playerId || !pendingAdjudication?.pendingDecision) return
+          const decision = pendingAdjudication.pendingDecision
+          sdk.roomSocket.selectAdjudication(playerId, {
+            clientActionId: pendingAdjudication.correlationId,
+            requestId: randomActionId(),
+            sourceRevision: pendingAdjudication.sourceRevision,
+            decisionId: decision.decision_id,
+            decisionVersion: decision.decision_version,
+            candidateId,
+          })
+        }}
+        onCancel={() => {
+          if (!playerId || !pendingAdjudication?.pendingDecision) return
+          const decision = pendingAdjudication.pendingDecision
+          sdk.roomSocket.selectAdjudication(playerId, {
+            clientActionId: pendingAdjudication.correlationId,
+            requestId: randomActionId(),
+            sourceRevision: pendingAdjudication.sourceRevision,
+            decisionId: decision.decision_id,
+            decisionVersion: decision.decision_version,
+            cancel: true,
+          })
+        }}
+        onPostRollOption={(optionId, revisedMethod) => {
+          if (!playerId || !pendingAdjudication?.checkRun) return
+          const checkRun = pendingAdjudication.checkRun
+          sdk.roomSocket.decidePostRoll(playerId, {
+            clientActionId: pendingAdjudication.correlationId,
+            requestId: randomActionId(),
+            sourceRevision: pendingAdjudication.sourceRevision,
+            checkId: checkRun.check_id,
+            checkVersion: checkRun.version,
+            optionId,
+            revisedMethod,
+          })
+        }}
+      />
       <DiceModal
         open={showDice}
         onClose={() => setShowDice(false)}

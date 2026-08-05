@@ -17,6 +17,7 @@ from collaboration_framework.contracts import (
     ActionAdjudication,
     ActionEffect,
     AdjudicationExecution,
+    AdjudicationStatusView,
     AdvanceTimeEffect,
     ChangeEntityStateEffect,
     CheckDecisionRequest,
@@ -26,6 +27,7 @@ from collaboration_framework.contracts import (
     EnsureRuntimeEntityEffect,
     EnsureRuntimeLocationEffect,
     EnterLocationEffect,
+    GetAdjudicationStatusRequest,
     HideInformationEffect,
     MarkCoreResolvedEffect,
     MoveEntityEffect,
@@ -59,6 +61,32 @@ class AdjudicationEngineService:
     def __init__(self, store: EngineStore, *, dice: DiceRoller | None = None) -> None:
         self._store = store
         self._dice = dice or DiceRoller()
+
+    async def get_status(
+        self,
+        request: GetAdjudicationStatusRequest,
+    ) -> AdjudicationStatusView:
+        """Read the latest player-safe status without exposing Engine ORM state."""
+
+        async with self._store.transaction(request.room_id) as transaction:
+            command = await transaction.find_latest_adjudication_command_by_action(
+                request.action_request_id
+            )
+            if command is None:
+                return AdjudicationStatusView(
+                    action_request_id=request.action_request_id,
+                    status="not_submitted",
+                )
+            if command.request.room_id != request.room_id:
+                raise ContractError("裁决状态与请求房间不一致")
+            if command.request.player_id != request.player_id:
+                raise ContractError("裁决状态不属于当前玩家")
+            execution = command.execution
+            return AdjudicationStatusView(
+                action_request_id=request.action_request_id,
+                status=execution.status,
+                execution=execution,
+            )
 
     async def submit(self, request: SubmitAdjudicationRequest) -> AdjudicationExecution:
         async with self._store.transaction(request.room_id) as transaction:
@@ -94,6 +122,7 @@ class AdjudicationEngineService:
                     view_revision=str(new_state.event_sequence),
                     outcome="success",
                     event_refs=tuple(event.event_id for event in events),
+                    public_event_refs=self._public_event_refs(events),
                 )
                 await transaction.commit_adjudication(
                     expected_revision=runtime.revision,
@@ -212,6 +241,7 @@ class AdjudicationEngineService:
                     view_revision=str(new_state.event_sequence),
                     outcome="cancelled",
                     event_refs=(event.event_id,),
+                    public_event_refs=(event.event_id,),
                 )
                 await transaction.commit_adjudication(
                     expected_revision=runtime.revision,
@@ -335,6 +365,7 @@ class AdjudicationEngineService:
                 outcome="success" if roll.passed else "failure",
                 check_run=self._run_view(check_run),
                 event_refs=tuple(event.event_id for event in events),
+                public_event_refs=self._public_event_refs(events),
             )
             await transaction.commit_adjudication(
                 expected_revision=runtime.revision,
@@ -483,6 +514,7 @@ class AdjudicationEngineService:
                 outcome="success" if final_roll.passed else "failure",
                 check_run=self._run_view(resolved_run),
                 event_refs=tuple(event.event_id for event in events),
+                public_event_refs=self._public_event_refs(events),
             )
             await transaction.commit_adjudication(
                 expected_revision=runtime.revision,
@@ -497,6 +529,10 @@ class AdjudicationEngineService:
                 ),
             )
             return execution
+
+    @staticmethod
+    def _public_event_refs(events: tuple[DomainEvent, ...]) -> tuple[str, ...]:
+        return tuple(event.event_id for event in events if event.visibility == "public")
 
     @staticmethod
     def _validate_identity(

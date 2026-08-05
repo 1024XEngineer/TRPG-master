@@ -81,24 +81,18 @@ async def test_pending_check_and_authoritative_roll_survive_service_rebuild(
         engine_store_factory(),
         dice=DiceRoller(SequenceDiceSource([64])),
     ).decide(decision_request)
-    replay = await AdjudicationEngineService(engine_store_factory()).decide(
-        decision_request
-    )
+    replay = await AdjudicationEngineService(engine_store_factory()).decide(decision_request)
 
     assert rolled.check_run is not None
     assert rolled.check_run.roll.value == 64
     assert replay.check_run == rolled.check_run
     decisions = (
         await db_session.scalars(
-            select(PendingCheckDecisionRecord).where(
-                PendingCheckDecisionRecord.room_id == room.id
-            )
+            select(PendingCheckDecisionRecord).where(PendingCheckDecisionRecord.room_id == room.id)
         )
     ).all()
     runs = (
-        await db_session.scalars(
-            select(CheckRunRecord).where(CheckRunRecord.room_id == room.id)
-        )
+        await db_session.scalars(select(CheckRunRecord).where(CheckRunRecord.room_id == room.id))
     ).all()
     commands = (
         await db_session.scalars(

@@ -184,6 +184,23 @@ class _InMemoryEngineTransaction(EngineTransaction):
         command = self._record.data.adjudication_commands.get(request_id)
         return command.model_copy(deep=True) if command is not None else None
 
+    async def find_latest_adjudication_command_by_action(
+        self,
+        action_request_id: str,
+    ) -> CompletedAdjudicationCommand | None:
+        self._ensure_active()
+        candidates = (
+            command
+            for command in self._record.data.adjudication_commands.values()
+            if command.execution.action_request_id == action_request_id
+        )
+        command = max(
+            candidates,
+            key=lambda item: int(item.execution.view_revision),
+            default=None,
+        )
+        return command.model_copy(deep=True) if command is not None else None
+
     async def find_pending_check_by_action(
         self,
         action_request_id: str,

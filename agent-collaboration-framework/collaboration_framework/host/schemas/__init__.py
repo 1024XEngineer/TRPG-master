@@ -1,5 +1,19 @@
 """Structured Host inputs, outputs, progress events, and recent-history schemas."""
 
+from .action_plan import (
+    RESERVING_PLAN_STATUSES,
+    TERMINAL_PLAN_STATUSES,
+    ActionPlanAdvanceResult,
+    ActionPlanNarrationContext,
+    ActionPlanNarrationOutput,
+    ActionPlanRun,
+    ActionPlanStepContext,
+    ActionPlanStepRun,
+    CompletedPlanStepSummary,
+    PlanRunStatus,
+    PlanStepStatus,
+    SingleActionTurnResult,
+)
 from .agent import (
     HostAgentCompleted,
     HostAgentContext,
@@ -49,6 +63,13 @@ from .tools import (
 from .turn import TurnState
 
 __all__ = [
+    "ActionPlanAdvanceResult",
+    "ActionPlanNarrationContext",
+    "ActionPlanNarrationOutput",
+    "ActionPlanRun",
+    "ActionPlanStepContext",
+    "ActionPlanStepRun",
+    "CompletedPlanStepSummary",
     "HostAgentCompleted",
     "HostAgentContext",
     "HostAgentEvent",
@@ -70,6 +91,9 @@ __all__ = [
     "OpeningNarrationContext",
     "OpeningParticipant",
     "OpeningSceneContext",
+    "PlanRunStatus",
+    "PlanStepStatus",
+    "SingleActionTurnResult",
     "PlayerTurnPayload",
     "RecentHistoryBudget",
     "RecentSafeResult",
@@ -85,5 +109,7 @@ __all__ = [
     "VisibleEntitySummary",
     "VisibleHistoryText",
     "WebSocketOutput",
+    "RESERVING_PLAN_STATUSES",
+    "TERMINAL_PLAN_STATUSES",
     "make_tool_error",
 ]

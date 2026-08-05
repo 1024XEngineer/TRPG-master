@@ -4,8 +4,7 @@ export type AppRoute =
   | '/home'
   | '/home/join'
   | '/home/create'
-  | '/home/create/games'
-  | `/home/create/games/${string}`
+  | '/home/create/modules'
   | '/home/my-rooms'
   | `/home/my-rooms/review/${string}`
   | '/home/profile'
@@ -16,7 +15,5 @@ export type AppRoute =
   | '/room/play'
 
 export interface RouteParams {
-  gameId?: string
-  systemId?: string
   roomCode?: string
 }

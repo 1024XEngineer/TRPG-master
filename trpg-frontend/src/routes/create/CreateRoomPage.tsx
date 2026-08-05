@@ -2,7 +2,8 @@ import { useNavigate } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import type { ModuleDetail } from 'trpg-sdk'
 import { Plus, Minus } from 'lucide-react'
-import { GAME_REGISTRY, getSystemVisualKey, SYSTEM_COLORS } from '@/config/games'
+import { FIXED_TRPG } from '@/config/games'
+import { ROUTES } from '@/config/routes'
 import { useGameStore } from '@/stores/game-store'
 import { useAuthStore } from '@/stores/auth-store'
 import { useRoomStore } from '@/stores/room-store'
@@ -38,12 +39,8 @@ export default function CreateRoomPage() {
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState('')
 
-  const selectedGame = store.gameId ? GAME_REGISTRY.find(g => g.id === store.gameId) : null
   const [selectedScenario, setSelectedScenario] = useState<ModuleDetail | null>(null)
-  const sysColors = store.systemId
-    ? SYSTEM_COLORS[getSystemVisualKey(selectedScenario?.gameSystemName || store.systemId)]
-    : null
-  const hasSelection = !!(store.gameId && store.systemId && store.sceneId)
+  const hasSelection = !!store.sceneId
   const playerMin = selectedScenario?.playersMin ?? MIN_PLAYERS
   const playerMax = selectedScenario?.playersMax ?? MAX_PLAYERS
 
@@ -95,18 +92,21 @@ export default function CreateRoomPage() {
 
   const canCreate = roomName.trim().length > 0 && hasSelection && !!selectedScenario && !creating
 
-  const handleSelectGame = () => {
-    setCreateForm({ roomName, maxPlayers })
+  const handleSelectModule = () => {
+    // 输入框允许用户在编辑过程中暂时留空，因此数值 state 会在 blur 时才同步。
+    // 点击模组入口本身会触发 blur，但 React 可能把 blur/click 放在同一批更新中，
+    // 这里直接从当前输入文本归一化，确保刚输入的人数也能跨页面保留。
+    const parsedMaxPlayers = parseInt(maxPlayersInput, 10)
+    const nextMaxPlayers = Number.isNaN(parsedMaxPlayers)
+      ? maxPlayers
+      : clampPlayerCount(parsedMaxPlayers, playerMin, playerMax)
+    setMaxPlayers(nextMaxPlayers)
+    setMaxPlayersInput(String(nextMaxPlayers))
+    setCreateForm({ roomName, maxPlayers: nextMaxPlayers })
+    // 游戏和规则系统是产品固定配置，不再存进可变 store；重新选择时只需要
+    // 清除之前的模组和当前流程阶段。
     store.reset()
-    store.setReturnFromGameSelect(true)
-    navigate('/home/create/games')
-  }
-
-  const handleChangeGame = () => {
-    setCreateForm({ roomName, maxPlayers })
-    store.reset()
-    store.setReturnFromGameSelect(true)
-    navigate('/home/create/games')
+    navigate(ROUTES.MODULES)
   }
 
   return (
@@ -225,8 +225,8 @@ export default function CreateRoomPage() {
       <button
         type="button"
         className="create-room-scene__game-stamp"
-        aria-label={hasSelection ? '更换游戏' : '选择游戏'}
-        onClick={hasSelection ? handleChangeGame : handleSelectGame}
+        aria-label={hasSelection ? '更换模组' : '选择模组'}
+        onClick={handleSelectModule}
       >
         <img
           className="create-room-scene__stamp-paper"
@@ -240,12 +240,9 @@ export default function CreateRoomPage() {
           alt=""
           aria-hidden="true"
         />
-        <img
-          className="create-room-scene__select-game-title"
-          src="/assets/rooms/create/select-game-title.webp"
-          alt=""
-          aria-hidden="true"
-        />
+        <span className="create-room-scene__select-module-title" aria-hidden="true">
+          选择模组
+        </span>
       </button>
 
       <img
@@ -284,8 +281,8 @@ export default function CreateRoomPage() {
 
         <dl className="create-room-scene__summary-list">
           <div><dt>房间名</dt><dd>{roomName || '未设置'}</dd></div>
-          <div><dt>游戏</dt><dd>{selectedGame?.name || store.gameId || '未选择'}</dd></div>
-          <div><dt>规则</dt><dd>{sysColors?.name || store.systemId || '未选择'}</dd></div>
+          <div><dt>游戏</dt><dd>{FIXED_TRPG.gameName}</dd></div>
+          <div><dt>规则</dt><dd>{FIXED_TRPG.systemCatalogName}</dd></div>
           <div><dt>模组</dt><dd>{selectedScenario?.title || store.sceneId || '未选择'}</dd></div>
           <div>
             <dt>人数上限</dt>

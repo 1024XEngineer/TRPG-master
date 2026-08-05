@@ -570,12 +570,17 @@
   user-select: none;
 }
 
-.create-room-scene__select-game-title {
+.create-room-scene__select-module-title {
   position: absolute;
   top: 44%;
   left: 24%;
   width: 63%;
-  height: auto;
+  color: #2b1b0f;
+  font-size: clamp(24px, 7.2vw, 32px);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  text-align: center;
   transform: rotate(-5deg);
   pointer-events: none;
   user-select: none;

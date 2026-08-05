@@ -81,3 +81,31 @@ Pending 决策、骰点和 Event 在同一数据库事务中提交。相同 `req
 当前生产 Host 仍输出 ModuleContent v2 `Intent`，本变更不修改 Agent 或把 v2 Intent
 偷偷转换成 v3 语义。后续 A 侧接入只需提交上述公共契约；数据库状态机和前端安全投影
 不需要重新设计。v2 `RuleEngineService.execute(ActionRequest)` 在迁移期继续可用。
+
+## ActionPlan 编排边界（Issue #225）
+
+复合输入现在有独立的 A 侧编排基座，但没有改变本服务的单意图职责：
+
+```text
+HostTurnDecision
+  ├─ SingleActionDecision -> AdjudicationEngineService.submit() 一次
+  └─ ActionPlan -> ActionPlanOrchestrator
+       -> 最新 PlayerView 裁决当前 semantic step
+       -> AdjudicationEngineService.submit() 一次
+       -> 刷新 revision
+       -> 当前步 resolved 后才可进入下一步
+```
+
+`ActionPlan` 是变长顺序数组，公共 Schema 只要求至少两步；运行时
+`ActionPlanPolicy.max_plan_steps` 默认 32，`max_steps_per_advance` 默认 3。后者只是持久化
+调度窗口，4/5 步计划会在 checkpoint 后续跑同一 parent action，不会截断或要求玩家重输。
+
+`ActionPlanRunStore` 与 `EngineStore` 分层。前者保存 plan/step 游标、冻结的单步裁决、CAS
+version、worker lease 和房间行动占用；后者仍只保存单个 `ActionAdjudication` 的权威命令、
+检定和领域 Event。两者通过确定性的 `step_request_id` 做 Saga 对账：Engine 已提交而
+PlanRun 尚未前移时，恢复会查询/重放首次结果，不重复状态效果或骰点。
+
+当前步骤进入技能选择或检定后选择时，PlanRun 进入 `waiting_for_player`，后续步骤禁止
+执行；最终成功后基于新 revision 继续，取消或最终失败则保留前序已提交事实并停止剩余
+步骤。Plan 到达 `awaiting_narration` 后不再调用 Adjudicator/Engine，只有叙事成功后才标记
+`completed`。

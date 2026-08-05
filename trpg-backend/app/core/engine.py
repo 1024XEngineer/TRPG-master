@@ -6,10 +6,11 @@ from collaboration_framework.engine import (
     RuleKernel,
 )
 
-from app.adapters import SqlAlchemyEngineStore
+from app.adapters import SqlAlchemyActionPlanRunStore, SqlAlchemyEngineStore
 from app.core.db import async_session_factory
 
 engine_store = SqlAlchemyEngineStore(async_session_factory)
+action_plan_store = SqlAlchemyActionPlanRunStore(async_session_factory)
 adjudication_engine_service = AdjudicationEngineService(engine_store)
 rule_engine_service = RuleEngineService(
     engine_store,
@@ -18,6 +19,7 @@ rule_engine_service = RuleEngineService(
 
 __all__ = [
     "adjudication_engine_service",
+    "action_plan_store",
     "engine_store",
     "rule_engine_service",
 ]

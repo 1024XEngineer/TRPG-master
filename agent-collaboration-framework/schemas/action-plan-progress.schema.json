@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "action-plan-progress.schema.json",
+  "additionalProperties": false,
+  "description": "Public progress contains no raw plan, effects, tools or hidden context.",
+  "properties": {
+    "type": {
+      "enum": [
+        "plan.started",
+        "plan.step_changed",
+        "plan.stopped",
+        "plan.completed"
+      ],
+      "title": "Type",
+      "type": "string"
+    },
+    "correlation_id": {
+      "minLength": 1,
+      "title": "Correlation Id",
+      "type": "string"
+    },
+    "current_step": {
+      "minimum": 0,
+      "title": "Current Step",
+      "type": "integer"
+    },
+    "completed_steps": {
+      "minimum": 0,
+      "title": "Completed Steps",
+      "type": "integer"
+    },
+    "total_steps": {
+      "minimum": 2,
+      "title": "Total Steps",
+      "type": "integer"
+    },
+    "phase": {
+      "enum": [
+        "understanding",
+        "executing",
+        "waiting_for_player",
+        "completed",
+        "stopped"
+      ],
+      "title": "Phase",
+      "type": "string"
+    },
+    "public_progress_label": {
+      "anyOf": [
+        {
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Public Progress Label"
+    },
+    "safe_reason": {
+      "anyOf": [
+        {
+          "maxLength": 100,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Safe Reason"
+    }
+  },
+  "required": [
+    "type",
+    "correlation_id",
+    "current_step",
+    "completed_steps",
+    "total_steps",
+    "phase"
+  ],
+  "title": "ActionPlanProgressEvent",
+  "type": "object"
+}

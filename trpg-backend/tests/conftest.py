@@ -11,13 +11,19 @@ from collections.abc import AsyncGenerator, Callable, Generator
 from pathlib import Path
 
 import pytest
-from collaboration_framework.engine import RuleEngineService
+from collaboration_framework.engine import AdjudicationEngineService, RuleEngineService
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from app.adapters import SqlAlchemyEngineStore, SqlAlchemyRecentHistorySource
+from app.adapters import (
+    SqlAlchemyActionPlanRunStore,
+    SqlAlchemyEngineStore,
+    SqlAlchemyRecentHistorySource,
+)
 from app.controller import ws as ws_controller
+from app.core.action_plan_turn import build_action_plan_turn_application
+from app.core.config import Settings
 from app.core.db import Base, get_db
 from app.core.seed import ensure_seed_content
 from app.core.turn import build_turn_application
@@ -64,7 +70,17 @@ _test_turn_store = SqlAlchemyEngineStore(TestSessionLocal)
 ws_controller.turn_application = build_turn_application(
     _test_turn_store,
     RuleEngineService(_test_turn_store),
+    settings=Settings(host_model_provider="fake", opening_narration_mode="model"),
 )
+_test_plan_store = SqlAlchemyActionPlanRunStore(TestSessionLocal)
+ws_controller.action_plan_turn_application = build_action_plan_turn_application(
+    store=_test_turn_store,
+    engine=RuleEngineService(_test_turn_store),
+    adjudication_engine=AdjudicationEngineService(_test_turn_store),
+    plan_store=_test_plan_store,
+    settings=Settings(host_model_provider="fake", opening_narration_mode="template"),
+)
+ws_controller.adjudication_engine_service = AdjudicationEngineService(_test_turn_store)
 
 
 @pytest.fixture(autouse=True)
@@ -106,6 +122,13 @@ def engine_store_factory() -> Callable[..., SqlAlchemyEngineStore]:
         return SqlAlchemyEngineStore(TestSessionLocal, **kwargs)
 
     return factory
+
+
+@pytest.fixture
+def action_plan_store_factory() -> Callable[[], SqlAlchemyActionPlanRunStore]:
+    """构造使用测试数据库的独立 ActionPlan Store。"""
+
+    return lambda: SqlAlchemyActionPlanRunStore(TestSessionLocal)
 
 
 @pytest.fixture

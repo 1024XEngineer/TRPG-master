@@ -81,6 +81,8 @@ class Settings(BaseSettings):
     recent_history_enabled: bool = True
     recent_history_max_turns: int = Field(default=6, ge=1, le=24)
     recent_history_max_chars: int = Field(default=6000, ge=2)
+    action_plan_max_steps: int = Field(default=32, ge=2, le=256)
+    action_plan_max_steps_per_advance: int = Field(default=3, ge=1, le=32)
 
     # 讨论区/Narrator 主线的兼容配置：未配置时使用确定性占位叙事，测试可通过
     # 延迟钩子稳定覆盖行动锁并发分支。
@@ -101,18 +103,6 @@ class Settings(BaseSettings):
         ):
             raise ValueError("HOST_MODEL_PROVIDER=deepseek 时必须设置 DEEPSEEK_API_KEY")
         return self
-
-    # DeepSeek API Key（issue #107 地基，`app/core/narrator.py`）：配了就走真实
-    # DeepSeek 生成叙事回应，不配（默认）自动回退到确定性的占位文案——CI/e2e
-    # 环境不配这个变量，本地演示/线上环境按需配置。
-    deepseek_api_key: str | None = None
-
-    # ⚠️ 测试专用（issue #107）：让叙事生成人为延迟 N 秒后再返回，生产永远保持 0。
-    # 存在的理由：无 key 时的占位叙事同步秒回，action.submit 的房间锁窗口只有
-    # 微秒级，e2e 两个客户端"同时提交"永远压不中 ACTION_IN_PROGRESS——锁的
-    # 并发拒绝路径会变成测不到的死代码。e2e 起后端时把它设成 1~2 秒，锁窗口
-    # 就能被稳定命中。
-    narrator_delay_seconds: float = 0.0
 
 
 @lru_cache

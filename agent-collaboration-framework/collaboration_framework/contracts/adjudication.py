@@ -316,6 +316,7 @@ class AdjudicationExecution(ContractModel):
     pending_decision: PendingCheckDecisionView | None = None
     check_run: CheckRunView | None = None
     event_refs: tuple[str, ...] = ()
+    public_event_refs: tuple[str, ...] = ()
 
     @model_validator(mode="after")
     def validate_status_payload(self) -> AdjudicationExecution:
@@ -323,4 +324,6 @@ class AdjudicationExecution(ContractModel):
             raise ValueError("awaiting_skill_choice 必须包含 pending_decision")
         if self.status == "awaiting_post_roll_decision" and self.check_run is None:
             raise ValueError("awaiting_post_roll_decision 必须包含 check_run")
+        if not set(self.public_event_refs).issubset(self.event_refs):
+            raise ValueError("public_event_refs 必须是 event_refs 的子集")
         return self

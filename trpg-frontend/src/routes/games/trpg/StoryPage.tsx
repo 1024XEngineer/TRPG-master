@@ -95,14 +95,14 @@ export default function StoryPage() {
         <ArrowLeft className="w-[18px] h-[18px]" />
       </button>
 
-      <div className="font-mono text-[11px] tracking-[0.15em] text-[#706090] mb-5">
-        {module.storyLabel || `MODULE ${module.version}`}
+      <div className="text-[11px] tracking-[0.15em] text-[#706090] mb-5">
+        模组版本 {module.version}
       </div>
       <h1 className="text-[28px] font-bold text-[#eeead8] leading-[1.25] mb-2">
         {module.title}
       </h1>
-      <p className="font-mono text-xs text-[#9088a0] mb-8 tracking-[0.05em]">
-        {module.nameEn || module.subtitle || ''}
+      <p className="text-xs text-[#9088a0] mb-8 tracking-[0.05em]">
+        {module.subtitle || module.nameEn || ''}
       </p>
       <div className="w-10 h-px bg-[#504860] mb-7" />
       <div className="text-sm leading-[1.9] text-[#c8c0b8]">

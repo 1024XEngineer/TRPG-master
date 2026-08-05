@@ -1,7 +1,7 @@
 /**
  * 本文件由 `npm run codegen` 从后端 pydantic 模型自动生成，请勿手改。
  *
- * 源头：trpg-backend/app/dto/{auth,room,character,common,ws}.py
+ * 源头：trpg-backend/app/dto/ 下由 export_schema.py 登记的 DTO（含 host_speech.py）
  * 重新生成：
  *   1. cd trpg-backend && uv run python scripts/export_schema.py
  *   2. cd trpg-sdk && npm run codegen
@@ -383,7 +383,10 @@ export type ErrorCode =
   | "RATE_LIMITED"
   | "NOT_IMPLEMENTED"
   | "CHARACTER_INVALID"
-  | "RULESET_NOT_CONFIGURED";
+  | "RULESET_NOT_CONFIGURED"
+  | "HOST_SPEECH_UNAVAILABLE"
+  | "HOST_SPEECH_FAILED"
+  | "HOST_SPEECH_TIMEOUT";
 
 /**
  * 错误信息的具体内容，只在 success=false 时出现在 error 字段里。
@@ -456,6 +459,37 @@ export interface GameSystemRead {
   worldName?: string | null;
   worldDescription?: string | null;
   gameDescription?: string | null;
+}
+
+export interface HostSpeechManifestRead {
+  messageId: string;
+  sentences: HostSpeechSentenceRead[];
+}
+
+export interface HostSpeechSentenceRead {
+  index: number;
+  text: string;
+}
+
+export interface HostSpeechSettingsRead {
+  available: boolean;
+  provider: string;
+  voiceType: string | null;
+  voices: HostSpeechVoiceRead[];
+  autoEmotion?: boolean;
+}
+
+export interface HostSpeechSettingsUpdate {
+  voiceType: string;
+}
+
+export interface HostSpeechSettingsUpdatedPayload {
+  voiceType: string | null;
+}
+
+export interface HostSpeechVoiceRead {
+  voiceType: string;
+  label: string;
 }
 
 /**

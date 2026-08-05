@@ -81,6 +81,31 @@ export class ApiClient {
     return body.data as T;
   }
 
+  /** 成功响应按 Blob 返回；错误响应仍解析统一 JSON 信封。 */
+  async requestBlob(path: string, init?: RequestInit): Promise<Blob> {
+    const headers = new Headers(init?.headers);
+    const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
+      ...init,
+      headers
+    });
+    if (!response.ok) {
+      // 音频接口只有成功分支是二进制；失败仍遵守全站 JSON 错误信封。先按状态码
+      // 分流，避免把一段错误 JSON 当成 MP3 交给 HTMLAudioElement。
+      let body: ApiResponse<unknown> | null = null;
+      try {
+        body = (await response.json()) as ApiResponse<unknown>;
+      } catch {
+        // 非标准上游错误也收敛为稳定 SDK 异常，不向调用方暴露解析细节。
+      }
+      throw new ApiError(
+        body?.error?.code ?? 'UNKNOWN_ERROR',
+        body?.error?.message ?? '请求失败',
+        response.status
+      );
+    }
+    return response.blob();
+  }
+
   get<T>(path: string, init?: RequestInit): Promise<T> {
     return this.request<T>(path, { ...init, method: 'GET' });
   }

@@ -32,7 +32,7 @@ const OUT_PATH = resolve(__dirname, '../src/generated/dto.ts');
 const BANNER = `/**
  * 本文件由 \`npm run codegen\` 从后端 pydantic 模型自动生成，请勿手改。
  *
- * 源头：trpg-backend/app/dto/{auth,room,character,common,ws}.py
+ * 源头：trpg-backend/app/dto/ 下由 export_schema.py 登记的 DTO（含 host_speech.py）
  * 重新生成：
  *   1. cd trpg-backend && uv run python scripts/export_schema.py
  *   2. cd trpg-sdk && npm run codegen

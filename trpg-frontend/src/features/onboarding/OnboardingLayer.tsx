@@ -1,9 +1,10 @@
 import { ChevronLeft, ChevronRight, X } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useAuthStore } from '@/stores/auth-store'
 import { useRoomStore } from '@/stores/room-store'
 import {
+  firstReplayStepForPath,
   firstStepForPath,
   stepsForAudience,
   type OnboardingStep,
@@ -14,11 +15,11 @@ import {
   type OnboardingState,
 } from './storage'
 import { calculateSpotlightRect, type Rect } from './geometry'
+import { useOnboardingController } from './controller'
 
-const GUIDE_ROUTES = new Set(['/room/lobby', '/room/story', '/room/character', '/room/ready', '/room/play'])
+const GUIDE_ROUTES = new Set(['/room/character', '/room/ready', '/room/play'])
 const SPOTLIGHT_GAP = 12
 const SPOTLIGHT_PADDING = 4
-const MAX_SPOTLIGHT_HEIGHT = 280
 const TOOLTIP_ESTIMATED_HEIGHT = 180
 const TARGET_SETTLE_DELAY = 900
 
@@ -50,7 +51,6 @@ function toRootRect(element: Element): Rect | null {
       clientWidth: root.clientWidth,
       clientHeight: root.clientHeight,
     },
-    MAX_SPOTLIGHT_HEIGHT,
   )
 }
 
@@ -58,6 +58,16 @@ function findStepIndex(steps: OnboardingStep[], stepId: string | null): number {
   if (!stepId) return 0
   const index = steps.findIndex((step) => step.id === stepId)
   return index >= 0 ? index : 0
+}
+
+export function preparePreviousStepTarget(step: OnboardingStep, pathname: string): boolean {
+  if (step.route !== pathname) return false
+  if (document.querySelector(`[data-onboarding-target="${step.target}"]`)) return true
+
+  const pageBack = document.querySelector<HTMLButtonElement>('[data-onboarding-page-back]')
+  if (!pageBack) return false
+  pageBack.click()
+  return true
 }
 
 function useTargetRect(target: string | null, pathname: string): Rect | null {
@@ -79,26 +89,46 @@ function useTargetRect(target: string | null, pathname: string): Rect | null {
   useEffect(() => {
     setRect(null)
     if (!target) return
-    const element = document.querySelector(`[data-onboarding-target="${target}"]`)
-    if (element) {
+    const selector = `[data-onboarding-target="${target}"]`
+    let observedElement: Element | null = null
+
+    const scrollTargetIntoView = (element: Element) => {
       const root = document.querySelector<HTMLElement>('#root')
       const block = root && element.getBoundingClientRect().height > root.clientHeight * 0.55
         ? 'start'
         : 'center'
       element.scrollIntoView({ block, behavior: 'smooth' })
     }
-    const retry = window.setTimeout(measure, 120)
-    const observer = element && typeof ResizeObserver !== 'undefined'
+
+    const resizeObserver = typeof ResizeObserver !== 'undefined'
       ? new ResizeObserver(measure)
       : null
-    const mutationObserver = new MutationObserver(measure)
-    if (element) observer?.observe(element)
+    const syncTarget = () => {
+      const element = document.querySelector(selector)
+      if (!element) {
+        setRect(null)
+        return
+      }
+      if (element !== observedElement) {
+        if (observedElement) resizeObserver?.unobserve(observedElement)
+        observedElement = element
+        resizeObserver?.observe(element)
+        // 建卡页的后续步骤会在当前引导目标已经激活后才挂载。
+        // 目标首次出现时必须重新滚动，否则高亮会停在视口边缘。
+        scrollTargetIntoView(element)
+      }
+      measure()
+    }
+
+    const retry = window.setTimeout(syncTarget, 120)
+    const mutationObserver = new MutationObserver(syncTarget)
+    syncTarget()
     mutationObserver.observe(document.body, { childList: true, subtree: true })
     window.addEventListener('resize', measure)
     document.addEventListener('scroll', measure, true)
     return () => {
       window.clearTimeout(retry)
-      observer?.disconnect()
+      resizeObserver?.disconnect()
       mutationObserver.disconnect()
       window.removeEventListener('resize', measure)
       document.removeEventListener('scroll', measure, true)
@@ -132,13 +162,13 @@ function IntroDialog({ onStart, onSkip }: { onStart: () => void; onSkip: () => v
         className="relative w-full max-w-[340px] rounded-lg border border-brass/50 bg-card p-5 shadow-2xl"
       >
         <div className="mb-4 text-[11px] font-semibold uppercase tracking-[0.16em] text-brass-dark">
-          新手指引
+          COC 规则指引
         </div>
         <h2 id="onboarding-intro-title" className="text-lg font-bold text-text-primary">
-          一起完成第一次游戏
+          快速了解调查员规则
         </h2>
         <p className="mt-2 text-sm leading-relaxed text-text-body">
-          接下来会带你完成创建调查员、准备房间和进入游戏的关键步骤，整个过程可以随时跳过。
+          接下来会说明人物卡、玩家准备、行动和游戏工具等关键规则，整个过程可以随时跳过。
         </p>
         <div className="mt-5 flex gap-2">
           <button
@@ -217,6 +247,7 @@ function Tooltip({
   total,
   rect,
   onPrevious,
+  canGoPrevious,
   onNext,
   onSkip,
 }: {
@@ -225,6 +256,7 @@ function Tooltip({
   total: number
   rect: Rect
   onPrevious: () => void
+  canGoPrevious: boolean
   onNext: () => void
   onSkip: () => void
 }) {
@@ -235,9 +267,16 @@ function Tooltip({
   const left = clamp(rect.left + rect.width / 2 - tooltipWidth / 2, 12, rootWidth - tooltipWidth - 12)
   const spaceAbove = rect.top
   const spaceBelow = rootHeight - rect.top - rect.height
-  const below = spaceBelow >= TOOLTIP_ESTIMATED_HEIGHT + SPOTLIGHT_GAP || spaceBelow >= spaceAbove
-  const top = below ? rect.top + rect.height + SPOTLIGHT_GAP : undefined
-  const bottom = below ? undefined : rootHeight - rect.top + SPOTLIGHT_GAP
+  const canPlaceBelow = spaceBelow >= TOOLTIP_ESTIMATED_HEIGHT + SPOTLIGHT_GAP
+  const canPlaceAbove = spaceAbove >= TOOLTIP_ESTIMATED_HEIGHT + SPOTLIGHT_GAP
+  const overlapsTarget = !canPlaceBelow && !canPlaceAbove
+  const below = canPlaceBelow || (!canPlaceAbove && spaceBelow >= spaceAbove)
+  const naturalTop = below
+    ? rect.top + rect.height + SPOTLIGHT_GAP
+    : rect.top - TOOLTIP_ESTIMATED_HEIGHT - SPOTLIGHT_GAP
+  const top = overlapsTarget
+    ? Math.max(12, rootHeight - TOOLTIP_ESTIMATED_HEIGHT - 20)
+    : clamp(naturalTop, 12, rootHeight - TOOLTIP_ESTIMATED_HEIGHT - 12)
   const arrowLeft = clamp(rect.left + rect.width / 2 - left - 7, 16, tooltipWidth - 20)
 
   return (
@@ -246,12 +285,14 @@ function Tooltip({
       aria-label="新手指引"
       aria-live="polite"
       className="fixed z-[102] pointer-events-auto"
-      style={{ left, top, bottom, width: tooltipWidth }}
+      style={{ left, top, width: tooltipWidth }}
     >
-      <div
-        className={`absolute -top-2 h-4 w-4 rotate-45 border-l border-t border-brass/50 bg-card ${below ? '' : 'top-auto -bottom-2 rotate-[225deg]'}`}
-        style={{ left: arrowLeft }}
-      />
+      {!overlapsTarget && (
+        <div
+          className={`absolute -top-2 h-4 w-4 rotate-45 border-l border-t border-brass/50 bg-card ${below ? '' : 'top-auto -bottom-2 rotate-[225deg]'}`}
+          style={{ left: arrowLeft }}
+        />
+      )}
       <div className="relative rounded-lg border border-brass/50 bg-card p-4 shadow-2xl">
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -266,7 +307,7 @@ function Tooltip({
         </div>
         <p className="mt-2 text-xs leading-relaxed text-text-body">{step.description}</p>
         <div className="mt-4 flex items-center justify-between gap-2">
-          <button type="button" onClick={onPrevious} disabled={index === 0} className="flex items-center gap-1 text-xs text-text-muted disabled:opacity-35">
+          <button type="button" onClick={onPrevious} disabled={!canGoPrevious} className="flex items-center gap-1 text-xs text-text-muted disabled:opacity-35">
             <ChevronLeft className="h-3.5 w-3.5" /> 上一步
           </button>
           <button type="button" onClick={onNext} className="flex items-center gap-1 rounded-sm bg-brass px-3 py-2 text-xs font-semibold text-white active:bg-brass-dark">
@@ -283,6 +324,8 @@ export default function OnboardingLayer() {
   const userId = useAuthStore((state) => state.userId)
   const roomId = useRoomStore((state) => state.roomId)
   const isHost = useRoomStore((state) => state.isHost)
+  const replayRequest = useOnboardingController((state) => state.replayRequest)
+  const handledReplayRequest = useRef(replayRequest)
   const [state, setState] = useState<OnboardingState | null>(null)
   const [introOpen, setIntroOpen] = useState(false)
   const [confirmSkipOpen, setConfirmSkipOpen] = useState(false)
@@ -292,8 +335,15 @@ export default function OnboardingLayer() {
   const steps = useMemo(() => stepsForAudience(isHost), [isHost])
   const activeIndex = findStepIndex(steps, state?.stepId ?? null)
   const activeStep = state?.status === 'active' ? steps[activeIndex] ?? null : null
+  const previousStep = activeIndex > 0 ? steps[activeIndex - 1] ?? null : null
+  const canGoPrevious = Boolean(previousStep?.route === pathname)
   const targetRect = useTargetRect(activeStep?.route === pathname ? activeStep.target : null, pathname)
-  const fallbackVisible = useDelayedFallback(Boolean(activeStep && activeStep.route === pathname && !targetRect))
+  const fallbackVisible = useDelayedFallback(Boolean(
+    activeStep &&
+    activeStep.route === pathname &&
+    !activeStep.waitForTarget &&
+    !targetRect,
+  ))
 
   useEffect(() => {
     if (!userId || !roomId || !isGuideRoute(pathname)) {
@@ -316,6 +366,27 @@ export default function OnboardingLayer() {
     setState(null)
     setIntroOpen(true)
   }, [isHost, pathname, roomId, userId])
+
+  useEffect(() => {
+    if (!replayRequest || replayRequest === handledReplayRequest.current) return
+    handledReplayRequest.current = replayRequest
+    if (!userId || !roomId || !isGuideRoute(pathname)) return
+
+    const first = firstReplayStepForPath(
+      pathname,
+      isHost,
+      (target) => Boolean(document.querySelector(`[data-onboarding-target="${target}"]`)),
+    ) ?? firstStepForPath(pathname, isHost)
+    if (!first) return
+
+    const nextState = { status: 'active' as const, stepId: first.id }
+    setState(nextState)
+    writeOnboardingState(userId, nextState)
+    setIntroOpen(false)
+    setConfirmSkipOpen(false)
+    setCompletionOpen(false)
+    setDismissedFallbackStep(null)
+  }, [isHost, pathname, replayRequest, roomId, userId])
 
   useEffect(() => {
     if (!userId || state?.status !== 'active' || !activeStep) return
@@ -382,7 +453,10 @@ export default function OnboardingLayer() {
       setCompletionOpen(true)
       return
     }
-    const nextState = { status: 'active' as const, stepId: steps[Math.max(0, nextIndex)].id }
+    const nextStep = steps[Math.max(0, nextIndex)]
+    if (!nextStep) return
+    if (delta < 0 && !preparePreviousStepTarget(nextStep, pathname)) return
+    const nextState = { status: 'active' as const, stepId: nextStep.id }
     setState(nextState)
     writeOnboardingState(userId, nextState)
     setDismissedFallbackStep(null)
@@ -422,6 +496,7 @@ export default function OnboardingLayer() {
         total={steps.length}
         rect={targetRect}
         onPrevious={() => move(-1)}
+        canGoPrevious={canGoPrevious}
         onNext={() => move(1)}
         onSkip={() => setConfirmSkipOpen(true)}
       />

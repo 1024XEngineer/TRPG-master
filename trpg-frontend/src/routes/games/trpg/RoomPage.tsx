@@ -13,6 +13,7 @@ import { useHostSpeech } from '@/hooks/useHostSpeech'
 import { useSpeechInput } from '@/hooks/useSpeechInput'
 import { Dice3DStage, supports3DDice, type Dice3DHandle } from '@/features/dice3d'
 import { DERIVED_STAT_DEFINITIONS } from '@/data/derived-stats'
+import { OnboardingTrigger } from '@/features/onboarding'
 
 // `crypto.randomUUID()` 要求安全上下文（HTTPS 或 localhost）——CI Preview
 // 部署在纯 HTTP 的 IP:端口上（issue #200，域名/HTTPS 明确列在本期不做），
@@ -1255,6 +1256,7 @@ export default function RoomPage() {
             {playerView?.scene.name || (roomInfo ? `${roomInfo.players.length} 位调查员` : '克苏鲁的呼唤')}
           </div>
         </div>
+        <OnboardingTrigger />
         <button
           onClick={() => setOpenPanel(openPanel === 'speech' ? null : 'speech')}
           aria-label="主持人语音"

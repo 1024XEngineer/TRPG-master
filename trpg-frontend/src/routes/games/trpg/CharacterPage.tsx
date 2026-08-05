@@ -21,6 +21,7 @@ import {
   DERIVED_STAT_DEFINITIONS,
   normalizeDerivedStats,
 } from '@/data/derived-stats'
+import { OnboardingTrigger } from '@/features/onboarding'
 
 // 图标和配色是纯 UI 装饰，不是规则数据，留在前端；键用后端 ruleset 的属性键。
 // 「有哪些属性、哪些能加点、默认值多少、预算和上下限是什么」全部来自
@@ -33,6 +34,20 @@ const ATTR_ICONS: Record<string, typeof Heart> = {
 const ATTR_COLORS: Record<string, string> = {
   STR: '#c04040', CON: '#c08050', POW: '#7050a0', DEX: '#4a8a4a',
   APP: '#8a4070', SIZ: '#b8976a', INT: '#4a7098', EDU: '#6a6050',
+}
+
+// 这些是 COC 新手教学文案，不参与规则计算；属性集合、点数限制和生成公式
+// 仍然以后端 ruleset 为准。
+const ATTRIBUTE_HELP: Record<string, string> = {
+  STR: '衡量肌肉力量与爆发力。常用于推、拉、举起、攀住目标和近战力量对抗，也参与伤害加值与体格计算。',
+  CON: '衡量健康程度与持久力。它会影响生命值，也常用于抵抗疾病、毒素、疲劳和昏迷。',
+  POW: '衡量意志与精神力量。它决定初始理智和魔法值，也常用于抵抗精神影响或进行意志对抗。',
+  DEX: '衡量反应速度与身体协调。它常影响行动顺序，并用于闪避、敏捷动作和精细操作。',
+  APP: '衡量外貌、气质与第一印象。它会影响陌生人的初始态度，但不能代替取悦、说服等社交技能。',
+  SIZ: '综合表示调查员的身高与体重。它参与生命值、伤害加值和体格计算；体型大不等于力量高。',
+  INT: '衡量理解、推理与临场判断。它决定兴趣技能点，也常用于灵感和线索联想相关的判断。',
+  EDU: '衡量正式教育与知识积累。它常参与职业技能点计算，也反映调查员可以调用的常识与专业知识。',
+  LUCK: '表示不由个人能力决定的偶然运气，用于幸运检定。它不占属性点，按 COC 规则独立生成。',
 }
 
 const BACKGROUND_PLACEHOLDERS: Record<BackgroundSectionKey, string> = {
@@ -203,6 +218,7 @@ export default function CharacterPage() {
 
   // Attributes
   const [attr, setAttr] = useState<Attributes>(() => ({ ...existingCharacter?.attr }))
+  const [attributeHelpKey, setAttributeHelpKey] = useState<string | null>(null)
 
   // 职业自选技能按槽位分组保存在表单中；提交时再按槽位顺序压平成 API 的
   // occupationChoiceSkillIds。occupationId 跟选择放在同一份状态里，避免异步
@@ -591,7 +607,8 @@ export default function CharacterPage() {
 
   const previewValidationIssues = preview?.validation ?? []
 
-  // 本期建卡页按分类独立记账：职业技能只吃职业池，兴趣技能只吃兴趣池。
+  // 兴趣技能的局部分配量需要单独保存；职业技能可以先吃职业池，再按 COC7
+  // 规则使用剩余兴趣点，因此它们只保存在总分配 skillAlloc 中。
   const [interestAlloc, setInterestAlloc] = useState<Record<string, number>>({})
   const interestAllocInitialized = useRef(false)
 
@@ -617,16 +634,26 @@ export default function CharacterPage() {
     setInterestAlloc(out)
   }, [ruleset, existingCharacter])
 
-  // 两条预算 bar 的"已花"直接取后端 preview 的权威记账，**不在前端本地重算**。
-  //
-  // 后端 compute_preview 返回的 spent 已经把固定技能、信用分账全算进去了（见
-  // coc7_rules._compute），前端只渲染，不叠加。预算闸门仍然走 preview 的总
-  // 结果，但每个技能的编辑只会作用于自己所在的那个池。
-  const occPointsSpent = preview?.occupationSkillPoints.spent ?? 0
-  const interestPointsSpent = preview?.interestSkillPoints.spent ?? 0
+  // 后端把所有职业技能投入都记在 occupation.spent 中，即使它已经超过职业预算；
+  // 超出的部分在 COC7 中实际由兴趣点承担。显示和前端闸门在这里做同一份转换，
+  // 让两条进度条展示玩家真正还剩下的两份预算。
+  const rawOccupationPointsSpent = preview?.occupationSkillPoints.spent ?? 0
+  const rawInterestPointsSpent = preview?.interestSkillPoints.spent ?? 0
+  const confirmedOccupationOverflow = Math.max(0, rawOccupationPointsSpent - occPointsTotal)
+  const occPointsSpent = Math.min(rawOccupationPointsSpent, occPointsTotal)
+  const interestPointsSpent = rawInterestPointsSpent + confirmedOccupationOverflow
 
-  const occupationPointsRemaining = Math.max(0, occPointsTotal - occPointsSpent - pendingOccupationDelta)
-  const interestPointsRemaining = Math.max(0, interestPointsTotal - interestPointsSpent - pendingInterestDelta)
+  const projectedOccupationSpent = rawOccupationPointsSpent + pendingOccupationDelta
+  const projectedInterestSpent = rawInterestPointsSpent + pendingInterestDelta
+  const projectedOccupationOverflow = Math.max(0, projectedOccupationSpent - occPointsTotal)
+  const combinedPointsRemaining = Math.max(
+    0,
+    occPointsTotal + interestPointsTotal - projectedOccupationSpent - projectedInterestSpent,
+  )
+  const interestPointsRemaining = Math.max(
+    0,
+    interestPointsTotal - projectedInterestSpent - projectedOccupationOverflow,
+  )
 
   const derived = useMemo(() => normalizeDerivedStats(preview?.derivedStats), [preview])
 
@@ -661,10 +688,12 @@ export default function CharacterPage() {
     if (appliedDelta !== 0) setPendingInterestDelta(d => Math.max(0, d + appliedDelta))
   }
 
-  // 职业技能页签：只动职业点数池，不再让职业技能自动借兴趣池。
+  // 职业技能先使用职业预算，超过职业预算的部分按 COC7 规则由兴趣预算承担。
+  // 因此这里用总剩余点数做闸门；非职业技能仍由上面的 interestPointsRemaining
+  // 单独限制，不能反过来借职业点。
   const handleOccSkillChange = (skillId: string, delta: number) => {
     if (delta > 0) {
-      if (occupationPointsRemaining <= 0) return
+      if (combinedPointsRemaining <= 0) return
       setSkillAlloc(prev => ({ ...prev, [skillId]: (prev[skillId] || 0) + 1 }))
       setPendingOccupationDelta(d => Math.max(0, d + 1))
     } else if (delta < 0) {
@@ -676,7 +705,7 @@ export default function CharacterPage() {
   const handleOccSkillSet = (skillId: string, newTotalAllocation: number) => {
     const prevOcc = skillAlloc[skillId] || 0
     let clamped = Math.max(0, newTotalAllocation)
-    if (clamped > prevOcc) clamped = Math.min(clamped, prevOcc + occupationPointsRemaining)
+    if (clamped > prevOcc) clamped = Math.min(clamped, prevOcc + combinedPointsRemaining)
     setSkillAlloc(prev => ({ ...prev, [skillId]: clamped }))
     const appliedDelta = clamped - prevOcc
     if (appliedDelta !== 0) setPendingOccupationDelta(d => Math.max(0, d + appliedDelta))
@@ -1000,6 +1029,7 @@ export default function CharacterPage() {
                 <ArrowLeft className="w-[18px] h-[18px] text-text-muted" strokeWidth={2.5} />
               </button>
               <h2 className="text-lg font-bold text-text-primary">创建角色</h2>
+              <OnboardingTrigger className="ml-auto" />
             </div>
             {/* Progress */}
             <div data-onboarding-target="character-progress" className="flex gap-1.5 px-5 py-3">
@@ -1190,7 +1220,7 @@ export default function CharacterPage() {
           {/* ═══════════════ Step 1: Attributes ═══════════════ */}
           {step === 1 && (
             <div className="px-5 pb-20 animate-screen-in">
-              <div data-onboarding-target="attribute-editor" className="bg-card border border-border-light rounded-md p-[18px]">
+              <div className="bg-card border border-border-light rounded-md p-[18px]">
                 <h4 className="text-[12px] font-semibold text-brass-dark uppercase tracking-[0.08em] mb-1.5">属性分配</h4>
                 <p className="text-[11px] text-text-muted mb-2">点击 +/- 调整属性值（范围 {pointBuyRules?.minValue ?? '—'}-{pointBuyRules?.maxValue ?? '—'}，每次 ±5）</p>
                 <div className="bg-panel rounded-md px-3.5 py-2 mb-3 flex items-center gap-3">
@@ -1211,40 +1241,66 @@ export default function CharacterPage() {
                     const Icon = ATTR_ICONS[key] || Shield
                     const color = ATTR_COLORS[key] || '#b8976a'
                     const val = attr[key] ?? 0
+                    const helpOpen = attributeHelpKey === key
                     return (
-                      <div key={key} className="flex items-center gap-3 px-3 py-2.5 bg-input border border-border-light rounded-[6px]">
-                        <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: color + '18' }}>
-                          <Icon className="w-4 h-4" style={{ color }} />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="text-[13px] font-semibold text-text-primary flex items-center gap-1.5">
-                            {attribute.label}
-                            <span className="text-[10px] font-mono text-text-dim font-normal">{key}</span>
+                      <div
+                        key={key}
+                        data-onboarding-target={key === pointBuyAttributes[0]?.key ? 'attribute-example-row' : undefined}
+                        className="px-3 py-2.5 bg-input border border-border-light rounded-[6px]"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: color + '18' }}>
+                            <Icon className="w-4 h-4" style={{ color }} />
                           </div>
-                          <div className="w-full h-1.5 rounded-full bg-border-light mt-1 overflow-hidden">
-                            <div className="h-full rounded-full transition-all" style={{ width: `${Math.min(100, val)}%`, backgroundColor: color }} />
+                          <div className="flex-1 min-w-0">
+                            <div className="text-[13px] font-semibold text-text-primary flex items-center gap-1.5">
+                              {attribute.label}
+                              <span className="text-[10px] font-mono text-text-dim font-normal">{key}</span>
+                              <button
+                                type="button"
+                                onClick={() => setAttributeHelpKey(helpOpen ? null : key)}
+                                aria-label={`了解${attribute.label}`}
+                                aria-expanded={helpOpen}
+                                aria-controls={`attribute-help-${key}`}
+                                title={`了解${attribute.label}`}
+                                className="w-4.5 h-4.5 rounded-full border border-border-mid text-text-muted flex items-center justify-center active:bg-panel transition-colors"
+                              >
+                                <Info className="w-2.5 h-2.5" strokeWidth={2.5} />
+                              </button>
+                            </div>
+                            <div className="w-full h-1.5 rounded-full bg-border-light mt-1 overflow-hidden">
+                              <div className="h-full rounded-full transition-all" style={{ width: `${Math.min(100, val)}%`, backgroundColor: color }} />
+                            </div>
                           </div>
+                          <button onClick={() => handleAttrChange(key, -5)}
+                            aria-label={`减少${attribute.label}`}
+                            className="w-7 h-7 rounded-full bg-card border border-border-light text-text-muted flex items-center justify-center active:bg-panel active:scale-90 transition-all"
+                          >
+                            <Minus className="w-3.5 h-3.5" />
+                          </button>
+                          <input
+                            type="number"
+                            inputMode="numeric"
+                            aria-label={`${attribute.label}数值`}
+                            min={pointBuyRules?.minValue}
+                            max={pointBuyRules?.maxValue}
+                            value={attrInputs[key]}
+                            onChange={e => setAttrInputs(inputs => ({ ...inputs, [key]: e.target.value }))}
+                            onBlur={() => commitAttrInput(key)}
+                            className="text-[17px] font-bold font-mono text-text-primary min-w-[36px] w-[36px] text-center bg-transparent outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                          />
+                          <button onClick={() => handleAttrChange(key, 5)}
+                            aria-label={`增加${attribute.label}`}
+                            className="w-7 h-7 rounded-full bg-card border border-border-light text-text-muted flex items-center justify-center active:bg-panel active:scale-90 transition-all"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                          </button>
                         </div>
-                        <button onClick={() => handleAttrChange(key, -5)}
-                          className="w-7 h-7 rounded-full bg-card border border-border-light text-text-muted flex items-center justify-center active:bg-panel active:scale-90 transition-all"
-                        >
-                          <Minus className="w-3.5 h-3.5" />
-                        </button>
-                        <input
-                          type="number"
-                          inputMode="numeric"
-                          min={pointBuyRules?.minValue}
-                          max={pointBuyRules?.maxValue}
-                          value={attrInputs[key]}
-                          onChange={e => setAttrInputs(inputs => ({ ...inputs, [key]: e.target.value }))}
-                          onBlur={() => commitAttrInput(key)}
-                          className="text-[17px] font-bold font-mono text-text-primary min-w-[36px] w-[36px] text-center bg-transparent outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                        />
-                        <button onClick={() => handleAttrChange(key, 5)}
-                          className="w-7 h-7 rounded-full bg-card border border-border-light text-text-muted flex items-center justify-center active:bg-panel active:scale-90 transition-all"
-                        >
-                          <Plus className="w-3.5 h-3.5" />
-                        </button>
+                        {helpOpen && (
+                          <p id={`attribute-help-${key}`} className="mt-2 border-t border-border-light pt-2 text-[11px] leading-relaxed text-text-muted">
+                            {ATTRIBUTE_HELP[key] ?? `${attribute.label}是当前规则系统定义的基础属性。`}
+                          </p>
+                        )}
                       </div>
                     )
                   })}
@@ -1252,21 +1308,42 @@ export default function CharacterPage() {
 
                 {/* 不参与点数购买的属性（COC7 里就是幸运：只能掷、不能用属性点买）。
                     同样由 ruleset 驱动，不写死是哪一项——换个规则系统这里自然跟着变。 */}
-                {(ruleset?.attributes ?? []).filter(a => !a.pointBuy).map(attribute => (
-                  <div key={attribute.key} className="flex items-center gap-3 px-3 py-2.5 mt-2 bg-panel border border-border-light rounded-[6px]">
-                    <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: '#4a8a4a18' }}>
-                      <Clover className="w-4 h-4" style={{ color: '#4a8a4a' }} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-[13px] font-semibold text-text-primary flex items-center gap-1.5">
-                        {attribute.label}
-                        <span className="text-[10px] font-mono text-text-dim font-normal">{attribute.key}</span>
+                {(ruleset?.attributes ?? []).filter(a => !a.pointBuy).map(attribute => {
+                  const helpOpen = attributeHelpKey === attribute.key
+                  return (
+                    <div key={attribute.key} className="px-3 py-2.5 mt-2 bg-panel border border-border-light rounded-[6px]">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: '#4a8a4a18' }}>
+                          <Clover className="w-4 h-4" style={{ color: '#4a8a4a' }} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-[13px] font-semibold text-text-primary flex items-center gap-1.5">
+                            {attribute.label}
+                            <span className="text-[10px] font-mono text-text-dim font-normal">{attribute.key}</span>
+                            <button
+                              type="button"
+                              onClick={() => setAttributeHelpKey(helpOpen ? null : attribute.key)}
+                              aria-label={`了解${attribute.label}`}
+                              aria-expanded={helpOpen}
+                              aria-controls={`attribute-help-${attribute.key}`}
+                              title={`了解${attribute.label}`}
+                              className="w-4.5 h-4.5 rounded-full border border-border-mid text-text-muted flex items-center justify-center active:bg-input transition-colors"
+                            >
+                              <Info className="w-2.5 h-2.5" strokeWidth={2.5} />
+                            </button>
+                          </div>
+                          <div className="text-[10px] text-text-dim mt-0.5">不占属性点数（规则为独立掷 {attribute.generation}，掷骰生成待接入，暂为默认值）</div>
+                        </div>
+                        <span className="text-[17px] font-bold font-mono text-text-primary min-w-[36px] text-center">{attr[attribute.key] ?? '—'}</span>
                       </div>
-                      <div className="text-[10px] text-text-dim mt-0.5">不占属性点数（规则为独立掷 {attribute.generation}，掷骰生成待接入，暂为默认值）</div>
+                      {helpOpen && (
+                        <p id={`attribute-help-${attribute.key}`} className="mt-2 border-t border-border-light pt-2 text-[11px] leading-relaxed text-text-muted">
+                          {ATTRIBUTE_HELP[attribute.key] ?? `${attribute.label}是当前规则系统定义的基础属性。`}
+                        </p>
+                      )}
                     </div>
-                    <span className="text-[17px] font-bold font-mono text-text-primary min-w-[36px] text-center">{attr[attribute.key] ?? '—'}</span>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
 
               {/* Derived Stats */}
@@ -1386,7 +1463,10 @@ export default function CharacterPage() {
               {/* Credit Rating — 后端必填技能，值须落在所选职业信用区间内，
                   单独给一张显眼卡片，不跟普通技能混在职业/兴趣两个 tab 里。 */}
               {selectedOcc && (
-                <div className="bg-[#fdfaf4] border border-brass rounded-md p-3.5 mb-3">
+                <div
+                  data-onboarding-target="credit-rating-editor"
+                  className="bg-[#fdfaf4] border border-brass rounded-md p-3.5 mb-3"
+                >
                   <div className="flex items-center justify-between mb-1">
                     <h4 className="text-[12px] font-semibold text-brass-dark">
                       信用评级 (Credit Rating) · <span className="text-[#c04040]">必填</span>
@@ -1446,7 +1526,7 @@ export default function CharacterPage() {
                       请先在上一步中选择职业
                     </div>
                   ) : occSkills.map(skill => {
-                    // 职业技能现在只记职业池，不再允许跨池溢出。
+                    // 职业技能优先吃职业池，超出部分由兴趣池承担。
                     const totalAllocation = skillAlloc[skill.id] || 0
                     const compute = skillComputeMap.get(skill.id)
                     const base = compute?.base ?? (typeof skill.base === 'number' ? skill.base : 0)
@@ -1456,14 +1536,13 @@ export default function CharacterPage() {
                         poolAllocation={totalAllocation}
                         onChange={(d) => handleOccSkillChange(skill.id, d)}
                         onSetAllocation={(v) => handleOccSkillSet(skill.id, v)}
-                        maxPoints={totalAllocation + occupationPointsRemaining}
+                        maxPoints={totalAllocation + combinedPointsRemaining}
                         minPoints={0}
                       />
                     )
                   })
                 ) : (
-                  // 兴趣技能页签只列非职业技能——职业技能那边已经能自动溢出用兴趣点数了，
-                  // 不需要在这里重复出现。这里纯粹是兴趣点数池，加点只碰 interestAlloc。
+                  // 兴趣页只列非职业技能；它们只能使用兴趣预算，不会占用职业点。
                   interestSkills.map(skill => {
                     const interestAllocation = interestAlloc[skill.id] || 0
                     const compute = skillComputeMap.get(skill.id)
@@ -1694,7 +1773,9 @@ export default function CharacterPage() {
               </p>
             )}
             <div className="flex gap-2.5">
-              <button onClick={() => step > 0 ? setStep(s => s - 1) : navigate(-1)}
+              <button
+                data-onboarding-page-back
+                onClick={() => step > 0 ? setStep(s => s - 1) : navigate(-1)}
                 className="flex-1 flex items-center justify-center gap-1.5 px-5 py-3 rounded-sm text-sm font-semibold transition-all border border-border-mid bg-card text-text-body active:bg-panel active:scale-[0.97]">
                 上一步
               </button>

@@ -235,6 +235,26 @@ describe('CharacterPage', () => {
     await advanceToAttributesAfterOccupationPreview()
   })
 
+  it('explains each COC attribute and luck from an inline info button', async () => {
+    renderPage()
+
+    fireEvent.change(screen.getByPlaceholderText('角色姓名'), { target: { value: '张三' } })
+    fireEvent.click(screen.getByText('会计师'))
+    fireEvent.click(screen.getByRole('button', { name: /下一步/ }))
+    await advanceToAttributesAfterOccupationPreview()
+
+    const strengthHelp = screen.getByRole('button', { name: '了解力量' })
+    fireEvent.click(strengthHelp)
+    expect(strengthHelp).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByText(/衡量肌肉力量与爆发力/)).toBeInTheDocument()
+
+    const luckHelp = screen.getByRole('button', { name: '了解幸运' })
+    fireEvent.click(luckHelp)
+    expect(luckHelp).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.queryByText(/衡量肌肉力量与爆发力/)).not.toBeInTheDocument()
+    expect(screen.getByText(/不由个人能力决定的偶然运气/)).toBeInTheDocument()
+  })
+
   it('renders occupation icons and filters from backend ruleset metadata', () => {
     renderPage()
 
@@ -377,7 +397,7 @@ describe('CharacterPage', () => {
     expect(screen.queryByLabelText('取消职业自选技能 取悦')).not.toBeInTheDocument()
   })
 
-  it('lets credit be typed directly and keeps occupation and interest pools separate', async () => {
+  it('lets credit be typed directly and clamps it to the occupation range', async () => {
     renderPage()
 
     fireEvent.change(screen.getByPlaceholderText('角色姓名'), { target: { value: '张三' } })
@@ -386,6 +406,8 @@ describe('CharacterPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /下一步/ }))
     expect(await screen.findByLabelText('信用评级')).toBeInTheDocument()
+    expect(screen.getByLabelText('信用评级').closest('[data-onboarding-target="credit-rating-editor"]'))
+      .toBeInTheDocument()
 
     const creditInput = screen.getByLabelText('信用评级')
     fireEvent.change(creditInput, { target: { value: '66' } })
@@ -397,19 +419,55 @@ describe('CharacterPage', () => {
     fireEvent.blur(creditInput)
     await waitForPreviewWithSkill('credit-rating', 70)
     expect(screen.getByLabelText('信用评级')).toHaveValue(70)
+  })
+
+  it('lets occupation skills use interest points after occupation points run out', async () => {
+    renderPage()
+
+    fireEvent.change(screen.getByPlaceholderText('角色姓名'), { target: { value: '张三' } })
+    fireEvent.click(screen.getByText('会计师'))
+    await advanceToAttributesAfterOccupationPreview()
+
+    fireEvent.click(screen.getByRole('button', { name: /下一步/ }))
+    expect(await screen.findByLabelText('信用评级')).toBeInTheDocument()
+
+    const occPlus = screen.getByLabelText('会计 增加技能点')
+    fireEvent.click(occPlus)
+    fireEvent.click(occPlus)
+    expect(screen.getByLabelText('会计 技能点')).toHaveValue(2)
+    expect(occPlus).toBeEnabled()
+
+    fireEvent.click(occPlus)
+    fireEvent.click(occPlus)
+    expect(screen.getByLabelText('会计 技能点')).toHaveValue(4)
+    expect(occPlus).toBeDisabled()
+    await waitForPreviewWithSkill('accounting', 4)
+    await waitFor(() => expect(screen.getAllByText('2/2')).toHaveLength(2))
 
     fireEvent.click(screen.getByRole('button', { name: /兴趣技能/ }))
     expect(screen.getByLabelText('潜行 增加技能点')).toBeDisabled()
     expect(screen.getByLabelText('潜行 技能点')).toHaveValue(0)
+  })
+
+  it('does not let non-occupation skills borrow unused occupation points', async () => {
+    renderPage()
+
+    fireEvent.change(screen.getByPlaceholderText('角色姓名'), { target: { value: '张三' } })
+    fireEvent.click(screen.getByText('会计师'))
+    await advanceToAttributesAfterOccupationPreview()
+
+    fireEvent.click(screen.getByRole('button', { name: /下一步/ }))
+    expect(await screen.findByLabelText('信用评级')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /兴趣技能/ }))
+
+    const interestPlus = screen.getByLabelText('潜行 增加技能点')
+    fireEvent.click(interestPlus)
+    fireEvent.click(interestPlus)
+    expect(screen.getByLabelText('潜行 技能点')).toHaveValue(2)
+    expect(interestPlus).toBeDisabled()
 
     fireEvent.click(screen.getByRole('button', { name: /职业技能/ }))
-    const occPlus = screen.getByLabelText('会计 增加技能点')
-    fireEvent.click(occPlus)
-    expect(screen.getByLabelText('会计 技能点')).toHaveValue(1)
-
-    fireEvent.click(occPlus)
-    expect(screen.getByLabelText('会计 技能点')).toHaveValue(2)
-    expect(occPlus).toBeDisabled()
+    expect(screen.getByLabelText('会计 增加技能点')).toBeEnabled()
   })
 
   it('renders all categorized background fields', async () => {

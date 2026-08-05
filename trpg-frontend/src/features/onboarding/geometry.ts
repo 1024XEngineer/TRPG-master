@@ -15,7 +15,6 @@ interface RootFrame extends Rect {
 export function calculateSpotlightRect(
   target: Rect,
   root: RootFrame,
-  maxHeight: number,
 ): Rect | null {
   const rootLeft = root.left + root.borderLeft
   const rootTop = root.top + root.borderTop
@@ -32,6 +31,6 @@ export function calculateSpotlightRect(
     left: visibleLeft,
     top: visibleTop,
     width: visibleRight - visibleLeft,
-    height: Math.min(visibleBottom - visibleTop, maxHeight),
+    height: visibleBottom - visibleTop,
   }
 }

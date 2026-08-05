@@ -9,6 +9,7 @@ import { connectWebSocket, disconnectWebSocket, sdk, waitForWsOpen } from '@/ser
 import { useRoomPlayers } from '@/hooks/useRoomPlayers'
 import { useRuleset } from '@/hooks/useRuleset'
 import { DERIVED_STAT_DEFINITIONS, normalizeDerivedStats } from '@/data/derived-stats'
+import { OnboardingTrigger } from '@/features/onboarding'
 
 const SHEET_PAGES = [
   { key: 'info', label: '基本信息' },
@@ -264,12 +265,15 @@ export default function CharacterReadyPage() {
   return (
     <div className="animate-screen-in px-5 pt-6">
       {/* Header */}
-      <button
-        onClick={handleGoBack}
-        className="w-[34px] h-[34px] rounded-full bg-card border border-border-light flex items-center justify-center flex-shrink-0 active:bg-panel active:scale-[0.94] transition-all duration-150 mb-3"
-      >
-        <ArrowLeft className="w-[18px] h-[18px] text-text-muted" strokeWidth={2.5} />
-      </button>
+      <div className="mb-3 flex items-center justify-between">
+        <button
+          onClick={handleGoBack}
+          className="w-[34px] h-[34px] rounded-full bg-card border border-border-light flex items-center justify-center flex-shrink-0 active:bg-panel active:scale-[0.94] transition-all duration-150"
+        >
+          <ArrowLeft className="w-[18px] h-[18px] text-text-muted" strokeWidth={2.5} />
+        </button>
+        <OnboardingTrigger />
+      </div>
 
       <div className="flex items-center justify-center gap-2 mb-1">
         <span className="font-mono text-2xl font-bold text-text-primary tracking-[0.15em] bg-card border border-dashed border-border-mid px-4 py-1.5 rounded-sm">

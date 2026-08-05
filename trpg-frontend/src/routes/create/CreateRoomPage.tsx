@@ -110,7 +110,7 @@ export default function CreateRoomPage() {
     <div className="create-room-scene animate-screen-in">
       <img
         className="create-room-scene__background"
-        src="/assets/rooms/create/background.png"
+        src="/assets/rooms/create/background.webp"
         alt=""
         aria-hidden="true"
       />

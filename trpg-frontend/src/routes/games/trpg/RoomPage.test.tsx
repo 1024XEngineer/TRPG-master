@@ -103,6 +103,7 @@ const {
   mockRollCheck,
   mockSendChat,
   mockSubmitAction,
+  mockSubmitPlannedAction,
   mockWaitForWsOpen,
   wsHandlers,
   dice3dSupported,
@@ -129,6 +130,7 @@ const {
       return () => handlers.delete(handler)
     }),
     mockSubmitAction: vi.fn(),
+    mockSubmitPlannedAction: vi.fn(),
     mockWaitForWsOpen: vi.fn(() => Promise.resolve()),
   }
 })
@@ -155,6 +157,7 @@ vi.mock('@/services/api-client', () => ({
       rollCheck: mockRollCheck,
       sendChat: mockSendChat,
       submitAction: mockSubmitAction,
+      submitPlannedAction: mockSubmitPlannedAction,
     },
   },
 }))
@@ -363,6 +366,7 @@ describe('RoomPage conversation history', () => {
       autoEmotion: true,
     })
     mockSubmitAction.mockReturnValue(new Promise(() => undefined))
+    mockSubmitPlannedAction.mockReturnValue(new Promise(() => undefined))
   })
 
   afterEach(() => {
@@ -1175,7 +1179,8 @@ describe('RoomPage conversation history', () => {
     const input = screen.getByPlaceholderText('输入行动…')
     fireEvent.change(input, { target: { value: '我调查书架' } })
     fireEvent.submit(input.closest('form')!)
-    await waitFor(() => expect(mockSubmitAction).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(mockSubmitPlannedAction).toHaveBeenCalledTimes(1))
+    expect(mockSubmitAction).not.toHaveBeenCalled()
 
     act(() => emitWsMessage({
       type: 'turn.failed',
@@ -1287,6 +1292,117 @@ describe('RoomPage conversation history', () => {
     expect(screen.getByRole('button', { name: '语音输入不可用' })).toBeDisabled()
     expect(screen.getByText('当前页面不是安全连接，请使用 HTTPS 或 localhost 访问')).toBeInTheDocument()
     expect(RoomSpeechRecognition.instances).toHaveLength(0)
+  })
+
+  it('submits the room input through ActionPlan and clears stale decisions', async () => {
+    renderRoomPage()
+
+    const input = screen.getByPlaceholderText('输入行动…')
+    fireEvent.change(input, { target: { value: '去书房找线索' } })
+    fireEvent.submit(input.closest('form')!)
+    await waitFor(() =>
+      expect(mockSubmitPlannedAction).toHaveBeenCalledWith(
+        'player-1',
+        expect.objectContaining({ utterance: '去书房找线索' }),
+      ),
+    )
+    expect(mockSubmitAction).not.toHaveBeenCalled()
+
+    const pending: Extract<ServerToClientEvent, { type: 'adjudication.pending' }> = {
+      type: 'adjudication.pending',
+      payload: {
+        correlationId: 'plan-input-1',
+        planId: 'plan-input-1',
+        sourceRevision: 'revision-1',
+        status: 'awaiting_skill_choice',
+        pendingDecision: {
+          decision_id: 'decision-1',
+          action_request_id: 'step-request-1',
+          source_revision: 'revision-1',
+          decision_version: 1,
+          actor_id: 'actor-1',
+          summary: '调查书房',
+          options: [
+            {
+              candidate_id: 'library',
+              skill_id: 'library-use',
+              display_name: '图书馆使用',
+              target_value: 50,
+              difficulty: 'regular' as const,
+              method_summary: '检查书架上的旧书',
+              player_safe_reason: '这是当前场景中可见的调查方式',
+            },
+          ],
+          allow_cancel: true,
+        },
+      },
+    }
+    act(() => emitWsMessage(pending))
+    expect(await screen.findByRole('region', { name: '待处理检定' })).toBeInTheDocument()
+
+    act(() => emitWsMessage({
+      type: 'plan.step_changed',
+      payload: {
+        correlationId: 'plan-input-1',
+        currentStep: 2,
+        completedSteps: 1,
+        totalSteps: 2,
+        phase: 'executing',
+      },
+    }))
+    expect(screen.queryByRole('region', { name: '待处理检定' })).not.toBeInTheDocument()
+
+    act(() => emitWsMessage(pending))
+    expect(await screen.findByRole('region', { name: '待处理检定' })).toBeInTheDocument()
+    act(() => emitWsMessage({
+      type: 'plan.stopped',
+      payload: {
+        correlationId: 'plan-input-1',
+        currentStep: 2,
+        completedSteps: 1,
+        totalSteps: 2,
+        phase: 'stopped',
+      },
+    }))
+    expect(screen.queryByRole('region', { name: '待处理检定' })).not.toBeInTheDocument()
+
+    act(() => emitWsMessage(pending))
+    expect(await screen.findByRole('region', { name: '待处理检定' })).toBeInTheDocument()
+    act(() => emitWsMessage({
+      type: 'plan.completed',
+      payload: {
+        correlationId: 'plan-input-1',
+        currentStep: 2,
+        completedSteps: 2,
+        totalSteps: 2,
+        phase: 'completed',
+      },
+    }))
+    expect(screen.queryByRole('region', { name: '待处理检定' })).not.toBeInTheDocument()
+
+    act(() => emitWsMessage(pending))
+    expect(await screen.findByRole('region', { name: '待处理检定' })).toBeInTheDocument()
+    act(() => emitWsMessage({
+      type: 'error',
+      payload: {
+        code: 'ACTION_IN_PROGRESS',
+        message: '当前行动仍在处理中',
+      },
+    }))
+    expect(screen.queryByRole('region', { name: '待处理检定' })).not.toBeInTheDocument()
+
+    act(() => emitWsMessage(pending))
+    expect(await screen.findByRole('region', { name: '待处理检定' })).toBeInTheDocument()
+    act(() => emitWsMessage({
+      type: 'turn.failed',
+      payload: {
+        correlationId: 'plan-input-1',
+        code: 'HOST_AGENT_TIMEOUT',
+        publicMessage: '主持 Agent 响应超时，请重试。',
+        retryable: true,
+      },
+    }))
+    expect(screen.queryByRole('region', { name: '待处理检定' })).not.toBeInTheDocument()
   })
 
   it('renders invalid Agent output as keeper guidance', () => {

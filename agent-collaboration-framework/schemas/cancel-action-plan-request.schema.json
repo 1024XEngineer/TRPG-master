@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "cancel-action-plan-request.schema.json",
+  "additionalProperties": false,
+  "properties": {
+    "request_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Request Id",
+      "type": "string"
+    },
+    "room_id": {
+      "minLength": 1,
+      "title": "Room Id",
+      "type": "string"
+    },
+    "player_id": {
+      "minLength": 1,
+      "title": "Player Id",
+      "type": "string"
+    },
+    "actor_id": {
+      "minLength": 1,
+      "title": "Actor Id",
+      "type": "string"
+    },
+    "parent_action_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Parent Action Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "request_id",
+    "room_id",
+    "player_id",
+    "actor_id",
+    "parent_action_id"
+  ],
+  "title": "CancelActionPlanRequest",
+  "type": "object"
+}

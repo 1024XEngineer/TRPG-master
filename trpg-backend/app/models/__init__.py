@@ -18,12 +18,14 @@ from app.models.content import (
 )
 from app.models.engine import (
     ActionExecution,
+    ActionPlanRunRecord,
     AdjudicationCommandExecution,
     CheckRunRecord,
     GameEvent,
     GameSession,
     ModuleVersion,
     PendingCheckDecisionRecord,
+    RoomActionReservation,
 )
 from app.models.event import CheckResult, Event
 from app.models.replay import ModuleImportJob, RoomSummary
@@ -32,6 +34,7 @@ from app.models.user import User, UserCharacterTemplate, UserSession
 
 __all__ = [
     "ActionExecution",
+    "ActionPlanRunRecord",
     "AdjudicationCommandExecution",
     "ChatMessage",
     "CheckResult",
@@ -54,6 +57,7 @@ __all__ = [
     "Player",
     "PendingCheckDecisionRecord",
     "Room",
+    "RoomActionReservation",
     "RoomSummary",
     "Scenario",
     "ScenarioScene",

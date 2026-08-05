@@ -8,21 +8,55 @@ from typing import Protocol
 import httpx
 import structlog
 from collaboration_framework.contracts import (
+    ActionAdjudication,
+    ActionPlanPolicy,
+    HostTurnDecision,
     Intent,
     JsonObject,
 )
-from collaboration_framework.host.application import IntentParser
+from collaboration_framework.host.adapters.openai_agents import (
+    current_step_adjudication_instructions,
+    host_turn_decision_instructions,
+)
+from collaboration_framework.host.application import (
+    HostTurnDecisionParser,
+    IntentParser,
+)
 from collaboration_framework.host.application.intent_parser import (
     coerce_intent_payload,
 )
 from collaboration_framework.host.schemas import (
+    ActionPlanNarrationContext,
+    ActionPlanNarrationOutput,
+    ActionPlanStepContext,
+    HostAgentContext,
     IntentContext,
     NarrationContext,
     NarrationOutput,
     OpeningNarrationContext,
 )
+from pydantic import TypeAdapter
 
 logger = structlog.get_logger()
+
+_HOST_TURN_DECISION_ADAPTER = TypeAdapter(HostTurnDecision)
+
+_SAFE_ADJUDICATION_INSTRUCTIONS = """
+只能使用输入 PlayerView 中当前可见的 ID 和能力。travel 可以对 available_exits 中明确
+匹配的目的地使用 enter_location；普通对话、确认和没有权威状态变化的动作只能使用
+narrative_only。不得从 PlayerView 猜测隐藏 Information、模组结果或 Keeper 内容，
+不得创建 runtime location/entity，不得直接推进时间。wait/rest 在领域能力尚未接入时
+必须返回不会伪造时间变化的 narrative_only。检定候选只能引用 self_actor.skills 中
+实际存在的技能；无法形成安全裁决时不得编造目标或效果。
+""".strip()
+
+_ACTION_PLAN_NARRATION_INSTRUCTIONS = """
+你是 TRPG 守秘人，只返回所要求的 JSON。只叙述 completed_steps 中已经提交的结果和
+最终 player_view；不得声称未完成步骤已经发生。needs_clarification 必须返回
+kind=clarification，并用自然的角色内措辞提出一次最小澄清。claimed_evidence_refs
+只能复制 allowed_evidence_refs 中正文确实使用的值。不得输出 raw plan、裁决效果、
+内部状态、工具结果、模型推理或协议字段。建议动作最多三条且只能来自最终 PlayerView。
+""".strip()
 
 _INTENT_INSTRUCTIONS = """\
 你是桌面角色扮演游戏的“玩家意图解析器”，不是客服，也不负责叙事。玩家输入是
@@ -262,6 +296,66 @@ class PromptOpeningNarrationModel:
             schema_name="trpg_opening_narration",
             schema=NarrationOutput.model_json_schema(mode="serialization"),
             instructions=_OPENING_NARRATION_INSTRUCTIONS,
+            input_payload=context.to_json_dict(),
+        )
+
+
+class PromptHostTurnDecisionModel:
+    """Provider-neutral structured planner for one single action or finite plan."""
+
+    def __init__(
+        self,
+        client: StructuredJsonClient,
+        *,
+        policy: ActionPlanPolicy | None = None,
+    ) -> None:
+        self._client = client
+        self._policy = policy or ActionPlanPolicy()
+
+    async def generate(self, context: HostAgentContext) -> HostTurnDecision:
+        raw = await self._client.generate(
+            schema_name="trpg_host_turn_decision",
+            schema=_HOST_TURN_DECISION_ADAPTER.json_schema(mode="serialization"),
+            instructions=(
+                f"{host_turn_decision_instructions(self._policy)}\n\n"
+                f"{_SAFE_ADJUDICATION_INSTRUCTIONS}"
+            ),
+            input_payload=context.to_json_dict(),
+        )
+        return HostTurnDecisionParser.parse(raw, policy=self._policy)
+
+
+class PromptActionPlanStepAdjudicator:
+    """Generate exactly one current-step adjudication from the latest safe view."""
+
+    def __init__(self, client: StructuredJsonClient) -> None:
+        self._client = client
+
+    async def adjudicate(self, context: ActionPlanStepContext) -> ActionAdjudication:
+        raw = await self._client.generate(
+            schema_name="trpg_action_plan_step_adjudication",
+            schema=ActionAdjudication.model_json_schema(mode="serialization"),
+            instructions=(
+                f"{current_step_adjudication_instructions()}\n\n"
+                f"{_SAFE_ADJUDICATION_INSTRUCTIONS}"
+            ),
+            input_payload=context.to_json_dict(),
+        )
+        return ActionAdjudication.model_validate(raw)
+
+
+class PromptActionPlanNarrationModel:
+    def __init__(self, client: StructuredJsonClient) -> None:
+        self._client = client
+
+    async def generate(
+        self,
+        context: ActionPlanNarrationContext,
+    ) -> JsonObject:
+        return await self._client.generate(
+            schema_name="trpg_action_plan_narration",
+            schema=ActionPlanNarrationOutput.model_json_schema(mode="serialization"),
+            instructions=_ACTION_PLAN_NARRATION_INSTRUCTIONS,
             input_payload=context.to_json_dict(),
         )
 

@@ -41,9 +41,14 @@ import anyio
 import structlog
 from collaboration_framework.contracts import (
     ActionResult,
+    CancelCheckChoice,
+    CheckDecisionRequest,
     ContractError,
     PlayerInput,
     PlayerView,
+    PostRollDecisionRequest,
+    PushAdjudication,
+    SelectCheckChoice,
 )
 from collaboration_framework.engine import RevisionConflictError
 from collaboration_framework.host.application import (
@@ -58,7 +63,12 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.websockets import WebSocketState
 
+from app.core.action_plan_turn import (
+    ActionPlanTurnResult,
+    action_plan_turn_application,
+)
 from app.core.db import async_session_factory
+from app.core.engine import adjudication_engine_service
 from app.core.turn import ActorResolutionError, PreparedTurn, turn_application
 from app.core.turn_events import (
     TurnEvent,
@@ -77,7 +87,11 @@ from app.core.turn_observability import (
 )
 from app.dto.ws import (
     ActionBroadcastPayload,
+    ActionPlanCancelPayload,
     ActionSubmitPayload,
+    AdjudicationChoicePayload,
+    AdjudicationPendingPayload,
+    AdjudicationPostRollPayload,
     ChatMessagePayload,
     ChatSendPayload,
     CheckRequestPayload,
@@ -90,6 +104,7 @@ from app.dto.ws import (
     NarrationChunkPayload,
     NarrationPushPayload,
     OpeningStartedPayload,
+    PlanProgressPayload,
     PlayerReadyPayload,
     RoomJoinPayload,
     RoomRejoinPayload,
@@ -203,6 +218,155 @@ async def _send_turn_failed(
             retryable=retryable,
         ),
     )
+
+
+async def _send_plan_progress(websocket: WebSocket, event) -> None:
+    payload = PlanProgressPayload(
+        correlation_id=event.correlation_id,
+        current_step=event.current_step,
+        completed_steps=event.completed_steps,
+        total_steps=event.total_steps,
+        phase=event.phase,
+        public_progress_label=event.public_progress_label,
+        safe_reason=event.safe_reason,
+    )
+    await websocket.send_json(
+        ServerEnvelope(
+            type=event.type,
+            payload=payload.model_dump(by_alias=True),
+        ).model_dump(by_alias=True)
+    )
+
+
+async def _send_action_plan_result(
+    db: AsyncSession,
+    websocket: WebSocket,
+    room_id: str,
+    player_id: str,
+    result: ActionPlanTurnResult,
+) -> bool:
+    if result.waiting_for_player:
+        execution = result.execution
+        if execution is None:
+            raise ContractError("waiting_for_player 缺少 adjudication execution")
+        pending = AdjudicationPendingPayload(
+            correlation_id=result.player_input.client_action_id,
+            plan_id=result.plan_id,
+            source_revision=execution.view_revision,
+            status=execution.status,
+            pending_decision=execution.pending_decision,
+            check_run=execution.check_run,
+        )
+        await websocket.send_json(
+            ServerEnvelope(
+                type="adjudication.pending",
+                payload=pending.model_dump(by_alias=True, mode="json"),
+            ).model_dump(by_alias=True)
+        )
+        return False
+
+    narration = result.narration
+    if narration is None:
+        raise ContractError("settled ActionPlan 缺少 narration")
+    await websocket.send_json(
+        {
+            "protocol_version": "1",
+            "message_type": "turn.completed",
+            "correlation_id": result.player_input.client_action_id,
+            "payload": {
+                "room_id": room_id,
+                "player_id": player_id,
+                "actor_id": result.player_input.actor_id,
+                "narration": {
+                    "kind": narration.kind,
+                    "text": narration.text,
+                    "claimed_fact_ids": list(narration.claimed_evidence_refs),
+                    "suggested_actions": list(narration.suggested_actions),
+                },
+                "player_view": result.player_view.to_json_dict(),
+            },
+        }
+    )
+    await _send_view_updated(websocket, player_id, result.player_view)
+    recorded = await _deliver_turn_narration(
+        db,
+        websocket,
+        room_id,
+        player_id,
+        client_action_id=result.player_input.client_action_id,
+        text=narration.text,
+        clarification=narration.kind == "clarification",
+        actor_id=result.player_input.actor_id,
+        scene_id=result.player_view.scene_id,
+        view_revision=result.player_view.revision,
+    )
+    await action_plan_turn_application.mark_narration_persisted(
+        room_id=room_id,
+        parent_action_id=result.player_input.client_action_id,
+    )
+    return recorded
+
+
+async def _recover_persisted_plan_narration(
+    db: AsyncSession,
+    websocket: WebSocket,
+    *,
+    room_id: str,
+    player_id: str,
+    client_action_id: str,
+) -> bool:
+    active = await action_plan_turn_application.get_plan(room_id, client_action_id)
+    if (
+        active is None
+        or active.parent_action_id != client_action_id
+        or active.player_id != player_id
+        or active.status not in {"awaiting_narration", "completed"}
+    ):
+        return False
+    existing = await room_service.get_correlated_event(
+        db,
+        room_id,
+        "narration.push",
+        client_action_id,
+    )
+    if existing is None:
+        return False
+    persisted = NarrationPushPayload.model_validate(existing.payload)
+    view = await turn_application.current_player_view(
+        room_id=room_id,
+        player_id=player_id,
+    )
+    await action_plan_turn_application.mark_narration_persisted(
+        room_id=room_id,
+        parent_action_id=client_action_id,
+    )
+    await websocket.send_json(
+        {
+            "protocol_version": "1",
+            "message_type": "turn.completed",
+            "correlation_id": client_action_id,
+            "payload": {
+                "room_id": room_id,
+                "player_id": player_id,
+                "actor_id": active.actor_id,
+                "narration": {
+                    "kind": "narration",
+                    "text": normalize_narration_text(persisted.text),
+                    "claimed_fact_ids": [],
+                    "suggested_actions": [],
+                },
+                "player_view": view.to_json_dict(),
+            },
+        }
+    )
+    await websocket.send_json(
+        ServerEnvelope(
+            type="narration.push",
+            payload=persisted.model_dump(by_alias=True),
+        ).model_dump(by_alias=True)
+    )
+    await _send_view_updated(websocket, player_id, view)
+    return True
 
 
 async def _send_view_updated(
@@ -753,6 +917,59 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                             # that ordering guarantees a reconnecting client receives
                             # either the live opening or this persisted replay.
                             await _send_persisted_opening(db, websocket, room_id)
+                            active_plan = (
+                                await action_plan_turn_application.active_for_room(room_id)
+                            )
+                            if (
+                                active_plan is not None
+                                and active_plan.player_id == bound_player_id
+                            ):
+                                await _send_plan_progress(
+                                    websocket,
+                                    type(
+                                        "RecoveredPlanProgress",
+                                        (),
+                                        {
+                                            "type": "plan.step_changed",
+                                            "correlation_id": active_plan.parent_action_id,
+                                            "current_step": min(
+                                                active_plan.current_step_index + 1,
+                                                len(active_plan.steps),
+                                            ),
+                                            "completed_steps": active_plan.completed_steps,
+                                            "total_steps": len(active_plan.steps),
+                                            "phase": (
+                                                "waiting_for_player"
+                                                if active_plan.status == "waiting_for_player"
+                                                else "understanding"
+                                            ),
+                                            "public_progress_label": None,
+                                            "safe_reason": None,
+                                        },
+                                    )(),
+                                )
+                                if active_plan.status == "waiting_for_player":
+                                    execution = active_plan.steps[
+                                        active_plan.current_step_index
+                                    ].adjudication_execution
+                                    if execution is not None:
+                                        pending = AdjudicationPendingPayload(
+                                            correlation_id=active_plan.parent_action_id,
+                                            plan_id=active_plan.plan_id,
+                                            source_revision=execution.view_revision,
+                                            status=execution.status,
+                                            pending_decision=execution.pending_decision,
+                                            check_run=execution.check_run,
+                                        )
+                                        await websocket.send_json(
+                                            ServerEnvelope(
+                                                type="adjudication.pending",
+                                                payload=pending.model_dump(
+                                                    by_alias=True,
+                                                    mode="json",
+                                                ),
+                                            ).model_dump(by_alias=True)
+                                        )
                         else:
                             return
                         continue
@@ -808,6 +1025,149 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                             bound_player_id,
                             chat_payload,
                         )
+                    elif event_type == "action.plan.submit":
+                        submit_payload = ActionSubmitPayload.model_validate(raw_payload)
+                        if submit_payload.visibility == "private":
+                            await _send_error(
+                                websocket,
+                                "NOT_IMPLEMENTED",
+                                "私密行动本期尚未实现",
+                                correlation_id=submit_payload.client_action_id,
+                            )
+                            continue
+                        if await _recover_persisted_plan_narration(
+                            db,
+                            websocket,
+                            room_id=room_id,
+                            player_id=bound_player_id,
+                            client_action_id=submit_payload.client_action_id,
+                        ):
+                            continue
+                        try:
+                            result = await action_plan_turn_application.start(
+                                room_id=room_id,
+                                player_id=bound_player_id,
+                                client_action_id=submit_payload.client_action_id,
+                                utterance=submit_payload.utterance,
+                                on_progress=lambda event: _send_plan_progress(
+                                    websocket,
+                                    event,
+                                ),
+                            )
+                            await _send_action_plan_result(
+                                db,
+                                websocket,
+                                room_id,
+                                bound_player_id,
+                                result,
+                            )
+                        except Exception as exc:
+                            await _send_turn_failed(
+                                websocket,
+                                submit_payload.client_action_id,
+                                exc,
+                            )
+                    elif event_type == "adjudication.select":
+                        choice = AdjudicationChoicePayload.model_validate(raw_payload)
+                        if choice.cancel:
+                            selected = CancelCheckChoice()
+                        elif choice.candidate_id is not None:
+                            selected = SelectCheckChoice(candidate_id=choice.candidate_id)
+                        else:
+                            await _send_error(
+                                websocket,
+                                "INVALID_CHOICE",
+                                "必须选择一个技能或取消当前检定",
+                                correlation_id=choice.client_action_id,
+                            )
+                            continue
+                        try:
+                            await adjudication_engine_service.decide(
+                                CheckDecisionRequest(
+                                    request_id=choice.request_id,
+                                    room_id=room_id,
+                                    player_id=bound_player_id,
+                                    source_revision=choice.source_revision,
+                                    decision_id=choice.decision_id,
+                                    decision_version=choice.decision_version,
+                                    choice=selected,
+                                )
+                            )
+                            result = await action_plan_turn_application.resume_owned(
+                                room_id=room_id,
+                                player_id=bound_player_id,
+                                parent_action_id=choice.client_action_id,
+                                on_progress=lambda event: _send_plan_progress(
+                                    websocket,
+                                    event,
+                                ),
+                            )
+                            await _send_action_plan_result(
+                                db,
+                                websocket,
+                                room_id,
+                                bound_player_id,
+                                result,
+                            )
+                        except Exception as exc:
+                            await _send_turn_failed(websocket, choice.client_action_id, exc)
+                    elif event_type == "adjudication.post_roll":
+                        choice = AdjudicationPostRollPayload.model_validate(raw_payload)
+                        try:
+                            await adjudication_engine_service.decide_post_roll(
+                                PostRollDecisionRequest(
+                                    request_id=choice.request_id,
+                                    room_id=room_id,
+                                    player_id=bound_player_id,
+                                    source_revision=choice.source_revision,
+                                    check_id=choice.check_id,
+                                    check_version=choice.check_version,
+                                    option_id=choice.option_id,
+                                    push_adjudication=(
+                                        PushAdjudication(
+                                            method_description=choice.revised_method
+                                        )
+                                        if choice.revised_method is not None
+                                        else None
+                                    ),
+                                )
+                            )
+                            result = await action_plan_turn_application.resume_owned(
+                                room_id=room_id,
+                                player_id=bound_player_id,
+                                parent_action_id=choice.client_action_id,
+                                on_progress=lambda event: _send_plan_progress(
+                                    websocket,
+                                    event,
+                                ),
+                            )
+                            await _send_action_plan_result(
+                                db,
+                                websocket,
+                                room_id,
+                                bound_player_id,
+                                result,
+                            )
+                        except Exception as exc:
+                            await _send_turn_failed(websocket, choice.client_action_id, exc)
+                    elif event_type == "action.plan.cancel":
+                        cancel = ActionPlanCancelPayload.model_validate(raw_payload)
+                        try:
+                            result = await action_plan_turn_application.cancel_remaining(
+                                room_id=room_id,
+                                player_id=bound_player_id,
+                                parent_action_id=cancel.client_action_id,
+                                request_id=cancel.request_id,
+                            )
+                            await _send_action_plan_result(
+                                db,
+                                websocket,
+                                room_id,
+                                bound_player_id,
+                                result,
+                            )
+                        except Exception as exc:
+                            await _send_turn_failed(websocket, cancel.client_action_id, exc)
                     elif event_type == "action.submit":
                         try:
                             submit_payload = ActionSubmitPayload.model_validate(raw_payload)

@@ -208,6 +208,51 @@ class _SqlAlchemyEngineTransaction(EngineTransaction):
             raise ContractError("裁决命令 committed_state_version 与结果不一致")
         return command
 
+    async def find_latest_adjudication_command_by_action(
+        self,
+        action_request_id: str,
+    ) -> CompletedAdjudicationCommand | None:
+        self._ensure_active()
+        records = list(
+            await self._session.scalars(
+                select(AdjudicationCommandExecution)
+                .where(
+                    AdjudicationCommandExecution.room_id == self._room_id,
+                    AdjudicationCommandExecution.action_request_id == action_request_id,
+                )
+                .order_by(AdjudicationCommandExecution.committed_state_version.desc())
+            )
+        )
+        if not records:
+            # Rows written before issue #225 have no indexed action_request_id;
+            # inspect only those legacy rows and keep the compatibility local.
+            records = list(
+                await self._session.scalars(
+                    select(AdjudicationCommandExecution)
+                    .where(
+                        AdjudicationCommandExecution.room_id == self._room_id,
+                        AdjudicationCommandExecution.action_request_id.is_(None),
+                    )
+                    .order_by(AdjudicationCommandExecution.committed_state_version.desc())
+                )
+            )
+        for record in records:
+            if record.request_schema_version != 1 or record.result_schema_version != 1:
+                raise ContractError("不支持的裁决命令 schema version")
+            command = CompletedAdjudicationCommand.model_validate(
+                {
+                    "request_id": record.request_id,
+                    "request": deepcopy(record.request_json),
+                    "execution": deepcopy(record.result_json),
+                }
+            )
+            if command.execution.action_request_id != action_request_id:
+                continue
+            if command.execution.view_revision != str(record.committed_state_version):
+                raise ContractError("裁决命令 committed_state_version 与结果不一致")
+            return command
+        return None
+
     async def find_pending_check_by_action(
         self,
         action_request_id: str,
@@ -476,6 +521,7 @@ class _SqlAlchemyEngineTransaction(EngineTransaction):
             AdjudicationCommandExecution(
                 room_id=self._room_id,
                 request_id=completed_command.request_id,
+                action_request_id=completed_command.execution.action_request_id,
                 request_schema_version=1,
                 request_json=completed_command.request.to_json_dict(),
                 result_schema_version=1,

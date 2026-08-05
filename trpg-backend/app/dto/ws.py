@@ -26,7 +26,11 @@ payload dict，再按 type 分支，把 payload dict 交给下面对应的具体
 
 from typing import Any, Literal
 
-from collaboration_framework.contracts import PlayerView
+from collaboration_framework.contracts import (
+    CheckRunView,
+    PendingCheckDecisionView,
+    PlayerView,
+)
 from pydantic import Field, field_validator
 
 from app.dto.common import CamelModel, UtcDatetime
@@ -101,6 +105,35 @@ class CheckRollPayload(CamelModel):
     client_action_id: str = Field(..., min_length=1, max_length=200)
     skill: str = Field(..., min_length=1)
     roll_value: int = Field(..., ge=1, le=100)
+
+
+class AdjudicationChoicePayload(CamelModel):
+    """Choose or cancel a v3 Engine-owned pending skill decision."""
+
+    client_action_id: str = Field(..., min_length=1, max_length=200)
+    request_id: str = Field(..., min_length=1, max_length=200)
+    source_revision: str = Field(..., min_length=1)
+    decision_id: str = Field(..., min_length=1)
+    decision_version: int = Field(..., ge=1)
+    candidate_id: str | None = Field(default=None, min_length=1)
+    cancel: bool = False
+
+
+class AdjudicationPostRollPayload(CamelModel):
+    """Resolve a v3 Engine-owned post-roll decision."""
+
+    client_action_id: str = Field(..., min_length=1, max_length=200)
+    request_id: str = Field(..., min_length=1, max_length=200)
+    source_revision: str = Field(..., min_length=1)
+    check_id: str = Field(..., min_length=1)
+    check_version: int = Field(..., ge=1)
+    option_id: str = Field(..., min_length=1)
+    revised_method: str | None = Field(default=None, min_length=1, max_length=1000)
+
+
+class ActionPlanCancelPayload(CamelModel):
+    client_action_id: str = Field(..., min_length=1, max_length=200)
+    request_id: str = Field(..., min_length=1, max_length=200)
 
 
 class SanCheckRollPayload(CamelModel):
@@ -220,6 +253,31 @@ class TurnFailedPayload(CamelModel):
     code: str
     public_message: str
     retryable: bool
+
+
+class PlanProgressPayload(CamelModel):
+    correlation_id: str
+    current_step: int = Field(..., ge=1)
+    completed_steps: int = Field(..., ge=0)
+    total_steps: int = Field(..., ge=2)
+    phase: Literal[
+        "understanding",
+        "executing",
+        "waiting_for_player",
+        "stopped",
+        "completed",
+    ]
+    public_progress_label: str | None = None
+    safe_reason: str | None = None
+
+
+class AdjudicationPendingPayload(CamelModel):
+    correlation_id: str
+    plan_id: str | None = None
+    source_revision: str
+    status: Literal["awaiting_skill_choice", "awaiting_post_roll_decision"]
+    pending_decision: PendingCheckDecisionView | None = None
+    check_run: CheckRunView | None = None
 
 
 class ViewUpdatedPayload(CamelModel):

@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "action-plan-policy.schema.json",
+  "additionalProperties": false,
+  "description": "A frozen runtime policy, not a product-level schema length limit.",
+  "properties": {
+    "policy_schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Policy Schema Version",
+      "type": "integer"
+    },
+    "max_plan_steps": {
+      "default": 32,
+      "maximum": 1024,
+      "minimum": 2,
+      "title": "Max Plan Steps",
+      "type": "integer"
+    },
+    "max_steps_per_advance": {
+      "default": 3,
+      "maximum": 1024,
+      "minimum": 1,
+      "title": "Max Steps Per Advance",
+      "type": "integer"
+    }
+  },
+  "title": "ActionPlanPolicy",
+  "type": "object"
+}

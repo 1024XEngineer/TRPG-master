@@ -282,14 +282,18 @@ export default function CharacterReadyPage() {
       </p>
 
       {/* Player List：自己能看查看/编辑，队友只能看到"建完了没有"——角色卡内容是私密的 */}
-      <div className="flex flex-col gap-2">
+      <div data-onboarding-target="player-status" className="flex flex-col gap-2">
         {players.length === 0 && (
           <div className="text-center py-6 text-xs text-text-dim">正在获取房间成员…</div>
         )}
         {players.map((p) => {
           const isSelf = p.playerId === playerId
           return (
-            <div key={p.playerId} className="flex items-center gap-3 px-3.5 py-3 bg-card border border-border-light rounded-md">
+            <div
+              key={p.playerId}
+              data-onboarding-target={isSelf ? 'character-summary' : undefined}
+              className="flex items-center gap-3 px-3.5 py-3 bg-card border border-border-light rounded-md"
+            >
               <div className={`w-10 h-10 rounded-full bg-panel border border-border-mid flex items-center justify-center text-lg flex-shrink-0 ${p.hasCharacter ? 'border-brass' : 'border-dashed border-border-light'}`}>
                 {p.hasCharacter ? '🔍' : '○'}
               </div>
@@ -345,6 +349,7 @@ export default function CharacterReadyPage() {
         <button
           onClick={handleStartGame}
           disabled={!allHaveCharacters || starting}
+          data-onboarding-target="start-game"
           className="w-full mt-2 px-6 py-3.5 rounded-sm bg-brass text-white text-sm font-semibold active:bg-brass-dark transition-all disabled:opacity-50 flex items-center justify-center gap-2"
         >
           <Swords className="w-4 h-4" />

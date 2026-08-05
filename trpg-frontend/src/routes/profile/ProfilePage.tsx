@@ -1,15 +1,17 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, LogOut } from 'lucide-react'
+import { ArrowLeft, LogOut, RotateCcw } from 'lucide-react'
 import { useAuthStore } from '@/stores/auth-store'
 import { useRoomStore } from '@/stores/room-store'
 import { useCharacterStore } from '@/stores/character-store'
 import { updateProfile, fetchMe, logout as logoutFromServer } from '@/services/auth'
 import { friendlyErrorMessage } from '@/services/api-client'
+import { resetOnboardingState } from '@/features/onboarding'
 
 export default function ProfilePage() {
   const navigate = useNavigate()
   const [account, setAccount] = useState('')
+  const userId = useAuthStore((s) => s.userId)
   const nickname = useAuthStore((s) => s.nickname)
   const setNickname = useAuthStore((s) => s.setNickname)
   const clearAuthStore = useAuthStore((s) => s.logout)
@@ -19,6 +21,7 @@ export default function ProfilePage() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [saved, setSaved] = useState(false)
+  const [guideReset, setGuideReset] = useState(false)
 
   useEffect(() => {
     fetchMe().then((me) => { if (me) setAccount(me.account) })
@@ -51,6 +54,19 @@ export default function ProfilePage() {
     resetRoomStore()
     clearCharacterStore()
     navigate('/auth/login')
+  }
+
+  const handleResetOnboarding = () => {
+    setError('')
+    setSaved(false)
+    setGuideReset(false)
+
+    if (!userId || !resetOnboardingState(userId)) {
+      setError('新手指引重置失败，请稍后重试')
+      return
+    }
+
+    setGuideReset(true)
   }
 
   return (
@@ -94,6 +110,18 @@ export default function ProfilePage() {
         >
           {saving ? '保存中…' : '保存'}
         </button>
+
+        <button
+          onClick={handleResetOnboarding}
+          className="w-full py-3.5 rounded-sm text-sm font-semibold border border-border-light text-text-dim flex items-center justify-center gap-2 active:bg-panel active:scale-[0.97] transition-all"
+        >
+          <RotateCcw className="w-[16px] h-[16px]" /> 重新观看新手指引
+        </button>
+        {guideReset && (
+          <p className="text-[11px] text-brass-dark text-center">
+            已重置，下次进入房间流程时会重新显示
+          </p>
+        )}
 
         <button
           onClick={handleLogout}

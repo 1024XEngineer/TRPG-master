@@ -68,6 +68,10 @@ class Room(Base):
     attribute_gen_method: Mapped[str | None] = mapped_column(
         String(20), nullable=True, default=None
     )
+    # 房间统一的主持人音色。NULL 表示跟随部署配置中的默认音色。
+    host_speech_voice_type: Mapped[str | None] = mapped_column(
+        String(200), nullable=True, default=None
+    )
     # 已探索场景 id 列表（对应 scenario_scenes.id），JSON 数组存起来，本期
     # 没有任何写入路径（推进场景发现属于规则引擎/编排器范畴），只铺字段。
     discovered_scene_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)

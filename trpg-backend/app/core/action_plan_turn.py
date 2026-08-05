@@ -154,6 +154,7 @@ class ActionPlanTurnApplication:
         client_action_id: str,
         utterance: str,
         on_progress: Callable[[object], Awaitable[None]] | None = None,
+        on_input_accepted: (Callable[[PlayerInput, PlayerView], Awaitable[None]] | None) = None,
     ) -> ActionPlanTurnResult:
         actor_id = await self._resolve_actor_id(room_id, player_id)
         player_input = PlayerInput(
@@ -173,6 +174,8 @@ class ActionPlanTurnApplication:
             return await self._from_plan(player_input, advanced)
 
         view = await self._projector.project(player_input)
+        if on_input_accepted is not None:
+            await on_input_accepted(player_input, view)
         decision = await self._planner.generate(
             HostAgentContext(
                 player_input=player_input,
@@ -281,6 +284,7 @@ class ActionPlanTurnApplication:
         *,
         room_id: str,
         parent_action_id: str,
+        on_progress: Callable[[object], Awaitable[None]] | None = None,
     ) -> None:
         active = await self._orchestrator.active_for_room(room_id)
         if (
@@ -291,6 +295,7 @@ class ActionPlanTurnApplication:
             await self._orchestrator.mark_narration_completed(
                 room_id=room_id,
                 parent_action_id=parent_action_id,
+                on_progress=on_progress,
             )
 
     async def _from_plan(

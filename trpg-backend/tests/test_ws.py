@@ -1514,17 +1514,41 @@ def test_action_plan_submit_emits_safe_progress_and_one_parent_completion(
                 },
             }
         )
-        completed, seen = receive_until(
+        terminal, seen = receive_until(
             ws,
-            lambda message: message.get("message_type") == "turn.completed",
+            lambda message: message.get("type") == "plan.completed",
+            limit=40,
         )
 
+    completed = next(message for message in seen if message.get("message_type") == "turn.completed")
+    action_echo = next(message for message in seen if message.get("type") == "action.broadcast")
     progress = [message for message in seen if message.get("type", "").startswith("plan.")]
     assert completed["correlation_id"] == "parent-plan-ws-225"
     assert completed["payload"]["narration"]["kind"] == "narration"
+    assert action_echo["payload"]["clientActionId"] == "parent-plan-ws-225"
+    assert action_echo["payload"]["utterance"] == "先观察房间，然后询问眼前的人"
     assert any(message["type"] == "plan.started" for message in progress)
+    assert seen.index(action_echo) < next(
+        index for index, message in enumerate(seen) if message.get("type") == "plan.started"
+    )
+    assert terminal["payload"]["correlationId"] == "parent-plan-ws-225"
+    assert terminal["payload"]["phase"] == "completed"
     assert sum(message.get("message_type") == "turn.completed" for message in seen) == 1
+    assert sum(message.get("type") == "plan.completed" for message in seen) == 1
     assert all("semanticGoal" not in str(message) for message in progress)
+
+    conversation = sync_client.get(
+        f"{ROOMS_BASE}/{room['roomId']}/conversation",
+        headers={"X-Reconnect-Token": room["reconnectToken"]},
+    ).json()["data"]
+    persisted_actions = [
+        event
+        for event in conversation
+        if event["type"] == "action.broadcast"
+        and event["payload"]["clientActionId"] == "parent-plan-ws-225"
+    ]
+    assert len(persisted_actions) == 1
+    assert persisted_actions[0]["payload"]["utterance"] == "先观察房间，然后询问眼前的人"
 
 
 def test_legacy_action_submit_is_blocked_while_plan_is_active(

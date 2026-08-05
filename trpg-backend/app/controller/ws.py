@@ -336,6 +336,7 @@ async def _send_action_plan_result(
     await action_plan_turn_application.mark_narration_persisted(
         room_id=room_id,
         parent_action_id=result.player_input.client_action_id,
+        on_progress=lambda event: _send_plan_progress(websocket, event),
     )
     return recorded
 
@@ -372,6 +373,7 @@ async def _recover_persisted_plan_narration(
     await action_plan_turn_application.mark_narration_persisted(
         room_id=room_id,
         parent_action_id=client_action_id,
+        on_progress=lambda event: _send_plan_progress(websocket, event),
     )
     await websocket.send_json(
         {
@@ -1107,6 +1109,10 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 on_progress=lambda event: _send_plan_progress(
                                     websocket,
                                     event,
+                                ),
+                                on_input_accepted=partial(
+                                    _broadcast_action_utterance,
+                                    db,
                                 ),
                             )
                             await _send_action_plan_result(

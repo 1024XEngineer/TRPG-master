@@ -1,7 +1,12 @@
 import { describe, expect, it, beforeEach } from 'vitest'
 import { calculateSpotlightRect } from './geometry'
 import { firstStepForPath, stepsForAudience } from './steps'
-import { onboardingStorageKey, readOnboardingState, writeOnboardingState } from './storage'
+import {
+  onboardingStorageKey,
+  readOnboardingState,
+  resetOnboardingState,
+  writeOnboardingState,
+} from './storage'
 
 describe('onboarding geometry', () => {
   it('uses the inner border edge as the fixed-position coordinate origin', () => {
@@ -57,5 +62,14 @@ describe('onboarding storage', () => {
   it('ignores malformed persisted data', () => {
     window.localStorage.setItem(onboardingStorageKey('user-a'), '{"status":"broken"}')
     expect(readOnboardingState('user-a')).toBeNull()
+  })
+
+  it('resets only the current account so the guide can be replayed', () => {
+    writeOnboardingState('user-a', { status: 'completed', stepId: null })
+    writeOnboardingState('user-b', { status: 'skipped', stepId: null })
+
+    expect(resetOnboardingState('user-a')).toBe(true)
+    expect(readOnboardingState('user-a')).toBeNull()
+    expect(readOnboardingState('user-b')).toEqual({ status: 'skipped', stepId: null })
   })
 })

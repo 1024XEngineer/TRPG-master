@@ -37,3 +37,12 @@ export function writeOnboardingState(userId: string, state: OnboardingState): vo
     // A blocked storage implementation must not prevent a player from entering a game.
   }
 }
+
+export function resetOnboardingState(userId: string): boolean {
+  try {
+    window.localStorage.removeItem(onboardingStorageKey(userId))
+    return true
+  } catch {
+    return false
+  }
+}

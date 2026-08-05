@@ -239,6 +239,26 @@ async def _send_plan_progress(websocket: WebSocket, event) -> None:
     )
 
 
+async def _reject_if_plan_active(
+    websocket: WebSocket,
+    *,
+    room_id: str,
+    correlation_id: str,
+) -> bool:
+    """Keep legacy single-action submissions behind the durable Plan gate."""
+
+    active_plan = await action_plan_turn_application.active_for_room(room_id)
+    if active_plan is None:
+        return False
+    await _send_error(
+        websocket,
+        "ACTION_IN_PROGRESS",
+        "守秘人正在处理行动计划，请先完成或取消当前计划",
+        correlation_id=correlation_id,
+    )
+    return True
+
+
 def _require_pending_adjudication_status(
     status: str,
 ) -> Literal["awaiting_skill_choice", "awaiting_post_roll_decision"]:
@@ -1055,7 +1075,30 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                             client_action_id=submit_payload.client_action_id,
                         ):
                             continue
+                        lock_token = action_lock_manager.try_acquire(room_id)
+                        if lock_token is None:
+                            await _send_error(
+                                websocket,
+                                "ACTION_IN_PROGRESS",
+                                "守秘人正在处理其他玩家的行动，请稍候",
+                                correlation_id=submit_payload.client_action_id,
+                            )
+                            continue
                         try:
+                            active_plan = await action_plan_turn_application.active_for_room(
+                                room_id
+                            )
+                            if (
+                                active_plan is not None
+                                and active_plan.parent_action_id != submit_payload.client_action_id
+                            ):
+                                await _send_error(
+                                    websocket,
+                                    "ACTION_IN_PROGRESS",
+                                    "守秘人正在处理其他玩家的行动计划，请稍候",
+                                    correlation_id=submit_payload.client_action_id,
+                                )
+                                continue
                             result = await action_plan_turn_application.start(
                                 room_id=room_id,
                                 player_id=bound_player_id,
@@ -1079,6 +1122,8 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 submit_payload.client_action_id,
                                 exc,
                             )
+                        finally:
+                            action_lock_manager.release(room_id, lock_token)
                     elif event_type == "adjudication.select":
                         choice = AdjudicationChoicePayload.model_validate(raw_payload)
                         if choice.cancel:
@@ -1206,6 +1251,12 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 "私密行动本期尚未实现",
                                 correlation_id=submit_payload.client_action_id,
                             )
+                            continue
+                        if await _reject_if_plan_active(
+                            websocket,
+                            room_id=room_id,
+                            correlation_id=submit_payload.client_action_id,
+                        ):
                             continue
                         lock_token = action_lock_manager.try_acquire(room_id)
                         if lock_token is None:

@@ -1109,6 +1109,11 @@ export default function RoomPage() {
         envelope.type === 'plan.stopped' ||
         envelope.type === 'plan.completed'
       ) {
+        // A plan step change supersedes any prior check decision. The server
+        // sends a fresh adjudication.pending when the new step is waiting for
+        // the player; clearing first prevents stale decision IDs from being
+        // submitted during the transition or after a terminal event.
+        setPendingAdjudication(null)
         setActivePlanId(
           envelope.type === 'plan.completed' || envelope.type === 'plan.stopped'
             ? null
@@ -1135,6 +1140,7 @@ export default function RoomPage() {
       } else if (envelope.type === 'turn.failed') {
         setTyping(false)
         setProgressLabel(null)
+        setPendingAdjudication(null)
         // 片段只在叙事落库成功后才会下发，回合失败时不存在对应的权威消息——
         // 留着半截文字会让玩家以为那是这回合的结果。
         //
@@ -1154,6 +1160,7 @@ export default function RoomPage() {
       } else if (envelope.type === 'error') {
         setTyping(false)
         setProgressLabel(null)
+        setPendingAdjudication(null)
         setStreamingNarration(null)
         setActionError(envelope.payload.message)
         setActionErrorRetryable(false)
@@ -1180,9 +1187,7 @@ export default function RoomPage() {
     setActionErrorCode(null)
     setActionErrorCorrelationId(null)
     setTyping(true)
-    const submit = sdk.roomSocket.submitPlannedAction?.bind(sdk.roomSocket)
-      ?? sdk.roomSocket.submitAction.bind(sdk.roomSocket)
-    void submit(playerId, action)
+    void sdk.roomSocket.submitPlannedAction(playerId, action)
       .then((result) => {
         setPlayerView(result.player_view)
         setPendingAction((current) =>

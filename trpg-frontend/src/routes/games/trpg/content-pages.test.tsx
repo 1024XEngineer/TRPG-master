@@ -124,6 +124,7 @@ describe('content selection pages', () => {
     )
 
     const createButton = screen.getByRole('button', { name: '创建房间' })
+    expect(screen.getByRole('textbox', { name: '房间名称' })).toHaveAttribute('maxLength', '200')
     expect(createButton).toBeDisabled()
     await waitFor(() => expect(screen.getByRole('spinbutton')).toHaveValue(1))
     expect(screen.getByText('本模组要求 1 人')).toBeInTheDocument()

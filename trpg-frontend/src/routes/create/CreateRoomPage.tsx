@@ -10,6 +10,9 @@ import { createGameRoom, getModuleDetail, selectModule } from '@/services/room'
 import { friendlyErrorMessage } from '@/services/api-client'
 
 const MIN_PLAYERS = 1
+// 与后端 RoomCreate.room_name 的 max_length=200 以及 rooms.room_name 的
+// String(200) 保持一致，避免前端静默拒绝 API 本来允许的房间名。
+const MAX_ROOM_NAME_LENGTH = 200
 // 后端 RoomCreate.max_players 的校验是 le=20（trpg-backend/app/dto/room.py），
 // 这里的加减号/输入框都要跟着限制到 20，否则提交时只会收到一个 422（见
 // PR #67 review）。
@@ -159,7 +162,7 @@ export default function CreateRoomPage() {
           id="create-room-name"
           className="create-room-scene__room-name-input"
           value={roomName}
-          maxLength={30}
+          maxLength={MAX_ROOM_NAME_LENGTH}
           onChange={(event) => setRoomName(event.target.value)}
           placeholder="请输入一个房间名"
           autoComplete="off"

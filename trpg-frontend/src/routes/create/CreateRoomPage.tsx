@@ -1,7 +1,7 @@
 import { useNavigate } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import type { ModuleDetail } from 'trpg-sdk'
-import { ArrowLeft, Plus, Minus } from 'lucide-react'
+import { Plus, Minus } from 'lucide-react'
 import { GAME_REGISTRY, getSystemVisualKey, SYSTEM_COLORS } from '@/config/games'
 import { useGameStore } from '@/stores/game-store'
 import { useAuthStore } from '@/stores/auth-store'
@@ -10,6 +10,9 @@ import { createGameRoom, getModuleDetail, selectModule } from '@/services/room'
 import { friendlyErrorMessage } from '@/services/api-client'
 
 const MIN_PLAYERS = 1
+// 与后端 RoomCreate.room_name 的 max_length=200 以及 rooms.room_name 的
+// String(200) 保持一致，避免前端静默拒绝 API 本来允许的房间名。
+const MAX_ROOM_NAME_LENGTH = 200
 // 后端 RoomCreate.max_players 的校验是 le=20（trpg-backend/app/dto/room.py），
 // 这里的加减号/输入框都要跟着限制到 20，否则提交时只会收到一个 422（见
 // PR #67 review）。
@@ -107,147 +110,212 @@ export default function CreateRoomPage() {
   }
 
   return (
-    <div className="animate-screen-in min-h-screen bg-page pb-24">
-      <div className="flex items-center gap-2.5 px-5 pt-3 pb-2">
-        <button onClick={() => { store.reset(); setCreateForm({ roomName: '', maxPlayers: 4 }); navigate('/home') }} className="w-[34px] h-[34px] rounded-full bg-card border border-border-light flex items-center justify-center active:bg-panel active:scale-[0.94] transition-all">
-          <ArrowLeft className="w-[18px] h-[18px] text-text-muted" strokeWidth={2.5} />
+    <div className="create-room-scene animate-screen-in">
+      <img
+        className="create-room-scene__background"
+        src="/assets/rooms/create/background.webp"
+        alt=""
+        aria-hidden="true"
+      />
+
+      <header className="create-room-scene__header">
+        <button
+          type="button"
+          className="create-room-scene__back"
+          aria-label="返回首页"
+          onClick={() => {
+            store.reset()
+            setCreateForm({ roomName: '', maxPlayers: 4 })
+            navigate('/home')
+          }}
+        >
+          <img src="/assets/rooms/create/back-button.webp" alt="" aria-hidden="true" />
         </button>
-        <h2 className="text-lg font-bold text-text-primary">创建房间</h2>
-      </div>
+        <h1 className="sr-only">创建房间</h1>
+        <img
+          className="create-room-scene__page-title"
+          src="/assets/rooms/create/page-title.webp"
+          alt=""
+          aria-hidden="true"
+        />
+      </header>
 
-      <div className="px-5 space-y-3.5">
-        {/* ── Room Settings ── */}
-        <div className="bg-card border border-border-light rounded-md p-[18px]">
-          <h4 className="text-[12px] font-semibold text-brass-dark uppercase tracking-[0.08em] mb-3.5">房间设置</h4>
-          <div className="space-y-3">
-            <div>
-              <label className="text-[11px] font-medium text-text-muted mb-1 block">房间名称</label>
-              <input value={roomName} onChange={e => setRoomName(e.target.value)}
-                placeholder="例如：阿卡姆调查团" className="w-full px-3.5 py-2.5 rounded-[6px] bg-input border border-border-light text-text-primary text-[15px] outline-none focus:border-brass" />
-            </div>
-            <div>
-              <label className="text-[11px] font-medium text-text-muted mb-1 block">最大人数</label>
-              <div className="flex items-center gap-3">
-                <button
-                  aria-label="减少人数"
-                  onClick={() => {
-                    const next = Math.max(playerMin, maxPlayers - 1)
-                    setMaxPlayers(next)
-                    setMaxPlayersInput(String(next))
-                  }}
-                  disabled={maxPlayers <= playerMin}
-                  className="w-10 h-10 rounded-[6px] bg-input border border-border-light text-text-muted flex items-center justify-center active:bg-panel disabled:opacity-40 disabled:cursor-not-allowed transition-all">
-                  <Minus className="w-[16px] h-[16px]" />
-                </button>
-                <div className="flex-1 flex items-center justify-center gap-1">
-                  <input
-                    type="number"
-                    inputMode="numeric"
-                    min={playerMin}
-                    max={playerMax}
-                    value={maxPlayersInput}
-                    onChange={e => setMaxPlayersInput(e.target.value)}
-                    onBlur={() => {
-                      const v = parseInt(maxPlayersInput, 10)
-                      const clamped = Number.isNaN(v)
-                        ? maxPlayers
-                        : clampPlayerCount(v, playerMin, playerMax)
-                      setMaxPlayers(clamped)
-                      setMaxPlayersInput(String(clamped))
-                    }}
-                    className="w-16 text-center text-lg font-semibold font-mono text-text-primary bg-transparent outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                  />
-                  <span className="text-sm text-text-muted">人</span>
-                </div>
-                <button
-                  aria-label="增加人数"
-                  onClick={() => {
-                    const next = Math.min(playerMax, maxPlayers + 1)
-                    setMaxPlayers(next)
-                    setMaxPlayersInput(String(next))
-                  }}
-                  disabled={maxPlayers >= playerMax}
-                  className="w-10 h-10 rounded-[6px] bg-input border border-border-light text-text-muted flex items-center justify-center active:bg-panel disabled:opacity-40 disabled:cursor-not-allowed transition-all">
-                  <Plus className="w-[16px] h-[16px]" />
-                </button>
-              </div>
-              <p className="text-[10px] text-text-dim mt-1.5">
-                {selectedScenario
-                  ? `本模组要求 ${playerMin === playerMax ? playerMin : `${playerMin}-${playerMax}`} 人`
-                  : `最多 ${MAX_PLAYERS} 人`}
-              </p>
-            </div>
+      <section className="create-room-scene__settings" aria-labelledby="room-settings-title">
+        <img
+          className="create-room-scene__archive"
+          src="/assets/rooms/create/archive.webp"
+          alt=""
+          aria-hidden="true"
+        />
+        <h2 id="room-settings-title" className="sr-only">房间设置</h2>
+        <img
+          className="create-room-scene__settings-title"
+          src="/assets/rooms/create/settings-title.webp"
+          alt=""
+          aria-hidden="true"
+        />
+
+        <label className="create-room-scene__room-name-label" htmlFor="create-room-name">
+          房间名称
+        </label>
+        <input
+          id="create-room-name"
+          className="create-room-scene__room-name-input"
+          value={roomName}
+          maxLength={MAX_ROOM_NAME_LENGTH}
+          onChange={(event) => setRoomName(event.target.value)}
+          placeholder="请输入一个房间名"
+          autoComplete="off"
+        />
+
+        <span className="create-room-scene__player-label">最大人数</span>
+        <span className="create-room-scene__player-hint">
+          {selectedScenario
+            ? `本模组要求 ${playerMin === playerMax ? playerMin : `${playerMin}-${playerMax}`} 人`
+            : `最多 ${MAX_PLAYERS} 人`}
+        </span>
+        <div className="create-room-scene__player-control">
+          <button
+            type="button"
+            aria-label="减少人数"
+            onClick={() => {
+              const next = Math.max(playerMin, maxPlayers - 1)
+              setMaxPlayers(next)
+              setMaxPlayersInput(String(next))
+            }}
+            disabled={maxPlayers <= playerMin}
+          >
+            <Minus aria-hidden="true" />
+          </button>
+          <div className="create-room-scene__player-value">
+            <input
+              type="number"
+              inputMode="numeric"
+              aria-label="人数上限"
+              min={playerMin}
+              max={playerMax}
+              value={maxPlayersInput}
+              onChange={(event) => setMaxPlayersInput(event.target.value)}
+              onBlur={() => {
+                const value = parseInt(maxPlayersInput, 10)
+                const clamped = Number.isNaN(value)
+                  ? maxPlayers
+                  : clampPlayerCount(value, playerMin, playerMax)
+                setMaxPlayers(clamped)
+                setMaxPlayersInput(String(clamped))
+              }}
+            />
+            <span>人</span>
           </div>
+          <button
+            type="button"
+            aria-label="增加人数"
+            onClick={() => {
+              const next = Math.min(playerMax, maxPlayers + 1)
+              setMaxPlayers(next)
+              setMaxPlayersInput(String(next))
+            }}
+            disabled={maxPlayers >= playerMax}
+          >
+            <Plus aria-hidden="true" />
+          </button>
         </div>
+      </section>
 
-        {/* ── Select Game ── */}
-        <div className="bg-card border border-border-light rounded-md p-[18px]">
-          <h4 className="text-[12px] font-semibold text-brass-dark uppercase tracking-[0.08em] mb-3.5">选择游戏</h4>
+      <button
+        type="button"
+        className="create-room-scene__game-stamp"
+        aria-label={hasSelection ? '更换游戏' : '选择游戏'}
+        onClick={hasSelection ? handleChangeGame : handleSelectGame}
+      >
+        <img
+          className="create-room-scene__stamp-paper"
+          src="/assets/rooms/create/game-stamp.webp"
+          alt=""
+          aria-hidden="true"
+        />
+        <img
+          className="create-room-scene__dice"
+          src="/assets/rooms/create/dice.webp"
+          alt=""
+          aria-hidden="true"
+        />
+        <img
+          className="create-room-scene__select-game-title"
+          src="/assets/rooms/create/select-game-title.webp"
+          alt=""
+          aria-hidden="true"
+        />
+      </button>
 
-          {hasSelection ? (
-            <div>
-              <div className="flex items-center gap-3 px-3.5 py-3 rounded-[6px] bg-[#fdfaf4] border border-brass mb-2">
-                <div className="w-10 h-10 rounded-[10px] bg-[#eef3f8] flex items-center justify-center text-lg">
-                  {selectedScenario?.nameEn?.charAt(0) || '🎮'}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm font-semibold text-text-primary">{selectedGame?.name} · {sysColors?.name}</div>
-                  <div className="text-xs text-text-muted mt-0.5">模组：{selectedScenario?.title || store.sceneId}</div>
-                </div>
-                <button onClick={handleChangeGame}
-                  className="text-[11px] text-text-dim underline whitespace-nowrap">更换</button>
-              </div>
-            </div>
-          ) : (
-            <div className="text-center">
-              <p className="text-xs text-text-muted mb-3">选择一个游戏、规则和模组</p>
-              <button onClick={handleSelectGame}
-                className="w-full py-3 rounded-[6px] border-2 border-dashed border-border-mid text-text-muted text-sm font-medium bg-transparent active:bg-panel transition-all flex items-center justify-center gap-2">
-                <Plus className="w-[18px] h-[18px]" />
-                选择游戏
-              </button>
-            </div>
-          )}
+      <img
+        className="create-room-scene__cat"
+        src="/assets/rooms/create/detective-cat.webp"
+        alt=""
+        aria-hidden="true"
+      />
 
-        </div>
+      <section className="create-room-scene__summary" aria-labelledby="room-summary-title">
+        <img
+          className="create-room-scene__folder"
+          src="/assets/rooms/create/folder.webp"
+          alt=""
+          aria-hidden="true"
+        />
+        <img
+          className="create-room-scene__summary-flourish create-room-scene__summary-flourish--left"
+          src="/assets/rooms/create/summary-flourish.webp"
+          alt=""
+          aria-hidden="true"
+        />
+        <img
+          className="create-room-scene__summary-flourish create-room-scene__summary-flourish--right"
+          src="/assets/rooms/create/summary-flourish.webp"
+          alt=""
+          aria-hidden="true"
+        />
+        <h2 id="room-summary-title" className="sr-only">房间概览</h2>
+        <img
+          className="create-room-scene__summary-title"
+          src="/assets/rooms/create/summary-title.webp"
+          alt=""
+          aria-hidden="true"
+        />
 
-        {/* ── Room Summary ── */}
-        <div className="bg-card border border-border-light rounded-md p-[18px]">
-          <h4 className="text-[12px] font-semibold text-brass-dark uppercase tracking-[0.08em] mb-3">房间概览</h4>
-          <div className="space-y-2 text-sm text-text-body">
-            <div className="flex items-center justify-between">
-              <span className="text-text-muted">房间名</span>
-              <span className="font-semibold text-text-primary">{roomName || '未设置'}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-text-muted">游戏</span>
-              <span className="text-text-primary">{selectedGame?.name || (store.gameId || '未选择')}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-text-muted">规则</span>
-              <span className="text-text-primary">{sysColors?.name || (store.systemId || '未选择')}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-text-muted">模组</span>
-              <span className="text-text-primary">{selectedScenario?.title || store.sceneId || '未选择'}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-text-muted">人数上限</span>
-              <span className="text-text-primary">{maxPlayers} 人</span>
-            </div>
+        <dl className="create-room-scene__summary-list">
+          <div><dt>房间名</dt><dd>{roomName || '未设置'}</dd></div>
+          <div><dt>游戏</dt><dd>{selectedGame?.name || store.gameId || '未选择'}</dd></div>
+          <div><dt>规则</dt><dd>{sysColors?.name || store.systemId || '未选择'}</dd></div>
+          <div><dt>模组</dt><dd>{selectedScenario?.title || store.sceneId || '未选择'}</dd></div>
+          <div>
+            <dt>人数上限</dt>
+            <dd className="create-room-scene__summary-player-limit">
+              <span>{maxPlayers}</span><span>人</span>
+            </dd>
           </div>
-        </div>
-      </div>
+        </dl>
+      </section>
 
-      <div className="fixed bottom-0 left-0 right-0 bg-page border-t border-border-light px-5 py-3 max-w-[430px] mx-auto z-20">
-        {createError && <p className="text-[11px] text-[#c04040] text-center mb-2">{createError}</p>}
-        <button onClick={handleCreate} disabled={!canCreate}
-          className={`w-full py-3.5 rounded-sm text-sm font-semibold transition-all flex items-center justify-center gap-2 ${
-            canCreate ? 'bg-brass text-white active:bg-brass-dark active:scale-[0.97]' : 'bg-border-light text-text-dim cursor-not-allowed'
-          }`}>
-          <Plus className="w-[18px] h-[18px]" /> {creating ? '创建中…' : '创建房间'}
-        </button>
-      </div>
+      <img
+        className="create-room-scene__folder-tie"
+        src="/assets/rooms/create/folder-tie.webp"
+        alt=""
+        aria-hidden="true"
+      />
+
+      {createError && (
+        <p className="create-room-scene__error" role="alert">{createError}</p>
+      )}
+      <button
+        type="button"
+        className="create-room-scene__create"
+        onClick={handleCreate}
+        disabled={!canCreate}
+        aria-label={creating ? '创建中' : '创建房间'}
+      >
+        <img src="/assets/rooms/create/create-button.webp" alt="" aria-hidden="true" />
+        {creating && <span>创建中…</span>}
+      </button>
     </div>
   )
 }

@@ -10,7 +10,8 @@ name: PR Preview
 # 和目录会永久遗留、PR 评论也不会更新成"已回收"（fennoai review 抓到的
 # 真问题）。改成 workflow 本身总是对 opened/synchronize/reopened/closed
 # 触发，路径判断挪到 job 内部（见 changes job），只门控是否需要真的构建
-# 部署；teardown job 不受这个判断影响，只要事件是 closed 就一定跑。
+# 部署；teardown job 不受路径判断影响，但只回收同仓库 PR——fork PR 本来
+# 就不会部署，也拿不到仓库 Secrets，关闭时继续尝试 SSH 只会产生误报。
 on:
   pull_request:
     types: [opened, synchronize, reopened, closed]
@@ -248,8 +249,12 @@ jobs:
 
   teardown:
     # 不依赖 changes job（那个 job 对 closed 事件根本不跑），也不看
-    # paths——只要是 closed 事件就一定尝试回收，见文件顶部的说明。
-    if: github.event.action == 'closed'
+    # paths。同仓库 PR 才可能跑过 deploy，也只有它们的 pull_request 事件
+    # 能拿到 PREVIEW_SSH_* Secrets；fork PR 关闭时无需回收，必须在 job 级
+    # 直接跳过，否则空 SSH_PORT 会导致 `Bad port ''` 并把已合并 PR 标红。
+    if: |
+      github.event.action == 'closed' &&
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write

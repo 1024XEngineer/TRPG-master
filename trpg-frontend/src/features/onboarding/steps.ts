@@ -7,59 +7,16 @@ export interface OnboardingStep {
   title: string
   description: string
   audience?: OnboardingAudience
+  waitForTarget?: boolean
 }
 
 export const ONBOARDING_STEPS: readonly OnboardingStep[] = [
-  {
-    id: 'lobby-players',
-    route: '/room/lobby',
-    target: 'lobby-players',
-    title: '先确认房间成员',
-    description: '这里会显示已经加入房间的玩家。房主和玩家都从同一个大厅开始准备。',
-  },
-  {
-    id: 'lobby-ready',
-    route: '/room/lobby',
-    target: 'lobby-ready',
-    title: '表达你的准备状态',
-    description: '普通玩家点击“标记为已就绪”，房主会在所有玩家准备好后开始故事。',
-    audience: 'player',
-  },
-  {
-    id: 'lobby-start-story',
-    route: '/room/lobby',
-    target: 'lobby-start-story',
-    title: '房主开始准备流程',
-    description: '房主确认所有玩家就绪后，点击这里进入故事介绍和角色创建。',
-    audience: 'host',
-  },
-  {
-    id: 'story-content',
-    route: '/room/story',
-    target: 'story-content',
-    title: '先了解案件背景',
-    description: '阅读模组的背景和当前处境。理解发生了什么，会更容易决定调查员接下来要做什么。',
-  },
-  {
-    id: 'story-continue',
-    route: '/room/story',
-    target: 'story-continue',
-    title: '进入角色创建',
-    description: '阅读完成后点击“继续”，开始创建这次冒险要使用的调查员。',
-  },
   {
     id: 'character-progress',
     route: '/room/character',
     target: 'character-progress',
     title: '按四步完成角色卡',
-    description: '角色卡分为信息、属性、技能和完成四步。已填写的内容会保留，也可以返回修改。',
-  },
-  {
-    id: 'character-info',
-    route: '/room/character',
-    target: 'character-info',
-    title: '填写调查员信息',
-    description: '姓名、年龄和出身让调查员成为一个具体的人物；姓名会显示在游戏对话中。',
+    description: '角色卡分为信息、属性、技能和完成四步。先填写姓名等身份信息，已填写的内容会保留，也可以返回修改。',
   },
   {
     id: 'occupation-picker',
@@ -71,59 +28,41 @@ export const ONBOARDING_STEPS: readonly OnboardingStep[] = [
   {
     id: 'attribute-editor',
     route: '/room/character',
-    target: 'attribute-editor',
-    title: '分配基础属性',
-    description: '属性代表调查员的基础能力。调整时可以同时查看 HP、SAN、MP 等派生属性的变化。',
+    target: 'attribute-example-row',
+    title: '先了解属性，再分配点数',
+    description: '点击属性名旁的圆形说明按钮，可以查看每项属性的用途，幸运也可以查看。了解后再用 +/- 调整数值，并留意 HP、SAN、MP 等衍生属性的变化。',
+    waitForTarget: true,
   },
   {
     id: 'skill-editor',
     route: '/room/character',
     target: 'skill-editor',
-    title: '把点数分给技能',
-    description: '技能会影响调查和检定。优先强化与你选择的职业或想尝试的玩法相关的技能即可。',
+    title: '认清两种技能点',
+    description: '上方两种点数是两份建卡预算。职业列表里的技能可以先花职业点，职业点用完后还能继续花兴趣点；兴趣列表里的技能则只能花兴趣点。优先强化符合职业或玩法方向的技能即可。',
+    waitForTarget: true,
   },
   {
-    id: 'background-editor',
+    id: 'credit-rating',
     route: '/room/character',
-    target: 'background-editor',
-    title: '补充背景和装备',
-    description: '背景故事和装备帮助你代入角色，本阶段可以留空，之后仍能在角色卡中查看。',
+    target: 'credit-rating-editor',
+    title: '单独设置信用评级',
+    description: '信用评级代表调查员的经济状况与社会地位，必须落在当前职业标出的范围内。职业下限会占用职业技能点；高于下限的部分会占用兴趣技能点。',
+    waitForTarget: true,
   },
   {
     id: 'character-submit',
     route: '/room/character',
     target: 'character-submit',
     title: '完成并保存角色卡',
-    description: '点击这里提交角色卡。保存成功后会进入角色准备页，等待其他玩家。',
-  },
-  {
-    id: 'character-summary',
-    route: '/room/ready',
-    target: 'character-summary',
-    title: '检查你的角色卡',
-    description: '准备页会显示角色完成状态。你可以查看或编辑自己的角色卡，直到房主开始游戏。',
+    description: '背景和装备可以留空。确认关键信息后提交角色卡，保存成功会进入玩家准备页。',
+    waitForTarget: true,
   },
   {
     id: 'player-status',
     route: '/room/ready',
     target: 'player-status',
-    title: '等待全员完成建卡',
-    description: '角色卡内容对其他玩家保密，但大家可以看到谁已经完成。房主会在全员完成后开始游戏。',
-  },
-  {
-    id: 'start-game',
-    route: '/room/ready',
-    target: 'start-game',
-    title: '房主进入游戏',
-    description: '房主确认全员完成后点击“开始游戏”，所有玩家会进入同一个游戏房间。',
-    audience: 'host',
-  },
-  {
-    id: 'scene-header',
-    route: '/room/play',
-    target: 'scene-header',
-    title: '这是当前调查现场',
-    description: '顶部显示模组和当前场景。先阅读主持人的叙事，再决定调查员要采取的行动。',
+    title: '确认玩家准备状态',
+    description: '这里能查看谁已完成建卡；自己的角色卡可以查看或编辑。全员完成后由房主开始游戏。',
   },
   {
     id: 'action-input',
@@ -133,18 +72,11 @@ export const ONBOARDING_STEPS: readonly OnboardingStep[] = [
     description: '你可以直接输入“检查门锁”“询问侦探”或“前往走廊”等行动，不限于固定选项。',
   },
   {
-    id: 'dice-button',
-    route: '/room/play',
-    target: 'dice-button',
-    title: '需要时使用骰子',
-    description: '需要检定时，系统会提示你选择技能并掷骰。最终结果由规则引擎负责结算。',
-  },
-  {
     id: 'tool-bar',
     route: '/room/play',
     target: 'tool-bar',
-    title: '随时查看调查工具',
-    description: '角色卡、技能、地图和速记本都可以从底部打开，不需要离开当前游戏页面。',
+    title: '随时使用游戏工具',
+    description: '底部可以打开角色卡、技能、地图和速记；需要主动掷骰时，使用输入框左侧的骰子按钮。',
   },
 ] as const
 
@@ -160,4 +92,22 @@ export function firstStepForPath(
 ): OnboardingStep | null {
   const steps = stepsForAudience(isHost)
   return steps.find((step, index) => index >= startAt && step.route === pathname) ?? null
+}
+
+export function firstReplayStepForPath(
+  pathname: string,
+  isHost: boolean,
+  isTargetAvailable: (target: string) => boolean,
+): OnboardingStep | null {
+  const availableSteps = stepsForAudience(isHost).filter(
+    (step) => step.route === pathname && isTargetAvailable(step.target),
+  )
+
+  if (pathname === '/room/character') {
+    return availableSteps.find((step) => step.id !== 'character-progress')
+      ?? availableSteps[0]
+      ?? null
+  }
+
+  return availableSteps[0] ?? null
 }

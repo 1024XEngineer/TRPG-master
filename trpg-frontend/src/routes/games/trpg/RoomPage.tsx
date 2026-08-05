@@ -798,6 +798,7 @@ export default function RoomPage() {
     setInput((current) => appendSpeechTranscript(current, transcript))
   }, [])
   const speechInput = useSpeechInput(handleSpeechTranscript)
+  // 单独取稳定方法，避免 effect 依赖每次渲染都会新建的 Hook 返回对象。
   const cancelSpeechInput = speechInput.cancel
   const [typing, setTyping] = useState(false)
   const [pendingAction, setPendingAction] = useState<{ clientActionId: string; utterance: string } | null>(null)
@@ -836,6 +837,8 @@ export default function RoomPage() {
   const mapLocations = mapLocationsFromPlayerView(playerView)
   const currentHp = resourceValue(playerView, 'hp') ?? character?.derived.hp ?? null
   const currentSan = resourceValue(playerView, 'san') ?? character?.derived.san ?? null
+  // 权限请求、识别和整理结果期间都占用语音会话。UI 用同一个布尔值切换
+  // “发送/取消”按钮，保持移动端输入栏始终只有四列，不挤压输入框。
   const speechInputActive =
     speechInput.status === 'requesting_permission' ||
     speechInput.status === 'listening' ||
@@ -1184,6 +1187,7 @@ export default function RoomPage() {
     e?.preventDefault()
     const text = input.trim()
     if (!text || !playerId || suspended) return
+    // 发送前先关闭识别结果闸门，防止浏览器稍后返回的文本写入已清空的输入框。
     cancelSpeechInput()
     setInput('')
     if (channel === 'discussion') {

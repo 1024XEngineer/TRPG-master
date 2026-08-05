@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+// TypeScript 的 DOM lib 尚未统一收录各浏览器的 SpeechRecognition 类型，且
+// Chromium 仍可能只暴露 webkit 前缀实现。这里声明实际使用的最小契约，避免
+// 引入与浏览器运行时不一致的第三方类型包。
 export type SpeechInputStatus =
   | 'unsupported'
   | 'idle'
@@ -94,14 +97,21 @@ function detachRecognition(recognition: SpeechRecognitionLike) {
  * Paraformer 时可以替换 Provider，而不需要把浏览器事件散落到输入组件中。
  */
 export function useSpeechInput(onTranscript: (text: string) => void) {
+  // 能力在页面生命周期内不会变化，只在首次渲染探测一次，避免渲染过程中因为
+  // 全局对象差异在 supported/unsupported 之间跳动。
   const [capability] = useState(getSpeechCapability)
   const [status, setStatus] = useState<SpeechInputStatus>(
     capability.ctor ? 'idle' : 'unsupported',
   )
   const [error, setError] = useState<string | null>(null)
+  // ref 同时充当 single-flight 锁：一个实例结束或取消前，重复点击 start 不会
+  // 再申请一次麦克风权限，也不会创建相互竞争的识别会话。
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
+  // acceptingResults 是取消闸门；finalResults 按浏览器 resultIndex 暂存最终片段。
+  // 两者都不用 state，避免每个语音事件触发 React 重渲染。
   const acceptingResultsRef = useRef(false)
   const finalResultsRef = useRef(new Map<number, string>())
+  // 调用方回调可能随输入框/频道状态更新；ref 保证浏览器异步事件总能调用最新版。
   const onTranscriptRef = useRef(onTranscript)
   onTranscriptRef.current = onTranscript
 
@@ -149,6 +159,8 @@ export function useSpeechInput(onTranscript: (text: string) => void) {
       const firstIndex = event.resultIndex ?? 0
       for (let index = firstIndex; index < event.results.length; index += 1) {
         const result = event.results[index]
+        // 即便 interimResults=false，仍有实现可能派发临时结果；只接受 final，
+        // 并用 resultIndex 去重浏览器重复派发的累计结果。
         if (result.isFinal === false || finalResultsRef.current.has(index)) continue
         const transcript = result[0]?.transcript?.trim()
         if (transcript) finalResultsRef.current.set(index, transcript)
@@ -187,6 +199,8 @@ export function useSpeechInput(onTranscript: (text: string) => void) {
   const stop = useCallback(() => {
     const recognition = recognitionRef.current
     if (!recognition) return
+    // stop 会要求浏览器完成当前识别，并由后续 onend 提交已暂存的最终文本；
+    // cancel 则会关闭结果闸门并 abort，两条路径不能合并。
     setStatus('processing')
     try {
       recognition.stop()

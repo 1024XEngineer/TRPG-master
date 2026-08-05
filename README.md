@@ -206,6 +206,12 @@ npm run dev
 | `DEEPSEEK_BASE_URL` | `https://api.deepseek.com` | OpenAI-compatible Chat Completions 根地址 |
 | `DEEPSEEK_MODEL` | `deepseek-chat` | DeepSeek 模型名称 |
 | `DEEPSEEK_TIMEOUT_SECONDS` | `30` | DeepSeek 请求超时秒数 |
+| `HOST_SPEECH_PROVIDER` | `disabled` | 主持人语音：`disabled`、`fake` 或 `doubao`；`fake` 仅用于测试 |
+| `DOUBAO_TTS_API_KEY` | 空 | 新版豆包语音控制台 API Key（按 SecretStr 读取且禁止写日志） |
+| `DOUBAO_TTS_RESOURCE_ID` | `seed-tts-2.0` | DouBao TTS 2.0 固定服务标识 |
+| `DOUBAO_TTS_VOICES` | `[]` | 房间允许选择的音色 JSON，如 `[{"voiceType":"...","label":"旁白"}]` |
+| `DOUBAO_TTS_DEFAULT_VOICE_TYPE` | 空 | 部署默认音色，必须包含在音色白名单中 |
+| `DOUBAO_TTS_TIMEOUT_SECONDS` | `15` | 单句合成超时；失败不自动重试，避免重复计费 |
 | `HOST_AGENT_MAX_TURNS` | `6` | 单次 Host Agent 最大模型轮数 |
 | `HOST_AGENT_MAX_TOOL_CALLS` | `8` | 单次 Host Agent 最大工具调用数 |
 | `HOST_AGENT_TOOL_TIMEOUT_SECONDS` | `5` | 单工具超时秒数 |

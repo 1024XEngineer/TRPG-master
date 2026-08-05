@@ -48,6 +48,12 @@ services:
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
       DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-chat}
+      # 没有一整套独立限额凭证时保持 disabled；应用不会回退到浏览器 TTS。
+      HOST_SPEECH_PROVIDER: ${HOST_SPEECH_PROVIDER:-disabled}
+      DOUBAO_TTS_API_KEY: ${DOUBAO_TTS_API_KEY:-}
+      DOUBAO_TTS_RESOURCE_ID: ${DOUBAO_TTS_RESOURCE_ID:-seed-tts-2.0}
+      DOUBAO_TTS_VOICES: ${DOUBAO_TTS_VOICES:-[]}
+      DOUBAO_TTS_DEFAULT_VOICE_TYPE: ${DOUBAO_TTS_DEFAULT_VOICE_TYPE:-}
     expose:
       - "8000"
     # `docker compose up -d` 只保证容器"被创建/启动"，不代表 entrypoint 里

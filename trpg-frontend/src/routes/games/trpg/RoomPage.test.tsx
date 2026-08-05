@@ -52,6 +52,43 @@ function installRoomSpeechApi() {
   return { audio }
 }
 
+class RoomSpeechRecognition {
+  static instances: RoomSpeechRecognition[] = []
+  lang = ''
+  continuous = true
+  interimResults = true
+  onstart: (() => void) | null = null
+  onresult: ((event: {
+    resultIndex?: number
+    results: ArrayLike<ArrayLike<{ transcript: string }> & { isFinal?: boolean }>
+  }) => void) | null = null
+  onend: (() => void) | null = null
+  onerror: ((event: { error: string }) => void) | null = null
+  start = vi.fn()
+  stop = vi.fn()
+  abort = vi.fn()
+
+  constructor() {
+    RoomSpeechRecognition.instances.push(this)
+  }
+
+  emitFinal(transcript: string) {
+    this.onresult?.({
+      resultIndex: 0,
+      results: [Object.assign([{ transcript }], { isFinal: true })],
+    })
+  }
+}
+
+function installRoomSpeechRecognition() {
+  RoomSpeechRecognition.instances = []
+  Object.defineProperty(window, 'isSecureContext', { configurable: true, value: true })
+  Object.defineProperty(window, 'SpeechRecognition', {
+    configurable: true,
+    value: RoomSpeechRecognition,
+  })
+}
+
 const {
   emitWsMessage,
   mockGetOpeningMessageId,
@@ -64,6 +101,7 @@ const {
   mockUpdateHostSpeechSettings,
   mockOnWsMessage,
   mockRollCheck,
+  mockSendChat,
   mockSubmitAction,
   mockWaitForWsOpen,
   wsHandlers,
@@ -85,6 +123,7 @@ const {
     mockGetHostSpeechSentence: vi.fn(),
     mockUpdateHostSpeechSettings: vi.fn(),
     mockRollCheck: vi.fn(),
+    mockSendChat: vi.fn(),
     mockOnWsMessage: vi.fn((handler: (event: ServerToClientEvent) => void) => {
       handlers.add(handler)
       return () => handlers.delete(handler)
@@ -114,7 +153,7 @@ vi.mock('@/services/api-client', () => ({
       getPlayerView: mockGetPlayerView,
       joinRoom: mockJoinRoom,
       rollCheck: mockRollCheck,
-      sendChat: vi.fn(),
+      sendChat: mockSendChat,
       submitAction: mockSubmitAction,
     },
   },
@@ -296,6 +335,10 @@ describe('RoomPage conversation history', () => {
     dice3dSupported.value = false
     Object.defineProperty(window, 'speechSynthesis', { configurable: true, value: undefined })
     Object.defineProperty(window, 'SpeechSynthesisUtterance', { configurable: true, value: undefined })
+    Object.defineProperty(window, 'isSecureContext', { configurable: true, value: true })
+    Reflect.deleteProperty(window, 'SpeechRecognition')
+    Reflect.deleteProperty(window, 'webkitSpeechRecognition')
+    RoomSpeechRecognition.instances = []
     window.HTMLElement.prototype.scrollIntoView = vi.fn()
     localStorage.clear()
     sessionStorage.clear()
@@ -324,6 +367,9 @@ describe('RoomPage conversation history', () => {
 
   afterEach(() => {
     cleanup()
+    Reflect.deleteProperty(window, 'SpeechRecognition')
+    Reflect.deleteProperty(window, 'webkitSpeechRecognition')
+    Reflect.deleteProperty(window, 'isSecureContext')
   })
 
   it('restores action history by default and discussion history after switching channel', async () => {
@@ -1167,6 +1213,80 @@ describe('RoomPage conversation history', () => {
     expect(screen.getByRole('button', { name: '复制错误详情' })).toHaveTextContent(
       'TURN_CONTRACT_INVALID',
     )
+  })
+
+  it('shows a disabled microphone with a clear message when speech input is unavailable', () => {
+    renderRoomPage()
+
+    expect(screen.getByRole('button', { name: '语音输入不可用' })).toBeDisabled()
+    expect(screen.getByText('当前浏览器不支持语音输入，请继续使用键盘输入')).toBeInTheDocument()
+  })
+
+  it('appends speech without auto-submitting and keeps it available in both channels', () => {
+    installRoomSpeechRecognition()
+    renderRoomPage()
+
+    const input = screen.getByPlaceholderText('输入行动…')
+    fireEvent.change(input, { target: { value: '我先观察' } })
+    fireEvent.click(screen.getByRole('button', { name: '开始语音输入' }))
+    const actionRecognition = RoomSpeechRecognition.instances[0]
+    act(() => actionRecognition.onstart?.())
+    expect(screen.getByRole('button', { name: '停止语音输入并采用文字' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '取消语音输入' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '发送消息' })).not.toBeInTheDocument()
+    act(() => {
+      actionRecognition.emitFinal('检查门锁')
+      actionRecognition.onend?.()
+    })
+
+    expect(input).toHaveValue('我先观察 检查门锁')
+    expect(mockSubmitAction).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: '发送消息' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '讨论区' }))
+    expect(screen.getByRole('button', { name: '开始语音输入' })).toBeEnabled()
+    fireEvent.change(input, { target: { value: '' } })
+    fireEvent.click(screen.getByRole('button', { name: '开始语音输入' }))
+    const discussionRecognition = RoomSpeechRecognition.instances[1]
+    act(() => {
+      discussionRecognition.onstart?.()
+      discussionRecognition.emitFinal('我们先商量路线')
+      discussionRecognition.onend?.()
+    })
+    expect(input).toHaveValue('我们先商量路线')
+    expect(mockSendChat).not.toHaveBeenCalled()
+    fireEvent.submit(input.closest('form')!)
+    expect(mockSendChat).toHaveBeenCalledWith('player-1', expect.objectContaining({
+      text: '我们先商量路线',
+    }))
+  })
+
+  it('cancels active speech on channel changes and ignores late browser results', () => {
+    installRoomSpeechRecognition()
+    renderRoomPage()
+
+    fireEvent.click(screen.getByRole('button', { name: '开始语音输入' }))
+    const recognition = RoomSpeechRecognition.instances[0]
+    const lateResult = recognition.onresult!
+    act(() => recognition.onstart?.())
+    fireEvent.click(screen.getByRole('button', { name: '讨论区' }))
+    expect(recognition.abort).toHaveBeenCalledOnce()
+
+    act(() => lateResult({
+      resultIndex: 0,
+      results: [Object.assign([{ transcript: '不应进入讨论区' }], { isFinal: true })],
+    }))
+    expect(screen.getByPlaceholderText('输入行动…')).toHaveValue('')
+  })
+
+  it('reports an insecure HTTP page instead of attempting recognition', () => {
+    installRoomSpeechRecognition()
+    Object.defineProperty(window, 'isSecureContext', { configurable: true, value: false })
+    renderRoomPage()
+
+    expect(screen.getByRole('button', { name: '语音输入不可用' })).toBeDisabled()
+    expect(screen.getByText('当前页面不是安全连接，请使用 HTTPS 或 localhost 访问')).toBeInTheDocument()
+    expect(RoomSpeechRecognition.instances).toHaveLength(0)
   })
 
   it('renders invalid Agent output as keeper guidance', () => {

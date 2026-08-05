@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import { RoomSocketServerError, TurnFailedError, type AgentPlayerView, type AgentTurnPhase, type CheckRequestPayload, type NarrationPushPayload, type RoomConversationEvent } from 'trpg-sdk'
-import { ArrowLeft, Users, Map, BookOpen, ScrollText, Star, X, SendHorizontal, Dice6, Plus, Save, FlagOff, Heart, Volume2, Pause, Play, Square, RotateCcw } from 'lucide-react'
+import { ArrowLeft, Users, Map, BookOpen, ScrollText, Star, X, SendHorizontal, Dice6, Plus, Save, FlagOff, Heart, Volume2, Pause, Play, Square, RotateCcw, Mic, LoaderCircle } from 'lucide-react'
 import { useCallback, useState, useRef, useEffect, type Dispatch, type FormEvent, type SetStateAction } from 'react'
 import { useRoomStore } from '@/stores/room-store'
 import { useAuthStore } from '@/stores/auth-store'
@@ -10,6 +10,7 @@ import { endGame } from '@/services/room'
 import { useRoomPlayers } from '@/hooks/useRoomPlayers'
 import { useRuleset } from '@/hooks/useRuleset'
 import { useHostSpeech } from '@/hooks/useHostSpeech'
+import { useSpeechInput } from '@/hooks/useSpeechInput'
 import { Dice3DStage, supports3DDice, type Dice3DHandle } from '@/features/dice3d'
 import { DERIVED_STAT_DEFINITIONS } from '@/data/derived-stats'
 
@@ -181,6 +182,15 @@ function displayName(...candidates: Array<string | null | undefined>): string {
     if (trimmed) return trimmed
   }
   return '玩家'
+}
+
+/** 保留玩家已有输入；只有两段之间没有空白或句末标点时才补一个空格。 */
+export function appendSpeechTranscript(current: string, transcript: string): string {
+  const normalized = transcript.trim()
+  if (!normalized) return current
+  if (!current) return normalized
+  const needsSeparator = !/[\s，。！？；：、,.!?;:]$/u.test(current)
+  return `${current}${needsSeparator ? ' ' : ''}${normalized}`
 }
 
 function conversationEventToMessage(
@@ -783,6 +793,12 @@ export default function RoomPage() {
   const [messages, setMessages] = useState<Message[]>([])
   const [channel, setChannel] = useState<'action' | 'discussion'>('action')
   const [input, setInput] = useState('')
+  const handleSpeechTranscript = useCallback((transcript: string) => {
+    // 使用函数式更新读取回调到达那一刻的输入，避免覆盖识别期间玩家新键入的文字。
+    setInput((current) => appendSpeechTranscript(current, transcript))
+  }, [])
+  const speechInput = useSpeechInput(handleSpeechTranscript)
+  const cancelSpeechInput = speechInput.cancel
   const [typing, setTyping] = useState(false)
   const [pendingAction, setPendingAction] = useState<{ clientActionId: string; utterance: string } | null>(null)
   const [pendingCheck, setPendingCheck] = useState<CheckRequestPayload | null>(null)
@@ -820,6 +836,19 @@ export default function RoomPage() {
   const mapLocations = mapLocationsFromPlayerView(playerView)
   const currentHp = resourceValue(playerView, 'hp') ?? character?.derived.hp ?? null
   const currentSan = resourceValue(playerView, 'san') ?? character?.derived.san ?? null
+  const speechInputActive =
+    speechInput.status === 'requesting_permission' ||
+    speechInput.status === 'listening' ||
+    speechInput.status === 'processing'
+
+  useEffect(() => {
+    // 输入框在行动和讨论区复用；切换频道时丢弃尚未完成的识别，避免结果进入新频道。
+    cancelSpeechInput()
+  }, [cancelSpeechInput, channel])
+
+  useEffect(() => {
+    if (suspended) cancelSpeechInput()
+  }, [cancelSpeechInput, suspended])
 
   useEffect(() => {
     if (roomInfo?.phase) setRoomPhase(roomInfo.phase)
@@ -1155,6 +1184,7 @@ export default function RoomPage() {
     e?.preventDefault()
     const text = input.trim()
     if (!text || !playerId || suspended) return
+    cancelSpeechInput()
     setInput('')
     if (channel === 'discussion') {
       sdk.roomSocket.sendChat(playerId, { text, clientMessageId: randomActionId() })
@@ -1465,6 +1495,26 @@ export default function RoomPage() {
             )}
           </div>
         )}
+        {(speechInput.status !== 'idle' || speechInput.error) && !suspended && (
+          <p
+            aria-live="polite"
+            className={`pb-1.5 px-1 text-[11px] ${
+              speechInput.status === 'failed' || speechInput.status === 'unsupported'
+                ? 'text-[#c04040]'
+                : 'text-text-muted'
+            }`}
+          >
+            {speechInput.status === 'unsupported'
+              ? speechInput.unavailableReason
+              : speechInput.status === 'requesting_permission'
+                ? '正在请求麦克风权限…'
+                : speechInput.status === 'listening'
+                  ? '正在聆听，点击停止后将文字填入输入框'
+                  : speechInput.status === 'processing'
+                    ? '正在整理识别结果…'
+                    : speechInput.error}
+          </p>
+        )}
         <form data-onboarding-target="action-input" onSubmit={sendMessage} className="flex gap-2 items-end">
           <button
             type="button"
@@ -1483,13 +1533,59 @@ export default function RoomPage() {
             placeholder={suspended ? '游戏已挂起' : '输入行动…'}
             className="flex-1 bg-input border border-border-mid rounded-[20px] px-4 py-2.5 text-sm text-text-primary font-sans outline-none min-h-[40px] placeholder:text-text-dim focus:border-brass transition-colors disabled:opacity-60"
           />
-          <button
-            type="submit"
-            disabled={suspended || !input.trim()}
-            className="w-10 h-10 rounded-full bg-brass border-none text-white flex items-center justify-center flex-shrink-0 active:scale-[0.92] transition-all hover:bg-brass-dark disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            <SendHorizontal className="w-[18px] h-[18px]" strokeWidth={2.5} />
-          </button>
+          {speechInput.status === 'listening' ? (
+            <button
+              type="button"
+              aria-label="停止语音输入并采用文字"
+              title="停止并采用识别文字"
+              onClick={speechInput.stop}
+              disabled={suspended}
+              className="w-10 h-10 rounded-full bg-[#c04040] border-none text-white flex items-center justify-center flex-shrink-0 active:scale-[0.92] transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <Square className="w-4 h-4" fill="currentColor" strokeWidth={2} />
+            </button>
+          ) : (
+            <button
+              type="button"
+              aria-label={speechInput.supported ? '开始语音输入' : '语音输入不可用'}
+              title={speechInput.unavailableReason ?? '开始语音输入'}
+              onClick={speechInput.start}
+              disabled={
+                suspended ||
+                !speechInput.supported ||
+                speechInput.status === 'requesting_permission' ||
+                speechInput.status === 'processing'
+              }
+              className="w-10 h-10 rounded-full bg-card border border-border-light text-text-muted flex items-center justify-center flex-shrink-0 active:scale-[0.92] active:border-brass active:text-brass-dark transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {speechInput.status === 'requesting_permission' || speechInput.status === 'processing' ? (
+                <LoaderCircle className="w-[18px] h-[18px] animate-spin" strokeWidth={2} />
+              ) : (
+                <Mic className="w-[18px] h-[18px]" strokeWidth={2} />
+              )}
+            </button>
+          )}
+          {speechInputActive && (
+            <button
+              type="button"
+              aria-label="取消语音输入"
+              title="取消并丢弃本次识别"
+              onClick={speechInput.cancel}
+              className="w-10 h-10 rounded-full bg-card border border-border-light text-text-muted flex items-center justify-center flex-shrink-0 active:scale-[0.92] transition-all"
+            >
+              <X className="w-[18px] h-[18px]" strokeWidth={2} />
+            </button>
+          )}
+          {!speechInputActive && (
+            <button
+              type="submit"
+              aria-label="发送消息"
+              disabled={suspended || !input.trim()}
+              className="w-10 h-10 rounded-full bg-brass border-none text-white flex items-center justify-center flex-shrink-0 active:scale-[0.92] transition-all hover:bg-brass-dark disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <SendHorizontal className="w-[18px] h-[18px]" strokeWidth={2.5} />
+            </button>
+          )}
         </form>
       </div>
 

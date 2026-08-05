@@ -5,7 +5,7 @@ import { useCallback, useState, useRef, useEffect, type Dispatch, type FormEvent
 import { useRoomStore } from '@/stores/room-store'
 import { useAuthStore } from '@/stores/auth-store'
 import { useCharacterStore } from '@/stores/character-store'
-import { connectWebSocket, waitForWsOpen, sdk, onWsMessage, disconnectWebSocket, friendlyErrorMessage } from '@/services/api-client'
+import { connectWebSocket, waitForWsOpen, sdk, onWsMessage, disconnectWebSocket, friendlyErrorMessage, getAuthToken } from '@/services/api-client'
 import { endGame } from '@/services/room'
 import { useRoomPlayers } from '@/hooks/useRoomPlayers'
 import { useRuleset } from '@/hooks/useRuleset'
@@ -35,6 +35,7 @@ interface Message {
   type: 'system' | 'narr' | 'player' | 'dice'
   channel?: 'action' | 'discussion'
   messageId?: string
+  narrationId?: string
   sender?: string
   content: string
   time: string
@@ -226,10 +227,12 @@ function conversationEventToMessage(
   }
   if (event.type === 'narration.push') {
     const payload = event.payload as { messageId?: string | null; text: string }
+    const narrationId = payload.messageId || event.id
     return {
       type: 'narr',
       channel: 'action',
-      messageId: conversationMessageId(event.type, payload.messageId || event.id),
+      messageId: conversationMessageId(event.type, narrationId),
+      narrationId,
       sender: '守秘人',
       content: payload.text,
       time: formatRoomTime(event.createdAt),
@@ -767,9 +770,10 @@ export default function RoomPage() {
   const senderName = character?.info.name || nickname || '你'
   const { ruleset } = useRuleset()
   const roomInfo = useRoomPlayers(roomCode)
-  const hostSpeech = useHostSpeech()
+  const hostSpeech = useHostSpeech({ roomId, reconnectToken, accountToken: getAuthToken() })
   const enqueueHostSpeech = hostSpeech.enqueue
   const markHostSpeechSeen = hostSpeech.markSeen
+  const handleHostSpeechSettingsUpdated = hostSpeech.handleSettingsUpdated
   const isHost = roomInfo?.players.find((p) => p.playerId === playerId)?.isHost ?? false
   const [roomPhase, setRoomPhase] = useState<string | null>(null)
   const [confirmEnd, setConfirmEnd] = useState(false)
@@ -831,7 +835,7 @@ export default function RoomPage() {
         .filter((item): item is Message => item !== null)
       markHostSpeechSeen(
         restored.flatMap((item) =>
-          item.type === 'narr' && item.messageId ? [item.messageId] : [],
+          item.type === 'narr' && item.narrationId ? [item.narrationId] : [],
         ),
       )
       setMessages((current) => mergeHistoricalMessages(current, restored))
@@ -886,7 +890,7 @@ export default function RoomPage() {
       : pendingNarrationActionIdRef.current
         ? conversationMessageId('narration.push', pendingNarrationActionIdRef.current)
         : undefined
-    enqueueHostSpeech(messageId, payload.text)
+    enqueueHostSpeech(authoritativeId)
     setMessages((prev) => {
       if (messageId && prev.some((item) => item.messageId === messageId)) {
         pendingNarrationActionIdRef.current = null
@@ -898,6 +902,7 @@ export default function RoomPage() {
         type: 'narr',
         channel: 'action',
         messageId,
+        narrationId: authoritativeId,
         sender: '守秘人',
         content: payload.text,
         time: formatRoomTime(new Date()),
@@ -979,6 +984,8 @@ export default function RoomPage() {
         setProgressLabel('守秘人正在生成开场叙事')
       } else if (envelope.type === 'room.state') {
         setRoomPhase(envelope.payload.phase)
+      } else if (envelope.type === 'host_speech.settings_updated') {
+        handleHostSpeechSettingsUpdated(envelope.payload.voiceType)
       } else if (envelope.type === 'chat.message') {
         setMessages((prev) => {
           const messageId = conversationMessageId('chat.message', envelope.payload.messageId)
@@ -1096,7 +1103,7 @@ export default function RoomPage() {
       setProgressLabel('守秘人正在生成开场叙事')
     }
     return off
-  }, [enqueueHostSpeech, playerId, senderName])
+  }, [enqueueHostSpeech, handleHostSpeechSettingsUpdated, playerId, senderName])
 
   const submitPlayerAction = (action: { clientActionId: string; utterance: string }) => {
     if (!playerId || suspended) return
@@ -1218,7 +1225,7 @@ export default function RoomPage() {
           onClick={() => setOpenPanel(openPanel === 'speech' ? null : 'speech')}
           aria-label="主持人语音"
           title="主持人语音"
-          className={`w-8 h-8 rounded-full bg-card border border-border-light flex items-center justify-center active:bg-panel ${hostSpeech.status === 'speaking' ? 'text-brass-dark' : 'text-text-muted'}`}
+          className={`w-8 h-8 rounded-full bg-card border border-border-light flex items-center justify-center active:bg-panel ${hostSpeech.status === 'playing' ? 'text-brass-dark' : 'text-text-muted'}`}
         >
           <Volume2 className="w-4 h-4" strokeWidth={2.5} />
         </button>
@@ -1304,7 +1311,16 @@ export default function RoomPage() {
                   ${isNarr ? 'bg-[#fdfaf4] border-l-[3px] border-brass rounded-r-sm rounded-l-none italic text-[#4a4030] text-left whitespace-pre-wrap' : ''}
                   ${!isPlayer && !isNarr ? 'bg-panel rounded-md' : ''}
                 `}>
-                  {msg.content}
+                  {isNarr && msg.narrationId === hostSpeech.currentMessageId && hostSpeech.currentSentences.length > 0
+                    ? hostSpeech.currentSentences.map((sentence) => (
+                        <span
+                          key={sentence.index}
+                          className={sentence.index === hostSpeech.currentSentenceIndex ? 'bg-brass/20 rounded-sm' : ''}
+                        >
+                          {sentence.text}
+                        </span>
+                      ))
+                    : msg.content}
                 </div>
                 <div className="text-[10px] text-text-dim mt-0.5">{msg.time}</div>
                 {isNarr && (
@@ -1312,8 +1328,8 @@ export default function RoomPage() {
                     type="button"
                     aria-label="重新朗读"
                     title="重新朗读"
-                    disabled={!hostSpeech.supported}
-                    onClick={() => hostSpeech.replay(msg.content)}
+                    disabled={!hostSpeech.available || !msg.narrationId}
+                    onClick={() => hostSpeech.replay(msg.narrationId)}
                     className="mt-1 inline-flex items-center gap-1 text-[10px] text-text-muted disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     <RotateCcw className="w-3 h-3" strokeWidth={2} />
@@ -1691,9 +1707,9 @@ export default function RoomPage() {
 
       {/* Panel: 主持人语音 */}
       <BottomPanel open={openPanel === 'speech'} onClose={() => setOpenPanel(null)} title="主持人语音">
-        {!hostSpeech.supported ? (
+        {!hostSpeech.available ? (
           <p className="text-sm text-text-dim py-6 text-center">
-            当前浏览器不支持语音朗读，文本消息仍可正常使用
+            主持人语音服务当前不可用，文本消息和游戏操作仍可正常使用
           </p>
         ) : (
           <div className="space-y-4">
@@ -1714,28 +1730,43 @@ export default function RoomPage() {
 
             <label className="block">
               <span className="block text-xs font-semibold text-text-muted mb-1.5">音色</span>
-              <select
-                aria-label="主持人音色"
-                value={hostSpeech.selectedVoiceURI ?? ''}
-                onChange={(event) => hostSpeech.setSelectedVoiceURI(event.target.value)}
-                disabled={hostSpeech.voices.length === 0}
-                className="w-full bg-input border border-border-light rounded-md px-3 py-2 text-sm text-text-primary disabled:opacity-50"
-              >
-                {hostSpeech.voices.length === 0 ? (
-                  <option value="">正在加载音色…</option>
-                ) : (
-                  hostSpeech.voices.map((voice) => (
-                    <option key={voice.voiceURI} value={voice.voiceURI}>
-                      {voice.name} · {voice.lang}
-                    </option>
-                  ))
-                )}
-              </select>
+              {isHost ? (
+                <select
+                  aria-label="主持人音色"
+                  value={hostSpeech.voiceType ?? ''}
+                  onChange={(event) => { void hostSpeech.updateVoice(event.target.value) }}
+                  disabled={hostSpeech.voices.length === 0}
+                  className="w-full bg-input border border-border-light rounded-md px-3 py-2 text-sm text-text-primary disabled:opacity-50"
+                >
+                  {hostSpeech.voices.map((voice) => (
+                    <option key={voice.voiceType} value={voice.voiceType}>{voice.label}</option>
+                  ))}
+                </select>
+              ) : (
+                <div className="w-full bg-panel border border-border-light rounded-md px-3 py-2 text-sm text-text-primary">
+                  {hostSpeech.voices.find((voice) => voice.voiceType === hostSpeech.voiceType)?.label ?? hostSpeech.voiceType}
+                </div>
+              )}
+              <span className="block text-[10px] text-text-dim mt-1">情绪由 DouBao TTS 2.0 根据当前句自动表达</span>
+            </label>
+
+            <label className="block text-xs text-text-muted">
+              播放速度：{hostSpeech.playbackRate.toFixed(2)}×
+              <input type="range" min="0.75" max="1.25" step="0.05" value={hostSpeech.playbackRate}
+                onChange={(event) => hostSpeech.setPlaybackRate(Number(event.target.value))}
+                className="w-full accent-brass" aria-label="主持人语音播放速度" />
+            </label>
+
+            <label className="block text-xs text-text-muted">
+              音量：{Math.round(hostSpeech.volume * 100)}%
+              <input type="range" min="0" max="1" step="0.05" value={hostSpeech.volume}
+                onChange={(event) => hostSpeech.setVolume(Number(event.target.value))}
+                className="w-full accent-brass" aria-label="主持人语音音量" />
             </label>
 
             <div className="flex items-center justify-between text-[11px] text-text-muted">
               <span>
-                {hostSpeech.status === 'speaking' ? '正在朗读' : hostSpeech.status === 'paused' ? '已暂停' : '空闲'}
+                {hostSpeech.status === 'synthesizing' ? '正在合成' : hostSpeech.status === 'buffering' ? '正在缓冲' : hostSpeech.status === 'playing' ? '正在朗读' : hostSpeech.status === 'paused' ? '已暂停' : hostSpeech.status === 'failed' ? '播放失败' : '空闲'}
               </span>
               <span>待播放 {hostSpeech.queueLength} 条</span>
             </div>
@@ -1746,7 +1777,7 @@ export default function RoomPage() {
                 aria-label="暂停朗读"
                 title="暂停朗读"
                 onClick={hostSpeech.pause}
-                disabled={hostSpeech.status !== 'speaking'}
+                disabled={hostSpeech.status !== 'playing'}
                 className="flex-1 py-2 rounded-sm bg-panel border border-border-light text-text-muted text-xs font-medium flex items-center justify-center gap-1 disabled:opacity-40"
               >
                 <Pause className="w-3.5 h-3.5" />
@@ -1775,6 +1806,7 @@ export default function RoomPage() {
                 停止
               </button>
             </div>
+            {hostSpeech.error && <p className="text-xs text-danger">{hostSpeech.error}</p>}
           </div>
         )}
       </BottomPanel>

@@ -1,211 +1,142 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useHostSpeech } from './useHostSpeech'
 
-class FakeUtterance {
-  text: string
-  voice: SpeechSynthesisVoice | null = null
-  lang = ''
-  rate = 0
-  pitch = 0
-  volume = 0
-  onend: (() => void) | null = null
-  onerror: (() => void) | null = null
+const { getSettings, getManifest, getSentence, updateSettings } = vi.hoisted(() => ({
+  getSettings: vi.fn(),
+  getManifest: vi.fn(),
+  getSentence: vi.fn(),
+  updateSettings: vi.fn(),
+}))
 
-  constructor(text: string) {
-    this.text = text
-  }
+vi.mock('@/services/api-client', () => ({
+  friendlyErrorMessage: (error: unknown, fallback: string) =>
+    error instanceof Error ? error.message : fallback,
+  sdk: { rooms: {
+    getHostSpeechSettings: getSettings,
+    getHostSpeechManifest: getManifest,
+    getHostSpeechSentence: getSentence,
+    updateHostSpeechSettings: updateSettings,
+  } },
+}))
+
+class FakeAudio extends EventTarget {
+  src = ''
+  playbackRate = 1
+  volume = 1
+  preservesPitch = false
+  play = vi.fn(async () => {})
+  pause = vi.fn()
+  load = vi.fn()
+  removeAttribute = vi.fn(() => { this.src = '' })
+  finish() { this.dispatchEvent(new Event('ended')) }
 }
 
-function fakeVoice(overrides: Partial<SpeechSynthesisVoice>): SpeechSynthesisVoice {
-  return {
-    default: false,
-    lang: 'en-US',
-    localService: true,
-    name: 'English',
-    voiceURI: 'english',
-    ...overrides,
-  }
-}
-
-function installSpeechApi(voices: SpeechSynthesisVoice[] = []) {
-  let voicesChanged: (() => void) | null = null
-  const spoken: FakeUtterance[] = []
-  const synthesis = {
-    getVoices: vi.fn(() => voices),
-    speak: vi.fn((utterance: FakeUtterance) => spoken.push(utterance)),
-    cancel: vi.fn(),
-    pause: vi.fn(),
-    resume: vi.fn(),
-    addEventListener: vi.fn((_event: string, listener: () => void) => { voicesChanged = listener }),
-    removeEventListener: vi.fn(),
-    emitVoicesChanged: () => voicesChanged?.(),
-  }
-  Object.defineProperty(window, 'speechSynthesis', { configurable: true, value: synthesis })
-  Object.defineProperty(window, 'SpeechSynthesisUtterance', { configurable: true, value: FakeUtterance })
-  return { synthesis, spoken }
+const options = { roomId: 'room-1', reconnectToken: 'reconnect-1', accountToken: 'account-1' }
+const settings = {
+  available: true,
+  provider: 'fake',
+  voiceType: 'voice-a',
+  voices: [{ voiceType: 'voice-a', label: '音色 A' }],
+  autoEmotion: true,
 }
 
 describe('useHostSpeech', () => {
+  let audios: FakeAudio[]
+
   beforeEach(() => {
     localStorage.clear()
-    Object.defineProperty(window, 'speechSynthesis', { configurable: true, value: undefined })
-    Object.defineProperty(window, 'SpeechSynthesisUtterance', { configurable: true, value: undefined })
-  })
-
-  afterEach(() => {
-    vi.restoreAllMocks()
-  })
-
-  it('reports unsupported browsers without throwing', () => {
-    const { result } = renderHook(() => useHostSpeech())
-
-    expect(result.current.supported).toBe(false)
-    expect(result.current.enabled).toBe(false)
-    act(() => {
-      result.current.enqueue('message-1', '文本')
-      result.current.replay('历史文本')
+    vi.clearAllMocks()
+    audios = []
+    vi.stubGlobal('Audio', class {
+      constructor() {
+        const audio = new FakeAudio()
+        audios.push(audio)
+        return audio
+      }
     })
-    expect(result.current.status).toBe('idle')
+    vi.stubGlobal('URL', {
+      ...URL,
+      createObjectURL: vi.fn((blob: Blob) => `blob:${blob.size}:${Math.random()}`),
+      revokeObjectURL: vi.fn(),
+    })
+    getSettings.mockResolvedValue(settings)
+    updateSettings.mockResolvedValue({ ...settings, voiceType: 'voice-b' })
+    getManifest.mockResolvedValue({
+      messageId: 'message-1',
+      sentences: [{ index: 0, text: '第一句。' }, { index: 1, text: '第二句。' }],
+    })
+    getSentence.mockResolvedValue(new Blob(['mp3'], { type: 'audio/mpeg' }))
   })
 
-  it('selects a stable Chinese default and starts disabled', () => {
-    installSpeechApi([
-      fakeVoice({ name: '中文乙', lang: 'zh-CN', voiceURI: 'zh-b' }),
-      fakeVoice({ name: '中文甲', lang: 'zh-Hans', voiceURI: 'zh-a' }),
-      fakeVoice({ name: 'English default', default: true, voiceURI: 'en-default' }),
-    ])
-    const { result: mounted } = renderHook(() => useHostSpeech())
-
-    expect(mounted.current.enabled).toBe(false)
-    expect(mounted.current.selectedVoiceURI).toBe('zh-a')
-    expect(mounted.current.voices.map((voice) => voice.voiceURI)).toEqual([
-      'zh-a',
-      'zh-b',
-      'en-default',
-    ])
-  })
-
-  it('falls back to the browser default voice when no Chinese voice exists', () => {
-    installSpeechApi([
-      fakeVoice({ name: 'Voice B', voiceURI: 'voice-b' }),
-      fakeVoice({ name: 'Voice A', default: true, voiceURI: 'voice-a' }),
-    ])
-    const { result } = renderHook(() => useHostSpeech())
-    expect(result.current.selectedVoiceURI).toBe('voice-a')
-  })
-
-  it('restores local settings and supports voice changes', () => {
-    localStorage.setItem('aidm-host-speech-settings', JSON.stringify({ enabled: true, voiceURI: 'voice-2' }))
-    installSpeechApi([
-      fakeVoice({ name: 'Voice 1', voiceURI: 'voice-1' }),
-      fakeVoice({ name: 'Voice 2', voiceURI: 'voice-2' }),
-    ])
-    const { result } = renderHook(() => useHostSpeech())
-
+  it('迁移旧设置时保留 enabled，并丢弃 voiceURI', async () => {
+    localStorage.setItem('aidm-host-speech-settings', JSON.stringify({ enabled: true, voiceURI: 'browser' }))
+    const { result } = renderHook(() => useHostSpeech(options))
+    await waitFor(() => expect(result.current.available).toBe(true))
     expect(result.current.enabled).toBe(true)
-    expect(result.current.selectedVoiceURI).toBe('voice-2')
-    act(() => result.current.setSelectedVoiceURI('voice-1'))
-    expect(JSON.parse(localStorage.getItem('aidm-host-speech-settings')!).voiceURI).toBe('voice-1')
+    expect(result.current.playbackRate).toBe(1)
+    expect(JSON.parse(localStorage.getItem('aidm-host-speech-settings')!)).toEqual({
+      version: 2, enabled: true, playbackRate: 1, volume: 1,
+    })
   })
 
-  it('plays an ordered, deduplicated automatic queue', () => {
-    const { spoken, synthesis } = installSpeechApi()
-    const { result } = renderHook(() => useHostSpeech())
-
+  it('历史消息标记后不自动朗读，仍允许手动重播', async () => {
+    const { result } = renderHook(() => useHostSpeech(options))
+    await waitFor(() => expect(result.current.available).toBe(true))
     act(() => {
       result.current.setEnabled(true)
-      result.current.enqueue('message-1', '第一段')
-      result.current.enqueue('message-1', '重复第一段')
-      result.current.enqueue('message-2', '第二段')
+      result.current.markSeen(['message-1'])
+      result.current.enqueue('message-1')
     })
-
-    expect(synthesis.speak).toHaveBeenCalledTimes(1)
-    expect(spoken[0]?.text).toBe('第一段')
-    expect(result.current.queueLength).toBe(1)
-
-    act(() => spoken[0]?.onend?.())
-    expect(spoken[1]?.text).toBe('第二段')
-    expect(result.current.queueLength).toBe(0)
+    expect(getManifest).not.toHaveBeenCalled()
+    act(() => result.current.replay('message-1'))
+    await waitFor(() => expect(getManifest).toHaveBeenCalledTimes(1))
   })
 
-  it('does not enqueue message ids already restored from history', () => {
-    const { spoken } = installSpeechApi()
-    const { result } = renderHook(() => useHostSpeech())
-
-    act(() => {
-      result.current.markSeen(['message-from-history'])
-      result.current.setEnabled(true)
-      result.current.enqueue('message-from-history', '历史消息的实时重放')
-    })
-
-    expect(spoken).toHaveLength(0)
-    expect(result.current.status).toBe('idle')
-  })
-
-  it('allows manual replay while automatic speech is disabled', () => {
-    const { spoken } = installSpeechApi()
-    const { result } = renderHook(() => useHostSpeech())
-
-    act(() => result.current.replay('历史主持人消息'))
-    expect(spoken).toHaveLength(1)
-    expect(spoken[0]?.text).toBe('历史主持人消息')
-  })
-
-  it('applies the selected voice and fixed speech parameters', () => {
-    const voice = fakeVoice({ name: 'Voice 1', voiceURI: 'voice-1' })
-    const { spoken } = installSpeechApi([voice])
-    const { result } = renderHook(() => useHostSpeech())
-
-    act(() => {
-      result.current.setSelectedVoiceURI('voice-1')
-      result.current.replay('带音色的消息')
-    })
-
-    expect(spoken[0]?.voice).toBe(voice)
-    expect(spoken[0]?.lang).toBe('en-US')
-    expect(spoken[0]?.rate).toBe(1)
-    expect(spoken[0]?.pitch).toBe(1)
-    expect(spoken[0]?.volume).toBe(1)
-  })
-
-  it('supports pause, resume, stop and skips utterance errors', () => {
-    const { spoken, synthesis } = installSpeechApi()
-    const { result } = renderHook(() => useHostSpeech())
-
+  it('逐句播放，并在当前句播放时只预取下一句', async () => {
+    const { result } = renderHook(() => useHostSpeech(options))
+    await waitFor(() => expect(result.current.available).toBe(true))
     act(() => {
       result.current.setEnabled(true)
-      result.current.enqueue('message-1', '第一段')
-      result.current.enqueue('message-2', '第二段')
+      result.current.enqueue('message-1')
     })
-    act(() => result.current.pause())
-    expect(result.current.status).toBe('paused')
-    expect(synthesis.pause).toHaveBeenCalledTimes(1)
-    act(() => result.current.resume())
-    expect(result.current.status).toBe('speaking')
-    expect(synthesis.resume).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(getSentence).toHaveBeenCalledTimes(2))
+    expect(result.current.currentSentenceIndex).toBe(0)
+    expect(result.current.currentSentences.map((sentence) => sentence.text).join('')).toBe('第一句。第二句。')
+    act(() => audios[0].finish())
+    await waitFor(() => expect(result.current.currentSentenceIndex).toBe(1))
+    act(() => audios[0].finish())
+    await waitFor(() => expect(result.current.status).toBe('idle'))
+    expect(URL.revokeObjectURL).toHaveBeenCalledTimes(2)
+  })
 
-    act(() => spoken[0]?.onerror?.())
-    expect(spoken[1]?.text).toBe('第二段')
-    act(() => result.current.stop())
-    expect(synthesis.cancel).toHaveBeenCalled()
+  it('本地速度和音量即时应用，音色广播会停止并清空队列', async () => {
+    const { result } = renderHook(() => useHostSpeech(options))
+    await waitFor(() => expect(result.current.available).toBe(true))
+    act(() => {
+      result.current.setPlaybackRate(1.25)
+      result.current.setVolume(0.4)
+      result.current.replay('message-1')
+    })
+    await waitFor(() => expect(audios[0]?.play).toHaveBeenCalled())
+    expect(audios[0].playbackRate).toBe(1.25)
+    expect(audios[0].volume).toBe(0.4)
+    act(() => result.current.handleSettingsUpdated('voice-b'))
     expect(result.current.status).toBe('idle')
     expect(result.current.queueLength).toBe(0)
+    expect(result.current.voiceType).toBe('voice-b')
+    expect(audios[0].pause).toHaveBeenCalled()
   })
 
-  it('refreshes voices and clears speech on unmount', async () => {
-    const { synthesis } = installSpeechApi([])
-    const { result, unmount } = renderHook(() => useHostSpeech())
-    expect(result.current.voices).toHaveLength(0)
-
-    const voice = fakeVoice({ name: '中文', lang: 'zh-CN', voiceURI: 'zh' })
-    synthesis.getVoices.mockReturnValue([voice])
-    act(() => synthesis.emitVoicesChanged())
-    await waitFor(() => expect(result.current.selectedVoiceURI).toBe('zh'))
-
-    act(() => result.current.replay('待清理'))
-    unmount()
-    expect(synthesis.cancel).toHaveBeenCalled()
-    expect(synthesis.removeEventListener).toHaveBeenCalled()
+  it('合成失败只保留失败状态，不调用浏览器 speechSynthesis', async () => {
+    getManifest.mockRejectedValue(new Error('上游失败'))
+    const browserSpeak = vi.fn()
+    Object.defineProperty(window, 'speechSynthesis', { configurable: true, value: { speak: browserSpeak } })
+    const { result } = renderHook(() => useHostSpeech(options))
+    await waitFor(() => expect(result.current.available).toBe(true))
+    act(() => result.current.replay('message-1'))
+    await waitFor(() => expect(result.current.status).toBe('failed'))
+    expect(result.current.error).toBe('上游失败')
+    expect(browserSpeak).not.toHaveBeenCalled()
   })
 })

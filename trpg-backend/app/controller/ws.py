@@ -36,6 +36,7 @@ import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from functools import partial
+from typing import Literal
 
 import anyio
 import structlog
@@ -238,6 +239,18 @@ async def _send_plan_progress(websocket: WebSocket, event) -> None:
     )
 
 
+def _require_pending_adjudication_status(
+    status: str,
+) -> Literal["awaiting_skill_choice", "awaiting_post_roll_decision"]:
+    """Narrow an execution status before exposing a pending-decision payload."""
+
+    if status == "awaiting_skill_choice":
+        return "awaiting_skill_choice"
+    if status == "awaiting_post_roll_decision":
+        return "awaiting_post_roll_decision"
+    raise ContractError("等待玩家的行动缺少 pending adjudication 状态")
+
+
 async def _send_action_plan_result(
     db: AsyncSession,
     websocket: WebSocket,
@@ -253,7 +266,7 @@ async def _send_action_plan_result(
             correlation_id=result.player_input.client_action_id,
             plan_id=result.plan_id,
             source_revision=execution.view_revision,
-            status=execution.status,
+            status=_require_pending_adjudication_status(execution.status),
             pending_decision=execution.pending_decision,
             check_run=execution.check_run,
         )
@@ -917,13 +930,10 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                             # that ordering guarantees a reconnecting client receives
                             # either the live opening or this persisted replay.
                             await _send_persisted_opening(db, websocket, room_id)
-                            active_plan = (
-                                await action_plan_turn_application.active_for_room(room_id)
+                            active_plan = await action_plan_turn_application.active_for_room(
+                                room_id
                             )
-                            if (
-                                active_plan is not None
-                                and active_plan.player_id == bound_player_id
-                            ):
+                            if active_plan is not None and active_plan.player_id == bound_player_id:
                                 await _send_plan_progress(
                                     websocket,
                                     type(
@@ -957,7 +967,9 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                             correlation_id=active_plan.parent_action_id,
                                             plan_id=active_plan.plan_id,
                                             source_revision=execution.view_revision,
-                                            status=execution.status,
+                                            status=_require_pending_adjudication_status(
+                                                execution.status
+                                            ),
                                             pending_decision=execution.pending_decision,
                                             check_run=execution.check_run,
                                         )
@@ -1124,9 +1136,7 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                     check_version=choice.check_version,
                                     option_id=choice.option_id,
                                     push_adjudication=(
-                                        PushAdjudication(
-                                            method_description=choice.revised_method
-                                        )
+                                        PushAdjudication(method_description=choice.revised_method)
                                         if choice.revised_method is not None
                                         else None
                                     ),

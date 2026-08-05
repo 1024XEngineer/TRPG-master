@@ -357,10 +357,22 @@ class ActionPlanTurnApplication:
                 status="waiting_for_player",
                 execution=execution,
             )
+        if execution.outcome == "success":
+            completed_outcome = "success"
+        elif execution.outcome == "failure":
+            completed_outcome = "failure"
+        elif execution.outcome == "cancelled":
+            completed_outcome = "cancelled"
+        else:
+            raise TurnExecutionError(
+                "PENDING_EXECUTION_NOT_WAITING",
+                "行动状态尚未完成，请重试",
+                retryable=True,
+            )
         summary = CompletedPlanStepSummary(
             step_index=0,
             semantic_goal=decision.adjudication.summary,
-            outcome=execution.outcome,
+            outcome=completed_outcome,
             view_revision=execution.view_revision,
             event_refs=execution.public_event_refs,
         )

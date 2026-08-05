@@ -23,7 +23,7 @@ from pathlib import Path
 from pydantic import BaseModel
 from pydantic.json_schema import GenerateJsonSchema, models_json_schema
 
-from app.dto import auth, character, chat, common, game, module, replay, room, ws
+from app.dto import auth, character, chat, common, game, host_speech, module, replay, room, ws
 
 # 需要导出的模型清单：REST 请求/响应体 + WS 事件 payload。
 #
@@ -79,6 +79,13 @@ _MODELS: list[type[BaseModel]] = [
     replay.RoomConversationEventRead,
     # 通用响应信封里的错误详情（ApiResponse 本身手写，见上面的说明）
     common.ErrorDetail,
+    # AI 主持人语音 REST + 设置广播（issue #220）
+    host_speech.HostSpeechVoiceRead,
+    host_speech.HostSpeechSettingsRead,
+    host_speech.HostSpeechSettingsUpdate,
+    host_speech.HostSpeechSentenceRead,
+    host_speech.HostSpeechManifestRead,
+    host_speech.HostSpeechSettingsUpdatedPayload,
     # WebSocket 现有 6 个事件（issue #60/#75）
     ws.RoomJoinPayload,
     ws.PlayerReadyPayload,

@@ -9,7 +9,7 @@ from pathlib import Path
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 PREVIOUS_REVISION = "1a02058345ee"
 ENGINE_IDENTITY_PREVIOUS_REVISION = "9c4e7a2b1d6f"
-HEAD_REVISION = "e4b6c8d0f2a1"
+HEAD_REVISION = "f2a7c9d1e4b6"
 
 
 def _run_alembic(database: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -90,6 +90,7 @@ def test_migration_upgrades_empty_sqlite_and_round_trips(tmp_path: Path) -> None
         ("module_version", "module_versions", "version"),
     }.issubset(_foreign_keys(database, "game_sessions"))
     assert "module_version" in _column_names(database, "rooms")
+    assert "host_speech_voice_type" in _column_names(database, "rooms")
     assert "version" in _column_names(database, "characters")
     assert "occupation_choice_skill_ids" in _column_names(database, "characters")
     assert "correlation_id" in _column_names(database, "events")

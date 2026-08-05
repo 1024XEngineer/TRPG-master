@@ -15,35 +15,41 @@ import { useAuthStore } from '@/stores/auth-store'
 import { useCharacterStore } from '@/stores/character-store'
 import { useRoomStore } from '@/stores/room-store'
 
-class RoomSpeechUtterance {
-  text: string
-  voice: SpeechSynthesisVoice | null = null
-  lang = ''
-  rate = 0
-  pitch = 0
-  volume = 0
-  onend: (() => void) | null = null
-  onerror: (() => void) | null = null
-
-  constructor(text: string) {
-    this.text = text
-  }
-}
-
 function installRoomSpeechApi() {
-  const spoken: RoomSpeechUtterance[] = []
-  const synthesis = {
-    getVoices: vi.fn(() => [] as SpeechSynthesisVoice[]),
-    speak: vi.fn((utterance: RoomSpeechUtterance) => spoken.push(utterance)),
-    cancel: vi.fn(),
-    pause: vi.fn(),
-    resume: vi.fn(),
-    addEventListener: vi.fn(),
-    removeEventListener: vi.fn(),
+  class RoomAudio extends EventTarget {
+    src = ''
+    playbackRate = 1
+    volume = 1
+    preservesPitch = false
+    play = vi.fn(async () => {})
+    pause = vi.fn()
+    load = vi.fn()
+    removeAttribute = vi.fn()
   }
-  Object.defineProperty(window, 'speechSynthesis', { configurable: true, value: synthesis })
-  Object.defineProperty(window, 'SpeechSynthesisUtterance', { configurable: true, value: RoomSpeechUtterance })
-  return { synthesis, spoken }
+  const audio = new RoomAudio()
+  vi.stubGlobal('Audio', class { constructor() { return audio } })
+  vi.stubGlobal('URL', { ...URL, createObjectURL: vi.fn(() => 'blob:room-speech'), revokeObjectURL: vi.fn() })
+  mockGetHostSpeechSettings.mockResolvedValue({
+    available: true,
+    provider: 'fake',
+    voiceType: 'voice-a',
+    voices: [{ voiceType: 'voice-a', label: '测试音色' }],
+    autoEmotion: true,
+  })
+  mockGetHostSpeechManifest.mockImplementation(async (_roomId: string, messageId: string) => ({
+    messageId,
+    sentences: [{
+      index: 0,
+      text: ({
+        'action-206': '渐进片段一号。渐进片段二号。',
+        'narration-1': '新的主持人叙事',
+        'history-narration': '历史主持人叙事',
+        'narration-controls-1': '控制面板测试',
+      } as Record<string, string>)[messageId] ?? '测试分句',
+    }],
+  }))
+  mockGetHostSpeechSentence.mockResolvedValue(new Blob(['mp3'], { type: 'audio/mpeg' }))
+  return { audio }
 }
 
 const {
@@ -52,6 +58,10 @@ const {
   mockGetPlayerView,
   mockJoinRoom,
   mockListConversation,
+  mockGetHostSpeechSettings,
+  mockGetHostSpeechManifest,
+  mockGetHostSpeechSentence,
+  mockUpdateHostSpeechSettings,
   mockOnWsMessage,
   mockRollCheck,
   mockSubmitAction,
@@ -70,6 +80,10 @@ const {
     mockGetPlayerView: vi.fn(),
     mockJoinRoom: vi.fn(),
     mockListConversation: vi.fn(),
+    mockGetHostSpeechSettings: vi.fn(),
+    mockGetHostSpeechManifest: vi.fn(),
+    mockGetHostSpeechSentence: vi.fn(),
+    mockUpdateHostSpeechSettings: vi.fn(),
     mockRollCheck: vi.fn(),
     mockOnWsMessage: vi.fn((handler: (event: ServerToClientEvent) => void) => {
       handlers.add(handler)
@@ -84,11 +98,16 @@ vi.mock('@/services/api-client', () => ({
   connectWebSocket: vi.fn(() => ({}) as WebSocket),
   disconnectWebSocket: vi.fn(),
   friendlyErrorMessage: vi.fn((_err: unknown, fallback: string) => fallback),
+  getAuthToken: vi.fn(() => 'token-1'),
   onWsMessage: mockOnWsMessage,
   waitForWsOpen: mockWaitForWsOpen,
   sdk: {
     rooms: {
       listConversation: mockListConversation,
+      getHostSpeechSettings: mockGetHostSpeechSettings,
+      getHostSpeechManifest: mockGetHostSpeechManifest,
+      getHostSpeechSentence: mockGetHostSpeechSentence,
+      updateHostSpeechSettings: mockUpdateHostSpeechSettings,
     },
     roomSocket: {
       getOpeningMessageId: mockGetOpeningMessageId,
@@ -293,6 +312,13 @@ describe('RoomPage conversation history', () => {
     mockGetPlayerView.mockReturnValue(null)
     mockGetOpeningMessageId.mockReturnValue(null)
     mockListConversation.mockResolvedValue([])
+    mockGetHostSpeechSettings.mockResolvedValue({
+      available: false,
+      provider: 'disabled',
+      voiceType: null,
+      voices: [],
+      autoEmotion: true,
+    })
     mockSubmitAction.mockReturnValue(new Promise(() => undefined))
   })
 
@@ -633,7 +659,7 @@ describe('RoomPage conversation history', () => {
   })
 
   it('speaks the narration only once the authoritative push has landed', async () => {
-    const { spoken } = installRoomSpeechApi()
+    installRoomSpeechApi()
     localStorage.setItem(
       'aidm-host-speech-settings',
       JSON.stringify({ enabled: true, voiceURI: null }),
@@ -652,14 +678,14 @@ describe('RoomPage conversation history', () => {
     })
     expect(await screen.findByText('生成中…')).toBeInTheDocument()
     // 揭示途中不能出声：片段不是权威消息。
-    expect(spoken).toHaveLength(0)
+    expect(mockGetHostSpeechManifest).not.toHaveBeenCalled()
 
     emitWsMessage({
       type: 'narration.push',
       payload: { messageId: 'action-206', text: full },
     })
-    await waitFor(() => expect(spoken).toHaveLength(1), { timeout: 4000 })
-    expect(spoken[0]?.text).toBe(full)
+    await waitFor(() => expect(mockGetHostSpeechManifest).toHaveBeenCalledTimes(1), { timeout: 4000 })
+    expect(mockGetHostSpeechManifest.mock.calls[0]?.[1]).toBe('action-206')
   })
 
   it('commits immediately when a narration arrives without any chunks', async () => {
@@ -676,7 +702,7 @@ describe('RoomPage conversation history', () => {
   })
 
   it('automatically speaks new final narration once by message id', async () => {
-    const { spoken } = installRoomSpeechApi()
+    installRoomSpeechApi()
     localStorage.setItem('aidm-host-speech-settings', JSON.stringify({ enabled: true, voiceURI: null }))
     renderRoomPage()
     await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
@@ -686,18 +712,18 @@ describe('RoomPage conversation history', () => {
       payload: { messageId: 'narration-1', text: '新的主持人叙事' },
     })
     expect(await screen.findByText('新的主持人叙事')).toBeInTheDocument()
-    expect(spoken).toHaveLength(1)
-    expect(spoken[0]?.text).toBe('新的主持人叙事')
+    await waitFor(() => expect(mockGetHostSpeechManifest).toHaveBeenCalledTimes(1))
+    expect(mockGetHostSpeechManifest.mock.calls[0]?.[1]).toBe('narration-1')
 
     emitWsMessage({
       type: 'narration.push',
       payload: { messageId: 'narration-1', text: '新的主持人叙事' },
     })
-    await waitFor(() => expect(spoken).toHaveLength(1))
+    await waitFor(() => expect(mockGetHostSpeechManifest).toHaveBeenCalledTimes(1))
   })
 
   it('does not auto-speak restored history but supports manual replay', async () => {
-    const { spoken } = installRoomSpeechApi()
+    installRoomSpeechApi()
     localStorage.setItem('aidm-host-speech-settings', JSON.stringify({ enabled: true, voiceURI: null }))
     mockListConversation.mockResolvedValue([
       {
@@ -711,7 +737,7 @@ describe('RoomPage conversation history', () => {
 
     renderRoomPage()
     expect(await screen.findByText('历史主持人叙事')).toBeInTheDocument()
-    expect(spoken).toHaveLength(0)
+    expect(mockGetHostSpeechManifest).not.toHaveBeenCalled()
 
     emitWsMessage({
       type: 'narration.push',
@@ -719,16 +745,16 @@ describe('RoomPage conversation history', () => {
     })
     await waitFor(() => {
       expect(screen.getAllByText('历史主持人叙事')).toHaveLength(1)
-      expect(spoken).toHaveLength(0)
+      expect(mockGetHostSpeechManifest).not.toHaveBeenCalled()
     })
 
     fireEvent.click(screen.getByRole('button', { name: '重新朗读' }))
-    expect(spoken).toHaveLength(1)
-    expect(spoken[0]?.text).toBe('历史主持人叙事')
+    await waitFor(() => expect(mockGetHostSpeechManifest).toHaveBeenCalledTimes(1))
+    expect(mockGetHostSpeechManifest.mock.calls[0]?.[1]).toBe('history-narration')
   })
 
   it('exposes speech controls and stops the queue when disabled', async () => {
-    const { spoken, synthesis } = installRoomSpeechApi()
+    const { audio } = installRoomSpeechApi()
     renderRoomPage()
     await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
 
@@ -742,15 +768,15 @@ describe('RoomPage conversation history', () => {
       payload: { messageId: 'narration-controls-1', text: '控制面板测试' },
     })
     expect(await screen.findByText('控制面板测试')).toBeInTheDocument()
-    expect(spoken).toHaveLength(1)
+    await waitFor(() => expect(audio.play).toHaveBeenCalledTimes(1))
 
     fireEvent.click(screen.getByRole('button', { name: '暂停朗读' }))
-    expect(synthesis.pause).toHaveBeenCalledTimes(1)
+    expect(audio.pause).toHaveBeenCalledTimes(1)
     fireEvent.click(screen.getByRole('button', { name: '继续朗读' }))
-    expect(synthesis.resume).toHaveBeenCalledTimes(1)
+    expect(audio.play).toHaveBeenCalledTimes(2)
     fireEvent.click(toggle)
     expect(toggle).not.toBeChecked()
-    expect(synthesis.cancel).toHaveBeenCalled()
+    expect(audio.pause).toHaveBeenCalledTimes(2)
   })
 
   it('keeps text readable and disables replay when speech is unsupported', async () => {

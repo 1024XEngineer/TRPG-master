@@ -155,6 +155,9 @@ jobs:
           GHCR_ACTOR: ${{ github.actor }}
           # Preview 专用 key，跟本地/生产用的 key 分开管理，方便单独限额/吊销。
           DEEPSEEK_API_KEY: ${{ secrets.PREVIEW_DEEPSEEK_API_KEY }}
+          DOUBAO_TTS_API_KEY: ${{ secrets.PREVIEW_DOUBAO_TTS_API_KEY }}
+          DOUBAO_TTS_VOICES: ${{ secrets.PREVIEW_DOUBAO_TTS_VOICES }}
+          DOUBAO_TTS_DEFAULT_VOICE_TYPE: ${{ secrets.PREVIEW_DOUBAO_TTS_DEFAULT_VOICE_TYPE }}
         run: |
           # 远程 provider 模式缺 key 时后端会启动失败（不是优雅降级，
           # README「主持模型配置」一节已说明）——这个判断必须在部署前做，
@@ -164,6 +167,14 @@ jobs:
           else
             HOST_MODEL_PROVIDER=fake
           fi
+          if [ -n "$DOUBAO_TTS_API_KEY" ] && [ -n "$DOUBAO_TTS_VOICES" ] && [ -n "$DOUBAO_TTS_DEFAULT_VOICE_TYPE" ]; then
+            HOST_SPEECH_PROVIDER=doubao
+          else
+            HOST_SPEECH_PROVIDER=disabled
+          fi
+          DOUBAO_TTS_API_KEY_B64=$(printf '%s' "$DOUBAO_TTS_API_KEY" | base64 | tr -d '\n')
+          DOUBAO_TTS_VOICES_B64=$(printf '%s' "$DOUBAO_TTS_VOICES" | base64 | tr -d '\n')
+          DOUBAO_TTS_DEFAULT_VOICE_TYPE_B64=$(printf '%s' "$DOUBAO_TTS_DEFAULT_VOICE_TYPE" | base64 | tr -d '\n')
 
           # 注意这里不再 scp 仓库里的 docker-compose.preview.yml——PR 分支
           # 能修改这个文件的内容，而部署账号在 docker 组里（等同宿主机
@@ -202,6 +213,12 @@ jobs:
             export PREVIEW_PORT="$PORT"
             export HOST_MODEL_PROVIDER="$HOST_MODEL_PROVIDER"
             export DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY"
+            export HOST_SPEECH_PROVIDER="$HOST_SPEECH_PROVIDER"
+            # base64 只负责安全穿过 SSH heredoc，不是加密；GitHub 日志仍由
+            # secrets 掩码保护，应用日志则永远不记录这些字段。
+            export DOUBAO_TTS_API_KEY="\$(printf '%s' '$DOUBAO_TTS_API_KEY_B64' | base64 -d)"
+            export DOUBAO_TTS_VOICES="\$(printf '%s' '$DOUBAO_TTS_VOICES_B64' | base64 -d)"
+            export DOUBAO_TTS_DEFAULT_VOICE_TYPE="\$(printf '%s' '$DOUBAO_TTS_DEFAULT_VOICE_TYPE_B64' | base64 -d)"
             docker compose -p pr-$PR pull
             # --wait：等 healthcheck 真的通过再算这一步成功，镜像坏了/
             # entrypoint 启动即崩溃会让这里失败，而不是"容器建起来了"就

@@ -51,6 +51,10 @@ class ErrorCode(StrEnum):
     # 会退化成"零个约束"从而放行空白角色卡，必须显式拒绝而不是当成无约束。
     RULESET_NOT_CONFIGURED = "RULESET_NOT_CONFIGURED"
 
+    HOST_SPEECH_UNAVAILABLE = "HOST_SPEECH_UNAVAILABLE"
+    HOST_SPEECH_FAILED = "HOST_SPEECH_FAILED"
+    HOST_SPEECH_TIMEOUT = "HOST_SPEECH_TIMEOUT"
+
 
 class AppException(Exception):
     """业务代码显式抛出的异常，携带错误码/状态码/用户可见信息。

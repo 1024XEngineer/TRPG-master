@@ -259,6 +259,8 @@ const PAYLOAD_VALIDATORS: {
     (p.messageId === undefined ||
       p.messageId === null ||
       (typeof p.messageId === 'string' && p.messageId.length > 0)),
+  'host_speech.settings_updated': (p) =>
+    p.voiceType === null || typeof p.voiceType === 'string',
   // 片段只是 narration.push 的渐进展示形式，不是权威消息（issue #203）：
   // messageId 用来归组、sequence 用来排序去重，拼接结果必须等于最终 push 的
   // text。下游不得把拼接内容当成权威历史。

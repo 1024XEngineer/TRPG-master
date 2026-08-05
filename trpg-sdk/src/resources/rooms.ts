@@ -11,6 +11,8 @@ import type {
   RoomSummary,
   ReplayEvent,
   RoomConversationEvent,
+  HostSpeechManifest,
+  HostSpeechSettings,
 } from '../types';
 
 /**
@@ -34,6 +36,16 @@ export class RoomsResource {
   /** 账号身份：`Authorization: Bearer`，代表"你是哪个用户"。 */
   private accountAuth(token: string): RequestInit {
     return { headers: { Authorization: `Bearer ${token}` } };
+  }
+
+  private hostSpeechAuth(token: string, reconnectToken: string, signal?: AbortSignal): RequestInit {
+    return {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'X-Reconnect-Token': reconnectToken,
+      },
+      signal,
+    };
   }
 
   /**
@@ -155,6 +167,59 @@ export class RoomsResource {
     return this.client.get<ChatMessage[]>(
       `/rooms/${roomId}/messages${query}`,
       this.roomAuth(reconnectToken)
+    );
+  }
+
+  getHostSpeechSettings(
+    roomId: string,
+    token: string,
+    reconnectToken: string,
+    signal?: AbortSignal
+  ): Promise<HostSpeechSettings> {
+    return this.client.get<HostSpeechSettings>(
+      `/rooms/${encodeURIComponent(roomId)}/host-speech`,
+      this.hostSpeechAuth(token, reconnectToken, signal)
+    );
+  }
+
+  updateHostSpeechSettings(
+    roomId: string,
+    voiceType: string,
+    token: string,
+    reconnectToken: string,
+    signal?: AbortSignal
+  ): Promise<HostSpeechSettings> {
+    return this.client.patch<HostSpeechSettings>(
+      `/rooms/${encodeURIComponent(roomId)}/host-speech`,
+      { voiceType },
+      this.hostSpeechAuth(token, reconnectToken, signal)
+    );
+  }
+
+  getHostSpeechManifest(
+    roomId: string,
+    messageId: string,
+    token: string,
+    reconnectToken: string,
+    signal?: AbortSignal
+  ): Promise<HostSpeechManifest> {
+    return this.client.get<HostSpeechManifest>(
+      `/rooms/${encodeURIComponent(roomId)}/narrations/${encodeURIComponent(messageId)}/speech`,
+      this.hostSpeechAuth(token, reconnectToken, signal)
+    );
+  }
+
+  getHostSpeechSentence(
+    roomId: string,
+    messageId: string,
+    sentenceIndex: number,
+    token: string,
+    reconnectToken: string,
+    signal?: AbortSignal
+  ): Promise<Blob> {
+    return this.client.requestBlob(
+      `/rooms/${encodeURIComponent(roomId)}/narrations/${encodeURIComponent(messageId)}/speech/sentences/${sentenceIndex}`,
+      { ...this.hostSpeechAuth(token, reconnectToken, signal), method: 'GET' }
     );
   }
 }

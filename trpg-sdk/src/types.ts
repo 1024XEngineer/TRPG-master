@@ -10,7 +10,11 @@
 // "动词+Input/Result"），生成产物忠实反映后端类名，这一层负责做名字翻译。
 // ──────────────────────────────────────────────
 
-import type { ErrorDetail, MyRoomSummary as GeneratedMyRoomSummary } from './generated/dto';
+import type {
+  ErrorDetail,
+  HostSpeechSettingsUpdatedPayload,
+  MyRoomSummary as GeneratedMyRoomSummary,
+} from './generated/dto';
 
 export type {
   ErrorDetail,
@@ -83,6 +87,12 @@ export type {
   SanCheckResultPayload,
   ClueGrantedPayload,
   ErrorPayload,
+  HostSpeechVoiceRead,
+  HostSpeechSettingsRead as HostSpeechSettings,
+  HostSpeechSettingsUpdate,
+  HostSpeechSentenceRead,
+  HostSpeechManifestRead as HostSpeechManifest,
+  HostSpeechSettingsUpdatedPayload,
 } from './generated/dto';
 
 /** GET /api/v1/me/rooms 返回项。 */
@@ -165,6 +175,7 @@ export type ServerToClientEvent =
   | { type: 'check.result'; payload: CheckResultPayload }
   | { type: 'chat.message'; payload: ChatMessagePayload }
   | { type: 'action.broadcast'; payload: ActionBroadcastPayload }
+  | { type: 'host_speech.settings_updated'; payload: HostSpeechSettingsUpdatedPayload }
   | { type: 'san.check.request'; payload: SanCheckRequestPayload }
   | { type: 'san.check.result'; payload: SanCheckResultPayload }
   | { type: 'clue.granted'; payload: ClueGrantedPayload }

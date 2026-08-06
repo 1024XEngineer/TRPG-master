@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ModuleDetail, ModuleSummary } from 'trpg-sdk'
@@ -161,6 +161,32 @@ describe('content selection pages', () => {
 
     expect(await screen.findByText('创建房间页面')).toBeInTheDocument()
     expect(useGameStore.getState().sceneId).toBe(moduleSummary.id)
+  })
+
+  it('uses the module layout instead of title keywords to group detail pages', async () => {
+    vi.mocked(listModules).mockResolvedValue([moduleSummary])
+    vi.mocked(getModuleDetail).mockResolvedValue({
+      ...moduleDetail,
+      storyPages: [
+        { title: '开局前准备', content: '这页仍然属于开局提示。' },
+        { title: '调查员须知', content: '这页属于调查员准备。' },
+      ],
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/home/create/modules']}>
+        <ScenarioSelectionPage />
+      </MemoryRouter>,
+    )
+
+    fireEvent.click(await screen.findByRole('button', { name: '查看模组 追书人 详情' }))
+
+    const openingSection = (await screen.findByRole('heading', { name: '开局提示' })).closest('section')
+    const preparationSection = (await screen.findByRole('heading', { name: '调查员须知' })).closest('section')
+    expect(openingSection).not.toBeNull()
+    expect(preparationSection).not.toBeNull()
+    expect(within(openingSection as HTMLElement).getByText('这页仍然属于开局提示。')).toBeInTheDocument()
+    expect(within(preparationSection as HTMLElement).getByText('这页属于调查员准备。')).toBeInTheDocument()
   })
 
   it('reuses loaded module details when reopening the same card', async () => {

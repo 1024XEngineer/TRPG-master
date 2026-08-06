@@ -19,6 +19,9 @@ const CARD_BACKGROUNDS = [
 const MODULE_COVERS: Record<string, string> = {
   'paper-chase-zh-coc7': `${ASSET_ROOT}/cover-paper-chase.webp`,
 }
+const MODULE_PREPARATION_PAGE_INDEXES: Record<string, readonly number[]> = {
+  'paper-chase-zh-coc7': [1],
+}
 
 const difficultyLabel: Record<number, string> = {
   1: '入门',
@@ -95,8 +98,11 @@ export default function ScenarioSelectionPage() {
   const setScene = useGameStore((state) => state.setScene)
   const detailSummary = modules?.find((module) => module.id === detailModuleId) ?? null
   const detail = detailModuleId ? detailCache[detailModuleId] : undefined
-  const preparationPages = detail?.storyPages.filter((page) => page.title.includes('准备')) ?? []
-  const openingPages = detail?.storyPages.filter((page) => !page.title.includes('准备')) ?? []
+  const preparationPageIndexes = detailModuleId
+    ? MODULE_PREPARATION_PAGE_INDEXES[detailModuleId] ?? []
+    : []
+  const preparationPages = detail?.storyPages.filter((_, index) => preparationPageIndexes.includes(index)) ?? []
+  const openingPages = detail?.storyPages.filter((_, index) => !preparationPageIndexes.includes(index)) ?? []
 
   useEffect(() => {
     let cancelled = false

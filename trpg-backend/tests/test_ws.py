@@ -1680,15 +1680,12 @@ def test_single_action_pending_resumes_without_plan_run(
         headers={"X-Reconnect-Token": room["reconnectToken"]},
     ).json()["data"]
     action_events = [
-        event
-        for event in replay
-        if event["payload"].get("clientActionId") == action_id
+        event for event in replay if event["payload"].get("clientActionId") == action_id
     ]
     narration_events = [
         event
         for event in replay
-        if event["eventType"] == "narration.push"
-        and event["payload"].get("messageId") == action_id
+        if event["eventType"] == "narration.push" and event["payload"].get("messageId") == action_id
     ]
     assert len(action_events) == 1
     assert len(narration_events) == 1

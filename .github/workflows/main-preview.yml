@@ -78,11 +78,25 @@ jobs:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GHCR_ACTOR: ${{ github.actor }}
           DEEPSEEK_API_KEY: ${{ secrets.PREVIEW_DEEPSEEK_API_KEY }}
+          DEEPSEEK_BASE_URL: ${{ vars.PREVIEW_DEEPSEEK_BASE_URL }}
+          DEEPSEEK_MODEL: ${{ vars.PREVIEW_DEEPSEEK_MODEL }}
           DOUBAO_TTS_API_KEY: ${{ secrets.PREVIEW_DOUBAO_TTS_API_KEY }}
           DOUBAO_TTS_VOICES: ${{ secrets.PREVIEW_DOUBAO_TTS_VOICES }}
           DOUBAO_TTS_DEFAULT_VOICE_TYPE: ${{ secrets.PREVIEW_DOUBAO_TTS_DEFAULT_VOICE_TYPE }}
         run: |
           if [ -n "$DEEPSEEK_API_KEY" ]; then
+            if [ -z "$DEEPSEEK_BASE_URL" ] || [ -z "$DEEPSEEK_MODEL" ]; then
+              echo "::error::已配置 Preview 模型密钥，但缺少 PREVIEW_DEEPSEEK_BASE_URL 或 PREVIEW_DEEPSEEK_MODEL"
+              exit 1
+            fi
+            if [[ ! "$DEEPSEEK_BASE_URL" =~ ^https?://[^/[:space:]]+(/.*)?$ ]]; then
+              echo "::error::PREVIEW_DEEPSEEK_BASE_URL 必须是包含主机名的 HTTP(S) 根地址"
+              exit 1
+            fi
+            if [[ "$DEEPSEEK_BASE_URL" == */chat/completions* ]]; then
+              echo "::error::PREVIEW_DEEPSEEK_BASE_URL 应填写 API 根地址，不能包含 /chat/completions"
+              exit 1
+            fi
             HOST_MODEL_PROVIDER=deepseek
           else
             HOST_MODEL_PROVIDER=fake
@@ -92,10 +106,18 @@ jobs:
           else
             HOST_SPEECH_PROVIDER=disabled
           fi
+          DEEPSEEK_API_KEY_B64=$(printf '%s' "$DEEPSEEK_API_KEY" | base64 | tr -d '\n')
+          DEEPSEEK_BASE_URL_B64=$(printf '%s' "$DEEPSEEK_BASE_URL" | base64 | tr -d '\n')
+          DEEPSEEK_MODEL_B64=$(printf '%s' "$DEEPSEEK_MODEL" | base64 | tr -d '\n')
+          if [ -n "$DEEPSEEK_API_KEY_B64" ]; then
+            echo "::add-mask::$DEEPSEEK_API_KEY_B64"
+          fi
           DOUBAO_TTS_API_KEY_B64=$(printf '%s' "$DOUBAO_TTS_API_KEY" | base64 | tr -d '\n')
           DOUBAO_TTS_VOICES_B64=$(printf '%s' "$DOUBAO_TTS_VOICES" | base64 | tr -d '\n')
           DOUBAO_TTS_DEFAULT_VOICE_TYPE_B64=$(printf '%s' "$DOUBAO_TTS_DEFAULT_VOICE_TYPE" | base64 | tr -d '\n')
 
+          # runner 需先展开部署参数与编码后的配置，不能给 heredoc delimiter 加引号。
+          # shellcheck disable=SC2087
           ssh -p "$SSH_PORT" -i ~/.ssh/preview_deploy_key "$SSH_USER@$SSH_HOST" bash -s <<EOF
             set -e
             mkdir -p ~/trpg-previews/main
@@ -106,7 +128,9 @@ jobs:
             export FRONTEND_IMAGE="$FRONTEND_IMAGE"
             export PREVIEW_PORT=80
             export HOST_MODEL_PROVIDER="$HOST_MODEL_PROVIDER"
-            export DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY"
+            export DEEPSEEK_API_KEY="\$(printf '%s' '$DEEPSEEK_API_KEY_B64' | base64 -d)"
+            export DEEPSEEK_BASE_URL="\$(printf '%s' '$DEEPSEEK_BASE_URL_B64' | base64 -d)"
+            export DEEPSEEK_MODEL="\$(printf '%s' '$DEEPSEEK_MODEL_B64' | base64 -d)"
             export HOST_SPEECH_PROVIDER="$HOST_SPEECH_PROVIDER"
             # 编码后穿过未加引号的 SSH heredoc，避免 token/JSON 中的 shell
             # 元字符在部署机上被二次解析；解码结果只作为赋值结果，不会重新执行。

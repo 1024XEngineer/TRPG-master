@@ -155,6 +155,8 @@ jobs:
           GHCR_ACTOR: ${{ github.actor }}
           # Preview 专用 key，跟本地/生产用的 key 分开管理，方便单独限额/吊销。
           DEEPSEEK_API_KEY: ${{ secrets.PREVIEW_DEEPSEEK_API_KEY }}
+          DEEPSEEK_BASE_URL: ${{ vars.PREVIEW_DEEPSEEK_BASE_URL }}
+          DEEPSEEK_MODEL: ${{ vars.PREVIEW_DEEPSEEK_MODEL }}
           DOUBAO_TTS_API_KEY: ${{ secrets.PREVIEW_DOUBAO_TTS_API_KEY }}
           DOUBAO_TTS_VOICES: ${{ secrets.PREVIEW_DOUBAO_TTS_VOICES }}
           DOUBAO_TTS_DEFAULT_VOICE_TYPE: ${{ secrets.PREVIEW_DOUBAO_TTS_DEFAULT_VOICE_TYPE }}
@@ -163,6 +165,18 @@ jobs:
           # README「主持模型配置」一节已说明）——这个判断必须在部署前做，
           # 不能让 compose 直接把空字符串当 key 传给 deepseek provider。
           if [ -n "$DEEPSEEK_API_KEY" ]; then
+            if [ -z "$DEEPSEEK_BASE_URL" ] || [ -z "$DEEPSEEK_MODEL" ]; then
+              echo "::error::已配置 Preview 模型密钥，但缺少 PREVIEW_DEEPSEEK_BASE_URL 或 PREVIEW_DEEPSEEK_MODEL"
+              exit 1
+            fi
+            if [[ ! "$DEEPSEEK_BASE_URL" =~ ^https?://[^/[:space:]]+(/.*)?$ ]]; then
+              echo "::error::PREVIEW_DEEPSEEK_BASE_URL 必须是包含主机名的 HTTP(S) 根地址"
+              exit 1
+            fi
+            if [[ "$DEEPSEEK_BASE_URL" == */chat/completions* ]]; then
+              echo "::error::PREVIEW_DEEPSEEK_BASE_URL 应填写 API 根地址，不能包含 /chat/completions"
+              exit 1
+            fi
             HOST_MODEL_PROVIDER=deepseek
           else
             HOST_MODEL_PROVIDER=fake
@@ -171,6 +185,12 @@ jobs:
             HOST_SPEECH_PROVIDER=doubao
           else
             HOST_SPEECH_PROVIDER=disabled
+          fi
+          DEEPSEEK_API_KEY_B64=$(printf '%s' "$DEEPSEEK_API_KEY" | base64 | tr -d '\n')
+          DEEPSEEK_BASE_URL_B64=$(printf '%s' "$DEEPSEEK_BASE_URL" | base64 | tr -d '\n')
+          DEEPSEEK_MODEL_B64=$(printf '%s' "$DEEPSEEK_MODEL" | base64 | tr -d '\n')
+          if [ -n "$DEEPSEEK_API_KEY_B64" ]; then
+            echo "::add-mask::$DEEPSEEK_API_KEY_B64"
           fi
           DOUBAO_TTS_API_KEY_B64=$(printf '%s' "$DOUBAO_TTS_API_KEY" | base64 | tr -d '\n')
           DOUBAO_TTS_VOICES_B64=$(printf '%s' "$DOUBAO_TTS_VOICES" | base64 | tr -d '\n')
@@ -186,6 +206,7 @@ jobs:
           # 固定 compose 模板（~/trpg-previews/compose-template/，这份文件
           # 只由有服务器访问权限的人手动维护，不经过 CI）——PR 能决定"用
           # 哪个镜像"，决定不了"以什么权限、挂载什么运行这个镜像"。
+          # shellcheck disable=SC2087
           ssh -p "$SSH_PORT" -i ~/.ssh/preview_deploy_key "$SSH_USER@$SSH_HOST" bash -s <<EOF
             set -e
             mkdir -p ~/trpg-previews/pr-$PR
@@ -212,7 +233,9 @@ jobs:
             export FRONTEND_IMAGE="$FRONTEND_IMAGE"
             export PREVIEW_PORT="$PORT"
             export HOST_MODEL_PROVIDER="$HOST_MODEL_PROVIDER"
-            export DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY"
+            export DEEPSEEK_API_KEY="\$(printf '%s' '$DEEPSEEK_API_KEY_B64' | base64 -d)"
+            export DEEPSEEK_BASE_URL="\$(printf '%s' '$DEEPSEEK_BASE_URL_B64' | base64 -d)"
+            export DEEPSEEK_MODEL="\$(printf '%s' '$DEEPSEEK_MODEL_B64' | base64 -d)"
             export HOST_SPEECH_PROVIDER="$HOST_SPEECH_PROVIDER"
             # base64 只负责安全穿过 SSH heredoc，不是加密；GitHub 日志仍由
             # secrets 掩码保护，应用日志则永远不记录这些字段。
@@ -301,6 +324,7 @@ jobs:
         run: |
           # 同上：故意不加引号，$PR 要在 runner 这一侧展开（这里没有
           # secret，纯粹是为了跟部署脚本保持同一套写法）。
+          # shellcheck disable=SC2087
           ssh -p "$SSH_PORT" -i ~/.ssh/preview_deploy_key "$SSH_USER@$SSH_HOST" bash -s <<EOF
             set -e
             if [ -d ~/trpg-previews/pr-$PR ]; then

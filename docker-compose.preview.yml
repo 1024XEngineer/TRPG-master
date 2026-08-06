@@ -19,12 +19,13 @@
 # 价值，容器销毁即丢，完全不碰生产/开发用的 Postgres——见 issue #200
 # 「决策 5」。
 #
-# HOST_MODEL_PROVIDER / DEEPSEEK_API_KEY 从宿主环境变量透传：同仓库 PR 由
-# workflow 注入真实 key；fork PR 因 GitHub Actions 平台限制拿不到 secrets、
-# 甚至连这个 workflow 的部署 job 都不会跑（见 pr-preview.yml 里的 job
-# 条件），本文件里的 fallback 只覆盖"本地跑、不传任何 key"这一种情况——
-# 远程 provider 模式缺 key 时后端会启动失败，不是优雅降级，所以本地不传
-# key 时必须落到 fake，不能让 HOST_MODEL_PROVIDER 意外等于 deepseek。
+# HOST_MODEL_PROVIDER / DEEPSEEK_* 从宿主环境变量透传：同仓库 PR 由 workflow
+# 注入真实 key、OpenAI-compatible API 根地址和模型名；fork PR 因 GitHub
+# Actions 平台限制拿不到 secrets，甚至连部署 job 都不会跑（见
+# pr-preview.yml）。下面的 DeepSeek 默认值只服务于本地复现和旧配置兼容，
+# CI Preview 配了 key 时必须显式提供三项配置，不能静默使用旧厂商默认值。
+# Base URL 填 API 根地址（如 https://api.example.com/v1），不能填完整的
+# /chat/completions；OpenAI SDK 会自行追加请求路径。
 
 services:
   backend:
@@ -46,6 +47,7 @@ services:
       OPENING_NARRATION_MODE: ${OPENING_NARRATION_MODE:-model}
       OPENING_NARRATION_TIMEOUT_SECONDS: ${OPENING_NARRATION_TIMEOUT_SECONDS:-10}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      # CI Preview 会用 Repository Variables 覆盖这两个本地兼容默认值。
       DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
       DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-chat}
       # 没有一整套独立限额凭证时保持 disabled；应用不会回退到浏览器 TTS。

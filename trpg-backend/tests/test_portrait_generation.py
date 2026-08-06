@@ -32,6 +32,7 @@ from app.service.portrait_generation import (
     build_character_portrait_snapshot,
     build_portrait_generation_service,
 )
+from app.service.portrait_reference import PortraitReferenceImage, load_portrait_reference_image
 from tests.helpers import ROOMS_BASE, create_room, join_room, reconnect, register
 
 ATTRIBUTES = {
@@ -88,7 +89,12 @@ class RecordingImageProvider:
         self.calls: list[dict[str, str]] = []
 
     async def generate(
-        self, *, prompt: str, negative_prompt: str, size: str
+        self,
+        *,
+        prompt: str,
+        negative_prompt: str,
+        size: str,
+        reference_image: PortraitReferenceImage | None = None,
     ) -> ImageGenerationOutput:
         self.calls.append({"prompt": prompt, "negative_prompt": negative_prompt, "size": size})
         return ImageGenerationOutput(image_url="https://images.example/portrait.png")
@@ -101,7 +107,12 @@ class BlockingImageProvider(RecordingImageProvider):
         self.release = asyncio.Event()
 
     async def generate(
-        self, *, prompt: str, negative_prompt: str, size: str
+        self,
+        *,
+        prompt: str,
+        negative_prompt: str,
+        size: str,
+        reference_image: PortraitReferenceImage | None = None,
     ) -> ImageGenerationOutput:
         self.started.set()
         await self.release.wait()
@@ -249,8 +260,28 @@ async def test_deterministic_prompt_changes_with_portrait_relevant_attributes() 
     for variant in variants:
         changed_prompt = await composer.compose(variant)
         assert changed_prompt.positive_prompt != base_prompt.positive_prompt
-    assert "写实方形半身单人肖像" in base_prompt.positive_prompt
+    assert "偏漫画风格" in base_prompt.positive_prompt
+    assert "照片写实" in base_prompt.negative_prompt
+    assert "写实肖像" not in base_prompt.prompt_summary
     assert "多人画面" in base_prompt.negative_prompt
+
+
+def test_portrait_reference_loader_returns_private_data_uri() -> None:
+    reference = load_portrait_reference_image("app/assets/portrait-style-reference.png")
+
+    assert reference is not None
+    assert reference.mime_type == "image/png"
+    assert reference.filename == "portrait-style-reference.png"
+    assert reference.data_uri.startswith("data:image/png;base64,")
+
+
+def test_portrait_reference_loader_rejects_missing_or_invalid_files(tmp_path) -> None:
+    missing = load_portrait_reference_image(str(tmp_path / "missing.png"))
+    invalid_path = tmp_path / "reference.txt"
+    invalid_path.write_text("not an image", encoding="utf-8")
+
+    assert missing is None
+    assert load_portrait_reference_image(str(invalid_path)) is None
 
 
 async def test_deepseek_prompt_composer_validates_structured_output() -> None:
@@ -602,6 +633,74 @@ async def test_sufy_provider_submits_openai_compatible_request() -> None:
         "n": 1,
     }
     assert output.image_url == "https://sufy.example/portrait.png"
+
+
+async def test_sufy_provider_submits_builtin_reference_image() -> None:
+    requests: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content))
+        return httpx.Response(200, json={"data": [{"url": "https://sufy.example/portrait.png"}]})
+
+    provider = SufyImageProvider(
+        api_key="test-key",
+        base_url="https://openai.sufy.example/v1",
+        model="google/gemini-3-pro-image",
+        timeout_seconds=120,
+        transport=httpx.MockTransport(handler),
+    )
+    reference = PortraitReferenceImage(
+        content=b"\x89PNG\r\n\x1a\nreference",
+        mime_type="image/png",
+        filename="portrait-style-reference.png",
+    )
+
+    await provider.generate(
+        prompt="漫画风格角色立绘",
+        negative_prompt="文字",
+        size="1024x1024",
+        reference_image=reference,
+    )
+
+    assert len(requests) == 1
+    assert requests[0]["images"] == [reference.data_uri]
+    assert "data:image/png;base64," in str(requests[0]["images"])
+
+
+async def test_sufy_provider_downgrades_once_when_reference_is_unsupported() -> None:
+    requests: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        requests.append(payload)
+        if "images" in payload:
+            return httpx.Response(422, json={"error": {"message": "reference image not supported"}})
+        return httpx.Response(200, json={"data": [{"url": "https://sufy.example/portrait.png"}]})
+
+    provider = SufyImageProvider(
+        api_key="test-key",
+        base_url="https://openai.sufy.example/v1",
+        model="google/gemini-3-pro-image",
+        timeout_seconds=120,
+        transport=httpx.MockTransport(handler),
+    )
+    reference = PortraitReferenceImage(
+        content=b"\x89PNG\r\n\x1a\nreference",
+        mime_type="image/png",
+        filename="portrait-style-reference.png",
+    )
+
+    output = await provider.generate(
+        prompt="漫画风格角色立绘",
+        negative_prompt="文字",
+        size="1024x1024",
+        reference_image=reference,
+    )
+
+    assert output.image_url == "https://sufy.example/portrait.png"
+    assert len(requests) == 2
+    assert "images" in requests[0]
+    assert "images" not in requests[1]
 
 
 async def test_sufy_provider_returns_validated_base64_image() -> None:

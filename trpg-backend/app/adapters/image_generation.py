@@ -16,11 +16,17 @@ from app.service.portrait_generation import (
     PortraitImageGenerationError,
     PortraitImageTimeoutError,
 )
+from app.service.portrait_reference import PortraitReferenceImage
 
 
 class MockImageProvider:
     async def generate(
-        self, *, prompt: str, negative_prompt: str, size: str
+        self,
+        *,
+        prompt: str,
+        negative_prompt: str,
+        size: str,
+        reference_image: PortraitReferenceImage | None = None,
     ) -> ImageGenerationOutput:
         digest = hashlib.sha256(f"{prompt}\n{negative_prompt}\n{size}".encode()).hexdigest()[:16]
         palettes = (
@@ -65,8 +71,15 @@ class DashScopeImageProvider:
         self._transport = transport
 
     async def generate(
-        self, *, prompt: str, negative_prompt: str, size: str
+        self,
+        *,
+        prompt: str,
+        negative_prompt: str,
+        size: str,
+        reference_image: PortraitReferenceImage | None = None,
     ) -> ImageGenerationOutput:
+        # DashScope 的当前文生图请求不接受参考图字段；服务层仍传入统一参数，
+        # 这里明确忽略它并保留纯提示词生成，避免伪造一个未被上游支持的协议。
         headers = {
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
@@ -186,7 +199,12 @@ class SufyImageProvider:
         self._transport = transport
 
     async def generate(
-        self, *, prompt: str, negative_prompt: str, size: str
+        self,
+        *,
+        prompt: str,
+        negative_prompt: str,
+        size: str,
+        reference_image: PortraitReferenceImage | None = None,
     ) -> ImageGenerationOutput:
         # OpenAI 生图协议没有通用的 negative_prompt 字段，因此将反向约束
         # 并入主提示词，避免不同 Sufy 模型对非标准字段的支持不一致。
@@ -197,6 +215,10 @@ class SufyImageProvider:
             "size": size,
             "n": 1,
         }
+        if reference_image is not None:
+            # Sufy 的 OpenAI-compatible 网关使用 images 数组接收图像输入；
+            # Data URI 保证参考图不会变成公开 URL，也不会暴露容器内文件路径。
+            payload["images"] = [reference_image.data_uri]
         headers = {
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
@@ -212,6 +234,17 @@ class SufyImageProvider:
                     f"{self._base_url}/images/generations",
                     json=payload,
                 )
+                if (
+                    response.is_error
+                    and reference_image is not None
+                    and self._is_reference_unsupported(response)
+                ):
+                    # 仅在上游明确表示不支持图像输入时降级一次；普通失败不重试，
+                    # 避免隐藏故障或让同一次玩家操作产生重复费用。
+                    response = await client.post(
+                        f"{self._base_url}/images/generations",
+                        json={key: value for key, value in payload.items() if key != "images"},
+                    )
                 if response.is_error:
                     self._raise_http_failure(response)
                 return ImageGenerationOutput(image_url=self._image_result(response.json()))
@@ -221,6 +254,33 @@ class SufyImageProvider:
             raise PortraitImageTimeoutError("图片生成超时") from exc
         except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
             raise PortraitImageGenerationError("图片生成服务暂时不可用") from exc
+
+    @classmethod
+    def _is_reference_unsupported(cls, response: httpx.Response) -> bool:
+        """只识别明确的参考图能力错误，避免把鉴权或审核失败误判成可重试。"""
+        try:
+            payload = response.json()
+        except ValueError:
+            return False
+        if not isinstance(payload, dict):
+            return False
+        error = payload.get("error")
+        if isinstance(error, dict):
+            text = f"{error.get('type', '')} {error.get('message', '')}"
+        else:
+            text = str(error or payload.get("message", ""))
+        normalized = text.lower()
+        return response.status_code in {400, 422} and any(
+            marker in normalized
+            for marker in (
+                "image input",
+                "reference image",
+                "unsupported field",
+                "not supported",
+                "不支持",
+                "参考图",
+            )
+        )
 
     @classmethod
     def _raise_http_failure(cls, response: httpx.Response) -> None:

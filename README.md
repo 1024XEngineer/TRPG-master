@@ -234,6 +234,7 @@ npm run dev
 | `SUFY_BASE_URL` | `https://openai.sufy.com/v1` | Sufy OpenAI-compatible API 根地址 |
 | `SUFY_IMAGE_MODEL` | `google/gemini-3-pro-image` | Sufy 高质量图片生成模型 |
 | `PORTRAIT_GENERATION_TIMEOUT_SECONDS` | `120` | 图片生成和任务轮询的总超时秒数 |
+| `PORTRAIT_REFERENCE_IMAGE_PATH` | `app/assets/portrait-style-reference.png` | 后端内置漫画风格参考图路径；留空或不可读时使用纯提示词 |
 
 生图入口由前端默认显示，不再配置前端环境变量。后端默认启用且使用 `auto`：依次检查 `SUFY_API_KEY` 和 `DASHSCOPE_API_KEY`，自动选择可用的真实 provider；两者都未填写时使用 mock。如需禁用后端生图，只需设置 `CHARACTER_PORTRAIT_ENABLED=false`。
 

@@ -109,6 +109,9 @@ class Settings(BaseSettings):
     sufy_api_key: SecretStr | None = None
     sufy_base_url: str = Field(default="https://openai.sufy.com/v1", min_length=1)
     sufy_image_model: str = Field(default="google/gemini-3-pro-image", min_length=1)
+    # 项目内置参考图只由后端读取并转成内存中的 Data URI，不通过前端或公开静态目录暴露。
+    # 留空或文件不可读时，角色生图自动降级为纯提示词模式。
+    portrait_reference_image_path: str = "app/assets/portrait-style-reference.png"
     portrait_generation_timeout_seconds: float = Field(default=120.0, gt=0, le=300)
 
     # 讨论区/Narrator 主线的兼容配置：未配置时使用确定性占位叙事，测试可通过

@@ -25,6 +25,7 @@ from app.dto.portrait import (
 from app.models.content import Scenario
 from app.models.engine import ModuleVersion
 from app.models.room import Character, Room
+from app.service.portrait_reference import PortraitReferenceImage, load_portrait_reference_image
 from app.service.room import (
     RoomAuthorizationError,
     find_room_by_id,
@@ -74,7 +75,12 @@ class PortraitPromptComposer(Protocol):
 
 class ImageGenerationProvider(Protocol):
     async def generate(
-        self, *, prompt: str, negative_prompt: str, size: str
+        self,
+        *,
+        prompt: str,
+        negative_prompt: str,
+        size: str,
+        reference_image: PortraitReferenceImage | None = None,
     ) -> ImageGenerationOutput: ...
 
 
@@ -203,16 +209,19 @@ class DeterministicPromptComposer:
             )
 
         positive = (
-            "一名TRPG人物的写实方形半身单人肖像，身份信息："
+            "偏漫画风格的精致角色立绘，清晰细致的线稿，轻厚涂与柔和赛璐璐上色，"
+            "优雅的设定集插画质感，方形构图，腰部以上，人物居中，单人肖像，身份信息："
             + "、".join(identity)
-            + "。自然真实的面部细节，符合年代与职业的服装和道具，"
-            "具有电影感但主体清晰的光线，背景简洁。"
+            + "。自然细腻的面部细节，符合年代与职业的服装和道具，"
+            "柔和暖色光影，主体清晰，背景简洁。"
             + " ".join(facts)
-            + " 不要呈现角色姓名或任何可读文字。"
+            + " 严格保持参考图的绘画风格，但只借鉴线稿、上色、光影和插画完成度；"
+            "不要复制参考图人物、金色卷发、绿色眼睛、绿色礼服、白色花饰、珠宝、蜡烛、"
+            "书架、书房、姿势或构图。不要呈现角色姓名或任何可读文字。"
         )
         negative = (
             "多人画面，文字，字母，字幕，水印，标志，用户界面，装饰边框，"
-            "重复肢体，手部畸形，面部扭曲，头部被裁切，低分辨率"
+            "重复肢体，手部畸形，面部扭曲，头部被裁切，低分辨率，照片写实，摄影棚照片"
         )
         summary_parts = []
         if snapshot.occupation:
@@ -229,7 +238,7 @@ class DeterministicPromptComposer:
             summary_parts.append("已优先参考背景故事中的形象描述")
         if snapshot.module_background:
             summary_parts.append("已参考当前模组的时代、地点与叙事氛围")
-        summary = "；".join(summary_parts) or "根据角色基本信息生成写实肖像"
+        summary = "；".join(summary_parts) or "根据角色基本信息生成漫画风格肖像"
         return PortraitPrompt(
             positive_prompt=positive[:3000],
             negative_prompt=negative,
@@ -246,11 +255,13 @@ class PortraitGenerationService:
         prompt_composer: PortraitPromptComposer,
         fallback_prompt_composer: PortraitPromptComposer,
         image_provider: ImageGenerationProvider,
+        reference_image: PortraitReferenceImage | None = None,
     ) -> None:
         self._enabled = enabled
         self._prompt_composer = prompt_composer
         self._fallback_prompt_composer = fallback_prompt_composer
         self._image_provider = image_provider
+        self._reference_image = reference_image
         self._in_flight: set[tuple[str, str]] = set()
         self._in_flight_lock = asyncio.Lock()
 
@@ -305,11 +316,19 @@ class PortraitGenerationService:
                 prompt = await self._fallback_prompt_composer.compose(snapshot)
                 prompt = prompt.model_copy(update={"source": "deterministic_fallback"})
 
-            output = await self._image_provider.generate(
-                prompt=prompt.positive_prompt,
-                negative_prompt=prompt.negative_prompt,
-                size=payload.size,
-            )
+            if self._reference_image is None:
+                output = await self._image_provider.generate(
+                    prompt=prompt.positive_prompt,
+                    negative_prompt=prompt.negative_prompt,
+                    size=payload.size,
+                )
+            else:
+                output = await self._image_provider.generate(
+                    prompt=prompt.positive_prompt,
+                    negative_prompt=prompt.negative_prompt,
+                    size=payload.size,
+                    reference_image=self._reference_image,
+                )
             return PortraitGenerationResult(
                 generation_id=str(uuid.uuid4()),
                 image_url=output.image_url,
@@ -335,6 +354,9 @@ def build_portrait_generation_service(settings: Settings) -> PortraitGenerationS
     from app.adapters.portrait_prompt import DeepSeekPortraitPromptComposer
 
     fallback = DeterministicPromptComposer()
+    reference_image = load_portrait_reference_image(settings.portrait_reference_image_path)
+    if settings.portrait_reference_image_path and reference_image is None:
+        logger.warning("portrait_reference_unavailable")
     prompt_composer: PortraitPromptComposer = fallback
     if settings.portrait_prompt_provider == "deepseek" and settings.deepseek_api_key:
         prompt_composer = DeepSeekPortraitPromptComposer(
@@ -380,4 +402,5 @@ def build_portrait_generation_service(settings: Settings) -> PortraitGenerationS
         prompt_composer=prompt_composer,
         fallback_prompt_composer=fallback,
         image_provider=image_provider,
+        reference_image=reference_image,
     )

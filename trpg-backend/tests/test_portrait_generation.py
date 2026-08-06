@@ -261,7 +261,10 @@ async def test_deterministic_prompt_changes_with_portrait_relevant_attributes() 
         changed_prompt = await composer.compose(variant)
         assert changed_prompt.positive_prompt != base_prompt.positive_prompt
     assert "偏漫画风格" in base_prompt.positive_prompt
+    assert "背景自然延伸至四边" in base_prompt.positive_prompt
     assert "照片写实" in base_prompt.negative_prompt
+    assert "卡纸" in base_prompt.negative_prompt
+    assert "画中画" in base_prompt.negative_prompt
     assert "写实肖像" not in base_prompt.prompt_summary
     assert "多人画面" in base_prompt.negative_prompt
 

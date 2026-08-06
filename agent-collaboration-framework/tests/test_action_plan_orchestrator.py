@@ -21,6 +21,8 @@ from collaboration_framework.contracts import (
     NarrativeOnlyEffect,
     NoAdjudicationCheck,
     PlayerInput,
+    PostRollDecisionRequest,
+    PushAdjudication,
     RequiredAdjudicationCheck,
     SceneSpec,
     SelectCheckChoice,
@@ -198,6 +200,27 @@ class ClarificationAdjudicator:
         )
 
 
+class FailSecondStepOnceAdjudicator(RecordingAdjudicator):
+    def __init__(self, world_ref: str) -> None:
+        super().__init__(world_ref)
+        self.failed = False
+
+    async def adjudicate(self, context):
+        if context.step_index == 1 and not self.failed:
+            self.contexts.append(context)
+            self.failed = True
+            raise RuntimeError("temporary provider outage")
+        return await super().adjudicate(context)
+
+
+class RejectSecondStepAdjudicator(RecordingAdjudicator):
+    async def adjudicate(self, context):
+        if context.step_index == 1:
+            self.contexts.append(context)
+            raise ContractError("provider output failed schema validation")
+        return await super().adjudicate(context)
+
+
 class OutOfScopeNarrationModel:
     async def generate(self, context):
         return {
@@ -301,6 +324,34 @@ async def test_five_steps_cross_soft_window_without_becoming_product_limit() -> 
         parent_action_id=original.client_action_id,
     )
     assert completed.status == "completed"
+
+
+@pytest.mark.asyncio
+async def test_persisted_narration_recovery_finishes_plan_without_replaying_engine_steps() -> None:
+    service, _, _, _, engine_store = orchestrator()
+    original = player_input("narration-recovery-parent")
+
+    settled = await service.start_or_resume(original, plan=plan(2))
+    assert settled.run.status == "awaiting_narration"
+    context = await service.build_narration_context(original)
+    assert context.allowed_evidence_refs
+    assert len(engine_store.inspect_domain_events("room_01")) == 2
+
+    recovered = await service.start_or_resume(original, plan=plan(2))
+    assert recovered.run.status == "awaiting_narration"
+    assert recovered.run.run_version == settled.run.run_version
+    assert len(engine_store.inspect_domain_events("room_01")) == 2
+
+    completed = await service.mark_narration_completed(
+        room_id="room_01",
+        parent_action_id=original.client_action_id,
+    )
+    replay = await service.mark_narration_completed(
+        room_id="room_01",
+        parent_action_id=original.client_action_id,
+    )
+    assert completed.status == "completed"
+    assert replay == completed
 
 
 def test_decision_parser_accepts_variable_lengths_and_rejects_invalid_shape() -> None:
@@ -421,6 +472,63 @@ async def test_pending_check_stops_plan_and_resumes_same_step_after_decision() -
 
 
 @pytest.mark.asyncio
+async def test_post_roll_retry_resolves_plan_once_without_duplicate_effects() -> None:
+    module, engine_store, projector = runtime()
+    adjudicator = RecordingAdjudicator(module.world_ref, check_step=0)
+    engine = AdjudicationEngineService(
+        engine_store,
+        dice=DiceRoller(SequenceDiceSource([80, 1])),
+    )
+    service = ActionPlanOrchestrator(
+        store=InMemoryActionPlanRunStore(),
+        adjudicator=adjudicator,
+        executor=engine,
+        player_view_projector=projector,
+    )
+    original = player_input("post-roll-parent")
+
+    waiting = await service.start_or_resume(original, plan=plan(2))
+    pending = waiting.latest_execution
+    assert pending is not None and pending.pending_decision is not None
+    rolled = await engine.decide(
+        CheckDecisionRequest(
+            request_id="post-roll-parent:select",
+            room_id="room_01",
+            player_id="player_01",
+            source_revision=pending.view_revision,
+            decision_id=pending.pending_decision.decision_id,
+            decision_version=pending.pending_decision.decision_version,
+            choice=SelectCheckChoice(candidate_id="spot"),
+        )
+    )
+    assert rolled.status == "awaiting_post_roll_decision"
+    check_run = rolled.check_run
+    assert check_run is not None
+    accept = PostRollDecisionRequest(
+        request_id="post-roll-parent:accept",
+        room_id="room_01",
+        player_id="player_01",
+        source_revision=rolled.view_revision,
+        check_id=check_run.check_id,
+        check_version=check_run.version,
+        option_id="push-once",
+        push_adjudication=PushAdjudication(method_description="换一种方式继续调查"),
+    )
+    resolved = await engine.decide_post_roll(accept)
+    replay = await engine.decide_post_roll(accept)
+    assert resolved.status == "resolved"
+    assert replay == resolved
+
+    completed = await service.start_or_resume(original, plan=plan(2))
+    assert completed.run.status == "awaiting_narration"
+    assert completed.run.current_step_index == 2
+    assert len(engine_store.inspect_domain_events("room_01")) == 7
+    assert [event.type for event in engine_store.inspect_domain_events("room_01")].count(
+        "action.succeeded"
+    ) == 2
+
+
+@pytest.mark.asyncio
 async def test_engine_commit_before_plan_cursor_update_reconciles_without_replay() -> None:
     module, engine_store, projector = runtime()
     engine = AdjudicationEngineService(engine_store)
@@ -495,6 +603,63 @@ async def test_unsubmitted_stale_step_is_refreshed_on_same_parent_retry() -> Non
         "2",
     ]
     assert len(engine_store.inspect_domain_events("room_01")) == 3
+
+
+@pytest.mark.asyncio
+async def test_second_step_provider_failure_retries_from_same_cursor() -> None:
+    module, engine_store, projector = runtime()
+    adjudicator = FailSecondStepOnceAdjudicator(module.world_ref)
+    service = ActionPlanOrchestrator(
+        store=InMemoryActionPlanRunStore(),
+        adjudicator=adjudicator,
+        executor=AdjudicationEngineService(engine_store),
+        player_view_projector=projector,
+    )
+    original = player_input("provider-retry-parent")
+
+    failed = await service.start_or_resume(original, plan=plan(2))
+
+    assert failed.run.status == "retryable_failure"
+    assert failed.run.current_step_index == 1
+    assert [step.status for step in failed.run.steps] == ["completed", "pending"]
+    assert failed.run.steps[1].safe_failure_code == "STEP_ADJUDICATOR_FAILED"
+    assert len(engine_store.inspect_domain_events("room_01")) == 1
+
+    recovered = await service.start_or_resume(original, plan=plan(2))
+
+    assert recovered.run.status == "awaiting_narration"
+    assert recovered.run.current_step_index == 2
+    assert [context.step_index for context in adjudicator.contexts] == [0, 1, 1]
+    assert [context.player_view.revision for context in adjudicator.contexts] == [
+        "0",
+        "1",
+        "1",
+    ]
+    assert len(engine_store.inspect_domain_events("room_01")) == 2
+
+
+@pytest.mark.asyncio
+async def test_invalid_second_step_fails_closed_before_engine_commit() -> None:
+    module, engine_store, projector = runtime()
+    adjudicator = RejectSecondStepAdjudicator(module.world_ref)
+    service = ActionPlanOrchestrator(
+        store=InMemoryActionPlanRunStore(),
+        adjudicator=adjudicator,
+        executor=AdjudicationEngineService(engine_store),
+        player_view_projector=projector,
+    )
+
+    failed = await service.start_or_resume(
+        player_input("invalid-step-parent"),
+        plan=plan(2),
+    )
+
+    assert failed.run.status == "retryable_failure"
+    assert failed.run.current_step_index == 1
+    assert [step.status for step in failed.run.steps] == ["completed", "pending"]
+    assert failed.run.steps[1].adjudication is None
+    assert failed.run.steps[1].safe_failure_code == "STEP_ADJUDICATOR_FAILED"
+    assert len(engine_store.inspect_domain_events("room_01")) == 1
 
 
 @pytest.mark.asyncio

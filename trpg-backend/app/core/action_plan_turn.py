@@ -15,6 +15,7 @@ from collaboration_framework.contracts import (
     ActionTarget,
     AdjudicationExecution,
     CancelActionPlanRequest,
+    GetAdjudicationStatusRequest,
     HostTurnDecision,
     NarrativeOnlyEffect,
     NoAdjudicationCheck,
@@ -193,7 +194,13 @@ class ActionPlanTurnApplication:
         )
         if isinstance(result, ActionPlanAdvanceResult):
             return await self._from_plan(player_input, result)
-        return await self._from_single(player_input, decision, result)
+        if not isinstance(decision, SingleActionDecision):
+            raise TypeError("single result 必须对应 SingleActionDecision")
+        return await self._from_single(
+            player_input,
+            decision.adjudication.summary,
+            result,
+        )
 
     async def resume_plan(
         self,
@@ -237,6 +244,69 @@ class ActionPlanTurnApplication:
             advanced,
             verify_fingerprint=False,
         )
+
+    async def resume_pending(
+        self,
+        *,
+        room_id: str,
+        player_id: str,
+        parent_action_id: str,
+        on_progress: Callable[[object], Awaitable[None]] | None = None,
+    ) -> ActionPlanTurnResult:
+        """Resume either a durable ActionPlan or a persisted single action."""
+
+        if await self._orchestrator.get_run(room_id, parent_action_id) is not None:
+            return await self.resume_owned(
+                room_id=room_id,
+                player_id=player_id,
+                parent_action_id=parent_action_id,
+                on_progress=on_progress,
+            )
+        return await self.resume_single(
+            room_id=room_id,
+            player_id=player_id,
+            parent_action_id=parent_action_id,
+        )
+
+    async def resume_single(
+        self,
+        *,
+        room_id: str,
+        player_id: str,
+        parent_action_id: str,
+    ) -> ActionPlanTurnResult:
+        """Finish a single ActionAdjudication without creating a PlanRun."""
+
+        recovery = await self._adjudication_engine.recover_action(
+            GetAdjudicationStatusRequest(
+                room_id=room_id,
+                player_id=player_id,
+                action_request_id=parent_action_id,
+            )
+        )
+        if recovery is None:
+            raise TurnExecutionError(
+                "ACTION_NOT_FOUND",
+                "没有找到可恢复的单动作裁决",
+                retryable=True,
+            )
+        player_input = PlayerInput(
+            room_id=room_id,
+            player_id=player_id,
+            actor_id=recovery.actor_id,
+            client_action_id=parent_action_id,
+            # The original player utterance is not part of the Engine contract;
+            # the frozen adjudication summary is the safe recovery label.
+            utterance=recovery.summary,
+        )
+        result = SingleActionTurnResult(
+            execution=recovery.execution,
+            player_view=await self._projector.refresh_adjudication(
+                player_input,
+                recovery.execution,
+            ),
+        )
+        return await self._from_single(player_input, recovery.summary, result)
 
     async def active_for_room(self, room_id: str):
         return await self._orchestrator.active_for_room(room_id)
@@ -349,11 +419,9 @@ class ActionPlanTurnApplication:
     async def _from_single(
         self,
         player_input: PlayerInput,
-        decision: HostTurnDecision,
+        summary: str,
         result: SingleActionTurnResult,
     ) -> ActionPlanTurnResult:
-        if not isinstance(decision, SingleActionDecision):
-            raise TypeError("single result 必须对应 SingleActionDecision")
         execution = result.execution
         if execution.status in {"awaiting_skill_choice", "awaiting_post_roll_decision"}:
             return ActionPlanTurnResult(
@@ -374,9 +442,9 @@ class ActionPlanTurnApplication:
                 "行动状态尚未完成，请重试",
                 retryable=True,
             )
-        summary = CompletedPlanStepSummary(
+        completed_summary = CompletedPlanStepSummary(
             step_index=0,
-            semantic_goal=decision.adjudication.summary,
+            semantic_goal=summary,
             outcome=completed_outcome,
             view_revision=execution.view_revision,
             event_refs=execution.public_event_refs,
@@ -384,9 +452,9 @@ class ActionPlanTurnApplication:
         context = ActionPlanNarrationContext(
             background=result.player_view.background,
             player_input=player_input,
-            plan_goal=decision.adjudication.summary,
+            plan_goal=summary,
             termination_status=("cancelled" if execution.status == "cancelled" else "resolved"),
-            completed_steps=(summary,),
+            completed_steps=(completed_summary,),
             player_view=result.player_view,
             allowed_evidence_refs=execution.public_event_refs,
         )

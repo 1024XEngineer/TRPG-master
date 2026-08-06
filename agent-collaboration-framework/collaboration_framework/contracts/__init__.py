@@ -38,6 +38,7 @@ from .adjudication import (
     ActionEffect,
     ActionMethod,
     ActionTarget,
+    AdjudicationRecovery,
     AdjudicationCheck,
     AdjudicationExecution,
     AdvanceTimeEffect,

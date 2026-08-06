@@ -1156,7 +1156,7 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                     choice=selected,
                                 )
                             )
-                            result = await action_plan_turn_application.resume_owned(
+                            result = await action_plan_turn_application.resume_pending(
                                 room_id=room_id,
                                 player_id=bound_player_id,
                                 parent_action_id=choice.client_action_id,
@@ -1193,7 +1193,7 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                     ),
                                 )
                             )
-                            result = await action_plan_turn_application.resume_owned(
+                            result = await action_plan_turn_application.resume_pending(
                                 room_id=room_id,
                                 player_id=bound_player_id,
                                 parent_action_id=choice.client_action_id,

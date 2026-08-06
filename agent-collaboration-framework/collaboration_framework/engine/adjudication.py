@@ -16,6 +16,7 @@ from collaboration_framework.contracts import (
     AcceptResultOption,
     ActionAdjudication,
     ActionEffect,
+    AdjudicationRecovery,
     AdjudicationExecution,
     AdjudicationStatusView,
     AdvanceTimeEffect,
@@ -86,6 +87,56 @@ class AdjudicationEngineService:
                 action_request_id=request.action_request_id,
                 status=execution.status,
                 execution=execution,
+            )
+
+    async def recover_action(
+        self,
+        request: GetAdjudicationStatusRequest,
+    ) -> AdjudicationRecovery | None:
+        """Recover the safe context needed to finish one persisted action.
+
+        The latest command may be a skill or post-roll decision and therefore
+        does not itself carry the original adjudication. For checked actions,
+        the durable PendingCheckDecision remains the source of that frozen
+        adjudication after the decision has resolved.
+        """
+
+        async with self._store.transaction(request.room_id) as transaction:
+            command = await transaction.find_latest_adjudication_command_by_action(
+                request.action_request_id
+            )
+            if command is None:
+                return None
+            if command.request.room_id != request.room_id:
+                raise ContractError("裁决恢复状态与请求房间不一致")
+            if command.request.player_id != request.player_id:
+                raise ContractError("裁决恢复状态不属于当前玩家")
+
+            adjudication = None
+            if isinstance(command.request, SubmitAdjudicationRequest):
+                adjudication = command.request.adjudication
+            else:
+                pending = await transaction.find_pending_check_by_action(
+                    request.action_request_id
+                )
+                if pending is not None:
+                    adjudication = pending.adjudication
+            if adjudication is None:
+                raise ContractError("裁决恢复缺少原始 ActionAdjudication")
+            if adjudication.request_id != request.action_request_id:
+                raise ContractError("裁决恢复的 action request id 不一致")
+            if command.execution.action_request_id != request.action_request_id:
+                raise ContractError("裁决恢复的 execution 不属于当前动作")
+            runtime = await transaction.load_runtime()
+            actor = runtime.game_state.actors.get(adjudication.actor_id)
+            if actor is None or actor.player_id != request.player_id:
+                raise ContractError("裁决恢复的 Actor 不属于当前玩家")
+
+            return AdjudicationRecovery(
+                action_request_id=request.action_request_id,
+                actor_id=adjudication.actor_id,
+                summary=adjudication.summary,
+                execution=command.execution,
             )
 
     async def submit(self, request: SubmitAdjudicationRequest) -> AdjudicationExecution:

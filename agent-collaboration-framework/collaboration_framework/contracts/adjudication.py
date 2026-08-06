@@ -327,3 +327,12 @@ class AdjudicationExecution(ContractModel):
         if not set(self.public_event_refs).issubset(self.event_refs):
             raise ValueError("public_event_refs 必须是 event_refs 的子集")
         return self
+
+
+class AdjudicationRecovery(ContractModel):
+    """Safe application-facing recovery projection for one adjudication."""
+
+    action_request_id: str = Field(min_length=1, max_length=200)
+    actor_id: str = Field(min_length=1)
+    summary: str = Field(min_length=1)
+    execution: AdjudicationExecution

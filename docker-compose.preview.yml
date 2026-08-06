@@ -19,13 +19,13 @@
 # 价值，容器销毁即丢，完全不碰生产/开发用的 Postgres——见 issue #200
 # 「决策 5」。
 #
-# HOST_MODEL_PROVIDER / DEEPSEEK_* 从宿主环境变量透传：同仓库 PR 由 workflow
-# 注入真实 key、OpenAI-compatible API 根地址和模型名；fork PR 因 GitHub
-# Actions 平台限制拿不到 secrets，甚至连部署 job 都不会跑（见
-# pr-preview.yml）。下面的 DeepSeek 默认值只服务于本地复现和旧配置兼容，
-# CI Preview 配了 key 时必须显式提供三项配置，不能静默使用旧厂商默认值。
+# HOST_MODEL_PROVIDER / DEEPSEEK_* 以及角色生图的 PORTRAIT_* / SUFY_* 都从
+# 宿主环境变量透传：同仓库 PR 由 workflow 注入真实 key、API 根地址、模型名
+# 和 provider；fork PR 因 GitHub Actions 平台限制拿不到 secrets，甚至连部署
+# job 都不会跑（见 pr-preview.yml）。下面的默认值只服务于本地复现和旧配置
+# 兼容，CI Preview 启用真实链路时必须显式选择对应 provider。
 # Base URL 填 API 根地址（如 https://api.example.com/v1），不能填完整的
-# /chat/completions；OpenAI SDK 会自行追加请求路径。
+# /chat/completions 或 /images/generations；客户端会自行追加请求路径。
 
 services:
   backend:
@@ -47,9 +47,21 @@ services:
       OPENING_NARRATION_MODE: ${OPENING_NARRATION_MODE:-model}
       OPENING_NARRATION_TIMEOUT_SECONDS: ${OPENING_NARRATION_TIMEOUT_SECONDS:-10}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
-      # CI Preview 会用 Repository Variables 覆盖这两个本地兼容默认值。
-      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
-      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-chat}
+      # Preview 默认使用当前新厂商的 v4 Pro；CI 仍可通过 Repository
+      # Variables 显式覆盖，通用后端配置不受这里的 Preview 默认值影响。
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.qnaigc.com/v1}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek/deepseek-v4-pro-202606}
+      # 角色生图的提示词与图片生成是两段独立链路：DeepSeek 负责提示词，
+      # Sufy Gemini 负责图片。CI 在两套 key 都存在时启用真实链路，否则
+      # 通过显式 provider 选择回退到本地可验证的 deterministic/mock。
+      CHARACTER_PORTRAIT_ENABLED: ${CHARACTER_PORTRAIT_ENABLED:-true}
+      PORTRAIT_PROMPT_PROVIDER: ${PORTRAIT_PROMPT_PROVIDER:-deterministic}
+      PORTRAIT_IMAGE_PROVIDER: ${PORTRAIT_IMAGE_PROVIDER:-mock}
+      SUFY_API_KEY: ${SUFY_API_KEY:-}
+      SUFY_BASE_URL: ${SUFY_BASE_URL:-https://openai.sufy.com/v1}
+      SUFY_IMAGE_MODEL: ${SUFY_IMAGE_MODEL:-google/gemini-3-pro-image}
+      PORTRAIT_REFERENCE_IMAGE_PATH: ${PORTRAIT_REFERENCE_IMAGE_PATH:-app/assets/portrait-style-reference.png}
+      PORTRAIT_GENERATION_TIMEOUT_SECONDS: ${PORTRAIT_GENERATION_TIMEOUT_SECONDS:-120}
       # 没有一整套独立限额凭证时保持 disabled；应用不会回退到浏览器 TTS。
       HOST_SPEECH_PROVIDER: ${HOST_SPEECH_PROVIDER:-disabled}
       DOUBAO_TTS_API_KEY: ${DOUBAO_TTS_API_KEY:-}

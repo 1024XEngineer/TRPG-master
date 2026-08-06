@@ -157,14 +157,21 @@ jobs:
           DEEPSEEK_API_KEY: ${{ secrets.PREVIEW_DEEPSEEK_API_KEY }}
           DEEPSEEK_BASE_URL: ${{ vars.PREVIEW_DEEPSEEK_BASE_URL }}
           DEEPSEEK_MODEL: ${{ vars.PREVIEW_DEEPSEEK_MODEL }}
+          # 当前凭证同时支持 DeepSeek v4 Pro 和 Sufy Gemini 生图；仍按用途
+          # 使用两个 Secret 名称，后续可以独立轮换。不要把图片 key 放进前端。
+          SUFY_API_KEY: ${{ secrets.PREVIEW_SUFY_API_KEY }}
+          SUFY_BASE_URL: ${{ vars.PREVIEW_SUFY_BASE_URL }}
+          SUFY_IMAGE_MODEL: ${{ vars.PREVIEW_SUFY_IMAGE_MODEL }}
           DOUBAO_TTS_API_KEY: ${{ secrets.PREVIEW_DOUBAO_TTS_API_KEY }}
           DOUBAO_TTS_VOICES: ${{ secrets.PREVIEW_DOUBAO_TTS_VOICES }}
           DOUBAO_TTS_DEFAULT_VOICE_TYPE: ${{ secrets.PREVIEW_DOUBAO_TTS_DEFAULT_VOICE_TYPE }}
         run: |
-          # 远程 provider 模式缺 key 时后端会启动失败（不是优雅降级，
-          # README「主持模型配置」一节已说明）——这个判断必须在部署前做，
-          # 不能让 compose 直接把空字符串当 key 传给 deepseek provider。
-          if [ -n "$DEEPSEEK_API_KEY" ]; then
+          SUFY_BASE_URL="${SUFY_BASE_URL:-https://openai.sufy.com/v1}"
+          SUFY_IMAGE_MODEL="${SUFY_IMAGE_MODEL:-google/gemini-3-pro-image}"
+          # DeepSeek 与 Sufy 是同一条角色生图链路的两个阶段：前者整理提示词，
+          # 后者生成图片。两套 key 必须成对存在；只配置一套会让预览出现
+          # 难以发现的半真实链路，因此在部署前直接失败。
+          if [ -n "$DEEPSEEK_API_KEY" ] && [ -n "$SUFY_API_KEY" ]; then
             if [ -z "$DEEPSEEK_BASE_URL" ] || [ -z "$DEEPSEEK_MODEL" ]; then
               echo "::error::已配置 Preview 模型密钥，但缺少 PREVIEW_DEEPSEEK_BASE_URL 或 PREVIEW_DEEPSEEK_MODEL"
               exit 1
@@ -177,9 +184,29 @@ jobs:
               echo "::error::PREVIEW_DEEPSEEK_BASE_URL 应填写 API 根地址，不能包含 /chat/completions"
               exit 1
             fi
+            if [[ ! "$SUFY_BASE_URL" =~ ^https?://[^/[:space:]]+(/.*)?$ ]]; then
+              echo "::error::PREVIEW_SUFY_BASE_URL 必须是包含主机名的 HTTP(S) 根地址"
+              exit 1
+            fi
+            if [[ "$SUFY_BASE_URL" == */images/generations* ]]; then
+              echo "::error::PREVIEW_SUFY_BASE_URL 应填写 API 根地址，不能包含 /images/generations"
+              exit 1
+            fi
+            if [ -z "$SUFY_IMAGE_MODEL" ]; then
+              echo "::error::已配置 Preview 生图密钥，但 PREVIEW_SUFY_IMAGE_MODEL 为空"
+              exit 1
+            fi
             HOST_MODEL_PROVIDER=deepseek
+            PORTRAIT_PROMPT_PROVIDER=deepseek
+            PORTRAIT_IMAGE_PROVIDER=sufy
           else
+            if [ -n "$DEEPSEEK_API_KEY" ] || [ -n "$SUFY_API_KEY" ]; then
+              echo "::error::Preview 的 DeepSeek 和 Sufy 密钥必须同时配置，不能只启用其中一段"
+              exit 1
+            fi
             HOST_MODEL_PROVIDER=fake
+            PORTRAIT_PROMPT_PROVIDER=deterministic
+            PORTRAIT_IMAGE_PROVIDER=mock
           fi
           if [ -n "$DOUBAO_TTS_API_KEY" ] && [ -n "$DOUBAO_TTS_VOICES" ] && [ -n "$DOUBAO_TTS_DEFAULT_VOICE_TYPE" ]; then
             HOST_SPEECH_PROVIDER=doubao
@@ -191,6 +218,12 @@ jobs:
           DEEPSEEK_MODEL_B64=$(printf '%s' "$DEEPSEEK_MODEL" | base64 | tr -d '\n')
           if [ -n "$DEEPSEEK_API_KEY_B64" ]; then
             echo "::add-mask::$DEEPSEEK_API_KEY_B64"
+          fi
+          SUFY_API_KEY_B64=$(printf '%s' "$SUFY_API_KEY" | base64 | tr -d '\n')
+          SUFY_BASE_URL_B64=$(printf '%s' "$SUFY_BASE_URL" | base64 | tr -d '\n')
+          SUFY_IMAGE_MODEL_B64=$(printf '%s' "$SUFY_IMAGE_MODEL" | base64 | tr -d '\n')
+          if [ -n "$SUFY_API_KEY_B64" ]; then
+            echo "::add-mask::$SUFY_API_KEY_B64"
           fi
           DOUBAO_TTS_API_KEY_B64=$(printf '%s' "$DOUBAO_TTS_API_KEY" | base64 | tr -d '\n')
           DOUBAO_TTS_VOICES_B64=$(printf '%s' "$DOUBAO_TTS_VOICES" | base64 | tr -d '\n')
@@ -236,6 +269,14 @@ jobs:
             export DEEPSEEK_API_KEY="\$(printf '%s' '$DEEPSEEK_API_KEY_B64' | base64 -d)"
             export DEEPSEEK_BASE_URL="\$(printf '%s' '$DEEPSEEK_BASE_URL_B64' | base64 -d)"
             export DEEPSEEK_MODEL="\$(printf '%s' '$DEEPSEEK_MODEL_B64' | base64 -d)"
+            export CHARACTER_PORTRAIT_ENABLED=true
+            export PORTRAIT_PROMPT_PROVIDER="$PORTRAIT_PROMPT_PROVIDER"
+            export PORTRAIT_IMAGE_PROVIDER="$PORTRAIT_IMAGE_PROVIDER"
+            export SUFY_API_KEY="\$(printf '%s' '$SUFY_API_KEY_B64' | base64 -d)"
+            export SUFY_BASE_URL="\$(printf '%s' '$SUFY_BASE_URL_B64' | base64 -d)"
+            export SUFY_IMAGE_MODEL="\$(printf '%s' '$SUFY_IMAGE_MODEL_B64' | base64 -d)"
+            export PORTRAIT_REFERENCE_IMAGE_PATH=app/assets/portrait-style-reference.png
+            export PORTRAIT_GENERATION_TIMEOUT_SECONDS=120
             export HOST_SPEECH_PROVIDER="$HOST_SPEECH_PROVIDER"
             # base64 只负责安全穿过 SSH heredoc，不是加密；GitHub 日志仍由
             # secrets 掩码保护，应用日志则永远不记录这些字段。

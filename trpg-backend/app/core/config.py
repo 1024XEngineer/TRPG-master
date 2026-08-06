@@ -83,16 +83,19 @@ class Settings(BaseSettings):
     recent_history_max_chars: int = Field(default=6000, ge=2)
 
     # 角色生图是建卡完成后的可选扩展。默认关闭且使用离线 provider，
-    # 只有显式开启并切换 provider 才会调用 DeepSeek / 阿里云。
+    # 只有显式开启并切换 provider 才会调用 DeepSeek / 阿里云 / Sufy。
     character_portrait_enabled: bool = False
     portrait_prompt_provider: Literal["deterministic", "deepseek"] = "deterministic"
-    portrait_image_provider: Literal["mock", "dashscope"] = "mock"
+    portrait_image_provider: Literal["mock", "dashscope", "sufy"] = "mock"
     dashscope_api_key: SecretStr | None = None
     dashscope_base_url: str = Field(
         default="https://dashscope.aliyuncs.com/api/v1",
         min_length=1,
     )
     dashscope_image_model: str = Field(default="wan2.2-t2i-flash", min_length=1)
+    sufy_api_key: SecretStr | None = None
+    sufy_base_url: str = Field(default="https://openai.sufy.com/v1", min_length=1)
+    sufy_image_model: str = Field(default="google/gemini-3-pro-image", min_length=1)
     portrait_generation_timeout_seconds: float = Field(default=120.0, gt=0, le=300)
 
     # 讨论区/Narrator 主线的兼容配置：未配置时使用确定性占位叙事，测试可通过
@@ -125,6 +128,12 @@ class Settings(BaseSettings):
             and (self.dashscope_api_key is None or not secret_value(self.dashscope_api_key).strip())
         ):
             raise ValueError("角色生图使用 DashScope 时必须设置 DASHSCOPE_API_KEY")
+        if (
+            self.character_portrait_enabled
+            and self.portrait_image_provider == "sufy"
+            and (self.sufy_api_key is None or not secret_value(self.sufy_api_key).strip())
+        ):
+            raise ValueError("角色生图使用 Sufy 时必须设置 SUFY_API_KEY")
         return self
 
 

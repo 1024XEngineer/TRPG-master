@@ -217,10 +217,13 @@ npm run dev
 | `RECENT_HISTORY_MAX_CHARS` | `6000` | 近期历史文本总字符预算 |
 | `CHARACTER_PORTRAIT_ENABLED` | `false` | 是否开启建卡完成后的可选角色生图 |
 | `PORTRAIT_PROMPT_PROVIDER` | `deterministic` | 提示词生成：`deterministic` 或 `deepseek` |
-| `PORTRAIT_IMAGE_PROVIDER` | `mock` | 图片 provider：`mock` 或 `dashscope` |
+| `PORTRAIT_IMAGE_PROVIDER` | `mock` | 图片 provider：`mock`、`dashscope` 或 `sufy` |
 | `DASHSCOPE_API_KEY` | 空 | 阿里云百炼 API Key；只存在后端环境变量中 |
 | `DASHSCOPE_BASE_URL` | `https://dashscope.aliyuncs.com/api/v1` | 通义万相 API 根地址 |
 | `DASHSCOPE_IMAGE_MODEL` | `wan2.2-t2i-flash` | 通义万相文生图模型 |
+| `SUFY_API_KEY` | 空 | Sufy API Key；只存在后端环境变量中 |
+| `SUFY_BASE_URL` | `https://openai.sufy.com/v1` | Sufy OpenAI-compatible API 根地址 |
+| `SUFY_IMAGE_MODEL` | `google/gemini-3-pro-image` | Sufy 高质量图片生成模型 |
 | `PORTRAIT_GENERATION_TIMEOUT_SECONDS` | `120` | 图片生成和任务轮询的总超时秒数 |
 
 ### 主持模型配置

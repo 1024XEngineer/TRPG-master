@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import json
 from collections.abc import Callable, Generator
 from typing import cast
@@ -6,10 +7,16 @@ from typing import cast
 import httpx
 import pytest
 from httpx import AsyncClient
+from pydantic import ValidationError
 
-from app.adapters.image_generation import DashScopeImageProvider, MockImageProvider
+from app.adapters.image_generation import (
+    DashScopeImageProvider,
+    MockImageProvider,
+    SufyImageProvider,
+)
 from app.adapters.portrait_prompt import DeepSeekPortraitPromptComposer
 from app.core.coc7_content import build_coc7_ruleset
+from app.core.config import Settings
 from app.core.seed import BUILTIN_MODULE_ID
 from app.dto.portrait import CharacterPortraitSnapshot, PortraitPrompt, PortraitSkillSnapshot
 from app.main import app
@@ -23,6 +30,7 @@ from app.service.portrait_generation import (
     PortraitImageTimeoutError,
     _visual_traits,
     build_character_portrait_snapshot,
+    build_portrait_generation_service,
 )
 from tests.helpers import ROOMS_BASE, create_room, join_room, reconnect, register
 
@@ -559,3 +567,174 @@ async def test_dashscope_provider_times_out_before_polling() -> None:
 
     with pytest.raises(PortraitImageTimeoutError):
         await provider.generate(prompt="prompt", negative_prompt="negative", size="1024x1024")
+
+
+async def test_sufy_provider_submits_openai_compatible_request() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"data": [{"url": "https://sufy.example/portrait.png"}]})
+
+    provider = SufyImageProvider(
+        api_key="test-key",
+        base_url="https://openai.sufy.example/v1/",
+        model="google/gemini-3-pro-image",
+        timeout_seconds=120,
+        transport=httpx.MockTransport(handler),
+    )
+
+    output = await provider.generate(
+        prompt="漫画风侦探立绘",
+        negative_prompt="写实照片，水印",
+        size="1024x1024",
+    )
+
+    assert len(requests) == 1
+    request = requests[0]
+    submitted = json.loads(request.content)
+    assert request.url == "https://openai.sufy.example/v1/images/generations"
+    assert request.headers["authorization"] == "Bearer test-key"
+    assert submitted == {
+        "model": "google/gemini-3-pro-image",
+        "prompt": "漫画风侦探立绘\n\n避免出现以下内容：写实照片，水印",
+        "size": "1024x1024",
+        "n": 1,
+    }
+    assert output.image_url == "https://sufy.example/portrait.png"
+
+
+async def test_sufy_provider_returns_validated_base64_image() -> None:
+    encoded = base64.b64encode(b"\x89PNG\r\n\x1a\nportrait").decode()
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"data": [{"b64_json": encoded}]})
+
+    provider = SufyImageProvider(
+        api_key="test-key",
+        base_url="https://openai.sufy.example/v1",
+        model="google/gemini-3-pro-image",
+        timeout_seconds=120,
+        transport=httpx.MockTransport(handler),
+    )
+
+    output = await provider.generate(prompt="prompt", negative_prompt="negative", size="1024x1024")
+
+    assert output.image_url == f"data:image/png;base64,{encoded}"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"data": []},
+        {"data": [{"url": "file:///tmp/portrait.png"}]},
+        {"data": [{"b64_json": "not-valid-base64"}]},
+    ],
+)
+async def test_sufy_provider_rejects_malformed_image_results(payload: object) -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=payload)
+
+    provider = SufyImageProvider(
+        api_key="test-key",
+        base_url="https://openai.sufy.example/v1",
+        model="google/gemini-3-pro-image",
+        timeout_seconds=120,
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(PortraitImageGenerationError, match="服务暂时不可用"):
+        await provider.generate(prompt="prompt", negative_prompt="negative", size="1024x1024")
+
+
+async def test_sufy_provider_maps_content_rejection_without_exposing_response() -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            422,
+            json={"error": {"type": "content_policy", "message": "sensitive prompt detail"}},
+        )
+
+    provider = SufyImageProvider(
+        api_key="test-key",
+        base_url="https://openai.sufy.example/v1",
+        model="google/gemini-3-pro-image",
+        timeout_seconds=120,
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(PortraitImageContentRejectedError) as error:
+        await provider.generate(prompt="prompt", negative_prompt="negative", size="1024x1024")
+    assert "sensitive prompt detail" not in str(error.value)
+
+
+@pytest.mark.parametrize("status_code", [401, 403, 429, 500])
+async def test_sufy_provider_maps_upstream_errors_without_exposing_response(
+    status_code: int,
+) -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            status_code,
+            json={"error": {"type": "upstream", "message": "private upstream detail"}},
+        )
+
+    provider = SufyImageProvider(
+        api_key="test-key",
+        base_url="https://openai.sufy.example/v1",
+        model="google/gemini-3-pro-image",
+        timeout_seconds=120,
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(PortraitImageGenerationError) as error:
+        await provider.generate(prompt="prompt", negative_prompt="negative", size="1024x1024")
+    assert "private upstream detail" not in str(error.value)
+
+
+async def test_sufy_provider_maps_timeout() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("upstream timeout", request=request)
+
+    provider = SufyImageProvider(
+        api_key="test-key",
+        base_url="https://openai.sufy.example/v1",
+        model="google/gemini-3-pro-image",
+        timeout_seconds=120,
+        transport=httpx.MockTransport(handler),
+    )
+
+    with pytest.raises(PortraitImageTimeoutError):
+        await provider.generate(prompt="prompt", negative_prompt="negative", size="1024x1024")
+
+
+def test_sufy_provider_requires_key_when_portrait_generation_is_enabled() -> None:
+    with pytest.raises(ValidationError, match="SUFY_API_KEY"):
+        Settings(
+            character_portrait_enabled=True,
+            portrait_image_provider="sufy",
+            sufy_api_key=None,
+        )
+
+
+def test_portrait_service_builds_selected_image_provider() -> None:
+    mock_service = build_portrait_generation_service(
+        Settings(character_portrait_enabled=True, portrait_image_provider="mock")
+    )
+    dashscope_service = build_portrait_generation_service(
+        Settings(
+            character_portrait_enabled=True,
+            portrait_image_provider="dashscope",
+            dashscope_api_key="test-key",
+        )
+    )
+    sufy_service = build_portrait_generation_service(
+        Settings(
+            character_portrait_enabled=True,
+            portrait_image_provider="sufy",
+            sufy_api_key="test-key",
+        )
+    )
+
+    assert isinstance(mock_service._image_provider, MockImageProvider)
+    assert isinstance(dashscope_service._image_provider, DashScopeImageProvider)
+    assert isinstance(sufy_service._image_provider, SufyImageProvider)

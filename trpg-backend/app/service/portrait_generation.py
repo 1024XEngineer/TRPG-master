@@ -325,7 +325,11 @@ class PortraitGenerationService:
 
 def build_portrait_generation_service(settings: Settings) -> PortraitGenerationService:
     from app.adapters.deepseek_models import DeepSeekChatCompletionsJsonClient
-    from app.adapters.image_generation import DashScopeImageProvider, MockImageProvider
+    from app.adapters.image_generation import (
+        DashScopeImageProvider,
+        MockImageProvider,
+        SufyImageProvider,
+    )
     from app.adapters.portrait_prompt import DeepSeekPortraitPromptComposer
 
     fallback = DeterministicPromptComposer()
@@ -341,11 +345,20 @@ def build_portrait_generation_service(settings: Settings) -> PortraitGenerationS
         )
 
     image_provider: ImageGenerationProvider = MockImageProvider()
+    # provider 按配置互斥选择；真实服务失败时不自动切换其他 provider，
+    # 以免隐藏错误或对同一次玩家操作重复计费。
     if settings.portrait_image_provider == "dashscope" and settings.dashscope_api_key:
         image_provider = DashScopeImageProvider(
             api_key=secret_value(settings.dashscope_api_key),
             base_url=settings.dashscope_base_url,
             model=settings.dashscope_image_model,
+            timeout_seconds=settings.portrait_generation_timeout_seconds,
+        )
+    elif settings.portrait_image_provider == "sufy" and settings.sufy_api_key:
+        image_provider = SufyImageProvider(
+            api_key=secret_value(settings.sufy_api_key),
+            base_url=settings.sufy_base_url,
+            model=settings.sufy_image_model,
             timeout_seconds=settings.portrait_generation_timeout_seconds,
         )
 

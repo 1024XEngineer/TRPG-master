@@ -447,6 +447,11 @@ export type ErrorCode =
   | "NOT_IMPLEMENTED"
   | "CHARACTER_INVALID"
   | "RULESET_NOT_CONFIGURED"
+  | "PORTRAIT_GENERATION_DISABLED"
+  | "PORTRAIT_GENERATION_IN_PROGRESS"
+  | "PORTRAIT_CONTENT_REJECTED"
+  | "PORTRAIT_GENERATION_FAILED"
+  | "PORTRAIT_GENERATION_TIMEOUT"
   | "HOST_SPEECH_UNAVAILABLE"
   | "HOST_SPEECH_FAILED"
   | "HOST_SPEECH_TIMEOUT";
@@ -823,6 +828,21 @@ export interface PlayerView {
   scene: SceneView;
   known_information?: KnownInformationView[];
   checkpoint_options?: CheckpointOption[];
+}
+
+export interface PortraitGenerationRequest {
+  style?: "realistic";
+  size?: "1024x1024";
+}
+
+export interface PortraitGenerationResult {
+  generationId: string;
+  status?: "completed";
+  imageUrl: string;
+  prompt: string;
+  negativePrompt: string;
+  promptSummary: string;
+  promptSource: "deepseek" | "deterministic" | "deterministic_fallback";
 }
 
 export interface PushOption {

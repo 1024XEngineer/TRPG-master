@@ -95,6 +95,25 @@ class Settings(BaseSettings):
     action_plan_max_steps: int = Field(default=32, ge=2, le=256)
     action_plan_max_steps_per_advance: int = Field(default=3, ge=1, le=32)
 
+    # 角色生图是建卡完成后的可选操作，入口默认开启。没有远程 Key 时
+    # auto provider 仍然使用离线 mock，不会因为修改默认值而产生费用。
+    character_portrait_enabled: bool = True
+    portrait_prompt_provider: Literal["deterministic", "deepseek"] = "deterministic"
+    portrait_image_provider: Literal["auto", "mock", "dashscope", "sufy"] = "auto"
+    dashscope_api_key: SecretStr | None = None
+    dashscope_base_url: str = Field(
+        default="https://dashscope.aliyuncs.com/api/v1",
+        min_length=1,
+    )
+    dashscope_image_model: str = Field(default="wan2.2-t2i-flash", min_length=1)
+    sufy_api_key: SecretStr | None = None
+    sufy_base_url: str = Field(default="https://openai.sufy.com/v1", min_length=1)
+    sufy_image_model: str = Field(default="google/gemini-3-pro-image", min_length=1)
+    # 项目内置参考图只由后端读取并转成内存中的 Data URI，不通过前端或公开静态目录暴露。
+    # 留空或文件不可读时，角色生图自动降级为纯提示词模式。
+    portrait_reference_image_path: str = "app/assets/portrait-style-reference.png"
+    portrait_generation_timeout_seconds: float = Field(default=120.0, gt=0, le=300)
+
     # 讨论区/Narrator 主线的兼容配置：未配置时使用确定性占位叙事，测试可通过
     # 延迟钩子稳定覆盖行动锁并发分支。
     narrator_delay_seconds: float = Field(default=0.0, ge=0, le=120)
@@ -127,6 +146,24 @@ class Settings(BaseSettings):
             self.deepseek_api_key is None or not secret_value(self.deepseek_api_key).strip()
         ):
             raise ValueError("HOST_MODEL_PROVIDER=deepseek 时必须设置 DEEPSEEK_API_KEY")
+        if (
+            self.character_portrait_enabled
+            and self.portrait_prompt_provider == "deepseek"
+            and (self.deepseek_api_key is None or not secret_value(self.deepseek_api_key).strip())
+        ):
+            raise ValueError("角色生图使用 DeepSeek 时必须设置 DEEPSEEK_API_KEY")
+        if (
+            self.character_portrait_enabled
+            and self.portrait_image_provider == "dashscope"
+            and (self.dashscope_api_key is None or not secret_value(self.dashscope_api_key).strip())
+        ):
+            raise ValueError("角色生图使用 DashScope 时必须设置 DASHSCOPE_API_KEY")
+        if (
+            self.character_portrait_enabled
+            and self.portrait_image_provider == "sufy"
+            and (self.sufy_api_key is None or not secret_value(self.sufy_api_key).strip())
+        ):
+            raise ValueError("角色生图使用 Sufy 时必须设置 SUFY_API_KEY")
         if self.host_speech_provider == "doubao":
             required = {
                 "DOUBAO_TTS_API_KEY": (

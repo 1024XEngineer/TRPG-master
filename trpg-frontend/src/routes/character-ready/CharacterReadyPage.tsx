@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom'
 import { useEffect, useRef, useState } from 'react'
-import { ArrowLeft, UserPlus, Swords, Eye } from 'lucide-react'
+import type { PortraitGenerationResult } from 'trpg-sdk'
+import { ArrowLeft, UserPlus, Swords, Eye, ImagePlus } from 'lucide-react'
 import { useCharacterStore } from '@/stores/character-store'
 import { fetchCharacter } from '@/services/character/character-api'
 import { useRoomStore } from '@/stores/room-store'
@@ -8,6 +9,7 @@ import { useAuthStore } from '@/stores/auth-store'
 import { connectWebSocket, disconnectWebSocket, sdk, waitForWsOpen } from '@/services/api-client'
 import { useRoomPlayers } from '@/hooks/useRoomPlayers'
 import { useRuleset } from '@/hooks/useRuleset'
+import { PortraitGenerationModal } from './PortraitGenerationModal'
 import { DERIVED_STAT_DEFINITIONS, normalizeDerivedStats } from '@/data/derived-stats'
 import { OnboardingTrigger } from '@/features/onboarding'
 
@@ -151,6 +153,8 @@ function CharacterSheetModal({ character, onClose }: { character: NonNullable<Re
 export default function CharacterReadyPage() {
   const navigate = useNavigate()
   const [showSelfSheet, setShowSelfSheet] = useState(false)
+  const [showPortraitGenerator, setShowPortraitGenerator] = useState(false)
+  const [portraitResult, setPortraitResult] = useState<PortraitGenerationResult | null>(null)
   const [starting, setStarting] = useState(false)
   const roomId = useRoomStore((s) => s.roomId)
   const cachedCharacter = useCharacterStore((s) => (roomId ? s.getForRoom(roomId) : null))
@@ -298,8 +302,14 @@ export default function CharacterReadyPage() {
               data-onboarding-target={isSelf ? 'character-summary' : undefined}
               className="flex items-center gap-3 px-3.5 py-3 bg-card border border-border-light rounded-md"
             >
-              <div className={`w-10 h-10 rounded-full bg-panel border border-border-mid flex items-center justify-center text-lg flex-shrink-0 ${p.hasCharacter ? 'border-brass' : 'border-dashed border-border-light'}`}>
-                {p.hasCharacter ? '🔍' : '○'}
+              <div className={`w-10 h-10 rounded-full bg-panel border border-border-mid flex items-center justify-center text-lg flex-shrink-0 overflow-hidden ${p.hasCharacter ? 'border-brass' : 'border-dashed border-border-light'}`}>
+                {isSelf && portraitResult ? (
+                  <img
+                    src={portraitResult.imageUrl}
+                    alt={`${character?.info.name ?? p.nickname}的人物图片`}
+                    className="h-full w-full object-cover"
+                  />
+                ) : p.hasCharacter ? '🔍' : '○'}
               </div>
               <div className="flex-1 min-w-0">
                 <div className="text-sm font-semibold text-text-primary">{p.nickname}{isSelf && ' (你)'}</div>
@@ -321,6 +331,18 @@ export default function CharacterReadyPage() {
                         className="text-[11px] font-semibold px-2 py-1 rounded-[99px] bg-brass/10 text-brass-dark flex items-center gap-1 active:scale-[0.95] transition-all border-none font-sans whitespace-nowrap cursor-pointer">
                         <Eye className="w-3 h-3" /> 查看
                       </button>
+                      {/* 入口默认显示，实际生图 provider 由后端根据 Key 统一选择。 */}
+                      {characterId && (
+                        <button
+                          type="button"
+                          onClick={() => setShowPortraitGenerator(true)}
+                          aria-label="生成角色图片"
+                          title="生成角色图片"
+                          className="flex h-7 w-7 items-center justify-center rounded-full bg-brass/10 text-brass-dark transition-all active:scale-[0.95]"
+                        >
+                          <ImagePlus className="h-3.5 w-3.5" />
+                        </button>
+                      )}
                       <button onClick={handleEditCharacter}
                         className="text-[11px] font-semibold px-2 py-1 rounded-[99px] bg-panel text-text-muted active:scale-[0.95] transition-all border border-border-light font-sans whitespace-nowrap cursor-pointer">
                         编辑
@@ -368,6 +390,16 @@ export default function CharacterReadyPage() {
       {/* Character Sheet Modal */}
       {showSelfSheet && character && (
         <CharacterSheetModal character={character} onClose={() => setShowSelfSheet(false)} />
+      )}
+      {showPortraitGenerator && character && roomId && characterId && (
+        <PortraitGenerationModal
+          roomId={roomId}
+          characterId={characterId}
+          characterName={character.info.name}
+          result={portraitResult}
+          onResult={setPortraitResult}
+          onClose={() => setShowPortraitGenerator(false)}
+        />
       )}
     </div>
   )

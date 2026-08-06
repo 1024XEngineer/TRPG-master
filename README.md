@@ -224,6 +224,19 @@ npm run dev
 | `RECENT_HISTORY_ENABLED` | `true` | 是否向 Host/Narrator 提供玩家安全的近期回合 |
 | `RECENT_HISTORY_MAX_TURNS` | `6` | 近期历史最多保留的回合数 |
 | `RECENT_HISTORY_MAX_CHARS` | `6000` | 近期历史文本总字符预算 |
+| `CHARACTER_PORTRAIT_ENABLED` | `true` | 是否启用角色生图后端接口；前端入口默认显示 |
+| `PORTRAIT_PROMPT_PROVIDER` | `deterministic` | 提示词生成：`deterministic` 或 `deepseek` |
+| `PORTRAIT_IMAGE_PROVIDER` | `auto` | 图片 provider：自动选择 `sufy` / `dashscope` / `mock`，也可显式指定 |
+| `DASHSCOPE_API_KEY` | 空 | 阿里云百炼 API Key；只存在后端环境变量中 |
+| `DASHSCOPE_BASE_URL` | `https://dashscope.aliyuncs.com/api/v1` | 通义万相 API 根地址 |
+| `DASHSCOPE_IMAGE_MODEL` | `wan2.2-t2i-flash` | 通义万相文生图模型 |
+| `SUFY_API_KEY` | 空 | Sufy API Key；只存在后端环境变量中 |
+| `SUFY_BASE_URL` | `https://openai.sufy.com/v1` | Sufy OpenAI-compatible API 根地址 |
+| `SUFY_IMAGE_MODEL` | `google/gemini-3-pro-image` | Sufy 高质量图片生成模型 |
+| `PORTRAIT_GENERATION_TIMEOUT_SECONDS` | `120` | 图片生成和任务轮询的总超时秒数 |
+| `PORTRAIT_REFERENCE_IMAGE_PATH` | `app/assets/portrait-style-reference.png` | 后端内置漫画风格参考图路径；留空或不可读时使用纯提示词 |
+
+生图入口由前端默认显示，不再配置前端环境变量。后端默认启用且使用 `auto`：依次检查 `SUFY_API_KEY` 和 `DASHSCOPE_API_KEY`，自动选择可用的真实 provider；两者都未填写时使用 mock。如需禁用后端生图，只需设置 `CHARACTER_PORTRAIT_ENABLED=false`。
 
 ### 主持模型配置
 

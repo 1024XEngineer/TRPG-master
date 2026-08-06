@@ -107,11 +107,15 @@ const {
   mockWaitForWsOpen,
   wsHandlers,
   dice3dSupported,
+  dice3dBehavior,
+  dice3dRolls,
 } = vi.hoisted(() => {
   const handlers = new Set<(event: ServerToClientEvent) => void>()
   return {
     wsHandlers: handlers,
     dice3dSupported: { value: false },
+    dice3dBehavior: { value: 'unsupported' as 'unsupported' | 'manual' },
+    dice3dRolls: [] as Array<{ token: string; settle: (value: number) => void }>,
     emitWsMessage: (event: ServerToClientEvent) => {
       for (const handler of handlers) handler(event)
     },
@@ -170,8 +174,8 @@ vi.mock('@/services/room', () => ({
  * 3D 骰子在 jsdom 里跑不了（没有 WebGL），默认按"不支持"处理，与真实 jsdom
  * 行为一致，不影响其余用例。
  *
- * `dice3dSupported` 置 true 时启用一个只做一件事的假舞台：被调用 roll() 就触发
- * `onUnsupported` —— 模拟"玩家已经点了掷骰、引擎 chunk 这时才加载失败"。
+ * `dice3dSupported` 置 true 时启用可控假舞台：默认模拟引擎加载失败；切到 manual
+ * 后由测试决定每一轮何时定格，用来覆盖跨请求迟到回调。
  */
 vi.mock('@/features/dice3d', async () => {
   const { forwardRef, useImperativeHandle } = await import('react')
@@ -179,10 +183,29 @@ vi.mock('@/features/dice3d', async () => {
     supports3DDice: () => dice3dSupported.value,
     Dice3DStage: forwardRef(
       (
-        { onUnsupported }: { onUnsupported?: () => void },
-        ref: React.Ref<{ roll: () => void }>,
+        {
+          onSettled,
+          onUnsupported,
+        }: {
+          onSettled: (value: number, token: string) => void
+          onUnsupported?: (token: string | null) => void
+        },
+        ref: React.Ref<{ roll: (token: string) => boolean }>,
       ) => {
-        useImperativeHandle(ref, () => ({ roll: () => onUnsupported?.() }), [onUnsupported])
+        useImperativeHandle(
+          ref,
+          () => ({
+            roll: (token: string) => {
+              if (dice3dBehavior.value === 'unsupported') {
+                onUnsupported?.(token)
+                return true
+              }
+              dice3dRolls.push({ token, settle: (value) => onSettled(value, token) })
+              return true
+            },
+          }),
+          [onSettled, onUnsupported],
+        )
         return <div data-testid="dice-3d-stage" />
       },
     ),
@@ -336,6 +359,8 @@ describe('RoomPage conversation history', () => {
     vi.clearAllMocks()
     wsHandlers.clear()
     dice3dSupported.value = false
+    dice3dBehavior.value = 'unsupported'
+    dice3dRolls.length = 0
     Object.defineProperty(window, 'speechSynthesis', { configurable: true, value: undefined })
     Object.defineProperty(window, 'SpeechSynthesisUtterance', { configurable: true, value: undefined })
     Object.defineProperty(window, 'isSecureContext', { configurable: true, value: true })
@@ -1001,6 +1026,61 @@ describe('RoomPage conversation history', () => {
     expect(screen.getByRole('button', { name: '确认并发送' })).toBeInTheDocument()
     // 已经退回 2D 展示。
     expect(screen.queryByTestId('dice-3d-stage')).not.toBeInTheDocument()
+  })
+
+  it('ignores a stale 3D result and lets the replacement check roll normally', async () => {
+    dice3dSupported.value = true
+    dice3dBehavior.value = 'manual'
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    await act(async () => {
+      emitWsMessage({
+        type: 'check.request',
+        payload: {
+          playerId: 'player-1',
+          clientActionId: 'check-a',
+          summary: '调查书架',
+          difficulty: 'regular',
+          skills: [{ id: 'skill-library', name: '图书馆使用', targetValue: 50 }],
+        },
+      })
+    })
+
+    fireEvent.click(await screen.findByRole('button', { name: '掷骰' }))
+    expect(dice3dRolls).toHaveLength(1)
+
+    await act(async () => {
+      emitWsMessage({
+        type: 'check.request',
+        payload: {
+          playerId: 'player-1',
+          clientActionId: 'check-b',
+          summary: '检查门锁',
+          difficulty: 'regular',
+          skills: [{ id: 'skill-locksmith', name: '锁匠', targetValue: 40 }],
+        },
+      })
+    })
+
+    expect(screen.getByText('锁匠')).toBeInTheDocument()
+    act(() => dice3dRolls[0].settle(23))
+
+    expect(screen.queryByText('23')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '确认并发送' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '掷骰' }))
+    expect(dice3dRolls).toHaveLength(2)
+
+    act(() => dice3dRolls[1].settle(41))
+    expect(screen.getByText('41')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '确认并发送' }))
+
+    expect(mockRollCheck).toHaveBeenCalledTimes(1)
+    expect(mockRollCheck).toHaveBeenCalledWith('player-1', {
+      clientActionId: 'check-b',
+      skill: 'skill-locksmith',
+      rollValue: 41,
+    })
   })
 
   it('shows explicit occupation choice skills in the occupation tab', () => {

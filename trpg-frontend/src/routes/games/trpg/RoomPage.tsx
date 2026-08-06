@@ -11,7 +11,7 @@ import { useRoomPlayers } from '@/hooks/useRoomPlayers'
 import { useRuleset } from '@/hooks/useRuleset'
 import { useHostSpeech } from '@/hooks/useHostSpeech'
 import { useSpeechInput } from '@/hooks/useSpeechInput'
-import { Dice3DStage, supports3DDice, type Dice3DHandle } from '@/features/dice3d'
+import { Dice3DStage, supports3DDice, type Dice3DHandle, type DiceRollToken } from '@/features/dice3d'
 import { DERIVED_STAT_DEFINITIONS } from '@/data/derived-stats'
 import { OnboardingTrigger } from '@/features/onboarding'
 import { CheckWorkflowPanel } from '@/features/adjudication'
@@ -450,6 +450,7 @@ function DiceModal({
   const [freeOnes, setFreeOnes] = useState(0)
   const submitLockRef = useRef(false)
   const dice3dRef = useRef<Dice3DHandle>(null)
+  const rollGenerationRef = useRef(0)
   // 3D 不可用（无 WebGL / 用户要求减少动效 / 引擎加载失败）时退回原来的 2D 展示。
   // 检定是主流程的一环，不能因为渲染能力缺失就卡住。
   const [use3D, setUse3D] = useState(() => supports3DDice())
@@ -510,11 +511,13 @@ function DiceModal({
    * 那时 `rolling` 的 setState 还没生效，读 state 会拿到旧值、判断成"没有掷骰
    * 在进行"，等于没修。
    */
-  const inFlight3DRollRef = useRef<{ requestId: string | null } | null>(null)
+  const inFlight3DRollRef = useRef<{
+    requestId: string | null
+    token: DiceRollToken
+  } | null>(null)
 
   /** 结果落地：3D 由动画定格回调进来，2D 由本地随机 + 定时器进来，两条路共用。 */
   const settle = (value: number, requestId: string | null) => {
-    inFlight3DRollRef.current = null
     const { tens, ones } = activeDiceType === 'd100' ? splitD100(value) : { tens: 0, ones: 0 }
     if (requestId !== null) {
       setCheckDiceState((current) => {
@@ -531,6 +534,17 @@ function DiceModal({
   }
 
   const currentRequestId = () => (isCheckMode ? checkRequest?.clientActionId ?? null : null)
+
+  const resetRolling = useCallback((requestId: string | null) => {
+    if (requestId === null) {
+      setFreeRolling(false)
+      return
+    }
+    setCheckDiceState((current) => {
+      if (!current || current.clientActionId !== requestId) return current
+      return { ...current, rolling: false }
+    })
+  }, [setCheckDiceState])
 
   /** 2D 回退掷骰：本地随机 + 固定时长的假动画，与改造前一致。 */
   const roll2D = (requestId: string | null) => {
@@ -562,8 +576,12 @@ function DiceModal({
     // 3D：值来自物理定格后朝上的那一面（面上的点数已由 Fisher–Yates 均匀洗过），
     // 所以这里不预先取值，等 onSettled 回调。
     if (use3D) {
-      inFlight3DRollRef.current = { requestId }
-      dice3dRef.current?.roll()
+      const token = `${requestId ?? 'free'}:${++rollGenerationRef.current}`
+      inFlight3DRollRef.current = { requestId, token }
+      if (!dice3dRef.current?.roll(token)) {
+        if (inFlight3DRollRef.current?.token === token) inFlight3DRollRef.current = null
+        resetRolling(requestId)
+      }
       return
     }
     roll2D(requestId)
@@ -577,12 +595,29 @@ function DiceModal({
    * 排任何定时器。只翻 use3D 的话 rolling 永远不清，检定会卡在"骰子还在滚"，
    * 既没有结果也没有重掷入口——恰好是这套降级本该防住的情况（PR #219 review）。
    */
-  const handle3DUnsupported = () => {
+  const handle3DUnsupported = (token: DiceRollToken | null) => {
     const pending = inFlight3DRollRef.current
+    if (token !== null && pending?.token !== token) return
     inFlight3DRollRef.current = null
     setUse3D(false)
     if (pending) roll2D(pending.requestId)
   }
+
+  const handle3DSettled = (value: number, token: DiceRollToken) => {
+    const pending = inFlight3DRollRef.current
+    if (!pending || pending.token !== token) return
+    inFlight3DRollRef.current = null
+    if (pending.requestId !== currentRequestId()) return
+    settle(value, pending.requestId)
+  }
+
+  useEffect(() => {
+    if (open) return
+    const pending = inFlight3DRollRef.current
+    if (!pending) return
+    inFlight3DRollRef.current = null
+    resetRolling(pending.requestId)
+  }, [open, resetRolling])
 
   const canRoll = !activeRolling && !activeShowResult && activeResult === null && !activeCheckDice?.submitted
 
@@ -606,13 +641,14 @@ function DiceModal({
   }
 
   const renderDiceDisplay = () => {
-    if (use3D) {
+    if (use3D && open) {
       return (
         <Dice3DStage
+          key={checkRequest?.clientActionId ?? `free-${activeDiceType}`}
           ref={dice3dRef}
           kind={activeDiceType}
           className="w-full h-48"
-          onSettled={(value) => settle(value, currentRequestId())}
+          onSettled={handle3DSettled}
           onUnsupported={handle3DUnsupported}
         />
       )

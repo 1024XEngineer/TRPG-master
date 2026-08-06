@@ -5,5 +5,8 @@
 /** 本项目用到的骰型。D100 由两颗 D10 组成，几何上没有 d100。 */
 export type DiceKind = 'd100' | 'd20' | 'd6'
 
+/** Opaque identity carried through one asynchronous 3D roll. */
+export type DiceRollToken = string
+
 /** 实际存在的多面体。 */
 export type PolyhedronKind = 'd10' | 'd20' | 'd6'

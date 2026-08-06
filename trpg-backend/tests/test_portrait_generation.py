@@ -734,7 +734,26 @@ def test_portrait_service_builds_selected_image_provider() -> None:
             sufy_api_key="test-key",
         )
     )
+    auto_sufy_service = build_portrait_generation_service(
+        Settings(
+            character_portrait_enabled=True, portrait_image_provider="auto", sufy_api_key="test-key"
+        )
+    )
+    auto_dashscope_service = build_portrait_generation_service(
+        Settings(
+            character_portrait_enabled=True,
+            portrait_image_provider="auto",
+            dashscope_api_key="test-key",
+            sufy_api_key=None,
+        )
+    )
+    auto_mock_service = build_portrait_generation_service(
+        Settings(character_portrait_enabled=True, portrait_image_provider="auto", sufy_api_key=None)
+    )
 
     assert isinstance(mock_service._image_provider, MockImageProvider)
     assert isinstance(dashscope_service._image_provider, DashScopeImageProvider)
     assert isinstance(sufy_service._image_provider, SufyImageProvider)
+    assert isinstance(auto_sufy_service._image_provider, SufyImageProvider)
+    assert isinstance(auto_dashscope_service._image_provider, DashScopeImageProvider)
+    assert isinstance(auto_mock_service._image_provider, MockImageProvider)

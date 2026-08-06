@@ -95,11 +95,11 @@ class Settings(BaseSettings):
     action_plan_max_steps: int = Field(default=32, ge=2, le=256)
     action_plan_max_steps_per_advance: int = Field(default=3, ge=1, le=32)
 
-    # 角色生图是建卡完成后的可选扩展。默认关闭且使用离线 provider，
-    # 只有显式开启并切换 provider 才会调用 DeepSeek / 阿里云 / Sufy。
-    character_portrait_enabled: bool = False
+    # 角色生图是建卡完成后的可选操作，入口默认开启。没有远程 Key 时
+    # auto provider 仍然使用离线 mock，不会因为修改默认值而产生费用。
+    character_portrait_enabled: bool = True
     portrait_prompt_provider: Literal["deterministic", "deepseek"] = "deterministic"
-    portrait_image_provider: Literal["mock", "dashscope", "sufy"] = "mock"
+    portrait_image_provider: Literal["auto", "mock", "dashscope", "sufy"] = "auto"
     dashscope_api_key: SecretStr | None = None
     dashscope_base_url: str = Field(
         default="https://dashscope.aliyuncs.com/api/v1",

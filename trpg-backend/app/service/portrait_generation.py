@@ -324,6 +324,8 @@ class PortraitGenerationService:
 
 
 def build_portrait_generation_service(settings: Settings) -> PortraitGenerationService:
+    """根据后端配置组装提示词和图片 provider，不在运行时隐式跨 provider 重试。"""
+
     from app.adapters.deepseek_models import DeepSeekChatCompletionsJsonClient
     from app.adapters.image_generation import (
         DashScopeImageProvider,
@@ -344,17 +346,28 @@ def build_portrait_generation_service(settings: Settings) -> PortraitGenerationS
             )
         )
 
+    provider_name = settings.portrait_image_provider
+    if provider_name == "auto":
+        # Sufy 是当前的高质量默认；只有它没有 Key 时才退到 DashScope，
+        # 两者都没有时使用 mock，让开发者填一个需要的 Key 就能启用真实生图。
+        if settings.sufy_api_key and secret_value(settings.sufy_api_key).strip():
+            provider_name = "sufy"
+        elif settings.dashscope_api_key and secret_value(settings.dashscope_api_key).strip():
+            provider_name = "dashscope"
+        else:
+            provider_name = "mock"
+
     image_provider: ImageGenerationProvider = MockImageProvider()
-    # provider 按配置互斥选择；真实服务失败时不自动切换其他 provider，
+    # 显式 provider 按配置互斥选择；真实服务失败时不自动切换其他 provider，
     # 以免隐藏错误或对同一次玩家操作重复计费。
-    if settings.portrait_image_provider == "dashscope" and settings.dashscope_api_key:
+    if provider_name == "dashscope" and settings.dashscope_api_key:
         image_provider = DashScopeImageProvider(
             api_key=secret_value(settings.dashscope_api_key),
             base_url=settings.dashscope_base_url,
             model=settings.dashscope_image_model,
             timeout_seconds=settings.portrait_generation_timeout_seconds,
         )
-    elif settings.portrait_image_provider == "sufy" and settings.sufy_api_key:
+    elif provider_name == "sufy" and settings.sufy_api_key:
         image_provider = SufyImageProvider(
             api_key=secret_value(settings.sufy_api_key),
             base_url=settings.sufy_base_url,

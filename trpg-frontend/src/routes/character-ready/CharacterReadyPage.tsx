@@ -9,7 +9,6 @@ import { useAuthStore } from '@/stores/auth-store'
 import { connectWebSocket, disconnectWebSocket, sdk, waitForWsOpen } from '@/services/api-client'
 import { useRoomPlayers } from '@/hooks/useRoomPlayers'
 import { useRuleset } from '@/hooks/useRuleset'
-import { isCharacterPortraitEnabled } from '@/services/character/portrait-api'
 import { PortraitGenerationModal } from './PortraitGenerationModal'
 import { DERIVED_STAT_DEFINITIONS, normalizeDerivedStats } from '@/data/derived-stats'
 import { OnboardingTrigger } from '@/features/onboarding'
@@ -216,7 +215,6 @@ export default function CharacterReadyPage() {
   const players = info?.players ?? []
   const allHaveCharacters = players.length > 0 && players.every((p) => p.hasCharacter)
   const advancedRef = useRef(false)
-  const portraitEnabled = isCharacterPortraitEnabled()
 
   // ★ 房主点"开始游戏"之后，后端 _on_game_start 会把房间 phase 改成
   // InGame——其他玩家没有 WS 广播可用，只能靠轮询这个字段发现"游戏真的开始
@@ -333,7 +331,8 @@ export default function CharacterReadyPage() {
                         className="text-[11px] font-semibold px-2 py-1 rounded-[99px] bg-brass/10 text-brass-dark flex items-center gap-1 active:scale-[0.95] transition-all border-none font-sans whitespace-nowrap cursor-pointer">
                         <Eye className="w-3 h-3" /> 查看
                       </button>
-                      {portraitEnabled && characterId && (
+                      {/* 入口默认显示，实际生图 provider 由后端根据 Key 统一选择。 */}
+                      {characterId && (
                         <button
                           type="button"
                           onClick={() => setShowPortraitGenerator(true)}

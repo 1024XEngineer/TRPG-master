@@ -52,6 +52,8 @@ const backendEnv = {
   // ⚠️ 显式锁定 Fake：本地 .env 可能把 Provider 切到远程模型，仅清空 Key 会在
   // Settings 校验阶段失败；若透传 Key 则会让 E2E 依赖外部服务并产生费用。
   HOST_MODEL_PROVIDER: 'fake',
+  APP_ENV: 'test',
+  TEST_FIXED_DICE_ROLL: '1',
   NARRATOR_DELAY_SECONDS: '1',
   DEEPSEEK_API_KEY: '',
 }

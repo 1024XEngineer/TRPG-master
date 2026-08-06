@@ -379,14 +379,29 @@ class ActionPlanOrchestrator:
             raise ActionPlanPolicyError("PLAN_OWNER_MISMATCH", "行动计划不属于当前玩家")
         if request.request_id in run.cancel_request_ids or run.status == "cancelled":
             return run
-        if run.is_terminal:
+        if run.is_terminal and run.status != "stopped":
             return run
+        if run.status == "waiting_for_player":
+            current = run.steps[run.current_step_index]
+            status = await self._executor.get_status(
+                GetAdjudicationStatusRequest(
+                    room_id=run.room_id,
+                    player_id=run.player_id,
+                    action_request_id=current.step_request_id,
+                )
+            )
+            if status.execution is not None and status.execution.status == "cancelled":
+                run = await self._apply_execution(run, status.execution)
         if run.current_step_index < len(run.steps):
             current = run.steps[run.current_step_index]
             cancellable_boundary = current.status == "pending" or (
                 run.status == "needs_clarification"
                 and current.status == "stopped"
                 and current.adjudication_execution is None
+            ) or (
+                current.status == "stopped"
+                and current.adjudication_execution is not None
+                and current.adjudication_execution.status == "cancelled"
             )
             if not cancellable_boundary:
                 raise ActionPlanPolicyError(

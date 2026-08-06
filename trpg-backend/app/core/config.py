@@ -94,6 +94,10 @@ class Settings(BaseSettings):
     recent_history_max_chars: int = Field(default=6000, ge=2)
     action_plan_max_steps: int = Field(default=32, ge=2, le=256)
     action_plan_max_steps_per_advance: int = Field(default=3, ge=1, le=32)
+    # Deterministic cross-process E2E hook. Production and development always
+    # use the Engine's cryptographic dice source; this value is honored only
+    # when APP_ENV=test.
+    test_fixed_dice_roll: int | None = Field(default=None, ge=1, le=100)
 
     # 讨论区/Narrator 主线的兼容配置：未配置时使用确定性占位叙事，测试可通过
     # 延迟钩子稳定覆盖行动锁并发分支。

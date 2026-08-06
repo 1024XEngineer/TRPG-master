@@ -77,6 +77,7 @@ function CoverImage({ moduleId, title }: { moduleId: string; title: string }) {
 export default function ScenarioSelectionPage() {
   const navigate = useNavigate()
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const detailDialogRef = useRef<HTMLElement>(null)
   const detailCloseRef = useRef<HTMLButtonElement>(null)
   const detailTriggerRef = useRef<HTMLButtonElement | null>(null)
   const detailRequestRef = useRef(0)
@@ -118,12 +119,63 @@ export default function ScenarioSelectionPage() {
   useEffect(() => {
     if (!detailModuleId) return
 
+    const dialog = detailDialogRef.current
+    if (!dialog) return
+
+    const previousBodyOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
     detailCloseRef.current?.focus()
+
+    const focusableSelector = [
+      'a[href]',
+      'button:not([disabled])',
+      'input:not([disabled])',
+      'select:not([disabled])',
+      'textarea:not([disabled])',
+      '[tabindex]:not([tabindex="-1"])',
+    ].join(',')
+
+    const focusableElements = () => Array.from(dialog.querySelectorAll<HTMLElement>(focusableSelector))
+      .filter((element) => !element.hidden && element.getAttribute('aria-hidden') !== 'true')
+
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') closeDetails()
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        closeDetails()
+        return
+      }
+      if (event.key !== 'Tab') return
+
+      const elements = focusableElements()
+      if (elements.length === 0) {
+        event.preventDefault()
+        dialog.focus()
+        return
+      }
+
+      const firstElement = elements[0]
+      const lastElement = elements[elements.length - 1]
+      const activeElement = document.activeElement
+      if (event.shiftKey && (activeElement === firstElement || !dialog.contains(activeElement))) {
+        event.preventDefault()
+        lastElement.focus()
+      } else if (!event.shiftKey && activeElement === lastElement) {
+        event.preventDefault()
+        firstElement.focus()
+      }
     }
+
+    const handleFocusIn = (event: FocusEvent) => {
+      if (!dialog.contains(event.target as Node)) detailCloseRef.current?.focus()
+    }
+
     window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
+    document.addEventListener('focusin', handleFocusIn)
+    return () => {
+      document.body.style.overflow = previousBodyOverflow
+      window.removeEventListener('keydown', handleKeyDown)
+      document.removeEventListener('focusin', handleFocusIn)
+    }
   }, [detailModuleId])
 
   const closeDetails = () => {
@@ -205,7 +257,7 @@ export default function ScenarioSelectionPage() {
         aria-hidden="true"
       />
 
-      <header className="scenario-selection-scene__header">
+      <header className="scenario-selection-scene__header" inert={detailModuleId ? true : undefined}>
         <button
           type="button"
           aria-label="返回创建房间"
@@ -219,7 +271,11 @@ export default function ScenarioSelectionPage() {
         </h1>
       </header>
 
-      <main className="scenario-selection-scene__catalog" aria-label="COC7 模组目录">
+      <main
+        className="scenario-selection-scene__catalog"
+        aria-label="COC7 模组目录"
+        inert={detailModuleId ? true : undefined}
+      >
         {pendingImport && (
           <article className="scenario-module-card scenario-module-card--pending">
             <img
@@ -332,7 +388,7 @@ export default function ScenarioSelectionPage() {
         })}
       </main>
 
-      <footer className="scenario-selection-scene__footer">
+      <footer className="scenario-selection-scene__footer" inert={detailModuleId ? true : undefined}>
         <input
           ref={fileInputRef}
           className="sr-only"
@@ -359,10 +415,12 @@ export default function ScenarioSelectionPage() {
           if (event.target === event.currentTarget) closeDetails()
         }}>
           <section
+            ref={detailDialogRef}
             className="scenario-module-detail__dialog"
             role="dialog"
             aria-modal="true"
             aria-labelledby="scenario-module-detail-title"
+            tabIndex={-1}
           >
             <button
               ref={detailCloseRef}

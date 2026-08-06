@@ -182,6 +182,43 @@ describe('content selection pages', () => {
     expect(getModuleDetail).toHaveBeenCalledTimes(1)
   })
 
+  it('traps focus inside module details and restores it after closing', async () => {
+    vi.mocked(listModules).mockResolvedValue([moduleSummary])
+    vi.mocked(getModuleDetail).mockResolvedValue(moduleDetail)
+
+    render(
+      <MemoryRouter initialEntries={['/home/create/modules']}>
+        <ScenarioSelectionPage />
+      </MemoryRouter>,
+    )
+
+    const trigger = await screen.findByRole('button', { name: '查看模组 追书人 详情' })
+    fireEvent.click(trigger)
+
+    const dialog = await screen.findByRole('dialog', { name: '追书人' })
+    const closeButton = screen.getByRole('button', { name: '关闭模组详情' })
+    const selectButton = await screen.findByRole('button', { name: '选择此模组' })
+    await waitFor(() => expect(selectButton).toBeEnabled())
+
+    expect(closeButton).toHaveFocus()
+    expect(screen.getByRole('main', { name: 'COC7 模组目录' })).toHaveAttribute('inert')
+
+    selectButton.focus()
+    fireEvent.keyDown(window, { key: 'Tab' })
+    expect(closeButton).toHaveFocus()
+
+    fireEvent.keyDown(window, { key: 'Tab', shiftKey: true })
+    expect(selectButton).toHaveFocus()
+
+    const backgroundButton = screen.getByRole('button', { name: '返回创建房间' })
+    backgroundButton.focus()
+    expect(closeButton).toHaveFocus()
+    expect(dialog).toContainElement(document.activeElement as HTMLElement)
+
+    fireEvent.click(closeButton)
+    await waitFor(() => expect(trigger).toHaveFocus())
+  })
+
   it('adds one removable in-memory parsing card for a valid local file', async () => {
     vi.mocked(listModules).mockResolvedValue([moduleSummary])
 

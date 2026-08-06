@@ -10,6 +10,7 @@ from collaboration_framework.contracts import (
     CheckpointOption,
     ContractError,
     ExitDestinationView,
+    KeeperCapabilityView,
     KnownInformationView,
     NarrativeDetailView,
     ObservableStateView,
@@ -20,6 +21,7 @@ from collaboration_framework.contracts import (
     SelfActorView,
     VisibleActorView,
     VisibleEntity,
+    WorldStateView,
 )
 from collaboration_framework.ports import PlayerViewSource
 
@@ -41,6 +43,32 @@ class PlayerViewProjector:
         """Project a view for a read-only scope without fabricating a PlayerInput."""
 
         return await self._read(scope)
+
+    async def keeper_capabilities(
+        self,
+        player_input: PlayerInput,
+        *,
+        expected_revision: str | None = None,
+    ) -> KeeperCapabilityView:
+        """Read the Keeper capability list that accompanies one adjudication.
+
+        `expected_revision` is the revision of the PlayerView it will be paired
+        with: the two must describe the same snapshot, or the Agent could name a
+        target from one world and a scene from another.
+        """
+
+        capabilities = await self._source.read_keeper_capabilities(
+            PlayerViewScope(
+                room_id=player_input.room_id,
+                player_id=player_input.player_id,
+                actor_id=player_input.actor_id,
+            )
+        )
+        if capabilities.actor_id != player_input.actor_id:
+            raise ContractError("KeeperCapabilityView 与 PlayerInput 身份作用域不一致")
+        if expected_revision is not None and capabilities.revision != expected_revision:
+            raise ContractError("KeeperCapabilityView 与 PlayerView revision 不一致")
+        return capabilities
 
     async def refresh(
         self,
@@ -168,6 +196,13 @@ class PlayerViewProjector:
                     )
                     for item in snapshot.scene.available_exits
                 ),
+            ),
+            world=WorldStateView(
+                elapsed_minutes=snapshot.world.elapsed_minutes,
+                time_of_day=snapshot.world.time_of_day,
+                core_resolved=snapshot.world.core_resolved,
+                ending_available=snapshot.world.ending_available,
+                ending_id=snapshot.world.ending_id,
             ),
             known_information=tuple(
                 KnownInformationView(

@@ -18,7 +18,9 @@ from collaboration_framework.contracts import (
     ContractError,
     GetAdjudicationStatusRequest,
     HostTurnDecision,
+    KeeperCapabilityView,
     PlayerInput,
+    PlayerView,
     SingleActionDecision,
     SubmitAdjudicationRequest,
     player_input_fingerprint,
@@ -618,6 +620,26 @@ class ActionPlanOrchestrator:
         created = await self._store.create(run)
         return created, created == run
 
+    async def _keeper_capabilities(
+        self,
+        player_input: PlayerInput,
+        view: PlayerView,
+    ) -> KeeperCapabilityView | None:
+        """Read the Keeper capability list, degrading to None if unavailable.
+
+        A source that does not implement it (offline fakes, older adapters) must
+        not break adjudication: without it the Agent simply keeps the smaller,
+        player-safe vocabulary it had before.
+        """
+
+        try:
+            return await self._player_view_projector.keeper_capabilities(
+                player_input,
+                expected_revision=view.revision,
+            )
+        except (AttributeError, NotImplementedError):
+            return None
+
     async def _revision_moved(
         self,
         step_run: ActionPlanStepRun,
@@ -658,6 +680,7 @@ class ActionPlanOrchestrator:
             player_view=view,
             completed_steps=self._completed_summaries(run),
             previous_rejection=previous_rejection,
+            keeper_capabilities=await self._keeper_capabilities(player_input, view),
         )
         try:
             proposal = await self._adjudicator.adjudicate(context)

@@ -324,6 +324,14 @@ export interface AgentKnownInformation {
   scope: 'actor' | 'party';
 }
 
+export interface AgentWorldState {
+  elapsed_minutes: number;
+  time_of_day: 'day' | 'night';
+  core_resolved: boolean;
+  ending_available: boolean;
+  ending_id: string | null;
+}
+
 export interface AgentCheckpointOption {
   id: string;
   target_id: string;
@@ -341,6 +349,7 @@ export interface AgentPlayerView {
   revision: string;
   self_actor: AgentSelfActor;
   scene: AgentSceneView;
+  world: AgentWorldState;
   known_information: AgentKnownInformation[];
   checkpoint_options: AgentCheckpointOption[];
 }

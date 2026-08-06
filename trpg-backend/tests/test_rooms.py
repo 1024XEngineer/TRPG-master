@@ -38,9 +38,53 @@ async def test_legacy_narration_escapes_are_normalized_without_rewriting_event(
     expected = "第一段\n第二段\n第三段"
     assert conversation[0]["payload"]["text"] == expected
     assert replay[0]["payload"]["text"] == expected
+    assert "_turnCompletion" not in conversation[0]["payload"]
+    assert "_turnCompletion" not in replay[0]["payload"]
 
     await db_session.refresh(event)
     assert event.payload["text"] == "第一段\\r\\n第二段\\n第三段"
+
+
+async def test_internal_turn_completion_snapshot_is_hidden_from_room_views(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    room = await create_room(client)
+    db_session.add(
+        Event(
+            room_id=room["roomId"],
+            player_id=room["playerId"],
+            event_type="narration.push",
+            payload={
+                "messageId": "snapshot-narration-249",
+                "text": "权威叙事",
+                "_turnCompletion": {
+                    "kind": "narration",
+                    "claimed_fact_ids": ["fact-1"],
+                    "suggested_actions": ["继续调查"],
+                },
+            },
+            visibility="public",
+        )
+    )
+    await db_session.commit()
+
+    headers = reconnect(room["reconnectToken"])
+    conversation = (
+        await client.get(f"{ROOMS_BASE}/{room['roomId']}/conversation", headers=headers)
+    ).json()["data"]
+    replay = (await client.get(f"{ROOMS_BASE}/{room['roomId']}/replay", headers=headers)).json()[
+        "data"
+    ]
+
+    assert conversation[0]["payload"] == {
+        "messageId": "snapshot-narration-249",
+        "text": "权威叙事",
+    }
+    assert replay[0]["payload"] == {
+        "messageId": "snapshot-narration-249",
+        "text": "权威叙事",
+    }
 
 
 async def test_join_rejects_full_room(client: AsyncClient) -> None:

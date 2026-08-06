@@ -45,6 +45,7 @@ from collaboration_framework.contracts import (
     CancelCheckChoice,
     CheckDecisionRequest,
     ContractError,
+    GetAdjudicationStatusRequest,
     PlayerInput,
     PlayerView,
     PostRollDecisionRequest,
@@ -57,9 +58,9 @@ from collaboration_framework.host.application import (
     normalize_narration_text,
     split_narration_chunks,
 )
-from collaboration_framework.host.schemas import TurnOutput
+from collaboration_framework.host.schemas import NarrationOutput, TurnOutput
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from pydantic import ValidationError
+from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.websockets import WebSocketState
@@ -132,6 +133,14 @@ logger = structlog.get_logger()
 _UNAUTHORIZED_CLOSE_CODE = 4401
 _NOT_FOUND_CLOSE_CODE = 4404
 _OPENING_MESSAGE_ID = "game-opening"
+
+
+class _PersistedTurnCompletion(BaseModel):
+    """Backend-only metadata needed to replay a completed turn exactly."""
+
+    kind: Literal["narration", "clarification"] = "narration"
+    claimed_fact_ids: tuple[str, ...] = ()
+    suggested_actions: tuple[str, ...] = Field(default=(), max_length=3)
 
 
 @asynccontextmanager
@@ -301,37 +310,21 @@ async def _send_action_plan_result(
     narration = result.narration
     if narration is None:
         raise ContractError("settled ActionPlan 缺少 narration")
-    await websocket.send_json(
-        {
-            "protocol_version": "1",
-            "message_type": "turn.completed",
-            "correlation_id": result.player_input.client_action_id,
-            "payload": {
-                "room_id": room_id,
-                "player_id": player_id,
-                "actor_id": result.player_input.actor_id,
-                "narration": {
-                    "kind": narration.kind,
-                    "text": narration.text,
-                    "claimed_fact_ids": list(narration.claimed_evidence_refs),
-                    "suggested_actions": list(narration.suggested_actions),
-                },
-                "player_view": result.player_view.to_json_dict(),
-            },
-        }
+    output = NarrationOutput(
+        kind=narration.kind,
+        text=narration.text,
+        claimed_fact_ids=narration.claimed_evidence_refs,
+        suggested_actions=narration.suggested_actions,
     )
-    await _send_view_updated(websocket, player_id, result.player_view)
-    recorded = await _deliver_turn_narration(
+    recorded = await _send_completed_turn_message(
         db,
         websocket,
         room_id,
         player_id,
-        client_action_id=result.player_input.client_action_id,
-        text=narration.text,
-        clarification=narration.kind == "clarification",
         actor_id=result.player_input.actor_id,
-        scene_id=result.player_view.scene_id,
-        view_revision=result.player_view.revision,
+        client_action_id=result.player_input.client_action_id,
+        player_view=result.player_view,
+        narration=output,
     )
     await action_plan_turn_application.mark_narration_persisted(
         room_id=room_id,
@@ -341,7 +334,49 @@ async def _send_action_plan_result(
     return recorded
 
 
-async def _recover_persisted_plan_narration(
+async def _send_completed_turn_message(
+    db: AsyncSession,
+    websocket: WebSocket,
+    room_id: str,
+    player_id: str,
+    *,
+    actor_id: str,
+    client_action_id: str,
+    player_view: PlayerView,
+    narration: NarrationOutput,
+) -> bool:
+    """Send one completed turn and persist its authoritative narration once."""
+
+    await websocket.send_json(
+        {
+            "protocol_version": "1",
+            "message_type": "turn.completed",
+            "correlation_id": client_action_id,
+            "payload": {
+                "room_id": room_id,
+                "player_id": player_id,
+                "actor_id": actor_id,
+                "narration": narration.model_dump(mode="json"),
+                "player_view": player_view.to_json_dict(),
+            },
+        }
+    )
+    await _send_view_updated(websocket, player_id, player_view)
+    recorded = await _deliver_turn_narration(
+        db,
+        websocket,
+        room_id,
+        player_id,
+        client_action_id=client_action_id,
+        narration=narration,
+        actor_id=actor_id,
+        scene_id=player_view.scene_id,
+        view_revision=player_view.revision,
+    )
+    return recorded
+
+
+async def _recover_persisted_turn_narration(
     db: AsyncSession,
     websocket: WebSocket,
     *,
@@ -350,13 +385,6 @@ async def _recover_persisted_plan_narration(
     client_action_id: str,
 ) -> bool:
     active = await action_plan_turn_application.get_plan(room_id, client_action_id)
-    if (
-        active is None
-        or active.parent_action_id != client_action_id
-        or active.player_id != player_id
-        or active.status not in {"awaiting_narration", "completed"}
-    ):
-        return False
     existing = await room_service.get_correlated_event(
         db,
         room_id,
@@ -365,15 +393,53 @@ async def _recover_persisted_plan_narration(
     )
     if existing is None:
         return False
+
+    actor_id: str | None = None
+    if active is not None:
+        if (
+            active.parent_action_id != client_action_id
+            or active.player_id != player_id
+            or active.status not in {"awaiting_narration", "completed"}
+        ):
+            return False
+        actor_id = active.actor_id
+    else:
+        recovery = await adjudication_engine_service.recover_action(
+            GetAdjudicationStatusRequest(
+                room_id=room_id,
+                player_id=player_id,
+                action_request_id=client_action_id,
+            )
+        )
+        if recovery is None or recovery.execution.status not in {"resolved", "cancelled"}:
+            return False
+        actor_id = recovery.actor_id
+
+    if existing.player_id not in {None, player_id}:
+        raise ContractError("持久化 narration 不属于当前玩家")
+    if existing.actor_id not in {None, actor_id}:
+        raise ContractError("持久化 narration 不属于当前 Actor")
     persisted = NarrationPushPayload.model_validate(existing.payload)
+    raw_completion = existing.payload.get(room_service.PERSISTED_TURN_COMPLETION_KEY)
+    if raw_completion is None:
+        narration = NarrationOutput(
+            kind="clarification" if existing.visibility == "player_scoped" else "narration",
+            text=normalize_narration_text(persisted.text),
+        )
+    else:
+        try:
+            completion = _PersistedTurnCompletion.model_validate(raw_completion)
+        except ValidationError as exc:
+            raise ContractError("持久化 narration 完成快照损坏") from exc
+        narration = NarrationOutput(
+            kind=completion.kind,
+            text=normalize_narration_text(persisted.text),
+            claimed_fact_ids=completion.claimed_fact_ids,
+            suggested_actions=completion.suggested_actions,
+        )
     view = await turn_application.current_player_view(
         room_id=room_id,
         player_id=player_id,
-    )
-    await action_plan_turn_application.mark_narration_persisted(
-        room_id=room_id,
-        parent_action_id=client_action_id,
-        on_progress=lambda event: _send_plan_progress(websocket, event),
     )
     await websocket.send_json(
         {
@@ -383,13 +449,8 @@ async def _recover_persisted_plan_narration(
             "payload": {
                 "room_id": room_id,
                 "player_id": player_id,
-                "actor_id": active.actor_id,
-                "narration": {
-                    "kind": "narration",
-                    "text": normalize_narration_text(persisted.text),
-                    "claimed_fact_ids": [],
-                    "suggested_actions": [],
-                },
+                "actor_id": actor_id,
+                "narration": narration.model_dump(mode="json"),
                 "player_view": view.to_json_dict(),
             },
         }
@@ -401,6 +462,12 @@ async def _recover_persisted_plan_narration(
         ).model_dump(by_alias=True)
     )
     await _send_view_updated(websocket, player_id, view)
+    if active is not None:
+        await action_plan_turn_application.mark_narration_persisted(
+            room_id=room_id,
+            parent_action_id=client_action_id,
+            on_progress=lambda event: _send_plan_progress(websocket, event),
+        )
     return True
 
 
@@ -559,27 +626,32 @@ async def _deliver_turn_narration(
     player_id: str,
     *,
     client_action_id: str,
-    text: str,
-    clarification: bool,
+    narration: NarrationOutput,
     actor_id: str,
     scene_id: str,
     view_revision: str,
 ) -> bool:
     """持久化去重成功后才发送一次动作叙事。"""
 
-    text = normalize_narration_text(text)
-    narration = NarrationPushPayload(
+    text = normalize_narration_text(narration.text)
+    completion = narration.model_copy(update={"text": text})
+    push = NarrationPushPayload(
         message_id=client_action_id,
         text=text,
     )
-    payload = narration.model_dump(by_alias=True)
+    payload = push.model_dump(by_alias=True)
+    payload[room_service.PERSISTED_TURN_COMPLETION_KEY] = {
+        "kind": completion.kind,
+        "claimed_fact_ids": list(completion.claimed_fact_ids),
+        "suggested_actions": list(completion.suggested_actions),
+    }
     recorded = await room_service.record_event(
         db,
         room_id,
         player_id,
         "narration.push",
         payload,
-        visibility="player_scoped" if clarification else "public",
+        visibility="player_scoped" if completion.kind == "clarification" else "public",
         actor_id=actor_id,
         scene_id=scene_id,
         view_revision=view_revision,
@@ -591,17 +663,24 @@ async def _deliver_turn_narration(
         room_id=room_id,
         correlation_id=client_action_id,
         text=text,
-        clarification=clarification,
+        clarification=completion.kind == "clarification",
     )
     # 澄清叙事只对发起者可见，它的渐进片段必须走同一条投递通道，
     # 否则片段会广播给全房间、泄露只该给一个人看的内容。
-    send = websocket.send_json if clarification else partial(manager.broadcast, room_id)
+    send = (
+        websocket.send_json
+        if completion.kind == "clarification"
+        else partial(manager.broadcast, room_id)
+    )
     await _stream_narration_chunks(
         send,
         message_id=client_action_id,
         text=text,
     )
-    envelope = ServerEnvelope(type="narration.push", payload=payload)
+    envelope = ServerEnvelope(
+        type="narration.push",
+        payload=push.model_dump(by_alias=True),
+    )
     await send(envelope.model_dump(by_alias=True))
     return True
 
@@ -698,20 +777,15 @@ async def _send_completed_turn(
     player_id: str,
     output: TurnOutput,
 ) -> bool:
-    websocket_output = output.to_websocket_output()
-    await websocket.send_json(websocket_output.to_json_dict())
-    await _send_view_updated(websocket, player_id, output.player_view)
-    narration_sent = await _deliver_turn_narration(
+    narration_sent = await _send_completed_turn_message(
         db,
         websocket,
         room_id,
         player_id,
-        client_action_id=output.player_input.client_action_id,
-        text=output.narration.text,
-        clarification=output.narration.kind == "clarification",
         actor_id=output.player_input.actor_id,
-        scene_id=output.player_view.scene_id,
-        view_revision=output.player_view.revision,
+        client_action_id=output.player_input.client_action_id,
+        player_view=output.player_view,
+        narration=output.narration,
     )
     if output.player_view.phase == "ended":
         await broadcast_room_state(db, room_id)
@@ -1069,7 +1143,7 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 correlation_id=submit_payload.client_action_id,
                             )
                             continue
-                        if await _recover_persisted_plan_narration(
+                        if await _recover_persisted_turn_narration(
                             db,
                             websocket,
                             room_id=room_id,
@@ -1156,6 +1230,14 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                     choice=selected,
                                 )
                             )
+                            if await _recover_persisted_turn_narration(
+                                db,
+                                websocket,
+                                room_id=room_id,
+                                player_id=bound_player_id,
+                                client_action_id=choice.client_action_id,
+                            ):
+                                continue
                             result = await action_plan_turn_application.resume_pending(
                                 room_id=room_id,
                                 player_id=bound_player_id,
@@ -1193,6 +1275,14 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                     ),
                                 )
                             )
+                            if await _recover_persisted_turn_narration(
+                                db,
+                                websocket,
+                                room_id=room_id,
+                                player_id=bound_player_id,
+                                client_action_id=choice.client_action_id,
+                            ):
+                                continue
                             result = await action_plan_turn_application.resume_pending(
                                 room_id=room_id,
                                 player_id=bound_player_id,

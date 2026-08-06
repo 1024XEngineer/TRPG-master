@@ -6,6 +6,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Protocol
 
+import structlog
 from collaboration_framework.contracts import (
     ActionAdjudication,
     ActionMethod,
@@ -15,6 +16,9 @@ from collaboration_framework.contracts import (
     ActionTarget,
     AdjudicationExecution,
     CancelActionPlanRequest,
+    CancelCheckChoice,
+    CheckDecisionRequest,
+    ContractError,
     GetAdjudicationStatusRequest,
     HostTurnDecision,
     NarrativeOnlyEffect,
@@ -33,15 +37,21 @@ from collaboration_framework.host.application import (
     PlayerViewProjector,
     TurnExecutionError,
 )
+from collaboration_framework.host.ports import RecentHistorySource
 from collaboration_framework.host.schemas import (
     ActionPlanAdvanceResult,
     ActionPlanNarrationContext,
     ActionPlanNarrationOutput,
     CompletedPlanStepSummary,
     HostAgentContext,
+    RecentHistoryBudget,
     RecentTurnContext,
     SingleActionTurnResult,
 )
+from pydantic import ValidationError
+from sqlalchemy.exc import SQLAlchemyError
+
+logger = structlog.get_logger()
 
 
 class HostTurnDecisionModel(Protocol):
@@ -133,12 +143,18 @@ class ActionPlanTurnApplication:
         planner: HostTurnDecisionModel,
         orchestrator: ActionPlanOrchestrator,
         narrator: ActionPlanNarrator,
+        recent_history_source: RecentHistorySource,
+        recent_history_budget: RecentHistoryBudget,
+        recent_history_enabled: bool,
     ) -> None:
         self._store = store
         self._engine = engine
         self._adjudication_engine = adjudication_engine
         self._planner = planner
         self._orchestrator = orchestrator
+        self._recent_history_source = recent_history_source
+        self._recent_history_budget = recent_history_budget
+        self._recent_history_enabled = recent_history_enabled
         self._narrator = narrator
         self._projector = PlayerViewProjector(engine)
         self._dispatcher = HostTurnDecisionExecutor(
@@ -174,6 +190,30 @@ class ActionPlanTurnApplication:
             )
             return await self._from_plan(player_input, advanced)
 
+        # A plan stuck in needs_clarification never produced any committed step
+        # effect (see ActionPlanOrchestrator.cancel_remaining's boundary check),
+        # so it is always safe to fold into the next turn. The player's new
+        # utterance is handed to the planner together with recent history
+        # (including the clarifying question itself); the model decides whether
+        # this is an answer to that question (multi-step) or unrelated fresh
+        # input, instead of the transport layer blocking on a stale plan_id.
+        stale_plan = await self._orchestrator.active_for_room(room_id)
+        if (
+            stale_plan is not None
+            and stale_plan.parent_action_id != client_action_id
+            and stale_plan.status == "needs_clarification"
+            and stale_plan.player_id == player_id
+        ):
+            await self._orchestrator.cancel_remaining(
+                CancelActionPlanRequest(
+                    request_id=f"auto-supersede-{client_action_id}",
+                    room_id=room_id,
+                    player_id=player_id,
+                    actor_id=actor_id,
+                    parent_action_id=stale_plan.parent_action_id,
+                )
+            )
+
         view = await self._projector.project(player_input)
         if on_input_accepted is not None:
             await on_input_accepted(player_input, view)
@@ -181,7 +221,7 @@ class ActionPlanTurnApplication:
             HostAgentContext(
                 player_input=player_input,
                 player_view=view,
-                recent_history=RecentTurnContext.empty(
+                recent_history=await self._read_recent_history(
                     player_input=player_input,
                     player_view=view,
                 ),
@@ -237,7 +277,7 @@ class ActionPlanTurnApplication:
             player_id=player_id,
             actor_id=actor_id,
             client_action_id=parent_action_id,
-            utterance=run.plan.goal,
+            utterance=run.parent_utterance or run.plan.goal,
         )
         return await self._from_plan(
             player_input,
@@ -323,6 +363,32 @@ class ActionPlanTurnApplication:
         request_id: str,
     ) -> ActionPlanTurnResult:
         actor_id = await self._resolve_actor_id(room_id, player_id)
+        existing = await self._orchestrator.get_run(room_id, parent_action_id)
+        if (
+            existing is not None
+            and existing.player_id == player_id
+            and existing.actor_id == actor_id
+            and existing.status == "waiting_for_player"
+            and existing.current_step_index < len(existing.steps)
+        ):
+            execution = existing.steps[existing.current_step_index].adjudication_execution
+            pending = execution.pending_decision if execution is not None else None
+            if (
+                execution is not None
+                and execution.status == "awaiting_skill_choice"
+                and pending is not None
+            ):
+                await self._adjudication_engine.decide(
+                    CheckDecisionRequest(
+                        request_id=request_id,
+                        room_id=room_id,
+                        player_id=player_id,
+                        source_revision=execution.view_revision,
+                        decision_id=pending.decision_id,
+                        decision_version=pending.decision_version,
+                        choice=CancelCheckChoice(),
+                    )
+                )
         run = await self._orchestrator.cancel_remaining(
             CancelActionPlanRequest(
                 request_id=request_id,
@@ -337,7 +403,7 @@ class ActionPlanTurnApplication:
             player_id=player_id,
             actor_id=actor_id,
             client_action_id=parent_action_id,
-            utterance=run.plan.goal,
+            utterance=run.parent_utterance or run.plan.goal,
         )
         result = ActionPlanAdvanceResult(
             run=run,
@@ -488,6 +554,48 @@ class ActionPlanTurnApplication:
                 ) from exc
         raise AssertionError("unreachable")
 
+    async def _read_recent_history(
+        self,
+        *,
+        player_input: PlayerInput,
+        player_view: PlayerView,
+    ) -> RecentTurnContext:
+        recent_history = RecentTurnContext.empty(
+            player_input=player_input,
+            player_view=player_view,
+        )
+        if not self._recent_history_enabled:
+            return recent_history
+        try:
+            recent_history = await self._recent_history_source.read(
+                player_input=player_input,
+                player_view=player_view,
+                exclude_correlation_id=player_input.client_action_id,
+                budget=self._recent_history_budget,
+            )
+            recent_history.validate_for(
+                player_input=player_input,
+                player_view=player_view,
+            )
+        except (ValidationError, ContractError, ValueError) as exc:
+            raise TurnExecutionError(
+                "RECENT_HISTORY_INVALID",
+                "近期历史未通过安全校验，本次动作未执行",
+                retryable=False,
+            ) from exc
+        except (SQLAlchemyError, OSError, TimeoutError) as exc:
+            logger.warning(
+                "action_plan_recent_history_degraded",
+                room_id=player_input.room_id,
+                correlation_id=player_input.client_action_id,
+                error_type=type(exc).__name__,
+            )
+            return RecentTurnContext.empty(
+                player_input=player_input,
+                player_view=player_view,
+            )
+        return recent_history
+
     async def _resolve_actor_id(self, room_id: str, player_id: str) -> str:
         async with self._store.transaction(room_id) as transaction:
             runtime = await transaction.load_runtime()
@@ -505,6 +613,19 @@ class ActionPlanTurnApplication:
         return actors[0]
 
 
+class _EmptyRecentHistorySource:
+    async def read(
+        self,
+        *,
+        player_input: PlayerInput,
+        player_view: PlayerView,
+        exclude_correlation_id: str,
+        budget: RecentHistoryBudget,
+    ) -> RecentTurnContext:
+        del exclude_correlation_id, budget
+        return RecentTurnContext.empty(player_input=player_input, player_view=player_view)
+
+
 def build_action_plan_turn_application(
     *,
     store: EngineStore,
@@ -513,6 +634,7 @@ def build_action_plan_turn_application(
     plan_store=None,
     settings=None,
     client=None,
+    recent_history_source: RecentHistorySource | None = None,
 ) -> ActionPlanTurnApplication:
     """Compose the finite-plan path without changing the single-intent Engine."""
 
@@ -583,6 +705,12 @@ def build_action_plan_turn_application(
         planner=planner,
         orchestrator=orchestrator,
         narrator=ActionPlanNarrator(narration_model),
+        recent_history_source=recent_history_source or _EmptyRecentHistorySource(),
+        recent_history_budget=RecentHistoryBudget(
+            max_turns=resolved.recent_history_max_turns,
+            max_chars=resolved.recent_history_max_chars,
+        ),
+        recent_history_enabled=resolved.recent_history_enabled,
     )
 
 
@@ -620,6 +748,8 @@ __all__ = [
 
 
 def _production_application() -> ActionPlanTurnApplication:
+    from app.adapters import SqlAlchemyRecentHistorySource
+    from app.core.db import async_session_factory
     from app.core.engine import (
         action_plan_store,
         adjudication_engine_service,
@@ -632,6 +762,7 @@ def _production_application() -> ActionPlanTurnApplication:
         engine=rule_engine_service,
         adjudication_engine=adjudication_engine_service,
         plan_store=action_plan_store,
+        recent_history_source=SqlAlchemyRecentHistorySource(async_session_factory),
     )
 
 

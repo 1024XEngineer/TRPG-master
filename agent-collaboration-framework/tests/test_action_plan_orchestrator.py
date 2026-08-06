@@ -221,6 +221,35 @@ class RejectSecondStepAdjudicator(RecordingAdjudicator):
         return await super().adjudicate(context)
 
 
+class MislabeledTargetAdjudicator(RecordingAdjudicator):
+    """First proposal for step 2 uses a target the Engine refuses.
+
+    Mirrors the real failure the model produces: a `world` id labelled as a
+    `location`. The Engine rejects it before committing anything, so the repair
+    pass gets to reuse the same step_request_id.
+    """
+
+    def __init__(self, world_ref: str, *, repairs: bool = True) -> None:
+        super().__init__(world_ref)
+        self.repairs = repairs
+
+    async def adjudicate(self, context):
+        repaired = self.repairs and context.previous_rejection is not None
+        if context.step_index != 1 or repaired:
+            return await super().adjudicate(context)
+        self.contexts.append(context)
+        return ActionAdjudication(
+            request_id="untrusted",
+            source_revision="untrusted",
+            actor_id="untrusted",
+            summary=context.step.semantic_goal,
+            target=ActionTarget(kind="location", id=self.world_ref),
+            method=ActionMethod(family="action", description=context.step.semantic_goal),
+            check=NoAdjudicationCheck(),
+            success_effects=(NarrativeOnlyEffect(),),
+        )
+
+
 class OutOfScopeNarrationModel:
     async def generate(self, context):
         return {
@@ -659,6 +688,59 @@ async def test_invalid_second_step_fails_closed_before_engine_commit() -> None:
     assert [step.status for step in failed.run.steps] == ["completed", "pending"]
     assert failed.run.steps[1].adjudication is None
     assert failed.run.steps[1].safe_failure_code == "STEP_ADJUDICATOR_FAILED"
+    assert len(engine_store.inspect_domain_events("room_01")) == 1
+
+
+@pytest.mark.asyncio
+async def test_engine_rejection_is_repaired_once_instead_of_stopping_the_plan() -> None:
+    module, engine_store, projector = runtime()
+    adjudicator = MislabeledTargetAdjudicator(module.world_ref)
+    service = ActionPlanOrchestrator(
+        store=InMemoryActionPlanRunStore(),
+        adjudicator=adjudicator,
+        executor=AdjudicationEngineService(engine_store),
+        player_view_projector=projector,
+    )
+
+    settled = await service.start_or_resume(
+        player_input("repairable-step-parent"),
+        plan=plan(2),
+    )
+
+    assert settled.run.status == "awaiting_narration"
+    assert [step.status for step in settled.run.steps] == ["completed", "completed"]
+    # Step 2 was adjudicated twice: the refused proposal, then the repair that
+    # carried the Engine's own reason back to the adjudicator.
+    step_two = [context for context in adjudicator.contexts if context.step_index == 1]
+    assert [context.previous_rejection for context in step_two] == [
+        None,
+        "ActionAdjudication target 引用了不存在或隐藏的对象",
+    ]
+    # The repair reuses the frozen step identity; nothing is committed twice.
+    assert len({context.step_request_id for context in step_two}) == 1
+    assert len(engine_store.inspect_domain_events("room_01")) == 2
+
+
+@pytest.mark.asyncio
+async def test_engine_rejection_repair_is_attempted_at_most_once() -> None:
+    module, engine_store, projector = runtime()
+    adjudicator = MislabeledTargetAdjudicator(module.world_ref, repairs=False)
+    service = ActionPlanOrchestrator(
+        store=InMemoryActionPlanRunStore(),
+        adjudicator=adjudicator,
+        executor=AdjudicationEngineService(engine_store),
+        player_view_projector=projector,
+    )
+
+    failed = await service.start_or_resume(
+        player_input("unrepairable-step-parent"),
+        plan=plan(2),
+    )
+
+    assert failed.run.status == "needs_clarification"
+    assert failed.run.steps[1].safe_failure_code == "STEP_ADJUDICATION_REJECTED"
+    assert len([context for context in adjudicator.contexts if context.step_index == 1]) == 2
+    # The first step stays committed; the refused one never reaches the Engine.
     assert len(engine_store.inspect_domain_events("room_01")) == 1
 
 

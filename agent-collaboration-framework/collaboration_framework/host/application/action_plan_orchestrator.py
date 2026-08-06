@@ -116,7 +116,13 @@ class ActionPlanOrchestrator:
             player_id=player_id,
             actor_id=actor_id,
             client_action_id=parent_action_id,
-            utterance=run.plan.goal,
+            # `plan.goal` is a model-authored paraphrase of the original
+            # utterance and will not generally reproduce parent_input_fingerprint
+            # (see _require_parent below, called via _advance_loaded). Use the
+            # verbatim utterance the fingerprint was actually computed from;
+            # fall back to the paraphrase only for runs persisted before
+            # parent_utterance existed.
+            utterance=run.parent_utterance or run.plan.goal,
         )
         return await self._advance_loaded(
             player_input,
@@ -243,56 +249,66 @@ class ActionPlanOrchestrator:
                     label=self._step_label(step_run),
                 ),
             )
-            try:
-                assert step_run.adjudication is not None
-                latest = await self._executor.submit(
-                    SubmitAdjudicationRequest(
-                        room_id=run.room_id,
-                        player_id=run.player_id,
-                        adjudication=step_run.adjudication,
-                    )
-                )
-            except ContractError:
-                status = await self._executor.get_status(
-                    GetAdjudicationStatusRequest(
-                        room_id=run.room_id,
-                        player_id=run.player_id,
-                        action_request_id=step_run.step_request_id,
-                    )
-                )
-                if status.status != "not_submitted" and status.execution is not None:
-                    latest = status.execution
-                else:
-                    current_view = await self._player_view_projector.project(player_input)
-                    if (
-                        step_run.source_revision is not None
-                        and current_view.revision != step_run.source_revision
-                    ):
-                        run = await self._mark_step_failure(
-                            run,
-                            plan_status="retryable_failure",
-                            step_status="pending",
-                            code="STEP_REVISION_CHANGED",
+            # #212 keeps the "可自动修复 -> REPAIR -> AGENT" arrow inside A: the
+            # Engine's rejection is already a stable, non-leaking reason, so a
+            # step whose frozen adjudication was refused gets exactly one
+            # re-adjudication carrying that reason before the plan gives up. The
+            # Engine still sees one ActionAdjudication per call, and a refused
+            # submit persists nothing, so reusing step_request_id is safe.
+            rejection: ContractError | None = None
+            for repair_attempt in range(2):
+                rejection = None
+                try:
+                    assert step_run.adjudication is not None
+                    latest = await self._executor.submit(
+                        SubmitAdjudicationRequest(
+                            room_id=run.room_id,
+                            player_id=run.player_id,
+                            adjudication=step_run.adjudication,
                         )
+                    )
+                    break
+                except ContractError as exc:
+                    rejection = exc
+                    status = await self._executor.get_status(
+                        GetAdjudicationStatusRequest(
+                            room_id=run.room_id,
+                            player_id=run.player_id,
+                            action_request_id=step_run.step_request_id,
+                        )
+                    )
+                    if status.status != "not_submitted" and status.execution is not None:
+                        latest = status.execution
+                        rejection = None
+                        break
+                    if repair_attempt == 1 or await self._revision_moved(step_run, player_input):
+                        break
+                    run = await self._freeze_current_adjudication(
+                        run,
+                        player_input,
+                        previous_rejection=str(exc),
+                    )
+                    if run.status != "active":
+                        # The re-adjudication itself failed; it already recorded
+                        # its own safe failure code.
                         run = await self._release_lease(run)
-                        await self._emit(
-                            on_progress,
-                            self._progress(
-                                run,
-                                "plan.stopped",
-                                "stopped",
-                                reason="STEP_REVISION_CHANGED",
-                            ),
-                        )
                         return ActionPlanAdvanceResult(
                             run=run,
-                            player_view=current_view,
+                            player_view=await self._player_view_projector.project(player_input),
                         )
+                    step_run = run.steps[step_index]
+
+            if rejection is not None:
+                current_view = await self._player_view_projector.project(player_input)
+                if (
+                    step_run.source_revision is not None
+                    and current_view.revision != step_run.source_revision
+                ):
                     run = await self._mark_step_failure(
                         run,
-                        plan_status="needs_clarification",
-                        step_status="stopped",
-                        code="STEP_ADJUDICATION_REJECTED",
+                        plan_status="retryable_failure",
+                        step_status="pending",
+                        code="STEP_REVISION_CHANGED",
                     )
                     run = await self._release_lease(run)
                     await self._emit(
@@ -301,13 +317,33 @@ class ActionPlanOrchestrator:
                             run,
                             "plan.stopped",
                             "stopped",
-                            reason="STEP_ADJUDICATION_REJECTED",
+                            reason="STEP_REVISION_CHANGED",
                         ),
                     )
                     return ActionPlanAdvanceResult(
                         run=run,
-                        player_view=await self._player_view_projector.project(player_input),
+                        player_view=current_view,
                     )
+                run = await self._mark_step_failure(
+                    run,
+                    plan_status="needs_clarification",
+                    step_status="stopped",
+                    code="STEP_ADJUDICATION_REJECTED",
+                )
+                run = await self._release_lease(run)
+                await self._emit(
+                    on_progress,
+                    self._progress(
+                        run,
+                        "plan.stopped",
+                        "stopped",
+                        reason="STEP_ADJUDICATION_REJECTED",
+                    ),
+                )
+                return ActionPlanAdvanceResult(
+                    run=run,
+                    player_view=await self._player_view_projector.project(player_input),
+                )
 
             assert latest is not None
             view = await self._player_view_projector.refresh_adjudication(
@@ -379,14 +415,33 @@ class ActionPlanOrchestrator:
             raise ActionPlanPolicyError("PLAN_OWNER_MISMATCH", "行动计划不属于当前玩家")
         if request.request_id in run.cancel_request_ids or run.status == "cancelled":
             return run
-        if run.is_terminal:
+        if run.is_terminal and run.status != "stopped":
             return run
+        if run.status == "waiting_for_player":
+            current = run.steps[run.current_step_index]
+            status = await self._executor.get_status(
+                GetAdjudicationStatusRequest(
+                    room_id=run.room_id,
+                    player_id=run.player_id,
+                    action_request_id=current.step_request_id,
+                )
+            )
+            if status.execution is not None and status.execution.status == "cancelled":
+                run = await self._apply_execution(run, status.execution)
         if run.current_step_index < len(run.steps):
             current = run.steps[run.current_step_index]
-            cancellable_boundary = current.status == "pending" or (
-                run.status == "needs_clarification"
-                and current.status == "stopped"
-                and current.adjudication_execution is None
+            cancellable_boundary = (
+                current.status == "pending"
+                or (
+                    run.status == "needs_clarification"
+                    and current.status == "stopped"
+                    and current.adjudication_execution is None
+                )
+                or (
+                    current.status == "stopped"
+                    and current.adjudication_execution is not None
+                    and current.adjudication_execution.status == "cancelled"
+                )
             )
             if not cancellable_boundary:
                 raise ActionPlanPolicyError(
@@ -549,6 +604,7 @@ class ActionPlanOrchestrator:
             plan_id=plan_id,
             parent_action_id=player_input.client_action_id,
             parent_input_fingerprint=player_input_fingerprint(player_input),
+            parent_utterance=player_input.utterance,
             room_id=player_input.room_id,
             player_id=player_input.player_id,
             actor_id=player_input.actor_id,
@@ -562,10 +618,24 @@ class ActionPlanOrchestrator:
         created = await self._store.create(run)
         return created, created == run
 
+    async def _revision_moved(
+        self,
+        step_run: ActionPlanStepRun,
+        player_input: PlayerInput,
+    ) -> bool:
+        """A revision that moved under the frozen step is retried, not repaired."""
+
+        if step_run.source_revision is None:
+            return False
+        current_view = await self._player_view_projector.project(player_input)
+        return current_view.revision != step_run.source_revision
+
     async def _freeze_current_adjudication(
         self,
         run: ActionPlanRun,
         player_input: PlayerInput,
+        *,
+        previous_rejection: str | None = None,
     ) -> ActionPlanRun:
         index = run.current_step_index
         steps = list(run.steps)
@@ -587,6 +657,7 @@ class ActionPlanOrchestrator:
             step=current.step,
             player_view=view,
             completed_steps=self._completed_summaries(run),
+            previous_rejection=previous_rejection,
         )
         try:
             proposal = await self._adjudicator.adjudicate(context)

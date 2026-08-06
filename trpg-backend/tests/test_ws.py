@@ -29,7 +29,6 @@ from starlette.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 from app.controller import ws as ws_controller
-from app.core.action_plan_turn import ActionPlanNarrator
 from app.core.turn import build_turn_application
 from app.main import app
 

@@ -55,6 +55,19 @@ class EngineTransaction(Protocol):
 
     async def load_check_run(self, check_id: str) -> CheckRun | None: ...
 
+    async def find_active_action_for_player(
+        self,
+        player_id: str,
+    ) -> str | None:
+        """Return the action_request_id of this player's one open check, if any.
+
+        Covers both an unresolved skill choice (`awaiting_skill_choice`) and an
+        already-rolled check still waiting on a post-roll decision
+        (`awaiting_post_roll_decision`) — the two states a reconnecting client
+        cannot otherwise discover without already knowing the action_request_id.
+        """
+        ...
+
     async def commit(
         self,
         *,

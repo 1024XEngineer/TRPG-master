@@ -4,14 +4,13 @@ import PhoneLayout from '@/shared/layouts/PhoneLayout';
 import { getAuthToken } from '@/services/api-client';
 import { fetchMe } from '@/services/auth';
 import { useAuthStore } from '@/stores/auth-store';
+import { ROUTES } from '@/config/routes';
 
 const LoginPage = lazy(() => import('@/routes/auth/LoginPage'));
 const RegisterPage = lazy(() => import('@/routes/auth/RegisterPage'));
 const HomePage = lazy(() => import('@/routes/home/HomePage'));
 const JoinRoomPage = lazy(() => import('@/routes/join/JoinRoomPage'));
 const CreateRoomPage = lazy(() => import('@/routes/create/CreateRoomPage'));
-const GameSelectionPage = lazy(() => import('@/routes/games/GameSelectionPage'));
-const SystemSelectionPage = lazy(() => import('@/routes/games/trpg/SystemSelectionPage'));
 const ScenarioSelectionPage = lazy(() => import('@/routes/games/trpg/ScenarioSelectionPage'));
 const StoryPage = lazy(() => import('@/routes/games/trpg/StoryPage'));
 const CharacterPage = lazy(() => import('@/routes/games/trpg/CharacterPage'));
@@ -69,11 +68,14 @@ function App() {
           <Route path="/home" element={<HomePage />} />
           <Route path="/home/join" element={<JoinRoomPage />} />
           <Route path="/home/create" element={<CreateRoomPage />} />
-          <Route path="/home/create/games" element={<GameSelectionPage />} />
-          <Route path="/home/create/games/:gameId" element={<SystemSelectionPage />} />
+          <Route path={ROUTES.MODULES} element={<ScenarioSelectionPage />} />
+          {/* 旧版创建流程的地址仍可能存在于书签或浏览器历史中。统一重定向到
+              固定 COC7 的模组目录，避免旧链接进入已经废弃的两级选择页面。 */}
+          <Route path="/home/create/games" element={<Navigate to={ROUTES.MODULES} replace />} />
+          <Route path="/home/create/games/:gameId" element={<Navigate to={ROUTES.MODULES} replace />} />
           <Route
             path="/home/create/games/:gameId/scenarios/:systemId"
-            element={<ScenarioSelectionPage />}
+            element={<Navigate to={ROUTES.MODULES} replace />}
           />
           <Route path="/home/my-rooms" element={<MyRoomsPage />} />
           <Route path="/home/my-rooms/review/:roomCode" element={<ReviewPage />} />

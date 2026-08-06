@@ -400,7 +400,7 @@
   border-radius: 4px;
   color: #412a18;
   background: transparent;
-  font-size: clamp(15px, 4.4vw, 20px);
+  font-size: clamp(17px, 4.8vw, 22px);
   font-weight: 600;
   letter-spacing: 0.04em;
   text-align: center;
@@ -570,12 +570,18 @@
   user-select: none;
 }
 
-.create-room-scene__select-game-title {
+.create-room-scene__select-module-title {
   position: absolute;
   top: 44%;
   left: 24%;
   width: 63%;
-  height: auto;
+  color: #2b1b0f;
+  font-size: clamp(20px, 5.8vw, 26px);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  text-align: center;
+  white-space: nowrap;
   transform: rotate(-5deg);
   pointer-events: none;
   user-select: none;
@@ -795,7 +801,10 @@
     font-size: 11px;
   }
 
-  .create-room-scene__room-name-input,
+  .create-room-scene__room-name-input {
+    font-size: 12px;
+  }
+
   .create-room-scene__summary-list {
     font-size: 10px;
   }

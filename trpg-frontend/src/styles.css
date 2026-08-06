@@ -576,11 +576,12 @@
   left: 24%;
   width: 63%;
   color: #2b1b0f;
-  font-size: clamp(24px, 7.2vw, 32px);
+  font-size: clamp(20px, 5.8vw, 26px);
   font-weight: 700;
   line-height: 1;
   letter-spacing: 0.04em;
   text-align: center;
+  white-space: nowrap;
   transform: rotate(-5deg);
   pointer-events: none;
   user-select: none;

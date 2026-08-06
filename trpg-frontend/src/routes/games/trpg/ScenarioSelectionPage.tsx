@@ -1,13 +1,27 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { Clock, FileText, RotateCcw, Trash2, Users, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
-import { BookOpen, Clock, Users, ChevronRight, Upload } from 'lucide-react'
-import type { ModuleSummary } from 'trpg-sdk'
-import { COC7_SYSTEM_COLORS, FIXED_TRPG } from '@/config/games'
+import type { ModuleDetail, ModuleSummary } from 'trpg-sdk'
+import { FIXED_TRPG } from '@/config/games'
 import { ROUTES } from '@/config/routes'
-import { useGameStore } from '@/stores/game-store'
 import { friendlyErrorMessage } from '@/services/api-client'
-import { listModules } from '@/services/room'
-import Badge from '@/shared/components/Badge'
+import { getModuleDetail, listModules } from '@/services/room'
+import { useGameStore } from '@/stores/game-store'
+
+const ASSET_ROOT = '/assets/rooms/scenarios'
+const MAX_IMPORT_SIZE = 20 * 1024 * 1024
+const ACCEPTED_FILE_TYPES = '.pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+const CARD_BACKGROUNDS = [
+  `${ASSET_ROOT}/module-card-1.webp`,
+  `${ASSET_ROOT}/module-card-2.webp`,
+  `${ASSET_ROOT}/module-card-3.webp`,
+]
+const MODULE_COVERS: Record<string, string> = {
+  'paper-chase-zh-coc7': `${ASSET_ROOT}/cover-paper-chase.webp`,
+}
+const MODULE_PREPARATION_PAGE_INDEXES: Record<string, readonly number[]> = {
+  'paper-chase-zh-coc7': [1],
+}
 
 const difficultyLabel: Record<number, string> = {
   1: '入门',
@@ -15,22 +29,85 @@ const difficultyLabel: Record<number, string> = {
   3: '挑战',
 }
 
-const difficultyStyles: Record<string, string> = {
-  '入门': 'bg-[rgba(74,138,74,0.12)] text-[#4a8a4a]',
-  '进阶': 'bg-[rgba(184,151,106,0.12)] text-[#b8976a]',
-  '挑战': 'bg-[rgba(192,64,64,0.12)] text-[#c04040]',
+interface PendingImport {
+  id: string
+  file: File
+  title: string
+  extension: 'PDF' | 'DOCX'
+}
+
+function moduleCover(moduleId: string) {
+  return MODULE_COVERS[moduleId] ?? `${ASSET_ROOT}/cover-default.webp`
+}
+
+function playerRange(module: ModuleSummary) {
+  return module.playersMin === module.playersMax
+    ? `${module.playersMin} 人`
+    : `${module.playersMin}-${module.playersMax} 人`
+}
+
+function readableFileSize(size: number) {
+  return `${(size / 1024 / 1024).toFixed(size >= 10 * 1024 * 1024 ? 0 : 1)} MB`
+}
+
+function contentSentences(content: string) {
+  return content.match(/[^。！？]+[。！？]?/g)?.map((sentence) => sentence.trim()).filter(Boolean) ?? [content]
+}
+
+function CoverImage({ moduleId, title }: { moduleId: string; title: string }) {
+  const usesDefaultCover = !MODULE_COVERS[moduleId]
+  return (
+    <span className={`scenario-module-card__cover${usesDefaultCover ? ' scenario-module-card__cover--default' : ''}`}>
+      <img
+        className="scenario-module-card__cover-image"
+        src={moduleCover(moduleId)}
+        alt={`${title}模组封面`}
+        onError={(event) => {
+          const fallback = `${ASSET_ROOT}/cover-default.webp`
+          if (!event.currentTarget.src.endsWith(fallback)) event.currentTarget.src = fallback
+        }}
+      />
+      <img
+        className="scenario-module-card__cover-frame"
+        src={`${ASSET_ROOT}/cover-frame.webp`}
+        alt=""
+        aria-hidden="true"
+      />
+    </span>
+  )
 }
 
 export default function ScenarioSelectionPage() {
   const navigate = useNavigate()
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const detailDialogRef = useRef<HTMLElement>(null)
+  const detailCloseRef = useRef<HTMLButtonElement>(null)
+  const detailTriggerRef = useRef<HTMLButtonElement | null>(null)
+  const detailRequestRef = useRef(0)
+  const [loadAttempt, setLoadAttempt] = useState(0)
   const [modules, setModules] = useState<ModuleSummary[] | null>(null)
   const [loadError, setLoadError] = useState('')
+  const [pendingImport, setPendingImport] = useState<PendingImport | null>(null)
+  const [importError, setImportError] = useState('')
+  const [detailModuleId, setDetailModuleId] = useState<string | null>(null)
+  const [detailCache, setDetailCache] = useState<Record<string, ModuleDetail>>({})
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [detailError, setDetailError] = useState('')
 
-  const setScene = useGameStore((s) => s.setScene)
-  const colors = COC7_SYSTEM_COLORS
+  const selectedModuleId = useGameStore((state) => state.sceneId)
+  const setScene = useGameStore((state) => state.setScene)
+  const detailSummary = modules?.find((module) => module.id === detailModuleId) ?? null
+  const detail = detailModuleId ? detailCache[detailModuleId] : undefined
+  const preparationPageIndexes = detailModuleId
+    ? MODULE_PREPARATION_PAGE_INDEXES[detailModuleId] ?? []
+    : []
+  const preparationPages = detail?.storyPages.filter((_, index) => preparationPageIndexes.includes(index)) ?? []
+  const openingPages = detail?.storyPages.filter((_, index) => !preparationPageIndexes.includes(index)) ?? []
 
   useEffect(() => {
     let cancelled = false
+    setModules(null)
+    setLoadError('')
     listModules()
       .then((items) => {
         if (!cancelled) {
@@ -43,117 +120,398 @@ export default function ScenarioSelectionPage() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [loadAttempt])
 
-  const handleSelect = (module: ModuleSummary) => {
+  useEffect(() => {
+    if (!detailModuleId) return
+
+    const dialog = detailDialogRef.current
+    if (!dialog) return
+
+    const previousBodyOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    detailCloseRef.current?.focus()
+
+    const focusableSelector = [
+      'a[href]',
+      'button:not([disabled])',
+      'input:not([disabled])',
+      'select:not([disabled])',
+      'textarea:not([disabled])',
+      '[tabindex]:not([tabindex="-1"])',
+    ].join(',')
+
+    const focusableElements = () => Array.from(dialog.querySelectorAll<HTMLElement>(focusableSelector))
+      .filter((element) => !element.hidden && element.getAttribute('aria-hidden') !== 'true')
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        closeDetails()
+        return
+      }
+      if (event.key !== 'Tab') return
+
+      const elements = focusableElements()
+      if (elements.length === 0) {
+        event.preventDefault()
+        dialog.focus()
+        return
+      }
+
+      const firstElement = elements[0]
+      const lastElement = elements[elements.length - 1]
+      const activeElement = document.activeElement
+      if (event.shiftKey && (activeElement === firstElement || !dialog.contains(activeElement))) {
+        event.preventDefault()
+        lastElement.focus()
+      } else if (!event.shiftKey && activeElement === lastElement) {
+        event.preventDefault()
+        firstElement.focus()
+      }
+    }
+
+    const handleFocusIn = (event: FocusEvent) => {
+      if (!dialog.contains(event.target as Node)) detailCloseRef.current?.focus()
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    document.addEventListener('focusin', handleFocusIn)
+    return () => {
+      document.body.style.overflow = previousBodyOverflow
+      window.removeEventListener('keydown', handleKeyDown)
+      document.removeEventListener('focusin', handleFocusIn)
+    }
+  }, [detailModuleId])
+
+  const closeDetails = () => {
+    detailRequestRef.current += 1
+    setDetailModuleId(null)
+    setDetailLoading(false)
+    setDetailError('')
+    window.setTimeout(() => detailTriggerRef.current?.focus(), 0)
+  }
+
+  const loadDetail = (module: ModuleSummary) => {
+    const requestId = detailRequestRef.current + 1
+    detailRequestRef.current = requestId
+    setDetailLoading(true)
+    setDetailError('')
+    getModuleDetail(module.id)
+      .then((result) => {
+        if (detailRequestRef.current !== requestId) return
+        setDetailCache((current) => ({ ...current, [module.id]: result }))
+        setDetailLoading(false)
+      })
+      .catch((error) => {
+        if (detailRequestRef.current !== requestId) return
+        setDetailError(friendlyErrorMessage(error, '加载模组详情失败'))
+        setDetailLoading(false)
+      })
+  }
+
+  const openDetails = (module: ModuleSummary, trigger: HTMLButtonElement) => {
     if (module.status !== 'ready') return
-    setScene(module.id)
+    detailTriggerRef.current = trigger
+    setDetailModuleId(module.id)
+    setDetailError('')
+    if (!detailCache[module.id]) loadDetail(module)
+  }
+
+  const handleSelect = () => {
+    if (!detailSummary || detailSummary.status !== 'ready') return
+    setScene(detailSummary.id)
     navigate(ROUTES.CREATE)
   }
 
+  const handleImport = (file: File | undefined) => {
+    if (!file) return
+    setImportError('')
+
+    const extension = file.name.split('.').pop()?.toLowerCase()
+    if (extension !== 'pdf' && extension !== 'docx') {
+      setImportError('仅支持 PDF 或 DOCX 文件')
+      if (fileInputRef.current) fileInputRef.current.value = ''
+      return
+    }
+    if (file.size > MAX_IMPORT_SIZE) {
+      setImportError('文件不能超过 20 MB')
+      if (fileInputRef.current) fileInputRef.current.value = ''
+      return
+    }
+
+    setPendingImport({
+      id: `${file.name}-${file.size}-${file.lastModified}`,
+      file,
+      title: file.name.replace(/\.(pdf|docx)$/i, ''),
+      extension: extension.toUpperCase() as 'PDF' | 'DOCX',
+    })
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  const removePendingImport = () => {
+    setPendingImport(null)
+    setImportError('')
+  }
+
   return (
-    <div className="animate-screen-in">
-      <div className="flex items-center gap-2.5 px-5 pb-3 pt-1">
+    <div className="scenario-selection-scene">
+      <img
+        className="scenario-selection-scene__background"
+        src={`${ASSET_ROOT}/background.webp`}
+        alt=""
+        aria-hidden="true"
+      />
+
+      <header className="scenario-selection-scene__header" inert={detailModuleId ? true : undefined}>
         <button
           type="button"
           aria-label="返回创建房间"
           onClick={() => navigate(ROUTES.CREATE)}
-          className="w-[34px] h-[34px] rounded-full bg-card border border-border-light flex items-center justify-center flex-shrink-0 active:bg-panel active:scale-[0.94] transition-all duration-150"
+          className="scenario-selection-scene__back"
         >
-          <svg className="w-[18px] h-[18px] text-text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
-            <path d="M19 12H5M12 19l-7-7 7-7" />
-          </svg>
+          <img src={`${ASSET_ROOT}/back-button.webp`} alt="" aria-hidden="true" />
         </button>
-        <h2 className="text-lg font-bold text-text-primary">选择模组</h2>
-      </div>
-      <p className="text-xs text-text-muted px-5 pb-4">
-        {FIXED_TRPG.gameName} · {FIXED_TRPG.systemName}
-      </p>
+        <h1 className="scenario-selection-scene__title">
+          <img src={`${ASSET_ROOT}/title.webp`} alt="选择模组" />
+        </h1>
+      </header>
 
-      <div className="px-5 flex flex-col gap-3.5">
-        {modules === null && !loadError && (
-          <div className="text-center py-10 text-text-muted text-sm">正在加载模组…</div>
-        )}
-        {loadError && (
-          <div className="text-center py-10 text-[#c04040] text-sm">{loadError}</div>
-        )}
-        {modules?.length === 0 && (
-          <div className="text-center py-10 text-text-muted text-sm">
-            暂无预置模组，您可以自行导入
-          </div>
-        )}
-
-        {modules?.map((module) => {
-          const difficulty = difficultyLabel[module.difficulty] ?? `等级 ${module.difficulty}`
-          const diffStyle = difficultyStyles[difficulty] || difficultyStyles['进阶']
-          const isReady = module.status === 'ready'
-
-          return (
+      <main
+        className="scenario-selection-scene__catalog"
+        aria-label="COC7 模组目录"
+        inert={detailModuleId ? true : undefined}
+      >
+        {pendingImport && (
+          <article className="scenario-module-card scenario-module-card--pending">
+            <img
+              className="scenario-module-card__paper"
+              src={CARD_BACKGROUNDS[0]}
+              alt=""
+              aria-hidden="true"
+            />
+            <div className="scenario-module-card__content">
+              <CoverImage moduleId={pendingImport.id} title={pendingImport.title} />
+              <div className="scenario-module-card__information">
+                <div className="scenario-module-card__heading">
+                  <h2>{pendingImport.title}</h2>
+                  <span>{pendingImport.extension}</span>
+                </div>
+                <p className="scenario-module-card__subtitle">待解析的本地模组</p>
+                <p className="scenario-module-card__synopsis">
+                  文件已加入队列，解析服务尚未接入。
+                </p>
+              </div>
+              <div className="scenario-module-card__metadata">
+                <span><FileText aria-hidden="true" />{readableFileSize(pendingImport.file.size)}</span>
+                <span className="scenario-module-card__status scenario-module-card__status--parsing">
+                  解析中
+                </span>
+              </div>
+            </div>
             <button
               type="button"
-              key={module.id}
-              onClick={() => handleSelect(module)}
-              disabled={!isReady}
-              className={`text-left bg-card border border-border-light rounded-md p-5 transition-all duration-200 ${
-                isReady ? 'cursor-pointer active:scale-[0.98]' : 'cursor-not-allowed opacity-65'
-              }`}
+              className="scenario-module-card__remove"
+              aria-label={`删除正在解析的模组 ${pendingImport.title}`}
+              onClick={removePendingImport}
             >
-              <div className="flex items-start gap-3 mb-3">
-                <div className={`w-12 h-12 rounded-[12px] flex-shrink-0 flex items-center justify-center ${colors?.iconBg ?? 'bg-panel'}`}>
-                  <BookOpen className={`w-6 h-6 ${colors?.iconColor ?? 'text-text-muted'}`} />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-[17px] font-bold text-text-primary">{module.title}</h3>
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${diffStyle}`}>
-                      {difficulty}
-                    </span>
+              <Trash2 aria-hidden="true" />
+            </button>
+          </article>
+        )}
+
+        {modules === null && !loadError && (
+          <section className="scenario-selection-state" aria-live="polite">
+            <span className="scenario-selection-state__spinner" aria-hidden="true" />
+            <h2>正在翻阅模组档案</h2>
+            <p>请稍候，调查资料正在整理中……</p>
+          </section>
+        )}
+
+        {loadError && (
+          <section className="scenario-selection-state scenario-selection-state--error" role="alert">
+            <h2>模组档案读取失败</h2>
+            <p>{loadError}</p>
+            <button type="button" onClick={() => setLoadAttempt((value) => value + 1)}>
+              <RotateCcw aria-hidden="true" />重新加载
+            </button>
+          </section>
+        )}
+
+        {modules?.length === 0 && (
+          <section className="scenario-selection-state">
+            <FileText aria-hidden="true" />
+            <h2>暂无可用模组</h2>
+            <p>当前没有已发布的 COC7 模组，可以先导入本地文件。</p>
+          </section>
+        )}
+
+        {modules?.map((module, index) => {
+          const isReady = module.status === 'ready'
+          const isSelected = selectedModuleId === module.id
+          const difficulty = difficultyLabel[module.difficulty] ?? `等级 ${module.difficulty}`
+
+          return (
+            <article
+              className={`scenario-module-card${isReady ? '' : ' scenario-module-card--disabled'}`}
+              key={module.id}
+            >
+              <img
+                className="scenario-module-card__paper"
+                src={CARD_BACKGROUNDS[index % CARD_BACKGROUNDS.length]}
+                alt=""
+                aria-hidden="true"
+              />
+              <div className="scenario-module-card__content">
+                <CoverImage moduleId={module.id} title={module.title} />
+                <div className="scenario-module-card__information">
+                  <div className="scenario-module-card__heading">
+                    <h2>{module.title}</h2>
+                    <span>{FIXED_TRPG.systemCatalogName} · {difficulty}</span>
                   </div>
-                  <p className="text-xs text-text-muted mt-0.5 font-mono tracking-[0.03em]">
-                    {module.nameEn || `v${module.version}`}
+                  <p className="scenario-module-card__subtitle">{module.nameEn || `v${module.version}`}</p>
+                  <p className="scenario-module-card__synopsis">
+                    {module.synopsis || '这份模组暂时没有公开故事简介。'}
                   </p>
                 </div>
-                {isReady && (
-                  <div className="text-text-dim flex-shrink-0 mt-1">
-                    <ChevronRight className="w-[18px] h-[18px]" />
-                  </div>
-                )}
+                <div className="scenario-module-card__metadata">
+                  <span><Users aria-hidden="true" />{playerRange(module)}</span>
+                  <span><Clock aria-hidden="true" />{module.estimatedDuration || '时长待定'}</span>
+                  <span className={`scenario-module-card__status${isSelected ? ' scenario-module-card__status--selected' : ''}`}>
+                    {isReady ? (isSelected ? '已选择' : '未选择') : '开发中'}
+                  </span>
+                </div>
               </div>
-              <p className="text-xs text-text-muted leading-[1.7] line-clamp-2 mb-3">
-                {module.synopsis}
-              </p>
-              <div className="flex items-center gap-4 text-[11px] text-text-dim">
-                <span className="flex items-center gap-1">
-                  <Users className="w-3.5 h-3.5" />
-                  {module.playersMin === module.playersMax
-                    ? `${module.playersMin} 人`
-                    : `${module.playersMin}-${module.playersMax} 人`}
-                </span>
-                <span className="flex items-center gap-1">
-                  <Clock className="w-3.5 h-3.5" />
-                  {module.estimatedDuration}
-                </span>
-                <Badge variant={isReady ? 'success' : 'default'}>
-                  {isReady ? '已就绪' : '开发中'}
-                </Badge>
-              </div>
-            </button>
+              <button
+                type="button"
+                className="scenario-module-card__hit-area"
+                aria-label={`查看模组 ${module.title} 详情`}
+                disabled={!isReady}
+                onClick={(event) => openDetails(module, event.currentTarget)}
+              />
+            </article>
           )
         })}
-      </div>
+      </main>
 
-      <div className="px-5 mt-5">
+      <footer className="scenario-selection-scene__footer" inert={detailModuleId ? true : undefined}>
+        <input
+          ref={fileInputRef}
+          className="sr-only"
+          type="file"
+          aria-label="选择 PDF 或 DOCX 模组文件"
+          accept={ACCEPTED_FILE_TYPES}
+          onChange={(event) => handleImport(event.target.files?.[0])}
+        />
         <button
           type="button"
-          className="w-full flex items-center justify-center gap-2 py-3.5 rounded-sm border border-dashed border-border-mid bg-transparent text-text-muted text-sm active:bg-panel transition-all duration-150"
+          className="scenario-selection-scene__import"
+          aria-label={pendingImport ? '已有模组正在解析，请先删除后再导入' : '导入 PDF 或 DOCX 模组'}
+          disabled={Boolean(pendingImport)}
+          onClick={() => fileInputRef.current?.click()}
         >
-          <Upload className="w-[18px] h-[18px]" />
-          自行导入模组
+          <img src={`${ASSET_ROOT}/import-button.webp`} alt="" aria-hidden="true" />
         </button>
-        <p className="text-[11px] text-text-dim text-center mt-2 mb-6">
-          支持 JSON / YAML 格式的模组文件
-        </p>
-      </div>
+        <p>支持 PDF、DOCX，单个文件不超过 20 MB</p>
+        {importError && <p className="scenario-selection-scene__import-error" role="alert">{importError}</p>}
+      </footer>
+
+      {detailModuleId && detailSummary && (
+        <div className="scenario-module-detail" role="presentation" onMouseDown={(event) => {
+          if (event.target === event.currentTarget) closeDetails()
+        }}>
+          <section
+            ref={detailDialogRef}
+            className="scenario-module-detail__dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="scenario-module-detail-title"
+            tabIndex={-1}
+          >
+            <button
+              ref={detailCloseRef}
+              type="button"
+              className="scenario-module-detail__close"
+              aria-label="关闭模组详情"
+              onClick={closeDetails}
+            >
+              <X aria-hidden="true" />
+            </button>
+
+            <div className="scenario-module-detail__header">
+              <CoverImage moduleId={detailSummary.id} title={detailSummary.title} />
+              <div className="scenario-module-detail__identity">
+                <span>{detail?.storyLabel || FIXED_TRPG.systemCatalogName}</span>
+                <h2 id="scenario-module-detail-title">{detailSummary.title}</h2>
+                <p>{detail?.subtitle || detailSummary.nameEn || `v${detailSummary.version}`}</p>
+                <div className="scenario-module-detail__metadata">
+                  <span><Users aria-hidden="true" />{playerRange(detailSummary)}</span>
+                  <span><Clock aria-hidden="true" />{detailSummary.estimatedDuration || '时长待定'}</span>
+                  <span><FileText aria-hidden="true" />CoC 7e</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="scenario-module-detail__body">
+              {detailLoading && (
+                <div className="scenario-module-detail__state" aria-live="polite">
+                  <span className="scenario-selection-state__spinner" aria-hidden="true" />
+                  正在展开故事档案……
+                </div>
+              )}
+
+              {detailError && (
+                <div className="scenario-module-detail__state scenario-module-detail__state--error" role="alert">
+                  <p>{detailError}</p>
+                  <button type="button" onClick={() => loadDetail(detailSummary)}>
+                    <RotateCcw aria-hidden="true" />重新加载
+                  </button>
+                </div>
+              )}
+
+              {detail && !detailLoading && (
+                <>
+                  <section>
+                    <h3>故事简介</h3>
+                    <p>{detail.synopsis || '这份模组暂时没有公开故事简介。'}</p>
+                  </section>
+                  <section>
+                    <h3>开局提示</h3>
+                    {openingPages.length > 0 ? openingPages.map((page, index) => (
+                      <div className="scenario-module-detail__story-page" key={`${page.title}-${index}`}>
+                        {page.title && <h4>{page.title}</h4>}
+                        <p>{page.content}</p>
+                      </div>
+                    )) : <p>这份模组暂时没有额外的开局提示。</p>}
+                  </section>
+                  {preparationPages.map((page, index) => (
+                    <section className="scenario-module-detail__preparation" key={`${page.title}-${index}`}>
+                      <h3>{page.title || '调查员准备'}</h3>
+                      <ul>
+                        {contentSentences(page.content).map((sentence, sentenceIndex) => (
+                          <li key={`${sentence}-${sentenceIndex}`}>{sentence}</li>
+                        ))}
+                      </ul>
+                    </section>
+                  ))}
+                </>
+              )}
+            </div>
+
+            <div className="scenario-module-detail__actions">
+              <button
+                type="button"
+                className="scenario-module-detail__select"
+                disabled={!detail || detailLoading}
+                onClick={handleSelect}
+              >
+                <span aria-hidden="true">◆</span>
+                {selectedModuleId === detailSummary.id ? '确认继续使用' : '选择此模组'}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   )
 }

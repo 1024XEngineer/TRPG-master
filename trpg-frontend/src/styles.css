@@ -1119,14 +1119,22 @@
   border-radius: 0.8rem;
   background: transparent;
   cursor: pointer;
+}
+
+.scenario-module-card__hit-area::before {
+  position: absolute;
+  inset: 0.35rem 0.25rem 0.7rem;
+  border-radius: 0.55rem;
+  background: transparent;
+  content: '';
   transition: background-color 150ms ease, box-shadow 150ms ease;
 }
 
-.scenario-module-card__hit-area:hover:not(:disabled) {
+.scenario-module-card__hit-area:hover:not(:disabled)::before {
   background: rgb(255 235 174 / 8%);
 }
 
-.scenario-module-card__hit-area:active:not(:disabled) {
+.scenario-module-card__hit-area:active:not(:disabled)::before {
   background: rgb(70 38 14 / 9%);
   box-shadow: inset 0 0 1.2rem rgb(49 26 9 / 18%);
 }

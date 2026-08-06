@@ -34,6 +34,7 @@
 | 实时通信 | WebSocket 会话绑定、准备、开始游戏、提交行动、房间叙事广播 |
 | AI 主持 | 玩家安全上下文、结构化意图解析、确定性规则执行、结果叙事；支持 OpenAI 与千问 3.7 Plus |
 | 游戏界面 | 对话区、角色卡、技能、地图、笔记和 D100/D20/D6 本地投骰交互 |
+| 语音输入 | 支持浏览器原生语音识别，转写结果回填行动或讨论区输入框，由玩家编辑确认后发送 |
 | API SDK | 封装认证、房间、角色和房间 WebSocket；与后端 DTO 对应的类型由 `npm run codegen` 生成 |
 
 ### 当前限制
@@ -42,7 +43,9 @@
 - 当前唯一承诺可运行的模组是「追书人」；另外三个示例 JSON 只用于解析与 Schema 回归，不会自动写入运行数据库。
 - 技能检定保留 `check.request → check.roll → check.result` 两阶段协议；玩家提交 D100 点数，后端规则引擎权威结算并持久化结果。
 - Director、世界知识检索、长期记忆、主动剧情推进、RAG、持久即兴内容和完整重连恢复不在当前阶段。
-- 复盘摘要、完整事件记录、语音输入等能力尚未完成。
+- 复盘摘要和完整事件记录等能力尚未完成。
+- 语音输入不需要项目配置第三方 Key，项目后端不会接收或保存原始录音；部分浏览器可能使用厂商远程服务完成识别，数据处理方式受浏览器服务条款约束。
+- 语音输入依赖浏览器 Web Speech API 和安全上下文。localhost 或 HTTPS 可用；当前纯 HTTP 的持久预览会明确显示语音输入不可用，键盘输入不受影响。
 
 ## 系统结构
 
@@ -206,6 +209,12 @@ npm run dev
 | `DEEPSEEK_BASE_URL` | `https://api.deepseek.com` | OpenAI-compatible Chat Completions 根地址 |
 | `DEEPSEEK_MODEL` | `deepseek-chat` | DeepSeek 模型名称 |
 | `DEEPSEEK_TIMEOUT_SECONDS` | `30` | DeepSeek 请求超时秒数 |
+| `HOST_SPEECH_PROVIDER` | `disabled` | 主持人语音：`disabled`、`fake` 或 `doubao`；`fake` 仅用于测试 |
+| `DOUBAO_TTS_API_KEY` | 空 | 新版豆包语音控制台 API Key（按 SecretStr 读取且禁止写日志） |
+| `DOUBAO_TTS_RESOURCE_ID` | `seed-tts-2.0` | DouBao TTS 2.0 固定服务标识 |
+| `DOUBAO_TTS_VOICES` | `[]` | 房间允许选择的音色 JSON，如 `[{"voiceType":"...","label":"旁白"}]` |
+| `DOUBAO_TTS_DEFAULT_VOICE_TYPE` | 空 | 部署默认音色，必须包含在音色白名单中 |
+| `DOUBAO_TTS_TIMEOUT_SECONDS` | `15` | 单句合成超时；失败不自动重试，避免重复计费 |
 | `HOST_AGENT_MAX_TURNS` | `6` | 单次 Host Agent 最大模型轮数 |
 | `HOST_AGENT_MAX_TOOL_CALLS` | `8` | 单次 Host Agent 最大工具调用数 |
 | `HOST_AGENT_TOOL_TIMEOUT_SECONDS` | `5` | 单工具超时秒数 |

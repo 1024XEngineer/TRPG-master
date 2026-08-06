@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { ApiError } from '@/services/api-client'
-import { translateCharacterValidationError } from './ruleset-api'
+import { resolveSystemId, translateCharacterValidationError } from './ruleset-api'
+import { FIXED_TRPG } from '@/config/games'
+
+describe('resolveSystemId', () => {
+  it('always resolves the fixed COC7 ruleset', async () => {
+    await expect(resolveSystemId()).resolves.toBe(FIXED_TRPG.systemId)
+  })
+})
 
 describe('translateCharacterValidationError', () => {
   it('translates request validation paths into player-facing Chinese messages', () => {

@@ -12,6 +12,7 @@
 4. [`docs/module-parser/MODULECONTENT-README.md`](docs/module-parser/MODULECONTENT-README.md)：B/C 发布语言、字段设计和 Parser 验证入口。
 5. [`docs/module-parser/module-content-field-decisions.md`](docs/module-parser/module-content-field-decisions.md)：ModuleContent v1 当前生效的完整契约决议。
 6. [`docs/architecture/adr-module-parser-architecture.md`](docs/architecture/adr-module-parser-architecture.md)：已接受的 Module Parser 实施架构。
+7. [`docs/architecture/issue-208-action-plan.md`](docs/architecture/issue-208-action-plan.md)：Issue #225 已确认的有限 ActionPlan、步骤幂等与恢复设计。
 
 `docs/` 只保留当前生效的决议、使用说明和四个模组的验证产物，不保留已被吸收的
 Proposal、RFC、对比报告或阶段性讨论。
@@ -36,6 +37,11 @@ PlayerInput
 `HostAgentIntentResolver`，但不是 FastAPI 的生产主链。生产环境由 backend 的
 `TurnApplication.prepare()/complete()` 负责 SQL Runtime、持久化幂等和两阶段检定；
 禁止再复制第三套完整回合流程。
+
+ModuleContent v3 的复合行动走独立的 `HostTurnDecisionExecutor`：单动作直接提交一个
+`ActionAdjudication`，复合动作交给 `ActionPlanOrchestrator`。后者只保存玩家安全的顺序
+语义步骤，每步开始时重新读取最新 PlayerView，再把一个单意图裁决交给 Engine。默认
+32 步技术上限和 3 步软调度窗口由冻结的 `ActionPlanPolicy` 控制；软窗口不是产品上限。
 
 当前 `HostAgentContext` 会把完整 PlayerView v2 交给一次 Host Agent run：其中包含同一 revision 的 `self_actor`、安全 `scene`
 （实体、人物、出口）、`known_information` 与可信 `checkpoint_options`。后端的
@@ -163,6 +169,9 @@ collaboration_framework/
 | `NarrationOutput` | A | Gateway | 模型原始 JSON 经 Pydantic 和事实引用校验后的输出 |
 | `HostAgentContext`/`HostAgentEvent`/`HostAgentUsage` | A | A 的 Host Agent Adapter | A 内部、框架无关；经 Resolver 接入意图阶段，不成为 A/B/C 共享契约 |
 | `ToolRegistry` 与 player-safe 工具 | A | A 的 Host Agent Adapter | 绑定当前 Context，只读；参数/结果均由项目 Schema 校验 |
+| `ActionPlan` / `ActionPlanPolicy` | A/B 共审 | A、Gateway | 有限顺序语义计划；不含未来裁决、效果、身份或 revision |
+| `ActionPlanRun` / `ActionPlanRunStore` | A，B 提供 Adapter | A/B | 独立于 Engine Store 的编排游标、CAS、lease、占用和恢复记录 |
+| `ActionPlanOrchestrator` | A | A | 每次只向 Engine 提交当前 revision 上的一个 `ActionAdjudication` |
 | `ModuleContent`/`CheckpointSpec`/`RuleSpec` | B/C 共审 | B、C | 声明式内容语言；A 不直接消费 |
 
 ## ModuleContent 为什么在 `contracts/module.py`
@@ -200,6 +209,12 @@ Schema 文件由 Pydantic 模型自动生成，不应手工维护：
 - `schemas/intent.schema.json`
 - `schemas/action-request.schema.json`
 - `schemas/action-result.schema.json`
+- `schemas/action-plan.schema.json`
+- `schemas/action-plan-policy.schema.json`
+- `schemas/action-plan-progress.schema.json`
+- `schemas/cancel-action-plan-request.schema.json`
+- `schemas/get-adjudication-status-request.schema.json`
+- `schemas/adjudication-status.schema.json`
 - `schemas/narration-output.schema.json`
 - `schemas/websocket-output.schema.json`
 - `schemas/host-agent-context.schema.json`（A 内部 Adapter 边界）

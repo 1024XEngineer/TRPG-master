@@ -6,6 +6,7 @@ from pathlib import Path
 import httpx
 import pytest
 from collaboration_framework.contracts import (
+    ActionPlan,
     ActionRequest,
     ActionResult,
     DefaultCheck,
@@ -17,6 +18,7 @@ from collaboration_framework.contracts import (
     RuleCheckResult,
     SceneView,
     SelfActorView,
+    SingleActionDecision,
     VisibleEntity,
     VisibleFact,
 )
@@ -31,6 +33,7 @@ from collaboration_framework.engine import (
 )
 from collaboration_framework.host.application import PlayerViewProjector
 from collaboration_framework.host.schemas import (
+    HostAgentContext,
     IntentContext,
     NarrationContext,
     RecentTurnContext,
@@ -40,6 +43,7 @@ from pydantic import ValidationError
 from app.adapters.deepseek_models import DeepSeekChatCompletionsJsonClient
 from app.adapters.openai_models import (
     OpenAIResponsesJsonClient,
+    PromptHostTurnDecisionModel,
     PromptIntentModel,
     PromptNarrationModel,
 )
@@ -545,6 +549,71 @@ async def test_prompt_models_complete_paper_chase_ending_without_state_access() 
     assert final_state.phase == "ended"
     assert final_state.ending_id == "ending_douglas_departs"
     assert client.backgrounds == [module.background, module.background]
+
+
+class ScriptedTurnDecisionClient:
+    async def generate(self, *, schema_name, schema, instructions, input_payload):
+        assert schema_name == "trpg_host_turn_decision"
+        assert schema and "32 步" in instructions
+        utterance = input_payload["player_input"]["utterance"]
+        requested = int(utterance.split(":", 1)[1])
+        if requested == 1:
+            return {
+                "kind": "single_action",
+                "adjudication": {
+                    "request_id": "model-value",
+                    "source_revision": "model-value",
+                    "actor_id": "model-value",
+                    "summary": "观察当前场景",
+                    "target": {"kind": "location", "id": "conversation"},
+                    "method": {"family": "action", "description": "观察"},
+                    "check": {"mode": "none", "candidates": []},
+                    "success_effects": [{"type": "narrative_only"}],
+                    "failure_effects": [],
+                },
+            }
+        return {
+            "kind": "action_plan",
+            "goal": utterance,
+            "steps": [
+                {"kind": "action", "semantic_goal": f"完成步骤 {index + 1}"}
+                for index in range(requested)
+            ],
+        }
+
+
+@pytest.mark.parametrize("step_count", [1, 2, 3, 4, 5])
+async def test_prompt_turn_decision_accepts_single_and_variable_plan_lengths(
+    step_count: int,
+) -> None:
+    module = load_paper_chase()
+    state = conversation_state(module)
+    store = InMemoryEngineStore()
+    store.register_room(module_content=module, initial_state=state)
+    player_input = PlayerInput(
+        room_id=state.room_id,
+        player_id="player_1",
+        actor_id="actor_1",
+        client_action_id=f"decision-{step_count}",
+        utterance=f"steps:{step_count}",
+    )
+    view = await PlayerViewProjector(RuleEngineService(store)).project(player_input)
+    decision = await PromptHostTurnDecisionModel(ScriptedTurnDecisionClient()).generate(
+        HostAgentContext(
+            player_input=player_input,
+            player_view=view,
+            recent_history=RecentTurnContext.empty(
+                player_input=player_input,
+                player_view=view,
+            ),
+        )
+    )
+
+    if step_count == 1:
+        assert isinstance(decision, SingleActionDecision)
+    else:
+        assert isinstance(decision, ActionPlan)
+        assert len(decision.steps) == step_count
 
 
 async def test_responses_client_posts_strict_schema_and_parses_output() -> None:

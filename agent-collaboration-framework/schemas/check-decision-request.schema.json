@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "check-decision-request.schema.json",
+  "$defs": {
+    "CancelCheckChoice": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "cancel",
+          "default": "cancel",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "title": "CancelCheckChoice",
+      "type": "object"
+    },
+    "SelectCheckChoice": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "select",
+          "default": "select",
+          "title": "Kind",
+          "type": "string"
+        },
+        "candidate_id": {
+          "minLength": 1,
+          "title": "Candidate Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "candidate_id"
+      ],
+      "title": "SelectCheckChoice",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "request_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Request Id",
+      "type": "string"
+    },
+    "room_id": {
+      "minLength": 1,
+      "title": "Room Id",
+      "type": "string"
+    },
+    "player_id": {
+      "minLength": 1,
+      "title": "Player Id",
+      "type": "string"
+    },
+    "source_revision": {
+      "minLength": 1,
+      "title": "Source Revision",
+      "type": "string"
+    },
+    "decision_id": {
+      "minLength": 1,
+      "title": "Decision Id",
+      "type": "string"
+    },
+    "decision_version": {
+      "minimum": 1,
+      "title": "Decision Version",
+      "type": "integer"
+    },
+    "choice": {
+      "discriminator": {
+        "mapping": {
+          "cancel": "#/$defs/CancelCheckChoice",
+          "select": "#/$defs/SelectCheckChoice"
+        },
+        "propertyName": "kind"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/SelectCheckChoice"
+        },
+        {
+          "$ref": "#/$defs/CancelCheckChoice"
+        }
+      ],
+      "title": "Choice"
+    }
+  },
+  "required": [
+    "request_id",
+    "room_id",
+    "player_id",
+    "source_revision",
+    "decision_id",
+    "decision_version",
+    "choice"
+  ],
+  "title": "CheckDecisionRequest",
+  "type": "object"
+}

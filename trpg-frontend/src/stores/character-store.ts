@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import type { Attributes, InvestigatorInfo } from '@/data/character-model'
+import type { DerivedStatsView } from '@/data/derived-stats'
 
 export interface CompletedCharacter {
   info: InvestigatorInfo
@@ -11,10 +12,13 @@ export interface CompletedCharacter {
   // 渲染这份数据，不用再拿 skillAlloc 现场重算（issue #84 S3：规则计算全部
   // 交给后端，前端只存/渲染结果）。
   skillFinalValues: Record<string, number>
+  // 可选是为了兼容 issue #140 之前写入 localStorage 的旧缓存；新保存的角色
+  // 始终写入数组，后端的 null 兼容路径负责旧角色推断。
+  occupationChoiceSkillIds?: string[]
   equipment: string
   background: string
   notes: string
-  derived: { hp: number; san: number; mp: number; db: string; move: number }
+  derived: DerivedStatsView
 }
 
 interface CharacterState {

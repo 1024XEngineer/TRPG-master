@@ -15,35 +15,78 @@ import { useAuthStore } from '@/stores/auth-store'
 import { useCharacterStore } from '@/stores/character-store'
 import { useRoomStore } from '@/stores/room-store'
 
-class RoomSpeechUtterance {
-  text: string
-  voice: SpeechSynthesisVoice | null = null
-  lang = ''
-  rate = 0
-  pitch = 0
-  volume = 0
-  onend: (() => void) | null = null
-  onerror: (() => void) | null = null
+function installRoomSpeechApi() {
+  class RoomAudio extends EventTarget {
+    src = ''
+    playbackRate = 1
+    volume = 1
+    preservesPitch = false
+    play = vi.fn(async () => {})
+    pause = vi.fn()
+    load = vi.fn()
+    removeAttribute = vi.fn()
+  }
+  const audio = new RoomAudio()
+  vi.stubGlobal('Audio', class { constructor() { return audio } })
+  vi.stubGlobal('URL', { ...URL, createObjectURL: vi.fn(() => 'blob:room-speech'), revokeObjectURL: vi.fn() })
+  mockGetHostSpeechSettings.mockResolvedValue({
+    available: true,
+    provider: 'fake',
+    voiceType: 'voice-a',
+    voices: [{ voiceType: 'voice-a', label: '测试音色' }],
+    autoEmotion: true,
+  })
+  mockGetHostSpeechManifest.mockImplementation(async (_roomId: string, messageId: string) => ({
+    messageId,
+    sentences: [{
+      index: 0,
+      text: ({
+        'action-206': '渐进片段一号。渐进片段二号。',
+        'narration-1': '新的主持人叙事',
+        'history-narration': '历史主持人叙事',
+        'narration-controls-1': '控制面板测试',
+      } as Record<string, string>)[messageId] ?? '测试分句',
+    }],
+  }))
+  mockGetHostSpeechSentence.mockResolvedValue(new Blob(['mp3'], { type: 'audio/mpeg' }))
+  return { audio }
+}
 
-  constructor(text: string) {
-    this.text = text
+class RoomSpeechRecognition {
+  static instances: RoomSpeechRecognition[] = []
+  lang = ''
+  continuous = true
+  interimResults = true
+  onstart: (() => void) | null = null
+  onresult: ((event: {
+    resultIndex?: number
+    results: ArrayLike<ArrayLike<{ transcript: string }> & { isFinal?: boolean }>
+  }) => void) | null = null
+  onend: (() => void) | null = null
+  onerror: ((event: { error: string }) => void) | null = null
+  start = vi.fn()
+  stop = vi.fn()
+  abort = vi.fn()
+
+  constructor() {
+    RoomSpeechRecognition.instances.push(this)
+  }
+
+  emitFinal(transcript: string) {
+    this.onresult?.({
+      resultIndex: 0,
+      results: [Object.assign([{ transcript }], { isFinal: true })],
+    })
   }
 }
 
-function installRoomSpeechApi() {
-  const spoken: RoomSpeechUtterance[] = []
-  const synthesis = {
-    getVoices: vi.fn(() => [] as SpeechSynthesisVoice[]),
-    speak: vi.fn((utterance: RoomSpeechUtterance) => spoken.push(utterance)),
-    cancel: vi.fn(),
-    pause: vi.fn(),
-    resume: vi.fn(),
-    addEventListener: vi.fn(),
-    removeEventListener: vi.fn(),
-  }
-  Object.defineProperty(window, 'speechSynthesis', { configurable: true, value: synthesis })
-  Object.defineProperty(window, 'SpeechSynthesisUtterance', { configurable: true, value: RoomSpeechUtterance })
-  return { synthesis, spoken }
+function installRoomSpeechRecognition() {
+  RoomSpeechRecognition.instances = []
+  Object.defineProperty(window, 'isSecureContext', { configurable: true, value: true })
+  Object.defineProperty(window, 'SpeechRecognition', {
+    configurable: true,
+    value: RoomSpeechRecognition,
+  })
 }
 
 const {
@@ -52,15 +95,23 @@ const {
   mockGetPlayerView,
   mockJoinRoom,
   mockListConversation,
+  mockGetHostSpeechSettings,
+  mockGetHostSpeechManifest,
+  mockGetHostSpeechSentence,
+  mockUpdateHostSpeechSettings,
   mockOnWsMessage,
   mockRollCheck,
+  mockSendChat,
   mockSubmitAction,
+  mockSubmitPlannedAction,
   mockWaitForWsOpen,
   wsHandlers,
+  dice3dSupported,
 } = vi.hoisted(() => {
   const handlers = new Set<(event: ServerToClientEvent) => void>()
   return {
     wsHandlers: handlers,
+    dice3dSupported: { value: false },
     emitWsMessage: (event: ServerToClientEvent) => {
       for (const handler of handlers) handler(event)
     },
@@ -68,12 +119,18 @@ const {
     mockGetPlayerView: vi.fn(),
     mockJoinRoom: vi.fn(),
     mockListConversation: vi.fn(),
+    mockGetHostSpeechSettings: vi.fn(),
+    mockGetHostSpeechManifest: vi.fn(),
+    mockGetHostSpeechSentence: vi.fn(),
+    mockUpdateHostSpeechSettings: vi.fn(),
     mockRollCheck: vi.fn(),
+    mockSendChat: vi.fn(),
     mockOnWsMessage: vi.fn((handler: (event: ServerToClientEvent) => void) => {
       handlers.add(handler)
       return () => handlers.delete(handler)
     }),
     mockSubmitAction: vi.fn(),
+    mockSubmitPlannedAction: vi.fn(),
     mockWaitForWsOpen: vi.fn(() => Promise.resolve()),
   }
 })
@@ -82,19 +139,25 @@ vi.mock('@/services/api-client', () => ({
   connectWebSocket: vi.fn(() => ({}) as WebSocket),
   disconnectWebSocket: vi.fn(),
   friendlyErrorMessage: vi.fn((_err: unknown, fallback: string) => fallback),
+  getAuthToken: vi.fn(() => 'token-1'),
   onWsMessage: mockOnWsMessage,
   waitForWsOpen: mockWaitForWsOpen,
   sdk: {
     rooms: {
       listConversation: mockListConversation,
+      getHostSpeechSettings: mockGetHostSpeechSettings,
+      getHostSpeechManifest: mockGetHostSpeechManifest,
+      getHostSpeechSentence: mockGetHostSpeechSentence,
+      updateHostSpeechSettings: mockUpdateHostSpeechSettings,
     },
     roomSocket: {
       getOpeningMessageId: mockGetOpeningMessageId,
       getPlayerView: mockGetPlayerView,
       joinRoom: mockJoinRoom,
       rollCheck: mockRollCheck,
-      sendChat: vi.fn(),
+      sendChat: mockSendChat,
       submitAction: mockSubmitAction,
+      submitPlannedAction: mockSubmitPlannedAction,
     },
   },
 }))
@@ -102,6 +165,29 @@ vi.mock('@/services/api-client', () => ({
 vi.mock('@/services/room', () => ({
   endGame: vi.fn(),
 }))
+
+/**
+ * 3D 骰子在 jsdom 里跑不了（没有 WebGL），默认按"不支持"处理，与真实 jsdom
+ * 行为一致，不影响其余用例。
+ *
+ * `dice3dSupported` 置 true 时启用一个只做一件事的假舞台：被调用 roll() 就触发
+ * `onUnsupported` —— 模拟"玩家已经点了掷骰、引擎 chunk 这时才加载失败"。
+ */
+vi.mock('@/features/dice3d', async () => {
+  const { forwardRef, useImperativeHandle } = await import('react')
+  return {
+    supports3DDice: () => dice3dSupported.value,
+    Dice3DStage: forwardRef(
+      (
+        { onUnsupported }: { onUnsupported?: () => void },
+        ref: React.Ref<{ roll: () => void }>,
+      ) => {
+        useImperativeHandle(ref, () => ({ roll: () => onUnsupported?.() }), [onUnsupported])
+        return <div data-testid="dice-3d-stage" />
+      },
+    ),
+  }
+})
 
 vi.mock('@/hooks/useRoomPlayers', () => ({
   useRoomPlayers: () => ({
@@ -121,7 +207,24 @@ vi.mock('@/hooks/useRoomPlayers', () => ({
 
 vi.mock('@/hooks/useRuleset', () => ({
   useRuleset: () => ({
-    ruleset: { attributes: [], skills: [], occupations: [] },
+    ruleset: {
+      attributes: [],
+      skills: [
+        { id: 'accounting', name: '会计', nameEn: 'accounting', base: 5, category: 'occupation' },
+        { id: 'charm', name: '取悦', nameEn: 'charm', base: 15, category: 'social' },
+        { id: 'stealth', name: '潜行', nameEn: 'stealth', base: 20, category: 'interest' },
+      ],
+      occupations: [{
+        id: 1,
+        name: '记者',
+        creditMin: 0,
+        creditMax: 70,
+        skillPointsFormula: 'EDU*4',
+        skillIds: ['accounting'],
+        choiceSlots: [{ count: 1, candidateSkillIds: null, label: '任意一项技能' }],
+        description: '',
+      }],
+    },
     loading: false,
     error: '',
   }),
@@ -232,8 +335,13 @@ describe('RoomPage conversation history', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     wsHandlers.clear()
+    dice3dSupported.value = false
     Object.defineProperty(window, 'speechSynthesis', { configurable: true, value: undefined })
     Object.defineProperty(window, 'SpeechSynthesisUtterance', { configurable: true, value: undefined })
+    Object.defineProperty(window, 'isSecureContext', { configurable: true, value: true })
+    Reflect.deleteProperty(window, 'SpeechRecognition')
+    Reflect.deleteProperty(window, 'webkitSpeechRecognition')
+    RoomSpeechRecognition.instances = []
     window.HTMLElement.prototype.scrollIntoView = vi.fn()
     localStorage.clear()
     sessionStorage.clear()
@@ -250,11 +358,22 @@ describe('RoomPage conversation history', () => {
     mockGetPlayerView.mockReturnValue(null)
     mockGetOpeningMessageId.mockReturnValue(null)
     mockListConversation.mockResolvedValue([])
+    mockGetHostSpeechSettings.mockResolvedValue({
+      available: false,
+      provider: 'disabled',
+      voiceType: null,
+      voices: [],
+      autoEmotion: true,
+    })
     mockSubmitAction.mockReturnValue(new Promise(() => undefined))
+    mockSubmitPlannedAction.mockReturnValue(new Promise(() => undefined))
   })
 
   afterEach(() => {
     cleanup()
+    Reflect.deleteProperty(window, 'SpeechRecognition')
+    Reflect.deleteProperty(window, 'webkitSpeechRecognition')
+    Reflect.deleteProperty(window, 'isSecureContext')
   })
 
   it('restores action history by default and discussion history after switching channel', async () => {
@@ -590,7 +709,7 @@ describe('RoomPage conversation history', () => {
   })
 
   it('speaks the narration only once the authoritative push has landed', async () => {
-    const { spoken } = installRoomSpeechApi()
+    installRoomSpeechApi()
     localStorage.setItem(
       'aidm-host-speech-settings',
       JSON.stringify({ enabled: true, voiceURI: null }),
@@ -609,14 +728,14 @@ describe('RoomPage conversation history', () => {
     })
     expect(await screen.findByText('生成中…')).toBeInTheDocument()
     // 揭示途中不能出声：片段不是权威消息。
-    expect(spoken).toHaveLength(0)
+    expect(mockGetHostSpeechManifest).not.toHaveBeenCalled()
 
     emitWsMessage({
       type: 'narration.push',
       payload: { messageId: 'action-206', text: full },
     })
-    await waitFor(() => expect(spoken).toHaveLength(1), { timeout: 4000 })
-    expect(spoken[0]?.text).toBe(full)
+    await waitFor(() => expect(mockGetHostSpeechManifest).toHaveBeenCalledTimes(1), { timeout: 4000 })
+    expect(mockGetHostSpeechManifest.mock.calls[0]?.[1]).toBe('action-206')
   })
 
   it('commits immediately when a narration arrives without any chunks', async () => {
@@ -633,7 +752,7 @@ describe('RoomPage conversation history', () => {
   })
 
   it('automatically speaks new final narration once by message id', async () => {
-    const { spoken } = installRoomSpeechApi()
+    installRoomSpeechApi()
     localStorage.setItem('aidm-host-speech-settings', JSON.stringify({ enabled: true, voiceURI: null }))
     renderRoomPage()
     await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
@@ -643,18 +762,18 @@ describe('RoomPage conversation history', () => {
       payload: { messageId: 'narration-1', text: '新的主持人叙事' },
     })
     expect(await screen.findByText('新的主持人叙事')).toBeInTheDocument()
-    expect(spoken).toHaveLength(1)
-    expect(spoken[0]?.text).toBe('新的主持人叙事')
+    await waitFor(() => expect(mockGetHostSpeechManifest).toHaveBeenCalledTimes(1))
+    expect(mockGetHostSpeechManifest.mock.calls[0]?.[1]).toBe('narration-1')
 
     emitWsMessage({
       type: 'narration.push',
       payload: { messageId: 'narration-1', text: '新的主持人叙事' },
     })
-    await waitFor(() => expect(spoken).toHaveLength(1))
+    await waitFor(() => expect(mockGetHostSpeechManifest).toHaveBeenCalledTimes(1))
   })
 
   it('does not auto-speak restored history but supports manual replay', async () => {
-    const { spoken } = installRoomSpeechApi()
+    installRoomSpeechApi()
     localStorage.setItem('aidm-host-speech-settings', JSON.stringify({ enabled: true, voiceURI: null }))
     mockListConversation.mockResolvedValue([
       {
@@ -668,7 +787,7 @@ describe('RoomPage conversation history', () => {
 
     renderRoomPage()
     expect(await screen.findByText('历史主持人叙事')).toBeInTheDocument()
-    expect(spoken).toHaveLength(0)
+    expect(mockGetHostSpeechManifest).not.toHaveBeenCalled()
 
     emitWsMessage({
       type: 'narration.push',
@@ -676,16 +795,16 @@ describe('RoomPage conversation history', () => {
     })
     await waitFor(() => {
       expect(screen.getAllByText('历史主持人叙事')).toHaveLength(1)
-      expect(spoken).toHaveLength(0)
+      expect(mockGetHostSpeechManifest).not.toHaveBeenCalled()
     })
 
     fireEvent.click(screen.getByRole('button', { name: '重新朗读' }))
-    expect(spoken).toHaveLength(1)
-    expect(spoken[0]?.text).toBe('历史主持人叙事')
+    await waitFor(() => expect(mockGetHostSpeechManifest).toHaveBeenCalledTimes(1))
+    expect(mockGetHostSpeechManifest.mock.calls[0]?.[1]).toBe('history-narration')
   })
 
   it('exposes speech controls and stops the queue when disabled', async () => {
-    const { spoken, synthesis } = installRoomSpeechApi()
+    const { audio } = installRoomSpeechApi()
     renderRoomPage()
     await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
 
@@ -699,15 +818,15 @@ describe('RoomPage conversation history', () => {
       payload: { messageId: 'narration-controls-1', text: '控制面板测试' },
     })
     expect(await screen.findByText('控制面板测试')).toBeInTheDocument()
-    expect(spoken).toHaveLength(1)
+    await waitFor(() => expect(audio.play).toHaveBeenCalledTimes(1))
 
     fireEvent.click(screen.getByRole('button', { name: '暂停朗读' }))
-    expect(synthesis.pause).toHaveBeenCalledTimes(1)
+    expect(audio.pause).toHaveBeenCalledTimes(1)
     fireEvent.click(screen.getByRole('button', { name: '继续朗读' }))
-    expect(synthesis.resume).toHaveBeenCalledTimes(1)
+    expect(audio.play).toHaveBeenCalledTimes(2)
     fireEvent.click(toggle)
     expect(toggle).not.toBeChecked()
-    expect(synthesis.cancel).toHaveBeenCalled()
+    expect(audio.pause).toHaveBeenCalledTimes(2)
   })
 
   it('keeps text readable and disables replay when speech is unsupported', async () => {
@@ -781,6 +900,140 @@ describe('RoomPage conversation history', () => {
     expect(await screen.findByText('杜调查员 · 掷骰')).toBeInTheDocument()
   })
 
+  it('preserves categorized background line breaks in the character sheet', async () => {
+    const background = '形象描述：穿着旧风衣\n重要之人：导师亨利'
+    useCharacterStore.getState().setCharacter(
+      {
+        info: {
+          name: '杜调查员',
+          playerName: '陈探员',
+          age: '32',
+          gender: '男',
+          residence: '阿卡姆',
+          birthplace: '波士顿',
+          occupationId: 1,
+        },
+        attr: {},
+        skillAlloc: {},
+        skillFinalValues: { accounting: 40, charm: 50, stealth: 30 },
+        occupationChoiceSkillIds: ['charm'],
+        equipment: '',
+        background,
+        notes: '',
+        derived: { hp: 10, san: 60, mp: 10, db: '0', build: '0', move: 8 },
+      },
+      'room-1',
+    )
+    mockListConversation.mockResolvedValue([])
+
+    renderRoomPage()
+    fireEvent.click(screen.getByRole('button', { name: '角色卡' }))
+    for (const label of ['生命值', '理智值', '魔法值', '伤害加值', '体格', '移动力']) {
+      expect(screen.getByText(new RegExp(label))).toBeInTheDocument()
+    }
+    fireEvent.click(screen.getByRole('button', { name: '背景装备' }))
+
+    const renderedBackground = screen.getByText((_, element) => element?.textContent === background)
+    expect(renderedBackground).toHaveClass('whitespace-pre-wrap')
+  })
+
+  // jsdom 没有 WebGL，supports3DDice() 为 false —— 正好覆盖降级路径：
+  // 渲染能力缺失时不能把检定卡住（issue #217）。
+  it('falls back to the 2D dice display when WebGL is unavailable', async () => {
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    await act(async () => {
+      emitWsMessage({
+        type: 'check.request',
+        payload: {
+          playerId: 'player-1',
+          clientActionId: 'check-fallback',
+          summary: '检查旧报纸',
+          difficulty: 'regular',
+          skills: [{ id: 'library', name: '图书馆使用', targetValue: 60 }],
+        },
+      })
+    })
+
+    expect(await screen.findByText('图书馆使用')).toBeInTheDocument()
+    expect(screen.queryByTestId('dice-3d-stage')).not.toBeInTheDocument()
+    expect(screen.getByText('十位')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '掷骰' })).toBeInTheDocument()
+  })
+
+  // 回归：3D 引擎在玩家点了「掷骰」之后才加载失败时，只翻 use3D 会让 rolling
+  // 永远不清 —— 检定卡在「骰子还在滚」，既没有结果也没有重掷入口，恰好是这套
+  // 降级本该防住的情况（PR #219 review 指出）。
+  it('completes the roll when the 3D engine fails to load after the tap', async () => {
+    dice3dSupported.value = true
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    await act(async () => {
+      emitWsMessage({
+        type: 'check.request',
+        payload: {
+          playerId: 'player-1',
+          clientActionId: 'check-3d-fail',
+          summary: '检查旧报纸',
+          difficulty: 'regular',
+          skills: [{ id: 'library', name: '图书馆使用', targetValue: 60 }],
+        },
+      })
+    })
+    expect(await screen.findByText('图书馆使用')).toBeInTheDocument()
+    expect(screen.getByTestId('dice-3d-stage')).toBeInTheDocument()
+
+    vi.useFakeTimers()
+    vi.spyOn(Math, 'random').mockReturnValueOnce(0.2).mockReturnValueOnce(0.3)
+
+    // 点击掷骰 → 假舞台立刻触发 onUnsupported，模拟 chunk 加载失败。
+    fireEvent.click(screen.getByRole('button', { name: '掷骰' }))
+    await act(async () => {
+      vi.advanceTimersByTime(800)
+    })
+    vi.useRealTimers()
+
+    // 这一次掷骰必须被补完：结果出来、能确认发送，而不是永远停在"骰子还在滚"。
+    expect(screen.getByText('23')).toBeInTheDocument()
+    expect(screen.queryByText('🎲 骰子还在滚……')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '确认并发送' })).toBeInTheDocument()
+    // 已经退回 2D 展示。
+    expect(screen.queryByTestId('dice-3d-stage')).not.toBeInTheDocument()
+  })
+
+  it('shows explicit occupation choice skills in the occupation tab', () => {
+    useCharacterStore.getState().setCharacter(
+      {
+        info: {
+          name: '杜调查员', playerName: '陈探员', age: '32', gender: '男',
+          residence: '阿卡姆', birthplace: '波士顿', occupationId: 1,
+        },
+        attr: {},
+        skillAlloc: {},
+        skillFinalValues: { accounting: 40, charm: 50, stealth: 30 },
+        occupationChoiceSkillIds: ['charm'],
+        equipment: '',
+        background: '',
+        notes: '',
+        derived: { hp: 10, san: 60, mp: 10, db: '0', build: '0', move: 8 },
+      },
+      'room-1',
+    )
+    mockListConversation.mockResolvedValue([])
+
+    renderRoomPage()
+    fireEvent.click(screen.getByRole('button', { name: '技能' }))
+    expect(screen.getByText('会计')).toBeInTheDocument()
+    expect(screen.getByText('取悦')).toBeInTheDocument()
+    expect(screen.queryByText('潜行')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '兴趣技能' }))
+    expect(screen.getByText('潜行')).toBeInTheDocument()
+    expect(screen.queryByText('取悦')).not.toBeInTheDocument()
+  })
+
   it('keeps the first check result when reopening the modal before confirming', async () => {
     renderRoomPage()
     await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
@@ -808,11 +1061,10 @@ describe('RoomPage conversation history', () => {
       .mockReturnValueOnce(0.2)
       .mockReturnValueOnce(0.3)
 
-    fireEvent.mouseDown(screen.getByTestId('dice-table'))
-    fireEvent.mouseUp(screen.getByTestId('dice-table'))
+    fireEvent.click(screen.getByRole('button', { name: '掷骰' }))
 
     await act(async () => {
-      vi.advanceTimersByTime(600)
+      vi.advanceTimersByTime(800)
     })
 
     expect(screen.getByText('23')).toBeInTheDocument()
@@ -863,11 +1115,10 @@ describe('RoomPage conversation history', () => {
       .mockReturnValueOnce(0.4)
       .mockReturnValueOnce(0.1)
 
-    fireEvent.mouseDown(screen.getByTestId('dice-table'))
-    fireEvent.mouseUp(screen.getByTestId('dice-table'))
+    fireEvent.click(screen.getByRole('button', { name: '掷骰' }))
 
     await act(async () => {
-      vi.advanceTimersByTime(600)
+      vi.advanceTimersByTime(800)
     })
 
     fireEvent.click(screen.getByRole('button', { name: '确认并发送' }))
@@ -905,11 +1156,10 @@ describe('RoomPage conversation history', () => {
     })
 
     expect(screen.getByText('侦查')).toBeInTheDocument()
-    fireEvent.mouseDown(screen.getByTestId('dice-table'))
-    fireEvent.mouseUp(screen.getByTestId('dice-table'))
+    fireEvent.click(screen.getByRole('button', { name: '掷骰' }))
 
     await act(async () => {
-      vi.advanceTimersByTime(600)
+      vi.advanceTimersByTime(800)
     })
 
     expect(screen.getByText('41')).toBeInTheDocument()
@@ -929,7 +1179,8 @@ describe('RoomPage conversation history', () => {
     const input = screen.getByPlaceholderText('输入行动…')
     fireEvent.change(input, { target: { value: '我调查书架' } })
     fireEvent.submit(input.closest('form')!)
-    await waitFor(() => expect(mockSubmitAction).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(mockSubmitPlannedAction).toHaveBeenCalledTimes(1))
+    expect(mockSubmitAction).not.toHaveBeenCalled()
 
     act(() => emitWsMessage({
       type: 'turn.failed',
@@ -967,6 +1218,191 @@ describe('RoomPage conversation history', () => {
     expect(screen.getByRole('button', { name: '复制错误详情' })).toHaveTextContent(
       'TURN_CONTRACT_INVALID',
     )
+  })
+
+  it('shows a disabled microphone with a clear message when speech input is unavailable', () => {
+    renderRoomPage()
+
+    expect(screen.getByRole('button', { name: '语音输入不可用' })).toBeDisabled()
+    expect(screen.getByText('当前浏览器不支持语音输入，请继续使用键盘输入')).toBeInTheDocument()
+  })
+
+  it('appends speech without auto-submitting and keeps it available in both channels', () => {
+    installRoomSpeechRecognition()
+    renderRoomPage()
+
+    const input = screen.getByPlaceholderText('输入行动…')
+    fireEvent.change(input, { target: { value: '我先观察' } })
+    fireEvent.click(screen.getByRole('button', { name: '开始语音输入' }))
+    const actionRecognition = RoomSpeechRecognition.instances[0]
+    act(() => actionRecognition.onstart?.())
+    expect(screen.getByRole('button', { name: '停止语音输入并采用文字' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '取消语音输入' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '发送消息' })).not.toBeInTheDocument()
+    act(() => {
+      actionRecognition.emitFinal('检查门锁')
+      actionRecognition.onend?.()
+    })
+
+    expect(input).toHaveValue('我先观察 检查门锁')
+    expect(mockSubmitAction).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: '发送消息' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '讨论区' }))
+    expect(screen.getByRole('button', { name: '开始语音输入' })).toBeEnabled()
+    fireEvent.change(input, { target: { value: '' } })
+    fireEvent.click(screen.getByRole('button', { name: '开始语音输入' }))
+    const discussionRecognition = RoomSpeechRecognition.instances[1]
+    act(() => {
+      discussionRecognition.onstart?.()
+      discussionRecognition.emitFinal('我们先商量路线')
+      discussionRecognition.onend?.()
+    })
+    expect(input).toHaveValue('我们先商量路线')
+    expect(mockSendChat).not.toHaveBeenCalled()
+    fireEvent.submit(input.closest('form')!)
+    expect(mockSendChat).toHaveBeenCalledWith('player-1', expect.objectContaining({
+      text: '我们先商量路线',
+    }))
+  })
+
+  it('cancels active speech on channel changes and ignores late browser results', () => {
+    installRoomSpeechRecognition()
+    renderRoomPage()
+
+    fireEvent.click(screen.getByRole('button', { name: '开始语音输入' }))
+    const recognition = RoomSpeechRecognition.instances[0]
+    const lateResult = recognition.onresult!
+    act(() => recognition.onstart?.())
+    fireEvent.click(screen.getByRole('button', { name: '讨论区' }))
+    expect(recognition.abort).toHaveBeenCalledOnce()
+
+    act(() => lateResult({
+      resultIndex: 0,
+      results: [Object.assign([{ transcript: '不应进入讨论区' }], { isFinal: true })],
+    }))
+    expect(screen.getByPlaceholderText('输入行动…')).toHaveValue('')
+  })
+
+  it('reports an insecure HTTP page instead of attempting recognition', () => {
+    installRoomSpeechRecognition()
+    Object.defineProperty(window, 'isSecureContext', { configurable: true, value: false })
+    renderRoomPage()
+
+    expect(screen.getByRole('button', { name: '语音输入不可用' })).toBeDisabled()
+    expect(screen.getByText('当前页面不是安全连接，请使用 HTTPS 或 localhost 访问')).toBeInTheDocument()
+    expect(RoomSpeechRecognition.instances).toHaveLength(0)
+  })
+
+  it('submits the room input through ActionPlan and clears stale decisions', async () => {
+    renderRoomPage()
+
+    const input = screen.getByPlaceholderText('输入行动…')
+    fireEvent.change(input, { target: { value: '去书房找线索' } })
+    fireEvent.submit(input.closest('form')!)
+    await waitFor(() =>
+      expect(mockSubmitPlannedAction).toHaveBeenCalledWith(
+        'player-1',
+        expect.objectContaining({ utterance: '去书房找线索' }),
+      ),
+    )
+    expect(mockSubmitAction).not.toHaveBeenCalled()
+
+    const pending: Extract<ServerToClientEvent, { type: 'adjudication.pending' }> = {
+      type: 'adjudication.pending',
+      payload: {
+        correlationId: 'plan-input-1',
+        planId: 'plan-input-1',
+        sourceRevision: 'revision-1',
+        status: 'awaiting_skill_choice',
+        pendingDecision: {
+          decision_id: 'decision-1',
+          action_request_id: 'step-request-1',
+          source_revision: 'revision-1',
+          decision_version: 1,
+          actor_id: 'actor-1',
+          summary: '调查书房',
+          options: [
+            {
+              candidate_id: 'library',
+              skill_id: 'library-use',
+              display_name: '图书馆使用',
+              target_value: 50,
+              difficulty: 'regular' as const,
+              method_summary: '检查书架上的旧书',
+              player_safe_reason: '这是当前场景中可见的调查方式',
+            },
+          ],
+          allow_cancel: true,
+        },
+      },
+    }
+    act(() => emitWsMessage(pending))
+    expect(await screen.findByRole('region', { name: '待处理检定' })).toBeInTheDocument()
+
+    act(() => emitWsMessage({
+      type: 'plan.step_changed',
+      payload: {
+        correlationId: 'plan-input-1',
+        currentStep: 2,
+        completedSteps: 1,
+        totalSteps: 2,
+        phase: 'executing',
+      },
+    }))
+    expect(screen.queryByRole('region', { name: '待处理检定' })).not.toBeInTheDocument()
+
+    act(() => emitWsMessage(pending))
+    expect(await screen.findByRole('region', { name: '待处理检定' })).toBeInTheDocument()
+    act(() => emitWsMessage({
+      type: 'plan.stopped',
+      payload: {
+        correlationId: 'plan-input-1',
+        currentStep: 2,
+        completedSteps: 1,
+        totalSteps: 2,
+        phase: 'stopped',
+      },
+    }))
+    expect(screen.queryByRole('region', { name: '待处理检定' })).not.toBeInTheDocument()
+
+    act(() => emitWsMessage(pending))
+    expect(await screen.findByRole('region', { name: '待处理检定' })).toBeInTheDocument()
+    act(() => emitWsMessage({
+      type: 'plan.completed',
+      payload: {
+        correlationId: 'plan-input-1',
+        currentStep: 2,
+        completedSteps: 2,
+        totalSteps: 2,
+        phase: 'completed',
+      },
+    }))
+    expect(screen.queryByRole('region', { name: '待处理检定' })).not.toBeInTheDocument()
+
+    act(() => emitWsMessage(pending))
+    expect(await screen.findByRole('region', { name: '待处理检定' })).toBeInTheDocument()
+    act(() => emitWsMessage({
+      type: 'error',
+      payload: {
+        code: 'ACTION_IN_PROGRESS',
+        message: '当前行动仍在处理中',
+      },
+    }))
+    expect(screen.queryByRole('region', { name: '待处理检定' })).not.toBeInTheDocument()
+
+    act(() => emitWsMessage(pending))
+    expect(await screen.findByRole('region', { name: '待处理检定' })).toBeInTheDocument()
+    act(() => emitWsMessage({
+      type: 'turn.failed',
+      payload: {
+        correlationId: 'plan-input-1',
+        code: 'HOST_AGENT_TIMEOUT',
+        publicMessage: '主持 Agent 响应超时，请重试。',
+        retryable: true,
+      },
+    }))
+    expect(screen.queryByRole('region', { name: '待处理检定' })).not.toBeInTheDocument()
   })
 
   it('renders invalid Agent output as keeper guidance', () => {

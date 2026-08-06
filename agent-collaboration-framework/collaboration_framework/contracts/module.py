@@ -12,9 +12,10 @@ from typing import Annotated, Any, Literal, TypeAlias
 
 from pydantic import Field, JsonValue, model_serializer, model_validator
 
+from .adjudication import ActionEffect
 from .common import ContractModel
 
-RuleHook: TypeAlias = Literal[
+RuleHook: TypeAlias = Literal[  # noqa: UP040 -- package still supports Python 3.11
     "on_attack_declare",
     "on_difficulty_calc",
     "on_attack_roll",
@@ -206,6 +207,26 @@ class RuleSpec(ContractModel):
             normalized["hook"] = "on_interact"
             return normalized
         return value
+
+
+class EventRuleSpec(ContractModel):
+    """v3 deterministic Rule that consumes only final committed domain Events."""
+
+    id: str = Field(min_length=1)
+    event_type: str = Field(min_length=1)
+    priority: int = 0
+    payload_matches: dict[str, JsonValue] = Field(default_factory=dict)
+    effects: tuple[ActionEffect, ...] = ()
+
+    @model_validator(mode="after")
+    def reject_provisional_check_events(self) -> EventRuleSpec:
+        if self.event_type in {
+            "check.choice_requested",
+            "check.rolled",
+            "check.post_roll_option_selected",
+        }:
+            raise ValueError("Event-driven Rule 不得匹配 provisional check Event")
+        return self
 
 
 class SceneExitSpec(ContractModel):
@@ -427,6 +448,7 @@ class ModuleContent(ContractModel):
     checkpoints: tuple[CheckpointSpec, ...]
     win_conditions: tuple[WinConditionSpec, ...]
     module_rules: tuple[RuleSpec, ...] = ()
+    event_rules: tuple[EventRuleSpec, ...] = ()
     information_items: tuple[InformationItem, ...] = ()
 
     @model_validator(mode="before")
@@ -469,7 +491,8 @@ class ModuleContent(ContractModel):
             *(rule for entity in self.entities for rule in entity.rules),
         ]
         rule_ids = [rule.id for rule in rules]
-        if len(rule_ids) != len(set(rule_ids)):
+        all_rule_ids = [*rule_ids, *(rule.id for rule in self.event_rules)]
+        if len(all_rule_ids) != len(set(all_rule_ids)):
             raise ValueError("Rule id 必须在 ModuleContent 内唯一")
 
         scene_ids = set(collections["Scene"])

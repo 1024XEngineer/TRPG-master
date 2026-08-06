@@ -10,6 +10,18 @@ import { previewCharacter, translateCharacterValidationError } from '@/services/
 import { friendlyErrorMessage } from '@/services/api-client'
 import { useRuleset } from '@/hooks/useRuleset'
 import type { OccupationSpec, SkillSpec } from '@/data/types'
+import {
+  BACKGROUND_SECTION_DEFINITIONS,
+  CHARACTER_BACKGROUND_MAX_LENGTH,
+  parseCharacterBackground,
+  serializeCharacterBackground,
+} from '@/data/character-background'
+import type { BackgroundSectionKey } from '@/data/character-background'
+import {
+  DERIVED_STAT_DEFINITIONS,
+  normalizeDerivedStats,
+} from '@/data/derived-stats'
+import { OnboardingTrigger } from '@/features/onboarding'
 
 // 图标和配色是纯 UI 装饰，不是规则数据，留在前端；键用后端 ruleset 的属性键。
 // 「有哪些属性、哪些能加点、默认值多少、预算和上下限是什么」全部来自
@@ -24,20 +36,32 @@ const ATTR_COLORS: Record<string, string> = {
   APP: '#8a4070', SIZ: '#b8976a', INT: '#4a7098', EDU: '#6a6050',
 }
 
-// 建卡阶段的衍生值面板用小写 key，后端 derivedStats 是 { HP, MP, SAN, DB,
-// Build, MOV } 这种大写 key 的松散字典（不是固定字段的 DTO），这里做一次
-// 归一化，纯粹是取值/改大小写，不是规则计算。
-function normalizeDerivedStats(d: CharacterComputeResult['derivedStats'] | undefined) {
-  const num = (v: unknown) => (typeof v === 'number' ? v : 0)
-  const str = (v: unknown) => (v == null ? '0' : String(v))
-  return {
-    hp: num(d?.HP),
-    san: num(d?.SAN),
-    mp: num(d?.MP),
-    db: str(d?.DB),
-    move: num(d?.MOV),
-  }
+// 这些是 COC 新手教学文案，不参与规则计算；属性集合、点数限制和生成公式
+// 仍然以后端 ruleset 为准。
+const ATTRIBUTE_HELP: Record<string, string> = {
+  STR: '衡量肌肉力量与爆发力。常用于推、拉、举起、攀住目标和近战力量对抗，也参与伤害加值与体格计算。',
+  CON: '衡量健康程度与持久力。它会影响生命值，也常用于抵抗疾病、毒素、疲劳和昏迷。',
+  POW: '衡量意志与精神力量。它决定初始理智和魔法值，也常用于抵抗精神影响或进行意志对抗。',
+  DEX: '衡量反应速度与身体协调。它常影响行动顺序，并用于闪避、敏捷动作和精细操作。',
+  APP: '衡量外貌、气质与第一印象。它会影响陌生人的初始态度，但不能代替取悦、说服等社交技能。',
+  SIZ: '综合表示调查员的身高与体重。它参与生命值、伤害加值和体格计算；体型大不等于力量高。',
+  INT: '衡量理解、推理与临场判断。它决定兴趣技能点，也常用于灵感和线索联想相关的判断。',
+  EDU: '衡量正式教育与知识积累。它常参与职业技能点计算，也反映调查员可以调用的常识与专业知识。',
+  LUCK: '表示不由个人能力决定的偶然运气，用于幸运检定。它不占属性点，按 COC 规则独立生成。',
 }
+
+const BACKGROUND_PLACEHOLDERS: Record<BackgroundSectionKey, string> = {
+  personalDescription: '外貌、衣着、举止或给人的第一印象……',
+  ideologyBeliefs: '角色坚持的原则、信仰或世界观……',
+  significantPeople: '对角色影响深远的人，以及彼此的关系……',
+  meaningfulLocations: '承载重要回忆或意义的地点……',
+  treasuredPossessions: '角色珍视的物品及其来历……',
+  traits: '性格特点、习惯或待人处事方式……',
+  injuriesScars: '身体或心理上留下的伤痕……',
+  phobiasManias: '角色恐惧、执着或难以控制的倾向……',
+}
+
+const EMPTY_CHOICE_SELECTIONS: string[][] = []
 
 function occupationIcon(occupation: Pick<OccupationSpec, 'icon'>): string {
   return occupation.icon ?? '·'
@@ -51,8 +75,14 @@ async function previewWithAllocations(
   attributes: Attributes,
   occupationId: number | null,
   allocations: Record<string, number>,
+  occupationChoiceSkillIds: string[],
 ) {
-  const basePreview = await previewCharacter({ attributes, occupationId, skills: {} })
+  const basePreview = await previewCharacter({
+    attributes,
+    occupationId,
+    skills: {},
+    occupationChoiceSkillIds,
+  })
   const allocatedSkills = Object.entries(allocations).filter(([, points]) => points > 0)
   if (allocatedSkills.length === 0) {
     return { preview: basePreview, skillValues: {} }
@@ -62,8 +92,27 @@ async function previewWithAllocations(
   const skillValues = Object.fromEntries(
     allocatedSkills.map(([id, points]) => [id, (baseBySkill.get(id) ?? 0) + points])
   )
-  const preview = await previewCharacter({ attributes, occupationId, skills: skillValues })
+  const preview = await previewCharacter({
+    attributes,
+    occupationId,
+    skills: skillValues,
+    occupationChoiceSkillIds,
+  })
   return { preview, skillValues }
+}
+
+type OccupationChoiceSlot = NonNullable<OccupationSpec['choiceSlots']>[number]
+
+function splitChoiceSkillIds(
+  slots: OccupationChoiceSlot[],
+  skillIds: string[],
+): string[][] {
+  let offset = 0
+  return slots.map(slot => {
+    const selected = skillIds.slice(offset, offset + slot.count)
+    offset += slot.count
+    return selected
+  })
 }
 
 // ─── SkillRow Component ──────────────────────────────
@@ -169,6 +218,15 @@ export default function CharacterPage() {
 
   // Attributes
   const [attr, setAttr] = useState<Attributes>(() => ({ ...existingCharacter?.attr }))
+  const [attributeHelpKey, setAttributeHelpKey] = useState<string | null>(null)
+
+  // 职业自选技能按槽位分组保存在表单中；提交时再按槽位顺序压平成 API 的
+  // occupationChoiceSkillIds。occupationId 跟选择放在同一份状态里，避免异步
+  // 水合或切换职业时把上一职业的槽位误套到新职业。
+  const [occupationChoiceState, setOccupationChoiceState] = useState<{
+    occupationId: number | null
+    selections: string[][]
+  }>({ occupationId: null, selections: [] })
 
   // 可用点数购买的属性键（幸运不在其中——COC7 里它只能掷）。这份名单来自
   // 后端 ruleset 的 pointBuy 标志，前端不再自己维护（issue #96）。
@@ -218,15 +276,23 @@ export default function CharacterPage() {
           attributes: savedAttrs,
           occupationId: matched?.id ?? null,
           skills: saved.skills ?? {},
+          occupationChoiceSkillIds: saved.occupationChoiceSkillIds ?? null,
         })
         if (cancelled) return
+
+        const hydratedChoiceSkillIds = saved.occupationChoiceSkillIds
+          ?? view.resolvedOccupationChoiceSkillIds
+          ?? []
 
         // skillAlloc 和 interestAlloc 两份状态都要重建（PR #97 review [4]）：
         // 兴趣技能的行和计数器读的是 interestAlloc，只重建 skillAlloc 的话，
         // 清掉本地缓存后兴趣技能显示成 0 点、兴趣预算 bar 也是空的。
         // 拆分口径跟后端记账保持一致（coc7_rules：职业技能上的点数全算职业点、
         // 其余全算兴趣点），所以从最终值可以无歧义地还原出这两份状态。
-        const occIds = new Set(matched?.skillIds ?? [])
+        const occIds = new Set([
+          ...(matched?.skillIds ?? []),
+          ...hydratedChoiceSkillIds,
+        ])
         const alloc: Record<string, number> = {}
         const interest: Record<string, number> = {}
         for (const v of view.skillView) {
@@ -266,11 +332,15 @@ export default function CharacterPage() {
           // 别把已选职业清成 null——那会连带清掉技能预算。
           ...(matched ? { occupationId: matched.id } : {}),
         }))
-        setBackground(saved.background ?? '')
+        setBackgroundForm(parseCharacterBackground(saved.background ?? ''))
         setNotes(saved.notes ?? '')
         setEquipment((saved.equipment ?? []).join('、'))
         setSkillAlloc(alloc)
         setInterestAlloc(interest)
+        setOccupationChoiceState({
+          occupationId: matched?.id ?? null,
+          selections: splitChoiceSkillIds(matched?.choiceSlots ?? [], hydratedChoiceSkillIds),
+        })
         // 后端那份已经是权威，别再让 localStorage 那条重建逻辑覆盖回去。
         interestAllocInitialized.current = true
       })
@@ -310,8 +380,21 @@ export default function CharacterPage() {
 
   // Equipment & background
   const [equipment, setEquipment] = useState(existingCharacter?.equipment ?? '')
-  const [background, setBackground] = useState(existingCharacter?.background ?? '')
+  const [backgroundForm, setBackgroundForm] = useState(() =>
+    parseCharacterBackground(existingCharacter?.background ?? '')
+  )
   const [notes, setNotes] = useState(existingCharacter?.notes ?? '')
+  const serializedBackground = useMemo(
+    () => serializeCharacterBackground(backgroundForm),
+    [backgroundForm]
+  )
+
+  const updateBackgroundSection = (key: BackgroundSectionKey, value: string) => {
+    setBackgroundForm(previous => ({
+      ...previous,
+      sections: { ...previous.sections, [key]: value },
+    }))
+  }
 
   // UI state
   const [search, setSearch] = useState('')
@@ -319,11 +402,70 @@ export default function CharacterPage() {
   const [skillTab, setSkillTab] = useState<'occupation' | 'interest'>('occupation')
   const [showGroupPicker, setShowGroupPicker] = useState(false)
   const [detailOcc, setDetailOcc] = useState<OccupationSpec | null>(null)
+  const [choicePickerSlotIndex, setChoicePickerSlotIndex] = useState<number | null>(null)
+  const [choiceSkillSearch, setChoiceSkillSearch] = useState('')
+  const [choiceActionError, setChoiceActionError] = useState('')
 
   const selectedOcc = useMemo(() => {
     if (!ruleset || info.occupationId == null) return null
     return ruleset.occupations.find(o => o.id === info.occupationId) ?? null
   }, [ruleset, info.occupationId])
+
+  useEffect(() => {
+    if (!selectedOcc) {
+      if (occupationChoiceState.occupationId !== null) {
+        setOccupationChoiceState({ occupationId: null, selections: [] })
+      }
+      return
+    }
+    if (occupationChoiceState.occupationId === selectedOcc.id) return
+    const cachedSkillIds = existingCharacter?.info.occupationId === selectedOcc.id
+      ? (existingCharacter.occupationChoiceSkillIds ?? [])
+      : []
+    setOccupationChoiceState({
+      occupationId: selectedOcc.id,
+      selections: splitChoiceSkillIds(selectedOcc.choiceSlots ?? [], cachedSkillIds),
+    })
+  }, [existingCharacter, occupationChoiceState.occupationId, selectedOcc])
+
+  const occupationChoiceSelections = selectedOcc
+    && occupationChoiceState.occupationId === selectedOcc.id
+    ? occupationChoiceState.selections
+    : EMPTY_CHOICE_SELECTIONS
+  const occupationChoiceSkillIds = useMemo(
+    () => occupationChoiceSelections.flat(),
+    [occupationChoiceSelections]
+  )
+  const selectedChoiceSkillIdSet = useMemo(
+    () => new Set(occupationChoiceSkillIds),
+    [occupationChoiceSkillIds]
+  )
+  const occupationChoicesComplete = (selectedOcc?.choiceSlots ?? []).every(
+    (slot, index) => (occupationChoiceSelections[index]?.length ?? 0) === slot.count
+  )
+
+  const selectOccupation = (occupationId: number | null) => {
+    if (occupationId === info.occupationId) return
+    const occupation = ruleset?.occupations.find(item => item.id === occupationId) ?? null
+    const fixedIds = new Set(occupation?.skillIds ?? [])
+    const nextInterest: Record<string, number> = {}
+    for (const [skillId, points] of Object.entries(skillAlloc)) {
+      if (skillId !== 'credit-rating' && !fixedIds.has(skillId) && points > 0) {
+        nextInterest[skillId] = points
+      }
+    }
+    setInfo(previous => ({ ...previous, occupationId }))
+    setOccupationChoiceState({
+      occupationId,
+      selections: (occupation?.choiceSlots ?? []).map(() => []),
+    })
+    setInterestAlloc(nextInterest)
+    setPendingOccupationDelta(0)
+    setPendingInterestDelta(0)
+    setChoicePickerSlotIndex(null)
+    setChoiceSkillSearch('')
+    setChoiceActionError('')
+  }
 
   const selectedOccupationSkillPreview = useMemo(() => {
     if (!ruleset || !selectedOcc) return []
@@ -379,8 +521,9 @@ export default function CharacterPage() {
   // Occupation skill IDs（保留职业技能清单里定义的顺序，不是技能表里的顺序）
   const occSkillIds = useMemo(() => {
     if (!ruleset || info.occupationId == null) return []
-    return ruleset.occupations.find(o => o.id === info.occupationId)?.skillIds ?? []
-  }, [ruleset, info.occupationId])
+    const fixed = ruleset.occupations.find(o => o.id === info.occupationId)?.skillIds ?? []
+    return [...fixed, ...occupationChoiceSkillIds]
+  }, [ruleset, info.occupationId, occupationChoiceSkillIds])
 
   const occSkills = useMemo(() => {
     if (!ruleset) return []
@@ -403,7 +546,7 @@ export default function CharacterPage() {
   // issue #114 之前这里刻意只在属性/职业变化时请求、不带 skills：那时"已花"是
   // 「occSkillIds 里的算职业点、其余算兴趣点」这种平凡算术，前端本地算即可。但
   // 职业技能 = 固定 + 自选槽后，某个技能的点数算职业还是兴趣，取决于后端的全局
-  // 最优占槽（_assign_choice_slots，尤其开放槽任何技能都可能占），前端无法在不
+  // 最优占槽（后端匹配器会处理开放槽与限定槽重叠），前端无法在不
   // 复刻规则的前提下算对。所以现在**把当前 skillAlloc 一起发过去、并在它变化时
   // （防抖）重新预演**，"已花"直接读后端返回的 occupationSkillPoints.spent /
   // interestSkillPoints.spent。代价是加点后数字有 ~400ms 防抖延迟。
@@ -430,7 +573,12 @@ export default function CharacterPage() {
     setPreviewStatus('pending')
     const timer = setTimeout(() => {
       const gen = ++previewGenRef.current
-      previewWithAllocations(attr, info.occupationId, skillAlloc)
+      previewWithAllocations(
+        attr,
+        info.occupationId,
+        skillAlloc,
+        occupationChoiceSkillIds,
+      )
         .then(({ preview: result }) => {
           if (gen !== previewGenRef.current) return
           setPreview(result)
@@ -446,7 +594,7 @@ export default function CharacterPage() {
         })
     }, 400)
     return () => clearTimeout(timer)
-  }, [ruleset, attr, info.occupationId, skillAlloc])
+  }, [ruleset, attr, info.occupationId, skillAlloc, occupationChoiceSkillIds])
 
   const skillComputeMap = useMemo(() => {
     const map = new Map<string, SkillComputeView>()
@@ -459,7 +607,8 @@ export default function CharacterPage() {
 
   const previewValidationIssues = preview?.validation ?? []
 
-  // 本期建卡页按分类独立记账：职业技能只吃职业池，兴趣技能只吃兴趣池。
+  // 兴趣技能的局部分配量需要单独保存；职业技能可以先吃职业池，再按 COC7
+  // 规则使用剩余兴趣点，因此它们只保存在总分配 skillAlloc 中。
   const [interestAlloc, setInterestAlloc] = useState<Record<string, number>>({})
   const interestAllocInitialized = useRef(false)
 
@@ -470,7 +619,10 @@ export default function CharacterPage() {
     if (!ruleset || !existingCharacter || interestAllocInitialized.current) return
     interestAllocInitialized.current = true
     const occIds = new Set(
-      ruleset.occupations.find(o => o.id === existingCharacter.info.occupationId)?.skillIds ?? []
+      [
+        ...(ruleset.occupations.find(o => o.id === existingCharacter.info.occupationId)?.skillIds ?? []),
+        ...(existingCharacter.occupationChoiceSkillIds ?? []),
+      ]
     )
     const out: Record<string, number> = {}
     for (const [id, pts] of Object.entries(existingCharacter.skillAlloc)) {
@@ -482,16 +634,26 @@ export default function CharacterPage() {
     setInterestAlloc(out)
   }, [ruleset, existingCharacter])
 
-  // 两条预算 bar 的"已花"直接取后端 preview 的权威记账，**不在前端本地重算**。
-  //
-  // 后端 compute_preview 返回的 spent 已经把固定技能、信用分账全算进去了（见
-  // coc7_rules._compute），前端只渲染，不叠加。预算闸门仍然走 preview 的总
-  // 结果，但每个技能的编辑只会作用于自己所在的那个池。
-  const occPointsSpent = preview?.occupationSkillPoints.spent ?? 0
-  const interestPointsSpent = preview?.interestSkillPoints.spent ?? 0
+  // 后端把所有职业技能投入都记在 occupation.spent 中，即使它已经超过职业预算；
+  // 超出的部分在 COC7 中实际由兴趣点承担。显示和前端闸门在这里做同一份转换，
+  // 让两条进度条展示玩家真正还剩下的两份预算。
+  const rawOccupationPointsSpent = preview?.occupationSkillPoints.spent ?? 0
+  const rawInterestPointsSpent = preview?.interestSkillPoints.spent ?? 0
+  const confirmedOccupationOverflow = Math.max(0, rawOccupationPointsSpent - occPointsTotal)
+  const occPointsSpent = Math.min(rawOccupationPointsSpent, occPointsTotal)
+  const interestPointsSpent = rawInterestPointsSpent + confirmedOccupationOverflow
 
-  const occupationPointsRemaining = Math.max(0, occPointsTotal - occPointsSpent - pendingOccupationDelta)
-  const interestPointsRemaining = Math.max(0, interestPointsTotal - interestPointsSpent - pendingInterestDelta)
+  const projectedOccupationSpent = rawOccupationPointsSpent + pendingOccupationDelta
+  const projectedInterestSpent = rawInterestPointsSpent + pendingInterestDelta
+  const projectedOccupationOverflow = Math.max(0, projectedOccupationSpent - occPointsTotal)
+  const combinedPointsRemaining = Math.max(
+    0,
+    occPointsTotal + interestPointsTotal - projectedOccupationSpent - projectedInterestSpent,
+  )
+  const interestPointsRemaining = Math.max(
+    0,
+    interestPointsTotal - projectedInterestSpent - projectedOccupationOverflow,
+  )
 
   const derived = useMemo(() => normalizeDerivedStats(preview?.derivedStats), [preview])
 
@@ -526,10 +688,12 @@ export default function CharacterPage() {
     if (appliedDelta !== 0) setPendingInterestDelta(d => Math.max(0, d + appliedDelta))
   }
 
-  // 职业技能页签：只动职业点数池，不再让职业技能自动借兴趣池。
+  // 职业技能先使用职业预算，超过职业预算的部分按 COC7 规则由兴趣预算承担。
+  // 因此这里用总剩余点数做闸门；非职业技能仍由上面的 interestPointsRemaining
+  // 单独限制，不能反过来借职业点。
   const handleOccSkillChange = (skillId: string, delta: number) => {
     if (delta > 0) {
-      if (occupationPointsRemaining <= 0) return
+      if (combinedPointsRemaining <= 0) return
       setSkillAlloc(prev => ({ ...prev, [skillId]: (prev[skillId] || 0) + 1 }))
       setPendingOccupationDelta(d => Math.max(0, d + 1))
     } else if (delta < 0) {
@@ -541,11 +705,76 @@ export default function CharacterPage() {
   const handleOccSkillSet = (skillId: string, newTotalAllocation: number) => {
     const prevOcc = skillAlloc[skillId] || 0
     let clamped = Math.max(0, newTotalAllocation)
-    if (clamped > prevOcc) clamped = Math.min(clamped, prevOcc + occupationPointsRemaining)
+    if (clamped > prevOcc) clamped = Math.min(clamped, prevOcc + combinedPointsRemaining)
     setSkillAlloc(prev => ({ ...prev, [skillId]: clamped }))
     const appliedDelta = clamped - prevOcc
     if (appliedDelta !== 0) setPendingOccupationDelta(d => Math.max(0, d + appliedDelta))
   }
+
+  const addOccupationChoice = (slotIndex: number, skillId: string) => {
+    if (!selectedOcc || selectedChoiceSkillIdSet.has(skillId)) return
+    const slot = selectedOcc.choiceSlots?.[slotIndex]
+    if (!slot || (occupationChoiceSelections[slotIndex]?.length ?? 0) >= slot.count) return
+    setOccupationChoiceState(previous => {
+      if (previous.occupationId !== selectedOcc.id) return previous
+      const selections = (selectedOcc.choiceSlots ?? []).map((_, index) => [
+        ...(previous.selections[index] ?? []),
+      ])
+      selections[slotIndex].push(skillId)
+      return { occupationId: previous.occupationId, selections }
+    })
+    // 原本作为兴趣技能加过点时保留总分配量，但移出兴趣池的本地镜像；后端
+    // preview 会按新的显式职业选择重新给两条预算记账。
+    setInterestAlloc(previous => {
+      const next = { ...previous }
+      delete next[skillId]
+      return next
+    })
+    setPendingOccupationDelta(0)
+    setPendingInterestDelta(0)
+    setChoiceActionError('')
+    if ((occupationChoiceSelections[slotIndex]?.length ?? 0) + 1 >= slot.count) {
+      setChoicePickerSlotIndex(null)
+      setChoiceSkillSearch('')
+    }
+  }
+
+  const removeOccupationChoice = (slotIndex: number, skillId: string) => {
+    if ((skillAlloc[skillId] ?? 0) > 0) {
+      setChoiceActionError(`请先将「${occupationSkillLabel(skillId, ruleset?.skills ?? [])}」的加点清零`)
+      return
+    }
+    setOccupationChoiceState(previous => {
+      if (!selectedOcc || previous.occupationId !== selectedOcc.id) return previous
+      const selections = previous.selections.map((selection, index) => (
+        index === slotIndex ? selection.filter(id => id !== skillId) : [...selection]
+      ))
+      return { occupationId: previous.occupationId, selections }
+    })
+    setPendingOccupationDelta(0)
+    setPendingInterestDelta(0)
+    setChoiceActionError('')
+  }
+
+  const activeChoiceSlot = choicePickerSlotIndex == null
+    ? null
+    : selectedOcc?.choiceSlots?.[choicePickerSlotIndex] ?? null
+  const choiceCandidateSkills = useMemo(() => {
+    if (!ruleset || !selectedOcc || !activeChoiceSlot) return []
+    const fixedIds = new Set(selectedOcc.skillIds)
+    const allowedIds = activeChoiceSlot.candidateSkillIds
+      ? new Set(activeChoiceSlot.candidateSkillIds)
+      : null
+    const query = choiceSkillSearch.trim().toLowerCase()
+    return ruleset.skills.filter(skill => {
+      if (skill.id === 'credit-rating' || skill.id === 'cthulhu-mythos') return false
+      if (fixedIds.has(skill.id) || selectedChoiceSkillIdSet.has(skill.id)) return false
+      if (allowedIds && !allowedIds.has(skill.id)) return false
+      if (!query) return true
+      return skill.name.toLowerCase().includes(query)
+        || (skill.nameEn ?? '').toLowerCase().includes(query)
+    })
+  }, [activeChoiceSlot, choiceSkillSearch, ruleset, selectedChoiceSkillIdSet, selectedOcc])
 
   // 信用评级 +/- ：直接夹在所选职业的 [creditMin, creditMax] 内。信用的
   // base 固定是 0（见后端 SkillSpec），所以 skillAlloc['credit-rating']
@@ -642,6 +871,15 @@ export default function CharacterPage() {
     const issues: string[] = []
     if (!info.name.trim()) issues.push('角色姓名不能为空')
     if (info.occupationId == null) issues.push('请选择职业')
+    if (targetStep >= 3 && selectedOcc && !occupationChoicesComplete) {
+      const missingSlot = (selectedOcc.choiceSlots ?? []).find(
+        (slot, index) => (occupationChoiceSelections[index]?.length ?? 0) < slot.count
+      )
+      issues.push(missingSlot ? `请完成职业自选技能：${missingSlot.label}` : '请完成职业自选技能')
+    }
+    if (targetStep >= 4 && serializedBackground.length > CHARACTER_BACKGROUND_MAX_LENGTH) {
+      issues.push(`背景故事不能超过 ${CHARACTER_BACKGROUND_MAX_LENGTH} 个字符`)
+    }
     const needsReadyPreview = targetStep >= 1 && info.name.trim() && info.occupationId != null
     if (needsReadyPreview) {
       if (previewStatus === 'pending') {
@@ -651,7 +889,9 @@ export default function CharacterPage() {
       } else if (previewStatus !== 'ready') {
         issues.push('规则预览尚未准备好，请稍后')
       } else {
-        issues.push(...previewValidationIssues.map(issue => issue.message))
+        issues.push(...previewValidationIssues
+          .filter(issue => issue.code !== 'OCCUPATION_CHOICES_INCOMPLETE')
+          .map(issue => issue.message))
       }
     }
     return issues
@@ -692,7 +932,12 @@ export default function CharacterPage() {
       // 已分配点数换算成"最终值"，连同属性/职业一起发给后端拿回完整的
       // skillView（79 项技能的最终值）和衍生值，两边都以这次结果为准落库。
       const { preview: finalPreview, skillValues: skillsPayload } =
-        await previewWithAllocations(attr, info.occupationId, skillAlloc)
+        await previewWithAllocations(
+          attr,
+          info.occupationId,
+          skillAlloc,
+          occupationChoiceSkillIds,
+        )
       const finalDerived = normalizeDerivedStats(finalPreview.derivedStats)
       const skillFinalValues = Object.fromEntries(
         finalPreview.skillView.map(v => [v.id, v.current])
@@ -717,9 +962,10 @@ export default function CharacterPage() {
         attr,
         derived: { hp: finalDerived.hp, san: finalDerived.san, mp: finalDerived.mp },
         skillValues: skillsPayload,
+        occupationChoiceSkillIds,
         equipment,
         occupationName: selectedOcc?.name ?? null,
-        background,
+        background: serializedBackground,
         notes,
       })
       await completeCharacter(roomId, characterId)
@@ -729,7 +975,8 @@ export default function CharacterPage() {
           attr: { ...attr },
           skillAlloc: { ...skillAlloc },
           skillFinalValues,
-          equipment, background, notes,
+          occupationChoiceSkillIds: [...occupationChoiceSkillIds],
+          equipment, background: serializedBackground, notes,
           derived: finalDerived,
         },
         roomId
@@ -743,11 +990,14 @@ export default function CharacterPage() {
   }
 
   const currentNavigationIssues = validationAttempted ? getBlockingIssues(step < 3 ? step + 1 : 4) : []
-  const previewIssuesBanner = previewStatus === 'ready' && previewValidationIssues.length > 0 ? (
+  const visiblePreviewIssues = previewValidationIssues.filter(
+    issue => issue.code !== 'OCCUPATION_CHOICES_INCOMPLETE'
+  )
+  const previewIssuesBanner = previewStatus === 'ready' && visiblePreviewIssues.length > 0 ? (
     <div className="mt-3 rounded-[6px] border border-[#e0a0a0] bg-[#fff5f5] px-3 py-2 text-[11px] text-[#c04040]">
       <div className="font-semibold mb-1">当前人物卡有校验问题</div>
       <div className="space-y-0.5">
-        {previewValidationIssues.map((issue) => (
+        {visiblePreviewIssues.map((issue) => (
           <div key={`${issue.field}-${issue.code}`}>{issue.message}</div>
         ))}
       </div>
@@ -779,9 +1029,10 @@ export default function CharacterPage() {
                 <ArrowLeft className="w-[18px] h-[18px] text-text-muted" strokeWidth={2.5} />
               </button>
               <h2 className="text-lg font-bold text-text-primary">创建角色</h2>
+              <OnboardingTrigger className="ml-auto" />
             </div>
             {/* Progress */}
-            <div className="flex gap-1.5 px-5 py-3">
+            <div data-onboarding-target="character-progress" className="flex gap-1.5 px-5 py-3">
               {steps.map((s, i) => (
                 <div key={i} className={`flex-1 h-[3px] rounded-[99px] transition-all duration-300 ${
                   s.done ? 'bg-brass-dark' : i === step ? 'bg-brass' : 'bg-border-light'
@@ -802,7 +1053,7 @@ export default function CharacterPage() {
           {step === 0 && (
             <div className="px-5 pb-20 animate-screen-in">
               {/* Basic Info */}
-              <div className="bg-card border border-border-light rounded-md p-[18px] mb-3">
+              <div data-onboarding-target="character-info" className="bg-card border border-border-light rounded-md p-[18px] mb-3">
                 <h4 className="text-[12px] font-semibold text-brass-dark uppercase tracking-[0.08em] mb-3.5">调查员信息</h4>
                 <div className="space-y-3">
                   <input value={info.name} onChange={e => setInfo(i => ({ ...i, name: e.target.value }))}
@@ -857,7 +1108,7 @@ export default function CharacterPage() {
               </div>
 
               {/* Occupation */}
-              <div className="bg-card border border-border-light rounded-md p-[18px]">
+              <div data-onboarding-target="occupation-picker" className="bg-card border border-border-light rounded-md p-[18px]">
                 <h4 className="text-[12px] font-semibold text-brass-dark uppercase tracking-[0.08em] mb-3.5">选择职业</h4>
 
                 {/* Search + Group filter */}
@@ -904,7 +1155,7 @@ export default function CharacterPage() {
                               className="text-[11px] text-brass-dark underline">
                               详情
                             </button>
-                            <button onClick={() => setInfo(i => ({ ...i, occupationId: null }))}
+                            <button onClick={() => selectOccupation(null)}
                               className="text-[11px] text-text-dim underline">
                               取消选择
                             </button>
@@ -946,7 +1197,7 @@ export default function CharacterPage() {
                         >
                           <Info className="w-3 h-3" />
                         </button>
-                        <div onClick={() => setInfo(i => ({ ...i, occupationId: occ.id }))} className="h-full flex flex-col items-center justify-center">
+                        <div onClick={() => selectOccupation(occ.id)} className="h-full flex flex-col items-center justify-center">
                           <div className="text-[20px] mb-1">{occupationIcon(occ)}</div>
                           <div className="text-[12px] font-semibold text-text-primary leading-[1.3]">{occ.name}</div>
                           {selected && (
@@ -990,40 +1241,66 @@ export default function CharacterPage() {
                     const Icon = ATTR_ICONS[key] || Shield
                     const color = ATTR_COLORS[key] || '#b8976a'
                     const val = attr[key] ?? 0
+                    const helpOpen = attributeHelpKey === key
                     return (
-                      <div key={key} className="flex items-center gap-3 px-3 py-2.5 bg-input border border-border-light rounded-[6px]">
-                        <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: color + '18' }}>
-                          <Icon className="w-4 h-4" style={{ color }} />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="text-[13px] font-semibold text-text-primary flex items-center gap-1.5">
-                            {attribute.label}
-                            <span className="text-[10px] font-mono text-text-dim font-normal">{key}</span>
+                      <div
+                        key={key}
+                        data-onboarding-target={key === pointBuyAttributes[0]?.key ? 'attribute-example-row' : undefined}
+                        className="px-3 py-2.5 bg-input border border-border-light rounded-[6px]"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: color + '18' }}>
+                            <Icon className="w-4 h-4" style={{ color }} />
                           </div>
-                          <div className="w-full h-1.5 rounded-full bg-border-light mt-1 overflow-hidden">
-                            <div className="h-full rounded-full transition-all" style={{ width: `${Math.min(100, val)}%`, backgroundColor: color }} />
+                          <div className="flex-1 min-w-0">
+                            <div className="text-[13px] font-semibold text-text-primary flex items-center gap-1.5">
+                              {attribute.label}
+                              <span className="text-[10px] font-mono text-text-dim font-normal">{key}</span>
+                              <button
+                                type="button"
+                                onClick={() => setAttributeHelpKey(helpOpen ? null : key)}
+                                aria-label={`了解${attribute.label}`}
+                                aria-expanded={helpOpen}
+                                aria-controls={`attribute-help-${key}`}
+                                title={`了解${attribute.label}`}
+                                className="w-4.5 h-4.5 rounded-full border border-border-mid text-text-muted flex items-center justify-center active:bg-panel transition-colors"
+                              >
+                                <Info className="w-2.5 h-2.5" strokeWidth={2.5} />
+                              </button>
+                            </div>
+                            <div className="w-full h-1.5 rounded-full bg-border-light mt-1 overflow-hidden">
+                              <div className="h-full rounded-full transition-all" style={{ width: `${Math.min(100, val)}%`, backgroundColor: color }} />
+                            </div>
                           </div>
+                          <button onClick={() => handleAttrChange(key, -5)}
+                            aria-label={`减少${attribute.label}`}
+                            className="w-7 h-7 rounded-full bg-card border border-border-light text-text-muted flex items-center justify-center active:bg-panel active:scale-90 transition-all"
+                          >
+                            <Minus className="w-3.5 h-3.5" />
+                          </button>
+                          <input
+                            type="number"
+                            inputMode="numeric"
+                            aria-label={`${attribute.label}数值`}
+                            min={pointBuyRules?.minValue}
+                            max={pointBuyRules?.maxValue}
+                            value={attrInputs[key]}
+                            onChange={e => setAttrInputs(inputs => ({ ...inputs, [key]: e.target.value }))}
+                            onBlur={() => commitAttrInput(key)}
+                            className="text-[17px] font-bold font-mono text-text-primary min-w-[36px] w-[36px] text-center bg-transparent outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                          />
+                          <button onClick={() => handleAttrChange(key, 5)}
+                            aria-label={`增加${attribute.label}`}
+                            className="w-7 h-7 rounded-full bg-card border border-border-light text-text-muted flex items-center justify-center active:bg-panel active:scale-90 transition-all"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                          </button>
                         </div>
-                        <button onClick={() => handleAttrChange(key, -5)}
-                          className="w-7 h-7 rounded-full bg-card border border-border-light text-text-muted flex items-center justify-center active:bg-panel active:scale-90 transition-all"
-                        >
-                          <Minus className="w-3.5 h-3.5" />
-                        </button>
-                        <input
-                          type="number"
-                          inputMode="numeric"
-                          min={pointBuyRules?.minValue}
-                          max={pointBuyRules?.maxValue}
-                          value={attrInputs[key]}
-                          onChange={e => setAttrInputs(inputs => ({ ...inputs, [key]: e.target.value }))}
-                          onBlur={() => commitAttrInput(key)}
-                          className="text-[17px] font-bold font-mono text-text-primary min-w-[36px] w-[36px] text-center bg-transparent outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                        />
-                        <button onClick={() => handleAttrChange(key, 5)}
-                          className="w-7 h-7 rounded-full bg-card border border-border-light text-text-muted flex items-center justify-center active:bg-panel active:scale-90 transition-all"
-                        >
-                          <Plus className="w-3.5 h-3.5" />
-                        </button>
+                        {helpOpen && (
+                          <p id={`attribute-help-${key}`} className="mt-2 border-t border-border-light pt-2 text-[11px] leading-relaxed text-text-muted">
+                            {ATTRIBUTE_HELP[key] ?? `${attribute.label}是当前规则系统定义的基础属性。`}
+                          </p>
+                        )}
                       </div>
                     )
                   })}
@@ -1031,38 +1308,57 @@ export default function CharacterPage() {
 
                 {/* 不参与点数购买的属性（COC7 里就是幸运：只能掷、不能用属性点买）。
                     同样由 ruleset 驱动，不写死是哪一项——换个规则系统这里自然跟着变。 */}
-                {(ruleset?.attributes ?? []).filter(a => !a.pointBuy).map(attribute => (
-                  <div key={attribute.key} className="flex items-center gap-3 px-3 py-2.5 mt-2 bg-panel border border-border-light rounded-[6px]">
-                    <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: '#4a8a4a18' }}>
-                      <Clover className="w-4 h-4" style={{ color: '#4a8a4a' }} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-[13px] font-semibold text-text-primary flex items-center gap-1.5">
-                        {attribute.label}
-                        <span className="text-[10px] font-mono text-text-dim font-normal">{attribute.key}</span>
+                {(ruleset?.attributes ?? []).filter(a => !a.pointBuy).map(attribute => {
+                  const helpOpen = attributeHelpKey === attribute.key
+                  return (
+                    <div key={attribute.key} className="px-3 py-2.5 mt-2 bg-panel border border-border-light rounded-[6px]">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: '#4a8a4a18' }}>
+                          <Clover className="w-4 h-4" style={{ color: '#4a8a4a' }} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-[13px] font-semibold text-text-primary flex items-center gap-1.5">
+                            {attribute.label}
+                            <span className="text-[10px] font-mono text-text-dim font-normal">{attribute.key}</span>
+                            <button
+                              type="button"
+                              onClick={() => setAttributeHelpKey(helpOpen ? null : attribute.key)}
+                              aria-label={`了解${attribute.label}`}
+                              aria-expanded={helpOpen}
+                              aria-controls={`attribute-help-${attribute.key}`}
+                              title={`了解${attribute.label}`}
+                              className="w-4.5 h-4.5 rounded-full border border-border-mid text-text-muted flex items-center justify-center active:bg-input transition-colors"
+                            >
+                              <Info className="w-2.5 h-2.5" strokeWidth={2.5} />
+                            </button>
+                          </div>
+                          <div className="text-[10px] text-text-dim mt-0.5">不占属性点数（规则为独立掷 {attribute.generation}，掷骰生成待接入，暂为默认值）</div>
+                        </div>
+                        <span className="text-[17px] font-bold font-mono text-text-primary min-w-[36px] text-center">{attr[attribute.key] ?? '—'}</span>
                       </div>
-                      <div className="text-[10px] text-text-dim mt-0.5">不占属性点数（规则为独立掷 {attribute.generation}，掷骰生成待接入，暂为默认值）</div>
+                      {helpOpen && (
+                        <p id={`attribute-help-${attribute.key}`} className="mt-2 border-t border-border-light pt-2 text-[11px] leading-relaxed text-text-muted">
+                          {ATTRIBUTE_HELP[attribute.key] ?? `${attribute.label}是当前规则系统定义的基础属性。`}
+                        </p>
+                      )}
                     </div>
-                    <span className="text-[17px] font-bold font-mono text-text-primary min-w-[36px] text-center">{attr[attribute.key] ?? '—'}</span>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
 
               {/* Derived Stats */}
               <div className="bg-card border border-border-light rounded-md p-[18px] mt-3">
                 <h4 className="text-[12px] font-semibold text-brass-dark uppercase tracking-[0.08em] mb-3">衍生属性</h4>
                 {previewError && <p className="text-[11px] text-[#c04040] mb-2">{previewError}</p>}
-                <div className="flex gap-2">
-                  {[
-                    { label: 'HP', value: `${derived.hp}`, color: '#4a8a4a' },
-                    { label: 'SAN', value: `${derived.san}`, color: '#7050a0' },
-                    { label: 'MP', value: `${derived.mp}`, color: '#4a7098' },
-                    { label: 'DB', value: derived.db, color: '#b8976a' },
-                    { label: 'MOV', value: `${derived.move}`, color: '#c08050' },
-                  ].map(pill => (
-                    <div key={pill.label} className="flex-1 bg-panel rounded-md px-2.5 py-2 text-center">
-                      <div className="text-[10px] text-text-muted font-semibold">{pill.label}</div>
-                      <div className="text-[16px] font-bold font-mono" style={{ color: pill.color }}>{pill.value}</div>
+                <div className="grid grid-cols-3 gap-2" data-testid="derived-stats-grid">
+                  {DERIVED_STAT_DEFINITIONS.map(definition => (
+                    <div key={definition.key} className="bg-panel rounded-md px-2.5 py-2 text-center">
+                      <div className="text-[10px] text-text-muted font-semibold">
+                        {definition.label} <span className="font-mono text-text-dim">{definition.abbreviation}</span>
+                      </div>
+                      <div className="text-[16px] font-bold font-mono" style={{ color: definition.color }}>
+                        {derived[definition.key]}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1075,7 +1371,7 @@ export default function CharacterPage() {
           {step === 2 && (
             <div className="px-5 pb-20 animate-screen-in">
               {/* Point counters */}
-              <div className="flex gap-2.5 mb-3">
+              <div data-onboarding-target="skill-editor" className="flex gap-2.5 mb-3">
                 <div className="flex-1 bg-card border border-border-light rounded-md p-3">
                   <div className="text-[10px] text-text-muted font-semibold mb-1">
                     职业技能 <span className="text-text-dim">({selectedOcc?.skillPointsFormula || '—'})</span>
@@ -1099,10 +1395,78 @@ export default function CharacterPage() {
               </div>
               {previewIssuesBanner}
 
+              {selectedOcc && (selectedOcc.choiceSlots?.length ?? 0) > 0 && (
+                <div className="bg-card border border-border-light rounded-md p-3.5 my-3" data-testid="occupation-choice-panel">
+                  <div className="flex items-start justify-between gap-3 mb-3">
+                    <div>
+                      <h4 className="text-[12px] font-semibold text-brass-dark">职业自选技能</h4>
+                      <p className="text-[10px] text-text-muted mt-0.5">选中的技能将使用职业技能点</p>
+                    </div>
+                    <span className={`text-[11px] font-mono font-semibold ${
+                      occupationChoicesComplete ? 'text-mold' : 'text-[#c08050]'
+                    }`}>
+                      {occupationChoiceSkillIds.length}/
+                      {(selectedOcc.choiceSlots ?? []).reduce((sum, slot) => sum + slot.count, 0)}
+                    </span>
+                  </div>
+
+                  <div className="space-y-2.5">
+                    {(selectedOcc.choiceSlots ?? []).map((slot, slotIndex) => {
+                      const selectedIds = occupationChoiceSelections[slotIndex] ?? []
+                      return (
+                        <div key={`${slot.label}-${slotIndex}`} className="rounded-[6px] bg-input border border-border-light p-3">
+                          <div className="flex items-center justify-between gap-2 mb-2">
+                            <div className="text-[12px] font-medium text-text-primary">{slot.label}</div>
+                            <span className="text-[10px] font-mono text-text-muted">{selectedIds.length}/{slot.count}</span>
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {selectedIds.map(skillId => (
+                              <button
+                                key={skillId}
+                                type="button"
+                                onClick={() => removeOccupationChoice(slotIndex, skillId)}
+                                className="flex items-center gap-1 px-2 py-1 rounded-[4px] bg-card border border-brass text-[11px] text-text-body"
+                                aria-label={`取消职业自选技能 ${occupationSkillLabel(skillId, ruleset?.skills ?? [])}`}
+                              >
+                                {occupationSkillLabel(skillId, ruleset?.skills ?? [])}
+                                <X className="w-3 h-3" />
+                              </button>
+                            ))}
+                            {selectedIds.length < slot.count && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setChoicePickerSlotIndex(slotIndex)
+                                  setChoiceSkillSearch('')
+                                  setChoiceActionError('')
+                                }}
+                                className="flex items-center gap-1 px-2 py-1 rounded-[4px] border border-dashed border-brass text-[11px] text-brass-dark"
+                              >
+                                <Plus className="w-3 h-3" /> 选择技能
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+
+                  {choiceActionError && (
+                    <p className="mt-2 text-[11px] text-[#c04040]">{choiceActionError}</p>
+                  )}
+                  {validationAttempted && !occupationChoicesComplete && (
+                    <p className="mt-2 text-[11px] text-[#c04040]">请填满全部职业自选技能槽位</p>
+                  )}
+                </div>
+              )}
+
               {/* Credit Rating — 后端必填技能，值须落在所选职业信用区间内，
                   单独给一张显眼卡片，不跟普通技能混在职业/兴趣两个 tab 里。 */}
               {selectedOcc && (
-                <div className="bg-[#fdfaf4] border border-brass rounded-md p-3.5 mb-3">
+                <div
+                  data-onboarding-target="credit-rating-editor"
+                  className="bg-[#fdfaf4] border border-brass rounded-md p-3.5 mb-3"
+                >
                   <div className="flex items-center justify-between mb-1">
                     <h4 className="text-[12px] font-semibold text-brass-dark">
                       信用评级 (Credit Rating) · <span className="text-[#c04040]">必填</span>
@@ -1162,7 +1526,7 @@ export default function CharacterPage() {
                       请先在上一步中选择职业
                     </div>
                   ) : occSkills.map(skill => {
-                    // 职业技能现在只记职业池，不再允许跨池溢出。
+                    // 职业技能优先吃职业池，超出部分由兴趣池承担。
                     const totalAllocation = skillAlloc[skill.id] || 0
                     const compute = skillComputeMap.get(skill.id)
                     const base = compute?.base ?? (typeof skill.base === 'number' ? skill.base : 0)
@@ -1172,14 +1536,13 @@ export default function CharacterPage() {
                         poolAllocation={totalAllocation}
                         onChange={(d) => handleOccSkillChange(skill.id, d)}
                         onSetAllocation={(v) => handleOccSkillSet(skill.id, v)}
-                        maxPoints={totalAllocation + occupationPointsRemaining}
+                        maxPoints={totalAllocation + combinedPointsRemaining}
                         minPoints={0}
                       />
                     )
                   })
                 ) : (
-                  // 兴趣技能页签只列非职业技能——职业技能那边已经能自动溢出用兴趣点数了，
-                  // 不需要在这里重复出现。这里纯粹是兴趣点数池，加点只碰 interestAlloc。
+                  // 兴趣页只列非职业技能；它们只能使用兴趣预算，不会占用职业点。
                   interestSkills.map(skill => {
                     const interestAllocation = interestAlloc[skill.id] || 0
                     const compute = skillComputeMap.get(skill.id)
@@ -1202,7 +1565,7 @@ export default function CharacterPage() {
 
           {/* ═══════════════ Step 3: Summary ═══════════════ */}
           {step === 3 && (
-            <div className="px-5 pb-20 animate-screen-in">
+            <div data-onboarding-target="background-editor" className="px-5 pb-20 animate-screen-in">
               {/* Equipment */}
               <div className="bg-card border border-border-light rounded-md p-[18px] mb-3">
                 <h4 className="text-[12px] font-semibold text-brass-dark uppercase tracking-[0.08em] mb-3">装备与物品</h4>
@@ -1213,10 +1576,60 @@ export default function CharacterPage() {
 
               {/* Background */}
               <div className="bg-card border border-border-light rounded-md p-[18px] mb-3">
-                <h4 className="text-[12px] font-semibold text-brass-dark uppercase tracking-[0.08em] mb-3">背景故事</h4>
-                <textarea value={background} onChange={e => setBackground(e.target.value)}
-                  placeholder="简单描述你的角色背景…" rows={4}
-                  className="w-full px-3.5 py-2.5 rounded-[6px] bg-input border border-border-light text-text-primary text-[14px] outline-none focus:border-brass resize-none" />
+                <div className="flex items-start justify-between gap-3 mb-1.5">
+                  <h4 className="text-[12px] font-semibold text-brass-dark uppercase tracking-[0.08em]">背景故事</h4>
+                  <span className={`text-[11px] font-mono ${
+                    serializedBackground.length > CHARACTER_BACKGROUND_MAX_LENGTH
+                      ? 'text-[#c04040] font-semibold'
+                      : 'text-text-muted'
+                  }`}>
+                    {serializedBackground.length}/{CHARACTER_BACKGROUND_MAX_LENGTH}
+                  </span>
+                </div>
+                <p className="text-[11px] text-text-muted leading-relaxed mb-3">
+                  分项填写调查员的经历，所有内容均为选填。
+                </p>
+                <div className="space-y-2.5">
+                  {BACKGROUND_SECTION_DEFINITIONS.map(section => {
+                    const value = backgroundForm.sections[section.key]
+                    return (
+                      <div key={section.key} className="rounded-[6px] bg-input border border-border-light p-3">
+                        <label htmlFor={`background-${section.key}`} className="block text-[13px] font-semibold text-text-primary mb-2">
+                          {section.label}
+                        </label>
+                        <textarea
+                          id={`background-${section.key}`}
+                          aria-label={section.label}
+                          value={value}
+                          onChange={event => updateBackgroundSection(section.key, event.target.value)}
+                          placeholder={BACKGROUND_PLACEHOLDERS[section.key]}
+                          rows={2}
+                          className="w-full px-3 py-2 rounded-[6px] bg-card border border-border-light text-text-primary text-[14px] outline-none focus:border-brass resize-y"
+                        />
+                      </div>
+                    )
+                  })}
+
+                  <div className="rounded-[6px] bg-input border border-border-light p-3">
+                    <label htmlFor="background-other" className="block text-[13px] font-semibold text-text-primary mb-2">
+                      其他
+                    </label>
+                    <textarea
+                      id="background-other"
+                      aria-label="其他"
+                      value={backgroundForm.other}
+                      onChange={event => setBackgroundForm(previous => ({ ...previous, other: event.target.value }))}
+                      placeholder="未归类的背景补充；旧版背景故事也会显示在这里……"
+                      rows={3}
+                      className="w-full px-3 py-2 rounded-[6px] bg-card border border-border-light text-text-primary text-[14px] outline-none focus:border-brass resize-y"
+                    />
+                  </div>
+                </div>
+                {serializedBackground.length > CHARACTER_BACKGROUND_MAX_LENGTH && (
+                  <p className="mt-2 text-[11px] text-[#c04040] font-medium">
+                    背景故事不能超过 {CHARACTER_BACKGROUND_MAX_LENGTH} 个字符，请精简后再完成建卡。
+                  </p>
+                )}
               </div>
 
               {/* Notes */}
@@ -1288,11 +1701,65 @@ export default function CharacterPage() {
                   </div>
 
                   <button
-                    onClick={() => { setInfo(i => ({ ...i, occupationId: detailOcc.id })); setDetailOcc(null) }}
+                    onClick={() => { selectOccupation(detailOcc.id); setDetailOcc(null) }}
                     className="mt-4 w-full flex items-center justify-center gap-2 py-3 rounded-sm bg-brass text-white text-sm font-semibold active:bg-brass-dark transition-all"
                   >
                     选择 {detailOcc.name}
                   </button>
+                </div>
+              </div>
+            </>
+          )}
+
+          {activeChoiceSlot && choicePickerSlotIndex != null && (
+            <>
+              <div
+                className="fixed inset-0 bg-black/50 z-40 animate-fade-in"
+                onClick={() => setChoicePickerSlotIndex(null)}
+              />
+              <div className="fixed inset-x-0 bottom-0 z-50 mx-auto max-w-[430px] bg-page border border-border-light rounded-t-xl px-5 pt-5 pb-8 max-h-[75vh] flex flex-col">
+                <div className="flex items-start justify-between gap-3 mb-3">
+                  <div>
+                    <h3 className="text-[16px] font-bold text-text-primary">选择职业技能</h3>
+                    <p className="text-[11px] text-text-muted mt-0.5">{activeChoiceSlot.label}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setChoicePickerSlotIndex(null)}
+                    className="w-8 h-8 rounded-full bg-card border border-border-light flex items-center justify-center text-text-muted"
+                    aria-label="关闭职业技能选择"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+                <div className="relative mb-3">
+                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-text-dim" />
+                  <input
+                    value={choiceSkillSearch}
+                    onChange={event => setChoiceSkillSearch(event.target.value)}
+                    placeholder="搜索技能…"
+                    aria-label="搜索职业自选技能"
+                    className="w-full pl-9 pr-3 py-2.5 rounded-[6px] bg-input border border-border-light text-[13px] text-text-primary outline-none focus:border-brass"
+                  />
+                </div>
+                <div className="overflow-y-auto space-y-1.5">
+                  {choiceCandidateSkills.map(skill => (
+                    <button
+                      key={skill.id}
+                      type="button"
+                      onClick={() => addOccupationChoice(choicePickerSlotIndex, skill.id)}
+                      className="w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-[6px] bg-card border border-border-light text-left active:bg-panel"
+                    >
+                      <span className="min-w-0">
+                        <span className="block text-[13px] font-medium text-text-primary">{skill.name}</span>
+                        <span className="block text-[10px] font-mono text-text-dim">{skill.nameEn}</span>
+                      </span>
+                      <Plus className="w-4 h-4 text-brass flex-shrink-0" />
+                    </button>
+                  ))}
+                  {choiceCandidateSkills.length === 0 && (
+                    <p className="py-8 text-center text-sm text-text-muted">没有可选技能</p>
+                  )}
                 </div>
               </div>
             </>
@@ -1306,12 +1773,15 @@ export default function CharacterPage() {
               </p>
             )}
             <div className="flex gap-2.5">
-              <button onClick={() => step > 0 ? setStep(s => s - 1) : navigate(-1)}
+              <button
+                data-onboarding-page-back
+                onClick={() => step > 0 ? setStep(s => s - 1) : navigate(-1)}
                 className="flex-1 flex items-center justify-center gap-1.5 px-5 py-3 rounded-sm text-sm font-semibold transition-all border border-border-mid bg-card text-text-body active:bg-panel active:scale-[0.97]">
                 上一步
               </button>
               <button onClick={handlePrimaryAction}
                 disabled={submitting}
+                data-onboarding-target={step === 3 ? 'character-submit' : undefined}
                 className="flex-1 flex items-center justify-center gap-1.5 px-5 py-3 rounded-sm text-sm font-semibold transition-all bg-brass text-white active:bg-brass-dark active:scale-[0.97] disabled:opacity-60">
                 {submitting ? '提交中…' : step === 3 ? '完成创建' : '下一步'} →
               </button>

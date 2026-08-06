@@ -3,6 +3,7 @@
 from collaboration_framework.contracts import (
     ActionDeclarationOption,
     ActionResult,
+    AdjudicationExecution,
     ActorResourceView,
     ActorValueView,
     AvailableExitView,
@@ -49,6 +50,18 @@ class PlayerViewProjector:
         view = await self.project(player_input)
         if view.revision != action_result.view_revision:
             raise ContractError("动作后 PlayerView revision 与 ActionResult 不一致")
+        return view
+
+    async def refresh_adjudication(
+        self,
+        player_input: PlayerInput,
+        execution: AdjudicationExecution,
+    ) -> PlayerView:
+        view = await self.project(player_input)
+        if view.revision != execution.view_revision:
+            raise ContractError(
+                "裁决后 PlayerView revision 与 AdjudicationExecution 不一致"
+            )
         return view
 
     async def _read(self, scope: PlayerViewScope) -> PlayerView:

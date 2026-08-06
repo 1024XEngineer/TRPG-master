@@ -68,6 +68,10 @@ class Room(Base):
     attribute_gen_method: Mapped[str | None] = mapped_column(
         String(20), nullable=True, default=None
     )
+    # 房间统一的主持人音色。NULL 表示跟随部署配置中的默认音色。
+    host_speech_voice_type: Mapped[str | None] = mapped_column(
+        String(200), nullable=True, default=None
+    )
     # 已探索场景 id 列表（对应 scenario_scenes.id），JSON 数组存起来，本期
     # 没有任何写入路径（推进场景发现属于规则引擎/编排器范畴），只铺字段。
     discovered_scene_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
@@ -190,6 +194,9 @@ class Character(Base):
     attributes: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     derived_stats: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     skills: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # None 表示 issue #140 之前创建、仍使用“按已加点技能自动占槽”的旧角色；
+    # list 表示玩家已经显式确认的职业自选技能（空列表对无自选槽职业合法）。
+    occupation_choice_skill_ids: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     equipment: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     background: Mapped[str] = mapped_column(Text, nullable=False, default="")
     notes: Mapped[str] = mapped_column(Text, nullable=False, default="")

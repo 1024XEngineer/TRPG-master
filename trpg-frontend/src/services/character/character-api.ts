@@ -14,6 +14,7 @@ export interface BuiltCharacter {
   attr: Record<string, number>; // 后端属性键，如 { STR: 50, CON: 60, ... }
   derived: { hp: number; san: number; mp: number };
   skillValues: Record<string, number>; // skillId -> 最终值（base+分配）
+  occupationChoiceSkillIds: string[];
   equipment: string;
   occupationName: string | null;
   background: string;
@@ -49,6 +50,7 @@ export async function saveCharacter(
       attributes: built.attr,
       derivedStats: { HP: built.derived.hp, SAN: built.derived.san, MP: built.derived.mp },
       skills: built.skillValues,
+      occupationChoiceSkillIds: built.occupationChoiceSkillIds,
       equipment: built.equipment
         ? built.equipment
             .split(/[,，\n]/)

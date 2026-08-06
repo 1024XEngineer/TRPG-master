@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { BookOpen, Clock, Users, ChevronRight, Upload } from 'lucide-react'
 import type { ModuleSummary } from 'trpg-sdk'
-import { getGameById, getSystemVisualKey, SYSTEM_COLORS } from '@/config/games'
+import { COC7_SYSTEM_COLORS, FIXED_TRPG } from '@/config/games'
+import { ROUTES } from '@/config/routes'
 import { useGameStore } from '@/stores/game-store'
 import { friendlyErrorMessage } from '@/services/api-client'
 import { listModules } from '@/services/room'
@@ -22,24 +23,18 @@ const difficultyStyles: Record<string, string> = {
 
 export default function ScenarioSelectionPage() {
   const navigate = useNavigate()
-  const { gameId, systemId } = useParams<{ gameId: string; systemId: string }>()
-  const game = getGameById(gameId || '')
   const [modules, setModules] = useState<ModuleSummary[] | null>(null)
   const [loadError, setLoadError] = useState('')
 
   const setScene = useGameStore((s) => s.setScene)
-  const setGame = useGameStore((s) => s.setGame)
-  const setReturnFromGameSelect = useGameStore((s) => s.setReturnFromGameSelect)
-  const returnFromGameSelect = useGameStore((s) => s.returnFromGameSelect)
-  const systemName = modules?.[0]?.gameSystemName || '当前规则系统'
-  const colors = SYSTEM_COLORS[getSystemVisualKey(systemName)]
+  const colors = COC7_SYSTEM_COLORS
 
   useEffect(() => {
     let cancelled = false
     listModules()
       .then((items) => {
         if (!cancelled) {
-          setModules(items.filter((item) => item.gameSystemId === systemId))
+          setModules(items.filter((item) => item.gameSystemId === FIXED_TRPG.systemId))
         }
       })
       .catch((error) => {
@@ -48,25 +43,21 @@ export default function ScenarioSelectionPage() {
     return () => {
       cancelled = true
     }
-  }, [systemId])
+  }, [])
 
   const handleSelect = (module: ModuleSummary) => {
     if (module.status !== 'ready') return
     setScene(module.id)
-    setGame(gameId || '', systemId || '')
-    if (returnFromGameSelect) {
-      setReturnFromGameSelect(false)
-      navigate('/home/create')
-    } else {
-      navigate('/room/story')
-    }
+    navigate(ROUTES.CREATE)
   }
 
   return (
     <div className="animate-screen-in">
       <div className="flex items-center gap-2.5 px-5 pb-3 pt-1">
         <button
-          onClick={() => navigate(`/home/create/games/${gameId}`)}
+          type="button"
+          aria-label="返回创建房间"
+          onClick={() => navigate(ROUTES.CREATE)}
           className="w-[34px] h-[34px] rounded-full bg-card border border-border-light flex items-center justify-center flex-shrink-0 active:bg-panel active:scale-[0.94] transition-all duration-150"
         >
           <svg className="w-[18px] h-[18px] text-text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
@@ -76,7 +67,7 @@ export default function ScenarioSelectionPage() {
         <h2 className="text-lg font-bold text-text-primary">选择模组</h2>
       </div>
       <p className="text-xs text-text-muted px-5 pb-4">
-        {game?.name || '跑团'} · {systemName}
+        {FIXED_TRPG.gameName} · {FIXED_TRPG.systemName}
       </p>
 
       <div className="px-5 flex flex-col gap-3.5">

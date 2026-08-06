@@ -26,12 +26,7 @@ async def test_fallback_narrator_returns_deterministic_placeholder_with_utteranc
 
 
 def test_build_narrator_falls_back_without_api_key() -> None:
-    settings = Settings(
-        deepseek_api_key=None,
-        character_portrait_enabled=False,
-        portrait_prompt_provider="deterministic",
-        portrait_image_provider="mock",
-    )
+    settings = Settings(host_model_provider="fake", deepseek_api_key=None)
 
     assert isinstance(build_narrator(settings), FallbackNarrator)
 

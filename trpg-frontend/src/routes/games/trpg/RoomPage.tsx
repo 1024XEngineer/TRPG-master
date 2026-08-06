@@ -1,15 +1,24 @@
 import { useNavigate } from 'react-router-dom'
-import { RoomSocketServerError, TurnFailedError, type AgentPlayerView, type AgentTurnPhase, type CheckRequestPayload, type NarrationPushPayload, type RoomConversationEvent } from 'trpg-sdk'
-import { ArrowLeft, Users, Map, BookOpen, ScrollText, Star, X, SendHorizontal, Dice6, Plus, Save, FlagOff, Heart, Volume2, Pause, Play, Square, RotateCcw } from 'lucide-react'
+import { RoomSocketServerError, TurnFailedError, type AdjudicationPendingPayload, type AgentPlayerView, type AgentTurnPhase, type CheckRequestPayload, type NarrationPushPayload, type RoomConversationEvent } from 'trpg-sdk'
+import { ArrowLeft, Users, Map, BookOpen, ScrollText, Star, X, SendHorizontal, Dice6, Plus, Save, FlagOff, Heart, Volume2, Pause, Play, Square, RotateCcw, Mic, LoaderCircle } from 'lucide-react'
 import { useCallback, useState, useRef, useEffect, type Dispatch, type FormEvent, type SetStateAction } from 'react'
 import { useRoomStore } from '@/stores/room-store'
 import { useAuthStore } from '@/stores/auth-store'
 import { useCharacterStore } from '@/stores/character-store'
-import { connectWebSocket, waitForWsOpen, sdk, onWsMessage, disconnectWebSocket, friendlyErrorMessage } from '@/services/api-client'
+import { connectWebSocket, waitForWsOpen, sdk, onWsMessage, disconnectWebSocket, friendlyErrorMessage, getAuthToken } from '@/services/api-client'
 import { endGame } from '@/services/room'
 import { useRoomPlayers } from '@/hooks/useRoomPlayers'
 import { useRuleset } from '@/hooks/useRuleset'
 import { useHostSpeech } from '@/hooks/useHostSpeech'
+import { useSpeechInput } from '@/hooks/useSpeechInput'
+import { Dice3DStage, supports3DDice, type Dice3DHandle } from '@/features/dice3d'
+import { DERIVED_STAT_DEFINITIONS } from '@/data/derived-stats'
+import { OnboardingTrigger } from '@/features/onboarding'
+import { CheckWorkflowPanel } from '@/features/adjudication'
+import type {
+  CheckRunView as UiCheckRunView,
+  PendingCheckDecisionView as UiPendingCheckDecisionView,
+} from '@/features/adjudication'
 
 // `crypto.randomUUID()` 要求安全上下文（HTTPS 或 localhost）——CI Preview
 // 部署在纯 HTTP 的 IP:端口上（issue #200，域名/HTTPS 明确列在本期不做），
@@ -28,11 +37,52 @@ function randomActionId(): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
 }
 
+function pendingDecisionForUi(
+  pending: AdjudicationPendingPayload | null,
+): UiPendingCheckDecisionView | null {
+  const decision = pending?.pendingDecision
+  if (!decision) return null
+  return {
+    ...decision,
+    status: decision.status ?? 'awaiting_skill_choice',
+    allow_cancel: decision.allow_cancel ?? true,
+  }
+}
+
+function checkRunForUi(
+  pending: AdjudicationPendingPayload | null,
+): UiCheckRunView | null {
+  const checkRun = pending?.checkRun
+  if (!checkRun) return null
+  return {
+    ...checkRun,
+    final_result: checkRun.final_result ?? null,
+    post_roll_options: (checkRun.post_roll_options ?? []).map((option) => {
+      if ('resource_id' in option) {
+        return {
+          ...option,
+          kind: 'spend_resource' as const,
+          resource_id: 'luck' as const,
+        }
+      }
+      if ('requires_revised_method' in option) {
+        return {
+          ...option,
+          kind: 'push' as const,
+          requires_revised_method: true as const,
+        }
+      }
+      return { ...option, kind: 'accept_result' as const }
+    }),
+  }
+}
+
 // ─── Types ───────────────────────────────────────────
 interface Message {
   type: 'system' | 'narr' | 'player' | 'dice'
   channel?: 'action' | 'discussion'
   messageId?: string
+  narrationId?: string
   sender?: string
   content: string
   time: string
@@ -180,6 +230,15 @@ function displayName(...candidates: Array<string | null | undefined>): string {
   return '玩家'
 }
 
+/** 保留玩家已有输入；只有两段之间没有空白或句末标点时才补一个空格。 */
+export function appendSpeechTranscript(current: string, transcript: string): string {
+  const normalized = transcript.trim()
+  if (!normalized) return current
+  if (!current) return normalized
+  const needsSeparator = !/[\s，。！？；：、,.!?;:]$/u.test(current)
+  return `${current}${needsSeparator ? ' ' : ''}${normalized}`
+}
+
 function conversationEventToMessage(
   event: RoomConversationEvent,
   selfPlayerId: string | null,
@@ -224,10 +283,12 @@ function conversationEventToMessage(
   }
   if (event.type === 'narration.push') {
     const payload = event.payload as { messageId?: string | null; text: string }
+    const narrationId = payload.messageId || event.id
     return {
       type: 'narr',
       channel: 'action',
-      messageId: conversationMessageId(event.type, payload.messageId || event.id),
+      messageId: conversationMessageId(event.type, narrationId),
+      narrationId,
       sender: '守秘人',
       content: payload.text,
       time: formatRoomTime(event.createdAt),
@@ -290,7 +351,6 @@ type DiceType = typeof DICE_OPTIONS[number]['id']
 type PendingCheckDiceState = {
   clientActionId: string
   selectedSkillId: string | null
-  shakeLevel: number
   result: number | null
   rolling: boolean
   showResult: boolean
@@ -303,7 +363,6 @@ function createPendingCheckDiceState(checkRequest: CheckRequestPayload): Pending
   return {
     clientActionId: checkRequest.clientActionId,
     selectedSkillId: checkRequest.skills[0]?.id ?? null,
-    shakeLevel: 0,
     result: null,
     rolling: false,
     showResult: false,
@@ -311,6 +370,12 @@ function createPendingCheckDiceState(checkRequest: CheckRequestPayload): Pending
     ones: 0,
     submitted: false,
   }
+}
+
+/** D100 结果拆成十位/个位用于展示。100 由「00 + 0」得来，两位都是 0。 */
+function splitD100(value: number): { tens: number; ones: number } {
+  if (value === 100) return { tens: 0, ones: 0 }
+  return { tens: Math.floor(value / 10), ones: value % 10 }
 }
 
 const DIFFICULTY_COLORS: Record<string, string> = {
@@ -378,18 +443,16 @@ function DiceModal({
   setCheckDiceState: Dispatch<SetStateAction<PendingCheckDiceState | null>>
 }) {
   const [freeDiceType, setFreeDiceType] = useState<DiceType>('d100')
-  const [freeShakeLevel, setFreeShakeLevel] = useState(0)
   const [freeResult, setFreeResult] = useState<number | null>(null)
   const [freeRolling, setFreeRolling] = useState(false)
   const [freeShowResult, setFreeShowResult] = useState(false)
   const [freeTens, setFreeTens] = useState(0)
   const [freeOnes, setFreeOnes] = useState(0)
-  const tableRef = useRef<HTMLDivElement>(null)
-  const isGrabbed = useRef(false)
-  const directionChanges = useRef(0)
-  const lastDirX = useRef(0)
-  const lastDirY = useRef(0)
   const submitLockRef = useRef(false)
+  const dice3dRef = useRef<Dice3DHandle>(null)
+  // 3D 不可用（无 WebGL / 用户要求减少动效 / 引擎加载失败）时退回原来的 2D 展示。
+  // 检定是主流程的一环，不能因为渲染能力缺失就卡住。
+  const [use3D, setUse3D] = useState(() => supports3DDice())
 
   useEffect(() => {
     if (!checkRequest) {
@@ -407,7 +470,6 @@ function DiceModal({
   useEffect(() => {
     if (open && !checkRequest) {
       setFreeDiceType('d100')
-      setFreeShakeLevel(0)
       setFreeResult(null)
       setFreeRolling(false)
       setFreeShowResult(false)
@@ -420,7 +482,6 @@ function DiceModal({
   const isCheckMode = Boolean(checkRequest)
   const activeCheckDice = checkRequest ? checkDiceState : null
   const activeDiceType: DiceType = isCheckMode ? 'd100' : freeDiceType
-  const activeShakeLevel = isCheckMode ? activeCheckDice?.shakeLevel ?? 0 : freeShakeLevel
   const activeResult = isCheckMode ? activeCheckDice?.result ?? null : freeResult
   const activeRolling = isCheckMode ? activeCheckDice?.rolling ?? false : freeRolling
   const activeShowResult = isCheckMode ? activeCheckDice?.showResult ?? false : freeShowResult
@@ -442,120 +503,88 @@ function DiceModal({
     })
   }
 
-  const roll = (power: number) => {
-    if (isCheckMode) {
-      if (!checkRequest || !activeCheckDice || activeCheckDice.result !== null || activeCheckDice.submitted || activeCheckDice.rolling) return
-      const requestId = checkRequest.clientActionId
-      updateCheckDiceState((current) => ({
-        ...current,
-        rolling: true,
-        showResult: false,
-      }))
+  /**
+   * 已经交给 3D、但还没定格的那次掷骰。
+   *
+   * 用 ref 而不是读 state：3D 失败回调可能与 `roll()` 在同一个同步流程里发生，
+   * 那时 `rolling` 的 setState 还没生效，读 state 会拿到旧值、判断成"没有掷骰
+   * 在进行"，等于没修。
+   */
+  const inFlight3DRollRef = useRef<{ requestId: string | null } | null>(null)
 
-      const tens = Math.floor(Math.random() * 10)
-      const ones = Math.floor(Math.random() * 10)
-      let finalResult = tens * 10 + ones
-      if (finalResult === 0) finalResult = 100
-
-      const dur = 500 + power * 100
-      setTimeout(() => {
-        setCheckDiceState((current) => {
-          if (!current || current.clientActionId !== requestId) return current
-          return {
-            ...current,
-            result: finalResult,
-            showResult: true,
-            rolling: false,
-            tens,
-            ones,
-          }
-        })
-      }, dur)
+  /** 结果落地：3D 由动画定格回调进来，2D 由本地随机 + 定时器进来，两条路共用。 */
+  const settle = (value: number, requestId: string | null) => {
+    inFlight3DRollRef.current = null
+    const { tens, ones } = activeDiceType === 'd100' ? splitD100(value) : { tens: 0, ones: 0 }
+    if (requestId !== null) {
+      setCheckDiceState((current) => {
+        if (!current || current.clientActionId !== requestId) return current
+        return { ...current, result: value, showResult: true, rolling: false, tens, ones }
+      })
       return
     }
+    setFreeTens(tens)
+    setFreeOnes(ones)
+    setFreeResult(value)
+    setFreeShowResult(true)
+    setFreeRolling(false)
+  }
 
-    setFreeRolling(true)
-    setFreeShowResult(false)
+  const currentRequestId = () => (isCheckMode ? checkRequest?.clientActionId ?? null : null)
 
+  /** 2D 回退掷骰：本地随机 + 固定时长的假动画，与改造前一致。 */
+  const roll2D = (requestId: string | null) => {
     let finalResult: number
-    let tens = 0
-    let ones = 0
-
-    if (freeDiceType === 'd100') {
-      tens = Math.floor(Math.random() * 10)
-      ones = Math.floor(Math.random() * 10)
+    if (activeDiceType === 'd100') {
+      const tens = Math.floor(Math.random() * 10)
+      const ones = Math.floor(Math.random() * 10)
       finalResult = tens * 10 + ones
       if (finalResult === 0) finalResult = 100
-      setFreeTens(tens)
-      setFreeOnes(ones)
-    } else if (freeDiceType === 'd20') {
+    } else if (activeDiceType === 'd20') {
       finalResult = Math.floor(Math.random() * 20) + 1
     } else {
       finalResult = Math.floor(Math.random() * 6) + 1
     }
-
-    const dur = 500 + power * 100
-    setTimeout(() => {
-      setFreeResult(finalResult)
-      setFreeShowResult(true)
-      setFreeRolling(false)
-    }, dur)
+    setTimeout(() => settle(finalResult, requestId), 700)
   }
 
-  const handleMouseDown = () => {
-    if (activeRolling || activeShowResult || (isCheckMode && activeResult !== null)) return
-    isGrabbed.current = true
-    directionChanges.current = 0
-    lastDirX.current = 0
-    lastDirY.current = 0
+  const roll = () => {
+    const requestId = currentRequestId()
     if (isCheckMode) {
-      updateCheckDiceState((current) => ({
-        ...current,
-        shakeLevel: 0,
-      }))
+      if (!checkRequest || !activeCheckDice || activeCheckDice.result !== null || activeCheckDice.submitted || activeCheckDice.rolling) return
+      updateCheckDiceState((current) => ({ ...current, rolling: true, showResult: false }))
     } else {
-      setFreeShakeLevel(0)
+      if (freeRolling) return
+      setFreeRolling(true)
+      setFreeShowResult(false)
     }
+
+    // 3D：值来自物理定格后朝上的那一面（面上的点数已由 Fisher–Yates 均匀洗过），
+    // 所以这里不预先取值，等 onSettled 回调。
+    if (use3D) {
+      inFlight3DRollRef.current = { requestId }
+      dice3dRef.current?.roll()
+      return
+    }
+    roll2D(requestId)
   }
 
-  const handleMouseMove = (e: React.MouseEvent | React.TouchEvent) => {
-    if (!isGrabbed.current) return
-    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX
-    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY
-
-    if (tableRef.current) {
-      const rect = tableRef.current.getBoundingClientRect()
-      const dx = clientX - (rect.left + rect.width / 2)
-      const dy = clientY - (rect.top + rect.height / 2)
-      const dirX = Math.sign(dx)
-      const dirY = Math.sign(dy)
-
-      if (lastDirX.current !== 0 && dirX !== lastDirX.current) directionChanges.current++
-      if (lastDirY.current !== 0 && dirY !== lastDirY.current) directionChanges.current++
-      lastDirX.current = dirX
-      lastDirY.current = dirY
-
-      const level = Math.min(5, Math.floor(directionChanges.current / 2.5))
-      if (isCheckMode) {
-        updateCheckDiceState((current) => ({
-          ...current,
-          shakeLevel: level,
-        }))
-      } else {
-        setFreeShakeLevel(level)
-      }
-    }
+  /**
+   * 3D 不可用。可能在掷骰之前（环境不支持），也可能在掷骰之后——懒加载 chunk
+   * 是一个网络请求，移动端抖一下就会失败。
+   *
+   * 后者必须把这一次掷骰补完：`roll()` 已经置了 rolling 并走 3D 分支返回，没有
+   * 排任何定时器。只翻 use3D 的话 rolling 永远不清，检定会卡在"骰子还在滚"，
+   * 既没有结果也没有重掷入口——恰好是这套降级本该防住的情况（PR #219 review）。
+   */
+  const handle3DUnsupported = () => {
+    const pending = inFlight3DRollRef.current
+    inFlight3DRollRef.current = null
+    setUse3D(false)
+    if (pending) roll2D(pending.requestId)
   }
 
-  const handleMouseUp = () => {
-    if (!isGrabbed.current) return
-    isGrabbed.current = false
-    if (activeShakeLevel >= 1) {
-      roll(activeShakeLevel)
-    } else {
-      roll(1)
-    }
-  }
+  const canRoll = !activeRolling && !activeShowResult && activeResult === null && !activeCheckDice?.submitted
 
   const confirmResult = () => {
     if (isCheckMode) {
@@ -577,9 +606,20 @@ function DiceModal({
   }
 
   const renderDiceDisplay = () => {
+    if (use3D) {
+      return (
+        <Dice3DStage
+          ref={dice3dRef}
+          kind={activeDiceType}
+          className="w-full h-48"
+          onSettled={(value) => settle(value, currentRequestId())}
+          onUnsupported={handle3DUnsupported}
+        />
+      )
+    }
     const glow = activeRolling ? 'opacity-40' : ''
     return (
-      <div ref={tableRef} className={`relative w-full h-48 flex items-center justify-center select-none ${isGrabbed.current ? 'cursor-grabbing' : 'cursor-grab'} ${glow}`}>
+      <div className={`relative w-full h-48 flex items-center justify-center select-none ${glow}`}>
         {activeDiceType === 'd100' ? (
           <div className="flex items-center gap-6">
             <div className="text-center">
@@ -598,7 +638,7 @@ function DiceModal({
           </div>
         ) : (
           <div
-            className={`text-[64px] font-bold font-mono text-[#eeead8] ${isGrabbed.current ? 'scale-105' : ''} transition-transform duration-150`}
+            className="text-[64px] font-bold font-mono text-[#eeead8] transition-transform duration-150"
             style={{
               clipPath: activeDiceType === 'd20' ? 'polygon(50% 0%, 95% 25%, 95% 75%, 50% 100%, 5% 75%, 5% 25%)' : undefined,
               background: 'linear-gradient(145deg, #2a2630, #1a1620)',
@@ -641,7 +681,6 @@ function DiceModal({
                   setFreeDiceType(opt.id)
                   setFreeResult(null)
                   setFreeShowResult(false)
-                  setFreeShakeLevel(0)
                   setFreeTens(0)
                   setFreeOnes(0)
                 }
@@ -671,7 +710,6 @@ function DiceModal({
                     selectedSkillId: skill.id,
                     result: null,
                     showResult: false,
-                    shakeLevel: 0,
                     tens: 0,
                     ones: 0,
                     submitted: false,
@@ -705,51 +743,30 @@ function DiceModal({
 
       <div
         data-testid="dice-table"
-        className="rounded-md bg-[#1a1620] px-4 pt-5 pb-4 flex flex-col items-center relative overflow-hidden"
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
-        onTouchStart={handleMouseDown}
-        onTouchMove={handleMouseMove}
-        onTouchEnd={handleMouseUp}
+        className="rounded-md px-4 pt-5 pb-4 flex flex-col items-center relative overflow-hidden"
+        style={{
+          // 暖调骰盘而不是冷近黑：骰子是亮面树脂材质，深底才有对比；
+          // 中心略亮、边缘压暗，配合内阴影读起来像一个打着光的托盘。
+          background:
+            'radial-gradient(120% 95% at 50% 30%, #3d3327 0%, #262019 55%, #171310 100%)',
+          boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06), inset 0 -14px 28px rgba(0,0,0,0.45)',
+        }}
       >
-        {activeShakeLevel >= 2 && !activeRolling && !activeShowResult && (
-          <div
-            className="absolute w-52 h-52 rounded-full pointer-events-none transition-all duration-200"
-            style={{
-              background: `radial-gradient(circle, rgba(184,151,106,${0.04 + activeShakeLevel * 0.04}) 0%, transparent 70%)`,
-              transform: `scale(${1 + activeShakeLevel * 0.05})`,
-            }}
-          />
-        )}
-
         {renderDiceDisplay()}
 
-        {!activeRolling && !activeShowResult && (
-          <div className="text-center mt-2">
-            <span className="text-xs text-[#9088a0]">
-              {activeShakeLevel === 0 ? '👆 按住这里来回拖动 · 摇动后松手' :
-               activeShakeLevel <= 2 ? '⚡ 再用力一点……' :
-               activeShakeLevel <= 4 ? '🔥 快了！' :
-               '💥 松手投出！'}
-            </span>
-          </div>
-        )}
-
-        {!activeRolling && !activeShowResult && (
-          <div className="flex gap-1 mt-3">
-            {[0, 1, 2, 3, 4].map((i) => (
-              <div key={i} className={`w-6 h-1 rounded-full transition-all duration-200 ${
-                i < activeShakeLevel ? (i >= 3 ? 'bg-brass' : 'bg-[rgba(184,151,106,0.5)]') : 'bg-[rgba(255,255,255,0.08)]'
-              }`} />
-            ))}
-          </div>
+        {canRoll && (
+          <button
+            type="button"
+            onClick={roll}
+            className="mt-3 px-8 py-2.5 rounded-sm bg-brass text-white text-sm font-semibold active:bg-brass-dark active:scale-[0.97] transition-all"
+          >
+            掷骰
+          </button>
         )}
 
         {activeRolling && (
-          <div className="text-center mt-2 text-xs text-[#9088a0] animate-pulse">
-            🎲 骰子飞出去了……
+          <div className="text-center mt-3 text-xs text-[#9088a0] animate-pulse">
+            🎲 骰子还在滚……
           </div>
         )}
       </div>
@@ -809,9 +826,10 @@ export default function RoomPage() {
   const senderName = character?.info.name || nickname || '你'
   const { ruleset } = useRuleset()
   const roomInfo = useRoomPlayers(roomCode)
-  const hostSpeech = useHostSpeech()
+  const hostSpeech = useHostSpeech({ roomId, reconnectToken, accountToken: getAuthToken() })
   const enqueueHostSpeech = hostSpeech.enqueue
   const markHostSpeechSeen = hostSpeech.markSeen
+  const handleHostSpeechSettingsUpdated = hostSpeech.handleSettingsUpdated
   const isHost = roomInfo?.players.find((p) => p.playerId === playerId)?.isHost ?? false
   const [roomPhase, setRoomPhase] = useState<string | null>(null)
   const [confirmEnd, setConfirmEnd] = useState(false)
@@ -821,9 +839,19 @@ export default function RoomPage() {
   const [messages, setMessages] = useState<Message[]>([])
   const [channel, setChannel] = useState<'action' | 'discussion'>('action')
   const [input, setInput] = useState('')
+  const handleSpeechTranscript = useCallback((transcript: string) => {
+    // 使用函数式更新读取回调到达那一刻的输入，避免覆盖识别期间玩家新键入的文字。
+    setInput((current) => appendSpeechTranscript(current, transcript))
+  }, [])
+  const speechInput = useSpeechInput(handleSpeechTranscript)
+  // 单独取稳定方法，避免 effect 依赖每次渲染都会新建的 Hook 返回对象。
+  const cancelSpeechInput = speechInput.cancel
   const [typing, setTyping] = useState(false)
   const [pendingAction, setPendingAction] = useState<{ clientActionId: string; utterance: string } | null>(null)
   const [pendingCheck, setPendingCheck] = useState<CheckRequestPayload | null>(null)
+  const [pendingAdjudication, setPendingAdjudication] =
+    useState<AdjudicationPendingPayload | null>(null)
+  const [activePlanId, setActivePlanId] = useState<string | null>(null)
   const [pendingCheckDice, setPendingCheckDice] = useState<PendingCheckDiceState | null>(null)
   const [playerView, setPlayerView] = useState<AgentPlayerView | null>(() => {
     const cached = sdk.roomSocket.getPlayerView()
@@ -858,6 +886,21 @@ export default function RoomPage() {
   const mapLocations = mapLocationsFromPlayerView(playerView)
   const currentHp = resourceValue(playerView, 'hp') ?? character?.derived.hp ?? null
   const currentSan = resourceValue(playerView, 'san') ?? character?.derived.san ?? null
+  // 权限请求、识别和整理结果期间都占用语音会话。UI 用同一个布尔值切换
+  // “发送/取消”按钮，保持移动端输入栏始终只有四列，不挤压输入框。
+  const speechInputActive =
+    speechInput.status === 'requesting_permission' ||
+    speechInput.status === 'listening' ||
+    speechInput.status === 'processing'
+
+  useEffect(() => {
+    // 输入框在行动和讨论区复用；切换频道时丢弃尚未完成的识别，避免结果进入新频道。
+    cancelSpeechInput()
+  }, [cancelSpeechInput, channel])
+
+  useEffect(() => {
+    if (suspended) cancelSpeechInput()
+  }, [cancelSpeechInput, suspended])
 
   useEffect(() => {
     if (roomInfo?.phase) setRoomPhase(roomInfo.phase)
@@ -873,7 +916,7 @@ export default function RoomPage() {
         .filter((item): item is Message => item !== null)
       markHostSpeechSeen(
         restored.flatMap((item) =>
-          item.type === 'narr' && item.messageId ? [item.messageId] : [],
+          item.type === 'narr' && item.narrationId ? [item.narrationId] : [],
         ),
       )
       setMessages((current) => mergeHistoricalMessages(current, restored))
@@ -928,7 +971,7 @@ export default function RoomPage() {
       : pendingNarrationActionIdRef.current
         ? conversationMessageId('narration.push', pendingNarrationActionIdRef.current)
         : undefined
-    enqueueHostSpeech(messageId, payload.text)
+    enqueueHostSpeech(authoritativeId)
     setMessages((prev) => {
       if (messageId && prev.some((item) => item.messageId === messageId)) {
         pendingNarrationActionIdRef.current = null
@@ -940,6 +983,7 @@ export default function RoomPage() {
         type: 'narr',
         channel: 'action',
         messageId,
+        narrationId: authoritativeId,
         sender: '守秘人',
         content: payload.text,
         time: formatRoomTime(new Date()),
@@ -1021,6 +1065,8 @@ export default function RoomPage() {
         setProgressLabel('守秘人正在生成开场叙事')
       } else if (envelope.type === 'room.state') {
         setRoomPhase(envelope.payload.phase)
+      } else if (envelope.type === 'host_speech.settings_updated') {
+        handleHostSpeechSettingsUpdated(envelope.payload.voiceType)
       } else if (envelope.type === 'chat.message') {
         setMessages((prev) => {
           const messageId = conversationMessageId('chat.message', envelope.payload.messageId)
@@ -1093,6 +1139,35 @@ export default function RoomPage() {
           current?.clientActionId === envelope.payload.clientActionId ? null : current
         )
         if (envelope.payload.playerId === playerId) setShowDice(false)
+      } else if (envelope.type === 'adjudication.pending') {
+        setTyping(false)
+        setProgressLabel('等待你决定检定方式')
+        setPendingAdjudication(envelope.payload)
+      } else if (
+        envelope.type === 'plan.started' ||
+        envelope.type === 'plan.step_changed' ||
+        envelope.type === 'plan.stopped' ||
+        envelope.type === 'plan.completed'
+      ) {
+        // A plan step change supersedes any prior check decision. The server
+        // sends a fresh adjudication.pending when the new step is waiting for
+        // the player; clearing first prevents stale decision IDs from being
+        // submitted during the transition or after a terminal event.
+        setPendingAdjudication(null)
+        setActivePlanId(
+          envelope.type === 'plan.completed' || envelope.type === 'plan.stopped'
+            ? null
+            : envelope.payload.correlationId,
+        )
+        setTyping(
+          envelope.payload.phase !== 'waiting_for_player' &&
+            envelope.payload.phase !== 'stopped' &&
+            envelope.payload.phase !== 'completed',
+        )
+        setProgressLabel(
+          envelope.payload.publicProgressLabel ??
+            `正在处理第 ${envelope.payload.currentStep}/${envelope.payload.totalSteps} 步`,
+        )
       } else if (envelope.type === 'turn.started') {
         setTyping(true)
         setProgressLabel('守秘人正在查看当前场景')
@@ -1105,6 +1180,7 @@ export default function RoomPage() {
       } else if (envelope.type === 'turn.failed') {
         setTyping(false)
         setProgressLabel(null)
+        setPendingAdjudication(null)
         // 片段只在叙事落库成功后才会下发，回合失败时不存在对应的权威消息——
         // 留着半截文字会让玩家以为那是这回合的结果。
         //
@@ -1124,6 +1200,7 @@ export default function RoomPage() {
       } else if (envelope.type === 'error') {
         setTyping(false)
         setProgressLabel(null)
+        setPendingAdjudication(null)
         setStreamingNarration(null)
         setActionError(envelope.payload.message)
         setActionErrorRetryable(false)
@@ -1138,7 +1215,7 @@ export default function RoomPage() {
       setProgressLabel('守秘人正在生成开场叙事')
     }
     return off
-  }, [enqueueHostSpeech, playerId, senderName])
+  }, [enqueueHostSpeech, handleHostSpeechSettingsUpdated, playerId, senderName])
 
   const submitPlayerAction = (action: { clientActionId: string; utterance: string }) => {
     if (!playerId || suspended) return
@@ -1150,8 +1227,7 @@ export default function RoomPage() {
     setActionErrorCode(null)
     setActionErrorCorrelationId(null)
     setTyping(true)
-    void sdk.roomSocket
-      .submitAction(playerId, action)
+    void sdk.roomSocket.submitPlannedAction(playerId, action)
       .then((result) => {
         setPlayerView(result.player_view)
         setPendingAction((current) =>
@@ -1190,6 +1266,8 @@ export default function RoomPage() {
     e?.preventDefault()
     const text = input.trim()
     if (!text || !playerId || suspended) return
+    // 发送前先关闭识别结果闸门，防止浏览器稍后返回的文本写入已清空的输入框。
+    cancelSpeechInput()
     setInput('')
     if (channel === 'discussion') {
       sdk.roomSocket.sendChat(playerId, { text, clientMessageId: randomActionId() })
@@ -1243,7 +1321,7 @@ export default function RoomPage() {
   return (
     <div className="h-full flex flex-col bg-card relative max-w-[430px] mx-auto">
       {/* Header */}
-      <div className="flex items-center gap-2.5 px-4 py-2.5 border-b border-border-light bg-page flex-shrink-0">
+      <div data-onboarding-target="scene-header" className="flex items-center gap-2.5 px-4 py-2.5 border-b border-border-light bg-page flex-shrink-0">
         <button onClick={() => setConfirmExit(true)} className="w-8 h-8 rounded-full bg-card border border-border-light flex items-center justify-center active:bg-panel">
           <ArrowLeft className="w-4 h-4 text-text-muted" strokeWidth={2.5} />
         </button>
@@ -1256,11 +1334,12 @@ export default function RoomPage() {
             {playerView?.scene.name || (roomInfo ? `${roomInfo.players.length} 位调查员` : '克苏鲁的呼唤')}
           </div>
         </div>
+        <OnboardingTrigger />
         <button
           onClick={() => setOpenPanel(openPanel === 'speech' ? null : 'speech')}
           aria-label="主持人语音"
           title="主持人语音"
-          className={`w-8 h-8 rounded-full bg-card border border-border-light flex items-center justify-center active:bg-panel ${hostSpeech.status === 'speaking' ? 'text-brass-dark' : 'text-text-muted'}`}
+          className={`w-8 h-8 rounded-full bg-card border border-border-light flex items-center justify-center active:bg-panel ${hostSpeech.status === 'playing' ? 'text-brass-dark' : 'text-text-muted'}`}
         >
           <Volume2 className="w-4 h-4" strokeWidth={2.5} />
         </button>
@@ -1301,7 +1380,7 @@ export default function RoomPage() {
           </button>
         ))}
       </div>
-      <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-3" id="chatScroll">
+      <div data-onboarding-target="narration-feed" className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-3" id="chatScroll">
         {messages.filter((msg) => (msg.channel ?? 'action') === channel).map((msg, i) => {
           if (msg.type === 'system') {
             return (
@@ -1346,7 +1425,16 @@ export default function RoomPage() {
                   ${isNarr ? 'bg-[#fdfaf4] border-l-[3px] border-brass rounded-r-sm rounded-l-none italic text-[#4a4030] text-left whitespace-pre-wrap' : ''}
                   ${!isPlayer && !isNarr ? 'bg-panel rounded-md' : ''}
                 `}>
-                  {msg.content}
+                  {isNarr && msg.narrationId === hostSpeech.currentMessageId && hostSpeech.currentSentences.length > 0
+                    ? hostSpeech.currentSentences.map((sentence) => (
+                        <span
+                          key={sentence.index}
+                          className={sentence.index === hostSpeech.currentSentenceIndex ? 'bg-brass/20 rounded-sm' : ''}
+                        >
+                          {sentence.text}
+                        </span>
+                      ))
+                    : msg.content}
                 </div>
                 <div className="text-[10px] text-text-dim mt-0.5">{msg.time}</div>
                 {isNarr && (
@@ -1354,8 +1442,8 @@ export default function RoomPage() {
                     type="button"
                     aria-label="重新朗读"
                     title="重新朗读"
-                    disabled={!hostSpeech.supported}
-                    onClick={() => hostSpeech.replay(msg.content)}
+                    disabled={!hostSpeech.available || !msg.narrationId}
+                    onClick={() => hostSpeech.replay(msg.narrationId)}
                     className="mt-1 inline-flex items-center gap-1 text-[10px] text-text-muted disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     <RotateCcw className="w-3 h-3" strokeWidth={2} />
@@ -1409,7 +1497,7 @@ export default function RoomPage() {
       </div>
 
       {/* Action Bar */}
-      <div className="flex bg-card border-t border-border-light flex-shrink-0">
+      <div data-onboarding-target="tool-bar" className="flex bg-card border-t border-border-light flex-shrink-0">
         {[
           { icon: ScrollText, label: '角色卡', key: 'sheet' },
           { icon: Star, label: '技能', key: 'skills' },
@@ -1437,14 +1525,14 @@ export default function RoomPage() {
         <div className="flex items-center gap-4 px-4 py-2 border-t border-border-light bg-page flex-shrink-0">
           <div className="flex items-center gap-1.5 flex-1 min-w-0">
             <Heart className="w-3 h-3 text-mold flex-shrink-0" strokeWidth={2.5} />
-            <span className="text-[10px] font-semibold text-text-muted flex-shrink-0">HP</span>
+            <span className="text-[10px] font-semibold text-text-muted flex-shrink-0">生命</span>
             <div className="flex-1 h-1.5 rounded-full bg-border-light overflow-hidden">
               <div className="h-full rounded-full bg-mold" style={{ width: '100%' }} />
             </div>
             <span className="text-[11px] font-bold font-mono text-mold flex-shrink-0">{currentHp}</span>
           </div>
           <div className="flex items-center gap-1.5 flex-1 min-w-0">
-            <span className="text-[10px] font-semibold text-text-muted flex-shrink-0">SAN</span>
+            <span className="text-[10px] font-semibold text-text-muted flex-shrink-0">理智</span>
             <div className="flex-1 h-1.5 rounded-full bg-border-light overflow-hidden">
               <div className="h-full rounded-full bg-[#7050a0]" style={{ width: `${Math.min(100, currentSan)}%` }} />
             </div>
@@ -1491,10 +1579,31 @@ export default function RoomPage() {
             )}
           </div>
         )}
-        <form onSubmit={sendMessage} className="flex gap-2 items-end">
+        {(speechInput.status !== 'idle' || speechInput.error) && !suspended && (
+          <p
+            aria-live="polite"
+            className={`pb-1.5 px-1 text-[11px] ${
+              speechInput.status === 'failed' || speechInput.status === 'unsupported'
+                ? 'text-[#c04040]'
+                : 'text-text-muted'
+            }`}
+          >
+            {speechInput.status === 'unsupported'
+              ? speechInput.unavailableReason
+              : speechInput.status === 'requesting_permission'
+                ? '正在请求麦克风权限…'
+                : speechInput.status === 'listening'
+                  ? '正在聆听，点击停止后将文字填入输入框'
+                  : speechInput.status === 'processing'
+                    ? '正在整理识别结果…'
+                    : speechInput.error}
+          </p>
+        )}
+        <form data-onboarding-target="action-input" onSubmit={sendMessage} className="flex gap-2 items-end">
           <button
             type="button"
             aria-label="骰子"
+            data-onboarding-target="dice-button"
             onClick={() => setShowDice(true)}
             disabled={suspended}
             className="w-10 h-10 rounded-full bg-card border border-border-light text-text-muted flex items-center justify-center flex-shrink-0 active:scale-[0.92] active:border-brass active:text-brass-dark transition-all disabled:opacity-40 disabled:cursor-not-allowed"
@@ -1508,13 +1617,59 @@ export default function RoomPage() {
             placeholder={suspended ? '游戏已挂起' : '输入行动…'}
             className="flex-1 bg-input border border-border-mid rounded-[20px] px-4 py-2.5 text-sm text-text-primary font-sans outline-none min-h-[40px] placeholder:text-text-dim focus:border-brass transition-colors disabled:opacity-60"
           />
-          <button
-            type="submit"
-            disabled={suspended || !input.trim()}
-            className="w-10 h-10 rounded-full bg-brass border-none text-white flex items-center justify-center flex-shrink-0 active:scale-[0.92] transition-all hover:bg-brass-dark disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            <SendHorizontal className="w-[18px] h-[18px]" strokeWidth={2.5} />
-          </button>
+          {speechInput.status === 'listening' ? (
+            <button
+              type="button"
+              aria-label="停止语音输入并采用文字"
+              title="停止并采用识别文字"
+              onClick={speechInput.stop}
+              disabled={suspended}
+              className="w-10 h-10 rounded-full bg-[#c04040] border-none text-white flex items-center justify-center flex-shrink-0 active:scale-[0.92] transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <Square className="w-4 h-4" fill="currentColor" strokeWidth={2} />
+            </button>
+          ) : (
+            <button
+              type="button"
+              aria-label={speechInput.supported ? '开始语音输入' : '语音输入不可用'}
+              title={speechInput.unavailableReason ?? '开始语音输入'}
+              onClick={speechInput.start}
+              disabled={
+                suspended ||
+                !speechInput.supported ||
+                speechInput.status === 'requesting_permission' ||
+                speechInput.status === 'processing'
+              }
+              className="w-10 h-10 rounded-full bg-card border border-border-light text-text-muted flex items-center justify-center flex-shrink-0 active:scale-[0.92] active:border-brass active:text-brass-dark transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {speechInput.status === 'requesting_permission' || speechInput.status === 'processing' ? (
+                <LoaderCircle className="w-[18px] h-[18px] animate-spin" strokeWidth={2} />
+              ) : (
+                <Mic className="w-[18px] h-[18px]" strokeWidth={2} />
+              )}
+            </button>
+          )}
+          {speechInputActive && (
+            <button
+              type="button"
+              aria-label="取消语音输入"
+              title="取消并丢弃本次识别"
+              onClick={speechInput.cancel}
+              className="w-10 h-10 rounded-full bg-card border border-border-light text-text-muted flex items-center justify-center flex-shrink-0 active:scale-[0.92] transition-all"
+            >
+              <X className="w-[18px] h-[18px]" strokeWidth={2} />
+            </button>
+          )}
+          {!speechInputActive && (
+            <button
+              type="submit"
+              aria-label="发送消息"
+              disabled={suspended || !input.trim()}
+              className="w-10 h-10 rounded-full bg-brass border-none text-white flex items-center justify-center flex-shrink-0 active:scale-[0.92] transition-all hover:bg-brass-dark disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <SendHorizontal className="w-[18px] h-[18px]" strokeWidth={2.5} />
+            </button>
+          )}
         </form>
       </div>
 
@@ -1562,17 +1717,15 @@ export default function RoomPage() {
                   </div>
                 </div>
 
-                <div className="flex gap-2 mb-4">
-                  {[
-                    { label: 'HP', value: `${character.derived.hp}`, color: 'text-mold' },
-                    { label: 'SAN', value: `${character.derived.san}`, color: 'text-[#7050a0]' },
-                    { label: 'MP', value: `${character.derived.mp}`, color: 'text-[#4a7098]' },
-                    { label: 'DB', value: character.derived.db, color: 'text-text-muted' },
-                    { label: 'MOV', value: `${character.derived.move}`, color: 'text-text-muted' },
-                  ].map((pill) => (
-                    <div key={pill.label} className="flex-1 bg-panel rounded-md px-2.5 py-2 text-center">
-                      <div className="text-[10px] text-text-muted font-medium">{pill.label}</div>
-                      <div className={`text-base font-bold font-mono ${pill.color}`}>{pill.value}</div>
+                <div className="grid grid-cols-3 gap-2 mb-4" data-testid="derived-stats-grid">
+                  {DERIVED_STAT_DEFINITIONS.map((definition) => (
+                    <div key={definition.key} className="bg-panel rounded-md px-2.5 py-2 text-center">
+                      <div className="text-[10px] text-text-muted font-medium">
+                        {definition.label} <span className="font-mono text-text-dim">{definition.abbreviation}</span>
+                      </div>
+                      <div className="text-base font-bold font-mono" style={{ color: definition.color }}>
+                        {character.derived[definition.key] ?? '—'}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1599,7 +1752,7 @@ export default function RoomPage() {
                 <h4 className="text-xs font-semibold text-brass-dark mb-2.5">装备</h4>
                 <p className="text-sm text-text-body leading-[1.7] mb-4">{character.equipment || '未填写装备'}</p>
                 <h4 className="text-xs font-semibold text-brass-dark mb-2.5">背景故事</h4>
-                <p className="text-sm text-text-body leading-[1.7] mb-4">{character.background || '未填写背景故事'}</p>
+                <p className="text-sm text-text-body leading-[1.7] mb-4 whitespace-pre-wrap">{character.background || '未填写背景故事'}</p>
                 <h4 className="text-xs font-semibold text-brass-dark mb-2.5">备注</h4>
                 <p className="text-sm text-text-body leading-[1.7]">{character.notes || '未填写备注'}</p>
               </>
@@ -1628,7 +1781,10 @@ export default function RoomPage() {
             <div className="space-y-2">
               {(() => {
                 const occSkillIds = character.info.occupationId
-                  ? ruleset?.occupations.find(o => o.id === character.info.occupationId)?.skillIds ?? []
+                  ? [
+                      ...(ruleset?.occupations.find(o => o.id === character.info.occupationId)?.skillIds ?? []),
+                      ...(character.occupationChoiceSkillIds ?? []),
+                    ]
                   : []
                 const list = (ruleset?.skills ?? [])
                   .filter((skill) => skillsTab === 'occupation' ? occSkillIds.includes(skill.id) : !occSkillIds.includes(skill.id))
@@ -1731,9 +1887,9 @@ export default function RoomPage() {
 
       {/* Panel: 主持人语音 */}
       <BottomPanel open={openPanel === 'speech'} onClose={() => setOpenPanel(null)} title="主持人语音">
-        {!hostSpeech.supported ? (
+        {!hostSpeech.available ? (
           <p className="text-sm text-text-dim py-6 text-center">
-            当前浏览器不支持语音朗读，文本消息仍可正常使用
+            主持人语音服务当前不可用，文本消息和游戏操作仍可正常使用
           </p>
         ) : (
           <div className="space-y-4">
@@ -1754,28 +1910,43 @@ export default function RoomPage() {
 
             <label className="block">
               <span className="block text-xs font-semibold text-text-muted mb-1.5">音色</span>
-              <select
-                aria-label="主持人音色"
-                value={hostSpeech.selectedVoiceURI ?? ''}
-                onChange={(event) => hostSpeech.setSelectedVoiceURI(event.target.value)}
-                disabled={hostSpeech.voices.length === 0}
-                className="w-full bg-input border border-border-light rounded-md px-3 py-2 text-sm text-text-primary disabled:opacity-50"
-              >
-                {hostSpeech.voices.length === 0 ? (
-                  <option value="">正在加载音色…</option>
-                ) : (
-                  hostSpeech.voices.map((voice) => (
-                    <option key={voice.voiceURI} value={voice.voiceURI}>
-                      {voice.name} · {voice.lang}
-                    </option>
-                  ))
-                )}
-              </select>
+              {isHost ? (
+                <select
+                  aria-label="主持人音色"
+                  value={hostSpeech.voiceType ?? ''}
+                  onChange={(event) => { void hostSpeech.updateVoice(event.target.value) }}
+                  disabled={hostSpeech.voices.length === 0}
+                  className="w-full bg-input border border-border-light rounded-md px-3 py-2 text-sm text-text-primary disabled:opacity-50"
+                >
+                  {hostSpeech.voices.map((voice) => (
+                    <option key={voice.voiceType} value={voice.voiceType}>{voice.label}</option>
+                  ))}
+                </select>
+              ) : (
+                <div className="w-full bg-panel border border-border-light rounded-md px-3 py-2 text-sm text-text-primary">
+                  {hostSpeech.voices.find((voice) => voice.voiceType === hostSpeech.voiceType)?.label ?? hostSpeech.voiceType}
+                </div>
+              )}
+              <span className="block text-[10px] text-text-dim mt-1">情绪由 DouBao TTS 2.0 根据当前句自动表达</span>
+            </label>
+
+            <label className="block text-xs text-text-muted">
+              播放速度：{hostSpeech.playbackRate.toFixed(2)}×
+              <input type="range" min="0.75" max="1.25" step="0.05" value={hostSpeech.playbackRate}
+                onChange={(event) => hostSpeech.setPlaybackRate(Number(event.target.value))}
+                className="w-full accent-brass" aria-label="主持人语音播放速度" />
+            </label>
+
+            <label className="block text-xs text-text-muted">
+              音量：{Math.round(hostSpeech.volume * 100)}%
+              <input type="range" min="0" max="1" step="0.05" value={hostSpeech.volume}
+                onChange={(event) => hostSpeech.setVolume(Number(event.target.value))}
+                className="w-full accent-brass" aria-label="主持人语音音量" />
             </label>
 
             <div className="flex items-center justify-between text-[11px] text-text-muted">
               <span>
-                {hostSpeech.status === 'speaking' ? '正在朗读' : hostSpeech.status === 'paused' ? '已暂停' : '空闲'}
+                {hostSpeech.status === 'synthesizing' ? '正在合成' : hostSpeech.status === 'buffering' ? '正在缓冲' : hostSpeech.status === 'playing' ? '正在朗读' : hostSpeech.status === 'paused' ? '已暂停' : hostSpeech.status === 'failed' ? '播放失败' : '空闲'}
               </span>
               <span>待播放 {hostSpeech.queueLength} 条</span>
             </div>
@@ -1786,7 +1957,7 @@ export default function RoomPage() {
                 aria-label="暂停朗读"
                 title="暂停朗读"
                 onClick={hostSpeech.pause}
-                disabled={hostSpeech.status !== 'speaking'}
+                disabled={hostSpeech.status !== 'playing'}
                 className="flex-1 py-2 rounded-sm bg-panel border border-border-light text-text-muted text-xs font-medium flex items-center justify-center gap-1 disabled:opacity-40"
               >
                 <Pause className="w-3.5 h-3.5" />
@@ -1815,6 +1986,7 @@ export default function RoomPage() {
                 停止
               </button>
             </div>
+            {hostSpeech.error && <p className="text-xs text-danger">{hostSpeech.error}</p>}
           </div>
         )}
       </BottomPanel>
@@ -1866,6 +2038,61 @@ export default function RoomPage() {
       </BottomPanel>
 
       {/* ── Dice Modal ── */}
+      {activePlanId && playerId && (
+        <div className="mx-4 mb-3">
+          <button
+            type="button"
+            className="w-full rounded-lg border border-border-light bg-white px-3 py-2 text-xs text-text-muted"
+            onClick={() => sdk.roomSocket.cancelActionPlan(playerId, {
+              clientActionId: activePlanId,
+              requestId: randomActionId(),
+            })}
+          >
+            停止后续行动（已完成步骤会保留）
+          </button>
+        </div>
+      )}
+      <CheckWorkflowPanel
+        decision={pendingDecisionForUi(pendingAdjudication)}
+        checkRun={checkRunForUi(pendingAdjudication)}
+        onSelectSkill={(candidateId) => {
+          if (!playerId || !pendingAdjudication?.pendingDecision) return
+          const decision = pendingAdjudication.pendingDecision
+          sdk.roomSocket.selectAdjudication(playerId, {
+            clientActionId: pendingAdjudication.correlationId,
+            requestId: randomActionId(),
+            sourceRevision: pendingAdjudication.sourceRevision,
+            decisionId: decision.decision_id,
+            decisionVersion: decision.decision_version,
+            candidateId,
+          })
+        }}
+        onCancel={() => {
+          if (!playerId || !pendingAdjudication?.pendingDecision) return
+          const decision = pendingAdjudication.pendingDecision
+          sdk.roomSocket.selectAdjudication(playerId, {
+            clientActionId: pendingAdjudication.correlationId,
+            requestId: randomActionId(),
+            sourceRevision: pendingAdjudication.sourceRevision,
+            decisionId: decision.decision_id,
+            decisionVersion: decision.decision_version,
+            cancel: true,
+          })
+        }}
+        onPostRollOption={(optionId, revisedMethod) => {
+          if (!playerId || !pendingAdjudication?.checkRun) return
+          const checkRun = pendingAdjudication.checkRun
+          sdk.roomSocket.decidePostRoll(playerId, {
+            clientActionId: pendingAdjudication.correlationId,
+            requestId: randomActionId(),
+            sourceRevision: pendingAdjudication.sourceRevision,
+            checkId: checkRun.check_id,
+            checkVersion: checkRun.version,
+            optionId,
+            revisedMethod,
+          })
+        }}
+      />
       <DiceModal
         open={showDice}
         onClose={() => setShowDice(false)}

@@ -66,6 +66,18 @@
 }
 
 @layer utilities {
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
   .animate-screen-in {
     animation: screenIn 0.3s ease;
   }
@@ -94,4 +106,727 @@
 }
 .animate-slide-up {
   animation: slide-up 0.3s ease-out;
+}
+
+.home-scene {
+  position: relative;
+  isolation: isolate;
+  min-height: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #170d07;
+}
+
+.home-scene__background {
+  position: absolute;
+  inset: 0;
+  z-index: -3;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  user-select: none;
+  pointer-events: none;
+}
+
+.home-scene__identity {
+  position: absolute;
+  top: max(1.15rem, env(safe-area-inset-top));
+  right: 0.3rem;
+  z-index: 4;
+  width: clamp(10.7rem, 58vw, 14.2rem);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  transition: transform 150ms ease, filter 150ms ease;
+}
+
+.home-scene__identity img {
+  display: block;
+  width: 100%;
+  height: auto;
+  pointer-events: none;
+}
+
+.home-scene__identity:focus-visible,
+.home-scene__action:focus-visible {
+  outline: 3px solid #f5d899;
+  outline-offset: 3px;
+}
+
+.home-scene__identity:hover {
+  filter: brightness(1.12);
+}
+
+.home-scene__identity:active,
+.home-scene__action:active {
+  transform: scale(0.97);
+}
+
+.home-scene__nickname {
+  position: absolute;
+  top: 31%;
+  left: 11%;
+  width: 66%;
+  overflow: hidden;
+  color: #e9c987;
+  font-family: Georgia, 'Songti SC', 'STSong', serif;
+  font-size: clamp(0.8rem, 3.6vw, 1.1rem);
+  line-height: 1.2;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-shadow: 0 1px 3px rgb(0 0 0 / 85%);
+  pointer-events: none;
+}
+
+.home-scene__actions {
+  position: absolute;
+  top: clamp(14.5rem, 33vh, 18rem);
+  left: 8%;
+  z-index: 4;
+  display: flex;
+  width: 46%;
+  flex-direction: column;
+  align-items: stretch;
+  gap: clamp(0.15rem, 0.45vh, 0.3rem);
+}
+
+.home-scene__action {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-height: 3rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  transition: filter 150ms ease, transform 150ms ease;
+}
+
+.home-scene__action img {
+  display: block;
+  width: 100%;
+  height: auto;
+  pointer-events: none;
+  user-select: none;
+}
+
+.home-scene__action:hover {
+  filter: brightness(1.1) saturate(1.08);
+}
+
+.home-scene__pins {
+  position: absolute;
+  top: -1.5rem;
+  left: -5%;
+  z-index: 5;
+  width: 180%;
+  max-width: none;
+  height: auto;
+  transform: scaleY(1.15);
+  transform-origin: center;
+  pointer-events: none;
+  user-select: none;
+}
+
+.home-scene__cat {
+  position: absolute;
+  right: -13%;
+  bottom: 6%;
+  z-index: 6;
+  width: 80%;
+  max-width: 22rem;
+  height: auto;
+  pointer-events: none;
+  user-select: none;
+}
+
+.home-scene__books {
+  position: absolute;
+  bottom: max(-1rem, env(safe-area-inset-bottom));
+  left: -4%;
+  z-index: 2;
+  width: 35%;
+  max-width: 10rem;
+  height: auto;
+  pointer-events: none;
+  user-select: none;
+}
+
+.home-scene__newspaper {
+  position: absolute;
+  right: -4%;
+  bottom: max(-0.5rem, env(safe-area-inset-bottom));
+  z-index: 2;
+  width: 45%;
+  max-width: 12rem;
+  height: auto;
+  pointer-events: none;
+  user-select: none;
+}
+
+.create-room-scene {
+  position: relative;
+  isolation: isolate;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  color: #2b1b0f;
+  background: #100a06;
+  font-family: Georgia, 'STKaiti', 'KaiTi', 'Songti SC', 'STSong', serif;
+}
+
+.create-room-scene button,
+.create-room-scene input {
+  font: inherit;
+}
+
+.create-room-scene__background {
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  pointer-events: none;
+  user-select: none;
+}
+
+.create-room-scene__header,
+.create-room-scene__settings,
+.create-room-scene__summary {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.create-room-scene__header {
+  z-index: 8;
+}
+
+.create-room-scene__back {
+  position: absolute;
+  top: 0.2%;
+  left: -1%;
+  width: 22%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  pointer-events: auto;
+  transition: filter 150ms ease, transform 150ms ease;
+}
+
+.create-room-scene__back img,
+.create-room-scene__page-title,
+.create-room-scene__archive,
+.create-room-scene__settings-title,
+.create-room-scene__cat,
+.create-room-scene__folder,
+.create-room-scene__summary-flourish,
+.create-room-scene__summary-title,
+.create-room-scene__folder-tie {
+  display: block;
+  height: auto;
+  pointer-events: none;
+  user-select: none;
+}
+
+.create-room-scene__back img {
+  width: 100%;
+}
+
+.create-room-scene__page-title {
+  position: absolute;
+  top: 3.7%;
+  left: 17.8%;
+  width: 31%;
+}
+
+.create-room-scene__settings {
+  z-index: 1;
+}
+
+.create-room-scene__archive {
+  position: absolute;
+  top: 6.7%;
+  left: -3%;
+  width: 107%;
+  max-width: none;
+}
+
+.create-room-scene__settings-title {
+  position: absolute;
+  top: 16.35%;
+  left: 50%;
+  width: 38%;
+  transform: translateX(-50%);
+}
+
+.create-room-scene__room-name-label,
+.create-room-scene__player-label,
+.create-room-scene__player-hint {
+  position: absolute;
+  color: #382111;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-shadow: 0 1px 0 rgb(255 244 207 / 24%);
+  pointer-events: none;
+}
+
+.create-room-scene__room-name-label {
+  top: calc(23.4% + 2px);
+  left: 11%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24%;
+  height: 6.5%;
+  font-size: clamp(14px, 4vw, 18px);
+  text-align: center;
+}
+
+.create-room-scene__room-name-input {
+  position: absolute;
+  top: 23.9%;
+  left: 36.4%;
+  z-index: 2;
+  width: 50%;
+  height: 6.5%;
+  padding: 0 1.5%;
+  border: 0;
+  border-radius: 4px;
+  color: #412a18;
+  background: transparent;
+  font-size: clamp(17px, 4.8vw, 22px);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-align: center;
+  pointer-events: auto;
+  transition: background-color 150ms ease, box-shadow 150ms ease;
+}
+
+.create-room-scene__room-name-input::placeholder {
+  color: rgb(73 48 28 / 60%);
+}
+
+.create-room-scene__room-name-input:focus {
+  background: rgb(255 244 207 / 16%);
+  box-shadow: inset 0 0 0 2px rgb(91 52 27 / 35%);
+}
+
+.create-room-scene__player-label {
+  top: 31.1%;
+  left: 11%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24%;
+  height: 6.9%;
+  font-size: clamp(14px, 4vw, 18px);
+  text-align: center;
+}
+
+.create-room-scene__player-hint {
+  top: 36.55%;
+  left: 15.3%;
+  max-width: 20%;
+  color: rgb(63 39 21 / 70%);
+  font-size: clamp(10px, 2.9vw, 13px);
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: 0.03em;
+}
+
+.create-room-scene__player-control {
+  position: absolute;
+  top: 31.1%;
+  left: 39.2%;
+  z-index: 3;
+  display: grid;
+  grid-template-columns: minmax(32px, 8vw) minmax(72px, 1fr) minmax(32px, 8vw);
+  align-items: center;
+  width: 42.6%;
+  height: 6.9%;
+  pointer-events: auto;
+}
+
+.create-room-scene__player-control > button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  justify-self: center;
+  width: clamp(30px, 8vw, 35px);
+  height: clamp(30px, 4.3vh, 36px);
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  color: #3c2412;
+  background: rgb(255 240 198 / 8%);
+  cursor: pointer;
+  transition: background-color 150ms ease, opacity 150ms ease, transform 150ms ease;
+}
+
+.create-room-scene__player-control > button svg {
+  width: 65%;
+  height: 65%;
+  stroke-width: 2;
+}
+
+.create-room-scene__player-control > button:first-child {
+  position: relative;
+  left: -6px;
+}
+
+.create-room-scene__player-control > button:last-child {
+  position: relative;
+  right: -12px;
+}
+
+.create-room-scene__player-control > button:active:not(:disabled) {
+  background: rgb(91 52 27 / 15%);
+  transform: scale(0.9);
+}
+
+.create-room-scene__player-control > button:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.create-room-scene__player-value {
+  position: relative;
+  left: calc(0.3vw + 11.5px);
+  top: calc(-0.3vh + 2px);
+  transform: translateX(-36%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  color: #382111;
+  font-size: clamp(15px, 4.5vw, 20px);
+  font-weight: 700;
+}
+
+.create-room-scene__player-value input {
+  position: relative;
+  top: 0.125rem;
+  left: calc(18% + 3px);
+  width: 2.2rem;
+  height: 2rem;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: transparent !important;
+  box-shadow: none;
+  font-family: 'Courier New', 'SF Mono', monospace;
+  font-variant-numeric: tabular-nums;
+  line-height: 2rem;
+  text-align: center;
+  font-weight: inherit;
+  appearance: textfield;
+}
+
+.create-room-scene__player-value input::-webkit-inner-spin-button,
+.create-room-scene__player-value input::-webkit-outer-spin-button {
+  margin: 0;
+  appearance: none;
+}
+
+.create-room-scene__game-stamp {
+  position: absolute;
+  top: 43.2%;
+  left: 10%;
+  z-index: 2;
+  width: 52%;
+  height: 23.5%;
+  padding: 0;
+  overflow: visible;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  transition: filter 160ms ease, transform 160ms ease;
+}
+
+.create-room-scene__stamp-paper {
+  position: absolute;
+  top: -47%;
+  left: -3%;
+  width: 108%;
+  height: auto;
+  max-width: none;
+  pointer-events: none;
+  user-select: none;
+}
+
+.create-room-scene__dice {
+  position: absolute;
+  top: 10%;
+  left: 33%;
+  width: 34%;
+  height: auto;
+  pointer-events: none;
+  user-select: none;
+}
+
+.create-room-scene__select-module-title {
+  position: absolute;
+  top: 44%;
+  left: 24%;
+  width: 63%;
+  color: #2b1b0f;
+  font-size: clamp(20px, 5.8vw, 26px);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  text-align: center;
+  white-space: nowrap;
+  transform: rotate(-5deg);
+  pointer-events: none;
+  user-select: none;
+}
+
+.create-room-scene__cat {
+  position: absolute;
+  top: 35.5%;
+  right: -7.5%;
+  z-index: 3;
+  width: 56%;
+}
+
+.create-room-scene__summary {
+  z-index: 4;
+}
+
+.create-room-scene__folder {
+  position: absolute;
+  top: 50.5%;
+  left: 0;
+  width: 100%;
+}
+
+.create-room-scene__summary-flourish {
+  position: absolute;
+  top: 49%;
+  width: 50%;
+}
+
+.create-room-scene__summary-flourish--left {
+  left: 11%;
+}
+
+.create-room-scene__summary-flourish--right {
+  left: 39%;
+  transform: scaleX(-1);
+}
+
+.create-room-scene__summary-title {
+  position: absolute;
+  top: 63.8%;
+  left: 50%;
+  width: 38%;
+  transform: translateX(-50%);
+}
+
+.create-room-scene__summary-list {
+  position: absolute;
+  top: 70.7%;
+  left: 11.6%;
+  z-index: 2;
+  width: 76.8%;
+  height: 15.8%;
+  margin: 0;
+  color: rgb(52 31 16 / 88%);
+  font-size: clamp(11px, 3.6vw, 17px);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  pointer-events: auto;
+}
+
+.create-room-scene__summary-list > div {
+  display: grid;
+  grid-template-columns: 40% minmax(0, 1fr);
+  align-items: center;
+  height: 20%;
+  padding: 0;
+}
+
+.create-room-scene__summary-list > div:not(:first-child) {
+  position: relative;
+  top: 5%;
+}
+
+.create-room-scene__summary-list > div:nth-child(4) {
+  top: 7%;
+}
+
+.create-room-scene__summary-list > div:nth-child(5) {
+  top: calc(9% + 1px);
+}
+
+.create-room-scene__summary-list dt,
+.create-room-scene__summary-list dd {
+  min-width: 0;
+  margin: 0;
+  text-align: center;
+}
+
+.create-room-scene__summary-list dd {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.create-room-scene__summary-player-limit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35em;
+}
+
+.create-room-scene__summary-player-limit span {
+  line-height: 1;
+}
+
+.create-room-scene__folder-tie {
+  position: absolute;
+  top: 84.2%;
+  left: 39.5%;
+  z-index: 7;
+  width: 23%;
+}
+
+.create-room-scene__create {
+  position: absolute;
+  bottom: 0.2%;
+  left: 18%;
+  z-index: 6;
+  width: 64%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  transition: filter 160ms ease, opacity 160ms ease, transform 160ms ease;
+}
+
+.create-room-scene__create img {
+  display: block;
+  width: 100%;
+  height: auto;
+  pointer-events: none;
+  user-select: none;
+}
+
+.create-room-scene__create span {
+  position: absolute;
+  top: 42%;
+  left: 50%;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  color: #f1d39a;
+  background: rgb(45 25 12 / 88%);
+  font-size: clamp(10px, 3vw, 13px);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  transform: translate(-50%, -50%);
+  white-space: nowrap;
+}
+
+.create-room-scene__create:disabled {
+  filter: grayscale(0.55) brightness(0.62);
+  opacity: 0.62;
+  cursor: not-allowed;
+}
+
+.create-room-scene__error {
+  position: absolute;
+  right: 12%;
+  bottom: 9.3%;
+  left: 12%;
+  z-index: 9;
+  margin: 0;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid rgb(87 35 22 / 45%);
+  border-radius: 3px;
+  color: #5d2118;
+  background: rgb(221 184 127 / 92%);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 20%);
+  font-size: clamp(9px, 2.8vw, 12px);
+  font-weight: 700;
+  text-align: center;
+}
+
+.create-room-scene__back:hover,
+.create-room-scene__game-stamp:hover,
+.create-room-scene__create:hover:not(:disabled) {
+  filter: brightness(1.1) saturate(1.08);
+}
+
+.create-room-scene__back:active,
+.create-room-scene__game-stamp:active,
+.create-room-scene__create:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.create-room-scene__back:focus-visible,
+.create-room-scene__game-stamp:focus-visible,
+.create-room-scene__create:focus-visible,
+.create-room-scene__player-control button:focus-visible,
+.create-room-scene__player-value input:focus-visible {
+  outline: 3px solid #f1d394;
+  outline-offset: 2px;
+}
+
+@media (max-height: 700px) {
+  .home-scene__actions {
+    top: 11.8rem;
+    width: 45%;
+    gap: 0;
+  }
+
+  .home-scene__cat {
+    right: -13%;
+    bottom: 3%;
+    width: 76%;
+  }
+
+  .home-scene__books,
+  .home-scene__newspaper {
+    opacity: 0.72;
+  }
+
+  .create-room-scene__room-name-label,
+  .create-room-scene__player-label {
+    font-size: 11px;
+  }
+
+  .create-room-scene__room-name-input {
+    font-size: 12px;
+  }
+
+  .create-room-scene__summary-list {
+    font-size: 10px;
+  }
+
+  .create-room-scene__player-hint {
+    font-size: 8px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-screen-in,
+  .animate-fade-in,
+  .animate-slide-up {
+    animation: none;
+  }
+
+  .home-scene__identity,
+  .home-scene__action,
+  .create-room-scene__back,
+  .create-room-scene__game-stamp,
+  .create-room-scene__create,
+  .create-room-scene__player-control > button {
+    transition: none;
+  }
 }

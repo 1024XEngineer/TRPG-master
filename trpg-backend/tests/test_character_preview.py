@@ -90,6 +90,28 @@ async def test_preview_returns_authoritative_compute_result(client: AsyncClient)
     assert data["validation"] == []
 
 
+async def test_preview_accepts_and_resolves_explicit_occupation_choices(
+    client: AsyncClient,
+) -> None:
+    session = await register(client)
+
+    response = await client.post(
+        PREVIEW_URL,
+        json={
+            "attributes": ATTRS,
+            "occupationId": 1,
+            "skills": {"credit-rating": 30},
+            "occupationChoiceSkillIds": ["climb", "swim"],
+        },
+        headers=bearer(session["token"]),
+    )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["resolvedOccupationChoiceSkillIds"] == ["climb", "swim"]
+    assert data["validation"] == []
+
+
 async def test_preview_surfaces_issues_for_invalid_draft(client: AsyncClient) -> None:
     """预览接口即使卡不合法也应该返回 200 + 校验报告，不是抛错——它是渲染用
     的接口，前端要能实时看到"哪里超了"，不是等 complete 才知道。"""

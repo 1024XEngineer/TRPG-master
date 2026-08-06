@@ -4,6 +4,9 @@
  */
 import type {
   ActionSubmitPayload,
+  ActionPlanCancelPayload,
+  AdjudicationChoicePayload,
+  AdjudicationPostRollPayload,
   ChatSendPayload,
   AgentPlayerView,
   AgentTurnPayload,
@@ -237,6 +240,23 @@ export function isValidTurnCompleted(value: unknown): value is TurnCompletedEven
   );
 }
 
+function isValidPlanProgress(p: Record<string, unknown>): boolean {
+  return (
+    typeof p.correlationId === 'string' &&
+    typeof p.currentStep === 'number' &&
+    Number.isInteger(p.currentStep) &&
+    typeof p.completedSteps === 'number' &&
+    Number.isInteger(p.completedSteps) &&
+    typeof p.totalSteps === 'number' &&
+    Number.isInteger(p.totalSteps) &&
+    (p.phase === 'understanding' ||
+      p.phase === 'executing' ||
+      p.phase === 'waiting_for_player' ||
+      p.phase === 'stopped' ||
+      p.phase === 'completed')
+  );
+}
+
 /**
  * 每个 S→C 事件各自的 payload 校验器。
  *
@@ -259,6 +279,8 @@ const PAYLOAD_VALIDATORS: {
     (p.messageId === undefined ||
       p.messageId === null ||
       (typeof p.messageId === 'string' && p.messageId.length > 0)),
+  'host_speech.settings_updated': (p) =>
+    p.voiceType === null || typeof p.voiceType === 'string',
   // 片段只是 narration.push 的渐进展示形式，不是权威消息（issue #203）：
   // messageId 用来归组、sequence 用来排序去重，拼接结果必须等于最终 push 的
   // text。下游不得把拼接内容当成权威历史。
@@ -293,6 +315,16 @@ const PAYLOAD_VALIDATORS: {
     typeof p.code === 'string' &&
     typeof p.publicMessage === 'string' &&
     typeof p.retryable === 'boolean',
+  'plan.started': isValidPlanProgress,
+  'plan.step_changed': isValidPlanProgress,
+  'plan.stopped': isValidPlanProgress,
+  'plan.completed': isValidPlanProgress,
+  'adjudication.pending': (p) =>
+    typeof p.correlationId === 'string' &&
+    (p.status === 'awaiting_skill_choice' ||
+      p.status === 'awaiting_post_roll_decision') &&
+    (p.status !== 'awaiting_skill_choice' || isRecord(p.pendingDecision)) &&
+    (p.status !== 'awaiting_post_roll_decision' || isRecord(p.checkRun)),
   'view.updated': (p) =>
     typeof p.playerId === 'string' &&
     isValidPlayerView(p.playerView) &&
@@ -570,6 +602,42 @@ export class RoomSocket {
       reject(new RoomSocketTransportError('WebSocket is not connected'));
     }
     return promise;
+  }
+
+  /** Submit through the finite ActionPlan production path (issue #225). */
+  submitPlannedAction(
+    playerId: string,
+    payload: ActionSubmitPayload,
+  ): Promise<AgentTurnPayload> {
+    const existing = this.pendingActions.get(payload.clientActionId);
+    if (existing) {
+      this.send('action.plan.submit', playerId, payload);
+      return existing.promise;
+    }
+    let resolve!: (result: AgentTurnPayload) => void;
+    let reject!: (error: Error) => void;
+    const promise = new Promise<AgentTurnPayload>((resolveAction, rejectAction) => {
+      resolve = resolveAction;
+      reject = rejectAction;
+    });
+    this.pendingActions.set(payload.clientActionId, { promise, resolve, reject });
+    if (!this.send('action.plan.submit', playerId, payload)) {
+      this.pendingActions.delete(payload.clientActionId);
+      reject(new RoomSocketTransportError('WebSocket is not connected'));
+    }
+    return promise;
+  }
+
+  selectAdjudication(playerId: string, payload: AdjudicationChoicePayload): void {
+    this.send('adjudication.select', playerId, payload);
+  }
+
+  decidePostRoll(playerId: string, payload: AdjudicationPostRollPayload): void {
+    this.send('adjudication.post_roll', playerId, payload);
+  }
+
+  cancelActionPlan(playerId: string, payload: ActionPlanCancelPayload): void {
+    this.send('action.plan.cancel', playerId, payload);
   }
 
   getPlayerView(): AgentPlayerView | null {

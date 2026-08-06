@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "action-plan.schema.json",
+  "$defs": {
+    "ActionPlanStep": {
+      "additionalProperties": false,
+      "description": "One player-safe semantic goal; it contains no future adjudication.",
+      "properties": {
+        "kind": {
+          "enum": [
+            "travel",
+            "wait",
+            "rest",
+            "action",
+            "dialogue"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "semantic_goal": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Semantic Goal",
+          "type": "string"
+        },
+        "public_progress_label": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Public Progress Label"
+        }
+      },
+      "required": [
+        "kind",
+        "semantic_goal"
+      ],
+      "title": "ActionPlanStep",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "A variable-length, finite and strictly sequential player plan.",
+  "properties": {
+    "kind": {
+      "const": "action_plan",
+      "default": "action_plan",
+      "title": "Kind",
+      "type": "string"
+    },
+    "goal": {
+      "maxLength": 2000,
+      "minLength": 1,
+      "title": "Goal",
+      "type": "string"
+    },
+    "steps": {
+      "items": {
+        "$ref": "#/$defs/ActionPlanStep"
+      },
+      "minItems": 2,
+      "title": "Steps",
+      "type": "array"
+    }
+  },
+  "required": [
+    "goal",
+    "steps"
+  ],
+  "title": "ActionPlan",
+  "type": "object"
+}

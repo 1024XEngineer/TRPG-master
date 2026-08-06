@@ -1,13 +1,18 @@
 /**
  * 本文件由 `npm run codegen` 从后端 pydantic 模型自动生成，请勿手改。
  *
- * 源头：trpg-backend/app/dto/{auth,room,character,common,ws}.py
+ * 源头：trpg-backend/app/dto/ 下由 export_schema.py 登记的 DTO（含 host_speech.py）
  * 重新生成：
  *   1. cd trpg-backend && uv run python scripts/export_schema.py
  *   2. cd trpg-sdk && npm run codegen
  * 生成后把这个文件的改动一并提交——CI 会重新跑一遍上面两步，用 git diff
  * 校验有没有人改了后端 DTO 却忘记重新生成（issue #75 决策 3）。
  */
+
+export interface AcceptResultOption {
+  option_id: string;
+  kind?: "accept_result";
+}
 
 /**
  * action.submit 原话广播 payload。
@@ -29,6 +34,11 @@ export interface ActionDeclarationOption {
    * @minItems 1
    */
   semantic_hints: [string, ...string[]];
+}
+
+export interface ActionPlanCancelPayload {
+  clientActionId: string;
+  requestId: string;
 }
 
 /**
@@ -54,6 +64,41 @@ export interface ActorValueView {
   id: string;
   name: string;
   value: number;
+}
+
+/**
+ * Choose or cancel a v3 Engine-owned pending skill decision.
+ */
+export interface AdjudicationChoicePayload {
+  clientActionId: string;
+  requestId: string;
+  sourceRevision: string;
+  decisionId: string;
+  decisionVersion: number;
+  candidateId?: string | null;
+  cancel?: boolean;
+}
+
+export interface AdjudicationPendingPayload {
+  correlationId: string;
+  planId?: string | null;
+  sourceRevision: string;
+  status: "awaiting_skill_choice" | "awaiting_post_roll_decision";
+  pendingDecision?: PendingCheckDecisionView | null;
+  checkRun?: CheckRunView | null;
+}
+
+/**
+ * Resolve a v3 Engine-owned post-roll decision.
+ */
+export interface AdjudicationPostRollPayload {
+  clientActionId: string;
+  requestId: string;
+  sourceRevision: string;
+  checkId: string;
+  checkVersion: number;
+  optionId: string;
+  revisedMethod?: string | null;
 }
 
 /**
@@ -133,6 +178,7 @@ export interface CharacterComputeResult {
   occupationSkillPoints: SkillPointsBudgetView;
   interestSkillPoints: SkillPointsBudgetView;
   skillView: SkillComputeView[];
+  resolvedOccupationChoiceSkillIds?: string[];
   validation: ValidationIssueView[];
 }
 
@@ -155,6 +201,7 @@ export interface CharacterPreviewRequest {
   skills?: {
     [k: string]: number;
   };
+  occupationChoiceSkillIds?: string[] | null;
 }
 
 /**
@@ -186,6 +233,7 @@ export interface CharacterRead {
   skills?: {
     [k: string]: number;
   };
+  occupationChoiceSkillIds?: string[] | null;
   equipment?: string[];
   occupation?: string | null;
   background?: string;
@@ -235,6 +283,7 @@ export interface CharacterUpdateBody {
   skills: {
     [k: string]: number;
   };
+  occupationChoiceSkillIds?: string[] | null;
   equipment?: EquipmentItem[];
   occupation?: string | null;
   background?: string;
@@ -305,6 +354,12 @@ export interface CheckResultPayload {
   result: string;
 }
 
+export interface CheckRoll {
+  value: number;
+  degree: "critical_success" | "extreme_success" | "hard_success" | "regular_success" | "failure" | "fumble";
+  passed: boolean;
+}
+
 /**
  * 为待处理动作提交玩家选择的技能与 D100 结果。
  */
@@ -312,6 +367,18 @@ export interface CheckRollPayload {
   clientActionId: string;
   skill: string;
   rollValue: number;
+}
+
+export interface CheckRunView {
+  check_id: string;
+  action_request_id: string;
+  selected_candidate_id: string;
+  status: "awaiting_post_roll_decision" | "resolved";
+  version: number;
+  roll_count: number;
+  roll: CheckRoll;
+  post_roll_options?: (AcceptResultOption | SpendResourceOption | PushOption)[];
+  final_result?: CheckRoll | null;
 }
 
 /**
@@ -384,7 +451,10 @@ export type ErrorCode =
   | "PORTRAIT_GENERATION_IN_PROGRESS"
   | "PORTRAIT_CONTENT_REJECTED"
   | "PORTRAIT_GENERATION_FAILED"
-  | "PORTRAIT_GENERATION_TIMEOUT";
+  | "PORTRAIT_GENERATION_TIMEOUT"
+  | "HOST_SPEECH_UNAVAILABLE"
+  | "HOST_SPEECH_FAILED"
+  | "HOST_SPEECH_TIMEOUT";
 
 /**
  * 错误信息的具体内容，只在 success=false 时出现在 error 字段里。
@@ -457,6 +527,37 @@ export interface GameSystemRead {
   worldName?: string | null;
   worldDescription?: string | null;
   gameDescription?: string | null;
+}
+
+export interface HostSpeechManifestRead {
+  messageId: string;
+  sentences: HostSpeechSentenceRead[];
+}
+
+export interface HostSpeechSentenceRead {
+  index: number;
+  text: string;
+}
+
+export interface HostSpeechSettingsRead {
+  available: boolean;
+  provider: string;
+  voiceType: string | null;
+  voices: HostSpeechVoiceRead[];
+  autoEmotion?: boolean;
+}
+
+export interface HostSpeechSettingsUpdate {
+  voiceType: string;
+}
+
+export interface HostSpeechSettingsUpdatedPayload {
+  voiceType: string | null;
+}
+
+export interface HostSpeechVoiceRead {
+  voiceType: string;
+  label: string;
 }
 
 /**
@@ -657,6 +758,41 @@ export interface OpeningStartedPayload {
   messageId: string;
 }
 
+export interface PendingCheckDecisionView {
+  decision_id: string;
+  status?: "awaiting_skill_choice";
+  action_request_id: string;
+  source_revision: string;
+  decision_version: number;
+  actor_id: string;
+  summary: string;
+  /**
+   * @minItems 1
+   */
+  options: [PendingCheckOption, ...PendingCheckOption[]];
+  allow_cancel?: true;
+}
+
+export interface PendingCheckOption {
+  candidate_id: string;
+  skill_id: string;
+  display_name: string;
+  target_value: number;
+  difficulty: "regular" | "hard" | "extreme";
+  method_summary: string;
+  player_safe_reason: string;
+}
+
+export interface PlanProgressPayload {
+  correlationId: string;
+  currentStep: number;
+  completedSteps: number;
+  totalSteps: number;
+  phase: "understanding" | "executing" | "waiting_for_player" | "stopped" | "completed";
+  publicProgressLabel?: string | null;
+  safeReason?: string | null;
+}
+
 /**
  * player.joined 推送 payload（issue #77 新增，同上，本期不会真的发出）。
  */
@@ -707,6 +843,13 @@ export interface PortraitGenerationResult {
   negativePrompt: string;
   promptSummary: string;
   promptSource: "deepseek" | "deterministic" | "deterministic_fallback";
+}
+
+export interface PushOption {
+  option_id: string;
+  kind?: "push";
+  requires_revised_method?: true;
+  player_safe_risk_summary: string;
 }
 
 /**
@@ -1007,6 +1150,14 @@ export interface SkillSpec {
   base: number | string;
   category: string;
   relatedAttr?: string | null;
+}
+
+export interface SpendResourceOption {
+  option_id: string;
+  kind?: "spend_resource";
+  resource_id?: "luck";
+  cost: number;
+  result_degree: "critical_success" | "extreme_success" | "hard_success" | "regular_success" | "failure" | "fumble";
 }
 
 export interface ToolCompletedPayload {

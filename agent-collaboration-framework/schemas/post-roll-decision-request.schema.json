@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "post-roll-decision-request.schema.json",
+  "$defs": {
+    "PushAdjudication": {
+      "additionalProperties": false,
+      "properties": {
+        "method_description": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Method Description",
+          "type": "string"
+        }
+      },
+      "required": [
+        "method_description"
+      ],
+      "title": "PushAdjudication",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "request_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Request Id",
+      "type": "string"
+    },
+    "room_id": {
+      "minLength": 1,
+      "title": "Room Id",
+      "type": "string"
+    },
+    "player_id": {
+      "minLength": 1,
+      "title": "Player Id",
+      "type": "string"
+    },
+    "source_revision": {
+      "minLength": 1,
+      "title": "Source Revision",
+      "type": "string"
+    },
+    "check_id": {
+      "minLength": 1,
+      "title": "Check Id",
+      "type": "string"
+    },
+    "check_version": {
+      "minimum": 1,
+      "title": "Check Version",
+      "type": "integer"
+    },
+    "option_id": {
+      "minLength": 1,
+      "title": "Option Id",
+      "type": "string"
+    },
+    "push_adjudication": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PushAdjudication"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "request_id",
+    "room_id",
+    "player_id",
+    "source_revision",
+    "check_id",
+    "check_version",
+    "option_id"
+  ],
+  "title": "PostRollDecisionRequest",
+  "type": "object"
+}

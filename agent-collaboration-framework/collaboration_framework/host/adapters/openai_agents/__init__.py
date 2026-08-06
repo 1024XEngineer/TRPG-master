@@ -1,5 +1,9 @@
 """OpenAI Agents SDK Host Agent adapter for compatible chat providers."""
 
+from .action_plan_prompt import (
+    current_step_adjudication_instructions,
+    host_turn_decision_instructions,
+)
 from .adapter import OpenAICompatibleHostAgentAdapter, QwenHostAgentAdapter
 from .config import (
     DEEPSEEK_BASE_URL,
@@ -21,4 +25,6 @@ __all__ = [
     "PROMPT_VERSION",
     "QwenHostAgentAdapter",
     "QwenHostAgentConfig",
+    "current_step_adjudication_instructions",
+    "host_turn_decision_instructions",
 ]

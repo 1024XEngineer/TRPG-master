@@ -26,6 +26,7 @@ from app.core.logging import configure_logging
 from app.core.narrator import build_narrator
 from app.core.seed import ensure_seed_content
 from app.dto.common import ApiResponse
+from app.service.host_speech import build_host_speech_service
 from app.service.portrait_generation import build_portrait_generation_service
 
 # 模块被导入时就把 structlog 配好（只需要配一次），后面直接用 structlog.get_logger()。
@@ -94,6 +95,7 @@ def create_app() -> FastAPI:
     # 实例就一定有 narrator"。
     app.state.narrator = build_narrator(settings)
     app.state.portrait_generation_service = build_portrait_generation_service(settings)
+    app.state.host_speech = build_host_speech_service(settings)
 
     # 允许配置里列出的前端源发起跨域请求（本地开发场景下 Vite 默认跑在
     # 9877 端口，跟后端的 8000 端口不同源，没有这个中间件浏览器会拦截请求）。
@@ -104,6 +106,15 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.middleware("http")
+    async def disable_sentence_audio_cache(request: Request, call_next):  # noqa: ANN001
+        # MP3 在服务端已有短期 LRU；浏览器再缓存会绕过房间成员校验，并在房主
+        # 切换音色后继续命中旧音频。成功和 JSON 失败响应都必须明确 no-store。
+        response = await call_next(request)
+        if "/narrations/" in request.url.path and "/speech/sentences/" in request.url.path:
+            response.headers["Cache-Control"] = "no-store"
+        return response
 
     app.include_router(api_router)
     app.include_router(ws_router)

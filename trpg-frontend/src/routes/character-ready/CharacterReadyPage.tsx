@@ -11,6 +11,8 @@ import { useRoomPlayers } from '@/hooks/useRoomPlayers'
 import { useRuleset } from '@/hooks/useRuleset'
 import { isCharacterPortraitEnabled } from '@/services/character/portrait-api'
 import { PortraitGenerationModal } from './PortraitGenerationModal'
+import { DERIVED_STAT_DEFINITIONS, normalizeDerivedStats } from '@/data/derived-stats'
+import { OnboardingTrigger } from '@/features/onboarding'
 
 const SHEET_PAGES = [
   { key: 'info', label: '基本信息' },
@@ -73,17 +75,15 @@ function CharacterSheetModal({ character, onClose }: { character: NonNullable<Re
                   <span className="text-sm font-medium text-text-primary">{character.info.birthplace || '—'}</span>
                 </div>
               </div>
-              <div className="flex gap-2">
-                {[
-                  { label: 'HP', value: `${character.derived.hp}`, color: 'text-mold' },
-                  { label: 'SAN', value: `${character.derived.san}`, color: 'text-[#7050a0]' },
-                  { label: 'MP', value: `${character.derived.mp}`, color: 'text-[#4a7098]' },
-                  { label: 'DB', value: character.derived.db, color: 'text-text-muted' },
-                  { label: 'MOV', value: `${character.derived.move}`, color: 'text-text-muted' },
-                ].map(pill => (
-                  <div key={pill.label} className="flex-1 bg-panel rounded-md px-2.5 py-2 text-center">
-                    <div className="text-[10px] text-text-muted font-semibold">{pill.label}</div>
-                    <div className={`text-[16px] font-bold font-mono ${pill.color}`}>{pill.value}</div>
+              <div className="grid grid-cols-3 gap-2" data-testid="derived-stats-grid">
+                {DERIVED_STAT_DEFINITIONS.map(definition => (
+                  <div key={definition.key} className="bg-panel rounded-md px-2.5 py-2 text-center">
+                    <div className="text-[10px] text-text-muted font-semibold">
+                      {definition.label} <span className="font-mono text-text-dim">{definition.abbreviation}</span>
+                    </div>
+                    <div className="text-[16px] font-bold font-mono" style={{ color: definition.color }}>
+                      {character.derived[definition.key] ?? '—'}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -176,8 +176,7 @@ export default function CharacterReadyPage() {
         if (cancelled || !saved.name) return
         const occupationId =
           readyRuleset.occupations.find((o) => o.name === saved.occupation)?.id ?? null
-        const derived = saved.derivedStats ?? {}
-        const num = (v: unknown) => (typeof v === 'number' ? v : 0)
+        const derived = normalizeDerivedStats(saved.derivedStats ?? {})
         setRemoteCharacter({
           info: {
             name: saved.name,
@@ -191,16 +190,11 @@ export default function CharacterReadyPage() {
           attr: { ...saved.attributes },
           skillAlloc: {},
           skillFinalValues: { ...saved.skills },
+          occupationChoiceSkillIds: saved.occupationChoiceSkillIds ?? [],
           equipment: (saved.equipment ?? []).join('、'),
           background: saved.background ?? '',
           notes: saved.notes ?? '',
-          derived: {
-            hp: num(derived.HP),
-            san: num(derived.SAN),
-            mp: num(derived.MP),
-            db: derived.DB == null ? '0' : String(derived.DB),
-            move: num(derived.MOV),
-          },
+          derived,
         })
       })
       .catch(() => {
@@ -277,12 +271,15 @@ export default function CharacterReadyPage() {
   return (
     <div className="animate-screen-in px-5 pt-6">
       {/* Header */}
-      <button
-        onClick={handleGoBack}
-        className="w-[34px] h-[34px] rounded-full bg-card border border-border-light flex items-center justify-center flex-shrink-0 active:bg-panel active:scale-[0.94] transition-all duration-150 mb-3"
-      >
-        <ArrowLeft className="w-[18px] h-[18px] text-text-muted" strokeWidth={2.5} />
-      </button>
+      <div className="mb-3 flex items-center justify-between">
+        <button
+          onClick={handleGoBack}
+          className="w-[34px] h-[34px] rounded-full bg-card border border-border-light flex items-center justify-center flex-shrink-0 active:bg-panel active:scale-[0.94] transition-all duration-150"
+        >
+          <ArrowLeft className="w-[18px] h-[18px] text-text-muted" strokeWidth={2.5} />
+        </button>
+        <OnboardingTrigger />
+      </div>
 
       <div className="flex items-center justify-center gap-2 mb-1">
         <span className="font-mono text-2xl font-bold text-text-primary tracking-[0.15em] bg-card border border-dashed border-border-mid px-4 py-1.5 rounded-sm">
@@ -295,14 +292,18 @@ export default function CharacterReadyPage() {
       </p>
 
       {/* Player List：自己能看查看/编辑，队友只能看到"建完了没有"——角色卡内容是私密的 */}
-      <div className="flex flex-col gap-2">
+      <div data-onboarding-target="player-status" className="flex flex-col gap-2">
         {players.length === 0 && (
           <div className="text-center py-6 text-xs text-text-dim">正在获取房间成员…</div>
         )}
         {players.map((p) => {
           const isSelf = p.playerId === playerId
           return (
-            <div key={p.playerId} className="flex items-center gap-3 px-3.5 py-3 bg-card border border-border-light rounded-md">
+            <div
+              key={p.playerId}
+              data-onboarding-target={isSelf ? 'character-summary' : undefined}
+              className="flex items-center gap-3 px-3.5 py-3 bg-card border border-border-light rounded-md"
+            >
               <div className={`w-10 h-10 rounded-full bg-panel border border-border-mid flex items-center justify-center text-lg flex-shrink-0 overflow-hidden ${p.hasCharacter ? 'border-brass' : 'border-dashed border-border-light'}`}>
                 {isSelf && portraitResult ? (
                   <img
@@ -375,6 +376,7 @@ export default function CharacterReadyPage() {
         <button
           onClick={handleStartGame}
           disabled={!allHaveCharacters || starting}
+          data-onboarding-target="start-game"
           className="w-full mt-2 px-6 py-3.5 rounded-sm bg-brass text-white text-sm font-semibold active:bg-brass-dark transition-all disabled:opacity-50 flex items-center justify-center gap-2"
         >
           <Swords className="w-4 h-4" />

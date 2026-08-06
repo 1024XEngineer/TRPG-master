@@ -9,7 +9,7 @@ from pathlib import Path
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 PREVIOUS_REVISION = "1a02058345ee"
 ENGINE_IDENTITY_PREVIOUS_REVISION = "9c4e7a2b1d6f"
-HEAD_REVISION = "3f8a1c2d4e5f"
+HEAD_REVISION = "e225a1b2c3d4"
 
 
 def _run_alembic(database: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -74,7 +74,28 @@ def test_migration_upgrades_empty_sqlite_and_round_trips(tmp_path: Path) -> None
         "game_sessions",
         "game_events",
         "action_executions",
+        "pending_check_decisions",
+        "check_runs",
+        "adjudication_command_executions",
+        "action_plan_runs",
+        "room_action_reservations",
     }.issubset(tables)
+    assert "decision_schema_version" in _column_names(
+        database,
+        "pending_check_decisions",
+    )
+    assert "check_schema_version" in _column_names(database, "check_runs")
+    assert {"request_schema_version", "result_schema_version"}.issubset(
+        _column_names(database, "adjudication_command_executions")
+    )
+    assert "action_request_id" in _column_names(
+        database,
+        "adjudication_command_executions",
+    )
+    assert {"run_version", "run_json", "lease_owner", "lease_expires_at"}.issubset(
+        _column_names(database, "action_plan_runs")
+    )
+    assert ("room_id",) in _unique_column_sets(database, "room_action_reservations")
     assert "room_sessions" not in tables
     assert {"status", "name_en", "story_label", "subtitle", "story_pages"}.issubset(
         _column_names(database, "scenarios")
@@ -90,7 +111,9 @@ def test_migration_upgrades_empty_sqlite_and_round_trips(tmp_path: Path) -> None
         ("module_version", "module_versions", "version"),
     }.issubset(_foreign_keys(database, "game_sessions"))
     assert "module_version" in _column_names(database, "rooms")
+    assert "host_speech_voice_type" in _column_names(database, "rooms")
     assert "version" in _column_names(database, "characters")
+    assert "occupation_choice_skill_ids" in _column_names(database, "characters")
     assert "correlation_id" in _column_names(database, "events")
     assert {
         "visibility",
@@ -105,6 +128,7 @@ def test_migration_upgrades_empty_sqlite_and_round_trips(tmp_path: Path) -> None
     assert "room_sessions" in _table_names(database)
     assert "module_versions" not in _table_names(database)
     assert "version" not in _column_names(database, "characters")
+    assert "occupation_choice_skill_ids" not in _column_names(database, "characters")
     assert "correlation_id" not in _column_names(database, "events")
 
     _upgrade_or_fail(database, "head")

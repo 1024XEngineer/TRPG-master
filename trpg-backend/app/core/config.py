@@ -11,7 +11,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, SecretStr, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -19,6 +19,17 @@ def secret_value(value: str | SecretStr) -> str:
     if isinstance(value, str):
         return value
     return getattr(value, "get_secret_value")()  # noqa: B009
+
+
+class HostSpeechVoiceConfig(BaseModel):
+    """部署允许在房间里选择的豆包音色。"""
+
+    # 部署文档沿用豆包 API 的 voiceType；populate_by_name 同时保留 Python
+    # 侧 voice_type，避免业务代码为了环境变量格式到处使用 camelCase。
+    model_config = ConfigDict(populate_by_name=True)
+
+    voice_type: str = Field(alias="voiceType", min_length=1)
+    label: str = Field(min_length=1)
 
 
 class Settings(BaseSettings):
@@ -81,6 +92,8 @@ class Settings(BaseSettings):
     recent_history_enabled: bool = True
     recent_history_max_turns: int = Field(default=6, ge=1, le=24)
     recent_history_max_chars: int = Field(default=6000, ge=2)
+    action_plan_max_steps: int = Field(default=32, ge=2, le=256)
+    action_plan_max_steps_per_advance: int = Field(default=3, ge=1, le=32)
 
     # 角色生图是建卡完成后的可选扩展。默认关闭且使用离线 provider，
     # 只有显式开启并切换 provider 才会调用 DeepSeek / 阿里云 / Sufy。
@@ -101,6 +114,20 @@ class Settings(BaseSettings):
     # 讨论区/Narrator 主线的兼容配置：未配置时使用确定性占位叙事，测试可通过
     # 延迟钩子稳定覆盖行动锁并发分支。
     narrator_delay_seconds: float = Field(default=0.0, ge=0, le=120)
+
+    # AI 主持人语音：默认关闭，未配置豆包凭证时不影响应用启动或文字游戏流程。
+    host_speech_provider: Literal["disabled", "fake", "doubao"] = "disabled"
+    doubao_tts_api_key: SecretStr | None = None
+    doubao_tts_resource_id: str = "seed-tts-2.0"
+    doubao_tts_voices: list[HostSpeechVoiceConfig] = Field(default_factory=list)
+    doubao_tts_default_voice_type: str | None = None
+    doubao_tts_timeout_seconds: float = Field(default=15.0, gt=0, le=60)
+    host_speech_max_sentence_bytes: int = Field(default=900, ge=100, le=4000)
+    host_speech_cache_ttl_seconds: int = Field(default=3600, ge=0, le=86400)
+    host_speech_cache_max_bytes: int = Field(default=67_108_864, ge=0)
+    host_speech_player_requests_per_minute: int = Field(default=60, ge=1, le=600)
+    host_speech_room_misses_per_minute: int = Field(default=30, ge=1, le=600)
+    host_speech_max_concurrency: int = Field(default=8, ge=1, le=64)
 
     @model_validator(mode="after")
     def validate_host_model(self) -> Settings:
@@ -134,6 +161,23 @@ class Settings(BaseSettings):
             and (self.sufy_api_key is None or not secret_value(self.sufy_api_key).strip())
         ):
             raise ValueError("角色生图使用 Sufy 时必须设置 SUFY_API_KEY")
+        if self.host_speech_provider == "doubao":
+            required = {
+                "DOUBAO_TTS_API_KEY": (
+                    secret_value(self.doubao_tts_api_key)
+                    if self.doubao_tts_api_key is not None
+                    else None
+                ),
+                "DOUBAO_TTS_DEFAULT_VOICE_TYPE": self.doubao_tts_default_voice_type,
+            }
+            missing = [name for name, value in required.items() if not value or not value.strip()]
+            if missing:
+                raise ValueError("HOST_SPEECH_PROVIDER=doubao 时缺少配置：" + ", ".join(missing))
+            allowed = {voice.voice_type for voice in self.doubao_tts_voices}
+            if not allowed:
+                raise ValueError("HOST_SPEECH_PROVIDER=doubao 时必须配置 DOUBAO_TTS_VOICES")
+            if self.doubao_tts_default_voice_type not in allowed:
+                raise ValueError("DOUBAO_TTS_DEFAULT_VOICE_TYPE 必须属于 DOUBAO_TTS_VOICES")
         return self
 
 

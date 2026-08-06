@@ -8,9 +8,13 @@ from typing import Protocol
 from collaboration_framework.contracts import ContractError
 
 from ..models import (
+    CheckRun,
     CompletedAction,
+    CompletedAdjudicationCommand,
+    DomainEvent,
     EngineRuntimeSnapshot,
     GameState,
+    PendingCheckDecision,
     StateModifiedEvent,
 )
 
@@ -29,6 +33,28 @@ class EngineTransaction(Protocol):
         request_id: str,
     ) -> CompletedAction | None: ...
 
+    async def find_adjudication_command(
+        self,
+        request_id: str,
+    ) -> CompletedAdjudicationCommand | None: ...
+
+    async def find_latest_adjudication_command_by_action(
+        self,
+        action_request_id: str,
+    ) -> CompletedAdjudicationCommand | None: ...
+
+    async def find_pending_check_by_action(
+        self,
+        action_request_id: str,
+    ) -> PendingCheckDecision | None: ...
+
+    async def load_pending_check(
+        self,
+        decision_id: str,
+    ) -> PendingCheckDecision | None: ...
+
+    async def load_check_run(self, check_id: str) -> CheckRun | None: ...
+
     async def commit(
         self,
         *,
@@ -36,6 +62,17 @@ class EngineTransaction(Protocol):
         new_state: GameState,
         events: tuple[StateModifiedEvent, ...],
         completed_action: CompletedAction,
+    ) -> None: ...
+
+    async def commit_adjudication(
+        self,
+        *,
+        expected_revision: str,
+        new_state: GameState,
+        events: tuple[DomainEvent, ...],
+        decision: PendingCheckDecision | None,
+        check_run: CheckRun | None,
+        completed_command: CompletedAdjudicationCommand,
     ) -> None: ...
 
 

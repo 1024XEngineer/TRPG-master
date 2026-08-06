@@ -1343,12 +1343,17 @@
     #9d9660;
 }
 
-.lobby-scene__ready-action:hover {
+.lobby-scene__ready-action:hover:not(:disabled) {
   filter: brightness(1.08) saturate(1.06);
 }
 
-.lobby-scene__ready-action:active {
+.lobby-scene__ready-action:active:not(:disabled) {
   transform: translateY(0.12rem) scale(0.98);
+}
+
+.lobby-scene__ready-action:disabled {
+  filter: grayscale(0.2) brightness(0.9);
+  cursor: wait;
 }
 
 .lobby-scene__action-hint {

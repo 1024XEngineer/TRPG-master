@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RoomPreview } from 'trpg-sdk'
@@ -65,9 +65,11 @@ beforeEach(() => {
   useRoomStore.getState().setHost(true)
   useAuthStore.getState().login('token', 'user-1', '皮卡丘')
   vi.mocked(useRoomPlayers).mockReturnValue(roomPreview())
+  vi.mocked(sdk.roomSocket.setReady).mockReturnValue(true)
 })
 
 afterEach(() => {
+  vi.useRealTimers()
   cleanup()
   vi.clearAllMocks()
   useRoomStore.getState().reset()
@@ -102,7 +104,88 @@ describe('LobbyPage', () => {
     expect(screen.getByRole('button', { name: '开始游戏' })).toBeEnabled()
   })
 
-  it('keeps the guest ready action and restores its server state', async () => {
+  it('keeps an optimistic ready state until a fresh poll confirms it', async () => {
+    useRoomStore.getState().setRoomIdentity({
+      roomId: 'room-1',
+      roomCode: 'FBSVKF',
+      playerId: 'guest-1',
+      reconnectToken: 'guest-token',
+    })
+    useRoomStore.getState().setHost(false)
+    let preview = roomPreview()
+    vi.mocked(useRoomPlayers).mockImplementation(() => preview)
+
+    const { rerender } = renderLobby()
+
+    const readyButton = await screen.findByRole('button', { name: '标记为已就绪' })
+    fireEvent.click(readyButton)
+
+    expect(sdk.roomSocket.setReady).toHaveBeenCalledWith('guest-1', { ready: true })
+    expect(screen.getByRole('button', { name: '同步中…' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: '同步中…' })).toBeDisabled()
+
+    // 下一轮轮询仍是旧值时，不能把用户刚才的操作拍回去。
+    preview = roomPreview()
+    rerender(
+      <MemoryRouter>
+        <LobbyPage />
+      </MemoryRouter>,
+    )
+    expect(screen.getByRole('button', { name: '同步中…' })).toHaveAttribute('aria-pressed', 'true')
+
+    preview = roomPreview({
+      players: [
+        { playerId: 'host-1', nickname: '皮卡丘', isHost: true, ready: false, hasCharacter: false },
+        { playerId: 'guest-1', nickname: '妙蛙种子', isHost: false, ready: true, hasCharacter: false },
+      ],
+    })
+    rerender(
+      <MemoryRouter>
+        <LobbyPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('button', { name: '取消就绪' })).toBeEnabled())
+    expect(screen.getByText('你已就绪，等待房主开始游戏')).toBeInTheDocument()
+  })
+
+  it('does not allow a ready action before the server state is hydrated', () => {
+    useRoomStore.getState().setRoomIdentity({
+      roomId: 'room-1',
+      roomCode: 'FBSVKF',
+      playerId: 'guest-1',
+      reconnectToken: 'guest-token',
+    })
+    useRoomStore.getState().setHost(false)
+    vi.mocked(useRoomPlayers).mockReturnValue(null)
+
+    renderLobby()
+
+    const readyButton = screen.getByRole('button', { name: '正在同步状态…' })
+    expect(readyButton).toBeDisabled()
+    fireEvent.click(readyButton)
+    expect(sdk.roomSocket.setReady).not.toHaveBeenCalled()
+  })
+
+  it('rolls back immediately when the ready command cannot be sent', () => {
+    useRoomStore.getState().setRoomIdentity({
+      roomId: 'room-1',
+      roomCode: 'FBSVKF',
+      playerId: 'guest-1',
+      reconnectToken: 'guest-token',
+    })
+    useRoomStore.getState().setHost(false)
+    vi.mocked(sdk.roomSocket.setReady).mockReturnValueOnce(false)
+
+    renderLobby()
+    fireEvent.click(screen.getByRole('button', { name: '标记为已就绪' }))
+
+    expect(screen.getByRole('button', { name: '标记为已就绪' })).toBeEnabled()
+    expect(screen.getByRole('alert')).toHaveTextContent('就绪状态发送失败')
+  })
+
+  it('rolls back when no server confirmation arrives before the timeout', () => {
+    vi.useFakeTimers()
     useRoomStore.getState().setRoomIdentity({
       roomId: 'room-1',
       roomCode: 'FBSVKF',
@@ -112,13 +195,11 @@ describe('LobbyPage', () => {
     useRoomStore.getState().setHost(false)
 
     renderLobby()
+    fireEvent.click(screen.getByRole('button', { name: '标记为已就绪' }))
+    act(() => vi.advanceTimersByTime(7_000))
 
-    const readyButton = await screen.findByRole('button', { name: '标记为已就绪' })
-    fireEvent.click(readyButton)
-
-    expect(sdk.roomSocket.setReady).toHaveBeenCalledWith('guest-1', { ready: true })
-    expect(screen.getByRole('button', { name: '取消就绪' })).toHaveAttribute('aria-pressed', 'true')
-    expect(screen.getByText('你已就绪，等待房主开始游戏')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '标记为已就绪' })).toBeEnabled()
+    expect(screen.getByRole('alert')).toHaveTextContent('就绪状态同步超时')
   })
 
   it('shows a themed start error and keeps the host in the lobby', async () => {

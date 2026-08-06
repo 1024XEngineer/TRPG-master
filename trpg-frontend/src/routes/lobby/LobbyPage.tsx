@@ -7,6 +7,8 @@ import { connectWebSocket, sdk, onWsMessage, waitForWsOpen, disconnectWebSocket,
 import { startStory } from '@/services/room'
 import { useRoomPlayers } from '@/hooks/useRoomPlayers'
 
+const READY_CONFIRM_TIMEOUT_MS = 7_000
+
 // 第一个等待界面：等所有玩家进入房间、都标记"已就绪"，才能一起往下走到
 // 背景介绍 + 建卡（见需求：不论房主还是访客，全员到齐才能开始）。
 export default function LobbyPage() {
@@ -20,13 +22,15 @@ export default function LobbyPage() {
   const playerId = useRoomStore((s) => s.playerId)
   const reconnectToken = useRoomStore((s) => s.reconnectToken)
   const nickname = useAuthStore((s) => s.nickname)
-  const [ready, setReady] = useState(false)
+  const [pendingReady, setPendingReady] = useState<boolean | null>(null)
+  const [readySyncError, setReadySyncError] = useState('')
   const [joined, setJoined] = useState(false)
   const [error, setError] = useState('')
   const [confirmLeave, setConfirmLeave] = useState(false)
   const info = useRoomPlayers(roomCode)
   const advancedRef = useRef(false)
   const cancelLeaveRef = useRef<HTMLButtonElement>(null)
+  const readyConfirmTimerRef = useRef<number | null>(null)
 
   useEffect(() => {
     if (!roomId || !playerId) return
@@ -68,12 +72,28 @@ export default function LobbyPage() {
   const [starting, setStarting] = useState(false)
   const [startError, setStartError] = useState('')
 
-  // 服务端房间预览才是就绪状态的权威源。刷新或重连后用它恢复本人的按钮文案，
-  // 同时保留点击后的即时反馈，不必等待下一轮 3 秒轮询。
+  // 服务端房间预览才是就绪状态的权威源；pendingReady 只表示已发送、
+  // 尚未被轮询结果确认的本地意图。这样旧轮询不会把乐观更新拍回去。
   const selfReady = players.find((player) => player.playerId === playerId)?.ready
+  const readyHydrated = selfReady !== undefined
+  const displayedReady = pendingReady ?? selfReady ?? false
+  const readySyncing = pendingReady !== null
+
   useEffect(() => {
-    if (selfReady !== undefined) setReady(selfReady)
-  }, [selfReady])
+    if (pendingReady === null || selfReady !== pendingReady) return
+    if (readyConfirmTimerRef.current !== null) {
+      window.clearTimeout(readyConfirmTimerRef.current)
+      readyConfirmTimerRef.current = null
+    }
+    setPendingReady(null)
+    setReadySyncError('')
+  }, [pendingReady, selfReady])
+
+  useEffect(() => () => {
+    if (readyConfirmTimerRef.current !== null) {
+      window.clearTimeout(readyConfirmTimerRef.current)
+    }
+  }, [])
 
   useEffect(() => {
     if (!confirmLeave) return
@@ -115,10 +135,24 @@ export default function LobbyPage() {
   }
 
   const toggleReady = () => {
-    if (!playerId) return
-    const next = !ready
-    setReady(next)
-    sdk.roomSocket.setReady(playerId, { ready: next })
+    // 首次轮询返回前没有可靠的基准；一次操作确认前也不允许连续反转，
+    // 避免服务端的中间状态被误当成最新意图。
+    if (!playerId || selfReady === undefined || pendingReady !== null) return
+    const next = !selfReady
+    setPendingReady(next)
+    setReadySyncError('')
+
+    if (!sdk.roomSocket.setReady(playerId, { ready: next })) {
+      setPendingReady(null)
+      setReadySyncError('就绪状态发送失败，请检查连接后重试')
+      return
+    }
+
+    readyConfirmTimerRef.current = window.setTimeout(() => {
+      readyConfirmTimerRef.current = null
+      setPendingReady(null)
+      setReadySyncError('就绪状态同步超时，请重试')
+    }, READY_CONFIRM_TIMEOUT_MS)
   }
 
   const handleLeave = () => {
@@ -139,7 +173,13 @@ export default function LobbyPage() {
       : '等待所有玩家标记为已就绪'
     : info?.storyStarted
       ? '房主已开始，即将进入…'
-      : ready
+      : !readyHydrated
+        ? '正在同步你的就绪状态…'
+        : readySyncing
+          ? pendingReady
+            ? '正在确认就绪状态…'
+            : '正在确认取消就绪…'
+          : displayedReady
         ? '你已就绪，等待房主开始游戏'
         : '标记就绪后，等待房主开始游戏'
 
@@ -239,6 +279,7 @@ export default function LobbyPage() {
 
       <footer className="lobby-scene__footer">
         {startError && <p className="lobby-scene__start-error" role="alert">{startError}</p>}
+        {readySyncError && <p className="lobby-scene__start-error" role="alert">{readySyncError}</p>}
 
         {isHost ? (
           <button
@@ -258,13 +299,15 @@ export default function LobbyPage() {
           <button
             type="button"
             onClick={toggleReady}
+            disabled={!readyHydrated || readySyncing}
             data-onboarding-target="lobby-ready"
-            className={`lobby-scene__ready-action ${ready ? 'is-ready' : ''}`}
-            aria-pressed={ready}
+            className={`lobby-scene__ready-action ${displayedReady ? 'is-ready' : ''}`}
+            aria-pressed={displayedReady}
+            aria-busy={readySyncing}
             aria-describedby="lobby-action-hint"
           >
             <span aria-hidden="true">◆</span>
-            {ready ? '取消就绪' : '标记为已就绪'}
+            {!readyHydrated ? '正在同步状态…' : readySyncing ? '同步中…' : displayedReady ? '取消就绪' : '标记为已就绪'}
             <span aria-hidden="true">◆</span>
           </button>
         )}

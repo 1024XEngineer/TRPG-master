@@ -575,8 +575,8 @@ export class RoomSocket {
     this.send('room.join', playerId, payload);
   }
 
-  setReady(playerId: string, payload: PlayerReadyPayload): void {
-    this.send('player.ready', playerId, payload);
+  setReady(playerId: string, payload: PlayerReadyPayload): boolean {
+    return this.send('player.ready', playerId, payload);
   }
 
   startGame(playerId: string): void {

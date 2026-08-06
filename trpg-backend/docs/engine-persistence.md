@@ -24,6 +24,24 @@ Protocol 和 RuleKernel 的前提下，实现 `SqlAlchemyEngineStore`、完成�
 - `action_executions`：按 `(room_id, request_id)` 保存首次完整 `ActionRequest` 和
   `EngineExecutionResult`，供 Store 在服务重建后幂等重放。
 
+ModuleContent v3 单意图裁决另使用 `pending_check_decisions`、`check_runs` 和
+`adjudication_command_executions` 保存待选技能、权威骰点/检定后选项及每一步命令的
+幂等结果。详见 [`rule-engine-v3.md`](rule-engine-v3.md)。这些记录与对应领域 Event、
+GameState revision 在同一事务提交，不能退化为 WebSocket 连接内存。
+
+Issue #225 另增加彼此分层的编排持久化：
+
+- `action_plan_runs`：父动作 owner/fingerprint、冻结的 policy、语义计划、逐步裁决游标、
+  CAS `run_version`、worker lease 和恢复状态；
+- `room_action_reservations`：每个 Room 最多一个未收束父计划，checkpoint 或等待玩家时仍
+  保留占用，避免其他动作改变 pending plan 的 revision；
+- `adjudication_command_executions.action_request_id`：为 Plan 恢复按稳定 step request id
+  查询最新单意图结果提供索引；旧记录为空时由 Adapter 做局部兼容查询。
+
+Plan Store 不与 Engine Store 合并成跨多步大事务。每个领域步骤仍由 Engine 原子提交；
+PlanRun 使用稳定 step request id 对账并前移游标，因而可覆盖“Engine 已提交、PlanRun 尚未
+更新”的进程崩溃窗口。
+
 领域 JSON 均使用 SQLAlchemy 通用 `JSON`。ModuleContent、GameState、Event、
 ActionRequest 和 EngineExecutionResult 各自具有独立 schema version，首版为 `1`。
 

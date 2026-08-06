@@ -59,7 +59,6 @@ def coerce_intent_payload(raw: JsonObject, context: IntentContext) -> JsonObject
     proposed_skills = check.get("proposed_skills")
     if isinstance(proposed_skills, (list, tuple)) and proposed_skills:
         return raw
-
     if _looks_like_no_check_action(raw, context):
         return {**raw, "check": {"route": "none"}}
 
@@ -69,6 +68,10 @@ def coerce_intent_payload(raw: JsonObject, context: IntentContext) -> JsonObject
             **raw,
             "check": {**check, "proposed_skills": [fallback_skill]},
         }
+    if "proposed_skills" in check:
+        # An explicit empty list with no deterministic safe recovery is a
+        # complete but invalid decision; let strict validation reject it.
+        return raw
     return _clarification_payload(context)
 
 

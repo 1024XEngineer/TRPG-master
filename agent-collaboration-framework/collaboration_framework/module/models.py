@@ -15,6 +15,7 @@ from collaboration_framework.contracts import (
     CheckpointSpec,
     ContractModel,
     EntitySpec,
+    EventRuleSpec,
     InformationItem,
     ModulePresentation,
     RuleSpec,
@@ -44,6 +45,7 @@ class ModuleDraft(ContractModel):
     checkpoints: tuple[CheckpointSpec, ...]
     win_conditions: tuple[WinConditionSpec, ...]
     module_rules: tuple[RuleSpec, ...] = ()
+    event_rules: tuple[EventRuleSpec, ...] = ()
     information_items: tuple[InformationItem, ...] = ()
     presentation: ModulePresentation | None = None
 

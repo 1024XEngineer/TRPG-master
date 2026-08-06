@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "get-adjudication-status-request.schema.json",
+  "additionalProperties": false,
+  "properties": {
+    "room_id": {
+      "minLength": 1,
+      "title": "Room Id",
+      "type": "string"
+    },
+    "player_id": {
+      "minLength": 1,
+      "title": "Player Id",
+      "type": "string"
+    },
+    "action_request_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Action Request Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "room_id",
+    "player_id",
+    "action_request_id"
+  ],
+  "title": "GetAdjudicationStatusRequest",
+  "type": "object"
+}

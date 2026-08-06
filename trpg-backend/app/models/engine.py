@@ -177,3 +177,234 @@ class ActionExecution(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
     )
+
+
+class PendingCheckDecisionRecord(Base):
+    """Durable, player-owned pre-roll choice with the full adjudication frozen."""
+
+    __tablename__ = "pending_check_decisions"
+    __table_args__ = (
+        PrimaryKeyConstraint("room_id", "decision_id", name="pk_pending_check_decisions"),
+        UniqueConstraint(
+            "room_id",
+            "action_request_id",
+            name="uq_pending_check_decisions_room_action",
+        ),
+        CheckConstraint("decision_version >= 1", name="ck_pending_check_decision_version"),
+        CheckConstraint(
+            "decision_schema_version >= 1",
+            name="ck_pending_check_decision_schema_version",
+        ),
+        CheckConstraint(
+            "status IN ('awaiting_skill_choice', 'rolled', 'resolved', 'cancelled')",
+            name="ck_pending_check_decision_status",
+        ),
+    )
+
+    room_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("game_sessions.room_id"), nullable=False
+    )
+    decision_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    action_request_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    player_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    actor_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    status: Mapped[str] = mapped_column(String(40), nullable=False)
+    decision_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    decision_schema_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
+    decision_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+
+class CheckRunRecord(Base):
+    """A server-authoritative roll and its optional post-roll decision state."""
+
+    __tablename__ = "check_runs"
+    __table_args__ = (
+        PrimaryKeyConstraint("room_id", "check_id", name="pk_check_runs"),
+        ForeignKeyConstraint(
+            ["room_id", "decision_id"],
+            [
+                "pending_check_decisions.room_id",
+                "pending_check_decisions.decision_id",
+            ],
+            name="fk_check_runs_pending_decision",
+        ),
+        UniqueConstraint("room_id", "decision_id", name="uq_check_runs_room_decision"),
+        CheckConstraint("version >= 1", name="ck_check_runs_version"),
+        CheckConstraint(
+            "check_schema_version >= 1",
+            name="ck_check_runs_schema_version",
+        ),
+        CheckConstraint("roll_count BETWEEN 1 AND 2", name="ck_check_runs_roll_count"),
+        CheckConstraint(
+            "status IN ('awaiting_post_roll_decision', 'resolved')",
+            name="ck_check_runs_status",
+        ),
+    )
+
+    room_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("game_sessions.room_id"), nullable=False
+    )
+    check_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    decision_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    action_request_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    player_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    actor_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    status: Mapped[str] = mapped_column(String(40), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    roll_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    check_schema_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
+    check_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+
+class AdjudicationCommandExecution(Base):
+    """Idempotency record for submit, skill choice, cancel, luck and push commands."""
+
+    __tablename__ = "adjudication_command_executions"
+    __table_args__ = (
+        PrimaryKeyConstraint(
+            "room_id",
+            "request_id",
+            name="pk_adjudication_command_executions",
+        ),
+        CheckConstraint(
+            "committed_state_version >= 0",
+            name="ck_adjudication_commands_state_version",
+        ),
+        CheckConstraint(
+            "request_schema_version >= 1",
+            name="ck_adjudication_commands_request_schema_version",
+        ),
+        CheckConstraint(
+            "result_schema_version >= 1",
+            name="ck_adjudication_commands_result_schema_version",
+        ),
+        Index(
+            "ix_adjudication_commands_room_action",
+            "room_id",
+            "action_request_id",
+            "committed_state_version",
+        ),
+    )
+
+    room_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("game_sessions.room_id"), nullable=False
+    )
+    request_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    action_request_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    request_schema_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
+    request_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    result_schema_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
+    result_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    committed_state_version: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+
+
+class ActionPlanRunRecord(Base):
+    """A-owned orchestration cursor persisted separately from Engine commands."""
+
+    __tablename__ = "action_plan_runs"
+    __table_args__ = (
+        PrimaryKeyConstraint(
+            "room_id",
+            "parent_action_id",
+            name="pk_action_plan_runs",
+        ),
+        UniqueConstraint("plan_id", name="uq_action_plan_runs_plan_id"),
+        CheckConstraint("run_version >= 1", name="ck_action_plan_runs_version"),
+        CheckConstraint(
+            "plan_schema_version >= 1",
+            name="ck_action_plan_runs_schema_version",
+        ),
+        CheckConstraint(
+            "status IN ('active', 'checkpointed', 'waiting_for_player', "
+            "'needs_clarification', 'retryable_failure', 'awaiting_narration', "
+            "'completed', 'cancelled', 'stopped')",
+            name="ck_action_plan_runs_status",
+        ),
+        Index("ix_action_plan_runs_room_status", "room_id", "status"),
+    )
+
+    room_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("game_sessions.room_id"), nullable=False
+    )
+    parent_action_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    plan_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    parent_input_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    player_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    actor_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    status: Mapped[str] = mapped_column(String(40), nullable=False)
+    current_step_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    run_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    plan_schema_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
+    run_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    lease_owner: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+
+class RoomActionReservation(Base):
+    """One durable active parent action owner per room."""
+
+    __tablename__ = "room_action_reservations"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["room_id", "parent_action_id"],
+            ["action_plan_runs.room_id", "action_plan_runs.parent_action_id"],
+            name="fk_room_action_reservation_plan",
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint("plan_id", name="uq_room_action_reservations_plan"),
+    )
+
+    room_id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True)
+    parent_action_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    plan_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )

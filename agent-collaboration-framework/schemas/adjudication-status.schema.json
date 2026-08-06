@@ -1,0 +1,476 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "adjudication-status.schema.json",
+  "$defs": {
+    "AcceptResultOption": {
+      "additionalProperties": false,
+      "properties": {
+        "option_id": {
+          "minLength": 1,
+          "title": "Option Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "accept_result",
+          "default": "accept_result",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "option_id"
+      ],
+      "title": "AcceptResultOption",
+      "type": "object"
+    },
+    "AdjudicationExecution": {
+      "additionalProperties": false,
+      "properties": {
+        "request_id": {
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "action_request_id": {
+          "minLength": 1,
+          "title": "Action Request Id",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "awaiting_skill_choice",
+            "awaiting_post_roll_decision",
+            "resolved",
+            "cancelled"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "view_revision": {
+          "minLength": 1,
+          "title": "View Revision",
+          "type": "string"
+        },
+        "outcome": {
+          "enum": [
+            "success",
+            "failure",
+            "cancelled",
+            "pending"
+          ],
+          "title": "Outcome",
+          "type": "string"
+        },
+        "pending_decision": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PendingCheckDecisionView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "check_run": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CheckRunView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "event_refs": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Event Refs",
+          "type": "array"
+        },
+        "public_event_refs": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Public Event Refs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "request_id",
+        "action_request_id",
+        "status",
+        "view_revision",
+        "outcome"
+      ],
+      "title": "AdjudicationExecution",
+      "type": "object"
+    },
+    "CheckRoll": {
+      "additionalProperties": false,
+      "properties": {
+        "value": {
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Value",
+          "type": "integer"
+        },
+        "degree": {
+          "enum": [
+            "critical_success",
+            "extreme_success",
+            "hard_success",
+            "regular_success",
+            "failure",
+            "fumble"
+          ],
+          "title": "Degree",
+          "type": "string"
+        },
+        "passed": {
+          "title": "Passed",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "value",
+        "degree",
+        "passed"
+      ],
+      "title": "CheckRoll",
+      "type": "object"
+    },
+    "CheckRunView": {
+      "additionalProperties": false,
+      "properties": {
+        "check_id": {
+          "minLength": 1,
+          "title": "Check Id",
+          "type": "string"
+        },
+        "action_request_id": {
+          "minLength": 1,
+          "title": "Action Request Id",
+          "type": "string"
+        },
+        "selected_candidate_id": {
+          "minLength": 1,
+          "title": "Selected Candidate Id",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "awaiting_post_roll_decision",
+            "resolved"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "roll_count": {
+          "maximum": 2,
+          "minimum": 1,
+          "title": "Roll Count",
+          "type": "integer"
+        },
+        "roll": {
+          "$ref": "#/$defs/CheckRoll"
+        },
+        "post_roll_options": {
+          "default": [],
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "accept_result": "#/$defs/AcceptResultOption",
+                "push": "#/$defs/PushOption",
+                "spend_resource": "#/$defs/SpendResourceOption"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/AcceptResultOption"
+              },
+              {
+                "$ref": "#/$defs/SpendResourceOption"
+              },
+              {
+                "$ref": "#/$defs/PushOption"
+              }
+            ]
+          },
+          "title": "Post Roll Options",
+          "type": "array"
+        },
+        "final_result": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CheckRoll"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "check_id",
+        "action_request_id",
+        "selected_candidate_id",
+        "status",
+        "version",
+        "roll_count",
+        "roll"
+      ],
+      "title": "CheckRunView",
+      "type": "object"
+    },
+    "PendingCheckDecisionView": {
+      "additionalProperties": false,
+      "properties": {
+        "decision_id": {
+          "minLength": 1,
+          "title": "Decision Id",
+          "type": "string"
+        },
+        "status": {
+          "const": "awaiting_skill_choice",
+          "default": "awaiting_skill_choice",
+          "title": "Status",
+          "type": "string"
+        },
+        "action_request_id": {
+          "minLength": 1,
+          "title": "Action Request Id",
+          "type": "string"
+        },
+        "source_revision": {
+          "minLength": 1,
+          "title": "Source Revision",
+          "type": "string"
+        },
+        "decision_version": {
+          "minimum": 1,
+          "title": "Decision Version",
+          "type": "integer"
+        },
+        "actor_id": {
+          "minLength": 1,
+          "title": "Actor Id",
+          "type": "string"
+        },
+        "summary": {
+          "minLength": 1,
+          "title": "Summary",
+          "type": "string"
+        },
+        "options": {
+          "items": {
+            "$ref": "#/$defs/PendingCheckOption"
+          },
+          "minItems": 1,
+          "title": "Options",
+          "type": "array"
+        },
+        "allow_cancel": {
+          "const": true,
+          "default": true,
+          "title": "Allow Cancel",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "decision_id",
+        "action_request_id",
+        "source_revision",
+        "decision_version",
+        "actor_id",
+        "summary",
+        "options"
+      ],
+      "title": "PendingCheckDecisionView",
+      "type": "object"
+    },
+    "PendingCheckOption": {
+      "additionalProperties": false,
+      "properties": {
+        "candidate_id": {
+          "minLength": 1,
+          "title": "Candidate Id",
+          "type": "string"
+        },
+        "skill_id": {
+          "minLength": 1,
+          "title": "Skill Id",
+          "type": "string"
+        },
+        "display_name": {
+          "minLength": 1,
+          "title": "Display Name",
+          "type": "string"
+        },
+        "target_value": {
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Target Value",
+          "type": "integer"
+        },
+        "difficulty": {
+          "enum": [
+            "regular",
+            "hard",
+            "extreme"
+          ],
+          "title": "Difficulty",
+          "type": "string"
+        },
+        "method_summary": {
+          "minLength": 1,
+          "title": "Method Summary",
+          "type": "string"
+        },
+        "player_safe_reason": {
+          "minLength": 1,
+          "title": "Player Safe Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "candidate_id",
+        "skill_id",
+        "display_name",
+        "target_value",
+        "difficulty",
+        "method_summary",
+        "player_safe_reason"
+      ],
+      "title": "PendingCheckOption",
+      "type": "object"
+    },
+    "PushOption": {
+      "additionalProperties": false,
+      "properties": {
+        "option_id": {
+          "minLength": 1,
+          "title": "Option Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "push",
+          "default": "push",
+          "title": "Kind",
+          "type": "string"
+        },
+        "requires_revised_method": {
+          "const": true,
+          "default": true,
+          "title": "Requires Revised Method",
+          "type": "boolean"
+        },
+        "player_safe_risk_summary": {
+          "minLength": 1,
+          "title": "Player Safe Risk Summary",
+          "type": "string"
+        }
+      },
+      "required": [
+        "option_id",
+        "player_safe_risk_summary"
+      ],
+      "title": "PushOption",
+      "type": "object"
+    },
+    "SpendResourceOption": {
+      "additionalProperties": false,
+      "properties": {
+        "option_id": {
+          "minLength": 1,
+          "title": "Option Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "spend_resource",
+          "default": "spend_resource",
+          "title": "Kind",
+          "type": "string"
+        },
+        "resource_id": {
+          "const": "luck",
+          "default": "luck",
+          "title": "Resource Id",
+          "type": "string"
+        },
+        "cost": {
+          "minimum": 1,
+          "title": "Cost",
+          "type": "integer"
+        },
+        "result_degree": {
+          "enum": [
+            "critical_success",
+            "extreme_success",
+            "hard_success",
+            "regular_success",
+            "failure",
+            "fumble"
+          ],
+          "title": "Result Degree",
+          "type": "string"
+        }
+      },
+      "required": [
+        "option_id",
+        "cost",
+        "result_degree"
+      ],
+      "title": "SpendResourceOption",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Player-safe recovery projection for one single-intent adjudication.",
+  "properties": {
+    "action_request_id": {
+      "minLength": 1,
+      "title": "Action Request Id",
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "not_submitted",
+        "awaiting_skill_choice",
+        "awaiting_post_roll_decision",
+        "resolved",
+        "cancelled"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "execution": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AdjudicationExecution"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "action_request_id",
+    "status"
+  ],
+  "title": "AdjudicationStatusView",
+  "type": "object"
+}

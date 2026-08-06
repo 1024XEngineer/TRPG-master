@@ -195,7 +195,7 @@ class ArchitectureTests(unittest.TestCase):
         )
         self.assertEqual(
             architecture_decisions,
-            ["adr-module-parser-architecture.md"],
+            ["adr-module-parser-architecture.md", "issue-208-action-plan.md"],
         )
 
         module_decisions = sorted(

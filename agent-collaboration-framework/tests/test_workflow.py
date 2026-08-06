@@ -165,7 +165,15 @@ class UnifiedWorkflowTests(unittest.TestCase):
 
     def test_exported_schemas_match_pydantic_source(self) -> None:
         expected = rendered_schemas()
-        self.assertEqual(len(expected), 14)
+        self.assertEqual(len(expected), 25)
+        self.assertIn("action-adjudication.schema.json", expected)
+        self.assertIn("adjudication-execution.schema.json", expected)
+        self.assertIn("action-plan.schema.json", expected)
+        self.assertIn("action-plan-policy.schema.json", expected)
+        self.assertIn("action-plan-progress.schema.json", expected)
+        self.assertIn("get-adjudication-status-request.schema.json", expected)
+        self.assertIn("adjudication-status.schema.json", expected)
+        self.assertIn("cancel-action-plan-request.schema.json", expected)
         self.assertIn("host-agent-context.schema.json", expected)
         self.assertIn("host-agent-usage.schema.json", expected)
         self.assertIn("host-agent-event.schema.json", expected)

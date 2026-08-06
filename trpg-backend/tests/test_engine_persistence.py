@@ -37,6 +37,9 @@ def test_engine_tables_and_constraints_are_registered() -> None:
         "game_sessions",
         "game_events",
         "action_executions",
+        "pending_check_decisions",
+        "check_runs",
+        "adjudication_command_executions",
     }.issubset(Base.metadata.tables)
     assert "room_sessions" not in Base.metadata.tables
 

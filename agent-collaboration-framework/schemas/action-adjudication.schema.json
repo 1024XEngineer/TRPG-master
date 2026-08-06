@@ -1,0 +1,780 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "action-adjudication.schema.json",
+  "$defs": {
+    "ActionMethod": {
+      "additionalProperties": false,
+      "properties": {
+        "family": {
+          "minLength": 1,
+          "title": "Family",
+          "type": "string"
+        },
+        "description": {
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        }
+      },
+      "required": [
+        "family",
+        "description"
+      ],
+      "title": "ActionMethod",
+      "type": "object"
+    },
+    "ActionTarget": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "information",
+            "entity",
+            "location",
+            "actor",
+            "world"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "id"
+      ],
+      "title": "ActionTarget",
+      "type": "object"
+    },
+    "AdvanceTimeEffect": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "advance_time",
+          "default": "advance_time",
+          "title": "Type",
+          "type": "string"
+        },
+        "minutes": {
+          "maximum": 10080,
+          "minimum": 1,
+          "title": "Minutes",
+          "type": "integer"
+        },
+        "reason": {
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "minutes",
+        "reason"
+      ],
+      "title": "AdvanceTimeEffect",
+      "type": "object"
+    },
+    "ChangeEntityStateEffect": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "change_entity_state",
+          "default": "change_entity_state",
+          "title": "Type",
+          "type": "string"
+        },
+        "entity_id": {
+          "minLength": 1,
+          "title": "Entity Id",
+          "type": "string"
+        },
+        "key": {
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_-]+$",
+          "title": "Key",
+          "type": "string"
+        },
+        "value": {
+          "$ref": "#/$defs/JsonValue"
+        }
+      },
+      "required": [
+        "entity_id",
+        "key",
+        "value"
+      ],
+      "title": "ChangeEntityStateEffect",
+      "type": "object"
+    },
+    "CommitTerminalEndingEffect": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "commit_terminal_ending",
+          "default": "commit_terminal_ending",
+          "title": "Type",
+          "type": "string"
+        },
+        "ending_id": {
+          "minLength": 1,
+          "title": "Ending Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ending_id"
+      ],
+      "title": "CommitTerminalEndingEffect",
+      "type": "object"
+    },
+    "ConsumeEntityEffect": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "consume_entity",
+          "default": "consume_entity",
+          "title": "Type",
+          "type": "string"
+        },
+        "entity_id": {
+          "minLength": 1,
+          "title": "Entity Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "entity_id"
+      ],
+      "title": "ConsumeEntityEffect",
+      "type": "object"
+    },
+    "EnsureRuntimeEntityEffect": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "ensure_runtime_entity",
+          "default": "ensure_runtime_entity",
+          "title": "Type",
+          "type": "string"
+        },
+        "entity_id": {
+          "minLength": 1,
+          "title": "Entity Id",
+          "type": "string"
+        },
+        "entity_kind": {
+          "enum": [
+            "npc",
+            "object"
+          ],
+          "title": "Entity Kind",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "location_id": {
+          "minLength": 1,
+          "title": "Location Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "entity_id",
+        "entity_kind",
+        "name",
+        "location_id"
+      ],
+      "title": "EnsureRuntimeEntityEffect",
+      "type": "object"
+    },
+    "EnsureRuntimeLocationEffect": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "ensure_runtime_location",
+          "default": "ensure_runtime_location",
+          "title": "Type",
+          "type": "string"
+        },
+        "location_id": {
+          "minLength": 1,
+          "title": "Location Id",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "parent_location_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Location Id"
+        },
+        "connected_location_id": {
+          "minLength": 1,
+          "title": "Connected Location Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "location_id",
+        "name",
+        "connected_location_id"
+      ],
+      "title": "EnsureRuntimeLocationEffect",
+      "type": "object"
+    },
+    "EnterLocationEffect": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "enter_location",
+          "default": "enter_location",
+          "title": "Type",
+          "type": "string"
+        },
+        "location_id": {
+          "minLength": 1,
+          "title": "Location Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "location_id"
+      ],
+      "title": "EnterLocationEffect",
+      "type": "object"
+    },
+    "HideInformationEffect": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "hide_information",
+          "default": "hide_information",
+          "title": "Type",
+          "type": "string"
+        },
+        "information_id": {
+          "minLength": 1,
+          "title": "Information Id",
+          "type": "string"
+        },
+        "scope": {
+          "default": "party",
+          "enum": [
+            "party",
+            "actor"
+          ],
+          "title": "Scope",
+          "type": "string"
+        }
+      },
+      "required": [
+        "information_id"
+      ],
+      "title": "HideInformationEffect",
+      "type": "object"
+    },
+    "JsonValue": {},
+    "MarkCoreResolvedEffect": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "mark_core_resolved",
+          "default": "mark_core_resolved",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "title": "MarkCoreResolvedEffect",
+      "type": "object"
+    },
+    "MoveEntityEffect": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "move_entity",
+          "default": "move_entity",
+          "title": "Type",
+          "type": "string"
+        },
+        "entity_id": {
+          "minLength": 1,
+          "title": "Entity Id",
+          "type": "string"
+        },
+        "location_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Location Id"
+        },
+        "holder_actor_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Holder Actor Id"
+        }
+      },
+      "required": [
+        "entity_id"
+      ],
+      "title": "MoveEntityEffect",
+      "type": "object"
+    },
+    "NarrativeOnlyEffect": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "narrative_only",
+          "default": "narrative_only",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "title": "NarrativeOnlyEffect",
+      "type": "object"
+    },
+    "NoAdjudicationCheck": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "const": "none",
+          "default": "none",
+          "title": "Mode",
+          "type": "string"
+        },
+        "candidates": {
+          "default": [],
+          "maxItems": 0,
+          "minItems": 0,
+          "title": "Candidates",
+          "type": "array"
+        }
+      },
+      "title": "NoAdjudicationCheck",
+      "type": "object"
+    },
+    "PlayerChoiceAdjudicationCheck": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "const": "player_choice",
+          "default": "player_choice",
+          "title": "Mode",
+          "type": "string"
+        },
+        "candidates": {
+          "items": {
+            "$ref": "#/$defs/SkillCheckCandidate"
+          },
+          "minItems": 2,
+          "title": "Candidates",
+          "type": "array"
+        }
+      },
+      "required": [
+        "candidates"
+      ],
+      "title": "PlayerChoiceAdjudicationCheck",
+      "type": "object"
+    },
+    "RequiredAdjudicationCheck": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "const": "required",
+          "default": "required",
+          "title": "Mode",
+          "type": "string"
+        },
+        "candidates": {
+          "items": {
+            "$ref": "#/$defs/SkillCheckCandidate"
+          },
+          "maxItems": 1,
+          "minItems": 1,
+          "title": "Candidates",
+          "type": "array"
+        }
+      },
+      "required": [
+        "candidates"
+      ],
+      "title": "RequiredAdjudicationCheck",
+      "type": "object"
+    },
+    "RevealInformationEffect": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "reveal_information",
+          "default": "reveal_information",
+          "title": "Type",
+          "type": "string"
+        },
+        "information_id": {
+          "minLength": 1,
+          "title": "Information Id",
+          "type": "string"
+        },
+        "scope": {
+          "default": "party",
+          "enum": [
+            "party",
+            "actor"
+          ],
+          "title": "Scope",
+          "type": "string"
+        }
+      },
+      "required": [
+        "information_id"
+      ],
+      "title": "RevealInformationEffect",
+      "type": "object"
+    },
+    "SetEndingAvailabilityEffect": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "set_ending_availability",
+          "default": "set_ending_availability",
+          "title": "Type",
+          "type": "string"
+        },
+        "available": {
+          "title": "Available",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "available"
+      ],
+      "title": "SetEndingAvailabilityEffect",
+      "type": "object"
+    },
+    "SetVisibilityEffect": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "set_visibility",
+          "default": "set_visibility",
+          "title": "Type",
+          "type": "string"
+        },
+        "target_kind": {
+          "enum": [
+            "information",
+            "entity",
+            "location"
+          ],
+          "title": "Target Kind",
+          "type": "string"
+        },
+        "target_id": {
+          "minLength": 1,
+          "title": "Target Id",
+          "type": "string"
+        },
+        "visible": {
+          "title": "Visible",
+          "type": "boolean"
+        },
+        "scope": {
+          "default": "party",
+          "enum": [
+            "party",
+            "actor"
+          ],
+          "title": "Scope",
+          "type": "string"
+        }
+      },
+      "required": [
+        "target_kind",
+        "target_id",
+        "visible"
+      ],
+      "title": "SetVisibilityEffect",
+      "type": "object"
+    },
+    "SkillCheckCandidate": {
+      "additionalProperties": false,
+      "properties": {
+        "candidate_id": {
+          "minLength": 1,
+          "title": "Candidate Id",
+          "type": "string"
+        },
+        "skill_id": {
+          "minLength": 1,
+          "title": "Skill Id",
+          "type": "string"
+        },
+        "difficulty": {
+          "enum": [
+            "regular",
+            "hard",
+            "extreme"
+          ],
+          "title": "Difficulty",
+          "type": "string"
+        },
+        "method_summary": {
+          "minLength": 1,
+          "title": "Method Summary",
+          "type": "string"
+        },
+        "player_safe_reason": {
+          "minLength": 1,
+          "title": "Player Safe Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "candidate_id",
+        "skill_id",
+        "difficulty",
+        "method_summary",
+        "player_safe_reason"
+      ],
+      "title": "SkillCheckCandidate",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "One Agent-adjudicated intent; the Engine never splits or interprets it.",
+  "properties": {
+    "request_id": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Request Id",
+      "type": "string"
+    },
+    "source_revision": {
+      "minLength": 1,
+      "title": "Source Revision",
+      "type": "string"
+    },
+    "actor_id": {
+      "minLength": 1,
+      "title": "Actor Id",
+      "type": "string"
+    },
+    "summary": {
+      "minLength": 1,
+      "title": "Summary",
+      "type": "string"
+    },
+    "target": {
+      "$ref": "#/$defs/ActionTarget"
+    },
+    "method": {
+      "$ref": "#/$defs/ActionMethod"
+    },
+    "check": {
+      "discriminator": {
+        "mapping": {
+          "none": "#/$defs/NoAdjudicationCheck",
+          "player_choice": "#/$defs/PlayerChoiceAdjudicationCheck",
+          "required": "#/$defs/RequiredAdjudicationCheck"
+        },
+        "propertyName": "mode"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/NoAdjudicationCheck"
+        },
+        {
+          "$ref": "#/$defs/RequiredAdjudicationCheck"
+        },
+        {
+          "$ref": "#/$defs/PlayerChoiceAdjudicationCheck"
+        }
+      ],
+      "title": "Check"
+    },
+    "success_effects": {
+      "default": [],
+      "items": {
+        "discriminator": {
+          "mapping": {
+            "advance_time": "#/$defs/AdvanceTimeEffect",
+            "change_entity_state": "#/$defs/ChangeEntityStateEffect",
+            "commit_terminal_ending": "#/$defs/CommitTerminalEndingEffect",
+            "consume_entity": "#/$defs/ConsumeEntityEffect",
+            "ensure_runtime_entity": "#/$defs/EnsureRuntimeEntityEffect",
+            "ensure_runtime_location": "#/$defs/EnsureRuntimeLocationEffect",
+            "enter_location": "#/$defs/EnterLocationEffect",
+            "hide_information": "#/$defs/HideInformationEffect",
+            "mark_core_resolved": "#/$defs/MarkCoreResolvedEffect",
+            "move_entity": "#/$defs/MoveEntityEffect",
+            "narrative_only": "#/$defs/NarrativeOnlyEffect",
+            "reveal_information": "#/$defs/RevealInformationEffect",
+            "set_ending_availability": "#/$defs/SetEndingAvailabilityEffect",
+            "set_visibility": "#/$defs/SetVisibilityEffect"
+          },
+          "propertyName": "type"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/RevealInformationEffect"
+          },
+          {
+            "$ref": "#/$defs/HideInformationEffect"
+          },
+          {
+            "$ref": "#/$defs/SetVisibilityEffect"
+          },
+          {
+            "$ref": "#/$defs/EnterLocationEffect"
+          },
+          {
+            "$ref": "#/$defs/EnsureRuntimeLocationEffect"
+          },
+          {
+            "$ref": "#/$defs/EnsureRuntimeEntityEffect"
+          },
+          {
+            "$ref": "#/$defs/MoveEntityEffect"
+          },
+          {
+            "$ref": "#/$defs/ChangeEntityStateEffect"
+          },
+          {
+            "$ref": "#/$defs/ConsumeEntityEffect"
+          },
+          {
+            "$ref": "#/$defs/AdvanceTimeEffect"
+          },
+          {
+            "$ref": "#/$defs/MarkCoreResolvedEffect"
+          },
+          {
+            "$ref": "#/$defs/SetEndingAvailabilityEffect"
+          },
+          {
+            "$ref": "#/$defs/CommitTerminalEndingEffect"
+          },
+          {
+            "$ref": "#/$defs/NarrativeOnlyEffect"
+          }
+        ]
+      },
+      "title": "Success Effects",
+      "type": "array"
+    },
+    "failure_effects": {
+      "default": [],
+      "items": {
+        "discriminator": {
+          "mapping": {
+            "advance_time": "#/$defs/AdvanceTimeEffect",
+            "change_entity_state": "#/$defs/ChangeEntityStateEffect",
+            "commit_terminal_ending": "#/$defs/CommitTerminalEndingEffect",
+            "consume_entity": "#/$defs/ConsumeEntityEffect",
+            "ensure_runtime_entity": "#/$defs/EnsureRuntimeEntityEffect",
+            "ensure_runtime_location": "#/$defs/EnsureRuntimeLocationEffect",
+            "enter_location": "#/$defs/EnterLocationEffect",
+            "hide_information": "#/$defs/HideInformationEffect",
+            "mark_core_resolved": "#/$defs/MarkCoreResolvedEffect",
+            "move_entity": "#/$defs/MoveEntityEffect",
+            "narrative_only": "#/$defs/NarrativeOnlyEffect",
+            "reveal_information": "#/$defs/RevealInformationEffect",
+            "set_ending_availability": "#/$defs/SetEndingAvailabilityEffect",
+            "set_visibility": "#/$defs/SetVisibilityEffect"
+          },
+          "propertyName": "type"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/RevealInformationEffect"
+          },
+          {
+            "$ref": "#/$defs/HideInformationEffect"
+          },
+          {
+            "$ref": "#/$defs/SetVisibilityEffect"
+          },
+          {
+            "$ref": "#/$defs/EnterLocationEffect"
+          },
+          {
+            "$ref": "#/$defs/EnsureRuntimeLocationEffect"
+          },
+          {
+            "$ref": "#/$defs/EnsureRuntimeEntityEffect"
+          },
+          {
+            "$ref": "#/$defs/MoveEntityEffect"
+          },
+          {
+            "$ref": "#/$defs/ChangeEntityStateEffect"
+          },
+          {
+            "$ref": "#/$defs/ConsumeEntityEffect"
+          },
+          {
+            "$ref": "#/$defs/AdvanceTimeEffect"
+          },
+          {
+            "$ref": "#/$defs/MarkCoreResolvedEffect"
+          },
+          {
+            "$ref": "#/$defs/SetEndingAvailabilityEffect"
+          },
+          {
+            "$ref": "#/$defs/CommitTerminalEndingEffect"
+          },
+          {
+            "$ref": "#/$defs/NarrativeOnlyEffect"
+          }
+        ]
+      },
+      "title": "Failure Effects",
+      "type": "array"
+    }
+  },
+  "required": [
+    "request_id",
+    "source_revision",
+    "actor_id",
+    "summary",
+    "target",
+    "method",
+    "check"
+  ],
+  "title": "ActionAdjudication",
+  "type": "object"
+}

@@ -835,8 +835,9 @@
   position: relative;
   isolation: isolate;
   width: 100%;
+  height: 100%;
   min-height: 100%;
-  padding: 0 0 max(1.25rem, env(safe-area-inset-bottom));
+  padding: 0;
   overflow: hidden;
   color: #2e1a0c;
   background: #1a0e07;
@@ -897,9 +898,9 @@
 
 .scenario-selection-scene__title {
   position: absolute;
-  top: 1.75rem;
+  top: 2.1rem;
   left: 50%;
-  width: min(58%, 14rem);
+  width: min(32%, 8rem);
   margin: 0;
   transform: translateX(-50%);
 }
@@ -911,28 +912,35 @@
 }
 
 .scenario-selection-scene__catalog {
-  position: relative;
+  position: absolute;
+  top: 6.25rem;
+  bottom: calc(8.5rem + env(safe-area-inset-bottom));
+  left: 50%;
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
   width: calc(100% - 1.5rem);
   min-height: 12rem;
-  margin: 0 auto;
+  margin: 0;
   padding: 0.7rem;
+  overflow-x: hidden;
+  overflow-y: auto;
   border: 1px solid rgb(192 132 51 / 62%);
   border-radius: 0.65rem;
   box-shadow:
     inset 0 0 0 2px rgb(39 18 6 / 55%),
     inset 0 0 0 3px rgb(230 172 82 / 22%),
     0 0.4rem 1.1rem rgb(0 0 0 / 30%);
+  overscroll-behavior: contain;
+  transform: translateX(-50%);
 }
 
 .scenario-module-card {
   position: relative;
   flex: 0 0 auto;
   width: 100%;
-  min-height: 10.8rem;
-  aspect-ratio: 1.84;
+  min-height: 12.5rem;
+  aspect-ratio: 1.55;
   overflow: hidden;
   border-radius: 0.8rem;
   filter: drop-shadow(0 0.35rem 0.3rem rgb(0 0 0 / 42%));
@@ -964,16 +972,20 @@
   display: block;
   align-self: center;
   justify-self: center;
-  width: min(94%, 7rem);
+  width: min(116%, 8.2rem);
   aspect-ratio: 317 / 425;
   filter: drop-shadow(0 0.2rem 0.18rem rgb(39 18 6 / 42%));
 }
 
+.scenario-module-card__cover--default {
+  width: min(104%, 7.35rem);
+}
+
 .scenario-module-card__cover-image {
   position: absolute;
-  inset: 5.5% 7.2%;
-  width: 85.6%;
-  height: 89%;
+  inset: 9% 12%;
+  width: 76%;
+  height: 82%;
   object-fit: cover;
   object-position: center;
 }
@@ -1043,7 +1055,7 @@
   margin: 0.55rem 0 0;
   overflow: hidden;
   color: #3b2615;
-  font-size: clamp(0.68rem, 3vw, 0.82rem);
+  font-size: clamp(0.78rem, 3.5vw, 0.95rem);
   font-weight: 600;
   line-height: 1.55;
   letter-spacing: 0.025em;
@@ -1060,8 +1072,9 @@
   min-width: 0;
   padding: 0 0.45rem;
   color: #4a2c14;
-  font-size: clamp(0.64rem, 2.8vw, 0.77rem);
+  font-size: clamp(0.75rem, 3.3vw, 0.9rem);
   font-weight: 700;
+  transform: translateY(-1rem);
 }
 
 .scenario-module-card__metadata > span {
@@ -1129,6 +1142,17 @@
 
 .scenario-module-card--pending {
   border: 1px dashed rgb(105 63 28 / 65%);
+}
+
+.scenario-module-card--pending::after {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  border-radius: inherit;
+  background: rgb(31 20 12 / 48%);
+  box-shadow: inset 0 0 2rem rgb(13 8 4 / 38%);
+  content: '';
+  pointer-events: none;
 }
 
 .scenario-module-card__remove {
@@ -1239,12 +1263,19 @@
 }
 
 .scenario-selection-scene__footer {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 20;
   display: flex;
   flex-direction: column;
   align-items: center;
   width: 100%;
   min-height: 8.5rem;
-  padding: 1.2rem 1rem 0;
+  padding: 1.1rem 1rem max(0.65rem, env(safe-area-inset-bottom));
+  background: linear-gradient(transparent, rgb(24 12 5 / 88%) 30%, rgb(20 10 4 / 96%));
+  pointer-events: none;
 }
 
 .scenario-selection-scene__import {
@@ -1253,6 +1284,7 @@
   border: 0;
   background: transparent;
   cursor: pointer;
+  pointer-events: auto;
   transition: filter 160ms ease, opacity 160ms ease, transform 160ms ease;
 }
 
@@ -1308,9 +1340,9 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 1rem;
-  background: rgb(8 4 2 / 78%);
-  backdrop-filter: blur(2px);
+  padding: 0.75rem;
+  background: rgb(8 4 2 / 84%);
+  backdrop-filter: blur(4px);
   animation: fade-in 180ms ease-out;
 }
 
@@ -1319,14 +1351,18 @@
   display: flex;
   flex-direction: column;
   width: 100%;
-  max-height: min(92%, 47rem);
+  height: min(94%, 48rem);
+  max-height: 48rem;
   overflow: hidden;
-  border: 2px solid #8d5d28;
-  border-radius: 0.75rem;
+  border: 2px solid #b78a4c;
+  border-radius: 1.1rem;
   color: #382110;
-  background: #d5b67e url('/assets/rooms/scenarios/module-card-1.webp') center / 100% 100% no-repeat;
+  background:
+    linear-gradient(rgb(246 237 216 / 90%), rgb(239 222 188 / 92%)),
+    url('/assets/rooms/scenarios/module-card-1.webp') right bottom / auto 48% no-repeat,
+    #efe2c5;
   box-shadow:
-    inset 0 0 0 2px rgb(236 197 124 / 34%),
+    inset 0 0 0 2px rgb(255 247 222 / 48%),
     0 1rem 2.5rem rgb(0 0 0 / 58%);
   animation: scenario-detail-in 190ms ease-out;
 }
@@ -1338,86 +1374,122 @@
 
 .scenario-module-detail__close {
   position: absolute;
-  top: 0.55rem;
-  right: 0.55rem;
+  top: 0.75rem;
+  right: 0.75rem;
   z-index: 2;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 2rem;
-  height: 2rem;
+  width: 2.5rem;
+  height: 2.5rem;
   padding: 0;
-  border: 1px solid rgb(77 42 19 / 44%);
+  border: 2px solid rgb(119 76 34 / 36%);
   border-radius: 50%;
   color: #4a2915;
-  background: rgb(230 196 139 / 76%);
+  background: rgb(239 219 179 / 72%);
   cursor: pointer;
 }
 
 .scenario-module-detail__close svg {
-  width: 1.1rem;
-  height: 1.1rem;
+  width: 1.35rem;
+  height: 1.35rem;
 }
 
 .scenario-module-detail__header {
   display: grid;
-  grid-template-columns: 5rem minmax(0, 1fr);
+  grid-template-columns: 7.35rem minmax(0, 1fr);
   align-items: center;
-  gap: 0.85rem;
-  min-height: 8rem;
-  padding: 1rem 3rem 0.8rem 1.1rem;
-  border-bottom: 1px solid rgb(91 55 26 / 28%);
+  gap: 1rem;
+  min-height: 12rem;
+  padding: 1.15rem 1rem 1rem 1.1rem;
+  border-bottom: 1px solid rgb(117 76 35 / 18%);
 }
 
 .scenario-module-detail__header .scenario-module-card__cover {
-  width: 4.8rem;
+  width: 7rem;
 }
 
-.scenario-module-detail__header > div {
+.scenario-module-detail__header .scenario-module-card__cover--default {
+  width: 6.35rem;
+}
+
+.scenario-module-detail__identity {
   min-width: 0;
 }
 
-.scenario-module-detail__header > div > span {
+.scenario-module-detail__identity > span {
   color: #835326;
   font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif;
-  font-size: 0.62rem;
+  font-size: 0.66rem;
   font-weight: 800;
   letter-spacing: 0.12em;
 }
 
 .scenario-module-detail__header h2 {
-  margin: 0.18rem 0 0;
+  margin: 0.3rem 0 0;
   overflow-wrap: anywhere;
-  font-size: 1.45rem;
+  font-size: 1.75rem;
   line-height: 1.15;
   letter-spacing: 0.05em;
 }
 
 .scenario-module-detail__header p {
-  margin: 0.35rem 0 0;
+  margin: 0.45rem 0 0;
   color: rgb(70 42 22 / 70%);
-  font-size: 0.7rem;
-  line-height: 1.35;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.scenario-module-detail__metadata {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.85rem;
+}
+
+.scenario-module-detail__metadata > span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.18rem;
+  flex: 0 0 auto;
+  min-width: max-content;
+  padding: 0.34rem 0.38rem;
+  border: 1px solid rgb(126 83 39 / 25%);
+  border-radius: 0.35rem;
+  color: #65411f;
+  background: rgb(255 248 225 / 34%);
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif;
+  font-size: 0.56rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.scenario-module-detail__metadata svg {
+  flex: 0 0 auto;
+  width: 0.85rem;
+  height: 0.85rem;
 }
 
 .scenario-module-detail__body {
+  flex: 1;
   min-height: 9rem;
-  padding: 1rem 1.2rem;
+  padding: 1.1rem 1.35rem 1.4rem;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
 
 .scenario-module-detail__body section + section {
-  margin-top: 1.15rem;
+  margin-top: 1.45rem;
 }
 
 .scenario-module-detail__body h3 {
   display: flex;
   align-items: center;
   gap: 0.45rem;
-  margin: 0 0 0.5rem;
+  margin: 0 0 0.7rem;
   color: #4b2a13;
-  font-size: 1rem;
+  font-size: 1.25rem;
   letter-spacing: 0.08em;
 }
 
@@ -1429,7 +1501,16 @@
 }
 
 .scenario-module-detail__body h3::before {
-  width: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  color: #835526;
+  background: transparent;
+  font-size: 1rem;
+  line-height: 1;
+  content: '◇';
 }
 
 .scenario-module-detail__body h3::after {
@@ -1439,9 +1520,9 @@
 .scenario-module-detail__body p {
   margin: 0;
   color: #402917;
-  font-size: 0.78rem;
+  font-size: 0.95rem;
   font-weight: 600;
-  line-height: 1.75;
+  line-height: 1.85;
   letter-spacing: 0.025em;
 }
 
@@ -1452,9 +1533,48 @@
 }
 
 .scenario-module-detail__story-page h4 {
-  margin: 0 0 0.25rem;
-  color: #5b3418;
-  font-size: 0.82rem;
+  margin: 0 0 0.35rem;
+  color: #835326;
+  font-size: 1rem;
+}
+
+.scenario-module-detail__preparation {
+  padding: 0.9rem 0.85rem 0.8rem;
+  border: 1px solid rgb(137 92 43 / 14%);
+  border-radius: 0.35rem;
+  background: rgb(255 249 229 / 22%);
+}
+
+.scenario-module-detail__preparation ul {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.scenario-module-detail__preparation li {
+  display: grid;
+  grid-template-columns: 1.8rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.55rem;
+  color: #402917;
+  font-size: 0.92rem;
+  font-weight: 600;
+  line-height: 1.75;
+}
+
+.scenario-module-detail__preparation li::before {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.8rem;
+  height: 1.8rem;
+  border-radius: 50%;
+  color: #71471f;
+  background: rgb(205 164 96 / 30%);
+  content: '◆';
+  font-size: 0.65rem;
 }
 
 .scenario-module-detail__state {
@@ -1471,24 +1591,34 @@
 
 .scenario-module-detail__actions {
   display: grid;
-  grid-template-columns: 1fr 1.35fr;
-  gap: 0.65rem;
-  padding: 0.75rem 1rem 1rem;
-  border-top: 1px solid rgb(91 55 26 / 28%);
+  grid-template-columns: 1fr;
+  gap: 0.75rem;
+  padding: 0.8rem 1rem 1rem;
+  border-top: 1px solid rgb(91 55 26 / 20%);
+  background: rgb(235 211 164 / 58%);
 }
 
 .scenario-module-detail__actions > button {
-  min-height: 2.65rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  min-height: 3rem;
   padding: 0.55rem;
   border: 1px solid rgb(84 47 21 / 58%);
   border-radius: 0.35rem;
   color: #4b2b15;
   background: rgb(226 192 134 / 72%);
   box-shadow: inset 0 1px rgb(255 244 208 / 36%);
-  font-size: 0.8rem;
+  font-size: 0.88rem;
   font-weight: 800;
   letter-spacing: 0.04em;
   cursor: pointer;
+}
+
+.scenario-module-detail__actions svg {
+  width: 1.1rem;
+  height: 1.1rem;
 }
 
 .scenario-module-detail__actions > .scenario-module-detail__select {

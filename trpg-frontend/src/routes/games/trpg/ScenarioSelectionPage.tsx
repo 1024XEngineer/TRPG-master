@@ -47,9 +47,14 @@ function readableFileSize(size: number) {
   return `${(size / 1024 / 1024).toFixed(size >= 10 * 1024 * 1024 ? 0 : 1)} MB`
 }
 
+function contentSentences(content: string) {
+  return content.match(/[^。！？]+[。！？]?/g)?.map((sentence) => sentence.trim()).filter(Boolean) ?? [content]
+}
+
 function CoverImage({ moduleId, title }: { moduleId: string; title: string }) {
+  const usesDefaultCover = !MODULE_COVERS[moduleId]
   return (
-    <span className="scenario-module-card__cover">
+    <span className={`scenario-module-card__cover${usesDefaultCover ? ' scenario-module-card__cover--default' : ''}`}>
       <img
         className="scenario-module-card__cover-image"
         src={moduleCover(moduleId)}
@@ -89,6 +94,8 @@ export default function ScenarioSelectionPage() {
   const setScene = useGameStore((state) => state.setScene)
   const detailSummary = modules?.find((module) => module.id === detailModuleId) ?? null
   const detail = detailModuleId ? detailCache[detailModuleId] : undefined
+  const preparationPages = detail?.storyPages.filter((page) => page.title.includes('准备')) ?? []
+  const openingPages = detail?.storyPages.filter((page) => !page.title.includes('准备')) ?? []
 
   useEffect(() => {
     let cancelled = false
@@ -369,10 +376,15 @@ export default function ScenarioSelectionPage() {
 
             <div className="scenario-module-detail__header">
               <CoverImage moduleId={detailSummary.id} title={detailSummary.title} />
-              <div>
+              <div className="scenario-module-detail__identity">
                 <span>{detail?.storyLabel || FIXED_TRPG.systemCatalogName}</span>
                 <h2 id="scenario-module-detail-title">{detailSummary.title}</h2>
                 <p>{detail?.subtitle || detailSummary.nameEn || `v${detailSummary.version}`}</p>
+                <div className="scenario-module-detail__metadata">
+                  <span><Users aria-hidden="true" />{playerRange(detailSummary)}</span>
+                  <span><Clock aria-hidden="true" />{detailSummary.estimatedDuration || '时长待定'}</span>
+                  <span><FileText aria-hidden="true" />CoC 7e</span>
+                </div>
               </div>
             </div>
 
@@ -401,25 +413,35 @@ export default function ScenarioSelectionPage() {
                   </section>
                   <section>
                     <h3>开局提示</h3>
-                    {detail.storyPages.length > 0 ? detail.storyPages.map((page, index) => (
+                    {openingPages.length > 0 ? openingPages.map((page, index) => (
                       <div className="scenario-module-detail__story-page" key={`${page.title}-${index}`}>
                         {page.title && <h4>{page.title}</h4>}
                         <p>{page.content}</p>
                       </div>
                     )) : <p>这份模组暂时没有额外的开局提示。</p>}
                   </section>
+                  {preparationPages.map((page, index) => (
+                    <section className="scenario-module-detail__preparation" key={`${page.title}-${index}`}>
+                      <h3>{page.title || '调查员准备'}</h3>
+                      <ul>
+                        {contentSentences(page.content).map((sentence, sentenceIndex) => (
+                          <li key={`${sentence}-${sentenceIndex}`}>{sentence}</li>
+                        ))}
+                      </ul>
+                    </section>
+                  ))}
                 </>
               )}
             </div>
 
             <div className="scenario-module-detail__actions">
-              <button type="button" onClick={closeDetails}>返回列表</button>
               <button
                 type="button"
                 className="scenario-module-detail__select"
                 disabled={!detail || detailLoading}
                 onClick={handleSelect}
               >
+                <span aria-hidden="true">◆</span>
                 {selectedModuleId === detailSummary.id ? '确认继续使用' : '选择此模组'}
               </button>
             </div>

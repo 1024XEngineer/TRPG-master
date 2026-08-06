@@ -400,7 +400,7 @@
   border-radius: 4px;
   color: #412a18;
   background: transparent;
-  font-size: clamp(15px, 4.4vw, 20px);
+  font-size: clamp(17px, 4.8vw, 22px);
   font-weight: 600;
   letter-spacing: 0.04em;
   text-align: center;
@@ -801,7 +801,10 @@
     font-size: 11px;
   }
 
-  .create-room-scene__room-name-input,
+  .create-room-scene__room-name-input {
+    font-size: 12px;
+  }
+
   .create-room-scene__summary-list {
     font-size: 10px;
   }

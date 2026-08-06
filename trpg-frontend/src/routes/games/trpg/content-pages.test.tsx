@@ -36,11 +36,13 @@ const moduleDetail: ModuleDetail = {
   subtitle: '五本失窃藏书与一年前的失踪案',
   storyPages: [
     { title: '调查委托', content: '托马斯请你调查失窃藏书与叔叔的失踪。' },
+    { title: '调查员准备', content: '擅长交涉、侦查或图书馆使用会更容易推进调查。' },
   ],
 }
 
 afterEach(() => {
   cleanup()
+  vi.clearAllMocks()
   vi.restoreAllMocks()
   useGameStore.getState().reset()
   useRoomStore.getState().reset()
@@ -71,7 +73,17 @@ describe('content selection pages', () => {
       gameSystemId: 'other-system',
       title: '其他规则模组',
     }
-    vi.mocked(listModules).mockResolvedValue([otherSystemModule, moduleSummary])
+    const moduleWithoutCover: ModuleSummary = {
+      ...moduleSummary,
+      id: 'another-coc7-module',
+      title: '未配置封面',
+      nameEn: 'Unknown Cover',
+      playersMin: 2,
+      playersMax: 4,
+      estimatedDuration: '3 小时',
+      synopsis: '用于验证默认模组封面的测试数据。',
+    }
+    vi.mocked(listModules).mockResolvedValue([otherSystemModule, moduleSummary, moduleWithoutCover])
 
     render(
       <MemoryRouter initialEntries={['/home/create/modules']}>
@@ -86,12 +98,47 @@ describe('content selection pages', () => {
     expect(screen.getByText('禁酒令时期的阿诺兹堡，五本珍藏旧书失窃。')).toBeInTheDocument()
     expect(screen.getByText('1 人')).toBeInTheDocument()
     expect(screen.getByText('1-2 小时')).toBeInTheDocument()
+    expect(screen.getByAltText('未配置封面模组封面')).toHaveAttribute(
+      'src',
+      '/assets/rooms/scenarios/cover-default.webp',
+    )
     expect(screen.queryByText('其他规则模组')).not.toBeInTheDocument()
     expect(screen.queryByText(/MS1 骨架联调/)).not.toBeInTheDocument()
   })
 
-  it('stores the selected module and returns to create-room', async () => {
+  it('shows a themed catalog error and retries the request', async () => {
+    vi.mocked(listModules)
+      .mockRejectedValueOnce(new Error('network unavailable'))
+      .mockResolvedValueOnce([moduleSummary])
+
+    render(
+      <MemoryRouter initialEntries={['/home/create/modules']}>
+        <ScenarioSelectionPage />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByRole('heading', { name: '模组档案读取失败' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '重新加载' }))
+    expect(await screen.findByText('Paper Chase')).toBeInTheDocument()
+    expect(listModules).toHaveBeenCalledTimes(2)
+  })
+
+  it('marks the module stored in the create flow as selected', async () => {
+    useGameStore.getState().setScene(moduleSummary.id)
     vi.mocked(listModules).mockResolvedValue([moduleSummary])
+
+    render(
+      <MemoryRouter initialEntries={['/home/create/modules']}>
+        <ScenarioSelectionPage />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('已选择')).toBeInTheDocument()
+  })
+
+  it('opens player-safe details before selecting the module and returns to create-room', async () => {
+    vi.mocked(listModules).mockResolvedValue([moduleSummary])
+    vi.mocked(getModuleDetail).mockResolvedValue(moduleDetail)
 
     render(
       <MemoryRouter initialEntries={['/home/create/modules']}>
@@ -102,10 +149,84 @@ describe('content selection pages', () => {
       </MemoryRouter>,
     )
 
-    fireEvent.click(await screen.findByRole('button', { name: /追书人/ }))
+    fireEvent.click(await screen.findByRole('button', { name: '查看模组 追书人 详情' }))
+
+    expect(await screen.findByRole('dialog', { name: '追书人' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '故事简介' })).toBeInTheDocument()
+    expect(screen.getByText('托马斯请你调查失窃藏书与叔叔的失踪。')).toBeInTheDocument()
+    expect(screen.getByText('擅长交涉、侦查或图书馆使用会更容易推进调查。')).toBeInTheDocument()
+    expect(useGameStore.getState().sceneId).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: '选择此模组' }))
 
     expect(await screen.findByText('创建房间页面')).toBeInTheDocument()
     expect(useGameStore.getState().sceneId).toBe(moduleSummary.id)
+  })
+
+  it('reuses loaded module details when reopening the same card', async () => {
+    vi.mocked(listModules).mockResolvedValue([moduleSummary])
+    vi.mocked(getModuleDetail).mockResolvedValue(moduleDetail)
+
+    render(
+      <MemoryRouter initialEntries={['/home/create/modules']}>
+        <ScenarioSelectionPage />
+      </MemoryRouter>,
+    )
+
+    const card = await screen.findByRole('button', { name: '查看模组 追书人 详情' })
+    fireEvent.click(card)
+    expect(await screen.findByText('调查员准备')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '关闭模组详情' }))
+    fireEvent.click(card)
+    expect(await screen.findByText('调查员准备')).toBeInTheDocument()
+    expect(getModuleDetail).toHaveBeenCalledTimes(1)
+  })
+
+  it('adds one removable in-memory parsing card for a valid local file', async () => {
+    vi.mocked(listModules).mockResolvedValue([moduleSummary])
+
+    render(
+      <MemoryRouter initialEntries={['/home/create/modules']}>
+        <ScenarioSelectionPage />
+      </MemoryRouter>,
+    )
+
+    await screen.findByText('Paper Chase')
+    const input = screen.getByLabelText('选择 PDF 或 DOCX 模组文件')
+    const file = new File(['module'], '阿卡姆档案.pdf', { type: 'application/pdf' })
+    fireEvent.change(input, { target: { files: [file] } })
+
+    expect(screen.getByRole('heading', { name: '阿卡姆档案' })).toBeInTheDocument()
+    expect(screen.getByText('解析中')).toBeInTheDocument()
+    expect(screen.getByText('文件已加入队列，解析服务尚未接入。')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '已有模组正在解析，请先删除后再导入' })).toBeDisabled()
+
+    fireEvent.click(screen.getByRole('button', { name: '删除正在解析的模组 阿卡姆档案' }))
+    expect(screen.queryByRole('heading', { name: '阿卡姆档案' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '导入 PDF 或 DOCX 模组' })).toBeEnabled()
+  })
+
+  it('rejects unsupported and oversized import files', async () => {
+    vi.mocked(listModules).mockResolvedValue([])
+
+    render(
+      <MemoryRouter initialEntries={['/home/create/modules']}>
+        <ScenarioSelectionPage />
+      </MemoryRouter>,
+    )
+
+    await screen.findByText('暂无可用模组')
+    const input = screen.getByLabelText('选择 PDF 或 DOCX 模组文件')
+    fireEvent.change(input, {
+      target: { files: [new File(['text'], '错误格式.txt', { type: 'text/plain' })] },
+    })
+    expect(screen.getByRole('alert')).toHaveTextContent('仅支持 PDF 或 DOCX 文件')
+
+    const oversized = new File(['pdf'], '超大模组.pdf', { type: 'application/pdf' })
+    Object.defineProperty(oversized, 'size', { value: 20 * 1024 * 1024 + 1 })
+    fireEvent.change(input, { target: { files: [oversized] } })
+    expect(screen.getByRole('alert')).toHaveTextContent('文件不能超过 20 MB')
+    expect(screen.queryByRole('heading', { name: '超大模组' })).not.toBeInTheDocument()
   })
 
   it('returns from the module catalog without changing the fixed game system', async () => {

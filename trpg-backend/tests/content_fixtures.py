@@ -1,12 +1,15 @@
 """Published content used only by backend and SDK E2E test databases."""
 
-from collaboration_framework.contracts import ModuleContent
+from collaboration_framework.contracts import ModuleContentV3
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.seed import BUILTIN_SYSTEM_ID
 from app.models.content import GameSystem, Scenario
 from app.models.engine import ModuleVersion
-from app.service.paper_chase_loader import PAPER_CHASE_SOURCE_PATH
+from app.service.paper_chase_loader import (
+    PAPER_CHASE_CONTENT_SCHEMA_VERSION,
+    PAPER_CHASE_SOURCE_PATH,
+)
 
 MULTIPLAYER_MODULE_ID = "e2e-multiplayer-coc7"
 MULTIPLAYER_VERSION = "1.0.0"
@@ -16,7 +19,9 @@ MULTIPLAYER_SCENARIO_ID = "00000000-0000-0000-0000-000000000154"
 async def publish_multiplayer_module(db: AsyncSession) -> None:
     """Clone playable content with a 1-2 player presentation for multiplayer tests."""
 
-    source = ModuleContent.model_validate_json(PAPER_CHASE_SOURCE_PATH.read_text(encoding="utf-8"))
+    source = ModuleContentV3.model_validate_json(
+        PAPER_CHASE_SOURCE_PATH.read_text(encoding="utf-8")
+    )
     payload = source.to_json_dict()
     payload["module_id"] = MULTIPLAYER_MODULE_ID
     payload["version"] = MULTIPLAYER_VERSION
@@ -24,7 +29,7 @@ async def publish_multiplayer_module(db: AsyncSession) -> None:
     presentation["title"] = "追书人（E2E 双人夹具）"
     presentation["name_en"] = "E2E Multiplayer Fixture"
     presentation["players_max"] = 2
-    content = ModuleContent.model_validate(payload)
+    content = ModuleContentV3.model_validate(payload)
     assert content.presentation is not None
 
     system = await db.get(GameSystem, BUILTIN_SYSTEM_ID)
@@ -58,7 +63,7 @@ async def publish_multiplayer_module(db: AsyncSession) -> None:
             module_id=MULTIPLAYER_MODULE_ID,
             version=MULTIPLAYER_VERSION,
             world_ref=content.world_ref,
-            content_schema_version=1,
+            content_schema_version=PAPER_CHASE_CONTENT_SCHEMA_VERSION,
             content_json=content.to_json_dict(),
         )
     )

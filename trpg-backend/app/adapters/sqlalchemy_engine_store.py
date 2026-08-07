@@ -7,7 +7,12 @@ from contextlib import asynccontextmanager
 from copy import deepcopy
 from datetime import UTC, datetime
 
-from collaboration_framework.contracts import ActionRequest, ContractError, ModuleContent
+from collaboration_framework.contracts import (
+    ActionRequest,
+    ContractError,
+    ModuleContent,
+    ModuleContentV3,
+)
 from collaboration_framework.engine import (
     CheckRun,
     CompletedAction,
@@ -101,12 +106,20 @@ class _SqlAlchemyEngineTransaction(EngineTransaction):
         )
         if module_version is None:
             raise ContractError("GameSession 引用的 ModuleVersion 不存在")
-        if module_version.content_schema_version not in {1, 2}:
+        if module_version.content_schema_version not in {1, 2, 3}:
             raise ContractError(
                 f"不支持的 ModuleContent schema version: {module_version.content_schema_version}"
             )
 
-        module_content = ModuleContent.model_validate(deepcopy(module_version.content_json))
+        # The stored schema version is what a room is pinned to for its whole
+        # life: a republished module never silently changes the meaning of a
+        # session already in flight (#226 §1).
+        payload = deepcopy(module_version.content_json)
+        module_content: ModuleContent | ModuleContentV3 = (
+            ModuleContentV3.model_validate(payload)
+            if module_version.content_schema_version == 3
+            else ModuleContent.model_validate(payload)
+        )
         if (
             module_content.module_id != module_version.module_id
             or module_content.version != module_version.version

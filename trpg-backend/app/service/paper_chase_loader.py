@@ -7,8 +7,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from collaboration_framework.contracts import ModulePresentation
-from collaboration_framework.module import validate_module_json
+from collaboration_framework.contracts import ModuleContentV3, ModulePresentation
+from collaboration_framework.module import validate_module_v3_json
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,8 +18,8 @@ from app.models.content import GameSystem, Scenario
 from app.models.engine import ModuleVersion
 
 PAPER_CHASE_MODULE_ID = "paper-chase-zh-coc7"
-PAPER_CHASE_VERSION = "1.0.5"
-PAPER_CHASE_CONTENT_SCHEMA_VERSION = 2
+PAPER_CHASE_VERSION = "3.0.0"
+PAPER_CHASE_CONTENT_SCHEMA_VERSION = 3
 PAPER_CHASE_WORLD_REF = "coc-7e"
 PAPER_CHASE_SOURCE_PATH = (
     Path(__file__).resolve().parents[3]
@@ -29,7 +29,7 @@ PAPER_CHASE_SOURCE_PATH = (
     / "examples"
     / "module-content-validation"
     / "追书人"
-    / "module-content-draft.json"
+    / "module-content-v3.json"
 )
 
 
@@ -52,11 +52,11 @@ class PaperChaseLoadResult:
     module_id: str
     version: str
     world_ref: str
-    scene_count: int
+    location_count: int
     entity_count: int
-    checkpoint_count: int
+    information_count: int
     rule_count: int
-    win_condition_count: int
+    ending_anchor_count: int
     outcome: str
 
     def summary_lines(self) -> tuple[str, ...]:
@@ -64,30 +64,15 @@ class PaperChaseLoadResult:
             f"module_id: {self.module_id}",
             f"version: {self.version}",
             f"world_ref: {self.world_ref}",
-            f"scenes: {self.scene_count}",
+            f"locations: {self.location_count}",
             f"entities: {self.entity_count}",
-            f"checkpoints: {self.checkpoint_count}",
+            f"information: {self.information_count}",
             f"rules: {self.rule_count}",
-            f"win_conditions: {self.win_condition_count}",
+            f"ending_anchors: {self.ending_anchor_count}",
             f"result: {self.outcome}",
         )
 
 
-def _check_catalog(ruleset: RulesetRead) -> set[str]:
-    """构造 Validation 使用的 COC7 检定目录。
-
-    ModuleDraft 目前把技能和属性检定都放在 ``Checkpoint.skills``。因此目录以
-    Ruleset 的技能 ID 为主体，同时加入属性键及其小写形式，以接受追书人中现有的
-    ``STR`` 与 ``luck`` 检定；所有值仍然只来自数据库 Ruleset。
-    """
-
-    if not ruleset.skills:
-        raise PaperChaseLoadError("coc-7e GameSystem 的 Ruleset 没有可用技能目录")
-    catalog = {skill.id for skill in ruleset.skills}
-    for attribute in ruleset.attributes:
-        catalog.add(attribute.key)
-        catalog.add(attribute.key.lower())
-    return catalog
 
 
 async def load_paper_chase(
@@ -111,22 +96,21 @@ async def load_paper_chase(
         if not system.ruleset:
             raise PaperChaseLoadError("coc-7e GameSystem 的 Ruleset 为空")
         try:
-            ruleset = RulesetRead.model_validate(system.ruleset)
+            RulesetRead.model_validate(system.ruleset)
         except ValidationError as exc:
-            raise PaperChaseLoadError("coc-7e GameSystem 的 Ruleset 无法构造技能目录") from exc
+            raise PaperChaseLoadError("coc-7e GameSystem 的 Ruleset 无法构造") from exc
 
-        report = validate_module_json(
-            payload,
-            skill_catalog=_check_catalog(ruleset),
-            content_schema_version=PAPER_CHASE_CONTENT_SCHEMA_VERSION,
-        )
-        if report.status != "pass" or report.content is None:
+        # v3 no longer needs a skill catalogue at load time: skills live inside
+        # a Rule's Check Profile parameters, and the Engine validates them
+        # against the Actor's own Ruleset snapshot at submit time.
+        report = validate_module_v3_json(payload)
+        if report.status != "pass":
             issues = "; ".join(f"{issue.code}@{issue.path}" for issue in report.errors)
             raise PaperChaseLoadError(
                 f"追书人 Validation 未通过（status={report.status}）"
                 + (f": {issues}" if issues else "")
             )
-        content = report.content
+        content = ModuleContentV3.model_validate_json(payload)
         actual_identity = (content.module_id, content.version, content.world_ref)
         expected_identity = (
             PAPER_CHASE_MODULE_ID,
@@ -197,15 +181,14 @@ async def load_paper_chase(
         if _before_commit is not None:
             _before_commit()
 
-    entity_rule_count = sum(len(entity.rules) for entity in content.entities)
     return PaperChaseLoadResult(
         module_id=content.module_id,
         version=content.version,
         world_ref=content.world_ref,
-        scene_count=len(content.scenes),
+        location_count=len(content.locations),
         entity_count=len(content.entities),
-        checkpoint_count=len(content.checkpoints),
-        rule_count=len(content.module_rules) + entity_rule_count,
-        win_condition_count=len(content.win_conditions),
+        information_count=len(content.information),
+        rule_count=len(content.rules),
+        ending_anchor_count=len(content.ending_anchors),
         outcome=outcome,
     )

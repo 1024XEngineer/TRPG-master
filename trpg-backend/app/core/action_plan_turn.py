@@ -18,7 +18,6 @@ from collaboration_framework.contracts import (
     AdvanceTimeEffect,
     CancelActionPlanRequest,
     CancelCheckChoice,
-    ChangeEntityStateEffect,
     CheckDecisionRequest,
     ContractError,
     EnterLocationEffect,
@@ -30,7 +29,7 @@ from collaboration_framework.contracts import (
     PlayerInput,
     PlayerView,
     RequiredAdjudicationCheck,
-    RevealInformationEffect,
+    RuleDecisionRef,
     SingleActionDecision,
     SkillCheckCandidate,
 )
@@ -920,37 +919,48 @@ class _DeterministicStepAdjudicator:
             "",
         ).strip(" ，,。")
         target = _match_visible_entity(context.player_view, action_text)
-        checkpoint = _match_visible_checkpoint(
-            context.player_view,
+        candidate, option = _match_rule_candidate(
+            context.keeper_capabilities,
             action_text,
             target.id if target is not None else None,
         )
-        if checkpoint is not None:
-            skill_id = checkpoint.skills[0]
-            success_effects, failure_effects = _fake_checkpoint_effects(checkpoint.id)
+        if candidate is not None and option is not None:
+            # The option id doubles as the skill id in the published fixture; the
+            # Engine re-validates it against the Actor's Ruleset snapshot anyway.
             return ActionAdjudication(
                 request_id=context.step_request_id,
                 source_revision=context.player_view.revision,
                 actor_id=context.player_input.actor_id,
                 summary=context.step.semantic_goal,
-                target=ActionTarget(kind="entity", id=checkpoint.target_id),
+                target=ActionTarget(
+                    kind="entity",
+                    id=(candidate.target_ids[0] if candidate.target_ids else target.id),
+                ),
                 method=ActionMethod(
-                    family=checkpoint.action_hint,
+                    family=(
+                        candidate.action_families[0]
+                        if candidate.action_families
+                        else context.step.kind
+                    ),
                     description=context.step.semantic_goal,
+                ),
+                rule_decision=RuleDecisionRef(
+                    rule_id=candidate.rule_id, option_id=option.id
                 ),
                 check=RequiredAdjudicationCheck(
                     candidates=(
                         SkillCheckCandidate(
-                            candidate_id=f"{checkpoint.id}:{skill_id}",
-                            skill_id=skill_id,
-                            difficulty=checkpoint.difficulty or "regular",
+                            candidate_id=option.id,
+                            skill_id=option.id,
+                            difficulty="regular",
                             method_summary=context.step.semantic_goal,
                             player_safe_reason="使用当前地点公开的检定方式",
                         ),
                     )
                 ),
-                success_effects=success_effects,
-                failure_effects=failure_effects,
+                # Effects belong to the rule (#226 §5), not to this stand-in.
+                success_effects=(),
+                failure_effects=(),
             )
 
         target_kind = "entity" if target is not None else "location"
@@ -984,67 +994,34 @@ def _match_visible_entity(view: PlayerView, text: str):
     return matches[0][2]
 
 
-def _match_visible_checkpoint(view: PlayerView, text: str, target_id: str | None):
-    family_markers = {
-        "search": ("搜索", "搜查", "找线索", "找"),
-        "research": ("查阅", "查找", "研究", "旧报", "查"),
-        "social": ("询问", "交谈", "问"),
-        "observe": ("观察", "查看"),
-        "intimidate": ("威胁", "恐吓"),
-        "bribe": ("贿赂", "送酒"),
-    }
-    matches = [
-        checkpoint
-        for checkpoint in view.checkpoint_options
-        if (target_id is None or checkpoint.target_id == target_id)
-        and any(
-            marker in text
-            for marker in family_markers.get(checkpoint.action_hint, (checkpoint.action_hint,))
-        )
-        and checkpoint.skills
-    ]
-    return matches[0] if len(matches) == 1 else None
+def _match_rule_candidate(capabilities, text: str, target_id: str | None):
+    """Pick at most one v3 Rule the player's words clearly mean.
 
+    The Fake stands in for the Agent's semantic judgement, so it only matches on
+    the player-safe hints the Match View published — it never reads the module.
+    Ambiguity yields nothing: guessing between two rules is exactly the mistake
+    a real Agent would be asked not to make.
+    """
 
-def _fake_checkpoint_effects(checkpoint_id: str):
-    """Deterministic effects for the published Paper Chase fake-provider fixture."""
-
-    effects = {
-        "search_kimball_study": (
-            (
-                ChangeEntityStateEffect(entity_id="kimball_study", key="searched", value=True),
-                ChangeEntityStateEffect(entity_id="douglas_diary", key="found", value=True),
-            ),
-            (ChangeEntityStateEffect(entity_id="kimball_study", key="searched", value=True),),
-        ),
-        "research_library_archive": (
-            (
-                RevealInformationEffect(
-                    information_id="cemetery_dance_report",
-                    scope="party",
-                ),
-                ChangeEntityStateEffect(
-                    entity_id="newspaper_archive",
-                    key="library_report_found",
-                    value=True,
-                ),
-            ),
-            (NarrativeOnlyEffect(),),
-        ),
-        "impress_caretaker": (
-            (
-                ChangeEntityStateEffect(entity_id="melodias", key="impressed", value=True),
-                ChangeEntityStateEffect(entity_id="favorite_grave", key="identified", value=True),
-            ),
-            (NarrativeOnlyEffect(),),
-        ),
-    }
-    return effects.get(
-        checkpoint_id,
-        ((NarrativeOnlyEffect(),), (NarrativeOnlyEffect(),)),
-    )
-
-
+    if capabilities is None:
+        return None, None
+    matches = []
+    for candidate in capabilities.rule_candidates:
+        if target_id is not None and candidate.target_ids and target_id not in candidate.target_ids:
+            continue
+        hints = [hint for hint in candidate.semantic_hints if hint and hint in text]
+        if not hints:
+            continue
+        matches.append((max(len(hint) for hint in hints), candidate.rule_id, candidate))
+    if len(matches) != 1:
+        return None, None
+    candidate = matches[0][2]
+    # Options are opaque: prefer one whose hints the player actually used, else
+    # fall back to the first declared one.
+    for option in candidate.options:
+        if any(hint and hint in text for hint in option.semantic_hints):
+            return candidate, option
+    return candidate, candidate.options[0] if candidate.options else None
 __all__ = [
     "ActionPlanTurnApplication",
     "ActionPlanTurnResult",

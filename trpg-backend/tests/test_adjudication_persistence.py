@@ -41,7 +41,7 @@ async def test_pending_check_and_authoritative_roll_survive_service_rebuild(
         for actor_id, actor in runtime.game_state.actors.items()
         if actor.player_id == players[0].id
     )
-    information_id = runtime.v2.information_items[0].id
+    information_id = sorted(runtime.canon_information_ids)[0]
     request = SubmitAdjudicationRequest(
         room_id=room.id,
         player_id=players[0].id,

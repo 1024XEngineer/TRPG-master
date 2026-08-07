@@ -147,7 +147,7 @@ async def test_background_service_falls_back_on_invalid_output() -> None:
 def test_deepseek_background_provider_requires_key() -> None:
     with pytest.raises(ValidationError, match="CHARACTER_BACKGROUND_PROVIDER"):
         Settings(
-            _env_file=None,
+            _env_file=None,  # ty: ignore[unknown-argument]
             character_background_provider="deepseek",
             deepseek_api_key=None,
         )
@@ -156,7 +156,7 @@ def test_deepseek_background_provider_requires_key() -> None:
 def test_deterministic_background_provider_needs_no_key() -> None:
     service = build_character_background_service(
         Settings(
-            _env_file=None,
+            _env_file=None,  # ty: ignore[unknown-argument]
             character_background_provider="deterministic",
             deepseek_api_key=None,
         )

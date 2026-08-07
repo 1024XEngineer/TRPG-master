@@ -15,7 +15,7 @@ export interface BuiltCharacter {
   derived: { hp: number; san: number; mp: number };
   skillValues: Record<string, number>; // skillId -> 最终值（base+分配）
   occupationChoiceSkillIds: string[];
-  equipment: string;
+  equipment: string | string[];
   occupationName: string | null;
   background: string;
   notes: string;
@@ -51,13 +51,18 @@ export async function saveCharacter(
       derivedStats: { HP: built.derived.hp, SAN: built.derived.san, MP: built.derived.mp },
       skills: built.skillValues,
       occupationChoiceSkillIds: built.occupationChoiceSkillIds,
-      equipment: built.equipment
+      equipment: Array.isArray(built.equipment)
         ? built.equipment
-            .split(/[,，\n]/)
-            .map((s) => s.trim())
+            .map((name) => name.trim())
             .filter(Boolean)
             .map((name) => ({ name }))
-        : [],
+        : built.equipment
+          ? built.equipment
+              .split(/[,，\n]/)
+              .map((s) => s.trim())
+              .filter(Boolean)
+              .map((name) => ({ name }))
+          : [],
       occupation: built.occupationName,
       background: built.background,
       notes: built.notes
@@ -75,6 +80,20 @@ export async function saveCharacter(
  */
 export async function fetchCharacter(roomId: string, characterId: string) {
   return sdk.characters.get(roomId, characterId, requireReconnectToken());
+}
+
+export async function quickGenerateCharacter(
+  roomId: string,
+  characterId: string,
+  identity: { name: string; age?: string; gender: string; residence: string; birthplace: string }
+) {
+  return sdk.characters.quickGenerate(roomId, characterId, requireReconnectToken(), {
+    name: identity.name.trim(),
+    age: identity.age ? Number(identity.age) : null,
+    gender: identity.gender || null,
+    residence: identity.residence,
+    birthplace: identity.birthplace,
+  });
 }
 
 export async function completeCharacter(roomId: string, characterId: string): Promise<void> {

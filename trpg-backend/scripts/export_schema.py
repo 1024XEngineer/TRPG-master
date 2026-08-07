@@ -66,6 +66,8 @@ _MODELS: list[type[BaseModel]] = [
     character.CharacterDraftResult,
     character.CharacterRead,
     character.RollAttributesResult,
+    character.QuickGenerateRequest,
+    character.QuickGenerateResult,
     character.CharacterTemplateCreateBody,
     character.CharacterTemplateRead,
     # 建卡计算/校验预览（issue #84 S2）

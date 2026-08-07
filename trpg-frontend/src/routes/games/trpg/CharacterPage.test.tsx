@@ -119,6 +119,7 @@ const { mockRuleset, mockPreviewCharacter, mockCharacterApi } = vi.hoisted(() =>
 
   const mockCharacterApi = {
     createCharacterDraft: vi.fn().mockResolvedValue('draft-1'),
+    quickGenerateCharacter: vi.fn(),
     saveCharacter: vi.fn().mockResolvedValue(undefined),
     completeCharacter: vi.fn().mockResolvedValue(undefined),
     fetchCharacter: vi.fn().mockResolvedValue({ attributes: {}, skills: {} }),
@@ -145,6 +146,43 @@ describe('CharacterPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockCharacterApi.createCharacterDraft.mockResolvedValue('draft-1')
+    mockCharacterApi.quickGenerateCharacter.mockResolvedValue({
+      character: {
+        id: 'draft-1',
+        status: 'draft',
+        generationMethod: 'roll',
+        name: '自动调查员',
+        age: 32,
+        gender: '女',
+        residence: '阿卡姆',
+        birthplace: '波士顿',
+        attributes: {
+          STR: 45, CON: 55, POW: 50, DEX: 60, APP: 40, SIZ: 65, INT: 60, EDU: 70, LUCK: 35,
+        },
+        derivedStats: { HP: 12, SAN: 50, MP: 10 },
+        skills: { accounting: 20, stealth: 30, 'credit-rating': 25 },
+        occupationChoiceSkillIds: [],
+        equipment: ['旧相机'],
+        occupation: '会计师',
+        background: '形象描述：总是带着一本磨损的账簿\n其他：曾调查过一桩失踪案',
+        notes: '习惯先记录再行动',
+      },
+      occupationId: 1,
+      compute: {
+        derivedStats: { HP: 12, SAN: 50, MP: 10, DB: '0', Build: '0', MOV: 8 },
+        occupationSkillPoints: { budget: 2, spent: 1, remaining: 1 },
+        interestSkillPoints: { budget: 2, spent: 1, remaining: 1 },
+        skillView: mockRuleset.skills.map(skill => ({
+          id: skill.id,
+          base: 0,
+          allocated: skill.id === 'accounting' ? 1 : skill.id === 'stealth' ? 1 : skill.id === 'credit-rating' ? 25 : 0,
+          current: skill.id === 'accounting' ? 1 : skill.id === 'stealth' ? 1 : skill.id === 'credit-rating' ? 25 : 0,
+          cap: skill.id === 'credit-rating' ? 70 : 99,
+        })),
+        resolvedOccupationChoiceSkillIds: [],
+        validation: [],
+      },
+    })
     mockCharacterApi.saveCharacter.mockResolvedValue(undefined)
     mockCharacterApi.completeCharacter.mockResolvedValue(undefined)
     mockCharacterApi.fetchCharacter.mockResolvedValue({ attributes: {}, skills: {} })
@@ -169,6 +207,7 @@ describe('CharacterPage', () => {
       <MemoryRouter initialEntries={['/room/character']}>
         <Routes>
           <Route path="/room/character" element={<CharacterPage />} />
+          <Route path="/room/ready" element={<div>ready-page</div>} />
         </Routes>
       </MemoryRouter>
     )
@@ -233,6 +272,51 @@ describe('CharacterPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /下一步/ }))
 
     await advanceToAttributesAfterOccupationPreview()
+  })
+
+  it('generates a character from the blank page and navigates directly to ready', async () => {
+    renderPage()
+
+    fireEvent.change(screen.getByPlaceholderText('角色姓名'), { target: { value: '玩家调查员' } })
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: '女' } })
+    fireEvent.click(screen.getByRole('button', { name: /一键生成调查员/ }))
+
+    await waitFor(() => {
+      expect(mockCharacterApi.createCharacterDraft).toHaveBeenCalledWith('room-1')
+      expect(mockCharacterApi.quickGenerateCharacter).toHaveBeenCalledWith(
+        'room-1',
+        'draft-1',
+        expect.objectContaining({ name: '玩家调查员', gender: '女' }),
+      )
+    })
+    expect(await screen.findByText('ready-page')).toBeInTheDocument()
+    expect(useRoomStore.getState().characterId).toBe('draft-1')
+    expect(useCharacterStore.getState().getForRoom('room-1')?.info.name).toBe('玩家调查员')
+    expect(mockCharacterApi.completeCharacter).toHaveBeenCalledWith('room-1', 'draft-1')
+    expect(mockCharacterApi.saveCharacter).toHaveBeenCalledWith(
+      'room-1',
+      'draft-1',
+      expect.objectContaining({
+        name: '玩家调查员',
+        gender: '女',
+        equipment: ['旧相机'],
+      }),
+    )
+  })
+
+  it('asks before replacing a non-empty draft and preserves it when generation fails', async () => {
+    renderPage()
+    fireEvent.change(screen.getByPlaceholderText('角色姓名'), { target: { value: '手工调查员' } })
+    fireEvent.click(screen.getByText('会计师'))
+    fireEvent.click(screen.getByRole('button', { name: /一键生成调查员/ }))
+
+    expect(screen.getByText('覆盖当前草稿？')).toBeInTheDocument()
+    expect(mockCharacterApi.quickGenerateCharacter).not.toHaveBeenCalled()
+
+    mockCharacterApi.quickGenerateCharacter.mockRejectedValueOnce(new Error('network failed'))
+    fireEvent.click(screen.getByRole('button', { name: '继续生成' }))
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('network failed'))
+    expect(screen.getByPlaceholderText('角色姓名')).toHaveValue('手工调查员')
   })
 
   it('explains each COC attribute and luck from an inline info button', async () => {

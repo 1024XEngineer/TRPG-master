@@ -209,6 +209,7 @@ npm run dev
 | `DEEPSEEK_BASE_URL` | `https://api.deepseek.com` | OpenAI-compatible Chat Completions 根地址 |
 | `DEEPSEEK_MODEL` | `deepseek-chat` | DeepSeek 模型名称 |
 | `DEEPSEEK_TIMEOUT_SECONDS` | `30` | DeepSeek 请求超时秒数 |
+| `CHARACTER_BACKGROUND_PROVIDER` | `deterministic` | 一键建卡装备与背景：`deterministic` 或 `deepseek`；模型失败会整体回退内置模板 |
 | `HOST_SPEECH_PROVIDER` | `disabled` | 主持人语音：`disabled`、`fake` 或 `doubao`；`fake` 仅用于测试 |
 | `DOUBAO_TTS_API_KEY` | 空 | 新版豆包语音控制台 API Key（按 SecretStr 读取且禁止写日志） |
 | `DOUBAO_TTS_RESOURCE_ID` | `seed-tts-2.0` | DouBao TTS 2.0 固定服务标识 |
@@ -302,6 +303,7 @@ Agent、重新掷骰或重复写入状态；使用同一 `clientActionId` 重试
 
 ```dotenv
 HOST_MODEL_PROVIDER=deepseek
+CHARACTER_BACKGROUND_PROVIDER=deepseek
 DEEPSEEK_API_KEY=你的_API_Key
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_MODEL=deepseek-chat
@@ -333,7 +335,7 @@ Repository Secret，非敏感的 API 根地址和模型名使用 Repository Vari
 
 - key 为空时使用 `HOST_MODEL_PROVIDER=fake`，其余预览功能仍可验证；
 - DeepSeek 和 Sufy key 必须成对存在；只有一套 key 时部署立即失败，避免出现半真实链路；
-- 两套 key 都存在时，`DEEPSEEK_MODEL` 先整理角色图片提示词，`SUFY_IMAGE_MODEL` 再生成图片；
+- 两套 key 都存在时，`DEEPSEEK_MODEL` 生成一键建卡背景并整理角色图片提示词，`SUFY_IMAGE_MODEL` 再生成图片；
 - 当前推荐的两套模型分别为 `deepseek/deepseek-v4-pro-202606` 和 `google/gemini-3-pro-image`；
 - DeepSeek key 非空时，其 Base URL 和模型名必须同时存在，否则部署立即失败；Sufy 的 Base URL 和模型名可留空使用上述默认值；
 - 配置真实 provider 时不会静默使用代码中的旧厂商默认值；
@@ -341,7 +343,8 @@ Repository Secret，非敏感的 API 根地址和模型名使用 Repository Vari
 
 部署服务器不会直接执行仓库中的 `docker-compose.preview.yml`，而是复制受信任的
 固定模板 `~/trpg-previews/compose-template/docker-compose.yml`。模板中的 backend
-service 必须透传相同配置：
+service 必须透传相同配置。两份 workflow 会在拉取镜像前检查这个变量已经解析为
+期望值；模板未更新时部署会明确失败，不会误把预览标成已启用模型：
 
 ```yaml
 environment:
@@ -349,6 +352,7 @@ environment:
   DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
   DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.qnaigc.com/v1}
   DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek/deepseek-v4-pro-202606}
+  CHARACTER_BACKGROUND_PROVIDER: ${CHARACTER_BACKGROUND_PROVIDER:-deterministic}
   CHARACTER_PORTRAIT_ENABLED: ${CHARACTER_PORTRAIT_ENABLED:-true}
   PORTRAIT_PROMPT_PROVIDER: ${PORTRAIT_PROMPT_PROVIDER:-deterministic}
   PORTRAIT_IMAGE_PROVIDER: ${PORTRAIT_IMAGE_PROVIDER:-mock}

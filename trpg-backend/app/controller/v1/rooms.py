@@ -8,10 +8,11 @@
 
 from typing import NoReturn
 
-from fastapi import APIRouter, Body, Depends, Header, Query, status
+from fastapi import APIRouter, Body, Depends, Header, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.controller.dependencies import get_current_user
+from app.core.coc7_character_generation import CharacterGenerationError
 from app.core.db import get_db
 from app.core.errors import AppException, ErrorCode
 from app.dto.character import (
@@ -19,6 +20,8 @@ from app.dto.character import (
     CharacterDraftResult,
     CharacterRead,
     CharacterUpdateBody,
+    QuickGenerateRequest,
+    QuickGenerateResult,
     RollAttributesResult,
 )
 from app.dto.chat import ChatMessageRead
@@ -64,6 +67,7 @@ _ERROR_MAP: dict[type[Exception], tuple[ErrorCode, int]] = {
     room_service.RoomAuthenticationError: (ErrorCode.UNAUTHORIZED, status.HTTP_401_UNAUTHORIZED),
     room_service.RoomAuthorizationError: (ErrorCode.FORBIDDEN, status.HTTP_403_FORBIDDEN),
     character_service.CharacterNotFoundError: (ErrorCode.NOT_FOUND, status.HTTP_404_NOT_FOUND),
+    CharacterGenerationError: (ErrorCode.CONFLICT, status.HTTP_409_CONFLICT),
 }
 
 
@@ -453,6 +457,41 @@ async def roll_attributes(
         room_service.RoomAuthenticationError,
         room_service.RoomAuthorizationError,
         room_service.RoomConflictError,
+    ) as exc:
+        _raise_service_error(exc)
+    return ApiResponse.ok(result)
+
+
+@router.post(
+    "/{room_id}/characters/{character_id}/quick-generate",
+    response_model=ApiResponse[QuickGenerateResult],
+    tags=["characters"],
+)
+async def quick_generate_character(
+    room_id: str,
+    character_id: str,
+    request: Request,
+    reconnect_token: str | None = Header(default=None, alias="X-Reconnect-Token"),
+    body: QuickGenerateRequest | None = Body(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[QuickGenerateResult]:
+    """生成一张规则合法的角色草稿，不完成角色卡，也不触发生图。"""
+    try:
+        result = await character_service.quick_generate_character(
+            db,
+            room_id,
+            character_id,
+            reconnect_token,
+            request.app.state.character_background_service,
+            body,
+        )
+    except (
+        CharacterGenerationError,
+        character_service.CharacterNotFoundError,
+        room_service.RoomAuthenticationError,
+        room_service.RoomAuthorizationError,
+        room_service.RoomConflictError,
+        room_service.RulesetNotConfiguredError,
     ) as exc:
         _raise_service_error(exc)
     return ApiResponse.ok(result)

@@ -197,6 +197,7 @@ jobs:
               exit 1
             fi
             HOST_MODEL_PROVIDER=deepseek
+            CHARACTER_BACKGROUND_PROVIDER=deepseek
             PORTRAIT_PROMPT_PROVIDER=deepseek
             PORTRAIT_IMAGE_PROVIDER=sufy
           else
@@ -205,6 +206,7 @@ jobs:
               exit 1
             fi
             HOST_MODEL_PROVIDER=fake
+            CHARACTER_BACKGROUND_PROVIDER=deterministic
             PORTRAIT_PROMPT_PROVIDER=deterministic
             PORTRAIT_IMAGE_PROVIDER=mock
           fi
@@ -266,6 +268,7 @@ jobs:
             export FRONTEND_IMAGE="$FRONTEND_IMAGE"
             export PREVIEW_PORT="$PORT"
             export HOST_MODEL_PROVIDER="$HOST_MODEL_PROVIDER"
+            export CHARACTER_BACKGROUND_PROVIDER="$CHARACTER_BACKGROUND_PROVIDER"
             export DEEPSEEK_API_KEY="\$(printf '%s' '$DEEPSEEK_API_KEY_B64' | base64 -d)"
             export DEEPSEEK_BASE_URL="\$(printf '%s' '$DEEPSEEK_BASE_URL_B64' | base64 -d)"
             export DEEPSEEK_MODEL="\$(printf '%s' '$DEEPSEEK_MODEL_B64' | base64 -d)"
@@ -283,6 +286,11 @@ jobs:
             export DOUBAO_TTS_API_KEY="\$(printf '%s' '$DOUBAO_TTS_API_KEY_B64' | base64 -d)"
             export DOUBAO_TTS_VOICES="\$(printf '%s' '$DOUBAO_TTS_VOICES_B64' | base64 -d)"
             export DOUBAO_TTS_DEFAULT_VOICE_TYPE="\$(printf '%s' '$DOUBAO_TTS_DEFAULT_VOICE_TYPE_B64' | base64 -d)"
+            CONFIGURED_BACKGROUND_PROVIDER=\$(docker compose config | awk '/CHARACTER_BACKGROUND_PROVIDER:/{print \$2; exit}')
+            if [ "\$CONFIGURED_BACKGROUND_PROVIDER" != "$CHARACTER_BACKGROUND_PROVIDER" ]; then
+              echo "固定 compose 模板未透传 CHARACTER_BACKGROUND_PROVIDER（期望 $CHARACTER_BACKGROUND_PROVIDER，实际 \${CONFIGURED_BACKGROUND_PROVIDER:-未配置})" >&2
+              exit 1
+            fi
             docker compose -p pr-$PR pull
             # --wait：等 healthcheck 真的通过再算这一步成功，镜像坏了/
             # entrypoint 启动即崩溃会让这里失败，而不是"容器建起来了"就

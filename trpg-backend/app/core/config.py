@@ -83,6 +83,9 @@ class Settings(BaseSettings):
     )
     deepseek_model: str = Field(default="deepseek-chat", min_length=1)
     deepseek_timeout_seconds: float = Field(default=30.0, gt=0, le=120)
+    # 一键建卡的规则数值始终由本地 COC7 生成器负责；此开关只决定八项背景文字
+    # 是否交给 DeepSeek 创作。模型失败时服务层会回退到生成器内置模板。
+    character_background_provider: Literal["deterministic", "deepseek"] = "deterministic"
     host_agent_max_turns: int = Field(default=6, gt=0, le=20)
     host_agent_max_tool_calls: int = Field(default=8, gt=0, le=50)
     host_agent_tool_timeout_seconds: float = Field(default=5.0, gt=0, le=30)
@@ -150,6 +153,10 @@ class Settings(BaseSettings):
             self.deepseek_api_key is None or not secret_value(self.deepseek_api_key).strip()
         ):
             raise ValueError("HOST_MODEL_PROVIDER=deepseek 时必须设置 DEEPSEEK_API_KEY")
+        if self.character_background_provider == "deepseek" and (
+            self.deepseek_api_key is None or not secret_value(self.deepseek_api_key).strip()
+        ):
+            raise ValueError("CHARACTER_BACKGROUND_PROVIDER=deepseek 时必须设置 DEEPSEEK_API_KEY")
         if (
             self.character_portrait_enabled
             and self.portrait_prompt_provider == "deepseek"

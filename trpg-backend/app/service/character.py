@@ -7,12 +7,13 @@
 """
 
 import random
-from dataclasses import asdict
+from dataclasses import asdict, replace
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.coc7_character_generation import generate_character_draft
 from app.core.coc7_content import build_coc7_ruleset
 from app.core.coc7_rules import (
     GENERATION_POINT_BUY,
@@ -33,11 +34,15 @@ from app.dto.character import (
     CharacterTemplateCreateBody,
     CharacterTemplateRead,
     CharacterUpdateBody,
+    QuickGenerateRequest,
+    QuickGenerateResult,
     RollAttributesResult,
 )
+from app.dto.character_background import CharacterBackgroundContext, CharacterBackgroundSkill
 from app.dto.game import RulesetRead
 from app.models.room import Character, Player, Room
 from app.models.user import UserCharacterTemplate
+from app.service.character_background import CharacterBackgroundService
 from app.service.room import (
     RoomAuthorizationError,
     RoomConflictError,
@@ -332,6 +337,7 @@ def compute_character_preview(
         occupation_id=payload.occupation_id,
         skills=payload.skills,
         occupation_choice_skill_ids=payload.occupation_choice_skill_ids,
+        generation_method=payload.generation_method,
     )
     return CharacterComputeResult(**asdict(result))
 
@@ -387,6 +393,119 @@ async def roll_attributes(
     character.version += 1
     await db.commit()
     return RollAttributesResult(attributes=attributes, derived_stats=derived_stats)
+
+
+async def quick_generate_character(
+    db: AsyncSession,
+    room_id: str,
+    character_id: str,
+    reconnect_token: str | None,
+    background_service: CharacterBackgroundService | None = None,
+    identity: QuickGenerateRequest | None = None,
+) -> QuickGenerateResult:
+    """生成并保存一张角色草稿，不标记完成，也不触发生图。"""
+    character = await _get_own_character(db, room_id, character_id, reconnect_token)
+    room = await find_room_by_id(db, room_id)
+    _require_character_editable(room)
+    ruleset = await _resolve_ruleset(db, room)
+    generated = generate_character_draft(ruleset)
+    if identity is not None:
+        generated = replace(
+            generated,
+            name=(
+                identity.name.strip() if identity.name and identity.name.strip() else generated.name
+            ),
+            age=identity.age if identity.age is not None else generated.age,
+            gender=identity.gender or generated.gender,
+            residence=identity.residence or generated.residence,
+            birthplace=identity.birthplace or generated.birthplace,
+        )
+
+    if background_service is not None:
+        occupation = next(
+            (item for item in ruleset.occupations if item.id == generated.occupation_id), None
+        )
+        skill_specs = {skill.id: skill for skill in ruleset.skills}
+        prominent_skills = [
+            CharacterBackgroundSkill(
+                id=skill_id,
+                name=skill_specs[skill_id].name,
+                value=value,
+            )
+            for skill_id, value in sorted(
+                generated.skills.items(), key=lambda item: item[1], reverse=True
+            )
+            if skill_id in skill_specs
+        ][:5]
+        context = CharacterBackgroundContext(
+            name=generated.name,
+            age=generated.age,
+            gender=generated.gender,
+            residence=generated.residence,
+            birthplace=generated.birthplace,
+            occupation=generated.occupation,
+            occupation_description=occupation.description if occupation else "",
+            occupation_categories=occupation.categories if occupation else [],
+            attributes=generated.attributes,
+            prominent_skills=prominent_skills,
+            credit_rating=generated.skills.get("credit-rating", 0),
+            equipment=generated.equipment,
+        )
+        generation = await background_service.generate(
+            context,
+            fallback=generated.background,
+            fallback_equipment=generated.equipment,
+        )
+        generated = replace(
+            generated,
+            background=generation.background,
+            equipment=generation.equipment,
+        )
+
+    await _mark_character_modified(db, character)
+    character.name = generated.name
+    character.age = generated.age
+    character.gender = generated.gender
+    character.residence = generated.residence
+    character.birthplace = generated.birthplace
+    character.attributes = generated.attributes
+    character.derived_stats = generated.derived_stats
+    character.skills = generated.skills
+    character.occupation_choice_skill_ids = generated.occupation_choice_skill_ids
+    character.equipment = generated.equipment
+    character.occupation = generated.occupation
+    character.background = generated.background
+    character.notes = generated.notes
+    character.generation_method = "roll"
+    character.version += 1
+    try:
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+
+    return QuickGenerateResult(
+        character=CharacterRead(
+            id=character.id,
+            status=character.status,
+            generation_method=character.generation_method,
+            name=character.name,
+            age=character.age,
+            gender=character.gender,
+            residence=character.residence or "",
+            birthplace=character.birthplace or "",
+            attributes=character.attributes or {},
+            derived_stats=character.derived_stats or {},
+            skills=character.skills or {},
+            occupation_choice_skill_ids=character.occupation_choice_skill_ids,
+            equipment=list(character.equipment or []),
+            occupation=character.occupation,
+            background=character.background or "",
+            notes=character.notes or "",
+        ),
+        occupation_id=generated.occupation_id,
+        compute=CharacterComputeResult(**asdict(generated.compute_result)),
+    )
 
 
 # ── 我的常用角色卡库（完成建卡自动写入；显式 CRUD 仍留待后续） ──

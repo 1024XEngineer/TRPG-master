@@ -11,9 +11,21 @@ RoomPlayer.has_character 标记为 True；但 issue #84 S2 起，`complete_chara
 `CharacterComputeResult`（`POST /systems/{systemId}/character/preview`）。
 """
 
+from typing import Literal
+
 from pydantic import Field
 
 from app.dto.common import CamelModel, UtcDatetime
+
+
+class QuickGenerateRequest(CamelModel):
+    """可选的玩家身份信息；旧客户端不传时仍使用确定性默认资料。"""
+
+    name: str | None = Field(default=None, max_length=100)
+    age: int | None = Field(default=None, ge=15, le=89)
+    gender: str | None = Field(default=None, max_length=20)
+    residence: str = Field(default="", max_length=100)
+    birthplace: str = Field(default="", max_length=100)
 
 
 class EquipmentItem(CamelModel):
@@ -134,6 +146,7 @@ class CharacterPreviewRequest(CamelModel):
     occupation_id: int | None = None
     skills: dict[str, int] = Field(default_factory=dict)
     occupation_choice_skill_ids: list[str] | None = None
+    generation_method: Literal["pointbuy", "roll"] = "pointbuy"
 
 
 class SkillPointsBudgetView(CamelModel):
@@ -172,3 +185,11 @@ class CharacterComputeResult(CamelModel):
     skill_view: list[SkillComputeView]
     resolved_occupation_choice_skill_ids: list[str] = Field(default_factory=list)
     validation: list[ValidationIssueView]
+
+
+class QuickGenerateResult(CamelModel):
+    """一键生成后返回的房间角色草稿和权威计算结果。"""
+
+    character: CharacterRead
+    occupation_id: int
+    compute: CharacterComputeResult

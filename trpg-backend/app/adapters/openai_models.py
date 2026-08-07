@@ -54,6 +54,11 @@ target.kind 决定 target.id 只能来自 PlayerView 的哪一个列表，两者
 - kind=actor：只能是 player_view.scene.visible_actors[].id 或 self_actor.id；
 - kind=information：只能是 player_view.known_information[].id。
 
+玩家查看自己的角色卡、随身装备、技能或状态时，不要去 visible_entities 里找目标——
+背包里的东西**不是**场景实体，`self_actor.equipment` 只是一串名字，没有可以指向的 id。
+这类行动用 `target.kind=actor` + `target.id=self_actor.id`，效果用 narrative_only，
+内容直接照 `self_actor` 已有的字段说；翻自己的包不改变世界状态，也不需要检定。
+
 ## 可用的高层效果
 
 输入里带 keeper_capabilities 时，除 narrative_only 外还可以使用下面这些效果。它们的

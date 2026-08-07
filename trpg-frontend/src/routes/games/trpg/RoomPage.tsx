@@ -2122,6 +2122,7 @@ export default function RoomPage() {
           if (!playerId || !pendingAdjudication?.pendingDecision) return
           const decision = pendingAdjudication.pendingDecision
           setTyping(true)
+          setProgressLabel('守秘人正在结算检定')
           sdk.roomSocket.selectAdjudication(playerId, {
             clientActionId: pendingAdjudication.correlationId,
             requestId: randomActionId(),
@@ -2135,6 +2136,7 @@ export default function RoomPage() {
           if (!playerId || !pendingAdjudication?.pendingDecision) return
           const decision = pendingAdjudication.pendingDecision
           setTyping(true)
+          setProgressLabel('守秘人正在结算检定')
           sdk.roomSocket.selectAdjudication(playerId, {
             clientActionId: pendingAdjudication.correlationId,
             requestId: randomActionId(),
@@ -2148,6 +2150,7 @@ export default function RoomPage() {
           if (!playerId || !pendingAdjudication?.checkRun) return
           const checkRun = pendingAdjudication.checkRun
           setTyping(true)
+          setProgressLabel('守秘人正在结算检定')
           sdk.roomSocket.decidePostRoll(playerId, {
             clientActionId: pendingAdjudication.correlationId,
             requestId: randomActionId(),

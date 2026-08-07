@@ -14,9 +14,11 @@ from collaboration_framework.contracts import (
     ActionPlanStep,
     AdjudicationExecution,
     ContractModel,
+    KeeperCapabilityView,
     PlayerInput,
     PlayerView,
 )
+from collaboration_framework.host.schemas.agent import _validate_keeper_scope
 
 PlanRunStatus = Literal[
     "active",
@@ -196,6 +198,9 @@ class ActionPlanStepContext(ContractModel):
     # module content — so the adjudicator can correct the proposal instead of
     # the plan dropping straight into needs_clarification.
     previous_rejection: str | None = Field(default=None, min_length=1, max_length=500)
+    # Controlled Keeper-side capability list for this same revision; see
+    # HostAgentContext.keeper_capabilities. Never forwarded to the Narrator.
+    keeper_capabilities: KeeperCapabilityView | None = None
 
     @model_validator(mode="after")
     def validate_scope(self) -> ActionPlanStepContext:
@@ -207,6 +212,7 @@ class ActionPlanStepContext(ContractModel):
             raise ValueError("ActionPlanStepContext identity scope 不一致")
         if self.step_index != len(self.completed_steps):
             raise ValueError("当前 step_index 必须紧跟已完成步骤")
+        _validate_keeper_scope(self.keeper_capabilities, self.player_view)
         return self
 
 

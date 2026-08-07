@@ -7,8 +7,35 @@ from typing import Annotated, Literal, TypeAlias
 
 from pydantic import ConfigDict, Field, JsonValue, RootModel, model_validator
 
-from collaboration_framework.contracts import ContractModel, PlayerInput, PlayerView
+from collaboration_framework.contracts import (
+    ContractModel,
+    KeeperCapabilityView,
+    PlayerInput,
+    PlayerView,
+)
 from collaboration_framework.host.schemas.history import RecentTurnContext
+
+
+def _validate_keeper_scope(
+    capabilities: KeeperCapabilityView | None,
+    player_view: PlayerView,
+) -> None:
+    """Keep the two views describing the same actor at the same revision.
+
+    Pairing a Keeper capability list with a PlayerView from another revision
+    would let the Agent target something that no longer exists, or miss
+    something that just appeared.
+    """
+
+    if capabilities is None:
+        return
+    if (
+        capabilities.room_id != player_view.room_id
+        or capabilities.actor_id != player_view.actor_id
+    ):
+        raise ValueError("KeeperCapabilityView scope 与 PlayerView 不一致")
+    if capabilities.revision != player_view.revision:
+        raise ValueError("KeeperCapabilityView revision 与 PlayerView 不一致")
 
 HostAgentTerminationReason: TypeAlias = Literal[
     "completed",
@@ -34,6 +61,10 @@ class HostAgentContext(ContractModel):
     player_input: PlayerInput
     player_view: PlayerView
     recent_history: RecentTurnContext
+    # Controlled Keeper-side capability list. Optional so offline/fake
+    # compositions and older callers keep working; when absent the Agent can
+    # still only name what the player-safe view exposes.
+    keeper_capabilities: KeeperCapabilityView | None = None
 
     @model_validator(mode="after")
     def validate_scope(self) -> HostAgentContext:
@@ -45,6 +76,7 @@ class HostAgentContext(ContractModel):
         ]
         if mismatches:
             raise ValueError("HostAgentContext scope 不一致: " + ", ".join(mismatches))
+        _validate_keeper_scope(self.keeper_capabilities, self.player_view)
         self.recent_history.validate_for(
             player_input=self.player_input,
             player_view=self.player_view,

@@ -267,6 +267,13 @@ function playerViewFixture(): AgentPlayerView {
       visible_actors: [],
       available_exits: [],
     },
+    world: {
+      elapsed_minutes: 0,
+      time_of_day: 'night',
+      core_resolved: false,
+      ending_available: false,
+      ending_id: null,
+    },
     known_information: [],
     checkpoint_options: [],
   }
@@ -1505,6 +1512,52 @@ describe('RoomPage conversation history', () => {
       },
     }))
     expect(screen.queryByRole('region', { name: '待处理检定' })).not.toBeInTheDocument()
+  })
+
+  it('shows the authoritative world clock and ending state from the PlayerView', async () => {
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    act(() =>
+      emitWsMessage({
+        type: 'view.updated',
+        payload: {
+          playerId: 'player-1',
+          playerView: {
+            ...playerViewFixture(),
+            world: {
+              elapsed_minutes: 13 * 60 + 25,
+              time_of_day: 'night',
+              core_resolved: true,
+              ending_available: true,
+              ending_id: null,
+            },
+          },
+        },
+      }),
+    )
+    fireEvent.click(screen.getByRole('button', { name: '地图' }))
+
+    expect(screen.getByText('夜晚 · 已过去 13 小时 25 分钟')).toBeInTheDocument()
+    expect(
+      screen.getByText('主线已经收束，可以选择如何收尾'),
+    ).toBeInTheDocument()
+  })
+
+  it('hides the mainline banner until an ending effect is committed', async () => {
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    act(() =>
+      emitWsMessage({
+        type: 'view.updated',
+        payload: { playerId: 'player-1', playerView: playerViewFixture() },
+      }),
+    )
+    fireEvent.click(screen.getByRole('button', { name: '地图' }))
+
+    expect(screen.getByText('夜晚 · 刚刚开始')).toBeInTheDocument()
+    expect(screen.queryByLabelText('主线进度')).not.toBeInTheDocument()
   })
 
   it('renders invalid Agent output as keeper guidance', () => {

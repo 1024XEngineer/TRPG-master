@@ -821,6 +821,7 @@ export interface PlayerView {
   revision: string;
   self_actor: SelfActorView;
   scene: SceneView;
+  world?: WorldStateView;
   known_information?: KnownInformationView[];
   checkpoint_options?: CheckpointOption[];
 }
@@ -1232,4 +1233,18 @@ export interface VisibleEntity {
   description: string;
   narrative_details?: NarrativeDetailView[];
   observable_state?: ObservableStateView[];
+}
+
+/**
+ * Player-safe world facts committed outside the current scene.
+ *
+ * See :class:`ProjectionWorldState`; this is the same data on the model/UI
+ * side of the projector.
+ */
+export interface WorldStateView {
+  elapsed_minutes?: number;
+  time_of_day?: "day" | "night";
+  core_resolved?: boolean;
+  ending_available?: boolean;
+  ending_id?: string | null;
 }

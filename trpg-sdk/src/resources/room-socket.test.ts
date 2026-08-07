@@ -55,6 +55,13 @@ const completedEvent = {
         visible_actors: [],
         available_exits: [],
       },
+      world: {
+        elapsed_minutes: 0,
+        time_of_day: 'night',
+        core_resolved: false,
+        ending_available: false,
+        ending_id: null,
+      },
       known_information: [],
       checkpoint_options: [],
     },

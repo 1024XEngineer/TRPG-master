@@ -15,12 +15,14 @@ from collaboration_framework.contracts import (
     ActionPlanStep,
     ActionTarget,
     AdjudicationExecution,
+    AdvanceTimeEffect,
     CancelActionPlanRequest,
     CancelCheckChoice,
     CheckDecisionRequest,
     ContractError,
     GetAdjudicationStatusRequest,
     HostTurnDecision,
+    KeeperCapabilityView,
     NarrativeOnlyEffect,
     NoAdjudicationCheck,
     PlayerInput,
@@ -225,6 +227,9 @@ class ActionPlanTurnApplication:
                     player_input=player_input,
                     player_view=view,
                 ),
+                # A single action is adjudicated right here in the planner call,
+                # so it needs the same Keeper vocabulary a plan step gets.
+                keeper_capabilities=await self._keeper_capabilities(player_input, view),
             )
         )
         result = await self._dispatcher.execute(
@@ -554,6 +559,19 @@ class ActionPlanTurnApplication:
                 ) from exc
         raise AssertionError("unreachable")
 
+    async def _keeper_capabilities(
+        self,
+        player_input: PlayerInput,
+        player_view: PlayerView,
+    ) -> KeeperCapabilityView | None:
+        try:
+            return await self._projector.keeper_capabilities(
+                player_input,
+                expected_revision=player_view.revision,
+            )
+        except (AttributeError, NotImplementedError):
+            return None
+
     async def _read_recent_history(
         self,
         *,
@@ -715,13 +733,22 @@ def build_action_plan_turn_application(
 
 
 class _DeterministicStepAdjudicator:
+    # Deliberately conservative: the offline composition has no model to judge
+    # which Canon Information a step earns, so it only uses the two effects that
+    # follow mechanically from the step kind. Everything else the Engine
+    # registers is reachable through the prompt-driven adjudicator.
+    _WAIT_MINUTES = 30
+
     async def adjudicate(self, context):
         if context.step.kind in {"wait", "rest"}:
-            raise TurnExecutionError(
-                "STEP_KIND_UNSUPPORTED",
-                "当前步骤需要尚未接入的时间/休息领域能力",
-                retryable=False,
+            success_effects = (
+                AdvanceTimeEffect(
+                    minutes=self._WAIT_MINUTES,
+                    reason="等待或休息占用了一段时间",
+                ),
             )
+        else:
+            success_effects = (NarrativeOnlyEffect(),)
         return ActionAdjudication(
             request_id=context.step_request_id,
             source_revision=context.player_view.revision,
@@ -733,7 +760,7 @@ class _DeterministicStepAdjudicator:
                 description=context.step.semantic_goal,
             ),
             check=NoAdjudicationCheck(),
-            success_effects=(NarrativeOnlyEffect(),),
+            success_effects=success_effects,
         )
 
 

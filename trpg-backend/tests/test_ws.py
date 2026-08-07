@@ -326,10 +326,37 @@ def start_game(client: TestClient, room: dict, token: str) -> None:
         assert any(message.get("type") == "room.state" for message in progress)
 
 
+# `ws.receive_json()` 等的是 portal 里的一个 future，那一层没有超时：服务端只要
+# 少发一条消息，用例就不是失败而是永久阻塞，整个 suite 跟着挂死，看不出卡在哪。
+RECEIVE_TIMEOUT_SECONDS = 5.0
+
+
+def receive_json(ws, *, timeout: float = RECEIVE_TIMEOUT_SECONDS):
+    """带截止时间的 `ws.receive_json()`，让"消息没来"成为一条可读的失败。"""
+
+    import json
+
+    import anyio
+
+    # 必须是 async：portal.call 在事件循环线程里跑它，而 receive() 是协程。
+    # 写成同步函数的话协程从不会被 await，超时形同虚设。
+    async def _receive_with_timeout():
+        with anyio.fail_after(timeout):
+            return await ws._send_rx.receive()
+
+    try:
+        message = ws.portal.call(_receive_with_timeout)
+    except TimeoutError as exc:
+        raise AssertionError(f"WebSocket 在 {timeout}s 内没有再发送任何消息") from exc
+    if message.get("type") == "websocket.close":
+        raise AssertionError(f"WebSocket 已关闭: {message!r}")
+    return json.loads(message["text"])
+
+
 def receive_until(ws, predicate, *, limit: int = 24):
     seen = []
     for _ in range(limit):
-        message = ws.receive_json()
+        message = receive_json(ws)
         seen.append(message)
         if predicate(message):
             return message, seen

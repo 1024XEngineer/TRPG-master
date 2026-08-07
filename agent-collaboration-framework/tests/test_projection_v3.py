@@ -10,14 +10,30 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from collaboration_framework.contracts import ModuleContentV3, PlayerViewScope
+from collaboration_framework.contracts import (
+    ActionAdjudication,
+    ActionMethod,
+    ActionTarget,
+    ChangeEntityStateEffect,
+    CommitTerminalEndingEffect,
+    ContractError,
+    EnterLocationEffect,
+    ModuleContentV3,
+    NoAdjudicationCheck,
+    PlayerViewScope,
+    PredicateCondition,
+    RevealInformationEffect,
+    SubmitAdjudicationRequest,
+)
 from collaboration_framework.engine import (
     ActorState,
+    AdjudicationEngineService,
     GameState,
     InMemoryEngineStore,
     RuleEngineService,
 )
 from collaboration_framework.engine.projection_v3 import location_breadcrumbs
+from collaboration_framework.engine.rules_v3 import evaluate_condition, walk_rule
 
 FIXTURE = (
     Path(__file__).resolve().parents[1]
@@ -178,6 +194,197 @@ class ProjectionV3Tests(unittest.IsolatedAsyncioTestCase):
         snapshot = await self.project(state)
         self.assertEqual(snapshot.scene_id, "alley")
         self.assertEqual(snapshot.scene.name, "后巷")
+
+
+class AdjudicationAgainstV3Tests(unittest.IsolatedAsyncioTestCase):
+    """The Engine must validate a v3 room against v3 collections (阶段 3b)."""
+
+    def setUp(self) -> None:
+        self.content = module()
+
+    def build(self, **overrides):
+        store = InMemoryEngineStore()
+        store.register_room(
+            module_content=self.content,
+            initial_state=game_state(self.content, **overrides),
+        )
+        return store, AdjudicationEngineService(store), RuleEngineService(store)
+
+    async def submit(self, engine, revision, *effects, target=None):
+        return await engine.submit(
+            SubmitAdjudicationRequest(
+                room_id=ROOM,
+                player_id=PLAYER,
+                adjudication=ActionAdjudication(
+                    request_id=f"v3-{revision}-{len(effects)}",
+                    source_revision=revision,
+                    actor_id=ACTOR,
+                    summary="测试用 v3 裁决",
+                    target=target or ActionTarget(kind="location", id="thomas_office"),
+                    method=ActionMethod(family="action", description="测试"),
+                    check=NoAdjudicationCheck(),
+                    success_effects=tuple(effects),
+                ),
+            )
+        )
+
+    async def test_revealing_a_v3_information_reaches_the_player_view(self) -> None:
+        store, engine, rules = self.build()
+        snapshot = await rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        await self.submit(
+            engine,
+            snapshot.revision,
+            RevealInformationEffect(information_id="cemetery_dance_report", scope="party"),
+        )
+        after = await rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        self.assertIn(
+            "cemetery_dance_report", {item.id for item in after.known_information}
+        )
+
+    async def test_entering_a_v3_location_moves_the_actor(self) -> None:
+        store, engine, rules = self.build()
+        snapshot = await rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        await self.submit(
+            engine,
+            snapshot.revision,
+            EnterLocationEffect(location_id="arnoldsburg_streets"),
+        )
+        after = await rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        self.assertEqual(after.scene_id, "arnoldsburg_streets")
+
+    async def test_a_v2_scene_id_is_no_longer_a_valid_location(self) -> None:
+        # `client_briefing` was the v2 opening Scene; it must not resolve now.
+        store, engine, rules = self.build()
+        snapshot = await rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        with self.assertRaises(ContractError):
+            await self.submit(
+                engine,
+                snapshot.revision,
+                EnterLocationEffect(location_id="client_briefing"),
+            )
+
+    async def test_ending_ids_come_from_v3_anchors(self) -> None:
+        store, engine, rules = self.build()
+        snapshot = await rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        await self.submit(
+            engine,
+            snapshot.revision,
+            CommitTerminalEndingEffect(ending_id="ending_douglas_departs"),
+        )
+        after = await rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        self.assertEqual(after.world.ending_id, "ending_douglas_departs")
+        self.assertEqual(after.phase, "ended")
+
+    async def test_keeper_capabilities_read_the_v3_collections(self) -> None:
+        store, engine, rules = self.build()
+        capabilities = await rules.read_keeper_capabilities(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        self.assertIn(
+            "douglas_true_nature", {item.id for item in capabilities.information}
+        )
+        self.assertIn("crypt", {item.id for item in capabilities.locations})
+        self.assertIn(
+            "ending_douglas_departs", {item.id for item in capabilities.endings}
+        )
+        # Keeper text is what the Agent judges with, and it is not the player half.
+        keeper = next(
+            item for item in capabilities.information if item.id == "douglas_true_nature"
+        )
+        self.assertNotEqual(keeper.content, keeper.summary)
+
+
+class EventRuleChainingTests(unittest.IsolatedAsyncioTestCase):
+    """v3 event rules chain off committed events (阶段 3c, #226 §4 partial)."""
+
+    def setUp(self) -> None:
+        self.content = module()
+
+    async def test_a_state_change_fires_the_rule_that_watches_it(self) -> None:
+        # locked_study_window_breaks fires once the visit is observed and the
+        # window is still locked and unbroken.
+        store = InMemoryEngineStore()
+        store.register_room(
+            module_content=self.content,
+            initial_state=game_state(
+                self.content,
+                scene_id="kimball_study",
+                entities={
+                    "study_window": {"locked": True, "broken": False},
+                    "cemetery_figure": {"visit_observed": False},
+                },
+            ),
+        )
+        engine = AdjudicationEngineService(store)
+        rules = RuleEngineService(store)
+        snapshot = await rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        await engine.submit(
+            SubmitAdjudicationRequest(
+                room_id=ROOM,
+                player_id=PLAYER,
+                adjudication=ActionAdjudication(
+                    request_id="observe-visit",
+                    source_revision=snapshot.revision,
+                    actor_id=ACTOR,
+                    summary="看到有人来过",
+                    target=ActionTarget(kind="entity", id="cemetery_figure"),
+                    method=ActionMethod(family="observe", description="看到有人来过"),
+                    check=NoAdjudicationCheck(),
+                    success_effects=(
+                        ChangeEntityStateEffect(
+                            entity_id="cemetery_figure",
+                            key="visit_observed",
+                            value=True,
+                        ),
+                    ),
+                ),
+            )
+        )
+        state = store.inspect_state(ROOM)
+        self.assertTrue(state.entities["study_window"]["broken"])
+        self.assertIn(
+            "rule.triggered",
+            {event.type for event in store.inspect_domain_events(ROOM)},
+        )
+
+    def test_a_rule_walk_stops_honestly_at_a_check(self) -> None:
+        # first_sight_of_douglas marks the flag, then needs a sanity check. The
+        # simplified executor commits the effect and reports why it stopped
+        # rather than pretending the check happened.
+        rule = next(
+            item for item in self.content.rules if item.id == "first_sight_of_douglas"
+        )
+        walk = walk_rule(rule)
+        self.assertEqual(len(walk.effects), 1)
+        self.assertEqual(walk.suspended_kind, "check")
+
+    def test_an_unregistered_predicate_never_fires_a_rule(self) -> None:
+        # Predicates are a closed set (#226 §1): an unknown name must read false,
+        # not crash and not accidentally match.
+        state = game_state(self.content)
+        self.assertFalse(
+            evaluate_condition(
+                PredicateCondition(predicate="not_registered", args={}),
+                state=state,
+                actor_id=ACTOR,
+            )
+        )
 
 
 if __name__ == "__main__":

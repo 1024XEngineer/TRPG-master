@@ -21,6 +21,11 @@ from __future__ import annotations
 
 from collaboration_framework.contracts import (
     ContractError,
+    KeeperCapabilityView,
+    KeeperEndingCapability,
+    KeeperEntityCapability,
+    KeeperInformationCapability,
+    KeeperLocationCapability,
     LocationSpecV3,
     ModuleContentV3,
     ProjectionActorResource,
@@ -371,4 +376,98 @@ def _optional_text(value) -> str | None:
     return value if isinstance(value, str) and value.strip() else None
 
 
-__all__ = ["location_breadcrumbs", "project_v3"]
+def keeper_capabilities_v3(
+    runtime: EngineRuntimeSnapshot,
+    *,
+    actor_id: str,
+) -> KeeperCapabilityView:
+    """The controlled Canon vocabulary, read off v3 collections (#212 §3.2).
+
+    Same boundary as the v2 arm: this is what lets the Agent name an Information
+    the player has not discovered yet, and the Engine still re-validates every id
+    at submit time.
+    """
+
+    module = runtime.v3
+    state = runtime.game_state
+    party_known = set(state.discovered_facts)
+    actor_known = set(state.actor_discovered_facts.get(actor_id, ()))
+    return KeeperCapabilityView(
+        room_id=state.room_id,
+        actor_id=actor_id,
+        revision=runtime.revision,
+        information=tuple(
+            KeeperInformationCapability(
+                id=item.id,
+                title=item.title,
+                summary=item.player_content,
+                content=item.keeper_content,
+                known_by_party=item.id in party_known,
+                known_by_actor=item.id in actor_known,
+            )
+            for item in module.information
+        ),
+        locations=tuple(
+            KeeperLocationCapability(
+                id=location.id,
+                name=location.player_visible_name or location.name,
+                origin="canon",
+                is_current=location.id == state.scene_id,
+            )
+            for location in module.locations
+        )
+        + tuple(
+            KeeperLocationCapability(
+                id=location_id,
+                name=_optional_text(payload.get("name")) or location_id,
+                origin="runtime",
+                is_current=location_id == state.scene_id,
+            )
+            for location_id, payload in sorted(state.runtime_locations.items())
+        ),
+        entities=tuple(
+            KeeperEntityCapability(
+                id=entity.id,
+                name=entity.player_visible_name or entity.name,
+                kind=entity.kind,
+                origin="canon",
+                location_id=_optional_text(
+                    state.entities.get(entity.id, {}).get("location_id")
+                )
+                or entity.located_in,
+                holder_actor_id=_optional_text(
+                    state.entities.get(entity.id, {}).get("holder_actor_id")
+                ),
+                consumed=state.entities.get(entity.id, {}).get("consumed") is True,
+            )
+            for entity in module.entities
+        )
+        + tuple(
+            KeeperEntityCapability(
+                id=entity_id,
+                name=_optional_text(payload.get("name")) or entity_id,
+                kind=(
+                    payload["kind"]
+                    if payload.get("kind") in {"npc", "object", "location"}
+                    else "object"
+                ),
+                origin="runtime",
+                location_id=_optional_text(payload.get("location_id")),
+                holder_actor_id=_optional_text(payload.get("holder_actor_id")),
+                consumed=payload.get("consumed") is True,
+            )
+            for entity_id, payload in sorted(state.runtime_entities.items())
+        ),
+        endings=tuple(
+            KeeperEndingCapability(
+                id=anchor.id,
+                summary=anchor.tone or anchor.id,
+            )
+            for anchor in module.ending_anchors
+        ),
+        core_resolved=state.core_resolved,
+        ending_available=state.ending_available,
+    )
+
+
+__all__ = ["keeper_capabilities_v3", "location_breadcrumbs", "project_v3"]

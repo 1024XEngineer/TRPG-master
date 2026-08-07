@@ -54,6 +54,7 @@ from .models import (
     PendingCheckDecision,
 )
 from .ports import EngineStore
+from .rules_v3 import matching_event_rules, walk_rule
 
 
 class AdjudicationEngineService:
@@ -638,10 +639,10 @@ class AdjudicationEngineService:
         state = runtime.game_state
         target = adjudication.target
         exists = {
-            "information": target.id in {item.id for item in module.information_items},
-            "entity": target.id in {item.id for item in module.entities}
+            "information": target.id in runtime.canon_information_ids,
+            "entity": target.id in runtime.canon_entity_ids
             or target.id in state.runtime_entities,
-            "location": target.id in {item.id for item in module.scenes}
+            "location": target.id in runtime.canon_location_ids
             or target.id in state.runtime_locations,
             "actor": target.id in state.actors,
             "world": target.id == module.world_ref,
@@ -658,11 +659,11 @@ class AdjudicationEngineService:
         runtime: EngineRuntimeSnapshot,
         effects: tuple[ActionEffect, ...],
     ) -> None:
-        information_ids = {item.id for item in runtime.module_content.information_items}
-        entity_ids = {item.id for item in runtime.module_content.entities} | set(
+        information_ids = runtime.canon_information_ids
+        entity_ids = runtime.canon_entity_ids | set(
             runtime.game_state.runtime_entities
         )
-        location_ids = {item.id for item in runtime.module_content.scenes} | set(
+        location_ids = runtime.canon_location_ids | set(
             runtime.game_state.runtime_locations
         )
         for effect in effects:
@@ -719,7 +720,6 @@ class AdjudicationEngineService:
         entity_ids: set[str],
         location_ids: set[str],
     ) -> None:
-        module = runtime.module_content
         state = runtime.game_state
         if isinstance(effect, RevealInformationEffect | HideInformationEffect):
             if effect.information_id not in information_ids:
@@ -761,8 +761,7 @@ class AdjudicationEngineService:
                 ):
                     raise ContractError("move_entity holder Actor 不存在")
         elif isinstance(effect, CommitTerminalEndingEffect):
-            ending_ids = {item.id for item in module.win_conditions}
-            if effect.ending_id not in ending_ids:
+            if effect.ending_id not in runtime.canon_ending_ids:
                 raise ContractError("结局效果引用不存在的 Ending")
 
     def _roll(self, target_value: int, difficulty: str) -> CheckRoll:
@@ -911,20 +910,13 @@ class AdjudicationEngineService:
         while cursor < len(events):
             source_event = events[cursor]
             cursor += 1
-            matching = sorted(
-                (
-                    rule
-                    for rule in runtime.module_content.event_rules
-                    if rule.event_type == source_event.type
-                    and all(
-                        source_event.payload.get(key) == value
-                        for key, value in rule.payload_matches.items()
-                    )
-                ),
-                key=lambda rule: (-rule.priority, rule.id),
-            )
-            for rule in matching:
-                fire_key = (rule.id, source_event.event_id)
+            for rule_id, effects in self._triggered_rule_effects(
+                runtime,
+                state=state,
+                source_event=source_event,
+                actor_id=actor_id,
+            ):
+                fire_key = (rule_id, source_event.event_id)
                 if fire_key in fired:
                     continue
                 fired.add(fire_key)
@@ -939,15 +931,15 @@ class AdjudicationEngineService:
                         actor_id=actor_id,
                         event_type="rule.triggered",
                         payload={
-                            "rule_id": rule.id,
+                            "rule_id": rule_id,
                             "source_event_id": source_event.event_id,
                         },
                         visibility="hidden",
                     )
                 )
                 rule_runtime = runtime.model_copy(update={"game_state": state}, deep=True)
-                self._validate_effect_sequence(rule_runtime, rule.effects)
-                for effect in rule.effects:
+                self._validate_effect_sequence(rule_runtime, tuple(effects))
+                for effect in effects:
                     state, emitted = self._apply_effect(
                         state,
                         effect,
@@ -958,6 +950,48 @@ class AdjudicationEngineService:
                     )
                     events.extend(emitted)
         return state, events
+
+    @staticmethod
+    def _triggered_rule_effects(
+        runtime: EngineRuntimeSnapshot,
+        *,
+        state: GameState,
+        source_event: DomainEvent,
+        actor_id: str,
+    ) -> list[tuple[str, list[ActionEffect]]]:
+        """Rules this event fires, already reduced to the effects they commit.
+
+        v3 rules are step graphs, so the effects are whatever the walk collects
+        before it has to suspend (see engine/rules_v3.py).
+        """
+
+        if not runtime.is_v3:
+            return [
+                (rule.id, list(rule.effects))
+                for rule in sorted(
+                    (
+                        rule
+                        for rule in runtime.v2.event_rules
+                        if rule.event_type == source_event.type
+                        and all(
+                            source_event.payload.get(key) == value
+                            for key, value in rule.payload_matches.items()
+                        )
+                    ),
+                    key=lambda rule: (-rule.priority, rule.id),
+                )
+            ]
+        triggered = []
+        for rule in matching_event_rules(
+            runtime.v3,
+            event_type=source_event.type,
+            state=state,
+            actor_id=actor_id,
+        ):
+            walk = walk_rule(rule)
+            if walk.effects:
+                triggered.append((rule.id, walk.effects))
+        return triggered
 
     def _apply_effect(
         self,

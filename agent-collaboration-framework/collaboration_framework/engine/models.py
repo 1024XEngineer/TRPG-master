@@ -201,6 +201,32 @@ class EngineRuntimeSnapshot(ContractModel):
         return self.module_content
 
     @property
+    def canon_information_ids(self) -> set[str]:
+        """Canon Information ids, whichever schema this room is pinned to."""
+
+        if isinstance(self.module_content, ModuleContentV3):
+            return {item.id for item in self.module_content.information}
+        return {item.id for item in self.module_content.information_items}
+
+    @property
+    def canon_entity_ids(self) -> set[str]:
+        return {item.id for item in self.module_content.entities}
+
+    @property
+    def canon_location_ids(self) -> set[str]:
+        """v2 called them Scenes; v3 calls them Locations."""
+
+        if isinstance(self.module_content, ModuleContentV3):
+            return {item.id for item in self.module_content.locations}
+        return {item.id for item in self.module_content.scenes}
+
+    @property
+    def canon_ending_ids(self) -> set[str]:
+        if isinstance(self.module_content, ModuleContentV3):
+            return {item.id for item in self.module_content.ending_anchors}
+        return {item.id for item in self.module_content.win_conditions}
+
+    @property
     def v2(self) -> ModuleContent:
         if isinstance(self.module_content, ModuleContentV3):
             raise ContractError("当前房间绑定的是 ModuleContent v3")

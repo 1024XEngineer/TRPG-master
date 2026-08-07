@@ -37,7 +37,7 @@ from pydantic import JsonValue
 
 from .capabilities import require_runtime_capabilities
 from .kernel import RuleKernel
-from .projection_v3 import project_v3
+from .projection_v3 import keeper_capabilities_v3, project_v3
 from .models import CompletedAction, EngineRuntimeSnapshot
 from .ports import EngineStore
 
@@ -345,7 +345,9 @@ class RuleEngineService:
         *,
         actor_id: str,
     ) -> KeeperCapabilityView:
-        module = runtime.module_content
+        if runtime.is_v3:
+            return keeper_capabilities_v3(runtime, actor_id=actor_id)
+        module = runtime.v2
         state = runtime.game_state
         party_known = set(state.discovered_facts)
         actor_known = set(state.actor_discovered_facts.get(actor_id, ()))

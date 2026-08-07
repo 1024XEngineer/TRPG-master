@@ -53,6 +53,48 @@ Pending 决策、骰点和 Event 在同一数据库事务中提交。相同 `req
 和终局确认，以及无状态的 `narrative_only`。这些效果都转换为具名领域 Event；Narrator
 只能使用提交后的 Event 引用。
 
+## 高层效果的端到端闭环
+
+引擎从一开始就实现并校验了 #212 冻结的全部高层效果，但只有 `enter_location` 和
+`narrative_only` 真的能被用上：其余效果要么 Agent 没有可用的词汇（不知道尚未发现的
+Canon Information id、不在场的 Entity id、Ending id），要么提交之后没有任何投影会变，
+玩家和 Agent 的下一步都观察不到。现在两端都补齐：
+
+### Agent 侧：`KeeperCapabilityView`
+
+`RuleEngineService.read_keeper_capabilities(scope)` 与 `read(scope)` 用同一份 runtime
+快照，产出受控的 Keeper 词汇表：全部 Canon Information（含 `known_by_party/known_by_actor`）、
+Canon 与 Runtime 的 Location/Entity 当前位置、可提交的 Ending id、`core_resolved` 与
+`ending_available`。
+
+边界：
+
+- 只进入 planner（单动作）与步骤裁决两处模型调用，通过
+  `HostAgentContext.keeper_capabilities` 与 `ActionPlanStepContext.keeper_capabilities`；
+- 不进入 `ActionPlanNarrationContext`——Narrator 仍然只能引用已提交的 evidence；
+- 不出现在任何发往客户端的 payload 里；
+- 与配套 PlayerView 必须同 revision，两者由 schema 校验强制配对；
+- 它只是词汇表，不是授权：Engine 在 submit 时用同一份快照重新校验每一个 id。
+
+### 投影侧：效果必须可观察
+
+`ProjectionSnapshot` / `PlayerView` 增加 `world` 块（`elapsed_minutes`、`time_of_day`、
+`core_resolved`、`ending_available`、`ending_id`），并补上这些投影：
+
+| 效果 | 之前 | 现在 |
+|---|---|---|
+| `reveal_information` / `hide_information` | 已投影 | 不变 |
+| `set_visibility` | 只写 `GameState`，无人读取 | Entity/Location/Information 投影按 actor 优先于 party 应用；party 作用域的 key 不再按行动者分片 |
+| `ensure_runtime_entity` / `move_entity` / `consume_entity` | 不投影 | 按当前 `location_id` 或 `holder_actor_id` 进入 `scene.visible_entities`；`consumed` 的移出 |
+| `ensure_runtime_location` | 不投影，且 `enter_location` 进去会让投影直接抛 `当前 Scene 不存在` | 作为出口出现在连接它的场景里，可以进入；进入后只保留回到连接点的出口 |
+| `advance_time` | 只有 `time_of_day` 间接可见 | `world.elapsed_minutes` + `world.time_of_day` |
+| `mark_core_resolved` / `set_ending_availability` / `commit_terminal_ending` | 不投影 | `world.core_resolved` / `world.ending_available` / `world.ending_id` |
+
+前端在地图面板显示权威时钟与主线/结局状态；线索列表与场景实体沿用既有 UI，因此
+`reveal_information` 与 `ensure_runtime_entity` 提交后立刻可见。
+
+复杂规则（ModuleContent v3 `event_rules` 的完整语义）不在本次范围内。
+
 ## 持久化
 
 除现有 `game_sessions/game_events/action_executions` 外，v3 增加：
@@ -75,12 +117,13 @@ Pending 决策、骰点和 Event 在同一数据库事务中提交。相同 `req
 - `resolved/cancelled`：使用最终 Event 与新 revision 刷新 PlayerView。
 
 仓库内的 `trpg-frontend/src/features/adjudication/CheckWorkflowPanel.tsx` 已按这三个安全
-投影实现展示，并使用模拟 Engine 输出覆盖选择、取消、精确幸运和强推输入；在 A 侧尚未
-产出 `ActionAdjudication` 前，它不会接管现有 v2 房间回合。
+投影实现展示，并使用模拟 Engine 输出覆盖选择、取消、精确幸运和强推输入。自 #225 的
+ActionPlan 回合接入后，房间回合已经由它承担真实的检定交互。
 
-当前生产 Host 仍输出 ModuleContent v2 `Intent`，本变更不修改 Agent 或把 v2 Intent
-偷偷转换成 v3 语义。后续 A 侧接入只需提交上述公共契约；数据库状态机和前端安全投影
-不需要重新设计。v2 `RuleEngineService.execute(ActionRequest)` 在迁移期继续可用。
+房间回合走 #225 的 ActionPlan 路径，Host 直接产出 v3 `ActionAdjudication`；上面的
+`KeeperCapabilityView` 与 `world` 投影补齐后，全部已注册的高层效果都能由 Agent 提出、
+由 Engine 提交、并在玩家视图里被看到。v2 `RuleEngineService.execute(ActionRequest)` 在
+迁移期继续可用。
 
 ## ActionPlan 编排边界（Issue #225）
 

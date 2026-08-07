@@ -38,6 +38,7 @@ from .adjudication import (
     ActionEffect,
     ActionMethod,
     ActionTarget,
+    AdjudicationRecovery,
     AdjudicationCheck,
     AdjudicationExecution,
     AdvanceTimeEffect,
@@ -122,6 +123,13 @@ from .module import (
     WinCondition,
     WinConditionSpec,
 )
+from .keeper_view import (
+    KeeperCapabilityView,
+    KeeperEndingCapability,
+    KeeperEntityCapability,
+    KeeperInformationCapability,
+    KeeperLocationCapability,
+)
 from .player_view import (
     ActionDeclarationOption,
     ActorResourceView,
@@ -148,11 +156,13 @@ from .player_view import (
     ProjectionSelfActor,
     ProjectionSnapshot,
     ProjectionVisibleActor,
+    ProjectionWorldState,
     SceneView,
     SelfActorView,
     VisibleActorView,
     VisibleEntity,
     VisibleFact,
+    WorldStateView,
 )
 from .runtime import PlayerInput, player_input_fingerprint
 

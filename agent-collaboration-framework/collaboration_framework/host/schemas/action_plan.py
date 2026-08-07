@@ -14,9 +14,11 @@ from collaboration_framework.contracts import (
     ActionPlanStep,
     AdjudicationExecution,
     ContractModel,
+    KeeperCapabilityView,
     PlayerInput,
     PlayerView,
 )
+from collaboration_framework.host.schemas.agent import _validate_keeper_scope
 
 PlanRunStatus = Literal[
     "active",
@@ -95,6 +97,13 @@ class ActionPlanRun(ContractModel):
     plan_id: str = Field(min_length=1, max_length=100)
     parent_action_id: str = Field(min_length=1, max_length=200)
     parent_input_fingerprint: str = Field(min_length=64, max_length=64)
+    # The verbatim utterance the fingerprint above was computed from. Needed to
+    # rebuild a fingerprint-matching PlayerInput on resume: `plan.goal` is a
+    # model-authored paraphrase and is not guaranteed to match the original
+    # text, so it cannot stand in for it. None only for rows persisted before
+    # this field existed; resume falls back to the pre-fix (paraphrase) behavior
+    # for those.
+    parent_utterance: str | None = Field(default=None, min_length=1)
     room_id: str = Field(min_length=1)
     player_id: str = Field(min_length=1)
     actor_id: str = Field(min_length=1)
@@ -183,6 +192,15 @@ class ActionPlanStepContext(ContractModel):
     step: ActionPlanStep
     player_view: PlayerView
     completed_steps: tuple[CompletedPlanStepSummary, ...] = ()
+    # Set only on the single repair pass the orchestrator allows after the
+    # Engine refused the previous adjudication for this same step. It carries
+    # the Engine's own stable, player-safe rejection reason — never hidden
+    # module content — so the adjudicator can correct the proposal instead of
+    # the plan dropping straight into needs_clarification.
+    previous_rejection: str | None = Field(default=None, min_length=1, max_length=500)
+    # Controlled Keeper-side capability list for this same revision; see
+    # HostAgentContext.keeper_capabilities. Never forwarded to the Narrator.
+    keeper_capabilities: KeeperCapabilityView | None = None
 
     @model_validator(mode="after")
     def validate_scope(self) -> ActionPlanStepContext:
@@ -194,6 +212,7 @@ class ActionPlanStepContext(ContractModel):
             raise ValueError("ActionPlanStepContext identity scope 不一致")
         if self.step_index != len(self.completed_steps):
             raise ValueError("当前 step_index 必须紧跟已完成步骤")
+        _validate_keeper_scope(self.keeper_capabilities, self.player_view)
         return self
 
 

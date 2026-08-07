@@ -593,6 +593,52 @@
       ],
       "title": "VisibleEntity",
       "type": "object"
+    },
+    "WorldStateView": {
+      "additionalProperties": false,
+      "description": "Player-safe world facts committed outside the current scene.\n\nSee :class:`ProjectionWorldState`; this is the same data on the model/UI\nside of the projector.",
+      "properties": {
+        "elapsed_minutes": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Elapsed Minutes",
+          "type": "integer"
+        },
+        "time_of_day": {
+          "default": "day",
+          "enum": [
+            "day",
+            "night"
+          ],
+          "title": "Time Of Day",
+          "type": "string"
+        },
+        "core_resolved": {
+          "default": false,
+          "title": "Core Resolved",
+          "type": "boolean"
+        },
+        "ending_available": {
+          "default": false,
+          "title": "Ending Available",
+          "type": "boolean"
+        },
+        "ending_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ending Id"
+        }
+      },
+      "title": "WorldStateView",
+      "type": "object"
     }
   },
   "additionalProperties": false,
@@ -641,6 +687,9 @@
     },
     "scene": {
       "$ref": "#/$defs/SceneView"
+    },
+    "world": {
+      "$ref": "#/$defs/WorldStateView"
     },
     "known_information": {
       "default": [],

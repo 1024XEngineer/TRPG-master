@@ -12,8 +12,10 @@ from collaboration_framework.contracts import (
     ActionResult,
     AdjudicationExecution,
     CheckDecisionRequest,
+    ContractError,
     ContractModel,
     ModuleContent,
+    ModuleContentV3,
     PendingCheckDecisionView,
     PendingCheckOption,
     PostRollDecisionRequest,
@@ -180,9 +182,29 @@ class EngineRuntimeSnapshot(ContractModel):
 
     module_id: str = Field(min_length=1)
     module_version: str = Field(min_length=1)
-    module_content: ModuleContent
+    # v2 and v3 both appear here during the #212 migration: the loader decides
+    # which one a room is pinned to, and every consumer dispatches on the type.
+    # The v2 arm is deleted in the same PR that switches the published fixture
+    # (#226 forbids a runtime compatibility layer in the shipped product).
+    module_content: ModuleContent | ModuleContentV3
     game_state: GameState
     revision: str = Field(min_length=1)
+
+    @property
+    def is_v3(self) -> bool:
+        return isinstance(self.module_content, ModuleContentV3)
+
+    @property
+    def v3(self) -> ModuleContentV3:
+        if not isinstance(self.module_content, ModuleContentV3):
+            raise ContractError("当前房间绑定的是 ModuleContent v2")
+        return self.module_content
+
+    @property
+    def v2(self) -> ModuleContent:
+        if isinstance(self.module_content, ModuleContentV3):
+            raise ContractError("当前房间绑定的是 ModuleContent v3")
+        return self.module_content
 
 
 class CompletedAction(ContractModel):

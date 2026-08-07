@@ -505,8 +505,8 @@
     {
       "id": "kimball_house",
       "kind": "site",
-      "name": "金博尔宅与书房",
-      "player_visible_name": "金博尔宅书房",
+      "name": "金博尔宅",
+      "player_visible_name": "金博尔宅",
       "player_visible_description": "大小、形制与题材各异的藏书塞满书房，每一本都保养得很好。",
       "parent_location_id": "arnoldsburg",
       "region_id": "arnoldsburg"

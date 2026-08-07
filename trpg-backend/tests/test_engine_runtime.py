@@ -584,13 +584,13 @@ async def test_loaded_runtime_is_deep_copy_isolated(
     async with store.transaction(room.id) as transaction:
         runtime = await transaction.load_runtime()
         runtime.game_state.entities["case_tracker"]["investigator_disappeared"] = True
-        runtime.module_content.entities[0].direct_responses["invented"] = "泄漏"
+        runtime.v2.entities[0].direct_responses["invented"] = "泄漏"
 
     async with store.transaction(room.id) as transaction:
         reloaded = await transaction.load_runtime()
 
     assert reloaded.game_state.entities["case_tracker"]["investigator_disappeared"] is False
-    assert "invented" not in reloaded.module_content.entities[0].direct_responses
+    assert "invented" not in reloaded.v2.entities[0].direct_responses
 
 
 async def test_store_rejects_stale_revision_without_partial_writes(
@@ -605,7 +605,7 @@ async def test_store_rejects_stale_revision_without_partial_writes(
         runtime = await transaction.load_runtime()
         execution, new_state = RuleKernel().execute(
             request=request,
-            module_content=runtime.module_content,
+            module_content=runtime.v2,
             game_state=runtime.game_state,
         )
         with pytest.raises(RevisionConflictError):

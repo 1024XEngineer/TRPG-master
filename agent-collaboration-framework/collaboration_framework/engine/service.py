@@ -37,6 +37,7 @@ from pydantic import JsonValue
 
 from .capabilities import require_runtime_capabilities
 from .kernel import RuleKernel
+from .projection_v3 import project_v3
 from .models import CompletedAction, EngineRuntimeSnapshot
 from .ports import EngineStore
 
@@ -151,7 +152,9 @@ class RuleEngineService:
         player_id: str,
         actor_id: str,
     ) -> ProjectionSnapshot:
-        module = runtime.module_content
+        if runtime.is_v3:
+            return project_v3(runtime, player_id=player_id, actor_id=actor_id)
+        module = runtime.v2
         state = runtime.game_state
         scene = next(
             (item for item in module.scenes if item.id == state.scene_id),

@@ -18,8 +18,10 @@ from collaboration_framework.contracts import (
     AdvanceTimeEffect,
     CancelActionPlanRequest,
     CancelCheckChoice,
+    ChangeEntityStateEffect,
     CheckDecisionRequest,
     ContractError,
+    EnterLocationEffect,
     GetAdjudicationStatusRequest,
     HostTurnDecision,
     KeeperCapabilityView,
@@ -27,7 +29,10 @@ from collaboration_framework.contracts import (
     NoAdjudicationCheck,
     PlayerInput,
     PlayerView,
+    RequiredAdjudicationCheck,
+    RevealInformationEffect,
     SingleActionDecision,
+    SkillCheckCandidate,
 )
 from collaboration_framework.engine import AdjudicationEngineService, EngineStore, RuleEngineService
 from collaboration_framework.host.adapters import InMemoryActionPlanRunStore
@@ -101,6 +106,30 @@ class DeterministicHostTurnDecisionModel:
                     for part in pieces
                 ),
             )
+
+        compact = _compact_travel_plan(context.player_view, utterance)
+        if compact is not None:
+            return compact
+
+        destination = _match_visible_exit(context.player_view, utterance)
+        if destination is not None and destination.destination is not None:
+            return SingleActionDecision(
+                adjudication=ActionAdjudication(
+                    request_id="application-owned",
+                    source_revision=context.player_view.revision,
+                    actor_id=context.player_input.actor_id,
+                    summary=utterance,
+                    target=ActionTarget(
+                        kind="location",
+                        id=destination.destination.scene_id,
+                    ),
+                    method=ActionMethod(family="travel", description=utterance),
+                    check=NoAdjudicationCheck(),
+                    success_effects=(
+                        EnterLocationEffect(location_id=destination.destination.scene_id),
+                    ),
+                )
+            )
         return SingleActionDecision(
             adjudication=ActionAdjudication(
                 request_id="application-owned",
@@ -113,6 +142,106 @@ class DeterministicHostTurnDecisionModel:
                 success_effects=(NarrativeOnlyEffect(),),
             )
         )
+
+
+def _compact_travel_plan(view: PlayerView, utterance: str) -> ActionPlan | None:
+    """Split compact fake-provider phrases without consulting hidden ModuleContent."""
+
+    destination = _match_visible_exit(view, utterance)
+    if destination is None or destination.destination is None:
+        return None
+    anchor = _best_label_overlap(
+        utterance,
+        (
+            destination.name,
+            destination.id,
+            *destination.aliases,
+            destination.destination.name,
+            destination.destination.scene_id,
+        ),
+    )
+    if anchor is None:
+        return None
+    anchor_end = utterance.find(anchor) + len(anchor)
+    remainder = utterance[anchor_end:].strip(" ，,。")
+    action_markers = (
+        "搜索",
+        "调查",
+        "查阅",
+        "查找",
+        "研究",
+        "询问",
+        "交谈",
+        "找",
+        "查",
+        "问",
+    )
+    marker = next((item for item in action_markers if item in remainder), None)
+    if marker is None:
+        return None
+    action_start = remainder.find(marker)
+    follow_up = remainder[action_start:].strip(" ，,。")
+    if not follow_up:
+        return None
+    destination_name = destination.destination.name
+    return ActionPlan(
+        goal=utterance,
+        steps=(
+            ActionPlanStep(kind="travel", semantic_goal=f"前往{destination_name}"),
+            ActionPlanStep(
+                kind=(
+                    "dialogue" if any(word in follow_up for word in ("问", "交谈")) else "action"
+                ),
+                semantic_goal=f"在{destination_name}{follow_up}",
+            ),
+        ),
+    )
+
+
+def _match_visible_exit(view: PlayerView, text: str):
+    if not any(word in text for word in ("去", "前往", "进入", "到", "抵达")):
+        return None
+    matches = []
+    for exit_view in view.scene.available_exits:
+        destination_labels = (
+            (exit_view.destination.name, exit_view.destination.scene_id)
+            if exit_view.destination
+            else ()
+        )
+        labels = (
+            exit_view.name,
+            exit_view.id,
+            *exit_view.aliases,
+            *destination_labels,
+        )
+        overlap = _best_label_overlap(text, labels)
+        if overlap is not None:
+            matches.append((len(overlap), exit_view.id, exit_view))
+    if not matches:
+        return None
+    matches.sort(key=lambda item: (-item[0], item[1]))
+    if len(matches) > 1 and matches[0][0] == matches[1][0]:
+        return None
+    return matches[0][2]
+
+
+def _best_label_overlap(text: str, labels: tuple[str, ...]) -> str | None:
+    candidates: set[str] = set()
+    for label in labels:
+        normalized = label.strip()
+        if not normalized:
+            continue
+        if normalized in text:
+            candidates.add(normalized)
+        if any("一" <= character <= "鿿" for character in normalized):
+            for width in range(len(normalized), 1, -1):
+                for start in range(len(normalized) - width + 1):
+                    candidate = normalized[start : start + width]
+                    if candidate in text:
+                        candidates.add(candidate)
+                if candidates:
+                    break
+    return max(candidates, key=lambda item: (len(item), item)) if candidates else None
 
 
 class DeterministicActionPlanNarrationModel:
@@ -741,27 +870,179 @@ class _DeterministicStepAdjudicator:
 
     async def adjudicate(self, context):
         if context.step.kind in {"wait", "rest"}:
-            success_effects = (
-                AdvanceTimeEffect(
-                    minutes=self._WAIT_MINUTES,
-                    reason="等待或休息占用了一段时间",
+            return ActionAdjudication(
+                request_id=context.step_request_id,
+                source_revision=context.player_view.revision,
+                actor_id=context.player_input.actor_id,
+                summary=context.step.semantic_goal,
+                target=ActionTarget(kind="location", id=context.player_view.scene.id),
+                method=ActionMethod(
+                    family=context.step.kind,
+                    description=context.step.semantic_goal,
+                ),
+                check=NoAdjudicationCheck(),
+                success_effects=(
+                    AdvanceTimeEffect(
+                        minutes=self._WAIT_MINUTES,
+                        reason="等待或休息占用了一段时间",
+                    ),
                 ),
             )
-        else:
-            success_effects = (NarrativeOnlyEffect(),)
+
+        if context.step.kind == "travel":
+            destination = _match_visible_exit(
+                context.player_view,
+                context.step.semantic_goal,
+            )
+            if destination is None or destination.destination is None:
+                raise TurnExecutionError(
+                    "STEP_DESTINATION_NOT_VISIBLE",
+                    "当前地点没有可安全确认的目标路线",
+                    retryable=False,
+                )
+            destination_id = destination.destination.scene_id
+            return ActionAdjudication(
+                request_id=context.step_request_id,
+                source_revision=context.player_view.revision,
+                actor_id=context.player_input.actor_id,
+                summary=context.step.semantic_goal,
+                target=ActionTarget(kind="location", id=destination_id),
+                method=ActionMethod(
+                    family="travel",
+                    description=context.step.semantic_goal,
+                ),
+                check=NoAdjudicationCheck(),
+                success_effects=(EnterLocationEffect(location_id=destination_id),),
+            )
+
+        action_text = context.step.semantic_goal.replace(
+            context.player_view.scene.name,
+            "",
+        ).strip(" ，,。")
+        target = _match_visible_entity(context.player_view, action_text)
+        checkpoint = _match_visible_checkpoint(
+            context.player_view,
+            action_text,
+            target.id if target is not None else None,
+        )
+        if checkpoint is not None:
+            skill_id = checkpoint.skills[0]
+            success_effects, failure_effects = _fake_checkpoint_effects(checkpoint.id)
+            return ActionAdjudication(
+                request_id=context.step_request_id,
+                source_revision=context.player_view.revision,
+                actor_id=context.player_input.actor_id,
+                summary=context.step.semantic_goal,
+                target=ActionTarget(kind="entity", id=checkpoint.target_id),
+                method=ActionMethod(
+                    family=checkpoint.action_hint,
+                    description=context.step.semantic_goal,
+                ),
+                check=RequiredAdjudicationCheck(
+                    candidates=(
+                        SkillCheckCandidate(
+                            candidate_id=f"{checkpoint.id}:{skill_id}",
+                            skill_id=skill_id,
+                            difficulty=checkpoint.difficulty or "regular",
+                            method_summary=context.step.semantic_goal,
+                            player_safe_reason="使用当前地点公开的检定方式",
+                        ),
+                    )
+                ),
+                success_effects=success_effects,
+                failure_effects=failure_effects,
+            )
+
+        target_kind = "entity" if target is not None else "location"
+        target_id = target.id if target is not None else context.player_view.scene.id
         return ActionAdjudication(
             request_id=context.step_request_id,
             source_revision=context.player_view.revision,
             actor_id=context.player_input.actor_id,
             summary=context.step.semantic_goal,
-            target=ActionTarget(kind="location", id=context.player_view.scene.id),
+            target=ActionTarget(kind=target_kind, id=target_id),
             method=ActionMethod(
                 family=context.step.kind,
                 description=context.step.semantic_goal,
             ),
             check=NoAdjudicationCheck(),
-            success_effects=success_effects,
+            success_effects=(NarrativeOnlyEffect(),),
         )
+
+
+def _match_visible_entity(view: PlayerView, text: str):
+    matches = []
+    for entity in view.scene.visible_entities:
+        overlap = _best_label_overlap(text, (entity.id, entity.name, *entity.aliases))
+        if overlap is not None:
+            matches.append((len(overlap), entity.id, entity))
+    if not matches:
+        return None
+    matches.sort(key=lambda item: (-item[0], item[1]))
+    if len(matches) > 1 and matches[0][0] == matches[1][0]:
+        return None
+    return matches[0][2]
+
+
+def _match_visible_checkpoint(view: PlayerView, text: str, target_id: str | None):
+    family_markers = {
+        "search": ("搜索", "搜查", "找线索", "找"),
+        "research": ("查阅", "查找", "研究", "旧报", "查"),
+        "social": ("询问", "交谈", "问"),
+        "observe": ("观察", "查看"),
+        "intimidate": ("威胁", "恐吓"),
+        "bribe": ("贿赂", "送酒"),
+    }
+    matches = [
+        checkpoint
+        for checkpoint in view.checkpoint_options
+        if (target_id is None or checkpoint.target_id == target_id)
+        and any(
+            marker in text
+            for marker in family_markers.get(checkpoint.action_hint, (checkpoint.action_hint,))
+        )
+        and checkpoint.skills
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _fake_checkpoint_effects(checkpoint_id: str):
+    """Deterministic effects for the published Paper Chase fake-provider fixture."""
+
+    effects = {
+        "search_kimball_study": (
+            (
+                ChangeEntityStateEffect(entity_id="kimball_study", key="searched", value=True),
+                ChangeEntityStateEffect(entity_id="douglas_diary", key="found", value=True),
+            ),
+            (ChangeEntityStateEffect(entity_id="kimball_study", key="searched", value=True),),
+        ),
+        "research_library_archive": (
+            (
+                RevealInformationEffect(
+                    information_id="cemetery_dance_report",
+                    scope="party",
+                ),
+                ChangeEntityStateEffect(
+                    entity_id="newspaper_archive",
+                    key="library_report_found",
+                    value=True,
+                ),
+            ),
+            (NarrativeOnlyEffect(),),
+        ),
+        "impress_caretaker": (
+            (
+                ChangeEntityStateEffect(entity_id="melodias", key="impressed", value=True),
+                ChangeEntityStateEffect(entity_id="favorite_grave", key="identified", value=True),
+            ),
+            (NarrativeOnlyEffect(),),
+        ),
+    }
+    return effects.get(
+        checkpoint_id,
+        ((NarrativeOnlyEffect(),), (NarrativeOnlyEffect(),)),
+    )
 
 
 __all__ = [

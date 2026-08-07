@@ -4,6 +4,8 @@ import type {
   CharacterDraftResult,
   GeneratePortraitInput,
   PortraitGenerationResult,
+  QuickGenerateInput,
+  QuickGenerateResult,
   RollAttributesResult,
   UpdateCharacterInput,
 } from '../types';
@@ -36,6 +38,21 @@ export class CharactersResource {
   get(roomId: string, characterId: string, reconnectToken: string): Promise<Character> {
     return this.client.get<Character>(
       `/rooms/${roomId}/characters/${characterId}`,
+      this.authenticated(reconnectToken)
+    );
+  }
+
+  /** POST /api/v1/rooms/{roomId}/characters/{characterId}/quick-generate —
+   * 服务端生成一张规则合法的角色草稿，不完成角色卡，也不触发生图。 */
+  quickGenerate(
+    roomId: string,
+    characterId: string,
+    reconnectToken: string,
+    payload?: QuickGenerateInput
+  ): Promise<QuickGenerateResult> {
+    return this.client.post<QuickGenerateResult>(
+      `/rooms/${roomId}/characters/${characterId}/quick-generate`,
+      payload ?? null,
       this.authenticated(reconnectToken)
     );
   }

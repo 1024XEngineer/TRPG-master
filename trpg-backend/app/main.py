@@ -26,6 +26,7 @@ from app.core.logging import configure_logging
 from app.core.narrator import build_narrator
 from app.core.seed import ensure_seed_content
 from app.dto.common import ApiResponse
+from app.service.character_background import build_character_background_service
 from app.service.host_speech import build_host_speech_service
 from app.service.portrait_generation import build_portrait_generation_service
 
@@ -94,6 +95,7 @@ def create_app() -> FastAPI:
     # ASGITransport 不一定会触发 lifespan——挂在 create_app 里保证"有 app
     # 实例就一定有 narrator"。
     app.state.narrator = build_narrator(settings)
+    app.state.character_background_service = build_character_background_service(settings)
     app.state.portrait_generation_service = build_portrait_generation_service(settings)
     app.state.host_speech = build_host_speech_service(settings)
 

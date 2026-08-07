@@ -6,7 +6,7 @@ from collections.abc import Mapping
 
 from collaboration_framework.contracts import ModuleContent, ModuleContentV3
 
-from .models import ActorState, ClockState, GameState
+from .models import ActorState, ClockState, GameState, time_of_day_at
 
 
 def create_initial_game_state(
@@ -65,5 +65,5 @@ def _clock_for(module_content: ModuleContentV3) -> ClockState:
         return ClockState()
     return ClockState(
         elapsed_minutes=point.hour_of_day * 60,
-        time_of_day="day" if 6 <= point.hour_of_day < 18 else "night",
+        time_of_day=time_of_day_at(point.hour_of_day * 60),
     )

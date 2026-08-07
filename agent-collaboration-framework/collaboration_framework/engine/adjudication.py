@@ -52,6 +52,7 @@ from .models import (
     EngineRuntimeSnapshot,
     GameState,
     PendingCheckDecision,
+    time_of_day_at,
 )
 from .ports import EngineStore
 from .rules_v3 import (
@@ -1176,7 +1177,7 @@ class AdjudicationEngineService:
             clock = state.clock.model_copy(
                 update={
                     "elapsed_minutes": elapsed,
-                    "time_of_day": "day" if elapsed % 1440 < 720 else "night",
+                    "time_of_day": time_of_day_at(elapsed),
                 },
                 deep=True,
             )

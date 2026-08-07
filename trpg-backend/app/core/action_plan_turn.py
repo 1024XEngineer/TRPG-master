@@ -944,9 +944,7 @@ class _DeterministicStepAdjudicator:
                     ),
                     description=context.step.semantic_goal,
                 ),
-                rule_decision=RuleDecisionRef(
-                    rule_id=candidate.rule_id, option_id=option.id
-                ),
+                rule_decision=RuleDecisionRef(rule_id=candidate.rule_id, option_id=option.id),
                 check=RequiredAdjudicationCheck(
                     candidates=(
                         SkillCheckCandidate(
@@ -1022,6 +1020,8 @@ def _match_rule_candidate(capabilities, text: str, target_id: str | None):
         if any(hint and hint in text for hint in option.semantic_hints):
             return candidate, option
     return candidate, candidate.options[0] if candidate.options else None
+
+
 __all__ = [
     "ActionPlanTurnApplication",
     "ActionPlanTurnResult",

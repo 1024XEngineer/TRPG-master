@@ -55,7 +55,8 @@ def sync_client() -> TestClient:
 
 # Paper Chase, the module the WebSocket suite loads: the opening scene, a
 # keeper-only Information nobody has discovered yet, and one declared Ending.
-OPENING_SCENE = "client_briefing"
+# v3 的 initial_state.start_location_id；v2 时期是 client_briefing。
+OPENING_SCENE = "thomas_office"
 KEEPER_INFORMATION = "lyla_cemetery_sighting"
 # A second keeper-only Information no test ever reveals, used to prove the
 # capability list does not leak what the turn did not release.
@@ -211,7 +212,9 @@ def test_advanced_time_reaches_the_client(
         AdvanceTimeEffect(minutes=13 * 60, reason="整个下午都在走访"),
     )
 
-    assert view["world"]["elapsed_minutes"] == 13 * 60
+    # v3 的 initial_state.start_time_point_id 是 hour_12，开局就已经是 720 分钟；
+    # 断绝对值等于把 fixture 的起点写死进用例，所以只断这次推进的增量。
+    assert view["world"]["elapsed_minutes"] == 12 * 60 + 13 * 60
     assert view["world"]["time_of_day"] == "night"
 
 

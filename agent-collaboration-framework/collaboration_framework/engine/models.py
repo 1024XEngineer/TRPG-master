@@ -45,6 +45,24 @@ class ActorState(ContractModel):
     conditions: tuple[str, ...] = ()
 
 
+DAY_STARTS_HOUR = 6
+NIGHT_STARTS_HOUR = 18
+MINUTES_PER_DAY = 24 * 60
+
+
+def time_of_day_at(elapsed_minutes: int) -> Literal["day", "night"]:
+    """The single day/night boundary: 06:00–18:00 is day, wrapping past midnight.
+
+    This lived in two places with two different answers — room initialization used
+    the 06–18 window while `advance_time` used "first half of the day". They only
+    ever agreed because the v2 fixture opened at midnight; the v3 fixture opens at
+    noon, and 13 hours later the two disagreed (#226).
+    """
+
+    hour = (elapsed_minutes % MINUTES_PER_DAY) // 60
+    return "day" if DAY_STARTS_HOUR <= hour < NIGHT_STARTS_HOUR else "night"
+
+
 class ClockState(ContractModel):
     """Small deterministic clock used by module expressions and time hooks."""
 

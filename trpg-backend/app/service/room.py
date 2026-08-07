@@ -67,7 +67,6 @@ def parse_module_content(module_version) -> ModuleContent | ModuleContentV3:
     return ModuleContent.model_validate(payload)
 
 
-
 class RoomNotFoundError(ValueError):
     """房间不存在。"""
 

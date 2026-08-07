@@ -242,6 +242,38 @@ def _available_exits(
                 ),
             )
         )
+    # Standing inside an Agent-created location, the way back has to be projected
+    # explicitly: it is not an authored edge, and the loop below only walks from a
+    # location to the runtime locations attached to it — never the other way. Without
+    # this a runtime location is a one-way trip.
+    here = state.runtime_locations.get(location_id)
+    if here is not None:
+        back_id = _optional_text(here.get("connected_location_id")) or _optional_text(
+            here.get("parent_location_id")
+        )
+        if back_id is not None and back_id != location_id:
+            back_canon = by_id.get(back_id)
+            back_runtime = state.runtime_locations.get(back_id)
+            back_name: str | None = None
+            if back_canon is not None:
+                back_name = back_canon.player_visible_name or back_canon.name
+            elif back_runtime is not None:
+                back_name = _optional_text(back_runtime.get("name")) or back_id
+            if back_name is not None and _override_allows(
+                state, actor_id, "location", back_id
+            ):
+                exits.append(
+                    ProjectionAvailableExit(
+                        id=f"runtime:{location_id}:back",
+                        name=back_name,
+                        description="",
+                        destination=ProjectionExitDestination(
+                            scene_id=back_id,
+                            name=back_name,
+                        ),
+                    )
+                )
+
     # Agent-created locations attach to whatever they were connected to.
     for runtime_id, payload in sorted(state.runtime_locations.items()):
         if runtime_id == location_id:

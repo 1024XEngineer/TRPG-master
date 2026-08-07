@@ -73,8 +73,6 @@ class PaperChaseLoadResult:
         )
 
 
-
-
 async def load_paper_chase(
     db: AsyncSession,
     *,

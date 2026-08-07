@@ -935,13 +935,17 @@ async def get_module_detail(db: AsyncSession, module_id: str) -> ModuleDetailRea
 
 # ── 复盘 / 事件回放 ──────────────────────────────────────
 
+PERSISTED_TURN_COMPLETION_KEY = "_turnCompletion"
+
 
 def _player_visible_event_payload(event_type: str, payload: dict) -> dict:
     """Return a display-safe copy without rewriting the stored event payload."""
 
     visible_payload = deepcopy(payload)
-    if event_type == "narration.push" and isinstance(visible_payload.get("text"), str):
-        visible_payload["text"] = normalize_narration_text(visible_payload["text"])
+    if event_type == "narration.push":
+        visible_payload.pop(PERSISTED_TURN_COMPLETION_KEY, None)
+        if isinstance(visible_payload.get("text"), str):
+            visible_payload["text"] = normalize_narration_text(visible_payload["text"])
     return visible_payload
 
 

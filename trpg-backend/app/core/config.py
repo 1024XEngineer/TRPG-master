@@ -94,6 +94,10 @@ class Settings(BaseSettings):
     recent_history_max_chars: int = Field(default=6000, ge=2)
     action_plan_max_steps: int = Field(default=32, ge=2, le=256)
     action_plan_max_steps_per_advance: int = Field(default=3, ge=1, le=32)
+    # Deterministic cross-process E2E hook. Production and development always
+    # use the Engine's cryptographic dice source; this value is honored only
+    # when APP_ENV=test.
+    test_fixed_dice_roll: int | None = Field(default=None, ge=1, le=100)
 
     # 角色生图是建卡完成后的可选操作，入口默认开启。没有远程 Key 时
     # auto provider 仍然使用离线 mock，不会因为修改默认值而产生费用。

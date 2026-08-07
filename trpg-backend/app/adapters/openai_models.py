@@ -42,12 +42,54 @@ logger = structlog.get_logger()
 _HOST_TURN_DECISION_ADAPTER = TypeAdapter(HostTurnDecision)
 
 _SAFE_ADJUDICATION_INSTRUCTIONS = """
-只能使用输入 PlayerView 中当前可见的 ID 和能力。travel 可以对 available_exits 中明确
-匹配的目的地使用 enter_location；普通对话、确认和没有权威状态变化的动作只能使用
-narrative_only。不得从 PlayerView 猜测隐藏 Information、模组结果或 Keeper 内容，
-不得创建 runtime location/entity，不得直接推进时间。wait/rest 在领域能力尚未接入时
-必须返回不会伪造时间变化的 narrative_only。检定候选只能引用 self_actor.skills 中
-实际存在的技能；无法形成安全裁决时不得编造目标或效果。
+叙事、对话、确认和任何没有权威状态变化的动作只能使用 narrative_only。检定候选只能
+引用 self_actor.skills 中实际存在的技能。无法形成安全裁决时不得编造目标或效果。
+
+target.kind 决定 target.id 只能来自 PlayerView 的哪一个列表，两者必须配套，绝不能
+把某个列表里的 id 换一个 kind 使用：
+
+- kind=location：只能是 player_view.scene.id，或某个 available_exits[].destination
+  .scene_id；
+- kind=entity：只能是 player_view.scene.visible_entities[].id；
+- kind=actor：只能是 player_view.scene.visible_actors[].id 或 self_actor.id；
+- kind=information：只能是 player_view.known_information[].id。
+
+## 可用的高层效果
+
+输入里带 keeper_capabilities 时，除 narrative_only 外还可以使用下面这些效果。它们的
+id 一律只能从 keeper_capabilities 里逐字复制，不得改写、拼接或自造；没有
+keeper_capabilities 时，只能使用 enter_location 与 narrative_only。
+
+- reveal_information / hide_information：information_id 取自
+  keeper_capabilities.information[].id。只有当玩家这次行动**确实**足以获知该条信息
+  （检定成功、有人告诉他、亲眼看到）时才 reveal，并优先选内容最贴合的那一条；
+  已经 known_by_party（或本角色 known_by_actor）的不必重复 reveal。
+  keeper_capabilities.information[].content 是守秘人内容，只能用来判断该不该发放，
+  不得抄进 summary，也不得当作已经发生的事实。
+- enter_location：location_id 取自 available_exits[].destination.scene_id，或
+  同一次裁决里刚刚用 ensure_runtime_location 建出来的地点。
+- ensure_runtime_location：玩家要去的地方在剧情上明显应该存在、但
+  keeper_capabilities.locations 里没有时才用。location_id 必须是新的、不得与任何
+  已有地点 id 相同；connected_location_id 必须是一个已存在的地点，通常就是当前场景。
+- ensure_runtime_entity：需要一个模组没写、但情境上应该在场的普通人或普通物件
+  （路过的店员、值班的管理员、桌上的一支笔）时才用。entity_id 必须是新的；
+  location_id 必须已存在。不要用它造关键 NPC、关键道具或本该由模组给出的线索。
+- move_entity：让实体换地点，或用 holder_actor_id 交到某个 Actor 手里（拿起、给予、
+  放下）。entity_id 取自 keeper_capabilities.entities[].id。
+- change_entity_state：记录实体上一个具体、可观察的变化（门被撬开、灯被点亮）。
+  key 只能用字母数字下划线短横。
+- consume_entity：实体被用掉、烧毁或彻底失效时使用。
+- advance_time：只在这次行动**在虚构世界里真的花掉了时间**（赶路、长时间搜查、
+  等待、休息）时使用，minutes 给一个保守估计，reason 用一句玩家安全的说明。
+  普通一问一答不要推进时间。
+- mark_core_resolved：主线目标真的被达成时使用一次。
+- set_ending_availability：主线已经收束、可以开始走结局流程时置 true。
+- commit_terminal_ending：ending_id 取自 keeper_capabilities.endings[].id。这会直接
+  结束整局游戏，只有在 ending_available 已经为 true、且玩家明确选择收束时才使用。
+
+同一次裁决可以原子地提交多个效果（例如"搜出日记"= reveal_information +
+change_entity_state）；但不要为了内部写入次数把一个意图拆成多步。需要检定的动作把
+效果分别放进 success_effects 与 failure_effects，失败时不要发放成功才配得到的信息。
 """.strip()
 
 _ACTION_PLAN_NARRATION_INSTRUCTIONS = """

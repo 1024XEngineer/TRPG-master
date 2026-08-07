@@ -109,6 +109,22 @@ class ProjectionScene(ContractModel):
     available_exits: tuple[ProjectionAvailableExit, ...] = ()
 
 
+class ProjectionWorldState(ContractModel):
+    """Player-safe world facts the Engine commits outside the current scene.
+
+    These are the projections of the `advance_time`, `mark_core_resolved`,
+    `set_ending_availability` and `commit_terminal_ending` effects: without them
+    an Engine commit changes authoritative state that neither the Agent's next
+    turn nor the player can observe.
+    """
+
+    elapsed_minutes: int = Field(default=0, ge=0)
+    time_of_day: Literal["day", "night"] = "day"
+    core_resolved: bool = False
+    ending_available: bool = False
+    ending_id: str | None = Field(default=None, min_length=1)
+
+
 class ProjectionKnownInformation(ContractModel):
     id: str = Field(min_length=1)
     title: str = Field(min_length=1)
@@ -155,6 +171,7 @@ class ProjectionSnapshot(ContractModel):
     revision: str = Field(min_length=1)
     self_actor: ProjectionSelfActor
     scene: ProjectionScene
+    world: ProjectionWorldState = Field(default_factory=ProjectionWorldState)
     known_information: tuple[ProjectionKnownInformation, ...] = ()
     checkpoint_options: tuple[ProjectionCheckpointOption, ...] = ()
 
@@ -263,6 +280,20 @@ class SceneView(ContractModel):
     available_exits: tuple[AvailableExitView, ...] = ()
 
 
+class WorldStateView(ContractModel):
+    """Player-safe world facts committed outside the current scene.
+
+    See :class:`ProjectionWorldState`; this is the same data on the model/UI
+    side of the projector.
+    """
+
+    elapsed_minutes: int = Field(default=0, ge=0)
+    time_of_day: Literal["day", "night"] = "day"
+    core_resolved: bool = False
+    ending_available: bool = False
+    ending_id: str | None = Field(default=None, min_length=1)
+
+
 class KnownInformationView(ContractModel):
     id: str = Field(min_length=1)
     title: str = Field(min_length=1)
@@ -313,6 +344,7 @@ class PlayerView(ContractModel):
     revision: str = Field(min_length=1)
     self_actor: SelfActorView
     scene: SceneView
+    world: WorldStateView = Field(default_factory=WorldStateView)
     known_information: tuple[KnownInformationView, ...] = ()
     checkpoint_options: tuple[CheckpointOption, ...] = ()
 

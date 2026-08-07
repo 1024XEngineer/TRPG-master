@@ -23,6 +23,19 @@ class InMemoryActionPlanRunStore(ActionPlanRunStore):
         self._reservations: dict[str, str] = {}
         self._lock = asyncio.Lock()
 
+    @staticmethod
+    def _persistable(run: ActionPlanRun) -> ActionPlanRun:
+        """Re-validate the way a persisting store does on its next read.
+
+        Callers build updates with `model_copy(update=...)`, which skips
+        validators — so an `ActionPlanRun` can be assembled in a state its own
+        model rejects. A real store serialises to JSON and validates on read, and
+        would then be unable to load the row it just wrote. Keeping the fake
+        permissive hides exactly that class of bug, so it round-trips too.
+        """
+
+        return ActionPlanRun.model_validate_json(run.model_dump_json())
+
     async def create(self, run: ActionPlanRun) -> ActionPlanRun:
         key = (run.room_id, run.parent_action_id)
         async with self._lock:
@@ -102,7 +115,7 @@ class InMemoryActionPlanRunStore(ActionPlanRunStore):
                     "PLAN_RESERVATION_LOST",
                     "ActionPlanRun 已失去房间行动占用",
                 )
-            self._runs[key] = updated_run.model_copy(deep=True)
+            self._runs[key] = self._persistable(updated_run)
             if updated_run.status in RESERVING_PLAN_STATUSES:
                 self._reservations[updated_run.room_id] = updated_run.parent_action_id
             elif reservation == updated_run.parent_action_id:

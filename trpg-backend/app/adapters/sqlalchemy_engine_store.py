@@ -295,6 +295,34 @@ class _SqlAlchemyEngineTransaction(EngineTransaction):
             raise ContractError("CheckRun 列值与 check_json 不一致")
         return check_run
 
+    async def find_active_action_for_player(
+        self,
+        player_id: str,
+    ) -> str | None:
+        self._ensure_active()
+        check_action_id = await self._session.scalar(
+            select(CheckRunRecord.action_request_id)
+            .where(
+                CheckRunRecord.room_id == self._room_id,
+                CheckRunRecord.player_id == player_id,
+                CheckRunRecord.status == "awaiting_post_roll_decision",
+            )
+            .order_by(CheckRunRecord.updated_at.desc())
+            .limit(1)
+        )
+        if check_action_id is not None:
+            return check_action_id
+        return await self._session.scalar(
+            select(PendingCheckDecisionRecord.action_request_id)
+            .where(
+                PendingCheckDecisionRecord.room_id == self._room_id,
+                PendingCheckDecisionRecord.player_id == player_id,
+                PendingCheckDecisionRecord.status == "awaiting_skill_choice",
+            )
+            .order_by(PendingCheckDecisionRecord.updated_at.desc())
+            .limit(1)
+        )
+
     async def commit(
         self,
         *,

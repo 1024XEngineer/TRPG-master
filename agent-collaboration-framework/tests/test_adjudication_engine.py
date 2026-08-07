@@ -14,6 +14,7 @@ from collaboration_framework.contracts import (
     EnsureRuntimeEntityEffect,
     EnsureRuntimeLocationEffect,
     EventRuleSpec,
+    GetAdjudicationStatusRequest,
     ModuleContent,
     NoAdjudicationCheck,
     PlayerChoiceAdjudicationCheck,
@@ -256,6 +257,52 @@ class AdjudicationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             [event.type for event in self.store.inspect_domain_events("room_01")],
             ["check.choice_requested", "action.cancelled"],
+        )
+
+    async def test_recover_action_returns_frozen_context_after_decision(self) -> None:
+        service = self.service(80)
+        action = adjudication("recover-action", "0")
+        pending = await self.submit(service, action)
+        recovery = await service.recover_action(
+            GetAdjudicationStatusRequest(
+                room_id="room_01",
+                player_id="player_01",
+                action_request_id=action.request_id,
+            )
+        )
+
+        assert recovery is not None
+        self.assertEqual(recovery.summary, action.summary)
+        self.assertEqual(recovery.actor_id, action.actor_id)
+        self.assertEqual(recovery.execution.status, "awaiting_skill_choice")
+
+        decision = pending.pending_decision
+        assert decision is not None
+        selected = await service.decide(
+            CheckDecisionRequest(
+                request_id="recover-select",
+                room_id="room_01",
+                player_id="player_01",
+                source_revision=pending.view_revision,
+                decision_id=decision.decision_id,
+                decision_version=decision.decision_version,
+                choice=SelectCheckChoice(candidate_id="spot"),
+            )
+        )
+        recovered = await service.recover_action(
+            GetAdjudicationStatusRequest(
+                room_id="room_01",
+                player_id="player_01",
+                action_request_id=action.request_id,
+            )
+        )
+
+        assert recovered is not None
+        self.assertEqual(recovered.execution, selected)
+        self.assertEqual(recovered.execution.action_request_id, action.request_id)
+        self.assertEqual(
+            len(self.store.inspect_domain_events("room_01")),
+            len(selected.event_refs) + 1,
         )
 
     async def test_failed_roll_is_persisted_then_exact_luck_spend_resolves(self) -> None:

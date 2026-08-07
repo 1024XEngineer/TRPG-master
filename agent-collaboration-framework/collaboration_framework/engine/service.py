@@ -8,6 +8,11 @@ from collaboration_framework.contracts import (
     CheckpointSpec,
     ConditionSpec,
     ContractError,
+    KeeperCapabilityView,
+    KeeperEndingCapability,
+    KeeperEntityCapability,
+    KeeperInformationCapability,
+    KeeperLocationCapability,
     NarrativeDetailSpec,
     PlayerViewScope,
     ProjectionActionDeclarationOption,
@@ -24,9 +29,11 @@ from collaboration_framework.contracts import (
     ProjectionSelfActor,
     ProjectionSnapshot,
     ProjectionVisibleActor,
+    ProjectionWorldState,
     SceneSpec,
     VisibilityPolicy,
 )
+from pydantic import JsonValue
 
 from .capabilities import require_runtime_capabilities
 from .kernel import RuleKernel
@@ -150,12 +157,22 @@ class RuleEngineService:
             (item for item in module.scenes if item.id == state.scene_id),
             None,
         )
-        if scene is None:
+        runtime_location = state.runtime_locations.get(state.scene_id)
+        if scene is None and runtime_location is None:
             raise ContractError(f"当前 Scene 不存在: {state.scene_id}")
+        if scene is None:
+            # Standing inside a location the Agent created via
+            # `ensure_runtime_location`. It has no SceneSpec, so everything that
+            # is authored per-Scene (checkpoints, narrative details, authored
+            # exits) is simply absent rather than fabricated.
+            scene = RuleEngineService._runtime_scene_spec(
+                state.scene_id,
+                runtime_location,
+            )
         actor = state.actors[actor_id]
         entities = {item.id: item for item in module.entities}
         scenes = {item.id: item for item in module.scenes}
-        visible_entities = tuple(
+        canon_entities = tuple(
             ProjectionEntity(
                 id=entity.id,
                 kind=entity.kind,
@@ -195,6 +212,24 @@ class RuleEngineService:
                 actor_id=actor_id,
                 target_id=entity.id,
             )
+            and RuleEngineService._override_allows(
+                state.visibility_overrides,
+                actor_id=actor_id,
+                target_kind="entity",
+                target_id=entity.id,
+            )
+        )
+        # Canon entities are placed by the module; runtime ones the Agent
+        # created or moved carry their own location_id, and a Canon entity that
+        # was moved out of its authored Scene has an override recorded the same
+        # way. Both are projected here so `ensure_runtime_entity` / `move_entity`
+        # are observable instead of silently committed.
+        visible_entities = canon_entities + RuleEngineService._project_placed_entities(
+            runtime,
+            scene_id=scene.id,
+            actor_id=actor_id,
+            already_projected={entity.id for entity in canon_entities},
+            canon_entities=entities,
         )
         visible_entity_ids = {entity.id for entity in visible_entities}
         available_exits = RuleEngineService._project_available_exits(
@@ -242,6 +277,13 @@ class RuleEngineService:
                 ),
                 available_exits=available_exits,
             ),
+            world=ProjectionWorldState(
+                elapsed_minutes=state.clock.elapsed_minutes,
+                time_of_day=state.clock.time_of_day,
+                core_resolved=state.core_resolved,
+                ending_available=state.ending_available,
+                ending_id=state.ending_id,
+            ),
             known_information=RuleEngineService._project_known_information(
                 runtime,
                 actor_id=actor_id,
@@ -272,6 +314,232 @@ class RuleEngineService:
                 )
             ),
         )
+
+    async def read_keeper_capabilities(
+        self,
+        scope: PlayerViewScope,
+    ) -> KeeperCapabilityView:
+        """Project the controlled Keeper-side capability list for one Agent run.
+
+        Same runtime snapshot and revision as :meth:`read`, so an adjudication
+        written against this list is refused on submit once the world moves.
+        This never reaches the client or the Narrator — see
+        :mod:`collaboration_framework.contracts.keeper_view`.
+        """
+
+        async with self._store.transaction(scope.room_id) as transaction:
+            runtime = await transaction.load_runtime()
+            self._validate_identity(
+                runtime,
+                player_id=scope.player_id,
+                actor_id=scope.actor_id,
+            )
+            return self._project_keeper_capabilities(runtime, actor_id=scope.actor_id)
+
+    @staticmethod
+    def _project_keeper_capabilities(
+        runtime: EngineRuntimeSnapshot,
+        *,
+        actor_id: str,
+    ) -> KeeperCapabilityView:
+        module = runtime.module_content
+        state = runtime.game_state
+        party_known = set(state.discovered_facts)
+        actor_known = set(state.actor_discovered_facts.get(actor_id, ()))
+        information = tuple(
+            KeeperInformationCapability(
+                id=item.id,
+                title=item.title or item.id,
+                summary=item.summary or item.content,
+                content=item.content,
+                related_entities=item.related_entities,
+                related_scenes=item.related_scenes,
+                known_by_party=item.id in party_known,
+                known_by_actor=item.id in actor_known,
+            )
+            for item in module.information_items
+        )
+        locations = tuple(
+            KeeperLocationCapability(
+                id=scene.id,
+                name=scene.player_visible_name or scene.name,
+                origin="canon",
+                is_current=scene.id == state.scene_id,
+            )
+            for scene in module.scenes
+        ) + tuple(
+            KeeperLocationCapability(
+                id=location_id,
+                name=(
+                    RuleEngineService._optional_text(payload.get("name")) or location_id
+                ),
+                origin="runtime",
+                is_current=location_id == state.scene_id,
+            )
+            for location_id, payload in sorted(state.runtime_locations.items())
+        )
+        canon_scene_of = {
+            entity_id: scene.id
+            for scene in module.scenes
+            for entity_id in scene.entity_ids
+        }
+        entities = tuple(
+            KeeperEntityCapability(
+                id=entity.id,
+                name=entity.player_visible_name or entity.id,
+                kind=entity.kind,
+                origin="canon",
+                location_id=RuleEngineService._optional_text(
+                    state.entities.get(entity.id, {}).get("location_id")
+                )
+                or canon_scene_of.get(entity.id),
+                holder_actor_id=RuleEngineService._optional_text(
+                    state.entities.get(entity.id, {}).get("holder_actor_id")
+                ),
+                consumed=state.entities.get(entity.id, {}).get("consumed") is True,
+            )
+            for entity in module.entities
+        ) + tuple(
+            KeeperEntityCapability(
+                id=entity_id,
+                name=RuleEngineService._optional_text(payload.get("name")) or entity_id,
+                kind=(
+                    payload["kind"]
+                    if payload.get("kind") in {"npc", "object", "location"}
+                    else "object"
+                ),
+                origin="runtime",
+                location_id=RuleEngineService._optional_text(payload.get("location_id")),
+                holder_actor_id=RuleEngineService._optional_text(
+                    payload.get("holder_actor_id")
+                ),
+                consumed=payload.get("consumed") is True,
+            )
+            for entity_id, payload in sorted(state.runtime_entities.items())
+        )
+        return KeeperCapabilityView(
+            room_id=state.room_id,
+            actor_id=actor_id,
+            revision=runtime.revision,
+            information=information,
+            locations=locations,
+            entities=entities,
+            endings=tuple(
+                KeeperEndingCapability(
+                    id=condition.id,
+                    summary=condition.player_visible_information or condition.fact,
+                )
+                for condition in module.win_conditions
+                if condition.is_ending
+            ),
+            core_resolved=state.core_resolved,
+            ending_available=state.ending_available,
+        )
+
+    @staticmethod
+    def _runtime_scene_spec(
+        location_id: str,
+        runtime_location: dict[str, JsonValue],
+    ) -> SceneSpec:
+        """Adapt an Agent-created runtime location to the Scene shape.
+
+        `exits` is left restricted to the location it was connected to, so a
+        runtime location never silently opens travel to every Canon Scene.
+        """
+
+        name = RuleEngineService._optional_text(runtime_location.get("name")) or location_id
+        connected = RuleEngineService._optional_text(
+            runtime_location.get("connected_location_id")
+        )
+        parent = RuleEngineService._optional_text(runtime_location.get("parent_location_id"))
+        neighbours = tuple(dict.fromkeys(item for item in (connected, parent) if item))
+        return SceneSpec(
+            id=location_id,
+            name=name,
+            content=name,
+            player_visible_name=name,
+            player_visible_description="",
+            entity_ids=(),
+            checkpoint_ids=(),
+            exits=neighbours,
+        )
+
+    @staticmethod
+    def _project_placed_entities(
+        runtime: EngineRuntimeSnapshot,
+        *,
+        scene_id: str,
+        actor_id: str,
+        already_projected: set[str],
+        canon_entities: dict[str, object],
+    ) -> tuple[ProjectionEntity, ...]:
+        """Project entities whose current placement — not the module — puts them here.
+
+        Covers `ensure_runtime_entity` (a brand-new npc/object) and `move_entity`
+        (a Canon or runtime entity relocated into this scene or carried by the
+        acting actor). Consumed entities drop out, which is what
+        `consume_entity` is for.
+        """
+
+        state = runtime.game_state
+        placed: list[ProjectionEntity] = []
+        sources: list[tuple[str, dict[str, JsonValue], str]] = [
+            (entity_id, payload, "runtime")
+            for entity_id, payload in state.runtime_entities.items()
+        ]
+        sources += [
+            (entity_id, payload, "canon")
+            for entity_id, payload in state.entities.items()
+            if entity_id not in state.runtime_entities
+        ]
+        for entity_id, payload, origin in sources:
+            if entity_id in already_projected or payload.get("consumed") is True:
+                continue
+            location_id = RuleEngineService._optional_text(payload.get("location_id"))
+            holder_actor_id = RuleEngineService._optional_text(payload.get("holder_actor_id"))
+            here = location_id == scene_id or holder_actor_id == actor_id
+            if not here:
+                continue
+            if not RuleEngineService._override_allows(
+                state.visibility_overrides,
+                actor_id=actor_id,
+                target_kind="entity",
+                target_id=entity_id,
+            ):
+                continue
+            canon = canon_entities.get(entity_id) if origin == "canon" else None
+            name = RuleEngineService._optional_text(payload.get("name"))
+            kind = payload.get("kind")
+            placed.append(
+                ProjectionEntity(
+                    id=entity_id,
+                    kind=(
+                        kind
+                        if kind in {"npc", "object", "location"}
+                        else getattr(canon, "kind", "object")
+                    ),
+                    name=(name or getattr(canon, "player_visible_name", "") or entity_id),
+                    aliases=getattr(canon, "player_visible_aliases", ()),
+                    description=getattr(canon, "content", ""),
+                )
+            )
+        placed.sort(key=lambda entity: entity.id)
+        return tuple(placed)
+
+    @staticmethod
+    def _override_allows(
+        overrides: dict[str, bool],
+        *,
+        actor_id: str,
+        target_kind: str,
+        target_id: str,
+    ) -> bool:
+        """Apply a `set_visibility` effect, actor scope winning over party scope."""
+
+        actor_key = f"actor:{actor_id}:{target_kind}:{target_id}"
+        if actor_key in overrides:
+            return overrides[actor_key]
+        return overrides.get(f"party:{target_kind}:{target_id}", True)
 
     @staticmethod
     def _project_available_exits(
@@ -334,18 +602,47 @@ class RuleEngineService:
                 if destination.id != scene.id
             )
         )
+        # Runtime locations are reachable from whatever they were attached to,
+        # and never from everywhere: `ensure_runtime_location` requires a
+        # `connected_location_id`, and that connection is the only route in.
+        runtime_locations = runtime.game_state.runtime_locations
+        reachable_scene_ids += tuple(
+            location_id
+            for location_id, payload in runtime_locations.items()
+            if location_id != scene.id
+            and scene.id
+            in {
+                payload.get("connected_location_id"),
+                payload.get("parent_location_id"),
+            }
+            and location_id not in reachable_scene_ids
+        )
         for destination_scene_id in reachable_scene_ids:
             if destination_scene_id in described_destinations:
                 continue
-            destination = scenes[destination_scene_id]
-            destination_name = destination.player_visible_name or destination.name
+            runtime_destination = runtime_locations.get(destination_scene_id)
+            if runtime_destination is not None and destination_scene_id not in scenes:
+                destination_name = (
+                    RuleEngineService._optional_text(runtime_destination.get("name"))
+                    or destination_scene_id
+                )
+            else:
+                destination = scenes[destination_scene_id]
+                destination_name = destination.player_visible_name or destination.name
+            if not RuleEngineService._override_allows(
+                runtime.game_state.visibility_overrides,
+                actor_id=actor_id,
+                target_kind="location",
+                target_id=destination_scene_id,
+            ):
+                continue
             projected.append(
                 ProjectionAvailableExit(
-                    id=destination.id,
+                    id=destination_scene_id,
                     name=destination_name,
                     description="",
                     destination=ProjectionExitDestination(
-                        scene_id=destination.id,
+                        scene_id=destination_scene_id,
                         name=destination_name,
                     ),
                 )
@@ -453,6 +750,13 @@ class RuleEngineService:
         actor_ids = set(state.actor_discovered_facts.get(actor_id, ()))
         projected: list[ProjectionKnownInformation] = []
         for information in runtime.module_content.information_items:
+            if not RuleEngineService._override_allows(
+                state.visibility_overrides,
+                actor_id=actor_id,
+                target_kind="information",
+                target_id=information.id,
+            ):
+                continue
             policy = information.visibility
             actor_scoped = (
                 policy.audience == "actor" or not policy.discovery_shares_to_party

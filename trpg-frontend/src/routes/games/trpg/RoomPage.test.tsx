@@ -290,6 +290,13 @@ function playerViewFixture(): AgentPlayerView {
       visible_actors: [],
       available_exits: [],
     },
+    world: {
+      elapsed_minutes: 0,
+      time_of_day: 'night',
+      core_resolved: false,
+      ending_available: false,
+      ending_id: null,
+    },
     known_information: [],
     checkpoint_options: [],
   }
@@ -1374,6 +1381,108 @@ describe('RoomPage conversation history', () => {
     expect(RoomSpeechRecognition.instances).toHaveLength(0)
   })
 
+  it('hides a settled single-action check panel once the turn produces narration', async () => {
+    // A standalone single action emits no plan.* events, so the panel used to
+    // survive the turn. Its buttons stayed clickable and a second click resent
+    // the same stale sourceRevision, which the server can only reject.
+    mockSubmitPlannedAction.mockImplementation(
+      () =>
+        new Promise(() => {
+          /* the authoritative narration is what settles this turn */
+        }),
+    )
+    renderRoomPage()
+
+    const input = screen.getByPlaceholderText('输入行动…')
+    fireEvent.change(input, { target: { value: '我要撬开抽屉' } })
+    fireEvent.submit(input.closest('form')!)
+    await waitFor(() => expect(mockSubmitPlannedAction).toHaveBeenCalled())
+    const { clientActionId } = mockSubmitPlannedAction.mock.calls[0][1]
+
+    act(() =>
+      emitWsMessage({
+        type: 'adjudication.pending',
+        payload: {
+          correlationId: clientActionId,
+          planId: null,
+          sourceRevision: 'revision-1',
+          status: 'awaiting_post_roll_decision',
+          pendingDecision: null,
+          checkRun: {
+            check_id: 'check-1',
+            action_request_id: clientActionId,
+            selected_candidate_id: 'library',
+            status: 'awaiting_post_roll_decision',
+            version: 1,
+            roll_count: 1,
+            roll: { value: 80, degree: 'failure', passed: false },
+            post_roll_options: [{ option_id: 'accept-current', kind: 'accept_result' }],
+            final_result: null,
+          },
+        },
+      }),
+    )
+    expect(await screen.findByRole('region', { name: '待处理检定' })).toBeInTheDocument()
+
+    act(() =>
+      emitWsMessage({
+        type: 'narration.push',
+        payload: { messageId: clientActionId, text: '抽屉纹丝不动，木头发出干涩的响声。' },
+      }),
+    )
+
+    await waitFor(() =>
+      expect(screen.queryByRole('region', { name: '待处理检定' })).not.toBeInTheDocument(),
+    )
+  })
+
+  it('keeps another action\'s pending check while an unrelated turn settles', async () => {
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    act(() =>
+      emitWsMessage({
+        type: 'adjudication.pending',
+        payload: {
+          correlationId: 'still-waiting',
+          planId: null,
+          sourceRevision: 'revision-1',
+          status: 'awaiting_skill_choice',
+          pendingDecision: {
+            decision_id: 'decision-9',
+            action_request_id: 'still-waiting',
+            source_revision: 'revision-1',
+            decision_version: 1,
+            actor_id: 'actor-1',
+            summary: '仍在等待玩家选择',
+            options: [
+              {
+                candidate_id: 'library',
+                skill_id: 'library-use',
+                display_name: '图书馆使用',
+                target_value: 50,
+                difficulty: 'regular' as const,
+                method_summary: '检查书架上的旧书',
+                player_safe_reason: '这是当前场景中可见的调查方式',
+              },
+            ],
+            allow_cancel: true,
+          },
+        },
+      }),
+    )
+    expect(await screen.findByRole('region', { name: '待处理检定' })).toBeInTheDocument()
+
+    act(() =>
+      emitWsMessage({
+        type: 'narration.push',
+        payload: { messageId: 'a-different-action', text: '别的动作结算完了。' },
+      }),
+    )
+
+    expect(screen.getByRole('region', { name: '待处理检定' })).toBeInTheDocument()
+  })
+
   it('submits the room input through ActionPlan and clears stale decisions', async () => {
     renderRoomPage()
 
@@ -1483,6 +1592,52 @@ describe('RoomPage conversation history', () => {
       },
     }))
     expect(screen.queryByRole('region', { name: '待处理检定' })).not.toBeInTheDocument()
+  })
+
+  it('shows the authoritative world clock and ending state from the PlayerView', async () => {
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    act(() =>
+      emitWsMessage({
+        type: 'view.updated',
+        payload: {
+          playerId: 'player-1',
+          playerView: {
+            ...playerViewFixture(),
+            world: {
+              elapsed_minutes: 13 * 60 + 25,
+              time_of_day: 'night',
+              core_resolved: true,
+              ending_available: true,
+              ending_id: null,
+            },
+          },
+        },
+      }),
+    )
+    fireEvent.click(screen.getByRole('button', { name: '地图' }))
+
+    expect(screen.getByText('夜晚 · 已过去 13 小时 25 分钟')).toBeInTheDocument()
+    expect(
+      screen.getByText('主线已经收束，可以选择如何收尾'),
+    ).toBeInTheDocument()
+  })
+
+  it('hides the mainline banner until an ending effect is committed', async () => {
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    act(() =>
+      emitWsMessage({
+        type: 'view.updated',
+        payload: { playerId: 'player-1', playerView: playerViewFixture() },
+      }),
+    )
+    fireEvent.click(screen.getByRole('button', { name: '地图' }))
+
+    expect(screen.getByText('夜晚 · 刚刚开始')).toBeInTheDocument()
+    expect(screen.queryByLabelText('主线进度')).not.toBeInTheDocument()
   })
 
   it('renders invalid Agent output as keeper guidance', () => {

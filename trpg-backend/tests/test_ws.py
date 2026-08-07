@@ -3,11 +3,23 @@
 from dataclasses import replace
 
 import pytest
-from collaboration_framework.contracts import ContractError, JsonObject
+from collaboration_framework.contracts import (
+    ActionAdjudication,
+    ActionMethod,
+    ActionTarget,
+    ContractError,
+    JsonObject,
+    NarrativeOnlyEffect,
+    RequiredAdjudicationCheck,
+    SingleActionDecision,
+    SkillCheckCandidate,
+)
+from collaboration_framework.engine import DiceRoller, SequenceDiceSource
 from collaboration_framework.host.adapters.fakes import (
     FakeNarrationModel,
     FakeOpeningNarrationModel,
 )
+from collaboration_framework.host.application import ActionPlanNarrator
 from collaboration_framework.host.schemas import (
     IntentContext,
     NarrationContext,
@@ -74,6 +86,57 @@ class _WsPlainIntentModel:
         }
 
 
+class _WsSingleActionCheckPlanner:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def generate(self, context) -> SingleActionDecision:
+        self.calls += 1
+        return SingleActionDecision(
+            adjudication=ActionAdjudication(
+                request_id="application-owned",
+                source_revision=context.player_view.revision,
+                actor_id=context.player_input.actor_id,
+                summary=context.player_input.utterance,
+                target=ActionTarget(
+                    kind="location",
+                    id=context.player_view.scene.id,
+                ),
+                method=ActionMethod(
+                    family="investigate",
+                    description=context.player_input.utterance,
+                ),
+                check=RequiredAdjudicationCheck(
+                    candidates=(
+                        SkillCheckCandidate(
+                            candidate_id="library-use",
+                            skill_id="library-use",
+                            difficulty="regular",
+                            method_summary="查阅现场资料",
+                            player_safe_reason="需要理解现场留下的文字线索",
+                        ),
+                    )
+                ),
+                success_effects=(NarrativeOnlyEffect(),),
+            )
+        )
+
+
+class _WsCountingActionPlanNarration:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def generate(self, context) -> JsonObject:
+        del context
+        self.calls += 1
+        return {
+            "kind": "narration",
+            "text": f"单动作恢复结果 {self.calls}",
+            "claimed_evidence_refs": [],
+            "suggested_actions": ["继续调查"],
+        }
+
+
 class _WsInvalidTwiceThenSafeNarration:
     leaked_text = "托马斯看着你。 claimed_fact_ids: [],"
 
@@ -124,6 +187,18 @@ class _WsCountingOpening:
     async def generate(self, context: OpeningNarrationContext) -> JsonObject:
         self.calls += 1
         return await self._fake.generate(context)
+
+
+class _FailOnceActionPlanNarrator:
+    def __init__(self, delegate: ActionPlanNarrator) -> None:
+        self.delegate = delegate
+        self.calls = 0
+
+    async def narrate(self, context):
+        self.calls += 1
+        if self.calls == 1:
+            raise RuntimeError("temporary narrator outage")
+        return await self.delegate.narrate(context)
 
 
 @pytest.fixture
@@ -1549,6 +1624,227 @@ def test_action_plan_submit_emits_safe_progress_and_one_parent_completion(
     ]
     assert len(persisted_actions) == 1
     assert persisted_actions[0]["payload"]["utterance"] == "先观察房间，然后询问眼前的人"
+
+
+def test_single_action_pending_resumes_without_plan_run(
+    sync_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    token = register_and_login(sync_client, "single_action_pending_247")
+    room = create_room(sync_client, token)
+    advance_to_building(sync_client, room)
+    complete_character(sync_client, room["roomId"], room["reconnectToken"])
+    start_game(sync_client, room, token)
+    planner = _WsSingleActionCheckPlanner()
+    narration_model = _WsCountingActionPlanNarration()
+    monkeypatch.setattr(
+        ws_controller.action_plan_turn_application,
+        "_planner",
+        planner,
+    )
+    monkeypatch.setattr(
+        ws_controller.action_plan_turn_application,
+        "_narrator",
+        ActionPlanNarrator(narration_model),
+    )
+    monkeypatch.setattr(
+        ws_controller.adjudication_engine_service,
+        "_dice",
+        DiceRoller(SequenceDiceSource([10])),
+    )
+
+    action_id = "single-action-pending-247"
+    with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
+        ws.send_json(
+            {
+                "type": "room.join",
+                "playerId": room["playerId"],
+                "payload": {"reconnectToken": room["reconnectToken"]},
+            }
+        )
+        ws.receive_json()  # session.bound
+        ws.receive_json()  # current view.updated
+        receive_replayed_opening(ws)
+
+        ws.send_json(
+            {
+                "type": "action.plan.submit",
+                "playerId": room["playerId"],
+                "payload": {
+                    "clientActionId": action_id,
+                    "utterance": "仔细检查书架上的文件",
+                },
+            }
+        )
+        pending, pending_events = receive_until(
+            ws,
+            lambda message: message.get("type") == "adjudication.pending",
+        )
+        assert pending["payload"]["planId"] is None
+        assert all(message.get("type") != "turn.failed" for message in pending_events)
+
+        decision = pending["payload"]["pendingDecision"]
+        assert decision["options"]
+        select_message = {
+            "type": "adjudication.select",
+            "playerId": room["playerId"],
+            "payload": {
+                "clientActionId": action_id,
+                "requestId": "single-action-select-247",
+                "sourceRevision": pending["payload"]["sourceRevision"],
+                "decisionId": decision["decision_id"],
+                "decisionVersion": decision["decision_version"],
+                "candidateId": decision["options"][0]["candidate_id"],
+            },
+        }
+        ws.send_json(select_message)
+        completed, completion_events = receive_until(
+            ws,
+            lambda message: message.get("message_type") == "turn.completed",
+            limit=40,
+        )
+        narration, narration_events = receive_until(
+            ws,
+            lambda message: message.get("type") == "narration.push",
+            limit=40,
+        )
+
+        ws.send_json(select_message)
+        repeated_completed, repeated_events = receive_until(
+            ws,
+            lambda message: message.get("message_type") == "turn.completed",
+            limit=20,
+        )
+        repeated_narration, repeated_narration_events = receive_until(
+            ws,
+            lambda message: message.get("type") == "narration.push",
+            limit=20,
+        )
+
+        ws.send_json(
+            {
+                "type": "action.plan.submit",
+                "playerId": room["playerId"],
+                "payload": {
+                    "clientActionId": action_id,
+                    "utterance": "仔细检查书架上的文件",
+                },
+            }
+        )
+        repeated_submit, repeated_submit_events = receive_until(
+            ws,
+            lambda message: message.get("message_type") == "turn.completed",
+            limit=20,
+        )
+        repeated_submit_narration, repeated_submit_narration_events = receive_until(
+            ws,
+            lambda message: message.get("type") == "narration.push",
+            limit=20,
+        )
+
+    assert completed["correlation_id"] == action_id
+    assert narration["payload"]["messageId"] == action_id
+    assert completed["payload"]["narration"]["suggested_actions"] == ["继续调查"]
+    assert all(message.get("type") != "turn.failed" for message in completion_events)
+    assert all(message.get("type") != "turn.failed" for message in narration_events)
+    assert repeated_completed["payload"]["narration"] == completed["payload"]["narration"]
+    assert repeated_narration["payload"] == narration["payload"]
+    assert repeated_submit["payload"]["narration"] == completed["payload"]["narration"]
+    assert repeated_submit_narration["payload"] == narration["payload"]
+    assert planner.calls == 1
+    assert narration_model.calls == 1
+    assert all(message.get("type") != "turn.failed" for message in repeated_events)
+    assert all(message.get("type") != "turn.failed" for message in repeated_narration_events)
+    assert all(message.get("type") != "turn.failed" for message in repeated_submit_events)
+    assert all(message.get("type") != "turn.failed" for message in repeated_submit_narration_events)
+
+    replay = sync_client.get(
+        f"{ROOMS_BASE}/{room['roomId']}/replay",
+        headers={"X-Reconnect-Token": room["reconnectToken"]},
+    ).json()["data"]
+    action_events = [
+        event for event in replay if event["payload"].get("clientActionId") == action_id
+    ]
+    narration_events = [
+        event
+        for event in replay
+        if event["eventType"] == "narration.push" and event["payload"].get("messageId") == action_id
+    ]
+    assert len(action_events) == 1
+    assert len(narration_events) == 1
+    assert "_turnCompletion" not in narration_events[0]["payload"]
+
+    conversation = sync_client.get(
+        f"{ROOMS_BASE}/{room['roomId']}/conversation",
+        headers={"X-Reconnect-Token": room["reconnectToken"]},
+    ).json()["data"]
+    conversation_narration = [
+        event
+        for event in conversation
+        if event["type"] == "narration.push" and event["payload"].get("messageId") == action_id
+    ]
+    assert len(conversation_narration) == 1
+    assert "_turnCompletion" not in conversation_narration[0]["payload"]
+
+
+def test_action_plan_narrator_failure_retries_narration_without_replaying_steps(
+    sync_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    token = register_and_login(sync_client, "action_plan_narrator_retry")
+    room = create_room(sync_client, token)
+    advance_to_building(sync_client, room)
+    complete_character(sync_client, room["roomId"], room["reconnectToken"])
+    start_game(sync_client, room, token)
+    application = ws_controller.action_plan_turn_application
+    narrator = _FailOnceActionPlanNarrator(application._narrator)
+    monkeypatch.setattr(application, "_narrator", narrator)
+    action = {
+        "type": "action.plan.submit",
+        "playerId": room["playerId"],
+        "payload": {
+            "clientActionId": "plan-narrator-retry-246",
+            "utterance": "先观察房间，然后询问眼前的人",
+        },
+    }
+
+    with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
+        ws.send_json(
+            {
+                "type": "room.join",
+                "playerId": room["playerId"],
+                "payload": {"reconnectToken": room["reconnectToken"]},
+            }
+        )
+        ws.receive_json()
+        ws.receive_json()
+        receive_replayed_opening(ws)
+
+        ws.send_json(action)
+        failed, first_seen = receive_until(
+            ws,
+            lambda message: message.get("type") == "turn.failed",
+            limit=40,
+        )
+        assert failed["payload"]["code"] == "PLAN_NARRATOR_FAILED"
+        assert all(message.get("type") != "plan.completed" for message in first_seen)
+
+        ws.send_json(action)
+        completed, retry_seen = receive_until(
+            ws,
+            lambda message: message.get("message_type") == "turn.completed",
+            limit=40,
+        )
+        terminal, _ = receive_until(
+            ws,
+            lambda message: message.get("type") == "plan.completed",
+            limit=40,
+        )
+
+    assert narrator.calls == 2
+    assert completed["correlation_id"] == "plan-narrator-retry-246"
+    assert terminal["payload"]["correlationId"] == "plan-narrator-retry-246"
+    assert all(message.get("type") != "adjudication.pending" for message in retry_seen)
 
 
 def test_legacy_action_submit_is_blocked_while_plan_is_active(

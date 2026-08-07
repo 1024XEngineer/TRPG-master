@@ -138,6 +138,22 @@ const PHASE_LABELS: Record<AgentTurnPhase, string> = {
   generating_narration: '守秘人正在组织叙事',
 }
 
+const TIME_OF_DAY_LABELS = { day: '白天', night: '夜晚' } as const
+
+/** Render the Engine's authoritative clock as elapsed in-fiction time. */
+function formatElapsed(minutes: number): string {
+  if (minutes <= 0) return '刚刚开始'
+  const days = Math.floor(minutes / 1440)
+  const hours = Math.floor((minutes % 1440) / 60)
+  const rest = minutes % 60
+  const parts = [
+    days > 0 ? `${days} 天` : '',
+    hours > 0 ? `${hours} 小时` : '',
+    rest > 0 ? `${rest} 分钟` : '',
+  ].filter(Boolean)
+  return `已过去 ${parts.join(' ')}`
+}
+
 function resourceValue(playerView: AgentPlayerView | null, id: string): number | null {
   const normalized = id.toLocaleLowerCase()
   const resource = playerView?.self_actor.resources.find((item) =>
@@ -1844,10 +1860,32 @@ export default function RoomPage() {
           <span className="text-xs text-text-dim">
             {playerView?.scene.name || '等待规则引擎同步当前场景'}
           </span>
-          {playerView?.scene.time && (
-            <span className="text-[10px] text-text-dim mt-1">{playerView.scene.time}</span>
+          {playerView?.world && (
+            <span className="text-[10px] text-text-dim mt-1">
+              {TIME_OF_DAY_LABELS[playerView.world.time_of_day]} ·{' '}
+              {formatElapsed(playerView.world.elapsed_minutes)}
+            </span>
           )}
         </div>
+        {playerView?.world && (playerView.world.core_resolved || playerView.world.ending_available) && (
+          <div
+            aria-label="主线进度"
+            className="mb-3.5 rounded-md border border-[#c7ad73] bg-[#fffaf0] px-3 py-2"
+          >
+            <div className="text-xs font-semibold text-brass-dark">
+              {playerView.world.ending_id
+                ? '本次调查已经结束'
+                : playerView.world.ending_available
+                  ? '主线已经收束，可以选择如何收尾'
+                  : '主线目标已经达成'}
+            </div>
+            <div className="text-[11px] text-text-muted mt-0.5">
+              {playerView.world.ending_id
+                ? '你可以回顾已经发生的事，但不能再改变结局。'
+                : '继续扮演或主动收束都可以，由你决定何时结束。'}
+            </div>
+          </div>
+        )}
         <div className="h-px bg-border-light mb-3.5" />
         <h4 className="text-xs font-semibold text-brass-dark mb-2.5">当前位置与可达地点</h4>
         <div className="space-y-1.5">

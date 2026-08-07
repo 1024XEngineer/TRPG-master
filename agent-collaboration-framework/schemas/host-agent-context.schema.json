@@ -226,6 +226,263 @@
       "type": "object"
     },
     "JsonValue": {},
+    "KeeperCapabilityView": {
+      "additionalProperties": false,
+      "description": "Everything the Agent needs to name a legal target or effect payload.",
+      "properties": {
+        "room_id": {
+          "minLength": 1,
+          "title": "Room Id",
+          "type": "string"
+        },
+        "actor_id": {
+          "minLength": 1,
+          "title": "Actor Id",
+          "type": "string"
+        },
+        "revision": {
+          "minLength": 1,
+          "title": "Revision",
+          "type": "string"
+        },
+        "information": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/KeeperInformationCapability"
+          },
+          "title": "Information",
+          "type": "array"
+        },
+        "locations": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/KeeperLocationCapability"
+          },
+          "title": "Locations",
+          "type": "array"
+        },
+        "entities": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/KeeperEntityCapability"
+          },
+          "title": "Entities",
+          "type": "array"
+        },
+        "endings": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/KeeperEndingCapability"
+          },
+          "title": "Endings",
+          "type": "array"
+        },
+        "core_resolved": {
+          "default": false,
+          "title": "Core Resolved",
+          "type": "boolean"
+        },
+        "ending_available": {
+          "default": false,
+          "title": "Ending Available",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "room_id",
+        "actor_id",
+        "revision"
+      ],
+      "title": "KeeperCapabilityView",
+      "type": "object"
+    },
+    "KeeperEndingCapability": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "summary": {
+          "minLength": 1,
+          "title": "Summary",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "summary"
+      ],
+      "title": "KeeperEndingCapability",
+      "type": "object"
+    },
+    "KeeperEntityCapability": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "npc",
+            "object",
+            "location"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "origin": {
+          "enum": [
+            "canon",
+            "runtime"
+          ],
+          "title": "Origin",
+          "type": "string"
+        },
+        "location_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Location Id"
+        },
+        "holder_actor_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Holder Actor Id"
+        },
+        "consumed": {
+          "default": false,
+          "title": "Consumed",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "kind",
+        "origin"
+      ],
+      "title": "KeeperEntityCapability",
+      "type": "object"
+    },
+    "KeeperInformationCapability": {
+      "additionalProperties": false,
+      "description": "One Canon Information the Agent may reveal or hide.",
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "title": {
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "summary": {
+          "minLength": 1,
+          "title": "Summary",
+          "type": "string"
+        },
+        "content": {
+          "minLength": 1,
+          "title": "Content",
+          "type": "string"
+        },
+        "related_entities": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Related Entities",
+          "type": "array"
+        },
+        "related_scenes": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Related Scenes",
+          "type": "array"
+        },
+        "known_by_party": {
+          "default": false,
+          "title": "Known By Party",
+          "type": "boolean"
+        },
+        "known_by_actor": {
+          "default": false,
+          "title": "Known By Actor",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "summary",
+        "content"
+      ],
+      "title": "KeeperInformationCapability",
+      "type": "object"
+    },
+    "KeeperLocationCapability": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "origin": {
+          "enum": [
+            "canon",
+            "runtime"
+          ],
+          "title": "Origin",
+          "type": "string"
+        },
+        "is_current": {
+          "default": false,
+          "title": "Is Current",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "origin"
+      ],
+      "title": "KeeperLocationCapability",
+      "type": "object"
+    },
     "KnownInformationView": {
       "additionalProperties": false,
       "properties": {
@@ -428,6 +685,9 @@
         },
         "scene": {
           "$ref": "#/$defs/SceneView"
+        },
+        "world": {
+          "$ref": "#/$defs/WorldStateView"
         },
         "known_information": {
           "default": [],
@@ -1035,6 +1295,52 @@
       ],
       "title": "VisibleHistoryText",
       "type": "object"
+    },
+    "WorldStateView": {
+      "additionalProperties": false,
+      "description": "Player-safe world facts committed outside the current scene.\n\nSee :class:`ProjectionWorldState`; this is the same data on the model/UI\nside of the projector.",
+      "properties": {
+        "elapsed_minutes": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Elapsed Minutes",
+          "type": "integer"
+        },
+        "time_of_day": {
+          "default": "day",
+          "enum": [
+            "day",
+            "night"
+          ],
+          "title": "Time Of Day",
+          "type": "string"
+        },
+        "core_resolved": {
+          "default": false,
+          "title": "Core Resolved",
+          "type": "boolean"
+        },
+        "ending_available": {
+          "default": false,
+          "title": "Ending Available",
+          "type": "boolean"
+        },
+        "ending_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ending Id"
+        }
+      },
+      "title": "WorldStateView",
+      "type": "object"
     }
   },
   "additionalProperties": false,
@@ -1048,6 +1354,17 @@
     },
     "recent_history": {
       "$ref": "#/$defs/RecentTurnContext"
+    },
+    "keeper_capabilities": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/KeeperCapabilityView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     }
   },
   "required": [

@@ -1847,7 +1847,6 @@ def test_action_plan_narrator_failure_retries_narration_without_replaying_steps(
     assert all(message.get("type") != "adjudication.pending" for message in retry_seen)
 
 
-
 def test_legacy_action_submit_is_blocked_while_plan_is_active(
     sync_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,

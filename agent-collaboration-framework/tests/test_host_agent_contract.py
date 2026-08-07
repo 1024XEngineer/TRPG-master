@@ -129,11 +129,21 @@ class HostAgentSchemaTests(unittest.TestCase):
         )
         self.assertEqual(
             set(HostAgentContext.model_fields),
-            {"player_input", "player_view", "recent_history"},
+            {
+                "player_input",
+                "player_view",
+                "recent_history",
+                "keeper_capabilities",
+            },
         )
         self.assertEqual(
             set(context.to_json_dict()),
-            {"player_input", "player_view", "recent_history"},
+            {
+                "player_input",
+                "player_view",
+                "recent_history",
+                "keeper_capabilities",
+            },
         )
 
         with self.assertRaises(ValidationError):
@@ -327,7 +337,12 @@ class HostAgentSchemaTests(unittest.TestCase):
         self.assertFalse(context_schema["additionalProperties"])
         self.assertEqual(
             set(context_schema["properties"]),
-            {"player_input", "player_view", "recent_history"},
+            {
+                "player_input",
+                "player_view",
+                "recent_history",
+                "keeper_capabilities",
+            },
         )
         self.assertIn("recent-turn-context.schema.json", schemas)
 

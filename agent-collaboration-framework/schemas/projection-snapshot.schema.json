@@ -589,6 +589,52 @@
       ],
       "title": "ProjectionVisibleActor",
       "type": "object"
+    },
+    "ProjectionWorldState": {
+      "additionalProperties": false,
+      "description": "Player-safe world facts the Engine commits outside the current scene.\n\nThese are the projections of the `advance_time`, `mark_core_resolved`,\n`set_ending_availability` and `commit_terminal_ending` effects: without them\nan Engine commit changes authoritative state that neither the Agent's next\nturn nor the player can observe.",
+      "properties": {
+        "elapsed_minutes": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Elapsed Minutes",
+          "type": "integer"
+        },
+        "time_of_day": {
+          "default": "day",
+          "enum": [
+            "day",
+            "night"
+          ],
+          "title": "Time Of Day",
+          "type": "string"
+        },
+        "core_resolved": {
+          "default": false,
+          "title": "Core Resolved",
+          "type": "boolean"
+        },
+        "ending_available": {
+          "default": false,
+          "title": "Ending Available",
+          "type": "boolean"
+        },
+        "ending_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ending Id"
+        }
+      },
+      "title": "ProjectionWorldState",
+      "type": "object"
     }
   },
   "additionalProperties": false,
@@ -637,6 +683,9 @@
     },
     "scene": {
       "$ref": "#/$defs/ProjectionScene"
+    },
+    "world": {
+      "$ref": "#/$defs/ProjectionWorldState"
     },
     "known_information": {
       "default": [],

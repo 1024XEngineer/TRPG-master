@@ -995,9 +995,16 @@ class AdjudicationEngineService:
             payload = {"information_id": effect.information_id, "scope": effect.scope}
         elif isinstance(effect, SetVisibilityEffect):
             overrides = dict(state.visibility_overrides)
-            overrides[f"{effect.scope}:{actor_id}:{effect.target_kind}:{effect.target_id}"] = (
-                effect.visible
+            # Party scope must not be keyed by the acting actor, or no other
+            # actor could ever find the override again. Actor scope keeps the
+            # actor id and wins over the party entry when both exist
+            # (see RuleEngineService._override_allows).
+            key = (
+                f"actor:{actor_id}:{effect.target_kind}:{effect.target_id}"
+                if effect.scope == "actor"
+                else f"party:{effect.target_kind}:{effect.target_id}"
             )
+            overrides[key] = effect.visible
             state = state.model_copy(update={"visibility_overrides": overrides}, deep=True)
             event_type = "visibility.changed"
             payload = {

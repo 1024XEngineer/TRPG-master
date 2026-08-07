@@ -160,6 +160,20 @@ function isValidScene(value: unknown, sceneId: string): boolean {
   );
 }
 
+function isValidWorldState(value: unknown): boolean {
+  // Optional so a server that predates the `world` block still yields a usable
+  // view; the frontend treats a missing block as "no world facts yet".
+  if (value === undefined) return true;
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.elapsed_minutes === 'number' &&
+    (value.time_of_day === 'day' || value.time_of_day === 'night') &&
+    typeof value.core_resolved === 'boolean' &&
+    typeof value.ending_available === 'boolean' &&
+    (value.ending_id === null || typeof value.ending_id === 'string')
+  );
+}
+
 function isValidPlayerView(value: unknown): value is AgentPlayerView {
   if (!isRecord(value)) return false;
   const {
@@ -171,6 +185,7 @@ function isValidPlayerView(value: unknown): value is AgentPlayerView {
     revision,
     self_actor,
     scene,
+    world,
     known_information,
     checkpoint_options,
   } = value;
@@ -183,6 +198,7 @@ function isValidPlayerView(value: unknown): value is AgentPlayerView {
     typeof revision === 'string' &&
     isValidSelfActor(self_actor, actor_id) &&
     isValidScene(scene, scene_id) &&
+    isValidWorldState(world) &&
     Array.isArray(known_information) &&
     known_information.every(
       (information) =>

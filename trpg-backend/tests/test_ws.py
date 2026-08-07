@@ -189,6 +189,18 @@ class _WsCountingOpening:
         return await self._fake.generate(context)
 
 
+class _FailOnceActionPlanNarrator:
+    def __init__(self, delegate: ActionPlanNarrator) -> None:
+        self.delegate = delegate
+        self.calls = 0
+
+    async def narrate(self, context):
+        self.calls += 1
+        if self.calls == 1:
+            raise RuntimeError("temporary narrator outage")
+        return await self.delegate.narrate(context)
+
+
 @pytest.fixture
 def sync_client() -> TestClient:
     # 用同一个 app 实例的同步 TestClient——HTTP 部分照常发请求准备房间/角色
@@ -1773,6 +1785,67 @@ def test_single_action_pending_resumes_without_plan_run(
     ]
     assert len(conversation_narration) == 1
     assert "_turnCompletion" not in conversation_narration[0]["payload"]
+
+
+def test_action_plan_narrator_failure_retries_narration_without_replaying_steps(
+    sync_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    token = register_and_login(sync_client, "action_plan_narrator_retry")
+    room = create_room(sync_client, token)
+    advance_to_building(sync_client, room)
+    complete_character(sync_client, room["roomId"], room["reconnectToken"])
+    start_game(sync_client, room, token)
+    application = ws_controller.action_plan_turn_application
+    narrator = _FailOnceActionPlanNarrator(application._narrator)
+    monkeypatch.setattr(application, "_narrator", narrator)
+    action = {
+        "type": "action.plan.submit",
+        "playerId": room["playerId"],
+        "payload": {
+            "clientActionId": "plan-narrator-retry-246",
+            "utterance": "先观察房间，然后询问眼前的人",
+        },
+    }
+
+    with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
+        ws.send_json(
+            {
+                "type": "room.join",
+                "playerId": room["playerId"],
+                "payload": {"reconnectToken": room["reconnectToken"]},
+            }
+        )
+        ws.receive_json()
+        ws.receive_json()
+        receive_replayed_opening(ws)
+
+        ws.send_json(action)
+        failed, first_seen = receive_until(
+            ws,
+            lambda message: message.get("type") == "turn.failed",
+            limit=40,
+        )
+        assert failed["payload"]["code"] == "PLAN_NARRATOR_FAILED"
+        assert all(message.get("type") != "plan.completed" for message in first_seen)
+
+        ws.send_json(action)
+        completed, retry_seen = receive_until(
+            ws,
+            lambda message: message.get("message_type") == "turn.completed",
+            limit=40,
+        )
+        terminal, _ = receive_until(
+            ws,
+            lambda message: message.get("type") == "plan.completed",
+            limit=40,
+        )
+
+    assert narrator.calls == 2
+    assert completed["correlation_id"] == "plan-narrator-retry-246"
+    assert terminal["payload"]["correlationId"] == "plan-narrator-retry-246"
+    assert all(message.get("type") != "adjudication.pending" for message in retry_seen)
+
 
 
 def test_legacy_action_submit_is_blocked_while_plan_is_active(

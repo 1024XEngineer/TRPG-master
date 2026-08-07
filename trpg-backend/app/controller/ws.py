@@ -1078,6 +1078,33 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                                 ),
                                             ).model_dump(by_alias=True)
                                         )
+                            else:
+                                # No ActionPlan-driven pending decision — but a
+                                # standalone single-action check (not part of a
+                                # plan) has no room/player-scoped record the
+                                # client can rediscover on its own after a
+                                # refresh drops its local pendingAdjudication
+                                # state; look one up explicitly so reconnect
+                                # resurfaces it exactly like the plan case above.
+                                action_request_id = (
+                                    await adjudication_engine_service.find_active_action_for_player(
+                                        room_id=room_id,
+                                        player_id=bound_player_id,
+                                    )
+                                )
+                                if action_request_id is not None:
+                                    recovered = await action_plan_turn_application.resume_single(
+                                        room_id=room_id,
+                                        player_id=bound_player_id,
+                                        parent_action_id=action_request_id,
+                                    )
+                                    await _send_action_plan_result(
+                                        db,
+                                        websocket,
+                                        room_id,
+                                        bound_player_id,
+                                        recovered,
+                                    )
                         else:
                             return
                         continue
@@ -1167,6 +1194,10 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                             if (
                                 active_plan is not None
                                 and active_plan.parent_action_id != submit_payload.client_action_id
+                                and not (
+                                    active_plan.status == "needs_clarification"
+                                    and active_plan.player_id == bound_player_id
+                                )
                             ):
                                 await _send_error(
                                     websocket,
@@ -1197,6 +1228,15 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 result,
                             )
                         except Exception as exc:
+                            code, _, _ = _map_turn_error(exc)
+                            log_turn_failed(
+                                room_id=room_id,
+                                stage="行动计划",
+                                code=code,
+                                correlation_id=submit_payload.client_action_id,
+                                error_type=type(exc).__name__,
+                                error_reason=_turn_error_reason(exc),
+                            )
                             await _send_turn_failed(
                                 websocket,
                                 submit_payload.client_action_id,
@@ -1255,6 +1295,15 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 result,
                             )
                         except Exception as exc:
+                            code, _, _ = _map_turn_error(exc)
+                            log_turn_failed(
+                                room_id=room_id,
+                                stage="检定选择",
+                                code=code,
+                                correlation_id=choice.client_action_id,
+                                error_type=type(exc).__name__,
+                                error_reason=_turn_error_reason(exc),
+                            )
                             await _send_turn_failed(websocket, choice.client_action_id, exc)
                     elif event_type == "adjudication.post_roll":
                         choice = AdjudicationPostRollPayload.model_validate(raw_payload)
@@ -1300,6 +1349,15 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 result,
                             )
                         except Exception as exc:
+                            code, _, _ = _map_turn_error(exc)
+                            log_turn_failed(
+                                room_id=room_id,
+                                stage="检定后续",
+                                code=code,
+                                correlation_id=choice.client_action_id,
+                                error_type=type(exc).__name__,
+                                error_reason=_turn_error_reason(exc),
+                            )
                             await _send_turn_failed(websocket, choice.client_action_id, exc)
                     elif event_type == "action.plan.cancel":
                         cancel = ActionPlanCancelPayload.model_validate(raw_payload)
@@ -1318,6 +1376,15 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 result,
                             )
                         except Exception as exc:
+                            code, _, _ = _map_turn_error(exc)
+                            log_turn_failed(
+                                room_id=room_id,
+                                stage="取消行动计划",
+                                code=code,
+                                correlation_id=cancel.client_action_id,
+                                error_type=type(exc).__name__,
+                                error_reason=_turn_error_reason(exc),
+                            )
                             await _send_turn_failed(websocket, cancel.client_action_id, exc)
                     elif event_type == "action.submit":
                         try:
@@ -1558,11 +1625,22 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                     continue
     except WebSocketDisconnect:
         pass
-    except RuntimeError:
+    except RuntimeError as exc:
         # 广播可能先发现对端断开，使 send_json 把 application_state 标为
         # DISCONNECTED；随后当前连接的 receive_json 会抛 RuntimeError。
         # TestClient 的常规断连则通常直接抛 WebSocketDisconnect。
-        if websocket.application_state is not WebSocketState.DISCONNECTED:
+        #
+        # 还有一种真实出现过的情况：底层 TCP 连接已经断开（例如玩家在等回复
+        # 时刷新了页面），但 Starlette 的 application_state 要到下一次收到
+        # receive 事件才会被标记为 DISCONNECTED——这时候是我们主动往一个已经
+        # 关闭的 transport 上 send_json，直接从 uvloop 抛 RuntimeError（信息类似
+        # "unable to perform operation on <TCPTransport closed=True ...>"），
+        # application_state 这时候还看着像"已连接"。两种情况本质一样：这个连接
+        # 已经联系不上了，没有客户端能收到接下来想发的任何消息，按断线处理即可。
+        if (
+            websocket.application_state is not WebSocketState.DISCONNECTED
+            and "closed" not in str(exc).lower()
+        ):
             raise
     finally:
         manager.remove(room_id, websocket)

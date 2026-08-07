@@ -48,6 +48,15 @@ narrative_only。不得从 PlayerView 猜测隐藏 Information、模组结果或
 不得创建 runtime location/entity，不得直接推进时间。wait/rest 在领域能力尚未接入时
 必须返回不会伪造时间变化的 narrative_only。检定候选只能引用 self_actor.skills 中
 实际存在的技能；无法形成安全裁决时不得编造目标或效果。
+
+target.kind 决定 target.id 只能来自 PlayerView 的哪一个列表，两者必须配套，绝不能
+把某个列表里的 id 换一个 kind 使用：
+
+- kind=location：只能是 player_view.scene.id，或某个 available_exits[].destination
+  .scene_id；
+- kind=entity：只能是 player_view.scene.visible_entities[].id；
+- kind=actor：只能是 player_view.scene.visible_actors[].id 或 self_actor.id；
+- kind=information：只能是 player_view.known_information[].id。
 """.strip()
 
 _ACTION_PLAN_NARRATION_INSTRUCTIONS = """

@@ -851,6 +851,25 @@ export default function RoomPage() {
   const [pendingCheck, setPendingCheck] = useState<CheckRequestPayload | null>(null)
   const [pendingAdjudication, setPendingAdjudication] =
     useState<AdjudicationPendingPayload | null>(null)
+  /**
+   * 收起已经结算完的检定面板。
+   *
+   * 单动作（不属于任何 ActionPlan）走完检定后不会有 plan.* 事件，而
+   * `turn.completed` 被 SDK 用来兑现 submit 的 Promise、不会转发给订阅者——
+   * 于是"服务端 D100 · 失败"那块面板会一直留在页面上。留着的按钮还能再点，
+   * 第二次提交带的是同一个已经过期的 sourceRevision，服务端只能回
+   * SOURCE_REVISION_STALE。
+   *
+   * 权威叙事是这个动作确实结算完的信号，按 correlationId 精确匹配，不会误清掉
+   * 另一个仍在等玩家的检定。
+   */
+  const clearSettledAdjudication = useCallback((correlationId?: string | null) => {
+    // 开场叙事等没有 messageId 的推送不属于任何动作，不能拿来收面板。
+    if (!correlationId) return
+    setPendingAdjudication((current) =>
+      current?.correlationId === correlationId ? null : current,
+    )
+  }, [])
   const [activePlanId, setActivePlanId] = useState<string | null>(null)
   const [pendingCheckDice, setPendingCheckDice] = useState<PendingCheckDiceState | null>(null)
   const [playerView, setPlayerView] = useState<AgentPlayerView | null>(() => {
@@ -1047,6 +1066,7 @@ export default function RoomPage() {
         // 已经有文字在往外走，就不要再同时显示"正在思考"的点点了。
         setTyping(false)
         setProgressLabel(null)
+        clearSettledAdjudication(envelope.payload.messageId)
         setStreamingNarration((current) =>
           accumulateNarrationChunk(current, {
             messageId: conversationMessageId('narration.push', envelope.payload.messageId),
@@ -1057,6 +1077,7 @@ export default function RoomPage() {
       } else if (envelope.type === 'narration.push') {
         setTyping(false)
         setProgressLabel(null)
+        clearSettledAdjudication(envelope.payload.messageId)
         // 不在这里直接落地：权威消息比最后一个片段只晚到半毫秒，立刻接管会让
         // 刚开始的渐进展示当场被整段覆盖。入队，交给上面的 effect 按序裁决。
         setPendingNarrations((current) => [...current, envelope.payload])
@@ -1215,7 +1236,7 @@ export default function RoomPage() {
       setProgressLabel('守秘人正在生成开场叙事')
     }
     return off
-  }, [enqueueHostSpeech, handleHostSpeechSettingsUpdated, playerId, senderName])
+  }, [clearSettledAdjudication, enqueueHostSpeech, handleHostSpeechSettingsUpdated, playerId, senderName])
 
   const submitPlayerAction = (action: { clientActionId: string; utterance: string }) => {
     if (!playerId || suspended) return
@@ -1230,6 +1251,9 @@ export default function RoomPage() {
     void sdk.roomSocket.submitPlannedAction(playerId, action)
       .then((result) => {
         setPlayerView(result.player_view)
+        // 这个动作已经拿到权威结果，属于它的检定面板不能再留在页面上。比等
+        // narration 更早，也覆盖了叙事走重放而不是逐片推送的情况。
+        clearSettledAdjudication(action.clientActionId)
         setPendingAction((current) =>
           current?.clientActionId === action.clientActionId ? null : current
         )
@@ -2055,9 +2079,11 @@ export default function RoomPage() {
       <CheckWorkflowPanel
         decision={pendingDecisionForUi(pendingAdjudication)}
         checkRun={checkRunForUi(pendingAdjudication)}
+        busy={typing}
         onSelectSkill={(candidateId) => {
           if (!playerId || !pendingAdjudication?.pendingDecision) return
           const decision = pendingAdjudication.pendingDecision
+          setTyping(true)
           sdk.roomSocket.selectAdjudication(playerId, {
             clientActionId: pendingAdjudication.correlationId,
             requestId: randomActionId(),
@@ -2070,6 +2096,7 @@ export default function RoomPage() {
         onCancel={() => {
           if (!playerId || !pendingAdjudication?.pendingDecision) return
           const decision = pendingAdjudication.pendingDecision
+          setTyping(true)
           sdk.roomSocket.selectAdjudication(playerId, {
             clientActionId: pendingAdjudication.correlationId,
             requestId: randomActionId(),
@@ -2082,6 +2109,7 @@ export default function RoomPage() {
         onPostRollOption={(optionId, revisedMethod) => {
           if (!playerId || !pendingAdjudication?.checkRun) return
           const checkRun = pendingAdjudication.checkRun
+          setTyping(true)
           sdk.roomSocket.decidePostRoll(playerId, {
             clientActionId: pendingAdjudication.correlationId,
             requestId: randomActionId(),

@@ -89,6 +89,23 @@ class AdjudicationEngineService:
                 execution=execution,
             )
 
+    async def find_active_action_for_player(
+        self,
+        *,
+        room_id: str,
+        player_id: str,
+    ) -> str | None:
+        """Return the action_request_id of this player's one open check, if any.
+
+        Lets a reconnecting client discover a standalone single-action check it
+        never persisted an ID for client-side (unlike ActionPlan-driven checks,
+        which are already discoverable room-scoped via
+        ActionPlanOrchestrator.active_for_room).
+        """
+
+        async with self._store.transaction(room_id) as transaction:
+            return await transaction.find_active_action_for_player(player_id)
+
     async def recover_action(
         self,
         request: GetAdjudicationStatusRequest,

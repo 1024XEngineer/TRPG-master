@@ -229,6 +229,25 @@ class _InMemoryEngineTransaction(EngineTransaction):
         check_run = self._record.data.check_runs.get(check_id)
         return check_run.model_copy(deep=True) if check_run is not None else None
 
+    async def find_active_action_for_player(
+        self,
+        player_id: str,
+    ) -> str | None:
+        self._ensure_active()
+        for check_run in self._record.data.check_runs.values():
+            if (
+                check_run.player_id == player_id
+                and check_run.status == "awaiting_post_roll_decision"
+            ):
+                return check_run.action_request_id
+        for decision in self._record.data.pending_checks.values():
+            if (
+                decision.player_id == player_id
+                and decision.status == "awaiting_skill_choice"
+            ):
+                return decision.action_request_id
+        return None
+
     async def commit(
         self,
         *,

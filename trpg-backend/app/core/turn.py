@@ -168,20 +168,36 @@ class EmptyRecentHistorySource:
 
 
 @dataclass(frozen=True)
-class TurnApplication:
-    """无 Room 内存状态的单回合应用入口。"""
+class SessionViewApplication:
+    """房间视图与开场叙事——与"提交一个动作"无关的那半边。
+
+    拆出来是为了让 #226 删除 v2 动作路径时，不会把这两件 v3 同样需要的事一起带走：
+    `room.join` 要推当前视图，`game.start` 要生成开场，两者都只依赖投影器和开场模型，
+    不碰 RuleKernel、Checkpoint 或 ActionRequest。
+    """
 
     store: EngineStore
     engine: RuleEngineService
-    intent_resolver: HostAgentIntentResolver
-    narration_model: NarrationModelPort
     opening_narration_model: OpeningNarrationModelPort
     host_metadata: HostModelMetadata
     opening_narration_mode: Literal["model", "template"]
     opening_narration_timeout_seconds: float
-    recent_history_source: RecentHistorySource
-    recent_history_budget: RecentHistoryBudget
-    recent_history_enabled: bool
+
+    async def _load_turn_scope(
+        self,
+        room_id: str,
+        player_id: str,
+    ) -> str:
+        async with self.store.transaction(room_id) as transaction:
+            runtime = await transaction.load_runtime()
+        actor_ids = [
+            actor_id
+            for actor_id, actor in runtime.game_state.actors.items()
+            if actor.player_id == player_id
+        ]
+        if len(actor_ids) != 1:
+            raise ActorResolutionError("当前玩家没有唯一绑定的局内 Actor")
+        return actor_ids[0]
 
     async def resolve_actor_id(self, room_id: str, player_id: str) -> str:
         return await self._load_turn_scope(room_id, player_id)
@@ -248,21 +264,16 @@ class TurnApplication:
             failure_category=failure_category,
         )
 
-    async def _load_turn_scope(
-        self,
-        room_id: str,
-        player_id: str,
-    ) -> str:
-        async with self.store.transaction(room_id) as transaction:
-            runtime = await transaction.load_runtime()
-        actor_ids = [
-            actor_id
-            for actor_id, actor in runtime.game_state.actors.items()
-            if actor.player_id == player_id
-        ]
-        if len(actor_ids) != 1:
-            raise ActorResolutionError("当前玩家没有唯一绑定的局内 Actor")
-        return actor_ids[0]
+
+@dataclass(frozen=True)
+class TurnApplication(SessionViewApplication):
+    """v2 单回合动作入口（#226 将随 Checkpoint 运行时一并移除）。"""
+
+    intent_resolver: HostAgentIntentResolver
+    narration_model: NarrationModelPort
+    recent_history_source: RecentHistorySource
+    recent_history_budget: RecentHistoryBudget
+    recent_history_enabled: bool
 
     async def handle(
         self,

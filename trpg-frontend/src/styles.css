@@ -183,7 +183,7 @@
 .home-scene__actions {
   position: absolute;
   top: clamp(14.5rem, 33vh, 18rem);
-  left: 8%;
+  left: 10%;
   z-index: 4;
   display: flex;
   width: 46%;
@@ -232,7 +232,7 @@
 
 .home-scene__cat {
   position: absolute;
-  right: -13%;
+  right: -20%;
   bottom: 6%;
   z-index: 6;
   width: 80%;
@@ -270,12 +270,23 @@
   position: relative;
   isolation: isolate;
   width: 100%;
-  height: 100%;
-  min-height: 0;
+  min-height: 100%;
   overflow: hidden;
   color: #2b1b0f;
   background: #100a06;
   font-family: Georgia, 'STKaiti', 'KaiTi', 'Songti SC', 'STSong', serif;
+}
+
+/*
+ * 背景原图是 853 × 1844。所有档案图片、输入控件和概览文字都放在同一个
+ * 等比画布中：窄屏只按宽度整体缩放，短屏交给 PhoneLayout 滚动，避免背景
+ * 被纵向压缩后，DOM 文字与仍按宽度缩放的图片边框产生错位。
+ */
+.create-room-scene__artboard {
+  position: relative;
+  container-type: inline-size;
+  width: 100%;
+  aspect-ratio: 853 / 1844;
 }
 
 .create-room-scene button,
@@ -377,14 +388,14 @@
 }
 
 .create-room-scene__room-name-label {
-  top: calc(23.4% + 2px);
+  top: calc(23.4% + 0.5cqw);
   left: 11%;
   display: flex;
   align-items: center;
   justify-content: center;
   width: 24%;
   height: 6.5%;
-  font-size: clamp(14px, 4vw, 18px);
+  font-size: clamp(13px, 4.5cqw, 20px);
   text-align: center;
 }
 
@@ -400,7 +411,7 @@
   border-radius: 4px;
   color: #412a18;
   background: transparent;
-  font-size: clamp(17px, 4.8vw, 22px);
+  font-size: clamp(15px, 4.8cqw, 22px);
   font-weight: 600;
   letter-spacing: 0.04em;
   text-align: center;
@@ -425,7 +436,7 @@
   justify-content: center;
   width: 24%;
   height: 6.9%;
-  font-size: clamp(14px, 4vw, 18px);
+  font-size: clamp(13px, 4.5cqw, 20px);
   text-align: center;
 }
 
@@ -434,7 +445,7 @@
   left: 15.3%;
   max-width: 20%;
   color: rgb(63 39 21 / 70%);
-  font-size: clamp(10px, 2.9vw, 13px);
+  font-size: clamp(9px, 2.9cqw, 13px);
   font-weight: 500;
   line-height: 1.2;
   letter-spacing: 0.03em;
@@ -446,7 +457,7 @@
   left: 39.2%;
   z-index: 3;
   display: grid;
-  grid-template-columns: minmax(32px, 8vw) minmax(72px, 1fr) minmax(32px, 8vw);
+  grid-template-columns: minmax(26px, 8cqw) minmax(58px, 1fr) minmax(26px, 8cqw);
   align-items: center;
   width: 42.6%;
   height: 6.9%;
@@ -454,12 +465,14 @@
 }
 
 .create-room-scene__player-control > button {
+  position: relative;
+  z-index: 2;
   display: flex;
   align-items: center;
   justify-content: center;
   justify-self: center;
-  width: clamp(30px, 8vw, 35px);
-  height: clamp(30px, 4.3vh, 36px);
+  width: clamp(26px, 8cqw, 35px);
+  height: clamp(26px, 8cqw, 35px);
   padding: 0;
   border: 0;
   border-radius: 3px;
@@ -473,16 +486,17 @@
   width: 65%;
   height: 65%;
   stroke-width: 2;
+  pointer-events: none;
 }
 
 .create-room-scene__player-control > button:first-child {
   position: relative;
-  left: -6px;
+  left: -0.25cqw;
 }
 
 .create-room-scene__player-control > button:last-child {
   position: relative;
-  right: -12px;
+  right: -1cqw;
 }
 
 .create-room-scene__player-control > button:active:not(:disabled) {
@@ -497,24 +511,25 @@
 
 .create-room-scene__player-value {
   position: relative;
-  left: calc(0.3vw + 11.5px);
-  top: calc(-0.3vh + 2px);
+  left: 6.5cqw;
+  top: -0.1cqw;
   transform: translateX(-36%);
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 0.75rem;
+  gap: 3cqw;
   color: #382111;
-  font-size: clamp(15px, 4.5vw, 20px);
+  font-size: clamp(13px, 4.5cqw, 20px);
   font-weight: 700;
+  pointer-events: none;
 }
 
 .create-room-scene__player-value input {
   position: relative;
-  top: 0.125rem;
-  left: calc(18% + 3px);
-  width: 2.2rem;
-  height: 2rem;
+  top: 0.5cqw;
+  left: calc(18% + 0.77cqw);
+  width: 9cqw;
+  height: 8.2cqw;
   padding: 0;
   border: 0;
   color: inherit;
@@ -522,10 +537,11 @@
   box-shadow: none;
   font-family: 'Courier New', 'SF Mono', monospace;
   font-variant-numeric: tabular-nums;
-  line-height: 2rem;
+  line-height: 8.2cqw;
   text-align: center;
   font-weight: inherit;
   appearance: textfield;
+  pointer-events: auto;
 }
 
 .create-room-scene__player-value input::-webkit-inner-spin-button,
@@ -576,7 +592,7 @@
   left: 24%;
   width: 63%;
   color: #2b1b0f;
-  font-size: clamp(20px, 5.8vw, 26px);
+  font-size: clamp(17px, 5.8cqw, 26px);
   font-weight: 700;
   line-height: 1;
   letter-spacing: 0.04em;
@@ -638,7 +654,7 @@
   height: 15.8%;
   margin: 0;
   color: rgb(52 31 16 / 88%);
-  font-size: clamp(11px, 3.6vw, 17px);
+  font-size: clamp(11px, 4cqw, 18px);
   font-weight: 600;
   letter-spacing: 0.08em;
   pointer-events: auto;
@@ -662,7 +678,7 @@
 }
 
 .create-room-scene__summary-list > div:nth-child(5) {
-  top: calc(9% + 1px);
+  top: calc(9% + 0.25cqw);
 }
 
 .create-room-scene__summary-list dt,
@@ -726,7 +742,7 @@
   border-radius: 999px;
   color: #f1d39a;
   background: rgb(45 25 12 / 88%);
-  font-size: clamp(10px, 3vw, 13px);
+  font-size: clamp(9px, 3cqw, 13px);
   font-weight: 700;
   letter-spacing: 0.08em;
   transform: translate(-50%, -50%);
@@ -752,7 +768,7 @@
   color: #5d2118;
   background: rgb(221 184 127 / 92%);
   box-shadow: 0 2px 8px rgb(0 0 0 / 20%);
-  font-size: clamp(9px, 2.8vw, 12px);
+  font-size: clamp(8px, 2.8cqw, 12px);
   font-weight: 700;
   text-align: center;
 }
@@ -786,7 +802,7 @@
   }
 
   .home-scene__cat {
-    right: -13%;
+    right: -20%;
     bottom: 3%;
     width: 76%;
   }
@@ -796,22 +812,6 @@
     opacity: 0.72;
   }
 
-  .create-room-scene__room-name-label,
-  .create-room-scene__player-label {
-    font-size: 11px;
-  }
-
-  .create-room-scene__room-name-input {
-    font-size: 12px;
-  }
-
-  .create-room-scene__summary-list {
-    font-size: 10px;
-  }
-
-  .create-room-scene__player-hint {
-    font-size: 8px;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {

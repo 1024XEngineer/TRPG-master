@@ -111,6 +111,7 @@ export default function CreateRoomPage() {
 
   return (
     <div className="create-room-scene animate-screen-in">
+      <div className="create-room-scene__artboard">
       <img
         className="create-room-scene__background"
         src="/assets/rooms/create/background.webp"
@@ -313,6 +314,7 @@ export default function CreateRoomPage() {
         <img src="/assets/rooms/create/create-button.webp" alt="" aria-hidden="true" />
         {creating && <span>创建中…</span>}
       </button>
+      </div>
     </div>
   )
 }

@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { Eye, EyeOff, LockKeyhole, UserRound } from 'lucide-react'
 import { register } from '@/services/auth'
 import { useAuthStore } from '@/stores/auth-store'
 import { friendlyErrorMessage } from '@/services/api-client'
-import AuthHeader from './AuthHeader'
+import AuthPageLayout from './AuthPageLayout'
 
-// 纯注册页——从 /login 拆出来，独立路由 /login/register。
+// 纯注册页——与登录页平级，使用独立路由 /auth/register。
 export default function RegisterPage() {
   const navigate = useNavigate()
   const isLoggedIn = useAuthStore((s) => s.isLoggedIn)
@@ -14,6 +15,7 @@ export default function RegisterPage() {
   const [account, setAccount] = useState('')
   const [password, setPassword] = useState('')
   const [nickname, setNickname] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -46,56 +48,56 @@ export default function RegisterPage() {
   if (isLoggedIn) return null
 
   return (
-    <div className="animate-screen-in">
-      <AuthHeader />
-
-      <div className="px-5 flex flex-col gap-2.5">
-        <div className="flex gap-2 mb-1">
-          <button
-            onClick={() => navigate('/auth/login')}
-            className="flex-1 py-2 text-sm font-semibold rounded-sm transition-all bg-card border border-border-mid text-text-muted"
-          >
-            登录
-          </button>
-          <button className="flex-1 py-2 text-sm font-semibold rounded-sm transition-all bg-brass text-white">
-            注册
-          </button>
-        </div>
-
+    <AuthPageLayout mode="register" loading={loading} error={error} onSubmit={submit}>
+      <label className="auth-field auth-field--account">
+        <UserRound className="auth-field__icon" aria-hidden="true" />
+        <span className="sr-only">账号</span>
         <input
           value={account}
           onChange={(e) => setAccount(e.target.value)}
           placeholder="账号"
-          className="w-full px-3.5 py-2.5 rounded-sm bg-input border border-border-light text-text-primary text-[15px] outline-none focus:border-brass"
+          autoComplete="username"
+          disabled={loading}
+          aria-describedby={error ? 'auth-form-error' : undefined}
         />
+      </label>
+
+      <label className="auth-field auth-field--password">
+        <LockKeyhole className="auth-field__icon" aria-hidden="true" />
+        <span className="sr-only">密码</span>
         <input
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          type="password"
+          type={showPassword ? 'text' : 'password'}
           placeholder="密码"
-          className="w-full px-3.5 py-2.5 rounded-sm bg-input border border-border-light text-text-primary text-[15px] outline-none focus:border-brass"
+          autoComplete="new-password"
+          disabled={loading}
+          aria-describedby={error ? 'auth-form-error' : undefined}
         />
+        <button
+          type="button"
+          className="auth-field__password-toggle"
+          onClick={() => setShowPassword((visible) => !visible)}
+          disabled={loading}
+          aria-label={showPassword ? '隐藏密码' : '显示密码'}
+          aria-pressed={showPassword}
+        >
+          {showPassword ? <EyeOff aria-hidden="true" /> : <Eye aria-hidden="true" />}
+        </button>
+      </label>
+
+      <label className="auth-field auth-field--nickname">
+        <UserRound className="auth-field__icon" aria-hidden="true" />
+        <span className="sr-only">昵称</span>
         <input
           value={nickname}
           onChange={(e) => setNickname(e.target.value)}
           placeholder="昵称"
-          className="w-full px-3.5 py-2.5 rounded-sm bg-input border border-border-light text-text-primary text-[15px] outline-none focus:border-brass"
-        />
-
-        {error && <p className="text-xs text-[#c04040] px-1">{error}</p>}
-
-        <button
-          onClick={submit}
+          autoComplete="nickname"
           disabled={loading}
-          className="flex items-center justify-center gap-2 px-6 py-3.5 w-full rounded-sm text-sm font-semibold cursor-pointer transition-all duration-150 border-none font-sans active:scale-[0.97] bg-brass text-white active:bg-brass-dark disabled:opacity-60"
-        >
-          {loading ? '处理中…' : '注册并进入'}
-        </button>
-      </div>
-
-      <p className="text-center pt-6 text-text-dim text-[11px]">
-        AI桌游主持人 © 2026
-      </p>
-    </div>
+          aria-describedby={error ? 'auth-form-error' : undefined}
+        />
+      </label>
+    </AuthPageLayout>
   )
 }

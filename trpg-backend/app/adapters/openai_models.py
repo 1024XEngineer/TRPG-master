@@ -87,6 +87,35 @@ keeper_capabilities 时，只能使用 enter_location 与 narrative_only。
 同一次裁决可以原子地提交多个效果（例如"搜出日记"= reveal_information +
 change_entity_state）；但不要为了内部写入次数把一个意图拆成多步。需要检定的动作把
 效果分别放进 success_effects 与 failure_effects，失败时不要发放成功才配得到的信息。
+
+## 模组规则优先（keeper_capabilities.rule_candidates）
+
+`rule_candidates` 是引擎按玩家当前所在位置筛出来的、**本次有可能适用的模组规则**。
+它比上面那套通用效果更权威：只要玩家这次行动落在某条候选规则的范围内，就必须走规则，
+不要自己拼效果。判断依据是候选上的这几个字段：
+
+- `semantic_hints`：这条规则想捕捉的说法（例如"观察""用侦查"）；
+- `action_families`：动作大类（observe / search / talk …）；
+- `target_kinds` 与 `target_ids`：这条规则针对的对象，`target_ids` 里的 id 通常就是
+  玩家话里指的那个实体；
+- `options[]`：这条规则给出的**候选做法**，每项只有一个不透明的 `id` 和它的
+  `semantic_hints`。
+
+命中时这样返回：
+
+1. `rule_decision = {"rule_id": <候选的 rule_id>, "option_id": <options[] 里最贴合玩家
+   说法的那个 id>}`。两个 id 都必须从 `rule_candidates` 里逐字复制，不得改写或自造。
+2. `target` 用该候选的 `target_ids[0]`（`kind` 取对应的 `target_kinds`）。
+3. `check` 用 `RequiredAdjudicationCheck`，候选项就是这条规则的 `options[]`——
+   `candidate_id` 与 `skill_id` 都填 option 的 `id`。
+4. `success_effects` 与 `failure_effects` **一律留空**。点名一条规则就等于把后果的
+   所有权交给了它：规则自己拥有检定结果与状态变更，你另外写的效果会被忽略。
+
+`options[]` 里的 id 是不透明的——你不知道也不需要知道每个选项会导致什么。你的职责只
+是判断"玩家这句话在语义上对应哪一个选项"，后果由已发布的规则决定。这正是规则与自由
+发挥的分界：模组作者预写好的剧情走规则，规则没覆盖的日常互动才走上面那套通用效果。
+
+只有在没有任何候选规则匹配时，才回到通用效果或 narrative_only。
 """.strip()
 
 _ACTION_PLAN_NARRATION_INSTRUCTIONS = """

@@ -166,7 +166,8 @@ function isValidWorldState(value: unknown): boolean {
   if (value === undefined) return true;
   if (!isRecord(value)) return false;
   return (
-    typeof value.elapsed_minutes === 'number' &&
+    typeof value.day_index === 'number' &&
+    typeof value.hour_of_day === 'number' &&
     (value.time_of_day === 'day' || value.time_of_day === 'night') &&
     typeof value.core_resolved === 'boolean' &&
     typeof value.ending_available === 'boolean' &&

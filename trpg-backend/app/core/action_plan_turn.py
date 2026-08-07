@@ -995,26 +995,47 @@ def _match_rule_candidate(capabilities, text: str, target_id: str | None):
     the player-safe hints the Match View published — it never reads the module.
     Ambiguity yields nothing: guessing between two rules is exactly the mistake
     a real Agent would be asked not to make.
+
+    Option hints have to participate in that judgement, not just candidate hints.
+    In the published fixture every rule aimed at the same NPC carries that NPC's
+    name as its candidate hint, and the word that actually tells them apart
+    （"侦查" / "贿赂" / "威吓"）lives on the options. Scoring candidate hints alone
+    therefore made all four caretaker rules tie on every utterance, and the tie
+    was resolved as "no match" — the Fake could never reach a rule at all.
     """
 
     if capabilities is None:
         return None, None
-    matches = []
+    scored = []
     for candidate in capabilities.rule_candidates:
         if target_id is not None and candidate.target_ids and target_id not in candidate.target_ids:
             continue
-        hints = [hint for hint in candidate.semantic_hints if hint and hint in text]
-        if not hints:
+        candidate_hits = [hint for hint in candidate.semantic_hints if hint and hint in text]
+        best_option = None
+        best_option_hit = 0
+        for option in candidate.options:
+            hits = [hint for hint in option.semantic_hints if hint and hint in text]
+            if hits and max(len(hint) for hint in hits) > best_option_hit:
+                best_option = option
+                best_option_hit = max(len(hint) for hint in hits)
+        if not candidate_hits and best_option is None:
             continue
-        matches.append((max(len(hint) for hint in hints), candidate.rule_id, candidate))
-    if len(matches) != 1:
+        # Option evidence outranks candidate evidence: sibling rules share the
+        # target's name, so only the option words carry discriminating power.
+        score = (
+            best_option_hit,
+            max((len(hint) for hint in candidate_hits), default=0),
+        )
+        scored.append((score, candidate, best_option))
+    if not scored:
         return None, None
-    candidate = matches[0][2]
-    # Options are opaque: prefer one whose hints the player actually used, else
-    # fall back to the first declared one.
-    for option in candidate.options:
-        if any(hint and hint in text for hint in option.semantic_hints):
-            return candidate, option
+    best = max(score for score, _, _ in scored)
+    finalists = [(candidate, option) for score, candidate, option in scored if score == best]
+    if len(finalists) != 1:
+        return None, None
+    candidate, option = finalists[0]
+    if option is not None:
+        return candidate, option
     return candidate, candidate.options[0] if candidate.options else None
 
 

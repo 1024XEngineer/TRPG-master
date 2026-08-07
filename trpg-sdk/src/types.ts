@@ -325,7 +325,9 @@ export interface AgentKnownInformation {
 }
 
 export interface AgentWorldState {
-  elapsed_minutes: number;
+  /** 离散世界时间（#245）：时间只在授权的时间点之间跳转，不按分钟流逝。 */
+  day_index: number;
+  hour_of_day: number;
   time_of_day: 'day' | 'night';
   core_resolved: boolean;
   ending_available: boolean;

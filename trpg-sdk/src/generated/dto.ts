@@ -1242,7 +1242,8 @@ export interface VisibleEntity {
  * side of the projector.
  */
 export interface WorldStateView {
-  elapsed_minutes?: number;
+  day_index?: number;
+  hour_of_day?: number;
   time_of_day?: "day" | "night";
   core_resolved?: boolean;
   ending_available?: boolean;

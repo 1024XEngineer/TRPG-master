@@ -56,7 +56,8 @@ const completedEvent = {
         available_exits: [],
       },
       world: {
-        elapsed_minutes: 0,
+        day_index: 0,
+        hour_of_day: 12,
         time_of_day: 'night',
         core_resolved: false,
         ending_available: false,

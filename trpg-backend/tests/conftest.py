@@ -26,7 +26,7 @@ from app.core.action_plan_turn import build_action_plan_turn_application
 from app.core.config import Settings
 from app.core.db import Base, get_db
 from app.core.seed import ensure_seed_content
-from app.core.turn import build_turn_application
+from app.core.turn import build_session_view_application, build_turn_application
 from app.main import app
 from app.service.paper_chase_loader import load_paper_chase
 from tests.content_fixtures import publish_multiplayer_module
@@ -67,6 +67,11 @@ app.dependency_overrides[get_db] = override_get_db
 # 去空的真实库里查 player，必然查不到而关连接。
 ws_controller.async_session_factory = TestSessionLocal  # type: ignore[assignment]
 _test_turn_store = SqlAlchemyEngineStore(TestSessionLocal)
+ws_controller.session_view_application = build_session_view_application(  # type: ignore[assignment]
+    _test_turn_store,
+    RuleEngineService(_test_turn_store),
+    settings=Settings(host_model_provider="fake", opening_narration_mode="model"),
+)
 ws_controller.turn_application = build_turn_application(
     _test_turn_store,
     RuleEngineService(_test_turn_store),

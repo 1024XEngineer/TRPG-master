@@ -71,7 +71,12 @@ from app.core.action_plan_turn import (
 )
 from app.core.db import async_session_factory
 from app.core.engine import adjudication_engine_service
-from app.core.turn import ActorResolutionError, PreparedTurn, turn_application
+from app.core.turn import (
+    ActorResolutionError,
+    PreparedTurn,
+    session_view_application,
+    turn_application,
+)
 from app.core.turn_events import (
     TurnEvent,
     TurnFailed,
@@ -437,7 +442,7 @@ async def _recover_persisted_turn_narration(
             claimed_fact_ids=completion.claimed_fact_ids,
             suggested_actions=completion.suggested_actions,
         )
-    view = await turn_application.current_player_view(
+    view = await session_view_application.current_player_view(
         room_id=room_id,
         player_id=player_id,
     )
@@ -573,7 +578,7 @@ async def _ensure_opening_narration(
     if existing is not None:
         return False
 
-    if turn_application.opening_narration_mode == "model":
+    if session_view_application.opening_narration_mode == "model":
         started = OpeningStartedPayload(message_id=_OPENING_MESSAGE_ID)
         await manager.broadcast(
             room_id,
@@ -583,7 +588,7 @@ async def _ensure_opening_narration(
             ).model_dump(by_alias=True),
         )
 
-    generated = await turn_application.generate_opening(player_view)
+    generated = await session_view_application.generate_opening(player_view)
     narration = NarrationPushPayload(
         message_id=_OPENING_MESSAGE_ID,
         text=normalize_narration_text(generated.narration.text),
@@ -1006,7 +1011,7 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                             bound_player_id = player_id
                             assert bound_player_id is not None
                             try:
-                                current_view = await turn_application.current_player_view(
+                                current_view = await session_view_application.current_player_view(
                                     room_id=room_id,
                                     player_id=bound_player_id,
                                 )
@@ -1136,7 +1141,7 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                         ) as exc:
                             await _send_error(websocket, "CONFLICT", str(exc))
                             continue
-                        initial_view = await turn_application.current_player_view(
+                        initial_view = await session_view_application.current_player_view(
                             room_id=room_id,
                             player_id=bound_player_id,
                         )

@@ -953,16 +953,43 @@ def _configured_models(
         )
 
 
+def build_session_view_application(
+    store: EngineStore,
+    engine: RuleEngineService,
+    *,
+    settings=None,
+) -> SessionViewApplication:
+    """房间视图与开场叙事，与 v2 动作路径无关。
+
+    复用 build_turn_application 的装配结果再取其中一半：开场模型和 provider 元数据
+    的选择逻辑只应该有一份，等 v2 动作路径删掉之后这里会变成直接装配。
+    """
+
+    full = build_turn_application(store, engine, settings=settings)
+    return SessionViewApplication(
+        store=full.store,
+        engine=full.engine,
+        opening_narration_model=full.opening_narration_model,
+        host_metadata=full.host_metadata,
+        opening_narration_mode=full.opening_narration_mode,
+        opening_narration_timeout_seconds=full.opening_narration_timeout_seconds,
+    )
+
+
 turn_application = build_turn_application(
     engine_store,
     rule_engine_service,
     recent_history_source=SqlAlchemyRecentHistorySource(async_session_factory),
 )
+session_view_application = build_session_view_application(engine_store, rule_engine_service)
 
 __all__ = [
     "ActorResolutionError",
     "OpeningGenerationResult",
+    "SessionViewApplication",
     "TurnApplication",
+    "build_session_view_application",
     "build_turn_application",
+    "session_view_application",
     "turn_application",
 ]

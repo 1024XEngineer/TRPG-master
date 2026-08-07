@@ -602,11 +602,12 @@ def test_room_join_replays_persisted_opening_without_regenerating(
     advance_to_building(sync_client, room)
     complete_character(sync_client, room["roomId"], room["reconnectToken"])
     opening_model = _WsCountingOpening()
+    # 开场叙事现在由 session_view_application 负责（与 v2 动作路径已拆开）。
     monkeypatch.setattr(
         ws_controller,
-        "turn_application",
+        "session_view_application",
         replace(
-            ws_controller.turn_application,
+            ws_controller.session_view_application,
             opening_narration_model=opening_model,
         ),
     )
@@ -646,11 +647,12 @@ def test_invalid_opening_model_falls_back_after_room_enters_in_game(
     room = create_room(sync_client, token)
     advance_to_building(sync_client, room)
     complete_character(sync_client, room["roomId"], room["reconnectToken"])
+    # 开场叙事现在由 session_view_application 负责（与 v2 动作路径已拆开）。
     monkeypatch.setattr(
         ws_controller,
-        "turn_application",
+        "session_view_application",
         replace(
-            ws_controller.turn_application,
+            ws_controller.session_view_application,
             opening_narration_model=_WsMissingParticipantOpening(),
         ),
     )

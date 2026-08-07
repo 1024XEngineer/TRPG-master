@@ -296,7 +296,11 @@ describe('CharacterPage', () => {
     expect(mockCharacterApi.saveCharacter).toHaveBeenCalledWith(
       'room-1',
       'draft-1',
-      expect.objectContaining({ name: '玩家调查员', gender: '女' }),
+      expect.objectContaining({
+        name: '玩家调查员',
+        gender: '女',
+        equipment: ['旧相机'],
+      }),
     )
   })
 

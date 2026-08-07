@@ -927,7 +927,7 @@ export default function CharacterPage() {
       derived: { hp: finalDerived.hp, san: finalDerived.san, mp: finalDerived.mp },
       skillValues: skillFinalValues,
       occupationChoiceSkillIds: generatedChoiceIds,
-      equipment: (generated.equipment ?? []).join('、'),
+      equipment: generated.equipment ?? [],
       occupationName: generated.occupation ?? generatedOccupation?.name ?? null,
       background: generated.background ?? '',
       notes: generated.notes ?? '',

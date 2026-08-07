@@ -5,10 +5,6 @@ import unittest
 from pathlib import Path
 
 from collaboration_framework.contracts import (
-    ActionRequest,
-    Intent,
-    MatchedTarget,
-    ModuleCheck,
     ModuleContent,
     PlayerInput,
 )
@@ -17,7 +13,6 @@ from collaboration_framework.engine import (
     GameState,
     InMemoryEngineStore,
     RuleEngineService,
-    RuleKernel,
 )
 from collaboration_framework.host.application import PlayerViewProjector
 
@@ -279,56 +274,3 @@ class PaperChaseVisibilityTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, serialized)
 
-    async def test_observe_caretaker_failure_and_success_projection(self) -> None:
-        async def execute(outcome: str):
-            state = self.state("cemetery")
-            store = InMemoryEngineStore()
-            store.register_room(module_content=self.module, initial_state=state)
-            service = RuleEngineService(
-                store,
-                kernel=RuleKernel(
-                    lambda _request, _checkpoint: outcome,
-                ),
-            )
-            player_input = PlayerInput(
-                room_id=state.room_id,
-                player_id="player",
-                actor_id="investigator",
-                client_action_id=f"observe-{outcome}",
-                utterance="观察看守",
-            )
-            before = await service.read(player_input)
-            await service.execute(
-                ActionRequest(
-                    request_id=f"observe-{outcome}",
-                    room_id=state.room_id,
-                    player_id="player",
-                    actor_id="investigator",
-                    source_view_revision=before.revision,
-                    intent=Intent(
-                        kind="action",
-                        verb="observe",
-                        target=MatchedTarget(id="melodias"),
-                        check=ModuleCheck(
-                            checkpoint_id="observe_caretaker",
-                            proposed_skills=("spot-hidden",),
-                        ),
-                        summary="观察墓地看守",
-                    ),
-                )
-            )
-            return store.inspect_state(state.room_id), await service.read(player_input)
-
-        failed_state, failed_view = await execute("failure")
-        self.assertFalse(failed_state.entities["melodias"]["bottle_noticed"])
-        self.assertEqual(
-            failed_view.scene.visible_entities[0].narrative_details,
-            (),
-        )
-
-        success_state, success_view = await execute("success")
-        self.assertTrue(success_state.entities["melodias"]["bottle_noticed"])
-        self.assertEqual(
-            self.ids(success_view.scene.visible_entities[0].narrative_details),
-            {"melodias_pocket_bottle"},
-        )

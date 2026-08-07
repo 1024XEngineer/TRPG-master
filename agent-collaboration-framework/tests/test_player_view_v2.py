@@ -7,14 +7,9 @@ import unittest
 from pathlib import Path
 
 from collaboration_framework.contracts import (
-    ActionRequest,
-    ContractError,
-    DefaultCheck,
-    Intent,
     MatchedTarget,
     ModuleCheck,
     ModuleContent,
-    NoCheck,
     PlayerInput,
     PlayerViewScope,
 )
@@ -24,14 +19,11 @@ from collaboration_framework.engine import (
     GameState,
     InMemoryEngineStore,
     RuleEngineService,
-    RuleKernel,
-    SequenceDiceSource,
 )
 from collaboration_framework.host.adapters.fakes import FakeIntentModel
 from collaboration_framework.host.application import (
     IntentParser,
     PlayerViewProjector,
-    validate_intent_against_view,
 )
 from collaboration_framework.host.schemas import IntentContext, RecentTurnContext
 
@@ -252,13 +244,7 @@ class PlayerViewV2Tests(unittest.IsolatedAsyncioTestCase):
             module_content=self.module,
             initial_state=self.state,
         )
-        self.service = RuleEngineService(
-            self.store,
-            kernel=RuleKernel(
-                dice_source=SequenceDiceSource([30]),
-                allow_legacy_missing_skill=False,
-            ),
-        )
+        self.service = RuleEngineService(self.store)
 
     async def test_projection_is_complete_revision_bound_and_player_safe(self) -> None:
         scope = PlayerViewScope(
@@ -358,111 +344,6 @@ class PlayerViewV2Tests(unittest.IsolatedAsyncioTestCase):
             {item.id for item in other.known_information},
         )
 
-    async def test_available_exit_is_a_trusted_target_and_moves_by_safe_id(
-        self,
-    ) -> None:
-        view = await PlayerViewProjector(self.service).project(player_input())
-        intent = Intent(
-            kind="action",
-            verb="go",
-            target=MatchedTarget(id="north_door"),
-            check=NoCheck(),
-            summary="从北侧门离开",
-        )
-        context = intent_context(
-            player_input=player_input(utterance="从北侧门离开"),
-            player_view=view,
-        )
-        self.assertEqual(validate_intent_against_view(intent, context), intent)
-
-        result = await self.service.execute(
-            ActionRequest(
-                request_id="move-north",
-                room_id="room_01",
-                player_id="player_01",
-                actor_id="pc_1",
-                source_view_revision=view.revision,
-                intent=intent,
-            )
-        )
-        self.assertEqual(result.outcome, "success")
-        self.assertEqual(self.store.inspect_state("room_01").scene_id, "garden")
-
-    async def test_empty_exits_derive_every_other_scene_as_free_travel(self) -> None:
-        module = route_module([])
-        store = InMemoryEngineStore()
-        store.register_room(module_content=module, initial_state=self.state)
-        service = RuleEngineService(store)
-        view = await PlayerViewProjector(service).project(player_input())
-
-        self.assertEqual(
-            [(item.id, item.name) for item in view.scene.available_exits],
-            [("garden", "花园"), ("attic", "阁楼")],
-        )
-        intent = Intent(
-            kind="action",
-            verb="go",
-            target=MatchedTarget(id="attic"),
-            check=NoCheck(),
-            summary="前往阁楼",
-        )
-        context = intent_context(
-            player_input=player_input(utterance="前往阁楼"),
-            player_view=view,
-        )
-        self.assertEqual(validate_intent_against_view(intent, context), intent)
-
-        result = await service.execute(
-            ActionRequest(
-                request_id="move-attic",
-                room_id="room_01",
-                player_id="player_01",
-                actor_id="pc_1",
-                source_view_revision=view.revision,
-                intent=intent,
-            )
-        )
-        self.assertEqual(result.outcome, "success")
-        self.assertEqual(store.inspect_state("room_01").scene_id, "attic")
-
-    async def test_non_empty_exits_only_allow_declared_destinations(self) -> None:
-        module = route_module(["garden"])
-        store = InMemoryEngineStore()
-        store.register_room(module_content=module, initial_state=self.state)
-        service = RuleEngineService(store)
-        view = await PlayerViewProjector(service).project(player_input())
-
-        self.assertEqual(
-            [item.id for item in view.scene.available_exits],
-            ["garden"],
-        )
-        blocked = Intent(
-            kind="action",
-            verb="go",
-            target=MatchedTarget(id="attic"),
-            check=NoCheck(),
-            summary="前往阁楼",
-        )
-        context = intent_context(
-            player_input=player_input(utterance="前往阁楼"),
-            player_view=view,
-        )
-        with self.assertRaisesRegex(ContractError, "PlayerView"):
-            validate_intent_against_view(blocked, context)
-
-        result = await service.execute(
-            ActionRequest(
-                request_id="blocked-attic",
-                room_id="room_01",
-                player_id="player_01",
-                actor_id="pc_1",
-                source_view_revision=view.revision,
-                intent=blocked,
-            )
-        )
-        self.assertEqual(result.resolution, "blocked")
-        self.assertEqual(store.inspect_state("room_01").scene_id, "study")
-
     async def test_visible_door_checkpoint_takes_priority_over_scene_travel(
         self,
     ) -> None:
@@ -497,174 +378,6 @@ class PlayerViewV2Tests(unittest.IsolatedAsyncioTestCase):
         assert isinstance(intent.check, ModuleCheck)
         self.assertEqual(intent.check.route, "module")
         self.assertEqual(intent.check.checkpoint_id, "smash_cabinet")
-
-    async def test_default_check_only_accepts_current_actor_candidates(self) -> None:
-        view = await PlayerViewProjector(self.service).project(player_input())
-        context = intent_context(player_input=player_input(), player_view=view)
-        valid = Intent(
-            kind="action",
-            verb="inspect",
-            target=MatchedTarget(id="bookshelf"),
-            check=DefaultCheck(proposed_skills=("spot-hidden",)),
-            summary="仔细检查书架",
-        )
-        self.assertEqual(validate_intent_against_view(valid, context), valid)
-
-        invalid = valid.model_copy(
-            update={
-                "check": DefaultCheck(proposed_skills=("spot-hidden", "keeper-secret"))
-            }
-        )
-        with self.assertRaisesRegex(ContractError, "当前 Actor"):
-            validate_intent_against_view(invalid, context)
-        with self.assertRaisesRegex(ContractError, "current Actor"):
-            await self.service.execute(
-                ActionRequest(
-                    request_id="invalid-default-check",
-                    room_id="room_01",
-                    player_id="player_01",
-                    actor_id="pc_1",
-                    source_view_revision=view.revision,
-                    intent=invalid,
-                )
-            )
-
-    async def test_scene_default_check_returns_authoritative_roll_without_plot_change(
-        self,
-    ) -> None:
-        view = await PlayerViewProjector(self.service).project(player_input())
-        intent = Intent(
-            kind="action",
-            verb="investigate",
-            target=MatchedTarget(id=view.scene.id),
-            check=DefaultCheck(proposed_skills=("spot-hidden",)),
-            summary="仔细观察整个房间",
-        )
-        context = intent_context(
-            player_input=player_input(utterance="我仔细观察整个房间"),
-            player_view=view,
-        )
-        self.assertEqual(validate_intent_against_view(intent, context), intent)
-
-        before = self.store.inspect_state("room_01")
-        result = await self.service.execute(
-            ActionRequest(
-                request_id="scene-spot-hidden",
-                room_id="room_01",
-                player_id="player_01",
-                actor_id="pc_1",
-                source_view_revision=view.revision,
-                intent=intent,
-            )
-        )
-
-        self.assertEqual(result.resolution, "direct")
-        self.assertEqual(result.outcome, "success")
-        self.assertIsNotNone(result.check_result)
-        assert result.check_result is not None
-        self.assertIsNone(result.check_result.checkpoint_id)
-        self.assertEqual(result.check_result.skill_id, "spot-hidden")
-        self.assertEqual(result.check_result.target_value, 65)
-        self.assertEqual(result.check_result.roll_value, 30)
-        self.assertEqual(result.check_result.difficulty, "regular")
-        self.assertTrue(result.check_result.passed)
-        self.assertTrue(
-            any("普通检定" in item for item in result.narration_constraints)
-        )
-        after = self.store.inspect_state("room_01")
-        self.assertEqual(after.discovered_facts, before.discovered_facts)
-        self.assertEqual(after.actor_discovered_facts, before.actor_discovered_facts)
-
-    async def test_failed_entity_default_check_does_not_reveal_direct_response(
-        self,
-    ) -> None:
-        store = InMemoryEngineStore()
-        store.register_room(
-            module_content=self.module,
-            initial_state=self.state,
-        )
-        service = RuleEngineService(
-            store,
-            kernel=RuleKernel(
-                dice_source=SequenceDiceSource([90]),
-                allow_legacy_missing_skill=False,
-            ),
-        )
-        view = await PlayerViewProjector(service).project(player_input())
-        intent = Intent(
-            kind="action",
-            verb="investigate",
-            target=MatchedTarget(id="cabinet"),
-            check=DefaultCheck(proposed_skills=("spot-hidden",)),
-            summary="仔细检查柜子的锁孔",
-        )
-
-        result = await service.execute(
-            ActionRequest(
-                request_id="failed-cabinet-check",
-                room_id="room_01",
-                player_id="player_01",
-                actor_id="pc_1",
-                source_view_revision=view.revision,
-                intent=intent,
-            )
-        )
-
-        self.assertEqual(result.outcome, "failure")
-        self.assertIsNotNone(result.check_result)
-        assert result.check_result is not None
-        self.assertFalse(result.check_result.passed)
-        visible_text = " ".join(item.text for item in result.visible_facts)
-        self.assertNotIn("柜门边缘没有被撬动过的痕迹", visible_text)
-        self.assertIn("没能充分发挥", visible_text)
-        self.assertFalse(result.event_refs)
-
-    async def test_exit_default_check_rolls_and_does_not_gate_movement(self) -> None:
-        store = InMemoryEngineStore()
-        store.register_room(
-            module_content=self.module,
-            initial_state=self.state,
-        )
-        service = RuleEngineService(
-            store,
-            kernel=RuleKernel(
-                dice_source=SequenceDiceSource([90]),
-                allow_legacy_missing_skill=False,
-            ),
-        )
-        view = await PlayerViewProjector(service).project(player_input())
-        intent = Intent(
-            kind="action",
-            verb="go",
-            target=MatchedTarget(id="north_door"),
-            check=DefaultCheck(proposed_skills=("stealth",)),
-            approach="保持隐蔽",
-            summary="潜行穿过北侧门",
-        )
-        context = intent_context(
-            player_input=player_input(utterance="我潜行穿过北侧门"),
-            player_view=view,
-        )
-        self.assertEqual(validate_intent_against_view(intent, context), intent)
-
-        result = await service.execute(
-            ActionRequest(
-                request_id="stealth-through-door",
-                room_id="room_01",
-                player_id="player_01",
-                actor_id="pc_1",
-                source_view_revision=view.revision,
-                intent=intent,
-            )
-        )
-
-        self.assertEqual(result.outcome, "failure")
-        self.assertIsNotNone(result.check_result)
-        assert result.check_result is not None
-        self.assertEqual(result.check_result.skill_id, "stealth")
-        self.assertFalse(result.check_result.passed)
-        self.assertEqual(store.inspect_state("room_01").scene_id, "garden")
-
 
 if __name__ == "__main__":
     unittest.main()

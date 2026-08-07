@@ -9,6 +9,7 @@ from typing import cast
 import pytest
 from collaboration_framework.contracts import (
     ActionRequest,
+    ActionResult,
     ContractError,
     Intent,
     JsonObject,
@@ -18,12 +19,12 @@ from collaboration_framework.contracts import (
 )
 from collaboration_framework.engine import (
     CompletedAction,
+    EngineExecutionResult,
     GameState,
     RevisionConflictError,
     RuleEngineService,
-    RuleKernel,
+    StateModifiedEvent,
 )
-from collaboration_framework.host.adapters.fakes import FakeNarrationModel
 from collaboration_framework.host.schemas import IntentContext
 from httpx import AsyncClient
 from sqlalchemy import func, select
@@ -205,6 +206,72 @@ def _checkpoint_request(
     )
 
 
+def _commit_payload(
+    request: ActionRequest,
+    runtime,
+) -> tuple[GameState, tuple[StateModifiedEvent, ...], CompletedAction]:
+    """One well-formed write, assembled by hand.
+
+    These store tests used to get their payload from `RuleKernel.execute`. The
+    kernel is gone (#226) but the SQLAlchemy store's atomicity is not v2 — the
+    adjudication path commits through the same tables — so the payload is built
+    here and the assertions below are unchanged.
+    """
+
+    new_state = runtime.game_state.model_copy(deep=True)
+    new_state.entities["case_tracker"]["investigator_disappeared"] = True
+    new_state = new_state.model_copy(
+        update={"event_sequence": runtime.game_state.event_sequence + 1}
+    )
+    events = (
+        StateModifiedEvent(
+            event_id=f"evt-{request.request_id}",
+            sequence=new_state.event_sequence,
+            room_id=request.room_id,
+            actor_id=request.actor_id,
+            client_action_id=request.request_id,
+            cause=f"action:{request.request_id}",
+            payload={
+                "path": "entities.case_tracker.investigator_disappeared",
+                "from": False,
+                "to": True,
+            },
+        ),
+    )
+    completed = CompletedAction(
+        request=request,
+        execution=EngineExecutionResult(
+            action_result=ActionResult(
+                request_id=request.request_id,
+                action_id=request.request_id,
+                resolution="checkpoint",
+                outcome="success",
+                view_revision=str(new_state.event_sequence),
+                event_refs=tuple(event.event_id for event in events),
+            ),
+            events=events,
+            state_version=new_state.event_sequence,
+        ),
+    )
+    return new_state, events, completed
+
+
+async def _commit_once(
+    store: SqlAlchemyEngineStore,
+    request: ActionRequest,
+) -> CompletedAction:
+    async with store.transaction(request.room_id) as transaction:
+        runtime = await transaction.load_runtime()
+        new_state, events, completed = _commit_payload(request, runtime)
+        await transaction.commit(
+            expected_revision=runtime.revision,
+            new_state=new_state,
+            events=events,
+            completed_action=completed,
+        )
+    return completed
+
+
 async def _counts(db: AsyncSession, room_id: str) -> tuple[int, int]:
     events = await db.scalar(
         select(func.count()).select_from(GameEvent).where(GameEvent.room_id == room_id)
@@ -220,86 +287,6 @@ def test_application_composes_sqlalchemy_engine_store() -> None:
 
     assert isinstance(engine_store, SqlAlchemyEngineStore)
     assert rule_engine_service._store is engine_store
-    assert rule_engine_service._kernel._allow_legacy_missing_skill is False
-
-
-async def test_turn_application_resolves_actor_and_replays_one_execution(
-    db_session: AsyncSession,
-    engine_store_factory: Callable[..., SqlAlchemyEngineStore],
-) -> None:
-    from app.core.turn import build_turn_application
-
-    room, players, _ = await _start_room(db_session)
-    store = engine_store_factory()
-    application = build_turn_application(store, RuleEngineService(store))
-
-    first = await application.handle(
-        room_id=room.id,
-        player_id=players[0].id,
-        client_action_id="turn-application-122",
-        utterance="我看看道格拉斯",
-    )
-    replayed = await application.handle(
-        room_id=room.id,
-        player_id=players[0].id,
-        client_action_id="turn-application-122",
-        utterance="我看看道格拉斯",
-    )
-
-    _, action_count = await _counts(db_session, room.id)
-    assert first.message_type == replayed.message_type == "turn.completed"
-    assert first.correlation_id == replayed.correlation_id == "turn-application-122"
-    assert first.payload.player_id == players[0].id
-    assert first.payload.actor_id == "actor_1"
-    assert first.payload.player_view.revision == replayed.payload.player_view.revision
-    assert action_count == 1
-
-
-async def test_turn_application_waits_for_selected_skill_and_submitted_roll(
-    db_session: AsyncSession,
-    engine_store_factory: Callable[..., SqlAlchemyEngineStore],
-) -> None:
-    from app.core.turn import build_turn_application
-
-    room, players, _ = await _start_room(
-        db_session,
-        room_number=2,
-        prepare_checkpoint=False,
-    )
-    store = engine_store_factory()
-    application = build_turn_application(
-        store,
-        RuleEngineService(store),
-        intent_model=_CandidateIntentModel(),
-        narration_model=FakeNarrationModel(),
-    )
-
-    prepared = await application.prepare(
-        room_id=room.id,
-        player_id=players[0].id,
-        client_action_id="selected-skill-roll-146",
-        utterance="尝试潜行观察周围",
-    )
-
-    assert [candidate.id for candidate in prepared.candidates] == [
-        "spot-hidden",
-        "stealth",
-    ]
-    assert await _counts(db_session, room.id) == (0, 0)
-
-    output = await application.complete(
-        prepared,
-        selected_skill="stealth",
-        roll_value=7,
-    )
-
-    check = output.action_result.check_result
-    assert check is not None
-    assert check.skill_id == "stealth"
-    assert check.roll_value == 7
-    assert check.target_value == 20
-    assert check.passed
-    assert await _counts(db_session, room.id) == (0, 1)
 
 
 async def test_select_module_pins_recommended_published_version(
@@ -473,13 +460,15 @@ async def test_character_reads_remain_available_and_writes_conflict_after_game_s
     assert characters[0].version == original_version
 
 
-async def test_suspend_blocks_new_actions_and_resume_allows_rule_ending(
+async def test_suspended_room_rejects_commits_and_resume_restores_them(
     db_session: AsyncSession,
     engine_store_factory: Callable[..., SqlAlchemyEngineStore],
 ) -> None:
+    """暂停中不许写，恢复后恢复可写——这道闸门在 store 的 commit 里（不在被删的
+    execute 里），裁决路径命中的是同一段 `Room.phase == "InGame"` 守卫。"""
+
     room, players, _ = await _start_room(db_session)
     store = engine_store_factory()
-    service = RuleEngineService(store)
 
     await room_service.suspend_game(db_session, room.id, players[0].reconnect_token)
     await db_session.refresh(room)
@@ -488,7 +477,8 @@ async def test_suspend_blocks_new_actions_and_resume_allows_rule_ending(
     assert room.phase == "Suspended"
     assert GameState.model_validate(game_session.state_json).phase == "playing"
 
-    projection = await service.read(
+    # 读始终允许：暂停挡的是写，不是看。
+    projection = await RuleEngineService(store).read(
         PlayerViewScope(
             room_id=room.id,
             player_id=players[0].id,
@@ -496,25 +486,21 @@ async def test_suspend_blocks_new_actions_and_resume_allows_rule_ending(
         )
     )
     assert projection.revision == "0"
+
+    request = _checkpoint_request(room_id=room.id, player_id=players[0].id)
     with pytest.raises(ContractError, match="InGame"):
-        await service.execute(_checkpoint_request(room_id=room.id, player_id=players[0].id))
+        await _commit_once(store, request)
     assert await _counts(db_session, room.id) == (0, 0)
 
     await room_service.resume_game(db_session, room.id, players[0].reconnect_token)
-    result = await service.execute(_checkpoint_request(room_id=room.id, player_id=players[0].id))
-    assert result.event_refs
+    completed = await _commit_once(store, request)
 
     room_id = room.id
     db_session.expire_all()
-    completed_room = await db_session.get(Room, room_id)
-    completed_session = await db_session.get(GameSession, room_id)
-    assert completed_room is not None
-    assert completed_session is not None
-    completed_state = GameState.model_validate(completed_session.state_json)
-    assert completed_state.phase == "ended"
-    assert completed_state.ending_id == "ending_followed_underground"
-    assert completed_room.phase == "Completed"
-    assert completed_room.ended_at is not None
+    assert await _counts(db_session, room_id) == (
+        len(completed.execution.action_result.event_refs),
+        1,
+    )
 
 
 async def test_manual_end_from_suspended_syncs_room_and_game_state(
@@ -553,16 +539,19 @@ async def test_manual_end_from_suspended_syncs_room_and_game_state(
         await room_service.resume_game(db_session, room.id, players[0].reconnect_token)
 
 
-async def test_store_persists_and_replays_completed_action_after_rebuild(
+async def test_store_persists_completed_action_across_store_rebuild(
     db_session: AsyncSession,
     engine_store_factory: Callable[..., SqlAlchemyEngineStore],
 ) -> None:
     room, players, _ = await _start_room(db_session)
     request = _checkpoint_request(room_id=room.id, player_id=players[0].id)
-    first = await RuleEngineService(engine_store_factory()).execute(request)
-    replay = await RuleEngineService(engine_store_factory()).execute(request)
+    completed = await _commit_once(engine_store_factory(), request)
 
-    assert replay == first
+    # 换一个 store 实例：幂等记录必须来自数据库，而不是进程内缓存。
+    async with engine_store_factory().transaction(room.id) as transaction:
+        replayed = await transaction.find_completed_action(request.request_id)
+    assert replayed == completed
+
     room_id = room.id
     db_session.expire_all()
     game_session = await db_session.get(GameSession, room_id)
@@ -571,7 +560,10 @@ async def test_store_persists_and_replays_completed_action_after_rebuild(
     assert action is not None
     state = GameState.model_validate(game_session.state_json)
     assert action.committed_state_version == state.event_sequence
-    assert await _counts(db_session, room_id) == (len(first.event_refs), 1)
+    assert await _counts(db_session, room_id) == (
+        len(completed.execution.action_result.event_refs),
+        1,
+    )
 
 
 async def test_loaded_runtime_is_deep_copy_isolated(
@@ -603,20 +595,13 @@ async def test_store_rejects_stale_revision_without_partial_writes(
 
     async with store.transaction(room.id) as transaction:
         runtime = await transaction.load_runtime()
-        execution, new_state = RuleKernel().execute(
-            request=request,
-            module_content=runtime.v2,
-            game_state=runtime.game_state,
-        )
+        new_state, events, completed = _commit_payload(request, runtime)
         with pytest.raises(RevisionConflictError):
             await transaction.commit(
                 expected_revision="999",
                 new_state=new_state,
-                events=execution.events,
-                completed_action=CompletedAction(
-                    request=request,
-                    execution=execution,
-                ),
+                events=events,
+                completed_action=completed,
             )
 
     room_id = room.id
@@ -638,9 +623,7 @@ async def test_store_failure_rolls_back_state_events_action_and_room(
 
     request = _checkpoint_request(room_id=room.id, player_id=players[0].id)
     with pytest.raises(RuntimeError, match="simulated failure"):
-        await RuleEngineService(engine_store_factory(before_commit=fail_before_commit)).execute(
-            request
-        )
+        await _commit_once(engine_store_factory(before_commit=fail_before_commit), request)
 
     room_id = room.id
     db_session.expire_all()
@@ -662,21 +645,29 @@ async def test_same_request_id_is_isolated_between_rooms(
     second_room, second_players, _ = await _start_room(db_session, room_number=2)
     store = engine_store_factory()
 
-    first = await RuleEngineService(store).execute(
+    first = await _commit_once(
+        store,
         _checkpoint_request(
             room_id=first_room.id,
             player_id=first_players[0].id,
             request_id="shared-request",
-        )
+        ),
     )
-    second = await RuleEngineService(store).execute(
+    second = await _commit_once(
+        store,
         _checkpoint_request(
             room_id=second_room.id,
             player_id=second_players[0].id,
             request_id="shared-request",
-        )
+        ),
     )
 
-    assert first.request_id == second.request_id == "shared-request"
-    assert await _counts(db_session, first_room.id) == (len(first.event_refs), 1)
-    assert await _counts(db_session, second_room.id) == (len(second.event_refs), 1)
+    assert first.request.request_id == second.request.request_id == "shared-request"
+    assert await _counts(db_session, first_room.id) == (
+        len(first.execution.action_result.event_refs),
+        1,
+    )
+    assert await _counts(db_session, second_room.id) == (
+        len(second.execution.action_result.event_refs),
+        1,
+    )

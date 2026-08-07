@@ -15,11 +15,10 @@ from collaboration_framework.contracts import (
     VisibleActorView,
 )
 from collaboration_framework.engine import InMemoryEngineStore, RuleEngineService
-from collaboration_framework.host.adapters.fakes import FakeIntentModel, FakeNarrationModel
 from collaboration_framework.host.schemas import OpeningNarrationContext
 
 from app.core.config import Settings
-from app.core.turn import HostModelMetadata, build_turn_application
+from app.core.turn import HostModelMetadata, build_session_view_application
 
 
 def opening_view() -> PlayerView:
@@ -103,15 +102,13 @@ def application(
     mode: Literal["model", "template"] = "model",
 ):
     store = InMemoryEngineStore()
-    return build_turn_application(
+    return build_session_view_application(
         store,
         RuleEngineService(store),
         settings=Settings(
             opening_narration_mode=mode,
             opening_narration_timeout_seconds=0.01,
         ),
-        intent_model=FakeIntentModel(),
-        narration_model=FakeNarrationModel(),
         opening_narration_model=model,
         host_metadata=HostModelMetadata(provider="deepseek", model="deepseek-chat"),
     )

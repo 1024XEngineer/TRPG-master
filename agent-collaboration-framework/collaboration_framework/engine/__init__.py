@@ -4,7 +4,6 @@
 
 from .adapters import InMemoryEngineStore
 from .adjudication import AdjudicationEngineService
-from .atomic import FakeAtomicEngine
 from .capabilities import (
     RuntimeCapabilityIssue,
     audit_runtime_capabilities,
@@ -12,7 +11,6 @@ from .capabilities import (
 )
 from .dice import DiceRoller, SequenceDiceSource, SystemDiceSource
 from .initialization import create_initial_game_state
-from .kernel import RuleKernel
 from .models import (
     ActorResources,
     ActorState,
@@ -44,14 +42,12 @@ __all__ = [
     "EngineRuntimeSnapshot",
     "EngineStore",
     "EngineTransaction",
-    "FakeAtomicEngine",
     "GameState",
     "InMemoryEngineStore",
     "PendingCheckDecision",
     "RevisionConflictError",
     "RuntimeCapabilityIssue",
     "RuleEngineService",
-    "RuleKernel",
     "SequenceDiceSource",
     "StateModifiedEvent",
     "SystemDiceSource",

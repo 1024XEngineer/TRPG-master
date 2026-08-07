@@ -29,6 +29,7 @@ from __future__ import annotations
 import json
 import os
 import time
+import unittest
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -319,6 +320,9 @@ class PlaySession:
         self._ws = ws
         self.player_id = player_id
         self._transcript = transcript
+        # 由 play_session fixture 在重放开场之后填上，场景用它作为模拟玩家的
+        # 第一段上下文。
+        self.opening_text = ""
 
     def send(self, event_type: str, payload: dict[str, Any]) -> None:
         self._transcript.write("send", event_type=event_type, payload=payload)
@@ -486,7 +490,7 @@ def play_session(transcript: Transcript, real_model_ws: None):
         session.receive()  # session.bound
         session.receive()  # view.updated
         opening = receive_replayed_opening(ws)
-        session.opening_text = opening["payload"]["text"]  # type: ignore[attr-defined]
+        session.opening_text = opening["payload"]["text"]
         yield session
 
 
@@ -503,7 +507,7 @@ async def test_single_intent_plays_through(
     utterance = await simulated_player.next_utterance(
         shape="single",
         intent="向面前的委托人打听一个具体细节",
-        last_narration=play_session.opening_text,  # type: ignore[attr-defined]
+        last_narration=play_session.opening_text,
     )
     action_id = _action_id("single")
     outcome = play_session.submit(utterance, client_action_id=action_id)
@@ -537,7 +541,7 @@ async def test_multi_intent_runs_as_one_plan(
         utterance = await simulated_player.next_utterance(
             shape="compound",
             intent="先在会客室里观察一样眼前确实存在的东西，然后就它向委托人提问",
-            last_narration=play_session.opening_text,  # type: ignore[attr-defined]
+            last_narration=play_session.opening_text,
         )
         action_id = _action_id(f"multi{attempt}")
         outcome = play_session.submit(utterance, client_action_id=action_id)
@@ -588,7 +592,7 @@ async def test_player_can_cancel_a_check_before_the_roll(
             intent=(
                 "尝试一件明显有难度、需要靠本事才能成功的事，比如强行说服、撬开、翻找隐藏的东西"
             ),
-            last_narration=play_session.opening_text,  # type: ignore[attr-defined]
+            last_narration=play_session.opening_text,
         )
         action_id = _action_id(f"cancelcheck{attempt}")
         outcome = play_session.submit(utterance, client_action_id=action_id)
@@ -599,7 +603,9 @@ async def test_player_can_cancel_a_check_before_the_roll(
         transcript.write("note", detail=f"attempt {attempt} produced no check; retrying")
 
     if pending is None:
-        pytest.skip("model never proposed a check in 3 attempts; cancel path not exercised")
+        raise unittest.SkipTest(
+            "model never proposed a check in 3 attempts; cancel path not exercised"
+        )
 
     assert pending["payload"]["status"] == "awaiting_skill_choice"
     cancelled = play_session.cancel_check(pending)
@@ -641,7 +647,7 @@ async def test_player_can_cancel_the_remaining_plan_steps(
             "先做一件需要靠本事才能成功的难事（比如强行说服或翻找隐藏的东西），"
             "然后再去另一个地方查线索"
         ),
-        last_narration=play_session.opening_text,  # type: ignore[attr-defined]
+        last_narration=play_session.opening_text,
     )
     action_id = _action_id("plancancel")
     outcome = play_session.submit(utterance, client_action_id=action_id)
@@ -652,9 +658,9 @@ async def test_player_can_cancel_the_remaining_plan_steps(
         )
         cancelled = play_session.cancel_plan(action_id)
     elif outcome.kind == "completed":
-        pytest.skip("plan settled without a waiting boundary; nothing to cancel")
+        raise unittest.SkipTest("plan settled without a waiting boundary; nothing to cancel")
     else:
-        pytest.fail(f"unexpected stop {outcome.kind}: {_summarize_all(outcome.seen)}")
+        raise AssertionError(f"unexpected stop {outcome.kind}: {_summarize_all(outcome.seen)}")
 
     assert cancelled.kind == "completed", _summarize_all(cancelled.seen)
     assert cancelled.stop["correlation_id"] == action_id

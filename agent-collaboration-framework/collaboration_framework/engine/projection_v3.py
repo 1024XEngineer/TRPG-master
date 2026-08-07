@@ -20,12 +20,15 @@ id; renaming the field is a storage change and belongs with the loader switch.
 from __future__ import annotations
 
 from collaboration_framework.contracts import (
+    AgentMatchTriggerSpec,
     ContractError,
     KeeperCapabilityView,
     KeeperEndingCapability,
     KeeperEntityCapability,
     KeeperInformationCapability,
     KeeperLocationCapability,
+    KeeperRuleCandidate,
+    KeeperRuleOption,
     LocationSpecV3,
     ModuleContentV3,
     ProjectionActorResource,
@@ -376,6 +379,40 @@ def _optional_text(value) -> str | None:
     return value if isinstance(value, str) and value.strip() else None
 
 
+def _rule_candidates(module, location_id: str) -> tuple[KeeperRuleCandidate, ...]:
+    """agent_match Rules whose scope covers where the actor is standing.
+
+    Scope filtering is the Engine's job so the Agent never sees rules for places
+    it is not in; picking among the remaining options is the Agent's job. An
+    empty `location_ids` means the rule is not location-bound.
+    """
+
+    candidates = []
+    for rule in module.rules:
+        trigger = rule.trigger
+        if not isinstance(trigger, AgentMatchTriggerSpec):
+            continue
+        scope = trigger.scope
+        if scope.location_ids and location_id not in scope.location_ids:
+            continue
+        candidates.append(
+            KeeperRuleCandidate(
+                rule_id=rule.id,
+                question_kind=trigger.question.kind,
+                semantic_hints=trigger.question.semantic_hints,
+                action_families=scope.action_families,
+                target_kinds=scope.target_kinds,
+                target_ids=scope.target_ids,
+                options=tuple(
+                    KeeperRuleOption(id=option.id, semantic_hints=option.semantic_hints)
+                    for option in trigger.options
+                ),
+            )
+        )
+    candidates.sort(key=lambda item: item.rule_id)
+    return tuple(candidates)
+
+
 def keeper_capabilities_v3(
     runtime: EngineRuntimeSnapshot,
     *,
@@ -465,6 +502,7 @@ def keeper_capabilities_v3(
             )
             for anchor in module.ending_anchors
         ),
+        rule_candidates=_rule_candidates(module, state.scene_id),
         core_resolved=state.core_resolved,
         ending_available=state.ending_available,
     )

@@ -7,7 +7,11 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 
-from collaboration_framework.contracts import ContractError, ModuleContent
+from collaboration_framework.contracts import (
+    ContractError,
+    ModuleContent,
+    ModuleContentV3,
+)
 
 from ..models import (
     CheckRun,
@@ -24,7 +28,7 @@ from ..ports import EngineTransaction, RevisionConflictError
 
 @dataclass(frozen=True)
 class _RoomData:
-    module_content: ModuleContent
+    module_content: ModuleContent | ModuleContentV3
     game_state: GameState
     revision: str
     events: tuple[StateModifiedEvent, ...]
@@ -55,7 +59,7 @@ class InMemoryEngineStore:
     def register_room(
         self,
         *,
-        module_content: ModuleContent,
+        module_content: ModuleContent | ModuleContentV3,
         initial_state: GameState,
     ) -> None:
         room_id = initial_state.room_id

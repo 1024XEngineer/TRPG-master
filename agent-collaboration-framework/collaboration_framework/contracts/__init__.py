@@ -129,6 +129,8 @@ from .keeper_view import (
     KeeperEntityCapability,
     KeeperInformationCapability,
     KeeperLocationCapability,
+    KeeperRuleCandidate,
+    KeeperRuleOption,
 )
 from .module_v3 import (
     DEFAULT_TIME_POINTS,

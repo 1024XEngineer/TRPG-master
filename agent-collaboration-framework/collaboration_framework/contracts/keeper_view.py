@@ -67,6 +67,36 @@ class KeeperEndingCapability(ContractModel):
     summary: str = Field(min_length=1)
 
 
+class KeeperRuleOption(ContractModel):
+    """One opaque choice on a rule's candidate menu.
+
+    The Agent submits `id` and nothing else; what the option *does* stays on the
+    server, so a creative model cannot pick an outcome (#226 §1).
+    """
+
+    id: str = Field(min_length=1)
+    semantic_hints: tuple[str, ...] = ()
+
+
+class KeeperRuleCandidate(ContractModel):
+    """An `agent_match` Rule that could apply where the actor currently is.
+
+    This is the minimal Rule Match View of #226 §2: the Engine decides which
+    rules are even in scope, and the Agent only judges which option the player's
+    words mean. It rides on the Keeper view because it is keeper-side, agent-only
+    data that must never reach the client — the same boundary #226 draws between
+    the Match View and PlayerView.
+    """
+
+    rule_id: str = Field(min_length=1)
+    question_kind: Literal["action_declaration", "method", "intent_relation"]
+    semantic_hints: tuple[str, ...] = ()
+    action_families: tuple[str, ...] = ()
+    target_kinds: tuple[Literal["information", "entity", "location", "actor", "world"], ...] = ()
+    target_ids: tuple[str, ...] = ()
+    options: tuple[KeeperRuleOption, ...] = ()
+
+
 class KeeperCapabilityView(ContractModel):
     """Everything the Agent needs to name a legal target or effect payload."""
 
@@ -79,6 +109,7 @@ class KeeperCapabilityView(ContractModel):
     locations: tuple[KeeperLocationCapability, ...] = ()
     entities: tuple[KeeperEntityCapability, ...] = ()
     endings: tuple[KeeperEndingCapability, ...] = ()
+    rule_candidates: tuple[KeeperRuleCandidate, ...] = ()
     core_resolved: bool = False
     ending_available: bool = False
 
@@ -89,4 +120,6 @@ __all__ = [
     "KeeperEntityCapability",
     "KeeperInformationCapability",
     "KeeperLocationCapability",
+    "KeeperRuleCandidate",
+    "KeeperRuleOption",
 ]

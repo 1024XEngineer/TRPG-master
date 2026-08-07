@@ -188,6 +188,103 @@
       ],
       "title": "KeeperLocationCapability",
       "type": "object"
+    },
+    "KeeperRuleCandidate": {
+      "additionalProperties": false,
+      "description": "An `agent_match` Rule that could apply where the actor currently is.\n\nThis is the minimal Rule Match View of #226 §2: the Engine decides which\nrules are even in scope, and the Agent only judges which option the player's\nwords mean. It rides on the Keeper view because it is keeper-side, agent-only\ndata that must never reach the client — the same boundary #226 draws between\nthe Match View and PlayerView.",
+      "properties": {
+        "rule_id": {
+          "minLength": 1,
+          "title": "Rule Id",
+          "type": "string"
+        },
+        "question_kind": {
+          "enum": [
+            "action_declaration",
+            "method",
+            "intent_relation"
+          ],
+          "title": "Question Kind",
+          "type": "string"
+        },
+        "semantic_hints": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Semantic Hints",
+          "type": "array"
+        },
+        "action_families": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Action Families",
+          "type": "array"
+        },
+        "target_kinds": {
+          "default": [],
+          "items": {
+            "enum": [
+              "information",
+              "entity",
+              "location",
+              "actor",
+              "world"
+            ],
+            "type": "string"
+          },
+          "title": "Target Kinds",
+          "type": "array"
+        },
+        "target_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Target Ids",
+          "type": "array"
+        },
+        "options": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/KeeperRuleOption"
+          },
+          "title": "Options",
+          "type": "array"
+        }
+      },
+      "required": [
+        "rule_id",
+        "question_kind"
+      ],
+      "title": "KeeperRuleCandidate",
+      "type": "object"
+    },
+    "KeeperRuleOption": {
+      "additionalProperties": false,
+      "description": "One opaque choice on a rule's candidate menu.\n\nThe Agent submits `id` and nothing else; what the option *does* stays on the\nserver, so a creative model cannot pick an outcome (#226 §1).",
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "semantic_hints": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Semantic Hints",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "KeeperRuleOption",
+      "type": "object"
     }
   },
   "additionalProperties": false,
@@ -238,6 +335,14 @@
         "$ref": "#/$defs/KeeperEndingCapability"
       },
       "title": "Endings",
+      "type": "array"
+    },
+    "rule_candidates": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/KeeperRuleCandidate"
+      },
+      "title": "Rule Candidates",
       "type": "array"
     },
     "core_resolved": {

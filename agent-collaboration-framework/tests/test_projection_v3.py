@@ -15,22 +15,30 @@ from collaboration_framework.contracts import (
     ActionMethod,
     ActionTarget,
     ChangeEntityStateEffect,
+    CheckDecisionRequest,
     CommitTerminalEndingEffect,
     ContractError,
     EnterLocationEffect,
     ModuleContentV3,
     NoAdjudicationCheck,
     PlayerViewScope,
+    PostRollDecisionRequest,
     PredicateCondition,
+    RequiredAdjudicationCheck,
+    RuleDecisionRef,
+    SelectCheckChoice,
+    SkillCheckCandidate,
     RevealInformationEffect,
     SubmitAdjudicationRequest,
 )
 from collaboration_framework.engine import (
     ActorState,
     AdjudicationEngineService,
+    DiceRoller,
     GameState,
     InMemoryEngineStore,
     RuleEngineService,
+    SequenceDiceSource,
 )
 from collaboration_framework.engine.projection_v3 import location_breadcrumbs
 from collaboration_framework.engine.rules_v3 import evaluate_condition, walk_rule
@@ -63,7 +71,10 @@ def game_state(content: ModuleContentV3, **overrides) -> GameState:
                 name="陈探员",
                 source_character_id="character_v3",
                 source_character_version=1,
-                state={"skills": {"spot-hidden": 60}, "occupation": "私家侦探"},
+                state={
+                    "skills": {"spot-hidden": 60, "library-use": 70},
+                    "occupation": "私家侦探",
+                },
             )
         },
         "entities": {},
@@ -385,6 +396,158 @@ class EventRuleChainingTests(unittest.IsolatedAsyncioTestCase):
                 actor_id=ACTOR,
             )
         )
+
+
+class RuleOwnedCheckTests(unittest.IsolatedAsyncioTestCase):
+    """A named rule owns the outcome of the check the Agent proposed (#226 §5)."""
+
+    def setUp(self) -> None:
+        self.content = module()
+
+    def build(self, rolls, **overrides):
+        store = InMemoryEngineStore()
+        store.register_room(
+            module_content=self.content,
+            initial_state=game_state(self.content, scene_id="library", **overrides),
+        )
+        return (
+            store,
+            AdjudicationEngineService(store, dice=DiceRoller(SequenceDiceSource(rolls))),
+            RuleEngineService(store),
+        )
+
+    async def run_rule_check(self, rolls, option_id="library-use"):
+        store, engine, rules = self.build(rolls)
+        snapshot = await rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        execution = await engine.submit(
+            SubmitAdjudicationRequest(
+                room_id=ROOM,
+                player_id=PLAYER,
+                adjudication=ActionAdjudication(
+                    request_id="rule-owned-1",
+                    source_revision=snapshot.revision,
+                    actor_id=ACTOR,
+                    summary="查阅旧报",
+                    target=ActionTarget(kind="entity", id="newspaper_archive"),
+                    method=ActionMethod(family="research", description="查阅旧报"),
+                    rule_decision=RuleDecisionRef(
+                        rule_id="research_library_archive", option_id=option_id
+                    ),
+                    check=RequiredAdjudicationCheck(
+                        candidates=(
+                            SkillCheckCandidate(
+                                candidate_id="library-use",
+                                skill_id="library-use",
+                                difficulty="regular",
+                                method_summary="按年份检索",
+                                player_safe_reason="使用图书馆使用",
+                            ),
+                        )
+                    ),
+                    # Deliberately wrong: the rule must override these.
+                    success_effects=(),
+                    failure_effects=(),
+                ),
+            )
+        )
+        pending = execution.pending_decision
+        assert pending is not None
+        resolved = await engine.decide(
+            CheckDecisionRequest(
+                request_id="rule-owned-1:select",
+                room_id=ROOM,
+                player_id=PLAYER,
+                source_revision=execution.view_revision,
+                decision_id=pending.decision_id,
+                decision_version=pending.decision_version,
+                choice=SelectCheckChoice(candidate_id="library-use"),
+            )
+        )
+        return store, engine, rules, resolved
+
+    async def test_success_commits_the_rules_effects_not_the_agents(self) -> None:
+        # The Agent sent empty effect lists; the release of the newspaper report
+        # can only come from the rule's success route.
+        store, engine, rules, resolved = await self.run_rule_check([5])
+        self.assertEqual(resolved.outcome, "success")
+        state = store.inspect_state(ROOM)
+        self.assertIn("cemetery_dance_report", state.discovered_facts)
+
+    async def test_failure_routes_somewhere_else_entirely(self) -> None:
+        store, engine, rules, resolved = await self.run_rule_check([100])
+        # A fumble offers post-roll options; accept to settle it as a failure.
+        self.assertEqual(resolved.status, "awaiting_post_roll_decision")
+        check_run = resolved.check_run
+        assert check_run is not None
+        final = await engine.decide_post_roll(
+            PostRollDecisionRequest(
+                request_id="rule-owned-1:accept",
+                room_id=ROOM,
+                player_id=PLAYER,
+                source_revision=resolved.view_revision,
+                check_id=check_run.check_id,
+                check_version=check_run.version,
+                option_id="accept-current",
+            )
+        )
+        self.assertEqual(final.outcome, "failure")
+        state = store.inspect_state(ROOM)
+        self.assertNotIn("cemetery_dance_report", state.discovered_facts)
+
+    async def test_an_invented_rule_id_is_refused(self) -> None:
+        store, engine, rules = self.build([5])
+        snapshot = await rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        with self.assertRaises(ContractError):
+            await engine.submit(
+                SubmitAdjudicationRequest(
+                    room_id=ROOM,
+                    player_id=PLAYER,
+                    adjudication=ActionAdjudication(
+                        request_id="invented-rule",
+                        source_revision=snapshot.revision,
+                        actor_id=ACTOR,
+                        summary="乱编一条规则",
+                        target=ActionTarget(kind="entity", id="newspaper_archive"),
+                        method=ActionMethod(family="research", description="x"),
+                        rule_decision=RuleDecisionRef(
+                            rule_id="no_such_rule", option_id="whatever"
+                        ),
+                        check=NoAdjudicationCheck(),
+                        success_effects=(),
+                    ),
+                )
+            )
+
+    async def test_an_option_the_rule_never_declared_is_refused(self) -> None:
+        store, engine, rules = self.build([5])
+        snapshot = await rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        with self.assertRaises(ContractError):
+            await engine.submit(
+                SubmitAdjudicationRequest(
+                    room_id=ROOM,
+                    player_id=PLAYER,
+                    adjudication=ActionAdjudication(
+                        request_id="invented-option",
+                        source_revision=snapshot.revision,
+                        actor_id=ACTOR,
+                        summary="选一个不存在的候选",
+                        target=ActionTarget(kind="entity", id="newspaper_archive"),
+                        method=ActionMethod(family="research", description="x"),
+                        rule_decision=RuleDecisionRef(
+                            rule_id="research_library_archive",
+                            option_id="by_smell",
+                        ),
+                        check=NoAdjudicationCheck(),
+                        success_effects=(),
+                    ),
+                )
+            )
 
 
 if __name__ == "__main__":

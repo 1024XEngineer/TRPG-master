@@ -464,6 +464,30 @@
       "title": "RevealInformationEffect",
       "type": "object"
     },
+    "RuleDecisionRef": {
+      "additionalProperties": false,
+      "description": "The Agent's answer to a Rule Match View question (#226 §2).\n\nBoth ids are opaque: they come from the candidate menu the Engine published,\nand the Agent may not invent them. Naming a rule hands ownership of the\noutcome to that rule — `success_effects` / `failure_effects` on the same\nadjudication are then ignored, because the published rule owns what the\nresult does (`effect_authority: rule`, #226 §5).",
+      "properties": {
+        "rule_id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Rule Id",
+          "type": "string"
+        },
+        "option_id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Option Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "rule_id",
+        "option_id"
+      ],
+      "title": "RuleDecisionRef",
+      "type": "object"
+    },
     "SetEndingAvailabilityEffect": {
       "additionalProperties": false,
       "properties": {
@@ -624,6 +648,17 @@
         }
       ],
       "title": "Check"
+    },
+    "rule_decision": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RuleDecisionRef"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "success_effects": {
       "default": [],

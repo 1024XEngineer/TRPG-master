@@ -23,10 +23,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from collaboration_framework.contracts import (
+    AdjudicatedCheckStep,
+    AgentMatchTriggerSpec,
     AllCondition,
     AnyCondition,
     ConditionExpr,
     EffectStep,
+    CheckStep,
+    ContractError,
     EventTriggerSpec,
     FinishStep,
     ModuleContentV3,
@@ -179,7 +183,101 @@ def walk_rule(rule: RuleSpecV3, *, branch_id: str | None = None) -> RuleWalk:
 
 __all__ = [
     "RuleWalk",
+    "effects_after_cancel",
+    "effects_after_degree",
     "evaluate_condition",
     "matching_event_rules",
+    "pending_check_for",
+    "resolve_rule_option",
     "walk_rule",
 ]
+
+
+# --------------------------------------------------------------------------- #
+# rule-owned checks (#226 §5): the Agent picks the method, the rule owns the
+# outcome. The suspension point is the only place a check can appear, so the
+# continuation is just "which rule, and where to resume from".
+# --------------------------------------------------------------------------- #
+
+
+def resolve_rule_option(
+    module: ModuleContentV3,
+    *,
+    rule_id: str,
+    option_id: str,
+) -> tuple[RuleSpecV3, str]:
+    """Validate an opaque Agent choice and return the branch it selects.
+
+    Both ids come from the published Match View, so an id the module never
+    declared means the Agent invented it — refused rather than guessed at.
+    """
+
+    rule = next((item for item in module.rules if item.id == rule_id), None)
+    if rule is None or not isinstance(rule.trigger, AgentMatchTriggerSpec):
+        raise ContractError(f"RuleDecision 引用了不存在的 agent_match Rule: {rule_id}")
+    if option_id not in {option.id for option in rule.trigger.options}:
+        raise ContractError(f"RuleDecision 引用了该 Rule 未声明的候选: {option_id}")
+    if option_id not in {branch.id for branch in rule.execution.branches}:
+        raise ContractError(f"Rule {rule_id} 的候选 {option_id} 没有对应分支")
+    return rule, option_id
+
+
+def pending_check_for(rule: RuleSpecV3, branch_id: str):
+    """The check a branch runs before it may commit anything, if it has one.
+
+    Returns `(step, effects_before)` — effects the walk already collected are
+    committed with the check request, because they happened regardless of how
+    the roll goes.
+    """
+
+    walk = walk_rule(rule, branch_id=branch_id)
+    if walk.suspended_kind not in {"check", "adjudicated_check"}:
+        return None, walk.effects
+    step = next(
+        (item for item in rule.execution.steps if item.id == walk.suspended_at),
+        None,
+    )
+    if not isinstance(step, CheckStep | AdjudicatedCheckStep):
+        return None, walk.effects
+    return step, walk.effects
+
+
+def effects_after_degree(rule: RuleSpecV3, step_id: str, degree: str) -> list:
+    """Continue the rule from where the roll routed it (#226 §4)."""
+
+    step = next((item for item in rule.execution.steps if item.id == step_id), None)
+    if not isinstance(step, CheckStep | AdjudicatedCheckStep):
+        return []
+    resume_id = step.result_routes.get(degree)
+    if resume_id is None:
+        return []
+    return _walk_from(rule, resume_id).effects
+
+
+def effects_after_cancel(rule: RuleSpecV3, step_id: str) -> list:
+    step = next((item for item in rule.execution.steps if item.id == step_id), None)
+    if not isinstance(step, AdjudicatedCheckStep):
+        return []
+    return _walk_from(rule, step.cancel_step_id).effects
+
+
+def _walk_from(rule: RuleSpecV3, step_id: str) -> RuleWalk:
+    steps = {step.id: step for step in rule.execution.steps}
+    walk = RuleWalk()
+    cursor: str | None = step_id
+    visited: set[str] = set()
+    while cursor is not None and len(visited) < rule.limits.max_steps:
+        if cursor in visited:
+            walk.suspended_at, walk.suspended_kind = cursor, "loop"
+            return walk
+        visited.add(cursor)
+        step = steps.get(cursor)
+        if step is None or isinstance(step, FinishStep):
+            return walk
+        if isinstance(step, EffectStep):
+            walk.effects.append(step.effect)
+            cursor = step.next_step_id
+            continue
+        walk.suspended_at, walk.suspended_kind = step.id, step.kind
+        return walk
+    return walk

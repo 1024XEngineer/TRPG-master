@@ -54,7 +54,13 @@ from .models import (
     PendingCheckDecision,
 )
 from .ports import EngineStore
-from .rules_v3 import matching_event_rules, walk_rule
+from .rules_v3 import (
+    effects_after_degree,
+    matching_event_rules,
+    pending_check_for,
+    resolve_rule_option,
+    walk_rule,
+)
 
 
 class AdjudicationEngineService:
@@ -649,6 +655,16 @@ class AdjudicationEngineService:
         }[target.kind]
         if not exists:
             raise ContractError("ActionAdjudication target 引用了不存在或隐藏的对象")
+        if adjudication.rule_decision is not None:
+            if not runtime.is_v3:
+                raise ContractError("RuleDecision 只在 ModuleContent v3 房间可用")
+            # Refuses an id the module never declared, so a model cannot invent
+            # a rule or reach a branch its option does not select.
+            resolve_rule_option(
+                runtime.v3,
+                rule_id=adjudication.rule_decision.rule_id,
+                option_id=adjudication.rule_decision.option_id,
+            )
         self._validate_effect_sequence(runtime, adjudication.success_effects)
         self._validate_effect_sequence(runtime, adjudication.failure_effects)
         if adjudication.check.mode != "none":
@@ -830,6 +846,40 @@ class AdjudicationEngineService:
         actors[actor_id] = actor.model_copy(update={"resources": resources}, deep=True)
         return state.model_copy(update={"actors": actors}, deep=True)
 
+    @staticmethod
+    def _owned_effects(
+        runtime: EngineRuntimeSnapshot,
+        *,
+        adjudication: ActionAdjudication,
+        passed: bool,
+        check_run: CheckRun | None,
+    ) -> tuple[ActionEffect, ...]:
+        """Whose effects commit: the rule's if one owns this action, else the Agent's.
+
+        #226 §5 gives a named rule `effect_authority: rule` — the Agent chose the
+        method, but the published rule decides what the result does. Its
+        `result_routes` map the actual degree to a step, so a hard success and a
+        regular success can diverge in ways an Agent-authored effect list cannot
+        express.
+        """
+
+        decision = adjudication.rule_decision
+        if decision is None or not runtime.is_v3:
+            return (
+                adjudication.success_effects if passed else adjudication.failure_effects
+            )
+        rule, branch_id = resolve_rule_option(
+            runtime.v3,
+            rule_id=decision.rule_id,
+            option_id=decision.option_id,
+        )
+        step, _ = pending_check_for(rule, branch_id)
+        if step is None or check_run is None:
+            # No check in this branch: the whole chain already ran at submit time.
+            return ()
+        degree = (check_run.final_result or check_run.roll).degree
+        return tuple(effects_after_degree(rule, step.id, degree))
+
     def _finalize_action(
         self,
         runtime: EngineRuntimeSnapshot,
@@ -859,8 +909,11 @@ class AdjudicationEngineService:
                     },
                 )
             )
-        selected_effects = (
-            adjudication.success_effects if passed else adjudication.failure_effects
+        selected_effects = self._owned_effects(
+            runtime,
+            adjudication=adjudication,
+            passed=passed,
+            check_run=check_run,
         )
         for effect in selected_effects:
             state, emitted = self._apply_effect(

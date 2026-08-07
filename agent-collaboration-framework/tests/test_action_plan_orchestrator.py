@@ -52,6 +52,7 @@ from collaboration_framework.host.ports import (
     ActionPlanBusyError,
     ActionPlanVersionConflictError,
 )
+from collaboration_framework.host.schemas import ActionPlanRun
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -555,6 +556,83 @@ async def test_post_roll_retry_resolves_plan_once_without_duplicate_effects() ->
     assert [event.type for event in engine_store.inspect_domain_events("room_01")].count(
         "action.succeeded"
     ) == 2
+
+
+@pytest.mark.asyncio
+async def test_failed_plan_step_leaves_a_run_that_can_still_be_loaded() -> None:
+    """A step that fails must not persist a terminal run that still holds a lease.
+
+    `ActionPlanRun` rejects that combination, and `model_copy` does not re-run
+    validators — so writing it produces a row no store can read back. The next
+    load raises a bare ValidationError, which the transport can only report as
+    TURN_CONTRACT_INVALID, and every retry of the same action hits it again.
+    """
+
+    module, engine_store, projector = runtime()
+    adjudicator = RecordingAdjudicator(module.world_ref, check_step=0)
+    # spot is 60; an 80 fails the regular-difficulty check.
+    engine = AdjudicationEngineService(
+        engine_store,
+        dice=DiceRoller(SequenceDiceSource([80])),
+    )
+    store = InMemoryActionPlanRunStore()
+    service = ActionPlanOrchestrator(
+        store=store,
+        adjudicator=adjudicator,
+        executor=engine,
+        player_view_projector=projector,
+    )
+    original = player_input("failed-step-parent")
+
+    waiting = await service.start_or_resume(original, plan=plan(2))
+    pending = waiting.latest_execution
+    assert pending is not None and pending.pending_decision is not None
+    rolled = await engine.decide(
+        CheckDecisionRequest(
+            request_id="failed-step-parent:select",
+            room_id="room_01",
+            player_id="player_01",
+            source_revision=pending.view_revision,
+            decision_id=pending.pending_decision.decision_id,
+            decision_version=pending.pending_decision.decision_version,
+            choice=SelectCheckChoice(candidate_id="spot"),
+        )
+    )
+    assert rolled.status == "awaiting_post_roll_decision"
+    assert rolled.check_run is not None
+    accepted = await engine.decide_post_roll(
+        PostRollDecisionRequest(
+            request_id="failed-step-parent:accept",
+            room_id="room_01",
+            player_id="player_01",
+            source_revision=rolled.view_revision,
+            check_id=rolled.check_run.check_id,
+            check_version=rolled.check_run.version,
+            option_id="accept-current",
+        )
+    )
+    assert accepted.outcome == "failure"
+
+    stopped = await service.resume_owned(
+        room_id="room_01",
+        player_id="player_01",
+        actor_id="pc_1",
+        parent_action_id=original.client_action_id,
+    )
+
+    assert stopped.run.status == "stopped"
+    assert stopped.run.steps[0].safe_failure_code == "STEP_FAILED"
+    assert stopped.run.lease_owner is None
+    assert stopped.run.lease_expires_at is None
+
+    # What a persisting store does on every read. `model_copy` skips validators,
+    # so only this round trip catches an invariant the writer broke.
+    persisted = await store.load("room_01", original.client_action_id)
+    assert persisted is not None
+    ActionPlanRun.model_validate_json(persisted.model_dump_json())
+
+    # And the stopped plan must still be reloadable through the normal path.
+    assert await service.get_run("room_01", original.client_action_id) is not None
 
 
 @pytest.mark.asyncio

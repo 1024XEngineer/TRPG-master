@@ -30,6 +30,7 @@ from collaboration_framework.host.ports import (
     SingleAdjudicationExecutor,
 )
 from collaboration_framework.host.schemas import (
+    TERMINAL_PLAN_STATUSES,
     ActionPlanAdvanceResult,
     ActionPlanNarrationContext,
     ActionPlanRun,
@@ -814,21 +815,31 @@ class ActionPlanOrchestrator:
         current_step_index: int | None = None,
     ) -> ActionPlanRun:
         now = datetime.now(UTC)
+        next_status = status or run.status
+        # A terminal run must not keep a worker lease — `ActionPlanRun` refuses
+        # that combination outright. Dropping the lease here rather than in a
+        # follow-up `_release_lease` matters because this write is what a store
+        # persists: a store that validates on read (the SQLAlchemy one does)
+        # could no longer load the row it had just written, so the follow-up
+        # release would fail too and leave the run permanently unreadable.
+        release_lease = next_status in TERMINAL_PLAN_STATUSES
         updated = run.model_copy(
             update={
                 "steps": steps,
-                "status": status or run.status,
+                "status": next_status,
                 "current_step_index": (
                     run.current_step_index if current_step_index is None else current_step_index
                 ),
                 "run_version": run.run_version + 1,
+                "lease_owner": None if release_lease else run.lease_owner,
+                "lease_expires_at": None if release_lease else run.lease_expires_at,
                 "updated_at": now,
             },
             deep=True,
         )
         return await self._store.compare_and_swap(
             expected_run_version=run.run_version,
-            updated_run=updated,
+            updated_run=self._validated(updated),
         )
 
     async def _transition(
@@ -839,20 +850,33 @@ class ActionPlanOrchestrator:
         release_lease: bool,
     ) -> ActionPlanRun:
         now = datetime.now(UTC)
+        drop_lease = release_lease or status in TERMINAL_PLAN_STATUSES
         updated = run.model_copy(
             update={
                 "status": status,
                 "run_version": run.run_version + 1,
-                "lease_owner": None if release_lease else run.lease_owner,
-                "lease_expires_at": None if release_lease else run.lease_expires_at,
+                "lease_owner": None if drop_lease else run.lease_owner,
+                "lease_expires_at": None if drop_lease else run.lease_expires_at,
                 "updated_at": now,
             },
             deep=True,
         )
         return await self._store.compare_and_swap(
             expected_run_version=run.run_version,
-            updated_run=updated,
+            updated_run=self._validated(updated),
         )
+
+    @staticmethod
+    def _validated(run: ActionPlanRun) -> ActionPlanRun:
+        """Fail at the writer, not on the next read.
+
+        `model_copy(update=...)` does not re-run validators, so a broken
+        invariant would otherwise be persisted silently and only surface when
+        some later request tries to load the row — by then the failure is
+        unattributable and the run is stuck.
+        """
+
+        return ActionPlanRun.model_validate(run.model_dump(mode="json"))
 
     async def _release_lease(self, run: ActionPlanRun) -> ActionPlanRun:
         if run.lease_owner is None:

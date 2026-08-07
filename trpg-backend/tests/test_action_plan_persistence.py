@@ -15,6 +15,7 @@ from collaboration_framework.contracts import (
     NarrativeOnlyEffect,
     NoAdjudicationCheck,
     PlayerInput,
+    PostRollDecisionRequest,
     RequiredAdjudicationCheck,
     SelectCheckChoice,
     SkillCheckCandidate,
@@ -259,6 +260,121 @@ async def test_sql_plan_worker_lease_blocks_then_allows_recovery(
     )
     assert recovered.lease_owner == "worker-b"
     assert recovered.run_version == run.run_version + 2
+
+
+class SqlFirstStepCheckAdjudicator(SqlPendingPlanAdjudicator):
+    """Put the check on step 0 so the plan stops before any step completes."""
+
+    async def adjudicate(self, context):
+        shifted = context.model_copy(update={"step_index": 1}, deep=True)
+        if context.step_index == 0:
+            proposal = await super().adjudicate(shifted)
+            return proposal.model_copy(update={"summary": context.step.semantic_goal}, deep=True)
+        return await SqlPlanAdjudicator.adjudicate(self, context)
+
+
+async def test_sql_failed_plan_step_stays_loadable_after_the_run_stops(
+    db_session: AsyncSession,
+    engine_store_factory: Callable[..., SqlAlchemyEngineStore],
+    action_plan_store_factory: Callable[[], SqlAlchemyActionPlanRunStore],
+) -> None:
+    """A failed plan step must not persist a run the store can no longer read.
+
+    Regression for the TURN_CONTRACT_INVALID a player hit on a compound action:
+    the step's check failed, the run went to `stopped` while still holding its
+    worker lease, and `ActionPlanRun` rejects that pair. The SQLAlchemy store
+    validates on read, so the follow-up lease release could not load the row it
+    had just written — leaving it permanently unreadable and every retry of the
+    same clientActionId failing.
+    """
+
+    room, players, _ = await _start_room(db_session, prepare_checkpoint=False)
+    engine_store = engine_store_factory()
+    async with engine_store.transaction(room.id) as transaction:
+        runtime = await transaction.load_runtime()
+    actor_id = next(
+        actor_id
+        for actor_id, actor in runtime.game_state.actors.items()
+        if actor.player_id == players[0].id
+    )
+    entity_id = runtime.module_content.entities[0].id
+    original = PlayerInput(
+        room_id=room.id,
+        player_id=players[0].id,
+        actor_id=actor_id,
+        client_action_id="sql-failed-step-246",
+        utterance="我要侦查会客室周围，然后去墓地找守墓人",
+    )
+    plan = ActionPlan(
+        goal=original.utterance,
+        steps=(
+            ActionPlanStep(kind="action", semantic_goal="侦查会客室周围"),
+            ActionPlanStep(kind="travel", semantic_goal="前往公共墓地"),
+        ),
+    )
+    # Step 0 needs a check; a 100 fails it outright.
+    adjudicator = SqlFirstStepCheckAdjudicator(runtime.module_content.world_ref, entity_id)
+    engine = AdjudicationEngineService(
+        engine_store,
+        dice=DiceRoller(SequenceDiceSource([100])),
+    )
+    service = ActionPlanOrchestrator(
+        store=action_plan_store_factory(),
+        adjudicator=adjudicator,
+        executor=engine,
+        player_view_projector=PlayerViewProjector(RuleEngineService(engine_store)),
+    )
+
+    waiting = await service.start_or_resume(original, plan=plan)
+    assert waiting.run.status == "waiting_for_player"
+    pending = waiting.latest_execution
+    assert pending is not None and pending.pending_decision is not None
+
+    resolved = await engine.decide(
+        CheckDecisionRequest(
+            request_id="sql-failed-step-246:select",
+            room_id=room.id,
+            player_id=players[0].id,
+            source_revision=pending.view_revision,
+            decision_id=pending.pending_decision.decision_id,
+            decision_version=pending.pending_decision.decision_version,
+            choice=SelectCheckChoice(candidate_id="recoverable-choice"),
+        )
+    )
+    # A failed roll first offers post-roll options; accepting settles the step
+    # as a failure, which is the transition that used to corrupt the run.
+    assert resolved.status == "awaiting_post_roll_decision"
+    assert resolved.check_run is not None
+    accepted = await engine.decide_post_roll(
+        PostRollDecisionRequest(
+            request_id="sql-failed-step-246:accept",
+            room_id=room.id,
+            player_id=players[0].id,
+            source_revision=resolved.view_revision,
+            check_id=resolved.check_run.check_id,
+            check_version=resolved.check_run.version,
+            option_id="accept-current",
+        )
+    )
+    assert accepted.outcome == "failure"
+
+    stopped = await service.resume_owned(
+        room_id=room.id,
+        player_id=players[0].id,
+        actor_id=actor_id,
+        parent_action_id=original.client_action_id,
+    )
+    assert stopped.run.status == "stopped"
+    assert stopped.run.steps[0].safe_failure_code == "STEP_FAILED"
+    assert stopped.run.lease_owner is None
+
+    # The row must survive a real read, and the room must not stay reserved.
+    reloaded = await action_plan_store_factory().load(room.id, original.client_action_id)
+    assert reloaded is not None
+    assert reloaded.status == "stopped"
+    assert reloaded.lease_owner is None
+    reservation = await db_session.get(RoomActionReservation, room.id)
+    assert reservation is None
 
 
 async def test_sql_pending_plan_rebuild_replays_decision_without_duplicate_effect(

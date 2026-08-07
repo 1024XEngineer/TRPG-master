@@ -1,6 +1,6 @@
 """Issue #89 的 ORM、约束与内置 ModuleVersion 测试。"""
 
-from collaboration_framework.contracts import ModuleContent
+from collaboration_framework.contracts import ModuleContentV3
 from sqlalchemy import CheckConstraint, PrimaryKeyConstraint, String, UniqueConstraint, delete
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -124,14 +124,14 @@ async def test_loader_persists_valid_playable_module_version(db_session: AsyncSe
     assert scenario is not None
     assert scenario.status == "ready"
     assert module_version is not None
-    publication = ModuleContent.model_validate(module_version.content_json)
+    publication = ModuleContentV3.model_validate(module_version.content_json)
     assert publication.module_id == BUILTIN_MODULE_ID
     assert publication.module_id == module_version.module_id
     assert publication.version == module_version.version
     assert publication.world_ref == module_version.world_ref
     assert publication.world_ref == BUILTIN_WORLD_REF
-    assert len(publication.scenes) == 11
-    assert len(publication.entities) == 16
+    assert len(publication.locations) == 12
+    assert len(publication.entities) == 15
     assert publication.background
     assert publication.presentation is not None
     assert publication.presentation.players_min == 1
@@ -152,13 +152,13 @@ async def test_seed_does_not_overwrite_published_module_content(
     )
     assert module_version is not None
     existing_publication = dict(module_version.content_json)
-    scenes = list(existing_publication["scenes"])
-    scenes[0] = {
-        **scenes[0],
-        "content": "已经发布、不得被 seed 覆盖的内容。",
+    locations = list(existing_publication["locations"])
+    locations[0] = {
+        **locations[0],
+        "player_visible_description": "已经发布、不得被 seed 覆盖的内容。",
     }
-    existing_publication["scenes"] = scenes
-    ModuleContent.model_validate(existing_publication)
+    existing_publication["locations"] = locations
+    ModuleContentV3.model_validate(existing_publication)
     module_version.content_json = existing_publication
     await db_session.commit()
 

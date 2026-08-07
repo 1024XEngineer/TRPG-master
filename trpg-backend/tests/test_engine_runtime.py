@@ -168,7 +168,7 @@ async def _start_room(
         cemetery_figure.update(willing_to_talk=True, truth_told=True)
         game_session.state_json = state.model_copy(
             update={
-                "scene_id": "conversation",
+                "scene_id": "cemetery",
                 "entities": {
                     **state.entities,
                     "cemetery_figure": cemetery_figure,
@@ -329,7 +329,7 @@ async def test_begin_game_creates_stable_actor_snapshots(
     assert game_session.module_id == BUILTIN_MODULE_ID
     assert game_session.module_version == BUILTIN_MODULE_VERSION
     assert game_session.state_version == state.event_sequence == 0
-    assert state.scene_id == "client_briefing"
+    assert state.scene_id == "thomas_office"
     assert state.phase == "playing"
     assert list(state.actors) == ["actor_1", "actor_2"]
     assert state.actors["actor_1"].player_id == players[0].id
@@ -576,13 +576,13 @@ async def test_loaded_runtime_is_deep_copy_isolated(
     async with store.transaction(room.id) as transaction:
         runtime = await transaction.load_runtime()
         runtime.game_state.entities["case_tracker"]["investigator_disappeared"] = True
-        runtime.v2.entities[0].direct_responses["invented"] = "泄漏"
+        runtime.v3.entities[0].state["invented"] = "泄漏"
 
     async with store.transaction(room.id) as transaction:
         reloaded = await transaction.load_runtime()
 
     assert reloaded.game_state.entities["case_tracker"]["investigator_disappeared"] is False
-    assert "invented" not in reloaded.v2.entities[0].direct_responses
+    assert "invented" not in reloaded.v3.entities[0].state
 
 
 async def test_store_rejects_stale_revision_without_partial_writes(

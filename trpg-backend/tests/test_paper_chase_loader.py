@@ -23,13 +23,13 @@ async def test_loader_is_idempotent_and_reports_real_content(
 
     assert result.outcome == "unchanged"
     assert result.module_id == BUILTIN_MODULE_ID
-    assert result.version == "1.0.5"
+    assert result.version == "3.0.0"
     assert result.world_ref == "coc-7e"
-    assert result.scene_count == 11
-    assert result.entity_count == 16
-    assert result.checkpoint_count == 20
-    assert result.rule_count >= 9
-    assert result.win_condition_count == 4
+    assert result.location_count == 12
+    assert result.entity_count == 15
+    assert result.information_count == 7
+    assert result.rule_count == 26
+    assert result.ending_anchor_count == 4
     assert "result: unchanged" in result.summary_lines()
 
     scenario = await db_session.get(Scenario, BUILTIN_SCENARIO_ID)
@@ -39,37 +39,47 @@ async def test_loader_is_idempotent_and_reports_real_content(
     assert "被盗的五本珍藏旧书" in scenario.story_pages[0]["content"]
 
 
-async def test_paper_chase_models_caretaker_bottle_as_conditional_detail() -> None:
+async def test_paper_chase_models_caretaker_bottle_as_discoverable_state() -> None:
+    """看守兜里的酒瓶不能是"看一眼就知道"的公开描述。
+
+    v2 把它建成 melodias 的 narrative_detail + discovery_rule；v3 没有
+    narrative_details，同一件事改成 `state.bottle_noticed` 这个状态位，由
+    observe_caretaker 规则在检定成功后翻开。断言的仍是同一条性质：它既不是
+    一个独立实体，也不出现在初始描述里。
+    """
+
     payload = json.loads(loader.PAPER_CHASE_SOURCE_PATH.read_text(encoding="utf-8"))
-    assert payload["version"] == "1.0.5"
-    assert payload["event_rules"] == []
-    assert payload["initial_scene_id"] == "client_briefing"
+    assert payload["version"] == "3.0.0"
     entities = {entity["id"]: entity for entity in payload["entities"]}
-    checkpoints = {checkpoint["id"]: checkpoint for checkpoint in payload["checkpoints"]}
+    rules = {rule["id"]: rule for rule in payload["rules"]}
 
     assert "caretaker_bottle" not in entities
-    detail = entities["melodias"]["narrative_details"][0]
-    assert detail["id"] == "melodias_pocket_bottle"
-    assert detail["visibility"] == {
-        "audience": "all",
-        "requires_discovery": True,
-        "discovery_rule": "entity.melodias.state.bottle_noticed == true",
-        "discovery_shares_to_party": True,
-    }
-    assert "玻璃瓶" not in entities["melodias"]["content"]
-    assert checkpoints["observe_caretaker"]["target_id"] == "melodias"
+    melodias = entities["melodias"]
+    assert melodias["state"]["bottle_noticed"] is False
+    assert "玻璃瓶" not in melodias["description"]
+    assert "瓶" not in melodias["description"]
+
+    observe = rules["observe_caretaker"]
+    assert observe["trigger"]["scope"]["target_ids"] == ["melodias"]
+    assert "bottle_noticed" in json.dumps(observe["execution"], ensure_ascii=False)
 
 
-def test_paper_chase_keeps_previous_1_0_4_snapshot() -> None:
+def test_paper_chase_keeps_previous_v2_snapshots() -> None:
+    """切到 v3 不删旧快照——已经开局的房间可能还钉在某个 v2 版本上。"""
+
     current = json.loads(loader.PAPER_CHASE_SOURCE_PATH.read_text(encoding="utf-8"))
-    previous_path = loader.PAPER_CHASE_SOURCE_PATH.with_name("module-content-1.0.4.json")
-    previous = json.loads(previous_path.read_text(encoding="utf-8"))
+    assert current["version"] == "3.0.0"
+    assert current["content_schema_version"] == 3
 
-    assert current["version"] == "1.0.5"
-    assert current["event_rules"] == []
-    assert previous["version"] == "1.0.4"
-    assert "event_rules" not in previous
-    assert previous["module_id"] == current["module_id"]
+    for name, version in (
+        ("module-content-draft.json", "1.0.5"),
+        ("module-content-1.0.4.json", "1.0.4"),
+        ("module-content-1.0.1.json", "1.0.1"),
+    ):
+        snapshot_path = loader.PAPER_CHASE_SOURCE_PATH.with_name(name)
+        snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
+        assert snapshot["version"] == version
+        assert snapshot["module_id"] == current["module_id"]
 
 
 async def test_loader_projects_player_safe_presentation_to_catalog(
@@ -106,7 +116,7 @@ async def test_loader_rejects_other_identity_without_database_changes(
     )
     assert scenario is not None
     assert module_version is not None
-    assert module_version.content_schema_version == 2
+    assert module_version.content_schema_version == 3
     original_content = module_version.content_json
     await db_session.commit()
 
@@ -131,7 +141,7 @@ async def test_loader_rejects_validation_failure_before_writing(
     tmp_path: Path,
 ) -> None:
     payload = json.loads(loader.PAPER_CHASE_SOURCE_PATH.read_text(encoding="utf-8"))
-    payload["checkpoints"][0]["skills"] = ["not-a-coc7-skill"]
+    payload["rules"][0]["trigger"]["scope"]["location_ids"] = ["no-such-location"]
     source = tmp_path / "invalid-paper-chase.json"
     source.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     monkeypatch.setattr(loader, "PAPER_CHASE_SOURCE_PATH", source)
@@ -196,7 +206,7 @@ async def test_loader_preserves_rooms_pinned_legacy_version(
 
     result = await loader.load_paper_chase(db_session)
 
-    assert result.version == "1.0.5"
+    assert result.version == "3.0.0"
     legacy = await db_session.get(ModuleVersion, (BUILTIN_MODULE_ID, "1.0.1"))
     assert legacy is not None
     assert legacy.content_json == legacy_content

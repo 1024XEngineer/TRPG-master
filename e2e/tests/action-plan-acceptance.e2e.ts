@@ -17,10 +17,22 @@ const LEGAL_ATTRIBUTES = {
   APP: 50, SIZ: 50, INT: 50, EDU: 50, LUCK: 50,
 }
 
+/**
+ * 真实 provider 一次结构化输出要几十秒，一个两步计划要跑 planner + 两次步骤裁决
+ * + 叙事。Fake 下的 10s / 30s 在真实模型下必然超时，所以按路线放大。
+ *
+ * 这些用例断言的是「一句话被拆成多步」「某一步要检定」「某条 Canon 信息被发放」，
+ * 都是 A 侧模型行为；Fake 的 planner 只认连接词、步骤裁决器永远不出检定，结构上
+ * 就不可能满足，因此它们只在 E2E_REAL_MODEL=1 下才有意义。
+ */
+const REAL_MODEL = process.env.E2E_REAL_MODEL === '1'
+const EVENT_TIMEOUT_MS = REAL_MODEL ? 180_000 : 10_000
+const TEST_TIMEOUT_MS = REAL_MODEL ? 600_000 : 30_000
+
 function waitForEvent(
   owner: { roomSocket: { onMessage: (handler: (event: ServerToClientEvent) => void) => () => void } },
   predicate: (event: ServerToClientEvent) => boolean,
-  timeoutMs = 10_000,
+  timeoutMs = EVENT_TIMEOUT_MS,
 ): Promise<ServerToClientEvent> {
   return new Promise((resolvePromise, rejectPromise) => {
     const timer = setTimeout(() => {
@@ -163,7 +175,7 @@ function assertPersistedCancellation(roomId: string, actionId: string): void {
 }
 
 for (const canon of CANON_CASES) {
-  test(`Issue #246 Canon：${canon.name}由一次 action.plan.submit 完成`, { timeout: 30_000 }, async () => {
+  test(`Issue #246 Canon：${canon.name}由一次 action.plan.submit 完成`, { timeout: TEST_TIMEOUT_MS }, async () => {
     const room = await createRoomWithModule(`canon-${canon.destinationSceneId}`)
     await room.host.sdk.rooms.startStory(room.roomId, room.reconnectToken)
     await buildCharacter(room.host.sdk, room.roomId, room.reconnectToken)
@@ -319,7 +331,7 @@ for (const canon of CANON_CASES) {
   })
 }
 
-test('Issue #246 恢复：断线重连后用原 parent 恢复 pending，重复选择不重掷', { timeout: 30_000 }, async () => {
+test('Issue #246 恢复：断线重连后用原 parent 恢复 pending，重复选择不重掷', { timeout: TEST_TIMEOUT_MS }, async () => {
   const room = await createRoomWithModule('reconnect-pending')
   await room.host.sdk.rooms.startStory(room.roomId, room.reconnectToken)
   await buildCharacter(room.host.sdk, room.roomId, room.reconnectToken)
@@ -438,7 +450,7 @@ test('Issue #246 恢复：断线重连后用原 parent 恢复 pending，重复�
   }
 })
 
-test('Issue #246 恢复：取消保留已提交 travel 且停止剩余步骤', { timeout: 30_000 }, async () => {
+test('Issue #246 恢复：取消保留已提交 travel 且停止剩余步骤', { timeout: TEST_TIMEOUT_MS }, async () => {
   const room = await createRoomWithModule('cancel-plan')
   await room.host.sdk.rooms.startStory(room.roomId, room.reconnectToken)
   await buildCharacter(room.host.sdk, room.roomId, room.reconnectToken)

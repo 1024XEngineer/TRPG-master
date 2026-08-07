@@ -36,6 +36,24 @@ const TEST_PATTERN = process.argv[2] ?? process.env.E2E_ONLY ?? 'tests/*.e2e.ts'
  * 数据清掉是很讨厌的副作用。
  */
 const DB_FILE = resolve(BACKEND_DIR, 'e2e.db')
+
+/**
+ * `E2E_REAL_MODEL=1` 时改用 `trpg-backend/.env` 里配置的真实 provider。
+ *
+ * 默认仍然是 Fake：CI 不能依赖外部服务，也不该产生费用。但 Fake 的
+ * `DeterministicHostTurnDecisionModel` 只在出现「然后 / 接着 / 再去」这类连接词
+ * 时才切分成 ActionPlan，`_DeterministicStepAdjudicator` 也永远返回
+ * NoAdjudicationCheck + narrative_only——所以凡是断言「一句话拆成多步」「某一步
+ * 要检定」「某条 Canon 信息被发放」的用例，在 Fake 下**结构上不可能通过**，只会
+ * 等事件超时。这类用例要验的正是 A 侧模型行为，必须走真实模型。
+ */
+const USE_REAL_MODEL = process.env.E2E_REAL_MODEL === '1'
+const fakeModelEnv = {
+  // ⚠️ 显式锁定 Fake：本地 .env 可能把 Provider 切到远程模型，仅清空 Key 会在
+  // Settings 校验阶段失败；若透传 Key 则会让 E2E 依赖外部服务并产生费用。
+  HOST_MODEL_PROVIDER: 'fake',
+  DEEPSEEK_API_KEY: '',
+}
 const backendEnv = {
   ...process.env,
   DATABASE_URL: 'sqlite+aiosqlite:///./e2e.db',
@@ -49,13 +67,12 @@ const backendEnv = {
   // 同步秒回，action.submit 的房间锁窗口只有微秒级，两个客户端"同时提交"
   // 永远压不中 ACTION_IN_PROGRESS——没有这 1 秒，锁的并发拒绝路径在 e2e 里
   // 是测不到的死代码。代价是每次 action.submit 的用例多等 1 秒。
-  // ⚠️ 显式锁定 Fake：本地 .env 可能把 Provider 切到远程模型，仅清空 Key 会在
-  // Settings 校验阶段失败；若透传 Key 则会让 E2E 依赖外部服务并产生费用。
-  HOST_MODEL_PROVIDER: 'fake',
   APP_ENV: 'test',
   TEST_FIXED_DICE_ROLL: '1',
   NARRATOR_DELAY_SECONDS: '1',
-  DEEPSEEK_API_KEY: '',
+  // 真实模型下不注入这两个变量，让后端按 .env 解析 provider 与 key：环境变量
+  // 优先级高于 .env，注入空 Key 会直接卡在 Settings 校验。
+  ...(USE_REAL_MODEL ? {} : fakeModelEnv),
 }
 
 /**
@@ -139,6 +156,11 @@ let backend: ChildProcess | undefined
 let backendExitCode: number | undefined
 
 async function main(): Promise<number> {
+  console.log(
+    USE_REAL_MODEL
+      ? 'Host 模型：trpg-backend/.env 配置的真实 provider（E2E_REAL_MODEL=1）'
+      : 'Host 模型：Fake（设 E2E_REAL_MODEL=1 走真实 provider）'
+  )
   await assertPortFree(PORT)
   rmSync(DB_FILE, { force: true })
   await run(venvExecutable('alembic'), ['upgrade', 'head'], 'alembic')

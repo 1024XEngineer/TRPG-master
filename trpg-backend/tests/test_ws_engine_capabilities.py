@@ -52,6 +52,7 @@ def sync_client() -> TestClient:
     # not importable across modules; the body is a one-liner, so redeclare it.
     return TestClient(app)
 
+
 # Paper Chase, the module the WebSocket suite loads: the opening scene, a
 # keeper-only Information nobody has discovered yet, and one declared Ending.
 OPENING_SCENE = "client_briefing"

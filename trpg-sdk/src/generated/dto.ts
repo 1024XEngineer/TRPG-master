@@ -202,6 +202,7 @@ export interface CharacterPreviewRequest {
     [k: string]: number;
   };
   occupationChoiceSkillIds?: string[] | null;
+  generationMethod?: "pointbuy" | "roll";
 }
 
 /**
@@ -850,6 +851,26 @@ export interface PushOption {
   kind?: "push";
   requires_revised_method?: true;
   player_safe_risk_summary: string;
+}
+
+/**
+ * 可选的玩家身份信息；旧客户端不传时仍使用确定性默认资料。
+ */
+export interface QuickGenerateRequest {
+  name?: string | null;
+  age?: number | null;
+  gender?: string | null;
+  residence?: string;
+  birthplace?: string;
+}
+
+/**
+ * 一键生成后返回的房间角色草稿和权威计算结果。
+ */
+export interface QuickGenerateResult {
+  character: CharacterRead;
+  occupationId: number;
+  compute: CharacterComputeResult;
 }
 
 /**

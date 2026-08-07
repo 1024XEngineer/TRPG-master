@@ -1,11 +1,11 @@
 import { useNavigate } from 'react-router-dom'
 import { useState, useMemo, useEffect, useRef } from 'react'
-import { ArrowLeft, Plus, Minus, Search, Shield, Heart, Brain, Zap, Eye, Maximize2, Lightbulb, BookOpen, ChevronDown, X, Info, Clover } from 'lucide-react'
+import { ArrowLeft, Plus, Minus, Search, Shield, Heart, Brain, Zap, Eye, Maximize2, Lightbulb, BookOpen, ChevronDown, X, Info, Clover, Sparkles } from 'lucide-react'
 import type { CharacterComputeResult, SkillComputeView } from 'trpg-sdk'
 import type { Attributes, InvestigatorInfo } from '@/data/character-model'
 import { useCharacterStore } from '@/stores/character-store'
 import { useRoomStore } from '@/stores/room-store'
-import { createCharacterDraft, saveCharacter, completeCharacter, fetchCharacter } from '@/services/character/character-api'
+import { createCharacterDraft, saveCharacter, completeCharacter, fetchCharacter, quickGenerateCharacter } from '@/services/character/character-api'
 import { previewCharacter, translateCharacterValidationError } from '@/services/character/ruleset-api'
 import { friendlyErrorMessage } from '@/services/api-client'
 import { useRuleset } from '@/hooks/useRuleset'
@@ -76,12 +76,14 @@ async function previewWithAllocations(
   occupationId: number | null,
   allocations: Record<string, number>,
   occupationChoiceSkillIds: string[],
+  generationMethod: 'pointbuy' | 'roll' = 'pointbuy',
 ) {
   const basePreview = await previewCharacter({
     attributes,
     occupationId,
     skills: {},
     occupationChoiceSkillIds,
+    generationMethod,
   })
   const allocatedSkills = Object.entries(allocations).filter(([, points]) => points > 0)
   if (allocatedSkills.length === 0) {
@@ -97,6 +99,7 @@ async function previewWithAllocations(
     occupationId,
     skills: skillValues,
     occupationChoiceSkillIds,
+    generationMethod,
   })
   return { preview, skillValues }
 }
@@ -210,6 +213,10 @@ export default function CharacterPage() {
     .getState()
     .getForRoom(useRoomStore.getState().roomId ?? '')
 
+  const [generationMethod, setGenerationMethod] = useState<'pointbuy' | 'roll'>(
+    existingCharacter?.generationMethod ?? 'pointbuy'
+  )
+
   // Investigator info
   const [info, setInfo] = useState<InvestigatorInfo>(() => existingCharacter?.info ?? {
     name: '', playerName: '', age: '28', gender: '男',
@@ -254,6 +261,9 @@ export default function CharacterPage() {
         // 存成局部常量：下面几处在闭包里用到它，直接写 saved.attributes 会丢掉
         // 上面这行的收窄，TS 认为它仍可能是 undefined。
         const savedAttrs = saved.attributes
+        const savedGenerationMethod: 'pointbuy' | 'roll' = saved.generationMethod === 'roll'
+          ? 'roll'
+          : 'pointbuy'
         const matched = saved.occupation
           ? (ruleset.occupations.find(o => o.name === saved.occupation) ?? null)
           : null
@@ -277,6 +287,7 @@ export default function CharacterPage() {
           occupationId: matched?.id ?? null,
           skills: saved.skills ?? {},
           occupationChoiceSkillIds: saved.occupationChoiceSkillIds ?? null,
+          generationMethod: savedGenerationMethod,
         })
         if (cancelled) return
 
@@ -306,6 +317,7 @@ export default function CharacterPage() {
         }
 
         setAttr({ ...savedAttrs })
+        setGenerationMethod(savedGenerationMethod)
         // 输入框的字符串镜像必须一起重建。它平时只在「属性项集合变化」时同步
         // 一次（见下面 attrInputs 那个 effect：跟着 attr 走的话，每敲一个字都会
         // 被覆盖回去），而水合是之后才异步到达的——不在这里补一次，清掉本地
@@ -405,6 +417,9 @@ export default function CharacterPage() {
   const [choicePickerSlotIndex, setChoicePickerSlotIndex] = useState<number | null>(null)
   const [choiceSkillSearch, setChoiceSkillSearch] = useState('')
   const [choiceActionError, setChoiceActionError] = useState('')
+  const [quickGenerating, setQuickGenerating] = useState(false)
+  const [quickGenerateError, setQuickGenerateError] = useState('')
+  const [showQuickGenerateConfirm, setShowQuickGenerateConfirm] = useState(false)
 
   const selectedOcc = useMemo(() => {
     if (!ruleset || info.occupationId == null) return null
@@ -578,6 +593,7 @@ export default function CharacterPage() {
         info.occupationId,
         skillAlloc,
         occupationChoiceSkillIds,
+        generationMethod,
       )
         .then(({ preview: result }) => {
           if (gen !== previewGenRef.current) return
@@ -594,7 +610,7 @@ export default function CharacterPage() {
         })
     }, 400)
     return () => clearTimeout(timer)
-  }, [ruleset, attr, info.occupationId, skillAlloc, occupationChoiceSkillIds])
+  }, [ruleset, attr, info.occupationId, skillAlloc, occupationChoiceSkillIds, generationMethod])
 
   const skillComputeMap = useMemo(() => {
     const map = new Map<string, SkillComputeView>()
@@ -830,15 +846,16 @@ export default function CharacterPage() {
 
   const handleAttrChange = (key: string, delta: number) => {
     if (!pointBuyRules) return
-    setAttr(prev => {
-      const newVal = Math.max(
-        pointBuyRules.minValue,
-        Math.min(pointBuyRules.maxValue, (prev[key] ?? 0) + delta)
-      )
-      if (delta > 0 && sumOtherPointBuy(prev, key) + newVal > pointBuyRules.budget) return prev
-      setAttrInputs(inputs => ({ ...inputs, [key]: String(newVal) }))
-      return { ...prev, [key]: newVal }
-    })
+    const current = attr[key] ?? 0
+    const newVal = Math.max(
+      pointBuyRules.minValue,
+      Math.min(pointBuyRules.maxValue, current + delta)
+    )
+    if (generationMethod !== 'roll' && delta > 0 && sumOtherPointBuy(attr, key) + newVal > pointBuyRules.budget) return
+    if (newVal === current) return
+    setGenerationMethod('pointbuy')
+    setAttrInputs(inputs => ({ ...inputs, [key]: String(newVal) }))
+    setAttr(prev => ({ ...prev, [key]: newVal }))
   }
 
   // 手动输入属性值——允许先清空再打字（不在每次按键就夹值，否则没法删了重打），
@@ -847,17 +864,172 @@ export default function CharacterPage() {
   const commitAttrInput = (key: string) => {
     if (!pointBuyRules) return
     const raw = parseInt(attrInputs[key], 10)
-    setAttr(prev => {
-      const maxAllowed = Math.min(
-        pointBuyRules.maxValue,
-        pointBuyRules.budget - sumOtherPointBuy(prev, key)
-      )
-      const clamped = Number.isNaN(raw)
-        ? (prev[key] ?? pointBuyRules.defaultValue)
-        : Math.max(pointBuyRules.minValue, Math.min(maxAllowed, raw))
-      setAttrInputs(inputs => ({ ...inputs, [key]: String(clamped) }))
-      return { ...prev, [key]: clamped }
+    const current = attr[key] ?? pointBuyRules.defaultValue
+    const maxAllowed = generationMethod === 'roll'
+      ? pointBuyRules.maxValue
+      : Math.min(
+          pointBuyRules.maxValue,
+          pointBuyRules.budget - sumOtherPointBuy(attr, key)
+        )
+    const clamped = Number.isNaN(raw)
+      ? current
+      : Math.max(pointBuyRules.minValue, Math.min(maxAllowed, raw))
+    setAttrInputs(inputs => ({ ...inputs, [key]: String(clamped) }))
+    if (clamped !== current) {
+      setGenerationMethod('pointbuy')
+      setAttr(prev => ({ ...prev, [key]: clamped }))
+    }
+  }
+
+  const hasQuickGenerateDraft = Boolean(
+    info.occupationId != null
+      || Object.values(skillAlloc).some(value => value > 0)
+      || serializedBackground.trim()
+      || equipment.trim()
+      || notes.trim()
+  )
+
+  const hydrateQuickGeneratedCharacter = async (
+    result: Awaited<ReturnType<typeof quickGenerateCharacter>>,
+    roomId: string,
+    characterId: string,
+    playerInfo: InvestigatorInfo,
+  ) => {
+    const generated = result.character
+    const generatedOccupation = ruleset?.occupations.find(occupation => occupation.id === result.occupationId)
+    const generatedChoiceIds = generated.occupationChoiceSkillIds ?? result.compute.resolvedOccupationChoiceSkillIds ?? []
+    const generatedAllocations = Object.fromEntries(
+      result.compute.skillView
+        .filter(skill => skill.allocated > 0)
+        .map(skill => [skill.id, skill.allocated])
+    )
+    const occupationSkillIds = new Set([
+      ...(generatedOccupation?.skillIds ?? []),
+      ...generatedChoiceIds,
+    ])
+    const generatedInterestAllocations = Object.fromEntries(
+      Object.entries(generatedAllocations).filter(([skillId]) => (
+        skillId !== 'credit-rating' && !occupationSkillIds.has(skillId)
+      ))
+    )
+    const finalDerived = normalizeDerivedStats(result.compute.derivedStats)
+    const skillFinalValues = Object.fromEntries(
+      result.compute.skillView.map(skill => [skill.id, skill.current])
+    )
+
+    await saveCharacter(roomId, characterId, {
+      name: playerInfo.name.trim(),
+      age: playerInfo.age ? Number(playerInfo.age) : null,
+      gender: playerInfo.gender || null,
+      residence: playerInfo.residence,
+      birthplace: playerInfo.birthplace,
+      attr: generated.attributes ?? {},
+      derived: { hp: finalDerived.hp, san: finalDerived.san, mp: finalDerived.mp },
+      skillValues: skillFinalValues,
+      occupationChoiceSkillIds: generatedChoiceIds,
+      equipment: (generated.equipment ?? []).join('、'),
+      occupationName: generated.occupation ?? generatedOccupation?.name ?? null,
+      background: generated.background ?? '',
+      notes: generated.notes ?? '',
     })
+
+    // 一键生成的接口先保存为草稿；进入 ready 前完成同一张卡，确保房间状态和
+    // 头像生成接口都能把它视为已完成角色，而不是一个无法生图的半成品。
+    await completeCharacter(roomId, characterId)
+
+    setGenerationMethod('roll')
+    const generatedInfo: InvestigatorInfo = {
+      ...playerInfo,
+      name: playerInfo.name.trim(),
+      playerName: playerInfo.playerName || playerInfo.name.trim(),
+      occupationId: result.occupationId,
+    }
+    setInfo(previous => ({
+      ...previous,
+      name: generatedInfo.name,
+      age: generatedInfo.age,
+      gender: generatedInfo.gender,
+      residence: generatedInfo.residence,
+      birthplace: generatedInfo.birthplace,
+      occupationId: result.occupationId,
+    }))
+    setAttr({ ...(generated.attributes ?? {}) })
+    setAttrInputs(Object.fromEntries(
+      (ruleset?.attributes ?? [])
+        .filter(attribute => attribute.pointBuy)
+        .map(attribute => [attribute.key, String(generated.attributes?.[attribute.key] ?? '')])
+    ))
+    setSkillAlloc(generatedAllocations)
+    setInterestAlloc(generatedInterestAllocations)
+    setOccupationChoiceState({
+      occupationId: result.occupationId,
+      selections: splitChoiceSkillIds(generatedOccupation?.choiceSlots ?? [], generatedChoiceIds),
+    })
+    setEquipment((generated.equipment ?? []).join('、'))
+    setBackgroundForm(parseCharacterBackground(generated.background ?? ''))
+    setNotes(generated.notes ?? '')
+    setPreview(result.compute)
+    setPreviewError('')
+    setPreviewStatus('ready')
+    setPendingOccupationDelta(0)
+    setPendingInterestDelta(0)
+    setValidationAttempted(false)
+    setQuickGenerateError('')
+    useCharacterStore.getState().setCharacter(
+      {
+        info: generatedInfo,
+        generationMethod: 'roll',
+        attr: { ...(generated.attributes ?? {}) },
+        skillAlloc: generatedAllocations,
+        skillFinalValues,
+        occupationChoiceSkillIds: [...generatedChoiceIds],
+        equipment: (generated.equipment ?? []).join('、'),
+        background: generated.background ?? '',
+        notes: generated.notes ?? '',
+        derived: finalDerived,
+      },
+      roomId
+    )
+    navigate('/room/ready')
+  }
+
+  const runQuickGenerate = async () => {
+    if (!roomId || !ruleset || quickGenerating) return
+    setQuickGenerating(true)
+    setQuickGenerateError('')
+    setShowQuickGenerateConfirm(false)
+    try {
+      let characterId = useRoomStore.getState().characterId
+      if (!characterId) {
+        characterId = await createCharacterDraft(roomId)
+        setCharacterId(characterId)
+      }
+      const result = await quickGenerateCharacter(roomId, characterId, { ...info })
+      await hydrateQuickGeneratedCharacter(result, roomId, characterId, { ...info })
+    } catch (err) {
+      setQuickGenerateError(friendlyErrorMessage(err, '一键生成失败，请稍后重试'))
+    } finally {
+      setQuickGenerating(false)
+    }
+  }
+
+  const handleQuickGenerate = () => {
+    if (quickGenerating) return
+    if (!info.name.trim()) {
+      setQuickGenerateError('请先填写调查员姓名，姓名和性别由你自己决定。')
+      setValidationAttempted(true)
+      return
+    }
+    if (!info.gender.trim()) {
+      setQuickGenerateError('请先选择调查员性别，姓名和性别由你自己决定。')
+      setValidationAttempted(true)
+      return
+    }
+    if (hasQuickGenerateDraft) {
+      setShowQuickGenerateConfirm(true)
+      return
+    }
+    void runQuickGenerate()
   }
 
   const steps = [
@@ -937,6 +1109,7 @@ export default function CharacterPage() {
           info.occupationId,
           skillAlloc,
           occupationChoiceSkillIds,
+          generationMethod,
         )
       const finalDerived = normalizeDerivedStats(finalPreview.derivedStats)
       const skillFinalValues = Object.fromEntries(
@@ -972,6 +1145,7 @@ export default function CharacterPage() {
       useCharacterStore.getState().setCharacter(
         {
           info: { ...info, playerName: info.playerName || info.name },
+          generationMethod,
           attr: { ...attr },
           skillAlloc: { ...skillAlloc },
           skillFinalValues,
@@ -1052,6 +1226,23 @@ export default function CharacterPage() {
           {/* ═══════════════ Step 0: Info + Occupation ═══════════════ */}
           {step === 0 && (
             <div className="px-5 pb-20 animate-screen-in">
+              <div className="mb-3">
+                <button
+                  type="button"
+                  onClick={handleQuickGenerate}
+                  disabled={quickGenerating || !roomId}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-md border border-brass bg-[#fffaf0] text-brass-dark text-sm font-semibold transition-all active:bg-[#f8edd8] disabled:opacity-60"
+                >
+                  <Sparkles className="w-4 h-4" />
+                  {quickGenerating ? '正在生成调查员…' : '一键生成调查员'}
+                </button>
+                {quickGenerateError && (
+                  <p className="mt-2 text-[11px] text-[#c04040]" role="alert">{quickGenerateError}</p>
+                )}
+                {!roomId && (
+                  <p className="mt-2 text-[11px] text-text-muted">加入房间后才能生成调查员。</p>
+                )}
+              </div>
               {/* Basic Info */}
               <div data-onboarding-target="character-info" className="bg-card border border-border-light rounded-md p-[18px] mb-3">
                 <h4 className="text-[12px] font-semibold text-brass-dark uppercase tracking-[0.08em] mb-3.5">调查员信息</h4>
@@ -1222,19 +1413,27 @@ export default function CharacterPage() {
             <div className="px-5 pb-20 animate-screen-in">
               <div className="bg-card border border-border-light rounded-md p-[18px]">
                 <h4 className="text-[12px] font-semibold text-brass-dark uppercase tracking-[0.08em] mb-1.5">属性分配</h4>
-                <p className="text-[11px] text-text-muted mb-2">点击 +/- 调整属性值（范围 {pointBuyRules?.minValue ?? '—'}-{pointBuyRules?.maxValue ?? '—'}，每次 ±5）</p>
-                <div className="bg-panel rounded-md px-3.5 py-2 mb-3 flex items-center gap-3">
-                  <div className="flex-1">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-[11px] font-medium text-text-muted">总点数</span>
-                      <span className="text-[12px] font-bold font-mono text-text-primary">{attrPointsTotal}<span className="text-text-dim font-normal">/{pointBuyRules?.budget ?? '—'}</span></span>
-                    </div>
-                    <div className="h-1.5 rounded-full bg-border-light overflow-hidden">
-                      <div className="h-full rounded-full bg-brass transition-all duration-300" style={{ width: `${pointBuyRules ? Math.min(100, (attrPointsTotal / pointBuyRules.budget) * 100) : 0}%` }} />
-                    </div>
+                <p className="text-[11px] text-text-muted mb-2">
+                  点击 +/- 调整属性值（范围 {pointBuyRules?.minValue ?? '—'}-{pointBuyRules?.maxValue ?? '—'}，每次 ±5）
+                </p>
+                {generationMethod === 'roll' ? (
+                  <div className="bg-[#fdf3e0] border border-[#e0c088] rounded-md px-3.5 py-2 mb-3 text-[11px] text-[#8a6a2a]">
+                    这些属性由 COC7 标准骰法生成，不占用属性点。手动调整后会切换为点数购买法，并按预算校验。
                   </div>
-                  <span className="text-[10px] text-text-dim">{pointBuyRules ? pointBuyRules.budget - attrPointsTotal : 0} 点剩余</span>
-                </div>
+                ) : (
+                  <div className="bg-panel rounded-md px-3.5 py-2 mb-3 flex items-center gap-3">
+                    <div className="flex-1">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[11px] font-medium text-text-muted">总点数</span>
+                        <span className="text-[12px] font-bold font-mono text-text-primary">{attrPointsTotal}<span className="text-text-dim font-normal">/{pointBuyRules?.budget ?? '—'}</span></span>
+                      </div>
+                      <div className="h-1.5 rounded-full bg-border-light overflow-hidden">
+                        <div className="h-full rounded-full bg-brass transition-all duration-300" style={{ width: `${pointBuyRules ? Math.min(100, (attrPointsTotal / pointBuyRules.budget) * 100) : 0}%` }} />
+                      </div>
+                    </div>
+                    <span className="text-[10px] text-text-dim">{pointBuyRules ? pointBuyRules.budget - attrPointsTotal : 0} 点剩余</span>
+                  </div>
+                )}
                 <div className="grid grid-cols-1 gap-2">
                   {pointBuyAttributes.map(attribute => {
                     const key = attribute.key
@@ -1332,7 +1531,7 @@ export default function CharacterPage() {
                               <Info className="w-2.5 h-2.5" strokeWidth={2.5} />
                             </button>
                           </div>
-                          <div className="text-[10px] text-text-dim mt-0.5">不占属性点数（规则为独立掷 {attribute.generation}，掷骰生成待接入，暂为默认值）</div>
+                          <div className="text-[10px] text-text-dim mt-0.5">不占属性点数（规则为独立掷 {attribute.generation}，由当前生成方式决定）</div>
                         </div>
                         <span className="text-[17px] font-bold font-mono text-text-primary min-w-[36px] text-center">{attr[attribute.key] ?? '—'}</span>
                       </div>
@@ -1705,6 +1904,44 @@ export default function CharacterPage() {
                     className="mt-4 w-full flex items-center justify-center gap-2 py-3 rounded-sm bg-brass text-white text-sm font-semibold active:bg-brass-dark transition-all"
                   >
                     选择 {detailOcc.name}
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+
+          {showQuickGenerateConfirm && (
+            <>
+              <div
+                className="fixed inset-0 bg-black/50 z-40 animate-fade-in"
+                onClick={() => setShowQuickGenerateConfirm(false)}
+              />
+              <div className="fixed inset-x-5 top-1/2 z-50 mx-auto max-w-[390px] -translate-y-1/2 rounded-lg bg-page border border-border-light p-5 shadow-xl">
+                <div className="flex items-start gap-3">
+                  <div className="w-9 h-9 rounded-full bg-[#fff2d8] flex items-center justify-center flex-shrink-0">
+                    <Sparkles className="w-4 h-4 text-brass-dark" />
+                  </div>
+                  <div>
+                    <h3 className="text-[16px] font-bold text-text-primary">覆盖当前草稿？</h3>
+                    <p className="mt-1.5 text-[12px] leading-relaxed text-text-muted">
+                      一键生成会替换当前已填写的信息、属性、技能和背景，生成后仍可继续修改。这个操作不能恢复当前草稿。
+                    </p>
+                  </div>
+                </div>
+                <div className="flex gap-2.5 mt-5">
+                  <button
+                    type="button"
+                    onClick={() => setShowQuickGenerateConfirm(false)}
+                    className="flex-1 px-4 py-2.5 rounded-sm border border-border-mid bg-card text-sm font-semibold text-text-body"
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void runQuickGenerate()}
+                    className="flex-1 px-4 py-2.5 rounded-sm bg-brass text-white text-sm font-semibold"
+                  >
+                    继续生成
                   </button>
                 </div>
               </div>

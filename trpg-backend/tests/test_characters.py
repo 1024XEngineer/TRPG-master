@@ -415,6 +415,80 @@ async def test_roll_attributes_marks_card_as_rolled(client: AsyncClient) -> None
     assert read_back.json()["data"]["generationMethod"] == "roll"
 
 
+async def test_quick_generate_saves_a_complete_rule_valid_draft(client: AsyncClient) -> None:
+    room = await create_room(client)
+    draft = await client.post(
+        f"{ROOMS_BASE}/{room['roomId']}/characters", headers=reconnect(room["reconnectToken"])
+    )
+    character_id = draft.json()["data"]["characterId"]
+
+    generated = await client.post(
+        f"{ROOMS_BASE}/{room['roomId']}/characters/{character_id}/quick-generate",
+        headers=reconnect(room["reconnectToken"]),
+    )
+
+    assert generated.status_code == 200, generated.text
+    data = generated.json()["data"]
+    assert data["character"]["status"] == "draft"
+    assert data["character"]["generationMethod"] == "roll"
+    assert data["character"]["occupation"]
+    assert "形象描述：" in data["character"]["background"]
+    assert data["compute"]["validation"] == []
+
+    completed = await client.post(
+        f"{ROOMS_BASE}/{room['roomId']}/characters/{character_id}/complete",
+        headers=reconnect(room["reconnectToken"]),
+    )
+    assert completed.status_code == 200, completed.text
+
+
+async def test_quick_generate_uses_player_identity(client: AsyncClient) -> None:
+    room = await create_room(client)
+    draft = await client.post(
+        f"{ROOMS_BASE}/{room['roomId']}/characters", headers=reconnect(room["reconnectToken"])
+    )
+    character_id = draft.json()["data"]["characterId"]
+
+    generated = await client.post(
+        f"{ROOMS_BASE}/{room['roomId']}/characters/{character_id}/quick-generate",
+        json={
+            "name": "许墨",
+            "age": 36,
+            "gender": "男",
+            "residence": "上海",
+            "birthplace": "苏州",
+        },
+        headers=reconnect(room["reconnectToken"]),
+    )
+
+    assert generated.status_code == 200, generated.text
+    character = generated.json()["data"]["character"]
+    assert character["name"] == "许墨"
+    assert character["age"] == 36
+    assert character["gender"] == "男"
+    assert character["residence"] == "上海"
+    assert character["birthplace"] == "苏州"
+
+
+async def test_quick_generate_cannot_access_another_players_character(
+    client: AsyncClient,
+) -> None:
+    room = await create_room(client)
+    other_token = await register(client)
+    joined = await join_room(client, room["roomCode"], other_token)
+    draft = await client.post(
+        f"{ROOMS_BASE}/{room['roomId']}/characters", headers=reconnect(room["reconnectToken"])
+    )
+    character_id = draft.json()["data"]["characterId"]
+
+    response = await client.post(
+        f"{ROOMS_BASE}/{room['roomId']}/characters/{character_id}/quick-generate",
+        headers=reconnect(joined["reconnectToken"]),
+    )
+
+    assert response.status_code == 403
+
+
 async def test_replacing_rolled_attributes_falls_back_to_point_buy(client: AsyncClient) -> None:
     """🔴 掷完骰再自己重填属性，来源标记必须退回点数购买法（PR #97 review [1]）。
 

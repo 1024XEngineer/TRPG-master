@@ -77,6 +77,20 @@ export async function fetchCharacter(roomId: string, characterId: string) {
   return sdk.characters.get(roomId, characterId, requireReconnectToken());
 }
 
+export async function quickGenerateCharacter(
+  roomId: string,
+  characterId: string,
+  identity: { name: string; age?: string; gender: string; residence: string; birthplace: string }
+) {
+  return sdk.characters.quickGenerate(roomId, characterId, requireReconnectToken(), {
+    name: identity.name.trim(),
+    age: identity.age ? Number(identity.age) : null,
+    gender: identity.gender || null,
+    residence: identity.residence,
+    birthplace: identity.birthplace,
+  });
+}
+
 export async function completeCharacter(roomId: string, characterId: string): Promise<void> {
   await sdk.characters.complete(roomId, characterId, requireReconnectToken());
 }

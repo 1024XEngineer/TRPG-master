@@ -185,7 +185,7 @@ class RuleEngineService:
                 id=scene.id,
                 name=scene.player_visible_name,
                 description=scene.player_visible_description,
-                time=state.clock.time_of_day,
+                time=state.world_time.time_of_day,
                 narrative_details=RuleEngineService._project_narrative_details(
                     scene.narrative_details,
                     runtime=runtime,
@@ -211,8 +211,9 @@ class RuleEngineService:
                 available_exits=available_exits,
             ),
             world=ProjectionWorldState(
-                elapsed_minutes=state.clock.elapsed_minutes,
-                time_of_day=state.clock.time_of_day,
+                day_index=state.world_time.current.day_index,
+                hour_of_day=state.world_time.current.hour_of_day,
+                time_of_day=state.world_time.time_of_day,
                 core_resolved=state.core_resolved,
                 ending_available=state.ending_available,
                 ending_id=state.ending_id,

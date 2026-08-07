@@ -174,9 +174,11 @@ class ProjectionV3Tests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(released.scope, "party")
         self.assertNotIn(keeper_text, released.content)
 
-    async def test_world_block_carries_the_clock_and_ending_state(self) -> None:
+    async def test_world_block_carries_the_time_point_and_ending_state(self) -> None:
         snapshot = await self.project(game_state(self.content))
-        self.assertEqual(snapshot.world.elapsed_minutes, 0)
+        self.assertEqual(snapshot.world.day_index, 0)
+        self.assertEqual(snapshot.world.hour_of_day, 12)
+        self.assertEqual(snapshot.world.time_of_day, "day")
         self.assertFalse(snapshot.world.core_resolved)
         self.assertFalse(snapshot.world.ending_available)
 

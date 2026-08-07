@@ -122,7 +122,7 @@ def _evaluate_predicate(
         # conditions are meant to fire on a fresh room.
         return (current if current is not None else False) == expected
     if condition.predicate == "time_of_day_is":
-        return state.clock.time_of_day == args.get("value")
+        return state.world_time.time_of_day == args.get("value")
     if condition.predicate == "information_is":
         information_id = args.get("id")
         if not isinstance(information_id, str):

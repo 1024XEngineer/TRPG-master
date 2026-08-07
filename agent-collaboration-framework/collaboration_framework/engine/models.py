@@ -47,28 +47,61 @@ class ActorState(ContractModel):
 
 DAY_STARTS_HOUR = 6
 NIGHT_STARTS_HOUR = 18
-MINUTES_PER_DAY = 24 * 60
 
 
-def time_of_day_at(elapsed_minutes: int) -> Literal["day", "night"]:
-    """The single day/night boundary: 06:00–18:00 is day, wrapping past midnight.
+def time_of_day_at_hour(hour_of_day: int) -> Literal["day", "night"]:
+    """The single day/night boundary: 06:00–18:00 is day.
 
-    This lived in two places with two different answers — room initialization used
-    the 06–18 window while `advance_time` used "first half of the day". They only
-    ever agreed because the v2 fixture opened at midnight; the v3 fixture opens at
-    noon, and 13 hours later the two disagreed (#226).
+    Derived, never stored. Two places used to compute this independently and gave
+    different answers; they only agreed because the v2 fixture opened at midnight
+    (#226).
     """
 
-    hour = (elapsed_minutes % MINUTES_PER_DAY) // 60
-    return "day" if DAY_STARTS_HOUR <= hour < NIGHT_STARTS_HOUR else "night"
+    return "day" if DAY_STARTS_HOUR <= hour_of_day < NIGHT_STARTS_HOUR else "night"
 
 
-class ClockState(ContractModel):
-    """Small deterministic clock used by module expressions and time hooks."""
+class WorldTimePoint(ContractModel):
+    """An exact hour on the world calendar (#245 §二.2)."""
 
-    elapsed_minutes: int = Field(default=0, ge=0)
-    time_of_day: Literal["day", "night"] = "day"
-    turn: int = Field(default=0, ge=0)
+    day_index: int = Field(default=0, ge=0)
+    hour_of_day: int = Field(default=0, ge=0, le=23)
+
+    @property
+    def absolute_hour(self) -> int:
+        """Total ordering across days, so "next point" is a plain comparison."""
+
+        return self.day_index * 24 + self.hour_of_day
+
+    @property
+    def time_of_day(self) -> Literal["day", "night"]:
+        return time_of_day_at_hour(self.hour_of_day)
+
+
+class WorldTimeState(ContractModel):
+    """Where the room currently sits on the discrete timeline (#245 §一.1).
+
+    Time never flows: it does not tick with real time, does not accrue per action,
+    and cannot land between authored points. It only jumps from `current_point_id`
+    to the next point in the ordered timeline.
+
+    #245 §二.2 also lists room_id / module_id / module_version / revision /
+    last_event_id on this record. Those are deliberately not duplicated here —
+    EngineRuntimeSnapshot already carries them, and a second copy of `revision`
+    inside the committed state is exactly the kind of thing that silently drifts.
+    The read-side view assembles the full shape from both (S2).
+    """
+
+    # 默认落在正午而不是午夜：v2 房间没有 time_policy，起点是任选的，而
+    # time_of_day 现在是推导出来的——午夜会让"没声明时间的房间一开局就是夜里"。
+    # v3 房间一律由 initial_state.start_time_point_id 覆盖这个默认值。
+    current: WorldTimePoint = Field(
+        default_factory=lambda: WorldTimePoint(day_index=0, hour_of_day=12)
+    )
+    current_point_id: str = Field(default="hour_12", min_length=1)
+
+    @property
+    def time_of_day(self) -> Literal["day", "night"]:
+        return self.current.time_of_day
 
 
 class GameState(ContractModel):
@@ -81,7 +114,7 @@ class GameState(ContractModel):
     event_sequence: int = Field(default=0, ge=0)
     actors: dict[str, ActorState]
     entities: dict[str, dict[str, JsonValue]]
-    clock: ClockState = Field(default_factory=ClockState)
+    world_time: WorldTimeState = Field(default_factory=WorldTimeState)
     discovered_facts: tuple[str, ...] = ()
     actor_discovered_facts: dict[str, tuple[str, ...]] = Field(default_factory=dict)
     runtime_locations: dict[str, dict[str, JsonValue]] = Field(default_factory=dict)

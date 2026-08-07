@@ -198,7 +198,8 @@ class PlayerViewProjector:
                 ),
             ),
             world=WorldStateView(
-                elapsed_minutes=snapshot.world.elapsed_minutes,
+                day_index=snapshot.world.day_index,
+                hour_of_day=snapshot.world.hour_of_day,
                 time_of_day=snapshot.world.time_of_day,
                 core_resolved=snapshot.world.core_resolved,
                 ending_available=snapshot.world.ending_available,

@@ -112,13 +112,14 @@ class ProjectionScene(ContractModel):
 class ProjectionWorldState(ContractModel):
     """Player-safe world facts the Engine commits outside the current scene.
 
-    These are the projections of the `advance_time`, `mark_core_resolved`,
+    These are the projections of the world time (#245), `mark_core_resolved`,
     `set_ending_availability` and `commit_terminal_ending` effects: without them
     an Engine commit changes authoritative state that neither the Agent's next
     turn nor the player can observe.
     """
 
-    elapsed_minutes: int = Field(default=0, ge=0)
+    day_index: int = Field(default=0, ge=0)
+    hour_of_day: int = Field(default=0, ge=0, le=23)
     time_of_day: Literal["day", "night"] = "day"
     core_resolved: bool = False
     ending_available: bool = False
@@ -287,7 +288,8 @@ class WorldStateView(ContractModel):
     side of the projector.
     """
 
-    elapsed_minutes: int = Field(default=0, ge=0)
+    day_index: int = Field(default=0, ge=0)
+    hour_of_day: int = Field(default=0, ge=0, le=23)
     time_of_day: Literal["day", "night"] = "day"
     core_resolved: bool = False
     ending_available: bool = False

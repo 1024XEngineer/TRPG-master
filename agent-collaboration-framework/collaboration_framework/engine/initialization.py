@@ -6,7 +6,7 @@ from collections.abc import Mapping
 
 from collaboration_framework.contracts import ModuleContent, ModuleContentV3
 
-from .models import ActorState, ClockState, GameState, time_of_day_at
+from .models import ActorState, GameState, WorldTimePoint, WorldTimeState
 
 
 def create_initial_game_state(
@@ -14,7 +14,7 @@ def create_initial_game_state(
     *,
     room_id: str,
     actors: Mapping[str, ActorState],
-    clock: ClockState | None = None,
+    world_time: WorldTimeState | None = None,
 ) -> GameState:
     """Hydrate the module-declared opening location and entity state defaults."""
 
@@ -32,7 +32,7 @@ def create_initial_game_state(
             scene_id=initial.start_location_id,
             actors=dict(actors),
             entities=entities,
-            clock=clock or _clock_for(module_content),
+            world_time=world_time or _world_time_for(module_content),
             discovered_facts=tuple(sorted(initial.revealed_information_ids)),
         )
     return GameState(
@@ -43,27 +43,22 @@ def create_initial_game_state(
             entity.id: dict(entity.state)
             for entity in module_content.entities
         },
-        clock=clock or ClockState(),
+        world_time=world_time or WorldTimeState(),
     )
 
 
-def _clock_for(module_content: ModuleContentV3) -> ClockState:
-    """Start the world clock on the module's declared opening time point (#245)."""
+def _world_time_for(module_content: ModuleContentV3) -> WorldTimeState:
+    """Open the room on the module's declared starting time point (#245 §一.1).
 
+    A module that declares none opens on its first ordered point rather than at
+    an arbitrary hour: every later jump is resolved relative to `current_point_id`,
+    so the room has to start *on* a point, not between them.
+    """
+
+    points = sorted(module_content.time_policy.default_points, key=lambda item: item.order)
     start_id = module_content.initial_state.start_time_point_id
-    if start_id is None:
-        return ClockState()
-    point = next(
-        (
-            item
-            for item in module_content.time_policy.default_points
-            if item.id == start_id
-        ),
-        None,
-    )
-    if point is None:
-        return ClockState()
-    return ClockState(
-        elapsed_minutes=point.hour_of_day * 60,
-        time_of_day=time_of_day_at(point.hour_of_day * 60),
+    point = next((item for item in points if item.id == start_id), None) or points[0]
+    return WorldTimeState(
+        current=WorldTimePoint(day_index=0, hour_of_day=point.hour_of_day),
+        current_point_id=point.id,
     )

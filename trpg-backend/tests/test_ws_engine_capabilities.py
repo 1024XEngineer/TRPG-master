@@ -20,7 +20,6 @@ from collaboration_framework.contracts import (
     ActionAdjudication,
     ActionMethod,
     ActionTarget,
-    AdvanceTimeEffect,
     CommitTerminalEndingEffect,
     EnsureRuntimeEntityEffect,
     EnsureRuntimeLocationEffect,
@@ -201,21 +200,27 @@ def test_runtime_location_is_created_entered_and_projected(
     }
 
 
-def test_advanced_time_reaches_the_client(
+def test_world_time_reaches_the_client_as_a_discrete_point(
     sync_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """行动不再推进时间（#245 附录E）：一次行动之后 WorldTime 必须原地不动。
+
+    这条替代了原来的 advance_time 用例。时间只在 ready 门禁通过后由
+    advance_to_next 整点跳转，模组制造节奏只能通过 TimeTask。
+    """
+
     view, _ = _play_one_action(
         sync_client,
         monkeypatch,
         "cap_time",
-        AdvanceTimeEffect(minutes=13 * 60, reason="整个下午都在走访"),
+        RevealInformationEffect(information_id=KEEPER_INFORMATION),
     )
 
-    # v3 的 initial_state.start_time_point_id 是 hour_12，开局就已经是 720 分钟；
-    # 断绝对值等于把 fixture 的起点写死进用例，所以只断这次推进的增量。
-    assert view["world"]["elapsed_minutes"] == 12 * 60 + 13 * 60
-    assert view["world"]["time_of_day"] == "night"
+    # 追书人 v3 的 initial_state.start_time_point_id 是 hour_12。
+    assert view["world"]["day_index"] == 0
+    assert view["world"]["hour_of_day"] == 12
+    assert view["world"]["time_of_day"] == "day"
 
 
 def test_ending_availability_and_confirmation_reach_the_client(

@@ -79,34 +79,6 @@
       "title": "AddOperationSpec",
       "type": "object"
     },
-    "AdvanceTimeEffect": {
-      "additionalProperties": false,
-      "properties": {
-        "type": {
-          "const": "advance_time",
-          "default": "advance_time",
-          "title": "Type",
-          "type": "string"
-        },
-        "minutes": {
-          "maximum": 10080,
-          "minimum": 1,
-          "title": "Minutes",
-          "type": "integer"
-        },
-        "reason": {
-          "minLength": 1,
-          "title": "Reason",
-          "type": "string"
-        }
-      },
-      "required": [
-        "minutes",
-        "reason"
-      ],
-      "title": "AdvanceTimeEffect",
-      "type": "object"
-    },
     "AllowOperationSpec": {
       "additionalProperties": false,
       "properties": {
@@ -803,7 +775,6 @@
           "items": {
             "discriminator": {
               "mapping": {
-                "advance_time": "#/$defs/AdvanceTimeEffect",
                 "change_entity_state": "#/$defs/ChangeEntityStateEffect",
                 "commit_terminal_ending": "#/$defs/CommitTerminalEndingEffect",
                 "consume_entity": "#/$defs/ConsumeEntityEffect",
@@ -847,9 +818,6 @@
               },
               {
                 "$ref": "#/$defs/ConsumeEntityEffect"
-              },
-              {
-                "$ref": "#/$defs/AdvanceTimeEffect"
               },
               {
                 "$ref": "#/$defs/MarkCoreResolvedEffect"

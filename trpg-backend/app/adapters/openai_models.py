@@ -79,9 +79,6 @@ keeper_capabilities 时，只能使用 enter_location 与 narrative_only。
 - change_entity_state：记录实体上一个具体、可观察的变化（门被撬开、灯被点亮）。
   key 只能用字母数字下划线短横。
 - consume_entity：实体被用掉、烧毁或彻底失效时使用。
-- advance_time：只在这次行动**在虚构世界里真的花掉了时间**（赶路、长时间搜查、
-  等待、休息）时使用，minutes 给一个保守估计，reason 用一句玩家安全的说明。
-  普通一问一答不要推进时间。
 - mark_core_resolved：主线目标真的被达成时使用一次。
 - set_ending_availability：主线已经收束、可以开始走结局流程时置 true。
 - commit_terminal_ending：ending_id 取自 keeper_capabilities.endings[].id。这会直接

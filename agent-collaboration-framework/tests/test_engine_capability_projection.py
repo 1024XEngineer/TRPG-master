@@ -20,7 +20,6 @@ from collaboration_framework.contracts import (
     ActionAdjudication,
     ActionMethod,
     ActionTarget,
-    AdvanceTimeEffect,
     CommitTerminalEndingEffect,
     ConsumeEntityEffect,
     EnsureRuntimeEntityEffect,
@@ -207,33 +206,13 @@ class EngineCapabilityProjectionTests(unittest.IsolatedAsyncioTestCase):
         after = await self.engine.read(SCOPE)
         self.assertNotIn("window", {entity.id for entity in after.scene.visible_entities})
 
-    async def test_advance_time_moves_the_projected_world_clock(self) -> None:
-        # `elapsed_minutes` 是午夜起算的分钟数——create_initial_game_state 把
-        # authored 的 hour_of_day * 60 放进来。这份 demo fixture 没有 authored
-        # 时间点，落在 ClockState() 默认值上（0 分钟却标着 day，两者对不上；
-        # 那个默认值属于 #245 的 WorldTime 范围，这里不动它）。这条用例验的是
-        # 推进本身：跨过 18:00 之后必须变成 night。
-        before = await self.engine.read(SCOPE)
-        self.assertEqual(before.world.elapsed_minutes, 0)
+    async def test_world_time_is_projected_as_a_discrete_point(self) -> None:
+        """时间只在离散点上，投影出的是 day_index + hour_of_day，不是流逝分钟数。"""
 
-        await self.commit(
-            "advance-1",
-            AdvanceTimeEffect(minutes=19 * 60, reason="在书房里翻查到了入夜"),
-        )
-
-        after = await self.engine.read(SCOPE)
-        self.assertEqual(after.world.elapsed_minutes, 19 * 60)
-        self.assertEqual(after.world.time_of_day, "night")
-
-        await self.commit(
-            "advance-2",
-            AdvanceTimeEffect(minutes=11 * 60, reason="睡到第二天早上"),
-        )
-
-        # 30 小时 = 次日 06:00，跨午夜之后要回到 day，而不是一路 night。
-        next_morning = await self.engine.read(SCOPE)
-        self.assertEqual(next_morning.world.elapsed_minutes, 30 * 60)
-        self.assertEqual(next_morning.world.time_of_day, "day")
+        snapshot = await self.engine.read(SCOPE)
+        self.assertEqual(snapshot.world.day_index, 0)
+        self.assertEqual(snapshot.world.hour_of_day, 12)
+        self.assertEqual(snapshot.world.time_of_day, "day")
 
     async def test_core_resolution_and_ending_reach_the_player_view(self) -> None:
         await self.commit(

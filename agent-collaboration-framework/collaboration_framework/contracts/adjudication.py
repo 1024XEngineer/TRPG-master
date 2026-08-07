@@ -129,12 +129,6 @@ class ConsumeEntityEffect(ContractModel):
     entity_id: str = Field(min_length=1)
 
 
-class AdvanceTimeEffect(ContractModel):
-    type: Literal["advance_time"] = "advance_time"
-    minutes: int = Field(ge=1, le=10080)
-    reason: str = Field(min_length=1)
-
-
 class MarkCoreResolvedEffect(ContractModel):
     type: Literal["mark_core_resolved"] = "mark_core_resolved"
 
@@ -163,7 +157,6 @@ ActionEffect = Annotated[
     | MoveEntityEffect
     | ChangeEntityStateEffect
     | ConsumeEntityEffect
-    | AdvanceTimeEffect
     | MarkCoreResolvedEffect
     | SetEndingAvailabilityEffect
     | CommitTerminalEndingEffect

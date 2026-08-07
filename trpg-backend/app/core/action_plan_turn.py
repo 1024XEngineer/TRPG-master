@@ -15,7 +15,6 @@ from collaboration_framework.contracts import (
     ActionPlanStep,
     ActionTarget,
     AdjudicationExecution,
-    AdvanceTimeEffect,
     CancelActionPlanRequest,
     CancelCheckChoice,
     CheckDecisionRequest,
@@ -865,7 +864,6 @@ class _DeterministicStepAdjudicator:
     # which Canon Information a step earns, so it only uses the two effects that
     # follow mechanically from the step kind. Everything else the Engine
     # registers is reachable through the prompt-driven adjudicator.
-    _WAIT_MINUTES = 30
 
     async def adjudicate(self, context):
         if context.step.kind in {"wait", "rest"}:
@@ -880,12 +878,10 @@ class _DeterministicStepAdjudicator:
                     description=context.step.semantic_goal,
                 ),
                 check=NoAdjudicationCheck(),
-                success_effects=(
-                    AdvanceTimeEffect(
-                        minutes=self._WAIT_MINUTES,
-                        reason="等待或休息占用了一段时间",
-                    ),
-                ),
+                # 等待/休息不再推进时间：#245 把行动耗时列为 non-goal，时间只在
+                # ready 门禁通过后由 advance_to_next 整点跳转。休息的收益改由
+                # 「上一时间点内未行动」的停留结算给出（#245 §四.桶三）。
+                success_effects=(),
             )
 
         if context.step.kind == "travel":

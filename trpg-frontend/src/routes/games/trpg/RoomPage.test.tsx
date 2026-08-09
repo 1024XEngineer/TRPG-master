@@ -866,6 +866,12 @@ describe('RoomPage conversation history', () => {
     renderRoomPage()
     expect(await screen.findByText('纯文本主持人叙事')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '重新朗读' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: '主持人语音' }))
+    expect(
+      await screen.findByText(
+        '主持人语音模块已加载，但服务端尚未配置语音供应商凭证和音色',
+      ),
+    ).toBeInTheDocument()
   })
 
   it('falls back for legacy payloads when characterName is missing', async () => {

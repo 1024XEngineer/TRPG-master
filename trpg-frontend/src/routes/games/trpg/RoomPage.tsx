@@ -2367,7 +2367,9 @@ export default function RoomPage() {
       <BottomPanel open={openPanel === 'speech'} onClose={() => setOpenPanel(null)} title="主持人语音">
         {!hostSpeech.available ? (
           <p className="text-sm text-text-dim py-6 text-center">
-            主持人语音服务当前不可用，文本消息和游戏操作仍可正常使用
+            {hostSpeech.provider === 'disabled'
+              ? '主持人语音模块已加载，但服务端尚未配置语音供应商凭证和音色'
+              : '主持人语音服务当前不可用，文本消息和游戏操作仍可正常使用'}
           </p>
         ) : (
           <div className="space-y-4">

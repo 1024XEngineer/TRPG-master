@@ -789,8 +789,13 @@ async def end_game(db: AsyncSession, room_id: str, reconnect_token: str | None) 
             .where(
                 GameSession.room_id == room_id,
                 GameSession.state_version == game_session.state_version,
+                GameSession.agenda_state_version == game_session.agenda_state_version,
             )
-            .values(state_json=ended_state.to_json_dict(), updated_at=now)
+            .values(
+                state_json=ended_state.to_json_dict(),
+                agenda_state_version=game_session.agenda_state_version + 1,
+                updated_at=now,
+            )
         )
         if getattr(state_update, "rowcount", None) != 1:
             raise RoomConflictError("GameState 已被并发更新，请重试结束操作")

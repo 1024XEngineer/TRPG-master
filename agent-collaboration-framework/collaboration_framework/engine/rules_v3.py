@@ -1,26 +1,15 @@
-"""Deterministic execution of v3 `event` Rules (#226 §4, partial).
+"""Deterministic v3 Rule walking and durable RuleAgenda helpers (#226 §4).
 
-Scope, stated plainly: this executes the **effect chain** of an event-triggered
-rule, synchronously, inside the transaction that produced the source event. It is
-strictly more than v2's `event_rules` could do (which had no step graph at all)
-and strictly less than the RuleAgenda #226 §4 specifies.
-
-What is deliberately not here, because it needs a persisted agenda:
-
-* `CheckStep` / `AdjudicatedCheckStep` — a check suspends the rule until the
-  player answers, so it cannot resolve inside this transaction;
-* `AwaitPlayerInputStep` — same, by definition;
-* `InvokeRulesetActionStep` — needs the Ruleset executor bridge;
-* cross-transaction resume, agenda ordering and lease recovery.
-
-Rather than silently doing nothing at those steps, the walk stops and records
-why, so the caller can see a rule was partially applied instead of guessing.
-`RuleLimitsSpec` bounds the walk either way.
+Rule effects may execute in the source transaction, but every blocking cursor is
+materialised as a ``RuleAgenda`` in ``GameState``. Stores lease that same object
+for cross-transaction work; a process restart therefore resumes the published
+step graph instead of replaying already committed effects.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 
 from collaboration_framework.contracts import (
     AdjudicatedCheckStep,
@@ -39,7 +28,7 @@ from collaboration_framework.contracts import (
     RuleSpecV3,
 )
 
-from .models import GameState
+from .models import AgendaItem, AgendaSource, DomainEvent, GameState, RuleAgenda
 
 # Predicates a rule may name. #226 §1 forbids scripts and arbitrary state paths,
 # so a rule can only ask questions the Engine registered.
@@ -53,6 +42,8 @@ class RuleWalk:
     effects: list[object] = field(default_factory=list)
     suspended_at: str | None = None
     suspended_kind: str | None = None
+    step_count: int = 0
+    completed: bool = False
 
 
 def matching_event_rules(
@@ -145,7 +136,6 @@ def _entity_state(state: GameState, entity_id: str) -> dict:
 def walk_rule(rule: RuleSpecV3, *, branch_id: str | None = None) -> RuleWalk:
     """Follow one rule's steps, collecting effects until it must suspend."""
 
-    steps = {step.id: step for step in rule.execution.steps}
     branches = {branch.id: branch for branch in rule.execution.branches}
     entry_id = branch_id
     if entry_id is None and isinstance(rule.trigger, EventTriggerSpec):
@@ -155,9 +145,17 @@ def walk_rule(rule: RuleSpecV3, *, branch_id: str | None = None) -> RuleWalk:
     if branch is None:
         return walk
 
-    cursor: str | None = branch.entry_step_id
+    return walk_rule_from(rule, branch.entry_step_id)
+
+
+def walk_rule_from(rule: RuleSpecV3, step_id: str) -> RuleWalk:
+    """Resume an immutable Rule graph from its persisted cursor."""
+
+    steps = {step.id: step for step in rule.execution.steps}
+    walk = RuleWalk()
+    cursor: str | None = step_id
     visited: set[str] = set()
-    while cursor is not None and len(visited) < rule.limits.max_steps:
+    while cursor is not None and walk.step_count < rule.limits.max_steps:
         if cursor in visited:
             # A loop in the authored graph: stop rather than spin.
             walk.suspended_at = cursor
@@ -165,7 +163,13 @@ def walk_rule(rule: RuleSpecV3, *, branch_id: str | None = None) -> RuleWalk:
             return walk
         visited.add(cursor)
         step = steps.get(cursor)
-        if step is None or isinstance(step, FinishStep):
+        walk.step_count += 1
+        if step is None:
+            walk.suspended_at = cursor
+            walk.suspended_kind = "unknown_step"
+            return walk
+        if isinstance(step, FinishStep):
+            walk.completed = True
             return walk
         if isinstance(step, EffectStep):
             walk.effects.append(step.effect)
@@ -181,15 +185,129 @@ def walk_rule(rule: RuleSpecV3, *, branch_id: str | None = None) -> RuleWalk:
     return walk
 
 
+def agenda_item_key(item: AgendaItem) -> tuple[int, int, str]:
+    """The exact queue order frozen by #226 §4."""
+
+    return (item.event_sequence, -item.rule_priority, item.rule_id)
+
+
+def ordered_agenda_items(items: tuple[AgendaItem, ...]) -> tuple[AgendaItem, ...]:
+    """Return a stable queue independent of input or database row order."""
+
+    return tuple(sorted(items, key=agenda_item_key))
+
+
+def create_rule_agenda(
+    *,
+    agenda_id: str,
+    room_id: str,
+    module: ModuleContentV3,
+    correlation_id: str,
+    root_source: AgendaSource,
+    revision: str,
+) -> RuleAgenda:
+    """Create the durable root before any blocking Rule step can be reached."""
+
+    return RuleAgenda(
+        agenda_id=agenda_id,
+        room_id=room_id,
+        module_id=module.module_id,
+        module_version=module.version,
+        correlation_id=correlation_id,
+        root_source=root_source,
+        revision=revision,
+    )
+
+
+def agenda_item_for_event(rule: RuleSpecV3, event: DomainEvent) -> AgendaItem:
+    trigger = rule.trigger
+    if not isinstance(trigger, EventTriggerSpec):
+        raise ContractError("只有 event Rule 可以进入 Event Agenda")
+    return AgendaItem(
+        source_event_id=event.event_id,
+        event_sequence=event.sequence,
+        rule_id=rule.id,
+        rule_priority=rule.priority,
+        branch_id=trigger.entry_branch_id,
+    )
+
+
+def agenda_status_for_walk(rule: RuleSpecV3, walk: RuleWalk) -> str:
+    """Map a blocking step to the authoritative Agenda boundary."""
+
+    if walk.suspended_kind in {"loop", "step_budget", "unknown_step"}:
+        return "failed"
+    if walk.suspended_kind == "check":
+        step = next(
+            (item for item in rule.execution.steps if item.id == walk.suspended_at),
+            None,
+        )
+        if isinstance(step, CheckStep) and step.check.initiation_kind == "passive_rule":
+            return "awaiting_passive_check"
+        return "awaiting_active_check"
+    if walk.suspended_kind == "adjudicated_check":
+        return "awaiting_active_check"
+    if walk.suspended_kind == "presentation":
+        return "awaiting_presentation"
+    if walk.suspended_kind == "await_player_input":
+        return "awaiting_player_input"
+    if walk.suspended_at is not None:
+        return "running"
+    return "stable"
+
+
+def agenda_claim_key(agenda: RuleAgenda) -> tuple[int, int, str, str]:
+    """Stable order when multiple runnable Agenda roots need a worker."""
+
+    pending = [item for item in agenda.queue if item.status in {"queued", "running"}]
+    if not pending:
+        return (2**63 - 1, 0, "", agenda.agenda_id)
+    first = min(pending, key=agenda_item_key)
+    return (*agenda_item_key(first), agenda.agenda_id)
+
+
+def agenda_is_claimable(agenda: RuleAgenda, *, now: datetime) -> bool:
+    return agenda.status == "running" and (
+        agenda.lease_expires_at is None or agenda.lease_expires_at <= now
+    )
+
+
+def resume_agenda_rule(
+    agenda: RuleAgenda,
+    module: ModuleContentV3,
+) -> tuple[RuleSpecV3, RuleWalk]:
+    """Reload the pinned Rule and continue from the persisted step cursor."""
+
+    if (agenda.module_id, agenda.module_version) != (module.module_id, module.version):
+        raise ContractError("RuleAgenda 与加载的 ModuleVersion 不一致")
+    if agenda.current_rule_id is None or agenda.current_step_id is None:
+        raise ContractError("RuleAgenda 没有可恢复的 Rule cursor")
+    rule = next(
+        (item for item in module.rules if item.id == agenda.current_rule_id), None
+    )
+    if rule is None:
+        raise ContractError("RuleAgenda 引用的 Rule 不存在于固定 ModuleVersion")
+    return rule, walk_rule_from(rule, agenda.current_step_id)
+
+
 __all__ = [
     "RuleWalk",
+    "agenda_claim_key",
+    "agenda_is_claimable",
+    "agenda_item_for_event",
+    "agenda_item_key",
+    "agenda_status_for_walk",
+    "create_rule_agenda",
     "effects_after_cancel",
     "effects_after_degree",
     "evaluate_condition",
     "matching_event_rules",
+    "ordered_agenda_items",
     "pending_check_for",
     "resolve_rule_option",
+    "resume_agenda_rule",
     "walk_rule",
+    "walk_rule_from",
 ]
 
 
@@ -251,33 +369,11 @@ def effects_after_degree(rule: RuleSpecV3, step_id: str, degree: str) -> list:
     resume_id = step.result_routes.get(degree)
     if resume_id is None:
         return []
-    return _walk_from(rule, resume_id).effects
+    return walk_rule_from(rule, resume_id).effects
 
 
 def effects_after_cancel(rule: RuleSpecV3, step_id: str) -> list:
     step = next((item for item in rule.execution.steps if item.id == step_id), None)
     if not isinstance(step, AdjudicatedCheckStep):
         return []
-    return _walk_from(rule, step.cancel_step_id).effects
-
-
-def _walk_from(rule: RuleSpecV3, step_id: str) -> RuleWalk:
-    steps = {step.id: step for step in rule.execution.steps}
-    walk = RuleWalk()
-    cursor: str | None = step_id
-    visited: set[str] = set()
-    while cursor is not None and len(visited) < rule.limits.max_steps:
-        if cursor in visited:
-            walk.suspended_at, walk.suspended_kind = cursor, "loop"
-            return walk
-        visited.add(cursor)
-        step = steps.get(cursor)
-        if step is None or isinstance(step, FinishStep):
-            return walk
-        if isinstance(step, EffectStep):
-            walk.effects.append(step.effect)
-            cursor = step.next_step_id
-            continue
-        walk.suspended_at, walk.suspended_kind = step.id, step.kind
-        return walk
-    return walk
+    return walk_rule_from(rule, step.cancel_step_id).effects

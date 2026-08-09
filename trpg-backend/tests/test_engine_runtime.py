@@ -18,10 +18,13 @@ from collaboration_framework.contracts import (
     PlayerViewScope,
 )
 from collaboration_framework.engine import (
+    AgendaItem,
+    AgendaSource,
     CompletedAction,
     EngineExecutionResult,
     GameState,
     RevisionConflictError,
+    RuleAgenda,
     RuleEngineService,
     StateModifiedEvent,
 )
@@ -178,6 +181,88 @@ async def _start_room(
         ).to_json_dict()
         await db.commit()
     return room, players, characters
+
+
+@pytest.mark.asyncio
+async def test_rule_agenda_lease_survives_store_recreation(
+    db_session: AsyncSession,
+    engine_store_factory: Callable[..., SqlAlchemyEngineStore],
+) -> None:
+    room, _, _ = await _start_room(db_session, room_number=91)
+    game_session = await db_session.get(GameSession, room.id)
+    assert game_session is not None
+    state = GameState.model_validate(game_session.state_json)
+    persisted = RuleAgenda(
+        agenda_id="agenda-restart",
+        room_id=room.id,
+        module_id=game_session.module_id,
+        module_version=game_session.module_version,
+        correlation_id="action-restart",
+        root_source=AgendaSource(kind="action", id="action-restart"),
+        revision=str(game_session.state_version),
+        current_rule_id="temporary_insanity_leads_to_asylum",
+        current_branch_id="default",
+        current_step_id="apply_unconscious",
+        queue=(
+            AgendaItem(
+                source_event_id="event-restart",
+                event_sequence=1,
+                rule_id="temporary_insanity_leads_to_asylum",
+                rule_priority=170,
+                branch_id="default",
+                status="running",
+            ),
+        ),
+    )
+    game_session.state_json = state.model_copy(
+        update={"rule_agendas": {persisted.agenda_id: persisted}}, deep=True
+    ).to_json_dict()
+    await db_session.commit()
+
+    now = datetime(2026, 8, 10, tzinfo=UTC)
+    first_store = engine_store_factory()
+    first_claim = await first_store.claim_rule_agenda(
+        room_id=room.id,
+        worker_id="worker-before-restart",
+        now=now,
+        lease_expires_at=now + timedelta(seconds=5),
+    )
+    assert first_claim is not None
+
+    restarted_store = engine_store_factory()
+    assert (
+        await restarted_store.claim_rule_agenda(
+            room_id=room.id,
+            worker_id="other-worker",
+            now=now + timedelta(seconds=1),
+            lease_expires_at=now + timedelta(seconds=10),
+        )
+        is None
+    )
+    recovered = await restarted_store.claim_rule_agenda(
+        room_id=room.id,
+        worker_id="worker-after-restart",
+        now=now + timedelta(seconds=6),
+        lease_expires_at=now + timedelta(seconds=20),
+    )
+    assert recovered is not None
+    assert recovered.agenda_id == persisted.agenda_id
+    with pytest.raises(RevisionConflictError):
+        await first_store.checkpoint_rule_agenda(
+            agenda=first_claim,
+            worker_id="worker-before-restart",
+            expected_lease_version=first_claim.lease_version,
+            now=now + timedelta(seconds=6),
+        )
+
+    saved = await restarted_store.checkpoint_rule_agenda(
+        agenda=recovered.model_copy(update={"status": "stable"}),
+        worker_id="worker-after-restart",
+        expected_lease_version=recovered.lease_version,
+        now=now + timedelta(seconds=7),
+    )
+    assert saved.status == "stable"
+    assert saved.lease_owner is None
 
 
 def _checkpoint_request(

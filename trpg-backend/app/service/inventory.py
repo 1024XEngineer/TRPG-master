@@ -307,10 +307,12 @@ async def confirm_import_draft(
         .where(
             GameSession.room_id == room_id,
             GameSession.state_version == session.state_version,
+            GameSession.agenda_state_version == session.agenda_state_version,
         )
         .values(
             state_json=state.to_json_dict(),
             state_version=final_revision,
+            agenda_state_version=session.agenda_state_version + 1,
             updated_at=datetime.now(UTC),
         )
         .execution_options(synchronize_session=False)
@@ -417,10 +419,12 @@ async def change_custody(
         .where(
             GameSession.room_id == room_id,
             GameSession.state_version == session.state_version,
+            GameSession.agenda_state_version == session.agenda_state_version,
         )
         .values(
             state_json=state.to_json_dict(),
             state_version=new_revision,
+            agenda_state_version=session.agenda_state_version + 1,
             updated_at=datetime.now(UTC),
         )
         .execution_options(synchronize_session=False)

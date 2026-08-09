@@ -73,6 +73,10 @@ class GameSession(Base):
             name="ck_game_sessions_state_schema_version",
         ),
         CheckConstraint("state_version >= 0", name="ck_game_sessions_state_version"),
+        CheckConstraint(
+            "agenda_state_version >= 0",
+            name="ck_game_sessions_agenda_state_version",
+        ),
     )
 
     # room_id 同时是主键和外键，从数据库层保证一个 Room 只能运行一局。
@@ -86,6 +90,9 @@ class GameSession(Base):
     )
     state_json: Mapped[dict] = mapped_column(JSON, nullable=False)
     state_version: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default="0"
+    )
+    agenda_state_version: Mapped[int] = mapped_column(
         BigInteger, nullable=False, default=0, server_default="0"
     )
     created_at: Mapped[datetime] = mapped_column(

@@ -297,10 +297,12 @@ async def confirm_draft(
         .where(
             GameSession.room_id == room_id,
             GameSession.state_version == session.state_version,
+            GameSession.agenda_state_version == session.agenda_state_version,
         )
         .values(
             state_json=ended_state.to_json_dict(),
             state_version=new_revision,
+            agenda_state_version=session.agenda_state_version + 1,
             updated_at=now,
         )
         .execution_options(synchronize_session=False)

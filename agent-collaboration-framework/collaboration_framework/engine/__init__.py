@@ -13,6 +13,8 @@ from .dice import DiceRoller, SequenceDiceSource, SystemDiceSource
 from .initialization import create_initial_game_state
 from .navigation import effective_location_knowledge, resolve_location_target
 from .models import (
+    AgendaItem,
+    AgendaSource,
     ActorResources,
     ActorState,
     LocationKnowledge,
@@ -26,12 +28,15 @@ from .models import (
     EngineRuntimeSnapshot,
     GameState,
     PendingCheckDecision,
+    RuleAgenda,
     StateModifiedEvent,
 )
 from .ports import EngineStore, EngineTransaction, RevisionConflictError
 from .service import RuleEngineService
 
 __all__ = [
+    "AgendaItem",
+    "AgendaSource",
     "CompletedAction",
     "CompletedAdjudicationCommand",
     "ActorResources",
@@ -50,6 +55,7 @@ __all__ = [
     "GameState",
     "InMemoryEngineStore",
     "PendingCheckDecision",
+    "RuleAgenda",
     "RevisionConflictError",
     "RuntimeCapabilityIssue",
     "RuleEngineService",

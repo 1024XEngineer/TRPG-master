@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import AbstractAsyncContextManager
+from datetime import datetime
 from typing import Protocol
 
 from collaboration_framework.contracts import ContractError
@@ -15,6 +16,7 @@ from ..models import (
     EngineRuntimeSnapshot,
     GameState,
     PendingCheckDecision,
+    RuleAgenda,
     StateModifiedEvent,
 )
 
@@ -96,3 +98,25 @@ class EngineStore(Protocol):
         self,
         room_id: str,
     ) -> AbstractAsyncContextManager[EngineTransaction]: ...
+
+    async def claim_rule_agenda(
+        self,
+        *,
+        room_id: str,
+        worker_id: str,
+        now: datetime,
+        lease_expires_at: datetime,
+    ) -> RuleAgenda | None:
+        """Lease the next runnable Agenda using its stable queue ordering."""
+        ...
+
+    async def checkpoint_rule_agenda(
+        self,
+        *,
+        agenda: RuleAgenda,
+        worker_id: str,
+        expected_lease_version: int,
+        now: datetime,
+    ) -> RuleAgenda:
+        """Persist a cursor/status update owned by a live lease."""
+        ...

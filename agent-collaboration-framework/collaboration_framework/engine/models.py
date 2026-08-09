@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Literal
 
 from pydantic import Field, JsonValue
@@ -109,6 +110,66 @@ class WorldTimeState(ContractModel):
         return self.current.time_of_day
 
 
+class AgendaSource(ContractModel):
+    """The committed fact that created a durable RuleAgenda (#226 §4)."""
+
+    kind: Literal["action", "event"]
+    id: str = Field(min_length=1)
+
+
+class AgendaItem(ContractModel):
+    """One Event Rule invocation in its deterministic queue position."""
+
+    source_event_id: str = Field(min_length=1)
+    event_sequence: int = Field(ge=1)
+    rule_id: str = Field(min_length=1)
+    rule_priority: int
+    branch_id: str = Field(min_length=1)
+    status: Literal["queued", "running", "completed", "skipped", "failed"] = "queued"
+
+
+class RuleAgenda(ContractModel):
+    """Persisted Rule cursor, queue, budgets, and worker lease (#226 §4).
+
+    Lease changes are coordination state rather than gameplay facts. Stores use
+    ``lease_version`` as a compare-and-swap token without changing the room's
+    Event revision.
+    """
+
+    agenda_id: str = Field(min_length=1)
+    room_id: str = Field(min_length=1)
+    module_id: str = Field(min_length=1)
+    module_version: str = Field(min_length=1)
+    correlation_id: str = Field(min_length=1)
+    root_source: AgendaSource
+    status: Literal[
+        "running",
+        "awaiting_active_check",
+        "awaiting_passive_check",
+        "awaiting_presentation",
+        "awaiting_player_input",
+        "stable",
+        "failed",
+    ] = "running"
+    source_event_ids: tuple[str, ...] = ()
+    queue: tuple[AgendaItem, ...] = ()
+    current_rule_id: str | None = None
+    current_branch_id: str | None = None
+    current_step_id: str | None = None
+    pending_check_id: str | None = None
+    pending_boundary_id: str | None = None
+    pending_rule_input_id: str | None = None
+    revision: str = Field(min_length=1)
+    chain_depth: int = Field(default=0, ge=0)
+    step_count: int = Field(default=0, ge=0)
+    max_chain_depth: int = Field(default=16, ge=1, le=64)
+    max_steps: int = Field(default=128, ge=1, le=1024)
+    failure_code: str | None = None
+    lease_owner: str | None = None
+    lease_expires_at: datetime | None = None
+    lease_version: int = Field(default=0, ge=0)
+
+
 class GameState(ContractModel):
     """Authoritative room state loaded and committed only through EngineStore."""
 
@@ -135,6 +196,7 @@ class GameState(ContractModel):
     actor_item_knowledge: dict[str, dict[str, ItemKnowledge]] = Field(
         default_factory=dict
     )
+    rule_agendas: dict[str, RuleAgenda] = Field(default_factory=dict)
     core_resolved: bool = False
     ending_available: bool = False
     ending_resolution: EndingResolution | None = None

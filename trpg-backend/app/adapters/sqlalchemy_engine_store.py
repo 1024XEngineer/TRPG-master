@@ -25,7 +25,12 @@ from collaboration_framework.engine import (
     GameState,
     PendingCheckDecision,
     RevisionConflictError,
+    RuleAgenda,
     StateModifiedEvent,
+)
+from collaboration_framework.engine.rules_v3 import (
+    agenda_claim_key,
+    agenda_is_claimable,
 )
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
@@ -72,6 +77,160 @@ class SqlAlchemyEngineStore(EngineStore):
             finally:
                 transaction.close()
             transaction.log_committed_state_changes()
+
+    async def claim_rule_agenda(
+        self,
+        *,
+        room_id: str,
+        worker_id: str,
+        now: datetime,
+        lease_expires_at: datetime,
+    ) -> RuleAgenda | None:
+        """Lease one runnable Agenda without changing the gameplay revision."""
+
+        if not worker_id or lease_expires_at <= now:
+            raise ContractError("RuleAgenda lease 的 worker 与截止时间必须有效")
+        async with self._session_factory() as session, session.begin():
+            game_session = await session.scalar(
+                select(GameSession).where(GameSession.room_id == room_id).with_for_update()
+            )
+            if game_session is None:
+                raise ContractError(f"房间运行时不存在: {room_id}")
+            state = GameState.model_validate(deepcopy(game_session.state_json))
+            candidates = sorted(
+                (
+                    agenda
+                    for agenda in state.rule_agendas.values()
+                    if agenda_is_claimable(agenda, now=now)
+                ),
+                key=agenda_claim_key,
+            )
+            if not candidates:
+                return None
+            current = candidates[0]
+            claimed = current.model_copy(
+                update={
+                    "lease_owner": worker_id,
+                    "lease_expires_at": lease_expires_at,
+                    "lease_version": current.lease_version + 1,
+                },
+                deep=True,
+            )
+            agendas = dict(state.rule_agendas)
+            agendas[claimed.agenda_id] = claimed
+            state = state.model_copy(update={"rule_agendas": agendas}, deep=True)
+            await self._write_agenda_state(
+                session,
+                game_session=game_session,
+                state=state,
+                now=now,
+            )
+            return claimed
+
+    async def checkpoint_rule_agenda(
+        self,
+        *,
+        agenda: RuleAgenda,
+        worker_id: str,
+        expected_lease_version: int,
+        now: datetime,
+    ) -> RuleAgenda:
+        """CAS a leased cursor/status update into the persisted GameState."""
+
+        async with self._session_factory() as session, session.begin():
+            game_session = await session.scalar(
+                select(GameSession).where(GameSession.room_id == agenda.room_id).with_for_update()
+            )
+            if game_session is None:
+                raise ContractError(f"房间运行时不存在: {agenda.room_id}")
+            state = GameState.model_validate(deepcopy(game_session.state_json))
+            current = state.rule_agendas.get(agenda.agenda_id)
+            _validate_agenda_checkpoint(
+                current=current,
+                proposed=agenda,
+                worker_id=worker_id,
+                expected_lease_version=expected_lease_version,
+                now=now,
+            )
+            terminal = agenda.status != "running"
+            saved = agenda.model_copy(
+                update={
+                    "lease_owner": None if terminal else worker_id,
+                    "lease_expires_at": None if terminal else agenda.lease_expires_at,
+                    "lease_version": expected_lease_version + 1,
+                },
+                deep=True,
+            )
+            agendas = dict(state.rule_agendas)
+            agendas[saved.agenda_id] = saved
+            state = state.model_copy(update={"rule_agendas": agendas}, deep=True)
+            await self._write_agenda_state(
+                session,
+                game_session=game_session,
+                state=state,
+                now=now,
+            )
+            return saved
+
+    @staticmethod
+    async def _write_agenda_state(
+        session: AsyncSession,
+        *,
+        game_session: GameSession,
+        state: GameState,
+        now: datetime,
+    ) -> None:
+        expected = game_session.agenda_state_version
+        result = await session.execute(
+            update(GameSession)
+            .where(
+                GameSession.room_id == game_session.room_id,
+                GameSession.agenda_state_version == expected,
+            )
+            .values(
+                state_json=state.to_json_dict(),
+                agenda_state_version=expected + 1,
+                updated_at=now,
+            )
+            .execution_options(synchronize_session=False)
+        )
+        if getattr(result, "rowcount", None) != 1:
+            raise RevisionConflictError("RuleAgenda 并发版本已变化")
+
+
+def _validate_agenda_checkpoint(
+    *,
+    current: RuleAgenda | None,
+    proposed: RuleAgenda,
+    worker_id: str,
+    expected_lease_version: int,
+    now: datetime,
+) -> None:
+    if current is None:
+        raise ContractError(f"RuleAgenda 不存在: {proposed.agenda_id}")
+    if (
+        current.lease_owner != worker_id
+        or current.lease_version != expected_lease_version
+        or current.lease_expires_at is None
+        or current.lease_expires_at <= now
+    ):
+        raise RevisionConflictError("RuleAgenda lease 已失效或由其他 worker 持有")
+    immutable = (
+        "agenda_id",
+        "room_id",
+        "module_id",
+        "module_version",
+        "correlation_id",
+        "root_source",
+    )
+    if any(getattr(current, name) != getattr(proposed, name) for name in immutable):
+        raise ContractError("RuleAgenda checkpoint 不能改写不可变身份")
+    if proposed.lease_owner != worker_id:
+        raise ContractError("RuleAgenda checkpoint 的 worker 不匹配")
+    if proposed.status == "running" and (
+        proposed.lease_expires_at is None or proposed.lease_expires_at <= now
+    ):
+        raise ContractError("运行中的 RuleAgenda 必须保留有效 lease")
 
 
 class _SqlAlchemyEngineTransaction(EngineTransaction):
@@ -146,9 +305,11 @@ class _SqlAlchemyEngineTransaction(EngineTransaction):
                 .where(
                     GameSession.room_id == self._room_id,
                     GameSession.state_version == game_session.state_version,
+                    GameSession.agenda_state_version == game_session.agenda_state_version,
                 )
                 .values(
                     state_json=game_state.to_json_dict(),
+                    agenda_state_version=game_session.agenda_state_version + 1,
                     updated_at=datetime.now(UTC),
                 )
                 .execution_options(synchronize_session=False)
@@ -411,10 +572,12 @@ class _SqlAlchemyEngineTransaction(EngineTransaction):
             .where(
                 GameSession.room_id == self._room_id,
                 GameSession.state_version == expected_version,
+                GameSession.agenda_state_version == current_session.agenda_state_version,
             )
             .values(
                 state_json=new_state.to_json_dict(),
                 state_version=new_state.event_sequence,
+                agenda_state_version=current_session.agenda_state_version + 1,
                 updated_at=now,
             )
         )
@@ -527,10 +690,12 @@ class _SqlAlchemyEngineTransaction(EngineTransaction):
             .where(
                 GameSession.room_id == self._room_id,
                 GameSession.state_version == expected_version,
+                GameSession.agenda_state_version == current_session.agenda_state_version,
             )
             .values(
                 state_json=new_state.to_json_dict(),
                 state_version=new_state.event_sequence,
+                agenda_state_version=current_session.agenda_state_version + 1,
                 updated_at=now,
             )
         )

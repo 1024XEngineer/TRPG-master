@@ -48,6 +48,7 @@ from collaboration_framework.contracts.adjudication import CheckDegree, CheckRol
 
 from .dice import DiceRoller, coc7_success_level, passes_difficulty
 from .models import (
+    AgendaSource,
     CheckRun,
     CompletedAdjudicationCommand,
     DomainEvent,
@@ -58,6 +59,9 @@ from .models import (
 from .navigation import resolve_location_target
 from .ports import EngineStore
 from .rules_v3 import (
+    agenda_item_for_event,
+    agenda_status_for_walk,
+    create_rule_agenda,
     effects_after_degree,
     matching_event_rules,
     pending_check_for,
@@ -1001,6 +1005,15 @@ class AdjudicationEngineService:
         request_id: str,
         actor_id: str,
     ) -> tuple[GameState, list[DomainEvent]]:
+        if runtime.is_v3:
+            return self._apply_v3_event_rules(
+                runtime,
+                state=state,
+                events=events,
+                request_id=request_id,
+                actor_id=actor_id,
+            )
+
         cursor = 0
         fired: set[tuple[str, str]] = set()
         while cursor < len(events):
@@ -1048,6 +1061,201 @@ class AdjudicationEngineService:
                         offset=len(events) + 1,
                     )
                     events.extend(emitted)
+        return state, events
+
+    def _apply_v3_event_rules(
+        self,
+        runtime: EngineRuntimeSnapshot,
+        *,
+        state: GameState,
+        events: list[DomainEvent],
+        request_id: str,
+        actor_id: str,
+    ) -> tuple[GameState, list[DomainEvent]]:
+        """Run event Rules in queue order and persist the first blocked cursor.
+
+        Effects and the resulting Agenda are returned in the same ``new_state``
+        and therefore committed atomically by ``commit_adjudication``.
+        """
+
+        agenda = create_rule_agenda(
+            agenda_id=self._new_id("agenda"),
+            room_id=runtime.game_state.room_id,
+            module=runtime.v3,
+            correlation_id=request_id,
+            root_source=AgendaSource(kind="action", id=request_id),
+            revision=str(runtime.game_state.event_sequence),
+        )
+        queue = []
+        source_event_ids: list[str] = []
+        fired: set[tuple[str, str]] = set()
+        cursor = 0
+        suspended = False
+
+        while cursor < len(events) and not suspended:
+            source_event = events[cursor]
+            cursor += 1
+            # Workflow/audit signals are never gameplay Rule inputs (#226 §4).
+            if source_event.type == "rule.triggered":
+                continue
+            rules = matching_event_rules(
+                runtime.v3,
+                event_type=source_event.type,
+                state=state,
+                actor_id=actor_id,
+            )
+            pending_rules = []
+            for rule in rules:
+                fire_key = (rule.id, source_event.event_id)
+                if fire_key in fired:
+                    continue
+                fired.add(fire_key)
+                pending_rules.append(rule)
+                queue.append(agenda_item_for_event(rule, source_event))
+            if pending_rules:
+                source_event_ids.append(source_event.event_id)
+
+            for rule in pending_rules:
+                item_index = next(
+                    index
+                    for index, item in enumerate(queue)
+                    if item.source_event_id == source_event.event_id
+                    and item.rule_id == rule.id
+                    and item.status == "queued"
+                )
+                queue[item_index] = queue[item_index].model_copy(
+                    update={"status": "running"}
+                )
+                next_depth = agenda.chain_depth + 1
+                max_chain_depth = min(
+                    agenda.max_chain_depth, rule.limits.max_chain_depth
+                )
+                max_steps = min(agenda.max_steps, rule.limits.max_steps)
+                agenda = agenda.model_copy(
+                    update={
+                        "chain_depth": next_depth,
+                        "max_chain_depth": max_chain_depth,
+                        "max_steps": max_steps,
+                    }
+                )
+                if next_depth > max_chain_depth:
+                    queue[item_index] = queue[item_index].model_copy(
+                        update={"status": "failed"}
+                    )
+                    agenda = agenda.model_copy(
+                        update={
+                            "status": "failed",
+                            "failure_code": "agenda_budget_exceeded",
+                            "current_rule_id": rule.id,
+                            "current_branch_id": queue[item_index].branch_id,
+                        }
+                    )
+                    suspended = True
+                    break
+
+                walk = walk_rule(rule, branch_id=queue[item_index].branch_id)
+                next_step_count = agenda.step_count + walk.step_count
+                if next_step_count > max_steps:
+                    queue[item_index] = queue[item_index].model_copy(
+                        update={"status": "failed"}
+                    )
+                    agenda = agenda.model_copy(
+                        update={
+                            "status": "failed",
+                            "failure_code": "agenda_budget_exceeded",
+                            "current_rule_id": rule.id,
+                            "current_branch_id": queue[item_index].branch_id,
+                            "current_step_id": walk.suspended_at
+                            or next(
+                                branch.entry_step_id
+                                for branch in rule.execution.branches
+                                if branch.id == queue[item_index].branch_id
+                            ),
+                            "step_count": next_step_count,
+                        }
+                    )
+                    suspended = True
+                    break
+                agenda = agenda.model_copy(update={"step_count": next_step_count})
+
+                events.append(
+                    self._event_from_state(
+                        state,
+                        room_id=runtime.game_state.room_id,
+                        offset=len(events) + 1,
+                        request_id=request_id,
+                        actor_id=actor_id,
+                        event_type="rule.triggered",
+                        payload={
+                            "rule_id": rule.id,
+                            "source_event_id": source_event.event_id,
+                            "agenda_id": agenda.agenda_id,
+                        },
+                        visibility="hidden",
+                    )
+                )
+                rule_runtime = runtime.model_copy(
+                    update={"game_state": state}, deep=True
+                )
+                self._validate_effect_sequence(rule_runtime, tuple(walk.effects))
+                for effect in walk.effects:
+                    state, emitted = self._apply_effect(
+                        runtime,
+                        state,
+                        effect,
+                        room_id=runtime.game_state.room_id,
+                        request_id=request_id,
+                        actor_id=actor_id,
+                        offset=len(events) + 1,
+                    )
+                    events.extend(emitted)
+
+                status = agenda_status_for_walk(rule, walk)
+                if status == "stable":
+                    queue[item_index] = queue[item_index].model_copy(
+                        update={"status": "completed"}
+                    )
+                    continue
+                queue[item_index] = queue[item_index].model_copy(
+                    update={"status": "failed" if status == "failed" else "running"}
+                )
+                agenda = agenda.model_copy(
+                    update={
+                        "status": status,
+                        "failure_code": (
+                            "agenda_budget_exceeded" if status == "failed" else None
+                        ),
+                        "current_rule_id": rule.id,
+                        "current_branch_id": queue[item_index].branch_id,
+                        "current_step_id": walk.suspended_at,
+                    }
+                )
+                suspended = True
+                break
+
+        if not queue:
+            return state, events
+        if not suspended:
+            agenda = agenda.model_copy(
+                update={
+                    "status": "stable",
+                    "current_rule_id": None,
+                    "current_branch_id": None,
+                    "current_step_id": None,
+                }
+            )
+        final_revision = str(runtime.game_state.event_sequence + len(events))
+        agenda = agenda.model_copy(
+            update={
+                "source_event_ids": tuple(source_event_ids),
+                "queue": tuple(queue),
+                "revision": final_revision,
+            },
+            deep=True,
+        )
+        agendas = dict(state.rule_agendas)
+        agendas[agenda.agenda_id] = agenda
+        state = state.model_copy(update={"rule_agendas": agendas}, deep=True)
         return state, events
 
     @staticmethod

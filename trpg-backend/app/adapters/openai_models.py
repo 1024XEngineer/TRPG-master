@@ -131,6 +131,11 @@ _ACTION_PLAN_NARRATION_INSTRUCTIONS = """
 kind=clarification，并用自然的角色内措辞提出一次最小澄清。claimed_evidence_refs
 只能复制 allowed_evidence_refs 中正文确实使用的值。不得输出 raw plan、裁决效果、
 内部状态、工具结果、模型推理或协议字段。建议动作最多三条且只能来自最终 PlayerView。
+
+completed_steps[].outcome 是消耗幸运、强推等检定后决定之后的最终权威结果。
+outcome=success 时必须明确叙述该 semantic_goal 成功，不得用“没看出更多”等失败措辞；
+outcome=failure 时不得叙述成功后果。若最终 player_view.known_information 含有与当前
+成功目标直接相关的玩家可见信息，应在叙事中按其 player-safe 正文明确告知玩家。
 """.strip()
 
 _INTENT_INSTRUCTIONS = """\

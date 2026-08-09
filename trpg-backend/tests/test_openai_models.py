@@ -39,6 +39,7 @@ from pydantic import ValidationError
 
 from app.adapters.deepseek_models import DeepSeekChatCompletionsJsonClient
 from app.adapters.openai_models import (
+    _ACTION_PLAN_NARRATION_INSTRUCTIONS,
     OpenAIResponsesJsonClient,
     PromptHostTurnDecisionModel,
     PromptIntentModel,
@@ -48,6 +49,14 @@ from app.adapters.qwen_models import QwenChatCompletionsJsonClient
 from app.core.config import Settings
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_action_plan_narration_uses_final_post_roll_outcome() -> None:
+    """叙事不能把消耗幸运或强推之前的失败当成最终结果。"""
+
+    assert "消耗幸运" in _ACTION_PLAN_NARRATION_INSTRUCTIONS
+    assert "outcome=success" in _ACTION_PLAN_NARRATION_INSTRUCTIONS
+    assert "最终权威结果" in _ACTION_PLAN_NARRATION_INSTRUCTIONS
 
 
 def load_paper_chase() -> ModuleContent:

@@ -23,11 +23,11 @@ async def test_loader_is_idempotent_and_reports_real_content(
 
     assert result.outcome == "unchanged"
     assert result.module_id == BUILTIN_MODULE_ID
-    assert result.version == "3.0.1"
+    assert result.version == "3.0.2"
     assert result.world_ref == "coc-7e"
     assert result.location_count == 12
     assert result.entity_count == 15
-    assert result.information_count == 7
+    assert result.information_count == 8
     assert result.rule_count == 26
     assert result.ending_anchor_count == 4
     assert "result: unchanged" in result.summary_lines()
@@ -42,15 +42,15 @@ async def test_loader_is_idempotent_and_reports_real_content(
 async def test_paper_chase_models_caretaker_bottle_as_discoverable_state() -> None:
     """看守兜里的酒瓶不能是"看一眼就知道"的公开描述。
 
-    v2 把它建成 melodias 的 narrative_detail + discovery_rule；v3 没有
-    narrative_details，同一件事改成 `state.bottle_noticed` 这个状态位，由
-    observe_caretaker 规则在检定成功后翻开。断言的仍是同一条性质：它既不是
-    一个独立实体，也不出现在初始描述里。
+    初始投影不能泄露酒瓶；observe_caretaker 成功后一方面翻开
+    `state.bottle_noticed`，另一方面发布玩家可见线索，使 Narrator 有安全正文
+    可以明确叙述检定收获。
     """
 
     payload = json.loads(loader.PAPER_CHASE_SOURCE_PATH.read_text(encoding="utf-8"))
-    assert payload["version"] == "3.0.1"
+    assert payload["version"] == "3.0.2"
     entities = {entity["id"]: entity for entity in payload["entities"]}
+    information = {item["id"]: item for item in payload["information"]}
     rules = {rule["id"]: rule for rule in payload["rules"]}
 
     assert "caretaker_bottle" not in entities
@@ -62,13 +62,17 @@ async def test_paper_chase_models_caretaker_bottle_as_discoverable_state() -> No
     observe = rules["observe_caretaker"]
     assert observe["trigger"]["scope"]["target_ids"] == ["melodias"]
     assert "bottle_noticed" in json.dumps(observe["execution"], ensure_ascii=False)
+    assert "melodias_pocket_bottle" in json.dumps(observe["execution"], ensure_ascii=False)
+    bottle_clue = information["melodias_pocket_bottle"]
+    assert "小酒瓶" in bottle_clue["player_content"]
+    assert "小酒瓶" in bottle_clue["keeper_content"]
 
 
 def test_paper_chase_keeps_previous_v2_snapshots() -> None:
     """切到 v3 不删旧快照——已经开局的房间可能还钉在某个 v2 版本上。"""
 
     current = json.loads(loader.PAPER_CHASE_SOURCE_PATH.read_text(encoding="utf-8"))
-    assert current["version"] == "3.0.1"
+    assert current["version"] == "3.0.2"
     assert current["content_schema_version"] == 3
 
     for name, version in (
@@ -206,7 +210,7 @@ async def test_loader_preserves_rooms_pinned_legacy_version(
 
     result = await loader.load_paper_chase(db_session)
 
-    assert result.version == "3.0.1"
+    assert result.version == "3.0.2"
     legacy = await db_session.get(ModuleVersion, (BUILTIN_MODULE_ID, "1.0.1"))
     assert legacy is not None
     assert legacy.content_json == legacy_content

@@ -42,11 +42,12 @@ from collaboration_framework.host.application import (
     PlayerViewProjector,
     TurnExecutionError,
 )
-from collaboration_framework.host.ports import RecentHistorySource
+from collaboration_framework.host.ports import ActionPlanStepAdjudicator, RecentHistorySource
 from collaboration_framework.host.schemas import (
     ActionPlanAdvanceResult,
     ActionPlanNarrationContext,
     ActionPlanNarrationOutput,
+    ActionPlanStepContext,
     CompletedPlanStepSummary,
     HostAgentContext,
     RecentHistoryBudget,
@@ -947,7 +948,7 @@ def build_action_plan_turn_application(
                 timeout_seconds=timeout,
             )
         planner = PromptHostTurnDecisionModel(client, policy=policy)
-        adjudicator = PromptActionPlanStepAdjudicator(client)
+        adjudicator = _RuleFirstStepAdjudicator(PromptActionPlanStepAdjudicator(client))
         narration_model = PromptActionPlanNarrationModel(client)
 
     plan_store = plan_store or InMemoryActionPlanRunStore()
@@ -976,103 +977,19 @@ def build_action_plan_turn_application(
 
 
 class _DeterministicStepAdjudicator:
-    # Deliberately conservative: the offline composition has no model to judge
-    # which Canon Information a step earns, so it only uses the two effects that
-    # follow mechanically from the step kind. Everything else the Engine
-    # registers is reachable through the prompt-driven adjudicator.
+    # Deliberately conservative: the offline composition only resolves steps
+    # fully implied by the safe view, then falls back to narrative-only.
 
-    async def adjudicate(self, context):
-        if context.step.kind in {"wait", "rest"}:
-            return ActionAdjudication(
-                request_id=context.step_request_id,
-                source_revision=context.player_view.revision,
-                actor_id=context.player_input.actor_id,
-                summary=context.step.semantic_goal,
-                target=ActionTarget(kind="location", id=context.player_view.scene.id),
-                method=ActionMethod(
-                    family=context.step.kind,
-                    description=context.step.semantic_goal,
-                ),
-                check=NoAdjudicationCheck(),
-                # 等待/休息不再推进时间：#245 把行动耗时列为 non-goal，时间只在
-                # ready 门禁通过后由 advance_to_next 整点跳转。休息的收益改由
-                # 「上一时间点内未行动」的停留结算给出（#245 §四.桶三）。
-                success_effects=(),
-            )
-
-        if context.step.kind == "travel":
-            destination = _match_travel_target(
-                context.player_view,
-                context.step.semantic_goal,
-            )
-            if destination is None:
-                raise TurnExecutionError(
-                    "STEP_DESTINATION_NOT_VISIBLE",
-                    "当前地点没有可安全确认的目标路线",
-                    retryable=False,
-                )
-            destination_id = destination.id
-            return ActionAdjudication(
-                request_id=context.step_request_id,
-                source_revision=context.player_view.revision,
-                actor_id=context.player_input.actor_id,
-                summary=context.step.semantic_goal,
-                target=ActionTarget(kind="location", id=destination_id),
-                method=ActionMethod(
-                    family="travel",
-                    description=context.step.semantic_goal,
-                ),
-                check=NoAdjudicationCheck(),
-                success_effects=(EnterLocationEffect(location_id=destination_id),),
-            )
+    async def adjudicate(self, context: ActionPlanStepContext) -> ActionAdjudication:
+        adjudication = _deterministic_step_adjudication(context)
+        if adjudication is not None:
+            return adjudication
 
         action_text = context.step.semantic_goal.replace(
             context.player_view.scene.name,
             "",
         ).strip(" ，,。")
         target = _match_visible_entity(context.player_view, action_text)
-        candidate, option = _match_rule_candidate(
-            context.keeper_capabilities,
-            action_text,
-            target.id if target is not None else None,
-        )
-        if candidate is not None and option is not None:
-            # The option id doubles as the skill id in the published fixture; the
-            # Engine re-validates it against the Actor's Ruleset snapshot anyway.
-            return ActionAdjudication(
-                request_id=context.step_request_id,
-                source_revision=context.player_view.revision,
-                actor_id=context.player_input.actor_id,
-                summary=context.step.semantic_goal,
-                target=ActionTarget(
-                    kind="entity",
-                    id=(candidate.target_ids[0] if candidate.target_ids else target.id),
-                ),
-                method=ActionMethod(
-                    family=(
-                        candidate.action_families[0]
-                        if candidate.action_families
-                        else context.step.kind
-                    ),
-                    description=context.step.semantic_goal,
-                ),
-                rule_decision=RuleDecisionRef(rule_id=candidate.rule_id, option_id=option.id),
-                check=RequiredAdjudicationCheck(
-                    candidates=(
-                        SkillCheckCandidate(
-                            candidate_id=option.id,
-                            skill_id=option.id,
-                            difficulty="regular",
-                            method_summary=context.step.semantic_goal,
-                            player_safe_reason="使用当前地点公开的检定方式",
-                        ),
-                    )
-                ),
-                # Effects belong to the rule (#226 §5), not to this stand-in.
-                success_effects=(),
-                failure_effects=(),
-            )
-
         target_kind = "entity" if target is not None else "location"
         target_id = target.id if target is not None else context.player_view.scene.id
         return ActionAdjudication(
@@ -1088,6 +1005,121 @@ class _DeterministicStepAdjudicator:
             check=NoAdjudicationCheck(),
             success_effects=(NarrativeOnlyEffect(),),
         )
+
+
+class _RuleFirstStepAdjudicator:
+    """Resolve unambiguous Match View steps without a fallible model round-trip."""
+
+    def __init__(self, fallback: ActionPlanStepAdjudicator) -> None:
+        self._fallback = fallback
+
+    async def adjudicate(self, context: ActionPlanStepContext) -> ActionAdjudication:
+        adjudication = _deterministic_step_adjudication(context)
+        if adjudication is not None:
+            return adjudication
+        return await self._fallback.adjudicate(context)
+
+
+def _deterministic_step_adjudication(
+    context: ActionPlanStepContext,
+) -> ActionAdjudication | None:
+    """Return only decisions fully implied by the current player-safe view."""
+
+    if context.step.kind in {"wait", "rest"}:
+        return ActionAdjudication(
+            request_id=context.step_request_id,
+            source_revision=context.player_view.revision,
+            actor_id=context.player_input.actor_id,
+            summary=context.step.semantic_goal,
+            target=ActionTarget(kind="location", id=context.player_view.scene.id),
+            method=ActionMethod(
+                family=context.step.kind,
+                description=context.step.semantic_goal,
+            ),
+            check=NoAdjudicationCheck(),
+            # 等待/休息不再推进时间：#245 把行动耗时列为 non-goal，时间只在
+            # ready 门禁通过后由 advance_to_next 整点跳转。休息的收益改由
+            # 「上一时间点内未行动」的停留结算给出（#245 §四.桶三）。
+            success_effects=(),
+        )
+
+    if context.step.kind == "travel":
+        destination = _match_travel_target(
+            context.player_view,
+            context.step.semantic_goal,
+        )
+        if destination is None:
+            raise TurnExecutionError(
+                "STEP_DESTINATION_NOT_VISIBLE",
+                "当前地点没有可安全确认的目标路线",
+                retryable=False,
+            )
+        destination_id = destination.id
+        return ActionAdjudication(
+            request_id=context.step_request_id,
+            source_revision=context.player_view.revision,
+            actor_id=context.player_input.actor_id,
+            summary=context.step.semantic_goal,
+            target=ActionTarget(kind="location", id=destination_id),
+            method=ActionMethod(
+                family="travel",
+                description=context.step.semantic_goal,
+            ),
+            check=NoAdjudicationCheck(),
+            success_effects=(EnterLocationEffect(location_id=destination_id),),
+        )
+
+    action_text = context.step.semantic_goal.replace(
+        context.player_view.scene.name,
+        "",
+    ).strip(" ，,。")
+    target = _match_visible_entity(context.player_view, action_text)
+    candidate, option = _match_rule_candidate(
+        context.keeper_capabilities,
+        action_text,
+        target.id if target is not None else None,
+    )
+    if candidate is not None and option is not None:
+        # The option id doubles as the skill id in the published fixture; the
+        # Engine re-validates it against the Actor's Ruleset snapshot anyway.
+        return ActionAdjudication(
+            request_id=context.step_request_id,
+            source_revision=context.player_view.revision,
+            actor_id=context.player_input.actor_id,
+            summary=context.step.semantic_goal,
+            target=ActionTarget(
+                kind="entity",
+                id=(
+                    candidate.target_ids[0]
+                    if candidate.target_ids
+                    else target.id
+                    if target is not None
+                    else context.player_view.scene.id
+                ),
+            ),
+            method=ActionMethod(
+                family=(
+                    candidate.action_families[0] if candidate.action_families else context.step.kind
+                ),
+                description=context.step.semantic_goal,
+            ),
+            rule_decision=RuleDecisionRef(rule_id=candidate.rule_id, option_id=option.id),
+            check=RequiredAdjudicationCheck(
+                candidates=(
+                    SkillCheckCandidate(
+                        candidate_id=option.id,
+                        skill_id=option.id,
+                        difficulty="regular",
+                        method_summary=context.step.semantic_goal,
+                        player_safe_reason="使用当前地点公开的检定方式",
+                    ),
+                )
+            ),
+            # Effects belong to the rule (#226 §5), not to this stand-in.
+            success_effects=(),
+            failure_effects=(),
+        )
+    return None
 
 
 def _match_visible_entity(view: PlayerView, text: str):
@@ -1126,6 +1158,12 @@ def _match_rule_candidate(capabilities, text: str, target_id: str | None):
     for candidate in capabilities.rule_candidates:
         if target_id is not None and candidate.target_ids and target_id not in candidate.target_ids:
             continue
+        family_hits = [
+            hint
+            for family in candidate.action_families
+            for hint in _ACTION_FAMILY_HINTS.get(family, ())
+            if hint in text
+        ]
         candidate_hits = [hint for hint in candidate.semantic_hints if hint and hint in text]
         best_option = None
         best_option_hit = 0
@@ -1134,12 +1172,13 @@ def _match_rule_candidate(capabilities, text: str, target_id: str | None):
             if hits and max(len(hint) for hint in hits) > best_option_hit:
                 best_option = option
                 best_option_hit = max(len(hint) for hint in hits)
-        if not candidate_hits and best_option is None:
+        if not family_hits and not candidate_hits and best_option is None:
             continue
         # Option evidence outranks candidate evidence: sibling rules share the
         # target's name, so only the option words carry discriminating power.
         score = (
             best_option_hit,
+            max((len(hint) for hint in family_hits), default=0),
             max((len(hint) for hint in candidate_hits), default=0),
         )
         scored.append((score, candidate, best_option))
@@ -1153,6 +1192,16 @@ def _match_rule_candidate(capabilities, text: str, target_id: str | None):
     if option is not None:
         return candidate, option
     return candidate, candidate.options[0] if candidate.options else None
+
+
+# Match View action families are stable contract identifiers. These localized
+# words merely recognize the player's explicit verb; they do not add a rule or
+# reveal module-only facts. Ties still yield no match below.
+_ACTION_FAMILY_HINTS: dict[str, tuple[str, ...]] = {
+    "observe": ("仔细观察", "观察", "察看", "查看"),
+    "intimidate": ("恐吓", "威吓"),
+    "bribe": ("贿赂", "收买"),
+}
 
 
 __all__ = [

@@ -32,7 +32,10 @@ from collaboration_framework.host.application import PlayerViewProjector
 from collaboration_framework.host.schemas import ActionPlanStepContext
 
 from app.adapters.openai_models import _SAFE_ADJUDICATION_INSTRUCTIONS
-from app.core.action_plan_turn import _DeterministicStepAdjudicator
+from app.core.action_plan_turn import (
+    _DeterministicStepAdjudicator,
+    _RuleFirstStepAdjudicator,
+)
 
 FIXTURE = (
     pathlib.Path(__file__).resolve().parents[2]
@@ -161,23 +164,32 @@ async def test_matched_rule_hands_ownership_to_the_rule() -> None:
     assert adjudication.rule_decision.option_id in published
 
 
-async def test_natural_chinese_does_not_reach_the_rule_by_literal_matching() -> None:
-    """记录一个模组内容缺口：玩家的自然说法匹配不到已发布的词汇。
-
-    `observe_caretaker` 的 semantic_hints 是 ["observe", "梅洛迪亚斯·杰弗逊"]——一个
-    英文动作族名加一个全名；melodias 的别名是 ["梅洛迪亚斯", "墓地看守", "看守"]，
-    不含"守墓人"。所以"仔细观察守墓人"这种最自然的说法，字面匹配一个都碰不到。
-
-    真实模型靠语义判断可以跨过这道坎，但它同样只能从这份词汇里挑 id，因此别名表越
-    贫乏、误配和落空的概率越高。这条用例故意断言当前行为，缺口补上时它会变红，提醒
-    连同这里一起更新。
-    """
+async def test_natural_chinese_action_family_reaches_the_unique_rule() -> None:
+    """稳定动作族词汇可直接命中唯一候选，不必依赖模型猜测。"""
 
     adjudication = await _DeterministicStepAdjudicator().adjudicate(
         await _cemetery_context("仔细观察守墓人")
     )
 
-    assert adjudication.rule_decision is None
+    assert adjudication.rule_decision is not None
+    assert adjudication.rule_decision.rule_id == "observe_caretaker"
+    assert isinstance(adjudication.check, RequiredAdjudicationCheck)
+
+
+async def test_rule_first_adjudicator_does_not_call_model_for_unique_match() -> None:
+    """线上裁决对唯一 Match View 候选也走确定性路径。"""
+
+    class FailingFallback:
+        async def adjudicate(self, context):
+            del context
+            raise AssertionError("唯一规则候选不应调用模型")
+
+    adjudication = await _RuleFirstStepAdjudicator(FailingFallback()).adjudicate(
+        await _cemetery_context("仔细观察守墓人")
+    )
+
+    assert adjudication.rule_decision is not None
+    assert adjudication.rule_decision.rule_id == "observe_caretaker"
 
 
 @pytest.mark.parametrize(

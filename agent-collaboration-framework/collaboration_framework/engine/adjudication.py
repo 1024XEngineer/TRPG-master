@@ -30,6 +30,7 @@ from collaboration_framework.contracts import (
     GetAdjudicationStatusRequest,
     HideInformationEffect,
     MarkCoreResolvedEffect,
+    LocationKnowledge,
     MoveEntityEffect,
     NarrativeOnlyEffect,
     PendingCheckOption,
@@ -40,6 +41,8 @@ from collaboration_framework.contracts import (
     SetVisibilityEffect,
     SpendResourceOption,
     SubmitAdjudicationRequest,
+    TravelInterrupted,
+    TravelResolved,
 )
 from collaboration_framework.contracts.adjudication import CheckDegree, CheckRoll
 
@@ -52,6 +55,7 @@ from .models import (
     GameState,
     PendingCheckDecision,
 )
+from .navigation import resolve_location_target
 from .ports import EngineStore
 from .rules_v3 import (
     effects_after_degree,
@@ -60,6 +64,26 @@ from .rules_v3 import (
     resolve_rule_option,
     walk_rule,
 )
+
+
+def _visibility_knowledge(
+    location_id: str,
+    *,
+    scope: str,
+    visible: bool,
+    previous: LocationKnowledge | None,
+) -> LocationKnowledge:
+    return LocationKnowledge(
+        location_id=location_id,
+        scope="actor" if scope == "actor" else "party",
+        existence="known" if visible else "unknown",
+        localization="located" if visible else "unknown",
+        access=(previous.access if visible and previous is not None else "unknown"),
+        visited=bool(visible and previous and previous.visited),
+        known_connection_ids=(
+            previous.known_connection_ids if visible and previous is not None else ()
+        ),
+    )
 
 
 class AdjudicationEngineService:
@@ -487,7 +511,9 @@ class AdjudicationEngineService:
             )
             if option is None:
                 raise ContractError("option_id 不属于该 CheckRun")
-            if isinstance(option, PushOption) != (request.push_adjudication is not None):
+            if isinstance(option, PushOption) != (
+                request.push_adjudication is not None
+            ):
                 raise ContractError("只有强推选项必须携带 push_adjudication")
 
             state = runtime.game_state.model_copy(deep=True)
@@ -551,7 +577,9 @@ class AdjudicationEngineService:
             elif not isinstance(option, AcceptResultOption):
                 raise ContractError("不支持的检定后选项")
 
-            runtime_after_resource = runtime.model_copy(update={"game_state": state}, deep=True)
+            runtime_after_resource = runtime.model_copy(
+                update={"game_state": state}, deep=True
+            )
             resolved_run = check_run.model_copy(
                 update={
                     "status": "resolved",
@@ -675,9 +703,7 @@ class AdjudicationEngineService:
         effects: tuple[ActionEffect, ...],
     ) -> None:
         information_ids = runtime.canon_information_ids
-        entity_ids = runtime.canon_entity_ids | set(
-            runtime.game_state.runtime_entities
-        )
+        entity_ids = runtime.canon_entity_ids | set(runtime.game_state.runtime_entities)
         location_ids = runtime.canon_location_ids | set(
             runtime.game_state.runtime_locations
         )
@@ -708,15 +734,23 @@ class AdjudicationEngineService:
         options: list[PendingCheckOption] = []
         for candidate in adjudication.check.candidates:
             value = skills.get(candidate.skill_id)
-            if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= 100:
-                raise ContractError(f"技能候选不属于 Actor 或数值非法: {candidate.skill_id}")
+            if (
+                not isinstance(value, int)
+                or isinstance(value, bool)
+                or not 0 <= value <= 100
+            ):
+                raise ContractError(
+                    f"技能候选不属于 Actor 或数值非法: {candidate.skill_id}"
+                )
             label = label_map.get(candidate.skill_id)
             options.append(
                 PendingCheckOption(
                     candidate_id=candidate.candidate_id,
                     skill_id=candidate.skill_id,
                     display_name=(
-                        label if isinstance(label, str) and label.strip() else candidate.skill_id
+                        label
+                        if isinstance(label, str) and label.strip()
+                        else candidate.skill_id
                     ),
                     target_value=value,
                     difficulty=candidate.difficulty,
@@ -764,11 +798,16 @@ class AdjudicationEngineService:
         elif isinstance(effect, EnsureRuntimeEntityEffect):
             if effect.entity_id in entity_ids or effect.location_id not in location_ids:
                 raise ContractError("Runtime Entity 发生 Canon shadow 或地点引用非法")
-        elif isinstance(effect, MoveEntityEffect | ChangeEntityStateEffect | ConsumeEntityEffect):
+        elif isinstance(
+            effect, MoveEntityEffect | ChangeEntityStateEffect | ConsumeEntityEffect
+        ):
             if effect.entity_id not in entity_ids:
                 raise ContractError("实体效果引用不存在的 Entity")
             if isinstance(effect, MoveEntityEffect):
-                if effect.location_id is not None and effect.location_id not in location_ids:
+                if (
+                    effect.location_id is not None
+                    and effect.location_id not in location_ids
+                ):
                     raise ContractError("move_entity 目标地点不存在")
                 if (
                     effect.holder_actor_id is not None
@@ -814,7 +853,12 @@ class AdjudicationEngineService:
         actor = runtime.game_state.actors.get(actor_id)
         luck_value = actor.resources.luck if actor is not None else None
         cost = roll.value - threshold
-        if roll.degree != "fumble" and cost > 0 and luck_value is not None and luck_value >= cost:
+        if (
+            roll.degree != "fumble"
+            and cost > 0
+            and luck_value is not None
+            and luck_value >= cost
+        ):
             options.append(
                 SpendResourceOption(
                     option_id=f"spend-luck-{cost}",
@@ -916,6 +960,7 @@ class AdjudicationEngineService:
         )
         for effect in selected_effects:
             state, emitted = self._apply_effect(
+                runtime,
                 state,
                 effect,
                 room_id=runtime.game_state.room_id,
@@ -989,10 +1034,13 @@ class AdjudicationEngineService:
                         visibility="hidden",
                     )
                 )
-                rule_runtime = runtime.model_copy(update={"game_state": state}, deep=True)
+                rule_runtime = runtime.model_copy(
+                    update={"game_state": state}, deep=True
+                )
                 self._validate_effect_sequence(rule_runtime, tuple(effects))
                 for effect in effects:
                     state, emitted = self._apply_effect(
+                        runtime,
                         state,
                         effect,
                         room_id=runtime.game_state.room_id,
@@ -1047,6 +1095,7 @@ class AdjudicationEngineService:
 
     def _apply_effect(
         self,
+        runtime: EngineRuntimeSnapshot,
         state: GameState,
         effect: ActionEffect,
         *,
@@ -1091,7 +1140,33 @@ class AdjudicationEngineService:
                 else f"party:{effect.target_kind}:{effect.target_id}"
             )
             overrides[key] = effect.visible
-            state = state.model_copy(update={"visibility_overrides": overrides}, deep=True)
+            updates: dict[str, object] = {"visibility_overrides": overrides}
+            if effect.target_kind == "location":
+                knowledge_by_scope = (
+                    deepcopy(state.actor_location_knowledge)
+                    if effect.scope == "actor"
+                    else deepcopy(state.party_location_knowledge)
+                )
+                if effect.scope == "actor":
+                    actor_knowledge = knowledge_by_scope.setdefault(actor_id, {})
+                    previous_knowledge = actor_knowledge.get(effect.target_id)
+                    actor_knowledge[effect.target_id] = _visibility_knowledge(
+                        effect.target_id,
+                        scope="actor",
+                        visible=effect.visible,
+                        previous=previous_knowledge,
+                    )
+                    updates["actor_location_knowledge"] = knowledge_by_scope
+                else:
+                    previous_knowledge = knowledge_by_scope.get(effect.target_id)
+                    knowledge_by_scope[effect.target_id] = _visibility_knowledge(
+                        effect.target_id,
+                        scope="party",
+                        visible=effect.visible,
+                        previous=previous_knowledge,
+                    )
+                    updates["party_location_knowledge"] = knowledge_by_scope
+            state = state.model_copy(update=updates, deep=True)
             event_type = "visibility.changed"
             payload = {
                 "target_kind": effect.target_kind,
@@ -1100,10 +1175,100 @@ class AdjudicationEngineService:
                 "scope": effect.scope,
             }
         elif isinstance(effect, EnterLocationEffect):
-            previous = state.scene_id
-            state = state.model_copy(update={"scene_id": effect.location_id}, deep=True)
-            event_type = "location.entered"
-            payload = {"location_id": effect.location_id, "from_location_id": previous}
+            if not runtime.is_v3:
+                previous = state.scene_id
+                state = state.model_copy(
+                    update={"scene_id": effect.location_id}, deep=True
+                )
+                event_type = "location.entered"
+                payload = {
+                    "location_id": effect.location_id,
+                    "from_location_id": previous,
+                }
+            else:
+                resolution = resolve_location_target(
+                    runtime.v3,
+                    state,
+                    actor_id=actor_id,
+                    target_id=effect.location_id,
+                )
+                contexts = dict(state.actor_position_contexts)
+                knowledge = dict(state.party_location_knowledge)
+                previous_knowledge = knowledge.get(effect.location_id)
+                if resolution.status == "known_reachable":
+                    contexts.pop(actor_id, None)
+                    knowledge[effect.location_id] = LocationKnowledge(
+                        location_id=effect.location_id,
+                        scope="party",
+                        existence="known",
+                        localization="located",
+                        access="reachable",
+                        visited=True,
+                        known_connection_ids=(
+                            previous_knowledge.known_connection_ids
+                            if previous_knowledge is not None
+                            else ()
+                        ),
+                    )
+                    travel = TravelResolved(
+                        destination_id=effect.location_id,
+                        path=resolution.path,
+                    )
+                    state = state.model_copy(
+                        update={
+                            "scene_id": effect.location_id,
+                            "party_location_knowledge": knowledge,
+                            "actor_position_contexts": contexts,
+                        },
+                        deep=True,
+                    )
+                    event_type = "travel.resolved"
+                    payload = {
+                        "destination_id": travel.destination_id,
+                        "path": list(travel.path),
+                    }
+                elif resolution.status == "known_blocked":
+                    assert resolution.boundary is not None
+                    assert resolution.reached_location_id is not None
+                    travel = TravelInterrupted(
+                        destination_id=effect.location_id,
+                        current_location_id=resolution.reached_location_id,
+                        path=resolution.path,
+                        reached_boundary=resolution.boundary,
+                    )
+                    contexts[actor_id] = travel
+                    knowledge[effect.location_id] = LocationKnowledge(
+                        location_id=effect.location_id,
+                        scope="party",
+                        existence="known",
+                        localization="located",
+                        access="blocked",
+                        visited=bool(previous_knowledge and previous_knowledge.visited),
+                        known_connection_ids=(
+                            previous_knowledge.known_connection_ids
+                            if previous_knowledge is not None
+                            else ()
+                        ),
+                    )
+                    state = state.model_copy(
+                        update={
+                            "scene_id": travel.current_location_id,
+                            "party_location_knowledge": knowledge,
+                            "actor_position_contexts": contexts,
+                        },
+                        deep=True,
+                    )
+                    event_type = "travel.interrupted"
+                    payload = {
+                        "destination_id": travel.destination_id,
+                        "current_location_id": travel.current_location_id,
+                        "path": list(travel.path),
+                        "reached_boundary": travel.reached_boundary.to_json_dict(),
+                    }
+                else:
+                    raise ContractError(
+                        resolution.safe_reason or "当前没有可确认的目标路线"
+                    )
         elif isinstance(effect, EnsureRuntimeLocationEffect):
             locations = deepcopy(state.runtime_locations)
             locations[effect.location_id] = {
@@ -1112,7 +1277,20 @@ class AdjudicationEngineService:
                 "connected_location_id": effect.connected_location_id,
                 "provenance": "agent_adjudication",
             }
-            state = state.model_copy(update={"runtime_locations": locations}, deep=True)
+            knowledge = dict(state.party_location_knowledge)
+            knowledge[effect.location_id] = LocationKnowledge(
+                location_id=effect.location_id,
+                existence="known",
+                localization="located",
+                access="reachable",
+            )
+            state = state.model_copy(
+                update={
+                    "runtime_locations": locations,
+                    "party_location_knowledge": knowledge,
+                },
+                deep=True,
+            )
             event_type = "location.created"
             payload = {"location_id": effect.location_id}
         elif isinstance(effect, EnsureRuntimeEntityEffect):
@@ -1135,7 +1313,10 @@ class AdjudicationEngineService:
             target["location_id"] = effect.location_id
             target["holder_actor_id"] = effect.holder_actor_id
             state = state.model_copy(
-                update={"runtime_entities": runtime_entities, "entities": entity_states},
+                update={
+                    "runtime_entities": runtime_entities,
+                    "entities": entity_states,
+                },
                 deep=True,
             )
             event_type = "entity.moved"
@@ -1152,11 +1333,18 @@ class AdjudicationEngineService:
                 target = entity_states.setdefault(effect.entity_id, {})
             target[effect.key] = effect.value
             state = state.model_copy(
-                update={"runtime_entities": runtime_entities, "entities": entity_states},
+                update={
+                    "runtime_entities": runtime_entities,
+                    "entities": entity_states,
+                },
                 deep=True,
             )
             event_type = "entity.state_changed"
-            payload = {"entity_id": effect.entity_id, "key": effect.key, "value": effect.value}
+            payload = {
+                "entity_id": effect.entity_id,
+                "key": effect.key,
+                "value": effect.value,
+            }
         elif isinstance(effect, ConsumeEntityEffect):
             runtime_entities = deepcopy(state.runtime_entities)
             entity_states = deepcopy(state.entities)
@@ -1165,7 +1353,10 @@ class AdjudicationEngineService:
                 target = entity_states.setdefault(effect.entity_id, {})
             target["consumed"] = True
             state = state.model_copy(
-                update={"runtime_entities": runtime_entities, "entities": entity_states},
+                update={
+                    "runtime_entities": runtime_entities,
+                    "entities": entity_states,
+                },
                 deep=True,
             )
             event_type = "entity.consumed"
@@ -1174,7 +1365,9 @@ class AdjudicationEngineService:
             state = state.model_copy(update={"core_resolved": True}, deep=True)
             event_type = "core.resolved"
         elif isinstance(effect, SetEndingAvailabilityEffect):
-            state = state.model_copy(update={"ending_available": effect.available}, deep=True)
+            state = state.model_copy(
+                update={"ending_available": effect.available}, deep=True
+            )
             event_type = "ending.availability_changed"
             payload = {"available": effect.available}
         elif isinstance(effect, CommitTerminalEndingEffect):
@@ -1266,7 +1459,10 @@ class AdjudicationEngineService:
         player_id: str,
         decision: PendingCheckDecision,
     ) -> None:
-        if decision.room_id != runtime.game_state.room_id or decision.player_id != player_id:
+        if (
+            decision.room_id != runtime.game_state.room_id
+            or decision.player_id != player_id
+        ):
             raise ContractError("PendingCheckDecision 不属于当前玩家或房间")
         AdjudicationEngineService._validate_identity(
             runtime,

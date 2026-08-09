@@ -29,6 +29,7 @@ from collaboration_framework.contracts import (
     KeeperLocationCapability,
     KeeperRuleCandidate,
     KeeperRuleOption,
+    LocationKnowledge,
     LocationSpecV3,
     ModuleContentV3,
     ProjectionActorResource,
@@ -37,6 +38,10 @@ from collaboration_framework.contracts import (
     ProjectionEntity,
     ProjectionExitDestination,
     ProjectionKnownInformation,
+    ProjectionKnownLocation,
+    ProjectionLocationBreadcrumb,
+    ProjectionLocationContext,
+    ProjectionPositionContext,
     ProjectionScene,
     ProjectionSelfActor,
     ProjectionSnapshot,
@@ -45,6 +50,7 @@ from collaboration_framework.contracts import (
 )
 
 from .models import EngineRuntimeSnapshot, GameState
+from .navigation import effective_location_knowledge
 
 # Visibility levels an authored node may carry, ordered from most to least open.
 _PLAYER_VISIBLE = {"public", "party"}
@@ -60,6 +66,11 @@ def project_v3(
     state = runtime.game_state
     location = _current_location(module, state)
     actor = state.actors[actor_id]
+    location_knowledge = effective_location_knowledge(
+        module,
+        state,
+        actor_id=actor_id,
+    )
 
     visible_entities = _visible_entities(module, state, location.id, actor_id)
     return ProjectionSnapshot(
@@ -87,8 +98,16 @@ def project_v3(
                 for other_id, other in state.actors.items()
                 if other_id != actor_id
             ),
-            available_exits=_available_exits(module, state, location.id, actor_id),
+            available_exits=_available_exits(
+                module,
+                state,
+                location.id,
+                actor_id,
+                location_knowledge,
+            ),
         ),
+        location_context=_location_context(module, state, actor_id),
+        known_locations=_known_locations(module, state, location_knowledge),
         world=ProjectionWorldState(
             day_index=state.world_time.current.day_index,
             hour_of_day=state.world_time.current.hour_of_day,
@@ -145,6 +164,89 @@ def location_breadcrumbs(
         trail.append((location.id, location.player_visible_name or location.name))
         cursor = location.parent_location_id
     return tuple(reversed(trail))
+
+
+def _location_context(
+    module: ModuleContentV3,
+    state: GameState,
+    actor_id: str,
+) -> ProjectionLocationContext:
+    trail = location_breadcrumbs(module, state.scene_id)
+    if not trail and state.scene_id in state.runtime_locations:
+        runtime = state.runtime_locations[state.scene_id]
+        parent_id = _optional_text(runtime.get("parent_location_id")) or _optional_text(
+            runtime.get("connected_location_id")
+        )
+        parent_trail = location_breadcrumbs(module, parent_id) if parent_id else ()
+        trail = (
+            *parent_trail,
+            (
+                state.scene_id,
+                _optional_text(runtime.get("name")) or state.scene_id,
+            ),
+        )
+    interrupted = state.actor_position_contexts.get(actor_id)
+    return ProjectionLocationContext(
+        current_location_id=state.scene_id,
+        breadcrumbs=tuple(
+            ProjectionLocationBreadcrumb(id=location_id, name=name)
+            for location_id, name in trail
+        ),
+        position_context=(
+            ProjectionPositionContext(
+                id=interrupted.reached_boundary.id,
+                label=interrupted.reached_boundary.label,
+                state=interrupted.reached_boundary.state,
+                destination_id=interrupted.destination_id,
+            )
+            if interrupted is not None
+            else None
+        ),
+    )
+
+
+def _known_locations(
+    module: ModuleContentV3,
+    state: GameState,
+    knowledge: dict[str, LocationKnowledge],
+) -> tuple[ProjectionKnownLocation, ...]:
+    projected: list[ProjectionKnownLocation] = []
+    for location in module.locations:
+        known = knowledge.get(location.id)
+        if known is None or known.existence == "unknown":
+            continue
+        projected.append(
+            ProjectionKnownLocation(
+                id=location.id,
+                kind=location.kind,
+                name=location.player_visible_name or location.name,
+                description=location.player_visible_description,
+                parent_location_id=location.parent_location_id,
+                region_id=location.region_id,
+                existence=known.existence,
+                localization=known.localization,
+                access=known.access,
+                visited=known.visited,
+            )
+        )
+    for location_id, payload in sorted(state.runtime_locations.items()):
+        known = knowledge.get(location_id)
+        if known is None or known.existence == "unknown":
+            continue
+        projected.append(
+            ProjectionKnownLocation(
+                id=location_id,
+                kind="room",
+                name=_optional_text(payload.get("name")) or location_id,
+                parent_location_id=_optional_text(payload.get("parent_location_id"))
+                or _optional_text(payload.get("connected_location_id")),
+                existence=known.existence,
+                localization=known.localization,
+                access=known.access,
+                visited=known.visited,
+            )
+        )
+    return tuple(projected)
 
 
 def _visible_entities(
@@ -204,6 +306,7 @@ def _available_exits(
     state: GameState,
     location_id: str,
     actor_id: str,
+    location_knowledge: dict[str, LocationKnowledge],
 ) -> tuple[ProjectionAvailableExit, ...]:
     """Outgoing edges the player may both see and use.
 
@@ -217,18 +320,17 @@ def _available_exits(
     for edge in module.location_edges:
         if edge.from_location_id != location_id:
             continue
-        if edge.visibility not in _PLAYER_VISIBLE and not _override_allows(
-            state, actor_id, "location", edge.to_location_id, default=False
-        ):
-            continue
-        if not _override_allows(state, actor_id, "location", edge.to_location_id):
+        known_destination = location_knowledge.get(edge.to_location_id)
+        if known_destination is None or known_destination.existence == "unknown":
             continue
         destination = by_id.get(edge.to_location_id)
         runtime_destination = state.runtime_locations.get(edge.to_location_id)
         if destination is not None:
             name = destination.player_visible_name or destination.name
         elif runtime_destination is not None:
-            name = _optional_text(runtime_destination.get("name")) or edge.to_location_id
+            name = (
+                _optional_text(runtime_destination.get("name")) or edge.to_location_id
+            )
         else:
             continue
         exits.append(
@@ -284,7 +386,10 @@ def _available_exits(
             payload.get("parent_location_id"),
         }:
             continue
-        if any(item.destination and item.destination.scene_id == runtime_id for item in exits):
+        if any(
+            item.destination and item.destination.scene_id == runtime_id
+            for item in exits
+        ):
             continue
         name = _optional_text(payload.get("name")) or runtime_id
         exits.append(
@@ -356,14 +461,20 @@ def _self_actor(actor_id: str, actor) -> ProjectionSelfActor:
         id=actor_id,
         name=actor.name,
         occupation=_optional_text(actor_state.get("occupation")),
-        attributes=_actor_values(actor_state.get("attributes"), actor_state.get("attribute_labels")),
-        skills=_actor_values(actor_state.get("skills"), actor_state.get("skill_labels")),
+        attributes=_actor_values(
+            actor_state.get("attributes"), actor_state.get("attribute_labels")
+        ),
+        skills=_actor_values(
+            actor_state.get("skills"), actor_state.get("skill_labels")
+        ),
         resources=tuple(
             ProjectionActorResource(id=key, name=key.upper(), value=value)
             for key, value in actor.resources.model_dump(mode="python").items()
             if isinstance(value, int) and not isinstance(value, bool)
         ),
-        conditions=tuple(item for item in actor.conditions if isinstance(item, str) and item.strip()),
+        conditions=tuple(
+            item for item in actor.conditions if isinstance(item, str) and item.strip()
+        ),
         equipment=_equipment(actor_state.get("equipment")),
         background_summary=_optional_text(actor_state.get("background")) or "",
         public_status_summary=_public_status_summary(actor_state),
@@ -404,7 +515,11 @@ def _equipment(value) -> tuple[str, ...]:
 
 
 def _public_status_summary(actor_state) -> str:
-    summary = actor_state.get("public_status_summary") if isinstance(actor_state, dict) else None
+    summary = (
+        actor_state.get("public_status_summary")
+        if isinstance(actor_state, dict)
+        else None
+    )
     return summary if isinstance(summary, str) else ""
 
 

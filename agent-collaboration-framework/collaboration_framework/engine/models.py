@@ -16,11 +16,13 @@ from collaboration_framework.contracts import (
     ContractModel,
     ModuleContent,
     ModuleContentV3,
+    LocationKnowledge,
     PendingCheckDecisionView,
     PendingCheckOption,
     PostRollDecisionRequest,
     PostRollOption,
     SubmitAdjudicationRequest,
+    TravelInterrupted,
 )
 from collaboration_framework.contracts.adjudication import CheckRoll
 
@@ -120,6 +122,11 @@ class GameState(ContractModel):
     runtime_locations: dict[str, dict[str, JsonValue]] = Field(default_factory=dict)
     runtime_entities: dict[str, dict[str, JsonValue]] = Field(default_factory=dict)
     visibility_overrides: dict[str, bool] = Field(default_factory=dict)
+    party_location_knowledge: dict[str, LocationKnowledge] = Field(default_factory=dict)
+    actor_location_knowledge: dict[str, dict[str, LocationKnowledge]] = Field(
+        default_factory=dict
+    )
+    actor_position_contexts: dict[str, TravelInterrupted] = Field(default_factory=dict)
     core_resolved: bool = False
     ending_available: bool = False
 
@@ -209,7 +216,9 @@ class CheckRun(ContractModel):
     adjudication: ActionAdjudication
 
 
-WorkflowRequest = SubmitAdjudicationRequest | CheckDecisionRequest | PostRollDecisionRequest
+WorkflowRequest = (
+    SubmitAdjudicationRequest | CheckDecisionRequest | PostRollDecisionRequest
+)
 
 
 class CompletedAdjudicationCommand(ContractModel):

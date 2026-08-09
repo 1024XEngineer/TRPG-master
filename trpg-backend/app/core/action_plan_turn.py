@@ -77,6 +77,12 @@ class ActionPlanTurnResult:
         return self.status == "waiting_for_player"
 
 
+@dataclass(frozen=True)
+class _TravelTarget:
+    id: str
+    name: str
+
+
 class DeterministicHostTurnDecisionModel:
     """Offline-safe model used only by fake/test composition."""
 
@@ -109,8 +115,8 @@ class DeterministicHostTurnDecisionModel:
         if compact is not None:
             return compact
 
-        destination = _match_visible_exit(context.player_view, utterance)
-        if destination is not None and destination.destination is not None:
+        destination = _match_travel_target(context.player_view, utterance)
+        if destination is not None:
             return SingleActionDecision(
                 adjudication=ActionAdjudication(
                     request_id="application-owned",
@@ -119,13 +125,11 @@ class DeterministicHostTurnDecisionModel:
                     summary=utterance,
                     target=ActionTarget(
                         kind="location",
-                        id=destination.destination.scene_id,
+                        id=destination.id,
                     ),
                     method=ActionMethod(family="travel", description=utterance),
                     check=NoAdjudicationCheck(),
-                    success_effects=(
-                        EnterLocationEffect(location_id=destination.destination.scene_id),
-                    ),
+                    success_effects=(EnterLocationEffect(location_id=destination.id),),
                 )
             )
         return SingleActionDecision(
@@ -145,17 +149,14 @@ class DeterministicHostTurnDecisionModel:
 def _compact_travel_plan(view: PlayerView, utterance: str) -> ActionPlan | None:
     """Split compact fake-provider phrases without consulting hidden ModuleContent."""
 
-    destination = _match_visible_exit(view, utterance)
-    if destination is None or destination.destination is None:
+    destination = _match_travel_target(view, utterance)
+    if destination is None:
         return None
     anchor = _best_label_overlap(
         utterance,
         (
             destination.name,
             destination.id,
-            *destination.aliases,
-            destination.destination.name,
-            destination.destination.scene_id,
         ),
     )
     if anchor is None:
@@ -181,7 +182,7 @@ def _compact_travel_plan(view: PlayerView, utterance: str) -> ActionPlan | None:
     follow_up = remainder[action_start:].strip(" ，,。")
     if not follow_up:
         return None
-    destination_name = destination.destination.name
+    destination_name = destination.name
     return ActionPlan(
         goal=utterance,
         steps=(
@@ -221,6 +222,47 @@ def _match_visible_exit(view: PlayerView, text: str):
     if len(matches) > 1 and matches[0][0] == matches[1][0]:
         return None
     return matches[0][2]
+
+
+def _match_travel_target(view: PlayerView, text: str) -> _TravelTarget | None:
+    if not any(word in text for word in ("去", "前往", "进入", "到", "抵达")):
+        return None
+    matches: list[tuple[int, str, _TravelTarget]] = []
+    for location in view.known_locations:
+        if location.existence != "known" or location.localization != "located":
+            continue
+        overlap = _best_label_overlap(text, (location.name, location.id))
+        if overlap is not None:
+            matches.append((len(overlap), location.id, _TravelTarget(location.id, location.name)))
+    for exit_view in view.scene.available_exits:
+        if exit_view.destination is None:
+            continue
+        labels = (
+            exit_view.name,
+            exit_view.id,
+            *exit_view.aliases,
+            exit_view.destination.name,
+            exit_view.destination.scene_id,
+        )
+        overlap = _best_label_overlap(text, labels)
+        if overlap is not None:
+            target = _TravelTarget(
+                exit_view.destination.scene_id,
+                exit_view.destination.name,
+            )
+            matches.append((len(overlap), target.id, target))
+    if not matches:
+        return None
+    # The same location can be present in both known_locations and immediate exits.
+    deduplicated = {
+        target.id: (score, target_id, target)
+        for score, target_id, target in matches
+        if score == max(item[0] for item in matches if item[2].id == target.id)
+    }
+    ranked = sorted(deduplicated.values(), key=lambda item: (-item[0], item[1]))
+    if len(ranked) > 1 and ranked[0][0] == ranked[1][0]:
+        return None
+    return ranked[0][2]
 
 
 def _best_label_overlap(text: str, labels: tuple[str, ...]) -> str | None:
@@ -885,17 +927,17 @@ class _DeterministicStepAdjudicator:
             )
 
         if context.step.kind == "travel":
-            destination = _match_visible_exit(
+            destination = _match_travel_target(
                 context.player_view,
                 context.step.semantic_goal,
             )
-            if destination is None or destination.destination is None:
+            if destination is None:
                 raise TurnExecutionError(
                     "STEP_DESTINATION_NOT_VISIBLE",
                     "当前地点没有可安全确认的目标路线",
                     retryable=False,
                 )
-            destination_id = destination.destination.scene_id
+            destination_id = destination.id
             return ActionAdjudication(
                 request_id=context.step_request_id,
                 source_revision=context.player_view.revision,

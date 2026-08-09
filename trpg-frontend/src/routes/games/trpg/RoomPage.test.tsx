@@ -1562,6 +1562,56 @@ describe('RoomPage conversation history', () => {
     expect(screen.queryByLabelText('主线进度')).not.toBeInTheDocument()
   })
 
+  it('shows every known location in containment hierarchy instead of one-hop exits', async () => {
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    const view = playerViewFixture()
+    act(() =>
+      emitWsMessage({
+        type: 'view.updated',
+        payload: {
+          playerId: 'player-1',
+          playerView: {
+            ...view,
+            scene_id: 'meeting_room',
+            scene: {
+              ...view.scene,
+              id: 'meeting_room',
+              name: '会客室',
+              available_exits: [{
+                id: 'meeting-to-street',
+                name: '街道',
+                aliases: [],
+                description: '',
+                destination: { scene_id: 'street', name: '街道' },
+              }],
+            },
+            location_context: {
+              current_location_id: 'meeting_room',
+              breadcrumbs: [
+                { id: 'town', name: '阿诺兹堡' },
+                { id: 'meeting_room', name: '会客室' },
+              ],
+              position_context: null,
+            },
+            known_locations: [
+              { id: 'town', kind: 'region', name: '阿诺兹堡', description: '', parent_location_id: null, region_id: null, existence: 'known', localization: 'located', access: 'unknown', visited: false },
+              { id: 'street', kind: 'connector', name: '街道', description: '', parent_location_id: 'town', region_id: 'town', existence: 'known', localization: 'located', access: 'reachable', visited: false },
+              { id: 'meeting_room', kind: 'site', name: '会客室', description: '', parent_location_id: 'town', region_id: 'town', existence: 'known', localization: 'located', access: 'reachable', visited: true },
+              { id: 'library', kind: 'site', name: '图书馆', description: '', parent_location_id: 'town', region_id: 'town', existence: 'known', localization: 'located', access: 'reachable', visited: false },
+            ],
+          },
+        },
+      }),
+    )
+    fireEvent.click(screen.getByRole('button', { name: '地图' }))
+
+    expect(screen.getByText('已知地点（按层级）')).toBeInTheDocument()
+    expect(screen.getByText('图书馆')).toBeInTheDocument()
+    expect(screen.getAllByText('会客室').length).toBeGreaterThanOrEqual(2)
+  })
+
   it('renders invalid Agent output as keeper guidance', () => {
     renderRoomPage()
 

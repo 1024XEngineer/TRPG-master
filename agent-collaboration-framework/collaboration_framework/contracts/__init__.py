@@ -184,6 +184,15 @@ from .module_v3 import (
     TravelCostSpec,
     WorldProfileSpec,
 )
+from .navigation import (
+    AccessBoundary,
+    LocationKnowledge,
+    TargetResolution,
+    TargetResolutionStatus,
+    TravelInterrupted,
+    TravelResolved,
+    TravelResult,
+)
 from .player_view import (
     ActionDeclarationOption,
     ActorResourceView,
@@ -192,6 +201,9 @@ from .player_view import (
     CheckpointOption,
     ExitDestinationView,
     KnownInformationView,
+    KnownLocationView,
+    LocationBreadcrumbView,
+    LocationContextView,
     NarrativeDetailView,
     ObservableStateView,
     PlayerView,
@@ -204,8 +216,12 @@ from .player_view import (
     ProjectionEntity,
     ProjectionExitDestination,
     ProjectionKnownInformation,
+    ProjectionKnownLocation,
+    ProjectionLocationBreadcrumb,
+    ProjectionLocationContext,
     ProjectionNarrativeDetail,
     ProjectionObservableState,
+    ProjectionPositionContext,
     ProjectionScene,
     ProjectionSelfActor,
     ProjectionSnapshot,
@@ -217,6 +233,7 @@ from .player_view import (
     VisibleEntity,
     VisibleFact,
     WorldStateView,
+    PositionContextView,
 )
 from .runtime import PlayerInput, player_input_fingerprint
 

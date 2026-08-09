@@ -11,9 +11,11 @@ from .capabilities import (
 )
 from .dice import DiceRoller, SequenceDiceSource, SystemDiceSource
 from .initialization import create_initial_game_state
+from .navigation import effective_location_knowledge, resolve_location_target
 from .models import (
     ActorResources,
     ActorState,
+    LocationKnowledge,
     CheckRun,
     WorldTimePoint,
     WorldTimeState,
@@ -34,6 +36,7 @@ __all__ = [
     "CompletedAdjudicationCommand",
     "ActorResources",
     "ActorState",
+    "LocationKnowledge",
     "AdjudicationEngineService",
     "WorldTimePoint",
     "WorldTimeState",
@@ -55,5 +58,7 @@ __all__ = [
     "SystemDiceSource",
     "audit_runtime_capabilities",
     "create_initial_game_state",
+    "effective_location_knowledge",
     "require_runtime_capabilities",
+    "resolve_location_target",
 ]

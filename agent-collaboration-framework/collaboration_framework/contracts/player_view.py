@@ -109,6 +109,38 @@ class ProjectionScene(ContractModel):
     available_exits: tuple[ProjectionAvailableExit, ...] = ()
 
 
+class ProjectionLocationBreadcrumb(ContractModel):
+    id: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+
+
+class ProjectionPositionContext(ContractModel):
+    kind: Literal["access_boundary"] = "access_boundary"
+    id: str = Field(min_length=1)
+    label: str = Field(min_length=1)
+    state: Literal["locked", "blocked", "interaction_required"]
+    destination_id: str = Field(min_length=1)
+
+
+class ProjectionLocationContext(ContractModel):
+    current_location_id: str = Field(min_length=1)
+    breadcrumbs: tuple[ProjectionLocationBreadcrumb, ...] = ()
+    position_context: ProjectionPositionContext | None = None
+
+
+class ProjectionKnownLocation(ContractModel):
+    id: str = Field(min_length=1)
+    kind: Literal["region", "site", "room", "connector"]
+    name: str = Field(min_length=1)
+    description: str = ""
+    parent_location_id: str | None = Field(default=None, min_length=1)
+    region_id: str | None = Field(default=None, min_length=1)
+    existence: Literal["rumored", "known"]
+    localization: Literal["unknown", "approximate", "located"]
+    access: Literal["unknown", "reachable", "blocked"]
+    visited: bool = False
+
+
 class ProjectionWorldState(ContractModel):
     """Player-safe world facts the Engine commits outside the current scene.
 
@@ -172,6 +204,8 @@ class ProjectionSnapshot(ContractModel):
     revision: str = Field(min_length=1)
     self_actor: ProjectionSelfActor
     scene: ProjectionScene
+    location_context: ProjectionLocationContext | None = None
+    known_locations: tuple[ProjectionKnownLocation, ...] = ()
     world: ProjectionWorldState = Field(default_factory=ProjectionWorldState)
     known_information: tuple[ProjectionKnownInformation, ...] = ()
     checkpoint_options: tuple[ProjectionCheckpointOption, ...] = ()
@@ -281,6 +315,38 @@ class SceneView(ContractModel):
     available_exits: tuple[AvailableExitView, ...] = ()
 
 
+class LocationBreadcrumbView(ContractModel):
+    id: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+
+
+class PositionContextView(ContractModel):
+    kind: Literal["access_boundary"] = "access_boundary"
+    id: str = Field(min_length=1)
+    label: str = Field(min_length=1)
+    state: Literal["locked", "blocked", "interaction_required"]
+    destination_id: str = Field(min_length=1)
+
+
+class LocationContextView(ContractModel):
+    current_location_id: str = Field(min_length=1)
+    breadcrumbs: tuple[LocationBreadcrumbView, ...] = ()
+    position_context: PositionContextView | None = None
+
+
+class KnownLocationView(ContractModel):
+    id: str = Field(min_length=1)
+    kind: Literal["region", "site", "room", "connector"]
+    name: str = Field(min_length=1)
+    description: str = ""
+    parent_location_id: str | None = Field(default=None, min_length=1)
+    region_id: str | None = Field(default=None, min_length=1)
+    existence: Literal["rumored", "known"]
+    localization: Literal["unknown", "approximate", "located"]
+    access: Literal["unknown", "reachable", "blocked"]
+    visited: bool = False
+
+
 class WorldStateView(ContractModel):
     """Player-safe world facts committed outside the current scene.
 
@@ -346,6 +412,8 @@ class PlayerView(ContractModel):
     revision: str = Field(min_length=1)
     self_actor: SelfActorView
     scene: SceneView
+    location_context: LocationContextView | None = None
+    known_locations: tuple[KnownLocationView, ...] = ()
     world: WorldStateView = Field(default_factory=WorldStateView)
     known_information: tuple[KnownInformationView, ...] = ()
     checkpoint_options: tuple[CheckpointOption, ...] = ()

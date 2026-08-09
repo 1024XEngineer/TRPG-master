@@ -99,7 +99,9 @@ class ProjectionV3Tests(unittest.IsolatedAsyncioTestCase):
         snapshot = await self.project(game_state(self.content))
         self.assertEqual(snapshot.scene_id, "thomas_office")
         # thomas is placed here by `located_in`, not by a Scene entity list.
-        self.assertIn("thomas", {entity.id for entity in snapshot.scene.visible_entities})
+        self.assertIn(
+            "thomas", {entity.id for entity in snapshot.scene.visible_entities}
+        )
         self.assertIn(
             "arnoldsburg_streets",
             {
@@ -107,6 +109,16 @@ class ProjectionV3Tests(unittest.IsolatedAsyncioTestCase):
                 for exit_ in snapshot.scene.available_exits
                 if exit_.destination
             },
+        )
+        known_ids = {location.id for location in snapshot.known_locations}
+        self.assertIn("library", known_ids)
+        self.assertIn("kimball_study", known_ids)
+        self.assertNotIn("crypt", known_ids)
+        self.assertNotIn("speakeasy", known_ids)
+        assert snapshot.location_context is not None
+        self.assertEqual(
+            [item.name for item in snapshot.location_context.breadcrumbs],
+            ["阿诺兹堡", "托马斯的会客室"],
         )
 
     async def test_hidden_edges_stay_out_of_the_view(self) -> None:
@@ -120,6 +132,24 @@ class ProjectionV3Tests(unittest.IsolatedAsyncioTestCase):
         }
         self.assertNotIn("crypt", destinations)
         self.assertIn("surveillance_point", destinations)
+
+    async def test_discovered_locked_location_is_known_but_not_entered(self) -> None:
+        state = game_state(
+            self.content,
+            scene_id="cemetery",
+            entities={"crypt_entrance": {"discovered": True, "slab_moved": False}},
+        )
+        snapshot = await self.project(state)
+        crypt = next(item for item in snapshot.known_locations if item.id == "crypt")
+        self.assertEqual(crypt.access, "blocked")
+        self.assertIn(
+            "crypt",
+            {
+                exit_.destination.scene_id
+                for exit_ in snapshot.scene.available_exits
+                if exit_.destination
+            },
+        )
 
     async def test_moving_an_entity_moves_where_it_is_projected(self) -> None:
         # `located_in` is the module's placement; runtime state overrides it, which
@@ -154,7 +184,9 @@ class ProjectionV3Tests(unittest.IsolatedAsyncioTestCase):
             entities={"liquor": {"consumed": True}},
         )
         snapshot = await self.project(state)
-        self.assertNotIn("liquor", {entity.id for entity in snapshot.scene.visible_entities})
+        self.assertNotIn(
+            "liquor", {entity.id for entity in snapshot.scene.visible_entities}
+        )
 
     async def test_undiscovered_information_is_withheld(self) -> None:
         snapshot = await self.project(game_state(self.content))
@@ -164,7 +196,9 @@ class ProjectionV3Tests(unittest.IsolatedAsyncioTestCase):
         state = game_state(self.content, discovered_facts=("cemetery_dance_report",))
         snapshot = await self.project(state)
         released = next(
-            item for item in snapshot.known_information if item.id == "cemetery_dance_report"
+            item
+            for item in snapshot.known_information
+            if item.id == "cemetery_dance_report"
         )
         keeper_text = next(
             item.keeper_content
@@ -201,7 +235,10 @@ class ProjectionV3Tests(unittest.IsolatedAsyncioTestCase):
             self.content,
             scene_id="alley",
             runtime_locations={
-                "alley": {"name": "后巷", "connected_location_id": "arnoldsburg_streets"}
+                "alley": {
+                    "name": "后巷",
+                    "connected_location_id": "arnoldsburg_streets",
+                }
             },
         )
         snapshot = await self.project(state)
@@ -249,7 +286,9 @@ class AdjudicationAgainstV3Tests(unittest.IsolatedAsyncioTestCase):
         await self.submit(
             engine,
             snapshot.revision,
-            RevealInformationEffect(information_id="cemetery_dance_report", scope="party"),
+            RevealInformationEffect(
+                information_id="cemetery_dance_report", scope="party"
+            ),
         )
         after = await rules.read(
             PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
@@ -272,6 +311,70 @@ class AdjudicationAgainstV3Tests(unittest.IsolatedAsyncioTestCase):
             PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
         )
         self.assertEqual(after.scene_id, "arnoldsburg_streets")
+
+    async def test_known_multi_edge_route_resolves_in_one_travel(self) -> None:
+        store, engine, rules = self.build()
+        snapshot = await rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        await self.submit(
+            engine,
+            snapshot.revision,
+            EnterLocationEffect(location_id="library"),
+        )
+
+        self.assertEqual(store.inspect_state(ROOM).scene_id, "library")
+        travel = next(
+            event
+            for event in store.inspect_domain_events(ROOM)
+            if event.type == "travel.resolved"
+        )
+        self.assertEqual(
+            travel.payload["path"],
+            ["thomas_office", "arnoldsburg_streets", "library"],
+        )
+
+    async def test_locked_route_stops_at_access_boundary(self) -> None:
+        store, engine, rules = self.build(
+            scene_id="cemetery",
+            entities={"crypt_entrance": {"discovered": True, "slab_moved": False}},
+        )
+        snapshot = await rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        await self.submit(
+            engine,
+            snapshot.revision,
+            EnterLocationEffect(location_id="crypt"),
+        )
+
+        self.assertEqual(store.inspect_state(ROOM).scene_id, "cemetery")
+        interrupted = next(
+            event
+            for event in store.inspect_domain_events(ROOM)
+            if event.type == "travel.interrupted"
+        )
+        self.assertEqual(interrupted.payload["destination_id"], "crypt")
+        after = await rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        assert after.location_context is not None
+        assert after.location_context.position_context is not None
+        self.assertEqual(after.location_context.current_location_id, "cemetery")
+        self.assertEqual(after.location_context.position_context.state, "locked")
+
+    async def test_unrevealed_hidden_location_cannot_be_entered(self) -> None:
+        store, engine, rules = self.build(scene_id="cemetery")
+        snapshot = await rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        with self.assertRaisesRegex(ContractError, "可确认的目标路线"):
+            await self.submit(
+                engine,
+                snapshot.revision,
+                EnterLocationEffect(location_id="crypt"),
+            )
+        self.assertEqual(store.inspect_state(ROOM).scene_id, "cemetery")
 
     async def test_a_v2_scene_id_is_no_longer_a_valid_location(self) -> None:
         # `client_briefing` was the v2 opening Scene; it must not resolve now.
@@ -316,7 +419,9 @@ class AdjudicationAgainstV3Tests(unittest.IsolatedAsyncioTestCase):
         )
         # Keeper text is what the Agent judges with, and it is not the player half.
         keeper = next(
-            item for item in capabilities.information if item.id == "douglas_true_nature"
+            item
+            for item in capabilities.information
+            if item.id == "douglas_true_nature"
         )
         self.assertNotEqual(keeper.content, keeper.summary)
 
@@ -414,7 +519,9 @@ class RuleOwnedCheckTests(unittest.IsolatedAsyncioTestCase):
         )
         return (
             store,
-            AdjudicationEngineService(store, dice=DiceRoller(SequenceDiceSource(rolls))),
+            AdjudicationEngineService(
+                store, dice=DiceRoller(SequenceDiceSource(rolls))
+            ),
             RuleEngineService(store),
         )
 

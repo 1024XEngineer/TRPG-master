@@ -334,6 +334,31 @@ export interface AgentWorldState {
   ending_id: string | null;
 }
 
+export interface AgentKnownLocation {
+  id: string;
+  kind: 'region' | 'site' | 'room' | 'connector';
+  name: string;
+  description: string;
+  parent_location_id: string | null;
+  region_id: string | null;
+  existence: 'rumored' | 'known';
+  localization: 'unknown' | 'approximate' | 'located';
+  access: 'unknown' | 'reachable' | 'blocked';
+  visited: boolean;
+}
+
+export interface AgentLocationContext {
+  current_location_id: string;
+  breadcrumbs: Array<{ id: string; name: string }>;
+  position_context: {
+    kind: 'access_boundary';
+    id: string;
+    label: string;
+    state: 'locked' | 'blocked' | 'interaction_required';
+    destination_id: string;
+  } | null;
+}
+
 export interface AgentCheckpointOption {
   id: string;
   target_id: string;
@@ -351,6 +376,10 @@ export interface AgentPlayerView {
   revision: string;
   self_actor: AgentSelfActor;
   scene: AgentSceneView;
+  /** v3-only safe hierarchy and boundary context; absent on historical payloads. */
+  location_context?: AgentLocationContext | null;
+  /** All player-known locations, not merely the current node's one-hop exits. */
+  known_locations?: AgentKnownLocation[];
   world: AgentWorldState;
   known_information: AgentKnownInformation[];
   checkpoint_options: AgentCheckpointOption[];

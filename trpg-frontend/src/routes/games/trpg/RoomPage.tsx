@@ -94,6 +94,9 @@ interface MapLocation {
   icon: string
   name: string
   desc: string
+  depth: number
+  access?: 'unknown' | 'reachable' | 'blocked'
+  visited?: boolean
   isCurrent?: boolean
 }
 
@@ -104,14 +107,73 @@ function mapLocationsFromPlayerView(playerView: AgentPlayerView | null): MapLoca
       icon: '📍',
       name: '等待场景同步',
       desc: '进入游戏后由规则引擎提供当前位置',
+      depth: 0,
       isCurrent: true,
     }]
+  }
+  if (playerView.known_locations && playerView.known_locations.length > 0) {
+    const locations = playerView.known_locations
+    const knownIds = new Set(locations.map((location) => location.id))
+    const children = new globalThis.Map<string | null, typeof locations>()
+    for (const location of locations) {
+      const parentId = location.parent_location_id && knownIds.has(location.parent_location_id)
+        ? location.parent_location_id
+        : null
+      children.set(parentId, [...(children.get(parentId) ?? []), location])
+    }
+    const ordered: MapLocation[] = []
+    const visited = new Set<string>()
+    const walk = (parentId: string | null, depth: number) => {
+      for (const location of children.get(parentId) ?? []) {
+        if (visited.has(location.id)) continue
+        visited.add(location.id)
+        const isCurrent = location.id === playerView.scene.id
+        const status = location.access === 'blocked'
+          ? '路线受阻'
+          : location.localization !== 'located'
+            ? '位置尚未确认'
+            : location.visited
+              ? '已到访'
+              : '已知地点'
+        ordered.push({
+          id: location.id,
+          icon: isCurrent
+            ? '📍'
+            : location.kind === 'region'
+              ? '🗺️'
+              : location.kind === 'connector'
+                ? '🛣️'
+                : location.kind === 'room'
+                  ? '🚪'
+                  : '🏛️',
+          name: location.name,
+          desc: isCurrent
+            ? playerView.scene.description || '当前所在场景'
+            : location.description || status,
+          depth,
+          access: location.access,
+          visited: location.visited,
+          isCurrent,
+        })
+        walk(location.id, depth + 1)
+      }
+    }
+    walk(null, 0)
+    // Malformed/cyclic hierarchy must not make a known location disappear.
+    for (const location of locations) {
+      if (!visited.has(location.id)) {
+        children.set(null, [location])
+        walk(null, 0)
+      }
+    }
+    return ordered
   }
   const current: MapLocation = {
     id: playerView.scene.id,
     icon: '📍',
     name: playerView.scene.name,
     desc: playerView.scene.description || '当前所在场景',
+    depth: 0,
     isCurrent: true,
   }
   const seen = new Set([current.id])
@@ -124,6 +186,7 @@ function mapLocationsFromPlayerView(playerView: AgentPlayerView | null): MapLoca
       icon: exit.destination ? '🧭' : '🚪',
       name: exit.destination?.name ?? exit.name,
       desc: exit.description || `可经「${exit.name}」到达`,
+      depth: 0,
     }]
   })
   return [current, ...exits]
@@ -1878,10 +1941,27 @@ export default function RoomPage() {
           </div>
         )}
         <div className="h-px bg-border-light mb-3.5" />
-        <h4 className="text-xs font-semibold text-brass-dark mb-2.5">当前位置与可达地点</h4>
+        {playerView?.location_context?.position_context && (
+          <div
+            aria-label="当前位置边界"
+            className="mb-3 rounded-md border border-[#c7ad73] bg-[#fffaf0] px-3 py-2"
+          >
+            <div className="text-xs font-semibold text-brass-dark">
+              已抵达：{playerView.location_context.position_context.label}
+            </div>
+            <div className="mt-0.5 text-[11px] text-text-muted">
+              {playerView.location_context.position_context.state === 'locked'
+                ? '前方被锁住；当前位置仍保持在门外。'
+                : playerView.location_context.position_context.state === 'interaction_required'
+                  ? '继续前进前需要先处理这里的交互。'
+                  : '前方路线暂时受阻。'}
+            </div>
+          </div>
+        )}
+        <h4 className="text-xs font-semibold text-brass-dark mb-2.5">已知地点（按层级）</h4>
         <div className="space-y-1.5">
           {mapLocations.map((loc) => (
-            <div key={loc.id} className={`flex items-center gap-3 px-3 py-2 rounded ${
+            <div key={loc.id} style={{ paddingLeft: `${12 + loc.depth * 18}px` }} className={`flex items-center gap-3 pr-3 py-2 rounded ${
               loc.isCurrent ? 'bg-[rgba(74,138,74,0.06)] border border-[rgba(74,138,74,0.15)]' : 'hover:bg-panel'
             }`}>
               <span className="text-lg">{loc.icon}</span>
@@ -1889,6 +1969,9 @@ export default function RoomPage() {
                 <div className="text-sm font-medium text-text-primary">{loc.name}</div>
                 <div className="text-[11px] text-text-muted">{loc.desc}</div>
               </div>
+              {!loc.isCurrent && loc.access === 'blocked' && (
+                <span className="text-[10px] font-semibold text-amber-700 flex-shrink-0">受阻</span>
+              )}
               {loc.isCurrent && <span className="text-[10px] font-semibold text-mold flex-shrink-0">▶ 当前位置</span>}
             </div>
           ))}

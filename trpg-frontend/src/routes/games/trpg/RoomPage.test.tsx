@@ -1945,6 +1945,40 @@ describe('RoomPage conversation history', () => {
     vi.useRealTimers()
   })
 
+  it('does not restore intent progress when plan completion follows narration', () => {
+    renderRoomPage()
+
+    act(() => emitWsMessage({
+      type: 'plan.started',
+      payload: {
+        correlationId: 'completed-after-narration',
+        currentStep: 1,
+        completedSteps: 0,
+        totalSteps: 1,
+        phase: 'executing',
+      },
+    }))
+    expect(screen.getByText('守秘人理解玩家意图中')).toBeInTheDocument()
+
+    act(() => emitWsMessage({
+      type: 'narration.push',
+      payload: { messageId: 'completed-after-narration', text: '守墓人摇了摇头。' },
+    }))
+    act(() => emitWsMessage({
+      type: 'plan.completed',
+      payload: {
+        correlationId: 'completed-after-narration',
+        currentStep: 1,
+        completedSteps: 1,
+        totalSteps: 1,
+        phase: 'completed',
+      },
+    }))
+
+    expect(screen.queryByText('守秘人理解玩家意图中')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /停止后续行动/ })).not.toBeInTheDocument()
+  })
+
   it('renders invalid Agent output as keeper guidance', () => {
     renderRoomPage()
 

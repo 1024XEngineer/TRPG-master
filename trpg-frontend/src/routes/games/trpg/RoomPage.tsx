@@ -1544,7 +1544,9 @@ export default function RoomPage() {
             : envelope.payload.publicProgressLabel ??
               `第 ${envelope.payload.currentStep}/${envelope.payload.totalSteps} 步`,
         )
-        setProgressLabel((current) => current ?? '守秘人理解玩家意图中')
+        if (envelope.type !== 'plan.completed' && envelope.type !== 'plan.stopped') {
+          setProgressLabel((current) => current ?? '守秘人理解玩家意图中')
+        }
       } else if (envelope.type === 'turn.started') {
         setTyping(true)
         showBackendPhase('reading_player_view')

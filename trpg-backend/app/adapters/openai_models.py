@@ -88,8 +88,8 @@ keeper_capabilities 时，只能使用 enter_location 与 narrative_only。
 - consume_entity：实体被用掉、烧毁或彻底失效时使用。
 - mark_core_resolved：主线目标真的被达成时使用一次。
 - set_ending_availability：主线已经收束、可以开始走结局流程时置 true。
-- commit_terminal_ending：ending_id 取自 keeper_capabilities.endings[].id。这会直接
-  结束整局游戏，只有在 ending_available 已经为 true、且玩家明确选择收束时才使用。
+- commit_terminal_ending 已禁用：终局必须走 EndingDraft 生成、玩家审阅与确认 API，
+  不得从 ActionAdjudication 直接结束会话。
 
 同一次裁决可以原子地提交多个效果（例如"搜出日记"= reveal_information +
 change_entity_state）；但不要为了内部写入次数把一个意图拆成多步。需要检定的动作把

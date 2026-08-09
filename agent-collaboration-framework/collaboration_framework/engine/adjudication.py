@@ -815,8 +815,7 @@ class AdjudicationEngineService:
                 ):
                     raise ContractError("move_entity holder Actor 不存在")
         elif isinstance(effect, CommitTerminalEndingEffect):
-            if effect.ending_id not in runtime.canon_ending_ids:
-                raise ContractError("结局效果引用不存在的 Ending")
+            raise ContractError("终局不能由行动效果直接提交，必须确认 EndingDraft")
 
     def _roll(self, target_value: int, difficulty: str) -> CheckRoll:
         value = self._dice.percentile()
@@ -1371,12 +1370,7 @@ class AdjudicationEngineService:
             event_type = "ending.availability_changed"
             payload = {"available": effect.available}
         elif isinstance(effect, CommitTerminalEndingEffect):
-            state = state.model_copy(
-                update={"phase": "ended", "ending_id": effect.ending_id},
-                deep=True,
-            )
-            event_type = "ending.confirmed"
-            payload = {"ending_id": effect.ending_id}
+            raise ContractError("终局不能由 Rule 效果直接提交，必须确认 EndingDraft")
         if event_type is None:
             raise ContractError("未注册的高层效果")
         return state, (

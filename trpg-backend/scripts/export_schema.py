@@ -23,9 +23,13 @@ from pathlib import Path
 from collaboration_framework.contracts import (
     ChangeItemCustodyRequest,
     ChangeItemCustodyResult,
+    ConfirmEndingDraftRequest,
+    ConfirmEndingDraftResult,
     ConfirmInventoryImportDraftRequest,
     ConfirmInventoryImportResult,
+    CreateEndingDraftRequest,
     CreateInventoryImportDraftRequest,
+    EndingDraft,
     InventoryImportDraft,
     InventoryView,
 )
@@ -50,6 +54,11 @@ _MODELS: list[type[BaseModel]] = [
     ChangeItemCustodyRequest,
     ChangeItemCustodyResult,
     InventoryView,
+    # v3 结局草稿（issue #212 §10）
+    CreateEndingDraftRequest,
+    EndingDraft,
+    ConfirmEndingDraftRequest,
+    ConfirmEndingDraftResult,
     # auth（issue #58）
     auth.RegisterBody,
     auth.LoginBody,

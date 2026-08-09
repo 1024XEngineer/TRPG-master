@@ -839,7 +839,7 @@
     },
     "ProjectionWorldState": {
       "additionalProperties": false,
-      "description": "Player-safe world facts the Engine commits outside the current scene.\n\nThese are the projections of the world time (#245), `mark_core_resolved`,\n`set_ending_availability` and `commit_terminal_ending` effects: without them\nan Engine commit changes authoritative state that neither the Agent's next\nturn nor the player can observe.",
+      "description": "Player-safe world facts the Engine commits outside the current scene.\n\nThese are the projections of the world time (#245), `mark_core_resolved`,\n`set_ending_availability` and confirmed EndingResolution: without them\nan Engine commit changes authoritative state that neither the Agent's next\nturn nor the player can observe.",
       "properties": {
         "day_index": {
           "default": 0,

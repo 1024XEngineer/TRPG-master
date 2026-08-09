@@ -1,5 +1,6 @@
 import type {
   CreateRoomResult,
+  EndingDraft,
   ModuleDetail,
   ModuleSummary,
   MyRoomSummary,
@@ -9,6 +10,7 @@ import { useRoomStore } from '@/stores/room-store';
 import { getAuthToken, sdk } from './api-client';
 
 export type { CreateRoomResult, ModuleDetail, ModuleSummary, MyRoomSummary, RoomPreview };
+export type { EndingDraft };
 
 // 房主/已加入玩家专属的操作（选模组/开始游戏/结束游戏/我的房间列表）需要
 // 后端的房间重连凭证（X-Reconnect-Token，issue #39），加入/创建房间时签发、
@@ -91,4 +93,37 @@ export async function listMyRooms(): Promise<MyRoomSummary[]> {
 // 房主结束游戏，房间转入「已完成」状态，之后只能查看复盘
 export async function endGame(roomId: string): Promise<void> {
   await sdk.rooms.endGame(roomId, requireReconnectToken());
+}
+
+export async function createEndingDraft(
+  roomId: string,
+  sourceRevision: string,
+  requestId: string,
+): Promise<EndingDraft> {
+  return sdk.endings.createDraft(
+    roomId,
+    {
+      request_id: requestId,
+      source_revision: sourceRevision,
+      player_intent: '为本次调查生成结局与后日谈',
+    },
+    requireReconnectToken(),
+  );
+}
+
+export async function confirmEndingDraft(
+  roomId: string,
+  draft: EndingDraft,
+  requestId: string,
+): Promise<void> {
+  await sdk.endings.confirmDraft(
+    roomId,
+    draft.draft_id,
+    {
+      request_id: requestId,
+      source_revision: draft.source_revision,
+      draft_version: draft.version ?? 1,
+    },
+    requireReconnectToken(),
+  );
 }

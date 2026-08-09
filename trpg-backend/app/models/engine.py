@@ -465,3 +465,63 @@ class InventoryCommandExecution(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
     )
+
+
+class EndingDraftRecord(Base):
+    """Grounded, revision-bound ending text awaiting explicit confirmation."""
+
+    __tablename__ = "ending_drafts"
+    __table_args__ = (
+        PrimaryKeyConstraint("room_id", "draft_id", name="pk_ending_drafts"),
+        UniqueConstraint("room_id", "request_id", name="uq_ending_drafts_request"),
+        CheckConstraint("version >= 1", name="ck_ending_draft_version"),
+        CheckConstraint(
+            "status IN ('active', 'confirmed', 'expired')",
+            name="ck_ending_draft_status",
+        ),
+    )
+
+    room_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("game_sessions.room_id"), nullable=False
+    )
+    draft_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    request_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    player_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    anchor_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    request_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    draft_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+
+class EndingCommandExecution(Base):
+    """Idempotency record for irreversible EndingDraft confirmation."""
+
+    __tablename__ = "ending_command_executions"
+    __table_args__ = (
+        PrimaryKeyConstraint("room_id", "request_id", name="pk_ending_command_executions"),
+        CheckConstraint(
+            "committed_state_version >= 0",
+            name="ck_ending_command_state_version",
+        ),
+    )
+
+    room_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("game_sessions.room_id"), nullable=False
+    )
+    request_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    request_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    result_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    committed_state_version: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )

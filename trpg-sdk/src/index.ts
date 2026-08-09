@@ -7,6 +7,7 @@ import { ApiClient, type ApiClientOptions } from './client';
 import { AuthResource } from './resources/auth';
 import { CharacterTemplatesResource } from './resources/character-templates';
 import { CharactersResource } from './resources/characters';
+import { EndingsResource } from './resources/endings';
 import { GamesResource } from './resources/games';
 import { InventoryResource } from './resources/inventory';
 import { ModulesResource } from './resources/modules';
@@ -44,6 +45,7 @@ export class TrpgSdk {
   readonly auth: AuthResource;
   readonly characters: CharactersResource;
   readonly games: GamesResource;
+  readonly endings: EndingsResource;
   readonly modules: ModulesResource;
   readonly inventory: InventoryResource;
   readonly characterTemplates: CharacterTemplatesResource;
@@ -55,6 +57,7 @@ export class TrpgSdk {
     this.auth = new AuthResource(client);
     this.characters = new CharactersResource(client);
     this.games = new GamesResource(client);
+    this.endings = new EndingsResource(client);
     this.modules = new ModulesResource(client);
     this.inventory = new InventoryResource(client);
     this.characterTemplates = new CharacterTemplatesResource(client);

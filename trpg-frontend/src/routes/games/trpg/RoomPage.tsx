@@ -1,12 +1,12 @@
 import { useNavigate } from 'react-router-dom'
-import { RoomSocketServerError, TurnFailedError, type AdjudicationPendingPayload, type AgentPlayerView, type AgentTurnPhase, type CheckRequestPayload, type NarrationPushPayload, type RoomConversationEvent } from 'trpg-sdk'
+import { RoomSocketServerError, TurnFailedError, type AdjudicationPendingPayload, type AgentPlayerView, type AgentTurnPhase, type CheckRequestPayload, type EndingDraft, type NarrationPushPayload, type RoomConversationEvent } from 'trpg-sdk'
 import { ArrowLeft, Users, Map, BookOpen, ScrollText, Star, X, SendHorizontal, Dice6, Plus, Save, FlagOff, Heart, Volume2, Pause, Play, Square, RotateCcw, Mic, LoaderCircle } from 'lucide-react'
 import { useCallback, useState, useRef, useEffect, type Dispatch, type FormEvent, type SetStateAction } from 'react'
 import { useRoomStore } from '@/stores/room-store'
 import { useAuthStore } from '@/stores/auth-store'
 import { useCharacterStore } from '@/stores/character-store'
 import { connectWebSocket, waitForWsOpen, sdk, onWsMessage, disconnectWebSocket, friendlyErrorMessage, getAuthToken } from '@/services/api-client'
-import { endGame } from '@/services/room'
+import { confirmEndingDraft, createEndingDraft, endGame } from '@/services/room'
 import { useRoomPlayers } from '@/hooks/useRoomPlayers'
 import { useRuleset } from '@/hooks/useRuleset'
 import { useHostSpeech } from '@/hooks/useHostSpeech'
@@ -904,6 +904,9 @@ export default function RoomPage() {
   const [roomPhase, setRoomPhase] = useState<string | null>(null)
   const [confirmEnd, setConfirmEnd] = useState(false)
   const [ending, setEnding] = useState(false)
+  const [endingDraft, setEndingDraft] = useState<EndingDraft | null>(null)
+  const endingDraftRequestId = useRef(randomActionId())
+  const endingConfirmRequestId = useRef(randomActionId())
   const [endError, setEndError] = useState('')
   const [confirmExit, setConfirmExit] = useState(false)
   const [messages, setMessages] = useState<Message[]>([])
@@ -1409,7 +1412,23 @@ export default function RoomPage() {
     setEnding(true)
     setEndError('')
     try {
-      await endGame(roomId)
+      if (playerView?.world.ending_available) {
+        if (!endingDraft) {
+          const draft = await createEndingDraft(
+            roomId,
+            playerView.revision,
+            endingDraftRequestId.current,
+          )
+          setEndingDraft(draft)
+          setEnding(false)
+          return
+        }
+        await confirmEndingDraft(roomId, endingDraft, endingConfirmRequestId.current)
+      } else {
+        // Legacy/admin room shutdown remains available only outside the v3
+        // player ending flow. A v3 terminal story outcome always confirms a draft.
+        await endGame(roomId)
+      }
       hostSpeech.stop()
       disconnectWebSocket()
       navigate('/home')
@@ -2170,27 +2189,41 @@ export default function RoomPage() {
           <p className="text-sm text-text-dim py-6 text-center">正在获取房间成员…</p>
         )}
 
-        {isHost && (
+        {(playerView?.world.ending_available || (isHost && !playerView)) && (
           <div className="mt-4 pt-4 border-t border-border-light">
             {endError && <p className="text-[11px] text-[#c04040] text-center mb-2">{endError}</p>}
             {confirmEnd ? (
               <div className="space-y-2">
-                <p className="text-xs text-text-muted text-center">确定要结束本局游戏吗？结束后将无法再回到聊天室，只能在「我的游戏」里查看复盘。</p>
+                {endingDraft ? (
+                  <div className="rounded-md border border-[#c7ad73] bg-[#fffaf0] p-3">
+                    <h4 className="text-sm font-semibold text-brass-dark">{endingDraft.title}</h4>
+                    <p className="mt-2 text-xs leading-relaxed text-text-body">{endingDraft.summary}</p>
+                    <p className="mt-2 text-xs leading-relaxed text-text-muted">{endingDraft.epilogue}</p>
+                  </div>
+                ) : (
+                  <p className="text-xs text-text-muted text-center">
+                    {playerView?.world.ending_available
+                      ? '先生成一份基于已提交证据的结局草稿；审阅前不会结束游戏。'
+                      : '确定要结束本局游戏吗？结束后将无法再回到聊天室。'}
+                  </p>
+                )}
                 <div className="flex gap-2">
-                  <button onClick={() => setConfirmEnd(false)} disabled={ending}
+                  <button onClick={() => { setConfirmEnd(false); setEndingDraft(null); endingDraftRequestId.current = randomActionId(); endingConfirmRequestId.current = randomActionId() }} disabled={ending}
                     className="flex-1 py-2 rounded-sm bg-panel border border-border-light text-text-muted text-xs font-medium active:bg-border-light disabled:opacity-60">
                     取消
                   </button>
                   <button onClick={handleEndGame} disabled={ending}
                     className="flex-1 py-2 rounded-sm bg-[#c04040] text-white text-xs font-medium active:bg-[#a03030] disabled:opacity-60">
-                    {ending ? '结束中…' : '确认结束'}
+                    {ending
+                      ? endingDraft ? '确认中…' : '生成中…'
+                      : endingDraft ? '确认这份结局' : playerView?.world.ending_available ? '生成草稿' : '确认结束'}
                   </button>
                 </div>
               </div>
             ) : (
               <button onClick={() => setConfirmEnd(true)}
                 className="w-full py-2 rounded-sm bg-transparent text-[#c04040] border border-[#c04040]/40 text-xs font-medium flex items-center justify-center gap-1.5 active:bg-[#c04040]/5">
-                <FlagOff className="w-3.5 h-3.5" /> 结束游戏
+                <FlagOff className="w-3.5 h-3.5" /> {playerView?.world.ending_available ? '生成结局与后日谈' : '结束游戏'}
               </button>
             )}
           </div>

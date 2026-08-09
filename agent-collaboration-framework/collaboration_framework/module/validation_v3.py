@@ -411,6 +411,15 @@ def _effect_issues(step: EffectStep, path: str, known: dict[str, set[str]]) -> l
     """
 
     effect = step.effect
+    if getattr(effect, "type", "") == "commit_terminal_ending":
+        return [
+            ValidationIssue(
+                severity="error",
+                code="MODULE_V3_DIRECT_ENDING_FORBIDDEN",
+                path=f"{path}.type",
+                message="v3 终局必须通过 EndingDraft 审阅与确认 API 提交",
+            )
+        ]
     if getattr(effect, "type", "").startswith("ensure_runtime"):
         return []
     issues: list[ValidationIssue] = []

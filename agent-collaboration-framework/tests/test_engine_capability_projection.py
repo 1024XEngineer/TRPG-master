@@ -214,7 +214,7 @@ class EngineCapabilityProjectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(snapshot.world.hour_of_day, 12)
         self.assertEqual(snapshot.world.time_of_day, "day")
 
-    async def test_core_resolution_and_ending_reach_the_player_view(self) -> None:
+    async def test_core_resolution_opens_draft_but_direct_ending_is_refused(self) -> None:
         await self.commit(
             "resolve-core",
             MarkCoreResolvedEffect(),
@@ -227,14 +227,11 @@ class EngineCapabilityProjectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(opened.world.ending_id)
         self.assertEqual(opened.phase, "playing")
 
-        await self.commit(
-            "confirm-ending",
-            CommitTerminalEndingEffect(ending_id="ending_document_recovered"),
-        )
-
-        ended = await self.engine.read(SCOPE)
-        self.assertEqual(ended.world.ending_id, "ending_document_recovered")
-        self.assertEqual(ended.phase, "ended")
+        with self.assertRaisesRegex(ContractError, "EndingDraft"):
+            await self.commit(
+                "confirm-ending",
+                CommitTerminalEndingEffect(ending_id="ending_document_recovered"),
+            )
 
     async def test_keeper_capabilities_name_ids_the_player_view_withholds(self) -> None:
         capabilities = await self.engine.read_keeper_capabilities(SCOPE)
@@ -287,7 +284,7 @@ class EngineCapabilityProjectionTests(unittest.IsolatedAsyncioTestCase):
                 "unknown-information",
                 RevealInformationEffect(information_id="information_that_does_not_exist"),
             )
-        with self.assertRaises(ContractError):
+        with self.assertRaisesRegex(ContractError, "EndingDraft"):
             await self.commit(
                 "unknown-ending",
                 CommitTerminalEndingEffect(ending_id="ending_that_does_not_exist"),

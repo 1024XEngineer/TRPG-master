@@ -105,6 +105,8 @@ const {
   mockSubmitAction,
   mockSubmitPlannedAction,
   mockWaitForWsOpen,
+  mockCreateEndingDraft,
+  mockConfirmEndingDraft,
   wsHandlers,
   dice3dSupported,
 } = vi.hoisted(() => {
@@ -132,6 +134,8 @@ const {
     mockSubmitAction: vi.fn(),
     mockSubmitPlannedAction: vi.fn(),
     mockWaitForWsOpen: vi.fn(() => Promise.resolve()),
+    mockCreateEndingDraft: vi.fn(),
+    mockConfirmEndingDraft: vi.fn(),
   }
 })
 
@@ -163,6 +167,8 @@ vi.mock('@/services/api-client', () => ({
 }))
 
 vi.mock('@/services/room', () => ({
+  confirmEndingDraft: mockConfirmEndingDraft,
+  createEndingDraft: mockCreateEndingDraft,
   endGame: vi.fn(),
 }))
 
@@ -1544,6 +1550,55 @@ describe('RoomPage conversation history', () => {
     expect(
       screen.getByText('主线已经收束，可以选择如何收尾'),
     ).toBeInTheDocument()
+  })
+
+  it('reviews a grounded ending draft before confirmation', async () => {
+    mockCreateEndingDraft.mockResolvedValue({
+      draft_id: 'ending-draft-1',
+      request_id: 'draft-request-1',
+      source_revision: '8',
+      mode: 'ending_and_epilogue',
+      player_intent: '生成结局',
+      title: '阿诺兹堡之后',
+      summary: '已确认的调查事实。',
+      epilogue: '未被证据确认的命运保持未知。',
+      evidence_refs: ['info-1'],
+      version: 1,
+      status: 'active',
+    })
+    mockConfirmEndingDraft.mockResolvedValue(undefined)
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+    act(() =>
+      emitWsMessage({
+        type: 'view.updated',
+        payload: {
+          playerId: 'player-1',
+          playerView: {
+            ...playerViewFixture(),
+            revision: '8',
+            world: {
+              day_index: 0,
+              hour_of_day: 12,
+              time_of_day: 'day',
+              core_resolved: true,
+              ending_available: true,
+              ending_id: null,
+            },
+          },
+        },
+      }),
+    )
+    fireEvent.click(screen.getByRole('button', { name: '房间成员' }))
+    fireEvent.click(screen.getByRole('button', { name: '生成结局与后日谈' }))
+    fireEvent.click(screen.getByRole('button', { name: '生成草稿' }))
+
+    expect(await screen.findByText('阿诺兹堡之后')).toBeInTheDocument()
+    expect(screen.getByText('已确认的调查事实。')).toBeInTheDocument()
+    expect(mockConfirmEndingDraft).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: '确认这份结局' }))
+    await waitFor(() => expect(mockConfirmEndingDraft).toHaveBeenCalledTimes(1))
   })
 
   it('hides the mainline banner until an ending effect is committed', async () => {

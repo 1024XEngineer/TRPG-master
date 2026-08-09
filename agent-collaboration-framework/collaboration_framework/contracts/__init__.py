@@ -76,6 +76,13 @@ from .adjudication import (
     SubmitAdjudicationRequest,
 )
 from .common import ContractError, ContractModel, JsonObject
+from .ending import (
+    ConfirmEndingDraftRequest,
+    ConfirmEndingDraftResult,
+    CreateEndingDraftRequest,
+    EndingDraft,
+    EndingResolution,
+)
 from .module import (
     AbsorbOperationSpec,
     ActionDeclarationOptionSpec,

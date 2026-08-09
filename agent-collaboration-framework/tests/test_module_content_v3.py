@@ -352,6 +352,19 @@ class RuleGraphTests(unittest.TestCase):
 
 
 class DomainRuleTests(unittest.TestCase):
+    def test_rule_cannot_bypass_ending_draft_confirmation(self) -> None:
+        payload = mutate()
+        payload["rules"][0]["execution"]["steps"][1]["effect"] = {
+            "type": "commit_terminal_ending",
+            "ending_id": payload["ending_anchors"][0]["id"],
+        }
+        report = validate_module_v3(payload)
+        self.assertEqual(
+            [issue.code for issue in report.errors],
+            ["MODULE_V3_DIRECT_ENDING_FORBIDDEN"],
+            report.errors,
+        )
+
     def test_strict_information_must_declare_its_sources(self) -> None:
         payload = mutate()
         payload["information"][0]["recovery"] = {"policy": "strict", "allowed_source_types": []}

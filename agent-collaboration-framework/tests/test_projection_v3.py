@@ -446,21 +446,18 @@ class AdjudicationAgainstV3Tests(unittest.IsolatedAsyncioTestCase):
                 EnterLocationEffect(location_id="client_briefing"),
             )
 
-    async def test_ending_ids_come_from_v3_anchors(self) -> None:
+    async def test_v3_ending_requires_the_reviewable_draft_api(self) -> None:
         store, engine, rules = self.build()
         snapshot = await rules.read(
             PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
         )
-        await self.submit(
-            engine,
-            snapshot.revision,
-            CommitTerminalEndingEffect(ending_id="ending_douglas_departs"),
-        )
-        after = await rules.read(
-            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
-        )
-        self.assertEqual(after.world.ending_id, "ending_douglas_departs")
-        self.assertEqual(after.phase, "ended")
+        with self.assertRaisesRegex(ContractError, "EndingDraft"):
+            await self.submit(
+                engine,
+                snapshot.revision,
+                CommitTerminalEndingEffect(ending_id="ending_douglas_departs"),
+            )
+        self.assertEqual(store.inspect_state(ROOM).phase, "playing")
 
     async def test_keeper_capabilities_read_the_v3_collections(self) -> None:
         store, engine, rules = self.build()

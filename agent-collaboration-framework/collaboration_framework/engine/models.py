@@ -14,6 +14,7 @@ from collaboration_framework.contracts import (
     CheckDecisionRequest,
     ContractError,
     ContractModel,
+    EndingResolution,
     ModuleContent,
     ModuleContentV3,
     LocationKnowledge,
@@ -136,6 +137,7 @@ class GameState(ContractModel):
     )
     core_resolved: bool = False
     ending_available: bool = False
+    ending_resolution: EndingResolution | None = None
 
 
 class StateChange(ContractModel):

@@ -427,6 +427,18 @@ export interface ClueGrantedPayload {
   description?: string | null;
 }
 
+export interface ConfirmEndingDraftRequest {
+  request_id: string;
+  source_revision: string;
+  draft_version: number;
+}
+
+export interface ConfirmEndingDraftResult {
+  request_id: string;
+  resolution: EndingResolution;
+  revision: string;
+}
+
 export interface ConfirmInventoryImportDraftRequest {
   request_id: string;
   source_revision: string;
@@ -440,11 +452,53 @@ export interface ConfirmInventoryImportResult {
   revision: string;
 }
 
+export interface CreateEndingDraftRequest {
+  request_id: string;
+  source_revision: string;
+  mode?: "ending_and_epilogue";
+  player_intent: string;
+}
+
 export interface CreateInventoryImportDraftRequest {
   request_id: string;
   source_revision: string;
   character_revision: string;
   claims: ItemClaim[];
+}
+
+export interface EndingDraft {
+  draft_id: string;
+  request_id: string;
+  source_revision: string;
+  mode?: "ending_and_epilogue";
+  player_intent: string;
+  title: string;
+  summary: string;
+  epilogue: string;
+  facets?: {
+    [k: string]: JsonValue;
+  };
+  /**
+   * @minItems 1
+   */
+  evidence_refs: [string, ...string[]];
+  version?: number;
+  status?: "active" | "confirmed" | "expired";
+}
+
+export interface EndingResolution {
+  draft_id: string;
+  source_revision: string;
+  anchor_id: string;
+  /**
+   * @minItems 1
+   */
+  fact_refs: [string, ...string[]];
+  facets?: {
+    [k: string]: JsonValue;
+  };
+  confirmed_by: string;
+  confirmed_event_id: string;
 }
 
 export interface EquipmentItem {
@@ -488,7 +542,9 @@ export type ErrorCode =
   | "HOST_SPEECH_TIMEOUT"
   | "REVISION_CONFLICT"
   | "ITEM_VERSION_CONFLICT"
-  | "ITEM_ALREADY_TAKEN";
+  | "ITEM_ALREADY_TAKEN"
+  | "ENDING_UNAVAILABLE"
+  | "ENDING_DRAFT_STALE";
 
 /**
  * 错误信息的具体内容，只在 success=false 时出现在 error 字段里。

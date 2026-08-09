@@ -88,7 +88,10 @@ Canon 与 Runtime 的 Location/Entity 当前位置、可提交的 Ending id、`c
 | `ensure_runtime_entity` / `move_entity` / `consume_entity` | 不投影 | 按当前 `location_id` 或 `holder_actor_id` 进入 `scene.visible_entities`；`consumed` 的移出 |
 | `ensure_runtime_location` | 不投影，且 `enter_location` 进去会让投影直接抛 `当前 Scene 不存在` | 作为出口出现在连接它的场景里，可以进入；进入后只保留回到连接点的出口 |
 | `advance_time` | 只有 `time_of_day` 间接可见 | `world.elapsed_minutes` + `world.time_of_day` |
-| `mark_core_resolved` / `set_ending_availability` / `commit_terminal_ending` | 不投影 | `world.core_resolved` / `world.ending_available` / `world.ending_id` |
+| `mark_core_resolved` / `set_ending_availability` | 不投影 | `world.core_resolved` / `world.ending_available` |
+
+`commit_terminal_ending` 已从可执行裁决边界移除；`world.ending_id` 只由同 revision
+`EndingDraft` 的显式确认产生。
 
 前端在地图面板显示权威时钟与主线/结局状态；线索列表与场景实体沿用既有 UI，因此
 `reveal_information` 与 `ensure_runtime_entity` 提交后立刻可见。

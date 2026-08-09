@@ -20,7 +20,6 @@ from collaboration_framework.contracts import (
     ActionAdjudication,
     ActionMethod,
     ActionTarget,
-    CommitTerminalEndingEffect,
     EnsureRuntimeEntityEffect,
     EnsureRuntimeLocationEffect,
     EnterLocationEffect,
@@ -223,7 +222,7 @@ def test_world_time_reaches_the_client_as_a_discrete_point(
     assert view["world"]["time_of_day"] == "day"
 
 
-def test_ending_availability_and_confirmation_reach_the_client(
+def test_ending_availability_reaches_the_client_without_direct_confirmation(
     sync_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -239,18 +238,6 @@ def test_ending_availability_and_confirmation_reach_the_client(
     assert opened["world"]["ending_available"] is True
     assert opened["world"]["ending_id"] is None
     assert opened["phase"] == "playing"
-
-    confirmed, _ = _play_one_action(
-        sync_client,
-        monkeypatch,
-        "cap_ending_confirm",
-        MarkCoreResolvedEffect(),
-        SetEndingAvailabilityEffect(available=True),
-        CommitTerminalEndingEffect(ending_id=ENDING_ID),
-    )
-
-    assert confirmed["world"]["ending_id"] == ENDING_ID
-    assert confirmed["phase"] == "ended"
 
 
 def test_planner_receives_keeper_capabilities_but_the_client_never_does(

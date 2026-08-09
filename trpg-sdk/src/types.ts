@@ -107,6 +107,10 @@ export type {
   ChangeItemCustodyRequest,
   ChangeItemCustodyResult,
   InventoryView,
+  CreateEndingDraftRequest,
+  EndingDraft,
+  ConfirmEndingDraftRequest,
+  ConfirmEndingDraftResult,
 } from './generated/dto';
 
 /** GET /api/v1/me/rooms 返回项。 */

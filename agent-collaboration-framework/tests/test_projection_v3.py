@@ -208,13 +208,38 @@ class ProjectionV3Tests(unittest.IsolatedAsyncioTestCase):
             },
         )
 
+    async def test_undiscovered_cemetery_secrets_never_enter_the_player_view(self) -> None:
+        hidden = await self.project(game_state(self.content, scene_id="cemetery"))
+        visible_ids = {entity.id for entity in hidden.scene.visible_entities}
+        self.assertNotIn("favorite_grave", visible_ids)
+        self.assertNotIn("crypt_entrance", visible_ids)
+        projected_text = hidden.model_dump_json()
+        self.assertNotIn("连续读上数小时", projected_text)
+        self.assertNotIn("沉重石板遮住了向下的通道", projected_text)
+
+        revealed = await self.project(
+            game_state(
+                self.content,
+                scene_id="cemetery",
+                entities={
+                    "favorite_grave": {"identified": True},
+                    "crypt_entrance": {"discovered": True},
+                },
+            )
+        )
+        revealed_ids = {entity.id for entity in revealed.scene.visible_entities}
+        self.assertIn("favorite_grave", revealed_ids)
+        self.assertIn("crypt_entrance", revealed_ids)
+
     async def test_moving_an_entity_moves_where_it_is_projected(self) -> None:
         # `located_in` is the module's placement; runtime state overrides it, which
         # is what `move_entity` writes.
         state = game_state(
             self.content,
             scene_id="cemetery",
-            entities={"douglas_diary": {"location_id": "cemetery"}},
+            entities={
+                "douglas_diary": {"location_id": "cemetery", "found": True}
+            },
         )
         snapshot = await self.project(state)
         self.assertIn(
@@ -226,7 +251,9 @@ class ProjectionV3Tests(unittest.IsolatedAsyncioTestCase):
         state = game_state(
             self.content,
             scene_id="cemetery",
-            entities={"douglas_diary": {"holder_actor_id": ACTOR}},
+            entities={
+                "douglas_diary": {"holder_actor_id": ACTOR, "found": True}
+            },
         )
         snapshot = await self.project(state)
         self.assertIn(
@@ -634,6 +661,20 @@ class RuleOwnedCheckTests(unittest.IsolatedAsyncioTestCase):
         # The Agent sent empty effect lists; the release of the newspaper report
         # can only come from the rule's success route.
         store, engine, rules, resolved = await self.run_rule_check([5])
+        self.assertEqual(resolved.status, "awaiting_post_roll_decision")
+        check_run = resolved.check_run
+        assert check_run is not None
+        resolved = await engine.decide_post_roll(
+            PostRollDecisionRequest(
+                request_id="rule-owned-1:accept-success",
+                room_id=ROOM,
+                player_id=PLAYER,
+                source_revision=resolved.view_revision,
+                check_id=check_run.check_id,
+                check_version=check_run.version,
+                option_id="accept-current",
+            )
+        )
         self.assertEqual(resolved.outcome, "success")
         state = store.inspect_state(ROOM)
         self.assertIn("cemetery_dance_report", state.discovered_facts)

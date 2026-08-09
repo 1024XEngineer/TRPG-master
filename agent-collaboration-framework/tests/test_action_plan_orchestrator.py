@@ -485,6 +485,19 @@ async def test_pending_check_stops_plan_and_resumes_same_step_after_decision() -
             choice=SelectCheckChoice(candidate_id="spot"),
         )
     )
+    assert resolved.status == "awaiting_post_roll_decision"
+    assert resolved.check_run is not None
+    resolved = await engine.decide_post_roll(
+        PostRollDecisionRequest(
+            request_id="accept-plan-step-1",
+            room_id="room_01",
+            player_id="player_01",
+            source_revision=resolved.view_revision,
+            check_id=resolved.check_run.check_id,
+            check_version=resolved.check_run.version,
+            option_id="accept-current",
+        )
+    )
     assert resolved.status == "resolved"
 
     resumed = await service.start_or_resume(original, plan=plan(2))

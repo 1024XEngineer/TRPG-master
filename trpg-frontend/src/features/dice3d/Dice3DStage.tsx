@@ -12,7 +12,7 @@ import type { DiceKind } from './types'
 
 export interface Dice3DHandle {
   /** 掷一次。引擎还没加载完时会记下来，加载完立刻补掷。 */
-  roll: () => void
+  roll: (targetValue?: number) => void
 }
 
 interface Dice3DStageProps {
@@ -31,7 +31,7 @@ export const Dice3DStage = forwardRef<Dice3DHandle, Dice3DStageProps>(function D
   const containerRef = useRef<HTMLDivElement>(null)
   const stageRef = useRef<DiceStage | null>(null)
   // 引擎异步加载期间收到的掷骰请求先记下来，加载完补上——否则首次点击会丢。
-  const pendingRollRef = useRef(false)
+  const pendingRollRef = useRef<{ targetValue?: number } | null>(null)
   const [failed, setFailed] = useState(false)
 
   // 回调放进 ref：它们的引用变化不应该触发引擎重建（重建会丢掉画面上的骰子）。
@@ -61,8 +61,9 @@ export const Dice3DStage = forwardRef<Dice3DHandle, Dice3DStageProps>(function D
         })
         stageRef.current = stage
         if (pendingRollRef.current) {
-          pendingRollRef.current = false
-          stage.roll()
+          const pending = pendingRollRef.current
+          pendingRollRef.current = null
+          stage.roll(pending.targetValue)
         }
       })
       .catch(() => {
@@ -74,7 +75,7 @@ export const Dice3DStage = forwardRef<Dice3DHandle, Dice3DStageProps>(function D
 
     return () => {
       cancelled = true
-      pendingRollRef.current = false
+      pendingRollRef.current = null
       stageRef.current?.dispose()
       stageRef.current = null
     }
@@ -83,11 +84,11 @@ export const Dice3DStage = forwardRef<Dice3DHandle, Dice3DStageProps>(function D
   useImperativeHandle(
     ref,
     () => ({
-      roll() {
+      roll(targetValue?: number) {
         if (failed) return
         const stage = stageRef.current
-        if (stage) stage.roll()
-        else pendingRollRef.current = true
+        if (stage) stage.roll(targetValue)
+        else pendingRollRef.current = { targetValue }
       },
     }),
     [failed],

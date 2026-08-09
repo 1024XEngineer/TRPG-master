@@ -438,6 +438,20 @@ async def test_sql_pending_plan_rebuild_replays_decision_without_duplicate_effec
     )
     resolved = await rebuilt_engine.decide(decision_request)
     replay = await rebuilt_engine.decide(decision_request)
+    assert resolved.status == "awaiting_post_roll_decision"
+    assert replay == resolved
+    assert resolved.check_run is not None
+    post_roll_request = PostRollDecisionRequest(
+        request_id="sql-pending-rebuild-246:accept",
+        room_id=room.id,
+        player_id=players[0].id,
+        source_revision=resolved.view_revision,
+        check_id=resolved.check_run.check_id,
+        check_version=resolved.check_run.version,
+        option_id="accept-current",
+    )
+    resolved = await rebuilt_engine.decide_post_roll(post_roll_request)
+    replay = await rebuilt_engine.decide_post_roll(post_roll_request)
     assert resolved.status == "resolved"
     assert replay == resolved
 
@@ -463,7 +477,8 @@ async def test_sql_pending_plan_rebuild_replays_decision_without_duplicate_effec
             select(GameEvent).where(GameEvent.room_id == room.id).order_by(GameEvent.sequence)
         )
     ).all()
-    assert len(commands) == 3
+    # Two step submissions + skill selection + explicit result acceptance.
+    assert len(commands) == 4
     assert [event.type for event in events].count("entity.state_changed") == 1
     assert [event.type for event in events].count("action.succeeded") == 2
 

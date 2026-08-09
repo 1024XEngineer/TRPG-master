@@ -1076,6 +1076,34 @@ def test_single_action_pending_resumes_without_plan_run(
             },
         }
         ws.send_json(select_message)
+        rolled, rolled_events = receive_until(
+            ws,
+            lambda message: (
+                message.get("type") == "adjudication.pending"
+                and message.get("payload", {}).get("status") == "awaiting_post_roll_decision"
+            ),
+            limit=40,
+        )
+        assert [
+            message["payload"]["phase"]
+            for message in rolled_events
+            if message.get("type") == "turn.phase_changed"
+        ] == ["waiting_for_check"]
+        check_run = rolled["payload"]["checkRun"]
+        ws.send_json(
+            {
+                "type": "adjudication.post_roll",
+                "playerId": room["playerId"],
+                "payload": {
+                    "clientActionId": action_id,
+                    "requestId": "single-action-accept-247",
+                    "sourceRevision": rolled["payload"]["sourceRevision"],
+                    "checkId": check_run["check_id"],
+                    "checkVersion": check_run["version"],
+                    "optionId": "accept-current",
+                },
+            }
+        )
         completed, completion_events = receive_until(
             ws,
             lambda message: message.get("message_type") == "turn.completed",
@@ -1124,6 +1152,11 @@ def test_single_action_pending_resumes_without_plan_run(
     assert narration["payload"]["messageId"] == action_id
     assert completed["payload"]["narration"]["suggested_actions"] == ["继续调查"]
     assert all(message.get("type") != "turn.failed" for message in completion_events)
+    assert [
+        message["payload"]["phase"]
+        for message in completion_events
+        if message.get("type") == "turn.phase_changed"
+    ] == ["refreshing_player_view", "generating_narration"]
     assert all(message.get("type") != "turn.failed" for message in narration_events)
     assert repeated_completed["payload"]["narration"] == completed["payload"]["narration"]
     assert repeated_narration["payload"] == narration["payload"]

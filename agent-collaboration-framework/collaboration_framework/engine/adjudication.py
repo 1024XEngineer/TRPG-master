@@ -843,11 +843,11 @@ class AdjudicationEngineService:
         option: PendingCheckOption,
         roll: CheckRoll,
     ) -> tuple[AcceptResultOption | SpendResourceOption | PushOption, ...]:
-        if roll.passed:
-            return ()
         options: list[AcceptResultOption | SpendResourceOption | PushOption] = [
             AcceptResultOption(option_id="accept-current")
         ]
+        if roll.passed:
+            return tuple(options)
         threshold = {
             "regular": option.target_value,
             "hard": option.target_value // 2,

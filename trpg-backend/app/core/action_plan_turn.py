@@ -452,6 +452,7 @@ class ActionPlanTurnApplication:
         result: ActionPlanAdvanceResult,
         *,
         on_phase: TurnPhaseObserver | None,
+        verify_fingerprint: bool = True,
     ) -> ActionPlanTurnResult:
         if result.run.status == "waiting_for_player":
             await _emit_phase(on_phase, "waiting_for_check")
@@ -464,20 +465,29 @@ class ActionPlanTurnApplication:
         }:
             await _emit_phase(on_phase, "refreshing_player_view")
             await _emit_phase(on_phase, "generating_narration")
-        return await self._from_plan(player_input, result)
+        return await self._from_plan(
+            player_input,
+            result,
+            verify_fingerprint=verify_fingerprint,
+        )
 
     async def resume_plan(
         self,
         player_input: PlayerInput,
         *,
         on_progress: Callable[[object], Awaitable[None]] | None = None,
+        on_phase: TurnPhaseObserver | None = None,
     ) -> ActionPlanTurnResult:
         advanced = await self._orchestrator.start_or_resume(
             player_input,
             plan=None,
             on_progress=on_progress,
         )
-        return await self._from_plan(player_input, advanced)
+        return await self._finish_plan_with_phases(
+            player_input,
+            advanced,
+            on_phase=on_phase,
+        )
 
     async def resume_owned(
         self,
@@ -486,6 +496,7 @@ class ActionPlanTurnApplication:
         player_id: str,
         parent_action_id: str,
         on_progress: Callable[[object], Awaitable[None]] | None = None,
+        on_phase: TurnPhaseObserver | None = None,
     ) -> ActionPlanTurnResult:
         actor_id = await self._resolve_actor_id(room_id, player_id)
         advanced = await self._orchestrator.resume_owned(
@@ -503,9 +514,10 @@ class ActionPlanTurnApplication:
             client_action_id=parent_action_id,
             utterance=run.parent_utterance or run.plan.goal,
         )
-        return await self._from_plan(
+        return await self._finish_plan_with_phases(
             player_input,
             advanced,
+            on_phase=on_phase,
             verify_fingerprint=False,
         )
 
@@ -516,6 +528,7 @@ class ActionPlanTurnApplication:
         player_id: str,
         parent_action_id: str,
         on_progress: Callable[[object], Awaitable[None]] | None = None,
+        on_phase: TurnPhaseObserver | None = None,
     ) -> ActionPlanTurnResult:
         """Resume either a durable ActionPlan or a persisted single action."""
 
@@ -525,11 +538,13 @@ class ActionPlanTurnApplication:
                 player_id=player_id,
                 parent_action_id=parent_action_id,
                 on_progress=on_progress,
+                on_phase=on_phase,
             )
         return await self.resume_single(
             room_id=room_id,
             player_id=player_id,
             parent_action_id=parent_action_id,
+            on_phase=on_phase,
         )
 
     async def resume_single(
@@ -538,6 +553,7 @@ class ActionPlanTurnApplication:
         room_id: str,
         player_id: str,
         parent_action_id: str,
+        on_phase: TurnPhaseObserver | None = None,
     ) -> ActionPlanTurnResult:
         """Finish a single ActionAdjudication without creating a PlanRun."""
 
@@ -570,6 +586,14 @@ class ActionPlanTurnApplication:
                 recovery.execution,
             ),
         )
+        if recovery.execution.status in {
+            "awaiting_skill_choice",
+            "awaiting_post_roll_decision",
+        }:
+            await _emit_phase(on_phase, "waiting_for_check")
+        else:
+            await _emit_phase(on_phase, "refreshing_player_view")
+            await _emit_phase(on_phase, "generating_narration")
         return await self._from_single(player_input, recovery.summary, result)
 
     async def active_for_room(self, room_id: str):

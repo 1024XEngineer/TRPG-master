@@ -197,6 +197,49 @@
         "left_forever": false
       },
       "visibility": "public",
+      "visibility_conditions": [
+        {
+          "op": "any",
+          "items": [
+            {
+              "op": "predicate",
+              "predicate": "entity_state_is",
+              "args": {
+                "entity_id": "cemetery_figure",
+                "key": "sighted",
+                "value": true
+              }
+            },
+            {
+              "op": "predicate",
+              "predicate": "entity_state_is",
+              "args": {
+                "entity_id": "cemetery_figure",
+                "key": "willing_to_talk",
+                "value": true
+              }
+            },
+            {
+              "op": "predicate",
+              "predicate": "entity_state_is",
+              "args": {
+                "entity_id": "cemetery_figure",
+                "key": "true_form_seen",
+                "value": true
+              }
+            },
+            {
+              "op": "predicate",
+              "predicate": "entity_state_is",
+              "args": {
+                "entity_id": "cemetery_figure",
+                "key": "corpse_identified",
+                "value": true
+              }
+            }
+          ]
+        }
+      ],
       "plot_relevance": true
     },
     {
@@ -250,6 +293,17 @@
       "located_in": "newspaper_office",
       "state": {},
       "visibility": "public",
+      "visibility_conditions": [
+        {
+          "op": "predicate",
+          "predicate": "entity_state_is",
+          "args": {
+            "entity_id": "newspaper_archive",
+            "key": "hilda_statement_found",
+            "value": true
+          }
+        }
+      ],
       "plot_relevance": true
     },
     {
@@ -268,6 +322,17 @@
         "read": false
       },
       "visibility": "public",
+      "visibility_conditions": [
+        {
+          "op": "predicate",
+          "predicate": "entity_state_is",
+          "args": {
+            "entity_id": "douglas_diary",
+            "key": "found",
+            "value": true
+          }
+        }
+      ],
       "plot_relevance": true
     },
     {
@@ -361,6 +426,17 @@
         "tracks_found": false
       },
       "visibility": "public",
+      "visibility_conditions": [
+        {
+          "op": "predicate",
+          "predicate": "entity_state_is",
+          "args": {
+            "entity_id": "favorite_grave",
+            "key": "identified",
+            "value": true
+          }
+        }
+      ],
       "plot_relevance": true
     },
     {
@@ -381,6 +457,17 @@
         "entered": false
       },
       "visibility": "public",
+      "visibility_conditions": [
+        {
+          "op": "predicate",
+          "predicate": "entity_state_is",
+          "args": {
+            "entity_id": "crypt_entrance",
+            "key": "discovered",
+            "value": true
+          }
+        }
+      ],
       "plot_relevance": true
     },
     {
@@ -399,6 +486,17 @@
         "hostile": false
       },
       "visibility": "public",
+      "visibility_conditions": [
+        {
+          "op": "predicate",
+          "predicate": "entity_state_is",
+          "args": {
+            "entity_id": "ghoul_crowd",
+            "key": "revealed",
+            "value": true
+          }
+        }
+      ],
       "plot_relevance": true
     },
     {

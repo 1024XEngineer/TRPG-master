@@ -196,6 +196,10 @@ class EntitySpecV3(ContractModel):
     state: dict[str, JsonValue] = Field(default_factory=dict)
     item_component: ItemComponent | None = None
     visibility: Literal["public", "party", "actor", "keeper"] = "public"
+    # Audience and discovery are separate concerns. A public entity may still
+    # stay out of every player projection until registered, deterministic
+    # predicates say it has been discovered.
+    visibility_conditions: tuple[ConditionExpr, ...] = ()
     plot_relevance: bool = True
     lifecycle: Literal["campaign", "session"] = "campaign"
 

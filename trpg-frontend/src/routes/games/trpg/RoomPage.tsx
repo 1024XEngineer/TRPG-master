@@ -201,6 +201,8 @@ const PHASE_LABELS: Record<AgentTurnPhase, string> = {
   generating_narration: '守秘人组织语言中',
 }
 
+const ORGANIZING_PHASE_MIN_MS = 600
+
 const TIME_OF_DAY_LABELS = { day: '白天', night: '夜晚' } as const
 
 /** Render the Engine's authoritative discrete world-time point. */
@@ -429,6 +431,14 @@ type PendingCheckDiceState = {
   submitted: boolean
 }
 
+type AuthoritativeDiceRoll = {
+  correlationId: string
+  checkId: string
+  rollCount: number
+  value: number
+  degree: UiCheckRunView['roll']['degree']
+}
+
 function createPendingCheckDiceState(checkRequest: CheckRequestPayload): PendingCheckDiceState {
   return {
     clientActionId: checkRequest.clientActionId,
@@ -504,6 +514,11 @@ function DiceModal({
   checkRequest,
   checkDiceState,
   setCheckDiceState,
+  presetResult = null,
+  presetDegree = null,
+  autoRoll = false,
+  autoRollKey,
+  onConfirmPreset,
 }: {
   open: boolean
   onClose: () => void
@@ -511,6 +526,11 @@ function DiceModal({
   checkRequest: CheckRequestPayload | null
   checkDiceState: PendingCheckDiceState | null
   setCheckDiceState: Dispatch<SetStateAction<PendingCheckDiceState | null>>
+  presetResult?: number | null
+  presetDegree?: UiCheckRunView['roll']['degree'] | null
+  autoRoll?: boolean
+  autoRollKey?: string
+  onConfirmPreset?: () => void
 }) {
   const [freeDiceType, setFreeDiceType] = useState<DiceType>('d100')
   const [freeResult, setFreeResult] = useState<number | null>(null)
@@ -520,6 +540,8 @@ function DiceModal({
   const [freeOnes, setFreeOnes] = useState(0)
   const submitLockRef = useRef(false)
   const dice3dRef = useRef<Dice3DHandle>(null)
+  const autoRollKeyRef = useRef<string | null>(null)
+  const rollRef = useRef<() => void>(() => {})
   // 3D 不可用（无 WebGL / 用户要求减少动效 / 引擎加载失败）时退回原来的 2D 展示。
   // 检定是主流程的一环，不能因为渲染能力缺失就卡住。
   const [use3D, setUse3D] = useState(() => supports3DDice())
@@ -585,17 +607,18 @@ function DiceModal({
   /** 结果落地：3D 由动画定格回调进来，2D 由本地随机 + 定时器进来，两条路共用。 */
   const settle = (value: number, requestId: string | null) => {
     inFlight3DRollRef.current = null
-    const { tens, ones } = activeDiceType === 'd100' ? splitD100(value) : { tens: 0, ones: 0 }
+    const settledValue = presetResult ?? value
+    const { tens, ones } = activeDiceType === 'd100' ? splitD100(settledValue) : { tens: 0, ones: 0 }
     if (requestId !== null) {
       setCheckDiceState((current) => {
         if (!current || current.clientActionId !== requestId) return current
-        return { ...current, result: value, showResult: true, rolling: false, tens, ones }
+        return { ...current, result: settledValue, showResult: true, rolling: false, tens, ones }
       })
       return
     }
     setFreeTens(tens)
     setFreeOnes(ones)
-    setFreeResult(value)
+    setFreeResult(settledValue)
     setFreeShowResult(true)
     setFreeRolling(false)
   }
@@ -605,7 +628,9 @@ function DiceModal({
   /** 2D 回退掷骰：本地随机 + 固定时长的假动画，与改造前一致。 */
   const roll2D = (requestId: string | null) => {
     let finalResult: number
-    if (activeDiceType === 'd100') {
+    if (presetResult !== null) {
+      finalResult = presetResult
+    } else if (activeDiceType === 'd100') {
       const tens = Math.floor(Math.random() * 10)
       const ones = Math.floor(Math.random() * 10)
       finalResult = tens * 10 + ones
@@ -633,11 +658,21 @@ function DiceModal({
     // 所以这里不预先取值，等 onSettled 回调。
     if (use3D) {
       inFlight3DRollRef.current = { requestId }
-      dice3dRef.current?.roll()
+      dice3dRef.current?.roll(presetResult ?? undefined)
       return
     }
     roll2D(requestId)
   }
+  rollRef.current = roll
+
+  useEffect(() => {
+    if (!open || !autoRoll || presetResult === null || !checkRequest) return
+    const key = autoRollKey ?? `${checkRequest.clientActionId}:${presetResult}`
+    if (autoRollKeyRef.current === key) return
+    autoRollKeyRef.current = key
+    const frame = requestAnimationFrame(() => rollRef.current())
+    return () => cancelAnimationFrame(frame)
+  }, [autoRoll, autoRollKey, checkRequest, open, presetResult])
 
   /**
    * 3D 不可用。可能在掷骰之前（环境不支持），也可能在掷骰之后——懒加载 chunk
@@ -665,6 +700,11 @@ function DiceModal({
         if (!current || current.clientActionId !== checkRequest.clientActionId) return current
         return { ...current, submitted: true }
       })
+      if (presetResult !== null && onConfirmPreset) {
+        onConfirmPreset()
+        onClose()
+        return
+      }
       onResult(activeResult, 'd100', activeSelectedSkillId)
       onClose()
       return
@@ -730,6 +770,23 @@ function DiceModal({
 
   const getVerdict = (): { label: string; color: string } | null => {
     if (activeResult === null || activeDiceType !== 'd100') return null
+    if (presetDegree !== null) {
+      const labels: Record<UiCheckRunView['roll']['degree'], string> = {
+        critical_success: '大成功',
+        extreme_success: '极难成功',
+        hard_success: '困难成功',
+        regular_success: '成功',
+        failure: '失败',
+        fumble: '大失败',
+      }
+      return {
+        label: labels[presetDegree],
+        color:
+          presetDegree === 'failure' || presetDegree === 'fumble'
+            ? DIFFICULTY_COLORS.fail
+            : DIFFICULTY_COLORS.success,
+      }
+    }
     if (activeResult === 1) return { label: '大成功', color: DIFFICULTY_COLORS.crit }
     if (activeResult <= Math.floor(targetValue / 5)) return { label: '极难成功', color: DIFFICULTY_COLORS.success }
     if (activeResult <= Math.floor(targetValue / 2)) return { label: '困难成功', color: DIFFICULTY_COLORS.success }
@@ -924,6 +981,13 @@ export default function RoomPage() {
   const [pendingCheck, setPendingCheck] = useState<CheckRequestPayload | null>(null)
   const [pendingAdjudication, setPendingAdjudication] =
     useState<AdjudicationPendingPayload | null>(null)
+  const selectedAdjudicationOptionRef = useRef<{
+    correlationId: string
+    option: UiPendingCheckDecisionView['options'][number]
+  } | null>(null)
+  const shownAdjudicationRollRef = useRef<string | null>(null)
+  const [authoritativeDiceRoll, setAuthoritativeDiceRoll] =
+    useState<AuthoritativeDiceRoll | null>(null)
   /**
    * 收起已经结算完的检定面板。
    *
@@ -975,6 +1039,8 @@ export default function RoomPage() {
   const [lastSaved, setLastSaved] = useState<string | null>(() => (notesKey ? localStorage.getItem(notesKey) : null) ? new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const pendingNarrationActionIdRef = useRef<string | null>(null)
+  const organizingPhaseStartedAtRef = useRef<number | null>(null)
+  const progressClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const suspended = (roomPhase || roomInfo?.phase) === 'Suspended'
   const mapLocations = mapLocationsFromPlayerView(playerView)
   const currentHp = resourceValue(playerView, 'hp') ?? character?.derived.hp ?? null
@@ -985,6 +1051,48 @@ export default function RoomPage() {
     speechInput.status === 'requesting_permission' ||
     speechInput.status === 'listening' ||
     speechInput.status === 'processing'
+
+  const showBackendPhase = useCallback((phase: AgentTurnPhase) => {
+    if (progressClearTimerRef.current !== null) {
+      clearTimeout(progressClearTimerRef.current)
+      progressClearTimerRef.current = null
+    }
+    const label = PHASE_LABELS[phase]
+    if (label === '守秘人组织语言中') {
+      organizingPhaseStartedAtRef.current ??= Date.now()
+    } else {
+      organizingPhaseStartedAtRef.current = null
+    }
+    setProgressLabel(label)
+  }, [])
+
+  const clearBackendProgress = useCallback(() => {
+    const startedAt = organizingPhaseStartedAtRef.current
+    const remaining =
+      startedAt === null ? 0 : ORGANIZING_PHASE_MIN_MS - (Date.now() - startedAt)
+    if (remaining <= 0) {
+      organizingPhaseStartedAtRef.current = null
+      setProgressLabel(null)
+      return
+    }
+    if (progressClearTimerRef.current !== null) {
+      clearTimeout(progressClearTimerRef.current)
+    }
+    progressClearTimerRef.current = setTimeout(() => {
+      progressClearTimerRef.current = null
+      organizingPhaseStartedAtRef.current = null
+      setProgressLabel(null)
+    }, remaining)
+  }, [])
+
+  useEffect(
+    () => () => {
+      if (progressClearTimerRef.current !== null) {
+        clearTimeout(progressClearTimerRef.current)
+      }
+    },
+    [],
+  )
 
   useEffect(() => {
     // 输入框在行动和讨论区复用；切换频道时丢弃尚未完成的识别，避免结果进入新频道。
@@ -1140,7 +1248,7 @@ export default function RoomPage() {
       if (envelope.type === 'narration.chunk') {
         // 已经有文字在往外走，就不要再同时显示"正在思考"的点点了。
         setTyping(false)
-        setProgressLabel(null)
+        clearBackendProgress()
         setSecondaryProgressLabel(null)
         clearSettledAdjudication(envelope.payload.messageId)
         setStreamingNarration((current) =>
@@ -1152,7 +1260,7 @@ export default function RoomPage() {
         )
       } else if (envelope.type === 'narration.push') {
         setTyping(false)
-        setProgressLabel(null)
+        clearBackendProgress()
         setSecondaryProgressLabel(null)
         clearSettledAdjudication(envelope.payload.messageId)
         // 不在这里直接落地：权威消息比最后一个片段只晚到半毫秒，立刻接管会让
@@ -1191,7 +1299,7 @@ export default function RoomPage() {
         }))
       } else if (envelope.type === 'check.request') {
         setTyping(false)
-        setProgressLabel('守秘人等待玩家掷骰子')
+        showBackendPhase('waiting_for_check')
         setPendingCheck(envelope.payload)
         setPendingCheckDice((current) =>
           current?.clientActionId === envelope.payload.clientActionId
@@ -1201,7 +1309,7 @@ export default function RoomPage() {
         setShowDice(true)
       } else if (envelope.type === 'check.result') {
         setTyping(true)
-        setProgressLabel('守秘人组织语言中')
+        showBackendPhase('executing_action')
         const levelLabels: Record<string, string> = {
           critical: '大成功',
           extreme: '极难成功',
@@ -1247,6 +1355,42 @@ export default function RoomPage() {
             : '守秘人等待玩家决定检定结果',
         )
         setPendingAdjudication(envelope.payload)
+        const checkRun = envelope.payload.checkRun
+        const selected = selectedAdjudicationOptionRef.current
+        if (
+          envelope.payload.status === 'awaiting_post_roll_decision' &&
+          checkRun &&
+          selected?.correlationId === envelope.payload.correlationId &&
+          selected.option.candidate_id === checkRun.selected_candidate_id
+        ) {
+          const rollKey = `${checkRun.check_id}:${checkRun.roll_count}`
+          if (shownAdjudicationRollRef.current !== rollKey) {
+            shownAdjudicationRollRef.current = rollKey
+            setAuthoritativeDiceRoll({
+              correlationId: envelope.payload.correlationId,
+              checkId: checkRun.check_id,
+              rollCount: checkRun.roll_count,
+              value: checkRun.roll.value,
+              degree: checkRun.roll.degree,
+            })
+            const checkRequest: CheckRequestPayload = {
+              playerId: playerId ?? '',
+              clientActionId: envelope.payload.correlationId,
+              summary: selected.option.method_summary,
+              difficulty: selected.option.difficulty,
+              skills: [
+                {
+                  id: selected.option.candidate_id,
+                  name: selected.option.display_name,
+                  targetValue: selected.option.target_value,
+                },
+              ],
+            }
+            setPendingCheck(checkRequest)
+            setPendingCheckDice(createPendingCheckDiceState(checkRequest))
+            setShowDice(true)
+          }
+        }
       } else if (
         envelope.type === 'plan.started' ||
         envelope.type === 'plan.step_changed' ||
@@ -1258,6 +1402,7 @@ export default function RoomPage() {
         // the player; clearing first prevents stale decision IDs from being
         // submitted during the transition or after a terminal event.
         setPendingAdjudication(null)
+        setAuthoritativeDiceRoll(null)
         setActivePlanId(
           envelope.type === 'plan.completed' || envelope.type === 'plan.stopped'
             ? null
@@ -1272,11 +1417,11 @@ export default function RoomPage() {
         setProgressLabel((current) => current ?? '守秘人理解玩家意图中')
       } else if (envelope.type === 'turn.started') {
         setTyping(true)
-        setProgressLabel('守秘人理解玩家意图中')
+        showBackendPhase('reading_player_view')
         setSecondaryProgressLabel(null)
       } else if (envelope.type === 'turn.phase_changed') {
         setTyping(envelope.payload.phase !== 'waiting_for_check')
-        setProgressLabel(PHASE_LABELS[envelope.payload.phase])
+        showBackendPhase(envelope.payload.phase)
       } else if (envelope.type === 'tool.started') {
         setTyping(true)
         setProgressLabel((current) => current ?? '守秘人理解玩家意图中')
@@ -1321,7 +1466,7 @@ export default function RoomPage() {
       setProgressLabel('守秘人正在生成开场叙事')
     }
     return off
-  }, [clearSettledAdjudication, enqueueHostSpeech, handleHostSpeechSettingsUpdated, playerId, senderName])
+  }, [clearBackendProgress, clearSettledAdjudication, enqueueHostSpeech, handleHostSpeechSettingsUpdated, playerId, senderName, showBackendPhase])
 
   const submitPlayerAction = (action: { clientActionId: string; utterance: string }) => {
     if (!playerId || suspended) return
@@ -1333,7 +1478,7 @@ export default function RoomPage() {
     setActionErrorCode(null)
     setActionErrorCorrelationId(null)
     setTyping(true)
-    setProgressLabel('守秘人理解玩家意图中')
+    showBackendPhase('reading_player_view')
     setSecondaryProgressLabel(null)
     void sdk.roomSocket.submitPlannedAction(playerId, action)
       .then((result) => {
@@ -2252,8 +2397,14 @@ export default function RoomPage() {
         onSelectSkill={(candidateId) => {
           if (!playerId || !pendingAdjudication?.pendingDecision) return
           const decision = pendingAdjudication.pendingDecision
+          const option = decision.options.find((item) => item.candidate_id === candidateId)
+          if (!option) return
+          selectedAdjudicationOptionRef.current = {
+            correlationId: pendingAdjudication.correlationId,
+            option,
+          }
           setTyping(true)
-          setProgressLabel('守秘人组织语言中')
+          showBackendPhase('waiting_for_check')
           sdk.roomSocket.selectAdjudication(playerId, {
             clientActionId: pendingAdjudication.correlationId,
             requestId: randomActionId(),
@@ -2267,7 +2418,7 @@ export default function RoomPage() {
           if (!playerId || !pendingAdjudication?.pendingDecision) return
           const decision = pendingAdjudication.pendingDecision
           setTyping(true)
-          setProgressLabel('守秘人组织语言中')
+          showBackendPhase('executing_action')
           sdk.roomSocket.selectAdjudication(playerId, {
             clientActionId: pendingAdjudication.correlationId,
             requestId: randomActionId(),
@@ -2281,7 +2432,11 @@ export default function RoomPage() {
           if (!playerId || !pendingAdjudication?.checkRun) return
           const checkRun = pendingAdjudication.checkRun
           setTyping(true)
-          setProgressLabel('守秘人组织语言中')
+          showBackendPhase('executing_action')
+          setShowDice(false)
+          setPendingCheck(null)
+          setPendingCheckDice(null)
+          setAuthoritativeDiceRoll(null)
           sdk.roomSocket.decidePostRoll(playerId, {
             clientActionId: pendingAdjudication.correlationId,
             requestId: randomActionId(),
@@ -2300,6 +2455,35 @@ export default function RoomPage() {
         checkRequest={pendingCheck}
         checkDiceState={pendingCheckDice}
         setCheckDiceState={setPendingCheckDice}
+        presetResult={authoritativeDiceRoll?.value ?? null}
+        presetDegree={authoritativeDiceRoll?.degree ?? null}
+        autoRoll={authoritativeDiceRoll !== null}
+        autoRollKey={
+          authoritativeDiceRoll
+            ? `${authoritativeDiceRoll.checkId}:${authoritativeDiceRoll.rollCount}`
+            : undefined
+        }
+        onConfirmPreset={() => {
+          if (!playerId || !pendingAdjudication?.checkRun || !authoritativeDiceRoll) return
+          const checkRun = pendingAdjudication.checkRun
+          const accept = (checkRun.post_roll_options ?? []).find(
+            (option) => !('resource_id' in option) && !('requires_revised_method' in option),
+          )
+          if (!accept) return
+          setTyping(true)
+          showBackendPhase('executing_action')
+          setPendingCheck(null)
+          setPendingCheckDice(null)
+          setAuthoritativeDiceRoll(null)
+          sdk.roomSocket.decidePostRoll(playerId, {
+            clientActionId: pendingAdjudication.correlationId,
+            requestId: randomActionId(),
+            sourceRevision: pendingAdjudication.sourceRevision,
+            checkId: checkRun.check_id,
+            checkVersion: checkRun.version,
+            optionId: accept.option_id,
+          })
+        }}
       />
     </div>
   )

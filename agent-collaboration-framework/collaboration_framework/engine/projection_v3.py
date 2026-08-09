@@ -52,6 +52,7 @@ from collaboration_framework.contracts import (
 
 from .models import EngineRuntimeSnapshot, GameState
 from .navigation import effective_location_knowledge
+from .rules_v3 import evaluate_condition
 
 # Visibility levels an authored node may carry, ordered from most to least open.
 _PLAYER_VISIBLE = {"public", "party"}
@@ -275,6 +276,11 @@ def _visible_entities(
         if placed != location_id and carried != actor_id:
             continue
         if entity.visibility not in _PLAYER_VISIBLE:
+            continue
+        if not all(
+            evaluate_condition(condition, state=state, actor_id=actor_id)
+            for condition in entity.visibility_conditions
+        ):
             continue
         if not _override_allows(state, actor_id, "entity", entity.id):
             continue

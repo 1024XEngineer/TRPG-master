@@ -104,6 +104,9 @@ const {
   mockSendChat,
   mockSubmitAction,
   mockSubmitPlannedAction,
+  mockSelectAdjudication,
+  mockDecidePostRoll,
+  mockCancelActionPlan,
   mockWaitForWsOpen,
   mockCreateEndingDraft,
   mockConfirmEndingDraft,
@@ -133,6 +136,9 @@ const {
     }),
     mockSubmitAction: vi.fn(),
     mockSubmitPlannedAction: vi.fn(),
+    mockSelectAdjudication: vi.fn(),
+    mockDecidePostRoll: vi.fn(),
+    mockCancelActionPlan: vi.fn(),
     mockWaitForWsOpen: vi.fn(() => Promise.resolve()),
     mockCreateEndingDraft: vi.fn(),
     mockConfirmEndingDraft: vi.fn(),
@@ -162,6 +168,9 @@ vi.mock('@/services/api-client', () => ({
       sendChat: mockSendChat,
       submitAction: mockSubmitAction,
       submitPlannedAction: mockSubmitPlannedAction,
+      selectAdjudication: mockSelectAdjudication,
+      decidePostRoll: mockDecidePostRoll,
+      cancelActionPlan: mockCancelActionPlan,
     },
   },
 }))
@@ -1363,6 +1372,89 @@ describe('RoomPage conversation history', () => {
     )
   })
 
+  it('animates the authoritative adjudication roll before the player sends it', async () => {
+    vi.useFakeTimers()
+    renderRoomPage()
+
+    act(() =>
+      emitWsMessage({
+        type: 'adjudication.pending',
+        payload: {
+          correlationId: 'animated-check',
+          planId: null,
+          sourceRevision: 'revision-1',
+          status: 'awaiting_skill_choice',
+          pendingDecision: {
+            decision_id: 'decision-animated',
+            action_request_id: 'animated-check',
+            source_revision: 'revision-1',
+            decision_version: 1,
+            actor_id: 'actor-1',
+            summary: '检索旧报',
+            options: [
+              {
+                candidate_id: 'library-use',
+                skill_id: 'library-use',
+                display_name: '图书馆使用',
+                target_value: 50,
+                difficulty: 'regular',
+                method_summary: '按年份检索旧报',
+                player_safe_reason: '这是当前可用的调查方式',
+              },
+            ],
+            allow_cancel: true,
+          },
+        },
+      }),
+    )
+    fireEvent.click(screen.getByRole('button', { name: /图书馆使用/ }))
+    expect(mockSelectAdjudication).toHaveBeenCalledWith(
+      'player-1',
+      expect.objectContaining({ candidateId: 'library-use' }),
+    )
+
+    act(() =>
+      emitWsMessage({
+        type: 'adjudication.pending',
+        payload: {
+          correlationId: 'animated-check',
+          planId: null,
+          sourceRevision: 'revision-2',
+          status: 'awaiting_post_roll_decision',
+          pendingDecision: null,
+          checkRun: {
+            check_id: 'check-animated',
+            action_request_id: 'animated-check',
+            selected_candidate_id: 'library-use',
+            status: 'awaiting_post_roll_decision',
+            version: 1,
+            roll_count: 1,
+            roll: { value: 82, degree: 'failure', passed: false },
+            post_roll_options: [{ option_id: 'accept-current', kind: 'accept_result' }],
+            final_result: null,
+          },
+        },
+      }),
+    )
+
+    act(() => vi.advanceTimersByTime(20))
+    expect(screen.getByText('骰子还在滚……')).toBeInTheDocument()
+    act(() => vi.advanceTimersByTime(750))
+    expect(screen.getByText('82')).toBeInTheDocument()
+    expect(screen.getByText('失败')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '确认并发送' }))
+
+    expect(mockDecidePostRoll).toHaveBeenCalledWith(
+      'player-1',
+      expect.objectContaining({
+        clientActionId: 'animated-check',
+        checkId: 'check-animated',
+        optionId: 'accept-current',
+      }),
+    )
+    vi.useRealTimers()
+  })
+
   it('keeps another action\'s pending check while an unrelated turn settles', async () => {
     renderRoomPage()
     await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
@@ -1708,6 +1800,25 @@ describe('RoomPage conversation history', () => {
       payload: { correlationId: 'progress-turn', phase: 'generating_narration' },
     }))
     expect(screen.getByText('守秘人组织语言中')).toBeInTheDocument()
+  })
+
+  it('keeps a fast narration phase visible long enough to be perceived', () => {
+    vi.useFakeTimers()
+    renderRoomPage()
+
+    act(() => emitWsMessage({
+      type: 'turn.phase_changed',
+      payload: { correlationId: 'fast-move', phase: 'generating_narration' },
+    }))
+    act(() => emitWsMessage({
+      type: 'narration.push',
+      payload: { messageId: 'fast-move', text: '你很快抵达了图书馆。' },
+    }))
+
+    expect(screen.getByText('守秘人组织语言中')).toBeInTheDocument()
+    act(() => vi.advanceTimersByTime(600))
+    expect(screen.queryByText('守秘人组织语言中')).not.toBeInTheDocument()
+    vi.useRealTimers()
   })
 
   it('renders invalid Agent output as keeper guidance', () => {

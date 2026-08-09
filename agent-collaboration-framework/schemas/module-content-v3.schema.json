@@ -1035,6 +1035,36 @@
           "title": "Visibility",
           "type": "string"
         },
+        "visibility_conditions": {
+          "default": [],
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "all": "#/$defs/AllCondition",
+                "any": "#/$defs/AnyCondition",
+                "not": "#/$defs/NotCondition",
+                "predicate": "#/$defs/PredicateCondition"
+              },
+              "propertyName": "op"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/AllCondition"
+              },
+              {
+                "$ref": "#/$defs/AnyCondition"
+              },
+              {
+                "$ref": "#/$defs/NotCondition"
+              },
+              {
+                "$ref": "#/$defs/PredicateCondition"
+              }
+            ]
+          },
+          "title": "Visibility Conditions",
+          "type": "array"
+        },
         "plot_relevance": {
           "default": true,
           "title": "Plot Relevance",

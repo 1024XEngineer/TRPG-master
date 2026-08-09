@@ -1176,6 +1176,11 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                     websocket,
                                     event,
                                 ),
+                                on_phase=partial(
+                                    _send_turn_phase,
+                                    websocket,
+                                    choice.client_action_id,
+                                ),
                             )
                             await _send_action_plan_result(
                                 db,
@@ -1229,6 +1234,11 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 on_progress=lambda event: _send_plan_progress(
                                     websocket,
                                     event,
+                                ),
+                                on_phase=partial(
+                                    _send_turn_phase,
+                                    websocket,
+                                    choice.client_action_id,
                                 ),
                             )
                             await _send_action_plan_result(

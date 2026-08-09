@@ -8,19 +8,19 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 're
 
 import type { DiceStage } from './engine'
 import { supports3DDice } from './support'
-import type { DiceKind } from './types'
+import type { DiceKind, DiceRollToken } from './types'
 
 export interface Dice3DHandle {
-  /** 掷一次。引擎还没加载完时会记下来，加载完立刻补掷。 */
-  roll: (targetValue?: number) => void
+  /** 返回 false 表示舞台仍在处理上一轮，未接受本次请求。 */
+  roll: (token: DiceRollToken, targetValue?: number) => boolean
 }
 
 interface Dice3DStageProps {
   kind: DiceKind
   /** 骰子停稳、结果可读时调用一次。 */
-  onSettled: (value: number) => void
+  onSettled: (value: number, token: DiceRollToken) => void
   /** 环境不支持 3D（无 WebGL / 用户要求减少动效）时调用，调用方据此回退 2D。 */
-  onUnsupported?: () => void
+  onUnsupported?: (token: DiceRollToken | null) => void
   className?: string
 }
 
@@ -31,7 +31,11 @@ export const Dice3DStage = forwardRef<Dice3DHandle, Dice3DStageProps>(function D
   const containerRef = useRef<HTMLDivElement>(null)
   const stageRef = useRef<DiceStage | null>(null)
   // 引擎异步加载期间收到的掷骰请求先记下来，加载完补上——否则首次点击会丢。
-  const pendingRollRef = useRef<{ targetValue?: number } | null>(null)
+  const pendingRollRef = useRef<{
+    token: DiceRollToken
+    targetValue?: number
+  } | null>(null)
+  const activeRollRef = useRef<DiceRollToken | null>(null)
   const [failed, setFailed] = useState(false)
 
   // 回调放进 ref：它们的引用变化不应该触发引擎重建（重建会丢掉画面上的骰子）。
@@ -46,7 +50,7 @@ export const Dice3DStage = forwardRef<Dice3DHandle, Dice3DStageProps>(function D
 
     if (!supports3DDice()) {
       setFailed(true)
-      onUnsupportedRef.current?.()
+      onUnsupportedRef.current?.(null)
       return
     }
 
@@ -57,25 +61,34 @@ export const Dice3DStage = forwardRef<Dice3DHandle, Dice3DStageProps>(function D
         const stage = createDiceStage({
           container,
           kind,
-          onSettled: (value) => onSettledRef.current(value),
+          onSettled: (value) => {
+            const token = activeRollRef.current
+            activeRollRef.current = null
+            if (token !== null) onSettledRef.current(value, token)
+          },
         })
         stageRef.current = stage
-        if (pendingRollRef.current) {
-          const pending = pendingRollRef.current
+        const pending = pendingRollRef.current
+        if (pending !== null) {
           pendingRollRef.current = null
-          stage.roll(pending.targetValue)
+          activeRollRef.current = pending.token
+          if (!stage.roll(pending.targetValue)) activeRollRef.current = null
         }
       })
       .catch(() => {
         if (cancelled) return
         // 加载或初始化失败同样退回 2D，不能把检定卡死在这里。
+        const failedToken = activeRollRef.current ?? pendingRollRef.current?.token ?? null
+        activeRollRef.current = null
+        pendingRollRef.current = null
         setFailed(true)
-        onUnsupportedRef.current?.()
+        onUnsupportedRef.current?.(failedToken)
       })
 
     return () => {
       cancelled = true
       pendingRollRef.current = null
+      activeRollRef.current = null
       stageRef.current?.dispose()
       stageRef.current = null
     }
@@ -84,11 +97,19 @@ export const Dice3DStage = forwardRef<Dice3DHandle, Dice3DStageProps>(function D
   useImperativeHandle(
     ref,
     () => ({
-      roll(targetValue?: number) {
-        if (failed) return
+      roll(token, targetValue) {
+        if (failed || pendingRollRef.current !== null || activeRollRef.current !== null) return false
         const stage = stageRef.current
-        if (stage) stage.roll(targetValue)
-        else pendingRollRef.current = { targetValue }
+        if (stage) {
+          activeRollRef.current = token
+          if (!stage.roll(targetValue)) {
+            activeRollRef.current = null
+            return false
+          }
+          return true
+        }
+        pendingRollRef.current = { token, targetValue }
+        return true
       },
     }),
     [failed],

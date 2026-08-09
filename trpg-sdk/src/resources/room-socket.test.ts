@@ -295,6 +295,54 @@ test('waitForOpen：连接失败时 reject 的是 Error，且 cause 是原始 Ev
   }
 });
 
+test('setReady：返回消息是否已交给 WebSocket', () => {
+  class FakeWebSocket {
+    static readonly OPEN = 1;
+    readonly readyState = FakeWebSocket.OPEN;
+    onmessage: ((event: { data: string }) => void) | null = null;
+    onclose: (() => void) | null = null;
+    sent: string[] = [];
+
+    constructor(readonly url: string) {}
+
+    send(data: string) {
+      this.sent.push(data);
+    }
+
+    close() {}
+  }
+
+  const original = globalThis.WebSocket;
+  Object.defineProperty(globalThis, 'WebSocket', {
+    configurable: true,
+    value: FakeWebSocket,
+  });
+  try {
+    const disconnectedSocket = new RoomSocket('ws://example.test');
+    const originalWarn = console.warn;
+    console.warn = () => {};
+    try {
+      assert.equal(disconnectedSocket.setReady('player-1', { ready: true }), false);
+    } finally {
+      console.warn = originalWarn;
+    }
+
+    const socket = new RoomSocket('ws://example.test');
+    const transport = socket.connect('room-1', 'token') as unknown as FakeWebSocket;
+    assert.equal(socket.setReady('player-1', { ready: true }), true);
+    assert.deepEqual(JSON.parse(transport.sent[0] ?? ''), {
+      type: 'player.ready',
+      playerId: 'player-1',
+      payload: { ready: true },
+    });
+  } finally {
+    Object.defineProperty(globalThis, 'WebSocket', {
+      configurable: true,
+      value: original,
+    });
+  }
+});
+
 test('turn.failed reject pending action，view.updated 更新同一份缓存', async () => {
   class FakeWebSocket {
     static readonly OPEN = 1;

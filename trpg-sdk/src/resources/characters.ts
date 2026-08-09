@@ -2,6 +2,10 @@ import type { ApiClient } from '../client';
 import type {
   Character,
   CharacterDraftResult,
+  GeneratePortraitInput,
+  PortraitGenerationResult,
+  QuickGenerateInput,
+  QuickGenerateResult,
   RollAttributesResult,
   UpdateCharacterInput,
 } from '../types';
@@ -38,6 +42,21 @@ export class CharactersResource {
     );
   }
 
+  /** POST /api/v1/rooms/{roomId}/characters/{characterId}/quick-generate —
+   * 服务端生成一张规则合法的角色草稿，不完成角色卡，也不触发生图。 */
+  quickGenerate(
+    roomId: string,
+    characterId: string,
+    reconnectToken: string,
+    payload?: QuickGenerateInput
+  ): Promise<QuickGenerateResult> {
+    return this.client.post<QuickGenerateResult>(
+      `/rooms/${roomId}/characters/${characterId}/quick-generate`,
+      payload ?? null,
+      this.authenticated(reconnectToken)
+    );
+  }
+
   /** PATCH /api/v1/rooms/{roomId}/characters/{characterId} — 保存建卡向导算好的完整角色数据 */
   save(
     roomId: string,
@@ -57,6 +76,21 @@ export class CharactersResource {
     return this.client.post<null>(
       `/rooms/${roomId}/characters/${characterId}/complete`,
       null,
+      this.authenticated(reconnectToken)
+    );
+  }
+
+  /** POST /api/v1/rooms/{roomId}/characters/{characterId}/portrait-generations —
+   * 玩家主动为已完成的本人角色生成图片。 */
+  generatePortrait(
+    roomId: string,
+    characterId: string,
+    payload: GeneratePortraitInput,
+    reconnectToken: string
+  ): Promise<PortraitGenerationResult> {
+    return this.client.post<PortraitGenerationResult>(
+      `/rooms/${roomId}/characters/${characterId}/portrait-generations`,
+      payload,
       this.authenticated(reconnectToken)
     );
   }

@@ -54,7 +54,7 @@ export default function HomePage() {
       />
 
       <h1 id="home-scene-title" className="sr-only">
-        AI桌游主持人
+        AI跑团主持人
       </h1>
       <p className="sr-only">AI 智能主持 · 多游戏聚会平台</p>
 

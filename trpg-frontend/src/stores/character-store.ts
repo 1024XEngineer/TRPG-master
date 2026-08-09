@@ -5,6 +5,7 @@ import type { DerivedStatsView } from '@/data/derived-stats'
 
 export interface CompletedCharacter {
   info: InvestigatorInfo
+  generationMethod?: 'pointbuy' | 'roll'
   attr: Attributes
   skillAlloc: Record<string, number>
   // 全部技能的最终值（skillId -> 已经算好的 base+分配，来自建卡完成时后端

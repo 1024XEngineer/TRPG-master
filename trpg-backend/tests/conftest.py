@@ -28,6 +28,7 @@ from app.core.db import Base, get_db
 from app.core.seed import ensure_seed_content
 from app.core.turn import build_session_view_application
 from app.main import app
+from app.service.character_background import CharacterBackgroundService
 from app.service.paper_chase_loader import load_paper_chase
 from tests.content_fixtures import publish_multiplayer_module
 
@@ -59,6 +60,9 @@ async def override_get_db() -> AsyncGenerator[AsyncSession, None]:
 # 里），所以只要 pytest 收集了这个 conftest.py，整个测试会话期间 app 用的都是
 # 测试数据库，不会有测试请求不小心打到本地开发用的 SQLite 文件或线上数据库。
 app.dependency_overrides[get_db] = override_get_db
+# 测试必须与开发者本地 `.env` 解耦：一键建卡的真实背景 provider 可能产生外部
+# 请求和费用；专门注入确定性实现，真实 provider 由 adapter 单测覆盖。
+app.state.character_background_service = CharacterBackgroundService()
 
 # WS 路由（app/controller/ws.py）是原生 websocket handler，拿不到 FastAPI 的
 # Depends(get_db)，而是直接 `async with async_session_factory() as db`——也就是

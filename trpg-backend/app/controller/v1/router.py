@@ -15,6 +15,7 @@ from app.controller.v1 import (
     inventory,
     me,
     modules,
+    portraits,
     rooms,
 )
 
@@ -22,6 +23,7 @@ api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(health.router)
 api_router.include_router(auth.router)
 api_router.include_router(rooms.router)
+api_router.include_router(portraits.router)
 api_router.include_router(host_speech.router)
 api_router.include_router(inventory.router)
 api_router.include_router(endings.router)

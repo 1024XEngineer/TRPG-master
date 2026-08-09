@@ -209,6 +209,7 @@ npm run dev
 | `DEEPSEEK_BASE_URL` | `https://api.deepseek.com` | OpenAI-compatible Chat Completions 根地址 |
 | `DEEPSEEK_MODEL` | `deepseek-chat` | DeepSeek 模型名称 |
 | `DEEPSEEK_TIMEOUT_SECONDS` | `30` | DeepSeek 请求超时秒数 |
+| `CHARACTER_BACKGROUND_PROVIDER` | `deterministic` | 一键建卡装备与背景：`deterministic` 或 `deepseek`；模型失败会整体回退内置模板 |
 | `HOST_SPEECH_PROVIDER` | `disabled` | 主持人语音：`disabled`、`fake` 或 `doubao`；`fake` 仅用于测试 |
 | `DOUBAO_TTS_API_KEY` | 空 | 新版豆包语音控制台 API Key（按 SecretStr 读取且禁止写日志） |
 | `DOUBAO_TTS_RESOURCE_ID` | `seed-tts-2.0` | DouBao TTS 2.0 固定服务标识 |
@@ -224,6 +225,19 @@ npm run dev
 | `RECENT_HISTORY_ENABLED` | `true` | 是否向 Host/Narrator 提供玩家安全的近期回合 |
 | `RECENT_HISTORY_MAX_TURNS` | `6` | 近期历史最多保留的回合数 |
 | `RECENT_HISTORY_MAX_CHARS` | `6000` | 近期历史文本总字符预算 |
+| `CHARACTER_PORTRAIT_ENABLED` | `true` | 是否启用角色生图后端接口；前端入口默认显示 |
+| `PORTRAIT_PROMPT_PROVIDER` | `deterministic` | 提示词生成：`deterministic` 或 `deepseek` |
+| `PORTRAIT_IMAGE_PROVIDER` | `auto` | 图片 provider：自动选择 `sufy` / `dashscope` / `mock`，也可显式指定 |
+| `DASHSCOPE_API_KEY` | 空 | 阿里云百炼 API Key；只存在后端环境变量中 |
+| `DASHSCOPE_BASE_URL` | `https://dashscope.aliyuncs.com/api/v1` | 通义万相 API 根地址 |
+| `DASHSCOPE_IMAGE_MODEL` | `wan2.2-t2i-flash` | 通义万相文生图模型 |
+| `SUFY_API_KEY` | 空 | Sufy API Key；只存在后端环境变量中 |
+| `SUFY_BASE_URL` | `https://openai.sufy.com/v1` | Sufy OpenAI-compatible API 根地址 |
+| `SUFY_IMAGE_MODEL` | `google/gemini-3-pro-image` | Sufy 高质量图片生成模型 |
+| `PORTRAIT_GENERATION_TIMEOUT_SECONDS` | `120` | 图片生成和任务轮询的总超时秒数 |
+| `PORTRAIT_REFERENCE_IMAGE_PATH` | `app/assets/portrait-style-reference.png` | 后端内置漫画风格参考图路径；留空或不可读时使用纯提示词 |
+
+生图入口由前端默认显示，不再配置前端环境变量。后端默认启用且使用 `auto`：依次检查 `SUFY_API_KEY` 和 `DASHSCOPE_API_KEY`，自动选择可用的真实 provider；两者都未填写时使用 mock。如需禁用后端生图，只需设置 `CHARACTER_PORTRAIT_ENABLED=false`。
 
 ### 主持模型配置
 
@@ -289,6 +303,7 @@ Agent、重新掷骰或重复写入状态；使用同一 `clientActionId` 重试
 
 ```dotenv
 HOST_MODEL_PROVIDER=deepseek
+CHARACTER_BACKGROUND_PROVIDER=deepseek
 DEEPSEEK_API_KEY=你的_API_Key
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_MODEL=deepseek-chat
@@ -309,6 +324,9 @@ Repository Secret，非敏感的 API 根地址和模型名使用 Repository Vari
 | `PREVIEW_DEEPSEEK_API_KEY` | Repository Secret | 新服务商签发的 Preview 专用 key（不要写入仓库或日志） |
 | `PREVIEW_DEEPSEEK_BASE_URL` | Repository Variable | `https://api.qnaigc.com/v1` |
 | `PREVIEW_DEEPSEEK_MODEL` | Repository Variable | `deepseek/deepseek-v4-pro-202606` |
+| `PREVIEW_SUFY_API_KEY` | Repository Secret | 与 `PREVIEW_DEEPSEEK_API_KEY` 使用同一把支持两个模型的 key |
+| `PREVIEW_SUFY_BASE_URL` | Repository Variable | `https://openai.sufy.com/v1`，可留空使用默认值 |
+| `PREVIEW_SUFY_IMAGE_MODEL` | Repository Variable | `google/gemini-3-pro-image`，可留空使用默认值 |
 
 `PREVIEW_DEEPSEEK_BASE_URL` 必须是 OpenAI-compatible API 根地址，不能填完整的
 `https://api.qnaigc.com/v1/chat/completions`；客户端会自行追加 `/chat/completions`。
@@ -316,29 +334,42 @@ Repository Secret，非敏感的 API 根地址和模型名使用 Repository Vari
 两份 Preview workflow 遵循同一配置规则：
 
 - key 为空时使用 `HOST_MODEL_PROVIDER=fake`，其余预览功能仍可验证；
-- key 非空时 Base URL 和模型名必须同时存在，否则部署立即失败；
+- DeepSeek 和 Sufy key 必须成对存在；只有一套 key 时部署立即失败，避免出现半真实链路；
+- 两套 key 都存在时，`DEEPSEEK_MODEL` 生成一键建卡背景并整理角色图片提示词，`SUFY_IMAGE_MODEL` 再生成图片；
+- 当前推荐的两套模型分别为 `deepseek/deepseek-v4-pro-202606` 和 `google/gemini-3-pro-image`；
+- DeepSeek key 非空时，其 Base URL 和模型名必须同时存在，否则部署立即失败；Sufy 的 Base URL 和模型名可留空使用上述默认值；
 - 配置真实 provider 时不会静默使用代码中的旧厂商默认值；
 - fork PR 不执行部署 job，也不能读取 Repository Secret。
 
 部署服务器不会直接执行仓库中的 `docker-compose.preview.yml`，而是复制受信任的
 固定模板 `~/trpg-previews/compose-template/docker-compose.yml`。模板中的 backend
-service 必须透传相同配置：
+service 必须透传相同配置。两份 workflow 会在拉取镜像前检查这个变量已经解析为
+期望值；模板未更新时部署会明确失败，不会误把预览标成已启用模型：
 
 ```yaml
 environment:
   HOST_MODEL_PROVIDER: ${HOST_MODEL_PROVIDER:-fake}
   DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
-  DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
-  DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-chat}
+  DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.qnaigc.com/v1}
+  DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek/deepseek-v4-pro-202606}
+  CHARACTER_BACKGROUND_PROVIDER: ${CHARACTER_BACKGROUND_PROVIDER:-deterministic}
+  CHARACTER_PORTRAIT_ENABLED: ${CHARACTER_PORTRAIT_ENABLED:-true}
+  PORTRAIT_PROMPT_PROVIDER: ${PORTRAIT_PROMPT_PROVIDER:-deterministic}
+  PORTRAIT_IMAGE_PROVIDER: ${PORTRAIT_IMAGE_PROVIDER:-mock}
+  SUFY_API_KEY: ${SUFY_API_KEY:-}
+  SUFY_BASE_URL: ${SUFY_BASE_URL:-https://openai.sufy.com/v1}
+  SUFY_IMAGE_MODEL: ${SUFY_IMAGE_MODEL:-google/gemini-3-pro-image}
+  PORTRAIT_REFERENCE_IMAGE_PATH: ${PORTRAIT_REFERENCE_IMAGE_PATH:-app/assets/portrait-style-reference.png}
+  PORTRAIT_GENERATION_TIMEOUT_SECONDS: ${PORTRAIT_GENERATION_TIMEOUT_SECONDS:-120}
 ```
 
 切换或轮换服务商时按以下顺序操作，避免 workflow 已更新但外部配置尚未就绪：
 
-1. 先更新服务器固定 compose 模板，确认三项 `DEEPSEEK_*` 环境变量都会进入 backend。
-2. 在主仓库创建或更新 `PREVIEW_DEEPSEEK_BASE_URL`、`PREVIEW_DEEPSEEK_MODEL`。
-3. 将 `PREVIEW_DEEPSEEK_API_KEY` 替换为新服务商的 Preview 专用 key。
+1. 先更新服务器固定 compose 模板，确认 `DEEPSEEK_*`、`SUFY_*` 和 `PORTRAIT_*` 环境变量都会进入 backend。
+2. 在主仓库创建或更新 `PREVIEW_DEEPSEEK_BASE_URL`、`PREVIEW_DEEPSEEK_MODEL`、`PREVIEW_SUFY_BASE_URL` 和 `PREVIEW_SUFY_IMAGE_MODEL`。
+3. 新建 `PREVIEW_SUFY_API_KEY`，其值暂时复用 `PREVIEW_DEEPSEEK_API_KEY`；两套 Secret 按用途分别映射。
 4. 合并 workflow 改动后重新运行 Main Preview，并用同仓库测试 PR 验证 PR Preview。
-5. 在两个预览环境各提交一次自然语言行动，确认返回真实模型结果而非 Fake 文案。
+5. 在两个预览环境各完成一次自然语言行动和一次角色生图，确认 DeepSeek v4 Pro 与 Sufy Gemini 都返回真实结果。
 
 健康检查只证明容器和 HTTP 服务可用，不会产生计费模型请求，也不能证明模型配置
 正确。真实验证必须覆盖一次 Host Agent 工具调用和最终结构化输出。轮换期间不要在

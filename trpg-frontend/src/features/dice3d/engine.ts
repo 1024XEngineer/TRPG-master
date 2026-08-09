@@ -35,6 +35,7 @@ import {
   WebGLRenderer,
 } from 'three'
 
+import { resolveSphereCollision, separatePlanarTargets } from './collision'
 import { faceNormal, polyhedronFaces } from './geometry'
 import { shuffle } from './shuffle'
 import { PALETTES, makeFaceTexture, type Palette } from './textures'
@@ -55,6 +56,8 @@ interface Die {
   group: Group
   /** 静止时质心离地高度：以面着地，取内切半径。 */
   restY: number
+  /** 仅用于轻量骰子间碰撞的保守包围半径。 */
+  collisionRadius: number
   faces: FaceInfo[]
 }
 
@@ -86,9 +89,11 @@ function buildDie(
   const faces: FaceInfo[] = []
   const coreTris: number[] = []
   let minInradius = Infinity
+  let maxVertexRadius = 0
   const usePips = kind === 'd6'
 
   polys.forEach((verts, faceIndex) => {
+    for (const vertex of verts) maxVertexRadius = Math.max(maxVertexRadius, vertex.length())
     // 保证顶点绕序让法线朝外。
     const normal = faceNormal(verts)
     const centroid = new Vector3()
@@ -172,7 +177,12 @@ function buildDie(
   core.scale.setScalar(0.985)
   group.add(core)
 
-  return { group, restY: minInradius, faces }
+  return {
+    group,
+    restY: minInradius,
+    collisionRadius: maxVertexRadius * 0.88,
+    faces,
+  }
 }
 
 function disposeGroup(group: Group): void {
@@ -232,7 +242,7 @@ function diceDefinitions(kind: DiceKind): {
 
 export interface DiceStage {
   /** 掷一次。正在掷的时候重复调用会被忽略。 */
-  roll: (targetValue?: number) => void
+  roll: (targetValue?: number) => boolean
   /** 释放 WebGL 资源并停掉动画循环。 */
   dispose: () => void
 }
@@ -358,7 +368,22 @@ export function createDiceStage({ container, kind, onSettled }: DiceStageOptions
       }
       return [requestedValue]
     })()
-    actors.forEach((actor, index) => {
+    const targets = actors.map((actor) => ({
+      x: actor.die.group.position.x,
+      z: actor.die.group.position.z,
+    }))
+    if (actors.length === 2) {
+      const separated = separatePlanarTargets(
+        targets[0],
+        targets[1],
+        actors[0].die.collisionRadius + actors[1].die.collisionRadius,
+        { halfX: ARENA.halfX - 0.25, halfZ: ARENA.halfZ - 0.25 },
+      )
+      targets[0] = separated[0]
+      targets[1] = separated[1]
+    }
+
+    for (const [index, actor] of actors.entries()) {
       actor.qStart = actor.die.group.quaternion.clone()
       actor.pStart = actor.die.group.position.clone()
       const requestedFace = requestedFaces
@@ -373,9 +398,11 @@ export function createDiceStage({ container, kind, onSettled }: DiceStageOptions
         new Vector3(0, 1, 0),
       )
       const target = actor.die.group.position.clone()
+      target.x = targets[index].x
       target.y = actor.die.restY
+      target.z = targets[index].z
       actor.pTarget = target
-    })
+    }
   }
 
   const step = (dt: number) => {
@@ -440,6 +467,28 @@ export function createDiceStage({ container, kind, onSettled }: DiceStageOptions
         }
       }
 
+      if (actors.length === 2) {
+        const collided = resolveSphereCollision(
+          {
+            position: actors[0].die.group.position,
+            velocity: actors[0].vel,
+            radius: actors[0].die.collisionRadius,
+          },
+          {
+            position: actors[1].die.group.position,
+            velocity: actors[1].vel,
+            radius: actors[1].die.collisionRadius,
+          },
+        )
+        if (collided) allResting = false
+        for (const actor of actors) {
+          const position = actor.die.group.position
+          position.x = Math.min(Math.max(position.x, -ARENA.halfX), ARENA.halfX)
+          position.y = Math.max(position.y, actor.die.restY)
+          position.z = Math.min(Math.max(position.z, -ARENA.halfZ), ARENA.halfZ)
+        }
+      }
+
       if ((allResting && elapsed >= minTumble) || elapsed >= MAX_TUMBLE_SECONDS) {
         enterAlign()
       }
@@ -472,7 +521,7 @@ export function createDiceStage({ container, kind, onSettled }: DiceStageOptions
 
   return {
     roll(targetValue?: number) {
-      if (disposed || phase !== 'idle') return
+      if (disposed || phase !== 'idle') return false
       requestedValue = targetValue ?? null
       clearActors()
       diceDefinitions(kind).forEach((def, index) => {
@@ -493,6 +542,7 @@ export function createDiceStage({ container, kind, onSettled }: DiceStageOptions
       elapsed = 0
       minTumble = rand(1.2, 1.5)
       phase = 'tumble'
+      return true
     },
     dispose() {
       if (disposed) return

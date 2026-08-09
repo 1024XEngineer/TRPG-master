@@ -218,6 +218,7 @@ export interface CharacterPreviewRequest {
     [k: string]: number;
   };
   occupationChoiceSkillIds?: string[] | null;
+  generationMethod?: "pointbuy" | "roll";
 }
 
 /**
@@ -537,6 +538,11 @@ export type ErrorCode =
   | "NOT_IMPLEMENTED"
   | "CHARACTER_INVALID"
   | "RULESET_NOT_CONFIGURED"
+  | "PORTRAIT_GENERATION_DISABLED"
+  | "PORTRAIT_GENERATION_IN_PROGRESS"
+  | "PORTRAIT_CONTENT_REJECTED"
+  | "PORTRAIT_GENERATION_FAILED"
+  | "PORTRAIT_GENERATION_TIMEOUT"
   | "HOST_SPEECH_UNAVAILABLE"
   | "HOST_SPEECH_FAILED"
   | "HOST_SPEECH_TIMEOUT"
@@ -1080,11 +1086,46 @@ export interface PositionContextView {
   destination_id: string;
 }
 
+export interface PortraitGenerationRequest {
+  style?: "realistic";
+  size?: "1024x1024";
+}
+
+export interface PortraitGenerationResult {
+  generationId: string;
+  status?: "completed";
+  imageUrl: string;
+  prompt: string;
+  negativePrompt: string;
+  promptSummary: string;
+  promptSource: "deepseek" | "deterministic" | "deterministic_fallback";
+}
+
 export interface PushOption {
   option_id: string;
   kind?: "push";
   requires_revised_method?: true;
   player_safe_risk_summary: string;
+}
+
+/**
+ * 可选的玩家身份信息；旧客户端不传时仍使用确定性默认资料。
+ */
+export interface QuickGenerateRequest {
+  name?: string | null;
+  age?: number | null;
+  gender?: string | null;
+  residence?: string;
+  birthplace?: string;
+}
+
+/**
+ * 一键生成后返回的房间角色草稿和权威计算结果。
+ */
+export interface QuickGenerateResult {
+  character: CharacterRead;
+  occupationId: number;
+  compute: CharacterComputeResult;
 }
 
 /**

@@ -1,0 +1,342 @@
+.auth-scene {
+  min-height: 100%;
+  overflow: hidden;
+  background-color: #120b06;
+  background-image: url('/assets/auth/background.webp');
+  background-repeat: no-repeat;
+  background-position: top center;
+  background-size: 100% auto;
+  color: #4b3420;
+}
+
+/*
+ * 所有设计坐标都以这张 849 × 1852 的等比画布为基准。画布在窄屏上只按宽度
+ * 缩放，短屏由 PhoneLayout 的 main 负责滚动，绝不纵向压缩素材。
+ */
+.auth-scene__artboard {
+  position: relative;
+  isolation: isolate;
+  width: 100%;
+  aspect-ratio: 849 / 1852;
+}
+
+.auth-scene__poster,
+.auth-scene__badge,
+.auth-panel__art {
+  display: block;
+  max-width: none;
+  height: auto;
+  pointer-events: none;
+  user-select: none;
+}
+
+.auth-scene__poster {
+  position: absolute;
+  top: 0;
+  right: -0.15%;
+  z-index: 1;
+  width: 37.7%;
+}
+
+.auth-scene__badge {
+  position: absolute;
+  top: 9.6%;
+  left: 40.35%;
+  z-index: 2;
+  width: 19.3%;
+  filter: drop-shadow(0 0.35rem 0.25rem rgb(0 0 0 / 45%));
+}
+
+.auth-panel {
+  position: absolute;
+  z-index: 3;
+}
+
+.auth-scene--login .auth-panel {
+  top: 29.25%;
+  left: 0;
+  width: 100%;
+  aspect-ratio: 849 / 1071;
+}
+
+.auth-scene--register .auth-panel {
+  top: 31.45%;
+  left: 8.3%;
+  width: 83.4%;
+  aspect-ratio: 708 / 995;
+}
+
+.auth-panel__art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+}
+
+.auth-panel__form {
+  position: absolute;
+  inset: 0;
+}
+
+.auth-tab {
+  position: absolute;
+  z-index: 3;
+  padding: 0;
+  border: 0;
+  border-radius: 1rem 1rem 0.4rem 0.4rem;
+  background: transparent;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.auth-scene--login .auth-tab--login {
+  top: 10.8%;
+  left: 17.5%;
+  width: 32%;
+  height: 14%;
+}
+
+.auth-scene--login .auth-tab--register {
+  top: 11.2%;
+  left: 50%;
+  width: 28%;
+  height: 13%;
+}
+
+.auth-scene--register .auth-tab--login {
+  top: 3.5%;
+  left: 5.2%;
+  width: 44.8%;
+  height: 15%;
+}
+
+.auth-scene--register .auth-tab--register {
+  top: 3.5%;
+  left: 50%;
+  width: 40%;
+  height: 16.5%;
+}
+
+.auth-tab:hover {
+  background: rgb(111 70 33 / 7%);
+}
+
+.auth-tab:active {
+  background: rgb(72 40 16 / 10%);
+}
+
+.auth-tab:focus-visible,
+.auth-field:focus-within,
+.auth-submit:focus-visible {
+  outline: 2px solid #8b4b17;
+  outline-offset: 2px;
+}
+
+.auth-field {
+  position: absolute;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid rgb(109 75 41 / 38%);
+  border-radius: clamp(0.35rem, 1.5vw, 0.55rem);
+  background:
+    linear-gradient(90deg, rgb(222 194 151 / 94%), rgb(236 213 177 / 91%));
+  box-shadow:
+    inset 0 1px 0 rgb(255 247 218 / 35%),
+    inset 0 0 0 2px rgb(111 73 36 / 6%);
+  color: #765735;
+}
+
+.auth-scene--login .auth-field {
+  left: 22.45%;
+  width: 54.75%;
+  height: 9.15%;
+}
+
+.auth-scene--login .auth-field--account {
+  top: 36.05%;
+}
+
+.auth-scene--login .auth-field--password {
+  top: 48.85%;
+}
+
+.auth-scene--register .auth-field {
+  left: 17.4%;
+  width: 66.35%;
+  height: 8.9%;
+}
+
+.auth-scene--register .auth-field--account {
+  top: 31.2%;
+}
+
+.auth-scene--register .auth-field--password {
+  top: 44.05%;
+}
+
+.auth-scene--register .auth-field--nickname {
+  top: 56.95%;
+}
+
+.auth-field__icon {
+  position: absolute;
+  left: 5.2%;
+  width: clamp(0.8rem, 4.2vw, 1.1rem);
+  height: clamp(0.8rem, 4.2vw, 1.1rem);
+  color: #755432;
+  stroke-width: 2.35;
+  pointer-events: none;
+}
+
+.auth-field input {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  padding: 0 12% 0 15.5%;
+  border: 0;
+  border-radius: inherit;
+  outline: none;
+  background: transparent;
+  color: #3e2918;
+  font-family: Georgia, 'Songti SC', 'STSong', 'Noto Serif SC', serif;
+  font-size: clamp(0.78rem, 3.55vw, 1rem);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  caret-color: #7a3510;
+}
+
+.auth-field input::placeholder {
+  color: #765735;
+  opacity: 0.92;
+}
+
+.auth-field input:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.auth-field__password-toggle {
+  position: absolute;
+  right: 2%;
+  display: grid;
+  width: 16%;
+  height: 82%;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #755432;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.auth-field__password-toggle svg {
+  width: clamp(0.82rem, 4.25vw, 1.12rem);
+  height: clamp(0.82rem, 4.25vw, 1.12rem);
+  stroke-width: 2.4;
+}
+
+.auth-field__password-toggle:hover {
+  background: rgb(106 67 31 / 10%);
+}
+
+.auth-field__password-toggle:focus-visible {
+  outline: 2px solid #8b4b17;
+  outline-offset: -2px;
+}
+
+.auth-panel__error {
+  position: absolute;
+  z-index: 5;
+  margin: 0;
+  color: #8d251b;
+  font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-size: clamp(0.62rem, 2.75vw, 0.75rem);
+  font-weight: 700;
+  line-height: 1.25;
+  text-align: center;
+  text-shadow: 0 1px rgb(255 232 196 / 60%);
+}
+
+.auth-scene--login .auth-panel__error {
+  top: 59.25%;
+  left: 23%;
+  width: 54%;
+}
+
+.auth-scene--register .auth-panel__error {
+  top: 67.05%;
+  left: 17.5%;
+  width: 66%;
+}
+
+.auth-submit {
+  position: absolute;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgb(30 11 3 / 65%);
+  border-radius: clamp(0.4rem, 1.8vw, 0.7rem);
+  background:
+    linear-gradient(180deg, rgb(116 48 11 / 94%), rgb(74 24 5 / 96%));
+  box-shadow:
+    inset 0 0 0 1px rgb(231 151 42 / 72%),
+    inset 0 0 0 3px rgb(37 12 3 / 72%),
+    0 0.2rem 0.38rem rgb(36 15 5 / 38%);
+  color: #ead2a1;
+  cursor: pointer;
+  font-family: Georgia, 'Songti SC', 'STSong', 'Noto Serif SC', serif;
+  font-size: clamp(1rem, 5.4vw, 1.45rem);
+  letter-spacing: 0.12em;
+  text-shadow: 0 1px 2px rgb(24 8 2 / 90%);
+  transition: filter 150ms ease, transform 150ms ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.auth-scene--login .auth-submit {
+  top: 64.5%;
+  left: 24.85%;
+  width: 48.8%;
+  height: 9.35%;
+}
+
+.auth-scene--register .auth-submit {
+  top: 72.25%;
+  left: 21.75%;
+  width: 58.05%;
+  height: 9.75%;
+}
+
+.auth-submit:hover:not(:disabled) {
+  filter: brightness(1.12) saturate(1.08);
+}
+
+.auth-submit:active:not(:disabled) {
+  transform: scale(0.98);
+  filter: brightness(0.94);
+}
+
+.auth-submit:disabled {
+  cursor: wait;
+  filter: grayscale(0.22) brightness(0.86);
+}
+
+@media (max-width: 340px) {
+  .auth-field input {
+    padding-left: 17%;
+    font-size: 0.75rem;
+  }
+
+  .auth-panel__error {
+    font-size: 0.58rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .auth-submit {
+    transition: none;
+  }
+}

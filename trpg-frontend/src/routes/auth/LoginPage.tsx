@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { Eye, EyeOff, LockKeyhole, UserRound } from 'lucide-react'
 import { login, fetchMe } from '@/services/auth'
 import { useAuthStore } from '@/stores/auth-store'
 import { friendlyErrorMessage } from '@/services/api-client'
-import AuthHeader from './AuthHeader'
+import AuthPageLayout from './AuthPageLayout'
 
-// 纯登录页——注册是另一个路由（/login/register），不再用本地 state 切 tab。
+// 纯登录页——注册是另一个路由（/auth/register），不再用本地 state 切 tab。
 // 登录成功后跳到 /home，那里才是"创建房间/加入房间/浏览已有游戏"这些入口
 // 所在的页面。
 export default function LoginPage() {
@@ -15,6 +16,7 @@ export default function LoginPage() {
 
   const [account, setAccount] = useState('')
   const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -46,50 +48,44 @@ export default function LoginPage() {
   if (isLoggedIn) return null
 
   return (
-    <div className="animate-screen-in">
-      <AuthHeader />
-
-      <div className="px-5 flex flex-col gap-2.5">
-        <div className="flex gap-2 mb-1">
-          <button className="flex-1 py-2 text-sm font-semibold rounded-sm transition-all bg-brass text-white">
-            登录
-          </button>
-          <button
-            onClick={() => navigate('/auth/register')}
-            className="flex-1 py-2 text-sm font-semibold rounded-sm transition-all bg-card border border-border-mid text-text-muted"
-          >
-            注册
-          </button>
-        </div>
-
+    <AuthPageLayout mode="login" loading={loading} error={error} onSubmit={submit}>
+      <label className="auth-field auth-field--account">
+        <UserRound className="auth-field__icon" aria-hidden="true" />
+        <span className="sr-only">账号</span>
         <input
           value={account}
           onChange={(e) => setAccount(e.target.value)}
           placeholder="账号"
-          className="w-full px-3.5 py-2.5 rounded-sm bg-input border border-border-light text-text-primary text-[15px] outline-none focus:border-brass"
+          autoComplete="username"
+          inputMode="text"
+          disabled={loading}
+          aria-describedby={error ? 'auth-form-error' : undefined}
         />
+      </label>
+
+      <label className="auth-field auth-field--password">
+        <LockKeyhole className="auth-field__icon" aria-hidden="true" />
+        <span className="sr-only">密码</span>
         <input
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          type="password"
+          type={showPassword ? 'text' : 'password'}
           placeholder="密码"
-          className="w-full px-3.5 py-2.5 rounded-sm bg-input border border-border-light text-text-primary text-[15px] outline-none focus:border-brass"
-        />
-
-        {error && <p className="text-xs text-[#c04040] px-1">{error}</p>}
-
-        <button
-          onClick={submit}
+          autoComplete="current-password"
           disabled={loading}
-          className="flex items-center justify-center gap-2 px-6 py-3.5 w-full rounded-sm text-sm font-semibold cursor-pointer transition-all duration-150 border-none font-sans active:scale-[0.97] bg-brass text-white active:bg-brass-dark disabled:opacity-60"
+          aria-describedby={error ? 'auth-form-error' : undefined}
+        />
+        <button
+          type="button"
+          className="auth-field__password-toggle"
+          onClick={() => setShowPassword((visible) => !visible)}
+          disabled={loading}
+          aria-label={showPassword ? '隐藏密码' : '显示密码'}
+          aria-pressed={showPassword}
         >
-          {loading ? '登录中…' : '登录'}
+          {showPassword ? <EyeOff aria-hidden="true" /> : <Eye aria-hidden="true" />}
         </button>
-      </div>
-
-      <p className="text-center pt-6 text-text-dim text-[11px]">
-        AI桌游主持人 © 2026
-      </p>
-    </div>
+      </label>
+    </AuthPageLayout>
   )
 }

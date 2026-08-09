@@ -663,7 +663,7 @@ async def test_deepseek_client_posts_compatible_json_mode_without_qwen_fields() 
     result = await client.generate(
         schema_name="test_schema",
         schema={"type": "object"},
-        instructions="Return the structured result.",
+        instructions="返回结构化结果。",
         input_payload={"safe": True},
     )
 
@@ -675,6 +675,7 @@ async def test_deepseek_client_posts_compatible_json_mode_without_qwen_fields() 
     assert body["response_format"] == {"type": "json_object"}
     assert "enable_thinking" not in body
     assert "test_schema" in body["messages"][0]["content"]
+    assert "只返回一个 JSON 对象" in body["messages"][0]["content"]
 
 
 def test_openai_provider_requires_api_key() -> None:

@@ -17,11 +17,14 @@
 from __future__ import annotations
 
 import pathlib
+from typing import Literal
 
 import pytest
 from collaboration_framework.contracts import (
     ActionPlanStep,
     ModuleContentV3,
+    NarrativeOnlyEffect,
+    NoAdjudicationCheck,
     PlayerInput,
     RequiredAdjudicationCheck,
 )
@@ -53,7 +56,12 @@ def _content() -> ModuleContentV3:
     return ModuleContentV3.model_validate_json(FIXTURE.read_text(encoding="utf-8"))
 
 
-async def _cemetery_context(utterance: str) -> ActionPlanStepContext:
+async def _cemetery_context(
+    utterance: str,
+    *,
+    step_kind: Literal["action", "dialogue"] = "action",
+    semantic_goal: str | None = None,
+) -> ActionPlanStepContext:
     """把调查员放到墓地，那里 melodias 的 observe_caretaker 规则在射程内。"""
 
     content = _content()
@@ -88,7 +96,10 @@ async def _cemetery_context(utterance: str) -> ActionPlanStepContext:
         plan_goal=utterance,
         step_index=0,
         step_request_id="act-1-step-0",
-        step=ActionPlanStep(kind="action", semantic_goal=utterance),
+        step=ActionPlanStep(
+            kind=step_kind,
+            semantic_goal=semantic_goal or utterance,
+        ),
         player_view=view,
         keeper_capabilities=await projector.keeper_capabilities(
             player_input,
@@ -190,6 +201,31 @@ async def test_rule_first_adjudicator_does_not_call_model_for_unique_match() -> 
 
     assert adjudication.rule_decision is not None
     assert adjudication.rule_decision.rule_id == "observe_caretaker"
+
+
+async def test_visible_dialogue_does_not_call_model_or_reveal_information() -> None:
+    """普通对话不应因二次模型调用失败，也不能绕过规则凭空揭示线索。"""
+
+    class FailingFallback:
+        async def adjudicate(self, context):
+            del context
+            raise AssertionError("可见人物的普通对话不应调用模型")
+
+    adjudication = await _RuleFirstStepAdjudicator(FailingFallback()).adjudicate(
+        await _cemetery_context(
+            "前往公墓，询问守墓人是否见过有人常来墓地",
+            step_kind="dialogue",
+            semantic_goal="询问守墓人梅洛迪亚斯是否见过有人常来墓地",
+        )
+    )
+
+    assert adjudication.target.kind == "entity"
+    assert adjudication.target.id == "melodias"
+    assert adjudication.method.family == "talk"
+    assert isinstance(adjudication.check, NoAdjudicationCheck)
+    assert adjudication.rule_decision is None
+    assert len(adjudication.success_effects) == 1
+    assert isinstance(adjudication.success_effects[0], NarrativeOnlyEffect)
 
 
 @pytest.mark.parametrize(

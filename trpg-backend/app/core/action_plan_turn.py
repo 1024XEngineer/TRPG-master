@@ -1119,6 +1119,25 @@ def _deterministic_step_adjudication(
             success_effects=(),
             failure_effects=(),
         )
+
+    # Once the planner has identified a visible conversation partner, ordinary
+    # dialogue needs no second model call to invent an adjudication.  Keeping
+    # this path narrative-only is also an information boundary: authored rules
+    # remain the only way to reveal facts or mutate state.
+    if context.step.kind == "dialogue" and target is not None:
+        return ActionAdjudication(
+            request_id=context.step_request_id,
+            source_revision=context.player_view.revision,
+            actor_id=context.player_input.actor_id,
+            summary=context.step.semantic_goal,
+            target=ActionTarget(kind="entity", id=target.id),
+            method=ActionMethod(
+                family="talk",
+                description=context.step.semantic_goal,
+            ),
+            check=NoAdjudicationCheck(),
+            success_effects=(NarrativeOnlyEffect(),),
+        )
     return None
 
 

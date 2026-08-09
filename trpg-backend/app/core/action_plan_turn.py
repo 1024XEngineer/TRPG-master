@@ -56,7 +56,16 @@ from collaboration_framework.host.schemas import (
 from pydantic import ValidationError
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.core.turn_events import TurnPhase
+
 logger = structlog.get_logger()
+
+TurnPhaseObserver = Callable[[TurnPhase], Awaitable[None]]
+
+
+async def _emit_phase(observer: TurnPhaseObserver | None, phase: TurnPhase) -> None:
+    if observer is not None:
+        await observer(phase)
 
 
 class HostTurnDecisionModel(Protocol):
@@ -342,8 +351,10 @@ class ActionPlanTurnApplication:
         client_action_id: str,
         utterance: str,
         on_progress: Callable[[object], Awaitable[None]] | None = None,
+        on_phase: TurnPhaseObserver | None = None,
         on_input_accepted: (Callable[[PlayerInput, PlayerView], Awaitable[None]] | None) = None,
     ) -> ActionPlanTurnResult:
+        await _emit_phase(on_phase, "reading_player_view")
         actor_id = await self._resolve_actor_id(room_id, player_id)
         player_input = PlayerInput(
             room_id=room_id,
@@ -354,12 +365,17 @@ class ActionPlanTurnApplication:
         )
         existing = await self._orchestrator.get_run(room_id, client_action_id)
         if existing is not None:
+            await _emit_phase(on_phase, "executing_action")
             advanced = await self._orchestrator.start_or_resume(
                 player_input,
                 plan=None,
                 on_progress=on_progress,
             )
-            return await self._from_plan(player_input, advanced)
+            return await self._finish_plan_with_phases(
+                player_input,
+                advanced,
+                on_phase=on_phase,
+            )
 
         # A plan stuck in needs_clarification never produced any committed step
         # effect (see ActionPlanOrchestrator.cancel_remaining's boundary check),
@@ -388,6 +404,7 @@ class ActionPlanTurnApplication:
         view = await self._projector.project(player_input)
         if on_input_accepted is not None:
             await on_input_accepted(player_input, view)
+        await _emit_phase(on_phase, "understanding_action")
         decision = await self._planner.generate(
             HostAgentContext(
                 player_input=player_input,
@@ -401,20 +418,53 @@ class ActionPlanTurnApplication:
                 keeper_capabilities=await self._keeper_capabilities(player_input, view),
             )
         )
+        await _emit_phase(on_phase, "executing_action")
         result = await self._dispatcher.execute(
             player_input,
             decision,
             on_progress=on_progress,
         )
         if isinstance(result, ActionPlanAdvanceResult):
-            return await self._from_plan(player_input, result)
+            return await self._finish_plan_with_phases(
+                player_input,
+                result,
+                on_phase=on_phase,
+            )
         if not isinstance(decision, SingleActionDecision):
             raise TypeError("single result 必须对应 SingleActionDecision")
+        if result.execution.status in {
+            "awaiting_skill_choice",
+            "awaiting_post_roll_decision",
+        }:
+            await _emit_phase(on_phase, "waiting_for_check")
+        else:
+            await _emit_phase(on_phase, "refreshing_player_view")
+            await _emit_phase(on_phase, "generating_narration")
         return await self._from_single(
             player_input,
             decision.adjudication.summary,
             result,
         )
+
+    async def _finish_plan_with_phases(
+        self,
+        player_input: PlayerInput,
+        result: ActionPlanAdvanceResult,
+        *,
+        on_phase: TurnPhaseObserver | None,
+    ) -> ActionPlanTurnResult:
+        if result.run.status == "waiting_for_player":
+            await _emit_phase(on_phase, "waiting_for_check")
+        elif result.run.status in {
+            "awaiting_narration",
+            "completed",
+            "needs_clarification",
+            "cancelled",
+            "stopped",
+        }:
+            await _emit_phase(on_phase, "refreshing_player_view")
+            await _emit_phase(on_phase, "generating_narration")
+        return await self._from_plan(player_input, result)
 
     async def resume_plan(
         self,

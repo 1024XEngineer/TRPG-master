@@ -78,6 +78,7 @@ from app.core.turn import (
 from app.core.turn_events import (
     TurnEvent,
     TurnFailed,
+    TurnPhase,
     TurnPhaseChanged,
     TurnStarted,
     TurnToolCompleted,
@@ -224,6 +225,17 @@ async def _send_turn_failed(
             public_message=public_message,
             retryable=retryable,
         ),
+    )
+
+
+async def _send_turn_phase(
+    websocket: WebSocket,
+    correlation_id: str,
+    phase: TurnPhase,
+) -> None:
+    await _send_turn_event(
+        websocket,
+        TurnPhaseChanged(correlation_id=correlation_id, phase=phase),
     )
 
 
@@ -1075,6 +1087,10 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                     correlation_id=submit_payload.client_action_id,
                                 )
                                 continue
+                            await _send_turn_event(
+                                websocket,
+                                TurnStarted(correlation_id=submit_payload.client_action_id),
+                            )
                             result = await action_plan_turn_application.start(
                                 room_id=room_id,
                                 player_id=bound_player_id,
@@ -1083,6 +1099,11 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 on_progress=lambda event: _send_plan_progress(
                                     websocket,
                                     event,
+                                ),
+                                on_phase=partial(
+                                    _send_turn_phase,
+                                    websocket,
+                                    submit_payload.client_action_id,
                                 ),
                                 on_input_accepted=partial(
                                     _broadcast_action_utterance,

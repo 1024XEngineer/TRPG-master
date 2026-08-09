@@ -959,6 +959,18 @@ def test_action_plan_submit_emits_safe_progress_and_one_parent_completion(
     assert action_echo["payload"]["clientActionId"] == "parent-plan-ws-225"
     assert action_echo["payload"]["utterance"] == "先观察房间，然后询问眼前的人"
     assert any(message["type"] == "plan.started" for message in progress)
+    phases = [
+        message["payload"]["phase"]
+        for message in seen
+        if message.get("type") == "turn.phase_changed"
+    ]
+    assert phases == [
+        "reading_player_view",
+        "understanding_action",
+        "executing_action",
+        "refreshing_player_view",
+        "generating_narration",
+    ]
     assert seen.index(action_echo) < next(
         index for index, message in enumerate(seen) if message.get("type") == "plan.started"
     )
@@ -1038,6 +1050,16 @@ def test_single_action_pending_resumes_without_plan_run(
         )
         assert pending["payload"]["planId"] is None
         assert all(message.get("type") != "turn.failed" for message in pending_events)
+        assert [
+            message["payload"]["phase"]
+            for message in pending_events
+            if message.get("type") == "turn.phase_changed"
+        ] == [
+            "reading_player_view",
+            "understanding_action",
+            "executing_action",
+            "waiting_for_check",
+        ]
 
         decision = pending["payload"]["pendingDecision"]
         assert decision["options"]

@@ -140,18 +140,9 @@ const PHASE_LABELS: Record<AgentTurnPhase, string> = {
 
 const TIME_OF_DAY_LABELS = { day: '白天', night: '夜晚' } as const
 
-/** Render the Engine's authoritative clock as elapsed in-fiction time. */
-function formatElapsed(minutes: number): string {
-  if (minutes <= 0) return '刚刚开始'
-  const days = Math.floor(minutes / 1440)
-  const hours = Math.floor((minutes % 1440) / 60)
-  const rest = minutes % 60
-  const parts = [
-    days > 0 ? `${days} 天` : '',
-    hours > 0 ? `${hours} 小时` : '',
-    rest > 0 ? `${rest} 分钟` : '',
-  ].filter(Boolean)
-  return `已过去 ${parts.join(' ')}`
+/** Render the Engine's authoritative discrete world-time point. */
+function formatWorldTime(dayIndex: number, hourOfDay: number): string {
+  return `第 ${dayIndex + 1} 天 ${String(hourOfDay).padStart(2, '0')}:00`
 }
 
 function resourceValue(playerView: AgentPlayerView | null, id: string): number | null {
@@ -1863,7 +1854,7 @@ export default function RoomPage() {
           {playerView?.world && (
             <span className="text-[10px] text-text-dim mt-1">
               {TIME_OF_DAY_LABELS[playerView.world.time_of_day]} ·{' '}
-              {formatElapsed(playerView.world.elapsed_minutes)}
+              {formatWorldTime(playerView.world.day_index, playerView.world.hour_of_day)}
             </span>
           )}
         </div>

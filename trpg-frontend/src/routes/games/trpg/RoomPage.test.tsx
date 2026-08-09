@@ -268,8 +268,9 @@ function playerViewFixture(): AgentPlayerView {
       available_exits: [],
     },
     world: {
-      elapsed_minutes: 0,
-      time_of_day: 'night',
+      day_index: 0,
+      hour_of_day: 12,
+      time_of_day: 'day',
       core_resolved: false,
       ending_available: false,
       ending_id: null,
@@ -1526,7 +1527,8 @@ describe('RoomPage conversation history', () => {
           playerView: {
             ...playerViewFixture(),
             world: {
-              elapsed_minutes: 13 * 60 + 25,
+              day_index: 1,
+              hour_of_day: 18,
               time_of_day: 'night',
               core_resolved: true,
               ending_available: true,
@@ -1538,7 +1540,7 @@ describe('RoomPage conversation history', () => {
     )
     fireEvent.click(screen.getByRole('button', { name: '地图' }))
 
-    expect(screen.getByText('夜晚 · 已过去 13 小时 25 分钟')).toBeInTheDocument()
+    expect(screen.getByText('夜晚 · 第 2 天 18:00')).toBeInTheDocument()
     expect(
       screen.getByText('主线已经收束，可以选择如何收尾'),
     ).toBeInTheDocument()
@@ -1556,7 +1558,7 @@ describe('RoomPage conversation history', () => {
     )
     fireEvent.click(screen.getByRole('button', { name: '地图' }))
 
-    expect(screen.getByText('夜晚 · 刚刚开始')).toBeInTheDocument()
+    expect(screen.getByText('白天 · 第 1 天 12:00')).toBeInTheDocument()
     expect(screen.queryByLabelText('主线进度')).not.toBeInTheDocument()
   })
 

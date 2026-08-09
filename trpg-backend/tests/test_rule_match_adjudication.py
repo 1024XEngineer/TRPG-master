@@ -21,7 +21,12 @@ from typing import Literal
 
 import pytest
 from collaboration_framework.contracts import (
+    ActionAdjudication,
+    ActionMethod,
     ActionPlanStep,
+    ActionTarget,
+    EnsureRuntimeLocationEffect,
+    EnterLocationEffect,
     ModuleContentV3,
     NarrativeOnlyEffect,
     NoAdjudicationCheck,
@@ -31,6 +36,9 @@ from collaboration_framework.contracts import (
 from collaboration_framework.engine import InMemoryEngineStore, RuleEngineService
 from collaboration_framework.engine.initialization import create_initial_game_state
 from collaboration_framework.engine.models import ActorState
+from collaboration_framework.host.adapters.openai_agents import (
+    current_step_adjudication_instructions,
+)
 from collaboration_framework.host.application import PlayerViewProjector
 from collaboration_framework.host.schemas import ActionPlanStepContext
 
@@ -59,7 +67,7 @@ def _content() -> ModuleContentV3:
 async def _cemetery_context(
     utterance: str,
     *,
-    step_kind: Literal["action", "dialogue"] = "action",
+    step_kind: Literal["action", "dialogue", "travel"] = "action",
     semantic_goal: str | None = None,
 ) -> ActionPlanStepContext:
     """把调查员放到墓地，那里 melodias 的 observe_caretaker 规则在射程内。"""
@@ -226,6 +234,56 @@ async def test_visible_dialogue_does_not_call_model_or_reveal_information() -> N
     assert adjudication.rule_decision is None
     assert len(adjudication.success_effects) == 1
     assert isinstance(adjudication.success_effects[0], NarrativeOnlyEffect)
+
+
+async def test_unknown_ordinary_travel_reaches_runtime_location_agent() -> None:
+    """#212 普通动态地点必须交给 Agent 提议，不能被可见地点快路径提前拒绝。"""
+
+    class RuntimeLocationFallback:
+        calls = 0
+
+        async def adjudicate(self, context):
+            self.calls += 1
+            return ActionAdjudication(
+                request_id=context.step_request_id,
+                source_revision=context.player_view.revision,
+                actor_id=context.player_input.actor_id,
+                summary="在阿诺兹堡登记一家普通旅店并前往休息",
+                target=ActionTarget(kind="location", id=context.player_view.scene.id),
+                method=ActionMethod(family="travel", description=context.step.semantic_goal),
+                check=NoAdjudicationCheck(),
+                success_effects=(
+                    EnsureRuntimeLocationEffect(
+                        location_id="runtime_arnoldsburg_inn",
+                        name="阿诺兹堡旅店",
+                        parent_location_id="town",
+                        connected_location_id="street",
+                    ),
+                    EnterLocationEffect(location_id="runtime_arnoldsburg_inn"),
+                ),
+            )
+
+    fallback = RuntimeLocationFallback()
+    adjudication = await _RuleFirstStepAdjudicator(fallback).adjudicate(
+        await _cemetery_context(
+            "我想去小镇上的旅馆休息到晚上",
+            step_kind="travel",
+            semantic_goal="前往小镇上的旅馆",
+        )
+    )
+
+    assert fallback.calls == 1
+    assert adjudication.target.id == "cemetery"
+    assert [effect.type for effect in adjudication.success_effects] == [
+        "ensure_runtime_location",
+        "enter_location",
+    ]
+
+
+def test_prompt_allows_ordinary_runtime_location_without_false_clarification() -> None:
+    assert "不应反问具体哪一家" in _SAFE_ADJUDICATION_INSTRUCTIONS
+    assert "ensure_runtime_location、enter_location" in _SAFE_ADJUDICATION_INSTRUCTIONS
+    assert "不要仅因玩家没有指定店名而要求澄清" in current_step_adjudication_instructions()
 
 
 @pytest.mark.parametrize(

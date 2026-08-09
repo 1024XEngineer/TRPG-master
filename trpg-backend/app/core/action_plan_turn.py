@@ -1049,11 +1049,12 @@ def _deterministic_step_adjudication(
             context.step.semantic_goal,
         )
         if destination is None:
-            raise TurnExecutionError(
-                "STEP_DESTINATION_NOT_VISIBLE",
-                "当前地点没有可安全确认的目标路线",
-                retryable=False,
-            )
+            # An unknown *ordinary* destination is not necessarily an error:
+            # #212 lets the step Agent propose an ambient Runtime Location.
+            # Hidden Canon collisions and unsupported proposals are still
+            # refused by the Agent boundary and Engine validation.  Returning
+            # None here is what gives the production fallback that chance.
+            return None
         destination_id = destination.id
         return ActionAdjudication(
             request_id=context.step_request_id,

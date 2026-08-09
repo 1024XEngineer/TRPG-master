@@ -61,8 +61,9 @@ target.kind 决定 target.id 只能来自 PlayerView 的哪一个列表，两者
 
 ## 可用的高层效果
 
-输入里带 keeper_capabilities 时，除 narrative_only 外还可以使用下面这些效果。它们的
-id 一律只能从 keeper_capabilities 里逐字复制，不得改写、拼接或自造；没有
+输入里带 keeper_capabilities 时，除 narrative_only 外还可以使用下面这些效果。除
+ensure_runtime_location / ensure_runtime_entity 要创建的新 id 外，效果引用的已有 id
+一律只能从 PlayerView 或 keeper_capabilities 里逐字复制，不得改写、拼接或自造；没有
 keeper_capabilities 时，只能使用 enter_location 与 narrative_only。
 
 - reveal_information / hide_information：information_id 取自
@@ -76,8 +77,14 @@ keeper_capabilities 时，只能使用 enter_location 与 narrative_only。
   刚刚用 ensure_runtime_location 建出来的地点。Engine 会对公开路线寻路，并在第一个
   锁门或交互边界处中断，不能因为目标不是当前的一跳邻居就要求玩家分段输入。
 - ensure_runtime_location：玩家要去的地方在剧情上明显应该存在、但
-  keeper_capabilities.locations 里没有时才用。location_id 必须是新的、不得与任何
-  已有地点 id 相同；connected_location_id 必须是一个已存在的地点，通常就是当前场景。
+  keeper_capabilities.locations 里没有时才用。若玩家泛指“一家旅店”“一个能休息的
+  地方”等普通地点，且不同店名不会改变已知路线、风险或剧情意义，不应反问具体哪一家，
+  而应创建一个符合 background / WorldProfile 的普通地点。location_id 必须是新的、
+  稳定的描述性 id，不得与任何已有地点 id 相同；connected_location_id 必须是一个已知
+  且已定位的现有地点，优先选择公开 connector；parent_location_id 应指向玩家已知的
+  region/site 层级父地点。Runtime 地点不得携带关键线索、隐藏入口、关键物品或结局能力。
+  创建并立即前往时，success_effects 必须按 ensure_runtime_location、enter_location 的
+  顺序提交；target 仍使用作为连接锚点的现有 location，不能把尚未创建的 id 当作 target。
 - ensure_runtime_entity：需要一个模组没写、但情境上应该在场的普通人或普通物件
   （路过的店员、值班的管理员、桌上的一支笔）时才用。entity_id 必须是新的；
   location_id 必须已存在。不要用它造关键 NPC、关键道具或本该由模组给出的线索。

@@ -193,12 +193,12 @@ function mapLocationsFromPlayerView(playerView: AgentPlayerView | null): MapLoca
 }
 
 const PHASE_LABELS: Record<AgentTurnPhase, string> = {
-  reading_player_view: '守秘人正在查看当前场景',
-  understanding_action: '守秘人正在理解你的行动',
-  waiting_for_check: '等待你选择技能并掷骰',
-  executing_action: '规则引擎正在结算行动',
-  refreshing_player_view: '正在更新场景与已知信息',
-  generating_narration: '守秘人正在组织叙事',
+  reading_player_view: '守秘人理解玩家意图中',
+  understanding_action: '守秘人理解玩家意图中',
+  waiting_for_check: '守秘人等待玩家掷骰子',
+  executing_action: '守秘人组织语言中',
+  refreshing_player_view: '守秘人组织语言中',
+  generating_narration: '守秘人组织语言中',
 }
 
 const TIME_OF_DAY_LABELS = { day: '白天', night: '夜晚' } as const
@@ -947,6 +947,7 @@ export default function RoomPage() {
     return cached?.room_id === roomId ? cached : null
   })
   const [progressLabel, setProgressLabel] = useState<string | null>(null)
+  const [secondaryProgressLabel, setSecondaryProgressLabel] = useState<string | null>(null)
   const [streamingNarration, setStreamingNarration] = useState<StreamingNarration | null>(null)
   // 队列而不是单槽：揭示窗口最长 REVEAL_MAX_MS，这期间完全可能再来一条叙事
   // （无片段的叙事后端会跳过切片，直接发 push）。用单槽的话后到的会把前一条
@@ -1017,6 +1018,7 @@ export default function RoomPage() {
       ) {
         setTyping(false)
         setProgressLabel(null)
+        setSecondaryProgressLabel(null)
       }
     }).catch(() => {})
     return () => { cancelled = true }
@@ -1136,6 +1138,7 @@ export default function RoomPage() {
         // 已经有文字在往外走，就不要再同时显示"正在思考"的点点了。
         setTyping(false)
         setProgressLabel(null)
+        setSecondaryProgressLabel(null)
         clearSettledAdjudication(envelope.payload.messageId)
         setStreamingNarration((current) =>
           accumulateNarrationChunk(current, {
@@ -1147,6 +1150,7 @@ export default function RoomPage() {
       } else if (envelope.type === 'narration.push') {
         setTyping(false)
         setProgressLabel(null)
+        setSecondaryProgressLabel(null)
         clearSettledAdjudication(envelope.payload.messageId)
         // 不在这里直接落地：权威消息比最后一个片段只晚到半毫秒，立刻接管会让
         // 刚开始的渐进展示当场被整段覆盖。入队，交给上面的 effect 按序裁决。
@@ -1184,7 +1188,7 @@ export default function RoomPage() {
         }))
       } else if (envelope.type === 'check.request') {
         setTyping(false)
-        setProgressLabel(null)
+        setProgressLabel('守秘人等待玩家掷骰子')
         setPendingCheck(envelope.payload)
         setPendingCheckDice((current) =>
           current?.clientActionId === envelope.payload.clientActionId
@@ -1193,6 +1197,8 @@ export default function RoomPage() {
         )
         setShowDice(true)
       } else if (envelope.type === 'check.result') {
+        setTyping(true)
+        setProgressLabel('守秘人组织语言中')
         const levelLabels: Record<string, string> = {
           critical: '大成功',
           extreme: '极难成功',
@@ -1232,7 +1238,11 @@ export default function RoomPage() {
         if (envelope.payload.playerId === playerId) setShowDice(false)
       } else if (envelope.type === 'adjudication.pending') {
         setTyping(false)
-        setProgressLabel('等待你决定检定方式')
+        setProgressLabel(
+          envelope.payload.status === 'awaiting_skill_choice'
+            ? '守秘人等待玩家掷骰子'
+            : '守秘人等待玩家决定检定结果',
+        )
         setPendingAdjudication(envelope.payload)
       } else if (
         envelope.type === 'plan.started' ||
@@ -1250,27 +1260,28 @@ export default function RoomPage() {
             ? null
             : envelope.payload.correlationId,
         )
-        setTyping(
-          envelope.payload.phase !== 'waiting_for_player' &&
-            envelope.payload.phase !== 'stopped' &&
-            envelope.payload.phase !== 'completed',
+        setSecondaryProgressLabel(
+          envelope.type === 'plan.completed' || envelope.type === 'plan.stopped'
+            ? null
+            : envelope.payload.publicProgressLabel ??
+              `第 ${envelope.payload.currentStep}/${envelope.payload.totalSteps} 步`,
         )
-        setProgressLabel(
-          envelope.payload.publicProgressLabel ??
-            `正在处理第 ${envelope.payload.currentStep}/${envelope.payload.totalSteps} 步`,
-        )
+        setProgressLabel((current) => current ?? '守秘人理解玩家意图中')
       } else if (envelope.type === 'turn.started') {
         setTyping(true)
-        setProgressLabel('守秘人正在查看当前场景')
+        setProgressLabel('守秘人理解玩家意图中')
+        setSecondaryProgressLabel(null)
       } else if (envelope.type === 'turn.phase_changed') {
         setTyping(envelope.payload.phase !== 'waiting_for_check')
         setProgressLabel(PHASE_LABELS[envelope.payload.phase])
       } else if (envelope.type === 'tool.started') {
         setTyping(true)
-        setProgressLabel(envelope.payload.publicProgressLabel)
+        setProgressLabel((current) => current ?? '守秘人理解玩家意图中')
+        setSecondaryProgressLabel(envelope.payload.publicProgressLabel)
       } else if (envelope.type === 'turn.failed') {
         setTyping(false)
         setProgressLabel(null)
+        setSecondaryProgressLabel(null)
         setPendingAdjudication(null)
         // 片段只在叙事落库成功后才会下发，回合失败时不存在对应的权威消息——
         // 留着半截文字会让玩家以为那是这回合的结果。
@@ -1291,6 +1302,7 @@ export default function RoomPage() {
       } else if (envelope.type === 'error') {
         setTyping(false)
         setProgressLabel(null)
+        setSecondaryProgressLabel(null)
         setPendingAdjudication(null)
         setStreamingNarration(null)
         setActionError(envelope.payload.message)
@@ -1318,6 +1330,8 @@ export default function RoomPage() {
     setActionErrorCode(null)
     setActionErrorCorrelationId(null)
     setTyping(true)
+    setProgressLabel('守秘人理解玩家意图中')
+    setSecondaryProgressLabel(null)
     void sdk.roomSocket.submitPlannedAction(playerId, action)
       .then((result) => {
         setPlayerView(result.player_view)
@@ -1331,6 +1345,7 @@ export default function RoomPage() {
       .catch((error: unknown) => {
         setTyping(false)
         setProgressLabel(null)
+        setSecondaryProgressLabel(null)
         setActionError(
           error instanceof TurnFailedError || error instanceof RoomSocketServerError
             ? error.message
@@ -1568,7 +1583,7 @@ export default function RoomPage() {
 
         {/* Typing indicator。第一个片段到达后还没揭示出字的那一瞬间也留着它，
             避免出现一个空气泡。*/}
-        {(typing || (streamingNarration !== null && streamingNarration.revealed === 0)) && (
+        {(progressLabel !== null || typing || (streamingNarration !== null && streamingNarration.revealed === 0)) && (
           <div className="flex gap-2.5 animate-[msgIn_0.3s_ease]">
             <div className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-sm bg-[#faf5eb] border border-brass">
               📜
@@ -1581,7 +1596,12 @@ export default function RoomPage() {
                 ))}
               </div>
               {progressLabel && (
-                <span className="text-[11px] text-text-muted">{progressLabel}</span>
+                <span className="text-[11px] text-text-muted">
+                  {progressLabel}
+                  {secondaryProgressLabel && (
+                    <span className="ml-1.5 text-text-dim">· {secondaryProgressLabel}</span>
+                  )}
+                </span>
               )}
             </div>
           </div>
@@ -2196,7 +2216,7 @@ export default function RoomPage() {
           if (!playerId || !pendingAdjudication?.pendingDecision) return
           const decision = pendingAdjudication.pendingDecision
           setTyping(true)
-          setProgressLabel('守秘人正在结算检定')
+          setProgressLabel('守秘人组织语言中')
           sdk.roomSocket.selectAdjudication(playerId, {
             clientActionId: pendingAdjudication.correlationId,
             requestId: randomActionId(),
@@ -2210,7 +2230,7 @@ export default function RoomPage() {
           if (!playerId || !pendingAdjudication?.pendingDecision) return
           const decision = pendingAdjudication.pendingDecision
           setTyping(true)
-          setProgressLabel('守秘人正在结算检定')
+          setProgressLabel('守秘人组织语言中')
           sdk.roomSocket.selectAdjudication(playerId, {
             clientActionId: pendingAdjudication.correlationId,
             requestId: randomActionId(),
@@ -2224,7 +2244,7 @@ export default function RoomPage() {
           if (!playerId || !pendingAdjudication?.checkRun) return
           const checkRun = pendingAdjudication.checkRun
           setTyping(true)
-          setProgressLabel('守秘人正在结算检定')
+          setProgressLabel('守秘人组织语言中')
           sdk.roomSocket.decidePostRoll(playerId, {
             clientActionId: pendingAdjudication.correlationId,
             requestId: randomActionId(),

@@ -1612,6 +1612,49 @@ describe('RoomPage conversation history', () => {
     expect(screen.getAllByText('会客室').length).toBeGreaterThanOrEqual(2)
   })
 
+  it('keeps keeper progress visible and maps backend phases to player-facing copy', async () => {
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    act(() => emitWsMessage({
+      type: 'turn.started',
+      payload: { correlationId: 'progress-turn' },
+    }))
+    expect(screen.getByText('守秘人理解玩家意图中')).toBeInTheDocument()
+
+    act(() => emitWsMessage({
+      type: 'plan.started',
+      payload: {
+        correlationId: 'progress-turn',
+        currentStep: 1,
+        completedSteps: 0,
+        totalSteps: 2,
+        phase: 'executing',
+      },
+    }))
+    expect(screen.getByText('守秘人理解玩家意图中')).toBeInTheDocument()
+    expect(screen.queryByText(/正在处理第/)).not.toBeInTheDocument()
+    expect(screen.getByText(/第 1\/2 步/)).toBeInTheDocument()
+
+    act(() => emitWsMessage({
+      type: 'turn.phase_changed',
+      payload: { correlationId: 'progress-turn', phase: 'waiting_for_check' },
+    }))
+    expect(screen.getByText('守秘人等待玩家掷骰子')).toBeInTheDocument()
+
+    act(() => emitWsMessage({
+      type: 'turn.phase_changed',
+      payload: { correlationId: 'progress-turn', phase: 'executing_action' },
+    }))
+    expect(screen.getByText('守秘人组织语言中')).toBeInTheDocument()
+
+    act(() => emitWsMessage({
+      type: 'turn.phase_changed',
+      payload: { correlationId: 'progress-turn', phase: 'generating_narration' },
+    }))
+    expect(screen.getByText('守秘人组织语言中')).toBeInTheDocument()
+  })
+
   it('renders invalid Agent output as keeper guidance', () => {
     renderRoomPage()
 

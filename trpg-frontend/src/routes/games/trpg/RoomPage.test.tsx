@@ -1377,6 +1377,15 @@ describe('RoomPage conversation history', () => {
     vi.useFakeTimers()
     renderRoomPage()
 
+    const playerView = playerViewFixture()
+    playerView.self_actor.resources = [{ id: 'luck', name: '幸运', value: 50 }]
+    act(() =>
+      emitWsMessage({
+        type: 'view.updated',
+        payload: { playerId: 'player-1', playerView },
+      }),
+    )
+
     act(() =>
       emitWsMessage({
         type: 'adjudication.pending',
@@ -1458,7 +1467,10 @@ describe('RoomPage conversation history', () => {
     expect(screen.getByText('失败')).toBeInTheDocument()
     expect(screen.queryByRole('region', { name: '待处理检定' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '接受结果并发送' })).toBeEnabled()
-    expect(screen.getByRole('button', { name: '消耗 32 点幸运并发送' })).toBeEnabled()
+    expect(
+      screen.getByRole('button', { name: '消耗 32 点幸运（当前 50 点）并发送' }),
+    ).toBeEnabled()
+    expect(screen.getByText('骰点已保存；刷新或重试不会重新投掷')).toBeInTheDocument()
     const pushButton = screen.getByRole('button', { name: '强推一次' })
     expect(pushButton).toBeDisabled()
     fireEvent.change(screen.getByRole('textbox', { name: '说明改变后的做法' }), {
@@ -1476,6 +1488,75 @@ describe('RoomPage conversation history', () => {
       }),
     )
     expect(screen.queryByRole('button', { name: '强推一次' })).not.toBeInTheDocument()
+
+    act(() =>
+      emitWsMessage({
+        type: 'adjudication.pending',
+        payload: {
+          correlationId: 'insufficient-luck-check',
+          planId: null,
+          sourceRevision: 'revision-3',
+          status: 'awaiting_skill_choice',
+          pendingDecision: {
+            decision_id: 'decision-insufficient-luck',
+            action_request_id: 'insufficient-luck-check',
+            source_revision: 'revision-3',
+            decision_version: 1,
+            actor_id: 'actor-1',
+            summary: '观察守墓人',
+            options: [
+              {
+                candidate_id: 'spot-hidden',
+                skill_id: 'spot-hidden',
+                display_name: '侦查',
+                target_value: 25,
+                difficulty: 'regular',
+                method_summary: '仔细观察守墓人',
+                player_safe_reason: '这是当前可用的调查方式',
+              },
+            ],
+            allow_cancel: true,
+          },
+        },
+      }),
+    )
+    fireEvent.click(screen.getByRole('button', { name: /侦查/ }))
+    act(() =>
+      emitWsMessage({
+        type: 'adjudication.pending',
+        payload: {
+          correlationId: 'insufficient-luck-check',
+          planId: null,
+          sourceRevision: 'revision-4',
+          status: 'awaiting_post_roll_decision',
+          pendingDecision: null,
+          checkRun: {
+            check_id: 'check-insufficient-luck',
+            action_request_id: 'insufficient-luck-check',
+            selected_candidate_id: 'spot-hidden',
+            status: 'awaiting_post_roll_decision',
+            version: 1,
+            roll_count: 1,
+            roll: { value: 77, degree: 'failure', passed: false },
+            post_roll_options: [
+              { option_id: 'accept-insufficient', kind: 'accept_result' },
+              {
+                option_id: 'push-insufficient',
+                kind: 'push',
+                requires_revised_method: true,
+                player_safe_risk_summary: '再次尝试会承担更严重的失败后果',
+              },
+            ],
+            final_result: null,
+          },
+        },
+      }),
+    )
+    act(() => vi.advanceTimersByTime(750))
+    expect(
+      screen.getByRole('button', { name: '幸运不足：需要 52 点，当前 50 点' }),
+    ).toBeDisabled()
+    expect(screen.getByRole('button', { name: '强推一次' })).toBeDisabled()
     vi.useRealTimers()
   })
 
@@ -1831,6 +1912,18 @@ describe('RoomPage conversation history', () => {
     renderRoomPage()
 
     act(() => emitWsMessage({
+      type: 'plan.started',
+      payload: {
+        correlationId: 'fast-move',
+        currentStep: 1,
+        completedSteps: 0,
+        totalSteps: 1,
+        phase: 'executing',
+      },
+    }))
+    expect(screen.getByRole('button', { name: /停止后续行动/ })).toBeInTheDocument()
+
+    act(() => emitWsMessage({
       type: 'turn.phase_changed',
       payload: { correlationId: 'fast-move', phase: 'generating_narration' },
     }))
@@ -1840,6 +1933,7 @@ describe('RoomPage conversation history', () => {
     }))
 
     expect(screen.getByText('守秘人组织语言中')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /停止后续行动/ })).not.toBeInTheDocument()
     act(() => vi.advanceTimersByTime(600))
     expect(screen.queryByText('守秘人组织语言中')).not.toBeInTheDocument()
     vi.useRealTimers()

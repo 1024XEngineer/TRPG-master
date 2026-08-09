@@ -519,6 +519,7 @@ function DiceModal({
   autoRoll = false,
   autoRollKey,
   postRollOptions = [],
+  luckValue = null,
   onPostRollOption,
 }: {
   open: boolean
@@ -532,6 +533,7 @@ function DiceModal({
   autoRoll?: boolean
   autoRollKey?: string
   postRollOptions?: UiCheckRunView['post_roll_options']
+  luckValue?: number | null
   onPostRollOption?: (optionId: string, revisedMethod?: string) => void
 }) {
   const [freeDiceType, setFreeDiceType] = useState<DiceType>('d100')
@@ -821,6 +823,33 @@ function DiceModal({
   const alternativeOptions = postRollOptions.filter(
     (option) => option.kind !== 'accept_result',
   )
+  const spendLuckOption = alternativeOptions.find(
+    (option) => option.kind === 'spend_resource',
+  )
+  const difficultyTarget = checkRequest
+    ? checkRequest.difficulty === 'hard'
+      ? Math.floor(targetValue / 2)
+      : checkRequest.difficulty === 'extreme'
+        ? Math.floor(targetValue / 5)
+        : targetValue
+    : targetValue
+  const neededLuck = activeResult === null
+    ? null
+    : Math.max(0, activeResult - difficultyTarget)
+  const unavailableLuckLabel =
+    presetResult === null ||
+    activeResult === null ||
+    spendLuckOption ||
+    neededLuck === null ||
+    neededLuck <= 0
+      ? null
+      : presetDegree === 'fumble'
+        ? '大失败无法消耗幸运'
+        : luckValue === null
+          ? `需要 ${neededLuck} 点幸运；当前幸运值不可用`
+          : luckValue < neededLuck
+            ? `幸运不足：需要 ${neededLuck} 点，当前 ${luckValue} 点`
+            : '本次检定规则不允许消耗幸运'
 
   return (
     <BottomPanel open={open} onClose={onClose} title="骰子检定">
@@ -950,6 +979,11 @@ function DiceModal({
                 ? `${selectedSkill?.name ?? '自由检定'} ${targetValue}% · 需求 ≤${targetValue}`
                 : `${activeDiceType.toUpperCase()} · 自由检定`}
             </div>
+            {presetResult !== null && (
+              <p className="mt-1 text-[11px] text-text-muted">
+                骰点已保存；刷新或重试不会重新投掷
+              </p>
+            )}
           </div>
 
           {presetResult !== null && acceptOption ? (
@@ -962,6 +996,15 @@ function DiceModal({
               >
                 接受结果并发送
               </button>
+              {unavailableLuckLabel && (
+                <button
+                  type="button"
+                  disabled
+                  className="w-full rounded-sm border border-border-light bg-panel py-2.5 text-sm font-semibold text-text-muted opacity-70"
+                >
+                  {unavailableLuckLabel}
+                </button>
+              )}
               {alternativeOptions.map((option) => (
                 <div key={option.option_id} className="rounded-lg border border-border-light bg-panel p-3">
                   {option.kind === 'push' && (
@@ -1000,7 +1043,7 @@ function DiceModal({
                     className="w-full rounded-sm border border-brass bg-white py-2.5 text-sm font-semibold text-brass-dark active:bg-brass/10 disabled:opacity-50"
                   >
                     {option.kind === 'spend_resource'
-                      ? `消耗 ${option.cost} 点幸运并发送`
+                      ? `消耗 ${option.cost} 点幸运${luckValue === null ? '' : `（当前 ${luckValue} 点）`}并发送`
                       : '强推一次'}
                   </button>
                 </div>
@@ -1090,6 +1133,11 @@ export default function RoomPage() {
     )
   }, [])
   const [activePlanId, setActivePlanId] = useState<string | null>(null)
+  const clearSettledAction = useCallback((correlationId?: string | null) => {
+    clearSettledAdjudication(correlationId)
+    if (!correlationId) return
+    setActivePlanId((current) => current === correlationId ? null : current)
+  }, [clearSettledAdjudication])
   const [pendingCheckDice, setPendingCheckDice] = useState<PendingCheckDiceState | null>(null)
   const [playerView, setPlayerView] = useState<AgentPlayerView | null>(() => {
     const cached = sdk.roomSocket.getPlayerView()
@@ -1332,7 +1380,7 @@ export default function RoomPage() {
         setTyping(false)
         clearBackendProgress()
         setSecondaryProgressLabel(null)
-        clearSettledAdjudication(envelope.payload.messageId)
+        clearSettledAction(envelope.payload.messageId)
         setStreamingNarration((current) =>
           accumulateNarrationChunk(current, {
             messageId: conversationMessageId('narration.push', envelope.payload.messageId),
@@ -1344,7 +1392,7 @@ export default function RoomPage() {
         setTyping(false)
         clearBackendProgress()
         setSecondaryProgressLabel(null)
-        clearSettledAdjudication(envelope.payload.messageId)
+        clearSettledAction(envelope.payload.messageId)
         // 不在这里直接落地：权威消息比最后一个片段只晚到半毫秒，立刻接管会让
         // 刚开始的渐进展示当场被整段覆盖。入队，交给上面的 effect 按序裁决。
         setPendingNarrations((current) => [...current, envelope.payload])
@@ -1548,7 +1596,7 @@ export default function RoomPage() {
       setProgressLabel('守秘人正在生成开场叙事')
     }
     return off
-  }, [clearBackendProgress, clearSettledAdjudication, enqueueHostSpeech, handleHostSpeechSettingsUpdated, playerId, senderName, showBackendPhase])
+  }, [clearBackendProgress, clearSettledAction, enqueueHostSpeech, handleHostSpeechSettingsUpdated, playerId, senderName, showBackendPhase])
 
   const submitPlayerAction = (action: { clientActionId: string; utterance: string }) => {
     if (!playerId || suspended) return
@@ -1567,7 +1615,7 @@ export default function RoomPage() {
         setPlayerView(result.player_view)
         // 这个动作已经拿到权威结果，属于它的检定面板不能再留在页面上。比等
         // narration 更早，也覆盖了叙事走重放而不是逐片推送的情况。
-        clearSettledAdjudication(action.clientActionId)
+        clearSettledAction(action.clientActionId)
         setPendingAction((current) =>
           current?.clientActionId === action.clientActionId ? null : current
         )
@@ -2552,6 +2600,7 @@ export default function RoomPage() {
             : undefined
         }
         postRollOptions={checkRunForUi(pendingAdjudication)?.post_roll_options ?? []}
+        luckValue={resourceValue(playerView, 'luck')}
         onPostRollOption={submitAdjudicationPostRoll}
       />
     </div>

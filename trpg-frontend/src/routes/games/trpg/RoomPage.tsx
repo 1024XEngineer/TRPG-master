@@ -518,7 +518,8 @@ function DiceModal({
   presetDegree = null,
   autoRoll = false,
   autoRollKey,
-  onConfirmPreset,
+  postRollOptions = [],
+  onPostRollOption,
 }: {
   open: boolean
   onClose: () => void
@@ -530,7 +531,8 @@ function DiceModal({
   presetDegree?: UiCheckRunView['roll']['degree'] | null
   autoRoll?: boolean
   autoRollKey?: string
-  onConfirmPreset?: () => void
+  postRollOptions?: UiCheckRunView['post_roll_options']
+  onPostRollOption?: (optionId: string, revisedMethod?: string) => void
 }) {
   const [freeDiceType, setFreeDiceType] = useState<DiceType>('d100')
   const [freeResult, setFreeResult] = useState<number | null>(null)
@@ -538,6 +540,7 @@ function DiceModal({
   const [freeShowResult, setFreeShowResult] = useState(false)
   const [freeTens, setFreeTens] = useState(0)
   const [freeOnes, setFreeOnes] = useState(0)
+  const [revisedMethod, setRevisedMethod] = useState('')
   const submitLockRef = useRef(false)
   const dice3dRef = useRef<Dice3DHandle>(null)
   const autoRollKeyRef = useRef<string | null>(null)
@@ -670,9 +673,12 @@ function DiceModal({
     const key = autoRollKey ?? `${checkRequest.clientActionId}:${presetResult}`
     if (autoRollKeyRef.current === key) return
     autoRollKeyRef.current = key
-    const frame = requestAnimationFrame(() => rollRef.current())
-    return () => cancelAnimationFrame(frame)
+    rollRef.current()
   }, [autoRoll, autoRollKey, checkRequest, open, presetResult])
+
+  useEffect(() => {
+    setRevisedMethod('')
+  }, [autoRollKey])
 
   /**
    * 3D 不可用。可能在掷骰之前（环境不支持），也可能在掷骰之后——懒加载 chunk
@@ -700,11 +706,6 @@ function DiceModal({
         if (!current || current.clientActionId !== checkRequest.clientActionId) return current
         return { ...current, submitted: true }
       })
-      if (presetResult !== null && onConfirmPreset) {
-        onConfirmPreset()
-        onClose()
-        return
-      }
       onResult(activeResult, 'd100', activeSelectedSkillId)
       onClose()
       return
@@ -712,6 +713,27 @@ function DiceModal({
 
     if (activeResult === null) return
     onResult(activeResult, activeDiceType, undefined)
+    onClose()
+  }
+
+  const submitPostRollOption = (optionId: string, method?: string) => {
+    if (
+      presetResult === null ||
+      !checkRequest ||
+      !activeCheckDice ||
+      activeResult === null ||
+      !onPostRollOption ||
+      submitLockRef.current ||
+      activeCheckDice.submitted
+    ) {
+      return
+    }
+    submitLockRef.current = true
+    setCheckDiceState((current) => {
+      if (!current || current.clientActionId !== checkRequest.clientActionId) return current
+      return { ...current, submitted: true }
+    })
+    onPostRollOption(optionId, method)
     onClose()
   }
 
@@ -795,6 +817,10 @@ function DiceModal({
   }
 
   const verdict = getVerdict()
+  const acceptOption = postRollOptions.find((option) => option.kind === 'accept_result')
+  const alternativeOptions = postRollOptions.filter(
+    (option) => option.kind !== 'accept_result',
+  )
 
   return (
     <BottomPanel open={open} onClose={onClose} title="骰子检定">
@@ -926,13 +952,69 @@ function DiceModal({
             </div>
           </div>
 
-          <button
-            onClick={confirmResult}
-            disabled={isCheckMode && !!activeCheckDice?.submitted}
-            className="w-full py-3 rounded-sm bg-brass text-white text-sm font-semibold active:bg-brass-dark active:scale-[0.97] transition-all disabled:opacity-60"
-          >
-            确认并发送
-          </button>
+          {presetResult !== null && acceptOption ? (
+            <div className="w-full space-y-2">
+              <button
+                type="button"
+                onClick={() => submitPostRollOption(acceptOption.option_id)}
+                disabled={!!activeCheckDice?.submitted}
+                className="w-full py-3 rounded-sm bg-brass text-white text-sm font-semibold active:bg-brass-dark active:scale-[0.97] transition-all disabled:opacity-60"
+              >
+                接受结果并发送
+              </button>
+              {alternativeOptions.map((option) => (
+                <div key={option.option_id} className="rounded-lg border border-border-light bg-panel p-3">
+                  {option.kind === 'push' && (
+                    <>
+                      <label
+                        htmlFor={`dice-push-method-${autoRollKey ?? 'current'}`}
+                        className="mb-1 block text-xs font-medium text-text-primary"
+                      >
+                        说明改变后的做法
+                      </label>
+                      <textarea
+                        id={`dice-push-method-${autoRollKey ?? 'current'}`}
+                        value={revisedMethod}
+                        disabled={!!activeCheckDice?.submitted}
+                        onChange={(event) => setRevisedMethod(event.target.value)}
+                        placeholder="例如：先缩小范围，再重新尝试"
+                        className="mb-2 min-h-16 w-full rounded-lg border border-border-light bg-white p-2 text-xs"
+                      />
+                      <p className="mb-2 text-[11px] text-[#9b3f35]">
+                        {option.player_safe_risk_summary}
+                      </p>
+                    </>
+                  )}
+                  <button
+                    type="button"
+                    disabled={
+                      !!activeCheckDice?.submitted ||
+                      (option.kind === 'push' && !revisedMethod.trim())
+                    }
+                    onClick={() =>
+                      submitPostRollOption(
+                        option.option_id,
+                        option.kind === 'push' ? revisedMethod.trim() : undefined,
+                      )
+                    }
+                    className="w-full rounded-sm border border-brass bg-white py-2.5 text-sm font-semibold text-brass-dark active:bg-brass/10 disabled:opacity-50"
+                  >
+                    {option.kind === 'spend_resource'
+                      ? `消耗 ${option.cost} 点幸运并发送`
+                      : '强推一次'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <button
+              onClick={confirmResult}
+              disabled={isCheckMode && !!activeCheckDice?.submitted}
+              className="w-full py-3 rounded-sm bg-brass text-white text-sm font-semibold active:bg-brass-dark active:scale-[0.97] transition-all disabled:opacity-60"
+            >
+              确认并发送
+            </button>
+          )}
         </div>
       )}
     </BottomPanel>
@@ -1549,6 +1631,30 @@ export default function RoomPage() {
     setMessages(prev => [...prev, {
       type: 'dice', channel: 'action', sender: senderName, content: `${typeLabel} · ${result} · ${resultLabel}`, time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }), isSelf: true,
     }])
+  }
+
+  const submitAdjudicationPostRoll = (optionId: string, revisedMethod?: string) => {
+    if (!playerId || !pendingAdjudication) return
+    const pending = pendingAdjudication
+    const checkRun = pending.checkRun
+    if (!checkRun) return
+    setTyping(true)
+    showBackendPhase('executing_action')
+    setShowDice(false)
+    setPendingCheck(null)
+    setPendingCheckDice(null)
+    setAuthoritativeDiceRoll(null)
+    setPendingAdjudication(null)
+    shownAdjudicationRollRef.current = null
+    sdk.roomSocket.decidePostRoll(playerId, {
+      clientActionId: pending.correlationId,
+      requestId: randomActionId(),
+      sourceRevision: pending.sourceRevision,
+      checkId: checkRun.check_id,
+      checkVersion: checkRun.version,
+      optionId,
+      revisedMethod,
+    })
   }
 
   // 结束游戏——仅房主可操作。房间转「已完成」后只能在「我的游戏」里查看复盘，不能再回到聊天室。
@@ -2392,7 +2498,7 @@ export default function RoomPage() {
       )}
       <CheckWorkflowPanel
         decision={pendingDecisionForUi(pendingAdjudication)}
-        checkRun={checkRunForUi(pendingAdjudication)}
+        checkRun={authoritativeDiceRoll ? null : checkRunForUi(pendingAdjudication)}
         busy={typing}
         onSelectSkill={(candidateId) => {
           if (!playerId || !pendingAdjudication?.pendingDecision) return
@@ -2428,25 +2534,7 @@ export default function RoomPage() {
             cancel: true,
           })
         }}
-        onPostRollOption={(optionId, revisedMethod) => {
-          if (!playerId || !pendingAdjudication?.checkRun) return
-          const checkRun = pendingAdjudication.checkRun
-          setTyping(true)
-          showBackendPhase('executing_action')
-          setShowDice(false)
-          setPendingCheck(null)
-          setPendingCheckDice(null)
-          setAuthoritativeDiceRoll(null)
-          sdk.roomSocket.decidePostRoll(playerId, {
-            clientActionId: pendingAdjudication.correlationId,
-            requestId: randomActionId(),
-            sourceRevision: pendingAdjudication.sourceRevision,
-            checkId: checkRun.check_id,
-            checkVersion: checkRun.version,
-            optionId,
-            revisedMethod,
-          })
-        }}
+        onPostRollOption={submitAdjudicationPostRoll}
       />
       <DiceModal
         open={showDice}
@@ -2463,27 +2551,8 @@ export default function RoomPage() {
             ? `${authoritativeDiceRoll.checkId}:${authoritativeDiceRoll.rollCount}`
             : undefined
         }
-        onConfirmPreset={() => {
-          if (!playerId || !pendingAdjudication?.checkRun || !authoritativeDiceRoll) return
-          const checkRun = pendingAdjudication.checkRun
-          const accept = (checkRun.post_roll_options ?? []).find(
-            (option) => !('resource_id' in option) && !('requires_revised_method' in option),
-          )
-          if (!accept) return
-          setTyping(true)
-          showBackendPhase('executing_action')
-          setPendingCheck(null)
-          setPendingCheckDice(null)
-          setAuthoritativeDiceRoll(null)
-          sdk.roomSocket.decidePostRoll(playerId, {
-            clientActionId: pendingAdjudication.correlationId,
-            requestId: randomActionId(),
-            sourceRevision: pendingAdjudication.sourceRevision,
-            checkId: checkRun.check_id,
-            checkVersion: checkRun.version,
-            optionId: accept.option_id,
-          })
-        }}
+        postRollOptions={checkRunForUi(pendingAdjudication)?.post_roll_options ?? []}
+        onPostRollOption={submitAdjudicationPostRoll}
       />
     </div>
   )

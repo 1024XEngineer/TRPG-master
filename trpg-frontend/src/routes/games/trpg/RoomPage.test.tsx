@@ -393,6 +393,7 @@ describe('RoomPage conversation history', () => {
   })
 
   afterEach(() => {
+    vi.useRealTimers()
     cleanup()
     Reflect.deleteProperty(window, 'SpeechRecognition')
     Reflect.deleteProperty(window, 'webkitSpeechRecognition')
@@ -1430,19 +1431,41 @@ describe('RoomPage conversation history', () => {
             version: 1,
             roll_count: 1,
             roll: { value: 82, degree: 'failure', passed: false },
-            post_roll_options: [{ option_id: 'accept-current', kind: 'accept_result' }],
+            post_roll_options: [
+              { option_id: 'accept-current', kind: 'accept_result' },
+              {
+                option_id: 'spend-luck-32',
+                kind: 'spend_resource',
+                resource_id: 'luck',
+                cost: 32,
+                result_degree: 'regular_success',
+              },
+              {
+                option_id: 'push-once',
+                kind: 'push',
+                requires_revised_method: true,
+                player_safe_risk_summary: '再次尝试会承担更严重的失败后果',
+              },
+            ],
             final_result: null,
           },
         },
       }),
     )
 
-    act(() => vi.advanceTimersByTime(20))
-    expect(screen.getByText('骰子还在滚……')).toBeInTheDocument()
     act(() => vi.advanceTimersByTime(750))
     expect(screen.getByText('82')).toBeInTheDocument()
     expect(screen.getByText('失败')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '确认并发送' }))
+    expect(screen.queryByRole('region', { name: '待处理检定' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '接受结果并发送' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '消耗 32 点幸运并发送' })).toBeEnabled()
+    const pushButton = screen.getByRole('button', { name: '强推一次' })
+    expect(pushButton).toBeDisabled()
+    fireEvent.change(screen.getByRole('textbox', { name: '说明改变后的做法' }), {
+      target: { value: '先按年份缩小范围，再重新检索' },
+    })
+    expect(pushButton).toBeEnabled()
+    fireEvent.click(screen.getByRole('button', { name: '接受结果并发送' }))
 
     expect(mockDecidePostRoll).toHaveBeenCalledWith(
       'player-1',
@@ -1452,6 +1475,7 @@ describe('RoomPage conversation history', () => {
         optionId: 'accept-current',
       }),
     )
+    expect(screen.queryByRole('button', { name: '强推一次' })).not.toBeInTheDocument()
     vi.useRealTimers()
   })
 

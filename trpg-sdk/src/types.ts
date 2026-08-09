@@ -100,6 +100,13 @@ export type {
   HostSpeechSentenceRead,
   HostSpeechManifestRead as HostSpeechManifest,
   HostSpeechSettingsUpdatedPayload,
+  CreateInventoryImportDraftRequest,
+  InventoryImportDraft,
+  ConfirmInventoryImportDraftRequest,
+  ConfirmInventoryImportResult,
+  ChangeItemCustodyRequest,
+  ChangeItemCustodyResult,
+  InventoryView,
 } from './generated/dto';
 
 /** GET /api/v1/me/rooms 返回项。 */
@@ -312,6 +319,16 @@ export interface AgentSceneView {
   visible_entities: AgentVisibleEntity[];
   visible_actors: AgentVisibleActor[];
   available_exits: AgentAvailableExit[];
+  loose_items?: AgentInventoryItem[];
+}
+
+export interface AgentInventoryItem {
+  id: string;
+  name: string;
+  source_label: string;
+  quantity: number;
+  condition: string;
+  version: number;
 }
 
 export interface AgentKnownInformation {
@@ -380,6 +397,8 @@ export interface AgentPlayerView {
   location_context?: AgentLocationContext | null;
   /** All player-known locations, not merely the current node's one-hop exits. */
   known_locations?: AgentKnownLocation[];
+  /** Runtime ItemInstances currently held by this actor. */
+  inventory?: AgentInventoryItem[];
   world: AgentWorldState;
   known_information: AgentKnownInformation[];
   checkpoint_options: AgentCheckpointOption[];

@@ -9,7 +9,7 @@ from pathlib import Path
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 PREVIOUS_REVISION = "1a02058345ee"
 ENGINE_IDENTITY_PREVIOUS_REVISION = "9c4e7a2b1d6f"
-HEAD_REVISION = "e225a1b2c3d4"
+HEAD_REVISION = "f6a1b2c3d4e5"
 
 
 def _run_alembic(database: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -79,6 +79,8 @@ def test_migration_upgrades_empty_sqlite_and_round_trips(tmp_path: Path) -> None
         "adjudication_command_executions",
         "action_plan_runs",
         "room_action_reservations",
+        "inventory_import_drafts",
+        "inventory_command_executions",
     }.issubset(tables)
     assert "decision_schema_version" in _column_names(
         database,
@@ -92,6 +94,7 @@ def test_migration_upgrades_empty_sqlite_and_round_trips(tmp_path: Path) -> None
         database,
         "adjudication_command_executions",
     )
+    assert "request_json" in _column_names(database, "inventory_import_drafts")
     assert {"run_version", "run_json", "lease_owner", "lease_expires_at"}.issubset(
         _column_names(database, "action_plan_runs")
     )

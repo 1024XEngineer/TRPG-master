@@ -7,6 +7,7 @@ from typing import Literal
 from pydantic import Field, JsonValue, model_validator
 
 from .common import ContractModel
+from .inventory import InventoryItemView
 
 
 class VisibleFact(ContractModel):
@@ -107,6 +108,7 @@ class ProjectionScene(ContractModel):
     visible_entities: tuple[ProjectionEntity, ...] = ()
     visible_actors: tuple[ProjectionVisibleActor, ...] = ()
     available_exits: tuple[ProjectionAvailableExit, ...] = ()
+    loose_items: tuple[InventoryItemView, ...] = ()
 
 
 class ProjectionLocationBreadcrumb(ContractModel):
@@ -206,6 +208,7 @@ class ProjectionSnapshot(ContractModel):
     scene: ProjectionScene
     location_context: ProjectionLocationContext | None = None
     known_locations: tuple[ProjectionKnownLocation, ...] = ()
+    inventory: tuple[InventoryItemView, ...] = ()
     world: ProjectionWorldState = Field(default_factory=ProjectionWorldState)
     known_information: tuple[ProjectionKnownInformation, ...] = ()
     checkpoint_options: tuple[ProjectionCheckpointOption, ...] = ()
@@ -313,6 +316,7 @@ class SceneView(ContractModel):
     visible_entities: tuple[VisibleEntity, ...] = ()
     visible_actors: tuple[VisibleActorView, ...] = ()
     available_exits: tuple[AvailableExitView, ...] = ()
+    loose_items: tuple[InventoryItemView, ...] = ()
 
 
 class LocationBreadcrumbView(ContractModel):
@@ -414,6 +418,7 @@ class PlayerView(ContractModel):
     scene: SceneView
     location_context: LocationContextView | None = None
     known_locations: tuple[KnownLocationView, ...] = ()
+    inventory: tuple[InventoryItemView, ...] = ()
     world: WorldStateView = Field(default_factory=WorldStateView)
     known_information: tuple[KnownInformationView, ...] = ()
     checkpoint_options: tuple[CheckpointOption, ...] = ()

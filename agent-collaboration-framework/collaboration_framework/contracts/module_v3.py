@@ -36,6 +36,7 @@ from pydantic import Field, JsonValue, model_validator
 
 from .adjudication import ActionEffect, CheckDegree
 from .common import ContractModel
+from .inventory import ItemComponent
 from .module import ModulePresentation
 
 # --------------------------------------------------------------------------- #
@@ -121,7 +122,9 @@ class InformationSpecV3(ContractModel):
     keeper_content: str = Field(min_length=1)
     # What the player is allowed to read once the fact is released.
     player_content: str = Field(min_length=1)
-    discovery: InformationDiscoverySpec = Field(default_factory=InformationDiscoverySpec)
+    discovery: InformationDiscoverySpec = Field(
+        default_factory=InformationDiscoverySpec
+    )
     audience: InformationAudienceSpec = Field(default_factory=InformationAudienceSpec)
     presentation: InformationPresentationSpec = Field(
         default_factory=InformationPresentationSpec
@@ -191,6 +194,7 @@ class EntitySpecV3(ContractModel):
     located_in: Identifier | None = None
     relations: tuple[EntityRelationSpec, ...] = ()
     state: dict[str, JsonValue] = Field(default_factory=dict)
+    item_component: ItemComponent | None = None
     visibility: Literal["public", "party", "actor", "keeper"] = "public"
     plot_relevance: bool = True
     lifecycle: Literal["campaign", "session"] = "campaign"
@@ -244,7 +248,9 @@ class LocationEdgeSpec(ContractModel):
     id: Identifier
     from_location_id: Identifier
     to_location_id: Identifier
-    kind: Literal["public_network", "private", "concealed", "vertical"] = "public_network"
+    kind: Literal["public_network", "private", "concealed", "vertical"] = (
+        "public_network"
+    )
     traversal: Literal["automatic", "gated", "guided"] = "automatic"
     visibility: Literal["public", "party", "actor", "hidden"] = "public"
     access_point_id: Identifier | None = None
@@ -511,7 +517,9 @@ class RuleExecutionSpec(ContractModel):
         step_ids = {step.id for step in self.steps}
         for branch in self.branches:
             if branch.entry_step_id not in step_ids:
-                raise ValueError(f"分支 {branch.id} 的入口步骤不存在: {branch.entry_step_id}")
+                raise ValueError(
+                    f"分支 {branch.id} 的入口步骤不存在: {branch.entry_step_id}"
+                )
         for step in self.steps:
             for target in _step_targets(step):
                 if target not in step_ids:
@@ -573,7 +581,9 @@ class RuleSpecV3(ContractModel):
             # An agent_match rule routes by option id: every option the Agent can
             # pick must land on a declared branch, or picking it would dead-end.
             missing = [
-                option.id for option in self.trigger.options if option.id not in branch_ids
+                option.id
+                for option in self.trigger.options
+                if option.id not in branch_ids
             ]
             if missing:
                 raise ValueError(

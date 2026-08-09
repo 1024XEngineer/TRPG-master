@@ -199,6 +199,7 @@ class PlayerViewProjector:
                     )
                     for item in snapshot.scene.available_exits
                 ),
+                loose_items=snapshot.scene.loose_items,
             ),
             location_context=(
                 LocationContextView(
@@ -238,6 +239,7 @@ class PlayerViewProjector:
                 )
                 for item in snapshot.known_locations
             ),
+            inventory=snapshot.inventory,
             world=WorldStateView(
                 day_index=snapshot.world.day_index,
                 hour_of_day=snapshot.world.hour_of_day,

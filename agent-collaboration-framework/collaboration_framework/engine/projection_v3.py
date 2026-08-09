@@ -29,6 +29,7 @@ from collaboration_framework.contracts import (
     KeeperLocationCapability,
     KeeperRuleCandidate,
     KeeperRuleOption,
+    InventoryItemView,
     LocationKnowledge,
     LocationSpecV3,
     ModuleContentV3,
@@ -71,6 +72,11 @@ def project_v3(
         state,
         actor_id=actor_id,
     )
+    inventory, loose_items = project_inventory_items(
+        state,
+        actor_id=actor_id,
+        location_id=location.id,
+    )
 
     visible_entities = _visible_entities(module, state, location.id, actor_id)
     return ProjectionSnapshot(
@@ -81,7 +87,7 @@ def project_v3(
         scene_id=location.id,
         phase=state.phase,
         revision=runtime.revision,
-        self_actor=_self_actor(actor_id, actor),
+        self_actor=_self_actor(actor_id, actor, inventory),
         scene=ProjectionScene(
             id=location.id,
             name=location.player_visible_name or location.name,
@@ -105,9 +111,11 @@ def project_v3(
                 actor_id,
                 location_knowledge,
             ),
+            loose_items=loose_items,
         ),
         location_context=_location_context(module, state, actor_id),
         known_locations=_known_locations(module, state, location_knowledge),
+        inventory=inventory,
         world=ProjectionWorldState(
             day_index=state.world_time.current.day_index,
             hour_of_day=state.world_time.current.hour_of_day,
@@ -455,7 +463,48 @@ def _override_allows(
     return state.visibility_overrides.get(f"party:{target_kind}:{target_id}", default)
 
 
-def _self_actor(actor_id: str, actor) -> ProjectionSelfActor:
+def project_inventory_items(
+    state: GameState,
+    *,
+    actor_id: str,
+    location_id: str,
+) -> tuple[tuple[InventoryItemView, ...], tuple[InventoryItemView, ...]]:
+    """Project recognized active items without leaking keeper-only fields."""
+
+    party = state.party_item_knowledge
+    actor = state.actor_item_knowledge.get(actor_id, {})
+    inventory: list[InventoryItemView] = []
+    loose_items: list[InventoryItemView] = []
+    for item_id, item in sorted(state.item_instances.items()):
+        knowledge = actor.get(item_id) or party.get(item_id)
+        if knowledge is None or knowledge.identity == "unknown":
+            continue
+        if item.state.status != "active":
+            continue
+        view = InventoryItemView(
+            id=item.id,
+            name=item.display.name,
+            source_label=(
+                item.acquisition.player_safe_label
+                if item.acquisition is not None
+                else ""
+            ),
+            quantity=item.item_component.quantity,
+            condition=item.state.condition,
+            version=item.version,
+        )
+        if item.custody.kind == "actor_inventory" and item.custody.ref_id == actor_id:
+            inventory.append(view)
+        elif item.custody.kind == "location" and item.custody.ref_id == location_id:
+            loose_items.append(view)
+    return tuple(inventory), tuple(loose_items)
+
+
+def _self_actor(
+    actor_id: str,
+    actor,
+    inventory: tuple[InventoryItemView, ...],
+) -> ProjectionSelfActor:
     actor_state = actor.state
     return ProjectionSelfActor(
         id=actor_id,
@@ -475,7 +524,13 @@ def _self_actor(actor_id: str, actor) -> ProjectionSelfActor:
         conditions=tuple(
             item for item in actor.conditions if isinstance(item, str) and item.strip()
         ),
-        equipment=_equipment(actor_state.get("equipment")),
+        # Once ItemInstances exist they are the only runtime inventory authority.
+        # Legacy v2 character equipment remains a read fallback for old rooms.
+        equipment=(
+            tuple(item.name for item in inventory)
+            if inventory
+            else _equipment(actor_state.get("equipment"))
+        ),
         background_summary=_optional_text(actor_state.get("background")) or "",
         public_status_summary=_public_status_summary(actor_state),
     )

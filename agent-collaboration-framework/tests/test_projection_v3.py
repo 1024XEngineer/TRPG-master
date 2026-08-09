@@ -19,6 +19,11 @@ from collaboration_framework.contracts import (
     CommitTerminalEndingEffect,
     ContractError,
     EnterLocationEffect,
+    ItemComponent,
+    ItemCustody,
+    ItemDisplay,
+    ItemInstance,
+    ItemKnowledge,
     ModuleContentV3,
     NoAdjudicationCheck,
     PlayerViewScope,
@@ -132,6 +137,58 @@ class ProjectionV3Tests(unittest.IsolatedAsyncioTestCase):
         }
         self.assertNotIn("crypt", destinations)
         self.assertIn("surveillance_point", destinations)
+
+    async def test_inventory_and_loose_items_require_separate_knowledge(self) -> None:
+        held = ItemInstance(
+            id="held_lamp",
+            room_id=ROOM,
+            origin="runtime",
+            definition_id="lamp",
+            display=ItemDisplay(name="提灯"),
+            item_component=ItemComponent(),
+            custody=ItemCustody(kind="actor_inventory", ref_id=ACTOR, form="carried"),
+            created_event_id="seed-held",
+            last_event_id="seed-held",
+            updated_revision="0",
+        )
+        loose = held.model_copy(
+            update={
+                "id": "loose_key",
+                "display": ItemDisplay(name="铜钥匙"),
+                "custody": ItemCustody(
+                    kind="location", ref_id="thomas_office", form="loose"
+                ),
+            }
+        )
+        hidden = held.model_copy(
+            update={
+                "id": "hidden_note",
+                "display": ItemDisplay(name="暗格信纸"),
+                "custody": ItemCustody(
+                    kind="location", ref_id="thomas_office", form="loose"
+                ),
+            }
+        )
+        state = game_state(
+            self.content,
+            item_instances={item.id: item for item in (held, loose, hidden)},
+            party_item_knowledge={
+                loose.id: ItemKnowledge(item_id=loose.id, identity="recognized")
+            },
+            actor_item_knowledge={
+                ACTOR: {
+                    held.id: ItemKnowledge(
+                        item_id=held.id, scope="actor", identity="known"
+                    )
+                }
+            },
+        )
+
+        snapshot = await self.project(state)
+
+        self.assertEqual([item.id for item in snapshot.inventory], [held.id])
+        self.assertEqual([item.id for item in snapshot.scene.loose_items], [loose.id])
+        self.assertEqual(snapshot.self_actor.equipment, ("提灯",))
 
     async def test_discovered_locked_location_is_known_but_not_entered(self) -> None:
         state = game_state(

@@ -225,6 +225,50 @@
       "title": "ExitDestinationView",
       "type": "object"
     },
+    "InventoryItemView": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "source_label": {
+          "default": "",
+          "title": "Source Label",
+          "type": "string"
+        },
+        "quantity": {
+          "minimum": 1,
+          "title": "Quantity",
+          "type": "integer"
+        },
+        "condition": {
+          "minLength": 1,
+          "title": "Condition",
+          "type": "string"
+        },
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "quantity",
+        "condition",
+        "version"
+      ],
+      "title": "InventoryItemView",
+      "type": "object"
+    },
     "JsonValue": {},
     "KeeperCapabilityView": {
       "additionalProperties": false,
@@ -962,6 +1006,14 @@
           "title": "Known Locations",
           "type": "array"
         },
+        "inventory": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/InventoryItemView"
+          },
+          "title": "Inventory",
+          "type": "array"
+        },
         "world": {
           "$ref": "#/$defs/WorldStateView"
         },
@@ -1374,6 +1426,14 @@
             "$ref": "#/$defs/AvailableExitView"
           },
           "title": "Available Exits",
+          "type": "array"
+        },
+        "loose_items": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/InventoryItemView"
+          },
+          "title": "Loose Items",
           "type": "array"
         }
       },

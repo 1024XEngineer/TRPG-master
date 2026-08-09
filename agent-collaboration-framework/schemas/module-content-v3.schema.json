@@ -1013,6 +1013,17 @@
           "title": "State",
           "type": "object"
         },
+        "item_component": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ItemComponent"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "visibility": {
           "default": "public",
           "enum": [
@@ -1485,6 +1496,92 @@
         "next_step_id"
       ],
       "title": "InvokeRulesetActionStep",
+      "type": "object"
+    },
+    "ItemCapability": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "type": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Type",
+          "type": "string"
+        },
+        "target_selector": {
+          "$ref": "#/$defs/ItemTargetSelector"
+        },
+        "consumes": {
+          "default": false,
+          "title": "Consumes",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "type"
+      ],
+      "title": "ItemCapability",
+      "type": "object"
+    },
+    "ItemComponent": {
+      "additionalProperties": false,
+      "properties": {
+        "portable": {
+          "default": true,
+          "title": "Portable",
+          "type": "boolean"
+        },
+        "unique": {
+          "default": false,
+          "title": "Unique",
+          "type": "boolean"
+        },
+        "quantity": {
+          "default": 1,
+          "maximum": 999,
+          "minimum": 1,
+          "title": "Quantity",
+          "type": "integer"
+        },
+        "capabilities": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ItemCapability"
+          },
+          "title": "Capabilities",
+          "type": "array"
+        }
+      },
+      "title": "ItemComponent",
+      "type": "object"
+    },
+    "ItemTargetSelector": {
+      "additionalProperties": false,
+      "properties": {
+        "entity_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Entity Ids",
+          "type": "array"
+        },
+        "location_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Location Ids",
+          "type": "array"
+        }
+      },
+      "title": "ItemTargetSelector",
       "type": "object"
     },
     "JsonValue": {},

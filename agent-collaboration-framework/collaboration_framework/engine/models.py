@@ -17,6 +17,8 @@ from collaboration_framework.contracts import (
     ModuleContent,
     ModuleContentV3,
     LocationKnowledge,
+    ItemInstance,
+    ItemKnowledge,
     PendingCheckDecisionView,
     PendingCheckOption,
     PostRollDecisionRequest,
@@ -127,6 +129,11 @@ class GameState(ContractModel):
         default_factory=dict
     )
     actor_position_contexts: dict[str, TravelInterrupted] = Field(default_factory=dict)
+    item_instances: dict[str, ItemInstance] = Field(default_factory=dict)
+    party_item_knowledge: dict[str, ItemKnowledge] = Field(default_factory=dict)
+    actor_item_knowledge: dict[str, dict[str, ItemKnowledge]] = Field(
+        default_factory=dict
+    )
     core_resolved: bool = False
     ending_available: bool = False
 

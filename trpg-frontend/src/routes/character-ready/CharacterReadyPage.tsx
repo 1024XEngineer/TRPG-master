@@ -47,7 +47,13 @@ interface RadarAttribute {
   label: string
 }
 
-function AttributeRadarChart({ attributes, values }: { attributes: readonly RadarAttribute[]; values: Record<string, number> }) {
+function AttributeRadarChart({
+  attributes,
+  values,
+}: {
+  attributes: readonly RadarAttribute[]
+  values: Readonly<Partial<Record<string, number>>>
+}) {
   if (attributes.length < 3) return null
 
   const centerX = 180
@@ -60,10 +66,19 @@ function AttributeRadarChart({ attributes, values }: { attributes: readonly Rada
     return `${centerX + Math.cos(angle) * pointRadius},${centerY + Math.sin(angle) * pointRadius}`
   }
   const polygonAt = (pointRadius: number) => attributes.map((_, index) => pointAt(index, pointRadius)).join(' ')
-  const valuePolygon = attributes.map((attribute, index) => {
-    const value = Math.max(0, Math.min(100, Number(values[attribute.key] ?? 0)))
-    return pointAt(index, radius * value / 100)
-  }).join(' ')
+  const resolvedValues = attributes.map((attribute) => {
+    const value = values[attribute.key]
+    return typeof value === 'number' && Number.isFinite(value) ? value : null
+  })
+  const completeValues = resolvedValues.every((value): value is number => value !== null)
+    ? resolvedValues
+    : null
+  const valuePolygon = completeValues
+    ? completeValues.map((rawValue, index) => {
+        const value = Math.max(0, Math.min(100, rawValue))
+        return pointAt(index, radius * value / 100)
+      }).join(' ')
+    : null
 
   return (
     <div className="character-ready-sheet__radar" data-testid="attribute-radar-chart">
@@ -85,7 +100,19 @@ function AttributeRadarChart({ attributes, values }: { attributes: readonly Rada
             className="character-ready-sheet__radar-axis"
           />
         ))}
-        <polygon points={valuePolygon} className="character-ready-sheet__radar-value" />
+        {valuePolygon ? (
+          <polygon points={valuePolygon} className="character-ready-sheet__radar-value" />
+        ) : (
+          <text
+            x={centerX}
+            y={centerY}
+            textAnchor="middle"
+            dominantBaseline="middle"
+            className="character-ready-sheet__radar-empty"
+          >
+            属性数据不完整
+          </text>
+        )}
         {attributes.map((attribute, index) => {
           const angle = angleAt(index)
           const x = centerX + Math.cos(angle) * labelRadius
@@ -101,7 +128,7 @@ function AttributeRadarChart({ attributes, values }: { attributes: readonly Rada
               className="character-ready-sheet__radar-label"
             >
               <tspan>{attribute.label}</tspan>
-              <tspan className="character-ready-sheet__radar-number"> {values[attribute.key] ?? '—'}</tspan>
+              <tspan className="character-ready-sheet__radar-number"> {resolvedValues[index] ?? '—'}</tspan>
             </text>
           )
         })}

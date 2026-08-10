@@ -3140,6 +3140,13 @@
   font-weight: 800;
 }
 
+.character-ready-sheet__radar-empty {
+  fill: #714b2e;
+  font-family: 'STKaiti', 'KaiTi', 'PingFang SC', sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+}
+
 .lobby-leave-dialog {
   position: fixed;
   inset: 0;

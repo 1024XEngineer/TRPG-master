@@ -70,6 +70,7 @@ from .timeline import advanced_to_next, next_point_after, time_advance_block_rea
 from .rules_v3 import (
     agenda_item_for_event,
     agenda_status_for_walk,
+    agent_match_scope_admits,
     create_rule_agenda,
     effects_after_degree,
     matching_event_rules,
@@ -701,11 +702,25 @@ class AdjudicationEngineService:
                 raise ContractError("RuleDecision 只在 ModuleContent v3 房间可用")
             # Refuses an id the module never declared, so a model cannot invent
             # a rule or reach a branch its option does not select.
-            resolve_rule_option(
+            rule, _ = resolve_rule_option(
                 runtime.v3,
                 rule_id=adjudication.rule_decision.rule_id,
                 option_id=adjudication.rule_decision.option_id,
             )
+            # 存在性不等于「此时此地可用」。候选菜单是按当前场景发布的，提交时
+            # 必须用同一个谓词重新绑定：否则模型可以点名另一个地点的规则，把它
+            # 的后果带到这里来 —— 范围校验等于交给了模型自觉。
+            if not agent_match_scope_admits(
+                rule,
+                location_id=state.scene_id,
+                action_family=adjudication.method.family,
+                target_kind=adjudication.target.kind,
+                target_id=adjudication.target.id,
+            ):
+                raise ContractError(
+                    "RuleDecision 超出当前可用范围: "
+                    f"{adjudication.rule_decision.rule_id}"
+                )
         self._validate_effect_sequence(runtime, adjudication.success_effects)
         self._validate_effect_sequence(runtime, adjudication.failure_effects)
         if adjudication.check.mode != "none":

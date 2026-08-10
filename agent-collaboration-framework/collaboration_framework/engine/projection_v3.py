@@ -56,7 +56,7 @@ from collaboration_framework.contracts import (
 from .models import EngineRuntimeSnapshot, GameState
 from .navigation import effective_location_knowledge, runtime_location_edges
 from .timeline import next_point_after, ordered_points, time_advance_block_reason
-from .rules_v3 import evaluate_condition
+from .rules_v3 import agent_match_scope_admits, evaluate_condition
 
 # Visibility levels an authored node may carry, ordered from most to least open.
 _PLAYER_VISIBLE = {"public", "party"}
@@ -671,9 +671,10 @@ def _rule_candidates(module, location_id: str) -> tuple[KeeperRuleCandidate, ...
         trigger = rule.trigger
         if not isinstance(trigger, AgentMatchTriggerSpec):
             continue
-        scope = trigger.scope
-        if scope.location_ids and location_id not in scope.location_ids:
+        # 同一个谓词也用在提交侧，两边不会各自漂移。
+        if not agent_match_scope_admits(rule, location_id=location_id):
             continue
+        scope = trigger.scope
         candidates.append(
             KeeperRuleCandidate(
                 rule_id=rule.id,

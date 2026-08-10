@@ -1015,6 +1015,84 @@ class RuleOwnedCheckTests(unittest.IsolatedAsyncioTestCase):
         )
         return store, engine, rules, resolved
 
+    async def _submit_rule_decision(
+        self,
+        *,
+        scene_id: str,
+        rule_id: str,
+        option_id: str,
+        target: ActionTarget,
+        family: str,
+    ):
+        store = InMemoryEngineStore()
+        store.register_room(
+            module_content=self.content,
+            initial_state=game_state(self.content, scene_id=scene_id),
+        )
+        engine = AdjudicationEngineService(store, dice=DiceRoller(SequenceDiceSource([5])))
+        rules = RuleEngineService(store)
+        snapshot = await rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        return await engine.submit(
+            SubmitAdjudicationRequest(
+                room_id=ROOM,
+                player_id=PLAYER,
+                adjudication=ActionAdjudication(
+                    request_id="scope-probe",
+                    source_revision=snapshot.revision,
+                    actor_id=ACTOR,
+                    summary="越界提交探测",
+                    target=target,
+                    method=ActionMethod(family=family, description="探测"),
+                    rule_decision=RuleDecisionRef(rule_id=rule_id, option_id=option_id),
+                    check=NoAdjudicationCheck(),
+                    success_effects=(),
+                    failure_effects=(),
+                ),
+            )
+        )
+
+    async def test_rule_decision_from_another_location_is_refused(self) -> None:
+        """候选按场景发布，提交也必须按场景复查。
+
+        `research_library_archive` 的 scope 只覆盖图书馆。站在墓地却点名它，
+        等于把另一个地点的规则后果搬到这里来——存在性校验拦不住这件事。
+        """
+
+        with self.assertRaises(ContractError):
+            await self._submit_rule_decision(
+                scene_id="cemetery",
+                rule_id="research_library_archive",
+                option_id="library-use",
+                target=ActionTarget(kind="entity", id="newspaper_archive"),
+                family="research",
+            )
+
+    async def test_rule_decision_with_a_target_outside_scope_is_refused(self) -> None:
+        """规则绑定的是档案，不是守墓人；换个目标就不该还算同一条规则。"""
+
+        with self.assertRaises(ContractError):
+            await self._submit_rule_decision(
+                scene_id="library",
+                rule_id="research_library_archive",
+                option_id="library-use",
+                target=ActionTarget(kind="entity", id="melodias"),
+                family="research",
+            )
+
+    async def test_rule_decision_with_a_foreign_action_family_is_refused(self) -> None:
+        """scope.action_families 声明了 research，用恐吓去触发它不成立。"""
+
+        with self.assertRaises(ContractError):
+            await self._submit_rule_decision(
+                scene_id="library",
+                rule_id="research_library_archive",
+                option_id="library-use",
+                target=ActionTarget(kind="entity", id="newspaper_archive"),
+                family="intimidate",
+            )
+
     async def test_success_commits_the_rules_effects_not_the_agents(self) -> None:
         # The Agent sent empty effect lists; the release of the newspaper report
         # can only come from the rule's success route.

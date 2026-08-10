@@ -298,6 +298,7 @@ __all__ = [
     "agenda_item_key",
     "agenda_status_for_walk",
     "create_rule_agenda",
+    "agent_match_scope_admits",
     "effects_after_cancel",
     "effects_after_degree",
     "evaluate_condition",
@@ -338,6 +339,43 @@ def resolve_rule_option(
     if option_id not in {branch.id for branch in rule.execution.branches}:
         raise ContractError(f"Rule {rule_id} 的候选 {option_id} 没有对应分支")
     return rule, option_id
+
+
+def agent_match_scope_admits(
+    rule: RuleSpecV3,
+    *,
+    location_id: str,
+    action_family: str | None = None,
+    target_kind: str | None = None,
+    target_id: str | None = None,
+) -> bool:
+    """Whether this rule may fire in this situation. Empty scope = unconstrained.
+
+    Publishing a candidate menu and accepting a decision must ask the *same*
+    question. When only the publish side filtered, the menu was scoped but the
+    submit side accepted any rule the module declared anywhere — so a model that
+    named a rule for another location had it honoured. Both sides call this.
+
+    The arguments narrow as the caller knows more: publishing knows only where
+    the actor stands, submitting also knows what was aimed at and how.
+    """
+
+    trigger = rule.trigger
+    if not isinstance(trigger, AgentMatchTriggerSpec):
+        return False
+    scope = trigger.scope
+    if scope.location_ids and location_id not in scope.location_ids:
+        return False
+    if action_family is not None and scope.action_families:
+        if action_family not in scope.action_families:
+            return False
+    if target_kind is not None and scope.target_kinds:
+        if target_kind not in scope.target_kinds:
+            return False
+    if target_id is not None and scope.target_ids:
+        if target_id not in scope.target_ids:
+            return False
+    return True
 
 
 def pending_check_for(rule: RuleSpecV3, branch_id: str):

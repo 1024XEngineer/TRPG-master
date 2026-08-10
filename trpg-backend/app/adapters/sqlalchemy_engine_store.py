@@ -248,6 +248,34 @@ class _SqlAlchemyEngineTransaction(EngineTransaction):
         self._committed = False
         self._committed_events: tuple[StateModifiedEvent, ...] = ()
         self._committed_request_id: str | None = None
+        self._content_schema_version: int | None = None
+
+    async def _require_writable_room(self) -> None:
+        """v3 之前的房间只读：可以读取和回顾，但不能再推进。
+
+        v2 的 `action.submit` 执行链已经删除，这类房间实际上载入得了却动不了。
+        与其让玩家在某个中途步骤上撞见一个语焉不详的错误，不如在唯一的两个写
+        入口明确拒绝——读路径不受影响，旧房间仍然可以打开查看。
+        """
+
+        if self._content_schema_version is None:
+            # 写之前一定已经 load_runtime 过；这里兜底再读一次，不假设调用顺序。
+            game_session = await self._session.get(GameSession, self._room_id)
+            if game_session is None:
+                raise ContractError(f"房间运行时不存在: {self._room_id}")
+            module_version = await self._session.get(
+                ModuleVersion,
+                (game_session.module_id, game_session.module_version),
+            )
+            if module_version is None:
+                raise ContractError("GameSession 引用的 ModuleVersion 不存在")
+            self._content_schema_version = module_version.content_schema_version
+        if self._content_schema_version != 3:
+            raise ContractError(
+                "ROOM_READ_ONLY: 这个房间使用 ModuleContent v"
+                f"{self._content_schema_version}，v3 之后旧房间只读，"
+                "请新建房间继续游戏"
+            )
 
     async def load_runtime(self) -> EngineRuntimeSnapshot:
         self._ensure_active()
@@ -273,6 +301,7 @@ class _SqlAlchemyEngineTransaction(EngineTransaction):
         # The stored schema version is what a room is pinned to for its whole
         # life: a republished module never silently changes the meaning of a
         # session already in flight (#226 §1).
+        self._content_schema_version = module_version.content_schema_version
         payload = deepcopy(module_version.content_json)
         module_content: ModuleContent | ModuleContentV3 = (
             ModuleContentV3.model_validate(payload)
@@ -508,6 +537,7 @@ class _SqlAlchemyEngineTransaction(EngineTransaction):
         self._ensure_active()
         if self._committed:
             raise ContractError("同一引擎事务只能提交一次")
+        await self._require_writable_room()
 
         expected_version = self._parse_revision(expected_revision)
         current_session = await self._session.get(GameSession, self._room_id)
@@ -639,6 +669,7 @@ class _SqlAlchemyEngineTransaction(EngineTransaction):
         self._ensure_active()
         if self._committed:
             raise ContractError("同一引擎事务只能提交一次")
+        await self._require_writable_room()
         expected_version = self._parse_revision(expected_revision)
         current_session = await self._session.get(GameSession, self._room_id)
         if current_session is None:

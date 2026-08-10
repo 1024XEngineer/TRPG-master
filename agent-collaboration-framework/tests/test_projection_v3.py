@@ -85,6 +85,8 @@ def game_state(content: ModuleContentV3, **overrides) -> GameState:
                 source_character_version=1,
                 state={
                     "skills": {"spot-hidden": 60, "library-use": 70},
+                    # 属性和技能分开存，和真实建卡一致：STR 检定要走 attributes。
+                    "attributes": {"STR": 45},
                     "occupation": "私家侦探",
                 },
             )
@@ -1103,6 +1105,159 @@ class RuleOwnedCheckTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(figure["true_form_seen"], True)
         self.assertIs(figure["willing_to_talk"], True)
 
+    async def test_the_crypt_endgame_is_reachable_and_commits(self) -> None:
+        """把地穴终局整段钉住：搬石板 → 进地穴 → 与身影对话 → 主线收束。
+
+        这段此前有两处各自独立的断点，任一都足以让模组「玩到中段就断」：
+
+        1. `move_crypt_slab` 的 scope 误写成 `crypt`，而进地穴的边正是由它置位的
+           `slab_moved` 把门——搬石板要先在地穴里，闭环，地穴不可达；
+        2. 纯效果分支的后果被 `_owned_effects` 丢掉，所以即使进得去，
+           `talk_to_figure` 的 `mark_core_resolved` 也不会发生。
+
+        自动化覆盖到这里，验收路径就不必依赖有人手动摸到地穴才发现问题。
+        """
+
+        store = InMemoryEngineStore()
+        store.register_room(
+            module_content=self.content,
+            initial_state=game_state(
+                self.content,
+                scene_id="cemetery",
+                # 石板已被发现，剩下的就是搬开它。
+                entities={"crypt_entrance": {"discovered": True}},
+            ),
+        )
+        # STR 检定取 5，稳定成功。
+        engine = AdjudicationEngineService(store, dice=DiceRoller(SequenceDiceSource([5])))
+        rules = RuleEngineService(store)
+
+        async def revision() -> str:
+            snapshot = await rules.read(
+                PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+            )
+            return snapshot.revision
+
+        # 1. 在墓地搬开石板（规则自有检定，STR）。
+        execution = await engine.submit(
+            SubmitAdjudicationRequest(
+                room_id=ROOM,
+                player_id=PLAYER,
+                adjudication=ActionAdjudication(
+                    request_id="crypt-slab",
+                    source_revision=await revision(),
+                    actor_id=ACTOR,
+                    summary="搬开石板",
+                    target=ActionTarget(kind="entity", id="crypt_entrance"),
+                    method=ActionMethod(family="move", description="搬开石板"),
+                    rule_decision=RuleDecisionRef(
+                        rule_id="move_crypt_slab", option_id="STR"
+                    ),
+                    check=RequiredAdjudicationCheck(
+                        candidates=(
+                            SkillCheckCandidate(
+                                candidate_id="STR",
+                                skill_id="STR",
+                                difficulty="regular",
+                                method_summary="用力搬开石板",
+                                player_safe_reason="这是当前可用的做法",
+                            ),
+                        )
+                    ),
+                    success_effects=(),
+                    failure_effects=(),
+                ),
+            )
+        )
+        pending = execution.pending_decision
+        assert pending is not None
+        resolved = await engine.decide(
+            CheckDecisionRequest(
+                request_id="crypt-slab:select",
+                room_id=ROOM,
+                player_id=PLAYER,
+                source_revision=execution.view_revision,
+                decision_id=pending.decision_id,
+                decision_version=pending.decision_version,
+                choice=SelectCheckChoice(candidate_id="STR"),
+            )
+        )
+        check_run = resolved.check_run
+        assert check_run is not None
+        await engine.decide_post_roll(
+            PostRollDecisionRequest(
+                request_id="crypt-slab:accept",
+                room_id=ROOM,
+                player_id=PLAYER,
+                source_revision=resolved.view_revision,
+                check_id=check_run.check_id,
+                check_version=check_run.version,
+                option_id="accept-current",
+            )
+        )
+        self.assertIs(
+            store.inspect_state(ROOM).entities["crypt_entrance"]["slab_moved"], True
+        )
+
+        # 2. 石板搬开后，地穴这条隐藏边才真正打开。
+        view = await rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        self.assertIn(
+            "crypt",
+            {
+                exit_.destination.scene_id
+                for exit_ in view.scene.available_exits
+                if exit_.destination
+            },
+        )
+
+        await engine.submit(
+            SubmitAdjudicationRequest(
+                room_id=ROOM,
+                player_id=PLAYER,
+                adjudication=ActionAdjudication(
+                    request_id="crypt-enter",
+                    source_revision=await revision(),
+                    actor_id=ACTOR,
+                    summary="进入地穴",
+                    target=ActionTarget(kind="location", id="crypt"),
+                    method=ActionMethod(family="travel", description="进入地穴"),
+                    check=NoAdjudicationCheck(),
+                    success_effects=(EnterLocationEffect(location_id="crypt"),),
+                ),
+            )
+        )
+        self.assertEqual(store.inspect_state(ROOM).scene_id, "crypt")
+
+        # 3. 与身影对话：纯效果规则，必须真的收束主线。
+        await engine.submit(
+            SubmitAdjudicationRequest(
+                room_id=ROOM,
+                player_id=PLAYER,
+                adjudication=ActionAdjudication(
+                    request_id="crypt-talk",
+                    source_revision=await revision(),
+                    actor_id=ACTOR,
+                    summary="与身影交谈",
+                    target=ActionTarget(kind="entity", id="cemetery_figure"),
+                    method=ActionMethod(family="talk", description="与身影交谈"),
+                    rule_decision=RuleDecisionRef(
+                        rule_id="talk_to_figure", option_id="proceed"
+                    ),
+                    check=NoAdjudicationCheck(),
+                    success_effects=(),
+                    failure_effects=(),
+                ),
+            )
+        )
+
+        state = store.inspect_state(ROOM)
+        self.assertTrue(state.core_resolved)
+        self.assertTrue(state.ending_available)
+        self.assertIn("douglas_true_nature", state.discovered_facts)
+        self.assertIn("douglas_confession", state.discovered_facts)
+
     async def test_branch_suspended_on_an_executor_refuses_half_effects(self) -> None:
         """停在 invoke_ruleset_action 上的分支不能提交走过的那一半。
 
@@ -1152,20 +1307,25 @@ class RuleOwnedCheckTests(unittest.IsolatedAsyncioTestCase):
     async def test_rule_option_publishes_whether_it_rolls_dice(self) -> None:
         """Agent 必须能分辨哪条分支要掷骰，否则只能编一个技能 id 出来。"""
 
-        store = InMemoryEngineStore()
-        store.register_room(
-            module_content=self.content,
-            initial_state=game_state(self.content, scene_id="crypt"),
-        )
-        rules = RuleEngineService(store)
-        capabilities = await rules.read_keeper_capabilities(
-            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
-        )
-        by_rule = {item.rule_id: item for item in capabilities.rule_candidates}
+        async def candidates(scene_id: str):
+            store = InMemoryEngineStore()
+            store.register_room(
+                module_content=self.content,
+                initial_state=game_state(self.content, scene_id=scene_id),
+            )
+            view = await RuleEngineService(store).read_keeper_capabilities(
+                PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+            )
+            return {item.rule_id: item for item in view.rule_candidates}
 
-        # proceed 类选项不掷骰；同一地点的力量对抗要掷。
-        self.assertFalse(by_rule["enter_crypt"].options[0].requires_check)
-        self.assertTrue(by_rule["move_crypt_slab"].options[0].requires_check)
+        # 地穴内的 proceed 类选项不掷骰。
+        in_crypt = await candidates("crypt")
+        self.assertFalse(in_crypt["enter_crypt"].options[0].requires_check)
+
+        # 搬石板要掷 STR，而它属于墓地——石板在墓地，不在地穴里。
+        at_cemetery = await candidates("cemetery")
+        self.assertTrue(at_cemetery["move_crypt_slab"].options[0].requires_check)
+        self.assertNotIn("move_crypt_slab", in_crypt)
 
     async def test_rule_decision_from_another_location_is_refused(self) -> None:
         """候选按场景发布，提交也必须按场景复查。

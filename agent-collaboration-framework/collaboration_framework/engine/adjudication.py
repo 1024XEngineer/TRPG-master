@@ -770,10 +770,22 @@ class AdjudicationEngineService:
         labels = actor.state.get("skill_labels")
         if not isinstance(skills, dict):
             raise ContractError("Actor 没有可验证的 Ruleset 技能快照")
-        label_map = labels if isinstance(labels, dict) else {}
+        # CoC7 的属性检定（搬开石板掷 STR、闪避掷 DEX）和技能检定用同一套 d100
+        # 判定，但属性存在 `attributes` 而不是 `skills` 里。只查 skills 会让作者
+        # 写好的 STR 检定在提交时被判成「技能不属于 Actor」——《追书人》搬石板
+        # 那一步正是这样卡死的，而它是进入地穴的唯一门禁。
+        attributes = actor.state.get("attributes")
+        attribute_map = attributes if isinstance(attributes, dict) else {}
+        attribute_labels = actor.state.get("attribute_labels")
+        label_map = {
+            **(attribute_labels if isinstance(attribute_labels, dict) else {}),
+            **(labels if isinstance(labels, dict) else {}),
+        }
         options: list[PendingCheckOption] = []
         for candidate in adjudication.check.candidates:
             value = skills.get(candidate.skill_id)
+            if value is None:
+                value = attribute_map.get(candidate.skill_id)
             if (
                 not isinstance(value, int)
                 or isinstance(value, bool)

@@ -2649,6 +2649,497 @@
   outline-offset: 2px;
 }
 
+/* Character-ready room reuses the lobby stage and artwork, while keeping its
+   own player-card controls and completion states. */
+.character-ready-scene__header {
+  justify-content: space-between;
+}
+
+.character-ready-scene__guide {
+  position: absolute;
+  top: 2.8rem;
+  right: 1.1rem;
+  z-index: 2;
+  min-height: 2.35rem;
+  padding: 0.45rem 0.8rem;
+  border: 1px solid rgb(183 139 83 / 72%);
+  border-radius: 999px;
+  color: #efd6a2 !important;
+  background: rgb(50 29 15 / 72%);
+  box-shadow: inset 0 0 0 1px rgb(255 226 168 / 10%), 0 0.18rem 0.25rem rgb(17 8 3 / 28%);
+  font-family: 'STKaiti', 'KaiTi', 'PingFang SC', sans-serif;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.character-ready-scene__dossier {
+  top: 9.6%;
+}
+
+.character-ready-scene__masthead {
+  top: 7.7%;
+}
+
+.character-ready-scene__roster {
+  top: 37.2%;
+  right: 8.2%;
+  bottom: 4.2%;
+  left: 10.2%;
+}
+
+.character-ready-scene__player-list {
+  gap: clamp(0.18rem, 0.55vh, 0.36rem);
+}
+
+.character-ready-player {
+  aspect-ratio: 711 / 218;
+  min-height: 5.05rem;
+}
+
+.character-ready-player__avatar {
+  overflow: hidden;
+}
+
+.character-ready-player__avatar button,
+.character-ready-player__avatar img {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.character-ready-player__avatar img {
+  object-fit: cover;
+}
+
+.character-ready-player__identity {
+  padding: 0.25rem 0;
+}
+
+.character-ready-player__identity small {
+  overflow: hidden;
+  max-width: 100%;
+  color: #65472c;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.character-ready-player.is-ready .character-ready-player__identity small {
+  color: #4e6234;
+}
+
+.character-ready-player__actions {
+  display: flex;
+  width: clamp(5.6rem, 25vw, 6.4rem);
+  margin-right: 5.2%;
+  margin-left: 0.35rem;
+  flex: 0 0 auto;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.38rem;
+  transform: translateY(-0.25rem);
+}
+
+.character-ready-player__actions button {
+  display: inline-flex;
+  width: 1.58rem;
+  min-width: 1.58rem;
+  min-height: 3.55rem;
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.16rem;
+  padding: 0.22rem 0.12rem;
+  border: 1px solid rgb(121 79 39 / 44%);
+  border-radius: 999px;
+  color: #56361d;
+  background: rgb(218 181 121 / 42%);
+  box-shadow: inset 0 1px rgb(255 237 194 / 30%);
+  font-family: 'PingFang SC', sans-serif;
+  font-size: clamp(0.52rem, 2.2vw, 0.62rem);
+  font-weight: 750;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: filter 140ms ease, transform 140ms ease;
+}
+
+.character-ready-player__actions button > span {
+  line-height: 1;
+  letter-spacing: 0.08em;
+  writing-mode: vertical-rl;
+}
+
+.character-ready-player__actions button.is-create {
+  width: auto;
+  min-width: 4.7rem;
+  min-height: 2rem;
+  flex-direction: row;
+  padding: 0.2rem 0.45rem;
+}
+
+.character-ready-player__actions button.is-create > span {
+  letter-spacing: 0;
+  writing-mode: horizontal-tb;
+}
+
+.character-ready-player__actions button:hover {
+  filter: brightness(1.08) saturate(1.05);
+}
+
+.character-ready-player__actions button:active {
+  transform: scale(0.95);
+}
+
+.character-ready-player__actions button:focus-visible,
+.character-ready-scene__guide:focus-visible {
+  outline: 2px solid #8d5e2b;
+  outline-offset: 1px;
+}
+
+.character-ready-player__actions svg {
+  width: 0.72rem;
+  height: 0.72rem;
+  flex: 0 0 auto;
+  stroke-width: 2.4;
+}
+
+.character-ready-scene__waiting-action {
+  position: absolute;
+  right: 10%;
+  bottom: 4.05rem;
+  left: 10%;
+  display: flex;
+  width: 80%;
+  min-height: 4.15rem;
+  align-items: center;
+  justify-content: center;
+  border: 0.22rem double #6a411f;
+  border-radius: 0.4rem;
+  color: #4b311c;
+  background: linear-gradient(rgb(255 239 201 / 12%), rgb(91 53 22 / 9%)), #a88760;
+  box-shadow: inset 0 0 0 0.12rem rgb(236 198 131 / 32%), 0 0.32rem 0.28rem rgb(58 30 11 / 32%);
+  font-family: 'STKaiti', 'KaiTi', 'PingFang SC', sans-serif;
+  font-size: clamp(1rem, 4.8vw, 1.28rem);
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-shadow: 0 1px rgb(247 216 161 / 36%);
+}
+
+.character-ready-sheet-backdrop {
+  background: rgb(22 12 6 / 68%);
+  backdrop-filter: blur(2px) sepia(0.14);
+}
+
+.portrait-generation-modal {
+  width: min(100%, 30rem);
+  margin: 0 auto;
+  padding: 3.6rem 3.4rem 3.8rem;
+  color: #422815;
+  font-family: 'Times New Roman', Times, 'STKaiti', 'KaiTi', 'PingFang SC', serif;
+  background-color: transparent;
+  background-image: url('/assets/rooms/ready/portrait-generation-background.webp');
+  background-position: center calc(50% + 0.35rem);
+  background-repeat: no-repeat;
+  background-size: 140% 112%;
+  scrollbar-width: none;
+}
+
+.portrait-generation-modal::-webkit-scrollbar {
+  display: none;
+}
+
+.portrait-generation-modal__header {
+  position: relative;
+  min-height: 3.2rem;
+  justify-content: center;
+  text-align: center;
+}
+
+.portrait-generation-modal__heading {
+  width: calc(100% - 4rem);
+}
+
+.portrait-generation-modal__title {
+  color: #402613 !important;
+  font-size: 1.3rem;
+}
+
+.portrait-generation-modal__subtitle {
+  color: #68472e !important;
+  font-size: 0.92rem;
+}
+
+.portrait-generation-modal__close {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.portrait-generation-modal__status,
+.portrait-generation-modal__error,
+.portrait-generation-modal__action {
+  font-size: 1rem;
+}
+
+.portrait-generation-modal__basis-title {
+  color: #442713 !important;
+  font-size: 0.95rem;
+}
+
+.portrait-generation-modal__basis-text {
+  color: #56351f !important;
+  font-size: 0.95rem;
+  line-height: 1.55;
+}
+
+.character-ready-sheet {
+  width: min(calc(100% - 1rem), 25.5rem);
+  margin: 0 auto;
+  padding: 4.1rem 2rem 2.5rem;
+  border: 0;
+  border-radius: 0;
+  color: #422815;
+  background-color: transparent;
+  background-image: url('/assets/character/create/弹窗背景.webp');
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 112% 100%;
+  box-shadow: 0 1rem 1.35rem rgb(25 12 5 / 45%);
+}
+
+.character-ready-sheet__scroll {
+  max-height: calc(82vh - 6.6rem);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+
+.character-ready-sheet__scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.character-ready-sheet__header {
+  position: relative;
+  margin-top: 0.75rem;
+  padding: 0 0.15rem 0.65rem !important;
+}
+
+.character-ready-sheet__header h3 {
+  width: 100%;
+  color: #3b2312 !important;
+  font-family: 'STKaiti', 'KaiTi', 'PingFang SC', sans-serif;
+  font-size: 1.38rem;
+  text-align: center;
+  text-shadow: 0 1px rgb(255 235 188 / 48%);
+}
+
+.character-ready-sheet__header button {
+  position: absolute;
+  right: 0.15rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #563820;
+  background: rgb(205 169 111 / 28%) !important;
+  box-shadow: inset 0 0 0 1px rgb(126 83 42 / 28%);
+}
+
+.character-ready-sheet__header button svg {
+  color: #3f2615 !important;
+}
+
+.character-ready-sheet__tabs {
+  padding: 0 0.15rem 0.8rem !important;
+}
+
+.character-ready-sheet__tabs button {
+  border-color: rgb(129 85 43 / 46%) !important;
+  color: #634329 !important;
+  background: rgb(217 180 120 / 26%) !important;
+  font-size: 0.88rem;
+}
+
+.character-ready-sheet__tabs button.bg-brass {
+  border-color: #6c4322 !important;
+  color: #f0daaa !important;
+  background: linear-gradient(#76502f, #4b2b18) !important;
+}
+
+.character-ready-sheet__content {
+  padding-right: 0.15rem !important;
+  padding-left: 0.15rem !important;
+  font-family: 'Times New Roman', Times, 'STKaiti', 'KaiTi', 'PingFang SC', serif;
+}
+
+.character-ready-sheet__content .bg-input,
+.character-ready-sheet__content .bg-panel {
+  border-color: rgb(136 92 49 / 38%) !important;
+  background-color: rgb(211 174 115 / 22%) !important;
+}
+
+.character-ready-sheet__content .text-text-primary {
+  color: #422815 !important;
+}
+
+.character-ready-sheet__content .text-text-muted,
+.character-ready-sheet__content .text-text-dim {
+  color: #67472e !important;
+}
+
+.character-ready-sheet__content h4 {
+  color: #4b2f18 !important;
+  font-size: 0.85rem;
+}
+
+.character-ready-sheet__numbered,
+.character-ready-sheet__content .font-mono {
+  font-family: 'Times New Roman', Times, 'STKaiti', 'KaiTi', 'PingFang SC', serif !important;
+  font-feature-settings: 'lnum' 1, 'tnum' 1;
+  font-variant-numeric: lining-nums tabular-nums;
+}
+
+.character-ready-sheet__profile {
+  display: flex;
+  align-items: stretch;
+  gap: 0.8rem;
+}
+
+.character-ready-sheet__portrait {
+  width: 8.5rem;
+  min-height: 9.5rem;
+  flex: none;
+}
+
+.character-ready-sheet__identity {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.28rem;
+  line-height: 1.3;
+}
+
+.character-ready-sheet__identity-name {
+  font-size: 1.25rem;
+  line-height: 1.3;
+}
+
+.character-ready-sheet__identity-summary {
+  font-size: 0.95rem;
+  line-height: 1.3;
+}
+
+.character-ready-sheet__locations {
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+  color: #5e3e27;
+  font-family: 'Times New Roman', Times, 'STKaiti', 'KaiTi', 'PingFang SC', serif;
+  font-size: 0.95rem;
+  font-weight: 500;
+  line-height: 1.3;
+}
+
+.character-ready-sheet__derived {
+  display: grid;
+  margin-top: 0.45rem !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 2rem;
+  row-gap: 0.72rem;
+  padding: 0.35rem 0.25rem;
+}
+
+.character-ready-sheet__derived-item {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 1.25rem minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 0.38rem;
+}
+
+.character-ready-sheet__derived-icon {
+  width: 1.15rem;
+  height: 1.15rem;
+  color: #68462b;
+  fill: rgb(145 99 54 / 14%);
+  stroke-width: 2.1;
+}
+
+.character-ready-sheet__derived-label {
+  overflow: hidden;
+  color: #5b3b25;
+  font-size: 0.82rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.character-ready-sheet__derived-value {
+  font-size: 1.05rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.character-ready-sheet__section-title {
+  margin-bottom: 0.15rem;
+  color: #4b2f18 !important;
+  font-family: 'STKaiti', 'KaiTi', 'PingFang SC', sans-serif;
+  font-size: 1rem !important;
+  font-weight: 800;
+  text-align: center;
+}
+
+.character-ready-sheet__attributes {
+  margin-top: 0.55rem !important;
+}
+
+.character-ready-sheet__radar {
+  width: 100%;
+  max-width: 23rem;
+  margin: 0 auto;
+}
+
+.character-ready-sheet__radar svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.character-ready-sheet__radar-grid {
+  fill: rgb(151 104 58 / 3%);
+  stroke: rgb(103 67 35 / 34%);
+  stroke-width: 1;
+}
+
+.character-ready-sheet__radar-axis {
+  stroke: rgb(103 67 35 / 30%);
+  stroke-width: 1;
+}
+
+.character-ready-sheet__radar-value {
+  fill: rgb(123 76 35 / 25%);
+  stroke: #70451f;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.character-ready-sheet__radar-label {
+  fill: #53341e;
+  font-family: 'STKaiti', 'KaiTi', 'PingFang SC', sans-serif;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.character-ready-sheet__radar-number {
+  fill: #7a4b25;
+  font-family: 'Times New Roman', Times, serif;
+  font-size: 17px;
+  font-weight: 800;
+}
+
 .lobby-leave-dialog {
   position: fixed;
   inset: 0;

@@ -58,15 +58,15 @@ export function PortraitGenerationModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="portrait-dialog-title"
-        className="fixed inset-x-0 bottom-0 z-50 max-h-[92vh] overflow-y-auto rounded-t-2xl bg-card px-5 pb-7 pt-4 animate-slide-up"
+        className="portrait-generation-modal fixed inset-x-0 bottom-0 z-50 max-h-[92vh] overflow-y-auto animate-slide-up"
       >
         <div className="mx-auto w-full max-w-md">
-          <div className="mb-4 flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <h3 id="portrait-dialog-title" className="truncate text-base font-bold text-text-primary">
+          <div className="portrait-generation-modal__header mb-4 flex items-center justify-between gap-3">
+            <div className="portrait-generation-modal__heading min-w-0">
+              <h3 id="portrait-dialog-title" className="portrait-generation-modal__title truncate font-bold text-text-primary">
                 {characterName}的人物图片
               </h3>
-              <p className="mt-0.5 text-xs text-text-muted">写实肖像 · 1024 × 1024</p>
+              <p className="portrait-generation-modal__subtitle mt-0.5 text-text-muted">写实肖像 · 1024 × 1024</p>
             </div>
             <button
               type="button"
@@ -74,7 +74,7 @@ export function PortraitGenerationModal({
               disabled={generating}
               aria-label="关闭人物图片生成"
               title="关闭"
-              className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-panel text-text-muted transition-colors disabled:opacity-40"
+              className="portrait-generation-modal__close flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-panel text-text-muted transition-colors disabled:opacity-40"
             >
               <X className="h-4 w-4" />
             </button>
@@ -84,7 +84,7 @@ export function PortraitGenerationModal({
             {generating ? (
               <div className="flex flex-col items-center gap-3 text-text-muted" aria-live="polite">
                 <RefreshCw className="h-8 w-8 animate-spin text-brass" />
-                <span className="text-sm">正在生成人物图片…</span>
+                <span className="portrait-generation-modal__status">正在生成人物图片…</span>
               </div>
             ) : portraitUrl ? (
               <img
@@ -99,14 +99,14 @@ export function PortraitGenerationModal({
           </div>
 
           {result && !generating && (
-            <div className="mt-4 border-l-2 border-brass px-3">
-              <div className="text-[11px] font-semibold text-brass-dark">生成依据</div>
-              <p className="mt-1 text-[13px] leading-5 text-text-muted">{result.promptSummary}</p>
+            <div className="portrait-generation-modal__basis mt-4 border-l-2 border-brass px-3">
+              <div className="portrait-generation-modal__basis-title font-semibold text-brass-dark">生成依据</div>
+              <p className="portrait-generation-modal__basis-text mt-1 text-text-muted">{result.promptSummary}</p>
             </div>
           )}
 
           {error && (
-            <p role="alert" className="mt-4 text-center text-sm text-[#b43b3b]">
+            <p role="alert" className="portrait-generation-modal__error mt-4 text-center text-[#b43b3b]">
               {error}
             </p>
           )}
@@ -115,7 +115,7 @@ export function PortraitGenerationModal({
             type="button"
             onClick={handleGenerate}
             disabled={generating}
-            className="mt-5 flex min-h-11 w-full items-center justify-center gap-2 rounded-sm bg-brass px-5 py-3 text-sm font-semibold text-white transition-colors active:bg-brass-dark disabled:opacity-50"
+            className="portrait-generation-modal__action mt-5 flex min-h-11 w-full items-center justify-center gap-2 rounded-sm bg-brass px-5 py-3 font-semibold text-white transition-colors active:bg-brass-dark disabled:opacity-50"
           >
             {portraitUrl ? <RefreshCw className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
             {generating ? '生成中…' : portraitUrl ? '重新生成' : '开始生成'}

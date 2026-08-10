@@ -273,4 +273,3 @@ class PaperChaseVisibilityTests(unittest.IsolatedAsyncioTestCase):
         ):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, serialized)
-

@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import { useState, useMemo, useEffect, useRef } from 'react'
-import { ArrowLeft, Plus, Minus, Search, Shield, Heart, Brain, Zap, Eye, Maximize2, Lightbulb, BookOpen, ChevronDown, X, Info, Clover, Sparkles } from 'lucide-react'
+import { Plus, Minus, Search, Shield, Heart, Brain, Zap, Eye, Maximize2, Lightbulb, BookOpen, ChevronDown, ChevronUp, X, Info, Clover, Sparkles } from 'lucide-react'
 import type { CharacterComputeResult, SkillComputeView } from 'trpg-sdk'
 import type { Attributes, InvestigatorInfo } from '@/data/character-model'
 import { useCharacterStore } from '@/stores/character-store'
@@ -199,6 +199,7 @@ function SkillRow({
 export default function CharacterPage() {
   const navigate = useNavigate()
   const [step, setStep] = useState(0)
+  const characterPageRef = useRef<HTMLDivElement>(null)
 
   // 建卡规则目录（职业/技能/属性）改从后端 GET /systems/{systemId}/ruleset
   // 拿（issue #84 S3），职业网格/技能列表在数据到达前先显示 loading。
@@ -413,6 +414,7 @@ export default function CharacterPage() {
   const [activeGroup, setActiveGroup] = useState<string | null>(null)
   const [skillTab, setSkillTab] = useState<'occupation' | 'interest'>('occupation')
   const [showGroupPicker, setShowGroupPicker] = useState(false)
+  const [showGenderPicker, setShowGenderPicker] = useState(false)
   const [detailOcc, setDetailOcc] = useState<OccupationSpec | null>(null)
   const [choicePickerSlotIndex, setChoicePickerSlotIndex] = useState<number | null>(null)
   const [choiceSkillSearch, setChoiceSkillSearch] = useState('')
@@ -1032,12 +1034,30 @@ export default function CharacterPage() {
     void runQuickGenerate()
   }
 
+  const adjustAge = (delta: number) => {
+    const range = ruleset?.ageRange
+    if (!range) return
+    const parsed = parseInt(info.age, 10)
+    const candidate = Number.isNaN(parsed) ? range.minValue : parsed + delta
+    const nextAge = Math.max(range.minValue, Math.min(range.maxValue, candidate))
+    setInfo(current => ({ ...current, age: String(nextAge) }))
+  }
+
   const steps = [
-    { label: '信息', key: 'info', done: step > 0 },
-    { label: '属性', key: 'attr', done: step > 1 },
-    { label: '技能', key: 'skill', done: step > 2 },
-    { label: '完成', key: 'done', done: step > 3 },
+    { label: '基础信息', key: 'info' },
+    { label: '属性', key: 'attr' },
+    { label: '技能', key: 'skill' },
+    { label: '背景', key: 'background' },
   ]
+
+  // 书签用于浏览和补填不同书页，不强制按顺序访问；底部「下一步」与最终提交
+  // 仍走原有校验，因此自由切页不会绕过人物卡完整性检查。
+  const handleStepTabChange = (nextStep: number) => {
+    setValidationAttempted(false)
+    setSubmitError('')
+    setStep(nextStep)
+    characterPageRef.current?.parentElement?.scrollTo?.({ top: 0, behavior: 'smooth' })
+  }
 
   const getBlockingIssues = (targetStep: number) => {
     const issues: string[] = []
@@ -1179,7 +1199,7 @@ export default function CharacterPage() {
   ) : null
 
   return (
-    <div className="animate-screen-in min-h-screen bg-page">
+    <div ref={characterPageRef} className="character-create animate-screen-in min-h-screen bg-page">
       {rulesetLoading ? (
         <div className="flex flex-col items-center justify-center min-h-screen px-5 text-center">
           <p className="text-sm text-text-muted">正在加载规则数据…</p>
@@ -1194,104 +1214,180 @@ export default function CharacterPage() {
         </div>
       ) : (
         <>
-          {/* Header */}
-          <div className="sticky top-0 z-10 bg-page pt-1 pb-0">
-            <div className="flex items-center gap-2.5 px-5 pt-0.5">
-              <button onClick={() => step > 0 ? setStep(s => s - 1) : navigate(-1)}
-                className="w-[34px] h-[34px] rounded-full bg-card border border-border-light flex items-center justify-center flex-shrink-0 active:bg-panel active:scale-[0.94] transition-all"
+          <header className="character-create__header">
+            <button
+              type="button"
+              aria-label={step > 0 ? '返回上一页' : '返回'}
+              onClick={() => step > 0 ? setStep(s => s - 1) : navigate(-1)}
+              className="character-create__back"
+            >
+              <img src="/assets/character/create/back.webp" alt="" aria-hidden="true" />
+            </button>
+            <img
+              className="character-create__title"
+              src="/assets/character/create/title.webp"
+              alt="创建角色"
+            />
+            <OnboardingTrigger className="character-create__rules" />
+          </header>
+
+          <div
+            className="character-create__tabs"
+            role="tablist"
+            aria-label="角色创建页面"
+          >
+            <span
+              data-onboarding-target="character-progress"
+              className="character-create__tabs-guide-target"
+              aria-hidden="true"
+            />
+            {steps.map((page, index) => (
+              <button
+                key={page.key}
+                type="button"
+                role="tab"
+                id={`character-tab-${page.key}`}
+                aria-selected={step === index}
+                aria-controls={`character-step-${page.key}`}
+                className={`character-create__tab ${step === index ? 'is-active' : ''}`}
+                onClick={() => handleStepTabChange(index)}
               >
-                <ArrowLeft className="w-[18px] h-[18px] text-text-muted" strokeWidth={2.5} />
+                <span className="character-create__tab-label">{page.label}</span>
               </button>
-              <h2 className="text-lg font-bold text-text-primary">创建角色</h2>
-              <OnboardingTrigger className="ml-auto" />
-            </div>
-            {/* Progress */}
-            <div data-onboarding-target="character-progress" className="flex gap-1.5 px-5 py-3">
-              {steps.map((s, i) => (
-                <div key={i} className={`flex-1 h-[3px] rounded-[99px] transition-all duration-300 ${
-                  s.done ? 'bg-brass-dark' : i === step ? 'bg-brass' : 'bg-border-light'
-                }`} />
-              ))}
-            </div>
-            {/* ★ 提前告知"没有房间"这件事，不要等填完四步、点完成创建才在最后一刻
-                报错——之前"浏览已有游戏"这条路径就是这样把用户的输入全部作废的
-                （见 2026-07-13 测试报告）。 */}
-            {!roomId && (
-              <div className="mx-5 mb-3 px-3.5 py-2.5 bg-[#fdf3e0] border border-[#e0c088] rounded-[6px] text-[12px] text-[#8a6a2a]">
-                当前未加入房间，创建的角色不会被保存。请先返回创建或加入一个房间。
-              </div>
-            )}
+            ))}
           </div>
+
+          {/* ★ 提前告知"没有房间"这件事，不要等填完四步、点完成创建才在最后一刻报错。 */}
+          {!roomId && (
+            <div className="character-create__room-warning">
+              当前未加入房间，创建的角色不会被保存。请先返回创建或加入一个房间。
+            </div>
+          )}
+
+          <div className="character-create__book">
 
           {/* ═══════════════ Step 0: Info + Occupation ═══════════════ */}
           {step === 0 && (
-            <div className="px-5 pb-20 animate-screen-in">
-              <div className="mb-3">
+            <div id="character-step-info" role="tabpanel" aria-labelledby="character-tab-info" className="character-create__page character-create__page--info px-5 pb-20 animate-screen-in">
+              <div className="character-create__quick-wrap mb-3">
                 <button
                   type="button"
+                  aria-label="一键生成调查员"
                   onClick={handleQuickGenerate}
                   disabled={quickGenerating || !roomId}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-md border border-brass bg-[#fffaf0] text-brass-dark text-sm font-semibold transition-all active:bg-[#f8edd8] disabled:opacity-60"
+                  className="character-create__quick flex flex-col items-center justify-center text-sm font-semibold transition-all disabled:opacity-60"
                 >
-                  <Sparkles className="w-4 h-4" />
-                  {quickGenerating ? '正在生成调查员…' : '一键生成调查员'}
+                  {quickGenerating ? (
+                    <span>正在生成…</span>
+                  ) : (
+                    <><span>一键创建</span><span>角色</span></>
+                  )}
                 </button>
-                {quickGenerateError && (
-                  <p className="mt-2 text-[11px] text-[#c04040]" role="alert">{quickGenerateError}</p>
-                )}
-                {!roomId && (
-                  <p className="mt-2 text-[11px] text-text-muted">加入房间后才能生成调查员。</p>
-                )}
               </div>
               {/* Basic Info */}
-              <div data-onboarding-target="character-info" className="bg-card border border-border-light rounded-md p-[18px] mb-3">
-                <h4 className="text-[12px] font-semibold text-brass-dark uppercase tracking-[0.08em] mb-3.5">调查员信息</h4>
-                <div className="space-y-3">
-                  <input value={info.name} onChange={e => setInfo(i => ({ ...i, name: e.target.value }))}
-                    placeholder="角色姓名"
-                    className={`w-full px-3.5 py-2.5 rounded-[6px] bg-input text-text-primary text-[15px] outline-none focus:border-brass border ${
-                      validationAttempted && !info.name.trim() ? 'border-[#c04040]' : 'border-border-light'
-                    }`} />
+              <div data-onboarding-target="character-info" className="character-create__section character-create__info bg-card border border-border-light rounded-md p-[18px] mb-3">
+                <h4 className="character-create__section-title">调查员档案</h4>
+                <div className="space-y-2">
+                  <div className="character-create__name-field">
+                    <label className="character-create__field-label" htmlFor="character-name">角色姓名：</label>
+                    <input value={info.name} onChange={e => setInfo(i => ({ ...i, name: e.target.value }))}
+                      id="character-name"
+                      autoComplete="off"
+                      placeholder="请输入角色姓名"
+                      className={`w-full px-3.5 py-2.5 rounded-[6px] bg-input text-text-primary text-[15px] outline-none focus:border-brass border ${
+                        validationAttempted && !info.name.trim() ? 'border-[#c04040]' : 'border-border-light'
+                      }`} />
+                  </div>
                   {validationAttempted && !info.name.trim() && (
                     <p className="mt-1 text-[11px] text-[#c04040]">角色姓名不能为空</p>
                   )}
                   <div className="grid grid-cols-2 gap-2.5">
-                    <div>
-                      <label className="text-[11px] font-medium text-text-muted mb-1 block">年龄</label>
-                      <input type="number" min={ruleset?.ageRange?.minValue} max={ruleset?.ageRange?.maxValue} value={info.age}
-                        onChange={e => setInfo(i => ({ ...i, age: e.target.value }))}
-                        onBlur={e => {
-                          // 夹值范围必须跟上面 input 的 min/max 用同一个数据源。
-                          // 之前这里写死 [10, 100]，属性改成消费后端之后没跟着改，
-                          // 结果是「显示的范围是 15-89、实际能填 12 和 90」——
-                          // 展示和生效的规则对不上，比两处都写死更难发现。
-                          const range = ruleset?.ageRange
-                          if (!range) return
-                          const typed = parseInt(e.target.value, 10)
-                          const v = Number.isNaN(typed)
-                            ? range.minValue
-                            : Math.max(range.minValue, Math.min(range.maxValue, typed))
-                          setInfo(i => ({ ...i, age: String(v) }))
-                        }}
-                        className="w-full px-3.5 py-2.5 rounded-[6px] bg-input border border-border-light text-text-primary text-[15px] outline-none focus:border-brass" />
+                    <div className="character-create__inline-field">
+                      <label className="text-[11px] font-medium text-text-muted">年龄：</label>
+                      <div className="character-create__age-control">
+                        <input type="number" min={ruleset?.ageRange?.minValue} max={ruleset?.ageRange?.maxValue} value={info.age}
+                          onChange={e => setInfo(i => ({ ...i, age: e.target.value }))}
+                          onBlur={e => {
+                            // 夹值范围必须跟上面 input 的 min/max 用同一个数据源。
+                            const range = ruleset?.ageRange
+                            if (!range) return
+                            const typed = parseInt(e.target.value, 10)
+                            const v = Number.isNaN(typed)
+                              ? range.minValue
+                              : Math.max(range.minValue, Math.min(range.maxValue, typed))
+                            setInfo(i => ({ ...i, age: String(v) }))
+                          }}
+                          className="w-full px-3.5 py-2.5 rounded-[6px] bg-input border border-border-light text-text-primary text-[15px] outline-none focus:border-brass" />
+                        <div className="character-create__age-steppers" aria-label="调整年龄">
+                          <button type="button" onClick={() => adjustAge(1)} aria-label="年龄增加一岁">
+                            <ChevronUp aria-hidden="true" />
+                          </button>
+                          <button type="button" onClick={() => adjustAge(-1)} aria-label="年龄减少一岁">
+                            <ChevronDown aria-hidden="true" />
+                          </button>
+                        </div>
+                      </div>
                     </div>
-                    <div>
-                      <label className="text-[11px] font-medium text-text-muted mb-1 block">性别</label>
-                      <select value={info.gender} onChange={e => setInfo(i => ({ ...i, gender: e.target.value }))}
-                        className="w-full px-3.5 py-2.5 rounded-[6px] bg-input border border-border-light text-text-primary text-[15px] outline-none focus:border-brass">
-                        <option>男</option><option>女</option><option>其他</option>
-                      </select>
+                    <div className="character-create__inline-field">
+                      <label className="text-[11px] font-medium text-text-muted">性别：</label>
+                      <div className="character-create__gender-picker">
+                        <button
+                          type="button"
+                          role="combobox"
+                          aria-label="性别"
+                          aria-controls="character-gender-options"
+                          aria-expanded={showGenderPicker}
+                          onClick={() => setShowGenderPicker(open => !open)}
+                          className="character-create__gender-trigger"
+                        >
+                          <span>{info.gender || '请选择'}</span>
+                          <ChevronDown aria-hidden="true" />
+                        </button>
+                        {showGenderPicker && (
+                          <>
+                            <button
+                              type="button"
+                              aria-label="关闭性别选择"
+                              className="fixed inset-0 z-10 cursor-default bg-transparent"
+                              onClick={() => setShowGenderPicker(false)}
+                            />
+                            <div
+                              id="character-gender-options"
+                              role="listbox"
+                              aria-label="选择性别"
+                              className="character-create__gender-options"
+                            >
+                              {['男', '女', '其他'].map(gender => (
+                                <button
+                                  key={gender}
+                                  type="button"
+                                  role="option"
+                                  aria-selected={info.gender === gender}
+                                  onClick={() => {
+                                    setInfo(current => ({ ...current, gender }))
+                                    setShowGenderPicker(false)
+                                  }}
+                                >
+                                  {gender}
+                                </button>
+                              ))}
+                            </div>
+                          </>
+                        )}
+                      </div>
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-2.5">
-                    <div>
-                      <label className="text-[11px] font-medium text-text-muted mb-1 block">居住地</label>
+                    <div className="character-create__location-field">
+                      <label className="character-create__location-label text-text-muted mb-1 block">居住地</label>
                       <input value={info.residence} onChange={e => setInfo(i => ({ ...i, residence: e.target.value }))}
+                        placeholder="请选择居住地"
                         className="w-full px-3.5 py-2.5 rounded-[6px] bg-input border border-border-light text-text-primary text-[15px] outline-none focus:border-brass" />
                     </div>
-                    <div>
-                      <label className="text-[11px] font-medium text-text-muted mb-1 block">出生地</label>
+                    <div className="character-create__location-field">
+                      <label className="character-create__location-label text-text-muted mb-1 block">出生地</label>
                       <input value={info.birthplace} onChange={e => setInfo(i => ({ ...i, birthplace: e.target.value }))}
+                        placeholder="请选择出生地"
                         className="w-full px-3.5 py-2.5 rounded-[6px] bg-input border border-border-light text-text-primary text-[15px] outline-none focus:border-brass" />
                     </div>
                   </div>
@@ -1299,33 +1395,33 @@ export default function CharacterPage() {
               </div>
 
               {/* Occupation */}
-              <div data-onboarding-target="occupation-picker" className="bg-card border border-border-light rounded-md p-[18px]">
-                <h4 className="text-[12px] font-semibold text-brass-dark uppercase tracking-[0.08em] mb-3.5">选择职业</h4>
+              <div data-onboarding-target="occupation-picker" className="character-create__section character-create__occupation bg-card border border-border-light rounded-md p-[18px]">
+                <h4 className="character-create__section-title">选择职业</h4>
 
                 {/* Search + Group filter */}
-                <div className="flex gap-2 mb-3">
-                  <div className="flex-1 relative">
+                <div className="grid grid-cols-2 gap-2.5 mb-3">
+                  <div className="relative">
                     <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-text-dim" />
                     <input value={search} onChange={e => setSearch(e.target.value)}
                       placeholder="搜索职业…" className="w-full pl-8 pr-3 py-2 text-[12px] rounded-[6px] bg-input border border-border-light outline-none focus:border-brass text-text-primary" />
                   </div>
-                  <div className="relative">
+                  <div className="character-create__category-field relative">
                     <button onClick={() => setShowGroupPicker(!showGroupPicker)}
-                      className="px-3 py-2 text-[12px] rounded-[6px] bg-input border border-border-light text-text-muted flex items-center gap-1 active:bg-panel">
+                      className="character-create__category-trigger w-full justify-between px-3 py-2 text-[12px] rounded-[6px] bg-input border border-border-light text-text-muted flex items-center gap-1 active:bg-panel">
                       {activeGroup || '全部分类'} <ChevronDown className="w-3 h-3" />
                     </button>
                     {showGroupPicker && (
                       <>
                         <div className="fixed inset-0 z-10" onClick={() => setShowGroupPicker(false)} />
-                        <div className="absolute right-0 top-full mt-1 z-20 bg-card border border-border-light rounded-md shadow-lg min-w-[140px] overflow-hidden">
+                        <div className="character-create__category-options absolute right-0 top-full mt-1 z-20 bg-card border border-border-light rounded-md shadow-lg overflow-hidden">
                           <button onClick={() => { setActiveGroup(null); setShowGroupPicker(false) }}
                             className="w-full text-left px-3.5 py-2 text-[12px] text-text-primary hover:bg-panel">
                             全部分类
                           </button>
                           {occupationCategories.map(g => (
                             <button key={g.label} onClick={() => { setActiveGroup(g.label); setShowGroupPicker(false) }}
-                              className="w-full text-left px-3.5 py-2 text-[12px] text-text-primary hover:bg-panel flex items-center gap-2">
-                              {g.icon && <span>{g.icon}</span>} {g.label}
+                              className="w-full text-left px-3.5 py-2 text-[12px] text-text-primary hover:bg-panel">
+                              {g.label}
                             </button>
                           ))}
                         </div>
@@ -1335,9 +1431,9 @@ export default function CharacterPage() {
                 </div>
 
                 {selectedOcc && (
-                  <div className="mb-3.5 px-3 py-3 bg-[#fdfaf4] border border-brass rounded-[6px]">
+                  <div className="character-create__selected-occupation mb-3.5 px-3 py-3 border border-brass rounded-[6px]">
                     <div className="flex items-start gap-2.5">
-                      <span className="text-2xl leading-none">{occupationIcon(selectedOcc)}</span>
+                      <span className="character-create__occupation-icon text-2xl leading-none">{occupationIcon(selectedOcc)}</span>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between gap-2">
                           <div className="text-sm font-semibold text-text-primary">{selectedOcc.name}</div>
@@ -1347,23 +1443,27 @@ export default function CharacterPage() {
                               详情
                             </button>
                             <button onClick={() => selectOccupation(null)}
-                              className="text-[11px] text-text-dim underline">
+                              className="character-create__cancel-occupation text-[11px] underline">
                               取消选择
                             </button>
                           </div>
                         </div>
-                        <div className="mt-1 text-[11px] text-text-muted">
-                          信用 {selectedOcc.creditMin}-{selectedOcc.creditMax} · {selectedOcc.skillPointsFormula}
+                        <div className="character-create__selected-occupation-meta mt-1 text-[11px]">
+                          信用 <span className="character-create__number">{selectedOcc.creditMin}-{selectedOcc.creditMax}</span>
+                          {' · '}
+                          <span className="character-create__number">{selectedOcc.skillPointsFormula}</span>
                           {selectedOcc.categories?.length ? ` · ${selectedOcc.categories.join(' / ')}` : ''}
                         </div>
-                        <div className="mt-2 flex flex-wrap gap-1.5">
+                        <div className="character-create__selected-skills mt-2">
                           {selectedOccupationSkillPreview.slice(0, 8).map((label, index) => (
-                            <span key={`${label}-${index}`} className="px-2 py-1 bg-card border border-border-light rounded-[4px] text-[10px] text-text-body">
+                            <span key={`${label}-${index}`} className={`character-create__selected-skill px-2 py-1 bg-card border border-border-light text-[10px] text-text-body ${
+                              Array.from(label).length > 8 ? 'is-wide' : ''
+                            }`}>
                               {label}
                             </span>
                           ))}
                           {selectedOccupationSkillPreview.length > 8 && (
-                            <span className="px-2 py-1 text-[10px] text-text-dim">
+                            <span className="character-create__number px-2 py-1 text-[10px] text-text-dim">
                               +{selectedOccupationSkillPreview.length - 8} 项
                             </span>
                           )}
@@ -1374,22 +1474,24 @@ export default function CharacterPage() {
                 )}
 
                 {/* Occupation grid */}
-                <div className="grid grid-cols-2 gap-2 max-h-[320px] overflow-y-auto pr-0.5">
+                <div className="character-create__occupation-list grid grid-cols-2 gap-2 pr-0.5">
                   {filteredOccupations.map(occ => {
                     const selected = info.occupationId === occ.id
                     return (
                       <div key={occ.id}
                         className={`group relative min-h-[82px] px-2.5 py-3 bg-input border rounded-[6px] text-center cursor-pointer active:scale-[0.96] transition-all ${
-                          selected ? 'border-brass bg-[#fdfaf4] shadow-[0_0_0_2px_rgba(184,151,106,0.15)]' : 'border-border-light'
+                          selected ? 'is-selected' : 'border-border-light'
                         }`}>
                         <button
                           onClick={(e) => { e.stopPropagation(); setDetailOcc(occ); }}
-                          className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-[rgba(255,255,255,0.7)] border border-border-light flex items-center justify-center text-text-dim hover:text-text-body transition-all opacity-0 group-hover:opacity-100"
+                          aria-label={`查看${occ.name}详细内容`}
+                          className="character-create__occupation-detail-button absolute top-1.5 right-1.5 z-[1] rounded-[4px] bg-[rgba(255,255,255,0.55)] border border-border-light px-1.5 py-0.5 text-[9px] text-text-muted hover:text-text-body transition-all"
                         >
-                          <Info className="w-3 h-3" />
+                          <span>查看</span>
+                          <span>详情</span>
                         </button>
                         <div onClick={() => selectOccupation(occ.id)} className="h-full flex flex-col items-center justify-center">
-                          <div className="text-[20px] mb-1">{occupationIcon(occ)}</div>
+                          <div className="character-create__occupation-icon text-[20px] mb-1">{occupationIcon(occ)}</div>
                           <div className="text-[12px] font-semibold text-text-primary leading-[1.3]">{occ.name}</div>
                           {selected && (
                             <div className="mt-1 inline-block px-2 py-0.5 bg-brass/10 text-brass-dark text-[9px] rounded-full font-semibold">
@@ -1410,31 +1512,31 @@ export default function CharacterPage() {
 
           {/* ═══════════════ Step 1: Attributes ═══════════════ */}
           {step === 1 && (
-            <div className="px-5 pb-20 animate-screen-in">
-              <div className="bg-card border border-border-light rounded-md p-[18px]">
-                <h4 className="text-[12px] font-semibold text-brass-dark uppercase tracking-[0.08em] mb-1.5">属性分配</h4>
-                <p className="text-[11px] text-text-muted mb-2">
-                  点击 +/- 调整属性值（范围 {pointBuyRules?.minValue ?? '—'}-{pointBuyRules?.maxValue ?? '—'}，每次 ±5）
+            <div id="character-step-attr" role="tabpanel" aria-labelledby="character-tab-attr" className="character-create__page character-create__page--attributes px-5 pb-20 animate-screen-in">
+              <div className="character-create__attribute-panel">
+                <h4 className="character-create__section-title character-create__attribute-title">属性分配</h4>
+                <p className="character-create__attribute-description mb-2">
+                  点击 +/- 调整属性值（范围 <span className="character-create__number">{pointBuyRules?.minValue ?? '—'}-{pointBuyRules?.maxValue ?? '—'}</span>，每次 <span className="character-create__number">±5</span>）
                 </p>
                 {generationMethod === 'roll' ? (
                   <div className="bg-[#fdf3e0] border border-[#e0c088] rounded-md px-3.5 py-2 mb-3 text-[11px] text-[#8a6a2a]">
                     这些属性由 COC7 标准骰法生成，不占用属性点。手动调整后会切换为点数购买法，并按预算校验。
                   </div>
                 ) : (
-                  <div className="bg-panel rounded-md px-3.5 py-2 mb-3 flex items-center gap-3">
+                  <div className="bg-panel rounded-md px-3.5 py-2 mb-2 flex items-center gap-3">
                     <div className="flex-1">
                       <div className="flex items-center justify-between mb-1">
-                        <span className="text-[11px] font-medium text-text-muted">总点数</span>
-                        <span className="text-[12px] font-bold font-mono text-text-primary">{attrPointsTotal}<span className="text-text-dim font-normal">/{pointBuyRules?.budget ?? '—'}</span></span>
+                        <span className="character-create__attribute-total-label text-[11px] font-medium">总点数</span>
+                        <span className="character-create__attribute-total-value text-[12px] font-bold font-mono">{attrPointsTotal}<span className="font-normal">/{pointBuyRules?.budget ?? '—'}</span></span>
                       </div>
                       <div className="h-1.5 rounded-full bg-border-light overflow-hidden">
                         <div className="h-full rounded-full bg-brass transition-all duration-300" style={{ width: `${pointBuyRules ? Math.min(100, (attrPointsTotal / pointBuyRules.budget) * 100) : 0}%` }} />
                       </div>
                     </div>
-                    <span className="text-[10px] text-text-dim">{pointBuyRules ? pointBuyRules.budget - attrPointsTotal : 0} 点剩余</span>
+                    <span className="character-create__attribute-remaining text-[10px]">（剩余点数：<span className="character-create__number">{pointBuyRules ? pointBuyRules.budget - attrPointsTotal : 0}</span>）</span>
                   </div>
                 )}
-                <div className="grid grid-cols-1 gap-2">
+                <div className="grid grid-cols-1 gap-0">
                   {pointBuyAttributes.map(attribute => {
                     const key = attribute.key
                     const Icon = ATTR_ICONS[key] || Shield
@@ -1445,16 +1547,16 @@ export default function CharacterPage() {
                       <div
                         key={key}
                         data-onboarding-target={key === pointBuyAttributes[0]?.key ? 'attribute-example-row' : undefined}
-                        className="px-3 py-2.5 bg-input border border-border-light rounded-[6px]"
+                        className="character-create__attribute-row px-3 py-2.5 bg-input border border-border-light rounded-[6px]"
                       >
-                        <div className="flex items-center gap-3">
+                        <div className="character-create__attribute-row-main flex items-center gap-3">
                           <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: color + '18' }}>
                             <Icon className="w-4 h-4" style={{ color }} />
                           </div>
                           <div className="flex-1 min-w-0">
                             <div className="text-[13px] font-semibold text-text-primary flex items-center gap-1.5">
                               {attribute.label}
-                              <span className="text-[10px] font-mono text-text-dim font-normal">{key}</span>
+                              <span className="character-create__attribute-key text-[10px] font-mono font-normal">{key}</span>
                               <button
                                 type="button"
                                 onClick={() => setAttributeHelpKey(helpOpen ? null : key)}
@@ -1486,7 +1588,7 @@ export default function CharacterPage() {
                             value={attrInputs[key]}
                             onChange={e => setAttrInputs(inputs => ({ ...inputs, [key]: e.target.value }))}
                             onBlur={() => commitAttrInput(key)}
-                            className="text-[17px] font-bold font-mono text-text-primary min-w-[36px] w-[36px] text-center bg-transparent outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                            className="character-create__attribute-value text-[17px] font-bold font-mono text-text-primary min-w-[36px] w-[36px] text-center bg-transparent outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                           />
                           <button onClick={() => handleAttrChange(key, 5)}
                             aria-label={`增加${attribute.label}`}
@@ -1510,15 +1612,15 @@ export default function CharacterPage() {
                 {(ruleset?.attributes ?? []).filter(a => !a.pointBuy).map(attribute => {
                   const helpOpen = attributeHelpKey === attribute.key
                   return (
-                    <div key={attribute.key} className="px-3 py-2.5 mt-2 bg-panel border border-border-light rounded-[6px]">
-                      <div className="flex items-center gap-3">
+                    <div key={attribute.key} className="character-create__attribute-row character-create__attribute-row--standalone px-3 py-2.5 bg-panel rounded-md">
+                      <div className="character-create__attribute-row-main flex items-center gap-3">
                         <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ backgroundColor: '#4a8a4a18' }}>
                           <Clover className="w-4 h-4" style={{ color: '#4a8a4a' }} />
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="text-[13px] font-semibold text-text-primary flex items-center gap-1.5">
                             {attribute.label}
-                            <span className="text-[10px] font-mono text-text-dim font-normal">{attribute.key}</span>
+                            <span className="character-create__attribute-key text-[10px] font-mono font-normal">{attribute.key}</span>
                             <button
                               type="button"
                               onClick={() => setAttributeHelpKey(helpOpen ? null : attribute.key)}
@@ -1531,9 +1633,9 @@ export default function CharacterPage() {
                               <Info className="w-2.5 h-2.5" strokeWidth={2.5} />
                             </button>
                           </div>
-                          <div className="text-[10px] text-text-dim mt-0.5">不占属性点数（规则为独立掷 {attribute.generation}，由当前生成方式决定）</div>
+                          <div className="character-create__attribute-note text-[10px] mt-0.5">不占属性点数（规则为独立掷 <span className="character-create__number">{attribute.generation}</span>，由当前生成方式决定）</div>
                         </div>
-                        <span className="text-[17px] font-bold font-mono text-text-primary min-w-[36px] text-center">{attr[attribute.key] ?? '—'}</span>
+                        <span className="character-create__attribute-static-value character-create__attribute-static-value--plain text-[17px] font-bold font-mono text-text-primary min-w-[36px] text-center">{attr[attribute.key] ?? '—'}</span>
                       </div>
                       {helpOpen && (
                         <p id={`attribute-help-${attribute.key}`} className="mt-2 border-t border-border-light pt-2 text-[11px] leading-relaxed text-text-muted">
@@ -1546,8 +1648,8 @@ export default function CharacterPage() {
               </div>
 
               {/* Derived Stats */}
-              <div className="bg-card border border-border-light rounded-md p-[18px] mt-3">
-                <h4 className="text-[12px] font-semibold text-brass-dark uppercase tracking-[0.08em] mb-3">衍生属性</h4>
+              <div className="character-create__derived mt-3">
+                <h4 className="character-create__derived-title font-semibold text-brass-dark tracking-[0.08em] mb-3">衍生属性</h4>
                 {previewError && <p className="text-[11px] text-[#c04040] mb-2">{previewError}</p>}
                 <div className="grid grid-cols-3 gap-2" data-testid="derived-stats-grid">
                   {DERIVED_STAT_DEFINITIONS.map(definition => (
@@ -1568,40 +1670,83 @@ export default function CharacterPage() {
 
           {/* ═══════════════ Step 2: Skills ═══════════════ */}
           {step === 2 && (
-            <div className="px-5 pb-20 animate-screen-in">
+            <div id="character-step-skill" role="tabpanel" aria-labelledby="character-tab-skill" className="character-create__page character-create__page--skills px-5 pb-20 animate-screen-in">
+              <h4 className="character-create__section-title character-create__skill-title">技能点分配</h4>
               {/* Point counters */}
               <div data-onboarding-target="skill-editor" className="flex gap-2.5 mb-3">
-                <div className="flex-1 bg-card border border-border-light rounded-md p-3">
-                  <div className="text-[10px] text-text-muted font-semibold mb-1">
-                    职业技能 <span className="text-text-dim">({selectedOcc?.skillPointsFormula || '—'})</span>
+                <div className="flex-1 bg-panel rounded-md p-3">
+                  <div className="character-create__skill-counter-title text-text-muted font-semibold mb-1">
+                    职业技能
                   </div>
                   <div className="flex items-center gap-2">
                     <div className="flex-1 h-2 rounded-full bg-border-light overflow-hidden">
-                      <div className="h-full rounded-full bg-brass transition-all" style={{ width: `${Math.min(100, occPointsTotal ? (occPointsSpent / occPointsTotal) * 100 : 0)}%` }} />
+                      <div className="character-create__skill-progress h-full rounded-full transition-all" style={{ width: `${Math.min(100, occPointsTotal ? (occPointsSpent / occPointsTotal) * 100 : 0)}%` }} />
                     </div>
-                    <span className="text-xs font-bold font-mono text-text-primary">{occPointsSpent}/{occPointsTotal}</span>
+                    <span className="character-create__skill-number text-xs font-bold text-text-primary">{occPointsSpent}/{occPointsTotal}</span>
                   </div>
                 </div>
-                <div className="flex-1 bg-card border border-border-light rounded-md p-3">
-                  <div className="text-[10px] text-text-muted font-semibold mb-1">兴趣技能 <span className="text-text-dim">(INT×2)</span></div>
+                <div className="flex-1 bg-panel rounded-md p-3">
+                  <div className="character-create__skill-counter-title text-text-muted font-semibold mb-1">兴趣技能</div>
                   <div className="flex items-center gap-2">
                     <div className="flex-1 h-2 rounded-full bg-border-light overflow-hidden">
-                      <div className="h-full rounded-full bg-[#4a7098] transition-all" style={{ width: `${Math.min(100, interestPointsTotal ? (interestPointsSpent / interestPointsTotal) * 100 : 0)}%` }} />
+                      <div className="character-create__skill-progress h-full rounded-full transition-all" style={{ width: `${Math.min(100, interestPointsTotal ? (interestPointsSpent / interestPointsTotal) * 100 : 0)}%` }} />
                     </div>
-                    <span className="text-xs font-bold font-mono text-text-primary">{interestPointsSpent}/{interestPointsTotal}</span>
+                    <span className="character-create__skill-number text-xs font-bold text-text-primary">{interestPointsSpent}/{interestPointsTotal}</span>
                   </div>
                 </div>
               </div>
               {previewIssuesBanner}
 
+              {/* Credit Rating — 后端必填技能，值须落在所选职业信用区间内。 */}
+              {selectedOcc && (
+                <div
+                  data-onboarding-target="credit-rating-editor"
+                  className="character-create__credit-rating rounded-md p-3.5 my-3"
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <h4 className="character-create__credit-title font-semibold text-brass-dark">
+                      信用评级 · <span className="text-[#c04040]">必填</span>
+                    </h4>
+                    <span className="character-create__credit-range text-text-muted font-mono">
+                      范围 {selectedOcc.creditMin}–{selectedOcc.creditMax}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3 mt-2">
+                    <button onClick={() => handleCreditChange(-1)}
+                      aria-label="减少信用评级"
+                      disabled={(creditRating ?? selectedOcc.creditMin) <= selectedOcc.creditMin}
+                      className="w-8 h-8 rounded-full bg-card border border-border-light text-text-muted flex items-center justify-center active:bg-panel active:scale-90 transition-all disabled:opacity-40 disabled:active:scale-100"
+                    >
+                      <Minus className="w-4 h-4" />
+                    </button>
+                    <input
+                      aria-label="信用评级"
+                      type="number"
+                      inputMode="numeric"
+                      value={creditInput}
+                      onChange={e => setCreditInput(e.target.value)}
+                      onBlur={commitCreditInput}
+                      className="flex-1 min-w-0 text-center text-[20px] font-bold font-mono text-text-primary bg-transparent outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                    />
+                    <button onClick={() => handleCreditChange(1)}
+                      aria-label="增加信用评级"
+                      disabled={(creditRating ?? selectedOcc.creditMin) >= selectedOcc.creditMax}
+                      className="w-8 h-8 rounded-full bg-card border border-border-light text-text-muted flex items-center justify-center active:bg-panel active:scale-90 transition-all disabled:opacity-40 disabled:active:scale-100"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {selectedOcc && (selectedOcc.choiceSlots?.length ?? 0) > 0 && (
-                <div className="bg-card border border-border-light rounded-md p-3.5 my-3" data-testid="occupation-choice-panel">
+                <div className="character-create__occupation-choice bg-card border border-border-light rounded-md p-3.5 my-3" data-testid="occupation-choice-panel">
                   <div className="flex items-start justify-between gap-3 mb-3">
                     <div>
-                      <h4 className="text-[12px] font-semibold text-brass-dark">职业自选技能</h4>
-                      <p className="text-[10px] text-text-muted mt-0.5">选中的技能将使用职业技能点</p>
+                      <h4 className="character-create__occupation-choice-title font-semibold text-brass-dark">职业自选技能</h4>
+                      <p className="character-create__occupation-choice-description text-text-muted mt-0.5">选中的技能将使用职业技能点</p>
                     </div>
-                    <span className={`text-[11px] font-mono font-semibold ${
+                    <span className={`character-create__occupation-choice-count font-mono font-semibold ${
                       occupationChoicesComplete ? 'text-mold' : 'text-[#c08050]'
                     }`}>
                       {occupationChoiceSkillIds.length}/
@@ -1656,49 +1801,6 @@ export default function CharacterPage() {
                   {validationAttempted && !occupationChoicesComplete && (
                     <p className="mt-2 text-[11px] text-[#c04040]">请填满全部职业自选技能槽位</p>
                   )}
-                </div>
-              )}
-
-              {/* Credit Rating — 后端必填技能，值须落在所选职业信用区间内，
-                  单独给一张显眼卡片，不跟普通技能混在职业/兴趣两个 tab 里。 */}
-              {selectedOcc && (
-                <div
-                  data-onboarding-target="credit-rating-editor"
-                  className="bg-[#fdfaf4] border border-brass rounded-md p-3.5 mb-3"
-                >
-                  <div className="flex items-center justify-between mb-1">
-                    <h4 className="text-[12px] font-semibold text-brass-dark">
-                      信用评级 (Credit Rating) · <span className="text-[#c04040]">必填</span>
-                    </h4>
-                    <span className="text-[11px] text-text-muted font-mono">
-                      范围 {selectedOcc.creditMin}–{selectedOcc.creditMax}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-3 mt-2">
-                    <button onClick={() => handleCreditChange(-1)}
-                      aria-label="减少信用评级"
-                      disabled={(creditRating ?? selectedOcc.creditMin) <= selectedOcc.creditMin}
-                      className="w-8 h-8 rounded-full bg-card border border-border-light text-text-muted flex items-center justify-center active:bg-panel active:scale-90 transition-all disabled:opacity-40 disabled:active:scale-100"
-                    >
-                      <Minus className="w-4 h-4" />
-                    </button>
-                    <input
-                      aria-label="信用评级"
-                      type="number"
-                      inputMode="numeric"
-                      value={creditInput}
-                      onChange={e => setCreditInput(e.target.value)}
-                      onBlur={commitCreditInput}
-                      className="flex-1 min-w-0 text-center text-[20px] font-bold font-mono text-text-primary bg-transparent outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                    />
-                    <button onClick={() => handleCreditChange(1)}
-                      aria-label="增加信用评级"
-                      disabled={(creditRating ?? selectedOcc.creditMin) >= selectedOcc.creditMax}
-                      className="w-8 h-8 rounded-full bg-card border border-border-light text-text-muted flex items-center justify-center active:bg-panel active:scale-90 transition-all disabled:opacity-40 disabled:active:scale-100"
-                    >
-                      <Plus className="w-4 h-4" />
-                    </button>
-                  </div>
                 </div>
               )}
 
@@ -1764,19 +1866,19 @@ export default function CharacterPage() {
 
           {/* ═══════════════ Step 3: Summary ═══════════════ */}
           {step === 3 && (
-            <div data-onboarding-target="background-editor" className="px-5 pb-20 animate-screen-in">
+            <div id="character-step-background" role="tabpanel" aria-labelledby="character-tab-background" data-onboarding-target="background-editor" className="character-create__page px-5 pb-20 animate-screen-in">
               {/* Equipment */}
-              <div className="bg-card border border-border-light rounded-md p-[18px] mb-3">
-                <h4 className="text-[12px] font-semibold text-brass-dark uppercase tracking-[0.08em] mb-3">装备与物品</h4>
+              <div className="character-create__equipment-section mb-3">
+                <h4 className="character-create__background-title font-semibold text-brass-dark tracking-[0.08em] mb-3">装备与物品</h4>
                 <textarea value={equipment} onChange={e => setEquipment(e.target.value)}
                   placeholder="手电筒、笔记本、相机、急救包…" rows={3}
                   className="w-full px-3.5 py-2.5 rounded-[6px] bg-input border border-border-light text-text-primary text-[14px] outline-none focus:border-brass resize-none" />
               </div>
 
               {/* Background */}
-              <div className="bg-card border border-border-light rounded-md p-[18px] mb-3">
-                <div className="flex items-start justify-between gap-3 mb-1.5">
-                  <h4 className="text-[12px] font-semibold text-brass-dark uppercase tracking-[0.08em]">背景故事</h4>
+              <div className="character-create__background-section mb-3">
+                <div className="character-create__background-heading-row flex items-start justify-between gap-3 mb-1.5">
+                  <h4 className="character-create__background-title font-semibold text-brass-dark tracking-[0.08em]">背景故事</h4>
                   <span className={`text-[11px] font-mono ${
                     serializedBackground.length > CHARACTER_BACKGROUND_MAX_LENGTH
                       ? 'text-[#c04040] font-semibold'
@@ -1785,14 +1887,14 @@ export default function CharacterPage() {
                     {serializedBackground.length}/{CHARACTER_BACKGROUND_MAX_LENGTH}
                   </span>
                 </div>
-                <p className="text-[11px] text-text-muted leading-relaxed mb-3">
+                <p className="character-create__background-description text-[11px] leading-relaxed mb-3">
                   分项填写调查员的经历，所有内容均为选填。
                 </p>
                 <div className="space-y-2.5">
                   {BACKGROUND_SECTION_DEFINITIONS.map(section => {
                     const value = backgroundForm.sections[section.key]
                     return (
-                      <div key={section.key} className="rounded-[6px] bg-input border border-border-light p-3">
+                      <div key={section.key} className="character-create__background-field">
                         <label htmlFor={`background-${section.key}`} className="block text-[13px] font-semibold text-text-primary mb-2">
                           {section.label}
                         </label>
@@ -1809,7 +1911,7 @@ export default function CharacterPage() {
                     )
                   })}
 
-                  <div className="rounded-[6px] bg-input border border-border-light p-3">
+                  <div className="character-create__background-field">
                     <label htmlFor="background-other" className="block text-[13px] font-semibold text-text-primary mb-2">
                       其他
                     </label>
@@ -1843,18 +1945,21 @@ export default function CharacterPage() {
             </div>
           )}
 
-                {/* ═══════════════ Occupation Detail Modal ═══════════════ */}
+          </div>
+
+          {/* ═══════════════ Occupation Detail Modal ═══════════════ */}
           {detailOcc && (
             <>
               <div className="fixed inset-0 bg-black/50 z-30 animate-fade-in" onClick={() => setDetailOcc(null)} />
               <div className="fixed inset-x-0 bottom-0 z-40 animate-slide-up">
-                <div className="bg-page border border-border-light rounded-t-xl px-5 pt-5 pb-8 max-h-[80vh] overflow-y-auto">
-                  <div className="flex items-start justify-between mb-5">
+                <div className="character-create__occupation-detail bg-page border border-border-light rounded-t-xl px-5 pt-5 pb-8 max-h-[80vh] overflow-hidden">
+                  <div className="character-create__occupation-detail-scroll">
+                  <div className="character-create__occupation-detail-header flex items-start justify-between mb-5">
                     <div className="flex items-center gap-3">
-                      <span className="text-[32px]">{occupationIcon(detailOcc)}</span>
+                      <span className="character-create__occupation-icon text-[32px]">{occupationIcon(detailOcc)}</span>
                       <div>
                         <h3 className="text-[18px] font-bold text-text-primary">{detailOcc.name}</h3>
-                        <p className="text-xs text-text-muted font-mono">{detailOcc.description}</p>
+                        <p className="character-create__occupation-detail-description text-xs">{detailOcc.description}</p>
                       </div>
                     </div>
                     <button onClick={() => setDetailOcc(null)}
@@ -1863,33 +1968,34 @@ export default function CharacterPage() {
                     </button>
                   </div>
 
-                  <div className="space-y-3.5">
-                    <div className="bg-input border border-border-light rounded-[6px] p-3.5">
-                      <div className="text-[11px] font-semibold text-brass-dark uppercase tracking-[0.08em] mb-2.5">基础信息</div>
-                      <div className="flex items-center gap-6 text-sm">
+                  <div className="space-y-1.5">
+                    <div className="character-create__occupation-detail-section bg-input border border-border-light rounded-[6px] p-3.5">
+                      <div className="character-create__occupation-detail-section-title font-semibold text-brass-dark uppercase tracking-[0.08em] mb-2.5">基础信息</div>
+                      <div className="grid grid-cols-2 gap-1.5 text-sm">
                         <div>
-                          <span className="text-[11px] text-text-muted block">信用范围</span>
-                          <span className="font-bold text-text-primary">{detailOcc.creditMin}-{detailOcc.creditMax}</span>
+                          <span className="character-create__occupation-detail-meta-label block">信用范围</span>
+                          <span className="character-create__occupation-detail-value character-create__number font-bold">{detailOcc.creditMin}-{detailOcc.creditMax}</span>
                         </div>
                         <div>
-                          <span className="text-[11px] text-text-muted block">技能点数</span>
-                          <span className="font-bold font-mono text-text-primary">{detailOcc.skillPointsFormula}</span>
+                          <span className="character-create__occupation-detail-meta-label block">技能点数</span>
+                          <span className="character-create__occupation-detail-value font-bold font-mono">{detailOcc.skillPointsFormula}</span>
                         </div>
                       </div>
                     </div>
 
-                    <div className="bg-input border border-border-light rounded-[6px] p-3.5">
-                      <div className="text-[11px] font-semibold text-brass-dark uppercase tracking-[0.08em] mb-2.5">职业技能 ({detailOcc.skillIds.length})</div>
+                    <div className="character-create__occupation-detail-section bg-input border border-border-light rounded-[6px] p-3.5">
+                      <div className="character-create__occupation-detail-section-title font-semibold text-brass-dark uppercase tracking-[0.08em] mb-2.5">
+                        职业技能 (<span className="character-create__number">{detailOcc.skillIds.length}</span>)
+                      </div>
                       <div className="grid grid-cols-2 gap-1.5">
                         {detailOcc.skillIds.map(id => {
                           const skill = ruleset?.skills.find(s => s.id === id)
                           return (
-                            <div key={id} className="flex items-center gap-2 px-2.5 py-1.5 bg-card border border-border-light rounded-[4px]">
+                            <div key={id} className="character-create__occupation-detail-skill flex items-center gap-2 px-2.5 py-1.5 bg-card border border-border-light">
                               <div className="flex-1 min-w-0">
                                 <div className="text-[12px] font-medium text-text-primary">{skill?.name || id}</div>
-                                <div className="text-[9px] text-text-dim font-mono">{skill?.nameEn}</div>
                               </div>
-                              <div className="text-[10px] font-mono bg-panel px-1.5 py-0.5 rounded text-text-muted">
+                              <div className="character-create__occupation-detail-percentage text-[10px] font-mono bg-panel px-1.5 py-0.5 rounded">
                                 {skill && (typeof skill.base === 'number' ? skill.base + '%' : skill.base)}
                               </div>
                             </div>
@@ -1905,6 +2011,7 @@ export default function CharacterPage() {
                   >
                     选择 {detailOcc.name}
                   </button>
+                  </div>
                 </div>
               </div>
             </>
@@ -1948,17 +2055,47 @@ export default function CharacterPage() {
             </>
           )}
 
+          {quickGenerateError && (
+            <>
+              <div
+                className="fixed inset-0 bg-black/50 z-40 animate-fade-in"
+                onClick={() => setQuickGenerateError('')}
+              />
+              <div
+                role="alertdialog"
+                aria-modal="true"
+                aria-labelledby="quick-generate-error-title"
+                className="fixed inset-x-5 top-1/2 z-50 mx-auto max-w-[360px] -translate-y-1/2 rounded-lg bg-page border border-border-light p-5 shadow-xl"
+              >
+                <h3 id="quick-generate-error-title" className="text-[16px] font-bold text-text-primary">
+                  无法一键创建角色
+                </h3>
+                <p className="mt-2 text-[13px] leading-relaxed text-text-muted" role="alert">
+                  {quickGenerateError}
+                </p>
+                <button
+                  type="button"
+                  autoFocus
+                  onClick={() => setQuickGenerateError('')}
+                  className="mt-5 w-full px-4 py-2.5 rounded-sm bg-brass text-white text-sm font-semibold"
+                >
+                  我知道了
+                </button>
+              </div>
+            </>
+          )}
+
           {activeChoiceSlot && choicePickerSlotIndex != null && (
             <>
               <div
                 className="fixed inset-0 bg-black/50 z-40 animate-fade-in"
                 onClick={() => setChoicePickerSlotIndex(null)}
               />
-              <div className="fixed inset-x-0 bottom-0 z-50 mx-auto max-w-[430px] bg-page border border-border-light rounded-t-xl px-5 pt-5 pb-8 max-h-[75vh] flex flex-col">
-                <div className="flex items-start justify-between gap-3 mb-3">
-                  <div>
-                    <h3 className="text-[16px] font-bold text-text-primary">选择职业技能</h3>
-                    <p className="text-[11px] text-text-muted mt-0.5">{activeChoiceSlot.label}</p>
+              <div className="character-create__choice-picker fixed inset-x-0 bottom-0 z-50 mx-auto max-w-[430px] px-5 pt-5 pb-8 max-h-[75vh] flex flex-col">
+                <div className="character-create__choice-picker-header flex items-start justify-between gap-3 mb-3">
+                  <div className="character-create__choice-picker-heading">
+                    <h3 className="character-create__choice-picker-title font-bold text-text-primary">选择职业技能</h3>
+                    <p className="character-create__choice-picker-description mt-0.5">{activeChoiceSlot.label}</p>
                   </div>
                   <button
                     type="button"
@@ -1976,7 +2113,7 @@ export default function CharacterPage() {
                     onChange={event => setChoiceSkillSearch(event.target.value)}
                     placeholder="搜索技能…"
                     aria-label="搜索职业自选技能"
-                    className="w-full pl-9 pr-3 py-2.5 rounded-[6px] bg-input border border-border-light text-[13px] text-text-primary outline-none focus:border-brass"
+                    className="character-create__choice-picker-search w-full pl-9 pr-3 py-2.5 rounded-[6px] bg-input border border-border-light text-text-primary outline-none focus:border-brass"
                   />
                 </div>
                 <div className="overflow-y-auto space-y-1.5">
@@ -1988,14 +2125,14 @@ export default function CharacterPage() {
                       className="w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-[6px] bg-card border border-border-light text-left active:bg-panel"
                     >
                       <span className="min-w-0">
-                        <span className="block text-[13px] font-medium text-text-primary">{skill.name}</span>
-                        <span className="block text-[10px] font-mono text-text-dim">{skill.nameEn}</span>
+                        <span className="character-create__choice-skill-name block font-medium text-text-primary">{skill.name}</span>
+                        <span className="character-create__choice-skill-subtitle block font-mono">{skill.nameEn}</span>
                       </span>
-                      <Plus className="w-4 h-4 text-brass flex-shrink-0" />
+                      <Plus className="character-create__choice-skill-add w-4 h-4 flex-shrink-0" />
                     </button>
                   ))}
                   {choiceCandidateSkills.length === 0 && (
-                    <p className="py-8 text-center text-sm text-text-muted">没有可选技能</p>
+                    <p className="character-create__choice-picker-empty py-8 text-center">没有可选技能</p>
                   )}
                 </div>
               </div>
@@ -2003,7 +2140,7 @@ export default function CharacterPage() {
           )}
 
           {/* ═══════════════ Bottom action bar ═══════════════ */}
-          <div className="fixed bottom-0 left-0 right-0 bg-page border-t border-border-light px-5 py-3 max-w-[430px] mx-auto z-20">
+          <div className="character-create__actions fixed bottom-0 left-0 right-0 px-5 py-3 max-w-[430px] mx-auto z-20">
             {(currentNavigationIssues[0] || (step === 3 ? submitError : '')) && (
               <p className="text-[11px] text-[#c04040] text-center mb-2">
                 {currentNavigationIssues[0] || submitError}
@@ -2013,14 +2150,14 @@ export default function CharacterPage() {
               <button
                 data-onboarding-page-back
                 onClick={() => step > 0 ? setStep(s => s - 1) : navigate(-1)}
-                className="flex-1 flex items-center justify-center gap-1.5 px-5 py-3 rounded-sm text-sm font-semibold transition-all border border-border-mid bg-card text-text-body active:bg-panel active:scale-[0.97]">
+                className="character-create__action character-create__action--previous flex-1 flex items-center justify-center text-sm font-semibold transition-all active:scale-[0.97]">
                 上一步
               </button>
               <button onClick={handlePrimaryAction}
                 disabled={submitting}
                 data-onboarding-target={step === 3 ? 'character-submit' : undefined}
-                className="flex-1 flex items-center justify-center gap-1.5 px-5 py-3 rounded-sm text-sm font-semibold transition-all bg-brass text-white active:bg-brass-dark active:scale-[0.97] disabled:opacity-60">
-                {submitting ? '提交中…' : step === 3 ? '完成创建' : '下一步'} →
+                className="character-create__action character-create__action--next flex-1 flex items-center justify-center text-sm font-semibold transition-all active:scale-[0.97] disabled:opacity-60">
+                {submitting ? '提交中…' : step === 3 ? '完成创建' : '下一步'}
               </button>
             </div>
           </div>

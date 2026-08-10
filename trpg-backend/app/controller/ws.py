@@ -1130,8 +1130,13 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                             if (
                                 active_plan is not None
                                 and active_plan.parent_action_id != submit_payload.client_action_id
+                                # `retryable_failure` 与 `needs_clarification` 同构：两者都停在
+                                # 等这名玩家再说一句上。此前只豁免后者，于是一次瞬态失败之后，
+                                # 本人换个说法就被自己那条死计划挡住——只有原样重发同一个
+                                # client_action_id 才放行，等于「换句话说」被永久禁用。
                                 and not (
-                                    active_plan.status == "needs_clarification"
+                                    active_plan.status
+                                    in ("needs_clarification", "retryable_failure")
                                     and active_plan.player_id == bound_player_id
                                 )
                             ):

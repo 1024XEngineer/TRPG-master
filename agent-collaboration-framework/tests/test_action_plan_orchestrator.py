@@ -762,6 +762,46 @@ async def test_second_step_provider_failure_retries_from_same_cursor() -> None:
 
 
 @pytest.mark.asyncio
+async def test_retryable_failure_can_be_superseded_by_the_next_utterance() -> None:
+    """可重试失败必须能被同一名玩家的下一句话顶替掉。
+
+    `ActionPlanTurnApplication.start` 靠 `cancel_remaining` 让位，而让位的前提是
+    这条死计划落在可取消边界上：可重试失败的**当前**步恒为 pending，即使更早的
+    步骤已经提交过效果——那正是 cancel_remaining 的语义，保留已提交的、放弃剩下
+    的。这里连同「先前效果不被回滚」一起钉住，免得以后有人把失败步改成非
+    pending，让顶替静默退化成 PLAN_CANCEL_NOT_AT_BOUNDARY，玩家又被锁回「只能
+    原样重发同一句」。
+    """
+
+    module, engine_store, projector = runtime()
+    service = ActionPlanOrchestrator(
+        store=InMemoryActionPlanRunStore(),
+        adjudicator=FailSecondStepOnceAdjudicator(module.world_ref),
+        executor=AdjudicationEngineService(engine_store),
+        player_view_projector=projector,
+    )
+    original = player_input("supersede-parent")
+
+    failed = await service.start_or_resume(original, plan=plan(2))
+    assert failed.run.status == "retryable_failure"
+    assert [step.status for step in failed.run.steps] == ["completed", "pending"]
+
+    superseded = await service.cancel_remaining(
+        CancelActionPlanRequest(
+            request_id="auto-supersede-supersede-parent",
+            room_id=original.room_id,
+            player_id=original.player_id,
+            actor_id=original.actor_id,
+            parent_action_id=original.client_action_id,
+        )
+    )
+
+    assert superseded.status == "cancelled"
+    # 第一步已提交的效果留在世界里，没有被顶替连带回滚。
+    assert len(engine_store.inspect_domain_events("room_01")) == 1
+
+
+@pytest.mark.asyncio
 async def test_invalid_second_step_fails_closed_before_engine_commit() -> None:
     module, engine_store, projector = runtime()
     adjudicator = RejectSecondStepAdjudicator(module.world_ref)
@@ -848,6 +888,72 @@ async def test_room_reservation_blocks_other_parent_until_plan_is_terminal() -> 
         worker_id="worker-1",
         auto_continue=False,
     )
+
+    second_service, _, _, _, _ = orchestrator(action_plan_store=store)
+    with pytest.raises(ActionPlanBusyError) as raised:
+        await second_service.start_or_resume(
+            player_input("second-parent", "另一个行动"),
+            plan=plan(2),
+        )
+    assert raised.value.code == "ACTION_IN_PROGRESS"
+
+
+@pytest.mark.asyncio
+async def test_expired_room_reservation_stops_blocking_the_room() -> None:
+    """占用必须能自己过期，否则一次没走到释放路径的失败就把房间永久锁死。
+
+    去掉 store 里的 TTL 判断，这个测试会停在 ActionPlanBusyError 上。
+    """
+
+    service, _, _, store, _ = orchestrator()
+    first = player_input("first-parent")
+    await service.start_or_resume(
+        first,
+        plan=plan(4),
+        worker_id="worker-1",
+        auto_continue=False,
+    )
+
+    # 把这次占用推到 TTL 之外。持久化侧对应的是 UPDATE 掉 reservation.updated_at，
+    # 内存 store 的占用时间戳就取自 run.updated_at，所以改这里等价。
+    key = (first.room_id, first.client_action_id)
+    store._runs[key] = store._runs[key].model_copy(
+        update={"updated_at": datetime.now(UTC) - timedelta(minutes=6)},
+    )
+
+    assert await store.load_active_for_room(first.room_id) is None
+
+    second_service, _, _, _, _ = orchestrator(action_plan_store=store)
+    taken_over = await second_service.start_or_resume(
+        player_input("second-parent", "另一个行动"),
+        plan=plan(2),
+    )
+    assert taken_over.run.parent_action_id == "second-parent"
+
+
+@pytest.mark.asyncio
+async def test_reservation_within_ttl_still_blocks_the_room() -> None:
+    """TTL 不能顺手把「玩家正在思考」也判成过期。
+
+    `waiting_for_player` 同样占着房间，5 分钟以内必须原样挡住——否则占用会在人
+    还在挑技能时被抽走，随后 CAS 抛 PLAN_RESERVATION_LOST 把回合打死。
+    """
+
+    service, _, _, store, _ = orchestrator()
+    first = player_input("first-parent")
+    await service.start_or_resume(
+        first,
+        plan=plan(4),
+        worker_id="worker-1",
+        auto_continue=False,
+    )
+
+    key = (first.room_id, first.client_action_id)
+    store._runs[key] = store._runs[key].model_copy(
+        update={"updated_at": datetime.now(UTC) - timedelta(minutes=4)},
+    )
+
+    assert await store.load_active_for_room(first.room_id) is not None
 
     second_service, _, _, _, _ = orchestrator(action_plan_store=store)
     with pytest.raises(ActionPlanBusyError) as raised:

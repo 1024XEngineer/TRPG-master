@@ -510,11 +510,18 @@ class ActionPlanTurnApplication:
         # (including the clarifying question itself); the model decides whether
         # this is an answer to that question (multi-step) or unrelated fresh
         # input, instead of the transport layer blocking on a stale plan_id.
+        #
+        # retryable_failure 同样要让位，但理由略有不同：它的**当前**步一定停在
+        # `pending`（三处 _mark_step_failure 对可重试失败都写 step_status="pending"），
+        # 所以照样落在可取消边界上；只是它更早的步骤可能已经提交过效果。那正是
+        # cancel_remaining 的语义——保留已提交的，放弃剩下的。玩家换了一句话说，
+        # 本来就是在放弃旧计划的余下部分。不让位的话，一次瞬态失败会把这名玩家
+        # 锁在「只能原样重发同一句」上，直到占用过期。
         stale_plan = await self._orchestrator.active_for_room(room_id)
         if (
             stale_plan is not None
             and stale_plan.parent_action_id != client_action_id
-            and stale_plan.status == "needs_clarification"
+            and stale_plan.status in ("needs_clarification", "retryable_failure")
             and stale_plan.player_id == player_id
         ):
             await self._orchestrator.cancel_remaining(

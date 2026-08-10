@@ -31,7 +31,7 @@ from collaboration_framework.host.application import (
     PlayerViewProjector,
 )
 from collaboration_framework.host.ports import ActionPlanBusyError
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapters import SqlAlchemyActionPlanRunStore, SqlAlchemyEngineStore
@@ -487,3 +487,78 @@ async def test_sql_pending_plan_rebuild_replays_decision_without_duplicate_effec
         parent_action_id=original.client_action_id,
     )
     assert terminal.status == "completed"
+
+
+async def test_sql_expired_room_reservation_stops_blocking_the_room(
+    db_session: AsyncSession,
+    engine_store_factory: Callable[..., SqlAlchemyEngineStore],
+    action_plan_store_factory: Callable[[], SqlAlchemyActionPlanRunStore],
+) -> None:
+    """过期占用不再挡住房间，且接管者会把这一行清掉。
+
+    这里同时守着一个 SQLite 专属的坑：`updated_at` 声明了 `timezone=True`，但
+    SQLite 不保存时区，取回来是 naive 的。少了 `reservation_is_expired` 里的
+    UTC 兜底，这个用例会以 TypeError 失败而不是断言失败。
+    """
+
+    room, players, _ = await _start_room(db_session, prepare_checkpoint=False)
+    room_id = room.id
+    engine_store = engine_store_factory()
+    async with engine_store.transaction(room.id) as transaction:
+        runtime = await transaction.load_runtime()
+    actor_id = next(
+        actor_id
+        for actor_id, actor in runtime.game_state.actors.items()
+        if actor.player_id == players[0].id
+    )
+    store = action_plan_store_factory()
+    service = ActionPlanOrchestrator(
+        store=store,
+        adjudicator=SqlPlanAdjudicator(runtime.module_content.world_ref),
+        executor=AdjudicationEngineService(engine_store),
+        player_view_projector=PlayerViewProjector(RuleEngineService(engine_store)),
+    )
+    first = PlayerInput(
+        room_id=room.id,
+        player_id=players[0].id,
+        actor_id=actor_id,
+        client_action_id="sql-stale-first",
+        utterance="依次完成四个行动",
+    )
+    await service.start_or_resume(
+        first,
+        plan=four_step_plan(),
+        worker_id="sql-worker-stale",
+        auto_continue=False,
+    )
+    assert await store.load_active_for_room(room_id) is not None
+
+    # 显式写进 SET 子句的值优先于列上的 onupdate，所以这次回拨不会被改回 now()。
+    await db_session.execute(
+        update(RoomActionReservation)
+        .where(RoomActionReservation.room_id == room_id)
+        .values(updated_at=datetime.now(UTC) - timedelta(minutes=6))
+    )
+    await db_session.commit()
+
+    assert await store.load_active_for_room(room_id) is None
+
+    second = PlayerInput(
+        room_id=room.id,
+        player_id=players[0].id,
+        actor_id=actor_id,
+        client_action_id="sql-stale-second",
+        utterance="改做另一件事",
+    )
+    taken_over = await service.start_or_resume(
+        second,
+        plan=four_step_plan(),
+        worker_id="sql-worker-takeover",
+        auto_continue=False,
+    )
+    assert taken_over.run.parent_action_id == "sql-stale-second"
+
+    db_session.expire_all()
+    reservation = await db_session.get(RoomActionReservation, room_id)
+    assert reservation is not None
+    assert reservation.parent_action_id == "sql-stale-second"

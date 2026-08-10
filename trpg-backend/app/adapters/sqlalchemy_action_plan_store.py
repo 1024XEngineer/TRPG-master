@@ -14,6 +14,7 @@ from collaboration_framework.host.ports import (
 from collaboration_framework.host.schemas import (
     RESERVING_PLAN_STATUSES,
     ActionPlanRun,
+    reservation_is_expired,
 )
 from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
@@ -39,10 +40,16 @@ class SqlAlchemyActionPlanRunStore(ActionPlanRunStore):
                     return current
                 reservation = await session.get(RoomActionReservation, run.room_id)
                 if reservation is not None:
-                    raise ActionPlanBusyError(
-                        "ACTION_IN_PROGRESS",
-                        "当前房间已有未完成行动计划",
-                    )
+                    # 过期占用在这里被接管者顺手清掉：读路径只判断、不写库，
+                    # 真正的删除留给第一个来抢占的人，省掉一次额外事务。
+                    if reservation_is_expired(reservation.updated_at):
+                        await session.delete(reservation)
+                        await session.flush()
+                    else:
+                        raise ActionPlanBusyError(
+                            "ACTION_IN_PROGRESS",
+                            "当前房间已有未完成行动计划",
+                        )
                 if run.status not in RESERVING_PLAN_STATUSES:
                     raise ActionPlanConflictError(
                         "PLAN_CREATE_TERMINAL",
@@ -88,6 +95,10 @@ class SqlAlchemyActionPlanRunStore(ActionPlanRunStore):
         async with self._session_factory() as session:
             reservation = await session.get(RoomActionReservation, room_id)
             if reservation is None:
+                return None
+            # 过期的占用不再挡住房间：ws 层据此放行新的提交，`create()` 会在
+            # 抢占时把这一行删掉。这里只读不写，保持读路径无副作用。
+            if reservation_is_expired(reservation.updated_at):
                 return None
             record = await session.get(
                 ActionPlanRunRecord,

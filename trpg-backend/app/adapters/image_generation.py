@@ -6,9 +6,11 @@ import asyncio
 import base64
 import hashlib
 import time
+from io import BytesIO
 from urllib.parse import urlparse
 
 import httpx
+from PIL import Image, ImageDraw
 
 from app.service.portrait_generation import (
     ImageGenerationOutput,
@@ -36,20 +38,19 @@ class MockImageProvider:
             ("#544a32", "#c99373"),
         )
         coat, skin = palettes[int(digest[:2], 16) % len(palettes)]
-        svg = f"""<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024"
- viewBox="0 0 1024 1024">
-<rect width="1024" height="1024" fill="#eee9df"/>
-<rect x="64" y="64" width="896" height="20" rx="10" fill="#{digest[:6]}"/>
-<circle cx="512" cy="372" r="174" fill="{skin}"/>
-<path d="M188 1024c22-262 137-404 324-404s302 142 324 404H188z" fill="{coat}"/>
-<path d="M378 648l134 180 134-180-48-24H426l-48 24z" fill="#f7f3eb"/>
-<circle cx="451" cy="365" r="14" fill="#272520"/>
-<circle cx="573" cy="365" r="14" fill="#272520"/>
-<path d="M458 457c32 22 76 22 108 0" fill="none" stroke="#754b3e"
- stroke-width="12" stroke-linecap="round"/>
-</svg>"""
-        encoded = base64.b64encode(svg.encode()).decode()
-        return ImageGenerationOutput(image_url=f"data:image/svg+xml;base64,{encoded}")
+        # Mock 同样产出可通过真实持久化校验的 PNG，避免开发环境绕开生产安全边界。
+        image = Image.new("RGB", (1024, 1024), "#eee9df")
+        draw = ImageDraw.Draw(image)
+        draw.rounded_rectangle((64, 64, 960, 84), radius=10, fill=f"#{digest[:6]}")
+        draw.ellipse((338, 198, 686, 546), fill=skin)
+        draw.polygon(((188, 1024), (836, 1024), (720, 700), (512, 620), (304, 700)), fill=coat)
+        draw.polygon(((378, 648), (512, 828), (646, 648), (598, 624), (426, 624)), fill="#f7f3eb")
+        draw.ellipse((437, 351, 465, 379), fill="#272520")
+        draw.ellipse((559, 351, 587, 379), fill="#272520")
+        buffer = BytesIO()
+        image.save(buffer, format="PNG", optimize=True)
+        encoded = base64.b64encode(buffer.getvalue()).decode()
+        return ImageGenerationOutput(image_url=f"data:image/png;base64,{encoded}")
 
 
 class DashScopeImageProvider:

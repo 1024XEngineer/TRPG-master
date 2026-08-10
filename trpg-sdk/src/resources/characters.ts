@@ -95,6 +95,23 @@ export class CharactersResource {
     );
   }
 
+  /** GET /api/v1/rooms/{roomId}/players/{playerId}/portrait —
+   * 使用房间凭证读取持久化头像；version 只用于安全地刷新浏览器缓存。 */
+  getPlayerPortrait(
+    roomId: string,
+    playerId: string,
+    version: string,
+    reconnectToken: string,
+    signal?: AbortSignal
+  ): Promise<Blob> {
+    const path = `/rooms/${encodeURIComponent(roomId)}/players/${encodeURIComponent(playerId)}/portrait?v=${encodeURIComponent(version)}`;
+    return this.client.requestBlob(path, {
+      ...this.authenticated(reconnectToken),
+      method: 'GET',
+      signal
+    });
+  }
+
   /** POST /api/v1/rooms/{roomId}/characters/{characterId}/roll-attributes —
    * 服务端权威掷骰生成属性（issue #77 新增，本期未实现）。 */
   rollAttributes(

@@ -78,6 +78,7 @@ class PortraitGenerationResult(CamelModel):
     generation_id: str
     status: Literal["completed"] = "completed"
     image_url: str
+    portrait_version: str
     prompt: str
     negative_prompt: str
     prompt_summary: str

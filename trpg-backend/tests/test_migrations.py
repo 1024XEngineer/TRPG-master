@@ -9,7 +9,7 @@ from pathlib import Path
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 PREVIOUS_REVISION = "1a02058345ee"
 ENGINE_IDENTITY_PREVIOUS_REVISION = "9c4e7a2b1d6f"
-HEAD_REVISION = "e225a1b2c3d4"
+HEAD_REVISION = "f3b8c1d2e4a5"
 
 
 def _run_alembic(database: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -79,6 +79,7 @@ def test_migration_upgrades_empty_sqlite_and_round_trips(tmp_path: Path) -> None
         "adjudication_command_executions",
         "action_plan_runs",
         "room_action_reservations",
+        "character_portraits",
     }.issubset(tables)
     assert "decision_schema_version" in _column_names(
         database,
@@ -114,6 +115,20 @@ def test_migration_upgrades_empty_sqlite_and_round_trips(tmp_path: Path) -> None
     assert "host_speech_voice_type" in _column_names(database, "rooms")
     assert "version" in _column_names(database, "characters")
     assert "occupation_choice_skill_ids" in _column_names(database, "characters")
+    assert {
+        "character_id",
+        "content",
+        "content_type",
+        "size_bytes",
+        "content_hash",
+        "created_at",
+        "updated_at",
+    } == _column_names(database, "character_portraits")
+    assert (
+        "character_id",
+        "characters",
+        "id",
+    ) in _foreign_keys(database, "character_portraits")
     assert "correlation_id" in _column_names(database, "events")
     assert {
         "visibility",
@@ -129,6 +144,7 @@ def test_migration_upgrades_empty_sqlite_and_round_trips(tmp_path: Path) -> None
     assert "module_versions" not in _table_names(database)
     assert "version" not in _column_names(database, "characters")
     assert "occupation_choice_skill_ids" not in _column_names(database, "characters")
+    assert "character_portraits" not in _table_names(database)
     assert "correlation_id" not in _column_names(database, "events")
 
     _upgrade_or_fail(database, "head")

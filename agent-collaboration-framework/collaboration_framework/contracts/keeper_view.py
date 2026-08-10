@@ -72,10 +72,18 @@ class KeeperRuleOption(ContractModel):
 
     The Agent submits `id` and nothing else; what the option *does* stays on the
     server, so a creative model cannot pick an outcome (#226 §1).
+
+    `requires_check` is the one exception, and it is not an outcome: it says
+    only whether this branch rolls dice. The Agent has to know, because it must
+    decide between proposing a check and proposing none — without it the prompt
+    had to tell the model to always send a check and reuse the option id as a
+    skill id, which breaks for options that name no skill at all (`proceed`,
+    `STR`). The player sees the dice either way, so nothing hidden leaks.
     """
 
     id: str = Field(min_length=1)
     semantic_hints: tuple[str, ...] = ()
+    requires_check: bool = True
 
 
 class KeeperRuleCandidate(ContractModel):

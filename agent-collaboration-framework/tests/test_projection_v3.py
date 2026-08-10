@@ -1053,6 +1053,120 @@ class RuleOwnedCheckTests(unittest.IsolatedAsyncioTestCase):
             )
         )
 
+    async def test_rule_without_a_check_still_commits_its_effects(self) -> None:
+        """纯效果规则也必须真的生效（#226 §5）。
+
+        `enter_crypt/proceed` 不掷骰，整条分支就是它的后果。此前这里返回空元组、
+        注释声称「链在提交时已经跑过了」，但没有任何地方跑它——Agenda 只装 event
+        规则。结果是《追书人》整条地穴终局（进入、对话、让他离开、跟随、呼喊、
+        逃离）都不改变任何状态。
+        """
+
+        store = InMemoryEngineStore()
+        store.register_room(
+            module_content=self.content,
+            initial_state=game_state(self.content, scene_id="crypt"),
+        )
+        engine = AdjudicationEngineService(store, dice=DiceRoller(SequenceDiceSource([5])))
+        rules = RuleEngineService(store)
+        snapshot = await rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+
+        execution = await engine.submit(
+            SubmitAdjudicationRequest(
+                room_id=ROOM,
+                player_id=PLAYER,
+                adjudication=ActionAdjudication(
+                    request_id="enter-crypt-1",
+                    source_revision=snapshot.revision,
+                    actor_id=ACTOR,
+                    summary="进入地穴",
+                    target=ActionTarget(kind="entity", id="crypt_entrance"),
+                    method=ActionMethod(family="enter", description="进入地穴"),
+                    rule_decision=RuleDecisionRef(
+                        rule_id="enter_crypt", option_id="proceed"
+                    ),
+                    # 不掷骰的分支：Agent 不该为了凑格式编一个技能出来。
+                    check=NoAdjudicationCheck(),
+                    success_effects=(),
+                    failure_effects=(),
+                ),
+            )
+        )
+
+        self.assertEqual(execution.outcome, "success")
+        state = store.inspect_state(ROOM)
+        self.assertIs(state.entities["crypt_entrance"]["entered"], True)
+        figure = state.entities["cemetery_figure"]
+        self.assertIs(figure["sighted"], True)
+        self.assertIs(figure["true_form_seen"], True)
+        self.assertIs(figure["willing_to_talk"], True)
+
+    async def test_branch_suspended_on_an_executor_refuses_half_effects(self) -> None:
+        """停在 invoke_ruleset_action 上的分支不能提交走过的那一半。
+
+        `crypt_stench_on_entry/just_enter` 先要 `coc7.apply_condition` 让调查员
+        昏迷，之后才置位「见过身影」。把「无检定」一律当成「整条链跑完」，就会
+        跳过昏迷直接记下见过身影——世界停在半截状态。这类分支要等 RuleAgenda
+        的恢复侧（R4）落地，现在应当可见地失败。
+        """
+
+        store = InMemoryEngineStore()
+        store.register_room(
+            module_content=self.content,
+            initial_state=game_state(self.content, scene_id="cemetery"),
+        )
+        engine = AdjudicationEngineService(store, dice=DiceRoller(SequenceDiceSource([5])))
+        rules = RuleEngineService(store)
+        snapshot = await rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+
+        with self.assertRaises(ContractError):
+            await engine.submit(
+                SubmitAdjudicationRequest(
+                    room_id=ROOM,
+                    player_id=PLAYER,
+                    adjudication=ActionAdjudication(
+                        request_id="stench-1",
+                        source_revision=snapshot.revision,
+                        actor_id=ACTOR,
+                        summary="直接钻进石板下的洞口",
+                        target=ActionTarget(kind="entity", id="crypt_entrance"),
+                        method=ActionMethod(family="enter", description="直接进入"),
+                        rule_decision=RuleDecisionRef(
+                            rule_id="crypt_stench_on_entry", option_id="just_enter"
+                        ),
+                        check=NoAdjudicationCheck(),
+                        success_effects=(),
+                        failure_effects=(),
+                    ),
+                )
+            )
+
+        # 半截状态尤其不能落库：昏迷没生效，就不该记下「见过身影」。
+        state = store.inspect_state(ROOM)
+        self.assertNotIn("sighted", state.entities.get("cemetery_figure", {}))
+
+    async def test_rule_option_publishes_whether_it_rolls_dice(self) -> None:
+        """Agent 必须能分辨哪条分支要掷骰，否则只能编一个技能 id 出来。"""
+
+        store = InMemoryEngineStore()
+        store.register_room(
+            module_content=self.content,
+            initial_state=game_state(self.content, scene_id="crypt"),
+        )
+        rules = RuleEngineService(store)
+        capabilities = await rules.read_keeper_capabilities(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        by_rule = {item.rule_id: item for item in capabilities.rule_candidates}
+
+        # proceed 类选项不掷骰；同一地点的力量对抗要掷。
+        self.assertFalse(by_rule["enter_crypt"].options[0].requires_check)
+        self.assertTrue(by_rule["move_crypt_slab"].options[0].requires_check)
+
     async def test_rule_decision_from_another_location_is_refused(self) -> None:
         """候选按场景发布，提交也必须按场景复查。
 

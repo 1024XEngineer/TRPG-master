@@ -1222,8 +1222,24 @@ def _deterministic_step_adjudication(
             if target is not None
             else "location"
         )
-        # The option id doubles as the skill id in the published fixture; the
-        # Engine re-validates it against the Actor's Ruleset snapshot anyway.
+        # 不掷骰的分支（例如 proceed）不能为了凑格式编一个技能出来：option id
+        # 不是技能名，`proceed` / `STR` 提交上去会被 Ruleset 快照拒绝。带检定的
+        # 分支才沿用 option id 作技能，Engine 仍会再校验一次。
+        check = (
+            RequiredAdjudicationCheck(
+                candidates=(
+                    SkillCheckCandidate(
+                        candidate_id=option.id,
+                        skill_id=option.id,
+                        difficulty="regular",
+                        method_summary=context.step.semantic_goal,
+                        player_safe_reason="使用当前地点公开的检定方式",
+                    ),
+                )
+            )
+            if option.requires_check
+            else NoAdjudicationCheck()
+        )
         return ActionAdjudication(
             request_id=context.step_request_id,
             source_revision=context.player_view.revision,
@@ -1246,17 +1262,7 @@ def _deterministic_step_adjudication(
                 description=context.step.semantic_goal,
             ),
             rule_decision=RuleDecisionRef(rule_id=candidate.rule_id, option_id=option.id),
-            check=RequiredAdjudicationCheck(
-                candidates=(
-                    SkillCheckCandidate(
-                        candidate_id=option.id,
-                        skill_id=option.id,
-                        difficulty="regular",
-                        method_summary=context.step.semantic_goal,
-                        player_safe_reason="使用当前地点公开的检定方式",
-                    ),
-                )
-            ),
+            check=check,
             # Effects belong to the rule (#226 §5), not to this stand-in.
             success_effects=(),
             failure_effects=(),

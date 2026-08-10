@@ -56,7 +56,7 @@ from collaboration_framework.contracts import (
 from .models import EngineRuntimeSnapshot, GameState
 from .navigation import effective_location_knowledge, runtime_location_edges
 from .timeline import next_point_after, ordered_points, time_advance_block_reason
-from .rules_v3 import agent_match_scope_admits, evaluate_condition
+from .rules_v3 import agent_match_scope_admits, evaluate_condition, pending_check_for
 
 # Visibility levels an authored node may carry, ordered from most to least open.
 _PLAYER_VISIBLE = {"public", "party"}
@@ -684,7 +684,12 @@ def _rule_candidates(module, location_id: str) -> tuple[KeeperRuleCandidate, ...
                 target_kinds=scope.target_kinds,
                 target_ids=scope.target_ids,
                 options=tuple(
-                    KeeperRuleOption(id=option.id, semantic_hints=option.semantic_hints)
+                    KeeperRuleOption(
+                        id=option.id,
+                        semantic_hints=option.semantic_hints,
+                        # 分支里有没有检定步，是 Agent 必须知道的；后果仍然不出服务端。
+                        requires_check=pending_check_for(rule, option.id)[0] is not None,
+                    )
                     for option in trigger.options
                 ),
             )

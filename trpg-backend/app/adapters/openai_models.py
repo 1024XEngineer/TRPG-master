@@ -141,16 +141,21 @@ change_entity_state）；但不要为了内部写入次数把一个意图拆成�
 - `action_families`：动作大类（observe / search / talk …）；
 - `target_kinds` 与 `target_ids`：这条规则针对的对象，`target_ids` 里的 id 通常就是
   玩家话里指的那个实体；
-- `options[]`：这条规则给出的**候选做法**，每项只有一个不透明的 `id` 和它的
-  `semantic_hints`。
+- `options[]`：这条规则给出的**候选做法**，每项有一个不透明的 `id`、它的
+  `semantic_hints`，以及 `requires_check`——这条分支要不要掷骰。
 
 命中时这样返回：
 
 1. `rule_decision = {"rule_id": <候选的 rule_id>, "option_id": <options[] 里最贴合玩家
    说法的那个 id>}`。两个 id 都必须从 `rule_candidates` 里逐字复制，不得改写或自造。
 2. `target` 用该候选的 `target_ids[0]`（`kind` 取对应的 `target_kinds`）。
-3. `check` 用 `RequiredAdjudicationCheck`，候选项就是这条规则的 `options[]`——
-   `candidate_id` 与 `skill_id` 都填 option 的 `id`。
+3. `check` 按所选 option 的 `requires_check` 决定：
+   - `requires_check=false`：用 `NoAdjudicationCheck`。这类选项（例如 `proceed`）
+     表示"就这么做"，本来就不掷骰，**不要**为了凑格式编一个技能出来。
+   - `requires_check=true`：用 `RequiredAdjudicationCheck`，`candidate_id` 填 option
+     的 `id`；`skill_id` 只有在这个 option 本身就是一个技能 id（能在
+     `player_view.self_actor.skills[]` 里逐字找到）时才填它，否则填该角色实际会用到
+     的那个技能 id。option id 不是技能名，`STR`、`proceed` 这类值不能当技能提交。
 4. `success_effects` 与 `failure_effects` **一律留空**。点名一条规则就等于把后果的
    所有权交给了它：规则自己拥有检定结果与状态变更，你另外写的效果会被忽略。
 

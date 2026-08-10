@@ -977,11 +977,30 @@ class AdjudicationEngineService:
             option_id=decision.option_id,
         )
         step, _ = pending_check_for(rule, branch_id)
-        if step is None or check_run is None:
-            # No check in this branch: the whole chain already ran at submit time.
-            return ()
-        degree = (check_run.final_result or check_run.roll).degree
-        return tuple(effects_after_degree(rule, step.id, degree))
+        if step is not None:
+            if check_run is None:
+                # 分支要求掷骰，裁决却没带检定：拒绝提交后果，而不是当作成功。
+                return ()
+            degree = (check_run.final_result or check_run.roll).degree
+            return tuple(effects_after_degree(rule, step.id, degree))
+
+        walk = walk_rule(rule, branch_id=branch_id)
+        if walk.completed:
+            # 这条分支不掷骰，整条链就是它的后果 —— 规则依然独占这些效果。
+            #
+            # 这里过去返回 ()，注释写的是「链在提交时已经跑过了」，但没有任何地方
+            # 跑它：Agenda 只装 event 规则，agent_match 的决定只经过这里。于是纯
+            # 效果规则被静默吞掉，《追书人》整条地穴终局都不产生任何后果。
+            return tuple(walk.effects)
+
+        # 既不是检定、也没走到终点：停在 invoke_ruleset_action、循环、未知步或
+        # 预算耗尽上。这类分支要靠 RuleAgenda 恢复才能跑完，而恢复侧还没有生产
+        # worker。只提交走过的那一半会把世界留在半截状态（例如昏迷没生效，却已经
+        # 标记见过身影），比什么都不做更糟——所以明确拒绝，让它可见地失败。
+        raise ContractError(
+            f"Rule {rule.id} 的分支 {branch_id} 停在 {walk.suspended_kind} 上，"
+            "当前没有可恢复的执行器，拒绝提交半截后果"
+        )
 
     def _finalize_action(
         self,

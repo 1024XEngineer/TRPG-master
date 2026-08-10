@@ -5,10 +5,13 @@ from __future__ import annotations
 import asyncio
 import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Protocol
 
 import structlog
 from collaboration_framework.contracts import ModuleContent
+from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.coc7_content import build_coc7_ruleset
@@ -24,7 +27,7 @@ from app.dto.portrait import (
 )
 from app.models.content import Scenario
 from app.models.engine import ModuleVersion
-from app.models.room import Character, Room
+from app.models.room import Character, CharacterPortrait, Player, Room
 from app.service.portrait_reference import PortraitReferenceImage, load_portrait_reference_image
 from app.service.room import (
     RoomAuthorizationError,
@@ -69,6 +72,15 @@ class ImageGenerationOutput:
     image_url: str
 
 
+@dataclass(frozen=True, slots=True)
+class StoredPortrait:
+    """头像读取接口所需的最小结果，不包含角色卡或生成提示词。"""
+
+    content: bytes
+    content_type: str
+    content_hash: str
+
+
 class PortraitPromptComposer(Protocol):
     async def compose(self, snapshot: CharacterPortraitSnapshot) -> PortraitPrompt: ...
 
@@ -82,6 +94,21 @@ class ImageGenerationProvider(Protocol):
         size: str,
         reference_image: PortraitReferenceImage | None = None,
     ) -> ImageGenerationOutput: ...
+
+
+class MaterializedPortrait(Protocol):
+    @property
+    def content(self) -> bytes: ...
+
+    @property
+    def content_type(self) -> str: ...
+
+    @property
+    def content_hash(self) -> str: ...
+
+
+class PortraitImageMaterializerProtocol(Protocol):
+    async def materialize(self, image_url: str) -> MaterializedPortrait: ...
 
 
 def _visual_traits(attributes: dict[str, int]) -> list[str]:
@@ -258,12 +285,14 @@ class PortraitGenerationService:
         prompt_composer: PortraitPromptComposer,
         fallback_prompt_composer: PortraitPromptComposer,
         image_provider: ImageGenerationProvider,
+        image_materializer: PortraitImageMaterializerProtocol,
         reference_image: PortraitReferenceImage | None = None,
     ) -> None:
         self._enabled = enabled
         self._prompt_composer = prompt_composer
         self._fallback_prompt_composer = fallback_prompt_composer
         self._image_provider = image_provider
+        self._image_materializer = image_materializer
         self._reference_image = reference_image
         self._in_flight: set[tuple[str, str]] = set()
         self._in_flight_lock = asyncio.Lock()
@@ -332,9 +361,12 @@ class PortraitGenerationService:
                     size=payload.size,
                     reference_image=self._reference_image,
                 )
+            materialized = await self._image_materializer.materialize(output.image_url)
+            await self._replace_portrait(db, character_id, materialized)
             return PortraitGenerationResult(
                 generation_id=str(uuid.uuid4()),
                 image_url=output.image_url,
+                portrait_version=materialized.content_hash,
                 prompt=prompt.positive_prompt,
                 negative_prompt=prompt.negative_prompt,
                 prompt_summary=prompt.prompt_summary,
@@ -343,6 +375,78 @@ class PortraitGenerationService:
         finally:
             async with self._in_flight_lock:
                 self._in_flight.discard(key)
+
+    @staticmethod
+    async def get_player_portrait(
+        db: AsyncSession,
+        room_id: str,
+        player_id: str,
+        reconnect_token: str | None,
+    ) -> StoredPortrait:
+        """只允许房间成员读取同房间玩家的当前头像。"""
+        requester = await get_player_by_reconnect_token(db, reconnect_token)
+        if requester.room_id != room_id:
+            raise RoomAuthorizationError("不能读取其他房间的角色头像")
+        target = await db.get(Player, player_id)
+        if target is None or target.room_id != room_id:
+            raise PortraitCharacterNotFoundError("玩家不存在")
+        row = await db.execute(
+            select(
+                CharacterPortrait.content,
+                CharacterPortrait.content_type,
+                CharacterPortrait.content_hash,
+            )
+            .join(Character, Character.id == CharacterPortrait.character_id)
+            .where(Character.room_id == room_id, Character.player_id == player_id)
+        )
+        portrait = row.one_or_none()
+        if portrait is None:
+            raise PortraitCharacterNotFoundError("角色头像不存在")
+        return StoredPortrait(
+            content=portrait.content,
+            content_type=portrait.content_type,
+            content_hash=portrait.content_hash,
+        )
+
+    @staticmethod
+    async def _replace_portrait(
+        db: AsyncSession,
+        character_id: str,
+        image: MaterializedPortrait,
+    ) -> None:
+        """锁定角色后原子替换当前头像；提交失败时旧头像仍由事务回滚保留。"""
+        try:
+            locked_character = await db.scalar(
+                select(Character).where(Character.id == character_id).with_for_update()
+            )
+            if locked_character is None:
+                raise PortraitCharacterNotFoundError("角色不存在")
+            portrait = await db.get(CharacterPortrait, character_id)
+            now = datetime.now(UTC)
+            if portrait is None:
+                portrait = CharacterPortrait(
+                    character_id=character_id,
+                    content=image.content,
+                    content_type=image.content_type,
+                    size_bytes=len(image.content),
+                    content_hash=image.content_hash,
+                    created_at=now,
+                    updated_at=now,
+                )
+                db.add(portrait)
+            else:
+                portrait.content = image.content
+                portrait.content_type = image.content_type
+                portrait.size_bytes = len(image.content)
+                portrait.content_hash = image.content_hash
+                portrait.updated_at = now
+            await db.commit()
+        except PortraitCharacterNotFoundError:
+            await db.rollback()
+            raise
+        except SQLAlchemyError as exc:
+            await db.rollback()
+            raise PortraitImageGenerationError("角色头像保存失败") from exc
 
 
 def build_portrait_generation_service(settings: Settings) -> PortraitGenerationService:
@@ -355,6 +459,7 @@ def build_portrait_generation_service(settings: Settings) -> PortraitGenerationS
         SufyImageProvider,
     )
     from app.adapters.portrait_prompt import DeepSeekPortraitPromptComposer
+    from app.service.portrait_image import PortraitImageMaterializer
 
     fallback = DeterministicPromptComposer()
     reference_image = load_portrait_reference_image(settings.portrait_reference_image_path)
@@ -405,5 +510,9 @@ def build_portrait_generation_service(settings: Settings) -> PortraitGenerationS
         prompt_composer=prompt_composer,
         fallback_prompt_composer=fallback,
         image_provider=image_provider,
+        image_materializer=PortraitImageMaterializer(
+            max_bytes=settings.portrait_max_image_bytes,
+            timeout_seconds=settings.portrait_image_download_timeout_seconds,
+        ),
         reference_image=reference_image,
     )

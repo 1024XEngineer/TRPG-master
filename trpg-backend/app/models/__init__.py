@@ -29,7 +29,7 @@ from app.models.engine import (
 )
 from app.models.event import CheckResult, Event
 from app.models.replay import ModuleImportJob, RoomSummary
-from app.models.room import Character, Note, Player, Room
+from app.models.room import Character, CharacterPortrait, Note, Player, Room
 from app.models.user import User, UserCharacterTemplate, UserSession
 
 __all__ = [
@@ -40,6 +40,7 @@ __all__ = [
     "CheckResult",
     "CheckRunRecord",
     "Character",
+    "CharacterPortrait",
     "Entity",
     "Event",
     "Game",

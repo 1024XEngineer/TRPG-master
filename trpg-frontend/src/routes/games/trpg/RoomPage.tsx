@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { RoomSocketServerError, TurnFailedError, type AdjudicationPendingPayload, type AgentPlayerView, type AgentTurnPhase, type CheckRequestPayload, type NarrationPushPayload, type RoomConversationEvent } from 'trpg-sdk'
+import { RoomSocketServerError, TurnFailedError, type AdjudicationPendingPayload, type AgentPlayerView, type AgentTurnPhase, type CheckRequestPayload, type NarrationPushPayload, type RoomConversationEvent, type RoomPlayerSummary } from 'trpg-sdk'
 import { ArrowLeft, Users, Map, BookOpen, ScrollText, Star, X, SendHorizontal, Dice6, Plus, Save, FlagOff, Heart, Volume2, Pause, Play, Square, RotateCcw, Mic, LoaderCircle } from 'lucide-react'
 import { useCallback, useState, useRef, useEffect, type Dispatch, type FormEvent, type SetStateAction } from 'react'
 import { useRoomStore } from '@/stores/room-store'
@@ -8,6 +8,7 @@ import { useCharacterStore } from '@/stores/character-store'
 import { connectWebSocket, waitForWsOpen, sdk, onWsMessage, disconnectWebSocket, friendlyErrorMessage, getAuthToken } from '@/services/api-client'
 import { endGame } from '@/services/room'
 import { useRoomPlayers } from '@/hooks/useRoomPlayers'
+import { usePlayerPortraits } from '@/hooks/usePlayerPortraits'
 import { useRuleset } from '@/hooks/useRuleset'
 import { useHostSpeech } from '@/hooks/useHostSpeech'
 import { useSpeechInput } from '@/hooks/useSpeechInput'
@@ -15,6 +16,7 @@ import { Dice3DStage, supports3DDice, type Dice3DHandle, type DiceRollToken } fr
 import { DERIVED_STAT_DEFINITIONS } from '@/data/derived-stats'
 import { OnboardingTrigger } from '@/features/onboarding'
 import { CheckWorkflowPanel } from '@/features/adjudication'
+import { PortraitImage } from '@/features/portrait/PortraitImage'
 import type {
   CheckRunView as UiCheckRunView,
   PendingCheckDecisionView as UiPendingCheckDecisionView,
@@ -87,7 +89,10 @@ interface Message {
   content: string
   time: string
   isSelf?: boolean
+  playerId?: string
 }
+
+const EMPTY_ROOM_PLAYERS: RoomPlayerSummary[] = []
 
 interface MapLocation {
   id: string
@@ -277,6 +282,7 @@ function conversationEventToMessage(
       content: payload.text,
       time: formatRoomTime(payload.sentAt),
       isSelf: payload.playerId === selfPlayerId,
+      playerId: payload.playerId,
     }
   }
   if (event.type === 'action.broadcast') {
@@ -295,6 +301,7 @@ function conversationEventToMessage(
       content: payload.utterance,
       time: formatRoomTime(event.createdAt),
       isSelf: payload.playerId === selfPlayerId,
+      playerId: payload.playerId,
     }
   }
   if (event.type === 'narration.push') {
@@ -878,6 +885,8 @@ export default function RoomPage() {
   const senderName = character?.info.name || nickname || '你'
   const { ruleset } = useRuleset()
   const roomInfo = useRoomPlayers(roomCode)
+  const roomPlayers = roomInfo?.players ?? EMPTY_ROOM_PLAYERS
+  const portraitUrls = usePlayerPortraits(roomId, reconnectToken, roomPlayers)
   const hostSpeech = useHostSpeech({ roomId, reconnectToken, accountToken: getAuthToken() })
   const enqueueHostSpeech = hostSpeech.enqueue
   const markHostSpeechSeen = hostSpeech.markSeen
@@ -1152,6 +1161,7 @@ export default function RoomPage() {
             content: envelope.payload.text,
             time: formatRoomTime(envelope.payload.sentAt),
             isSelf: envelope.payload.playerId === playerId,
+            playerId: envelope.payload.playerId,
           })
         })
       } else if (envelope.type === 'action.broadcast') {
@@ -1163,6 +1173,7 @@ export default function RoomPage() {
           content: envelope.payload.utterance,
           time: formatRoomTime(new Date()),
           isSelf: envelope.payload.playerId === playerId,
+          playerId: envelope.payload.playerId,
         }))
       } else if (envelope.type === 'check.request') {
         setTyping(false)
@@ -1485,11 +1496,18 @@ export default function RoomPage() {
 
           const isPlayer = msg.type === 'player' && msg.isSelf
           const isNarr = msg.type === 'narr'
+          const portraitUrl = msg.playerId ? portraitUrls[msg.playerId] : undefined
 
           return (
             <div key={i} className={`flex gap-2.5 ${isPlayer ? 'flex-row-reverse' : ''} animate-[msgIn_0.3s_ease]`}>
-              <div className={`w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-sm border border-border-light ${isNarr ? 'bg-[#faf5eb] border-brass' : isPlayer ? 'bg-[#eef6ee]' : 'bg-panel'}`}>
-                {isNarr ? '📜' : isPlayer ? '🔍' : '🤖'}
+              <div className={`w-8 h-8 rounded-full flex-shrink-0 overflow-hidden flex items-center justify-center text-sm border border-border-light ${isNarr ? 'bg-[#faf5eb] border-brass' : isPlayer ? 'bg-[#eef6ee]' : 'bg-panel'}`}>
+                {msg.type === 'player' && portraitUrl ? (
+                  <img
+                    src={portraitUrl}
+                    alt={`${msg.sender ?? '玩家'}的头像`}
+                    className="h-full w-full object-cover"
+                  />
+                ) : isNarr ? '📜' : msg.type === 'player' ? '🔍' : '🤖'}
               </div>
               <div className={`flex-1 min-w-0 ${isPlayer ? 'text-right' : ''}`}>
                 <div className={`text-[11px] font-semibold text-text-muted mb-0.5 ${isPlayer ? 'text-mold' : ''} ${isNarr ? 'text-brass-dark' : ''}`}>
@@ -1770,9 +1788,16 @@ export default function RoomPage() {
             {sheetPage === 'info' && (
               <>
                 <div className="flex items-center gap-3 mb-3.5">
-                  <div className="w-12 h-14 rounded-sm flex items-center justify-center text-2xl"
+                  <div className="w-12 h-14 rounded-sm flex items-center justify-center text-2xl overflow-hidden"
                     style={{ background: 'linear-gradient(135deg,#e8e0d0,#d8cfb8)', border: '2px solid #b8976a' }}>
-                    🕵️
+                    {playerId && portraitUrls[playerId] ? (
+                      <PortraitImage
+                        src={portraitUrls[playerId]}
+                        alt={`${character.info.name}的头像`}
+                        buttonClassName="h-full w-full"
+                        imageClassName="h-full w-full object-cover"
+                      />
+                    ) : '🕵️'}
                   </div>
                   <div>
                     <div className="text-sm font-semibold text-text-primary">{character.info.name}</div>

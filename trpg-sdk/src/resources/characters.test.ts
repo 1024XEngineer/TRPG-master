@@ -22,6 +22,7 @@ test('generatePortrait 调用角色生图接口并携带房间凭证', async () 
           generationId: 'generation-1',
           status: 'completed',
           imageUrl: 'https://images.example/portrait.png',
+          portraitVersion: 'portrait-version-1',
           prompt: 'portrait prompt',
           negativePrompt: 'watermark',
           promptSummary: '根据职业与背景生成',
@@ -53,6 +54,40 @@ test('generatePortrait 调用角色生图接口并携带房间凭证', async () 
     size: '1024x1024'
   });
   assert.equal(result.promptSource, 'deepseek');
+});
+
+test('getPlayerPortrait 编码路径和版本并返回鉴权 Blob', async () => {
+  let captured: { url: string; method: string | undefined; headers: Headers } | undefined;
+  const fakeFetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    captured = {
+      url: String(input),
+      method: init?.method,
+      headers: new Headers(init?.headers)
+    };
+    return new Response(new Blob(['portrait-bytes'], { type: 'image/png' }), {
+      status: 200,
+      headers: { 'Content-Type': 'image/png' }
+    });
+  }) as typeof fetch;
+  const characters = new CharactersResource(
+    new ApiClient({ baseUrl: 'http://test/api/v1', fetch: fakeFetch })
+  );
+
+  const result = await characters.getPlayerPortrait(
+    'room /一',
+    'player /二',
+    'hash +/=',
+    'reconnect-token-1'
+  );
+
+  assert.equal(
+    captured?.url,
+    'http://test/api/v1/rooms/room%20%2F%E4%B8%80/players/player%20%2F%E4%BA%8C/portrait?v=hash%20%2B%2F%3D'
+  );
+  assert.equal(captured?.method, 'GET');
+  assert.equal(captured?.headers.get('x-reconnect-token'), 'reconnect-token-1');
+  assert.equal(result.type, 'image/png');
+  assert.equal(await result.text(), 'portrait-bytes');
 });
 
 test('quickGenerate 调用一键生成接口并携带房间凭证', async () => {

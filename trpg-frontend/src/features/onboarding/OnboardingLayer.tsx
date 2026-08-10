@@ -320,7 +320,10 @@ function Tooltip({
 }
 
 export default function OnboardingLayer() {
-  const { pathname } = useLocation()
+  const location = useLocation()
+  const { pathname } = location
+  const isEditingExistingCharacter = pathname === '/room/character'
+    && Boolean((location.state as { fromCharacterReady?: boolean } | null)?.fromCharacterReady)
   const userId = useAuthStore((state) => state.userId)
   const roomId = useRoomStore((state) => state.roomId)
   const isHost = useRoomStore((state) => state.isHost)
@@ -331,6 +334,7 @@ export default function OnboardingLayer() {
   const [confirmSkipOpen, setConfirmSkipOpen] = useState(false)
   const [completionOpen, setCompletionOpen] = useState(false)
   const [dismissedFallbackStep, setDismissedFallbackStep] = useState<string | null>(null)
+  const [autoGuideSuppressed, setAutoGuideSuppressed] = useState(isEditingExistingCharacter)
 
   const steps = useMemo(() => stepsForAudience(isHost), [isHost])
   const activeIndex = findStepIndex(steps, state?.stepId ?? null)
@@ -346,6 +350,7 @@ export default function OnboardingLayer() {
   ))
 
   useEffect(() => {
+    setAutoGuideSuppressed(isEditingExistingCharacter)
     if (!userId || !roomId || !isGuideRoute(pathname)) {
       setState(null)
       setIntroOpen(false)
@@ -353,6 +358,12 @@ export default function OnboardingLayer() {
       return
     }
     const stored = readOnboardingState(userId)
+    if (isEditingExistingCharacter) {
+      setState(stored)
+      setIntroOpen(false)
+      setConfirmSkipOpen(false)
+      return
+    }
     if (stored?.status === 'skipped' || stored?.status === 'completed') {
       setState(stored)
       setIntroOpen(false)
@@ -365,7 +376,7 @@ export default function OnboardingLayer() {
     }
     setState(null)
     setIntroOpen(true)
-  }, [isHost, pathname, roomId, userId])
+  }, [isEditingExistingCharacter, isHost, pathname, roomId, userId])
 
   useEffect(() => {
     if (!replayRequest || replayRequest === handledReplayRequest.current) return
@@ -380,6 +391,7 @@ export default function OnboardingLayer() {
     if (!first) return
 
     const nextState = { status: 'active' as const, stepId: first.id }
+    setAutoGuideSuppressed(false)
     setState(nextState)
     writeOnboardingState(userId, nextState)
     setIntroOpen(false)
@@ -462,6 +474,7 @@ export default function OnboardingLayer() {
     setDismissedFallbackStep(null)
   }
 
+  if (autoGuideSuppressed) return null
   if (confirmSkipOpen) return <ConfirmSkipDialog onCancel={() => setConfirmSkipOpen(false)} onConfirm={skip} />
   if (completionOpen) return <CompletionDialog onClose={() => setCompletionOpen(false)} />
   if (introOpen) return <IntroDialog onStart={start} onSkip={() => setConfirmSkipOpen(true)} />

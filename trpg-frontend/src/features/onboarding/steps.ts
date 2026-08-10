@@ -16,7 +16,7 @@ export const ONBOARDING_STEPS: readonly OnboardingStep[] = [
     route: '/room/character',
     target: 'character-progress',
     title: '按四步完成角色卡',
-    description: '角色卡分为信息、属性、技能和完成四步。先填写姓名等身份信息，已填写的内容会保留，也可以返回修改。',
+    description: '角色卡分为基础信息、属性、技能、背景四部分。先填写姓名等身份信息，已填写的内容会保留，也可以返回修改。',
   },
   {
     id: 'occupation-picker',

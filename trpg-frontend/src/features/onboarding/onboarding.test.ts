@@ -1,5 +1,5 @@
 import { createElement } from 'react'
-import { cleanup, render, waitFor } from '@testing-library/react'
+import { act, cleanup, render, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { calculateSpotlightRect } from './geometry'
@@ -163,6 +163,60 @@ describe('onboarding delayed target alignment', () => {
 
     await waitFor(() => {
       expect(scrollIntoView).toHaveBeenCalledWith({ block: 'center', behavior: 'smooth' })
+    })
+  })
+})
+
+describe('onboarding character edit mode', () => {
+  beforeEach(() => {
+    window.localStorage.clear()
+    useOnboardingController.setState({ replayRequest: 0 })
+    useAuthStore.setState({ userId: 'user-a' })
+    useRoomStore.setState({ roomId: 'room-a', isHost: false })
+  })
+
+  it('does not automatically resume character-building steps when editing a completed character', async () => {
+    writeOnboardingState('user-a', { status: 'active', stepId: 'skill-editor' })
+
+    render(
+      createElement(
+        MemoryRouter,
+        { initialEntries: [{ pathname: '/room/character', state: { fromCharacterReady: true } }] },
+        createElement(
+          'div',
+          { id: 'root' },
+          createElement(OnboardingLayer),
+          createElement('div', { 'data-onboarding-target': 'skill-editor' }),
+        ),
+      ),
+    )
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-onboarding-highlight="true"]')).toBeNull()
+    })
+  })
+
+  it('still allows the rules button to replay the guide while editing', async () => {
+    writeOnboardingState('user-a', { status: 'completed', stepId: null })
+
+    render(
+      createElement(
+        MemoryRouter,
+        { initialEntries: [{ pathname: '/room/character', state: { fromCharacterReady: true } }] },
+        createElement(
+          'div',
+          { id: 'root' },
+          createElement(OnboardingLayer),
+          createElement('div', { 'data-onboarding-target': 'skill-editor' }),
+        ),
+      ),
+    )
+
+    await act(async () => undefined)
+    act(() => useOnboardingController.getState().requestReplay())
+
+    await waitFor(() => {
+      expect(readOnboardingState('user-a')).toEqual({ status: 'active', stepId: 'skill-editor' })
     })
   })
 })

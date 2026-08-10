@@ -2092,8 +2092,8 @@ export default function CharacterPage() {
                 onClick={() => setChoicePickerSlotIndex(null)}
               />
               <div className="character-create__choice-picker fixed inset-x-0 bottom-0 z-50 mx-auto max-w-[430px] px-5 pt-5 pb-8 max-h-[75vh] flex flex-col">
-                <div className="flex items-start justify-between gap-3 mb-3">
-                  <div>
+                <div className="character-create__choice-picker-header flex items-start justify-between gap-3 mb-3">
+                  <div className="character-create__choice-picker-heading">
                     <h3 className="character-create__choice-picker-title font-bold text-text-primary">选择职业技能</h3>
                     <p className="character-create__choice-picker-description mt-0.5">{activeChoiceSlot.label}</p>
                   </div>
@@ -2128,7 +2128,7 @@ export default function CharacterPage() {
                         <span className="character-create__choice-skill-name block font-medium text-text-primary">{skill.name}</span>
                         <span className="character-create__choice-skill-subtitle block font-mono">{skill.nameEn}</span>
                       </span>
-                      <Plus className="w-4 h-4 text-brass flex-shrink-0" />
+                      <Plus className="character-create__choice-skill-add w-4 h-4 flex-shrink-0" />
                     </button>
                   ))}
                   {choiceCandidateSkills.length === 0 && (

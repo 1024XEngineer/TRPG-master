@@ -2681,6 +2681,8 @@
 }
 
 .character-ready-scene__connection {
+  position: relative;
+  left: 0.65rem;
   display: grid;
   width: 78%;
   grid-template-columns: 0.5rem minmax(0, 1fr) 0.5rem;

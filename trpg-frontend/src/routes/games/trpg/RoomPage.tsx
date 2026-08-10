@@ -2711,6 +2711,13 @@ export default function RoomPage() {
             decisionVersion: decision.decision_version,
             cancel: true,
           })
+          // 选技能之后服务端会回一条新的 adjudication.pending（掷骰结果）把面板换掉，
+          // 取消则没有任何东西来接替它：面板要一直等到权威叙事回来才收，而叙事这一
+          // 趟是整回合里最慢的。于是"选择检定方式"和"守秘人组织语言中"会同屏并存好
+          // 几秒——两个互斥状态一起显示。这个决策在服务端已经作废（取消不可撤销，
+          // 重试也只会撞 SOURCE_REVISION_STALE），所以本地立刻收面板；万一取消本身被
+          // 拒，turn.failed / error 分支同样会清掉它并给出错误，行为一致。
+          setPendingAdjudication(null)
         }}
         onPostRollOption={submitAdjudicationPostRoll}
       />

@@ -1626,6 +1626,58 @@ describe('RoomPage conversation history', () => {
     )
   })
 
+  it('closes the check panel as soon as the player cancels the action', () => {
+    // 取消之后没有后续面板来接替"选择检定方式"，而权威叙事要等整回合跑完才回来。
+    // 面板留在原地的那几秒里，屏幕上同时挂着它和"守秘人组织语言中"。
+    renderRoomPage()
+
+    act(() =>
+      emitWsMessage({
+        type: 'adjudication.pending',
+        payload: {
+          correlationId: 'cancelled-check',
+          planId: null,
+          sourceRevision: 'revision-1',
+          status: 'awaiting_skill_choice',
+          pendingDecision: {
+            decision_id: 'decision-cancelled',
+            action_request_id: 'cancelled-check',
+            source_revision: 'revision-1',
+            decision_version: 1,
+            actor_id: 'actor-1',
+            summary: '撬开抽屉',
+            options: [
+              {
+                candidate_id: 'locksmith',
+                skill_id: 'locksmith',
+                display_name: '锁匠',
+                target_value: 40,
+                difficulty: 'regular',
+                method_summary: '用铁丝拨开锁芯',
+                player_safe_reason: '这是当前可用的做法',
+              },
+            ],
+            allow_cancel: true,
+          },
+        },
+      }),
+    )
+    expect(screen.getByRole('region', { name: '待处理检定' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /取消行动/ }))
+
+    expect(mockSelectAdjudication).toHaveBeenCalledWith(
+      'player-1',
+      expect.objectContaining({
+        clientActionId: 'cancelled-check',
+        decisionId: 'decision-cancelled',
+        cancel: true,
+      }),
+    )
+    expect(screen.queryByRole('region', { name: '待处理检定' })).not.toBeInTheDocument()
+    expect(screen.getByText('守秘人组织语言中')).toBeInTheDocument()
+  })
+
   it('animates the authoritative adjudication roll before the player sends it', async () => {
     vi.useFakeTimers()
     renderRoomPage()

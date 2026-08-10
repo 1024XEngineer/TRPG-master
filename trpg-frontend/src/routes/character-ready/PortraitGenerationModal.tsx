@@ -9,6 +9,7 @@ interface PortraitGenerationModalProps {
   characterId: string
   characterName: string
   result: PortraitGenerationResult | null
+  portraitUrl?: string
   onResult: (result: PortraitGenerationResult) => void
   onClose: () => void
 }
@@ -18,6 +19,7 @@ export function PortraitGenerationModal({
   characterId,
   characterName,
   result,
+  portraitUrl,
   onResult,
   onClose,
 }: PortraitGenerationModalProps) {
@@ -84,12 +86,12 @@ export function PortraitGenerationModal({
                 <RefreshCw className="h-8 w-8 animate-spin text-brass" />
                 <span className="text-sm">正在生成人物图片…</span>
               </div>
-            ) : result ? (
+            ) : portraitUrl ? (
               <img
-                src={result.imageUrl}
+                src={portraitUrl}
                 alt={`${characterName}的人物图片`}
                 className="h-full w-full object-cover"
-                onError={() => setError('图片地址已失效，请重新生成')}
+                onError={() => setError('人物头像加载失败，请稍后重试')}
               />
             ) : (
               <Image className="h-14 w-14 text-text-dim" strokeWidth={1.4} />
@@ -115,8 +117,8 @@ export function PortraitGenerationModal({
             disabled={generating}
             className="mt-5 flex min-h-11 w-full items-center justify-center gap-2 rounded-sm bg-brass px-5 py-3 text-sm font-semibold text-white transition-colors active:bg-brass-dark disabled:opacity-50"
           >
-            {result ? <RefreshCw className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
-            {generating ? '生成中…' : result ? '重新生成' : '开始生成'}
+            {portraitUrl ? <RefreshCw className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
+            {generating ? '生成中…' : portraitUrl ? '重新生成' : '开始生成'}
           </button>
         </div>
       </div>

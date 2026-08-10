@@ -228,6 +228,10 @@ vi.mock('@/hooks/useRoomPlayers', () => ({
   }),
 }))
 
+vi.mock('@/hooks/usePlayerPortraits', () => ({
+  usePlayerPortraits: () => ({ 'player-1': 'blob:player-1-portrait' }),
+}))
+
 vi.mock('@/hooks/useRuleset', () => ({
   useRuleset: () => ({
     ruleset: {
@@ -414,6 +418,10 @@ describe('RoomPage conversation history', () => {
     renderRoomPage()
 
     expect(await screen.findByText('我查看书架')).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: '杜调查员的头像' })).toHaveAttribute(
+      'src',
+      'blob:player-1-portrait',
+    )
     expect(screen.getByText('你发现书架后有一个暗格。')).toBeInTheDocument()
     expect(screen.getByText('图书馆使用 50% · D100 23 · 成功')).toBeInTheDocument()
     expect(screen.getByText('杜调查员 · 掷骰')).toBeInTheDocument()
@@ -422,6 +430,10 @@ describe('RoomPage conversation history', () => {
     fireEvent.click(screen.getByRole('button', { name: '讨论区' }))
 
     expect(await screen.findByText('先在讨论区确认路线')).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: '陈探员的头像' })).toHaveAttribute(
+      'src',
+      'blob:player-1-portrait',
+    )
   })
 
   it('does not duplicate realtime action broadcast already restored from history', async () => {

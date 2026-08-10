@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom'
-import { useEffect, useRef, useState } from 'react'
-import type { PortraitGenerationResult } from 'trpg-sdk'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { PortraitGenerationResult, RoomPlayerSummary } from 'trpg-sdk'
 import { ArrowLeft, UserPlus, Swords, Eye, ImagePlus } from 'lucide-react'
 import { useCharacterStore } from '@/stores/character-store'
 import { fetchCharacter } from '@/services/character/character-api'
@@ -8,6 +8,7 @@ import { useRoomStore } from '@/stores/room-store'
 import { useAuthStore } from '@/stores/auth-store'
 import { connectWebSocket, disconnectWebSocket, sdk, waitForWsOpen } from '@/services/api-client'
 import { useRoomPlayers } from '@/hooks/useRoomPlayers'
+import { usePlayerPortraits } from '@/hooks/usePlayerPortraits'
 import { useRuleset } from '@/hooks/useRuleset'
 import { PortraitGenerationModal } from './PortraitGenerationModal'
 import { DERIVED_STAT_DEFINITIONS, normalizeDerivedStats } from '@/data/derived-stats'
@@ -18,8 +19,9 @@ const SHEET_PAGES = [
   { key: 'skills', label: '技能' },
   { key: 'background', label: '背景装备' },
 ] as const
+const EMPTY_PLAYERS: RoomPlayerSummary[] = []
 
-function CharacterSheetModal({ character, onClose }: { character: NonNullable<ReturnType<typeof useCharacterStore.getState>['character']>; onClose: () => void }) {
+function CharacterSheetModal({ character, portraitUrl, onClose }: { character: NonNullable<ReturnType<typeof useCharacterStore.getState>['character']>; portraitUrl?: string; onClose: () => void }) {
   const [page, setPage] = useState<typeof SHEET_PAGES[number]['key']>('info')
   const { ruleset } = useRuleset()
   const occupation = character.info.occupationId
@@ -55,9 +57,11 @@ function CharacterSheetModal({ character, onClose }: { character: NonNullable<Re
           {page === 'info' && (
             <>
               <div className="flex items-center gap-3">
-                <div className="w-12 h-14 rounded-sm flex items-center justify-center text-2xl"
+                <div className="w-12 h-14 rounded-sm flex items-center justify-center text-2xl overflow-hidden"
                   style={{ background: 'linear-gradient(135deg,#e8e0d0,#d8cfb8)', border: '2px solid #b8976a' }}>
-                  🕵️
+                  {portraitUrl ? (
+                    <img src={portraitUrl} alt={`${character.info.name}的头像`} className="h-full w-full object-cover" />
+                  ) : '🕵️'}
                 </div>
                 <div>
                   <div className="font-bold text-text-primary text-[17px]">{character.info.name}</div>
@@ -155,6 +159,7 @@ export default function CharacterReadyPage() {
   const [showSelfSheet, setShowSelfSheet] = useState(false)
   const [showPortraitGenerator, setShowPortraitGenerator] = useState(false)
   const [portraitResult, setPortraitResult] = useState<PortraitGenerationResult | null>(null)
+  const [portraitVersionOverride, setPortraitVersionOverride] = useState<string | null>(null)
   const [starting, setStarting] = useState(false)
   const roomId = useRoomStore((s) => s.roomId)
   const cachedCharacter = useCharacterStore((s) => (roomId ? s.getForRoom(roomId) : null))
@@ -212,9 +217,24 @@ export default function CharacterReadyPage() {
   const nickname = useAuthStore((s) => s.nickname)
   const hasCharacter = character !== null
   const info = useRoomPlayers(roomCode)
-  const players = info?.players ?? []
+  const players = info?.players ?? EMPTY_PLAYERS
+  // 生图成功响应里的版本先覆盖轮询旧值，使当前玩家无需等待下一轮房间请求。
+  const portraitPlayers = useMemo(() => players.map((player) => (
+    player.playerId === playerId && portraitVersionOverride
+      ? { ...player, hasPortrait: true, portraitVersion: portraitVersionOverride }
+      : player
+  )), [players, playerId, portraitVersionOverride])
+  const portraitUrls = usePlayerPortraits(roomId, reconnectToken, portraitPlayers)
   const allHaveCharacters = players.length > 0 && players.every((p) => p.hasCharacter)
   const advancedRef = useRef(false)
+
+  useEffect(() => {
+    const current = players.find((player) => player.playerId === playerId)
+    if (portraitVersionOverride && current?.portraitVersion === portraitVersionOverride) {
+      // 房间轮询追上刚生成的版本后撤掉临时覆盖，后续跨设备重生成仍能被发现。
+      setPortraitVersionOverride(null)
+    }
+  }, [playerId, players, portraitVersionOverride])
 
   // ★ 房主点"开始游戏"之后，后端 _on_game_start 会把房间 phase 改成
   // InGame——其他玩家没有 WS 广播可用，只能靠轮询这个字段发现"游戏真的开始
@@ -303,9 +323,9 @@ export default function CharacterReadyPage() {
               className="flex items-center gap-3 px-3.5 py-3 bg-card border border-border-light rounded-md"
             >
               <div className={`w-10 h-10 rounded-full bg-panel border border-border-mid flex items-center justify-center text-lg flex-shrink-0 overflow-hidden ${p.hasCharacter ? 'border-brass' : 'border-dashed border-border-light'}`}>
-                {isSelf && portraitResult ? (
+                {portraitUrls[p.playerId] ? (
                   <img
-                    src={portraitResult.imageUrl}
+                    src={portraitUrls[p.playerId]}
                     alt={`${character?.info.name ?? p.nickname}的人物图片`}
                     className="h-full w-full object-cover"
                   />
@@ -389,7 +409,11 @@ export default function CharacterReadyPage() {
 
       {/* Character Sheet Modal */}
       {showSelfSheet && character && (
-        <CharacterSheetModal character={character} onClose={() => setShowSelfSheet(false)} />
+        <CharacterSheetModal
+          character={character}
+          portraitUrl={playerId ? portraitUrls[playerId] : undefined}
+          onClose={() => setShowSelfSheet(false)}
+        />
       )}
       {showPortraitGenerator && character && roomId && characterId && (
         <PortraitGenerationModal
@@ -397,7 +421,11 @@ export default function CharacterReadyPage() {
           characterId={characterId}
           characterName={character.info.name}
           result={portraitResult}
-          onResult={setPortraitResult}
+          portraitUrl={playerId ? portraitUrls[playerId] : undefined}
+          onResult={(result) => {
+            setPortraitResult(result)
+            setPortraitVersionOverride(result.portraitVersion)
+          }}
           onClose={() => setShowPortraitGenerator(false)}
         />
       )}

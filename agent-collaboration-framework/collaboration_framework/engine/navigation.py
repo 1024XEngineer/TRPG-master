@@ -19,13 +19,60 @@ _PLAYER_VISIBLE = {"public", "party", "actor"}
 
 
 @dataclass(frozen=True)
-class _RouteEdge:
+class RouteEdge:
     id: str
     from_location_id: str
     to_location_id: str
     traversal: str
     access_point_id: str | None
     conditions: tuple[object, ...]
+
+
+def runtime_location_edges(state: GameState) -> tuple[RouteEdge, ...]:
+    """Registering a Runtime Location *is* laying its path (#212 §7.3).
+
+    A Runtime Location owns no authored `location_edges`, so its
+    `connected_location_id` anchor is the only statement of how the world
+    reaches it — and that statement is symmetric: an inn you can walk into from
+    the street is an inn you can walk out of onto the street. Deriving both
+    directions here, once, is what keeps the knowledge graph, the route graph
+    and the projected exits telling the same story. When only the two forward
+    halves existed, standing inside the inn left the party on an island: the map
+    collapsed to that single node and every canon destination answered
+    "当前没有可确认的目标路线".
+
+    Containment stays out of this: `parent_location_id` is a fallback anchor
+    only when nothing declared the connection, never a second edge.
+    """
+
+    edges: list[RouteEdge] = []
+    for location_id, payload in sorted(state.runtime_locations.items()):
+        anchor = _text(payload.get("connected_location_id")) or _text(
+            payload.get("parent_location_id")
+        )
+        if anchor is None or anchor == location_id:
+            continue
+        edges.extend(
+            (
+                RouteEdge(
+                    id=f"runtime:{location_id}",
+                    from_location_id=anchor,
+                    to_location_id=location_id,
+                    traversal="automatic",
+                    access_point_id=None,
+                    conditions=(),
+                ),
+                RouteEdge(
+                    id=f"runtime:{location_id}:back",
+                    from_location_id=location_id,
+                    to_location_id=anchor,
+                    traversal="automatic",
+                    access_point_id=None,
+                    conditions=(),
+                ),
+            )
+        )
+    return tuple(edges)
 
 
 def effective_location_knowledge(
@@ -76,6 +123,7 @@ def effective_location_knowledge(
             known_connection_ids=tuple(sorted(connections)),
         )
 
+    runtime_edges = runtime_location_edges(state)
     mark(state.scene_id, visited=True)
     queue = deque([state.scene_id])
     traversed: set[str] = set()
@@ -106,19 +154,18 @@ def effective_location_knowledge(
             )
             if traversable:
                 queue.append(edge.to_location_id)
-
-    # Runtime locations are ordinary public leaves attached to a known anchor.
-    changed = True
-    while changed:
-        changed = False
-        for location_id, payload in sorted(state.runtime_locations.items()):
-            anchor = _text(payload.get("connected_location_id")) or _text(
-                payload.get("parent_location_id")
-            )
-            if location_id in knowledge or anchor not in knowledge:
+        # Runtime locations are ordinary public leaves, and their registered
+        # path is walked in the same sweep as the authored ones — including
+        # outwards, so standing in an Agent-created inn still discovers the
+        # street it was hung off and everything the street leads to.
+        for edge in runtime_edges:
+            if edge.from_location_id != source_id:
                 continue
-            mark(location_id)
-            changed = True
+            if not _location_visible(state, actor_id, edge.to_location_id):
+                continue
+            mark(source_id, connection_id=edge.id)
+            mark(edge.to_location_id, connection_id=edge.id)
+            queue.append(edge.to_location_id)
 
     # Containment is presentation, not reachability. Add ancestors only after a
     # child is known; doing this in the other direction would reveal secret rooms.
@@ -259,14 +306,14 @@ def _known_route_edges(
     *,
     actor_id: str,
     knowledge: dict[str, LocationKnowledge],
-) -> tuple[_RouteEdge, ...]:
+) -> tuple[RouteEdge, ...]:
     known_connections = {
         connection_id
         for item in knowledge.values()
         for connection_id in item.known_connection_ids
     }
     edges = [
-        _RouteEdge(
+        RouteEdge(
             id=edge.id,
             from_location_id=edge.from_location_id,
             to_location_id=edge.to_location_id,
@@ -285,37 +332,16 @@ def _known_route_edges(
             known_connection_ids=known_connections,
         )
     ]
-    for location_id, payload in sorted(state.runtime_locations.items()):
-        anchor = _text(payload.get("connected_location_id")) or _text(
-            payload.get("parent_location_id")
-        )
-        if anchor is None or location_id not in knowledge or anchor not in knowledge:
-            continue
-        edges.extend(
-            (
-                _RouteEdge(
-                    id=f"runtime:{location_id}",
-                    from_location_id=anchor,
-                    to_location_id=location_id,
-                    traversal="automatic",
-                    access_point_id=None,
-                    conditions=(),
-                ),
-                _RouteEdge(
-                    id=f"runtime:{location_id}:back",
-                    from_location_id=location_id,
-                    to_location_id=anchor,
-                    traversal="automatic",
-                    access_point_id=None,
-                    conditions=(),
-                ),
-            )
-        )
+    edges.extend(
+        edge
+        for edge in runtime_location_edges(state)
+        if edge.from_location_id in knowledge and edge.to_location_id in knowledge
+    )
     return tuple(edges)
 
 
 def _find_path(
-    edges: tuple[_RouteEdge, ...],
+    edges: tuple[RouteEdge, ...],
     start: str,
     target: str,
     *,
@@ -369,7 +395,7 @@ def _edge_is_known(
 
 
 def _edge_is_traversable(state: GameState, actor_id: str, edge) -> bool:
-    route = _RouteEdge(
+    route = RouteEdge(
         id=edge.id,
         from_location_id=edge.from_location_id,
         to_location_id=edge.to_location_id,
@@ -383,7 +409,7 @@ def _edge_is_traversable(state: GameState, actor_id: str, edge) -> bool:
 def _route_edge_is_traversable(
     state: GameState,
     actor_id: str,
-    edge: _RouteEdge,
+    edge: RouteEdge,
 ) -> bool:
     if not all(
         evaluate_condition(condition, state=state, actor_id=actor_id)
@@ -403,7 +429,7 @@ def _route_edge_is_traversable(
 def _boundary(
     module: ModuleContentV3,
     state: GameState,
-    edge: _RouteEdge,
+    edge: RouteEdge,
 ) -> AccessBoundary:
     entity = next(
         (item for item in module.entities if item.id == edge.access_point_id),

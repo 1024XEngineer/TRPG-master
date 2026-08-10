@@ -51,6 +51,7 @@ from collaboration_framework.engine import (
     SequenceDiceSource,
 )
 from collaboration_framework.engine.initialization import create_initial_game_state
+from collaboration_framework.engine.navigation import resolve_location_target
 from collaboration_framework.engine.projection_v3 import location_breadcrumbs
 from collaboration_framework.engine.rules_v3 import evaluate_condition, walk_rule
 
@@ -540,6 +541,70 @@ class ProjectionV3Tests(unittest.IsolatedAsyncioTestCase):
             [item.name for item in snapshot.location_context.breadcrumbs],
             ["阿诺兹堡", "镇上的寄宿屋"],
         )
+
+    def _inn_state(self) -> GameState:
+        """站在 Agent 新开的旅店里 —— 玩家直奔旅店，中途的街道没有单独进过。"""
+
+        return game_state(
+            self.content,
+            scene_id="ambient_inn",
+            runtime_locations={
+                "ambient_inn": {
+                    "name": "镇上的旅店",
+                    "connected_location_id": "arnoldsburg_streets",
+                }
+            },
+            party_location_knowledge={
+                "ambient_inn": LocationKnowledge(
+                    location_id="ambient_inn",
+                    existence="known",
+                    localization="located",
+                    visited=True,
+                )
+            },
+        )
+
+    async def test_standing_in_a_runtime_location_keeps_the_rest_of_the_map(
+        self,
+    ) -> None:
+        """登记旅店时也就铺好了路，进去之后整张镇子还在。
+
+        已知地图是每次从当前场景现推出来的。Runtime Location 没有任何 authored
+        edge，反向那半条路一旦缺席，图就只剩脚下这一个点——玩家开一家旅店，
+        阿诺兹堡的街道、图书馆、墓地全部从地图上消失。
+        """
+
+        snapshot = await self.project(self._inn_state())
+
+        known = {location.id for location in snapshot.known_locations}
+        self.assertIn("ambient_inn", known)
+        self.assertLessEqual(
+            {"arnoldsburg", "arnoldsburg_streets", "library", "cemetery"},
+            known,
+        )
+
+    async def test_the_way_out_of_a_runtime_location_is_one_the_engine_accepts(
+        self,
+    ) -> None:
+        """投影出来的出口必须是导航真的走得通的那一条。"""
+
+        state = self._inn_state()
+        snapshot = await self.project(state)
+
+        back = next(
+            item
+            for item in snapshot.scene.available_exits
+            if item.destination and item.destination.scene_id == "arnoldsburg_streets"
+        )
+        self.assertEqual(back.name, "阿诺兹堡街道")
+        for target_id in ("arnoldsburg_streets", "library"):
+            resolution = resolve_location_target(
+                self.content,
+                state,
+                actor_id=ACTOR,
+                target_id=target_id,
+            )
+            self.assertEqual(resolution.status, "known_reachable")
 
 
 class AdjudicationAgainstV3Tests(unittest.IsolatedAsyncioTestCase):

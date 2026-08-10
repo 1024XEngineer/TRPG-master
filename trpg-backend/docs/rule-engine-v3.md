@@ -86,7 +86,7 @@ Canon 与 Runtime 的 Location/Entity 当前位置、可提交的 Ending id、`c
 | `reveal_information` / `hide_information` | 已投影 | 不变 |
 | `set_visibility` | 只写 `GameState`，无人读取 | Entity/Location/Information 投影按 actor 优先于 party 应用；party 作用域的 key 不再按行动者分片 |
 | `ensure_runtime_entity` / `move_entity` / `consume_entity` | 不投影 | Runtime NPC 进入 `scene.visible_entities`；Runtime object 成为 `ItemInstance`，按 custody 进入 `scene.loose_items` 或 `inventory`，消费后退出两者 |
-| `ensure_runtime_location` | 不投影，且 `enter_location` 进去会让投影直接抛 `当前 Scene 不存在` | 作为出口出现在连接它的场景里，可以进入；进入后只保留回到连接点的出口 |
+| `ensure_runtime_location` | 不投影，且 `enter_location` 进去会让投影直接抛 `当前 Scene 不存在` | 登记即铺路：`connected_location_id` 落成一对双向路径，两头互为出口，可达性与已知地图都按它推导，因此站在新地点里仍然看得见、走得回整张地图 |
 | `advance_time` | 只有 `time_of_day` 间接可见 | `world.elapsed_minutes` + `world.time_of_day` |
 | `mark_core_resolved` / `set_ending_availability` | 不投影 | `world.core_resolved` / `world.ending_available` |
 

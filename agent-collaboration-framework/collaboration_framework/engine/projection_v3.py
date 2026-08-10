@@ -54,7 +54,7 @@ from collaboration_framework.contracts import (
 )
 
 from .models import EngineRuntimeSnapshot, GameState
-from .navigation import effective_location_knowledge
+from .navigation import effective_location_knowledge, runtime_location_edges
 from .timeline import next_point_after, ordered_points, time_advance_block_reason
 from .rules_v3 import evaluate_condition
 
@@ -400,59 +400,37 @@ def _available_exits(
                 ),
             )
         )
-    # Standing inside an Agent-created location, the way back has to be projected
-    # explicitly: it is not an authored edge, and the loop below only walks from a
-    # location to the runtime locations attached to it — never the other way. Without
-    # this a runtime location is a one-way trip.
-    here = state.runtime_locations.get(location_id)
-    if here is not None:
-        back_id = _optional_text(here.get("connected_location_id")) or _optional_text(
-            here.get("parent_location_id")
-        )
-        if back_id is not None and back_id != location_id:
-            back_canon = by_id.get(back_id)
-            back_runtime = state.runtime_locations.get(back_id)
-            back_name: str | None = None
-            if back_canon is not None:
-                back_name = back_canon.player_visible_name or back_canon.name
-            elif back_runtime is not None:
-                back_name = _optional_text(back_runtime.get("name")) or back_id
-            if back_name is not None and _override_allows(
-                state, actor_id, "location", back_id
-            ):
-                exits.append(
-                    ProjectionAvailableExit(
-                        id=f"runtime:{location_id}:back",
-                        name=back_name,
-                        description="",
-                        destination=ProjectionExitDestination(
-                            scene_id=back_id,
-                            name=back_name,
-                        ),
-                    )
-                )
-
-    # Agent-created locations attach to whatever they were connected to.
-    for runtime_id, payload in sorted(state.runtime_locations.items()):
-        if runtime_id == location_id:
+    # A Runtime Location's registered path is a two-way street, and it is the
+    # same pair of edges navigation resolves routes over — projecting them from
+    # one source is what keeps a shown exit from being one the Engine refuses.
+    for edge in runtime_location_edges(state):
+        if edge.from_location_id != location_id:
             continue
-        if location_id not in {
-            payload.get("connected_location_id"),
-            payload.get("parent_location_id"),
-        }:
+        destination_id = edge.to_location_id
+        canon = by_id.get(destination_id)
+        runtime = state.runtime_locations.get(destination_id)
+        if canon is not None:
+            name = canon.player_visible_name or canon.name
+        elif runtime is not None:
+            name = _optional_text(runtime.get("name")) or destination_id
+        else:
+            continue
+        if not _override_allows(state, actor_id, "location", destination_id):
             continue
         if any(
-            item.destination and item.destination.scene_id == runtime_id
+            item.destination and item.destination.scene_id == destination_id
             for item in exits
         ):
             continue
-        name = _optional_text(payload.get("name")) or runtime_id
         exits.append(
             ProjectionAvailableExit(
-                id=f"runtime:{runtime_id}",
+                id=edge.id,
                 name=name,
                 description="",
-                destination=ProjectionExitDestination(scene_id=runtime_id, name=name),
+                destination=ProjectionExitDestination(
+                    scene_id=destination_id,
+                    name=name,
+                ),
             )
         )
     return tuple(exits)

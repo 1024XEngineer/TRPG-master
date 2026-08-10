@@ -37,6 +37,57 @@ function waitForEvent(
   })
 }
 
+type PendingAdjudicationEvent = Extract<
+  ServerToClientEvent,
+  { type: 'adjudication.pending' }
+>
+type TestSdk = Awaited<ReturnType<typeof registerPlayer>>['sdk']
+
+async function selectSkillAndAcceptResult(
+  sdk: TestSdk,
+  playerId: string,
+  pendingEvent: PendingAdjudicationEvent,
+  requestPrefix: string,
+): Promise<PendingAdjudicationEvent> {
+  const pending = pendingEvent.payload
+  assert.equal(pending.status, 'awaiting_skill_choice')
+  const decision = pending.pendingDecision
+  assert.ok(decision)
+
+  const rolledPromise = waitForEvent(
+    sdk,
+    (event) =>
+      event.type === 'adjudication.pending' &&
+      event.payload.correlationId === pending.correlationId &&
+      event.payload.status === 'awaiting_post_roll_decision',
+  )
+  sdk.roomSocket.selectAdjudication(playerId, {
+    clientActionId: pending.correlationId,
+    requestId: `${requestPrefix}:select`,
+    sourceRevision: pending.sourceRevision,
+    decisionId: decision.decision_id,
+    decisionVersion: decision.decision_version,
+    candidateId: decision.options[0].candidate_id,
+  })
+  const rolled = await rolledPromise
+  assert.equal(rolled.type, 'adjudication.pending')
+  const checkRun = rolled.payload.checkRun
+  assert.ok(checkRun)
+  const accept = (checkRun.post_roll_options ?? []).find(
+    (option) => option.kind === 'accept_result',
+  )
+  assert.ok(accept)
+  sdk.roomSocket.decidePostRoll(playerId, {
+    clientActionId: rolled.payload.correlationId,
+    requestId: `${requestPrefix}:accept`,
+    sourceRevision: rolled.payload.sourceRevision,
+    checkId: checkRun.check_id,
+    checkVersion: checkRun.version,
+    optionId: accept.option_id,
+  })
+  return rolled
+}
+
 /** 收集事件直到出现终止事件，返回这期间收到的全部事件（含终止事件本身）。 */
 function collectUntil(
   socketOwner: { roomSocket: { onMessage: (h: (e: ServerToClientEvent) => void) => () => void } },
@@ -217,7 +268,7 @@ test('提交行动会广播给房间里的所有人（不只是发起者）', as
     // 房主提交行动，**访客**这一侧应该收到广播
     const guestHears = waitForEvent(guest.sdk, (e) => e.type === 'narration.push')
     const actionId = `e2e-action-${Date.now()}`
-    const completed = room.host.sdk.roomSocket.submitAction(room.hostPlayerId, {
+    const completed = room.host.sdk.roomSocket.submitPlannedAction(room.hostPlayerId, {
       clientActionId: actionId,
       utterance: '我询问托马斯藏书的情况',
     })
@@ -265,17 +316,20 @@ test('追书人纵切：首场景 → 托马斯 → 图书馆 → 旧报检定 �
     assert.match(opening.payload.text, /会计师/)
     assert.equal(initialView.payload.playerView.scene.name, '托马斯的会客室')
     assert.ok(
-      initialView.payload.playerView.scene.available_exits.some(
-        (exit) => exit.id === 'library'
+      (initialView.payload.playerView.known_locations ?? []).some(
+        (location) =>
+          location.id === 'library' &&
+          location.existence === 'known' &&
+          location.localization === 'located'
       )
     )
 
-    await room.host.sdk.roomSocket.submitAction(room.hostPlayerId, {
+    await room.host.sdk.roomSocket.submitPlannedAction(room.hostPlayerId, {
       clientActionId: `ask-thomas-${Date.now()}`,
       utterance: '我询问托马斯失踪藏书和叔叔的情况',
     })
 
-    const travelled = await room.host.sdk.roomSocket.submitAction(room.hostPlayerId, {
+    const travelled = await room.host.sdk.roomSocket.submitPlannedAction(room.hostPlayerId, {
       clientActionId: `travel-library-${Date.now()}`,
       utterance: '我前往阿诺兹堡图书馆',
     })
@@ -286,31 +340,28 @@ test('追书人纵切：首场景 → 托马斯 → 图书馆 → 旧报检定 �
     const checkRequested = waitForEvent(
       room.host.sdk,
       (event) =>
-        event.type === 'check.request' &&
-        event.payload.clientActionId === checkActionId
+        event.type === 'adjudication.pending' &&
+        event.payload.correlationId === checkActionId &&
+        event.payload.status === 'awaiting_skill_choice'
     )
-    const completed = room.host.sdk.roomSocket.submitAction(room.hostPlayerId, {
+    const completed = room.host.sdk.roomSocket.submitPlannedAction(room.hostPlayerId, {
       clientActionId: checkActionId,
       utterance: '我查阅当地旧报档案，研究报纸旧刊',
     })
     const request = await checkRequested
-    assert.equal(request.type, 'check.request')
-    assert.deepEqual(request.payload.skills.map((skill) => skill.id), ['library-use'])
-
-    const checkResult = waitForEvent(
-      room.host.sdk,
-      (event) =>
-        event.type === 'check.result' &&
-        event.payload.clientActionId === checkActionId
+    assert.equal(request.type, 'adjudication.pending')
+    assert.deepEqual(
+      request.payload.pendingDecision?.options.map((option) => option.skill_id),
+      ['library-use'],
     )
-    room.host.sdk.roomSocket.rollCheck(room.hostPlayerId, {
-      clientActionId: checkActionId,
-      skill: 'library-use',
-      rollValue: 1,
-    })
-    const [result, turn] = await Promise.all([checkResult, completed])
-    assert.equal(result.type, 'check.result')
-    assert.equal(result.payload.passed, true)
+    const rolled = await selectSkillAndAcceptResult(
+      room.host.sdk,
+      room.hostPlayerId,
+      request,
+      checkActionId,
+    )
+    assert.equal(rolled.payload.checkRun?.roll.passed, true)
+    const turn = await completed
     assert.equal(turn.player_view.scene.id, 'library')
     assert.ok(
       turn.player_view.known_information.some((item) =>
@@ -324,9 +375,16 @@ test('追书人纵切：首场景 → 托马斯 → 图书馆 → 旧报检定 �
     )
 
     const publicProgress = observed.filter(
-      (event) => event.type === 'tool.started' || event.type === 'tool.completed'
+      (event) =>
+        event.type === 'turn.phase_changed' || event.type === 'adjudication.pending'
     )
-    assert.ok(publicProgress.length >= 2)
+    assert.ok(
+      publicProgress.some(
+        (event) =>
+          event.type === 'turn.phase_changed' && event.payload.phase === 'waiting_for_check'
+      )
+    )
+    assert.ok(publicProgress.some((event) => event.type === 'adjudication.pending'))
     const serializedProgress = JSON.stringify(publicProgress)
     assert.equal(serializedProgress.includes('fake_tool_call_001'), false)
     assert.equal(serializedProgress.includes('墓地旧闻档案'), false)
@@ -336,8 +394,8 @@ test('追书人纵切：首场景 → 托马斯 → 图书馆 → 旧报检定 �
   }
 })
 
-test('终止性攻击检定失败后仍可继续提交行动', async () => {
-  const room = await createRoomWithModule('terminal-check')
+test('v3 规则检定完成后仍可继续提交行动', async () => {
+  const room = await createRoomWithModule('v3-check-continuation')
   await room.host.sdk.rooms.startStory(room.roomId, room.reconnectToken)
   await buildCharacter(room.host.sdk, room.roomId, room.reconnectToken)
 
@@ -357,40 +415,44 @@ test('终止性攻击检定失败后仍可继续提交行动', async () => {
     room.host.sdk.roomSocket.startGame(room.hostPlayerId)
     await Promise.all([openingView, openingNarration])
 
-    const attackActionId = `attack-thomas-${Date.now()}`
+    await room.host.sdk.roomSocket.submitPlannedAction(room.hostPlayerId, {
+      clientActionId: `travel-library-continuation-${Date.now()}`,
+      utterance: '我前往阿诺兹堡图书馆',
+    })
+
+    const researchActionId = `research-library-continuation-${Date.now()}`
     const checkRequested = waitForEvent(
       room.host.sdk,
       (event) =>
-        event.type === 'check.request' &&
-        event.payload.clientActionId === attackActionId
+        event.type === 'adjudication.pending' &&
+        event.payload.correlationId === researchActionId &&
+        event.payload.status === 'awaiting_skill_choice'
     )
-    const blockedAction = room.host.sdk.roomSocket.submitAction(room.hostPlayerId, {
-      clientActionId: attackActionId,
-      utterance: '我想打一顿托马斯',
+    const checkedAction = room.host.sdk.roomSocket.submitPlannedAction(room.hostPlayerId, {
+      clientActionId: researchActionId,
+      utterance: '我查阅当地旧报档案',
     })
     const request = await checkRequested
-    assert.equal(request.type, 'check.request')
-    assert.deepEqual(request.payload.skills.map((skill) => skill.id), ['fighting-brawl'])
-
-    const checkResult = waitForEvent(
-      room.host.sdk,
-      (event) =>
-        event.type === 'check.result' &&
-        event.payload.clientActionId === attackActionId
+    assert.equal(request.type, 'adjudication.pending')
+    assert.deepEqual(
+      request.payload.pendingDecision?.options.map((option) => option.skill_id),
+      ['library-use'],
     )
-    room.host.sdk.roomSocket.rollCheck(room.hostPlayerId, {
-      clientActionId: attackActionId,
-      skill: 'fighting-brawl',
-      rollValue: 1,
-    })
-    const [result, turn] = await Promise.all([checkResult, blockedAction])
-    assert.equal(result.type, 'check.result')
-    assert.equal(result.payload.passed, true)
-    assert.match(turn.narration.text, /战斗数据/)
+    const rolled = await selectSkillAndAcceptResult(
+      room.host.sdk,
+      room.hostPlayerId,
+      request,
+      researchActionId,
+    )
+    assert.equal(rolled.payload.checkRun?.roll.passed, true)
+    const turn = await checkedAction
+    assert.ok(
+      turn.player_view.known_information.some((item) => item.id === 'cemetery_dance_report')
+    )
 
-    const nextTurn = await room.host.sdk.roomSocket.submitAction(room.hostPlayerId, {
-      clientActionId: `after-attack-${Date.now()}`,
-      utterance: '我继续和托马斯交谈',
+    const nextTurn = await room.host.sdk.roomSocket.submitPlannedAction(room.hostPlayerId, {
+      clientActionId: `after-v3-check-${Date.now()}`,
+      utterance: '我在图书馆整理刚才查到的资料',
     })
     assert.equal(nextTurn.player_id, room.hostPlayerId)
     assert.doesNotMatch(nextTurn.narration.text, /CHECK_PENDING|契约校验/)

@@ -15,7 +15,7 @@ export interface AcceptResultOption {
 }
 
 /**
- * action.submit 原话广播 payload。
+ * action.plan.submit 原话广播 payload。
  */
 export interface ActionBroadcastPayload {
   playerId: string;
@@ -42,7 +42,7 @@ export interface ActionPlanCancelPayload {
 }
 
 /**
- * action.submit 事件 payload。
+ * action.plan.submit 事件 payload。
  *
  * `client_action_id` 是客户端为一次逻辑动作生成的稳定幂等键；网络重试必须
  * 复用原值。两个字段都在契约层拒绝空白文本。
@@ -1078,14 +1078,6 @@ export interface PlayerView {
   checkpoint_options?: CheckpointOption[];
 }
 
-export interface PositionContextView {
-  kind?: "access_boundary";
-  id: string;
-  label: string;
-  state: "locked" | "blocked" | "interaction_required";
-  destination_id: string;
-}
-
 export interface PortraitGenerationRequest {
   style?: "realistic";
   size?: "1024x1024";
@@ -1099,6 +1091,14 @@ export interface PortraitGenerationResult {
   negativePrompt: string;
   promptSummary: string;
   promptSource: "deepseek" | "deterministic" | "deterministic_fallback";
+}
+
+export interface PositionContextView {
+  kind?: "access_boundary";
+  id: string;
+  label: string;
+  state: "locked" | "blocked" | "interaction_required";
+  destination_id: string;
 }
 
 export interface PushOption {

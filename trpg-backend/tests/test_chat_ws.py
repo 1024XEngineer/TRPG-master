@@ -147,11 +147,11 @@ def test_chat_send_is_idempotent_on_duplicate_client_message_id(
     assert len(history) == 1
 
 
-# ── action.submit：原话广播 + 叙事回复 ────────────────
+# ── action.plan.submit：原话广播 + 叙事回复 ───────────
 
 
 def test_action_submit_broadcasts_utterance_then_narration(sync_client: TestClient) -> None:
-    """action.submit 先广播发起者的**原话**（action.broadcast，修"聊天记录像
+    """action.plan.submit 先广播发起者的**原话**（action.broadcast，修"聊天记录像
     被隔离"的 bug——此前原话只在发送方本地插入），再广播守秘人回复
     （narration.push）。双客户端的"对方也能看到"断言在 e2e（见文件头说明）。"""
     token = register_and_login(sync_client, "act_host")

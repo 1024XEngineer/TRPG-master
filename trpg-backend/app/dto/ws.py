@@ -79,7 +79,7 @@ class GameStartPayload(CamelModel):
 
 
 class ActionSubmitPayload(CamelModel):
-    """action.submit 事件 payload。
+    """action.plan.submit 事件 payload。
 
     `client_action_id` 是客户端为一次逻辑动作生成的稳定幂等键；网络重试必须
     复用原值。两个字段都在契约层拒绝空白文本。
@@ -211,7 +211,7 @@ class ChatMessagePayload(CamelModel):
 
 
 class ActionBroadcastPayload(CamelModel):
-    """action.submit 原话广播 payload。"""
+    """action.plan.submit 原话广播 payload。"""
 
     player_id: str
     client_action_id: str

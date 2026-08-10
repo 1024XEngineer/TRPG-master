@@ -162,7 +162,7 @@ test('🔴 所有人都能看到发起者的原话 + 守秘人回复（修"聊�
       (e) => e.type === 'action.broadcast' && e.payload.utterance === '我与托马斯交谈'
     )
     const guestSeesNarration = waitForEvent(guest.sdk, (e) => e.type === 'narration.push')
-    const completed = room.host.sdk.roomSocket.submitAction(room.hostPlayerId, {
+    const completed = room.host.sdk.roomSocket.submitPlannedAction(room.hostPlayerId, {
       clientActionId: 'discussion-echo-host',
       utterance: '我与托马斯交谈',
     })
@@ -210,7 +210,7 @@ test('🔴 行动锁：处理中他人提交被拒（ACTION_IN_PROGRESS），完
     // 开着。等到原话广播到达（证明房主的提交已被受理、锁已被持有）再让访客抢。
     const hostNarration = waitForEvent(room.host.sdk, (e) => e.type === 'narration.push')
     const hostEcho = waitForEvent(room.host.sdk, (e) => e.type === 'action.broadcast')
-    const hostCompleted = room.host.sdk.roomSocket.submitAction(room.hostPlayerId, {
+    const hostCompleted = room.host.sdk.roomSocket.submitPlannedAction(room.hostPlayerId, {
       clientActionId: 'action-lock-host',
       utterance: '我与托马斯交谈',
     })
@@ -221,7 +221,7 @@ test('🔴 行动锁：处理中他人提交被拒（ACTION_IN_PROGRESS），完
       guest.sdk,
       (e) => e.type === 'error' && e.payload.code === 'ACTION_IN_PROGRESS'
     )
-    const rejectedAction = guest.sdk.roomSocket.submitAction(joined.playerId, {
+    const rejectedAction = guest.sdk.roomSocket.submitPlannedAction(joined.playerId, {
       clientActionId: 'action-lock-guest-rejected',
       utterance: '我翻抽屉',
     })
@@ -245,7 +245,7 @@ test('🔴 行动锁：处理中他人提交被拒（ACTION_IN_PROGRESS），完
           (e.type === 'action.broadcast' && e.payload.utterance === '我查看托马斯') ||
           (e.type === 'error' && e.payload.code === 'ACTION_IN_PROGRESS')
       )
-      const submitted = guest.sdk.roomSocket.submitAction(joined.playerId, {
+      const submitted = guest.sdk.roomSocket.submitPlannedAction(joined.playerId, {
         clientActionId: 'action-lock-guest-retry',
         utterance: '我查看托马斯',
       })

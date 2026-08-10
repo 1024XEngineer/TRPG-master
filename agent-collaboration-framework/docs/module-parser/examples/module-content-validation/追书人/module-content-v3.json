@@ -284,6 +284,7 @@
       "player_visible_name": "梅洛迪亚斯·杰弗逊",
       "player_visible_aliases": [
         "梅洛迪亚斯",
+        "守墓人",
         "墓地看守",
         "看守"
       ],
@@ -2021,10 +2022,10 @@
             "search"
           ],
           "location_ids": [
-            "kimball_house"
+            "kimball_study"
           ],
           "target_kinds": [
-            "entity"
+            "location"
           ],
           "target_ids": [
             "kimball_study"

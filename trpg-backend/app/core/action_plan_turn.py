@@ -142,6 +142,33 @@ class DeterministicHostTurnDecisionModel:
                     success_effects=(EnterLocationEffect(location_id=destination.id),),
                 )
             )
+
+        # A single action uses the same player-safe Rule Match View as a plan
+        # step.  Without this bridge, the Fake planner returned narrative_only
+        # for every non-travel utterance, so CI could exercise v3 rules only by
+        # artificially wrapping one action in a multi-step plan.
+        deterministic = _deterministic_step_adjudication(
+            ActionPlanStepContext(
+                player_input=context.player_input,
+                plan_id="single-action",
+                plan_goal=utterance,
+                step_index=0,
+                step_request_id="application-owned",
+                step=ActionPlanStep(
+                    kind=(
+                        "dialogue"
+                        if any(word in utterance for word in ("问", "交谈", "聊天"))
+                        else "action"
+                    ),
+                    semantic_goal=utterance,
+                ),
+                player_view=context.player_view,
+                keeper_capabilities=context.keeper_capabilities,
+            )
+        )
+        if deterministic is not None:
+            return SingleActionDecision(adjudication=deterministic)
+
         return SingleActionDecision(
             adjudication=ActionAdjudication(
                 request_id="application-owned",
@@ -188,8 +215,11 @@ def _compact_travel_plan(view: PlayerView, utterance: str) -> ActionPlan | None:
     marker = next((item for item in action_markers if item in remainder), None)
     if marker is None:
         return None
-    action_start = remainder.find(marker)
-    follow_up = remainder[action_start:].strip(" ，,。")
+    # Keep method qualifiers that precede the verb (for example “用侦查搜索”
+    # or “用信用评级询问”).  Rule options are selected from those player-safe
+    # words; slicing from the verb silently discarded the only discriminating
+    # evidence and made the step fall back to narrative_only.
+    follow_up = remainder.strip(" ，,。")
     if not follow_up:
         return None
     destination_name = destination.name
@@ -1081,6 +1111,13 @@ def _deterministic_step_adjudication(
         target.id if target is not None else None,
     )
     if candidate is not None and option is not None:
+        target_kind = (
+            candidate.target_kinds[0]
+            if candidate.target_kinds
+            else "entity"
+            if target is not None
+            else "location"
+        )
         # The option id doubles as the skill id in the published fixture; the
         # Engine re-validates it against the Actor's Ruleset snapshot anyway.
         return ActionAdjudication(
@@ -1089,7 +1126,7 @@ def _deterministic_step_adjudication(
             actor_id=context.player_input.actor_id,
             summary=context.step.semantic_goal,
             target=ActionTarget(
-                kind="entity",
+                kind=target_kind,
                 id=(
                     candidate.target_ids[0]
                     if candidate.target_ids
@@ -1219,6 +1256,9 @@ def _match_rule_candidate(capabilities, text: str, target_id: str | None):
 # reveal module-only facts. Ties still yield no match below.
 _ACTION_FAMILY_HINTS: dict[str, tuple[str, ...]] = {
     "observe": ("仔细观察", "观察", "察看", "查看"),
+    "search": ("搜索", "搜查", "查找", "找线索", "寻找"),
+    "research": ("研究", "查阅", "检索", "翻阅", "查旧报"),
+    "social": ("留下好印象", "博取信任", "说服"),
     "intimidate": ("恐吓", "威吓"),
     "bribe": ("贿赂", "收买"),
 }

@@ -32,6 +32,7 @@ from collaboration_framework.contracts import (
     NoAdjudicationCheck,
     PlayerInput,
     RequiredAdjudicationCheck,
+    SingleActionDecision,
 )
 from collaboration_framework.engine import InMemoryEngineStore, RuleEngineService
 from collaboration_framework.engine.initialization import create_initial_game_state
@@ -40,10 +41,15 @@ from collaboration_framework.host.adapters.openai_agents import (
     current_step_adjudication_instructions,
 )
 from collaboration_framework.host.application import PlayerViewProjector
-from collaboration_framework.host.schemas import ActionPlanStepContext
+from collaboration_framework.host.schemas import (
+    ActionPlanStepContext,
+    HostAgentContext,
+    RecentTurnContext,
+)
 
 from app.adapters.openai_models import _SAFE_ADJUDICATION_INSTRUCTIONS
 from app.core.action_plan_turn import (
+    DeterministicHostTurnDecisionModel,
     _DeterministicStepAdjudicator,
     _RuleFirstStepAdjudicator,
 )
@@ -193,6 +199,28 @@ async def test_natural_chinese_action_family_reaches_the_unique_rule() -> None:
     assert adjudication.rule_decision is not None
     assert adjudication.rule_decision.rule_id == "observe_caretaker"
     assert isinstance(adjudication.check, RequiredAdjudicationCheck)
+
+
+async def test_fake_single_action_uses_the_same_rule_match_view() -> None:
+    """单动作不能绕过 v3 Rule Match 而静默退化成纯叙事。"""
+
+    step_context = await _cemetery_context("仔细观察守墓人")
+    decision = await DeterministicHostTurnDecisionModel().generate(
+        HostAgentContext(
+            player_input=step_context.player_input,
+            player_view=step_context.player_view,
+            recent_history=RecentTurnContext.empty(
+                player_input=step_context.player_input,
+                player_view=step_context.player_view,
+            ),
+            keeper_capabilities=step_context.keeper_capabilities,
+        )
+    )
+
+    assert isinstance(decision, SingleActionDecision)
+    assert decision.adjudication.rule_decision is not None
+    assert decision.adjudication.rule_decision.rule_id == "observe_caretaker"
+    assert isinstance(decision.adjudication.check, RequiredAdjudicationCheck)
 
 
 async def test_rule_first_adjudicator_does_not_call_model_for_unique_match() -> None:

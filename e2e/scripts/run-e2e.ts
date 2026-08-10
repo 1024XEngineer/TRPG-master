@@ -61,13 +61,8 @@ const backendEnv = {
     resolve(BACKEND_DIR, '../agent-collaboration-framework'),
     process.env.PYTHONPATH,
   ].filter(Boolean).join(delimiter),
-  // 叙事生成人为延迟 1 秒（issue #107 测试钩子，生产恒为 0）：占位 narrator
-  // 同步秒回，action.plan.submit 的房间锁窗口只有微秒级，两个客户端"同时提交"
-  // 永远压不中 ACTION_IN_PROGRESS——没有这 1 秒，锁的并发拒绝路径在 e2e 里
-  // 是测不到的死代码。代价是每次 action.plan.submit 的用例多等 1 秒。
   APP_ENV: 'test',
   TEST_FIXED_DICE_ROLL: '1',
-  NARRATOR_DELAY_SECONDS: '1',
   // 真实模型下不注入这两个变量，让后端按 .env 解析 provider 与 key：环境变量
   // 优先级高于 .env，注入空 Key 会直接卡在 Settings 校验。
   ...(USE_REAL_MODEL ? {} : fakeModelEnv),

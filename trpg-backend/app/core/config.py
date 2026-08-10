@@ -125,10 +125,6 @@ class Settings(BaseSettings):
     portrait_reference_image_path: str = "app/assets/portrait-style-reference.png"
     portrait_generation_timeout_seconds: float = Field(default=120.0, gt=0, le=300)
 
-    # 讨论区/Narrator 主线的兼容配置：未配置时使用确定性占位叙事，测试可通过
-    # 延迟钩子稳定覆盖行动锁并发分支。
-    narrator_delay_seconds: float = Field(default=0.0, ge=0, le=120)
-
     # AI 主持人语音：默认关闭，未配置豆包凭证时不影响应用启动或文字游戏流程。
     host_speech_provider: Literal["disabled", "fake", "doubao"] = "disabled"
     doubao_tts_api_key: SecretStr | None = None

@@ -11,8 +11,7 @@
 e2e/tests/discussion-chat.e2e.ts，那边有完整的双客户端覆盖；这里守住的是
 落库/幂等/锁语义/鉴权/清理这些单连接就能证明的行为。
 
-锁相关用例通过覆盖 `app.state.narrator` 注入可控的 fake——narrator 挂在
-app.state 上（而不是模块内部单例）正是为了让测试不需要 monkeypatch。
+锁相关用例直接覆盖 `action_lock_manager`，不依赖任何叙事实现的时序。
 """
 
 from collections.abc import Iterator
@@ -21,7 +20,6 @@ from uuid import uuid4
 import pytest
 from starlette.testclient import TestClient
 
-from app.core.narrator import FallbackNarrator
 from app.main import app
 from app.service.action_lock import RoomActionLockManager
 from tests.test_ws import (
@@ -38,9 +36,6 @@ from tests.test_ws import (
 @pytest.fixture
 def sync_client() -> Iterator[TestClient]:
     yield TestClient(app)
-    # 每个用例结束后把 narrator 还原成默认实现，避免某个用例注入的 fake
-    # 泄漏到后面的用例里（app 是全局单例，state 会跨用例存活）。
-    app.state.narrator = FallbackNarrator()
 
 
 def _join_ws(ws, player: dict) -> None:
@@ -179,7 +174,7 @@ def test_action_submit_broadcasts_utterance_then_narration(sync_client: TestClie
 # ── 行动锁 ───────────────────────────────────────────
 
 
-def test_lock_released_after_narrator_failure(sync_client: TestClient) -> None:
+def test_lock_released_after_turn_failure(sync_client: TestClient) -> None:
     """AI 调用失败后锁必须释放（finally 兜底），否则房间永久锁死——issue #107
     验收标准。PlayerView 尚不存在时输入不会被接受或广播。"""
     token = register_and_login(sync_client, "fail_host")

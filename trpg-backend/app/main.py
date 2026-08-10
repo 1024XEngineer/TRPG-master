@@ -23,7 +23,6 @@ from app.core.config import get_settings
 from app.core.db import async_session_factory
 from app.core.errors import AppException, ErrorCode
 from app.core.logging import configure_logging
-from app.core.narrator import build_narrator
 from app.core.seed import ensure_seed_content
 from app.dto.common import ApiResponse
 from app.service.character_background import build_character_background_service
@@ -88,13 +87,6 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # AI 主持人叙事生成器（issue #107）：按配置在真实 DeepSeek / 占位文案之间
-    # 二选一，挂在 app.state 上——ws.py 通过 websocket.app.state.narrator 取用，
-    # 测试直接覆盖这个属性注入 fake（不用 monkeypatch 模块内部）。放在这里而
-    # 不是 lifespan：构造 narrator 没有任何 IO，而测试用的 TestClient/
-    # ASGITransport 不一定会触发 lifespan——挂在 create_app 里保证"有 app
-    # 实例就一定有 narrator"。
-    app.state.narrator = build_narrator(settings)
     app.state.character_background_service = build_character_background_service(settings)
     app.state.portrait_generation_service = build_portrait_generation_service(settings)
     app.state.host_speech = build_host_speech_service(settings)

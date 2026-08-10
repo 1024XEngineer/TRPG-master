@@ -4,9 +4,10 @@
  * 覆盖：讨论区广播 / 重发去重 / 玩家原话广播（修"聊天记录像被隔离"的 bug）/
  * 行动锁的并发拒绝与释放 / 退房清空聊天 / 复盘纯净。
  *
- * 锁窗口依赖 run-e2e.ts 给后端设置的 NARRATOR_DELAY_SECONDS=1（测试钩子）：
- * 占位 narrator 同步秒回，没有这 1 秒延迟，两个客户端"同时提交"永远压不中
- * ACTION_IN_PROGRESS，锁的拒绝路径就是 e2e 测不到的死代码。
+ * 锁窗口不再需要人为延迟钩子：v2 的单轮 narrator 同步秒回，窗口只有微秒级，
+ * 当时要靠 NARRATOR_DELAY_SECONDS=1 才压得中 ACTION_IN_PROGRESS；现在一个回合
+ * 要走完 ActionPlan 的规划、逐步裁决和叙事，窗口天然足够宽。下面用
+ * `action.broadcast` 到达（证明提交已被受理、锁已被持有）作为抢锁的时机。
  */
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
@@ -206,8 +207,8 @@ test('🔴 行动锁：处理中他人提交被拒（ACTION_IN_PROGRESS），完
     room.host.sdk.roomSocket.startGame(room.hostPlayerId)
     await Promise.all([hostOpening, guestOpening])
 
-    // 房主提交——narrator 有 1 秒人为延迟（NARRATOR_DELAY_SECONDS），锁窗口
-    // 开着。等到原话广播到达（证明房主的提交已被受理、锁已被持有）再让访客抢。
+    // 房主提交——整个回合期间锁都开着。等到原话广播到达（证明房主的提交已被
+    // 受理、锁已被持有）再让访客抢。
     const hostNarration = waitForEvent(room.host.sdk, (e) => e.type === 'narration.push')
     const hostEcho = waitForEvent(room.host.sdk, (e) => e.type === 'action.broadcast')
     const hostCompleted = room.host.sdk.roomSocket.submitPlannedAction(room.hostPlayerId, {

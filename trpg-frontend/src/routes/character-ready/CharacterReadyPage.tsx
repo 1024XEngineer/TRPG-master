@@ -426,10 +426,13 @@ export default function CharacterReadyPage() {
               </span>
             ))}
           </h1>
-          <p className="lobby-scene__connection" aria-live="polite">
+          <p className="lobby-scene__connection character-ready-scene__connection" aria-live="polite">
             <span className={`lobby-scene__connection-dot ${allHaveCharacters ? 'is-connected' : ''}`} aria-hidden="true" />
-            人物卡准备 · {allHaveCharacters ? '全员已完成' : '等待成员建卡'}
-            {info && <span> · {players.length}/{info.maxPlayers} 人</span>}
+            <span className="character-ready-scene__connection-text">
+              人物卡准备 · {allHaveCharacters ? '全员已完成' : '等待成员建卡'}
+              {info && <span> · {players.length}/{info.maxPlayers} 人</span>}
+            </span>
+            <span className="character-ready-scene__connection-spacer" aria-hidden="true" />
           </p>
         </section>
 

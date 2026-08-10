@@ -2680,6 +2680,29 @@
   top: 7.7%;
 }
 
+.character-ready-scene__connection {
+  display: grid;
+  width: 78%;
+  grid-template-columns: 0.5rem minmax(0, 1fr) 0.5rem;
+  align-items: center;
+  column-gap: 0.3rem;
+  margin-top: clamp(0.7rem, 2.2vh, 1rem);
+}
+
+.character-ready-scene__connection .lobby-scene__connection-dot {
+  justify-self: center;
+}
+
+.character-ready-scene__connection-text {
+  min-width: 0;
+  text-align: center;
+}
+
+.character-ready-scene__connection-spacer {
+  width: 0.5rem;
+  height: 0.5rem;
+}
+
 .character-ready-scene__roster {
   top: 37.2%;
   right: 8.2%;

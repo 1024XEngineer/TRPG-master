@@ -94,6 +94,9 @@ class RoomPlayerRead(CamelModel):
     is_host: bool
     ready: bool
     has_character: bool
+    # 房间预览只暴露头像存在性和内容版本；图片本体仍需房间凭证单独读取。
+    has_portrait: bool = False
+    portrait_version: str | None = None
 
 
 class ModuleRead(CamelModel):

@@ -2,11 +2,14 @@ import asyncio
 import base64
 import json
 from collections.abc import Callable, Generator
+from hashlib import sha256
+from io import BytesIO
 from typing import cast
 
 import httpx
 import pytest
 from httpx import AsyncClient
+from PIL import Image
 from pydantic import ValidationError
 
 from app.adapters.image_generation import (
@@ -32,6 +35,7 @@ from app.service.portrait_generation import (
     build_character_portrait_snapshot,
     build_portrait_generation_service,
 )
+from app.service.portrait_image import MaterializedPortraitImage, PortraitImageMaterializer
 from app.service.portrait_reference import PortraitReferenceImage, load_portrait_reference_image
 from tests.helpers import ROOMS_BASE, create_room, join_room, reconnect, register
 
@@ -100,6 +104,35 @@ class RecordingImageProvider:
         return ImageGenerationOutput(image_url="https://images.example/portrait.png")
 
 
+class FixedImageMaterializer:
+    """接口测试使用的确定性物化器，避免访问真实图片服务。"""
+
+    def __init__(self, content: bytes = b"persisted-png") -> None:
+        self.content = content
+        self.calls: list[str] = []
+
+    async def materialize(self, image_url: str) -> MaterializedPortraitImage:
+        self.calls.append(image_url)
+        return MaterializedPortraitImage(
+            content=self.content,
+            content_type="image/png",
+            content_hash=sha256(self.content).hexdigest(),
+        )
+
+
+class FailingImageMaterializer:
+    async def materialize(self, image_url: str) -> MaterializedPortraitImage:
+        del image_url
+        raise PortraitImageGenerationError("图片下载失败")
+
+
+def png_bytes(*, width: int = 32, height: int = 32, color: str = "#204b5e") -> bytes:
+    """生成测试专用的小型 PNG，确保物化器覆盖真实 Pillow 解码路径。"""
+    buffer = BytesIO()
+    Image.new("RGB", (width, height), color).save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
 class BlockingImageProvider(RecordingImageProvider):
     def __init__(self) -> None:
         super().__init__()
@@ -146,6 +179,7 @@ def make_service(
         prompt_composer=composer,
         fallback_prompt_composer=DeterministicPromptComposer(),
         image_provider=image_provider,
+        image_materializer=FixedImageMaterializer(),
     )
     return service, composer, image_provider
 
@@ -370,11 +404,180 @@ async def test_completed_character_generates_real_provider_result_and_prompt_fal
     assert response.status_code == 200
     data = response.json()["data"]
     assert data["imageUrl"] == "https://images.example/portrait.png"
+    assert data["portraitVersion"] == sha256(b"persisted-png").hexdigest()
     assert data["promptSource"] == "deterministic_fallback"
     assert image_provider.calls[0]["size"] == "1024x1024"
     assert composer.snapshots[0].background == BACKGROUND
     assert "禁酒令时期" in composer.snapshots[0].module_background
     assert PRIVATE_NOTES not in composer.snapshots[0].model_dump_json()
+
+    portrait = await client.get(
+        f"{ROOMS_BASE}/{room['roomId']}/players/{room['playerId']}/portrait",
+        headers=reconnect(room["reconnectToken"]),
+    )
+    assert portrait.status_code == 200
+    assert portrait.content == b"persisted-png"
+    assert portrait.headers["content-type"] == "image/png"
+    assert portrait.headers["cache-control"] == "private, max-age=3600"
+    assert portrait.headers["x-content-type-options"] == "nosniff"
+    assert portrait.headers["etag"] == f'"{data["portraitVersion"]}"'
+
+    preview = await client.get(f"{ROOMS_BASE}/{room['roomCode']}")
+    player = next(
+        item for item in preview.json()["data"]["players"] if item["playerId"] == room["playerId"]
+    )
+    assert player["hasPortrait"] is True
+    assert player["portraitVersion"] == data["portraitVersion"]
+
+
+async def test_portrait_read_requires_same_room_membership(
+    client: AsyncClient,
+    install_portrait_service: Callable[[PortraitGenerationService], None],
+) -> None:
+    room = await create_room(client)
+    character_id = await create_character(client, room, complete=True)
+    service, _composer, _provider = make_service()
+    install_portrait_service(service)
+    generated = await client.post(
+        f"{ROOMS_BASE}/{room['roomId']}/characters/{character_id}/portrait-generations",
+        json={},
+        headers=reconnect(room["reconnectToken"]),
+    )
+    assert generated.status_code == 200
+    teammate = await join_room(client, room["roomCode"], await register(client))
+    other_room = await create_room(client)
+    url = f"{ROOMS_BASE}/{room['roomId']}/players/{room['playerId']}/portrait"
+    missing_portrait_url = f"{ROOMS_BASE}/{room['roomId']}/players/{teammate['playerId']}/portrait"
+
+    missing = await client.get(url)
+    allowed = await client.get(url, headers=reconnect(teammate["reconnectToken"]))
+    no_portrait = await client.get(
+        missing_portrait_url,
+        headers=reconnect(room["reconnectToken"]),
+    )
+    forbidden = await client.get(url, headers=reconnect(other_room["reconnectToken"]))
+
+    assert missing.status_code == 401
+    assert allowed.status_code == 200
+    assert no_portrait.status_code == 404
+    assert forbidden.status_code == 403
+
+
+async def test_failed_regeneration_keeps_previous_portrait(
+    client: AsyncClient,
+    install_portrait_service: Callable[[PortraitGenerationService], None],
+) -> None:
+    room = await create_room(client)
+    character_id = await create_character(client, room, complete=True)
+    service, _composer, _provider = make_service()
+    install_portrait_service(service)
+    generation_url = f"{ROOMS_BASE}/{room['roomId']}/characters/{character_id}/portrait-generations"
+    headers = reconnect(room["reconnectToken"])
+    assert (await client.post(generation_url, json={}, headers=headers)).status_code == 200
+
+    replacement_content = b"replacement-png"
+    replacement_service = PortraitGenerationService(
+        enabled=True,
+        prompt_composer=FixedPromptComposer(),
+        fallback_prompt_composer=DeterministicPromptComposer(),
+        image_provider=RecordingImageProvider(),
+        image_materializer=FixedImageMaterializer(replacement_content),
+    )
+    install_portrait_service(replacement_service)
+    replaced = await client.post(generation_url, json={}, headers=headers)
+    assert replaced.status_code == 200
+
+    failing_service = PortraitGenerationService(
+        enabled=True,
+        prompt_composer=FixedPromptComposer(),
+        fallback_prompt_composer=DeterministicPromptComposer(),
+        image_provider=RecordingImageProvider(),
+        image_materializer=FailingImageMaterializer(),
+    )
+    install_portrait_service(failing_service)
+    failed = await client.post(generation_url, json={}, headers=headers)
+    portrait = await client.get(
+        f"{ROOMS_BASE}/{room['roomId']}/players/{room['playerId']}/portrait",
+        headers=headers,
+    )
+
+    assert failed.status_code == 502
+    assert portrait.status_code == 200
+    assert portrait.content == replacement_content
+
+
+async def test_portrait_image_materializer_validates_data_uri_and_remote_redirect() -> None:
+    content = png_bytes()
+    encoded = base64.b64encode(content).decode()
+    materializer = PortraitImageMaterializer(max_bytes=1024 * 1024, timeout_seconds=1)
+
+    inline = await materializer.materialize(f"data:image/png;base64,{encoded}")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/start":
+            return httpx.Response(302, headers={"Location": "/portrait.png"})
+        return httpx.Response(200, content=content, headers={"Content-Type": "image/png"})
+
+    remote = await PortraitImageMaterializer(
+        max_bytes=1024 * 1024,
+        timeout_seconds=1,
+        transport=httpx.MockTransport(handler),
+        resolve_dns=False,
+    ).materialize("https://images.example/start")
+
+    assert inline.content_type == "image/png"
+    assert inline.content_hash == sha256(content).hexdigest()
+    assert remote == inline
+
+
+@pytest.mark.parametrize(
+    "image_url",
+    [
+        "data:image/png;base64,not-base64",
+        f"data:image/png;base64,{base64.b64encode(b'not-an-image').decode()}",
+        "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=",
+        "file:///tmp/portrait.png",
+        "http://127.0.0.1/portrait.png",
+    ],
+)
+async def test_portrait_image_materializer_rejects_invalid_or_unsafe_input(
+    image_url: str,
+) -> None:
+    materializer = PortraitImageMaterializer(max_bytes=1024, timeout_seconds=1)
+    with pytest.raises(PortraitImageGenerationError):
+        await materializer.materialize(image_url)
+
+
+async def test_portrait_image_materializer_rejects_oversized_dimensions_and_bytes() -> None:
+    oversized_dimensions = png_bytes(width=4097, height=1)
+    materializer = PortraitImageMaterializer(
+        max_bytes=len(oversized_dimensions) + 100,
+        timeout_seconds=1,
+    )
+    with pytest.raises(PortraitImageGenerationError, match="尺寸"):
+        await materializer.materialize(
+            f"data:image/png;base64,{base64.b64encode(oversized_dimensions).decode()}"
+        )
+
+    small_limit = PortraitImageMaterializer(max_bytes=16, timeout_seconds=1)
+    with pytest.raises(PortraitImageGenerationError, match="大小"):
+        await small_limit.materialize(
+            f"data:image/png;base64,{base64.b64encode(png_bytes()).decode()}"
+        )
+
+
+async def test_portrait_image_materializer_maps_remote_timeout() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("timeout", request=request)
+
+    materializer = PortraitImageMaterializer(
+        max_bytes=1024,
+        timeout_seconds=1,
+        transport=httpx.MockTransport(handler),
+        resolve_dns=False,
+    )
+    with pytest.raises(PortraitImageTimeoutError, match="下载超时"):
+        await materializer.materialize("https://images.example/portrait.png")
 
 
 async def test_concurrent_portrait_request_is_rejected_before_second_provider_call(
@@ -389,6 +592,7 @@ async def test_concurrent_portrait_request_is_rejected_before_second_provider_ca
         prompt_composer=FixedPromptComposer(),
         fallback_prompt_composer=DeterministicPromptComposer(),
         image_provider=image_provider,
+        image_materializer=FixedImageMaterializer(),
     )
     install_portrait_service(service)
     url = f"{ROOMS_BASE}/{room['roomId']}/characters/{character_id}/portrait-generations"
@@ -536,7 +740,7 @@ async def test_mock_image_provider_returns_stable_inline_image() -> None:
         prompt="portrait two", negative_prompt="text", size="1024x1024"
     )
 
-    assert first.image_url.startswith("data:image/svg+xml;base64,")
+    assert first.image_url.startswith("data:image/png;base64,")
     assert repeated.image_url == first.image_url
     assert different.image_url != first.image_url
 

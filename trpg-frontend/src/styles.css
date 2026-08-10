@@ -827,6 +827,26 @@
   display: none;
 }
 
+.character-create__choice-picker .bg-input,
+.character-create__choice-picker input {
+  border-color: rgb(137 91 48 / 48%) !important;
+  color: #422815 !important;
+  background-color: rgb(205 169 111 / 24%) !important;
+  box-shadow: inset 0 0 0 1px rgb(255 238 199 / 22%);
+}
+
+.character-create__choice-picker .bg-card {
+  border-color: rgb(137 91 48 / 42%) !important;
+  color: #422815 !important;
+  background-color: rgb(224 191 137 / 42%) !important;
+  box-shadow: inset 0 0 0 1px rgb(255 240 205 / 20%);
+}
+
+.character-create__choice-picker input::placeholder {
+  color: #765b40;
+  opacity: 0.85;
+}
+
 .character-create__occupation-detail h3 {
   color: #42220f !important;
   font-size: 1.25rem !important;

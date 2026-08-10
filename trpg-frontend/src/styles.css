@@ -803,6 +803,30 @@
   display: none;
 }
 
+.character-create__choice-picker {
+  padding: 3.6rem 2rem 2.4rem !important;
+  border: 0;
+  border-radius: 0;
+  color: #422815;
+  background-color: transparent;
+  background-image: url('/assets/character/create/弹窗背景.webp');
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 112% 100%;
+  box-shadow: 0 1rem 1.35rem rgb(25 12 5 / 42%);
+  overflow: hidden;
+}
+
+.character-create__choice-picker > div:last-child {
+  min-height: 0;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+
+.character-create__choice-picker > div:last-child::-webkit-scrollbar {
+  display: none;
+}
+
 .character-create__occupation-detail h3 {
   color: #42220f !important;
   font-size: 1.25rem !important;

@@ -2091,7 +2091,7 @@ export default function CharacterPage() {
                 className="fixed inset-0 bg-black/50 z-40 animate-fade-in"
                 onClick={() => setChoicePickerSlotIndex(null)}
               />
-              <div className="fixed inset-x-0 bottom-0 z-50 mx-auto max-w-[430px] bg-page border border-border-light rounded-t-xl px-5 pt-5 pb-8 max-h-[75vh] flex flex-col">
+              <div className="character-create__choice-picker fixed inset-x-0 bottom-0 z-50 mx-auto max-w-[430px] px-5 pt-5 pb-8 max-h-[75vh] flex flex-col">
                 <div className="flex items-start justify-between gap-3 mb-3">
                   <div>
                     <h3 className="text-[16px] font-bold text-text-primary">选择职业技能</h3>

@@ -2094,8 +2094,8 @@ export default function CharacterPage() {
               <div className="character-create__choice-picker fixed inset-x-0 bottom-0 z-50 mx-auto max-w-[430px] px-5 pt-5 pb-8 max-h-[75vh] flex flex-col">
                 <div className="flex items-start justify-between gap-3 mb-3">
                   <div>
-                    <h3 className="text-[16px] font-bold text-text-primary">选择职业技能</h3>
-                    <p className="text-[11px] text-text-muted mt-0.5">{activeChoiceSlot.label}</p>
+                    <h3 className="character-create__choice-picker-title font-bold text-text-primary">选择职业技能</h3>
+                    <p className="character-create__choice-picker-description mt-0.5">{activeChoiceSlot.label}</p>
                   </div>
                   <button
                     type="button"
@@ -2113,7 +2113,7 @@ export default function CharacterPage() {
                     onChange={event => setChoiceSkillSearch(event.target.value)}
                     placeholder="搜索技能…"
                     aria-label="搜索职业自选技能"
-                    className="w-full pl-9 pr-3 py-2.5 rounded-[6px] bg-input border border-border-light text-[13px] text-text-primary outline-none focus:border-brass"
+                    className="character-create__choice-picker-search w-full pl-9 pr-3 py-2.5 rounded-[6px] bg-input border border-border-light text-text-primary outline-none focus:border-brass"
                   />
                 </div>
                 <div className="overflow-y-auto space-y-1.5">
@@ -2125,14 +2125,14 @@ export default function CharacterPage() {
                       className="w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-[6px] bg-card border border-border-light text-left active:bg-panel"
                     >
                       <span className="min-w-0">
-                        <span className="block text-[13px] font-medium text-text-primary">{skill.name}</span>
-                        <span className="block text-[10px] font-mono text-text-dim">{skill.nameEn}</span>
+                        <span className="character-create__choice-skill-name block font-medium text-text-primary">{skill.name}</span>
+                        <span className="character-create__choice-skill-subtitle block font-mono">{skill.nameEn}</span>
                       </span>
                       <Plus className="w-4 h-4 text-brass flex-shrink-0" />
                     </button>
                   ))}
                   {choiceCandidateSkills.length === 0 && (
-                    <p className="py-8 text-center text-sm text-text-muted">没有可选技能</p>
+                    <p className="character-create__choice-picker-empty py-8 text-center">没有可选技能</p>
                   )}
                 </div>
               </div>

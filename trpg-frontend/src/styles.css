@@ -847,6 +847,37 @@
   opacity: 0.85;
 }
 
+.character-create__choice-picker-title {
+  color: #382313 !important;
+  font-size: 1.25rem;
+}
+
+.character-create__choice-picker-description {
+  color: #563820;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.character-create__choice-picker-search {
+  font-size: 0.9rem;
+}
+
+.character-create__choice-skill-name {
+  color: #3f2918 !important;
+  font-size: 0.92rem;
+}
+
+.character-create__choice-skill-subtitle {
+  color: #64452c;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.character-create__choice-picker-empty {
+  color: #60422a;
+  font-size: 0.9rem;
+}
+
 .character-create__occupation-detail h3 {
   color: #42220f !important;
   font-size: 1.25rem !important;

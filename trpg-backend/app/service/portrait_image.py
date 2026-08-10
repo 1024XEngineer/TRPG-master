@@ -28,6 +28,8 @@ _ALLOWED_FORMATS = {
 }
 _MAX_IMAGE_DIMENSION = 4096
 _MAX_REDIRECTS = 3
+# 这是 Pillow 的模块级全局配置，会影响同一进程内后续所有图片处理；当前后端仅头像物化器
+# 使用 Pillow。若未来新增其他图片业务，应改为各业务独立的限制策略，避免静默继承本上限。
 # Pillow 会在打开图片头时根据该值触发解压炸弹保护；之后仍会逐边检查尺寸。
 Image.MAX_IMAGE_PIXELS = _MAX_IMAGE_DIMENSION * _MAX_IMAGE_DIMENSION
 
@@ -120,6 +122,9 @@ class PortraitImageMaterializer:
         raise PortraitImageGenerationError("图片下载失败")
 
     async def _validate_remote_url(self, value: str) -> None:
+        # 已知残余风险：校验与 httpx 建连会分别解析 DNS，理论上存在 rebinding 的 TOCTOU。
+        # 当前 URL 仅来自受信任生图 provider，故接受该风险；严禁在未固定已校验 IP 的情况下
+        # 将本物化流程直接复用于玩家可控 URL。
         parsed = urlparse(value)
         if (
             parsed.scheme not in {"http", "https"}

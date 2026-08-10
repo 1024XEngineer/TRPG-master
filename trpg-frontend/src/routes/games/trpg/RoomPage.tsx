@@ -1502,11 +1502,10 @@ export default function RoomPage() {
             <div key={i} className={`flex gap-2.5 ${isPlayer ? 'flex-row-reverse' : ''} animate-[msgIn_0.3s_ease]`}>
               <div className={`w-8 h-8 rounded-full flex-shrink-0 overflow-hidden flex items-center justify-center text-sm border border-border-light ${isNarr ? 'bg-[#faf5eb] border-brass' : isPlayer ? 'bg-[#eef6ee]' : 'bg-panel'}`}>
                 {msg.type === 'player' && portraitUrl ? (
-                  <PortraitImage
+                  <img
                     src={portraitUrl}
                     alt={`${msg.sender ?? '玩家'}的头像`}
-                    buttonClassName="h-full w-full"
-                    imageClassName="h-full w-full object-cover"
+                    className="h-full w-full object-cover"
                   />
                 ) : isNarr ? '📜' : msg.type === 'player' ? '🔍' : '🤖'}
               </div>

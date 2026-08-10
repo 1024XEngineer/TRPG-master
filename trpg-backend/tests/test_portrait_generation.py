@@ -391,6 +391,7 @@ async def test_completed_character_generates_real_provider_result_and_prompt_fal
     character_id = await create_character(client, room, complete=True)
     service, composer, image_provider = make_service(prompt_error=prompt_error)
     install_portrait_service(service)
+    headers = reconnect(room["reconnectToken"])
 
     assert composer.snapshots == []
     assert image_provider.calls == []
@@ -398,7 +399,7 @@ async def test_completed_character_generates_real_provider_result_and_prompt_fal
     response = await client.post(
         f"{ROOMS_BASE}/{room['roomId']}/characters/{character_id}/portrait-generations",
         json={"style": "realistic", "size": "1024x1024"},
-        headers=reconnect(room["reconnectToken"]),
+        headers=headers,
     )
 
     assert response.status_code == 200
@@ -413,7 +414,7 @@ async def test_completed_character_generates_real_provider_result_and_prompt_fal
 
     portrait = await client.get(
         f"{ROOMS_BASE}/{room['roomId']}/players/{room['playerId']}/portrait",
-        headers=reconnect(room["reconnectToken"]),
+        headers=headers,
     )
     assert portrait.status_code == 200
     assert portrait.content == b"persisted-png"
@@ -421,6 +422,20 @@ async def test_completed_character_generates_real_provider_result_and_prompt_fal
     assert portrait.headers["cache-control"] == "private, max-age=3600"
     assert portrait.headers["x-content-type-options"] == "nosniff"
     assert portrait.headers["etag"] == f'"{data["portraitVersion"]}"'
+
+    not_modified = await client.get(
+        f"{ROOMS_BASE}/{room['roomId']}/players/{room['playerId']}/portrait",
+        headers={**headers, "If-None-Match": f'W/"{data["portraitVersion"]}"'},
+    )
+    stale_cache = await client.get(
+        f"{ROOMS_BASE}/{room['roomId']}/players/{room['playerId']}/portrait",
+        headers={**headers, "If-None-Match": '"stale-version"'},
+    )
+    assert not_modified.status_code == 304
+    assert not_modified.content == b""
+    assert not_modified.headers["etag"] == f'"{data["portraitVersion"]}"'
+    assert stale_cache.status_code == 200
+    assert stale_cache.content == b"persisted-png"
 
     preview = await client.get(f"{ROOMS_BASE}/{room['roomCode']}")
     player = next(
@@ -449,7 +464,8 @@ async def test_portrait_read_requires_same_room_membership(
     url = f"{ROOMS_BASE}/{room['roomId']}/players/{room['playerId']}/portrait"
     missing_portrait_url = f"{ROOMS_BASE}/{room['roomId']}/players/{teammate['playerId']}/portrait"
 
-    missing = await client.get(url)
+    # 条件缓存头不能绕过房间鉴权；即使声称任意版本可用，也必须先验证成员身份。
+    missing = await client.get(url, headers={"If-None-Match": "*"})
     allowed = await client.get(url, headers=reconnect(teammate["reconnectToken"]))
     no_portrait = await client.get(
         missing_portrait_url,

@@ -57,4 +57,44 @@ describe('usePlayerPortraits', () => {
     unmount()
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:two')
   })
+
+  it('成员元数据内容未变时不产生额外状态渲染', async () => {
+    vi.mocked(sdk.characters.getPlayerPortrait).mockResolvedValue(
+      new Blob(['one'], { type: 'image/png' }),
+    )
+    createObjectURL.mockReturnValue('blob:one')
+    const renderCounter = vi.fn()
+    const { result, rerender } = renderHook(
+      ({ players }) => {
+        renderCounter()
+        return usePlayerPortraits('room-1', 'token-1', players)
+      },
+      { initialProps: { players: [player('version-1')] } },
+    )
+    await waitFor(() => expect(result.current['player-1']).toBe('blob:one'))
+    renderCounter.mockClear()
+
+    await act(async () => rerender({ players: [player('version-1')] }))
+
+    expect(renderCounter).toHaveBeenCalledTimes(1)
+    expect(sdk.characters.getPlayerPortrait).toHaveBeenCalledTimes(1)
+  })
+
+  it('重连凭证失效时立即中止请求并释放 Blob URL', async () => {
+    vi.mocked(sdk.characters.getPlayerPortrait).mockResolvedValue(
+      new Blob(['one'], { type: 'image/png' }),
+    )
+    createObjectURL.mockReturnValue('blob:one')
+    const portraitPlayers = [player('version-1')]
+    const { result, rerender } = renderHook(
+      ({ reconnectToken }) => usePlayerPortraits('room-1', reconnectToken, portraitPlayers),
+      { initialProps: { reconnectToken: 'token-1' as string | null } },
+    )
+    await waitFor(() => expect(result.current['player-1']).toBe('blob:one'))
+
+    await act(async () => rerender({ reconnectToken: null }))
+
+    expect(result.current).toEqual({})
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:one')
+  })
 })

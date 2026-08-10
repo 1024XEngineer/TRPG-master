@@ -16,6 +16,7 @@ import { Dice3DStage, supports3DDice, type Dice3DHandle, type DiceRollToken } fr
 import { DERIVED_STAT_DEFINITIONS } from '@/data/derived-stats'
 import { OnboardingTrigger } from '@/features/onboarding'
 import { CheckWorkflowPanel } from '@/features/adjudication'
+import { PortraitImage } from '@/features/portrait/PortraitImage'
 import type {
   CheckRunView as UiCheckRunView,
   PendingCheckDecisionView as UiPendingCheckDecisionView,
@@ -1501,7 +1502,12 @@ export default function RoomPage() {
             <div key={i} className={`flex gap-2.5 ${isPlayer ? 'flex-row-reverse' : ''} animate-[msgIn_0.3s_ease]`}>
               <div className={`w-8 h-8 rounded-full flex-shrink-0 overflow-hidden flex items-center justify-center text-sm border border-border-light ${isNarr ? 'bg-[#faf5eb] border-brass' : isPlayer ? 'bg-[#eef6ee]' : 'bg-panel'}`}>
                 {msg.type === 'player' && portraitUrl ? (
-                  <img src={portraitUrl} alt={`${msg.sender ?? '玩家'}的头像`} className="h-full w-full object-cover" />
+                  <PortraitImage
+                    src={portraitUrl}
+                    alt={`${msg.sender ?? '玩家'}的头像`}
+                    buttonClassName="h-full w-full"
+                    imageClassName="h-full w-full object-cover"
+                  />
                 ) : isNarr ? '📜' : msg.type === 'player' ? '🔍' : '🤖'}
               </div>
               <div className={`flex-1 min-w-0 ${isPlayer ? 'text-right' : ''}`}>
@@ -1786,7 +1792,12 @@ export default function RoomPage() {
                   <div className="w-12 h-14 rounded-sm flex items-center justify-center text-2xl overflow-hidden"
                     style={{ background: 'linear-gradient(135deg,#e8e0d0,#d8cfb8)', border: '2px solid #b8976a' }}>
                     {playerId && portraitUrls[playerId] ? (
-                      <img src={portraitUrls[playerId]} alt={`${character.info.name}的头像`} className="h-full w-full object-cover" />
+                      <PortraitImage
+                        src={portraitUrls[playerId]}
+                        alt={`${character.info.name}的头像`}
+                        buttonClassName="h-full w-full"
+                        imageClassName="h-full w-full object-cover"
+                      />
                     ) : '🕵️'}
                   </div>
                   <div>

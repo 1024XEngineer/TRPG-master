@@ -13,6 +13,7 @@ import { useRuleset } from '@/hooks/useRuleset'
 import { PortraitGenerationModal } from './PortraitGenerationModal'
 import { DERIVED_STAT_DEFINITIONS, normalizeDerivedStats } from '@/data/derived-stats'
 import { OnboardingTrigger } from '@/features/onboarding'
+import { PortraitImage } from '@/features/portrait/PortraitImage'
 
 const SHEET_PAGES = [
   { key: 'info', label: '基本信息' },
@@ -60,7 +61,12 @@ function CharacterSheetModal({ character, portraitUrl, onClose }: { character: N
                 <div className="w-12 h-14 rounded-sm flex items-center justify-center text-2xl overflow-hidden"
                   style={{ background: 'linear-gradient(135deg,#e8e0d0,#d8cfb8)', border: '2px solid #b8976a' }}>
                   {portraitUrl ? (
-                    <img src={portraitUrl} alt={`${character.info.name}的头像`} className="h-full w-full object-cover" />
+                    <PortraitImage
+                      src={portraitUrl}
+                      alt={`${character.info.name}的头像`}
+                      buttonClassName="h-full w-full"
+                      imageClassName="h-full w-full object-cover"
+                    />
                   ) : '🕵️'}
                 </div>
                 <div>
@@ -324,10 +330,11 @@ export default function CharacterReadyPage() {
             >
               <div className={`w-10 h-10 rounded-full bg-panel border border-border-mid flex items-center justify-center text-lg flex-shrink-0 overflow-hidden ${p.hasCharacter ? 'border-brass' : 'border-dashed border-border-light'}`}>
                 {portraitUrls[p.playerId] ? (
-                  <img
+                  <PortraitImage
                     src={portraitUrls[p.playerId]}
-                    alt={`${character?.info.name ?? p.nickname}的人物图片`}
-                    className="h-full w-full object-cover"
+                    alt={`${character?.info.name ?? p.nickname}的头像`}
+                    buttonClassName="h-full w-full"
+                    imageClassName="h-full w-full object-cover"
                   />
                 ) : p.hasCharacter ? '🔍' : '○'}
               </div>

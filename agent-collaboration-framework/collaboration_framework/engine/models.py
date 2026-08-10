@@ -27,6 +27,9 @@ from collaboration_framework.contracts import (
     PostRollOption,
     SubmitAdjudicationRequest,
     TravelInterrupted,
+    AuthorityLevel,
+    ClassificationCoverage,
+    ValidationResult,
 )
 from collaboration_framework.contracts.adjudication import CheckRoll
 
@@ -296,6 +299,9 @@ class CompletedAdjudicationCommand(ContractModel):
     request_id: str = Field(min_length=1)
     request: WorkflowRequest
     execution: AdjudicationExecution
+    validation: ValidationResult | None = None
+    committed_authority_level: AuthorityLevel | None = None
+    classification_coverage: ClassificationCoverage = "complete"
 
 
 class EngineExecutionResult(ContractModel):

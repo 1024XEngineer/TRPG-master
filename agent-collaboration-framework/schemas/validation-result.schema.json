@@ -1,0 +1,209 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "validation-result.schema.json",
+  "$defs": {
+    "EffectValidationDetail": {
+      "additionalProperties": false,
+      "description": "Internal per-effect classification and eventual application state.",
+      "properties": {
+        "branch": {
+          "enum": [
+            "success",
+            "failure",
+            "selected"
+          ],
+          "title": "Branch",
+          "type": "string"
+        },
+        "effect_index": {
+          "minimum": 0,
+          "title": "Effect Index",
+          "type": "integer"
+        },
+        "effect_type": {
+          "minLength": 1,
+          "title": "Effect Type",
+          "type": "string"
+        },
+        "authority_level": {
+          "enum": [
+            "L0",
+            "L1",
+            "L2",
+            "L3",
+            "L4",
+            "L5"
+          ],
+          "title": "Authority Level",
+          "type": "string"
+        },
+        "application_status": {
+          "default": "not_applied",
+          "enum": [
+            "not_applied",
+            "not_selected",
+            "applied",
+            "partial"
+          ],
+          "title": "Application Status",
+          "type": "string"
+        },
+        "target_ref": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target Ref"
+        },
+        "evidence_refs": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Evidence Refs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "branch",
+        "effect_index",
+        "effect_type",
+        "authority_level"
+      ],
+      "title": "EffectValidationDetail",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Complete B-side result; this model is never serialized to PlayerView.",
+  "properties": {
+    "status": {
+      "enum": [
+        "accepted",
+        "rejected"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "authority_level": {
+      "anyOf": [
+        {
+          "enum": [
+            "L0",
+            "L1",
+            "L2",
+            "L3",
+            "L4",
+            "L5"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Authority Level"
+    },
+    "code": {
+      "maxLength": 100,
+      "minLength": 1,
+      "title": "Code",
+      "type": "string"
+    },
+    "repairability": {
+      "anyOf": [
+        {
+          "enum": [
+            "auto_repairable",
+            "retry_with_latest_revision",
+            "requires_player_choice",
+            "hard_reject"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Repairability"
+    },
+    "fault": {
+      "anyOf": [
+        {
+          "enum": [
+            "agent",
+            "player",
+            "engine"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Fault"
+    },
+    "player_safe_reason": {
+      "maxLength": 512,
+      "minLength": 1,
+      "title": "Player Safe Reason",
+      "type": "string"
+    },
+    "affected_effects": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/EffectValidationDetail"
+      },
+      "title": "Affected Effects",
+      "type": "array"
+    },
+    "evidence_refs": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Evidence Refs",
+      "type": "array"
+    },
+    "classification_coverage": {
+      "default": "complete",
+      "enum": [
+        "complete",
+        "partial_validation_failure",
+        "rule_effects_excluded",
+        "legacy_unknown"
+      ],
+      "title": "Classification Coverage",
+      "type": "string"
+    },
+    "internal_reason": {
+      "anyOf": [
+        {
+          "maxLength": 1024,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Internal Reason"
+    }
+  },
+  "required": [
+    "status",
+    "code",
+    "player_safe_reason"
+  ],
+  "title": "ValidationResult",
+  "type": "object"
+}

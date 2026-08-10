@@ -109,4 +109,16 @@ async def test_pending_check_and_authoritative_roll_survive_service_rebuild(
     assert [decision.status for decision in decisions] == ["rolled"]
     assert [run.check_json["roll"]["value"] for run in runs] == [64]
     assert len(commands) == 2
+    assert {command.result_schema_version for command in commands} == {2}
+    assert all(
+        "committed_authority_level" in command.result_json
+        and "classification_coverage" in command.result_json
+        and "execution" in command.result_json
+        for command in commands
+    )
+    assert all(
+        "authority_level" not in command.result_json["execution"]
+        and "committed_authority_level" not in command.result_json["execution"]
+        for command in commands
+    )
     assert [event.type for event in events] == ["check.choice_requested", "check.rolled"]

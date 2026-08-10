@@ -3,19 +3,30 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from collaboration_framework.contracts import (
     ActionAdjudication,
     ActionMethod,
     ActionTarget,
+    AdvanceWorldTimeEffect,
+    AdjudicationValidationError,
     CancelCheckChoice,
+    ChangeEntityStateEffect,
     CheckDecisionRequest,
+    CommitTerminalEndingEffect,
+    ConsumeEntityEffect,
     ContractError,
     EnsureRuntimeEntityEffect,
     EnsureRuntimeLocationEffect,
+    EnterLocationEffect,
     EventRuleSpec,
-    MarkCoreResolvedEffect,
     GetAdjudicationStatusRequest,
+    HideInformationEffect,
+    MarkCoreResolvedEffect,
     ModuleContent,
+    MoveEntityEffect,
+    NarrativeOnlyEffect,
     NoAdjudicationCheck,
     PlayerChoiceAdjudicationCheck,
     PostRollDecisionRequest,
@@ -23,6 +34,8 @@ from collaboration_framework.contracts import (
     RequiredAdjudicationCheck,
     RevealInformationEffect,
     SelectCheckChoice,
+    SetEndingAvailabilityEffect,
+    SetVisibilityEffect,
     SkillCheckCandidate,
     SubmitAdjudicationRequest,
 )
@@ -69,7 +82,8 @@ def adjudication(
         summary="调查文件中的真相",
         target=ActionTarget(kind="information", id="document_truth"),
         method=ActionMethod(family="research", description="检查书房中的文件"),
-        check=check or RequiredAdjudicationCheck(candidates=(candidate("spot", "spot"),)),
+        check=check
+        or RequiredAdjudicationCheck(candidates=(candidate("spot", "spot"),)),
         success_effects=(RevealInformationEffect(information_id="document_truth"),),
     )
 
@@ -127,7 +141,9 @@ class AdjudicationEngineTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(first.status, "resolved")
         self.assertEqual(replay.event_refs, first.event_refs)
-        self.assertIn("document_truth", self.store.inspect_state("room_01").discovered_facts)
+        self.assertIn(
+            "document_truth", self.store.inspect_state("room_01").discovered_facts
+        )
         self.assertEqual(
             [event.type for event in self.store.inspect_domain_events("room_01")],
             ["information.revealed", "action.succeeded"],
@@ -149,7 +165,9 @@ class AdjudicationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.store.inspect_state("room_01").event_sequence, 0)
         self.assertEqual(self.store.inspect_domain_events("room_01"), ())
 
-    async def test_one_intent_can_atomically_create_linked_runtime_content(self) -> None:
+    async def test_one_intent_can_atomically_create_linked_runtime_content(
+        self,
+    ) -> None:
         action = ActionAdjudication(
             request_id="runtime-content",
             source_revision="0",
@@ -253,7 +271,9 @@ class AdjudicationEngineTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(cancelled.status, "cancelled")
-        self.assertNotIn("document_truth", self.store.inspect_state("room_01").discovered_facts)
+        self.assertNotIn(
+            "document_truth", self.store.inspect_state("room_01").discovered_facts
+        )
         self.assertEqual(
             [event.type for event in self.store.inspect_domain_events("room_01")],
             ["check.choice_requested", "action.cancelled"],
@@ -305,7 +325,9 @@ class AdjudicationEngineTests(unittest.IsolatedAsyncioTestCase):
             len(selected.event_refs) + 1,
         )
 
-    async def test_failed_roll_is_persisted_then_exact_luck_spend_resolves(self) -> None:
+    async def test_failed_roll_is_persisted_then_exact_luck_spend_resolves(
+        self,
+    ) -> None:
         service = self.service(64)
         pending = await self.submit(service, adjudication("luck-action", "0"))
         decision = pending.pending_decision
@@ -352,9 +374,15 @@ class AdjudicationEngineTests(unittest.IsolatedAsyncioTestCase):
         assert resolved.check_run is not None
         self.assertEqual(resolved.check_run.roll.degree, "failure")
         self.assertEqual(resolved.check_run.final_result.degree, "regular_success")
-        self.assertEqual(self.store.inspect_state("room_01").actors["pc_1"].resources.luck, 46)
-        self.assertIn("document_truth", self.store.inspect_state("room_01").discovered_facts)
-        event_types = [event.type for event in self.store.inspect_domain_events("room_01")]
+        self.assertEqual(
+            self.store.inspect_state("room_01").actors["pc_1"].resources.luck, 46
+        )
+        self.assertIn(
+            "document_truth", self.store.inspect_state("room_01").discovered_facts
+        )
+        event_types = [
+            event.type for event in self.store.inspect_domain_events("room_01")
+        ]
         self.assertIn("check.resolved", event_types)
         self.assertIn("action.succeeded", event_types)
 
@@ -410,6 +438,222 @@ class AdjudicationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(resolved.check_run.roll.value, 80)
         self.assertEqual(resolved.check_run.final_result.value, 30)
         self.assertEqual(resolved.outcome, "success")
+
+    async def test_authority_mapping_is_internal_and_covers_all_effect_variants(
+        self,
+    ) -> None:
+        service = self.service()
+        async with self.store.transaction("room_01") as transaction:
+            runtime = await transaction.load_runtime()
+        runtime_state = runtime.game_state.model_copy(
+            update={"runtime_entities": {"runtime_npc": {"name": "路人"}}},
+            deep=True,
+        )
+        runtime = runtime.model_copy(update={"game_state": runtime_state}, deep=True)
+        effects = (
+            NarrativeOnlyEffect(),
+            EnsureRuntimeLocationEffect(
+                location_id="runtime_inn",
+                name="旅店",
+                connected_location_id="study",
+            ),
+            EnsureRuntimeEntityEffect(
+                entity_id="runtime_keeper",
+                entity_kind="npc",
+                name="店主",
+                location_id="study",
+            ),
+            EnterLocationEffect(location_id="study"),
+            MoveEntityEffect(entity_id="butler", location_id="study"),
+            MoveEntityEffect(entity_id="butler", holder_actor_id="pc_1"),
+            AdvanceWorldTimeEffect(),
+            RevealInformationEffect(information_id="document_truth"),
+            HideInformationEffect(information_id="document_truth"),
+            ChangeEntityStateEffect(entity_id="runtime_npc", key="mood", value="calm"),
+            ChangeEntityStateEffect(entity_id="butler", key="mood", value="calm"),
+            ConsumeEntityEffect(entity_id="butler"),
+            SetVisibilityEffect(
+                target_kind="information",
+                target_id="document_truth",
+                visible=True,
+            ),
+            SetVisibilityEffect(
+                target_kind="entity",
+                target_id="runtime_npc",
+                visible=True,
+            ),
+            SetVisibilityEffect(
+                target_kind="location",
+                target_id="study",
+                visible=True,
+            ),
+            MarkCoreResolvedEffect(),
+            SetEndingAvailabilityEffect(available=True),
+            CommitTerminalEndingEffect(ending_id="ending_document_recovered"),
+        )
+
+        level, details = service._classify_effects(
+            runtime,
+            effects,
+            branch="selected",
+        )
+
+        self.assertEqual(level, "L5")
+        self.assertEqual(
+            tuple(detail.authority_level for detail in details),
+            (
+                "L0",
+                "L1",
+                "L1",
+                "L2",
+                "L2",
+                "L3",
+                "L2",
+                "L2",
+                "L2",
+                "L1",
+                "L3",
+                "L3",
+                "L2",
+                "L1",
+                "L3",
+                "L4",
+                "L4",
+                "L5",
+            ),
+        )
+        self.assertEqual(
+            service._classify_effects(runtime, (), branch="selected")[0], None
+        )
+        self.assertEqual(
+            service._classify_effects(
+                runtime,
+                (),
+                branch="selected",
+                check_floor=True,
+            )[0],
+            "L3",
+        )
+
+    async def test_committed_authority_is_stored_outside_player_execution(self) -> None:
+        request = SubmitAdjudicationRequest(
+            room_id="room_01",
+            player_id="player_01",
+            adjudication=adjudication(
+                "internal-authority",
+                "0",
+                check=NoAdjudicationCheck(),
+            ),
+        )
+
+        execution = await self.service().submit(request)
+        async with self.store.transaction("room_01") as transaction:
+            completed = await transaction.find_adjudication_command(
+                request.adjudication.request_id
+            )
+
+        assert completed is not None
+        assert completed.validation is not None
+        self.assertEqual(completed.validation.authority_level, "L2")
+        self.assertEqual(completed.committed_authority_level, "L2")
+        execution_json = execution.to_json_dict()
+        self.assertNotIn("authority_level", execution_json)
+        self.assertNotIn("committed_authority_level", execution_json)
+
+    async def test_target_rejections_share_one_safe_projection_and_leave_no_state(
+        self,
+    ) -> None:
+        missing = adjudication(
+            "missing-target", "0", check=NoAdjudicationCheck()
+        ).model_copy(
+            update={"target": ActionTarget(kind="entity", id="not-visible")},
+            deep=True,
+        )
+        with self.assertRaises(AdjudicationValidationError) as missing_error:
+            await self.submit(self.service(), missing)
+
+        shadow = ActionAdjudication(
+            request_id="canon-shadow",
+            source_revision="0",
+            actor_id="pc_1",
+            summary="创建临时地点",
+            target=ActionTarget(kind="world", id=self.module.world_ref),
+            method=ActionMethod(family="travel", description="寻找附近地点"),
+            check=NoAdjudicationCheck(),
+            success_effects=(
+                EnsureRuntimeLocationEffect(
+                    location_id="study",
+                    name="重复书房",
+                    connected_location_id="study",
+                ),
+            ),
+        )
+        with self.assertRaises(AdjudicationValidationError) as shadow_error:
+            await self.submit(self.service(), shadow)
+
+        self.assertEqual(missing_error.exception.result.code, "TARGET_NOT_FOUND")
+        self.assertEqual(shadow_error.exception.result.code, "CANON_SHADOW")
+        self.assertEqual(
+            missing_error.exception.result.to_feedback().code,
+            "TARGET_UNAVAILABLE",
+        )
+        self.assertEqual(
+            shadow_error.exception.result.to_feedback().code,
+            "TARGET_UNAVAILABLE",
+        )
+        self.assertNotIn(
+            "authority",
+            missing_error.exception.result.to_feedback().model_dump_json(),
+        )
+        self.assertEqual(self.store.inspect_state("room_01").event_sequence, 0)
+        self.assertEqual(self.store.inspect_domain_events("room_01"), ())
+
+    async def test_l4_can_commit_while_l5_direct_ending_is_rejected(self) -> None:
+        core_action = ActionAdjudication(
+            request_id="core-resolution",
+            source_revision="0",
+            actor_id="pc_1",
+            summary="完成核心目标",
+            target=ActionTarget(kind="world", id=self.module.world_ref),
+            method=ActionMethod(family="resolve", description="确认核心目标已完成"),
+            check=NoAdjudicationCheck(),
+            success_effects=(MarkCoreResolvedEffect(),),
+        )
+        await self.submit(self.service(), core_action)
+        async with self.store.transaction("room_01") as transaction:
+            completed = await transaction.find_adjudication_command(
+                core_action.request_id
+            )
+        assert completed is not None
+        self.assertEqual(completed.committed_authority_level, "L4")
+
+        terminal_action = ActionAdjudication(
+            request_id="direct-ending",
+            source_revision=completed.execution.view_revision,
+            actor_id="pc_1",
+            summary="直接提交终局",
+            target=ActionTarget(kind="world", id=self.module.world_ref),
+            method=ActionMethod(family="ending", description="直接确认最终结局"),
+            check=NoAdjudicationCheck(),
+            success_effects=(
+                CommitTerminalEndingEffect(ending_id="ending_document_recovered"),
+            ),
+        )
+        with self.assertRaises(AdjudicationValidationError) as error:
+            await self.submit(self.service(), terminal_action)
+        self.assertEqual(error.exception.result.code, "ENDING_REQUIRES_DRAFT")
+        self.assertEqual(self.store.inspect_state("room_01").ending_id, None)
+
+    def test_agent_cannot_supply_authority_fields(self) -> None:
+        payload = adjudication(
+            "forged-authority",
+            "0",
+            check=NoAdjudicationCheck(),
+        ).to_json_dict()
+        payload["authority_level"] = "L0"
+
+        with self.assertRaises(ValidationError):
+            ActionAdjudication.model_validate(payload)
 
 
 if __name__ == "__main__":

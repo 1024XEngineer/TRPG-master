@@ -32,7 +32,7 @@ class ContractGuardTests(unittest.TestCase):
 
     def test_exported_schemas_match_pydantic_source(self) -> None:
         expected = rendered_schemas()
-        self.assertEqual(len(expected), 27)
+        self.assertEqual(len(expected), 29)
         self.assertIn("keeper-capability-view.schema.json", expected)
         self.assertIn("module-content-v3.schema.json", expected)
         self.assertIn("action-adjudication.schema.json", expected)

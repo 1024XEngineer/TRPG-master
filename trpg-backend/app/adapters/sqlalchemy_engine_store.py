@@ -250,6 +250,32 @@ class _SqlAlchemyEngineTransaction(EngineTransaction):
         self._committed_request_id: str | None = None
         self._content_schema_version: int | None = None
 
+    @staticmethod
+    def _completed_adjudication_from_record(
+        record: AdjudicationCommandExecution,
+    ) -> CompletedAdjudicationCommand:
+        if record.request_schema_version != 1 or record.result_schema_version not in {
+            1,
+            2,
+        }:
+            raise ContractError("不支持的裁决命令 schema version")
+        if record.result_schema_version == 1:
+            result_payload = {
+                "execution": deepcopy(record.result_json),
+                "validation": None,
+                "committed_authority_level": None,
+                "classification_coverage": "legacy_unknown",
+            }
+        else:
+            result_payload = deepcopy(record.result_json)
+        return CompletedAdjudicationCommand.model_validate(
+            {
+                "request_id": record.request_id,
+                "request": deepcopy(record.request_json),
+                **result_payload,
+            }
+        )
+
     async def _require_writable_room(self) -> None:
         """v3 之前的房间只读：可以读取和回顾，但不能再推进。
 
@@ -398,15 +424,7 @@ class _SqlAlchemyEngineTransaction(EngineTransaction):
         )
         if record is None:
             return None
-        if record.request_schema_version != 1 or record.result_schema_version != 1:
-            raise ContractError("不支持的裁决命令 schema version")
-        command = CompletedAdjudicationCommand.model_validate(
-            {
-                "request_id": record.request_id,
-                "request": deepcopy(record.request_json),
-                "execution": deepcopy(record.result_json),
-            }
-        )
+        command = self._completed_adjudication_from_record(record)
         if command.execution.view_revision != str(record.committed_state_version):
             raise ContractError("裁决命令 committed_state_version 与结果不一致")
         return command
@@ -440,15 +458,7 @@ class _SqlAlchemyEngineTransaction(EngineTransaction):
                 )
             )
         for record in records:
-            if record.request_schema_version != 1 or record.result_schema_version != 1:
-                raise ContractError("不支持的裁决命令 schema version")
-            command = CompletedAdjudicationCommand.model_validate(
-                {
-                    "request_id": record.request_id,
-                    "request": deepcopy(record.request_json),
-                    "execution": deepcopy(record.result_json),
-                }
-            )
+            command = self._completed_adjudication_from_record(record)
             if command.execution.action_request_id != action_request_id:
                 continue
             if command.execution.view_revision != str(record.committed_state_version):
@@ -761,8 +771,17 @@ class _SqlAlchemyEngineTransaction(EngineTransaction):
                 action_request_id=completed_command.execution.action_request_id,
                 request_schema_version=1,
                 request_json=completed_command.request.to_json_dict(),
-                result_schema_version=1,
-                result_json=completed_command.execution.to_json_dict(),
+                result_schema_version=2,
+                result_json={
+                    "execution": completed_command.execution.to_json_dict(),
+                    "validation": (
+                        completed_command.validation.to_json_dict()
+                        if completed_command.validation is not None
+                        else None
+                    ),
+                    "committed_authority_level": (completed_command.committed_authority_level),
+                    "classification_coverage": (completed_command.classification_coverage),
+                },
                 committed_state_version=new_state.event_sequence,
                 created_at=now,
             )

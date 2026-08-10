@@ -42,6 +42,7 @@ from typing import Literal
 import anyio
 import structlog
 from collaboration_framework.contracts import (
+    AdjudicationValidationError,
     CancelCheckChoice,
     CheckDecisionRequest,
     ContractError,
@@ -675,6 +676,13 @@ async def _deliver_turn_narration(
 
 
 def _map_turn_error(exc: Exception) -> tuple[str, str, bool]:
+    if isinstance(exc, AdjudicationValidationError):
+        feedback = exc.result.to_feedback()
+        return (
+            feedback.code,
+            feedback.player_safe_reason,
+            feedback.repairability == "retry_with_latest_revision",
+        )
     if isinstance(exc, TurnExecutionError):
         return exc.code, exc.public_message, exc.retryable
     if isinstance(exc, ActorResolutionError):
@@ -689,12 +697,6 @@ def _map_turn_error(exc: Exception) -> tuple[str, str, bool]:
         return "ROOM_RUNTIME_NOT_FOUND", "房间尚未建立可用的游戏运行时", True
     if "不是可提交动作的 InGame" in message:
         return "ROOM_NOT_ACTIONABLE", "房间当前状态不允许提交动作", False
-    if "request_id 已用于不同" in message:
-        return "ACTION_ID_CONFLICT", "clientActionId 已被另一动作占用", False
-    if "过期 PlayerView" in message:
-        return "SOURCE_REVISION_STALE", "动作基于过期的玩家视图，请重试", True
-    if "player_id/actor_id" in message:
-        return "ACTOR_NOT_CONTROLLED", "当前玩家不能控制该局内角色", False
     if isinstance(exc, (ContractError, ValidationError)):
         return "TURN_CONTRACT_INVALID", "本次动作未通过主持编排契约校验", False
     return "TURN_INTERNAL_ERROR", "本次动作处理失败，请稍后重试", True

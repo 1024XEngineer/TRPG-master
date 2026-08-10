@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "validation-feedback.schema.json",
+  "$defs": {
+    "SafeEffectRef": {
+      "additionalProperties": false,
+      "description": "A non-sensitive effect location for A/Host repair feedback.",
+      "properties": {
+        "branch": {
+          "enum": [
+            "success",
+            "failure",
+            "selected"
+          ],
+          "title": "Branch",
+          "type": "string"
+        },
+        "effect_index": {
+          "minimum": 0,
+          "title": "Effect Index",
+          "type": "integer"
+        },
+        "effect_type": {
+          "minLength": 1,
+          "title": "Effect Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "branch",
+        "effect_index",
+        "effect_type"
+      ],
+      "title": "SafeEffectRef",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Safe projection consumed by A/Host and suitable for player messaging.",
+  "properties": {
+    "status": {
+      "enum": [
+        "accepted",
+        "rejected"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "code": {
+      "maxLength": 100,
+      "minLength": 1,
+      "title": "Code",
+      "type": "string"
+    },
+    "repairability": {
+      "anyOf": [
+        {
+          "enum": [
+            "auto_repairable",
+            "retry_with_latest_revision",
+            "requires_player_choice",
+            "hard_reject"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Repairability"
+    },
+    "fault": {
+      "anyOf": [
+        {
+          "enum": [
+            "agent",
+            "player",
+            "engine"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Fault"
+    },
+    "player_safe_reason": {
+      "maxLength": 512,
+      "minLength": 1,
+      "title": "Player Safe Reason",
+      "type": "string"
+    },
+    "affected_effects": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/SafeEffectRef"
+      },
+      "title": "Affected Effects",
+      "type": "array"
+    }
+  },
+  "required": [
+    "status",
+    "code",
+    "player_safe_reason"
+  ],
+  "title": "ValidationFeedback",
+  "type": "object"
+}

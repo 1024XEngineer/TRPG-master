@@ -26,7 +26,7 @@ from collaboration_framework.host.schemas import (
     OpeningNarrationContext,
 )
 from starlette.testclient import TestClient
-from starlette.websockets import WebSocketDisconnect
+from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from app.controller import ws as ws_controller
 from app.main import app
@@ -913,6 +913,150 @@ def test_replayed_opening_sends_no_chunks(sync_client: TestClient) -> None:
         opening = receive_replayed_opening(ws)
 
     assert opening["payload"]["messageId"] == "game-opening"
+
+
+def _send_json_failing_on(match, error: Exception):
+    """Replace WebSocket.send_json so exactly the matching frame raises."""
+
+    original = WebSocket.send_json
+
+    async def send_json(self, data, mode: str = "text") -> None:
+        if match(data):
+            raise error
+        await original(self, data, mode)
+
+    return send_json
+
+
+def test_disconnected_socket_does_not_lose_the_turn_narration(
+    sync_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """对端掉线不能把内联执行的回合从中间掐断。
+
+    `turn.completed` 是结算链的第一帧，而叙事落库排在这条链的最后
+    （`_deliver_turn_narration`）。这一帧抛异常就会把整个回合中止在"规则效果
+    已事务提交、叙事还没写进 events 表"的状态上——世界推进了，解释它的那段话
+    永远消失，重连也恢复不出来，因为重放依赖的正是那行记录。
+
+    这里模拟的是真实出现过的那种：底层 TCP 已断、application_state 还没被标记，
+    send 直接从 uvloop 抛 RuntimeError。
+    """
+
+    token = register_and_login(sync_client, "disconnect_midturn")
+    room = create_room(sync_client, token)
+    advance_to_building(sync_client, room)
+    complete_character(sync_client, room["roomId"], room["reconnectToken"])
+    start_game(sync_client, room, token)
+    monkeypatch.setattr(
+        WebSocket,
+        "send_json",
+        _send_json_failing_on(
+            lambda data: data.get("message_type") == "turn.completed",
+            RuntimeError("unable to perform operation on <TCPTransport closed=True ...>"),
+        ),
+    )
+
+    action_id = "disconnect-midturn-b10"
+    with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
+        ws.send_json(
+            {
+                "type": "room.join",
+                "playerId": room["playerId"],
+                "payload": {"reconnectToken": room["reconnectToken"]},
+            }
+        )
+        ws.receive_json()  # session.bound
+        ws.receive_json()  # current view.updated
+        receive_replayed_opening(ws)
+        ws.send_json(
+            {
+                "type": "action.plan.submit",
+                "playerId": room["playerId"],
+                "payload": {
+                    "clientActionId": action_id,
+                    "utterance": "先观察房间，然后询问眼前的人",
+                },
+            }
+        )
+        settled, seen = receive_until(
+            ws,
+            lambda message: message.get("type") in {"narration.push", "turn.failed"},
+            limit=40,
+        )
+
+    assert settled["type"] == "narration.push", seen
+    assert settled["payload"]["messageId"] == action_id
+    assert all(message.get("type") != "turn.failed" for message in seen)
+
+    # 落库才是这条断言的重点：客户端收没收到都可能，events 表里必须有。
+    conversation = sync_client.get(
+        f"{ROOMS_BASE}/{room['roomId']}/conversation",
+        headers={"X-Reconnect-Token": room["reconnectToken"]},
+    ).json()["data"]
+    persisted = [
+        event
+        for event in conversation
+        if event["type"] == "narration.push" and event["payload"]["messageId"] == action_id
+    ]
+    assert len(persisted) == 1, conversation
+
+
+def test_a_send_failure_that_is_not_a_disconnect_still_fails_the_turn(
+    sync_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """容断只针对断线，不能变成"所有发送异常一律吞掉"。
+
+    payload 不可序列化之类的问题必须继续以 turn.failed 的形式暴露出来，否则
+    一个真实的契约错误会安静地消失在投递层里。
+    """
+
+    token = register_and_login(sync_client, "send_failure_not_disconnect")
+    room = create_room(sync_client, token)
+    advance_to_building(sync_client, room)
+    complete_character(sync_client, room["roomId"], room["reconnectToken"])
+    start_game(sync_client, room, token)
+    monkeypatch.setattr(
+        WebSocket,
+        "send_json",
+        _send_json_failing_on(
+            lambda data: (
+                data.get("type") == "turn.phase_changed"
+                and data["payload"]["phase"] == "understanding_action"
+            ),
+            RuntimeError("payload 不可序列化"),
+        ),
+    )
+
+    with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
+        ws.send_json(
+            {
+                "type": "room.join",
+                "playerId": room["playerId"],
+                "payload": {"reconnectToken": room["reconnectToken"]},
+            }
+        )
+        ws.receive_json()  # session.bound
+        ws.receive_json()  # current view.updated
+        receive_replayed_opening(ws)
+        ws.send_json(
+            {
+                "type": "action.plan.submit",
+                "playerId": room["playerId"],
+                "payload": {
+                    "clientActionId": "send-failure-not-disconnect",
+                    "utterance": "先观察房间，然后询问眼前的人",
+                },
+            }
+        )
+        failed, _ = receive_until(
+            ws,
+            lambda message: message.get("type") == "turn.failed",
+            limit=40,
+        )
+
+    assert failed["payload"]["correlationId"] == "send-failure-not-disconnect"
 
 
 def test_action_plan_submit_emits_safe_progress_and_one_parent_completion(

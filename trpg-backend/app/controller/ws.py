@@ -153,6 +153,54 @@ async def _short_db_session() -> AsyncIterator[AsyncSession]:
             await session.close()
 
 
+def _connection_is_gone(websocket: WebSocket, exc: Exception) -> bool:
+    """这个连接是不是已经联系不上了。
+
+    对端断开有两种表现：Starlette 自己发现状态不对，抛
+    `Cannot call "send" once a close message has been sent.`（此时
+    application_state 必然已是 DISCONNECTED，见 starlette/websockets.py 的
+    send()）；以及底层 TCP 已断但 application_state 还没被标记，直接从 uvloop
+    抛出 `unable to perform operation on <TCPTransport closed=True ...>`。
+    OSError 会被 Starlette 转成 WebSocketDisconnect。
+
+    只认这三种。别的异常（比如 payload 不可序列化）是真的出了问题，必须继续
+    往上抛，不能被"对端可能断了"顺手吞掉。
+    """
+
+    if isinstance(exc, WebSocketDisconnect):
+        return True
+    return isinstance(exc, RuntimeError) and (
+        websocket.application_state is WebSocketState.DISCONNECTED or "closed" in str(exc).lower()
+    )
+
+
+async def _send_to_player(websocket: WebSocket, message: dict) -> bool:
+    """单播一帧；对端已经断了就丢掉这一帧，不打断正在跑的回合。
+
+    回合是在收消息循环里内联跑完的，进度、阶段和结算帧都直接写这个 socket。
+    玩家中途掉线/刷新时，这些 send 会抛异常并把回合从中间掐断——规则效果已经
+    事务提交，叙事却还没落库（`_deliver_turn_narration` 在发送链的末尾），世界
+    推进了但解释它的那段话永远消失。房间广播早就是容断的（见
+    service/ws_manager.py 的 broadcast），单播这条通道之前不是。
+
+    返回是否真的送达，让调用方能记日志；但**不构成控制流**：一个已经断开的
+    连接不该影响这一回合能不能跑完、能不能落库。
+    """
+
+    try:
+        await websocket.send_json(message)
+    except Exception as exc:
+        if not _connection_is_gone(websocket, exc):
+            raise
+        logger.info(
+            "ws_send_dropped",
+            message_type=message.get("type") or message.get("message_type"),
+            correlation_id=message.get("correlation_id"),
+        )
+        return False
+    return True
+
+
 async def _send_error(
     websocket: WebSocket,
     code: str,
@@ -164,7 +212,7 @@ async def _send_error(
     这次请求怎么了"，不是房间广播内容（issue #77 新增）。"""
     payload = ErrorPayload(code=code, message=message, correlation_id=correlation_id)
     envelope = ServerEnvelope(type="error", payload=payload.model_dump(by_alias=True))
-    await websocket.send_json(envelope.model_dump(by_alias=True))
+    await _send_to_player(websocket, envelope.model_dump(by_alias=True))
 
 
 async def _send_turn_event(
@@ -208,7 +256,7 @@ async def _send_turn_event(
         type=event.type,
         payload=payload.model_dump(by_alias=True),
     )
-    await websocket.send_json(envelope.model_dump(by_alias=True))
+    await _send_to_player(websocket, envelope.model_dump(by_alias=True))
 
 
 async def _send_turn_failed(
@@ -249,11 +297,12 @@ async def _send_plan_progress(websocket: WebSocket, event) -> None:
         public_progress_label=event.public_progress_label,
         safe_reason=event.safe_reason,
     )
-    await websocket.send_json(
+    await _send_to_player(
+        websocket,
         ServerEnvelope(
             type=event.type,
             payload=payload.model_dump(by_alias=True),
-        ).model_dump(by_alias=True)
+        ).model_dump(by_alias=True),
     )
 
 
@@ -288,11 +337,12 @@ async def _send_action_plan_result(
             pending_decision=execution.pending_decision,
             check_run=execution.check_run,
         )
-        await websocket.send_json(
+        await _send_to_player(
+            websocket,
             ServerEnvelope(
                 type="adjudication.pending",
                 payload=pending.model_dump(by_alias=True, mode="json"),
-            ).model_dump(by_alias=True)
+            ).model_dump(by_alias=True),
         )
         return False
 
@@ -336,7 +386,8 @@ async def _send_completed_turn_message(
 ) -> bool:
     """Send one completed turn and persist its authoritative narration once."""
 
-    await websocket.send_json(
+    await _send_to_player(
+        websocket,
         {
             "protocol_version": "1",
             "message_type": "turn.completed",
@@ -348,7 +399,7 @@ async def _send_completed_turn_message(
                 "narration": narration.model_dump(mode="json"),
                 "player_view": player_view.to_json_dict(),
             },
-        }
+        },
     )
     await _send_view_updated(websocket, player_id, player_view)
     recorded = await _deliver_turn_narration(
@@ -430,7 +481,8 @@ async def _recover_persisted_turn_narration(
         room_id=room_id,
         player_id=player_id,
     )
-    await websocket.send_json(
+    await _send_to_player(
+        websocket,
         {
             "protocol_version": "1",
             "message_type": "turn.completed",
@@ -442,13 +494,14 @@ async def _recover_persisted_turn_narration(
                 "narration": narration.model_dump(mode="json"),
                 "player_view": view.to_json_dict(),
             },
-        }
+        },
     )
-    await websocket.send_json(
+    await _send_to_player(
+        websocket,
         ServerEnvelope(
             type="narration.push",
             payload=persisted.model_dump(by_alias=True),
-        ).model_dump(by_alias=True)
+        ).model_dump(by_alias=True),
     )
     await _send_view_updated(websocket, player_id, view)
     if active is not None:
@@ -473,11 +526,12 @@ async def _send_view_updated(
         type="view.updated",
         payload=payload.model_dump(by_alias=True),
     )
-    await websocket.send_json(envelope.model_dump(by_alias=True))
+    await _send_to_player(websocket, envelope.model_dump(by_alias=True))
 
 
 async def _stream_narration_chunks(
-    send: Callable[[dict], Awaitable[None]],
+    # 广播返回 None，单播返回"是否送达"，两者都只当投递用，返回值不参与切片逻辑。
+    send: Callable[[dict], Awaitable[object]],
     *,
     message_id: str,
     text: str,
@@ -542,7 +596,7 @@ async def _send_persisted_opening(
         type="narration.push",
         payload=narration.model_dump(by_alias=True),
     )
-    await websocket.send_json(envelope.model_dump(by_alias=True))
+    await _send_to_player(websocket, envelope.model_dump(by_alias=True))
     return True
 
 
@@ -657,7 +711,7 @@ async def _deliver_turn_narration(
     # 澄清叙事只对发起者可见，它的渐进片段必须走同一条投递通道，
     # 否则片段会广播给全房间、泄露只该给一个人看的内容。
     send = (
-        websocket.send_json
+        partial(_send_to_player, websocket)
         if completion.kind == "clarification"
         else partial(manager.broadcast, room_id)
     )
@@ -950,14 +1004,15 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                             pending_decision=execution.pending_decision,
                                             check_run=execution.check_run,
                                         )
-                                        await websocket.send_json(
+                                        await _send_to_player(
+                                            websocket,
                                             ServerEnvelope(
                                                 type="adjudication.pending",
                                                 payload=pending.model_dump(
                                                     by_alias=True,
                                                     mode="json",
                                                 ),
-                                            ).model_dump(by_alias=True)
+                                            ).model_dump(by_alias=True),
                                         )
                             else:
                                 # No ActionPlan-driven pending decision — but a
@@ -1317,10 +1372,10 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
         # "unable to perform operation on <TCPTransport closed=True ...>"），
         # application_state 这时候还看着像"已连接"。两种情况本质一样：这个连接
         # 已经联系不上了，没有客户端能收到接下来想发的任何消息，按断线处理即可。
-        if (
-            websocket.application_state is not WebSocketState.DISCONNECTED
-            and "closed" not in str(exc).lower()
-        ):
+        #
+        # 判据与 `_send_to_player` 共用一个：单播帧被丢掉的条件，和整条连接被
+        # 判定为断开的条件，必须是同一件事，否则两边会各自漂移。
+        if not _connection_is_gone(websocket, exc):
             raise
     finally:
         manager.remove(room_id, websocket)

@@ -366,6 +366,30 @@ class WorldStateView(ContractModel):
     ending_id: str | None = Field(default=None, min_length=1)
 
 
+class WorldClockView(ContractModel):
+    """Just the clock, sampled at one point in a turn (#245 §二.2).
+
+    A PlayerView only ever carries *now*. A turn that advanced time therefore
+    leaves no record of when its earlier steps happened, and the Narrator — who
+    is handed the post-turn view — writes the whole turn at the final hour:
+    walk to the inn at noon, sleep until eight, narrated as arriving after dark.
+    This is the one field that repairs that, so it deliberately carries the clock
+    alone and none of the other world flags.
+    """
+
+    day_index: int = Field(default=0, ge=0)
+    hour_of_day: int = Field(default=0, ge=0, le=23)
+    time_of_day: Literal["day", "night"] = "day"
+
+    @classmethod
+    def from_world(cls, world: WorldStateView) -> WorldClockView:
+        return cls(
+            day_index=world.day_index,
+            hour_of_day=world.hour_of_day,
+            time_of_day=world.time_of_day,
+        )
+
+
 class KnownInformationView(ContractModel):
     id: str = Field(min_length=1)
     title: str = Field(min_length=1)

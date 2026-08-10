@@ -12,12 +12,14 @@ from collaboration_framework.contracts import (
     ActionPlanPolicyError,
     ActionPlanStep,
     ActionTarget,
+    AdvanceWorldTimeEffect,
     CancelActionPlanRequest,
     CheckDecisionRequest,
     ContractError,
     EnterLocationEffect,
     GetAdjudicationStatusRequest,
     ModuleContent,
+    ModuleContentV3,
     NarrativeOnlyEffect,
     NoAdjudicationCheck,
     PlayerInput,
@@ -31,6 +33,7 @@ from collaboration_framework.contracts import (
     SubmitAdjudicationRequest,
 )
 from collaboration_framework.engine import (
+    ActorState,
     AdjudicationEngineService,
     DiceRoller,
     GameState,
@@ -1000,6 +1003,113 @@ async def test_progress_delivery_failure_does_not_change_authoritative_execution
     assert result.run.status == "awaiting_narration"
     assert result.run.completed_steps == 2
     assert len(engine_store.inspect_domain_events("room_01")) == 2
+
+
+V3_FIXTURE = (
+    ROOT
+    / "docs"
+    / "module-parser"
+    / "examples"
+    / "module-content-validation"
+    / "追书人"
+    / "module-content-v3.json"
+)
+
+
+class SleepAfterTravelAdjudicator:
+    """去旅店 + 睡一觉：第二步推进时间，第一步没有。"""
+
+    async def adjudicate(self, context):
+        effects = (
+            (NarrativeOnlyEffect(),)
+            if context.step_index == 0
+            else (
+                AdvanceWorldTimeEffect(to_point_id="hour_18"),
+                AdvanceWorldTimeEffect(to_point_id="hour_20"),
+            )
+        )
+        return ActionAdjudication(
+            request_id="model-cannot-control-this",
+            source_revision="model-cannot-control-this",
+            actor_id="model-cannot-control-this",
+            summary=context.step.semantic_goal,
+            target=ActionTarget(kind="location", id=context.player_view.scene.id),
+            method=ActionMethod(
+                family=context.step.kind,
+                description=context.step.semantic_goal,
+            ),
+            check=NoAdjudicationCheck(),
+            success_effects=effects,
+        )
+
+
+def v3_orchestrator(adjudicator):
+    """Only a v3 room has a discrete timeline for a step to advance."""
+
+    content = ModuleContentV3.model_validate_json(
+        V3_FIXTURE.read_text(encoding="utf-8")
+    )
+    engine_store = InMemoryEngineStore()
+    engine_store.register_room(
+        module_content=content,
+        initial_state=GameState(
+            room_id="room_01",
+            scene_id=content.initial_state.start_location_id,
+            actors={
+                "pc_1": ActorState(
+                    player_id="player_01",
+                    name="陈探员",
+                    source_character_id="character_v3",
+                    source_character_version=1,
+                    state={"skills": {"spot-hidden": 60}},
+                )
+            },
+            entities={},
+        ),
+    )
+    return ActionPlanOrchestrator(
+        store=InMemoryActionPlanRunStore(),
+        adjudicator=adjudicator,
+        executor=AdjudicationEngineService(engine_store),
+        player_view_projector=PlayerViewProjector(RuleEngineService(engine_store)),
+        lease_seconds=1,
+    )
+
+
+@pytest.mark.asyncio
+async def test_narration_context_dates_each_step_by_its_own_clock() -> None:
+    """去旅店发生在中午，睡觉才把时间推到夜里。
+
+    叙事器拿到的是回合结束后的 PlayerView。只给它这一个时刻，它就会把整段都
+    写在终局时钟上——「夜色浓稠，你推开旅店的门」，而玩家其实是正午出发的。
+    """
+
+    service = v3_orchestrator(SleepAfterTravelAdjudicator())
+    original = player_input("inn-and-sleep")
+    sleep_plan = ActionPlan(
+        goal="前往镇上的旅店并睡一觉",
+        steps=(
+            ActionPlanStep(kind="travel", semantic_goal="前往镇上的旅店"),
+            ActionPlanStep(kind="rest", semantic_goal="在旅店睡一觉"),
+        ),
+    )
+
+    await service.start_or_resume(original, plan=sleep_plan)
+    context = await service.build_narration_context(original)
+
+    assert context.opening_world_time is not None
+    assert (context.opening_world_time.hour_of_day, context.opening_world_time.time_of_day) == (
+        12,
+        "day",
+    )
+    clocks = [
+        (step.world_time_after.hour_of_day, step.world_time_after.time_of_day)
+        for step in context.completed_steps
+    ]
+    assert clocks == [(12, "day"), (20, "night")]
+    # The final view is still the post-turn state; it is simply no longer the
+    # only clock the Narrator can see.
+    assert context.player_view.world.hour_of_day == 20
 
 
 @pytest.mark.asyncio

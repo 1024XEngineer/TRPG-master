@@ -172,6 +172,12 @@ completed_steps[].outcome 是消耗幸运、强推等检定后决定之后的最
 outcome=success 时必须明确叙述该 semantic_goal 成功，不得用“没看出更多”等失败措辞；
 outcome=failure 时不得叙述成功后果。若最终 player_view.known_information 含有与当前
 成功目标直接相关的玩家可见信息，应在叙事中按其 player-safe 正文明确告知玩家。
+
+时间在一个回合内会推进，每一步各有自己的时刻：opening_world_time 是回合开始时的世界
+时刻，completed_steps[].world_time_after 是该步骤结束时的世界时刻，player_view.world
+只是最后一步结束后的状态。每一步都必须按它自己的时刻来写，不得把整段都放在终局时刻
+上——中午动身去旅店、一觉睡到夜里，就要写成白天出门、醒来已是夜晚，绝不能写成夜里才
+走到旅店门口。缺少 world_time_after 时按相邻步骤的时刻推断，不要虚构具体钟点。
 """.strip()
 
 _INTENT_INSTRUCTIONS = """\

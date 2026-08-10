@@ -23,6 +23,7 @@ from collaboration_framework.contracts import (
     PlayerView,
     SingleActionDecision,
     SubmitAdjudicationRequest,
+    WorldClockView,
     player_input_fingerprint,
 )
 from collaboration_framework.host.ports import (
@@ -353,7 +354,11 @@ class ActionPlanOrchestrator:
                 player_input,
                 latest,
             )
-            run = await self._apply_execution(run, latest)
+            run = await self._apply_execution(
+                run,
+                latest,
+                world_time_after=WorldClockView.from_world(view.world),
+            )
             if run.status == "waiting_for_player":
                 run = await self._release_lease(run)
                 await self._emit(
@@ -564,6 +569,7 @@ class ActionPlanOrchestrator:
             termination_status=termination,
             completed_steps=summaries,
             player_view=view,
+            opening_world_time=run.opening_world_time,
             allowed_evidence_refs=evidence,
         )
 
@@ -612,6 +618,7 @@ class ActionPlanOrchestrator:
             player_id=player_input.player_id,
             actor_id=player_input.actor_id,
             created_revision=view.revision,
+            opening_world_time=WorldClockView.from_world(view.world),
             policy_snapshot=self._policy,
             plan=plan,
             steps=steps,
@@ -743,16 +750,25 @@ class ActionPlanOrchestrator:
                 code="PENDING_ADJUDICATION_MISSING",
             )
             return failed, None
-        await self._player_view_projector.refresh_adjudication(
+        view = await self._player_view_projector.refresh_adjudication(
             player_input,
             status.execution,
         )
-        return await self._apply_execution(run, status.execution), status.execution
+        return (
+            await self._apply_execution(
+                run,
+                status.execution,
+                world_time_after=WorldClockView.from_world(view.world),
+            ),
+            status.execution,
+        )
 
     async def _apply_execution(
         self,
         run: ActionPlanRun,
         execution: AdjudicationExecution,
+        *,
+        world_time_after: WorldClockView | None = None,
     ) -> ActionPlanRun:
         index = run.current_step_index
         current = run.steps[index]
@@ -762,6 +778,9 @@ class ActionPlanOrchestrator:
             "event_refs": execution.event_refs,
             "pending_action_request_id": None,
             "safe_failure_code": None,
+            # A step that stops halfway keeps whatever clock it managed to
+            # commit; only a caller with no refreshed view leaves it untouched.
+            "world_time_after": world_time_after or current.world_time_after,
         }
         if execution.status in {
             "awaiting_skill_choice",
@@ -942,6 +961,7 @@ class ActionPlanOrchestrator:
                     semantic_goal=step.step.semantic_goal,
                     outcome=execution.outcome,
                     view_revision=execution.view_revision,
+                    world_time_after=step.world_time_after,
                     event_refs=execution.public_event_refs,
                 )
             )
@@ -962,6 +982,7 @@ class ActionPlanOrchestrator:
                         semantic_goal=step.step.semantic_goal,
                         outcome=execution.outcome,
                         view_revision=execution.view_revision,
+                        world_time_after=step.world_time_after,
                         event_refs=execution.public_event_refs,
                     )
                 )
@@ -1077,4 +1098,7 @@ class HostTurnDecisionExecutor:
                 player_input,
                 execution,
             ),
+            # `view` was projected before the submit above, so this is the clock
+            # the action started on — a single "睡到晚上" moves it too.
+            opening_world_time=WorldClockView.from_world(view.world),
         )

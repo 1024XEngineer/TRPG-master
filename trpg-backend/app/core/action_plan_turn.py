@@ -32,6 +32,7 @@ from collaboration_framework.contracts import (
     RuleDecisionRef,
     SingleActionDecision,
     SkillCheckCandidate,
+    WorldClockView,
 )
 from collaboration_framework.engine import AdjudicationEngineService, EngineStore, RuleEngineService
 from collaboration_framework.host.adapters import InMemoryActionPlanRunStore
@@ -886,6 +887,7 @@ class ActionPlanTurnApplication:
             semantic_goal=summary,
             outcome=completed_outcome,
             view_revision=execution.view_revision,
+            world_time_after=WorldClockView.from_world(result.player_view.world),
             event_refs=execution.public_event_refs,
         )
         context = ActionPlanNarrationContext(
@@ -895,6 +897,7 @@ class ActionPlanTurnApplication:
             termination_status=("cancelled" if execution.status == "cancelled" else "resolved"),
             completed_steps=(completed_summary,),
             player_view=result.player_view,
+            opening_world_time=result.opening_world_time,
             allowed_evidence_refs=execution.public_event_refs,
         )
         return ActionPlanTurnResult(

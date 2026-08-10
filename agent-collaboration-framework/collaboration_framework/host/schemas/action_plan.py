@@ -17,6 +17,7 @@ from collaboration_framework.contracts import (
     KeeperCapabilityView,
     PlayerInput,
     PlayerView,
+    WorldClockView,
 )
 from collaboration_framework.host.schemas.agent import _validate_keeper_scope
 
@@ -61,6 +62,10 @@ class ActionPlanStepRun(ContractModel):
     source_revision: str | None = Field(default=None, min_length=1)
     adjudication: ActionAdjudication | None = None
     adjudication_execution: AdjudicationExecution | None = None
+    # The clock this step left behind, sampled from the PlayerView refreshed
+    # right after it committed. None on rows persisted before this field existed
+    # and on steps that never executed.
+    world_time_after: WorldClockView | None = None
     event_refs: tuple[str, ...] = ()
     pending_action_request_id: str | None = Field(default=None, min_length=1)
     safe_failure_code: str | None = Field(default=None, min_length=1, max_length=100)
@@ -108,6 +113,10 @@ class ActionPlanRun(ContractModel):
     player_id: str = Field(min_length=1)
     actor_id: str = Field(min_length=1)
     created_revision: str = Field(min_length=1)
+    # The clock the turn opened on, before any step ran. Together with each
+    # step's `world_time_after` it gives the Narrator the whole span, so a plan
+    # whose first step advances time is still narrated from where it started.
+    opening_world_time: WorldClockView | None = None
     plan_schema_version: Literal[1] = 1
     run_version: int = Field(default=1, ge=1)
     status: PlanRunStatus = "active"
@@ -178,6 +187,7 @@ class CompletedPlanStepSummary(ContractModel):
     semantic_goal: str = Field(min_length=1, max_length=1000)
     outcome: Literal["success", "failure", "cancelled"]
     view_revision: str = Field(min_length=1)
+    world_time_after: WorldClockView | None = None
     event_refs: tuple[str, ...] = ()
 
 
@@ -225,6 +235,8 @@ class ActionPlanAdvanceResult(ContractModel):
 class SingleActionTurnResult(ContractModel):
     execution: AdjudicationExecution
     player_view: PlayerView
+    # Sampled before the adjudication was submitted; see ActionPlanRun.
+    opening_world_time: WorldClockView | None = None
 
 
 class ActionPlanNarrationContext(ContractModel):
@@ -242,6 +254,10 @@ class ActionPlanNarrationContext(ContractModel):
     ]
     completed_steps: tuple[CompletedPlanStepSummary, ...] = ()
     player_view: PlayerView
+    # `player_view` is the post-turn state, so it is the *only* clock the
+    # Narrator would otherwise see. This is where the turn started; each step
+    # then carries the clock it ended on.
+    opening_world_time: WorldClockView | None = None
     allowed_evidence_refs: tuple[str, ...] = ()
 
     @model_validator(mode="after")

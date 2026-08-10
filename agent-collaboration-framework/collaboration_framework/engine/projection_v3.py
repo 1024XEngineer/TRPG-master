@@ -22,6 +22,7 @@ from __future__ import annotations
 from collaboration_framework.contracts import (
     AgentMatchTriggerSpec,
     ContractError,
+    EntitySpecV3,
     KeeperCapabilityView,
     KeeperEndingCapability,
     KeeperEntityCapability,
@@ -29,7 +30,9 @@ from collaboration_framework.contracts import (
     KeeperLocationCapability,
     KeeperRuleCandidate,
     KeeperRuleOption,
+    KeeperTimeCapability,
     InventoryItemView,
+    ItemInstance,
     LocationKnowledge,
     LocationSpecV3,
     ModuleContentV3,
@@ -52,6 +55,7 @@ from collaboration_framework.contracts import (
 
 from .models import EngineRuntimeSnapshot, GameState
 from .navigation import effective_location_knowledge
+from .timeline import next_point_after, ordered_points, time_advance_block_reason
 from .rules_v3 import evaluate_condition
 
 # Visibility levels an authored node may carry, ordered from most to least open.
@@ -77,6 +81,7 @@ def project_v3(
         state,
         actor_id=actor_id,
         location_id=location.id,
+        module=module,
     )
 
     visible_entities = _visible_entities(module, state, location.id, actor_id)
@@ -175,6 +180,45 @@ def location_breadcrumbs(
     return tuple(reversed(trail))
 
 
+def _runtime_containment_parent(
+    module: ModuleContentV3,
+    payload: dict,
+) -> str | None:
+    """Where a Runtime Location *sits*, which is not where it *connects*.
+
+    Containment and reachability are separate graphs (#212 §7.3). Falling back
+    to `connected_location_id` conflates them: an inn reached from the study
+    door would be drawn inside 金博尔宅. The anchor still tells us the right
+    answer indirectly — the inn belongs to the anchor's region, so resolve that
+    instead and leave it at the region root when there is none.
+    """
+
+    explicit = _optional_text(payload.get("parent_location_id"))
+    if explicit is not None:
+        return explicit
+    anchor_id = _optional_text(payload.get("connected_location_id"))
+    if anchor_id is None:
+        return None
+    by_id = {location.id: location for location in module.locations}
+    anchor = by_id.get(anchor_id)
+    if anchor is None:
+        return None
+    if anchor.kind == "region":
+        return anchor.id
+    if anchor.region_id is not None and anchor.region_id in by_id:
+        return anchor.region_id
+    # No declared region: walk containment up to the outermost known ancestor.
+    cursor = anchor
+    seen: set[str] = {cursor.id}
+    while cursor.parent_location_id is not None:
+        parent = by_id.get(cursor.parent_location_id)
+        if parent is None or parent.id in seen:
+            break
+        seen.add(parent.id)
+        cursor = parent
+    return cursor.id if cursor.id != anchor.id else None
+
+
 def _location_context(
     module: ModuleContentV3,
     state: GameState,
@@ -183,9 +227,7 @@ def _location_context(
     trail = location_breadcrumbs(module, state.scene_id)
     if not trail and state.scene_id in state.runtime_locations:
         runtime = state.runtime_locations[state.scene_id]
-        parent_id = _optional_text(runtime.get("parent_location_id")) or _optional_text(
-            runtime.get("connected_location_id")
-        )
+        parent_id = _runtime_containment_parent(module, runtime)
         parent_trail = location_breadcrumbs(module, parent_id) if parent_id else ()
         trail = (
             *parent_trail,
@@ -247,8 +289,7 @@ def _known_locations(
                 id=location_id,
                 kind="room",
                 name=_optional_text(payload.get("name")) or location_id,
-                parent_location_id=_optional_text(payload.get("parent_location_id"))
-                or _optional_text(payload.get("connected_location_id")),
+                parent_location_id=_runtime_containment_parent(module, payload),
                 existence=known.existence,
                 localization=known.localization,
                 access=known.access,
@@ -474,9 +515,20 @@ def project_inventory_items(
     *,
     actor_id: str,
     location_id: str,
+    module: ModuleContentV3 | None = None,
 ) -> tuple[tuple[InventoryItemView, ...], tuple[InventoryItemView, ...]]:
-    """Project recognized active items without leaking keeper-only fields."""
+    """Project recognized active items without leaking keeper-only fields.
 
+    A Canon item is still a Canon Entity, so it stays behind the same visibility
+    gate `_visible_entities` applies. Without `module` the gate cannot be
+    evaluated and only Runtime items are safe to project — seeded Canon items
+    would otherwise appear in a scene before their `visibility_conditions`
+    (say, a diary's `found` flag) ever became true.
+    """
+
+    canon_entities = (
+        {entity.id: entity for entity in module.entities} if module is not None else {}
+    )
     party = state.party_item_knowledge
     actor = state.actor_item_knowledge.get(actor_id, {})
     inventory: list[InventoryItemView] = []
@@ -486,6 +538,12 @@ def project_inventory_items(
         if knowledge is None or knowledge.identity == "unknown":
             continue
         if item.state.status != "active":
+            continue
+        if item.origin == "canon" and not _canon_item_is_visible(
+            canon_entities.get(item_id),
+            state=state,
+            actor_id=actor_id,
+        ):
             continue
         view = InventoryItemView(
             id=item.id,
@@ -504,6 +562,40 @@ def project_inventory_items(
         elif item.custody.kind == "location" and item.custody.ref_id == location_id:
             loose_items.append(view)
     return tuple(inventory), tuple(loose_items)
+
+
+def _canon_item_is_visible(
+    entity: EntitySpecV3 | None,
+    *,
+    state: GameState,
+    actor_id: str,
+) -> bool:
+    """Mirror the Entity gate in `_visible_entities` for a Canon-origin item."""
+
+    if entity is None:
+        # A Canon-origin item with no Entity behind it cannot be gated, and an
+        # ungatable plot object is exactly what must not reach the player.
+        return False
+    if entity.visibility not in _PLAYER_VISIBLE:
+        return False
+    if not all(
+        evaluate_condition(condition, state=state, actor_id=actor_id)
+        for condition in entity.visibility_conditions
+    ):
+        return False
+    return _override_allows(state, actor_id, "entity", entity.id)
+
+
+def _item_location_id(item: ItemInstance | None) -> str | None:
+    if item is None or item.custody.kind != "location":
+        return None
+    return item.custody.ref_id
+
+
+def _item_holder_actor_id(item: ItemInstance | None) -> str | None:
+    if item is None or item.custody.kind != "actor_inventory":
+        return None
+    return item.custody.ref_id
 
 
 def _self_actor(
@@ -636,6 +728,7 @@ def keeper_capabilities_v3(
 
     module = runtime.v3
     state = runtime.game_state
+    canon_entity_ids = {entity.id for entity in module.entities}
     party_known = set(state.discovered_facts)
     actor_known = set(state.actor_discovered_facts.get(actor_id, ()))
     return KeeperCapabilityView(
@@ -677,14 +770,20 @@ def keeper_capabilities_v3(
                 name=entity.player_visible_name or entity.name,
                 kind=entity.kind,
                 origin="canon",
-                location_id=_optional_text(
-                    state.entities.get(entity.id, {}).get("location_id")
-                )
+                location_id=_item_location_id(state.item_instances.get(entity.id))
+                or _optional_text(state.entities.get(entity.id, {}).get("location_id"))
                 or entity.located_in,
-                holder_actor_id=_optional_text(
+                holder_actor_id=_item_holder_actor_id(
+                    state.item_instances.get(entity.id)
+                )
+                or _optional_text(
                     state.entities.get(entity.id, {}).get("holder_actor_id")
                 ),
-                consumed=state.entities.get(entity.id, {}).get("consumed") is True,
+                consumed=(
+                    state.item_instances[entity.id].state.status == "retired"
+                    if entity.id in state.item_instances
+                    else state.entities.get(entity.id, {}).get("consumed") is True
+                ),
             )
             for entity in module.entities
         )
@@ -703,6 +802,19 @@ def keeper_capabilities_v3(
                 consumed=payload.get("consumed") is True,
             )
             for entity_id, payload in sorted(state.runtime_entities.items())
+        )
+        + tuple(
+            KeeperEntityCapability(
+                id=item_id,
+                name=item.display.name,
+                kind="object",
+                origin="runtime",
+                location_id=_item_location_id(item),
+                holder_actor_id=_item_holder_actor_id(item),
+                consumed=item.state.status == "retired",
+            )
+            for item_id, item in sorted(state.item_instances.items())
+            if item_id not in canon_entity_ids and item_id not in state.runtime_entities
         ),
         endings=tuple(
             KeeperEndingCapability(
@@ -712,8 +824,32 @@ def keeper_capabilities_v3(
             for anchor in module.ending_anchors
         ),
         rule_candidates=_rule_candidates(module, state.scene_id),
+        time=_time_capability(module, state),
         core_resolved=state.core_resolved,
         ending_available=state.ending_available,
+    )
+
+
+def _time_capability(
+    module: ModuleContentV3,
+    state: GameState,
+) -> KeeperTimeCapability:
+    blocked = time_advance_block_reason(tuple(state.actors))
+    try:
+        next_point, _ = next_point_after(module, state.world_time)
+        next_point_id = next_point.id
+    except ContractError:
+        # The room is parked on a point this module version no longer declares.
+        # Reporting "no next point" beats guessing one.
+        next_point_id = None
+        blocked = blocked or "time_next_point_not_found: 当前时间点不在模组时间线上"
+    return KeeperTimeCapability(
+        current_point_id=state.world_time.current_point_id,
+        current_hour_of_day=state.world_time.current.hour_of_day,
+        current_day_index=state.world_time.current.day_index,
+        next_point_id=next_point_id,
+        ordered_point_ids=tuple(point.id for point in ordered_points(module)),
+        blocked_reason=blocked,
     )
 
 

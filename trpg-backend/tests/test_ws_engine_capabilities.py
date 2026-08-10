@@ -24,6 +24,7 @@ from collaboration_framework.contracts import (
     EnsureRuntimeLocationEffect,
     EnterLocationEffect,
     MarkCoreResolvedEffect,
+    MoveEntityEffect,
     NoAdjudicationCheck,
     RevealInformationEffect,
     SetEndingAvailabilityEffect,
@@ -170,6 +171,28 @@ def test_runtime_entity_reaches_the_client_scene(
     )
     assert clerk["name"] == "送信来的信差"
     assert clerk["kind"] == "npc"
+
+
+def test_runtime_object_reaches_the_client_inventory(
+    sync_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    view, _ = _play_one_action(
+        sync_client,
+        monkeypatch,
+        "cap_inventory_item",
+        EnsureRuntimeEntityEffect(
+            entity_id="ordinary_pebble",
+            entity_kind="object",
+            name="一枚普通石子",
+            location_id=OPENING_SCENE,
+        ),
+        MoveEntityEffect(entity_id="ordinary_pebble", holder_actor_id="actor_1"),
+    )
+
+    assert [item["id"] for item in view["inventory"]] == ["ordinary_pebble"]
+    assert view["self_actor"]["equipment"] == ["一枚普通石子"]
+    assert "ordinary_pebble" not in {entity["id"] for entity in view["scene"]["visible_entities"]}
 
 
 def test_runtime_location_is_created_entered_and_projected(

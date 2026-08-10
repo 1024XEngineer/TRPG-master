@@ -147,6 +147,24 @@ class NarrativeOnlyEffect(ContractModel):
     type: Literal["narrative_only"] = "narrative_only"
 
 
+class AdvanceWorldTimeEffect(ContractModel):
+    """Jump the room to the single next point on the discrete timeline (#245).
+
+    One effect is exactly one jump — the timeline decides *where*, the caller
+    only decides *that*. Sleeping from noon until 20:00 is therefore two of
+    these in sequence, and each one publishes its own `time.point_entered`, so
+    a Rule that watches for nightfall still fires on the point it was written
+    against instead of being skipped over.
+
+    `to_point_id` is not a destination request: it is the Agent stating which
+    point it believes comes next, and the Engine refuses the effect when that
+    disagrees with the authored timeline.
+    """
+
+    type: Literal["advance_world_time"] = "advance_world_time"
+    to_point_id: str | None = Field(default=None, min_length=1)
+
+
 ActionEffect = Annotated[
     RevealInformationEffect
     | HideInformationEffect
@@ -160,6 +178,7 @@ ActionEffect = Annotated[
     | MarkCoreResolvedEffect
     | SetEndingAvailabilityEffect
     | CommitTerminalEndingEffect
+    | AdvanceWorldTimeEffect
     | NarrativeOnlyEffect,
     Field(discriminator="type"),
 ]

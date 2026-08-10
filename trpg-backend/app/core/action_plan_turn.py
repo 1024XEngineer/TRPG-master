@@ -19,6 +19,7 @@ from collaboration_framework.contracts import (
     CancelCheckChoice,
     CheckDecisionRequest,
     ContractError,
+    EnsureRuntimeLocationEffect,
     EnterLocationEffect,
     GetAdjudicationStatusRequest,
     HostTurnDecision,
@@ -262,6 +263,99 @@ def _match_visible_exit(view: PlayerView, text: str):
     if len(matches) > 1 and matches[0][0] == matches[1][0]:
         return None
     return matches[0][2]
+
+
+"""普通环境地点：现实中理应遍地都是、不承载任何剧情秘密的那类去处。
+
+只收录「模组不写、但世界里一定有」的通用场所。任何可能是关键地点的词
+（教堂、警局、医院、码头……）都不在这里——那些必须由模组作者写出来，
+或者由 Agent 在完整上下文里判断，不能由这张表凭空造出来。
+"""
+_AMBIENT_VENUE_LABELS: tuple[tuple[str, str, str], ...] = (
+    ("旅店", "ambient_inn", "镇上的旅店"),
+    ("旅馆", "ambient_inn", "镇上的旅店"),
+    ("客栈", "ambient_inn", "镇上的旅店"),
+    ("寄宿屋", "ambient_boarding_house", "出租床位的寄宿屋"),
+    ("住处", "ambient_boarding_house", "出租床位的寄宿屋"),
+    ("餐馆", "ambient_diner", "街边的餐馆"),
+    ("饭馆", "ambient_diner", "街边的餐馆"),
+    ("餐厅", "ambient_diner", "街边的餐馆"),
+    ("咖啡馆", "ambient_cafe", "街角的咖啡馆"),
+    ("杂货店", "ambient_general_store", "街边的杂货店"),
+    ("商店", "ambient_general_store", "街边的杂货店"),
+)
+
+_AMBIENT_VENUE_INTENT_WORDS = ("找", "去", "前往", "进入", "到", "住", "休息", "睡")
+
+
+def _ambient_venue_adjudication(
+    context: ActionPlanStepContext,
+) -> ActionAdjudication | None:
+    """把「找一家旅店」这类泛指去处，确定性地落成一个运行时地点。
+
+    只在三件事同时成立时才动手：说的是一个普通场所、玩家确实想去、而且它
+    和模组写过的任何地点都不重名。第三条是关键——重名意味着这可能是一个
+    隐藏的 Canon 地点（比如地下酒吧），那就必须留给模组自己揭示，绝不能由
+    这里凭空造一个同名替身出来。
+    """
+
+    goal = context.step.semantic_goal
+    if not any(word in goal for word in _AMBIENT_VENUE_INTENT_WORDS):
+        return None
+    matched = next(
+        ((label, id_stem, name) for label, id_stem, name in _AMBIENT_VENUE_LABELS if label in goal),
+        None,
+    )
+    if matched is None:
+        return None
+    label, id_stem, display_name = matched
+
+    capabilities = context.keeper_capabilities
+    if capabilities is None:
+        return None
+    # 和任何已写地点（含隐藏地点）重名就退出，交给模型在完整上下文里判断。
+    for location in capabilities.locations:
+        if label in location.name or location.name in goal:
+            return None
+    if any(location.id == id_stem for location in capabilities.locations):
+        return None
+
+    anchor_id = _ambient_venue_anchor(context.player_view)
+    if anchor_id is None:
+        return None
+
+    return ActionAdjudication(
+        request_id=context.step_request_id,
+        source_revision=context.player_view.revision,
+        actor_id=context.player_input.actor_id,
+        summary=goal,
+        # 目标仍是作为连接锚点的既有地点：新地点这一刻还不存在。
+        target=ActionTarget(kind="location", id=anchor_id),
+        method=ActionMethod(family="travel", description=goal),
+        check=NoAdjudicationCheck(),
+        success_effects=(
+            EnsureRuntimeLocationEffect(
+                location_id=id_stem,
+                name=display_name,
+                connected_location_id=anchor_id,
+            ),
+            EnterLocationEffect(location_id=id_stem),
+        ),
+    )
+
+
+def _ambient_venue_anchor(view: PlayerView) -> str | None:
+    """普通去处应当挂在公共路网上，而不是你此刻站着的那间私人书房。"""
+
+    for location in view.known_locations:
+        if (
+            location.kind == "connector"
+            and location.existence == "known"
+            and location.localization == "located"
+            and location.access != "blocked"
+        ):
+            return location.id
+    return view.scene.id or None
 
 
 def _match_travel_target(view: PlayerView, text: str) -> _TravelTarget | None:
@@ -1056,6 +1150,13 @@ def _deterministic_step_adjudication(
     """Return only decisions fully implied by the current player-safe view."""
 
     if context.step.kind in {"wait", "rest"}:
+        time = context.keeper_capabilities.time if context.keeper_capabilities else None
+        if time is not None and time.blocked_reason is None and time.next_point_id:
+            # 「休息到晚上」「睡到八点」要跳几个时间点，取决于玩家说的是哪个
+            # 时间——这是语义问题，确定性分支答不了。把它交给模型，由它按
+            # keeper_capabilities.time 数出 advance_world_time 的次数，Engine
+            # 仍然逐个校验每一跳是不是时间线上的下一个点。
+            return None
         return ActionAdjudication(
             request_id=context.step_request_id,
             source_revision=context.player_view.revision,
@@ -1067,9 +1168,8 @@ def _deterministic_step_adjudication(
                 description=context.step.semantic_goal,
             ),
             check=NoAdjudicationCheck(),
-            # 等待/休息不再推进时间：#245 把行动耗时列为 non-goal，时间只在
-            # ready 门禁通过后由 advance_to_next 整点跳转。休息的收益改由
-            # 「上一时间点内未行动」的停留结算给出（#245 §四.桶三）。
+            # 时间推不动（多人房间还没有 ready 门禁，或模组没有下一个时间点）时，
+            # 等待/休息就只是一次叙事停留，不改变任何权威状态。
             success_effects=(),
         )
 
@@ -1081,10 +1181,11 @@ def _deterministic_step_adjudication(
         if destination is None:
             # An unknown *ordinary* destination is not necessarily an error:
             # #212 lets the step Agent propose an ambient Runtime Location.
-            # Hidden Canon collisions and unsupported proposals are still
-            # refused by the Agent boundary and Engine validation.  Returning
-            # None here is what gives the production fallback that chance.
-            return None
+            # Prompting alone did not get us there — the model kept answering
+            # "阿诺兹堡没有挂牌的旅店" instead of proposing one — so an ordinary
+            # venue that collides with nothing authored is resolved here, and
+            # everything else still falls through to the model.
+            return _ambient_venue_adjudication(context)
         destination_id = destination.id
         return ActionAdjudication(
             request_id=context.step_request_id,

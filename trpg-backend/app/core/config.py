@@ -91,7 +91,11 @@ class Settings(BaseSettings):
     host_agent_tool_timeout_seconds: float = Field(default=5.0, gt=0, le=30)
     host_agent_timeout_seconds: float = Field(default=30.0, gt=0, le=120)
     opening_narration_mode: Literal["model", "template"] = "model"
-    opening_narration_timeout_seconds: float = Field(default=10.0, gt=0, le=60)
+    # 10 秒对真实 provider 太紧：DeepSeek 生成开场稳定在 10s 上下，几乎每局都
+    # 撞上超时、退回确定性模板——玩家看到的就是"开场变死板了"，而日志里是
+    # opening_narration_completed result=fallback failure_category=timeout。
+    # 开场期间前端已经收到 opening.started 并显示生成中，等待是可见的。
+    opening_narration_timeout_seconds: float = Field(default=30.0, gt=0, le=60)
     recent_history_enabled: bool = True
     recent_history_max_turns: int = Field(default=6, ge=1, le=24)
     recent_history_max_chars: int = Field(default=6000, ge=2)

@@ -26,20 +26,26 @@ class DiscreteTimelineTests(unittest.TestCase):
             current_point_id=point_id,
         )
 
-    def test_default_cycle_walks_00_06_12_18(self) -> None:
+    def test_cycle_walks_the_module_declared_points(self) -> None:
+        """《追书人》声明了自己的 time_policy，夜里多一个 20 点。
+
+        20 点不是装饰：夜间监视和「睡到晚上八点再出门」都要落在一个真实存在的
+        时间点上，否则 Agent 无从映射（见 module-content-v3.json time_policy）。
+        """
+
         world = self.at("hour_00", hour=0)
         seen = []
-        for _ in range(3):
+        for _ in range(4):
             world = advanced_to_next(self.content, world)
             seen.append((world.current_point_id, world.current.day_index, world.current.hour_of_day))
 
         self.assertEqual(
             seen,
-            [("hour_06", 0, 6), ("hour_12", 0, 12), ("hour_18", 0, 18)],
+            [("hour_06", 0, 6), ("hour_12", 0, 12), ("hour_18", 0, 18), ("hour_20", 0, 20)],
         )
 
     def test_last_point_of_the_day_rolls_into_the_next_day(self) -> None:
-        world = advanced_to_next(self.content, self.at("hour_18", hour=18))
+        world = advanced_to_next(self.content, self.at("hour_20", hour=20))
 
         self.assertEqual(world.current_point_id, "hour_00")
         self.assertEqual(world.current.day_index, 1)

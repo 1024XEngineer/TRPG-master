@@ -2,7 +2,7 @@
  * RoomPage regressions for authoritative history/live message ownership and
  * opening-progress cleanup. Network and WebSocket boundaries are mocked here.
  */
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
@@ -193,7 +193,7 @@ vi.mock('@/services/room', () => ({
  * 后由测试决定每一轮何时定格，用来覆盖跨请求迟到回调。
  */
 vi.mock('@/features/dice3d', async () => {
-  const { forwardRef, useImperativeHandle } = await import('react')
+  const { forwardRef, useEffect, useImperativeHandle, useRef } = await import('react')
   return {
     supports3DDice: () => dice3dSupported.value,
     Dice3DStage: forwardRef(
@@ -201,12 +201,27 @@ vi.mock('@/features/dice3d', async () => {
         {
           onSettled,
           onUnsupported,
+          onRollAbandoned,
         }: {
           onSettled: (value: number, token: string) => void
           onUnsupported?: (token: string | null) => void
+          onRollAbandoned?: (token: string) => void
         },
         ref: React.Ref<{ roll: (token: string) => boolean }>,
       ) => {
+        // 真实舞台在卸载时会把「还没定格的那次掷骰」交回父组件。测试里必须
+        // 一起模拟，否则中途关弹窗这条路径在测试中根本不会发生，回归测不到。
+        const inFlightRef = useRef<string | null>(null)
+        const onRollAbandonedRef = useRef(onRollAbandoned)
+        onRollAbandonedRef.current = onRollAbandoned
+        useEffect(
+          () => () => {
+            const abandoned = inFlightRef.current
+            inFlightRef.current = null
+            if (abandoned !== null) onRollAbandonedRef.current?.(abandoned)
+          },
+          [],
+        )
         useImperativeHandle(
           ref,
           () => ({
@@ -215,7 +230,14 @@ vi.mock('@/features/dice3d', async () => {
                 onUnsupported?.(token)
                 return true
               }
-              dice3dRolls.push({ token, settle: (value) => onSettled(value, token) })
+              inFlightRef.current = token
+              dice3dRolls.push({
+                token,
+                settle: (value) => {
+                  inFlightRef.current = null
+                  onSettled(value, token)
+                },
+              })
               return true
             },
           }),
@@ -1058,6 +1080,151 @@ describe('RoomPage conversation history', () => {
     expect(screen.queryByTestId('dice-3d-stage')).not.toBeInTheDocument()
   })
 
+  // 回归：3D 受理了这次掷骰却永远不定格（chunk 卡住、WebGL 上下文丢失、标签页
+  // 切到后台让 rAF 暂停）。`roll()` 返回 true，rolling 被置上，而 onSettled 永远
+  // 不来 —— 检定就死在「骰子还在滚」，玩家只能退出重点一次。看门狗必须补完它。
+  it('completes the roll when the 3D engine accepts it but never settles', async () => {
+    dice3dSupported.value = true
+    dice3dBehavior.value = 'manual'
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    await act(async () => {
+      emitWsMessage({
+        type: 'check.request',
+        payload: {
+          playerId: 'player-1',
+          clientActionId: 'check-3d-stall',
+          summary: '检查旧报纸',
+          difficulty: 'regular',
+          skills: [{ id: 'library', name: '图书馆使用', targetValue: 60 }],
+        },
+      })
+    })
+    expect(await screen.findByText('图书馆使用')).toBeInTheDocument()
+
+    vi.useFakeTimers()
+    vi.spyOn(Math, 'random').mockReturnValueOnce(0.2).mockReturnValueOnce(0.3)
+
+    fireEvent.click(screen.getByRole('button', { name: '掷骰' }))
+
+    // 3D 收下了这次掷骰，但一直不回调。
+    expect(dice3dRolls).toHaveLength(1)
+    await act(async () => {
+      vi.advanceTimersByTime(1000)
+    })
+    expect(screen.getByText('🎲 骰子还在滚……')).toBeInTheDocument()
+
+    // 动画自身封顶约 5s，看门狗必须还没响。
+    await act(async () => {
+      vi.advanceTimersByTime(6000)
+    })
+    expect(screen.getByText('🎲 骰子还在滚……')).toBeInTheDocument()
+
+    // 超时之后用 2D 把这一次掷骰补完。
+    await act(async () => {
+      vi.advanceTimersByTime(15000 + 800)
+    })
+    vi.useRealTimers()
+
+    expect(screen.queryByText('🎲 骰子还在滚……')).not.toBeInTheDocument()
+    expect(screen.getByText('23')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '确认并发送' })).toBeInTheDocument()
+    // 关键：只是这一次没定格，3D 能力必须保留，否则之后每次检定都只剩数字版。
+    expect(screen.getByTestId('dice-3d-stage')).toBeInTheDocument()
+  })
+
+  // 检定必须和左下角的自由投掷手感一致：点按钮 → 播动画 → 出结果。
+  //
+  // 之前它在弹窗打开的同一个 commit 里自动掷骰，那时 3D 舞台刚挂载、懒加载还没
+  // 回来，握手失败就整次退回 2D —— 玩家看到的是「选完技能自己跳到结果，没有动画」。
+  it('waits for the player to tap before animating an authoritative check roll', async () => {
+    dice3dSupported.value = true
+    dice3dBehavior.value = 'manual'
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    await act(async () => {
+      emitWsMessage({
+        type: 'check.request',
+        payload: {
+          playerId: 'player-1',
+          clientActionId: 'check-tap-first',
+          summary: '检查旧报纸',
+          difficulty: 'regular',
+          skills: [{ id: 'library', name: '图书馆使用', targetValue: 60 }],
+        },
+      })
+    })
+    expect(await screen.findByText('图书馆使用')).toBeInTheDocument()
+
+    // 弹窗打开后不能自己开滚，也不能直接蹦出结果。
+    expect(dice3dRolls).toHaveLength(0)
+    expect(screen.queryByText('🎲 骰子还在滚……')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '掷骰' })).toBeInTheDocument()
+
+    // 点了才交给 3D 舞台，动画期间停在「还在滚」。
+    fireEvent.click(screen.getByRole('button', { name: '掷骰' }))
+    expect(dice3dRolls).toHaveLength(1)
+    expect(screen.getByText('🎲 骰子还在滚……')).toBeInTheDocument()
+
+    // 3D 定格后才出结果，而不是绕过动画。
+    await act(async () => {
+      dice3dRolls[0].settle(37)
+    })
+    expect(screen.queryByText('🎲 骰子还在滚……')).not.toBeInTheDocument()
+    expect(screen.getByText('37')).toBeInTheDocument()
+  })
+
+  // 回归：掷骰途中关掉弹窗会卸载 3D 舞台。如果把「这一次没了」当成「3D 不可用」，
+  // 那么玩家为了绕开卡住而退出一次，就会永久失去骰子动画——之后每次检定，无论
+  // 自动触发还是手动打开，都只剩下数字版。
+  it('keeps 3D available after the modal is closed mid-roll', async () => {
+    dice3dSupported.value = true
+    dice3dBehavior.value = 'manual'
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    await act(async () => {
+      emitWsMessage({
+        type: 'check.request',
+        payload: {
+          playerId: 'player-1',
+          clientActionId: 'check-3d-abandon',
+          summary: '检查旧报纸',
+          difficulty: 'regular',
+          skills: [{ id: 'library', name: '图书馆使用', targetValue: 60 }],
+        },
+      })
+    })
+    expect(await screen.findByText('图书馆使用')).toBeInTheDocument()
+    expect(screen.getByTestId('dice-3d-stage')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '掷骰' }))
+    expect(dice3dRolls).toHaveLength(1)
+
+    // 掷骰途中关掉弹窗（每个 BottomPanel 都有一个关闭按钮，取骰子这一个）。
+    const dicePanel = screen.getByText('骰子检定').closest('div[class*="fixed"]')
+    expect(dicePanel).not.toBeNull()
+    fireEvent.click(within(dicePanel as HTMLElement).getByLabelText('关闭面板'))
+
+    // 重新打开同一个检定：3D 舞台必须还在。
+    await act(async () => {
+      emitWsMessage({
+        type: 'check.request',
+        payload: {
+          playerId: 'player-1',
+          clientActionId: 'check-3d-abandon-2',
+          summary: '再检查一次',
+          difficulty: 'regular',
+          skills: [{ id: 'library', name: '图书馆使用', targetValue: 60 }],
+        },
+      })
+    })
+    expect(await screen.findByText('图书馆使用')).toBeInTheDocument()
+    expect(screen.getByTestId('dice-3d-stage')).toBeInTheDocument()
+  })
+
   it('ignores a stale 3D result and lets the replacement check roll normally', async () => {
     dice3dSupported.value = true
     dice3dBehavior.value = 'manual'
@@ -1548,6 +1715,10 @@ describe('RoomPage conversation history', () => {
       }),
     )
 
+    // 权威骰点已经到了，但要等玩家自己点「掷骰」才播放并定格——不再自动开滚。
+    expect(screen.queryByText('82')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '掷骰' }))
+
     act(() => vi.advanceTimersByTime(750))
     expect(screen.getByText('82')).toBeInTheDocument()
     expect(screen.getByText('失败')).toBeInTheDocument()
@@ -1638,6 +1809,7 @@ describe('RoomPage conversation history', () => {
         },
       }),
     )
+    fireEvent.click(screen.getByRole('button', { name: '掷骰' }))
     act(() => vi.advanceTimersByTime(750))
     expect(
       screen.getByRole('button', { name: '幸运不足：需要 52 点，当前 50 点' }),
@@ -1898,6 +2070,40 @@ describe('RoomPage conversation history', () => {
 
     expect(screen.getByText('白天 · 第 1 天 12:00')).toBeInTheDocument()
     expect(screen.queryByLabelText('主线进度')).not.toBeInTheDocument()
+  })
+
+  it('shows items left in the current scene after an action', async () => {
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    const view = playerViewFixture()
+    act(() =>
+      emitWsMessage({
+        type: 'view.updated',
+        payload: {
+          playerId: 'player-1',
+          playerView: {
+            ...view,
+            scene: {
+              ...view.scene,
+              loose_items: [{
+                id: 'ordinary-pebble',
+                name: '一枚普通石子',
+                source_label: '行动中发现',
+                quantity: 1,
+                condition: 'intact',
+                version: 2,
+              }],
+            },
+          },
+        },
+      }),
+    )
+    fireEvent.click(screen.getByRole('button', { name: '地图' }))
+
+    expect(screen.getByText('当前场景物品')).toBeInTheDocument()
+    expect(screen.getByText('一枚普通石子')).toBeInTheDocument()
+    expect(screen.getByText('状态：intact')).toBeInTheDocument()
   })
 
   it('shows every known location in containment hierarchy instead of one-hop exits', async () => {

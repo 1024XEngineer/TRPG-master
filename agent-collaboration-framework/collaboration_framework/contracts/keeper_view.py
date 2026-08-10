@@ -97,6 +97,24 @@ class KeeperRuleCandidate(ContractModel):
     options: tuple[KeeperRuleOption, ...] = ()
 
 
+class KeeperTimeCapability(ContractModel):
+    """What one `advance_world_time` effect would do, and whether it may run.
+
+    The Agent has to be able to count jumps ("sleep until 20:00" is two of
+    them), so it needs the ordered points, not just the next one. `blocked_reason`
+    is populated instead of hiding the capability, because "you cannot advance
+    time here, and here is why" is what lets the Agent say something true to the
+    player rather than silently doing nothing.
+    """
+
+    current_point_id: str = Field(min_length=1)
+    current_hour_of_day: int = Field(ge=0, le=23)
+    current_day_index: int = Field(ge=0)
+    next_point_id: str | None = Field(default=None, min_length=1)
+    ordered_point_ids: tuple[str, ...] = ()
+    blocked_reason: str | None = None
+
+
 class KeeperCapabilityView(ContractModel):
     """Everything the Agent needs to name a legal target or effect payload."""
 
@@ -110,6 +128,7 @@ class KeeperCapabilityView(ContractModel):
     entities: tuple[KeeperEntityCapability, ...] = ()
     endings: tuple[KeeperEndingCapability, ...] = ()
     rule_candidates: tuple[KeeperRuleCandidate, ...] = ()
+    time: KeeperTimeCapability | None = None
     core_resolved: bool = False
     ending_available: bool = False
 
@@ -122,4 +141,5 @@ __all__ = [
     "KeeperLocationCapability",
     "KeeperRuleCandidate",
     "KeeperRuleOption",
+    "KeeperTimeCapability",
 ]

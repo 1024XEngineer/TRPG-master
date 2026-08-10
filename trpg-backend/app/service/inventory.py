@@ -474,7 +474,12 @@ async def inventory_view(
     room_id: str,
     player: Player,
 ) -> InventoryView:
-    _, state, _ = await _runtime(db, room_id)
+    _, state, module = await _runtime(db, room_id)
     actor_id = _actor_for_player(state, player)
-    inventory, loose = project_inventory_items(state, actor_id=actor_id, location_id=state.scene_id)
+    inventory, loose = project_inventory_items(
+        state,
+        actor_id=actor_id,
+        location_id=state.scene_id,
+        module=module,
+    )
     return InventoryView(inventory=inventory, loose_items=loose)

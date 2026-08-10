@@ -54,7 +54,8 @@ async def test_inventory_http_draft_and_confirm_routes(
     assert confirm_response.status_code == 200, confirm_response.text
     view_response = await client.get(f"/api/v1/rooms/{room.id}/inventory", headers=headers)
     assert view_response.status_code == 200, view_response.text
-    assert [item["name"] for item in view_response.json()["data"]["inventory"]] == ["绳索"]
+    # 开局就带着角色卡上的装备（手电筒），确认导入的绳索追加在后面。
+    assert "绳索" in [item["name"] for item in view_response.json()["data"]["inventory"]]
 
 
 async def test_import_draft_is_reviewed_then_confirmed_idempotently(
@@ -199,5 +200,7 @@ async def test_second_pickup_loses_with_item_already_taken(
     loser_view = await inventory_service.inventory_view(
         db_session, room_id=room.id, player=players[1]
     )
-    assert [entry.id for entry in winner_view.inventory] == [item.id]
-    assert loser_view.inventory == ()
+    # 角色卡装备现在开局就在背包里，所以这里断言「抢到的那件归赢家、输家没有」，
+    # 而不是断言整个背包只有这一件。
+    assert item.id in {entry.id for entry in winner_view.inventory}
+    assert item.id not in {entry.id for entry in loser_view.inventory}

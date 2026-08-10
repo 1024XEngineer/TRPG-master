@@ -13,6 +13,8 @@ so that adding them does not change any caller.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from collaboration_framework.contracts import ContractError, ModuleContentV3, TimePointSpec
 
 from .models import WorldTimePoint, WorldTimeState
@@ -67,3 +69,24 @@ def advanced_to_next(
 
     target, moment = next_point_after(module_content, world_time)
     return WorldTimeState(current=moment, current_point_id=target.id)
+
+
+def time_advance_block_reason(actor_ids: Sequence[str]) -> str | None:
+    """Why this room may not jump yet, or None when it may (#245 §四).
+
+    Time is shared state: one investigator cannot sleep the whole party into
+    the night. A solo room has nobody to disagree with, so consent is implicit
+    and the jump proceeds. A party room needs an explicit readiness round,
+    which is not built yet — refusing is the honest answer, because silently
+    advancing would move other players' world without asking them.
+    """
+
+    if len(actor_ids) <= 1:
+        return None
+    # TODO(#245 §四): replace with the party readiness round — every actor
+    # confirms, then the jump commits. Until that exists a party room simply
+    # cannot advance time.
+    return (
+        "time_advance_requires_party_ready: "
+        "多人房间推进时间需要全体确认，该确认流程尚未实现"
+    )

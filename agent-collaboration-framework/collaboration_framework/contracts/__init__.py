@@ -3,6 +3,7 @@
 # ruff: noqa: F401 -- this module intentionally re-exports the public contract API.
 
 from .action import (
+    ENGINE_AUTHORED_INTENT_CONTEXT,
     ActionOutcome,
     ActionRequest,
     ActionResolution,
@@ -39,6 +40,7 @@ from .adjudication import (
     ActionEffect,
     ActionMethod,
     ActionTarget,
+    AdvanceWorldTimeEffect,
     AdjudicationRecovery,
     AdjudicationCheck,
     AdjudicationExecution,
@@ -138,6 +140,7 @@ from .keeper_view import (
     KeeperLocationCapability,
     KeeperRuleCandidate,
     KeeperRuleOption,
+    KeeperTimeCapability,
 )
 from .inventory import (
     ChangeItemCustodyRequest,

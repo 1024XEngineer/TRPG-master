@@ -4,10 +4,24 @@ from __future__ import annotations
 
 from typing import Annotated, Literal, TypeAlias
 
-from pydantic import Field, model_validator
+from pydantic import Field, ValidationInfo, model_validator
 
 from .common import ContractModel
 from .player_view import VisibleFact
+
+ENGINE_AUTHORED_INTENT_CONTEXT: dict[str, str] = {"intent_source": "engine"}
+"""The only validation context allowed to construct an engine-initiated Intent.
+
+`initiated_by_target` is authority-bearing: it reaches rule evaluation directly
+(`engine/expression.py`), so a player-sourced Intent that carried it would let
+untrusted model output pick which authored rules fire. Requiring this context
+makes the invariant fail closed — a call site that bypasses the Host aligner and
+validates raw model output is rejected rather than silently trusted.
+
+Engine-internal construction opts in explicitly::
+
+    Intent.model_validate(payload, context=ENGINE_AUTHORED_INTENT_CONTEXT)
+"""
 
 
 class MatchedTarget(ContractModel):
@@ -74,7 +88,8 @@ class Intent(ContractModel):
         default=False,
         description=(
             "Authority-bearing Engine flag. It is always false for "
-            "player-submitted Intent."
+            "player-submitted Intent, and setting it true requires validating "
+            "with ENGINE_AUTHORED_INTENT_CONTEXT."
         ),
     )
     summary: str = Field(
@@ -84,7 +99,14 @@ class Intent(ContractModel):
     clarification_question: str | None = None
 
     @model_validator(mode="after")
-    def validate_shape(self) -> Intent:
+    def validate_shape(self, info: ValidationInfo) -> Intent:
+        if self.initiated_by_target:
+            context = info.context if isinstance(info.context, dict) else {}
+            if context.get("intent_source") != "engine":
+                raise ValueError(
+                    "initiated_by_target 是 Engine 授权标记，"
+                    "玩家来源的 Intent 必须为 False"
+                )
         if self.kind == "unknown":
             if not isinstance(self.target, UnmatchedTarget):
                 raise ValueError("unknown Intent 必须使用 unmatched target")

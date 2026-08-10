@@ -285,6 +285,68 @@
       ],
       "title": "KeeperRuleOption",
       "type": "object"
+    },
+    "KeeperTimeCapability": {
+      "additionalProperties": false,
+      "description": "What one `advance_world_time` effect would do, and whether it may run.\n\nThe Agent has to be able to count jumps (\"sleep until 20:00\" is two of\nthem), so it needs the ordered points, not just the next one. `blocked_reason`\nis populated instead of hiding the capability, because \"you cannot advance\ntime here, and here is why\" is what lets the Agent say something true to the\nplayer rather than silently doing nothing.",
+      "properties": {
+        "current_point_id": {
+          "minLength": 1,
+          "title": "Current Point Id",
+          "type": "string"
+        },
+        "current_hour_of_day": {
+          "maximum": 23,
+          "minimum": 0,
+          "title": "Current Hour Of Day",
+          "type": "integer"
+        },
+        "current_day_index": {
+          "minimum": 0,
+          "title": "Current Day Index",
+          "type": "integer"
+        },
+        "next_point_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Next Point Id"
+        },
+        "ordered_point_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Ordered Point Ids",
+          "type": "array"
+        },
+        "blocked_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Blocked Reason"
+        }
+      },
+      "required": [
+        "current_point_id",
+        "current_hour_of_day",
+        "current_day_index"
+      ],
+      "title": "KeeperTimeCapability",
+      "type": "object"
     }
   },
   "additionalProperties": false,
@@ -344,6 +406,17 @@
       },
       "title": "Rule Candidates",
       "type": "array"
+    },
+    "time": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/KeeperTimeCapability"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "core_resolved": {
       "default": false,

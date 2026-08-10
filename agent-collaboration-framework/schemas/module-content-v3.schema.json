@@ -86,6 +86,33 @@
       "title": "AdjudicatedCheckStep",
       "type": "object"
     },
+    "AdvanceWorldTimeEffect": {
+      "additionalProperties": false,
+      "description": "Jump the room to the single next point on the discrete timeline (#245).\n\nOne effect is exactly one jump — the timeline decides *where*, the caller\nonly decides *that*. Sleeping from noon until 20:00 is therefore two of\nthese in sequence, and each one publishes its own `time.point_entered`, so\na Rule that watches for nightfall still fires on the point it was written\nagainst instead of being skipped over.\n\n`to_point_id` is not a destination request: it is the Agent stating which\npoint it believes comes next, and the Engine refuses the effect when that\ndisagrees with the authored timeline.",
+      "properties": {
+        "type": {
+          "const": "advance_world_time",
+          "default": "advance_world_time",
+          "title": "Type",
+          "type": "string"
+        },
+        "to_point_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "To Point Id"
+        }
+      },
+      "title": "AdvanceWorldTimeEffect",
+      "type": "object"
+    },
     "AgentMatchTriggerSpec": {
       "additionalProperties": false,
       "properties": {
@@ -644,6 +671,7 @@
         "effect": {
           "discriminator": {
             "mapping": {
+              "advance_world_time": "#/$defs/AdvanceWorldTimeEffect",
               "change_entity_state": "#/$defs/ChangeEntityStateEffect",
               "commit_terminal_ending": "#/$defs/CommitTerminalEndingEffect",
               "consume_entity": "#/$defs/ConsumeEntityEffect",
@@ -696,6 +724,9 @@
             },
             {
               "$ref": "#/$defs/CommitTerminalEndingEffect"
+            },
+            {
+              "$ref": "#/$defs/AdvanceWorldTimeEffect"
             },
             {
               "$ref": "#/$defs/NarrativeOnlyEffect"

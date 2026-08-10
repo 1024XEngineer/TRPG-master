@@ -16,6 +16,7 @@ from collaboration_framework.contracts import (
     AcceptResultOption,
     ActionAdjudication,
     ActionEffect,
+    AdvanceWorldTimeEffect,
     AdjudicationRecovery,
     AdjudicationExecution,
     AdjudicationStatusView,
@@ -29,6 +30,12 @@ from collaboration_framework.contracts import (
     EnterLocationEffect,
     GetAdjudicationStatusRequest,
     HideInformationEffect,
+    ItemAcquisition,
+    ItemComponent,
+    ItemCustody,
+    ItemDisplay,
+    ItemInstance,
+    ItemKnowledge,
     MarkCoreResolvedEffect,
     LocationKnowledge,
     MoveEntityEffect,
@@ -55,9 +62,11 @@ from .models import (
     EngineRuntimeSnapshot,
     GameState,
     PendingCheckDecision,
+    WorldTimeState,
 )
 from .navigation import resolve_location_target
 from .ports import EngineStore
+from .timeline import advanced_to_next, next_point_after, time_advance_block_reason
 from .rules_v3 import (
     agenda_item_for_event,
     agenda_status_for_walk,
@@ -678,7 +687,8 @@ class AdjudicationEngineService:
         exists = {
             "information": target.id in runtime.canon_information_ids,
             "entity": target.id in runtime.canon_entity_ids
-            or target.id in state.runtime_entities,
+            or target.id in state.runtime_entities
+            or target.id in state.item_instances,
             "location": target.id in runtime.canon_location_ids
             or target.id in state.runtime_locations,
             "actor": target.id in state.actors,
@@ -707,10 +717,18 @@ class AdjudicationEngineService:
         effects: tuple[ActionEffect, ...],
     ) -> None:
         information_ids = runtime.canon_information_ids
-        entity_ids = runtime.canon_entity_ids | set(runtime.game_state.runtime_entities)
+        entity_ids = (
+            runtime.canon_entity_ids
+            | set(runtime.game_state.runtime_entities)
+            | set(runtime.game_state.item_instances)
+        )
         location_ids = runtime.canon_location_ids | set(
             runtime.game_state.runtime_locations
         )
+        # Sleeping until 20:00 is several jumps in one adjudication, so each one
+        # has to be checked against the clock the previous jump left behind —
+        # not against the clock this action started on.
+        world_time = runtime.game_state.world_time
         for effect in effects:
             self._validate_effect(
                 runtime,
@@ -718,11 +736,14 @@ class AdjudicationEngineService:
                 information_ids=information_ids,
                 entity_ids=entity_ids,
                 location_ids=location_ids,
+                world_time=world_time,
             )
             if isinstance(effect, EnsureRuntimeLocationEffect):
                 location_ids.add(effect.location_id)
             elif isinstance(effect, EnsureRuntimeEntityEffect):
                 entity_ids.add(effect.entity_id)
+            elif isinstance(effect, AdvanceWorldTimeEffect):
+                world_time = advanced_to_next(runtime.v3, world_time)
 
     def _validated_options(
         self,
@@ -772,6 +793,7 @@ class AdjudicationEngineService:
         information_ids: set[str],
         entity_ids: set[str],
         location_ids: set[str],
+        world_time: WorldTimeState | None = None,
     ) -> None:
         state = runtime.game_state
         if isinstance(effect, RevealInformationEffect | HideInformationEffect):
@@ -802,6 +824,12 @@ class AdjudicationEngineService:
         elif isinstance(effect, EnsureRuntimeEntityEffect):
             if effect.entity_id in entity_ids or effect.location_id not in location_ids:
                 raise ContractError("Runtime Entity 发生 Canon shadow 或地点引用非法")
+            if (
+                runtime.is_v3
+                and effect.entity_kind == "object"
+                and (len(effect.entity_id) > 100 or len(effect.name) > 200)
+            ):
+                raise ContractError("Runtime Item 的 id 或名称超过 ItemInstance 上限")
         elif isinstance(
             effect, MoveEntityEffect | ChangeEntityStateEffect | ConsumeEntityEffect
         ):
@@ -818,6 +846,20 @@ class AdjudicationEngineService:
                     and effect.holder_actor_id not in state.actors
                 ):
                     raise ContractError("move_entity holder Actor 不存在")
+        elif isinstance(effect, AdvanceWorldTimeEffect):
+            if not runtime.is_v3:
+                raise ContractError("只有 v3 房间有离散时间线")
+            blocked = time_advance_block_reason(tuple(state.actors))
+            if blocked is not None:
+                raise ContractError(blocked)
+            target, _ = next_point_after(
+                runtime.v3, world_time if world_time is not None else state.world_time
+            )
+            if effect.to_point_id is not None and effect.to_point_id != target.id:
+                raise ContractError(
+                    "advance_world_time 声明的时间点不是时间线上的下一个点: "
+                    f"{effect.to_point_id} != {target.id}"
+                )
         elif isinstance(effect, CommitTerminalEndingEffect):
             raise ContractError("终局不能由行动效果直接提交，必须确认 EndingDraft")
 
@@ -1312,6 +1354,7 @@ class AdjudicationEngineService:
         offset: int,
     ) -> tuple[GameState, tuple[DomainEvent, ...]]:
         event_type: str | None = None
+        effect_event_id: str | None = None
         payload: dict[str, JsonValue] = {}
         if isinstance(effect, NarrativeOnlyEffect):
             return state, ()
@@ -1501,31 +1544,119 @@ class AdjudicationEngineService:
             event_type = "location.created"
             payload = {"location_id": effect.location_id}
         elif isinstance(effect, EnsureRuntimeEntityEffect):
-            entities = deepcopy(state.runtime_entities)
-            entities[effect.entity_id] = {
-                "kind": effect.entity_kind,
-                "name": effect.name,
-                "location_id": effect.location_id,
-                "provenance": "agent_adjudication",
-            }
-            state = state.model_copy(update={"runtime_entities": entities}, deep=True)
+            if runtime.is_v3 and effect.entity_kind == "object":
+                effect_event_id = self._new_id("evt")
+                revision = str(state.event_sequence + offset)
+                items = deepcopy(state.item_instances)
+                items[effect.entity_id] = ItemInstance(
+                    id=effect.entity_id,
+                    room_id=room_id,
+                    origin="runtime",
+                    definition_id=effect.entity_id,
+                    display=ItemDisplay(name=effect.name),
+                    item_component=ItemComponent(),
+                    custody=ItemCustody(
+                        kind="location",
+                        ref_id=effect.location_id,
+                        form="loose",
+                    ),
+                    acquisition=ItemAcquisition(
+                        source_type="runtime",
+                        source_id=effect.location_id,
+                        player_safe_label="行动中发现",
+                        event_id=effect_event_id,
+                        revision=revision,
+                    ),
+                    created_event_id=effect_event_id,
+                    last_event_id=effect_event_id,
+                    updated_revision=revision,
+                )
+                party_knowledge = deepcopy(state.party_item_knowledge)
+                party_knowledge[effect.entity_id] = ItemKnowledge(
+                    item_id=effect.entity_id,
+                    identity="recognized",
+                )
+                state = state.model_copy(
+                    update={
+                        "item_instances": items,
+                        "party_item_knowledge": party_knowledge,
+                    },
+                    deep=True,
+                )
+            else:
+                entities = deepcopy(state.runtime_entities)
+                entities[effect.entity_id] = {
+                    "kind": effect.entity_kind,
+                    "name": effect.name,
+                    "location_id": effect.location_id,
+                    "provenance": "agent_adjudication",
+                }
+                state = state.model_copy(
+                    update={"runtime_entities": entities}, deep=True
+                )
             event_type = "entity.created"
             payload = {"entity_id": effect.entity_id, "location_id": effect.location_id}
         elif isinstance(effect, MoveEntityEffect):
-            runtime_entities = deepcopy(state.runtime_entities)
-            entity_states = deepcopy(state.entities)
-            target = runtime_entities.get(effect.entity_id)
-            if target is None:
-                target = entity_states.setdefault(effect.entity_id, {})
-            target["location_id"] = effect.location_id
-            target["holder_actor_id"] = effect.holder_actor_id
-            state = state.model_copy(
-                update={
-                    "runtime_entities": runtime_entities,
-                    "entities": entity_states,
-                },
-                deep=True,
-            )
+            item = state.item_instances.get(effect.entity_id)
+            if item is not None:
+                effect_event_id = self._new_id("evt")
+                revision = str(state.event_sequence + offset)
+                custody = (
+                    ItemCustody(
+                        kind="actor_inventory",
+                        ref_id=effect.holder_actor_id,
+                        form="carried",
+                    )
+                    if effect.holder_actor_id is not None
+                    else ItemCustody(
+                        kind="location",
+                        ref_id=effect.location_id,
+                        form="placed",
+                    )
+                )
+                items = deepcopy(state.item_instances)
+                items[effect.entity_id] = item.model_copy(
+                    update={
+                        "custody": custody,
+                        "version": item.version + 1,
+                        "last_event_id": effect_event_id,
+                        "updated_revision": revision,
+                    }
+                )
+                updates: dict[str, object] = {"item_instances": items}
+                if effect.holder_actor_id is not None:
+                    actor_knowledge = deepcopy(state.actor_item_knowledge)
+                    actor_knowledge.setdefault(effect.holder_actor_id, {})[
+                        effect.entity_id
+                    ] = ItemKnowledge(
+                        item_id=effect.entity_id,
+                        scope="actor",
+                        identity="known",
+                    )
+                    updates["actor_item_knowledge"] = actor_knowledge
+                else:
+                    party_knowledge = deepcopy(state.party_item_knowledge)
+                    party_knowledge[effect.entity_id] = ItemKnowledge(
+                        item_id=effect.entity_id,
+                        identity="recognized",
+                    )
+                    updates["party_item_knowledge"] = party_knowledge
+                state = state.model_copy(update=updates, deep=True)
+            else:
+                runtime_entities = deepcopy(state.runtime_entities)
+                entity_states = deepcopy(state.entities)
+                target = runtime_entities.get(effect.entity_id)
+                if target is None:
+                    target = entity_states.setdefault(effect.entity_id, {})
+                target["location_id"] = effect.location_id
+                target["holder_actor_id"] = effect.holder_actor_id
+                state = state.model_copy(
+                    update={
+                        "runtime_entities": runtime_entities,
+                        "entities": entity_states,
+                    },
+                    deep=True,
+                )
             event_type = "entity.moved"
             payload = {
                 "entity_id": effect.entity_id,
@@ -1533,19 +1664,36 @@ class AdjudicationEngineService:
                 "holder_actor_id": effect.holder_actor_id,
             }
         elif isinstance(effect, ChangeEntityStateEffect):
-            runtime_entities = deepcopy(state.runtime_entities)
-            entity_states = deepcopy(state.entities)
-            target = runtime_entities.get(effect.entity_id)
-            if target is None:
-                target = entity_states.setdefault(effect.entity_id, {})
-            target[effect.key] = effect.value
-            state = state.model_copy(
-                update={
-                    "runtime_entities": runtime_entities,
-                    "entities": entity_states,
-                },
-                deep=True,
-            )
+            item = state.item_instances.get(effect.entity_id)
+            if item is not None:
+                effect_event_id = self._new_id("evt")
+                revision = str(state.event_sequence + offset)
+                values = deepcopy(item.state.values)
+                values[effect.key] = effect.value
+                items = deepcopy(state.item_instances)
+                items[effect.entity_id] = item.model_copy(
+                    update={
+                        "state": item.state.model_copy(update={"values": values}),
+                        "version": item.version + 1,
+                        "last_event_id": effect_event_id,
+                        "updated_revision": revision,
+                    }
+                )
+                state = state.model_copy(update={"item_instances": items}, deep=True)
+            else:
+                runtime_entities = deepcopy(state.runtime_entities)
+                entity_states = deepcopy(state.entities)
+                target = runtime_entities.get(effect.entity_id)
+                if target is None:
+                    target = entity_states.setdefault(effect.entity_id, {})
+                target[effect.key] = effect.value
+                state = state.model_copy(
+                    update={
+                        "runtime_entities": runtime_entities,
+                        "entities": entity_states,
+                    },
+                    deep=True,
+                )
             event_type = "entity.state_changed"
             payload = {
                 "entity_id": effect.entity_id,
@@ -1553,21 +1701,46 @@ class AdjudicationEngineService:
                 "value": effect.value,
             }
         elif isinstance(effect, ConsumeEntityEffect):
-            runtime_entities = deepcopy(state.runtime_entities)
-            entity_states = deepcopy(state.entities)
-            target = runtime_entities.get(effect.entity_id)
-            if target is None:
-                target = entity_states.setdefault(effect.entity_id, {})
-            target["consumed"] = True
-            state = state.model_copy(
-                update={
-                    "runtime_entities": runtime_entities,
-                    "entities": entity_states,
-                },
-                deep=True,
-            )
+            item = state.item_instances.get(effect.entity_id)
+            if item is not None:
+                effect_event_id = self._new_id("evt")
+                revision = str(state.event_sequence + offset)
+                items = deepcopy(state.item_instances)
+                items[effect.entity_id] = item.model_copy(
+                    update={
+                        "state": item.state.model_copy(update={"status": "retired"}),
+                        "version": item.version + 1,
+                        "last_event_id": effect_event_id,
+                        "updated_revision": revision,
+                    }
+                )
+                state = state.model_copy(update={"item_instances": items}, deep=True)
+            else:
+                runtime_entities = deepcopy(state.runtime_entities)
+                entity_states = deepcopy(state.entities)
+                target = runtime_entities.get(effect.entity_id)
+                if target is None:
+                    target = entity_states.setdefault(effect.entity_id, {})
+                target["consumed"] = True
+                state = state.model_copy(
+                    update={
+                        "runtime_entities": runtime_entities,
+                        "entities": entity_states,
+                    },
+                    deep=True,
+                )
             event_type = "entity.consumed"
             payload = {"entity_id": effect.entity_id}
+        elif isinstance(effect, AdvanceWorldTimeEffect):
+            advanced = advanced_to_next(runtime.v3, state.world_time)
+            state = state.model_copy(update={"world_time": advanced}, deep=True)
+            event_type = "time.point_entered"
+            payload = {
+                "point_id": advanced.current_point_id,
+                "day_index": advanced.current.day_index,
+                "hour_of_day": advanced.current.hour_of_day,
+                "time_of_day": advanced.time_of_day,
+            }
         elif isinstance(effect, MarkCoreResolvedEffect):
             state = state.model_copy(update={"core_resolved": True}, deep=True)
             event_type = "core.resolved"
@@ -1590,6 +1763,7 @@ class AdjudicationEngineService:
                 actor_id=actor_id,
                 event_type=event_type,
                 payload=payload,
+                event_id=effect_event_id,
             ),
         )
 
@@ -1642,9 +1816,10 @@ class AdjudicationEngineService:
         event_type: str,
         payload: dict[str, JsonValue],
         visibility: str = "public",
+        event_id: str | None = None,
     ) -> DomainEvent:
         return DomainEvent(
-            event_id=self._new_id("evt"),
+            event_id=event_id or self._new_id("evt"),
             sequence=state.event_sequence + offset,
             type=event_type,
             room_id=room_id,

@@ -14,17 +14,22 @@ from collaboration_framework.contracts import (
     ActionAdjudication,
     ActionMethod,
     ActionTarget,
+    AdvanceWorldTimeEffect,
     ChangeEntityStateEffect,
     CheckDecisionRequest,
     CommitTerminalEndingEffect,
+    ConsumeEntityEffect,
     ContractError,
+    EnsureRuntimeEntityEffect,
     EnterLocationEffect,
     ItemComponent,
     ItemCustody,
     ItemDisplay,
     ItemInstance,
     ItemKnowledge,
+    LocationKnowledge,
     ModuleContentV3,
+    MoveEntityEffect,
     NoAdjudicationCheck,
     PlayerViewScope,
     PostRollDecisionRequest,
@@ -45,6 +50,7 @@ from collaboration_framework.engine import (
     RuleEngineService,
     SequenceDiceSource,
 )
+from collaboration_framework.engine.initialization import create_initial_game_state
 from collaboration_framework.engine.projection_v3 import location_breadcrumbs
 from collaboration_framework.engine.rules_v3 import evaluate_condition, walk_rule
 
@@ -121,9 +127,10 @@ class ProjectionV3Tests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("crypt", known_ids)
         self.assertNotIn("speakeasy", known_ids)
         assert snapshot.location_context is not None
+        # 会客室是金博尔宅内的一个房间，面包屑必须带上这一层包含关系。
         self.assertEqual(
             [item.name for item in snapshot.location_context.breadcrumbs],
-            ["阿诺兹堡", "托马斯的会客室"],
+            ["阿诺兹堡", "金博尔宅", "托马斯的会客室"],
         )
 
     async def test_hidden_edges_stay_out_of_the_view(self) -> None:
@@ -190,6 +197,178 @@ class ProjectionV3Tests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([item.id for item in snapshot.scene.loose_items], [loose.id])
         self.assertEqual(snapshot.self_actor.equipment, ("提灯",))
 
+    async def test_canon_item_stays_behind_its_entity_visibility_gate(self) -> None:
+        """一个 Canon 物品仍然是一个 Canon Entity，必须走同一道可见性门禁。
+
+        日记的 `visibility_conditions` 要求 `found=true`。物品投影若只看
+        ItemKnowledge，就会把它当作散落物品直接摆进书房——玩家还没找到，
+        它已经出现在场景物品列表里了。
+        """
+
+        seeded = create_initial_game_state(
+            module_content=self.content,
+            room_id=ROOM,
+            actors={
+                ACTOR: ActorState(
+                    player_id=PLAYER,
+                    name="陈探员",
+                    source_character_id="character_v3",
+                    source_character_version=1,
+                )
+            },
+        )
+        # 日记确实被播种成了 ItemInstance，否则这条测试会因为「根本没有物品」而假绿。
+        self.assertIn("douglas_diary", seeded.item_instances)
+
+        hidden = seeded.model_copy(update={"scene_id": "kimball_study"}, deep=True)
+        snapshot = await self.project(hidden)
+        self.assertNotIn(
+            "douglas_diary", {item.id for item in snapshot.scene.loose_items}
+        )
+
+        found = hidden.model_copy(
+            update={
+                "entities": {
+                    **hidden.entities,
+                    "douglas_diary": {
+                        **hidden.entities.get("douglas_diary", {}),
+                        "found": True,
+                    },
+                }
+            },
+            deep=True,
+        )
+        revealed = await self.project(found)
+        self.assertIn(
+            "douglas_diary", {item.id for item in revealed.scene.loose_items}
+        )
+
+    async def test_character_equipment_is_carried_from_the_first_revision(self) -> None:
+        """角色卡上的装备必须在开局就是真的物品。
+
+        否则背包一开始是空的，等到绳子或手电真正用得上时才凭空出现——玩家看到
+        的就是一个时空背包。
+        """
+
+        seeded = create_initial_game_state(
+            module_content=self.content,
+            room_id=ROOM,
+            actors={
+                ACTOR: ActorState(
+                    player_id=PLAYER,
+                    name="陈探员",
+                    source_character_id="character_v3",
+                    source_character_version=1,
+                    state={
+                        "skills": {"spot-hidden": 60},
+                        "equipment": ["手电筒", "笔记本与钢笔", "", "手电筒"],
+                    },
+                )
+            },
+        )
+
+        snapshot = await self.project(seeded)
+
+        self.assertEqual(
+            [item.name for item in snapshot.inventory], ["手电筒", "笔记本与钢笔"]
+        )
+        self.assertTrue(
+            all(item.source_label == "随身携带" for item in snapshot.inventory)
+        )
+        # 是自己带着的，不是散落在开场地点等人来捡。
+        self.assertEqual(snapshot.scene.loose_items, ())
+
+    async def test_agent_created_npc_and_item_custody_lifecycle(self) -> None:
+        state = game_state(self.content, scene_id="library")
+        store = InMemoryEngineStore()
+        store.register_room(module_content=self.content, initial_state=state)
+        engine = RuleEngineService(store)
+        adjudicator = AdjudicationEngineService(store)
+        scope = PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+
+        async def commit(request_id: str, *effects) -> None:
+            before = await engine.read(scope)
+            await adjudicator.submit(
+                SubmitAdjudicationRequest(
+                    room_id=ROOM,
+                    player_id=PLAYER,
+                    adjudication=ActionAdjudication(
+                        request_id=request_id,
+                        source_revision=before.revision,
+                        actor_id=ACTOR,
+                        summary=request_id,
+                        target=ActionTarget(kind="location", id="library"),
+                        method=ActionMethod(family="action", description=request_id),
+                        check=NoAdjudicationCheck(),
+                        success_effects=effects,
+                    ),
+                )
+            )
+
+        await commit(
+            "create-and-take",
+            EnsureRuntimeEntityEffect(
+                entity_id="runtime_librarian",
+                entity_kind="npc",
+                name="图书馆管理员",
+                location_id="library",
+            ),
+            EnsureRuntimeEntityEffect(
+                entity_id="ordinary_pebble",
+                entity_kind="object",
+                name="一枚普通石子",
+                location_id="library",
+            ),
+            MoveEntityEffect(entity_id="ordinary_pebble", holder_actor_id=ACTOR),
+        )
+
+        carried = await engine.read(scope)
+        self.assertIn(
+            "runtime_librarian",
+            {entity.id for entity in carried.scene.visible_entities},
+        )
+        self.assertEqual([item.id for item in carried.inventory], ["ordinary_pebble"])
+        self.assertEqual(carried.self_actor.equipment, ("一枚普通石子",))
+        self.assertNotIn(
+            "ordinary_pebble",
+            {entity.id for entity in carried.scene.visible_entities},
+        )
+        committed = store.inspect_state(ROOM)
+        self.assertIn("runtime_librarian", committed.runtime_entities)
+        self.assertNotIn("ordinary_pebble", committed.runtime_entities)
+        self.assertEqual(
+            committed.item_instances["ordinary_pebble"].custody.kind,
+            "actor_inventory",
+        )
+        capabilities = await engine.read_keeper_capabilities(scope)
+        pebble = next(
+            item for item in capabilities.entities if item.id == "ordinary_pebble"
+        )
+        self.assertEqual(pebble.holder_actor_id, ACTOR)
+
+        await commit(
+            "throw-pebble",
+            MoveEntityEffect(entity_id="ordinary_pebble", location_id="library"),
+        )
+        placed = await engine.read(scope)
+        self.assertEqual(placed.inventory, ())
+        self.assertEqual(
+            [item.id for item in placed.scene.loose_items],
+            ["ordinary_pebble"],
+        )
+
+        await commit(
+            "consume-pebble",
+            ConsumeEntityEffect(entity_id="ordinary_pebble"),
+        )
+        consumed = await engine.read(scope)
+        self.assertEqual(consumed.inventory, ())
+        self.assertEqual(consumed.scene.loose_items, ())
+        self.assertEqual(
+            store.inspect_state(ROOM).item_instances["ordinary_pebble"].state.status,
+            "retired",
+        )
+
     async def test_discovered_locked_location_is_known_but_not_entered(self) -> None:
         state = game_state(
             self.content,
@@ -208,7 +387,9 @@ class ProjectionV3Tests(unittest.IsolatedAsyncioTestCase):
             },
         )
 
-    async def test_undiscovered_cemetery_secrets_never_enter_the_player_view(self) -> None:
+    async def test_undiscovered_cemetery_secrets_never_enter_the_player_view(
+        self,
+    ) -> None:
         hidden = await self.project(game_state(self.content, scene_id="cemetery"))
         visible_ids = {entity.id for entity in hidden.scene.visible_entities}
         self.assertNotIn("favorite_grave", visible_ids)
@@ -237,9 +418,7 @@ class ProjectionV3Tests(unittest.IsolatedAsyncioTestCase):
         state = game_state(
             self.content,
             scene_id="cemetery",
-            entities={
-                "douglas_diary": {"location_id": "cemetery", "found": True}
-            },
+            entities={"douglas_diary": {"location_id": "cemetery", "found": True}},
         )
         snapshot = await self.project(state)
         self.assertIn(
@@ -251,9 +430,7 @@ class ProjectionV3Tests(unittest.IsolatedAsyncioTestCase):
         state = game_state(
             self.content,
             scene_id="cemetery",
-            entities={
-                "douglas_diary": {"holder_actor_id": ACTOR, "found": True}
-            },
+            entities={"douglas_diary": {"holder_actor_id": ACTOR, "found": True}},
         )
         snapshot = await self.project(state)
         self.assertIn(
@@ -329,6 +506,41 @@ class ProjectionV3Tests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(snapshot.scene_id, "alley")
         self.assertEqual(snapshot.scene.name, "后巷")
 
+    async def test_runtime_location_is_contained_by_region_not_by_its_anchor(
+        self,
+    ) -> None:
+        """连接锚点是可达性，不是包含关系。
+
+        玩家站在书房里让 Agent 开一家旅店时，锚点就是书房。按锚点当父节点，
+        地图会把旅店画进金博尔宅里 —— 正是 #212 §7.3 要求分开的两张图。
+        """
+
+        state = game_state(
+            self.content,
+            scene_id="inn",
+            runtime_locations={
+                "inn": {
+                    "name": "镇上的寄宿屋",
+                    "connected_location_id": "kimball_study",
+                }
+            },
+            party_location_knowledge={
+                "inn": LocationKnowledge(
+                    location_id="inn", existence="known", localization="located"
+                )
+            },
+        )
+
+        snapshot = await self.project(state)
+        inn = next(
+            location for location in snapshot.known_locations if location.id == "inn"
+        )
+        self.assertEqual(inn.parent_location_id, "arnoldsburg")
+        self.assertEqual(
+            [item.name for item in snapshot.location_context.breadcrumbs],
+            ["阿诺兹堡", "镇上的寄宿屋"],
+        )
+
 
 class AdjudicationAgainstV3Tests(unittest.IsolatedAsyncioTestCase):
     """The Engine must validate a v3 room against v3 collections (阶段 3b)."""
@@ -380,6 +592,87 @@ class AdjudicationAgainstV3Tests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(
             "cemetery_dance_report", {item.id for item in after.known_information}
         )
+
+    async def test_sleeping_until_eight_walks_the_timeline_one_point_at_a_time(
+        self,
+    ) -> None:
+        """「睡一觉，到晚上八点」= 12 点 → 18 点 → 20 点，两跳，两个事件。
+
+        一次 advance_world_time 只走一个点，中间的 hour_18 不能被跳过：
+        夜间监视那条规则就挂在 `time.point_entered` 上，跳过点等于跳过规则。
+        """
+
+        store, engine, rules = self.build()
+        snapshot = await rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        self.assertEqual(snapshot.world.hour_of_day, 12)
+        self.assertEqual(snapshot.world.time_of_day, "day")
+
+        await self.submit(
+            engine,
+            snapshot.revision,
+            AdvanceWorldTimeEffect(to_point_id="hour_18"),
+            AdvanceWorldTimeEffect(to_point_id="hour_20"),
+        )
+
+        after = await rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        self.assertEqual(after.world.hour_of_day, 20)
+        self.assertEqual(after.world.day_index, 0)
+        self.assertEqual(after.world.time_of_day, "night")
+
+        entered = [
+            event
+            for event in store.inspect_domain_events(ROOM)
+            if event.type == "time.point_entered"
+        ]
+        self.assertEqual(
+            [event.payload["point_id"] for event in entered], ["hour_18", "hour_20"]
+        )
+
+    async def test_advance_world_time_refuses_a_point_that_is_not_next(self) -> None:
+        store, engine, rules = self.build()
+        snapshot = await rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+
+        with self.assertRaises(ContractError):
+            await self.submit(
+                engine,
+                snapshot.revision,
+                # 12 点的下一个点是 18 点，不是 20 点。
+                AdvanceWorldTimeEffect(to_point_id="hour_20"),
+            )
+
+    async def test_party_room_cannot_advance_time_without_the_ready_round(
+        self,
+    ) -> None:
+        """时间是共享状态：一个人不能替全队睡到天黑（#245 §四）。"""
+
+        store, engine, rules = self.build(
+            actors={
+                ACTOR: ActorState(
+                    player_id=PLAYER,
+                    name="陈探员",
+                    source_character_id="character_v3",
+                    source_character_version=1,
+                ),
+                "actor_2": ActorState(
+                    player_id="player_2",
+                    name="李探员",
+                    source_character_id="character_v3b",
+                    source_character_version=1,
+                ),
+            }
+        )
+        snapshot = await rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+
+        with self.assertRaises(ContractError):
+            await self.submit(engine, snapshot.revision, AdvanceWorldTimeEffect())
 
     async def test_entering_a_v3_location_moves_the_actor(self) -> None:
         store, engine, rules = self.build()

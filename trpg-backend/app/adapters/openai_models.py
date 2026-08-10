@@ -50,14 +50,16 @@ target.kind 决定 target.id 只能来自 PlayerView 的哪一个列表，两者
 
 - kind=location：只能是 player_view.scene.id、known_locations[].id，或某个
   available_exits[].destination.scene_id；
-- kind=entity：只能是 player_view.scene.visible_entities[].id；
+- kind=entity：只能是 player_view.scene.visible_entities[].id、
+  player_view.scene.loose_items[].id 或 player_view.inventory[].id；
 - kind=actor：只能是 player_view.scene.visible_actors[].id 或 self_actor.id；
 - kind=information：只能是 player_view.known_information[].id。
 
-玩家查看自己的角色卡、随身装备、技能或状态时，不要去 visible_entities 里找目标——
-背包里的东西**不是**场景实体，`self_actor.equipment` 只是一串名字，没有可以指向的 id。
-这类行动用 `target.kind=actor` + `target.id=self_actor.id`，效果用 narrative_only，
-内容直接照 `self_actor` 已有的字段说；翻自己的包不改变世界状态，也不需要检定。
+玩家查看自己的角色卡、技能或状态时，用 `target.kind=actor` +
+`target.id=self_actor.id`。查看或使用背包中的具体物品时，必须使用
+`player_view.inventory[].id` 作为 entity target；`self_actor.equipment` 只是兼容旧房间的
+名称列表，不能在已经有 inventory 项时取代 ItemInstance id。翻包本身不改变世界状态，
+也不需要检定。
 
 ## 可用的高层效果
 
@@ -86,13 +88,26 @@ keeper_capabilities 时，只能使用 enter_location 与 narrative_only。
   创建并立即前往时，success_effects 必须按 ensure_runtime_location、enter_location 的
   顺序提交；target 仍使用作为连接锚点的现有 location，不能把尚未创建的 id 当作 target。
 - ensure_runtime_entity：需要一个模组没写、但情境上应该在场的普通人或普通物件
-  （路过的店员、值班的管理员、桌上的一支笔）时才用。entity_id 必须是新的；
+  （路过的店员、值班的管理员、地上的石子、桌上的一支笔）时才用。entity_id 必须是新的；
   location_id 必须已存在。不要用它造关键 NPC、关键道具或本该由模组给出的线索。
-- move_entity：让实体换地点，或用 holder_actor_id 交到某个 Actor 手里（拿起、给予、
-  放下）。entity_id 取自 keeper_capabilities.entities[].id。
+  `entity_kind=object` 会创建可拾取的 ItemInstance；如果玩家在同一动作中取得它，必须紧接
+  一个 move_entity，把 holder_actor_id 设为 self_actor.id。这样物品才会进入背包。
+- move_entity：让 NPC/实体换地点，或改变物品 custody。拾取、保留或转交物品时使用
+  holder_actor_id；把投掷、放置、丢弃后的物品留在当前场景时使用 location_id。
+  entity_id 取自 keeper_capabilities.entities[].id、player_view.scene.loose_items[].id 或
+  player_view.inventory[].id。
 - change_entity_state：记录实体上一个具体、可观察的变化（门被撬开、灯被点亮）。
   key 只能用字母数字下划线短横。
-- consume_entity：实体被用掉、烧毁或彻底失效时使用。
+- consume_entity：物品被吃掉、喝掉、烧毁、耗尽或彻底失效时使用，之后它会从背包和
+  场景中消失。
+- advance_world_time：只有玩家明确要等待、休息、过夜或指定「到某个时间再做某事」时才用。
+  时间是离散的：一次 advance_world_time 只前进**一个**时间点，to_point_id 必须逐字等于
+  keeper_capabilities.time.next_point_id。要跳到更晚的时间点，就按
+  keeper_capabilities.time.ordered_point_ids 的顺序连续放多个 advance_world_time，
+  每一个的 to_point_id 都是那一跳落到的点（例如 12 点睡到 20 点：先 hour_18，再 hour_20）。
+  不要为了凑时间跳过中间的点，也不要用它表示「过了一会儿」——普通行动不推进时间。
+  keeper_capabilities.time.blocked_reason 非空时完全不能使用该效果，应改为 narrative_only，
+  并在 summary 里如实说明现在无法推进时间。
 - mark_core_resolved：主线目标真的被达成时使用一次。
 - set_ending_availability：主线已经收束、可以开始走结局流程时置 true。
 - commit_terminal_ending 已禁用：终局必须走 EndingDraft 生成、玩家审阅与确认 API，
@@ -101,6 +116,20 @@ keeper_capabilities 时，只能使用 enter_location 与 narrative_only。
 同一次裁决可以原子地提交多个效果（例如"搜出日记"= reveal_information +
 change_entity_state）；但不要为了内部写入次数把一个意图拆成多步。需要检定的动作把
 效果分别放进 success_effects 与 failure_effects，失败时不要发放成功才配得到的信息。
+
+## 物品取得与使用后的归宿
+
+物品的归宿由本次语义和常识裁决，不要一律删除，也不要一律留在背包：
+
+- 玩家捡起/收好普通物品：move_entity(holder_actor_id=self_actor.id)。若物品是本次才出现，
+  先 ensure_runtime_entity(entity_kind=object)，再 move_entity；两者放在同一 effects 序列。
+- 玩家投掷、放下或把可重复使用物品留在现场：move_entity(location_id=当前 scene.id)。
+- 玩家吃掉、喝掉、烧掉，或一次性物品已经耗尽：consume_entity。
+- 使用后仍合理随身携带的可重复使用工具：不要移动或消费它，可使用 narrative_only 或只提交
+  这次确实发生的其他效果。
+
+不得凭空把关键道具塞进背包；不能携带的固定设施也不得 move 到 holder_actor_id。若行动需要
+检定，只有成功分支才能执行取得、放置或消费效果，失败分支必须保持正确的物品 custody。
 
 ## 模组规则优先（keeper_capabilities.rule_candidates）
 

@@ -31,6 +31,11 @@ class IntentParser:
     @staticmethod
     def parse(raw: JsonObject, context: IntentContext) -> Intent:
         raw = coerce_intent_payload(raw, context)
+        if isinstance(raw, dict) and raw.get("initiated_by_target"):
+            # Untrusted output never carries Engine authority. Dropping it here
+            # keeps a hallucinated flag a recoverable turn instead of a contract
+            # failure; the Intent contract itself refuses it either way.
+            raw = {**raw, "initiated_by_target": False}
         intent = Intent.model_validate(raw)
         intent = normalize_intent_against_view(intent, context)
         intent = validate_intent_against_view(intent, context)

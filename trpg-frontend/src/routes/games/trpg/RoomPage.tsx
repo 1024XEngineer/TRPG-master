@@ -205,6 +205,16 @@ const ORGANIZING_PHASE_MIN_MS = 600
 
 const TIME_OF_DAY_LABELS = { day: '白天', night: '夜晚' } as const
 
+/**
+ * 3D 掷骰从受理到定格的上限。超过就退回 2D 把这次掷骰补完。
+ *
+ * 必须明显高于动画自身的封顶：引擎是 MAX_TUMBLE_SECONDS 4.5s + SETTLE 0.55s
+ * ≈ 5.05s，再加上第一次掷骰要现拉懒加载 chunk。上一版取 6s，正好卡在这个和
+ * 之间，于是正常的掷骰被当成卡死，动画被误杀成 2D。这里留足余量——它是防
+ * 死锁的兜底，不是性能预算，宁可晚一点也不能误伤。
+ */
+const DICE_3D_SETTLE_TIMEOUT_MS = 15000
+
 /** Render the Engine's authoritative discrete world-time point. */
 function formatWorldTime(dayIndex: number, hourOfDay: number): string {
   return `第 ${dayIndex + 1} 天 ${String(hourOfDay).padStart(2, '0')}:00`
@@ -516,7 +526,6 @@ function DiceModal({
   setCheckDiceState,
   presetResult = null,
   presetDegree = null,
-  autoRoll = false,
   autoRollKey,
   postRollOptions = [],
   luckValue = null,
@@ -530,7 +539,6 @@ function DiceModal({
   setCheckDiceState: Dispatch<SetStateAction<PendingCheckDiceState | null>>
   presetResult?: number | null
   presetDegree?: UiCheckRunView['roll']['degree'] | null
-  autoRoll?: boolean
   autoRollKey?: string
   postRollOptions?: UiCheckRunView['post_roll_options']
   luckValue?: number | null
@@ -545,8 +553,6 @@ function DiceModal({
   const [revisedMethod, setRevisedMethod] = useState('')
   const submitLockRef = useRef(false)
   const dice3dRef = useRef<Dice3DHandle>(null)
-  const autoRollKeyRef = useRef<string | null>(null)
-  const rollRef = useRef<() => void>(() => {})
   const rollGenerationRef = useRef(0)
   // 3D 不可用（无 WebGL / 用户要求减少动效 / 引擎加载失败）时退回原来的 2D 展示。
   // 检定是主流程的一环，不能因为渲染能力缺失就卡住。
@@ -613,8 +619,24 @@ function DiceModal({
     token: DiceRollToken
   } | null>(null)
 
+  /**
+   * 3D 接了这次掷骰、但迟迟不定格时的兜底闹钟。
+   *
+   * `roll()` 返回 true 只代表舞台受理了，不代表它一定会回调：懒加载 chunk 可能
+   * 卡住、WebGL 上下文可能丢失、标签页切到后台会让 rAF 整个暂停。这些情况下
+   * `onSettled` 永远不来，rolling 永远不清，检定就死在"骰子还在滚"。
+   */
+  const watchdog3DRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const clear3DWatchdog = useCallback(() => {
+    if (watchdog3DRef.current === null) return
+    clearTimeout(watchdog3DRef.current)
+    watchdog3DRef.current = null
+  }, [])
+
   /** 结果落地：3D 由动画定格回调进来，2D 由本地随机 + 定时器进来，两条路共用。 */
   const settle = (value: number, requestId: string | null) => {
+    clear3DWatchdog()
     inFlight3DRollRef.current = null
     const settledValue = presetResult ?? value
     const { tens, ones } = activeDiceType === 'd100' ? splitD100(settledValue) : { tens: 0, ones: 0 }
@@ -663,6 +685,36 @@ function DiceModal({
     setTimeout(() => settle(finalResult, requestId), 700)
   }
 
+  /**
+   * 给一次已被 3D 受理的掷骰装上兜底：超时未定格就退回 2D 把它补完。
+   *
+   * 走 `handle3DUnsupported` 而不是直接 `roll2D`，是为了和真正的 3D 失败共用
+   * 同一条降级路径——它会一并翻掉 use3D，避免后续每一次检定都再等一轮超时。
+   */
+  /**
+   * 这一次 3D 掷骰不会定格了，用 2D 把它补完 —— 但**保留** 3D 能力。
+   *
+   * 和 handle3DUnsupported 的区别就在最后半句：超时、舞台被卸载都只是这一次
+   * 的意外（chunk 慢、玩家中途关了弹窗），不等于这台设备用不了 3D。之前两条
+   * 路都走 setUse3D(false)，于是任何一次误判都会把之后每一次检定永久降级成
+   * 只有数字的版本。
+   */
+  const finish3DRollWithout3D = (token: DiceRollToken) => {
+    const pending = inFlight3DRollRef.current
+    if (pending?.token !== token) return
+    clear3DWatchdog()
+    inFlight3DRollRef.current = null
+    roll2D(pending.requestId)
+  }
+
+  const arm3DWatchdog = (token: DiceRollToken) => {
+    clear3DWatchdog()
+    watchdog3DRef.current = setTimeout(() => {
+      watchdog3DRef.current = null
+      finish3DRollWithout3D(token)
+    }, DICE_3D_SETTLE_TIMEOUT_MS)
+  }
+
   const roll = () => {
     const requestId = currentRequestId()
     if (isCheckMode) {
@@ -677,26 +729,38 @@ function DiceModal({
     // 自由掷骰读取物理定格后的朝上面；检定使用服务端已持久化的权威结果，
     // 只让 3D 引擎把对应面平滑定格，客户端不会生成第二个检定结果。
     if (use3D) {
+      const stage = dice3dRef.current
       const token = `${requestId ?? 'free'}:${++rollGenerationRef.current}`
       inFlight3DRollRef.current = { requestId, token }
-      if (!dice3dRef.current?.roll(token, presetResult ?? undefined)) {
-        if (inFlight3DRollRef.current?.token === token) inFlight3DRollRef.current = null
-        resetRolling(requestId)
+      if (stage === null) {
+        // 舞台根本没挂载，这次掷骰不可能有动画，用 2D 补完它而不是留个死胡同。
+        inFlight3DRollRef.current = null
+        roll2D(requestId)
+        return
       }
+      if (!stage.roll(token, presetResult ?? undefined)) {
+        // 舞台在，只是还占着上一次掷骰。掷骰现在一律由玩家点击触发，所以清掉
+        // rolling 让按钮重新可用就够了——不要退回 2D，那会把玩家想看的动画
+        // 悄悄换成一个直接蹦出来的数字。
+        inFlight3DRollRef.current = null
+        resetRolling(requestId)
+        return
+      }
+      arm3DWatchdog(token)
       return
     }
     roll2D(requestId)
   }
-  rollRef.current = roll
 
-  useEffect(() => {
-    if (!open || !autoRoll || presetResult === null || !checkRequest) return
-    const key = autoRollKey ?? `${checkRequest.clientActionId}:${presetResult}`
-    if (autoRollKeyRef.current === key) return
-    autoRollKeyRef.current = key
-    rollRef.current()
-  }, [autoRoll, autoRollKey, checkRequest, open, presetResult])
-
+  /**
+   * 检定由玩家点「掷骰」触发，和左下角的自由投掷完全同一条路径。
+   *
+   * 这里曾经在弹窗打开的同一个 commit 里自动掷骰。那一刻 3D 舞台刚挂载、懒加载
+   * chunk 还没回来，握手常常拿不到引擎，于是整次掷骰退回 2D——玩家看到的就是
+   * 「选完技能它自己跳到结果，没有动画」。骰点本来就由服务端决定，动画只是把
+   * 这个结果演出来，所以让玩家自己点、在舞台就绪之后再跑，既拿回了动画也拿回
+   * 了掷骰的仪式感。
+   */
   useEffect(() => {
     setRevisedMethod('')
   }, [autoRollKey])
@@ -712,6 +776,7 @@ function DiceModal({
   const handle3DUnsupported = (token: DiceRollToken | null) => {
     const pending = inFlight3DRollRef.current
     if (token !== null && pending?.token !== token) return
+    clear3DWatchdog()
     inFlight3DRollRef.current = null
     setUse3D(false)
     if (pending) roll2D(pending.requestId)
@@ -720,6 +785,7 @@ function DiceModal({
   const handle3DSettled = (value: number, token: DiceRollToken) => {
     const pending = inFlight3DRollRef.current
     if (!pending || pending.token !== token) return
+    clear3DWatchdog()
     inFlight3DRollRef.current = null
     if (pending.requestId !== currentRequestId()) return
     settle(value, pending.requestId)
@@ -727,11 +793,15 @@ function DiceModal({
 
   useEffect(() => {
     if (open) return
+    clear3DWatchdog()
     const pending = inFlight3DRollRef.current
     if (!pending) return
     inFlight3DRollRef.current = null
     resetRolling(pending.requestId)
-  }, [open, resetRolling])
+  }, [open, resetRolling, clear3DWatchdog])
+
+  // 组件卸载时别把闹钟留在后台。
+  useEffect(() => clear3DWatchdog, [clear3DWatchdog])
 
   const canRoll = !activeRolling && !activeShowResult && activeResult === null && !activeCheckDice?.submitted
 
@@ -785,6 +855,7 @@ function DiceModal({
           className="w-full h-48"
           onSettled={handle3DSettled}
           onUnsupported={handle3DUnsupported}
+          onRollAbandoned={finish3DRollWithout3D}
         />
       )
     }
@@ -2357,6 +2428,24 @@ export default function RoomPage() {
             </div>
           ))}
         </div>
+        {playerView?.scene.loose_items?.length ? (
+          <>
+            <div className="h-px bg-border-light my-3.5" />
+            <h4 className="text-xs font-semibold text-brass-dark mb-2.5">当前场景物品</h4>
+            <div className="space-y-2">
+              {playerView.scene.loose_items.map(item => (
+                <div key={item.id} className="rounded-md bg-panel px-3 py-2">
+                  <div className="text-sm font-medium text-text-primary">
+                    {item.name}{item.quantity > 1 ? ` ×${item.quantity}` : ''}
+                  </div>
+                  <div className="text-[11px] text-text-muted mt-0.5">
+                    状态：{item.condition}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        ) : null}
         {playerView && playerView.known_information.length > 0 && (
           <>
             <div className="h-px bg-border-light my-3.5" />
@@ -2634,7 +2723,6 @@ export default function RoomPage() {
         setCheckDiceState={setPendingCheckDice}
         presetResult={authoritativeDiceRoll?.value ?? null}
         presetDegree={authoritativeDiceRoll?.degree ?? null}
-        autoRoll={authoritativeDiceRoll !== null}
         autoRollKey={
           authoritativeDiceRoll
             ? `${authoritativeDiceRoll.checkId}:${authoritativeDiceRoll.rollCount}`

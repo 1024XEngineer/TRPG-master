@@ -264,10 +264,48 @@ async def test_visible_dialogue_does_not_call_model_or_reveal_information() -> N
     assert isinstance(adjudication.success_effects[0], NarrativeOnlyEffect)
 
 
-async def test_unknown_ordinary_travel_reaches_runtime_location_agent() -> None:
-    """#212 普通动态地点必须交给 Agent 提议，不能被可见地点快路径提前拒绝。"""
+async def test_unknown_ordinary_travel_is_resolved_without_a_model_round_trip() -> None:
+    """#212 普通动态地点要真的建出来。
 
-    class RuntimeLocationFallback:
+    只靠提示词不管用：模型反复回答「阿诺兹堡没有挂牌的旅店」，玩家因此永远
+    住不进任何旅店。泛指一个普通去处、且不与任何已写地点重名时，这里确定性
+    地登记并进入，不再看模型脸色。
+    """
+
+    class FailingFallback:
+        async def adjudicate(self, context):
+            del context
+            raise AssertionError("普通去处不应该还要问模型")
+
+    adjudication = await _RuleFirstStepAdjudicator(FailingFallback()).adjudicate(
+        await _cemetery_context(
+            "我想去小镇上的旅馆休息到晚上",
+            step_kind="travel",
+            semantic_goal="前往小镇上的旅馆",
+        )
+    )
+
+    assert [effect.type for effect in adjudication.success_effects] == [
+        "ensure_runtime_location",
+        "enter_location",
+    ]
+    created, entered = adjudication.success_effects
+    assert isinstance(created, EnsureRuntimeLocationEffect)
+    assert isinstance(entered, EnterLocationEffect)
+    # 挂在公共路网上，而不是玩家此刻站着的墓地。
+    assert created.connected_location_id == "arnoldsburg_streets"
+    assert adjudication.target.id == "arnoldsburg_streets"
+    assert entered.location_id == created.location_id
+
+
+async def test_ambient_venue_never_shadows_an_authored_location() -> None:
+    """重名的去处必须留给模组自己揭示。
+
+    地下酒吧是模组写过的隐藏地点。如果这里也能凭「酒吧」两个字造一个同名
+    运行时地点，玩家就能绕过隐藏边条件，直接走进一个冒牌的地下酒吧。
+    """
+
+    class RecordingFallback:
         calls = 0
 
         async def adjudicate(self, context):
@@ -276,42 +314,40 @@ async def test_unknown_ordinary_travel_reaches_runtime_location_agent() -> None:
                 request_id=context.step_request_id,
                 source_revision=context.player_view.revision,
                 actor_id=context.player_input.actor_id,
-                summary="在阿诺兹堡登记一家普通旅店并前往休息",
+                summary=context.step.semantic_goal,
                 target=ActionTarget(kind="location", id=context.player_view.scene.id),
                 method=ActionMethod(family="travel", description=context.step.semantic_goal),
                 check=NoAdjudicationCheck(),
-                success_effects=(
-                    EnsureRuntimeLocationEffect(
-                        location_id="runtime_arnoldsburg_inn",
-                        name="阿诺兹堡旅店",
-                        parent_location_id="town",
-                        connected_location_id="street",
-                    ),
-                    EnterLocationEffect(location_id="runtime_arnoldsburg_inn"),
-                ),
+                success_effects=(NarrativeOnlyEffect(),),
             )
 
-    fallback = RuntimeLocationFallback()
-    adjudication = await _RuleFirstStepAdjudicator(fallback).adjudicate(
+    fallback = RecordingFallback()
+    await _RuleFirstStepAdjudicator(fallback).adjudicate(
         await _cemetery_context(
-            "我想去小镇上的旅馆休息到晚上",
+            "我想去地下酒吧",
             step_kind="travel",
-            semantic_goal="前往小镇上的旅馆",
+            semantic_goal="前往地下酒吧",
         )
     )
 
     assert fallback.calls == 1
-    assert adjudication.target.id == "cemetery"
-    assert [effect.type for effect in adjudication.success_effects] == [
-        "ensure_runtime_location",
-        "enter_location",
-    ]
 
 
 def test_prompt_allows_ordinary_runtime_location_without_false_clarification() -> None:
     assert "不应反问具体哪一家" in _SAFE_ADJUDICATION_INSTRUCTIONS
     assert "ensure_runtime_location、enter_location" in _SAFE_ADJUDICATION_INSTRUCTIONS
     assert "不要仅因玩家没有指定店名而要求澄清" in current_step_adjudication_instructions()
+
+
+def test_prompt_defines_runtime_item_custody_and_consumption() -> None:
+    assert "player_view.scene.loose_items[].id" in _SAFE_ADJUDICATION_INSTRUCTIONS
+    assert "player_view.inventory[].id" in _SAFE_ADJUDICATION_INSTRUCTIONS
+    assert "这样物品才会进入背包" in _SAFE_ADJUDICATION_INSTRUCTIONS
+    assert "move_entity(location_id=当前 scene.id)" in _SAFE_ADJUDICATION_INSTRUCTIONS
+    assert "consume_entity" in _SAFE_ADJUDICATION_INSTRUCTIONS
+    step_instructions = current_step_adjudication_instructions()
+    assert "普通工作人员、路人或无关紧要的可携带物品" in step_instructions
+    assert "拾取要在同一 effects 序列继续 move_entity" in step_instructions
 
 
 @pytest.mark.parametrize(

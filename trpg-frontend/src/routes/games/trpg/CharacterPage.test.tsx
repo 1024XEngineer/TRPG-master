@@ -232,7 +232,7 @@ describe('CharacterPage', () => {
   }
 
   async function advanceToBackgroundStep() {
-    fireEvent.change(screen.getByPlaceholderText('角色姓名'), { target: { value: '张三' } })
+    fireEvent.change(screen.getByPlaceholderText('请输入角色姓名'), { target: { value: '张三' } })
     fireEvent.click(screen.getByText('会计师'))
     fireEvent.click(screen.getByRole('button', { name: /下一步/ }))
     await advanceToAttributesAfterOccupationPreview()
@@ -244,7 +244,7 @@ describe('CharacterPage', () => {
   }
 
   async function advanceToReporterSkills() {
-    fireEvent.change(screen.getByPlaceholderText('角色姓名'), { target: { value: '张三' } })
+    fireEvent.change(screen.getByPlaceholderText('请输入角色姓名'), { target: { value: '张三' } })
     fireEvent.click(screen.getByText('记者'))
     fireEvent.click(screen.getByRole('button', { name: /下一步/ }))
     await waitFor(() => {
@@ -258,13 +258,39 @@ describe('CharacterPage', () => {
     expect(await screen.findByTestId('occupation-choice-panel')).toBeInTheDocument()
   }
 
+  it('switches directly between the four book tabs without requiring sequential progress', () => {
+    renderPage()
+
+    const infoTab = screen.getByRole('tab', { name: '基础信息' })
+    const attributeTab = screen.getByRole('tab', { name: '属性' })
+    const skillTab = screen.getByRole('tab', { name: '技能' })
+    const backgroundTab = screen.getByRole('tab', { name: '背景' })
+
+    expect(infoTab).toHaveAttribute('aria-selected', 'true')
+
+    fireEvent.click(attributeTab)
+    expect(screen.getByText('属性分配')).toBeInTheDocument()
+    expect(attributeTab).toHaveAttribute('aria-selected', 'true')
+
+    fireEvent.click(skillTab)
+    expect(screen.getByText('请先在上一步中选择职业')).toBeInTheDocument()
+    expect(skillTab).toHaveAttribute('aria-selected', 'true')
+
+    fireEvent.click(backgroundTab)
+    expect(screen.getByText('装备与物品')).toBeInTheDocument()
+    expect(backgroundTab).toHaveAttribute('aria-selected', 'true')
+
+    fireEvent.click(infoTab)
+    expect(screen.getByText('调查员档案')).toBeInTheDocument()
+  })
+
   it('blocks advancing until name and occupation are filled', async () => {
     renderPage()
 
     fireEvent.click(screen.getByRole('button', { name: /下一步/ }))
     expect(screen.getAllByText('角色姓名不能为空').length).toBeGreaterThan(0)
 
-    fireEvent.change(screen.getByPlaceholderText('角色姓名'), { target: { value: '张三' } })
+    fireEvent.change(screen.getByPlaceholderText('请输入角色姓名'), { target: { value: '张三' } })
     fireEvent.click(screen.getByRole('button', { name: /下一步/ }))
     expect(screen.getAllByText('请选择职业后再继续').length).toBeGreaterThan(0)
 
@@ -274,11 +300,37 @@ describe('CharacterPage', () => {
     await advanceToAttributesAfterOccupationPreview()
   })
 
+  it('shows quick-create validation in a dialog without moving the trigger button', () => {
+    renderPage()
+
+    fireEvent.click(screen.getByRole('button', { name: /一键生成调查员/ }))
+
+    expect(screen.getByRole('alertdialog')).toHaveTextContent(
+      '请先填写调查员姓名，姓名和性别由你自己决定。'
+    )
+    fireEvent.click(screen.getByRole('button', { name: '我知道了' }))
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+  })
+
+  it('adjusts age with the always-visible arrow buttons', () => {
+    renderPage()
+
+    const ageInput = screen.getByRole('spinbutton')
+    expect(ageInput).toHaveValue(28)
+
+    fireEvent.click(screen.getByRole('button', { name: '年龄增加一岁' }))
+    expect(ageInput).toHaveValue(29)
+
+    fireEvent.click(screen.getByRole('button', { name: '年龄减少一岁' }))
+    expect(ageInput).toHaveValue(28)
+  })
+
   it('generates a character from the blank page and navigates directly to ready', async () => {
     renderPage()
 
-    fireEvent.change(screen.getByPlaceholderText('角色姓名'), { target: { value: '玩家调查员' } })
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: '女' } })
+    fireEvent.change(screen.getByPlaceholderText('请输入角色姓名'), { target: { value: '玩家调查员' } })
+    fireEvent.click(screen.getByRole('combobox', { name: '性别' }))
+    fireEvent.click(screen.getByRole('option', { name: '女' }))
     fireEvent.click(screen.getByRole('button', { name: /一键生成调查员/ }))
 
     await waitFor(() => {
@@ -306,7 +358,7 @@ describe('CharacterPage', () => {
 
   it('asks before replacing a non-empty draft and preserves it when generation fails', async () => {
     renderPage()
-    fireEvent.change(screen.getByPlaceholderText('角色姓名'), { target: { value: '手工调查员' } })
+    fireEvent.change(screen.getByPlaceholderText('请输入角色姓名'), { target: { value: '手工调查员' } })
     fireEvent.click(screen.getByText('会计师'))
     fireEvent.click(screen.getByRole('button', { name: /一键生成调查员/ }))
 
@@ -316,13 +368,13 @@ describe('CharacterPage', () => {
     mockCharacterApi.quickGenerateCharacter.mockRejectedValueOnce(new Error('network failed'))
     fireEvent.click(screen.getByRole('button', { name: '继续生成' }))
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('network failed'))
-    expect(screen.getByPlaceholderText('角色姓名')).toHaveValue('手工调查员')
+    expect(screen.getByPlaceholderText('请输入角色姓名')).toHaveValue('手工调查员')
   })
 
   it('explains each COC attribute and luck from an inline info button', async () => {
     renderPage()
 
-    fireEvent.change(screen.getByPlaceholderText('角色姓名'), { target: { value: '张三' } })
+    fireEvent.change(screen.getByPlaceholderText('请输入角色姓名'), { target: { value: '张三' } })
     fireEvent.click(screen.getByText('会计师'))
     fireEvent.click(screen.getByRole('button', { name: /下一步/ }))
     await advanceToAttributesAfterOccupationPreview()
@@ -345,6 +397,7 @@ describe('CharacterPage', () => {
     expect(screen.getByText('📊')).toBeInTheDocument()
     expect(screen.getByText('🕶️')).toBeInTheDocument()
     expect(screen.queryByText('❔')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '查看会计师详细内容' })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: /全部分类/ }))
     fireEvent.click(screen.getByRole('button', { name: /犯罪边缘/ }))
@@ -362,7 +415,7 @@ describe('CharacterPage', () => {
 
     expect(screen.getByText('会计')).toBeInTheDocument()
     expect(screen.queryByText('测试用职业')).not.toBeInTheDocument()
-    expect(screen.getByText(/信用 0-70/)).toBeInTheDocument()
+    expect(screen.getByText('0-70')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '详情' }))
 
@@ -371,7 +424,7 @@ describe('CharacterPage', () => {
 
   it('renders all six derived stats in a three-column grid', async () => {
     renderPage()
-    fireEvent.change(screen.getByPlaceholderText('角色姓名'), { target: { value: '张三' } })
+    fireEvent.change(screen.getByPlaceholderText('请输入角色姓名'), { target: { value: '张三' } })
     fireEvent.click(screen.getByText('会计师'))
     fireEvent.click(screen.getByRole('button', { name: /下一步/ }))
     await advanceToAttributesAfterOccupationPreview()
@@ -448,7 +501,7 @@ describe('CharacterPage', () => {
     })
 
     renderPage()
-    await waitFor(() => expect(screen.getByPlaceholderText('角色姓名')).toHaveValue('旧卡调查员'))
+    await waitFor(() => expect(screen.getByPlaceholderText('请输入角色姓名')).toHaveValue('旧卡调查员'))
     await waitFor(() => {
       expect(mockPreviewCharacter).toHaveBeenCalledWith(expect.objectContaining({
         occupationId: 2,
@@ -484,7 +537,7 @@ describe('CharacterPage', () => {
   it('lets credit be typed directly and clamps it to the occupation range', async () => {
     renderPage()
 
-    fireEvent.change(screen.getByPlaceholderText('角色姓名'), { target: { value: '张三' } })
+    fireEvent.change(screen.getByPlaceholderText('请输入角色姓名'), { target: { value: '张三' } })
     fireEvent.click(screen.getByText('会计师'))
     await advanceToAttributesAfterOccupationPreview()
 
@@ -508,7 +561,7 @@ describe('CharacterPage', () => {
   it('lets occupation skills use interest points after occupation points run out', async () => {
     renderPage()
 
-    fireEvent.change(screen.getByPlaceholderText('角色姓名'), { target: { value: '张三' } })
+    fireEvent.change(screen.getByPlaceholderText('请输入角色姓名'), { target: { value: '张三' } })
     fireEvent.click(screen.getByText('会计师'))
     await advanceToAttributesAfterOccupationPreview()
 
@@ -536,7 +589,7 @@ describe('CharacterPage', () => {
   it('does not let non-occupation skills borrow unused occupation points', async () => {
     renderPage()
 
-    fireEvent.change(screen.getByPlaceholderText('角色姓名'), { target: { value: '张三' } })
+    fireEvent.change(screen.getByPlaceholderText('请输入角色姓名'), { target: { value: '张三' } })
     fireEvent.click(screen.getByText('会计师'))
     await advanceToAttributesAfterOccupationPreview()
 
@@ -637,7 +690,7 @@ describe('CharacterPage', () => {
 
     renderPage()
     await waitFor(() => {
-      expect(screen.getByPlaceholderText('角色姓名')).toHaveValue('后端调查员')
+      expect(screen.getByPlaceholderText('请输入角色姓名')).toHaveValue('后端调查员')
     })
     await waitFor(() => {
       expect(mockPreviewCharacter).toHaveBeenCalledWith(expect.objectContaining({ occupationId: 1 }))

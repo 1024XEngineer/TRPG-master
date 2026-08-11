@@ -1,7 +1,7 @@
 """add inventory import drafts and idempotent commands
 
 Revision ID: f6a1b2c3d4e5
-Revises: e225a1b2c3d4
+Revises: f3b8c1d2e4a5
 """
 
 from collections.abc import Sequence
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "f6a1b2c3d4e5"
-down_revision: str | None = "e225a1b2c3d4"
+down_revision: str | None = "f3b8c1d2e4a5"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

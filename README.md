@@ -240,9 +240,17 @@ npm run dev
 | `SUFY_BASE_URL` | `https://openai.sufy.com/v1` | Sufy OpenAI-compatible API 根地址 |
 | `SUFY_IMAGE_MODEL` | `google/gemini-3-pro-image` | Sufy 高质量图片生成模型 |
 | `PORTRAIT_GENERATION_TIMEOUT_SECONDS` | `120` | 图片生成和任务轮询的总超时秒数 |
+| `PORTRAIT_MAX_IMAGE_BYTES` | `5242880` | 持久化角色头像允许的最大原始文件字节数（默认 5 MiB） |
+| `PORTRAIT_IMAGE_DOWNLOAD_TIMEOUT_SECONDS` | `15` | 下载上游临时图片的独立超时秒数 |
 | `PORTRAIT_REFERENCE_IMAGE_PATH` | `app/assets/portrait-style-reference.png` | 后端内置漫画风格参考图路径；留空或不可读时使用纯提示词 |
 
 生图入口由前端默认显示，不再配置前端环境变量。后端默认启用且使用 `auto`：依次检查 `SUFY_API_KEY` 和 `DASHSCOPE_API_KEY`，自动选择可用的真实 provider；两者都未填写时使用 mock。如需禁用后端生图，只需设置 `CHARACTER_PORTRAIT_ENABLED=false`。
+
+生图成功后，后端会下载或解码 provider 返回的图片，使用 Pillow 校验为不超过
+4096×4096 的 PNG、JPEG 或 WebP，再把当前头像二进制保存到
+`character_portraits` 表。每名角色只保留一张当前头像，重新生成成功后覆盖旧图；
+下载、校验或保存失败时旧图保持不变。头像进入数据库备份，角色数量较多时需要同时
+评估数据库容量、备份耗时和恢复时间；需要历史图库或大规模分发时应迁移到对象存储。
 
 ### 主持模型配置
 

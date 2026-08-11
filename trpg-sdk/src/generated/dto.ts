@@ -1087,6 +1087,7 @@ export interface PortraitGenerationResult {
   generationId: string;
   status?: "completed";
   imageUrl: string;
+  portraitVersion: string;
   prompt: string;
   negativePrompt: string;
   promptSummary: string;
@@ -1238,6 +1239,8 @@ export interface RoomPlayerRead {
   isHost: boolean;
   ready: boolean;
   hasCharacter: boolean;
+  hasPortrait?: boolean;
+  portraitVersion?: string | null;
 }
 
 /**

@@ -47,7 +47,7 @@ from app.models.chat import ChatMessage
 from app.models.content import Game, GameSystem, Scenario, World
 from app.models.engine import GameSession, ModuleVersion
 from app.models.event import Event
-from app.models.room import Character, Player, Room
+from app.models.room import Character, CharacterPortrait, Player, Room
 from app.models.user import User
 from app.service import chat as chat_service
 
@@ -217,6 +217,15 @@ async def _module_identity(db: AsyncSession, scenario_id: str | None) -> str | N
 async def _to_room_preview(db: AsyncSession, room: Room) -> RoomPreview:
     result = await db.scalars(select(Player).where(Player.room_id == room.id))
     room_players = list(result)
+    # 单独只查头像哈希，不把 LargeBinary 内容带进每 3 秒一次的房间预览轮询。
+    portrait_rows = await db.execute(
+        select(Character.player_id, CharacterPortrait.content_hash)
+        .join(CharacterPortrait, CharacterPortrait.character_id == Character.id)
+        .where(Character.room_id == room.id)
+    )
+    portrait_versions: dict[str, str] = {}
+    for player_id, content_hash in portrait_rows.tuples().all():
+        portrait_versions[player_id] = content_hash
     return RoomPreview(
         room_id=room.id,
         room_code=room.room_code,
@@ -236,6 +245,8 @@ async def _to_room_preview(db: AsyncSession, room: Room) -> RoomPreview:
                 is_host=p.is_host,
                 ready=p.ready,
                 has_character=p.has_character,
+                has_portrait=p.id in portrait_versions,
+                portrait_version=portrait_versions.get(p.id),
             )
             for p in room_players
         ],

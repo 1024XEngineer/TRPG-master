@@ -13,6 +13,7 @@ const generated: PortraitGenerationResult = {
   generationId: 'generation-1',
   status: 'completed',
   imageUrl: 'https://images.example/portrait.png',
+  portraitVersion: 'portrait-version-1',
   prompt: 'portrait prompt',
   negativePrompt: 'watermark',
   promptSummary: '私家侦探的风衣、伤疤和侦查装备',
@@ -27,6 +28,7 @@ function Harness({ initialResult = null }: { initialResult?: PortraitGenerationR
       characterId="character-1"
       characterName="陈探员"
       result={result}
+      portraitUrl={result ? 'blob:persistent-portrait' : undefined}
       onResult={setResult}
       onClose={vi.fn()}
     />
@@ -68,7 +70,7 @@ describe('PortraitGenerationModal', () => {
     await waitFor(() => {
       expect(screen.getByRole('img', { name: '陈探员的人物图片' })).toHaveAttribute(
         'src',
-        generated.imageUrl,
+        'blob:persistent-portrait',
       )
     })
     expect(screen.getByText(generated.promptSummary)).toBeInTheDocument()

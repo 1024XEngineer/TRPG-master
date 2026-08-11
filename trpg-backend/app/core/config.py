@@ -124,6 +124,10 @@ class Settings(BaseSettings):
     # 留空或文件不可读时，角色生图自动降级为纯提示词模式。
     portrait_reference_image_path: str = "app/assets/portrait-style-reference.png"
     portrait_generation_timeout_seconds: float = Field(default=120.0, gt=0, le=300)
+    # 生图服务返回的 URL/Data URI 必须先由后端下载、解码并校验，再持久化为头像。
+    # 该上限同时约束远程响应体和解码后的原始文件，避免异常响应耗尽内存或撑大数据库。
+    portrait_max_image_bytes: int = Field(default=5 * 1024 * 1024, ge=1024, le=20 * 1024 * 1024)
+    portrait_image_download_timeout_seconds: float = Field(default=15.0, gt=0, le=60)
 
     # AI 主持人语音：默认关闭，未配置豆包凭证时不影响应用启动或文字游戏流程。
     host_speech_provider: Literal["disabled", "fake", "doubao"] = "disabled"

@@ -83,6 +83,7 @@ def test_migration_upgrades_empty_sqlite_and_round_trips(tmp_path: Path) -> None
         "inventory_command_executions",
         "ending_drafts",
         "ending_command_executions",
+        "character_portraits",
     }.issubset(tables)
     assert "decision_schema_version" in _column_names(
         database,
@@ -120,6 +121,20 @@ def test_migration_upgrades_empty_sqlite_and_round_trips(tmp_path: Path) -> None
     assert "host_speech_voice_type" in _column_names(database, "rooms")
     assert "version" in _column_names(database, "characters")
     assert "occupation_choice_skill_ids" in _column_names(database, "characters")
+    assert {
+        "character_id",
+        "content",
+        "content_type",
+        "size_bytes",
+        "content_hash",
+        "created_at",
+        "updated_at",
+    } == _column_names(database, "character_portraits")
+    assert (
+        "character_id",
+        "characters",
+        "id",
+    ) in _foreign_keys(database, "character_portraits")
     assert "correlation_id" in _column_names(database, "events")
     assert {
         "visibility",
@@ -135,6 +150,7 @@ def test_migration_upgrades_empty_sqlite_and_round_trips(tmp_path: Path) -> None
     assert "module_versions" not in _table_names(database)
     assert "version" not in _column_names(database, "characters")
     assert "occupation_choice_skill_ids" not in _column_names(database, "characters")
+    assert "character_portraits" not in _table_names(database)
     assert "correlation_id" not in _column_names(database, "events")
 
     _upgrade_or_fail(database, "head")

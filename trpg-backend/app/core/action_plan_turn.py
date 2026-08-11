@@ -51,6 +51,7 @@ from collaboration_framework.host.schemas import (
     ActionPlanAdvanceResult,
     ActionPlanNarrationContext,
     ActionPlanNarrationOutput,
+    ActionPlanRun,
     ActionPlanStepContext,
     CompletedPlanStepSummary,
     HostAgentContext,
@@ -634,6 +635,15 @@ class ActionPlanTurnApplication:
         on_phase: TurnPhaseObserver | None = None,
     ) -> ActionPlanTurnResult:
         actor_id = await self._resolve_actor_id(room_id, player_id)
+        run = await self._orchestrator.get_run(room_id, parent_action_id)
+        if (
+            run is not None
+            and run.player_id == player_id
+            and run.actor_id == actor_id
+            and run.parent_action_id == parent_action_id
+            and run.pending_cancel_request_id is not None
+        ):
+            await self._recover_pending_post_roll_cancel(run)
         advanced = await self._orchestrator.resume_owned(
             room_id=room_id,
             player_id=player_id,
@@ -747,6 +757,22 @@ class ActionPlanTurnApplication:
     ) -> ActionPlanTurnResult:
         actor_id = await self._resolve_actor_id(room_id, player_id)
         existing = await self._orchestrator.get_run(room_id, parent_action_id)
+        if (
+            existing is not None
+            and existing.player_id == player_id
+            and existing.actor_id == actor_id
+            and existing.parent_action_id == parent_action_id
+            and existing.pending_cancel_request_id is not None
+        ):
+            # The durable intent, rather than the current client request ID,
+            # owns recovery. This also handles a retry with a fresh request ID
+            # after either authoritative write has already committed.
+            await self._recover_pending_post_roll_cancel(existing)
+            return await self.resume_owned(
+                room_id=room_id,
+                player_id=player_id,
+                parent_action_id=parent_action_id,
+            )
         execution: AdjudicationExecution | None = None
         if (
             existing is not None
@@ -797,39 +823,9 @@ class ActionPlanTurnApplication:
             # A post-roll cancel accepts the already-authoritative roll.  The
             # intent is durable before the Engine command so recovery can
             # finish the same check and stop later steps after a crash.
-            check_run = execution.check_run
-            accept_option = next(
-                (
-                    option
-                    for option in check_run.post_roll_options
-                    if option.kind == "accept_result"
-                ),
-                None,
-            )
-            if accept_option is None:
-                raise TurnExecutionError(
-                    "POST_ROLL_ACCEPT_UNAVAILABLE",
-                    "当前检定没有可接受的已掷结果",
-                    retryable=False,
-                )
-            await self._orchestrator.request_cancel_after_current(cancel_request)
-            derived_request_id = f"{request_id}:accept-current"
-            if len(derived_request_id) > 200:
-                derived_request_id = (
-                    "post-roll-accept-" + hashlib.sha256(request_id.encode("utf-8")).hexdigest()
-                )
-            await self._adjudication_engine.decide_post_roll(
-                PostRollDecisionRequest(
-                    request_id=derived_request_id,
-                    room_id=room_id,
-                    player_id=player_id,
-                    source_revision=execution.view_revision,
-                    check_id=check_run.check_id,
-                    check_version=check_run.version,
-                    option_id=accept_option.option_id,
-                )
-            )
-            result = await self.resume_pending(
+            intent = await self._orchestrator.request_cancel_after_current(cancel_request)
+            await self._recover_pending_post_roll_cancel(intent)
+            result = await self.resume_owned(
                 room_id=room_id,
                 player_id=player_id,
                 parent_action_id=parent_action_id,
@@ -853,6 +849,81 @@ class ActionPlanTurnApplication:
             result,
             verify_fingerprint=False,
         )
+
+    async def _recover_pending_post_roll_cancel(
+        self,
+        run: ActionPlanRun,
+    ) -> None:
+        """Finish a durable post-roll cancel intent after any process restart.
+
+        The persisted cancel ID is the idempotency key. A resolved Engine
+        execution needs no second write; an awaiting execution receives the
+        same derived accept-current command regardless of which client request
+        triggered recovery.
+        """
+
+        cancel_id = run.pending_cancel_request_id
+        if cancel_id is None:
+            return
+        if run.current_step_index >= len(run.steps):
+            raise TurnExecutionError(
+                "PLAN_CANCEL_RECOVERY_UNAVAILABLE",
+                "取消请求无法从当前行动计划状态恢复，请刷新后重试",
+                retryable=True,
+            )
+        current = run.steps[run.current_step_index]
+        status = await self._adjudication_engine.get_status(
+            GetAdjudicationStatusRequest(
+                room_id=run.room_id,
+                player_id=run.player_id,
+                action_request_id=current.step_request_id,
+            )
+        )
+        if status.status in {"resolved", "cancelled"}:
+            return
+        if status.status != "awaiting_post_roll_decision" or status.execution is None:
+            raise TurnExecutionError(
+                "PLAN_CANCEL_RECOVERY_UNAVAILABLE",
+                "取消请求无法从当前检定状态恢复，请刷新后重试",
+                retryable=True,
+            )
+        execution = status.execution
+        check_run = execution.check_run
+        if check_run is None:
+            raise TurnExecutionError(
+                "PLAN_CANCEL_RECOVERY_UNAVAILABLE",
+                "取消请求无法从当前检定状态恢复，请刷新后重试",
+                retryable=True,
+            )
+        accept_option = next(
+            (option for option in check_run.post_roll_options if option.kind == "accept_result"),
+            None,
+        )
+        if accept_option is None:
+            raise TurnExecutionError(
+                "POST_ROLL_ACCEPT_UNAVAILABLE",
+                "当前检定没有可接受的已掷结果",
+                retryable=False,
+            )
+        derived_request_id = self._post_roll_accept_request_id(cancel_id)
+        await self._adjudication_engine.decide_post_roll(
+            PostRollDecisionRequest(
+                request_id=derived_request_id,
+                room_id=run.room_id,
+                player_id=run.player_id,
+                source_revision=execution.view_revision,
+                check_id=check_run.check_id,
+                check_version=check_run.version,
+                option_id=accept_option.option_id,
+            )
+        )
+
+    @staticmethod
+    def _post_roll_accept_request_id(cancel_id: str) -> str:
+        derived_request_id = f"{cancel_id}:accept-current"
+        if len(derived_request_id) <= 200:
+            return derived_request_id
+        return "post-roll-accept-" + hashlib.sha256(cancel_id.encode("utf-8")).hexdigest()
 
     async def mark_narration_persisted(
         self,

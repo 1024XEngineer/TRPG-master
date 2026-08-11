@@ -970,55 +970,76 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 room_id
                             )
                             if active_plan is not None and active_plan.player_id == bound_player_id:
-                                await _send_plan_progress(
-                                    websocket,
-                                    type(
-                                        "RecoveredPlanProgress",
-                                        (),
-                                        {
-                                            "type": "plan.step_changed",
-                                            "correlation_id": active_plan.parent_action_id,
-                                            "current_step": min(
-                                                active_plan.current_step_index + 1,
-                                                len(active_plan.steps),
-                                            ),
-                                            "completed_steps": active_plan.completed_steps,
-                                            "total_steps": len(active_plan.steps),
-                                            "phase": (
-                                                "waiting_for_player"
-                                                if active_plan.status == "waiting_for_player"
-                                                else "understanding"
-                                            ),
-                                            "public_progress_label": None,
-                                            "safe_reason": None,
-                                        },
-                                    )(),
-                                )
-                                if active_plan.status == "waiting_for_player":
-                                    execution = active_plan.steps[
-                                        active_plan.current_step_index
-                                    ].adjudication_execution
-                                    if execution is not None:
-                                        pending = AdjudicationPendingPayload(
-                                            correlation_id=active_plan.parent_action_id,
-                                            plan_id=active_plan.plan_id,
-                                            source_revision=execution.view_revision,
-                                            status=_require_pending_adjudication_status(
-                                                execution.status
-                                            ),
-                                            pending_decision=execution.pending_decision,
-                                            check_run=execution.check_run,
-                                        )
-                                        await _send_to_player(
+                                if active_plan.pending_cancel_request_id is not None:
+                                    # A reconnect is also a recovery worker. The
+                                    # durable intent owns the Engine command;
+                                    # never replay the stale post-roll menu.
+                                    recovered = await action_plan_turn_application.resume_owned(
+                                        room_id=room_id,
+                                        player_id=bound_player_id,
+                                        parent_action_id=active_plan.parent_action_id,
+                                        on_progress=lambda event: _send_plan_progress(
                                             websocket,
-                                            ServerEnvelope(
-                                                type="adjudication.pending",
-                                                payload=pending.model_dump(
-                                                    by_alias=True,
-                                                    mode="json",
+                                            event,
+                                        ),
+                                    )
+                                    await _send_action_plan_result(
+                                        db,
+                                        websocket,
+                                        room_id,
+                                        bound_player_id,
+                                        recovered,
+                                    )
+                                else:
+                                    await _send_plan_progress(
+                                        websocket,
+                                        type(
+                                            "RecoveredPlanProgress",
+                                            (),
+                                            {
+                                                "type": "plan.step_changed",
+                                                "correlation_id": active_plan.parent_action_id,
+                                                "current_step": min(
+                                                    active_plan.current_step_index + 1,
+                                                    len(active_plan.steps),
                                                 ),
-                                            ).model_dump(by_alias=True),
-                                        )
+                                                "completed_steps": active_plan.completed_steps,
+                                                "total_steps": len(active_plan.steps),
+                                                "phase": (
+                                                    "waiting_for_player"
+                                                    if active_plan.status == "waiting_for_player"
+                                                    else "understanding"
+                                                ),
+                                                "public_progress_label": None,
+                                                "safe_reason": None,
+                                            },
+                                        )(),
+                                    )
+                                    if active_plan.status == "waiting_for_player":
+                                        execution = active_plan.steps[
+                                            active_plan.current_step_index
+                                        ].adjudication_execution
+                                        if execution is not None:
+                                            pending = AdjudicationPendingPayload(
+                                                correlation_id=active_plan.parent_action_id,
+                                                plan_id=active_plan.plan_id,
+                                                source_revision=execution.view_revision,
+                                                status=_require_pending_adjudication_status(
+                                                    execution.status
+                                                ),
+                                                pending_decision=execution.pending_decision,
+                                                check_run=execution.check_run,
+                                            )
+                                            await _send_to_player(
+                                                websocket,
+                                                ServerEnvelope(
+                                                    type="adjudication.pending",
+                                                    payload=pending.model_dump(
+                                                        by_alias=True,
+                                                        mode="json",
+                                                    ),
+                                                ).model_dump(by_alias=True),
+                                            )
                             else:
                                 # No ActionPlan-driven pending decision — but a
                                 # standalone single-action check (not part of a

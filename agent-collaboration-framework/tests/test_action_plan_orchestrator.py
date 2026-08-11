@@ -517,6 +517,117 @@ async def test_pending_check_stops_plan_and_resumes_same_step_after_decision() -
     assert status.status == "resolved"
 
 
+@pytest.mark.parametrize(
+    ("roll_value", "expected_outcome", "expected_status"),
+    ((10, "success", "cancelled"), (80, "failure", "stopped")),
+)
+@pytest.mark.asyncio
+async def test_post_roll_cancel_accepts_current_roll_and_stops_remaining_steps(
+    roll_value: int,
+    expected_outcome: str,
+    expected_status: str,
+) -> None:
+    module, engine_store, projector = runtime()
+    adjudicator = RecordingAdjudicator(module.world_ref, check_step=0)
+    engine = AdjudicationEngineService(
+        engine_store,
+        dice=DiceRoller(SequenceDiceSource([roll_value])),
+    )
+    plan_store = InMemoryActionPlanRunStore()
+    service = ActionPlanOrchestrator(
+        store=plan_store,
+        adjudicator=adjudicator,
+        executor=engine,
+        player_view_projector=projector,
+    )
+    original = player_input("post-roll-cancel-parent")
+
+    waiting = await service.start_or_resume(original, plan=plan(3))
+    pending = waiting.latest_execution
+    assert pending is not None and pending.pending_decision is not None
+    rolled = await engine.decide(
+        CheckDecisionRequest(
+            request_id="post-roll-cancel-parent:select",
+            room_id="room_01",
+            player_id="player_01",
+            source_revision=pending.view_revision,
+            decision_id=pending.pending_decision.decision_id,
+            decision_version=pending.pending_decision.decision_version,
+            choice=SelectCheckChoice(candidate_id="spot"),
+        )
+    )
+    assert rolled.status == "awaiting_post_roll_decision"
+    assert rolled.check_run is not None
+
+    cancel = CancelActionPlanRequest(
+        request_id="post-roll-cancel-parent:cancel",
+        room_id="room_01",
+        player_id="player_01",
+        actor_id="pc_1",
+        parent_action_id=original.client_action_id,
+    )
+    intent = await service.request_cancel_after_current(cancel)
+    assert intent.pending_cancel_request_id == cancel.request_id
+    assert intent.status == "waiting_for_player"
+    assert await service.request_cancel_after_current(cancel) == intent
+
+    accepted = await engine.decide_post_roll(
+        PostRollDecisionRequest(
+            request_id=f"{cancel.request_id}:accept-current",
+            room_id="room_01",
+            player_id="player_01",
+            source_revision=rolled.view_revision,
+            check_id=rolled.check_run.check_id,
+            check_version=rolled.check_run.version,
+            option_id="accept-current",
+        )
+    )
+    replay = await engine.decide_post_roll(
+        PostRollDecisionRequest(
+            request_id=f"{cancel.request_id}:accept-current",
+            room_id="room_01",
+            player_id="player_01",
+            source_revision=rolled.view_revision,
+            check_id=rolled.check_run.check_id,
+            check_version=rolled.check_run.version,
+            option_id="accept-current",
+        )
+    )
+    assert accepted == replay
+    assert accepted.outcome == expected_outcome
+
+    stopped = await service.resume_owned(
+        room_id="room_01",
+        player_id="player_01",
+        actor_id="pc_1",
+        parent_action_id=original.client_action_id,
+    )
+    assert stopped.run.status == expected_status
+    if expected_status == "cancelled":
+        assert [step.status for step in stopped.run.steps] == [
+            "completed",
+            "stopped",
+            "pending",
+        ]
+        assert stopped.run.steps[1].safe_failure_code == "PLAN_CANCELLED"
+    else:
+        assert stopped.run.steps[0].safe_failure_code == "STEP_FAILED"
+    assert stopped.run.pending_cancel_request_id is None
+    assert cancel.request_id in stopped.run.cancel_request_ids
+    assert len(adjudicator.contexts) == 1
+
+    # A retry after the reconciliation is a pure replay: no later step starts
+    # and no effect/event is duplicated.
+    replayed = await service.resume_owned(
+        room_id="room_01",
+        player_id="player_01",
+        actor_id="pc_1",
+        parent_action_id=original.client_action_id,
+    )
+    assert replayed.run == stopped.run
+    assert len(adjudicator.contexts) == 1
+
+
 @pytest.mark.asyncio
 async def test_post_roll_retry_resolves_plan_once_without_duplicate_effects() -> None:
     module, engine_store, projector = runtime()

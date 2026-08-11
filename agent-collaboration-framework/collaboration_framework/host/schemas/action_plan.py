@@ -150,6 +150,10 @@ class ActionPlanRun(ContractModel):
     lease_owner: str | None = Field(default=None, min_length=1, max_length=200)
     lease_expires_at: datetime | None = None
     cancel_request_ids: tuple[str, ...] = ()
+    # A post-roll cancel is a two-phase operation: persist this intent first,
+    # then accept the already-authoritative roll and stop the remaining plan.
+    # Keeping it on the run makes the operation recoverable across a crash.
+    pending_cancel_request_id: str | None = Field(default=None, min_length=1, max_length=200)
     created_at: datetime
     updated_at: datetime
 
@@ -194,6 +198,18 @@ class ActionPlanRun(ContractModel):
             raise ValueError("终态 PlanRun 不得持有 worker lease")
         if len(self.cancel_request_ids) != len(set(self.cancel_request_ids)):
             raise ValueError("cancel request id 必须唯一")
+        if self.pending_cancel_request_id is not None:
+            if self.pending_cancel_request_id in self.cancel_request_ids:
+                raise ValueError("pending cancel request 不得已经完成")
+            if self.status != "waiting_for_player" or self.current_step_index >= len(self.steps):
+                raise ValueError("pending cancel request 只能存在于等待玩家处理的当前步骤")
+            current = self.steps[self.current_step_index]
+            if (
+                current.status != "waiting_for_player"
+                or current.adjudication_execution is None
+                or current.adjudication_execution.status != "awaiting_post_roll_decision"
+            ):
+                raise ValueError("pending cancel request 必须对应等待 post-roll 的当前步骤")
         return self
 
     @property

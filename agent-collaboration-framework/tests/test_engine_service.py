@@ -5,6 +5,7 @@ from pathlib import Path
 
 from collaboration_framework.contracts import (
     ActionRequest,
+    ActorBindingError,
     Intent,
     MatchedTarget,
     ModuleCheck,
@@ -84,6 +85,18 @@ class RuleEngineServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("event_sequence", payload)
         self.assertNotIn("secrets", projection.model_dump_json())
         self.assertNotIn("他知道柜中藏有文件", projection.model_dump_json())
+
+    async def test_read_rejects_an_actor_bound_to_another_player(self) -> None:
+        with self.assertRaises(ActorBindingError):
+            await self.service.read(
+                PlayerInput(
+                    room_id="room_01",
+                    player_id="player_01",
+                    actor_id="pc_2",
+                    client_action_id="read_wrong_actor",
+                    utterance="查看房间",
+                )
+            )
 
 
 if __name__ == "__main__":

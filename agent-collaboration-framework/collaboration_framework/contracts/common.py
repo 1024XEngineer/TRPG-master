@@ -14,6 +14,10 @@ class ContractError(ValueError):
     """Raised when a deterministic boundary invariant is violated."""
 
 
+class ActorBindingError(ContractError):
+    """Raised when a player-scoped request names an actor they do not control."""
+
+
 class ContractModel(BaseModel):
     """Strict immutable base model for public contracts."""
 

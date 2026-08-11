@@ -28,6 +28,8 @@ from collaboration_framework.contracts import (
     PostRollDecisionRequest,
     ProjectionSnapshot,
     SubmitAdjudicationRequest,
+    ValidationFeedback,
+    ValidationResult,
 )
 from collaboration_framework.host.schemas import (
     HostAgentContext,
@@ -60,6 +62,8 @@ SCHEMA_MODELS: dict[str, type[BaseModel]] = {
     "adjudication-status.schema.json": AdjudicationStatusView,
     "cancel-action-plan-request.schema.json": CancelActionPlanRequest,
     "get-adjudication-status-request.schema.json": GetAdjudicationStatusRequest,
+    "validation-result.schema.json": ValidationResult,
+    "validation-feedback.schema.json": ValidationFeedback,
     "narration-output.schema.json": NarrationOutput,
     "opening-narration-context.schema.json": OpeningNarrationContext,
     "websocket-output.schema.json": WebSocketOutput,

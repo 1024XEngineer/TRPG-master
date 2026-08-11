@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collaboration_framework.contracts import (
     ActionRequest,
+    ActorBindingError,
     CheckpointSpec,
     ContractError,
     KeeperCapabilityView,
@@ -73,7 +74,7 @@ class RuleEngineService:
     ) -> None:
         actor = runtime.game_state.actors.get(actor_id)
         if actor is None or actor.player_id != player_id:
-            raise ContractError("player_id/actor_id 未绑定到当前房间")
+            raise ActorBindingError("player_id/actor_id 未绑定到当前房间")
 
     @staticmethod
     def _project(

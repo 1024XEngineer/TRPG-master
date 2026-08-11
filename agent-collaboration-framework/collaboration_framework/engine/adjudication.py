@@ -8,6 +8,7 @@ commits them without interpreting player language.
 from __future__ import annotations
 
 from copy import deepcopy
+from typing import Literal, NoReturn
 from uuid import uuid4
 
 from pydantic import JsonValue
@@ -52,6 +53,14 @@ from collaboration_framework.contracts import (
     TravelResolved,
 )
 from collaboration_framework.contracts.adjudication import CheckDegree, CheckRoll
+from collaboration_framework.contracts.validation import (
+    AdjudicationValidationError,
+    AuthorityLevel,
+    ClassificationCoverage,
+    EffectValidationDetail,
+    Repairability,
+    ValidationResult,
+)
 
 from .dice import DiceRoller, coc7_success_level, passes_difficulty
 from .models import (
@@ -106,6 +115,268 @@ class AdjudicationEngineService:
     def __init__(self, store: EngineStore, *, dice: DiceRoller | None = None) -> None:
         self._store = store
         self._dice = dice or DiceRoller()
+
+    @staticmethod
+    def _reject_validation(
+        code: str,
+        *,
+        repairability: Repairability,
+        fault: Literal["agent", "player", "engine"],
+        player_safe_reason: str,
+        internal_reason: str | None = None,
+        classification_coverage: ClassificationCoverage = "partial_validation_failure",
+    ) -> NoReturn:
+        raise AdjudicationValidationError(
+            ValidationResult(
+                status="rejected",
+                code=code,
+                repairability=repairability,
+                fault=fault,
+                player_safe_reason=player_safe_reason,
+                classification_coverage=classification_coverage,
+                internal_reason=internal_reason,
+            )
+        )
+
+    @staticmethod
+    def _level_rank(level: AuthorityLevel) -> int:
+        return int(level[1:])
+
+    @classmethod
+    def _max_level(cls, levels: tuple[AuthorityLevel, ...]) -> AuthorityLevel | None:
+        return max(levels, key=cls._level_rank, default=None)
+
+    @staticmethod
+    def _accepted_validation(
+        *,
+        authority_level: AuthorityLevel | None,
+        affected_effects: tuple[EffectValidationDetail, ...],
+        classification_coverage: ClassificationCoverage = "complete",
+    ) -> ValidationResult:
+        return ValidationResult(
+            status="accepted",
+            authority_level=authority_level,
+            code="OK",
+            player_safe_reason="裁决已通过确定性校验",
+            affected_effects=affected_effects,
+            classification_coverage=classification_coverage,
+        )
+
+    @classmethod
+    def _classify_effects(
+        cls,
+        runtime: EngineRuntimeSnapshot,
+        effects: tuple[ActionEffect, ...],
+        *,
+        branch: Literal["success", "failure", "selected"],
+        check_floor: bool = False,
+    ) -> tuple[AuthorityLevel | None, tuple[EffectValidationDetail, ...]]:
+        """Classify only Agent-owned effects; Rule-owned effects are explicit."""
+
+        details: list[EffectValidationDetail] = []
+        levels: list[AuthorityLevel] = ["L3"] if check_floor else []
+        v3 = runtime.v3 if runtime.is_v3 else None
+        entity_specs = {item.id: item for item in v3.entities} if v3 else {}
+        information_specs = {item.id: item for item in v3.information} if v3 else {}
+        core_goal_ids = {
+            info_id
+            for goal in (v3.knowledge_goals if v3 else ())
+            if goal.required_for_core_resolution
+            for info_id in goal.target_information_ids
+        }
+        runtime_entity_ids = set(runtime.game_state.runtime_entities)
+        runtime_location_ids = set(runtime.game_state.runtime_locations)
+
+        for index, effect in enumerate(effects):
+            level: AuthorityLevel
+            target_ref: str | None = None
+            if isinstance(effect, NarrativeOnlyEffect):
+                level = "L0"
+            elif isinstance(
+                effect, (EnsureRuntimeLocationEffect, EnsureRuntimeEntityEffect)
+            ):
+                level = "L1"
+                target_ref = getattr(effect, "location_id", None) or getattr(
+                    effect, "entity_id", None
+                )
+            elif isinstance(effect, EnterLocationEffect):
+                level = "L2"
+                target_ref = effect.location_id
+            elif isinstance(effect, MoveEntityEffect):
+                level = "L3" if effect.holder_actor_id is not None else "L2"
+                target_ref = effect.entity_id
+            elif isinstance(effect, AdvanceWorldTimeEffect):
+                level = "L2"
+            elif isinstance(effect, (RevealInformationEffect, HideInformationEffect)):
+                info = information_specs.get(effect.information_id)
+                level = (
+                    "L4"
+                    if (
+                        info is not None
+                        and (
+                            info.criticality == "essential"
+                            or effect.information_id in core_goal_ids
+                        )
+                    )
+                    else "L2"
+                )
+                target_ref = effect.information_id
+            elif isinstance(effect, ChangeEntityStateEffect):
+                target_ref = effect.entity_id
+                level = "L1" if effect.entity_id in runtime_entity_ids else "L3"
+            elif isinstance(effect, ConsumeEntityEffect):
+                target_ref = effect.entity_id
+                entity = entity_specs.get(effect.entity_id)
+                level = (
+                    "L4"
+                    if entity is not None and entity.visibility == "keeper"
+                    else "L3"
+                )
+            elif isinstance(effect, SetVisibilityEffect):
+                target_ref = effect.target_id
+                if effect.target_kind == "information":
+                    info = information_specs.get(effect.target_id)
+                    level = (
+                        "L4"
+                        if (
+                            info is not None
+                            and (
+                                info.criticality == "essential"
+                                or effect.target_id in core_goal_ids
+                            )
+                        )
+                        else "L2"
+                    )
+                elif (
+                    effect.target_id in runtime_entity_ids
+                    or effect.target_id in runtime_location_ids
+                ):
+                    level = "L1"
+                elif effect.target_kind == "entity" and (
+                    entity_specs.get(effect.target_id) is not None
+                    and entity_specs[effect.target_id].visibility == "keeper"
+                ):
+                    level = "L4"
+                else:
+                    level = "L3"
+            elif isinstance(
+                effect, (MarkCoreResolvedEffect, SetEndingAvailabilityEffect)
+            ):
+                level = "L4"
+            elif isinstance(effect, CommitTerminalEndingEffect):
+                level = "L5"
+                target_ref = effect.ending_id
+            else:  # pragma: no cover - ActionEffect is a closed discriminated union.
+                continue
+            levels.append(level)
+            details.append(
+                EffectValidationDetail(
+                    branch=branch,
+                    effect_index=index,
+                    effect_type=effect.type,
+                    authority_level=level,
+                    target_ref=target_ref,
+                )
+            )
+        return cls._max_level(tuple(levels)), tuple(details)
+
+    def _build_submission_validation(
+        self,
+        runtime: EngineRuntimeSnapshot,
+        adjudication: ActionAdjudication,
+    ) -> tuple[ValidationResult, AuthorityLevel | None]:
+        if adjudication.rule_decision is not None and runtime.is_v3:
+            success_level, success_details = self._classify_effects(
+                runtime,
+                adjudication.success_effects,
+                branch="success",
+                check_floor=adjudication.check.mode != "none",
+            )
+            failure_level, failure_details = self._classify_effects(
+                runtime,
+                adjudication.failure_effects,
+                branch="failure",
+                check_floor=adjudication.check.mode != "none",
+            )
+            authority_level = self._max_level(
+                tuple(
+                    level
+                    for level in (success_level, failure_level)
+                    if level is not None
+                )
+            )
+            return (
+                self._accepted_validation(
+                    authority_level=authority_level,
+                    affected_effects=success_details + failure_details,
+                    classification_coverage="rule_effects_excluded",
+                ),
+                None,
+            )
+
+        if adjudication.check.mode == "none":
+            authority_level, effects = self._classify_effects(
+                runtime,
+                adjudication.success_effects,
+                branch="selected",
+                check_floor=False,
+            )
+            return (
+                self._accepted_validation(
+                    authority_level=authority_level,
+                    affected_effects=effects,
+                ),
+                authority_level,
+            )
+
+        success_level, success_details = self._classify_effects(
+            runtime,
+            adjudication.success_effects,
+            branch="success",
+            check_floor=True,
+        )
+        failure_level, failure_details = self._classify_effects(
+            runtime,
+            adjudication.failure_effects,
+            branch="failure",
+            check_floor=True,
+        )
+        authority_level = self._max_level(
+            tuple(
+                level for level in (success_level, failure_level) if level is not None
+            )
+        )
+        return (
+            self._accepted_validation(
+                authority_level=authority_level,
+                affected_effects=success_details + failure_details,
+            ),
+            None,
+        )
+
+    def _build_resolution_validation(
+        self,
+        runtime: EngineRuntimeSnapshot,
+        adjudication: ActionAdjudication,
+        *,
+        selected_effects: tuple[ActionEffect, ...],
+        rule_effects_excluded: bool,
+    ) -> tuple[ValidationResult, AuthorityLevel | None]:
+        level, details = self._classify_effects(
+            runtime,
+            selected_effects,
+            branch="selected",
+            check_floor=adjudication.check.mode != "none",
+        )
+        coverage = "rule_effects_excluded" if rule_effects_excluded else "complete"
+        return (
+            self._accepted_validation(
+                authority_level=level,
+                affected_effects=details,
+                classification_coverage=coverage,
+            ),
+            None if rule_effects_excluded else level,
+        )
 
     async def get_status(
         self,
@@ -218,6 +489,12 @@ class AdjudicationEngineService:
                 runtime.revision,
             )
             self._validate_adjudication(runtime, request.adjudication)
+            proposal_validation, proposal_committed_level = (
+                self._build_submission_validation(
+                    runtime,
+                    request.adjudication,
+                )
+            )
 
             if request.adjudication.check.mode == "none":
                 new_state, events = self._finalize_action(
@@ -246,6 +523,9 @@ class AdjudicationEngineService:
                         request_id=request.adjudication.request_id,
                         request=request,
                         execution=execution,
+                        validation=proposal_validation,
+                        committed_authority_level=proposal_committed_level,
+                        classification_coverage=proposal_validation.classification_coverage,
                     ),
                 )
                 return execution
@@ -254,7 +534,12 @@ class AdjudicationEngineService:
                 request.adjudication.request_id
             )
             if existing is not None:
-                raise ContractError("action request 已存在待处理检定")
+                self._reject_validation(
+                    "DECISION_ALREADY_SETTLED",
+                    repairability="hard_reject",
+                    fault="player",
+                    player_safe_reason="该行动已经存在待处理检定",
+                )
             options = self._validated_options(runtime, request.adjudication)
             decision = PendingCheckDecision(
                 decision_id=self._new_id("check_decision"),
@@ -303,6 +588,9 @@ class AdjudicationEngineService:
                     request_id=request.adjudication.request_id,
                     request=request,
                     execution=execution,
+                    validation=proposal_validation,
+                    committed_authority_level=None,
+                    classification_coverage=proposal_validation.classification_coverage,
                 ),
             )
             return execution
@@ -316,12 +604,29 @@ class AdjudicationEngineService:
             self._require_revision(request.source_revision, runtime.revision)
             decision = await transaction.load_pending_check(request.decision_id)
             if decision is None:
-                raise ContractError("PendingCheckDecision 不存在")
+                self._reject_validation(
+                    "DECISION_ALREADY_SETTLED",
+                    repairability="hard_reject",
+                    fault="player",
+                    player_safe_reason="该检定选择已经失效或完成",
+                    internal_reason="该检定已完成选择，不能再次选择或取消",
+                )
             self._validate_decision_owner(runtime, request.player_id, decision)
             if decision.status != "awaiting_skill_choice":
-                raise ContractError("该检定已完成选择，不能再次选择或取消")
+                self._reject_validation(
+                    "DECISION_ALREADY_SETTLED",
+                    repairability="hard_reject",
+                    fault="player",
+                    player_safe_reason="该检定选择已经失效或完成",
+                    internal_reason="该检定已完成选择，不能再次选择或取消",
+                )
             if decision.decision_version != request.decision_version:
-                raise ContractError("PendingCheckDecision version 已过期")
+                self._reject_validation(
+                    "DECISION_VERSION_STALE",
+                    repairability="retry_with_latest_revision",
+                    fault="player",
+                    player_safe_reason="检定选择已更新，请刷新后重试",
+                )
 
             if request.choice.kind == "cancel":
                 event = self._event(
@@ -378,7 +683,12 @@ class AdjudicationEngineService:
                 None,
             )
             if option is None:
-                raise ContractError("candidate_id 不属于该 PendingCheckDecision")
+                self._reject_validation(
+                    "OPTION_NOT_IN_MENU",
+                    repairability="hard_reject",
+                    fault="player",
+                    player_safe_reason="所选检定方式不在当前可用列表中",
+                )
             roll = self._roll(option.target_value, option.difficulty)
             post_options = self._post_roll_options(
                 runtime,
@@ -479,6 +789,24 @@ class AdjudicationEngineService:
                 event_refs=tuple(event.event_id for event in events),
                 public_event_refs=self._public_event_refs(events),
             )
+            rule_effects_excluded = (
+                decision.adjudication.rule_decision is not None and runtime.is_v3
+            )
+            selected_effects = (
+                ()
+                if rule_effects_excluded
+                else (
+                    decision.adjudication.success_effects
+                    if roll.passed
+                    else decision.adjudication.failure_effects
+                )
+            )
+            validation, committed_level = self._build_resolution_validation(
+                runtime,
+                decision.adjudication,
+                selected_effects=selected_effects,
+                rule_effects_excluded=rule_effects_excluded,
+            )
             await transaction.commit_adjudication(
                 expected_revision=runtime.revision,
                 new_state=new_state,
@@ -489,6 +817,9 @@ class AdjudicationEngineService:
                     request_id=request.request_id,
                     request=request,
                     execution=execution,
+                    validation=validation,
+                    committed_authority_level=committed_level,
+                    classification_coverage=validation.classification_coverage,
                 ),
             )
             return execution
@@ -505,16 +836,31 @@ class AdjudicationEngineService:
             self._require_revision(request.source_revision, runtime.revision)
             check_run = await transaction.load_check_run(request.check_id)
             if check_run is None:
-                raise ContractError("CheckRun 不存在")
+                self._reject_validation(
+                    "DECISION_ALREADY_SETTLED",
+                    repairability="hard_reject",
+                    fault="player",
+                    player_safe_reason="该检定已经失效或完成",
+                )
             self._validate_identity(
                 runtime,
                 player_id=request.player_id,
                 actor_id=check_run.actor_id,
             )
             if check_run.status != "awaiting_post_roll_decision":
-                raise ContractError("CheckRun 已经收束")
+                self._reject_validation(
+                    "DECISION_ALREADY_SETTLED",
+                    repairability="hard_reject",
+                    fault="player",
+                    player_safe_reason="该检定已经失效或完成",
+                )
             if check_run.version != request.check_version:
-                raise ContractError("CheckRun version 已过期")
+                self._reject_validation(
+                    "DECISION_VERSION_STALE",
+                    repairability="retry_with_latest_revision",
+                    fault="player",
+                    player_safe_reason="检定结果已更新，请刷新后重试",
+                )
             option = next(
                 (
                     item
@@ -524,11 +870,21 @@ class AdjudicationEngineService:
                 None,
             )
             if option is None:
-                raise ContractError("option_id 不属于该 CheckRun")
+                self._reject_validation(
+                    "OPTION_NOT_IN_MENU",
+                    repairability="hard_reject",
+                    fault="player",
+                    player_safe_reason="所选处理方式不在当前可用列表中",
+                )
             if isinstance(option, PushOption) != (
                 request.push_adjudication is not None
             ):
-                raise ContractError("只有强推选项必须携带 push_adjudication")
+                self._reject_validation(
+                    "OPTION_NOT_IN_MENU",
+                    repairability="hard_reject",
+                    fault="player",
+                    player_safe_reason="检定后处理参数与当前选项不一致",
+                )
 
             state = runtime.game_state.model_copy(deep=True)
             prefix: list[DomainEvent] = [
@@ -589,7 +945,12 @@ class AdjudicationEngineService:
                     )
                 )
             elif not isinstance(option, AcceptResultOption):
-                raise ContractError("不支持的检定后选项")
+                self._reject_validation(
+                    "EFFECT_NOT_REGISTERED",
+                    repairability="hard_reject",
+                    fault="engine",
+                    player_safe_reason="规则引擎无法处理当前检定选项",
+                )
 
             runtime_after_resource = runtime.model_copy(
                 update={"game_state": state}, deep=True
@@ -606,7 +967,12 @@ class AdjudicationEngineService:
             )
             decision = await transaction.load_pending_check(check_run.decision_id)
             if decision is None:
-                raise ContractError("CheckRun 引用的 PendingCheckDecision 不存在")
+                self._reject_validation(
+                    "EFFECT_NOT_REGISTERED",
+                    repairability="hard_reject",
+                    fault="engine",
+                    player_safe_reason="规则引擎缺少当前检定的恢复状态",
+                )
             resolved_decision = decision.model_copy(
                 update={
                     "status": "resolved",
@@ -632,6 +998,24 @@ class AdjudicationEngineService:
                 event_refs=tuple(event.event_id for event in events),
                 public_event_refs=self._public_event_refs(events),
             )
+            rule_effects_excluded = (
+                check_run.adjudication.rule_decision is not None and runtime.is_v3
+            )
+            selected_effects = (
+                ()
+                if rule_effects_excluded
+                else (
+                    check_run.adjudication.success_effects
+                    if final_roll.passed
+                    else check_run.adjudication.failure_effects
+                )
+            )
+            validation, committed_level = self._build_resolution_validation(
+                runtime_after_resource,
+                check_run.adjudication,
+                selected_effects=selected_effects,
+                rule_effects_excluded=rule_effects_excluded,
+            )
             await transaction.commit_adjudication(
                 expected_revision=runtime.revision,
                 new_state=new_state,
@@ -642,6 +1026,9 @@ class AdjudicationEngineService:
                     request_id=request.request_id,
                     request=request,
                     execution=execution,
+                    validation=validation,
+                    committed_authority_level=committed_level,
+                    classification_coverage=validation.classification_coverage,
                 ),
             )
             return execution
@@ -659,19 +1046,39 @@ class AdjudicationEngineService:
     ) -> None:
         actor = runtime.game_state.actors.get(actor_id)
         if actor is None or actor.player_id != player_id:
-            raise ContractError("player_id/actor_id 未绑定到当前房间")
+            AdjudicationEngineService._reject_validation(
+                "IDENTITY_NOT_BOUND",
+                repairability="hard_reject",
+                fault="player",
+                player_safe_reason="当前玩家不能控制该局内角色",
+            )
         if runtime.game_state.phase != "playing":
-            raise ContractError("游戏已经结束，不能提交新裁决")
+            AdjudicationEngineService._reject_validation(
+                "SESSION_ENDED",
+                repairability="hard_reject",
+                fault="player",
+                player_safe_reason="游戏已经结束，不能提交新裁决",
+            )
 
     @staticmethod
     def _require_revision(source: str, current: str) -> None:
         if source != current:
-            raise ContractError("裁决基于过期 PlayerView")
+            AdjudicationEngineService._reject_validation(
+                "SOURCE_REVISION_STALE",
+                repairability="retry_with_latest_revision",
+                fault="player",
+                player_safe_reason="动作基于过期的玩家视图，请刷新后重试",
+            )
 
     @staticmethod
     def _replay(request, completed, current_revision: str) -> AdjudicationExecution:
         if request != completed.request:
-            raise ContractError("request_id 已用于不同的裁决命令")
+            AdjudicationEngineService._reject_validation(
+                "REQUEST_ID_REUSED",
+                repairability="hard_reject",
+                fault="player",
+                player_safe_reason="请求标识已经用于另一条裁决命令",
+            )
         return completed.execution.model_copy(
             update={"view_revision": current_revision},
             deep=True,
@@ -696,10 +1103,21 @@ class AdjudicationEngineService:
             "world": target.id == module.world_ref,
         }[target.kind]
         if not exists:
-            raise ContractError("ActionAdjudication target 引用了不存在或隐藏的对象")
+            self._reject_validation(
+                "TARGET_NOT_FOUND",
+                repairability="auto_repairable",
+                fault="agent",
+                player_safe_reason="当前目标不可用于这次行动",
+                internal_reason="ActionAdjudication target 引用了不存在或隐藏的对象",
+            )
         if adjudication.rule_decision is not None:
             if not runtime.is_v3:
-                raise ContractError("RuleDecision 只在 ModuleContent v3 房间可用")
+                self._reject_validation(
+                    "RULE_OUT_OF_SCOPE",
+                    repairability="hard_reject",
+                    fault="agent",
+                    player_safe_reason="当前行动不能使用该规则选项",
+                )
             # Refuses an id the module never declared, so a model cannot invent
             # a rule or reach a branch its option does not select.
             rule, _ = resolve_rule_option(
@@ -717,9 +1135,15 @@ class AdjudicationEngineService:
                 target_kind=adjudication.target.kind,
                 target_id=adjudication.target.id,
             ):
-                raise ContractError(
-                    "RuleDecision 超出当前可用范围: "
-                    f"{adjudication.rule_decision.rule_id}"
+                self._reject_validation(
+                    "RULE_OUT_OF_SCOPE",
+                    repairability="hard_reject",
+                    fault="agent",
+                    player_safe_reason="当前行动不能使用该规则选项",
+                    internal_reason=(
+                        "RuleDecision 超出当前可用范围: "
+                        f"{adjudication.rule_decision.rule_id}"
+                    ),
                 )
         self._validate_effect_sequence(runtime, adjudication.success_effects)
         self._validate_effect_sequence(runtime, adjudication.failure_effects)
@@ -769,7 +1193,12 @@ class AdjudicationEngineService:
         skills = actor.state.get("skills")
         labels = actor.state.get("skill_labels")
         if not isinstance(skills, dict):
-            raise ContractError("Actor 没有可验证的 Ruleset 技能快照")
+            self._reject_validation(
+                "SKILL_NOT_AVAILABLE",
+                repairability="auto_repairable",
+                fault="agent",
+                player_safe_reason="当前角色没有可用于这次检定的能力",
+            )
         # CoC7 的属性检定（搬开石板掷 STR、闪避掷 DEX）和技能检定用同一套 d100
         # 判定，但属性存在 `attributes` 而不是 `skills` 里。只查 skills 会让作者
         # 写好的 STR 检定在提交时被判成「技能不属于 Actor」——《追书人》搬石板
@@ -791,8 +1220,14 @@ class AdjudicationEngineService:
                 or isinstance(value, bool)
                 or not 0 <= value <= 100
             ):
-                raise ContractError(
-                    f"技能候选不属于 Actor 或数值非法: {candidate.skill_id}"
+                self._reject_validation(
+                    "SKILL_NOT_AVAILABLE",
+                    repairability="auto_repairable",
+                    fault="agent",
+                    player_safe_reason="当前角色没有可用于这次检定的能力",
+                    internal_reason=(
+                        f"技能候选不属于 Actor 或数值非法: {candidate.skill_id}"
+                    ),
                 )
             label = label_map.get(candidate.skill_id)
             options.append(
@@ -825,7 +1260,12 @@ class AdjudicationEngineService:
         state = runtime.game_state
         if isinstance(effect, RevealInformationEffect | HideInformationEffect):
             if effect.information_id not in information_ids:
-                raise ContractError("信息效果不能创建不存在的 Canon Information")
+                self._reject_validation(
+                    "TARGET_NOT_FOUND",
+                    repairability="auto_repairable",
+                    fault="agent",
+                    player_safe_reason="当前目标不可用于这次行动",
+                )
         elif isinstance(effect, SetVisibilityEffect):
             valid = {
                 "information": information_ids,
@@ -833,62 +1273,130 @@ class AdjudicationEngineService:
                 "location": location_ids,
             }[effect.target_kind]
             if effect.target_id not in valid:
-                raise ContractError("set_visibility 引用了不存在的对象")
+                self._reject_validation(
+                    "TARGET_NOT_FOUND",
+                    repairability="auto_repairable",
+                    fault="agent",
+                    player_safe_reason="当前目标不可用于这次行动",
+                )
         elif isinstance(effect, EnterLocationEffect):
             if effect.location_id not in location_ids:
-                raise ContractError("enter_location 引用了不存在的地点")
+                self._reject_validation(
+                    "TARGET_NOT_FOUND",
+                    repairability="auto_repairable",
+                    fault="agent",
+                    player_safe_reason="当前目标不可用于这次行动",
+                )
         elif isinstance(effect, EnsureRuntimeLocationEffect):
             if (
                 effect.location_id in location_ids
                 or effect.connected_location_id not in location_ids
             ):
-                raise ContractError("Runtime Location 发生 Canon shadow 或连接引用非法")
+                self._reject_validation(
+                    "CANON_SHADOW",
+                    repairability="auto_repairable",
+                    fault="agent",
+                    player_safe_reason="当前目标不可用于这次行动",
+                )
             if (
                 effect.parent_location_id is not None
                 and effect.parent_location_id not in location_ids
             ):
-                raise ContractError("Runtime Location parent 不存在")
+                self._reject_validation(
+                    "TARGET_NOT_FOUND",
+                    repairability="auto_repairable",
+                    fault="agent",
+                    player_safe_reason="当前目标不可用于这次行动",
+                )
         elif isinstance(effect, EnsureRuntimeEntityEffect):
             if effect.entity_id in entity_ids or effect.location_id not in location_ids:
-                raise ContractError("Runtime Entity 发生 Canon shadow 或地点引用非法")
+                self._reject_validation(
+                    "CANON_SHADOW",
+                    repairability="auto_repairable",
+                    fault="agent",
+                    player_safe_reason="当前目标不可用于这次行动",
+                )
             if (
                 runtime.is_v3
                 and effect.entity_kind == "object"
                 and (len(effect.entity_id) > 100 or len(effect.name) > 200)
             ):
-                raise ContractError("Runtime Item 的 id 或名称超过 ItemInstance 上限")
+                self._reject_validation(
+                    "RUNTIME_ITEM_TOO_LARGE",
+                    repairability="auto_repairable",
+                    fault="agent",
+                    player_safe_reason="临时物品描述超过当前系统限制",
+                )
         elif isinstance(
             effect, MoveEntityEffect | ChangeEntityStateEffect | ConsumeEntityEffect
         ):
             if effect.entity_id not in entity_ids:
-                raise ContractError("实体效果引用不存在的 Entity")
+                self._reject_validation(
+                    "TARGET_NOT_FOUND",
+                    repairability="auto_repairable",
+                    fault="agent",
+                    player_safe_reason="当前目标不可用于这次行动",
+                )
             if isinstance(effect, MoveEntityEffect):
                 if (
                     effect.location_id is not None
                     and effect.location_id not in location_ids
                 ):
-                    raise ContractError("move_entity 目标地点不存在")
+                    self._reject_validation(
+                        "TARGET_NOT_FOUND",
+                        repairability="auto_repairable",
+                        fault="agent",
+                        player_safe_reason="当前目标不可用于这次行动",
+                    )
                 if (
                     effect.holder_actor_id is not None
                     and effect.holder_actor_id not in state.actors
                 ):
-                    raise ContractError("move_entity holder Actor 不存在")
+                    self._reject_validation(
+                        "TARGET_NOT_FOUND",
+                        repairability="auto_repairable",
+                        fault="agent",
+                        player_safe_reason="当前目标不可用于这次行动",
+                    )
         elif isinstance(effect, AdvanceWorldTimeEffect):
             if not runtime.is_v3:
-                raise ContractError("只有 v3 房间有离散时间线")
+                self._reject_validation(
+                    "TIME_POINT_MISMATCH",
+                    repairability="auto_repairable",
+                    fault="agent",
+                    player_safe_reason="当前时间目标与世界时间线不一致",
+                )
             blocked = time_advance_block_reason(tuple(state.actors))
             if blocked is not None:
-                raise ContractError(blocked)
+                self._reject_validation(
+                    "TIME_ADVANCE_BLOCKED",
+                    repairability="requires_player_choice",
+                    fault="player",
+                    player_safe_reason="当前存在需要玩家先处理的事项，不能推进时间",
+                    internal_reason=blocked,
+                )
             target, _ = next_point_after(
                 runtime.v3, world_time if world_time is not None else state.world_time
             )
             if effect.to_point_id is not None and effect.to_point_id != target.id:
-                raise ContractError(
-                    "advance_world_time 声明的时间点不是时间线上的下一个点: "
-                    f"{effect.to_point_id} != {target.id}"
+                self._reject_validation(
+                    "TIME_POINT_MISMATCH",
+                    repairability="auto_repairable",
+                    fault="agent",
+                    player_safe_reason="当前时间目标与世界时间线不一致",
+                    internal_reason=(
+                        "advance_world_time 声明的时间点不是时间线上的下一个点: "
+                        f"{effect.to_point_id} != {target.id}"
+                    ),
                 )
         elif isinstance(effect, CommitTerminalEndingEffect):
-            raise ContractError("终局不能由行动效果直接提交，必须确认 EndingDraft")
+            self._reject_validation(
+                "ENDING_REQUIRES_DRAFT",
+                repairability="hard_reject",
+                fault="agent",
+                player_safe_reason="终局必须经过明确确认后才能提交",
+                internal_reason="终局不能由行动效果直接提交，必须确认 EndingDraft",
+            )
 
     def _roll(self, target_value: int, difficulty: str) -> CheckRoll:
         value = self._dice.percentile()
@@ -955,7 +1463,12 @@ class AdjudicationEngineService:
         actor = state.actors[actor_id]
         luck = actor.resources.luck
         if luck is None or luck < cost:
-            raise ContractError("Actor 当前幸运不足，不能选择该选项")
+            AdjudicationEngineService._reject_validation(
+                "RESOURCE_INSUFFICIENT",
+                repairability="requires_player_choice",
+                fault="player",
+                player_safe_reason="当前资源不足，请选择其他处理方式",
+            )
         resources = actor.resources.model_copy(update={"luck": luck - cost}, deep=True)
         actors = dict(state.actors)
         actors[actor_id] = actor.model_copy(update={"resources": resources}, deep=True)
@@ -1009,9 +1522,16 @@ class AdjudicationEngineService:
         # 预算耗尽上。这类分支要靠 RuleAgenda 恢复才能跑完，而恢复侧还没有生产
         # worker。只提交走过的那一半会把世界留在半截状态（例如昏迷没生效，却已经
         # 标记见过身影），比什么都不做更糟——所以明确拒绝，让它可见地失败。
-        raise ContractError(
-            f"Rule {rule.id} 的分支 {branch_id} 停在 {walk.suspended_kind} 上，"
-            "当前没有可恢复的执行器，拒绝提交半截后果"
+        AdjudicationEngineService._reject_validation(
+            "RULE_BUDGET_EXCEEDED",
+            repairability="hard_reject",
+            fault="engine",
+            player_safe_reason="规则处理暂时无法完成",
+            internal_reason=(
+                f"Rule {rule.id} 的分支 {branch_id} 停在 {walk.suspended_kind} 上，"
+                "当前没有可恢复的执行器，拒绝提交半截后果"
+            ),
+            classification_coverage="rule_effects_excluded",
         )
 
     def _finalize_action(
@@ -1118,7 +1638,12 @@ class AdjudicationEngineService:
                     continue
                 fired.add(fire_key)
                 if len(events) >= 100:
-                    raise ContractError("Event-driven Rule 超过单次裁决步数上限")
+                    self._reject_validation(
+                        "RULE_BUDGET_EXCEEDED",
+                        repairability="hard_reject",
+                        fault="engine",
+                        player_safe_reason="规则处理暂时无法完成",
+                    )
                 events.append(
                     self._event_from_state(
                         state,
@@ -1562,8 +2087,14 @@ class AdjudicationEngineService:
                         "reached_boundary": travel.reached_boundary.to_json_dict(),
                     }
                 else:
-                    raise ContractError(
-                        resolution.safe_reason or "当前没有可确认的目标路线"
+                    self._reject_validation(
+                        "TARGET_NOT_FOUND",
+                        repairability="auto_repairable",
+                        fault="agent",
+                        player_safe_reason="当前目标不可用于这次行动",
+                        internal_reason=(
+                            resolution.safe_reason or "当前没有可确认的目标路线"
+                        ),
                     )
         elif isinstance(effect, EnsureRuntimeLocationEffect):
             locations = deepcopy(state.runtime_locations)
@@ -1797,9 +2328,20 @@ class AdjudicationEngineService:
             event_type = "ending.availability_changed"
             payload = {"available": effect.available}
         elif isinstance(effect, CommitTerminalEndingEffect):
-            raise ContractError("终局不能由 Rule 效果直接提交，必须确认 EndingDraft")
+            self._reject_validation(
+                "ENDING_REQUIRES_DRAFT",
+                repairability="hard_reject",
+                fault="engine",
+                player_safe_reason="终局必须经过明确确认后才能提交",
+                classification_coverage="rule_effects_excluded",
+            )
         if event_type is None:
-            raise ContractError("未注册的高层效果")
+            self._reject_validation(
+                "EFFECT_NOT_REGISTERED",
+                repairability="hard_reject",
+                fault="engine",
+                player_safe_reason="规则引擎无法处理当前效果",
+            )
         return state, (
             self._event_from_state(
                 state,
@@ -1886,7 +2428,12 @@ class AdjudicationEngineService:
             decision.room_id != runtime.game_state.room_id
             or decision.player_id != player_id
         ):
-            raise ContractError("PendingCheckDecision 不属于当前玩家或房间")
+            AdjudicationEngineService._reject_validation(
+                "IDENTITY_NOT_BOUND",
+                repairability="hard_reject",
+                fault="player",
+                player_safe_reason="当前玩家不能处理该检定",
+            )
         AdjudicationEngineService._validate_identity(
             runtime,
             player_id=player_id,

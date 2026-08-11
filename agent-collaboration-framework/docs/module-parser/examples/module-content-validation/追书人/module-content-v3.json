@@ -1,7 +1,7 @@
 {
   "content_schema_version": 3,
   "module_id": "paper-chase-zh-coc7",
-  "version": "3.0.4",
+  "version": "3.0.5",
   "world_ref": "coc-7e",
   "background": "时代与地点为美国禁酒令时期的密歇根州阿诺兹堡。调查员受托马斯·金博尔委托，从五本失窃的旧书和叔叔道格拉斯一年前的失踪案入手，走访旧宅、图书馆与公共墓地。叙事应保持安静、克制而带哥特气息，以夜色、旧书、墓园和孤独感作为反复意象；面对异常时不要急于渲染纯粹敌意，应为同情、选择与淡淡哀伤保留空间。任何尚未由线索确认的真相都不得提前告知玩家。",
   "information": [
@@ -45,6 +45,23 @@
       "title": "看守衣袋里的酒瓶",
       "keeper_content": "仔细观察梅洛迪亚斯时，可以看出他的旧外套衣袋里藏着一只小酒瓶。",
       "player_content": "你注意到梅洛迪亚斯的旧外套衣袋被一只小酒瓶撑出了明显的轮廓。",
+      "criticality": "supporting",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location",
+          "runtime_entity",
+          "public_record"
+        ]
+      }
+    },
+    {
+      "id": "town_speakeasy_rumor",
+      "kind": "rumor",
+      "title": "镇上有地下酒吧",
+      "keeper_content": "禁酒令下阿诺兹堡仍有一家地下酒吧在营业，入口开在街面某处不起眼的门后。看守衣袋里的酒正是从那儿流出来的，但外人得自己打听或留意才找得到确切位置。",
+      "player_content": "禁酒令都这么些年了，这瓶酒总得有个来处——镇上多半藏着一家地下酒吧，只是入口在哪，得自己去街上打听或留意。",
       "criticality": "supporting",
       "recovery": {
         "policy": "adaptive",
@@ -367,10 +384,10 @@
         "窗户",
         "书房的窗"
       ],
-      "description": "书房墙上的一扇木框玻璃窗，窗框和玻璃目前完好无损。",
+      "description": "书房墙上的一扇木框玻璃窗，窗框和玻璃目前完好无损，窗闩从内侧扣着。",
       "located_in": "kimball_study",
       "state": {
-        "locked": false,
+        "locked": true,
         "broken": false
       },
       "visibility": "public",
@@ -411,6 +428,7 @@
       "description": "调查员正在寻找的一品脱酒，在禁酒令下通常需要花费 1d3 美元。",
       "located_in": "speakeasy",
       "state": {
+        "speakeasy_found": false,
         "obtained": false,
         "given_to_caretaker": false
       },
@@ -1235,6 +1253,16 @@
               "information_id": "melodias_pocket_bottle",
               "scope": "party"
             },
+            "next_step_id": "succeed_2"
+          },
+          {
+            "id": "succeed_2",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "town_speakeasy_rumor",
+              "scope": "party"
+            },
             "next_step_id": "finish"
           },
           {
@@ -1931,6 +1959,121 @@
               "initiation_kind": "active_action",
               "parameters": {
                 "skill_id": "luck"
+              },
+              "difficulty": "regular"
+            },
+            "result_routes": {
+              "critical_success": "succeed_0",
+              "extreme_success": "succeed_0",
+              "hard_success": "succeed_0",
+              "regular_success": "succeed_0",
+              "failure": "finish",
+              "fumble": "finish"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "ask_around_speakeasy",
+      "trigger": {
+        "kind": "agent_match",
+        "scope": {
+          "action_families": [
+            "search",
+            "interview"
+          ],
+          "location_ids": [
+            "arnoldsburg_streets"
+          ],
+          "target_kinds": [
+            "location"
+          ],
+          "target_ids": [
+            "arnoldsburg_streets"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "search",
+            "打听地下酒吧的位置"
+          ]
+        },
+        "options": [
+          {
+            "id": "fast-talk",
+            "semantic_hints": [
+              "话术",
+              "用话术打听"
+            ]
+          },
+          {
+            "id": "spot-hidden",
+            "semantic_hints": [
+              "侦查",
+              "留意街上的暗门"
+            ]
+          }
+        ]
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "fast-talk",
+            "entry_step_id": "check_fast-talk"
+          },
+          {
+            "id": "spot-hidden",
+            "entry_step_id": "check_spot-hidden"
+          }
+        ],
+        "steps": [
+          {
+            "id": "finish",
+            "kind": "finish"
+          },
+          {
+            "id": "succeed_0",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "liquor",
+              "key": "speakeasy_found",
+              "value": true
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "check_fast-talk",
+            "kind": "check",
+            "check": {
+              "profile_id": "coc7.skill",
+              "actor_binding": "actor",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "fast-talk"
+              },
+              "difficulty": "regular"
+            },
+            "result_routes": {
+              "critical_success": "succeed_0",
+              "extreme_success": "succeed_0",
+              "hard_success": "succeed_0",
+              "regular_success": "succeed_0",
+              "failure": "finish",
+              "fumble": "finish"
+            }
+          },
+          {
+            "id": "check_spot-hidden",
+            "kind": "check",
+            "check": {
+              "profile_id": "coc7.skill",
+              "actor_binding": "actor",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "spot-hidden"
               },
               "difficulty": "regular"
             },

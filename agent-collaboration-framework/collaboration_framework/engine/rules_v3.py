@@ -108,7 +108,7 @@ def _evaluate_predicate(
         if not isinstance(entity_id, str) or not isinstance(key, str):
             return False
         expected = args.get("value", True)
-        current = _entity_state(state, entity_id).get(key)
+        current = entity_state(state, entity_id).get(key)
         # An absent flag reads as False, which is how the authored `== false`
         # conditions are meant to fire on a fresh room.
         return (current if current is not None else False) == expected
@@ -126,11 +126,28 @@ def _evaluate_predicate(
     return _UNKNOWN_PREDICATE_IS_FALSE
 
 
-def _entity_state(state: GameState, entity_id: str) -> dict:
+def entity_state(state: GameState, entity_id: str) -> dict:
+    """The one authoritative read of an entity's state flags.
+
+    An entity carrying an `item_component` gets materialised into
+    `item_instances`, and `ChangeEntityStateEffect` then writes **only** to that
+    record (it is the versioned one). Reading just `runtime_entities`/`entities`
+    therefore never observes those writes: the authored defaults sit on one side
+    while every subsequent update lands on the other, so any condition gated on
+    such a flag — `visibility_conditions`, gated edges, event triggers — stays
+    frozen at its initial value forever.
+
+    Resolving here in the same precedence the write side uses (item wins) keeps
+    a single source of truth per flag. The authored state stays the base so
+    defaults survive: a fresh item instance starts with empty `values`.
+    """
+
     runtime = state.runtime_entities.get(entity_id)
-    if runtime is not None:
-        return runtime
-    return state.entities.get(entity_id, {})
+    base = runtime if runtime is not None else state.entities.get(entity_id, {})
+    item = state.item_instances.get(entity_id)
+    if item is None:
+        return base
+    return {**base, **item.state.values}
 
 
 def walk_rule(rule: RuleSpecV3, *, branch_id: str | None = None) -> RuleWalk:

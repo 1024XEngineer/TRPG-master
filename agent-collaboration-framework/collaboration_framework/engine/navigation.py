@@ -13,7 +13,7 @@ from collaboration_framework.contracts import (
 )
 
 from .models import GameState
-from .rules_v3 import evaluate_condition
+from .rules_v3 import entity_state, evaluate_condition
 
 _PLAYER_VISIBLE = {"public", "party", "actor"}
 
@@ -385,7 +385,7 @@ def _edge_is_known(
     if _visibility_override(state, actor_id, "location", edge.to_location_id) is True:
         return True
     if edge.access_point_id is not None:
-        access_state = _entity_state(state, edge.access_point_id)
+        access_state = entity_state(state, edge.access_point_id)
         if access_state.get("discovered") is True:
             return True
     return bool(edge.conditions) and all(
@@ -422,7 +422,7 @@ def _route_edge_is_traversable(
         return True
     if edge.access_point_id is None:
         return False
-    access_state = _entity_state(state, edge.access_point_id)
+    access_state = entity_state(state, edge.access_point_id)
     return access_state.get("unlocked") is True or access_state.get("open") is True
 
 
@@ -438,7 +438,7 @@ def _boundary(
     label = (
         (entity.player_visible_name or entity.name) if entity is not None else "通路前"
     )
-    access_state = _entity_state(state, edge.access_point_id or "")
+    access_state = entity_state(state, edge.access_point_id or "")
     if edge.traversal == "guided":
         boundary_state = "interaction_required"
     elif access_state.get("locked") is True or edge.conditions:
@@ -466,10 +466,6 @@ def _visibility_override(
     if actor_key in state.visibility_overrides:
         return state.visibility_overrides[actor_key]
     return state.visibility_overrides.get(f"party:{target_kind}:{target_id}")
-
-
-def _entity_state(state: GameState, entity_id: str) -> dict:
-    return state.runtime_entities.get(entity_id) or state.entities.get(entity_id, {})
 
 
 def _text(value: object) -> str | None:

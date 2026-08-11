@@ -1,4 +1,5 @@
 from collaboration_framework.contracts import (
+    ActorBindingError,
     AdjudicationValidationError,
     ValidationResult,
 )
@@ -43,4 +44,12 @@ def test_only_revision_refresh_feedback_is_client_retryable() -> None:
         "SOURCE_REVISION_STALE",
         "动作基于过期的玩家视图，请刷新后重试",
         True,
+    )
+
+
+def test_actor_binding_error_keeps_stable_public_code() -> None:
+    assert _map_turn_error(ActorBindingError("player_id/actor_id 未绑定到当前房间")) == (
+        "ACTOR_NOT_CONTROLLED",
+        "当前玩家不能控制该局内角色",
+        False,
     )

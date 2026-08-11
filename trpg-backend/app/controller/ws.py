@@ -42,6 +42,7 @@ from typing import Literal
 import anyio
 import structlog
 from collaboration_framework.contracts import (
+    ActorBindingError,
     AdjudicationValidationError,
     CancelCheckChoice,
     CheckDecisionRequest,
@@ -687,6 +688,8 @@ def _map_turn_error(exc: Exception) -> tuple[str, str, bool]:
         return exc.code, exc.public_message, exc.retryable
     if isinstance(exc, ActorResolutionError):
         return "ACTOR_NOT_CONTROLLED", "当前玩家没有可控制的局内角色", False
+    if isinstance(exc, ActorBindingError):
+        return "ACTOR_NOT_CONTROLLED", "当前玩家不能控制该局内角色", False
     if isinstance(exc, RevisionConflictError):
         return "REVISION_CONFLICT", "房间状态已被其他动作更新，请重试", True
     if isinstance(exc, SQLAlchemyError):

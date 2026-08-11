@@ -77,7 +77,7 @@ from .adjudication import (
     SpendResourceOption,
     SubmitAdjudicationRequest,
 )
-from .common import ContractError, ContractModel, JsonObject
+from .common import ActorBindingError, ContractError, ContractModel, JsonObject
 from .validation import (
     AdjudicationValidationError,
     AuthorityLevel,

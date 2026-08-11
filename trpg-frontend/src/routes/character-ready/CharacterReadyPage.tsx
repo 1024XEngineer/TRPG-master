@@ -1,7 +1,19 @@
 import { useNavigate } from 'react-router-dom'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { PortraitGenerationResult, RoomPlayerSummary } from 'trpg-sdk'
-import { ArrowLeft, UserPlus, Swords, Eye, ImagePlus } from 'lucide-react'
+import {
+  User,
+  UserPlus,
+  Eye,
+  ImagePlus,
+  Heart,
+  Brain,
+  WandSparkles,
+  Sword,
+  BicepsFlexed,
+  Footprints,
+  type LucideIcon,
+} from 'lucide-react'
 import { useCharacterStore } from '@/stores/character-store'
 import { fetchCharacter } from '@/services/character/character-api'
 import { useRoomStore } from '@/stores/room-store'
@@ -11,7 +23,7 @@ import { useRoomPlayers } from '@/hooks/useRoomPlayers'
 import { usePlayerPortraits } from '@/hooks/usePlayerPortraits'
 import { useRuleset } from '@/hooks/useRuleset'
 import { PortraitGenerationModal } from './PortraitGenerationModal'
-import { DERIVED_STAT_DEFINITIONS, normalizeDerivedStats } from '@/data/derived-stats'
+import { DERIVED_STAT_DEFINITIONS, normalizeDerivedStats, type DerivedStatKey } from '@/data/derived-stats'
 import { OnboardingTrigger } from '@/features/onboarding'
 import { PortraitImage } from '@/features/portrait/PortraitImage'
 
@@ -20,7 +32,110 @@ const SHEET_PAGES = [
   { key: 'skills', label: '技能' },
   { key: 'background', label: '背景装备' },
 ] as const
+const DERIVED_STAT_ICONS: Record<DerivedStatKey, LucideIcon> = {
+  hp: Heart,
+  san: Brain,
+  mp: WandSparkles,
+  db: Sword,
+  build: BicepsFlexed,
+  move: Footprints,
+}
 const EMPTY_PLAYERS: RoomPlayerSummary[] = []
+
+interface RadarAttribute {
+  key: string
+  label: string
+}
+
+function AttributeRadarChart({
+  attributes,
+  values,
+}: {
+  attributes: readonly RadarAttribute[]
+  values: Readonly<Partial<Record<string, number>>>
+}) {
+  if (attributes.length < 3) return null
+
+  const centerX = 180
+  const centerY = 155
+  const radius = 98
+  const labelRadius = 112
+  const angleAt = (index: number) => -Math.PI / 2 + (index * Math.PI * 2) / attributes.length
+  const pointAt = (index: number, pointRadius: number) => {
+    const angle = angleAt(index)
+    return `${centerX + Math.cos(angle) * pointRadius},${centerY + Math.sin(angle) * pointRadius}`
+  }
+  const polygonAt = (pointRadius: number) => attributes.map((_, index) => pointAt(index, pointRadius)).join(' ')
+  const resolvedValues = attributes.map((attribute) => {
+    const value = values[attribute.key]
+    return typeof value === 'number' && Number.isFinite(value) ? value : null
+  })
+  const completeValues = resolvedValues.every((value): value is number => value !== null)
+    ? resolvedValues
+    : null
+  const valuePolygon = completeValues
+    ? completeValues.map((rawValue, index) => {
+        const value = Math.max(0, Math.min(100, rawValue))
+        return pointAt(index, radius * value / 100)
+      }).join(' ')
+    : null
+
+  return (
+    <div className="character-ready-sheet__radar" data-testid="attribute-radar-chart">
+      <svg viewBox="0 28 360 260" role="img" aria-label="基础属性雷达图">
+        {[0.25, 0.5, 0.75, 1].map(level => (
+          <polygon
+            key={level}
+            points={polygonAt(radius * level)}
+            className="character-ready-sheet__radar-grid"
+          />
+        ))}
+        {attributes.map((attribute, index) => (
+          <line
+            key={attribute.key}
+            x1={centerX}
+            y1={centerY}
+            x2={centerX + Math.cos(angleAt(index)) * radius}
+            y2={centerY + Math.sin(angleAt(index)) * radius}
+            className="character-ready-sheet__radar-axis"
+          />
+        ))}
+        {valuePolygon ? (
+          <polygon points={valuePolygon} className="character-ready-sheet__radar-value" />
+        ) : (
+          <text
+            x={centerX}
+            y={centerY}
+            textAnchor="middle"
+            dominantBaseline="middle"
+            className="character-ready-sheet__radar-empty"
+          >
+            属性数据不完整
+          </text>
+        )}
+        {attributes.map((attribute, index) => {
+          const angle = angleAt(index)
+          const x = centerX + Math.cos(angle) * labelRadius
+          const y = centerY + Math.sin(angle) * labelRadius
+          const anchor = Math.cos(angle) > 0.2 ? 'start' : Math.cos(angle) < -0.2 ? 'end' : 'middle'
+          return (
+            <text
+              key={attribute.key}
+              x={x}
+              y={y}
+              textAnchor={anchor}
+              dominantBaseline="middle"
+              className="character-ready-sheet__radar-label"
+            >
+              <tspan>{attribute.label}</tspan>
+              <tspan className="character-ready-sheet__radar-number"> {resolvedValues[index] ?? '—'}</tspan>
+            </text>
+          )
+        })}
+      </svg>
+    </div>
+  )
+}
 
 function CharacterSheetModal({ character, portraitUrl, onClose }: { character: NonNullable<ReturnType<typeof useCharacterStore.getState>['character']>; portraitUrl?: string; onClose: () => void }) {
   const [page, setPage] = useState<typeof SHEET_PAGES[number]['key']>('info')
@@ -31,10 +146,11 @@ function CharacterSheetModal({ character, portraitUrl, onClose }: { character: N
 
   return (
     <>
-      <div className="fixed inset-0 bg-black/50 z-30 animate-fade-in" onClick={onClose} />
-      <div className="fixed inset-x-0 bottom-0 z-40 bg-card rounded-t-2xl animate-slide-up max-h-[80vh] overflow-y-auto">
-        <div className="flex items-center justify-between px-5 pt-4 pb-2">
-          <h3 className="text-base font-bold text-text-primary">调查员 · {character.info.name}</h3>
+      <div className="character-ready-sheet-backdrop fixed inset-0 z-30 animate-fade-in" onClick={onClose} />
+      <div className="character-ready-sheet fixed inset-x-0 bottom-0 z-40 animate-slide-up max-h-[82vh] overflow-hidden">
+        <div className="character-ready-sheet__scroll">
+        <div className="character-ready-sheet__header flex items-center justify-between px-5 pt-4 pb-2">
+          <h3 className="text-base font-bold text-text-primary">调查员 · <span className="character-ready-sheet__numbered">{character.info.name}</span></h3>
           <button onClick={onClose} className="w-7 h-7 rounded-full bg-panel flex items-center justify-center">
             <svg className="w-4 h-4 text-text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
               <path d="M18 6L6 18M6 6l12 12" />
@@ -43,7 +159,7 @@ function CharacterSheetModal({ character, portraitUrl, onClose }: { character: N
         </div>
 
         {/* Page tabs */}
-        <div className="flex gap-1.5 px-5 pb-3">
+        <div className="character-ready-sheet__tabs flex gap-1.5 px-5 pb-3">
           {SHEET_PAGES.map(p => (
             <button key={p.key} onClick={() => setPage(p.key)}
               className={`flex-1 text-center text-[12px] font-semibold py-1.5 rounded-[99px] border transition-all ${
@@ -54,11 +170,11 @@ function CharacterSheetModal({ character, portraitUrl, onClose }: { character: N
           ))}
         </div>
 
-        <div className="px-5 pb-6 space-y-4">
+        <div className="character-ready-sheet__content px-5 pb-6 space-y-4">
           {page === 'info' && (
             <>
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-14 rounded-sm flex items-center justify-center text-2xl overflow-hidden"
+              <div className="character-ready-sheet__profile">
+                <div className="character-ready-sheet__portrait rounded-sm flex items-center justify-center text-2xl overflow-hidden"
                   style={{ background: 'linear-gradient(135deg,#e8e0d0,#d8cfb8)', border: '2px solid #b8976a' }}>
                   {portraitUrl ? (
                     <PortraitImage
@@ -69,46 +185,35 @@ function CharacterSheetModal({ character, portraitUrl, onClose }: { character: N
                     />
                   ) : '🕵️'}
                 </div>
-                <div>
-                  <div className="font-bold text-text-primary text-[17px]">{character.info.name}</div>
-                  <div className="text-xs text-text-muted">{character.info.age}岁 · {character.info.gender} · {occupation?.name ?? '未选择职业'}</div>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-1.5">
-                <div className="flex items-center justify-between bg-input border border-border-light rounded px-3 py-1.5">
-                  <span className="text-[11px] text-text-muted">居住地</span>
-                  <span className="text-sm font-medium text-text-primary">{character.info.residence || '—'}</span>
-                </div>
-                <div className="flex items-center justify-between bg-input border border-border-light rounded px-3 py-1.5">
-                  <span className="text-[11px] text-text-muted">出生地</span>
-                  <span className="text-sm font-medium text-text-primary">{character.info.birthplace || '—'}</span>
-                </div>
-              </div>
-              <div className="grid grid-cols-3 gap-2" data-testid="derived-stats-grid">
-                {DERIVED_STAT_DEFINITIONS.map(definition => (
-                  <div key={definition.key} className="bg-panel rounded-md px-2.5 py-2 text-center">
-                    <div className="text-[10px] text-text-muted font-semibold">
-                      {definition.label} <span className="font-mono text-text-dim">{definition.abbreviation}</span>
-                    </div>
-                    <div className="text-[16px] font-bold font-mono" style={{ color: definition.color }}>
-                      {character.derived[definition.key] ?? '—'}
-                    </div>
+                <div className="character-ready-sheet__identity">
+                  <div className="character-ready-sheet__identity-name font-bold text-text-primary">{character.info.name}</div>
+                  <div className="character-ready-sheet__identity-summary character-ready-sheet__numbered text-text-muted">{character.info.age}岁 · {character.info.gender} · {occupation?.name ?? '未选择职业'}</div>
+                  <div className="character-ready-sheet__locations">
+                    <span>居住地：{character.info.residence || '—'}</span>
+                    <span>出生地：{character.info.birthplace || '—'}</span>
                   </div>
-                ))}
-              </div>
-              <div>
-                <h4 className="text-[11px] font-semibold text-brass-dark mb-2">基础属性</h4>
-                <div className="grid grid-cols-2 gap-1.5">
-                  {/* 属性清单由后端 ruleset 驱动，前端不再自己维护一份名单——
-                      此前三处各硬编码一份，加幸运时漏改一处就导致角色卡看不到
-                      幸运值（issue #96）。 */}
-                  {(ruleset?.attributes ?? []).map(attribute => (
-                    <div key={attribute.key} className="flex items-center justify-between bg-input border border-border-light rounded px-3 py-1.5">
-                      <span className="font-mono text-[11px] font-bold text-text-muted">{attribute.key}</span>
-                      <span className="font-mono text-sm font-bold text-text-primary">{character.attr[attribute.key]}</span>
-                    </div>
-                  ))}
                 </div>
+              </div>
+              <div className="character-ready-sheet__derived" data-testid="derived-stats-grid">
+                {DERIVED_STAT_DEFINITIONS.map(definition => {
+                  const StatIcon = DERIVED_STAT_ICONS[definition.key]
+                  return (
+                    <div key={definition.key} className="character-ready-sheet__derived-item">
+                      <StatIcon className="character-ready-sheet__derived-icon" aria-hidden="true" />
+                      <span className="character-ready-sheet__derived-label">{definition.label}</span>
+                      <span
+                        className="character-ready-sheet__derived-value character-ready-sheet__numbered"
+                        style={{ color: definition.color }}
+                      >
+                        {character.derived[definition.key] ?? '—'}
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+              <div className="character-ready-sheet__attributes">
+                <h4 className="character-ready-sheet__section-title">基础属性</h4>
+                <AttributeRadarChart attributes={ruleset?.attributes ?? []} values={character.attr} />
               </div>
             </>
           )}
@@ -152,6 +257,7 @@ function CharacterSheetModal({ character, portraitUrl, onClose }: { character: N
             </>
           )}
         </div>
+        </div>
       </div>
     </>
   )
@@ -167,6 +273,7 @@ export default function CharacterReadyPage() {
   const [portraitResult, setPortraitResult] = useState<PortraitGenerationResult | null>(null)
   const [portraitVersionOverride, setPortraitVersionOverride] = useState<string | null>(null)
   const [starting, setStarting] = useState(false)
+  const [startError, setStartError] = useState('')
   const roomId = useRoomStore((s) => s.roomId)
   const cachedCharacter = useCharacterStore((s) => (roomId ? s.getForRoom(roomId) : null))
   const characterId = useRoomStore((s) => s.characterId)
@@ -254,6 +361,7 @@ export default function CharacterReadyPage() {
 
   const handleStartGame = async () => {
     if (!isHost || !playerId || !roomId) return
+    setStartError('')
     setStarting(true)
     try {
       // ★ 这个页面从来没有主动建立过 WS 连接（只有 LobbyPage 会连）——如果
@@ -271,6 +379,7 @@ export default function CharacterReadyPage() {
       })
       sdk.roomSocket.startGame(playerId)
     } catch {
+      setStartError('无法开始游戏，请检查连接后重试。')
       setStarting(false)
       return
     }
@@ -293,126 +402,129 @@ export default function CharacterReadyPage() {
   }
 
   return (
-    <div className="animate-screen-in px-5 pt-6">
-      {/* Header */}
-      <div className="mb-3 flex items-center justify-between">
-        <button
-          onClick={handleGoBack}
-          className="w-[34px] h-[34px] rounded-full bg-card border border-border-light flex items-center justify-center flex-shrink-0 active:bg-panel active:scale-[0.94] transition-all duration-150"
-        >
-          <ArrowLeft className="w-[18px] h-[18px] text-text-muted" strokeWidth={2.5} />
+    <div className="lobby-scene character-ready-scene animate-screen-in">
+      <img className="lobby-scene__background" src="/assets/rooms/lobby/background.webp" alt="" aria-hidden="true" />
+      <img className="lobby-scene__map" src="/assets/rooms/lobby/map.webp" alt="" aria-hidden="true" />
+      <img className="lobby-scene__note" src="/assets/rooms/lobby/gather-note.webp" alt="" aria-hidden="true" />
+      <img className="lobby-scene__poster" src="/assets/rooms/lobby/camp-poster.webp" alt="" aria-hidden="true" />
+
+      <header className="lobby-scene__header character-ready-scene__header">
+        <button type="button" className="lobby-scene__back" onClick={handleGoBack} aria-label="返回首页">
+          <img src="/assets/rooms/create/back-button.webp" alt="" aria-hidden="true" />
         </button>
-        <OnboardingTrigger />
-      </div>
+        <OnboardingTrigger className="character-ready-scene__guide" />
+      </header>
 
-      <div className="flex items-center justify-center gap-2 mb-1">
-        <span className="font-mono text-2xl font-bold text-text-primary tracking-[0.15em] bg-card border border-dashed border-border-mid px-4 py-1.5 rounded-sm">
-          {roomCode || '------'}
-        </span>
-      </div>
-      <p className="text-center text-xs text-text-muted mb-5">
-        人物卡准备 · 等待所有玩家创建角色
-        {info && ` · ${players.length}/${info.maxPlayers} 人已加入`}
-      </p>
+      <main className="lobby-scene__dossier character-ready-scene__dossier" aria-labelledby="character-ready-room-code">
+        <img className="lobby-scene__dossier-art" src="/assets/rooms/ready/player-dossier.webp" alt="" aria-hidden="true" />
 
-      {/* Player List：自己能看查看/编辑，队友只能看到"建完了没有"——角色卡内容是私密的 */}
-      <div data-onboarding-target="player-status" className="flex flex-col gap-2">
-        {players.length === 0 && (
-          <div className="text-center py-6 text-xs text-text-dim">正在获取房间成员…</div>
-        )}
-        {players.map((p) => {
-          const isSelf = p.playerId === playerId
-          return (
-            <div
-              key={p.playerId}
-              data-onboarding-target={isSelf ? 'character-summary' : undefined}
-              className="flex items-center gap-3 px-3.5 py-3 bg-card border border-border-light rounded-md"
-            >
-              <div className={`w-10 h-10 rounded-full bg-panel border border-border-mid flex items-center justify-center text-lg flex-shrink-0 overflow-hidden ${p.hasCharacter ? 'border-brass' : 'border-dashed border-border-light'}`}>
-                {portraitUrls[p.playerId] ? (
-                  <PortraitImage
-                    src={portraitUrls[p.playerId]}
-                    alt={`${character?.info.name ?? p.nickname}的头像`}
-                    buttonClassName="h-full w-full"
-                    imageClassName="h-full w-full object-cover"
-                  />
-                ) : p.hasCharacter ? '🔍' : '○'}
+        <section className="lobby-scene__masthead character-ready-scene__masthead" aria-label="房间信息">
+          <h1 id="character-ready-room-code" className="lobby-scene__room-code" aria-label={`房间码 ${roomCode || '未获取'}`}>
+            {Array.from(roomCode || '------').map((character, index) => (
+              <span className={/\d/.test(character) ? 'lobby-scene__room-code-digit' : undefined} key={`${character}-${index}`}>
+                {character}
+              </span>
+            ))}
+          </h1>
+          <p className="lobby-scene__connection character-ready-scene__connection" aria-live="polite">
+            <span className={`lobby-scene__connection-dot ${allHaveCharacters ? 'is-connected' : ''}`} aria-hidden="true" />
+            <span className="character-ready-scene__connection-text">
+              人物卡准备 · {allHaveCharacters ? '全员已完成' : '等待成员建卡'}
+              {info && <span> · {players.length}/{info.maxPlayers} 人</span>}
+            </span>
+            <span className="character-ready-scene__connection-spacer" aria-hidden="true" />
+          </p>
+        </section>
+
+        <section className="lobby-scene__roster character-ready-scene__roster" aria-labelledby="character-ready-roster-title">
+          <h2 id="character-ready-roster-title" className="sr-only">调查员档案</h2>
+          <div className="lobby-scene__player-list character-ready-scene__player-list" data-onboarding-target="player-status" aria-busy={!info}>
+            {players.length === 0 && (
+              <div className="lobby-player lobby-player--loading" role="status">
+                <img className="lobby-player__paper" src="/assets/rooms/lobby/seat.webp" alt="" aria-hidden="true" />
+                正在整理调查员档案…
               </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-semibold text-text-primary">{p.nickname}{isSelf && ' (你)'}</div>
-                <div className="text-xs text-text-muted">
-                  {isSelf && hasCharacter ? (
-                    <span className="text-mold">人物卡：{character!.info.name}</span>
-                  ) : p.hasCharacter ? (
-                    <span className="text-mold">已完成建卡</span>
-                  ) : (
-                    <span className="text-text-dim">尚未创建人物卡</span>
-                  )}
-                </div>
-              </div>
-              {isSelf && (
-                <div className="flex items-center gap-1.5">
-                  {hasCharacter ? (
-                    <>
-                      <button onClick={() => setShowSelfSheet(true)}
-                        className="text-[11px] font-semibold px-2 py-1 rounded-[99px] bg-brass/10 text-brass-dark flex items-center gap-1 active:scale-[0.95] transition-all border-none font-sans whitespace-nowrap cursor-pointer">
-                        <Eye className="w-3 h-3" /> 查看
-                      </button>
-                      {/* 入口默认显示，实际生图 provider 由后端根据 Key 统一选择。 */}
-                      {characterId && (
-                        <button
-                          type="button"
-                          onClick={() => setShowPortraitGenerator(true)}
-                          aria-label="生成角色图片"
-                          title="生成角色图片"
-                          className="flex h-7 w-7 items-center justify-center rounded-full bg-brass/10 text-brass-dark transition-all active:scale-[0.95]"
-                        >
-                          <ImagePlus className="h-3.5 w-3.5" />
-                        </button>
+            )}
+            {players.map((player) => {
+              const isSelf = player.playerId === playerId
+              return (
+                <article
+                  key={player.playerId}
+                  data-onboarding-target={isSelf ? 'character-summary' : undefined}
+                  className={`lobby-player character-ready-player ${player.hasCharacter ? 'is-ready' : ''}`}
+                >
+                  <img className="lobby-player__paper" src="/assets/rooms/lobby/seat.webp" alt="" aria-hidden="true" />
+                  <span className="lobby-player__avatar character-ready-player__avatar">
+                    {portraitUrls[player.playerId] ? (
+                      <PortraitImage
+                        src={portraitUrls[player.playerId]}
+                        alt={`${isSelf && character ? character.info.name : player.nickname}的头像`}
+                        buttonClassName="h-full w-full"
+                        imageClassName="h-full w-full object-cover"
+                      />
+                    ) : <User aria-hidden="true" />}
+                  </span>
+                  <span className="lobby-player__identity character-ready-player__identity">
+                    <strong title={player.nickname}>{player.nickname}{isSelf && '（你）'}</strong>
+                    <small>
+                      {isSelf && hasCharacter
+                        ? `调查员：${character.info.name}`
+                        : player.hasCharacter ? '调查员档案已完成' : '尚未创建调查员档案'}
+                    </small>
+                  </span>
+                  {isSelf && (
+                    <span className="character-ready-player__actions">
+                      {hasCharacter ? (
+                        <>
+                          <button type="button" onClick={() => setShowSelfSheet(true)}><Eye /><span>查看</span></button>
+                          {characterId && (
+                            <button type="button" onClick={() => setShowPortraitGenerator(true)} aria-label="生成角色图片" title="生成角色图片"><ImagePlus /><span>生图</span></button>
+                          )}
+                          <button type="button" onClick={handleEditCharacter}><span>编辑</span></button>
+                        </>
+                      ) : (
+                        <button type="button" className="is-create" onClick={handleEditCharacter}><UserPlus /><span>创建人物卡</span></button>
                       )}
-                      <button onClick={handleEditCharacter}
-                        className="text-[11px] font-semibold px-2 py-1 rounded-[99px] bg-panel text-text-muted active:scale-[0.95] transition-all border border-border-light font-sans whitespace-nowrap cursor-pointer">
-                        编辑
-                      </button>
-                    </>
-                  ) : (
-                    <button onClick={handleEditCharacter}
-                      className="text-[11px] font-semibold px-2.5 py-1 rounded-[99px] bg-brass text-white flex items-center gap-1 active:scale-[0.95] transition-all border-none font-sans whitespace-nowrap cursor-pointer">
-                      <UserPlus className="w-3 h-3" /> 创建人物卡
-                    </button>
+                    </span>
                   )}
-                </div>
-              )}
-            </div>
-          )
-        })}
-      </div>
+                  {!isSelf && (
+                    <span className={`lobby-player__status ${player.hasCharacter ? 'is-ready' : ''}`}>
+                      <img src="/assets/rooms/lobby/status-badge.webp" alt="" aria-hidden="true" />
+                      <span>{player.hasCharacter ? '已建卡' : '建卡中'}</span>
+                    </span>
+                  )}
+                </article>
+              )
+            })}
+          </div>
+        </section>
+      </main>
 
-      {/* Waiting message */}
-      <p className="text-center text-xs text-text-muted mt-6 mb-4">
-        {isHost
-          ? '将房间号分享给好友，让他们加入游戏并创建角色'
-          : allHaveCharacters
-            ? '全员已完成建卡，等待房主开始游戏…'
-            : '等待所有玩家完成建卡'}
-      </p>
-
-      {/* 只有房主能真正开始游戏，且要等全员都建完卡才能点 */}
-      {isHost ? (
-        <button
-          onClick={handleStartGame}
-          disabled={!allHaveCharacters || starting}
-          data-onboarding-target="start-game"
-          className="w-full mt-2 px-6 py-3.5 rounded-sm bg-brass text-white text-sm font-semibold active:bg-brass-dark transition-all disabled:opacity-50 flex items-center justify-center gap-2"
-        >
-          <Swords className="w-4 h-4" />
-          {starting ? '进入中…' : '开始游戏'}
-        </button>
-      ) : (
-        <div className="w-full mt-2 px-6 py-3.5 rounded-sm bg-panel text-text-dim text-sm font-semibold text-center">
-          等待房主开始游戏…
-        </div>
-      )}
+      <footer className="lobby-scene__footer character-ready-scene__footer">
+        {startError && <p className="lobby-scene__start-error" role="alert">{startError}</p>}
+        {isHost ? (
+          <button
+            type="button"
+            onClick={handleStartGame}
+            disabled={!allHaveCharacters || starting}
+            data-onboarding-target="start-game"
+            className="lobby-scene__start-action"
+            aria-describedby="character-ready-action-hint"
+          >
+            <img src="/assets/rooms/lobby/start-game.webp" alt="" aria-hidden="true" />
+            <span className={starting ? 'lobby-scene__start-progress' : 'sr-only'}>{starting ? '进入中…' : '开始游戏'}</span>
+          </button>
+        ) : (
+          <div className="character-ready-scene__waiting-action" aria-describedby="character-ready-action-hint">等待房主开始游戏</div>
+        )}
+        <p id="character-ready-action-hint" className="lobby-scene__action-hint" aria-live="polite">
+          <span aria-hidden="true">✥</span>
+          {isHost
+            ? allHaveCharacters ? '调查员已经集结完毕，可以开始冒险' : '等待所有玩家完成调查员档案'
+            : allHaveCharacters ? '全员已完成建卡，等待房主开始游戏' : '等待其他玩家完成调查员档案'}
+          <span aria-hidden="true">✥</span>
+        </p>
+      </footer>
 
       {/* Character Sheet Modal */}
       {showSelfSheet && character && (

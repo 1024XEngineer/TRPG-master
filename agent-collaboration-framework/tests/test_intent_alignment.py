@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 from collaboration_framework.contracts import (
+    ENGINE_AUTHORED_INTENT_CONTEXT,
     ActionDeclarationOption,
     ActorResourceView,
     ActorValueView,
@@ -13,6 +14,7 @@ from collaboration_framework.contracts import (
     CheckpointOption,
     ContractError,
     ExitDestinationView,
+    Intent,
     MatchedTarget,
     PlayerInput,
     PlayerView,
@@ -145,6 +147,29 @@ def test_exit_travel_is_aligned_to_one_engine_verb() -> None:
     assert isinstance(intent.target, MatchedTarget)
     assert intent.verb == "go"
     assert intent.initiated_by_target is False
+
+
+def test_contract_refuses_engine_authority_from_untrusted_intent() -> None:
+    """The invariant lives in the contract, not only in the Host aligner.
+
+    Any future call site that skips `align_intent_for_engine` and validates raw
+    model output must fail loudly here — `initiated_by_target` is fed straight
+    into rule evaluation, so a silent pass-through has real consequences.
+    """
+
+    with pytest.raises(ValueError, match="initiated_by_target"):
+        Intent.model_validate(
+            raw_intent(verb="go", target_id="library", initiated_by_target=True)
+        )
+
+
+def test_engine_authored_context_may_still_initiate_by_target() -> None:
+    intent = Intent.model_validate(
+        raw_intent(verb="go", target_id="library", initiated_by_target=True),
+        context=ENGINE_AUTHORED_INTENT_CONTEXT,
+    )
+
+    assert intent.initiated_by_target is True
 
 
 def test_unique_named_exit_recovers_an_unknown_model_target() -> None:

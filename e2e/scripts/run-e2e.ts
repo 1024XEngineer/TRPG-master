@@ -27,6 +27,7 @@ const PORT = Number(process.env.E2E_PORT ?? 8099)
 const BASE_URL = `http://127.0.0.1:${PORT}`
 const TSX_CLI = resolve(HERE, '../node_modules/tsx/dist/cli.mjs')
 const TEST_PATTERN = process.argv[2] ?? process.env.E2E_ONLY ?? 'tests/*.e2e.ts'
+const TEST_NAME_PATTERN = process.env.E2E_TEST_NAME_PATTERN
 
 /**
  * 每次跑都用**全新的 e2e.db**。
@@ -40,12 +41,9 @@ const DB_FILE = resolve(BACKEND_DIR, 'e2e.db')
 /**
  * `E2E_REAL_MODEL=1` 时改用 `trpg-backend/.env` 里配置的真实 provider。
  *
- * 默认仍然是 Fake：CI 不能依赖外部服务，也不该产生费用。但 Fake 的
- * `DeterministicHostTurnDecisionModel` 只在出现「然后 / 接着 / 再去」这类连接词
- * 时才切分成 ActionPlan，`_DeterministicStepAdjudicator` 也永远返回
- * NoAdjudicationCheck + narrative_only——所以凡是断言「一句话拆成多步」「某一步
- * 要检定」「某条 Canon 信息被发放」的用例，在 Fake 下**结构上不可能通过**，只会
- * 等事件超时。这类用例要验的正是 A 侧模型行为，必须走真实模型。
+ * 默认仍然是 Fake：CI 不能依赖外部服务，也不该产生费用。Fake 只从 PlayerView 与
+ * Rule Match View 做保守、确定性的匹配，因此 CI 覆盖的是已发布候选能够唯一确定的
+ * ActionPlan；需要开放式语义理解的场景仍可用 E2E_REAL_MODEL=1 单独验证。
  */
 const USE_REAL_MODEL = process.env.E2E_REAL_MODEL === '1'
 const fakeModelEnv = {
@@ -63,13 +61,8 @@ const backendEnv = {
     resolve(BACKEND_DIR, '../agent-collaboration-framework'),
     process.env.PYTHONPATH,
   ].filter(Boolean).join(delimiter),
-  // 叙事生成人为延迟 1 秒（issue #107 测试钩子，生产恒为 0）：占位 narrator
-  // 同步秒回，action.submit 的房间锁窗口只有微秒级，两个客户端"同时提交"
-  // 永远压不中 ACTION_IN_PROGRESS——没有这 1 秒，锁的并发拒绝路径在 e2e 里
-  // 是测不到的死代码。代价是每次 action.submit 的用例多等 1 秒。
   APP_ENV: 'test',
   TEST_FIXED_DICE_ROLL: '1',
-  NARRATOR_DELAY_SECONDS: '1',
   // 真实模型下不注入这两个变量，让后端按 .env 解析 provider 与 key：环境变量
   // 优先级高于 .env，注入空 Key 会直接卡在 Settings 校验。
   ...(USE_REAL_MODEL ? {} : fakeModelEnv),
@@ -184,7 +177,13 @@ async function main(): Promise<number> {
   return await new Promise<number>((resolvePromise) => {
     const tests = spawn(
       process.execPath,
-      [TSX_CLI, '--test', '--test-reporter=spec', TEST_PATTERN],
+      [
+        TSX_CLI,
+        '--test',
+        '--test-reporter=spec',
+        ...(TEST_NAME_PATTERN ? ['--test-name-pattern', TEST_NAME_PATTERN] : []),
+        TEST_PATTERN,
+      ],
       {
         cwd: resolve(HERE, '..'),
         env: { ...process.env, E2E_BASE_URL: BASE_URL },

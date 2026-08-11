@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from typing import Protocol
 
 import structlog
-from collaboration_framework.contracts import ModuleContent
+from collaboration_framework.contracts import ModuleContent, ModuleContentV3
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -199,6 +199,10 @@ async def _load_module_background(db: AsyncSession, room: Room) -> str:
     if module_version is None:
         return ""
     try:
+        if module_version.content_schema_version == 3:
+            module_v3 = ModuleContentV3.model_validate(module_version.content_json)
+            profile = module_v3.world_profile
+            return "；".join(part for part in (profile.era, profile.region, profile.tone) if part)
         module = ModuleContent.model_validate(module_version.content_json)
     except ValueError:
         return ""

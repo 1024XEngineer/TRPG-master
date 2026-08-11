@@ -79,8 +79,8 @@ def expression_context(
         "entity": entity_view,
         "entities": entity_view,
         "clock": state.get(
-            "clock",
-            {"elapsed_minutes": 0, "time_of_day": "day", "turn": 0},
+            "world_time",
+            {"current": {"day_index": 0, "hour_of_day": 0}, "current_point_id": "hour_00"},
         ),
         "party": {
             "facts": state.get("discovered_facts", ()),

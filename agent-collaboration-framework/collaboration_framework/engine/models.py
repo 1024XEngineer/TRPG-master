@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Literal
 
 from pydantic import Field, JsonValue
@@ -12,13 +13,20 @@ from collaboration_framework.contracts import (
     ActionResult,
     AdjudicationExecution,
     CheckDecisionRequest,
+    ContractError,
     ContractModel,
+    EndingResolution,
     ModuleContent,
+    ModuleContentV3,
+    LocationKnowledge,
+    ItemInstance,
+    ItemKnowledge,
     PendingCheckDecisionView,
     PendingCheckOption,
     PostRollDecisionRequest,
     PostRollOption,
     SubmitAdjudicationRequest,
+    TravelInterrupted,
 )
 from collaboration_framework.contracts.adjudication import CheckRoll
 
@@ -43,12 +51,123 @@ class ActorState(ContractModel):
     conditions: tuple[str, ...] = ()
 
 
-class ClockState(ContractModel):
-    """Small deterministic clock used by module expressions and time hooks."""
+DAY_STARTS_HOUR = 6
+NIGHT_STARTS_HOUR = 18
 
-    elapsed_minutes: int = Field(default=0, ge=0)
-    time_of_day: Literal["day", "night"] = "day"
-    turn: int = Field(default=0, ge=0)
+
+def time_of_day_at_hour(hour_of_day: int) -> Literal["day", "night"]:
+    """The single day/night boundary: 06:00–18:00 is day.
+
+    Derived, never stored. Two places used to compute this independently and gave
+    different answers; they only agreed because the v2 fixture opened at midnight
+    (#226).
+    """
+
+    return "day" if DAY_STARTS_HOUR <= hour_of_day < NIGHT_STARTS_HOUR else "night"
+
+
+class WorldTimePoint(ContractModel):
+    """An exact hour on the world calendar (#245 §二.2)."""
+
+    day_index: int = Field(default=0, ge=0)
+    hour_of_day: int = Field(default=0, ge=0, le=23)
+
+    @property
+    def absolute_hour(self) -> int:
+        """Total ordering across days, so "next point" is a plain comparison."""
+
+        return self.day_index * 24 + self.hour_of_day
+
+    @property
+    def time_of_day(self) -> Literal["day", "night"]:
+        return time_of_day_at_hour(self.hour_of_day)
+
+
+class WorldTimeState(ContractModel):
+    """Where the room currently sits on the discrete timeline (#245 §一.1).
+
+    Time never flows: it does not tick with real time, does not accrue per action,
+    and cannot land between authored points. It only jumps from `current_point_id`
+    to the next point in the ordered timeline.
+
+    #245 §二.2 also lists room_id / module_id / module_version / revision /
+    last_event_id on this record. Those are deliberately not duplicated here —
+    EngineRuntimeSnapshot already carries them, and a second copy of `revision`
+    inside the committed state is exactly the kind of thing that silently drifts.
+    The read-side view assembles the full shape from both (S2).
+    """
+
+    # 默认落在正午而不是午夜：v2 房间没有 time_policy，起点是任选的，而
+    # time_of_day 现在是推导出来的——午夜会让"没声明时间的房间一开局就是夜里"。
+    # v3 房间一律由 initial_state.start_time_point_id 覆盖这个默认值。
+    current: WorldTimePoint = Field(
+        default_factory=lambda: WorldTimePoint(day_index=0, hour_of_day=12)
+    )
+    current_point_id: str = Field(default="hour_12", min_length=1)
+
+    @property
+    def time_of_day(self) -> Literal["day", "night"]:
+        return self.current.time_of_day
+
+
+class AgendaSource(ContractModel):
+    """The committed fact that created a durable RuleAgenda (#226 §4)."""
+
+    kind: Literal["action", "event"]
+    id: str = Field(min_length=1)
+
+
+class AgendaItem(ContractModel):
+    """One Event Rule invocation in its deterministic queue position."""
+
+    source_event_id: str = Field(min_length=1)
+    event_sequence: int = Field(ge=1)
+    rule_id: str = Field(min_length=1)
+    rule_priority: int
+    branch_id: str = Field(min_length=1)
+    status: Literal["queued", "running", "completed", "skipped", "failed"] = "queued"
+
+
+class RuleAgenda(ContractModel):
+    """Persisted Rule cursor, queue, budgets, and worker lease (#226 §4).
+
+    Lease changes are coordination state rather than gameplay facts. Stores use
+    ``lease_version`` as a compare-and-swap token without changing the room's
+    Event revision.
+    """
+
+    agenda_id: str = Field(min_length=1)
+    room_id: str = Field(min_length=1)
+    module_id: str = Field(min_length=1)
+    module_version: str = Field(min_length=1)
+    correlation_id: str = Field(min_length=1)
+    root_source: AgendaSource
+    status: Literal[
+        "running",
+        "awaiting_active_check",
+        "awaiting_passive_check",
+        "awaiting_presentation",
+        "awaiting_player_input",
+        "stable",
+        "failed",
+    ] = "running"
+    source_event_ids: tuple[str, ...] = ()
+    queue: tuple[AgendaItem, ...] = ()
+    current_rule_id: str | None = None
+    current_branch_id: str | None = None
+    current_step_id: str | None = None
+    pending_check_id: str | None = None
+    pending_boundary_id: str | None = None
+    pending_rule_input_id: str | None = None
+    revision: str = Field(min_length=1)
+    chain_depth: int = Field(default=0, ge=0)
+    step_count: int = Field(default=0, ge=0)
+    max_chain_depth: int = Field(default=16, ge=1, le=64)
+    max_steps: int = Field(default=128, ge=1, le=1024)
+    failure_code: str | None = None
+    lease_owner: str | None = None
+    lease_expires_at: datetime | None = None
+    lease_version: int = Field(default=0, ge=0)
 
 
 class GameState(ContractModel):
@@ -61,14 +180,26 @@ class GameState(ContractModel):
     event_sequence: int = Field(default=0, ge=0)
     actors: dict[str, ActorState]
     entities: dict[str, dict[str, JsonValue]]
-    clock: ClockState = Field(default_factory=ClockState)
+    world_time: WorldTimeState = Field(default_factory=WorldTimeState)
     discovered_facts: tuple[str, ...] = ()
     actor_discovered_facts: dict[str, tuple[str, ...]] = Field(default_factory=dict)
     runtime_locations: dict[str, dict[str, JsonValue]] = Field(default_factory=dict)
     runtime_entities: dict[str, dict[str, JsonValue]] = Field(default_factory=dict)
     visibility_overrides: dict[str, bool] = Field(default_factory=dict)
+    party_location_knowledge: dict[str, LocationKnowledge] = Field(default_factory=dict)
+    actor_location_knowledge: dict[str, dict[str, LocationKnowledge]] = Field(
+        default_factory=dict
+    )
+    actor_position_contexts: dict[str, TravelInterrupted] = Field(default_factory=dict)
+    item_instances: dict[str, ItemInstance] = Field(default_factory=dict)
+    party_item_knowledge: dict[str, ItemKnowledge] = Field(default_factory=dict)
+    actor_item_knowledge: dict[str, dict[str, ItemKnowledge]] = Field(
+        default_factory=dict
+    )
+    rule_agendas: dict[str, RuleAgenda] = Field(default_factory=dict)
     core_resolved: bool = False
     ending_available: bool = False
+    ending_resolution: EndingResolution | None = None
 
 
 class StateChange(ContractModel):
@@ -156,7 +287,9 @@ class CheckRun(ContractModel):
     adjudication: ActionAdjudication
 
 
-WorkflowRequest = SubmitAdjudicationRequest | CheckDecisionRequest | PostRollDecisionRequest
+WorkflowRequest = (
+    SubmitAdjudicationRequest | CheckDecisionRequest | PostRollDecisionRequest
+)
 
 
 class CompletedAdjudicationCommand(ContractModel):
@@ -180,9 +313,55 @@ class EngineRuntimeSnapshot(ContractModel):
 
     module_id: str = Field(min_length=1)
     module_version: str = Field(min_length=1)
-    module_content: ModuleContent
+    # v2 and v3 both appear here during the #212 migration: the loader decides
+    # which one a room is pinned to, and every consumer dispatches on the type.
+    # The v2 arm is deleted in the same PR that switches the published fixture
+    # (#226 forbids a runtime compatibility layer in the shipped product).
+    module_content: ModuleContent | ModuleContentV3
     game_state: GameState
     revision: str = Field(min_length=1)
+
+    @property
+    def is_v3(self) -> bool:
+        return isinstance(self.module_content, ModuleContentV3)
+
+    @property
+    def v3(self) -> ModuleContentV3:
+        if not isinstance(self.module_content, ModuleContentV3):
+            raise ContractError("当前房间绑定的是 ModuleContent v2")
+        return self.module_content
+
+    @property
+    def canon_information_ids(self) -> set[str]:
+        """Canon Information ids, whichever schema this room is pinned to."""
+
+        if isinstance(self.module_content, ModuleContentV3):
+            return {item.id for item in self.module_content.information}
+        return {item.id for item in self.module_content.information_items}
+
+    @property
+    def canon_entity_ids(self) -> set[str]:
+        return {item.id for item in self.module_content.entities}
+
+    @property
+    def canon_location_ids(self) -> set[str]:
+        """v2 called them Scenes; v3 calls them Locations."""
+
+        if isinstance(self.module_content, ModuleContentV3):
+            return {item.id for item in self.module_content.locations}
+        return {item.id for item in self.module_content.scenes}
+
+    @property
+    def canon_ending_ids(self) -> set[str]:
+        if isinstance(self.module_content, ModuleContentV3):
+            return {item.id for item in self.module_content.ending_anchors}
+        return {item.id for item in self.module_content.win_conditions}
+
+    @property
+    def v2(self) -> ModuleContent:
+        if isinstance(self.module_content, ModuleContentV3):
+            raise ContractError("当前房间绑定的是 ModuleContent v3")
+        return self.module_content
 
 
 class CompletedAction(ContractModel):

@@ -10,7 +10,6 @@ dependencies = [
 ]
 
 [project.scripts]
-agent-collab = "collaboration_framework.cli:main"
 agent-collab-export-schemas = "collaboration_framework.schema_export:main"
 
 [build-system]

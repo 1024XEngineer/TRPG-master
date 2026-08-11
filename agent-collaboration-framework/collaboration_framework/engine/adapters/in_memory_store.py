@@ -5,9 +5,14 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from datetime import datetime
 
-from collaboration_framework.contracts import ContractError, ModuleContent
+from collaboration_framework.contracts import (
+    ContractError,
+    ModuleContent,
+    ModuleContentV3,
+)
 
 from ..models import (
     CheckRun,
@@ -17,14 +22,16 @@ from ..models import (
     EngineRuntimeSnapshot,
     GameState,
     PendingCheckDecision,
+    RuleAgenda,
     StateModifiedEvent,
 )
 from ..ports import EngineTransaction, RevisionConflictError
+from ..rules_v3 import agenda_claim_key, agenda_is_claimable
 
 
 @dataclass(frozen=True)
 class _RoomData:
-    module_content: ModuleContent
+    module_content: ModuleContent | ModuleContentV3
     game_state: GameState
     revision: str
     events: tuple[StateModifiedEvent, ...]
@@ -55,7 +62,7 @@ class InMemoryEngineStore:
     def register_room(
         self,
         *,
-        module_content: ModuleContent,
+        module_content: ModuleContent | ModuleContentV3,
         initial_state: GameState,
     ) -> None:
         room_id = initial_state.room_id
@@ -96,8 +103,7 @@ class InMemoryEngineStore:
 
     def inspect_events(self, room_id: str) -> tuple[StateModifiedEvent, ...]:
         return tuple(
-            event.model_copy(deep=True)
-            for event in self._record(room_id).data.events
+            event.model_copy(deep=True) for event in self._record(room_id).data.events
         )
 
     def inspect_completed_action(
@@ -135,11 +141,122 @@ class InMemoryEngineStore:
             raise ContractError(f"检定运行不存在: {check_id}") from error
         return check_run.model_copy(deep=True)
 
+    async def claim_rule_agenda(
+        self,
+        *,
+        room_id: str,
+        worker_id: str,
+        now: datetime,
+        lease_expires_at: datetime,
+    ) -> RuleAgenda | None:
+        """Atomically lease the next runnable persisted Agenda."""
+
+        if not worker_id or lease_expires_at <= now:
+            raise ContractError("RuleAgenda lease 的 worker 与截止时间必须有效")
+        record = self._record(room_id)
+        async with record.lock:
+            state = record.data.game_state.model_copy(deep=True)
+            candidates = sorted(
+                (
+                    agenda
+                    for agenda in state.rule_agendas.values()
+                    if agenda_is_claimable(agenda, now=now)
+                ),
+                key=agenda_claim_key,
+            )
+            if not candidates:
+                return None
+            current = candidates[0]
+            claimed = current.model_copy(
+                update={
+                    "lease_owner": worker_id,
+                    "lease_expires_at": lease_expires_at,
+                    "lease_version": current.lease_version + 1,
+                },
+                deep=True,
+            )
+            agendas = dict(state.rule_agendas)
+            agendas[claimed.agenda_id] = claimed
+            state = state.model_copy(update={"rule_agendas": agendas}, deep=True)
+            record.data = replace(record.data, game_state=state)
+            return claimed.model_copy(deep=True)
+
+    async def checkpoint_rule_agenda(
+        self,
+        *,
+        agenda: RuleAgenda,
+        worker_id: str,
+        expected_lease_version: int,
+        now: datetime,
+    ) -> RuleAgenda:
+        """Persist one leased cursor update without advancing Event revision."""
+
+        record = self._record(agenda.room_id)
+        async with record.lock:
+            state = record.data.game_state.model_copy(deep=True)
+            current = state.rule_agendas.get(agenda.agenda_id)
+            _validate_agenda_checkpoint(
+                current=current,
+                proposed=agenda,
+                worker_id=worker_id,
+                expected_lease_version=expected_lease_version,
+                now=now,
+            )
+            terminal = agenda.status != "running"
+            saved = agenda.model_copy(
+                update={
+                    "lease_owner": None if terminal else worker_id,
+                    "lease_expires_at": None if terminal else agenda.lease_expires_at,
+                    "lease_version": expected_lease_version + 1,
+                },
+                deep=True,
+            )
+            agendas = dict(state.rule_agendas)
+            agendas[saved.agenda_id] = saved
+            state = state.model_copy(update={"rule_agendas": agendas}, deep=True)
+            record.data = replace(record.data, game_state=state)
+            return saved.model_copy(deep=True)
+
     def _record(self, room_id: str) -> _RoomRecord:
         try:
             return self._rooms[room_id]
         except KeyError as error:
             raise ContractError(f"房间运行时不存在: {room_id}") from error
+
+
+def _validate_agenda_checkpoint(
+    *,
+    current: RuleAgenda | None,
+    proposed: RuleAgenda,
+    worker_id: str,
+    expected_lease_version: int,
+    now: datetime,
+) -> None:
+    if current is None:
+        raise ContractError(f"RuleAgenda 不存在: {proposed.agenda_id}")
+    if (
+        current.lease_owner != worker_id
+        or current.lease_version != expected_lease_version
+        or current.lease_expires_at is None
+        or current.lease_expires_at <= now
+    ):
+        raise RevisionConflictError("RuleAgenda lease 已失效或由其他 worker 持有")
+    immutable = (
+        "agenda_id",
+        "room_id",
+        "module_id",
+        "module_version",
+        "correlation_id",
+        "root_source",
+    )
+    if any(getattr(current, name) != getattr(proposed, name) for name in immutable):
+        raise ContractError("RuleAgenda checkpoint 不能改写不可变身份")
+    if proposed.lease_owner != worker_id:
+        raise ContractError("RuleAgenda checkpoint 的 worker 不匹配")
+    if proposed.status == "running" and (
+        proposed.lease_expires_at is None or proposed.lease_expires_at <= now
+    ):
+        raise ContractError("运行中的 RuleAgenda 必须保留有效 lease")
 
 
 class _InMemoryEngineTransaction(EngineTransaction):
@@ -284,9 +401,7 @@ class _InMemoryEngineTransaction(EngineTransaction):
         if completed_action.execution.action_result.event_refs != tuple(
             event.event_id for event in events
         ):
-            raise ContractError(
-                "ActionResult 的 Event 引用与提交 Event 不一致"
-            )
+            raise ContractError("ActionResult 的 Event 引用与提交 Event 不一致")
 
         self._validate_events(
             current_state=current.game_state,
@@ -404,17 +519,11 @@ class _InMemoryEngineTransaction(EngineTransaction):
         actor_id: str,
     ) -> None:
         first_sequence = current_state.event_sequence + 1
-        expected_sequences = tuple(
-            range(first_sequence, first_sequence + len(events))
-        )
+        expected_sequences = tuple(range(first_sequence, first_sequence + len(events)))
         if tuple(event.sequence for event in events) != expected_sequences:
-            raise ContractError(
-                "提交的 Event sequence 必须在房间内连续递增"
-            )
+            raise ContractError("提交的 Event sequence 必须在房间内连续递增")
         if new_state.event_sequence != current_state.event_sequence + len(events):
-            raise ContractError(
-                "GameState event_sequence 与提交 Event 数量不一致"
-            )
+            raise ContractError("GameState event_sequence 与提交 Event 数量不一致")
         if not events and new_state != current_state:
             raise ContractError("无 Event 的提交不得修改 GameState")
         event_ids = tuple(event.event_id for event in events)
@@ -456,5 +565,7 @@ class _InMemoryEngineTransaction(EngineTransaction):
             *(event.event_id for event in self._record.data.domain_events),
         }
         event_ids = [event.event_id for event in events]
-        if len(event_ids) != len(set(event_ids)) or existing_ids.intersection(event_ids):
+        if len(event_ids) != len(set(event_ids)) or existing_ids.intersection(
+            event_ids
+        ):
             raise ContractError("领域 Event id 必须唯一")

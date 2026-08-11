@@ -22,6 +22,7 @@ from collaboration_framework.contracts import (
     Intent,
     KeeperCapabilityView,
     ModuleContent,
+    ModuleContentV3,
     PlayerInput,
     PlayerView,
     PostRollDecisionRequest,
@@ -40,6 +41,7 @@ from collaboration_framework.host.schemas import (
 
 SCHEMA_MODELS: dict[str, type[BaseModel]] = {
     "module-content.schema.json": ModuleContent,
+    "module-content-v3.schema.json": ModuleContentV3,
     "player-input.schema.json": PlayerInput,
     "projection-snapshot.schema.json": ProjectionSnapshot,
     "player-view.schema.json": PlayerView,

@@ -4,7 +4,6 @@
 
 from .adapters import InMemoryEngineStore
 from .adjudication import AdjudicationEngineService
-from .atomic import FakeAtomicEngine
 from .capabilities import (
     RuntimeCapabilityIssue,
     audit_runtime_capabilities,
@@ -12,12 +11,16 @@ from .capabilities import (
 )
 from .dice import DiceRoller, SequenceDiceSource, SystemDiceSource
 from .initialization import create_initial_game_state
-from .kernel import RuleKernel
+from .navigation import effective_location_knowledge, resolve_location_target
 from .models import (
+    AgendaItem,
+    AgendaSource,
     ActorResources,
     ActorState,
+    LocationKnowledge,
     CheckRun,
-    ClockState,
+    WorldTimePoint,
+    WorldTimeState,
     CompletedAction,
     CompletedAdjudicationCommand,
     DomainEvent,
@@ -25,18 +28,23 @@ from .models import (
     EngineRuntimeSnapshot,
     GameState,
     PendingCheckDecision,
+    RuleAgenda,
     StateModifiedEvent,
 )
 from .ports import EngineStore, EngineTransaction, RevisionConflictError
 from .service import RuleEngineService
 
 __all__ = [
+    "AgendaItem",
+    "AgendaSource",
     "CompletedAction",
     "CompletedAdjudicationCommand",
     "ActorResources",
     "ActorState",
+    "LocationKnowledge",
     "AdjudicationEngineService",
-    "ClockState",
+    "WorldTimePoint",
+    "WorldTimeState",
     "CheckRun",
     "DiceRoller",
     "DomainEvent",
@@ -44,18 +52,19 @@ __all__ = [
     "EngineRuntimeSnapshot",
     "EngineStore",
     "EngineTransaction",
-    "FakeAtomicEngine",
     "GameState",
     "InMemoryEngineStore",
     "PendingCheckDecision",
+    "RuleAgenda",
     "RevisionConflictError",
     "RuntimeCapabilityIssue",
     "RuleEngineService",
-    "RuleKernel",
     "SequenceDiceSource",
     "StateModifiedEvent",
     "SystemDiceSource",
     "audit_runtime_capabilities",
     "create_initial_game_state",
+    "effective_location_knowledge",
     "require_runtime_capabilities",
+    "resolve_location_target",
 ]

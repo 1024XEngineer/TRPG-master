@@ -12,11 +12,15 @@ from collaboration_framework.contracts import (
     ExitDestinationView,
     KeeperCapabilityView,
     KnownInformationView,
+    KnownLocationView,
+    LocationBreadcrumbView,
+    LocationContextView,
     NarrativeDetailView,
     ObservableStateView,
     PlayerInput,
     PlayerView,
     PlayerViewScope,
+    PositionContextView,
     SceneView,
     SelfActorView,
     VisibleActorView,
@@ -96,11 +100,10 @@ class PlayerViewProjector:
         snapshot = await self._source.read(scope)
         if snapshot.room_id != scope.room_id:
             raise ContractError("ProjectionSnapshot 与 PlayerViewScope 房间不一致")
-        if (
-            snapshot.player_id != scope.player_id
-            or snapshot.actor_id != scope.actor_id
-        ):
-            raise ContractError("ProjectionSnapshot 与 PlayerViewScope 身份作用域不一致")
+        if snapshot.player_id != scope.player_id or snapshot.actor_id != scope.actor_id:
+            raise ContractError(
+                "ProjectionSnapshot 与 PlayerViewScope 身份作用域不一致"
+            )
         return PlayerView(
             room_id=scope.room_id,
             player_id=scope.player_id,
@@ -196,9 +199,50 @@ class PlayerViewProjector:
                     )
                     for item in snapshot.scene.available_exits
                 ),
+                loose_items=snapshot.scene.loose_items,
             ),
+            location_context=(
+                LocationContextView(
+                    current_location_id=snapshot.location_context.current_location_id,
+                    breadcrumbs=tuple(
+                        LocationBreadcrumbView(id=item.id, name=item.name)
+                        for item in snapshot.location_context.breadcrumbs
+                    ),
+                    position_context=(
+                        PositionContextView(
+                            id=snapshot.location_context.position_context.id,
+                            label=snapshot.location_context.position_context.label,
+                            state=snapshot.location_context.position_context.state,
+                            destination_id=(
+                                snapshot.location_context.position_context.destination_id
+                            ),
+                        )
+                        if snapshot.location_context.position_context is not None
+                        else None
+                    ),
+                )
+                if snapshot.location_context is not None
+                else None
+            ),
+            known_locations=tuple(
+                KnownLocationView(
+                    id=item.id,
+                    kind=item.kind,
+                    name=item.name,
+                    description=item.description,
+                    parent_location_id=item.parent_location_id,
+                    region_id=item.region_id,
+                    existence=item.existence,
+                    localization=item.localization,
+                    access=item.access,
+                    visited=item.visited,
+                )
+                for item in snapshot.known_locations
+            ),
+            inventory=snapshot.inventory,
             world=WorldStateView(
-                elapsed_minutes=snapshot.world.elapsed_minutes,
+                day_index=snapshot.world.day_index,
+                hour_of_day=snapshot.world.hour_of_day,
                 time_of_day=snapshot.world.time_of_day,
                 core_resolved=snapshot.world.core_resolved,
                 ending_available=snapshot.world.ending_available,

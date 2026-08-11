@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from pydantic import Field, model_validator
@@ -17,6 +17,7 @@ from collaboration_framework.contracts import (
     KeeperCapabilityView,
     PlayerInput,
     PlayerView,
+    WorldClockView,
 )
 from collaboration_framework.host.schemas.agent import _validate_keeper_scope
 
@@ -52,6 +53,29 @@ RESERVING_PLAN_STATUSES = frozenset(
     }
 )
 
+# 房间行动占用必须能自己过期，理由与 RoomActionLockManager 里那条 🔴 注释相同：
+# 一次失败若没走到释放路径，房间就永久锁死，之后谁都无法再提交。进程内锁早就
+# 照做了（60s），而这张持久化占用表当初漏了，于是把同一个失败模式重新引了回来。
+#
+# 取值不能照抄那 60s：`waiting_for_player` 也在 RESERVING_PLAN_STATUSES 里，
+# 玩家正在挑技能、决定要不要烧幸运时计划就停在这个状态。太短会在人还在思考时
+# 抽走占用，随后 CAS 抛 PLAN_RESERVATION_LOST 把回合打死——比它要修的 bug 更糟。
+RESERVATION_TTL = timedelta(minutes=5)
+
+
+def reservation_is_expired(reserved_at: datetime, *, now: datetime | None = None) -> bool:
+    """占用是否已过期到可以被别人接管。
+
+    `reserved_at` 允许是 naive 的：SQLite 不保存时区，取回来的列即使声明了
+    `timezone=True` 也是 naive，直接跟 aware 的当前时间相减会抛 TypeError。
+    这里统一按 UTC 解释，两个 store 就不用各写一遍。
+    """
+
+    moment = now if now is not None else datetime.now(UTC)
+    if reserved_at.tzinfo is None:
+        reserved_at = reserved_at.replace(tzinfo=UTC)
+    return moment - reserved_at > RESERVATION_TTL
+
 
 class ActionPlanStepRun(ContractModel):
     step_id: str = Field(min_length=1, max_length=100)
@@ -61,6 +85,10 @@ class ActionPlanStepRun(ContractModel):
     source_revision: str | None = Field(default=None, min_length=1)
     adjudication: ActionAdjudication | None = None
     adjudication_execution: AdjudicationExecution | None = None
+    # The clock this step left behind, sampled from the PlayerView refreshed
+    # right after it committed. None on rows persisted before this field existed
+    # and on steps that never executed.
+    world_time_after: WorldClockView | None = None
     event_refs: tuple[str, ...] = ()
     pending_action_request_id: str | None = Field(default=None, min_length=1)
     safe_failure_code: str | None = Field(default=None, min_length=1, max_length=100)
@@ -108,6 +136,10 @@ class ActionPlanRun(ContractModel):
     player_id: str = Field(min_length=1)
     actor_id: str = Field(min_length=1)
     created_revision: str = Field(min_length=1)
+    # The clock the turn opened on, before any step ran. Together with each
+    # step's `world_time_after` it gives the Narrator the whole span, so a plan
+    # whose first step advances time is still narrated from where it started.
+    opening_world_time: WorldClockView | None = None
     plan_schema_version: Literal[1] = 1
     run_version: int = Field(default=1, ge=1)
     status: PlanRunStatus = "active"
@@ -178,6 +210,7 @@ class CompletedPlanStepSummary(ContractModel):
     semantic_goal: str = Field(min_length=1, max_length=1000)
     outcome: Literal["success", "failure", "cancelled"]
     view_revision: str = Field(min_length=1)
+    world_time_after: WorldClockView | None = None
     event_refs: tuple[str, ...] = ()
 
 
@@ -225,6 +258,8 @@ class ActionPlanAdvanceResult(ContractModel):
 class SingleActionTurnResult(ContractModel):
     execution: AdjudicationExecution
     player_view: PlayerView
+    # Sampled before the adjudication was submitted; see ActionPlanRun.
+    opening_world_time: WorldClockView | None = None
 
 
 class ActionPlanNarrationContext(ContractModel):
@@ -242,6 +277,10 @@ class ActionPlanNarrationContext(ContractModel):
     ]
     completed_steps: tuple[CompletedPlanStepSummary, ...] = ()
     player_view: PlayerView
+    # `player_view` is the post-turn state, so it is the *only* clock the
+    # Narrator would otherwise see. This is where the turn started; each step
+    # then carries the clock it ended on.
+    opening_world_time: WorldClockView | None = None
     allowed_evidence_refs: tuple[str, ...] = ()
 
     @model_validator(mode="after")

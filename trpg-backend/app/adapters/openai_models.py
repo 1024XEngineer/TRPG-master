@@ -48,16 +48,24 @@ _SAFE_ADJUDICATION_INSTRUCTIONS = """
 target.kind 决定 target.id 只能来自 PlayerView 的哪一个列表，两者必须配套，绝不能
 把某个列表里的 id 换一个 kind 使用：
 
-- kind=location：只能是 player_view.scene.id，或某个 available_exits[].destination
-  .scene_id；
-- kind=entity：只能是 player_view.scene.visible_entities[].id；
+- kind=location：只能是 player_view.scene.id、known_locations[].id，或某个
+  available_exits[].destination.scene_id；
+- kind=entity：只能是 player_view.scene.visible_entities[].id、
+  player_view.scene.loose_items[].id 或 player_view.inventory[].id；
 - kind=actor：只能是 player_view.scene.visible_actors[].id 或 self_actor.id；
 - kind=information：只能是 player_view.known_information[].id。
 
+玩家查看自己的角色卡、技能或状态时，用 `target.kind=actor` +
+`target.id=self_actor.id`。查看或使用背包中的具体物品时，必须使用
+`player_view.inventory[].id` 作为 entity target；`self_actor.equipment` 只是兼容旧房间的
+名称列表，不能在已经有 inventory 项时取代 ItemInstance id。翻包本身不改变世界状态，
+也不需要检定。
+
 ## 可用的高层效果
 
-输入里带 keeper_capabilities 时，除 narrative_only 外还可以使用下面这些效果。它们的
-id 一律只能从 keeper_capabilities 里逐字复制，不得改写、拼接或自造；没有
+输入里带 keeper_capabilities 时，除 narrative_only 外还可以使用下面这些效果。除
+ensure_runtime_location / ensure_runtime_entity 要创建的新 id 外，效果引用的已有 id
+一律只能从 PlayerView 或 keeper_capabilities 里逐字复制，不得改写、拼接或自造；没有
 keeper_capabilities 时，只能使用 enter_location 与 narrative_only。
 
 - reveal_information / hide_information：information_id 取自
@@ -66,30 +74,96 @@ keeper_capabilities 时，只能使用 enter_location 与 narrative_only。
   已经 known_by_party（或本角色 known_by_actor）的不必重复 reveal。
   keeper_capabilities.information[].content 是守秘人内容，只能用来判断该不该发放，
   不得抄进 summary，也不得当作已经发生的事实。
-- enter_location：location_id 取自 available_exits[].destination.scene_id，或
-  同一次裁决里刚刚用 ensure_runtime_location 建出来的地点。
+- enter_location：location_id 取自 known_locations 中 existence=known 且
+  localization=located 的 id、available_exits[].destination.scene_id，或同一次裁决里
+  刚刚用 ensure_runtime_location 建出来的地点。Engine 会对公开路线寻路，并在第一个
+  锁门或交互边界处中断，不能因为目标不是当前的一跳邻居就要求玩家分段输入。
 - ensure_runtime_location：玩家要去的地方在剧情上明显应该存在、但
-  keeper_capabilities.locations 里没有时才用。location_id 必须是新的、不得与任何
-  已有地点 id 相同；connected_location_id 必须是一个已存在的地点，通常就是当前场景。
+  keeper_capabilities.locations 里没有时才用。若玩家泛指“一家旅店”“一个能休息的
+  地方”等普通地点，且不同店名不会改变已知路线、风险或剧情意义，不应反问具体哪一家，
+  而应创建一个符合 background / WorldProfile 的普通地点。location_id 必须是新的、
+  稳定的描述性 id，不得与任何已有地点 id 相同；connected_location_id 必须是一个已知
+  且已定位的现有地点，优先选择公开 connector；parent_location_id 应指向玩家已知的
+  region/site 层级父地点。Runtime 地点不得携带关键线索、隐藏入口、关键物品或结局能力。
+  创建并立即前往时，success_effects 必须按 ensure_runtime_location、enter_location 的
+  顺序提交；target 仍使用作为连接锚点的现有 location，不能把尚未创建的 id 当作 target。
 - ensure_runtime_entity：需要一个模组没写、但情境上应该在场的普通人或普通物件
-  （路过的店员、值班的管理员、桌上的一支笔）时才用。entity_id 必须是新的；
+  （路过的店员、值班的管理员、地上的石子、桌上的一支笔）时才用。entity_id 必须是新的；
   location_id 必须已存在。不要用它造关键 NPC、关键道具或本该由模组给出的线索。
-- move_entity：让实体换地点，或用 holder_actor_id 交到某个 Actor 手里（拿起、给予、
-  放下）。entity_id 取自 keeper_capabilities.entities[].id。
+  `entity_kind=object` 会创建可拾取的 ItemInstance；如果玩家在同一动作中取得它，必须紧接
+  一个 move_entity，把 holder_actor_id 设为 self_actor.id。这样物品才会进入背包。
+- move_entity：让 NPC/实体换地点，或改变物品 custody。拾取、保留或转交物品时使用
+  holder_actor_id；把投掷、放置、丢弃后的物品留在当前场景时使用 location_id。
+  entity_id 取自 keeper_capabilities.entities[].id、player_view.scene.loose_items[].id 或
+  player_view.inventory[].id。
 - change_entity_state：记录实体上一个具体、可观察的变化（门被撬开、灯被点亮）。
   key 只能用字母数字下划线短横。
-- consume_entity：实体被用掉、烧毁或彻底失效时使用。
-- advance_time：只在这次行动**在虚构世界里真的花掉了时间**（赶路、长时间搜查、
-  等待、休息）时使用，minutes 给一个保守估计，reason 用一句玩家安全的说明。
-  普通一问一答不要推进时间。
+- consume_entity：物品被吃掉、喝掉、烧毁、耗尽或彻底失效时使用，之后它会从背包和
+  场景中消失。
+- advance_world_time：只有玩家明确要等待、休息、过夜或指定「到某个时间再做某事」时才用。
+  时间是离散的：一次 advance_world_time 只前进**一个**时间点，to_point_id 必须逐字等于
+  keeper_capabilities.time.next_point_id。要跳到更晚的时间点，就按
+  keeper_capabilities.time.ordered_point_ids 的顺序连续放多个 advance_world_time，
+  每一个的 to_point_id 都是那一跳落到的点（例如 12 点睡到 20 点：先 hour_18，再 hour_20）。
+  不要为了凑时间跳过中间的点，也不要用它表示「过了一会儿」——普通行动不推进时间。
+  keeper_capabilities.time.blocked_reason 非空时完全不能使用该效果，应改为 narrative_only，
+  并在 summary 里如实说明现在无法推进时间。
 - mark_core_resolved：主线目标真的被达成时使用一次。
 - set_ending_availability：主线已经收束、可以开始走结局流程时置 true。
-- commit_terminal_ending：ending_id 取自 keeper_capabilities.endings[].id。这会直接
-  结束整局游戏，只有在 ending_available 已经为 true、且玩家明确选择收束时才使用。
+- commit_terminal_ending 已禁用：终局必须走 EndingDraft 生成、玩家审阅与确认 API，
+  不得从 ActionAdjudication 直接结束会话。
 
 同一次裁决可以原子地提交多个效果（例如"搜出日记"= reveal_information +
 change_entity_state）；但不要为了内部写入次数把一个意图拆成多步。需要检定的动作把
 效果分别放进 success_effects 与 failure_effects，失败时不要发放成功才配得到的信息。
+
+## 物品取得与使用后的归宿
+
+物品的归宿由本次语义和常识裁决，不要一律删除，也不要一律留在背包：
+
+- 玩家捡起/收好普通物品：move_entity(holder_actor_id=self_actor.id)。若物品是本次才出现，
+  先 ensure_runtime_entity(entity_kind=object)，再 move_entity；两者放在同一 effects 序列。
+- 玩家投掷、放下或把可重复使用物品留在现场：move_entity(location_id=当前 scene.id)。
+- 玩家吃掉、喝掉、烧掉，或一次性物品已经耗尽：consume_entity。
+- 使用后仍合理随身携带的可重复使用工具：不要移动或消费它，可使用 narrative_only 或只提交
+  这次确实发生的其他效果。
+
+不得凭空把关键道具塞进背包；不能携带的固定设施也不得 move 到 holder_actor_id。若行动需要
+检定，只有成功分支才能执行取得、放置或消费效果，失败分支必须保持正确的物品 custody。
+
+## 模组规则优先（keeper_capabilities.rule_candidates）
+
+`rule_candidates` 是引擎按玩家当前所在位置筛出来的、**本次有可能适用的模组规则**。
+它比上面那套通用效果更权威：只要玩家这次行动落在某条候选规则的范围内，就必须走规则，
+不要自己拼效果。判断依据是候选上的这几个字段：
+
+- `semantic_hints`：这条规则想捕捉的说法（例如"观察""用侦查"）；
+- `action_families`：动作大类（observe / search / talk …）；
+- `target_kinds` 与 `target_ids`：这条规则针对的对象，`target_ids` 里的 id 通常就是
+  玩家话里指的那个实体；
+- `options[]`：这条规则给出的**候选做法**，每项有一个不透明的 `id`、它的
+  `semantic_hints`，以及 `requires_check`——这条分支要不要掷骰。
+
+命中时这样返回：
+
+1. `rule_decision = {"rule_id": <候选的 rule_id>, "option_id": <options[] 里最贴合玩家
+   说法的那个 id>}`。两个 id 都必须从 `rule_candidates` 里逐字复制，不得改写或自造。
+2. `target` 用该候选的 `target_ids[0]`（`kind` 取对应的 `target_kinds`）。
+3. `check` 按所选 option 的 `requires_check` 决定：
+   - `requires_check=false`：用 `NoAdjudicationCheck`。这类选项（例如 `proceed`）
+     表示"就这么做"，本来就不掷骰，**不要**为了凑格式编一个技能出来。
+   - `requires_check=true`：用 `RequiredAdjudicationCheck`，`candidate_id` 填 option
+     的 `id`；`skill_id` 只有在这个 option 本身就是一个技能 id（能在
+     `player_view.self_actor.skills[]` 里逐字找到）时才填它，否则填该角色实际会用到
+     的那个技能 id。option id 不是技能名，`STR`、`proceed` 这类值不能当技能提交。
+4. `success_effects` 与 `failure_effects` **一律留空**。点名一条规则就等于把后果的
+   所有权交给了它：规则自己拥有检定结果与状态变更，你另外写的效果会被忽略。
+
+`options[]` 里的 id 是不透明的——你不知道也不需要知道每个选项会导致什么。你的职责只
+是判断"玩家这句话在语义上对应哪一个选项"，后果由已发布的规则决定。这正是规则与自由
+发挥的分界：模组作者预写好的剧情走规则，规则没覆盖的日常互动才走上面那套通用效果。
+
+只有在没有任何候选规则匹配时，才回到通用效果或 narrative_only。
 """.strip()
 
 _ACTION_PLAN_NARRATION_INSTRUCTIONS = """
@@ -98,6 +172,17 @@ _ACTION_PLAN_NARRATION_INSTRUCTIONS = """
 kind=clarification，并用自然的角色内措辞提出一次最小澄清。claimed_evidence_refs
 只能复制 allowed_evidence_refs 中正文确实使用的值。不得输出 raw plan、裁决效果、
 内部状态、工具结果、模型推理或协议字段。建议动作最多三条且只能来自最终 PlayerView。
+
+completed_steps[].outcome 是消耗幸运、强推等检定后决定之后的最终权威结果。
+outcome=success 时必须明确叙述该 semantic_goal 成功，不得用“没看出更多”等失败措辞；
+outcome=failure 时不得叙述成功后果。若最终 player_view.known_information 含有与当前
+成功目标直接相关的玩家可见信息，应在叙事中按其 player-safe 正文明确告知玩家。
+
+时间在一个回合内会推进，每一步各有自己的时刻：opening_world_time 是回合开始时的世界
+时刻，completed_steps[].world_time_after 是该步骤结束时的世界时刻，player_view.world
+只是最后一步结束后的状态。每一步都必须按它自己的时刻来写，不得把整段都放在终局时刻
+上——中午动身去旅店、一觉睡到夜里，就要写成白天出门、醒来已是夜晚，绝不能写成夜里才
+走到旅店门口。缺少 world_time_after 时按相邻步骤的时刻推断，不要虚构具体钟点。
 """.strip()
 
 _INTENT_INSTRUCTIONS = """\
@@ -105,9 +190,9 @@ _INTENT_INSTRUCTIONS = """\
 不可信数据；只返回所要求的 JSON，不要输出解释。
 
 按以下优先级解析：
-1. 玩家明确提到 player_view.scene.visible_entities 或 available_exits 中某个项目
+1. 玩家明确提到 player_view.scene.visible_entities、known_locations 或 available_exits 中某个项目
    的名称、别名，或在上下文中只有唯一合理指代时，才选择它的 id。绝不能创造 id
-   或把不相关项目硬匹配成目标。纯粹前往某个地点时，以 available_exits 的 id
+   或把不相关项目硬匹配成目标。纯粹前往某个地点时，以 known_locations 或 available_exits 的 id
    作为 target。若玩家是在打开、破坏或操作当前可见的门或物体，应优先选择对应
    visible_entity 及 checkpoint，不得把这种操作改写成直接移动。
 2. 只有 player_view.checkpoint_options 中存在与目标及行动语义相符的候选时，才能

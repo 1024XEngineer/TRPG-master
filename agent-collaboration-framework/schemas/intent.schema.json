@@ -189,7 +189,7 @@
     },
     "initiated_by_target": {
       "default": false,
-      "description": "Authority-bearing Engine flag. It is always false for player-submitted Intent.",
+      "description": "Authority-bearing Engine flag. It is always false for player-submitted Intent, and setting it true requires validating with ENGINE_AUTHORED_INTENT_CONTEXT.",
       "title": "Initiated By Target",
       "type": "boolean"
     },

@@ -34,9 +34,17 @@ def current_step_adjudication_instructions() -> str:
 不得自行继续后续步骤。
 
 这一步提到的对象在当前 PlayerView 里根本不存在时（计划是在更早的 revision 上写的，
-它提到的物品或人物可能这里没有），不要凭空造一个 id，也不要把别的 id 硬套成需要的
-kind：以 kind=location + player_view.scene.id 为目标，返回 narrative_only，并在
-summary 里如实说明当前看不到该对象。这只是本步骤的降级处理，不影响后续步骤。
+它提到的物品或人物可能这里没有），通常不要凭空造一个 id，也不要把别的 id 硬套成
+需要的 kind：以 kind=location + player_view.scene.id 为目标，返回 narrative_only，并
+在 summary 里如实说明当前看不到该对象。
+
+例外是符合 WorldProfile、且不承载剧情秘密的普通动态内容：玩家泛指一家旅店、餐馆等
+现实中合理存在的地点时，可按 ensure_runtime_location 协议创建并进入；当前场景按常识
+应有普通工作人员、路人或无关紧要的可携带物品时，可按 ensure_runtime_entity 协议创建。
+创建普通物品后，拾取要在同一 effects 序列继续 move_entity 到 actor；投掷或放置已有物品
+要 move_entity 到当前 location；一次性物品用尽才 consume_entity。不要仅因玩家没有指定店名而要求澄清，
+也不要仅因缺少普通 NPC 姓名或普通物件预存 id 而澄清。隐藏 Canon 地点、关键人物、
+关键道具、秘密入口或玩家声称的剧情事实不属于例外，仍不得创建或确认其存在。
 
 输入里出现 previous_rejection 时，说明规则引擎刚刚拒绝了你对**同一个步骤**给出的上
 一份裁决，字段内容就是它给出的拒绝原因。这是你唯一一次修正机会：先按该原因定位问

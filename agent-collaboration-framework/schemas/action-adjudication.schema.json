@@ -50,32 +50,31 @@
       "title": "ActionTarget",
       "type": "object"
     },
-    "AdvanceTimeEffect": {
+    "AdvanceWorldTimeEffect": {
       "additionalProperties": false,
+      "description": "Jump the room to the single next point on the discrete timeline (#245).\n\nOne effect is exactly one jump — the timeline decides *where*, the caller\nonly decides *that*. Sleeping from noon until 20:00 is therefore two of\nthese in sequence, and each one publishes its own `time.point_entered`, so\na Rule that watches for nightfall still fires on the point it was written\nagainst instead of being skipped over.\n\n`to_point_id` is not a destination request: it is the Agent stating which\npoint it believes comes next, and the Engine refuses the effect when that\ndisagrees with the authored timeline.",
       "properties": {
         "type": {
-          "const": "advance_time",
-          "default": "advance_time",
+          "const": "advance_world_time",
+          "default": "advance_world_time",
           "title": "Type",
           "type": "string"
         },
-        "minutes": {
-          "maximum": 10080,
-          "minimum": 1,
-          "title": "Minutes",
-          "type": "integer"
-        },
-        "reason": {
-          "minLength": 1,
-          "title": "Reason",
-          "type": "string"
+        "to_point_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "To Point Id"
         }
       },
-      "required": [
-        "minutes",
-        "reason"
-      ],
-      "title": "AdvanceTimeEffect",
+      "title": "AdvanceWorldTimeEffect",
       "type": "object"
     },
     "ChangeEntityStateEffect": {
@@ -464,6 +463,30 @@
       "title": "RevealInformationEffect",
       "type": "object"
     },
+    "RuleDecisionRef": {
+      "additionalProperties": false,
+      "description": "The Agent's answer to a Rule Match View question (#226 §2).\n\nBoth ids are opaque: they come from the candidate menu the Engine published,\nand the Agent may not invent them. Naming a rule hands ownership of the\noutcome to that rule — `success_effects` / `failure_effects` on the same\nadjudication are then ignored, because the published rule owns what the\nresult does (`effect_authority: rule`, #226 §5).",
+      "properties": {
+        "rule_id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Rule Id",
+          "type": "string"
+        },
+        "option_id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Option Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "rule_id",
+        "option_id"
+      ],
+      "title": "RuleDecisionRef",
+      "type": "object"
+    },
     "SetEndingAvailabilityEffect": {
       "additionalProperties": false,
       "properties": {
@@ -625,12 +648,23 @@
       ],
       "title": "Check"
     },
+    "rule_decision": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RuleDecisionRef"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "success_effects": {
       "default": [],
       "items": {
         "discriminator": {
           "mapping": {
-            "advance_time": "#/$defs/AdvanceTimeEffect",
+            "advance_world_time": "#/$defs/AdvanceWorldTimeEffect",
             "change_entity_state": "#/$defs/ChangeEntityStateEffect",
             "commit_terminal_ending": "#/$defs/CommitTerminalEndingEffect",
             "consume_entity": "#/$defs/ConsumeEntityEffect",
@@ -676,9 +710,6 @@
             "$ref": "#/$defs/ConsumeEntityEffect"
           },
           {
-            "$ref": "#/$defs/AdvanceTimeEffect"
-          },
-          {
             "$ref": "#/$defs/MarkCoreResolvedEffect"
           },
           {
@@ -686,6 +717,9 @@
           },
           {
             "$ref": "#/$defs/CommitTerminalEndingEffect"
+          },
+          {
+            "$ref": "#/$defs/AdvanceWorldTimeEffect"
           },
           {
             "$ref": "#/$defs/NarrativeOnlyEffect"
@@ -700,7 +734,7 @@
       "items": {
         "discriminator": {
           "mapping": {
-            "advance_time": "#/$defs/AdvanceTimeEffect",
+            "advance_world_time": "#/$defs/AdvanceWorldTimeEffect",
             "change_entity_state": "#/$defs/ChangeEntityStateEffect",
             "commit_terminal_ending": "#/$defs/CommitTerminalEndingEffect",
             "consume_entity": "#/$defs/ConsumeEntityEffect",
@@ -746,9 +780,6 @@
             "$ref": "#/$defs/ConsumeEntityEffect"
           },
           {
-            "$ref": "#/$defs/AdvanceTimeEffect"
-          },
-          {
             "$ref": "#/$defs/MarkCoreResolvedEffect"
           },
           {
@@ -756,6 +787,9 @@
           },
           {
             "$ref": "#/$defs/CommitTerminalEndingEffect"
+          },
+          {
+            "$ref": "#/$defs/AdvanceWorldTimeEffect"
           },
           {
             "$ref": "#/$defs/NarrativeOnlyEffect"

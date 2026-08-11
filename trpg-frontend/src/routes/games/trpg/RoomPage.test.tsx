@@ -2,7 +2,7 @@
  * RoomPage regressions for authoritative history/live message ownership and
  * opening-progress cleanup. Network and WebSocket boundaries are mocked here.
  */
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
@@ -104,7 +104,12 @@ const {
   mockSendChat,
   mockSubmitAction,
   mockSubmitPlannedAction,
+  mockSelectAdjudication,
+  mockDecidePostRoll,
+  mockCancelActionPlan,
   mockWaitForWsOpen,
+  mockCreateEndingDraft,
+  mockConfirmEndingDraft,
   wsHandlers,
   dice3dSupported,
   dice3dBehavior,
@@ -135,7 +140,12 @@ const {
     }),
     mockSubmitAction: vi.fn(),
     mockSubmitPlannedAction: vi.fn(),
+    mockSelectAdjudication: vi.fn(),
+    mockDecidePostRoll: vi.fn(),
+    mockCancelActionPlan: vi.fn(),
     mockWaitForWsOpen: vi.fn(() => Promise.resolve()),
+    mockCreateEndingDraft: vi.fn(),
+    mockConfirmEndingDraft: vi.fn(),
   }
 })
 
@@ -162,11 +172,16 @@ vi.mock('@/services/api-client', () => ({
       sendChat: mockSendChat,
       submitAction: mockSubmitAction,
       submitPlannedAction: mockSubmitPlannedAction,
+      selectAdjudication: mockSelectAdjudication,
+      decidePostRoll: mockDecidePostRoll,
+      cancelActionPlan: mockCancelActionPlan,
     },
   },
 }))
 
 vi.mock('@/services/room', () => ({
+  confirmEndingDraft: mockConfirmEndingDraft,
+  createEndingDraft: mockCreateEndingDraft,
   endGame: vi.fn(),
 }))
 
@@ -178,7 +193,7 @@ vi.mock('@/services/room', () => ({
  * 后由测试决定每一轮何时定格，用来覆盖跨请求迟到回调。
  */
 vi.mock('@/features/dice3d', async () => {
-  const { forwardRef, useImperativeHandle } = await import('react')
+  const { forwardRef, useEffect, useImperativeHandle, useRef } = await import('react')
   return {
     supports3DDice: () => dice3dSupported.value,
     Dice3DStage: forwardRef(
@@ -186,12 +201,27 @@ vi.mock('@/features/dice3d', async () => {
         {
           onSettled,
           onUnsupported,
+          onRollAbandoned,
         }: {
           onSettled: (value: number, token: string) => void
           onUnsupported?: (token: string | null) => void
+          onRollAbandoned?: (token: string) => void
         },
         ref: React.Ref<{ roll: (token: string) => boolean }>,
       ) => {
+        // 真实舞台在卸载时会把「还没定格的那次掷骰」交回父组件。测试里必须
+        // 一起模拟，否则中途关弹窗这条路径在测试中根本不会发生，回归测不到。
+        const inFlightRef = useRef<string | null>(null)
+        const onRollAbandonedRef = useRef(onRollAbandoned)
+        onRollAbandonedRef.current = onRollAbandoned
+        useEffect(
+          () => () => {
+            const abandoned = inFlightRef.current
+            inFlightRef.current = null
+            if (abandoned !== null) onRollAbandonedRef.current?.(abandoned)
+          },
+          [],
+        )
         useImperativeHandle(
           ref,
           () => ({
@@ -200,7 +230,14 @@ vi.mock('@/features/dice3d', async () => {
                 onUnsupported?.(token)
                 return true
               }
-              dice3dRolls.push({ token, settle: (value) => onSettled(value, token) })
+              inFlightRef.current = token
+              dice3dRolls.push({
+                token,
+                settle: (value) => {
+                  inFlightRef.current = null
+                  onSettled(value, token)
+                },
+              })
               return true
             },
           }),
@@ -295,8 +332,9 @@ function playerViewFixture(): AgentPlayerView {
       available_exits: [],
     },
     world: {
-      elapsed_minutes: 0,
-      time_of_day: 'night',
+      day_index: 0,
+      hour_of_day: 12,
+      time_of_day: 'day',
       core_resolved: false,
       ending_available: false,
       ending_id: null,
@@ -406,6 +444,7 @@ describe('RoomPage conversation history', () => {
   })
 
   afterEach(() => {
+    vi.useRealTimers()
     cleanup()
     Reflect.deleteProperty(window, 'SpeechRecognition')
     Reflect.deleteProperty(window, 'webkitSpeechRecognition')
@@ -887,6 +926,12 @@ describe('RoomPage conversation history', () => {
     renderRoomPage()
     expect(await screen.findByText('纯文本主持人叙事')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '重新朗读' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: '主持人语音' }))
+    expect(
+      await screen.findByText(
+        '主持人语音模块已加载，但服务端尚未配置语音供应商凭证和音色',
+      ),
+    ).toBeInTheDocument()
   })
 
   it('falls back for legacy payloads when characterName is missing', async () => {
@@ -1047,6 +1092,151 @@ describe('RoomPage conversation history', () => {
     expect(screen.getByRole('button', { name: '确认并发送' })).toBeInTheDocument()
     // 已经退回 2D 展示。
     expect(screen.queryByTestId('dice-3d-stage')).not.toBeInTheDocument()
+  })
+
+  // 回归：3D 受理了这次掷骰却永远不定格（chunk 卡住、WebGL 上下文丢失、标签页
+  // 切到后台让 rAF 暂停）。`roll()` 返回 true，rolling 被置上，而 onSettled 永远
+  // 不来 —— 检定就死在「骰子还在滚」，玩家只能退出重点一次。看门狗必须补完它。
+  it('completes the roll when the 3D engine accepts it but never settles', async () => {
+    dice3dSupported.value = true
+    dice3dBehavior.value = 'manual'
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    await act(async () => {
+      emitWsMessage({
+        type: 'check.request',
+        payload: {
+          playerId: 'player-1',
+          clientActionId: 'check-3d-stall',
+          summary: '检查旧报纸',
+          difficulty: 'regular',
+          skills: [{ id: 'library', name: '图书馆使用', targetValue: 60 }],
+        },
+      })
+    })
+    expect(await screen.findByText('图书馆使用')).toBeInTheDocument()
+
+    vi.useFakeTimers()
+    vi.spyOn(Math, 'random').mockReturnValueOnce(0.2).mockReturnValueOnce(0.3)
+
+    fireEvent.click(screen.getByRole('button', { name: '掷骰' }))
+
+    // 3D 收下了这次掷骰，但一直不回调。
+    expect(dice3dRolls).toHaveLength(1)
+    await act(async () => {
+      vi.advanceTimersByTime(1000)
+    })
+    expect(screen.getByText('🎲 骰子还在滚……')).toBeInTheDocument()
+
+    // 动画自身封顶约 5s，看门狗必须还没响。
+    await act(async () => {
+      vi.advanceTimersByTime(6000)
+    })
+    expect(screen.getByText('🎲 骰子还在滚……')).toBeInTheDocument()
+
+    // 超时之后用 2D 把这一次掷骰补完。
+    await act(async () => {
+      vi.advanceTimersByTime(15000 + 800)
+    })
+    vi.useRealTimers()
+
+    expect(screen.queryByText('🎲 骰子还在滚……')).not.toBeInTheDocument()
+    expect(screen.getByText('23')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '确认并发送' })).toBeInTheDocument()
+    // 关键：只是这一次没定格，3D 能力必须保留，否则之后每次检定都只剩数字版。
+    expect(screen.getByTestId('dice-3d-stage')).toBeInTheDocument()
+  })
+
+  // 检定必须和左下角的自由投掷手感一致：点按钮 → 播动画 → 出结果。
+  //
+  // 之前它在弹窗打开的同一个 commit 里自动掷骰，那时 3D 舞台刚挂载、懒加载还没
+  // 回来，握手失败就整次退回 2D —— 玩家看到的是「选完技能自己跳到结果，没有动画」。
+  it('waits for the player to tap before animating an authoritative check roll', async () => {
+    dice3dSupported.value = true
+    dice3dBehavior.value = 'manual'
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    await act(async () => {
+      emitWsMessage({
+        type: 'check.request',
+        payload: {
+          playerId: 'player-1',
+          clientActionId: 'check-tap-first',
+          summary: '检查旧报纸',
+          difficulty: 'regular',
+          skills: [{ id: 'library', name: '图书馆使用', targetValue: 60 }],
+        },
+      })
+    })
+    expect(await screen.findByText('图书馆使用')).toBeInTheDocument()
+
+    // 弹窗打开后不能自己开滚，也不能直接蹦出结果。
+    expect(dice3dRolls).toHaveLength(0)
+    expect(screen.queryByText('🎲 骰子还在滚……')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '掷骰' })).toBeInTheDocument()
+
+    // 点了才交给 3D 舞台，动画期间停在「还在滚」。
+    fireEvent.click(screen.getByRole('button', { name: '掷骰' }))
+    expect(dice3dRolls).toHaveLength(1)
+    expect(screen.getByText('🎲 骰子还在滚……')).toBeInTheDocument()
+
+    // 3D 定格后才出结果，而不是绕过动画。
+    await act(async () => {
+      dice3dRolls[0].settle(37)
+    })
+    expect(screen.queryByText('🎲 骰子还在滚……')).not.toBeInTheDocument()
+    expect(screen.getByText('37')).toBeInTheDocument()
+  })
+
+  // 回归：掷骰途中关掉弹窗会卸载 3D 舞台。如果把「这一次没了」当成「3D 不可用」，
+  // 那么玩家为了绕开卡住而退出一次，就会永久失去骰子动画——之后每次检定，无论
+  // 自动触发还是手动打开，都只剩下数字版。
+  it('keeps 3D available after the modal is closed mid-roll', async () => {
+    dice3dSupported.value = true
+    dice3dBehavior.value = 'manual'
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    await act(async () => {
+      emitWsMessage({
+        type: 'check.request',
+        payload: {
+          playerId: 'player-1',
+          clientActionId: 'check-3d-abandon',
+          summary: '检查旧报纸',
+          difficulty: 'regular',
+          skills: [{ id: 'library', name: '图书馆使用', targetValue: 60 }],
+        },
+      })
+    })
+    expect(await screen.findByText('图书馆使用')).toBeInTheDocument()
+    expect(screen.getByTestId('dice-3d-stage')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '掷骰' }))
+    expect(dice3dRolls).toHaveLength(1)
+
+    // 掷骰途中关掉弹窗（每个 BottomPanel 都有一个关闭按钮，取骰子这一个）。
+    const dicePanel = screen.getByText('骰子检定').closest('div[class*="fixed"]')
+    expect(dicePanel).not.toBeNull()
+    fireEvent.click(within(dicePanel as HTMLElement).getByLabelText('关闭面板'))
+
+    // 重新打开同一个检定：3D 舞台必须还在。
+    await act(async () => {
+      emitWsMessage({
+        type: 'check.request',
+        payload: {
+          playerId: 'player-1',
+          clientActionId: 'check-3d-abandon-2',
+          summary: '再检查一次',
+          difficulty: 'regular',
+          skills: [{ id: 'library', name: '图书馆使用', targetValue: 60 }],
+        },
+      })
+    })
+    expect(await screen.findByText('图书馆使用')).toBeInTheDocument()
+    expect(screen.getByTestId('dice-3d-stage')).toBeInTheDocument()
   })
 
   it('ignores a stale 3D result and lets the replacement check roll normally', async () => {
@@ -1450,6 +1640,250 @@ describe('RoomPage conversation history', () => {
     )
   })
 
+  it('closes the check panel as soon as the player cancels the action', () => {
+    // 取消之后没有后续面板来接替"选择检定方式"，而权威叙事要等整回合跑完才回来。
+    // 面板留在原地的那几秒里，屏幕上同时挂着它和"守秘人组织语言中"。
+    renderRoomPage()
+
+    act(() =>
+      emitWsMessage({
+        type: 'adjudication.pending',
+        payload: {
+          correlationId: 'cancelled-check',
+          planId: null,
+          sourceRevision: 'revision-1',
+          status: 'awaiting_skill_choice',
+          pendingDecision: {
+            decision_id: 'decision-cancelled',
+            action_request_id: 'cancelled-check',
+            source_revision: 'revision-1',
+            decision_version: 1,
+            actor_id: 'actor-1',
+            summary: '撬开抽屉',
+            options: [
+              {
+                candidate_id: 'locksmith',
+                skill_id: 'locksmith',
+                display_name: '锁匠',
+                target_value: 40,
+                difficulty: 'regular',
+                method_summary: '用铁丝拨开锁芯',
+                player_safe_reason: '这是当前可用的做法',
+              },
+            ],
+            allow_cancel: true,
+          },
+        },
+      }),
+    )
+    expect(screen.getByRole('region', { name: '待处理检定' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: /取消行动/ }))
+
+    expect(mockSelectAdjudication).toHaveBeenCalledWith(
+      'player-1',
+      expect.objectContaining({
+        clientActionId: 'cancelled-check',
+        decisionId: 'decision-cancelled',
+        cancel: true,
+      }),
+    )
+    expect(screen.queryByRole('region', { name: '待处理检定' })).not.toBeInTheDocument()
+    expect(screen.getByText('守秘人组织语言中')).toBeInTheDocument()
+  })
+
+  it('animates the authoritative adjudication roll before the player sends it', async () => {
+    vi.useFakeTimers()
+    renderRoomPage()
+
+    const playerView = playerViewFixture()
+    playerView.self_actor.resources = [{ id: 'luck', name: '幸运', value: 50 }]
+    act(() =>
+      emitWsMessage({
+        type: 'view.updated',
+        payload: { playerId: 'player-1', playerView },
+      }),
+    )
+
+    act(() =>
+      emitWsMessage({
+        type: 'adjudication.pending',
+        payload: {
+          correlationId: 'animated-check',
+          planId: null,
+          sourceRevision: 'revision-1',
+          status: 'awaiting_skill_choice',
+          pendingDecision: {
+            decision_id: 'decision-animated',
+            action_request_id: 'animated-check',
+            source_revision: 'revision-1',
+            decision_version: 1,
+            actor_id: 'actor-1',
+            summary: '检索旧报',
+            options: [
+              {
+                candidate_id: 'library-use',
+                skill_id: 'library-use',
+                display_name: '图书馆使用',
+                target_value: 50,
+                difficulty: 'regular',
+                method_summary: '按年份检索旧报',
+                player_safe_reason: '这是当前可用的调查方式',
+              },
+            ],
+            allow_cancel: true,
+          },
+        },
+      }),
+    )
+    fireEvent.click(screen.getByRole('button', { name: /图书馆使用/ }))
+    expect(mockSelectAdjudication).toHaveBeenCalledWith(
+      'player-1',
+      expect.objectContaining({ candidateId: 'library-use' }),
+    )
+
+    act(() =>
+      emitWsMessage({
+        type: 'adjudication.pending',
+        payload: {
+          correlationId: 'animated-check',
+          planId: null,
+          sourceRevision: 'revision-2',
+          status: 'awaiting_post_roll_decision',
+          pendingDecision: null,
+          checkRun: {
+            check_id: 'check-animated',
+            action_request_id: 'animated-check',
+            selected_candidate_id: 'library-use',
+            status: 'awaiting_post_roll_decision',
+            version: 1,
+            roll_count: 1,
+            roll: { value: 82, degree: 'failure', passed: false },
+            post_roll_options: [
+              { option_id: 'accept-current', kind: 'accept_result' },
+              {
+                option_id: 'spend-luck-32',
+                kind: 'spend_resource',
+                resource_id: 'luck',
+                cost: 32,
+                result_degree: 'regular_success',
+              },
+              {
+                option_id: 'push-once',
+                kind: 'push',
+                requires_revised_method: true,
+                player_safe_risk_summary: '再次尝试会承担更严重的失败后果',
+              },
+            ],
+            final_result: null,
+          },
+        },
+      }),
+    )
+
+    // 权威骰点已经到了，但要等玩家自己点「掷骰」才播放并定格——不再自动开滚。
+    expect(screen.queryByText('82')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '掷骰' }))
+
+    act(() => vi.advanceTimersByTime(750))
+    expect(screen.getByText('82')).toBeInTheDocument()
+    expect(screen.getByText('失败')).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: '待处理检定' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '接受结果并发送' })).toBeEnabled()
+    expect(
+      screen.getByRole('button', { name: '消耗 32 点幸运（当前 50 点）并发送' }),
+    ).toBeEnabled()
+    expect(screen.getByText('骰点已保存；刷新或重试不会重新投掷')).toBeInTheDocument()
+    const pushButton = screen.getByRole('button', { name: '强推一次' })
+    expect(pushButton).toBeDisabled()
+    fireEvent.change(screen.getByRole('textbox', { name: '说明改变后的做法' }), {
+      target: { value: '先按年份缩小范围，再重新检索' },
+    })
+    expect(pushButton).toBeEnabled()
+    fireEvent.click(screen.getByRole('button', { name: '接受结果并发送' }))
+
+    expect(mockDecidePostRoll).toHaveBeenCalledWith(
+      'player-1',
+      expect.objectContaining({
+        clientActionId: 'animated-check',
+        checkId: 'check-animated',
+        optionId: 'accept-current',
+      }),
+    )
+    expect(screen.queryByRole('button', { name: '强推一次' })).not.toBeInTheDocument()
+
+    act(() =>
+      emitWsMessage({
+        type: 'adjudication.pending',
+        payload: {
+          correlationId: 'insufficient-luck-check',
+          planId: null,
+          sourceRevision: 'revision-3',
+          status: 'awaiting_skill_choice',
+          pendingDecision: {
+            decision_id: 'decision-insufficient-luck',
+            action_request_id: 'insufficient-luck-check',
+            source_revision: 'revision-3',
+            decision_version: 1,
+            actor_id: 'actor-1',
+            summary: '观察守墓人',
+            options: [
+              {
+                candidate_id: 'spot-hidden',
+                skill_id: 'spot-hidden',
+                display_name: '侦查',
+                target_value: 25,
+                difficulty: 'regular',
+                method_summary: '仔细观察守墓人',
+                player_safe_reason: '这是当前可用的调查方式',
+              },
+            ],
+            allow_cancel: true,
+          },
+        },
+      }),
+    )
+    fireEvent.click(screen.getByRole('button', { name: /侦查/ }))
+    act(() =>
+      emitWsMessage({
+        type: 'adjudication.pending',
+        payload: {
+          correlationId: 'insufficient-luck-check',
+          planId: null,
+          sourceRevision: 'revision-4',
+          status: 'awaiting_post_roll_decision',
+          pendingDecision: null,
+          checkRun: {
+            check_id: 'check-insufficient-luck',
+            action_request_id: 'insufficient-luck-check',
+            selected_candidate_id: 'spot-hidden',
+            status: 'awaiting_post_roll_decision',
+            version: 1,
+            roll_count: 1,
+            roll: { value: 77, degree: 'failure', passed: false },
+            post_roll_options: [
+              { option_id: 'accept-insufficient', kind: 'accept_result' },
+              {
+                option_id: 'push-insufficient',
+                kind: 'push',
+                requires_revised_method: true,
+                player_safe_risk_summary: '再次尝试会承担更严重的失败后果',
+              },
+            ],
+            final_result: null,
+          },
+        },
+      }),
+    )
+    fireEvent.click(screen.getByRole('button', { name: '掷骰' }))
+    act(() => vi.advanceTimersByTime(750))
+    expect(
+      screen.getByRole('button', { name: '幸运不足：需要 52 点，当前 50 点' }),
+    ).toBeDisabled()
+    expect(screen.getByRole('button', { name: '强推一次' })).toBeDisabled()
+    vi.useRealTimers()
+  })
+
   it('keeps another action\'s pending check while an unrelated turn settles', async () => {
     renderRoomPage()
     await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
@@ -1620,7 +2054,8 @@ describe('RoomPage conversation history', () => {
           playerView: {
             ...playerViewFixture(),
             world: {
-              elapsed_minutes: 13 * 60 + 25,
+              day_index: 1,
+              hour_of_day: 18,
               time_of_day: 'night',
               core_resolved: true,
               ending_available: true,
@@ -1632,10 +2067,59 @@ describe('RoomPage conversation history', () => {
     )
     fireEvent.click(screen.getByRole('button', { name: '地图' }))
 
-    expect(screen.getByText('夜晚 · 已过去 13 小时 25 分钟')).toBeInTheDocument()
+    expect(screen.getByText('夜晚 · 第 2 天 18:00')).toBeInTheDocument()
     expect(
       screen.getByText('主线已经收束，可以选择如何收尾'),
     ).toBeInTheDocument()
+  })
+
+  it('reviews a grounded ending draft before confirmation', async () => {
+    mockCreateEndingDraft.mockResolvedValue({
+      draft_id: 'ending-draft-1',
+      request_id: 'draft-request-1',
+      source_revision: '8',
+      mode: 'ending_and_epilogue',
+      player_intent: '生成结局',
+      title: '阿诺兹堡之后',
+      summary: '已确认的调查事实。',
+      epilogue: '未被证据确认的命运保持未知。',
+      evidence_refs: ['info-1'],
+      version: 1,
+      status: 'active',
+    })
+    mockConfirmEndingDraft.mockResolvedValue(undefined)
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+    act(() =>
+      emitWsMessage({
+        type: 'view.updated',
+        payload: {
+          playerId: 'player-1',
+          playerView: {
+            ...playerViewFixture(),
+            revision: '8',
+            world: {
+              day_index: 0,
+              hour_of_day: 12,
+              time_of_day: 'day',
+              core_resolved: true,
+              ending_available: true,
+              ending_id: null,
+            },
+          },
+        },
+      }),
+    )
+    fireEvent.click(screen.getByRole('button', { name: '房间成员' }))
+    fireEvent.click(screen.getByRole('button', { name: '生成结局与后日谈' }))
+    fireEvent.click(screen.getByRole('button', { name: '生成草稿' }))
+
+    expect(await screen.findByText('阿诺兹堡之后')).toBeInTheDocument()
+    expect(screen.getByText('已确认的调查事实。')).toBeInTheDocument()
+    expect(mockConfirmEndingDraft).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: '确认这份结局' }))
+    await waitFor(() => expect(mockConfirmEndingDraft).toHaveBeenCalledTimes(1))
   })
 
   it('hides the mainline banner until an ending effect is committed', async () => {
@@ -1650,8 +2134,201 @@ describe('RoomPage conversation history', () => {
     )
     fireEvent.click(screen.getByRole('button', { name: '地图' }))
 
-    expect(screen.getByText('夜晚 · 刚刚开始')).toBeInTheDocument()
+    expect(screen.getByText('白天 · 第 1 天 12:00')).toBeInTheDocument()
     expect(screen.queryByLabelText('主线进度')).not.toBeInTheDocument()
+  })
+
+  it('shows items left in the current scene after an action', async () => {
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    const view = playerViewFixture()
+    act(() =>
+      emitWsMessage({
+        type: 'view.updated',
+        payload: {
+          playerId: 'player-1',
+          playerView: {
+            ...view,
+            scene: {
+              ...view.scene,
+              loose_items: [{
+                id: 'ordinary-pebble',
+                name: '一枚普通石子',
+                source_label: '行动中发现',
+                quantity: 1,
+                condition: 'intact',
+                version: 2,
+              }],
+            },
+          },
+        },
+      }),
+    )
+    fireEvent.click(screen.getByRole('button', { name: '地图' }))
+
+    expect(screen.getByText('当前场景物品')).toBeInTheDocument()
+    expect(screen.getByText('一枚普通石子')).toBeInTheDocument()
+    expect(screen.getByText('状态：intact')).toBeInTheDocument()
+  })
+
+  it('shows every known location in containment hierarchy instead of one-hop exits', async () => {
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    const view = playerViewFixture()
+    act(() =>
+      emitWsMessage({
+        type: 'view.updated',
+        payload: {
+          playerId: 'player-1',
+          playerView: {
+            ...view,
+            scene_id: 'meeting_room',
+            scene: {
+              ...view.scene,
+              id: 'meeting_room',
+              name: '会客室',
+              available_exits: [{
+                id: 'meeting-to-street',
+                name: '街道',
+                aliases: [],
+                description: '',
+                destination: { scene_id: 'street', name: '街道' },
+              }],
+            },
+            location_context: {
+              current_location_id: 'meeting_room',
+              breadcrumbs: [
+                { id: 'town', name: '阿诺兹堡' },
+                { id: 'meeting_room', name: '会客室' },
+              ],
+              position_context: null,
+            },
+            known_locations: [
+              { id: 'town', kind: 'region', name: '阿诺兹堡', description: '', parent_location_id: null, region_id: null, existence: 'known', localization: 'located', access: 'unknown', visited: false },
+              { id: 'street', kind: 'connector', name: '街道', description: '', parent_location_id: 'town', region_id: 'town', existence: 'known', localization: 'located', access: 'reachable', visited: false },
+              { id: 'meeting_room', kind: 'site', name: '会客室', description: '', parent_location_id: 'town', region_id: 'town', existence: 'known', localization: 'located', access: 'reachable', visited: true },
+              { id: 'library', kind: 'site', name: '图书馆', description: '', parent_location_id: 'town', region_id: 'town', existence: 'known', localization: 'located', access: 'reachable', visited: false },
+            ],
+          },
+        },
+      }),
+    )
+    fireEvent.click(screen.getByRole('button', { name: '地图' }))
+
+    expect(screen.getByText('已知地点（按层级）')).toBeInTheDocument()
+    expect(screen.getByText('图书馆')).toBeInTheDocument()
+    expect(screen.getAllByText('会客室').length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('keeps keeper progress visible and maps backend phases to player-facing copy', async () => {
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    act(() => emitWsMessage({
+      type: 'turn.started',
+      payload: { correlationId: 'progress-turn' },
+    }))
+    expect(screen.getByText('守秘人理解玩家意图中')).toBeInTheDocument()
+
+    act(() => emitWsMessage({
+      type: 'plan.started',
+      payload: {
+        correlationId: 'progress-turn',
+        currentStep: 1,
+        completedSteps: 0,
+        totalSteps: 2,
+        phase: 'executing',
+      },
+    }))
+    expect(screen.getByText('守秘人理解玩家意图中')).toBeInTheDocument()
+    expect(screen.queryByText(/正在处理第/)).not.toBeInTheDocument()
+    expect(screen.getByText(/第 1\/2 步/)).toBeInTheDocument()
+
+    act(() => emitWsMessage({
+      type: 'turn.phase_changed',
+      payload: { correlationId: 'progress-turn', phase: 'waiting_for_check' },
+    }))
+    expect(screen.getByText('守秘人等待玩家掷骰子')).toBeInTheDocument()
+
+    act(() => emitWsMessage({
+      type: 'turn.phase_changed',
+      payload: { correlationId: 'progress-turn', phase: 'executing_action' },
+    }))
+    expect(screen.getByText('守秘人组织语言中')).toBeInTheDocument()
+
+    act(() => emitWsMessage({
+      type: 'turn.phase_changed',
+      payload: { correlationId: 'progress-turn', phase: 'generating_narration' },
+    }))
+    expect(screen.getByText('守秘人组织语言中')).toBeInTheDocument()
+  })
+
+  it('keeps a fast narration phase visible long enough to be perceived', () => {
+    vi.useFakeTimers()
+    renderRoomPage()
+
+    act(() => emitWsMessage({
+      type: 'plan.started',
+      payload: {
+        correlationId: 'fast-move',
+        currentStep: 1,
+        completedSteps: 0,
+        totalSteps: 1,
+        phase: 'executing',
+      },
+    }))
+    expect(screen.getByRole('button', { name: /停止后续行动/ })).toBeInTheDocument()
+
+    act(() => emitWsMessage({
+      type: 'turn.phase_changed',
+      payload: { correlationId: 'fast-move', phase: 'generating_narration' },
+    }))
+    act(() => emitWsMessage({
+      type: 'narration.push',
+      payload: { messageId: 'fast-move', text: '你很快抵达了图书馆。' },
+    }))
+
+    expect(screen.getByText('守秘人组织语言中')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /停止后续行动/ })).not.toBeInTheDocument()
+    act(() => vi.advanceTimersByTime(600))
+    expect(screen.queryByText('守秘人组织语言中')).not.toBeInTheDocument()
+    vi.useRealTimers()
+  })
+
+  it('does not restore intent progress when plan completion follows narration', () => {
+    renderRoomPage()
+
+    act(() => emitWsMessage({
+      type: 'plan.started',
+      payload: {
+        correlationId: 'completed-after-narration',
+        currentStep: 1,
+        completedSteps: 0,
+        totalSteps: 1,
+        phase: 'executing',
+      },
+    }))
+    expect(screen.getByText('守秘人理解玩家意图中')).toBeInTheDocument()
+
+    act(() => emitWsMessage({
+      type: 'narration.push',
+      payload: { messageId: 'completed-after-narration', text: '守墓人摇了摇头。' },
+    }))
+    act(() => emitWsMessage({
+      type: 'plan.completed',
+      payload: {
+        correlationId: 'completed-after-narration',
+        currentStep: 1,
+        completedSteps: 1,
+        totalSteps: 1,
+        phase: 'completed',
+      },
+    }))
+
+    expect(screen.queryByText('守秘人理解玩家意图中')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /停止后续行动/ })).not.toBeInTheDocument()
   })
 
   it('renders invalid Agent output as keeper guidance', () => {

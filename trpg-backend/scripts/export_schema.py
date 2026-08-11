@@ -20,6 +20,19 @@ git（issue #75 决策 3b）——真正提交的是 trpg-sdk 生成出来的 TS
 import json
 from pathlib import Path
 
+from collaboration_framework.contracts import (
+    ChangeItemCustodyRequest,
+    ChangeItemCustodyResult,
+    ConfirmEndingDraftRequest,
+    ConfirmEndingDraftResult,
+    ConfirmInventoryImportDraftRequest,
+    ConfirmInventoryImportResult,
+    CreateEndingDraftRequest,
+    CreateInventoryImportDraftRequest,
+    EndingDraft,
+    InventoryImportDraft,
+    InventoryView,
+)
 from pydantic import BaseModel
 from pydantic.json_schema import GenerateJsonSchema, models_json_schema
 
@@ -45,6 +58,19 @@ from app.dto import (
 # 基础设施类型），见 issue #75 决策 2 的精神——生成的是"数据形状"，不是需要
 # 业务语义/语言特性去表达的东西。
 _MODELS: list[type[BaseModel]] = [
+    # v3 房间背包（issue #212 §9）
+    CreateInventoryImportDraftRequest,
+    InventoryImportDraft,
+    ConfirmInventoryImportDraftRequest,
+    ConfirmInventoryImportResult,
+    ChangeItemCustodyRequest,
+    ChangeItemCustodyResult,
+    InventoryView,
+    # v3 结局草稿（issue #212 §10）
+    CreateEndingDraftRequest,
+    EndingDraft,
+    ConfirmEndingDraftRequest,
+    ConfirmEndingDraftResult,
     # auth（issue #58）
     auth.RegisterBody,
     auth.LoginBody,

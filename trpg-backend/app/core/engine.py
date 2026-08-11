@@ -4,7 +4,6 @@ from collaboration_framework.engine import (
     AdjudicationEngineService,
     DiceRoller,
     RuleEngineService,
-    RuleKernel,
 )
 
 from app.adapters import SqlAlchemyActionPlanRunStore, SqlAlchemyEngineStore
@@ -31,10 +30,7 @@ _dice = (
     else None
 )
 adjudication_engine_service = AdjudicationEngineService(engine_store, dice=_dice)
-rule_engine_service = RuleEngineService(
-    engine_store,
-    kernel=RuleKernel(allow_legacy_missing_skill=False),
-)
+rule_engine_service = RuleEngineService(engine_store)
 
 __all__ = [
     "adjudication_engine_service",

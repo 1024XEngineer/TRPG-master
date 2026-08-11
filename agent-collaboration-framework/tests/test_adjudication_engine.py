@@ -7,13 +7,13 @@ from collaboration_framework.contracts import (
     ActionAdjudication,
     ActionMethod,
     ActionTarget,
-    AdvanceTimeEffect,
     CancelCheckChoice,
     CheckDecisionRequest,
     ContractError,
     EnsureRuntimeEntityEffect,
     EnsureRuntimeLocationEffect,
     EventRuleSpec,
+    MarkCoreResolvedEffect,
     GetAdjudicationStatusRequest,
     ModuleContent,
     NoAdjudicationCheck,
@@ -188,10 +188,10 @@ class AdjudicationEngineTests(unittest.IsolatedAsyncioTestCase):
             update={
                 "event_rules": (
                     EventRuleSpec(
-                        id="truth-advances-time",
+                        id="truth-marks-core-resolved",
                         event_type="information.revealed",
                         payload_matches={"information_id": "document_truth"},
-                        effects=(AdvanceTimeEffect(minutes=15, reason="整理已揭示线索"),),
+                        effects=(MarkCoreResolvedEffect(),),
                     ),
                 )
             },
@@ -216,14 +216,14 @@ class AdjudicationEngineTests(unittest.IsolatedAsyncioTestCase):
             )
         )
 
-        self.assertEqual(store.inspect_state("room_01").clock.elapsed_minutes, 15)
+        self.assertTrue(store.inspect_state("room_01").core_resolved)
         self.assertEqual(
             [event.type for event in store.inspect_domain_events("room_01")],
             [
                 "information.revealed",
                 "action.succeeded",
                 "rule.triggered",
-                "time.elapsed",
+                "core.resolved",
             ],
         )
 

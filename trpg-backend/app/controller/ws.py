@@ -11,13 +11,15 @@
   `{protocol_version, message_type: "turn.completed", correlation_id, payload}`；
 - 连接后第一条消息必须是 `room.join`，成功后回 `session.bound`，
   在此之前收到的其它事件类型会被忽略（还没确认这个连接对应哪个玩家）；
-- `player.ready`/`game.start`/`action.submit` 使用服务端权威状态，并在房间
+- `player.ready`/`game.start`/`action.plan.submit` 使用服务端权威状态，并在房间
   阶段或玩家状态变化后广播 `room.state`；
-- `action.submit` 必须携带 `clientActionId`，由 TurnApplication 完成身份绑定、
-  编排、幂等去重和 PlayerView 投影；框架回包只发给动作发起者，普通叙事广播
-  全房间，需要澄清的叙事只发给发起者；
-- `action.submit` 需要检定时先回 `check.request`；玩家用 `check.roll`
-  选择技能并提交 D100 点数后，引擎才结算状态、返回 `check.result` 和叙述。
+- `action.plan.submit` 必须携带 `clientActionId`，由 ActionPlanTurnApplication
+  完成身份绑定、编排、幂等去重和 PlayerView 投影；框架回包只发给动作发起者，
+  普通叙事广播全房间，需要澄清的叙事只发给发起者；
+- 需要检定时由 ActionPlan 暂停并下发待决策载荷；玩家用 `adjudication.select`
+  选技能、`adjudication.post_roll` 处理奖惩骰与孤注一掷，随后计划继续推进。
+  旧的 `action.submit`/`check.roll` 单动作通道已随 Checkpoint 运行时一并移除
+  （#226：仅面向 ModuleContent v3，不保留兼容层）。
 - `san.check.roll`/`room.rejoin` 仍是 `NOT_IMPLEMENTED` 协议桩。
 - 每条实际发送的 `narration.push` 都会同步写一行 `events` 表；动作叙事用
   `clientActionId` 做持久化去重，`GET /rooms/{roomId}/replay` 直接读它。
@@ -32,7 +34,6 @@ WebSocket 可能存活很久，用一个 session 包住整条连接会在这期�
 连接取消时短 session 的 close/rollback 会在 shield 中完成，避免遗留锁。
 """
 
-import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from functools import partial
@@ -41,7 +42,6 @@ from typing import Literal
 import anyio
 import structlog
 from collaboration_framework.contracts import (
-    ActionResult,
     CancelCheckChoice,
     CheckDecisionRequest,
     ContractError,
@@ -58,7 +58,7 @@ from collaboration_framework.host.application import (
     normalize_narration_text,
     split_narration_chunks,
 )
-from collaboration_framework.host.schemas import NarrationOutput, TurnOutput
+from collaboration_framework.host.schemas import NarrationOutput
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy.exc import SQLAlchemyError
@@ -71,20 +71,22 @@ from app.core.action_plan_turn import (
 )
 from app.core.db import async_session_factory
 from app.core.engine import adjudication_engine_service
-from app.core.turn import ActorResolutionError, PreparedTurn, turn_application
+from app.core.turn import (
+    ActorResolutionError,
+    session_view_application,
+)
 from app.core.turn_events import (
     TurnEvent,
     TurnFailed,
+    TurnPhase,
     TurnPhaseChanged,
     TurnStarted,
     TurnToolCompleted,
     TurnToolStarted,
 )
 from app.core.turn_observability import (
-    log_check_result,
     log_narration_output,
     log_player_input,
-    log_turn_completed,
     log_turn_failed,
 )
 from app.dto.ws import (
@@ -96,10 +98,6 @@ from app.dto.ws import (
     AdjudicationPostRollPayload,
     ChatMessagePayload,
     ChatSendPayload,
-    CheckRequestPayload,
-    CheckResultPayload,
-    CheckRollPayload,
-    CheckSkillOptionPayload,
     ClientEnvelope,
     ErrorPayload,
     GameStartPayload,
@@ -155,6 +153,54 @@ async def _short_db_session() -> AsyncIterator[AsyncSession]:
             await session.close()
 
 
+def _connection_is_gone(websocket: WebSocket, exc: Exception) -> bool:
+    """这个连接是不是已经联系不上了。
+
+    对端断开有两种表现：Starlette 自己发现状态不对，抛
+    `Cannot call "send" once a close message has been sent.`（此时
+    application_state 必然已是 DISCONNECTED，见 starlette/websockets.py 的
+    send()）；以及底层 TCP 已断但 application_state 还没被标记，直接从 uvloop
+    抛出 `unable to perform operation on <TCPTransport closed=True ...>`。
+    OSError 会被 Starlette 转成 WebSocketDisconnect。
+
+    只认这三种。别的异常（比如 payload 不可序列化）是真的出了问题，必须继续
+    往上抛，不能被"对端可能断了"顺手吞掉。
+    """
+
+    if isinstance(exc, WebSocketDisconnect):
+        return True
+    return isinstance(exc, RuntimeError) and (
+        websocket.application_state is WebSocketState.DISCONNECTED or "closed" in str(exc).lower()
+    )
+
+
+async def _send_to_player(websocket: WebSocket, message: dict) -> bool:
+    """单播一帧；对端已经断了就丢掉这一帧，不打断正在跑的回合。
+
+    回合是在收消息循环里内联跑完的，进度、阶段和结算帧都直接写这个 socket。
+    玩家中途掉线/刷新时，这些 send 会抛异常并把回合从中间掐断——规则效果已经
+    事务提交，叙事却还没落库（`_deliver_turn_narration` 在发送链的末尾），世界
+    推进了但解释它的那段话永远消失。房间广播早就是容断的（见
+    service/ws_manager.py 的 broadcast），单播这条通道之前不是。
+
+    返回是否真的送达，让调用方能记日志；但**不构成控制流**：一个已经断开的
+    连接不该影响这一回合能不能跑完、能不能落库。
+    """
+
+    try:
+        await websocket.send_json(message)
+    except Exception as exc:
+        if not _connection_is_gone(websocket, exc):
+            raise
+        logger.info(
+            "ws_send_dropped",
+            message_type=message.get("type") or message.get("message_type"),
+            correlation_id=message.get("correlation_id"),
+        )
+        return False
+    return True
+
+
 async def _send_error(
     websocket: WebSocket,
     code: str,
@@ -166,7 +212,7 @@ async def _send_error(
     这次请求怎么了"，不是房间广播内容（issue #77 新增）。"""
     payload = ErrorPayload(code=code, message=message, correlation_id=correlation_id)
     envelope = ServerEnvelope(type="error", payload=payload.model_dump(by_alias=True))
-    await websocket.send_json(envelope.model_dump(by_alias=True))
+    await _send_to_player(websocket, envelope.model_dump(by_alias=True))
 
 
 async def _send_turn_event(
@@ -210,7 +256,7 @@ async def _send_turn_event(
         type=event.type,
         payload=payload.model_dump(by_alias=True),
     )
-    await websocket.send_json(envelope.model_dump(by_alias=True))
+    await _send_to_player(websocket, envelope.model_dump(by_alias=True))
 
 
 async def _send_turn_failed(
@@ -230,6 +276,17 @@ async def _send_turn_failed(
     )
 
 
+async def _send_turn_phase(
+    websocket: WebSocket,
+    correlation_id: str,
+    phase: TurnPhase,
+) -> None:
+    await _send_turn_event(
+        websocket,
+        TurnPhaseChanged(correlation_id=correlation_id, phase=phase),
+    )
+
+
 async def _send_plan_progress(websocket: WebSocket, event) -> None:
     payload = PlanProgressPayload(
         correlation_id=event.correlation_id,
@@ -240,32 +297,13 @@ async def _send_plan_progress(websocket: WebSocket, event) -> None:
         public_progress_label=event.public_progress_label,
         safe_reason=event.safe_reason,
     )
-    await websocket.send_json(
+    await _send_to_player(
+        websocket,
         ServerEnvelope(
             type=event.type,
             payload=payload.model_dump(by_alias=True),
-        ).model_dump(by_alias=True)
+        ).model_dump(by_alias=True),
     )
-
-
-async def _reject_if_plan_active(
-    websocket: WebSocket,
-    *,
-    room_id: str,
-    correlation_id: str,
-) -> bool:
-    """Keep legacy single-action submissions behind the durable Plan gate."""
-
-    active_plan = await action_plan_turn_application.active_for_room(room_id)
-    if active_plan is None:
-        return False
-    await _send_error(
-        websocket,
-        "ACTION_IN_PROGRESS",
-        "守秘人正在处理行动计划，请先完成或取消当前计划",
-        correlation_id=correlation_id,
-    )
-    return True
 
 
 def _require_pending_adjudication_status(
@@ -299,11 +337,12 @@ async def _send_action_plan_result(
             pending_decision=execution.pending_decision,
             check_run=execution.check_run,
         )
-        await websocket.send_json(
+        await _send_to_player(
+            websocket,
             ServerEnvelope(
                 type="adjudication.pending",
                 payload=pending.model_dump(by_alias=True, mode="json"),
-            ).model_dump(by_alias=True)
+            ).model_dump(by_alias=True),
         )
         return False
 
@@ -347,7 +386,8 @@ async def _send_completed_turn_message(
 ) -> bool:
     """Send one completed turn and persist its authoritative narration once."""
 
-    await websocket.send_json(
+    await _send_to_player(
+        websocket,
         {
             "protocol_version": "1",
             "message_type": "turn.completed",
@@ -359,7 +399,7 @@ async def _send_completed_turn_message(
                 "narration": narration.model_dump(mode="json"),
                 "player_view": player_view.to_json_dict(),
             },
-        }
+        },
     )
     await _send_view_updated(websocket, player_id, player_view)
     recorded = await _deliver_turn_narration(
@@ -437,11 +477,12 @@ async def _recover_persisted_turn_narration(
             claimed_fact_ids=completion.claimed_fact_ids,
             suggested_actions=completion.suggested_actions,
         )
-    view = await turn_application.current_player_view(
+    view = await session_view_application.current_player_view(
         room_id=room_id,
         player_id=player_id,
     )
-    await websocket.send_json(
+    await _send_to_player(
+        websocket,
         {
             "protocol_version": "1",
             "message_type": "turn.completed",
@@ -453,13 +494,14 @@ async def _recover_persisted_turn_narration(
                 "narration": narration.model_dump(mode="json"),
                 "player_view": view.to_json_dict(),
             },
-        }
+        },
     )
-    await websocket.send_json(
+    await _send_to_player(
+        websocket,
         ServerEnvelope(
             type="narration.push",
             payload=persisted.model_dump(by_alias=True),
-        ).model_dump(by_alias=True)
+        ).model_dump(by_alias=True),
     )
     await _send_view_updated(websocket, player_id, view)
     if active is not None:
@@ -484,11 +526,12 @@ async def _send_view_updated(
         type="view.updated",
         payload=payload.model_dump(by_alias=True),
     )
-    await websocket.send_json(envelope.model_dump(by_alias=True))
+    await _send_to_player(websocket, envelope.model_dump(by_alias=True))
 
 
 async def _stream_narration_chunks(
-    send: Callable[[dict], Awaitable[None]],
+    # 广播返回 None，单播返回"是否送达"，两者都只当投递用，返回值不参与切片逻辑。
+    send: Callable[[dict], Awaitable[object]],
     *,
     message_id: str,
     text: str,
@@ -553,7 +596,7 @@ async def _send_persisted_opening(
         type="narration.push",
         payload=narration.model_dump(by_alias=True),
     )
-    await websocket.send_json(envelope.model_dump(by_alias=True))
+    await _send_to_player(websocket, envelope.model_dump(by_alias=True))
     return True
 
 
@@ -573,7 +616,7 @@ async def _ensure_opening_narration(
     if existing is not None:
         return False
 
-    if turn_application.opening_narration_mode == "model":
+    if session_view_application.opening_narration_mode == "model":
         started = OpeningStartedPayload(message_id=_OPENING_MESSAGE_ID)
         await manager.broadcast(
             room_id,
@@ -583,7 +626,7 @@ async def _ensure_opening_narration(
             ).model_dump(by_alias=True),
         )
 
-    generated = await turn_application.generate_opening(player_view)
+    generated = await session_view_application.generate_opening(player_view)
     narration = NarrationPushPayload(
         message_id=_OPENING_MESSAGE_ID,
         text=normalize_narration_text(generated.narration.text),
@@ -668,7 +711,7 @@ async def _deliver_turn_narration(
     # 澄清叙事只对发起者可见，它的渐进片段必须走同一条投递通道，
     # 否则片段会广播给全房间、泄露只该给一个人看的内容。
     send = (
-        websocket.send_json
+        partial(_send_to_player, websocket)
         if completion.kind == "clarification"
         else partial(manager.broadcast, room_id)
     )
@@ -683,113 +726,6 @@ async def _deliver_turn_narration(
     )
     await send(envelope.model_dump(by_alias=True))
     return True
-
-
-async def _send_check_request(
-    websocket: WebSocket,
-    player_id: str,
-    prepared: PreparedTurn,
-) -> None:
-    payload = CheckRequestPayload(
-        player_id=player_id,
-        client_action_id=prepared.player_input.client_action_id,
-        summary=prepared.intent.summary,
-        difficulty=prepared.difficulty,
-        skills=[
-            CheckSkillOptionPayload(
-                id=candidate.id,
-                name=candidate.name,
-                target_value=candidate.target_value,
-            )
-            for candidate in prepared.candidates
-        ],
-    )
-    envelope = ServerEnvelope(
-        type="check.request",
-        payload=payload.model_dump(by_alias=True),
-    )
-    await websocket.send_json(envelope.model_dump(by_alias=True))
-
-
-async def _send_check_result(
-    db: AsyncSession,
-    websocket: WebSocket,
-    room_id: str,
-    player_id: str,
-    prepared: PreparedTurn,
-    action_result: ActionResult,
-    player_view: PlayerView,
-) -> None:
-    check_result = action_result.check_result
-    if check_result is None:
-        raise ContractError("Completed skill check did not return a check result")
-    candidate = next(item for item in prepared.candidates if item.id == check_result.skill_id)
-    character_name = await room_service.get_player_character_name(db, player_id)
-    payload = CheckResultPayload(
-        player_id=player_id,
-        client_action_id=prepared.player_input.client_action_id,
-        skill=check_result.skill_id,
-        skill_name=candidate.name,
-        character_name=character_name,
-        roll_value=check_result.roll_value,
-        target_value=check_result.target_value,
-        difficulty=check_result.difficulty,
-        success_level=check_result.success_level,
-        passed=check_result.passed,
-        result=check_result.success_level,
-    )
-    recorded = await room_service.record_event(
-        db,
-        room_id,
-        player_id,
-        "check.result",
-        payload.model_dump(by_alias=True, mode="json"),
-        visibility="player_scoped",
-        actor_id=prepared.player_input.actor_id,
-        scene_id=player_view.scene_id,
-        view_revision=player_view.revision,
-        correlation_id=prepared.player_input.client_action_id,
-    )
-    if not recorded:
-        return
-    log_check_result(
-        room_id=room_id,
-        correlation_id=prepared.player_input.client_action_id,
-        character_name=character_name,
-        skill_name=candidate.name,
-        target_value=check_result.target_value,
-        roll_value=check_result.roll_value,
-        difficulty=check_result.difficulty,
-        success_level=check_result.success_level,
-        passed=check_result.passed,
-    )
-    envelope = ServerEnvelope(
-        type="check.result",
-        payload=payload.model_dump(by_alias=True),
-    )
-    await websocket.send_json(envelope.model_dump(by_alias=True))
-
-
-async def _send_completed_turn(
-    db: AsyncSession,
-    websocket: WebSocket,
-    room_id: str,
-    player_id: str,
-    output: TurnOutput,
-) -> bool:
-    narration_sent = await _send_completed_turn_message(
-        db,
-        websocket,
-        room_id,
-        player_id,
-        actor_id=output.player_input.actor_id,
-        client_action_id=output.player_input.client_action_id,
-        player_view=output.player_view,
-        narration=output.narration,
-    )
-    if output.player_view.phase == "ended":
-        await broadcast_room_state(db, room_id)
-    return narration_sent
 
 
 def _map_turn_error(exc: Exception) -> tuple[str, str, bool]:
@@ -966,7 +902,6 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
 
     await websocket.accept()
     bound_player_id: str | None = None
-    pending_turn: PreparedTurn | None = None
 
     try:
         while True:
@@ -1006,7 +941,7 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                             bound_player_id = player_id
                             assert bound_player_id is not None
                             try:
-                                current_view = await turn_application.current_player_view(
+                                current_view = await session_view_application.current_player_view(
                                     room_id=room_id,
                                     player_id=bound_player_id,
                                 )
@@ -1069,14 +1004,15 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                             pending_decision=execution.pending_decision,
                                             check_run=execution.check_run,
                                         )
-                                        await websocket.send_json(
+                                        await _send_to_player(
+                                            websocket,
                                             ServerEnvelope(
                                                 type="adjudication.pending",
                                                 payload=pending.model_dump(
                                                     by_alias=True,
                                                     mode="json",
                                                 ),
-                                            ).model_dump(by_alias=True)
+                                            ).model_dump(by_alias=True),
                                         )
                             else:
                                 # No ActionPlan-driven pending decision — but a
@@ -1136,7 +1072,7 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                         ) as exc:
                             await _send_error(websocket, "CONFLICT", str(exc))
                             continue
-                        initial_view = await turn_application.current_player_view(
+                        initial_view = await session_view_application.current_player_view(
                             room_id=room_id,
                             player_id=bound_player_id,
                         )
@@ -1194,8 +1130,13 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                             if (
                                 active_plan is not None
                                 and active_plan.parent_action_id != submit_payload.client_action_id
+                                # `retryable_failure` 与 `needs_clarification` 同构：两者都停在
+                                # 等这名玩家再说一句上。此前只豁免后者，于是一次瞬态失败之后，
+                                # 本人换个说法就被自己那条死计划挡住——只有原样重发同一个
+                                # client_action_id 才放行，等于「换句话说」被永久禁用。
                                 and not (
-                                    active_plan.status == "needs_clarification"
+                                    active_plan.status
+                                    in ("needs_clarification", "retryable_failure")
                                     and active_plan.player_id == bound_player_id
                                 )
                             ):
@@ -1206,6 +1147,10 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                     correlation_id=submit_payload.client_action_id,
                                 )
                                 continue
+                            await _send_turn_event(
+                                websocket,
+                                TurnStarted(correlation_id=submit_payload.client_action_id),
+                            )
                             result = await action_plan_turn_application.start(
                                 room_id=room_id,
                                 player_id=bound_player_id,
@@ -1214,6 +1159,11 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 on_progress=lambda event: _send_plan_progress(
                                     websocket,
                                     event,
+                                ),
+                                on_phase=partial(
+                                    _send_turn_phase,
+                                    websocket,
+                                    submit_payload.client_action_id,
                                 ),
                                 on_input_accepted=partial(
                                     _broadcast_action_utterance,
@@ -1286,6 +1236,11 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                     websocket,
                                     event,
                                 ),
+                                on_phase=partial(
+                                    _send_turn_phase,
+                                    websocket,
+                                    choice.client_action_id,
+                                ),
                             )
                             await _send_action_plan_result(
                                 db,
@@ -1340,6 +1295,11 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                     websocket,
                                     event,
                                 ),
+                                on_phase=partial(
+                                    _send_turn_phase,
+                                    websocket,
+                                    choice.client_action_id,
+                                ),
                             )
                             await _send_action_plan_result(
                                 db,
@@ -1386,226 +1346,6 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 error_reason=_turn_error_reason(exc),
                             )
                             await _send_turn_failed(websocket, cancel.client_action_id, exc)
-                    elif event_type == "action.submit":
-                        try:
-                            submit_payload = ActionSubmitPayload.model_validate(raw_payload)
-                        except ValidationError as exc:
-                            correlation_id = (
-                                raw_payload.get("clientActionId")
-                                if isinstance(raw_payload.get("clientActionId"), str)
-                                else None
-                            )
-                            logger.warning(
-                                "ws_invalid_action",
-                                correlation_id=correlation_id,
-                                validation_error_count=exc.error_count(),
-                            )
-                            await _send_error(
-                                websocket,
-                                "INVALID_ACTION",
-                                "action.submit 必须包含非空 clientActionId 和 utterance",
-                                correlation_id=correlation_id,
-                            )
-                            continue
-                        if submit_payload.visibility == "private":
-                            await _send_error(
-                                websocket,
-                                "NOT_IMPLEMENTED",
-                                "私密行动本期尚未实现",
-                                correlation_id=submit_payload.client_action_id,
-                            )
-                            continue
-                        if await _reject_if_plan_active(
-                            websocket,
-                            room_id=room_id,
-                            correlation_id=submit_payload.client_action_id,
-                        ):
-                            continue
-                        lock_token = action_lock_manager.try_acquire(room_id)
-                        if lock_token is None:
-                            await _send_error(
-                                websocket,
-                                "ACTION_IN_PROGRESS",
-                                "守秘人正在处理其他玩家的行动，请稍候",
-                                correlation_id=submit_payload.client_action_id,
-                            )
-                            continue
-                        turn_started_at = time.monotonic()
-                        try:
-                            if pending_turn is not None:
-                                same_action = (
-                                    pending_turn.player_input.client_action_id
-                                    == submit_payload.client_action_id
-                                    and pending_turn.player_input.utterance
-                                    == submit_payload.utterance
-                                )
-                                if same_action:
-                                    await _send_check_request(
-                                        websocket,
-                                        bound_player_id,
-                                        pending_turn,
-                                    )
-                                else:
-                                    await _send_error(
-                                        websocket,
-                                        "CHECK_PENDING",
-                                        "请先完成当前待处理的技能检定",
-                                        correlation_id=submit_payload.client_action_id,
-                                    )
-                                continue
-
-                            prepared = await turn_application.prepare(
-                                room_id=room_id,
-                                player_id=bound_player_id,
-                                client_action_id=submit_payload.client_action_id,
-                                utterance=submit_payload.utterance,
-                                on_event=lambda event: _send_turn_event(
-                                    websocket,
-                                    event,
-                                ),
-                                on_input_accepted=partial(
-                                    _broadcast_action_utterance,
-                                    db,
-                                ),
-                            )
-                            if prepared.candidates:
-                                pending_turn = prepared
-                                await _send_check_request(
-                                    websocket,
-                                    bound_player_id,
-                                    prepared,
-                                )
-                                continue
-
-                            output = await turn_application.complete(
-                                prepared,
-                                on_event=lambda event: _send_turn_event(
-                                    websocket,
-                                    event,
-                                ),
-                            )
-                            narration_sent = await _send_completed_turn(
-                                db,
-                                websocket,
-                                room_id,
-                                bound_player_id,
-                                output,
-                            )
-                            log_turn_completed(
-                                room_id=room_id,
-                                correlation_id=output.player_input.client_action_id,
-                                intent_summary=output.intent.summary,
-                                resolution=output.action_result.resolution,
-                                outcome=output.action_result.outcome,
-                                revision=output.action_result.view_revision,
-                                duration_ms=int((time.monotonic() - turn_started_at) * 1000),
-                                narration_sent=narration_sent,
-                            )
-                        except Exception as exc:
-                            code, _, _ = _map_turn_error(exc)
-                            log_turn_failed(
-                                room_id=room_id,
-                                stage="行动处理",
-                                code=code,
-                                correlation_id=submit_payload.client_action_id,
-                                error_type=type(exc).__name__,
-                                error_reason=_turn_error_reason(exc),
-                            )
-                            await _send_turn_failed(
-                                websocket,
-                                submit_payload.client_action_id,
-                                exc,
-                            )
-                            continue
-                        finally:
-                            action_lock_manager.release(room_id, lock_token)
-                    elif event_type == "check.roll":
-                        roll_payload = CheckRollPayload.model_validate(raw_payload)
-                        if pending_turn is None:
-                            await _send_error(
-                                websocket,
-                                "CHECK_NOT_PENDING",
-                                "当前没有等待投掷的技能检定",
-                                correlation_id=roll_payload.client_action_id,
-                            )
-                            continue
-                        if (
-                            pending_turn.player_input.client_action_id
-                            != roll_payload.client_action_id
-                        ):
-                            await _send_error(
-                                websocket,
-                                "CHECK_ACTION_MISMATCH",
-                                "检定结果与当前待处理动作不匹配",
-                                correlation_id=roll_payload.client_action_id,
-                            )
-                            continue
-                        lock_token = action_lock_manager.try_acquire(room_id)
-                        if lock_token is None:
-                            await _send_error(
-                                websocket,
-                                "ACTION_IN_PROGRESS",
-                                "守秘人正在处理其他玩家的行动，请稍候",
-                                correlation_id=roll_payload.client_action_id,
-                            )
-                            continue
-                        turn_started_at = time.monotonic()
-                        try:
-                            output = await turn_application.complete(
-                                pending_turn,
-                                selected_skill=roll_payload.skill,
-                                roll_value=roll_payload.roll_value,
-                                on_event=lambda event: _send_turn_event(
-                                    websocket,
-                                    event,
-                                ),
-                                on_action_result=partial(
-                                    _send_check_result,
-                                    db,
-                                    websocket,
-                                    room_id,
-                                    bound_player_id,
-                                    pending_turn,
-                                ),
-                            )
-                            pending_turn = None
-                            narration_sent = await _send_completed_turn(
-                                db,
-                                websocket,
-                                room_id,
-                                bound_player_id,
-                                output,
-                            )
-                            log_turn_completed(
-                                room_id=room_id,
-                                correlation_id=output.player_input.client_action_id,
-                                intent_summary=output.intent.summary,
-                                resolution=output.action_result.resolution,
-                                outcome=output.action_result.outcome,
-                                revision=output.action_result.view_revision,
-                                duration_ms=int((time.monotonic() - turn_started_at) * 1000),
-                                narration_sent=narration_sent,
-                            )
-                        except Exception as exc:
-                            code, _, retryable = _map_turn_error(exc)
-                            if code in {"NARRATOR_FAILED", "NARRATION_INVALID"} or not retryable:
-                                pending_turn = None
-                            log_turn_failed(
-                                room_id=room_id,
-                                stage="检定结算",
-                                code=code,
-                                correlation_id=roll_payload.client_action_id,
-                                error_type=type(exc).__name__,
-                                error_reason=_turn_error_reason(exc),
-                            )
-                            await _send_turn_failed(
-                                websocket,
-                                roll_payload.client_action_id,
-                                exc,
-                            )
-                            continue
-                        finally:
-                            action_lock_manager.release(room_id, lock_token)
                     elif event_type == "san.check.roll":
                         SanCheckRollPayload.model_validate(raw_payload)
                         await _send_error(
@@ -1637,10 +1377,10 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
         # "unable to perform operation on <TCPTransport closed=True ...>"），
         # application_state 这时候还看着像"已连接"。两种情况本质一样：这个连接
         # 已经联系不上了，没有客户端能收到接下来想发的任何消息，按断线处理即可。
-        if (
-            websocket.application_state is not WebSocketState.DISCONNECTED
-            and "closed" not in str(exc).lower()
-        ):
+        #
+        # 判据与 `_send_to_player` 共用一个：单播帧被丢掉的条件，和整条连接被
+        # 判定为断开的条件，必须是同一件事，否则两边会各自漂移。
+        if not _connection_is_gone(websocket, exc):
             raise
     finally:
         manager.remove(room_id, websocket)

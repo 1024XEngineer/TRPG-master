@@ -20,12 +20,11 @@ from collaboration_framework.contracts import (
     ActionAdjudication,
     ActionMethod,
     ActionTarget,
-    AdvanceTimeEffect,
-    CommitTerminalEndingEffect,
     EnsureRuntimeEntityEffect,
     EnsureRuntimeLocationEffect,
     EnterLocationEffect,
     MarkCoreResolvedEffect,
+    MoveEntityEffect,
     NoAdjudicationCheck,
     RevealInformationEffect,
     SetEndingAvailabilityEffect,
@@ -55,7 +54,8 @@ def sync_client() -> TestClient:
 
 # Paper Chase, the module the WebSocket suite loads: the opening scene, a
 # keeper-only Information nobody has discovered yet, and one declared Ending.
-OPENING_SCENE = "client_briefing"
+# v3 的 initial_state.start_location_id；v2 时期是 client_briefing。
+OPENING_SCENE = "thomas_office"
 KEEPER_INFORMATION = "lyla_cemetery_sighting"
 # A second keeper-only Information no test ever reveals, used to prove the
 # capability list does not leak what the turn did not release.
@@ -173,6 +173,28 @@ def test_runtime_entity_reaches_the_client_scene(
     assert clerk["kind"] == "npc"
 
 
+def test_runtime_object_reaches_the_client_inventory(
+    sync_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    view, _ = _play_one_action(
+        sync_client,
+        monkeypatch,
+        "cap_inventory_item",
+        EnsureRuntimeEntityEffect(
+            entity_id="ordinary_pebble",
+            entity_kind="object",
+            name="一枚普通石子",
+            location_id=OPENING_SCENE,
+        ),
+        MoveEntityEffect(entity_id="ordinary_pebble", holder_actor_id="actor_1"),
+    )
+
+    assert [item["id"] for item in view["inventory"]] == ["ordinary_pebble"]
+    assert view["self_actor"]["equipment"] == ["一枚普通石子"]
+    assert "ordinary_pebble" not in {entity["id"] for entity in view["scene"]["visible_entities"]}
+
+
 def test_runtime_location_is_created_entered_and_projected(
     sync_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
@@ -200,22 +222,30 @@ def test_runtime_location_is_created_entered_and_projected(
     }
 
 
-def test_advanced_time_reaches_the_client(
+def test_world_time_reaches_the_client_as_a_discrete_point(
     sync_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """行动不再推进时间（#245 附录E）：一次行动之后 WorldTime 必须原地不动。
+
+    这条替代了原来的 advance_time 用例。时间只在 ready 门禁通过后由
+    advance_to_next 整点跳转，模组制造节奏只能通过 TimeTask。
+    """
+
     view, _ = _play_one_action(
         sync_client,
         monkeypatch,
         "cap_time",
-        AdvanceTimeEffect(minutes=13 * 60, reason="整个下午都在走访"),
+        RevealInformationEffect(information_id=KEEPER_INFORMATION),
     )
 
-    assert view["world"]["elapsed_minutes"] == 13 * 60
-    assert view["world"]["time_of_day"] == "night"
+    # 追书人 v3 的 initial_state.start_time_point_id 是 hour_12。
+    assert view["world"]["day_index"] == 0
+    assert view["world"]["hour_of_day"] == 12
+    assert view["world"]["time_of_day"] == "day"
 
 
-def test_ending_availability_and_confirmation_reach_the_client(
+def test_ending_availability_reaches_the_client_without_direct_confirmation(
     sync_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -231,18 +261,6 @@ def test_ending_availability_and_confirmation_reach_the_client(
     assert opened["world"]["ending_available"] is True
     assert opened["world"]["ending_id"] is None
     assert opened["phase"] == "playing"
-
-    confirmed, _ = _play_one_action(
-        sync_client,
-        monkeypatch,
-        "cap_ending_confirm",
-        MarkCoreResolvedEffect(),
-        SetEndingAvailabilityEffect(available=True),
-        CommitTerminalEndingEffect(ending_id=ENDING_ID),
-    )
-
-    assert confirmed["world"]["ending_id"] == ENDING_ID
-    assert confirmed["phase"] == "ended"
 
 
 def test_planner_receives_keeper_capabilities_but_the_client_never_does(

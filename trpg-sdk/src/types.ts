@@ -105,6 +105,17 @@ export type {
   HostSpeechSentenceRead,
   HostSpeechManifestRead as HostSpeechManifest,
   HostSpeechSettingsUpdatedPayload,
+  CreateInventoryImportDraftRequest,
+  InventoryImportDraft,
+  ConfirmInventoryImportDraftRequest,
+  ConfirmInventoryImportResult,
+  ChangeItemCustodyRequest,
+  ChangeItemCustodyResult,
+  InventoryView,
+  CreateEndingDraftRequest,
+  EndingDraft,
+  ConfirmEndingDraftRequest,
+  ConfirmEndingDraftResult,
 } from './generated/dto';
 
 /** GET /api/v1/me/rooms 返回项。 */
@@ -317,6 +328,16 @@ export interface AgentSceneView {
   visible_entities: AgentVisibleEntity[];
   visible_actors: AgentVisibleActor[];
   available_exits: AgentAvailableExit[];
+  loose_items?: AgentInventoryItem[];
+}
+
+export interface AgentInventoryItem {
+  id: string;
+  name: string;
+  source_label: string;
+  quantity: number;
+  condition: string;
+  version: number;
 }
 
 export interface AgentKnownInformation {
@@ -330,11 +351,38 @@ export interface AgentKnownInformation {
 }
 
 export interface AgentWorldState {
-  elapsed_minutes: number;
+  /** 离散世界时间（#245）：时间只在授权的时间点之间跳转，不按分钟流逝。 */
+  day_index: number;
+  hour_of_day: number;
   time_of_day: 'day' | 'night';
   core_resolved: boolean;
   ending_available: boolean;
   ending_id: string | null;
+}
+
+export interface AgentKnownLocation {
+  id: string;
+  kind: 'region' | 'site' | 'room' | 'connector';
+  name: string;
+  description: string;
+  parent_location_id: string | null;
+  region_id: string | null;
+  existence: 'rumored' | 'known';
+  localization: 'unknown' | 'approximate' | 'located';
+  access: 'unknown' | 'reachable' | 'blocked';
+  visited: boolean;
+}
+
+export interface AgentLocationContext {
+  current_location_id: string;
+  breadcrumbs: Array<{ id: string; name: string }>;
+  position_context: {
+    kind: 'access_boundary';
+    id: string;
+    label: string;
+    state: 'locked' | 'blocked' | 'interaction_required';
+    destination_id: string;
+  } | null;
 }
 
 export interface AgentCheckpointOption {
@@ -354,6 +402,12 @@ export interface AgentPlayerView {
   revision: string;
   self_actor: AgentSelfActor;
   scene: AgentSceneView;
+  /** v3-only safe hierarchy and boundary context; absent on historical payloads. */
+  location_context?: AgentLocationContext | null;
+  /** All player-known locations, not merely the current node's one-hop exits. */
+  known_locations?: AgentKnownLocation[];
+  /** Runtime ItemInstances currently held by this actor. */
+  inventory?: AgentInventoryItem[];
   world: AgentWorldState;
   known_information: AgentKnownInformation[];
   checkpoint_options: AgentCheckpointOption[];

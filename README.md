@@ -132,8 +132,13 @@ cd ..
 cd trpg-backend
 uv sync --locked
 uv run alembic upgrade head   # 建表：首次启动、以及之后表结构有变更时都要先跑
-uv run uvicorn app.main:app --reload
+uv run uvicorn app.main:app --reload \
+  --reload-dir app --reload-dir ../agent-collaboration-framework/collaboration_framework
 ```
+
+> 两个 `--reload-dir` 都不能省。`--reload` 默认只监视当前工作目录，而规则引擎
+> （`collaboration_framework`）是以 editable 方式装进来的**兄弟目录**——改了它
+> 不会触发重载，后端会一直跑着旧引擎，表现为"代码明明改了、游戏里没变化"。
 
 > 建表由 Alembic 迁移负责（不再由应用启动时自动 `create_all`）。跳过
 > `alembic upgrade head` 直接启动会因为表不存在、种子数据写入失败而崩溃。
@@ -297,7 +302,8 @@ npm run dev
 4. 重启后端使配置生效：
 
    ```bash
-   uv run uvicorn app.main:app --reload
+   uv run uvicorn app.main:app --reload \
+     --reload-dir app --reload-dir ../agent-collaboration-framework/collaboration_framework
    ```
 
 健康检查只能确认后端存活，不会调用模型。请进入房间提交一次自然语言行动进行验证。

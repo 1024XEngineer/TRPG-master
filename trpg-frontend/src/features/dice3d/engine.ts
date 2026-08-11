@@ -6,9 +6,9 @@
  * ——否则 three 会进首屏包。
  *
  * ## 结果怎么来的
- * 不预先挑结果面，而是让骰子自然停下、读此刻朝上的那一面。这样数字与肉眼看到
- * 的面永远一致；原型第一版是"先定值再把目标面掰上来"，表现为动画放完后骰子突然
- * 又转一下，很突兀。
+ * 自由掷骰不预先挑结果面，而是让骰子自然停下、读此刻朝上的那一面。服务端检定
+ * 可以传入已经持久化的权威骰点；舞台会在收束阶段把对应面平滑转到上方，保证动画、
+ * 画面结果和服务端状态一致，同时不会因为刷新或重试再次随机。
  *
  * 均匀性由 `shuffle()` 保证（见该文件注释），与物理是否有偏无关。
  */
@@ -242,7 +242,7 @@ function diceDefinitions(kind: DiceKind): {
 
 export interface DiceStage {
   /** 掷一次。正在掷的时候重复调用会被忽略。 */
-  roll: () => boolean
+  roll: (targetValue?: number) => boolean
   /** 释放 WebGL 资源并停掉动画循环。 */
   dispose: () => void
 }
@@ -303,6 +303,7 @@ export function createDiceStage({ container, kind, onSettled }: DiceStageOptions
   let frame = 0
   let lastFrame = performance.now()
   let disposed = false
+  let requestedValue: number | null = null
 
   // 让 three 同时写 canvas 的 CSS 尺寸（setSize 的第三参默认 true）。
   // 原型里用的是 setSize(w, h, false)，靠它自己页面的 CSS 把 canvas 拉成 100%；
@@ -359,6 +360,14 @@ export function createDiceStage({ container, kind, onSettled }: DiceStageOptions
   const enterAlign = () => {
     phase = 'align'
     alignProgress = 0
+    const requestedFaces = (() => {
+      if (requestedValue === null) return null
+      if (kind === 'd100') {
+        const normalized = requestedValue === 100 ? 0 : requestedValue
+        return [Math.floor(normalized / 10) * 10, normalized % 10]
+      }
+      return [requestedValue]
+    })()
     const targets = actors.map((actor) => ({
       x: actor.die.group.position.x,
       z: actor.die.group.position.z,
@@ -377,9 +386,13 @@ export function createDiceStage({ container, kind, onSettled }: DiceStageOptions
     for (const [index, actor] of actors.entries()) {
       actor.qStart = actor.die.group.quaternion.clone()
       actor.pStart = actor.die.group.position.clone()
-      const top = findTopFace(actor.die)
+      const requestedFace = requestedFaces
+        ? actor.die.faces.find((face) => face.value === requestedFaces[index])
+        : null
+      const top = requestedFace ?? findTopFace(actor.die)
       actor.value = top.value
-      // 只做最短弧修正：这一面本来就接近朝上，不会出现大幅突转。
+      // 自由掷骰只修正自然朝上的面；服务端已经持久化骰点的检定则把权威结果
+      // 对应的面平滑转到上方。这样重连/重试不会在客户端生成第二个结果。
       actor.qTarget = new Quaternion().setFromUnitVectors(
         top.normal.clone(),
         new Vector3(0, 1, 0),
@@ -491,6 +504,7 @@ export function createDiceStage({ container, kind, onSettled }: DiceStageOptions
       if (k >= 1) {
         phase = 'idle'
         onSettled(readValue())
+        requestedValue = null
       }
     }
   }
@@ -506,8 +520,9 @@ export function createDiceStage({ container, kind, onSettled }: DiceStageOptions
   frame = requestAnimationFrame(loop)
 
   return {
-    roll() {
+    roll(targetValue?: number) {
       if (disposed || phase !== 'idle') return false
+      requestedValue = targetValue ?? null
       clearActors()
       diceDefinitions(kind).forEach((def, index) => {
         const die = buildDie(def.poly, def.palette, def.values, def.labels)

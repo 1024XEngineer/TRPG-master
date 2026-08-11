@@ -35,16 +35,88 @@ function waitForEvent(
   timeoutMs = EVENT_TIMEOUT_MS,
 ): Promise<ServerToClientEvent> {
   return new Promise((resolvePromise, rejectPromise) => {
+    const observedTypes: string[] = []
     const timer = setTimeout(() => {
       off()
-      rejectPromise(new Error(`等待 ActionPlan 事件超时（${timeoutMs}ms）`))
+      rejectPromise(
+        new Error(
+          `等待 ActionPlan 事件超时（${timeoutMs}ms）；期间收到：${observedTypes.join(', ')}`
+        )
+      )
     }, timeoutMs)
     const off = owner.roomSocket.onMessage((event) => {
+      observedTypes.push(
+        event.type === 'adjudication.pending'
+          ? `${event.type}:${event.payload.correlationId}`
+          : event.type
+      )
       if (!predicate(event)) return
       clearTimeout(timer)
       off()
       resolvePromise(event)
     })
+  })
+}
+
+type PendingAdjudicationEvent = Extract<
+  ServerToClientEvent,
+  { type: 'adjudication.pending' }
+>
+type TestSdk = Awaited<ReturnType<typeof registerPlayer>>['sdk']
+
+async function selectPendingSkill(
+  sdk: TestSdk,
+  playerId: string,
+  pendingEvent: PendingAdjudicationEvent,
+  requestId: string,
+): Promise<PendingAdjudicationEvent> {
+  const pending = pendingEvent.payload
+  assert.equal(pending.status, 'awaiting_skill_choice')
+  const decision = pending.pendingDecision
+  assert.ok(decision)
+  assert.equal(decision.options.length, 1)
+
+  const rolledPromise = waitForEvent(
+    sdk,
+    (event) =>
+      event.type === 'adjudication.pending' &&
+      event.payload.correlationId === pending.correlationId &&
+      event.payload.status === 'awaiting_post_roll_decision',
+  )
+  sdk.roomSocket.selectAdjudication(playerId, {
+    clientActionId: pending.correlationId,
+    requestId,
+    sourceRevision: pending.sourceRevision,
+    decisionId: decision.decision_id,
+    decisionVersion: decision.decision_version,
+    candidateId: decision.options[0].candidate_id,
+  })
+  const rolled = await rolledPromise
+  assert.equal(rolled.type, 'adjudication.pending')
+  return rolled
+}
+
+function acceptPostRoll(
+  sdk: TestSdk,
+  playerId: string,
+  rolledEvent: PendingAdjudicationEvent,
+  requestId: string,
+): void {
+  const rolled = rolledEvent.payload
+  assert.equal(rolled.status, 'awaiting_post_roll_decision')
+  const checkRun = rolled.checkRun
+  assert.ok(checkRun)
+  const accept = (checkRun.post_roll_options ?? []).find(
+    (option) => option.kind === 'accept_result',
+  )
+  assert.ok(accept)
+  sdk.roomSocket.decidePostRoll(playerId, {
+    clientActionId: rolled.correlationId,
+    requestId,
+    sourceRevision: rolled.sourceRevision,
+    checkId: checkRun.check_id,
+    checkVersion: checkRun.version,
+    optionId: accept.option_id,
   })
 }
 
@@ -82,9 +154,9 @@ interface CanonCase {
 const CANON_CASES: CanonCase[] = [
   {
     name: '书房搜索',
-    utterance: '去书房找线索',
-    destinationSceneId: 'kimball_house',
-    destinationEntityId: 'kimball_study',
+    utterance: '去书房用侦查搜索线索',
+    destinationSceneId: 'kimball_study',
+    destinationEntityId: 'study_window',
     destinationCheckpointId: 'search_kimball_study',
     assertFinal(view) {
       assert.ok(
@@ -108,7 +180,7 @@ const CANON_CASES: CanonCase[] = [
   },
   {
     name: '墓地询问',
-    utterance: '到墓地问守墓人',
+    utterance: '到墓地用信用评级给守墓人留下好印象并询问线索',
     destinationSceneId: 'cemetery',
     destinationEntityId: 'melodias',
     destinationCheckpointId: 'impress_caretaker',
@@ -148,7 +220,11 @@ function assertPersistedPlan(roomId: string, actionId: string): void {
          WHERE room_id = ? AND parent_action_id = ?
        )`
     ).get(persistedRoomId, persistedRoomId, actionId) as { count: number }
-    assert.equal(commands.count, 3, '两次 step submit 加一次技能选择应各持久化一次')
+    assert.equal(
+      commands.count,
+      4,
+      '两次 step submit、一次技能选择和一次结果接受应各持久化一次',
+    )
   } finally {
     database.close()
   }
@@ -203,7 +279,7 @@ for (const canon of CANON_CASES) {
       const [openingViewEvent] = await Promise.all([openingViewPromise, openingNarration])
       assert.equal(openingViewEvent.type, 'view.updated')
       const initialView = openingViewEvent.payload.playerView
-      assert.equal(initialView.scene.id, 'client_briefing')
+      assert.equal(initialView.scene.id, 'thomas_office')
       assert.equal(
         initialView.scene.visible_entities.some(
           (entity) => entity.id === canon.destinationEntityId,
@@ -245,20 +321,19 @@ for (const canon of CANON_CASES) {
       assert.equal(decision.summary.includes(canon.utterance), false)
       assert.equal(decision.options.length, 1)
 
+      const rolled = await selectPendingSkill(
+        room.host.sdk,
+        room.hostPlayerId,
+        pendingEvent,
+        `${actionId}:select`,
+      )
       const completedProgress = waitForEvent(
         room.host.sdk,
         (event) =>
           event.type === 'plan.completed' &&
           event.payload.correlationId === actionId,
       )
-      room.host.sdk.roomSocket.selectAdjudication(room.hostPlayerId, {
-        clientActionId: actionId,
-        requestId: `${actionId}:select`,
-        sourceRevision: pending.sourceRevision,
-        decisionId: decision.decision_id,
-        decisionVersion: decision.decision_version,
-        candidateId: decision.options[0].candidate_id,
-      })
+      acceptPostRoll(room.host.sdk, room.hostPlayerId, rolled, `${actionId}:accept`)
       const [turn, terminal] = await Promise.all([turnPromise, completedProgress])
       assert.equal(terminal.type, 'plan.completed')
       assert.equal(terminal.payload.completedSteps, 2)
@@ -398,20 +473,19 @@ test('Issue #246 恢复：断线重连后用原 parent 恢复 pending，重复�
     assert.deepEqual(resumed.payload.pendingDecision, firstDecision)
     assert.ok(resumed.payload.planId)
 
+    const rolled = await selectPendingSkill(
+      room.host.sdk,
+      room.hostPlayerId,
+      resumed,
+      `${actionId}:select`,
+    )
     const planCompleted = waitForEvent(
       room.host.sdk,
       (event) => event.type === 'plan.completed' && event.payload.correlationId === actionId,
     )
     const decision = resumed.payload.pendingDecision
     assert.ok(decision)
-    room.host.sdk.roomSocket.selectAdjudication(room.hostPlayerId, {
-      clientActionId: actionId,
-      requestId: `${actionId}:select`,
-      sourceRevision: resumed.payload.sourceRevision,
-      decisionId: decision.decision_id,
-      decisionVersion: decision.decision_version,
-      candidateId: decision.options[0].candidate_id,
-    })
+    acceptPostRoll(room.host.sdk, room.hostPlayerId, rolled, `${actionId}:accept`)
     const [turn] = await Promise.all([recoveredTurn, planCompleted])
     assert.equal(turn.player_view.scene.id, 'library')
 
@@ -477,7 +551,7 @@ test('Issue #246 恢复：取消保留已提交 travel 且停止剩余步骤', {
     )
     const turnPromise = room.host.sdk.roomSocket.submitPlannedAction(room.hostPlayerId, {
       clientActionId: actionId,
-      utterance: '去书房找线索',
+      utterance: '去书房用侦查搜索线索',
     })
     await pending
     const completedEvent = waitForEvent(
@@ -489,7 +563,7 @@ test('Issue #246 恢复：取消保留已提交 travel 且停止剩余步骤', {
       requestId: `${actionId}:cancel`,
     })
     const [turn] = await Promise.all([turnPromise, completedEvent])
-    assert.equal(turn.player_view.scene.id, 'kimball_house')
+    assert.equal(turn.player_view.scene.id, 'kimball_study')
     assert.equal(
       turn.player_view.scene.visible_entities.some((entity) => entity.id === 'douglas_diary'),
       false,

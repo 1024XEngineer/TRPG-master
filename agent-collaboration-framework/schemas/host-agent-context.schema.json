@@ -225,6 +225,50 @@
       "title": "ExitDestinationView",
       "type": "object"
     },
+    "InventoryItemView": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "source_label": {
+          "default": "",
+          "title": "Source Label",
+          "type": "string"
+        },
+        "quantity": {
+          "minimum": 1,
+          "title": "Quantity",
+          "type": "integer"
+        },
+        "condition": {
+          "minLength": 1,
+          "title": "Condition",
+          "type": "string"
+        },
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "quantity",
+        "condition",
+        "version"
+      ],
+      "title": "InventoryItemView",
+      "type": "object"
+    },
     "JsonValue": {},
     "KeeperCapabilityView": {
       "additionalProperties": false,
@@ -276,6 +320,25 @@
           },
           "title": "Endings",
           "type": "array"
+        },
+        "rule_candidates": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/KeeperRuleCandidate"
+          },
+          "title": "Rule Candidates",
+          "type": "array"
+        },
+        "time": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/KeeperTimeCapability"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "core_resolved": {
           "default": false,
@@ -483,6 +546,170 @@
       "title": "KeeperLocationCapability",
       "type": "object"
     },
+    "KeeperRuleCandidate": {
+      "additionalProperties": false,
+      "description": "An `agent_match` Rule that could apply where the actor currently is.\n\nThis is the minimal Rule Match View of #226 §2: the Engine decides which\nrules are even in scope, and the Agent only judges which option the player's\nwords mean. It rides on the Keeper view because it is keeper-side, agent-only\ndata that must never reach the client — the same boundary #226 draws between\nthe Match View and PlayerView.",
+      "properties": {
+        "rule_id": {
+          "minLength": 1,
+          "title": "Rule Id",
+          "type": "string"
+        },
+        "question_kind": {
+          "enum": [
+            "action_declaration",
+            "method",
+            "intent_relation"
+          ],
+          "title": "Question Kind",
+          "type": "string"
+        },
+        "semantic_hints": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Semantic Hints",
+          "type": "array"
+        },
+        "action_families": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Action Families",
+          "type": "array"
+        },
+        "target_kinds": {
+          "default": [],
+          "items": {
+            "enum": [
+              "information",
+              "entity",
+              "location",
+              "actor",
+              "world"
+            ],
+            "type": "string"
+          },
+          "title": "Target Kinds",
+          "type": "array"
+        },
+        "target_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Target Ids",
+          "type": "array"
+        },
+        "options": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/KeeperRuleOption"
+          },
+          "title": "Options",
+          "type": "array"
+        }
+      },
+      "required": [
+        "rule_id",
+        "question_kind"
+      ],
+      "title": "KeeperRuleCandidate",
+      "type": "object"
+    },
+    "KeeperRuleOption": {
+      "additionalProperties": false,
+      "description": "One opaque choice on a rule's candidate menu.\n\nThe Agent submits `id` and nothing else; what the option *does* stays on the\nserver, so a creative model cannot pick an outcome (#226 §1).\n\n`requires_check` is the one exception, and it is not an outcome: it says\nonly whether this branch rolls dice. The Agent has to know, because it must\ndecide between proposing a check and proposing none — without it the prompt\nhad to tell the model to always send a check and reuse the option id as a\nskill id, which breaks for options that name no skill at all (`proceed`,\n`STR`). The player sees the dice either way, so nothing hidden leaks.",
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "semantic_hints": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Semantic Hints",
+          "type": "array"
+        },
+        "requires_check": {
+          "default": true,
+          "title": "Requires Check",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "KeeperRuleOption",
+      "type": "object"
+    },
+    "KeeperTimeCapability": {
+      "additionalProperties": false,
+      "description": "What one `advance_world_time` effect would do, and whether it may run.\n\nThe Agent has to be able to count jumps (\"sleep until 20:00\" is two of\nthem), so it needs the ordered points, not just the next one. `blocked_reason`\nis populated instead of hiding the capability, because \"you cannot advance\ntime here, and here is why\" is what lets the Agent say something true to the\nplayer rather than silently doing nothing.",
+      "properties": {
+        "current_point_id": {
+          "minLength": 1,
+          "title": "Current Point Id",
+          "type": "string"
+        },
+        "current_hour_of_day": {
+          "maximum": 23,
+          "minimum": 0,
+          "title": "Current Hour Of Day",
+          "type": "integer"
+        },
+        "current_day_index": {
+          "minimum": 0,
+          "title": "Current Day Index",
+          "type": "integer"
+        },
+        "next_point_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Next Point Id"
+        },
+        "ordered_point_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Ordered Point Ids",
+          "type": "array"
+        },
+        "blocked_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Blocked Reason"
+        }
+      },
+      "required": [
+        "current_point_id",
+        "current_hour_of_day",
+        "current_day_index"
+      ],
+      "title": "KeeperTimeCapability",
+      "type": "object"
+    },
     "KnownInformationView": {
       "additionalProperties": false,
       "properties": {
@@ -539,6 +766,158 @@
         "scope"
       ],
       "title": "KnownInformationView",
+      "type": "object"
+    },
+    "KnownLocationView": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "region",
+            "site",
+            "room",
+            "connector"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "parent_location_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Location Id"
+        },
+        "region_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Region Id"
+        },
+        "existence": {
+          "enum": [
+            "rumored",
+            "known"
+          ],
+          "title": "Existence",
+          "type": "string"
+        },
+        "localization": {
+          "enum": [
+            "unknown",
+            "approximate",
+            "located"
+          ],
+          "title": "Localization",
+          "type": "string"
+        },
+        "access": {
+          "enum": [
+            "unknown",
+            "reachable",
+            "blocked"
+          ],
+          "title": "Access",
+          "type": "string"
+        },
+        "visited": {
+          "default": false,
+          "title": "Visited",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "name",
+        "existence",
+        "localization",
+        "access"
+      ],
+      "title": "KnownLocationView",
+      "type": "object"
+    },
+    "LocationBreadcrumbView": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "title": "LocationBreadcrumbView",
+      "type": "object"
+    },
+    "LocationContextView": {
+      "additionalProperties": false,
+      "properties": {
+        "current_location_id": {
+          "minLength": 1,
+          "title": "Current Location Id",
+          "type": "string"
+        },
+        "breadcrumbs": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/LocationBreadcrumbView"
+          },
+          "title": "Breadcrumbs",
+          "type": "array"
+        },
+        "position_context": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PositionContextView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "current_location_id"
+      ],
+      "title": "LocationContextView",
       "type": "object"
     },
     "NarrativeDetailView": {
@@ -686,6 +1065,33 @@
         "scene": {
           "$ref": "#/$defs/SceneView"
         },
+        "location_context": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LocationContextView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "known_locations": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/KnownLocationView"
+          },
+          "title": "Known Locations",
+          "type": "array"
+        },
+        "inventory": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/InventoryItemView"
+          },
+          "title": "Inventory",
+          "type": "array"
+        },
         "world": {
           "$ref": "#/$defs/WorldStateView"
         },
@@ -718,6 +1124,49 @@
         "scene"
       ],
       "title": "PlayerView",
+      "type": "object"
+    },
+    "PositionContextView": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "access_boundary",
+          "default": "access_boundary",
+          "title": "Kind",
+          "type": "string"
+        },
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "label": {
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "locked",
+            "blocked",
+            "interaction_required"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "destination_id": {
+          "minLength": 1,
+          "title": "Destination Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "state",
+        "destination_id"
+      ],
+      "title": "PositionContextView",
       "type": "object"
     },
     "RecentSafeResult": {
@@ -1056,6 +1505,14 @@
           },
           "title": "Available Exits",
           "type": "array"
+        },
+        "loose_items": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/InventoryItemView"
+          },
+          "title": "Loose Items",
+          "type": "array"
         }
       },
       "required": [
@@ -1300,10 +1757,17 @@
       "additionalProperties": false,
       "description": "Player-safe world facts committed outside the current scene.\n\nSee :class:`ProjectionWorldState`; this is the same data on the model/UI\nside of the projector.",
       "properties": {
-        "elapsed_minutes": {
+        "day_index": {
           "default": 0,
           "minimum": 0,
-          "title": "Elapsed Minutes",
+          "title": "Day Index",
+          "type": "integer"
+        },
+        "hour_of_day": {
+          "default": 0,
+          "maximum": 23,
+          "minimum": 0,
+          "title": "Hour Of Day",
           "type": "integer"
         },
         "time_of_day": {

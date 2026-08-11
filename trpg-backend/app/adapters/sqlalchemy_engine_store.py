@@ -7,7 +7,12 @@ from contextlib import asynccontextmanager
 from copy import deepcopy
 from datetime import UTC, datetime
 
-from collaboration_framework.contracts import ActionRequest, ContractError, ModuleContent
+from collaboration_framework.contracts import (
+    ActionRequest,
+    ContractError,
+    ModuleContent,
+    ModuleContentV3,
+)
 from collaboration_framework.engine import (
     CheckRun,
     CompletedAction,
@@ -20,7 +25,12 @@ from collaboration_framework.engine import (
     GameState,
     PendingCheckDecision,
     RevisionConflictError,
+    RuleAgenda,
     StateModifiedEvent,
+)
+from collaboration_framework.engine.rules_v3 import (
+    agenda_claim_key,
+    agenda_is_claimable,
 )
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
@@ -68,6 +78,160 @@ class SqlAlchemyEngineStore(EngineStore):
                 transaction.close()
             transaction.log_committed_state_changes()
 
+    async def claim_rule_agenda(
+        self,
+        *,
+        room_id: str,
+        worker_id: str,
+        now: datetime,
+        lease_expires_at: datetime,
+    ) -> RuleAgenda | None:
+        """Lease one runnable Agenda without changing the gameplay revision."""
+
+        if not worker_id or lease_expires_at <= now:
+            raise ContractError("RuleAgenda lease 的 worker 与截止时间必须有效")
+        async with self._session_factory() as session, session.begin():
+            game_session = await session.scalar(
+                select(GameSession).where(GameSession.room_id == room_id).with_for_update()
+            )
+            if game_session is None:
+                raise ContractError(f"房间运行时不存在: {room_id}")
+            state = GameState.model_validate(deepcopy(game_session.state_json))
+            candidates = sorted(
+                (
+                    agenda
+                    for agenda in state.rule_agendas.values()
+                    if agenda_is_claimable(agenda, now=now)
+                ),
+                key=agenda_claim_key,
+            )
+            if not candidates:
+                return None
+            current = candidates[0]
+            claimed = current.model_copy(
+                update={
+                    "lease_owner": worker_id,
+                    "lease_expires_at": lease_expires_at,
+                    "lease_version": current.lease_version + 1,
+                },
+                deep=True,
+            )
+            agendas = dict(state.rule_agendas)
+            agendas[claimed.agenda_id] = claimed
+            state = state.model_copy(update={"rule_agendas": agendas}, deep=True)
+            await self._write_agenda_state(
+                session,
+                game_session=game_session,
+                state=state,
+                now=now,
+            )
+            return claimed
+
+    async def checkpoint_rule_agenda(
+        self,
+        *,
+        agenda: RuleAgenda,
+        worker_id: str,
+        expected_lease_version: int,
+        now: datetime,
+    ) -> RuleAgenda:
+        """CAS a leased cursor/status update into the persisted GameState."""
+
+        async with self._session_factory() as session, session.begin():
+            game_session = await session.scalar(
+                select(GameSession).where(GameSession.room_id == agenda.room_id).with_for_update()
+            )
+            if game_session is None:
+                raise ContractError(f"房间运行时不存在: {agenda.room_id}")
+            state = GameState.model_validate(deepcopy(game_session.state_json))
+            current = state.rule_agendas.get(agenda.agenda_id)
+            _validate_agenda_checkpoint(
+                current=current,
+                proposed=agenda,
+                worker_id=worker_id,
+                expected_lease_version=expected_lease_version,
+                now=now,
+            )
+            terminal = agenda.status != "running"
+            saved = agenda.model_copy(
+                update={
+                    "lease_owner": None if terminal else worker_id,
+                    "lease_expires_at": None if terminal else agenda.lease_expires_at,
+                    "lease_version": expected_lease_version + 1,
+                },
+                deep=True,
+            )
+            agendas = dict(state.rule_agendas)
+            agendas[saved.agenda_id] = saved
+            state = state.model_copy(update={"rule_agendas": agendas}, deep=True)
+            await self._write_agenda_state(
+                session,
+                game_session=game_session,
+                state=state,
+                now=now,
+            )
+            return saved
+
+    @staticmethod
+    async def _write_agenda_state(
+        session: AsyncSession,
+        *,
+        game_session: GameSession,
+        state: GameState,
+        now: datetime,
+    ) -> None:
+        expected = game_session.agenda_state_version
+        result = await session.execute(
+            update(GameSession)
+            .where(
+                GameSession.room_id == game_session.room_id,
+                GameSession.agenda_state_version == expected,
+            )
+            .values(
+                state_json=state.to_json_dict(),
+                agenda_state_version=expected + 1,
+                updated_at=now,
+            )
+            .execution_options(synchronize_session=False)
+        )
+        if getattr(result, "rowcount", None) != 1:
+            raise RevisionConflictError("RuleAgenda 并发版本已变化")
+
+
+def _validate_agenda_checkpoint(
+    *,
+    current: RuleAgenda | None,
+    proposed: RuleAgenda,
+    worker_id: str,
+    expected_lease_version: int,
+    now: datetime,
+) -> None:
+    if current is None:
+        raise ContractError(f"RuleAgenda 不存在: {proposed.agenda_id}")
+    if (
+        current.lease_owner != worker_id
+        or current.lease_version != expected_lease_version
+        or current.lease_expires_at is None
+        or current.lease_expires_at <= now
+    ):
+        raise RevisionConflictError("RuleAgenda lease 已失效或由其他 worker 持有")
+    immutable = (
+        "agenda_id",
+        "room_id",
+        "module_id",
+        "module_version",
+        "correlation_id",
+        "root_source",
+    )
+    if any(getattr(current, name) != getattr(proposed, name) for name in immutable):
+        raise ContractError("RuleAgenda checkpoint 不能改写不可变身份")
+    if proposed.lease_owner != worker_id:
+        raise ContractError("RuleAgenda checkpoint 的 worker 不匹配")
+    if proposed.status == "running" and (
+        proposed.lease_expires_at is None or proposed.lease_expires_at <= now
+    ):
+        raise ContractError("运行中的 RuleAgenda 必须保留有效 lease")
+
 
 class _SqlAlchemyEngineTransaction(EngineTransaction):
     def __init__(
@@ -84,6 +248,34 @@ class _SqlAlchemyEngineTransaction(EngineTransaction):
         self._committed = False
         self._committed_events: tuple[StateModifiedEvent, ...] = ()
         self._committed_request_id: str | None = None
+        self._content_schema_version: int | None = None
+
+    async def _require_writable_room(self) -> None:
+        """v3 之前的房间只读：可以读取和回顾，但不能再推进。
+
+        v2 的 `action.submit` 执行链已经删除，这类房间实际上载入得了却动不了。
+        与其让玩家在某个中途步骤上撞见一个语焉不详的错误，不如在唯一的两个写
+        入口明确拒绝——读路径不受影响，旧房间仍然可以打开查看。
+        """
+
+        if self._content_schema_version is None:
+            # 写之前一定已经 load_runtime 过；这里兜底再读一次，不假设调用顺序。
+            game_session = await self._session.get(GameSession, self._room_id)
+            if game_session is None:
+                raise ContractError(f"房间运行时不存在: {self._room_id}")
+            module_version = await self._session.get(
+                ModuleVersion,
+                (game_session.module_id, game_session.module_version),
+            )
+            if module_version is None:
+                raise ContractError("GameSession 引用的 ModuleVersion 不存在")
+            self._content_schema_version = module_version.content_schema_version
+        if self._content_schema_version != 3:
+            raise ContractError(
+                "ROOM_READ_ONLY: 这个房间使用 ModuleContent v"
+                f"{self._content_schema_version}，v3 之后旧房间只读，"
+                "请新建房间继续游戏"
+            )
 
     async def load_runtime(self) -> EngineRuntimeSnapshot:
         self._ensure_active()
@@ -101,12 +293,21 @@ class _SqlAlchemyEngineTransaction(EngineTransaction):
         )
         if module_version is None:
             raise ContractError("GameSession 引用的 ModuleVersion 不存在")
-        if module_version.content_schema_version not in {1, 2}:
+        if module_version.content_schema_version not in {1, 2, 3}:
             raise ContractError(
                 f"不支持的 ModuleContent schema version: {module_version.content_schema_version}"
             )
 
-        module_content = ModuleContent.model_validate(deepcopy(module_version.content_json))
+        # The stored schema version is what a room is pinned to for its whole
+        # life: a republished module never silently changes the meaning of a
+        # session already in flight (#226 §1).
+        self._content_schema_version = module_version.content_schema_version
+        payload = deepcopy(module_version.content_json)
+        module_content: ModuleContent | ModuleContentV3 = (
+            ModuleContentV3.model_validate(payload)
+            if module_version.content_schema_version == 3
+            else ModuleContent.model_validate(payload)
+        )
         if (
             module_content.module_id != module_version.module_id
             or module_content.version != module_version.version
@@ -133,9 +334,11 @@ class _SqlAlchemyEngineTransaction(EngineTransaction):
                 .where(
                     GameSession.room_id == self._room_id,
                     GameSession.state_version == game_session.state_version,
+                    GameSession.agenda_state_version == game_session.agenda_state_version,
                 )
                 .values(
                     state_json=game_state.to_json_dict(),
+                    agenda_state_version=game_session.agenda_state_version + 1,
                     updated_at=datetime.now(UTC),
                 )
                 .execution_options(synchronize_session=False)
@@ -334,6 +537,7 @@ class _SqlAlchemyEngineTransaction(EngineTransaction):
         self._ensure_active()
         if self._committed:
             raise ContractError("同一引擎事务只能提交一次")
+        await self._require_writable_room()
 
         expected_version = self._parse_revision(expected_revision)
         current_session = await self._session.get(GameSession, self._room_id)
@@ -398,10 +602,12 @@ class _SqlAlchemyEngineTransaction(EngineTransaction):
             .where(
                 GameSession.room_id == self._room_id,
                 GameSession.state_version == expected_version,
+                GameSession.agenda_state_version == current_session.agenda_state_version,
             )
             .values(
                 state_json=new_state.to_json_dict(),
                 state_version=new_state.event_sequence,
+                agenda_state_version=current_session.agenda_state_version + 1,
                 updated_at=now,
             )
         )
@@ -463,6 +669,7 @@ class _SqlAlchemyEngineTransaction(EngineTransaction):
         self._ensure_active()
         if self._committed:
             raise ContractError("同一引擎事务只能提交一次")
+        await self._require_writable_room()
         expected_version = self._parse_revision(expected_revision)
         current_session = await self._session.get(GameSession, self._room_id)
         if current_session is None:
@@ -514,10 +721,12 @@ class _SqlAlchemyEngineTransaction(EngineTransaction):
             .where(
                 GameSession.room_id == self._room_id,
                 GameSession.state_version == expected_version,
+                GameSession.agenda_state_version == current_session.agenda_state_version,
             )
             .values(
                 state_json=new_state.to_json_dict(),
                 state_version=new_state.event_sequence,
+                agenda_state_version=current_session.agenda_state_version + 1,
                 updated_at=now,
             )
         )

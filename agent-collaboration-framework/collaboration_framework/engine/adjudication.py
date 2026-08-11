@@ -16,10 +16,10 @@ from collaboration_framework.contracts import (
     AcceptResultOption,
     ActionAdjudication,
     ActionEffect,
+    AdvanceWorldTimeEffect,
     AdjudicationRecovery,
     AdjudicationExecution,
     AdjudicationStatusView,
-    AdvanceTimeEffect,
     ChangeEntityStateEffect,
     CheckDecisionRequest,
     CommitTerminalEndingEffect,
@@ -30,7 +30,14 @@ from collaboration_framework.contracts import (
     EnterLocationEffect,
     GetAdjudicationStatusRequest,
     HideInformationEffect,
+    ItemAcquisition,
+    ItemComponent,
+    ItemCustody,
+    ItemDisplay,
+    ItemInstance,
+    ItemKnowledge,
     MarkCoreResolvedEffect,
+    LocationKnowledge,
     MoveEntityEffect,
     NarrativeOnlyEffect,
     PendingCheckOption,
@@ -41,19 +48,56 @@ from collaboration_framework.contracts import (
     SetVisibilityEffect,
     SpendResourceOption,
     SubmitAdjudicationRequest,
+    TravelInterrupted,
+    TravelResolved,
 )
 from collaboration_framework.contracts.adjudication import CheckDegree, CheckRoll
 
 from .dice import DiceRoller, coc7_success_level, passes_difficulty
 from .models import (
+    AgendaSource,
     CheckRun,
     CompletedAdjudicationCommand,
     DomainEvent,
     EngineRuntimeSnapshot,
     GameState,
     PendingCheckDecision,
+    WorldTimeState,
 )
+from .navigation import resolve_location_target
 from .ports import EngineStore
+from .timeline import advanced_to_next, next_point_after, time_advance_block_reason
+from .rules_v3 import (
+    agenda_item_for_event,
+    agenda_status_for_walk,
+    agent_match_scope_admits,
+    create_rule_agenda,
+    effects_after_degree,
+    matching_event_rules,
+    pending_check_for,
+    resolve_rule_option,
+    walk_rule,
+)
+
+
+def _visibility_knowledge(
+    location_id: str,
+    *,
+    scope: str,
+    visible: bool,
+    previous: LocationKnowledge | None,
+) -> LocationKnowledge:
+    return LocationKnowledge(
+        location_id=location_id,
+        scope="actor" if scope == "actor" else "party",
+        existence="known" if visible else "unknown",
+        localization="located" if visible else "unknown",
+        access=(previous.access if visible and previous is not None else "unknown"),
+        visited=bool(visible and previous and previous.visited),
+        known_connection_ids=(
+            previous.known_connection_ids if visible and previous is not None else ()
+        ),
+    )
 
 
 class AdjudicationEngineService:
@@ -481,7 +525,9 @@ class AdjudicationEngineService:
             )
             if option is None:
                 raise ContractError("option_id 不属于该 CheckRun")
-            if isinstance(option, PushOption) != (request.push_adjudication is not None):
+            if isinstance(option, PushOption) != (
+                request.push_adjudication is not None
+            ):
                 raise ContractError("只有强推选项必须携带 push_adjudication")
 
             state = runtime.game_state.model_copy(deep=True)
@@ -545,7 +591,9 @@ class AdjudicationEngineService:
             elif not isinstance(option, AcceptResultOption):
                 raise ContractError("不支持的检定后选项")
 
-            runtime_after_resource = runtime.model_copy(update={"game_state": state}, deep=True)
+            runtime_after_resource = runtime.model_copy(
+                update={"game_state": state}, deep=True
+            )
             resolved_run = check_run.model_copy(
                 update={
                     "status": "resolved",
@@ -638,16 +686,41 @@ class AdjudicationEngineService:
         state = runtime.game_state
         target = adjudication.target
         exists = {
-            "information": target.id in {item.id for item in module.information_items},
-            "entity": target.id in {item.id for item in module.entities}
-            or target.id in state.runtime_entities,
-            "location": target.id in {item.id for item in module.scenes}
+            "information": target.id in runtime.canon_information_ids,
+            "entity": target.id in runtime.canon_entity_ids
+            or target.id in state.runtime_entities
+            or target.id in state.item_instances,
+            "location": target.id in runtime.canon_location_ids
             or target.id in state.runtime_locations,
             "actor": target.id in state.actors,
             "world": target.id == module.world_ref,
         }[target.kind]
         if not exists:
             raise ContractError("ActionAdjudication target 引用了不存在或隐藏的对象")
+        if adjudication.rule_decision is not None:
+            if not runtime.is_v3:
+                raise ContractError("RuleDecision 只在 ModuleContent v3 房间可用")
+            # Refuses an id the module never declared, so a model cannot invent
+            # a rule or reach a branch its option does not select.
+            rule, _ = resolve_rule_option(
+                runtime.v3,
+                rule_id=adjudication.rule_decision.rule_id,
+                option_id=adjudication.rule_decision.option_id,
+            )
+            # 存在性不等于「此时此地可用」。候选菜单是按当前场景发布的，提交时
+            # 必须用同一个谓词重新绑定：否则模型可以点名另一个地点的规则，把它
+            # 的后果带到这里来 —— 范围校验等于交给了模型自觉。
+            if not agent_match_scope_admits(
+                rule,
+                location_id=state.scene_id,
+                action_family=adjudication.method.family,
+                target_kind=adjudication.target.kind,
+                target_id=adjudication.target.id,
+            ):
+                raise ContractError(
+                    "RuleDecision 超出当前可用范围: "
+                    f"{adjudication.rule_decision.rule_id}"
+                )
         self._validate_effect_sequence(runtime, adjudication.success_effects)
         self._validate_effect_sequence(runtime, adjudication.failure_effects)
         if adjudication.check.mode != "none":
@@ -658,13 +731,19 @@ class AdjudicationEngineService:
         runtime: EngineRuntimeSnapshot,
         effects: tuple[ActionEffect, ...],
     ) -> None:
-        information_ids = {item.id for item in runtime.module_content.information_items}
-        entity_ids = {item.id for item in runtime.module_content.entities} | set(
-            runtime.game_state.runtime_entities
+        information_ids = runtime.canon_information_ids
+        entity_ids = (
+            runtime.canon_entity_ids
+            | set(runtime.game_state.runtime_entities)
+            | set(runtime.game_state.item_instances)
         )
-        location_ids = {item.id for item in runtime.module_content.scenes} | set(
+        location_ids = runtime.canon_location_ids | set(
             runtime.game_state.runtime_locations
         )
+        # Sleeping until 20:00 is several jumps in one adjudication, so each one
+        # has to be checked against the clock the previous jump left behind —
+        # not against the clock this action started on.
+        world_time = runtime.game_state.world_time
         for effect in effects:
             self._validate_effect(
                 runtime,
@@ -672,11 +751,14 @@ class AdjudicationEngineService:
                 information_ids=information_ids,
                 entity_ids=entity_ids,
                 location_ids=location_ids,
+                world_time=world_time,
             )
             if isinstance(effect, EnsureRuntimeLocationEffect):
                 location_ids.add(effect.location_id)
             elif isinstance(effect, EnsureRuntimeEntityEffect):
                 entity_ids.add(effect.entity_id)
+            elif isinstance(effect, AdvanceWorldTimeEffect):
+                world_time = advanced_to_next(runtime.v3, world_time)
 
     def _validated_options(
         self,
@@ -688,19 +770,39 @@ class AdjudicationEngineService:
         labels = actor.state.get("skill_labels")
         if not isinstance(skills, dict):
             raise ContractError("Actor 没有可验证的 Ruleset 技能快照")
-        label_map = labels if isinstance(labels, dict) else {}
+        # CoC7 的属性检定（搬开石板掷 STR、闪避掷 DEX）和技能检定用同一套 d100
+        # 判定，但属性存在 `attributes` 而不是 `skills` 里。只查 skills 会让作者
+        # 写好的 STR 检定在提交时被判成「技能不属于 Actor」——《追书人》搬石板
+        # 那一步正是这样卡死的，而它是进入地穴的唯一门禁。
+        attributes = actor.state.get("attributes")
+        attribute_map = attributes if isinstance(attributes, dict) else {}
+        attribute_labels = actor.state.get("attribute_labels")
+        label_map = {
+            **(attribute_labels if isinstance(attribute_labels, dict) else {}),
+            **(labels if isinstance(labels, dict) else {}),
+        }
         options: list[PendingCheckOption] = []
         for candidate in adjudication.check.candidates:
             value = skills.get(candidate.skill_id)
-            if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= 100:
-                raise ContractError(f"技能候选不属于 Actor 或数值非法: {candidate.skill_id}")
+            if value is None:
+                value = attribute_map.get(candidate.skill_id)
+            if (
+                not isinstance(value, int)
+                or isinstance(value, bool)
+                or not 0 <= value <= 100
+            ):
+                raise ContractError(
+                    f"技能候选不属于 Actor 或数值非法: {candidate.skill_id}"
+                )
             label = label_map.get(candidate.skill_id)
             options.append(
                 PendingCheckOption(
                     candidate_id=candidate.candidate_id,
                     skill_id=candidate.skill_id,
                     display_name=(
-                        label if isinstance(label, str) and label.strip() else candidate.skill_id
+                        label
+                        if isinstance(label, str) and label.strip()
+                        else candidate.skill_id
                     ),
                     target_value=value,
                     difficulty=candidate.difficulty,
@@ -718,8 +820,8 @@ class AdjudicationEngineService:
         information_ids: set[str],
         entity_ids: set[str],
         location_ids: set[str],
+        world_time: WorldTimeState | None = None,
     ) -> None:
-        module = runtime.module_content
         state = runtime.game_state
         if isinstance(effect, RevealInformationEffect | HideInformationEffect):
             if effect.information_id not in information_ids:
@@ -749,21 +851,44 @@ class AdjudicationEngineService:
         elif isinstance(effect, EnsureRuntimeEntityEffect):
             if effect.entity_id in entity_ids or effect.location_id not in location_ids:
                 raise ContractError("Runtime Entity 发生 Canon shadow 或地点引用非法")
-        elif isinstance(effect, MoveEntityEffect | ChangeEntityStateEffect | ConsumeEntityEffect):
+            if (
+                runtime.is_v3
+                and effect.entity_kind == "object"
+                and (len(effect.entity_id) > 100 or len(effect.name) > 200)
+            ):
+                raise ContractError("Runtime Item 的 id 或名称超过 ItemInstance 上限")
+        elif isinstance(
+            effect, MoveEntityEffect | ChangeEntityStateEffect | ConsumeEntityEffect
+        ):
             if effect.entity_id not in entity_ids:
                 raise ContractError("实体效果引用不存在的 Entity")
             if isinstance(effect, MoveEntityEffect):
-                if effect.location_id is not None and effect.location_id not in location_ids:
+                if (
+                    effect.location_id is not None
+                    and effect.location_id not in location_ids
+                ):
                     raise ContractError("move_entity 目标地点不存在")
                 if (
                     effect.holder_actor_id is not None
                     and effect.holder_actor_id not in state.actors
                 ):
                     raise ContractError("move_entity holder Actor 不存在")
+        elif isinstance(effect, AdvanceWorldTimeEffect):
+            if not runtime.is_v3:
+                raise ContractError("只有 v3 房间有离散时间线")
+            blocked = time_advance_block_reason(tuple(state.actors))
+            if blocked is not None:
+                raise ContractError(blocked)
+            target, _ = next_point_after(
+                runtime.v3, world_time if world_time is not None else state.world_time
+            )
+            if effect.to_point_id is not None and effect.to_point_id != target.id:
+                raise ContractError(
+                    "advance_world_time 声明的时间点不是时间线上的下一个点: "
+                    f"{effect.to_point_id} != {target.id}"
+                )
         elif isinstance(effect, CommitTerminalEndingEffect):
-            ending_ids = {item.id for item in module.win_conditions}
-            if effect.ending_id not in ending_ids:
-                raise ContractError("结局效果引用不存在的 Ending")
+            raise ContractError("终局不能由行动效果直接提交，必须确认 EndingDraft")
 
     def _roll(self, target_value: int, difficulty: str) -> CheckRoll:
         value = self._dice.percentile()
@@ -787,11 +912,11 @@ class AdjudicationEngineService:
         option: PendingCheckOption,
         roll: CheckRoll,
     ) -> tuple[AcceptResultOption | SpendResourceOption | PushOption, ...]:
-        if roll.passed:
-            return ()
         options: list[AcceptResultOption | SpendResourceOption | PushOption] = [
             AcceptResultOption(option_id="accept-current")
         ]
+        if roll.passed:
+            return tuple(options)
         threshold = {
             "regular": option.target_value,
             "hard": option.target_value // 2,
@@ -800,7 +925,12 @@ class AdjudicationEngineService:
         actor = runtime.game_state.actors.get(actor_id)
         luck_value = actor.resources.luck if actor is not None else None
         cost = roll.value - threshold
-        if roll.degree != "fumble" and cost > 0 and luck_value is not None and luck_value >= cost:
+        if (
+            roll.degree != "fumble"
+            and cost > 0
+            and luck_value is not None
+            and luck_value >= cost
+        ):
             options.append(
                 SpendResourceOption(
                     option_id=f"spend-luck-{cost}",
@@ -831,6 +961,59 @@ class AdjudicationEngineService:
         actors[actor_id] = actor.model_copy(update={"resources": resources}, deep=True)
         return state.model_copy(update={"actors": actors}, deep=True)
 
+    @staticmethod
+    def _owned_effects(
+        runtime: EngineRuntimeSnapshot,
+        *,
+        adjudication: ActionAdjudication,
+        passed: bool,
+        check_run: CheckRun | None,
+    ) -> tuple[ActionEffect, ...]:
+        """Whose effects commit: the rule's if one owns this action, else the Agent's.
+
+        #226 §5 gives a named rule `effect_authority: rule` — the Agent chose the
+        method, but the published rule decides what the result does. Its
+        `result_routes` map the actual degree to a step, so a hard success and a
+        regular success can diverge in ways an Agent-authored effect list cannot
+        express.
+        """
+
+        decision = adjudication.rule_decision
+        if decision is None or not runtime.is_v3:
+            return (
+                adjudication.success_effects if passed else adjudication.failure_effects
+            )
+        rule, branch_id = resolve_rule_option(
+            runtime.v3,
+            rule_id=decision.rule_id,
+            option_id=decision.option_id,
+        )
+        step, _ = pending_check_for(rule, branch_id)
+        if step is not None:
+            if check_run is None:
+                # 分支要求掷骰，裁决却没带检定：拒绝提交后果，而不是当作成功。
+                return ()
+            degree = (check_run.final_result or check_run.roll).degree
+            return tuple(effects_after_degree(rule, step.id, degree))
+
+        walk = walk_rule(rule, branch_id=branch_id)
+        if walk.completed:
+            # 这条分支不掷骰，整条链就是它的后果 —— 规则依然独占这些效果。
+            #
+            # 这里过去返回 ()，注释写的是「链在提交时已经跑过了」，但没有任何地方
+            # 跑它：Agenda 只装 event 规则，agent_match 的决定只经过这里。于是纯
+            # 效果规则被静默吞掉，《追书人》整条地穴终局都不产生任何后果。
+            return tuple(walk.effects)
+
+        # 既不是检定、也没走到终点：停在 invoke_ruleset_action、循环、未知步或
+        # 预算耗尽上。这类分支要靠 RuleAgenda 恢复才能跑完，而恢复侧还没有生产
+        # worker。只提交走过的那一半会把世界留在半截状态（例如昏迷没生效，却已经
+        # 标记见过身影），比什么都不做更糟——所以明确拒绝，让它可见地失败。
+        raise ContractError(
+            f"Rule {rule.id} 的分支 {branch_id} 停在 {walk.suspended_kind} 上，"
+            "当前没有可恢复的执行器，拒绝提交半截后果"
+        )
+
     def _finalize_action(
         self,
         runtime: EngineRuntimeSnapshot,
@@ -860,11 +1043,15 @@ class AdjudicationEngineService:
                     },
                 )
             )
-        selected_effects = (
-            adjudication.success_effects if passed else adjudication.failure_effects
+        selected_effects = self._owned_effects(
+            runtime,
+            adjudication=adjudication,
+            passed=passed,
+            check_run=check_run,
         )
         for effect in selected_effects:
             state, emitted = self._apply_effect(
+                runtime,
                 state,
                 effect,
                 room_id=runtime.game_state.room_id,
@@ -906,25 +1093,27 @@ class AdjudicationEngineService:
         request_id: str,
         actor_id: str,
     ) -> tuple[GameState, list[DomainEvent]]:
+        if runtime.is_v3:
+            return self._apply_v3_event_rules(
+                runtime,
+                state=state,
+                events=events,
+                request_id=request_id,
+                actor_id=actor_id,
+            )
+
         cursor = 0
         fired: set[tuple[str, str]] = set()
         while cursor < len(events):
             source_event = events[cursor]
             cursor += 1
-            matching = sorted(
-                (
-                    rule
-                    for rule in runtime.module_content.event_rules
-                    if rule.event_type == source_event.type
-                    and all(
-                        source_event.payload.get(key) == value
-                        for key, value in rule.payload_matches.items()
-                    )
-                ),
-                key=lambda rule: (-rule.priority, rule.id),
-            )
-            for rule in matching:
-                fire_key = (rule.id, source_event.event_id)
+            for rule_id, effects in self._triggered_rule_effects(
+                runtime,
+                state=state,
+                source_event=source_event,
+                actor_id=actor_id,
+            ):
+                fire_key = (rule_id, source_event.event_id)
                 if fire_key in fired:
                     continue
                 fired.add(fire_key)
@@ -939,16 +1128,19 @@ class AdjudicationEngineService:
                         actor_id=actor_id,
                         event_type="rule.triggered",
                         payload={
-                            "rule_id": rule.id,
+                            "rule_id": rule_id,
                             "source_event_id": source_event.event_id,
                         },
                         visibility="hidden",
                     )
                 )
-                rule_runtime = runtime.model_copy(update={"game_state": state}, deep=True)
-                self._validate_effect_sequence(rule_runtime, rule.effects)
-                for effect in rule.effects:
+                rule_runtime = runtime.model_copy(
+                    update={"game_state": state}, deep=True
+                )
+                self._validate_effect_sequence(rule_runtime, tuple(effects))
+                for effect in effects:
                     state, emitted = self._apply_effect(
+                        runtime,
                         state,
                         effect,
                         room_id=runtime.game_state.room_id,
@@ -959,8 +1151,246 @@ class AdjudicationEngineService:
                     events.extend(emitted)
         return state, events
 
+    def _apply_v3_event_rules(
+        self,
+        runtime: EngineRuntimeSnapshot,
+        *,
+        state: GameState,
+        events: list[DomainEvent],
+        request_id: str,
+        actor_id: str,
+    ) -> tuple[GameState, list[DomainEvent]]:
+        """Run event Rules in queue order and persist the first blocked cursor.
+
+        Effects and the resulting Agenda are returned in the same ``new_state``
+        and therefore committed atomically by ``commit_adjudication``.
+        """
+
+        agenda = create_rule_agenda(
+            agenda_id=self._new_id("agenda"),
+            room_id=runtime.game_state.room_id,
+            module=runtime.v3,
+            correlation_id=request_id,
+            root_source=AgendaSource(kind="action", id=request_id),
+            revision=str(runtime.game_state.event_sequence),
+        )
+        queue = []
+        source_event_ids: list[str] = []
+        fired: set[tuple[str, str]] = set()
+        cursor = 0
+        suspended = False
+
+        while cursor < len(events) and not suspended:
+            source_event = events[cursor]
+            cursor += 1
+            # Workflow/audit signals are never gameplay Rule inputs (#226 §4).
+            if source_event.type == "rule.triggered":
+                continue
+            rules = matching_event_rules(
+                runtime.v3,
+                event_type=source_event.type,
+                state=state,
+                actor_id=actor_id,
+            )
+            pending_rules = []
+            for rule in rules:
+                fire_key = (rule.id, source_event.event_id)
+                if fire_key in fired:
+                    continue
+                fired.add(fire_key)
+                pending_rules.append(rule)
+                queue.append(agenda_item_for_event(rule, source_event))
+            if pending_rules:
+                source_event_ids.append(source_event.event_id)
+
+            for rule in pending_rules:
+                item_index = next(
+                    index
+                    for index, item in enumerate(queue)
+                    if item.source_event_id == source_event.event_id
+                    and item.rule_id == rule.id
+                    and item.status == "queued"
+                )
+                queue[item_index] = queue[item_index].model_copy(
+                    update={"status": "running"}
+                )
+                next_depth = agenda.chain_depth + 1
+                max_chain_depth = min(
+                    agenda.max_chain_depth, rule.limits.max_chain_depth
+                )
+                max_steps = min(agenda.max_steps, rule.limits.max_steps)
+                agenda = agenda.model_copy(
+                    update={
+                        "chain_depth": next_depth,
+                        "max_chain_depth": max_chain_depth,
+                        "max_steps": max_steps,
+                    }
+                )
+                if next_depth > max_chain_depth:
+                    queue[item_index] = queue[item_index].model_copy(
+                        update={"status": "failed"}
+                    )
+                    agenda = agenda.model_copy(
+                        update={
+                            "status": "failed",
+                            "failure_code": "agenda_budget_exceeded",
+                            "current_rule_id": rule.id,
+                            "current_branch_id": queue[item_index].branch_id,
+                        }
+                    )
+                    suspended = True
+                    break
+
+                walk = walk_rule(rule, branch_id=queue[item_index].branch_id)
+                next_step_count = agenda.step_count + walk.step_count
+                if next_step_count > max_steps:
+                    queue[item_index] = queue[item_index].model_copy(
+                        update={"status": "failed"}
+                    )
+                    agenda = agenda.model_copy(
+                        update={
+                            "status": "failed",
+                            "failure_code": "agenda_budget_exceeded",
+                            "current_rule_id": rule.id,
+                            "current_branch_id": queue[item_index].branch_id,
+                            "current_step_id": walk.suspended_at
+                            or next(
+                                branch.entry_step_id
+                                for branch in rule.execution.branches
+                                if branch.id == queue[item_index].branch_id
+                            ),
+                            "step_count": next_step_count,
+                        }
+                    )
+                    suspended = True
+                    break
+                agenda = agenda.model_copy(update={"step_count": next_step_count})
+
+                events.append(
+                    self._event_from_state(
+                        state,
+                        room_id=runtime.game_state.room_id,
+                        offset=len(events) + 1,
+                        request_id=request_id,
+                        actor_id=actor_id,
+                        event_type="rule.triggered",
+                        payload={
+                            "rule_id": rule.id,
+                            "source_event_id": source_event.event_id,
+                            "agenda_id": agenda.agenda_id,
+                        },
+                        visibility="hidden",
+                    )
+                )
+                rule_runtime = runtime.model_copy(
+                    update={"game_state": state}, deep=True
+                )
+                self._validate_effect_sequence(rule_runtime, tuple(walk.effects))
+                for effect in walk.effects:
+                    state, emitted = self._apply_effect(
+                        runtime,
+                        state,
+                        effect,
+                        room_id=runtime.game_state.room_id,
+                        request_id=request_id,
+                        actor_id=actor_id,
+                        offset=len(events) + 1,
+                    )
+                    events.extend(emitted)
+
+                status = agenda_status_for_walk(rule, walk)
+                if status == "stable":
+                    queue[item_index] = queue[item_index].model_copy(
+                        update={"status": "completed"}
+                    )
+                    continue
+                queue[item_index] = queue[item_index].model_copy(
+                    update={"status": "failed" if status == "failed" else "running"}
+                )
+                agenda = agenda.model_copy(
+                    update={
+                        "status": status,
+                        "failure_code": (
+                            "agenda_budget_exceeded" if status == "failed" else None
+                        ),
+                        "current_rule_id": rule.id,
+                        "current_branch_id": queue[item_index].branch_id,
+                        "current_step_id": walk.suspended_at,
+                    }
+                )
+                suspended = True
+                break
+
+        if not queue:
+            return state, events
+        if not suspended:
+            agenda = agenda.model_copy(
+                update={
+                    "status": "stable",
+                    "current_rule_id": None,
+                    "current_branch_id": None,
+                    "current_step_id": None,
+                }
+            )
+        final_revision = str(runtime.game_state.event_sequence + len(events))
+        agenda = agenda.model_copy(
+            update={
+                "source_event_ids": tuple(source_event_ids),
+                "queue": tuple(queue),
+                "revision": final_revision,
+            },
+            deep=True,
+        )
+        agendas = dict(state.rule_agendas)
+        agendas[agenda.agenda_id] = agenda
+        state = state.model_copy(update={"rule_agendas": agendas}, deep=True)
+        return state, events
+
+    @staticmethod
+    def _triggered_rule_effects(
+        runtime: EngineRuntimeSnapshot,
+        *,
+        state: GameState,
+        source_event: DomainEvent,
+        actor_id: str,
+    ) -> list[tuple[str, list[ActionEffect]]]:
+        """Rules this event fires, already reduced to the effects they commit.
+
+        v3 rules are step graphs, so the effects are whatever the walk collects
+        before it has to suspend (see engine/rules_v3.py).
+        """
+
+        if not runtime.is_v3:
+            return [
+                (rule.id, list(rule.effects))
+                for rule in sorted(
+                    (
+                        rule
+                        for rule in runtime.v2.event_rules
+                        if rule.event_type == source_event.type
+                        and all(
+                            source_event.payload.get(key) == value
+                            for key, value in rule.payload_matches.items()
+                        )
+                    ),
+                    key=lambda rule: (-rule.priority, rule.id),
+                )
+            ]
+        triggered = []
+        for rule in matching_event_rules(
+            runtime.v3,
+            event_type=source_event.type,
+            state=state,
+            actor_id=actor_id,
+        ):
+            walk = walk_rule(rule)
+            if walk.effects:
+                triggered.append((rule.id, walk.effects))
+        return triggered
+
     def _apply_effect(
         self,
+        runtime: EngineRuntimeSnapshot,
         state: GameState,
         effect: ActionEffect,
         *,
@@ -970,6 +1400,7 @@ class AdjudicationEngineService:
         offset: int,
     ) -> tuple[GameState, tuple[DomainEvent, ...]]:
         event_type: str | None = None
+        effect_event_id: str | None = None
         payload: dict[str, JsonValue] = {}
         if isinstance(effect, NarrativeOnlyEffect):
             return state, ()
@@ -1005,7 +1436,33 @@ class AdjudicationEngineService:
                 else f"party:{effect.target_kind}:{effect.target_id}"
             )
             overrides[key] = effect.visible
-            state = state.model_copy(update={"visibility_overrides": overrides}, deep=True)
+            updates: dict[str, object] = {"visibility_overrides": overrides}
+            if effect.target_kind == "location":
+                knowledge_by_scope = (
+                    deepcopy(state.actor_location_knowledge)
+                    if effect.scope == "actor"
+                    else deepcopy(state.party_location_knowledge)
+                )
+                if effect.scope == "actor":
+                    actor_knowledge = knowledge_by_scope.setdefault(actor_id, {})
+                    previous_knowledge = actor_knowledge.get(effect.target_id)
+                    actor_knowledge[effect.target_id] = _visibility_knowledge(
+                        effect.target_id,
+                        scope="actor",
+                        visible=effect.visible,
+                        previous=previous_knowledge,
+                    )
+                    updates["actor_location_knowledge"] = knowledge_by_scope
+                else:
+                    previous_knowledge = knowledge_by_scope.get(effect.target_id)
+                    knowledge_by_scope[effect.target_id] = _visibility_knowledge(
+                        effect.target_id,
+                        scope="party",
+                        visible=effect.visible,
+                        previous=previous_knowledge,
+                    )
+                    updates["party_location_knowledge"] = knowledge_by_scope
+            state = state.model_copy(update=updates, deep=True)
             event_type = "visibility.changed"
             payload = {
                 "target_kind": effect.target_kind,
@@ -1014,10 +1471,100 @@ class AdjudicationEngineService:
                 "scope": effect.scope,
             }
         elif isinstance(effect, EnterLocationEffect):
-            previous = state.scene_id
-            state = state.model_copy(update={"scene_id": effect.location_id}, deep=True)
-            event_type = "location.entered"
-            payload = {"location_id": effect.location_id, "from_location_id": previous}
+            if not runtime.is_v3:
+                previous = state.scene_id
+                state = state.model_copy(
+                    update={"scene_id": effect.location_id}, deep=True
+                )
+                event_type = "location.entered"
+                payload = {
+                    "location_id": effect.location_id,
+                    "from_location_id": previous,
+                }
+            else:
+                resolution = resolve_location_target(
+                    runtime.v3,
+                    state,
+                    actor_id=actor_id,
+                    target_id=effect.location_id,
+                )
+                contexts = dict(state.actor_position_contexts)
+                knowledge = dict(state.party_location_knowledge)
+                previous_knowledge = knowledge.get(effect.location_id)
+                if resolution.status == "known_reachable":
+                    contexts.pop(actor_id, None)
+                    knowledge[effect.location_id] = LocationKnowledge(
+                        location_id=effect.location_id,
+                        scope="party",
+                        existence="known",
+                        localization="located",
+                        access="reachable",
+                        visited=True,
+                        known_connection_ids=(
+                            previous_knowledge.known_connection_ids
+                            if previous_knowledge is not None
+                            else ()
+                        ),
+                    )
+                    travel = TravelResolved(
+                        destination_id=effect.location_id,
+                        path=resolution.path,
+                    )
+                    state = state.model_copy(
+                        update={
+                            "scene_id": effect.location_id,
+                            "party_location_knowledge": knowledge,
+                            "actor_position_contexts": contexts,
+                        },
+                        deep=True,
+                    )
+                    event_type = "travel.resolved"
+                    payload = {
+                        "destination_id": travel.destination_id,
+                        "path": list(travel.path),
+                    }
+                elif resolution.status == "known_blocked":
+                    assert resolution.boundary is not None
+                    assert resolution.reached_location_id is not None
+                    travel = TravelInterrupted(
+                        destination_id=effect.location_id,
+                        current_location_id=resolution.reached_location_id,
+                        path=resolution.path,
+                        reached_boundary=resolution.boundary,
+                    )
+                    contexts[actor_id] = travel
+                    knowledge[effect.location_id] = LocationKnowledge(
+                        location_id=effect.location_id,
+                        scope="party",
+                        existence="known",
+                        localization="located",
+                        access="blocked",
+                        visited=bool(previous_knowledge and previous_knowledge.visited),
+                        known_connection_ids=(
+                            previous_knowledge.known_connection_ids
+                            if previous_knowledge is not None
+                            else ()
+                        ),
+                    )
+                    state = state.model_copy(
+                        update={
+                            "scene_id": travel.current_location_id,
+                            "party_location_knowledge": knowledge,
+                            "actor_position_contexts": contexts,
+                        },
+                        deep=True,
+                    )
+                    event_type = "travel.interrupted"
+                    payload = {
+                        "destination_id": travel.destination_id,
+                        "current_location_id": travel.current_location_id,
+                        "path": list(travel.path),
+                        "reached_boundary": travel.reached_boundary.to_json_dict(),
+                    }
+                else:
+                    raise ContractError(
+                        resolution.safe_reason or "当前没有可确认的目标路线"
+                    )
         elif isinstance(effect, EnsureRuntimeLocationEffect):
             locations = deepcopy(state.runtime_locations)
             locations[effect.location_id] = {
@@ -1026,32 +1573,136 @@ class AdjudicationEngineService:
                 "connected_location_id": effect.connected_location_id,
                 "provenance": "agent_adjudication",
             }
-            state = state.model_copy(update={"runtime_locations": locations}, deep=True)
+            knowledge = dict(state.party_location_knowledge)
+            knowledge[effect.location_id] = LocationKnowledge(
+                location_id=effect.location_id,
+                existence="known",
+                localization="located",
+                access="reachable",
+            )
+            state = state.model_copy(
+                update={
+                    "runtime_locations": locations,
+                    "party_location_knowledge": knowledge,
+                },
+                deep=True,
+            )
             event_type = "location.created"
             payload = {"location_id": effect.location_id}
         elif isinstance(effect, EnsureRuntimeEntityEffect):
-            entities = deepcopy(state.runtime_entities)
-            entities[effect.entity_id] = {
-                "kind": effect.entity_kind,
-                "name": effect.name,
-                "location_id": effect.location_id,
-                "provenance": "agent_adjudication",
-            }
-            state = state.model_copy(update={"runtime_entities": entities}, deep=True)
+            if runtime.is_v3 and effect.entity_kind == "object":
+                effect_event_id = self._new_id("evt")
+                revision = str(state.event_sequence + offset)
+                items = deepcopy(state.item_instances)
+                items[effect.entity_id] = ItemInstance(
+                    id=effect.entity_id,
+                    room_id=room_id,
+                    origin="runtime",
+                    definition_id=effect.entity_id,
+                    display=ItemDisplay(name=effect.name),
+                    item_component=ItemComponent(),
+                    custody=ItemCustody(
+                        kind="location",
+                        ref_id=effect.location_id,
+                        form="loose",
+                    ),
+                    acquisition=ItemAcquisition(
+                        source_type="runtime",
+                        source_id=effect.location_id,
+                        player_safe_label="行动中发现",
+                        event_id=effect_event_id,
+                        revision=revision,
+                    ),
+                    created_event_id=effect_event_id,
+                    last_event_id=effect_event_id,
+                    updated_revision=revision,
+                )
+                party_knowledge = deepcopy(state.party_item_knowledge)
+                party_knowledge[effect.entity_id] = ItemKnowledge(
+                    item_id=effect.entity_id,
+                    identity="recognized",
+                )
+                state = state.model_copy(
+                    update={
+                        "item_instances": items,
+                        "party_item_knowledge": party_knowledge,
+                    },
+                    deep=True,
+                )
+            else:
+                entities = deepcopy(state.runtime_entities)
+                entities[effect.entity_id] = {
+                    "kind": effect.entity_kind,
+                    "name": effect.name,
+                    "location_id": effect.location_id,
+                    "provenance": "agent_adjudication",
+                }
+                state = state.model_copy(
+                    update={"runtime_entities": entities}, deep=True
+                )
             event_type = "entity.created"
             payload = {"entity_id": effect.entity_id, "location_id": effect.location_id}
         elif isinstance(effect, MoveEntityEffect):
-            runtime_entities = deepcopy(state.runtime_entities)
-            entity_states = deepcopy(state.entities)
-            target = runtime_entities.get(effect.entity_id)
-            if target is None:
-                target = entity_states.setdefault(effect.entity_id, {})
-            target["location_id"] = effect.location_id
-            target["holder_actor_id"] = effect.holder_actor_id
-            state = state.model_copy(
-                update={"runtime_entities": runtime_entities, "entities": entity_states},
-                deep=True,
-            )
+            item = state.item_instances.get(effect.entity_id)
+            if item is not None:
+                effect_event_id = self._new_id("evt")
+                revision = str(state.event_sequence + offset)
+                custody = (
+                    ItemCustody(
+                        kind="actor_inventory",
+                        ref_id=effect.holder_actor_id,
+                        form="carried",
+                    )
+                    if effect.holder_actor_id is not None
+                    else ItemCustody(
+                        kind="location",
+                        ref_id=effect.location_id,
+                        form="placed",
+                    )
+                )
+                items = deepcopy(state.item_instances)
+                items[effect.entity_id] = item.model_copy(
+                    update={
+                        "custody": custody,
+                        "version": item.version + 1,
+                        "last_event_id": effect_event_id,
+                        "updated_revision": revision,
+                    }
+                )
+                updates: dict[str, object] = {"item_instances": items}
+                if effect.holder_actor_id is not None:
+                    actor_knowledge = deepcopy(state.actor_item_knowledge)
+                    actor_knowledge.setdefault(effect.holder_actor_id, {})[
+                        effect.entity_id
+                    ] = ItemKnowledge(
+                        item_id=effect.entity_id,
+                        scope="actor",
+                        identity="known",
+                    )
+                    updates["actor_item_knowledge"] = actor_knowledge
+                else:
+                    party_knowledge = deepcopy(state.party_item_knowledge)
+                    party_knowledge[effect.entity_id] = ItemKnowledge(
+                        item_id=effect.entity_id,
+                        identity="recognized",
+                    )
+                    updates["party_item_knowledge"] = party_knowledge
+                state = state.model_copy(update=updates, deep=True)
+            else:
+                runtime_entities = deepcopy(state.runtime_entities)
+                entity_states = deepcopy(state.entities)
+                target = runtime_entities.get(effect.entity_id)
+                if target is None:
+                    target = entity_states.setdefault(effect.entity_id, {})
+                target["location_id"] = effect.location_id
+                target["holder_actor_id"] = effect.holder_actor_id
+                state = state.model_copy(
+                    update={
+                        "runtime_entities": runtime_entities,
+                        "entities": entity_states,
+                    },
+                    deep=True,
+                )
             event_type = "entity.moved"
             payload = {
                 "entity_id": effect.entity_id,
@@ -1059,57 +1710,94 @@ class AdjudicationEngineService:
                 "holder_actor_id": effect.holder_actor_id,
             }
         elif isinstance(effect, ChangeEntityStateEffect):
-            runtime_entities = deepcopy(state.runtime_entities)
-            entity_states = deepcopy(state.entities)
-            target = runtime_entities.get(effect.entity_id)
-            if target is None:
-                target = entity_states.setdefault(effect.entity_id, {})
-            target[effect.key] = effect.value
-            state = state.model_copy(
-                update={"runtime_entities": runtime_entities, "entities": entity_states},
-                deep=True,
-            )
+            item = state.item_instances.get(effect.entity_id)
+            if item is not None:
+                effect_event_id = self._new_id("evt")
+                revision = str(state.event_sequence + offset)
+                values = deepcopy(item.state.values)
+                values[effect.key] = effect.value
+                items = deepcopy(state.item_instances)
+                items[effect.entity_id] = item.model_copy(
+                    update={
+                        "state": item.state.model_copy(update={"values": values}),
+                        "version": item.version + 1,
+                        "last_event_id": effect_event_id,
+                        "updated_revision": revision,
+                    }
+                )
+                state = state.model_copy(update={"item_instances": items}, deep=True)
+            else:
+                runtime_entities = deepcopy(state.runtime_entities)
+                entity_states = deepcopy(state.entities)
+                target = runtime_entities.get(effect.entity_id)
+                if target is None:
+                    target = entity_states.setdefault(effect.entity_id, {})
+                target[effect.key] = effect.value
+                state = state.model_copy(
+                    update={
+                        "runtime_entities": runtime_entities,
+                        "entities": entity_states,
+                    },
+                    deep=True,
+                )
             event_type = "entity.state_changed"
-            payload = {"entity_id": effect.entity_id, "key": effect.key, "value": effect.value}
+            payload = {
+                "entity_id": effect.entity_id,
+                "key": effect.key,
+                "value": effect.value,
+            }
         elif isinstance(effect, ConsumeEntityEffect):
-            runtime_entities = deepcopy(state.runtime_entities)
-            entity_states = deepcopy(state.entities)
-            target = runtime_entities.get(effect.entity_id)
-            if target is None:
-                target = entity_states.setdefault(effect.entity_id, {})
-            target["consumed"] = True
-            state = state.model_copy(
-                update={"runtime_entities": runtime_entities, "entities": entity_states},
-                deep=True,
-            )
+            item = state.item_instances.get(effect.entity_id)
+            if item is not None:
+                effect_event_id = self._new_id("evt")
+                revision = str(state.event_sequence + offset)
+                items = deepcopy(state.item_instances)
+                items[effect.entity_id] = item.model_copy(
+                    update={
+                        "state": item.state.model_copy(update={"status": "retired"}),
+                        "version": item.version + 1,
+                        "last_event_id": effect_event_id,
+                        "updated_revision": revision,
+                    }
+                )
+                state = state.model_copy(update={"item_instances": items}, deep=True)
+            else:
+                runtime_entities = deepcopy(state.runtime_entities)
+                entity_states = deepcopy(state.entities)
+                target = runtime_entities.get(effect.entity_id)
+                if target is None:
+                    target = entity_states.setdefault(effect.entity_id, {})
+                target["consumed"] = True
+                state = state.model_copy(
+                    update={
+                        "runtime_entities": runtime_entities,
+                        "entities": entity_states,
+                    },
+                    deep=True,
+                )
             event_type = "entity.consumed"
             payload = {"entity_id": effect.entity_id}
-        elif isinstance(effect, AdvanceTimeEffect):
-            elapsed = state.clock.elapsed_minutes + effect.minutes
-            clock = state.clock.model_copy(
-                update={
-                    "elapsed_minutes": elapsed,
-                    "time_of_day": "day" if elapsed % 1440 < 720 else "night",
-                },
-                deep=True,
-            )
-            state = state.model_copy(update={"clock": clock}, deep=True)
-            event_type = "time.elapsed"
-            payload = {"minutes": effect.minutes, "reason": effect.reason}
+        elif isinstance(effect, AdvanceWorldTimeEffect):
+            advanced = advanced_to_next(runtime.v3, state.world_time)
+            state = state.model_copy(update={"world_time": advanced}, deep=True)
+            event_type = "time.point_entered"
+            payload = {
+                "point_id": advanced.current_point_id,
+                "day_index": advanced.current.day_index,
+                "hour_of_day": advanced.current.hour_of_day,
+                "time_of_day": advanced.time_of_day,
+            }
         elif isinstance(effect, MarkCoreResolvedEffect):
             state = state.model_copy(update={"core_resolved": True}, deep=True)
             event_type = "core.resolved"
         elif isinstance(effect, SetEndingAvailabilityEffect):
-            state = state.model_copy(update={"ending_available": effect.available}, deep=True)
+            state = state.model_copy(
+                update={"ending_available": effect.available}, deep=True
+            )
             event_type = "ending.availability_changed"
             payload = {"available": effect.available}
         elif isinstance(effect, CommitTerminalEndingEffect):
-            state = state.model_copy(
-                update={"phase": "ended", "ending_id": effect.ending_id},
-                deep=True,
-            )
-            event_type = "ending.confirmed"
-            payload = {"ending_id": effect.ending_id}
+            raise ContractError("终局不能由 Rule 效果直接提交，必须确认 EndingDraft")
         if event_type is None:
             raise ContractError("未注册的高层效果")
         return state, (
@@ -1121,6 +1809,7 @@ class AdjudicationEngineService:
                 actor_id=actor_id,
                 event_type=event_type,
                 payload=payload,
+                event_id=effect_event_id,
             ),
         )
 
@@ -1173,9 +1862,10 @@ class AdjudicationEngineService:
         event_type: str,
         payload: dict[str, JsonValue],
         visibility: str = "public",
+        event_id: str | None = None,
     ) -> DomainEvent:
         return DomainEvent(
-            event_id=self._new_id("evt"),
+            event_id=event_id or self._new_id("evt"),
             sequence=state.event_sequence + offset,
             type=event_type,
             room_id=room_id,
@@ -1192,7 +1882,10 @@ class AdjudicationEngineService:
         player_id: str,
         decision: PendingCheckDecision,
     ) -> None:
-        if decision.room_id != runtime.game_state.room_id or decision.player_id != player_id:
+        if (
+            decision.room_id != runtime.game_state.room_id
+            or decision.player_id != player_id
+        ):
             raise ContractError("PendingCheckDecision 不属于当前玩家或房间")
         AdjudicationEngineService._validate_identity(
             runtime,

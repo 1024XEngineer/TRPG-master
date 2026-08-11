@@ -1,6 +1,7 @@
 """Structured Host inputs, outputs, progress events, and recent-history schemas."""
 
 from .action_plan import (
+    RESERVATION_TTL,
     RESERVING_PLAN_STATUSES,
     TERMINAL_PLAN_STATUSES,
     ActionPlanAdvanceResult,
@@ -12,6 +13,7 @@ from .action_plan import (
     CompletedPlanStepSummary,
     PlanRunStatus,
     PlanStepStatus,
+    reservation_is_expired,
     SingleActionTurnResult,
 )
 from .agent import (
@@ -109,7 +111,9 @@ __all__ = [
     "VisibleEntitySummary",
     "VisibleHistoryText",
     "WebSocketOutput",
+    "RESERVATION_TTL",
     "RESERVING_PLAN_STATUSES",
     "TERMINAL_PLAN_STATUSES",
     "make_tool_error",
+    "reservation_is_expired",
 ]

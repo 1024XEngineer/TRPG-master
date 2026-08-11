@@ -12,7 +12,7 @@ import type { DiceKind, DiceRollToken } from './types'
 
 export interface Dice3DHandle {
   /** 返回 false 表示舞台仍在处理上一轮，未接受本次请求。 */
-  roll: (token: DiceRollToken) => boolean
+  roll: (token: DiceRollToken, targetValue?: number) => boolean
 }
 
 interface Dice3DStageProps {
@@ -21,17 +21,27 @@ interface Dice3DStageProps {
   onSettled: (value: number, token: DiceRollToken) => void
   /** 环境不支持 3D（无 WebGL / 用户要求减少动效）时调用，调用方据此回退 2D。 */
   onUnsupported?: (token: DiceRollToken | null) => void
+  /**
+   * 舞台被卸载或重建，已受理的这次掷骰不会再定格了。
+   *
+   * 与 onUnsupported 分开：这里只说"这一次没了"，不说"3D 不能用"。调用方
+   * 应该补完这次掷骰，但保留 3D 能力。
+   */
+  onRollAbandoned?: (token: DiceRollToken) => void
   className?: string
 }
 
 export const Dice3DStage = forwardRef<Dice3DHandle, Dice3DStageProps>(function Dice3DStage(
-  { kind, onSettled, onUnsupported, className },
+  { kind, onSettled, onUnsupported, onRollAbandoned, className },
   ref,
 ) {
   const containerRef = useRef<HTMLDivElement>(null)
   const stageRef = useRef<DiceStage | null>(null)
   // 引擎异步加载期间收到的掷骰请求先记下来，加载完补上——否则首次点击会丢。
-  const pendingRollRef = useRef<DiceRollToken | null>(null)
+  const pendingRollRef = useRef<{
+    token: DiceRollToken
+    targetValue?: number
+  } | null>(null)
   const activeRollRef = useRef<DiceRollToken | null>(null)
   const [failed, setFailed] = useState(false)
 
@@ -40,6 +50,8 @@ export const Dice3DStage = forwardRef<Dice3DHandle, Dice3DStageProps>(function D
   onSettledRef.current = onSettled
   const onUnsupportedRef = useRef(onUnsupported)
   onUnsupportedRef.current = onUnsupported
+  const onRollAbandonedRef = useRef(onRollAbandoned)
+  onRollAbandonedRef.current = onRollAbandoned
 
   useEffect(() => {
     const container = containerRef.current
@@ -65,17 +77,17 @@ export const Dice3DStage = forwardRef<Dice3DHandle, Dice3DStageProps>(function D
           },
         })
         stageRef.current = stage
-        const pendingToken = pendingRollRef.current
-        if (pendingToken !== null) {
+        const pending = pendingRollRef.current
+        if (pending !== null) {
           pendingRollRef.current = null
-          activeRollRef.current = pendingToken
-          if (!stage.roll()) activeRollRef.current = null
+          activeRollRef.current = pending.token
+          if (!stage.roll(pending.targetValue)) activeRollRef.current = null
         }
       })
       .catch(() => {
         if (cancelled) return
         // 加载或初始化失败同样退回 2D，不能把检定卡死在这里。
-        const failedToken = activeRollRef.current ?? pendingRollRef.current
+        const failedToken = activeRollRef.current ?? pendingRollRef.current?.token ?? null
         activeRollRef.current = null
         pendingRollRef.current = null
         setFailed(true)
@@ -84,28 +96,36 @@ export const Dice3DStage = forwardRef<Dice3DHandle, Dice3DStageProps>(function D
 
     return () => {
       cancelled = true
+      // 引擎重建会丢掉这次掷骰，父组件却还在等它定格。不通知的话 rolling
+      // 永远不清，检定卡死在"骰子还在滚"。
+      //
+      // 走 onRollAbandoned 而不是 onUnsupported：舞台被卸载不代表 3D 不可用，
+      // 最常见的原因恰恰是玩家自己关掉了弹窗。用后者会让"中途退出一次"永久
+      // 关掉 3D，之后每次检定都只剩数字版。
+      const abandoned = activeRollRef.current ?? pendingRollRef.current?.token ?? null
       pendingRollRef.current = null
       activeRollRef.current = null
       stageRef.current?.dispose()
       stageRef.current = null
+      if (abandoned !== null) onRollAbandonedRef.current?.(abandoned)
     }
   }, [kind])
 
   useImperativeHandle(
     ref,
     () => ({
-      roll(token) {
+      roll(token, targetValue) {
         if (failed || pendingRollRef.current !== null || activeRollRef.current !== null) return false
         const stage = stageRef.current
         if (stage) {
           activeRollRef.current = token
-          if (!stage.roll()) {
+          if (!stage.roll(targetValue)) {
             activeRollRef.current = null
             return false
           }
           return true
         }
-        pendingRollRef.current = token
+        pendingRollRef.current = { token, targetValue }
         return true
       },
     }),

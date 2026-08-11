@@ -11,7 +11,11 @@ import string
 from copy import deepcopy
 from datetime import UTC, datetime
 
-from collaboration_framework.contracts import ContractError, ModuleContent
+from collaboration_framework.contracts import (
+    ContractError,
+    ModuleContent,
+    ModuleContentV3,
+)
 from collaboration_framework.engine import (
     ActorResources,
     ActorState,
@@ -25,7 +29,6 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import not_implemented
-from app.core.narrator import NarrationContext
 from app.core.runtime_state import ruleset_labels, ruleset_skill_values
 from app.dto.game import GameRead, GameSystemRead, RulesetRead
 from app.dto.module import ModuleDetailRead
@@ -47,6 +50,20 @@ from app.models.event import Event
 from app.models.room import Character, CharacterPortrait, Player, Room
 from app.models.user import User
 from app.service import chat as chat_service
+
+
+def parse_module_content(module_version) -> ModuleContent | ModuleContentV3:
+    """Parse a published module at whatever schema version it was pinned to.
+
+    Rooms only need `presentation` and the identity triple here, and both
+    versions carry those — but they must be parsed with the matching model or
+    every field of the other version reads as an error.
+    """
+
+    payload = module_version.content_json
+    if getattr(module_version, "content_schema_version", 2) == 3:
+        return ModuleContentV3.model_validate(payload)
+    return ModuleContent.model_validate(payload)
 
 
 class RoomNotFoundError(ValueError):
@@ -379,7 +396,7 @@ async def select_module(
     if system is None or system.world_ref != module_version.world_ref:
         raise RoomConflictError("模组版本引用的规则系统不存在或不匹配")
     try:
-        module_content = ModuleContent.model_validate(module_version.content_json)
+        module_content = parse_module_content(module_version)
     except ValueError as exc:
         raise RoomConflictError("模组发布内容无效") from exc
     presentation = module_content.presentation
@@ -474,7 +491,7 @@ async def begin_game(db: AsyncSession, room_id: str, player_id: str) -> bool:
     if system is None or system.world_ref != module_version.world_ref:
         raise RoomConflictError("房间固定的模组版本与规则系统不匹配")
     try:
-        module_content = ModuleContent.model_validate(module_version.content_json)
+        module_content = parse_module_content(module_version)
     except ValueError as exc:
         raise RoomConflictError("房间固定的模组版本内容无效") from exc
     if (
@@ -483,7 +500,10 @@ async def begin_game(db: AsyncSession, room_id: str, player_id: str) -> bool:
         or module_content.world_ref != module_version.world_ref
     ):
         raise RoomConflictError("模组发布内容与版本记录不一致")
-    if not module_content.scenes:
+    if isinstance(module_content, ModuleContentV3):
+        if not module_content.locations:
+            raise RoomConflictError("模组没有可作为初始地点的 Location")
+    elif not module_content.scenes:
         raise RoomConflictError("模组没有可作为初始场景的 Scene")
     try:
         require_runtime_capabilities(module_content)
@@ -779,8 +799,13 @@ async def end_game(db: AsyncSession, room_id: str, reconnect_token: str | None) 
             .where(
                 GameSession.room_id == room_id,
                 GameSession.state_version == game_session.state_version,
+                GameSession.agenda_state_version == game_session.agenda_state_version,
             )
-            .values(state_json=ended_state.to_json_dict(), updated_at=now)
+            .values(
+                state_json=ended_state.to_json_dict(),
+                agenda_state_version=game_session.agenda_state_version + 1,
+                updated_at=now,
+            )
         )
         if getattr(state_update, "rowcount", None) != 1:
             raise RoomConflictError("GameState 已被并发更新，请重试结束操作")
@@ -879,7 +904,7 @@ async def list_modules(db: AsyncSession) -> list[ModuleRead]:
         if module_version is None:
             continue
         try:
-            content = ModuleContent.model_validate(module_version.content_json)
+            content = parse_module_content(module_version)
         except ValueError:
             continue
         presentation = content.presentation
@@ -915,7 +940,7 @@ async def get_module_detail(db: AsyncSession, module_id: str) -> ModuleDetailRea
     if module_version is None:
         return None
     try:
-        content = ModuleContent.model_validate(module_version.content_json)
+        content = parse_module_content(module_version)
     except ValueError:
         return None
     presentation = content.presentation
@@ -1025,66 +1050,6 @@ async def get_correlated_event(
             Event.event_type == event_type,
             Event.correlation_id == correlation_id,
         )
-    )
-
-
-# 叙事上下文里带多少条行动历史。取值权衡：太少 AI 上文接不住，太多白白烧
-# token——单轮生成（非编排）的定位下 6 条足够撑起"延续刚才的场景"。
-_NARRATION_HISTORY_LIMIT = 6
-
-
-async def build_narration_context(
-    db: AsyncSession, room_id: str, player_id: str, utterance: str
-) -> NarrationContext:
-    """为一次 action.submit 组装叙事生成的上下文（issue #107）。
-
-    数据来源只有两处：房间关联的模组标题 + `events` 表里最近几条
-    `action.submit`（**不读聊天表**——讨论区内容永远不进 LLM 上下文，这是
-    #107 跟 AI 编排对齐的第 1 条约定，靠这里的代码结构保证）。
-
-    ⚠️ 调用时序约定：ws.py 必须在 `record_event` 写入当前这条 action.submit
-    **之前**调用本函数——这样查出来的历史天然不含当前这条（它会作为"玩家刚
-    说的话"单独出现在 prompt 末尾，不该在历史里重复）。靠时序排除比靠
-    "player_id+内容匹配"过滤可靠：玩家完全可能重复说过一模一样的话。
-
-    Narrator（app/core/narrator.py）自己不查库，所有字段由这里备好传入。
-    """
-    player = await db.get(Player, player_id)
-    nickname = player.nickname if player is not None else "玩家"
-
-    room = await db.get(Room, room_id)
-    module_title = await _module_title(db, room.scenario_id) if room is not None else None
-
-    # 最近 N 条行动：按倒序取再反转成时间正序喂给模型。
-    result = await db.execute(
-        select(Event)
-        .where(Event.room_id == room_id, Event.event_type == "action.submit")
-        .order_by(Event.created_at.desc(), Event.id.desc())
-        .limit(_NARRATION_HISTORY_LIMIT)
-    )
-    history = list(result.scalars())
-    history.reverse()
-
-    # 批量查昵称，不在循环里逐条查（N+1 的教训，PR #110 review [3]）
-    speaker_ids = {e.player_id for e in history if e.player_id is not None}
-    nicknames: dict[str, str] = {}
-    if speaker_ids:
-        rows = await db.execute(
-            select(Player.id, Player.nickname).where(Player.id.in_(speaker_ids))
-        )
-        # Row 是 tuple 的子类但类型上不是 tuple[str, str]，直接喂 dict() 过不了
-        # 类型检查——用 .tuples() 显式转成类型化元组再构造。
-        nicknames = dict(rows.tuples().all())
-
-    recent_actions = [
-        f"{nicknames.get(e.player_id or '', '玩家')}: {e.payload.get('utterance', '')}"
-        for e in history
-    ]
-    return NarrationContext(
-        utterance=utterance,
-        player_nickname=nickname,
-        module_title=module_title,
-        recent_actions=recent_actions,
     )
 
 

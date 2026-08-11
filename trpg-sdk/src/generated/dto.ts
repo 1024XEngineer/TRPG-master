@@ -15,7 +15,7 @@ export interface AcceptResultOption {
 }
 
 /**
- * action.submit 原话广播 payload。
+ * action.plan.submit 原话广播 payload。
  */
 export interface ActionBroadcastPayload {
   playerId: string;
@@ -42,7 +42,7 @@ export interface ActionPlanCancelPayload {
 }
 
 /**
- * action.submit 事件 payload。
+ * action.plan.submit 事件 payload。
  *
  * `client_action_id` 是客户端为一次逻辑动作生成的稳定幂等键；网络重试必须
  * 复用原值。两个字段都在契约层拒绝空白文本。
@@ -165,6 +165,22 @@ export interface AvailableExitView {
   aliases?: string[];
   description?: string;
   destination?: ExitDestinationView | null;
+}
+
+export interface ChangeItemCustodyRequest {
+  request_id: string;
+  source_revision: string;
+  actor_id: string;
+  expected_version: number;
+  reason: "pickup" | "drop" | "throw" | "place" | "transfer";
+  to_custody: ItemCustody;
+}
+
+export interface ChangeItemCustodyResult {
+  request_id: string;
+  item: ItemInstance;
+  revision: string;
+  event_id: string;
 }
 
 /**
@@ -412,6 +428,80 @@ export interface ClueGrantedPayload {
   description?: string | null;
 }
 
+export interface ConfirmEndingDraftRequest {
+  request_id: string;
+  source_revision: string;
+  draft_version: number;
+}
+
+export interface ConfirmEndingDraftResult {
+  request_id: string;
+  resolution: EndingResolution;
+  revision: string;
+}
+
+export interface ConfirmInventoryImportDraftRequest {
+  request_id: string;
+  source_revision: string;
+  draft_version: number;
+}
+
+export interface ConfirmInventoryImportResult {
+  request_id: string;
+  draft_id: string;
+  created_item_ids: string[];
+  revision: string;
+}
+
+export interface CreateEndingDraftRequest {
+  request_id: string;
+  source_revision: string;
+  mode?: "ending_and_epilogue";
+  player_intent: string;
+}
+
+export interface CreateInventoryImportDraftRequest {
+  request_id: string;
+  source_revision: string;
+  character_revision: string;
+  claims: ItemClaim[];
+}
+
+export interface EndingDraft {
+  draft_id: string;
+  request_id: string;
+  source_revision: string;
+  mode?: "ending_and_epilogue";
+  player_intent: string;
+  title: string;
+  summary: string;
+  epilogue: string;
+  facets?: {
+    [k: string]: JsonValue;
+  };
+  /**
+   * @minItems 1
+   */
+  evidence_refs: [string, ...string[]];
+  version?: number;
+  status?: "active" | "confirmed" | "expired";
+}
+
+export interface EndingResolution {
+  draft_id: string;
+  source_revision: string;
+  anchor_id: string;
+  /**
+   * @minItems 1
+   */
+  fact_refs: [string, ...string[]];
+  facets?: {
+    [k: string]: JsonValue;
+  };
+  confirmed_by: string;
+  confirmed_event_id: string;
+}
+
 export interface EquipmentItem {
   name: string;
 }
@@ -455,7 +545,12 @@ export type ErrorCode =
   | "PORTRAIT_GENERATION_TIMEOUT"
   | "HOST_SPEECH_UNAVAILABLE"
   | "HOST_SPEECH_FAILED"
-  | "HOST_SPEECH_TIMEOUT";
+  | "HOST_SPEECH_TIMEOUT"
+  | "REVISION_CONFLICT"
+  | "ITEM_VERSION_CONFLICT"
+  | "ITEM_ALREADY_TAKEN"
+  | "ENDING_UNAVAILABLE"
+  | "ENDING_DRAFT_STALE";
 
 /**
  * 错误信息的具体内容，只在 success=false 时出现在 error 字段里。
@@ -561,6 +656,130 @@ export interface HostSpeechVoiceRead {
   label: string;
 }
 
+export interface InventoryImportDraft {
+  draft_id: string;
+  request_id: string;
+  room_id: string;
+  player_id: string;
+  actor_id: string;
+  source_revision: string;
+  character_revision: string;
+  version?: number;
+  entries: InventoryImportEntry[];
+  confirmed?: boolean;
+}
+
+export interface InventoryImportEntry {
+  claim_id: string;
+  decision: "accepted" | "normalized" | "rejected";
+  reason_code?:
+    | (
+        | "anachronistic"
+        | "profession_mismatch"
+        | "wealth_exceeded"
+        | "restricted_by_setting"
+        | "reserved_canon_identity"
+        | "invalid_quantity"
+        | "unsupported_item"
+      )
+    | null;
+  normalized_definition?: ItemDefinition | null;
+  narrative_policy: "brought" | "adjusted" | "not_brought";
+}
+
+export interface InventoryItemView {
+  id: string;
+  name: string;
+  source_label?: string;
+  quantity: number;
+  condition: string;
+  version: number;
+}
+
+export interface InventoryView {
+  inventory?: InventoryItemView[];
+  loose_items?: InventoryItemView[];
+}
+
+export interface ItemAcquisition {
+  source_type: "character_import" | "location" | "entity" | "runtime";
+  source_id: string;
+  player_safe_label: string;
+  event_id: string;
+  revision: string;
+}
+
+export interface ItemCapability {
+  id: string;
+  type: string;
+  target_selector?: ItemTargetSelector;
+  consumes?: boolean;
+}
+
+export interface ItemClaim {
+  claim_id: string;
+  raw_name: string;
+  declared_quantity?: number;
+  declared_properties?: string[];
+  source?: "character_sheet";
+}
+
+export interface ItemComponent {
+  portable?: boolean;
+  unique?: boolean;
+  quantity?: number;
+  capabilities?: ItemCapability[];
+}
+
+export interface ItemCustody {
+  kind: "actor_inventory" | "location" | "entity" | "retired";
+  ref_id: string;
+  form: "carried" | "loose" | "placed" | "thrown" | "contained";
+}
+
+export interface ItemDefinition {
+  definition_id: string;
+  display: ItemDisplay;
+  item_component: ItemComponent;
+}
+
+export interface ItemDisplay {
+  name: string;
+  description?: string;
+}
+
+export interface ItemInstance {
+  id: string;
+  room_id: string;
+  kind?: "item";
+  origin: "canon" | "runtime";
+  definition_id: string;
+  display: ItemDisplay;
+  item_component: ItemComponent;
+  custody: ItemCustody;
+  state?: ItemState;
+  acquisition?: ItemAcquisition | null;
+  keeper_notes?: string;
+  hidden_information_refs?: string[];
+  version?: number;
+  created_event_id: string;
+  last_event_id: string;
+  updated_revision: string;
+}
+
+export interface ItemState {
+  condition?: string;
+  status?: "active" | "retired";
+  values?: {
+    [k: string]: JsonValue;
+  };
+}
+
+export interface ItemTargetSelector {
+  entity_ids?: string[];
+  location_ids?: string[];
+}
+
 /**
  * POST /api/v1/rooms/{roomCode}/join 请求体
  */
@@ -580,6 +799,30 @@ export interface KnownInformationView {
   related_entities?: string[];
   related_scenes?: string[];
   scope: "actor" | "party";
+}
+
+export interface KnownLocationView {
+  id: string;
+  kind: "region" | "site" | "room" | "connector";
+  name: string;
+  description?: string;
+  parent_location_id?: string | null;
+  region_id?: string | null;
+  existence: "rumored" | "known";
+  localization: "unknown" | "approximate" | "located";
+  access: "unknown" | "reachable" | "blocked";
+  visited?: boolean;
+}
+
+export interface LocationBreadcrumbView {
+  id: string;
+  name: string;
+}
+
+export interface LocationContextView {
+  current_location_id: string;
+  breadcrumbs?: LocationBreadcrumbView[];
+  position_context?: PositionContextView | null;
 }
 
 /**
@@ -827,6 +1070,9 @@ export interface PlayerView {
   revision: string;
   self_actor: SelfActorView;
   scene: SceneView;
+  location_context?: LocationContextView | null;
+  known_locations?: KnownLocationView[];
+  inventory?: InventoryItemView[];
   world?: WorldStateView;
   known_information?: KnownInformationView[];
   checkpoint_options?: CheckpointOption[];
@@ -846,6 +1092,14 @@ export interface PortraitGenerationResult {
   negativePrompt: string;
   promptSummary: string;
   promptSource: "deepseek" | "deterministic" | "deterministic_fallback";
+}
+
+export interface PositionContextView {
+  kind?: "access_boundary";
+  id: string;
+  label: string;
+  state: "locked" | "blocked" | "interaction_required";
+  destination_id: string;
 }
 
 export interface PushOption {
@@ -1086,6 +1340,7 @@ export interface SceneView {
   visible_entities?: VisibleEntity[];
   visible_actors?: VisibleActorView[];
   available_exits?: AvailableExitView[];
+  loose_items?: InventoryItemView[];
 }
 
 /**
@@ -1286,7 +1541,8 @@ export interface VisibleEntity {
  * side of the projector.
  */
 export interface WorldStateView {
-  elapsed_minutes?: number;
+  day_index?: number;
+  hour_of_day?: number;
   time_of_day?: "day" | "night";
   core_resolved?: boolean;
   ending_available?: boolean;

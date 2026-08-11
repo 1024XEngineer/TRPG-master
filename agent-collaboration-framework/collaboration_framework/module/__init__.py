@@ -13,6 +13,7 @@ from .validation import (
     validate_module,
     validate_module_json,
 )
+from .validation_v3 import validate_module_v3, validate_module_v3_json
 
 __all__ = [
     "ValidationIssue",
@@ -26,4 +27,6 @@ __all__ = [
     "validate_draft",
     "validate_module",
     "validate_module_json",
+    "validate_module_v3",
+    "validate_module_v3_json",
 ]

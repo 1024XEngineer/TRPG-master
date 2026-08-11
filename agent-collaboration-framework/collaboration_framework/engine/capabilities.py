@@ -9,6 +9,7 @@ from collaboration_framework.contracts import (
     ContractModel,
     ForceOperationSpec,
     ModuleContent,
+    ModuleContentV3,
     OperationSpec,
 )
 
@@ -60,8 +61,28 @@ class RuntimeCapabilityIssue(ContractModel):
 
 
 def audit_runtime_capabilities(
-    module_content: ModuleContent,
+    module_content: ModuleContent | ModuleContentV3,
 ) -> tuple[RuntimeCapabilityIssue, ...]:
+    """Refuse to run a module whose declared capabilities the runtime lacks.
+
+    v3 needs a much shorter audit than v2: hooks and free-form operations are
+    gone, and a v3 Rule can only reference registered Steps, Effects and
+    Predicates — the contract and its validator already enforce that statically
+    (#226 §1). What is left to check at load time is the world ruleset.
+    """
+
+    if isinstance(module_content, ModuleContentV3):
+        if module_content.world_ref in SUPPORTED_WORLD_REFS:
+            return ()
+        return (
+            RuntimeCapabilityIssue(
+                owner=f"module:{module_content.module_id}",
+                capability=f"world_ref:{module_content.world_ref}",
+                message=(
+                    "The deterministic runtime has no ruleset resolver for this world."
+                ),
+            ),
+        )
     issues: list[RuntimeCapabilityIssue] = []
     if module_content.world_ref not in SUPPORTED_WORLD_REFS:
         issues.append(
@@ -155,7 +176,9 @@ def audit_runtime_capabilities(
     return tuple(issues)
 
 
-def require_runtime_capabilities(module_content: ModuleContent) -> None:
+def require_runtime_capabilities(
+    module_content: ModuleContent | ModuleContentV3,
+) -> None:
     issues = audit_runtime_capabilities(module_content)
     if not issues:
         return

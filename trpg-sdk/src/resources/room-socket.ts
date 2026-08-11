@@ -166,7 +166,8 @@ function isValidWorldState(value: unknown): boolean {
   if (value === undefined) return true;
   if (!isRecord(value)) return false;
   return (
-    typeof value.elapsed_minutes === 'number' &&
+    typeof value.day_index === 'number' &&
+    typeof value.hour_of_day === 'number' &&
     (value.time_of_day === 'day' || value.time_of_day === 'night') &&
     typeof value.core_resolved === 'boolean' &&
     typeof value.ending_available === 'boolean' &&
@@ -597,27 +598,6 @@ export class RoomSocket {
 
   startGame(playerId: string): void {
     this.send('game.start', playerId, {});
-  }
-
-  submitAction(playerId: string, payload: ActionSubmitPayload): Promise<AgentTurnPayload> {
-    const existing = this.pendingActions.get(payload.clientActionId);
-    if (existing) {
-      this.send('action.submit', playerId, payload);
-      return existing.promise;
-    }
-
-    let resolve!: (result: AgentTurnPayload) => void;
-    let reject!: (error: Error) => void;
-    const promise = new Promise<AgentTurnPayload>((resolveAction, rejectAction) => {
-      resolve = resolveAction;
-      reject = rejectAction;
-    });
-    this.pendingActions.set(payload.clientActionId, { promise, resolve, reject });
-    if (!this.send('action.submit', playerId, payload)) {
-      this.pendingActions.delete(payload.clientActionId);
-      reject(new RoomSocketTransportError('WebSocket is not connected'));
-    }
-    return promise;
   }
 
   /** Submit through the finite ActionPlan production path (issue #225). */

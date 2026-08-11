@@ -1,0 +1,3647 @@
+{
+  "content_schema_version": 3,
+  "module_id": "paper-chase-zh-coc7",
+  "version": "3.0.5",
+  "world_ref": "coc-7e",
+  "background": "时代与地点为美国禁酒令时期的密歇根州阿诺兹堡。调查员受托马斯·金博尔委托，从五本失窃的旧书和叔叔道格拉斯一年前的失踪案入手，走访旧宅、图书馆与公共墓地。叙事应保持安静、克制而带哥特气息，以夜色、旧书、墓园和孤独感作为反复意象；面对异常时不要急于渲染纯粹敌意，应为同情、选择与淡淡哀伤保留空间。任何尚未由线索确认的真相都不得提前告知玩家。",
+  "information": [
+    {
+      "id": "lyla_cemetery_sighting",
+      "kind": "clue",
+      "title": "莱拉的回忆",
+      "keeper_content": "莱拉·奥戴尔曾看见道格拉斯夹着一本书往公墓方向走；但他本来走到哪里都带着书。",
+      "player_content": "莱拉记得道格拉斯曾夹着一本书从窗前经过，往公墓方向走去。",
+      "criticality": "supporting",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location",
+          "runtime_entity",
+          "public_record"
+        ]
+      }
+    },
+    {
+      "id": "melodias_night_sighting",
+      "kind": "clue",
+      "title": "看守的夜间目击",
+      "keeper_content": "梅洛迪亚斯深夜在公墓看见一个人影仍坐在道格拉斯常用的墓碑上，因为害怕而没有靠近。",
+      "player_content": "梅洛迪亚斯承认，他曾在深夜看到一个人影坐在那块墓碑上，但因为害怕没有上前。",
+      "criticality": "supporting",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location",
+          "runtime_entity",
+          "public_record"
+        ]
+      }
+    },
+    {
+      "id": "melodias_pocket_bottle",
+      "kind": "clue",
+      "title": "看守衣袋里的酒瓶",
+      "keeper_content": "仔细观察梅洛迪亚斯时，可以看出他的旧外套衣袋里藏着一只小酒瓶。",
+      "player_content": "你注意到梅洛迪亚斯的旧外套衣袋被一只小酒瓶撑出了明显的轮廓。",
+      "criticality": "supporting",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location",
+          "runtime_entity",
+          "public_record"
+        ]
+      }
+    },
+    {
+      "id": "town_speakeasy_rumor",
+      "kind": "rumor",
+      "title": "镇上有地下酒吧",
+      "keeper_content": "禁酒令下阿诺兹堡仍有一家地下酒吧在营业，入口开在街面某处不起眼的门后。看守衣袋里的酒正是从那儿流出来的，但外人得自己打听或留意才找得到确切位置。",
+      "player_content": "禁酒令都这么些年了，这瓶酒总得有个来处——镇上多半藏着一家地下酒吧，只是入口在哪，得自己去街上打听或留意。",
+      "criticality": "supporting",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location",
+          "runtime_entity",
+          "public_record"
+        ]
+      }
+    },
+    {
+      "id": "cemetery_dance_report",
+      "kind": "clue",
+      "title": "墓地旧闻",
+      "keeper_content": "十多年前有人目击一群看似未着寸缕的人在公墓跳舞；警方没找到人，只留下形状怪异的脚印。",
+      "player_content": "旧报报道曾有人目击一群近似裸体的人在公墓跳舞；警方没找到人，却留下了怪异脚印。",
+      "criticality": "supporting",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location",
+          "runtime_entity",
+          "public_record"
+        ]
+      }
+    },
+    {
+      "id": "hilda_ghoul_statement",
+      "kind": "clue",
+      "title": "希尔达的陈述",
+      "keeper_content": "希尔达·沃德称自己二十多年间常看到犬类面孔、蹄状足部、浑身腐泥的“恶魔子嗣”在墓地附近出没。",
+      "player_content": "报社让你查阅相关材料，其中有希尔达·沃德关于犬脸、蹄足怪物的未刊陈述。",
+      "criticality": "supporting",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location",
+          "runtime_entity",
+          "public_record"
+        ]
+      }
+    },
+    {
+      "id": "diary_tunnel_clue",
+      "kind": "clue",
+      "title": "日记中的地下线索",
+      "keeper_content": "道格拉斯失踪前决定加入“我在地下的朋友们”；日记暗示公墓地下有神秘生物居住的隧道网络。",
+      "player_content": "最后一条日记说，道格拉斯决定加入“我在地下的朋友们”；零碎记录还暗示公墓下存在隧道网络。",
+      "criticality": "essential",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location",
+          "runtime_entity",
+          "public_record"
+        ]
+      }
+    },
+    {
+      "id": "douglas_true_nature",
+      "kind": "clue",
+      "title": "人影的真实身份",
+      "keeper_content": "道格拉斯已经转化为食尸鬼，但仍保留记忆、人格和交谈能力。",
+      "player_content": "道格拉斯承认自己厌倦了人类社会，只想不受打扰地阅读。地下生活令他满足，而食尸鬼即将永远关闭这处入口。",
+      "criticality": "essential",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location",
+          "runtime_entity",
+          "public_record"
+        ]
+      }
+    },
+    {
+      "id": "douglas_confession",
+      "kind": "clue",
+      "title": "道格拉斯的选择",
+      "keeper_content": "道格拉斯厌倦人类社会，只想自由阅读；地下生活令他满足，食尸鬼即将关闭这处入口，他不会再回来，并请求调查员向托马斯隐瞒真相。",
+      "player_content": "道格拉斯承认自己厌倦了人类社会，只想不受打扰地阅读。地下生活令他满足，而食尸鬼即将永远关闭这处入口。",
+      "criticality": "essential",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location",
+          "runtime_entity",
+          "public_record"
+        ]
+      }
+    }
+  ],
+  "knowledge_goals": [
+    {
+      "id": "learn_cemetery_connection",
+      "target_information_ids": [
+        "lyla_cemetery_sighting",
+        "melodias_night_sighting",
+        "cemetery_dance_report",
+        "hilda_ghoul_statement"
+      ],
+      "completion": "any",
+      "required_for_core_resolution": true
+    },
+    {
+      "id": "learn_crypt_access",
+      "target_information_ids": [
+        "diary_tunnel_clue"
+      ],
+      "completion": "all",
+      "required_for_core_resolution": false
+    },
+    {
+      "id": "learn_douglas_fate",
+      "target_information_ids": [
+        "douglas_true_nature",
+        "douglas_confession"
+      ],
+      "completion": "all",
+      "required_for_core_resolution": true
+    }
+  ],
+  "entities": [
+    {
+      "id": "thomas",
+      "kind": "npc",
+      "name": "托马斯·金博尔",
+      "player_visible_name": "托马斯·金博尔",
+      "player_visible_aliases": [
+        "托马斯",
+        "道格拉斯的侄子",
+        "委托人"
+      ],
+      "description": "道格拉斯·金博尔的侄子，现住在叔叔的旧居。他希望找回五本失窃藏书，并确认叔叔的下落。",
+      "located_in": "thomas_office",
+      "state": {
+        "case_open": true,
+        "knows_truth": false
+      },
+      "visibility": "public",
+      "plot_relevance": true
+    },
+    {
+      "id": "cemetery_figure",
+      "kind": "npc",
+      "name": "道格拉斯·金博尔",
+      "player_visible_name": "墓地中的人影",
+      "player_visible_aliases": [
+        "人影",
+        "夜行者"
+      ],
+      "description": "夜色中一条瘦削的人影，怀里似乎夹着一本书。",
+      "located_in": "crypt",
+      "state": {
+        "alive": true,
+        "sighted": false,
+        "true_form_seen": false,
+        "visit_observed": false,
+        "willing_to_talk": false,
+        "truth_told": false,
+        "corpse_identified": false,
+        "left_forever": false
+      },
+      "visibility": "public",
+      "visibility_conditions": [
+        {
+          "op": "any",
+          "items": [
+            {
+              "op": "predicate",
+              "predicate": "entity_state_is",
+              "args": {
+                "entity_id": "cemetery_figure",
+                "key": "sighted",
+                "value": true
+              }
+            },
+            {
+              "op": "predicate",
+              "predicate": "entity_state_is",
+              "args": {
+                "entity_id": "cemetery_figure",
+                "key": "willing_to_talk",
+                "value": true
+              }
+            },
+            {
+              "op": "predicate",
+              "predicate": "entity_state_is",
+              "args": {
+                "entity_id": "cemetery_figure",
+                "key": "true_form_seen",
+                "value": true
+              }
+            },
+            {
+              "op": "predicate",
+              "predicate": "entity_state_is",
+              "args": {
+                "entity_id": "cemetery_figure",
+                "key": "corpse_identified",
+                "value": true
+              }
+            }
+          ]
+        }
+      ],
+      "plot_relevance": true
+    },
+    {
+      "id": "lyla",
+      "kind": "npc",
+      "name": "莱拉·奥戴尔",
+      "player_visible_name": "莱拉·奥戴尔",
+      "player_visible_aliases": [
+        "莱拉",
+        "奥戴尔女士",
+        "邻居"
+      ],
+      "description": "道格拉斯旧居附近的一名邻居，记得他失踪前的一些生活习惯。",
+      "located_in": "neighborhood",
+      "state": {
+        "interviewed": false
+      },
+      "visibility": "public",
+      "plot_relevance": true
+    },
+    {
+      "id": "melodias",
+      "kind": "npc",
+      "name": "梅洛迪亚斯·杰弗逊",
+      "player_visible_name": "梅洛迪亚斯·杰弗逊",
+      "player_visible_aliases": [
+        "梅洛迪亚斯",
+        "守墓人",
+        "墓地看守",
+        "看守"
+      ],
+      "description": "公共墓地的看守，穿着一件旧外套，看起来有些紧张。",
+      "located_in": "cemetery",
+      "state": {
+        "impressed": false,
+        "bottle_noticed": false,
+        "cooperative": false
+      },
+      "visibility": "public",
+      "plot_relevance": true
+    },
+    {
+      "id": "hilda",
+      "kind": "npc",
+      "name": "希尔达·沃德",
+      "player_visible_name": "希尔达·沃德",
+      "player_visible_aliases": [
+        "沃德女士",
+        "失眠症邻居"
+      ],
+      "description": "一位已经搬去底特律的老妇人，曾向报社留下关于墓地的陈述。",
+      "located_in": "newspaper_office",
+      "state": {},
+      "visibility": "public",
+      "visibility_conditions": [
+        {
+          "op": "predicate",
+          "predicate": "entity_state_is",
+          "args": {
+            "entity_id": "newspaper_archive",
+            "key": "hilda_statement_found",
+            "value": true
+          }
+        }
+      ],
+      "plot_relevance": true
+    },
+    {
+      "id": "douglas_diary",
+      "kind": "object",
+      "name": "道格拉斯的日记",
+      "player_visible_name": "道格拉斯的旧日记",
+      "player_visible_aliases": [
+        "日记",
+        "旧日记"
+      ],
+      "description": "一本记录零碎、字迹难读的日记，最后一条写于道格拉斯失踪前一天。",
+      "located_in": "kimball_study",
+      "state": {
+        "found": false,
+        "read": false
+      },
+      "visibility": "public",
+      "visibility_conditions": [
+        {
+          "op": "predicate",
+          "predicate": "entity_state_is",
+          "args": {
+            "entity_id": "douglas_diary",
+            "key": "found",
+            "value": true
+          }
+        }
+      ],
+      "item_component": {
+        "portable": true,
+        "unique": true,
+        "quantity": 1
+      },
+      "plot_relevance": true
+    },
+    {
+      "id": "study_window",
+      "kind": "object",
+      "name": "书房窗户",
+      "player_visible_name": "书房窗户",
+      "player_visible_aliases": [
+        "窗户",
+        "书房的窗"
+      ],
+      "description": "书房墙上的一扇木框玻璃窗，窗框和玻璃目前完好无损，窗闩从内侧扣着。",
+      "located_in": "kimball_study",
+      "state": {
+        "locked": true,
+        "broken": false
+      },
+      "visibility": "public",
+      "plot_relevance": true
+    },
+    {
+      "id": "missing_books",
+      "kind": "object",
+      "name": "五本失窃藏书",
+      "player_visible_name": "五本失窃藏书",
+      "player_visible_aliases": [
+        "失窃书籍",
+        "道格拉斯的书"
+      ],
+      "description": "五本没有多少经济价值、却被道格拉斯珍爱的旧书。",
+      "located_in": "kimball_study",
+      "state": {
+        "stolen": true,
+        "recovered": false
+      },
+      "visibility": "public",
+      "item_component": {
+        "portable": true,
+        "unique": true,
+        "quantity": 5
+      },
+      "plot_relevance": true
+    },
+    {
+      "id": "liquor",
+      "kind": "object",
+      "name": "一品脱酒",
+      "player_visible_name": "一品脱酒",
+      "player_visible_aliases": [
+        "酒",
+        "贿赂用酒"
+      ],
+      "description": "调查员正在寻找的一品脱酒，在禁酒令下通常需要花费 1d3 美元。",
+      "located_in": "speakeasy",
+      "state": {
+        "speakeasy_found": false,
+        "obtained": false,
+        "given_to_caretaker": false
+      },
+      "visibility": "public",
+      "item_component": {
+        "portable": true,
+        "unique": false,
+        "quantity": 1
+      },
+      "plot_relevance": true
+    },
+    {
+      "id": "newspaper_archive",
+      "kind": "object",
+      "name": "墓地旧闻档案",
+      "player_visible_name": "当地旧报档案",
+      "player_visible_aliases": [
+        "旧报",
+        "报社档案",
+        "当地档案"
+      ],
+      "description": "当地报纸与历史资料的旧档案。",
+      "located_in": "library",
+      "state": {
+        "library_report_found": false,
+        "newspaper_accessed": false,
+        "hilda_statement_found": false
+      },
+      "visibility": "public",
+      "plot_relevance": true
+    },
+    {
+      "id": "favorite_grave",
+      "kind": "object",
+      "name": "道格拉斯常坐的墓碑",
+      "player_visible_name": "道格拉斯常坐的墓碑",
+      "player_visible_aliases": [
+        "低矮墓碑",
+        "常坐的坟墓",
+        "最喜欢的墓碑"
+      ],
+      "description": "道格拉斯过去常坐在这里连续读上数小时。",
+      "located_in": "cemetery",
+      "state": {
+        "identified": false,
+        "tracks_found": false
+      },
+      "visibility": "public",
+      "visibility_conditions": [
+        {
+          "op": "predicate",
+          "predicate": "entity_state_is",
+          "args": {
+            "entity_id": "favorite_grave",
+            "key": "identified",
+            "value": true
+          }
+        }
+      ],
+      "plot_relevance": true
+    },
+    {
+      "id": "crypt_entrance",
+      "kind": "object",
+      "name": "石板下的地穴入口",
+      "player_visible_name": "石板下的地穴入口",
+      "player_visible_aliases": [
+        "地穴",
+        "入口石板",
+        "坟墓入口"
+      ],
+      "description": "一块沉重石板遮住了向下的通道，缝隙附近有难闻气味。",
+      "located_in": "cemetery",
+      "state": {
+        "discovered": false,
+        "slab_moved": false,
+        "entered": false
+      },
+      "visibility": "public",
+      "visibility_conditions": [
+        {
+          "op": "predicate",
+          "predicate": "entity_state_is",
+          "args": {
+            "entity_id": "crypt_entrance",
+            "key": "discovered",
+            "value": true
+          }
+        }
+      ],
+      "plot_relevance": true
+    },
+    {
+      "id": "ghoul_crowd",
+      "kind": "npc",
+      "name": "食尸鬼群",
+      "player_visible_name": "食尸鬼群",
+      "player_visible_aliases": [
+        "几十只食尸鬼",
+        "墓地怪物"
+      ],
+      "description": "夜幕下传来密集细碎的脚步声，几十个近似人形的轮廓逐渐从墓碑之间现身。",
+      "located_in": "crypt",
+      "state": {
+        "revealed": false,
+        "hostile": false
+      },
+      "visibility": "public",
+      "visibility_conditions": [
+        {
+          "op": "predicate",
+          "predicate": "entity_state_is",
+          "args": {
+            "entity_id": "ghoul_crowd",
+            "key": "revealed",
+            "value": true
+          }
+        }
+      ],
+      "plot_relevance": true
+    },
+    {
+      "id": "case_tracker",
+      "kind": "object",
+      "name": "案件进程",
+      "player_visible_name": "案件进程",
+      "player_visible_aliases": [],
+      "description": "用于记录失踪与盗书调查的进展。",
+      "located_in": null,
+      "state": {
+        "surveillance_available": false,
+        "first_ghoul_sight_resolved": false,
+        "douglas_identity_shock_resolved": false,
+        "crowd_sight_resolved": false,
+        "investigator_disappeared": false,
+        "sent_to_asylum": false,
+        "douglas_body_removed": false,
+        "investigation_resolved": false
+      },
+      "visibility": "keeper",
+      "plot_relevance": false
+    },
+    {
+      "id": "surveillance_area",
+      "kind": "object",
+      "name": "夜间监视区域",
+      "player_visible_name": "夜间监视区域",
+      "player_visible_aliases": [
+        "监视点",
+        "道路"
+      ],
+      "description": "金博尔宅、书房窗户与通往公墓的道路都在监视范围内。",
+      "located_in": "surveillance_point",
+      "state": {},
+      "visibility": "public",
+      "plot_relevance": true
+    }
+  ],
+  "locations": [
+    {
+      "id": "arnoldsburg",
+      "kind": "region",
+      "name": "阿诺兹堡",
+      "player_visible_name": "阿诺兹堡"
+    },
+    {
+      "id": "arnoldsburg_streets",
+      "kind": "connector",
+      "origin": "system_seeded",
+      "name": "阿诺兹堡街道",
+      "player_visible_name": "阿诺兹堡街道",
+      "player_visible_description": "连接镇上各处的街道。",
+      "parent_location_id": "arnoldsburg",
+      "region_id": "arnoldsburg",
+      "plot_relevance": false,
+      "lifecycle": "room"
+    },
+    {
+      "id": "thomas_office",
+      "kind": "room",
+      "name": "托马斯的委托",
+      "player_visible_name": "托马斯的会客室",
+      "player_visible_description": "托马斯·金博尔坐在你面前，正等待你回应寻找失窃藏书和叔叔下落的委托。",
+      "parent_location_id": "kimball_house",
+      "region_id": "arnoldsburg"
+    },
+    {
+      "id": "neighborhood",
+      "kind": "site",
+      "name": "询问朋友和邻居",
+      "player_visible_name": "金博尔宅附近",
+      "player_visible_description": "道格拉斯旧居周围是安静的街区，熟悉他的邻居仍在这里生活。",
+      "parent_location_id": "arnoldsburg",
+      "region_id": "arnoldsburg"
+    },
+    {
+      "id": "cemetery",
+      "kind": "site",
+      "name": "阿诺兹堡公共墓地",
+      "player_visible_name": "阿诺兹堡公共墓地",
+      "player_visible_description": "成排墓碑立在寂静的公共墓地中，守墓人的住处位于不远处。",
+      "parent_location_id": "arnoldsburg",
+      "region_id": "arnoldsburg"
+    },
+    {
+      "id": "library",
+      "kind": "site",
+      "name": "当地图书馆",
+      "player_visible_name": "阿诺兹堡图书馆",
+      "player_visible_description": "安静的图书馆里整齐保存着当地报纸与历史资料的旧刊。",
+      "parent_location_id": "arnoldsburg",
+      "region_id": "arnoldsburg"
+    },
+    {
+      "id": "newspaper_office",
+      "kind": "site",
+      "name": "《阿诺兹堡广告报》",
+      "player_visible_name": "《阿诺兹堡广告报》报社",
+      "player_visible_description": "报社里电话声与打字声此起彼伏，存放旧闻材料的档案室位于里面。",
+      "parent_location_id": "arnoldsburg",
+      "region_id": "arnoldsburg"
+    },
+    {
+      "id": "kimball_house",
+      "kind": "site",
+      "name": "金博尔宅",
+      "player_visible_name": "金博尔宅",
+      "player_visible_description": "大小、形制与题材各异的藏书塞满书房，每一本都保养得很好。",
+      "parent_location_id": "arnoldsburg",
+      "region_id": "arnoldsburg"
+    },
+    {
+      "id": "speakeasy",
+      "kind": "site",
+      "name": "地下酒吧",
+      "player_visible_name": "地下酒吧",
+      "player_visible_description": "隐蔽入口后是灯光昏暗、压低交谈声不断的地下酒吧。",
+      "parent_location_id": "arnoldsburg",
+      "region_id": "arnoldsburg"
+    },
+    {
+      "id": "crypt",
+      "kind": "room",
+      "name": "地穴入口",
+      "player_visible_name": "地穴入口",
+      "player_visible_description": "一块沉重石板盖着向下的通道，周围空气阴冷而浑浊。",
+      "parent_location_id": "cemetery",
+      "region_id": "arnoldsburg"
+    },
+    {
+      "id": "surveillance_point",
+      "kind": "room",
+      "name": "夜间监视",
+      "player_visible_name": "夜间监视点",
+      "player_visible_description": "夜色笼罩着金博尔宅与通往公墓的道路，你可以在阴影中观察周围动静。",
+      "parent_location_id": "arnoldsburg",
+      "region_id": "arnoldsburg"
+    },
+    {
+      "id": "kimball_study",
+      "kind": "room",
+      "name": "道格拉斯的书房",
+      "player_visible_name": "道格拉斯的书房",
+      "player_visible_description": "房内塞满受到精心保养的各类书籍。彻底搜索至少需要一天。",
+      "parent_location_id": "kimball_house",
+      "region_id": "arnoldsburg"
+    }
+  ],
+  "location_edges": [
+    {
+      "id": "edge_arnoldsburg_streets_to_thomas_office",
+      "from_location_id": "arnoldsburg_streets",
+      "to_location_id": "thomas_office",
+      "kind": "public_network",
+      "travel_cost": {
+        "minutes": 10
+      },
+      "origin": "synthesized"
+    },
+    {
+      "id": "edge_thomas_office_to_arnoldsburg_streets",
+      "from_location_id": "thomas_office",
+      "to_location_id": "arnoldsburg_streets",
+      "kind": "public_network",
+      "travel_cost": {
+        "minutes": 10
+      },
+      "origin": "synthesized"
+    },
+    {
+      "id": "edge_arnoldsburg_streets_to_neighborhood",
+      "from_location_id": "arnoldsburg_streets",
+      "to_location_id": "neighborhood",
+      "kind": "public_network",
+      "travel_cost": {
+        "minutes": 10
+      },
+      "origin": "synthesized"
+    },
+    {
+      "id": "edge_neighborhood_to_arnoldsburg_streets",
+      "from_location_id": "neighborhood",
+      "to_location_id": "arnoldsburg_streets",
+      "kind": "public_network",
+      "travel_cost": {
+        "minutes": 10
+      },
+      "origin": "synthesized"
+    },
+    {
+      "id": "edge_arnoldsburg_streets_to_cemetery",
+      "from_location_id": "arnoldsburg_streets",
+      "to_location_id": "cemetery",
+      "kind": "public_network",
+      "travel_cost": {
+        "minutes": 10
+      },
+      "origin": "synthesized"
+    },
+    {
+      "id": "edge_cemetery_to_arnoldsburg_streets",
+      "from_location_id": "cemetery",
+      "to_location_id": "arnoldsburg_streets",
+      "kind": "public_network",
+      "travel_cost": {
+        "minutes": 10
+      },
+      "origin": "synthesized"
+    },
+    {
+      "id": "edge_arnoldsburg_streets_to_library",
+      "from_location_id": "arnoldsburg_streets",
+      "to_location_id": "library",
+      "kind": "public_network",
+      "travel_cost": {
+        "minutes": 10
+      },
+      "origin": "synthesized"
+    },
+    {
+      "id": "edge_library_to_arnoldsburg_streets",
+      "from_location_id": "library",
+      "to_location_id": "arnoldsburg_streets",
+      "kind": "public_network",
+      "travel_cost": {
+        "minutes": 10
+      },
+      "origin": "synthesized"
+    },
+    {
+      "id": "edge_arnoldsburg_streets_to_newspaper_office",
+      "from_location_id": "arnoldsburg_streets",
+      "to_location_id": "newspaper_office",
+      "kind": "public_network",
+      "travel_cost": {
+        "minutes": 10
+      },
+      "origin": "synthesized"
+    },
+    {
+      "id": "edge_newspaper_office_to_arnoldsburg_streets",
+      "from_location_id": "newspaper_office",
+      "to_location_id": "arnoldsburg_streets",
+      "kind": "public_network",
+      "travel_cost": {
+        "minutes": 10
+      },
+      "origin": "synthesized"
+    },
+    {
+      "id": "edge_arnoldsburg_streets_to_kimball_house",
+      "from_location_id": "arnoldsburg_streets",
+      "to_location_id": "kimball_house",
+      "kind": "public_network",
+      "travel_cost": {
+        "minutes": 10
+      },
+      "origin": "synthesized"
+    },
+    {
+      "id": "edge_kimball_house_to_arnoldsburg_streets",
+      "from_location_id": "kimball_house",
+      "to_location_id": "arnoldsburg_streets",
+      "kind": "public_network",
+      "travel_cost": {
+        "minutes": 10
+      },
+      "origin": "synthesized"
+    },
+    {
+      "id": "edge_kimball_house_to_study",
+      "from_location_id": "kimball_house",
+      "to_location_id": "kimball_study",
+      "kind": "private",
+      "travel_cost": {
+        "minutes": 1
+      }
+    },
+    {
+      "id": "edge_study_to_kimball_house",
+      "from_location_id": "kimball_study",
+      "to_location_id": "kimball_house",
+      "kind": "private",
+      "travel_cost": {
+        "minutes": 1
+      }
+    },
+    {
+      "id": "edge_streets_to_speakeasy",
+      "from_location_id": "arnoldsburg_streets",
+      "to_location_id": "speakeasy",
+      "kind": "concealed",
+      "traversal": "gated",
+      "visibility": "hidden",
+      "travel_cost": {
+        "minutes": 15
+      },
+      "conditions": [
+        {
+          "op": "predicate",
+          "predicate": "entity_state_is",
+          "args": {
+            "entity_id": "liquor",
+            "key": "speakeasy_found",
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "edge_speakeasy_to_streets",
+      "from_location_id": "speakeasy",
+      "to_location_id": "arnoldsburg_streets",
+      "kind": "concealed",
+      "travel_cost": {
+        "minutes": 15
+      }
+    },
+    {
+      "id": "edge_cemetery_to_crypt",
+      "from_location_id": "cemetery",
+      "to_location_id": "crypt",
+      "kind": "concealed",
+      "traversal": "gated",
+      "visibility": "hidden",
+      "access_point_id": "crypt_entrance",
+      "travel_cost": {
+        "minutes": 5
+      },
+      "conditions": [
+        {
+          "op": "predicate",
+          "predicate": "entity_state_is",
+          "args": {
+            "entity_id": "crypt_entrance",
+            "key": "slab_moved",
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "edge_crypt_to_cemetery",
+      "from_location_id": "crypt",
+      "to_location_id": "cemetery",
+      "kind": "concealed",
+      "access_point_id": "crypt_entrance",
+      "travel_cost": {
+        "minutes": 5
+      }
+    },
+    {
+      "id": "edge_cemetery_to_surveillance",
+      "from_location_id": "cemetery",
+      "to_location_id": "surveillance_point",
+      "kind": "private",
+      "travel_cost": {
+        "minutes": 5
+      }
+    },
+    {
+      "id": "edge_surveillance_to_cemetery",
+      "from_location_id": "surveillance_point",
+      "to_location_id": "cemetery",
+      "kind": "private",
+      "travel_cost": {
+        "minutes": 5
+      }
+    },
+    {
+      "id": "edge_kimball_house_to_surveillance",
+      "from_location_id": "kimball_house",
+      "to_location_id": "surveillance_point",
+      "kind": "private",
+      "travel_cost": {
+        "minutes": 5
+      }
+    },
+    {
+      "id": "edge_surveillance_to_kimball_house",
+      "from_location_id": "surveillance_point",
+      "to_location_id": "kimball_house",
+      "kind": "private",
+      "travel_cost": {
+        "minutes": 5
+      }
+    }
+  ],
+  "rules": [
+    {
+      "id": "question_neighbors",
+      "trigger": {
+        "kind": "agent_match",
+        "scope": {
+          "action_families": [
+            "interview"
+          ],
+          "location_ids": [
+            "neighborhood"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "lyla"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "interview",
+            "莱拉·奥戴尔"
+          ]
+        },
+        "options": [
+          {
+            "id": "fast-talk",
+            "semantic_hints": [
+              "话术",
+              "用话术"
+            ]
+          },
+          {
+            "id": "charm",
+            "semantic_hints": [
+              "取悦",
+              "用取悦"
+            ]
+          },
+          {
+            "id": "persuade",
+            "semantic_hints": [
+              "说服",
+              "用说服"
+            ]
+          }
+        ]
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "fast-talk",
+            "entry_step_id": "check_fast-talk"
+          },
+          {
+            "id": "charm",
+            "entry_step_id": "check_charm"
+          },
+          {
+            "id": "persuade",
+            "entry_step_id": "check_persuade"
+          }
+        ],
+        "steps": [
+          {
+            "id": "finish",
+            "kind": "finish"
+          },
+          {
+            "id": "succeed_0",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "lyla_cemetery_sighting",
+              "scope": "party"
+            },
+            "next_step_id": "succeed_1"
+          },
+          {
+            "id": "succeed_1",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "lyla",
+              "key": "interviewed",
+              "value": true
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "check_fast-talk",
+            "kind": "check",
+            "check": {
+              "profile_id": "coc7.skill",
+              "actor_binding": "actor",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "fast-talk"
+              },
+              "difficulty": "regular"
+            },
+            "result_routes": {
+              "critical_success": "succeed_0",
+              "extreme_success": "succeed_0",
+              "hard_success": "succeed_0",
+              "regular_success": "succeed_0",
+              "failure": "finish",
+              "fumble": "finish"
+            }
+          },
+          {
+            "id": "check_charm",
+            "kind": "check",
+            "check": {
+              "profile_id": "coc7.skill",
+              "actor_binding": "actor",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "charm"
+              },
+              "difficulty": "regular"
+            },
+            "result_routes": {
+              "critical_success": "succeed_0",
+              "extreme_success": "succeed_0",
+              "hard_success": "succeed_0",
+              "regular_success": "succeed_0",
+              "failure": "finish",
+              "fumble": "finish"
+            }
+          },
+          {
+            "id": "check_persuade",
+            "kind": "check",
+            "check": {
+              "profile_id": "coc7.skill",
+              "actor_binding": "actor",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "persuade"
+              },
+              "difficulty": "regular"
+            },
+            "result_routes": {
+              "critical_success": "succeed_0",
+              "extreme_success": "succeed_0",
+              "hard_success": "succeed_0",
+              "regular_success": "succeed_0",
+              "failure": "finish",
+              "fumble": "finish"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "impress_caretaker",
+      "trigger": {
+        "kind": "agent_match",
+        "scope": {
+          "action_families": [
+            "social"
+          ],
+          "location_ids": [
+            "cemetery"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "melodias"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "social",
+            "梅洛迪亚斯·杰弗逊"
+          ]
+        },
+        "options": [
+          {
+            "id": "credit-rating",
+            "semantic_hints": [
+              "信用评级",
+              "用信用评级"
+            ]
+          }
+        ]
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "credit-rating",
+            "entry_step_id": "check_credit-rating"
+          }
+        ],
+        "steps": [
+          {
+            "id": "finish",
+            "kind": "finish"
+          },
+          {
+            "id": "succeed_0",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "melodias",
+              "key": "impressed",
+              "value": true
+            },
+            "next_step_id": "succeed_1"
+          },
+          {
+            "id": "succeed_1",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "favorite_grave",
+              "key": "identified",
+              "value": true
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "check_credit-rating",
+            "kind": "check",
+            "check": {
+              "profile_id": "coc7.skill",
+              "actor_binding": "actor",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "credit-rating"
+              },
+              "difficulty": "regular"
+            },
+            "result_routes": {
+              "critical_success": "succeed_0",
+              "extreme_success": "succeed_0",
+              "hard_success": "succeed_0",
+              "regular_success": "succeed_0",
+              "failure": "finish",
+              "fumble": "finish"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "observe_caretaker",
+      "trigger": {
+        "kind": "agent_match",
+        "scope": {
+          "action_families": [
+            "observe"
+          ],
+          "location_ids": [
+            "cemetery"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "melodias"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "observe",
+            "梅洛迪亚斯·杰弗逊"
+          ]
+        },
+        "options": [
+          {
+            "id": "spot-hidden",
+            "semantic_hints": [
+              "侦查",
+              "用侦查"
+            ]
+          }
+        ]
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "spot-hidden",
+            "entry_step_id": "check_spot-hidden"
+          }
+        ],
+        "steps": [
+          {
+            "id": "finish",
+            "kind": "finish"
+          },
+          {
+            "id": "succeed_0",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "melodias",
+              "key": "bottle_noticed",
+              "value": true
+            },
+            "next_step_id": "succeed_1"
+          },
+          {
+            "id": "succeed_1",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "melodias_pocket_bottle",
+              "scope": "party"
+            },
+            "next_step_id": "succeed_2"
+          },
+          {
+            "id": "succeed_2",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "town_speakeasy_rumor",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "check_spot-hidden",
+            "kind": "check",
+            "check": {
+              "profile_id": "coc7.skill",
+              "actor_binding": "actor",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "spot-hidden"
+              },
+              "difficulty": "regular"
+            },
+            "result_routes": {
+              "critical_success": "succeed_0",
+              "extreme_success": "succeed_0",
+              "hard_success": "succeed_0",
+              "regular_success": "succeed_0",
+              "failure": "finish",
+              "fumble": "finish"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "intimidate_caretaker",
+      "trigger": {
+        "kind": "agent_match",
+        "scope": {
+          "action_families": [
+            "intimidate"
+          ],
+          "location_ids": [
+            "cemetery"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "melodias"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "intimidate",
+            "梅洛迪亚斯·杰弗逊"
+          ]
+        },
+        "options": [
+          {
+            "id": "intimidate",
+            "semantic_hints": [
+              "恐吓",
+              "用恐吓"
+            ]
+          }
+        ]
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "intimidate",
+            "entry_step_id": "check_intimidate"
+          }
+        ],
+        "steps": [
+          {
+            "id": "finish",
+            "kind": "finish"
+          },
+          {
+            "id": "succeed_0",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "melodias_night_sighting",
+              "scope": "party"
+            },
+            "next_step_id": "succeed_1"
+          },
+          {
+            "id": "succeed_1",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "melodias",
+              "key": "cooperative",
+              "value": true
+            },
+            "next_step_id": "succeed_2"
+          },
+          {
+            "id": "succeed_2",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "favorite_grave",
+              "key": "identified",
+              "value": true
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "check_intimidate",
+            "kind": "check",
+            "check": {
+              "profile_id": "coc7.skill",
+              "actor_binding": "actor",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "intimidate"
+              },
+              "difficulty": "regular"
+            },
+            "result_routes": {
+              "critical_success": "succeed_0",
+              "extreme_success": "succeed_0",
+              "hard_success": "succeed_0",
+              "regular_success": "succeed_0",
+              "failure": "finish",
+              "fumble": "finish"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "bribe_caretaker",
+      "trigger": {
+        "kind": "agent_match",
+        "scope": {
+          "action_families": [
+            "bribe"
+          ],
+          "location_ids": [
+            "cemetery"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "melodias"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "bribe",
+            "梅洛迪亚斯·杰弗逊"
+          ]
+        },
+        "options": [
+          {
+            "id": "fast-talk",
+            "semantic_hints": [
+              "话术",
+              "用话术"
+            ]
+          },
+          {
+            "id": "charm",
+            "semantic_hints": [
+              "取悦",
+              "用取悦"
+            ]
+          },
+          {
+            "id": "credit-rating",
+            "semantic_hints": [
+              "信用评级",
+              "用信用评级"
+            ]
+          }
+        ]
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "fast-talk",
+            "entry_step_id": "check_fast-talk"
+          },
+          {
+            "id": "charm",
+            "entry_step_id": "check_charm"
+          },
+          {
+            "id": "credit-rating",
+            "entry_step_id": "check_credit-rating"
+          }
+        ],
+        "steps": [
+          {
+            "id": "finish",
+            "kind": "finish"
+          },
+          {
+            "id": "succeed_0",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "melodias_night_sighting",
+              "scope": "party"
+            },
+            "next_step_id": "succeed_1"
+          },
+          {
+            "id": "succeed_1",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "liquor",
+              "key": "given_to_caretaker",
+              "value": true
+            },
+            "next_step_id": "succeed_2"
+          },
+          {
+            "id": "succeed_2",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "melodias",
+              "key": "cooperative",
+              "value": true
+            },
+            "next_step_id": "succeed_3"
+          },
+          {
+            "id": "succeed_3",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "favorite_grave",
+              "key": "identified",
+              "value": true
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "check_fast-talk",
+            "kind": "check",
+            "check": {
+              "profile_id": "coc7.skill",
+              "actor_binding": "actor",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "fast-talk"
+              },
+              "difficulty": "regular"
+            },
+            "result_routes": {
+              "critical_success": "succeed_0",
+              "extreme_success": "succeed_0",
+              "hard_success": "succeed_0",
+              "regular_success": "succeed_0",
+              "failure": "finish",
+              "fumble": "finish"
+            }
+          },
+          {
+            "id": "check_charm",
+            "kind": "check",
+            "check": {
+              "profile_id": "coc7.skill",
+              "actor_binding": "actor",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "charm"
+              },
+              "difficulty": "regular"
+            },
+            "result_routes": {
+              "critical_success": "succeed_0",
+              "extreme_success": "succeed_0",
+              "hard_success": "succeed_0",
+              "regular_success": "succeed_0",
+              "failure": "finish",
+              "fumble": "finish"
+            }
+          },
+          {
+            "id": "check_credit-rating",
+            "kind": "check",
+            "check": {
+              "profile_id": "coc7.skill",
+              "actor_binding": "actor",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "credit-rating"
+              },
+              "difficulty": "regular"
+            },
+            "result_routes": {
+              "critical_success": "succeed_0",
+              "extreme_success": "succeed_0",
+              "hard_success": "succeed_0",
+              "regular_success": "succeed_0",
+              "failure": "finish",
+              "fumble": "finish"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "research_library_archive",
+      "trigger": {
+        "kind": "agent_match",
+        "scope": {
+          "action_families": [
+            "research"
+          ],
+          "location_ids": [
+            "library"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "newspaper_archive"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "research",
+            "当地旧报档案"
+          ]
+        },
+        "options": [
+          {
+            "id": "library-use",
+            "semantic_hints": [
+              "图书馆使用",
+              "用图书馆使用"
+            ]
+          }
+        ]
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "library-use",
+            "entry_step_id": "check_library-use"
+          }
+        ],
+        "steps": [
+          {
+            "id": "finish",
+            "kind": "finish"
+          },
+          {
+            "id": "succeed_0",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "cemetery_dance_report",
+              "scope": "party"
+            },
+            "next_step_id": "succeed_1"
+          },
+          {
+            "id": "succeed_1",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "newspaper_archive",
+              "key": "library_report_found",
+              "value": true
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "check_library-use",
+            "kind": "check",
+            "check": {
+              "profile_id": "coc7.skill",
+              "actor_binding": "actor",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "library-use"
+              },
+              "difficulty": "regular"
+            },
+            "result_routes": {
+              "critical_success": "succeed_0",
+              "extreme_success": "succeed_0",
+              "hard_success": "succeed_0",
+              "regular_success": "succeed_0",
+              "failure": "finish",
+              "fumble": "finish"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "access_newspaper_archive",
+      "trigger": {
+        "kind": "agent_match",
+        "scope": {
+          "action_families": [
+            "request_access"
+          ],
+          "location_ids": [
+            "newspaper_office"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "newspaper_archive"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "request_access",
+            "当地旧报档案"
+          ]
+        },
+        "options": [
+          {
+            "id": "fast-talk",
+            "semantic_hints": [
+              "话术",
+              "用话术"
+            ]
+          },
+          {
+            "id": "charm",
+            "semantic_hints": [
+              "取悦",
+              "用取悦"
+            ]
+          },
+          {
+            "id": "persuade",
+            "semantic_hints": [
+              "说服",
+              "用说服"
+            ]
+          },
+          {
+            "id": "credit-rating",
+            "semantic_hints": [
+              "信用评级",
+              "用信用评级"
+            ]
+          }
+        ]
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "fast-talk",
+            "entry_step_id": "check_fast-talk"
+          },
+          {
+            "id": "charm",
+            "entry_step_id": "check_charm"
+          },
+          {
+            "id": "persuade",
+            "entry_step_id": "check_persuade"
+          },
+          {
+            "id": "credit-rating",
+            "entry_step_id": "check_credit-rating"
+          }
+        ],
+        "steps": [
+          {
+            "id": "finish",
+            "kind": "finish"
+          },
+          {
+            "id": "succeed_0",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "hilda_ghoul_statement",
+              "scope": "party"
+            },
+            "next_step_id": "succeed_1"
+          },
+          {
+            "id": "succeed_1",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "newspaper_archive",
+              "key": "newspaper_accessed",
+              "value": true
+            },
+            "next_step_id": "succeed_2"
+          },
+          {
+            "id": "succeed_2",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "newspaper_archive",
+              "key": "hilda_statement_found",
+              "value": true
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "check_fast-talk",
+            "kind": "check",
+            "check": {
+              "profile_id": "coc7.skill",
+              "actor_binding": "actor",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "fast-talk"
+              },
+              "difficulty": "regular"
+            },
+            "result_routes": {
+              "critical_success": "succeed_0",
+              "extreme_success": "succeed_0",
+              "hard_success": "succeed_0",
+              "regular_success": "succeed_0",
+              "failure": "finish",
+              "fumble": "finish"
+            }
+          },
+          {
+            "id": "check_charm",
+            "kind": "check",
+            "check": {
+              "profile_id": "coc7.skill",
+              "actor_binding": "actor",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "charm"
+              },
+              "difficulty": "regular"
+            },
+            "result_routes": {
+              "critical_success": "succeed_0",
+              "extreme_success": "succeed_0",
+              "hard_success": "succeed_0",
+              "regular_success": "succeed_0",
+              "failure": "finish",
+              "fumble": "finish"
+            }
+          },
+          {
+            "id": "check_persuade",
+            "kind": "check",
+            "check": {
+              "profile_id": "coc7.skill",
+              "actor_binding": "actor",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "persuade"
+              },
+              "difficulty": "regular"
+            },
+            "result_routes": {
+              "critical_success": "succeed_0",
+              "extreme_success": "succeed_0",
+              "hard_success": "succeed_0",
+              "regular_success": "succeed_0",
+              "failure": "finish",
+              "fumble": "finish"
+            }
+          },
+          {
+            "id": "check_credit-rating",
+            "kind": "check",
+            "check": {
+              "profile_id": "coc7.skill",
+              "actor_binding": "actor",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "credit-rating"
+              },
+              "difficulty": "regular"
+            },
+            "result_routes": {
+              "critical_success": "succeed_0",
+              "extreme_success": "succeed_0",
+              "hard_success": "succeed_0",
+              "regular_success": "succeed_0",
+              "failure": "finish",
+              "fumble": "finish"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "luck_find_newspaper_report",
+      "trigger": {
+        "kind": "agent_match",
+        "scope": {
+          "action_families": [
+            "search"
+          ],
+          "location_ids": [
+            "newspaper_office"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "newspaper_archive"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "search",
+            "当地旧报档案"
+          ]
+        },
+        "options": [
+          {
+            "id": "luck",
+            "semantic_hints": [
+              "幸运",
+              "用幸运"
+            ]
+          }
+        ]
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "luck",
+            "entry_step_id": "check_luck"
+          }
+        ],
+        "steps": [
+          {
+            "id": "finish",
+            "kind": "finish"
+          },
+          {
+            "id": "succeed_0",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "cemetery_dance_report",
+              "scope": "party"
+            },
+            "next_step_id": "succeed_1"
+          },
+          {
+            "id": "succeed_1",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "hilda_ghoul_statement",
+              "scope": "party"
+            },
+            "next_step_id": "succeed_2"
+          },
+          {
+            "id": "succeed_2",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "newspaper_archive",
+              "key": "newspaper_accessed",
+              "value": true
+            },
+            "next_step_id": "succeed_3"
+          },
+          {
+            "id": "succeed_3",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "newspaper_archive",
+              "key": "hilda_statement_found",
+              "value": true
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "check_luck",
+            "kind": "check",
+            "check": {
+              "profile_id": "coc7.skill",
+              "actor_binding": "actor",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "luck"
+              },
+              "difficulty": "regular"
+            },
+            "result_routes": {
+              "critical_success": "succeed_0",
+              "extreme_success": "succeed_0",
+              "hard_success": "succeed_0",
+              "regular_success": "succeed_0",
+              "failure": "finish",
+              "fumble": "finish"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "ask_around_speakeasy",
+      "trigger": {
+        "kind": "agent_match",
+        "scope": {
+          "action_families": [
+            "search",
+            "interview"
+          ],
+          "location_ids": [
+            "arnoldsburg_streets"
+          ],
+          "target_kinds": [
+            "location"
+          ],
+          "target_ids": [
+            "arnoldsburg_streets"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "search",
+            "打听地下酒吧的位置"
+          ]
+        },
+        "options": [
+          {
+            "id": "fast-talk",
+            "semantic_hints": [
+              "话术",
+              "用话术打听"
+            ]
+          },
+          {
+            "id": "spot-hidden",
+            "semantic_hints": [
+              "侦查",
+              "留意街上的暗门"
+            ]
+          }
+        ]
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "fast-talk",
+            "entry_step_id": "check_fast-talk"
+          },
+          {
+            "id": "spot-hidden",
+            "entry_step_id": "check_spot-hidden"
+          }
+        ],
+        "steps": [
+          {
+            "id": "finish",
+            "kind": "finish"
+          },
+          {
+            "id": "succeed_0",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "liquor",
+              "key": "speakeasy_found",
+              "value": true
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "check_fast-talk",
+            "kind": "check",
+            "check": {
+              "profile_id": "coc7.skill",
+              "actor_binding": "actor",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "fast-talk"
+              },
+              "difficulty": "regular"
+            },
+            "result_routes": {
+              "critical_success": "succeed_0",
+              "extreme_success": "succeed_0",
+              "hard_success": "succeed_0",
+              "regular_success": "succeed_0",
+              "failure": "finish",
+              "fumble": "finish"
+            }
+          },
+          {
+            "id": "check_spot-hidden",
+            "kind": "check",
+            "check": {
+              "profile_id": "coc7.skill",
+              "actor_binding": "actor",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "spot-hidden"
+              },
+              "difficulty": "regular"
+            },
+            "result_routes": {
+              "critical_success": "succeed_0",
+              "extreme_success": "succeed_0",
+              "hard_success": "succeed_0",
+              "regular_success": "succeed_0",
+              "failure": "finish",
+              "fumble": "finish"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "find_speakeasy",
+      "trigger": {
+        "kind": "agent_match",
+        "scope": {
+          "action_families": [
+            "search"
+          ],
+          "location_ids": [
+            "speakeasy"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "liquor"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "search",
+            "一品脱酒"
+          ]
+        },
+        "options": [
+          {
+            "id": "luck",
+            "semantic_hints": [
+              "幸运",
+              "用幸运"
+            ]
+          }
+        ]
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "luck",
+            "entry_step_id": "check_luck"
+          }
+        ],
+        "steps": [
+          {
+            "id": "finish",
+            "kind": "finish"
+          },
+          {
+            "id": "succeed_0",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "liquor",
+              "key": "obtained",
+              "value": true
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "check_luck",
+            "kind": "check",
+            "check": {
+              "profile_id": "coc7.skill",
+              "actor_binding": "actor",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "luck"
+              },
+              "difficulty": "regular"
+            },
+            "result_routes": {
+              "critical_success": "succeed_0",
+              "extreme_success": "succeed_0",
+              "hard_success": "succeed_0",
+              "regular_success": "succeed_0",
+              "failure": "finish",
+              "fumble": "finish"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "search_kimball_study",
+      "trigger": {
+        "kind": "agent_match",
+        "scope": {
+          "action_families": [
+            "search"
+          ],
+          "location_ids": [
+            "kimball_study"
+          ],
+          "target_kinds": [
+            "location"
+          ],
+          "target_ids": [
+            "kimball_study"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "search",
+            "道格拉斯的书房"
+          ]
+        },
+        "options": [
+          {
+            "id": "spot-hidden",
+            "semantic_hints": [
+              "侦查",
+              "用侦查"
+            ]
+          }
+        ]
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "spot-hidden",
+            "entry_step_id": "check_spot-hidden"
+          }
+        ],
+        "steps": [
+          {
+            "id": "finish",
+            "kind": "finish"
+          },
+          {
+            "id": "succeed_0",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "douglas_diary",
+              "key": "found",
+              "value": true
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "check_spot-hidden",
+            "kind": "check",
+            "check": {
+              "profile_id": "coc7.skill",
+              "actor_binding": "actor",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "spot-hidden"
+              },
+              "difficulty": "regular"
+            },
+            "result_routes": {
+              "critical_success": "succeed_0",
+              "extreme_success": "succeed_0",
+              "hard_success": "succeed_0",
+              "regular_success": "succeed_0",
+              "failure": "finish",
+              "fumble": "finish"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "read_douglas_diary",
+      "trigger": {
+        "kind": "agent_match",
+        "scope": {
+          "action_families": [
+            "read"
+          ],
+          "location_ids": [
+            "kimball_house"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "douglas_diary"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "read",
+            "道格拉斯的旧日记"
+          ]
+        },
+        "options": [
+          {
+            "id": "language-foreign-1",
+            "semantic_hints": [
+              "外语",
+              "用外语"
+            ]
+          }
+        ]
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "language-foreign-1",
+            "entry_step_id": "check_language-foreign-1"
+          }
+        ],
+        "steps": [
+          {
+            "id": "finish",
+            "kind": "finish"
+          },
+          {
+            "id": "succeed_0",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "diary_tunnel_clue",
+              "scope": "party"
+            },
+            "next_step_id": "succeed_1"
+          },
+          {
+            "id": "succeed_1",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "douglas_diary",
+              "key": "read",
+              "value": true
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "check_language-foreign-1",
+            "kind": "check",
+            "check": {
+              "profile_id": "coc7.skill",
+              "actor_binding": "actor",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "language-foreign-1"
+              },
+              "difficulty": "regular"
+            },
+            "result_routes": {
+              "critical_success": "succeed_0",
+              "extreme_success": "succeed_0",
+              "hard_success": "succeed_0",
+              "regular_success": "succeed_0",
+              "failure": "finish",
+              "fumble": "finish"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "keep_night_watch",
+      "trigger": {
+        "kind": "agent_match",
+        "scope": {
+          "action_families": [
+            "surveil"
+          ],
+          "location_ids": [
+            "surveillance_point"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "surveillance_area"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "surveil",
+            "夜间监视区域"
+          ]
+        },
+        "options": [
+          {
+            "id": "luck",
+            "semantic_hints": [
+              "幸运",
+              "用幸运"
+            ]
+          }
+        ]
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "luck",
+            "entry_step_id": "check_luck"
+          }
+        ],
+        "steps": [
+          {
+            "id": "finish",
+            "kind": "finish"
+          },
+          {
+            "id": "succeed_0",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "cemetery_figure",
+              "key": "sighted",
+              "value": true
+            },
+            "next_step_id": "succeed_1"
+          },
+          {
+            "id": "succeed_1",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "cemetery_figure",
+              "key": "visit_observed",
+              "value": true
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "check_luck",
+            "kind": "check",
+            "check": {
+              "profile_id": "coc7.skill",
+              "actor_binding": "actor",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "luck"
+              },
+              "difficulty": "regular"
+            },
+            "result_routes": {
+              "critical_success": "succeed_0",
+              "extreme_success": "succeed_0",
+              "hard_success": "succeed_0",
+              "regular_success": "succeed_0",
+              "failure": "finish",
+              "fumble": "finish"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "call_to_figure",
+      "trigger": {
+        "kind": "agent_match",
+        "scope": {
+          "action_families": [
+            "call_name"
+          ],
+          "location_ids": [
+            "surveillance_point"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "cemetery_figure"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "call_name",
+            "墓地中的人影"
+          ]
+        },
+        "options": [
+          {
+            "id": "proceed",
+            "semantic_hints": [
+              "call_name",
+              "墓地中的人影"
+            ]
+          }
+        ]
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "proceed",
+            "entry_step_id": "succeed_0"
+          }
+        ],
+        "steps": [
+          {
+            "id": "finish",
+            "kind": "finish"
+          },
+          {
+            "id": "succeed_0",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "cemetery_figure",
+              "key": "willing_to_talk",
+              "value": true
+            },
+            "next_step_id": "succeed_1"
+          },
+          {
+            "id": "succeed_1",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "cemetery_figure",
+              "key": "true_form_seen",
+              "value": true
+            },
+            "next_step_id": "finish"
+          }
+        ]
+      }
+    },
+    {
+      "id": "inspect_grave_area",
+      "trigger": {
+        "kind": "agent_match",
+        "scope": {
+          "action_families": [
+            "track"
+          ],
+          "location_ids": [
+            "cemetery"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "favorite_grave"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "track",
+            "道格拉斯常坐的墓碑"
+          ]
+        },
+        "options": [
+          {
+            "id": "track",
+            "semantic_hints": [
+              "追踪",
+              "用追踪"
+            ]
+          }
+        ]
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "track",
+            "entry_step_id": "check_track"
+          }
+        ],
+        "steps": [
+          {
+            "id": "finish",
+            "kind": "finish"
+          },
+          {
+            "id": "succeed_0",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "favorite_grave",
+              "key": "tracks_found",
+              "value": true
+            },
+            "next_step_id": "succeed_1"
+          },
+          {
+            "id": "succeed_1",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "crypt_entrance",
+              "key": "discovered",
+              "value": true
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "check_track",
+            "kind": "check",
+            "check": {
+              "profile_id": "coc7.skill",
+              "actor_binding": "actor",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "track"
+              },
+              "difficulty": "regular"
+            },
+            "result_routes": {
+              "critical_success": "succeed_0",
+              "extreme_success": "succeed_0",
+              "hard_success": "succeed_0",
+              "regular_success": "succeed_0",
+              "failure": "finish",
+              "fumble": "finish"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "move_crypt_slab",
+      "trigger": {
+        "kind": "agent_match",
+        "scope": {
+          "action_families": [
+            "move"
+          ],
+          "location_ids": [
+            "cemetery"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "crypt_entrance"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "move",
+            "石板下的地穴入口"
+          ]
+        },
+        "options": [
+          {
+            "id": "STR",
+            "semantic_hints": [
+              "力量",
+              "用力量"
+            ]
+          }
+        ]
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "STR",
+            "entry_step_id": "check_STR"
+          }
+        ],
+        "steps": [
+          {
+            "id": "finish",
+            "kind": "finish"
+          },
+          {
+            "id": "succeed_0",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "crypt_entrance",
+              "key": "slab_moved",
+              "value": true
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "check_STR",
+            "kind": "check",
+            "check": {
+              "profile_id": "coc7.skill",
+              "actor_binding": "actor",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "STR"
+              },
+              "difficulty": "regular"
+            },
+            "result_routes": {
+              "critical_success": "succeed_0",
+              "extreme_success": "succeed_0",
+              "hard_success": "succeed_0",
+              "regular_success": "succeed_0",
+              "failure": "finish",
+              "fumble": "finish"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "enter_crypt",
+      "trigger": {
+        "kind": "agent_match",
+        "scope": {
+          "action_families": [
+            "enter"
+          ],
+          "location_ids": [
+            "crypt"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "crypt_entrance"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "enter",
+            "石板下的地穴入口"
+          ]
+        },
+        "options": [
+          {
+            "id": "proceed",
+            "semantic_hints": [
+              "enter",
+              "石板下的地穴入口"
+            ]
+          }
+        ]
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "proceed",
+            "entry_step_id": "succeed_0"
+          }
+        ],
+        "steps": [
+          {
+            "id": "finish",
+            "kind": "finish"
+          },
+          {
+            "id": "succeed_0",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "crypt_entrance",
+              "key": "entered",
+              "value": true
+            },
+            "next_step_id": "succeed_1"
+          },
+          {
+            "id": "succeed_1",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "cemetery_figure",
+              "key": "sighted",
+              "value": true
+            },
+            "next_step_id": "succeed_2"
+          },
+          {
+            "id": "succeed_2",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "cemetery_figure",
+              "key": "true_form_seen",
+              "value": true
+            },
+            "next_step_id": "succeed_3"
+          },
+          {
+            "id": "succeed_3",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "cemetery_figure",
+              "key": "willing_to_talk",
+              "value": true
+            },
+            "next_step_id": "finish"
+          }
+        ]
+      }
+    },
+    {
+      "id": "talk_to_figure",
+      "trigger": {
+        "kind": "agent_match",
+        "scope": {
+          "action_families": [
+            "talk"
+          ],
+          "location_ids": [
+            "crypt"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "cemetery_figure"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "talk",
+            "墓地中的人影"
+          ]
+        },
+        "options": [
+          {
+            "id": "proceed",
+            "semantic_hints": [
+              "talk",
+              "墓地中的人影"
+            ]
+          }
+        ]
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "proceed",
+            "entry_step_id": "succeed_0"
+          }
+        ],
+        "steps": [
+          {
+            "id": "finish",
+            "kind": "finish"
+          },
+          {
+            "id": "succeed_0",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "douglas_true_nature",
+              "scope": "party"
+            },
+            "next_step_id": "succeed_1"
+          },
+          {
+            "id": "succeed_1",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "douglas_confession",
+              "scope": "party"
+            },
+            "next_step_id": "succeed_2"
+          },
+          {
+            "id": "succeed_2",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "cemetery_figure",
+              "key": "truth_told",
+              "value": true
+            },
+            "next_step_id": "succeed_3"
+          },
+          {
+            "id": "succeed_3",
+            "kind": "effect",
+            "effect": {
+              "type": "mark_core_resolved"
+            },
+            "next_step_id": "succeed_4"
+          },
+          {
+            "id": "succeed_4",
+            "kind": "effect",
+            "effect": {
+              "type": "set_ending_availability",
+              "available": true
+            },
+            "next_step_id": "finish"
+          }
+        ]
+      }
+    },
+    {
+      "id": "let_douglas_leave",
+      "trigger": {
+        "kind": "agent_match",
+        "scope": {
+          "action_families": [
+            "let_leave"
+          ],
+          "location_ids": [
+            "crypt"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "cemetery_figure"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "let_leave",
+            "墓地中的人影"
+          ]
+        },
+        "options": [
+          {
+            "id": "proceed",
+            "semantic_hints": [
+              "let_leave",
+              "墓地中的人影"
+            ]
+          }
+        ]
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "proceed",
+            "entry_step_id": "succeed_0"
+          }
+        ],
+        "steps": [
+          {
+            "id": "finish",
+            "kind": "finish"
+          },
+          {
+            "id": "succeed_0",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "cemetery_figure",
+              "key": "left_forever",
+              "value": true
+            },
+            "next_step_id": "finish"
+          }
+        ]
+      }
+    },
+    {
+      "id": "follow_douglas_underground",
+      "trigger": {
+        "kind": "agent_match",
+        "scope": {
+          "action_families": [
+            "follow"
+          ],
+          "location_ids": [
+            "crypt"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "cemetery_figure"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "follow",
+            "墓地中的人影"
+          ]
+        },
+        "options": [
+          {
+            "id": "proceed",
+            "semantic_hints": [
+              "follow",
+              "墓地中的人影"
+            ]
+          }
+        ]
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "proceed",
+            "entry_step_id": "succeed_0"
+          }
+        ],
+        "steps": [
+          {
+            "id": "finish",
+            "kind": "finish"
+          },
+          {
+            "id": "succeed_0",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "case_tracker",
+              "key": "investigator_disappeared",
+              "value": true
+            },
+            "next_step_id": "finish"
+          }
+        ]
+      }
+    },
+    {
+      "id": "flee_ghoul_crowd",
+      "trigger": {
+        "kind": "agent_match",
+        "scope": {
+          "action_families": [
+            "flee"
+          ],
+          "location_ids": [
+            "cemetery"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "ghoul_crowd"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "flee",
+            "食尸鬼群"
+          ]
+        },
+        "options": [
+          {
+            "id": "proceed",
+            "semantic_hints": [
+              "flee",
+              "食尸鬼群"
+            ]
+          }
+        ]
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "proceed",
+            "entry_step_id": "succeed_0"
+          }
+        ],
+        "steps": [
+          {
+            "id": "finish",
+            "kind": "finish"
+          },
+          {
+            "id": "succeed_0",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "case_tracker",
+              "key": "douglas_body_removed",
+              "value": true
+            },
+            "next_step_id": "succeed_1"
+          },
+          {
+            "id": "succeed_1",
+            "kind": "effect",
+            "effect": {
+              "type": "mark_core_resolved"
+            },
+            "next_step_id": "succeed_2"
+          },
+          {
+            "id": "succeed_2",
+            "kind": "effect",
+            "effect": {
+              "type": "set_ending_availability",
+              "available": true
+            },
+            "next_step_id": "finish"
+          }
+        ]
+      }
+    },
+    {
+      "id": "locked_study_window_breaks",
+      "priority": 80,
+      "trigger": {
+        "kind": "event",
+        "event_type": "entity.state_changed",
+        "when": {
+          "op": "all",
+          "items": [
+            {
+              "op": "predicate",
+              "predicate": "entity_state_is",
+              "args": {
+                "entity_id": "cemetery_figure",
+                "key": "visit_observed",
+                "value": true
+              }
+            },
+            {
+              "op": "predicate",
+              "predicate": "entity_state_is",
+              "args": {
+                "entity_id": "study_window",
+                "key": "locked",
+                "value": true
+              }
+            },
+            {
+              "op": "predicate",
+              "predicate": "entity_state_is",
+              "args": {
+                "entity_id": "study_window",
+                "key": "broken",
+                "value": false
+              }
+            }
+          ]
+        },
+        "entry_branch_id": "default"
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "default",
+            "entry_step_id": "break_window"
+          }
+        ],
+        "steps": [
+          {
+            "id": "break_window",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "study_window",
+              "key": "broken",
+              "value": true
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      }
+    },
+    {
+      "id": "first_sight_of_douglas",
+      "priority": 120,
+      "trigger": {
+        "kind": "event",
+        "event_type": "entity.state_changed",
+        "when": {
+          "op": "all",
+          "items": [
+            {
+              "op": "predicate",
+              "predicate": "entity_state_is",
+              "args": {
+                "entity_id": "cemetery_figure",
+                "key": "true_form_seen",
+                "value": true
+              }
+            },
+            {
+              "op": "predicate",
+              "predicate": "entity_state_is",
+              "args": {
+                "entity_id": "case_tracker",
+                "key": "first_ghoul_sight_resolved",
+                "value": false
+              }
+            }
+          ]
+        },
+        "entry_branch_id": "default"
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "default",
+            "entry_step_id": "mark_seen"
+          }
+        ],
+        "steps": [
+          {
+            "id": "mark_seen",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "case_tracker",
+              "key": "first_ghoul_sight_resolved",
+              "value": true
+            },
+            "next_step_id": "san_check"
+          },
+          {
+            "id": "san_check",
+            "kind": "check",
+            "check": {
+              "profile_id": "coc7.sanity",
+              "actor_binding": "actor",
+              "initiation_kind": "passive_rule",
+              "parameters": {
+                "success_loss": "0",
+                "failure_loss": "1d6"
+              }
+            },
+            "result_routes": {
+              "critical_success": "finish",
+              "extreme_success": "finish",
+              "hard_success": "finish",
+              "regular_success": "finish",
+              "failure": "finish",
+              "fumble": "finish"
+            }
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      }
+    },
+    {
+      "id": "ghoul_crowd_sanity",
+      "priority": 180,
+      "trigger": {
+        "kind": "event",
+        "event_type": "entity.state_changed",
+        "when": {
+          "op": "all",
+          "items": [
+            {
+              "op": "predicate",
+              "predicate": "entity_state_is",
+              "args": {
+                "entity_id": "ghoul_crowd",
+                "key": "revealed",
+                "value": true
+              }
+            },
+            {
+              "op": "predicate",
+              "predicate": "entity_state_is",
+              "args": {
+                "entity_id": "case_tracker",
+                "key": "crowd_sight_resolved",
+                "value": false
+              }
+            }
+          ]
+        },
+        "entry_branch_id": "default"
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "default",
+            "entry_step_id": "mark_crowd"
+          }
+        ],
+        "steps": [
+          {
+            "id": "mark_crowd",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "case_tracker",
+              "key": "crowd_sight_resolved",
+              "value": true
+            },
+            "next_step_id": "crowd_san"
+          },
+          {
+            "id": "crowd_san",
+            "kind": "check",
+            "check": {
+              "profile_id": "coc7.sanity",
+              "actor_binding": "actor",
+              "initiation_kind": "passive_rule",
+              "parameters": {
+                "success_loss": "0",
+                "failure_loss": "1d6",
+                "habit_cap": 6
+              }
+            },
+            "result_routes": {
+              "critical_success": "finish",
+              "extreme_success": "finish",
+              "hard_success": "finish",
+              "regular_success": "finish",
+              "failure": "finish",
+              "fumble": "finish"
+            }
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      }
+    },
+    {
+      "id": "temporary_insanity_leads_to_asylum",
+      "priority": 170,
+      "trigger": {
+        "kind": "event",
+        "event_type": "actor.temporary_insanity",
+        "when": {
+          "op": "all",
+          "items": [
+            {
+              "op": "predicate",
+              "predicate": "entity_state_is",
+              "args": {
+                "entity_id": "ghoul_crowd",
+                "key": "revealed",
+                "value": true
+              }
+            },
+            {
+              "op": "predicate",
+              "predicate": "entity_state_is",
+              "args": {
+                "entity_id": "case_tracker",
+                "key": "sent_to_asylum",
+                "value": false
+              }
+            }
+          ]
+        },
+        "entry_branch_id": "default"
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "default",
+            "entry_step_id": "mark_asylum"
+          }
+        ],
+        "steps": [
+          {
+            "id": "mark_asylum",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "case_tracker",
+              "key": "sent_to_asylum",
+              "value": true
+            },
+            "next_step_id": "apply_unconscious"
+          },
+          {
+            "id": "apply_unconscious",
+            "kind": "invoke_ruleset_action",
+            "action_id": "coc7.apply_condition",
+            "actor_binding": "actor",
+            "parameters": {
+              "condition": "unconscious"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      }
+    },
+    {
+      "id": "enable_night_surveillance",
+      "priority": 30,
+      "trigger": {
+        "kind": "event",
+        "event_type": "time.point_entered",
+        "when": {
+          "op": "all",
+          "items": [
+            {
+              "op": "predicate",
+              "predicate": "time_of_day_is",
+              "args": {
+                "value": "night"
+              }
+            },
+            {
+              "op": "predicate",
+              "predicate": "entity_state_is",
+              "args": {
+                "entity_id": "case_tracker",
+                "key": "surveillance_available",
+                "value": false
+              }
+            }
+          ]
+        },
+        "entry_branch_id": "default"
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "default",
+            "entry_step_id": "open_surveillance"
+          }
+        ],
+        "steps": [
+          {
+            "id": "open_surveillance",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "case_tracker",
+              "key": "surveillance_available",
+              "value": true
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      }
+    },
+    {
+      "id": "crypt_stench_on_entry",
+      "priority": 150,
+      "trigger": {
+        "kind": "agent_match",
+        "scope": {
+          "action_families": [
+            "enter"
+          ],
+          "location_ids": [
+            "cemetery"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "crypt_entrance"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "进入地穴",
+            "钻进石板下的洞口"
+          ]
+        },
+        "options": [
+          {
+            "id": "hold_breath",
+            "semantic_hints": [
+              "屏住呼吸",
+              "捂住口鼻"
+            ]
+          },
+          {
+            "id": "just_enter",
+            "semantic_hints": [
+              "直接进去",
+              "没有防护"
+            ]
+          }
+        ]
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "hold_breath",
+            "entry_step_id": "enter_safely"
+          },
+          {
+            "id": "just_enter",
+            "entry_step_id": "faint"
+          }
+        ],
+        "steps": [
+          {
+            "id": "enter_safely",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "crypt_entrance",
+              "key": "entered",
+              "value": true
+            },
+            "next_step_id": "crypt_finish"
+          },
+          {
+            "id": "faint",
+            "kind": "invoke_ruleset_action",
+            "action_id": "coc7.apply_condition",
+            "actor_binding": "actor",
+            "parameters": {
+              "condition": "unconscious_until_night"
+            },
+            "next_step_id": "faint_sighted"
+          },
+          {
+            "id": "faint_sighted",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "cemetery_figure",
+              "key": "sighted",
+              "value": true
+            },
+            "next_step_id": "faint_willing"
+          },
+          {
+            "id": "faint_willing",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "cemetery_figure",
+              "key": "willing_to_talk",
+              "value": true
+            },
+            "next_step_id": "crypt_finish"
+          },
+          {
+            "id": "crypt_finish",
+            "kind": "finish"
+          }
+        ]
+      }
+    }
+  ],
+  "core_resolution": {
+    "required_goal_ids": [
+      "learn_cemetery_connection",
+      "learn_douglas_fate"
+    ],
+    "completion": "all"
+  },
+  "ending_policy": {
+    "allow_continue_after_core_resolution": true,
+    "require_no_pending_action": true,
+    "allow_grounded_variations": true,
+    "facets": [
+      "case_outcome",
+      "client_report",
+      "npc_outcomes",
+      "investigator_fate"
+    ]
+  },
+  "ending_anchors": [
+    {
+      "id": "ending_douglas_departs",
+      "tone": "somber",
+      "required_fact_refs": [
+        "douglas_true_nature",
+        "douglas_confession"
+      ],
+      "forbidden_claims": [
+        "uncommitted_transformation"
+      ]
+    },
+    {
+      "id": "ending_followed_underground",
+      "tone": "bleak",
+      "required_fact_refs": [
+        "douglas_true_nature"
+      ],
+      "forbidden_claims": [
+        "uncommitted_transformation"
+      ]
+    },
+    {
+      "id": "ending_asylum",
+      "tone": "bleak",
+      "required_fact_refs": [
+        "douglas_true_nature"
+      ],
+      "forbidden_claims": [
+        "uncommitted_transformation"
+      ]
+    },
+    {
+      "id": "ending_douglas_killed_and_recovered",
+      "tone": "tragic",
+      "required_fact_refs": [
+        "douglas_true_nature"
+      ],
+      "forbidden_claims": [
+        "uncommitted_transformation"
+      ]
+    }
+  ],
+  "presentation": {
+    "title": "追书人",
+    "name_en": "Paper Chase",
+    "synopsis": "禁酒令时期的阿诺兹堡，调查员受托找回五本失窃藏书，并调查藏书家一年前的失踪。",
+    "players_min": 1,
+    "players_max": 1,
+    "difficulty": 1,
+    "estimated_duration": "1-2 小时",
+    "story_label": "PAPER CHASE",
+    "subtitle": "五本失窃藏书与一年前的失踪案",
+    "authors": [],
+    "tags": [
+      "1920年代",
+      "调查悬疑",
+      "宇宙恐怖"
+    ],
+    "player_intro_pages": [
+      {
+        "title": "调查委托",
+        "content": "故事发生在禁酒令时期的美国密歇根州阿诺兹堡。托马斯·金博尔请你调查叔叔道格拉斯一年前的失踪，以及最近从叔叔旧居被盗的五本珍藏旧书。你需要寻找窃贼、尽可能追回书籍，并确认道格拉斯是否尚在人世。"
+      },
+      {
+        "title": "调查员准备",
+        "content": "本模组由一名调查员进行，调查将以走访、资料检索和现场观察为主。擅长交涉、侦查或图书馆使用的调查员可能更容易推进调查，但这些能力并非必需。"
+      }
+    ]
+  },
+  "time_policy": {
+    "default_points": [
+      { "id": "hour_00", "hour_of_day": 0, "order": 0 },
+      { "id": "hour_06", "hour_of_day": 6, "order": 1 },
+      { "id": "hour_12", "hour_of_day": 12, "order": 2 },
+      { "id": "hour_18", "hour_of_day": 18, "order": 3 },
+      { "id": "hour_20", "hour_of_day": 20, "order": 4 }
+    ],
+    "storage_precision": "hour",
+    "progression": "host_controlled_discrete",
+    "actions_per_point": "multiple"
+  },
+  "initial_state": {
+    "start_location_id": "thomas_office",
+    "default_actor_placement": {
+      "location_id": "thomas_office"
+    },
+    "start_time_point_id": "hour_12"
+  },
+  "world_profile": {
+    "era": "1920s 美国禁酒令时期",
+    "region": "密歇根州阿诺兹堡",
+    "technology_level": "早期汽车与电报",
+    "tone": "安静、克制、带哥特气息",
+    "forbidden_content": [
+      "提前揭示道格拉斯的食尸鬼身份"
+    ]
+  }
+}

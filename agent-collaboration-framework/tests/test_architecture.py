@@ -319,5 +319,24 @@ class ArchitectureTests(unittest.TestCase):
                     self.assertIn(field_name, document)
 
 
+
+class WriteBoundaryTests(unittest.TestCase):
+    """v3 的权威写入口必须有一个 A 可以依赖的 Protocol。
+
+    v2 时期这个位置上是 ActionExecutor；它随 Checkpoint 运行时一起删掉之后，
+    ports/ 里一度只剩读侧，看起来像"规则引擎不再执行状态修改"。写通道其实一直在
+    （AdjudicationEngineService.submit → commit_adjudication），缺的只是端口声明。
+    """
+
+    def test_adjudication_engine_satisfies_the_write_port(self) -> None:
+        from collaboration_framework.engine import AdjudicationEngineService
+        from collaboration_framework.ports import AdjudicationExecutor
+
+        for method in AdjudicationExecutor.__protocol_attrs__:
+            self.assertTrue(
+                hasattr(AdjudicationEngineService, method),
+                f"具体实现缺少写入口方法: {method}",
+            )
+
 if __name__ == "__main__":
     unittest.main()

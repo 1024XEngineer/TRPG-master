@@ -7,7 +7,6 @@ import httpx
 import pytest
 from collaboration_framework.contracts import (
     ActionPlan,
-    ActionRequest,
     ActionResult,
     DefaultCheck,
     Intent,
@@ -28,8 +27,6 @@ from collaboration_framework.engine import (
     GameState,
     InMemoryEngineStore,
     RuleEngineService,
-    RuleKernel,
-    SequenceDiceSource,
 )
 from collaboration_framework.host.application import PlayerViewProjector
 from collaboration_framework.host.schemas import (
@@ -42,6 +39,7 @@ from pydantic import ValidationError
 
 from app.adapters.deepseek_models import DeepSeekChatCompletionsJsonClient
 from app.adapters.openai_models import (
+    _ACTION_PLAN_NARRATION_INSTRUCTIONS,
     OpenAIResponsesJsonClient,
     PromptHostTurnDecisionModel,
     PromptIntentModel,
@@ -49,9 +47,16 @@ from app.adapters.openai_models import (
 )
 from app.adapters.qwen_models import QwenChatCompletionsJsonClient
 from app.core.config import Settings
-from app.core.turn import build_turn_application
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_action_plan_narration_uses_final_post_roll_outcome() -> None:
+    """叙事不能把消耗幸运或强推之前的失败当成最终结果。"""
+
+    assert "消耗幸运" in _ACTION_PLAN_NARRATION_INSTRUCTIONS
+    assert "outcome=success" in _ACTION_PLAN_NARRATION_INSTRUCTIONS
+    assert "最终权威结果" in _ACTION_PLAN_NARRATION_INSTRUCTIONS
 
 
 def load_paper_chase() -> ModuleContent:
@@ -272,52 +277,6 @@ async def test_prompt_intent_keeps_distinct_module_actions_canonical() -> None:
     assert first.verb == second.verb == "observe"
 
 
-async def test_paper_chase_empty_exits_allow_free_travel_to_named_scene() -> None:
-    module = load_paper_chase()
-    state = conversation_state(module).model_copy(update={"scene_id": "client_briefing"})
-    store = InMemoryEngineStore()
-    store.register_room(module_content=module, initial_state=state)
-    engine = RuleEngineService(store)
-    player_input = PlayerInput(
-        room_id=state.room_id,
-        player_id="player_1",
-        actor_id="actor_1",
-        client_action_id="travel-library",
-        utterance="前往图书馆",
-    )
-    view = await PlayerViewProjector(engine).project(player_input)
-
-    assert "library" in {item.id for item in view.scene.available_exits}
-    context = IntentContext(
-        player_input=player_input,
-        player_view=view,
-        recent_history=RecentTurnContext.empty(
-            player_input=player_input,
-            player_view=view,
-        ),
-    )
-    intent = Intent.model_validate(
-        await PromptIntentModel(ChineseTravelVerbClient()).generate(context)
-    )
-    assert isinstance(intent.target, MatchedTarget)
-    assert intent.target.id == "library"
-    assert intent.verb == "go"
-
-    result = await engine.execute(
-        ActionRequest(
-            request_id=player_input.client_action_id,
-            room_id=state.room_id,
-            player_id=player_input.player_id,
-            actor_id=player_input.actor_id,
-            source_view_revision=view.revision,
-            intent=intent,
-        )
-    )
-
-    assert result.outcome == "success"
-    assert store.inspect_state(state.room_id).scene_id == "library"
-
-
 async def test_prompts_treat_scene_orientation_as_narration_not_form_validation() -> None:
     player_input = PlayerInput(
         room_id="room_prompt",
@@ -511,46 +470,6 @@ async def test_narration_receives_authoritative_default_check_result() -> None:
     }
 
 
-async def test_prompt_models_complete_paper_chase_ending_without_state_access() -> None:
-    module = load_paper_chase()
-    state = conversation_state(module)
-    store = InMemoryEngineStore()
-    store.register_room(module_content=module, initial_state=state)
-    engine = RuleEngineService(
-        store,
-        kernel=RuleKernel(
-            dice_source=SequenceDiceSource([4, 2]),
-            allow_legacy_missing_skill=False,
-        ),
-    )
-    client = ScriptedStructuredClient()
-    application = build_turn_application(
-        store,
-        engine,
-        intent_model=PromptIntentModel(client),
-        narration_model=PromptNarrationModel(client),
-    )
-
-    first = await application.handle(
-        room_id=state.room_id,
-        player_id="player_1",
-        client_action_id="talk",
-        utterance="我礼貌询问道格拉斯事情的真相",
-    )
-    second = await application.handle(
-        room_id=state.room_id,
-        player_id="player_1",
-        client_action_id="leave",
-        utterance="让道格拉斯离开",
-    )
-
-    final_state = store.inspect_state(state.room_id)
-    assert first.message_type == second.message_type == "turn.completed"
-    assert final_state.phase == "ended"
-    assert final_state.ending_id == "ending_douglas_departs"
-    assert client.backgrounds == [module.background, module.background]
-
-
 class ScriptedTurnDecisionClient:
     async def generate(self, *, schema_name, schema, instructions, input_payload):
         assert schema_name == "trpg_host_turn_decision"
@@ -711,78 +630,6 @@ async def test_qwen_client_posts_json_mode_with_schema_in_instructions() -> None
     assert "test_schema" in body["messages"][0]["content"]
     assert '"additionalProperties":false' in body["messages"][0]["content"]
     assert json.loads(body["messages"][1]["content"]) == {"safe": True}
-
-
-async def test_qwen_style_protocol_leak_is_retried_offline() -> None:
-    narration_calls = 0
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        nonlocal narration_calls
-        body = json.loads(request.content)
-        instructions = body["messages"][0]["content"]
-        if 'named "trpg_intent"' in instructions:
-            output = {
-                "kind": "dialogue",
-                "verb": "talk",
-                "target": {"matched": True, "id": "cemetery_figure"},
-                "check": {"route": "none"},
-                "summary": "我询问眼前人的情况",
-            }
-        else:
-            assert 'named "trpg_narration"' in instructions
-            narration_calls += 1
-            output = {
-                "kind": "narration",
-                "text": (
-                    "眼前的人压低了声音。 claimed_fact_ids: [],"
-                    if narration_calls == 1
-                    else "眼前的人压低声音，谨慎地回答了你的问题。"
-                ),
-                "claimed_fact_ids": [],
-                "suggested_actions": [],
-            }
-        return httpx.Response(
-            200,
-            json={
-                "choices": [
-                    {
-                        "message": {
-                            "role": "assistant",
-                            "content": json.dumps(output, ensure_ascii=False),
-                        }
-                    }
-                ]
-            },
-        )
-
-    client = QwenChatCompletionsJsonClient(
-        api_key="offline-test-key",
-        base_url="https://dashscope.example/compatible-mode/v1/",
-        model="qwen3.7-plus",
-        timeout_seconds=1,
-        transport=httpx.MockTransport(handler),
-    )
-    module = load_paper_chase()
-    state = conversation_state(module)
-    store = InMemoryEngineStore()
-    store.register_room(module_content=module, initial_state=state)
-    application = build_turn_application(
-        store,
-        RuleEngineService(store),
-        intent_model=PromptIntentModel(client),
-        narration_model=PromptNarrationModel(client),
-    )
-
-    output = await application.handle(
-        room_id=state.room_id,
-        player_id="player_1",
-        client_action_id="qwen-protocol-leak",
-        utterance="我询问眼前人的情况",
-    )
-
-    assert narration_calls == 2
-    assert output.payload.narration.text == "眼前的人压低声音，谨慎地回答了你的问题。"
-    assert "claimed_fact_ids" not in output.payload.narration.text
 
 
 async def test_deepseek_client_posts_compatible_json_mode_without_qwen_fields() -> None:

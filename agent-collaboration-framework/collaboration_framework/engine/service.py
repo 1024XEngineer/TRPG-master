@@ -4,9 +4,7 @@ from __future__ import annotations
 
 from collaboration_framework.contracts import (
     ActionRequest,
-    ActionResult,
     CheckpointSpec,
-    ConditionSpec,
     ContractError,
     KeeperCapabilityView,
     KeeperEndingCapability,
@@ -35,22 +33,22 @@ from collaboration_framework.contracts import (
 )
 from pydantic import JsonValue
 
-from .capabilities import require_runtime_capabilities
-from .kernel import RuleKernel
-from .models import CompletedAction, EngineRuntimeSnapshot
+from .expression import ExpressionEvaluator, expression_context
+from .projection_v3 import keeper_capabilities_v3, project_v3
+from .models import EngineRuntimeSnapshot
 from .ports import EngineStore
 
 
 class RuleEngineService:
-    """Stateless-over-rooms façade implementing both stable host ports."""
+    """Stateless-over-rooms read façade for the player view (#226: read-only).
 
-    def __init__(
-        self,
-        store: EngineStore,
-        kernel: RuleKernel | None = None,
-    ) -> None:
+    The authoritative write path used to sit here as `execute`, driving the
+    Checkpoint kernel. Writes now belong to the adjudication engine and the
+    ActionPlan runtime; this class only projects.
+    """
+
+    def __init__(self, store: EngineStore) -> None:
         self._store = store
-        self._kernel = kernel or RuleKernel()
 
     async def read(self, scope: PlayerViewScope) -> ProjectionSnapshot:
         async with self._store.transaction(scope.room_id) as transaction:
@@ -66,43 +64,6 @@ class RuleEngineService:
                 actor_id=scope.actor_id,
             )
 
-    async def execute(self, request: ActionRequest) -> ActionResult:
-        async with self._store.transaction(request.room_id) as transaction:
-            runtime = await transaction.load_runtime()
-            self._validate_identity(
-                runtime,
-                player_id=request.player_id,
-                actor_id=request.actor_id,
-            )
-
-            completed = await transaction.find_completed_action(request.request_id)
-            if completed is not None:
-                return self._replay_result(
-                    request=request,
-                    completed=completed,
-                    current_revision=runtime.revision,
-                )
-            if request.source_view_revision != runtime.revision:
-                raise ContractError("ActionRequest 基于过期 PlayerView")
-            require_runtime_capabilities(runtime.module_content)
-
-            execution, new_state = self._kernel.execute(
-                request=request,
-                module_content=runtime.module_content,
-                game_state=runtime.game_state,
-            )
-            completed = CompletedAction(
-                request=request.model_copy(deep=True),
-                execution=execution.model_copy(deep=True),
-            )
-            await transaction.commit(
-                expected_revision=runtime.revision,
-                new_state=new_state,
-                events=execution.events,
-                completed_action=completed,
-            )
-            return execution.action_result.model_copy(deep=True)
-
     @staticmethod
     def _validate_identity(
         runtime: EngineRuntimeSnapshot,
@@ -115,43 +76,15 @@ class RuleEngineService:
             raise ContractError("player_id/actor_id 未绑定到当前房间")
 
     @staticmethod
-    def _replay_result(
-        *,
-        request: ActionRequest,
-        completed: CompletedAction,
-        current_revision: str,
-    ) -> ActionResult:
-        original = completed.request
-        if (
-            request.room_id,
-            request.player_id,
-            request.actor_id,
-            request.input_fingerprint,
-            request.intent,
-            request.roll_value,
-        ) != (
-            original.room_id,
-            original.player_id,
-            original.actor_id,
-            original.input_fingerprint,
-            original.intent,
-            original.roll_value,
-        ):
-            raise ContractError("request_id 已用于不同的动作请求")
-
-        return completed.execution.action_result.model_copy(
-            update={"view_revision": current_revision},
-            deep=True,
-        )
-
-    @staticmethod
     def _project(
         runtime: EngineRuntimeSnapshot,
         *,
         player_id: str,
         actor_id: str,
     ) -> ProjectionSnapshot:
-        module = runtime.module_content
+        if runtime.is_v3:
+            return project_v3(runtime, player_id=player_id, actor_id=actor_id)
+        module = runtime.v2
         state = runtime.game_state
         scene = next(
             (item for item in module.scenes if item.id == state.scene_id),
@@ -252,7 +185,7 @@ class RuleEngineService:
                 id=scene.id,
                 name=scene.player_visible_name,
                 description=scene.player_visible_description,
-                time=state.clock.time_of_day,
+                time=state.world_time.time_of_day,
                 narrative_details=RuleEngineService._project_narrative_details(
                     scene.narrative_details,
                     runtime=runtime,
@@ -278,8 +211,9 @@ class RuleEngineService:
                 available_exits=available_exits,
             ),
             world=ProjectionWorldState(
-                elapsed_minutes=state.clock.elapsed_minutes,
-                time_of_day=state.clock.time_of_day,
+                day_index=state.world_time.current.day_index,
+                hour_of_day=state.world_time.current.hour_of_day,
+                time_of_day=state.world_time.time_of_day,
                 core_resolved=state.core_resolved,
                 ending_available=state.ending_available,
                 ending_id=state.ending_id,
@@ -342,7 +276,9 @@ class RuleEngineService:
         *,
         actor_id: str,
     ) -> KeeperCapabilityView:
-        module = runtime.module_content
+        if runtime.is_v3:
+            return keeper_capabilities_v3(runtime, actor_id=actor_id)
+        module = runtime.v2
         state = runtime.game_state
         party_known = set(state.discovered_facts)
         actor_known = set(state.actor_discovered_facts.get(actor_id, ()))
@@ -771,7 +707,7 @@ class RuleEngineService:
                 scope = "actor"
             else:
                 continue
-            # Discovery lists are written only by the authoritative RuleKernel
+            # Discovery lists are written only by the authoritative engine
             # after an outcome releases a fact. Module authors may keep the
             # source information item keeper-only before discovery; once its id
             # is present here, the fact itself is player-safe by definition.
@@ -864,11 +800,16 @@ class RuleEngineService:
             },
         )
         try:
-            return RuleKernel.condition_matches(
-                ConditionSpec(expr=policy.discovery_rule),
-                runtime.game_state,
-                request=synthetic_request,
-                target_id=target_id,
+            # This used to route through RuleKernel.condition_matches, which also
+            # understood path/equals conditions. A discovery rule is always an
+            # expression, so the kernel's removal (#226) costs this call nothing.
+            return ExpressionEvaluator().matches(
+                policy.discovery_rule,
+                expression_context(
+                    runtime.game_state.model_dump(mode="python", by_alias=True),
+                    request=synthetic_request,
+                    target_id=target_id,
+                ),
             )
         except ContractError:
             # Projection policies fail closed when optional runtime data is absent.

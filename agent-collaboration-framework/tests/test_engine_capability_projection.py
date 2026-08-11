@@ -20,7 +20,6 @@ from collaboration_framework.contracts import (
     ActionAdjudication,
     ActionMethod,
     ActionTarget,
-    AdvanceTimeEffect,
     CommitTerminalEndingEffect,
     ConsumeEntityEffect,
     EnsureRuntimeEntityEffect,
@@ -207,21 +206,15 @@ class EngineCapabilityProjectionTests(unittest.IsolatedAsyncioTestCase):
         after = await self.engine.read(SCOPE)
         self.assertNotIn("window", {entity.id for entity in after.scene.visible_entities})
 
-    async def test_advance_time_moves_the_projected_world_clock(self) -> None:
-        before = await self.engine.read(SCOPE)
-        self.assertEqual(before.world.elapsed_minutes, 0)
-        self.assertEqual(before.world.time_of_day, "day")
+    async def test_world_time_is_projected_as_a_discrete_point(self) -> None:
+        """时间只在离散点上，投影出的是 day_index + hour_of_day，不是流逝分钟数。"""
 
-        await self.commit(
-            "advance-1",
-            AdvanceTimeEffect(minutes=13 * 60, reason="在书房里翻查了一整个下午"),
-        )
+        snapshot = await self.engine.read(SCOPE)
+        self.assertEqual(snapshot.world.day_index, 0)
+        self.assertEqual(snapshot.world.hour_of_day, 12)
+        self.assertEqual(snapshot.world.time_of_day, "day")
 
-        after = await self.engine.read(SCOPE)
-        self.assertEqual(after.world.elapsed_minutes, 13 * 60)
-        self.assertEqual(after.world.time_of_day, "night")
-
-    async def test_core_resolution_and_ending_reach_the_player_view(self) -> None:
+    async def test_core_resolution_opens_draft_but_direct_ending_is_refused(self) -> None:
         await self.commit(
             "resolve-core",
             MarkCoreResolvedEffect(),
@@ -234,14 +227,11 @@ class EngineCapabilityProjectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(opened.world.ending_id)
         self.assertEqual(opened.phase, "playing")
 
-        await self.commit(
-            "confirm-ending",
-            CommitTerminalEndingEffect(ending_id="ending_document_recovered"),
-        )
-
-        ended = await self.engine.read(SCOPE)
-        self.assertEqual(ended.world.ending_id, "ending_document_recovered")
-        self.assertEqual(ended.phase, "ended")
+        with self.assertRaisesRegex(ContractError, "EndingDraft"):
+            await self.commit(
+                "confirm-ending",
+                CommitTerminalEndingEffect(ending_id="ending_document_recovered"),
+            )
 
     async def test_keeper_capabilities_name_ids_the_player_view_withholds(self) -> None:
         capabilities = await self.engine.read_keeper_capabilities(SCOPE)
@@ -294,7 +284,7 @@ class EngineCapabilityProjectionTests(unittest.IsolatedAsyncioTestCase):
                 "unknown-information",
                 RevealInformationEffect(information_id="information_that_does_not_exist"),
             )
-        with self.assertRaises(ContractError):
+        with self.assertRaisesRegex(ContractError, "EndingDraft"):
             await self.commit(
                 "unknown-ending",
                 CommitTerminalEndingEffect(ending_id="ending_that_does_not_exist"),

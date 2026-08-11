@@ -7,6 +7,7 @@ from typing import Literal
 from pydantic import Field, JsonValue, model_validator
 
 from .common import ContractModel
+from .inventory import InventoryItemView
 
 
 class VisibleFact(ContractModel):
@@ -107,18 +108,52 @@ class ProjectionScene(ContractModel):
     visible_entities: tuple[ProjectionEntity, ...] = ()
     visible_actors: tuple[ProjectionVisibleActor, ...] = ()
     available_exits: tuple[ProjectionAvailableExit, ...] = ()
+    loose_items: tuple[InventoryItemView, ...] = ()
+
+
+class ProjectionLocationBreadcrumb(ContractModel):
+    id: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+
+
+class ProjectionPositionContext(ContractModel):
+    kind: Literal["access_boundary"] = "access_boundary"
+    id: str = Field(min_length=1)
+    label: str = Field(min_length=1)
+    state: Literal["locked", "blocked", "interaction_required"]
+    destination_id: str = Field(min_length=1)
+
+
+class ProjectionLocationContext(ContractModel):
+    current_location_id: str = Field(min_length=1)
+    breadcrumbs: tuple[ProjectionLocationBreadcrumb, ...] = ()
+    position_context: ProjectionPositionContext | None = None
+
+
+class ProjectionKnownLocation(ContractModel):
+    id: str = Field(min_length=1)
+    kind: Literal["region", "site", "room", "connector"]
+    name: str = Field(min_length=1)
+    description: str = ""
+    parent_location_id: str | None = Field(default=None, min_length=1)
+    region_id: str | None = Field(default=None, min_length=1)
+    existence: Literal["rumored", "known"]
+    localization: Literal["unknown", "approximate", "located"]
+    access: Literal["unknown", "reachable", "blocked"]
+    visited: bool = False
 
 
 class ProjectionWorldState(ContractModel):
     """Player-safe world facts the Engine commits outside the current scene.
 
-    These are the projections of the `advance_time`, `mark_core_resolved`,
-    `set_ending_availability` and `commit_terminal_ending` effects: without them
+    These are the projections of the world time (#245), `mark_core_resolved`,
+    `set_ending_availability` and confirmed EndingResolution: without them
     an Engine commit changes authoritative state that neither the Agent's next
     turn nor the player can observe.
     """
 
-    elapsed_minutes: int = Field(default=0, ge=0)
+    day_index: int = Field(default=0, ge=0)
+    hour_of_day: int = Field(default=0, ge=0, le=23)
     time_of_day: Literal["day", "night"] = "day"
     core_resolved: bool = False
     ending_available: bool = False
@@ -171,6 +206,9 @@ class ProjectionSnapshot(ContractModel):
     revision: str = Field(min_length=1)
     self_actor: ProjectionSelfActor
     scene: ProjectionScene
+    location_context: ProjectionLocationContext | None = None
+    known_locations: tuple[ProjectionKnownLocation, ...] = ()
+    inventory: tuple[InventoryItemView, ...] = ()
     world: ProjectionWorldState = Field(default_factory=ProjectionWorldState)
     known_information: tuple[ProjectionKnownInformation, ...] = ()
     checkpoint_options: tuple[ProjectionCheckpointOption, ...] = ()
@@ -278,6 +316,39 @@ class SceneView(ContractModel):
     visible_entities: tuple[VisibleEntity, ...] = ()
     visible_actors: tuple[VisibleActorView, ...] = ()
     available_exits: tuple[AvailableExitView, ...] = ()
+    loose_items: tuple[InventoryItemView, ...] = ()
+
+
+class LocationBreadcrumbView(ContractModel):
+    id: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+
+
+class PositionContextView(ContractModel):
+    kind: Literal["access_boundary"] = "access_boundary"
+    id: str = Field(min_length=1)
+    label: str = Field(min_length=1)
+    state: Literal["locked", "blocked", "interaction_required"]
+    destination_id: str = Field(min_length=1)
+
+
+class LocationContextView(ContractModel):
+    current_location_id: str = Field(min_length=1)
+    breadcrumbs: tuple[LocationBreadcrumbView, ...] = ()
+    position_context: PositionContextView | None = None
+
+
+class KnownLocationView(ContractModel):
+    id: str = Field(min_length=1)
+    kind: Literal["region", "site", "room", "connector"]
+    name: str = Field(min_length=1)
+    description: str = ""
+    parent_location_id: str | None = Field(default=None, min_length=1)
+    region_id: str | None = Field(default=None, min_length=1)
+    existence: Literal["rumored", "known"]
+    localization: Literal["unknown", "approximate", "located"]
+    access: Literal["unknown", "reachable", "blocked"]
+    visited: bool = False
 
 
 class WorldStateView(ContractModel):
@@ -287,11 +358,36 @@ class WorldStateView(ContractModel):
     side of the projector.
     """
 
-    elapsed_minutes: int = Field(default=0, ge=0)
+    day_index: int = Field(default=0, ge=0)
+    hour_of_day: int = Field(default=0, ge=0, le=23)
     time_of_day: Literal["day", "night"] = "day"
     core_resolved: bool = False
     ending_available: bool = False
     ending_id: str | None = Field(default=None, min_length=1)
+
+
+class WorldClockView(ContractModel):
+    """Just the clock, sampled at one point in a turn (#245 §二.2).
+
+    A PlayerView only ever carries *now*. A turn that advanced time therefore
+    leaves no record of when its earlier steps happened, and the Narrator — who
+    is handed the post-turn view — writes the whole turn at the final hour:
+    walk to the inn at noon, sleep until eight, narrated as arriving after dark.
+    This is the one field that repairs that, so it deliberately carries the clock
+    alone and none of the other world flags.
+    """
+
+    day_index: int = Field(default=0, ge=0)
+    hour_of_day: int = Field(default=0, ge=0, le=23)
+    time_of_day: Literal["day", "night"] = "day"
+
+    @classmethod
+    def from_world(cls, world: WorldStateView) -> WorldClockView:
+        return cls(
+            day_index=world.day_index,
+            hour_of_day=world.hour_of_day,
+            time_of_day=world.time_of_day,
+        )
 
 
 class KnownInformationView(ContractModel):
@@ -344,6 +440,9 @@ class PlayerView(ContractModel):
     revision: str = Field(min_length=1)
     self_actor: SelfActorView
     scene: SceneView
+    location_context: LocationContextView | None = None
+    known_locations: tuple[KnownLocationView, ...] = ()
+    inventory: tuple[InventoryItemView, ...] = ()
     world: WorldStateView = Field(default_factory=WorldStateView)
     known_information: tuple[KnownInformationView, ...] = ()
     checkpoint_options: tuple[CheckpointOption, ...] = ()

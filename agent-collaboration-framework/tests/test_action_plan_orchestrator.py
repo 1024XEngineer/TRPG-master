@@ -12,12 +12,14 @@ from collaboration_framework.contracts import (
     ActionPlanPolicyError,
     ActionPlanStep,
     ActionTarget,
+    AdvanceWorldTimeEffect,
     CancelActionPlanRequest,
     CheckDecisionRequest,
     ContractError,
     EnterLocationEffect,
     GetAdjudicationStatusRequest,
     ModuleContent,
+    ModuleContentV3,
     NarrativeOnlyEffect,
     NoAdjudicationCheck,
     PlayerInput,
@@ -31,6 +33,7 @@ from collaboration_framework.contracts import (
     SubmitAdjudicationRequest,
 )
 from collaboration_framework.engine import (
+    ActorState,
     AdjudicationEngineService,
     DiceRoller,
     GameState,
@@ -485,6 +488,19 @@ async def test_pending_check_stops_plan_and_resumes_same_step_after_decision() -
             choice=SelectCheckChoice(candidate_id="spot"),
         )
     )
+    assert resolved.status == "awaiting_post_roll_decision"
+    assert resolved.check_run is not None
+    resolved = await engine.decide_post_roll(
+        PostRollDecisionRequest(
+            request_id="accept-plan-step-1",
+            room_id="room_01",
+            player_id="player_01",
+            source_revision=resolved.view_revision,
+            check_id=resolved.check_run.check_id,
+            check_version=resolved.check_run.version,
+            option_id="accept-current",
+        )
+    )
     assert resolved.status == "resolved"
 
     resumed = await service.start_or_resume(original, plan=plan(2))
@@ -746,6 +762,46 @@ async def test_second_step_provider_failure_retries_from_same_cursor() -> None:
 
 
 @pytest.mark.asyncio
+async def test_retryable_failure_can_be_superseded_by_the_next_utterance() -> None:
+    """可重试失败必须能被同一名玩家的下一句话顶替掉。
+
+    `ActionPlanTurnApplication.start` 靠 `cancel_remaining` 让位，而让位的前提是
+    这条死计划落在可取消边界上：可重试失败的**当前**步恒为 pending，即使更早的
+    步骤已经提交过效果——那正是 cancel_remaining 的语义，保留已提交的、放弃剩下
+    的。这里连同「先前效果不被回滚」一起钉住，免得以后有人把失败步改成非
+    pending，让顶替静默退化成 PLAN_CANCEL_NOT_AT_BOUNDARY，玩家又被锁回「只能
+    原样重发同一句」。
+    """
+
+    module, engine_store, projector = runtime()
+    service = ActionPlanOrchestrator(
+        store=InMemoryActionPlanRunStore(),
+        adjudicator=FailSecondStepOnceAdjudicator(module.world_ref),
+        executor=AdjudicationEngineService(engine_store),
+        player_view_projector=projector,
+    )
+    original = player_input("supersede-parent")
+
+    failed = await service.start_or_resume(original, plan=plan(2))
+    assert failed.run.status == "retryable_failure"
+    assert [step.status for step in failed.run.steps] == ["completed", "pending"]
+
+    superseded = await service.cancel_remaining(
+        CancelActionPlanRequest(
+            request_id="auto-supersede-supersede-parent",
+            room_id=original.room_id,
+            player_id=original.player_id,
+            actor_id=original.actor_id,
+            parent_action_id=original.client_action_id,
+        )
+    )
+
+    assert superseded.status == "cancelled"
+    # 第一步已提交的效果留在世界里，没有被顶替连带回滚。
+    assert len(engine_store.inspect_domain_events("room_01")) == 1
+
+
+@pytest.mark.asyncio
 async def test_invalid_second_step_fails_closed_before_engine_commit() -> None:
     module, engine_store, projector = runtime()
     adjudicator = RejectSecondStepAdjudicator(module.world_ref)
@@ -832,6 +888,72 @@ async def test_room_reservation_blocks_other_parent_until_plan_is_terminal() -> 
         worker_id="worker-1",
         auto_continue=False,
     )
+
+    second_service, _, _, _, _ = orchestrator(action_plan_store=store)
+    with pytest.raises(ActionPlanBusyError) as raised:
+        await second_service.start_or_resume(
+            player_input("second-parent", "另一个行动"),
+            plan=plan(2),
+        )
+    assert raised.value.code == "ACTION_IN_PROGRESS"
+
+
+@pytest.mark.asyncio
+async def test_expired_room_reservation_stops_blocking_the_room() -> None:
+    """占用必须能自己过期，否则一次没走到释放路径的失败就把房间永久锁死。
+
+    去掉 store 里的 TTL 判断，这个测试会停在 ActionPlanBusyError 上。
+    """
+
+    service, _, _, store, _ = orchestrator()
+    first = player_input("first-parent")
+    await service.start_or_resume(
+        first,
+        plan=plan(4),
+        worker_id="worker-1",
+        auto_continue=False,
+    )
+
+    # 把这次占用推到 TTL 之外。持久化侧对应的是 UPDATE 掉 reservation.updated_at，
+    # 内存 store 的占用时间戳就取自 run.updated_at，所以改这里等价。
+    key = (first.room_id, first.client_action_id)
+    store._runs[key] = store._runs[key].model_copy(
+        update={"updated_at": datetime.now(UTC) - timedelta(minutes=6)},
+    )
+
+    assert await store.load_active_for_room(first.room_id) is None
+
+    second_service, _, _, _, _ = orchestrator(action_plan_store=store)
+    taken_over = await second_service.start_or_resume(
+        player_input("second-parent", "另一个行动"),
+        plan=plan(2),
+    )
+    assert taken_over.run.parent_action_id == "second-parent"
+
+
+@pytest.mark.asyncio
+async def test_reservation_within_ttl_still_blocks_the_room() -> None:
+    """TTL 不能顺手把「玩家正在思考」也判成过期。
+
+    `waiting_for_player` 同样占着房间，5 分钟以内必须原样挡住——否则占用会在人
+    还在挑技能时被抽走，随后 CAS 抛 PLAN_RESERVATION_LOST 把回合打死。
+    """
+
+    service, _, _, store, _ = orchestrator()
+    first = player_input("first-parent")
+    await service.start_or_resume(
+        first,
+        plan=plan(4),
+        worker_id="worker-1",
+        auto_continue=False,
+    )
+
+    key = (first.room_id, first.client_action_id)
+    store._runs[key] = store._runs[key].model_copy(
+        update={"updated_at": datetime.now(UTC) - timedelta(minutes=4)},
+    )
+
+    assert await store.load_active_for_room(first.room_id) is not None
 
     second_service, _, _, _, _ = orchestrator(action_plan_store=store)
     with pytest.raises(ActionPlanBusyError) as raised:
@@ -987,6 +1109,113 @@ async def test_progress_delivery_failure_does_not_change_authoritative_execution
     assert result.run.status == "awaiting_narration"
     assert result.run.completed_steps == 2
     assert len(engine_store.inspect_domain_events("room_01")) == 2
+
+
+V3_FIXTURE = (
+    ROOT
+    / "docs"
+    / "module-parser"
+    / "examples"
+    / "module-content-validation"
+    / "追书人"
+    / "module-content-v3.json"
+)
+
+
+class SleepAfterTravelAdjudicator:
+    """去旅店 + 睡一觉：第二步推进时间，第一步没有。"""
+
+    async def adjudicate(self, context):
+        effects = (
+            (NarrativeOnlyEffect(),)
+            if context.step_index == 0
+            else (
+                AdvanceWorldTimeEffect(to_point_id="hour_18"),
+                AdvanceWorldTimeEffect(to_point_id="hour_20"),
+            )
+        )
+        return ActionAdjudication(
+            request_id="model-cannot-control-this",
+            source_revision="model-cannot-control-this",
+            actor_id="model-cannot-control-this",
+            summary=context.step.semantic_goal,
+            target=ActionTarget(kind="location", id=context.player_view.scene.id),
+            method=ActionMethod(
+                family=context.step.kind,
+                description=context.step.semantic_goal,
+            ),
+            check=NoAdjudicationCheck(),
+            success_effects=effects,
+        )
+
+
+def v3_orchestrator(adjudicator):
+    """Only a v3 room has a discrete timeline for a step to advance."""
+
+    content = ModuleContentV3.model_validate_json(
+        V3_FIXTURE.read_text(encoding="utf-8")
+    )
+    engine_store = InMemoryEngineStore()
+    engine_store.register_room(
+        module_content=content,
+        initial_state=GameState(
+            room_id="room_01",
+            scene_id=content.initial_state.start_location_id,
+            actors={
+                "pc_1": ActorState(
+                    player_id="player_01",
+                    name="陈探员",
+                    source_character_id="character_v3",
+                    source_character_version=1,
+                    state={"skills": {"spot-hidden": 60}},
+                )
+            },
+            entities={},
+        ),
+    )
+    return ActionPlanOrchestrator(
+        store=InMemoryActionPlanRunStore(),
+        adjudicator=adjudicator,
+        executor=AdjudicationEngineService(engine_store),
+        player_view_projector=PlayerViewProjector(RuleEngineService(engine_store)),
+        lease_seconds=1,
+    )
+
+
+@pytest.mark.asyncio
+async def test_narration_context_dates_each_step_by_its_own_clock() -> None:
+    """去旅店发生在中午，睡觉才把时间推到夜里。
+
+    叙事器拿到的是回合结束后的 PlayerView。只给它这一个时刻，它就会把整段都
+    写在终局时钟上——「夜色浓稠，你推开旅店的门」，而玩家其实是正午出发的。
+    """
+
+    service = v3_orchestrator(SleepAfterTravelAdjudicator())
+    original = player_input("inn-and-sleep")
+    sleep_plan = ActionPlan(
+        goal="前往镇上的旅店并睡一觉",
+        steps=(
+            ActionPlanStep(kind="travel", semantic_goal="前往镇上的旅店"),
+            ActionPlanStep(kind="rest", semantic_goal="在旅店睡一觉"),
+        ),
+    )
+
+    await service.start_or_resume(original, plan=sleep_plan)
+    context = await service.build_narration_context(original)
+
+    assert context.opening_world_time is not None
+    assert (context.opening_world_time.hour_of_day, context.opening_world_time.time_of_day) == (
+        12,
+        "day",
+    )
+    clocks = [
+        (step.world_time_after.hour_of_day, step.world_time_after.time_of_day)
+        for step in context.completed_steps
+    ]
+    assert clocks == [(12, "day"), (20, "night")]
+    # The final view is still the post-turn state; it is simply no longer the
+    # only clock the Narrator can see.
+    assert context.player_view.world.hour_of_day == 20
 
 
 @pytest.mark.asyncio

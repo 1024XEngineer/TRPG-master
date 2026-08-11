@@ -225,6 +225,50 @@
       "title": "ExitDestinationView",
       "type": "object"
     },
+    "InventoryItemView": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "source_label": {
+          "default": "",
+          "title": "Source Label",
+          "type": "string"
+        },
+        "quantity": {
+          "minimum": 1,
+          "title": "Quantity",
+          "type": "integer"
+        },
+        "condition": {
+          "minLength": 1,
+          "title": "Condition",
+          "type": "string"
+        },
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "quantity",
+        "condition",
+        "version"
+      ],
+      "title": "InventoryItemView",
+      "type": "object"
+    },
     "JsonValue": {},
     "KnownInformationView": {
       "additionalProperties": false,
@@ -282,6 +326,158 @@
         "scope"
       ],
       "title": "KnownInformationView",
+      "type": "object"
+    },
+    "KnownLocationView": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "region",
+            "site",
+            "room",
+            "connector"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "parent_location_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Location Id"
+        },
+        "region_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Region Id"
+        },
+        "existence": {
+          "enum": [
+            "rumored",
+            "known"
+          ],
+          "title": "Existence",
+          "type": "string"
+        },
+        "localization": {
+          "enum": [
+            "unknown",
+            "approximate",
+            "located"
+          ],
+          "title": "Localization",
+          "type": "string"
+        },
+        "access": {
+          "enum": [
+            "unknown",
+            "reachable",
+            "blocked"
+          ],
+          "title": "Access",
+          "type": "string"
+        },
+        "visited": {
+          "default": false,
+          "title": "Visited",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "name",
+        "existence",
+        "localization",
+        "access"
+      ],
+      "title": "KnownLocationView",
+      "type": "object"
+    },
+    "LocationBreadcrumbView": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "title": "LocationBreadcrumbView",
+      "type": "object"
+    },
+    "LocationContextView": {
+      "additionalProperties": false,
+      "properties": {
+        "current_location_id": {
+          "minLength": 1,
+          "title": "Current Location Id",
+          "type": "string"
+        },
+        "breadcrumbs": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/LocationBreadcrumbView"
+          },
+          "title": "Breadcrumbs",
+          "type": "array"
+        },
+        "position_context": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PositionContextView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "current_location_id"
+      ],
+      "title": "LocationContextView",
       "type": "object"
     },
     "NarrativeDetailView": {
@@ -342,6 +538,49 @@
       "title": "ObservableStateView",
       "type": "object"
     },
+    "PositionContextView": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "access_boundary",
+          "default": "access_boundary",
+          "title": "Kind",
+          "type": "string"
+        },
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "label": {
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "locked",
+            "blocked",
+            "interaction_required"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "destination_id": {
+          "minLength": 1,
+          "title": "Destination Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "state",
+        "destination_id"
+      ],
+      "title": "PositionContextView",
+      "type": "object"
+    },
     "SceneView": {
       "additionalProperties": false,
       "properties": {
@@ -400,6 +639,14 @@
             "$ref": "#/$defs/AvailableExitView"
           },
           "title": "Available Exits",
+          "type": "array"
+        },
+        "loose_items": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/InventoryItemView"
+          },
+          "title": "Loose Items",
           "type": "array"
         }
       },
@@ -598,10 +845,17 @@
       "additionalProperties": false,
       "description": "Player-safe world facts committed outside the current scene.\n\nSee :class:`ProjectionWorldState`; this is the same data on the model/UI\nside of the projector.",
       "properties": {
-        "elapsed_minutes": {
+        "day_index": {
           "default": 0,
           "minimum": 0,
-          "title": "Elapsed Minutes",
+          "title": "Day Index",
+          "type": "integer"
+        },
+        "hour_of_day": {
+          "default": 0,
+          "maximum": 23,
+          "minimum": 0,
+          "title": "Hour Of Day",
           "type": "integer"
         },
         "time_of_day": {
@@ -687,6 +941,33 @@
     },
     "scene": {
       "$ref": "#/$defs/SceneView"
+    },
+    "location_context": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/LocationContextView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "known_locations": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/KnownLocationView"
+      },
+      "title": "Known Locations",
+      "type": "array"
+    },
+    "inventory": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/InventoryItemView"
+      },
+      "title": "Inventory",
+      "type": "array"
     },
     "world": {
       "$ref": "#/$defs/WorldStateView"

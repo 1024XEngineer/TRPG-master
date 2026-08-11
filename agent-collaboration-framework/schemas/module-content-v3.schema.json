@@ -1,0 +1,2916 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "module-content-v3.schema.json",
+  "$defs": {
+    "ActorPlacementSpec": {
+      "additionalProperties": false,
+      "description": "Where investigators start. Actor position is runtime state (#240 §1).",
+      "properties": {
+        "location_id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+          "title": "Location Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "location_id"
+      ],
+      "title": "ActorPlacementSpec",
+      "type": "object"
+    },
+    "AdjudicatedCheckStep": {
+      "additionalProperties": false,
+      "description": "Take over the check the Agent already proposed for this action.\n\n`effect_authority=\"rule\"` is the point: the player picked the skill, but the\npublished rule — not the Agent — owns what the result does.",
+      "properties": {
+        "id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "adjudicated_check",
+          "default": "adjudicated_check",
+          "title": "Kind",
+          "type": "string"
+        },
+        "adjudication_ref": {
+          "const": "current",
+          "default": "current",
+          "title": "Adjudication Ref",
+          "type": "string"
+        },
+        "effect_authority": {
+          "const": "rule",
+          "default": "rule",
+          "title": "Effect Authority",
+          "type": "string"
+        },
+        "result_routes": {
+          "additionalProperties": {
+            "maxLength": 100,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+            "type": "string"
+          },
+          "minProperties": 1,
+          "propertyNames": {
+            "enum": [
+              "critical_success",
+              "extreme_success",
+              "hard_success",
+              "regular_success",
+              "failure",
+              "fumble"
+            ]
+          },
+          "title": "Result Routes",
+          "type": "object"
+        },
+        "cancel_step_id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+          "title": "Cancel Step Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "result_routes",
+        "cancel_step_id"
+      ],
+      "title": "AdjudicatedCheckStep",
+      "type": "object"
+    },
+    "AdvanceWorldTimeEffect": {
+      "additionalProperties": false,
+      "description": "Jump the room to the single next point on the discrete timeline (#245).\n\nOne effect is exactly one jump — the timeline decides *where*, the caller\nonly decides *that*. Sleeping from noon until 20:00 is therefore two of\nthese in sequence, and each one publishes its own `time.point_entered`, so\na Rule that watches for nightfall still fires on the point it was written\nagainst instead of being skipped over.\n\n`to_point_id` is not a destination request: it is the Agent stating which\npoint it believes comes next, and the Engine refuses the effect when that\ndisagrees with the authored timeline.",
+      "properties": {
+        "type": {
+          "const": "advance_world_time",
+          "default": "advance_world_time",
+          "title": "Type",
+          "type": "string"
+        },
+        "to_point_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "To Point Id"
+        }
+      },
+      "title": "AdvanceWorldTimeEffect",
+      "type": "object"
+    },
+    "AgentMatchTriggerSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "agent_match",
+          "default": "agent_match",
+          "title": "Kind",
+          "type": "string"
+        },
+        "required": {
+          "default": true,
+          "title": "Required",
+          "type": "boolean"
+        },
+        "decision_mode": {
+          "default": "selective",
+          "enum": [
+            "selective",
+            "exhaustive_for_scope"
+          ],
+          "title": "Decision Mode",
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/CandidateScopeSpec"
+        },
+        "question": {
+          "$ref": "#/$defs/MatchQuestionSpec"
+        },
+        "options": {
+          "items": {
+            "$ref": "#/$defs/MatchOptionAuthorSpec"
+          },
+          "minItems": 1,
+          "title": "Options",
+          "type": "array"
+        },
+        "bindings": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/BindingSlotSpec"
+          },
+          "title": "Bindings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "question",
+        "options"
+      ],
+      "title": "AgentMatchTriggerSpec",
+      "type": "object"
+    },
+    "AllCondition": {
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "const": "all",
+          "default": "all",
+          "title": "Op",
+          "type": "string"
+        },
+        "items": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "all": "#/$defs/AllCondition",
+                "any": "#/$defs/AnyCondition",
+                "not": "#/$defs/NotCondition",
+                "predicate": "#/$defs/PredicateCondition"
+              },
+              "propertyName": "op"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/AllCondition"
+              },
+              {
+                "$ref": "#/$defs/AnyCondition"
+              },
+              {
+                "$ref": "#/$defs/NotCondition"
+              },
+              {
+                "$ref": "#/$defs/PredicateCondition"
+              }
+            ]
+          },
+          "minItems": 1,
+          "title": "Items",
+          "type": "array"
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "title": "AllCondition",
+      "type": "object"
+    },
+    "AnyCondition": {
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "const": "any",
+          "default": "any",
+          "title": "Op",
+          "type": "string"
+        },
+        "items": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "all": "#/$defs/AllCondition",
+                "any": "#/$defs/AnyCondition",
+                "not": "#/$defs/NotCondition",
+                "predicate": "#/$defs/PredicateCondition"
+              },
+              "propertyName": "op"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/AllCondition"
+              },
+              {
+                "$ref": "#/$defs/AnyCondition"
+              },
+              {
+                "$ref": "#/$defs/NotCondition"
+              },
+              {
+                "$ref": "#/$defs/PredicateCondition"
+              }
+            ]
+          },
+          "minItems": 1,
+          "title": "Items",
+          "type": "array"
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "title": "AnyCondition",
+      "type": "object"
+    },
+    "AwaitPlayerInputStep": {
+      "additionalProperties": false,
+      "description": "Suspend the agenda until the player speaks again (#226 §4).",
+      "properties": {
+        "id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "await_player_input",
+          "default": "await_player_input",
+          "title": "Kind",
+          "type": "string"
+        },
+        "resume_step_id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+          "title": "Resume Step Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "resume_step_id"
+      ],
+      "title": "AwaitPlayerInputStep",
+      "type": "object"
+    },
+    "BindingSlotSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "source": {
+          "enum": [
+            "actor",
+            "target",
+            "scene",
+            "location"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "required": {
+          "default": true,
+          "title": "Required",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "source"
+      ],
+      "title": "BindingSlotSpec",
+      "type": "object"
+    },
+    "CancelTimeTaskStep": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "cancel_time_task",
+          "default": "cancel_time_task",
+          "title": "Kind",
+          "type": "string"
+        },
+        "task_id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+          "title": "Task Id",
+          "type": "string"
+        },
+        "next_step_id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+          "title": "Next Step Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "task_id",
+        "next_step_id"
+      ],
+      "title": "CancelTimeTaskStep",
+      "type": "object"
+    },
+    "CandidateScopeSpec": {
+      "additionalProperties": false,
+      "description": "Which situations may surface this rule as an Agent candidate.\n\n#226 writes this as `scene_ids`; #240 §5 rules that a scene is a narrative\nchapter and is no longer the authoritative actor position, so v3 scopes by\n`location_ids` instead — the same reconciliation that moved\n`RuleMatchContextRefs` onto `actor_location_id` / `target_location_id`.",
+      "properties": {
+        "action_families": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Action Families",
+          "type": "array"
+        },
+        "location_ids": {
+          "default": [],
+          "items": {
+            "maxLength": 100,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+            "type": "string"
+          },
+          "title": "Location Ids",
+          "type": "array"
+        },
+        "target_kinds": {
+          "default": [],
+          "items": {
+            "enum": [
+              "information",
+              "entity",
+              "location",
+              "actor",
+              "world"
+            ],
+            "type": "string"
+          },
+          "title": "Target Kinds",
+          "type": "array"
+        },
+        "target_ids": {
+          "default": [],
+          "items": {
+            "maxLength": 100,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+            "type": "string"
+          },
+          "title": "Target Ids",
+          "type": "array"
+        }
+      },
+      "title": "CandidateScopeSpec",
+      "type": "object"
+    },
+    "ChangeEntityStateEffect": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "change_entity_state",
+          "default": "change_entity_state",
+          "title": "Type",
+          "type": "string"
+        },
+        "entity_id": {
+          "minLength": 1,
+          "title": "Entity Id",
+          "type": "string"
+        },
+        "key": {
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_-]+$",
+          "title": "Key",
+          "type": "string"
+        },
+        "value": {
+          "$ref": "#/$defs/JsonValue"
+        }
+      },
+      "required": [
+        "entity_id",
+        "key",
+        "value"
+      ],
+      "title": "ChangeEntityStateEffect",
+      "type": "object"
+    },
+    "CheckStep": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "check",
+          "default": "check",
+          "title": "Kind",
+          "type": "string"
+        },
+        "check": {
+          "$ref": "#/$defs/RuleCheckSpec"
+        },
+        "result_routes": {
+          "additionalProperties": {
+            "maxLength": 100,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+            "type": "string"
+          },
+          "minProperties": 1,
+          "propertyNames": {
+            "enum": [
+              "critical_success",
+              "extreme_success",
+              "hard_success",
+              "regular_success",
+              "failure",
+              "fumble"
+            ]
+          },
+          "title": "Result Routes",
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "check",
+        "result_routes"
+      ],
+      "title": "CheckStep",
+      "type": "object"
+    },
+    "CommitTerminalEndingEffect": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "commit_terminal_ending",
+          "default": "commit_terminal_ending",
+          "title": "Type",
+          "type": "string"
+        },
+        "ending_id": {
+          "minLength": 1,
+          "title": "Ending Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ending_id"
+      ],
+      "title": "CommitTerminalEndingEffect",
+      "type": "object"
+    },
+    "ConsumeEntityEffect": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "consume_entity",
+          "default": "consume_entity",
+          "title": "Type",
+          "type": "string"
+        },
+        "entity_id": {
+          "minLength": 1,
+          "title": "Entity Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "entity_id"
+      ],
+      "title": "ConsumeEntityEffect",
+      "type": "object"
+    },
+    "CoreResolutionSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "required_goal_ids": {
+          "default": [],
+          "items": {
+            "maxLength": 100,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+            "type": "string"
+          },
+          "title": "Required Goal Ids",
+          "type": "array"
+        },
+        "completion": {
+          "default": "all",
+          "enum": [
+            "all",
+            "any"
+          ],
+          "title": "Completion",
+          "type": "string"
+        }
+      },
+      "title": "CoreResolutionSpec",
+      "type": "object"
+    },
+    "CreateNpcActionOpportunityStep": {
+      "additionalProperties": false,
+      "description": "Positive authorisation for an NPC to act; nothing acts implicitly.",
+      "properties": {
+        "id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "create_npc_action_opportunity",
+          "default": "create_npc_action_opportunity",
+          "title": "Kind",
+          "type": "string"
+        },
+        "entity_id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+          "title": "Entity Id",
+          "type": "string"
+        },
+        "action_id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Action Id",
+          "type": "string"
+        },
+        "next_step_id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+          "title": "Next Step Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "entity_id",
+        "action_id",
+        "next_step_id"
+      ],
+      "title": "CreateNpcActionOpportunityStep",
+      "type": "object"
+    },
+    "CreateTimeTaskStep": {
+      "additionalProperties": false,
+      "description": "Schema owned by #245; referenced here so a rule can schedule one.",
+      "properties": {
+        "id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "create_time_task",
+          "default": "create_time_task",
+          "title": "Kind",
+          "type": "string"
+        },
+        "task_id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+          "title": "Task Id",
+          "type": "string"
+        },
+        "next_step_id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+          "title": "Next Step Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "task_id",
+        "next_step_id"
+      ],
+      "title": "CreateTimeTaskStep",
+      "type": "object"
+    },
+    "EffectStep": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "effect",
+          "default": "effect",
+          "title": "Kind",
+          "type": "string"
+        },
+        "effect": {
+          "discriminator": {
+            "mapping": {
+              "advance_world_time": "#/$defs/AdvanceWorldTimeEffect",
+              "change_entity_state": "#/$defs/ChangeEntityStateEffect",
+              "commit_terminal_ending": "#/$defs/CommitTerminalEndingEffect",
+              "consume_entity": "#/$defs/ConsumeEntityEffect",
+              "ensure_runtime_entity": "#/$defs/EnsureRuntimeEntityEffect",
+              "ensure_runtime_location": "#/$defs/EnsureRuntimeLocationEffect",
+              "enter_location": "#/$defs/EnterLocationEffect",
+              "hide_information": "#/$defs/HideInformationEffect",
+              "mark_core_resolved": "#/$defs/MarkCoreResolvedEffect",
+              "move_entity": "#/$defs/MoveEntityEffect",
+              "narrative_only": "#/$defs/NarrativeOnlyEffect",
+              "reveal_information": "#/$defs/RevealInformationEffect",
+              "set_ending_availability": "#/$defs/SetEndingAvailabilityEffect",
+              "set_visibility": "#/$defs/SetVisibilityEffect"
+            },
+            "propertyName": "type"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/RevealInformationEffect"
+            },
+            {
+              "$ref": "#/$defs/HideInformationEffect"
+            },
+            {
+              "$ref": "#/$defs/SetVisibilityEffect"
+            },
+            {
+              "$ref": "#/$defs/EnterLocationEffect"
+            },
+            {
+              "$ref": "#/$defs/EnsureRuntimeLocationEffect"
+            },
+            {
+              "$ref": "#/$defs/EnsureRuntimeEntityEffect"
+            },
+            {
+              "$ref": "#/$defs/MoveEntityEffect"
+            },
+            {
+              "$ref": "#/$defs/ChangeEntityStateEffect"
+            },
+            {
+              "$ref": "#/$defs/ConsumeEntityEffect"
+            },
+            {
+              "$ref": "#/$defs/MarkCoreResolvedEffect"
+            },
+            {
+              "$ref": "#/$defs/SetEndingAvailabilityEffect"
+            },
+            {
+              "$ref": "#/$defs/CommitTerminalEndingEffect"
+            },
+            {
+              "$ref": "#/$defs/AdvanceWorldTimeEffect"
+            },
+            {
+              "$ref": "#/$defs/NarrativeOnlyEffect"
+            }
+          ],
+          "title": "Effect"
+        },
+        "next_step_id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+          "title": "Next Step Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "effect",
+        "next_step_id"
+      ],
+      "title": "EffectStep",
+      "type": "object"
+    },
+    "EndingAnchorSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "tone": {
+          "default": "",
+          "maxLength": 100,
+          "title": "Tone",
+          "type": "string"
+        },
+        "required_fact_refs": {
+          "default": [],
+          "items": {
+            "maxLength": 100,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+            "type": "string"
+          },
+          "title": "Required Fact Refs",
+          "type": "array"
+        },
+        "forbidden_claims": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Forbidden Claims",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "EndingAnchorSpec",
+      "type": "object"
+    },
+    "EndingPolicySpec": {
+      "additionalProperties": false,
+      "description": "Reaching the core resolution opens the ending; it does not force it.\n\n`allow_continue_after_core_resolution` is the fix for v2's habit of ending\nthe session the moment the main thread closed (#212 §1).",
+      "properties": {
+        "allow_continue_after_core_resolution": {
+          "default": true,
+          "title": "Allow Continue After Core Resolution",
+          "type": "boolean"
+        },
+        "require_no_pending_action": {
+          "default": true,
+          "title": "Require No Pending Action",
+          "type": "boolean"
+        },
+        "allow_grounded_variations": {
+          "default": true,
+          "title": "Allow Grounded Variations",
+          "type": "boolean"
+        },
+        "facets": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Facets",
+          "type": "array"
+        }
+      },
+      "title": "EndingPolicySpec",
+      "type": "object"
+    },
+    "EnsureRuntimeEntityEffect": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "ensure_runtime_entity",
+          "default": "ensure_runtime_entity",
+          "title": "Type",
+          "type": "string"
+        },
+        "entity_id": {
+          "minLength": 1,
+          "title": "Entity Id",
+          "type": "string"
+        },
+        "entity_kind": {
+          "enum": [
+            "npc",
+            "object"
+          ],
+          "title": "Entity Kind",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "location_id": {
+          "minLength": 1,
+          "title": "Location Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "entity_id",
+        "entity_kind",
+        "name",
+        "location_id"
+      ],
+      "title": "EnsureRuntimeEntityEffect",
+      "type": "object"
+    },
+    "EnsureRuntimeLocationEffect": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "ensure_runtime_location",
+          "default": "ensure_runtime_location",
+          "title": "Type",
+          "type": "string"
+        },
+        "location_id": {
+          "minLength": 1,
+          "title": "Location Id",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "parent_location_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Location Id"
+        },
+        "connected_location_id": {
+          "minLength": 1,
+          "title": "Connected Location Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "location_id",
+        "name",
+        "connected_location_id"
+      ],
+      "title": "EnsureRuntimeLocationEffect",
+      "type": "object"
+    },
+    "EnterLocationEffect": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "enter_location",
+          "default": "enter_location",
+          "title": "Type",
+          "type": "string"
+        },
+        "location_id": {
+          "minLength": 1,
+          "title": "Location Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "location_id"
+      ],
+      "title": "EnterLocationEffect",
+      "type": "object"
+    },
+    "EntityRelationSpec": {
+      "additionalProperties": false,
+      "description": "A semantic relation only.\n\n`owns` / `carried_by` / `contains` deliberately do not imply custody: an\nitem's authoritative position is `ItemCustody` runtime state, and capacity,\nequipment slots and stacking are explicitly not frozen yet (#212 §8.2).",
+      "properties": {
+        "kind": {
+          "enum": [
+            "contains",
+            "located_in",
+            "owns",
+            "carried_by",
+            "knows",
+            "guards",
+            "attached_to",
+            "related_to"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "target_id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+          "title": "Target Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "target_id"
+      ],
+      "title": "EntityRelationSpec",
+      "type": "object"
+    },
+    "EntitySpecV3": {
+      "additionalProperties": false,
+      "description": "A Canon NPC or object.\n\nRuntime entities the Agent proposes mid-session are not authored here; they\ncarry `origin=\"runtime\"` and live in GameState, and may never shadow a Canon\nid (#212 §8.2).",
+      "properties": {
+        "id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "npc",
+            "object"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "origin": {
+          "const": "canon",
+          "default": "canon",
+          "title": "Origin",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "player_visible_name": {
+          "default": "",
+          "title": "Player Visible Name",
+          "type": "string"
+        },
+        "player_visible_aliases": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Player Visible Aliases",
+          "type": "array"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "located_in": {
+          "anyOf": [
+            {
+              "maxLength": 100,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Located In"
+        },
+        "relations": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/EntityRelationSpec"
+          },
+          "title": "Relations",
+          "type": "array"
+        },
+        "state": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "State",
+          "type": "object"
+        },
+        "item_component": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ItemComponent"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "visibility": {
+          "default": "public",
+          "enum": [
+            "public",
+            "party",
+            "actor",
+            "keeper"
+          ],
+          "title": "Visibility",
+          "type": "string"
+        },
+        "visibility_conditions": {
+          "default": [],
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "all": "#/$defs/AllCondition",
+                "any": "#/$defs/AnyCondition",
+                "not": "#/$defs/NotCondition",
+                "predicate": "#/$defs/PredicateCondition"
+              },
+              "propertyName": "op"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/AllCondition"
+              },
+              {
+                "$ref": "#/$defs/AnyCondition"
+              },
+              {
+                "$ref": "#/$defs/NotCondition"
+              },
+              {
+                "$ref": "#/$defs/PredicateCondition"
+              }
+            ]
+          },
+          "title": "Visibility Conditions",
+          "type": "array"
+        },
+        "plot_relevance": {
+          "default": true,
+          "title": "Plot Relevance",
+          "type": "boolean"
+        },
+        "lifecycle": {
+          "default": "campaign",
+          "enum": [
+            "campaign",
+            "session"
+          ],
+          "title": "Lifecycle",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "name"
+      ],
+      "title": "EntitySpecV3",
+      "type": "object"
+    },
+    "EventTriggerSpec": {
+      "additionalProperties": false,
+      "description": "Matches a committed domain event, never the player's words (#212 §3.3).",
+      "properties": {
+        "kind": {
+          "const": "event",
+          "default": "event",
+          "title": "Kind",
+          "type": "string"
+        },
+        "event_type": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Event Type",
+          "type": "string"
+        },
+        "when": {
+          "anyOf": [
+            {
+              "discriminator": {
+                "mapping": {
+                  "all": "#/$defs/AllCondition",
+                  "any": "#/$defs/AnyCondition",
+                  "not": "#/$defs/NotCondition",
+                  "predicate": "#/$defs/PredicateCondition"
+                },
+                "propertyName": "op"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/AllCondition"
+                },
+                {
+                  "$ref": "#/$defs/AnyCondition"
+                },
+                {
+                  "$ref": "#/$defs/NotCondition"
+                },
+                {
+                  "$ref": "#/$defs/PredicateCondition"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "When"
+        },
+        "entry_branch_id": {
+          "default": "default",
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+          "title": "Entry Branch Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_type"
+      ],
+      "title": "EventTriggerSpec",
+      "type": "object"
+    },
+    "ExecutionBranchSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "entry_step_id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+          "title": "Entry Step Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "entry_step_id"
+      ],
+      "title": "ExecutionBranchSpec",
+      "type": "object"
+    },
+    "FinishStep": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "finish",
+          "default": "finish",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "FinishStep",
+      "type": "object"
+    },
+    "HideInformationEffect": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "hide_information",
+          "default": "hide_information",
+          "title": "Type",
+          "type": "string"
+        },
+        "information_id": {
+          "minLength": 1,
+          "title": "Information Id",
+          "type": "string"
+        },
+        "scope": {
+          "default": "party",
+          "enum": [
+            "party",
+            "actor"
+          ],
+          "title": "Scope",
+          "type": "string"
+        }
+      },
+      "required": [
+        "information_id"
+      ],
+      "title": "HideInformationEffect",
+      "type": "object"
+    },
+    "InformationAudienceSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "keeper": {
+          "default": true,
+          "title": "Keeper",
+          "type": "boolean"
+        },
+        "player_when_discovered": {
+          "default": true,
+          "title": "Player When Discovered",
+          "type": "boolean"
+        }
+      },
+      "title": "InformationAudienceSpec",
+      "type": "object"
+    },
+    "InformationDiscoverySpec": {
+      "additionalProperties": false,
+      "description": "Whether the fact starts hidden, and who shares it once discovered.",
+      "properties": {
+        "initial": {
+          "default": "hidden",
+          "enum": [
+            "hidden",
+            "known"
+          ],
+          "title": "Initial",
+          "type": "string"
+        },
+        "scope": {
+          "default": "party",
+          "enum": [
+            "party",
+            "actor"
+          ],
+          "title": "Scope",
+          "type": "string"
+        }
+      },
+      "title": "InformationDiscoverySpec",
+      "type": "object"
+    },
+    "InformationPresentationSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "channels": {
+          "default": [
+            "narration"
+          ],
+          "items": {
+            "enum": [
+              "narration",
+              "journal",
+              "handout"
+            ],
+            "type": "string"
+          },
+          "title": "Channels",
+          "type": "array"
+        },
+        "show_in_ui": {
+          "default": true,
+          "title": "Show In Ui",
+          "type": "boolean"
+        }
+      },
+      "title": "InformationPresentationSpec",
+      "type": "object"
+    },
+    "InformationRecoverySpec": {
+      "additionalProperties": false,
+      "description": "How hard the module insists on *this* route to the fact.\n\n`strict` must honour the declared sources; `adaptive` / `guaranteed` let the\nAgent reach the same Canon Information through a reasonable Runtime source —\na neighbour, a public record, a clerk who looks it up — without ever letting\nit invent a fact that is not already Canon (#212 §4.2, §4.3).",
+      "properties": {
+        "policy": {
+          "default": "adaptive",
+          "enum": [
+            "strict",
+            "adaptive",
+            "guaranteed"
+          ],
+          "title": "Policy",
+          "type": "string"
+        },
+        "allowed_source_types": {
+          "default": [],
+          "items": {
+            "enum": [
+              "explicit_entity",
+              "explicit_location",
+              "runtime_entity",
+              "public_record",
+              "environmental_source"
+            ],
+            "type": "string"
+          },
+          "title": "Allowed Source Types",
+          "type": "array"
+        }
+      },
+      "title": "InformationRecoverySpec",
+      "type": "object"
+    },
+    "InformationSpecV3": {
+      "additionalProperties": false,
+      "description": "One Canon fact, separated from every carrier that can deliver it.",
+      "properties": {
+        "id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "default": "clue",
+          "enum": [
+            "clue",
+            "fact",
+            "rumor",
+            "testimony",
+            "record"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "keeper_content": {
+          "minLength": 1,
+          "title": "Keeper Content",
+          "type": "string"
+        },
+        "player_content": {
+          "minLength": 1,
+          "title": "Player Content",
+          "type": "string"
+        },
+        "discovery": {
+          "$ref": "#/$defs/InformationDiscoverySpec"
+        },
+        "audience": {
+          "$ref": "#/$defs/InformationAudienceSpec"
+        },
+        "presentation": {
+          "$ref": "#/$defs/InformationPresentationSpec"
+        },
+        "criticality": {
+          "default": "supporting",
+          "enum": [
+            "essential",
+            "supporting",
+            "flavor"
+          ],
+          "title": "Criticality",
+          "type": "string"
+        },
+        "recovery": {
+          "$ref": "#/$defs/InformationRecoverySpec"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "keeper_content",
+        "player_content"
+      ],
+      "title": "InformationSpecV3",
+      "type": "object"
+    },
+    "InitialStateSpec": {
+      "additionalProperties": false,
+      "description": "The opening world snapshot.\n\nProvisional, same reason as `WorldProfileSpec`: only the fields the rest of\nthis contract references are modelled.",
+      "properties": {
+        "start_location_id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+          "title": "Start Location Id",
+          "type": "string"
+        },
+        "default_actor_placement": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ActorPlacementSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "revealed_information_ids": {
+          "default": [],
+          "items": {
+            "maxLength": 100,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+            "type": "string"
+          },
+          "title": "Revealed Information Ids",
+          "type": "array"
+        },
+        "start_time_point_id": {
+          "anyOf": [
+            {
+              "maxLength": 100,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Start Time Point Id"
+        },
+        "entity_state": {
+          "patternProperties": {
+            "^[A-Za-z0-9_][A-Za-z0-9_.-]*$": {
+              "additionalProperties": {
+                "$ref": "#/$defs/JsonValue"
+              },
+              "type": "object"
+            }
+          },
+          "propertyNames": {
+            "maxLength": 100,
+            "minLength": 1
+          },
+          "title": "Entity State",
+          "type": "object"
+        }
+      },
+      "required": [
+        "start_location_id"
+      ],
+      "title": "InitialStateSpec",
+      "type": "object"
+    },
+    "InvokeRulesetActionStep": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "invoke_ruleset_action",
+          "default": "invoke_ruleset_action",
+          "title": "Kind",
+          "type": "string"
+        },
+        "action_id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Action Id",
+          "type": "string"
+        },
+        "actor_binding": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Actor Binding",
+          "type": "string"
+        },
+        "parameters": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Parameters",
+          "type": "object"
+        },
+        "next_step_id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+          "title": "Next Step Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "action_id",
+        "actor_binding",
+        "next_step_id"
+      ],
+      "title": "InvokeRulesetActionStep",
+      "type": "object"
+    },
+    "ItemCapability": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "type": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Type",
+          "type": "string"
+        },
+        "target_selector": {
+          "$ref": "#/$defs/ItemTargetSelector"
+        },
+        "consumes": {
+          "default": false,
+          "title": "Consumes",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "type"
+      ],
+      "title": "ItemCapability",
+      "type": "object"
+    },
+    "ItemComponent": {
+      "additionalProperties": false,
+      "properties": {
+        "portable": {
+          "default": true,
+          "title": "Portable",
+          "type": "boolean"
+        },
+        "unique": {
+          "default": false,
+          "title": "Unique",
+          "type": "boolean"
+        },
+        "quantity": {
+          "default": 1,
+          "maximum": 999,
+          "minimum": 1,
+          "title": "Quantity",
+          "type": "integer"
+        },
+        "capabilities": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ItemCapability"
+          },
+          "title": "Capabilities",
+          "type": "array"
+        }
+      },
+      "title": "ItemComponent",
+      "type": "object"
+    },
+    "ItemTargetSelector": {
+      "additionalProperties": false,
+      "properties": {
+        "entity_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Entity Ids",
+          "type": "array"
+        },
+        "location_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Location Ids",
+          "type": "array"
+        }
+      },
+      "title": "ItemTargetSelector",
+      "type": "object"
+    },
+    "JsonValue": {},
+    "KnowledgeGoalSpec": {
+      "additionalProperties": false,
+      "description": "What the party must end up *knowing*, independent of how they learn it.",
+      "properties": {
+        "id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "target_information_ids": {
+          "items": {
+            "maxLength": 100,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Target Information Ids",
+          "type": "array"
+        },
+        "completion": {
+          "default": "all",
+          "enum": [
+            "all",
+            "any"
+          ],
+          "title": "Completion",
+          "type": "string"
+        },
+        "required_for_core_resolution": {
+          "default": false,
+          "title": "Required For Core Resolution",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "target_information_ids"
+      ],
+      "title": "KnowledgeGoalSpec",
+      "type": "object"
+    },
+    "LocationEdgeSpec": {
+      "additionalProperties": false,
+      "description": "One directed route in the navigation graph.\n\n`access_point_id` is the Entity that gates the edge (a door, a gate). When it\nis set and locked, travel stops at that boundary instead of failing — that is\nwhat lets the player be \"at the study door\" rather than either inside or\nnowhere.",
+      "properties": {
+        "id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "from_location_id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+          "title": "From Location Id",
+          "type": "string"
+        },
+        "to_location_id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+          "title": "To Location Id",
+          "type": "string"
+        },
+        "kind": {
+          "default": "public_network",
+          "enum": [
+            "public_network",
+            "private",
+            "concealed",
+            "vertical"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "traversal": {
+          "default": "automatic",
+          "enum": [
+            "automatic",
+            "gated",
+            "guided"
+          ],
+          "title": "Traversal",
+          "type": "string"
+        },
+        "visibility": {
+          "default": "public",
+          "enum": [
+            "public",
+            "party",
+            "actor",
+            "hidden"
+          ],
+          "title": "Visibility",
+          "type": "string"
+        },
+        "access_point_id": {
+          "anyOf": [
+            {
+              "maxLength": 100,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Access Point Id"
+        },
+        "conditions": {
+          "default": [],
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "all": "#/$defs/AllCondition",
+                "any": "#/$defs/AnyCondition",
+                "not": "#/$defs/NotCondition",
+                "predicate": "#/$defs/PredicateCondition"
+              },
+              "propertyName": "op"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/AllCondition"
+              },
+              {
+                "$ref": "#/$defs/AnyCondition"
+              },
+              {
+                "$ref": "#/$defs/NotCondition"
+              },
+              {
+                "$ref": "#/$defs/PredicateCondition"
+              }
+            ]
+          },
+          "title": "Conditions",
+          "type": "array"
+        },
+        "travel_cost": {
+          "$ref": "#/$defs/TravelCostSpec"
+        },
+        "origin": {
+          "default": "authored",
+          "enum": [
+            "authored",
+            "synthesized"
+          ],
+          "title": "Origin",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "from_location_id",
+        "to_location_id"
+      ],
+      "title": "LocationEdgeSpec",
+      "type": "object"
+    },
+    "LocationSpecV3": {
+      "additionalProperties": false,
+      "description": "A place.\n\n`parent_location_id` drives the UI breadcrumb; reachability is a separate\ngraph (`LocationEdgeSpec`). Conflating the two is what made v2 Scene exits\nunable to express \"standing at the locked study door\" (#212 §7.3, §7.4).",
+      "properties": {
+        "id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "region",
+            "site",
+            "room",
+            "connector"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "origin": {
+          "default": "canon",
+          "enum": [
+            "canon",
+            "system_seeded"
+          ],
+          "title": "Origin",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "player_visible_name": {
+          "default": "",
+          "title": "Player Visible Name",
+          "type": "string"
+        },
+        "player_visible_description": {
+          "default": "",
+          "title": "Player Visible Description",
+          "type": "string"
+        },
+        "parent_location_id": {
+          "anyOf": [
+            {
+              "maxLength": 100,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Location Id"
+        },
+        "region_id": {
+          "anyOf": [
+            {
+              "maxLength": 100,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Region Id"
+        },
+        "relations": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/EntityRelationSpec"
+          },
+          "title": "Relations",
+          "type": "array"
+        },
+        "plot_relevance": {
+          "default": true,
+          "title": "Plot Relevance",
+          "type": "boolean"
+        },
+        "lifecycle": {
+          "default": "campaign",
+          "enum": [
+            "campaign",
+            "session",
+            "room"
+          ],
+          "title": "Lifecycle",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "name"
+      ],
+      "title": "LocationSpecV3",
+      "type": "object"
+    },
+    "MarkCoreResolvedEffect": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "mark_core_resolved",
+          "default": "mark_core_resolved",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "title": "MarkCoreResolvedEffect",
+      "type": "object"
+    },
+    "MatchOptionAuthorSpec": {
+      "additionalProperties": false,
+      "description": "One opaque choice offered to the Agent.\n\nThe Agent submits `id` and nothing else; the mapping from option to\nconsequence exists only server-side, so a compromised or creative model\ncannot pick an outcome (#226 §1 设计结论).",
+      "properties": {
+        "id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "semantic_hints": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Semantic Hints",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "semantic_hints"
+      ],
+      "title": "MatchOptionAuthorSpec",
+      "type": "object"
+    },
+    "MatchQuestionSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "action_declaration",
+            "method",
+            "intent_relation"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "semantic_hints": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Semantic Hints",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "semantic_hints"
+      ],
+      "title": "MatchQuestionSpec",
+      "type": "object"
+    },
+    "ModulePresentation": {
+      "additionalProperties": false,
+      "description": "Player-facing publication metadata, separate from keeper context.",
+      "properties": {
+        "title": {
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "name_en": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name En"
+        },
+        "synopsis": {
+          "minLength": 1,
+          "title": "Synopsis",
+          "type": "string"
+        },
+        "players_min": {
+          "minimum": 1,
+          "title": "Players Min",
+          "type": "integer"
+        },
+        "players_max": {
+          "minimum": 1,
+          "title": "Players Max",
+          "type": "integer"
+        },
+        "difficulty": {
+          "maximum": 3,
+          "minimum": 1,
+          "title": "Difficulty",
+          "type": "integer"
+        },
+        "estimated_duration": {
+          "minLength": 1,
+          "title": "Estimated Duration",
+          "type": "string"
+        },
+        "story_label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Story Label"
+        },
+        "subtitle": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Subtitle"
+        },
+        "authors": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Authors",
+          "type": "array"
+        },
+        "tags": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Tags",
+          "type": "array"
+        },
+        "player_intro_pages": {
+          "items": {
+            "$ref": "#/$defs/ModuleStoryPage"
+          },
+          "minItems": 1,
+          "title": "Player Intro Pages",
+          "type": "array"
+        }
+      },
+      "required": [
+        "title",
+        "synopsis",
+        "players_min",
+        "players_max",
+        "difficulty",
+        "estimated_duration",
+        "player_intro_pages"
+      ],
+      "title": "ModulePresentation",
+      "type": "object"
+    },
+    "ModuleStoryPage": {
+      "additionalProperties": false,
+      "description": "A player-safe page shown before character creation.",
+      "properties": {
+        "title": {
+          "default": "",
+          "title": "Title",
+          "type": "string"
+        },
+        "content": {
+          "minLength": 1,
+          "title": "Content",
+          "type": "string"
+        }
+      },
+      "required": [
+        "content"
+      ],
+      "title": "ModuleStoryPage",
+      "type": "object"
+    },
+    "ModuleTimePolicySpec": {
+      "additionalProperties": false,
+      "description": "Discrete time points; the clock jumps between them, it does not tick.",
+      "properties": {
+        "default_points": {
+          "default": [
+            {
+              "id": "hour_00",
+              "hour_of_day": 0,
+              "order": 0
+            },
+            {
+              "id": "hour_06",
+              "hour_of_day": 6,
+              "order": 1
+            },
+            {
+              "id": "hour_12",
+              "hour_of_day": 12,
+              "order": 2
+            },
+            {
+              "id": "hour_18",
+              "hour_of_day": 18,
+              "order": 3
+            }
+          ],
+          "items": {
+            "$ref": "#/$defs/TimePointSpec"
+          },
+          "title": "Default Points",
+          "type": "array"
+        },
+        "storage_precision": {
+          "const": "hour",
+          "default": "hour",
+          "title": "Storage Precision",
+          "type": "string"
+        },
+        "progression": {
+          "const": "host_controlled_discrete",
+          "default": "host_controlled_discrete",
+          "title": "Progression",
+          "type": "string"
+        },
+        "actions_per_point": {
+          "const": "multiple",
+          "default": "multiple",
+          "title": "Actions Per Point",
+          "type": "string"
+        }
+      },
+      "title": "ModuleTimePolicySpec",
+      "type": "object"
+    },
+    "MoveEntityEffect": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "move_entity",
+          "default": "move_entity",
+          "title": "Type",
+          "type": "string"
+        },
+        "entity_id": {
+          "minLength": 1,
+          "title": "Entity Id",
+          "type": "string"
+        },
+        "location_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Location Id"
+        },
+        "holder_actor_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Holder Actor Id"
+        }
+      },
+      "required": [
+        "entity_id"
+      ],
+      "title": "MoveEntityEffect",
+      "type": "object"
+    },
+    "NarrativeOnlyEffect": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "narrative_only",
+          "default": "narrative_only",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "title": "NarrativeOnlyEffect",
+      "type": "object"
+    },
+    "NotCondition": {
+      "additionalProperties": false,
+      "properties": {
+        "op": {
+          "const": "not",
+          "default": "not",
+          "title": "Op",
+          "type": "string"
+        },
+        "item": {
+          "discriminator": {
+            "mapping": {
+              "all": "#/$defs/AllCondition",
+              "any": "#/$defs/AnyCondition",
+              "not": "#/$defs/NotCondition",
+              "predicate": "#/$defs/PredicateCondition"
+            },
+            "propertyName": "op"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/AllCondition"
+            },
+            {
+              "$ref": "#/$defs/AnyCondition"
+            },
+            {
+              "$ref": "#/$defs/NotCondition"
+            },
+            {
+              "$ref": "#/$defs/PredicateCondition"
+            }
+          ],
+          "title": "Item"
+        }
+      },
+      "required": [
+        "item"
+      ],
+      "title": "NotCondition",
+      "type": "object"
+    },
+    "PredicateCondition": {
+      "additionalProperties": false,
+      "description": "A registered predicate, never a script.\n\n#226 §1 forbids scripts, database paths and arbitrary event payloads in\nrules; the predicate name must resolve to something the Engine registered.",
+      "properties": {
+        "op": {
+          "const": "predicate",
+          "default": "predicate",
+          "title": "Op",
+          "type": "string"
+        },
+        "predicate": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+          "title": "Predicate",
+          "type": "string"
+        },
+        "args": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Args",
+          "type": "object"
+        }
+      },
+      "required": [
+        "predicate"
+      ],
+      "title": "PredicateCondition",
+      "type": "object"
+    },
+    "PresentationStep": {
+      "additionalProperties": false,
+      "description": "Hand the Narrator a reference, not prose to copy.",
+      "properties": {
+        "id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "presentation",
+          "default": "presentation",
+          "title": "Kind",
+          "type": "string"
+        },
+        "presentation_id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+          "title": "Presentation Id",
+          "type": "string"
+        },
+        "next_step_id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+          "title": "Next Step Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "presentation_id",
+        "next_step_id"
+      ],
+      "title": "PresentationStep",
+      "type": "object"
+    },
+    "RevealInformationEffect": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "reveal_information",
+          "default": "reveal_information",
+          "title": "Type",
+          "type": "string"
+        },
+        "information_id": {
+          "minLength": 1,
+          "title": "Information Id",
+          "type": "string"
+        },
+        "scope": {
+          "default": "party",
+          "enum": [
+            "party",
+            "actor"
+          ],
+          "title": "Scope",
+          "type": "string"
+        }
+      },
+      "required": [
+        "information_id"
+      ],
+      "title": "RevealInformationEffect",
+      "type": "object"
+    },
+    "RuleCheckSpec": {
+      "additionalProperties": false,
+      "description": "A check owned by the rule rather than proposed by the Agent.\n\n`parameters` may only carry fields the named Check Profile registered — the\nrule cannot restate the system's dice algebra (#226 §5).",
+      "properties": {
+        "profile_id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Profile Id",
+          "type": "string"
+        },
+        "actor_binding": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Actor Binding",
+          "type": "string"
+        },
+        "initiation_kind": {
+          "enum": [
+            "active_action",
+            "passive_rule"
+          ],
+          "title": "Initiation Kind",
+          "type": "string"
+        },
+        "parameters": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Parameters",
+          "type": "object"
+        },
+        "difficulty": {
+          "anyOf": [
+            {
+              "enum": [
+                "regular",
+                "hard",
+                "extreme"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Difficulty"
+        },
+        "allow_luck": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Allow Luck"
+        },
+        "allow_push": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Allow Push"
+        }
+      },
+      "required": [
+        "profile_id",
+        "actor_binding",
+        "initiation_kind"
+      ],
+      "title": "RuleCheckSpec",
+      "type": "object"
+    },
+    "RuleExecutionSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "branches": {
+          "items": {
+            "$ref": "#/$defs/ExecutionBranchSpec"
+          },
+          "minItems": 1,
+          "title": "Branches",
+          "type": "array"
+        },
+        "steps": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "adjudicated_check": "#/$defs/AdjudicatedCheckStep",
+                "await_player_input": "#/$defs/AwaitPlayerInputStep",
+                "cancel_time_task": "#/$defs/CancelTimeTaskStep",
+                "check": "#/$defs/CheckStep",
+                "create_npc_action_opportunity": "#/$defs/CreateNpcActionOpportunityStep",
+                "create_time_task": "#/$defs/CreateTimeTaskStep",
+                "effect": "#/$defs/EffectStep",
+                "finish": "#/$defs/FinishStep",
+                "invoke_ruleset_action": "#/$defs/InvokeRulesetActionStep",
+                "presentation": "#/$defs/PresentationStep"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/EffectStep"
+              },
+              {
+                "$ref": "#/$defs/CheckStep"
+              },
+              {
+                "$ref": "#/$defs/AdjudicatedCheckStep"
+              },
+              {
+                "$ref": "#/$defs/InvokeRulesetActionStep"
+              },
+              {
+                "$ref": "#/$defs/CreateNpcActionOpportunityStep"
+              },
+              {
+                "$ref": "#/$defs/CreateTimeTaskStep"
+              },
+              {
+                "$ref": "#/$defs/CancelTimeTaskStep"
+              },
+              {
+                "$ref": "#/$defs/PresentationStep"
+              },
+              {
+                "$ref": "#/$defs/AwaitPlayerInputStep"
+              },
+              {
+                "$ref": "#/$defs/FinishStep"
+              }
+            ]
+          },
+          "minItems": 1,
+          "title": "Steps",
+          "type": "array"
+        }
+      },
+      "required": [
+        "branches",
+        "steps"
+      ],
+      "title": "RuleExecutionSpec",
+      "type": "object"
+    },
+    "RuleLimitsSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "max_chain_depth": {
+          "default": 16,
+          "maximum": 64,
+          "minimum": 1,
+          "title": "Max Chain Depth",
+          "type": "integer"
+        },
+        "max_steps": {
+          "default": 128,
+          "maximum": 1024,
+          "minimum": 1,
+          "title": "Max Steps",
+          "type": "integer"
+        }
+      },
+      "title": "RuleLimitsSpec",
+      "type": "object"
+    },
+    "RulePresentationSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "player_safe_summary": {
+          "default": "",
+          "maxLength": 500,
+          "title": "Player Safe Summary",
+          "type": "string"
+        },
+        "narration_constraints": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Narration Constraints",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "RulePresentationSpec",
+      "type": "object"
+    },
+    "RuleSpecV3": {
+      "additionalProperties": false,
+      "description": "One authored rule.\n\nIts immutable identity is `(module_id, module_version, rule_id)`; a running\nsession pins a ModuleVersion so a republished rule can never change the\nmeaning of an agenda already in flight (#226 §1).",
+      "properties": {
+        "id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "priority": {
+          "default": 0,
+          "maximum": 1000,
+          "minimum": -1000,
+          "title": "Priority",
+          "type": "integer"
+        },
+        "trigger": {
+          "discriminator": {
+            "mapping": {
+              "agent_match": "#/$defs/AgentMatchTriggerSpec",
+              "event": "#/$defs/EventTriggerSpec"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/AgentMatchTriggerSpec"
+            },
+            {
+              "$ref": "#/$defs/EventTriggerSpec"
+            }
+          ],
+          "title": "Trigger"
+        },
+        "execution": {
+          "$ref": "#/$defs/RuleExecutionSpec"
+        },
+        "presentation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RulePresentationSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "limits": {
+          "$ref": "#/$defs/RuleLimitsSpec"
+        }
+      },
+      "required": [
+        "id",
+        "trigger",
+        "execution"
+      ],
+      "title": "RuleSpecV3",
+      "type": "object"
+    },
+    "SetEndingAvailabilityEffect": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "set_ending_availability",
+          "default": "set_ending_availability",
+          "title": "Type",
+          "type": "string"
+        },
+        "available": {
+          "title": "Available",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "available"
+      ],
+      "title": "SetEndingAvailabilityEffect",
+      "type": "object"
+    },
+    "SetVisibilityEffect": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "set_visibility",
+          "default": "set_visibility",
+          "title": "Type",
+          "type": "string"
+        },
+        "target_kind": {
+          "enum": [
+            "information",
+            "entity",
+            "location"
+          ],
+          "title": "Target Kind",
+          "type": "string"
+        },
+        "target_id": {
+          "minLength": 1,
+          "title": "Target Id",
+          "type": "string"
+        },
+        "visible": {
+          "title": "Visible",
+          "type": "boolean"
+        },
+        "scope": {
+          "default": "party",
+          "enum": [
+            "party",
+            "actor"
+          ],
+          "title": "Scope",
+          "type": "string"
+        }
+      },
+      "required": [
+        "target_kind",
+        "target_id",
+        "visible"
+      ],
+      "title": "SetVisibilityEffect",
+      "type": "object"
+    },
+    "TimePointSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "hour_of_day": {
+          "maximum": 23,
+          "minimum": 0,
+          "title": "Hour Of Day",
+          "type": "integer"
+        },
+        "order": {
+          "minimum": 0,
+          "title": "Order",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "hour_of_day",
+        "order"
+      ],
+      "title": "TimePointSpec",
+      "type": "object"
+    },
+    "TravelCostSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "minutes": {
+          "default": 0,
+          "maximum": 10080,
+          "minimum": 0,
+          "title": "Minutes",
+          "type": "integer"
+        }
+      },
+      "title": "TravelCostSpec",
+      "type": "object"
+    },
+    "WorldProfileSpec": {
+      "additionalProperties": false,
+      "description": "Setting constraints the Agent must respect when proposing Runtime content.\n\nProvisional: #212 §7.5 only requires that an Agent-proposed inn \"符合\nworld_profile\". Modelled with the minimum needed to judge that, so a later\nissue can extend it without unwinding invented structure.",
+      "properties": {
+        "era": {
+          "default": "",
+          "maxLength": 100,
+          "title": "Era",
+          "type": "string"
+        },
+        "region": {
+          "default": "",
+          "maxLength": 100,
+          "title": "Region",
+          "type": "string"
+        },
+        "technology_level": {
+          "default": "",
+          "maxLength": 100,
+          "title": "Technology Level",
+          "type": "string"
+        },
+        "tone": {
+          "default": "",
+          "maxLength": 200,
+          "title": "Tone",
+          "type": "string"
+        },
+        "forbidden_content": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Forbidden Content",
+          "type": "array"
+        }
+      },
+      "title": "WorldProfileSpec",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The v3 module file (#212 §3.1).\n\nStructural invariants only live here; cross-collection reference checks\n(does this goal name a real Information? does this edge name a real\nLocation?) belong to the semantic validator, which can report every problem\nat once instead of aborting on the first.",
+  "properties": {
+    "content_schema_version": {
+      "const": 3,
+      "default": 3,
+      "title": "Content Schema Version",
+      "type": "integer"
+    },
+    "module_id": {
+      "maxLength": 100,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+      "title": "Module Id",
+      "type": "string"
+    },
+    "version": {
+      "maxLength": 50,
+      "minLength": 1,
+      "title": "Version",
+      "type": "string"
+    },
+    "world_ref": {
+      "maxLength": 100,
+      "minLength": 1,
+      "title": "World Ref",
+      "type": "string"
+    },
+    "background": {
+      "minLength": 1,
+      "title": "Background",
+      "type": "string"
+    },
+    "information": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/InformationSpecV3"
+      },
+      "title": "Information",
+      "type": "array"
+    },
+    "knowledge_goals": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/KnowledgeGoalSpec"
+      },
+      "title": "Knowledge Goals",
+      "type": "array"
+    },
+    "entities": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/EntitySpecV3"
+      },
+      "title": "Entities",
+      "type": "array"
+    },
+    "locations": {
+      "items": {
+        "$ref": "#/$defs/LocationSpecV3"
+      },
+      "minItems": 1,
+      "title": "Locations",
+      "type": "array"
+    },
+    "location_edges": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/LocationEdgeSpec"
+      },
+      "title": "Location Edges",
+      "type": "array"
+    },
+    "rules": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/RuleSpecV3"
+      },
+      "title": "Rules",
+      "type": "array"
+    },
+    "core_resolution": {
+      "$ref": "#/$defs/CoreResolutionSpec"
+    },
+    "ending_policy": {
+      "$ref": "#/$defs/EndingPolicySpec"
+    },
+    "ending_anchors": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/EndingAnchorSpec"
+      },
+      "title": "Ending Anchors",
+      "type": "array"
+    },
+    "presentation": {
+      "$ref": "#/$defs/ModulePresentation"
+    },
+    "initial_state": {
+      "$ref": "#/$defs/InitialStateSpec"
+    },
+    "world_profile": {
+      "$ref": "#/$defs/WorldProfileSpec"
+    },
+    "time_policy": {
+      "$ref": "#/$defs/ModuleTimePolicySpec"
+    }
+  },
+  "required": [
+    "module_id",
+    "version",
+    "world_ref",
+    "background",
+    "locations",
+    "presentation",
+    "initial_state"
+  ],
+  "title": "ModuleContentV3",
+  "type": "object"
+}

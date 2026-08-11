@@ -14,6 +14,7 @@ from collaboration_framework.host.ports.action_plan import (
 from collaboration_framework.host.schemas import (
     RESERVING_PLAN_STATUSES,
     ActionPlanRun,
+    reservation_is_expired,
 )
 
 
@@ -36,6 +37,19 @@ class InMemoryActionPlanRunStore(ActionPlanRunStore):
 
         return ActionPlanRun.model_validate_json(run.model_dump_json())
 
+    def _reservation_expired(self, room_id: str, parent_action_id: str) -> bool:
+        """占用是否已过期，判据与持久化 store 完全一致。
+
+        持久化侧存的是 `RoomActionReservation.updated_at`，而 CAS 每次都把它同步
+        成 `run.updated_at`——两者恒等，所以这里直接读 run 的时间戳，不必再往
+        `_reservations` 里塞一个会和 run 漂移的副本。
+        """
+
+        run = self._runs.get((room_id, parent_action_id))
+        if run is None:
+            return False
+        return reservation_is_expired(run.updated_at)
+
     async def create(self, run: ActionPlanRun) -> ActionPlanRun:
         key = (run.room_id, run.parent_action_id)
         async with self._lock:
@@ -45,10 +59,13 @@ class InMemoryActionPlanRunStore(ActionPlanRunStore):
                 return existing.model_copy(deep=True)
             owner = self._reservations.get(run.room_id)
             if owner is not None and owner != run.parent_action_id:
-                raise ActionPlanBusyError(
-                    "ACTION_IN_PROGRESS",
-                    "当前房间已有未完成行动计划",
-                )
+                if self._reservation_expired(run.room_id, owner):
+                    del self._reservations[run.room_id]
+                else:
+                    raise ActionPlanBusyError(
+                        "ACTION_IN_PROGRESS",
+                        "当前房间已有未完成行动计划",
+                    )
             if run.status not in RESERVING_PLAN_STATUSES:
                 raise ActionPlanConflictError(
                     "PLAN_CREATE_TERMINAL",
@@ -70,7 +87,7 @@ class InMemoryActionPlanRunStore(ActionPlanRunStore):
     ) -> ActionPlanRun | None:
         async with self._lock:
             parent_action_id = self._reservations.get(room_id)
-            if parent_action_id is None:
+            if parent_action_id is None or self._reservation_expired(room_id, parent_action_id):
                 return None
             run = self._runs[(room_id, parent_action_id)]
             if run.player_id != player_id:
@@ -80,7 +97,8 @@ class InMemoryActionPlanRunStore(ActionPlanRunStore):
     async def load_active_for_room(self, room_id: str) -> ActionPlanRun | None:
         async with self._lock:
             parent_action_id = self._reservations.get(room_id)
-            if parent_action_id is None:
+            # 过期占用不再挡住房间，判断与写入分离：删除留给 `create()` 的抢占方。
+            if parent_action_id is None or self._reservation_expired(room_id, parent_action_id):
                 return None
             return self._runs[(room_id, parent_action_id)].model_copy(deep=True)
 

@@ -56,7 +56,8 @@ const completedEvent = {
         available_exits: [],
       },
       world: {
-        elapsed_minutes: 0,
+        day_index: 0,
+        hour_of_day: 12,
         time_of_day: 'night',
         core_resolved: false,
         ending_available: false,
@@ -408,7 +409,7 @@ test('turn.failed reject pending action，view.updated 更新同一份缓存', a
     });
     assert.equal(socket.getOpeningMessageId(), null);
 
-    const pending = socket.submitAction('player-1', {
+    const pending = socket.submitPlannedAction('player-1', {
       clientActionId: 'failed-action',
       utterance: '调查书架',
     });
@@ -431,7 +432,7 @@ test('turn.failed reject pending action，view.updated 更新同一份缓存', a
         error.correlationId === 'failed-action'
     );
 
-    const rejectedAction = socket.submitAction('player-1', {
+    const rejectedAction = socket.submitPlannedAction('player-1', {
       clientActionId: 'busy-action',
       utterance: '继续调查书架',
     });
@@ -451,7 +452,7 @@ test('turn.failed reject pending action，view.updated 更新同一份缓存', a
         error.correlationId === 'busy-action'
     );
 
-    const retriedAction = socket.submitAction('player-1', {
+    const retriedAction = socket.submitPlannedAction('player-1', {
       clientActionId: 'busy-action',
       utterance: '继续调查书架',
     });
@@ -462,7 +463,7 @@ test('turn.failed reject pending action，view.updated 更新同一份缓存', a
     });
     await assert.doesNotReject(retriedAction);
 
-    const interruptedAction = socket.submitAction('player-1', {
+    const interruptedAction = socket.submitPlannedAction('player-1', {
       clientActionId: 'interrupted-action',
       utterance: '查看门外',
     });
@@ -481,10 +482,10 @@ test('turn.failed reject pending action，view.updated 更新同一份缓存', a
   }
 });
 
-test('未连接时 submitAction reject RoomSocketTransportError', async () => {
+test('未连接时 submitPlannedAction reject RoomSocketTransportError', async () => {
   const socket = new RoomSocket('ws://example.test');
   await assert.rejects(
-    socket.submitAction('player-1', {
+    socket.submitPlannedAction('player-1', {
       clientActionId: 'not-connected',
       utterance: '调查书架',
     }),

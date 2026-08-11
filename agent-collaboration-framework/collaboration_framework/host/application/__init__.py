@@ -34,7 +34,6 @@ from .opening_narrator import (
     OpeningNarrator,
     deterministic_opening_narration,
 )
-from .orchestrator import Orchestrator
 from .player_view_projector import PlayerViewProjector
 from .tool_registry import (
     BoundToolRegistry,
@@ -61,7 +60,6 @@ __all__ = [
     "Narrator",
     "OpeningNarrationValidationError",
     "OpeningNarrator",
-    "Orchestrator",
     "PlayerViewProjector",
     "REFERENCE_MODULE_ACTIONS",
     "RULE_ENGINE_ACTION_VOCABULARY",

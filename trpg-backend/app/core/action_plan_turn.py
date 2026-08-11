@@ -62,7 +62,6 @@ from collaboration_framework.host.schemas import (
 from pydantic import ValidationError
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.adapters.structured_http import ModelClientRetryPolicy
 from app.core.turn_events import TurnPhase
 
 logger = structlog.get_logger()
@@ -1176,7 +1175,7 @@ def build_action_plan_turn_application(
         PromptHostTurnDecisionModel,
         QwenChatCompletionsJsonClient,
     )
-    from app.core.config import get_settings, secret_value
+    from app.core.config import get_settings, model_client_retry_policy, secret_value
 
     resolved = settings or get_settings()
     policy = ActionPlanPolicy(
@@ -1214,10 +1213,7 @@ def build_action_plan_turn_application(
                 base_url=base_url,
                 model=model,
                 timeout_seconds=timeout,
-                retry_policy=ModelClientRetryPolicy(
-                    max_attempts=resolved.model_client_max_attempts,
-                    backoff_seconds=resolved.model_client_retry_backoff_seconds,
-                ),
+                retry_policy=model_client_retry_policy(resolved),
             )
         planner = PromptHostTurnDecisionModel(client, policy=policy)
         adjudicator = _RuleFirstStepAdjudicator(PromptActionPlanStepAdjudicator(client))

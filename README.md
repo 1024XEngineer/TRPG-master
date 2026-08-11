@@ -214,7 +214,7 @@ npm run dev
 | `DEEPSEEK_BASE_URL` | `https://api.deepseek.com` | OpenAI-compatible Chat Completions 根地址 |
 | `DEEPSEEK_MODEL` | `deepseek-chat` | DeepSeek 模型名称 |
 | `DEEPSEEK_TIMEOUT_SECONDS` | `30` | DeepSeek 请求超时秒数 |
-| `MODEL_CLIENT_MAX_ATTEMPTS` | `2` | 结构化输出请求的总尝试次数（含首次），三个 provider 共用；只重试超时、连接错误、5xx 与 429 |
+| `MODEL_CLIENT_MAX_ATTEMPTS` | `2` | 结构化输出请求的总尝试次数（含首次），三个 provider 共用；只重试超时、连接错误、5xx 与 429。**开场叙事不适用**：它另有总预算 `OPENING_NARRATION_TIMEOUT_SECONDS`，容不下第二次尝试，该路径固定只试一次 |
 | `MODEL_CLIENT_RETRY_BACKOFF_SECONDS` | `0.5` | 首次重试前的等待秒数，之后按 2 倍指数退避 |
 | `CHARACTER_BACKGROUND_PROVIDER` | `deterministic` | 一键建卡装备与背景：`deterministic` 或 `deepseek`；模型失败会整体回退内置模板 |
 | `HOST_SPEECH_PROVIDER` | `disabled` | 主持人语音：`disabled`、`fake` 或 `doubao`；`fake` 仅用于测试 |

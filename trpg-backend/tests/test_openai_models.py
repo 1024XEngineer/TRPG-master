@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import anyio
 import httpx
 import pytest
 from collaboration_framework.contracts import (
@@ -24,6 +25,7 @@ from collaboration_framework.contracts import (
 from collaboration_framework.engine import (
     ActorResources,
     ActorState,
+    AdjudicationEngineService,
     GameState,
     InMemoryEngineStore,
     RuleEngineService,
@@ -47,7 +49,11 @@ from app.adapters.openai_models import (
 )
 from app.adapters.qwen_models import QwenChatCompletionsJsonClient
 from app.adapters.structured_http import ModelClientRetryPolicy, is_transient_model_error
-from app.core.config import Settings
+from app.core.action_plan_turn import build_action_plan_turn_application
+from app.core.config import Settings, model_client_retry_policy
+from app.core.turn import _configured_opening_models
+from app.service.character_background import build_character_background_service
+from app.service.portrait_generation import build_portrait_generation_service
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -914,3 +920,104 @@ def test_transient_classification_covers_transport_and_server_errors() -> None:
         )
         assert not is_transient_model_error(error)
     assert not is_transient_model_error(ValueError("malformed structured output"))
+
+
+def _retry_policy_of(owner: object) -> ModelClientRetryPolicy:
+    """穿过 composer / planner，取它实际持有的 client 的重试策略。
+
+    这些持有者的声明类型都是 Protocol，直接点私有属性过不了 ty。
+    """
+
+    return getattr(getattr(owner, "_client"), "_retry_policy")  # noqa: B009
+
+
+def test_configured_retry_policy_reaches_every_structured_client() -> None:
+    """每个 StructuredJsonClient 构造点都必须走 `model_client_retry_policy`。
+
+    否则那个 client 会静默吃默认值、无视 `MODEL_CLIENT_*`，运维就没法为它
+    调整或关闭重试——一键建卡背景与立绘提示词曾经就是这样漏掉的。
+    """
+
+    settings = Settings.model_validate(
+        {
+            "host_model_provider": "deepseek",
+            "deepseek_api_key": "test-key",
+            "character_background_provider": "deepseek",
+            "portrait_prompt_provider": "deepseek",
+            "model_client_max_attempts": 4,
+            "model_client_retry_backoff_seconds": 1.5,
+        }
+    )
+    expected = ModelClientRetryPolicy(max_attempts=4, backoff_seconds=1.5)
+    assert model_client_retry_policy(settings) == expected
+
+    background_service = build_character_background_service(settings)
+    assert _retry_policy_of(background_service._composer) == expected
+
+    portrait_service = build_portrait_generation_service(settings)
+    assert _retry_policy_of(portrait_service._prompt_composer) == expected
+
+    engine_store = InMemoryEngineStore()
+    plan_application = build_action_plan_turn_application(
+        store=engine_store,
+        engine=RuleEngineService(engine_store),
+        adjudication_engine=AdjudicationEngineService(engine_store),
+        settings=settings,
+    )
+    assert _retry_policy_of(plan_application._planner) == expected
+
+
+def test_opening_narration_client_does_not_retry() -> None:
+    """开场路径显式不重试。
+
+    开场整段被 `anyio.fail_after(opening_narration_timeout_seconds)` 包住，那是
+    总预算；单次请求预算是 `deepseek_timeout_seconds`。两者默认都是 30 秒，第一次
+    请求耗尽预算时外层 deadline 同时到期，退避与第二次尝试会被取消。与其配一个
+    永远不生效的策略，不如如实地不重试——开场有确定性模板兜底。
+    """
+
+    settings = Settings.model_validate(
+        {
+            "host_model_provider": "deepseek",
+            "deepseek_api_key": "test-key",
+            "model_client_max_attempts": 4,
+        }
+    )
+    model, _ = _configured_opening_models(settings)
+    assert _retry_policy_of(model).max_attempts == 1
+
+
+async def test_outer_deadline_equal_to_request_timeout_cancels_the_retry() -> None:
+    """坐实上面那条注释：外层预算等于单次预算时，重试根本不会发生。
+
+    每次尝试都耗满单次预算才失败，所以第一次尝试就把总预算用光了。
+    """
+
+    per_request = 0.2
+    attempts = {"count": 0}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        attempts["count"] += 1
+        await anyio.sleep(per_request)
+        raise httpx.ReadTimeout("upstream timed out", request=request)
+
+    client = DeepSeekChatCompletionsJsonClient(
+        api_key="test-key",
+        base_url="https://api.deepseek.example/v1",
+        model="deepseek-chat",
+        timeout_seconds=per_request,
+        transport=httpx.MockTransport(handler),
+        retry_policy=ModelClientRetryPolicy(max_attempts=2, backoff_seconds=0.05),
+    )
+
+    with pytest.raises(TimeoutError):
+        with anyio.fail_after(per_request):
+            await _generate(client)
+    assert attempts["count"] == 1
+
+    # 对照：总预算容得下两次尝试时，重试照常发生。
+    attempts["count"] = 0
+    with pytest.raises(httpx.ReadTimeout):
+        with anyio.fail_after(per_request * 2 + 0.05 + 0.5):
+            await _generate(client)
+    assert attempts["count"] == 2

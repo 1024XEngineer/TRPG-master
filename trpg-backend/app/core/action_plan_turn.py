@@ -815,9 +815,9 @@ class ActionPlanTurnApplication:
             await self._orchestrator.request_cancel_after_current(cancel_request)
             derived_request_id = f"{request_id}:accept-current"
             if len(derived_request_id) > 200:
-                derived_request_id = "post-roll-accept-" + hashlib.sha256(
-                    request_id.encode("utf-8")
-                ).hexdigest()
+                derived_request_id = (
+                    "post-roll-accept-" + hashlib.sha256(request_id.encode("utf-8")).hexdigest()
+                )
             await self._adjudication_engine.decide_post_roll(
                 PostRollDecisionRequest(
                     request_id=derived_request_id,

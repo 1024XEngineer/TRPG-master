@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Protocol
@@ -28,6 +29,7 @@ from collaboration_framework.contracts import (
     NoAdjudicationCheck,
     PlayerInput,
     PlayerView,
+    PostRollDecisionRequest,
     RequiredAdjudicationCheck,
     RuleDecisionRef,
     SingleActionDecision,
@@ -745,6 +747,7 @@ class ActionPlanTurnApplication:
     ) -> ActionPlanTurnResult:
         actor_id = await self._resolve_actor_id(room_id, player_id)
         existing = await self._orchestrator.get_run(room_id, parent_action_id)
+        execution: AdjudicationExecution | None = None
         if (
             existing is not None
             and existing.player_id == player_id
@@ -753,6 +756,15 @@ class ActionPlanTurnApplication:
             and existing.current_step_index < len(existing.steps)
         ):
             execution = existing.steps[existing.current_step_index].adjudication_execution
+            status = await self._adjudication_engine.get_status(
+                GetAdjudicationStatusRequest(
+                    room_id=room_id,
+                    player_id=player_id,
+                    action_request_id=existing.steps[existing.current_step_index].step_request_id,
+                )
+            )
+            if status.execution is not None:
+                execution = status.execution
             pending = execution.pending_decision if execution is not None else None
             if (
                 execution is not None
@@ -770,15 +782,61 @@ class ActionPlanTurnApplication:
                         choice=CancelCheckChoice(),
                     )
                 )
-        run = await self._orchestrator.cancel_remaining(
-            CancelActionPlanRequest(
-                request_id=request_id,
+        cancel_request = CancelActionPlanRequest(
+            request_id=request_id,
+            room_id=room_id,
+            player_id=player_id,
+            actor_id=actor_id,
+            parent_action_id=parent_action_id,
+        )
+        if (
+            execution is not None
+            and execution.status == "awaiting_post_roll_decision"
+            and execution.check_run is not None
+        ):
+            # A post-roll cancel accepts the already-authoritative roll.  The
+            # intent is durable before the Engine command so recovery can
+            # finish the same check and stop later steps after a crash.
+            check_run = execution.check_run
+            accept_option = next(
+                (
+                    option
+                    for option in check_run.post_roll_options
+                    if option.kind == "accept_result"
+                ),
+                None,
+            )
+            if accept_option is None:
+                raise TurnExecutionError(
+                    "POST_ROLL_ACCEPT_UNAVAILABLE",
+                    "当前检定没有可接受的已掷结果",
+                    retryable=False,
+                )
+            await self._orchestrator.request_cancel_after_current(cancel_request)
+            derived_request_id = f"{request_id}:accept-current"
+            if len(derived_request_id) > 200:
+                derived_request_id = "post-roll-accept-" + hashlib.sha256(
+                    request_id.encode("utf-8")
+                ).hexdigest()
+            await self._adjudication_engine.decide_post_roll(
+                PostRollDecisionRequest(
+                    request_id=derived_request_id,
+                    room_id=room_id,
+                    player_id=player_id,
+                    source_revision=execution.view_revision,
+                    check_id=check_run.check_id,
+                    check_version=check_run.version,
+                    option_id=accept_option.option_id,
+                )
+            )
+            result = await self.resume_pending(
                 room_id=room_id,
                 player_id=player_id,
-                actor_id=actor_id,
                 parent_action_id=parent_action_id,
             )
-        )
+            return result
+
+        run = await self._orchestrator.cancel_remaining(cancel_request)
         player_input = PlayerInput(
             room_id=room_id,
             player_id=player_id,

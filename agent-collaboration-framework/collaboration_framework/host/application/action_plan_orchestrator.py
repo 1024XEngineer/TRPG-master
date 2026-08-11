@@ -375,6 +375,21 @@ class ActionPlanOrchestrator:
                     player_view=view,
                     latest_execution=latest,
                 )
+            if run.status == "cancelled":
+                await self._emit(
+                    on_progress,
+                    self._progress(
+                        run,
+                        "plan.stopped",
+                        "stopped",
+                        reason="PLAN_CANCELLED",
+                    ),
+                )
+                return ActionPlanAdvanceResult(
+                    run=run,
+                    player_view=view,
+                    latest_execution=latest,
+                )
             if run.status == "stopped":
                 run = await self._release_lease(run)
                 await self._emit(
@@ -490,6 +505,78 @@ class ActionPlanOrchestrator:
             ),
         )
         return cancelled
+
+    async def request_cancel_after_current(
+        self,
+        request: CancelActionPlanRequest,
+    ) -> ActionPlanRun:
+        """Persist a post-roll cancel intent without cancelling the check.
+
+        The caller must settle the current check afterwards.  Persisting the
+        intent first makes that settlement recoverable if the process exits
+        between the two authoritative writes.
+        """
+
+        run = await self._store.load(request.room_id, request.parent_action_id)
+        if run is None:
+            raise ActionPlanPolicyError("PLAN_NOT_FOUND", "没有可取消的行动计划")
+        if run.player_id != request.player_id or run.actor_id != request.actor_id:
+            raise ActionPlanPolicyError("PLAN_OWNER_MISMATCH", "行动计划不属于当前玩家")
+        if request.request_id in run.cancel_request_ids:
+            return run
+        if run.pending_cancel_request_id == request.request_id:
+            return run
+        if run.pending_cancel_request_id is not None:
+            raise ActionPlanPolicyError(
+                "PLAN_CANCEL_IN_PROGRESS",
+                "当前行动计划已有一个取消请求正在处理",
+            )
+        if run.status != "waiting_for_player" or run.current_step_index >= len(run.steps):
+            raise ActionPlanPolicyError(
+                "PLAN_CANCEL_NOT_AT_BOUNDARY",
+                "当前步骤已经开始；请先完成或取消当前检定，再取消剩余计划",
+            )
+        current = run.steps[run.current_step_index]
+        status = await self._executor.get_status(
+            GetAdjudicationStatusRequest(
+                room_id=run.room_id,
+                player_id=run.player_id,
+                action_request_id=current.step_request_id,
+            )
+        )
+        execution = status.execution
+        if (
+            current.status != "waiting_for_player"
+            or execution is None
+            or status.status != "awaiting_post_roll_decision"
+            or execution.check_run is None
+        ):
+            raise ActionPlanPolicyError(
+                "PLAN_CANCEL_NOT_AT_BOUNDARY",
+                "当前步骤不在可接受检定结果的取消节点",
+            )
+        now = datetime.now(UTC)
+        steps = list(run.steps)
+        steps[run.current_step_index] = current.model_copy(
+            update={
+                "adjudication_execution": execution,
+                "event_refs": execution.event_refs,
+            },
+            deep=True,
+        )
+        updated = run.model_copy(
+            update={
+                "steps": tuple(steps),
+                "pending_cancel_request_id": request.request_id,
+                "run_version": run.run_version + 1,
+                "updated_at": now,
+            },
+            deep=True,
+        )
+        return await self._store.compare_and_swap(
+            expected_run_version=run.run_version,
+            updated_run=self._validated(updated),
+        )
 
     async def mark_narration_completed(
         self,
@@ -805,13 +892,41 @@ class ActionPlanOrchestrator:
                 update={**common, "status": "stopped", "safe_failure_code": code},
                 deep=True,
             )
-            return await self._replace_steps(run, tuple(steps), status="stopped")
+            return await self._replace_steps(
+                run,
+                tuple(steps),
+                status="stopped",
+                consume_cancel_request=run.pending_cancel_request_id is not None,
+            )
 
         steps[index] = current.model_copy(
             update={**common, "status": "completed"},
             deep=True,
         )
         next_index = index + 1
+        if run.pending_cancel_request_id is not None:
+            if next_index < len(steps):
+                steps[next_index] = steps[next_index].model_copy(
+                    update={
+                        "status": "stopped",
+                        "safe_failure_code": "PLAN_CANCELLED",
+                    },
+                    deep=True,
+                )
+                return await self._replace_steps(
+                    run,
+                    tuple(steps),
+                    current_step_index=next_index,
+                    status="cancelled",
+                    consume_cancel_request=True,
+                )
+            return await self._replace_steps(
+                run,
+                tuple(steps),
+                current_step_index=next_index,
+                status="awaiting_narration",
+                consume_cancel_request=True,
+            )
         return await self._replace_steps(
             run,
             tuple(steps),
@@ -855,6 +970,7 @@ class ActionPlanOrchestrator:
         *,
         status: str | None = None,
         current_step_index: int | None = None,
+        consume_cancel_request: bool = False,
     ) -> ActionPlanRun:
         now = datetime.now(UTC)
         next_status = status or run.status
@@ -865,18 +981,24 @@ class ActionPlanOrchestrator:
         # could no longer load the row it had just written, so the follow-up
         # release would fail too and leave the run permanently unreadable.
         release_lease = next_status in TERMINAL_PLAN_STATUSES
+        update: dict[str, object] = {
+            "steps": steps,
+            "status": next_status,
+            "current_step_index": (
+                run.current_step_index if current_step_index is None else current_step_index
+            ),
+            "run_version": run.run_version + 1,
+            "lease_owner": None if release_lease else run.lease_owner,
+            "lease_expires_at": None if release_lease else run.lease_expires_at,
+            "updated_at": now,
+        }
+        if consume_cancel_request:
+            request_id = run.pending_cancel_request_id
+            if request_id is not None and request_id not in run.cancel_request_ids:
+                update["cancel_request_ids"] = (*run.cancel_request_ids, request_id)
+            update["pending_cancel_request_id"] = None
         updated = run.model_copy(
-            update={
-                "steps": steps,
-                "status": next_status,
-                "current_step_index": (
-                    run.current_step_index if current_step_index is None else current_step_index
-                ),
-                "run_version": run.run_version + 1,
-                "lease_owner": None if release_lease else run.lease_owner,
-                "lease_expires_at": None if release_lease else run.lease_expires_at,
-                "updated_at": now,
-            },
+            update=update,
             deep=True,
         )
         return await self._store.compare_and_swap(

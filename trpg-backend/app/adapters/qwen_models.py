@@ -16,6 +16,7 @@ import httpx
 from collaboration_framework.contracts import JsonObject
 
 from app.adapters.openai_models import StructuredJsonClient, _log_structured_usage
+from app.adapters.structured_http import ModelClientRetryPolicy, post_structured_json
 
 
 class QwenChatCompletionsJsonClient(StructuredJsonClient):
@@ -29,12 +30,14 @@ class QwenChatCompletionsJsonClient(StructuredJsonClient):
         model: str,
         timeout_seconds: float,
         transport: httpx.AsyncBaseTransport | None = None,
+        retry_policy: ModelClientRetryPolicy | None = None,
     ) -> None:
         self._api_key = api_key
         self._base_url = base_url.rstrip("/")
         self._model = model
         self._timeout_seconds = timeout_seconds
         self._transport = transport
+        self._retry_policy = retry_policy or ModelClientRetryPolicy()
 
     async def generate(
         self,
@@ -72,11 +75,13 @@ class QwenChatCompletionsJsonClient(StructuredJsonClient):
             timeout=self._timeout_seconds,
             transport=self._transport,
         ) as client:
-            response = await client.post(
+            response = await post_structured_json(
+                client,
                 f"{self._base_url}/chat/completions",
                 json=request_payload,
+                provider="qwen",
+                retry_policy=self._retry_policy,
             )
-            response.raise_for_status()
 
         response_payload = response.json()
         _log_structured_usage(

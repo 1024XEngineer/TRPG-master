@@ -83,6 +83,10 @@ class Settings(BaseSettings):
     )
     deepseek_model: str = Field(default="deepseek-chat", min_length=1)
     deepseek_timeout_seconds: float = Field(default=30.0, gt=0, le=120)
+    # 结构化输出请求的传输层重试，三个 provider 共用。只覆盖超时、连接错误、5xx
+    # 与 429；其余 4xx 立即失败。默认一次重试，避免一次瞬态故障就让整个回合报废。
+    model_client_max_attempts: int = Field(default=2, ge=1, le=5)
+    model_client_retry_backoff_seconds: float = Field(default=0.5, gt=0, le=10)
     # 一键建卡的规则数值始终由本地 COC7 生成器负责；此开关只决定八项背景文字
     # 是否交给 DeepSeek 创作。模型失败时服务层会回退到生成器内置模板。
     character_background_provider: Literal["deterministic", "deepseek"] = "deterministic"

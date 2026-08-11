@@ -62,6 +62,7 @@ from collaboration_framework.host.schemas import (
 from pydantic import ValidationError
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.adapters.structured_http import ModelClientRetryPolicy
 from app.core.turn_events import TurnPhase
 
 logger = structlog.get_logger()
@@ -1059,6 +1060,10 @@ class ActionPlanTurnApplication:
                         retryable=True,
                     ) from exc
             except Exception as exc:
+                # 传输层的瞬态失败已经由 StructuredJsonClient 自己重试过了
+                # （见 adapters/structured_http.py）。在这里再整体重试一轮，两层
+                # 是相乘的：一轮叙事内含 client 的多次尝试，失败等待会成倍拉长。
+                # 玩家宁可早点看到失败，也不愿盯着"生成中"等上几分钟。
                 raise TurnExecutionError(
                     "PLAN_NARRATOR_FAILED",
                     "规则结果已保存，但叙事生成失败；请使用原请求重试",
@@ -1209,6 +1214,10 @@ def build_action_plan_turn_application(
                 base_url=base_url,
                 model=model,
                 timeout_seconds=timeout,
+                retry_policy=ModelClientRetryPolicy(
+                    max_attempts=resolved.model_client_max_attempts,
+                    backoff_seconds=resolved.model_client_retry_backoff_seconds,
+                ),
             )
         planner = PromptHostTurnDecisionModel(client, policy=policy)
         adjudicator = _RuleFirstStepAdjudicator(PromptActionPlanStepAdjudicator(client))

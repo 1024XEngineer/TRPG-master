@@ -47,6 +47,7 @@ from app.adapters import (
     PromptOpeningNarrationModel,
     QwenChatCompletionsJsonClient,
 )
+from app.adapters.structured_http import ModelClientRetryPolicy
 from app.core.config import Settings, get_settings, secret_value
 from app.core.engine import engine_store, rule_engine_service
 
@@ -231,6 +232,10 @@ def _configured_opening_models(
             FakeOpeningNarrationModel(),
             HostModelMetadata(provider="fake", model="deterministic"),
         )
+    retry_policy = ModelClientRetryPolicy(
+        max_attempts=settings.model_client_max_attempts,
+        backoff_seconds=settings.model_client_retry_backoff_seconds,
+    )
     if settings.host_model_provider == "deepseek":
         if settings.deepseek_api_key is None:
             raise ValueError("DeepSeek Host 模型缺少 API key")
@@ -241,6 +246,7 @@ def _configured_opening_models(
                     base_url=settings.deepseek_base_url,
                     model=settings.deepseek_model,
                     timeout_seconds=settings.deepseek_timeout_seconds,
+                    retry_policy=retry_policy,
                 )
             ),
             HostModelMetadata(provider="deepseek", model=settings.deepseek_model),
@@ -255,6 +261,7 @@ def _configured_opening_models(
                     base_url=settings.qwen_base_url,
                     model=settings.qwen_model,
                     timeout_seconds=settings.qwen_timeout_seconds,
+                    retry_policy=retry_policy,
                 )
             ),
             HostModelMetadata(provider="qwen", model=settings.qwen_model),
@@ -268,6 +275,7 @@ def _configured_opening_models(
                 base_url=settings.openai_base_url,
                 model=settings.openai_model,
                 timeout_seconds=settings.openai_timeout_seconds,
+                retry_policy=retry_policy,
             )
         ),
         HostModelMetadata(provider="openai", model=settings.openai_model),

@@ -46,6 +46,7 @@ from app.adapters.openai_models import (
     PromptNarrationModel,
 )
 from app.adapters.qwen_models import QwenChatCompletionsJsonClient
+from app.adapters.structured_http import ModelClientRetryPolicy, is_transient_model_error
 from app.core.config import Settings
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -711,3 +712,205 @@ def test_deepseek_provider_requires_api_key() -> None:
 def test_intent_schema_remains_strict_for_prompt_adapter() -> None:
     schema = Intent.model_json_schema(mode="serialization")
     assert schema["additionalProperties"] is False
+
+
+def _json_object_response() -> httpx.Response:
+    return httpx.Response(
+        200,
+        json={"choices": [{"message": {"role": "assistant", "content": '{"kind":"unknown"}'}}]},
+    )
+
+
+def _fast_retry() -> ModelClientRetryPolicy:
+    """退避缩到几乎为零，让重试测试不真的睡 0.5 秒。"""
+
+    return ModelClientRetryPolicy(max_attempts=2, backoff_seconds=0.001)
+
+
+def _deepseek_client(
+    handler,
+    *,
+    retry_policy: ModelClientRetryPolicy | None = None,
+) -> DeepSeekChatCompletionsJsonClient:
+    return DeepSeekChatCompletionsJsonClient(
+        api_key="test-key",
+        base_url="https://api.deepseek.example/v1",
+        model="deepseek-chat",
+        timeout_seconds=1,
+        transport=httpx.MockTransport(handler),
+        retry_policy=retry_policy or _fast_retry(),
+    )
+
+
+async def _generate(client) -> dict:
+    return await client.generate(
+        schema_name="test_schema",
+        schema={"type": "object"},
+        instructions="返回结构化结果。",
+        input_payload={"safe": True},
+    )
+
+
+async def test_structured_client_retries_after_timeout_and_succeeds() -> None:
+    attempts = {"count": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise httpx.ReadTimeout("upstream timed out", request=request)
+        return _json_object_response()
+
+    result = await _generate(_deepseek_client(handler))
+
+    assert result == {"kind": "unknown"}
+    assert attempts["count"] == 2
+
+
+async def test_structured_client_retries_after_server_error_and_succeeds() -> None:
+    attempts = {"count": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            return httpx.Response(503, json={"error": "upstream unavailable"})
+        return _json_object_response()
+
+    result = await _generate(_deepseek_client(handler))
+
+    assert result == {"kind": "unknown"}
+    assert attempts["count"] == 2
+
+
+async def test_structured_client_reraises_original_error_after_retries_exhausted() -> None:
+    attempts = {"count": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts["count"] += 1
+        raise httpx.ReadTimeout("upstream timed out", request=request)
+
+    with pytest.raises(httpx.ReadTimeout):
+        await _generate(_deepseek_client(handler))
+
+    assert attempts["count"] == 2
+
+
+async def test_structured_client_does_not_retry_client_errors() -> None:
+    attempts = {"count": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts["count"] += 1
+        return httpx.Response(400, json={"error": "bad request"})
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await _generate(_deepseek_client(handler))
+
+    assert attempts["count"] == 1
+
+
+async def test_structured_client_retries_rate_limit_responses() -> None:
+    attempts = {"count": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            return httpx.Response(429, json={"error": "rate limited"})
+        return _json_object_response()
+
+    result = await _generate(_deepseek_client(handler))
+
+    assert result == {"kind": "unknown"}
+    assert attempts["count"] == 2
+
+
+async def test_structured_client_attempt_count_follows_the_policy() -> None:
+    attempts = {"count": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts["count"] += 1
+        raise httpx.ConnectError("connection reset", request=request)
+
+    policy = ModelClientRetryPolicy(max_attempts=4, backoff_seconds=0.001)
+    with pytest.raises(httpx.ConnectError):
+        await _generate(_deepseek_client(handler, retry_policy=policy))
+
+    assert attempts["count"] == 4
+
+
+async def test_qwen_client_retries_transient_failures() -> None:
+    attempts = {"count": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise httpx.ReadTimeout("upstream timed out", request=request)
+        return _json_object_response()
+
+    client = QwenChatCompletionsJsonClient(
+        api_key="test-key",
+        base_url="https://dashscope.example/compatible-mode/v1",
+        model="qwen3.7-plus",
+        timeout_seconds=1,
+        transport=httpx.MockTransport(handler),
+        retry_policy=_fast_retry(),
+    )
+
+    assert await _generate(client) == {"kind": "unknown"}
+    assert attempts["count"] == 2
+
+
+async def test_openai_client_retries_transient_failures() -> None:
+    attempts = {"count": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise httpx.ReadTimeout("upstream timed out", request=request)
+        return httpx.Response(
+            200,
+            json={
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [{"type": "output_text", "text": '{"kind":"unknown"}'}],
+                    }
+                ]
+            },
+        )
+
+    client = OpenAIResponsesJsonClient(
+        api_key="test-key",
+        base_url="https://example.test/v1",
+        model="test-model",
+        timeout_seconds=1,
+        transport=httpx.MockTransport(handler),
+        retry_policy=_fast_retry(),
+    )
+
+    assert await _generate(client) == {"kind": "unknown"}
+    assert attempts["count"] == 2
+
+
+def test_retry_policy_backoff_is_exponential() -> None:
+    policy = ModelClientRetryPolicy(max_attempts=4, backoff_seconds=0.5)
+    assert [policy.delay_before(attempt) for attempt in (1, 2, 3)] == [0.5, 1.0, 2.0]
+
+
+def test_transient_classification_covers_transport_and_server_errors() -> None:
+    request = httpx.Request("POST", "https://example.test/v1/chat/completions")
+    assert is_transient_model_error(httpx.ReadTimeout("timeout", request=request))
+    assert is_transient_model_error(httpx.ConnectError("reset", request=request))
+    for status in (500, 502, 503, 429):
+        error = httpx.HTTPStatusError(
+            "server error",
+            request=request,
+            response=httpx.Response(status, request=request),
+        )
+        assert is_transient_model_error(error)
+    for status in (400, 401, 403, 404, 422):
+        error = httpx.HTTPStatusError(
+            "client error",
+            request=request,
+            response=httpx.Response(status, request=request),
+        )
+        assert not is_transient_model_error(error)
+    assert not is_transient_model_error(ValueError("malformed structured output"))

@@ -2670,6 +2670,8 @@
   font-family: 'STKaiti', 'KaiTi', 'PingFang SC', sans-serif;
   font-size: 0.72rem;
   font-weight: 800;
+  cursor: pointer;
+  pointer-events: auto;
 }
 
 .character-ready-scene__dossier {

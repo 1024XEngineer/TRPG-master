@@ -137,9 +137,16 @@ export default function CharacterReadyPage() {
   // 之前这里只读 localStorage：清掉缓存（或换浏览器）后，明明后端有这张卡，
   // 页面却显示成"还没建卡"。现在有了 GET 端点，就该以后端那份为准——本地缓存
   // 保留是为了拉取回来之前不闪空白，不是权威源。
-  const [remoteCharacter, setRemoteCharacter] = useState<typeof cachedCharacter>(null)
+  const characterIdentity = roomId && characterId ? `${roomId}:${characterId}` : null
+  const [remoteCharacter, setRemoteCharacter] = useState<{
+    identity: string
+    character: NonNullable<typeof cachedCharacter>
+  } | null>(null)
   useEffect(() => {
-    if (!roomId || !characterId || !readyRuleset) return
+    // 组件可能在不卸载的情况下切换房间。上一身份的远程角色不能继续压过
+    // 新房间的缓存，更不能让没有 characterId 的房间误判为已经建卡。
+    setRemoteCharacter(null)
+    if (!roomId || !characterId || !readyRuleset || !characterIdentity) return
     let cancelled = false
     fetchCharacter(roomId, characterId)
       .then((saved) => {
@@ -148,23 +155,26 @@ export default function CharacterReadyPage() {
           readyRuleset.occupations.find((o) => o.name === saved.occupation)?.id ?? null
         const derived = normalizeDerivedStats(saved.derivedStats ?? {})
         setRemoteCharacter({
-          info: {
-            name: saved.name,
-            playerName: '',
-            age: saved.age != null ? String(saved.age) : '',
-            gender: saved.gender ?? '',
-            residence: saved.residence ?? '',
-            birthplace: saved.birthplace ?? '',
-            occupationId,
+          identity: characterIdentity,
+          character: {
+            info: {
+              name: saved.name,
+              playerName: '',
+              age: saved.age != null ? String(saved.age) : '',
+              gender: saved.gender ?? '',
+              residence: saved.residence ?? '',
+              birthplace: saved.birthplace ?? '',
+              occupationId,
+            },
+            attr: { ...saved.attributes },
+            skillAlloc: {},
+            skillFinalValues: { ...saved.skills },
+            occupationChoiceSkillIds: saved.occupationChoiceSkillIds ?? [],
+            equipment: (saved.equipment ?? []).join('、'),
+            background: saved.background ?? '',
+            notes: saved.notes ?? '',
+            derived,
           },
-          attr: { ...saved.attributes },
-          skillAlloc: {},
-          skillFinalValues: { ...saved.skills },
-          occupationChoiceSkillIds: saved.occupationChoiceSkillIds ?? [],
-          equipment: (saved.equipment ?? []).join('、'),
-          background: saved.background ?? '',
-          notes: saved.notes ?? '',
-          derived,
         })
       })
       .catch(() => {
@@ -173,9 +183,11 @@ export default function CharacterReadyPage() {
     return () => {
       cancelled = true
     }
-  }, [roomId, characterId, readyRuleset])
+  }, [roomId, characterId, characterIdentity, readyRuleset])
 
-  const character = remoteCharacter ?? cachedCharacter
+  const character = remoteCharacter?.identity === characterIdentity
+    ? remoteCharacter.character
+    : cachedCharacter
   const roomCode = useRoomStore((s) => s.roomCode)
   const isHost = useRoomStore((s) => s.isHost)
   const playerId = useRoomStore((s) => s.playerId)

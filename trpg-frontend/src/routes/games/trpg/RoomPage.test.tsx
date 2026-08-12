@@ -1643,7 +1643,7 @@ describe('RoomPage conversation history', () => {
         },
       }),
     )
-    expect(await screen.findByRole('region', { name: '待处理检定' })).toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: '待处理检定' })).toBeInTheDocument()
 
     act(() =>
       emitWsMessage({
@@ -1653,7 +1653,7 @@ describe('RoomPage conversation history', () => {
     )
 
     await waitFor(() =>
-      expect(screen.queryByRole('region', { name: '待处理检定' })).not.toBeInTheDocument(),
+      expect(screen.queryByRole('dialog', { name: '待处理检定' })).not.toBeInTheDocument(),
     )
   })
 
@@ -1693,7 +1693,7 @@ describe('RoomPage conversation history', () => {
         },
       }),
     )
-    expect(screen.getByRole('region', { name: '待处理检定' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: '待处理检定' })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: /取消行动/ }))
 
@@ -1705,7 +1705,7 @@ describe('RoomPage conversation history', () => {
         cancel: true,
       }),
     )
-    expect(screen.queryByRole('region', { name: '待处理检定' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: '待处理检定' })).not.toBeInTheDocument()
     expect(screen.getByText('守秘人组织语言中')).toBeInTheDocument()
   })
 
@@ -1805,7 +1805,7 @@ describe('RoomPage conversation history', () => {
     act(() => vi.advanceTimersByTime(750))
     expect(screen.getByText('82')).toBeInTheDocument()
     expect(screen.getByText('失败')).toBeInTheDocument()
-    expect(screen.queryByRole('region', { name: '待处理检定' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: '待处理检定' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '接受结果并发送' })).toBeEnabled()
     expect(
       screen.getByRole('button', { name: '消耗 32 点幸运（当前 50 点）并发送' }),
@@ -1936,7 +1936,7 @@ describe('RoomPage conversation history', () => {
         },
       }),
     )
-    expect(await screen.findByRole('region', { name: '待处理检定' })).toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: '待处理检定' })).toBeInTheDocument()
 
     act(() =>
       emitWsMessage({
@@ -1945,7 +1945,7 @@ describe('RoomPage conversation history', () => {
       }),
     )
 
-    expect(screen.getByRole('region', { name: '待处理检定' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: '待处理检定' })).toBeInTheDocument()
   })
 
   it('submits the room input through ActionPlan and clears stale decisions', async () => {
@@ -1992,7 +1992,7 @@ describe('RoomPage conversation history', () => {
       },
     }
     act(() => emitWsMessage(pending))
-    expect(await screen.findByRole('region', { name: '待处理检定' })).toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: '待处理检定' })).toBeInTheDocument()
 
     act(() => emitWsMessage({
       type: 'plan.step_changed',
@@ -2004,10 +2004,10 @@ describe('RoomPage conversation history', () => {
         phase: 'executing',
       },
     }))
-    expect(screen.queryByRole('region', { name: '待处理检定' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: '待处理检定' })).not.toBeInTheDocument()
 
     act(() => emitWsMessage(pending))
-    expect(await screen.findByRole('region', { name: '待处理检定' })).toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: '待处理检定' })).toBeInTheDocument()
     act(() => emitWsMessage({
       type: 'plan.stopped',
       payload: {
@@ -2018,10 +2018,10 @@ describe('RoomPage conversation history', () => {
         phase: 'stopped',
       },
     }))
-    expect(screen.queryByRole('region', { name: '待处理检定' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: '待处理检定' })).not.toBeInTheDocument()
 
     act(() => emitWsMessage(pending))
-    expect(await screen.findByRole('region', { name: '待处理检定' })).toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: '待处理检定' })).toBeInTheDocument()
     act(() => emitWsMessage({
       type: 'plan.completed',
       payload: {
@@ -2032,10 +2032,10 @@ describe('RoomPage conversation history', () => {
         phase: 'completed',
       },
     }))
-    expect(screen.queryByRole('region', { name: '待处理检定' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: '待处理检定' })).not.toBeInTheDocument()
 
     act(() => emitWsMessage(pending))
-    expect(await screen.findByRole('region', { name: '待处理检定' })).toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: '待处理检定' })).toBeInTheDocument()
     act(() => emitWsMessage({
       type: 'error',
       payload: {
@@ -2043,10 +2043,10 @@ describe('RoomPage conversation history', () => {
         message: '当前行动仍在处理中',
       },
     }))
-    expect(screen.queryByRole('region', { name: '待处理检定' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: '待处理检定' })).not.toBeInTheDocument()
 
     act(() => emitWsMessage(pending))
-    expect(await screen.findByRole('region', { name: '待处理检定' })).toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: '待处理检定' })).toBeInTheDocument()
     act(() => emitWsMessage({
       type: 'turn.failed',
       payload: {
@@ -2056,7 +2056,7 @@ describe('RoomPage conversation history', () => {
         retryable: true,
       },
     }))
-    expect(screen.queryByRole('region', { name: '待处理检定' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: '待处理检定' })).not.toBeInTheDocument()
   })
 
   it('shows the authoritative world clock and ending state from the PlayerView', async () => {

@@ -45,10 +45,13 @@ export function CheckWorkflowPanel({
   if (!decision && !checkRun) return null
 
   return (
-    <section
-      aria-label="待处理检定"
-      className="mx-4 mb-3 rounded-xl border border-[#c7ad73] bg-[#fffaf0] p-4 shadow-sm"
-    >
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/45 px-4 py-6" role="presentation">
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-label="待处理检定"
+        className="max-h-[min(78vh,42rem)] w-full max-w-[398px] overflow-y-auto rounded-xl border border-[#c7ad73] bg-[#fffaf0] p-4 shadow-xl"
+      >
       {decision && (
         <>
           <div className="mb-3 flex items-start gap-2">
@@ -160,6 +163,7 @@ export function CheckWorkflowPanel({
           )}
         </>
       )}
-    </section>
+      </section>
+    </div>
   )
 }

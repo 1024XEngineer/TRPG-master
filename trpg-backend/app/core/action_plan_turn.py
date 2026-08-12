@@ -470,6 +470,8 @@ class ActionPlanTurnApplication:
             plan_orchestrator=orchestrator,
             executor=adjudication_engine,
             player_view_projector=self._projector,
+            repair_adjudicator=orchestrator.adjudicator,
+            policy=orchestrator.policy,
         )
 
     async def start(
@@ -1181,6 +1183,7 @@ def build_action_plan_turn_application(
     policy = ActionPlanPolicy(
         max_plan_steps=resolved.action_plan_max_steps,
         max_steps_per_advance=resolved.action_plan_max_steps_per_advance,
+        max_repair_attempts=resolved.action_plan_max_repair_attempts,
     )
     if resolved.host_model_provider == "fake":
         planner = DeterministicHostTurnDecisionModel()

@@ -162,8 +162,10 @@ export function CharacterBasicInfo({
   // 初始值不能就这么消失：SAN 的初始值决定不定性疯狂的阈值（1/5），幸运的初始
   // 值是成长上限的参考。只列出真正变过的项，没变时这一行不渲染。
   const changed = [
+    // 只认数字：`db` 是字符串且从不作为资源投影；老角色卡还可能整个缺 `mp`
+    // 这类键，那时没有「初始值」可言，列出来只会是 `MP undefined`。
     ...derivedValues
-      .filter(item => item.initial !== null && item.current !== item.initial)
+      .filter(item => typeof item.initial === 'number' && item.current !== item.initial)
       .map(item => `${item.definition.abbreviation} ${item.initial}`),
     ...attributes
       .filter(attribute => {

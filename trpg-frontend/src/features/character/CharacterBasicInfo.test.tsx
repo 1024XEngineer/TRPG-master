@@ -74,4 +74,24 @@ describe('CharacterBasicInfo', () => {
     expect(note).not.toHaveTextContent('HP')
     expect(note).not.toHaveTextContent('幸运')
   })
+
+  // 老角色卡整个缺 `mp` 这类键（`character-store` 里确实存在这种快照）。
+  // 没有初始值可言时不能凑一条 `MP undefined` 出来。
+  it('skips derived keys the creation snapshot never recorded', () => {
+    const legacy = character()
+    delete (legacy.derived as unknown as Record<string, unknown>).mp
+
+    render(
+      <CharacterBasicInfo
+        character={legacy}
+        attributes={ATTRIBUTES}
+        liveResources={{ mp: 8, san: 45 }}
+      />,
+    )
+
+    expect(screen.getByTestId('derived-stat-mp')).toHaveTextContent('8')
+    const note = screen.getByTestId('initial-values-note')
+    expect(note).toHaveTextContent('初始：SAN 65')
+    expect(note).not.toHaveTextContent('MP')
+  })
 })

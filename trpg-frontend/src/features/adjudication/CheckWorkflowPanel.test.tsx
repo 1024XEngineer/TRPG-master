@@ -48,6 +48,7 @@ describe('CheckWorkflowPanel', () => {
       />,
     )
 
+    expect(screen.getByRole('dialog', { name: '待处理检定' })).toHaveAttribute('aria-modal', 'true')
     expect(screen.getByText('图书馆使用 · 60%')).toBeInTheDocument()
     expect(screen.getByText('侧重从大量材料中发现显眼细节')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /侦查/ }))

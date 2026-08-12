@@ -1010,7 +1010,7 @@ describe('RoomPage conversation history', () => {
         equipment: '',
         background,
         notes: '',
-        derived: { hp: 10, san: 60, mp: 10, db: '0', build: '0', move: 8 },
+        derived: { hp: 10, san: 60, mp: 10, db: '0', build: 0, move: 8 },
       },
       'room-1',
     )
@@ -1308,7 +1308,7 @@ describe('RoomPage conversation history', () => {
         equipment: '',
         background: '',
         notes: '',
-        derived: { hp: 10, san: 60, mp: 10, db: '0', build: '0', move: 8 },
+        derived: { hp: 10, san: 60, mp: 10, db: '0', build: 0, move: 8 },
       },
       'room-1',
     )

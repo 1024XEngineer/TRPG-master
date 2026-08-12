@@ -17,6 +17,8 @@ issue #112：这个模块的公开入口现在都要求调用方传入 `RulesetR
 COC7 毫无关系的最小 ruleset 证明这一点。
 """
 
+import pytest
+
 from app.core.coc7_content import build_coc7_ruleset
 from app.core.coc7_rules import (
     SkillPointsBudget,
@@ -53,7 +55,7 @@ ACCOUNTANT_NAME = "会计师"
 
 def test_derived_stats_formulas() -> None:
     stats = compute_derived_stats(ATTRS)
-    assert stats == {"HP": 10, "MP": 10, "SAN": 50, "DB": "0", "Build": "0", "MOV": 8}
+    assert stats == {"HP": 10, "MP": 10, "SAN": 50, "DB": "0", "Build": 0, "MOV": 8}
 
 
 def test_derived_stats_move_small_and_large() -> None:
@@ -65,10 +67,51 @@ def test_derived_stats_move_small_and_large() -> None:
     assert large["MOV"] == 9
 
 
-def test_damage_bonus_build_table() -> None:
-    assert compute_derived_stats({**ATTRS, "STR": 10, "SIZ": 10})["DB"] == "-2"
-    assert compute_derived_stats({**ATTRS, "STR": 90, "SIZ": 90})["DB"] == "+1D6"
-    assert compute_derived_stats({**ATTRS, "STR": 150, "SIZ": 150})["DB"] == "+1D8"
+@pytest.mark.parametrize(
+    ("total", "expected_db", "expected_build"),
+    [
+        # 每一档的下界与上界都取到。DB 与 Build 前三档相同、从 125 起分叉，
+        # 这个 bug 当初能在全绿套件下存活，正是因为唯一的断言落在相同的那一档。
+        (2, "-2", -2),
+        (64, "-2", -2),
+        (65, "-1", -1),
+        (84, "-1", -1),
+        (85, "0", 0),
+        (124, "0", 0),
+        (125, "+1D4", 1),
+        (164, "+1D4", 1),
+        (165, "+1D6", 2),
+        (204, "+1D6", 2),
+        (205, "+2D6", 3),
+        (284, "+2D6", 3),
+        (285, "+3D6", 4),
+        (364, "+3D6", 4),
+        (365, "+4D6", 5),
+        (444, "+4D6", 5),
+        (445, "+5D6", 6),
+        (524, "+5D6", 6),
+        # 印表止于 524，之后每额外 80 点或其零头再加 1D6 与 1 点 Build。
+        (525, "+6D6", 7),
+        (604, "+6D6", 7),
+        (605, "+7D6", 8),
+    ],
+)
+def test_damage_bonus_and_build_table(total: int, expected_db: str, expected_build: int) -> None:
+    """DB 与 Build 是 COC7 同一张表的两列，不是同一个值。"""
+
+    stats = compute_derived_stats({**ATTRS, "STR": total - total // 2, "SIZ": total // 2})
+    assert stats["DB"] == expected_db
+    assert stats["Build"] == expected_build
+
+
+def test_damage_bonus_never_returns_a_die_absent_from_the_table() -> None:
+    """`+1D8` 在 COC7 的表里不存在，曾被当作 205 以上的封顶值。"""
+
+    produced = {
+        compute_derived_stats({**ATTRS, "STR": total - total // 2, "SIZ": total // 2})["DB"]
+        for total in range(2, 1000)
+    }
+    assert "+1D8" not in produced
 
 
 def test_evaluate_skill_base_handles_fixed_formula_and_divisor() -> None:

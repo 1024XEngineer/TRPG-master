@@ -656,7 +656,7 @@ describe('CharacterPage', () => {
         equipment: '',
         background: '没有分类前缀的旧背景',
         notes: '',
-        derived: { hp: 0, san: 0, mp: 0, db: '0', move: 0 },
+        derived: { hp: 0, san: 0, mp: 0, db: '0', build: 0, move: 0 },
       },
       'room-1'
     )

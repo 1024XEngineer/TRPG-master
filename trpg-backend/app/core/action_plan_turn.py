@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import traceback
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Protocol
@@ -46,7 +47,11 @@ from collaboration_framework.host.application import (
     PlayerViewProjector,
     TurnExecutionError,
 )
-from collaboration_framework.host.ports import ActionPlanStepAdjudicator, RecentHistorySource
+from collaboration_framework.host.ports import (
+    ActionPlanStepAdjudicator,
+    ActionPlanStepFailure,
+    RecentHistorySource,
+)
 from collaboration_framework.host.schemas import (
     ActionPlanAdvanceResult,
     ActionPlanNarrationContext,
@@ -72,6 +77,34 @@ TurnPhaseObserver = Callable[[TurnPhase], Awaitable[None]]
 async def _emit_phase(observer: TurnPhaseObserver | None, phase: TurnPhase) -> None:
     if observer is not None:
         await observer(phase)
+
+
+async def _log_step_adjudication_failure(failure: ActionPlanStepFailure) -> None:
+    """记录玩家不可见的步骤诊断，不接触 Prompt、模型正文或 GM-only 上下文。"""
+
+    fields = {
+        "action": failure.correlation_id,
+        "stage": "步骤裁决",
+        "plan": failure.plan_id,
+        "step": failure.step_id,
+        "step_index": failure.step_index,
+        "attempt": failure.attempt,
+        "duration_ms": failure.duration_ms,
+        "code": failure.code,
+        "error_type": type(failure.error).__name__,
+        "completed_steps": failure.completed_steps,
+        "authoritative_submitted": failure.authoritative_submitted,
+    }
+    if failure.code == "STEP_ADJUDICATOR_FAILED":
+        # 未分类错误必须留下完整堆栈，定位号才能从回合日志追到真正失败点；堆栈只在
+        # 服务端输出，ActionPlanRun 和 WebSocket 协议都不会持有这个字段。
+        logger.error(
+            "action_plan_step_adjudication_unclassified",
+            **fields,
+            stack="".join(traceback.format_exception(failure.error)),
+        )
+        return
+    logger.warning("action_plan_step_adjudication_failed", **fields)
 
 
 class HostTurnDecisionModel(Protocol):
@@ -1227,6 +1260,7 @@ def build_action_plan_turn_application(
         executor=adjudication_engine,
         player_view_projector=projector,
         policy=policy,
+        on_step_failure=_log_step_adjudication_failure,
     )
     return ActionPlanTurnApplication(
         store=store,

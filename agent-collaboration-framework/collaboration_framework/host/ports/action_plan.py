@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
@@ -77,6 +78,22 @@ class ActionPlanStepAdjudicator(Protocol):
     async def adjudicate(self, context: ActionPlanStepContext) -> ActionAdjudication: ...
 
 
+@dataclass(frozen=True)
+class ActionPlanStepFailure:
+    """步骤裁决失败的进程内诊断信息，不进入持久化模型或玩家协议。"""
+
+    correlation_id: str
+    plan_id: str
+    step_id: str
+    step_index: int
+    attempt: int
+    duration_ms: int
+    code: str
+    error: BaseException
+    completed_steps: int
+    authoritative_submitted: bool = False
+
+
 class SingleAdjudicationExecutor(Protocol):
     async def submit(self, request: SubmitAdjudicationRequest) -> AdjudicationExecution: ...
 
@@ -94,3 +111,4 @@ class ActionPlanNarrationModelPort(Protocol):
 
 
 ActionPlanProgressObserver = Callable[[ActionPlanProgressEvent], Awaitable[None]]
+ActionPlanStepFailureObserver = Callable[[ActionPlanStepFailure], Awaitable[None]]

@@ -8,6 +8,7 @@ import httpx
 import pytest
 from collaboration_framework.contracts import (
     ActionPlan,
+    ActionPlanStep,
     ActionResult,
     DefaultCheck,
     Intent,
@@ -30,8 +31,10 @@ from collaboration_framework.engine import (
     InMemoryEngineStore,
     RuleEngineService,
 )
-from collaboration_framework.host.application import PlayerViewProjector
+from collaboration_framework.host.application import PlayerViewProjector, TurnExecutionError
+from collaboration_framework.host.ports import ActionPlanStepFailure
 from collaboration_framework.host.schemas import (
+    ActionPlanStepContext,
     HostAgentContext,
     IntentContext,
     NarrationContext,
@@ -43,6 +46,7 @@ from app.adapters.deepseek_models import DeepSeekChatCompletionsJsonClient
 from app.adapters.openai_models import (
     _ACTION_PLAN_NARRATION_INSTRUCTIONS,
     OpenAIResponsesJsonClient,
+    PromptActionPlanStepAdjudicator,
     PromptHostTurnDecisionModel,
     PromptIntentModel,
     PromptNarrationModel,
@@ -761,6 +765,130 @@ async def _generate(client) -> dict:
     )
 
 
+class _ScriptedStepClient:
+    """为步骤适配器注入成功结果或指定异常，不经过真实 HTTP。"""
+
+    def __init__(self, result: dict | BaseException) -> None:
+        self._result = result
+
+    async def generate(
+        self,
+        *,
+        schema_name: str,
+        schema: dict,
+        instructions: str,
+        input_payload: dict,
+    ) -> dict:
+        assert schema_name == "trpg_action_plan_step_adjudication"
+        assert schema
+        assert instructions
+        assert input_payload["plan_id"] == "plan-step-error"
+        if isinstance(self._result, BaseException):
+            raise self._result
+        return self._result
+
+
+def _step_error_context() -> ActionPlanStepContext:
+    player_input = PlayerInput(
+        room_id="room-step-error",
+        player_id="player-step-error",
+        actor_id="actor-step-error",
+        client_action_id="action-step-error",
+        utterance="检查当前房间",
+    )
+    return ActionPlanStepContext(
+        player_input=player_input,
+        plan_id="plan-step-error",
+        plan_goal="检查房间后继续调查",
+        step_index=0,
+        step_request_id="action-step-error-step-0",
+        step=ActionPlanStep(kind="action", semantic_goal="检查当前房间"),
+        player_view=PlayerView(
+            room_id=player_input.room_id,
+            player_id=player_input.player_id,
+            actor_id=player_input.actor_id,
+            background="测试场景",
+            scene_id="scene-step-error",
+            phase="playing",
+            revision="1",
+            self_actor=SelfActorView(id=player_input.actor_id, name="调查员"),
+            scene=SceneView(
+                id="scene-step-error",
+                name="测试房间",
+                description="一间用于测试的房间。",
+            ),
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        httpx.ReadTimeout(
+            "timeout",
+            request=httpx.Request("POST", "https://example.test/chat/completions"),
+        ),
+        httpx.ConnectError(
+            "reset",
+            request=httpx.Request("POST", "https://example.test/chat/completions"),
+        ),
+        httpx.HTTPStatusError(
+            "rate limited",
+            request=httpx.Request("POST", "https://example.test/chat/completions"),
+            response=httpx.Response(
+                429,
+                request=httpx.Request("POST", "https://example.test/chat/completions"),
+            ),
+        ),
+        httpx.HTTPStatusError(
+            "server error",
+            request=httpx.Request("POST", "https://example.test/chat/completions"),
+            response=httpx.Response(
+                503,
+                request=httpx.Request("POST", "https://example.test/chat/completions"),
+            ),
+        ),
+    ],
+)
+async def test_step_adjudicator_classifies_transient_provider_failure(
+    failure: Exception,
+) -> None:
+    adjudicator = PromptActionPlanStepAdjudicator(_ScriptedStepClient(failure))
+
+    with pytest.raises(TurnExecutionError) as caught:
+        await adjudicator.adjudicate(_step_error_context())
+
+    assert caught.value.code == "MODEL_UPSTREAM_UNAVAILABLE"
+    assert caught.value.retryable is True
+    assert caught.value.__cause__ is failure
+
+
+async def test_step_adjudicator_classifies_unreadable_and_invalid_output() -> None:
+    unreadable = StructuredOutputError("DeepSeek message has no text content")
+    adjudicator = PromptActionPlanStepAdjudicator(_ScriptedStepClient(unreadable))
+
+    with pytest.raises(TurnExecutionError) as caught:
+        await adjudicator.adjudicate(_step_error_context())
+    assert caught.value.code == "MODEL_OUTPUT_UNREADABLE"
+    assert caught.value.__cause__ is unreadable
+
+    invalid = PromptActionPlanStepAdjudicator(_ScriptedStepClient({}))
+    with pytest.raises(TurnExecutionError) as caught:
+        await invalid.adjudicate(_step_error_context())
+    assert caught.value.code == "MODEL_OUTPUT_UNREADABLE"
+    assert isinstance(caught.value.__cause__, ValidationError)
+
+
+async def test_step_adjudicator_leaves_unknown_failure_for_orchestrator_fallback() -> None:
+    unknown = RuntimeError("unexpected adapter bug")
+    adjudicator = PromptActionPlanStepAdjudicator(_ScriptedStepClient(unknown))
+
+    with pytest.raises(RuntimeError) as caught:
+        await adjudicator.adjudicate(_step_error_context())
+
+    assert caught.value is unknown
+
+
 async def test_structured_client_retries_after_timeout_and_succeeds() -> None:
     attempts = {"count": 0}
 
@@ -1178,6 +1306,81 @@ def test_classified_failure_does_not_log_a_stack_trace(
     recorder = _log_failure_with("MODEL_UPSTREAM_UNAVAILABLE", monkeypatch)
     assert [call for call in recorder.calls if call[0] == "error"] == []
     assert [call for call in recorder.calls if call[0] == "warning"]
+
+
+async def test_step_failure_log_contains_correlation_and_unclassified_stack(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """步骤定位日志须足够排障，但不能携带模型输入或玩家不可见上下文。"""
+
+    from app.core import action_plan_turn
+
+    recorder = _RecordingLogger()
+    monkeypatch.setattr(action_plan_turn, "logger", recorder)
+    try:
+        raise RuntimeError("unexpected adjudicator bug")
+    except RuntimeError as error:
+        failure = ActionPlanStepFailure(
+            correlation_id="b97b36bc-full-correlation",
+            plan_id="plan-298",
+            step_id="step-2",
+            step_index=1,
+            attempt=2,
+            duration_ms=60001,
+            code="STEP_ADJUDICATOR_FAILED",
+            error=error,
+            completed_steps=1,
+        )
+
+    await action_plan_turn._log_step_adjudication_failure(failure)
+
+    assert len(recorder.calls) == 1
+    level, event, fields = recorder.calls[0]
+    assert level == "error"
+    assert event == "action_plan_step_adjudication_unclassified"
+    assert fields["action"] == failure.correlation_id
+    assert fields["stage"] == "步骤裁决"
+    assert fields["plan"] == failure.plan_id
+    assert fields["step"] == failure.step_id
+    assert fields["step_index"] == 1
+    assert fields["attempt"] == 2
+    assert fields["duration_ms"] == 60001
+    assert fields["completed_steps"] == 1
+    assert fields["authoritative_submitted"] is False
+    assert "Traceback" in fields["stack"]
+    assert "RuntimeError: unexpected adjudicator bug" in fields["stack"]
+    assert "prompt" not in fields
+    assert "response" not in fields
+
+
+async def test_classified_step_failure_logs_warning_without_stack(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.core import action_plan_turn
+
+    recorder = _RecordingLogger()
+    monkeypatch.setattr(action_plan_turn, "logger", recorder)
+    failure = ActionPlanStepFailure(
+        correlation_id="action-298",
+        plan_id="plan-298",
+        step_id="step-2",
+        step_index=1,
+        attempt=1,
+        duration_ms=30,
+        code="MODEL_UPSTREAM_UNAVAILABLE",
+        error=httpx.ReadTimeout("timeout"),
+        completed_steps=1,
+    )
+
+    await action_plan_turn._log_step_adjudication_failure(failure)
+
+    assert len(recorder.calls) == 1
+    level, event, fields = recorder.calls[0]
+    assert level == "warning"
+    assert event == "action_plan_step_adjudication_failed"
+    assert fields["code"] == "MODEL_UPSTREAM_UNAVAILABLE"
+    assert fields["error_type"] == "ReadTimeout"
+    assert "stack" not in fields
 
 
 async def test_non_json_http_body_is_classified_as_unreadable_output() -> None:

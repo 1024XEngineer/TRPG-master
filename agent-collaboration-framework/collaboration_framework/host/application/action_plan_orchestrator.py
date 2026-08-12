@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
+import time
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -30,6 +32,8 @@ from collaboration_framework.host.ports import (
     ActionPlanProgressObserver,
     ActionPlanRunStore,
     ActionPlanStepAdjudicator,
+    ActionPlanStepFailure,
+    ActionPlanStepFailureObserver,
     SingleAdjudicationExecutor,
 )
 from collaboration_framework.host.schemas import (
@@ -46,6 +50,8 @@ from collaboration_framework.host.schemas import (
 from .host_agent_intent_resolver import TurnExecutionError
 from .player_view_projector import PlayerViewProjector
 
+logger = logging.getLogger(__name__)
+
 
 class ActionPlanOrchestrator:
     """A-owned Saga coordinator; the Engine never receives an ActionPlan."""
@@ -59,6 +65,7 @@ class ActionPlanOrchestrator:
         player_view_projector: PlayerViewProjector,
         policy: ActionPlanPolicy | None = None,
         lease_seconds: int = 30,
+        on_step_failure: ActionPlanStepFailureObserver | None = None,
     ) -> None:
         if lease_seconds < 1:
             raise ValueError("lease_seconds 必须大于 0")
@@ -68,6 +75,7 @@ class ActionPlanOrchestrator:
         self._player_view_projector = player_view_projector
         self._policy = policy or ActionPlanPolicy()
         self._lease_seconds = lease_seconds
+        self._on_step_failure = on_step_failure
 
     async def start_or_resume(
         self,
@@ -777,16 +785,31 @@ class ActionPlanOrchestrator:
             previous_rejection=previous_rejection,
             keeper_capabilities=await self._keeper_capabilities(player_input, view),
         )
+        adjudication_started_at = time.monotonic()
         try:
             proposal = await self._adjudicator.adjudicate(context)
         except TurnExecutionError as exc:
+            await self._observe_step_failure(
+                run,
+                current,
+                code=exc.code,
+                error=exc.__cause__ or exc,
+                started_at=adjudication_started_at,
+            )
             return await self._mark_step_failure(
                 run,
                 plan_status="retryable_failure" if exc.retryable else "needs_clarification",
                 step_status="pending" if exc.retryable else "stopped",
                 code=exc.code,
             )
-        except Exception:
+        except Exception as exc:
+            await self._observe_step_failure(
+                run,
+                current,
+                code="STEP_ADJUDICATOR_FAILED",
+                error=exc,
+                started_at=adjudication_started_at,
+            )
             return await self._mark_step_failure(
                 run,
                 plan_status="retryable_failure",
@@ -813,6 +836,36 @@ class ActionPlanOrchestrator:
             deep=True,
         )
         return await self._replace_steps(run, tuple(steps))
+
+    async def _observe_step_failure(
+        self,
+        run: ActionPlanRun,
+        step: ActionPlanStepRun,
+        *,
+        code: str,
+        error: BaseException,
+        started_at: float,
+    ) -> None:
+        """尽力上报步骤诊断；观察器故障绝不能改变权威状态机的收束结果。"""
+
+        if self._on_step_failure is None:
+            return
+        failure = ActionPlanStepFailure(
+            correlation_id=run.parent_action_id,
+            plan_id=run.plan_id,
+            step_id=step.step_id,
+            step_index=run.current_step_index,
+            attempt=step.retry_count + 1,
+            duration_ms=max(0, int((time.monotonic() - started_at) * 1000)),
+            code=code,
+            error=error,
+            completed_steps=sum(item.status == "completed" for item in run.steps),
+        )
+        try:
+            await self._on_step_failure(failure)
+        except Exception:
+            # 诊断链路必须 fail-open，否则日志系统故障会覆盖玩家真正遇到的失败。
+            logger.warning("action plan step failure observer raised", exc_info=True)
 
     async def _reconcile_waiting(
         self,

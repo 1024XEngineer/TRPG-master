@@ -42,6 +42,7 @@ from app.adapters.structured_http import (
     StructuredOutputError,
     decode_structured_json,
     post_structured_json,
+    read_structured_payload,
 )
 
 logger = structlog.get_logger()
@@ -380,7 +381,7 @@ class OpenAIResponsesJsonClient:
                 provider="openai",
                 retry_policy=self._retry_policy,
             )
-        response_payload = response.json()
+        response_payload = read_structured_payload(response, provider_name="OpenAI")
         _log_structured_usage(
             response_payload,
             provider="openai",

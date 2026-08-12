@@ -89,6 +89,20 @@ async def post_structured_json(
     raise AssertionError("unreachable")
 
 
+def read_structured_payload(response: httpx.Response, *, provider_name: str) -> object:
+    """把 HTTP 响应体读成 JSON，失败一律抛 `StructuredOutputError`。
+
+    解码是两层的：先 HTTP 响应体 → JSON，再模型正文 → JSON 对象。只包住第二层
+    是不够的——代理或网关返回 200 加一张 HTML 错误页时，坏在第一层，同样属于
+    「拿到了回复但读不懂」，不该掉进未分类兜底。
+    """
+
+    try:
+        return response.json()
+    except ValueError as exc:
+        raise StructuredOutputError(f"{provider_name} response body is not valid JSON") from exc
+
+
 def decode_structured_json(output_text: str, *, provider_name: str) -> JsonObject:
     """把模型正文解成一个 JSON 对象，失败一律抛 `StructuredOutputError`。"""
 
@@ -107,4 +121,5 @@ __all__ = [
     "decode_structured_json",
     "is_transient_model_error",
     "post_structured_json",
+    "read_structured_payload",
 ]

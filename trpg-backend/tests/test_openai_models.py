@@ -1178,3 +1178,49 @@ def test_classified_failure_does_not_log_a_stack_trace(
     recorder = _log_failure_with("MODEL_UPSTREAM_UNAVAILABLE", monkeypatch)
     assert [call for call in recorder.calls if call[0] == "error"] == []
     assert [call for call in recorder.calls if call[0] == "warning"]
+
+
+async def test_non_json_http_body_is_classified_as_unreadable_output() -> None:
+    """上游 200 但响应体根本不是 JSON（代理的 HTML 错误页是典型）。
+
+    解码分两层：HTTP 响应体 → JSON，再 JSON 里的 content → JSON 对象。
+    只包住第二层的话，第一层失败仍然会掉进 `TURN_INTERNAL_ERROR` 兜底。
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="<html><body>502 Bad Gateway</body></html>")
+
+    with pytest.raises(StructuredOutputError):
+        await _generate(_deepseek_client(handler))
+
+
+async def test_qwen_non_json_http_body_is_classified() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="upstream proxy error")
+
+    client = QwenChatCompletionsJsonClient(
+        api_key="test-key",
+        base_url="https://dashscope.example/compatible-mode/v1",
+        model="qwen3.7-plus",
+        timeout_seconds=1,
+        transport=httpx.MockTransport(handler),
+        retry_policy=_fast_retry(),
+    )
+    with pytest.raises(StructuredOutputError):
+        await _generate(client)
+
+
+async def test_openai_non_json_http_body_is_classified() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="upstream proxy error")
+
+    client = OpenAIResponsesJsonClient(
+        api_key="test-key",
+        base_url="https://example.test/v1",
+        model="test-model",
+        timeout_seconds=1,
+        transport=httpx.MockTransport(handler),
+        retry_policy=_fast_retry(),
+    )
+    with pytest.raises(StructuredOutputError):
+        await _generate(client)

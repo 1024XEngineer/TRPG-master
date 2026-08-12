@@ -21,6 +21,7 @@ from app.adapters.structured_http import (
     StructuredOutputError,
     decode_structured_json,
     post_structured_json,
+    read_structured_payload,
 )
 
 
@@ -88,7 +89,7 @@ class QwenChatCompletionsJsonClient(StructuredJsonClient):
                 retry_policy=self._retry_policy,
             )
 
-        response_payload = response.json()
+        response_payload = read_structured_payload(response, provider_name="Qwen")
         _log_structured_usage(
             response_payload,
             provider="qwen",

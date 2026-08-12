@@ -46,7 +46,7 @@
 | 调查员 | CoC 风格建卡、一键生成、属性与技能配置、装备、背景和角色头像 |
 | AI 主持 | 玩家安全上下文、结构化行动规划、确定性规则结算与结果叙事 |
 | 跑团交互 | 实时房间消息、角色卡、技能检定、幸运消耗、强推、地图与笔记 |
-| 辅助体验 | 主持人语音、浏览器语音输入、D100/D20/D6 本地投骰 |
+| 辅助体验 | 可配置的主持人语音、浏览器语音输入、D100/D20/D6 本地投骰 |
 | 工程能力 | REST + WebSocket SDK、SQL 持久化、自动化测试与 Preview 部署 |
 
 ## 测试阶段需要关注什么
@@ -59,9 +59,9 @@
 ### 当前限制
 
 - 默认 `HOST_MODEL_PROVIDER=fake`，不会访问真实大模型；远程 Host Agent 或 Narrator 失败时当前回合安全中止并允许重试，不会静默回退到 Fake。
-- 技能检定保留 `check.request → check.roll → check.result` 两阶段协议；玩家提交 D100 点数，后端规则引擎权威结算并持久化结果。
+- 权威技能检定通过 `adjudication.pending` 暂停回合；玩家选择技能后由服务端生成并持久化 D100 点数，再由玩家接受结果、精确消耗幸运或强推。
 - Director、世界知识检索、长期记忆、主动剧情推进、RAG、持久即兴内容和完整重连恢复不在当前阶段。
-- 复盘摘要和完整事件记录等能力尚未完成。
+- 房间事件回放与对话恢复已有服务端接口；AI 复盘摘要尚未实现。
 - 语音输入不需要项目配置第三方 Key，项目后端不会接收或保存原始录音；部分浏览器可能使用厂商远程服务完成识别，数据处理方式受浏览器服务条款约束。
 - 语音输入依赖浏览器 Web Speech API 和安全上下文。localhost 或 HTTPS 可用；当前纯 HTTP 的持久预览会明确显示语音输入不可用，键盘输入不受影响。
 
@@ -115,10 +115,14 @@ WebSocket 使用独立事件信封：客户端发送 `{ "type", "playerId", "pay
 
 ```text
 TRPG-master/
-├── trpg-frontend/        # 移动端 React 应用
-├── trpg-sdk/             # 前后端通信 SDK，前端通过本地依赖引用
-├── trpg-backend/         # FastAPI 服务、REST API、WebSocket 和测试
-├── .github/workflows/    # 三个独立 CI：后端、SDK、前端
+├── trpg-frontend/                 # 移动端 React 应用
+├── trpg-sdk/                      # 前后端通信 SDK
+├── trpg-backend/                  # FastAPI 服务、接口和测试
+├── agent-collaboration-framework/ # Agent、规则引擎与 ModuleContent 契约
+├── e2e/                           # SDK → 后端的端到端测试
+├── docs/                          # 仓库文档与截图
+├── scripts/                       # 仓库级辅助脚本
+├── .github/workflows/             # CI 与 Preview 工作流
 └── README.md
 ```
 
@@ -223,7 +227,7 @@ npm run dev
 | `DATABASE_URL` | `sqlite+aiosqlite:///./app.db` | SQLAlchemy 异步数据库地址 |
 | `ENABLE_DOCS` | `true` | 是否开放 `/docs`、`/redoc` 和 `/openapi.json` |
 | `LOG_LEVEL` | `INFO` | 后端日志级别 |
-| `CORS_ORIGINS` | `["http://localhost:9877"]` | 允许跨域访问的前端来源列表 |
+| `CORS_ORIGINS` | `["http://localhost:9877"]` | `.env.example` 的跨域来源；不创建 `.env` 时，代码默认还允许 `http://127.0.0.1:9877` |
 | `HOST_MODEL_PROVIDER` | `fake` | 主持模型：`fake`、`openai`、`qwen` 或 `deepseek` |
 | `OPENAI_API_KEY` | 空 | `openai` 提供商的 API 密钥 |
 | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | OpenAI Responses API 根地址 |
@@ -251,7 +255,7 @@ npm run dev
 | `HOST_AGENT_TOOL_TIMEOUT_SECONDS` | `5` | 单工具超时秒数 |
 | `HOST_AGENT_TIMEOUT_SECONDS` | `30` | Host Agent 整轮超时秒数 |
 | `OPENING_NARRATION_MODE` | `model` | 权威开场生成方式：`model` 或确定性 `template` |
-| `OPENING_NARRATION_TIMEOUT_SECONDS` | `10` | 开场模型生成的独立总超时秒数；失败后使用安全模板 |
+| `OPENING_NARRATION_TIMEOUT_SECONDS` | `30`（示例配置与 Preview 为 `10`） | 开场模型的独立总超时；失败后使用安全模板 |
 | `RECENT_HISTORY_ENABLED` | `true` | 是否向 Host/Narrator 提供玩家安全的近期回合 |
 | `RECENT_HISTORY_MAX_TURNS` | `6` | 近期历史最多保留的回合数 |
 | `RECENT_HISTORY_MAX_CHARS` | `6000` | 近期历史文本总字符预算 |
@@ -414,9 +418,10 @@ environment:
 正确。真实验证必须覆盖一次 Host Agent 工具调用和最终结构化输出。轮换期间不要在
 Issue、PR、Actions 参数或服务器命令历史中粘贴明文 key。
 
-公共 WebSocket 只发送安全进度：`turn.started`、`turn.phase_changed`、
-`tool.started`、`tool.completed`、`turn.failed` 和 `view.updated`。内部 call id、
-工具参数/结果、Prompt、raw model output、reasoning、异常栈和模组秘密不会进入浏览器。
+回合进度通过 `turn.started`、`turn.phase_changed`、`tool.started`、
+`tool.completed`、`turn.failed` 和 `view.updated` 等玩家安全事件发送；房间状态、叙事、
+检定和聊天另有对应业务事件。内部 call id、工具参数/结果、Prompt、raw model output、
+reasoning、异常栈和模组秘密不会进入浏览器。
 
 ### 前端 `trpg-frontend/.env`
 
@@ -444,6 +449,7 @@ cd trpg-frontend
 npm ci
 npm run lint
 npm run build   # 内部先跑 tsc -b 做类型检查，再用 vite build 打包
+npm run test
 ```
 
 ### 后端
@@ -487,10 +493,11 @@ npm run codegen
 | Workflow | 触发路径 | 检查内容 |
 | --- | --- | --- |
 | `trpg-backend-ci.yml`（Backend CI） | `trpg-backend/**`；另外 `trpg-sdk/scripts/generate-types.ts` 和 `trpg-sdk/src/generated/**` 也会触发（见下） | `ruff check`、`ruff format --check`、`ty check`、`pytest`；另有 `codegen-drift` job：重新跑一遍 DTO → JSON Schema → TS 生成管线，用 `git diff` 确认 `trpg-sdk/src/generated/` 跟提交的一致，不一致就报错 |
-| `trpg-sdk-ci.yml`（SDK CI） | `trpg-sdk/**` | `npm run lint`、`npm run typecheck`、`npm run build` |
+| `trpg-sdk-ci.yml`（SDK CI） | `trpg-sdk/**` | `npm run lint`、`npm run typecheck`、`npm run build`、`npm test` |
 | `trpg-frontend-ci.yml`（Frontend CI） | `trpg-frontend/**` | `npm run lint`、`npm run build` |
+| `e2e-ci.yml`（E2E CI） | `trpg-backend/**`、`trpg-sdk/**` 或 `e2e/**` | 构建 SDK、启动后端并运行 SDK → 后端端到端测试 |
 | `pr-preview.yml`（PR Preview） | PR 打开、更新、重开、关闭 | 部署或回收 PR 专属预览环境 |
-| `main-preview.yml`（Main Preview） | PR 合并到 `main` | 更新固定端口的持久预览环境 |
+| `main-preview.yml`（Main Preview） | `main` 分支更新 | 更新固定端口的持久预览环境 |
 
 `codegen-drift` 放在 Backend CI 而不是 SDK CI：它要在"改了 DTO 却忘记重新
 生成"的那个 PR 上就亮红灯，而 SDK CI 只在 `trpg-sdk/**` 变化时触发——一个纯

@@ -1,4 +1,4 @@
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { Plus, Minus, Search, Shield, Heart, Brain, Zap, Eye, Maximize2, Lightbulb, BookOpen, ChevronDown, ChevronUp, X, Info, Clover, Sparkles } from 'lucide-react'
 import type { CharacterComputeResult, SkillComputeView } from 'trpg-sdk'
@@ -7,7 +7,7 @@ import { useCharacterStore } from '@/stores/character-store'
 import { useRoomStore } from '@/stores/room-store'
 import { createCharacterDraft, saveCharacter, completeCharacter, fetchCharacter, quickGenerateCharacter } from '@/services/character/character-api'
 import { previewCharacter, translateCharacterValidationError } from '@/services/character/ruleset-api'
-import { friendlyErrorMessage } from '@/services/api-client'
+import { disconnectWebSocket, friendlyErrorMessage } from '@/services/api-client'
 import { useRuleset } from '@/hooks/useRuleset'
 import type { OccupationSpec, SkillSpec } from '@/data/types'
 import {
@@ -197,8 +197,13 @@ function SkillRow({
 
 // ─── Main Page ───────────────────────────────────────
 export default function CharacterPage() {
+  const location = useLocation()
   const navigate = useNavigate()
   const [step, setStep] = useState(0)
+  const [confirmExit, setConfirmExit] = useState(false)
+  const isEditingExistingCharacter = Boolean(
+    (location.state as { fromCharacterReady?: boolean } | null)?.fromCharacterReady
+  )
   const characterPageRef = useRef<HTMLDivElement>(null)
 
   // 建卡规则目录（职业/技能/属性）改从后端 GET /systems/{systemId}/ruleset
@@ -1187,6 +1192,28 @@ export default function CharacterPage() {
   const visiblePreviewIssues = previewValidationIssues.filter(
     issue => issue.code !== 'OCCUPATION_CHOICES_INCOMPLETE'
   )
+
+  const handleLeaveCharacterPage = () => {
+    if (isEditingExistingCharacter) {
+      navigate(-1)
+      return
+    }
+    setConfirmExit(true)
+  }
+
+  const handleConfirmExit = () => {
+    disconnectWebSocket()
+    navigate('/home')
+  }
+
+  const handlePreviousStep = () => {
+    if (step > 0) {
+      setStep(current => current - 1)
+      return
+    }
+    handleLeaveCharacterPage()
+  }
+
   const previewIssuesBanner = previewStatus === 'ready' && visiblePreviewIssues.length > 0 ? (
     <div className="mt-3 rounded-[6px] border border-[#e0a0a0] bg-[#fff5f5] px-3 py-2 text-[11px] text-[#c04040]">
       <div className="font-semibold mb-1">当前人物卡有校验问题</div>
@@ -1200,6 +1227,41 @@ export default function CharacterPage() {
 
   return (
     <div ref={characterPageRef} className="character-create animate-screen-in min-h-screen bg-page">
+      {confirmExit && (
+        <div
+          className="fixed inset-0 z-40 bg-black/50 flex items-center justify-center px-8"
+          onClick={() => setConfirmExit(false)}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="character-exit-title"
+            className="bg-card border border-border-light rounded-md p-5 w-full max-w-[300px]"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <p id="character-exit-title" className="text-sm text-text-body text-center mb-4">
+              确定要退出游戏吗？房间会保留，之后可以从「我的游戏」继续。
+            </p>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmExit(false)}
+                className="flex-1 py-2 rounded-sm bg-panel border border-border-light text-text-muted text-xs font-medium active:bg-border-light"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmExit}
+                className="flex-1 py-2 rounded-sm bg-[#c04040] text-white text-xs font-medium active:bg-[#a03030]"
+              >
+                确认退出
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
       {rulesetLoading ? (
         <div className="flex flex-col items-center justify-center min-h-screen px-5 text-center">
           <p className="text-sm text-text-muted">正在加载规则数据…</p>
@@ -1207,7 +1269,7 @@ export default function CharacterPage() {
       ) : rulesetError ? (
         <div className="flex flex-col items-center justify-center min-h-screen px-5 text-center gap-3">
           <p className="text-sm text-[#c04040]">{rulesetError}</p>
-          <button onClick={() => navigate(-1)}
+          <button onClick={handleLeaveCharacterPage}
             className="px-5 py-2.5 rounded-sm bg-card border border-border-light text-text-body text-sm font-semibold">
             返回
           </button>
@@ -1218,7 +1280,7 @@ export default function CharacterPage() {
             <button
               type="button"
               aria-label={step > 0 ? '返回上一页' : '返回'}
-              onClick={() => step > 0 ? setStep(s => s - 1) : navigate(-1)}
+              onClick={handlePreviousStep}
               className="character-create__back"
             >
               <img src="/assets/character/create/back.webp" alt="" aria-hidden="true" />
@@ -2149,7 +2211,7 @@ export default function CharacterPage() {
             <div className="flex gap-2.5">
               <button
                 data-onboarding-page-back
-                onClick={() => step > 0 ? setStep(s => s - 1) : navigate(-1)}
+                onClick={handlePreviousStep}
                 className="character-create__action character-create__action--previous flex-1 flex items-center justify-center text-sm font-semibold transition-all active:scale-[0.97]">
                 上一步
               </button>

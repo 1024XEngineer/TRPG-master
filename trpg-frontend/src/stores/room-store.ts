@@ -80,8 +80,8 @@ export const useRoomStore = create<RoomState>()(
             : state.roomId !== roomId
               ? { characterId: null }
               : {}),
-          // moduleId 同样是房间级状态。切换房间时先清空，避免 StoryPage 在新房间
-          // 预览返回前短暂读取并展示上一局的模组。
+          // moduleId 同样是房间级状态。切换房间时先清空，避免新房间短暂沿用
+          // 上一局的模组信息。
           ...(state.roomId !== roomId ? { moduleId: null } : {}),
         })),
       setModuleId: (moduleId) => set({ moduleId }),

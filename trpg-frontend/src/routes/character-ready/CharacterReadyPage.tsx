@@ -127,6 +127,8 @@ export default function CharacterReadyPage() {
   const [portraitVersionOverride, setPortraitVersionOverride] = useState<string | null>(null)
   const [starting, setStarting] = useState(false)
   const [startError, setStartError] = useState('')
+  const [confirmExit, setConfirmExit] = useState(false)
+  const cancelExitRef = useRef<HTMLButtonElement>(null)
   const roomId = useRoomStore((s) => s.roomId)
   const cachedCharacter = useCharacterStore((s) => (roomId ? s.getForRoom(roomId) : null))
   const characterId = useRoomStore((s) => s.characterId)
@@ -262,9 +264,23 @@ export default function CharacterReadyPage() {
   }
 
   const handleGoBack = () => {
+    setConfirmExit(true)
+  }
+
+  const handleConfirmExit = () => {
     disconnectWebSocket()
     navigate('/home')
   }
+
+  useEffect(() => {
+    if (!confirmExit) return
+    cancelExitRef.current?.focus()
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setConfirmExit(false)
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [confirmExit])
 
   return (
     <div className="lobby-scene character-ready-scene animate-screen-in">
@@ -274,7 +290,7 @@ export default function CharacterReadyPage() {
       <img className="lobby-scene__poster" src="/assets/rooms/lobby/camp-poster.webp" alt="" aria-hidden="true" />
 
       <header className="lobby-scene__header character-ready-scene__header">
-        <button type="button" className="lobby-scene__back" onClick={handleGoBack} aria-label="返回首页">
+        <button type="button" className="lobby-scene__back" onClick={handleGoBack} aria-label="退出房间">
           <img src="/assets/rooms/create/back-button.webp" alt="" aria-hidden="true" />
         </button>
         <OnboardingTrigger className="character-ready-scene__guide" />
@@ -390,6 +406,33 @@ export default function CharacterReadyPage() {
           <span aria-hidden="true">✥</span>
         </p>
       </footer>
+
+      {confirmExit && (
+        <div className="lobby-leave-dialog" onMouseDown={() => setConfirmExit(false)}>
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="character-ready-exit-title"
+            className="lobby-leave-dialog__paper"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <img
+              className="lobby-leave-dialog__art"
+              src="/assets/rooms/lobby/leave-dialog.webp"
+              alt=""
+              aria-hidden="true"
+            />
+            <span className="lobby-leave-dialog__eyebrow">调查员档案</span>
+            <h2 id="character-ready-exit-title">退出房间？</h2>
+            <div className="lobby-leave-dialog__divider" aria-hidden="true"><span>◆</span></div>
+            <p>确定要退出房间吗？房间会保留，之后可以从「我的游戏」继续。</p>
+            <div className="lobby-leave-dialog__actions">
+              <button ref={cancelExitRef} type="button" onClick={() => setConfirmExit(false)}>取消</button>
+              <button type="button" className="is-danger" onClick={handleConfirmExit}>确认退出</button>
+            </div>
+          </section>
+        </div>
+      )}
 
       {/* Character Sheet Modal */}
       {showSelfSheet && character && (

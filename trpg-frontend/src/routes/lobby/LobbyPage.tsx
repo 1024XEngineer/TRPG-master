@@ -10,7 +10,7 @@ import { useRoomPlayers } from '@/hooks/useRoomPlayers'
 const READY_CONFIRM_TIMEOUT_MS = 7_000
 
 // 第一个等待界面：等所有玩家进入房间、都标记"已就绪"，才能一起往下走到
-// 背景介绍 + 建卡（见需求：不论房主还是访客，全员到齐才能开始）。
+// 建卡（见需求：不论房主还是访客，全员到齐才能开始）。
 export default function LobbyPage() {
   const navigate = useNavigate()
 
@@ -112,7 +112,7 @@ export default function LobbyPage() {
     if (isHost) return
     if (info?.storyStarted && !advancedRef.current) {
       advancedRef.current = true
-      navigate('/room/story')
+      navigate('/room/character', { state: { startCharacterOnboarding: true } })
     }
   }, [info?.storyStarted, isHost, navigate])
 
@@ -126,7 +126,7 @@ export default function LobbyPage() {
       setStartError('')
       await startStory(roomId)
       advancedRef.current = true
-      navigate('/room/story')
+      navigate('/room/character', { state: { startCharacterOnboarding: true } })
     } catch (err) {
       setStartError(friendlyErrorMessage(err, '开始游戏失败'))
     } finally {
@@ -184,14 +184,8 @@ export default function LobbyPage() {
         : '标记就绪后，等待房主开始游戏'
 
   return (
-    <div className="lobby-scene animate-screen-in">
-      <img
-        className="lobby-scene__background"
-        src="/assets/rooms/lobby/background.webp"
-        alt=""
-        aria-hidden="true"
-      />
-
+    <div className="lobby-scene lobby-scene--waiting animate-screen-in">
+      <div className="lobby-scene__artboard">
       <img className="lobby-scene__map" src="/assets/rooms/lobby/map.webp" alt="" aria-hidden="true" />
       <img className="lobby-scene__note" src="/assets/rooms/lobby/gather-note.webp" alt="" aria-hidden="true" />
       <img className="lobby-scene__poster" src="/assets/rooms/lobby/camp-poster.webp" alt="" aria-hidden="true" />
@@ -318,6 +312,8 @@ export default function LobbyPage() {
           <span aria-hidden="true">✥</span>
         </p>
       </footer>
+
+      </div>
 
       {confirmLeave && (
         <div className="lobby-leave-dialog" onMouseDown={() => setConfirmLeave(false)}>

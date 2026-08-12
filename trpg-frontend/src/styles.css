@@ -16,6 +16,7 @@
     display: flex;
     justify-content: center;
     min-height: 100vh;
+    min-height: 100dvh;
     -webkit-font-smoothing: antialiased;
     overflow-x: hidden;
   }
@@ -24,6 +25,7 @@
     width: 100%;
     max-width: 390px;
     height: 100vh;
+    height: 100dvh;
     background: #faf7f0;
     position: relative;
     /* 不能在这个元素自己身上开 overflow:auto——它同时也是下面 transform
@@ -1379,10 +1381,21 @@
 .home-scene {
   position: relative;
   isolation: isolate;
+  width: 100%;
   min-height: 100%;
-  height: 100%;
   overflow: hidden;
-  background: #170d07;
+  background: #25170e;
+}
+
+/* 背景与全部可交互/装饰元素共用原图坐标系，避免长屏裁切背景后，纸张、
+ * 图钉和木板发生错位。超出画布的视口高度由外层深色背景自然补齐。 */
+.home-scene__artboard {
+  position: relative;
+  isolation: isolate;
+  container-type: inline-size;
+  width: 100%;
+  aspect-ratio: 853 / 1844;
+  overflow: hidden;
 }
 
 .home-scene__background {
@@ -1450,14 +1463,14 @@
 
 .home-scene__actions {
   position: absolute;
-  top: clamp(14.5rem, 33vh, 18rem);
+  top: 36.2%;
   left: 10%;
   z-index: 4;
   display: flex;
   width: 46%;
   flex-direction: column;
   align-items: stretch;
-  gap: clamp(0.15rem, 0.45vh, 0.3rem);
+  gap: 0.65cqw;
 }
 
 .home-scene__action {
@@ -1486,7 +1499,7 @@
 
 .home-scene__pins {
   position: absolute;
-  top: -1.5rem;
+  top: -6.15cqw;
   left: -5%;
   z-index: 5;
   width: 180%;
@@ -1667,7 +1680,7 @@
   text-align: center;
 }
 
-.create-room-scene__room-name-input {
+.create-room-scene input.create-room-scene__room-name-input {
   position: absolute;
   top: 23.9%;
   left: 36.4%;
@@ -1679,6 +1692,8 @@
   border-radius: 4px;
   color: #412a18;
   background: transparent;
+  font-family: 'Times New Roman', Times, 'STKaiti', 'KaiTi', 'Songti SC', 'STSong', serif;
+  font-variant-numeric: tabular-nums;
   font-size: clamp(15px, 4.8cqw, 22px);
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -1710,13 +1725,18 @@
 
 .create-room-scene__player-hint {
   top: 36.55%;
-  left: 15.3%;
-  max-width: 20%;
+  left: 11%;
+  display: flex;
+  width: 24%;
+  align-items: center;
+  justify-content: center;
   color: rgb(63 39 21 / 70%);
   font-size: clamp(9px, 2.9cqw, 13px);
   font-weight: 500;
   line-height: 1.2;
   letter-spacing: 0.03em;
+  text-align: center;
+  white-space: nowrap;
 }
 
 .create-room-scene__player-control {
@@ -1958,6 +1978,7 @@
 
 .create-room-scene__summary-list dd {
   overflow: hidden;
+  font-family: 'Times New Roman', 'STKaiti', 'KaiTi', 'Songti SC', 'STSong', serif;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2062,26 +2083,6 @@
   outline-offset: 2px;
 }
 
-@media (max-height: 700px) {
-  .home-scene__actions {
-    top: 11.8rem;
-    width: 45%;
-    gap: 0;
-  }
-
-  .home-scene__cat {
-    right: -20%;
-    bottom: 3%;
-    width: 76%;
-  }
-
-  .home-scene__books,
-  .home-scene__newspaper {
-    opacity: 0.72;
-  }
-
-}
-
 @media (prefers-reduced-motion: reduce) {
   .animate-screen-in,
   .animate-fade-in,
@@ -2111,6 +2112,22 @@
   color: #3b2412;
   background: #8b6848;
   font-family: Georgia, 'STKaiti', 'KaiTi', 'Songti SC', 'STSong', serif;
+}
+
+.lobby-scene--waiting {
+  height: auto;
+  min-height: 100%;
+  background: #2d1c10 url('/assets/rooms/lobby/background.webp') center top / cover no-repeat;
+}
+
+/* 等待大厅的档案、玩家列表和操作按钮共用原图 870 × 1808 的坐标系，
+ * 避免操作按钮随着手机高度变化而脱离档案板。 */
+.lobby-scene__artboard {
+  position: relative;
+  isolation: isolate;
+  width: 100%;
+  aspect-ratio: 870 / 1808;
+  overflow: hidden;
 }
 
 .lobby-scene button {
@@ -2179,6 +2196,10 @@
   cursor: pointer;
   pointer-events: auto;
   transition: filter 150ms ease, transform 150ms ease;
+}
+
+.lobby-scene--waiting .lobby-scene__back {
+  top: max(1.15%, env(safe-area-inset-top));
 }
 
 .lobby-scene__back img {
@@ -2385,6 +2406,10 @@
     0 0.13rem 0.18rem rgb(64 34 13 / 30%);
 }
 
+.lobby-scene--waiting .lobby-player__avatar {
+  transform: translateY(-0.18rem);
+}
+
 .lobby-player__avatar svg {
   width: 54%;
   height: 54%;
@@ -2405,6 +2430,10 @@
   flex-direction: column;
   justify-content: center;
   line-height: 1.25;
+}
+
+.lobby-scene--waiting .lobby-player__identity {
+  transform: translateY(-0.18rem);
 }
 
 .lobby-player__identity strong {
@@ -2440,6 +2469,10 @@
   font-size: clamp(0.66rem, 2.8vw, 0.76rem);
   font-weight: 800;
   white-space: nowrap;
+}
+
+.lobby-scene--waiting .lobby-player__status {
+  transform: translateY(-0.18rem);
 }
 
 .lobby-player__status img {
@@ -2507,6 +2540,11 @@
   cursor: pointer;
   pointer-events: auto;
   transition: filter 160ms ease, transform 160ms ease;
+}
+
+.lobby-scene--waiting .lobby-scene__start-action {
+  top: 79.5%;
+  bottom: auto;
 }
 
 .lobby-scene__start-action img {
@@ -2946,7 +2984,7 @@
 
 .character-ready-sheet {
   width: min(100%, 26.875rem);
-  height: 80vh;
+  height: 76vh;
   margin: 0 auto;
   padding: 4.1rem 2rem 2.5rem;
   border: 0;
@@ -2961,7 +2999,7 @@
 }
 
 .character-ready-sheet__scroll {
-  max-height: calc(80vh - 6.6rem);
+  max-height: calc(76vh - 6.6rem);
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -3210,7 +3248,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 1.25rem;
+  padding: max(1.25rem, env(safe-area-inset-top)) 1.25rem max(1.25rem, env(safe-area-inset-bottom));
   background: rgb(29 17 8 / 68%);
   backdrop-filter: blur(3px) sepia(0.15);
   animation: fade-in 180ms ease-out;
@@ -3409,12 +3447,12 @@
 
 .scenario-selection-scene__header {
   position: relative;
-  height: clamp(7rem, 15vh, 8.2rem);
+  height: calc(clamp(7rem, 15dvh, 8.2rem) + env(safe-area-inset-top));
 }
 
 .scenario-selection-scene__back {
   position: absolute;
-  top: 0.8rem;
+  top: calc(0.8rem + env(safe-area-inset-top));
   left: 0.65rem;
   z-index: 2;
   width: clamp(4rem, 19vw, 4.8rem);
@@ -3435,7 +3473,7 @@
 
 .scenario-selection-scene__title {
   position: absolute;
-  top: 2.1rem;
+  top: calc(2.1rem + env(safe-area-inset-top));
   left: 50%;
   width: min(32%, 8rem);
   margin: 0;
@@ -3450,7 +3488,7 @@
 
 .scenario-selection-scene__catalog {
   position: absolute;
-  top: 6.25rem;
+  top: calc(6.25rem + env(safe-area-inset-top));
   bottom: calc(8.5rem + env(safe-area-inset-bottom));
   left: 50%;
   display: flex;
@@ -3885,7 +3923,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0.75rem;
+  padding: max(0.75rem, env(safe-area-inset-top)) 0.75rem max(0.75rem, env(safe-area-inset-bottom));
   background: rgb(8 4 2 / 84%);
   backdrop-filter: blur(4px);
   animation: fade-in 180ms ease-out;
@@ -4202,6 +4240,41 @@
 
   .scenario-module-card__metadata {
     padding: 0 0.15rem;
+  }
+}
+
+@media (max-height: 640px) {
+  .scenario-module-detail__dialog {
+    height: 96%;
+  }
+
+  .scenario-module-detail__header {
+    grid-template-columns: 5.8rem minmax(0, 1fr);
+    gap: 0.7rem;
+    min-height: 9.5rem;
+    padding: 0.8rem 0.75rem;
+  }
+
+  .scenario-module-detail__header .scenario-module-card__cover {
+    width: 5.5rem;
+  }
+
+  .scenario-module-detail__header .scenario-module-card__cover--default {
+    width: 5rem;
+  }
+
+  .scenario-module-detail__header h2 {
+    font-size: 1.4rem;
+  }
+
+  .scenario-module-detail__metadata {
+    margin-top: 0.55rem;
+  }
+
+  .scenario-module-detail__body {
+    min-height: 6rem;
+    padding-top: 0.85rem;
+    padding-bottom: 1rem;
   }
 }
 

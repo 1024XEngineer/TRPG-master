@@ -645,7 +645,7 @@
 }
 
 .room-play__bottom-panel--character-sheet > .room-play__bottom-panel-content {
-  max-height: calc(82vh - 7.25rem) !important;
+  max-height: calc(70vh - 7.25rem) !important;
   overscroll-behavior: contain;
 }
 

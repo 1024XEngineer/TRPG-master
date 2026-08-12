@@ -2328,7 +2328,7 @@ export default function RoomPage() {
         onClose={() => setOpenPanel(null)}
         title={`调查员 · ${character?.info.name || '未建卡'}`}
         className="room-play__bottom-panel--character-sheet"
-        heightVh={82}
+        heightVh={70}
       >
         {character ? (
           <>

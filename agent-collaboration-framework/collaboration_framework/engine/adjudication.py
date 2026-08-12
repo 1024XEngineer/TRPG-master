@@ -143,6 +143,7 @@ def _normalize_target_kind(
     logger.warning(
         "adjudication_target_kind_normalized",
         extra={
+            "room_id": runtime.game_state.room_id,
             "target_id": target.id,
             "declared_kind": target.kind,
             "resolved_kind": resolved,

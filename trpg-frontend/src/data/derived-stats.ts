@@ -24,27 +24,30 @@ export const DERIVED_STAT_DEFINITIONS: ReadonlyArray<{
   { key: 'move', label: '移动力', abbreviation: 'MOV', color: '#c08050' },
 ]
 
+/**
+ * 体格在修复前与伤害加值共用同一个值，所以已经建好的角色卡（以及
+ * localStorage 里的缓存）可能存着 `+1D4` 这样的骰子表达式。解析不出整数就
+ * 留空——0 是合法体格值，兜底成它只会让玩家看到一个看似正常的错误数字。
+ */
+export function coerceBuild(value: unknown): number | null {
+  if (typeof value === 'number') return value
+  if (typeof value === 'string' && /^[+-]?\d+$/.test(value.trim())) {
+    return Number(value)
+  }
+  return null
+}
+
 export function normalizeDerivedStats(
   derived: Record<string, number | string> | undefined,
 ): DerivedStatsView {
   const numberValue = (value: unknown) => (typeof value === 'number' ? value : 0)
   const stringValue = (value: unknown) => (value == null ? '0' : String(value))
-  // 体格在修复前与伤害加值共用同一个值，所以已经建好的角色卡里可能存着
-  // `+1D4` 这样的骰子表达式。解析不出整数就留空——0 是合法体格值，兜底成
-  // 它只会让玩家看到一个看似正常的错误数字。
-  const buildValue = (value: unknown) => {
-    if (typeof value === 'number') return value
-    if (typeof value === 'string' && /^[+-]?\d+$/.test(value.trim())) {
-      return Number(value)
-    }
-    return null
-  }
   return {
     hp: numberValue(derived?.HP),
     san: numberValue(derived?.SAN),
     mp: numberValue(derived?.MP),
     db: stringValue(derived?.DB),
-    build: buildValue(derived?.Build),
+    build: coerceBuild(derived?.Build),
     move: numberValue(derived?.MOV),
   }
 }

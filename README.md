@@ -155,7 +155,14 @@ uv run ty check
 uv run pytest
 ```
 
-后端 DTO 变化后，需要运行 `trpg-backend/scripts/export_schema.py` 和 `trpg-sdk` 的 `npm run codegen`，并提交更新后的 `trpg-sdk/src/generated/dto.ts`。
+后端 DTO 变化后，需要重新生成 SDK 类型并提交更新后的 `trpg-sdk/src/generated/dto.ts`：
+
+```bash
+cd trpg-backend
+uv run python scripts/export_schema.py
+cd ../trpg-sdk
+npm run codegen
+```
 
 ## 项目进展
 

@@ -259,6 +259,24 @@ function formatWorldTime(dayIndex: number, hourOfDay: number): string {
   return `第 ${dayIndex + 1} 天 ${String(hourOfDay).padStart(2, '0')}:00`
 }
 
+/**
+ * PlayerView 的当前资源，按小写 id 索引，供角色卡面板显示活的 HP/SAN/MP/幸运。
+ *
+ * 顶部状态栏一直读 PlayerView，角色卡面板读的却是建卡快照，同一页的同名数值
+ * 于是对不上（issue #286）。两处现在共用这同一份投影。
+ */
+function liveResourcesOf(playerView: AgentPlayerView | null): Record<string, number> {
+  const resources: Record<string, number> = {}
+  for (const item of playerView?.self_actor.resources ?? []) {
+    if (typeof item.value !== 'number' || !Number.isFinite(item.value)) continue
+    // id 与 name 都建索引，和 `resourceValue` 的匹配口径保持一致：否则顶部
+    // 状态栏能按 name 命中的资源，面板会按 id 找不到，又变回两个数。
+    resources[item.id.toLocaleLowerCase()] = item.value
+    resources[item.name.toLocaleLowerCase()] = item.value
+  }
+  return resources
+}
+
 function resourceValue(playerView: AgentPlayerView | null, id: string): number | null {
   const normalized = id.toLocaleLowerCase()
   const resource = playerView?.self_actor.resources.find((item) =>
@@ -1326,6 +1344,7 @@ export default function RoomPage() {
   const suspended = (roomPhase || roomInfo?.phase) === 'Suspended'
   const mapLocations = mapLocationsFromPlayerView(playerView)
   const currentLocationImage = playerView ? LOCATION_IMAGE_BY_ID[playerView.scene.id] : undefined
+  const liveResources = liveResourcesOf(playerView)
   const currentHp = resourceValue(playerView, 'hp') ?? character?.derived.hp ?? null
   const currentSan = resourceValue(playerView, 'san') ?? character?.derived.san ?? null
   // 权限请求、识别和整理结果期间都占用语音会话。UI 用同一个布尔值切换
@@ -2333,6 +2352,7 @@ export default function RoomPage() {
                     ? ruleset?.occupations.find(o => o.id === character.info.occupationId)?.name
                     : null}
                   attributes={ruleset?.attributes ?? []}
+                  liveResources={liveResources}
                 />
               </div>
             )}

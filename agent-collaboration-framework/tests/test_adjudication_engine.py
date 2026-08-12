@@ -608,6 +608,62 @@ class AdjudicationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.store.inspect_state("room_01").event_sequence, 0)
         self.assertEqual(self.store.inspect_domain_events("room_01"), ())
 
+    async def test_wrong_target_kind_is_normalized_when_id_is_unambiguous(
+        self,
+    ) -> None:
+        # 模型常把 NPC 写成 kind="actor"：`state.actors` 只有玩家角色，NPC 在
+        # entity 侧。id 唯一可辨，归一后回合应照常完成。
+        mislabeled = adjudication(
+            "mislabeled-target", "0", check=NoAdjudicationCheck()
+        ).model_copy(
+            update={"target": ActionTarget(kind="actor", id="butler")},
+            deep=True,
+        )
+
+        await self.submit(self.service(), mislabeled)
+
+        async with self.store.transaction("room_01") as transaction:
+            completed = await transaction.find_adjudication_command(
+                "mislabeled-target"
+            )
+        assert completed is not None
+        # 归一后的 target 贯穿整次提交：范围匹配、效果校验和持久化拿到的是同一份。
+        persisted = completed.request.adjudication.target
+        self.assertEqual(persisted.kind, "entity")
+        self.assertEqual(persisted.id, "butler")
+
+    async def test_ambiguous_target_id_is_rejected_instead_of_guessed(self) -> None:
+        # butler 同时是 canon entity 和一个 actor id，declared kind 两边都不是：
+        # 跨集合撞名时归一等于猜，必须维持拒绝。
+        state = self.store.inspect_state("room_01")
+        actors = dict(state.actors)
+        actors["butler"] = actors["pc_1"].model_copy(deep=True)
+        self.store.register_room(
+            module_content=self.module,
+            initial_state=state.model_copy(
+                update={"actors": actors, "room_id": "room_ambiguous"},
+                deep=True,
+            ),
+        )
+        ambiguous = adjudication(
+            "ambiguous-target", "0", check=NoAdjudicationCheck()
+        ).model_copy(
+            update={"target": ActionTarget(kind="location", id="butler")},
+            deep=True,
+        )
+
+        with self.assertRaises(AdjudicationValidationError) as error:
+            await self.service().submit(
+                SubmitAdjudicationRequest(
+                    room_id="room_ambiguous",
+                    player_id="player_01",
+                    adjudication=ambiguous,
+                )
+            )
+
+        self.assertEqual(error.exception.result.code, "TARGET_NOT_FOUND")
+        self.assertEqual(self.store.inspect_state("room_ambiguous").event_sequence, 0)
+
     async def test_l4_can_commit_while_l5_direct_ending_is_rejected(self) -> None:
         core_action = ActionAdjudication(
             request_id="core-resolution",

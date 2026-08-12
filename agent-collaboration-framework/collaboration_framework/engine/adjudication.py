@@ -7,6 +7,7 @@ commits them without interpreting player language.
 
 from __future__ import annotations
 
+import logging
 from copy import deepcopy
 from typing import Literal, NoReturn
 from uuid import uuid4
@@ -17,6 +18,7 @@ from collaboration_framework.contracts import (
     AcceptResultOption,
     ActionAdjudication,
     ActionEffect,
+    ActionTarget,
     AdvanceWorldTimeEffect,
     AdjudicationRecovery,
     AdjudicationExecution,
@@ -87,6 +89,69 @@ from .rules_v3 import (
     resolve_rule_option,
     walk_rule,
 )
+
+
+logger = logging.getLogger(__name__)
+
+
+def _target_kinds_matching(
+    runtime: EngineRuntimeSnapshot,
+    target_id: str,
+) -> frozenset[str]:
+    """`target_id` 在哪些 kind 的集合里存在。
+
+    `ActionTarget.kind` 决定去哪个集合查 id，这里把五个集合全查一遍，供存在性
+    校验和 kind 归一共用同一份定义。
+    """
+
+    state = runtime.game_state
+    matches = {
+        "information": target_id in runtime.canon_information_ids,
+        "entity": target_id in runtime.canon_entity_ids
+        or target_id in state.runtime_entities
+        or target_id in state.item_instances,
+        "location": target_id in runtime.canon_location_ids
+        or target_id in state.runtime_locations,
+        "actor": target_id in state.actors,
+        "world": target_id == runtime.module_content.world_ref,
+    }
+    return frozenset(kind for kind, hit in matches.items() if hit)
+
+
+def _normalize_target_kind(
+    runtime: EngineRuntimeSnapshot,
+    adjudication: ActionAdjudication,
+) -> ActionAdjudication:
+    """`kind` 填错但 `id` 唯一可辨时改写 `kind`，其余情况原样返回。
+
+    模型经常把 NPC 写成 `kind="actor"`——`state.actors` 只有玩家角色，NPC 一律在
+    entity 侧，于是整个回合以 `TARGET_NOT_FOUND` 失败，玩家原样重发又能过。引擎
+    自己把这条拒绝标成 `auto_repairable` / `fault="agent"`，但答案本来就在引擎
+    手里：`id` 已经唯一确定了对象，错的只是那个分类标签，不必再问模型一次。
+
+    只在**恰好一个**其它 kind 命中时归一。零命中仍然拒绝；多个 kind 同时命中而
+    `kind` 不在其中时也拒绝——跨集合撞名的归一是猜，不能猜。
+
+    归一不放宽可见性边界：能碰到的对象集合与直接写对 `kind` 完全一致。
+    """
+
+    target = adjudication.target
+    matched = _target_kinds_matching(runtime, target.id)
+    if target.kind in matched or len(matched) != 1:
+        return adjudication
+    (resolved,) = matched
+    logger.warning(
+        "adjudication_target_kind_normalized",
+        extra={
+            "target_id": target.id,
+            "declared_kind": target.kind,
+            "resolved_kind": resolved,
+            "request_id": adjudication.request_id,
+        },
+    )
+    return adjudication.model_copy(
+        update={"target": ActionTarget(kind=resolved, id=target.id)}
+    )
 
 
 def _visibility_knowledge(
@@ -487,6 +552,16 @@ class AdjudicationEngineService:
             self._require_revision(
                 request.adjudication.source_revision,
                 runtime.revision,
+            )
+            # 归一必须发生在校验之前，且改写后的 target 要贯穿这次提交的余下
+            # 部分——规则范围匹配、效果校验和持久化用的都是 `request.adjudication`。
+            request = request.model_copy(
+                update={
+                    "adjudication": _normalize_target_kind(
+                        runtime,
+                        request.adjudication,
+                    )
+                }
             )
             self._validate_adjudication(runtime, request.adjudication)
             proposal_validation, proposal_committed_level = (
@@ -1089,20 +1164,9 @@ class AdjudicationEngineService:
         runtime: EngineRuntimeSnapshot,
         adjudication: ActionAdjudication,
     ) -> None:
-        module = runtime.module_content
         state = runtime.game_state
         target = adjudication.target
-        exists = {
-            "information": target.id in runtime.canon_information_ids,
-            "entity": target.id in runtime.canon_entity_ids
-            or target.id in state.runtime_entities
-            or target.id in state.item_instances,
-            "location": target.id in runtime.canon_location_ids
-            or target.id in state.runtime_locations,
-            "actor": target.id in state.actors,
-            "world": target.id == module.world_ref,
-        }[target.kind]
-        if not exists:
+        if target.kind not in _target_kinds_matching(runtime, target.id):
             self._reject_validation(
                 "TARGET_NOT_FOUND",
                 repairability="auto_repairable",

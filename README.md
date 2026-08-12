@@ -1,51 +1,74 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/milestone-MS1-brass?style=flat-square" alt="MS1" />
+  <img src="https://img.shields.io/badge/status-MS3_稳定测试版-c58b3b?style=flat-square" alt="MS3 稳定测试版" />
   <img src="https://img.shields.io/badge/frontend-React_19_|_Vite_7-61dafb?style=flat-square" alt="React 19 and Vite 7" />
   <img src="https://img.shields.io/badge/backend-FastAPI_|_Python_3.12+-teal?style=flat-square" alt="FastAPI and Python 3.12+" />
   <img src="https://img.shields.io/badge/realtime-WebSocket-7050a0?style=flat-square" alt="WebSocket" />
 </p>
 
-# 🎲 TRPG-master
+<h1 align="center">🎲 TRPG-master</h1>
 
-> **有人就能跑。** 面向移动端的多人在线 TRPG 应用，目标是由 AI 承担守秘人（KP）的叙事工作。
+<p align="center">
+  面向移动端的在线 TRPG 应用，由 AI 承担守秘人（KP）的叙事与回合主持工作。
+</p>
 
-当前仓库是一个已经完成前后端联调的 **MS1 可运行版本**，包含 React 前端、TypeScript SDK 和 FastAPI 后端。用户可以完成注册登录、创建或加入房间、选择模组、创建角色、进入大厅、开始游戏和房间内互动等基础流程。
+<p align="center">
+  <a href="http://218.11.5.114:10005"><strong>在线体验</strong></a>
+  ·
+  <a href="https://github.com/orgs/1024XEngineer/projects/28"><strong>开发进度</strong></a>
+  ·
+  <a href="https://github.com/1024XEngineer/TRPG-master/issues"><strong>Issues</strong></a>
+  ·
+  <a href="https://github.com/1024XEngineer/TRPG-master/pulls"><strong>Pull Requests</strong></a>
+</p>
 
-当前版本仍属于阶段性实现：主持人意图理解与叙事支持离线 Fake、OpenAI 和阿里云百炼千问三种模式，默认使用不访问网络的 Fake；复盘摘要等非主链能力仍未实现。账号、房间、角色、模组内容、规则 Runtime、事件和已完成动作均由 SQL Store 持久化。
+![TRPG-master 当前模组选择界面](docs/screenshots/product-overview.jpg)
 
-## 当前功能
+> [!IMPORTANT]
+> 当前为 **MS3 稳定测试版**，用于持续试玩和验收，不代表正式商业发布。测试环境会随 `main` 更新，容器重建时数据可能重置；请勿在其中保存重要资料。
 
-### 在线体验
+## 从建卡到开团
 
-`main` 有新提交（包括 PR 合并）后会自动更新持久预览环境，前端入口固定使用
-网关端口 `10005`，地址不会随着部署变化：
+当前主要支持单人 CoC 7th 模组《追书人》。一次完整体验包括：
 
-- [TRPG-master 持久预览](http://218.11.5.114:10005)
+1. 注册或登录，创建自己的游戏房间；
+2. 选择《追书人》，创建或一键生成调查员角色；
+3. 进入大厅并开始游戏，由 AI 主持人介绍场景；
+4. 用自然语言声明行动，在需要时完成技能检定、幸运消耗或强推；
+5. 根据规则结算与叙事反馈继续调查。
 
-该环境只保留面向用户的前端入口，`/api` 和 `/ws` 由 Caddy 反向代理到后端；
-数据库随容器重建而重置，未配置 Preview 专用 DeepSeek key 时使用 Fake Provider。
+界面面向手机尺寸设计，也可以直接在桌面浏览器中体验。在线环境的 `/api` 与 `/ws` 由同一入口代理；未配置 Preview 专用模型密钥时，主持功能会使用离线 Fake Provider。
 
-| 模块 | 当前实现 |
+## 当前体验
+
+| 环节 | 已实现能力 |
 | --- | --- |
-| 账号 | 注册、登录、退出登录、获取个人信息、修改昵称 |
-| 首页 | 创建房间、输入房间码加入、查看我的房间、个人资料 |
-| 房间 | 房主选择模组、玩家列表、准备状态、房主开始与结束游戏 |
-| 角色 | CoC 风格建卡流程、属性与技能配置、装备和背景信息、完成建卡 |
-| 实时通信 | WebSocket 会话绑定、准备、开始游戏、提交行动、房间叙事广播 |
-| AI 主持 | 玩家安全上下文、结构化意图解析、确定性规则执行、结果叙事；支持 OpenAI 与千问 3.7 Plus |
-| 游戏界面 | 对话区、角色卡、技能、地图、笔记和 D100/D20/D6 本地投骰交互 |
-| 语音输入 | 支持浏览器原生语音识别，转写结果回填行动或讨论区输入框，由玩家编辑确认后发送 |
-| API SDK | 封装认证、房间、角色和房间 WebSocket；与后端 DTO 对应的类型由 `npm run codegen` 生成 |
+| 进入游戏 | 注册登录、创建或加入房间、查看历史房间、选择模组 |
+| 调查员 | CoC 风格建卡、一键生成、属性与技能配置、装备、背景和角色头像 |
+| AI 主持 | 玩家安全上下文、结构化行动规划、确定性规则结算与结果叙事 |
+| 跑团交互 | 实时房间消息、角色卡、技能检定、幸运消耗、强推、地图与笔记 |
+| 辅助体验 | 主持人语音、浏览器语音输入、D100/D20/D6 本地投骰 |
+| 工程能力 | REST + WebSocket SDK、SQL 持久化、自动化测试与 Preview 部署 |
+
+## 测试阶段需要关注什么
+
+- 当前唯一承诺可运行的模组是《追书人》，其他示例内容主要用于解析和 Schema 回归。
+- 功能仍在持续验收，遇到卡住、状态显示不一致或叙事异常时，请在 [Issues](https://github.com/1024XEngineer/TRPG-master/issues) 中反馈复现步骤。
+- 当前开发安排以 [MS3 项目看板](https://github.com/orgs/1024XEngineer/projects/28) 为准；README 不维护容易过期的任务清单。
+- 语音输入依赖浏览器 Web Speech API 和安全上下文；当前 HTTP 预览环境中可能不可用，键盘输入不受影响。
 
 ### 当前限制
 
 - 默认 `HOST_MODEL_PROVIDER=fake`，不会访问真实大模型；远程 Host Agent 或 Narrator 失败时当前回合安全中止并允许重试，不会静默回退到 Fake。
-- 当前唯一承诺可运行的模组是「追书人」；另外三个示例 JSON 只用于解析与 Schema 回归，不会自动写入运行数据库。
 - 技能检定保留 `check.request → check.roll → check.result` 两阶段协议；玩家提交 D100 点数，后端规则引擎权威结算并持久化结果。
 - Director、世界知识检索、长期记忆、主动剧情推进、RAG、持久即兴内容和完整重连恢复不在当前阶段。
 - 复盘摘要和完整事件记录等能力尚未完成。
 - 语音输入不需要项目配置第三方 Key，项目后端不会接收或保存原始录音；部分浏览器可能使用厂商远程服务完成识别，数据处理方式受浏览器服务条款约束。
 - 语音输入依赖浏览器 Web Speech API 和安全上下文。localhost 或 HTTPS 可用；当前纯 HTTP 的持久预览会明确显示语音输入不可用，键盘输入不受影响。
+
+<details>
+<summary><strong>工程文档：架构、本地开发、配置与测试</strong></summary>
+
+<br />
 
 ## 系统结构
 
@@ -60,7 +83,7 @@ trpg-backend (FastAPI)
         ├── /api/v1/*       REST API
         ├── /ws/{roomId}    房间实时通道
         ├── TurnApplication   Host Agent → 两阶段检定 → RuleEngine → Narrator
-        ├── 模型适配器        Fake / OpenAI Responses / Qwen Agents SDK
+        ├── 模型适配器        Fake / OpenAI Responses / Qwen / DeepSeek
         └── SQL Store         业务数据、模组、Runtime、事件与幂等记录
 ```
 
@@ -84,7 +107,7 @@ WebSocket 使用独立事件信封：客户端发送 `{ "type", "playerId", "pay
 | SDK | TypeScript、Rollup 4 |
 | 后端 | Python 3.12+、FastAPI、Pydantic 2、SQLAlchemy Async、Uvicorn |
 | 实时通信 | WebSocket |
-| AI 主持 | Host Orchestrator、OpenAI Responses API、阿里云百炼千问 JSON Mode |
+| AI 主持 | Host Orchestrator、OpenAI Responses API、千问与 DeepSeek JSON Mode |
 | 数据与安全 | SQLite、PostgreSQL 异步驱动、bcrypt |
 | 工程质量 | pytest、ruff、ty、GitHub Actions |
 
@@ -163,7 +186,7 @@ uv run python scripts/load_paper_chase.py
 脚本可直接在刚迁移的空数据库运行：缺少 Seed 时会先执行同一套幂等 Seed。重复
 执行相同内容会返回 `unchanged`；同一版本已有不同内容时会拒绝覆盖。
 
-追书人当前发布版本为 `1.0.3`，使用 `content_schema_version=2`；原始 `1.0.1`
+追书人当前发布版本为 `1.0.5`；原始 `1.0.1`
 归档仍可供已固定版本的房间读取。玩家可见的模组简介、推荐人数和开局页来自发布内容的
 `presentation` 字段，不读取面向叙述 Agent 的 `background`；升级旧数据库后需要重新执行
 上述加载命令，已有固定到旧版本的游戏不会被改写。
@@ -473,6 +496,8 @@ npm run codegen
 生成"的那个 PR 上就亮红灯，而 SDK CI 只在 `trpg-sdk/**` 变化时触发——一个纯
 改后端 DTO 的 PR 根本不会碰 `trpg-sdk/**`，放在 SDK CI 里等于没测。这也是
 Backend CI 的路径过滤器额外加了两条 `trpg-sdk/` 路径的原因。
+
+</details>
 
 ## 团队
 

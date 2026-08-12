@@ -23,7 +23,6 @@
 
   #root {
     width: 100%;
-    max-width: 390px;
     height: 100vh;
     height: 100dvh;
     background: #faf7f0;
@@ -49,6 +48,7 @@
       padding: 20px 0;
     }
     #root {
+      max-width: 390px;
       border-radius: 32px;
       border: 8px solid #2c2416;
       height: 820px;

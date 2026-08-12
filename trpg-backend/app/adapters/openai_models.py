@@ -37,7 +37,12 @@ from collaboration_framework.host.schemas import (
 )
 from pydantic import TypeAdapter
 
-from app.adapters.structured_http import ModelClientRetryPolicy, post_structured_json
+from app.adapters.structured_http import (
+    ModelClientRetryPolicy,
+    StructuredOutputError,
+    decode_structured_json,
+    post_structured_json,
+)
 
 logger = structlog.get_logger()
 
@@ -383,10 +388,7 @@ class OpenAIResponsesJsonClient:
             schema_name=schema_name,
         )
         output_text = _response_output_text(response_payload)
-        parsed = json.loads(output_text)
-        if not isinstance(parsed, dict):
-            raise ValueError("Structured model output must be a JSON object")
-        return parsed
+        return decode_structured_json(output_text, provider_name="OpenAI")
 
 
 class PromptIntentModel:
@@ -519,13 +521,13 @@ def _log_structured_usage(
 
 def _response_output_text(payload: object) -> str:
     if not isinstance(payload, dict):
-        raise ValueError("Responses API payload must be an object")
+        raise StructuredOutputError("Responses API payload must be an object")
     direct = payload.get("output_text")
     if isinstance(direct, str) and direct:
         return direct
     output = payload.get("output")
     if not isinstance(output, list):
-        raise ValueError("Responses API payload has no output list")
+        raise StructuredOutputError("Responses API payload has no output list")
     for item in output:
         if not isinstance(item, dict) or item.get("type") != "message":
             continue
@@ -540,4 +542,4 @@ def _response_output_text(payload: object) -> str:
                 and isinstance(text, str)
             ):
                 return text
-    raise ValueError("Responses API payload has no structured output text")
+    raise StructuredOutputError("Responses API payload has no structured output text")

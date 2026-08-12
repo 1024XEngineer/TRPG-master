@@ -16,7 +16,12 @@ import httpx
 from collaboration_framework.contracts import JsonObject
 
 from app.adapters.openai_models import StructuredJsonClient, _log_structured_usage
-from app.adapters.structured_http import ModelClientRetryPolicy, post_structured_json
+from app.adapters.structured_http import (
+    ModelClientRetryPolicy,
+    StructuredOutputError,
+    decode_structured_json,
+    post_structured_json,
+)
 
 
 class QwenChatCompletionsJsonClient(StructuredJsonClient):
@@ -94,27 +99,24 @@ class QwenChatCompletionsJsonClient(StructuredJsonClient):
             response_payload,
             provider_name="Qwen",
         )
-        parsed = json.loads(output_text)
-        if not isinstance(parsed, dict):
-            raise ValueError("Qwen structured output must be a JSON object")
-        return parsed
+        return decode_structured_json(output_text, provider_name="Qwen")
 
 
 def chat_completion_output_text(payload: object, *, provider_name: str) -> str:
     if not isinstance(payload, dict):
-        raise ValueError(f"{provider_name} Chat Completions payload must be an object")
+        raise StructuredOutputError(f"{provider_name} Chat Completions payload must be an object")
     choices = payload.get("choices")
     if not isinstance(choices, list) or not choices:
-        raise ValueError(f"{provider_name} Chat Completions payload has no choices")
+        raise StructuredOutputError(f"{provider_name} Chat Completions payload has no choices")
     first = choices[0]
     if not isinstance(first, dict):
-        raise ValueError(f"{provider_name} Chat Completions choice must be an object")
+        raise StructuredOutputError(f"{provider_name} Chat Completions choice must be an object")
     message = first.get("message")
     if not isinstance(message, dict):
-        raise ValueError(f"{provider_name} Chat Completions choice has no message")
+        raise StructuredOutputError(f"{provider_name} Chat Completions choice has no message")
     content = message.get("content")
     if not isinstance(content, str) or not content.strip():
-        raise ValueError(f"{provider_name} Chat Completions message has no text content")
+        raise StructuredOutputError(f"{provider_name} Chat Completions message has no text content")
     return content
 
 

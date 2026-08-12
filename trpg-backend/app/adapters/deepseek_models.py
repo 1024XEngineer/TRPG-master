@@ -9,7 +9,11 @@ from collaboration_framework.contracts import JsonObject
 
 from app.adapters.openai_models import StructuredJsonClient, _log_structured_usage
 from app.adapters.qwen_models import chat_completion_output_text
-from app.adapters.structured_http import ModelClientRetryPolicy, post_structured_json
+from app.adapters.structured_http import (
+    ModelClientRetryPolicy,
+    decode_structured_json,
+    post_structured_json,
+)
 
 
 class DeepSeekChatCompletionsJsonClient(StructuredJsonClient):
@@ -84,10 +88,7 @@ class DeepSeekChatCompletionsJsonClient(StructuredJsonClient):
             response_payload,
             provider_name="DeepSeek",
         )
-        parsed = json.loads(output_text)
-        if not isinstance(parsed, dict):
-            raise ValueError("DeepSeek structured output must be a JSON object")
-        return parsed
+        return decode_structured_json(output_text, provider_name="DeepSeek")
 
 
 __all__ = ["DeepSeekChatCompletionsJsonClient"]

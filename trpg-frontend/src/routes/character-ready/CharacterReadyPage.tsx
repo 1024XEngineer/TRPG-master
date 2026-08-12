@@ -284,6 +284,7 @@ export default function CharacterReadyPage() {
 
   return (
     <div className="lobby-scene character-ready-scene animate-screen-in">
+      <div className="lobby-scene__artboard character-ready-scene__artboard">
       <img className="lobby-scene__background" src="/assets/rooms/lobby/background.webp" alt="" aria-hidden="true" />
       <img className="lobby-scene__map" src="/assets/rooms/lobby/map.webp" alt="" aria-hidden="true" />
       <img className="lobby-scene__note" src="/assets/rooms/lobby/gather-note.webp" alt="" aria-hidden="true" />
@@ -406,6 +407,7 @@ export default function CharacterReadyPage() {
           <span aria-hidden="true">✥</span>
         </p>
       </footer>
+      </div>
 
       {confirmExit && (
         <div className="lobby-leave-dialog" onMouseDown={() => setConfirmExit(false)}>

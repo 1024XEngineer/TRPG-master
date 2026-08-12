@@ -152,13 +152,14 @@
 .character-create__header {
   position: relative;
   z-index: 4;
-  /* 标题和操作按钮都是绝对定位；这里仅控制书签与书本整体从哪里开始。 */
-  height: 4.75rem;
+  /* 三个头部元素共用同一个安全区偏移；同时为安全区留出布局空间，避免
+     返回按钮下移后与标题、规则指引或下方书签错位。 */
+  height: calc(4.75rem + env(safe-area-inset-top));
 }
 
 .character-create__title {
   position: absolute;
-  top: max(2rem, env(safe-area-inset-top));
+  top: calc(2rem + env(safe-area-inset-top));
   left: 50%;
   width: 10.3rem;
   height: auto;
@@ -213,7 +214,7 @@
 
 .character-create__rules {
   position: absolute;
-  top: max(2rem, env(safe-area-inset-top));
+  top: calc(2rem + env(safe-area-inset-top));
   right: 0.8rem;
   width: 5.5rem;
   height: 2.1rem;
@@ -2712,14 +2713,25 @@
 
 /* Character-ready room reuses the lobby stage and artwork, while keeping its
    own player-card controls and completion states. */
+.character-ready-scene {
+  height: auto;
+  min-height: 100%;
+  background: #2d1c10 url('/assets/rooms/lobby/background.webp') center top / cover no-repeat;
+}
+
+.character-ready-scene .lobby-scene__back {
+  top: max(0.15%, env(safe-area-inset-top));
+}
+
 .character-ready-scene__header {
   justify-content: space-between;
 }
 
 .character-ready-scene__guide {
   position: absolute;
-  top: 2.8rem;
-  right: 1.1rem;
+  /* 以 870 × 1808 画布为坐标系等比定位；安全区只作为额外顶部偏移。 */
+  top: calc(4.45% + env(safe-area-inset-top));
+  right: 4.5%;
   z-index: 2;
   min-height: 2.35rem;
   padding: 0.45rem 0.8rem;
@@ -2914,6 +2926,13 @@
   text-shadow: 0 1px rgb(247 216 161 / 36%);
 }
 
+/* 操作区锚定到固定比例画布，而不是当前视口底边；不同高宽比设备上，
+   “开始游戏”都会保持在档案板的同一位置。 */
+.character-ready-scene .lobby-scene__start-action {
+  top: 79.5%;
+  bottom: auto;
+}
+
 .character-ready-sheet-backdrop {
   background: rgb(22 12 6 / 68%);
   backdrop-filter: blur(2px) sepia(0.14);
@@ -2984,9 +3003,13 @@
 
 .character-ready-sheet {
   width: min(100%, 26.875rem);
-  height: 76vh;
+  /* 使用动态视口让手机地址栏展开/收起时保持稳定；长屏限制最大高度，
+     矮屏则按可用空间等比提高角色卡背景。 */
+  height: min(80vh, 46rem);
+  height: min(80dvh, 46rem);
   margin: 0 auto;
-  padding: 4.1rem 2rem 2.5rem;
+  padding: 4.1rem clamp(1.55rem, 8.2vw, 2rem) max(2.25rem, env(safe-area-inset-bottom));
+  padding-top: clamp(3.6rem, 8.2dvh, 4.4rem);
   border: 0;
   border-radius: 0;
   color: #422815;
@@ -2999,7 +3022,8 @@
 }
 
 .character-ready-sheet__scroll {
-  max-height: calc(76vh - 6.6rem);
+  height: 100%;
+  max-height: 100%;
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;

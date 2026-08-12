@@ -37,6 +37,8 @@ from collaboration_framework.host.schemas import (
 )
 from pydantic import TypeAdapter
 
+from app.adapters.structured_http import ModelClientRetryPolicy, post_structured_json
+
 logger = structlog.get_logger()
 
 _HOST_TURN_DECISION_ADAPTER = TypeAdapter(HostTurnDecision)
@@ -327,12 +329,14 @@ class OpenAIResponsesJsonClient:
         model: str,
         timeout_seconds: float,
         transport: httpx.AsyncBaseTransport | None = None,
+        retry_policy: ModelClientRetryPolicy | None = None,
     ) -> None:
         self._api_key = api_key
         self._base_url = base_url.rstrip("/")
         self._model = model
         self._timeout_seconds = timeout_seconds
         self._transport = transport
+        self._retry_policy = retry_policy or ModelClientRetryPolicy()
 
     async def generate(
         self,
@@ -364,11 +368,13 @@ class OpenAIResponsesJsonClient:
             timeout=self._timeout_seconds,
             transport=self._transport,
         ) as client:
-            response = await client.post(
+            response = await post_structured_json(
+                client,
                 f"{self._base_url}/responses",
                 json=request_payload,
+                provider="openai",
+                retry_policy=self._retry_policy,
             )
-            response.raise_for_status()
         response_payload = response.json()
         _log_structured_usage(
             response_payload,

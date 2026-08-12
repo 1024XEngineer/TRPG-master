@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.coc7_content import build_coc7_ruleset
 from app.core.coc7_rules import evaluate_skill_base
-from app.core.config import Settings, secret_value
+from app.core.config import Settings, model_client_retry_policy, secret_value
 from app.dto.game import RulesetRead
 from app.dto.portrait import (
     CharacterPortraitSnapshot,
@@ -477,6 +477,7 @@ def build_portrait_generation_service(settings: Settings) -> PortraitGenerationS
                 base_url=settings.deepseek_base_url,
                 model=settings.deepseek_model,
                 timeout_seconds=settings.deepseek_timeout_seconds,
+                retry_policy=model_client_retry_policy(settings),
             )
         )
 

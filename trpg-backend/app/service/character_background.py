@@ -5,7 +5,7 @@ from typing import Protocol
 
 import structlog
 
-from app.core.config import Settings, secret_value
+from app.core.config import Settings, model_client_retry_policy, secret_value
 from app.dto.character_background import CharacterBackgroundContext, CharacterBackgroundDraft
 
 logger = structlog.get_logger()
@@ -59,6 +59,7 @@ def build_character_background_service(settings: Settings) -> CharacterBackgroun
             base_url=settings.deepseek_base_url,
             model=settings.deepseek_model,
             timeout_seconds=settings.deepseek_timeout_seconds,
+            retry_policy=model_client_retry_policy(settings),
         )
     )
     return CharacterBackgroundService(composer)

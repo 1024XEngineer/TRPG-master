@@ -9,10 +9,13 @@ IDE 能补全，写错类型（比如 ENABLE_DOCS 传了个不是 true/false 的
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+if TYPE_CHECKING:
+    from app.adapters.structured_http import ModelClientRetryPolicy
 
 
 def secret_value(value: str | SecretStr) -> str:
@@ -83,6 +86,10 @@ class Settings(BaseSettings):
     )
     deepseek_model: str = Field(default="deepseek-chat", min_length=1)
     deepseek_timeout_seconds: float = Field(default=30.0, gt=0, le=120)
+    # 结构化输出请求的传输层重试，三个 provider 共用。只覆盖超时、连接错误、5xx
+    # 与 429；其余 4xx 立即失败。默认一次重试，避免一次瞬态故障就让整个回合报废。
+    model_client_max_attempts: int = Field(default=2, ge=1, le=5)
+    model_client_retry_backoff_seconds: float = Field(default=0.5, gt=0, le=10)
     # 一键建卡的规则数值始终由本地 COC7 生成器负责；此开关只决定八项背景文字
     # 是否交给 DeepSeek 创作。模型失败时服务层会回退到生成器内置模板。
     character_background_provider: Literal["deterministic", "deepseek"] = "deterministic"
@@ -197,6 +204,24 @@ class Settings(BaseSettings):
             if self.doubao_tts_default_voice_type not in allowed:
                 raise ValueError("DOUBAO_TTS_DEFAULT_VOICE_TYPE 必须属于 DOUBAO_TTS_VOICES")
         return self
+
+
+def model_client_retry_policy(settings: Settings) -> ModelClientRetryPolicy:
+    """把重试配置翻成 client 层的策略。
+
+    每一个 StructuredJsonClient 的构造点都应该经过这里，否则该 client 会静默地
+    吃默认值、无视 `MODEL_CLIENT_*`，运维就没法为它调整或关闭重试。
+
+    在函数体内 import：`app.adapters` 的包初始化会间接回到 `app.core.db`，
+    放到模块顶部会形成循环 import。
+    """
+
+    from app.adapters.structured_http import ModelClientRetryPolicy
+
+    return ModelClientRetryPolicy(
+        max_attempts=settings.model_client_max_attempts,
+        backoff_seconds=settings.model_client_retry_backoff_seconds,
+    )
 
 
 @lru_cache

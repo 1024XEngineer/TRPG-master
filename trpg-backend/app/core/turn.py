@@ -47,6 +47,7 @@ from app.adapters import (
     PromptOpeningNarrationModel,
     QwenChatCompletionsJsonClient,
 )
+from app.adapters.structured_http import ModelClientRetryPolicy
 from app.core.config import Settings, get_settings, secret_value
 from app.core.engine import engine_store, rule_engine_service
 
@@ -231,6 +232,19 @@ def _configured_opening_models(
             FakeOpeningNarrationModel(),
             HostModelMetadata(provider="fake", model="deterministic"),
         )
+    # 开场叙事显式不重试，与回合链的策略不同。
+    #
+    # 开场整段被 `anyio.fail_after(opening_narration_timeout_seconds)` 包住，那是
+    # 一个**总**预算（超时即退回确定性模板），而单次请求预算是
+    # `<provider>_timeout_seconds`。两者默认都是 30 秒，于是第一次请求耗尽预算的
+    # 同时外层 deadline 到期，退避与第二次尝试直接被取消——重试在这条路径上
+    # 从来不会发生，配了也是假的。
+    #
+    # 让总预算容纳两次尝试需要放宽到 60 秒以上（config 的上限也只有 60），玩家
+    # 开局要多等一分钟；压缩单次预算又会让每一次生成都更容易超时（#267 才因为
+    # 10 秒太紧把它提到 30 秒）。开场本来就有确定性模板兜底，失败代价远低于让
+    # 玩家干等，所以这里选择如实地不重试，而不是配一个永远不生效的策略。
+    retry_policy = ModelClientRetryPolicy(max_attempts=1)
     if settings.host_model_provider == "deepseek":
         if settings.deepseek_api_key is None:
             raise ValueError("DeepSeek Host 模型缺少 API key")
@@ -241,6 +255,7 @@ def _configured_opening_models(
                     base_url=settings.deepseek_base_url,
                     model=settings.deepseek_model,
                     timeout_seconds=settings.deepseek_timeout_seconds,
+                    retry_policy=retry_policy,
                 )
             ),
             HostModelMetadata(provider="deepseek", model=settings.deepseek_model),
@@ -255,6 +270,7 @@ def _configured_opening_models(
                     base_url=settings.qwen_base_url,
                     model=settings.qwen_model,
                     timeout_seconds=settings.qwen_timeout_seconds,
+                    retry_policy=retry_policy,
                 )
             ),
             HostModelMetadata(provider="qwen", model=settings.qwen_model),
@@ -268,6 +284,7 @@ def _configured_opening_models(
                 base_url=settings.openai_base_url,
                 model=settings.openai_model,
                 timeout_seconds=settings.openai_timeout_seconds,
+                retry_policy=retry_policy,
             )
         ),
         HostModelMetadata(provider="openai", model=settings.openai_model),

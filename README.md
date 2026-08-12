@@ -21,10 +21,16 @@
   <a href="https://github.com/1024XEngineer/TRPG-master/pulls"><strong>Pull Requests</strong></a>
 </p>
 
-![TRPG-master 当前模组选择界面](docs/screenshots/product-overview.jpg)
+![TRPG-master 登录首页](docs/screenshots/product-home.jpg)
+
+## 在线体验（CI Preview）
+
+> **[进入 TRPG-master MS3 稳定测试环境](http://218.11.5.114:10005)**
+
+该入口是由 GitHub Actions 持续部署的 Main Preview：`main` 分支更新后会自动部署最新版本，固定使用端口 `10005`。它用于团队试玩和验收，不是正式生产环境；容器重建时测试数据会重置。
 
 > [!IMPORTANT]
-> 当前为 **MS3 稳定测试版**，用于持续试玩和验收，不代表正式商业发布。测试环境会随 `main` 更新，容器重建时数据可能重置；请勿在其中保存重要资料。
+> 当前为 **MS3 稳定测试版**，不代表正式商业发布。请勿在测试环境中保存重要资料。
 
 ## 从建卡到开团
 

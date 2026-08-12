@@ -48,7 +48,11 @@ from app.adapters.openai_models import (
     PromptNarrationModel,
 )
 from app.adapters.qwen_models import QwenChatCompletionsJsonClient
-from app.adapters.structured_http import ModelClientRetryPolicy, is_transient_model_error
+from app.adapters.structured_http import (
+    ModelClientRetryPolicy,
+    StructuredOutputError,
+    is_transient_model_error,
+)
 from app.core.action_plan_turn import build_action_plan_turn_application
 from app.core.config import Settings, model_client_retry_policy
 from app.core.turn import _configured_opening_models
@@ -1021,3 +1025,202 @@ async def test_outer_deadline_equal_to_request_timeout_cancels_the_retry() -> No
         with anyio.fail_after(per_request * 2 + 0.05 + 0.5):
             await _generate(client)
     assert attempts["count"] == 2
+
+
+def _map(exc: Exception) -> tuple[str, str, bool]:
+    from app.controller.ws import _map_turn_error
+
+    return _map_turn_error(exc)
+
+
+def test_planner_transport_failures_get_their_own_error_code() -> None:
+    """规划阶段的模型故障不能再落进 `TURN_INTERNAL_ERROR` 兜底（#285）。
+
+    兜底的语义是「我们没预料到这个失败」。一个 30 秒超时是完全预料得到的，
+    把它和引擎内部错误混在一起，玩家既不知道能否重试，也让兜底本身失去意义。
+    """
+
+    request = httpx.Request("POST", "https://example.test/v1/chat/completions")
+    transport_failures: list[Exception] = [
+        httpx.ReadTimeout("timeout", request=request),
+        httpx.ConnectError("reset", request=request),
+        httpx.HTTPStatusError(
+            "server error",
+            request=request,
+            response=httpx.Response(503, request=request),
+        ),
+        httpx.HTTPStatusError(
+            "rate limited",
+            request=request,
+            response=httpx.Response(429, request=request),
+        ),
+    ]
+    for exc in transport_failures:
+        code, message, retryable = _map(exc)
+        assert code == "MODEL_UPSTREAM_UNAVAILABLE", exc
+        assert retryable is True
+        # 这类失败发生在裁决提交规则引擎之前，没有任何权威效果落库。
+        assert "未生效" in message
+        assert "已保存" not in message
+
+
+def test_unreadable_model_output_gets_its_own_error_code() -> None:
+    """上游回了 200 但正文读不懂，与「没拿到回复」是两回事。"""
+
+    code, message, retryable = _map(StructuredOutputError("not valid JSON"))
+    assert code == "MODEL_OUTPUT_UNREADABLE"
+    assert retryable is True
+    assert "未生效" in message
+    assert "已保存" not in message
+
+
+def test_client_errors_still_fall_through_to_contract_or_fallback() -> None:
+    """4xx 不属于上游不可用，分类不能把它一起认领走。"""
+
+    request = httpx.Request("POST", "https://example.test/v1/chat/completions")
+    code, _, _ = _map(
+        httpx.HTTPStatusError(
+            "bad request",
+            request=request,
+            response=httpx.Response(400, request=request),
+        )
+    )
+    assert code == "TURN_INTERNAL_ERROR"
+
+
+async def test_client_raises_structured_output_error_on_unparsable_body() -> None:
+    """上游 200 + 非 JSON 正文：客户端抛可分类的异常，而不是裸 ValueError。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"message": {"role": "assistant", "content": "抱歉，我不能这样做。"}}]
+            },
+        )
+
+    with pytest.raises(StructuredOutputError):
+        await _generate(_deepseek_client(handler))
+
+
+async def test_client_raises_structured_output_error_when_json_is_not_an_object() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"role": "assistant", "content": "[1, 2, 3]"}}]},
+        )
+
+    with pytest.raises(StructuredOutputError):
+        await _generate(_deepseek_client(handler))
+
+
+class _RecordingLogger:
+    """记下 structlog 调用的事件名与结构化字段。
+
+    堆栈是作为 `stack=` 字段传出去的，不在 caplog 的渲染文本里，直接捕获调用
+    参数才能断言它的内容。
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str, dict]] = []
+
+    def warning(self, event: str, **kwargs: object) -> None:
+        self.calls.append(("warning", event, dict(kwargs)))
+
+    def error(self, event: str, **kwargs: object) -> None:
+        self.calls.append(("error", event, dict(kwargs)))
+
+
+def _log_failure_with(code: str, monkeypatch: pytest.MonkeyPatch) -> _RecordingLogger:
+    from app.core import turn_observability
+
+    recorder = _RecordingLogger()
+    monkeypatch.setattr(turn_observability, "logger", recorder)
+    try:
+        raise RuntimeError("boom")
+    except RuntimeError as exc:
+        turn_observability.log_turn_failed(
+            room_id="room-1",
+            correlation_id="action-1",
+            stage="行动计划",
+            code=code,
+            error_type=type(exc).__name__,
+            exc=exc,
+        )
+    return recorder
+
+
+def test_unclassified_failure_logs_a_stack_trace_to_the_server_log(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """兜底必须留下可定位的证据，否则事后只有一个错误码可查（#285）。
+
+    #285 的原始正文正是在拿不到堆栈的情况下靠读代码猜出来的，猜错了机制。
+    """
+
+    recorder = _log_failure_with("TURN_INTERNAL_ERROR", monkeypatch)
+    errors = [call for call in recorder.calls if call[0] == "error"]
+    assert len(errors) == 1
+    _, event, fields = errors[0]
+    assert event == "turn_unclassified_exception"
+    assert "Traceback" in fields["stack"]
+    assert "RuntimeError: boom" in fields["stack"]
+    # 定位号与阶段必须一并记下，否则玩家报来的定位号仍然查不到东西。
+    assert fields["action"] == "action-1"
+    assert fields["stage"] == "行动计划"
+
+
+def test_classified_failure_does_not_log_a_stack_trace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """已分类的失败是预期内的，不该往日志里灌堆栈。"""
+
+    recorder = _log_failure_with("MODEL_UPSTREAM_UNAVAILABLE", monkeypatch)
+    assert [call for call in recorder.calls if call[0] == "error"] == []
+    assert [call for call in recorder.calls if call[0] == "warning"]
+
+
+async def test_non_json_http_body_is_classified_as_unreadable_output() -> None:
+    """上游 200 但响应体根本不是 JSON（代理的 HTML 错误页是典型）。
+
+    解码分两层：HTTP 响应体 → JSON，再 JSON 里的 content → JSON 对象。
+    只包住第二层的话，第一层失败仍然会掉进 `TURN_INTERNAL_ERROR` 兜底。
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="<html><body>502 Bad Gateway</body></html>")
+
+    with pytest.raises(StructuredOutputError):
+        await _generate(_deepseek_client(handler))
+
+
+async def test_qwen_non_json_http_body_is_classified() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="upstream proxy error")
+
+    client = QwenChatCompletionsJsonClient(
+        api_key="test-key",
+        base_url="https://dashscope.example/compatible-mode/v1",
+        model="qwen3.7-plus",
+        timeout_seconds=1,
+        transport=httpx.MockTransport(handler),
+        retry_policy=_fast_retry(),
+    )
+    with pytest.raises(StructuredOutputError):
+        await _generate(client)
+
+
+async def test_openai_non_json_http_body_is_classified() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="upstream proxy error")
+
+    client = OpenAIResponsesJsonClient(
+        api_key="test-key",
+        base_url="https://example.test/v1",
+        model="test-model",
+        timeout_seconds=1,
+        transport=httpx.MockTransport(handler),
+        retry_policy=_fast_retry(),
+    )
+    with pytest.raises(StructuredOutputError):
+        await _generate(client)

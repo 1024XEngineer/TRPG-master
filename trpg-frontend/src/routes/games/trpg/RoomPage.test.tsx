@@ -1037,6 +1037,91 @@ describe('RoomPage conversation history', () => {
     expect(renderedBackground).toHaveClass('whitespace-pre-wrap')
   })
 
+  // 回归 #286：角色卡面板读的是建卡快照，顶部状态栏读的是 PlayerView，同一页
+  // 的同名数值于是对不上——掉了理智、花了幸运，角色卡上一点看不出来。
+  it('shows live resources in the character sheet instead of the creation snapshot', async () => {
+    useCharacterStore.getState().setCharacter(
+      {
+        info: {
+          name: '杜调查员',
+          playerName: '陈探员',
+          age: '32',
+          gender: '男',
+          residence: '阿卡姆',
+          birthplace: '波士顿',
+          occupationId: 1,
+        },
+        attr: {},
+        skillAlloc: {},
+        skillFinalValues: {},
+        equipment: '',
+        background: '',
+        notes: '',
+        derived: { hp: 10, san: 60, mp: 10, db: '0', build: 0, move: 8 },
+      },
+      'room-1',
+    )
+    mockListConversation.mockResolvedValue([])
+
+    renderRoomPage()
+
+    const playerView = playerViewFixture()
+    playerView.self_actor.resources = [
+      { id: 'hp', name: '生命值', value: 7 },
+      { id: 'san', name: '理智值', value: 45 },
+      { id: 'mp', name: '魔法值', value: 8 },
+    ]
+    act(() =>
+      emitWsMessage({
+        type: 'view.updated',
+        payload: { playerId: 'player-1', playerView },
+      }),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '角色卡' }))
+
+    expect(screen.getByTestId('derived-stat-hp')).toHaveTextContent('7')
+    expect(screen.getByTestId('derived-stat-san')).toHaveTextContent('45')
+    expect(screen.getByTestId('derived-stat-mp')).toHaveTextContent('8')
+    // 初始值不能就这么消失：SAN 的初始值决定不定性疯狂的阈值。
+    expect(screen.getByTestId('initial-values-note')).toHaveTextContent(
+      '初始：HP 10 · SAN 60 · MP 10',
+    )
+    // 未被引擎投影的衍生值仍来自快照。
+    expect(screen.getByTestId('derived-stat-move')).toHaveTextContent('8')
+  })
+
+  it('keeps the snapshot in the character sheet until the first PlayerView arrives', async () => {
+    useCharacterStore.getState().setCharacter(
+      {
+        info: {
+          name: '杜调查员',
+          playerName: '陈探员',
+          age: '32',
+          gender: '男',
+          residence: '阿卡姆',
+          birthplace: '波士顿',
+          occupationId: 1,
+        },
+        attr: {},
+        skillAlloc: {},
+        skillFinalValues: {},
+        equipment: '',
+        background: '',
+        notes: '',
+        derived: { hp: 10, san: 60, mp: 10, db: '0', build: 0, move: 8 },
+      },
+      'room-1',
+    )
+    mockListConversation.mockResolvedValue([])
+
+    renderRoomPage()
+    fireEvent.click(screen.getByRole('button', { name: '角色卡' }))
+
+    expect(screen.getByTestId('derived-stat-hp')).toHaveTextContent('10')
+    expect(screen.queryByTestId('initial-values-note')).not.toBeInTheDocument()
+  })
+
   // jsdom 没有 WebGL，supports3DDice() 为 false —— 正好覆盖降级路径：
   // 渲染能力缺失时不能把检定卡住（issue #217）。
   it('falls back to the 2D dice display when WebGL is unavailable', async () => {

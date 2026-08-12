@@ -545,6 +545,21 @@ class AdjudicationEngineService:
                 player_id=request.player_id,
                 actor_id=request.adjudication.actor_id,
             )
+            # 归一要贯穿这次提交的余下部分——重放比对、规则范围匹配、效果校验和
+            # 持久化用的都是 `request.adjudication`。
+            #
+            # 尤其**必须**排在重放比对之前：`_replay` 比的是整个 request，而落库的
+            # 是归一后的那份；客户端重试原样重发未归一的报文（响应丢失时正是如此），
+            # 放在比对之后会让每一条被本特性修好的请求反而丢掉幂等，报
+            # REQUEST_ID_REUSED。
+            request = request.model_copy(
+                update={
+                    "adjudication": _normalize_target_kind(
+                        runtime,
+                        request.adjudication,
+                    )
+                }
+            )
             replay = await transaction.find_adjudication_command(
                 request.adjudication.request_id
             )
@@ -553,16 +568,6 @@ class AdjudicationEngineService:
             self._require_revision(
                 request.adjudication.source_revision,
                 runtime.revision,
-            )
-            # 归一必须发生在校验之前，且改写后的 target 要贯穿这次提交的余下
-            # 部分——规则范围匹配、效果校验和持久化用的都是 `request.adjudication`。
-            request = request.model_copy(
-                update={
-                    "adjudication": _normalize_target_kind(
-                        runtime,
-                        request.adjudication,
-                    )
-                }
             )
             self._validate_adjudication(runtime, request.adjudication)
             proposal_validation, proposal_committed_level = (

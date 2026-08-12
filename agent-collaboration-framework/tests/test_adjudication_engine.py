@@ -620,7 +620,7 @@ class AdjudicationEngineTests(unittest.IsolatedAsyncioTestCase):
             deep=True,
         )
 
-        await self.submit(self.service(), mislabeled)
+        execution = await self.submit(self.service(), mislabeled)
 
         async with self.store.transaction("room_01") as transaction:
             completed = await transaction.find_adjudication_command(
@@ -631,6 +631,19 @@ class AdjudicationEngineTests(unittest.IsolatedAsyncioTestCase):
         persisted = completed.request.adjudication.target
         self.assertEqual(persisted.kind, "entity")
         self.assertEqual(persisted.id, "butler")
+
+        # 客户端重试会原样重发**未归一**的报文（响应丢失时尤其如此）。归一必须
+        # 发生在重放比对之前，否则存下来的是归一后的 request，重试永远比对不上，
+        # 恰好在被本特性修复的每一条请求上打破幂等。
+        replayed = await self.submit(self.service(), mislabeled)
+
+        self.assertEqual(replayed.request_id, execution.request_id)
+        self.assertEqual(replayed.outcome, execution.outcome)
+        self.assertEqual(replayed.event_refs, execution.event_refs)
+        self.assertEqual(
+            self.store.inspect_state("room_01").event_sequence,
+            int(execution.view_revision),
+        )
 
     async def test_ambiguous_target_id_is_rejected_instead_of_guessed(self) -> None:
         # butler 同时是 canon entity 和一个 actor id，declared kind 两边都不是：

@@ -50,8 +50,9 @@ export function CheckWorkflowPanel({
         role="dialog"
         aria-modal="true"
         aria-label="待处理检定"
-        className="max-h-[min(78vh,42rem)] w-full max-w-[398px] overflow-y-auto rounded-xl border border-[#c7ad73] bg-[#fffaf0] p-4 shadow-xl"
+        className="check-workflow-dialog"
       >
+        <div className="check-workflow-dialog__content">
       {decision && (
         <>
           <div className="mb-3 flex items-start gap-2">
@@ -163,6 +164,7 @@ export function CheckWorkflowPanel({
           )}
         </>
       )}
+        </div>
       </section>
     </div>
   )

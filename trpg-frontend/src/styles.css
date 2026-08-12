@@ -65,6 +65,29 @@
   }
 }
 
+.check-workflow-dialog {
+  width: min(100%, 25rem);
+  max-height: min(82vh, 42rem);
+  aspect-ratio: 1;
+  overflow: hidden;
+  color: #4d311b;
+  background: transparent url('/assets/rooms/play/check-dialog-background.webp') center / 100% 100% no-repeat;
+  filter: drop-shadow(0 0.8rem 0.7rem rgb(28 15 7 / 42%));
+}
+
+.check-workflow-dialog__content {
+  height: 100%;
+  padding: 15% 13% 11%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+
+.check-workflow-dialog__content::-webkit-scrollbar {
+  display: none;
+}
+
 @layer utilities {
   .sr-only {
     position: absolute;

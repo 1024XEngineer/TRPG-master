@@ -243,6 +243,14 @@ function diceDefinitions(kind: DiceKind): {
 export interface DiceStage {
   /** 掷一次。正在掷的时候重复调用会被忽略。 */
   roll: (targetValue?: number) => boolean
+  /**
+   * 换骰型，复用同一个 renderer 与场景。
+   *
+   * 之前换骰型靠整个重建舞台，也就重建一个 `WebGLRenderer`。浏览器对同时存活
+   * 的 context 有上限，这种 churn 会把上限顶穿（issue #320）。骰型只决定生成
+   * 哪几颗骰子，renderer、相机、光照、地面都不需要动。
+   */
+  setKind: (kind: DiceKind) => void
   /** 释放 WebGL 资源并停掉动画循环。 */
   dispose: () => void
 }
@@ -252,9 +260,24 @@ export interface DiceStageOptions {
   kind: DiceKind
   /** 骰子完全停稳、结果可读时调用一次。 */
   onSettled: (value: number) => void
+  /**
+   * WebGL context 丢了，这个舞台再也画不出东西。
+   *
+   * 浏览器对同时存活的 context 有上限，超了会强制掐掉最老的那些；GPU 进程崩溃
+   * 也会触发。之前没有人监听，画布就停在死状态——骰子看着是黑的，渲染循环还在
+   * 往里画（issue #320）。
+   */
+  onContextLost?: () => void
 }
 
-export function createDiceStage({ container, kind, onSettled }: DiceStageOptions): DiceStage {
+export function createDiceStage({
+  container,
+  kind: initialKind,
+  onSettled,
+  onContextLost,
+}: DiceStageOptions): DiceStage {
+  // 可变：`setKind` 换的就是它，下面所有闭包都读这一个变量。
+  let kind = initialKind
   const renderer = new WebGLRenderer({ antialias: true, alpha: true })
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
   renderer.shadowMap.enabled = true
@@ -310,6 +333,16 @@ export function createDiceStage({ container, kind, onSettled }: DiceStageOptions
   // 这里没有那段 CSS，不写 style 的话 canvas 会按绘制缓冲尺寸当 CSS 像素显示
   // ——在 dpr=2 的屏上就是 2 倍大小，父容器 overflow-hidden 只露出左上四分之一。
   renderer.domElement.style.display = 'block'
+
+  let contextLost = false
+  const handleContextLost = (event: Event) => {
+    // preventDefault 是让浏览器保留恢复这个 context 的可能；不调的话它永久作废。
+    event.preventDefault()
+    contextLost = true
+    cancelAnimationFrame(frame)
+    onContextLost?.()
+  }
+  renderer.domElement.addEventListener('webglcontextlost', handleContextLost)
 
   const resize = () => {
     const w = container.clientWidth
@@ -510,7 +543,8 @@ export function createDiceStage({ container, kind, onSettled }: DiceStageOptions
   }
 
   const loop = (now: number) => {
-    if (disposed) return
+    // context 丢了就别再排下一帧，也别往死掉的 context 里画。
+    if (disposed || contextLost) return
     frame = requestAnimationFrame(loop)
     const dt = Math.min((now - lastFrame) / 1000, 0.05)
     lastFrame = now
@@ -520,8 +554,17 @@ export function createDiceStage({ container, kind, onSettled }: DiceStageOptions
   frame = requestAnimationFrame(loop)
 
   return {
+    setKind(next: DiceKind) {
+      if (disposed || next === kind) return
+      kind = next
+      // 上一副骰子属于旧骰型，留着会和新骰型混在一起。清掉并回到 idle，
+      // 下一次 roll() 会按新骰型重新生成。
+      clearActors()
+      phase = 'idle'
+      requestedValue = null
+    },
     roll(targetValue?: number) {
-      if (disposed || phase !== 'idle') return false
+      if (disposed || contextLost || phase !== 'idle') return false
       requestedValue = targetValue ?? null
       clearActors()
       diceDefinitions(kind).forEach((def, index) => {
@@ -549,10 +592,18 @@ export function createDiceStage({ container, kind, onSettled }: DiceStageOptions
       disposed = true
       cancelAnimationFrame(frame)
       observer?.disconnect()
+      renderer.domElement.removeEventListener('webglcontextlost', handleContextLost)
       clearActors()
       groundGeom.dispose()
       groundMat.dispose()
       renderer.dispose()
+      // `dispose()` 只释放 GPU 资源，WebGL context 本身要等 GC 才归还。浏览器
+      // 对同时存活的 context 有上限（Chrome 约 16），舞台每次挂载都新建一个
+      // renderer——开关面板、切骰型都会重建——不主动归还就会顶到上限，浏览器
+      // 转而强制掐掉最老的那些 context（issue #320 实测：连开 20 个被掐掉 4 个）。
+      //
+      // context 已经丢了就不要再调：那会在控制台留下一条无意义的告警。
+      if (!contextLost) renderer.forceContextLoss()
       renderer.domElement.remove()
     },
   }

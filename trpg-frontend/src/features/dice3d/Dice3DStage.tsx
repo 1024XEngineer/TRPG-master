@@ -52,6 +52,10 @@ export const Dice3DStage = forwardRef<Dice3DHandle, Dice3DStageProps>(function D
   onUnsupportedRef.current = onUnsupported
   const onRollAbandonedRef = useRef(onRollAbandoned)
   onRollAbandonedRef.current = onRollAbandoned
+  // 舞台只建一次；骰型变化由下面那个 effect 通过 setKind 同步。放 ref 里是为了
+  // 让创建时能读到当前值，又不把它变成重建的理由。
+  const kindRef = useRef(kind)
+  kindRef.current = kind
 
   useEffect(() => {
     const container = containerRef.current
@@ -69,11 +73,21 @@ export const Dice3DStage = forwardRef<Dice3DHandle, Dice3DStageProps>(function D
         if (cancelled) return
         const stage = createDiceStage({
           container,
-          kind,
+          kind: kindRef.current,
           onSettled: (value) => {
             const token = activeRollRef.current
             activeRollRef.current = null
             if (token !== null) onSettledRef.current(value, token)
+          },
+          // context 丢失走 onRollAbandoned 而不是 onUnsupported：浏览器回收
+          // context、GPU 进程重启都是可恢复的偶发事件，不等于这台设备用不了
+          // 3D。用后者会把 use3D 永久翻成 false，之后每次检定都只剩数字版
+          // ——和「舞台被卸载不代表 3D 不可用」是同一条原则（issue #320）。
+          onContextLost: () => {
+            const token = activeRollRef.current ?? pendingRollRef.current?.token ?? null
+            activeRollRef.current = null
+            pendingRollRef.current = null
+            if (token !== null) onRollAbandonedRef.current?.(token)
           },
         })
         stageRef.current = stage
@@ -84,8 +98,11 @@ export const Dice3DStage = forwardRef<Dice3DHandle, Dice3DStageProps>(function D
           if (!stage.roll(pending.targetValue)) activeRollRef.current = null
         }
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (cancelled) return
+        // 回退本身是对的，但之前连一行日志都不留：3D 静默消失，控制台一条错误
+        // 都没有，只能看到「只剩数字版」这个结果（issue #320 排查时踩到）。
+        console.warn('[dice3d] 引擎加载或初始化失败，退回 2D', error)
         // 加载或初始化失败同样退回 2D，不能把检定卡死在这里。
         const failedToken = activeRollRef.current ?? pendingRollRef.current?.token ?? null
         activeRollRef.current = null
@@ -109,6 +126,20 @@ export const Dice3DStage = forwardRef<Dice3DHandle, Dice3DStageProps>(function D
       stageRef.current = null
       if (abandoned !== null) onRollAbandonedRef.current?.(abandoned)
     }
+    // 依赖为空：舞台只随组件挂载/卸载建一次。骰型变化不重建——重建一次就多
+    // 一个 WebGLRenderer，顶穿浏览器的 context 上限（issue #320）。
+  }, [])
+
+  // 骰型变化：复用舞台，只换骰子。换型会丢掉上一副骰子，所以已受理但还没定格
+  // 的那次掷骰要按「这一次没了」通知出去，否则父组件的 rolling 永远不清。
+  useEffect(() => {
+    const stage = stageRef.current
+    if (!stage) return
+    const abandoned = activeRollRef.current ?? pendingRollRef.current?.token ?? null
+    activeRollRef.current = null
+    pendingRollRef.current = null
+    stage.setKind(kind)
+    if (abandoned !== null) onRollAbandonedRef.current?.(abandoned)
   }, [kind])
 
   useImperativeHandle(

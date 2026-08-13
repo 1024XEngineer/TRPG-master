@@ -9,7 +9,6 @@ from pydantic import Field, model_validator
 
 from collaboration_framework.contracts import (
     ActionAdjudication,
-    CommittedResult,
     ActionPlan,
     ActionPlanPolicy,
     ActionPlanStep,
@@ -66,9 +65,7 @@ RESERVING_PLAN_STATUSES = frozenset(
 RESERVATION_TTL = timedelta(minutes=5)
 
 
-def reservation_is_expired(
-    reserved_at: datetime, *, now: datetime | None = None
-) -> bool:
+def reservation_is_expired(reserved_at: datetime, *, now: datetime | None = None) -> bool:
     """占用是否已过期到可以被别人接管。
 
     `reserved_at` 允许是 naive 的：SQLite 不保存时区，取回来的列即使声明了
@@ -101,6 +98,9 @@ class ActionPlanStepRun(ContractModel):
     repair_attempts: int = Field(default=0, ge=0, le=8)
     last_validation_code: str | None = Field(default=None, min_length=1, max_length=100)
     last_validation_message: str | None = Field(default=None, min_length=1, max_length=512)
+    # Player-safe repair comparison state. Stored in the existing PlanRun JSON
+    # so a process restart cannot lose the original proposal and bypass the
+    # semantic check before the repaired proposal reaches the Engine.
     repair_baseline: ActionAdjudication | None = None
     repair_feedback: ValidationFeedback | None = None
 
@@ -112,9 +112,7 @@ class ActionPlanStepRun(ContractModel):
             raise ValueError("repair_baseline/feedback 必须同时存在或同时为空")
         if self.adjudication is not None:
             if self.adjudication.request_id != self.step_request_id:
-                raise ValueError(
-                    "step adjudication request_id 与 step_request_id 不一致"
-                )
+                raise ValueError("step adjudication request_id 与 step_request_id 不一致")
             if self.source_revision != self.adjudication.source_revision:
                 raise ValueError("step source_revision 与 adjudication 不一致")
         if self.adjudication_execution is not None:
@@ -132,10 +130,7 @@ class ActionPlanStepRun(ContractModel):
             and self.adjudication_execution is None
         ):
             raise ValueError(f"{self.status} step 必须包含 execution")
-        if (
-            self.status == "waiting_for_player"
-            and self.pending_action_request_id is None
-        ):
+        if self.status == "waiting_for_player" and self.pending_action_request_id is None:
             raise ValueError("waiting_for_player step 必须记录 pending action request")
         return self
 
@@ -172,9 +167,7 @@ class ActionPlanRun(ContractModel):
     # A post-roll cancel is a two-phase operation: persist this intent first,
     # then accept the already-authoritative roll and stop the remaining plan.
     # Keeping it on the run makes the operation recoverable across a crash.
-    pending_cancel_request_id: str | None = Field(
-        default=None, min_length=1, max_length=200
-    )
+    pending_cancel_request_id: str | None = Field(default=None, min_length=1, max_length=200)
     created_at: datetime
     updated_at: datetime
 
@@ -224,22 +217,15 @@ class ActionPlanRun(ContractModel):
         if self.pending_cancel_request_id is not None:
             if self.pending_cancel_request_id in self.cancel_request_ids:
                 raise ValueError("pending cancel request 不得已经完成")
-            if self.status != "waiting_for_player" or self.current_step_index >= len(
-                self.steps
-            ):
-                raise ValueError(
-                    "pending cancel request 只能存在于等待玩家处理的当前步骤"
-                )
+            if self.status != "waiting_for_player" or self.current_step_index >= len(self.steps):
+                raise ValueError("pending cancel request 只能存在于等待玩家处理的当前步骤")
             current = self.steps[self.current_step_index]
             if (
                 current.status != "waiting_for_player"
                 or current.adjudication_execution is None
-                or current.adjudication_execution.status
-                != "awaiting_post_roll_decision"
+                or current.adjudication_execution.status != "awaiting_post_roll_decision"
             ):
-                raise ValueError(
-                    "pending cancel request 必须对应等待 post-roll 的当前步骤"
-                )
+                raise ValueError("pending cancel request 必须对应等待 post-roll 的当前步骤")
         return self
 
     @property
@@ -258,8 +244,13 @@ class CompletedPlanStepSummary(ContractModel):
     view_revision: str = Field(min_length=1)
     world_time_after: WorldClockView | None = None
     event_refs: tuple[str, ...] = ()
-    committed_results: tuple[CommittedResult, ...] = ()
     narration_evidence: tuple[NarrationEvidence, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_evidence(self) -> CompletedPlanStepSummary:
+        if not {item.ref for item in self.narration_evidence}.issubset(self.event_refs):
+            raise ValueError("步骤 narration_evidence 必须引用公开 event_refs")
+        return self
 
 
 class ActionPlanStepContext(ContractModel):
@@ -307,14 +298,6 @@ class SingleActionTurnResult(ContractModel):
     opening_world_time: WorldClockView | None = None
 
 
-class SingleActionClarificationResult(ContractModel):
-    """单动作两次裁决均未形成合法效果时的无提交结果。"""
-
-    player_view: PlayerView
-    player_safe_reason: str = Field(min_length=1, max_length=512)
-    opening_world_time: WorldClockView | None = None
-
-
 class ActionPlanNarrationContext(ContractModel):
     """Player-safe evidence for one final or partial ActionPlan narration."""
 
@@ -336,6 +319,9 @@ class ActionPlanNarrationContext(ContractModel):
     opening_world_time: WorldClockView | None = None
     allowed_evidence_refs: tuple[str, ...] = ()
     narration_evidence: tuple[NarrationEvidence, ...] = ()
+    # Only populated for the bounded second narration attempt; contains no
+    # hidden data, just the player-safe requirement the first output missed.
+    narration_retry_hint: str | None = Field(default=None, max_length=500)
 
     @model_validator(mode="after")
     def validate_narration_scope(self) -> ActionPlanNarrationContext:
@@ -350,13 +336,6 @@ class ActionPlanNarrationContext(ContractModel):
         )
         if set(self.allowed_evidence_refs) != set(evidence):
             raise ValueError("allowed_evidence_refs 必须等于已完成步骤的公开 evidence")
-        result_refs = {
-            result.event_ref
-            for step in self.completed_steps
-            for result in step.committed_results
-        }
-        if not result_refs.issubset(set(evidence)):
-            raise ValueError("committed_results 必须引用对应步骤的公开 evidence")
         step_evidence = tuple(
             item for step in self.completed_steps for item in step.narration_evidence
         )

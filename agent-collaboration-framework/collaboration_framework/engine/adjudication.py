@@ -77,11 +77,6 @@ from .models import (
     WorldTimeState,
 )
 from .navigation import resolve_location_target
-from .persistent_results import (
-    committed_results_from_events,
-    is_public_standard_state,
-    validate_persistent_effects,
-)
 from .ports import EngineStore
 from .projection_v3 import project_v3
 from .timeline import advanced_to_next, next_point_after, time_advance_block_reason
@@ -601,8 +596,13 @@ class AdjudicationEngineService:
                     outcome="success",
                     event_refs=tuple(event.event_id for event in events),
                     public_event_refs=self._public_event_refs(events),
-                    committed_results=committed_results_from_events(events),
-                    narration_evidence=self._narration_evidence(runtime, new_state=new_state, events=events, player_id=request.player_id, actor_id=request.adjudication.actor_id),
+                    narration_evidence=self._narration_evidence(
+                        runtime,
+                        new_state=new_state,
+                        events=events,
+                        player_id=request.player_id,
+                        actor_id=request.adjudication.actor_id,
+                    ),
                 )
                 await transaction.commit_adjudication(
                     expected_revision=runtime.revision,
@@ -880,8 +880,13 @@ class AdjudicationEngineService:
                 check_run=self._run_view(check_run),
                 event_refs=tuple(event.event_id for event in events),
                 public_event_refs=self._public_event_refs(events),
-                committed_results=committed_results_from_events(events),
-                narration_evidence=self._narration_evidence(runtime, new_state=new_state, events=events, player_id=decision.player_id, actor_id=decision.actor_id),
+                narration_evidence=self._narration_evidence(
+                    runtime,
+                    new_state=new_state,
+                    events=events,
+                    player_id=decision.player_id,
+                    actor_id=decision.actor_id,
+                ),
             )
             rule_effects_excluded = (
                 decision.adjudication.rule_decision is not None and runtime.is_v3
@@ -1091,8 +1096,13 @@ class AdjudicationEngineService:
                 check_run=self._run_view(resolved_run),
                 event_refs=tuple(event.event_id for event in events),
                 public_event_refs=self._public_event_refs(events),
-                committed_results=committed_results_from_events(events),
-                narration_evidence=self._narration_evidence(runtime_after_resource, new_state=new_state, events=events, player_id=decision.player_id, actor_id=decision.actor_id),
+                narration_evidence=self._narration_evidence(
+                    runtime_after_resource,
+                    new_state=new_state,
+                    events=events,
+                    player_id=decision.player_id,
+                    actor_id=decision.actor_id,
+                ),
             )
             rule_effects_excluded = (
                 check_run.adjudication.rule_decision is not None and runtime.is_v3
@@ -1134,36 +1144,73 @@ class AdjudicationEngineService:
         return tuple(event.event_id for event in events if event.visibility == "public")
 
     @staticmethod
-    def _narration_evidence(runtime, *, new_state, events, player_id, actor_id):
-        """将本回合公开发现事件投影为玩家可见的叙述证据。"""
+    def _narration_evidence(
+        runtime: EngineRuntimeSnapshot,
+        *,
+        new_state: GameState,
+        events: tuple[DomainEvent, ...],
+        player_id: str,
+        actor_id: str,
+    ) -> tuple[NarrationEvidence, ...]:
+        """Project newly discovered entities through the final player-safe view."""
+
         if not runtime.is_v3:
             return ()
-        candidates = tuple(
-            event for event in events
-            if event.visibility == "public"
-            and event.type == "entity.state_changed"
-            and event.payload.get("key") == "discovered"
-            and event.payload.get("value") is True
-            and isinstance(event.payload.get("entity_id"), str)
-            and entity_state(runtime.game_state, event.payload["entity_id"]).get("discovered") is not True
-        )
-        if not candidates:
-            return ()
-        final_runtime = runtime.model_copy(update={"game_state": new_state, "revision": str(new_state.event_sequence)}, deep=True)
-        visible = {item.id: item for item in project_v3(final_runtime, player_id=player_id, actor_id=actor_id).scene.visible_entities}
-        return tuple(
-            NarrationEvidence(
-                ref=event.event_id,
-                kind="entity_discovered",
-                subject_id=visible[entity_id].id,
-                subject_name=visible[entity_id].name,
-                subject_aliases=visible[entity_id].aliases,
-                description=visible[entity_id].description,
-                required_in_narration=True,
+        candidate_events = tuple(
+            event
+            for event in events
+            if (
+                event.visibility == "public"
+                and event.type == "entity.state_changed"
+                and event.payload.get("key") == "discovered"
+                and event.payload.get("value") is True
+                and isinstance(event.payload.get("entity_id"), str)
+                and entity_state(
+                    runtime.game_state,
+                    event.payload["entity_id"],
+                ).get("discovered")
+                is not True
             )
-            for event in candidates
-            if (entity_id := event.payload.get("entity_id")) in visible
         )
+        if not candidate_events:
+            return ()
+        final_runtime = runtime.model_copy(
+            update={
+                "game_state": new_state,
+                "revision": str(new_state.event_sequence),
+            },
+            deep=True,
+        )
+        visible = {
+            item.id: item
+            for item in project_v3(
+                final_runtime,
+                player_id=player_id,
+                actor_id=actor_id,
+            ).scene.visible_entities
+        }
+        evidence: list[NarrationEvidence] = []
+        for event in candidate_events:
+            entity_id = event.payload.get("entity_id")
+            if (
+                not isinstance(entity_id, str)
+            ):
+                continue
+            projected = visible.get(entity_id)
+            if projected is None:
+                continue
+            evidence.append(
+                NarrationEvidence(
+                    ref=event.event_id,
+                    kind="entity_discovered",
+                    subject_id=projected.id,
+                    subject_name=projected.name,
+                    subject_aliases=projected.aliases,
+                    description=projected.description,
+                    required_in_narration=True,
+                )
+            )
+        return tuple(evidence)
 
     @staticmethod
     def _validate_identity(
@@ -1261,17 +1308,6 @@ class AdjudicationEngineService:
                         "RuleDecision 超出当前可用范围: "
                         f"{adjudication.rule_decision.rule_id}"
                     ),
-                )
-        else:
-            # 自由行动的完整性必须在创建待检定、掷骰或写入事件之前完成；规则路径
-            # 的效果由模组拥有，因此仍允许模型 success_effects 为空。
-            persistent_problem = validate_persistent_effects(adjudication)
-            if persistent_problem is not None:
-                self._reject_validation(
-                    persistent_problem.code,
-                    repairability="auto_repairable",
-                    fault="agent",
-                    player_safe_reason=persistent_problem.player_safe_reason,
                 )
         self._validate_effect_sequence(runtime, adjudication.success_effects)
         self._validate_effect_sequence(runtime, adjudication.failure_effects)
@@ -2384,7 +2420,7 @@ class AdjudicationEngineService:
                         "updated_revision": revision,
                     }
                 )
-                updates: dict[str, object] = {"item_instances": items}
+                state = state.model_copy(update={"item_instances": items}, deep=True)
             else:
                 runtime_entities = deepcopy(state.runtime_entities)
                 entity_states = deepcopy(state.entities)
@@ -2392,17 +2428,13 @@ class AdjudicationEngineService:
                 if target is None:
                     target = entity_states.setdefault(effect.entity_id, {})
                 target[effect.key] = effect.value
-                updates = {
-                    "runtime_entities": runtime_entities,
-                    "entities": entity_states,
-                }
-            if is_public_standard_state(effect):
-                public_keys = deepcopy(state.public_entity_state_keys)
-                keys = set(public_keys.get(effect.entity_id, ()))
-                keys.add(effect.key)
-                public_keys[effect.entity_id] = tuple(sorted(keys))
-                updates["public_entity_state_keys"] = public_keys
-            state = state.model_copy(update=updates, deep=True)
+                state = state.model_copy(
+                    update={
+                        "runtime_entities": runtime_entities,
+                        "entities": entity_states,
+                    },
+                    deep=True,
+                )
             event_type = "entity.state_changed"
             payload = {
                 "entity_id": effect.entity_id,

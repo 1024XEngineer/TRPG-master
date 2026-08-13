@@ -183,8 +183,6 @@ class GameState(ContractModel):
     event_sequence: int = Field(default=0, ge=0)
     actors: dict[str, ActorState]
     entities: dict[str, dict[str, JsonValue]]
-    # 仅记录由公开标准状态效果产生的键；值仍保存在现有实体状态 JSON 中。
-    public_entity_state_keys: dict[str, tuple[str, ...]] = Field(default_factory=dict)
     world_time: WorldTimeState = Field(default_factory=WorldTimeState)
     discovered_facts: tuple[str, ...] = ()
     actor_discovered_facts: dict[str, tuple[str, ...]] = Field(default_factory=dict)

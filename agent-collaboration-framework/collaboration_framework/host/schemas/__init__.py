@@ -15,7 +15,6 @@ from .action_plan import (
     PlanStepStatus,
     reservation_is_expired,
     SingleActionTurnResult,
-    SingleActionClarificationResult,
 )
 from .agent import (
     HostAgentCompleted,
@@ -97,7 +96,6 @@ __all__ = [
     "PlanRunStatus",
     "PlanStepStatus",
     "SingleActionTurnResult",
-    "SingleActionClarificationResult",
     "PlayerTurnPayload",
     "RecentHistoryBudget",
     "RecentSafeResult",

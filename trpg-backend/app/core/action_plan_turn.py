@@ -470,10 +470,21 @@ class DeterministicActionPlanNarrationModel:
             goal = completed or _quote_action_summary(context.plan_goal)
             text = f"你依次完成了：{goal}。"
             kind = "narration"
+        required_refs = tuple(
+            item.ref for item in context.narration_evidence if item.required_in_narration
+        )
+        required_text = "；".join(
+            f"你发现了{item.subject_name}"
+            + (f"：{item.description}" if item.description else "")
+            for item in context.narration_evidence
+            if item.required_in_narration
+        )
+        if required_text:
+            text = f"{text}{required_text}。"
         return {
             "kind": kind,
             "text": text,
-            "claimed_evidence_refs": [],
+            "claimed_evidence_refs": required_refs,
             "suggested_actions": [],
         }
 
@@ -1069,6 +1080,7 @@ class ActionPlanTurnApplication:
             view_revision=execution.view_revision,
             world_time_after=WorldClockView.from_world(result.player_view.world),
             event_refs=execution.public_event_refs,
+            narration_evidence=execution.narration_evidence,
         )
         context = ActionPlanNarrationContext(
             background=result.player_view.background,
@@ -1079,6 +1091,7 @@ class ActionPlanTurnApplication:
             player_view=result.player_view,
             opening_world_time=result.opening_world_time,
             allowed_evidence_refs=execution.public_event_refs,
+            narration_evidence=execution.narration_evidence,
         )
         return ActionPlanTurnResult(
             player_input=player_input,
@@ -1097,6 +1110,8 @@ class ActionPlanTurnApplication:
                 return await self._narrator.narrate(context)
             except ActionPlanNarrationValidationError as exc:
                 if attempt == 1:
+                    if exc.reason == "required_evidence_missing":
+                        return self._required_evidence_fallback(context)
                     raise TurnExecutionError(
                         "PLAN_NARRATION_INVALID",
                         "规则结果已保存，但叙事未通过安全校验；请使用原请求重试",
@@ -1113,6 +1128,29 @@ class ActionPlanTurnApplication:
                     retryable=True,
                 ) from exc
         raise AssertionError("unreachable")
+
+    @staticmethod
+    def _required_evidence_fallback(
+        context: ActionPlanNarrationContext,
+    ) -> ActionPlanNarrationOutput:
+        required = tuple(
+            item for item in context.narration_evidence if item.required_in_narration
+        )
+        if not required:
+            raise TurnExecutionError(
+                "PLAN_NARRATION_INVALID",
+                "规则结果已保存，但叙事未通过安全校验；请使用原请求重试",
+                retryable=True,
+            )
+        details = "；".join(
+            f"你发现了{item.subject_name}"
+            + (f"：{item.description}" if item.description else "")
+            for item in required
+        )
+        return ActionPlanNarrationOutput(
+            text=f"{details}。",
+            claimed_evidence_refs=tuple(item.ref for item in required),
+        )
 
     async def _keeper_capabilities(
         self,

@@ -98,6 +98,14 @@
           },
           "title": "Public Event Refs",
           "type": "array"
+        },
+        "narration_evidence": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/NarrationEvidence"
+          },
+          "title": "Narration Evidence",
+          "type": "array"
         }
       },
       "required": [
@@ -261,6 +269,50 @@
         "roll"
       ],
       "title": "CheckRunView",
+      "type": "object"
+    },
+    "NarrationEvidence": {
+      "additionalProperties": false,
+      "description": "Player-safe meaning of one public event that narration may rely on.",
+      "properties": {
+        "ref": {
+          "minLength": 1,
+          "title": "Ref",
+          "type": "string"
+        },
+        "kind": {
+          "const": "entity_discovered",
+          "title": "Kind",
+          "type": "string"
+        },
+        "subject_id": {
+          "minLength": 1,
+          "title": "Subject Id",
+          "type": "string"
+        },
+        "subject_name": {
+          "minLength": 1,
+          "title": "Subject Name",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "required_in_narration": {
+          "default": false,
+          "title": "Required In Narration",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "ref",
+        "kind",
+        "subject_id",
+        "subject_name"
+      ],
+      "title": "NarrationEvidence",
       "type": "object"
     },
     "PendingCheckDecisionView": {

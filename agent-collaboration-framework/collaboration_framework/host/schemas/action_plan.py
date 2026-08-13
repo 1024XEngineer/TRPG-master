@@ -15,6 +15,7 @@ from collaboration_framework.contracts import (
     AdjudicationExecution,
     ContractModel,
     KeeperCapabilityView,
+    NarrationEvidence,
     PlayerInput,
     PlayerView,
     WorldClockView,
@@ -235,6 +236,13 @@ class CompletedPlanStepSummary(ContractModel):
     view_revision: str = Field(min_length=1)
     world_time_after: WorldClockView | None = None
     event_refs: tuple[str, ...] = ()
+    narration_evidence: tuple[NarrationEvidence, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_evidence(self) -> CompletedPlanStepSummary:
+        if not {item.ref for item in self.narration_evidence}.issubset(self.event_refs):
+            raise ValueError("步骤 narration_evidence 必须引用公开 event_refs")
+        return self
 
 
 class ActionPlanStepContext(ContractModel):
@@ -302,6 +310,7 @@ class ActionPlanNarrationContext(ContractModel):
     # then carries the clock it ended on.
     opening_world_time: WorldClockView | None = None
     allowed_evidence_refs: tuple[str, ...] = ()
+    narration_evidence: tuple[NarrationEvidence, ...] = ()
 
     @model_validator(mode="after")
     def validate_narration_scope(self) -> ActionPlanNarrationContext:
@@ -316,6 +325,11 @@ class ActionPlanNarrationContext(ContractModel):
         )
         if set(self.allowed_evidence_refs) != set(evidence):
             raise ValueError("allowed_evidence_refs 必须等于已完成步骤的公开 evidence")
+        step_evidence = tuple(
+            item for step in self.completed_steps for item in step.narration_evidence
+        )
+        if self.narration_evidence != step_evidence:
+            raise ValueError("narration_evidence 必须按步骤聚合")
         return self
 
 

@@ -702,6 +702,9 @@ class ActionPlanOrchestrator:
         view = await self._player_view_projector.project(player_input)
         summaries = self._narration_summaries(run)
         evidence = tuple(ref for step in summaries for ref in step.event_refs)
+        narration_evidence = tuple(
+            item for step in summaries for item in step.narration_evidence
+        )
         return ActionPlanNarrationContext(
             background=view.background,
             player_input=player_input,
@@ -712,6 +715,7 @@ class ActionPlanOrchestrator:
             player_view=view,
             opening_world_time=run.opening_world_time,
             allowed_evidence_refs=evidence,
+            narration_evidence=narration_evidence,
         )
 
     async def _load_or_create(
@@ -1230,6 +1234,7 @@ class ActionPlanOrchestrator:
                     view_revision=execution.view_revision,
                     world_time_after=step.world_time_after,
                     event_refs=execution.public_event_refs,
+                    narration_evidence=execution.narration_evidence,
                 )
             )
         return tuple(summaries)
@@ -1253,6 +1258,7 @@ class ActionPlanOrchestrator:
                         view_revision=execution.view_revision,
                         world_time_after=step.world_time_after,
                         event_refs=execution.public_event_refs,
+                        narration_evidence=execution.narration_evidence,
                     )
                 )
         return tuple(summaries)

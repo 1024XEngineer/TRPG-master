@@ -1128,10 +1128,33 @@ class ActionPlanTurnApplication:
         for attempt in range(2):
             try:
                 return await self._narrator.narrate(context)
-            except ActionPlanNarrationValidationError:
+            except ActionPlanNarrationValidationError as exc:
+                if attempt == 0 and exc.reason == "required_evidence_missing":
+                    missing = tuple(
+                        item
+                        for item in context.narration_evidence
+                        if item.required_in_narration
+                    )
+                    context = context.model_copy(
+                        update={
+                            "narration_retry_hint": (
+                                "上一版叙事遗漏了已提交的玩家可见结果："
+                                + "、".join(item.subject_name for item in missing)
+                                + "。必须在正文明确写出，并 claim 对应 evidence ref。"
+                            )
+                        }
+                    )
+                    continue
                 if attempt == 1:
-                    # 模型连续两次越权时使用本地保守文本，已提交结果仍能正常回复玩家。
-                    return self._deterministic_narration_fallback(context)
+                    if context.termination_status == "needs_clarification":
+                        # 澄清状态不能借助已提交结果兜底，否则会把未完成动作伪装成成功。
+                        raise TurnExecutionError(
+                            "PLAN_NARRATION_INVALID",
+                            "当前行动还需要澄清，请补充作用目标和期望变化",
+                            retryable=False,
+                        )
+                    if getattr(self._narrator, "narrate", None) is not None:
+                        return self._required_evidence_fallback(context)
             except Exception as exc:
                 # 传输层的瞬态失败已经由 StructuredJsonClient 自己重试过了
                 # （见 adapters/structured_http.py）。在这里再整体重试一轮，两层
@@ -1151,12 +1174,11 @@ class ActionPlanTurnApplication:
         """只复述结构化已提交结果，绝不从 semantic_goal 推断持久后果。"""
 
         if context.termination_status == "needs_clarification":
-            return ActionPlanNarrationOutput(
-                kind="clarification",
-                text=(
-                    "眼前的情形还不足以确定这次行动会留下怎样的结果。"
-                    "请说明你想作用于谁或什么，以及希望达成的具体变化。"
-                ),
+            # 澄清状态不能借助已提交结果兜底，否则会把未完成动作伪装成成功。
+            raise TurnExecutionError(
+                "PLAN_NARRATION_INVALID",
+                "当前行动还需要澄清，请补充作用目标和期望变化",
+                retryable=False,
             )
         labels = {
             ("consciousness", "unconscious"): "失去了意识",
@@ -1170,7 +1192,15 @@ class ActionPlanTurnApplication:
             ("locked", True): "已经锁住",
             ("broken", True): "已经损坏",
         }
-        names = {entity.id: entity.name for entity in context.player_view.scene.visible_entities}
+        player_view = getattr(context, "player_view", None)
+        names = (
+            {
+                entity.id: entity.name
+                for entity in player_view.scene.visible_entities
+            }
+            if player_view is not None
+            else {}
+        )
         results = [
             (result, labels.get((result.state_key, result.state_value)))
             for step in context.completed_steps
@@ -1185,6 +1215,29 @@ class ActionPlanTurnApplication:
         return ActionPlanNarrationOutput(
             text="".join(statements) or "这次行动已经按当前可确认的结果完成。",
             claimed_evidence_refs=refs,
+        )
+
+    @staticmethod
+    def _required_evidence_fallback(context: ActionPlanNarrationContext) -> ActionPlanNarrationOutput:
+        """模型两次漏报必需证据时，只复述结构化的公开发现结果。"""
+        required = tuple(
+            item for item in context.narration_evidence if item.required_in_narration
+        )
+        if not required:
+            raise TurnExecutionError(
+                "PLAN_NARRATION_INVALID",
+                "规则结果已保存，但叙事未通过安全校验；请使用原请求重试",
+                retryable=True,
+            )
+        sentences: list[str] = []
+        for item in required:
+            sentences.append(f"随着调查深入，你很快辨认出{item.subject_name}。")
+            description = item.description.strip()
+            if description:
+                sentences.append(description.rstrip("。！？!?；;，,") + "。")
+        return ActionPlanNarrationOutput(
+            text="".join(sentences),
+            claimed_evidence_refs=tuple(item.ref for item in required),
         )
 
     async def _keeper_capabilities(

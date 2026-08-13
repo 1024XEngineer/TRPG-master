@@ -93,9 +93,14 @@ class ActionPlanStepRun(ContractModel):
     pending_action_request_id: str | None = Field(default=None, min_length=1)
     safe_failure_code: str | None = Field(default=None, min_length=1, max_length=100)
     retry_count: int = Field(default=0, ge=0)
+    repair_attempts: int = Field(default=0, ge=0, le=8)
+    last_validation_code: str | None = Field(default=None, min_length=1, max_length=100)
+    last_validation_message: str | None = Field(default=None, min_length=1, max_length=512)
 
     @model_validator(mode="after")
     def validate_state(self) -> ActionPlanStepRun:
+        if (self.last_validation_code is None) != (self.last_validation_message is None):
+            raise ValueError("last_validation_code/message 必须同时存在或同时为空")
         if self.adjudication is not None:
             if self.adjudication.request_id != self.step_request_id:
                 raise ValueError("step adjudication request_id 与 step_request_id 不一致")
@@ -173,6 +178,8 @@ class ActionPlanRun(ContractModel):
                 raise ValueError("PlanRun 游标之前的步骤必须全部完成")
             if index > self.current_step_index and step_run.status != "pending":
                 raise ValueError("PlanRun 游标之后的步骤不得提前开始")
+            if step_run.repair_attempts > self.policy_snapshot.max_repair_attempts:
+                raise ValueError("step repair_attempts 超过冻结的修复预算")
         if self.current_step_index == len(self.steps):
             if any(step.status != "completed" for step in self.steps):
                 raise ValueError("PlanRun 到达尾游标时必须完成全部步骤")
@@ -241,12 +248,9 @@ class ActionPlanStepContext(ContractModel):
     step: ActionPlanStep
     player_view: PlayerView
     completed_steps: tuple[CompletedPlanStepSummary, ...] = ()
-    # Set only on the single repair pass the orchestrator allows after the
-    # Engine refused the previous adjudication for this same step. It carries
-    # the Engine's own stable, player-safe rejection reason — never hidden
-    # module content — so the adjudicator can correct the proposal instead of
-    # the plan dropping straight into needs_clarification.
-    previous_rejection: str | None = Field(default=None, min_length=1, max_length=500)
+    # Set only after the Engine refused a proposal for this same step. It carries
+    # a stable player-safe code/reason, never hidden module content.
+    previous_rejection: str | None = Field(default=None, min_length=1, max_length=614)
     # Controlled Keeper-side capability list for this same revision; see
     # HostAgentContext.keeper_capabilities. Never forwarded to the Narrator.
     keeper_capabilities: KeeperCapabilityView | None = None

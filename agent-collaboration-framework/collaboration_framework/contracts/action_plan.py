@@ -51,6 +51,7 @@ class ActionPlanPolicy(ContractModel):
     policy_schema_version: Literal[1] = 1
     max_plan_steps: int = Field(default=32, ge=2, le=1024)
     max_steps_per_advance: int = Field(default=3, ge=1, le=1024)
+    max_repair_attempts: int = Field(default=1, ge=0, le=8)
 
     @model_validator(mode="after")
     def validate_window(self) -> ActionPlanPolicy:

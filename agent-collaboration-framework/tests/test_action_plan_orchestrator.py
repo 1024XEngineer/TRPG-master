@@ -12,6 +12,7 @@ from collaboration_framework.contracts import (
     ActionPlanPolicyError,
     ActionPlanStep,
     ActionTarget,
+    AdjudicationValidationError,
     AdvanceWorldTimeEffect,
     CancelActionPlanRequest,
     CheckDecisionRequest,
@@ -25,12 +26,14 @@ from collaboration_framework.contracts import (
     PlayerInput,
     PostRollDecisionRequest,
     PushAdjudication,
+    Repairability,
     RequiredAdjudicationCheck,
     SceneSpec,
     SelectCheckChoice,
     SingleActionDecision,
     SkillCheckCandidate,
     SubmitAdjudicationRequest,
+    ValidationResult,
 )
 from collaboration_framework.engine import (
     ActorState,
@@ -56,7 +59,12 @@ from collaboration_framework.host.ports import (
     ActionPlanStepFailure,
     ActionPlanVersionConflictError,
 )
-from collaboration_framework.host.schemas import ActionPlanRun
+from collaboration_framework.host.schemas import (
+    ActionPlanRun,
+    ActionPlanStepContext,
+    ActionPlanStepRun,
+    SingleActionTurnResult,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -254,12 +262,12 @@ class RejectSecondStepAdjudicator(RecordingAdjudicator):
         return await super().adjudicate(context)
 
 
-class MislabeledTargetAdjudicator(RecordingAdjudicator):
-    """First proposal for step 2 uses a target the Engine refuses.
+class MissingTargetAdjudicator(RecordingAdjudicator):
+    """First proposal for step 2 references a target the Engine cannot resolve.
 
-    Mirrors the real failure the model produces: a `world` id labelled as a
-    `location`. The Engine rejects it before committing anything, so the repair
-    pass gets to reuse the same step_request_id.
+    A uniquely identifiable target with the wrong kind is now normalized by the
+    Engine. A genuinely absent id still exercises the Host repair loop without
+    overlapping that deterministic normalization responsibility.
     """
 
     def __init__(self, world_ref: str, *, repairs: bool = True) -> None:
@@ -276,7 +284,73 @@ class MislabeledTargetAdjudicator(RecordingAdjudicator):
             source_revision="untrusted",
             actor_id="untrusted",
             summary=context.step.semantic_goal,
-            target=ActionTarget(kind="location", id=self.world_ref),
+            target=ActionTarget(kind="world", id="missing-target"),
+            method=ActionMethod(family="action", description=context.step.semantic_goal),
+            check=NoAdjudicationCheck(),
+            success_effects=(NarrativeOnlyEffect(),),
+        )
+
+
+class ValidationRejectingExecutor:
+    def __init__(
+        self,
+        service: AdjudicationEngineService,
+        *,
+        repairability: Repairability,
+        rejected_summary: str | None = None,
+    ) -> None:
+        self.service = service
+        self.repairability = repairability
+        self.rejected_summary = rejected_summary
+        self.submit_calls = []
+
+    async def submit(self, request):
+        self.submit_calls.append(request)
+        if (
+            self.rejected_summary is None
+            or request.adjudication.summary == self.rejected_summary
+        ):
+            raise AdjudicationValidationError(
+                ValidationResult(
+                    status="rejected",
+                    code="TEST_VALIDATION_REJECTION",
+                    repairability=self.repairability,
+                    fault="agent",
+                    player_safe_reason="这次行动需要停下确认",
+                    internal_reason="keeper-only hidden target evidence",
+                    classification_coverage="partial_validation_failure",
+                )
+            )
+        return await self.service.submit(request)
+
+    async def get_status(self, request):
+        return await self.service.get_status(request)
+
+
+class ContractRejectingExecutor:
+    def __init__(self, service: AdjudicationEngineService) -> None:
+        self.service = service
+        self.submit_calls = []
+
+    async def submit(self, request):
+        self.submit_calls.append(request)
+        if request.adjudication.summary == "完成步骤 2":
+            raise ContractError("ordinary contract failure")
+        return await self.service.submit(request)
+
+    async def get_status(self, request):
+        return await self.service.get_status(request)
+
+
+class AlwaysMissingTargetAdjudicator(RecordingAdjudicator):
+    async def adjudicate(self, context):
+        self.contexts.append(context)
+        return ActionAdjudication(
+            request_id="untrusted",
+            source_revision="untrusted",
+            actor_id="untrusted",
+            summary=context.step.semantic_goal,
+            target=ActionTarget(kind="world", id="missing-target"),
             method=ActionMethod(family="action", description=context.step.semantic_goal),
             check=NoAdjudicationCheck(),
             success_effects=(NarrativeOnlyEffect(),),
@@ -819,34 +893,16 @@ async def test_engine_commit_before_plan_cursor_update_reconciles_without_replay
     )
     original = player_input()
 
-    with pytest.raises(RuntimeError, match="simulated process crash"):
-        await service.start_or_resume(
-            original,
-            plan=plan(2),
-            worker_id="crashed-worker",
-        )
-    stranded = await store.load("room_01", original.client_action_id)
-    assert stranded is not None
-    assert stranded.steps[0].status == "ready"
-    assert len(engine_store.inspect_domain_events("room_01")) == 1
-
-    future = datetime.now(UTC) + timedelta(seconds=2)
-    await store.claim(
-        room_id="room_01",
-        parent_action_id=original.client_action_id,
-        worker_id="recovery-worker",
-        now=future,
-        lease_expires_at=future + timedelta(seconds=1),
-    )
     recovered = await service.start_or_resume(
         original,
         plan=plan(2),
-        worker_id="recovery-worker",
+        worker_id="crashed-worker",
     )
 
     assert recovered.run.status == "awaiting_narration"
     assert len(engine_store.inspect_domain_events("room_01")) == 2
     assert [context.step_index for context in adjudicator.contexts] == [0, 1]
+    assert crashing.crashed is True
 
 
 @pytest.mark.asyncio
@@ -863,12 +919,6 @@ async def test_unsubmitted_stale_step_is_refreshed_on_same_parent_retry() -> Non
     )
     original = player_input()
 
-    stale = await service.start_or_resume(original, plan=plan(2))
-    assert stale.run.status == "retryable_failure"
-    assert stale.run.current_step_index == 0
-    assert stale.run.steps[0].status == "pending"
-    assert stale.run.steps[0].safe_failure_code == "STEP_REVISION_CHANGED"
-
     resumed = await service.start_or_resume(original, plan=plan(2))
 
     assert resumed.run.status == "awaiting_narration"
@@ -877,6 +927,9 @@ async def test_unsubmitted_stale_step_is_refreshed_on_same_parent_retry() -> Non
         "1",
         "2",
     ]
+    assert adjudicator.contexts[1].previous_rejection == (
+        "SOURCE_REVISION_STALE: 动作基于过期的玩家视图，请刷新后重试"
+    )
     assert len(engine_store.inspect_domain_events("room_01")) == 3
 
 
@@ -1045,7 +1098,7 @@ async def test_invalid_second_step_fails_closed_before_engine_commit() -> None:
 @pytest.mark.asyncio
 async def test_engine_rejection_is_repaired_once_instead_of_stopping_the_plan() -> None:
     module, engine_store, projector = runtime()
-    adjudicator = MislabeledTargetAdjudicator(module.world_ref)
+    adjudicator = MissingTargetAdjudicator(module.world_ref)
     service = ActionPlanOrchestrator(
         store=InMemoryActionPlanRunStore(),
         adjudicator=adjudicator,
@@ -1065,8 +1118,11 @@ async def test_engine_rejection_is_repaired_once_instead_of_stopping_the_plan() 
     step_two = [context for context in adjudicator.contexts if context.step_index == 1]
     assert [context.previous_rejection for context in step_two] == [
         None,
-        "ActionAdjudication target 引用了不存在或隐藏的对象",
+        "TARGET_UNAVAILABLE: 当前目标不可用于这次行动",
     ]
+    assert settled.run.steps[1].repair_attempts == 1
+    assert settled.run.steps[1].last_validation_code == "TARGET_UNAVAILABLE"
+    assert settled.run.steps[1].last_validation_message == "当前目标不可用于这次行动"
     # The repair reuses the frozen step identity; nothing is committed twice.
     assert len({context.step_request_id for context in step_two}) == 1
     assert len(engine_store.inspect_domain_events("room_01")) == 2
@@ -1075,7 +1131,7 @@ async def test_engine_rejection_is_repaired_once_instead_of_stopping_the_plan() 
 @pytest.mark.asyncio
 async def test_engine_rejection_repair_is_attempted_at_most_once() -> None:
     module, engine_store, projector = runtime()
-    adjudicator = MislabeledTargetAdjudicator(module.world_ref, repairs=False)
+    adjudicator = MissingTargetAdjudicator(module.world_ref, repairs=False)
     service = ActionPlanOrchestrator(
         store=InMemoryActionPlanRunStore(),
         adjudicator=adjudicator,
@@ -1089,10 +1145,164 @@ async def test_engine_rejection_repair_is_attempted_at_most_once() -> None:
     )
 
     assert failed.run.status == "needs_clarification"
-    assert failed.run.steps[1].safe_failure_code == "STEP_ADJUDICATION_REJECTED"
+    assert failed.run.steps[1].safe_failure_code == "REPAIR_BUDGET_EXHAUSTED"
+    assert failed.run.steps[1].repair_attempts == 1
+    assert failed.run.steps[1].last_validation_code == "TARGET_UNAVAILABLE"
+    assert failed.run.steps[1].last_validation_message == "当前目标不可用于这次行动"
     assert len([context for context in adjudicator.contexts if context.step_index == 1]) == 2
     # The first step stays committed; the refused one never reaches the Engine.
     assert len(engine_store.inspect_domain_events("room_01")) == 1
+
+
+@pytest.mark.parametrize(
+    ("repairability", "expected_status"),
+    (
+        ("requires_player_choice", "needs_clarification"),
+        ("hard_reject", "stopped"),
+    ),
+)
+@pytest.mark.asyncio
+async def test_non_repairable_validation_stops_without_recalling_agent(
+    repairability: Repairability,
+    expected_status: str,
+) -> None:
+    module, engine_store, projector = runtime()
+    adjudicator = RecordingAdjudicator(module.world_ref)
+    executor = ValidationRejectingExecutor(
+        AdjudicationEngineService(engine_store),
+        repairability=repairability,
+        rejected_summary="完成步骤 2",
+    )
+    service = ActionPlanOrchestrator(
+        store=InMemoryActionPlanRunStore(),
+        adjudicator=adjudicator,
+        executor=executor,
+        player_view_projector=projector,
+    )
+
+    result = await service.start_or_resume(
+        player_input(f"{repairability}-parent"),
+        plan=plan(2),
+    )
+
+    current = result.run.steps[1]
+    assert result.run.status == expected_status
+    assert [step.status for step in result.run.steps] == ["completed", "stopped"]
+    assert [context.step_index for context in adjudicator.contexts] == [0, 1]
+    assert current.repair_attempts == 0
+    assert current.safe_failure_code == "TEST_VALIDATION_REJECTION"
+    assert current.last_validation_code == "TEST_VALIDATION_REJECTION"
+    assert current.last_validation_message == "这次行动需要停下确认"
+    assert "keeper-only" not in result.run.model_dump_json()
+    assert len(engine_store.inspect_domain_events("room_01")) == 1
+
+
+@pytest.mark.asyncio
+async def test_zero_repair_budget_disables_plan_auto_repair() -> None:
+    module, engine_store, projector = runtime()
+    adjudicator = MissingTargetAdjudicator(module.world_ref)
+    service = ActionPlanOrchestrator(
+        store=InMemoryActionPlanRunStore(),
+        adjudicator=adjudicator,
+        executor=AdjudicationEngineService(engine_store),
+        player_view_projector=projector,
+        policy=ActionPlanPolicy(max_repair_attempts=0),
+    )
+
+    failed = await service.start_or_resume(
+        player_input("repair-disabled-parent"),
+        plan=plan(2),
+    )
+
+    assert failed.run.status == "needs_clarification"
+    assert failed.run.steps[1].repair_attempts == 0
+    assert failed.run.steps[1].safe_failure_code == "REPAIR_BUDGET_EXHAUSTED"
+    assert len([context for context in adjudicator.contexts if context.step_index == 1]) == 1
+    assert len(engine_store.inspect_domain_events("room_01")) == 1
+
+
+@pytest.mark.asyncio
+async def test_plain_contract_error_is_not_treated_as_repairable() -> None:
+    module, engine_store, projector = runtime()
+    adjudicator = RecordingAdjudicator(module.world_ref)
+    executor = ContractRejectingExecutor(AdjudicationEngineService(engine_store))
+    service = ActionPlanOrchestrator(
+        store=InMemoryActionPlanRunStore(),
+        adjudicator=adjudicator,
+        executor=executor,
+        player_view_projector=projector,
+    )
+
+    failed = await service.start_or_resume(
+        player_input("contract-rejection-parent"),
+        plan=plan(2),
+    )
+
+    assert failed.run.status == "needs_clarification"
+    assert failed.run.steps[1].safe_failure_code == "STEP_ADJUDICATION_REJECTED"
+    assert failed.run.steps[1].repair_attempts == 0
+    assert [context.step_index for context in adjudicator.contexts] == [0, 1]
+    assert len(engine_store.inspect_domain_events("room_01")) == 1
+
+
+def test_plan_run_repair_fields_round_trip_and_old_json_uses_defaults() -> None:
+    original = player_input("json-default-parent")
+    created_at = datetime.now(UTC)
+    plan_value = plan(2)
+    run = ActionPlanRun(
+        plan_id="plan-json-default",
+        parent_action_id=original.client_action_id,
+        parent_input_fingerprint=("0" * 64),
+        parent_utterance=original.utterance,
+        room_id=original.room_id,
+        player_id=original.player_id,
+        actor_id=original.actor_id,
+        created_revision="0",
+        policy_snapshot=ActionPlanPolicy(),
+        plan=plan_value,
+        steps=tuple(
+            ActionPlanStepRun(
+                step_id=f"step-{index}",
+                step_request_id=f"request-{index}",
+                step=step,
+            )
+            for index, step in enumerate(plan_value.steps)
+        ),
+        created_at=created_at,
+        updated_at=created_at,
+    )
+    payload = run.model_dump(mode="json")
+    payload["policy_snapshot"].pop("max_repair_attempts")
+    for step_payload in payload["steps"]:
+        step_payload.pop("repair_attempts")
+        step_payload.pop("last_validation_code")
+        step_payload.pop("last_validation_message")
+
+    restored = ActionPlanRun.model_validate(payload)
+
+    assert restored.policy_snapshot.max_repair_attempts == 1
+    assert all(step.repair_attempts == 0 for step in restored.steps)
+    assert all(step.last_validation_code is None for step in restored.steps)
+    assert ActionPlanRun.model_validate_json(restored.model_dump_json()) == restored
+
+
+@pytest.mark.asyncio
+async def test_safe_validation_feedback_maximum_length_fits_step_context() -> None:
+    _, _, projector = runtime()
+    original = player_input("max-feedback-parent")
+    context = ActionPlanStepContext(
+        player_input=original,
+        plan_id="max-feedback-plan",
+        plan_goal="验证最长安全反馈",
+        step_index=0,
+        step_request_id="max-feedback-step",
+        step=ActionPlanStep(kind="action", semantic_goal="验证最长安全反馈"),
+        player_view=await projector.project(original),
+        previous_rejection=f"{'C' * 100}: {'R' * 512}",
+    )
+
+    assert context.previous_rejection is not None
+    assert len(context.previous_rejection) == 614
 
 
 @pytest.mark.asyncio
@@ -1205,10 +1415,221 @@ async def test_single_action_fast_path_creates_no_plan_run() -> None:
 
     result = await dispatcher.execute(original, decision)
 
+    assert isinstance(result, SingleActionTurnResult)
     assert result.execution.status == "resolved"
     assert result.execution.action_request_id == original.client_action_id
     assert await store.load("room_01", original.client_action_id) is None
     assert len(engine_store.inspect_domain_events("room_01")) == 1
+
+
+def single_action_decision(*, world_ref: str, valid_target: bool) -> SingleActionDecision:
+    return SingleActionDecision(
+        adjudication=ActionAdjudication(
+            request_id="untrusted",
+            source_revision="untrusted",
+            actor_id="untrusted",
+            summary="检查当前环境",
+            target=ActionTarget(
+                kind="world",
+                id=world_ref if valid_target else "missing-target",
+            ),
+            method=ActionMethod(family="observe", description="检查当前环境"),
+            check=NoAdjudicationCheck(),
+            success_effects=(NarrativeOnlyEffect(),),
+        )
+    )
+
+
+def single_travel_decision(*, target_id: str) -> SingleActionDecision:
+    return SingleActionDecision(
+        adjudication=ActionAdjudication(
+            request_id="untrusted",
+            source_revision="untrusted",
+            actor_id="untrusted",
+            summary="前往墓地",
+            target=ActionTarget(kind="location", id=target_id),
+            method=ActionMethod(family="travel", description="前往墓地"),
+            check=NoAdjudicationCheck(),
+            success_effects=(EnterLocationEffect(location_id=target_id),),
+        )
+    )
+
+
+@pytest.mark.asyncio
+async def test_single_action_auto_repair_succeeds_without_creating_plan_run() -> None:
+    module, engine_store, projector = runtime()
+    plan_store = InMemoryActionPlanRunStore()
+    engine = AdjudicationEngineService(engine_store)
+    repair_adjudicator = RecordingAdjudicator(module.world_ref)
+    orchestrator_service = ActionPlanOrchestrator(
+        store=plan_store,
+        adjudicator=repair_adjudicator,
+        executor=engine,
+        player_view_projector=projector,
+    )
+    dispatcher = HostTurnDecisionExecutor(
+        plan_orchestrator=orchestrator_service,
+        executor=engine,
+        player_view_projector=projector,
+        repair_adjudicator=repair_adjudicator,
+        policy=ActionPlanPolicy(),
+    )
+    original = player_input("single-repair-parent", "检查当前环境")
+
+    result = await dispatcher.execute(
+        original,
+        single_action_decision(world_ref=module.world_ref, valid_target=False),
+    )
+
+    assert isinstance(result, SingleActionTurnResult)
+    assert result.execution.status == "resolved"
+    assert result.execution.action_request_id == original.client_action_id
+    assert len(repair_adjudicator.contexts) == 1
+    context = repair_adjudicator.contexts[0]
+    assert context.step_request_id == original.client_action_id
+    assert context.previous_rejection == "TARGET_UNAVAILABLE: 当前目标不可用于这次行动"
+    assert await plan_store.load(original.room_id, original.client_action_id) is None
+    assert len(engine_store.inspect_domain_events(original.room_id)) == 1
+
+
+@pytest.mark.asyncio
+async def test_single_travel_repair_preserves_semantic_step_kind() -> None:
+    module, engine_store, projector = runtime()
+    plan_store = InMemoryActionPlanRunStore()
+    engine = AdjudicationEngineService(engine_store)
+    repair_adjudicator = RecordingAdjudicator(module.world_ref)
+    orchestrator_service = ActionPlanOrchestrator(
+        store=plan_store,
+        adjudicator=repair_adjudicator,
+        executor=engine,
+        player_view_projector=projector,
+    )
+    dispatcher = HostTurnDecisionExecutor(
+        plan_orchestrator=orchestrator_service,
+        executor=engine,
+        player_view_projector=projector,
+        repair_adjudicator=repair_adjudicator,
+        policy=ActionPlanPolicy(),
+    )
+    original = player_input("single-travel-repair", "前往墓地")
+
+    result = await dispatcher.execute(
+        original,
+        single_travel_decision(target_id="missing-location"),
+    )
+
+    assert isinstance(result, SingleActionTurnResult)
+    assert result.execution.status == "resolved"
+    assert len(repair_adjudicator.contexts) == 1
+    context = repair_adjudicator.contexts[0]
+    assert context.step.kind == "travel"
+    assert context.previous_rejection == "TARGET_UNAVAILABLE: 当前目标不可用于这次行动"
+    assert await plan_store.load(original.room_id, original.client_action_id) is None
+    assert len(engine_store.inspect_domain_events(original.room_id)) == 1
+
+
+@pytest.mark.asyncio
+async def test_single_action_repair_budget_is_finite() -> None:
+    module, engine_store, projector = runtime()
+    plan_store = InMemoryActionPlanRunStore()
+    engine = AdjudicationEngineService(engine_store)
+    repair_adjudicator = AlwaysMissingTargetAdjudicator(module.world_ref)
+    orchestrator_service = ActionPlanOrchestrator(
+        store=plan_store,
+        adjudicator=repair_adjudicator,
+        executor=engine,
+        player_view_projector=projector,
+    )
+    dispatcher = HostTurnDecisionExecutor(
+        plan_orchestrator=orchestrator_service,
+        executor=engine,
+        player_view_projector=projector,
+        repair_adjudicator=repair_adjudicator,
+        policy=ActionPlanPolicy(max_repair_attempts=1),
+    )
+    original = player_input("single-repair-exhausted", "检查当前环境")
+
+    with pytest.raises(TurnExecutionError) as raised:
+        await dispatcher.execute(
+            original,
+            single_action_decision(world_ref=module.world_ref, valid_target=False),
+        )
+
+    assert raised.value.code == "REPAIR_BUDGET_EXHAUSTED"
+    assert len(repair_adjudicator.contexts) == 1
+    assert await plan_store.load(original.room_id, original.client_action_id) is None
+    assert engine_store.inspect_domain_events(original.room_id) == ()
+
+
+@pytest.mark.parametrize("repairability", ("requires_player_choice", "hard_reject"))
+@pytest.mark.asyncio
+async def test_single_action_non_repairable_feedback_does_not_call_agent(
+    repairability: Repairability,
+) -> None:
+    module, engine_store, projector = runtime()
+    plan_store = InMemoryActionPlanRunStore()
+    repair_adjudicator = RecordingAdjudicator(module.world_ref)
+    engine = ValidationRejectingExecutor(
+        AdjudicationEngineService(engine_store),
+        repairability=repairability,
+    )
+    orchestrator_service = ActionPlanOrchestrator(
+        store=plan_store,
+        adjudicator=repair_adjudicator,
+        executor=engine,
+        player_view_projector=projector,
+    )
+    dispatcher = HostTurnDecisionExecutor(
+        plan_orchestrator=orchestrator_service,
+        executor=engine,
+        player_view_projector=projector,
+        repair_adjudicator=repair_adjudicator,
+    )
+    original = player_input(f"single-{repairability}", "检查当前环境")
+
+    with pytest.raises(AdjudicationValidationError) as raised:
+        await dispatcher.execute(
+            original,
+            single_action_decision(world_ref=module.world_ref, valid_target=True),
+        )
+
+    feedback = raised.value.result.to_feedback()
+    assert feedback.code == "TEST_VALIDATION_REJECTION"
+    assert feedback.player_safe_reason == "这次行动需要停下确认"
+    assert repair_adjudicator.contexts == []
+    assert await plan_store.load(original.room_id, original.client_action_id) is None
+    assert engine_store.inspect_domain_events(original.room_id) == ()
+
+
+@pytest.mark.asyncio
+async def test_single_action_reconciles_commit_response_failure_without_repair() -> None:
+    module, engine_store, projector = runtime()
+    plan_store = InMemoryActionPlanRunStore()
+    repair_adjudicator = RecordingAdjudicator(module.world_ref)
+    executor = CrashAfterCommitExecutor(AdjudicationEngineService(engine_store))
+    orchestrator_service = ActionPlanOrchestrator(
+        store=plan_store,
+        adjudicator=repair_adjudicator,
+        executor=executor,
+        player_view_projector=projector,
+    )
+    dispatcher = HostTurnDecisionExecutor(
+        plan_orchestrator=orchestrator_service,
+        executor=executor,
+        player_view_projector=projector,
+        repair_adjudicator=repair_adjudicator,
+    )
+    original = player_input("single-reconcile-parent", "检查当前环境")
+
+    result = await dispatcher.execute(
+        original,
+        single_action_decision(world_ref=module.world_ref, valid_target=True),
+    )
+
+    assert isinstance(result, SingleActionTurnResult)
+    assert result.execution.action_request_id == original.client_action_id
+    assert repair_adjudicator.contexts == []
+    assert len(engine_store.inspect_domain_events(original.room_id)) == 1
 
 
 @pytest.mark.asyncio

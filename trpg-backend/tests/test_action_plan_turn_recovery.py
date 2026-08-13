@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import AsyncMock
 
 import pytest
-from collaboration_framework.contracts import PostRollDecisionRequest
+from collaboration_framework.contracts import ActionPlanPolicy, PostRollDecisionRequest
 
 from app.core.action_plan_turn import ActionPlanTurnApplication
 
@@ -65,6 +66,8 @@ class _Orchestrator:
     def __init__(self, run: SimpleNamespace) -> None:
         self.run = run
         self.resume_calls = []
+        self.adjudicator = object()
+        self.policy = ActionPlanPolicy(max_repair_attempts=3)
 
     async def get_run(self, room_id: str, parent_action_id: str):
         assert room_id == self.run.room_id
@@ -83,6 +86,27 @@ def _application(run: SimpleNamespace, engine: _Engine, orchestrator: _Orchestra
     application._resolve_actor_id = AsyncMock(return_value=run.actor_id)
     application._finish_plan_with_phases = AsyncMock(return_value="recovered")
     return application
+
+
+def test_application_injects_plan_repair_dependencies_into_single_action_path() -> None:
+    run = _run(cancel_id=None)
+    engine = _Engine(_status("resolved"))
+    orchestrator = _Orchestrator(run)
+
+    application = ActionPlanTurnApplication(
+        store=cast(Any, object()),
+        engine=cast(Any, object()),
+        adjudication_engine=cast(Any, engine),
+        planner=cast(Any, object()),
+        orchestrator=cast(Any, orchestrator),
+        narrator=cast(Any, object()),
+        recent_history_source=cast(Any, object()),
+        recent_history_budget=cast(Any, object()),
+        recent_history_enabled=False,
+    )
+
+    assert application._dispatcher._repair_adjudicator is orchestrator.adjudicator
+    assert application._dispatcher._policy is orchestrator.policy
 
 
 @pytest.mark.asyncio

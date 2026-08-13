@@ -100,6 +100,28 @@ class SqlPendingPlanAdjudicator(SqlPlanAdjudicator):
         )
 
 
+class SqlRepairingPlanAdjudicator(SqlPlanAdjudicator):
+    def __init__(self, world_ref: str) -> None:
+        super().__init__(world_ref)
+        self.contexts = []
+
+    async def adjudicate(self, context):
+        self.contexts.append(context)
+        target = ActionTarget(kind="world", id=self.world_ref)
+        if context.step_index == 1 and context.previous_rejection is None:
+            target = ActionTarget(kind="world", id="missing-target")
+        return ActionAdjudication(
+            request_id="untrusted",
+            source_revision="untrusted",
+            actor_id="untrusted",
+            summary=context.step.semantic_goal,
+            target=target,
+            method=ActionMethod(family=context.step.kind, description=context.step.semantic_goal),
+            check=NoAdjudicationCheck(),
+            success_effects=(NarrativeOnlyEffect(),),
+        )
+
+
 def four_step_plan() -> ActionPlan:
     return ActionPlan(
         goal="完成四步计划",
@@ -195,6 +217,57 @@ async def test_sql_plan_resumes_across_store_and_service_rebuild(
         )
         is None
     )
+
+
+async def test_sql_plan_repair_state_survives_store_rebuild(
+    db_session: AsyncSession,
+    engine_store_factory: Callable[..., SqlAlchemyEngineStore],
+    action_plan_store_factory: Callable[[], SqlAlchemyActionPlanRunStore],
+) -> None:
+    room, players, _ = await _start_room(db_session, prepare_checkpoint=False)
+    engine_store = engine_store_factory()
+    async with engine_store.transaction(room.id) as transaction:
+        runtime = await transaction.load_runtime()
+    actor_id = next(
+        actor_id
+        for actor_id, actor in runtime.game_state.actors.items()
+        if actor.player_id == players[0].id
+    )
+    original = PlayerInput(
+        room_id=room.id,
+        player_id=players[0].id,
+        actor_id=actor_id,
+        client_action_id="sql-plan-repair-272",
+        utterance="完成两步并修正错误目标",
+    )
+    repair_plan = ActionPlan(
+        goal=original.utterance,
+        steps=(
+            ActionPlanStep(kind="action", semantic_goal="执行第一步"),
+            ActionPlanStep(kind="action", semantic_goal="执行第二步"),
+        ),
+    )
+    adjudicator = SqlRepairingPlanAdjudicator(runtime.module_content.world_ref)
+    service = ActionPlanOrchestrator(
+        store=action_plan_store_factory(),
+        adjudicator=adjudicator,
+        executor=AdjudicationEngineService(engine_store),
+        player_view_projector=PlayerViewProjector(RuleEngineService(engine_store)),
+    )
+
+    settled = await service.start_or_resume(original, plan=repair_plan)
+    rebuilt = await action_plan_store_factory().load(room.id, original.client_action_id)
+
+    assert settled.run.status == "awaiting_narration"
+    assert rebuilt is not None
+    repaired = rebuilt.steps[1]
+    assert repaired.repair_attempts == 1
+    assert repaired.last_validation_code == "TARGET_UNAVAILABLE"
+    assert repaired.last_validation_message == "当前目标不可用于这次行动"
+    assert adjudicator.contexts[-1].previous_rejection == (
+        "TARGET_UNAVAILABLE: 当前目标不可用于这次行动"
+    )
+    assert "keeper" not in rebuilt.model_dump_json()
 
 
 async def test_sql_plan_worker_lease_blocks_then_allows_recovery(

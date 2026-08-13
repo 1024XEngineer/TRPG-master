@@ -7,6 +7,7 @@ import hashlib
 import logging
 import time
 from datetime import UTC, datetime, timedelta
+from typing import Literal
 from uuid import uuid4
 
 from collaboration_framework.contracts import (
@@ -15,7 +16,9 @@ from collaboration_framework.contracts import (
     ActionPlanPolicy,
     ActionPlanPolicyError,
     ActionPlanProgressEvent,
+    ActionPlanStep,
     AdjudicationExecution,
+    AdjudicationValidationError,
     CancelActionPlanRequest,
     ContractError,
     GetAdjudicationStatusRequest,
@@ -25,6 +28,7 @@ from collaboration_framework.contracts import (
     PlayerView,
     SingleActionDecision,
     SubmitAdjudicationRequest,
+    ValidationFeedback,
     WorldClockView,
     player_input_fingerprint,
 )
@@ -76,6 +80,14 @@ class ActionPlanOrchestrator:
         self._policy = policy or ActionPlanPolicy()
         self._lease_seconds = lease_seconds
         self._on_step_failure = on_step_failure
+
+    @property
+    def policy(self) -> ActionPlanPolicy:
+        return self._policy
+
+    @property
+    def adjudicator(self) -> ActionPlanStepAdjudicator:
+        return self._adjudicator
 
     async def start_or_resume(
         self,
@@ -261,14 +273,8 @@ class ActionPlanOrchestrator:
                     label=self._step_label(step_run),
                 ),
             )
-            # #212 keeps the "可自动修复 -> REPAIR -> AGENT" arrow inside A: the
-            # Engine's rejection is already a stable, non-leaking reason, so a
-            # step whose frozen adjudication was refused gets exactly one
-            # re-adjudication carrying that reason before the plan gives up. The
-            # Engine still sees one ActionAdjudication per call, and a refused
-            # submit persists nothing, so reusing step_request_id is safe.
-            rejection: ContractError | None = None
-            for repair_attempt in range(2):
+            rejection: Exception | None = None
+            while True:
                 rejection = None
                 try:
                     assert step_run.adjudication is not None
@@ -280,7 +286,7 @@ class ActionPlanOrchestrator:
                         )
                     )
                     break
-                except ContractError as exc:
+                except Exception as exc:
                     rejection = exc
                     status = await self._executor.get_status(
                         GetAdjudicationStatusRequest(
@@ -293,16 +299,37 @@ class ActionPlanOrchestrator:
                         latest = status.execution
                         rejection = None
                         break
-                    if repair_attempt == 1 or await self._revision_moved(step_run, player_input):
+
+                    if not isinstance(exc, AdjudicationValidationError):
                         break
-                    run = await self._freeze_current_adjudication(
-                        run,
-                        player_input,
-                        previous_rejection=str(exc),
-                    )
+
+                    feedback = exc.result.to_feedback()
+                    if feedback.repairability == "requires_player_choice":
+                        run = await self._stop_for_validation(
+                            run,
+                            feedback,
+                            plan_status="needs_clarification",
+                        )
+                        break
+                    if feedback.repairability == "hard_reject":
+                        run = await self._stop_for_validation(
+                            run,
+                            feedback,
+                            plan_status="stopped",
+                        )
+                        break
+                    if step_run.repair_attempts >= run.policy_snapshot.max_repair_attempts:
+                        run = await self._stop_for_validation(
+                            run,
+                            feedback,
+                            plan_status="needs_clarification",
+                            code="REPAIR_BUDGET_EXHAUSTED",
+                        )
+                        break
+
+                    run = await self._prepare_repair(run, feedback)
+                    run = await self._freeze_current_adjudication(run, player_input)
                     if run.status != "active":
-                        # The re-adjudication itself failed; it already recorded
-                        # its own safe failure code.
                         run = await self._release_lease(run)
                         return ActionPlanAdvanceResult(
                             run=run,
@@ -311,6 +338,21 @@ class ActionPlanOrchestrator:
                     step_run = run.steps[step_index]
 
             if rejection is not None:
+                if run.status in {"needs_clarification", "stopped"}:
+                    run = await self._release_lease(run)
+                    await self._emit(
+                        on_progress,
+                        self._progress(
+                            run,
+                            "plan.stopped",
+                            "stopped",
+                            reason=run.steps[step_index].safe_failure_code,
+                        ),
+                    )
+                    return ActionPlanAdvanceResult(
+                        run=run,
+                        player_view=await self._player_view_projector.project(player_input),
+                    )
                 current_view = await self._player_view_projector.project(player_input)
                 if (
                     step_run.source_revision is not None
@@ -641,13 +683,17 @@ class ActionPlanOrchestrator:
             or run.parent_action_id != player_input.client_action_id
         ):
             raise ActionPlanPolicyError("PARENT_ACTION_CONFLICT", "行动计划 owner 不一致")
-        termination = {
+        termination_by_status: dict[
+            str,
+            Literal["resolved", "needs_clarification", "cancelled", "stopped"],
+        ] = {
             "awaiting_narration": "resolved",
             "completed": "resolved",
             "needs_clarification": "needs_clarification",
             "cancelled": "cancelled",
             "stopped": "stopped",
-        }.get(run.status)
+        }
+        termination = termination_by_status.get(run.status)
         if termination is None:
             raise ActionPlanPolicyError(
                 "PLAN_NOT_READY_FOR_NARRATION",
@@ -743,24 +789,10 @@ class ActionPlanOrchestrator:
         except (AttributeError, NotImplementedError):
             return None
 
-    async def _revision_moved(
-        self,
-        step_run: ActionPlanStepRun,
-        player_input: PlayerInput,
-    ) -> bool:
-        """A revision that moved under the frozen step is retried, not repaired."""
-
-        if step_run.source_revision is None:
-            return False
-        current_view = await self._player_view_projector.project(player_input)
-        return current_view.revision != step_run.source_revision
-
     async def _freeze_current_adjudication(
         self,
         run: ActionPlanRun,
         player_input: PlayerInput,
-        *,
-        previous_rejection: str | None = None,
     ) -> ActionPlanRun:
         index = run.current_step_index
         steps = list(run.steps)
@@ -782,7 +814,7 @@ class ActionPlanOrchestrator:
             step=current.step,
             player_view=view,
             completed_steps=self._completed_summaries(run),
-            previous_rejection=previous_rejection,
+            previous_rejection=self._validation_feedback_text(current),
             keeper_capabilities=await self._keeper_capabilities(player_input, view),
         )
         adjudication_started_at = time.monotonic()
@@ -836,6 +868,64 @@ class ActionPlanOrchestrator:
             deep=True,
         )
         return await self._replace_steps(run, tuple(steps))
+
+    async def _prepare_repair(
+        self,
+        run: ActionPlanRun,
+        feedback: ValidationFeedback,
+    ) -> ActionPlanRun:
+        index = run.current_step_index
+        steps = list(run.steps)
+        current = steps[index]
+        steps[index] = current.model_copy(
+            update={
+                "status": "pending",
+                "source_revision": None,
+                "adjudication": None,
+                "adjudication_execution": None,
+                "event_refs": (),
+                "pending_action_request_id": None,
+                "safe_failure_code": None,
+                "repair_attempts": current.repair_attempts + 1,
+                "last_validation_code": feedback.code,
+                "last_validation_message": feedback.player_safe_reason,
+            },
+            deep=True,
+        )
+        return await self._replace_steps(run, tuple(steps))
+
+    async def _stop_for_validation(
+        self,
+        run: ActionPlanRun,
+        feedback: ValidationFeedback,
+        *,
+        plan_status: str,
+        code: str | None = None,
+    ) -> ActionPlanRun:
+        index = run.current_step_index
+        steps = list(run.steps)
+        current = steps[index]
+        steps[index] = current.model_copy(
+            update={
+                "status": "stopped",
+                "source_revision": None,
+                "adjudication": None,
+                "adjudication_execution": None,
+                "event_refs": (),
+                "pending_action_request_id": None,
+                "safe_failure_code": code or feedback.code,
+                "last_validation_code": feedback.code,
+                "last_validation_message": feedback.player_safe_reason,
+            },
+            deep=True,
+        )
+        return await self._replace_steps(run, tuple(steps), status=plan_status)
+
+    @staticmethod
+    def _validation_feedback_text(step: ActionPlanStepRun) -> str | None:
+        if step.last_validation_code is None or step.last_validation_message is None:
+            return None
+        return f"{step.last_validation_code}: {step.last_validation_message}"
 
     async def _observe_step_failure(
         self,
@@ -1130,6 +1220,8 @@ class ActionPlanOrchestrator:
             execution = step.adjudication_execution
             if step.status != "completed" or execution is None:
                 raise ContractError("PlanRun 游标之前存在未完成步骤")
+            if execution.outcome == "pending":
+                raise ContractError("已完成 PlanRun 步骤不得保留 pending outcome")
             summaries.append(
                 CompletedPlanStepSummary(
                     step_index=index,
@@ -1151,6 +1243,8 @@ class ActionPlanOrchestrator:
             step = run.steps[run.current_step_index]
             execution = step.adjudication_execution
             if step.status == "stopped" and execution is not None:
+                if execution.outcome == "pending":
+                    raise ContractError("已停止 PlanRun 步骤不得保留 pending outcome")
                 summaries.append(
                     CompletedPlanStepSummary(
                         step_index=run.current_step_index,
@@ -1184,8 +1278,19 @@ class ActionPlanOrchestrator:
     @staticmethod
     def _progress(
         run: ActionPlanRun,
-        event_type: str,
-        phase: str,
+        event_type: Literal[
+            "plan.started",
+            "plan.step_changed",
+            "plan.stopped",
+            "plan.completed",
+        ],
+        phase: Literal[
+            "understanding",
+            "executing",
+            "waiting_for_player",
+            "completed",
+            "stopped",
+        ],
         *,
         label: str | None = None,
         reason: str | None = None,
@@ -1225,10 +1330,14 @@ class HostTurnDecisionExecutor:
         plan_orchestrator: ActionPlanOrchestrator,
         executor: SingleAdjudicationExecutor,
         player_view_projector: PlayerViewProjector,
+        repair_adjudicator: ActionPlanStepAdjudicator | None = None,
+        policy: ActionPlanPolicy | None = None,
     ) -> None:
         self._plan_orchestrator = plan_orchestrator
         self._executor = executor
         self._player_view_projector = player_view_projector
+        self._repair_adjudicator = repair_adjudicator
+        self._policy = policy or ActionPlanPolicy()
 
     async def execute(
         self,
@@ -1251,22 +1360,78 @@ class HostTurnDecisionExecutor:
                 "ACTION_IN_PROGRESS",
                 "当前房间已有未完成行动计划",
             )
-        view = await self._player_view_projector.project(player_input)
-        adjudication: ActionAdjudication = decision.adjudication.model_copy(
-            update={
-                "request_id": player_input.client_action_id,
-                "source_revision": view.revision,
-                "actor_id": player_input.actor_id,
-            },
-            deep=True,
+        opening_view = await self._player_view_projector.project(player_input)
+        view = opening_view
+        adjudication = self._bind_single_adjudication(
+            decision.adjudication,
+            player_input=player_input,
+            view=view,
         )
-        execution = await self._executor.submit(
-            SubmitAdjudicationRequest(
-                room_id=player_input.room_id,
-                player_id=player_input.player_id,
-                adjudication=adjudication,
-            )
-        )
+        repair_attempts = 0
+        while True:
+            try:
+                execution = await self._executor.submit(
+                    SubmitAdjudicationRequest(
+                        room_id=player_input.room_id,
+                        player_id=player_input.player_id,
+                        adjudication=adjudication,
+                    )
+                )
+                break
+            except Exception as exc:
+                status = await self._executor.get_status(
+                    GetAdjudicationStatusRequest(
+                        room_id=player_input.room_id,
+                        player_id=player_input.player_id,
+                        action_request_id=player_input.client_action_id,
+                    )
+                )
+                if status.status != "not_submitted" and status.execution is not None:
+                    execution = status.execution
+                    break
+                if not isinstance(exc, AdjudicationValidationError):
+                    raise
+                feedback = exc.result.to_feedback()
+                if feedback.repairability not in {
+                    "auto_repairable",
+                    "retry_with_latest_revision",
+                }:
+                    raise
+                if self._repair_adjudicator is None:
+                    raise
+                if repair_attempts >= self._policy.max_repair_attempts:
+                    raise TurnExecutionError(
+                        "REPAIR_BUDGET_EXHAUSTED",
+                        "本次行动仍无法安全执行，需要玩家确认下一步",
+                        retryable=False,
+                    ) from exc
+                repair_attempts += 1
+                view = await self._player_view_projector.project(player_input)
+                context = ActionPlanStepContext(
+                    player_input=player_input,
+                    plan_id="single-action",
+                    plan_goal=decision.adjudication.summary,
+                    step_index=0,
+                    step_request_id=player_input.client_action_id,
+                    step=ActionPlanStep(
+                        kind=self._single_action_step_kind(decision.adjudication),
+                        semantic_goal=decision.adjudication.summary,
+                    ),
+                    player_view=view,
+                    previous_rejection=(
+                        f"{feedback.code}: {feedback.player_safe_reason}"
+                    ),
+                    keeper_capabilities=await self._single_keeper_capabilities(
+                        player_input,
+                        view,
+                    ),
+                )
+                proposal = await self._repair_adjudicator.adjudicate(context)
+                adjudication = self._bind_single_adjudication(
+                    proposal,
+                    player_input=player_input,
+                    view=view,
+                )
         return SingleActionTurnResult(
             execution=execution,
             player_view=await self._player_view_projector.refresh_adjudication(
@@ -1275,5 +1440,49 @@ class HostTurnDecisionExecutor:
             ),
             # `view` was projected before the submit above, so this is the clock
             # the action started on — a single "睡到晚上" moves it too.
-            opening_world_time=WorldClockView.from_world(view.world),
+            opening_world_time=WorldClockView.from_world(opening_view.world),
         )
+
+    @staticmethod
+    def _single_action_step_kind(
+        adjudication: ActionAdjudication,
+    ) -> Literal["travel", "wait", "rest", "action", "dialogue"]:
+        family = adjudication.method.family
+        if family == "travel":
+            return "travel"
+        if family == "wait":
+            return "wait"
+        if family == "rest":
+            return "rest"
+        if family == "dialogue":
+            return "dialogue"
+        return "action"
+
+    @staticmethod
+    def _bind_single_adjudication(
+        adjudication: ActionAdjudication,
+        *,
+        player_input: PlayerInput,
+        view: PlayerView,
+    ) -> ActionAdjudication:
+        return adjudication.model_copy(
+            update={
+                "request_id": player_input.client_action_id,
+                "source_revision": view.revision,
+                "actor_id": player_input.actor_id,
+            },
+            deep=True,
+        )
+
+    async def _single_keeper_capabilities(
+        self,
+        player_input: PlayerInput,
+        view: PlayerView,
+    ) -> KeeperCapabilityView | None:
+        try:
+            return await self._player_view_projector.keeper_capabilities(
+                player_input,
+                expected_revision=view.revision,
+            )
+        except (AttributeError, NotImplementedError):
+            return None

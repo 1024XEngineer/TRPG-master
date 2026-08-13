@@ -703,6 +703,46 @@ describe('RoomPage conversation history', () => {
 
     // 引擎在等玩家掷骰。单纯藏起来会让这次检定静默卡住——玩家看不到任何提示，
     // 回合悬着。所以把频道切回行动区，而不是压住面板。
+    // 输入框在两个频道复用过，草稿会跟着频道一起漂移：在讨论区打了一半、
+    // 检定到达把频道切回行动区，那段本来要说给队友听的话再一按发送就提交给
+    // 引擎了（#306 review 指出）。草稿必须按频道各存各的。
+    it('keeps each channel draft to itself when a check pulls the player back', async () => {
+      renderRoomPage()
+      await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+      const field = () => screen.getByPlaceholderText('输入行动…')
+      fireEvent.change(field(), { target: { value: '这是行动区的草稿' } })
+
+      switchToDiscussion()
+      fireEvent.change(field(), { target: { value: '我们先商量一下路线' } })
+
+      await act(async () => {
+        emitWsMessage({
+          type: 'check.request',
+          payload: {
+            playerId: 'player-1',
+            clientActionId: 'check-with-draft',
+            summary: '检查旧报纸',
+            difficulty: 'regular',
+            skills: [{ id: 'library', name: '图书馆使用', targetValue: 60 }],
+          },
+        })
+      })
+
+      // 被拉回行动区，输入框里必须是行动区自己的草稿，不能是讨论区那句。
+      expect(field()).toHaveValue('这是行动区的草稿')
+
+      fireEvent.submit(field().closest('form')!)
+      await waitFor(() => expect(mockSubmitPlannedAction).toHaveBeenCalledTimes(1))
+      expect(mockSubmitPlannedAction.mock.calls[0][1]).toEqual(
+        expect.objectContaining({ utterance: '这是行动区的草稿' }),
+      )
+
+      // 讨论区那句原样还在，没被顺手清掉也没被提交。
+      switchToDiscussion()
+      expect(field()).toHaveValue('我们先商量一下路线')
+    })
+
     it('switches back to the action channel when a check arrives during discussion', async () => {
       renderRoomPage()
       await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())

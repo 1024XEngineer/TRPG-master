@@ -1263,11 +1263,32 @@ export default function RoomPage() {
   const [messages, setMessages] = useState<Message[]>([])
   const [channel, setChannel] = useState<'action' | 'discussion'>('action')
   const isActionChannel = channel === 'action'
-  const [input, setInput] = useState('')
+  /**
+   * 草稿按频道各存各的（issue #304）。
+   *
+   * 输入框在两个频道复用，但一份共享草稿会跟着频道漂移：在讨论区打了一半、
+   * 检定到达把频道切回行动区，那段本来要说给队友听的话再一按发送就提交给了
+   * 引擎——`sendMessage` 只看当前 `channel` 决定走 sendChat 还是提交行动。
+   * 手动切频道同样漏，只是自动切换让它在玩家毫无预期时发生。
+   */
+  const [drafts, setDrafts] = useState<Record<'action' | 'discussion', string>>({
+    action: '',
+    discussion: '',
+  })
+  const input = drafts[channel]
+  const setInput = useCallback(
+    (next: string | ((current: string) => string)) => {
+      setDrafts((current) => ({
+        ...current,
+        [channel]: typeof next === 'function' ? next(current[channel]) : next,
+      }))
+    },
+    [channel],
+  )
   const handleSpeechTranscript = useCallback((transcript: string) => {
     // 使用函数式更新读取回调到达那一刻的输入，避免覆盖识别期间玩家新键入的文字。
     setInput((current) => appendSpeechTranscript(current, transcript))
-  }, [])
+  }, [setInput])
   const speechInput = useSpeechInput(handleSpeechTranscript)
   // 单独取稳定方法，避免 effect 依赖每次渲染都会新建的 Hook 返回对象。
   const cancelSpeechInput = speechInput.cancel

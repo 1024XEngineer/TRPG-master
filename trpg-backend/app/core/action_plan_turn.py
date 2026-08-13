@@ -1108,12 +1108,25 @@ class ActionPlanTurnApplication:
             try:
                 return await self._narrator.narrate(context)
             except ActionPlanNarrationValidationError as exc:
+                if attempt == 0 and exc.reason == "required_evidence_missing":
+                    missing = tuple(
+                        item for item in context.narration_evidence if item.required_in_narration
+                    )
+                    context = context.model_copy(
+                        update={
+                            "narration_retry_hint": (
+                                "上一版叙事遗漏了已提交的玩家可见结果："
+                                + "、".join(item.subject_name for item in missing)
+                                + "。必须在正文明确写出，并 claim 对应 evidence ref。"
+                            )
+                        }
+                    )
                 if attempt == 1:
                     if (
                         exc.reason == "required_evidence_missing"
                         and context.termination_status != "needs_clarification"
                     ):
-                        logger.warning(
+                        logger.info(
                             "action_plan_narration_required_evidence_fallback",
                             evidence_refs=[
                                 item.ref

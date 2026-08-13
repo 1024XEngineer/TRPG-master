@@ -88,6 +88,21 @@ class _Orchestrator:
         return SimpleNamespace(run=self.run)
 
 
+class _NarrationContextStub:
+    def __init__(self, evidence: NarrationEvidence, termination_status: str) -> None:
+        self.narration_evidence = (evidence,)
+        self.termination_status = termination_status
+        self.narration_retry_hint: str | None = None
+
+    def model_copy(self, *, update: dict[str, object]):
+        copied = _NarrationContextStub(
+            self.narration_evidence[0],
+            self.termination_status,
+        )
+        copied.narration_retry_hint = cast(str | None, update["narration_retry_hint"])
+        return copied
+
+
 def _application(run: SimpleNamespace, engine: _Engine, orchestrator: _Orchestrator):
     application = object.__new__(ActionPlanTurnApplication)
     application._adjudication_engine = engine
@@ -133,15 +148,15 @@ async def test_narration_falls_back_to_required_player_safe_evidence() -> None:
     )
     context = cast(
         ActionPlanNarrationContext,
-        SimpleNamespace(
-            narration_evidence=(evidence,),
-            termination_status="resolved",
-        ),
+        _NarrationContextStub(evidence, "resolved"),
     )
 
     narration = await application._narrate(context)
 
     assert narrate.await_count == 2
+    retry_context = narrate.await_args_list[1].args[0]
+    assert "石板下的地穴入口" in retry_context.narration_retry_hint
+    assert "claim" in retry_context.narration_retry_hint
     assert narration.claimed_evidence_refs == (evidence.ref,)
     assert "石板下的地穴入口" in narration.text
     assert "沉重石板" in narration.text
@@ -162,10 +177,7 @@ async def test_required_evidence_fallback_never_changes_clarification_scope() ->
     )
     context = cast(
         ActionPlanNarrationContext,
-        SimpleNamespace(
-            narration_evidence=(evidence,),
-            termination_status="needs_clarification",
-        ),
+        _NarrationContextStub(evidence, "needs_clarification"),
     )
 
     with pytest.raises(TurnExecutionError) as raised:

@@ -457,7 +457,9 @@ def _best_label_overlap(text: str, labels: tuple[str, ...]) -> str | None:
 
 class DeterministicActionPlanNarrationModel:
     async def generate(self, context: ActionPlanNarrationContext) -> object:
-        completed = "；".join(step.semantic_goal for step in context.completed_steps)
+        completed = "；".join(
+            _quote_action_summary(step.semantic_goal) for step in context.completed_steps
+        )
         if context.termination_status == "needs_clarification":
             text = f"已经完成的行动是：{completed}。接下来的目标还不够明确，你想具体怎么做？"
             kind = "clarification"
@@ -465,7 +467,8 @@ class DeterministicActionPlanNarrationModel:
             text = f"已经发生的行动是：{completed or '当前没有已完成步骤'}。后续行动已停止。"
             kind = "narration"
         else:
-            text = f"你依次完成了：{completed or context.plan_goal}。"
+            goal = completed or _quote_action_summary(context.plan_goal)
+            text = f"你依次完成了：{goal}。"
             kind = "narration"
         return {
             "kind": kind,
@@ -473,6 +476,12 @@ class DeterministicActionPlanNarrationModel:
             "claimed_evidence_refs": [],
             "suggested_actions": [],
         }
+
+
+def _quote_action_summary(summary: str) -> str:
+    """Keep player-authored first person inside an explicit quotation."""
+
+    return f"「{summary.replace('「', '“').replace('」', '”')}」"
 
 
 class ActionPlanTurnApplication:

@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 
 from collaboration_framework.host.application.narrator import (
-    normalize_narration_text,
+    NarrationValidationError,
+    Narrator,
+    narration_subject_rejection_reason,
     narration_text_rejection_reason,
+    normalize_narration_text,
 )
 
 
@@ -96,6 +100,65 @@ class NarrationTextPolicyTests(unittest.TestCase):
         for text in cases:
             with self.subTest(text=text):
                 self.assertIsNone(narration_text_rejection_reason(text))
+
+    def test_rejects_first_person_subjects_outside_quoted_spans(self) -> None:
+        cases = (
+            "我带着你们进入墓园。",
+            "我当过兵，知道该怎么办。",
+            "我们继续向前走。",
+            "咱们沿着墓碑间的小路前进。",
+            "托马斯说：“我会保护你们。随后我们继续前进。",
+        )
+
+        for text in cases:
+            with self.subTest(text=text):
+                self.assertEqual(
+                    narration_subject_rejection_reason(text),
+                    "subject_ownership",
+                )
+
+    def test_allows_first_person_in_dialogue_and_quoted_titles(self) -> None:
+        cases = (
+            "你对托马斯说：“我会保护你们。”",
+            "托马斯说：「我叔叔以前常来这里。」",
+            "管理员说：『我们没有保存那份报纸。』",
+            "你听见她低声说：‘我记得那个人。’",
+            '托马斯说："我会和你一起去。"',
+            "托马斯说：'我会和你一起去。'",
+            "你翻开《我的秘密生涯》，发现其中缺了几页。",
+        )
+
+        for text in cases:
+            with self.subTest(text=text):
+                self.assertIsNone(narration_subject_rejection_reason(text))
+
+
+class _CandidateNarrationModel:
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+    async def generate(self, context):
+        del context
+        return {
+            "kind": "narration",
+            "text": self.text,
+            "claimed_fact_ids": [],
+            "suggested_actions": [],
+        }
+
+
+class NarratorSubjectPolicyTests(unittest.IsolatedAsyncioTestCase):
+    async def test_narrator_rejects_first_person_subject_in_prose(self) -> None:
+        context = SimpleNamespace(
+            action_result=SimpleNamespace(visible_facts=()),
+        )
+
+        with self.assertRaises(NarrationValidationError) as raised:
+            await Narrator(_CandidateNarrationModel("我带着你们进入墓园。")).narrate(
+                context
+            )
+
+        self.assertEqual(raised.exception.reason, "subject_ownership")
 
 
 if __name__ == "__main__":

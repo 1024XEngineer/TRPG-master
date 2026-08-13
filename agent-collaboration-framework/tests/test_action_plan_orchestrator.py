@@ -293,6 +293,16 @@ class OutOfScopeNarrationModel:
         }
 
 
+class FirstPersonNarrationModel:
+    async def generate(self, context):
+        return {
+            "kind": "narration",
+            "text": "我带着你们进入墓园。",
+            "claimed_evidence_refs": [],
+            "suggested_actions": [],
+        }
+
+
 def runtime(*, two_scenes: bool = False):
     module = load_model("fixtures/demo-module.json", ModuleContent)
     if two_scenes:
@@ -1437,3 +1447,16 @@ async def test_narrator_rejects_evidence_outside_committed_public_refs() -> None
         await ActionPlanNarrator(OutOfScopeNarrationModel()).narrate(context)
 
     assert raised.value.reason == "evidence_scope"
+
+
+@pytest.mark.asyncio
+async def test_narrator_rejects_first_person_subject_in_prose() -> None:
+    service, _, _, _, _ = orchestrator()
+    original = player_input()
+    await service.start_or_resume(original, plan=plan(2))
+    context = await service.build_narration_context(original)
+
+    with pytest.raises(ActionPlanNarrationValidationError) as raised:
+        await ActionPlanNarrator(FirstPersonNarrationModel()).narrate(context)
+
+    assert raised.value.reason == "subject_ownership"

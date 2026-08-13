@@ -14,7 +14,6 @@ from .narrator import (
     narration_text_rejection_reason,
     normalize_narration_text,
 )
-from .persistent_results import unsupported_persistent_claim
 
 
 class ActionPlanNarrationValidationError(ContractError):
@@ -72,23 +71,6 @@ class ActionPlanNarrator:
         subject_rejection = narration_subject_rejection_reason(output.text)
         if subject_rejection is not None:
             raise ActionPlanNarrationValidationError(subject_rejection)
-        committed_results = tuple(
-            result
-            for step in context.completed_steps
-            for result in step.committed_results
-        )
-        persistent_rejection = unsupported_persistent_claim(
-            output.text,
-            committed_results,
-            context.player_view,
-        )
-        if persistent_rejection is not None:
-            raise ActionPlanNarrationValidationError(
-                f"persistent_claim_without_evidence:{persistent_rejection}"
-            )
-        if (
-            context.termination_status == "needs_clarification"
-            and output.kind != "clarification"
-        ):
+        if context.termination_status == "needs_clarification" and output.kind != "clarification":
             raise ActionPlanNarrationValidationError("clarification_kind")
         return output

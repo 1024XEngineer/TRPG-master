@@ -364,7 +364,9 @@
   display: flex;
   flex-direction: column;
   padding-bottom: 0.75rem !important;
-  overflow: hidden;
+  /* 信息页内容会因已选职业面板而变长，必须允许页面自身纵向滚动。 */
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .character-create__page--attributes {
@@ -1127,7 +1129,9 @@
 
 .character-create__occupation {
   display: flex;
-  flex: 1 1 auto;
+  /* 职业区域由内容撑高，统一交给信息页滚动；否则选中职业后新增面板会把
+     内部列表压缩到很小，移动端触摸时表现为列表固定、无法继续浏览。 */
+  flex: 0 0 auto;
   min-height: 0;
   flex-direction: column;
   padding-top: 0.35rem !important;
@@ -1171,6 +1175,16 @@
   border-radius: 0 0 6px 6px !important;
   background: #f1ddb7 !important;
   box-shadow: 0 6px 14px rgb(67 38 14 / 28%), inset 0 0 0 1px rgb(255 244 215 / 62%);
+  /* 分类数量不固定，超出视口时在菜单内部滚动，避免被页面边界裁切。 */
+  max-height: min(60vh, 20rem);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+
+.character-create__category-options::-webkit-scrollbar {
+  display: none;
 }
 
 .character-create__category-options button {
@@ -1248,18 +1262,10 @@
 }
 
 .character-create__occupation-list {
-  flex: 1 1 auto;
-  min-height: 0;
+  /* 避免页面与职业列表形成嵌套滚动，完整列表高度计入页面滚动范围。 */
+  flex: 0 0 auto;
   align-content: start;
-  overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: none;
-  -webkit-overflow-scrolling: touch;
-}
-
-.character-create__occupation-list::-webkit-scrollbar {
-  display: none;
+  overflow: visible;
 }
 
 .character-create__occupation .group {
@@ -1288,14 +1294,15 @@
 }
 
 .character-create__occupation-detail-button {
-  display: flex;
-  flex-direction: column;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 0.2rem 0.35rem !important;
+  width: 1.65rem;
+  height: 1.65rem;
+  padding: 0 !important;
   color: #6f5137 !important;
   font-weight: 700;
-  line-height: 1.05;
+  line-height: 1;
 }
 
 .character-create__book .bg-card,

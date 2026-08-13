@@ -1439,8 +1439,10 @@ export default function CharacterPage() {
                           <div className="text-sm font-semibold text-text-primary">{selectedOcc.name}</div>
                           <div className="flex items-center gap-2 flex-shrink-0">
                             <button onClick={() => setDetailOcc(selectedOcc)}
-                              className="text-[11px] text-brass-dark underline">
-                              详情
+                              aria-label="详情"
+                              title="查看职业详情"
+                              className="character-create__occupation-detail-button rounded-full border border-border-light bg-[rgba(255,255,255,0.55)] text-brass-dark hover:text-text-body transition-all">
+                              <Info aria-hidden="true" className="h-3.5 w-3.5" />
                             </button>
                             <button onClick={() => selectOccupation(null)}
                               className="character-create__cancel-occupation text-[11px] underline">
@@ -1485,10 +1487,10 @@ export default function CharacterPage() {
                         <button
                           onClick={(e) => { e.stopPropagation(); setDetailOcc(occ); }}
                           aria-label={`查看${occ.name}详细内容`}
+                          title="查看职业详情"
                           className="character-create__occupation-detail-button absolute top-1.5 right-1.5 z-[1] rounded-[4px] bg-[rgba(255,255,255,0.55)] border border-border-light px-1.5 py-0.5 text-[9px] text-text-muted hover:text-text-body transition-all"
                         >
-                          <span>查看</span>
-                          <span>详情</span>
+                          <Info aria-hidden="true" className="h-3.5 w-3.5" />
                         </button>
                         <div onClick={() => selectOccupation(occ.id)} className="h-full flex flex-col items-center justify-center">
                           <div className="character-create__occupation-icon text-[20px] mb-1">{occupationIcon(occ)}</div>

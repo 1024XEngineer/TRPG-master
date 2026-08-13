@@ -1414,7 +1414,7 @@ class HostTurnDecisionExecutor:
                     step_index=0,
                     step_request_id=player_input.client_action_id,
                     step=ActionPlanStep(
-                        kind="action",
+                        kind=self._single_action_step_kind(decision.adjudication),
                         semantic_goal=decision.adjudication.summary,
                     ),
                     player_view=view,
@@ -1442,6 +1442,21 @@ class HostTurnDecisionExecutor:
             # the action started on — a single "睡到晚上" moves it too.
             opening_world_time=WorldClockView.from_world(opening_view.world),
         )
+
+    @staticmethod
+    def _single_action_step_kind(
+        adjudication: ActionAdjudication,
+    ) -> Literal["travel", "wait", "rest", "action", "dialogue"]:
+        family = adjudication.method.family
+        if family == "travel":
+            return "travel"
+        if family == "wait":
+            return "wait"
+        if family == "rest":
+            return "rest"
+        if family == "dialogue":
+            return "dialogue"
+        return "action"
 
     @staticmethod
     def _bind_single_adjudication(

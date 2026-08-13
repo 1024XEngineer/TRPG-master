@@ -1430,6 +1430,21 @@ def single_action_decision(*, world_ref: str, valid_target: bool) -> SingleActio
     )
 
 
+def single_travel_decision(*, target_id: str) -> SingleActionDecision:
+    return SingleActionDecision(
+        adjudication=ActionAdjudication(
+            request_id="untrusted",
+            source_revision="untrusted",
+            actor_id="untrusted",
+            summary="前往墓地",
+            target=ActionTarget(kind="location", id=target_id),
+            method=ActionMethod(family="travel", description="前往墓地"),
+            check=NoAdjudicationCheck(),
+            success_effects=(EnterLocationEffect(location_id=target_id),),
+        )
+    )
+
+
 @pytest.mark.asyncio
 async def test_single_action_auto_repair_succeeds_without_creating_plan_run() -> None:
     module, engine_store, projector = runtime()
@@ -1462,6 +1477,42 @@ async def test_single_action_auto_repair_succeeds_without_creating_plan_run() ->
     assert len(repair_adjudicator.contexts) == 1
     context = repair_adjudicator.contexts[0]
     assert context.step_request_id == original.client_action_id
+    assert context.previous_rejection == "TARGET_UNAVAILABLE: 当前目标不可用于这次行动"
+    assert await plan_store.load(original.room_id, original.client_action_id) is None
+    assert len(engine_store.inspect_domain_events(original.room_id)) == 1
+
+
+@pytest.mark.asyncio
+async def test_single_travel_repair_preserves_semantic_step_kind() -> None:
+    module, engine_store, projector = runtime()
+    plan_store = InMemoryActionPlanRunStore()
+    engine = AdjudicationEngineService(engine_store)
+    repair_adjudicator = RecordingAdjudicator(module.world_ref)
+    orchestrator_service = ActionPlanOrchestrator(
+        store=plan_store,
+        adjudicator=repair_adjudicator,
+        executor=engine,
+        player_view_projector=projector,
+    )
+    dispatcher = HostTurnDecisionExecutor(
+        plan_orchestrator=orchestrator_service,
+        executor=engine,
+        player_view_projector=projector,
+        repair_adjudicator=repair_adjudicator,
+        policy=ActionPlanPolicy(),
+    )
+    original = player_input("single-travel-repair", "前往墓地")
+
+    result = await dispatcher.execute(
+        original,
+        single_travel_decision(target_id="missing-location"),
+    )
+
+    assert isinstance(result, SingleActionTurnResult)
+    assert result.execution.status == "resolved"
+    assert len(repair_adjudicator.contexts) == 1
+    context = repair_adjudicator.contexts[0]
+    assert context.step.kind == "travel"
     assert context.previous_rejection == "TARGET_UNAVAILABLE: 当前目标不可用于这次行动"
     assert await plan_store.load(original.room_id, original.client_action_id) is None
     assert len(engine_store.inspect_domain_events(original.room_id)) == 1

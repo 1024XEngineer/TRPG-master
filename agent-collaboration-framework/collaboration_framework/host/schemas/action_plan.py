@@ -100,11 +100,15 @@ class ActionPlanStepRun(ContractModel):
     repair_attempts: int = Field(default=0, ge=0, le=8)
     last_validation_code: str | None = Field(default=None, min_length=1, max_length=100)
     last_validation_message: str | None = Field(default=None, min_length=1, max_length=512)
+    repair_baseline: ActionAdjudication | None = None
+    repair_feedback: ValidationFeedback | None = None
 
     @model_validator(mode="after")
     def validate_state(self) -> ActionPlanStepRun:
         if (self.last_validation_code is None) != (self.last_validation_message is None):
             raise ValueError("last_validation_code/message 必须同时存在或同时为空")
+        if (self.repair_baseline is None) != (self.repair_feedback is None):
+            raise ValueError("repair_baseline/feedback 必须同时存在或同时为空")
         if self.adjudication is not None:
             if self.adjudication.request_id != self.step_request_id:
                 raise ValueError(

@@ -15,6 +15,7 @@ from collaboration_framework.contracts import (
     AdvanceWorldTimeEffect,
     CancelActionPlanRequest,
     CheckDecisionRequest,
+    ChangeEntityStateEffect,
     ContractError,
     EnterLocationEffect,
     GetAdjudicationStatusRequest,
@@ -65,7 +66,9 @@ def load_model(path: str, model_type):
     return model_type.model_validate_json((ROOT / path).read_text(encoding="utf-8"))
 
 
-def player_input(action_id: str = "parent-plan-1", utterance: str = "连续行动") -> PlayerInput:
+def player_input(
+    action_id: str = "parent-plan-1", utterance: str = "连续行动"
+) -> PlayerInput:
     return PlayerInput(
         room_id="room_01",
         player_id="player_01",
@@ -116,7 +119,9 @@ class RecordingAdjudicator:
             actor_id="model-cannot-control-this",
             summary=context.step.semantic_goal,
             target=ActionTarget(kind="world", id=self.world_ref),
-            method=ActionMethod(family=context.step.kind, description=context.step.semantic_goal),
+            method=ActionMethod(
+                family=context.step.kind, description=context.step.semantic_goal
+            ),
             check=check,
             success_effects=(NarrativeOnlyEffect(),),
             failure_effects=(NarrativeOnlyEffect(),),
@@ -142,7 +147,9 @@ class CanonTravelAdjudicator(RecordingAdjudicator):
                 success_effects=(EnterLocationEffect(location_id="cemetery"),),
             )
         assert context.player_view.scene.id == "cemetery"
-        assert "butler" in {entity.id for entity in context.player_view.scene.visible_entities}
+        assert "butler" in {
+            entity.id for entity in context.player_view.scene.visible_entities
+        }
         return ActionAdjudication(
             request_id="untrusted",
             source_revision="untrusted",
@@ -277,9 +284,61 @@ class MislabeledTargetAdjudicator(RecordingAdjudicator):
             actor_id="untrusted",
             summary=context.step.semantic_goal,
             target=ActionTarget(kind="location", id=self.world_ref),
-            method=ActionMethod(family="action", description=context.step.semantic_goal),
+            method=ActionMethod(
+                family="action", description=context.step.semantic_goal
+            ),
             check=NoAdjudicationCheck(),
             success_effects=(NarrativeOnlyEffect(),),
+        )
+
+
+class PersistentRepairAdjudicator(RecordingAdjudicator):
+    """首次不给持久效果，收到 Engine 反馈后补齐昏迷效果。"""
+
+    async def adjudicate(self, context):
+        self.contexts.append(context)
+        if context.previous_rejection is None:
+            return ActionAdjudication(
+                request_id="untrusted",
+                source_revision="untrusted",
+                actor_id="untrusted",
+                summary="击晕守墓人",
+                target=ActionTarget(kind="entity", id="butler"),
+                method=ActionMethod(family="knock_out", description="用撬棍砸晕他"),
+                persistence_intent="character_state",
+                check=NoAdjudicationCheck(),
+            )
+        return ActionAdjudication(
+            request_id="untrusted",
+            source_revision="untrusted",
+            actor_id="untrusted",
+            summary="击晕守墓人",
+            target=ActionTarget(kind="entity", id="butler"),
+            method=ActionMethod(family="knock_out", description="用撬棍砸晕他"),
+            persistence_intent="character_state",
+            check=NoAdjudicationCheck(),
+            success_effects=(
+                ChangeEntityStateEffect(
+                    entity_id="butler",
+                    key="consciousness",
+                    value="unconscious",
+                ),
+            ),
+        )
+
+
+class PersistentEmptyAdjudicator(PersistentRepairAdjudicator):
+    async def adjudicate(self, context):
+        self.contexts.append(context)
+        return ActionAdjudication(
+            request_id="untrusted",
+            source_revision="untrusted",
+            actor_id="untrusted",
+            summary="击晕守墓人",
+            target=ActionTarget(kind="entity", id="butler"),
+            method=ActionMethod(family="knock_out", description="用撬棍砸晕他"),
+            persistence_intent="character_state",
+            check=NoAdjudicationCheck(),
         )
 
 
@@ -375,7 +434,11 @@ async def test_five_steps_cross_soft_window_without_becoming_product_limit() -> 
 
     assert first_window.run.status == "checkpointed"
     assert first_window.run.current_step_index == 3
-    assert [context.player_view.revision for context in adjudicator.contexts] == ["0", "1", "2"]
+    assert [context.player_view.revision for context in adjudicator.contexts] == [
+        "0",
+        "1",
+        "2",
+    ]
 
     completed_actions = await service.start_or_resume(
         original,
@@ -401,7 +464,9 @@ async def test_five_steps_cross_soft_window_without_becoming_product_limit() -> 
 
 
 @pytest.mark.asyncio
-async def test_persisted_narration_recovery_finishes_plan_without_replaying_engine_steps() -> None:
+async def test_persisted_narration_recovery_finishes_plan_without_replaying_engine_steps() -> (
+    None
+):
     service, _, _, _, engine_store = orchestrator()
     original = player_input("narration-recovery-parent")
 
@@ -721,9 +786,9 @@ async def test_post_roll_retry_resolves_plan_once_without_duplicate_effects() ->
     assert completed.run.status == "awaiting_narration"
     assert completed.run.current_step_index == 2
     assert len(engine_store.inspect_domain_events("room_01")) == 7
-    assert [event.type for event in engine_store.inspect_domain_events("room_01")].count(
-        "action.succeeded"
-    ) == 2
+    assert [
+        event.type for event in engine_store.inspect_domain_events("room_01")
+    ].count("action.succeeded") == 2
 
 
 @pytest.mark.asyncio
@@ -804,7 +869,9 @@ async def test_failed_plan_step_leaves_a_run_that_can_still_be_loaded() -> None:
 
 
 @pytest.mark.asyncio
-async def test_engine_commit_before_plan_cursor_update_reconciles_without_replay() -> None:
+async def test_engine_commit_before_plan_cursor_update_reconciles_without_replay() -> (
+    None
+):
     module, engine_store, projector = runtime()
     engine = AdjudicationEngineService(engine_store)
     crashing = CrashAfterCommitExecutor(engine)
@@ -1090,7 +1157,10 @@ async def test_engine_rejection_repair_is_attempted_at_most_once() -> None:
 
     assert failed.run.status == "needs_clarification"
     assert failed.run.steps[1].safe_failure_code == "STEP_ADJUDICATION_REJECTED"
-    assert len([context for context in adjudicator.contexts if context.step_index == 1]) == 2
+    assert (
+        len([context for context in adjudicator.contexts if context.step_index == 1])
+        == 2
+    )
     # The first step stays committed; the refused one never reaches the Engine.
     assert len(engine_store.inspect_domain_events("room_01")) == 1
 
@@ -1212,6 +1282,50 @@ async def test_single_action_fast_path_creates_no_plan_run() -> None:
 
 
 @pytest.mark.asyncio
+async def test_action_plan_persistent_empty_effect_is_repaired_once() -> None:
+    service, adjudicator, _, _, engine_store = orchestrator(
+        adjudicator=PersistentRepairAdjudicator("coc-7e")
+    )
+    result = await service.start_or_resume(
+        player_input("persistent-repair"),
+        plan=ActionPlan(
+            goal="击晕守墓人",
+            steps=(
+                ActionPlanStep(kind="action", semantic_goal="击晕守墓人"),
+                ActionPlanStep(kind="dialogue", semantic_goal="继续行动"),
+            ),
+        ),
+    )
+    assert result.run.status == "awaiting_narration"
+    assert len([c for c in adjudicator.contexts if c.step_index == 0]) == 2
+    assert result.latest_execution is not None
+    assert result.latest_execution.committed_results[0].state_value == "unconscious"
+    assert len(engine_store.inspect_domain_events("room_01")) == 4
+
+
+@pytest.mark.asyncio
+async def test_action_plan_persistent_empty_effect_twice_needs_clarification() -> None:
+    service, adjudicator, _, _, engine_store = orchestrator(
+        adjudicator=PersistentEmptyAdjudicator("coc-7e")
+    )
+    result = await service.start_or_resume(
+        player_input("persistent-clarification"),
+        plan=ActionPlan(
+            goal="击晕守墓人",
+            steps=(
+                ActionPlanStep(kind="action", semantic_goal="击晕守墓人"),
+                ActionPlanStep(kind="dialogue", semantic_goal="不应执行"),
+            ),
+        ),
+    )
+    assert result.run.status == "needs_clarification"
+    assert result.run.steps[0].status == "stopped"
+    assert result.run.steps[1].status == "pending"
+    assert len(engine_store.inspect_domain_events("room_01")) == 0
+    assert len([c for c in adjudicator.contexts if c.step_index == 0]) == 2
+
+
+@pytest.mark.asyncio
 async def test_parent_id_reuse_with_different_input_fails_closed() -> None:
     service, _, _, _, _ = orchestrator()
     await service.start_or_resume(
@@ -1287,8 +1401,12 @@ async def test_cancel_remaining_is_idempotent_at_checkpoint_boundary() -> None:
 
 
 @pytest.mark.asyncio
-async def test_needs_clarification_can_be_cancelled_without_running_later_steps() -> None:
-    service, _, _, _, engine_store = orchestrator(adjudicator=ClarificationAdjudicator())
+async def test_needs_clarification_can_be_cancelled_without_running_later_steps() -> (
+    None
+):
+    service, _, _, _, engine_store = orchestrator(
+        adjudicator=ClarificationAdjudicator()
+    )
     original = player_input()
 
     paused = await service.start_or_resume(original, plan=plan(2))
@@ -1311,7 +1429,9 @@ async def test_needs_clarification_can_be_cancelled_without_running_later_steps(
 
 
 @pytest.mark.asyncio
-async def test_progress_delivery_failure_does_not_change_authoritative_execution() -> None:
+async def test_progress_delivery_failure_does_not_change_authoritative_execution() -> (
+    None
+):
     service, _, _, _, engine_store = orchestrator()
 
     async def unavailable_progress_sink(event) -> None:
@@ -1421,7 +1541,10 @@ async def test_narration_context_dates_each_step_by_its_own_clock() -> None:
     context = await service.build_narration_context(original)
 
     assert context.opening_world_time is not None
-    assert (context.opening_world_time.hour_of_day, context.opening_world_time.time_of_day) == (
+    assert (
+        context.opening_world_time.hour_of_day,
+        context.opening_world_time.time_of_day,
+    ) == (
         12,
         "day",
     )

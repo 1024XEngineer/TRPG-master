@@ -176,6 +176,65 @@
       "title": "CheckRunView",
       "type": "object"
     },
+    "CommittedResult": {
+      "additionalProperties": false,
+      "description": "玩家安全的已提交结果摘要，不复制原始事件载荷或内部裁决信息。",
+      "properties": {
+        "kind": {
+          "enum": [
+            "none",
+            "character_state",
+            "object_state",
+            "inventory",
+            "location"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "target_id": {
+          "minLength": 1,
+          "title": "Target Id",
+          "type": "string"
+        },
+        "state_key": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "State Key"
+        },
+        "state_value": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/JsonValue"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "event_ref": {
+          "minLength": 1,
+          "title": "Event Ref",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "target_id",
+        "event_ref"
+      ],
+      "title": "CommittedResult",
+      "type": "object"
+    },
+    "JsonValue": {},
     "PendingCheckDecisionView": {
       "additionalProperties": false,
       "properties": {
@@ -451,6 +510,14 @@
         "type": "string"
       },
       "title": "Public Event Refs",
+      "type": "array"
+    },
+    "committed_results": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/CommittedResult"
+      },
+      "title": "Committed Results",
       "type": "array"
     }
   },

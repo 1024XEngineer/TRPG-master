@@ -12,10 +12,12 @@ from uuid import uuid4
 from collaboration_framework.contracts import (
     ActionAdjudication,
     ActionPlan,
+    ActionPlanStep,
     ActionPlanPolicy,
     ActionPlanPolicyError,
     ActionPlanProgressEvent,
     AdjudicationExecution,
+    AdjudicationValidationError,
     CancelActionPlanRequest,
     ContractError,
     GetAdjudicationStatusRequest,
@@ -45,6 +47,7 @@ from collaboration_framework.host.schemas import (
     ActionPlanStepRun,
     CompletedPlanStepSummary,
     SingleActionTurnResult,
+    SingleActionClarificationResult,
 )
 
 from .host_agent_intent_resolver import TurnExecutionError
@@ -248,7 +251,9 @@ class ActionPlanOrchestrator:
                     run = await self._release_lease(run)
                     return ActionPlanAdvanceResult(
                         run=run,
-                        player_view=await self._player_view_projector.project(player_input),
+                        player_view=await self._player_view_projector.project(
+                            player_input
+                        ),
                     )
                 step_run = run.steps[step_index]
 
@@ -289,16 +294,28 @@ class ActionPlanOrchestrator:
                             action_request_id=step_run.step_request_id,
                         )
                     )
-                    if status.status != "not_submitted" and status.execution is not None:
+                    if (
+                        status.status != "not_submitted"
+                        and status.execution is not None
+                    ):
                         latest = status.execution
                         rejection = None
                         break
-                    if repair_attempt == 1 or await self._revision_moved(step_run, player_input):
+                    auto_repairable = (
+                        isinstance(exc, AdjudicationValidationError)
+                        and exc.result.repairability == "auto_repairable"
+                    )
+                    if (
+                        repair_attempt == 1
+                        or not auto_repairable
+                        or await self._revision_moved(step_run, player_input)
+                    ):
                         break
+                    feedback = exc.result.to_feedback()
                     run = await self._freeze_current_adjudication(
                         run,
                         player_input,
-                        previous_rejection=str(exc),
+                        previous_rejection=feedback.player_safe_reason,
                     )
                     if run.status != "active":
                         # The re-adjudication itself failed; it already recorded
@@ -306,7 +323,9 @@ class ActionPlanOrchestrator:
                         run = await self._release_lease(run)
                         return ActionPlanAdvanceResult(
                             run=run,
-                            player_view=await self._player_view_projector.project(player_input),
+                            player_view=await self._player_view_projector.project(
+                                player_input
+                            ),
                         )
                     step_run = run.steps[step_index]
 
@@ -539,7 +558,9 @@ class ActionPlanOrchestrator:
                 "PLAN_CANCEL_IN_PROGRESS",
                 "当前行动计划已有一个取消请求正在处理",
             )
-        if run.status != "waiting_for_player" or run.current_step_index >= len(run.steps):
+        if run.status != "waiting_for_player" or run.current_step_index >= len(
+            run.steps
+        ):
             raise ActionPlanPolicyError(
                 "PLAN_CANCEL_NOT_AT_BOUNDARY",
                 "当前步骤已经开始；请先完成或取消当前检定，再取消剩余计划",
@@ -620,6 +641,37 @@ class ActionPlanOrchestrator:
     ) -> ActionPlanRun | None:
         return await self._store.load(room_id, parent_action_id)
 
+    async def adjudicate_single_repair(
+        self,
+        player_input: PlayerInput,
+        *,
+        semantic_goal: str,
+        previous_rejection: str,
+    ) -> ActionAdjudication:
+        """复用步骤裁决器修复单动作，始终基于拒绝后的最新 PlayerView。"""
+
+        view = await self._player_view_projector.project(player_input)
+        context = ActionPlanStepContext(
+            player_input=player_input,
+            plan_id=f"single-{player_input.client_action_id}",
+            plan_goal=semantic_goal,
+            step_index=0,
+            step_request_id=player_input.client_action_id,
+            step=ActionPlanStep(kind="action", semantic_goal=semantic_goal),
+            player_view=view,
+            previous_rejection=previous_rejection,
+            keeper_capabilities=await self._keeper_capabilities(player_input, view),
+        )
+        proposal = await self._adjudicator.adjudicate(context)
+        return proposal.model_copy(
+            update={
+                "request_id": player_input.client_action_id,
+                "source_revision": view.revision,
+                "actor_id": player_input.actor_id,
+            },
+            deep=True,
+        )
+
     async def build_narration_context(
         self,
         player_input: PlayerInput,
@@ -640,7 +692,9 @@ class ActionPlanOrchestrator:
             or run.actor_id != player_input.actor_id
             or run.parent_action_id != player_input.client_action_id
         ):
-            raise ActionPlanPolicyError("PARENT_ACTION_CONFLICT", "行动计划 owner 不一致")
+            raise ActionPlanPolicyError(
+                "PARENT_ACTION_CONFLICT", "行动计划 owner 不一致"
+            )
         termination = {
             "awaiting_narration": "resolved",
             "completed": "resolved",
@@ -798,7 +852,9 @@ class ActionPlanOrchestrator:
             )
             return await self._mark_step_failure(
                 run,
-                plan_status="retryable_failure" if exc.retryable else "needs_clarification",
+                plan_status="retryable_failure"
+                if exc.retryable
+                else "needs_clarification",
                 step_status="pending" if exc.retryable else "stopped",
                 code=exc.code,
             )
@@ -939,8 +995,13 @@ class ActionPlanOrchestrator:
                 tuple(steps),
                 status="waiting_for_player",
             )
-        if execution.status == "cancelled" or execution.outcome in {"failure", "cancelled"}:
-            code = "STEP_CANCELLED" if execution.status == "cancelled" else "STEP_FAILED"
+        if execution.status == "cancelled" or execution.outcome in {
+            "failure",
+            "cancelled",
+        }:
+            code = (
+                "STEP_CANCELLED" if execution.status == "cancelled" else "STEP_FAILED"
+            )
             steps[index] = current.model_copy(
                 update={**common, "status": "stopped", "safe_failure_code": code},
                 deep=True,
@@ -1038,7 +1099,9 @@ class ActionPlanOrchestrator:
             "steps": steps,
             "status": next_status,
             "current_step_index": (
-                run.current_step_index if current_step_index is None else current_step_index
+                run.current_step_index
+                if current_step_index is None
+                else current_step_index
             ),
             "run_version": run.run_version + 1,
             "lease_owner": None if release_lease else run.lease_owner,
@@ -1124,7 +1187,9 @@ class ActionPlanOrchestrator:
             )
 
     @staticmethod
-    def _completed_summaries(run: ActionPlanRun) -> tuple[CompletedPlanStepSummary, ...]:
+    def _completed_summaries(
+        run: ActionPlanRun,
+    ) -> tuple[CompletedPlanStepSummary, ...]:
         summaries: list[CompletedPlanStepSummary] = []
         for index, step in enumerate(run.steps[: run.current_step_index]):
             execution = step.adjudication_execution
@@ -1138,6 +1203,7 @@ class ActionPlanOrchestrator:
                     view_revision=execution.view_revision,
                     world_time_after=step.world_time_after,
                     event_refs=execution.public_event_refs,
+                    committed_results=execution.committed_results,
                 )
             )
         return tuple(summaries)
@@ -1159,6 +1225,7 @@ class ActionPlanOrchestrator:
                         view_revision=execution.view_revision,
                         world_time_after=step.world_time_after,
                         event_refs=execution.public_event_refs,
+                        committed_results=execution.committed_results,
                     )
                 )
         return tuple(summaries)
@@ -1236,7 +1303,11 @@ class HostTurnDecisionExecutor:
         decision: HostTurnDecision,
         *,
         on_progress: ActionPlanProgressObserver | None = None,
-    ) -> SingleActionTurnResult | ActionPlanAdvanceResult:
+    ) -> (
+        SingleActionTurnResult
+        | SingleActionClarificationResult
+        | ActionPlanAdvanceResult
+    ):
         if isinstance(decision, ActionPlan):
             return await self._plan_orchestrator.start_or_resume(
                 player_input,
@@ -1260,13 +1331,36 @@ class HostTurnDecisionExecutor:
             },
             deep=True,
         )
-        execution = await self._executor.submit(
-            SubmitAdjudicationRequest(
-                room_id=player_input.room_id,
-                player_id=player_input.player_id,
-                adjudication=adjudication,
-            )
-        )
+        opening_world_time = WorldClockView.from_world(view.world)
+        for repair_attempt in range(2):
+            try:
+                execution = await self._executor.submit(
+                    SubmitAdjudicationRequest(
+                        room_id=player_input.room_id,
+                        player_id=player_input.player_id,
+                        adjudication=adjudication,
+                    )
+                )
+                break
+            except AdjudicationValidationError as exc:
+                feedback = exc.result.to_feedback()
+                if exc.result.repairability != "auto_repairable":
+                    raise
+                if repair_attempt == 1:
+                    return SingleActionClarificationResult(
+                        player_view=await self._player_view_projector.project(
+                            player_input
+                        ),
+                        player_safe_reason=feedback.player_safe_reason,
+                        opening_world_time=opening_world_time,
+                    )
+                adjudication = await self._plan_orchestrator.adjudicate_single_repair(
+                    player_input,
+                    semantic_goal=decision.adjudication.summary,
+                    previous_rejection=(feedback.player_safe_reason),
+                )
+        else:  # pragma: no cover - 两次循环总会提交成功或返回澄清。
+            raise AssertionError("unreachable")
         return SingleActionTurnResult(
             execution=execution,
             player_view=await self._player_view_projector.refresh_adjudication(
@@ -1275,5 +1369,5 @@ class HostTurnDecisionExecutor:
             ),
             # `view` was projected before the submit above, so this is the clock
             # the action started on — a single "睡到晚上" moves it too.
-            opening_world_time=WorldClockView.from_world(view.world),
+            opening_world_time=opening_world_time,
         )

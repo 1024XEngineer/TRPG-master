@@ -76,6 +76,11 @@ from .models import (
     WorldTimeState,
 )
 from .navigation import resolve_location_target
+from .persistent_results import (
+    committed_results_from_events,
+    is_public_standard_state,
+    validate_persistent_effects,
+)
 from .ports import EngineStore
 from .timeline import advanced_to_next, next_point_after, time_advance_block_reason
 from .rules_v3 import (
@@ -593,6 +598,7 @@ class AdjudicationEngineService:
                     outcome="success",
                     event_refs=tuple(event.event_id for event in events),
                     public_event_refs=self._public_event_refs(events),
+                    committed_results=committed_results_from_events(events),
                 )
                 await transaction.commit_adjudication(
                     expected_revision=runtime.revision,
@@ -870,6 +876,7 @@ class AdjudicationEngineService:
                 check_run=self._run_view(check_run),
                 event_refs=tuple(event.event_id for event in events),
                 public_event_refs=self._public_event_refs(events),
+                committed_results=committed_results_from_events(events),
             )
             rule_effects_excluded = (
                 decision.adjudication.rule_decision is not None and runtime.is_v3
@@ -1079,6 +1086,7 @@ class AdjudicationEngineService:
                 check_run=self._run_view(resolved_run),
                 event_refs=tuple(event.event_id for event in events),
                 public_event_refs=self._public_event_refs(events),
+                committed_results=committed_results_from_events(events),
             )
             rule_effects_excluded = (
                 check_run.adjudication.rule_decision is not None and runtime.is_v3
@@ -1215,6 +1223,17 @@ class AdjudicationEngineService:
                         "RuleDecision 超出当前可用范围: "
                         f"{adjudication.rule_decision.rule_id}"
                     ),
+                )
+        else:
+            # 自由行动的完整性必须在创建待检定、掷骰或写入事件之前完成；规则路径
+            # 的效果由模组拥有，因此仍允许模型 success_effects 为空。
+            persistent_problem = validate_persistent_effects(adjudication)
+            if persistent_problem is not None:
+                self._reject_validation(
+                    persistent_problem.code,
+                    repairability="auto_repairable",
+                    fault="agent",
+                    player_safe_reason=persistent_problem.player_safe_reason,
                 )
         self._validate_effect_sequence(runtime, adjudication.success_effects)
         self._validate_effect_sequence(runtime, adjudication.failure_effects)
@@ -2327,7 +2346,7 @@ class AdjudicationEngineService:
                         "updated_revision": revision,
                     }
                 )
-                state = state.model_copy(update={"item_instances": items}, deep=True)
+                updates: dict[str, object] = {"item_instances": items}
             else:
                 runtime_entities = deepcopy(state.runtime_entities)
                 entity_states = deepcopy(state.entities)
@@ -2335,13 +2354,17 @@ class AdjudicationEngineService:
                 if target is None:
                     target = entity_states.setdefault(effect.entity_id, {})
                 target[effect.key] = effect.value
-                state = state.model_copy(
-                    update={
-                        "runtime_entities": runtime_entities,
-                        "entities": entity_states,
-                    },
-                    deep=True,
-                )
+                updates = {
+                    "runtime_entities": runtime_entities,
+                    "entities": entity_states,
+                }
+            if is_public_standard_state(effect):
+                public_keys = deepcopy(state.public_entity_state_keys)
+                keys = set(public_keys.get(effect.entity_id, ()))
+                keys.add(effect.key)
+                public_keys[effect.entity_id] = tuple(sorted(keys))
+                updates["public_entity_state_keys"] = public_keys
+            state = state.model_copy(update=updates, deep=True)
             event_type = "entity.state_changed"
             payload = {
                 "entity_id": effect.entity_id,

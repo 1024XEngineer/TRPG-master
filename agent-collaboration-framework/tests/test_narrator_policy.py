@@ -306,6 +306,26 @@ class PersistentNarrationPolicyTests(unittest.IsolatedAsyncioTestCase):
                 ).narrate(context)
                 self.assertEqual(output.text, text)
 
+    async def test_rejects_ambiguous_pronoun_when_multiple_entities_match(self):
+        """多个 NPC 都有同类状态时，未绑定的“他”不能任选证据。"""
+        entities = tuple(
+            SimpleNamespace(
+                id=entity_id,
+                name=name,
+                aliases=(),
+                observable_state=(
+                    SimpleNamespace(key="consciousness", value="unconscious"),
+                ),
+            )
+            for entity_id, name in (("butler", "守墓人"), ("guard", "守卫"))
+        )
+        context = self._context()
+        context.player_view.scene.visible_entities = entities
+        with self.assertRaises(ActionPlanNarrationValidationError):
+            await ActionPlanNarrator(
+                _PersistentNarrationModel("他昏迷了。")
+            ).narrate(context)
+
 
 if __name__ == "__main__":
     unittest.main()

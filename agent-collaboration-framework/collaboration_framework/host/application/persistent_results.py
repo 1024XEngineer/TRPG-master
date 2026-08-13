@@ -73,20 +73,26 @@ def unsupported_persistent_claim(
                     )
                 )
             }
-            has_evidence = any(
-                result.state_key == key
-                and result.state_value == value
-                and (not mentioned_ids or result.target_id in mentioned_ids)
+            evidence_target_ids = {
+                result.target_id
                 for result in committed_results
-            )
-            if not has_evidence and player_view is not None:
-                has_evidence = any(
-                    state.key == key
-                    and state.value == value
-                    and (not mentioned_ids or entity.id in mentioned_ids)
+                if result.state_key == key and result.state_value == value
+            }
+            if player_view is not None:
+                evidence_target_ids.update(
+                    entity.id
                     for entity in player_view.scene.visible_entities
-                    for state in entity.observable_state
+                    if any(
+                        state.key == key and state.value == value
+                        for state in entity.observable_state
+                    )
                 )
+            if mentioned_ids:
+                has_evidence = bool(mentioned_ids & evidence_target_ids)
+            else:
+                # “他/目标”等指代没有名称绑定时，只允许唯一状态候选，
+                # 多个实体都符合时必须拒绝，不能任选一个套用证据。
+                has_evidence = len(evidence_target_ids) == 1
             if not has_evidence:
                 return key
     return None

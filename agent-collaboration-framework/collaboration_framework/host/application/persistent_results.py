@@ -92,9 +92,25 @@ def unsupported_persistent_claim(
                 # 多实体同句必须逐一有证据，不能只凭其中一个实体背书整句。
                 has_evidence = mentioned_ids.issubset(evidence_target_ids)
             else:
-                # “他/目标”等指代没有名称绑定时，只允许唯一状态候选，
-                # 多个实体都符合时必须拒绝，不能任选一个套用证据。
-                has_evidence = len(evidence_target_ids) == 1
+                # “他/目标”等指代必须同时满足“场景中只有一个可能目标”和
+                # “该目标有精确证据”；只有一个有证据的 NPC 并不代表它是
+                # 唯一目标，否则会把 NPC A 的状态错误套到 NPC B 身上。
+                character_keys = {"consciousness", "posture", "restraint", "injury"}
+                expected_kind = "npc" if key in character_keys else "object"
+                candidate_ids = {
+                    entity.id
+                    for entity in entities
+                    if getattr(entity, "kind", "npc") == expected_kind
+                }
+                if entities:
+                    # 有场景投影时，候选必须来自当前可见实体，避免跨实体串状态。
+                    has_evidence = (
+                        len(candidate_ids) == 1
+                        and candidate_ids.issubset(evidence_target_ids)
+                    )
+                else:
+                    # 旧调用方可能只提供本回合证据而没有场景投影，保持兼容。
+                    has_evidence = len(evidence_target_ids) == 1
             if not has_evidence:
                 return key
     return None

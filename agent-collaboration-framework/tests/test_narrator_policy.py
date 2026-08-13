@@ -326,6 +326,51 @@ class PersistentNarrationPolicyTests(unittest.IsolatedAsyncioTestCase):
                 _PersistentNarrationModel("他昏迷了。")
             ).narrate(context)
 
+    async def test_rejects_unbound_pronoun_when_other_visible_npc_lacks_evidence(self):
+        """多个 NPC 同场时，即使只有一个有证据也不能用“他”隐式绑定目标。"""
+        entities = (
+            SimpleNamespace(
+                id="butler",
+                kind="npc",
+                name="守墓人",
+                aliases=(),
+                observable_state=(
+                    SimpleNamespace(key="consciousness", value="unconscious"),
+                ),
+            ),
+            SimpleNamespace(
+                id="guard",
+                kind="npc",
+                name="守卫",
+                aliases=(),
+                observable_state=(),
+            ),
+        )
+        context = self._context()
+        context.player_view.scene.visible_entities = entities
+        with self.assertRaises(ActionPlanNarrationValidationError):
+            await ActionPlanNarrator(
+                _PersistentNarrationModel("他昏迷了。")
+            ).narrate(context)
+
+    async def test_allows_unbound_pronoun_with_single_visible_npc(self):
+        """场景只有一个可见 NPC 且有精确证据时，保留“他”的兼容语义。"""
+        entity = SimpleNamespace(
+            id="butler",
+            kind="npc",
+            name="守墓人",
+            aliases=(),
+            observable_state=(
+                SimpleNamespace(key="consciousness", value="unconscious"),
+            ),
+        )
+        context = self._context()
+        context.player_view.scene.visible_entities = (entity,)
+        output = await ActionPlanNarrator(
+            _PersistentNarrationModel("他昏迷了。")
+        ).narrate(context)
+        self.assertEqual(output.text, "他昏迷了。")
+
     async def test_requires_all_named_entities_to_have_matching_evidence(self):
         """同一句点名多个实体时，所有实体都必须有对应状态证据。"""
         entities = (

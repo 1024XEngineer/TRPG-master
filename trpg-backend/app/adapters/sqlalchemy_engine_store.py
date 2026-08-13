@@ -50,6 +50,14 @@ from app.models.engine import (
 )
 from app.models.room import Room
 
+# 落库 JSON 的 schema 版本。#310 给 CheckRun / CheckRunView 各加了字段，老行没有
+# 这些键，直接 model_validate 会当场失败——正卡在 awaiting_post_roll_decision 的
+# 房间一提交奖惩骰决定就炸。读路径按版本升级，写路径一律写当前版本。
+_CHECK_RUN_SCHEMA_VERSION = 2
+_SUPPORTED_CHECK_RUN_VERSIONS = frozenset({1, _CHECK_RUN_SCHEMA_VERSION})
+_ADJUDICATION_RESULT_SCHEMA_VERSION = 3
+_SUPPORTED_ADJUDICATION_RESULT_VERSIONS = frozenset({1, 2, _ADJUDICATION_RESULT_SCHEMA_VERSION})
+
 
 class SqlAlchemyEngineStore(EngineStore):
     """为每个规则引擎事务创建独立数据库 Session 和原子事务。"""
@@ -250,14 +258,14 @@ class _SqlAlchemyEngineTransaction(EngineTransaction):
         self._committed_request_id: str | None = None
         self._content_schema_version: int | None = None
 
-    @staticmethod
-    def _completed_adjudication_from_record(
+    async def _completed_adjudication_from_record(
+        self,
         record: AdjudicationCommandExecution,
     ) -> CompletedAdjudicationCommand:
-        if record.request_schema_version != 1 or record.result_schema_version not in {
-            1,
-            2,
-        }:
+        if (
+            record.request_schema_version != 1
+            or record.result_schema_version not in _SUPPORTED_ADJUDICATION_RESULT_VERSIONS
+        ):
             raise ContractError("不支持的裁决命令 schema version")
         if record.result_schema_version == 1:
             result_payload = {
@@ -268,6 +276,8 @@ class _SqlAlchemyEngineTransaction(EngineTransaction):
             }
         else:
             result_payload = deepcopy(record.result_json)
+        if record.result_schema_version < _ADJUDICATION_RESULT_SCHEMA_VERSION:
+            await self._upgrade_embedded_check_run_view(result_payload)
         return CompletedAdjudicationCommand.model_validate(
             {
                 "request_id": record.request_id,
@@ -275,6 +285,36 @@ class _SqlAlchemyEngineTransaction(EngineTransaction):
                 **result_payload,
             }
         )
+
+    async def _upgrade_embedded_check_run_view(self, result_payload: dict) -> None:
+        """把老 execution JSON 里内嵌的 CheckRunView 补齐到当前契约（#310）。
+
+        `CheckRunView` 新增了 `selected_skill_id` / `selected_skill_name` /
+        `difficulty` / `target_value`。部署之前落库的行没有这四项，直接
+        `model_validate` 会当场失败——正卡在 `awaiting_post_roll_decision` 的房间
+        一提交奖惩骰决定就炸，恢复路径同样读不回来。
+
+        这四项都是同一次检定的属性，权威副本在 `check_runs` 行上（那张表原本就
+        存着 skill_id / difficulty / target_value）。所以从兄弟行补，而不是编一个
+        默认值：视图是投影，投影缺字段就回源头取。
+        """
+
+        execution = result_payload.get("execution")
+        if not isinstance(execution, dict):
+            return
+        view = execution.get("check_run")
+        if not isinstance(view, dict) or "selected_skill_name" in view:
+            return
+        check_id = view.get("check_id")
+        if not isinstance(check_id, str):
+            raise ContractError("老 execution JSON 的 check_run 缺少 check_id")
+        source = await self.load_check_run(check_id)
+        if source is None:
+            raise ContractError(f"老 execution JSON 找不到对应的 check_runs 行: {check_id}")
+        view["selected_skill_id"] = source.selected_skill_id
+        view["selected_skill_name"] = source.selected_skill_name
+        view["difficulty"] = source.difficulty
+        view["target_value"] = source.target_value
 
     async def _require_writable_room(self) -> None:
         """v3 之前的房间只读：可以读取和回顾，但不能再推进。
@@ -424,7 +464,7 @@ class _SqlAlchemyEngineTransaction(EngineTransaction):
         )
         if record is None:
             return None
-        command = self._completed_adjudication_from_record(record)
+        command = await self._completed_adjudication_from_record(record)
         if command.execution.view_revision != str(record.committed_state_version):
             raise ContractError("裁决命令 committed_state_version 与结果不一致")
         return command
@@ -458,7 +498,7 @@ class _SqlAlchemyEngineTransaction(EngineTransaction):
                 )
             )
         for record in records:
-            command = self._completed_adjudication_from_record(record)
+            command = await self._completed_adjudication_from_record(record)
             if command.execution.action_request_id != action_request_id:
                 continue
             if command.execution.view_revision != str(record.committed_state_version):
@@ -495,9 +535,15 @@ class _SqlAlchemyEngineTransaction(EngineTransaction):
         record = await self._session.get(CheckRunRecord, (self._room_id, check_id))
         if record is None:
             return None
-        if record.check_schema_version != 1:
+        if record.check_schema_version not in _SUPPORTED_CHECK_RUN_VERSIONS:
             raise ContractError("不支持的 CheckRun schema version")
-        check_run = CheckRun.model_validate(deepcopy(record.check_json))
+        payload = deepcopy(record.check_json)
+        if record.check_schema_version < _CHECK_RUN_SCHEMA_VERSION:
+            # v1 行没有 `selected_skill_name`（#310 新增）。老行里根本没存过显示名，
+            # 唯一还原得出来的只有 skill_id——这不是「数据没到位就填个假值」，而是
+            # 这条记录当年确实只有这一个可用名称。新写入一律带真实显示名。
+            payload.setdefault("selected_skill_name", payload.get("selected_skill_id"))
+        check_run = CheckRun.model_validate(payload)
         if (
             check_run.room_id != record.room_id
             or check_run.check_id != record.check_id
@@ -771,7 +817,7 @@ class _SqlAlchemyEngineTransaction(EngineTransaction):
                 action_request_id=completed_command.execution.action_request_id,
                 request_schema_version=1,
                 request_json=completed_command.request.to_json_dict(),
-                result_schema_version=2,
+                result_schema_version=_ADJUDICATION_RESULT_SCHEMA_VERSION,
                 result_json={
                     "execution": completed_command.execution.to_json_dict(),
                     "validation": (
@@ -964,7 +1010,7 @@ class _SqlAlchemyEngineTransaction(EngineTransaction):
                     status=check_run.status,
                     version=check_run.version,
                     roll_count=check_run.roll_count,
-                    check_schema_version=1,
+                    check_schema_version=_CHECK_RUN_SCHEMA_VERSION,
                     check_json=check_run.to_json_dict(),
                     created_at=now,
                     updated_at=now,
@@ -974,6 +1020,7 @@ class _SqlAlchemyEngineTransaction(EngineTransaction):
         record.status = check_run.status
         record.version = check_run.version
         record.roll_count = check_run.roll_count
+        record.check_schema_version = _CHECK_RUN_SCHEMA_VERSION
         record.check_json = check_run.to_json_dict()
         record.updated_at = now
 

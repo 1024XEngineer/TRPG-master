@@ -182,6 +182,13 @@ _ACTION_PLAN_NARRATION_INSTRUCTIONS = """
 kind=clarification，并用自然的角色内措辞提出一次最小澄清。claimed_evidence_refs
 只能复制 allowed_evidence_refs 中正文确实使用的值。不得输出 raw plan、裁决效果、
 内部状态、工具结果、模型推理或协议字段。建议动作最多三条且只能来自最终 PlayerView。
+叙事必须明确写出 narration_evidence 中 required_in_narration=true 的每项玩家可见结果；
+应把对应 ref 放入 claimed_evidence_refs，服务端也会按正文中明确出现的公开名称或别名
+确定性记录 required ref。不得以未经证据确认的关键发现替代这些结果。
+text 只能包含自然的角色内叙事，不得把 claimed_evidence_refs、suggested_actions 或其他
+JSON/schema 字段和值重复写入正文。
+如果输入中提供 narration_retry_hint，说明上一版叙事漏报了一个已提交结果；本次必须
+在自然叙事中明确写出该结果，并准确 claim 对应 ref，然后再返回完整 JSON。
 
 【叙事主体】
 - 你是守秘人，不是玩家角色。player_input、plan_goal 或 semantic_goal 中玩家使用的

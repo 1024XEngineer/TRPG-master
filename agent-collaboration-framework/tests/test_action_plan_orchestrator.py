@@ -21,6 +21,7 @@ from collaboration_framework.contracts import (
     GetAdjudicationStatusRequest,
     ModuleContent,
     ModuleContentV3,
+    NarrationEvidence,
     NarrativeOnlyEffect,
     NoAdjudicationCheck,
     PlayerInput,
@@ -418,6 +419,36 @@ class FirstPersonNarrationModel:
         return {
             "kind": "narration",
             "text": "我带着你们进入墓园。",
+            "claimed_evidence_refs": [],
+            "suggested_actions": [],
+        }
+
+
+class MissingRequiredEvidenceNarrationModel:
+    async def generate(self, context):
+        return {
+            "kind": "narration",
+            "text": "你在墓碑附近发现了一些痕迹。",
+            "claimed_evidence_refs": [],
+            "suggested_actions": [],
+        }
+
+
+class ClaimsButOmitsRequiredEvidenceNarrationModel:
+    async def generate(self, context):
+        return {
+            "kind": "narration",
+            "text": "你在墓碑附近发现了一些痕迹。",
+            "claimed_evidence_refs": [context.narration_evidence[0].ref],
+            "suggested_actions": [],
+        }
+
+
+class AliasRequiredEvidenceNarrationModel:
+    async def generate(self, context):
+        return {
+            "kind": "narration",
+            "text": "沿着断续的痕迹，你确认这里藏着一个地穴入口。",
             "claimed_evidence_refs": [],
             "suggested_actions": [],
         }
@@ -1960,6 +1991,53 @@ async def test_narrator_rejects_evidence_outside_committed_public_refs() -> None
         await ActionPlanNarrator(OutOfScopeNarrationModel()).narrate(context)
 
     assert raised.value.reason == "evidence_scope"
+
+
+@pytest.mark.asyncio
+async def test_narrator_rejects_missing_required_evidence() -> None:
+    service, _, _, _, _ = orchestrator()
+    original = player_input()
+    await service.start_or_resume(original, plan=plan(2))
+    context = await service.build_narration_context(original)
+    required_ref = context.allowed_evidence_refs[0]
+    evidence = NarrationEvidence(
+        ref=required_ref,
+        kind="entity_discovered",
+        subject_id="crypt_entrance",
+        subject_name="石板下的地穴入口",
+        subject_aliases=("地穴入口",),
+        description="一块沉重石板遮住了向下的通道。",
+        required_in_narration=True,
+    )
+    first_step = context.completed_steps[0].model_copy(
+        update={"narration_evidence": (evidence,)}, deep=True
+    )
+    context = context.model_copy(
+        update={
+            "completed_steps": (first_step, *context.completed_steps[1:]),
+            "narration_evidence": (evidence,),
+        },
+        deep=True,
+    )
+
+    with pytest.raises(ActionPlanNarrationValidationError) as raised:
+        await ActionPlanNarrator(MissingRequiredEvidenceNarrationModel()).narrate(context)
+
+    assert raised.value.reason == "required_evidence_missing"
+
+    with pytest.raises(ActionPlanNarrationValidationError) as claimed_but_omitted:
+        await ActionPlanNarrator(ClaimsButOmitsRequiredEvidenceNarrationModel()).narrate(
+            context
+        )
+
+    assert claimed_but_omitted.value.reason == "required_evidence_missing"
+
+    # A natural narration that clearly names a safe alias is authoritative
+    # enough for the service to record the required public ref itself.
+    alias_output = await ActionPlanNarrator(
+        AliasRequiredEvidenceNarrationModel()
+    ).narrate(context)
+    assert alias_output.claimed_evidence_refs == (required_ref,)
 
 
 @pytest.mark.asyncio

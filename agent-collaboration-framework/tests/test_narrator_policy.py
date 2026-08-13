@@ -54,6 +54,10 @@ class NarrationTextPolicyTests(unittest.TestCase):
             "托马斯沉默。\ntext:": "protocol_tail",
             "托马斯沉默。\nkind:": "protocol_tail",
             "托马斯沉默。\nclaimed_fact_ids:": "protocol_tail",
+            (
+                '托马斯沉默。","claimed_evidence_refs":["evt_1"],'
+                '"suggested_actions":["继续调查"]}'
+            ): "protocol_tail",
             "托马斯沉默。\n```json\nsuggestedActions:\n```": "protocol_tail",
             (
                 '{"kind":"narration","text":"托马斯看着你。",'

@@ -6,13 +6,6 @@ import {
   UserPlus,
   Eye,
   ImagePlus,
-  Heart,
-  Brain,
-  WandSparkles,
-  Sword,
-  BicepsFlexed,
-  Footprints,
-  type LucideIcon,
 } from 'lucide-react'
 import { useCharacterStore } from '@/stores/character-store'
 import { fetchCharacter } from '@/services/character/character-api'
@@ -23,119 +16,17 @@ import { useRoomPlayers } from '@/hooks/useRoomPlayers'
 import { usePlayerPortraits } from '@/hooks/usePlayerPortraits'
 import { useRuleset } from '@/hooks/useRuleset'
 import { PortraitGenerationModal } from './PortraitGenerationModal'
-import { DERIVED_STAT_DEFINITIONS, normalizeDerivedStats, type DerivedStatKey } from '@/data/derived-stats'
+import { normalizeDerivedStats } from '@/data/derived-stats'
 import { OnboardingTrigger } from '@/features/onboarding'
 import { PortraitImage } from '@/features/portrait/PortraitImage'
+import { CharacterBasicInfo } from '@/features/character/CharacterBasicInfo'
 
 const SHEET_PAGES = [
   { key: 'info', label: '基本信息' },
   { key: 'skills', label: '技能' },
   { key: 'background', label: '背景装备' },
 ] as const
-const DERIVED_STAT_ICONS: Record<DerivedStatKey, LucideIcon> = {
-  hp: Heart,
-  san: Brain,
-  mp: WandSparkles,
-  db: Sword,
-  build: BicepsFlexed,
-  move: Footprints,
-}
 const EMPTY_PLAYERS: RoomPlayerSummary[] = []
-
-interface RadarAttribute {
-  key: string
-  label: string
-}
-
-function AttributeRadarChart({
-  attributes,
-  values,
-}: {
-  attributes: readonly RadarAttribute[]
-  values: Readonly<Partial<Record<string, number>>>
-}) {
-  if (attributes.length < 3) return null
-
-  const centerX = 180
-  const centerY = 155
-  const radius = 98
-  const labelRadius = 112
-  const angleAt = (index: number) => -Math.PI / 2 + (index * Math.PI * 2) / attributes.length
-  const pointAt = (index: number, pointRadius: number) => {
-    const angle = angleAt(index)
-    return `${centerX + Math.cos(angle) * pointRadius},${centerY + Math.sin(angle) * pointRadius}`
-  }
-  const polygonAt = (pointRadius: number) => attributes.map((_, index) => pointAt(index, pointRadius)).join(' ')
-  const resolvedValues = attributes.map((attribute) => {
-    const value = values[attribute.key]
-    return typeof value === 'number' && Number.isFinite(value) ? value : null
-  })
-  const completeValues = resolvedValues.every((value): value is number => value !== null)
-    ? resolvedValues
-    : null
-  const valuePolygon = completeValues
-    ? completeValues.map((rawValue, index) => {
-        const value = Math.max(0, Math.min(100, rawValue))
-        return pointAt(index, radius * value / 100)
-      }).join(' ')
-    : null
-
-  return (
-    <div className="character-ready-sheet__radar" data-testid="attribute-radar-chart">
-      <svg viewBox="0 28 360 260" role="img" aria-label="基础属性雷达图">
-        {[0.25, 0.5, 0.75, 1].map(level => (
-          <polygon
-            key={level}
-            points={polygonAt(radius * level)}
-            className="character-ready-sheet__radar-grid"
-          />
-        ))}
-        {attributes.map((attribute, index) => (
-          <line
-            key={attribute.key}
-            x1={centerX}
-            y1={centerY}
-            x2={centerX + Math.cos(angleAt(index)) * radius}
-            y2={centerY + Math.sin(angleAt(index)) * radius}
-            className="character-ready-sheet__radar-axis"
-          />
-        ))}
-        {valuePolygon ? (
-          <polygon points={valuePolygon} className="character-ready-sheet__radar-value" />
-        ) : (
-          <text
-            x={centerX}
-            y={centerY}
-            textAnchor="middle"
-            dominantBaseline="middle"
-            className="character-ready-sheet__radar-empty"
-          >
-            属性数据不完整
-          </text>
-        )}
-        {attributes.map((attribute, index) => {
-          const angle = angleAt(index)
-          const x = centerX + Math.cos(angle) * labelRadius
-          const y = centerY + Math.sin(angle) * labelRadius
-          const anchor = Math.cos(angle) > 0.2 ? 'start' : Math.cos(angle) < -0.2 ? 'end' : 'middle'
-          return (
-            <text
-              key={attribute.key}
-              x={x}
-              y={y}
-              textAnchor={anchor}
-              dominantBaseline="middle"
-              className="character-ready-sheet__radar-label"
-            >
-              <tspan>{attribute.label}</tspan>
-              <tspan className="character-ready-sheet__radar-number"> {resolvedValues[index] ?? '—'}</tspan>
-            </text>
-          )
-        })}
-      </svg>
-    </div>
-  )
-}
 
 function CharacterSheetModal({ character, portraitUrl, onClose }: { character: NonNullable<ReturnType<typeof useCharacterStore.getState>['character']>; portraitUrl?: string; onClose: () => void }) {
   const [page, setPage] = useState<typeof SHEET_PAGES[number]['key']>('info')
@@ -147,7 +38,7 @@ function CharacterSheetModal({ character, portraitUrl, onClose }: { character: N
   return (
     <>
       <div className="character-ready-sheet-backdrop fixed inset-0 z-30 animate-fade-in" onClick={onClose} />
-      <div className="character-ready-sheet fixed inset-x-0 bottom-0 z-40 animate-slide-up max-h-[82vh] overflow-hidden">
+      <div className="character-ready-sheet fixed inset-x-0 bottom-0 z-40 animate-slide-up overflow-hidden">
         <div className="character-ready-sheet__scroll">
         <div className="character-ready-sheet__header flex items-center justify-between px-5 pt-4 pb-2">
           <h3 className="text-base font-bold text-text-primary">调查员 · <span className="character-ready-sheet__numbered">{character.info.name}</span></h3>
@@ -172,50 +63,12 @@ function CharacterSheetModal({ character, portraitUrl, onClose }: { character: N
 
         <div className="character-ready-sheet__content px-5 pb-6 space-y-4">
           {page === 'info' && (
-            <>
-              <div className="character-ready-sheet__profile">
-                <div className="character-ready-sheet__portrait rounded-sm flex items-center justify-center text-2xl overflow-hidden"
-                  style={{ background: 'linear-gradient(135deg,#e8e0d0,#d8cfb8)', border: '2px solid #b8976a' }}>
-                  {portraitUrl ? (
-                    <PortraitImage
-                      src={portraitUrl}
-                      alt={`${character.info.name}的头像`}
-                      buttonClassName="h-full w-full"
-                      imageClassName="h-full w-full object-cover"
-                    />
-                  ) : '🕵️'}
-                </div>
-                <div className="character-ready-sheet__identity">
-                  <div className="character-ready-sheet__identity-name font-bold text-text-primary">{character.info.name}</div>
-                  <div className="character-ready-sheet__identity-summary character-ready-sheet__numbered text-text-muted">{character.info.age}岁 · {character.info.gender} · {occupation?.name ?? '未选择职业'}</div>
-                  <div className="character-ready-sheet__locations">
-                    <span>居住地：{character.info.residence || '—'}</span>
-                    <span>出生地：{character.info.birthplace || '—'}</span>
-                  </div>
-                </div>
-              </div>
-              <div className="character-ready-sheet__derived" data-testid="derived-stats-grid">
-                {DERIVED_STAT_DEFINITIONS.map(definition => {
-                  const StatIcon = DERIVED_STAT_ICONS[definition.key]
-                  return (
-                    <div key={definition.key} className="character-ready-sheet__derived-item">
-                      <StatIcon className="character-ready-sheet__derived-icon" aria-hidden="true" />
-                      <span className="character-ready-sheet__derived-label">{definition.label}</span>
-                      <span
-                        className="character-ready-sheet__derived-value character-ready-sheet__numbered"
-                        style={{ color: definition.color }}
-                      >
-                        {character.derived[definition.key] ?? '—'}
-                      </span>
-                    </div>
-                  )
-                })}
-              </div>
-              <div className="character-ready-sheet__attributes">
-                <h4 className="character-ready-sheet__section-title">基础属性</h4>
-                <AttributeRadarChart attributes={ruleset?.attributes ?? []} values={character.attr} />
-              </div>
-            </>
+            <CharacterBasicInfo
+              character={character}
+              portraitUrl={portraitUrl}
+              occupationName={occupation?.name}
+              attributes={ruleset?.attributes ?? []}
+            />
           )}
 
           {page === 'skills' && (
@@ -274,6 +127,8 @@ export default function CharacterReadyPage() {
   const [portraitVersionOverride, setPortraitVersionOverride] = useState<string | null>(null)
   const [starting, setStarting] = useState(false)
   const [startError, setStartError] = useState('')
+  const [confirmExit, setConfirmExit] = useState(false)
+  const cancelExitRef = useRef<HTMLButtonElement>(null)
   const roomId = useRoomStore((s) => s.roomId)
   const cachedCharacter = useCharacterStore((s) => (roomId ? s.getForRoom(roomId) : null))
   const characterId = useRoomStore((s) => s.characterId)
@@ -284,9 +139,16 @@ export default function CharacterReadyPage() {
   // 之前这里只读 localStorage：清掉缓存（或换浏览器）后，明明后端有这张卡，
   // 页面却显示成"还没建卡"。现在有了 GET 端点，就该以后端那份为准——本地缓存
   // 保留是为了拉取回来之前不闪空白，不是权威源。
-  const [remoteCharacter, setRemoteCharacter] = useState<typeof cachedCharacter>(null)
+  const characterIdentity = roomId && characterId ? `${roomId}:${characterId}` : null
+  const [remoteCharacter, setRemoteCharacter] = useState<{
+    identity: string
+    character: NonNullable<typeof cachedCharacter>
+  } | null>(null)
   useEffect(() => {
-    if (!roomId || !characterId || !readyRuleset) return
+    // 组件可能在不卸载的情况下切换房间。上一身份的远程角色不能继续压过
+    // 新房间的缓存，更不能让没有 characterId 的房间误判为已经建卡。
+    setRemoteCharacter(null)
+    if (!roomId || !characterId || !readyRuleset || !characterIdentity) return
     let cancelled = false
     fetchCharacter(roomId, characterId)
       .then((saved) => {
@@ -295,23 +157,26 @@ export default function CharacterReadyPage() {
           readyRuleset.occupations.find((o) => o.name === saved.occupation)?.id ?? null
         const derived = normalizeDerivedStats(saved.derivedStats ?? {})
         setRemoteCharacter({
-          info: {
-            name: saved.name,
-            playerName: '',
-            age: saved.age != null ? String(saved.age) : '',
-            gender: saved.gender ?? '',
-            residence: saved.residence ?? '',
-            birthplace: saved.birthplace ?? '',
-            occupationId,
+          identity: characterIdentity,
+          character: {
+            info: {
+              name: saved.name,
+              playerName: '',
+              age: saved.age != null ? String(saved.age) : '',
+              gender: saved.gender ?? '',
+              residence: saved.residence ?? '',
+              birthplace: saved.birthplace ?? '',
+              occupationId,
+            },
+            attr: { ...saved.attributes },
+            skillAlloc: {},
+            skillFinalValues: { ...saved.skills },
+            occupationChoiceSkillIds: saved.occupationChoiceSkillIds ?? [],
+            equipment: (saved.equipment ?? []).join('、'),
+            background: saved.background ?? '',
+            notes: saved.notes ?? '',
+            derived,
           },
-          attr: { ...saved.attributes },
-          skillAlloc: {},
-          skillFinalValues: { ...saved.skills },
-          occupationChoiceSkillIds: saved.occupationChoiceSkillIds ?? [],
-          equipment: (saved.equipment ?? []).join('、'),
-          background: saved.background ?? '',
-          notes: saved.notes ?? '',
-          derived,
         })
       })
       .catch(() => {
@@ -320,9 +185,11 @@ export default function CharacterReadyPage() {
     return () => {
       cancelled = true
     }
-  }, [roomId, characterId, readyRuleset])
+  }, [roomId, characterId, characterIdentity, readyRuleset])
 
-  const character = remoteCharacter ?? cachedCharacter
+  const character = remoteCharacter?.identity === characterIdentity
+    ? remoteCharacter.character
+    : cachedCharacter
   const roomCode = useRoomStore((s) => s.roomCode)
   const isHost = useRoomStore((s) => s.isHost)
   const playerId = useRoomStore((s) => s.playerId)
@@ -397,19 +264,34 @@ export default function CharacterReadyPage() {
   }
 
   const handleGoBack = () => {
+    setConfirmExit(true)
+  }
+
+  const handleConfirmExit = () => {
     disconnectWebSocket()
     navigate('/home')
   }
 
+  useEffect(() => {
+    if (!confirmExit) return
+    cancelExitRef.current?.focus()
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setConfirmExit(false)
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [confirmExit])
+
   return (
     <div className="lobby-scene character-ready-scene animate-screen-in">
+      <div className="lobby-scene__artboard character-ready-scene__artboard">
       <img className="lobby-scene__background" src="/assets/rooms/lobby/background.webp" alt="" aria-hidden="true" />
       <img className="lobby-scene__map" src="/assets/rooms/lobby/map.webp" alt="" aria-hidden="true" />
       <img className="lobby-scene__note" src="/assets/rooms/lobby/gather-note.webp" alt="" aria-hidden="true" />
       <img className="lobby-scene__poster" src="/assets/rooms/lobby/camp-poster.webp" alt="" aria-hidden="true" />
 
       <header className="lobby-scene__header character-ready-scene__header">
-        <button type="button" className="lobby-scene__back" onClick={handleGoBack} aria-label="返回首页">
+        <button type="button" className="lobby-scene__back" onClick={handleGoBack} aria-label="退出房间">
           <img src="/assets/rooms/create/back-button.webp" alt="" aria-hidden="true" />
         </button>
         <OnboardingTrigger className="character-ready-scene__guide" />
@@ -525,6 +407,34 @@ export default function CharacterReadyPage() {
           <span aria-hidden="true">✥</span>
         </p>
       </footer>
+      </div>
+
+      {confirmExit && (
+        <div className="lobby-leave-dialog" onMouseDown={() => setConfirmExit(false)}>
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="character-ready-exit-title"
+            className="lobby-leave-dialog__paper"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <img
+              className="lobby-leave-dialog__art"
+              src="/assets/rooms/lobby/leave-dialog.webp"
+              alt=""
+              aria-hidden="true"
+            />
+            <span className="lobby-leave-dialog__eyebrow">调查员档案</span>
+            <h2 id="character-ready-exit-title">退出房间？</h2>
+            <div className="lobby-leave-dialog__divider" aria-hidden="true"><span>◆</span></div>
+            <p>确定要退出房间吗？房间会保留，之后可以从「我的游戏」继续。</p>
+            <div className="lobby-leave-dialog__actions">
+              <button ref={cancelExitRef} type="button" onClick={() => setConfirmExit(false)}>取消</button>
+              <button type="button" className="is-danger" onClick={handleConfirmExit}>确认退出</button>
+            </div>
+          </section>
+        </div>
+      )}
 
       {/* Character Sheet Modal */}
       {showSelfSheet && character && (

@@ -21,6 +21,7 @@ from collaboration_framework.host.adapters.openai_agents import (
 from collaboration_framework.host.application import (
     HostTurnDecisionParser,
     IntentParser,
+    TurnExecutionError,
 )
 from collaboration_framework.host.application.intent_parser import (
     coerce_intent_payload,
@@ -35,9 +36,16 @@ from collaboration_framework.host.schemas import (
     NarrationOutput,
     OpeningNarrationContext,
 )
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter, ValidationError
 
-from app.adapters.structured_http import ModelClientRetryPolicy, post_structured_json
+from app.adapters.structured_http import (
+    ModelClientRetryPolicy,
+    StructuredOutputError,
+    decode_structured_json,
+    is_transient_model_error,
+    post_structured_json,
+    read_structured_payload,
+)
 
 logger = structlog.get_logger()
 
@@ -375,7 +383,7 @@ class OpenAIResponsesJsonClient:
                 provider="openai",
                 retry_policy=self._retry_policy,
             )
-        response_payload = response.json()
+        response_payload = read_structured_payload(response, provider_name="OpenAI")
         _log_structured_usage(
             response_payload,
             provider="openai",
@@ -383,10 +391,7 @@ class OpenAIResponsesJsonClient:
             schema_name=schema_name,
         )
         output_text = _response_output_text(response_payload)
-        parsed = json.loads(output_text)
-        if not isinstance(parsed, dict):
-            raise ValueError("Structured model output must be a JSON object")
-        return parsed
+        return decode_structured_json(output_text, provider_name="OpenAI")
 
 
 class PromptIntentModel:
@@ -465,15 +470,45 @@ class PromptActionPlanStepAdjudicator:
         self._client = client
 
     async def adjudicate(self, context: ActionPlanStepContext) -> ActionAdjudication:
-        raw = await self._client.generate(
-            schema_name="trpg_action_plan_step_adjudication",
-            schema=ActionAdjudication.model_json_schema(mode="serialization"),
-            instructions=(
-                f"{current_step_adjudication_instructions()}\n\n{_SAFE_ADJUDICATION_INSTRUCTIONS}"
-            ),
-            input_payload=context.to_json_dict(),
-        )
-        return ActionAdjudication.model_validate(raw)
+        try:
+            raw = await self._client.generate(
+                schema_name="trpg_action_plan_step_adjudication",
+                schema=ActionAdjudication.model_json_schema(mode="serialization"),
+                instructions=(
+                    f"{current_step_adjudication_instructions()}\n\n"
+                    f"{_SAFE_ADJUDICATION_INSTRUCTIONS}"
+                ),
+                input_payload=context.to_json_dict(),
+            )
+        except TurnExecutionError:
+            raise
+        except Exception as exc:
+            # Client 已耗尽传输层重试后才会走到这里；转换成框架认识的稳定错误码，
+            # 避免 ActionPlan 编排器把所有 provider 故障压成 STEP_ADJUDICATOR_FAILED。
+            if is_transient_model_error(exc):
+                raise TurnExecutionError(
+                    "MODEL_UPSTREAM_UNAVAILABLE",
+                    "主持模型暂时不可用，当前步骤未生效，请重试",
+                    retryable=True,
+                ) from exc
+            if isinstance(exc, StructuredOutputError):
+                raise TurnExecutionError(
+                    "MODEL_OUTPUT_UNREADABLE",
+                    "主持模型返回了无法解读的结果，当前步骤未生效，请重试",
+                    retryable=True,
+                ) from exc
+            raise
+
+        try:
+            return ActionAdjudication.model_validate(raw)
+        except ValidationError as exc:
+            # HTTP 与 JSON 都成功也不代表输出符合 ActionAdjudication 契约；这一类同样
+            # 属于“模型结果不可读”，并保留异常链供步骤级诊断记录字段路径和错误类型。
+            raise TurnExecutionError(
+                "MODEL_OUTPUT_UNREADABLE",
+                "主持模型返回了无法解读的结果，当前步骤未生效，请重试",
+                retryable=True,
+            ) from exc
 
 
 class PromptActionPlanNarrationModel:
@@ -519,13 +554,13 @@ def _log_structured_usage(
 
 def _response_output_text(payload: object) -> str:
     if not isinstance(payload, dict):
-        raise ValueError("Responses API payload must be an object")
+        raise StructuredOutputError("Responses API payload must be an object")
     direct = payload.get("output_text")
     if isinstance(direct, str) and direct:
         return direct
     output = payload.get("output")
     if not isinstance(output, list):
-        raise ValueError("Responses API payload has no output list")
+        raise StructuredOutputError("Responses API payload has no output list")
     for item in output:
         if not isinstance(item, dict) or item.get("type") != "message":
             continue
@@ -540,4 +575,4 @@ def _response_output_text(payload: object) -> str:
                 and isinstance(text, str)
             ):
                 return text
-    raise ValueError("Responses API payload has no structured output text")
+    raise StructuredOutputError("Responses API payload has no structured output text")

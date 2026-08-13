@@ -12,7 +12,6 @@ const HomePage = lazy(() => import('@/routes/home/HomePage'));
 const JoinRoomPage = lazy(() => import('@/routes/join/JoinRoomPage'));
 const CreateRoomPage = lazy(() => import('@/routes/create/CreateRoomPage'));
 const ScenarioSelectionPage = lazy(() => import('@/routes/games/trpg/ScenarioSelectionPage'));
-const StoryPage = lazy(() => import('@/routes/games/trpg/StoryPage'));
 const CharacterPage = lazy(() => import('@/routes/games/trpg/CharacterPage'));
 const LobbyPage = lazy(() => import('@/routes/lobby/LobbyPage'));
 const CharacterReadyPage = lazy(() => import('@/routes/character-ready/CharacterReadyPage'));
@@ -81,10 +80,10 @@ function App() {
           <Route path="/home/my-rooms/review/:roomCode" element={<ReviewPage />} />
           <Route path="/home/profile" element={<ProfilePage />} />
 
-          {/* /room/* —— 已经加入/创建了房间之后的整条游戏内流程：大厅→背景介绍→
-              建卡→建卡准备→聊天室，都是同一个房间生命周期里的阶段。 */}
+          {/* /room/* —— 已经加入/创建了房间之后的整条游戏内流程：大厅→建卡→
+              建卡准备→聊天室，都是同一个房间生命周期里的阶段。 */}
           <Route path="/room/lobby" element={<LobbyPage />} />
-          <Route path="/room/story" element={<StoryPage />} />
+          <Route path="/room/story" element={<Navigate to={ROUTES.CHARACTER} replace />} />
           <Route path="/room/character" element={<CharacterPage />} />
           <Route path="/room/ready" element={<CharacterReadyPage />} />
           <Route path="/room/play" element={<RoomPage />} />

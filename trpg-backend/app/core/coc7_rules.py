@@ -23,6 +23,7 @@ issue #112：此前本模块直接 import `app/core/coc7_content.py` 的模块�
 "complete 时校验"两条腿走路、结果不一致的情况。
 """
 
+import math
 import re
 from dataclasses import dataclass, field
 
@@ -88,20 +89,33 @@ class ComputeResult:
     validation: list[ValidationIssue] = field(default_factory=list)
 
 
-def _damage_bonus_and_build(str_: int, siz: int) -> str:
-    """伤害加值 DB 和体格 Build 是同一张表查出来的同一个值（COC7 规则）。"""
+# COC7「伤害加值与体格」表：DB 与 Build 是同一张表的**两列**，不是同一个值。
+# 前三档两者恰好相同，从 125 起分叉——DB 是骰子表达式，Build 是整数。
+# 每项为 (STR+SIZ 上界, DB, Build)。
+_DAMAGE_BONUS_BUILD_TABLE: tuple[tuple[int, str, int], ...] = (
+    (64, "-2", -2),
+    (84, "-1", -1),
+    (124, "0", 0),
+    (164, "+1D4", 1),
+    (204, "+1D6", 2),
+    (284, "+2D6", 3),
+    (364, "+3D6", 4),
+    (444, "+4D6", 5),
+    (524, "+5D6", 6),
+)
+
+
+def _damage_bonus_and_build(str_: int, siz: int) -> tuple[str, int]:
+    """按 STR+SIZ 查 COC7 表，返回 (伤害加值, 体格)。"""
     total = str_ + siz
-    if total <= 64:
-        return "-2"
-    if total <= 84:
-        return "-1"
-    if total <= 124:
-        return "0"
-    if total <= 164:
-        return "+1D4"
-    if total <= 204:
-        return "+1D6"
-    return "+1D8"
+    for upper_bound, damage_bonus, build in _DAMAGE_BONUS_BUILD_TABLE:
+        if total <= upper_bound:
+            return damage_bonus, build
+    # 表格印到 524 为止，之后按规则书递推：「每额外 80 点或其零头，再加 1D6
+    # 与 1 点 Build」。「或其零头」意味着不满 80 也算一档，所以向上取整。
+    # 这一段只有怪物级数值够得着，调查员两项属性都拉满也到不了。
+    steps = math.ceil((total - 524) / 80)
+    return f"+{5 + steps}D6", 6 + steps
 
 
 def compute_derived_stats(attributes: dict[str, int]) -> dict[str, int | str]:
@@ -113,7 +127,7 @@ def compute_derived_stats(attributes: dict[str, int]) -> dict[str, int | str]:
     dex = attributes.get("DEX", 0)
     siz = attributes.get("SIZ", 0)
 
-    db_build = _damage_bonus_and_build(str_, siz)
+    damage_bonus, build = _damage_bonus_and_build(str_, siz)
 
     if str_ < siz and dex < siz:
         move = 7
@@ -126,8 +140,8 @@ def compute_derived_stats(attributes: dict[str, int]) -> dict[str, int | str]:
         "HP": (siz + con) // 10,
         "MP": pow_ // 5,
         "SAN": pow_,
-        "DB": db_build,
-        "Build": db_build,
+        "DB": damage_bonus,
+        "Build": build,
         "MOV": move,
     }
 

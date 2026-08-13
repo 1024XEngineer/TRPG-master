@@ -1,5 +1,6 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { fetchCharacter } from '@/services/character/character-api'
 import CharacterReadyPage from './CharacterReadyPage'
 
 const mocks = vi.hoisted(() => ({
@@ -45,8 +46,8 @@ vi.mock('@/stores/auth-store', () => ({
   useAuthStore: (selector: (state: { nickname: string }) => unknown) => selector({ nickname: '测试玩家' }),
 }))
 vi.mock('@/stores/character-store', () => ({
-  useCharacterStore: (selector: (state: { getForRoom: () => typeof mocks.character }) => unknown) => (
-    selector({ getForRoom: () => mocks.character })
+  useCharacterStore: (selector: (state: { getForRoom: (roomId: string) => typeof mocks.character | null }) => unknown) => (
+    selector({ getForRoom: (roomId: string) => roomId === 'room-1' ? mocks.character : null })
   ),
 }))
 vi.mock('@/hooks/useRoomPlayers', () => ({
@@ -74,7 +75,12 @@ vi.mock('@/features/portrait/PortraitImage', () => ({ PortraitImage: () => <img 
 vi.mock('./PortraitGenerationModal', () => ({ PortraitGenerationModal: () => null }))
 
 describe('CharacterReadyPage', () => {
-  beforeEach(() => mocks.navigate.mockReset())
+  beforeEach(() => {
+    mocks.navigate.mockReset()
+    mocks.room.roomId = 'room-1'
+    mocks.room.characterId = null
+    vi.mocked(fetchCharacter).mockReset()
+  })
   afterEach(cleanup)
 
   it('使用档案布局展示房间和玩家建卡状态', () => {
@@ -96,5 +102,39 @@ describe('CharacterReadyPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '编辑' }))
     expect(mocks.navigate).toHaveBeenCalledWith('/room/character', { state: { fromCharacterReady: true } })
+  })
+
+  it('切换到没有角色的房间时不会保留上一房间的远程角色', async () => {
+    mocks.room.characterId = 'character-1'
+    vi.mocked(fetchCharacter).mockResolvedValue({
+      id: 'character-1',
+      status: 'Completed',
+      generationMethod: 'manual',
+      name: '远程调查员',
+      age: 31,
+      gender: '女',
+      residence: '阿卡姆',
+      birthplace: '波士顿',
+      occupation: '会计师',
+      attributes: { STR: 55 },
+      skills: { accounting: 65 },
+      occupationChoiceSkillIds: [],
+      equipment: [],
+      background: '',
+      notes: '',
+      derivedStats: { hp: 10, san: 50, mp: 10 },
+    } as Awaited<ReturnType<typeof fetchCharacter>>)
+
+    const view = render(<CharacterReadyPage />)
+    expect(await screen.findByText('调查员：远程调查员')).toBeInTheDocument()
+
+    mocks.room.roomId = 'room-2'
+    mocks.room.characterId = null
+    view.rerender(<CharacterReadyPage />)
+
+    await waitFor(() => {
+      expect(screen.queryByText('调查员：远程调查员')).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: '创建人物卡' })).toBeInTheDocument()
+    })
   })
 })

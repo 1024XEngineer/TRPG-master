@@ -11,15 +11,28 @@ HTTP 客户端的固有职责，所以重试放在这一层：三个 provider �
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import dataclass
 
 import httpx
 import structlog
+from collaboration_framework.contracts import JsonObject
 
 logger = structlog.get_logger()
 
 # 429 是限流，不是请求本身有问题，退避后重试是正确做法；其余 4xx 重试没有意义。
 _RETRYABLE_STATUS_CODES = frozenset({429})
+
+
+class StructuredOutputError(ValueError):
+    """上游回了 200，但响应体不是一个能用的结构化结果。
+
+    与传输故障（超时 / 连接 / 5xx）分开：那类是「没拿到回复」，这类是「拿到了
+    但读不懂」——响应结构不符、正文不是合法 JSON、或者 JSON 顶层不是对象。
+    两者对玩家的含义不同，错误码也不该混在一起。
+
+    继承 `ValueError` 是为了不改变既有调用方的兜底行为。
+    """
 
 
 @dataclass(frozen=True)
@@ -76,8 +89,37 @@ async def post_structured_json(
     raise AssertionError("unreachable")
 
 
+def read_structured_payload(response: httpx.Response, *, provider_name: str) -> object:
+    """把 HTTP 响应体读成 JSON，失败一律抛 `StructuredOutputError`。
+
+    解码是两层的：先 HTTP 响应体 → JSON，再模型正文 → JSON 对象。只包住第二层
+    是不够的——代理或网关返回 200 加一张 HTML 错误页时，坏在第一层，同样属于
+    「拿到了回复但读不懂」，不该掉进未分类兜底。
+    """
+
+    try:
+        return response.json()
+    except ValueError as exc:
+        raise StructuredOutputError(f"{provider_name} response body is not valid JSON") from exc
+
+
+def decode_structured_json(output_text: str, *, provider_name: str) -> JsonObject:
+    """把模型正文解成一个 JSON 对象，失败一律抛 `StructuredOutputError`。"""
+
+    try:
+        parsed = json.loads(output_text)
+    except json.JSONDecodeError as exc:
+        raise StructuredOutputError(f"{provider_name} structured output is not valid JSON") from exc
+    if not isinstance(parsed, dict):
+        raise StructuredOutputError(f"{provider_name} structured output must be a JSON object")
+    return parsed
+
+
 __all__ = [
     "ModelClientRetryPolicy",
+    "StructuredOutputError",
+    "decode_structured_json",
     "is_transient_model_error",
     "post_structured_json",
+    "read_structured_payload",
 ]

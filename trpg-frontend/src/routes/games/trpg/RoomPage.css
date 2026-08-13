@@ -1,0 +1,976 @@
+/* ─── Game room: detective dossier on a wooden desk ─────────────────── */
+@font-face {
+  font-family: 'Room Numerals';
+  src: local('Times New Roman'), local('Times');
+  font-display: swap;
+  unicode-range: U+0030-0039;
+}
+
+.room-play {
+  min-height: 0;
+  overflow: hidden;
+  color: #3d2917;
+  background-color: #402918;
+  background-image:
+    linear-gradient(rgb(44 25 13 / 62%), rgb(44 25 13 / 48%)),
+    url('/assets/rooms/play/wood-desk.webp');
+  background-position: center;
+  background-size: cover;
+  font-family: 'Room Numerals', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', 'Helvetica Neue', sans-serif;
+  font-variant-numeric: lining-nums tabular-nums;
+}
+
+.room-play__header {
+  z-index: 2;
+  gap: 0.35rem;
+  height: calc(3.8rem + env(safe-area-inset-top));
+  min-height: calc(3.8rem + env(safe-area-inset-top));
+  padding: env(safe-area-inset-top) 0.75rem 0;
+  color: #f4dfb2;
+  text-shadow: 0 1px 2px rgb(22 12 6 / 75%);
+}
+
+.room-play__round-button,
+.room-play__guide-button {
+  display: grid;
+  width: 2.15rem;
+  height: 2.15rem;
+  min-width: 2.15rem;
+  flex: 0 0 2.15rem;
+  place-items: center;
+  padding: 0;
+  border: 1.5px solid rgb(244 223 178 / 82%);
+  border-radius: 999px;
+  color: #f4dfb2;
+  background: rgb(49 28 15 / 34%);
+  box-shadow: inset 0 0 0 1px rgb(49 28 15 / 22%);
+  cursor: pointer;
+  transition: color 160ms ease, background 160ms ease, transform 160ms ease;
+}
+
+.room-play__round-button svg,
+.room-play__guide-button svg {
+  width: 1.1rem;
+  height: 1.1rem;
+  color: inherit;
+}
+
+.room-play__guide-button span {
+  display: none;
+}
+
+.room-play__round-button:hover,
+.room-play__guide-button:hover,
+.room-play__round-button.is-active {
+  color: #fff2ce;
+  background: rgb(174 121 58 / 30%);
+}
+
+.room-play__round-button:active,
+.room-play__guide-button:active {
+  transform: scale(0.92);
+}
+
+.room-play__scene {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: row;
+  gap: 0.35rem;
+  overflow: hidden;
+}
+
+.room-play__module-title {
+  flex: 0 0 auto;
+  color: #f7e6c2;
+  font-size: clamp(1.02rem, 5vw, 1.35rem);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+.room-play__location {
+  display: flex;
+  max-width: 100%;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 0.2rem;
+  color: #ead1a1;
+  font-size: 0.76rem;
+  line-height: 1.25;
+  text-align: center;
+  white-space: normal;
+}
+
+.room-play__location svg {
+  width: 0.9rem;
+  height: 0.9rem;
+  flex: 0 0 auto;
+  fill: currentColor;
+}
+
+.room-play__location span {
+  display: -webkit-box;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.room-play__paper {
+  position: relative;
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  margin: 0 0.2rem;
+  overflow: hidden;
+  border: 1px solid rgb(174 121 58 / 48%);
+  border-radius: 0.9rem;
+  background-color: #f8e9c8;
+  background-image: url('/assets/rooms/play/chat-paper.webp');
+  background-position: center;
+  background-size: 100% 100%;
+  box-shadow:
+    0 0.2rem 0.65rem rgb(28 15 7 / 35%),
+    inset 0 0 1.2rem rgb(157 106 45 / 10%);
+}
+
+.room-play__tabs {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  height: 2.5rem;
+  min-height: 2.5rem;
+  grid-template-columns: 1fr 1fr;
+  border-bottom: 1px solid rgb(157 106 45 / 25%);
+}
+
+.room-play__tab {
+  position: relative;
+  border: 0;
+  color: #927855;
+  background: transparent;
+  font-family: inherit;
+  font-size: 0.92rem;
+  cursor: pointer;
+  transition: color 160ms ease, background 160ms ease;
+}
+
+.room-play__tab + .room-play__tab::before {
+  position: absolute;
+  top: 25%;
+  bottom: 25%;
+  left: 0;
+  width: 1px;
+  background: rgb(166 112 47 / 35%);
+  content: '';
+}
+
+.room-play__tab::after {
+  position: absolute;
+  right: 22%;
+  bottom: -1px;
+  left: 22%;
+  height: 2px;
+  border-radius: 999px;
+  background: #a96f25;
+  content: '';
+  opacity: 0;
+  transform: scaleX(0.35);
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+
+.room-play__tab.is-active {
+  color: #302011;
+  font-weight: 700;
+}
+
+.room-play__tab.is-active::after {
+  opacity: 1;
+  transform: scaleX(1);
+}
+
+.room-play__tab-paw {
+  display: inline-block;
+  margin-right: 0.45rem;
+  color: #a96f25;
+  font-size: 0.72rem;
+  opacity: 0;
+  transform: rotate(-18deg);
+}
+
+.room-play__tab.is-active .room-play__tab-paw {
+  opacity: 1;
+}
+
+.room-play__feed {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 1rem;
+  order: 1;
+  padding: 1.1rem 0.85rem 1.4rem;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-behavior: smooth;
+  scrollbar-gutter: stable;
+}
+
+.room-play__system-message {
+  padding: 0.15rem 0;
+  color: #967b59;
+  font-size: 0.67rem;
+  text-align: center;
+}
+
+.room-play__system-message span {
+  display: inline-block;
+  padding: 0.28rem 0.7rem;
+  border: 1px solid rgb(154 106 49 / 20%);
+  border-radius: 999px;
+  background: rgb(243 221 180 / 58%);
+}
+
+.room-play__message {
+  display: flex;
+  gap: 0.65rem;
+  align-items: flex-start;
+}
+
+.room-play__message--self {
+  flex-direction: row-reverse;
+}
+
+.room-play__message-body {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.room-play__message--self .room-play__message-body {
+  text-align: right;
+}
+
+.room-play__avatar {
+  display: grid;
+  width: 2.65rem;
+  height: 2.65rem;
+  flex: 0 0 2.65rem;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid rgb(148 96 36 / 42%);
+  border-radius: 999px;
+  background: rgb(247 226 189 / 88%);
+  box-shadow: 0 1px 3px rgb(85 49 16 / 18%);
+}
+
+.room-play__avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.room-play__avatar--keeper {
+  width: 2.9rem;
+  height: 2.9rem;
+  flex-basis: 2.9rem;
+  background: #f6e1ba;
+}
+
+.room-play__avatar--dice {
+  color: #79552d;
+  background: #e6d6ad;
+}
+
+.room-play__sender {
+  margin: 0 0 0.15rem 0.15rem;
+  color: #49331e;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.room-play__message--self .room-play__sender {
+  margin-right: 0.15rem;
+  color: #596744;
+}
+
+.room-play__message-card {
+  --room-bubble-border: rgb(151 103 47 / 24%);
+  --room-bubble-fill: rgb(242 224 187 / 72%);
+
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  padding: 0.65rem 0.8rem;
+  border: 1px solid var(--room-bubble-border);
+  border-radius: 0.3rem 0.9rem 0.9rem;
+  color: #47321d;
+  background: var(--room-bubble-fill);
+  box-shadow: 0 1px 4px rgb(84 48 17 / 10%);
+  font-family: 'Room Numerals', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', 'Helvetica Neue', sans-serif;
+  font-size: 0.94rem;
+  line-height: 1.7;
+  text-align: left;
+  white-space: pre-wrap;
+}
+
+.room-play__message-card::before {
+  position: absolute;
+  top: 0.67rem;
+  left: -0.54rem;
+  width: 0.58rem;
+  height: 0.78rem;
+  background: var(--room-bubble-border);
+  clip-path: polygon(100% 0, 100% 100%, 0 42%);
+  content: '';
+}
+
+.room-play__message-card::after {
+  position: absolute;
+  top: 0.73rem;
+  left: -0.46rem;
+  width: 0.5rem;
+  height: 0.66rem;
+  background: var(--room-bubble-fill);
+  clip-path: polygon(100% 0, 100% 100%, 0 42%);
+  content: '';
+}
+
+.room-play__message--self .room-play__message-card {
+  --room-bubble-border: rgb(100 111 67 / 24%);
+  --room-bubble-fill: rgb(222 224 181 / 76%);
+
+  border-radius: 0.9rem 0.3rem 0.9rem 0.9rem;
+}
+
+.room-play__message--self .room-play__message-card::before,
+.room-play__message--self .room-play__message-card::after {
+  left: auto;
+  clip-path: polygon(0 0, 100% 42%, 0 100%);
+}
+
+.room-play__message--self .room-play__message-card::before {
+  right: -0.54rem;
+}
+
+.room-play__message--self .room-play__message-card::after {
+  right: -0.46rem;
+}
+
+.room-play__narration-card {
+  --room-bubble-border: rgb(151 103 47 / 36%);
+  --room-bubble-fill: rgb(247 225 186 / 76%);
+
+  width: auto;
+  padding: 0.75rem 0.9rem 0.85rem;
+  border-radius: 0.3rem 0.9rem 0.9rem;
+  box-shadow:
+    0 2px 6px rgb(81 45 16 / 18%),
+    inset 0 0 1rem rgb(255 250 226 / 30%);
+}
+
+.room-play__message-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 0.35rem;
+  padding: 0 0.15rem;
+  color: #9c805e;
+  font-size: 0.68rem;
+}
+
+.room-play__message--self .room-play__message-meta {
+  justify-content: flex-end;
+}
+
+.room-play__message-meta button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  font-family: inherit;
+  font-size: inherit;
+  cursor: pointer;
+}
+
+.room-play__message-meta button svg {
+  width: 0.78rem;
+  height: 0.78rem;
+}
+
+.room-play__message-meta button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.room-play__dice-card {
+  font-family: inherit;
+}
+
+.room-play__typing {
+  display: inline-flex;
+  min-height: 2.65rem;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.65rem 0.9rem;
+  border: 1px solid rgb(151 103 47 / 24%);
+  border-radius: 0.5rem;
+  color: #765a38;
+  background: rgb(247 225 186 / 72%);
+}
+
+.room-play__vitals {
+  display: flex;
+  min-height: 1.8rem;
+  order: 2;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.25rem 0.9rem;
+  border-top: 1px solid rgb(157 106 45 / 18%);
+  color: #785d3c;
+  background: rgb(246 226 187 / 52%);
+}
+
+.room-play__vital {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.62rem;
+}
+
+.room-play__vital > svg {
+  width: 0.7rem;
+  height: 0.7rem;
+  color: #8c4b42;
+}
+
+.room-play__vital:nth-child(2) > svg {
+  color: #77668b;
+}
+
+.room-play__vital-track {
+  height: 0.26rem;
+  flex: 1;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgb(105 73 39 / 18%);
+}
+
+.room-play__vital-fill {
+  height: 100%;
+  border-radius: inherit;
+}
+
+.room-play__vital-fill--hp {
+  background: #7e8a55;
+}
+
+.room-play__vital-fill--san {
+  background: #77668b;
+}
+
+.room-play__vital strong {
+  font-family: inherit;
+  font-size: 0.66rem;
+}
+
+.room-play__toolbar {
+  z-index: 1;
+  display: grid;
+  min-height: 2.75rem;
+  order: 3;
+  grid-template-columns: repeat(4, 1fr);
+  border-top: 1px solid rgb(157 106 45 / 30%);
+  background: rgb(250 232 198 / 72%);
+}
+
+.room-play__toolbar button {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 0.38rem;
+  padding: 0.15rem 0.2rem;
+  border: 0;
+  color: #6d4b26;
+  background: transparent;
+  font-family: inherit;
+  font-size: 0.72rem;
+  cursor: pointer;
+  transition: color 160ms ease, background 160ms ease;
+}
+
+.room-play__toolbar button + button::before {
+  position: absolute;
+  top: 27%;
+  bottom: 27%;
+  left: 0;
+  width: 1px;
+  background: rgb(157 106 45 / 46%);
+  content: '';
+}
+
+.room-play__toolbar button:hover,
+.room-play__toolbar button.is-active {
+  color: #9b6423;
+  background: rgb(177 117 45 / 8%);
+}
+
+.room-play__toolbar svg {
+  width: 1.22rem;
+  height: 1.22rem;
+}
+
+.room-play__composer {
+  z-index: 2;
+  flex: 0 0 auto;
+  padding: 0.65rem 0.7rem calc(0.7rem + env(safe-area-inset-bottom));
+  color: #f2ddb4;
+  background: rgb(51 29 15 / 18%);
+}
+
+.room-play__composer-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.4rem;
+}
+
+.room-play__composer-button {
+  display: grid;
+  width: 2.4rem;
+  height: 2.4rem;
+  flex: 0 0 2.4rem;
+  place-items: center;
+  border: 1.5px solid rgb(245 222 178 / 68%);
+  border-radius: 999px;
+  color: #51351c;
+  background: rgb(248 225 182 / 94%);
+  box-shadow:
+    0 2px 5px rgb(25 13 6 / 36%),
+    inset 0 0 0 2px rgb(132 84 35 / 10%);
+  cursor: pointer;
+  transition: filter 160ms ease, transform 160ms ease;
+}
+
+.room-play__composer-button svg {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+.room-play__dice-button svg {
+  width: 1.2rem;
+  height: 1.2rem;
+}
+
+.room-play__send-button {
+  color: #f8e8c7;
+  background: #9b6428;
+}
+
+.room-play__composer-button--danger {
+  color: #fff;
+  background: #a94e45;
+}
+
+.room-play__composer-button:active:not(:disabled) {
+  transform: scale(0.92);
+}
+
+.room-play__composer-button:disabled {
+  cursor: not-allowed;
+  filter: grayscale(0.45);
+  opacity: 0.48;
+}
+
+.room-play__input {
+  width: 0;
+  min-width: 0;
+  min-height: 2.75rem;
+  flex: 1 1 auto;
+  padding: 0.66rem 0.9rem;
+  border: 1.5px solid rgb(139 91 38 / 38%);
+  border-radius: 1.35rem;
+  outline: 0;
+  overflow: hidden;
+  resize: none;
+  color: #4b321b;
+  background-color: #f2dbaf;
+  background-image: linear-gradient(rgb(255 247 221 / 34%), rgb(255 247 221 / 8%));
+  box-shadow:
+    0 2px 5px rgb(25 13 6 / 28%),
+    inset 0 0 0 2px rgb(255 246 216 / 26%);
+  font-family: inherit;
+  font-size: 0.94rem;
+  line-height: 1.4;
+}
+
+.room-play__input::placeholder {
+  color: #a68b65;
+}
+
+.room-play__input:focus {
+  border-color: #d5aa68;
+  box-shadow: 0 0 0 2px rgb(239 206 148 / 34%);
+}
+
+.room-play__bottom-panel {
+  border: 1px solid rgb(157 106 45 / 45%);
+  color: #49321c;
+  background-color: #f7e7c7;
+  background-image: url('/assets/rooms/play/chat-paper.webp');
+  background-position: center top;
+  background-size: 100% auto;
+  font-family: inherit;
+}
+
+.room-play__bottom-panel--character-paper {
+  background-color: transparent;
+  background-image: url('/assets/rooms/play/character-sheet-background.webp');
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 112% 100%;
+}
+
+.room-play__bottom-panel--character-sheet {
+  overflow: hidden;
+  padding-top: 3.5rem;
+}
+
+.room-play__bottom-panel--skills {
+  overflow: hidden;
+  padding-top: 2.75rem;
+}
+
+.room-play__bottom-panel--skills > .room-play__bottom-panel-content {
+  max-height: calc(60vh - 6.5rem) !important;
+  max-height: calc(60dvh - 6.5rem) !important;
+  overscroll-behavior: contain;
+}
+
+.room-play__bottom-panel--notes {
+  overflow: hidden;
+  padding-top: 3.5rem;
+}
+
+.room-play__bottom-panel--notes > .room-play__bottom-panel-content {
+  max-height: calc(65vh - 7.25rem) !important;
+  max-height: calc(65dvh - 7.25rem) !important;
+  overscroll-behavior: contain;
+}
+
+.room-play__bottom-panel--character-sheet > .room-play__bottom-panel-content {
+  max-height: calc(70vh - 7.25rem) !important;
+  overscroll-behavior: contain;
+}
+
+.room-play__bottom-panel-header {
+  position: relative;
+  display: grid;
+  min-height: 2.75rem;
+  place-items: center;
+}
+
+.room-play__bottom-panel-title {
+  width: 100%;
+  padding: 0 2.25rem;
+  text-align: center;
+}
+
+.room-play__bottom-panel-close {
+  position: absolute;
+  right: 1.25rem;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.room-play__bottom-panel-close:active {
+  transform: translateY(-50%) scale(0.9);
+}
+
+.room-play__skill-tabs {
+  display: grid;
+  margin-bottom: 0.9rem;
+  padding: 0.2rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border: 1px solid rgb(99 59 27 / 44%);
+  border-radius: 0.25rem;
+  background: rgb(105 64 30 / 14%);
+  box-shadow: inset 0 1px rgb(255 243 210 / 30%);
+}
+
+.room-play__skill-tab {
+  position: relative;
+  min-height: 2.25rem;
+  padding: 0.45rem 0.75rem 0.55rem;
+  border: 0;
+  color: #684528;
+  background: transparent;
+  font-family: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-align: center;
+  text-shadow: 0 1px rgb(255 248 226 / 45%);
+  transition: color 160ms ease, background-color 160ms ease;
+}
+
+.room-play__skill-tab + .room-play__skill-tab::before {
+  position: absolute;
+  left: 0;
+  top: 0.55rem;
+  bottom: 0.55rem;
+  width: 1px;
+  background: rgb(91 53 25 / 34%);
+  content: '';
+}
+
+.room-play__skill-tab::after {
+  position: absolute;
+  right: 24%;
+  bottom: -1px;
+  left: 24%;
+  height: 2px;
+  background: #edcf96;
+  box-shadow: 0 1px rgb(43 24 11 / 32%);
+  content: '';
+  opacity: 0;
+  transform: scaleX(0.4);
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+
+.room-play__skill-tab.is-active {
+  color: #fff0cf;
+  background: linear-gradient(180deg, #805329, #68401f);
+  box-shadow: inset 0 1px rgb(255 225 169 / 22%), 0 1px 2px rgb(67 36 15 / 24%);
+  font-weight: 700;
+  text-shadow: 0 1px rgb(49 27 12 / 55%);
+}
+
+.room-play__skill-tab.is-active::after {
+  opacity: 1;
+  transform: scaleX(1);
+}
+
+.room-play__skill-tab:active {
+  background-color: rgb(92 54 24 / 22%);
+}
+
+.room-play__notes-textarea {
+  min-height: 25rem;
+  border: 0;
+  border-radius: 0;
+  line-height: 2.05;
+  background-color: transparent;
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent calc(2.05em - 1px),
+    rgb(126 86 47 / 28%) calc(2.05em - 1px),
+    rgb(126 86 47 / 28%) 2.05em
+  );
+  background-position: 0 0.42rem;
+  background-attachment: local;
+  box-shadow: none;
+}
+
+.room-play__notes-save-status {
+  position: relative;
+  color: #684225;
+  font-size: 0.68rem;
+  font-weight: 600;
+  margin-bottom: -2.1rem;
+  pointer-events: none;
+  transform: translateY(-2.1rem);
+}
+
+.room-play__skill-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.room-play__skill-pill {
+  display: flex;
+  min-width: 0;
+  min-height: 2.25rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.55rem;
+  padding: 0.42rem 0.75rem;
+  border: 1px solid rgb(136 92 49 / 38%);
+  border-radius: 999px;
+  color: #4a301b;
+  background: rgb(225 194 143 / 30%);
+  box-shadow: inset 0 1px rgb(255 246 216 / 32%);
+  transition: border-color 160ms ease, background-color 160ms ease;
+}
+
+.room-play__skill-name {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 0.82rem;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.room-play__skill-value {
+  flex: 0 0 auto;
+  color: #815326;
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.room-play__location-preview {
+  position: relative;
+  display: flex;
+  min-height: 10rem;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 1rem;
+  overflow: hidden;
+  border: 1px solid rgb(157 106 45 / 35%);
+  border-radius: 0.45rem;
+  background: #f2efe8;
+}
+
+.room-play__location-preview.has-image {
+  min-height: 0;
+  aspect-ratio: 4 / 3;
+  justify-content: flex-end;
+  background: #302215;
+}
+
+.room-play__location-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.room-play__location-caption {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.room-play__location-preview.has-image .room-play__location-caption {
+  width: 100%;
+  padding: 1.65rem 0.8rem 0.65rem;
+  color: #fff6df;
+  background: linear-gradient(transparent, rgb(24 14 7 / 82%));
+  text-shadow: 0 1px 2px rgb(0 0 0 / 75%);
+}
+
+.room-play__location-preview.has-image .room-play__location-caption span {
+  color: inherit;
+}
+
+/* Tailwind 的 font-mono 和等待页角色卡的主题样式会覆盖房间页根字体。
+   在游戏房间中统一恢复系统字体；Room Numerals 仅覆盖 0–9。 */
+.room-play .font-mono,
+.room-play .character-ready-sheet__numbered,
+.room-play .character-ready-sheet__content,
+.room-play .character-ready-sheet__occupation,
+.room-play .character-ready-sheet__locations,
+.room-play .character-ready-sheet__section-title,
+.room-play .character-ready-sheet__radar-label,
+.room-play .character-ready-sheet__radar-number,
+.room-play .character-ready-sheet__radar-empty {
+  font-family: 'Room Numerals', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', 'Helvetica Neue', sans-serif !important;
+}
+
+.room-play button:focus-visible,
+.room-play input:focus-visible {
+  outline: 2px solid #efd39a;
+  outline-offset: 2px;
+}
+
+@media (max-height: 700px) {
+  .room-play__bottom-panel--dice {
+    max-height: 76vh !important;
+    max-height: 76dvh !important;
+  }
+
+  .room-play__bottom-panel--dice > .room-play__bottom-panel-content {
+    max-height: calc(76vh - 60px) !important;
+    max-height: calc(76dvh - 60px) !important;
+  }
+
+  .room-play__header {
+    height: calc(3.35rem + env(safe-area-inset-top));
+    min-height: calc(3.35rem + env(safe-area-inset-top));
+  }
+
+  .room-play__round-button,
+  .room-play__guide-button {
+    width: 2.05rem;
+    height: 2.05rem;
+    min-width: 2.05rem;
+    flex-basis: 2.05rem;
+  }
+
+  .room-play__tabs {
+    height: 2.35rem;
+    min-height: 2.35rem;
+  }
+
+  .room-play__feed {
+    gap: 0.7rem;
+    padding-top: 0.75rem;
+    padding-bottom: 0.85rem;
+  }
+
+  .room-play__avatar--keeper {
+    width: 2.55rem;
+    height: 2.55rem;
+    flex-basis: 2.55rem;
+  }
+
+  .room-play__toolbar {
+    min-height: 2.5rem;
+  }
+
+  .room-play__composer {
+    padding-top: 0.45rem;
+    padding-bottom: calc(0.45rem + env(safe-area-inset-bottom));
+  }
+
+  .room-play__composer-button,
+  .room-play__input {
+    min-height: 2.5rem;
+  }
+
+  .room-play__composer-button {
+    width: 2.25rem;
+    height: 2.25rem;
+    min-height: 2.25rem;
+    flex-basis: 2.25rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .room-play *,
+  .room-play *::before,
+  .room-play *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

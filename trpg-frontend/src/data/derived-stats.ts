@@ -3,7 +3,8 @@ export interface DerivedStatsView {
   san: number
   mp: number
   db: string
-  build?: string
+  /** 体格是整数；`null` 表示这份角色卡存的值无法解读，由渲染层显示占位符。 */
+  build: number | null
   move: number
 }
 
@@ -23,6 +24,19 @@ export const DERIVED_STAT_DEFINITIONS: ReadonlyArray<{
   { key: 'move', label: '移动力', abbreviation: 'MOV', color: '#c08050' },
 ]
 
+/**
+ * 体格在修复前与伤害加值共用同一个值，所以已经建好的角色卡（以及
+ * localStorage 里的缓存）可能存着 `+1D4` 这样的骰子表达式。解析不出整数就
+ * 留空——0 是合法体格值，兜底成它只会让玩家看到一个看似正常的错误数字。
+ */
+export function coerceBuild(value: unknown): number | null {
+  if (typeof value === 'number') return value
+  if (typeof value === 'string' && /^[+-]?\d+$/.test(value.trim())) {
+    return Number(value)
+  }
+  return null
+}
+
 export function normalizeDerivedStats(
   derived: Record<string, number | string> | undefined,
 ): DerivedStatsView {
@@ -33,7 +47,7 @@ export function normalizeDerivedStats(
     san: numberValue(derived?.SAN),
     mp: numberValue(derived?.MP),
     db: stringValue(derived?.DB),
-    build: stringValue(derived?.Build),
+    build: coerceBuild(derived?.Build),
     move: numberValue(derived?.MOV),
   }
 }

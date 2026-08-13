@@ -8,12 +8,16 @@
 from __future__ import annotations
 
 import json
+import traceback
 from typing import Any
 
 import structlog
 from collaboration_framework.engine import StateModifiedEvent
 
 logger = structlog.get_logger()
+
+# `_map_turn_error` 的最后兜底：没有任何分类分支命中时用的错误码。
+UNCLASSIFIED_TURN_ERROR_CODE = "TURN_INTERNAL_ERROR"
 
 _DIFFICULTY_LABELS = {
     "regular": "常规",
@@ -159,6 +163,7 @@ def log_turn_failed(
     code: str,
     error_type: str,
     error_reason: str = "",
+    exc: BaseException | None = None,
 ) -> None:
     logger.warning(
         "【回合失败】",
@@ -169,6 +174,22 @@ def log_turn_failed(
         error_type=error_type,
         error_reason=error_reason,
     )
+    if code != UNCLASSIFIED_TURN_ERROR_CODE or exc is None:
+        return
+    # 兜底错误码的含义就是「这个失败我们没预料到」。只记一个异常名根本没法定位：
+    # #285 在预览环境上撞到它时，正因为服务端只留下 `TURN_INTERNAL_ERROR`，
+    # 根因只能靠读代码猜，猜出来的还是错的。
+    #
+    # 堆栈只写服务端日志，绝不进 WebSocket 事件——玩家侧仍然只看到错误码和
+    # 那句安全文案。
+    logger.error(
+        "turn_unclassified_exception",
+        room=_short_ref(room_id),
+        action=correlation_id,
+        stage=stage,
+        error_type=error_type,
+        stack="".join(traceback.format_exception(exc)),
+    )
 
 
 __all__ = [
@@ -178,4 +199,5 @@ __all__ = [
     "log_state_changes",
     "log_turn_completed",
     "log_turn_failed",
+    "UNCLASSIFIED_TURN_ERROR_CODE",
 ]

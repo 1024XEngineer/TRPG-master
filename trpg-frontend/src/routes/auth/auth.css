@@ -1,5 +1,7 @@
 .auth-scene {
   min-height: 100%;
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
   overflow: hidden;
   background-color: #120b06;
   background-image: url('/assets/auth/background.webp');
@@ -18,6 +20,14 @@
   isolation: isolate;
   width: 100%;
   aspect-ratio: 849 / 1852;
+}
+
+/* 输入法弹出后浏览器会把聚焦控件滚进可视区。给登录和注册控件额外预留
+ * 滚动边距，尤其避免注册页位置更靠下的昵称框和提交按钮被软键盘遮住。
+ * 画布仍按原始设计比例等比缩放。 */
+.auth-scene .auth-field,
+.auth-scene .auth-submit {
+  scroll-margin-block: max(1rem, env(safe-area-inset-top)) max(2rem, 24dvh);
 }
 
 .auth-scene__poster,

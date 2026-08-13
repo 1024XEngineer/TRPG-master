@@ -56,6 +56,7 @@ from collaboration_framework.host.application import (
 )
 from collaboration_framework.host.ports import (
     ActionPlanBusyError,
+    ActionPlanStepFailure,
     ActionPlanVersionConflictError,
 )
 from collaboration_framework.host.schemas import (
@@ -225,6 +226,34 @@ class FailSecondStepOnceAdjudicator(RecordingAdjudicator):
         return await super().adjudicate(context)
 
 
+class ClassifiedSecondStepAdjudicator(RecordingAdjudicator):
+    async def adjudicate(self, context):
+        if context.step_index == 1:
+            self.contexts.append(context)
+            provider_error = RuntimeError("provider timed out")
+            raise TurnExecutionError(
+                "MODEL_UPSTREAM_UNAVAILABLE",
+                "主持模型暂时不可用，当前步骤未生效，请重试",
+                retryable=True,
+            ) from provider_error
+        return await super().adjudicate(context)
+
+
+class RecordingStepFailureObserver:
+    """收集进程内诊断，确认它不会混进 PlanRun 持久化结构。"""
+
+    def __init__(self) -> None:
+        self.failures: list[ActionPlanStepFailure] = []
+
+    async def __call__(self, failure: ActionPlanStepFailure) -> None:
+        self.failures.append(failure)
+
+
+class RaisingStepFailureObserver:
+    async def __call__(self, failure: ActionPlanStepFailure) -> None:
+        raise RuntimeError("diagnostic sink unavailable")
+
+
 class RejectSecondStepAdjudicator(RecordingAdjudicator):
     async def adjudicate(self, context):
         if context.step_index == 1:
@@ -233,12 +262,12 @@ class RejectSecondStepAdjudicator(RecordingAdjudicator):
         return await super().adjudicate(context)
 
 
-class MislabeledTargetAdjudicator(RecordingAdjudicator):
-    """First proposal for step 2 uses a target the Engine refuses.
+class MissingTargetAdjudicator(RecordingAdjudicator):
+    """First proposal for step 2 references a target the Engine cannot resolve.
 
-    Mirrors the real failure the model produces: a `world` id labelled as a
-    `location`. The Engine rejects it before committing anything, so the repair
-    pass gets to reuse the same step_request_id.
+    A uniquely identifiable target with the wrong kind is now normalized by the
+    Engine. A genuinely absent id still exercises the Host repair loop without
+    overlapping that deterministic normalization responsibility.
     """
 
     def __init__(self, world_ref: str, *, repairs: bool = True) -> None:
@@ -255,7 +284,7 @@ class MislabeledTargetAdjudicator(RecordingAdjudicator):
             source_revision="untrusted",
             actor_id="untrusted",
             summary=context.step.semantic_goal,
-            target=ActionTarget(kind="location", id=self.world_ref),
+            target=ActionTarget(kind="world", id="missing-target"),
             method=ActionMethod(family="action", description=context.step.semantic_goal),
             check=NoAdjudicationCheck(),
             success_effects=(NarrativeOnlyEffect(),),
@@ -313,7 +342,7 @@ class ContractRejectingExecutor:
         return await self.service.get_status(request)
 
 
-class AlwaysMislabeledTargetAdjudicator(RecordingAdjudicator):
+class AlwaysMissingTargetAdjudicator(RecordingAdjudicator):
     async def adjudicate(self, context):
         self.contexts.append(context)
         return ActionAdjudication(
@@ -321,7 +350,7 @@ class AlwaysMislabeledTargetAdjudicator(RecordingAdjudicator):
             source_revision="untrusted",
             actor_id="untrusted",
             summary=context.step.semantic_goal,
-            target=ActionTarget(kind="location", id=self.world_ref),
+            target=ActionTarget(kind="world", id="missing-target"),
             method=ActionMethod(family="action", description=context.step.semantic_goal),
             check=NoAdjudicationCheck(),
             success_effects=(NarrativeOnlyEffect(),),
@@ -373,6 +402,7 @@ def orchestrator(
     executor=None,
     policy=None,
     two_scenes: bool = False,
+    on_step_failure=None,
 ):
     module, engine_store, projector = runtime(two_scenes=two_scenes)
     adjudicator = adjudicator or RecordingAdjudicator(module.world_ref)
@@ -386,6 +416,7 @@ def orchestrator(
             player_view_projector=projector,
             policy=policy,
             lease_seconds=1,
+            on_step_failure=on_step_failure,
         ),
         adjudicator,
         service,
@@ -896,11 +927,13 @@ async def test_unsubmitted_stale_step_is_refreshed_on_same_parent_retry() -> Non
 async def test_second_step_provider_failure_retries_from_same_cursor() -> None:
     module, engine_store, projector = runtime()
     adjudicator = FailSecondStepOnceAdjudicator(module.world_ref)
+    observer = RecordingStepFailureObserver()
     service = ActionPlanOrchestrator(
         store=InMemoryActionPlanRunStore(),
         adjudicator=adjudicator,
         executor=AdjudicationEngineService(engine_store),
         player_view_projector=projector,
+        on_step_failure=observer,
     )
     original = player_input("provider-retry-parent")
 
@@ -911,6 +944,19 @@ async def test_second_step_provider_failure_retries_from_same_cursor() -> None:
     assert [step.status for step in failed.run.steps] == ["completed", "pending"]
     assert failed.run.steps[1].safe_failure_code == "STEP_ADJUDICATOR_FAILED"
     assert len(engine_store.inspect_domain_events("room_01")) == 1
+    assert "temporary provider outage" not in failed.run.model_dump_json()
+    assert len(observer.failures) == 1
+    diagnostic = observer.failures[0]
+    assert diagnostic.correlation_id == original.client_action_id
+    assert diagnostic.plan_id == failed.run.plan_id
+    assert diagnostic.step_id == failed.run.steps[1].step_id
+    assert diagnostic.step_index == 1
+    assert diagnostic.attempt == 1
+    assert diagnostic.duration_ms >= 0
+    assert diagnostic.code == "STEP_ADJUDICATOR_FAILED"
+    assert isinstance(diagnostic.error, RuntimeError)
+    assert diagnostic.completed_steps == 1
+    assert diagnostic.authoritative_submitted is False
 
     recovered = await service.start_or_resume(original, plan=plan(2))
 
@@ -923,6 +969,56 @@ async def test_second_step_provider_failure_retries_from_same_cursor() -> None:
         "1",
     ]
     assert len(engine_store.inspect_domain_events("room_01")) == 2
+
+
+@pytest.mark.asyncio
+async def test_step_failure_observer_error_does_not_change_plan_failure_state() -> None:
+    """日志或监控不可用时，仍须保留前序提交并安全停在当前未提交步骤。"""
+
+    module, engine_store, projector = runtime()
+    service = ActionPlanOrchestrator(
+        store=InMemoryActionPlanRunStore(),
+        adjudicator=FailSecondStepOnceAdjudicator(module.world_ref),
+        executor=AdjudicationEngineService(engine_store),
+        player_view_projector=projector,
+        on_step_failure=RaisingStepFailureObserver(),
+    )
+
+    failed = await service.start_or_resume(
+        player_input("observer-failure-parent"),
+        plan=plan(2),
+    )
+
+    assert failed.run.status == "retryable_failure"
+    assert [step.status for step in failed.run.steps] == ["completed", "pending"]
+    assert failed.run.steps[1].safe_failure_code == "STEP_ADJUDICATOR_FAILED"
+    assert len(engine_store.inspect_domain_events("room_01")) == 1
+
+
+@pytest.mark.asyncio
+async def test_classified_step_failure_preserves_code_and_original_cause() -> None:
+    module, engine_store, projector = runtime()
+    observer = RecordingStepFailureObserver()
+    service = ActionPlanOrchestrator(
+        store=InMemoryActionPlanRunStore(),
+        adjudicator=ClassifiedSecondStepAdjudicator(module.world_ref),
+        executor=AdjudicationEngineService(engine_store),
+        player_view_projector=projector,
+        on_step_failure=observer,
+    )
+
+    failed = await service.start_or_resume(
+        player_input("classified-provider-parent"),
+        plan=plan(2),
+    )
+
+    assert failed.run.status == "retryable_failure"
+    assert failed.run.steps[1].safe_failure_code == "MODEL_UPSTREAM_UNAVAILABLE"
+    assert [step.status for step in failed.run.steps] == ["completed", "pending"]
+    assert len(engine_store.inspect_domain_events("room_01")) == 1
+    assert len(observer.failures) == 1
+    assert observer.failures[0].code == "MODEL_UPSTREAM_UNAVAILABLE"
+    assert isinstance(observer.failures[0].error, RuntimeError)
 
 
 @pytest.mark.asyncio
@@ -992,7 +1088,7 @@ async def test_invalid_second_step_fails_closed_before_engine_commit() -> None:
 @pytest.mark.asyncio
 async def test_engine_rejection_is_repaired_once_instead_of_stopping_the_plan() -> None:
     module, engine_store, projector = runtime()
-    adjudicator = MislabeledTargetAdjudicator(module.world_ref)
+    adjudicator = MissingTargetAdjudicator(module.world_ref)
     service = ActionPlanOrchestrator(
         store=InMemoryActionPlanRunStore(),
         adjudicator=adjudicator,
@@ -1025,7 +1121,7 @@ async def test_engine_rejection_is_repaired_once_instead_of_stopping_the_plan() 
 @pytest.mark.asyncio
 async def test_engine_rejection_repair_is_attempted_at_most_once() -> None:
     module, engine_store, projector = runtime()
-    adjudicator = MislabeledTargetAdjudicator(module.world_ref, repairs=False)
+    adjudicator = MissingTargetAdjudicator(module.world_ref, repairs=False)
     service = ActionPlanOrchestrator(
         store=InMemoryActionPlanRunStore(),
         adjudicator=adjudicator,
@@ -1094,7 +1190,7 @@ async def test_non_repairable_validation_stops_without_recalling_agent(
 @pytest.mark.asyncio
 async def test_zero_repair_budget_disables_plan_auto_repair() -> None:
     module, engine_store, projector = runtime()
-    adjudicator = MislabeledTargetAdjudicator(module.world_ref)
+    adjudicator = MissingTargetAdjudicator(module.world_ref)
     service = ActionPlanOrchestrator(
         store=InMemoryActionPlanRunStore(),
         adjudicator=adjudicator,
@@ -1324,8 +1420,8 @@ def single_action_decision(*, world_ref: str, valid_target: bool) -> SingleActio
             actor_id="untrusted",
             summary="检查当前环境",
             target=ActionTarget(
-                kind="world" if valid_target else "location",
-                id=world_ref,
+                kind="world",
+                id=world_ref if valid_target else "missing-target",
             ),
             method=ActionMethod(family="observe", description="检查当前环境"),
             check=NoAdjudicationCheck(),
@@ -1376,7 +1472,7 @@ async def test_single_action_repair_budget_is_finite() -> None:
     module, engine_store, projector = runtime()
     plan_store = InMemoryActionPlanRunStore()
     engine = AdjudicationEngineService(engine_store)
-    repair_adjudicator = AlwaysMislabeledTargetAdjudicator(module.world_ref)
+    repair_adjudicator = AlwaysMissingTargetAdjudicator(module.world_ref)
     orchestrator_service = ActionPlanOrchestrator(
         store=plan_store,
         adjudicator=repair_adjudicator,

@@ -109,7 +109,7 @@ class SqlRepairingPlanAdjudicator(SqlPlanAdjudicator):
         self.contexts.append(context)
         target = ActionTarget(kind="world", id=self.world_ref)
         if context.step_index == 1 and context.previous_rejection is None:
-            target = ActionTarget(kind="location", id=self.world_ref)
+            target = ActionTarget(kind="world", id="missing-target")
         return ActionAdjudication(
             request_id="untrusted",
             source_revision="untrusted",

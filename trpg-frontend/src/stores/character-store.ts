@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import type { Attributes, InvestigatorInfo } from '@/data/character-model'
-import type { DerivedStatsView } from '@/data/derived-stats'
+import { coerceBuild, type DerivedStatsView } from '@/data/derived-stats'
 
 export interface CompletedCharacter {
   info: InvestigatorInfo
@@ -42,6 +42,28 @@ interface CharacterState {
 // 房间时，会展示上一个房间的角色卡；换账号登录也会继承上一个用户的数据
 // （见 PR #67 review）。现在额外存一个 roomId，读取时用 getForRoom 核对，
 // 房间对不上就当作没建过卡，而不是直接把 character 暴露出去。
+export const CHARACTER_STORE_VERSION = 1
+
+/**
+ * v1（issue #284）：体格从「与伤害加值共用的字符串」收敛为整数。已经写进
+ * localStorage 的角色卡里存着 `+1D4` 这类骰子表达式，不迁移的话类型声明与
+ * 运行时不符，玩家也会继续看到那个错误的体格。
+ */
+export function migrateCharacterState(persisted: unknown, version: number): unknown {
+  const state = persisted as CharacterState | null
+  if (version >= 1 || !state?.character) return state
+  return {
+    ...state,
+    character: {
+      ...state.character,
+      derived: {
+        ...state.character.derived,
+        build: coerceBuild(state.character.derived?.build),
+      },
+    },
+  }
+}
+
 export const useCharacterStore = create<CharacterState>()(
   persist(
     (set, get) => ({
@@ -51,6 +73,14 @@ export const useCharacterStore = create<CharacterState>()(
       getForRoom: (roomId) => (get().roomId === roomId ? get().character : null),
       clear: () => set({ character: null, roomId: null }),
     }),
-    { name: 'aidm-character', storage: createJSONStorage(() => localStorage) }
+    {
+      name: 'aidm-character',
+      storage: createJSONStorage(() => localStorage),
+      // v1（issue #284）：体格从「与伤害加值共用的字符串」收敛为整数。已经
+      // 写进 localStorage 的角色卡里存着 `+1D4` 这类骰子表达式，不迁移的话
+      // 类型声明与运行时不符，玩家也会继续看到那个错误的体格。
+      version: CHARACTER_STORE_VERSION,
+      migrate: migrateCharacterState,
+    }
   )
 )

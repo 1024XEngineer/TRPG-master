@@ -67,6 +67,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.websockets import WebSocketState
 
+from app.adapters.structured_http import StructuredOutputError, is_transient_model_error
 from app.core.action_plan_turn import (
     ActionPlanTurnResult,
     action_plan_turn_application,
@@ -748,6 +749,24 @@ def _map_turn_error(exc: Exception) -> tuple[str, str, bool]:
         return "REVISION_CONFLICT", "房间状态已被其他动作更新，请重试", True
     if isinstance(exc, SQLAlchemyError):
         return "DATABASE_CONFLICT", "动作提交发生数据库并发冲突，请重试", True
+    # 模型调用的普通故障。叙事阶段的同类失败已经在 `_narrate` 里被包装成
+    # TurnExecutionError，所以这两条实际认领的是规划阶段——那里此前什么分类都没有，
+    # 一个 30 秒超时和「引擎内部炸了」共用同一个兜底码（#285）。
+    #
+    # 两句文案都明确「本次动作未生效」：这类失败发生在裁决提交规则引擎之前，
+    # 没有任何权威效果落库，不能让玩家以为动作已经算数、只是缺一段叙事。
+    if is_transient_model_error(exc):
+        return (
+            "MODEL_UPSTREAM_UNAVAILABLE",
+            "主持模型暂时不可用，本次动作未生效，请重试",
+            True,
+        )
+    if isinstance(exc, StructuredOutputError):
+        return (
+            "MODEL_OUTPUT_UNREADABLE",
+            "主持模型返回了无法解读的结果，本次动作未生效，请重试",
+            True,
+        )
 
     message = str(exc)
     if "运行时不存在" in message:
@@ -1212,6 +1231,7 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 correlation_id=submit_payload.client_action_id,
                                 error_type=type(exc).__name__,
                                 error_reason=_turn_error_reason(exc),
+                                exc=exc,
                             )
                             await _send_turn_failed(
                                 websocket,
@@ -1284,6 +1304,7 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 correlation_id=choice.client_action_id,
                                 error_type=type(exc).__name__,
                                 error_reason=_turn_error_reason(exc),
+                                exc=exc,
                             )
                             await _send_turn_failed(websocket, choice.client_action_id, exc)
                     elif event_type == "adjudication.post_roll":
@@ -1343,6 +1364,7 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 correlation_id=choice.client_action_id,
                                 error_type=type(exc).__name__,
                                 error_reason=_turn_error_reason(exc),
+                                exc=exc,
                             )
                             await _send_turn_failed(websocket, choice.client_action_id, exc)
                     elif event_type == "action.plan.cancel":
@@ -1370,6 +1392,7 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 correlation_id=cancel.client_action_id,
                                 error_type=type(exc).__name__,
                                 error_reason=_turn_error_reason(exc),
+                                exc=exc,
                             )
                             await _send_turn_failed(websocket, cancel.client_action_id, exc)
                     elif event_type == "san.check.roll":

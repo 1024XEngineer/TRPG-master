@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import { RoomSocketServerError, TurnFailedError, type AdjudicationPendingPayload, type AgentPlayerView, type AgentTurnPhase, type CheckRequestPayload, type EndingDraft, type NarrationPushPayload, type RoomConversationEvent, type RoomPlayerSummary } from 'trpg-sdk'
-import { ArrowLeft, Users, Map, BookOpen, ScrollText, Star, X, SendHorizontal, Dice6, Plus, Save, FlagOff, Heart, Volume2, Pause, Play, Square, RotateCcw, Mic, LoaderCircle } from 'lucide-react'
+import { ArrowLeft, Users, Map, MapPin, BookOpen, ScrollText, Star, X, SendHorizontal, Plus, Save, FlagOff, Heart, Brain, Volume2, Pause, Play, Square, RotateCcw, Mic, LoaderCircle } from 'lucide-react'
 import { useCallback, useState, useRef, useEffect, type Dispatch, type FormEvent, type SetStateAction } from 'react'
 import { useRoomStore } from '@/stores/room-store'
 import { useAuthStore } from '@/stores/auth-store'
@@ -13,14 +13,29 @@ import { useRuleset } from '@/hooks/useRuleset'
 import { useHostSpeech } from '@/hooks/useHostSpeech'
 import { useSpeechInput } from '@/hooks/useSpeechInput'
 import { Dice3DStage, supports3DDice, type Dice3DHandle, type DiceRollToken } from '@/features/dice3d'
-import { DERIVED_STAT_DEFINITIONS } from '@/data/derived-stats'
 import { OnboardingTrigger } from '@/features/onboarding'
 import { CheckWorkflowPanel } from '@/features/adjudication'
-import { PortraitImage } from '@/features/portrait/PortraitImage'
+import { CharacterBasicInfo } from '@/features/character/CharacterBasicInfo'
 import type {
   CheckRunView as UiCheckRunView,
   PendingCheckDecisionView as UiPendingCheckDecisionView,
 } from '@/features/adjudication'
+import './RoomPage.css'
+
+function IsometricDiceIcon() {
+  return (
+    <svg viewBox="0 0 32 32" fill="none" aria-hidden="true">
+      <path d="M16 3 28 9.5 16 16 4 9.5 16 3Z" fill="#fff0c8" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+      <path d="M4 9.5 16 16v13L4 22.5v-13Z" fill="#d8a65c" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+      <path d="M28 9.5 16 16v13l12-6.5v-13Z" fill="#b87935" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+      <circle cx="16" cy="9.4" r="1.45" fill="currentColor" />
+      <circle cx="8.3" cy="14" r="1.25" fill="currentColor" />
+      <circle cx="11.7" cy="22.7" r="1.25" fill="currentColor" />
+      <circle cx="23.7" cy="14" r="1.25" fill="#fff0c8" />
+      <circle cx="20.3" cy="22.7" r="1.25" fill="#fff0c8" />
+    </svg>
+  )
+}
 
 // `crypto.randomUUID()` 要求安全上下文（HTTPS 或 localhost）——CI Preview
 // 部署在纯 HTTP 的 IP:端口上（issue #200，域名/HTTPS 明确列在本期不做），
@@ -37,6 +52,14 @@ function randomActionId(): string {
   bytes[8] = (bytes[8] & 0x3f) | 0x80
   const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
+
+function skillPillColors(value: number) {
+  const ratio = Math.min(100, Math.max(0, value)) / 100
+  return {
+    backgroundColor: `hsl(36 52% ${92 - ratio * 22}%)`,
+    borderColor: `hsl(31 45% ${72 - ratio * 22}%)`,
+  }
 }
 
 function pendingDecisionForUi(
@@ -103,6 +126,17 @@ interface MapLocation {
   access?: 'unknown' | 'reachable' | 'blocked'
   visited?: boolean
   isCurrent?: boolean
+}
+
+const LOCATION_IMAGE_BY_ID: Record<string, string> = {
+  arnoldsburg_streets: '/assets/rooms/play/location-arnoldsburg-streets.webp',
+  thomas_office: '/assets/rooms/play/location-thomas-office.webp',
+  neighborhood: '/assets/rooms/play/location-neighborhood.webp',
+  cemetery: '/assets/rooms/play/location-cemetery.webp',
+  library: '/assets/rooms/play/location-library.webp',
+  newspaper_office: '/assets/rooms/play/location-newspaper-office.webp',
+  surveillance_point: '/assets/rooms/play/location-surveillance-point.webp',
+  kimball_study: '/assets/rooms/play/location-kimball-study.webp',
 }
 
 function mapLocationsFromPlayerView(playerView: AgentPlayerView | null): MapLocation[] {
@@ -223,6 +257,24 @@ const DICE_3D_SETTLE_TIMEOUT_MS = 15000
 /** Render the Engine's authoritative discrete world-time point. */
 function formatWorldTime(dayIndex: number, hourOfDay: number): string {
   return `第 ${dayIndex + 1} 天 ${String(hourOfDay).padStart(2, '0')}:00`
+}
+
+/**
+ * PlayerView 的当前资源，按小写 id 索引，供角色卡面板显示活的 HP/SAN/MP/幸运。
+ *
+ * 顶部状态栏一直读 PlayerView，角色卡面板读的却是建卡快照，同一页的同名数值
+ * 于是对不上（issue #286）。两处现在共用这同一份投影。
+ */
+function liveResourcesOf(playerView: AgentPlayerView | null): Record<string, number> {
+  const resources: Record<string, number> = {}
+  for (const item of playerView?.self_actor.resources ?? []) {
+    if (typeof item.value !== 'number' || !Number.isFinite(item.value)) continue
+    // id 与 name 都建索引，和 `resourceValue` 的匹配口径保持一致：否则顶部
+    // 状态栏能按 name 命中的资源，面板会按 id 找不到，又变回两个数。
+    resources[item.id.toLocaleLowerCase()] = item.value
+    resources[item.name.toLocaleLowerCase()] = item.value
+  }
+  return resources
 }
 
 function resourceValue(playerView: AgentPlayerView | null, id: string): number | null {
@@ -486,7 +538,7 @@ const DIFFICULTY_COLORS: Record<string, string> = {
 // heightVh：不传就是原来的"按内容自适应、最多 72vh"；传了就固定成这个高度
 // （不再随内容多少变化），配合内部 overflow-y-auto 滚动——用于内容量本身
 // 会因为切页签/切分类而差很多、又不想让面板跟着一起忽高忽低的场景。
-function BottomPanel({ open, onClose, title, children, heightVh }: { open: boolean; onClose: () => void; title: string; children: React.ReactNode; heightVh?: number }) {
+function BottomPanel({ open, onClose, title, children, heightVh, className = '' }: { open: boolean; onClose: () => void; title: string; children: React.ReactNode; heightVh?: number; className?: string }) {
   useEffect(() => {
     if (open) document.body.style.overflow = 'hidden'
     else document.body.style.overflow = ''
@@ -499,19 +551,19 @@ function BottomPanel({ open, onClose, title, children, heightVh }: { open: boole
     <>
       {open && <div className="fixed inset-0 z-40 bg-black/30" onClick={onClose} />}
       <div
-        className={`fixed bottom-0 left-0 right-0 z-50 bg-card rounded-t-2xl shadow-xl transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] max-w-[430px] mx-auto ${open ? 'translate-y-0' : 'translate-y-full'}`}
+        className={`room-play__bottom-panel ${className} fixed bottom-0 left-0 right-0 z-50 bg-card rounded-t-2xl shadow-xl transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] max-w-[430px] mx-auto ${open ? 'translate-y-0' : 'translate-y-full'}`}
         style={heightVh ? { height: `${maxH}vh` } : { maxHeight: `${maxH}vh` }}
       >
         <div className="flex flex-col items-center pt-2.5 pb-0 cursor-pointer" onClick={onClose}>
           <div className="w-9 h-1 rounded-full bg-border-mid" />
         </div>
-        <div className="flex items-center justify-between px-5 pt-2 pb-3">
-          <h3 className="text-base font-bold text-text-primary">{title}</h3>
-          <button aria-label="关闭面板" onClick={onClose} className="w-7 h-7 rounded-full bg-panel flex items-center justify-center active:scale-90 transition-transform">
+        <div className="room-play__bottom-panel-header px-5 pt-2 pb-3">
+          <h3 className="room-play__bottom-panel-title text-base font-bold text-text-primary">{title}</h3>
+          <button aria-label="关闭面板" onClick={onClose} className="room-play__bottom-panel-close w-7 h-7 rounded-full bg-panel flex items-center justify-center active:scale-90 transition-transform">
             <X className="w-4 h-4 text-text-muted" strokeWidth={2.5} />
           </button>
         </div>
-        <div className="overflow-y-auto px-5 pb-6" style={{ maxHeight: `calc(${maxH}vh - 60px)` }}>
+        <div className="room-play__bottom-panel-content overflow-y-auto px-5 pb-6" style={{ maxHeight: `calc(${maxH}vh - 60px)` }}>
           {children}
         </div>
       </div>
@@ -967,7 +1019,12 @@ function DiceModal({
             : '本次检定规则不允许消耗幸运'
 
   return (
-    <BottomPanel open={open} onClose={onClose} title="骰子检定">
+    <BottomPanel
+      open={open}
+      onClose={onClose}
+      title="骰子检定"
+      className="room-play__bottom-panel--dice"
+    >
       {!isCheckMode && (
         <div className="flex gap-1.5 mb-3.5">
           {DICE_OPTIONS.map((opt) => (
@@ -1285,11 +1342,14 @@ export default function RoomPage() {
   )
   const [lastSaved, setLastSaved] = useState<string | null>(() => (notesKey ? localStorage.getItem(notesKey) : null) ? new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const composerInputRef = useRef<HTMLTextAreaElement>(null)
   const pendingNarrationActionIdRef = useRef<string | null>(null)
   const organizingPhaseStartedAtRef = useRef<number | null>(null)
   const progressClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const suspended = (roomPhase || roomInfo?.phase) === 'Suspended'
   const mapLocations = mapLocationsFromPlayerView(playerView)
+  const currentLocationImage = playerView ? LOCATION_IMAGE_BY_ID[playerView.scene.id] : undefined
+  const liveResources = liveResourcesOf(playerView)
   const currentHp = resourceValue(playerView, 'hp') ?? character?.derived.hp ?? null
   const currentSan = resourceValue(playerView, 'san') ?? character?.derived.san ?? null
   // 权限请求、识别和整理结果期间都占用语音会话。UI 用同一个布尔值切换
@@ -1784,6 +1844,13 @@ export default function RoomPage() {
     }
   }
 
+  useEffect(() => {
+    const field = composerInputRef.current
+    if (!field) return
+    field.style.height = 'auto'
+    field.style.height = `${field.scrollHeight}px`
+  }, [input])
+
   const handleDiceResult = (result: number, diceType: DiceType, skillId?: string) => {
     if (pendingCheck) {
       if (!playerId || diceType !== 'd100' || !skillId || pendingCheckDice?.submitted) return
@@ -1867,39 +1934,43 @@ export default function RoomPage() {
   }
 
   return (
-    <div className="h-full flex flex-col bg-card relative max-w-[430px] mx-auto">
+    <div className="room-play h-full flex flex-col relative max-w-[430px] mx-auto">
       {/* Header */}
-      <div data-onboarding-target="scene-header" className="flex items-center gap-2.5 px-4 py-2.5 border-b border-border-light bg-page flex-shrink-0">
-        <button onClick={() => setConfirmExit(true)} className="w-8 h-8 rounded-full bg-card border border-border-light flex items-center justify-center active:bg-panel">
-          <ArrowLeft className="w-4 h-4 text-text-muted" strokeWidth={2.5} />
+      <header data-onboarding-target="scene-header" className="room-play__header flex items-center flex-shrink-0">
+        <button
+          type="button"
+          aria-label="退出游戏"
+          title="退出游戏"
+          onClick={() => setConfirmExit(true)}
+          className="room-play__round-button"
+        >
+          <ArrowLeft strokeWidth={2.2} />
         </button>
-        <div className="w-8 h-8 rounded-full bg-[#f3eef8] flex items-center justify-center text-base flex-shrink-0">
-          🏚️
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="text-sm font-semibold text-text-primary">{roomInfo?.moduleTitle || '当前模组'}</div>
-          <div className="text-[11px] text-text-muted">
-            {playerView?.scene.name || (roomInfo ? `${roomInfo.players.length} 位调查员` : '克苏鲁的呼唤')}
+        <div className="room-play__scene flex-1 min-w-0">
+          <div className="room-play__module-title">{roomInfo?.moduleTitle || '当前模组'}</div>
+          <div className="room-play__location" title={playerView?.scene.name || '场景同步中'}>
+            <MapPin aria-hidden="true" />
+            <span>{playerView?.scene.name || '场景同步中'}</span>
           </div>
         </div>
-        <OnboardingTrigger />
+        <OnboardingTrigger className="room-play__guide-button" />
         <button
           onClick={() => setOpenPanel(openPanel === 'speech' ? null : 'speech')}
           aria-label="主持人语音"
           title="主持人语音"
-          className={`w-8 h-8 rounded-full bg-card border border-border-light flex items-center justify-center active:bg-panel ${hostSpeech.status === 'playing' ? 'text-brass-dark' : 'text-text-muted'}`}
+          className={`room-play__round-button ${hostSpeech.status === 'playing' ? 'is-active' : ''}`}
         >
-          <Volume2 className="w-4 h-4" strokeWidth={2.5} />
+          <Volume2 strokeWidth={2.2} />
         </button>
         <button
           onClick={() => setOpenPanel(openPanel === 'members' ? null : 'members')}
           aria-label="房间成员"
           title="房间成员"
-          className="w-8 h-8 rounded-full bg-card border border-border-light flex items-center justify-center active:bg-panel"
+          className="room-play__round-button"
         >
-          <Users className="w-4 h-4 text-text-muted" strokeWidth={2.5} />
+          <Users strokeWidth={2.2} />
         </button>
-      </div>
+      </header>
 
       {/* 退出确认——不是结束游戏，房间对其他人继续存在 */}
       {confirmExit && (
@@ -1920,36 +1991,44 @@ export default function RoomPage() {
         </div>
       )}
 
+      <section className="room-play__paper">
       {/* Messages */}
-      <div className="flex items-center gap-1 px-3 py-2 border-b border-border-light bg-page">
+      <div className="room-play__tabs" aria-label="游戏消息频道">
         {([{ id: 'action', label: '行动' }, { id: 'discussion', label: '讨论区' }] as const).map((item) => (
-          <button key={item.id} type="button" onClick={() => setChannel(item.id)} className={`flex-1 py-1.5 text-xs font-semibold rounded-md ${channel === item.id ? 'bg-brass text-white' : 'text-text-muted bg-panel'}`}>
+          <button
+            key={item.id}
+            type="button"
+            aria-pressed={channel === item.id}
+            onClick={() => setChannel(item.id)}
+            className={`room-play__tab ${channel === item.id ? 'is-active' : ''}`}
+          >
+            <span aria-hidden="true" className="room-play__tab-paw">●</span>
             {item.label}
           </button>
         ))}
       </div>
-      <div data-onboarding-target="narration-feed" className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-3" id="chatScroll">
+      <div data-onboarding-target="narration-feed" className="room-play__feed" id="chatScroll">
         {messages.filter((msg) => (msg.channel ?? 'action') === channel).map((msg, i) => {
           if (msg.type === 'system') {
             return (
-              <div key={i} className="text-center py-1.5 animate-[fadeIn_0.3s_ease]">
-                <span className="text-[11px] text-text-dim bg-panel px-3.5 py-1 rounded-[99px] font-mono">{msg.content}</span>
+              <div key={i} className="room-play__system-message animate-[fadeIn_0.3s_ease]">
+                <span>{msg.content}</span>
               </div>
             )
           }
 
           if (msg.type === 'dice') {
             return (
-              <div key={i} className="flex flex-row-reverse gap-2.5 animate-[msgIn_0.3s_ease]">
-                <div className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-sm bg-[#eef6ee] border border-border-light">
+              <div key={i} className="room-play__message room-play__message--self room-play__message--dice animate-[msgIn_0.3s_ease]">
+                <div className="room-play__avatar room-play__avatar--dice">
                   🎲
                 </div>
-                <div className="flex-1 min-w-0 text-right">
-                  <div className="text-[11px] font-semibold text-mold mb-0.5">{msg.sender} · 掷骰</div>
-                  <div className="text-sm leading-[1.65] text-text-body inline-block max-w-full px-3.5 py-2.5 bg-[#eef6ee] rounded-md font-mono">
+                <div className="room-play__message-body">
+                  <div className="room-play__sender">{msg.sender} · 掷骰</div>
+                  <div className="room-play__message-card room-play__dice-card">
                     {msg.content}
                   </div>
-                  <div className="text-[10px] text-text-dim mt-0.5">{msg.time}</div>
+                  <div className="room-play__message-meta">{msg.time}</div>
                 </div>
               </div>
             )
@@ -1960,51 +2039,51 @@ export default function RoomPage() {
           const portraitUrl = msg.playerId ? portraitUrls[msg.playerId] : undefined
 
           return (
-            <div key={i} className={`flex gap-2.5 ${isPlayer ? 'flex-row-reverse' : ''} animate-[msgIn_0.3s_ease]`}>
-              <div className={`w-8 h-8 rounded-full flex-shrink-0 overflow-hidden flex items-center justify-center text-sm border border-border-light ${isNarr ? 'bg-[#faf5eb] border-brass' : isPlayer ? 'bg-[#eef6ee]' : 'bg-panel'}`}>
+            <div key={i} className={`room-play__message ${isPlayer ? 'room-play__message--self' : ''} ${isNarr ? 'room-play__message--narration' : ''} animate-[msgIn_0.3s_ease]`}>
+              <div className={`room-play__avatar ${isNarr ? 'room-play__avatar--keeper' : ''}`}>
                 {msg.type === 'player' && portraitUrl ? (
                   <img
                     src={portraitUrl}
                     alt={`${msg.sender ?? '玩家'}的头像`}
                     className="h-full w-full object-cover"
                   />
-                ) : isNarr ? '📜' : msg.type === 'player' ? '🔍' : '🤖'}
+                ) : isNarr ? (
+                  <img src="/assets/rooms/play/keeper-cat.webp" alt="" aria-hidden="true" />
+                ) : msg.type === 'player' ? '🔍' : '🤖'}
               </div>
-              <div className={`flex-1 min-w-0 ${isPlayer ? 'text-right' : ''}`}>
-                <div className={`text-[11px] font-semibold text-text-muted mb-0.5 ${isPlayer ? 'text-mold' : ''} ${isNarr ? 'text-brass-dark' : ''}`}>
+              <div className="room-play__message-body">
+                <div className="room-play__sender">
                   {msg.sender}
                 </div>
-                <div className={`
-                  text-sm leading-[1.65] text-text-body inline-block max-w-full px-3.5 py-2.5
-                  ${isPlayer ? 'bg-[#eef6ee] rounded-md' : ''}
-                  ${isNarr ? 'bg-[#fdfaf4] border-l-[3px] border-brass rounded-r-sm rounded-l-none italic text-[#4a4030] text-left whitespace-pre-wrap' : ''}
-                  ${!isPlayer && !isNarr ? 'bg-panel rounded-md' : ''}
-                `}>
-                  {isNarr && msg.narrationId === hostSpeech.currentMessageId && hostSpeech.currentSentences.length > 0
-                    ? hostSpeech.currentSentences.map((sentence) => (
-                        <span
-                          key={sentence.index}
-                          className={sentence.index === hostSpeech.currentSentenceIndex ? 'bg-brass/20 rounded-sm' : ''}
-                        >
-                          {sentence.text}
-                        </span>
-                      ))
-                    : msg.content}
+                <div className={`room-play__message-card ${isNarr ? 'room-play__narration-card' : ''}`}>
+                  <div className="room-play__narration-text whitespace-pre-wrap">
+                    {isNarr && msg.narrationId === hostSpeech.currentMessageId && hostSpeech.currentSentences.length > 0
+                      ? hostSpeech.currentSentences.map((sentence) => (
+                          <span
+                            key={sentence.index}
+                            className={sentence.index === hostSpeech.currentSentenceIndex ? 'bg-brass/20 rounded-sm' : ''}
+                          >
+                            {sentence.text}
+                          </span>
+                        ))
+                      : msg.content}
+                  </div>
                 </div>
-                <div className="text-[10px] text-text-dim mt-0.5">{msg.time}</div>
-                {isNarr && (
-                  <button
-                    type="button"
-                    aria-label="重新朗读"
-                    title="重新朗读"
-                    disabled={!hostSpeech.available || !msg.narrationId}
-                    onClick={() => hostSpeech.replay(msg.narrationId)}
-                    className="mt-1 inline-flex items-center gap-1 text-[10px] text-text-muted disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    <RotateCcw className="w-3 h-3" strokeWidth={2} />
-                    重播
-                  </button>
-                )}
+                <div className="room-play__message-meta">
+                  <span>{msg.time}</span>
+                  {isNarr && (
+                    <button
+                      type="button"
+                      aria-label="重新朗读"
+                      title="重新朗读"
+                      disabled={!hostSpeech.available || !msg.narrationId}
+                      onClick={() => hostSpeech.replay(msg.narrationId)}
+                    >
+                      <RotateCcw aria-hidden="true" />
+                      重播
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           )
@@ -2013,16 +2092,18 @@ export default function RoomPage() {
         {/* 渐进到达的主持叙事（issue #203）。没有"重播"按钮：它还不是权威
             消息，语音朗读只认最终 narration.push。*/}
         {streamingNarration && streamingNarration.revealed > 0 && (
-          <div className="flex gap-2.5 animate-[msgIn_0.3s_ease]">
-            <div className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-sm bg-[#faf5eb] border border-brass">
-              📜
+          <div className="room-play__message room-play__message--narration animate-[msgIn_0.3s_ease]">
+            <div className="room-play__avatar room-play__avatar--keeper">
+              <img src="/assets/rooms/play/keeper-cat.webp" alt="" aria-hidden="true" />
             </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-[11px] font-semibold text-brass-dark mb-0.5">守秘人</div>
-              <div className="text-sm leading-[1.65] inline-block max-w-full px-3.5 py-2.5 bg-[#fdfaf4] border-l-[3px] border-brass rounded-r-sm rounded-l-none italic text-[#4a4030] text-left whitespace-pre-wrap">
-                {streamingNarrationText(streamingNarration).slice(0, streamingNarration.revealed)}
+            <div className="room-play__message-body">
+              <div className="room-play__sender">守秘人</div>
+              <div className="room-play__message-card room-play__narration-card">
+                <div className="room-play__narration-text whitespace-pre-wrap">
+                  {streamingNarrationText(streamingNarration).slice(0, streamingNarration.revealed)}
+                </div>
               </div>
-              <div className="text-[10px] text-text-dim mt-0.5">生成中…</div>
+              <div className="room-play__message-meta">生成中…</div>
             </div>
           </div>
         )}
@@ -2030,11 +2111,11 @@ export default function RoomPage() {
         {/* Typing indicator。第一个片段到达后还没揭示出字的那一瞬间也留着它，
             避免出现一个空气泡。*/}
         {(progressLabel !== null || typing || (streamingNarration !== null && streamingNarration.revealed === 0)) && (
-          <div className="flex gap-2.5 animate-[msgIn_0.3s_ease]">
-            <div className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-sm bg-[#faf5eb] border border-brass">
-              📜
+          <div className="room-play__message room-play__message--narration animate-[msgIn_0.3s_ease]">
+            <div className="room-play__avatar room-play__avatar--keeper">
+              <img src="/assets/rooms/play/keeper-cat.webp" alt="" aria-hidden="true" />
             </div>
-            <div className="bg-panel inline-flex gap-2 items-center px-4 py-3 rounded-md">
+            <div className="room-play__typing">
               <div className="inline-flex gap-1">
                 {[0, 1, 2].map((i) => (
                   <span key={i} className="w-1.5 h-1.5 bg-brass rounded-full animate-bounce"
@@ -2057,22 +2138,22 @@ export default function RoomPage() {
       </div>
 
       {/* Action Bar */}
-      <div data-onboarding-target="tool-bar" className="flex bg-card border-t border-border-light flex-shrink-0">
+      <div data-onboarding-target="tool-bar" className="room-play__toolbar">
         {[
           { icon: ScrollText, label: '角色卡', key: 'sheet' },
           { icon: Star, label: '技能', key: 'skills' },
           { icon: Map, label: '地图', key: 'map' },
-          { icon: BookOpen, label: '速记', key: 'notes' },
+          { icon: BookOpen, label: '笔记', key: 'notes' },
         ].map((item) => (
           <button
             key={item.key}
+            type="button"
+            aria-pressed={openPanel === item.key}
             onClick={() => setOpenPanel(openPanel === item.key ? null : item.key)}
-            className={`flex-1 py-1.5 px-1 bg-none border-none text-[10px] font-medium cursor-pointer flex flex-col items-center gap-[3px] font-sans transition-colors ${
-              openPanel === item.key ? 'text-brass-dark bg-panel' : 'text-text-muted'
-            }`}
+            className={openPanel === item.key ? 'is-active' : ''}
           >
-            <item.icon className="w-5 h-5" strokeWidth={1.5} />
-            {item.label}
+            <item.icon aria-hidden="true" strokeWidth={1.7} />
+            <span>{item.label}</span>
           </button>
         ))}
       </div>
@@ -2082,27 +2163,29 @@ export default function RoomPage() {
           做受伤扣血的机制，见已知局限），先按"当前即满值"画满条，以后接了扣血
           机制这里会自然跟着变化。 */}
       {currentHp !== null && currentSan !== null && (
-        <div className="flex items-center gap-4 px-4 py-2 border-t border-border-light bg-page flex-shrink-0">
-          <div className="flex items-center gap-1.5 flex-1 min-w-0">
-            <Heart className="w-3 h-3 text-mold flex-shrink-0" strokeWidth={2.5} />
-            <span className="text-[10px] font-semibold text-text-muted flex-shrink-0">生命</span>
-            <div className="flex-1 h-1.5 rounded-full bg-border-light overflow-hidden">
-              <div className="h-full rounded-full bg-mold" style={{ width: '100%' }} />
+        <div className="room-play__vitals" aria-label="调查员实时状态">
+          <div className="room-play__vital">
+            <Heart aria-hidden="true" strokeWidth={2.5} />
+            <span>生命</span>
+            <div className="room-play__vital-track">
+              <div className="room-play__vital-fill room-play__vital-fill--hp" style={{ width: '100%' }} />
             </div>
-            <span className="text-[11px] font-bold font-mono text-mold flex-shrink-0">{currentHp}</span>
+            <strong>{currentHp}</strong>
           </div>
-          <div className="flex items-center gap-1.5 flex-1 min-w-0">
-            <span className="text-[10px] font-semibold text-text-muted flex-shrink-0">理智</span>
-            <div className="flex-1 h-1.5 rounded-full bg-border-light overflow-hidden">
-              <div className="h-full rounded-full bg-[#7050a0]" style={{ width: `${Math.min(100, currentSan)}%` }} />
+          <div className="room-play__vital">
+            <Brain aria-hidden="true" strokeWidth={2.3} />
+            <span>理智</span>
+            <div className="room-play__vital-track">
+              <div className="room-play__vital-fill room-play__vital-fill--san" style={{ width: `${Math.min(100, currentSan)}%` }} />
             </div>
-            <span className="text-[11px] font-bold font-mono text-[#7050a0] flex-shrink-0">{currentSan}</span>
+            <strong>{currentSan}</strong>
           </div>
         </div>
       )}
+      </section>
 
       {/* Input area */}
-      <div className="border-t border-border-light px-3 pb-3 pt-1.5 bg-page flex-shrink-0">
+      <div className="room-play__composer">
         {suspended && (
           <p className="text-[11px] text-[#9a6a30] text-center pb-1.5">
             游戏已挂起，恢复后才能继续提交行动
@@ -2159,23 +2242,31 @@ export default function RoomPage() {
                     : speechInput.error}
           </p>
         )}
-        <form data-onboarding-target="action-input" onSubmit={sendMessage} className="flex gap-2 items-end">
+        <form data-onboarding-target="action-input" onSubmit={sendMessage} className="room-play__composer-form">
           <button
             type="button"
             aria-label="骰子"
             data-onboarding-target="dice-button"
             onClick={() => setShowDice(true)}
             disabled={suspended}
-            className="w-10 h-10 rounded-full bg-card border border-border-light text-text-muted flex items-center justify-center flex-shrink-0 active:scale-[0.92] active:border-brass active:text-brass-dark transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+            className="room-play__composer-button room-play__dice-button"
           >
-            <Dice6 className="w-[18px] h-[18px]" strokeWidth={2} />
+            <IsometricDiceIcon />
           </button>
-          <input
+          <textarea
+            ref={composerInputRef}
+            rows={1}
+            wrap="soft"
             value={input}
             onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return
+              e.preventDefault()
+              sendMessage()
+            }}
             disabled={suspended}
             placeholder={suspended ? '游戏已挂起' : '输入行动…'}
-            className="flex-1 bg-input border border-border-mid rounded-[20px] px-4 py-2.5 text-sm text-text-primary font-sans outline-none min-h-[40px] placeholder:text-text-dim focus:border-brass transition-colors disabled:opacity-60"
+            className="room-play__input"
           />
           {speechInput.status === 'listening' ? (
             <button
@@ -2184,7 +2275,7 @@ export default function RoomPage() {
               title="停止并采用识别文字"
               onClick={speechInput.stop}
               disabled={suspended}
-              className="w-10 h-10 rounded-full bg-[#c04040] border-none text-white flex items-center justify-center flex-shrink-0 active:scale-[0.92] transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+              className="room-play__composer-button room-play__composer-button--danger"
             >
               <Square className="w-4 h-4" fill="currentColor" strokeWidth={2} />
             </button>
@@ -2200,7 +2291,7 @@ export default function RoomPage() {
                 speechInput.status === 'requesting_permission' ||
                 speechInput.status === 'processing'
               }
-              className="w-10 h-10 rounded-full bg-card border border-border-light text-text-muted flex items-center justify-center flex-shrink-0 active:scale-[0.92] active:border-brass active:text-brass-dark transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+              className="room-play__composer-button"
             >
               {speechInput.status === 'requesting_permission' || speechInput.status === 'processing' ? (
                 <LoaderCircle className="w-[18px] h-[18px] animate-spin" strokeWidth={2} />
@@ -2215,7 +2306,7 @@ export default function RoomPage() {
               aria-label="取消语音输入"
               title="取消并丢弃本次识别"
               onClick={speechInput.cancel}
-              className="w-10 h-10 rounded-full bg-card border border-border-light text-text-muted flex items-center justify-center flex-shrink-0 active:scale-[0.92] transition-all"
+              className="room-play__composer-button"
             >
               <X className="w-[18px] h-[18px]" strokeWidth={2} />
             </button>
@@ -2225,7 +2316,7 @@ export default function RoomPage() {
               type="submit"
               aria-label="发送消息"
               disabled={suspended || !input.trim()}
-              className="w-10 h-10 rounded-full bg-brass border-none text-white flex items-center justify-center flex-shrink-0 active:scale-[0.92] transition-all hover:bg-brass-dark disabled:opacity-40 disabled:cursor-not-allowed"
+              className="room-play__composer-button room-play__send-button"
             >
               <SendHorizontal className="w-[18px] h-[18px]" strokeWidth={2.5} />
             </button>
@@ -2237,7 +2328,13 @@ export default function RoomPage() {
 
       {/* Panel: 角色卡（真实建卡数据，不再是写死的示例角色）。分两页——技能已经有
           单独的底部按钮，这里不重复放。 */}
-      <BottomPanel open={openPanel === 'sheet'} onClose={() => setOpenPanel(null)} title={`调查员 · ${character?.info.name || '未建卡'}`}>
+      <BottomPanel
+        open={openPanel === 'sheet'}
+        onClose={() => setOpenPanel(null)}
+        title={`调查员 · ${character?.info.name || '未建卡'}`}
+        className="room-play__bottom-panel--character-paper room-play__bottom-panel--character-sheet"
+        heightVh={70}
+      >
         {character ? (
           <>
             <div className="flex gap-1.5 mb-3.5">
@@ -2252,66 +2349,17 @@ export default function RoomPage() {
             </div>
 
             {sheetPage === 'info' && (
-              <>
-                <div className="flex items-center gap-3 mb-3.5">
-                  <div className="w-12 h-14 rounded-sm flex items-center justify-center text-2xl overflow-hidden"
-                    style={{ background: 'linear-gradient(135deg,#e8e0d0,#d8cfb8)', border: '2px solid #b8976a' }}>
-                    {playerId && portraitUrls[playerId] ? (
-                      <PortraitImage
-                        src={portraitUrls[playerId]}
-                        alt={`${character.info.name}的头像`}
-                        buttonClassName="h-full w-full"
-                        imageClassName="h-full w-full object-cover"
-                      />
-                    ) : '🕵️'}
-                  </div>
-                  <div>
-                    <div className="text-sm font-semibold text-text-primary">{character.info.name}</div>
-                    <div className="text-[11px] text-text-muted">
-                      {character.info.age}岁 · {character.info.gender} · {character.info.occupationId ? ruleset?.occupations.find(o => o.id === character.info.occupationId)?.name : '未选择职业'}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-1.5 mb-4">
-                  <div className="flex items-center justify-between bg-input border border-border-light rounded px-3 py-1.5">
-                    <span className="text-[11px] text-text-muted">居住地</span>
-                    <span className="text-sm font-medium text-text-primary">{character.info.residence || '—'}</span>
-                  </div>
-                  <div className="flex items-center justify-between bg-input border border-border-light rounded px-3 py-1.5">
-                    <span className="text-[11px] text-text-muted">出生地</span>
-                    <span className="text-sm font-medium text-text-primary">{character.info.birthplace || '—'}</span>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-3 gap-2 mb-4" data-testid="derived-stats-grid">
-                  {DERIVED_STAT_DEFINITIONS.map((definition) => (
-                    <div key={definition.key} className="bg-panel rounded-md px-2.5 py-2 text-center">
-                      <div className="text-[10px] text-text-muted font-medium">
-                        {definition.label} <span className="font-mono text-text-dim">{definition.abbreviation}</span>
-                      </div>
-                      <div className="text-base font-bold font-mono" style={{ color: definition.color }}>
-                        {character.derived[definition.key] ?? '—'}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="h-px bg-border-light mb-3.5" />
-
-                <h4 className="text-xs font-semibold text-brass-dark mb-2.5">基础属性</h4>
-                <div className="grid grid-cols-2 gap-1.5">
-                  {/* 属性清单由后端 ruleset 驱动，前端不再自己维护一份名单——
-                      此前三处各硬编码一份，加幸运时漏改一处就导致角色卡看不到
-                      幸运值（issue #96）。 */}
-                  {(ruleset?.attributes ?? []).map(attribute => (
-                    <div key={attribute.key} className="flex items-center justify-between bg-input border border-border-light rounded px-3 py-1.5">
-                      <span className="font-mono text-[11px] font-bold text-text-muted">{attribute.key}</span>
-                      <span className="font-mono text-sm font-bold text-text-primary">{character.attr[attribute.key]}</span>
-                    </div>
-                  ))}
-                </div>
-              </>
+              <div className="character-ready-sheet__content space-y-4">
+                <CharacterBasicInfo
+                  character={character}
+                  portraitUrl={playerId ? portraitUrls[playerId] : undefined}
+                  occupationName={character.info.occupationId
+                    ? ruleset?.occupations.find(o => o.id === character.info.occupationId)?.name
+                    : null}
+                  attributes={ruleset?.attributes ?? []}
+                  liveResources={liveResources}
+                />
+              </div>
             )}
 
             {sheetPage === 'background' && (
@@ -2336,20 +2384,29 @@ export default function RoomPage() {
 
       {/* Panel: 技能——按职业技能/兴趣技能分两页，各自按数值从高到低排列。
           固定半屏高度，两个页签内容多少不一样也不会让面板忽高忽低。 */}
-      <BottomPanel open={openPanel === 'skills'} onClose={() => setOpenPanel(null)} title="技能" heightVh={50}>
+      <BottomPanel
+        open={openPanel === 'skills'}
+        onClose={() => setOpenPanel(null)}
+        title="技能"
+        heightVh={60}
+        className="room-play__bottom-panel--character-paper room-play__bottom-panel--skills"
+      >
         {character ? (
           <>
-            <div className="flex gap-1.5 mb-3.5">
+            <div className="room-play__skill-tabs" role="group" aria-label="技能分类">
               {[{ key: 'occupation', label: '职业技能' }, { key: 'interest', label: '兴趣技能' }].map((t) => (
-                <button key={t.key} onClick={() => setSkillsTab(t.key as typeof skillsTab)}
-                  className={`flex-1 text-center text-[12px] font-semibold py-1.5 rounded-[99px] border transition-all ${
-                    skillsTab === t.key ? 'bg-brass text-white border-brass' : 'bg-panel text-text-muted border-border-light'
-                  }`}>
+                <button
+                  key={t.key}
+                  type="button"
+                  onClick={() => setSkillsTab(t.key as typeof skillsTab)}
+                  aria-pressed={skillsTab === t.key}
+                  className={`room-play__skill-tab ${skillsTab === t.key ? 'is-active' : ''}`}
+                >
                   {t.label}
                 </button>
               ))}
             </div>
-            <div className="space-y-2">
+            <div className="room-play__skill-grid">
               {(() => {
                 const occSkillIds = character.info.occupationId
                   ? [
@@ -2365,15 +2422,13 @@ export default function RoomPage() {
                   }))
                   .sort((a, b) => b.value - a.value)
                 return list.map(({ skill, value }) => (
-                  <div key={skill.id} className="flex items-center gap-3 py-1.5">
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium text-text-primary">{skill.name}</div>
-                      <div className="text-[10px] text-text-dim font-mono">{skill.nameEn}</div>
-                    </div>
-                    <div className="flex-1 h-2 rounded-full bg-border-light overflow-hidden">
-                      <div className="h-full rounded-full bg-brass transition-all" style={{ width: `${value}%` }} />
-                    </div>
-                    <span className="text-xs font-bold font-mono text-text-muted min-w-[36px] text-right">{value}%</span>
+                  <div
+                    key={skill.id}
+                    className="room-play__skill-pill"
+                    style={skillPillColors(value)}
+                  >
+                    <span className="room-play__skill-name">{skill.name}</span>
+                    <strong className="room-play__skill-value">{value}%</strong>
                   </div>
                 ))
               })()}
@@ -2386,8 +2441,18 @@ export default function RoomPage() {
 
       {/* Panel: 地图 */}
       <BottomPanel open={openPanel === 'map'} onClose={() => setOpenPanel(null)} title="地图">
-        <div className="bg-[#f2efe8] rounded-md flex flex-col items-center justify-center py-10 mb-4 border border-border-light">
-          <Map className="w-10 h-10 text-text-dim mb-2" />
+        <div className={`room-play__location-preview ${currentLocationImage ? 'has-image' : ''}`}>
+          {currentLocationImage ? (
+            <img
+              src={currentLocationImage}
+              alt=""
+              className="room-play__location-image"
+              aria-hidden="true"
+            />
+          ) : (
+            <Map className="w-10 h-10 text-text-dim mb-2" />
+          )}
+          <div className="room-play__location-caption">
           <span className="text-xs text-text-dim">
             {playerView?.scene.name || '等待规则引擎同步当前场景'}
           </span>
@@ -2397,6 +2462,7 @@ export default function RoomPage() {
               {formatWorldTime(playerView.world.day_index, playerView.world.hour_of_day)}
             </span>
           )}
+          </div>
         </div>
         {playerView?.world && (playerView.world.core_resolved || playerView.world.ending_available) && (
           <div
@@ -2492,9 +2558,19 @@ export default function RoomPage() {
       </BottomPanel>
 
       {/* Panel: 速记 */}
-      <BottomPanel open={openPanel === 'notes'} onClose={() => setOpenPanel(null)} title="速记本">
+      <BottomPanel
+        open={openPanel === 'notes'}
+        onClose={() => setOpenPanel(null)}
+        title="速记本"
+        heightVh={65}
+        className="room-play__bottom-panel--character-paper room-play__bottom-panel--notes"
+      >
         <div className="flex gap-2 mb-3">
-          <button onClick={() => setNotes(prev => prev + `\n\n[🔍 新线索 ${new Date().toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit'})}]\n`)}
+          <button onClick={() => setNotes(prev => {
+              const tag = `[🔍 新线索 ${new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}]`
+              const existingNotes = prev.trimStart()
+              return existingNotes ? `${tag}\n\n${existingNotes}` : `${tag}\n`
+            })}
             className="flex-1 py-2 rounded-sm bg-panel border border-border-light text-text-muted text-xs font-medium flex items-center justify-center gap-1 active:bg-border-light">
             <Plus className="w-3.5 h-3.5" /> 添加线索标签
           </button>
@@ -2511,9 +2587,9 @@ export default function RoomPage() {
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
           placeholder="📋 案件笔记"
-          className="w-full min-h-[180px] text-sm leading-[1.7] text-text-body bg-input border border-border-light rounded-md px-3.5 py-3 resize-none outline-none focus:border-brass transition-colors font-mono placeholder:text-text-dim"
+          className="room-play__notes-textarea w-full text-sm text-text-body px-1 py-2 resize-none outline-none font-mono placeholder:text-text-dim"
         />
-        <div className="text-[10px] text-text-dim mt-2 text-right">{lastSaved ? `最后保存: ${lastSaved}` : '尚未保存'}</div>
+        <div className="room-play__notes-save-status mt-2 text-right">{lastSaved ? `最后保存: ${lastSaved}` : '尚未保存'}</div>
       </BottomPanel>
 
       {/* Panel: 主持人语音 */}

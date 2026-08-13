@@ -322,8 +322,14 @@ function Tooltip({
 export default function OnboardingLayer() {
   const location = useLocation()
   const { pathname } = location
+  const navigationState = location.state as {
+    fromCharacterReady?: boolean
+    startCharacterOnboarding?: boolean
+  } | null
   const isEditingExistingCharacter = pathname === '/room/character'
-    && Boolean((location.state as { fromCharacterReady?: boolean } | null)?.fromCharacterReady)
+    && Boolean(navigationState?.fromCharacterReady)
+  const startsCharacterOnboarding = pathname === '/room/character'
+    && Boolean(navigationState?.startCharacterOnboarding)
   const userId = useAuthStore((state) => state.userId)
   const roomId = useRoomStore((state) => state.roomId)
   const isHost = useRoomStore((state) => state.isHost)
@@ -370,13 +376,22 @@ export default function OnboardingLayer() {
       return
     }
     if (stored?.status === 'active') {
-      setState(stored)
+      const storedStepIndex = steps.findIndex((step) => step.id === stored.stepId)
+      const firstCharacterStepIndex = steps.findIndex((step) => step.route === '/room/character')
+      const shouldRestartCharacterSteps = startsCharacterOnboarding
+        && firstCharacterStepIndex >= 0
+        && (storedStepIndex < 0 || steps[storedStepIndex]?.route !== '/room/character')
+      const nextState = shouldRestartCharacterSteps
+        ? { status: 'active' as const, stepId: steps[firstCharacterStepIndex].id }
+        : stored
+      setState(nextState)
+      if (shouldRestartCharacterSteps) writeOnboardingState(userId, nextState)
       setIntroOpen(false)
       return
     }
     setState(null)
     setIntroOpen(true)
-  }, [isEditingExistingCharacter, isHost, pathname, roomId, userId])
+  }, [isEditingExistingCharacter, isHost, pathname, roomId, startsCharacterOnboarding, steps, userId])
 
   useEffect(() => {
     if (!replayRequest || replayRequest === handledReplayRequest.current) return

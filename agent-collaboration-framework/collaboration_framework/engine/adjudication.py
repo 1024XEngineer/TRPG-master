@@ -1156,6 +1156,24 @@ class AdjudicationEngineService:
 
         if not runtime.is_v3:
             return ()
+        candidate_events = tuple(
+            event
+            for event in events
+            if (
+                event.visibility == "public"
+                and event.type == "entity.state_changed"
+                and event.payload.get("key") == "discovered"
+                and event.payload.get("value") is True
+                and isinstance(event.payload.get("entity_id"), str)
+                and entity_state(
+                    runtime.game_state,
+                    event.payload["entity_id"],
+                ).get("discovered")
+                is not True
+            )
+        )
+        if not candidate_events:
+            return ()
         final_runtime = runtime.model_copy(
             update={
                 "game_state": new_state,
@@ -1172,15 +1190,10 @@ class AdjudicationEngineService:
             ).scene.visible_entities
         }
         evidence: list[NarrationEvidence] = []
-        for event in events:
+        for event in candidate_events:
             entity_id = event.payload.get("entity_id")
             if (
-                event.visibility != "public"
-                or event.type != "entity.state_changed"
-                or event.payload.get("key") != "discovered"
-                or event.payload.get("value") is not True
-                or not isinstance(entity_id, str)
-                or entity_state(runtime.game_state, entity_id).get("discovered") is True
+                not isinstance(entity_id, str)
             ):
                 continue
             projected = visible.get(entity_id)

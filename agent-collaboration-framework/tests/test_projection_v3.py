@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from collaboration_framework.contracts import (
     ActionAdjudication,
@@ -1120,6 +1121,39 @@ class RuleOwnedCheckTests(unittest.IsolatedAsyncioTestCase):
             store.inspect_state(ROOM).entities.get("crypt_entrance", {}).get("discovered"),
             True,
         )
+        self.assertEqual(execution.narration_evidence, ())
+
+    async def test_non_discovery_action_skips_player_projection_for_narration_evidence(self) -> None:
+        store = InMemoryEngineStore()
+        store.register_room(
+            module_content=self.content,
+            initial_state=game_state(self.content, scene_id="cemetery"),
+        )
+        engine = AdjudicationEngineService(store)
+        rules = RuleEngineService(store)
+        snapshot = await rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        with patch(
+            "collaboration_framework.engine.adjudication.project_v3",
+            side_effect=AssertionError("projection should be skipped"),
+        ):
+            execution = await engine.submit(
+                SubmitAdjudicationRequest(
+                    room_id=ROOM,
+                    player_id=PLAYER,
+                    adjudication=ActionAdjudication(
+                        request_id="ordinary-action-no-discovery",
+                        source_revision=snapshot.revision,
+                        actor_id=ACTOR,
+                        summary="观察墓地",
+                        target=ActionTarget(kind="location", id="cemetery"),
+                        method=ActionMethod(family="observe", description="观察墓地"),
+                        check=NoAdjudicationCheck(),
+                        success_effects=(),
+                    ),
+                )
+            )
         self.assertEqual(execution.narration_evidence, ())
 
     async def _submit_rule_decision(

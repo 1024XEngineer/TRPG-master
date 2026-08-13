@@ -1019,7 +1019,12 @@ function DiceModal({
             : '本次检定规则不允许消耗幸运'
 
   return (
-    <BottomPanel open={open} onClose={onClose} title="骰子检定">
+    <BottomPanel
+      open={open}
+      onClose={onClose}
+      title="骰子检定"
+      className="room-play__bottom-panel--dice"
+    >
       {!isCheckMode && (
         <div className="flex gap-1.5 mb-3.5">
           {DICE_OPTIONS.map((opt) => (
@@ -2327,8 +2332,8 @@ export default function RoomPage() {
         open={openPanel === 'sheet'}
         onClose={() => setOpenPanel(null)}
         title={`调查员 · ${character?.info.name || '未建卡'}`}
-        className="room-play__bottom-panel--character-sheet"
-        heightVh={82}
+        className="room-play__bottom-panel--character-paper room-play__bottom-panel--character-sheet"
+        heightVh={70}
       >
         {character ? (
           <>
@@ -2379,15 +2384,24 @@ export default function RoomPage() {
 
       {/* Panel: 技能——按职业技能/兴趣技能分两页，各自按数值从高到低排列。
           固定半屏高度，两个页签内容多少不一样也不会让面板忽高忽低。 */}
-      <BottomPanel open={openPanel === 'skills'} onClose={() => setOpenPanel(null)} title="技能" heightVh={50}>
+      <BottomPanel
+        open={openPanel === 'skills'}
+        onClose={() => setOpenPanel(null)}
+        title="技能"
+        heightVh={60}
+        className="room-play__bottom-panel--character-paper room-play__bottom-panel--skills"
+      >
         {character ? (
           <>
-            <div className="flex gap-1.5 mb-3.5">
+            <div className="room-play__skill-tabs" role="group" aria-label="技能分类">
               {[{ key: 'occupation', label: '职业技能' }, { key: 'interest', label: '兴趣技能' }].map((t) => (
-                <button key={t.key} onClick={() => setSkillsTab(t.key as typeof skillsTab)}
-                  className={`flex-1 text-center text-[12px] font-semibold py-1.5 rounded-[99px] border transition-all ${
-                    skillsTab === t.key ? 'bg-brass text-white border-brass' : 'bg-panel text-text-muted border-border-light'
-                  }`}>
+                <button
+                  key={t.key}
+                  type="button"
+                  onClick={() => setSkillsTab(t.key as typeof skillsTab)}
+                  aria-pressed={skillsTab === t.key}
+                  className={`room-play__skill-tab ${skillsTab === t.key ? 'is-active' : ''}`}
+                >
                   {t.label}
                 </button>
               ))}
@@ -2544,7 +2558,13 @@ export default function RoomPage() {
       </BottomPanel>
 
       {/* Panel: 速记 */}
-      <BottomPanel open={openPanel === 'notes'} onClose={() => setOpenPanel(null)} title="速记本">
+      <BottomPanel
+        open={openPanel === 'notes'}
+        onClose={() => setOpenPanel(null)}
+        title="速记本"
+        heightVh={65}
+        className="room-play__bottom-panel--character-paper room-play__bottom-panel--notes"
+      >
         <div className="flex gap-2 mb-3">
           <button onClick={() => setNotes(prev => {
               const tag = `[🔍 新线索 ${new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}]`
@@ -2567,9 +2587,9 @@ export default function RoomPage() {
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
           placeholder="📋 案件笔记"
-          className="w-full min-h-[180px] text-sm leading-[1.7] text-text-body bg-input border border-border-light rounded-md px-3.5 py-3 resize-none outline-none focus:border-brass transition-colors font-mono placeholder:text-text-dim"
+          className="room-play__notes-textarea w-full text-sm text-text-body px-1 py-2 resize-none outline-none font-mono placeholder:text-text-dim"
         />
-        <div className="text-[10px] text-text-dim mt-2 text-right">{lastSaved ? `最后保存: ${lastSaved}` : '尚未保存'}</div>
+        <div className="room-play__notes-save-status mt-2 text-right">{lastSaved ? `最后保存: ${lastSaved}` : '尚未保存'}</div>
       </BottomPanel>
 
       {/* Panel: 主持人语音 */}

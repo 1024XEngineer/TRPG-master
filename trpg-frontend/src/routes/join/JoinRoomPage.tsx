@@ -5,6 +5,7 @@ import { useAuthStore } from '@/stores/auth-store'
 import { useRoomStore } from '@/stores/room-store'
 import { joinRoomByCode } from '@/services/room'
 import { friendlyErrorMessage } from '@/services/api-client'
+import './JoinRoomPage.css'
 
 export default function JoinRoomPage() {
   const navigate = useNavigate()
@@ -39,19 +40,30 @@ export default function JoinRoomPage() {
   }
 
   return (
-    <div className="animate-screen-in min-h-screen flex flex-col bg-page">
-      <div className="flex items-center gap-2.5 px-5 pt-3 pb-2">
-        <button onClick={() => navigate('/home')} className="w-[34px] h-[34px] rounded-full bg-card border border-border-light flex items-center justify-center active:bg-panel active:scale-[0.94] transition-all">
+    <div className="join-room-page animate-screen-in bg-page">
+      <div className="join-room-page__header flex items-center gap-2.5 px-5 pb-2">
+        <button
+          type="button"
+          onClick={() => navigate('/home')}
+          aria-label="返回首页"
+          className="join-room-page__back rounded-full bg-card border border-border-light flex items-center justify-center active:bg-panel active:scale-[0.94] transition-all"
+        >
           <ArrowLeft className="w-[18px] h-[18px] text-text-muted" strokeWidth={2.5} />
         </button>
         <h2 className="text-lg font-bold text-text-primary">加入房间</h2>
       </div>
 
-      <div className="flex-1 flex flex-col items-center px-5 pt-12">
+      <form
+        className="join-room-page__form flex-1 flex flex-col items-center px-5"
+        onSubmit={(event) => {
+          event.preventDefault()
+          if (roomCode.length >= 4 && !joining) void handleJoin()
+        }}
+      >
         <DoorOpen className="w-12 h-12 text-brass mb-4" />
         <p className="text-sm text-text-muted mb-6">输入房主分享的房间号</p>
 
-        <div className="relative w-full max-w-[280px] mb-6">
+        <div className="join-room-page__field relative w-full max-w-[280px] mb-6">
           <Hash className="w-4 h-4 absolute left-4 top-1/2 -translate-y-1/2 text-text-dim" />
           <input
             value={roomCode}
@@ -70,7 +82,7 @@ export default function JoinRoomPage() {
         {error && <p className="text-[12px] text-[#c04040] mb-4">{error}</p>}
 
         <button
-          onClick={handleJoin}
+          type="submit"
           disabled={roomCode.length < 4 || joining}
           className={`w-full max-w-[280px] py-3.5 rounded-sm text-sm font-semibold transition-all ${
             roomCode.length >= 4 && !joining
@@ -79,7 +91,7 @@ export default function JoinRoomPage() {
           }`}>
           {joining ? '加入中…' : '加入房间'}
         </button>
-      </div>
+      </form>
     </div>
   )
 }

@@ -1,0 +1,44 @@
+.join-room-page {
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.join-room-page__header {
+  flex: none;
+  padding-top: max(0.75rem, env(safe-area-inset-top));
+}
+
+.join-room-page__back {
+  width: 2.5rem;
+  height: 2.5rem;
+  flex: none;
+}
+
+.join-room-page__form {
+  min-height: 0;
+  padding-top: clamp(2rem, 7dvh, 3rem);
+  padding-bottom: max(1.5rem, env(safe-area-inset-bottom));
+}
+
+.join-room-page__field,
+.join-room-page__form button[type='submit'] {
+  scroll-margin-block: max(1rem, env(safe-area-inset-top)) max(2rem, 28dvh);
+}
+
+@media (max-height: 600px) {
+  .join-room-page__form {
+    padding-top: 1.25rem;
+  }
+
+  .join-room-page__form > svg {
+    width: 2.5rem;
+    height: 2.5rem;
+    margin-bottom: 0.65rem;
+  }
+
+  .join-room-page__form > p:first-of-type {
+    margin-bottom: 1rem;
+  }
+}

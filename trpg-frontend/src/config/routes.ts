@@ -9,7 +9,6 @@ export const ROUTES = {
   REVIEW: (roomCode: string) => `/home/my-rooms/review/${roomCode}`,
   PROFILE: '/home/profile',
   LOBBY: '/room/lobby',
-  STORY: '/room/story',
   CHARACTER: '/room/character',
   CHARACTER_READY: '/room/ready',
   ROOM: '/room/play',

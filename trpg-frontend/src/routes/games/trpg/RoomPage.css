@@ -634,9 +634,7 @@
   font-family: inherit;
 }
 
-.room-play__bottom-panel--character-sheet {
-  overflow: hidden;
-  padding-top: 3.5rem;
+.room-play__bottom-panel--character-paper {
   background-color: transparent;
   background-image: url('/assets/rooms/play/character-sheet-background.webp');
   background-position: center;
@@ -644,8 +642,35 @@
   background-size: 112% 100%;
 }
 
+.room-play__bottom-panel--character-sheet {
+  overflow: hidden;
+  padding-top: 3.5rem;
+}
+
+.room-play__bottom-panel--skills {
+  overflow: hidden;
+  padding-top: 2.75rem;
+}
+
+.room-play__bottom-panel--skills > .room-play__bottom-panel-content {
+  max-height: calc(60vh - 6.5rem) !important;
+  max-height: calc(60dvh - 6.5rem) !important;
+  overscroll-behavior: contain;
+}
+
+.room-play__bottom-panel--notes {
+  overflow: hidden;
+  padding-top: 3.5rem;
+}
+
+.room-play__bottom-panel--notes > .room-play__bottom-panel-content {
+  max-height: calc(65vh - 7.25rem) !important;
+  max-height: calc(65dvh - 7.25rem) !important;
+  overscroll-behavior: contain;
+}
+
 .room-play__bottom-panel--character-sheet > .room-play__bottom-panel-content {
-  max-height: calc(82vh - 7.25rem) !important;
+  max-height: calc(70vh - 7.25rem) !important;
   overscroll-behavior: contain;
 }
 
@@ -671,6 +696,102 @@
 
 .room-play__bottom-panel-close:active {
   transform: translateY(-50%) scale(0.9);
+}
+
+.room-play__skill-tabs {
+  display: grid;
+  margin-bottom: 0.9rem;
+  padding: 0.2rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border: 1px solid rgb(99 59 27 / 44%);
+  border-radius: 0.25rem;
+  background: rgb(105 64 30 / 14%);
+  box-shadow: inset 0 1px rgb(255 243 210 / 30%);
+}
+
+.room-play__skill-tab {
+  position: relative;
+  min-height: 2.25rem;
+  padding: 0.45rem 0.75rem 0.55rem;
+  border: 0;
+  color: #684528;
+  background: transparent;
+  font-family: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-align: center;
+  text-shadow: 0 1px rgb(255 248 226 / 45%);
+  transition: color 160ms ease, background-color 160ms ease;
+}
+
+.room-play__skill-tab + .room-play__skill-tab::before {
+  position: absolute;
+  left: 0;
+  top: 0.55rem;
+  bottom: 0.55rem;
+  width: 1px;
+  background: rgb(91 53 25 / 34%);
+  content: '';
+}
+
+.room-play__skill-tab::after {
+  position: absolute;
+  right: 24%;
+  bottom: -1px;
+  left: 24%;
+  height: 2px;
+  background: #edcf96;
+  box-shadow: 0 1px rgb(43 24 11 / 32%);
+  content: '';
+  opacity: 0;
+  transform: scaleX(0.4);
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+
+.room-play__skill-tab.is-active {
+  color: #fff0cf;
+  background: linear-gradient(180deg, #805329, #68401f);
+  box-shadow: inset 0 1px rgb(255 225 169 / 22%), 0 1px 2px rgb(67 36 15 / 24%);
+  font-weight: 700;
+  text-shadow: 0 1px rgb(49 27 12 / 55%);
+}
+
+.room-play__skill-tab.is-active::after {
+  opacity: 1;
+  transform: scaleX(1);
+}
+
+.room-play__skill-tab:active {
+  background-color: rgb(92 54 24 / 22%);
+}
+
+.room-play__notes-textarea {
+  min-height: 25rem;
+  border: 0;
+  border-radius: 0;
+  line-height: 2.05;
+  background-color: transparent;
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent calc(2.05em - 1px),
+    rgb(126 86 47 / 28%) calc(2.05em - 1px),
+    rgb(126 86 47 / 28%) 2.05em
+  );
+  background-position: 0 0.42rem;
+  background-attachment: local;
+  box-shadow: none;
+}
+
+.room-play__notes-save-status {
+  position: relative;
+  color: #684225;
+  font-size: 0.68rem;
+  font-weight: 600;
+  margin-bottom: -2.1rem;
+  pointer-events: none;
+  transform: translateY(-2.1rem);
 }
 
 .room-play__skill-grid {
@@ -765,6 +886,7 @@
 .room-play .font-mono,
 .room-play .character-ready-sheet__numbered,
 .room-play .character-ready-sheet__content,
+.room-play .character-ready-sheet__occupation,
 .room-play .character-ready-sheet__locations,
 .room-play .character-ready-sheet__section-title,
 .room-play .character-ready-sheet__radar-label,
@@ -780,6 +902,16 @@
 }
 
 @media (max-height: 700px) {
+  .room-play__bottom-panel--dice {
+    max-height: 76vh !important;
+    max-height: 76dvh !important;
+  }
+
+  .room-play__bottom-panel--dice > .room-play__bottom-panel-content {
+    max-height: calc(76vh - 60px) !important;
+    max-height: calc(76dvh - 60px) !important;
+  }
+
   .room-play__header {
     height: calc(3.35rem + env(safe-area-inset-top));
     min-height: calc(3.35rem + env(safe-area-inset-top));

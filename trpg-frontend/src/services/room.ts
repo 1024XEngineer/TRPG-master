@@ -76,7 +76,7 @@ export async function getRoomInfo(roomCode: string): Promise<RoomPreview> {
   return sdk.rooms.getInfo(roomCode);
 }
 
-// 房主点击「开始游戏」，从大厅推进到背景介绍——访客端轮询这个标记自动跟进
+// 房主点击「开始游戏」，从大厅推进到建卡——访客端轮询这个标记自动跟进
 export async function startStory(roomId: string): Promise<void> {
   await sdk.rooms.startStory(roomId, requireReconnectToken());
 }

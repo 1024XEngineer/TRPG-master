@@ -44,96 +44,98 @@ export default function HomePage() {
 
   return (
     <section className="home-scene" aria-labelledby="home-scene-title">
-      <img
-        className="home-scene__background"
-        src="/assets/home/background.webp"
-        alt=""
-        aria-hidden="true"
-        width={864}
-        height={1821}
-      />
-
-      <h1 id="home-scene-title" className="sr-only">
-        AI跑团主持人
-      </h1>
-      <p className="sr-only">AI 智能主持 · 多游戏聚会平台</p>
-
-      <button
-      type="button"
-        onClick={() => navigate('/home/profile')}
-        aria-label={`打开个人信息：${nickname || '未设置昵称'}`}
-        className="home-scene__identity"
-      >
+      <div className="home-scene__artboard">
         <img
-          src="/assets/home/nameplate.webp"
+          className="home-scene__background"
+          src="/assets/home/background.webp"
           alt=""
           aria-hidden="true"
-          width={484}
-          height={198}
+          width={853}
+          height={1844}
+        />
+
+        <h1 id="home-scene-title" className="sr-only">
+          AI跑团主持人
+        </h1>
+        <p className="sr-only">AI 智能主持 · 多游戏聚会平台</p>
+
+        <button
+          type="button"
+          onClick={() => navigate('/home/profile')}
+          aria-label={`打开个人信息：${nickname || '未设置昵称'}`}
+          className="home-scene__identity"
+        >
+          <img
+            src="/assets/home/nameplate.webp"
+            alt=""
+            aria-hidden="true"
+            width={484}
+            height={198}
+            decoding="async"
+          />
+          <span className="home-scene__nickname">{nickname || '未设置昵称'}</span>
+        </button>
+
+        <div className="home-scene__actions" role="group" aria-label="房间操作">
+          <SceneAction
+            label="加入房间"
+            image="/assets/home/join-paper.webp"
+            width={858}
+            height={532}
+            onClick={() => navigate('/home/join')}
+          />
+          <SceneAction
+            label="创建房间"
+            image="/assets/home/create-paper.webp"
+            width={912}
+            height={604}
+            onClick={() => navigate('/home/create')}
+          />
+          <SceneAction
+            label="我的游戏"
+            image="/assets/home/my-games-paper.webp"
+            width={914}
+            height={565}
+            onClick={() => navigate('/home/my-rooms')}
+          />
+          <img
+            className="home-scene__pins"
+            src="/assets/home/pins-and-string.webp"
+            alt=""
+            aria-hidden="true"
+            width={1024}
+            height={1536}
+            decoding="async"
+          />
+        </div>
+
+        <img
+          className="home-scene__cat"
+          src="/assets/home/detective-cat.webp"
+          alt="猫侦探"
+          width={615}
+          height={829}
           decoding="async"
         />
-        <span className="home-scene__nickname">{nickname || '未设置昵称'}</span>
-      </button>
-
-      <div className="home-scene__actions" role="group" aria-label="房间操作">
-        <SceneAction
-          label="加入房间"
-          image="/assets/home/join-paper.webp"
-          width={858}
-          height={532}
-          onClick={() => navigate('/home/join')}
-        />
-        <SceneAction
-          label="创建房间"
-          image="/assets/home/create-paper.webp"
-          width={912}
-          height={604}
-          onClick={() => navigate('/home/create')}
-        />
-        <SceneAction
-          label="我的游戏"
-          image="/assets/home/my-games-paper.webp"
-          width={914}
-          height={565}
-          onClick={() => navigate('/home/my-rooms')}
-        />
         <img
-          className="home-scene__pins"
-          src="/assets/home/pins-and-string.webp"
+          className="home-scene__books"
+          src="/assets/home/books.webp"
           alt=""
           aria-hidden="true"
-          width={1024}
-          height={1536}
+          width={373}
+          height={338}
+          decoding="async"
+        />
+        <img
+          className="home-scene__newspaper"
+          src="/assets/home/newspaper-pen.webp"
+          alt=""
+          aria-hidden="true"
+          width={475}
+          height={280}
           decoding="async"
         />
       </div>
-
-      <img
-        className="home-scene__cat"
-        src="/assets/home/detective-cat.webp"
-        alt="猫侦探"
-        width={615}
-        height={829}
-        decoding="async"
-      />
-      <img
-        className="home-scene__books"
-        src="/assets/home/books.webp"
-        alt=""
-        aria-hidden="true"
-        width={373}
-        height={338}
-        decoding="async"
-      />
-      <img
-        className="home-scene__newspaper"
-        src="/assets/home/newspaper-pen.webp"
-        alt=""
-        aria-hidden="true"
-        width={475}
-        height={280}
-        decoding="async"
-      />
     </section>
   )
 }

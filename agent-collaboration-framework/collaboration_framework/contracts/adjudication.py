@@ -392,6 +392,18 @@ class CommittedResult(ContractModel):
     event_ref: str = Field(min_length=1)
 
 
+class NarrationEvidence(ContractModel):
+    """玩家可见的公开事件语义，供主持人叙述时引用。"""
+
+    ref: str = Field(min_length=1)
+    kind: Literal["entity_discovered"]
+    subject_id: str = Field(min_length=1)
+    subject_name: str = Field(min_length=1)
+    subject_aliases: tuple[str, ...] = ()
+    description: str = ""
+    required_in_narration: bool = False
+
+
 class AdjudicationExecution(ContractModel):
     request_id: str = Field(min_length=1)
     action_request_id: str = Field(min_length=1)
@@ -409,6 +421,7 @@ class AdjudicationExecution(ContractModel):
     public_event_refs: tuple[str, ...] = ()
     # 只保存已提交且玩家可见的高层结果，供 Narrator 约束持久状态声明。
     committed_results: tuple[CommittedResult, ...] = ()
+    narration_evidence: tuple[NarrationEvidence, ...] = ()
 
     @model_validator(mode="after")
     def validate_status_payload(self) -> AdjudicationExecution:
@@ -418,6 +431,11 @@ class AdjudicationExecution(ContractModel):
             raise ValueError("awaiting_post_roll_decision 必须包含 check_run")
         if not set(self.public_event_refs).issubset(self.event_refs):
             raise ValueError("public_event_refs 必须是 event_refs 的子集")
+        evidence_refs = tuple(item.ref for item in self.narration_evidence)
+        if len(evidence_refs) != len(set(evidence_refs)):
+            raise ValueError("narration_evidence ref 不得重复")
+        if not set(evidence_refs).issubset(self.public_event_refs):
+            raise ValueError("narration_evidence 必须引用 public_event_refs")
         return self
 
 

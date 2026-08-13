@@ -277,19 +277,65 @@ class MissingTargetAdjudicator(RecordingAdjudicator):
 
     async def adjudicate(self, context):
         repaired = self.repairs and context.previous_rejection is not None
-        if context.step_index != 1 or repaired:
+        if context.step_index != 1:
             return await super().adjudicate(context)
+        if repaired:
+            self.contexts.append(context)
+            return ActionAdjudication(
+                request_id="untrusted",
+                source_revision="untrusted",
+                actor_id="untrusted",
+                summary="调查书架",
+                target=ActionTarget(kind="entity", id="bookshelf"),
+                method=ActionMethod(family="action", description="调查书架"),
+                check=NoAdjudicationCheck(),
+                success_effects=(NarrativeOnlyEffect(),),
+            )
         self.contexts.append(context)
         return ActionAdjudication(
             request_id="untrusted",
             source_revision="untrusted",
             actor_id="untrusted",
-            summary=context.step.semantic_goal,
-            target=ActionTarget(kind="world", id="missing-target"),
-            method=ActionMethod(family="action", description=context.step.semantic_goal),
+            summary="调查书架",
+            target=ActionTarget(kind="entity", id="missing-bookshelf"),
+            method=ActionMethod(family="action", description="调查书架"),
             check=NoAdjudicationCheck(),
             success_effects=(NarrativeOnlyEffect(),),
         )
+
+
+class SemanticallyDriftingRepairAdjudicator(MissingTargetAdjudicator):
+    async def adjudicate(self, context):
+        if context.step_index == 1 and context.previous_rejection is not None:
+            self.contexts.append(context)
+            return ActionAdjudication(
+                request_id="untrusted",
+                source_revision="untrusted",
+                actor_id="untrusted",
+                summary=context.step.semantic_goal,
+                target=ActionTarget(kind="entity", id="butler"),
+                method=ActionMethod(family="combat", description="攻击管家"),
+                check=NoAdjudicationCheck(),
+                success_effects=(NarrativeOnlyEffect(),),
+            )
+        return await super().adjudicate(context)
+
+
+class VisibleTargetRepairAdjudicator(RecordingAdjudicator):
+    async def adjudicate(self, context):
+        if context.previous_rejection is not None:
+            self.contexts.append(context)
+            return ActionAdjudication(
+                request_id="untrusted",
+                source_revision="untrusted",
+                actor_id="untrusted",
+                summary=context.step.semantic_goal,
+                target=ActionTarget(kind="entity", id="bookshelf"),
+                method=ActionMethod(family="observe", description=context.step.semantic_goal),
+                check=NoAdjudicationCheck(),
+                success_effects=(NarrativeOnlyEffect(),),
+            )
+        return await super().adjudicate(context)
 
 
 class ValidationRejectingExecutor:
@@ -1185,6 +1231,34 @@ async def test_engine_rejection_repair_is_attempted_at_most_once() -> None:
     assert len(engine_store.inspect_domain_events("room_01")) == 1
 
 
+@pytest.mark.asyncio
+async def test_plan_semantic_drift_stops_before_second_engine_submit() -> None:
+    module, engine_store, projector = runtime()
+    adjudicator = SemanticallyDriftingRepairAdjudicator(module.world_ref)
+    service = ActionPlanOrchestrator(
+        store=InMemoryActionPlanRunStore(),
+        adjudicator=adjudicator,
+        executor=AdjudicationEngineService(engine_store),
+        player_view_projector=projector,
+    )
+
+    result = await service.start_or_resume(
+        player_input("semantic-drift-parent"),
+        plan=plan(2),
+    )
+
+    assert result.run.status == "needs_clarification"
+    assert [step.status for step in result.run.steps] == ["completed", "stopped"]
+    assert result.run.steps[1].safe_failure_code == (
+        "SEMANTIC_REPAIR_REQUIRES_CLARIFICATION"
+    )
+    assert result.run.steps[1].repair_baseline is None
+    assert result.run.steps[1].repair_feedback is None
+    assert "keeper-only" not in result.run.model_dump_json()
+    assert "hidden target evidence" not in result.run.model_dump_json()
+    assert len(engine_store.inspect_domain_events("room_01")) == 1
+
+
 @pytest.mark.parametrize(
     ("repairability", "expected_status"),
     (
@@ -1308,12 +1382,16 @@ def test_plan_run_repair_fields_round_trip_and_old_json_uses_defaults() -> None:
         step_payload.pop("repair_attempts")
         step_payload.pop("last_validation_code")
         step_payload.pop("last_validation_message")
+        step_payload.pop("repair_baseline")
+        step_payload.pop("repair_feedback")
 
     restored = ActionPlanRun.model_validate(payload)
 
     assert restored.policy_snapshot.max_repair_attempts == 1
     assert all(step.repair_attempts == 0 for step in restored.steps)
     assert all(step.last_validation_code is None for step in restored.steps)
+    assert all(step.repair_baseline is None for step in restored.steps)
+    assert all(step.repair_feedback is None for step in restored.steps)
     assert ActionPlanRun.model_validate_json(restored.model_dump_json()) == restored
 
 
@@ -1491,7 +1569,7 @@ async def test_single_action_auto_repair_succeeds_without_creating_plan_run() ->
     module, engine_store, projector = runtime()
     plan_store = InMemoryActionPlanRunStore()
     engine = AdjudicationEngineService(engine_store)
-    repair_adjudicator = RecordingAdjudicator(module.world_ref)
+    repair_adjudicator = VisibleTargetRepairAdjudicator(module.world_ref)
     orchestrator_service = ActionPlanOrchestrator(
         store=plan_store,
         adjudicator=repair_adjudicator,
@@ -1505,11 +1583,25 @@ async def test_single_action_auto_repair_succeeds_without_creating_plan_run() ->
         repair_adjudicator=repair_adjudicator,
         policy=ActionPlanPolicy(),
     )
-    original = player_input("single-repair-parent", "检查当前环境")
+    original = player_input("single-repair-parent", "检查书架")
+    decision = single_action_decision(world_ref=module.world_ref, valid_target=False)
+    decision = decision.model_copy(
+        update={
+            "adjudication": decision.adjudication.model_copy(
+                update={
+                    "summary": "检查书架",
+                    "target": ActionTarget(kind="entity", id="missing-bookshelf"),
+                    "method": ActionMethod(family="observe", description="检查书架"),
+                },
+                deep=True,
+            )
+        },
+        deep=True,
+    )
 
     result = await dispatcher.execute(
         original,
-        single_action_decision(world_ref=module.world_ref, valid_target=False),
+        decision,
     )
 
     assert isinstance(result, SingleActionTurnResult)
@@ -1524,7 +1616,7 @@ async def test_single_action_auto_repair_succeeds_without_creating_plan_run() ->
 
 
 @pytest.mark.asyncio
-async def test_single_travel_repair_preserves_semantic_step_kind() -> None:
+async def test_single_travel_repair_with_changed_effect_requires_clarification() -> None:
     module, engine_store, projector = runtime()
     plan_store = InMemoryActionPlanRunStore()
     engine = AdjudicationEngineService(engine_store)
@@ -1544,19 +1636,19 @@ async def test_single_travel_repair_preserves_semantic_step_kind() -> None:
     )
     original = player_input("single-travel-repair", "前往墓地")
 
-    result = await dispatcher.execute(
-        original,
-        single_travel_decision(target_id="missing-location"),
-    )
+    with pytest.raises(TurnExecutionError) as raised:
+        await dispatcher.execute(
+            original,
+            single_travel_decision(target_id="missing-location"),
+        )
 
-    assert isinstance(result, SingleActionTurnResult)
-    assert result.execution.status == "resolved"
+    assert raised.value.code == "SEMANTIC_REPAIR_REQUIRES_CLARIFICATION"
     assert len(repair_adjudicator.contexts) == 1
     context = repair_adjudicator.contexts[0]
     assert context.step.kind == "travel"
     assert context.previous_rejection == "TARGET_UNAVAILABLE: 当前目标不可用于这次行动"
     assert await plan_store.load(original.room_id, original.client_action_id) is None
-    assert len(engine_store.inspect_domain_events(original.room_id)) == 1
+    assert engine_store.inspect_domain_events(original.room_id) == ()
 
 
 @pytest.mark.asyncio

@@ -344,6 +344,7 @@ class NarrationEvidence(ContractModel):
     kind: Literal["entity_discovered"]
     subject_id: str = Field(min_length=1)
     subject_name: str = Field(min_length=1)
+    subject_aliases: tuple[str, ...] = ()
     description: str = ""
     required_in_narration: bool = False
 

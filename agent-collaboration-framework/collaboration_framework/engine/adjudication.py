@@ -1192,6 +1192,7 @@ class AdjudicationEngineService:
                     kind="entity_discovered",
                     subject_id=projected.id,
                     subject_name=projected.name,
+                    subject_aliases=projected.aliases,
                     description=projected.description,
                     required_in_narration=True,
                 )

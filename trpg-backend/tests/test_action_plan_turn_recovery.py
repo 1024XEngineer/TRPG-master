@@ -10,7 +10,10 @@ from collaboration_framework.contracts import (
     NarrationEvidence,
     PostRollDecisionRequest,
 )
-from collaboration_framework.host.application import ActionPlanNarrationValidationError
+from collaboration_framework.host.application import (
+    ActionPlanNarrationValidationError,
+    TurnExecutionError,
+)
 from collaboration_framework.host.schemas import ActionPlanNarrationContext
 
 from app.core.action_plan_turn import ActionPlanTurnApplication
@@ -130,7 +133,10 @@ async def test_narration_falls_back_to_required_player_safe_evidence() -> None:
     )
     context = cast(
         ActionPlanNarrationContext,
-        SimpleNamespace(narration_evidence=(evidence,)),
+        SimpleNamespace(
+            narration_evidence=(evidence,),
+            termination_status="resolved",
+        ),
     )
 
     narration = await application._narrate(context)
@@ -139,6 +145,34 @@ async def test_narration_falls_back_to_required_player_safe_evidence() -> None:
     assert narration.claimed_evidence_refs == (evidence.ref,)
     assert "石板下的地穴入口" in narration.text
     assert "沉重石板" in narration.text
+    assert "。。" not in narration.text
+
+
+@pytest.mark.asyncio
+async def test_required_evidence_fallback_never_changes_clarification_scope() -> None:
+    application = object.__new__(ActionPlanTurnApplication)
+    narrate = AsyncMock(side_effect=ActionPlanNarrationValidationError("required_evidence_missing"))
+    application._narrator = SimpleNamespace(narrate=narrate)
+    evidence = NarrationEvidence(
+        ref="evt-crypt-discovered",
+        kind="entity_discovered",
+        subject_id="crypt_entrance",
+        subject_name="石板下的地穴入口",
+        required_in_narration=True,
+    )
+    context = cast(
+        ActionPlanNarrationContext,
+        SimpleNamespace(
+            narration_evidence=(evidence,),
+            termination_status="needs_clarification",
+        ),
+    )
+
+    with pytest.raises(TurnExecutionError) as raised:
+        await application._narrate(context)
+
+    assert raised.value.code == "PLAN_NARRATION_INVALID"
+    assert narrate.await_count == 2
 
 
 @pytest.mark.asyncio

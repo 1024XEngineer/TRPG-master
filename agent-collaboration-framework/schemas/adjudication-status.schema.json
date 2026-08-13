@@ -295,6 +295,14 @@
           "title": "Subject Name",
           "type": "string"
         },
+        "subject_aliases": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Subject Aliases",
+          "type": "array"
+        },
         "description": {
           "default": "",
           "title": "Description",

@@ -19,7 +19,8 @@ NarrationRejectionReason = Literal[
 
 _NARRATION_FIELD = (
     r"(?<![A-Za-z0-9_])"
-    r"(?:kind|text|claimed_fact_ids|claimedFactIds|suggested_actions|suggestedActions)"
+    r"(?:kind|text|claimed_fact_ids|claimedFactIds|claimed_evidence_refs|"
+    r"claimedEvidenceRefs|suggested_actions|suggestedActions)"
     r"(?![A-Za-z0-9_])"
 )
 _QUOTED_NARRATION_FIELD = rf"""(?:"|')?{_NARRATION_FIELD}(?:"|')?"""
@@ -50,6 +51,15 @@ _TRAILING_NARRATION_FIELD_RE = re.compile(
     re.IGNORECASE | re.DOTALL | re.VERBOSE,
 )
 
+_ESCAPED_TEXT_TAIL_RE = re.compile(
+    rf"""
+    ["'][ \t]*,[ \t]*
+    {_QUOTED_NARRATION_FIELD}
+    [ \t]*[:：]
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
 _TRAILING_OBJECT_FRAGMENT_RE = re.compile(
     r"""
     (?:^|[\r\n]|[。！？.!?]|(?<=\s))[ \t]*
@@ -68,7 +78,8 @@ _NARRATION_KIND_RE = re.compile(
 _NARRATION_FIELD_KEY_RE = re.compile(
     r"""
     (?:"|')?
-    (?P<field>kind|text|claimed_fact_ids|claimedFactIds|suggested_actions|suggestedActions)
+    (?P<field>kind|text|claimed_fact_ids|claimedFactIds|claimed_evidence_refs|
+    claimedEvidenceRefs|suggested_actions|suggestedActions)
     (?:"|')?
     [ \t]*[:：]
     """,
@@ -76,7 +87,7 @@ _NARRATION_FIELD_KEY_RE = re.compile(
 )
 
 _NARRATION_FIELD_TOKEN_RE = re.compile(
-    r"""(?:"|')?(kind|text|claimed_fact_ids|claimedFactIds|suggested_actions|suggestedActions)(?:"|')?""",
+    r"""(?:"|')?(kind|text|claimed_fact_ids|claimedFactIds|claimed_evidence_refs|claimedEvidenceRefs|suggested_actions|suggestedActions)(?:"|')?""",
     re.IGNORECASE,
 )
 
@@ -164,6 +175,8 @@ def narration_text_rejection_reason(
     if _STANDALONE_NARRATION_FIELD_RE.search(text):
         return "protocol_tail"
     if _TRAILING_NARRATION_FIELD_RE.search(text):
+        return "protocol_tail"
+    if _ESCAPED_TEXT_TAIL_RE.search(text):
         return "protocol_tail"
 
     object_match = _TRAILING_OBJECT_FRAGMENT_RE.search(text)

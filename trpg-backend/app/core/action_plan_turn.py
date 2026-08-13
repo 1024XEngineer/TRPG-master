@@ -1109,7 +1109,18 @@ class ActionPlanTurnApplication:
                 return await self._narrator.narrate(context)
             except ActionPlanNarrationValidationError as exc:
                 if attempt == 1:
-                    if exc.reason == "required_evidence_missing":
+                    if (
+                        exc.reason == "required_evidence_missing"
+                        and context.termination_status != "needs_clarification"
+                    ):
+                        logger.warning(
+                            "action_plan_narration_required_evidence_fallback",
+                            evidence_refs=[
+                                item.ref
+                                for item in context.narration_evidence
+                                if item.required_in_narration
+                            ],
+                        )
                         return self._required_evidence_fallback(context)
                     raise TurnExecutionError(
                         "PLAN_NARRATION_INVALID",
@@ -1139,12 +1150,14 @@ class ActionPlanTurnApplication:
                 "规则结果已保存，但叙事未通过安全校验；请使用原请求重试",
                 retryable=True,
             )
-        details = "；".join(
-            f"你发现了{item.subject_name}" + (f"：{item.description}" if item.description else "")
-            for item in required
-        )
+        sentences: list[str] = []
+        for item in required:
+            sentences.append(f"随着调查深入，你很快辨认出{item.subject_name}。")
+            description = item.description.strip()
+            if description:
+                sentences.append(description.rstrip("。！？!?；;，,") + "。")
         return ActionPlanNarrationOutput(
-            text=f"{details}。",
+            text="".join(sentences),
             claimed_evidence_refs=tuple(item.ref for item in required),
         )
 

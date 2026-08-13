@@ -184,6 +184,8 @@ kind=clarification，并用自然的角色内措辞提出一次最小澄清。cl
 内部状态、工具结果、模型推理或协议字段。建议动作最多三条且只能来自最终 PlayerView。
 叙事必须明确写出 narration_evidence 中 required_in_narration=true 的每项玩家可见结果，
 并把对应 ref 放入 claimed_evidence_refs；不得以未经证据确认的关键发现替代这些结果。
+text 只能包含自然的角色内叙事，不得把 claimed_evidence_refs、suggested_actions 或其他
+JSON/schema 字段和值重复写入正文。
 
 【叙事主体】
 - 你是守秘人，不是玩家角色。player_input、plan_goal 或 semantic_goal 中玩家使用的

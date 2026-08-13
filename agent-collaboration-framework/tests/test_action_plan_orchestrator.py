@@ -398,6 +398,16 @@ class ClaimsButOmitsRequiredEvidenceNarrationModel:
         }
 
 
+class AliasRequiredEvidenceNarrationModel:
+    async def generate(self, context):
+        return {
+            "kind": "narration",
+            "text": "沿着断续的痕迹，你确认这里藏着一个地穴入口。",
+            "claimed_evidence_refs": [context.narration_evidence[0].ref],
+            "suggested_actions": [],
+        }
+
+
 def runtime(*, two_scenes: bool = False):
     module = load_model("fixtures/demo-module.json", ModuleContent)
     if two_scenes:
@@ -1903,6 +1913,7 @@ async def test_narrator_rejects_missing_required_evidence() -> None:
         kind="entity_discovered",
         subject_id="crypt_entrance",
         subject_name="石板下的地穴入口",
+        subject_aliases=("地穴入口",),
         description="一块沉重石板遮住了向下的通道。",
         required_in_narration=True,
     )
@@ -1928,6 +1939,11 @@ async def test_narrator_rejects_missing_required_evidence() -> None:
         )
 
     assert claimed_but_omitted.value.reason == "required_evidence_missing"
+
+    alias_output = await ActionPlanNarrator(
+        AliasRequiredEvidenceNarrationModel()
+    ).narrate(context)
+    assert alias_output.claimed_evidence_refs == (required_ref,)
 
 
 @pytest.mark.asyncio

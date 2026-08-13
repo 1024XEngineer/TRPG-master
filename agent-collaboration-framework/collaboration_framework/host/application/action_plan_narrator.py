@@ -47,7 +47,13 @@ class ActionPlanNarrator:
         required_refs = {item.ref for item in required}
         if not required_refs.issubset(output.claimed_evidence_refs):
             raise ActionPlanNarrationValidationError("required_evidence_missing")
-        if any(item.subject_name not in output.text for item in required):
+        if any(
+            not any(
+                label and label in output.text
+                for label in (item.subject_name, *item.subject_aliases)
+            )
+            for item in required
+        ):
             raise ActionPlanNarrationValidationError("required_evidence_missing")
         rejection = narration_text_rejection_reason(output.text)
         if rejection is not None:

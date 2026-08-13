@@ -390,6 +390,10 @@ export interface CheckRunView {
   check_id: string;
   action_request_id: string;
   selected_candidate_id: string;
+  selected_skill_id: string;
+  selected_skill_name: string;
+  difficulty: "regular" | "hard" | "extreme";
+  target_value: number;
   status: "awaiting_post_roll_decision" | "resolved";
   version: number;
   roll_count: number;

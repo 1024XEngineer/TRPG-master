@@ -1246,6 +1246,33 @@ describe('RoomPage conversation history', () => {
 
   // jsdom 没有 WebGL，supports3DDice() 为 false —— 正好覆盖降级路径：
   // 渲染能力缺失时不能把检定卡住（issue #217）。
+  // 自由骰没有技能、没有难度、没有目标值，后端也不知道它发生过——就没有判定
+  // 可言。此前会按 `result <= 5 / <= 65` 编一个「成功 / 失败」出来，渲染得和
+  // 权威检定结果一模一样，玩家会以为自己过了什么（#310）。
+  it('reports a free roll without inventing a verdict', async () => {
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    // 不触发任何检定，直接点输入栏的骰子按钮。
+    fireEvent.click(screen.getByRole('button', { name: '骰子' }))
+
+    vi.useFakeTimers()
+    vi.spyOn(Math, 'random').mockReturnValueOnce(0.2).mockReturnValueOnce(0.3)
+    fireEvent.click(screen.getByRole('button', { name: '掷骰' }))
+    await act(async () => {
+      vi.advanceTimersByTime(800)
+    })
+    vi.useRealTimers()
+
+    fireEvent.click(screen.getByRole('button', { name: '确认并发送' }))
+
+    const message = await screen.findByText(/^D100 · 23 · /)
+    expect(message).toHaveTextContent('D100 · 23 · 自由掷骰')
+    for (const verdict of ['成功', '失败', '极限成功']) {
+      expect(message).not.toHaveTextContent(verdict)
+    }
+  })
+
   it('falls back to the 2D dice display when WebGL is unavailable', async () => {
     renderRoomPage()
     await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
@@ -1840,6 +1867,10 @@ describe('RoomPage conversation history', () => {
             check_id: 'check-1',
             action_request_id: clientActionId,
             selected_candidate_id: 'library',
+            selected_skill_id: 'library',
+            selected_skill_name: '图书馆使用',
+            difficulty: 'regular',
+            target_value: 60,
             status: 'awaiting_post_roll_decision',
             version: 1,
             roll_count: 1,
@@ -1979,6 +2010,10 @@ describe('RoomPage conversation history', () => {
             check_id: 'check-animated',
             action_request_id: 'animated-check',
             selected_candidate_id: 'library-use',
+            selected_skill_id: 'library-use',
+            selected_skill_name: '图书馆使用',
+            difficulty: 'regular',
+            target_value: 50,
             status: 'awaiting_post_roll_decision',
             version: 1,
             roll_count: 1,
@@ -2081,6 +2116,10 @@ describe('RoomPage conversation history', () => {
             check_id: 'check-insufficient-luck',
             action_request_id: 'insufficient-luck-check',
             selected_candidate_id: 'spot-hidden',
+            selected_skill_id: 'spot-hidden',
+            selected_skill_name: '侦查',
+            difficulty: 'regular',
+            target_value: 60,
             status: 'awaiting_post_roll_decision',
             version: 1,
             roll_count: 1,

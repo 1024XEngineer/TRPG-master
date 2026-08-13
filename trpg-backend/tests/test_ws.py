@@ -1318,7 +1318,10 @@ def test_single_action_pending_resumes_without_plan_run(
         headers={"X-Reconnect-Token": room["reconnectToken"]},
     ).json()["data"]
     action_events = [
-        event for event in replay if event["payload"].get("clientActionId") == action_id
+        event
+        for event in replay
+        if event["eventType"] == "action.broadcast"
+        and event["payload"].get("clientActionId") == action_id
     ]
     narration_events = [
         event
@@ -1328,6 +1331,22 @@ def test_single_action_pending_resumes_without_plan_run(
     assert len(action_events) == 1
     assert len(narration_events) == 1
     assert "_turnCompletion" not in narration_events[0]["payload"]
+
+    # 权威检定结果要留在历史里，刷新重进才恢复得出来（#310）。此前 check.result
+    # 的发送侧随 #226 一并没了，掷骰结果只在骰子浮层里出现一次就再也找不到。
+    check_events = [
+        event
+        for event in replay
+        if event["eventType"] == "check.result"
+        and event["payload"].get("clientActionId") == action_id
+    ]
+    assert len(check_events) == 1
+    check_payload = check_events[0]["payload"]
+    assert check_payload["skillName"] == "图书馆使用"
+    assert check_payload["targetValue"] == 20
+    assert check_payload["rollValue"] == 10
+    assert check_payload["passed"] is True
+    assert check_payload["characterName"] == "陈探员"
 
     conversation = sync_client.get(
         f"{ROOMS_BASE}/{room['roomId']}/conversation",

@@ -1895,10 +1895,15 @@ export default function RoomPage() {
       })
       return
     }
+    // 自由骰：玩家自己点骰子按钮掷的，引擎没有发起任何检定。这里只报点数。
+    //
+    // 此前会按 `result <= 5 / <= 65` 编一个「极限成功 / 成功 / 失败」出来。那个
+    // 65 是个魔数，跟角色技能值、跟模组、跟任何东西都没关系，渲染出来却和权威
+    // 检定结果长得一模一样，玩家会以为自己过了什么判定（#310）。没有技能、没有
+    // 难度、没有目标值，就没有判定可言。
     const typeLabel = diceType.toUpperCase()
-    const resultLabel = diceType === 'd100' ? (result <= 5 ? '极限成功' : result <= 65 ? '成功' : '失败') : `掷出 ${result}`
     setMessages(prev => [...prev, {
-      type: 'dice', channel: 'action', sender: senderName, content: `${typeLabel} · ${result} · ${resultLabel}`, time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }), isSelf: true,
+      type: 'dice', channel: 'action', sender: senderName, content: `${typeLabel} · ${result} · 自由掷骰`, time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }), isSelf: true,
     }])
   }
 

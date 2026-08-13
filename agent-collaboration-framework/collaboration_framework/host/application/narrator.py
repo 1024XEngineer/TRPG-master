@@ -9,12 +9,15 @@ from collaboration_framework.contracts import ContractError
 from collaboration_framework.host.ports import NarrationModelPort
 from collaboration_framework.host.schemas import NarrationContext, NarrationOutput
 
+from .persistent_results import unsupported_persistent_claim
+
 NarrationRejectionReason = Literal[
     "outer_schema",
     "fact_scope",
     "protocol_tail",
     "schema_fragment",
     "subject_ownership",
+    "persistent_claim_without_evidence",
 ]
 
 _NARRATION_FIELD = (
@@ -256,4 +259,13 @@ class Narrator:
         subject_rejection = narration_subject_rejection_reason(output.text)
         if subject_rejection is not None:
             raise NarrationValidationError(subject_rejection)
+        # 普通单动作叙事同样只能描述最终 PlayerView 已确认的持久状态，
+        # 避免它绕过 ActionPlanNarrator 的证据边界自行补写 NPC 后果。
+        persistent_rejection = unsupported_persistent_claim(
+            output.text,
+            (),
+            getattr(context, "player_view", None),
+        )
+        if persistent_rejection is not None:
+            raise NarrationValidationError("persistent_claim_without_evidence")
         return output

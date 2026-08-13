@@ -9,8 +9,8 @@ from collaboration_framework.contracts import (
     ActionAdjudication,
     ActionMethod,
     ActionTarget,
-    AdvanceWorldTimeEffect,
     AdjudicationValidationError,
+    AdvanceWorldTimeEffect,
     CancelCheckChoice,
     ChangeEntityStateEffect,
     CheckDecisionRequest,
@@ -623,9 +623,7 @@ class AdjudicationEngineTests(unittest.IsolatedAsyncioTestCase):
         execution = await self.submit(self.service(), mislabeled)
 
         async with self.store.transaction("room_01") as transaction:
-            completed = await transaction.find_adjudication_command(
-                "mislabeled-target"
-            )
+            completed = await transaction.find_adjudication_command("mislabeled-target")
         assert completed is not None
         # 归一后的 target 贯穿整次提交：范围匹配、效果校验和持久化拿到的是同一份。
         persisted = completed.request.adjudication.target
@@ -723,6 +721,85 @@ class AdjudicationEngineTests(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaises(ValidationError):
             ActionAdjudication.model_validate(payload)
+
+    async def test_persistent_intent_rejects_empty_success_effects_before_roll(
+        self,
+    ) -> None:
+        action = adjudication("empty-persistent", "0").model_copy(
+            update={
+                "summary": "击晕守墓人",
+                "target": ActionTarget(kind="entity", id="butler"),
+                "method": ActionMethod(family="knock_out", description="用撬棍砸晕他"),
+                "persistence_intent": "character_state",
+                "success_effects": (),
+            },
+            deep=True,
+        )
+        with self.assertRaises(AdjudicationValidationError) as raised:
+            await self.submit(self.service(1), action)
+        self.assertEqual(raised.exception.result.code, "PERSISTENT_EFFECT_REQUIRED")
+        self.assertEqual(raised.exception.result.repairability, "auto_repairable")
+        self.assertEqual(self.store.inspect_state("room_01").event_sequence, 0)
+
+    async def test_persistent_intent_accepts_unconscious_state_and_publishes_evidence(
+        self,
+    ) -> None:
+        action = adjudication(
+            "valid-persistent", "0", check=NoAdjudicationCheck()
+        ).model_copy(
+            update={
+                "summary": "击晕守墓人",
+                "target": ActionTarget(kind="entity", id="butler"),
+                "method": ActionMethod(family="knock_out", description="用撬棍砸晕他"),
+                "persistence_intent": "character_state",
+                "success_effects": (
+                    ChangeEntityStateEffect(
+                        entity_id="butler",
+                        key="consciousness",
+                        value="unconscious",
+                    ),
+                ),
+            },
+            deep=True,
+        )
+        result = await self.submit(self.service(), action)
+        self.assertEqual(result.committed_results[0].state_value, "unconscious")
+        self.assertIn(
+            "consciousness",
+            self.store.inspect_state("room_01").public_entity_state_keys["butler"],
+        )
+
+    async def test_explicit_none_cannot_downgrade_controlled_persistent_family(self):
+        """新裁决显式写 none 时，受控击晕动作仍必须提交状态效果。"""
+        action = adjudication("explicit-none-persistent", "0", check=NoAdjudicationCheck()).model_copy(
+            update={
+                "summary": "击晕守墓人",
+                "target": ActionTarget(kind="entity", id="butler"),
+                "method": ActionMethod(family="knock_out", description="用撬棍砸晕他"),
+                "persistence_intent": "none",
+                "success_effects": (),
+            },
+            deep=True,
+        )
+        with self.assertRaises(AdjudicationValidationError) as raised:
+            await self.submit(self.service(), action)
+        self.assertEqual(raised.exception.result.code, "PERSISTENT_EFFECT_REQUIRED")
+
+    def test_persistence_intent_explicitness_survives_json_round_trip(self) -> None:
+        """序列化必须保留新旧裁决的显式性差异，供计划恢复后继续校验。"""
+        legacy = adjudication("legacy-intent", "0", check=NoAdjudicationCheck())
+        # model_copy 不会重跑 validator，模拟真实新模型输出需从 JSON 构造。
+        explicit_payload = legacy.to_json_dict()
+        explicit_payload["persistence_intent"] = "none"
+        explicit = ActionAdjudication.model_validate(explicit_payload)
+
+        legacy_reloaded = ActionAdjudication.model_validate_json(legacy.model_dump_json())
+        explicit_reloaded = ActionAdjudication.model_validate_json(
+            explicit.model_dump_json()
+        )
+
+        self.assertFalse(legacy_reloaded.persistence_intent_explicit)
+        self.assertTrue(explicit_reloaded.persistence_intent_explicit)
 
 
 if __name__ == "__main__":

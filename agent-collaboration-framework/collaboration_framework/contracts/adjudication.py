@@ -9,7 +9,14 @@ from __future__ import annotations
 
 from typing import Annotated, Literal, TypeAlias
 
-from pydantic import Field, JsonValue, model_validator
+from pydantic import (
+    Field,
+    JsonValue,
+    PrivateAttr,
+    SerializerFunctionWrapHandler,
+    model_serializer,
+    model_validator,
+)
 
 from .common import ContractModel
 
@@ -21,6 +28,13 @@ CheckDegree: TypeAlias = Literal[  # noqa: UP040
     "regular_success",
     "failure",
     "fumble",
+]
+PersistenceIntent: TypeAlias = Literal[  # noqa: UP040
+    "none",
+    "character_state",
+    "object_state",
+    "inventory",
+    "location",
 ]
 
 
@@ -113,7 +127,9 @@ class MoveEntityEffect(ContractModel):
     @model_validator(mode="after")
     def validate_destination(self) -> MoveEntityEffect:
         if (self.location_id is None) == (self.holder_actor_id is None):
-            raise ValueError("move_entity 必须且只能指定 location_id 或 holder_actor_id")
+            raise ValueError(
+                "move_entity 必须且只能指定 location_id 或 holder_actor_id"
+            )
         return self
 
 
@@ -207,17 +223,44 @@ class ActionAdjudication(ContractModel):
     summary: str = Field(min_length=1)
     target: ActionTarget
     method: ActionMethod
+    # 旧裁决缺少该字段时按 none 恢复；模型侧 Prompt 会要求新输出必须显式填写。
+    persistence_intent: PersistenceIntent = "none"
     check: AdjudicationCheck
     rule_decision: RuleDecisionRef | None = None
     success_effects: tuple[ActionEffect, ...] = ()
     failure_effects: tuple[ActionEffect, ...] = ()
+    _persistence_intent_explicit: bool = PrivateAttr(default=False)
 
     @model_validator(mode="after")
     def validate_candidates(self) -> ActionAdjudication:
+        # 私有标记随 model_copy 保留，但不会进入持久化 JSON 或公开 Schema。
+        object.__setattr__(
+            self,
+            "_persistence_intent_explicit",
+            "persistence_intent" in self.model_fields_set,
+        )
         ids = [candidate.candidate_id for candidate in self.check.candidates]
         if len(ids) != len(set(ids)):
             raise ValueError("candidate_id 必须在一次 ActionAdjudication 内唯一")
         return self
+
+    @property
+    def persistence_intent_explicit(self) -> bool:
+        """区分旧 JSON 的兼容默认值与新模型显式声明。"""
+
+        return self._persistence_intent_explicit
+
+    @model_serializer(mode="wrap")
+    def serialize_with_legacy_intent_compatibility(
+        self,
+        handler: SerializerFunctionWrapHandler,
+    ) -> dict[str, object]:
+        """旧裁决继续省略意图字段，新裁决则保留显式 none 供重载后校验。"""
+
+        payload = handler(self)
+        if not self.persistence_intent_explicit:
+            payload.pop("persistence_intent", None)
+        return payload
 
 
 class SubmitAdjudicationRequest(ContractModel):
@@ -257,7 +300,9 @@ class CancelCheckChoice(ContractModel):
     kind: Literal["cancel"] = "cancel"
 
 
-CheckChoice = Annotated[SelectCheckChoice | CancelCheckChoice, Field(discriminator="kind")]
+CheckChoice = Annotated[
+    SelectCheckChoice | CancelCheckChoice, Field(discriminator="kind")
+]
 
 
 class CheckDecisionRequest(ContractModel):
@@ -337,8 +382,18 @@ class PostRollDecisionRequest(ContractModel):
     push_adjudication: PushAdjudication | None = None
 
 
+class CommittedResult(ContractModel):
+    """玩家安全的已提交结果摘要，不复制原始事件载荷或内部裁决信息。"""
+
+    kind: PersistenceIntent
+    target_id: str = Field(min_length=1)
+    state_key: str | None = Field(default=None, min_length=1)
+    state_value: JsonValue | None = None
+    event_ref: str = Field(min_length=1)
+
+
 class NarrationEvidence(ContractModel):
-    """Player-safe meaning of one public event that narration may rely on."""
+    """玩家可见的公开事件语义，供主持人叙述时引用。"""
 
     ref: str = Field(min_length=1)
     kind: Literal["entity_discovered"]
@@ -364,6 +419,8 @@ class AdjudicationExecution(ContractModel):
     check_run: CheckRunView | None = None
     event_refs: tuple[str, ...] = ()
     public_event_refs: tuple[str, ...] = ()
+    # 只保存已提交且玩家可见的高层结果，供 Narrator 约束持久状态声明。
+    committed_results: tuple[CommittedResult, ...] = ()
     narration_evidence: tuple[NarrationEvidence, ...] = ()
 
     @model_validator(mode="after")

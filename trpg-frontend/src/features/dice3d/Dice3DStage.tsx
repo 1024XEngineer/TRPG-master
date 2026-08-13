@@ -10,6 +10,14 @@ import type { DiceStage } from './engine'
 import { supports3DDice } from './support'
 import type { DiceKind, DiceRollToken } from './types'
 
+/**
+ * context 连续丢失多少次之后放弃 3D。
+ *
+ * 允许重建是因为浏览器回收 context、GPU 进程重启都是可恢复的偶发事件；封顶是
+ * 因为如果每次新建的 context 转头就丢，重建只会一直制造新 context。
+ */
+const MAX_CONTEXT_LOSS_REBUILDS = 2
+
 export interface Dice3DHandle {
   /** 返回 false 表示舞台仍在处理上一轮，未接受本次请求。 */
   roll: (token: DiceRollToken, targetValue?: number) => boolean
@@ -44,6 +52,16 @@ export const Dice3DStage = forwardRef<Dice3DHandle, Dice3DStageProps>(function D
   } | null>(null)
   const activeRollRef = useRef<DiceRollToken | null>(null)
   const [failed, setFailed] = useState(false)
+  /**
+   * context 丢失后换一个新舞台（issue #320 review 指出）。
+   *
+   * 丢掉的 context 救不回来：引擎的 `roll()` 从此永久返回 false，而 `RoomPage`
+   * 收到 false 只清 rolling、不回退 2D——同一次面板打开期间，之后每次点「掷骰」
+   * 都静默失效，玩家看到按钮恢复可用却什么都没发生。所以必须换新舞台，拿一个
+   * 新的 context。
+   */
+  const [stageGeneration, setStageGeneration] = useState(0)
+  const contextLossCountRef = useRef(0)
 
   // 回调放进 ref：它们的引用变化不应该触发引擎重建（重建会丢掉画面上的骰子）。
   const onSettledRef = useRef(onSettled)
@@ -88,6 +106,16 @@ export const Dice3DStage = forwardRef<Dice3DHandle, Dice3DStageProps>(function D
             activeRollRef.current = null
             pendingRollRef.current = null
             if (token !== null) onRollAbandonedRef.current?.(token)
+            contextLossCountRef.current += 1
+            if (contextLossCountRef.current > MAX_CONTEXT_LOSS_REBUILDS) {
+              // 换了几次还在丢，说明不是偶发回收（GPU 反复崩、驱动有问题）。
+              // 继续重建只会一直制造新 context，老实退回 2D。
+              console.warn('[dice3d] WebGL context 反复丢失，退回 2D')
+              setFailed(true)
+              onUnsupportedRef.current?.(null)
+              return
+            }
+            setStageGeneration((generation) => generation + 1)
           },
         })
         stageRef.current = stage
@@ -126,9 +154,9 @@ export const Dice3DStage = forwardRef<Dice3DHandle, Dice3DStageProps>(function D
       stageRef.current = null
       if (abandoned !== null) onRollAbandonedRef.current?.(abandoned)
     }
-    // 依赖为空：舞台只随组件挂载/卸载建一次。骰型变化不重建——重建一次就多
-    // 一个 WebGLRenderer，顶穿浏览器的 context 上限（issue #320）。
-  }, [])
+    // 只随组件挂载/卸载和 context 丢失重建。骰型变化不重建——重建一次就多一个
+    // WebGLRenderer，顶穿浏览器的 context 上限（issue #320）。
+  }, [stageGeneration])
 
   // 骰型变化：复用舞台，只换骰子。换型会丢掉上一副骰子，所以已受理但还没定格
   // 的那次掷骰要按「这一次没了」通知出去，否则父组件的 rolling 永远不清。

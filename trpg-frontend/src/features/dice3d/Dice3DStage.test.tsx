@@ -10,7 +10,7 @@ const { createdStages, mockDispose, mockStageRoll, mockSetKind } = vi.hoisted(()
     onContextLost?: () => void
   }>,
   mockDispose: vi.fn(),
-  mockStageRoll: vi.fn(() => true),
+  mockStageRoll: vi.fn((): boolean => true),
   mockSetKind: vi.fn(),
 }))
 
@@ -26,8 +26,23 @@ vi.mock('./engine', () => ({
     onSettled: (value: number) => void
     onContextLost?: () => void
   }) => {
-    createdStages.push({ onSettled, onContextLost })
-    return { roll: mockStageRoll, dispose: mockDispose, setKind: mockSetKind }
+    // 贴着真实引擎的行为建模：context 一丢，这个舞台就永久拒绝后续掷骰
+    // （engine.ts 的 `roll()` 里 `if (disposed || contextLost) return false`）。
+    // 之前 mock 的 roll 恒为 true，于是「丢失后还能继续掷」这条断言是假绿的。
+    let contextLost = false
+    const entry = {
+      onSettled,
+      onContextLost: () => {
+        contextLost = true
+        onContextLost?.()
+      },
+    }
+    createdStages.push(entry)
+    return {
+      roll: () => (contextLost ? false : mockStageRoll()),
+      dispose: mockDispose,
+      setKind: mockSetKind,
+    }
   },
 }))
 
@@ -99,8 +114,42 @@ describe('Dice3DStage', () => {
     expect(onRollAbandoned).toHaveBeenCalledWith('check-a:1')
     expect(onUnsupported).not.toHaveBeenCalled()
 
-    // 这一次被放弃后，槽位要腾出来，下一次检定还能继续用 3D。
+    // 丢失的 context 救不回来，必须换一个新舞台，否则之后每次掷骰都被静默拒绝
+    // ——玩家点「掷骰」按钮，rolling 清掉了，什么都没发生（#324 review 指出）。
+    await waitFor(() => expect(createdStages).toHaveLength(2))
+    expect(mockDispose).toHaveBeenCalled()
+
     expect(ref.current?.roll('check-b:2')).toBe(true)
+    act(() => createdStages[1].onSettled(41))
+    expect(onSettled).toHaveBeenCalledWith(41, 'check-b:2')
+    expect(onUnsupported).not.toHaveBeenCalled()
+  })
+
+  // 换新舞台也救不回来时（GPU 反复崩），不能无限重建：有限次之后老实退回 2D。
+  it('gives up on 3D after repeated context losses instead of rebuilding forever', async () => {
+    const ref = createRef<Dice3DHandle>()
+    const onUnsupported = vi.fn()
+    render(
+      <Dice3DStage
+        ref={ref}
+        kind="d100"
+        onSettled={vi.fn()}
+        onUnsupported={onUnsupported}
+        onRollAbandoned={vi.fn()}
+      />,
+    )
+    await waitFor(() => expect(createdStages).toHaveLength(1))
+
+    for (let i = 0; i < 5; i += 1) {
+      const stage = createdStages.at(-1)
+      act(() => stage?.onContextLost?.())
+      await waitFor(() => expect(onUnsupported.mock.calls.length + createdStages.length).toBeGreaterThan(i + 1))
+      if (onUnsupported.mock.calls.length > 0) break
+    }
+
+    expect(onUnsupported).toHaveBeenCalled()
+    expect(createdStages.length).toBeLessThanOrEqual(4)
+    expect(ref.current?.roll('check-after-giveup:1')).toBe(false)
   })
 
   // 每重建一次舞台就多一个 WebGLRenderer，顶穿浏览器的 context 上限。切骰型

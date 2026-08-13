@@ -9,7 +9,11 @@ from collaboration_framework.host.schemas.action_plan import (
     ActionPlanNarrationOutput,
 )
 
-from .narrator import narration_text_rejection_reason, normalize_narration_text
+from .narrator import (
+    narration_subject_rejection_reason,
+    narration_text_rejection_reason,
+    normalize_narration_text,
+)
 
 
 class ActionPlanNarrationValidationError(ContractError):
@@ -40,6 +44,9 @@ class ActionPlanNarrator:
         rejection = narration_text_rejection_reason(output.text)
         if rejection is not None:
             raise ActionPlanNarrationValidationError(rejection)
+        subject_rejection = narration_subject_rejection_reason(output.text)
+        if subject_rejection is not None:
+            raise ActionPlanNarrationValidationError(subject_rejection)
         if context.termination_status == "needs_clarification" and output.kind != "clarification":
             raise ActionPlanNarrationValidationError("clarification_kind")
         return output

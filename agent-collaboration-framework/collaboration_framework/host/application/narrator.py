@@ -14,6 +14,7 @@ NarrationRejectionReason = Literal[
     "fact_scope",
     "protocol_tail",
     "schema_fragment",
+    "subject_ownership",
 ]
 
 _NARRATION_FIELD = (
@@ -83,6 +84,17 @@ _SCHEMA_MARKER_RE = re.compile(
     r"""(?:"|')?(?:properties|required)(?:"|')?[ \t]*[:：]""",
     re.IGNORECASE,
 )
+
+_QUOTED_SPAN_DELIMITERS = {
+    "“": "”",
+    "「": "」",
+    "『": "』",
+    "‘": "’",
+    '"': '"',
+    "'": "'",
+    "《": "》",
+}
+_FIRST_PERSON_RE = re.compile(r"[我咱]")
 
 
 class NarrationValidationError(ContractError):
@@ -178,6 +190,38 @@ def narration_text_rejection_reason(
     return None
 
 
+def narration_subject_rejection_reason(
+    text: str,
+) -> Literal["subject_ownership"] | None:
+    """Reject first-person ownership in prose while preserving quoted speech."""
+
+    quoted = [False] * len(text)
+    for opening, closing in _QUOTED_SPAN_DELIMITERS.items():
+        start: int | None = None
+        for index, character in enumerate(text):
+            if opening == closing:
+                if character != opening:
+                    continue
+                if start is None:
+                    start = index
+                else:
+                    quoted[start : index + 1] = [True] * (index + 1 - start)
+                    start = None
+                continue
+            if character == opening and start is None:
+                start = index
+            elif character == closing and start is not None:
+                quoted[start : index + 1] = [True] * (index + 1 - start)
+                start = None
+
+    prose = "".join(
+        character for index, character in enumerate(text) if not quoted[index]
+    )
+    if _FIRST_PERSON_RE.search(prose):
+        return "subject_ownership"
+    return None
+
+
 class Narrator:
     def __init__(self, model: NarrationModelPort) -> None:
         self._model = model
@@ -196,4 +240,7 @@ class Narrator:
         rejection_reason = narration_text_rejection_reason(output.text)
         if rejection_reason is not None:
             raise NarrationValidationError(rejection_reason)
+        subject_rejection = narration_subject_rejection_reason(output.text)
+        if subject_rejection is not None:
+            raise NarrationValidationError(subject_rejection)
         return output

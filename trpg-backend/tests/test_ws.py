@@ -136,6 +136,25 @@ class _WsCountingActionPlanNarration:
         }
 
 
+class _WsFirstPersonThenSafeNarration:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def generate(self, context) -> JsonObject:
+        del context
+        self.calls += 1
+        return {
+            "kind": "narration",
+            "text": (
+                "我带着你们进入墓园。"
+                if self.calls == 1
+                else "你带着托马斯进入墓园。"
+            ),
+            "claimed_evidence_refs": [],
+            "suggested_actions": [],
+        }
+
+
 class _WsInvalidTwiceThenSafeNarration:
     leaked_text = "托马斯看着你。 claimed_fact_ids: [],"
 
@@ -1400,3 +1419,58 @@ def test_action_plan_narrator_failure_retries_narration_without_replaying_steps(
     assert completed["correlation_id"] == "plan-narrator-retry-246"
     assert terminal["payload"]["correlationId"] == "plan-narrator-retry-246"
     assert all(message.get("type") != "adjudication.pending" for message in retry_seen)
+
+
+def test_subject_ownership_failure_retries_before_publishing_narration(
+    sync_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    token = register_and_login(sync_client, "subject_ownership_retry")
+    room = create_room(sync_client, token)
+    advance_to_building(sync_client, room)
+    complete_character(sync_client, room["roomId"], room["reconnectToken"])
+    start_game(sync_client, room, token)
+    narration_model = _WsFirstPersonThenSafeNarration()
+    monkeypatch.setattr(
+        ws_controller.action_plan_turn_application,
+        "_narrator",
+        ActionPlanNarrator(narration_model),
+    )
+    action_id = "subject-ownership-retry-308"
+
+    with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
+        ws.send_json(
+            {
+                "type": "room.join",
+                "playerId": room["playerId"],
+                "payload": {"reconnectToken": room["reconnectToken"]},
+            }
+        )
+        ws.receive_json()
+        ws.receive_json()
+        receive_replayed_opening(ws)
+        ws.send_json(
+            {
+                "type": "action.plan.submit",
+                "playerId": room["playerId"],
+                "payload": {
+                    "clientActionId": action_id,
+                    "utterance": "带托马斯去墓园",
+                },
+            }
+        )
+        completed, seen = receive_until(
+            ws,
+            lambda message: message.get("message_type") == "turn.completed",
+            limit=40,
+        )
+        narration, _ = receive_until(
+            ws,
+            lambda message: message.get("type") == "narration.push",
+            limit=20,
+        )
+
+    assert narration_model.calls == 2
+    assert completed["payload"]["narration"]["text"] == "你带着托马斯进入墓园。"
+    assert narration["payload"]["text"] == "你带着托马斯进入墓园。"
+    assert all("我带着你们进入墓园" not in str(message) for message in seen)

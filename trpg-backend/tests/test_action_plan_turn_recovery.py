@@ -118,9 +118,7 @@ def test_application_injects_plan_repair_dependencies_into_single_action_path() 
 @pytest.mark.asyncio
 async def test_narration_falls_back_to_required_player_safe_evidence() -> None:
     application = object.__new__(ActionPlanTurnApplication)
-    narrate = AsyncMock(
-        side_effect=ActionPlanNarrationValidationError("required_evidence_missing")
-    )
+    narrate = AsyncMock(side_effect=ActionPlanNarrationValidationError("required_evidence_missing"))
     application._narrator = SimpleNamespace(narrate=narrate)
     evidence = NarrationEvidence(
         ref="evt-crypt-discovered",

@@ -474,8 +474,7 @@ class DeterministicActionPlanNarrationModel:
             item.ref for item in context.narration_evidence if item.required_in_narration
         )
         required_text = "；".join(
-            f"你发现了{item.subject_name}"
-            + (f"：{item.description}" if item.description else "")
+            f"你发现了{item.subject_name}" + (f"：{item.description}" if item.description else "")
             for item in context.narration_evidence
             if item.required_in_narration
         )
@@ -1133,9 +1132,7 @@ class ActionPlanTurnApplication:
     def _required_evidence_fallback(
         context: ActionPlanNarrationContext,
     ) -> ActionPlanNarrationOutput:
-        required = tuple(
-            item for item in context.narration_evidence if item.required_in_narration
-        )
+        required = tuple(item for item in context.narration_evidence if item.required_in_narration)
         if not required:
             raise TurnExecutionError(
                 "PLAN_NARRATION_INVALID",
@@ -1143,8 +1140,7 @@ class ActionPlanTurnApplication:
                 retryable=True,
             )
         details = "；".join(
-            f"你发现了{item.subject_name}"
-            + (f"：{item.description}" if item.description else "")
+            f"你发现了{item.subject_name}" + (f"：{item.description}" if item.description else "")
             for item in required
         )
         return ActionPlanNarrationOutput(

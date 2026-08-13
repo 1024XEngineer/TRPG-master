@@ -648,6 +648,128 @@ describe('RoomPage conversation history', () => {
     expect(realtime).toHaveClass('whitespace-pre-wrap')
   })
 
+  // 频道隔离此前只做在历史消息那一层（按 msg.channel 过滤），运行时的行动区
+  // UI 一个都没隔离：叙事气泡、进度指示器、行动报错和骰子入口全都漏进讨论区。
+  // 讨论区只承载玩家之间的讨论，不承载任何行动区的叙事、判定与状态（#304）。
+  describe('channel isolation', () => {
+    const switchToDiscussion = () =>
+      fireEvent.click(screen.getByRole('button', { name: '讨论区' }))
+
+    it('keeps the streaming narration and progress indicator out of the discussion channel', async () => {
+      renderRoomPage()
+      await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+      act(() => {
+        emitWsMessage({
+          type: 'narration.chunk',
+          payload: { messageId: 'leak-1', sequence: 0, text: '午后的阳光透过百叶窗。' },
+        })
+      })
+      // 先确认行动区确实在生成，否则这条用例可能因为压根没渲染而假绿。
+      expect(await screen.findByText('生成中…')).toBeInTheDocument()
+
+      switchToDiscussion()
+
+      expect(screen.queryByText('生成中…')).not.toBeInTheDocument()
+      expect(screen.queryByText(/午后的阳光/)).not.toBeInTheDocument()
+    })
+
+    it('keeps the action error and its retry entry out of the discussion channel', async () => {
+      mockSubmitPlannedAction.mockRejectedValueOnce(new Error('boom'))
+      renderRoomPage()
+      await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+      const field = screen.getByPlaceholderText('输入行动…')
+      fireEvent.change(field, { target: { value: '我查看书架' } })
+      fireEvent.submit(field.closest('form')!)
+
+      expect(await screen.findByText('行动提交失败，请重试')).toBeInTheDocument()
+
+      switchToDiscussion()
+
+      expect(screen.queryByText('行动提交失败，请重试')).not.toBeInTheDocument()
+    })
+
+    it('removes the dice entry from the discussion channel', async () => {
+      renderRoomPage()
+      await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+      expect(screen.getByRole('button', { name: '骰子' })).toBeInTheDocument()
+
+      switchToDiscussion()
+
+      expect(screen.queryByRole('button', { name: '骰子' })).not.toBeInTheDocument()
+    })
+
+    // 引擎在等玩家掷骰。单纯藏起来会让这次检定静默卡住——玩家看不到任何提示，
+    // 回合悬着。所以把频道切回行动区，而不是压住面板。
+    // 输入框在两个频道复用过，草稿会跟着频道一起漂移：在讨论区打了一半、
+    // 检定到达把频道切回行动区，那段本来要说给队友听的话再一按发送就提交给
+    // 引擎了（#306 review 指出）。草稿必须按频道各存各的。
+    it('keeps each channel draft to itself when a check pulls the player back', async () => {
+      renderRoomPage()
+      await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+      const field = () => screen.getByPlaceholderText('输入行动…')
+      fireEvent.change(field(), { target: { value: '这是行动区的草稿' } })
+
+      switchToDiscussion()
+      fireEvent.change(field(), { target: { value: '我们先商量一下路线' } })
+
+      await act(async () => {
+        emitWsMessage({
+          type: 'check.request',
+          payload: {
+            playerId: 'player-1',
+            clientActionId: 'check-with-draft',
+            summary: '检查旧报纸',
+            difficulty: 'regular',
+            skills: [{ id: 'library', name: '图书馆使用', targetValue: 60 }],
+          },
+        })
+      })
+
+      // 被拉回行动区，输入框里必须是行动区自己的草稿，不能是讨论区那句。
+      expect(field()).toHaveValue('这是行动区的草稿')
+
+      fireEvent.submit(field().closest('form')!)
+      await waitFor(() => expect(mockSubmitPlannedAction).toHaveBeenCalledTimes(1))
+      expect(mockSubmitPlannedAction.mock.calls[0][1]).toEqual(
+        expect.objectContaining({ utterance: '这是行动区的草稿' }),
+      )
+
+      // 讨论区那句原样还在，没被顺手清掉也没被提交。
+      switchToDiscussion()
+      expect(field()).toHaveValue('我们先商量一下路线')
+    })
+
+    it('switches back to the action channel when a check arrives during discussion', async () => {
+      renderRoomPage()
+      await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+      switchToDiscussion()
+      expect(screen.queryByRole('button', { name: '骰子' })).not.toBeInTheDocument()
+
+      await act(async () => {
+        emitWsMessage({
+          type: 'check.request',
+          payload: {
+            playerId: 'player-1',
+            clientActionId: 'check-during-discussion',
+            summary: '检查旧报纸',
+            difficulty: 'regular',
+            skills: [{ id: 'library', name: '图书馆使用', targetValue: 60 }],
+          },
+        })
+      })
+
+      expect(
+        screen.getByRole('button', { name: '行动' }),
+      ).toHaveAttribute('aria-pressed', 'true')
+      expect(await screen.findByText('图书馆使用')).toBeInTheDocument()
+    })
+  })
+
   it('reveals narration chunks gradually instead of dumping the whole text', async () => {
     renderRoomPage()
     await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())

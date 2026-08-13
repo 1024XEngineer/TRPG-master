@@ -1267,11 +1267,33 @@ export default function RoomPage() {
   const [confirmExit, setConfirmExit] = useState(false)
   const [messages, setMessages] = useState<Message[]>([])
   const [channel, setChannel] = useState<'action' | 'discussion'>('action')
-  const [input, setInput] = useState('')
+  const isActionChannel = channel === 'action'
+  /**
+   * 草稿按频道各存各的（issue #304）。
+   *
+   * 输入框在两个频道复用，但一份共享草稿会跟着频道漂移：在讨论区打了一半、
+   * 检定到达把频道切回行动区，那段本来要说给队友听的话再一按发送就提交给了
+   * 引擎——`sendMessage` 只看当前 `channel` 决定走 sendChat 还是提交行动。
+   * 手动切频道同样漏，只是自动切换让它在玩家毫无预期时发生。
+   */
+  const [drafts, setDrafts] = useState<Record<'action' | 'discussion', string>>({
+    action: '',
+    discussion: '',
+  })
+  const input = drafts[channel]
+  const setInput = useCallback(
+    (next: string | ((current: string) => string)) => {
+      setDrafts((current) => ({
+        ...current,
+        [channel]: typeof next === 'function' ? next(current[channel]) : next,
+      }))
+    },
+    [channel],
+  )
   const handleSpeechTranscript = useCallback((transcript: string) => {
     // 使用函数式更新读取回调到达那一刻的输入，避免覆盖识别期间玩家新键入的文字。
     setInput((current) => appendSpeechTranscript(current, transcript))
-  }, [])
+  }, [setInput])
   const speechInput = useSpeechInput(handleSpeechTranscript)
   // 单独取稳定方法，避免 effect 依赖每次渲染都会新建的 Hook 返回对象。
   const cancelSpeechInput = speechInput.cancel
@@ -1333,6 +1355,17 @@ export default function RoomPage() {
   const [sheetPage, setSheetPage] = useState<'info' | 'background'>('info')
   const [skillsTab, setSkillsTab] = useState<'occupation' | 'interest'>('occupation')
   const [showDice, setShowDice] = useState(false)
+  /**
+   * 引擎在等玩家掷骰时唯一的开面板入口（issue #304）。
+   *
+   * 讨论区只承载玩家之间的讨论，不出现骰子。但玩家停在讨论区时不能只是把面板
+   * 藏起来——那会让这次检定静默卡住，回合一直悬着。所以先把频道切回行动区再
+   * 呈现：「在讨论区掷骰」这件事因此从不发生，检定也不会挂起。
+   */
+  const openDiceForCheck = useCallback(() => {
+    setChannel('action')
+    setShowDice(true)
+  }, [])
   const notesKey = roomId ? `aidm-notes-${roomId}` : null
   // ★ 之前"📋 案件笔记"标题是直接塞进 textarea 初始内容里的普通文本，用户
   // 一编辑/全选删除就会把标题本身也删掉。改成占位符（placeholder），真正
@@ -1615,7 +1648,7 @@ export default function RoomPage() {
             ? current
             : createPendingCheckDiceState(envelope.payload)
         )
-        setShowDice(true)
+        openDiceForCheck()
       } else if (envelope.type === 'check.result') {
         setTyping(true)
         showBackendPhase('executing_action')
@@ -1697,7 +1730,7 @@ export default function RoomPage() {
             }
             setPendingCheck(checkRequest)
             setPendingCheckDice(createPendingCheckDiceState(checkRequest))
-            setShowDice(true)
+            openDiceForCheck()
           }
         }
       } else if (
@@ -1777,7 +1810,7 @@ export default function RoomPage() {
       setProgressLabel('守秘人正在生成开场叙事')
     }
     return off
-  }, [clearBackendProgress, clearSettledAction, enqueueHostSpeech, handleHostSpeechSettingsUpdated, playerId, senderName, showBackendPhase])
+  }, [clearBackendProgress, clearSettledAction, enqueueHostSpeech, handleHostSpeechSettingsUpdated, openDiceForCheck, playerId, senderName, showBackendPhase])
 
   const submitPlayerAction = (action: { clientActionId: string; utterance: string }) => {
     if (!playerId || suspended) return
@@ -2090,8 +2123,11 @@ export default function RoomPage() {
         })}
 
         {/* 渐进到达的主持叙事（issue #203）。没有"重播"按钮：它还不是权威
-            消息，语音朗读只认最终 narration.push。*/}
-        {streamingNarration && streamingNarration.revealed > 0 && (
+            消息，语音朗读只认最终 narration.push。
+
+            频道判断不能只做在上面那条历史消息的 filter 上：这个气泡和下面的
+            进度指示器都不经过 messages，漏进讨论区过（issue #304）。*/}
+        {isActionChannel && streamingNarration && streamingNarration.revealed > 0 && (
           <div className="room-play__message room-play__message--narration animate-[msgIn_0.3s_ease]">
             <div className="room-play__avatar room-play__avatar--keeper">
               <img src="/assets/rooms/play/keeper-cat.webp" alt="" aria-hidden="true" />
@@ -2110,7 +2146,7 @@ export default function RoomPage() {
 
         {/* Typing indicator。第一个片段到达后还没揭示出字的那一瞬间也留着它，
             避免出现一个空气泡。*/}
-        {(progressLabel !== null || typing || (streamingNarration !== null && streamingNarration.revealed === 0)) && (
+        {isActionChannel && (progressLabel !== null || typing || (streamingNarration !== null && streamingNarration.revealed === 0)) && (
           <div className="room-play__message room-play__message--narration animate-[msgIn_0.3s_ease]">
             <div className="room-play__avatar room-play__avatar--keeper">
               <img src="/assets/rooms/play/keeper-cat.webp" alt="" aria-hidden="true" />
@@ -2191,7 +2227,7 @@ export default function RoomPage() {
             游戏已挂起，恢复后才能继续提交行动
           </p>
         )}
-        {actionError && !suspended && (
+        {isActionChannel && actionError && !suspended && (
           <div className="pb-1.5 px-1">
             <div className="flex items-center justify-between gap-2">
               <p className={`text-[11px] ${actionErrorIsGuidance ? 'text-[#8a642d]' : 'text-[#c04040]'}`}>
@@ -2243,16 +2279,19 @@ export default function RoomPage() {
           </p>
         )}
         <form data-onboarding-target="action-input" onSubmit={sendMessage} className="room-play__composer-form">
-          <button
-            type="button"
-            aria-label="骰子"
-            data-onboarding-target="dice-button"
-            onClick={() => setShowDice(true)}
-            disabled={suspended}
-            className="room-play__composer-button room-play__dice-button"
-          >
-            <IsometricDiceIcon />
-          </button>
+          {/* 讨论区只承载玩家之间的讨论，不提供掷骰入口（issue #304）。 */}
+          {isActionChannel && (
+            <button
+              type="button"
+              aria-label="骰子"
+              data-onboarding-target="dice-button"
+              onClick={() => setShowDice(true)}
+              disabled={suspended}
+              className="room-play__composer-button room-play__dice-button"
+            >
+              <IsometricDiceIcon />
+            </button>
+          )}
           <textarea
             ref={composerInputRef}
             rows={1}

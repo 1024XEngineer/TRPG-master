@@ -14,6 +14,8 @@ from collaboration_framework.contracts import (
     ModuleContent,
     NoAdjudicationCheck,
     PlayerInput,
+    RequiredAdjudicationCheck,
+    SkillCheckCandidate,
     ValidationFeedback,
 )
 from collaboration_framework.engine import (
@@ -154,6 +156,90 @@ def test_target_drift_is_rejected_even_when_validator_would_accept_it() -> None:
 
     assert result.status == "requires_clarification"
     assert result.reason_code == "TARGET_CHANGED"
+
+
+def test_world_target_correction_is_fail_closed_without_canonical_world_binding() -> None:
+    _, _, projector = runtime()
+    original = _action(target_id="missing-world")
+    repaired = _action(target_id="another-world")
+    original = original.model_copy(
+        update={"target": ActionTarget(kind="world", id="missing-world")}, deep=True
+    )
+    repaired = repaired.model_copy(
+        update={"target": ActionTarget(kind="world", id="another-world")}, deep=True
+    )
+    view = asyncio.run(projector.project(player_input(utterance="检查当前环境")))
+
+    result = compare_repair_semantics(
+        player_input=player_input(utterance="检查当前环境"),
+        plan_goal="检查当前环境",
+        step=ActionPlanStep(kind="action", semantic_goal="检查当前环境"),
+        original=original,
+        repaired=repaired,
+        validation_feedback=_feedback(),
+        player_view=view,
+    )
+
+    assert result.status == "requires_clarification"
+    assert result.reason_code == "TARGET_CHANGED"
+
+
+def _checked_action(**candidate_updates) -> ActionAdjudication:
+    candidate = SkillCheckCandidate(
+        candidate_id="spot-candidate",
+        skill_id="spot-hidden",
+        difficulty="regular",
+        method_summary="调查书架",
+        player_safe_reason="使用侦查能力",
+    ).model_copy(update=candidate_updates)
+    return _action(target_id="bookshelf").model_copy(
+        update={"check": RequiredAdjudicationCheck(candidates=(candidate,))},
+        deep=True,
+    )
+
+
+def test_unchanged_check_candidate_is_preserved() -> None:
+    _, _, projector = runtime()
+    original = _checked_action()
+    view = asyncio.run(projector.project(player_input(utterance="调查书架")))
+
+    result = compare_repair_semantics(
+        player_input=player_input(utterance="调查书架"),
+        plan_goal="调查书架",
+        step=ActionPlanStep(kind="action", semantic_goal="调查书架"),
+        original=original,
+        repaired=original.model_copy(deep=True),
+        validation_feedback=_feedback(),
+        player_view=view,
+    )
+
+    assert result.status == "preserved"
+    assert result.reason_code == "MECHANICAL_REPAIR"
+
+
+def test_changed_check_candidate_identity_is_rejected() -> None:
+    _, _, projector = runtime()
+    original = _checked_action()
+    view = asyncio.run(projector.project(player_input(utterance="调查书架")))
+
+    changed_fields = (
+        {"candidate_id": "listen-candidate"},
+        {"skill_id": "listen"},
+        {"player_safe_reason": "使用聆听能力"},
+    )
+    for candidate_updates in changed_fields:
+        result = compare_repair_semantics(
+            player_input=player_input(utterance="调查书架"),
+            plan_goal="调查书架",
+            step=ActionPlanStep(kind="action", semantic_goal="调查书架"),
+            original=original,
+            repaired=_checked_action(**candidate_updates),
+            validation_feedback=_feedback(),
+            player_view=view,
+        )
+
+        assert result.status == "requires_clarification"
+        assert result.reason_code == "CHECK_CHANGED"
 
 
 def test_ambiguous_visible_target_mentions_require_clarification() -> None:

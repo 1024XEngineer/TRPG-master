@@ -146,19 +146,6 @@ def _compare_target(
         original.summary,
         original.method.description,
     )
-    if after.kind == "world" and all(
-        _same_semantic_text(before_text, after_text)
-        for before_text, after_text in (
-            (original.summary, repaired.summary),
-            (original.method.description, repaired.method.description),
-        )
-    ):
-        return SemanticPreservationResult(
-            "preserved",
-            "TARGET_ID_CORRECTED",
-            "世界目标绑定已修正",
-        )
-
     referenced_target_ids = _referenced_safe_target_ids(
         semantic_sources,
         player_view,
@@ -181,9 +168,15 @@ def _check_is_mechanical(
     if before.mode != after.mode or len(before.candidates) != len(after.candidates):
         return False
     for old, new in zip(before.candidates, after.candidates, strict=True):
-        if old.difficulty != new.difficulty:
+        if (
+            old.candidate_id != new.candidate_id
+            or old.skill_id != new.skill_id
+            or old.difficulty != new.difficulty
+        ):
             return False
         if not _same_semantic_text(old.method_summary, new.method_summary):
+            return False
+        if not _same_semantic_text(old.player_safe_reason, new.player_safe_reason):
             return False
     return True
 

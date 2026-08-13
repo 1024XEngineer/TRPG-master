@@ -276,16 +276,28 @@ class MissingTargetAdjudicator(RecordingAdjudicator):
 
     async def adjudicate(self, context):
         repaired = self.repairs and context.previous_rejection is not None
-        if context.step_index != 1 or repaired:
+        if context.step_index != 1:
             return await super().adjudicate(context)
+        if repaired:
+            self.contexts.append(context)
+            return ActionAdjudication(
+                request_id="untrusted",
+                source_revision="untrusted",
+                actor_id="untrusted",
+                summary="调查书架",
+                target=ActionTarget(kind="entity", id="bookshelf"),
+                method=ActionMethod(family="action", description="调查书架"),
+                check=NoAdjudicationCheck(),
+                success_effects=(NarrativeOnlyEffect(),),
+            )
         self.contexts.append(context)
         return ActionAdjudication(
             request_id="untrusted",
             source_revision="untrusted",
             actor_id="untrusted",
-            summary=context.step.semantic_goal,
-            target=ActionTarget(kind="world", id="missing-target"),
-            method=ActionMethod(family="action", description=context.step.semantic_goal),
+            summary="调查书架",
+            target=ActionTarget(kind="entity", id="missing-bookshelf"),
+            method=ActionMethod(family="action", description="调查书架"),
             check=NoAdjudicationCheck(),
             success_effects=(NarrativeOnlyEffect(),),
         )
@@ -302,6 +314,23 @@ class SemanticallyDriftingRepairAdjudicator(MissingTargetAdjudicator):
                 summary=context.step.semantic_goal,
                 target=ActionTarget(kind="entity", id="butler"),
                 method=ActionMethod(family="combat", description="攻击管家"),
+                check=NoAdjudicationCheck(),
+                success_effects=(NarrativeOnlyEffect(),),
+            )
+        return await super().adjudicate(context)
+
+
+class VisibleTargetRepairAdjudicator(RecordingAdjudicator):
+    async def adjudicate(self, context):
+        if context.previous_rejection is not None:
+            self.contexts.append(context)
+            return ActionAdjudication(
+                request_id="untrusted",
+                source_revision="untrusted",
+                actor_id="untrusted",
+                summary=context.step.semantic_goal,
+                target=ActionTarget(kind="entity", id="bookshelf"),
+                method=ActionMethod(family="observe", description=context.step.semantic_goal),
                 check=NoAdjudicationCheck(),
                 success_effects=(NarrativeOnlyEffect(),),
             )
@@ -1509,7 +1538,7 @@ async def test_single_action_auto_repair_succeeds_without_creating_plan_run() ->
     module, engine_store, projector = runtime()
     plan_store = InMemoryActionPlanRunStore()
     engine = AdjudicationEngineService(engine_store)
-    repair_adjudicator = RecordingAdjudicator(module.world_ref)
+    repair_adjudicator = VisibleTargetRepairAdjudicator(module.world_ref)
     orchestrator_service = ActionPlanOrchestrator(
         store=plan_store,
         adjudicator=repair_adjudicator,
@@ -1523,11 +1552,25 @@ async def test_single_action_auto_repair_succeeds_without_creating_plan_run() ->
         repair_adjudicator=repair_adjudicator,
         policy=ActionPlanPolicy(),
     )
-    original = player_input("single-repair-parent", "检查当前环境")
+    original = player_input("single-repair-parent", "检查书架")
+    decision = single_action_decision(world_ref=module.world_ref, valid_target=False)
+    decision = decision.model_copy(
+        update={
+            "adjudication": decision.adjudication.model_copy(
+                update={
+                    "summary": "检查书架",
+                    "target": ActionTarget(kind="entity", id="missing-bookshelf"),
+                    "method": ActionMethod(family="observe", description="检查书架"),
+                },
+                deep=True,
+            )
+        },
+        deep=True,
+    )
 
     result = await dispatcher.execute(
         original,
-        single_action_decision(world_ref=module.world_ref, valid_target=False),
+        decision,
     )
 
     assert isinstance(result, SingleActionTurnResult)

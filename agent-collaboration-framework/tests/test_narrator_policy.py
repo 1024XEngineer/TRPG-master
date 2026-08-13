@@ -264,6 +264,48 @@ class PersistentNarrationPolicyTests(unittest.IsolatedAsyncioTestCase):
                     _PersistentNarrationModel(text)
                 ).narrate(self._context())
 
+    async def test_rejects_uncommitted_inverse_persistent_claims(self):
+        """持久状态的反向变化没有证据时同样不能由主持人补写。"""
+        for text in (
+            "守墓人醒来了。",
+            "门已经关上。",
+            "锁已经解开。",
+            "绳索已经解除，目标恢复自由。",
+            "箱子已经修好。",
+        ):
+            with self.subTest(text=text), self.assertRaises(
+                ActionPlanNarrationValidationError
+            ):
+                await ActionPlanNarrator(
+                    _PersistentNarrationModel(text)
+                ).narrate(self._context())
+
+    async def test_allows_inverse_persistent_claims_from_player_view(self):
+        """最终玩家视图存在精确状态时，反向持久变化可以正常叙述。"""
+        cases = (
+            ("consciousness", "conscious", "守墓人醒来了。"),
+            ("posture", "standing", "守墓人站起来了。"),
+            ("restraint", "free", "守墓人恢复自由。"),
+            ("injury", "none", "守墓人伤势痊愈。"),
+            ("open", False, "守墓人面前的门已经关上。"),
+            ("locked", False, "守墓人面前的锁已经解开。"),
+            ("broken", False, "守墓人身旁的箱子已经修好。"),
+        )
+        for key, value, text in cases:
+            with self.subTest(key=key, value=value):
+                entity = SimpleNamespace(
+                    id="butler",
+                    name="守墓人",
+                    aliases=("墓地看守",),
+                    observable_state=(SimpleNamespace(key=key, value=value),),
+                )
+                context = self._context()
+                context.player_view.scene.visible_entities = (entity,)
+                output = await ActionPlanNarrator(
+                    _PersistentNarrationModel(text)
+                ).narrate(context)
+                self.assertEqual(output.text, text)
+
 
 if __name__ == "__main__":
     unittest.main()

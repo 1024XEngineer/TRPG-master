@@ -9,7 +9,14 @@ from __future__ import annotations
 
 from typing import Annotated, Literal, TypeAlias
 
-from pydantic import Field, JsonValue, PrivateAttr, model_validator
+from pydantic import (
+    Field,
+    JsonValue,
+    PrivateAttr,
+    SerializerFunctionWrapHandler,
+    model_serializer,
+    model_validator,
+)
 
 from .common import ContractModel
 
@@ -242,6 +249,18 @@ class ActionAdjudication(ContractModel):
         """区分旧 JSON 的兼容默认值与新模型显式声明。"""
 
         return self._persistence_intent_explicit
+
+    @model_serializer(mode="wrap")
+    def serialize_with_legacy_intent_compatibility(
+        self,
+        handler: SerializerFunctionWrapHandler,
+    ) -> dict[str, object]:
+        """旧裁决继续省略意图字段，新裁决则保留显式 none 供重载后校验。"""
+
+        payload = handler(self)
+        if not self.persistence_intent_explicit:
+            payload.pop("persistence_intent", None)
+        return payload
 
 
 class SubmitAdjudicationRequest(ContractModel):

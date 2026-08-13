@@ -9,8 +9,8 @@ from collaboration_framework.contracts import (
     ActionAdjudication,
     ActionMethod,
     ActionTarget,
-    AdvanceWorldTimeEffect,
     AdjudicationValidationError,
+    AdvanceWorldTimeEffect,
     CancelCheckChoice,
     ChangeEntityStateEffect,
     CheckDecisionRequest,
@@ -768,6 +768,38 @@ class AdjudicationEngineTests(unittest.IsolatedAsyncioTestCase):
             "consciousness",
             self.store.inspect_state("room_01").public_entity_state_keys["butler"],
         )
+
+    async def test_explicit_none_cannot_downgrade_controlled_persistent_family(self):
+        """新裁决显式写 none 时，受控击晕动作仍必须提交状态效果。"""
+        action = adjudication("explicit-none-persistent", "0", check=NoAdjudicationCheck()).model_copy(
+            update={
+                "summary": "击晕守墓人",
+                "target": ActionTarget(kind="entity", id="butler"),
+                "method": ActionMethod(family="knock_out", description="用撬棍砸晕他"),
+                "persistence_intent": "none",
+                "success_effects": (),
+            },
+            deep=True,
+        )
+        with self.assertRaises(AdjudicationValidationError) as raised:
+            await self.submit(self.service(), action)
+        self.assertEqual(raised.exception.result.code, "PERSISTENT_EFFECT_REQUIRED")
+
+    def test_persistence_intent_explicitness_survives_json_round_trip(self) -> None:
+        """序列化必须保留新旧裁决的显式性差异，供计划恢复后继续校验。"""
+        legacy = adjudication("legacy-intent", "0", check=NoAdjudicationCheck())
+        # model_copy 不会重跑 validator，模拟真实新模型输出需从 JSON 构造。
+        explicit_payload = legacy.to_json_dict()
+        explicit_payload["persistence_intent"] = "none"
+        explicit = ActionAdjudication.model_validate(explicit_payload)
+
+        legacy_reloaded = ActionAdjudication.model_validate_json(legacy.model_dump_json())
+        explicit_reloaded = ActionAdjudication.model_validate_json(
+            explicit.model_dump_json()
+        )
+
+        self.assertFalse(legacy_reloaded.persistence_intent_explicit)
+        self.assertTrue(explicit_reloaded.persistence_intent_explicit)
 
 
 if __name__ == "__main__":

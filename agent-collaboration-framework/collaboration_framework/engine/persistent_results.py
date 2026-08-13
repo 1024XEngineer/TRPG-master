@@ -100,11 +100,9 @@ def validate_persistent_effects(
     policy = _FAMILY_POLICIES.get(adjudication.method.family.strip().lower())
     # 新模型显式写 none 不能把明显持久动作降级成普通叙事；旧存量裁决没有
     # explicit 标记，继续按兼容语义读取 none。
-    if (
-        adjudication.persistence_intent_explicit
-        and adjudication.persistence_intent != "none"
-        and policy is not None
-    ):
+    if adjudication.persistence_intent_explicit and policy is not None:
+        # 显式填写 none 也不能把受控持久动作降级为普通叙事；只有省略字段
+        # 的旧裁决才走兼容默认值 none。
         intent = policy.intent
     if intent == "none":
         return None

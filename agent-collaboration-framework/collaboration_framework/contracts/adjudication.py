@@ -306,6 +306,14 @@ class CheckRunView(ContractModel):
     check_id: str = Field(min_length=1)
     action_request_id: str = Field(min_length=1)
     selected_candidate_id: str = Field(min_length=1)
+    # 这三项此前只在引擎内部的 CheckRun 上，视图不带，于是「这次检定用了什么
+    # 技能、目标值多少」跨不出引擎：带 post-roll 选项的检定最终结算发生在
+    # 玩家做完奖惩骰决定那一轮，那时技能选择阶段的 PendingCheckDecisionView
+    # 已经不在了，调用方无从重建。视图自带这三项后，任何一轮都能独立描述自己。
+    selected_skill_id: str = Field(min_length=1)
+    selected_skill_name: str = Field(min_length=1)
+    difficulty: CheckDifficulty
+    target_value: int = Field(ge=0, le=100)
     status: Literal["awaiting_post_roll_decision", "resolved"]
     version: int = Field(ge=1)
     roll_count: int = Field(ge=1, le=2)

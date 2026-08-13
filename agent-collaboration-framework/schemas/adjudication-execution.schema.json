@@ -75,6 +75,31 @@
           "title": "Selected Candidate Id",
           "type": "string"
         },
+        "selected_skill_id": {
+          "minLength": 1,
+          "title": "Selected Skill Id",
+          "type": "string"
+        },
+        "selected_skill_name": {
+          "minLength": 1,
+          "title": "Selected Skill Name",
+          "type": "string"
+        },
+        "difficulty": {
+          "enum": [
+            "regular",
+            "hard",
+            "extreme"
+          ],
+          "title": "Difficulty",
+          "type": "string"
+        },
+        "target_value": {
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Target Value",
+          "type": "integer"
+        },
         "status": {
           "enum": [
             "awaiting_post_roll_decision",
@@ -139,6 +164,10 @@
         "check_id",
         "action_request_id",
         "selected_candidate_id",
+        "selected_skill_id",
+        "selected_skill_name",
+        "difficulty",
+        "target_value",
         "status",
         "version",
         "roll_count",

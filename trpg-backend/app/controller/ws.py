@@ -43,6 +43,7 @@ import anyio
 import structlog
 from collaboration_framework.contracts import (
     ActorBindingError,
+    AdjudicationExecution,
     AdjudicationValidationError,
     CancelCheckChoice,
     CheckDecisionRequest,
@@ -88,6 +89,7 @@ from app.core.turn_events import (
     TurnToolStarted,
 )
 from app.core.turn_observability import (
+    log_check_result,
     log_narration_output,
     log_player_input,
     log_turn_failed,
@@ -101,6 +103,7 @@ from app.dto.ws import (
     AdjudicationPostRollPayload,
     ChatMessagePayload,
     ChatSendPayload,
+    CheckResultPayload,
     ClientEnvelope,
     ErrorPayload,
     GameStartPayload,
@@ -791,6 +794,107 @@ def _turn_error_reason(exc: Exception) -> str:
     return (reason or type(exc).__name__)[:512]
 
 
+_CheckSuccessLevel = Literal["critical", "extreme", "hard", "regular", "failure", "fumble"]
+
+_CHECK_DEGREE_TO_SUCCESS_LEVEL: dict[str, _CheckSuccessLevel] = {
+    "critical_success": "critical",
+    "extreme_success": "extreme",
+    "hard_success": "hard",
+    "regular_success": "regular",
+    "failure": "failure",
+    "fumble": "fumble",
+}
+
+
+async def _emit_check_result(
+    db: AsyncSession,
+    websocket: WebSocket,
+    *,
+    room_id: str,
+    player_id: str,
+    client_action_id: str,
+    execution: AdjudicationExecution,
+) -> None:
+    """检定结算后把权威结果落库并单播给掷骰玩家（issue #310）。
+
+    #226 移除旧的 `check.roll` 通道时，`check.result` 的发送侧一并没了，消费侧
+    却全留着：DTO、`events` 落库、replay 读取、recent-history 拼装、SDK 类型、
+    前端渲染。结果是权威掷骰只在骰子浮层里出现一次，浮层一关就什么都不剩，
+    刷新重进更是无从恢复。这里把发送侧接回去。
+
+    只在检定真正 `resolved` 时发：带奖惩骰选项的检定要等玩家做完决定才有终值，
+    中途发等于把一个还会变的点数当成结果。
+
+    单播不广播：`replay`（`service/room.py`）现有口径就是「`check.result` 只返回
+    给对应玩家」，两侧必须一致，否则重进房间会看到和当时不一样的历史。
+    """
+
+    check_run = execution.check_run
+    if check_run is None or check_run.status != "resolved":
+        return
+    # 有 post-roll 选项时终值在 `final_result`；没有时引擎在建 CheckRun 那一刻
+    # 就把 `roll` 同时写进了 `final_result`。两者都没有说明契约被破坏了，不猜。
+    final = check_run.final_result
+    if final is None:
+        raise ContractError("resolved 的 CheckRun 缺少 final_result")
+    success_level = _CHECK_DEGREE_TO_SUCCESS_LEVEL.get(final.degree)
+    if success_level is None:
+        raise ContractError(f"未知的检定判定等级: {final.degree}")
+
+    player = await room_service.get_player(db, player_id)
+    character_name = await room_service.get_player_character_name(
+        db,
+        player_id,
+        fallback=player.nickname if player is not None else "玩家",
+    )
+    payload = CheckResultPayload(
+        player_id=player_id,
+        client_action_id=client_action_id,
+        skill=check_run.selected_skill_id,
+        skill_name=check_run.selected_skill_name,
+        character_name=character_name,
+        roll_value=final.value,
+        target_value=check_run.target_value,
+        difficulty=check_run.difficulty,
+        success_level=success_level,
+        passed=final.passed,
+        result=success_level,
+    )
+    recorded = await room_service.record_event(
+        db,
+        room_id,
+        player_id,
+        "check.result",
+        payload.model_dump(by_alias=True, mode="json"),
+        visibility="player_scoped",
+        actor_id=None,
+        scene_id=None,
+        view_revision=execution.view_revision,
+        # 同一次检定重放（断线重连后重复提交同一决定）不能落成两条历史。
+        correlation_id=check_run.check_id,
+    )
+    if not recorded:
+        return
+    log_check_result(
+        room_id=room_id,
+        correlation_id=client_action_id,
+        character_name=character_name,
+        skill_name=check_run.selected_skill_name,
+        target_value=check_run.target_value,
+        roll_value=final.value,
+        difficulty=check_run.difficulty,
+        success_level=success_level,
+        passed=final.passed,
+    )
+    await _send_to_player(
+        websocket,
+        ServerEnvelope(
+            type="check.result",
+            payload=payload.model_dump(by_alias=True),
+        ).model_dump(by_alias=True),
+    )
+
+
 async def _broadcast_action_utterance(
     db: AsyncSession,
     player_input: PlayerInput,
@@ -1255,7 +1359,7 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                             )
                             continue
                         try:
-                            await adjudication_engine_service.decide(
+                            execution = await adjudication_engine_service.decide(
                                 CheckDecisionRequest(
                                     request_id=choice.request_id,
                                     room_id=room_id,
@@ -1265,6 +1369,15 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                     decision_version=choice.decision_version,
                                     choice=selected,
                                 )
+                            )
+                            # 没有奖惩骰选项的检定在这一步就定了终值。
+                            await _emit_check_result(
+                                db,
+                                websocket,
+                                room_id=room_id,
+                                player_id=bound_player_id,
+                                client_action_id=choice.client_action_id,
+                                execution=execution,
                             )
                             if await _recover_persisted_turn_narration(
                                 db,
@@ -1310,7 +1423,7 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                     elif event_type == "adjudication.post_roll":
                         choice = AdjudicationPostRollPayload.model_validate(raw_payload)
                         try:
-                            await adjudication_engine_service.decide_post_roll(
+                            execution = await adjudication_engine_service.decide_post_roll(
                                 PostRollDecisionRequest(
                                     request_id=choice.request_id,
                                     room_id=room_id,
@@ -1325,6 +1438,15 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                         else None
                                     ),
                                 )
+                            )
+                            # 奖惩骰/孤注一掷做完决定，这一步才有终值。
+                            await _emit_check_result(
+                                db,
+                                websocket,
+                                room_id=room_id,
+                                player_id=bound_player_id,
+                                client_action_id=choice.client_action_id,
+                                execution=execution,
                             )
                             if await _recover_persisted_turn_narration(
                                 db,

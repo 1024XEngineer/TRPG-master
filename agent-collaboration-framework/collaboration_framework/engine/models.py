@@ -279,6 +279,9 @@ class CheckRun(ContractModel):
     action_request_id: str = Field(min_length=1)
     selected_candidate_id: str = Field(min_length=1)
     selected_skill_id: str = Field(min_length=1)
+    # 玩家选技能时菜单上显示的那个名字。留住它，结果消息才和当时看到的一致；
+    # 调用方拿 skill_id 反查 ruleset 会在自定义技能上对不上。
+    selected_skill_name: str = Field(min_length=1)
     difficulty: Literal["regular", "hard", "extreme"]
     target_value: int = Field(ge=0, le=100)
     status: Literal["awaiting_post_roll_decision", "resolved"]

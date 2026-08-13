@@ -136,6 +136,31 @@ class ProjectionV3Tests(unittest.IsolatedAsyncioTestCase):
             ["阿诺兹堡", "金博尔宅", "托马斯的会客室"],
         )
 
+    async def test_canonical_item_state_is_projected_from_item_instance_values(self) -> None:
+        """标准物品状态写入 item_instances 后仍必须进入 PlayerView。"""
+        item = ItemInstance(
+            id="study_window",
+            room_id=ROOM,
+            origin="canon",
+            definition_id="study_window",
+            display=ItemDisplay(name="书房窗户"),
+            item_component=ItemComponent(),
+            custody=ItemCustody(kind="location", ref_id="kimball_study", form="placed"),
+            state={"values": {"locked": False}},
+            created_event_id="seed-window",
+            last_event_id="window-state",
+            updated_revision="1",
+        )
+        state = game_state(
+            self.content,
+            scene_id="kimball_study",
+            item_instances={item.id: item},
+            public_entity_state_keys={item.id: ("locked",)},
+        )
+        snapshot = await self.project(state)
+        window = next(entity for entity in snapshot.scene.visible_entities if entity.id == item.id)
+        self.assertEqual([(state.key, state.value) for state in window.observable_state], [("locked", False)])
+
     async def test_hidden_edges_stay_out_of_the_view(self) -> None:
         # The crypt and the speakeasy must not be advertised before they are found.
         state = game_state(self.content, scene_id="cemetery")

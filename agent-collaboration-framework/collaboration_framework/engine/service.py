@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pydantic import JsonValue
+
 from collaboration_framework.contracts import (
     ActionRequest,
     ActorBindingError,
@@ -32,13 +34,12 @@ from collaboration_framework.contracts import (
     SceneSpec,
     VisibilityPolicy,
 )
-from pydantic import JsonValue
 
 from .expression import ExpressionEvaluator, expression_context
-from .projection_v3 import keeper_capabilities_v3, project_v3
 from .models import EngineRuntimeSnapshot, GameState
 from .persistent_results import PUBLIC_STATE_KEYS
 from .ports import EngineStore
+from .projection_v3 import keeper_capabilities_v3, project_v3
 
 
 class RuleEngineService:
@@ -482,7 +483,12 @@ class RuleEngineService:
     ) -> tuple[ProjectionObservableState, ...]:
         """为 v2 兼容投影补充公开标准状态，同时不重复模组已声明的键。"""
 
-        values = state.runtime_entities.get(entity_id) or state.entities.get(entity_id, {})
+        item = state.item_instances.get(entity_id)
+        values = (
+            item.state.values
+            if item is not None
+            else state.runtime_entities.get(entity_id) or state.entities.get(entity_id, {})
+        )
         blocked = excluded or set()
         return tuple(
             ProjectionObservableState(key=key, label=key, value=values[key])

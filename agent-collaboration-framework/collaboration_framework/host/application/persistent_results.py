@@ -21,8 +21,9 @@ _PERSISTENT_CLAIMS: tuple[tuple[str, str, JsonValue], ...] = (
     (r"站起|站起来|站立着|直立", "posture", "standing"),
     (r"被束缚|被捆住|被绑住|动弹不得", "restraint", "restrained"),
     (r"挣脱束缚|解除束缚|恢复自由|不再受束缚", "restraint", "free"),
-    (r"重伤", "injury", "major"),
-    (r"受伤|负伤", "injury", "minor"),
+    (r"重伤|严重受伤", "injury", "major"),
+    (r"危重伤|伤势危重|伤势危急", "injury", "critical"),
+    (r"(?<!重)受伤|负伤", "injury", "minor"),
     (r"伤势痊愈|恢复健康|完好无损", "injury", "none"),
     (r"已经打开|被打开|敞开", "open", True),
     (r"关上|关闭|闭合|已经关好", "open", False),
@@ -88,7 +89,8 @@ def unsupported_persistent_claim(
                     )
                 )
             if mentioned_ids:
-                has_evidence = bool(mentioned_ids & evidence_target_ids)
+                # 多实体同句必须逐一有证据，不能只凭其中一个实体背书整句。
+                has_evidence = mentioned_ids.issubset(evidence_target_ids)
             else:
                 # “他/目标”等指代没有名称绑定时，只允许唯一状态候选，
                 # 多个实体都符合时必须拒绝，不能任选一个套用证据。

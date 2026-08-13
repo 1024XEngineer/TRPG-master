@@ -23,6 +23,8 @@ from collaboration_framework.contracts import (
     AgentMatchTriggerSpec,
     ContractError,
     EntitySpecV3,
+    InventoryItemView,
+    ItemInstance,
     KeeperCapabilityView,
     KeeperEndingCapability,
     KeeperEntityCapability,
@@ -31,8 +33,6 @@ from collaboration_framework.contracts import (
     KeeperRuleCandidate,
     KeeperRuleOption,
     KeeperTimeCapability,
-    InventoryItemView,
-    ItemInstance,
     LocationKnowledge,
     LocationSpecV3,
     ModuleContentV3,
@@ -57,8 +57,8 @@ from collaboration_framework.contracts import (
 from .models import EngineRuntimeSnapshot, GameState
 from .navigation import effective_location_knowledge, runtime_location_edges
 from .persistent_results import PUBLIC_STATE_KEYS
-from .timeline import next_point_after, ordered_points, time_advance_block_reason
 from .rules_v3 import agent_match_scope_admits, evaluate_condition, pending_check_for
+from .timeline import next_point_after, ordered_points, time_advance_block_reason
 
 # Visibility levels an authored node may carry, ordered from most to least open.
 _PLAYER_VISIBLE = {"public", "party"}
@@ -312,6 +312,10 @@ def _visible_entities(
     projected: list[ProjectionEntity] = []
     for entity in module.entities:
         overrides = state.entities.get(entity.id, {})
+        item = state.item_instances.get(entity.id)
+        projected_values = (
+            dict(item.state.values) if item is not None else overrides
+        )
         placed = _optional_text(overrides.get("location_id")) or entity.located_in
         carried = _optional_text(overrides.get("holder_actor_id"))
         if overrides.get("consumed") is True:
@@ -334,7 +338,9 @@ def _visible_entities(
                 name=entity.player_visible_name or entity.name,
                 aliases=entity.player_visible_aliases,
                 description=entity.description,
-                observable_state=_public_entity_state(state, entity.id, overrides),
+                observable_state=_public_entity_state(
+                    state, entity.id, projected_values
+                ),
             )
         )
     for entity_id, payload in sorted(state.runtime_entities.items()):

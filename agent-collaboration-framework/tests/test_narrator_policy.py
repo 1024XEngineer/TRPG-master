@@ -326,6 +326,55 @@ class PersistentNarrationPolicyTests(unittest.IsolatedAsyncioTestCase):
                 _PersistentNarrationModel("他昏迷了。")
             ).narrate(context)
 
+    async def test_requires_all_named_entities_to_have_matching_evidence(self):
+        """同一句点名多个实体时，所有实体都必须有对应状态证据。"""
+        entities = (
+            SimpleNamespace(
+                id="butler",
+                name="守墓人",
+                aliases=(),
+                observable_state=(
+                    SimpleNamespace(key="consciousness", value="unconscious"),
+                ),
+            ),
+            SimpleNamespace(
+                id="guard",
+                name="守卫",
+                aliases=(),
+                observable_state=(),
+            ),
+        )
+        context = self._context()
+        context.player_view.scene.visible_entities = entities
+        with self.assertRaises(ActionPlanNarrationValidationError):
+            await ActionPlanNarrator(
+                _PersistentNarrationModel("守墓人和守卫都昏迷了。")
+            ).narrate(context)
+
+    async def test_injury_levels_are_mutually_exclusive_and_critical_is_checked(self):
+        """重伤、轻伤、危重伤分别绑定自己的标准值。"""
+        for text, value in (
+            ("守墓人重伤了。", "major"),
+            ("守墓人伤势危重。", "critical"),
+        ):
+            with self.subTest(text=text):
+                entity = SimpleNamespace(
+                    id="butler",
+                    name="守墓人",
+                    aliases=(),
+                    observable_state=(SimpleNamespace(key="injury", value=value),),
+                )
+                context = self._context()
+                context.player_view.scene.visible_entities = (entity,)
+                output = await ActionPlanNarrator(
+                    _PersistentNarrationModel(text)
+                ).narrate(context)
+                self.assertEqual(output.text, text)
+        with self.assertRaises(ActionPlanNarrationValidationError):
+            await ActionPlanNarrator(
+                _PersistentNarrationModel("守墓人伤势危重。")
+            ).narrate(self._context())
+
 
 if __name__ == "__main__":
     unittest.main()

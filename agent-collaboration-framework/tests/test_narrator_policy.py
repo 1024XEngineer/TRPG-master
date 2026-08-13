@@ -8,7 +8,6 @@ from collaboration_framework.host.application.action_plan_narrator import (
     ActionPlanNarrationValidationError,
     ActionPlanNarrator,
 )
-from collaboration_framework.host.schemas import ActionPlanNarrationContext
 from collaboration_framework.host.application.narrator import (
     NarrationValidationError,
     Narrator,
@@ -16,6 +15,7 @@ from collaboration_framework.host.application.narrator import (
     narration_text_rejection_reason,
     normalize_narration_text,
 )
+from collaboration_framework.host.schemas import ActionPlanNarrationContext
 
 
 class NarrationTextPolicyTests(unittest.TestCase):
@@ -232,6 +232,37 @@ class PersistentNarrationPolicyTests(unittest.IsolatedAsyncioTestCase):
             _PersistentNarrationModel("守墓人昏迷了。")
         ).narrate(self._context(results=(result,)))
         self.assertEqual(output.text, "守墓人昏迷了。")
+
+    async def test_allows_previous_turn_unconscious_state_from_player_view(self):
+        """上一回合已公开的 NPC 状态必须能约束本回合的询问叙事。"""
+        entity = SimpleNamespace(
+            id="butler",
+            name="守墓人",
+            aliases=("墓地看守",),
+            observable_state=(
+                SimpleNamespace(key="consciousness", value="unconscious"),
+            )
+        )
+        context = self._context()
+        context.player_view.scene.visible_entities = (entity,)
+        output = await ActionPlanNarrator(
+            _PersistentNarrationModel("守墓人双眼紧闭，仍然没有醒来。")
+        ).narrate(context)
+        self.assertIn("仍然没有醒来", output.text)
+
+    async def test_rejects_uncommitted_sleeping_synonyms(self):
+        """没有证据时，闭眼、未醒和躺倒等同义事实也必须被拒绝。"""
+        for text in (
+            "守墓人双眼紧闭。",
+            "守墓人仍未醒来。",
+            "守墓人躺在墓园草地上。",
+        ):
+            with self.subTest(text=text), self.assertRaises(
+                ActionPlanNarrationValidationError
+            ):
+                await ActionPlanNarrator(
+                    _PersistentNarrationModel(text)
+                ).narrate(self._context())
 
 
 if __name__ == "__main__":

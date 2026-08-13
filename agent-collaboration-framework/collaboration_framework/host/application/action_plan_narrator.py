@@ -56,6 +56,7 @@ class ActionPlanNarrator:
         persistent_rejection = unsupported_persistent_claim(
             output.text,
             committed_results,
+            context.player_view,
         )
         if persistent_rejection is not None:
             raise ActionPlanNarrationValidationError(

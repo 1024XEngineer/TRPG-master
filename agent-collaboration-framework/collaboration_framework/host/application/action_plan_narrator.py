@@ -44,17 +44,27 @@ class ActionPlanNarrator:
         required = tuple(
             item for item in context.narration_evidence if item.required_in_narration
         )
-        required_refs = {item.ref for item in required}
-        if not required_refs.issubset(output.claimed_evidence_refs):
-            raise ActionPlanNarrationValidationError("required_evidence_missing")
-        if any(
-            not any(
+        mentioned_required = tuple(
+            item
+            for item in required
+            if any(
                 label and label in output.text
                 for label in (item.subject_name, *item.subject_aliases)
             )
-            for item in required
-        ):
+        )
+        if len(mentioned_required) != len(required):
             raise ActionPlanNarrationValidationError("required_evidence_missing")
+        # The prose is the player-facing source of truth. Once it demonstrably
+        # reports a required safe result, record its public ref deterministically
+        # instead of discarding otherwise valid narration because the model
+        # omitted a bookkeeping field.
+        claimed = tuple(
+            dict.fromkeys(
+                (*output.claimed_evidence_refs, *(item.ref for item in mentioned_required))
+            )
+        )
+        if claimed != output.claimed_evidence_refs:
+            output = output.model_copy(update={"claimed_evidence_refs": claimed})
         rejection = narration_text_rejection_reason(output.text)
         if rejection is not None:
             raise ActionPlanNarrationValidationError(rejection)

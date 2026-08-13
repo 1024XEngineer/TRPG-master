@@ -403,7 +403,7 @@ class AliasRequiredEvidenceNarrationModel:
         return {
             "kind": "narration",
             "text": "沿着断续的痕迹，你确认这里藏着一个地穴入口。",
-            "claimed_evidence_refs": [context.narration_evidence[0].ref],
+            "claimed_evidence_refs": [],
             "suggested_actions": [],
         }
 
@@ -1940,6 +1940,8 @@ async def test_narrator_rejects_missing_required_evidence() -> None:
 
     assert claimed_but_omitted.value.reason == "required_evidence_missing"
 
+    # A natural narration that clearly names a safe alias is authoritative
+    # enough for the service to record the required public ref itself.
     alias_output = await ActionPlanNarrator(
         AliasRequiredEvidenceNarrationModel()
     ).narrate(context)

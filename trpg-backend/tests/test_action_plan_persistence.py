@@ -108,15 +108,25 @@ class SqlRepairingPlanAdjudicator(SqlPlanAdjudicator):
     async def adjudicate(self, context):
         self.contexts.append(context)
         target = ActionTarget(kind="world", id=self.world_ref)
-        if context.step_index == 1 and context.previous_rejection is None:
-            target = ActionTarget(kind="world", id="missing-target")
+        summary = context.step.semantic_goal
+        if context.step_index == 1:
+            visible_target = context.player_view.scene.visible_entities[0]
+            target = ActionTarget(
+                kind="entity",
+                id=(
+                    "missing-visible-target"
+                    if context.previous_rejection is None
+                    else visible_target.id
+                ),
+            )
+            summary = f"调查{visible_target.name}"
         return ActionAdjudication(
             request_id="untrusted",
             source_revision="untrusted",
             actor_id="untrusted",
-            summary=context.step.semantic_goal,
+            summary=summary,
             target=target,
-            method=ActionMethod(family=context.step.kind, description=context.step.semantic_goal),
+            method=ActionMethod(family=context.step.kind, description=summary),
             check=NoAdjudicationCheck(),
             success_effects=(NarrativeOnlyEffect(),),
         )

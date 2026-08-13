@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from collaboration_framework.contracts import (
     ActionAdjudication,
@@ -1041,6 +1042,144 @@ class RuleOwnedCheckTests(unittest.IsolatedAsyncioTestCase):
             )
         )
         return store, engine, rules, resolved
+
+    async def run_grave_tracking(self, roll: int):
+        state = game_state(
+            self.content,
+            scene_id="cemetery",
+            entities={"favorite_grave": {"identified": True}},
+        )
+        actor = state.actors[ACTOR]
+        actors = dict(state.actors)
+        actors[ACTOR] = actor.model_copy(
+            update={
+                "state": {
+                    **actor.state,
+                    "skills": {**actor.state["skills"], "track": 90},
+                }
+            },
+            deep=True,
+        )
+        state = state.model_copy(update={"actors": actors}, deep=True)
+        store = InMemoryEngineStore()
+        store.register_room(module_content=self.content, initial_state=state)
+        engine = AdjudicationEngineService(
+            store, dice=DiceRoller(SequenceDiceSource([roll]))
+        )
+        rules = RuleEngineService(store)
+        snapshot = await rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        pending_execution = await engine.submit(
+            SubmitAdjudicationRequest(
+                room_id=ROOM,
+                player_id=PLAYER,
+                adjudication=ActionAdjudication(
+                    request_id=f"track-grave-{roll}",
+                    source_revision=snapshot.revision,
+                    actor_id=ACTOR,
+                    summary="追踪墓碑附近的痕迹",
+                    target=ActionTarget(kind="entity", id="favorite_grave"),
+                    method=ActionMethod(family="track", description="追踪痕迹"),
+                    rule_decision=RuleDecisionRef(
+                        rule_id="inspect_grave_area", option_id="track"
+                    ),
+                    check=RequiredAdjudicationCheck(
+                        candidates=(
+                            SkillCheckCandidate(
+                                candidate_id="track",
+                                skill_id="track",
+                                difficulty="regular",
+                                method_summary="追踪墓碑附近的痕迹",
+                                player_safe_reason="使用追踪",
+                            ),
+                        )
+                    ),
+                ),
+            )
+        )
+        pending = pending_execution.pending_decision
+        assert pending is not None
+        resolved = await engine.decide(
+            CheckDecisionRequest(
+                request_id=f"track-grave-{roll}:select",
+                room_id=ROOM,
+                player_id=PLAYER,
+                source_revision=pending_execution.view_revision,
+                decision_id=pending.decision_id,
+                decision_version=pending.decision_version,
+                choice=SelectCheckChoice(candidate_id="track"),
+            )
+        )
+        check_run = resolved.check_run
+        assert check_run is not None
+        resolved = await engine.decide_post_roll(
+            PostRollDecisionRequest(
+                request_id=f"track-grave-{roll}:accept",
+                room_id=ROOM,
+                player_id=PLAYER,
+                source_revision=resolved.view_revision,
+                check_id=check_run.check_id,
+                check_version=check_run.version,
+                option_id="accept-current",
+            )
+        )
+        return store, resolved
+
+    async def test_discovering_crypt_entrance_produces_required_safe_evidence(self) -> None:
+        store, execution = await self.run_grave_tracking(25)
+
+        self.assertIs(store.inspect_state(ROOM).entities["crypt_entrance"]["discovered"], True)
+        self.assertEqual(len(execution.narration_evidence), 1)
+        evidence = execution.narration_evidence[0]
+        self.assertEqual(evidence.kind, "entity_discovered")
+        self.assertEqual(evidence.subject_id, "crypt_entrance")
+        self.assertEqual(evidence.subject_name, "石板下的地穴入口")
+        self.assertIn("沉重石板", evidence.description)
+        self.assertTrue(evidence.required_in_narration)
+        self.assertIn(evidence.ref, execution.public_event_refs)
+
+    async def test_failed_tracking_produces_no_crypt_discovery_evidence(self) -> None:
+        store, execution = await self.run_grave_tracking(95)
+
+        self.assertIsNot(
+            store.inspect_state(ROOM).entities.get("crypt_entrance", {}).get("discovered"),
+            True,
+        )
+        self.assertEqual(execution.narration_evidence, ())
+
+    async def test_non_discovery_action_skips_player_projection_for_narration_evidence(self) -> None:
+        store = InMemoryEngineStore()
+        store.register_room(
+            module_content=self.content,
+            initial_state=game_state(self.content, scene_id="cemetery"),
+        )
+        engine = AdjudicationEngineService(store)
+        rules = RuleEngineService(store)
+        snapshot = await rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        with patch(
+            "collaboration_framework.engine.adjudication.project_v3",
+            side_effect=AssertionError("projection should be skipped"),
+        ):
+            execution = await engine.submit(
+                SubmitAdjudicationRequest(
+                    room_id=ROOM,
+                    player_id=PLAYER,
+                    adjudication=ActionAdjudication(
+                        request_id="ordinary-action-no-discovery",
+                        source_revision=snapshot.revision,
+                        actor_id=ACTOR,
+                        summary="观察墓地",
+                        target=ActionTarget(kind="location", id="cemetery"),
+                        method=ActionMethod(family="observe", description="观察墓地"),
+                        check=NoAdjudicationCheck(),
+                        success_effects=(),
+                    ),
+                )
+            )
+        self.assertEqual(execution.narration_evidence, ())
 
     async def _submit_rule_decision(
         self,

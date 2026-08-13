@@ -60,6 +60,7 @@ from .adjudication import (
     HideInformationEffect,
     MarkCoreResolvedEffect,
     MoveEntityEffect,
+    NarrationEvidence,
     NarrativeOnlyEffect,
     NoAdjudicationCheck,
     PendingCheckDecisionView,

@@ -16,6 +16,7 @@ from collaboration_framework.contracts import (
     AdjudicationExecution,
     ContractModel,
     KeeperCapabilityView,
+    NarrationEvidence,
     PlayerInput,
     PlayerView,
     WorldClockView,
@@ -253,6 +254,7 @@ class CompletedPlanStepSummary(ContractModel):
     world_time_after: WorldClockView | None = None
     event_refs: tuple[str, ...] = ()
     committed_results: tuple[CommittedResult, ...] = ()
+    narration_evidence: tuple[NarrationEvidence, ...] = ()
 
 
 class ActionPlanStepContext(ContractModel):
@@ -328,6 +330,7 @@ class ActionPlanNarrationContext(ContractModel):
     # then carries the clock it ended on.
     opening_world_time: WorldClockView | None = None
     allowed_evidence_refs: tuple[str, ...] = ()
+    narration_evidence: tuple[NarrationEvidence, ...] = ()
 
     @model_validator(mode="after")
     def validate_narration_scope(self) -> ActionPlanNarrationContext:
@@ -349,6 +352,11 @@ class ActionPlanNarrationContext(ContractModel):
         }
         if not result_refs.issubset(set(evidence)):
             raise ValueError("committed_results 必须引用对应步骤的公开 evidence")
+        step_evidence = tuple(
+            item for step in self.completed_steps for item in step.narration_evidence
+        )
+        if self.narration_evidence != step_evidence:
+            raise ValueError("narration_evidence 必须按步骤聚合")
         return self
 
 

@@ -5,7 +5,16 @@ from typing import Any, cast
 from unittest.mock import AsyncMock
 
 import pytest
-from collaboration_framework.contracts import ActionPlanPolicy, PostRollDecisionRequest
+from collaboration_framework.contracts import (
+    ActionPlanPolicy,
+    NarrationEvidence,
+    PostRollDecisionRequest,
+)
+from collaboration_framework.host.application import (
+    ActionPlanNarrationValidationError,
+    TurnExecutionError,
+)
+from collaboration_framework.host.schemas import ActionPlanNarrationContext
 
 from app.core.action_plan_turn import ActionPlanTurnApplication
 
@@ -79,6 +88,21 @@ class _Orchestrator:
         return SimpleNamespace(run=self.run)
 
 
+class _NarrationContextStub:
+    def __init__(self, evidence: NarrationEvidence, termination_status: str) -> None:
+        self.narration_evidence = (evidence,)
+        self.termination_status = termination_status
+        self.narration_retry_hint: str | None = None
+
+    def model_copy(self, *, update: dict[str, object]):
+        copied = _NarrationContextStub(
+            self.narration_evidence[0],
+            self.termination_status,
+        )
+        copied.narration_retry_hint = cast(str | None, update["narration_retry_hint"])
+        return copied
+
+
 def _application(run: SimpleNamespace, engine: _Engine, orchestrator: _Orchestrator):
     application = object.__new__(ActionPlanTurnApplication)
     application._adjudication_engine = engine
@@ -107,6 +131,60 @@ def test_application_injects_plan_repair_dependencies_into_single_action_path() 
 
     assert application._dispatcher._repair_adjudicator is orchestrator.adjudicator
     assert application._dispatcher._policy is orchestrator.policy
+
+
+@pytest.mark.asyncio
+async def test_narration_falls_back_to_required_player_safe_evidence() -> None:
+    application = object.__new__(ActionPlanTurnApplication)
+    narrate = AsyncMock(side_effect=ActionPlanNarrationValidationError("required_evidence_missing"))
+    application._narrator = SimpleNamespace(narrate=narrate)
+    evidence = NarrationEvidence(
+        ref="evt-crypt-discovered",
+        kind="entity_discovered",
+        subject_id="crypt_entrance",
+        subject_name="石板下的地穴入口",
+        description="一块沉重石板遮住了向下的通道。",
+        required_in_narration=True,
+    )
+    context = cast(
+        ActionPlanNarrationContext,
+        _NarrationContextStub(evidence, "resolved"),
+    )
+
+    narration = await application._narrate(context)
+
+    assert narrate.await_count == 2
+    retry_context = narrate.await_args_list[1].args[0]
+    assert "石板下的地穴入口" in retry_context.narration_retry_hint
+    assert "claim" in retry_context.narration_retry_hint
+    assert narration.claimed_evidence_refs == (evidence.ref,)
+    assert "石板下的地穴入口" in narration.text
+    assert "沉重石板" in narration.text
+    assert "。。" not in narration.text
+
+
+@pytest.mark.asyncio
+async def test_required_evidence_fallback_never_changes_clarification_scope() -> None:
+    application = object.__new__(ActionPlanTurnApplication)
+    narrate = AsyncMock(side_effect=ActionPlanNarrationValidationError("required_evidence_missing"))
+    application._narrator = SimpleNamespace(narrate=narrate)
+    evidence = NarrationEvidence(
+        ref="evt-crypt-discovered",
+        kind="entity_discovered",
+        subject_id="crypt_entrance",
+        subject_name="石板下的地穴入口",
+        required_in_narration=True,
+    )
+    context = cast(
+        ActionPlanNarrationContext,
+        _NarrationContextStub(evidence, "needs_clarification"),
+    )
+
+    with pytest.raises(TurnExecutionError) as raised:
+        await application._narrate(context)
+
+    assert raised.value.code == "PLAN_NARRATION_INVALID"
+    assert narrate.await_count == 2
 
 
 @pytest.mark.asyncio

@@ -42,6 +42,7 @@ from collaboration_framework.contracts import (
     MarkCoreResolvedEffect,
     LocationKnowledge,
     MoveEntityEffect,
+    NarrationEvidence,
     NarrativeOnlyEffect,
     PendingCheckOption,
     PostRollDecisionRequest,
@@ -82,6 +83,7 @@ from .persistent_results import (
     validate_persistent_effects,
 )
 from .ports import EngineStore
+from .projection_v3 import project_v3
 from .timeline import advanced_to_next, next_point_after, time_advance_block_reason
 from .rules_v3 import (
     agenda_item_for_event,
@@ -91,6 +93,7 @@ from .rules_v3 import (
     effects_after_degree,
     matching_event_rules,
     pending_check_for,
+    entity_state,
     resolve_rule_option,
     walk_rule,
 )
@@ -599,6 +602,7 @@ class AdjudicationEngineService:
                     event_refs=tuple(event.event_id for event in events),
                     public_event_refs=self._public_event_refs(events),
                     committed_results=committed_results_from_events(events),
+                    narration_evidence=self._narration_evidence(runtime, new_state=new_state, events=events, player_id=request.player_id, actor_id=request.adjudication.actor_id),
                 )
                 await transaction.commit_adjudication(
                     expected_revision=runtime.revision,
@@ -877,6 +881,7 @@ class AdjudicationEngineService:
                 event_refs=tuple(event.event_id for event in events),
                 public_event_refs=self._public_event_refs(events),
                 committed_results=committed_results_from_events(events),
+                narration_evidence=self._narration_evidence(runtime, new_state=new_state, events=events, player_id=decision.player_id, actor_id=decision.actor_id),
             )
             rule_effects_excluded = (
                 decision.adjudication.rule_decision is not None and runtime.is_v3
@@ -1087,6 +1092,7 @@ class AdjudicationEngineService:
                 event_refs=tuple(event.event_id for event in events),
                 public_event_refs=self._public_event_refs(events),
                 committed_results=committed_results_from_events(events),
+                narration_evidence=self._narration_evidence(runtime_after_resource, new_state=new_state, events=events, player_id=decision.player_id, actor_id=decision.actor_id),
             )
             rule_effects_excluded = (
                 check_run.adjudication.rule_decision is not None and runtime.is_v3
@@ -1126,6 +1132,38 @@ class AdjudicationEngineService:
     @staticmethod
     def _public_event_refs(events: tuple[DomainEvent, ...]) -> tuple[str, ...]:
         return tuple(event.event_id for event in events if event.visibility == "public")
+
+    @staticmethod
+    def _narration_evidence(runtime, *, new_state, events, player_id, actor_id):
+        """将本回合公开发现事件投影为玩家可见的叙述证据。"""
+        if not runtime.is_v3:
+            return ()
+        candidates = tuple(
+            event for event in events
+            if event.visibility == "public"
+            and event.type == "entity.state_changed"
+            and event.payload.get("key") == "discovered"
+            and event.payload.get("value") is True
+            and isinstance(event.payload.get("entity_id"), str)
+            and entity_state(runtime.game_state, event.payload["entity_id"]).get("discovered") is not True
+        )
+        if not candidates:
+            return ()
+        final_runtime = runtime.model_copy(update={"game_state": new_state, "revision": str(new_state.event_sequence)}, deep=True)
+        visible = {item.id: item for item in project_v3(final_runtime, player_id=player_id, actor_id=actor_id).scene.visible_entities}
+        return tuple(
+            NarrationEvidence(
+                ref=event.event_id,
+                kind="entity_discovered",
+                subject_id=visible[entity_id].id,
+                subject_name=visible[entity_id].name,
+                subject_aliases=visible[entity_id].aliases,
+                description=visible[entity_id].description,
+                required_in_narration=True,
+            )
+            for event in candidates
+            if (entity_id := event.payload.get("entity_id")) in visible
+        )
 
     @staticmethod
     def _validate_identity(

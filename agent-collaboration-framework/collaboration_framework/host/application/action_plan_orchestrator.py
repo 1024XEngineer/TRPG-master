@@ -53,6 +53,7 @@ from collaboration_framework.host.schemas import (
 
 from .host_agent_intent_resolver import TurnExecutionError
 from .player_view_projector import PlayerViewProjector
+from .semantic_preservation import compare_repair_semantics
 
 logger = logging.getLogger(__name__)
 
@@ -702,6 +703,9 @@ class ActionPlanOrchestrator:
         view = await self._player_view_projector.project(player_input)
         summaries = self._narration_summaries(run)
         evidence = tuple(ref for step in summaries for ref in step.event_refs)
+        narration_evidence = tuple(
+            item for step in summaries for item in step.narration_evidence
+        )
         return ActionPlanNarrationContext(
             background=view.background,
             player_input=player_input,
@@ -712,6 +716,7 @@ class ActionPlanOrchestrator:
             player_view=view,
             opening_world_time=run.opening_world_time,
             allowed_evidence_refs=evidence,
+            narration_evidence=narration_evidence,
         )
 
     async def _load_or_create(
@@ -857,6 +862,34 @@ class ActionPlanOrchestrator:
             },
             deep=True,
         )
+        if current.repair_baseline is not None and current.repair_feedback is not None:
+            preservation = compare_repair_semantics(
+                player_input=player_input,
+                plan_goal=run.plan.goal,
+                step=current.step,
+                original=current.repair_baseline,
+                repaired=adjudication,
+                validation_feedback=current.repair_feedback,
+                player_view=view,
+            )
+            if preservation.status == "requires_clarification":
+                steps = list(run.steps)
+                steps[index] = current.model_copy(
+                    update={
+                        "status": "stopped",
+                        "source_revision": None,
+                        "adjudication": None,
+                        "safe_failure_code": "SEMANTIC_REPAIR_REQUIRES_CLARIFICATION",
+                        "repair_baseline": None,
+                        "repair_feedback": None,
+                    },
+                    deep=True,
+                )
+                return await self._replace_steps(
+                    run,
+                    tuple(steps),
+                    status="needs_clarification",
+                )
         steps = list(run.steps)
         steps[index] = current.model_copy(
             update={
@@ -864,6 +897,8 @@ class ActionPlanOrchestrator:
                 "source_revision": view.revision,
                 "adjudication": adjudication,
                 "safe_failure_code": None,
+                "repair_baseline": None,
+                "repair_feedback": None,
             },
             deep=True,
         )
@@ -889,6 +924,8 @@ class ActionPlanOrchestrator:
                 "repair_attempts": current.repair_attempts + 1,
                 "last_validation_code": feedback.code,
                 "last_validation_message": feedback.player_safe_reason,
+                "repair_baseline": current.adjudication,
+                "repair_feedback": feedback,
             },
             deep=True,
         )
@@ -916,6 +953,8 @@ class ActionPlanOrchestrator:
                 "safe_failure_code": code or feedback.code,
                 "last_validation_code": feedback.code,
                 "last_validation_message": feedback.player_safe_reason,
+                "repair_baseline": None,
+                "repair_feedback": None,
             },
             deep=True,
         )
@@ -1230,6 +1269,7 @@ class ActionPlanOrchestrator:
                     view_revision=execution.view_revision,
                     world_time_after=step.world_time_after,
                     event_refs=execution.public_event_refs,
+                    narration_evidence=execution.narration_evidence,
                 )
             )
         return tuple(summaries)
@@ -1253,6 +1293,7 @@ class ActionPlanOrchestrator:
                         view_revision=execution.view_revision,
                         world_time_after=step.world_time_after,
                         event_refs=execution.public_event_refs,
+                        narration_evidence=execution.narration_evidence,
                     )
                 )
         return tuple(summaries)
@@ -1427,11 +1468,27 @@ class HostTurnDecisionExecutor:
                     ),
                 )
                 proposal = await self._repair_adjudicator.adjudicate(context)
-                adjudication = self._bind_single_adjudication(
+                repaired = self._bind_single_adjudication(
                     proposal,
                     player_input=player_input,
                     view=view,
                 )
+                preservation = compare_repair_semantics(
+                    player_input=player_input,
+                    plan_goal=decision.adjudication.summary,
+                    step=context.step,
+                    original=adjudication,
+                    repaired=repaired,
+                    validation_feedback=feedback,
+                    player_view=view,
+                )
+                if preservation.status == "requires_clarification":
+                    raise TurnExecutionError(
+                        "SEMANTIC_REPAIR_REQUIRES_CLARIFICATION",
+                        preservation.safe_reason,
+                        retryable=False,
+                    ) from exc
+                adjudication = repaired
         return SingleActionTurnResult(
             execution=execution,
             player_view=await self._player_view_projector.refresh_adjudication(

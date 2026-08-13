@@ -99,12 +99,12 @@
           "title": "Public Event Refs",
           "type": "array"
         },
-        "committed_results": {
+        "narration_evidence": {
           "default": [],
           "items": {
-            "$ref": "#/$defs/CommittedResult"
+            "$ref": "#/$defs/NarrationEvidence"
           },
-          "title": "Committed Results",
+          "title": "Narration Evidence",
           "type": "array"
         }
       },
@@ -271,65 +271,58 @@
       "title": "CheckRunView",
       "type": "object"
     },
-    "CommittedResult": {
+    "NarrationEvidence": {
       "additionalProperties": false,
-      "description": "玩家安全的已提交结果摘要，不复制原始事件载荷或内部裁决信息。",
+      "description": "Player-safe meaning of one public event that narration may rely on.",
       "properties": {
+        "ref": {
+          "minLength": 1,
+          "title": "Ref",
+          "type": "string"
+        },
         "kind": {
-          "enum": [
-            "none",
-            "character_state",
-            "object_state",
-            "inventory",
-            "location"
-          ],
+          "const": "entity_discovered",
           "title": "Kind",
           "type": "string"
         },
-        "target_id": {
+        "subject_id": {
           "minLength": 1,
-          "title": "Target Id",
+          "title": "Subject Id",
           "type": "string"
         },
-        "state_key": {
-          "anyOf": [
-            {
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "State Key"
-        },
-        "state_value": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/JsonValue"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "event_ref": {
+        "subject_name": {
           "minLength": 1,
-          "title": "Event Ref",
+          "title": "Subject Name",
           "type": "string"
+        },
+        "subject_aliases": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Subject Aliases",
+          "type": "array"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "required_in_narration": {
+          "default": false,
+          "title": "Required In Narration",
+          "type": "boolean"
         }
       },
       "required": [
+        "ref",
         "kind",
-        "target_id",
-        "event_ref"
+        "subject_id",
+        "subject_name"
       ],
-      "title": "CommittedResult",
+      "title": "NarrationEvidence",
       "type": "object"
     },
-    "JsonValue": {},
     "PendingCheckDecisionView": {
       "additionalProperties": false,
       "properties": {

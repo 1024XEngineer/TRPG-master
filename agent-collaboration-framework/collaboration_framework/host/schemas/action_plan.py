@@ -19,6 +19,7 @@ from collaboration_framework.contracts import (
     NarrationEvidence,
     PlayerInput,
     PlayerView,
+    ValidationFeedback,
     WorldClockView,
 )
 from collaboration_framework.host.schemas.agent import _validate_keeper_scope

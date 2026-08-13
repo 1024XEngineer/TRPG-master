@@ -145,11 +145,7 @@ class _WsFirstPersonThenSafeNarration:
         self.calls += 1
         return {
             "kind": "narration",
-            "text": (
-                "我带着你们进入墓园。"
-                if self.calls == 1
-                else "你带着托马斯进入墓园。"
-            ),
+            "text": ("我带着你们进入墓园。" if self.calls == 1 else "你带着托马斯进入墓园。"),
             "claimed_evidence_refs": [],
             "suggested_actions": [],
         }

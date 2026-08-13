@@ -1131,9 +1131,7 @@ class ActionPlanTurnApplication:
             except ActionPlanNarrationValidationError as exc:
                 if attempt == 0 and exc.reason == "required_evidence_missing":
                     missing = tuple(
-                        item
-                        for item in context.narration_evidence
-                        if item.required_in_narration
+                        item for item in context.narration_evidence if item.required_in_narration
                     )
                     context = context.model_copy(
                         update={
@@ -1152,7 +1150,7 @@ class ActionPlanTurnApplication:
                             "PLAN_NARRATION_INVALID",
                             "当前行动还需要澄清，请补充作用目标和期望变化",
                             retryable=False,
-                        )
+                        ) from exc
                     if getattr(self._narrator, "narrate", None) is not None:
                         return self._required_evidence_fallback(context)
             except Exception as exc:
@@ -1194,10 +1192,7 @@ class ActionPlanTurnApplication:
         }
         player_view = getattr(context, "player_view", None)
         names = (
-            {
-                entity.id: entity.name
-                for entity in player_view.scene.visible_entities
-            }
+            {entity.id: entity.name for entity in player_view.scene.visible_entities}
             if player_view is not None
             else {}
         )
@@ -1218,11 +1213,11 @@ class ActionPlanTurnApplication:
         )
 
     @staticmethod
-    def _required_evidence_fallback(context: ActionPlanNarrationContext) -> ActionPlanNarrationOutput:
+    def _required_evidence_fallback(
+        context: ActionPlanNarrationContext,
+    ) -> ActionPlanNarrationOutput:
         """模型两次漏报必需证据时，只复述结构化的公开发现结果。"""
-        required = tuple(
-            item for item in context.narration_evidence if item.required_in_narration
-        )
+        required = tuple(item for item in context.narration_evidence if item.required_in_narration)
         if not required:
             raise TurnExecutionError(
                 "PLAN_NARRATION_INVALID",

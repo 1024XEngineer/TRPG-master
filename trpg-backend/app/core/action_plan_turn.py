@@ -62,6 +62,7 @@ from collaboration_framework.host.schemas import (
     HostAgentContext,
     RecentHistoryBudget,
     RecentTurnContext,
+    SingleActionClarificationResult,
     SingleActionTurnResult,
 )
 from pydantic import ValidationError
@@ -622,6 +623,14 @@ class ActionPlanTurnApplication:
             )
         if not isinstance(decision, SingleActionDecision):
             raise TypeError("single result 必须对应 SingleActionDecision")
+        if isinstance(result, SingleActionClarificationResult):
+            await _emit_phase(on_phase, "refreshing_player_view")
+            await _emit_phase(on_phase, "generating_narration")
+            return await self._from_single_clarification(
+                player_input,
+                decision.adjudication.summary,
+                result,
+            )
         if result.execution.status in {
             "awaiting_skill_choice",
             "awaiting_post_roll_decision",
@@ -1080,6 +1089,7 @@ class ActionPlanTurnApplication:
             world_time_after=WorldClockView.from_world(result.player_view.world),
             event_refs=execution.public_event_refs,
             narration_evidence=execution.narration_evidence,
+            committed_results=execution.committed_results,
         )
         context = ActionPlanNarrationContext(
             background=result.player_view.background,
@@ -1097,6 +1107,29 @@ class ActionPlanTurnApplication:
             player_view=result.player_view,
             status="completed",
             execution=execution,
+            narration=await self._narrate(context),
+        )
+
+    async def _from_single_clarification(
+        self,
+        player_input: PlayerInput,
+        summary: str,
+        result: SingleActionClarificationResult,
+    ) -> ActionPlanTurnResult:
+        """把未发生任何权威写入的单动作失败转换成自然主持人澄清。"""
+
+        context = ActionPlanNarrationContext(
+            background=result.player_view.background,
+            player_input=player_input,
+            plan_goal=summary,
+            termination_status="needs_clarification",
+            player_view=result.player_view,
+            opening_world_time=result.opening_world_time,
+        )
+        return ActionPlanTurnResult(
+            player_input=player_input,
+            player_view=result.player_view,
+            status="needs_clarification",
             narration=await self._narrate(context),
         )
 
@@ -1135,11 +1168,7 @@ class ActionPlanTurnApplication:
                             ],
                         )
                         return self._required_evidence_fallback(context)
-                    raise TurnExecutionError(
-                        "PLAN_NARRATION_INVALID",
-                        "规则结果已保存，但叙事未通过安全校验；请使用原请求重试",
-                        retryable=True,
-                    ) from exc
+                    return self._deterministic_narration_fallback(context)
             except Exception as exc:
                 # 传输层的瞬态失败已经由 StructuredJsonClient 自己重试过了
                 # （见 adapters/structured_http.py）。在这里再整体重试一轮，两层
@@ -1172,6 +1201,49 @@ class ActionPlanTurnApplication:
         return ActionPlanNarrationOutput(
             text="".join(sentences),
             claimed_evidence_refs=tuple(item.ref for item in required),
+        )
+
+    @staticmethod
+    def _deterministic_narration_fallback(
+        context: ActionPlanNarrationContext,
+    ) -> ActionPlanNarrationOutput:
+        """只复述结构化已提交结果，绝不从 semantic_goal 推断持久后果。"""
+
+        if context.termination_status == "needs_clarification":
+            return ActionPlanNarrationOutput(
+                kind="clarification",
+                text=(
+                    "眼前的情形还不足以确定这次行动会留下怎样的结果。"
+                    "请说明你想作用于谁或什么，以及希望达成的具体变化。"
+                ),
+            )
+        labels = {
+            ("consciousness", "unconscious"): "失去了意识",
+            ("consciousness", "dead"): "已经死亡",
+            ("posture", "prone"): "已经倒地",
+            ("restraint", "restrained"): "已被束缚",
+            ("injury", "minor"): "受了轻伤",
+            ("injury", "major"): "受了重伤",
+            ("injury", "critical"): "伤势危重",
+            ("open", True): "已经打开",
+            ("locked", True): "已经锁住",
+            ("broken", True): "已经损坏",
+        }
+        names = {entity.id: entity.name for entity in context.player_view.scene.visible_entities}
+        results = [
+            (result, labels.get((result.state_key, result.state_value)))
+            for step in context.completed_steps
+            for result in step.committed_results
+        ]
+        statements = [
+            f"{names.get(result.target_id, '目标')}{label}。"
+            for result, label in results
+            if label is not None
+        ]
+        refs = tuple(result.event_ref for result, label in results if label is not None)
+        return ActionPlanNarrationOutput(
+            text="".join(statements) or "这次行动已经按当前可确认的结果完成。",
+            claimed_evidence_refs=refs,
         )
 
     async def _keeper_capabilities(

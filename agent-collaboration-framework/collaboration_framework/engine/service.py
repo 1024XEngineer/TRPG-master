@@ -36,7 +36,8 @@ from pydantic import JsonValue
 
 from .expression import ExpressionEvaluator, expression_context
 from .projection_v3 import keeper_capabilities_v3, project_v3
-from .models import EngineRuntimeSnapshot
+from .models import EngineRuntimeSnapshot, GameState
+from .persistent_results import PUBLIC_STATE_KEYS
 from .ports import EngineStore
 
 
@@ -135,6 +136,11 @@ class RuleEngineService:
                         actor_id=actor_id,
                         target_id=entity.id,
                     )
+                )
+                + RuleEngineService._project_public_standard_state(
+                    state,
+                    entity.id,
+                    excluded={field.key for field in entity.observable_state},
                 ),
             )
             for entity_id in scene.entity_ids
@@ -458,10 +464,31 @@ class RuleEngineService:
                     name=(name or getattr(canon, "player_visible_name", "") or entity_id),
                     aliases=getattr(canon, "player_visible_aliases", ()),
                     description=getattr(canon, "content", ""),
+                    observable_state=RuleEngineService._project_public_standard_state(
+                        state,
+                        entity_id,
+                    ),
                 )
             )
         placed.sort(key=lambda entity: entity.id)
         return tuple(placed)
+
+    @staticmethod
+    def _project_public_standard_state(
+        state: GameState,
+        entity_id: str,
+        *,
+        excluded: set[str] | None = None,
+    ) -> tuple[ProjectionObservableState, ...]:
+        """为 v2 兼容投影补充公开标准状态，同时不重复模组已声明的键。"""
+
+        values = state.runtime_entities.get(entity_id) or state.entities.get(entity_id, {})
+        blocked = excluded or set()
+        return tuple(
+            ProjectionObservableState(key=key, label=key, value=values[key])
+            for key in state.public_entity_state_keys.get(entity_id, ())
+            if key in PUBLIC_STATE_KEYS and key not in blocked and key in values
+        )
 
     @staticmethod
     def _override_allows(

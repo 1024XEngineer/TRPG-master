@@ -3,6 +3,12 @@ from __future__ import annotations
 import unittest
 from types import SimpleNamespace
 
+from collaboration_framework.contracts import CommittedResult, PlayerInput
+from collaboration_framework.host.application.action_plan_narrator import (
+    ActionPlanNarrationValidationError,
+    ActionPlanNarrator,
+)
+from collaboration_framework.host.schemas import ActionPlanNarrationContext
 from collaboration_framework.host.application.narrator import (
     NarrationValidationError,
     Narrator,
@@ -42,7 +48,7 @@ class NarrationTextPolicyTests(unittest.TestCase):
         cases = {
             "托马斯看着你。 claimed_fact_ids: [],": "protocol_tail",
             "托马斯看着你 claimed_fact_ids: []": "protocol_tail",
-            "suggested_actions: [\"继续询问\"]": "protocol_tail",
+            'suggested_actions: ["继续询问"]': "protocol_tail",
             'suggested_actions: [\n  "继续询问",\n  "查看书架"\n]': "protocol_tail",
             "'claimedFactIds'：null": "protocol_tail",
             '他说完便沉默下来。\n"suggestedActions": []': "protocol_tail",
@@ -60,8 +66,7 @@ class NarrationTextPolicyTests(unittest.TestCase):
             ): "protocol_tail",
             "托马斯沉默。\n```json\nsuggestedActions:\n```": "protocol_tail",
             (
-                '{"kind":"narration","text":"托马斯看着你。",'
-                '"claimed_fact_ids":[]}'
+                '{"kind":"narration","text":"托马斯看着你。","claimed_fact_ids":[]}'
             ): "protocol_tail",
             (
                 '托马斯后退一步 {"kind":"narration","text":"他保持沉默",'
@@ -79,8 +84,7 @@ class NarrationTextPolicyTests(unittest.TestCase):
                 '"claimed_fact_ids":{"type":"array"}}'
             ): "schema_fragment",
             (
-                "现场只剩下雨声。\n"
-                '{"required":["kind","text","claimed_fact_ids"]'
+                '现场只剩下雨声。\n{"required":["kind","text","claimed_fact_ids"]'
             ): "schema_fragment",
         }
 
@@ -88,7 +92,9 @@ class NarrationTextPolicyTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(narration_text_rejection_reason(text), expected)
 
-    def test_allows_natural_narration_and_non_protocol_technical_discussion(self) -> None:
+    def test_allows_natural_narration_and_non_protocol_technical_discussion(
+        self,
+    ) -> None:
         cases = (
             "托马斯抬起眼睛，耐心等着你继续问下去。",
             "雨点敲打着窗框。\n\n屋里只剩壁炉燃烧的细响。",
@@ -163,6 +169,73 @@ class NarratorSubjectPolicyTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(raised.exception.reason, "subject_ownership")
+
+
+class _PersistentNarrationModel:
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+    async def generate(self, context):
+        return {
+            "kind": "narration",
+            "text": self.text,
+            "claimed_evidence_refs": [],
+            "suggested_actions": [],
+        }
+
+
+class PersistentNarrationPolicyTests(unittest.IsolatedAsyncioTestCase):
+    def _context(self, *, results=()):
+        view = SimpleNamespace(
+            room_id="room",
+            player_id="player",
+            actor_id="actor",
+            background="背景",
+            scene=SimpleNamespace(visible_entities=()),
+        )
+        return ActionPlanNarrationContext.model_construct(
+            background="背景",
+            player_input=PlayerInput(
+                room_id="room",
+                player_id="player",
+                actor_id="actor",
+                client_action_id="action",
+                utterance="行动",
+            ),
+            plan_goal="行动",
+            termination_status="resolved",
+            completed_steps=(
+                SimpleNamespace(
+                    step_index=0,
+                    semantic_goal="行动",
+                    outcome="success",
+                    view_revision="1",
+                    event_refs=("event-1",),
+                    committed_results=results,
+                ),
+            ),
+            player_view=view,
+            allowed_evidence_refs=("event-1",),
+        )
+
+    async def test_rejects_uncommitted_unconscious_claim(self):
+        with self.assertRaises(ActionPlanNarrationValidationError):
+            await ActionPlanNarrator(
+                _PersistentNarrationModel("守墓人昏迷了。")
+            ).narrate(self._context())
+
+    async def test_allows_committed_unconscious_claim(self):
+        result = CommittedResult(
+            kind="character_state",
+            target_id="butler",
+            state_key="consciousness",
+            state_value="unconscious",
+            event_ref="event-1",
+        )
+        output = await ActionPlanNarrator(
+            _PersistentNarrationModel("守墓人昏迷了。")
+        ).narrate(self._context(results=(result,)))
+        self.assertEqual(output.text, "守墓人昏迷了。")
 
 
 if __name__ == "__main__":

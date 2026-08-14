@@ -45,6 +45,7 @@ from collaboration_framework.contracts import (
     ProjectionKnownLocation,
     ProjectionLocationBreadcrumb,
     ProjectionLocationContext,
+    ProjectionObservableState,
     ProjectionPositionContext,
     ProjectionScene,
     ProjectionSelfActor,
@@ -55,6 +56,7 @@ from collaboration_framework.contracts import (
 
 from .models import EngineRuntimeSnapshot, GameState
 from .navigation import effective_location_knowledge, runtime_location_edges
+from .persistent_results import PUBLIC_STATE_KEYS
 from .timeline import next_point_after, ordered_points, time_advance_block_reason
 from .rules_v3 import agent_match_scope_admits, evaluate_condition, pending_check_for
 
@@ -332,6 +334,7 @@ def _visible_entities(
                 name=entity.player_visible_name or entity.name,
                 aliases=entity.player_visible_aliases,
                 description=entity.description,
+                observable_state=_public_entity_state(state, entity.id, overrides),
             )
         )
     for entity_id, payload in sorted(state.runtime_entities.items()):
@@ -350,10 +353,26 @@ def _visible_entities(
                 kind=kind if kind in {"npc", "object", "location"} else "object",
                 name=_optional_text(payload.get("name")) or entity_id,
                 description="",
+                observable_state=_public_entity_state(state, entity_id, payload),
             )
         )
     projected.sort(key=lambda item: item.id)
     return tuple(projected)
+
+
+def _public_entity_state(
+    state: GameState,
+    entity_id: str,
+    values: dict[str, object],
+) -> tuple[ProjectionObservableState, ...]:
+    """只投影由公开标准效果登记过的状态键，避免把模组隐藏状态带给模型。"""
+
+    keys = state.public_entity_state_keys.get(entity_id, ())
+    return tuple(
+        ProjectionObservableState(key=key, label=key, value=values[key])
+        for key in keys
+        if key in PUBLIC_STATE_KEYS and key in values
+    )
 
 
 def _available_exits(

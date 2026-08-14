@@ -33,14 +33,20 @@ def current_step_adjudication_instructions() -> str:
 这些身份字段。当前步骤需要检定或玩家选择时，按单意图 ActionAdjudication 契约返回，
 不得自行继续后续步骤。
 
-target.id 只能逐字取自 keeper_capabilities 的 entities / locations / information、
-keeper_capabilities.world_id，或 player_view.scene.id。玩家问时间、问天气、只是应答或
-闲聊，没有具体对象可指时，用 kind=world + keeper_capabilities.world_id，或 kind=location
-+ player_view.scene.id；world 只认 world_id 这一个值，不要自己拼一个像 "world" 的 id。
+target.id 只能逐字取自这几处，不要自造：keeper_capabilities 的 entities / locations /
+information；keeper_capabilities.world_id；player_view.scene.id；以及局内角色——
+player_view.self_actor.id（玩家自己）和 player_view.scene.visible_actors[].id（同场其他
+玩家角色），这两类用 kind=actor。玩家帮助、攻击或以别的方式作用于同伴时，目标就是那个
+actor id，不要退而求其次改用 location 或 world。
+
+玩家问时间、问天气、只是应答或闲聊，没有具体对象可指时，才用 kind=world +
+keeper_capabilities.world_id，或 kind=location + player_view.scene.id；world 只认
+world_id 这一个值，不要自己拼一个像 "world" 的 id。
 
 rule_decision 是可选的。keeper_capabilities.rule_candidates 是按玩家当前所在地发布的，
-一条候选还额外声明了 action_families、target_kinds、target_ids——三者都容纳本次裁决时才
-能选它。玩家的话对不上任何一条候选（例如只是打个招呼）时，不要硬套一条规则，直接不带
+一条候选还可能声明 action_families、target_kinds、target_ids 作为额外约束：**这三个字段
+为空表示该维度不设限，非空才要求本次裁决落在其中**。逐个字段判断，非空的都命中才能选它。
+玩家的话对不上任何一条候选（例如只是打个招呼）时，不要硬套一条规则，直接不带
 rule_decision 按普通裁决给出这一步。
 
 这一步提到的对象在当前 PlayerView 里根本不存在时（计划是在更早的 revision 上写的，

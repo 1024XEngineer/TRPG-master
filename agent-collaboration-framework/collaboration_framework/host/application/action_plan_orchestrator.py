@@ -68,15 +68,18 @@ logger = logging.getLogger(__name__)
 _REPAIR_HINTS: dict[str, str] = {
     "TARGET_UNAVAILABLE": (
         "target.id 必须逐字取自 keeper_capabilities 的 entities / locations / "
-        "information、keeper_capabilities.world_id，或 player_view.scene.id；"
-        "不要自造 id。找不到玩家所指的对象时，以 kind=location + "
-        "player_view.scene.id 为目标返回 narrative_only。"
+        "information、keeper_capabilities.world_id、player_view.scene.id，或局内"
+        "角色 player_view.self_actor.id 与 player_view.scene.visible_actors[].id"
+        "（后两者用 kind=actor）；不要自造 id。作用于同伴的行动目标就是那个 actor "
+        "id，不要改用 location 或 world 绕开。确实找不到玩家所指的对象时，才以 "
+        "kind=location + player_view.scene.id 为目标返回 narrative_only。"
     ),
     "RULE_OUT_OF_SCOPE": (
-        "所选 rule_decision 与本次 method.family 或 target 不匹配。只有在 "
-        "keeper_capabilities.rule_candidates 里找得到一条 action_families、"
-        "target_kinds、target_ids 同时容纳本次裁决的规则时才保留 rule_decision；"
-        "否则去掉 rule_decision，按普通裁决重新给出这一步。"
+        "所选 rule_decision 与本次 method.family 或 target 不匹配。"
+        "keeper_capabilities.rule_candidates 里一条候选的 action_families、"
+        "target_kinds、target_ids 为空即表示该维度不设限，非空才要求本次裁决落在"
+        "其中——逐个字段判断，非空的都命中才能保留 rule_decision；一条都对不上就"
+        "去掉 rule_decision，按普通裁决重新给出这一步。"
     ),
 }
 

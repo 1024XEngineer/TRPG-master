@@ -1,7 +1,7 @@
 import { useNavigate } from 'react-router-dom'
 import { RoomSocketServerError, TurnFailedError, type AdjudicationPendingPayload, type AgentPlayerView, type AgentTurnPhase, type CheckRequestPayload, type CheckResultPayload, type EndingDraft, type NarrationPushPayload, type RoomConversationEvent, type RoomPlayerSummary } from 'trpg-sdk'
 import { ArrowLeft, Users, Map, MapPin, BookOpen, ScrollText, Star, X, SendHorizontal, Plus, Save, FlagOff, Heart, Brain, Volume2, Pause, Play, Square, RotateCcw, Mic, LoaderCircle } from 'lucide-react'
-import { useCallback, useState, useRef, useEffect, type Dispatch, type FormEvent, type SetStateAction } from 'react'
+import { useCallback, useState, useRef, useEffect, useMemo, type Dispatch, type FormEvent, type SetStateAction } from 'react'
 import { useRoomStore } from '@/stores/room-store'
 import { useAuthStore } from '@/stores/auth-store'
 import { useCharacterStore } from '@/stores/character-store'
@@ -16,6 +16,8 @@ import { Dice3DStage, supports3DDice, type Dice3DHandle, type DiceRollToken } fr
 import { OnboardingTrigger } from '@/features/onboarding'
 import { CheckWorkflowPanel } from '@/features/adjudication'
 import { CharacterBasicInfo } from '@/features/character/CharacterBasicInfo'
+import { PortraitGenerationModal } from '@/routes/character-ready/PortraitGenerationModal'
+import { usePortraitGenerationStore } from '@/stores/portrait-generation-store'
 import type {
   CheckRunView as UiCheckRunView,
   PendingCheckDecisionView as UiPendingCheckDecisionView,
@@ -1241,6 +1243,7 @@ export default function RoomPage() {
   const roomId = useRoomStore((s) => s.roomId)
   const roomCode = useRoomStore((s) => s.roomCode)
   const playerId = useRoomStore((s) => s.playerId)
+  const characterId = useRoomStore((s) => s.characterId)
   const reconnectToken = useRoomStore((s) => s.reconnectToken)
   const nickname = useAuthStore((s) => s.nickname)
   // 按房间取角色卡，而不是直接读 s.character——本地缓存不按房间区分的话，
@@ -1250,7 +1253,17 @@ export default function RoomPage() {
   const { ruleset } = useRuleset()
   const roomInfo = useRoomPlayers(roomCode)
   const roomPlayers = roomInfo?.players ?? EMPTY_ROOM_PLAYERS
-  const portraitUrls = usePlayerPortraits(roomId, reconnectToken, roomPlayers)
+  const portraitVersionOverride = usePortraitGenerationStore((s) => roomId ? s.portraitVersions[roomId] : undefined)
+  const clearPortraitVersion = usePortraitGenerationStore((s) => s.clearPortraitVersion)
+  const portraitPlayers = useMemo(() => roomPlayers.map((player) => player.playerId === playerId && portraitVersionOverride
+    ? { ...player, hasPortrait: true, portraitVersion: portraitVersionOverride } : player), [roomPlayers, playerId, portraitVersionOverride])
+  const portraitUrls = usePlayerPortraits(roomId, reconnectToken, portraitPlayers)
+  useEffect(() => {
+    const current = roomPlayers.find((player) => player.playerId === playerId)
+    if (roomId && portraitVersionOverride && current?.portraitVersion === portraitVersionOverride) {
+      clearPortraitVersion(roomId)
+    }
+  }, [roomId, playerId, roomPlayers, portraitVersionOverride, clearPortraitVersion])
   const hostSpeech = useHostSpeech({ roomId, reconnectToken, accountToken: getAuthToken() })
   const enqueueHostSpeech = hostSpeech.enqueue
   const markHostSpeechSeen = hostSpeech.markSeen
@@ -1264,6 +1277,7 @@ export default function RoomPage() {
   const endingConfirmRequestId = useRef(randomActionId())
   const [endError, setEndError] = useState('')
   const [confirmExit, setConfirmExit] = useState(false)
+  const [showPortraitGenerator, setShowPortraitGenerator] = useState(false)
   const [messages, setMessages] = useState<Message[]>([])
   const [channel, setChannel] = useState<'action' | 'discussion'>('action')
   const isActionChannel = channel === 'action'
@@ -2383,6 +2397,7 @@ export default function RoomPage() {
                     : null}
                   attributes={ruleset?.attributes ?? []}
                   liveResources={liveResources}
+                  portraitAction={{ kind: 'generate', onActivate: () => setShowPortraitGenerator(true) }}
                 />
               </div>
             )}
@@ -2865,6 +2880,15 @@ export default function RoomPage() {
         luckValue={resourceValue(playerView, 'luck')}
         onPostRollOption={submitAdjudicationPostRoll}
       />
+      {showPortraitGenerator && character && roomId && characterId && (
+        <PortraitGenerationModal
+          roomId={roomId}
+          characterId={characterId}
+          characterName={character.info.name}
+          portraitUrl={playerId ? portraitUrls[playerId] : undefined}
+          onClose={() => setShowPortraitGenerator(false)}
+        />
+      )}
     </div>
   )
 }

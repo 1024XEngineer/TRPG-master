@@ -10,6 +10,7 @@ interface PortraitImageProps {
   alt: string
   buttonClassName?: string
   imageClassName?: string
+  action?: { kind: 'preview' } | { kind: 'generate'; onActivate: () => void } | { kind: 'static' }
 }
 
 /**
@@ -20,6 +21,7 @@ export function PortraitImage({
   alt,
   buttonClassName = '',
   imageClassName = '',
+  action = { kind: 'preview' },
 }: PortraitImageProps) {
   const [open, setOpen] = useState(false)
   const triggerRef = useRef<HTMLButtonElement>(null)
@@ -70,6 +72,9 @@ export function PortraitImage({
       trigger?.focus()
     }
   }, [open])
+
+  if (action.kind === 'static') return <img src={src} alt={alt} className={imageClassName} />
+  if (action.kind === 'generate') return <button type="button" aria-label={`为${alt}生成图片`} title="点击生成角色图片" onClick={action.onActivate} className={`block overflow-hidden border-0 bg-transparent p-0 ${buttonClassName}`}><img src={src} alt={alt} className={imageClassName} /></button>
 
   return (
     <>

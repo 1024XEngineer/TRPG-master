@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { PortraitGenerationResult, RoomPlayerSummary } from 'trpg-sdk'
+import type { RoomPlayerSummary } from 'trpg-sdk'
 import {
   User,
   UserPlus,
@@ -20,6 +20,7 @@ import { normalizeDerivedStats } from '@/data/derived-stats'
 import { OnboardingTrigger } from '@/features/onboarding'
 import { PortraitImage } from '@/features/portrait/PortraitImage'
 import { CharacterBasicInfo } from '@/features/character/CharacterBasicInfo'
+import { usePortraitGenerationStore } from '@/stores/portrait-generation-store'
 
 const SHEET_PAGES = [
   { key: 'info', label: '基本信息' },
@@ -123,8 +124,6 @@ export default function CharacterReadyPage() {
   const navigate = useNavigate()
   const [showSelfSheet, setShowSelfSheet] = useState(false)
   const [showPortraitGenerator, setShowPortraitGenerator] = useState(false)
-  const [portraitResult, setPortraitResult] = useState<PortraitGenerationResult | null>(null)
-  const [portraitVersionOverride, setPortraitVersionOverride] = useState<string | null>(null)
   const [starting, setStarting] = useState(false)
   const [startError, setStartError] = useState('')
   const [confirmExit, setConfirmExit] = useState(false)
@@ -194,6 +193,8 @@ export default function CharacterReadyPage() {
   const isHost = useRoomStore((s) => s.isHost)
   const playerId = useRoomStore((s) => s.playerId)
   const reconnectToken = useRoomStore((s) => s.reconnectToken)
+  const portraitVersionOverride = usePortraitGenerationStore((s) => roomId ? s.portraitVersions[roomId] : undefined)
+  const clearPortraitVersion = usePortraitGenerationStore((s) => s.clearPortraitVersion)
   const nickname = useAuthStore((s) => s.nickname)
   const hasCharacter = character !== null
   const info = useRoomPlayers(roomCode)
@@ -210,11 +211,10 @@ export default function CharacterReadyPage() {
 
   useEffect(() => {
     const current = players.find((player) => player.playerId === playerId)
-    if (portraitVersionOverride && current?.portraitVersion === portraitVersionOverride) {
-      // 房间轮询追上刚生成的版本后撤掉临时覆盖，后续跨设备重生成仍能被发现。
-      setPortraitVersionOverride(null)
+    if (roomId && portraitVersionOverride && current?.portraitVersion === portraitVersionOverride) {
+      clearPortraitVersion(roomId)
     }
-  }, [playerId, players, portraitVersionOverride])
+  }, [roomId, playerId, players, portraitVersionOverride, clearPortraitVersion])
 
   // ★ 房主点"开始游戏"之后，后端 _on_game_start 会把房间 phase 改成
   // InGame——其他玩家没有 WS 广播可用，只能靠轮询这个字段发现"游戏真的开始
@@ -449,12 +449,7 @@ export default function CharacterReadyPage() {
           roomId={roomId}
           characterId={characterId}
           characterName={character.info.name}
-          result={portraitResult}
           portraitUrl={playerId ? portraitUrls[playerId] : undefined}
-          onResult={(result) => {
-            setPortraitResult(result)
-            setPortraitVersionOverride(result.portraitVersion)
-          }}
           onClose={() => setShowPortraitGenerator(false)}
         />
       )}

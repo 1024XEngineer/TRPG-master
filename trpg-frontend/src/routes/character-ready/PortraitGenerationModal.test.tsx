@@ -1,89 +1,53 @@
-import { useState } from 'react'
+/** 验证后台生图弹窗的关闭、创建和终止交互。 */
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import type { PortraitGenerationResult } from 'trpg-sdk'
+import type { PortraitGenerationTaskRead } from 'trpg-sdk'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { generateCharacterPortrait } from '@/services/character/portrait-api'
+import { createCharacterPortrait, cancelCharacterPortrait } from '@/services/character/portrait-api'
+import { usePortraitGenerationStore } from '@/stores/portrait-generation-store'
 import { PortraitGenerationModal } from './PortraitGenerationModal'
 
-vi.mock('@/services/character/portrait-api', () => ({
-  generateCharacterPortrait: vi.fn(),
-}))
-
-const generated: PortraitGenerationResult = {
-  generationId: 'generation-1',
-  status: 'completed',
-  imageUrl: 'https://images.example/portrait.png',
-  portraitVersion: 'portrait-version-1',
-  prompt: 'portrait prompt',
-  negativePrompt: 'watermark',
-  promptSummary: '私家侦探的风衣、伤疤和侦查装备',
-  promptSource: 'deepseek',
-}
-
-function Harness({ initialResult = null }: { initialResult?: PortraitGenerationResult | null }) {
-  const [result, setResult] = useState(initialResult)
-  return (
-    <PortraitGenerationModal
-      roomId="room-1"
-      characterId="character-1"
-      characterName="陈探员"
-      result={result}
-      portraitUrl={result ? 'blob:persistent-portrait' : undefined}
-      onResult={setResult}
-      onClose={vi.fn()}
-    />
-  )
-}
+vi.mock('@/services/character/portrait-api', () => ({ createCharacterPortrait: vi.fn(), cancelCharacterPortrait: vi.fn() }))
+const task = (status: PortraitGenerationTaskRead['status']): PortraitGenerationTaskRead => ({
+  generationId: 'generation-1', status, cancelRequested: status === 'cancelling', style: 'realistic',
+  size: '1024x1024', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
+})
+const props = { roomId: 'room-1', characterId: 'character-1', characterName: '陈探员', onClose: vi.fn() }
 
 describe('PortraitGenerationModal', () => {
-  beforeEach(() => {
-    vi.mocked(generateCharacterPortrait).mockReset()
-  })
+  beforeEach(() => { usePortraitGenerationStore.setState({ tasks: {}, cancelling: {}, notices: [], portraitVersions: {} }); vi.clearAllMocks() })
+  afterEach(cleanup)
 
-  afterEach(() => {
-    cleanup()
-  })
-
-  it('打开弹窗时不会自动生图，由玩家主动确认', () => {
-    render(<Harness />)
-
-    expect(generateCharacterPortrait).not.toHaveBeenCalled()
-    expect(screen.getByRole('button', { name: '开始生成' })).toBeEnabled()
-  })
-
-  it('展示生成中状态、成功图片和生成依据', async () => {
-    let resolveRequest: (value: PortraitGenerationResult) => void = () => undefined
-    vi.mocked(generateCharacterPortrait).mockReturnValue(
-      new Promise((resolve) => {
-        resolveRequest = resolve
-      }),
-    )
-    render(<Harness />)
-
+  it('创建接口返回后台任务快照', async () => {
+    vi.mocked(createCharacterPortrait).mockResolvedValue(task('queued'))
+    render(<PortraitGenerationModal {...props} />)
     fireEvent.click(screen.getByRole('button', { name: '开始生成' }))
-
-    expect(screen.getByText('正在生成人物图片…')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '生成中…' })).toBeDisabled()
-    expect(generateCharacterPortrait).toHaveBeenCalledTimes(1)
-
-    resolveRequest(generated)
-    await waitFor(() => {
-      expect(screen.getByRole('img', { name: '陈探员的人物图片' })).toHaveAttribute(
-        'src',
-        'blob:persistent-portrait',
-      )
-    })
-    expect(screen.getByText(generated.promptSummary)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '重新生成' })).toBeEnabled()
+    await waitFor(() => expect(screen.getByRole('button', { name: '终止生成' })).toBeEnabled())
   })
 
-  it('生成失败后显示错误并允许重试', async () => {
-    vi.mocked(generateCharacterPortrait).mockRejectedValueOnce(new Error('阿里云生图服务暂时不可用'))
-    render(<Harness initialResult={generated} />)
+  it('生成中仍可关闭弹窗且不会隐式取消', () => {
+    usePortraitGenerationStore.getState().setTask('room-1', 'character-1', task('generating'))
+    render(<PortraitGenerationModal {...props} />)
+    expect(screen.getByText('关闭窗口不会终止任务，进入游戏后仍会继续生成')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '关闭窗口，生成将在后台继续' }))
+    expect(props.onClose).toHaveBeenCalledOnce()
+    expect(cancelCharacterPortrait).not.toHaveBeenCalled()
+  })
 
-    fireEvent.click(screen.getByRole('button', { name: '重新生成' }))
+  it('遮罩和 Esc 也只关闭窗口，不终止生成', () => {
+    usePortraitGenerationStore.getState().setTask('room-1', 'character-1', task('generating'))
+    const { container } = render(<PortraitGenerationModal {...props} />)
+    fireEvent.click(container.querySelector('[aria-hidden="true"]') as Element)
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(props.onClose).toHaveBeenCalledTimes(2)
+    expect(cancelCharacterPortrait).not.toHaveBeenCalled()
+  })
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('阿里云生图服务暂时不可用')
-    expect(screen.getByRole('button', { name: '重新生成' })).toBeEnabled()
+  it('终止生成防止重复提交并显示终止中', async () => {
+    usePortraitGenerationStore.getState().setTask('room-1', 'character-1', task('generating'))
+    vi.mocked(cancelCharacterPortrait).mockResolvedValue(task('cancelling'))
+    render(<PortraitGenerationModal {...props} />)
+    fireEvent.click(screen.getByRole('button', { name: '终止生成' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: '终止中…' })).toBeDisabled())
+    expect(cancelCharacterPortrait).toHaveBeenCalledOnce()
   })
 })

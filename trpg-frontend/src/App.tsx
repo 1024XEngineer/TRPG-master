@@ -5,6 +5,8 @@ import { getAuthToken } from '@/services/api-client';
 import { fetchMe } from '@/services/auth';
 import { useAuthStore } from '@/stores/auth-store';
 import { ROUTES } from '@/config/routes';
+import { usePortraitGenerationCoordinator } from '@/hooks/usePortraitGeneration';
+import { PortraitGenerationNotices } from '@/features/portrait/PortraitGenerationNotices';
 
 const LoginPage = lazy(() => import('@/routes/auth/LoginPage'));
 const RegisterPage = lazy(() => import('@/routes/auth/RegisterPage'));
@@ -33,6 +35,7 @@ function LoadingFallback() {
  * 原型，业务数据全部走真实后端 + trpg-sdk，不再有 mock 模式。
  */
 function App() {
+  usePortraitGenerationCoordinator();
   const login = useAuthStore((s) => s.login);
   // auth-store 只存在内存里（不持久化），但登录 token 一直躺在 localStorage。
   // 页面刷新/HMR 全量重载后 auth-store 会被清空，若不在这里用 token 换回身份，
@@ -52,6 +55,7 @@ function App() {
 
   return (
     <PhoneLayout>
+      <PortraitGenerationNotices />
       <Suspense fallback={<LoadingFallback />}>
         <Routes>
           <Route path="/" element={<Navigate to="/auth/login" replace />} />

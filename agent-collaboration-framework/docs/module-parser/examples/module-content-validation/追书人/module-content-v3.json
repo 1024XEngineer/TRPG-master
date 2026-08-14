@@ -1,7 +1,7 @@
 {
   "content_schema_version": 3,
   "module_id": "paper-chase-zh-coc7",
-  "version": "3.0.5",
+  "version": "3.0.6",
   "world_ref": "coc-7e",
   "background": "时代与地点为美国禁酒令时期的密歇根州阿诺兹堡。调查员受托马斯·金博尔委托，从五本失窃的旧书和叔叔道格拉斯一年前的失踪案入手，走访旧宅、图书馆与公共墓地。叙事应保持安静、克制而带哥特气息，以夜色、旧书、墓园和孤独感作为反复意象；面对异常时不要急于渲染纯粹敌意，应为同情、选择与淡淡哀伤保留空间。任何尚未由线索确认的真相都不得提前告知玩家。",
   "information": [
@@ -403,12 +403,23 @@
         "道格拉斯的书"
       ],
       "description": "五本没有多少经济价值、却被道格拉斯珍爱的旧书。",
-      "located_in": "kimball_study",
+      "located_in": "crypt",
       "state": {
         "stolen": true,
         "recovered": false
       },
       "visibility": "public",
+      "visibility_conditions": [
+        {
+          "op": "predicate",
+          "predicate": "entity_state_is",
+          "args": {
+            "entity_id": "crypt_entrance",
+            "key": "slab_moved",
+            "value": true
+          }
+        }
+      ],
       "item_component": {
         "portable": true,
         "unique": true,

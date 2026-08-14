@@ -145,7 +145,7 @@ class _WsFirstPersonThenSafeNarration:
         self.calls += 1
         return {
             "kind": "narration",
-            "text": ("我带着你们进入墓园。" if self.calls == 1 else "你带着托马斯进入墓园。"),
+            "text": ("我带着你们进入墓地。" if self.calls == 1 else "你带着托马斯进入墓地。"),
             "claimed_evidence_refs": [],
             "suggested_actions": [],
         }
@@ -1478,7 +1478,7 @@ def test_subject_ownership_failure_retries_before_publishing_narration(
                 "playerId": room["playerId"],
                 "payload": {
                     "clientActionId": action_id,
-                    "utterance": "带托马斯去墓园",
+                    "utterance": "带托马斯去墓地",
                 },
             }
         )
@@ -1494,6 +1494,6 @@ def test_subject_ownership_failure_retries_before_publishing_narration(
         )
 
     assert narration_model.calls == 2
-    assert completed["payload"]["narration"]["text"] == "你带着托马斯进入墓园。"
-    assert narration["payload"]["text"] == "你带着托马斯进入墓园。"
-    assert all("我带着你们进入墓园" not in str(message) for message in seen)
+    assert completed["payload"]["narration"]["text"] == "你带着托马斯进入墓地。"
+    assert narration["payload"]["text"] == "你带着托马斯进入墓地。"
+    assert all("我带着你们进入墓地" not in str(message) for message in seen)

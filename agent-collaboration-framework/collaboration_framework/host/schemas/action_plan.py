@@ -15,6 +15,7 @@ from collaboration_framework.contracts import (
     ActionPlanStep,
     AdjudicationExecution,
     ContractModel,
+    JsonObject,
     KeeperCapabilityView,
     NarrationEvidence,
     PlayerInput,
@@ -23,6 +24,7 @@ from collaboration_framework.contracts import (
     WorldClockView,
 )
 from collaboration_framework.host.schemas.agent import _validate_keeper_scope
+from collaboration_framework.host.schemas.history import RecentTurnContext
 
 PlanRunStatus = Literal[
     "active",
@@ -181,6 +183,23 @@ class ActionPlanRun(ContractModel):
     created_at: datetime
     updated_at: datetime
 
+    def to_persistence_json_dict(self) -> JsonObject:
+        """序列化可恢复的内部运行状态，并保留裁决字段来源信息。"""
+
+        return self.model_dump(
+            mode="json",
+            context={"preserve_persistence_intent_explicit": True},
+        )
+
+    @classmethod
+    def from_persistence_json_dict(cls, value: JsonObject) -> ActionPlanRun:
+        """只在可信存储边界读取内部兼容标记。"""
+
+        return cls.model_validate(
+            value,
+            context={"allow_persistence_intent_explicit_marker": True},
+        )
+
     @model_validator(mode="after")
     def validate_run(self) -> ActionPlanRun:
         if len(self.steps) != len(self.plan.steps):
@@ -284,6 +303,11 @@ class ActionPlanStepContext(ContractModel):
     step: ActionPlanStep
     player_view: PlayerView
     completed_steps: tuple[CompletedPlanStepSummary, ...] = ()
+    # Player-safe presentation history is not authoritative world state.  It is
+    # nevertheless useful as soft context when the player now acts on an
+    # ordinary detail that was narrated in the same continuous scene; the
+    # adjudicator must still materialize that detail through Runtime creation.
+    recent_history: RecentTurnContext | None = None
     # Set only after the Engine refused a proposal for this same step. It carries
     # a stable player-safe code/reason, never hidden module content.
     #
@@ -306,6 +330,11 @@ class ActionPlanStepContext(ContractModel):
             raise ValueError("ActionPlanStepContext identity scope 不一致")
         if self.step_index != len(self.completed_steps):
             raise ValueError("当前 step_index 必须紧跟已完成步骤")
+        if self.recent_history is not None:
+            self.recent_history.validate_for(
+                player_input=self.player_input,
+                player_view=self.player_view,
+            )
         _validate_keeper_scope(self.keeper_capabilities, self.player_view)
         return self
 

@@ -38,6 +38,7 @@ from collaboration_framework.host.ports import (
     ActionPlanStepAdjudicator,
     ActionPlanStepFailure,
     ActionPlanStepFailureObserver,
+    RecentHistorySource,
     SingleAdjudicationExecutor,
 )
 from collaboration_framework.host.schemas import (
@@ -48,6 +49,8 @@ from collaboration_framework.host.schemas import (
     ActionPlanStepContext,
     ActionPlanStepRun,
     CompletedPlanStepSummary,
+    RecentHistoryBudget,
+    RecentTurnContext,
     SingleActionClarificationResult,
     SingleActionTurnResult,
 )
@@ -81,6 +84,14 @@ _REPAIR_HINTS: dict[str, str] = {
         "其中——逐个字段判断，非空的都命中才能保留 rule_decision；一条都对不上就"
         "去掉 rule_decision，按普通裁决重新给出这一步。"
     ),
+    "INVENTORY_TARGET_NOT_PORTABLE": (
+        "holder_actor_id 只接受 player_view.scene.loose_items、player_view.inventory，"
+        "或同一 effects 序列先用 ensure_runtime_entity(entity_kind=object) 创建的物品。"
+        "若玩家明确指的是当前可见但不可携带的固定实体，改为零写入 narrative_only，"
+        "如实表现拿不走，绝不能创建一个便携替身；若上一版只是把玩家所说的普通软场景"
+        "物品错配到不相干实体，则重新执行通用 Runtime 创建门禁，通过后按"
+        " ensure_runtime_entity、move_entity 的顺序创建并取得。"
+    ),
 }
 
 
@@ -102,6 +113,8 @@ class ActionPlanOrchestrator:
         policy: ActionPlanPolicy | None = None,
         lease_seconds: int = 30,
         on_step_failure: ActionPlanStepFailureObserver | None = None,
+        recent_history_source: RecentHistorySource | None = None,
+        recent_history_budget: RecentHistoryBudget | None = None,
     ) -> None:
         if lease_seconds < 1:
             raise ValueError("lease_seconds 必须大于 0")
@@ -112,6 +125,8 @@ class ActionPlanOrchestrator:
         self._policy = policy or ActionPlanPolicy()
         self._lease_seconds = lease_seconds
         self._on_step_failure = on_step_failure
+        self._recent_history_source = recent_history_source
+        self._recent_history_budget = recent_history_budget or RecentHistoryBudget()
 
     @property
     def policy(self) -> ActionPlanPolicy:
@@ -725,6 +740,7 @@ class ActionPlanOrchestrator:
             step_request_id=player_input.client_action_id,
             step=ActionPlanStep(kind="action", semantic_goal=semantic_goal),
             player_view=view,
+            recent_history=await self._recent_history(player_input, view),
             previous_rejection=previous_rejection,
             keeper_capabilities=await self._keeper_capabilities(player_input, view),
         )
@@ -871,6 +887,33 @@ class ActionPlanOrchestrator:
         except (AttributeError, NotImplementedError):
             return None
 
+    async def _recent_history(
+        self,
+        player_input: PlayerInput,
+        view: PlayerView,
+    ) -> RecentTurnContext | None:
+        """Read revision-bound presentation history without making it authority."""
+
+        if self._recent_history_source is None:
+            return None
+        try:
+            history = await self._recent_history_source.read(
+                player_input=player_input,
+                player_view=view,
+                exclude_correlation_id=player_input.client_action_id,
+                budget=self._recent_history_budget,
+            )
+            history.validate_for(player_input=player_input, player_view=view)
+            return history
+        except Exception as exc:
+            # History is optional soft context.  A read/projection failure must
+            # not prevent an otherwise authoritative step from being judged.
+            logger.warning(
+                "action_plan_step_recent_history_degraded",
+                extra={"error_type": type(exc).__name__},
+            )
+            return None
+
     async def _freeze_current_adjudication(
         self,
         run: ActionPlanRun,
@@ -896,6 +939,7 @@ class ActionPlanOrchestrator:
             step=current.step,
             player_view=view,
             completed_steps=self._completed_summaries(run),
+            recent_history=await self._recent_history(player_input, view),
             previous_rejection=self._validation_feedback_text(current),
             keeper_capabilities=await self._keeper_capabilities(player_input, view),
         )
@@ -1311,7 +1355,9 @@ class ActionPlanOrchestrator:
         unattributable and the run is stuck.
         """
 
-        return ActionPlanRun.model_validate(run.model_dump(mode="json"))
+        return ActionPlanRun.from_persistence_json_dict(
+            run.to_persistence_json_dict()
+        )
 
     async def _release_lease(self, run: ActionPlanRun) -> ActionPlanRun:
         if run.lease_owner is None:
@@ -1479,6 +1525,7 @@ class HostTurnDecisionExecutor:
         decision: HostTurnDecision,
         *,
         on_progress: ActionPlanProgressObserver | None = None,
+        recent_history: RecentTurnContext | None = None,
     ) -> (
         SingleActionTurnResult
         | SingleActionClarificationResult
@@ -1574,6 +1621,12 @@ class HostTurnDecisionExecutor:
                         semantic_goal=decision.adjudication.summary,
                     ),
                     player_view=view,
+                    recent_history=(
+                        recent_history
+                        if recent_history is not None
+                        and recent_history.as_of_revision == view.revision
+                        else None
+                    ),
                     previous_rejection=_with_repair_hint(
                         feedback.code,
                         feedback.player_safe_reason,

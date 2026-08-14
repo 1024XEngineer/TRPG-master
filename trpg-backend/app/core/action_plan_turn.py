@@ -305,11 +305,11 @@ def _match_visible_exit(view: PlayerView, text: str):
     return matches[0][2]
 
 
-"""普通环境地点：现实中理应遍地都是、不承载任何剧情秘密的那类去处。
+"""部分常见环境地点的确定性快捷路径。
 
-只收录「模组不写、但世界里一定有」的通用场所。任何可能是关键地点的词
-（教堂、警局、医院、码头……）都不在这里——那些必须由模组作者写出来，
-或者由 Agent 在完整上下文里判断，不能由这张表凭空造出来。
+这张表只用于减少明确简单请求的模型调用，不是 Runtime 地点的类别白名单。
+未出现在表里的地点必须交由 Agent 按 WorldProfile / background 和 Canon 冲突
+门禁判断；不得仅因类别未收录就拒绝创建，也不得映射成其他已知地点。
 """
 _AMBIENT_VENUE_LABELS: tuple[tuple[str, str, str], ...] = (
     ("旅店", "ambient_inn", "镇上的旅店"),
@@ -326,6 +326,18 @@ _AMBIENT_VENUE_LABELS: tuple[tuple[str, str, str], ...] = (
 )
 
 _AMBIENT_VENUE_INTENT_WORDS = ("找", "去", "前往", "进入", "到", "住", "休息", "睡")
+
+
+def _ambient_venue_aliases(location_id: str) -> tuple[str, ...]:
+    """返回同一类普通地点的自然语言名称。
+
+    Runtime 只保存一个稳定 id 和展示名，但玩家后续回到该地点时
+    可能使用同义词。同义词来自通用场所表，不从单个测试语句猜测。
+    """
+
+    return tuple(
+        label for label, id_stem, _display_name in _AMBIENT_VENUE_LABELS if id_stem == location_id
+    )
 
 
 def _ambient_venue_adjudication(
@@ -416,13 +428,16 @@ def _match_travel_target(view: PlayerView, text: str) -> _TravelTarget | None:
     else:
         arrival_marker = text.rfind("到")
         match_text = text[arrival_marker + 1 :]
-    matches: list[tuple[int, str, _TravelTarget]] = []
+    matches: list[tuple[tuple[int, int], str, _TravelTarget]] = []
     for location in view.known_locations:
         if location.existence != "known" or location.localization != "located":
             continue
-        overlap = _best_label_overlap(match_text, (location.name, location.id))
-        if overlap is not None:
-            matches.append((len(overlap), location.id, _TravelTarget(location.id, location.name)))
+        score = _best_travel_label_score(
+            match_text,
+            (location.name, location.id, *_ambient_venue_aliases(location.id)),
+        )
+        if score is not None:
+            matches.append((score, location.id, _TravelTarget(location.id, location.name)))
     for exit_view in view.scene.available_exits:
         if exit_view.destination is None:
             continue
@@ -433,13 +448,13 @@ def _match_travel_target(view: PlayerView, text: str) -> _TravelTarget | None:
             exit_view.destination.name,
             exit_view.destination.scene_id,
         )
-        overlap = _best_label_overlap(match_text, labels)
-        if overlap is not None:
+        score = _best_travel_label_score(match_text, labels)
+        if score is not None:
             target = _TravelTarget(
                 exit_view.destination.scene_id,
                 exit_view.destination.name,
             )
-            matches.append((len(overlap), target.id, target))
+            matches.append((score, target.id, target))
     if not matches:
         return None
     # The same location can be present in both known_locations and immediate exits.
@@ -448,10 +463,85 @@ def _match_travel_target(view: PlayerView, text: str) -> _TravelTarget | None:
         for score, target_id, target in matches
         if score == max(item[0] for item in matches if item[2].id == target.id)
     }
-    ranked = sorted(deduplicated.values(), key=lambda item: (-item[0], item[1]))
+    ranked = sorted(
+        deduplicated.values(),
+        key=lambda item: (-item[0][0], -item[0][1], item[1]),
+    )
     if len(ranked) > 1 and ranked[0][0] == ranked[1][0]:
         return None
     return ranked[0][2]
+
+
+def _best_travel_label_score(
+    text: str,
+    labels: tuple[str, ...],
+) -> tuple[int, int] | None:
+    """Score only destination-bearing location-name matches.
+
+    A full label or stable alias is always meaningful.  For longer display
+    names, a suffix can also be the identifying place name.  A shared prefix is
+    deliberately excluded: locality and directional wording commonly lives
+    there and cannot distinguish two venues in the same area.
+    """
+
+    scores: list[tuple[int, int]] = []
+    for label in labels:
+        normalized = label.strip()
+        if not normalized:
+            continue
+        if normalized in text:
+            scores.append((len(normalized), 2))
+            continue
+        overlap = _best_label_overlap(text, (normalized,))
+        if overlap is not None and normalized.endswith(overlap):
+            scores.append((len(overlap), 1))
+    return max(scores) if scores else None
+
+
+def _explicit_travel_phrase(text: str) -> str | None:
+    """Return a directly named destination phrase, not a goal that implies one.
+
+    ``去教堂看看`` names a destination and therefore must never be repaired to
+    another known location. ``去找守墓人`` only names the person being sought, so the
+    Agent may still infer a destination from player-safe capabilities.
+    """
+
+    markers = tuple(re.finditer(r"前往|进入|抵达|去", text))
+    if not markers:
+        return None
+    remainder = text[markers[-1].end() :].strip(" \t，,。；;！!？?")
+    if not remainder:
+        return None
+    phrase = re.split(r"，|,|。|；|;|！|!|？|\?|\b然后\b|接着|随后|再去", remainder, maxsplit=1)[
+        0
+    ].strip()
+    if not phrase or phrase.startswith(("找", "寻找", "寻访", "拜访", "询问", "问", "会合")):
+        return None
+    return phrase
+
+
+def _has_unmatched_explicit_travel_destination(view: PlayerView, text: str) -> bool:
+    return _explicit_travel_phrase(text) is not None and _match_travel_target(view, text) is None
+
+
+def _deterministic_clarification_text(context: ActionPlanNarrationContext) -> str:
+    """根据已提交步骤生成不会推翻权威状态的澄清文案。"""
+
+    successful_steps = tuple(
+        step for step in context.completed_steps if getattr(step, "outcome", None) == "success"
+    )
+    completed_travel = any(
+        _explicit_travel_phrase(getattr(step, "semantic_goal", "")) is not None
+        for step in successful_steps
+    )
+    if completed_travel:
+        scene_name = getattr(context.player_view.scene, "name", "") or "当前地点"
+        return f"你已经抵达{scene_name}，但后续行动尚未形成可确认的结果。"
+    if successful_steps:
+        return "此前已经完成的行动仍然有效，但后续行动尚未形成可确认的结果。"
+    if _explicit_travel_phrase(context.player_input.utterance) is not None:
+        return "你没有在当前能够确认的道路和周边找到与描述相符的地点，因此仍停留在原处。"
+    return "你暂时无法确认这次行动的具体对象或结果。"
 
 
 def _best_label_overlap(text: str, labels: tuple[str, ...]) -> str | None:
@@ -479,7 +569,7 @@ class DeterministicActionPlanNarrationModel:
             _quote_action_summary(step.semantic_goal) for step in context.completed_steps
         )
         if context.termination_status == "needs_clarification":
-            text = f"已经完成的行动是：{completed}。接下来的目标还不够明确，你想具体怎么做？"
+            text = _deterministic_clarification_text(context)
             kind = "clarification"
         elif context.termination_status in {"cancelled", "stopped"}:
             text = f"已经发生的行动是：{completed or '当前没有已完成步骤'}。后续行动已停止。"
@@ -614,15 +704,16 @@ class ActionPlanTurnApplication:
             await on_input_accepted(player_input, view)
         await _emit_phase(on_phase, "understanding_action")
         keeper_capabilities = await self._keeper_capabilities(player_input, view)
+        recent_history = await self._read_recent_history(
+            player_input=player_input,
+            player_view=view,
+        )
         try:
             decision = await self._planner.generate(
                 HostAgentContext(
                     player_input=player_input,
                     player_view=view,
-                    recent_history=await self._read_recent_history(
-                        player_input=player_input,
-                        player_view=view,
-                    ),
+                    recent_history=recent_history,
                     # A single action is adjudicated right here in the planner call,
                     # so it needs the same Keeper vocabulary a plan step gets.
                     keeper_capabilities=keeper_capabilities,
@@ -655,6 +746,7 @@ class ActionPlanTurnApplication:
             player_input,
             decision,
             on_progress=on_progress,
+            recent_history=recent_history,
         )
         if isinstance(result, ActionPlanAdvanceResult):
             return await self._finish_plan_with_phases(
@@ -1298,10 +1390,7 @@ class ActionPlanTurnApplication:
                 )
             return ActionPlanNarrationOutput(
                 kind="clarification",
-                text=(
-                    "眼前的情形还不足以确定这次行动会留下怎样的结果。"
-                    "请说明你想作用于谁或什么，以及希望达成的具体变化。"
-                ),
+                text=_deterministic_clarification_text(context),
             )
         labels = {
             ("consciousness", "unconscious"): "失去了意识",
@@ -1316,6 +1405,9 @@ class ActionPlanTurnApplication:
             ("broken", True): "已经损坏",
         }
         names = {entity.id: entity.name for entity in context.player_view.scene.visible_entities}
+        inventory_names = {
+            item.id: item.name for item in getattr(context.player_view, "inventory", ())
+        }
         results = [
             (result, labels.get((result.state_key, result.state_value)))
             for step in context.completed_steps
@@ -1326,7 +1418,19 @@ class ActionPlanTurnApplication:
             for result, label in results
             if label is not None
         ]
-        refs = tuple(result.event_ref for result, label in results if label is not None)
+        inventory_results = tuple(
+            result
+            for result, _label in results
+            if result.kind == "inventory" and result.target_id in inventory_names
+        )
+        statements.extend(
+            f"{inventory_names[result.target_id]}已经放入你的背包。" for result in inventory_results
+        )
+        refs = tuple(
+            result.event_ref
+            for result, label in results
+            if label is not None or result in inventory_results
+        )
         outcomes = tuple(step.outcome for step in context.completed_steps)
         if "cancelled" in outcomes or context.termination_status == "cancelled":
             status_text = "这次行动已经取消。"
@@ -1502,6 +1606,11 @@ def build_action_plan_turn_application(
 
     plan_store = plan_store or InMemoryActionPlanRunStore()
     projector = PlayerViewProjector(engine)
+    recent_history_budget = RecentHistoryBudget(
+        max_turns=resolved.recent_history_max_turns,
+        max_chars=resolved.recent_history_max_chars,
+    )
+    history_source = recent_history_source or _EmptyRecentHistorySource()
     orchestrator = ActionPlanOrchestrator(
         store=plan_store,
         adjudicator=adjudicator,
@@ -1509,6 +1618,8 @@ def build_action_plan_turn_application(
         player_view_projector=projector,
         policy=policy,
         on_step_failure=_log_step_adjudication_failure,
+        recent_history_source=(history_source if resolved.recent_history_enabled else None),
+        recent_history_budget=recent_history_budget,
     )
     return ActionPlanTurnApplication(
         store=store,
@@ -1517,11 +1628,8 @@ def build_action_plan_turn_application(
         planner=planner,
         orchestrator=orchestrator,
         narrator=ActionPlanNarrator(narration_model),
-        recent_history_source=recent_history_source or _EmptyRecentHistorySource(),
-        recent_history_budget=RecentHistoryBudget(
-            max_turns=resolved.recent_history_max_turns,
-            max_chars=resolved.recent_history_max_chars,
-        ),
+        recent_history_source=history_source,
+        recent_history_budget=recent_history_budget,
         recent_history_enabled=resolved.recent_history_enabled,
     )
 
@@ -1567,7 +1675,47 @@ class _RuleFirstStepAdjudicator:
         adjudication = _deterministic_step_adjudication(context)
         if adjudication is not None:
             return adjudication
-        return await self._fallback.adjudicate(context)
+        adjudication = await self._fallback.adjudicate(context)
+        if (
+            context.step.kind == "travel"
+            and _explicit_travel_phrase(context.player_input.utterance) is not None
+            and _has_unmatched_explicit_travel_destination(
+                context.player_view,
+                context.step.semantic_goal,
+            )
+            and not any(
+                isinstance(effect, EnsureRuntimeLocationEffect)
+                for effect in adjudication.success_effects
+            )
+        ):
+            # A model may choose a protocol-legal known id merely to satisfy the
+            # schema. Treat that as an unresolved destination, never as travel to
+            # the substituted place. The plan then ends with a zero-write,
+            # player-facing "not found" narration.
+            if context.plan_id != "single-action":
+                raise TurnExecutionError(
+                    "TRAVEL_DESTINATION_NOT_FOUND",
+                    "没有找到与玩家描述相符且可安全创建或到达的地点",
+                    retryable=False,
+                )
+            return adjudication.model_copy(
+                update={
+                    "summary": context.player_input.utterance,
+                    "target": ActionTarget(
+                        kind="location",
+                        id=context.player_view.scene.id,
+                    ),
+                    "method": ActionMethod(
+                        family="travel",
+                        description=context.player_input.utterance,
+                    ),
+                    "persistence_intent": "location",
+                    "success_effects": (NarrativeOnlyEffect(),),
+                    "failure_effects": (),
+                },
+                deep=True,
+            )
+        return adjudication
 
 
 def _deterministic_step_adjudication(
@@ -1612,13 +1760,27 @@ def _deterministic_step_adjudication(
                 or destination
             )
         if destination is None:
-            # An unknown *ordinary* destination is not necessarily an error:
-            # #212 lets the step Agent propose an ambient Runtime Location.
-            # Prompting alone did not get us there — the model kept answering
-            # "阿诺兹堡没有挂牌的旅店" instead of proposing one — so an ordinary
-            # venue that collides with nothing authored is resolved here, and
-            # everything else still falls through to the model.
+            # A small set of obvious venues has a deterministic fast path. This
+            # is not a creation allowlist: every other requested location still
+            # falls through to the Agent's WorldProfile/Canon-aware judgement.
             return _ambient_venue_adjudication(context)
+        if destination.id == context.player_view.scene.id:
+            # “去旅馆”也可能是在创建旅馆后的下一轮再次指向同一地点。此时行动
+            # 已经满足，不应重复提交 enter_location，更不应因零位置变化要求澄清。
+            return ActionAdjudication(
+                request_id=context.step_request_id,
+                source_revision=context.player_view.revision,
+                actor_id=context.player_input.actor_id,
+                summary=f"已经位于{destination.name}",
+                target=ActionTarget(kind="location", id=destination.id),
+                method=ActionMethod(
+                    family="action",
+                    description=f"确认当前已在{destination.name}",
+                ),
+                persistence_intent="none",
+                check=NoAdjudicationCheck(),
+                success_effects=(NarrativeOnlyEffect(),),
+            )
         destination_id = destination.id
         companion_moves = _companion_move_effects(
             player_input=context.player_input,
@@ -1808,23 +1970,86 @@ def _normalize_single_travel_decision(
     if not isinstance(decision, SingleActionDecision):
         return decision
     adjudication = decision.adjudication
-    if adjudication.method.family != "travel":
-        return decision
+    enter_effects = tuple(
+        effect for effect in adjudication.success_effects if isinstance(effect, EnterLocationEffect)
+    )
+    created_locations = {
+        effect.location_id: effect
+        for effect in adjudication.success_effects
+        if isinstance(effect, EnsureRuntimeLocationEffect)
+    }
     proposed_destination = (
         adjudication.target.id if adjudication.target.kind == "location" else None
     )
     # 玩家明确说出已知地点时绝不能被模型改写覆盖；原话没有地点时，才允许
     # 模型根据“去找守墓人”之类的语义选择目的地。
     explicit_destination = _match_travel_target(view, player_input.utterance)
+    if explicit_destination is not None and explicit_destination.id == view.scene.id:
+        mentioned_companions = _requested_companions(
+            player_input=player_input,
+            semantic_text=f"{adjudication.summary} {adjudication.method.description}",
+            capabilities=capabilities,
+        )
+        has_offscene_companion = any(
+            entity.location_id is not None and entity.location_id != view.scene.id
+            for entity in mentioned_companions
+        )
+        if not has_offscene_companion:
+            already_there = adjudication.model_copy(
+                update={
+                    "summary": f"已经位于{explicit_destination.name}",
+                    "target": ActionTarget(kind="location", id=explicit_destination.id),
+                    "method": ActionMethod(
+                        family="action",
+                        description=f"确认当前已在{explicit_destination.name}",
+                    ),
+                    "persistence_intent": "none",
+                    "check": NoAdjudicationCheck(),
+                    "success_effects": (NarrativeOnlyEffect(),),
+                    "failure_effects": (),
+                },
+                deep=True,
+            )
+            return decision.model_copy(update={"adjudication": already_there}, deep=True)
+    runtime_destination = next(
+        (effect.location_id for effect in enter_effects if effect.location_id in created_locations),
+        None,
+    )
+    if (
+        explicit_destination is None
+        and _has_unmatched_explicit_travel_destination(view, player_input.utterance)
+        and runtime_destination is None
+    ):
+        # Re-run an unknown, directly named destination through the stricter
+        # per-step location-creation path. This prevents a single-action planner
+        # from turning (for example) an unlisted requested venue into an unrelated
+        # known location just because that id is legal in the schema.
+        invalid_for_bounded_repair = adjudication.model_copy(
+            update={
+                "summary": player_input.utterance,
+                "target": ActionTarget(kind="location", id=view.scene.id),
+                "method": ActionMethod(
+                    family="travel",
+                    description=player_input.utterance,
+                ),
+                "persistence_intent": "location",
+                "success_effects": (NarrativeOnlyEffect(),),
+                "failure_effects": (),
+            },
+            deep=True,
+        )
+        return decision.model_copy(
+            update={"adjudication": invalid_for_bounded_repair},
+            deep=True,
+        )
+    if adjudication.method.family != "travel" or not enter_effects:
+        return decision
     destination_id = (
-        explicit_destination.id if explicit_destination is not None else proposed_destination
+        explicit_destination.id
+        if explicit_destination is not None
+        else runtime_destination or proposed_destination
     )
     if destination_id is None:
-        return decision
-    enter_effects = tuple(
-        effect for effect in adjudication.success_effects if isinstance(effect, EnterLocationEffect)
-    )
-    if not enter_effects:
         return decision
     semantic_text = f"{adjudication.summary} {adjudication.method.description}"
     requested_companions = _requested_companions(
@@ -1843,6 +2068,9 @@ def _normalize_single_travel_decision(
         assert source_id is not None
         assert capabilities is not None
         location_names = {location.id: location.name for location in capabilities.locations}
+        location_names.update(
+            {location_id: effect.name for location_id, effect in created_locations.items()}
+        )
         source_name = location_names.get(source_id, source_id)
         destination_name = location_names.get(destination_id, destination_id)
         # 同行者不在身边时，单次“带他去”必须展开为先会合、再同行两步；
@@ -1884,7 +2112,13 @@ def _normalize_single_travel_decision(
     )
     normalized = adjudication.model_copy(
         update={
-            "target": ActionTarget(kind="location", id=destination_id),
+            # 新地点尚不存在，必须继续以已有连接锚点作为 target；普通已知地点
+            # 才把 target 归一到最终目的地。
+            "target": (
+                adjudication.target
+                if destination_id in created_locations
+                else ActionTarget(kind="location", id=destination_id)
+            ),
             "persistence_intent": "location",
             "success_effects": (*effects, *missing_companion_moves),
         },

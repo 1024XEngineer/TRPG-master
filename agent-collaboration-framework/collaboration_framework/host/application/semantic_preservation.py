@@ -164,6 +164,32 @@ def _compare_target(
             )
         return _clarification("TARGET_KIND_CHANGED")
 
+    if (
+        validation_feedback.code == "INVENTORY_TARGET_NOT_PORTABLE"
+        and before.kind == "entity"
+        and after.kind == "location"
+        and after.id == player_view.scene.id
+        and original.persistence_intent == "inventory"
+        and any(
+            effect.type == "move_entity"
+            and getattr(effect, "holder_actor_id", None) is not None
+            for effect in original.success_effects
+        )
+        and not any(
+            item.id == before.id
+            for item in (*player_view.scene.loose_items, *player_view.inventory)
+        )
+    ):
+        # The rejected id was not a portable item.  Re-anchoring the same
+        # pickup intent to the current scene is the protocol-required shape
+        # for either a zero-write obstruction or a guarded Runtime item
+        # creation; the effect comparison below still restricts both forms.
+        return SemanticPreservationResult(
+            "preserved",
+            "INVENTORY_TARGET_REANCHORED",
+            "不可携带目标已按当前场景重新裁决",
+        )
+
     if validation_feedback.code != "TARGET_UNAVAILABLE" or before.kind != after.kind:
         return _clarification("TARGET_CHANGED")
 
@@ -252,6 +278,14 @@ def _compare_effect_branch(
     after = [_effect_payload(effect, new_target_id, new_target_id) for effect in repaired]
     if before == after:
         return SemanticPreservationResult("preserved", "UNCHANGED", "效果未改变")
+    portability_repair = _inventory_portability_repair_status(
+        branch,
+        before,
+        after,
+        feedback,
+    )
+    if portability_repair is not None:
+        return portability_repair
     if len(after) >= len(before):
         if before == after[: len(before)] and all(
             payload == {"type": "narrative_only"} for payload in after[len(before) :]
@@ -315,6 +349,53 @@ def _is_persistent_effect_repair(
     meaningful_before = [item for item in before if item != {"type": "narrative_only"}]
     meaningful_after = [item for item in after if item != {"type": "narrative_only"}]
     return len(meaningful_before) <= 1 and len(meaningful_after) == 1
+
+
+def _inventory_portability_repair_status(
+    branch: Literal["success", "failure"],
+    before: list[object],
+    after: list[object],
+    feedback: ValidationFeedback,
+) -> SemanticPreservationResult | None:
+    """Allow only the two safe repairs for a nonportable inventory target."""
+
+    if branch != "success" or feedback.code != "INVENTORY_TARGET_NOT_PORTABLE":
+        return None
+    meaningful_before = [item for item in before if item != {"type": "narrative_only"}]
+    invalid_moves = [
+        item
+        for item in meaningful_before
+        if isinstance(item, dict)
+        and item.get("type") == "move_entity"
+        and isinstance(item.get("holder_actor_id"), str)
+    ]
+    if len(meaningful_before) != 1 or len(invalid_moves) != 1:
+        return None
+    meaningful_after = [item for item in after if item != {"type": "narrative_only"}]
+    if not meaningful_after:
+        return SemanticPreservationResult(
+            "narrowed",
+            "NONPORTABLE_PICKUP_BLOCKED",
+            "不可携带对象已改为零写入叙事结果",
+        )
+    if len(meaningful_after) != 2:
+        return None
+    created, moved = meaningful_after
+    if not isinstance(created, dict) or not isinstance(moved, dict):
+        return None
+    if (
+        created.get("type") != "ensure_runtime_entity"
+        or created.get("entity_kind") != "object"
+        or moved.get("type") != "move_entity"
+        or moved.get("entity_id") != created.get("entity_id")
+        or moved.get("holder_actor_id") != invalid_moves[0].get("holder_actor_id")
+    ):
+        return None
+    return SemanticPreservationResult(
+        "preserved",
+        "RUNTIME_ITEM_PICKUP_REPAIRED",
+        "普通场景物品已改为先创建再取得",
+    )
 
 
 def _effect_payload(effect: ActionEffect, source_id: str, replacement_id: str) -> object:

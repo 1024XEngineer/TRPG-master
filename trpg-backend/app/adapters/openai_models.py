@@ -66,6 +66,39 @@ method.family 也使用下列稳定值并生成精确匹配的成功效果：击
 拾取=pick_up、转交=transfer、丢下=drop、消耗=consume、前往=travel。不得把这些动作
 标成 none，也不得只给 narrative_only。命中模组 rule_decision 时仍显式填写最贴近的
 persistence_intent，但 success_effects/failure_effects 按规则所有权要求留空。
+上述 open/close/lock 等物体动作族只适用于一个已存在的物理实体确实改变
+对应状态的情况。自然语言中同一动词的服务请求、惯用语或抽象含义，不得映射成
+物体 open；若没有单独建模的权威状态，使用 method.family=action、
+persistence_intent=none 和 narrative_only，不要伪造 object_state 效果。
+
+**明确旅行地点决策表（高优先级）**：当玩家直接指定了目的地类型时，只能选择：
+
+1. 语义匹配已有地点：enter_location。
+2. PlayerView 和 keeper_capabilities.locations 都无匹配，但该类地点符合 WorldProfile /
+   background 且不与 Canon 或隐藏剧情冲突：必须使用 persistence_intent=location，并按
+   ensure_runtime_location、enter_location 的顺序创建并进入。
+3. 与 WorldProfile / background / forbidden_content 冲突，或与已写 Canon、秘密入口、隐藏路线
+   冲突：narrative_only，不移动。
+
+没有“因为列表里没有就无法确认”的第四个分支。列表缺失是进入分支 2 做背景判定的
+触发条件，不是拒绝理由。新地点尚未创建时，target 使用已有公开连接锚点，新 id 只出现在
+上述两个 effects 中。
+
+**明确取得物品决策表（同样优先于后文“目标不存在”处理）**：玩家要捡起、拿走、收好或
+放入背包时，只能选择：
+
+1. scene.loose_items 或 inventory 有语义明确匹配且归宿相容的 ItemInstance：复用其 id，执行
+   move_entity / consume_entity。
+2. 没有权威实例，但同一连续场景的 published_narration、scene、location_context 或环境常识
+   支持该类型内容自然在场，且它通过世界一致性、普通性、零剧情权限及 Canon 不替代门禁：
+   必须按 ensure_runtime_entity(entity_kind=object)、move_entity(holder_actor_id=self_actor.id)
+   的顺序创建并取得。叙事没有预先建立某个具体实体 id 正是此分支要解决的问题，不是拒绝理由。
+3. 玩家语义明确指向一个已存在但不在 loose_items / inventory 的固定实体：narrative_only
+   表现无法拿走，不得创建便携替身。
+4. 软场景依据不足，或候选未通过安全门禁：narrative_only，不得声称进入背包。
+
+不存在“叙事提过这种普通物品，但没有具体实体所以只能留在原处”的第五个分支；分支 2 条件
+全部满足时必须创建。新 id 仍只出现在 effects 中，target 使用当前 scene location。
 
 target.kind 决定 target.id 只能来自 PlayerView 的哪一个列表，两者必须配套，绝不能
 把某个列表里的 id 换一个 kind 使用：
@@ -76,6 +109,27 @@ target.kind 决定 target.id 只能来自 PlayerView 的哪一个列表，两者
   player_view.scene.loose_items[].id 或 player_view.inventory[].id；
 - kind=actor：只能是 player_view.scene.visible_actors[].id 或 self_actor.id；
 - kind=information：只能是 player_view.known_information[].id。
+
+上述列表只证明一个 id 在协议上可以引用，不证明它与玩家原话语义匹配。裁决前必须把玩家
+本回合明确指定的对象或地点，与 PlayerView 中候选项的 id、名称、别名、类型、用途和限定属性
+逐项核对；只有明确相容时才能复用。玩家指定的地点不存在或不匹配时，绝不能为了得到一个合法
+id，就把当前 scene 或其他已知地点当作替代目标，也不能把玩家要求在别处进行的休息、等待、
+交互或操作改成在当前位置执行。
+
+没有匹配项时只能选择以下路径之一：符合通用创建门禁就创建玩家实际指定类型的 Runtime 内容；
+不能安全创建时，以当前 scene.id 作为零写入裁决的范围 target，使用 narrative_only，并在 summary
+中如实说明该目标目前无法确认或到达。此时不得 enter_location、advance_world_time，或提交任何
+暗示玩家已在替代地点完成行动的效果。当前 scene.id 在这种失败裁决中只是叙事范围锚点，不代表
+玩家指定的地点已经匹配成功。
+
+recent_history 主要帮助解析本回合省略的指代和对话承接。玩家本回合明确说出的对象、地点、类型
+和限定条件始终优先；过去的玩家主张、语义摘要或叙事文本都不能覆盖本回合原话，不能把历史里
+出现过的相似地点当成当前目标，也不能把过去可能错误的映射延续到本回合。唯一的软场景用途是：
+若同一连续场景中已发布的 published_narration 描述了一个普通环境物品，玩家现在明确要取得它，
+该描述可以与 scene、location_context、环境常识共同支持“这种普通物品自然在场”的 Runtime
+创建判断；它本身不建立实体 id、不证明所有权，也绝不能支持秘密、线索、钥匙、危险品或其他
+受限内容。通过全部通用门禁后仍须新建 ItemInstance，再执行 move_entity，不能把叙事名词硬套到
+名称相近的 Canon 实体。
 
 玩家查看自己的角色卡、技能或状态时，用 `target.kind=actor` +
 `target.id=self_actor.id`。查看或使用背包中的具体物品时，必须使用
@@ -100,24 +154,57 @@ keeper_capabilities 时，只能使用 enter_location 与 narrative_only。
   localization=located 的 id、available_exits[].destination.scene_id，或同一次裁决里
   刚刚用 ensure_runtime_location 建出来的地点。Engine 会对公开路线寻路，并在第一个
   锁门或交互边界处中断，不能因为目标不是当前的一跳邻居就要求玩家分段输入。
-- ensure_runtime_location：玩家要去的地方在剧情上明显应该存在、但
-  keeper_capabilities.locations 里没有时才用。若玩家泛指“一家旅店”“一个能休息的
-  地方”等普通地点，且不同店名不会改变已知路线、风险或剧情意义，不应反问具体哪一家，
-  而应创建一个符合 background / WorldProfile 的普通地点。location_id 必须是新的、
+- ensure_runtime_location：先检查 PlayerView 和 keeper_capabilities.locations。玩家指定的
+  地点与已有 Canon / Runtime 地点都不匹配，但该类地点按 background 与
+  WorldProfile 的 era、region、technology_level、tone、forbidden_content 可以在当前世界
+  和所在地区合理存在时，必须创建并进入。模组和当前 scene 没有穷举该地区的
+  设施不是反证，地点的功能类别、规模或专业性本身也不构成拒绝理由；不应追问
+  具体实例。location_id 必须是新的、
   稳定的描述性 id，不得与任何已有地点 id 相同；connected_location_id 必须是一个已知
   且已定位的现有地点，优先选择公开 connector；parent_location_id 应指向玩家已知的
-  region/site 层级父地点。Runtime 地点不得携带关键线索、隐藏入口、关键物品或结局能力。
+  region/site 层级父地点。创建只确立地点的公开外壳与普通连接，不得同时确认内部
+  NPC、服务、物品、床位、访问权限、信息、证据、线索、秘密入口、隐藏路线、捷径或结局能力。
+  与隐藏 Canon 地点同名或同一语义时不得创建替身或泄露它；除此以外，只要模组未提及且
+  地点本身符合背景，就不得因列表里没有它而返回 narrative_only。
   创建并立即前往时，success_effects 必须按 ensure_runtime_location、enter_location 的
   顺序提交；target 仍使用作为连接锚点的现有 location，不能把尚未创建的 id 当作 target。
 - ensure_runtime_entity：需要一个模组没写、但情境上应该在场的普通人或普通物件
-  （路过的店员、值班的管理员、地上的石子、桌上的一支笔）时才用。entity_id 必须是新的；
-  location_id 必须已存在。不要用它造关键 NPC、关键道具或本该由模组给出的线索。
+  （当前环境自然出现的普通工作人员，或无剧情意义的日常可携带物件）时才用。entity_id 必须是新的；
+  location_id 必须已存在。使用前必须先核对 scene.visible_entities、scene.loose_items 与
+  inventory；只有 id / 名称 / 别名明确匹配，且类别、数量、所有者、唯一性、状态和玩家限定属性
+  都相容时才复用已有实体，共享上位类别或部分词语不够。
+
+  这次核对只决定“复用已有实体”还是“评估 Runtime 创建候选”。列表没有预存某个具体实例，
+  正是 ensure_runtime_entity 要处理的情况，不能单独作为 narrative_only 的理由；没有匹配项时
+  必须继续完成下列门禁。
+
+  不存在时逐项执行通用创建门禁：
+  1. 对照 keeper_capabilities.world_profile 的 era、region、technology_level、tone 与
+     forbidden_content，排除时代、地区、技术或基调不相容的内容；该字段缺失时不得自行假设。
+  2. scene 公开描述、location_context、不依赖隐藏事实的环境常识，或同一连续场景中已经发布的
+     published_narration，必须支持“该类型内容”自然在场；这里判断的是类型与环境的关系，不要求
+     某个具体实例已有 id。published_narration 只是普通内容的软场景依据，不是权威实体或剧情事实；
+     列表未列出实例不是反证，玩家单方面声称其存在也不是证据，公开描述不需要逐件列举日常陈设。
+  3. 只允许常见、低价值、低风险、可替代、无唯一身份且可合理携带的日常内容；需要专业来源、
+     受管制获取、显著财富、危险能力或罕见技术的内容一律不创建。
+  4. 不得创建或暗示信息、证据、线索、任务物、钥匙、特殊武器、稀有资源、关键 NPC、秘密入口、
+     新路线、捷径，或任何改变风险、可达性、调查结论和结局的能力。
+  5. 不得冒充、复制、改写或提前显现 Canon 实体，也不能拿类别相近的 Canon 实体代替普通物件。
+
+  任一门禁不满足就使用 narrative_only；全部通过时必须 ensure_runtime_entity，不能因为列表中
+  原先没有该实例而退回 narrative_only。
   `entity_kind=object` 会创建可拾取的 ItemInstance；如果玩家在同一动作中取得它，必须紧接
-  一个 move_entity，把 holder_actor_id 设为 self_actor.id。这样物品才会进入背包。
+  一个 move_entity，把 holder_actor_id 设为 self_actor.id。这样物品才会进入背包。新实体在
+  提交前尚不存在，因此 target 必须保持为当前 player_view.scene.id 的 location，绝不能把新
+  entity_id 当作 target。
 - move_entity：让 NPC/实体换地点，或改变物品 custody。拾取、保留或转交物品时使用
   holder_actor_id；把投掷、放置、丢弃后的物品留在当前场景时使用 location_id。
-  entity_id 取自 keeper_capabilities.entities[].id、player_view.scene.loose_items[].id 或
-  player_view.inventory[].id。
+  玩家拾取、转交、丢下或消费物品时，entity_id 只能取自 player_view.scene.loose_items[].id、
+  player_view.inventory[].id，或同一 effects 序列刚 ensure_runtime_entity 创建的新 id；不能
+  仅因某物出现在 scene.visible_entities 或 keeper_capabilities.entities 就把它移入背包。
+  玩家明确指向一个现有但不可携带的固定实体时只能 narrative_only 表现拿不走，不得创建便携
+  替身；玩家指向的是叙事中的普通软物品且没有权威实例时，则重新走 Runtime 门禁，通过后创建
+  新 ItemInstance 再移动。NPC 移动也必须是玩家当前可见且本次行动明确涉及的对象。
 - change_entity_state：记录实体上一个具体、可观察的变化（门被撬开、灯被点亮）。
   key 只能用字母数字下划线短横。
 - consume_entity：物品被吃掉、喝掉、烧毁、耗尽或彻底失效时使用，之后它会从背包和
@@ -191,7 +278,13 @@ change_entity_state）；但不要为了内部写入次数把一个意图拆成�
 _ACTION_PLAN_NARRATION_INSTRUCTIONS = """
 你是 TRPG 守秘人，只返回所要求的 JSON。只叙述 completed_steps 中已经提交的结果和
 最终 player_view；不得声称未完成步骤已经发生。needs_clarification 必须返回
-kind=clarification，并用自然的角色内措辞提出一次最小澄清。claimed_evidence_refs
+kind=clarification。若 completed_steps 已有成功的旅行步骤，但后续步骤未解决，必须根据
+最终 player_view 明确说玩家已经抵达当前地点，并且只说后续行动未完成；绝不得说
+该地点没找到、玩家仍在原处，或把已提交的旅行推翻。若玩家明确要前往某个地点，
+但 completed_steps 没有任何到达结果，只用角色内
+叙事说明没有找到或无法确认与玩家描述相符的地点、人物仍在原处；不要反问“作用于谁或什么”，
+不要要求说明“具体变化”，也不得把行动改写成前往当前地点或其他已知地点。其他确实存在语义歧义的
+needs_clarification，才用自然的角色内措辞提出一次最小澄清。claimed_evidence_refs
 只能复制 allowed_evidence_refs 中正文确实使用的值。不得输出 raw plan、裁决效果、
 内部状态、工具结果、模型推理或协议字段。建议动作最多三条且只能来自最终 PlayerView。
 叙事必须明确写出 narration_evidence 中 required_in_narration=true 的每项玩家可见结果；
@@ -223,11 +316,17 @@ completed_steps[].committed_results，并在 claimed_evidence_refs 引用该结�
 outcome=failure 时不得叙述成功后果。若最终 player_view.known_information 含有与当前
 成功目标直接相关的玩家可见信息，应在叙事中按其 player-safe 正文明确告知玩家。
 
+取得物品属于持久结果。只有某个 completed_steps[].committed_results 同时满足 kind=inventory，
+且同一 target_id 确实出现在最终 player_view.inventory 中，正文才能声称该物品已被捡起、拿走、
+收好或放入背包；必须使用最终 inventory 中对应的公开名称。只有移动事件但最终背包没有该 id，
+不能写成取得成功，应如实叙述没有拿走、拿不动或行动未形成可确认的背包变化。叙事中临时出现的
+普通物品只有在裁决阶段已创建为 ItemInstance 并满足上述交叉确认后，才能写成进入背包。
+
 时间在一个回合内会推进，每一步各有自己的时刻：opening_world_time 是回合开始时的世界
 时刻，completed_steps[].world_time_after 是该步骤结束时的世界时刻，player_view.world
 只是最后一步结束后的状态。每一步都必须按它自己的时刻来写，不得把整段都放在终局时刻
-上——中午动身去旅店、一觉睡到夜里，就要写成白天出门、醒来已是夜晚，绝不能写成夜里才
-走到旅店门口。缺少 world_time_after 时按相邻步骤的时刻推断，不要虚构具体钟点。
+上——白天开始第一步、随后休息到夜里，就要写成行动开始时仍是白天、醒来已是夜晚，绝不能
+把第一步也写成发生在夜里。缺少 world_time_after 时按相邻步骤的时刻推断，不要虚构具体钟点。
 """.strip()
 
 _INTENT_INSTRUCTIONS = """\

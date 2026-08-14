@@ -24,15 +24,18 @@ from collaboration_framework.contracts import (
     ActionAdjudication,
     ActionMethod,
     ActionPlan,
+    ActionPlanPolicy,
     ActionPlanStep,
     ActionTarget,
     EnsureRuntimeLocationEffect,
     EnterLocationEffect,
+    LocationContextView,
     ModuleContentV3,
     MoveEntityEffect,
     NarrativeOnlyEffect,
     NoAdjudicationCheck,
     PlayerInput,
+    PlayerView,
     RequiredAdjudicationCheck,
     SingleActionDecision,
 )
@@ -41,8 +44,9 @@ from collaboration_framework.engine.initialization import create_initial_game_st
 from collaboration_framework.engine.models import ActorState
 from collaboration_framework.host.adapters.openai_agents import (
     current_step_adjudication_instructions,
+    host_turn_decision_instructions,
 )
-from collaboration_framework.host.application import PlayerViewProjector
+from collaboration_framework.host.application import PlayerViewProjector, TurnExecutionError
 from collaboration_framework.host.schemas import (
     ActionPlanStepContext,
     HostAgentContext,
@@ -52,7 +56,9 @@ from collaboration_framework.host.schemas import (
 from app.adapters.openai_models import _SAFE_ADJUDICATION_INSTRUCTIONS
 from app.core.action_plan_turn import (
     DeterministicHostTurnDecisionModel,
+    _deterministic_step_adjudication,
     _DeterministicStepAdjudicator,
+    _match_travel_target,
     _normalize_single_travel_decision,
     _RuleFirstStepAdjudicator,
 )
@@ -126,6 +132,14 @@ async def _cemetery_context(
     )
 
 
+def _located(view: PlayerView) -> LocationContextView:
+    """v3 投影必然带 location_context；断言它在，顺带把 Optional 收窄掉。"""
+
+    location_context = view.location_context
+    assert location_context is not None
+    return location_context
+
+
 async def test_engine_publishes_rule_candidates_where_the_actor_stands() -> None:
     """规则匹配的前提：引擎得先把候选发出来。"""
 
@@ -146,6 +160,14 @@ async def test_rule_candidates_reach_the_model_payload() -> None:
     context = await _cemetery_context("仔细观察守墓人")
 
     payload = context.to_json_dict()
+    world_profile = payload["keeper_capabilities"]["world_profile"]
+    assert world_profile == {
+        "era": "1920s 美国禁酒令时期",
+        "region": "密歇根州阿诺兹堡",
+        "technology_level": "早期汽车与电报",
+        "tone": "安静、克制、带哥特气息",
+        "forbidden_content": ["提前揭示道格拉斯的食尸鬼身份"],
+    }
     candidates = payload["keeper_capabilities"]["rule_candidates"]
     assert candidates, "rule_candidates 没有进入模型输入"
     observe = next(item for item in candidates if item["rule_id"] == "observe_caretaker")
@@ -281,13 +303,12 @@ async def test_unknown_ordinary_travel_is_resolved_without_a_model_round_trip() 
             del context
             raise AssertionError("普通去处不应该还要问模型")
 
-    adjudication = await _RuleFirstStepAdjudicator(FailingFallback()).adjudicate(
-        await _cemetery_context(
-            "我想去小镇上的旅馆休息到晚上",
-            step_kind="travel",
-            semantic_goal="前往小镇上的旅馆",
-        )
+    context = await _cemetery_context(
+        "我想去小镇上的旅馆休息到晚上",
+        step_kind="travel",
+        semantic_goal="前往小镇上的旅馆",
     )
+    adjudication = await _RuleFirstStepAdjudicator(FailingFallback()).adjudicate(context)
 
     assert [effect.type for effect in adjudication.success_effects] == [
         "ensure_runtime_location",
@@ -300,6 +321,185 @@ async def test_unknown_ordinary_travel_is_resolved_without_a_model_round_trip() 
     assert created.connected_location_id == "arnoldsburg_streets"
     assert adjudication.target.id == "arnoldsburg_streets"
     assert entered.location_id == created.location_id
+
+    normalized = _normalize_single_travel_decision(
+        SingleActionDecision(adjudication=adjudication),
+        player_input=context.player_input,
+        view=context.player_view,
+        capabilities=context.keeper_capabilities,
+    )
+
+    assert isinstance(normalized, SingleActionDecision)
+    normalized_created = next(
+        effect
+        for effect in normalized.adjudication.success_effects
+        if isinstance(effect, EnsureRuntimeLocationEffect)
+    )
+    normalized_entered = next(
+        effect
+        for effect in normalized.adjudication.success_effects
+        if isinstance(effect, EnterLocationEffect)
+    )
+    # 新地点在提交前不能作为 target；连接锚点保留，同时进入刚创建的地点。
+    assert normalized.adjudication.target.id == "arnoldsburg_streets"
+    assert normalized_entered.location_id == normalized_created.location_id
+
+
+@pytest.mark.asyncio
+async def test_runtime_venue_can_be_reused_through_a_synonym() -> None:
+    """Runtime 展示名与玩家用词不同时，仍应命中原地点。"""
+
+    context = await _cemetery_context("去旅馆", step_kind="travel")
+    template = context.player_view.known_locations[0]
+    runtime_inn = template.model_copy(
+        update={
+            "id": "ambient_inn",
+            "kind": "site",
+            "name": "镇上的旅店",
+            "existence": "known",
+            "localization": "located",
+            "access": "reachable",
+            "visited": True,
+        },
+        deep=True,
+    )
+    context = context.model_copy(
+        update={
+            "player_view": context.player_view.model_copy(
+                update={
+                    "known_locations": (*context.player_view.known_locations, runtime_inn),
+                },
+                deep=True,
+            )
+        },
+        deep=True,
+    )
+
+    adjudication = _deterministic_step_adjudication(context)
+
+    assert adjudication is not None
+    assert adjudication.target.id == "ambient_inn"
+    assert adjudication.success_effects == (EnterLocationEffect(location_id="ambient_inn"),)
+    assert all(
+        not isinstance(effect, EnsureRuntimeLocationEffect)
+        for effect in adjudication.success_effects
+    )
+
+
+@pytest.mark.asyncio
+async def test_travel_to_current_runtime_venue_is_a_successful_noop() -> None:
+    """已在同一 Runtime 地点时，同义地名不应触发重复进入或澄清。"""
+
+    context = await _cemetery_context("去旅馆", step_kind="travel")
+    template = context.player_view.known_locations[0]
+    runtime_inn = template.model_copy(
+        update={
+            "id": "ambient_inn",
+            "kind": "site",
+            "name": "镇上的旅店",
+            "existence": "known",
+            "localization": "located",
+            "access": "reachable",
+            "visited": True,
+        },
+        deep=True,
+    )
+    current_view = context.player_view.model_copy(
+        update={
+            "scene": context.player_view.scene.model_copy(
+                update={"id": "ambient_inn", "name": "镇上的旅店"},
+                deep=True,
+            ),
+            "location_context": _located(context.player_view).model_copy(
+                update={"current_location_id": "ambient_inn"},
+                deep=True,
+            ),
+            "known_locations": (*context.player_view.known_locations, runtime_inn),
+        },
+        deep=True,
+    )
+    context = context.model_copy(update={"player_view": current_view}, deep=True)
+
+    adjudication = _deterministic_step_adjudication(context)
+
+    assert adjudication is not None
+    assert adjudication.method.family == "action"
+    assert adjudication.persistence_intent == "none"
+    assert adjudication.success_effects == (NarrativeOnlyEffect(),)
+    assert adjudication.summary == "已经位于镇上的旅店"
+
+    wrong_model_decision = SingleActionDecision(
+        adjudication=ActionAdjudication(
+            request_id="model-owned",
+            source_revision=current_view.revision,
+            actor_id="pc_1",
+            summary="前往其他地点",
+            target=ActionTarget(kind="location", id="cemetery"),
+            method=ActionMethod(family="travel", description="前往其他地点"),
+            persistence_intent="location",
+            check=NoAdjudicationCheck(),
+            success_effects=(EnterLocationEffect(location_id="cemetery"),),
+        )
+    )
+    normalized = _normalize_single_travel_decision(
+        wrong_model_decision,
+        player_input=context.player_input,
+        view=current_view,
+        capabilities=context.keeper_capabilities,
+    )
+
+    assert isinstance(normalized, SingleActionDecision)
+    assert normalized.adjudication.target.id == "ambient_inn"
+    assert normalized.adjudication.persistence_intent == "none"
+    assert normalized.adjudication.success_effects == (NarrativeOnlyEffect(),)
+
+
+@pytest.mark.asyncio
+async def test_travel_matching_uses_destination_name_not_shared_prefix() -> None:
+    """地域修饰部分相同时，必须由地点核心名称决定目的地。"""
+
+    context = await _cemetery_context(
+        "依次前往多个地点",
+        step_kind="travel",
+        semantic_goal="前往镇上的图书馆",
+    )
+    template = context.player_view.known_locations[0]
+    runtime_inn = template.model_copy(
+        update={
+            "id": "ambient_inn",
+            "kind": "site",
+            "name": "镇上的旅店",
+            "existence": "known",
+            "localization": "located",
+            "access": "reachable",
+            "visited": True,
+        },
+        deep=True,
+    )
+    current_view = context.player_view.model_copy(
+        update={
+            "scene": context.player_view.scene.model_copy(
+                update={"id": "ambient_inn", "name": "镇上的旅店"},
+                deep=True,
+            ),
+            "location_context": _located(context.player_view).model_copy(
+                update={"current_location_id": "ambient_inn"},
+                deep=True,
+            ),
+            "known_locations": (*context.player_view.known_locations, runtime_inn),
+        },
+        deep=True,
+    )
+    context = context.model_copy(update={"player_view": current_view}, deep=True)
+
+    destination = _match_travel_target(current_view, context.step.semantic_goal)
+    assert destination is not None
+    assert destination.id == "library"
+
+    adjudication = _deterministic_step_adjudication(context)
+    assert adjudication is not None
+    assert adjudication.target.id == "library"
+    assert adjudication.success_effects == (EnterLocationEffect(location_id="library"),)
 
 
 async def test_planner_cannot_invent_ambient_venue_for_npc_search() -> None:
@@ -341,7 +541,7 @@ async def test_planner_cannot_invent_ambient_venue_for_npc_search() -> None:
 async def test_single_travel_prefers_explicit_player_destination() -> None:
     """模型把“去墓地”裁成办公室时，玩家原话中的明确地点必须覆盖模型。"""
 
-    context = await _cemetery_context("去墓地", step_kind="travel")
+    context = await _cemetery_context("去墓地", step_kind="travel", scene_id="thomas_office")
     wrong = SingleActionDecision(
         adjudication=ActionAdjudication(
             request_id="model-owned",
@@ -372,6 +572,102 @@ async def test_single_travel_prefers_explicit_player_destination() -> None:
         if isinstance(effect, EnterLocationEffect)
     )
     assert entered.location_id == "cemetery"
+
+
+@pytest.mark.asyncio
+async def test_single_travel_replans_unknown_destination_instead_of_substituting() -> None:
+    """单意图模型不得把未列出的玩家目的地换成一个合法的已知 id。"""
+
+    context = await _cemetery_context("去教堂看看", step_kind="travel")
+    wrong = SingleActionDecision(
+        adjudication=ActionAdjudication(
+            request_id="model-owned",
+            source_revision=context.player_view.revision,
+            actor_id="pc_1",
+            summary="前往阿诺兹堡公共墓地",
+            target=ActionTarget(kind="location", id="cemetery"),
+            method=ActionMethod(family="travel", description="前往阿诺兹堡公共墓地"),
+            persistence_intent="location",
+            check=NoAdjudicationCheck(),
+            success_effects=(EnterLocationEffect(location_id="cemetery"),),
+        )
+    )
+
+    normalized = _normalize_single_travel_decision(
+        wrong,
+        player_input=context.player_input,
+        view=context.player_view,
+        capabilities=context.keeper_capabilities,
+    )
+
+    assert isinstance(normalized, SingleActionDecision)
+    assert normalized.adjudication.summary == "去教堂看看"
+    assert normalized.adjudication.target.id == context.player_view.scene.id
+    assert normalized.adjudication.persistence_intent == "location"
+    assert normalized.adjudication.success_effects == (NarrativeOnlyEffect(),)
+
+
+@pytest.mark.asyncio
+async def test_unknown_destination_narrative_only_still_gets_bounded_creation_repair() -> None:
+    """模型直接放弃未知地点时，也要进入同一条创建修复路径。"""
+
+    context = await _cemetery_context("进入诊所", step_kind="travel")
+    abandoned = SingleActionDecision(
+        adjudication=ActionAdjudication(
+            request_id="model-owned",
+            source_revision=context.player_view.revision,
+            actor_id="pc_1",
+            summary="无法确认行动",
+            target=ActionTarget(kind="location", id="cemetery"),
+            method=ActionMethod(family="action", description="无法确认行动"),
+            persistence_intent="none",
+            check=NoAdjudicationCheck(),
+            success_effects=(NarrativeOnlyEffect(),),
+        )
+    )
+
+    normalized = _normalize_single_travel_decision(
+        abandoned,
+        player_input=context.player_input,
+        view=context.player_view,
+        capabilities=context.keeper_capabilities,
+    )
+
+    assert isinstance(normalized, SingleActionDecision)
+    assert normalized.adjudication.summary == "进入诊所"
+    assert normalized.adjudication.method.family == "travel"
+    assert normalized.adjudication.persistence_intent == "location"
+
+
+@pytest.mark.asyncio
+async def test_step_travel_rejects_known_location_substitution_for_unknown_destination() -> None:
+    """二次地点裁决仍选错已知地点时，必须零写入停止。"""
+
+    class WrongLocationFallback:
+        async def adjudicate(self, context):
+            return ActionAdjudication(
+                request_id=context.step_request_id,
+                source_revision=context.player_view.revision,
+                actor_id=context.player_input.actor_id,
+                summary="前往阿诺兹堡公共墓地",
+                target=ActionTarget(kind="location", id="cemetery"),
+                method=ActionMethod(family="travel", description="前往阿诺兹堡公共墓地"),
+                persistence_intent="location",
+                check=NoAdjudicationCheck(),
+                success_effects=(EnterLocationEffect(location_id="cemetery"),),
+            )
+
+    with pytest.raises(TurnExecutionError) as captured:
+        await _RuleFirstStepAdjudicator(WrongLocationFallback()).adjudicate(
+            await _cemetery_context(
+                "去教堂看看",
+                step_kind="travel",
+                semantic_goal="前往教堂",
+            )
+        )
+
+    assert captured.value.code == "TRAVEL_DESTINATION_NOT_FOUND"
+    assert captured.value.retryable is False
 
 
 @pytest.mark.asyncio
@@ -470,21 +766,55 @@ async def test_ambient_venue_never_shadows_an_authored_location() -> None:
             )
 
     fallback = RecordingFallback()
-    await _RuleFirstStepAdjudicator(fallback).adjudicate(
-        await _cemetery_context(
-            "我想去地下酒吧",
-            step_kind="travel",
-            semantic_goal="前往地下酒吧",
+    with pytest.raises(TurnExecutionError) as captured:
+        await _RuleFirstStepAdjudicator(fallback).adjudicate(
+            await _cemetery_context(
+                "我想去地下酒吧",
+                step_kind="travel",
+                semantic_goal="前往地下酒吧",
+            )
         )
-    )
 
     assert fallback.calls == 1
+    assert captured.value.code == "TRAVEL_DESTINATION_NOT_FOUND"
 
 
 def test_prompt_allows_ordinary_runtime_location_without_false_clarification() -> None:
-    assert "不应反问具体哪一家" in _SAFE_ADJUDICATION_INSTRUCTIONS
+    assert "不应追问" in _SAFE_ADJUDICATION_INSTRUCTIONS
+    assert "具体实例" in _SAFE_ADJUDICATION_INSTRUCTIONS
     assert "ensure_runtime_location、enter_location" in _SAFE_ADJUDICATION_INSTRUCTIONS
-    assert "不要仅因玩家没有指定店名而要求澄清" in current_step_adjudication_instructions()
+    assert "地点的功能类别、规模或专业性本身也不构成拒绝理由" in (_SAFE_ADJUDICATION_INSTRUCTIONS)
+    assert "不要仅因玩家没有指定普通内容的具体名称或实例而要求澄清" in (
+        current_step_adjudication_instructions()
+    )
+    assert "不得把人物和可携带物件的" in current_step_adjudication_instructions()
+    assert "地点的功能类别、规模或专业性本身也不构成拒绝理由" in (
+        current_step_adjudication_instructions()
+    )
+
+
+def test_prompt_preserves_terminal_actions_and_distinguishes_service_verbs() -> None:
+    planning = host_turn_decision_instructions(ActionPlanPolicy())
+
+    assert "句末动词" in planning
+    assert "相邻书写、省略连词" in planning
+    assert "前置交互 + 等待/休息/使用/继续操作" in planning
+    assert "服务请求、惯用语或抽象含义" in _SAFE_ADJUDICATION_INSTRUCTIONS
+    assert "不得映射成\n物体 open" in _SAFE_ADJUDICATION_INSTRUCTIONS
+
+
+def test_prompt_forbids_semantically_unrelated_target_substitution() -> None:
+    assert "只证明一个 id 在协议上可以引用，不证明它与玩家原话语义匹配" in (
+        _SAFE_ADJUDICATION_INSTRUCTIONS
+    )
+    assert "绝不能为了得到一个合法\nid，就把当前 scene 或其他已知地点当作替代目标" in (
+        _SAFE_ADJUDICATION_INSTRUCTIONS
+    )
+    assert "过去可能错误的映射延续到本回合" in _SAFE_ADJUDICATION_INSTRUCTIONS
+
+    step_instructions = current_step_adjudication_instructions()
+    assert "不能覆盖玩家本回合明确指定的对象、地点" in step_instructions
+    assert "不得进入替代地点、推进时间" in step_instructions
 
 
 def test_prompt_defines_runtime_item_custody_and_consumption() -> None:
@@ -494,8 +824,36 @@ def test_prompt_defines_runtime_item_custody_and_consumption() -> None:
     assert "move_entity(location_id=当前 scene.id)" in _SAFE_ADJUDICATION_INSTRUCTIONS
     assert "consume_entity" in _SAFE_ADJUDICATION_INSTRUCTIONS
     step_instructions = current_step_adjudication_instructions()
-    assert "普通工作人员、路人或无关紧要的可携带物品" in step_instructions
+    assert "世界一致性" in step_instructions
+    assert "场景依据" in step_instructions
+    assert "普通性" in step_instructions
+    assert "零剧情权限" in step_instructions
+    assert "Canon 不替代" in step_instructions
     assert "拾取要在同一 effects 序列继续 move_entity" in step_instructions
+    assert "新建物品尚不是合法 target" in step_instructions
+    assert "keeper_capabilities.world_profile" in step_instructions
+    assert "明确取得物品决策表" in step_instructions
+    assert "没有具体实体所以只能留在原处" in step_instructions
+    assert "published_narration 只是普通内容的软场景依据" in step_instructions
+    assert "固定实体\n不能因此进入背包" in step_instructions
+
+
+def test_prompt_requires_exact_existing_entity_match_before_runtime_creation() -> None:
+    assert "scene.visible_entities、scene.loose_items 与" in _SAFE_ADJUDICATION_INSTRUCTIONS
+    assert "target 必须保持为当前 player_view.scene.id" in _SAFE_ADJUDICATION_INSTRUCTIONS
+    assert (
+        "不能\n  仅因某物出现在 scene.visible_entities 或 "
+        "keeper_capabilities.entities 就把它移入背包" in _SAFE_ADJUDICATION_INSTRUCTIONS
+    )
+    assert "published_narration 只是普通内容的软场景依据" in (_SAFE_ADJUDICATION_INSTRUCTIONS)
+    assert "明确取得物品决策表" in _SAFE_ADJUDICATION_INSTRUCTIONS
+    assert "不得创建便携\n  替身" in _SAFE_ADJUDICATION_INSTRUCTIONS
+    step_instructions = current_step_adjudication_instructions()
+    assert "keeper_capabilities 里的实体不代表玩家此刻看得见" in step_instructions
+    assert "是效果能力词表，不自动成为可直接作用的 target" in step_instructions
+    assert "类别、数量、所有者、唯一性、状态" in step_instructions
+    assert "五本失窃藏书" not in step_instructions
+    assert "五本失窃藏书" not in _SAFE_ADJUDICATION_INSTRUCTIONS
 
 
 @pytest.mark.parametrize(

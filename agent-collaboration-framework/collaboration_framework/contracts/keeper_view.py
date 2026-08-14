@@ -28,6 +28,7 @@ from typing import Literal
 from pydantic import Field
 
 from .common import ContractModel
+from .module_v3 import WorldProfileSpec
 
 
 class KeeperInformationCapability(ContractModel):
@@ -137,6 +138,10 @@ class KeeperCapabilityView(ContractModel):
     # wanted the world as a target had to guess and was rejected every time
     # (TARGET_UNAVAILABLE on "今天几点了" and other non-object utterances).
     world_id: str | None = Field(default=None, min_length=1)
+    # v3 Runtime content must be judged against authored setting constraints,
+    # not reconstructed from prose or guessed from the player's wording.
+    # v2 has no WorldProfile contract and therefore leaves this absent.
+    world_profile: WorldProfileSpec | None = None
     information: tuple[KeeperInformationCapability, ...] = ()
     locations: tuple[KeeperLocationCapability, ...] = ()
     entities: tuple[KeeperEntityCapability, ...] = ()

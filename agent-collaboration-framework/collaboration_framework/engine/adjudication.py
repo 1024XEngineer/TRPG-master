@@ -1363,6 +1363,13 @@ class AdjudicationEngineService:
         location_ids = runtime.canon_location_ids | set(
             runtime.game_state.runtime_locations
         )
+        # ``holder_actor_id`` is inventory custody, not a generic entity
+        # position.  Track real portable item instances separately from the
+        # wider entity vocabulary so a Canon prop/NPC cannot acquire a
+        # holder-only shadow state that PlayerView.inventory will never read.
+        # A v3 runtime object becomes portable as soon as an earlier effect in
+        # this same atomic sequence creates it.
+        portable_item_ids = set(runtime.game_state.item_instances)
         # Sleeping until 20:00 is several jumps in one adjudication, so each one
         # has to be checked against the clock the previous jump left behind —
         # not against the clock this action started on.
@@ -1374,12 +1381,15 @@ class AdjudicationEngineService:
                 information_ids=information_ids,
                 entity_ids=entity_ids,
                 location_ids=location_ids,
+                portable_item_ids=portable_item_ids,
                 world_time=world_time,
             )
             if isinstance(effect, EnsureRuntimeLocationEffect):
                 location_ids.add(effect.location_id)
             elif isinstance(effect, EnsureRuntimeEntityEffect):
                 entity_ids.add(effect.entity_id)
+                if runtime.is_v3 and effect.entity_kind == "object":
+                    portable_item_ids.add(effect.entity_id)
             elif isinstance(effect, AdvanceWorldTimeEffect):
                 world_time = advanced_to_next(runtime.v3, world_time)
 
@@ -1454,6 +1464,7 @@ class AdjudicationEngineService:
         information_ids: set[str],
         entity_ids: set[str],
         location_ids: set[str],
+        portable_item_ids: set[str],
         world_time: WorldTimeState | None = None,
     ) -> None:
         state = runtime.game_state
@@ -1556,6 +1567,16 @@ class AdjudicationEngineService:
                         repairability="auto_repairable",
                         fault="agent",
                         player_safe_reason="当前目标不可用于这次行动",
+                    )
+                if (
+                    effect.holder_actor_id is not None
+                    and effect.entity_id not in portable_item_ids
+                ):
+                    self._reject_validation(
+                        "INVENTORY_TARGET_NOT_PORTABLE",
+                        repairability="auto_repairable",
+                        fault="agent",
+                        player_safe_reason="这个对象不是可携带物品，不能放入背包",
                     )
         elif isinstance(effect, AdvanceWorldTimeEffect):
             if not runtime.is_v3:
@@ -2419,6 +2440,17 @@ class AdjudicationEngineService:
                     updates["party_item_knowledge"] = party_knowledge
                 state = state.model_copy(update=updates, deep=True)
             else:
+                if effect.holder_actor_id is not None:
+                    # Defense in depth for authored/rule-owned effects and any
+                    # future caller that reaches application without the
+                    # proposal validator.  Generic entities may move between
+                    # locations, but only ItemInstances have inventory custody.
+                    self._reject_validation(
+                        "INVENTORY_TARGET_NOT_PORTABLE",
+                        repairability="auto_repairable",
+                        fault="agent",
+                        player_safe_reason="这个对象不是可携带物品，不能放入背包",
+                    )
                 runtime_entities = deepcopy(state.runtime_entities)
                 entity_states = deepcopy(state.entities)
                 target = runtime_entities.get(effect.entity_id)

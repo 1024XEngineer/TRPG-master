@@ -352,6 +352,46 @@
       ],
       "title": "KeeperTimeCapability",
       "type": "object"
+    },
+    "WorldProfileSpec": {
+      "additionalProperties": false,
+      "description": "Setting constraints the Agent must respect when proposing Runtime content.\n\nProvisional: #212 §7.5 only requires that an Agent-proposed inn \"符合\nworld_profile\". Modelled with the minimum needed to judge that, so a later\nissue can extend it without unwinding invented structure.",
+      "properties": {
+        "era": {
+          "default": "",
+          "maxLength": 100,
+          "title": "Era",
+          "type": "string"
+        },
+        "region": {
+          "default": "",
+          "maxLength": 100,
+          "title": "Region",
+          "type": "string"
+        },
+        "technology_level": {
+          "default": "",
+          "maxLength": 100,
+          "title": "Technology Level",
+          "type": "string"
+        },
+        "tone": {
+          "default": "",
+          "maxLength": 200,
+          "title": "Tone",
+          "type": "string"
+        },
+        "forbidden_content": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Forbidden Content",
+          "type": "array"
+        }
+      },
+      "title": "WorldProfileSpec",
+      "type": "object"
     }
   },
   "additionalProperties": false,
@@ -384,6 +424,17 @@
       ],
       "default": null,
       "title": "World Id"
+    },
+    "world_profile": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/WorldProfileSpec"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "information": {
       "default": [],

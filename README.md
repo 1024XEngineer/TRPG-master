@@ -57,7 +57,7 @@ TRPG-master 希望让一场跑团更容易开始。玩家不必等待守秘人�
 | 规则 | Call of Cthulhu 7th Edition |
 | 人数 | 单人模组 |
 | 时长 | 约 1-2 小时 |
-| 内容版本 | `3.0.5` |
+| 内容版本 | `3.0.6` |
 | 内容协议 | `content_schema_version=3` |
 
 《追书人》当前由 `module-content-v3.json` 加载。仓库中的其他模组文件主要用于内容解析与 Schema 回归，不代表已经开放游玩。

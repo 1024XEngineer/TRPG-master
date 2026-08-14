@@ -18,10 +18,10 @@ from pathlib import Path
 
 from collaboration_framework.contracts import (
     ActionAdjudication,
+    AdjudicationValidationError,
     ActionMethod,
     ActionTarget,
     CommitTerminalEndingEffect,
-    ConsumeEntityEffect,
     EnsureRuntimeEntityEffect,
     EnsureRuntimeLocationEffect,
     EnterLocationEffect,
@@ -160,7 +160,7 @@ class EngineCapabilityProjectionTests(unittest.IsolatedAsyncioTestCase):
             {"study"},
         )
 
-    async def test_carried_entity_follows_the_actor_and_consuming_removes_it(self) -> None:
+    async def test_generic_entity_cannot_claim_item_inventory_custody(self) -> None:
         await self.commit(
             "runtime-location-3",
             EnsureRuntimeLocationEffect(
@@ -169,25 +169,18 @@ class EngineCapabilityProjectionTests(unittest.IsolatedAsyncioTestCase):
                 connected_location_id="study",
             ),
         )
-        await self.commit(
-            "take-document",
-            MoveEntityEffect(entity_id="document", holder_actor_id="pc_1"),
-        )
-        await self.commit("enter-attic", EnterLocationEffect(location_id="attic"))
+        with self.assertRaises(AdjudicationValidationError) as raised:
+            await self.commit(
+                "take-document",
+                MoveEntityEffect(entity_id="document", holder_actor_id="pc_1"),
+            )
 
-        carried = await self.engine.read(SCOPE)
-        self.assertIn(
-            "document",
-            {entity.id for entity in carried.scene.visible_entities},
+        self.assertEqual(
+            raised.exception.result.code,
+            "INVENTORY_TARGET_NOT_PORTABLE",
         )
-
-        await self.commit("burn-document", ConsumeEntityEffect(entity_id="document"))
-
-        after = await self.engine.read(SCOPE)
-        self.assertNotIn(
-            "document",
-            {entity.id for entity in after.scene.visible_entities},
-        )
+        state = self.store.inspect_state(SCOPE.room_id)
+        self.assertNotIn("holder_actor_id", state.entities.get("document", {}))
 
     async def test_party_scoped_set_visibility_hides_a_canon_entity(self) -> None:
         before = await self.engine.read(SCOPE)

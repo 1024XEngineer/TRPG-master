@@ -343,7 +343,9 @@ class VisibleTargetRepairAdjudicator(RecordingAdjudicator):
                 actor_id="untrusted",
                 summary=context.step.semantic_goal,
                 target=ActionTarget(kind="entity", id="bookshelf"),
-                method=ActionMethod(family="observe", description=context.step.semantic_goal),
+                method=ActionMethod(
+                    family="observe", description=context.step.semantic_goal
+                ),
                 check=NoAdjudicationCheck(),
                 success_effects=(NarrativeOnlyEffect(),),
             )
@@ -1475,6 +1477,63 @@ def test_plan_run_repair_fields_round_trip_and_old_json_uses_defaults() -> None:
     assert ActionPlanRun.model_validate_json(restored.model_dump_json()) == restored
 
 
+def test_legacy_plan_run_restores_default_persistence_intent_as_omitted() -> None:
+    original = player_input("legacy-persistence-parent")
+    created_at = datetime.now(UTC)
+    plan_value = plan(2)
+    adjudication = ActionAdjudication(
+        request_id="request-0",
+        source_revision="0",
+        actor_id=original.actor_id,
+        summary="前往旅店",
+        target=ActionTarget(kind="location", id="street"),
+        method=ActionMethod(family="travel", description="前往旅店"),
+        check=NoAdjudicationCheck(),
+        success_effects=(EnterLocationEffect(location_id="inn"),),
+    )
+    run = ActionPlanRun(
+        plan_id="legacy-persistence-plan",
+        parent_action_id=original.client_action_id,
+        parent_input_fingerprint=("0" * 64),
+        parent_utterance=original.utterance,
+        room_id=original.room_id,
+        player_id=original.player_id,
+        actor_id=original.actor_id,
+        created_revision="0",
+        policy_snapshot=ActionPlanPolicy(),
+        plan=plan_value,
+        steps=(
+            ActionPlanStepRun(
+                step_id="step-0",
+                step_request_id="request-0",
+                step=plan_value.steps[0],
+                status="ready",
+                source_revision="0",
+                adjudication=adjudication,
+            ),
+            ActionPlanStepRun(
+                step_id="step-1",
+                step_request_id="request-1",
+                step=plan_value.steps[1],
+            ),
+        ),
+        created_at=created_at,
+        updated_at=created_at,
+    )
+
+    legacy_payload = run.model_dump(mode="json")
+    stored_adjudication = legacy_payload["steps"][0]["adjudication"]
+    assert stored_adjudication["persistence_intent"] == "none"
+    assert "persistence_intent_explicit_marker" not in stored_adjudication
+
+    restored = ActionPlanRun.from_persistence_json_dict(legacy_payload)
+
+    restored_adjudication = restored.steps[0].adjudication
+    assert restored_adjudication is not None
+    assert restored_adjudication.persistence_intent == "none"
+    assert restored_adjudication.persistence_intent_explicit is False
+
+
 @pytest.mark.asyncio
 async def test_safe_validation_feedback_maximum_length_fits_step_context() -> None:
     _, _, projector = runtime()
@@ -1731,7 +1790,9 @@ async def test_single_action_auto_repair_succeeds_without_creating_plan_run() ->
 
 
 @pytest.mark.asyncio
-async def test_single_travel_repair_with_changed_effect_requires_clarification() -> None:
+async def test_single_travel_repair_with_changed_effect_requires_clarification() -> (
+    None
+):
     module, engine_store, projector = runtime()
     plan_store = InMemoryActionPlanRunStore()
     engine = AdjudicationEngineService(engine_store)
@@ -2194,14 +2255,16 @@ async def test_narrator_rejects_missing_required_evidence() -> None:
     )
 
     with pytest.raises(ActionPlanNarrationValidationError) as raised:
-        await ActionPlanNarrator(MissingRequiredEvidenceNarrationModel()).narrate(context)
+        await ActionPlanNarrator(MissingRequiredEvidenceNarrationModel()).narrate(
+            context
+        )
 
     assert raised.value.reason == "required_evidence_missing"
 
     with pytest.raises(ActionPlanNarrationValidationError) as claimed_but_omitted:
-        await ActionPlanNarrator(ClaimsButOmitsRequiredEvidenceNarrationModel()).narrate(
-            context
-        )
+        await ActionPlanNarrator(
+            ClaimsButOmitsRequiredEvidenceNarrationModel()
+        ).narrate(context)
 
     assert claimed_but_omitted.value.reason == "required_evidence_missing"
 

@@ -33,6 +33,7 @@ from collaboration_framework.contracts import (
     ModuleContentV3,
     MoveEntityEffect,
     NoAdjudicationCheck,
+    PersistenceIntent,
     PlayerViewScope,
     PostRollDecisionRequest,
     PredicateCondition,
@@ -248,6 +249,59 @@ class ProjectionV3Tests(unittest.IsolatedAsyncioTestCase):
             "douglas_diary", {item.id for item in revealed.scene.loose_items}
         )
 
+    async def test_stolen_books_are_gated_to_the_opened_crypt(self) -> None:
+        """The physical books start in the crypt and stay hidden behind its gate."""
+
+        seeded = create_initial_game_state(
+            module_content=self.content,
+            room_id=ROOM,
+            actors={
+                ACTOR: ActorState(
+                    player_id=PLAYER,
+                    name="陈探员",
+                    source_character_id="character_v3",
+                    source_character_version=1,
+                )
+            },
+        )
+        study = await self.project(
+            seeded.model_copy(update={"scene_id": "kimball_study"}, deep=True)
+        )
+        unopened_crypt = await self.project(
+            seeded.model_copy(update={"scene_id": "crypt"}, deep=True)
+        )
+        opened_entities = {
+            **seeded.entities,
+            "crypt_entrance": {
+                **seeded.entities["crypt_entrance"],
+                "slab_moved": True,
+            },
+        }
+        opened_crypt = await self.project(
+            seeded.model_copy(
+                update={"scene_id": "crypt", "entities": opened_entities}, deep=True
+            )
+        )
+
+        self.assertNotIn(
+            "missing_books", {item.id for item in study.scene.loose_items}
+        )
+        self.assertNotIn(
+            "missing_books", {item.id for item in study.scene.visible_entities}
+        )
+        self.assertNotIn(
+            "missing_books", {item.id for item in unopened_crypt.scene.loose_items}
+        )
+        self.assertNotIn(
+            "missing_books", {item.id for item in unopened_crypt.scene.visible_entities}
+        )
+        self.assertIn(
+            "missing_books", {item.id for item in opened_crypt.scene.loose_items}
+        )
+        self.assertIn(
+            "missing_books", {item.id for item in opened_crypt.scene.visible_entities}
+        )
+
     async def test_character_equipment_is_carried_from_the_first_revision(self) -> None:
         """角色卡上的装备必须在开局就是真的物品。
 
@@ -291,7 +345,12 @@ class ProjectionV3Tests(unittest.IsolatedAsyncioTestCase):
         adjudicator = AdjudicationEngineService(store)
         scope = PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
 
-        async def commit(request_id: str, *effects) -> None:
+        async def commit(
+            request_id: str,
+            *effects,
+            family: str = "action",
+            persistence_intent: PersistenceIntent = "none",
+        ) -> None:
             before = await engine.read(scope)
             await adjudicator.submit(
                 SubmitAdjudicationRequest(
@@ -303,7 +362,8 @@ class ProjectionV3Tests(unittest.IsolatedAsyncioTestCase):
                         actor_id=ACTOR,
                         summary=request_id,
                         target=ActionTarget(kind="location", id="library"),
-                        method=ActionMethod(family="action", description=request_id),
+                        method=ActionMethod(family=family, description=request_id),
+                        persistence_intent=persistence_intent,
                         check=NoAdjudicationCheck(),
                         success_effects=effects,
                     ),
@@ -325,6 +385,8 @@ class ProjectionV3Tests(unittest.IsolatedAsyncioTestCase):
                 location_id="library",
             ),
             MoveEntityEffect(entity_id="ordinary_pebble", holder_actor_id=ACTOR),
+            family="pick_up",
+            persistence_intent="inventory",
         )
 
         carried = await engine.read(scope)
@@ -946,6 +1008,7 @@ class AdjudicationAgainstV3Tests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(
             "ending_douglas_departs", {item.id for item in capabilities.endings}
         )
+        self.assertEqual(capabilities.world_profile, self.content.world_profile)
         # Keeper text is what the Agent judges with, and it is not the player half.
         keeper = next(
             item

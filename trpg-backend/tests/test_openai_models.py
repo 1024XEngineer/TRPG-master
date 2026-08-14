@@ -9,6 +9,7 @@ import anyio
 import httpx
 import pytest
 from collaboration_framework.contracts import (
+    ActionAdjudication,
     ActionPlan,
     ActionPlanStep,
     ActionResult,
@@ -40,7 +41,9 @@ from collaboration_framework.host.schemas import (
     HostAgentContext,
     IntentContext,
     NarrationContext,
+    RecentTurn,
     RecentTurnContext,
+    VisibleHistoryText,
 )
 from pydantic import ValidationError
 
@@ -74,6 +77,11 @@ def test_action_plan_narration_uses_final_post_roll_outcome() -> None:
     assert "消耗幸运" in _ACTION_PLAN_NARRATION_INSTRUCTIONS
     assert "outcome=success" in _ACTION_PLAN_NARRATION_INSTRUCTIONS
     assert "最终权威结果" in _ACTION_PLAN_NARRATION_INSTRUCTIONS
+
+
+def test_action_plan_narration_preserves_completed_travel_before_clarification() -> None:
+    assert "completed_steps 已有成功的旅行步骤" in (_ACTION_PLAN_NARRATION_INSTRUCTIONS)
+    assert "绝不得说\n该地点没找到" in _ACTION_PLAN_NARRATION_INSTRUCTIONS
 
 
 def load_paper_chase() -> ModuleContent:
@@ -395,6 +403,9 @@ async def test_prompts_treat_scene_orientation_as_narration_not_form_validation(
     assert "claimed_fact_ids" in narration_instructions
     assert "JSON/schema 片段" in narration_instructions
     assert "Markdown JSON 代码块" in narration_instructions
+    assert "同一 target_id 确实出现在最终 player_view.inventory" in (
+        _ACTION_PLAN_NARRATION_INSTRUCTIONS
+    )
     serialized_view = client.inputs["trpg_narration"]["player_view"]
     assert serialized_view["scene"]["visible_entities"][0]["id"] == "thomas"
     assert serialized_view["scene"]["description"] == "托马斯坐在你面前，等待你回应他的委托。"
@@ -795,6 +806,27 @@ def test_intent_schema_remains_strict_for_prompt_adapter() -> None:
     assert schema["additionalProperties"] is False
 
 
+def test_action_adjudication_schema_remains_strict_for_prompt_adapter() -> None:
+    """Internal persistence serialization must not erase the provider schema."""
+
+    schema = ActionAdjudication.model_json_schema(mode="serialization")
+
+    assert schema["additionalProperties"] is False
+    assert {
+        "request_id",
+        "source_revision",
+        "actor_id",
+        "summary",
+        "target",
+        "method",
+        "persistence_intent",
+        "check",
+        "success_effects",
+        "failure_effects",
+    } <= schema["properties"].keys()
+    assert "persistence_intent_explicit_marker" not in schema["properties"]
+
+
 def _json_object_response() -> httpx.Response:
     return httpx.Response(
         200,
@@ -837,6 +869,7 @@ class _ScriptedStepClient:
 
     def __init__(self, result: dict | BaseException) -> None:
         self._result = result
+        self.input_payload: dict | None = None
 
     async def generate(
         self,
@@ -850,6 +883,7 @@ class _ScriptedStepClient:
         assert schema
         assert instructions
         assert input_payload["plan_id"] == "plan-step-error"
+        self.input_payload = input_payload
         if isinstance(self._result, BaseException):
             raise self._result
         return self._result
@@ -944,6 +978,55 @@ async def test_step_adjudicator_classifies_unreadable_and_invalid_output() -> No
         await invalid.adjudicate(_step_error_context())
     assert caught.value.code == "MODEL_OUTPUT_UNREADABLE"
     assert isinstance(caught.value.__cause__, ValidationError)
+
+
+async def test_step_adjudicator_receives_published_narration_as_soft_context() -> None:
+    context = _step_error_context()
+    history = RecentTurnContext(
+        room_id=context.player_input.room_id,
+        viewer_player_id=context.player_input.player_id,
+        as_of_revision=context.player_view.revision,
+        turns=(
+            RecentTurn(
+                correlation_id="previous-action",
+                source_player_id=context.player_input.player_id,
+                source_actor_id=context.player_input.actor_id,
+                scene_id=context.player_view.scene.id,
+                player_utterance=VisibleHistoryText(
+                    text="查看房间",
+                    visibility="player_scoped",
+                ),
+                published_narration=VisibleHistoryText(
+                    text="桌上散放着几册普通读物。",
+                    visibility="player_scoped",
+                ),
+            ),
+        ),
+    )
+    client = _ScriptedStepClient(
+        {
+            "request_id": context.step_request_id,
+            "source_revision": context.player_view.revision,
+            "actor_id": context.player_input.actor_id,
+            "summary": context.step.semantic_goal,
+            "target": {"kind": "location", "id": context.player_view.scene.id},
+            "method": {"family": "action", "description": context.step.semantic_goal},
+            "persistence_intent": "none",
+            "check": {"mode": "none"},
+            "success_effects": [{"type": "narrative_only"}],
+            "failure_effects": [],
+        }
+    )
+
+    await PromptActionPlanStepAdjudicator(client).adjudicate(
+        context.model_copy(update={"recent_history": history})
+    )
+
+    assert client.input_payload is not None
+    assert (
+        client.input_payload["recent_history"]["turns"][0]["published_narration"]["text"]
+        == "桌上散放着几册普通读物。"
+    )
 
 
 async def test_step_adjudicator_leaves_unknown_failure_for_orchestrator_fallback() -> None:

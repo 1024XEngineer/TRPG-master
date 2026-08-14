@@ -19,7 +19,7 @@ test('世界标签、追书人 v3 发布元数据和玩家安全开局简介正�
   assert.ok(paperChase)
   assert.equal(paperChase.title, '追书人')
   assert.equal(paperChase.nameEn, 'Paper Chase')
-  assert.equal(paperChase.version, '3.0.5')
+  assert.equal(paperChase.version, '3.0.6')
   assert.equal(paperChase.playersMin, 1)
   assert.equal(paperChase.playersMax, 1)
   assert.equal(paperChase.estimatedDuration, '1-2 小时')

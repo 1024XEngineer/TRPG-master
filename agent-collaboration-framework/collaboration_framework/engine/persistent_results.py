@@ -18,6 +18,8 @@ from collaboration_framework.contracts import (
     ChangeEntityStateEffect,
     CommittedResult,
     ConsumeEntityEffect,
+    EnsureRuntimeEntityEffect,
+    EnsureRuntimeLocationEffect,
     EnterLocationEffect,
     MoveEntityEffect,
     NarrativeOnlyEffect,
@@ -100,11 +102,7 @@ def validate_persistent_effects(
     policy = _FAMILY_POLICIES.get(adjudication.method.family.strip().lower())
     # 新模型显式写 none 不能把明显持久动作降级成普通叙事；旧存量裁决没有
     # explicit 标记，继续按兼容语义读取 none。
-    if (
-        adjudication.persistence_intent_explicit
-        and adjudication.persistence_intent != "none"
-        and policy is not None
-    ):
+    if adjudication.persistence_intent_explicit and policy is not None:
         intent = policy.intent
     if intent == "none":
         return None
@@ -160,21 +158,57 @@ def _has_matching_effect(
                 return True
         return False
     if intent == "inventory":
+        # 新物品在裁决提交前还不存在，因此不能作为 ActionTarget。允许原版的
+        # ensure_runtime_entity -> move/consume 原子序列；实际存在性和先后顺序仍由
+        # Engine._validate_effect_sequence 确定性校验。
+        eligible_entity_ids = {
+            target_id,
+            *(
+                effect.entity_id
+                for effect in effects
+                if isinstance(effect, EnsureRuntimeEntityEffect)
+                and effect.entity_kind == "object"
+            ),
+        }
+        family = adjudication.method.family.strip().lower()
         for effect in effects:
-            if isinstance(effect, MoveEntityEffect) and effect.entity_id == target_id:
-                if policy is None or policy.effect_kind == "move":
-                    return True
+            if (
+                isinstance(effect, MoveEntityEffect)
+                and effect.entity_id in eligible_entity_ids
+                and (policy is None or policy.effect_kind == "move")
+            ):
+                if (
+                    family == "pick_up"
+                    and effect.holder_actor_id != adjudication.actor_id
+                ):
+                    continue
+                if family == "transfer" and effect.holder_actor_id is None:
+                    continue
+                if family == "drop" and effect.location_id is None:
+                    continue
+                return True
             if (
                 isinstance(effect, ConsumeEntityEffect)
-                and effect.entity_id == target_id
+                and effect.entity_id in eligible_entity_ids
+                and (policy is None or policy.effect_kind == "consume")
             ):
-                if policy is None or policy.effect_kind == "consume":
-                    return True
+                return True
         return False
     if intent == "location":
+        # 动态地点与动态物品相同：新 id 只能先由 ensure_runtime_location 引入，
+        # ActionTarget 仍是已有连接锚点。不要把“主目标必须等于最终目的地”强加给
+        # 这种合法的顺序效果。
+        eligible_location_ids = {
+            target_id,
+            *(
+                effect.location_id
+                for effect in effects
+                if isinstance(effect, EnsureRuntimeLocationEffect)
+            ),
+        }
         return any(
             isinstance(effect, EnterLocationEffect)
-            and effect.location_id == target_id
+            and effect.location_id in eligible_location_ids
             and (policy is None or policy.effect_kind == "enter")
             for effect in effects
         )

@@ -9,7 +9,17 @@ from __future__ import annotations
 
 from typing import Annotated, Literal, TypeAlias
 
-from pydantic import Field, JsonValue, PrivateAttr, model_validator
+from pydantic import (
+    Field,
+    JsonValue,
+    PrivateAttr,
+    SerializationInfo,
+    SerializerFunctionWrapHandler,
+    ValidationInfo,
+    model_serializer,
+    model_validator,
+)
+from pydantic.json_schema import SkipJsonSchema
 
 from .common import ContractModel
 
@@ -222,20 +232,70 @@ class ActionAdjudication(ContractModel):
     rule_decision: RuleDecisionRef | None = None
     success_effects: tuple[ActionEffect, ...] = ()
     failure_effects: tuple[ActionEffect, ...] = ()
+    # 只用于 ActionPlan 内部持久化的兼容标记；不进入公开 Schema，也不会出现在
+    # 普通模型/API 序列化中。否则旧裁决省略字段后经过 JSON round-trip，会被误判
+    # 成新模型显式声明 none。
+    persistence_intent_explicit_marker: SkipJsonSchema[bool | None] = Field(
+        default=None,
+        exclude=True,
+    )
     _persistence_intent_explicit: bool = PrivateAttr(default=False)
+    _persistence_intent_marker_restored: bool = PrivateAttr(default=False)
 
     @model_validator(mode="after")
-    def validate_candidates(self) -> ActionAdjudication:
+    def validate_candidates(self, info: ValidationInfo) -> ActionAdjudication:
         # 私有标记随 model_copy 保留，但不会进入持久化 JSON 或公开 Schema。
+        trusted_persistence_restore = (
+            info.context is not None
+            and info.context.get("allow_persistence_intent_explicit_marker") is True
+        )
+        marker = self.persistence_intent_explicit_marker
+        if marker is not None:
+            if not trusted_persistence_restore:
+                raise ValueError("persistence_intent_explicit_marker 仅供内部恢复使用")
+            object.__setattr__(self, "_persistence_intent_marker_restored", True)
+            object.__setattr__(self, "persistence_intent_explicit_marker", None)
+        explicit = (
+            marker
+            if marker is not None
+            else self._persistence_intent_explicit
+            if self._persistence_intent_marker_restored
+            # 新 writer 总会写 marker；可信存储里缺失 marker 的只能是 legacy
+            # model_dump 记录，其默认 none 不代表模型曾显式声明该字段。
+            else False
+            if trusted_persistence_restore
+            else "persistence_intent" in self.model_fields_set
+        )
         object.__setattr__(
             self,
             "_persistence_intent_explicit",
-            "persistence_intent" in self.model_fields_set,
+            explicit,
         )
         ids = [candidate.candidate_id for candidate in self.check.candidates]
         if len(ids) != len(set(ids)):
             raise ValueError("candidate_id 必须在一次 ActionAdjudication 内唯一")
         return self
+
+    @model_serializer(mode="wrap")
+    def serialize_with_persistence_marker(
+        self,
+        handler: SerializerFunctionWrapHandler,
+        info: SerializationInfo,
+    ):
+        # Do not annotate this wrap serializer as ``dict[str, object]``.
+        # Pydantic treats that annotation as the model's serialization shape,
+        # collapsing ActionAdjudication.model_json_schema(mode="serialization")
+        # to an unconstrained object.  That schema is sent to JSON-mode model
+        # providers, so the collapse makes the provider guess every field.
+        data = handler(self)
+        if (
+            info.context is not None
+            and info.context.get("preserve_persistence_intent_explicit") is True
+        ):
+            data["persistence_intent_explicit_marker"] = (
+                self.persistence_intent_explicit
+            )
+        return data
 
     @property
     def persistence_intent_explicit(self) -> bool:
@@ -346,7 +406,9 @@ class CheckRunView(ContractModel):
     roll: CheckRoll
     post_roll_options: tuple[PostRollOption, ...] = ()
     final_result: CheckRoll | None = None
-    resolution_kind: Literal["initial_roll", "accept_result", "spend_luck", "push"] = "initial_roll"
+    resolution_kind: Literal["initial_roll", "accept_result", "spend_luck", "push"] = (
+        "initial_roll"
+    )
     luck_spent: int | None = Field(default=None, ge=1)
 
 

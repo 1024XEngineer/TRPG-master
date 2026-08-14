@@ -209,6 +209,61 @@ def test_clarification_fallback_points_to_visible_dead_body() -> None:
     assert output.text.startswith("梅洛迪亚斯·杰弗逊的尸体就在当前场景中")
 
 
+def test_unresolved_travel_fallback_narrates_not_found_without_substitution() -> None:
+    """无法创建的明确地点应说没找到，不应返回通用表单式澄清。"""
+
+    context = SimpleNamespace(
+        termination_status="needs_clarification",
+        player_input=SimpleNamespace(
+            client_action_id="unresolved-clinic",
+            utterance="去一个与当前背景冲突的诊所",
+        ),
+        completed_steps=(),
+        player_view=SimpleNamespace(scene=SimpleNamespace(visible_entities=())),
+    )
+
+    output = ActionPlanTurnApplication._deterministic_narration_fallback(cast(Any, context))
+
+    assert "没有" in output.text
+    assert "找到" in output.text
+    assert "仍停留在原处" in output.text
+    assert "作用于谁或什么" not in output.text
+    assert "具体变化" not in output.text
+
+
+def test_partial_travel_success_fallback_keeps_the_arrival() -> None:
+    """旅行已提交、后续步骤失败时，保底叙事不能把玩家送回原处。"""
+
+    context = SimpleNamespace(
+        termination_status="needs_clarification",
+        player_input=SimpleNamespace(
+            client_action_id="partial-inn",
+            utterance="去旅馆，开一间房休息",
+        ),
+        completed_steps=(
+            SimpleNamespace(
+                outcome="success",
+                semantic_goal="前往旅馆",
+                committed_results=(),
+            ),
+        ),
+        player_view=SimpleNamespace(
+            scene=SimpleNamespace(
+                name="镇上的旅店",
+                visible_entities=(),
+            ),
+        ),
+    )
+
+    output = ActionPlanTurnApplication._deterministic_narration_fallback(cast(Any, context))
+
+    assert output.kind == "clarification"
+    assert "已经抵达镇上的旅店" in output.text
+    assert "后续行动" in output.text
+    assert "没有" not in output.text
+    assert "仍停留在原处" not in output.text
+
+
 def test_planning_failure_returns_host_reply_without_execution() -> None:
     """规划结构连续失败时必须有主持人回复，并保持零权威写入。"""
 

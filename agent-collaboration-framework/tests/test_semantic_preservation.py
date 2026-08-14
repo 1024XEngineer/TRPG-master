@@ -11,7 +11,10 @@ from collaboration_framework.contracts import (
     ChangeEntityStateEffect,
     ConsumeEntityEffect,
     EnterLocationEffect,
+    EnsureRuntimeEntityEffect,
     ModuleContent,
+    MoveEntityEffect,
+    NarrativeOnlyEffect,
     NoAdjudicationCheck,
     PlayerInput,
     RequiredAdjudicationCheck,
@@ -468,3 +471,91 @@ def test_a_rule_may_not_be_dropped_for_an_unrelated_rejection() -> None:
 
     assert result.status == "requires_clarification"
     assert result.reason_code == "RULE_DECISION_CHANGED"
+
+
+def test_nonportable_pickup_can_be_repaired_to_runtime_item_creation() -> None:
+    """A wrong generic-entity binding may be repaired without changing pickup intent."""
+
+    _, _, projector = runtime()
+    current_input = player_input(utterance="拿起刚才提到的普通册子")
+    view = asyncio.run(projector.project(current_input))
+    original = ActionAdjudication(
+        request_id="request",
+        source_revision="0",
+        actor_id="pc_1",
+        summary="拿起刚才提到的普通册子",
+        target=ActionTarget(kind="entity", id="bookshelf"),
+        method=ActionMethod(family="pick_up", description="拿起刚才提到的普通册子"),
+        persistence_intent="inventory",
+        check=NoAdjudicationCheck(),
+        success_effects=(
+            MoveEntityEffect(entity_id="bookshelf", holder_actor_id="pc_1"),
+        ),
+    )
+    repaired = original.model_copy(
+        update={
+            "target": ActionTarget(kind="location", id=view.scene.id),
+            "success_effects": (
+                EnsureRuntimeEntityEffect(
+                    entity_id="runtime_volume",
+                    entity_kind="object",
+                    name="一本普通册子",
+                    location_id=view.scene.id,
+                ),
+                MoveEntityEffect(entity_id="runtime_volume", holder_actor_id="pc_1"),
+            ),
+        },
+        deep=True,
+    )
+
+    result = compare_repair_semantics(
+        player_input=current_input,
+        plan_goal=original.summary,
+        step=ActionPlanStep(kind="action", semantic_goal=original.summary),
+        original=original,
+        repaired=repaired,
+        validation_feedback=_feedback(code="INVENTORY_TARGET_NOT_PORTABLE"),
+        player_view=view,
+    )
+
+    assert result.status == "preserved"
+    assert result.reason_code == "INVENTORY_TARGET_REANCHORED"
+
+
+def test_nonportable_pickup_can_be_narrowed_to_zero_write_obstruction() -> None:
+    _, _, projector = runtime()
+    current_input = player_input(utterance="拿起固定陈设")
+    view = asyncio.run(projector.project(current_input))
+    original = ActionAdjudication(
+        request_id="request",
+        source_revision="0",
+        actor_id="pc_1",
+        summary="拿起固定陈设",
+        target=ActionTarget(kind="entity", id="bookshelf"),
+        method=ActionMethod(family="pick_up", description="拿起固定陈设"),
+        persistence_intent="inventory",
+        check=NoAdjudicationCheck(),
+        success_effects=(
+            MoveEntityEffect(entity_id="bookshelf", holder_actor_id="pc_1"),
+        ),
+    )
+    repaired = original.model_copy(
+        update={
+            "method": ActionMethod(family="action", description="拿起固定陈设"),
+            "persistence_intent": "none",
+            "success_effects": (NarrativeOnlyEffect(),),
+        },
+        deep=True,
+    )
+
+    result = compare_repair_semantics(
+        player_input=current_input,
+        plan_goal=original.summary,
+        step=ActionPlanStep(kind="action", semantic_goal=original.summary),
+        original=original,
+        repaired=repaired,
+        validation_feedback=_feedback(code="INVENTORY_TARGET_NOT_PORTABLE"),
+        player_view=view,
+    )
+
+    assert result.status == "narrowed"

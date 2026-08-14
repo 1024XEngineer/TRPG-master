@@ -37,6 +37,15 @@ _PLAYER_PRESENCE = re.compile(r"你(?:们)?(?:正|仍|还)?(?:站在|站着|坐�
 _ABSENT_PRESENCE = re.compile(
     r"人(?:却|已经|却已经)?不见|不在(?:这里|现场)|找不到(?:他|她)"
 )
+_INVENTORY_ACQUISITION = re.compile(
+    r"捡起|拾起|拿起|拿走|取走|收好|收下|带走|收入囊中|"
+    r"(?:放|装|塞|收)(?:入|进|到).{0,10}(?:背包|行囊|口袋|物品栏)|"
+    r"(?:背包|行囊|口袋|物品栏)(?:里|中)?(?:多了|有了|装着|放着|收着)"
+)
+_NON_ASSERTIVE_ACQUISITION = re.compile(
+    r"未|没有|没能|并未|不能|无法|不曾|试图|尝试|打算|准备|想要|却没"
+)
+_ITEM_PRONOUN = re.compile(r"它们?|该物品|此物")
 
 
 def unsupported_persistent_claim(
@@ -127,3 +136,58 @@ def unsupported_persistent_claim(
             if not has_evidence:
                 return key
     return None
+
+
+def unsupported_inventory_acquisition_claim(
+    text: str,
+    committed_results: tuple[CommittedResult, ...],
+    player_view: PlayerView,
+) -> str | None:
+    """Reject prose that claims an acquisition absent from final inventory.
+
+    An ``entity.moved`` event by itself is insufficient: older behavior could
+    attach ``holder_actor_id`` to a generic entity while inventory projection
+    ignored it.  A truthful acquisition therefore needs both a current-turn
+    inventory result and the same id in the final PlayerView inventory.
+    """
+
+    result_ids = {
+        result.target_id for result in committed_results if result.kind == "inventory"
+    }
+    confirmed_items = tuple(
+        item for item in player_view.inventory if item.id in result_ids
+    )
+    asserted_text = _QUOTED_TEXT.sub("", text)
+    for sentence in re.split(r"[。！？!?]", asserted_text):
+        match = _INVENTORY_ACQUISITION.search(sentence)
+        if match is None:
+            continue
+        prefix = sentence[max(0, match.start() - 12) : match.start()]
+        if _NON_ASSERTIVE_ACQUISITION.search(prefix):
+            continue
+        if not confirmed_items:
+            return "inventory_acquisition"
+        if any(_mentions_inventory_item(sentence, item.name) for item in confirmed_items):
+            continue
+        if len(confirmed_items) == 1 and _ITEM_PRONOUN.search(sentence):
+            continue
+        return "inventory_acquisition"
+    return None
+
+
+def _mentions_inventory_item(sentence: str, name: str) -> bool:
+    """Match a displayed item name without maintaining an item allowlist."""
+
+    compact_name = re.sub(r"\s+", "", name).casefold()
+    compact_sentence = re.sub(r"\s+", "", sentence).casefold()
+    if compact_name and compact_name in compact_sentence:
+        return True
+    cjk_name = "".join(character for character in compact_name if "一" <= character <= "鿿")
+    # Display names commonly carry a quantity or adjective before the actual
+    # noun.  A trailing CJK name segment lets prose use that ordinary noun
+    # while still requiring correspondence with the confirmed item.
+    for width in range(len(cjk_name), 1, -1):
+        if cjk_name[-width:] in compact_sentence:
+            return True
+    words = tuple(re.findall(r"[a-z0-9]+", compact_name))
+    return bool(words) and words[-1] in compact_sentence

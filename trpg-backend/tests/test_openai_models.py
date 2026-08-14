@@ -688,6 +688,11 @@ async def test_deepseek_client_posts_compatible_json_mode_without_qwen_fields() 
     assert captured["authorization"] == "Bearer test-key"
     assert body["model"] == "deepseek-chat"
     assert body["response_format"] == {"type": "json_object"}
+    # DeepSeek 的 `thinking` 默认是 enabled（reasoning_effort 默认 high），不显式
+    # 关掉就会在每次结构化输出前白烧一段推理——实测 qnaigc 端点上同一个 trivial
+    # 请求 151 vs 5 个 completion tokens（issue #330）。我们只要那个 JSON 对象。
+    assert body["thinking"] == {"type": "disabled"}
+    # `enable_thinking` 是 Qwen 的字段名，别混进 DeepSeek 的请求体。
     assert "enable_thinking" not in body
     assert "test_schema" in body["messages"][0]["content"]
     assert "只返回一个 JSON 对象" in body["messages"][0]["content"]

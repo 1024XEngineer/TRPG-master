@@ -27,7 +27,10 @@ from app.core.seed import ensure_seed_content
 from app.dto.common import ApiResponse
 from app.service.character_background import build_character_background_service
 from app.service.host_speech import build_host_speech_service
-from app.service.portrait_generation import build_portrait_generation_service
+from app.service.portrait_generation import (
+    PortraitGenerationService,
+    build_portrait_generation_service,
+)
 
 # 模块被导入时就把 structlog 配好（只需要配一次），后面直接用 structlog.get_logger()。
 configure_logging()
@@ -62,9 +65,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """
     async with async_session_factory() as db:
         await ensure_seed_content(db)
+    portrait_service: PortraitGenerationService = app.state.portrait_generation_service
+    await portrait_service.recover_interrupted()
     logger.info("app_started")
-    yield
-    logger.info("app_stopped")
+    try:
+        yield
+    finally:
+        await portrait_service.shutdown()
+        logger.info("app_stopped")
 
 
 def create_app() -> FastAPI:

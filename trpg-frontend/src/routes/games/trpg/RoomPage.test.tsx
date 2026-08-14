@@ -1151,7 +1151,7 @@ describe('RoomPage conversation history', () => {
 
     renderRoomPage()
     fireEvent.click(screen.getByRole('button', { name: '角色卡' }))
-    expect(screen.getByRole('button', { name: '查看杜调查员的头像大图' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '为杜调查员的头像生成图片' })).toBeInTheDocument()
     for (const label of ['生命值', '理智值', '魔法值', '伤害加值', '体格', '移动力']) {
       expect(screen.getByText(new RegExp(label))).toBeInTheDocument()
     }

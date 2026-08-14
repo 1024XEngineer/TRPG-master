@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fetchCharacter } from '@/services/character/character-api'
 import CharacterReadyPage from './CharacterReadyPage'
+import { usePortraitGenerationStore } from '@/stores/portrait-generation-store'
 
 const mocks = vi.hoisted(() => ({
   navigate: vi.fn(),
@@ -80,6 +81,7 @@ describe('CharacterReadyPage', () => {
     mocks.room.roomId = 'room-1'
     mocks.room.characterId = null
     vi.mocked(fetchCharacter).mockReset()
+    usePortraitGenerationStore.setState({ tasks: {}, cancelling: {}, notices: [], portraitVersions: {} })
   })
   afterEach(cleanup)
 
@@ -92,6 +94,18 @@ describe('CharacterReadyPage', () => {
     expect(screen.getByText('队友')).toBeInTheDocument()
     expect(screen.getByText('已建卡')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '开始游戏' })).toBeEnabled()
+  })
+
+  it('生图任务进行中仍可开始游戏，跳转不会清除任务', async () => {
+    usePortraitGenerationStore.getState().setTask('room-1', 'character-1', {
+      generationId: 'generation-1', status: 'generating', cancelRequested: false,
+      style: 'realistic', size: '1024x1024', createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:00Z',
+    })
+    render(<CharacterReadyPage />)
+    fireEvent.click(screen.getByRole('button', { name: '开始游戏' }))
+    await waitFor(() => expect(mocks.navigate).toHaveBeenCalledWith('/room/play'))
+    expect(usePortraitGenerationStore.getState().tasks['room-1/character-1']?.status).toBe('generating')
   })
 
   it('本人可以打开主题化角色卡并进入编辑页面', () => {

@@ -88,6 +88,33 @@ test('建卡全流程：草稿 → 保存 → 读回 → 完成', async () => {
   assert.equal(derived.SAN, 50) // = POW
 })
 
+test('角色生图以后台任务创建并可通过 SDK 恢复到终态', async () => {
+  const room = await createRoomWithModule('portrait-task')
+  const { sdk } = room.host
+  const draft = await sdk.characters.createDraft(room.roomId, room.reconnectToken)
+  const attributes = { STR: 50, CON: 50, POW: 50, DEX: 50, APP: 50, SIZ: 50, INT: 50, EDU: 50, LUCK: 50 }
+  await sdk.characters.save(room.roomId, draft.characterId, legalCharacterPayload(attributes), room.reconnectToken)
+  await sdk.characters.complete(room.roomId, draft.characterId, room.reconnectToken)
+
+  const created = await sdk.characters.createPortraitGeneration(
+    room.roomId, draft.characterId, { style: 'realistic', size: '1024x1024' }, room.reconnectToken
+  )
+  assert.equal(created.status, 'queued')
+  let current = created
+  for (let attempt = 0; attempt < 300 && ['queued', 'generating', 'cancelling'].includes(current.status); attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    current = await sdk.characters.getPortraitGeneration(
+      room.roomId, draft.characterId, created.generationId, room.reconnectToken
+    )
+  }
+  assert.equal(current.status, 'completed')
+  assert.ok(current.portraitVersion)
+  const recovered = await sdk.characters.getCurrentPortraitGeneration(
+    room.roomId, draft.characterId, room.reconnectToken
+  )
+  assert.equal(recovered?.generationId, created.generationId)
+})
+
 test('🔴 属性点预算：点数购买法超预算被拒，掷骰法不受该预算约束', async () => {
   // 这两条必须成对测。只测第一条的话，一个「无条件校验总预算」的实现也能过，
   // 但那会把合法掷出来的角色卡判成非法——掷骰法 8 项总和均值约 457、范围

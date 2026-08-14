@@ -140,12 +140,14 @@ export function CharacterBasicInfo({
   occupationName,
   attributes,
   liveResources,
+  portraitAction,
 }: {
   character: CompletedCharacter
   portraitUrl?: string
   occupationName?: string | null
   attributes: readonly RadarAttribute[]
   liveResources?: LiveResources
+  portraitAction?: { kind: 'preview' } | { kind: 'generate'; onActivate: () => void } | { kind: 'static' }
 }) {
   // 当前值优先，没有运行时投影时才落回建卡快照。
   const derivedValues = DERIVED_STAT_DEFINITIONS.map(definition => ({
@@ -188,7 +190,10 @@ export function CharacterBasicInfo({
               alt={`${character.info.name}的头像`}
               buttonClassName="h-full w-full"
               imageClassName="h-full w-full object-cover"
+              action={portraitAction}
             />
+          ) : portraitAction?.kind === 'generate' ? (
+            <button type="button" aria-label="生成角色图片" onClick={portraitAction.onActivate} className="h-full w-full text-2xl">🕵️</button>
           ) : '🕵️'}
         </div>
         <div className="character-ready-sheet__identity">

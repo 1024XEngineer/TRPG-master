@@ -104,7 +104,7 @@ _MODELS: list[type[BaseModel]] = [
     character.CharacterComputeResult,
     # 建卡完成后的角色生图（issue #199）
     portrait.PortraitGenerationRequest,
-    portrait.PortraitGenerationResult,
+    portrait.PortraitGenerationTaskRead,
     # 游戏目录 / 规则数据（issue #77 新增，issue #84 S1 加厚 ruleset 结构）
     game.GameRead,
     game.GameSystemRead,

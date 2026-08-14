@@ -1,5 +1,6 @@
-"""Character portrait generation request, snapshot, and response models."""
+"""角色生图请求、提示词快照与后台任务响应模型。"""
 
+from datetime import datetime
 from typing import Literal
 
 from pydantic import Field, field_validator
@@ -74,12 +75,28 @@ class PortraitPrompt(PortraitPromptDraft):
     source: Literal["deepseek", "deterministic", "deterministic_fallback"]
 
 
-class PortraitGenerationResult(CamelModel):
+class PortraitGenerationTaskRead(CamelModel):
+    """可安全返回给玩家的生图任务快照。"""
+
     generation_id: str
-    status: Literal["completed"] = "completed"
-    image_url: str
-    portrait_version: str
-    prompt: str
-    negative_prompt: str
-    prompt_summary: str
-    prompt_source: Literal["deepseek", "deterministic", "deterministic_fallback"]
+    status: Literal["queued", "generating", "cancelling", "completed", "failed", "cancelled"]
+    cancel_requested: bool
+    failure_code: (
+        Literal[
+            "content_rejected",
+            "timeout",
+            "provider_failed",
+            "materialization_failed",
+            "process_restarted",
+        ]
+        | None
+    ) = None
+    portrait_version: str | None = None
+    prompt_summary: str | None = None
+    prompt_source: Literal["deepseek", "deterministic", "deterministic_fallback"] | None = None
+    style: Literal["realistic"]
+    size: Literal["1024x1024"]
+    created_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    updated_at: datetime

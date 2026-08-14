@@ -66,6 +66,41 @@ jobs:
       - name: Run tests
         run: uv run pytest
 
+  postgres-migration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: trpg
+          POSTGRES_PASSWORD: trpg
+          POSTGRES_DB: trpg_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U trpg -d trpg_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+asyncpg://trpg:trpg@127.0.0.1:5432/trpg_test
+    defaults:
+      run:
+        working-directory: trpg-backend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: Set up Python
+        run: uv python install
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Upgrade PostgreSQL schema
+        run: uv run alembic upgrade head
+      - name: Verify portrait task index
+        run: uv run python scripts/check_portrait_postgres.py
+
   # 漂移检查（issue #75 决策 3）：重新跑一遍完整的 DTO -> JSON Schema -> TS
   # 生成管线，用 git diff 确认 trpg-sdk/src/generated/ 跟刚生成的结果一致。
   # 不一致说明有人改了后端 DTO（或手改了生成产物）却没有重新跑 codegen。

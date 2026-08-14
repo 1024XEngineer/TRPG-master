@@ -51,6 +51,11 @@ const fakeModelEnv = {
   // Settings 校验阶段失败；若透传 Key 则会让 E2E 依赖外部服务并产生费用。
   HOST_MODEL_PROVIDER: 'fake',
   DEEPSEEK_API_KEY: '',
+  // 建卡背景和角色生图也必须锁定确定性实现，不能继承开发机 .env 的付费 provider。
+  CHARACTER_BACKGROUND_PROVIDER: 'deterministic',
+  PORTRAIT_PROMPT_PROVIDER: 'deterministic',
+  PORTRAIT_IMAGE_PROVIDER: 'mock',
+  CHARACTER_PORTRAIT_ENABLED: 'true',
 }
 const backendEnv = {
   ...process.env,

@@ -3,31 +3,34 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Protocol
+from typing import Any, Protocol, cast
 
 import structlog
 from collaboration_framework.contracts import ModuleContent, ModuleContentV3
-from sqlalchemy import select
-from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, update
+from sqlalchemy.engine import CursorResult
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.coc7_content import build_coc7_ruleset
 from app.core.coc7_rules import evaluate_skill_base
 from app.core.config import Settings, model_client_retry_policy, secret_value
+from app.core.db import async_session_factory
 from app.dto.game import RulesetRead
 from app.dto.portrait import (
     CharacterPortraitSnapshot,
     PortraitGenerationRequest,
-    PortraitGenerationResult,
+    PortraitGenerationTaskRead,
     PortraitPrompt,
     PortraitSkillSnapshot,
 )
 from app.models.content import Scenario
 from app.models.engine import ModuleVersion
-from app.models.room import Character, CharacterPortrait, Player, Room
+from app.models.room import Character, CharacterPortrait, Player, PortraitGenerationTask, Room
 from app.service.portrait_reference import PortraitReferenceImage, load_portrait_reference_image
 from app.service.room import (
     RoomAuthorizationError,
@@ -67,6 +70,12 @@ class PortraitImageTimeoutError(PortraitImageGenerationError):
     pass
 
 
+class PortraitGenerationCancelled(RuntimeError):
+    """后台执行器内部使用的取消信号，不直接暴露给 API。"""
+
+    pass
+
+
 @dataclass(frozen=True, slots=True)
 class ImageGenerationOutput:
     image_url: str
@@ -93,6 +102,40 @@ class ImageGenerationProvider(Protocol):
         negative_prompt: str,
         size: str,
         reference_image: PortraitReferenceImage | None = None,
+    ) -> ImageGenerationOutput: ...
+
+
+class ImageGenerationControl:
+    """把上游任务 ID 安全回写数据库，并向 provider 传递取消状态。"""
+
+    def __init__(
+        self, generation_id: str, session_factory: async_sessionmaker[AsyncSession]
+    ) -> None:
+        self.generation_id = generation_id
+        self.cancelled = asyncio.Event()
+        self._session_factory = session_factory
+
+    async def set_provider_task_id(self, task_id: str) -> None:
+        async with self._session_factory() as db:
+            await db.execute(
+                update(PortraitGenerationTask)
+                .where(PortraitGenerationTask.generation_id == self.generation_id)
+                .values(provider_task_id=task_id, updated_at=datetime.now(UTC))
+            )
+            await db.commit()
+
+
+class ControlledImageGenerationProvider(Protocol):
+    """新版 provider 可选协议；旧 provider 仍按基础协议正常工作。"""
+
+    async def generate(
+        self,
+        *,
+        prompt: str,
+        negative_prompt: str,
+        size: str,
+        reference_image: PortraitReferenceImage | None = None,
+        control: ImageGenerationControl | None = None,
     ) -> ImageGenerationOutput: ...
 
 
@@ -291,6 +334,7 @@ class PortraitGenerationService:
         image_provider: ImageGenerationProvider,
         image_materializer: PortraitImageMaterializerProtocol,
         reference_image: PortraitReferenceImage | None = None,
+        session_factory: async_sessionmaker[AsyncSession] = async_session_factory,
     ) -> None:
         self._enabled = enabled
         self._prompt_composer = prompt_composer
@@ -298,17 +342,30 @@ class PortraitGenerationService:
         self._image_provider = image_provider
         self._image_materializer = image_materializer
         self._reference_image = reference_image
-        self._in_flight: set[tuple[str, str]] = set()
-        self._in_flight_lock = asyncio.Lock()
+        self._session_factory = session_factory
+        self._tasks: dict[str, asyncio.Task[None]] = {}
+        self._controls: dict[str, ImageGenerationControl] = {}
+        self._stopping = False
 
-    async def generate(
+    def set_session_factory_for_testing(
+        self, session_factory: async_sessionmaker[AsyncSession]
+    ) -> None:
+        """测试环境显式注入隔离数据库，避免后台协程绕过 FastAPI 依赖覆盖。"""
+        self._session_factory = session_factory
+
+    @staticmethod
+    def _read(task: PortraitGenerationTask) -> PortraitGenerationTaskRead:
+        return PortraitGenerationTaskRead.model_validate(task, from_attributes=True)
+
+    async def create(
         self,
         db: AsyncSession,
         room_id: str,
         character_id: str,
         reconnect_token: str | None,
         payload: PortraitGenerationRequest,
-    ) -> PortraitGenerationResult:
+    ) -> PortraitGenerationTaskRead:
+        """验证归属并提交 queued 记录；提交成功后才允许调度后台执行。"""
         if not self._enabled:
             raise PortraitGenerationDisabledError("角色图片生成功能未开启")
 
@@ -321,64 +378,338 @@ class PortraitGenerationService:
         if character.status != "complete":
             raise PortraitCharacterIncompleteError("请先完成建卡再生成角色图片")
 
-        room = await find_room_by_id(db, room_id)
-        ruleset = (
-            await require_ruleset(db, room.system_id)
-            if room.system_id is not None
-            else build_coc7_ruleset()
-        )
-
-        key = (room_id, character_id)
-        async with self._in_flight_lock:
-            if key in self._in_flight:
-                raise PortraitGenerationInProgressError("该角色的图片正在生成")
-            self._in_flight.add(key)
-
         try:
-            module_background = await _load_module_background(db, room)
-            snapshot = build_character_portrait_snapshot(
-                character,
-                ruleset,
-                module_background=module_background,
+            now = datetime.now(UTC)
+            task = PortraitGenerationTask(
+                generation_id=str(uuid.uuid4()),
+                room_id=room_id,
+                character_id=character_id,
+                player_id=player.id,
+                status="queued",
+                cancel_requested=False,
+                style=payload.style,
+                size=payload.size,
+                created_at=now,
+                updated_at=now,
             )
+            db.add(task)
+            await db.commit()
+        except IntegrityError as exc:
+            await db.rollback()
+            raise PortraitGenerationInProgressError("该角色的图片正在生成") from exc
+        snapshot = self._read(task)
+        self.schedule(task.generation_id)
+        return snapshot
+
+    def schedule(self, generation_id: str) -> None:
+        """登记进程内协程；数据库唯一索引而非该字典负责并发正确性。"""
+        if self._stopping or generation_id in self._tasks:
+            return
+        task = asyncio.create_task(self._run(generation_id), name=f"portrait-{generation_id}")
+        self._tasks[generation_id] = task
+        task.add_done_callback(lambda _task: self._tasks.pop(generation_id, None))
+
+    async def get_current(
+        self, db: AsyncSession, room_id: str, character_id: str, reconnect_token: str | None
+    ) -> PortraitGenerationTaskRead | None:
+        await self._authorize_character(db, room_id, character_id, reconnect_token)
+        task = await db.scalar(
+            select(PortraitGenerationTask)
+            .where(
+                PortraitGenerationTask.room_id == room_id,
+                PortraitGenerationTask.character_id == character_id,
+            )
+            .order_by(PortraitGenerationTask.created_at.desc())
+            .limit(1)
+        )
+        return self._read(task) if task else None
+
+    async def get_task(
+        self,
+        db: AsyncSession,
+        room_id: str,
+        character_id: str,
+        generation_id: str,
+        reconnect_token: str | None,
+    ) -> PortraitGenerationTaskRead:
+        await self._authorize_character(db, room_id, character_id, reconnect_token)
+        task = await db.get(PortraitGenerationTask, generation_id)
+        if task is None or task.room_id != room_id or task.character_id != character_id:
+            raise PortraitCharacterNotFoundError("生图任务不存在")
+        return self._read(task)
+
+    async def cancel(
+        self,
+        db: AsyncSession,
+        room_id: str,
+        character_id: str,
+        generation_id: str,
+        reconnect_token: str | None,
+    ) -> PortraitGenerationTaskRead:
+        """先提交权威取消状态，再尽力中断本地与上游任务。"""
+        await self._authorize_character(db, room_id, character_id, reconnect_token)
+        task = await db.scalar(
+            select(PortraitGenerationTask)
+            .where(PortraitGenerationTask.generation_id == generation_id)
+            .with_for_update()
+        )
+        if task is None or task.room_id != room_id or task.character_id != character_id:
+            raise PortraitCharacterNotFoundError("生图任务不存在")
+        if task.status in {"completed", "failed", "cancelled"}:
+            return self._read(task)
+        now = datetime.now(UTC)
+        task.cancel_requested = True
+        task.updated_at = now
+        if task.status == "queued":
+            task.status = "cancelled"
+            task.finished_at = now
+        else:
+            task.status = "cancelling"
+        provider_task_id = task.provider_task_id
+        await db.commit()
+        snapshot = self._read(task)
+        control = self._controls.get(generation_id)
+        if control:
+            control.cancelled.set()
+        cancel_method = getattr(self._image_provider, "cancel", None)
+        if provider_task_id and callable(cancel_method):
             try:
-                prompt = await self._prompt_composer.compose(snapshot)
+                await cancel_method(provider_task_id)
+            except Exception:
+                logger.warning("portrait_provider_cancel_failed", generation_id=generation_id)
+        local_task = self._tasks.get(generation_id)
+        if local_task and task.status == "cancelling":
+            local_task.cancel()
+        return snapshot
+
+    async def _authorize_character(
+        self, db: AsyncSession, room_id: str, character_id: str, reconnect_token: str | None
+    ) -> Character:
+        player = await get_player_by_reconnect_token(db, reconnect_token)
+        character = await db.get(Character, character_id)
+        if character is None or character.room_id != room_id:
+            raise PortraitCharacterNotFoundError("角色不存在")
+        if character.player_id != player.id:
+            raise RoomAuthorizationError("不能访问其他玩家的生图任务")
+        return character
+
+    async def _is_cancelled(self, generation_id: str) -> bool:
+        async with self._session_factory() as db:
+            task = await db.get(PortraitGenerationTask, generation_id)
+            return (
+                task is None or task.cancel_requested or task.status in {"cancelling", "cancelled"}
+            )
+
+    async def _run(self, generation_id: str) -> None:
+        """后台流水线：每个数据库阶段使用独立短会话，外部 IO 不占事务。"""
+        control = ImageGenerationControl(generation_id, self._session_factory)
+        self._controls[generation_id] = control
+        stage = "provider"
+        try:
+            async with self._session_factory() as db:
+                task = await db.get(PortraitGenerationTask, generation_id)
+                if task is None or task.status != "queued" or task.cancel_requested:
+                    return
+                task.status = "generating"
+                task.started_at = task.updated_at = datetime.now(UTC)
+                await db.commit()
+            if await self._is_cancelled(generation_id):
+                raise PortraitGenerationCancelled()
+            async with self._session_factory() as db:
+                task = await db.get(PortraitGenerationTask, generation_id)
+                if task is None:
+                    return
+                character = await db.get(Character, task.character_id)
+                room = await find_room_by_id(db, task.room_id)
+                if character is None:
+                    raise PortraitCharacterNotFoundError("角色不存在")
+                ruleset = (
+                    await require_ruleset(db, room.system_id)
+                    if room.system_id
+                    else build_coc7_ruleset()
+                )
+                background = await _load_module_background(db, room)
+                portrait_snapshot = build_character_portrait_snapshot(
+                    character, ruleset, module_background=background
+                )
+                size = task.size
+            try:
+                prompt = await self._prompt_composer.compose(portrait_snapshot)
             except Exception as exc:
                 logger.warning(
                     "portrait_prompt_fallback",
-                    character_id=character_id,
+                    generation_id=generation_id,
                     error_type=type(exc).__name__,
                 )
-                prompt = await self._fallback_prompt_composer.compose(snapshot)
+                prompt = await self._fallback_prompt_composer.compose(portrait_snapshot)
                 prompt = prompt.model_copy(update={"source": "deterministic_fallback"})
-
-            if self._reference_image is None:
-                output = await self._image_provider.generate(
+            async with self._session_factory() as db:
+                task = await db.get(PortraitGenerationTask, generation_id)
+                if task is None or task.cancel_requested:
+                    raise PortraitGenerationCancelled()
+                task.prompt_summary, task.prompt_source = prompt.prompt_summary, prompt.source
+                task.updated_at = datetime.now(UTC)
+                await db.commit()
+            if "control" in inspect.signature(self._image_provider.generate).parameters:
+                controlled = cast(ControlledImageGenerationProvider, self._image_provider)
+                output = await controlled.generate(
                     prompt=prompt.positive_prompt,
                     negative_prompt=prompt.negative_prompt,
-                    size=payload.size,
+                    size=size,
+                    reference_image=self._reference_image,
+                    control=control,
                 )
             else:
+                # 兼容仓库内已有的第三方/测试 provider；新版实现应接收 control。
                 output = await self._image_provider.generate(
                     prompt=prompt.positive_prompt,
                     negative_prompt=prompt.negative_prompt,
-                    size=payload.size,
+                    size=size,
                     reference_image=self._reference_image,
                 )
+            if await self._is_cancelled(generation_id):
+                raise PortraitGenerationCancelled()
+            stage = "materialization"
             materialized = await self._image_materializer.materialize(output.image_url)
-            await self._replace_portrait(db, character_id, materialized)
-            return PortraitGenerationResult(
-                generation_id=str(uuid.uuid4()),
-                image_url=output.image_url,
-                portrait_version=materialized.content_hash,
-                prompt=prompt.positive_prompt,
-                negative_prompt=prompt.negative_prompt,
-                prompt_summary=prompt.prompt_summary,
-                prompt_source=prompt.source,
+            if await self._is_cancelled(generation_id):
+                raise PortraitGenerationCancelled()
+            await self._complete(generation_id, materialized)
+        except asyncio.CancelledError:
+            # 进程关闭不是玩家取消：保留活动状态，交给下次启动标记 process_restarted。
+            if not self._stopping:
+                await self._finish_cancelled(generation_id)
+        except PortraitGenerationCancelled:
+            await self._finish_cancelled(generation_id)
+        except PortraitImageContentRejectedError:
+            await self._fail(generation_id, "content_rejected")
+        except PortraitImageTimeoutError:
+            await self._fail(generation_id, "timeout")
+        except Exception:
+            logger.exception("portrait_generation_failed", generation_id=generation_id)
+            await self._fail(
+                generation_id,
+                "materialization_failed" if stage == "materialization" else "provider_failed",
             )
         finally:
-            async with self._in_flight_lock:
-                self._in_flight.discard(key)
+            self._controls.pop(generation_id, None)
+
+    async def _complete(self, generation_id: str, image: MaterializedPortrait) -> None:
+        """条件抢占完成权并在同一事务替换头像；取消先提交则不产生写入。"""
+        async with self._session_factory() as db:
+            task = await db.scalar(
+                select(PortraitGenerationTask)
+                .where(PortraitGenerationTask.generation_id == generation_id)
+                .with_for_update()
+            )
+            if task is None or task.status != "generating" or task.cancel_requested:
+                await db.rollback()
+                await self._finish_cancelled(generation_id)
+                return
+            now = datetime.now(UTC)
+            # SQLite 的 FOR UPDATE 不提供真实行锁，因此必须先用条件 UPDATE 抢完成权；
+            # 取消若已提交，rowcount 为 0，整个头像事务立即回滚。
+            claimed = cast(
+                CursorResult[Any],
+                await db.execute(
+                    update(PortraitGenerationTask)
+                    .where(
+                        PortraitGenerationTask.generation_id == generation_id,
+                        PortraitGenerationTask.status == "generating",
+                        PortraitGenerationTask.cancel_requested.is_(False),
+                    )
+                    .values(
+                        status="completed",
+                        portrait_version=image.content_hash,
+                        finished_at=now,
+                        updated_at=now,
+                    )
+                    .execution_options(synchronize_session=False)
+                ),
+            )
+            if claimed.rowcount != 1:
+                await db.rollback()
+                await self._finish_cancelled(generation_id)
+                return
+            await db.scalar(
+                select(Character).where(Character.id == task.character_id).with_for_update()
+            )
+            portrait = await db.get(CharacterPortrait, task.character_id)
+            if portrait is None:
+                portrait = CharacterPortrait(
+                    character_id=task.character_id,
+                    content=image.content,
+                    content_type=image.content_type,
+                    size_bytes=len(image.content),
+                    content_hash=image.content_hash,
+                    created_at=now,
+                    updated_at=now,
+                )
+                db.add(portrait)
+            else:
+                portrait.content, portrait.content_type = image.content, image.content_type
+                portrait.size_bytes, portrait.content_hash, portrait.updated_at = (
+                    len(image.content),
+                    image.content_hash,
+                    now,
+                )
+            await db.commit()
+
+    async def _finish_cancelled(self, generation_id: str) -> None:
+        async with self._session_factory() as db:
+            await db.execute(
+                update(PortraitGenerationTask)
+                .where(
+                    PortraitGenerationTask.generation_id == generation_id,
+                    PortraitGenerationTask.status.in_(("queued", "generating", "cancelling")),
+                )
+                .values(
+                    status="cancelled",
+                    cancel_requested=True,
+                    finished_at=datetime.now(UTC),
+                    updated_at=datetime.now(UTC),
+                )
+            )
+            await db.commit()
+
+    async def _fail(self, generation_id: str, failure_code: str) -> None:
+        async with self._session_factory() as db:
+            now = datetime.now(UTC)
+            await db.execute(
+                update(PortraitGenerationTask)
+                .where(
+                    PortraitGenerationTask.generation_id == generation_id,
+                    PortraitGenerationTask.status.in_(("queued", "generating")),
+                )
+                .values(status="failed", failure_code=failure_code, finished_at=now, updated_at=now)
+            )
+            await db.commit()
+
+    async def recover_interrupted(self) -> None:
+        """启动时明确失败遗留活动任务，避免未知上游重复计费。"""
+        async with self._session_factory() as db:
+            now = datetime.now(UTC)
+            await db.execute(
+                update(PortraitGenerationTask)
+                .where(
+                    PortraitGenerationTask.status.in_(("queued", "generating", "cancelling")),
+                )
+                .values(
+                    status="failed",
+                    failure_code="process_restarted",
+                    finished_at=now,
+                    updated_at=now,
+                )
+            )
+            await db.commit()
+
+    async def shutdown(self, timeout_seconds: float = 5.0) -> None:
+        """有限等待本进程任务退出，遗留状态交给下次启动恢复。"""
+        self._stopping = True
+        tasks = list(self._tasks.values())
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.wait(tasks, timeout=timeout_seconds)
 
     @staticmethod
     async def get_player_portrait(

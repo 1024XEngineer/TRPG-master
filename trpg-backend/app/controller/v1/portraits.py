@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_db
 from app.core.errors import AppException, ErrorCode
 from app.dto.common import ApiResponse
-from app.dto.portrait import PortraitGenerationRequest, PortraitGenerationResult
+from app.dto.portrait import PortraitGenerationRequest, PortraitGenerationTaskRead
 from app.service import room as room_service
 from app.service.portrait_generation import (
     PortraitCharacterIncompleteError,
@@ -76,7 +76,8 @@ async def get_player_portrait(
 
 @router.post(
     "/{room_id}/characters/{character_id}/portrait-generations",
-    response_model=ApiResponse[PortraitGenerationResult],
+    response_model=ApiResponse[PortraitGenerationTaskRead],
+    status_code=status.HTTP_202_ACCEPTED,
 )
 async def generate_character_portrait(
     room_id: str,
@@ -85,9 +86,9 @@ async def generate_character_portrait(
     reconnect_token: str | None = Header(default=None, alias="X-Reconnect-Token"),
     db: AsyncSession = Depends(get_db),
     service: PortraitGenerationService = Depends(get_portrait_generation_service),
-) -> ApiResponse[PortraitGenerationResult]:
+) -> ApiResponse[PortraitGenerationTaskRead]:
     try:
-        result = await service.generate(db, room_id, character_id, reconnect_token, payload)
+        result = await service.create(db, room_id, character_id, reconnect_token, payload)
     except PortraitGenerationDisabledError as exc:
         raise AppException(
             ErrorCode.PORTRAIT_GENERATION_DISABLED,
@@ -131,3 +132,69 @@ async def generate_character_portrait(
             status.HTTP_502_BAD_GATEWAY,
         ) from exc
     return ApiResponse.ok(result)
+
+
+async def _portrait_task_call(call):  # noqa: ANN001, ANN202
+    """把任务查询/取消共享的归属错误稳定映射到 REST 错误信封。"""
+    try:
+        return await call
+    except PortraitCharacterNotFoundError as exc:
+        raise AppException(ErrorCode.NOT_FOUND, str(exc), status.HTTP_404_NOT_FOUND) from exc
+    except room_service.RoomAuthenticationError as exc:
+        raise AppException(ErrorCode.UNAUTHORIZED, str(exc), status.HTTP_401_UNAUTHORIZED) from exc
+    except room_service.RoomAuthorizationError as exc:
+        raise AppException(ErrorCode.FORBIDDEN, str(exc), status.HTTP_403_FORBIDDEN) from exc
+
+
+@router.get(
+    "/{room_id}/characters/{character_id}/portrait-generations/current",
+    response_model=ApiResponse[PortraitGenerationTaskRead | None],
+)
+async def get_current_portrait_generation(
+    room_id: str,
+    character_id: str,
+    reconnect_token: str | None = Header(default=None, alias="X-Reconnect-Token"),
+    db: AsyncSession = Depends(get_db),
+    service: PortraitGenerationService = Depends(get_portrait_generation_service),
+) -> ApiResponse[PortraitGenerationTaskRead | None]:
+    return ApiResponse.ok(
+        await _portrait_task_call(service.get_current(db, room_id, character_id, reconnect_token))
+    )
+
+
+@router.get(
+    "/{room_id}/characters/{character_id}/portrait-generations/{generation_id}",
+    response_model=ApiResponse[PortraitGenerationTaskRead],
+)
+async def get_portrait_generation(
+    room_id: str,
+    character_id: str,
+    generation_id: str,
+    reconnect_token: str | None = Header(default=None, alias="X-Reconnect-Token"),
+    db: AsyncSession = Depends(get_db),
+    service: PortraitGenerationService = Depends(get_portrait_generation_service),
+) -> ApiResponse[PortraitGenerationTaskRead]:
+    return ApiResponse.ok(
+        await _portrait_task_call(
+            service.get_task(db, room_id, character_id, generation_id, reconnect_token)
+        )
+    )
+
+
+@router.post(
+    "/{room_id}/characters/{character_id}/portrait-generations/{generation_id}/cancel",
+    response_model=ApiResponse[PortraitGenerationTaskRead],
+)
+async def cancel_portrait_generation(
+    room_id: str,
+    character_id: str,
+    generation_id: str,
+    reconnect_token: str | None = Header(default=None, alias="X-Reconnect-Token"),
+    db: AsyncSession = Depends(get_db),
+    service: PortraitGenerationService = Depends(get_portrait_generation_service),
+) -> ApiResponse[PortraitGenerationTaskRead]:
+    return ApiResponse.ok(
+        await _portrait_task_call(
+            service.cancel(db, room_id, character_id, generation_id, reconnect_token)
+        )
+    )

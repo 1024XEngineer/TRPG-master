@@ -63,6 +63,7 @@ app.dependency_overrides[get_db] = override_get_db
 # 测试必须与开发者本地 `.env` 解耦：一键建卡的真实背景 provider 可能产生外部
 # 请求和费用；专门注入确定性实现，真实 provider 由 adapter 单测覆盖。
 app.state.character_background_service = CharacterBackgroundService()
+app.state.test_session_factory = TestSessionLocal
 
 # WS 路由（app/controller/ws.py）是原生 websocket handler，拿不到 FastAPI 的
 # Depends(get_db)，而是直接 `async with async_session_factory() as db`——也就是

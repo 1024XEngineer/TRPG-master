@@ -348,10 +348,10 @@ class CheckRequestPayload(CamelModel):
 
 
 class CheckResultPayload(CamelModel):
-    """check.result 推送 payload（issue #77 新增）。
+    """check.result 推送最终权威结果。
 
-    直接返回终值，不做两段式初步结果（issue 决策 4：幸运消耗机制推迟，
-    协议一并简化）。
+    保留原始骰点，并通过 resolution_kind / luck_spent 说明幸运等 post-roll
+    结算，避免把未达标骰点直接展示成普通成功（issue #327）。
     """
 
     player_id: str
@@ -372,6 +372,8 @@ class CheckResultPayload(CamelModel):
     ]
     passed: bool
     result: str
+    resolution_kind: Literal["initial_roll", "accept_result", "spend_luck", "push"] = "initial_roll"
+    luck_spent: int | None = Field(default=None, ge=1)
 
 
 class SanCheckRequestPayload(CamelModel):

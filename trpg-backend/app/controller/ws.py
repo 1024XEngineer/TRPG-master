@@ -859,6 +859,8 @@ async def _emit_check_result(
         success_level=success_level,
         passed=final.passed,
         result=success_level,
+        resolution_kind=check_run.resolution_kind,
+        luck_spent=check_run.luck_spent,
     )
     recorded = await room_service.record_event(
         db,

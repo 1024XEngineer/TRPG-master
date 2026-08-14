@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { RoomSocketServerError, TurnFailedError, type AdjudicationPendingPayload, type AgentPlayerView, type AgentTurnPhase, type CheckRequestPayload, type EndingDraft, type NarrationPushPayload, type RoomConversationEvent, type RoomPlayerSummary } from 'trpg-sdk'
+import { RoomSocketServerError, TurnFailedError, type AdjudicationPendingPayload, type AgentPlayerView, type AgentTurnPhase, type CheckRequestPayload, type CheckResultPayload, type EndingDraft, type NarrationPushPayload, type RoomConversationEvent, type RoomPlayerSummary } from 'trpg-sdk'
 import { ArrowLeft, Users, Map, MapPin, BookOpen, ScrollText, Star, X, SendHorizontal, Plus, Save, FlagOff, Heart, Brain, Volume2, Pause, Play, Square, RotateCcw, Mic, LoaderCircle } from 'lucide-react'
 import { useCallback, useState, useRef, useEffect, type Dispatch, type FormEvent, type SetStateAction } from 'react'
 import { useRoomStore } from '@/stores/room-store'
@@ -100,6 +100,33 @@ function checkRunForUi(
       return { ...option, kind: 'accept_result' as const }
     }),
   }
+}
+
+const checkResultLevelLabels: Record<string, string> = {
+  critical: '大成功',
+  extreme: '极难成功',
+  hard: '困难成功',
+  regular: '成功',
+  failure: '失败',
+  fumble: '大失败',
+}
+
+const checkDifficultyLabels: Record<string, string> = {
+  regular: '常规',
+  hard: '困难',
+  extreme: '极难',
+}
+
+function checkResultContent(payload: CheckResultPayload): string {
+  const levelLabel = checkResultLevelLabels[payload.successLevel] ?? payload.result
+  const outcomeLabel = payload.passed
+    ? levelLabel
+    : `${levelLabel}（未通过${checkDifficultyLabels[payload.difficulty] ?? ''}检定）`
+  const resolutionLabel =
+    payload.resolutionKind === 'spend_luck' && payload.luckSpent
+      ? ` · 消耗 ${payload.luckSpent} 点幸运 → ${outcomeLabel}`
+      : ` · ${outcomeLabel}`
+  return `${payload.skillName} ${payload.targetValue}% · D100 ${payload.rollValue}${resolutionLabel}`
 }
 
 // ─── Types ───────────────────────────────────────────
@@ -436,35 +463,7 @@ function conversationEventToMessage(
     }
   }
   if (event.type === 'check.result') {
-    const payload = event.payload as {
-      playerId: string
-      clientActionId: string
-      skillName: string
-      characterName?: string | null
-      targetValue: number
-      rollValue: number
-      difficulty: string
-      successLevel: string
-      passed: boolean
-      result: string
-    }
-    const levelLabels: Record<string, string> = {
-      critical: '大成功',
-      extreme: '极难成功',
-      hard: '困难成功',
-      regular: '成功',
-      failure: '失败',
-      fumble: '大失败',
-    }
-    const difficultyLabels: Record<string, string> = {
-      regular: '常规',
-      hard: '困难',
-      extreme: '极难',
-    }
-    const levelLabel = levelLabels[payload.successLevel] ?? payload.result
-    const outcomeLabel = payload.passed
-      ? levelLabel
-      : `${levelLabel}（未通过${difficultyLabels[payload.difficulty] ?? ''}检定）`
+    const payload = event.payload as unknown as CheckResultPayload
     return {
       type: 'dice',
       channel: 'action',
@@ -473,7 +472,7 @@ function conversationEventToMessage(
         payload.characterName,
         payload.playerId === selfPlayerId ? senderName : null,
       ),
-      content: `${payload.skillName} ${payload.targetValue}% · D100 ${payload.rollValue} · ${outcomeLabel}`,
+      content: checkResultContent(payload),
       time: formatRoomTime(event.createdAt),
       isSelf: payload.playerId === selfPlayerId,
     }
@@ -1652,24 +1651,6 @@ export default function RoomPage() {
       } else if (envelope.type === 'check.result') {
         setTyping(true)
         showBackendPhase('executing_action')
-        const levelLabels: Record<string, string> = {
-          critical: '大成功',
-          extreme: '极难成功',
-          hard: '困难成功',
-          regular: '成功',
-          failure: '失败',
-          fumble: '大失败',
-        }
-        const difficultyLabels: Record<string, string> = {
-          regular: '常规',
-          hard: '困难',
-          extreme: '极难',
-        }
-        const levelLabel =
-          levelLabels[envelope.payload.successLevel] ?? envelope.payload.result
-        const outcomeLabel = envelope.payload.passed
-          ? levelLabel
-          : `${levelLabel}（未通过${difficultyLabels[envelope.payload.difficulty] ?? ''}检定）`
         setMessages(prev => appendLiveMessage(prev, {
           type: 'dice',
           channel: 'action',
@@ -1678,7 +1659,7 @@ export default function RoomPage() {
             envelope.payload.characterName,
             envelope.payload.playerId === playerId ? senderName : null,
           ),
-          content: `${envelope.payload.skillName} ${envelope.payload.targetValue}% · D100 ${envelope.payload.rollValue} · ${outcomeLabel}`,
+          content: checkResultContent(envelope.payload),
           time: formatRoomTime(new Date()),
           isSelf: envelope.payload.playerId === playerId,
         }))

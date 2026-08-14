@@ -383,11 +383,13 @@ function conversationHistory(): RoomConversationEvent[] {
         skillName: '图书馆使用',
         characterName: '杜调查员',
         targetValue: 50,
-        rollValue: 23,
+        rollValue: 54,
         difficulty: 'regular',
         successLevel: 'regular',
         passed: true,
         result: 'regular',
+        resolutionKind: 'spend_luck',
+        luckSpent: 4,
       },
       createdAt: '2026-07-28T10:02:00Z',
     },
@@ -463,7 +465,7 @@ describe('RoomPage conversation history', () => {
     )
     expect(screen.queryByRole('button', { name: '查看杜调查员的头像大图' })).not.toBeInTheDocument()
     expect(screen.getByText('你发现书架后有一个暗格。')).toBeInTheDocument()
-    expect(screen.getByText('图书馆使用 50% · D100 23 · 成功')).toBeInTheDocument()
+    expect(screen.getByText('图书馆使用 50% · D100 54 · 消耗 4 点幸运 → 成功')).toBeInTheDocument()
     expect(screen.getByText('杜调查员 · 掷骰')).toBeInTheDocument()
     expect(mockListConversation).toHaveBeenCalledWith('room-1', 'reconnect-1')
 
@@ -1679,9 +1681,13 @@ describe('RoomPage conversation history', () => {
           successLevel: 'regular',
           passed: true,
           result: 'regular',
+          resolutionKind: 'spend_luck',
+          luckSpent: 4,
         },
       })
     })
+
+    expect(screen.getByText('图书馆使用 50% · D100 23 · 消耗 4 点幸运 → 成功')).toBeInTheDocument()
 
     await act(async () => {
       emitWsMessage({

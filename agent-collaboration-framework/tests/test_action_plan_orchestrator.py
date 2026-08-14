@@ -57,6 +57,9 @@ from collaboration_framework.host.application import (
     PlayerViewProjector,
     TurnExecutionError,
 )
+from collaboration_framework.host.application.action_plan_orchestrator import (
+    _REPAIR_HINTS,
+)
 from collaboration_framework.host.ports import (
     ActionPlanBusyError,
     ActionPlanStepFailure,
@@ -1262,10 +1265,12 @@ async def test_engine_rejection_is_repaired_once_instead_of_stopping_the_plan() 
     # Step 2 was adjudicated twice: the refused proposal, then the repair that
     # carried the Engine's own reason back to the adjudicator.
     step_two = [context for context in adjudicator.contexts if context.step_index == 1]
-    assert [context.previous_rejection for context in step_two] == [
-        None,
-        "TARGET_UNAVAILABLE: 当前目标不可用于这次行动",
-    ]
+    assert step_two[0].previous_rejection is None
+    assert step_two[1].previous_rejection is not None
+    assert step_two[1].previous_rejection.startswith(
+        "TARGET_UNAVAILABLE: 当前目标不可用于这次行动"
+    )
+    assert "keeper_capabilities" in step_two[1].previous_rejection
     assert settled.run.steps[1].repair_attempts == 1
     assert settled.run.steps[1].last_validation_code == "TARGET_UNAVAILABLE"
     assert settled.run.steps[1].last_validation_message == "当前目标不可用于这次行动"
@@ -1490,6 +1495,34 @@ async def test_safe_validation_feedback_maximum_length_fits_step_context() -> No
 
 
 @pytest.mark.asyncio
+async def test_repair_hint_fits_the_step_context() -> None:
+    """最长的一条拒绝理由加上最长的一条修复指引仍要装得下（#313）。
+
+    `previous_rejection` 有 max_length，而修复指引是拼在拒绝理由后面的。指引写长了
+    应该在这里红，而不是等到线上某次修复重试直接抛 ValidationError——那会把一次本
+    来能救回来的回合变成 TURN_CONTRACT_INVALID。
+    """
+
+    _, _, projector = runtime()
+    original = player_input("max-hint-parent")
+    longest_hint = max(_REPAIR_HINTS.values(), key=len)
+    worst_case = f"{'C' * 100}: {'R' * 512}\n{longest_hint}"
+
+    context = ActionPlanStepContext(
+        player_input=original,
+        plan_id="max-hint-plan",
+        plan_goal="验证最长修复指引",
+        step_index=0,
+        step_request_id="max-hint-step",
+        step=ActionPlanStep(kind="action", semantic_goal="验证最长修复指引"),
+        player_view=await projector.project(original),
+        previous_rejection=worst_case,
+    )
+
+    assert context.previous_rejection == worst_case
+
+
+@pytest.mark.asyncio
 async def test_room_reservation_blocks_other_parent_until_plan_is_terminal() -> None:
     service, _, _, store, _ = orchestrator()
     first = player_input("first-parent")
@@ -1687,7 +1720,12 @@ async def test_single_action_auto_repair_succeeds_without_creating_plan_run() ->
     assert len(repair_adjudicator.contexts) == 1
     context = repair_adjudicator.contexts[0]
     assert context.step_request_id == original.client_action_id
-    assert context.previous_rejection == "TARGET_UNAVAILABLE: 当前目标不可用于这次行动"
+    assert context.previous_rejection is not None
+    assert context.previous_rejection.startswith(
+        "TARGET_UNAVAILABLE: 当前目标不可用于这次行动"
+    )
+    # #313：光有错误码定位不到问题，指引必须跟着一起回到修复裁决器。
+    assert "keeper_capabilities" in context.previous_rejection
     assert await plan_store.load(original.room_id, original.client_action_id) is None
     assert len(engine_store.inspect_domain_events(original.room_id)) == 1
 
@@ -1723,7 +1761,12 @@ async def test_single_travel_repair_with_changed_effect_requires_clarification()
     assert len(repair_adjudicator.contexts) == 1
     context = repair_adjudicator.contexts[0]
     assert context.step.kind == "travel"
-    assert context.previous_rejection == "TARGET_UNAVAILABLE: 当前目标不可用于这次行动"
+    assert context.previous_rejection is not None
+    assert context.previous_rejection.startswith(
+        "TARGET_UNAVAILABLE: 当前目标不可用于这次行动"
+    )
+    # #313：光有错误码定位不到问题，指引必须跟着一起回到修复裁决器。
+    assert "keeper_capabilities" in context.previous_rejection
     assert await plan_store.load(original.room_id, original.client_action_id) is None
     assert engine_store.inspect_domain_events(original.room_id) == ()
 

@@ -58,6 +58,36 @@ from .semantic_preservation import compare_repair_semantics
 
 logger = logging.getLogger(__name__)
 
+# 修复预算只有一次，所以这一次必须让模型知道该动哪里。此前 previous_rejection
+# 只有「TARGET_UNAVAILABLE: 当前目标不可用于这次行动」——既没说哪个 id 不存在，
+# 也没说合法的从哪来，等于让模型闭着眼睛再掷一次，重试能不能过全看运气（#313）。
+#
+# 这里刻意只放**与具体 id 无关的静态指引**：拒绝理由里的 id 是模型自己编的，
+# 但它同批次的其它字段未必是，逐字回显等于给自己开一条把引擎内部命名回灌进
+# 提示词的口子。要定位对象，模型手上本来就有 KeeperCapabilityView。
+_REPAIR_HINTS: dict[str, str] = {
+    "TARGET_UNAVAILABLE": (
+        "target.id 必须逐字取自 keeper_capabilities 的 entities / locations / "
+        "information、keeper_capabilities.world_id、player_view.scene.id，或局内"
+        "角色 player_view.self_actor.id 与 player_view.scene.visible_actors[].id"
+        "（后两者用 kind=actor）；不要自造 id。作用于同伴的行动目标就是那个 actor "
+        "id，不要改用 location 或 world 绕开。确实找不到玩家所指的对象时，才以 "
+        "kind=location + player_view.scene.id 为目标返回 narrative_only。"
+    ),
+    "RULE_OUT_OF_SCOPE": (
+        "所选 rule_decision 与本次 method.family 或 target 不匹配。"
+        "keeper_capabilities.rule_candidates 里一条候选的 action_families、"
+        "target_kinds、target_ids 为空即表示该维度不设限，非空才要求本次裁决落在"
+        "其中——逐个字段判断，非空的都命中才能保留 rule_decision；一条都对不上就"
+        "去掉 rule_decision，按普通裁决重新给出这一步。"
+    ),
+}
+
+
+def _with_repair_hint(code: str, message: str) -> str:
+    hint = _REPAIR_HINTS.get(code)
+    return f"{code}: {message}" if hint is None else f"{code}: {message}\n{hint}"
+
 
 class ActionPlanOrchestrator:
     """A-owned Saga coordinator; the Engine never receives an ActionPlan."""
@@ -1013,7 +1043,10 @@ class ActionPlanOrchestrator:
     def _validation_feedback_text(step: ActionPlanStepRun) -> str | None:
         if step.last_validation_code is None or step.last_validation_message is None:
             return None
-        return f"{step.last_validation_code}: {step.last_validation_message}"
+        return _with_repair_hint(
+            step.last_validation_code,
+            step.last_validation_message,
+        )
 
     async def _observe_step_failure(
         self,
@@ -1541,8 +1574,9 @@ class HostTurnDecisionExecutor:
                         semantic_goal=decision.adjudication.summary,
                     ),
                     player_view=view,
-                    previous_rejection=(
-                        f"{feedback.code}: {feedback.player_safe_reason}"
+                    previous_rejection=_with_repair_hint(
+                        feedback.code,
+                        feedback.player_safe_reason,
                     ),
                     keeper_capabilities=await self._single_keeper_capabilities(
                         player_input,

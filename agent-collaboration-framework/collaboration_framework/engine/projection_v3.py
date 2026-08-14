@@ -738,6 +738,7 @@ def keeper_capabilities_v3(
         room_id=state.room_id,
         actor_id=actor_id,
         revision=runtime.revision,
+        world_id=module.world_ref,
         information=tuple(
             KeeperInformationCapability(
                 id=item.id,

@@ -131,6 +131,12 @@ class KeeperCapabilityView(ContractModel):
     # Bound to the same revision as the PlayerView it accompanies, so a step
     # adjudicated against a stale capability list is rejected on submit.
     revision: str = Field(min_length=1)
+    # The only id `ActionTarget(kind="world", ...)` accepts. It is the module's
+    # `world_ref`, which is a rule-system id (`coc-7e` for 追书人) — nothing in
+    # PlayerView or anywhere else hints at it, so before #313 an Agent that
+    # wanted the world as a target had to guess and was rejected every time
+    # (TARGET_UNAVAILABLE on "今天几点了" and other non-object utterances).
+    world_id: str | None = Field(default=None, min_length=1)
     information: tuple[KeeperInformationCapability, ...] = ()
     locations: tuple[KeeperLocationCapability, ...] = ()
     entities: tuple[KeeperEntityCapability, ...] = ()

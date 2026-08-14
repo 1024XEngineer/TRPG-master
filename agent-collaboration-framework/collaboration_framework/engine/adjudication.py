@@ -1316,9 +1316,16 @@ class AdjudicationEngineService:
                 target_kind=adjudication.target.kind,
                 target_id=adjudication.target.id,
             ):
+                # 可自动修复，不是死路。菜单是按「玩家站在哪」发布的，这里才
+                # 第一次用上 method.family 和 target —— 也就是说模型看得到的
+                # 候选，提交时完全可能不适用（#313：在 neighborhood 说「跟邻居
+                # 打个招呼」，菜单里有 question_neighbors，但它只认
+                # family=interview + target=lyla）。这是 fault="agent" 的错，
+                # 而放弃 rule_decision 就能变回一次普通叙事裁决，没有任何理由
+                # 让玩家的回合直接死在这里。
                 self._reject_validation(
                     "RULE_OUT_OF_SCOPE",
-                    repairability="hard_reject",
+                    repairability="auto_repairable",
                     fault="agent",
                     player_safe_reason="当前行动不能使用该规则选项",
                     internal_reason=(

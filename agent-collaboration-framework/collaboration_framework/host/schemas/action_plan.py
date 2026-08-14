@@ -286,7 +286,12 @@ class ActionPlanStepContext(ContractModel):
     completed_steps: tuple[CompletedPlanStepSummary, ...] = ()
     # Set only after the Engine refused a proposal for this same step. It carries
     # a stable player-safe code/reason, never hidden module content.
-    previous_rejection: str | None = Field(default=None, min_length=1, max_length=614)
+    #
+    # 614 = 100 (`ValidationResult.code`) + 2 + 512 (`player_safe_reason`)，也就是
+    # 一条拒绝理由本身的上限。#313 之后还要追加一段与具体 id 无关的静态修复指引
+    # （`_REPAIR_HINTS`），所以留到 1024；`test_repair_hint_fits_the_step_context`
+    # 用最长的那条钉住这个余量，加长指引会先撞到那个测试而不是线上。
+    previous_rejection: str | None = Field(default=None, min_length=1, max_length=1024)
     # Controlled Keeper-side capability list for this same revision; see
     # HostAgentContext.keeper_capabilities. Never forwarded to the Narrator.
     keeper_capabilities: KeeperCapabilityView | None = None

@@ -274,9 +274,12 @@ async def test_sql_plan_repair_state_survives_store_rebuild(
     assert repaired.repair_attempts == 1
     assert repaired.last_validation_code == "TARGET_UNAVAILABLE"
     assert repaired.last_validation_message == "当前目标不可用于这次行动"
-    assert adjudicator.contexts[-1].previous_rejection == (
-        "TARGET_UNAVAILABLE: 当前目标不可用于这次行动"
-    )
+    last_rejection = adjudicator.contexts[-1].previous_rejection
+    assert last_rejection is not None
+    assert last_rejection.startswith("TARGET_UNAVAILABLE: 当前目标不可用于这次行动")
+    # #313：修复指引跟着拒绝理由一起穿过 SQL 存储回到裁决器，落库的只有 code 和
+    # player_safe_reason，指引是读出来时按 code 现拼的。
+    assert "keeper_capabilities" in last_rejection
     assert "keeper" not in rebuilt.model_dump_json()
 
 

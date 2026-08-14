@@ -777,7 +777,18 @@ def _map_turn_error(exc: Exception) -> tuple[str, str, bool]:
     if "不是可提交动作的 InGame" in message:
         return "ROOM_NOT_ACTIONABLE", "房间当前状态不允许提交动作", False
     if isinstance(exc, (ContractError, ValidationError)):
-        return "TURN_CONTRACT_INVALID", "本次动作未通过主持编排契约校验", False
+        # 可重试。这是主持链上「模型这一次的输出没通过契约」的兜底桶，同一句话
+        # 重说一遍常常就过了（#313 的实测：`TURN_CONTRACT_INVALID` 后原话重试成
+        # 功）。标成不可重试只会让前端连重试按钮都不给，把一次非确定性失败变成
+        # 玩家必须自己重新打字的死路。与上面 `MODEL_OUTPUT_UNREADABLE` 同源，
+        # 重试语义也应当一致。
+        #
+        # 重试不会重复结算，但理由不是「什么都没落库」——`adjudication.select` /
+        # `adjudication.post_roll` 上 `_emit_check_result` 就跑在引擎权威结算之后，
+        # 它抛 ContractError 时检定其实已经定了。挡住重复结算的是引擎自己：重放
+        # 同一次决定会撞上 `DECISION_ALREADY_SETTLED`（hard_reject），重放同一个
+        # clientActionId 的动作则复用已提交结果。
+        return "TURN_CONTRACT_INVALID", "本次动作未通过主持编排契约校验，请重试", True
     return "TURN_INTERNAL_ERROR", "本次动作处理失败，请稍后重试", True
 
 

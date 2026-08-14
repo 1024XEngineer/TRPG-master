@@ -15,6 +15,7 @@ from collaboration_framework.contracts import (
     ActionAdjudication,
     ActionMethod,
     ActionTarget,
+    AdjudicationValidationError,
     AdvanceWorldTimeEffect,
     ChangeEntityStateEffect,
     CheckDecisionRequest,
@@ -638,6 +639,92 @@ class AdjudicationAgainstV3Tests(unittest.IsolatedAsyncioTestCase):
                     method=ActionMethod(family="action", description="测试"),
                     check=NoAdjudicationCheck(),
                     success_effects=tuple(effects),
+                ),
+            )
+        )
+
+    async def test_greeting_a_neighbour_is_repairable_not_a_dead_turn(self) -> None:
+        """#313 复现：在 neighborhood 说「跟邻居打个招呼」被直接判死。
+
+        菜单是按「玩家站在哪」发布的，所以 `question_neighbors` 会出现在候选里；
+        但它另外要求 `family=interview` 且 `target=lyla`，提交时才第一次校验这两
+        项。模型把打招呼归成 `social` 是它自己的错（`fault="agent"`），而放弃
+        rule_decision 就能退回一次普通叙事裁决——没有任何理由让玩家的回合死在这。
+        """
+
+        store, engine, rules = self.build(scene_id="neighborhood")
+        snapshot = await rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        capabilities = await rules.read_keeper_capabilities(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        published = {item.rule_id for item in capabilities.rule_candidates}
+        self.assertIn("question_neighbors", published)
+
+        greeting = ActionAdjudication(
+            request_id="greet-neighbour-313",
+            source_revision=snapshot.revision,
+            actor_id=ACTOR,
+            summary="跟邻居打个招呼",
+            target=ActionTarget(kind="entity", id="lyla"),
+            method=ActionMethod(family="social", description="打招呼"),
+            check=NoAdjudicationCheck(),
+            rule_decision=RuleDecisionRef(
+                rule_id="question_neighbors", option_id="fast-talk"
+            ),
+        )
+        with self.assertRaises(AdjudicationValidationError) as rejected:
+            await engine.submit(
+                SubmitAdjudicationRequest(
+                    room_id=ROOM, player_id=PLAYER, adjudication=greeting
+                )
+            )
+
+        result = rejected.exception.result
+        self.assertEqual(result.code, "RULE_OUT_OF_SCOPE")
+        self.assertEqual(result.fault, "agent")
+        # 关键断言：修复循环只认 auto_repairable / retry_with_latest_revision，
+        # hard_reject 会被直接抛出去变成 turn.failed。
+        self.assertEqual(result.repairability, "auto_repairable")
+        self.assertEqual(self.store_events(store), 0)
+
+        # 放弃这条规则之后，同一句话应当照常裁决完成。
+        repaired = greeting.model_copy(
+            update={"request_id": "greet-neighbour-313-repaired", "rule_decision": None},
+            deep=True,
+        )
+        await engine.submit(
+            SubmitAdjudicationRequest(
+                room_id=ROOM, player_id=PLAYER, adjudication=repaired
+            )
+        )
+
+    @staticmethod
+    def store_events(store: InMemoryEngineStore) -> int:
+        return len(store.inspect_domain_events(ROOM))
+
+    async def test_keeper_capabilities_publish_the_v3_world_target(self) -> None:
+        """v3 侧同样要发 world_id，否则「今天周几」这类输入没有合法目标（#313）。"""
+
+        store, engine, rules = self.build(scene_id="neighborhood")
+        scope = PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        capabilities = await rules.read_keeper_capabilities(scope)
+        self.assertEqual(capabilities.world_id, self.content.world_ref)
+
+        snapshot = await rules.read(scope)
+        await engine.submit(
+            SubmitAdjudicationRequest(
+                room_id=ROOM,
+                player_id=PLAYER,
+                adjudication=ActionAdjudication(
+                    request_id="ask-the-date-313",
+                    source_revision=snapshot.revision,
+                    actor_id=ACTOR,
+                    summary="今天周几？",
+                    target=ActionTarget(kind="world", id=capabilities.world_id or ""),
+                    method=ActionMethod(family="talk", description="询问日期"),
+                    check=NoAdjudicationCheck(),
                 ),
             )
         )

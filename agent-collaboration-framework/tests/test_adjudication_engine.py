@@ -374,6 +374,8 @@ class AdjudicationEngineTests(unittest.IsolatedAsyncioTestCase):
         assert resolved.check_run is not None
         self.assertEqual(resolved.check_run.roll.degree, "failure")
         self.assertEqual(resolved.check_run.final_result.degree, "regular_success")
+        self.assertEqual(resolved.check_run.resolution_kind, "spend_luck")
+        self.assertEqual(resolved.check_run.luck_spent, 4)
         self.assertEqual(
             self.store.inspect_state("room_01").actors["pc_1"].resources.luck, 46
         )

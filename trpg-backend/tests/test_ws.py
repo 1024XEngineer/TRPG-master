@@ -1177,7 +1177,7 @@ def test_single_action_pending_resumes_without_plan_run(
     monkeypatch.setattr(
         ws_controller.adjudication_engine_service,
         "_dice",
-        DiceRoller(SequenceDiceSource([10])),
+        DiceRoller(SequenceDiceSource([24])),
     )
 
     action_id = "single-action-pending-247"
@@ -1249,17 +1249,23 @@ def test_single_action_pending_resumes_without_plan_run(
             if message.get("type") == "turn.phase_changed"
         ] == ["waiting_for_check"]
         check_run = rolled["payload"]["checkRun"]
+        luck_option = next(
+            option
+            for option in check_run["post_roll_options"]
+            if option["kind"] == "spend_resource"
+        )
+        assert luck_option["cost"] == 4
         ws.send_json(
             {
                 "type": "adjudication.post_roll",
                 "playerId": room["playerId"],
                 "payload": {
                     "clientActionId": action_id,
-                    "requestId": "single-action-accept-247",
+                    "requestId": "single-action-spend-luck-247",
                     "sourceRevision": rolled["payload"]["sourceRevision"],
                     "checkId": check_run["check_id"],
                     "checkVersion": check_run["version"],
-                    "optionId": "accept-current",
+                    "optionId": luck_option["option_id"],
                 },
             }
         )
@@ -1359,8 +1365,10 @@ def test_single_action_pending_resumes_without_plan_run(
     check_payload = check_events[0]["payload"]
     assert check_payload["skillName"] == "图书馆使用"
     assert check_payload["targetValue"] == 20
-    assert check_payload["rollValue"] == 10
+    assert check_payload["rollValue"] == 24
     assert check_payload["passed"] is True
+    assert check_payload["resolutionKind"] == "spend_luck"
+    assert check_payload["luckSpent"] == 4
     assert check_payload["characterName"] == "陈探员"
 
     conversation = sync_client.get(

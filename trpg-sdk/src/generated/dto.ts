@@ -352,10 +352,10 @@ export interface CheckRequestPayload {
 }
 
 /**
- * check.result 推送 payload（issue #77 新增）。
+ * check.result 推送最终权威结果。
  *
- * 直接返回终值，不做两段式初步结果（issue 决策 4：幸运消耗机制推迟，
- * 协议一并简化）。
+ * 保留原始骰点，并通过 resolution_kind / luck_spent 说明幸运等 post-roll
+ * 结算，避免把未达标骰点直接展示成普通成功（issue #327）。
  */
 export interface CheckResultPayload {
   playerId: string;
@@ -369,6 +369,8 @@ export interface CheckResultPayload {
   successLevel: "critical" | "extreme" | "hard" | "regular" | "failure" | "fumble";
   passed: boolean;
   result: string;
+  resolutionKind?: "initial_roll" | "accept_result" | "spend_luck" | "push";
+  luckSpent?: number | null;
 }
 
 export interface CheckRoll {
@@ -400,6 +402,8 @@ export interface CheckRunView {
   roll: CheckRoll;
   post_roll_options?: (AcceptResultOption | SpendResourceOption | PushOption)[];
   final_result?: CheckRoll | null;
+  resolution_kind?: "initial_roll" | "accept_result" | "spend_luck" | "push";
+  luck_spent?: number | null;
 }
 
 /**

@@ -1061,6 +1061,14 @@ class AdjudicationEngineService:
                     "roll_count": roll_count,
                     "post_roll_options": (),
                     "final_result": final_roll,
+                    "resolution_kind": (
+                        "spend_luck"
+                        if isinstance(option, SpendResourceOption)
+                        else "push"
+                        if isinstance(option, PushOption)
+                        else "accept_result"
+                    ),
+                    "luck_spent": option.cost if isinstance(option, SpendResourceOption) else None,
                 },
                 deep=True,
             )
@@ -2537,6 +2545,8 @@ class AdjudicationEngineService:
             roll=check_run.roll,
             post_roll_options=check_run.post_roll_options,
             final_result=check_run.final_result,
+            resolution_kind=check_run.resolution_kind,
+            luck_spent=check_run.luck_spent,
         )
 
     def _event(

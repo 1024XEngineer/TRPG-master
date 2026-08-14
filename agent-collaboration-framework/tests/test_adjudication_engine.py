@@ -230,7 +230,7 @@ class AdjudicationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.scene_id, "runtime_inn")
         self.assertIn("runtime_inn", state.runtime_locations)
 
-    async def test_persistent_pick_up_can_create_runtime_item_before_moving_it(
+    async def test_legacy_runtime_entity_cannot_fake_inventory_custody(
         self,
     ) -> None:
         action = ActionAdjudication(
@@ -256,11 +256,17 @@ class AdjudicationEngineTests(unittest.IsolatedAsyncioTestCase):
             ),
         )
 
-        resolved = await self.submit(self.service(), action)
+        with self.assertRaises(AdjudicationValidationError) as raised:
+            await self.submit(self.service(), action)
 
-        self.assertEqual(resolved.outcome, "success")
-        entity = self.store.inspect_state("room_01").runtime_entities["ordinary_pebble"]
-        self.assertEqual(entity["holder_actor_id"], "pc_1")
+        self.assertEqual(
+            raised.exception.result.code,
+            "INVENTORY_TARGET_NOT_PORTABLE",
+        )
+        self.assertNotIn(
+            "ordinary_pebble",
+            self.store.inspect_state("room_01").runtime_entities,
+        )
 
     async def test_event_rule_only_reacts_to_final_domain_event(self) -> None:
         module = self.module.model_copy(
@@ -737,6 +743,34 @@ class AdjudicationEngineTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(error.exception.result.code, "TARGET_NOT_FOUND")
         self.assertEqual(self.store.inspect_state("room_ambiguous").event_sequence, 0)
+
+    async def test_generic_entity_cannot_acquire_inventory_custody(self) -> None:
+        """A visible Canon prop is not portable unless it is an ItemInstance."""
+
+        action = ActionAdjudication(
+            request_id="take-fixed-entity",
+            source_revision="0",
+            actor_id="pc_1",
+            summary="把当前陈设放进背包",
+            target=ActionTarget(kind="entity", id="butler"),
+            method=ActionMethod(family="pick_up", description="拿起当前陈设"),
+            persistence_intent="inventory",
+            check=NoAdjudicationCheck(),
+            success_effects=(
+                MoveEntityEffect(entity_id="butler", holder_actor_id="pc_1"),
+            ),
+        )
+
+        with self.assertRaises(AdjudicationValidationError) as raised:
+            await self.submit(self.service(), action)
+
+        self.assertEqual(
+            raised.exception.result.code,
+            "INVENTORY_TARGET_NOT_PORTABLE",
+        )
+        state = self.store.inspect_state("room_01")
+        self.assertEqual(state.event_sequence, 0)
+        self.assertNotIn("holder_actor_id", state.entities.get("butler", {}))
 
     async def test_l4_can_commit_while_l5_direct_ending_is_rejected(self) -> None:
         core_action = ActionAdjudication(

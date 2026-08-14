@@ -185,13 +185,14 @@ class _PersistentNarrationModel:
 
 
 class PersistentNarrationPolicyTests(unittest.IsolatedAsyncioTestCase):
-    def _context(self, *, results=(), utterance="行动"):
+    def _context(self, *, results=(), inventory=(), utterance="行动"):
         view = SimpleNamespace(
             room_id="room",
             player_id="player",
             actor_id="actor",
             background="背景",
             scene=SimpleNamespace(visible_entities=()),
+            inventory=inventory,
         )
         return ActionPlanNarrationContext.model_construct(
             background="背景",
@@ -253,6 +254,54 @@ class PersistentNarrationPolicyTests(unittest.IsolatedAsyncioTestCase):
             _PersistentNarrationModel("守墓人双眼紧闭，仍然没有醒来。")
         ).narrate(context)
         self.assertIn("仍然没有醒来", output.text)
+
+    async def test_rejects_inventory_claim_when_final_view_has_no_item(self):
+        result = CommittedResult(
+            kind="inventory",
+            target_id="fixed_archive",
+            event_ref="event-1",
+        )
+
+        with self.assertRaises(ActionPlanNarrationValidationError) as raised:
+            await ActionPlanNarrator(
+                _PersistentNarrationModel("你把那册资料收好，放进背包。")
+            ).narrate(self._context(results=(result,)))
+
+        self.assertEqual(
+            raised.exception.reason,
+            "persistent_claim_without_evidence:inventory_acquisition",
+        )
+
+    async def test_allows_acquisition_confirmed_by_result_and_final_inventory(self):
+        result = CommittedResult(
+            kind="inventory",
+            target_id="runtime_volume",
+            event_ref="event-1",
+        )
+        inventory = (
+            SimpleNamespace(id="runtime_volume", name="一本薄诗集"),
+        )
+
+        output = await ActionPlanNarrator(
+            _PersistentNarrationModel("你拿起诗集，将它放进背包。")
+        ).narrate(self._context(results=(result,), inventory=inventory))
+
+        self.assertIn("放进背包", output.text)
+
+    async def test_rejects_different_item_even_when_another_pickup_was_confirmed(self):
+        result = CommittedResult(
+            kind="inventory",
+            target_id="runtime_branch",
+            event_ref="event-1",
+        )
+        inventory = (
+            SimpleNamespace(id="runtime_branch", name="一根干树枝"),
+        )
+
+        with self.assertRaises(ActionPlanNarrationValidationError):
+            await ActionPlanNarrator(
+                _PersistentNarrationModel("你把那本手册装进背包。")
+            ).narrate(self._context(results=(result,), inventory=inventory))
 
     async def test_rejects_uncommitted_sleeping_synonyms(self):
         """没有证据时，闭眼、未醒和躺倒等同义事实也必须被拒绝。"""

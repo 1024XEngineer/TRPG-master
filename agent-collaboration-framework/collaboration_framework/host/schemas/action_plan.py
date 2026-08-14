@@ -24,6 +24,7 @@ from collaboration_framework.contracts import (
     WorldClockView,
 )
 from collaboration_framework.host.schemas.agent import _validate_keeper_scope
+from collaboration_framework.host.schemas.history import RecentTurnContext
 
 PlanRunStatus = Literal[
     "active",
@@ -302,6 +303,11 @@ class ActionPlanStepContext(ContractModel):
     step: ActionPlanStep
     player_view: PlayerView
     completed_steps: tuple[CompletedPlanStepSummary, ...] = ()
+    # Player-safe presentation history is not authoritative world state.  It is
+    # nevertheless useful as soft context when the player now acts on an
+    # ordinary detail that was narrated in the same continuous scene; the
+    # adjudicator must still materialize that detail through Runtime creation.
+    recent_history: RecentTurnContext | None = None
     # Set only after the Engine refused a proposal for this same step. It carries
     # a stable player-safe code/reason, never hidden module content.
     #
@@ -324,6 +330,11 @@ class ActionPlanStepContext(ContractModel):
             raise ValueError("ActionPlanStepContext identity scope 不一致")
         if self.step_index != len(self.completed_steps):
             raise ValueError("当前 step_index 必须紧跟已完成步骤")
+        if self.recent_history is not None:
+            self.recent_history.validate_for(
+                player_input=self.player_input,
+                player_view=self.player_view,
+            )
         _validate_keeper_scope(self.keeper_capabilities, self.player_view)
         return self
 

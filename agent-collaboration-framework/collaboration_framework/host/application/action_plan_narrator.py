@@ -16,7 +16,10 @@ from .narrator import (
     narration_text_rejection_reason,
     normalize_narration_text,
 )
-from .persistent_results import unsupported_persistent_claim
+from .persistent_results import (
+    unsupported_inventory_acquisition_claim,
+    unsupported_persistent_claim,
+)
 
 
 class ActionPlanNarrationValidationError(ContractError):
@@ -92,6 +95,15 @@ class ActionPlanNarrator:
         if persistent_rejection is not None:
             raise ActionPlanNarrationValidationError(
                 f"persistent_claim_without_evidence:{persistent_rejection}"
+            )
+        inventory_rejection = unsupported_inventory_acquisition_claim(
+            output.text,
+            committed_results,
+            context.player_view,
+        )
+        if inventory_rejection is not None:
+            raise ActionPlanNarrationValidationError(
+                f"persistent_claim_without_evidence:{inventory_rejection}"
             )
         visible_dead = tuple(
             entity

@@ -18,12 +18,14 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     LargeBinary,
     String,
     Text,
     UniqueConstraint,
     Uuid,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -237,6 +239,56 @@ class CharacterPortrait(Base):
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
         nullable=False,
+    )
+
+
+class PortraitGenerationTask(Base):
+    """角色生图后台任务；只保存恢复与裁决所需数据，不保存上游临时图片。"""
+
+    __tablename__ = "portrait_generation_tasks"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('queued', 'generating', 'cancelling', 'completed', 'failed', 'cancelled')",
+            name="ck_portrait_generation_tasks_status",
+        ),
+        # SQLite 与 PostgreSQL 都用部分唯一索引兜住多进程并发创建。
+        Index(
+            "uq_portrait_generation_tasks_active_character",
+            "character_id",
+            unique=True,
+            sqlite_where=text("status IN ('queued', 'generating', 'cancelling')"),
+            postgresql_where=text("status IN ('queued', 'generating', 'cancelling')"),
+        ),
+    )
+
+    generation_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    room_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("rooms.id", ondelete="CASCADE"), nullable=False
+    )
+    character_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("characters.id", ondelete="CASCADE"), nullable=False
+    )
+    player_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("players.id", ondelete="CASCADE"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="queued")
+    cancel_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    failure_code: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    style: Mapped[str] = mapped_column(String(20), nullable=False)
+    size: Mapped[str] = mapped_column(String(20), nullable=False)
+    prompt_summary: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    prompt_source: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    portrait_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    provider_task_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
     )
 
 

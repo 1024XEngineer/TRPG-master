@@ -2,6 +2,7 @@ import asyncio
 import base64
 import json
 from collections.abc import Callable, Generator
+from contextlib import suppress
 from hashlib import sha256
 from io import BytesIO
 from typing import cast
@@ -156,6 +157,17 @@ class BlockingImageProvider(RecordingImageProvider):
         )
 
 
+class CancelIgnoringImageProvider(BlockingImageProvider):
+    """模拟无法终止的上游：吞掉本地取消并返回迟到结果。"""
+
+    async def generate(self, **kwargs: object) -> ImageGenerationOutput:
+        self.started.set()
+        with suppress(asyncio.CancelledError):
+            await self.release.wait()
+        self.calls.append({"prompt": str(kwargs.get("prompt", ""))})
+        return ImageGenerationOutput(image_url="https://images.example/late.png")
+
+
 @pytest.fixture
 def install_portrait_service() -> Generator[
     Callable[[PortraitGenerationService], None], None, None
@@ -163,6 +175,7 @@ def install_portrait_service() -> Generator[
     previous = app.state.portrait_generation_service
 
     def install(service: PortraitGenerationService) -> None:
+        service.set_session_factory_for_testing(app.state.test_session_factory)
         app.state.portrait_generation_service = service
 
     yield install
@@ -203,6 +216,19 @@ async def create_character(client: AsyncClient, room: dict, *, complete: bool) -
         )
         assert completed.status_code == 200
     return character_id
+
+
+async def wait_for_generation(
+    client: AsyncClient, url: str, headers: dict[str, str], generation_id: str
+) -> dict[str, object]:
+    """轮询后台任务到终态，避免测试依赖协程调度时序。"""
+    for _ in range(100):
+        response = await client.get(f"{url}/{generation_id}", headers=headers)
+        data = response.json()["data"]
+        if data["status"] in {"completed", "failed", "cancelled"}:
+            return data
+        await asyncio.sleep(0.01)
+    raise AssertionError("生图任务未在测试时限内结束")
 
 
 def test_snapshot_uses_actual_allocations_and_excludes_notes() -> None:
@@ -402,9 +428,15 @@ async def test_completed_character_generates_real_provider_result_and_prompt_fal
         headers=headers,
     )
 
-    assert response.status_code == 200
-    data = response.json()["data"]
-    assert data["imageUrl"] == "https://images.example/portrait.png"
+    assert response.status_code == 202
+    queued = response.json()["data"]
+    assert queued["status"] == "queued"
+    data = await wait_for_generation(
+        client,
+        f"{ROOMS_BASE}/{room['roomId']}/characters/{character_id}/portrait-generations",
+        headers,
+        queued["generationId"],
+    )
     assert data["portraitVersion"] == sha256(b"persisted-png").hexdigest()
     assert data["promptSource"] == "deterministic_fallback"
     assert image_provider.calls[0]["size"] == "1024x1024"
@@ -458,7 +490,13 @@ async def test_portrait_read_requires_same_room_membership(
         json={},
         headers=reconnect(room["reconnectToken"]),
     )
-    assert generated.status_code == 200
+    assert generated.status_code == 202
+    await wait_for_generation(
+        client,
+        f"{ROOMS_BASE}/{room['roomId']}/characters/{character_id}/portrait-generations",
+        reconnect(room["reconnectToken"]),
+        generated.json()["data"]["generationId"],
+    )
     teammate = await join_room(client, room["roomCode"], await register(client))
     other_room = await create_room(client)
     url = f"{ROOMS_BASE}/{room['roomId']}/players/{room['playerId']}/portrait"
@@ -489,7 +527,9 @@ async def test_failed_regeneration_keeps_previous_portrait(
     install_portrait_service(service)
     generation_url = f"{ROOMS_BASE}/{room['roomId']}/characters/{character_id}/portrait-generations"
     headers = reconnect(room["reconnectToken"])
-    assert (await client.post(generation_url, json={}, headers=headers)).status_code == 200
+    first = await client.post(generation_url, json={}, headers=headers)
+    assert first.status_code == 202
+    await wait_for_generation(client, generation_url, headers, first.json()["data"]["generationId"])
 
     replacement_content = b"replacement-png"
     replacement_service = PortraitGenerationService(
@@ -501,7 +541,10 @@ async def test_failed_regeneration_keeps_previous_portrait(
     )
     install_portrait_service(replacement_service)
     replaced = await client.post(generation_url, json={}, headers=headers)
-    assert replaced.status_code == 200
+    assert replaced.status_code == 202
+    await wait_for_generation(
+        client, generation_url, headers, replaced.json()["data"]["generationId"]
+    )
 
     failing_service = PortraitGenerationService(
         enabled=True,
@@ -512,12 +555,17 @@ async def test_failed_regeneration_keeps_previous_portrait(
     )
     install_portrait_service(failing_service)
     failed = await client.post(generation_url, json={}, headers=headers)
+    assert failed.status_code == 202
+    failed_task = await wait_for_generation(
+        client, generation_url, headers, failed.json()["data"]["generationId"]
+    )
     portrait = await client.get(
         f"{ROOMS_BASE}/{room['roomId']}/players/{room['playerId']}/portrait",
         headers=headers,
     )
 
-    assert failed.status_code == 502
+    assert failed_task["status"] == "failed"
+    assert failed_task["failureCode"] == "materialization_failed"
     assert portrait.status_code == 200
     assert portrait.content == replacement_content
 
@@ -619,11 +667,62 @@ async def test_concurrent_portrait_request_is_rejected_before_second_provider_ca
     second_response = await client.post(url, json={}, headers=headers)
     image_provider.release.set()
     first_response = await first_request
+    await wait_for_generation(client, url, headers, first_response.json()["data"]["generationId"])
 
-    assert first_response.status_code == 200
+    assert first_response.status_code == 202
     assert second_response.status_code == 409
     assert second_response.json()["error"]["code"] == "PORTRAIT_GENERATION_IN_PROGRESS"
     assert len(image_provider.calls) == 1
+
+
+async def test_current_is_null_before_first_generation(
+    client: AsyncClient,
+    install_portrait_service: Callable[[PortraitGenerationService], None],
+) -> None:
+    room = await create_room(client)
+    character_id = await create_character(client, room, complete=True)
+    service, _composer, _provider = make_service()
+    install_portrait_service(service)
+    response = await client.get(
+        f"{ROOMS_BASE}/{room['roomId']}/characters/{character_id}/portrait-generations/current",
+        headers=reconnect(room["reconnectToken"]),
+    )
+    assert response.status_code == 200
+    assert response.json()["data"] is None
+
+
+async def test_cancel_discards_provider_late_result(
+    client: AsyncClient,
+    install_portrait_service: Callable[[PortraitGenerationService], None],
+) -> None:
+    room = await create_room(client)
+    character_id = await create_character(client, room, complete=True)
+    provider = CancelIgnoringImageProvider()
+    service = PortraitGenerationService(
+        enabled=True,
+        prompt_composer=FixedPromptComposer(),
+        fallback_prompt_composer=DeterministicPromptComposer(),
+        image_provider=provider,
+        image_materializer=FixedImageMaterializer(b"late-image"),
+    )
+    install_portrait_service(service)
+    url = f"{ROOMS_BASE}/{room['roomId']}/characters/{character_id}/portrait-generations"
+    headers = reconnect(room["reconnectToken"])
+    created = await client.post(url, json={}, headers=headers)
+    generation_id = created.json()["data"]["generationId"]
+    await provider.started.wait()
+
+    cancelled = await client.post(f"{url}/{generation_id}/cancel", headers=headers)
+    provider.release.set()
+    terminal = await wait_for_generation(client, url, headers, generation_id)
+
+    assert cancelled.status_code == 200
+    assert cancelled.json()["data"]["status"] == "cancelling"
+    assert terminal["status"] == "cancelled"
+    portrait = await client.get(
+        f"{ROOMS_BASE}/{room['roomId']}/players/{room['playerId']}/portrait", headers=headers
+    )
+    assert portrait.status_code == 404
 
 
 async def test_draft_character_is_rejected_without_calling_provider(
@@ -743,6 +842,25 @@ async def test_dashscope_provider_submits_and_polls_task() -> None:
     assert submitted["model"] == "wan2.2-t2i-flash"
     assert submitted["parameters"] == {"size": "1024*1024", "n": 1}
     assert output.image_url == "https://dashscope.example/portrait.png"
+
+
+async def test_dashscope_provider_cancel_calls_upstream_task_endpoint() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"output": {"task_status": "CANCELED"}})
+
+    provider = DashScopeImageProvider(
+        api_key="test-key",
+        base_url="https://dashscope.example/api/v1",
+        model="wan2.2-t2i-flash",
+        timeout_seconds=5,
+        transport=httpx.MockTransport(handler),
+    )
+    await provider.cancel("task-1")
+    assert requests[0].method == "POST"
+    assert requests[0].url.path.endswith("/tasks/task-1/cancel")
 
 
 async def test_mock_image_provider_returns_stable_inline_image() -> None:

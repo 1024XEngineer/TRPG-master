@@ -13,6 +13,7 @@ import httpx
 from PIL import Image, ImageDraw
 
 from app.service.portrait_generation import (
+    ImageGenerationControl,
     ImageGenerationOutput,
     PortraitImageContentRejectedError,
     PortraitImageGenerationError,
@@ -29,7 +30,9 @@ class MockImageProvider:
         negative_prompt: str,
         size: str,
         reference_image: PortraitReferenceImage | None = None,
+        control: ImageGenerationControl | None = None,
     ) -> ImageGenerationOutput:
+        del control
         digest = hashlib.sha256(f"{prompt}\n{negative_prompt}\n{size}".encode()).hexdigest()[:16]
         palettes = (
             ("#204b5e", "#d59b72"),
@@ -78,6 +81,7 @@ class DashScopeImageProvider:
         negative_prompt: str,
         size: str,
         reference_image: PortraitReferenceImage | None = None,
+        control: ImageGenerationControl | None = None,
     ) -> ImageGenerationOutput:
         # DashScope 的当前文生图请求不接受参考图字段；服务层仍传入统一参数，
         # 这里明确忽略它并保留纯提示词生成，避免伪造一个未被上游支持的协议。
@@ -105,10 +109,14 @@ class DashScopeImageProvider:
                 )
                 response.raise_for_status()
                 task_id = self._task_id(response.json())
+                if control is not None:
+                    await control.set_provider_task_id(task_id)
 
                 while True:
                     if time.monotonic() >= deadline:
                         raise PortraitImageTimeoutError("图片生成超时")
+                    if control is not None and control.cancelled.is_set():
+                        raise asyncio.CancelledError
                     if self._poll_interval_seconds > 0:
                         await asyncio.sleep(self._poll_interval_seconds)
                     status_response = await client.get(f"{self._base_url}/tasks/{task_id}")
@@ -125,6 +133,16 @@ class DashScopeImageProvider:
             raise PortraitImageTimeoutError("图片生成超时") from exc
         except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
             raise PortraitImageGenerationError("图片生成服务暂时不可用") from exc
+
+    async def cancel(self, task_id: str) -> None:
+        """尽力取消仍处于等待态的 DashScope 任务；运行中任务可能拒绝取消。"""
+        async with httpx.AsyncClient(
+            headers={"Authorization": f"Bearer {self._api_key}"},
+            timeout=min(self._timeout_seconds, 30.0),
+            transport=self._transport,
+        ) as client:
+            response = await client.post(f"{self._base_url}/tasks/{task_id}/cancel")
+            response.raise_for_status()
 
     @staticmethod
     def _output(payload: object) -> dict:
@@ -206,7 +224,9 @@ class SufyImageProvider:
         negative_prompt: str,
         size: str,
         reference_image: PortraitReferenceImage | None = None,
+        control: ImageGenerationControl | None = None,
     ) -> ImageGenerationOutput:
+        del control
         # OpenAI 生图协议没有通用的 negative_prompt 字段，因此将反向约束
         # 并入主提示词，避免不同 Sufy 模型对非标准字段的支持不一致。
         combined_prompt = f"{prompt}\n\n避免出现以下内容：{negative_prompt}"

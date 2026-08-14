@@ -185,7 +185,7 @@ class _PersistentNarrationModel:
 
 
 class PersistentNarrationPolicyTests(unittest.IsolatedAsyncioTestCase):
-    def _context(self, *, results=()):
+    def _context(self, *, results=(), utterance="行动"):
         view = SimpleNamespace(
             room_id="room",
             player_id="player",
@@ -200,7 +200,7 @@ class PersistentNarrationPolicyTests(unittest.IsolatedAsyncioTestCase):
                 player_id="player",
                 actor_id="actor",
                 client_action_id="action",
-                utterance="行动",
+                utterance=utterance,
             ),
             plan_goal="行动",
             termination_status="resolved",
@@ -245,7 +245,7 @@ class PersistentNarrationPolicyTests(unittest.IsolatedAsyncioTestCase):
             aliases=("墓地看守",),
             observable_state=(
                 SimpleNamespace(key="consciousness", value="unconscious"),
-            )
+            ),
         )
         context = self._context()
         context.player_view.scene.visible_entities = (entity,)
@@ -261,21 +261,21 @@ class PersistentNarrationPolicyTests(unittest.IsolatedAsyncioTestCase):
             "守墓人仍未醒来。",
             "守墓人躺在墓园草地上。",
         ):
-            with self.subTest(text=text), self.assertRaises(
-                ActionPlanNarrationValidationError
+            with (
+                self.subTest(text=text),
+                self.assertRaises(ActionPlanNarrationValidationError),
             ):
-                await ActionPlanNarrator(
-                    _PersistentNarrationModel(text)
-                ).narrate(self._context())
-
-    async def test_rejects_non_visible_npc_claimed_at_current_scene(self):
-        """最近历史提到过 NPC，也不能把当前不可见实体写成正在现场。"""
-        with self.assertRaises(ActionPlanNarrationValidationError):
-            await ActionPlanNarrator(
-                _PersistentNarrationModel(
-                    "梅洛迪亚斯·杰弗逊正站在门口附近，目光一直盯着你。"
+                await ActionPlanNarrator(_PersistentNarrationModel(text)).narrate(
+                    self._context()
                 )
-            ).narrate(self._context())
+
+    async def test_allows_unprojected_companion_active_presence(self):
+        """未进入标准场景投影的随行人物不能被全局在场校验误伤。"""
+        output = await ActionPlanNarrator(
+            _PersistentNarrationModel("托马斯跟在你身边，正站在墓园入口。")
+        ).narrate(self._context())
+
+        self.assertEqual(output.text, "托马斯跟在你身边，正站在墓园入口。")
 
     async def test_rejects_dead_visible_npc_active_presence(self):
         """即使尸体仍然可见，死亡实体也不能被描述为站立或主动移动。"""
@@ -291,6 +291,31 @@ class PersistentNarrationPolicyTests(unittest.IsolatedAsyncioTestCase):
             await ActionPlanNarrator(
                 _PersistentNarrationModel("守墓人仍站在墓碑旁。")
             ).narrate(context)
+
+        with self.assertRaises(ActionPlanNarrationValidationError):
+            await ActionPlanNarrator(
+                _PersistentNarrationModel(
+                    "梅洛迪亚斯·杰弗逊的外套还在，人却已经不见了。"
+                )
+            ).narrate(context)
+
+    async def test_rejects_search_question_when_dead_body_is_visible(self):
+        """尸体已在当前 PlayerView 时，不能重新询问玩家要去哪里寻找。"""
+        entity = SimpleNamespace(
+            id="butler",
+            name="守墓人",
+            aliases=("梅洛迪亚斯·杰弗逊",),
+            observable_state=(SimpleNamespace(key="consciousness", value="dead"),),
+        )
+        context = self._context(utterance="去找他的尸体")
+        context.player_view.scene.visible_entities = (entity,)
+
+        with self.assertRaises(ActionPlanNarrationValidationError) as raised:
+            await ActionPlanNarrator(
+                _PersistentNarrationModel("你打算从哪里开始找？还是扩大范围搜寻尸体？")
+            ).narrate(context)
+
+        self.assertEqual(raised.exception.reason, "visible_corpse_search_conflict")
 
     async def test_allows_player_presence_without_visible_npc(self):
         """校验只限制 NPC 在场断言，不阻止主持人描述玩家自己的位置。"""

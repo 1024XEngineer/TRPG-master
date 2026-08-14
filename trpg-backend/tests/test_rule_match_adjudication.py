@@ -23,11 +23,13 @@ import pytest
 from collaboration_framework.contracts import (
     ActionAdjudication,
     ActionMethod,
+    ActionPlan,
     ActionPlanStep,
     ActionTarget,
     EnsureRuntimeLocationEffect,
     EnterLocationEffect,
     ModuleContentV3,
+    MoveEntityEffect,
     NarrativeOnlyEffect,
     NoAdjudicationCheck,
     PlayerInput,
@@ -51,6 +53,7 @@ from app.adapters.openai_models import _SAFE_ADJUDICATION_INSTRUCTIONS
 from app.core.action_plan_turn import (
     DeterministicHostTurnDecisionModel,
     _DeterministicStepAdjudicator,
+    _normalize_single_travel_decision,
     _RuleFirstStepAdjudicator,
 )
 
@@ -75,6 +78,7 @@ async def _cemetery_context(
     *,
     step_kind: Literal["action", "dialogue", "travel"] = "action",
     semantic_goal: str | None = None,
+    scene_id: str = "cemetery",
 ) -> ActionPlanStepContext:
     """把调查员放到墓地，那里 melodias 的 observe_caretaker 规则在射程内。"""
 
@@ -89,7 +93,7 @@ async def _cemetery_context(
         )
     }
     state = create_initial_game_state(content, room_id="r1", actors=actors).model_copy(
-        update={"scene_id": "cemetery"},
+        update={"scene_id": scene_id},
         deep=True,
     )
     store = InMemoryEngineStore()
@@ -331,6 +335,115 @@ async def test_planner_cannot_invent_ambient_venue_for_npc_search() -> None:
         not isinstance(effect, EnsureRuntimeLocationEffect)
         for effect in adjudication.success_effects
     )
+
+
+@pytest.mark.asyncio
+async def test_single_travel_prefers_explicit_player_destination() -> None:
+    """模型把“去墓地”裁成办公室时，玩家原话中的明确地点必须覆盖模型。"""
+
+    context = await _cemetery_context("去墓地", step_kind="travel")
+    wrong = SingleActionDecision(
+        adjudication=ActionAdjudication(
+            request_id="model-owned",
+            source_revision=context.player_view.revision,
+            actor_id="pc_1",
+            summary="去墓地",
+            target=ActionTarget(kind="location", id="thomas_office"),
+            method=ActionMethod(family="travel", description="去墓地"),
+            persistence_intent="none",
+            check=NoAdjudicationCheck(),
+            success_effects=(EnterLocationEffect(location_id="thomas_office"),),
+        )
+    )
+
+    normalized = _normalize_single_travel_decision(
+        wrong,
+        player_input=context.player_input,
+        view=context.player_view,
+        capabilities=context.keeper_capabilities,
+    )
+
+    assert isinstance(normalized, SingleActionDecision)
+    assert normalized.adjudication.target.id == "cemetery"
+    assert normalized.adjudication.persistence_intent == "location"
+    entered = next(
+        effect
+        for effect in normalized.adjudication.success_effects
+        if isinstance(effect, EnterLocationEffect)
+    )
+    assert entered.location_id == "cemetery"
+
+
+@pytest.mark.asyncio
+async def test_single_travel_builds_plan_when_companion_is_elsewhere() -> None:
+    """同行 NPC 不在身边时，必须先会合再前往玩家指定目的地。"""
+
+    context = await _cemetery_context("带托马斯去墓地", step_kind="travel")
+    wrong = SingleActionDecision(
+        adjudication=ActionAdjudication(
+            request_id="model-owned",
+            source_revision=context.player_view.revision,
+            actor_id="pc_1",
+            summary="带托马斯去墓地",
+            target=ActionTarget(kind="location", id="thomas_office"),
+            method=ActionMethod(family="travel", description="带托马斯去墓地"),
+            persistence_intent="none",
+            check=NoAdjudicationCheck(),
+            success_effects=(EnterLocationEffect(location_id="thomas_office"),),
+        )
+    )
+
+    normalized = _normalize_single_travel_decision(
+        wrong,
+        player_input=context.player_input,
+        view=context.player_view,
+        capabilities=context.keeper_capabilities,
+    )
+
+    assert isinstance(normalized, ActionPlan)
+    assert [step.kind for step in normalized.steps] == ["travel", "travel"]
+    assert "托马斯" in normalized.steps[0].semantic_goal
+    assert "会客室" in normalized.steps[0].semantic_goal
+    assert "墓地" in normalized.steps[1].semantic_goal
+
+
+@pytest.mark.asyncio
+async def test_single_travel_moves_named_companion_present_with_player() -> None:
+    """“带他”由裁决摘要消解后，身边 NPC 必须获得权威移动效果。"""
+
+    context = await _cemetery_context(
+        "带他去找守墓人",
+        step_kind="travel",
+        scene_id="thomas_office",
+    )
+    decision = SingleActionDecision(
+        adjudication=ActionAdjudication(
+            request_id="model-owned",
+            source_revision=context.player_view.revision,
+            actor_id="pc_1",
+            summary="带托马斯去找守墓人",
+            target=ActionTarget(kind="location", id="cemetery"),
+            method=ActionMethod(family="travel", description="和托马斯一起前往墓地"),
+            persistence_intent="location",
+            check=NoAdjudicationCheck(),
+            success_effects=(EnterLocationEffect(location_id="cemetery"),),
+        )
+    )
+
+    normalized = _normalize_single_travel_decision(
+        decision,
+        player_input=context.player_input,
+        view=context.player_view,
+        capabilities=context.keeper_capabilities,
+    )
+
+    assert isinstance(normalized, SingleActionDecision)
+    moved = tuple(
+        effect
+        for effect in normalized.adjudication.success_effects
+        if isinstance(effect, MoveEntityEffect)
+    )
+    assert moved == (MoveEntityEffect(entity_id="thomas", location_id="cemetery"),)
 
 
 async def test_ambient_venue_never_shadows_an_authored_location() -> None:

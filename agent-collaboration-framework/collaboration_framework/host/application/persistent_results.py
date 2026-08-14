@@ -14,7 +14,11 @@ from collaboration_framework.contracts import CommittedResult, PlayerView
 
 _PERSISTENT_CLAIMS: tuple[tuple[str, str, JsonValue], ...] = (
     # 中文叙事经常不用“昏迷”这个词，以下同义表达也必须受同一证据约束。
-    (r"昏迷|昏倒|失去意识|失去知觉|不省人事|昏睡|没有醒来|仍未醒|尚未苏醒|闭着眼|双眼紧闭", "consciousness", "unconscious"),
+    (
+        r"昏迷|昏倒|失去意识|失去知觉|不省人事|昏睡|没有醒来|仍未醒|尚未苏醒|闭着眼|双眼紧闭",
+        "consciousness",
+        "unconscious",
+    ),
     (r"死亡|死去|毙命|断气", "consciousness", "dead"),
     (r"倒地|倒下|趴在地上|躺在地上|躺着|躺在", "posture", "prone"),
     (r"被束缚|被捆住|被绑住|动弹不得", "restraint", "restrained"),
@@ -30,6 +34,9 @@ _NON_ASSERTIVE_PREFIX = re.compile(
 )
 _ACTIVE_PRESENCE = re.compile(r"(?:正|仍|还)?(?:站在|站着|坐在|走来|走向|朝你走来)")
 _PLAYER_PRESENCE = re.compile(r"你(?:们)?(?:正|仍|还)?(?:站在|站着|坐在|走来|走向)")
+_ABSENT_PRESENCE = re.compile(
+    r"人(?:却|已经|却已经)?不见|不在(?:这里|现场)|找不到(?:他|她)"
+)
 
 
 def unsupported_persistent_claim(
@@ -46,7 +53,9 @@ def unsupported_persistent_claim(
     asserted_text = _QUOTED_TEXT.sub("", text)
     entities = () if player_view is None else player_view.scene.visible_entities
     for sentence in re.split(r"[。！？]", asserted_text):
-        if not _ACTIVE_PRESENCE.search(sentence) or _PLAYER_PRESENCE.search(sentence):
+        active_claim = _ACTIVE_PRESENCE.search(sentence)
+        absent_claim = _ABSENT_PRESENCE.search(sentence)
+        if (not active_claim and not absent_claim) or _PLAYER_PRESENCE.search(sentence):
             continue
         mentioned = tuple(
             entity
@@ -59,9 +68,10 @@ def unsupported_persistent_claim(
                 )
             )
         )
-        # 明确的 NPC 在场行为必须绑定当前可见实体；最近对话提到过某人，
-        # 不等于该实体现在就在当前场景。
-        if not mentioned:
+        # 当前 PlayerView 只投影标准场景实体，随行者或运行时对话人物可能暂未
+        # 出现在 visible_entities。不能仅凭“未投影”判定叙事越权，否则会把正常
+        # 的同行、交谈全部拒绝；这里只否决已有明确权威状态冲突的可见实体。
+        if absent_claim and mentioned:
             return "entity_presence"
         for entity in mentioned:
             consciousness = next(
@@ -72,7 +82,7 @@ def unsupported_persistent_claim(
                 ),
                 None,
             )
-            if consciousness in {"dead", "unconscious"}:
+            if active_claim and consciousness in {"dead", "unconscious"}:
                 return "entity_presence"
     for pattern, key, value in _PERSISTENT_CLAIMS:
         for match in re.finditer(pattern, asserted_text):
@@ -80,11 +90,14 @@ def unsupported_persistent_claim(
             if _NON_ASSERTIVE_PREFIX.search(prefix):
                 continue
             # 以句子中的可见名称绑定目标，避免把另一个 NPC 的状态套到当前目标上。
-            sentence_start = max(
-                asserted_text.rfind("。", 0, match.start()),
-                asserted_text.rfind("！", 0, match.start()),
-                asserted_text.rfind("？", 0, match.start()),
-            ) + 1
+            sentence_start = (
+                max(
+                    asserted_text.rfind("。", 0, match.start()),
+                    asserted_text.rfind("！", 0, match.start()),
+                    asserted_text.rfind("？", 0, match.start()),
+                )
+                + 1
+            )
             sentence = asserted_text[sentence_start : match.end()]
             mentioned_ids = {
                 entity.id

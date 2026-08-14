@@ -92,7 +92,13 @@ class _NarrationContextStub:
         self.narration_evidence = (evidence,)
         self.termination_status = termination_status
         self.narration_retry_hint: str | None = None
-        self.player_input = SimpleNamespace(client_action_id="action-narration-test")
+        self.player_input = SimpleNamespace(
+            client_action_id="action-narration-test",
+            utterance="",
+        )
+        self.player_view = SimpleNamespace(
+            scene=SimpleNamespace(visible_entities=()),
+        )
         self.completed_steps: tuple[object, ...] = ()
 
     def model_copy(self, *, update: dict[str, object]):
@@ -172,6 +178,34 @@ def test_deterministic_narration_fallback_preserves_action_outcome(
     output = ActionPlanTurnApplication._deterministic_narration_fallback(cast(Any, context))
 
     assert output.text == expected
+
+
+def test_clarification_fallback_points_to_visible_dead_body() -> None:
+    """模型连续忽略可见尸体时，兜底应给出权威位置而不是继续要求寻找。"""
+
+    context = SimpleNamespace(
+        termination_status="needs_clarification",
+        player_input=SimpleNamespace(
+            client_action_id="find-body",
+            utterance="去找他的尸体",
+        ),
+        completed_steps=(),
+        player_view=SimpleNamespace(
+            scene=SimpleNamespace(
+                visible_entities=(
+                    SimpleNamespace(
+                        name="梅洛迪亚斯·杰弗逊",
+                        observable_state=(SimpleNamespace(key="consciousness", value="dead"),),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    output = ActionPlanTurnApplication._deterministic_narration_fallback(cast(Any, context))
+
+    assert output.kind == "clarification"
+    assert output.text.startswith("梅洛迪亚斯·杰弗逊的尸体就在当前场景中")
 
 
 @pytest.mark.asyncio

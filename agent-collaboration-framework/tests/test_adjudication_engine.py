@@ -724,6 +724,26 @@ class AdjudicationEngineTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValidationError):
             ActionAdjudication.model_validate(payload)
 
+    def test_legacy_missing_persistence_intent_survives_round_trip(self) -> None:
+        """旧裁决重存后仍需保持缺字段，不能被升级成模型显式 none。"""
+
+        legacy = adjudication(
+            "legacy-intent", "0", check=NoAdjudicationCheck()
+        ).model_copy(
+            update={
+                "method": ActionMethod(family="knock_out", description="旧裁决"),
+                "success_effects": (),
+            },
+            deep=True,
+        )
+
+        payload = legacy.to_json_dict()
+        restored = ActionAdjudication.model_validate(payload)
+
+        self.assertNotIn("persistence_intent", payload)
+        self.assertFalse(restored.persistence_intent_explicit)
+        self.assertEqual(restored.persistence_intent, "none")
+
     async def test_persistent_intent_rejects_empty_success_effects_before_roll(
         self,
     ) -> None:
@@ -741,6 +761,59 @@ class AdjudicationEngineTests(unittest.IsolatedAsyncioTestCase):
             await self.submit(self.service(1), action)
         self.assertEqual(raised.exception.result.code, "PERSISTENT_EFFECT_REQUIRED")
         self.assertEqual(raised.exception.result.repairability, "auto_repairable")
+        self.assertEqual(self.store.inspect_state("room_01").event_sequence, 0)
+
+    async def test_controlled_family_rejects_explicit_none_intent(self) -> None:
+        """新模型不能用显式 none 绕过击晕等受控动作族的持久效果校验。"""
+
+        payload = adjudication(
+            "explicit-none", "0", check=NoAdjudicationCheck()
+        ).to_json_dict()
+        payload.update(
+            {
+                "summary": "击晕守墓人",
+                "target": {"kind": "entity", "id": "butler"},
+                "method": {"family": "knock_out", "description": "用撬棍砸晕他"},
+                "persistence_intent": "none",
+                "success_effects": [],
+            }
+        )
+        action = ActionAdjudication.model_validate(payload)
+
+        with self.assertRaises(AdjudicationValidationError) as raised:
+            await self.submit(self.service(), action)
+
+        self.assertEqual(raised.exception.result.code, "PERSISTENT_EFFECT_MISMATCH")
+        self.assertEqual(self.store.inspect_state("room_01").event_sequence, 0)
+
+    async def test_object_state_rejects_integer_as_boolean_value(self) -> None:
+        """对象状态只接受真正的布尔值，整数 0/1 不能进入权威状态。"""
+
+        payload = adjudication(
+            "integer-object-state", "0", check=NoAdjudicationCheck()
+        ).to_json_dict()
+        payload.update(
+            {
+                "summary": "打开石门",
+                "target": {"kind": "entity", "id": "butler"},
+                "method": {"family": "open", "description": "推开石门"},
+                "persistence_intent": "object_state",
+                "success_effects": [
+                    {
+                        "type": "change_entity_state",
+                        "entity_id": "butler",
+                        "key": "open",
+                        "value": 1,
+                    }
+                ],
+            }
+        )
+        action = ActionAdjudication.model_validate(payload)
+
+        with self.assertRaises(AdjudicationValidationError) as raised:
+            await self.submit(self.service(), action)
+
+        self.assertEqual(raised.exception.result.code, "PERSISTENT_EFFECT_MISMATCH")
         self.assertEqual(self.store.inspect_state("room_01").event_sequence, 0)
 
     async def test_persistent_intent_accepts_unconscious_state_and_publishes_evidence(

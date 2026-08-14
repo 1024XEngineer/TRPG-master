@@ -19,14 +19,21 @@ _PERSISTENT_CLAIMS: tuple[tuple[str, str, JsonValue], ...] = (
         "consciousness",
         "unconscious",
     ),
+    (r"已经醒来|醒了过来|苏醒|恢复意识|恢复知觉", "consciousness", "conscious"),
     (r"死亡|死去|毙命|断气", "consciousness", "dead"),
     (r"倒地|倒下|趴在地上|躺在地上|躺着|躺在", "posture", "prone"),
+    (r"站了起来|重新站起|起身站好", "posture", "standing"),
     (r"被束缚|被捆住|被绑住|动弹不得", "restraint", "restrained"),
+    (r"已经获释|恢复自由|解开束缚|挣脱束缚", "restraint", "free"),
     (r"重伤", "injury", "major"),
     (r"受伤|负伤", "injury", "minor"),
+    (r"伤势痊愈|已经痊愈|伤口愈合|恢复如初", "injury", "none"),
     (r"已经打开|被打开|敞开", "open", True),
+    (r"已经关闭|被关闭|已经关上|已经合上", "open", False),
     (r"已经锁住|被锁住|上了锁", "locked", True),
+    (r"已经解锁|被解锁|锁已打开|没有上锁", "locked", False),
     (r"已经损坏|被破坏|已经破碎|碎裂", "broken", True),
+    (r"已经修好|被修好|修复完毕|恢复完好", "broken", False),
 )
 _QUOTED_TEXT = re.compile(r"[“\"『「][^”\"』」]*[”\"』」]")
 _NON_ASSERTIVE_PREFIX = re.compile(
@@ -110,20 +117,30 @@ def unsupported_persistent_claim(
                     )
                 )
             }
+            # 持久事实必须绑定到句中明确出现的可见实体；无法绑定时宁可让
+            # Narrator 重试，也不能把同类结果从另一个目标复用过来。
+            if not mentioned_ids:
+                return key
             has_evidence = any(
                 result.state_key == key
-                and result.state_value == value
-                and (not mentioned_ids or result.target_id in mentioned_ids)
+                and _same_json_value(result.state_value, value)
+                and result.target_id in mentioned_ids
                 for result in committed_results
             )
             if not has_evidence and player_view is not None:
                 has_evidence = any(
                     state.key == key
-                    and state.value == value
-                    and (not mentioned_ids or entity.id in mentioned_ids)
+                    and _same_json_value(state.value, value)
+                    and entity.id in mentioned_ids
                     for entity in player_view.scene.visible_entities
                     for state in entity.observable_state
                 )
             if not has_evidence:
                 return key
     return None
+
+
+def _same_json_value(left: JsonValue, right: JsonValue) -> bool:
+    """持久声明证据同时匹配 JSON 值与类型，避免 0/1 冒充布尔状态。"""
+
+    return type(left) is type(right) and left == right

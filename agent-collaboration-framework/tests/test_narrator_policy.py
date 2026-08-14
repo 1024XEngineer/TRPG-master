@@ -232,10 +232,136 @@ class PersistentNarrationPolicyTests(unittest.IsolatedAsyncioTestCase):
             state_value="unconscious",
             event_ref="event-1",
         )
+        context = self._context(results=(result,))
+        context.player_view.scene.visible_entities = (
+            SimpleNamespace(
+                id="butler",
+                name="守墓人",
+                aliases=(),
+                observable_state=(),
+            ),
+        )
         output = await ActionPlanNarrator(
             _PersistentNarrationModel("守墓人昏迷了。")
-        ).narrate(self._context(results=(result,)))
+        ).narrate(context)
         self.assertEqual(output.text, "守墓人昏迷了。")
+
+    async def test_rejects_committed_state_reused_for_another_target(self):
+        """A 的提交结果不能授权叙事声称 B 具有相同持久状态。"""
+
+        result = CommittedResult(
+            kind="character_state",
+            target_id="npc-a",
+            state_key="consciousness",
+            state_value="unconscious",
+            event_ref="event-1",
+        )
+        context = self._context(results=(result,))
+        context.player_view.scene.visible_entities = (
+            SimpleNamespace(
+                id="npc-b",
+                name="医生",
+                aliases=(),
+                observable_state=(),
+            ),
+        )
+
+        with self.assertRaises(ActionPlanNarrationValidationError):
+            await ActionPlanNarrator(
+                _PersistentNarrationModel("医生昏迷了。")
+            ).narrate(context)
+
+    async def test_rejects_unbound_name_even_with_same_state_result(self):
+        """无法绑定到 PlayerView 的名称不能把同类 committed result 当通配证据。"""
+
+        result = CommittedResult(
+            kind="character_state",
+            target_id="npc-a",
+            state_key="consciousness",
+            state_value="unconscious",
+            event_ref="event-1",
+        )
+        with self.assertRaises(ActionPlanNarrationValidationError):
+            await ActionPlanNarrator(
+                _PersistentNarrationModel("医生昏迷了。")
+            ).narrate(self._context(results=(result,)))
+
+    async def test_reverse_state_claim_requires_matching_visible_state(self):
+        """醒来等反向状态声明也必须由本回合结果或当前公开状态支持。"""
+
+        entity = SimpleNamespace(
+            id="butler",
+            name="守墓人",
+            aliases=(),
+            observable_state=(
+                SimpleNamespace(key="consciousness", value="unconscious"),
+            ),
+        )
+        context = self._context()
+        context.player_view.scene.visible_entities = (entity,)
+        with self.assertRaises(ActionPlanNarrationValidationError):
+            await ActionPlanNarrator(
+                _PersistentNarrationModel("守墓人已经醒来。")
+            ).narrate(context)
+
+        entity.observable_state = (
+            SimpleNamespace(key="consciousness", value="conscious"),
+        )
+        output = await ActionPlanNarrator(
+            _PersistentNarrationModel("守墓人已经醒来。")
+        ).narrate(context)
+        self.assertEqual(output.text, "守墓人已经醒来。")
+
+    async def test_all_reverse_state_families_require_matching_state(self):
+        """首期受控动作族的所有反向结果都必须经过同一证据校验。"""
+
+        cases = (
+            ("守墓人站了起来。", "守墓人", "posture", "standing"),
+            ("守墓人已经获释。", "守墓人", "restraint", "free"),
+            ("守墓人伤势痊愈。", "守墓人", "injury", "none"),
+            ("石门已经关闭。", "石门", "open", False),
+            ("石门已经解锁。", "石门", "locked", False),
+            ("石门已经修好。", "石门", "broken", False),
+        )
+        for text, name, key, value in cases:
+            with self.subTest(text=text):
+                entity = SimpleNamespace(
+                    id="target",
+                    name=name,
+                    aliases=(),
+                    observable_state=(),
+                )
+                context = self._context()
+                context.player_view.scene.visible_entities = (entity,)
+                with self.assertRaises(ActionPlanNarrationValidationError):
+                    await ActionPlanNarrator(
+                        _PersistentNarrationModel(text)
+                    ).narrate(context)
+
+                entity.observable_state = (
+                    SimpleNamespace(key=key, value=value),
+                )
+                output = await ActionPlanNarrator(
+                    _PersistentNarrationModel(text)
+                ).narrate(context)
+                self.assertEqual(output.text, text)
+
+    async def test_integer_state_does_not_authorize_boolean_claim(self):
+        """旧数据中的整数 0 不能被解释为对象已经关闭。"""
+
+        entity = SimpleNamespace(
+            id="door",
+            name="石门",
+            aliases=(),
+            observable_state=(SimpleNamespace(key="open", value=0),),
+        )
+        context = self._context()
+        context.player_view.scene.visible_entities = (entity,)
+
+        with self.assertRaises(ActionPlanNarrationValidationError):
+            await ActionPlanNarrator(
+                _PersistentNarrationModel("石门已经关闭。")
+            ).narrate(context)
 
     async def test_allows_previous_turn_unconscious_state_from_player_view(self):
         """上一回合已公开的 NPC 状态必须能约束本回合的询问叙事。"""

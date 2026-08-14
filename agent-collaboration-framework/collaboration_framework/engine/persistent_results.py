@@ -98,13 +98,14 @@ def validate_persistent_effects(
 
     intent = effective_persistence_intent(adjudication)
     policy = _FAMILY_POLICIES.get(adjudication.method.family.strip().lower())
-    # 新模型显式写 none 不能把明显持久动作降级成普通叙事；旧存量裁决没有
-    # explicit 标记，继续按兼容语义读取 none。
-    if (
-        adjudication.persistence_intent_explicit
-        and adjudication.persistence_intent != "none"
-        and policy is not None
-    ):
+    # 新模型对受控动作族必须声明与策略一致的意图，包括不能显式写 none；只有
+    # 真正缺字段的旧持久化裁决保留 none 兼容语义。
+    if policy is not None and adjudication.persistence_intent_explicit:
+        if adjudication.persistence_intent != policy.intent:
+            return PersistentEffectProblem(
+                "PERSISTENT_EFFECT_MISMATCH",
+                "行动的持久结果类别与所用方式不一致，请重新裁决",
+            )
         intent = policy.intent
     if intent == "none":
         return None
@@ -152,10 +153,11 @@ def _has_matching_effect(
                 continue
             if effect.entity_id != target_id or effect.key not in allowed:
                 continue
-            if effect.value not in allowed[effect.key]:
+            if not _is_allowed_value(effect.value, allowed[effect.key]):
                 continue
             if policy is None or (
-                effect.key == policy.state_key and effect.value == policy.state_value
+                effect.key == policy.state_key
+                and _same_json_value(effect.value, policy.state_value)
             ):
                 return True
         return False
@@ -189,7 +191,7 @@ def is_public_standard_state(effect: ActionEffect) -> bool:
     allowed = CHARACTER_STATE_VALUES.get(effect.key) or OBJECT_STATE_VALUES.get(
         effect.key
     )
-    return allowed is not None and effect.value in allowed
+    return allowed is not None and _is_allowed_value(effect.value, allowed)
 
 
 def committed_results_from_events(
@@ -214,7 +216,7 @@ def committed_results_from_events(
             if (
                 not isinstance(target_id, str)
                 or allowed is None
-                or value not in allowed
+                or not _is_allowed_value(value, allowed)
             ):
                 continue
             assert isinstance(key, str)
@@ -264,3 +266,15 @@ def committed_results_from_events(
                 )
             )
     return tuple(results)
+
+
+def _is_allowed_value(value: JsonValue, allowed: tuple[JsonValue, ...]) -> bool:
+    """按值与实际类型匹配白名单，避免 Python 把整数 0/1 当成布尔值。"""
+
+    return any(_same_json_value(value, candidate) for candidate in allowed)
+
+
+def _same_json_value(left: JsonValue, right: JsonValue) -> bool:
+    """JSON 标量必须同时满足类型和值相同。"""
+
+    return type(left) is type(right) and left == right

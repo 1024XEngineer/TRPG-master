@@ -7,9 +7,16 @@ domain effects instead of arbitrary state paths.
 
 from __future__ import annotations
 
-from typing import Annotated, Literal, TypeAlias
+from typing import Annotated, Any, Literal, TypeAlias
 
-from pydantic import Field, JsonValue, PrivateAttr, model_validator
+from pydantic import (
+    Field,
+    JsonValue,
+    PrivateAttr,
+    SerializerFunctionWrapHandler,
+    model_serializer,
+    model_validator,
+)
 
 from .common import ContractModel
 
@@ -242,6 +249,18 @@ class ActionAdjudication(ContractModel):
         """区分旧 JSON 的兼容默认值与新模型显式声明。"""
 
         return self._persistence_intent_explicit
+
+    @model_serializer(mode="wrap")
+    def serialize_persistence_intent(
+        self,
+        handler: SerializerFunctionWrapHandler,
+    ) -> dict[str, Any]:
+        """旧裁决缺少字段时继续省略，避免一次重存后被误判为显式 none。"""
+
+        payload = handler(self)
+        if not self.persistence_intent_explicit:
+            payload.pop("persistence_intent", None)
+        return payload
 
 
 class SubmitAdjudicationRequest(ContractModel):

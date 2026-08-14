@@ -15,6 +15,7 @@ from collaboration_framework.contracts import (
     NoAdjudicationCheck,
     PlayerInput,
     RequiredAdjudicationCheck,
+    RuleDecisionRef,
     SkillCheckCandidate,
     ValidationFeedback,
 )
@@ -396,3 +397,74 @@ def test_same_length_effect_replacement_requires_clarification() -> None:
 
     assert result.status == "requires_clarification"
     assert result.reason_code == "NEW_OR_CHANGED_EFFECT"
+
+
+def _greeting(*, rule: RuleDecisionRef | None) -> ActionAdjudication:
+    return ActionAdjudication(
+        request_id="request",
+        source_revision="0",
+        actor_id="pc_1",
+        summary="跟邻居打个招呼",
+        target=ActionTarget(kind="entity", id="bookshelf"),
+        method=ActionMethod(family="social", description="打招呼"),
+        check=NoAdjudicationCheck(),
+        rule_decision=rule,
+    )
+
+
+def _compare(original: ActionAdjudication, repaired: ActionAdjudication, code: str):
+    _, _, projector = runtime()
+    view = asyncio.run(projector.project(player_input(utterance="跟邻居打个招呼")))
+    return compare_repair_semantics(
+        player_input=player_input(utterance="跟邻居打个招呼"),
+        plan_goal="跟邻居打个招呼",
+        step=ActionPlanStep(kind="action", semantic_goal="跟邻居打个招呼"),
+        original=original,
+        repaired=repaired,
+        validation_feedback=_feedback(code=code),
+        player_view=view,
+    )
+
+
+def test_dropping_an_out_of_scope_rule_is_an_allowed_narrowing() -> None:
+    """#313：引擎判 RULE_OUT_OF_SCOPE 之后，放弃这条规则是唯一能走通的修复。
+
+    把 rule_decision 设回 None，这一步退化成普通叙事裁决——拿不到任何它原本拿不到
+    的东西。不允许的话，第 313 号那三次「跟邻居打个招呼」即使改成 auto_repairable
+    也照样死在语义保持这一关。
+    """
+
+    result = _compare(
+        _greeting(rule=RuleDecisionRef(rule_id="question_neighbors", option_id="fast-talk")),
+        _greeting(rule=None),
+        "RULE_OUT_OF_SCOPE",
+    )
+
+    assert result.status == "narrowed"
+    assert result.reason_code == "RULE_DECISION_DROPPED"
+
+
+def test_swapping_to_another_rule_still_requires_player_choice() -> None:
+    """只放行「有 -> 无」。换一条规则等于让模型自己挑模组后果（#226 §1）。"""
+
+    result = _compare(
+        _greeting(rule=RuleDecisionRef(rule_id="question_neighbors", option_id="fast-talk")),
+        _greeting(rule=RuleDecisionRef(rule_id="impress_caretaker", option_id="credit-rating")),
+        "RULE_OUT_OF_SCOPE",
+    )
+
+    assert result.status == "requires_clarification"
+    assert result.reason_code == "RULE_DECISION_CHANGED"
+
+
+def test_a_rule_may_not_be_dropped_for_an_unrelated_rejection() -> None:
+    """目标不存在跟规则范围无关，这时丢掉规则是模型在夹带（#313）。"""
+
+    result = _compare(
+        _greeting(rule=RuleDecisionRef(rule_id="question_neighbors", option_id="fast-talk")),
+        _greeting(rule=None),
+        "TARGET_UNAVAILABLE",
+    )
+
+    assert result.status == "requires_clarification"
+    assert result.reason_code == "RULE_DECISION_CHANGED"

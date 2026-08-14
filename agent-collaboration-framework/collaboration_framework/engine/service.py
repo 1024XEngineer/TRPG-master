@@ -364,6 +364,7 @@ class RuleEngineService:
             room_id=state.room_id,
             actor_id=actor_id,
             revision=runtime.revision,
+            world_id=module.world_ref,
             information=information,
             locations=locations,
             entities=entities,

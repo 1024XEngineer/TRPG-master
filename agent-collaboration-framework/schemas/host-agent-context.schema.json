@@ -289,6 +289,19 @@
           "title": "Revision",
           "type": "string"
         },
+        "world_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "World Id"
+        },
         "information": {
           "default": [],
           "items": {

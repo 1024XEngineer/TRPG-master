@@ -50,7 +50,8 @@ def compare_repair_semantics(
         return _clarification("METHOD_CHANGED")
     if not _same_semantic_text(original.method.description, repaired.method.description):
         return _clarification("METHOD_CHANGED")
-    if original.rule_decision != repaired.rule_decision:
+    rule_dropped = _rule_decision_dropped(original, repaired, validation_feedback)
+    if not rule_dropped and original.rule_decision != repaired.rule_decision:
         return _clarification("RULE_DECISION_CHANGED")
     if not _check_is_mechanical(original, repaired):
         return _clarification("CHECK_CHANGED")
@@ -98,6 +99,12 @@ def compare_repair_semantics(
     if failure.status == "requires_clarification":
         return failure
 
+    if rule_dropped:
+        return SemanticPreservationResult(
+            status="narrowed",
+            reason_code="RULE_DECISION_DROPPED",
+            safe_reason="已放弃不适用于本次行动的模组规则选项",
+        )
     if "narrowed" in {success.status, failure.status}:
         return SemanticPreservationResult(
             status="narrowed",
@@ -110,6 +117,25 @@ def compare_repair_semantics(
         status="preserved",
         reason_code="MECHANICAL_REPAIR",
         safe_reason="修复仅调整了行动的机械参数",
+    )
+
+
+def _rule_decision_dropped(
+    original: ActionAdjudication,
+    repaired: ActionAdjudication,
+    feedback: ValidationFeedback,
+) -> bool:
+    """放弃一个引擎刚判定为超范围的规则选项，是允许的收窄修复（#313）。
+
+    只认「有 -> 无」这一个方向。换成另一条规则等于让模型自己挑模组后果，那是
+    #226 明令留在服务端的决定；而放弃之后这一步退化成普通叙事裁决，拿不到任何
+    它原本拿不到的东西，引擎照样会把修复后的裁决整个重新校验一遍。
+    """
+
+    return (
+        feedback.code == "RULE_OUT_OF_SCOPE"
+        and original.rule_decision is not None
+        and repaired.rule_decision is None
     )
 
 

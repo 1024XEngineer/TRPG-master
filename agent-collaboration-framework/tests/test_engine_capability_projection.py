@@ -255,6 +255,36 @@ class EngineCapabilityProjectionTests(unittest.IsolatedAsyncioTestCase):
             {"study"},
         )
 
+    async def test_keeper_capabilities_publish_the_only_legal_world_target(self) -> None:
+        """`kind="world"` 只认 `world_ref`，所以必须把它发出去（#313）。
+
+        它是规则系统 id（追书人是 `coc-7e`），PlayerView 里没有、场景里也推不出。
+        不发就等于「world 这个 target kind 对 Agent 不存在」：玩家问时间、问天气、
+        纯应答这类没有具体对象的输入，模型只能猜一个 id，然后每次都吃
+        TARGET_UNAVAILABLE。
+        """
+
+        capabilities = await self.engine.read_keeper_capabilities(SCOPE)
+
+        self.assertEqual(capabilities.world_id, self.module.world_ref)
+        # 发布出来的这个值必须真的能当目标用，而不只是多了一个字段。
+        snapshot = await self.engine.read(SCOPE)
+        await self.adjudication_engine.submit(
+            SubmitAdjudicationRequest(
+                room_id=SCOPE.room_id,
+                player_id=SCOPE.player_id,
+                adjudication=ActionAdjudication(
+                    request_id="world-target-313",
+                    source_revision=snapshot.revision,
+                    actor_id=SCOPE.actor_id,
+                    summary="现在几点了？",
+                    target=ActionTarget(kind="world", id=capabilities.world_id or ""),
+                    method=ActionMethod(family="talk", description="询问时间"),
+                    check=NoAdjudicationCheck(),
+                ),
+            )
+        )
+
     async def test_keeper_capabilities_track_committed_effects(self) -> None:
         await self.commit("reveal-2", RevealInformationEffect(information_id="document_truth"))
         await self.commit(

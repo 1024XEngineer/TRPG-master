@@ -10,12 +10,13 @@ import re
 
 from pydantic import JsonValue
 
-from collaboration_framework.contracts import CommittedResult
+from collaboration_framework.contracts import CommittedResult, PlayerView
 
 _PERSISTENT_CLAIMS: tuple[tuple[str, str, JsonValue], ...] = (
-    (r"昏迷|昏倒|失去意识|不省人事", "consciousness", "unconscious"),
+    # 中文叙事经常不用“昏迷”这个词，以下同义表达也必须受同一证据约束。
+    (r"昏迷|昏倒|失去意识|失去知觉|不省人事|昏睡|没有醒来|仍未醒|尚未苏醒|闭着眼|双眼紧闭", "consciousness", "unconscious"),
     (r"死亡|死去|毙命|断气", "consciousness", "dead"),
-    (r"倒地|倒下|趴在地上", "posture", "prone"),
+    (r"倒地|倒下|趴在地上|躺在地上|躺着|躺在", "posture", "prone"),
     (r"被束缚|被捆住|被绑住|动弹不得", "restraint", "restrained"),
     (r"重伤", "injury", "major"),
     (r"受伤|负伤", "injury", "minor"),
@@ -32,18 +33,53 @@ _NON_ASSERTIVE_PREFIX = re.compile(
 def unsupported_persistent_claim(
     text: str,
     committed_results: tuple[CommittedResult, ...],
+    player_view: PlayerView | None = None,
 ) -> str | None:
-    """返回首个缺少已提交证据的持久声明类别。"""
+    """返回首个缺少证据或与当前状态冲突的持久声明类别。
+
+    ``committed_results`` 只覆盖本回合事件；``player_view`` 则覆盖之前回合
+    已经写入并重新投影的公开状态，避免 NPC 状态跨回合丢失。
+    """
 
     asserted_text = _QUOTED_TEXT.sub("", text)
+    entities = () if player_view is None else player_view.scene.visible_entities
     for pattern, key, value in _PERSISTENT_CLAIMS:
         for match in re.finditer(pattern, asserted_text):
             prefix = asserted_text[max(0, match.start() - 8) : match.start()]
             if _NON_ASSERTIVE_PREFIX.search(prefix):
                 continue
-            if not any(
-                result.state_key == key and result.state_value == value
+            # 以句子中的可见名称绑定目标，避免把另一个 NPC 的状态套到当前目标上。
+            sentence_start = max(
+                asserted_text.rfind("。", 0, match.start()),
+                asserted_text.rfind("！", 0, match.start()),
+                asserted_text.rfind("？", 0, match.start()),
+            ) + 1
+            sentence = asserted_text[sentence_start : match.end()]
+            mentioned_ids = {
+                entity.id
+                for entity in entities
+                if any(
+                    name and name in sentence
+                    for name in (
+                        getattr(entity, "name", ""),
+                        *getattr(entity, "aliases", ()),
+                    )
+                )
+            }
+            has_evidence = any(
+                result.state_key == key
+                and result.state_value == value
+                and (not mentioned_ids or result.target_id in mentioned_ids)
                 for result in committed_results
-            ):
+            )
+            if not has_evidence and player_view is not None:
+                has_evidence = any(
+                    state.key == key
+                    and state.value == value
+                    and (not mentioned_ids or entity.id in mentioned_ids)
+                    for entity in player_view.scene.visible_entities
+                    for state in entity.observable_state
+                )
+            if not has_evidence:
                 return key
     return None

@@ -1713,13 +1713,13 @@ async def test_single_travel_repair_with_changed_effect_requires_clarification()
     )
     original = player_input("single-travel-repair", "前往墓地")
 
-    with pytest.raises(TurnExecutionError) as raised:
-        await dispatcher.execute(
-            original,
-            single_travel_decision(target_id="missing-location"),
-        )
+    result = await dispatcher.execute(
+        original,
+        single_travel_decision(target_id="missing-location"),
+    )
 
-    assert raised.value.code == "SEMANTIC_REPAIR_REQUIRES_CLARIFICATION"
+    assert isinstance(result, SingleActionClarificationResult)
+    assert result.player_safe_reason == "修复方案可能改变原本行动，需要玩家确认下一步"
     assert len(repair_adjudicator.contexts) == 1
     context = repair_adjudicator.contexts[0]
     assert context.step.kind == "travel"

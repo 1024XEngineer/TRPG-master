@@ -1565,11 +1565,15 @@ class HostTurnDecisionExecutor:
                     player_view=view,
                 )
                 if preservation.status == "requires_clarification":
-                    raise TurnExecutionError(
-                        "SEMANTIC_REPAIR_REQUIRES_CLARIFICATION",
-                        preservation.safe_reason,
-                        retryable=False,
-                    ) from exc
+                    # 语义保护器拒绝的是自动替玩家换动作，不是玩家输入本身。
+                    # 此时尚未掷骰或提交效果，应交给主持人自然澄清，不能抛协议错误终止回合。
+                    return SingleActionClarificationResult(
+                        player_view=view,
+                        player_safe_reason=preservation.safe_reason,
+                        opening_world_time=WorldClockView.from_world(
+                            opening_view.world
+                        ),
+                    )
                 adjudication = repaired
         return SingleActionTurnResult(
             execution=execution,

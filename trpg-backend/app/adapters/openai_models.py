@@ -10,6 +10,7 @@ import structlog
 from collaboration_framework.contracts import (
     ActionAdjudication,
     ActionPlanPolicy,
+    ContractError,
     HostTurnDecision,
     Intent,
     JsonObject,
@@ -498,19 +499,68 @@ class PromptHostTurnDecisionModel:
         self._policy = policy or ActionPlanPolicy()
 
     async def generate(self, context: HostAgentContext) -> HostTurnDecision:
-        raw = await self._client.generate(
-            schema_name="trpg_host_turn_decision",
-            schema=_HOST_TURN_DECISION_ADAPTER.json_schema(mode="serialization"),
-            instructions=(
-                f"{host_turn_decision_instructions(self._policy)}\n\n"
-                f"{_SAFE_ADJUDICATION_INSTRUCTIONS}"
-            ),
-            input_payload=context.to_json_dict(),
+        instructions = (
+            f"{host_turn_decision_instructions(self._policy)}\n\n{_SAFE_ADJUDICATION_INSTRUCTIONS}"
         )
-        # 单动作与 ActionPlan 步骤共享同一持久结果字段约束；普通 narrative_only
-        # Fake 输出由辅助函数按兼容规则放行，持久动作则必须显式声明。
-        _require_explicit_persistence_intent(raw)
-        return HostTurnDecisionParser.parse(raw, policy=self._policy)
+        last_error: Exception | None = None
+        for attempt in range(2):
+            try:
+                raw = await self._client.generate(
+                    schema_name="trpg_host_turn_decision",
+                    schema=_HOST_TURN_DECISION_ADAPTER.json_schema(mode="serialization"),
+                    instructions=(
+                        instructions
+                        if attempt == 0
+                        else (
+                            f"{instructions}\n\n"
+                            "上一份返回未通过结构校验，请严格按 schema 重新生成。"
+                        )
+                    ),
+                    input_payload=context.to_json_dict(),
+                )
+                # 单动作与 ActionPlan 步骤共享同一持久结果字段约束；普通
+                # narrative_only 输出按兼容规则放行，持久动作必须显式声明。
+                _require_explicit_persistence_intent(raw)
+                return HostTurnDecisionParser.parse(raw, policy=self._policy)
+            except TurnExecutionError as exc:
+                if exc.code != "MODEL_OUTPUT_UNREADABLE":
+                    raise
+                last_error = exc
+            except (StructuredOutputError, ContractError, ValidationError) as exc:
+                last_error = exc
+
+            # 只记录安全的异常类型和字段路径；禁止记录模型正文、Prompt 或 GM-only 数据。
+            logger.warning(
+                "host_turn_decision_rejected",
+                attempt=attempt + 1,
+                error_type=type(last_error).__name__,
+                issues=_validation_issue_paths(last_error),
+            )
+
+        raise TurnExecutionError(
+            "MODEL_OUTPUT_UNREADABLE",
+            "主持模型返回了无法解读的结果，本次动作未生效，请重试",
+            retryable=True,
+        ) from last_error
+
+
+def _validation_issue_paths(exc: Exception | None) -> tuple[str, ...]:
+    """提取不含输入值的 Pydantic 字段路径，供模型输出故障定位。"""
+
+    current: BaseException | None = exc
+    while current is not None:
+        if isinstance(current, ValidationError):
+            return tuple(
+                f"{'.'.join(str(part) for part in issue.get('loc', ()))}:"
+                f"{issue.get('type', 'unknown')}"
+                for issue in current.errors(
+                    include_url=False,
+                    include_context=False,
+                    include_input=False,
+                )
+            )
+        current = current.__cause__
+    return ()
 
 
 class PromptActionPlanStepAdjudicator:

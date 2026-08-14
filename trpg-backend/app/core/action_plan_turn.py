@@ -614,19 +614,36 @@ class ActionPlanTurnApplication:
             await on_input_accepted(player_input, view)
         await _emit_phase(on_phase, "understanding_action")
         keeper_capabilities = await self._keeper_capabilities(player_input, view)
-        decision = await self._planner.generate(
-            HostAgentContext(
-                player_input=player_input,
-                player_view=view,
-                recent_history=await self._read_recent_history(
+        try:
+            decision = await self._planner.generate(
+                HostAgentContext(
                     player_input=player_input,
                     player_view=view,
-                ),
-                # A single action is adjudicated right here in the planner call,
-                # so it needs the same Keeper vocabulary a plan step gets.
-                keeper_capabilities=keeper_capabilities,
+                    recent_history=await self._read_recent_history(
+                        player_input=player_input,
+                        player_view=view,
+                    ),
+                    # A single action is adjudicated right here in the planner call,
+                    # so it needs the same Keeper vocabulary a plan step gets.
+                    keeper_capabilities=keeper_capabilities,
+                )
             )
-        )
+        except TurnExecutionError as exc:
+            if exc.code != "MODEL_OUTPUT_UNREADABLE":
+                raise
+            # 两次结构输出都失败时，动作尚未进入规则引擎，也没有任何权威写入。
+            # 用确定性主持人澄清结束回合，不能把内部契约错误直接抛给玩家。
+            logger.warning(
+                "host_turn_planning_fallback",
+                room=room_id.split("-", 1)[0][:8],
+                action=client_action_id,
+                code=exc.code,
+            )
+            await _emit_phase(on_phase, "generating_narration")
+            return self._planning_failure_clarification(
+                player_input=player_input,
+                player_view=view,
+            )
         decision = _normalize_single_travel_decision(
             decision,
             player_input=player_input,
@@ -667,6 +684,24 @@ class ActionPlanTurnApplication:
             player_input,
             decision.adjudication.summary,
             result,
+        )
+
+    @staticmethod
+    def _planning_failure_clarification(
+        *,
+        player_input: PlayerInput,
+        player_view: PlayerView,
+    ) -> ActionPlanTurnResult:
+        """规划模型连续返回坏结构时，生成零提交的玩家可见主持人回复。"""
+
+        return ActionPlanTurnResult(
+            player_input=player_input,
+            player_view=player_view,
+            status="needs_clarification",
+            narration=ActionPlanNarrationOutput(
+                kind="clarification",
+                text="我暂时没能准确理解这次行动。请再明确一下你想做什么，以及行动的对象或地点。",
+            ),
         )
 
     async def _finish_plan_with_phases(

@@ -8,6 +8,7 @@ import pytest
 from collaboration_framework.contracts import (
     ActionPlanPolicy,
     NarrationEvidence,
+    PlayerInput,
     PostRollDecisionRequest,
 )
 from collaboration_framework.host.application import (
@@ -206,6 +207,28 @@ def test_clarification_fallback_points_to_visible_dead_body() -> None:
 
     assert output.kind == "clarification"
     assert output.text.startswith("梅洛迪亚斯·杰弗逊的尸体就在当前场景中")
+
+
+def test_planning_failure_returns_host_reply_without_execution() -> None:
+    """规划结构连续失败时必须有主持人回复，并保持零权威写入。"""
+
+    player_input = PlayerInput(
+        room_id="room-315",
+        player_id="player-315",
+        actor_id="actor-315",
+        client_action_id="76664d06-3ac2-411b-8986-1ff12ed53cbf",
+        utterance="去墓地",
+    )
+    result = ActionPlanTurnApplication._planning_failure_clarification(
+        player_input=player_input,
+        player_view=cast(Any, SimpleNamespace()),
+    )
+
+    assert result.status == "needs_clarification"
+    assert result.execution is None
+    assert result.narration is not None
+    assert result.narration.kind == "clarification"
+    assert "行动的对象或地点" in result.narration.text
 
 
 @pytest.mark.asyncio

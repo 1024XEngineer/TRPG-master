@@ -131,11 +131,8 @@ class RecordingAdjudicator:
             summary=context.step.semantic_goal,
             target=ActionTarget(kind="world", id=self.world_ref),
             method=ActionMethod(
-                # 通用测试步骤只验证编排流程，不伪装成需要位置效果的 travel 裁决。
-                family="action",
-                description=context.step.semantic_goal,
+                family=context.step.kind, description=context.step.semantic_goal
             ),
-            persistence_intent="none",
             check=check,
             success_effects=(NarrativeOnlyEffect(),),
             failure_effects=(NarrativeOnlyEffect(),),
@@ -157,7 +154,6 @@ class CanonTravelAdjudicator(RecordingAdjudicator):
                 summary="前往墓地",
                 target=ActionTarget(kind="location", id="cemetery"),
                 method=ActionMethod(family="travel", description="沿道路前往墓地"),
-                persistence_intent="location",
                 check=NoAdjudicationCheck(),
                 success_effects=(EnterLocationEffect(location_id="cemetery"),),
             )
@@ -1639,7 +1635,6 @@ def single_travel_decision(*, target_id: str) -> SingleActionDecision:
             summary="前往墓地",
             target=ActionTarget(kind="location", id=target_id),
             method=ActionMethod(family="travel", description="前往墓地"),
-            persistence_intent="location",
             check=NoAdjudicationCheck(),
             success_effects=(EnterLocationEffect(location_id=target_id),),
         )
@@ -2034,11 +2029,9 @@ class SleepAfterTravelAdjudicator:
             summary=context.step.semantic_goal,
             target=ActionTarget(kind="location", id=context.player_view.scene.id),
             method=ActionMethod(
-                # 本测试只关注每步时钟快照，地点变化不由这个 Fake 模拟。
-                family="action",
+                family=context.step.kind,
                 description=context.step.semantic_goal,
             ),
-            persistence_intent="none",
             check=NoAdjudicationCheck(),
             success_effects=effects,
         )

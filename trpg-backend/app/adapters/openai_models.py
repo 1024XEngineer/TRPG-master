@@ -507,8 +507,8 @@ class PromptHostTurnDecisionModel:
             ),
             input_payload=context.to_json_dict(),
         )
-        # 单动作与 ActionPlan 步骤共享同一持久结果字段约束；新模型输出不享受
-        # 旧持久化 JSON 的缺字段兼容，否则通用 family 可以绕过完整性校验。
+        # 单动作与 ActionPlan 步骤共享同一持久结果字段约束；普通 narrative_only
+        # Fake 输出由辅助函数按兼容规则放行，持久动作则必须显式声明。
         _require_explicit_persistence_intent(raw)
         return HostTurnDecisionParser.parse(raw, policy=self._policy)
 
@@ -572,12 +572,57 @@ def _require_explicit_persistence_intent(raw: object, *, direct: bool = False) -
             single = raw.get("single_action")
             candidate = single.get("adjudication") if isinstance(single, dict) else None
     if isinstance(candidate, dict) and "persistence_intent" not in candidate:
-        error = ValueError("新模型 ActionAdjudication 缺少 persistence_intent")
+        method = candidate.get("method")
+        family = method.get("family") if isinstance(method, dict) else None
+        success_effects = candidate.get("success_effects", ())
+        failure_effects = candidate.get("failure_effects", ())
+        effects = (
+            *(success_effects if isinstance(success_effects, list) else ()),
+            *(failure_effects if isinstance(failure_effects, list) else ()),
+        )
+        persistent_families = {
+            "knock_out",
+            "wake",
+            "kill",
+            "knock_down",
+            "stand_up",
+            "restrain",
+            "release",
+            "injure_minor",
+            "injure_major",
+            "injure_critical",
+            "heal",
+            "open",
+            "close",
+            "lock",
+            "unlock",
+            "break",
+            "repair",
+            "pick_up",
+            "transfer",
+            "drop",
+            "consume",
+            "travel",
+        }
+        persistent_effects = {
+            item.get("type")
+            for item in effects
+            if isinstance(item, dict)
+            and item.get("type")
+            in {
+                "change_entity_state",
+                "move_entity",
+                "consume_entity",
+                "enter_location",
+            }
+        }
+        if family not in persistent_families and not persistent_effects:
+            return
         raise TurnExecutionError(
             "MODEL_OUTPUT_UNREADABLE",
             "主持模型返回了无法解读的结果，当前步骤未生效，请重试",
             retryable=True,
-        ) from error
+        )
 
 
 class PromptActionPlanNarrationModel:

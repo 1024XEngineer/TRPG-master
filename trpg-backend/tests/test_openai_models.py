@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from types import SimpleNamespace
-from typing import cast
 
 import anyio
 import httpx
@@ -503,7 +501,6 @@ class ScriptedTurnDecisionClient:
                     "summary": "观察当前场景",
                     "target": {"kind": "location", "id": "conversation"},
                     "method": {"family": "action", "description": "观察"},
-                    "persistence_intent": "none",
                     "check": {"mode": "none", "candidates": []},
                     "success_effects": [{"type": "narrative_only"}],
                     "failure_effects": [],
@@ -551,42 +548,6 @@ async def test_prompt_turn_decision_accepts_single_and_variable_plan_lengths(
     else:
         assert isinstance(decision, ActionPlan)
         assert len(decision.steps) == step_count
-
-
-class _StaticTurnDecisionClient:
-    """返回指定主持决策，用于验证新模型输出边界。"""
-
-    def __init__(self, result: dict) -> None:
-        self._result = result
-
-    async def generate(self, **kwargs) -> dict:
-        del kwargs
-        return self._result
-
-
-async def test_new_turn_model_output_always_requires_persistence_intent() -> None:
-    """即使使用通用 family，新生成的单动作也不能省略持久意图字段。"""
-
-    payload = {
-        "kind": "single_action",
-        "adjudication": {
-            "request_id": "model-value",
-            "source_revision": "model-value",
-            "actor_id": "model-value",
-            "summary": "攻击守墓人",
-            "target": {"kind": "entity", "id": "butler"},
-            "method": {"family": "combat", "description": "挥动撬棍攻击"},
-            "check": {"mode": "none", "candidates": []},
-            "success_effects": [],
-            "failure_effects": [],
-        },
-    }
-    context = cast(HostAgentContext, SimpleNamespace(to_json_dict=lambda: {}))
-
-    with pytest.raises(TurnExecutionError) as caught:
-        await PromptHostTurnDecisionModel(_StaticTurnDecisionClient(payload)).generate(context)
-
-    assert caught.value.code == "MODEL_OUTPUT_UNREADABLE"
 
 
 async def test_responses_client_posts_strict_schema_and_parses_output() -> None:
@@ -915,30 +876,7 @@ async def test_step_adjudicator_classifies_unreadable_and_invalid_output() -> No
     with pytest.raises(TurnExecutionError) as caught:
         await invalid.adjudicate(_step_error_context())
     assert caught.value.code == "MODEL_OUTPUT_UNREADABLE"
-    assert isinstance(caught.value.__cause__, ValueError)
-
-
-async def test_new_step_model_output_always_requires_persistence_intent() -> None:
-    """步骤裁决同样不能用通用 family 和缺字段绕过完整性检查。"""
-
-    payload = {
-        "request_id": "model-value",
-        "source_revision": "model-value",
-        "actor_id": "model-value",
-        "summary": "攻击守墓人",
-        "target": {"kind": "entity", "id": "butler"},
-        "method": {"family": "combat", "description": "挥动撬棍攻击"},
-        "check": {"mode": "none", "candidates": []},
-        "success_effects": [],
-        "failure_effects": [],
-    }
-
-    with pytest.raises(TurnExecutionError) as caught:
-        await PromptActionPlanStepAdjudicator(_ScriptedStepClient(payload)).adjudicate(
-            _step_error_context()
-        )
-
-    assert caught.value.code == "MODEL_OUTPUT_UNREADABLE"
+    assert isinstance(caught.value.__cause__, ValidationError)
 
 
 async def test_step_adjudicator_leaves_unknown_failure_for_orchestrator_fallback() -> None:

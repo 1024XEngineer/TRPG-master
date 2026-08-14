@@ -61,6 +61,18 @@ class DeepSeekChatCompletionsJsonClient(StructuredJsonClient):
                 },
             ],
             "response_format": {"type": "json_object"},
+            # DeepSeek 的 `thinking` 默认是 enabled（`reasoning_effort` 默认
+            # high），不显式关掉，每次结构化输出前都会先产出一段推理内容——而
+            # 这个 client 只要一个符合 schema 的 JSON 对象，推理过程既不读也不
+            # 存，纯属白烧 token 和延迟。
+            #
+            # 实测（issue #330）同一个 trivial 请求，preview 用的 qnaigc 端点上
+            # `deepseek/deepseek-v4-flash`：不发这个参数 151 个 completion
+            # tokens（其中 145 是推理），发了之后 5 个。官方端点同样生效。
+            #
+            # 同目录的 Qwen client 早就用 `enable_thinking: False` 做了同一件事，
+            # 只是字段名不同。
+            "thinking": {"type": "disabled"},
         }
         async with httpx.AsyncClient(
             headers={

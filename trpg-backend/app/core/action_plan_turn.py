@@ -340,8 +340,15 @@ def _ambient_venue_adjudication(
     goal = context.step.semantic_goal
     if not any(word in goal for word in _AMBIENT_VENUE_INTENT_WORDS):
         return None
+    # semantic_goal 是模型对原话的改写，不能把模型自行补出的“住处”等地点
+    # 当成玩家授权创建新地点；地点类别必须在玩家原话中也明确出现。
+    utterance = context.player_input.utterance
     matched = next(
-        ((label, id_stem, name) for label, id_stem, name in _AMBIENT_VENUE_LABELS if label in goal),
+        (
+            (label, id_stem, name)
+            for label, id_stem, name in _AMBIENT_VENUE_LABELS
+            if label in goal and label in utterance
+        ),
         None,
     )
     if matched is None:

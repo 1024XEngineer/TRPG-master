@@ -268,6 +268,42 @@ class PersistentNarrationPolicyTests(unittest.IsolatedAsyncioTestCase):
                     _PersistentNarrationModel(text)
                 ).narrate(self._context())
 
+    async def test_rejects_non_visible_npc_claimed_at_current_scene(self):
+        """最近历史提到过 NPC，也不能把当前不可见实体写成正在现场。"""
+        with self.assertRaises(ActionPlanNarrationValidationError):
+            await ActionPlanNarrator(
+                _PersistentNarrationModel(
+                    "梅洛迪亚斯·杰弗逊正站在门口附近，目光一直盯着你。"
+                )
+            ).narrate(self._context())
+
+    async def test_rejects_dead_visible_npc_active_presence(self):
+        """即使尸体仍然可见，死亡实体也不能被描述为站立或主动移动。"""
+        entity = SimpleNamespace(
+            id="butler",
+            name="守墓人",
+            aliases=("梅洛迪亚斯·杰弗逊",),
+            observable_state=(SimpleNamespace(key="consciousness", value="dead"),),
+        )
+        context = self._context()
+        context.player_view.scene.visible_entities = (entity,)
+        with self.assertRaises(ActionPlanNarrationValidationError):
+            await ActionPlanNarrator(
+                _PersistentNarrationModel("守墓人仍站在墓碑旁。")
+            ).narrate(context)
+
+    async def test_allows_player_presence_without_visible_npc(self):
+        """校验只限制 NPC 在场断言，不阻止主持人描述玩家自己的位置。"""
+        output = await ActionPlanNarrator(
+            _PersistentNarrationModel("你站在寄宿屋的房间里。")
+        ).narrate(self._context())
+        self.assertEqual(output.text, "你站在寄宿屋的房间里。")
+
+        plural_output = await ActionPlanNarrator(
+            _PersistentNarrationModel("你们正坐在旅店的桌边。")
+        ).narrate(self._context())
+        self.assertEqual(plural_output.text, "你们正坐在旅店的桌边。")
+
 
 if __name__ == "__main__":
     unittest.main()

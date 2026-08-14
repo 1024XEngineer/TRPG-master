@@ -12,7 +12,6 @@ from collaboration_framework.contracts import (
 )
 from collaboration_framework.host.application import (
     ActionPlanNarrationValidationError,
-    TurnExecutionError,
 )
 from collaboration_framework.host.schemas import ActionPlanNarrationContext
 
@@ -180,10 +179,11 @@ async def test_required_evidence_fallback_never_changes_clarification_scope() ->
         _NarrationContextStub(evidence, "needs_clarification"),
     )
 
-    with pytest.raises(TurnExecutionError) as raised:
-        await application._narrate(context)
+    narration = await application._narrate(context)
 
-    assert raised.value.code == "PLAN_NARRATION_INVALID"
+    assert narration.kind == "clarification"
+    assert evidence.subject_name not in narration.text
+    assert narration.claimed_evidence_refs == ()
     assert narrate.await_count == 2
 
 

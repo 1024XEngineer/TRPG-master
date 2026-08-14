@@ -28,6 +28,8 @@ _QUOTED_TEXT = re.compile(r"[“\"『「][^”\"』」]*[”\"』」]")
 _NON_ASSERTIVE_PREFIX = re.compile(
     r"(?:未|没有|并未|尚未|不会|不能|无法|如果|假如|倘若|是否|能否|想要|试图|准备|打算)$"
 )
+_ACTIVE_PRESENCE = re.compile(r"(?:正|仍|还)?(?:站在|站着|坐在|走来|走向|朝你走来)")
+_PLAYER_PRESENCE = re.compile(r"你(?:们)?(?:正|仍|还)?(?:站在|站着|坐在|走来|走向)")
 
 
 def unsupported_persistent_claim(
@@ -43,6 +45,35 @@ def unsupported_persistent_claim(
 
     asserted_text = _QUOTED_TEXT.sub("", text)
     entities = () if player_view is None else player_view.scene.visible_entities
+    for sentence in re.split(r"[。！？]", asserted_text):
+        if not _ACTIVE_PRESENCE.search(sentence) or _PLAYER_PRESENCE.search(sentence):
+            continue
+        mentioned = tuple(
+            entity
+            for entity in entities
+            if any(
+                label and label in sentence
+                for label in (
+                    getattr(entity, "name", ""),
+                    *getattr(entity, "aliases", ()),
+                )
+            )
+        )
+        # 明确的 NPC 在场行为必须绑定当前可见实体；最近对话提到过某人，
+        # 不等于该实体现在就在当前场景。
+        if not mentioned:
+            return "entity_presence"
+        for entity in mentioned:
+            consciousness = next(
+                (
+                    state.value
+                    for state in entity.observable_state
+                    if state.key == "consciousness"
+                ),
+                None,
+            )
+            if consciousness in {"dead", "unconscious"}:
+                return "entity_presence"
     for pattern, key, value in _PERSISTENT_CLAIMS:
         for match in re.finditer(pattern, asserted_text):
             prefix = asserted_text[max(0, match.start() - 8) : match.start()]

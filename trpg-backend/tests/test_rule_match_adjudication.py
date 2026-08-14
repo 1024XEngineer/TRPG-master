@@ -298,6 +298,41 @@ async def test_unknown_ordinary_travel_is_resolved_without_a_model_round_trip() 
     assert entered.location_id == created.location_id
 
 
+async def test_planner_cannot_invent_ambient_venue_for_npc_search() -> None:
+    """“找 NPC”不能因模型擅自补写“住处”而创建无关的动态地点。"""
+
+    class RecordingFallback:
+        calls = 0
+
+        async def adjudicate(self, context):
+            self.calls += 1
+            return ActionAdjudication(
+                request_id=context.step_request_id,
+                source_revision=context.player_view.revision,
+                actor_id=context.player_input.actor_id,
+                summary=context.step.semantic_goal,
+                target=ActionTarget(kind="location", id=context.player_view.scene.id),
+                method=ActionMethod(family="travel", description=context.step.semantic_goal),
+                check=NoAdjudicationCheck(),
+                success_effects=(NarrativeOnlyEffect(),),
+            )
+
+    fallback = RecordingFallback()
+    adjudication = await _RuleFirstStepAdjudicator(fallback).adjudicate(
+        await _cemetery_context(
+            "去找守墓人",
+            step_kind="travel",
+            semantic_goal="前往守墓人的住处寻找守墓人",
+        )
+    )
+
+    assert fallback.calls == 1
+    assert all(
+        not isinstance(effect, EnsureRuntimeLocationEffect)
+        for effect in adjudication.success_effects
+    )
+
+
 async def test_ambient_venue_never_shadows_an_authored_location() -> None:
     """重名的去处必须留给模组自己揭示。
 

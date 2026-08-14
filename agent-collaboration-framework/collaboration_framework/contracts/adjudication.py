@@ -406,7 +406,9 @@ class CheckRunView(ContractModel):
     roll: CheckRoll
     post_roll_options: tuple[PostRollOption, ...] = ()
     final_result: CheckRoll | None = None
-    resolution_kind: Literal["initial_roll", "accept_result", "spend_luck", "push"] = "initial_roll"
+    resolution_kind: Literal["initial_roll", "accept_result", "spend_luck", "push"] = (
+        "initial_roll"
+    )
     luck_spent: int | None = Field(default=None, ge=1)
 
 

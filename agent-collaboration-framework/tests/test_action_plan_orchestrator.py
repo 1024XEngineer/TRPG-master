@@ -343,7 +343,9 @@ class VisibleTargetRepairAdjudicator(RecordingAdjudicator):
                 actor_id="untrusted",
                 summary=context.step.semantic_goal,
                 target=ActionTarget(kind="entity", id="bookshelf"),
-                method=ActionMethod(family="observe", description=context.step.semantic_goal),
+                method=ActionMethod(
+                    family="observe", description=context.step.semantic_goal
+                ),
                 check=NoAdjudicationCheck(),
                 success_effects=(NarrativeOnlyEffect(),),
             )
@@ -1788,7 +1790,9 @@ async def test_single_action_auto_repair_succeeds_without_creating_plan_run() ->
 
 
 @pytest.mark.asyncio
-async def test_single_travel_repair_with_changed_effect_requires_clarification() -> None:
+async def test_single_travel_repair_with_changed_effect_requires_clarification() -> (
+    None
+):
     module, engine_store, projector = runtime()
     plan_store = InMemoryActionPlanRunStore()
     engine = AdjudicationEngineService(engine_store)
@@ -2251,14 +2255,16 @@ async def test_narrator_rejects_missing_required_evidence() -> None:
     )
 
     with pytest.raises(ActionPlanNarrationValidationError) as raised:
-        await ActionPlanNarrator(MissingRequiredEvidenceNarrationModel()).narrate(context)
+        await ActionPlanNarrator(MissingRequiredEvidenceNarrationModel()).narrate(
+            context
+        )
 
     assert raised.value.reason == "required_evidence_missing"
 
     with pytest.raises(ActionPlanNarrationValidationError) as claimed_but_omitted:
-        await ActionPlanNarrator(ClaimsButOmitsRequiredEvidenceNarrationModel()).narrate(
-            context
-        )
+        await ActionPlanNarrator(
+            ClaimsButOmitsRequiredEvidenceNarrationModel()
+        ).narrate(context)
 
     assert claimed_but_omitted.value.reason == "required_evidence_missing"
 

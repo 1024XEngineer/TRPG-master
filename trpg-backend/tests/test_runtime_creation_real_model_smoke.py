@@ -95,9 +95,7 @@ async def test_real_model_respects_runtime_creation_boundary(
     settings = Settings()
     assert settings.host_model_provider != "fake"
     adjudicator = PromptActionPlanStepAdjudicator(_structured_client(settings))
-    result = await adjudicator.adjudicate(
-        await _cemetery_context(utterance, scene_id=scene_id)
-    )
+    result = await adjudicator.adjudicate(await _cemetery_context(utterance, scene_id=scene_id))
     effects = [effect.type for effect in result.success_effects]
     print(
         json.dumps(

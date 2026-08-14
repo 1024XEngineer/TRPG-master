@@ -245,12 +245,13 @@ class ActionAdjudication(ContractModel):
     @model_validator(mode="after")
     def validate_candidates(self, info: ValidationInfo) -> ActionAdjudication:
         # 私有标记随 model_copy 保留，但不会进入持久化 JSON 或公开 Schema。
+        trusted_persistence_restore = (
+            info.context is not None
+            and info.context.get("allow_persistence_intent_explicit_marker") is True
+        )
         marker = self.persistence_intent_explicit_marker
         if marker is not None:
-            if not (
-                info.context is not None
-                and info.context.get("allow_persistence_intent_explicit_marker") is True
-            ):
+            if not trusted_persistence_restore:
                 raise ValueError("persistence_intent_explicit_marker 仅供内部恢复使用")
             object.__setattr__(self, "_persistence_intent_marker_restored", True)
             object.__setattr__(self, "persistence_intent_explicit_marker", None)
@@ -259,6 +260,10 @@ class ActionAdjudication(ContractModel):
             if marker is not None
             else self._persistence_intent_explicit
             if self._persistence_intent_marker_restored
+            # 新 writer 总会写 marker；可信存储里缺失 marker 的只能是 legacy
+            # model_dump 记录，其默认 none 不代表模型曾显式声明该字段。
+            else False
+            if trusted_persistence_restore
             else "persistence_intent" in self.model_fields_set
         )
         object.__setattr__(

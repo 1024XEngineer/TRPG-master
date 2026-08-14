@@ -864,6 +864,20 @@ class AdjudicationEngineTests(unittest.IsolatedAsyncioTestCase):
                 )
                 self.assertEqual(restored.persistence_intent_explicit, expected)
 
+        # 旧 store 使用普通 model_dump：默认 none 会写进 JSON，但没有 marker。
+        # 可信持久化恢复必须把它当作 legacy omitted；相同 JSON 作为公开输入时，
+        # 字段确实存在，仍然必须按显式 none 处理。
+        legacy_payload = omitted.model_dump(mode="json")
+        self.assertEqual(legacy_payload["persistence_intent"], "none")
+        self.assertNotIn("persistence_intent_explicit_marker", legacy_payload)
+        legacy_restored = ActionAdjudication.model_validate(
+            legacy_payload,
+            context={"allow_persistence_intent_explicit_marker": True},
+        )
+        public_restored = ActionAdjudication.model_validate(legacy_payload)
+        self.assertFalse(legacy_restored.persistence_intent_explicit)
+        self.assertTrue(public_restored.persistence_intent_explicit)
+
         self.assertNotIn(
             "persistence_intent_explicit_marker",
             explicit.to_json_dict(),

@@ -1091,15 +1091,24 @@ export interface PortraitGenerationRequest {
   size?: "1024x1024";
 }
 
-export interface PortraitGenerationResult {
+/**
+ * 可安全返回给玩家的生图任务快照。
+ */
+export interface PortraitGenerationTaskRead {
   generationId: string;
-  status?: "completed";
-  imageUrl: string;
-  portraitVersion: string;
-  prompt: string;
-  negativePrompt: string;
-  promptSummary: string;
-  promptSource: "deepseek" | "deterministic" | "deterministic_fallback";
+  status: "queued" | "generating" | "cancelling" | "completed" | "failed" | "cancelled";
+  cancelRequested: boolean;
+  failureCode?:
+    ("content_rejected" | "timeout" | "provider_failed" | "materialization_failed" | "process_restarted") | null;
+  portraitVersion?: string | null;
+  promptSummary?: string | null;
+  promptSource?: ("deepseek" | "deterministic" | "deterministic_fallback") | null;
+  style: "realistic";
+  size: "1024x1024";
+  createdAt: string;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  updatedAt: string;
 }
 
 export interface PositionContextView {

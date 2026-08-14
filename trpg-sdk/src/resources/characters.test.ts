@@ -20,11 +20,12 @@ test('generatePortrait 调用角色生图接口并携带房间凭证', async () 
         success: true,
         data: {
           generationId: 'generation-1',
-          status: 'completed',
-          imageUrl: 'https://images.example/portrait.png',
-          portraitVersion: 'portrait-version-1',
-          prompt: 'portrait prompt',
-          negativePrompt: 'watermark',
+          status: 'queued',
+          cancelRequested: false,
+          style: 'realistic',
+          size: '1024x1024',
+          createdAt: '2026-01-01T00:00:00Z',
+          updatedAt: '2026-01-01T00:00:00Z',
           promptSummary: '根据职业与背景生成',
           promptSource: 'deepseek'
         },
@@ -54,6 +55,23 @@ test('generatePortrait 调用角色生图接口并携带房间凭证', async () 
     size: '1024x1024'
   });
   assert.equal(result.promptSource, 'deepseek');
+});
+
+test('任务查询与取消方法使用正确路径和凭证', async () => {
+  const calls: Array<{ url: string; method?: string; token: string | null }> = [];
+  const fakeFetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    calls.push({ url: String(input), method: init?.method, token: new Headers(init?.headers).get('x-reconnect-token') });
+    return new Response(JSON.stringify({ success: true, data: null, error: null }));
+  }) as typeof fetch;
+  const characters = new CharactersResource(new ApiClient({ baseUrl: 'http://test/api/v1', fetch: fakeFetch }));
+  await characters.getCurrentPortraitGeneration('room-1', 'character-1', 'token-1');
+  await characters.getPortraitGeneration('room-1', 'character-1', 'generation-1', 'token-1');
+  await characters.cancelPortraitGeneration('room-1', 'character-1', 'generation-1', 'token-1');
+  assert.deepEqual(calls.map(({ url, method, token }) => [url.replace('http://test/api/v1', ''), method, token]), [
+    ['/rooms/room-1/characters/character-1/portrait-generations/current', 'GET', 'token-1'],
+    ['/rooms/room-1/characters/character-1/portrait-generations/generation-1', 'GET', 'token-1'],
+    ['/rooms/room-1/characters/character-1/portrait-generations/generation-1/cancel', 'POST', 'token-1'],
+  ]);
 });
 
 test('getPlayerPortrait 编码路径和版本并返回鉴权 Blob', async () => {

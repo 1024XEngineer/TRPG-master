@@ -3,7 +3,7 @@ import type {
   Character,
   CharacterDraftResult,
   GeneratePortraitInput,
-  PortraitGenerationResult,
+  PortraitGenerationTaskRead,
   QuickGenerateInput,
   QuickGenerateResult,
   RollAttributesResult,
@@ -82,15 +82,64 @@ export class CharactersResource {
 
   /** POST /api/v1/rooms/{roomId}/characters/{characterId}/portrait-generations —
    * 玩家主动为已完成的本人角色生成图片。 */
+  createPortraitGeneration(
+    roomId: string,
+    characterId: string,
+    payload: GeneratePortraitInput,
+    reconnectToken: string
+  ): Promise<PortraitGenerationTaskRead> {
+    return this.client.post<PortraitGenerationTaskRead>(
+      `/rooms/${roomId}/characters/${characterId}/portrait-generations`,
+      payload,
+      this.authenticated(reconnectToken)
+    );
+  }
+
+  /** 兼容旧资源命名；现在创建的是后台任务而非同步图片结果。 */
   generatePortrait(
     roomId: string,
     characterId: string,
     payload: GeneratePortraitInput,
     reconnectToken: string
-  ): Promise<PortraitGenerationResult> {
-    return this.client.post<PortraitGenerationResult>(
-      `/rooms/${roomId}/characters/${characterId}/portrait-generations`,
-      payload,
+  ): Promise<PortraitGenerationTaskRead> {
+    return this.createPortraitGeneration(roomId, characterId, payload, reconnectToken);
+  }
+
+  /** GET current — 读取活动任务；没有活动任务时返回最近终态。 */
+  getCurrentPortraitGeneration(
+    roomId: string,
+    characterId: string,
+    reconnectToken: string
+  ): Promise<PortraitGenerationTaskRead | null> {
+    return this.client.get<PortraitGenerationTaskRead | null>(
+      `/rooms/${roomId}/characters/${characterId}/portrait-generations/current`,
+      this.authenticated(reconnectToken)
+    );
+  }
+
+  /** GET generation — 读取指定任务的权威快照。 */
+  getPortraitGeneration(
+    roomId: string,
+    characterId: string,
+    generationId: string,
+    reconnectToken: string
+  ): Promise<PortraitGenerationTaskRead> {
+    return this.client.get<PortraitGenerationTaskRead>(
+      `/rooms/${roomId}/characters/${characterId}/portrait-generations/${generationId}`,
+      this.authenticated(reconnectToken)
+    );
+  }
+
+  /** POST cancel — 幂等终止任务并返回服务端权威状态。 */
+  cancelPortraitGeneration(
+    roomId: string,
+    characterId: string,
+    generationId: string,
+    reconnectToken: string
+  ): Promise<PortraitGenerationTaskRead> {
+    return this.client.post<PortraitGenerationTaskRead>(
+      `/rooms/${roomId}/characters/${characterId}/portrait-generations/${generationId}/cancel`,
+      null,
       this.authenticated(reconnectToken)
     );
   }

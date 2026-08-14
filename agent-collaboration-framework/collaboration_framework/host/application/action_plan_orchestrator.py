@@ -13,10 +13,10 @@ from uuid import uuid4
 from collaboration_framework.contracts import (
     ActionAdjudication,
     ActionPlan,
+    ActionPlanStep,
     ActionPlanPolicy,
     ActionPlanPolicyError,
     ActionPlanProgressEvent,
-    ActionPlanStep,
     AdjudicationExecution,
     AdjudicationValidationError,
     CancelActionPlanRequest,
@@ -48,6 +48,7 @@ from collaboration_framework.host.schemas import (
     ActionPlanStepContext,
     ActionPlanStepRun,
     CompletedPlanStepSummary,
+    SingleActionClarificationResult,
     SingleActionTurnResult,
 )
 
@@ -261,7 +262,9 @@ class ActionPlanOrchestrator:
                     run = await self._release_lease(run)
                     return ActionPlanAdvanceResult(
                         run=run,
-                        player_view=await self._player_view_projector.project(player_input),
+                        player_view=await self._player_view_projector.project(
+                            player_input
+                        ),
                     )
                 step_run = run.steps[step_index]
 
@@ -296,11 +299,13 @@ class ActionPlanOrchestrator:
                             action_request_id=step_run.step_request_id,
                         )
                     )
-                    if status.status != "not_submitted" and status.execution is not None:
+                    if (
+                        status.status != "not_submitted"
+                        and status.execution is not None
+                    ):
                         latest = status.execution
                         rejection = None
                         break
-
                     if not isinstance(exc, AdjudicationValidationError):
                         break
 
@@ -319,7 +324,10 @@ class ActionPlanOrchestrator:
                             plan_status="stopped",
                         )
                         break
-                    if step_run.repair_attempts >= run.policy_snapshot.max_repair_attempts:
+                    if (
+                        step_run.repair_attempts
+                        >= run.policy_snapshot.max_repair_attempts
+                    ):
                         run = await self._stop_for_validation(
                             run,
                             feedback,
@@ -334,7 +342,9 @@ class ActionPlanOrchestrator:
                         run = await self._release_lease(run)
                         return ActionPlanAdvanceResult(
                             run=run,
-                            player_view=await self._player_view_projector.project(player_input),
+                            player_view=await self._player_view_projector.project(
+                                player_input
+                            ),
                         )
                     step_run = run.steps[step_index]
 
@@ -352,7 +362,9 @@ class ActionPlanOrchestrator:
                     )
                     return ActionPlanAdvanceResult(
                         run=run,
-                        player_view=await self._player_view_projector.project(player_input),
+                        player_view=await self._player_view_projector.project(
+                            player_input
+                        ),
                     )
                 current_view = await self._player_view_projector.project(player_input)
                 if (
@@ -582,7 +594,9 @@ class ActionPlanOrchestrator:
                 "PLAN_CANCEL_IN_PROGRESS",
                 "当前行动计划已有一个取消请求正在处理",
             )
-        if run.status != "waiting_for_player" or run.current_step_index >= len(run.steps):
+        if run.status != "waiting_for_player" or run.current_step_index >= len(
+            run.steps
+        ):
             raise ActionPlanPolicyError(
                 "PLAN_CANCEL_NOT_AT_BOUNDARY",
                 "当前步骤已经开始；请先完成或取消当前检定，再取消剩余计划",
@@ -663,6 +677,37 @@ class ActionPlanOrchestrator:
     ) -> ActionPlanRun | None:
         return await self._store.load(room_id, parent_action_id)
 
+    async def adjudicate_single_repair(
+        self,
+        player_input: PlayerInput,
+        *,
+        semantic_goal: str,
+        previous_rejection: str,
+    ) -> ActionAdjudication:
+        """复用步骤裁决器修复单动作，始终基于拒绝后的最新 PlayerView。"""
+
+        view = await self._player_view_projector.project(player_input)
+        context = ActionPlanStepContext(
+            player_input=player_input,
+            plan_id=f"single-{player_input.client_action_id}",
+            plan_goal=semantic_goal,
+            step_index=0,
+            step_request_id=player_input.client_action_id,
+            step=ActionPlanStep(kind="action", semantic_goal=semantic_goal),
+            player_view=view,
+            previous_rejection=previous_rejection,
+            keeper_capabilities=await self._keeper_capabilities(player_input, view),
+        )
+        proposal = await self._adjudicator.adjudicate(context)
+        return proposal.model_copy(
+            update={
+                "request_id": player_input.client_action_id,
+                "source_revision": view.revision,
+                "actor_id": player_input.actor_id,
+            },
+            deep=True,
+        )
+
     async def build_narration_context(
         self,
         player_input: PlayerInput,
@@ -683,7 +728,9 @@ class ActionPlanOrchestrator:
             or run.actor_id != player_input.actor_id
             or run.parent_action_id != player_input.client_action_id
         ):
-            raise ActionPlanPolicyError("PARENT_ACTION_CONFLICT", "行动计划 owner 不一致")
+            raise ActionPlanPolicyError(
+                "PARENT_ACTION_CONFLICT", "行动计划 owner 不一致"
+            )
         termination_by_status: dict[
             str,
             Literal["resolved", "needs_clarification", "cancelled", "stopped"],
@@ -835,7 +882,9 @@ class ActionPlanOrchestrator:
             )
             return await self._mark_step_failure(
                 run,
-                plan_status="retryable_failure" if exc.retryable else "needs_clarification",
+                plan_status="retryable_failure"
+                if exc.retryable
+                else "needs_clarification",
                 step_status="pending" if exc.retryable else "stopped",
                 code=exc.code,
             )
@@ -1068,8 +1117,13 @@ class ActionPlanOrchestrator:
                 tuple(steps),
                 status="waiting_for_player",
             )
-        if execution.status == "cancelled" or execution.outcome in {"failure", "cancelled"}:
-            code = "STEP_CANCELLED" if execution.status == "cancelled" else "STEP_FAILED"
+        if execution.status == "cancelled" or execution.outcome in {
+            "failure",
+            "cancelled",
+        }:
+            code = (
+                "STEP_CANCELLED" if execution.status == "cancelled" else "STEP_FAILED"
+            )
             steps[index] = current.model_copy(
                 update={**common, "status": "stopped", "safe_failure_code": code},
                 deep=True,
@@ -1167,7 +1221,9 @@ class ActionPlanOrchestrator:
             "steps": steps,
             "status": next_status,
             "current_step_index": (
-                run.current_step_index if current_step_index is None else current_step_index
+                run.current_step_index
+                if current_step_index is None
+                else current_step_index
             ),
             "run_version": run.run_version + 1,
             "lease_owner": None if release_lease else run.lease_owner,
@@ -1253,7 +1309,9 @@ class ActionPlanOrchestrator:
             )
 
     @staticmethod
-    def _completed_summaries(run: ActionPlanRun) -> tuple[CompletedPlanStepSummary, ...]:
+    def _completed_summaries(
+        run: ActionPlanRun,
+    ) -> tuple[CompletedPlanStepSummary, ...]:
         summaries: list[CompletedPlanStepSummary] = []
         for index, step in enumerate(run.steps[: run.current_step_index]):
             execution = step.adjudication_execution
@@ -1270,6 +1328,7 @@ class ActionPlanOrchestrator:
                     world_time_after=step.world_time_after,
                     event_refs=execution.public_event_refs,
                     narration_evidence=execution.narration_evidence,
+                    committed_results=execution.committed_results,
                 )
             )
         return tuple(summaries)
@@ -1294,6 +1353,7 @@ class ActionPlanOrchestrator:
                         world_time_after=step.world_time_after,
                         event_refs=execution.public_event_refs,
                         narration_evidence=execution.narration_evidence,
+                        committed_results=execution.committed_results,
                     )
                 )
         return tuple(summaries)
@@ -1386,7 +1446,11 @@ class HostTurnDecisionExecutor:
         decision: HostTurnDecision,
         *,
         on_progress: ActionPlanProgressObserver | None = None,
-    ) -> SingleActionTurnResult | ActionPlanAdvanceResult:
+    ) -> (
+        SingleActionTurnResult
+        | SingleActionClarificationResult
+        | ActionPlanAdvanceResult
+    ):
         if isinstance(decision, ActionPlan):
             return await self._plan_orchestrator.start_or_resume(
                 player_input,
@@ -1437,15 +1501,33 @@ class HostTurnDecisionExecutor:
                     "auto_repairable",
                     "retry_with_latest_revision",
                 }:
-                    raise
+                    # 单动作尚未产生权威写入时，以玩家安全理由进入主持人澄清，
+                    # 不把规则/Agent 内部校验错误直接暴露给玩家。
+                    return SingleActionClarificationResult(
+                        player_view=view,
+                        player_safe_reason=feedback.player_safe_reason,
+                        opening_world_time=WorldClockView.from_world(
+                            opening_view.world
+                        ),
+                    )
                 if self._repair_adjudicator is None:
-                    raise
+                    return SingleActionClarificationResult(
+                        player_view=view,
+                        player_safe_reason=feedback.player_safe_reason,
+                        opening_world_time=WorldClockView.from_world(
+                            opening_view.world
+                        ),
+                    )
                 if repair_attempts >= self._policy.max_repair_attempts:
-                    raise TurnExecutionError(
-                        "REPAIR_BUDGET_EXHAUSTED",
-                        "本次行动仍无法安全执行，需要玩家确认下一步",
-                        retryable=False,
-                    ) from exc
+                    return SingleActionClarificationResult(
+                        player_view=view,
+                        player_safe_reason=(
+                            "本次行动仍无法安全执行，请确认具体目标或换一种做法"
+                        ),
+                        opening_world_time=WorldClockView.from_world(
+                            opening_view.world
+                        ),
+                    )
                 repair_attempts += 1
                 view = await self._player_view_projector.project(player_input)
                 context = ActionPlanStepContext(
@@ -1483,11 +1565,15 @@ class HostTurnDecisionExecutor:
                     player_view=view,
                 )
                 if preservation.status == "requires_clarification":
-                    raise TurnExecutionError(
-                        "SEMANTIC_REPAIR_REQUIRES_CLARIFICATION",
-                        preservation.safe_reason,
-                        retryable=False,
-                    ) from exc
+                    # 语义保护器拒绝的是自动替玩家换动作，不是玩家输入本身。
+                    # 此时尚未掷骰或提交效果，应交给主持人自然澄清，不能抛协议错误终止回合。
+                    return SingleActionClarificationResult(
+                        player_view=view,
+                        player_safe_reason=preservation.safe_reason,
+                        opening_world_time=WorldClockView.from_world(
+                            opening_view.world
+                        ),
+                    )
                 adjudication = repaired
         return SingleActionTurnResult(
             execution=execution,

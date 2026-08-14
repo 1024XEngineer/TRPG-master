@@ -12,6 +12,13 @@ from .capabilities import (
 from .dice import DiceRoller, SequenceDiceSource, SystemDiceSource
 from .initialization import create_initial_game_state
 from .navigation import effective_location_knowledge, resolve_location_target
+from .persistent_results import (
+    CHARACTER_STATE_VALUES,
+    OBJECT_STATE_VALUES,
+    PUBLIC_STATE_KEYS,
+    committed_results_from_events,
+    validate_persistent_effects,
+)
 from .models import (
     AgendaItem,
     AgendaSource,
@@ -67,4 +74,9 @@ __all__ = [
     "effective_location_knowledge",
     "require_runtime_capabilities",
     "resolve_location_target",
+    "CHARACTER_STATE_VALUES",
+    "OBJECT_STATE_VALUES",
+    "PUBLIC_STATE_KEYS",
+    "committed_results_from_events",
+    "validate_persistent_effects",
 ]

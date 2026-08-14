@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
+from typing import cast
 
 import anyio
 import httpx
@@ -516,6 +518,20 @@ class ScriptedTurnDecisionClient:
         }
 
 
+class SequencedTurnDecisionClient:
+    """依次返回预设规划结果，用于验证坏结构只重试一次。"""
+
+    def __init__(self, results: list[dict]) -> None:
+        self.results = results
+        self.calls = 0
+
+    async def generate(self, **kwargs) -> dict:
+        del kwargs
+        result = self.results[self.calls]
+        self.calls += 1
+        return result
+
+
 @pytest.mark.parametrize("step_count", [1, 2, 3, 4, 5])
 async def test_prompt_turn_decision_accepts_single_and_variable_plan_lengths(
     step_count: int,
@@ -548,6 +564,52 @@ async def test_prompt_turn_decision_accepts_single_and_variable_plan_lengths(
     else:
         assert isinstance(decision, ActionPlan)
         assert len(decision.steps) == step_count
+
+
+def _valid_travel_decision() -> dict:
+    """构造一个符合 HostTurnDecision 契约的旅行结果。"""
+
+    return {
+        "kind": "single_action",
+        "adjudication": {
+            "request_id": "model-value",
+            "source_revision": "revision-1",
+            "actor_id": "actor-1",
+            "summary": "去墓地",
+            "target": {"kind": "location", "id": "cemetery"},
+            "method": {"family": "travel", "description": "去墓地"},
+            "persistence_intent": "location",
+            "check": {"mode": "none", "candidates": []},
+            "success_effects": [{"type": "enter_location", "location_id": "cemetery"}],
+            "failure_effects": [],
+        },
+    }
+
+
+async def test_turn_planner_retries_schema_failure_once_then_succeeds() -> None:
+    """首次结构损坏不应直接终止回合，第二份合法结果应正常使用。"""
+
+    client = SequencedTurnDecisionClient([{"kind": "single_action"}, _valid_travel_decision()])
+    context = cast(HostAgentContext, SimpleNamespace(to_json_dict=lambda: {}))
+
+    decision = await PromptHostTurnDecisionModel(client).generate(context)
+
+    assert isinstance(decision, SingleActionDecision)
+    assert client.calls == 2
+
+
+async def test_turn_planner_classifies_two_schema_failures_as_model_output() -> None:
+    """连续两份坏结构应归类为模型输出故障，而不是 TURN_CONTRACT_INVALID。"""
+
+    client = SequencedTurnDecisionClient([{"kind": "single_action"}, {"kind": "single_action"}])
+    context = cast(HostAgentContext, SimpleNamespace(to_json_dict=lambda: {}))
+
+    with pytest.raises(TurnExecutionError) as caught:
+        await PromptHostTurnDecisionModel(client).generate(context)
+
+    assert caught.value.code == "MODEL_OUTPUT_UNREADABLE"
+    assert caught.value.retryable is True
+    assert client.calls == 2
 
 
 async def test_responses_client_posts_strict_schema_and_parses_output() -> None:

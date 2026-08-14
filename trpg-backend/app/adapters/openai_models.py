@@ -10,6 +10,7 @@ import structlog
 from collaboration_framework.contracts import (
     ActionAdjudication,
     ActionPlanPolicy,
+    ContractError,
     HostTurnDecision,
     Intent,
     JsonObject,
@@ -54,6 +55,17 @@ _HOST_TURN_DECISION_ADAPTER = TypeAdapter(HostTurnDecision)
 _SAFE_ADJUDICATION_INSTRUCTIONS = """
 叙事、对话、确认和任何没有权威状态变化的动作只能使用 narrative_only。检定候选只能
 引用 self_actor.skills 中实际存在的技能。无法形成安全裁决时不得编造目标或效果。
+
+每个新 ActionAdjudication 都必须显式输出 persistence_intent。它是稳定的机器标识，
+不随玩家语言变化：普通对话、观察及纯叙事为 none；角色状态为 character_state；物体
+状态为 object_state；背包变化为 inventory；移动到地点为 location。需要持久结果时，
+method.family 也使用下列稳定值并生成精确匹配的成功效果：击晕=knock_out
+（consciousness=unconscious）、击倒=knock_down（posture=prone）、束缚=restrain
+（restraint=restrained）、打伤=injure_minor/injure_major/injure_critical、杀死=kill；
+打开=open、关闭=close、上锁=lock、解锁=unlock、破坏=break、修复=repair；
+拾取=pick_up、转交=transfer、丢下=drop、消耗=consume、前往=travel。不得把这些动作
+标成 none，也不得只给 narrative_only。命中模组 rule_decision 时仍显式填写最贴近的
+persistence_intent，但 success_effects/failure_effects 按规则所有权要求留空。
 
 target.kind 决定 target.id 只能来自 PlayerView 的哪一个列表，两者必须配套，绝不能
 把某个列表里的 id 换一个 kind 使用：
@@ -203,8 +215,11 @@ JSON/schema 字段和值重复写入正文。
 - 第一人称可以出现在明确归属于玩家或某个 NPC 的对白中，但对白的说话者必须清楚；
   引号外的守秘人叙述不得以“我”认领玩家的行为、身份或经历。
 
-completed_steps[].outcome 是消耗幸运、强推等检定后决定之后的最终权威结果。
-outcome=success 时必须明确叙述该 semantic_goal 成功，不得用“没看出更多”等失败措辞；
+completed_steps[].outcome 是消耗幸运、强推等检定后决定之后的最终权威结果（检定或分支结果），
+不等于玩家完整语义目标已经实现。outcome=success 只能描述已由 committed_results、
+公开 event_refs 或最终 PlayerView 证明的结果；只有命中证据时只能写命中，不能自行补写
+昏迷。昏迷、死亡、倒地、束缚、受伤、打开、锁住、损坏等持久声明必须逐项存在匹配的
+completed_steps[].committed_results，并在 claimed_evidence_refs 引用该结果的 event_ref。
 outcome=failure 时不得叙述成功后果。若最终 player_view.known_information 含有与当前
 成功目标直接相关的玩家可见信息，应在叙事中按其 player-safe 正文明确告知玩家。
 
@@ -484,16 +499,68 @@ class PromptHostTurnDecisionModel:
         self._policy = policy or ActionPlanPolicy()
 
     async def generate(self, context: HostAgentContext) -> HostTurnDecision:
-        raw = await self._client.generate(
-            schema_name="trpg_host_turn_decision",
-            schema=_HOST_TURN_DECISION_ADAPTER.json_schema(mode="serialization"),
-            instructions=(
-                f"{host_turn_decision_instructions(self._policy)}\n\n"
-                f"{_SAFE_ADJUDICATION_INSTRUCTIONS}"
-            ),
-            input_payload=context.to_json_dict(),
+        instructions = (
+            f"{host_turn_decision_instructions(self._policy)}\n\n{_SAFE_ADJUDICATION_INSTRUCTIONS}"
         )
-        return HostTurnDecisionParser.parse(raw, policy=self._policy)
+        last_error: Exception | None = None
+        for attempt in range(2):
+            try:
+                raw = await self._client.generate(
+                    schema_name="trpg_host_turn_decision",
+                    schema=_HOST_TURN_DECISION_ADAPTER.json_schema(mode="serialization"),
+                    instructions=(
+                        instructions
+                        if attempt == 0
+                        else (
+                            f"{instructions}\n\n"
+                            "上一份返回未通过结构校验，请严格按 schema 重新生成。"
+                        )
+                    ),
+                    input_payload=context.to_json_dict(),
+                )
+                # 单动作与 ActionPlan 步骤共享同一持久结果字段约束；普通
+                # narrative_only 输出按兼容规则放行，持久动作必须显式声明。
+                _require_explicit_persistence_intent(raw)
+                return HostTurnDecisionParser.parse(raw, policy=self._policy)
+            except TurnExecutionError as exc:
+                if exc.code != "MODEL_OUTPUT_UNREADABLE":
+                    raise
+                last_error = exc
+            except (StructuredOutputError, ContractError, ValidationError) as exc:
+                last_error = exc
+
+            # 只记录安全的异常类型和字段路径；禁止记录模型正文、Prompt 或 GM-only 数据。
+            logger.warning(
+                "host_turn_decision_rejected",
+                attempt=attempt + 1,
+                error_type=type(last_error).__name__,
+                issues=_validation_issue_paths(last_error),
+            )
+
+        raise TurnExecutionError(
+            "MODEL_OUTPUT_UNREADABLE",
+            "主持模型返回了无法解读的结果，本次动作未生效，请重试",
+            retryable=True,
+        ) from last_error
+
+
+def _validation_issue_paths(exc: Exception | None) -> tuple[str, ...]:
+    """提取不含输入值的 Pydantic 字段路径，供模型输出故障定位。"""
+
+    current: BaseException | None = exc
+    while current is not None:
+        if isinstance(current, ValidationError):
+            return tuple(
+                f"{'.'.join(str(part) for part in issue.get('loc', ()))}:"
+                f"{issue.get('type', 'unknown')}"
+                for issue in current.errors(
+                    include_url=False,
+                    include_context=False,
+                    include_input=False,
+                )
+            )
+        current = current.__cause__
+    return ()
 
 
 class PromptActionPlanStepAdjudicator:
@@ -533,6 +600,7 @@ class PromptActionPlanStepAdjudicator:
             raise
 
         try:
+            _require_explicit_persistence_intent(raw, direct=True)
             return ActionAdjudication.model_validate(raw)
         except ValidationError as exc:
             # HTTP 与 JSON 都成功也不代表输出符合 ActionAdjudication 契约；这一类同样
@@ -542,6 +610,69 @@ class PromptActionPlanStepAdjudicator:
                 "主持模型返回了无法解读的结果，当前步骤未生效，请重试",
                 retryable=True,
             ) from exc
+
+
+def _require_explicit_persistence_intent(raw: object, *, direct: bool = False) -> None:
+    """拒绝新模型省略持久意图；旧持久化 JSON 仍由契约默认值兼容读取。"""
+
+    candidate = raw
+    if not direct and isinstance(raw, dict):
+        candidate = raw.get("adjudication")
+        if candidate is None:
+            single = raw.get("single_action")
+            candidate = single.get("adjudication") if isinstance(single, dict) else None
+    if isinstance(candidate, dict) and "persistence_intent" not in candidate:
+        method = candidate.get("method")
+        family = method.get("family") if isinstance(method, dict) else None
+        success_effects = candidate.get("success_effects", ())
+        failure_effects = candidate.get("failure_effects", ())
+        effects = (
+            *(success_effects if isinstance(success_effects, list) else ()),
+            *(failure_effects if isinstance(failure_effects, list) else ()),
+        )
+        persistent_families = {
+            "knock_out",
+            "wake",
+            "kill",
+            "knock_down",
+            "stand_up",
+            "restrain",
+            "release",
+            "injure_minor",
+            "injure_major",
+            "injure_critical",
+            "heal",
+            "open",
+            "close",
+            "lock",
+            "unlock",
+            "break",
+            "repair",
+            "pick_up",
+            "transfer",
+            "drop",
+            "consume",
+            "travel",
+        }
+        persistent_effects = {
+            item.get("type")
+            for item in effects
+            if isinstance(item, dict)
+            and item.get("type")
+            in {
+                "change_entity_state",
+                "move_entity",
+                "consume_entity",
+                "enter_location",
+            }
+        }
+        if family not in persistent_families and not persistent_effects:
+            return
+        raise TurnExecutionError(
+            "MODEL_OUTPUT_UNREADABLE",
+            "主持模型返回了无法解读的结果，当前步骤未生效，请重试",
+            retryable=True,
+        )
 
 
 class PromptActionPlanNarrationModel:

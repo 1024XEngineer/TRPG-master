@@ -8,11 +8,11 @@ import pytest
 from collaboration_framework.contracts import (
     ActionPlanPolicy,
     NarrationEvidence,
+    PlayerInput,
     PostRollDecisionRequest,
 )
 from collaboration_framework.host.application import (
     ActionPlanNarrationValidationError,
-    TurnExecutionError,
 )
 from collaboration_framework.host.schemas import ActionPlanNarrationContext
 
@@ -93,6 +93,14 @@ class _NarrationContextStub:
         self.narration_evidence = (evidence,)
         self.termination_status = termination_status
         self.narration_retry_hint: str | None = None
+        self.player_input = SimpleNamespace(
+            client_action_id="action-narration-test",
+            utterance="",
+        )
+        self.player_view = SimpleNamespace(
+            scene=SimpleNamespace(visible_entities=()),
+        )
+        self.completed_steps: tuple[object, ...] = ()
 
     def model_copy(self, *, update: dict[str, object]):
         copied = _NarrationContextStub(
@@ -131,6 +139,96 @@ def test_application_injects_plan_repair_dependencies_into_single_action_path() 
 
     assert application._dispatcher._repair_adjudicator is orchestrator.adjudicator
     assert application._dispatcher._policy is orchestrator.policy
+
+
+@pytest.mark.parametrize(
+    ("outcomes", "termination_status", "expected"),
+    (
+        (
+            ("failure",),
+            "resolved",
+            "这次行动未能成功，局面没有产生当前可确认的新结果。",
+        ),
+        (
+            ("success", "failure"),
+            "stopped",
+            "当前步骤未能成功；此前已经完成的步骤仍然保留。",
+        ),
+        (("cancelled",), "cancelled", "这次行动已经取消。"),
+        (("success",), "resolved", "这次行动已经按当前可确认的结果完成。"),
+    ),
+)
+def test_deterministic_narration_fallback_preserves_action_outcome(
+    outcomes: tuple[str, ...],
+    termination_status: str,
+    expected: str,
+) -> None:
+    """模型叙事被拒绝后，兜底文案仍必须忠实表达权威行动结果。"""
+
+    context = SimpleNamespace(
+        termination_status=termination_status,
+        player_input=SimpleNamespace(client_action_id="action-fallback"),
+        completed_steps=tuple(
+            SimpleNamespace(outcome=outcome, committed_results=()) for outcome in outcomes
+        ),
+        player_view=SimpleNamespace(
+            scene=SimpleNamespace(visible_entities=()),
+        ),
+    )
+
+    output = ActionPlanTurnApplication._deterministic_narration_fallback(cast(Any, context))
+
+    assert output.text == expected
+
+
+def test_clarification_fallback_points_to_visible_dead_body() -> None:
+    """模型连续忽略可见尸体时，兜底应给出权威位置而不是继续要求寻找。"""
+
+    context = SimpleNamespace(
+        termination_status="needs_clarification",
+        player_input=SimpleNamespace(
+            client_action_id="find-body",
+            utterance="去找他的尸体",
+        ),
+        completed_steps=(),
+        player_view=SimpleNamespace(
+            scene=SimpleNamespace(
+                visible_entities=(
+                    SimpleNamespace(
+                        name="梅洛迪亚斯·杰弗逊",
+                        observable_state=(SimpleNamespace(key="consciousness", value="dead"),),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    output = ActionPlanTurnApplication._deterministic_narration_fallback(cast(Any, context))
+
+    assert output.kind == "clarification"
+    assert output.text.startswith("梅洛迪亚斯·杰弗逊的尸体就在当前场景中")
+
+
+def test_planning_failure_returns_host_reply_without_execution() -> None:
+    """规划结构连续失败时必须有主持人回复，并保持零权威写入。"""
+
+    player_input = PlayerInput(
+        room_id="room-315",
+        player_id="player-315",
+        actor_id="actor-315",
+        client_action_id="76664d06-3ac2-411b-8986-1ff12ed53cbf",
+        utterance="去墓地",
+    )
+    result = ActionPlanTurnApplication._planning_failure_clarification(
+        player_input=player_input,
+        player_view=cast(Any, SimpleNamespace()),
+    )
+
+    assert result.status == "needs_clarification"
+    assert result.execution is None
+    assert result.narration is not None
+    assert result.narration.kind == "clarification"
+    assert "行动的对象或地点" in result.narration.text
 
 
 @pytest.mark.asyncio
@@ -180,10 +278,11 @@ async def test_required_evidence_fallback_never_changes_clarification_scope() ->
         _NarrationContextStub(evidence, "needs_clarification"),
     )
 
-    with pytest.raises(TurnExecutionError) as raised:
-        await application._narrate(context)
+    narration = await application._narrate(context)
 
-    assert raised.value.code == "PLAN_NARRATION_INVALID"
+    assert narration.kind == "clarification"
+    assert evidence.subject_name not in narration.text
+    assert narration.claimed_evidence_refs == ()
     assert narrate.await_count == 2
 
 

@@ -626,6 +626,18 @@
     "method": {
       "$ref": "#/$defs/ActionMethod"
     },
+    "persistence_intent": {
+      "default": "none",
+      "enum": [
+        "none",
+        "character_state",
+        "object_state",
+        "inventory",
+        "location"
+      ],
+      "title": "Persistence Intent",
+      "type": "string"
+    },
     "check": {
       "discriminator": {
         "mapping": {

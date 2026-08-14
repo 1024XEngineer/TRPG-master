@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from collaboration_framework.contracts import ContractError
 from collaboration_framework.host.ports.action_plan import ActionPlanNarrationModelPort
 from collaboration_framework.host.schemas.action_plan import (
@@ -14,12 +16,18 @@ from .narrator import (
     narration_text_rejection_reason,
     normalize_narration_text,
 )
+from .persistent_results import unsupported_persistent_claim
 
 
 class ActionPlanNarrationValidationError(ContractError):
     def __init__(self, reason: str) -> None:
         super().__init__("ActionPlanNarrationOutput 未通过玩家可见输出安全校验")
         self.reason = reason
+
+
+_CORPSE_SEARCH_QUESTION = re.compile(
+    r"(?:从哪里|哪里).{0,12}(?:找|搜)|(?:寻找|搜寻).{0,12}(?:尸体|遗体)"
+)
 
 
 class ActionPlanNarrator:
@@ -71,6 +79,39 @@ class ActionPlanNarrator:
         subject_rejection = narration_subject_rejection_reason(output.text)
         if subject_rejection is not None:
             raise ActionPlanNarrationValidationError(subject_rejection)
-        if context.termination_status == "needs_clarification" and output.kind != "clarification":
+        committed_results = tuple(
+            result
+            for step in context.completed_steps
+            for result in step.committed_results
+        )
+        persistent_rejection = unsupported_persistent_claim(
+            output.text,
+            committed_results,
+            context.player_view,
+        )
+        if persistent_rejection is not None:
+            raise ActionPlanNarrationValidationError(
+                f"persistent_claim_without_evidence:{persistent_rejection}"
+            )
+        visible_dead = tuple(
+            entity
+            for entity in context.player_view.scene.visible_entities
+            if any(
+                state.key == "consciousness" and state.value == "dead"
+                for state in entity.observable_state
+            )
+        )
+        if (
+            visible_dead
+            and any(word in context.player_input.utterance for word in ("尸体", "遗体"))
+            and _CORPSE_SEARCH_QUESTION.search(output.text)
+        ):
+            # PlayerView 已确认尸体就在当前场景时，不能反问玩家去哪里寻找；
+            # 这会把权威可见状态重新降级成模型猜测。
+            raise ActionPlanNarrationValidationError("visible_corpse_search_conflict")
+        if (
+            context.termination_status == "needs_clarification"
+            and output.kind != "clarification"
+        ):
             raise ActionPlanNarrationValidationError("clarification_kind")
         return output

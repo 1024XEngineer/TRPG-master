@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import traceback
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -26,6 +27,7 @@ from collaboration_framework.contracts import (
     GetAdjudicationStatusRequest,
     HostTurnDecision,
     KeeperCapabilityView,
+    MoveEntityEffect,
     NarrativeOnlyEffect,
     NoAdjudicationCheck,
     PlayerInput,
@@ -62,6 +64,7 @@ from collaboration_framework.host.schemas import (
     HostAgentContext,
     RecentHistoryBudget,
     RecentTurnContext,
+    SingleActionClarificationResult,
     SingleActionTurnResult,
 )
 from pydantic import ValidationError
@@ -339,8 +342,15 @@ def _ambient_venue_adjudication(
     goal = context.step.semantic_goal
     if not any(word in goal for word in _AMBIENT_VENUE_INTENT_WORDS):
         return None
+    # semantic_goal 是模型对原话的改写，不能把模型自行补出的“住处”等地点
+    # 当成玩家授权创建新地点；地点类别必须在玩家原话中也明确出现。
+    utterance = context.player_input.utterance
     matched = next(
-        ((label, id_stem, name) for label, id_stem, name in _AMBIENT_VENUE_LABELS if label in goal),
+        (
+            (label, id_stem, name)
+            for label, id_stem, name in _AMBIENT_VENUE_LABELS
+            if label in goal and label in utterance
+        ),
         None,
     )
     if matched is None:
@@ -398,11 +408,19 @@ def _ambient_venue_anchor(view: PlayerView) -> str | None:
 def _match_travel_target(view: PlayerView, text: str) -> _TravelTarget | None:
     if not any(word in text for word in ("去", "前往", "进入", "到", "抵达")):
         return None
+    # 只在旅行动词之后识别目的地，避免“带托马斯去墓地”中的“托马斯”
+    # 模糊命中“托马斯的会客室”，从而把旅行方向完全反转。
+    explicit_markers = tuple(re.finditer(r"前往|进入|抵达|去", text))
+    if explicit_markers:
+        match_text = text[explicit_markers[-1].end() :]
+    else:
+        arrival_marker = text.rfind("到")
+        match_text = text[arrival_marker + 1 :]
     matches: list[tuple[int, str, _TravelTarget]] = []
     for location in view.known_locations:
         if location.existence != "known" or location.localization != "located":
             continue
-        overlap = _best_label_overlap(text, (location.name, location.id))
+        overlap = _best_label_overlap(match_text, (location.name, location.id))
         if overlap is not None:
             matches.append((len(overlap), location.id, _TravelTarget(location.id, location.name)))
     for exit_view in view.scene.available_exits:
@@ -415,7 +433,7 @@ def _match_travel_target(view: PlayerView, text: str) -> _TravelTarget | None:
             exit_view.destination.name,
             exit_view.destination.scene_id,
         )
-        overlap = _best_label_overlap(text, labels)
+        overlap = _best_label_overlap(match_text, labels)
         if overlap is not None:
             target = _TravelTarget(
                 exit_view.destination.scene_id,
@@ -595,18 +613,42 @@ class ActionPlanTurnApplication:
         if on_input_accepted is not None:
             await on_input_accepted(player_input, view)
         await _emit_phase(on_phase, "understanding_action")
-        decision = await self._planner.generate(
-            HostAgentContext(
-                player_input=player_input,
-                player_view=view,
-                recent_history=await self._read_recent_history(
+        keeper_capabilities = await self._keeper_capabilities(player_input, view)
+        try:
+            decision = await self._planner.generate(
+                HostAgentContext(
                     player_input=player_input,
                     player_view=view,
-                ),
-                # A single action is adjudicated right here in the planner call,
-                # so it needs the same Keeper vocabulary a plan step gets.
-                keeper_capabilities=await self._keeper_capabilities(player_input, view),
+                    recent_history=await self._read_recent_history(
+                        player_input=player_input,
+                        player_view=view,
+                    ),
+                    # A single action is adjudicated right here in the planner call,
+                    # so it needs the same Keeper vocabulary a plan step gets.
+                    keeper_capabilities=keeper_capabilities,
+                )
             )
+        except TurnExecutionError as exc:
+            if exc.code != "MODEL_OUTPUT_UNREADABLE":
+                raise
+            # 两次结构输出都失败时，动作尚未进入规则引擎，也没有任何权威写入。
+            # 用确定性主持人澄清结束回合，不能把内部契约错误直接抛给玩家。
+            logger.warning(
+                "host_turn_planning_fallback",
+                room=room_id.split("-", 1)[0][:8],
+                action=client_action_id,
+                code=exc.code,
+            )
+            await _emit_phase(on_phase, "generating_narration")
+            return self._planning_failure_clarification(
+                player_input=player_input,
+                player_view=view,
+            )
+        decision = _normalize_single_travel_decision(
+            decision,
+            player_input=player_input,
+            view=view,
+            capabilities=keeper_capabilities,
         )
         await _emit_phase(on_phase, "executing_action")
         result = await self._dispatcher.execute(
@@ -622,6 +664,14 @@ class ActionPlanTurnApplication:
             )
         if not isinstance(decision, SingleActionDecision):
             raise TypeError("single result 必须对应 SingleActionDecision")
+        if isinstance(result, SingleActionClarificationResult):
+            await _emit_phase(on_phase, "refreshing_player_view")
+            await _emit_phase(on_phase, "generating_narration")
+            return await self._from_single_clarification(
+                player_input,
+                decision.adjudication.summary,
+                result,
+            )
         if result.execution.status in {
             "awaiting_skill_choice",
             "awaiting_post_roll_decision",
@@ -634,6 +684,24 @@ class ActionPlanTurnApplication:
             player_input,
             decision.adjudication.summary,
             result,
+        )
+
+    @staticmethod
+    def _planning_failure_clarification(
+        *,
+        player_input: PlayerInput,
+        player_view: PlayerView,
+    ) -> ActionPlanTurnResult:
+        """规划模型连续返回坏结构时，生成零提交的玩家可见主持人回复。"""
+
+        return ActionPlanTurnResult(
+            player_input=player_input,
+            player_view=player_view,
+            status="needs_clarification",
+            narration=ActionPlanNarrationOutput(
+                kind="clarification",
+                text="我暂时没能准确理解这次行动。请再明确一下你想做什么，以及行动的对象或地点。",
+            ),
         )
 
     async def _finish_plan_with_phases(
@@ -1080,6 +1148,7 @@ class ActionPlanTurnApplication:
             world_time_after=WorldClockView.from_world(result.player_view.world),
             event_refs=execution.public_event_refs,
             narration_evidence=execution.narration_evidence,
+            committed_results=execution.committed_results,
         )
         context = ActionPlanNarrationContext(
             background=result.player_view.background,
@@ -1100,6 +1169,29 @@ class ActionPlanTurnApplication:
             narration=await self._narrate(context),
         )
 
+    async def _from_single_clarification(
+        self,
+        player_input: PlayerInput,
+        summary: str,
+        result: SingleActionClarificationResult,
+    ) -> ActionPlanTurnResult:
+        """把未发生任何权威写入的单动作失败转换成自然主持人澄清。"""
+
+        context = ActionPlanNarrationContext(
+            background=result.player_view.background,
+            player_input=player_input,
+            plan_goal=summary,
+            termination_status="needs_clarification",
+            player_view=result.player_view,
+            opening_world_time=result.opening_world_time,
+        )
+        return ActionPlanTurnResult(
+            player_input=player_input,
+            player_view=result.player_view,
+            status="needs_clarification",
+            narration=await self._narrate(context),
+        )
+
     async def _narrate(
         self,
         context: ActionPlanNarrationContext,
@@ -1108,6 +1200,15 @@ class ActionPlanTurnApplication:
             try:
                 return await self._narrator.narrate(context)
             except ActionPlanNarrationValidationError as exc:
+                # 只记录校验类别和权威结果，不记录模型正文或其他敏感上下文。
+                logger.warning(
+                    "action_plan_narration_rejected",
+                    action=context.player_input.client_action_id,
+                    attempt=attempt + 1,
+                    reason=exc.reason,
+                    outcomes=tuple(step.outcome for step in context.completed_steps),
+                    termination_status=context.termination_status,
+                )
                 if attempt == 0 and exc.reason == "required_evidence_missing":
                     missing = tuple(
                         item for item in context.narration_evidence if item.required_in_narration
@@ -1135,11 +1236,7 @@ class ActionPlanTurnApplication:
                             ],
                         )
                         return self._required_evidence_fallback(context)
-                    raise TurnExecutionError(
-                        "PLAN_NARRATION_INVALID",
-                        "规则结果已保存，但叙事未通过安全校验；请使用原请求重试",
-                        retryable=True,
-                    ) from exc
+                    return self._deterministic_narration_fallback(context)
             except Exception as exc:
                 # 传输层的瞬态失败已经由 StructuredJsonClient 自己重试过了
                 # （见 adapters/structured_http.py）。在这里再整体重试一轮，两层
@@ -1172,6 +1269,85 @@ class ActionPlanTurnApplication:
         return ActionPlanNarrationOutput(
             text="".join(sentences),
             claimed_evidence_refs=tuple(item.ref for item in required),
+        )
+
+    @staticmethod
+    def _deterministic_narration_fallback(
+        context: ActionPlanNarrationContext,
+    ) -> ActionPlanNarrationOutput:
+        """只复述结构化已提交结果，绝不从 semantic_goal 推断持久后果。"""
+
+        if context.termination_status == "needs_clarification":
+            visible_dead = tuple(
+                entity
+                for entity in context.player_view.scene.visible_entities
+                if any(
+                    state.key == "consciousness" and state.value == "dead"
+                    for state in entity.observable_state
+                )
+            )
+            if visible_dead and any(
+                word in context.player_input.utterance for word in ("尸体", "遗体")
+            ):
+                names = "、".join(entity.name for entity in visible_dead)
+                return ActionPlanNarrationOutput(
+                    kind="clarification",
+                    text=(
+                        f"{names}的尸体就在当前场景中。你想检查尸体、搜查随身物品，还是处理现场？"
+                    ),
+                )
+            return ActionPlanNarrationOutput(
+                kind="clarification",
+                text=(
+                    "眼前的情形还不足以确定这次行动会留下怎样的结果。"
+                    "请说明你想作用于谁或什么，以及希望达成的具体变化。"
+                ),
+            )
+        labels = {
+            ("consciousness", "unconscious"): "失去了意识",
+            ("consciousness", "dead"): "已经死亡",
+            ("posture", "prone"): "已经倒地",
+            ("restraint", "restrained"): "已被束缚",
+            ("injury", "minor"): "受了轻伤",
+            ("injury", "major"): "受了重伤",
+            ("injury", "critical"): "伤势危重",
+            ("open", True): "已经打开",
+            ("locked", True): "已经锁住",
+            ("broken", True): "已经损坏",
+        }
+        names = {entity.id: entity.name for entity in context.player_view.scene.visible_entities}
+        results = [
+            (result, labels.get((result.state_key, result.state_value)))
+            for step in context.completed_steps
+            for result in step.committed_results
+        ]
+        statements = [
+            f"{names.get(result.target_id, '目标')}{label}。"
+            for result, label in results
+            if label is not None
+        ]
+        refs = tuple(result.event_ref for result, label in results if label is not None)
+        outcomes = tuple(step.outcome for step in context.completed_steps)
+        if "cancelled" in outcomes or context.termination_status == "cancelled":
+            status_text = "这次行动已经取消。"
+        elif "failure" in outcomes:
+            # ActionPlan 可能保留此前成功步骤，因此失败文案要区分全部失败和部分完成。
+            status_text = (
+                "当前步骤未能成功；此前已经完成的步骤仍然保留。"
+                if "success" in outcomes
+                else "这次行动未能成功，局面没有产生当前可确认的新结果。"
+            )
+        else:
+            status_text = "这次行动已经按当前可确认的结果完成。"
+        if outcomes and outcomes[-1] != "success":
+            fallback_text = status_text + "".join(statements)
+        else:
+            fallback_text = "".join(statements) or status_text
+        return ActionPlanNarrationOutput(
+            # 失败或取消时即使存在失败分支效果，也必须先明确行动结果，不能让
+            # 玩家把后面的状态变化误读成目标已经成功达成。
+            text=fallback_text,
+            claimed_evidence_refs=refs,
         )
 
     async def _keeper_capabilities(
@@ -1424,10 +1600,17 @@ def _deterministic_step_adjudication(
         )
 
     if context.step.kind == "travel":
-        destination = _match_travel_target(
-            context.player_view,
-            context.step.semantic_goal,
-        )
+        destination = _match_travel_target(context.player_view, context.step.semantic_goal)
+        if context.plan_id == "single-action":
+            # 单动作修复时玩家原话优先；真正的多步计划必须逐步使用 semantic_goal，
+            # 否则“先去办公室再回墓地”的第一步也会被原话最终目的地覆盖。
+            destination = (
+                _match_travel_target(
+                    context.player_view,
+                    context.player_input.utterance,
+                )
+                or destination
+            )
         if destination is None:
             # An unknown *ordinary* destination is not necessarily an error:
             # #212 lets the step Agent propose an ambient Runtime Location.
@@ -1437,6 +1620,13 @@ def _deterministic_step_adjudication(
             # everything else still falls through to the model.
             return _ambient_venue_adjudication(context)
         destination_id = destination.id
+        companion_moves = _companion_move_effects(
+            player_input=context.player_input,
+            semantic_text=context.step.semantic_goal,
+            view=context.player_view,
+            capabilities=context.keeper_capabilities,
+            destination_id=destination_id,
+        )
         return ActionAdjudication(
             request_id=context.step_request_id,
             source_revision=context.player_view.revision,
@@ -1448,7 +1638,10 @@ def _deterministic_step_adjudication(
                 description=context.step.semantic_goal,
             ),
             check=NoAdjudicationCheck(),
-            success_effects=(EnterLocationEffect(location_id=destination_id),),
+            success_effects=(
+                EnterLocationEffect(location_id=destination_id),
+                *companion_moves,
+            ),
         )
 
     action_text = context.step.semantic_goal.replace(
@@ -1548,6 +1741,156 @@ def _match_visible_entity(view: PlayerView, text: str):
     if len(matches) > 1 and matches[0][0] == matches[1][0]:
         return None
     return matches[0][2]
+
+
+def _companion_move_effects(
+    *,
+    player_input: PlayerInput,
+    semantic_text: str,
+    view: PlayerView,
+    capabilities: KeeperCapabilityView | None,
+    destination_id: str,
+) -> tuple[MoveEntityEffect, ...]:
+    """把玩家明确要求同行、且当前就在身边的 NPC 一并移动到目的地。"""
+
+    effects = []
+    for entity in _requested_companions(
+        player_input=player_input,
+        semantic_text=semantic_text,
+        capabilities=capabilities,
+    ):
+        if entity.location_id != view.scene.id:
+            continue
+        effects.append(
+            MoveEntityEffect(
+                entity_id=entity.id,
+                location_id=destination_id,
+            )
+        )
+    return tuple(effects)
+
+
+def _requested_companions(
+    *,
+    player_input: PlayerInput,
+    semantic_text: str,
+    capabilities: KeeperCapabilityView | None,
+):
+    """从玩家同行措辞及模型语义消解中找出明确提及的 Canon NPC。"""
+
+    if capabilities is None or not any(
+        marker in player_input.utterance for marker in ("带", "一起", "同行")
+    ):
+        return ()
+    combined = f"{player_input.utterance} {semantic_text}"
+    requested = []
+    for entity in capabilities.entities:
+        if entity.kind != "npc":
+            continue
+        # KeeperCapability 目前没有 aliases；中文音译姓名通常以间隔号分段，首段
+        # 可以覆盖“托马斯”对应“托马斯·金博尔”这类玩家常用简称。
+        short_name = entity.name.split("·", 1)[0]
+        labels = (entity.id, entity.name, short_name)
+        if any(label and label in combined for label in labels):
+            requested.append(entity)
+    return tuple(requested)
+
+
+def _normalize_single_travel_decision(
+    decision: HostTurnDecision,
+    *,
+    player_input: PlayerInput,
+    view: PlayerView,
+    capabilities: KeeperCapabilityView | None,
+) -> HostTurnDecision:
+    """让单动作旅行服从玩家原话，并补齐明确同行 NPC 的权威移动效果。"""
+
+    if not isinstance(decision, SingleActionDecision):
+        return decision
+    adjudication = decision.adjudication
+    if adjudication.method.family != "travel":
+        return decision
+    proposed_destination = (
+        adjudication.target.id if adjudication.target.kind == "location" else None
+    )
+    # 玩家明确说出已知地点时绝不能被模型改写覆盖；原话没有地点时，才允许
+    # 模型根据“去找守墓人”之类的语义选择目的地。
+    explicit_destination = _match_travel_target(view, player_input.utterance)
+    destination_id = (
+        explicit_destination.id if explicit_destination is not None else proposed_destination
+    )
+    if destination_id is None:
+        return decision
+    enter_effects = tuple(
+        effect for effect in adjudication.success_effects if isinstance(effect, EnterLocationEffect)
+    )
+    if not enter_effects:
+        return decision
+    semantic_text = f"{adjudication.summary} {adjudication.method.description}"
+    requested_companions = _requested_companions(
+        player_input=player_input,
+        semantic_text=semantic_text,
+        capabilities=capabilities,
+    )
+    offscene_companions = tuple(
+        entity
+        for entity in requested_companions
+        if entity.location_id is not None and entity.location_id != view.scene.id
+    )
+    if offscene_companions:
+        companion = offscene_companions[0]
+        source_id = companion.location_id
+        assert source_id is not None
+        assert capabilities is not None
+        location_names = {location.id: location.name for location in capabilities.locations}
+        source_name = location_names.get(source_id, source_id)
+        destination_name = location_names.get(destination_id, destination_id)
+        # 同行者不在身边时，单次“带他去”必须展开为先会合、再同行两步；
+        # 不能原地提交一次玩家旅行后靠旁白假装 NPC 已经到场。
+        return ActionPlan(
+            goal=player_input.utterance,
+            steps=(
+                ActionPlanStep(
+                    kind="travel",
+                    semantic_goal=f"前往{source_name}找到{companion.name}",
+                ),
+                ActionPlanStep(
+                    kind="travel",
+                    semantic_goal=f"带{companion.name}前往{destination_name}",
+                ),
+            ),
+        )
+    companion_moves = _companion_move_effects(
+        player_input=player_input,
+        semantic_text=semantic_text,
+        view=view,
+        capabilities=capabilities,
+        destination_id=destination_id,
+    )
+    companion_ids = {effect.entity_id for effect in companion_moves}
+    effects = tuple(
+        EnterLocationEffect(location_id=destination_id)
+        if isinstance(effect, EnterLocationEffect)
+        else MoveEntityEffect(entity_id=effect.entity_id, location_id=destination_id)
+        if isinstance(effect, MoveEntityEffect) and effect.entity_id in companion_ids
+        else effect
+        for effect in adjudication.success_effects
+    )
+    existing_moves = {
+        effect.entity_id for effect in effects if isinstance(effect, MoveEntityEffect)
+    }
+    missing_companion_moves = tuple(
+        effect for effect in companion_moves if effect.entity_id not in existing_moves
+    )
+    normalized = adjudication.model_copy(
+        update={
+            "target": ActionTarget(kind="location", id=destination_id),
+            "persistence_intent": "location",
+            "success_effects": (*effects, *missing_companion_moves),
+        },
+        deep=True,
+    )
+    return decision.model_copy(update={"adjudication": normalized}, deep=True)
 
 
 def _match_rule_candidate(capabilities, text: str, target_id: str | None):

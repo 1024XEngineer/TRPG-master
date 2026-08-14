@@ -3,6 +3,11 @@ from __future__ import annotations
 import unittest
 from types import SimpleNamespace
 
+from collaboration_framework.contracts import CommittedResult, PlayerInput
+from collaboration_framework.host.application.action_plan_narrator import (
+    ActionPlanNarrationValidationError,
+    ActionPlanNarrator,
+)
 from collaboration_framework.host.application.narrator import (
     NarrationValidationError,
     Narrator,
@@ -10,6 +15,7 @@ from collaboration_framework.host.application.narrator import (
     narration_text_rejection_reason,
     normalize_narration_text,
 )
+from collaboration_framework.host.schemas import ActionPlanNarrationContext
 
 
 class NarrationTextPolicyTests(unittest.TestCase):
@@ -42,7 +48,7 @@ class NarrationTextPolicyTests(unittest.TestCase):
         cases = {
             "托马斯看着你。 claimed_fact_ids: [],": "protocol_tail",
             "托马斯看着你 claimed_fact_ids: []": "protocol_tail",
-            "suggested_actions: [\"继续询问\"]": "protocol_tail",
+            'suggested_actions: ["继续询问"]': "protocol_tail",
             'suggested_actions: [\n  "继续询问",\n  "查看书架"\n]': "protocol_tail",
             "'claimedFactIds'：null": "protocol_tail",
             '他说完便沉默下来。\n"suggestedActions": []': "protocol_tail",
@@ -60,8 +66,7 @@ class NarrationTextPolicyTests(unittest.TestCase):
             ): "protocol_tail",
             "托马斯沉默。\n```json\nsuggestedActions:\n```": "protocol_tail",
             (
-                '{"kind":"narration","text":"托马斯看着你。",'
-                '"claimed_fact_ids":[]}'
+                '{"kind":"narration","text":"托马斯看着你。","claimed_fact_ids":[]}'
             ): "protocol_tail",
             (
                 '托马斯后退一步 {"kind":"narration","text":"他保持沉默",'
@@ -79,8 +84,7 @@ class NarrationTextPolicyTests(unittest.TestCase):
                 '"claimed_fact_ids":{"type":"array"}}'
             ): "schema_fragment",
             (
-                "现场只剩下雨声。\n"
-                '{"required":["kind","text","claimed_fact_ids"]'
+                '现场只剩下雨声。\n{"required":["kind","text","claimed_fact_ids"]'
             ): "schema_fragment",
         }
 
@@ -88,7 +92,9 @@ class NarrationTextPolicyTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(narration_text_rejection_reason(text), expected)
 
-    def test_allows_natural_narration_and_non_protocol_technical_discussion(self) -> None:
+    def test_allows_natural_narration_and_non_protocol_technical_discussion(
+        self,
+    ) -> None:
         cases = (
             "托马斯抬起眼睛，耐心等着你继续问下去。",
             "雨点敲打着窗框。\n\n屋里只剩壁炉燃烧的细响。",
@@ -163,6 +169,165 @@ class NarratorSubjectPolicyTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(raised.exception.reason, "subject_ownership")
+
+
+class _PersistentNarrationModel:
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+    async def generate(self, context):
+        return {
+            "kind": "narration",
+            "text": self.text,
+            "claimed_evidence_refs": [],
+            "suggested_actions": [],
+        }
+
+
+class PersistentNarrationPolicyTests(unittest.IsolatedAsyncioTestCase):
+    def _context(self, *, results=(), utterance="行动"):
+        view = SimpleNamespace(
+            room_id="room",
+            player_id="player",
+            actor_id="actor",
+            background="背景",
+            scene=SimpleNamespace(visible_entities=()),
+        )
+        return ActionPlanNarrationContext.model_construct(
+            background="背景",
+            player_input=PlayerInput(
+                room_id="room",
+                player_id="player",
+                actor_id="actor",
+                client_action_id="action",
+                utterance=utterance,
+            ),
+            plan_goal="行动",
+            termination_status="resolved",
+            completed_steps=(
+                SimpleNamespace(
+                    step_index=0,
+                    semantic_goal="行动",
+                    outcome="success",
+                    view_revision="1",
+                    event_refs=("event-1",),
+                    committed_results=results,
+                ),
+            ),
+            player_view=view,
+            allowed_evidence_refs=("event-1",),
+        )
+
+    async def test_rejects_uncommitted_unconscious_claim(self):
+        with self.assertRaises(ActionPlanNarrationValidationError):
+            await ActionPlanNarrator(
+                _PersistentNarrationModel("守墓人昏迷了。")
+            ).narrate(self._context())
+
+    async def test_allows_committed_unconscious_claim(self):
+        result = CommittedResult(
+            kind="character_state",
+            target_id="butler",
+            state_key="consciousness",
+            state_value="unconscious",
+            event_ref="event-1",
+        )
+        output = await ActionPlanNarrator(
+            _PersistentNarrationModel("守墓人昏迷了。")
+        ).narrate(self._context(results=(result,)))
+        self.assertEqual(output.text, "守墓人昏迷了。")
+
+    async def test_allows_previous_turn_unconscious_state_from_player_view(self):
+        """上一回合已公开的 NPC 状态必须能约束本回合的询问叙事。"""
+        entity = SimpleNamespace(
+            id="butler",
+            name="守墓人",
+            aliases=("墓地看守",),
+            observable_state=(
+                SimpleNamespace(key="consciousness", value="unconscious"),
+            ),
+        )
+        context = self._context()
+        context.player_view.scene.visible_entities = (entity,)
+        output = await ActionPlanNarrator(
+            _PersistentNarrationModel("守墓人双眼紧闭，仍然没有醒来。")
+        ).narrate(context)
+        self.assertIn("仍然没有醒来", output.text)
+
+    async def test_rejects_uncommitted_sleeping_synonyms(self):
+        """没有证据时，闭眼、未醒和躺倒等同义事实也必须被拒绝。"""
+        for text in (
+            "守墓人双眼紧闭。",
+            "守墓人仍未醒来。",
+            "守墓人躺在墓园草地上。",
+        ):
+            with (
+                self.subTest(text=text),
+                self.assertRaises(ActionPlanNarrationValidationError),
+            ):
+                await ActionPlanNarrator(_PersistentNarrationModel(text)).narrate(
+                    self._context()
+                )
+
+    async def test_allows_unprojected_companion_active_presence(self):
+        """未进入标准场景投影的随行人物不能被全局在场校验误伤。"""
+        output = await ActionPlanNarrator(
+            _PersistentNarrationModel("托马斯跟在你身边，正站在墓园入口。")
+        ).narrate(self._context())
+
+        self.assertEqual(output.text, "托马斯跟在你身边，正站在墓园入口。")
+
+    async def test_rejects_dead_visible_npc_active_presence(self):
+        """即使尸体仍然可见，死亡实体也不能被描述为站立或主动移动。"""
+        entity = SimpleNamespace(
+            id="butler",
+            name="守墓人",
+            aliases=("梅洛迪亚斯·杰弗逊",),
+            observable_state=(SimpleNamespace(key="consciousness", value="dead"),),
+        )
+        context = self._context()
+        context.player_view.scene.visible_entities = (entity,)
+        with self.assertRaises(ActionPlanNarrationValidationError):
+            await ActionPlanNarrator(
+                _PersistentNarrationModel("守墓人仍站在墓碑旁。")
+            ).narrate(context)
+
+        with self.assertRaises(ActionPlanNarrationValidationError):
+            await ActionPlanNarrator(
+                _PersistentNarrationModel(
+                    "梅洛迪亚斯·杰弗逊的外套还在，人却已经不见了。"
+                )
+            ).narrate(context)
+
+    async def test_rejects_search_question_when_dead_body_is_visible(self):
+        """尸体已在当前 PlayerView 时，不能重新询问玩家要去哪里寻找。"""
+        entity = SimpleNamespace(
+            id="butler",
+            name="守墓人",
+            aliases=("梅洛迪亚斯·杰弗逊",),
+            observable_state=(SimpleNamespace(key="consciousness", value="dead"),),
+        )
+        context = self._context(utterance="去找他的尸体")
+        context.player_view.scene.visible_entities = (entity,)
+
+        with self.assertRaises(ActionPlanNarrationValidationError) as raised:
+            await ActionPlanNarrator(
+                _PersistentNarrationModel("你打算从哪里开始找？还是扩大范围搜寻尸体？")
+            ).narrate(context)
+
+        self.assertEqual(raised.exception.reason, "visible_corpse_search_conflict")
+
+    async def test_allows_player_presence_without_visible_npc(self):
+        """校验只限制 NPC 在场断言，不阻止主持人描述玩家自己的位置。"""
+        output = await ActionPlanNarrator(
+            _PersistentNarrationModel("你站在寄宿屋的房间里。")
+        ).narrate(self._context())
+        self.assertEqual(output.text, "你站在寄宿屋的房间里。")
+
+        plural_output = await ActionPlanNarrator(
+            _PersistentNarrationModel("你们正坐在旅店的桌边。")
+        ).narrate(self._context())
+        self.assertEqual(plural_output.text, "你们正坐在旅店的桌边。")
 
 
 if __name__ == "__main__":

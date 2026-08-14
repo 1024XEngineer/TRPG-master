@@ -30,6 +30,8 @@ class SemanticPreservationResult:
 
 
 _SAFE_REASON = "修复方案可能改变原本行动，需要玩家确认下一步"
+
+
 def compare_repair_semantics(
     *,
     player_input: PlayerInput,
@@ -233,7 +235,20 @@ def _compare_effect_branch(
                 "NARRATIVE_DETAIL_ADDED",
                 "补齐了不产生领域副作用的叙事细节",
             )
+        if _is_persistent_effect_repair(branch, before, after, feedback):
+            return SemanticPreservationResult(
+                "preserved",
+                "PERSISTENT_EFFECT_REPAIRED",
+                "已按校验反馈补齐持久结果效果",
+            )
         return _clarification("NEW_OR_CHANGED_EFFECT")
+
+    if _is_persistent_effect_repair(branch, before, after, feedback):
+        return SemanticPreservationResult(
+            "preserved",
+            "PERSISTENT_EFFECT_REPAIRED",
+            "已按校验反馈修正持久结果效果",
+        )
 
     rejected_indices = {
         item.effect_index for item in feedback.affected_effects if item.branch == branch
@@ -252,6 +267,28 @@ def _compare_effect_branch(
         "INVALID_EFFECT_REMOVED",
         "已移除校验器明确拒绝的无效效果",
     )
+
+
+def _is_persistent_effect_repair(
+    branch: Literal["success", "failure"],
+    before: list[object],
+    after: list[object],
+    feedback: ValidationFeedback,
+) -> bool:
+    """仅允许 Validator 指定的持久结果在成功分支替换一个领域效果。
+
+    此处只判定修复是否保持玩家原意；修复后的目标、状态键和值仍会由 Engine
+    再次执行确定性校验，因此不匹配的效果不会被提交。
+    """
+
+    if branch != "success" or feedback.code not in {
+        "PERSISTENT_EFFECT_REQUIRED",
+        "PERSISTENT_EFFECT_MISMATCH",
+    }:
+        return False
+    meaningful_before = [item for item in before if item != {"type": "narrative_only"}]
+    meaningful_after = [item for item in after if item != {"type": "narrative_only"}]
+    return len(meaningful_before) <= 1 and len(meaningful_after) == 1
 
 
 def _effect_payload(effect: ActionEffect, source_id: str, replacement_id: str) -> object:

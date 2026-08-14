@@ -201,6 +201,67 @@ class AdjudicationEngineTests(unittest.IsolatedAsyncioTestCase):
             "runtime_inn",
         )
 
+    async def test_persistent_travel_can_create_and_enter_runtime_location(
+        self,
+    ) -> None:
+        action = ActionAdjudication(
+            request_id="create-and-enter-runtime-location",
+            source_revision="0",
+            actor_id="pc_1",
+            summary="进入一家普通旅店",
+            target=ActionTarget(kind="location", id="study"),
+            method=ActionMethod(family="travel", description="寻找并进入附近的旅店"),
+            persistence_intent="location",
+            check=NoAdjudicationCheck(),
+            success_effects=(
+                EnsureRuntimeLocationEffect(
+                    location_id="runtime_inn",
+                    name="街角旅店",
+                    connected_location_id="study",
+                ),
+                EnterLocationEffect(location_id="runtime_inn"),
+            ),
+        )
+
+        resolved = await self.submit(self.service(), action)
+
+        self.assertEqual(resolved.outcome, "success")
+        state = self.store.inspect_state("room_01")
+        self.assertEqual(state.scene_id, "runtime_inn")
+        self.assertIn("runtime_inn", state.runtime_locations)
+
+    async def test_persistent_pick_up_can_create_runtime_item_before_moving_it(
+        self,
+    ) -> None:
+        action = ActionAdjudication(
+            request_id="create-and-pick-up-runtime-item",
+            source_revision="0",
+            actor_id="pc_1",
+            summary="捡起地上的石子",
+            target=ActionTarget(kind="location", id="study"),
+            method=ActionMethod(family="pick_up", description="捡起一枚普通石子"),
+            persistence_intent="inventory",
+            check=NoAdjudicationCheck(),
+            success_effects=(
+                EnsureRuntimeEntityEffect(
+                    entity_id="ordinary_pebble",
+                    entity_kind="object",
+                    name="一枚普通石子",
+                    location_id="study",
+                ),
+                MoveEntityEffect(
+                    entity_id="ordinary_pebble",
+                    holder_actor_id="pc_1",
+                ),
+            ),
+        )
+
+        resolved = await self.submit(self.service(), action)
+
+        self.assertEqual(resolved.outcome, "success")
+        entity = self.store.inspect_state("room_01").runtime_entities["ordinary_pebble"]
+        self.assertEqual(entity["holder_actor_id"], "pc_1")
+
     async def test_event_rule_only_reacts_to_final_domain_event(self) -> None:
         module = self.module.model_copy(
             update={
@@ -742,6 +803,75 @@ class AdjudicationEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(raised.exception.result.code, "PERSISTENT_EFFECT_REQUIRED")
         self.assertEqual(raised.exception.result.repairability, "auto_repairable")
         self.assertEqual(self.store.inspect_state("room_01").event_sequence, 0)
+
+    async def test_explicit_none_cannot_bypass_controlled_persistent_family(
+        self,
+    ) -> None:
+        action = ActionAdjudication(
+            request_id="explicit-none-persistent",
+            source_revision="0",
+            actor_id="pc_1",
+            summary="击晕守墓人",
+            target=ActionTarget(kind="entity", id="butler"),
+            method=ActionMethod(family="knock_out", description="用撬棍砸晕他"),
+            persistence_intent="none",
+            check=NoAdjudicationCheck(),
+        )
+
+        with self.assertRaises(AdjudicationValidationError) as raised:
+            await self.submit(self.service(), action)
+
+        self.assertEqual(raised.exception.result.code, "PERSISTENT_EFFECT_REQUIRED")
+        self.assertEqual(raised.exception.result.repairability, "auto_repairable")
+        self.assertEqual(self.store.inspect_state("room_01").event_sequence, 0)
+
+    def test_persistence_intent_explicitness_survives_internal_round_trip(
+        self,
+    ) -> None:
+        omitted = ActionAdjudication(
+            request_id="omitted-persistence-intent",
+            source_revision="0",
+            actor_id="pc_1",
+            summary="普通移动",
+            target=ActionTarget(kind="location", id="study"),
+            method=ActionMethod(family="travel", description="普通移动"),
+            check=NoAdjudicationCheck(),
+            success_effects=(EnterLocationEffect(location_id="study"),),
+        )
+        explicit = ActionAdjudication(
+            request_id="explicit-persistence-intent",
+            source_revision="0",
+            actor_id="pc_1",
+            summary="普通移动",
+            target=ActionTarget(kind="location", id="study"),
+            method=ActionMethod(family="travel", description="普通移动"),
+            persistence_intent="none",
+            check=NoAdjudicationCheck(),
+            success_effects=(EnterLocationEffect(location_id="study"),),
+        )
+
+        for value, expected in ((omitted, False), (explicit, True)):
+            with self.subTest(expected=expected):
+                payload = value.model_dump(
+                    mode="json",
+                    context={"preserve_persistence_intent_explicit": True},
+                )
+                with self.assertRaises(ValidationError):
+                    ActionAdjudication.model_validate(payload)
+                restored = ActionAdjudication.model_validate(
+                    payload,
+                    context={"allow_persistence_intent_explicit_marker": True},
+                )
+                self.assertEqual(restored.persistence_intent_explicit, expected)
+
+        self.assertNotIn(
+            "persistence_intent_explicit_marker",
+            explicit.to_json_dict(),
+        )
+        self.assertNotIn(
+            "persistence_intent_explicit_marker",
+            str(ActionAdjudication.model_json_schema()),
+        )
 
     async def test_persistent_intent_accepts_unconscious_state_and_publishes_evidence(
         self,

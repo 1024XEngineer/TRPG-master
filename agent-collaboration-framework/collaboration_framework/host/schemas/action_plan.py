@@ -15,6 +15,7 @@ from collaboration_framework.contracts import (
     ActionPlanStep,
     AdjudicationExecution,
     ContractModel,
+    JsonObject,
     KeeperCapabilityView,
     NarrationEvidence,
     PlayerInput,
@@ -180,6 +181,23 @@ class ActionPlanRun(ContractModel):
     )
     created_at: datetime
     updated_at: datetime
+
+    def to_persistence_json_dict(self) -> JsonObject:
+        """序列化可恢复的内部运行状态，并保留裁决字段来源信息。"""
+
+        return self.model_dump(
+            mode="json",
+            context={"preserve_persistence_intent_explicit": True},
+        )
+
+    @classmethod
+    def from_persistence_json_dict(cls, value: JsonObject) -> ActionPlanRun:
+        """只在可信存储边界读取内部兼容标记。"""
+
+        return cls.model_validate(
+            value,
+            context={"allow_persistence_intent_explicit_marker": True},
+        )
 
     @model_validator(mode="after")
     def validate_run(self) -> ActionPlanRun:

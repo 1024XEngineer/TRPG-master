@@ -258,7 +258,7 @@ class SqlAlchemyActionPlanRunStore(ActionPlanRunStore):
             current_step_index=run.current_step_index,
             run_version=run.run_version,
             plan_schema_version=run.plan_schema_version,
-            run_json=run.to_json_dict(),
+            run_json=run.to_persistence_json_dict(),
             lease_owner=run.lease_owner,
             lease_expires_at=run.lease_expires_at,
             created_at=run.created_at,
@@ -271,7 +271,7 @@ class SqlAlchemyActionPlanRunStore(ActionPlanRunStore):
             "status": run.status,
             "current_step_index": run.current_step_index,
             "run_version": run.run_version,
-            "run_json": run.to_json_dict(),
+            "run_json": run.to_persistence_json_dict(),
             "lease_owner": run.lease_owner,
             "lease_expires_at": run.lease_expires_at,
             "updated_at": run.updated_at,
@@ -284,7 +284,7 @@ class SqlAlchemyActionPlanRunStore(ActionPlanRunStore):
                 "PLAN_SCHEMA_UNSUPPORTED",
                 "不支持的 ActionPlanRun schema version",
             )
-        run = ActionPlanRun.model_validate(deepcopy(record.run_json))
+        run = ActionPlanRun.from_persistence_json_dict(deepcopy(record.run_json))
         if (
             run.room_id != record.room_id
             or run.parent_action_id != record.parent_action_id

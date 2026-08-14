@@ -9,6 +9,7 @@ import anyio
 import httpx
 import pytest
 from collaboration_framework.contracts import (
+    ActionAdjudication,
     ActionPlan,
     ActionPlanStep,
     ActionResult,
@@ -793,6 +794,27 @@ def test_deepseek_provider_requires_api_key() -> None:
 def test_intent_schema_remains_strict_for_prompt_adapter() -> None:
     schema = Intent.model_json_schema(mode="serialization")
     assert schema["additionalProperties"] is False
+
+
+def test_action_adjudication_schema_remains_strict_for_prompt_adapter() -> None:
+    """Internal persistence serialization must not erase the provider schema."""
+
+    schema = ActionAdjudication.model_json_schema(mode="serialization")
+
+    assert schema["additionalProperties"] is False
+    assert {
+        "request_id",
+        "source_revision",
+        "actor_id",
+        "summary",
+        "target",
+        "method",
+        "persistence_intent",
+        "check",
+        "success_effects",
+        "failure_effects",
+    } <= schema["properties"].keys()
+    assert "persistence_intent_explicit_marker" not in schema["properties"]
 
 
 def _json_object_response() -> httpx.Response:

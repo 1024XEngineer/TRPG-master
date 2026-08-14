@@ -1810,21 +1810,32 @@ def _normalize_single_travel_decision(
     adjudication = decision.adjudication
     if adjudication.method.family != "travel":
         return decision
+    enter_effects = tuple(
+        effect for effect in adjudication.success_effects if isinstance(effect, EnterLocationEffect)
+    )
+    if not enter_effects:
+        return decision
+    created_locations = {
+        effect.location_id: effect
+        for effect in adjudication.success_effects
+        if isinstance(effect, EnsureRuntimeLocationEffect)
+    }
     proposed_destination = (
         adjudication.target.id if adjudication.target.kind == "location" else None
     )
     # 玩家明确说出已知地点时绝不能被模型改写覆盖；原话没有地点时，才允许
     # 模型根据“去找守墓人”之类的语义选择目的地。
     explicit_destination = _match_travel_target(view, player_input.utterance)
+    runtime_destination = next(
+        (effect.location_id for effect in enter_effects if effect.location_id in created_locations),
+        None,
+    )
     destination_id = (
-        explicit_destination.id if explicit_destination is not None else proposed_destination
+        explicit_destination.id
+        if explicit_destination is not None
+        else runtime_destination or proposed_destination
     )
     if destination_id is None:
-        return decision
-    enter_effects = tuple(
-        effect for effect in adjudication.success_effects if isinstance(effect, EnterLocationEffect)
-    )
-    if not enter_effects:
         return decision
     semantic_text = f"{adjudication.summary} {adjudication.method.description}"
     requested_companions = _requested_companions(
@@ -1843,6 +1854,9 @@ def _normalize_single_travel_decision(
         assert source_id is not None
         assert capabilities is not None
         location_names = {location.id: location.name for location in capabilities.locations}
+        location_names.update(
+            {location_id: effect.name for location_id, effect in created_locations.items()}
+        )
         source_name = location_names.get(source_id, source_id)
         destination_name = location_names.get(destination_id, destination_id)
         # 同行者不在身边时，单次“带他去”必须展开为先会合、再同行两步；
@@ -1884,7 +1898,13 @@ def _normalize_single_travel_decision(
     )
     normalized = adjudication.model_copy(
         update={
-            "target": ActionTarget(kind="location", id=destination_id),
+            # 新地点尚不存在，必须继续以已有连接锚点作为 target；普通已知地点
+            # 才把 target 归一到最终目的地。
+            "target": (
+                adjudication.target
+                if destination_id in created_locations
+                else ActionTarget(kind="location", id=destination_id)
+            ),
             "persistence_intent": "location",
             "success_effects": (*effects, *missing_companion_moves),
         },

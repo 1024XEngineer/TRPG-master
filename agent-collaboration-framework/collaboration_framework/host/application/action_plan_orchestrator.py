@@ -1311,7 +1311,9 @@ class ActionPlanOrchestrator:
         unattributable and the run is stuck.
         """
 
-        return ActionPlanRun.model_validate(run.model_dump(mode="json"))
+        return ActionPlanRun.from_persistence_json_dict(
+            run.to_persistence_json_dict()
+        )
 
     async def _release_lease(self, run: ActionPlanRun) -> ActionPlanRun:
         if run.lease_owner is None:

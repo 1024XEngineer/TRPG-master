@@ -110,14 +110,39 @@ keeper_capabilities 时，只能使用 enter_location 与 narrative_only。
   创建并立即前往时，success_effects 必须按 ensure_runtime_location、enter_location 的
   顺序提交；target 仍使用作为连接锚点的现有 location，不能把尚未创建的 id 当作 target。
 - ensure_runtime_entity：需要一个模组没写、但情境上应该在场的普通人或普通物件
-  （路过的店员、值班的管理员、地上的石子、桌上的一支笔）时才用。entity_id 必须是新的；
-  location_id 必须已存在。不要用它造关键 NPC、关键道具或本该由模组给出的线索。
+  （当前环境自然出现的普通工作人员，或无剧情意义的日常可携带物件）时才用。entity_id 必须是新的；
+  location_id 必须已存在。使用前必须先核对 scene.visible_entities、scene.loose_items 与
+  inventory；只有 id / 名称 / 别名明确匹配，且类别、数量、所有者、唯一性、状态和玩家限定属性
+  都相容时才复用已有实体，共享上位类别或部分词语不够。
+
+  这次核对只决定“复用已有实体”还是“评估 Runtime 创建候选”。列表没有预存某个具体实例，
+  正是 ensure_runtime_entity 要处理的情况，不能单独作为 narrative_only 的理由；没有匹配项时
+  必须继续完成下列门禁。
+
+  不存在时逐项执行通用创建门禁：
+  1. 对照 keeper_capabilities.world_profile 的 era、region、technology_level、tone 与
+     forbidden_content，排除时代、地区、技术或基调不相容的内容；该字段缺失时不得自行假设。
+  2. scene 公开描述、location_context 或不依赖隐藏事实的环境常识必须支持“该类型内容”自然
+     在场；这里判断的是类型与环境的关系，不要求某个具体实例已有 id。列表未列出实例不是反证，
+     玩家单方面声称其存在也不是证据，公开描述不需要逐件列举日常陈设。
+  3. 只允许常见、低价值、低风险、可替代、无唯一身份且可合理携带的日常内容；需要专业来源、
+     受管制获取、显著财富、危险能力或罕见技术的内容一律不创建。
+  4. 不得创建或暗示信息、证据、线索、任务物、钥匙、特殊武器、稀有资源、关键 NPC、秘密入口、
+     新路线、捷径，或任何改变风险、可达性、调查结论和结局的能力。
+  5. 不得冒充、复制、改写或提前显现 Canon 实体，也不能拿类别相近的 Canon 实体代替普通物件。
+
+  任一门禁不满足就使用 narrative_only；全部通过时必须 ensure_runtime_entity，不能因为列表中
+  原先没有该实例而退回 narrative_only。
   `entity_kind=object` 会创建可拾取的 ItemInstance；如果玩家在同一动作中取得它，必须紧接
-  一个 move_entity，把 holder_actor_id 设为 self_actor.id。这样物品才会进入背包。
+  一个 move_entity，把 holder_actor_id 设为 self_actor.id。这样物品才会进入背包。新实体在
+  提交前尚不存在，因此 target 必须保持为当前 player_view.scene.id 的 location，绝不能把新
+  entity_id 当作 target。
 - move_entity：让 NPC/实体换地点，或改变物品 custody。拾取、保留或转交物品时使用
   holder_actor_id；把投掷、放置、丢弃后的物品留在当前场景时使用 location_id。
-  entity_id 取自 keeper_capabilities.entities[].id、player_view.scene.loose_items[].id 或
-  player_view.inventory[].id。
+  玩家拾取、转交、丢下或消费物品时，entity_id 只能取自 player_view.scene.loose_items[].id、
+  player_view.inventory[].id，或同一 effects 序列刚 ensure_runtime_entity 创建的新 id；不能
+  仅因某物出现在 keeper_capabilities.entities 就移动它。NPC 移动也必须是玩家当前可见且本次
+  行动明确涉及的对象。
 - change_entity_state：记录实体上一个具体、可观察的变化（门被撬开、灯被点亮）。
   key 只能用字母数字下划线短横。
 - consume_entity：物品被吃掉、喝掉、烧毁、耗尽或彻底失效时使用，之后它会从背包和

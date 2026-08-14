@@ -35,7 +35,9 @@ class InMemoryActionPlanRunStore(ActionPlanRunStore):
         permissive hides exactly that class of bug, so it round-trips too.
         """
 
-        return ActionPlanRun.model_validate_json(run.model_dump_json())
+        return ActionPlanRun.from_persistence_json_dict(
+            run.to_persistence_json_dict()
+        )
 
     def _reservation_expired(self, room_id: str, parent_action_id: str) -> bool:
         """占用是否已过期，判据与持久化 store 完全一致。

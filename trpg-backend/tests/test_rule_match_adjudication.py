@@ -146,6 +146,14 @@ async def test_rule_candidates_reach_the_model_payload() -> None:
     context = await _cemetery_context("仔细观察守墓人")
 
     payload = context.to_json_dict()
+    world_profile = payload["keeper_capabilities"]["world_profile"]
+    assert world_profile == {
+        "era": "1920s 美国禁酒令时期",
+        "region": "密歇根州阿诺兹堡",
+        "technology_level": "早期汽车与电报",
+        "tone": "安静、克制、带哥特气息",
+        "forbidden_content": ["提前揭示道格拉斯的食尸鬼身份"],
+    }
     candidates = payload["keeper_capabilities"]["rule_candidates"]
     assert candidates, "rule_candidates 没有进入模型输入"
     observe = next(item for item in candidates if item["rule_id"] == "observe_caretaker")
@@ -281,13 +289,12 @@ async def test_unknown_ordinary_travel_is_resolved_without_a_model_round_trip() 
             del context
             raise AssertionError("普通去处不应该还要问模型")
 
-    adjudication = await _RuleFirstStepAdjudicator(FailingFallback()).adjudicate(
-        await _cemetery_context(
-            "我想去小镇上的旅馆休息到晚上",
-            step_kind="travel",
-            semantic_goal="前往小镇上的旅馆",
-        )
+    context = await _cemetery_context(
+        "我想去小镇上的旅馆休息到晚上",
+        step_kind="travel",
+        semantic_goal="前往小镇上的旅馆",
     )
+    adjudication = await _RuleFirstStepAdjudicator(FailingFallback()).adjudicate(context)
 
     assert [effect.type for effect in adjudication.success_effects] == [
         "ensure_runtime_location",
@@ -300,6 +307,28 @@ async def test_unknown_ordinary_travel_is_resolved_without_a_model_round_trip() 
     assert created.connected_location_id == "arnoldsburg_streets"
     assert adjudication.target.id == "arnoldsburg_streets"
     assert entered.location_id == created.location_id
+
+    normalized = _normalize_single_travel_decision(
+        SingleActionDecision(adjudication=adjudication),
+        player_input=context.player_input,
+        view=context.player_view,
+        capabilities=context.keeper_capabilities,
+    )
+
+    assert isinstance(normalized, SingleActionDecision)
+    normalized_created = next(
+        effect
+        for effect in normalized.adjudication.success_effects
+        if isinstance(effect, EnsureRuntimeLocationEffect)
+    )
+    normalized_entered = next(
+        effect
+        for effect in normalized.adjudication.success_effects
+        if isinstance(effect, EnterLocationEffect)
+    )
+    # 新地点在提交前不能作为 target；连接锚点保留，同时进入刚创建的地点。
+    assert normalized.adjudication.target.id == "arnoldsburg_streets"
+    assert normalized_entered.location_id == normalized_created.location_id
 
 
 async def test_planner_cannot_invent_ambient_venue_for_npc_search() -> None:
@@ -494,8 +523,28 @@ def test_prompt_defines_runtime_item_custody_and_consumption() -> None:
     assert "move_entity(location_id=当前 scene.id)" in _SAFE_ADJUDICATION_INSTRUCTIONS
     assert "consume_entity" in _SAFE_ADJUDICATION_INSTRUCTIONS
     step_instructions = current_step_adjudication_instructions()
-    assert "普通工作人员、路人或无关紧要的可携带物品" in step_instructions
+    assert "世界一致性" in step_instructions
+    assert "场景依据" in step_instructions
+    assert "普通性" in step_instructions
+    assert "零剧情权限" in step_instructions
+    assert "Canon 不替代" in step_instructions
     assert "拾取要在同一 effects 序列继续 move_entity" in step_instructions
+    assert "新建物品尚不是合法 target" in step_instructions
+    assert "keeper_capabilities.world_profile" in step_instructions
+
+
+def test_prompt_requires_exact_existing_entity_match_before_runtime_creation() -> None:
+    assert "scene.visible_entities、scene.loose_items 与" in _SAFE_ADJUDICATION_INSTRUCTIONS
+    assert "target 必须保持为当前 player_view.scene.id" in _SAFE_ADJUDICATION_INSTRUCTIONS
+    assert "不能\n  仅因某物出现在 keeper_capabilities.entities 就移动它" in (
+        _SAFE_ADJUDICATION_INSTRUCTIONS
+    )
+    step_instructions = current_step_adjudication_instructions()
+    assert "keeper_capabilities 里的实体不代表玩家此刻看得见" in step_instructions
+    assert "是效果能力词表，不自动成为可直接作用的 target" in step_instructions
+    assert "类别、数量、所有者、唯一性、状态" in step_instructions
+    assert "五本失窃藏书" not in step_instructions
+    assert "五本失窃藏书" not in _SAFE_ADJUDICATION_INSTRUCTIONS
 
 
 @pytest.mark.parametrize(

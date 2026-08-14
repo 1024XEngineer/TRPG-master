@@ -7,7 +7,7 @@ import re
 import traceback
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Literal, Protocol
 
 import structlog
 from collaboration_framework.contracts import (
@@ -132,6 +132,121 @@ class ActionPlanTurnResult:
 class _TravelTarget:
     id: str
     name: str
+
+
+@dataclass(frozen=True)
+class _InventoryReferenceResolution:
+    """Deterministic grounding for an item explicitly sourced from inventory."""
+
+    requested_name: str
+    matched_item_names: tuple[str, ...]
+
+    @property
+    def status(self) -> Literal["missing", "matched", "ambiguous"]:
+        if not self.matched_item_names:
+            return "missing"
+        if len(self.matched_item_names) == 1:
+            return "matched"
+        return "ambiguous"
+
+
+_INVENTORY_CONTAINER = (
+    r"(?:我的|自己(?:的)?|随身(?:携带的)?)?"
+    r"(?:背包|行囊|物品栏|随身物品|口袋|挎包|公文包|手提包)"
+)
+_INVENTORY_TAKE_VERB = r"(?:拿|取|掏|翻|找)(?:出来|出|到)?"
+_INVENTORY_REFERENCE_PATTERNS = (
+    re.compile(
+        rf"(?:从|在)?\s*{_INVENTORY_CONTAINER}\s*(?:里|中|内)?\s*"
+        rf"{_INVENTORY_TAKE_VERB}\s*(?P<item>.+)"
+    ),
+    re.compile(
+        rf"{_INVENTORY_TAKE_VERB}\s*{_INVENTORY_CONTAINER}\s*"
+        rf"(?:里|中|内)(?:的)?\s*(?P<item>.+)"
+    ),
+    re.compile(
+        rf"(?:使用|用|喝下?|吃下?|递出|交出|丢下|扔出)\s*"
+        rf"{_INVENTORY_CONTAINER}\s*(?:里|中|内)(?:的)?\s*(?P<item>.+)"
+    ),
+)
+_INVENTORY_ITEM_BOUNDARY = re.compile(
+    r"(?:[，,。；;！!？?]|然后|接着|随后|再(?:把|将)?|"
+    r"递给|交给|送给|拿给|给到|放到|放在|扔向|用来|并且|并)"
+)
+_LEADING_ITEM_DETERMINER = re.compile(
+    r"^(?:把|将|我的|自己的|这(?:个|件|瓶|本|支|把|枚|块|根|顶|盒|包|张|份|卷|颗|杯|罐)?|"
+    r"那(?:个|件|瓶|本|支|把|枚|块|根|顶|盒|包|张|份|卷|颗|杯|罐)?|"
+    r"(?:一|二|两|三|四|五|六|七|八|九|十|\d+)\s*"
+    r"(?:个|件|瓶|本|支|把|枚|块|根|顶|盒|包|张|份|卷|串|颗|杯|罐))\s*"
+)
+_GENERIC_INVENTORY_REFERENCES = frozenset(
+    {"东西", "物品", "装备", "道具", "什么", "某件东西", "随便一件东西"}
+)
+
+
+def _inventory_source_reference(
+    utterance: str,
+    view: PlayerView,
+) -> _InventoryReferenceResolution | None:
+    """Resolve explicit inventory provenance before any model can invent an item.
+
+    This intentionally uses only names present in the player-safe inventory view.
+    Semantic category expansion (for example, treating a flask as any requested
+    "container") is not deterministic without structured aliases, so uncertain
+    categories fail closed instead of becoming imagined inventory.
+    """
+
+    requested_name: str | None = None
+    for pattern in _INVENTORY_REFERENCE_PATTERNS:
+        match = pattern.search(utterance)
+        if match is None:
+            continue
+        requested_name = _clean_inventory_reference(match.group("item"))
+        if requested_name:
+            break
+    if not requested_name:
+        return None
+
+    if requested_name in _GENERIC_INVENTORY_REFERENCES:
+        matches = tuple(item.name for item in view.inventory)
+    else:
+        matches = tuple(
+            item.name
+            for item in view.inventory
+            if _inventory_names_match(requested_name, item.name)
+        )
+    return _InventoryReferenceResolution(
+        requested_name=requested_name,
+        matched_item_names=matches,
+    )
+
+
+def _clean_inventory_reference(raw: str) -> str:
+    candidate = _INVENTORY_ITEM_BOUNDARY.split(raw, maxsplit=1)[0]
+    candidate = candidate.strip(" \t\r\n\"'“”‘’《》【】()（）")
+    previous = None
+    while candidate and candidate != previous:
+        previous = candidate
+        candidate = _LEADING_ITEM_DETERMINER.sub("", candidate, count=1).strip()
+    return candidate if len(candidate) <= 200 else ""
+
+
+def _inventory_names_match(requested_name: str, inventory_name: str) -> bool:
+    requested = _compact_inventory_name(requested_name)
+    inventory = _compact_inventory_name(inventory_name)
+    if not requested or not inventory:
+        return False
+    parts = tuple(part for part in re.split(r"(?:与|和|及|、|/|／|&)", inventory) if part)
+    return any(
+        requested == part
+        or (len(requested) >= 2 and requested in part)
+        or (len(part) >= 2 and part in requested)
+        for part in (inventory, *parts)
+    )
+
+
+def _compact_inventory_name(value: str) -> str:
+    return re.sub(r"[\s\-_—·•，,。；;：:！!？?（）()【】\[\]《》<>\"'“”‘’]", "", value).casefold()
 
 
 class DeterministicHostTurnDecisionModel:
@@ -613,6 +728,22 @@ class ActionPlanTurnApplication:
         if on_input_accepted is not None:
             await on_input_accepted(player_input, view)
         await _emit_phase(on_phase, "understanding_action")
+        inventory_reference = _inventory_source_reference(utterance, view)
+        if inventory_reference is not None and inventory_reference.status != "matched":
+            logger.info(
+                "inventory_source_reference_grounded",
+                action=client_action_id,
+                status=inventory_reference.status,
+                requested_name=inventory_reference.requested_name,
+                matched_item_names=inventory_reference.matched_item_names,
+            )
+            await _emit_phase(on_phase, "refreshing_player_view")
+            await _emit_phase(on_phase, "generating_narration")
+            return self._inventory_reference_result(
+                player_input=player_input,
+                player_view=view,
+                resolution=inventory_reference,
+            )
         keeper_capabilities = await self._keeper_capabilities(player_input, view)
         try:
             decision = await self._planner.generate(
@@ -702,6 +833,40 @@ class ActionPlanTurnApplication:
                 kind="clarification",
                 text="我暂时没能准确理解这次行动。请再明确一下你想做什么，以及行动的对象或地点。",
             ),
+        )
+
+    @staticmethod
+    def _inventory_reference_result(
+        *,
+        player_input: PlayerInput,
+        player_view: PlayerView,
+        resolution: _InventoryReferenceResolution,
+    ) -> ActionPlanTurnResult:
+        """Return a zero-write result grounded only in authoritative inventory."""
+
+        if resolution.status == "missing":
+            narration = ActionPlanNarrationOutput(
+                kind="narration",
+                text=f"你查看了随身物品，但背包里没有{resolution.requested_name}。",
+            )
+            status = "completed"
+        elif resolution.status == "ambiguous":
+            choices = "、".join(resolution.matched_item_names)
+            narration = ActionPlanNarrationOutput(
+                kind="clarification",
+                text=(
+                    f"背包里有不止一件物品符合“{resolution.requested_name}”："
+                    f"{choices}。你想拿哪一件？"
+                ),
+            )
+            status = "needs_clarification"
+        else:
+            raise ValueError("唯一匹配应继续进入正常裁决")
+        return ActionPlanTurnResult(
+            player_input=player_input,
+            player_view=player_view,
+            status=status,
+            narration=narration,
         )
 
     async def _finish_plan_with_phases(

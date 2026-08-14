@@ -16,7 +16,10 @@ from collaboration_framework.host.application import (
 )
 from collaboration_framework.host.schemas import ActionPlanNarrationContext
 
-from app.core.action_plan_turn import ActionPlanTurnApplication
+from app.core.action_plan_turn import (
+    ActionPlanTurnApplication,
+    _inventory_source_reference,
+)
 
 
 def _run(*, cancel_id: str | None) -> SimpleNamespace:
@@ -229,6 +232,126 @@ def test_planning_failure_returns_host_reply_without_execution() -> None:
     assert result.narration is not None
     assert result.narration.kind == "clarification"
     assert "行动的对象或地点" in result.narration.text
+
+
+@pytest.mark.parametrize(
+    ("utterance", "requested_name"),
+    (
+        ("从背包里拿出一瓶饮料递给托马斯", "饮料"),
+        ("从背包里取出一个炸弹", "炸弹"),
+    ),
+)
+def test_missing_inventory_source_is_grounded_before_model_adjudication(
+    utterance: str,
+    requested_name: str,
+) -> None:
+    view = SimpleNamespace(
+        inventory=(
+            SimpleNamespace(name="笔记本与铅笔"),
+            SimpleNamespace(name="手电筒"),
+            SimpleNamespace(name="旧式公文包"),
+        )
+    )
+
+    resolution = _inventory_source_reference(utterance, cast(Any, view))
+
+    assert resolution is not None
+    assert resolution.status == "missing"
+    assert resolution.requested_name == requested_name
+    result = ActionPlanTurnApplication._inventory_reference_result(
+        player_input=cast(Any, SimpleNamespace()),
+        player_view=cast(Any, view),
+        resolution=resolution,
+    )
+    assert result.status == "completed"
+    assert result.execution is None
+    assert result.narration is not None
+    assert result.narration.kind == "narration"
+    assert f"背包里没有{requested_name}" in result.narration.text
+    assert "汽水" not in result.narration.text
+
+
+def test_inventory_source_uses_only_real_matches_for_clarification() -> None:
+    view = SimpleNamespace(
+        inventory=(
+            SimpleNamespace(name="旧笔记本"),
+            SimpleNamespace(name="空白笔记本"),
+            SimpleNamespace(name="手电筒"),
+        )
+    )
+
+    resolution = _inventory_source_reference(
+        "从背包里拿出一本笔记本",
+        cast(Any, view),
+    )
+
+    assert resolution is not None
+    assert resolution.status == "ambiguous"
+    assert resolution.matched_item_names == ("旧笔记本", "空白笔记本")
+    result = ActionPlanTurnApplication._inventory_reference_result(
+        player_input=cast(Any, SimpleNamespace()),
+        player_view=cast(Any, view),
+        resolution=resolution,
+    )
+    assert result.status == "needs_clarification"
+    assert result.narration is not None
+    assert result.narration.kind == "clarification"
+    assert "旧笔记本、空白笔记本" in result.narration.text
+    assert "手电筒" not in result.narration.text
+
+
+def test_unique_or_non_inventory_reference_continues_normal_adjudication() -> None:
+    view = SimpleNamespace(
+        inventory=(
+            SimpleNamespace(name="笔记本与铅笔"),
+            SimpleNamespace(name="手电筒"),
+        )
+    )
+
+    unique = _inventory_source_reference("从背包里拿出笔记本", cast(Any, view))
+
+    assert unique is not None
+    assert unique.status == "matched"
+    assert unique.matched_item_names == ("笔记本与铅笔",)
+    assert (
+        _inventory_source_reference(
+            "从地上捡起一块石子",
+            cast(Any, view),
+        )
+        is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_missing_inventory_source_never_reaches_planner() -> None:
+    application = object.__new__(ActionPlanTurnApplication)
+    application._resolve_actor_id = AsyncMock(return_value="actor-334")
+    application._orchestrator = SimpleNamespace(
+        get_run=AsyncMock(return_value=None),
+        active_for_room=AsyncMock(return_value=None),
+    )
+    view = SimpleNamespace(
+        inventory=(
+            SimpleNamespace(name="笔记本与铅笔"),
+            SimpleNamespace(name="手电筒"),
+        )
+    )
+    application._projector = SimpleNamespace(project=AsyncMock(return_value=view))
+    application._planner = SimpleNamespace(generate=AsyncMock())
+
+    result = await application.start(
+        room_id="room-334",
+        player_id="player-334",
+        client_action_id="missing-drink",
+        utterance="从背包里拿出一瓶饮料递给托马斯",
+    )
+
+    assert result.status == "completed"
+    assert result.execution is None
+    assert result.narration is not None
+    assert result.narration.kind == "narration"
+    assert "背包里没有饮料" in result.narration.text
+    application._planner.generate.assert_not_awaited()
 
 
 @pytest.mark.asyncio

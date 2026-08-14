@@ -92,6 +92,8 @@ class _NarrationContextStub:
         self.narration_evidence = (evidence,)
         self.termination_status = termination_status
         self.narration_retry_hint: str | None = None
+        self.player_input = SimpleNamespace(client_action_id="action-narration-test")
+        self.completed_steps: tuple[object, ...] = ()
 
     def model_copy(self, *, update: dict[str, object]):
         copied = _NarrationContextStub(
@@ -130,6 +132,46 @@ def test_application_injects_plan_repair_dependencies_into_single_action_path() 
 
     assert application._dispatcher._repair_adjudicator is orchestrator.adjudicator
     assert application._dispatcher._policy is orchestrator.policy
+
+
+@pytest.mark.parametrize(
+    ("outcomes", "termination_status", "expected"),
+    (
+        (
+            ("failure",),
+            "resolved",
+            "这次行动未能成功，局面没有产生当前可确认的新结果。",
+        ),
+        (
+            ("success", "failure"),
+            "stopped",
+            "当前步骤未能成功；此前已经完成的步骤仍然保留。",
+        ),
+        (("cancelled",), "cancelled", "这次行动已经取消。"),
+        (("success",), "resolved", "这次行动已经按当前可确认的结果完成。"),
+    ),
+)
+def test_deterministic_narration_fallback_preserves_action_outcome(
+    outcomes: tuple[str, ...],
+    termination_status: str,
+    expected: str,
+) -> None:
+    """模型叙事被拒绝后，兜底文案仍必须忠实表达权威行动结果。"""
+
+    context = SimpleNamespace(
+        termination_status=termination_status,
+        player_input=SimpleNamespace(client_action_id="action-fallback"),
+        completed_steps=tuple(
+            SimpleNamespace(outcome=outcome, committed_results=()) for outcome in outcomes
+        ),
+        player_view=SimpleNamespace(
+            scene=SimpleNamespace(visible_entities=()),
+        ),
+    )
+
+    output = ActionPlanTurnApplication._deterministic_narration_fallback(cast(Any, context))
+
+    assert output.text == expected
 
 
 @pytest.mark.asyncio

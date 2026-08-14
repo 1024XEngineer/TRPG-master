@@ -1148,6 +1148,15 @@ class ActionPlanTurnApplication:
             try:
                 return await self._narrator.narrate(context)
             except ActionPlanNarrationValidationError as exc:
+                # 只记录校验类别和权威结果，不记录模型正文或其他敏感上下文。
+                logger.warning(
+                    "action_plan_narration_rejected",
+                    action=context.player_input.client_action_id,
+                    attempt=attempt + 1,
+                    reason=exc.reason,
+                    outcomes=tuple(step.outcome for step in context.completed_steps),
+                    termination_status=context.termination_status,
+                )
                 if attempt == 0 and exc.reason == "required_evidence_missing":
                     missing = tuple(
                         item for item in context.narration_evidence if item.required_in_narration
@@ -1248,8 +1257,26 @@ class ActionPlanTurnApplication:
             if label is not None
         ]
         refs = tuple(result.event_ref for result, label in results if label is not None)
+        outcomes = tuple(step.outcome for step in context.completed_steps)
+        if "cancelled" in outcomes or context.termination_status == "cancelled":
+            status_text = "这次行动已经取消。"
+        elif "failure" in outcomes:
+            # ActionPlan 可能保留此前成功步骤，因此失败文案要区分全部失败和部分完成。
+            status_text = (
+                "当前步骤未能成功；此前已经完成的步骤仍然保留。"
+                if "success" in outcomes
+                else "这次行动未能成功，局面没有产生当前可确认的新结果。"
+            )
+        else:
+            status_text = "这次行动已经按当前可确认的结果完成。"
+        if outcomes and outcomes[-1] != "success":
+            fallback_text = status_text + "".join(statements)
+        else:
+            fallback_text = "".join(statements) or status_text
         return ActionPlanNarrationOutput(
-            text="".join(statements) or "这次行动已经按当前可确认的结果完成。",
+            # 失败或取消时即使存在失败分支效果，也必须先明确行动结果，不能让
+            # 玩家把后面的状态变化误读成目标已经成功达成。
+            text=fallback_text,
             claimed_evidence_refs=refs,
         )
 

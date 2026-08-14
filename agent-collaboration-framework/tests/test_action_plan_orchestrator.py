@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+
 from collaboration_framework.contracts import (
     ActionAdjudication,
     ActionMethod,
@@ -65,6 +66,7 @@ from collaboration_framework.host.schemas import (
     ActionPlanRun,
     ActionPlanStepContext,
     ActionPlanStepRun,
+    SingleActionClarificationResult,
     SingleActionTurnResult,
 )
 
@@ -405,7 +407,9 @@ class AlwaysMissingTargetAdjudicator(RecordingAdjudicator):
             actor_id="untrusted",
             summary=context.step.semantic_goal,
             target=ActionTarget(kind="world", id="missing-target"),
-            method=ActionMethod(family="action", description=context.step.semantic_goal),
+            method=ActionMethod(
+                family="action", description=context.step.semantic_goal
+            ),
             check=NoAdjudicationCheck(),
             success_effects=(NarrativeOnlyEffect(),),
         )
@@ -1291,7 +1295,10 @@ async def test_engine_rejection_repair_is_attempted_at_most_once() -> None:
     assert failed.run.steps[1].repair_attempts == 1
     assert failed.run.steps[1].last_validation_code == "TARGET_UNAVAILABLE"
     assert failed.run.steps[1].last_validation_message == "当前目标不可用于这次行动"
-    assert len([context for context in adjudicator.contexts if context.step_index == 1]) == 2
+    assert (
+        len([context for context in adjudicator.contexts if context.step_index == 1])
+        == 2
+    )
     # The first step stays committed; the refused one never reaches the Engine.
     assert len(engine_store.inspect_domain_events("room_01")) == 1
 
@@ -1387,7 +1394,10 @@ async def test_zero_repair_budget_disables_plan_auto_repair() -> None:
     assert failed.run.status == "needs_clarification"
     assert failed.run.steps[1].repair_attempts == 0
     assert failed.run.steps[1].safe_failure_code == "REPAIR_BUDGET_EXHAUSTED"
-    assert len([context for context in adjudicator.contexts if context.step_index == 1]) == 1
+    assert (
+        len([context for context in adjudicator.contexts if context.step_index == 1])
+        == 1
+    )
     assert len(engine_store.inspect_domain_events("room_01")) == 1
 
 
@@ -1596,7 +1606,9 @@ async def test_single_action_fast_path_creates_no_plan_run() -> None:
     assert len(engine_store.inspect_domain_events("room_01")) == 1
 
 
-def single_action_decision(*, world_ref: str, valid_target: bool) -> SingleActionDecision:
+def single_action_decision(
+    *, world_ref: str, valid_target: bool
+) -> SingleActionDecision:
     return SingleActionDecision(
         adjudication=ActionAdjudication(
             request_id="untrusted",
@@ -1737,13 +1749,13 @@ async def test_single_action_repair_budget_is_finite() -> None:
     )
     original = player_input("single-repair-exhausted", "检查当前环境")
 
-    with pytest.raises(TurnExecutionError) as raised:
-        await dispatcher.execute(
-            original,
-            single_action_decision(world_ref=module.world_ref, valid_target=False),
-        )
+    result = await dispatcher.execute(
+        original,
+        single_action_decision(world_ref=module.world_ref, valid_target=False),
+    )
 
-    assert raised.value.code == "REPAIR_BUDGET_EXHAUSTED"
+    assert isinstance(result, SingleActionClarificationResult)
+    assert "确认具体目标" in result.player_safe_reason
     assert len(repair_adjudicator.contexts) == 1
     assert await plan_store.load(original.room_id, original.client_action_id) is None
     assert engine_store.inspect_domain_events(original.room_id) == ()
@@ -1775,22 +1787,22 @@ async def test_single_action_non_repairable_feedback_does_not_call_agent(
     )
     original = player_input(f"single-{repairability}", "检查当前环境")
 
-    with pytest.raises(AdjudicationValidationError) as raised:
-        await dispatcher.execute(
-            original,
-            single_action_decision(world_ref=module.world_ref, valid_target=True),
-        )
+    result = await dispatcher.execute(
+        original,
+        single_action_decision(world_ref=module.world_ref, valid_target=True),
+    )
 
-    feedback = raised.value.result.to_feedback()
-    assert feedback.code == "TEST_VALIDATION_REJECTION"
-    assert feedback.player_safe_reason == "这次行动需要停下确认"
+    assert isinstance(result, SingleActionClarificationResult)
+    assert result.player_safe_reason == "这次行动需要停下确认"
     assert repair_adjudicator.contexts == []
     assert await plan_store.load(original.room_id, original.client_action_id) is None
     assert engine_store.inspect_domain_events(original.room_id) == ()
 
 
 @pytest.mark.asyncio
-async def test_single_action_reconciles_commit_response_failure_without_repair() -> None:
+async def test_single_action_reconciles_commit_response_failure_without_repair() -> (
+    None
+):
     module, engine_store, projector = runtime()
     plan_store = InMemoryActionPlanRunStore()
     repair_adjudicator = RecordingAdjudicator(module.world_ref)

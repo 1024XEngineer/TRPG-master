@@ -19,10 +19,10 @@ from collaboration_framework.contracts import (
     ActionAdjudication,
     ActionEffect,
     ActionTarget,
-    AdvanceWorldTimeEffect,
-    AdjudicationRecovery,
     AdjudicationExecution,
+    AdjudicationRecovery,
     AdjudicationStatusView,
+    AdvanceWorldTimeEffect,
     ChangeEntityStateEffect,
     CheckDecisionRequest,
     CommitTerminalEndingEffect,
@@ -39,8 +39,8 @@ from collaboration_framework.contracts import (
     ItemDisplay,
     ItemInstance,
     ItemKnowledge,
-    MarkCoreResolvedEffect,
     LocationKnowledge,
+    MarkCoreResolvedEffect,
     MoveEntityEffect,
     NarrationEvidence,
     NarrativeOnlyEffect,
@@ -84,7 +84,6 @@ from .persistent_results import (
 )
 from .ports import EngineStore
 from .projection_v3 import project_v3
-from .timeline import advanced_to_next, next_point_after, time_advance_block_reason
 from .rules_v3 import (
     agenda_item_for_event,
     agenda_status_for_walk,
@@ -97,7 +96,7 @@ from .rules_v3 import (
     resolve_rule_option,
     walk_rule,
 )
-
+from .timeline import advanced_to_next, next_point_after, time_advance_block_reason
 
 logger = logging.getLogger(__name__)
 
@@ -1294,7 +1293,9 @@ class AdjudicationEngineService:
             if not runtime.is_v3:
                 self._reject_validation(
                     "RULE_OUT_OF_SCOPE",
-                    repairability="hard_reject",
+                    # 规则真实存在，只是 Agent 绑定了错误的动作族或目标；允许使用
+                    # 最新 PlayerView 重裁决一次，不应直接把内部错误抛给玩家。
+                    repairability="auto_repairable",
                     fault="agent",
                     player_safe_reason="当前行动不能使用该规则选项",
                 )

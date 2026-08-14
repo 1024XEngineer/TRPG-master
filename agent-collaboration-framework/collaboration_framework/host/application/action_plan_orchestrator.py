@@ -48,8 +48,8 @@ from collaboration_framework.host.schemas import (
     ActionPlanStepContext,
     ActionPlanStepRun,
     CompletedPlanStepSummary,
-    SingleActionTurnResult,
     SingleActionClarificationResult,
+    SingleActionTurnResult,
 )
 
 from .host_agent_intent_resolver import TurnExecutionError
@@ -324,7 +324,10 @@ class ActionPlanOrchestrator:
                             plan_status="stopped",
                         )
                         break
-                    if step_run.repair_attempts >= run.policy_snapshot.max_repair_attempts:
+                    if (
+                        step_run.repair_attempts
+                        >= run.policy_snapshot.max_repair_attempts
+                    ):
                         run = await self._stop_for_validation(
                             run,
                             feedback,
@@ -359,7 +362,9 @@ class ActionPlanOrchestrator:
                     )
                     return ActionPlanAdvanceResult(
                         run=run,
-                        player_view=await self._player_view_projector.project(player_input),
+                        player_view=await self._player_view_projector.project(
+                            player_input
+                        ),
                     )
                 current_view = await self._player_view_projector.project(player_input)
                 if (
@@ -723,7 +728,9 @@ class ActionPlanOrchestrator:
             or run.actor_id != player_input.actor_id
             or run.parent_action_id != player_input.client_action_id
         ):
-            raise ActionPlanPolicyError("PARENT_ACTION_CONFLICT", "行动计划 owner 不一致")
+            raise ActionPlanPolicyError(
+                "PARENT_ACTION_CONFLICT", "行动计划 owner 不一致"
+            )
         termination_by_status: dict[
             str,
             Literal["resolved", "needs_clarification", "cancelled", "stopped"],
@@ -1494,15 +1501,33 @@ class HostTurnDecisionExecutor:
                     "auto_repairable",
                     "retry_with_latest_revision",
                 }:
-                    raise
+                    # 单动作尚未产生权威写入时，以玩家安全理由进入主持人澄清，
+                    # 不把规则/Agent 内部校验错误直接暴露给玩家。
+                    return SingleActionClarificationResult(
+                        player_view=view,
+                        player_safe_reason=feedback.player_safe_reason,
+                        opening_world_time=WorldClockView.from_world(
+                            opening_view.world
+                        ),
+                    )
                 if self._repair_adjudicator is None:
-                    raise
+                    return SingleActionClarificationResult(
+                        player_view=view,
+                        player_safe_reason=feedback.player_safe_reason,
+                        opening_world_time=WorldClockView.from_world(
+                            opening_view.world
+                        ),
+                    )
                 if repair_attempts >= self._policy.max_repair_attempts:
-                    raise TurnExecutionError(
-                        "REPAIR_BUDGET_EXHAUSTED",
-                        "本次行动仍无法安全执行，需要玩家确认下一步",
-                        retryable=False,
-                    ) from exc
+                    return SingleActionClarificationResult(
+                        player_view=view,
+                        player_safe_reason=(
+                            "本次行动仍无法安全执行，请确认具体目标或换一种做法"
+                        ),
+                        opening_world_time=WorldClockView.from_world(
+                            opening_view.world
+                        ),
+                    )
                 repair_attempts += 1
                 view = await self._player_view_projector.project(player_input)
                 context = ActionPlanStepContext(

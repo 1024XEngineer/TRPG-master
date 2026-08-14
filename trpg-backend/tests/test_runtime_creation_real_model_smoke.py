@@ -13,7 +13,13 @@ import json
 import os
 
 import pytest
-from collaboration_framework.contracts import ActionPlan
+from collaboration_framework.contracts import (
+    ActionPlan,
+    EnsureRuntimeEntityEffect,
+    EnsureRuntimeLocationEffect,
+    EnterLocationEffect,
+    MoveEntityEffect,
+)
 from collaboration_framework.host.schemas import (
     HostAgentContext,
     RecentTurn,
@@ -180,11 +186,10 @@ async def test_real_model_materializes_ordinary_item_from_soft_narration_on_pick
 
     effects = result.success_effects
     print(json.dumps(result.model_dump(mode="json"), ensure_ascii=False))
-    assert [effect.type for effect in effects[:2]] == [
-        "ensure_runtime_entity",
-        "move_entity",
-    ]
-    assert effects[0].entity_id == effects[1].entity_id
+    created, moved = effects[0], effects[1]
+    assert isinstance(created, EnsureRuntimeEntityEffect)
+    assert isinstance(moved, MoveEntityEffect)
+    assert created.entity_id == moved.entity_id
     assert result.target.kind == "location"
     assert result.target.id == context.player_view.scene.id
 
@@ -253,8 +258,11 @@ async def test_real_model_respects_runtime_creation_boundary(
         assert effects[:2] == ["ensure_runtime_location", "enter_location"]
         assert result.persistence_intent == "location"
         assert result.target.kind == "location"
-        assert result.target.id != result.success_effects[0].location_id
-        assert result.success_effects[1].location_id == result.success_effects[0].location_id
+        created_location, entered = result.success_effects[0], result.success_effects[1]
+        assert isinstance(created_location, EnsureRuntimeLocationEffect)
+        assert isinstance(entered, EnterLocationEffect)
+        assert result.target.id != created_location.location_id
+        assert entered.location_id == created_location.location_id
     elif expectation == "unsafe_location":
         assert "ensure_runtime_location" not in effects
         assert "enter_location" not in effects

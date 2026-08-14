@@ -29,11 +29,13 @@ from collaboration_framework.contracts import (
     ActionTarget,
     EnsureRuntimeLocationEffect,
     EnterLocationEffect,
+    LocationContextView,
     ModuleContentV3,
     MoveEntityEffect,
     NarrativeOnlyEffect,
     NoAdjudicationCheck,
     PlayerInput,
+    PlayerView,
     RequiredAdjudicationCheck,
     SingleActionDecision,
 )
@@ -128,6 +130,14 @@ async def _cemetery_context(
             expected_revision=view.revision,
         ),
     )
+
+
+def _located(view: PlayerView) -> LocationContextView:
+    """v3 投影必然带 location_context；断言它在，顺带把 Optional 收窄掉。"""
+
+    location_context = view.location_context
+    assert location_context is not None
+    return location_context
 
 
 async def test_engine_publishes_rule_candidates_where_the_actor_stands() -> None:
@@ -400,7 +410,7 @@ async def test_travel_to_current_runtime_venue_is_a_successful_noop() -> None:
                 update={"id": "ambient_inn", "name": "镇上的旅店"},
                 deep=True,
             ),
-            "location_context": context.player_view.location_context.model_copy(
+            "location_context": _located(context.player_view).model_copy(
                 update={"current_location_id": "ambient_inn"},
                 deep=True,
             ),
@@ -472,7 +482,7 @@ async def test_travel_matching_uses_destination_name_not_shared_prefix() -> None
                 update={"id": "ambient_inn", "name": "镇上的旅店"},
                 deep=True,
             ),
-            "location_context": context.player_view.location_context.model_copy(
+            "location_context": _located(context.player_view).model_copy(
                 update={"current_location_id": "ambient_inn"},
                 deep=True,
             ),

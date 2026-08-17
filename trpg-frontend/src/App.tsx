@@ -85,6 +85,9 @@ function App() {
           <Route path="/home/my-rooms/review/:roomCode" element={<ReviewPage />} />
           <Route path="/home/profile" element={<ProfilePage />} />
           <Route path="/home/characters" element={<CharacterLibraryPage />} />
+          {/* 建卡向导的第二个宿主（#337 决策 A）：同一个页面，带 templateId 时
+              建的是卡库卡，不需要任何房间。 */}
+          <Route path="/home/characters/:templateId" element={<CharacterPage />} />
 
           {/* /room/* —— 已经加入/创建了房间之后的整条游戏内流程：大厅→建卡→
               建卡准备→聊天室，都是同一个房间生命周期里的阶段。 */}

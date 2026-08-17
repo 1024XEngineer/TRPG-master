@@ -130,3 +130,51 @@ export function templateDataFromBuilt(built: BuiltCharacter): CharacterTemplateD
     notes: built.notes,
   };
 }
+
+/**
+ * 把卡库卡摊平成建卡向导已经会读的那个形状（`CharacterRead`）。
+ *
+ * 建卡向导的水合逻辑（读回属性 → 走后端权威 preview 反推技能点 → 填表单）本身
+ * 跟"这张卡存在哪"无关。与其为卡库再写一份，不如把 `data` 这个 snake_case 的
+ * JSON 袋子适配成房间卡的形状，让两个宿主共用同一条水合路径——#337 的整个前提
+ * 就是这两者是同一种东西的两份拷贝。
+ *
+ * `derivedStats` 恒为空：卡库不存衍生值，它由属性算出来，preview 会给出权威值。
+ */
+export function characterReadFromTemplate(template: CharacterTemplate) {
+  const data = (template.data ?? {}) as CharacterTemplateData;
+  return {
+    id: template.templateId,
+    status: 'draft',
+    generationMethod: typeof data.generation_method === 'string' ? data.generation_method : 'pointbuy',
+    name: typeof data.name === 'string' ? data.name : template.name,
+    age: typeof data.age === 'number' ? data.age : null,
+    gender: typeof data.gender === 'string' ? data.gender : null,
+    residence: typeof data.residence === 'string' ? data.residence : '',
+    birthplace: typeof data.birthplace === 'string' ? data.birthplace : '',
+    attributes: (data.attributes ?? {}) as Record<string, number>,
+    derivedStats: {} as Record<string, number | string>,
+    skills: (data.skills ?? {}) as Record<string, number>,
+    occupationChoiceSkillIds: (data.occupation_choice_skill_ids ?? null) as string[] | null,
+    equipment: (data.equipment ?? []) as string[],
+    occupation: typeof data.occupation === 'string' ? data.occupation : null,
+    background: typeof data.background === 'string' ? data.background : '',
+    notes: typeof data.notes === 'string' ? data.notes : '',
+  };
+}
+
+/** 一键生成的返回同样摊平成向导认识的形状，好走同一条水合。 */
+export function quickGenerateResultAsCharacter(
+  templateId: string,
+  name: string,
+  result: Awaited<ReturnType<typeof quickGenerateTemplate>>
+) {
+  return characterReadFromTemplate({
+    templateId,
+    name,
+    systemId: '',
+    data: result.data,
+    createdAt: '',
+    updatedAt: '',
+  } as CharacterTemplate);
+}

@@ -53,9 +53,7 @@ export default function CharacterLibraryPage() {
     setError('')
     try {
       const created = await createCharacterTemplate('未命名调查员')
-      // TODO(#337 PR3)：建卡向导的宿主切换还没做，这里暂时只把新卡加进列表。
-      // 跳到 `/home/characters/:id` 需要那个页面先存在，否则是个死链。
-      setTemplates((current) => [created, ...(current ?? [])])
+      navigate(`/home/characters/${created.templateId}`)
     } catch (err) {
       setError(friendlyErrorMessage(err, '新建角色卡失败'))
     } finally {
@@ -115,14 +113,18 @@ export default function CharacterLibraryPage() {
                 key={template.templateId}
                 className="bg-card border border-border-light rounded-md p-[14px] flex items-center gap-3"
               >
-                <div className="flex-1 min-w-0">
+                <button
+                  type="button"
+                  onClick={() => navigate(`/home/characters/${template.templateId}`)}
+                  className="flex-1 min-w-0 text-left"
+                >
                   <div className="text-sm font-semibold text-text-primary truncate">
                     {template.name}
                   </div>
                   <div className="text-[11px] text-text-muted mt-0.5">
                     {summarize(template)} · {formatTime(template.updatedAt)}
                   </div>
-                </div>
+                </button>
                 {pendingDelete === template.templateId ? (
                   <div className="flex items-center gap-1.5">
                     <button

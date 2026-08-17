@@ -41,6 +41,7 @@ from app.dto.character import (
 )
 from app.dto.character_background import CharacterBackgroundContext, CharacterBackgroundSkill
 from app.dto.game import RulesetRead
+from app.models.content import GameSystem
 from app.models.room import Character, Player, Room
 from app.models.user import UserCharacterTemplate
 from app.service.character_background import CharacterBackgroundService
@@ -55,6 +56,10 @@ from app.service.room import (
 
 class CharacterNotFoundError(ValueError):
     """角色不存在。"""
+
+
+class CharacterInvalidDataError(ValueError):
+    """卡库卡的建卡态数据形状不合法（字段类型或长度），映射成 422。"""
 
 
 class CharacterInvalidError(ValueError):
@@ -115,6 +120,33 @@ def _character_template_data(character: Character) -> dict[str, object]:
     }
 
 
+# `characters` 上这几列的长度上限。卡库卡的 `data` 是客户端自由写入的 JSON，
+# 只校验总大小的话，一条 200 字的 name 能顺利存进卡库、却在播种时撑爆
+# `characters.name VARCHAR(100)`——SQLite 不强制长度所以本地和测试都看不见，
+# PostgreSQL 上是一个合法保存的卡永远播种不了（DataError → 500）。在保存卡库卡
+# 这一步就拦住，而不是等到播种时才失败。
+_SEEDABLE_MAX_LENGTHS: dict[str, int] = {
+    "name": 100,
+    "gender": 20,
+    "residence": 100,
+    "birthplace": 100,
+    "occupation": 100,
+    "background": 4000,
+    "notes": 4000,
+}
+
+
+def _require_seedable_lengths(data: dict) -> None:
+    for key, limit in _SEEDABLE_MAX_LENGTHS.items():
+        value = data.get(key)
+        if value is None:
+            continue
+        if not isinstance(value, str):
+            raise CharacterInvalidDataError(f"角色卡字段 {key} 必须是字符串")
+        if len(value) > limit:
+            raise CharacterInvalidDataError(f"角色卡字段 {key} 超过 {limit} 字上限")
+
+
 def _seed_character_from_template(character: Character, template: UserCharacterTemplate) -> None:
     """把卡库卡的建卡态字段拷进一张新的房间草稿。
 
@@ -128,7 +160,7 @@ def _seed_character_from_template(character: Character, template: UserCharacterT
     data = dict(template.data or {})
     character.based_on_template_id = template.id
     character.generation_method = data.get("generation_method") or GENERATION_POINT_BUY
-    character.name = data.get("name") or template.name
+    character.name = data.get("name")
     character.age = data.get("age")
     character.gender = data.get("gender")
     character.residence = data.get("residence") or ""
@@ -202,6 +234,10 @@ async def create_character_draft(
         )
         if existing is None:
             raise
+        # 并发下另一个请求先建成了草稿。带模板的请求在这里也必须报冲突，否则
+        # 前置查询挡住的那条路会从这里绕回来——又变成「201 成功但模板没应用」。
+        if based_on_template_id is not None:
+            raise RoomConflictError("本房间已有角色卡草稿，不能直接套用卡库角色卡") from None
         return CharacterDraftResult(
             character_id=existing.id,
             status=existing.status,
@@ -617,7 +653,14 @@ async def create_character_template(
 
     落库前把 `generation_method` 压成点数购买法：客户端提交的数据里那个字段没有
     任何背书价值，而它恰好是 `complete` 用来跳过点数预算校验的开关。
+
+    `system_id` 也要先确认存在。它是指向 `game_systems` 的外键，而本地和测试跑的
+    SQLite 关着外键约束、随便写什么都能落库；线上 PostgreSQL 会在 commit 那一刻
+    抛 IntegrityError，表现成 500。校验放在这里，两种方言都给同一个 404。
     """
+    if await db.get(GameSystem, payload.system_id) is None:
+        raise CharacterNotFoundError("规则系统不存在")
+    _require_seedable_lengths(payload.data)
     template = UserCharacterTemplate(
         user_id=user_id,
         system_id=payload.system_id,
@@ -647,6 +690,7 @@ async def update_character_template(
     if payload.name is not None:
         template.name = payload.name
     if payload.data is not None:
+        _require_seedable_lengths(payload.data)
         template.data = _data_with_attested_generation_method(
             dict(template.data or {}), dict(payload.data)
         )
@@ -757,6 +801,9 @@ async def quick_generate_template(
         "notes": generated.notes,
     }
     template.data = data
+    # 卡库列表展示的是顶层 name，不是 data.name。只更新后者的话，玩家一键生成出
+    # 「叶探员」，列表里还挂着建卡时那个占位名。
+    template.name = generated.name
     await db.commit()
     return SystemQuickGenerateResult(
         data=data,

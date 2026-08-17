@@ -59,6 +59,10 @@ def _not_found(exc: Exception) -> AppException:
     return AppException(ErrorCode.NOT_FOUND, str(exc), status.HTTP_404_NOT_FOUND)
 
 
+def _invalid_data(exc: Exception) -> AppException:
+    return AppException(ErrorCode.VALIDATION_ERROR, str(exc), status.HTTP_422_UNPROCESSABLE_CONTENT)
+
+
 @router.get("/character-templates", response_model=ApiResponse[list[CharacterTemplateRead]])
 async def list_character_templates(
     system_id: str | None = Query(default=None, alias="systemId", min_length=1),
@@ -86,7 +90,12 @@ async def create_character_template(
 ) -> ApiResponse[CharacterTemplateRead]:
     """POST /api/v1/me/character-templates —— 把一张角色卡保存为常用卡。"""
     user_id = await _require_user_id(authorization, db)
-    template = await character_service.create_character_template(db, user_id, payload)
+    try:
+        template = await character_service.create_character_template(db, user_id, payload)
+    except character_service.CharacterNotFoundError as exc:
+        raise _not_found(exc) from exc
+    except character_service.CharacterInvalidDataError as exc:
+        raise _invalid_data(exc) from exc
     return ApiResponse.ok(template)
 
 
@@ -125,6 +134,8 @@ async def update_character_template(
         )
     except character_service.CharacterNotFoundError as exc:
         raise _not_found(exc) from exc
+    except character_service.CharacterInvalidDataError as exc:
+        raise _invalid_data(exc) from exc
     return ApiResponse.ok(template)
 
 

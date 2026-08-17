@@ -9,12 +9,33 @@ from httpx import AsyncClient
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.seed import BUILTIN_SYSTEM_ID
+from app.core.seed import BUILTIN_GAME_ID, BUILTIN_SYSTEM_ID
+from app.models.content import GameSystem
 from app.models.room import Character
 from app.models.user import UserCharacterTemplate
 from tests.helpers import ROOMS_BASE, bearer, create_room, register
 
 TEMPLATES_BASE = "/api/v1/me/character-templates"
+# 另一个真实存在的规则系统。`user_character_templates.system_id` 是指向
+# `game_systems` 的外键——SQLite 关着外键约束，随便编个 UUID 也能落库，但
+# PostgreSQL 上那是 commit 时的 IntegrityError。用例要建真行，不能编 id。
+OTHER_SYSTEM_ID = "00000000-0000-0000-0000-0000000000fd"
+
+
+async def _ensure_other_system(db_session: AsyncSession) -> str:
+    if await db_session.get(GameSystem, OTHER_SYSTEM_ID) is None:
+        db_session.add(
+            GameSystem(
+                id=OTHER_SYSTEM_ID,
+                game_id=BUILTIN_GAME_ID,
+                world_ref="test-other-system",
+                name="另一个规则系统",
+                ruleset=None,
+            )
+        )
+        await db_session.commit()
+    return OTHER_SYSTEM_ID
+
 
 TEMPLATE_ATTRIBUTES: dict[str, int] = {
     "STR": 50,
@@ -139,12 +160,13 @@ async def test_another_players_template_is_indistinguishable_from_a_missing_one(
     assert still_there.json()["data"]["name"] == "陈探员"
 
 
-async def test_list_can_be_filtered_by_system(client: AsyncClient) -> None:
+async def test_list_can_be_filtered_by_system(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
     token = await register(client)
+    other_system_id = await _ensure_other_system(db_session)
     coc = await _create_template(client, token, name="COC 卡")
-    other = await _create_template(
-        client, token, name="别的系统的卡", system_id="00000000-0000-0000-0000-0000000000fe"
-    )
+    other = await _create_template(client, token, name="别的系统的卡", system_id=other_system_id)
 
     filtered = await client.get(
         TEMPLATES_BASE, params={"systemId": BUILTIN_SYSTEM_ID}, headers=bearer(token)
@@ -233,11 +255,12 @@ async def test_deleting_a_referenced_card_clears_provenance_instead_of_failing(
     assert stored.attributes == TEMPLATE_ATTRIBUTES
 
 
-async def test_seeding_refuses_a_card_from_another_rule_system(client: AsyncClient) -> None:
+async def test_seeding_refuses_a_card_from_another_rule_system(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
     token = await register(client)
-    template = await _create_template(
-        client, token, system_id="00000000-0000-0000-0000-0000000000fe"
-    )
+    other_system_id = await _ensure_other_system(db_session)
+    template = await _create_template(client, token, system_id=other_system_id)
     room = await create_room(client, token=token)
 
     draft = await client.post(
@@ -426,3 +449,68 @@ async def test_card_library_endpoints_require_login(client: AsyncClient) -> None
         response = await client.post(f"{TEMPLATES_BASE}/{template_id}/{path}")
         assert response.status_code == 401, response.text
     assert (await client.get(TEMPLATES_BASE)).status_code == 401
+
+
+async def test_saving_a_card_for_a_missing_rule_system_is_refused(client: AsyncClient) -> None:
+    """`system_id` 是外键。SQLite 关着约束随便编都能存，PostgreSQL 上是 500。"""
+    token = await register(client)
+
+    response = await client.post(
+        TEMPLATES_BASE,
+        json={
+            "name": "野系统卡",
+            "systemId": "00000000-0000-0000-0000-0000000000aa",
+            "data": TEMPLATE_DATA,
+        },
+        headers=bearer(token),
+    )
+
+    assert response.status_code == 404, response.text
+
+
+async def test_fields_that_would_overflow_character_columns_are_refused(
+    client: AsyncClient,
+) -> None:
+    """卡库能存、房间存不下的卡不该存在。
+
+    `characters.name` 是 VARCHAR(100)，而卡库的 `data` 只校验总大小。一条 200 字
+    的 name 在 SQLite 上一路畅通，到 PostgreSQL 就是「合法保存的卡永远播种不了」。
+    """
+    token = await register(client)
+
+    too_long = await client.post(
+        TEMPLATES_BASE,
+        json={
+            "name": "超长名字",
+            "systemId": BUILTIN_SYSTEM_ID,
+            "data": {**TEMPLATE_DATA, "name": "陈" * 101},
+        },
+        headers=bearer(token),
+    )
+    assert too_long.status_code == 422, too_long.text
+
+    created = await _create_template(client, token)
+    patched = await client.patch(
+        f"{TEMPLATES_BASE}/{created['templateId']}",
+        json={"data": {**TEMPLATE_DATA, "gender": "男" * 21}},
+        headers=bearer(token),
+    )
+    assert patched.status_code == 422, patched.text
+
+
+async def test_quick_generate_syncs_the_display_name(client: AsyncClient) -> None:
+    """卡库列表展示的是顶层 name，一键生成要把它一起更新。"""
+    token = await register(client)
+    template = await _create_template(client, token, name="占位名")
+
+    await client.post(
+        f"{TEMPLATES_BASE}/{template['templateId']}/quick-generate",
+        json={"name": "叶探员"},
+        headers=bearer(token),
+    )
+
+    listed = await client.get(TEMPLATES_BASE, headers=bearer(token))
+    entry = next(
+        item for item in listed.json()["data"] if item["templateId"] == template["templateId"]
+    )
+    assert entry["name"] == "叶探员"

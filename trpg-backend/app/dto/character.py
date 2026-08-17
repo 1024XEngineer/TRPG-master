@@ -11,9 +11,10 @@ RoomPlayer.has_character 标记为 True；但 issue #84 S2 起，`complete_chara
 `CharacterComputeResult`（`POST /systems/{systemId}/character/preview`）。
 """
 
+import json
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from app.dto.common import CamelModel, UtcDatetime
 
@@ -111,12 +112,35 @@ class RollAttributesResult(CamelModel):
     derived_stats: dict[str, int]
 
 
+# 卡库卡的 `data` 是 JSON 列，写入方是客户端。不设上限的话一次 PATCH 就能往
+# 单行里塞进任意大小的内容（实测 2MB 直接 201）。建卡态数据满打满算也就几 KB。
+CHARACTER_TEMPLATE_DATA_MAX_BYTES = 64 * 1024
+
+
+def _validate_template_data(value: dict) -> dict:
+    encoded = json.dumps(value, ensure_ascii=False).encode("utf-8")
+    if len(encoded) > CHARACTER_TEMPLATE_DATA_MAX_BYTES:
+        raise ValueError(f"角色卡数据过大（上限 {CHARACTER_TEMPLATE_DATA_MAX_BYTES} 字节）")
+    return value
+
+
 class CharacterTemplateCreateBody(CamelModel):
-    """POST /api/v1/me/character-templates 请求体。"""
+    """POST /api/v1/me/character-templates 请求体。
+
+    `data.generation_method` 由服务端决定，这里传什么都会被覆盖成点数购买法：
+    「属性是掷出来的」是一条**服务端背书**，只有服务端自己掷的那一次才能给出
+    （见 `POST /me/character-templates/{id}/roll-attributes`）。让客户端自己声明
+    的话，它只要写上 roll 就能跳过 `complete` 的点数预算校验，8 项全 90 也能过。
+    """
 
     name: str = Field(..., min_length=1, max_length=200)
     system_id: str = Field(..., min_length=1)
     data: dict = Field(default_factory=dict)
+
+    @field_validator("data")
+    @classmethod
+    def check_data_size(cls, value: dict) -> dict:
+        return _validate_template_data(value)
 
 
 class CharacterTemplateUpdateBody(CamelModel):
@@ -126,10 +150,19 @@ class CharacterTemplateUpdateBody(CamelModel):
     只改数据、或两个都改——两个字段都可选，`None` 表示这一次不动它。
 
     `data` 命中时是**整体覆盖**而不是合并：合并语义下前端删掉一项技能永远删不掉。
+
+    `data.generation_method` 同样不由客户端决定：只有「这次 PATCH 没有改动属性」
+    时服务端背书的 roll 才会保留，其余一律退回点数购买法。这跟房间版
+    `update_character` 对 `roll` 的处理是同一道闸。
     """
 
     name: str | None = Field(default=None, min_length=1, max_length=200)
     data: dict | None = None
+
+    @field_validator("data")
+    @classmethod
+    def check_data_size(cls, value: dict | None) -> dict | None:
+        return None if value is None else _validate_template_data(value)
 
 
 class CharacterTemplateRead(CamelModel):

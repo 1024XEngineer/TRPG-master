@@ -259,6 +259,11 @@ export interface CharacterRead {
 
 /**
  * POST /api/v1/me/character-templates 请求体。
+ *
+ * `data.generation_method` 由服务端决定，这里传什么都会被覆盖成点数购买法：
+ * 「属性是掷出来的」是一条**服务端背书**，只有服务端自己掷的那一次才能给出
+ * （见 `POST /me/character-templates/{id}/roll-attributes`）。让客户端自己声明
+ * 的话，它只要写上 roll 就能跳过 `complete` 的点数预算校验，8 项全 90 也能过。
  */
 export interface CharacterTemplateCreateBody {
   name: string;
@@ -289,6 +294,10 @@ export interface CharacterTemplateRead {
  * 只改数据、或两个都改——两个字段都可选，`None` 表示这一次不动它。
  *
  * `data` 命中时是**整体覆盖**而不是合并：合并语义下前端删掉一项技能永远删不掉。
+ *
+ * `data.generation_method` 同样不由客户端决定：只有「这次 PATCH 没有改动属性」
+ * 时服务端背书的 roll 才会保留，其余一律退回点数购买法。这跟房间版
+ * `update_character` 对 `roll` 的处理是同一道闸。
  */
 export interface CharacterTemplateUpdateBody {
   name?: string | null;

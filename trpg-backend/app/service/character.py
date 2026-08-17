@@ -151,8 +151,9 @@ async def create_character_draft(
     一张新草稿，把建卡态字段整体拷进来。拷贝之后房间角色卡是自足的，卡库卡后来
     改了或删了都不影响这一局。
 
-    已经有草稿时不覆盖，直接返回既有那张——玩家可能已经在上面改了半天，一次
-    「用卡库的卡」不该把它冲掉。要换卡得先明确处理既有草稿，那是另一条交互。
+    已经有草稿时**带模板会 409**，不会静默返回既有那张。前端多半在进页面时就建好
+    了草稿，所以「从卡库选卡」几乎必然撞上它；返回 201 加一张原封不动的空卡，看
+    起来是成功的、实际什么都没发生。要不要冲掉玩家已有的草稿，得让玩家自己决定。
     """
     room = await find_room_by_id(db, room_id)
     _require_character_editable(room)
@@ -167,6 +168,8 @@ async def create_character_draft(
         )
     )
     if existing is not None:
+        if based_on_template_id is not None:
+            raise RoomConflictError("本房间已有角色卡草稿，不能直接套用卡库角色卡")
         return CharacterDraftResult(
             character_id=existing.id,
             status=existing.status,
@@ -539,79 +542,6 @@ async def quick_generate_character(
     )
 
 
-# ── 不依赖房间的建卡（#337 决策 A：卡库也是建卡宿主） ──
-
-
-def roll_attributes_for_system() -> RollAttributesResult:
-    """纯掷骰，不落库。
-
-    房间版 `roll_attributes` 把结果写进 `characters` 才返回；卡库宿主没有那张
-    行，客户端拿到结果后自己 PATCH 进卡库卡。掷骰规则是同一份，抽出来共用，
-    免得两边各掷各的、哪天改了公式只改一处。
-    """
-    attributes = {
-        "STR": _roll(3, 6) * 5,
-        "CON": _roll(3, 6) * 5,
-        "DEX": _roll(3, 6) * 5,
-        "APP": _roll(3, 6) * 5,
-        "POW": _roll(3, 6) * 5,
-        "SIZ": (_roll(2, 6) + 6) * 5,
-        "INT": (_roll(2, 6) + 6) * 5,
-        "EDU": (_roll(2, 6) + 6) * 5,
-        "LUCK": _roll(3, 6) * 5,
-    }
-    return RollAttributesResult(
-        attributes=attributes,
-        derived_stats={
-            "HP": (attributes["CON"] + attributes["SIZ"]) // 10,
-            "MP": attributes["POW"] // 5,
-            "SAN": attributes["POW"],
-        },
-    )
-
-
-def quick_generate_for_system(
-    ruleset: RulesetRead, identity: QuickGenerateRequest | None = None
-) -> SystemQuickGenerateResult:
-    """一键生成一份建卡态数据，不落库、不生成背景故事。
-
-    背景故事要调模型（`CharacterBackgroundService`），房间版在那条链路上；这里
-    刻意不接——卡库建卡是玩家在自己账号下随手捏卡，不该每点一次就产生一次计费
-    请求。玩家想要生成的背景，可以在进房建卡时再要。
-    """
-    generated = generate_character_draft(ruleset)
-    if identity is not None:
-        generated = replace(
-            generated,
-            name=(
-                identity.name.strip() if identity.name and identity.name.strip() else generated.name
-            ),
-            age=identity.age if identity.age is not None else generated.age,
-            gender=identity.gender or generated.gender,
-            residence=identity.residence or generated.residence,
-            birthplace=identity.birthplace or generated.birthplace,
-        )
-    return SystemQuickGenerateResult(
-        data={
-            "generation_method": GENERATION_ROLL,
-            "name": generated.name,
-            "age": generated.age,
-            "gender": generated.gender,
-            "residence": generated.residence,
-            "birthplace": generated.birthplace,
-            "attributes": dict(generated.attributes),
-            "skills": dict(generated.skills),
-            "occupation_choice_skill_ids": list(generated.occupation_choice_skill_ids),
-            "equipment": list(generated.equipment),
-            "occupation": generated.occupation,
-            "background": generated.background,
-            "notes": generated.notes,
-        },
-        occupation_id=generated.occupation_id,
-        compute=CharacterComputeResult(**asdict(generated.compute_result)),
-    )
-
-
 # ── 我的常用角色卡库（#337：卡库卡是第一等实体，房间角色卡是它的一份拷贝） ──
 
 
@@ -624,6 +554,28 @@ def _template_read(template: UserCharacterTemplate) -> CharacterTemplateRead:
         created_at=template.created_at,
         updated_at=template.updated_at,
     )
+
+
+def _data_with_attested_generation_method(
+    stored: dict[str, object], incoming: dict[str, object]
+) -> dict[str, object]:
+    """`generation_method` 只能由服务端背书，客户端改不动它。
+
+    「属性是掷出来的」这条声明的唯一作用，是让 `complete` 跳过点数购买法的总预算
+    校验（掷骰结果经常超 480）。所以它必须来自服务端自己掷的那一次，否则客户端
+    写上 roll 就能让 8 项全 90 过关。
+
+    保留 roll 的唯一条件是这次写入**没有改动属性**——玩家改的是姓名、背景、技能
+    分配这些。一旦属性变了，就说明属性不再是服务端掷出来的那一份，退回点数购买法。
+    这跟房间版 `update_character` 里那道闸是同一个判据。
+    """
+    attested = stored.get("generation_method") == GENERATION_ROLL and incoming.get(
+        "attributes"
+    ) == stored.get("attributes")
+    return {
+        **incoming,
+        "generation_method": GENERATION_ROLL if attested else GENERATION_POINT_BUY,
+    }
 
 
 async def _own_template(db: AsyncSession, user_id: str, template_id: str) -> UserCharacterTemplate:
@@ -661,12 +613,16 @@ async def list_character_templates(
 async def create_character_template(
     db: AsyncSession, user_id: str, payload: CharacterTemplateCreateBody
 ) -> CharacterTemplateRead:
-    """显式保存一张卡库卡。"""
+    """显式保存一张卡库卡。
+
+    落库前把 `generation_method` 压成点数购买法：客户端提交的数据里那个字段没有
+    任何背书价值，而它恰好是 `complete` 用来跳过点数预算校验的开关。
+    """
     template = UserCharacterTemplate(
         user_id=user_id,
         system_id=payload.system_id,
         name=payload.name,
-        data=dict(payload.data),
+        data={**dict(payload.data), "generation_method": GENERATION_POINT_BUY},
     )
     db.add(template)
     await db.commit()
@@ -691,7 +647,9 @@ async def update_character_template(
     if payload.name is not None:
         template.name = payload.name
     if payload.data is not None:
-        template.data = dict(payload.data)
+        template.data = _data_with_attested_generation_method(
+            dict(template.data or {}), dict(payload.data)
+        )
     await db.commit()
     return _template_read(template)
 
@@ -716,3 +674,92 @@ async def delete_character_template(db: AsyncSession, user_id: str, template_id:
     )
     await db.delete(template)
     await db.commit()
+
+
+# ── 不依赖房间的建卡（#337 决策 A：卡库也是建卡宿主） ──
+#
+# 这两个端点挂在卡库卡下面而不是 `/systems/{id}` 下，是因为「属性是掷出来的」
+# 必须由服务端写进那张卡才算数。做成无状态、把点数交回客户端再让它自己 PATCH
+# 的话，服务端就无从区分「这是我掷的」和「客户端自己填的」——而这正是
+# `complete` 跳过点数预算校验的依据。
+
+
+async def roll_template_attributes(
+    db: AsyncSession, user_id: str, template_id: str
+) -> RollAttributesResult:
+    """服务端权威掷属性，直接写进这张卡库卡并背书为 roll。"""
+    template = await _own_template(db, user_id, template_id)
+    attributes = {
+        "STR": _roll(3, 6) * 5,
+        "CON": _roll(3, 6) * 5,
+        "DEX": _roll(3, 6) * 5,
+        "APP": _roll(3, 6) * 5,
+        "POW": _roll(3, 6) * 5,
+        "SIZ": (_roll(2, 6) + 6) * 5,
+        "INT": (_roll(2, 6) + 6) * 5,
+        "EDU": (_roll(2, 6) + 6) * 5,
+        "LUCK": _roll(3, 6) * 5,
+    }
+    template.data = {
+        **dict(template.data or {}),
+        "attributes": attributes,
+        "generation_method": GENERATION_ROLL,
+    }
+    await db.commit()
+    return RollAttributesResult(
+        attributes=attributes,
+        derived_stats={
+            "HP": (attributes["CON"] + attributes["SIZ"]) // 10,
+            "MP": attributes["POW"] // 5,
+            "SAN": attributes["POW"],
+        },
+    )
+
+
+async def quick_generate_template(
+    db: AsyncSession,
+    user_id: str,
+    template_id: str,
+    ruleset: RulesetRead,
+    identity: QuickGenerateRequest | None = None,
+) -> SystemQuickGenerateResult:
+    """一键生成一整份建卡态数据，写进这张卡库卡。
+
+    不生成 AI 背景故事：房间版那条链路会调模型，而卡库建卡是玩家在自己账号下
+    随手捏卡，不该每点一次就产生一次计费请求。想要生成的背景，进房建卡时再要。
+    """
+    template = await _own_template(db, user_id, template_id)
+    generated = generate_character_draft(ruleset)
+    if identity is not None:
+        generated = replace(
+            generated,
+            name=(
+                identity.name.strip() if identity.name and identity.name.strip() else generated.name
+            ),
+            age=identity.age if identity.age is not None else generated.age,
+            gender=identity.gender or generated.gender,
+            residence=identity.residence or generated.residence,
+            birthplace=identity.birthplace or generated.birthplace,
+        )
+    data: dict[str, object] = {
+        "generation_method": GENERATION_ROLL,
+        "name": generated.name,
+        "age": generated.age,
+        "gender": generated.gender,
+        "residence": generated.residence,
+        "birthplace": generated.birthplace,
+        "attributes": dict(generated.attributes),
+        "skills": dict(generated.skills),
+        "occupation_choice_skill_ids": list(generated.occupation_choice_skill_ids),
+        "equipment": list(generated.equipment),
+        "occupation": generated.occupation,
+        "background": generated.background,
+        "notes": generated.notes,
+    }
+    template.data = data
+    await db.commit()
+    return SystemQuickGenerateResult(
+        data=data,
+        occupation_id=generated.occupation_id,
+        compute=CharacterComputeResult(**asdict(generated.compute_result)),
+    )

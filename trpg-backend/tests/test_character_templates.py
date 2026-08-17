@@ -15,7 +15,18 @@ from app.models.user import UserCharacterTemplate
 from tests.helpers import ROOMS_BASE, bearer, create_room, register
 
 TEMPLATES_BASE = "/api/v1/me/character-templates"
-SYSTEMS_BASE = "/api/v1/systems"
+
+TEMPLATE_ATTRIBUTES: dict[str, int] = {
+    "STR": 50,
+    "CON": 60,
+    "POW": 55,
+    "DEX": 45,
+    "APP": 50,
+    "SIZ": 60,
+    "INT": 70,
+    "EDU": 80,
+    "LUCK": 50,
+}
 
 TEMPLATE_DATA = {
     "generation_method": "pointbuy",
@@ -24,17 +35,7 @@ TEMPLATE_DATA = {
     "gender": "男",
     "residence": "阿卡姆",
     "birthplace": "波士顿",
-    "attributes": {
-        "STR": 50,
-        "CON": 60,
-        "POW": 55,
-        "DEX": 45,
-        "APP": 50,
-        "SIZ": 60,
-        "INT": 70,
-        "EDU": 80,
-        "LUCK": 50,
-    },
+    "attributes": TEMPLATE_ATTRIBUTES,
     "skills": {"law": 55, "spot-hidden": 75, "credit-rating": 25},
     "occupation_choice_skill_ids": None,
     "equipment": ["左轮手枪"],
@@ -80,7 +81,7 @@ async def test_card_library_round_trip_without_any_room(client: AsyncClient) -> 
     assert renamed.status_code == 200
     assert renamed.json()["data"]["name"] == "陈探员（二版）"
     # 只传 name 时 data 必须原样留着，不能被当成"没传即清空"。
-    assert renamed.json()["data"]["data"]["attributes"] == TEMPLATE_DATA["attributes"]
+    assert renamed.json()["data"]["data"]["attributes"] == TEMPLATE_ATTRIBUTES
 
     deleted = await client.delete(
         f"{TEMPLATES_BASE}/{created['templateId']}", headers=bearer(token)
@@ -179,7 +180,7 @@ async def test_seeding_a_room_draft_copies_the_card_and_then_stands_alone(
     )
     body = read.json()["data"]
     assert body["name"] == "陈探员"
-    assert body["attributes"] == TEMPLATE_DATA["attributes"]
+    assert body["attributes"] == TEMPLATE_ATTRIBUTES
     assert body["skills"] == TEMPLATE_DATA["skills"]
     assert body["occupation"] == "私家侦探"
     # 局内状态不跟着卡库走：衍生值等 complete 时服务端按属性权威重算。
@@ -229,7 +230,7 @@ async def test_deleting_a_referenced_card_clears_provenance_instead_of_failing(
     assert stored.based_on_template_id is None
     # 房间卡自己的数据一点没少。
     assert stored.name == "陈探员"
-    assert stored.attributes == TEMPLATE_DATA["attributes"]
+    assert stored.attributes == TEMPLATE_ATTRIBUTES
 
 
 async def test_seeding_refuses_a_card_from_another_rule_system(client: AsyncClient) -> None:
@@ -277,40 +278,151 @@ async def test_room_scoped_building_still_works_without_a_template(client: Async
 
 
 async def test_rolling_and_generating_need_no_room(client: AsyncClient) -> None:
-    """无房间建卡链路：掷属性和一键生成都不需要 roomId，也都不落库。"""
+    """无房间建卡链路：掷属性和一键生成都挂在卡库卡下面，服务端直接写进那张卡。"""
     token = await register(client)
+    template = await _create_template(client, token)
+    template_id = template["templateId"]
 
     rolled = await client.post(
-        f"{SYSTEMS_BASE}/{BUILTIN_SYSTEM_ID}/character/roll-attributes", headers=bearer(token)
+        f"{TEMPLATES_BASE}/{template_id}/roll-attributes", headers=bearer(token)
     )
     assert rolled.status_code == 200, rolled.text
     attributes = rolled.json()["data"]["attributes"]
     assert set(attributes) == {"STR", "CON", "DEX", "APP", "POW", "SIZ", "INT", "EDU", "LUCK"}
     assert all(15 <= value <= 90 for value in attributes.values())
 
+    stored = await client.get(f"{TEMPLATES_BASE}/{template_id}", headers=bearer(token))
+    assert stored.json()["data"]["data"]["attributes"] == attributes
+    assert stored.json()["data"]["data"]["generation_method"] == "roll"
+
     generated = await client.post(
-        f"{SYSTEMS_BASE}/{BUILTIN_SYSTEM_ID}/character/quick-generate",
+        f"{TEMPLATES_BASE}/{template_id}/quick-generate",
         json={"name": "叶探员"},
         headers=bearer(token),
     )
     assert generated.status_code == 200, generated.text
     data = generated.json()["data"]["data"]
     assert data["name"] == "叶探员"
-    assert data["attributes"]
-    assert data["occupation"]
+    assert data["attributes"] and data["occupation"]
+    reread = await client.get(f"{TEMPLATES_BASE}/{template_id}", headers=bearer(token))
+    assert reread.json()["data"]["data"]["name"] == "叶探员"
 
-    # 生成结果与卡库卡的 data 同形，可以原样存回去，中间不用再拼字段。
-    saved = await client.post(
+
+async def test_a_client_cannot_claim_its_attributes_were_rolled(client: AsyncClient) -> None:
+    """自查抓到的洞：`generation_method` 是跳过点数预算校验的开关，不能由客户端声明。
+
+    改之前 `data` 是客户端全权写入的，只要写上 `roll` 再播种进房间，8 项全 90 的卡
+    也能 complete 成功——因为 roll 本来就允许超 480 总预算（掷骰经常超）。
+    """
+    token = await register(client)
+    maxed = {
+        **TEMPLATE_DATA,
+        "generation_method": "roll",
+        "attributes": dict.fromkeys(TEMPLATE_ATTRIBUTES, 90),
+    }
+
+    created = await client.post(
         TEMPLATES_BASE,
-        json={"name": data["name"], "systemId": BUILTIN_SYSTEM_ID, "data": data},
+        json={"name": "满属性", "systemId": BUILTIN_SYSTEM_ID, "data": maxed},
         headers=bearer(token),
     )
-    assert saved.status_code == 201
-    assert saved.json()["data"]["data"]["occupation"] == data["occupation"]
+    assert created.status_code == 201
+    assert created.json()["data"]["data"]["generation_method"] == "pointbuy"
+    template_id = created.json()["data"]["templateId"]
+
+    patched = await client.patch(
+        f"{TEMPLATES_BASE}/{template_id}",
+        json={"data": maxed},
+        headers=bearer(token),
+    )
+    assert patched.status_code == 200
+    assert patched.json()["data"]["data"]["generation_method"] == "pointbuy"
+
+    room = await create_room(client, token=token)
+    draft = await client.post(
+        f"{ROOMS_BASE}/{room['roomId']}/characters",
+        json={"basedOnTemplateId": template_id},
+        headers={"X-Reconnect-Token": room["reconnectToken"]},
+    )
+    completed = await client.post(
+        f"{ROOMS_BASE}/{room['roomId']}/characters/{draft.json()['data']['characterId']}/complete",
+        headers={"X-Reconnect-Token": room["reconnectToken"]},
+    )
+    assert completed.status_code == 422, completed.text
 
 
-async def test_no_room_endpoints_require_login(client: AsyncClient) -> None:
-    for path in ("character/roll-attributes", "character/quick-generate"):
-        response = await client.post(f"{SYSTEMS_BASE}/{BUILTIN_SYSTEM_ID}/{path}")
+async def test_server_rolled_attributes_survive_edits_that_leave_them_alone(
+    client: AsyncClient,
+) -> None:
+    """服务端掷出来的 roll 背书，在「只改姓名/技能」的保存里必须留住。
+
+    否则玩家在卡库里捏完一张掷骰卡，改一下名字就被降级成点数购买法，进房间
+    complete 会因为掷骰总点数超 480 而失败。
+    """
+    token = await register(client)
+    template = await _create_template(client, token)
+    template_id = template["templateId"]
+    await client.post(f"{TEMPLATES_BASE}/{template_id}/roll-attributes", headers=bearer(token))
+    rolled = (await client.get(f"{TEMPLATES_BASE}/{template_id}", headers=bearer(token))).json()[
+        "data"
+    ]["data"]
+
+    kept = await client.patch(
+        f"{TEMPLATES_BASE}/{template_id}",
+        json={"data": {**rolled, "name": "改个名字"}},
+        headers=bearer(token),
+    )
+    assert kept.json()["data"]["data"]["generation_method"] == "roll"
+
+    tampered = await client.patch(
+        f"{TEMPLATES_BASE}/{template_id}",
+        json={"data": {**rolled, "attributes": dict.fromkeys(TEMPLATE_ATTRIBUTES, 90)}},
+        headers=bearer(token),
+    )
+    assert tampered.json()["data"]["data"]["generation_method"] == "pointbuy"
+
+
+async def test_oversized_template_data_is_refused(client: AsyncClient) -> None:
+    token = await register(client)
+
+    response = await client.post(
+        TEMPLATES_BASE,
+        json={"name": "巨无霸", "systemId": BUILTIN_SYSTEM_ID, "data": {"junk": "x" * 200_000}},
+        headers=bearer(token),
+    )
+
+    assert response.status_code == 422, response.text
+
+
+async def test_seeding_onto_an_existing_draft_is_a_conflict(client: AsyncClient) -> None:
+    """已有草稿时带模板必须报错，不能返回 201 加一张原封不动的空卡。
+
+    前端多半在进页面时就建好了草稿，所以「从卡库选卡」几乎必然撞上这条路径；
+    静默忽略的话它看起来成功了、实际什么都没发生。
+    """
+    token = await register(client)
+    template = await _create_template(client, token)
+    room = await create_room(client, token=token)
+    headers = {"X-Reconnect-Token": room["reconnectToken"]}
+
+    first = await client.post(f"{ROOMS_BASE}/{room['roomId']}/characters", headers=headers)
+    assert first.status_code == 201
+
+    second = await client.post(
+        f"{ROOMS_BASE}/{room['roomId']}/characters",
+        json={"basedOnTemplateId": template["templateId"]},
+        headers=headers,
+    )
+
+    assert second.status_code == 409, second.text
+
+
+async def test_card_library_endpoints_require_login(client: AsyncClient) -> None:
+    token = await register(client)
+    template = await _create_template(client, token)
+    template_id = template["templateId"]
+
+    for path in ("roll-attributes", "quick-generate"):
+        response = await client.post(f"{TEMPLATES_BASE}/{template_id}/{path}")
         assert response.status_code == 401, response.text
     assert (await client.get(TEMPLATES_BASE)).status_code == 401

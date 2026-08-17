@@ -1,7 +1,10 @@
 import type { ApiClient } from '../client';
 import type {
   CharacterTemplate,
+  QuickGenerateInput,
+  RollAttributesResult,
   SaveCharacterTemplateInput,
+  SystemQuickGenerateOutput,
   UpdateCharacterTemplateInput,
 } from '../types';
 
@@ -75,6 +78,40 @@ export class CharacterTemplatesResource {
   remove(templateId: string, token: string): Promise<null> {
     return this.client.delete<null>(
       `/me/character-templates/${templateId}`,
+      this.authenticated(token)
+    );
+  }
+
+  /**
+   * POST /api/v1/me/character-templates/{templateId}/roll-attributes —— 服务端
+   * 权威掷属性，结果**直接写进这张卡**并背书为 roll（#337）。
+   *
+   * 写进服务端而不是交回客户端自己存，是因为「属性是掷出来的」这条声明的唯一
+   * 作用是让房间里的 complete 跳过点数预算校验。客户端能自己声明的话，8 项全
+   * 90 也能过关。之后任何改动属性的 update() 都会把这条背书退回点数购买法。
+   */
+  rollAttributes(templateId: string, token: string): Promise<RollAttributesResult> {
+    return this.client.post<RollAttributesResult>(
+      `/me/character-templates/${templateId}/roll-attributes`,
+      undefined,
+      this.authenticated(token)
+    );
+  }
+
+  /**
+   * POST /api/v1/me/character-templates/{templateId}/quick-generate —— 一键生成
+   * 一整份建卡态数据并写进这张卡（#337）。
+   *
+   * 不生成 AI 背景故事：卡库建卡是随手捏卡，不该每点一次就产生一次计费请求。
+   */
+  quickGenerate(
+    templateId: string,
+    payload: QuickGenerateInput | undefined,
+    token: string
+  ): Promise<SystemQuickGenerateOutput> {
+    return this.client.post<SystemQuickGenerateOutput>(
+      `/me/character-templates/${templateId}/quick-generate`,
+      payload,
       this.authenticated(token)
     );
   }

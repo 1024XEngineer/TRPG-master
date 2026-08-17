@@ -4,18 +4,23 @@
 第一等资产，房间角色卡是它的一份拷贝。
 """
 
-from fastapi import APIRouter, Depends, Header, Query, status
+from fastapi import APIRouter, Body, Depends, Header, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.controller.dependencies import extract_bearer_token, get_current_user
+from app.core.coc7_character_generation import CharacterGenerationError
 from app.core.db import get_db
 from app.core.errors import AppException, ErrorCode
 from app.dto.character import (
     CharacterTemplateCreateBody,
     CharacterTemplateRead,
     CharacterTemplateUpdateBody,
+    QuickGenerateRequest,
+    RollAttributesResult,
+    SystemQuickGenerateResult,
 )
 from app.dto.common import ApiResponse
+from app.dto.game import RulesetRead
 from app.dto.room import MyRoomSummary
 from app.models.user import User
 from app.service import auth as auth_service
@@ -139,3 +144,76 @@ async def delete_character_template(
     except character_service.CharacterNotFoundError as exc:
         raise _not_found(exc) from exc
     return ApiResponse.ok(None)
+
+
+# ── 不依赖房间的建卡（#337 决策 A） ─────────────────────────────────────────
+#
+# 挂在卡库卡下面而不是 `/systems/{systemId}` 下：服务端必须**把掷骰结果写进那张
+# 卡**，「属性是掷出来的」才算数。做成无状态、把点数交回客户端再让它自己 PATCH
+# 的话，服务端无从区分「这是我掷的」和「客户端自己填的」——而这正是 `complete`
+# 跳过点数预算校验的依据，客户端一旦能自称 roll，8 项全 90 也能过关。
+
+
+async def _template_ruleset(
+    db: AsyncSession, user_id: str, template_id: str
+) -> tuple[str, RulesetRead]:
+    """解析这张卡库卡所属规则系统的 ruleset，顺带确认卡是这个人的。"""
+    template = await character_service.get_character_template(db, user_id, template_id)
+    try:
+        return template.template_id, await room_service.require_ruleset(db, template.system_id)
+    except room_service.ModuleNotFoundError as exc:
+        raise AppException(ErrorCode.NOT_FOUND, str(exc), status.HTTP_404_NOT_FOUND) from exc
+    except room_service.RulesetNotConfiguredError as exc:
+        raise AppException(
+            ErrorCode.RULESET_NOT_CONFIGURED, str(exc), status.HTTP_409_CONFLICT
+        ) from exc
+
+
+@router.post(
+    "/character-templates/{template_id}/roll-attributes",
+    response_model=ApiResponse[RollAttributesResult],
+)
+async def roll_template_attributes(
+    template_id: str,
+    authorization: str | None = Header(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[RollAttributesResult]:
+    """POST /api/v1/me/character-templates/{templateId}/roll-attributes。
+
+    服务端权威掷骰，结果直接写进这张卡并背书为 roll。之后任何改动属性的 PATCH
+    都会把这条背书退回点数购买法。
+    """
+    user_id = await _require_user_id(authorization, db)
+    try:
+        await _template_ruleset(db, user_id, template_id)
+        result = await character_service.roll_template_attributes(db, user_id, template_id)
+    except character_service.CharacterNotFoundError as exc:
+        raise _not_found(exc) from exc
+    return ApiResponse.ok(result)
+
+
+@router.post(
+    "/character-templates/{template_id}/quick-generate",
+    response_model=ApiResponse[SystemQuickGenerateResult],
+)
+async def quick_generate_template(
+    template_id: str,
+    payload: QuickGenerateRequest | None = Body(default=None),
+    authorization: str | None = Header(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[SystemQuickGenerateResult]:
+    """POST /api/v1/me/character-templates/{templateId}/quick-generate。
+
+    一键生成一整份建卡态数据并写进这张卡。不生成 AI 背景故事（见 service 层）。
+    """
+    user_id = await _require_user_id(authorization, db)
+    try:
+        _, ruleset = await _template_ruleset(db, user_id, template_id)
+        result = await character_service.quick_generate_template(
+            db, user_id, template_id, ruleset, payload
+        )
+    except character_service.CharacterNotFoundError as exc:
+        raise _not_found(exc) from exc
+    except CharacterGenerationError as exc:
+        raise AppException(ErrorCode.CONFLICT, str(exc), status.HTTP_409_CONFLICT) from exc
+    return ApiResponse.ok(result)

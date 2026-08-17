@@ -1174,6 +1174,13 @@ export default function CharacterPage() {
     void handleSubmit()
   }
 
+  // 「已存入卡库」只对存下去的那一版成立。玩家继续改卡之后按钮还挂着这句话，
+  // 等于告诉他改动也保存了——而卡库里那张还是旧的。任何一处建卡输入变化就撤回
+  // 这个状态。
+  useEffect(() => {
+    setSavedToLibrary(false)
+  }, [info, attr, skillAlloc, occupationChoiceSkillIds, equipment, serializedBackground, notes])
+
   // 把当前正在捏的这张存进卡库。存的是建卡态，不带衍生值——后端 complete 时按
   // 属性权威重算，存一份只会过期。
   const handleSaveToLibrary = async () => {
@@ -1220,7 +1227,9 @@ export default function CharacterPage() {
   const handleOpenLibrary = async () => {
     setLibraryOpen(true)
     setLibraryError('')
-    if (libraryCards !== null) return
+    // 每次打开都重新拉：玩家可能刚点过"存入卡库"，缓存住的话新卡不会出现在
+    // 这个面板里，看起来就像刚才那次保存没生效。
+    setLibraryCards(null)
     try {
       setLibraryCards(await listCharacterTemplates())
     } catch (err) {

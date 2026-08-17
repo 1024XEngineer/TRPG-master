@@ -77,10 +77,6 @@ export function deleteCharacterTemplate(templateId: string): Promise<null> {
   return sdk.characterTemplates.remove(templateId, requireAuthToken());
 }
 
-export function rollTemplateAttributes(templateId: string) {
-  return sdk.characterTemplates.rollAttributes(templateId, requireAuthToken());
-}
-
 export function quickGenerateTemplate(
   templateId: string,
   identity?: { name?: string; age?: number | null; gender?: string; residence?: string; birthplace?: string }

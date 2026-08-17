@@ -258,7 +258,7 @@ export interface CharacterRead {
 }
 
 /**
- * POST /api/v1/me/character-templates 请求体（issue 决策 5，本期不实现）。
+ * POST /api/v1/me/character-templates 请求体。
  */
 export interface CharacterTemplateCreateBody {
   name: string;
@@ -269,7 +269,7 @@ export interface CharacterTemplateCreateBody {
 }
 
 /**
- * `我的常用角色卡` 列表/详情返回项（issue 决策 5，本期不实现）。
+ * `我的常用角色卡` 列表/详情返回项。
  */
 export interface CharacterTemplateRead {
   templateId: string;
@@ -280,6 +280,21 @@ export interface CharacterTemplateRead {
   };
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * PATCH /api/v1/me/character-templates/{templateId} 请求体（#337）。
+ *
+ * 卡库现在也是建卡的宿主，建卡向导的每一次保存都落到这里，所以要能只改名、
+ * 只改数据、或两个都改——两个字段都可选，`None` 表示这一次不动它。
+ *
+ * `data` 命中时是**整体覆盖**而不是合并：合并语义下前端删掉一项技能永远删不掉。
+ */
+export interface CharacterTemplateUpdateBody {
+  name?: string | null;
+  data?: {
+    [k: string]: unknown;
+  } | null;
 }
 
 /**
@@ -1455,6 +1470,24 @@ export interface SpendResourceOption {
   resource_id?: "luck";
   cost: number;
   result_degree: "critical_success" | "extreme_success" | "hard_success" | "regular_success" | "failure" | "fumble";
+}
+
+/**
+ * POST /api/v1/systems/{systemId}/character/quick-generate 返回（#337）。
+ *
+ * 不依赖房间的一键生成。跟房间版 `QuickGenerateResult` 的区别是它**不落库**：
+ * 没有 `characterId`，也没有 `status`，只把生成结果交回客户端，由客户端决定
+ * 存进哪张卡库卡（`PATCH /me/character-templates/{id}`）。
+ *
+ * `data` 与 `CharacterTemplateRead.data` 同形，可以原样 PATCH 回去，中间不用
+ * 再拼一次字段。
+ */
+export interface SystemQuickGenerateResult {
+  data: {
+    [k: string]: unknown;
+  };
+  occupationId?: number | null;
+  compute?: CharacterComputeResult | null;
 }
 
 export interface ToolCompletedPayload {

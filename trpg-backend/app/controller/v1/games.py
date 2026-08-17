@@ -7,13 +7,20 @@ issue #84 S2 补充建卡计算预览接口）。
 下而不是 `/games/{gameId}/systems/{systemId}`——跟 issue §2 的端点表一致。
 """
 
-from fastapi import APIRouter, Depends, Header, status
+from fastapi import APIRouter, Body, Depends, Header, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.controller.dependencies import extract_bearer_token
+from app.core.coc7_character_generation import CharacterGenerationError
 from app.core.db import get_db
 from app.core.errors import AppException, ErrorCode
-from app.dto.character import CharacterComputeResult, CharacterPreviewRequest
+from app.dto.character import (
+    CharacterComputeResult,
+    CharacterPreviewRequest,
+    QuickGenerateRequest,
+    RollAttributesResult,
+    SystemQuickGenerateResult,
+)
 from app.dto.common import ApiResponse
 from app.dto.game import GameRead, GameSystemRead, RulesetRead
 from app.service import auth as auth_service
@@ -93,4 +100,62 @@ async def preview_character(
             ErrorCode.RULESET_NOT_CONFIGURED, str(exc), status.HTTP_409_CONFLICT
         ) from exc
     result = character_service.compute_character_preview(ruleset, payload)
+    return ApiResponse.ok(result)
+
+
+async def _require_ruleset_for_system(system_id: str, db: AsyncSession) -> RulesetRead:
+    """#337 的两个无房间建卡端点共用的 systemId 解析。
+
+    与 `preview_character` 同一口径：要求登录、但不要求是房间成员——卡库建卡
+    本来就发生在任何房间之外。
+    """
+    try:
+        return await room_service.require_ruleset(db, system_id)
+    except room_service.ModuleNotFoundError as exc:
+        raise AppException(ErrorCode.NOT_FOUND, str(exc), status.HTTP_404_NOT_FOUND) from exc
+    except room_service.RulesetNotConfiguredError as exc:
+        raise AppException(
+            ErrorCode.RULESET_NOT_CONFIGURED, str(exc), status.HTTP_409_CONFLICT
+        ) from exc
+
+
+@systems_router.post(
+    "/{system_id}/character/roll-attributes", response_model=ApiResponse[RollAttributesResult]
+)
+async def roll_attributes_for_system(
+    system_id: str,
+    authorization: str | None = Header(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[RollAttributesResult]:
+    """POST /api/v1/systems/{systemId}/character/roll-attributes —— 无房间掷属性。
+
+    房间版会把结果写进那张房间角色卡；这里只把点数交回客户端，由它决定存进哪张
+    卡库卡。掷骰仍然在服务端做，前端不允许自己 `Math.random()`（issue #77）。
+    """
+    await _require_user_id(authorization, db)
+    await _require_ruleset_for_system(system_id, db)
+    return ApiResponse.ok(character_service.roll_attributes_for_system())
+
+
+@systems_router.post(
+    "/{system_id}/character/quick-generate",
+    response_model=ApiResponse[SystemQuickGenerateResult],
+)
+async def quick_generate_for_system(
+    system_id: str,
+    payload: QuickGenerateRequest | None = Body(default=None),
+    authorization: str | None = Header(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[SystemQuickGenerateResult]:
+    """POST /api/v1/systems/{systemId}/character/quick-generate —— 无房间一键生成。
+
+    不落库、也不生成 AI 背景故事（见 service 层说明）。返回的 `data` 与卡库卡的
+    `data` 同形，客户端可以原样 PATCH 回去。
+    """
+    await _require_user_id(authorization, db)
+    ruleset = await _require_ruleset_for_system(system_id, db)
+    try:
+        result = character_service.quick_generate_for_system(ruleset, payload)
+    except CharacterGenerationError as exc:
+        raise AppException(ErrorCode.CONFLICT, str(exc), status.HTTP_409_CONFLICT) from exc
     return ApiResponse.ok(result)

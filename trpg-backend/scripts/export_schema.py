@@ -95,7 +95,9 @@ _MODELS: list[type[BaseModel]] = [
     character.QuickGenerateRequest,
     character.QuickGenerateResult,
     character.CharacterTemplateCreateBody,
+    character.CharacterTemplateUpdateBody,
     character.CharacterTemplateRead,
+    character.SystemQuickGenerateResult,
     # 建卡计算/校验预览（issue #84 S2）
     character.CharacterPreviewRequest,
     character.SkillPointsBudgetView,

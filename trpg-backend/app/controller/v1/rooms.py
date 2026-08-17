@@ -320,8 +320,8 @@ async def create_character(
 ) -> ApiResponse[CharacterDraftResult]:
     """POST /api/v1/rooms/{roomId}/characters —— 玩家创建一份角色草稿。
 
-    `basedOnTemplateId`（issue #77 新增第三条建卡路径，见 CharacterCreateBody
-    的说明）本期未实现，带了这个字段会直接收到 NOT_IMPLEMENTED。
+    `basedOnTemplateId`（#337 落地）：从玩家自己的卡库卡播种这份草稿。卡不是
+    自己的、或属于别的规则系统都会被拒绝，见 service 层说明。
     """
     based_on_template_id = payload.based_on_template_id if payload else None
     try:
@@ -329,6 +329,7 @@ async def create_character(
             db, room_id, reconnect_token, based_on_template_id
         )
     except (
+        character_service.CharacterNotFoundError,
         room_service.RoomNotFoundError,
         room_service.RoomAuthenticationError,
         room_service.RoomAuthorizationError,

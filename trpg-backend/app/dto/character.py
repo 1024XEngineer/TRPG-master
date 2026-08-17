@@ -112,15 +112,28 @@ class RollAttributesResult(CamelModel):
 
 
 class CharacterTemplateCreateBody(CamelModel):
-    """POST /api/v1/me/character-templates 请求体（issue 决策 5，本期不实现）。"""
+    """POST /api/v1/me/character-templates 请求体。"""
 
     name: str = Field(..., min_length=1, max_length=200)
     system_id: str = Field(..., min_length=1)
     data: dict = Field(default_factory=dict)
 
 
+class CharacterTemplateUpdateBody(CamelModel):
+    """PATCH /api/v1/me/character-templates/{templateId} 请求体（#337）。
+
+    卡库现在也是建卡的宿主，建卡向导的每一次保存都落到这里，所以要能只改名、
+    只改数据、或两个都改——两个字段都可选，`None` 表示这一次不动它。
+
+    `data` 命中时是**整体覆盖**而不是合并：合并语义下前端删掉一项技能永远删不掉。
+    """
+
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    data: dict | None = None
+
+
 class CharacterTemplateRead(CamelModel):
-    """`我的常用角色卡` 列表/详情返回项（issue 决策 5，本期不实现）。"""
+    """`我的常用角色卡` 列表/详情返回项。"""
 
     template_id: str
     name: str
@@ -193,3 +206,19 @@ class QuickGenerateResult(CamelModel):
     character: CharacterRead
     occupation_id: int
     compute: CharacterComputeResult
+
+
+class SystemQuickGenerateResult(CamelModel):
+    """POST /api/v1/systems/{systemId}/character/quick-generate 返回（#337）。
+
+    不依赖房间的一键生成。跟房间版 `QuickGenerateResult` 的区别是它**不落库**：
+    没有 `characterId`，也没有 `status`，只把生成结果交回客户端，由客户端决定
+    存进哪张卡库卡（`PATCH /me/character-templates/{id}`）。
+
+    `data` 与 `CharacterTemplateRead.data` 同形，可以原样 PATCH 回去，中间不用
+    再拼一次字段。
+    """
+
+    data: dict
+    occupation_id: int | None = None
+    compute: CharacterComputeResult | None = None

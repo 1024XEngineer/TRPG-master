@@ -6,8 +6,11 @@ import type { Attributes, InvestigatorInfo } from '@/data/character-model'
 import { useCharacterStore } from '@/stores/character-store'
 import { useRoomStore } from '@/stores/room-store'
 import { createCharacterDraft, saveCharacter, completeCharacter, fetchCharacter, quickGenerateCharacter, type BuiltCharacter } from '@/services/character/character-api'
+import type { CharacterTemplate } from '@/services/character/template-api'
 import {
   characterReadFromTemplate,
+  createCharacterTemplate,
+  listCharacterTemplates,
   getCharacterTemplate,
   quickGenerateResultAsCharacter,
   quickGenerateTemplate,
@@ -15,7 +18,7 @@ import {
   updateCharacterTemplate,
 } from '@/services/character/template-api'
 import { previewCharacter, translateCharacterValidationError } from '@/services/character/ruleset-api'
-import { disconnectWebSocket, friendlyErrorMessage } from '@/services/api-client'
+import { ApiError, disconnectWebSocket, friendlyErrorMessage } from '@/services/api-client'
 import { useRuleset } from '@/hooks/useRuleset'
 import type { OccupationSpec, SkillSpec } from '@/data/types'
 import {
@@ -449,6 +452,13 @@ export default function CharacterPage() {
   const [choiceActionError, setChoiceActionError] = useState('')
   const [quickGenerating, setQuickGenerating] = useState(false)
   const [quickGenerateError, setQuickGenerateError] = useState('')
+  // 车卡界面与卡库之间的两条通路（#337）：把当前这张存进卡库，或从卡库选一张
+  // 播种成本房间的草稿。只对房间宿主成立——卡库宿主本身就在编辑卡库卡。
+  const [libraryOpen, setLibraryOpen] = useState(false)
+  const [libraryCards, setLibraryCards] = useState<CharacterTemplate[] | null>(null)
+  const [libraryError, setLibraryError] = useState('')
+  const [libraryBusy, setLibraryBusy] = useState(false)
+  const [savedToLibrary, setSavedToLibrary] = useState(false)
   const [showQuickGenerateConfirm, setShowQuickGenerateConfirm] = useState(false)
 
   const selectedOcc = useMemo(() => {
@@ -1164,6 +1174,84 @@ export default function CharacterPage() {
     void handleSubmit()
   }
 
+  // 把当前正在捏的这张存进卡库。存的是建卡态，不带衍生值——后端 complete 时按
+  // 属性权威重算，存一份只会过期。
+  const handleSaveToLibrary = async () => {
+    if (libraryBusy) return
+    setLibraryBusy(true)
+    setLibraryError('')
+    setSavedToLibrary(false)
+    try {
+      const { preview: finalPreview, skillValues: skillsPayload } =
+        await previewWithAllocations(
+          attr,
+          info.occupationId,
+          skillAlloc,
+          occupationChoiceSkillIds,
+          generationMethod,
+        )
+      const finalDerived = normalizeDerivedStats(finalPreview.derivedStats)
+      await createCharacterTemplate(
+        info.name.trim() || '未命名调查员',
+        templateDataFromBuilt({
+          name: info.name,
+          age: info.age ? Number(info.age) : null,
+          gender: info.gender || null,
+          residence: info.residence,
+          birthplace: info.birthplace,
+          attr,
+          derived: { hp: finalDerived.hp, san: finalDerived.san, mp: finalDerived.mp },
+          skillValues: skillsPayload,
+          occupationChoiceSkillIds,
+          equipment,
+          occupationName: selectedOcc?.name ?? null,
+          background: serializedBackground,
+          notes,
+        }),
+      )
+      setSavedToLibrary(true)
+    } catch (err) {
+      setLibraryError(friendlyErrorMessage(err, '保存到角色卡库失败'))
+    } finally {
+      setLibraryBusy(false)
+    }
+  }
+
+  const handleOpenLibrary = async () => {
+    setLibraryOpen(true)
+    setLibraryError('')
+    if (libraryCards !== null) return
+    try {
+      setLibraryCards(await listCharacterTemplates())
+    } catch (err) {
+      setLibraryError(friendlyErrorMessage(err, '加载角色卡库失败'))
+    }
+  }
+
+  // 用卡库的卡开这一局。后端在已有草稿时会 409（不静默忽略玩家改了一半的
+  // 草稿），这里把它翻成人话而不是抛一个通用错误。
+  const handleUseLibraryCard = async (templateId: string) => {
+    if (!roomId || libraryBusy) return
+    setLibraryBusy(true)
+    setLibraryError('')
+    try {
+      const characterId = await createCharacterDraft(roomId, templateId)
+      setCharacterId(characterId)
+      setLibraryOpen(false)
+      // 草稿已经带着卡库卡的数据落库了，重新进这个页面让既有的水合逻辑把它读回
+      // 表单——不在这里再抄一遍字段映射。
+      navigate(0)
+    } catch (err) {
+      setLibraryError(
+        err instanceof ApiError && err.status === 409
+          ? '本房间已经有一张角色卡草稿了。想换成卡库里的卡，请先处理掉当前草稿。'
+          : friendlyErrorMessage(err, '套用角色卡失败'),
+      )
+    } finally {
+      setLibraryBusy(false)
+    }
+  }
+
   const handleSubmit = async () => {
     if (!isTemplateHost && !roomId) {
       setSubmitError('房间信息丢失，请重新创建/加入房间')
@@ -1404,6 +1492,60 @@ export default function CharacterPage() {
           {/* ═══════════════ Step 0: Info + Occupation ═══════════════ */}
           {step === 0 && (
             <div id="character-step-info" role="tabpanel" aria-labelledby="character-tab-info" className="character-create__page character-create__page--info px-5 pb-20 animate-screen-in">
+              {/* 车卡界面与卡库的两条通路（#337）。只对房间宿主显示——卡库宿主
+                  本身就在编辑卡库卡，"存进卡库"和"从卡库选"都没有意义。 */}
+              {!isTemplateHost && roomId && (
+                <div className="mb-3 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleOpenLibrary}
+                    disabled={libraryBusy}
+                    className="flex-1 px-3 py-2 rounded-sm text-xs font-semibold bg-card text-text-body border border-border-mid active:bg-panel active:scale-[0.97] transition-all disabled:opacity-60"
+                  >
+                    从卡库选卡
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveToLibrary}
+                    disabled={libraryBusy || !info.name.trim()}
+                    className="flex-1 px-3 py-2 rounded-sm text-xs font-semibold bg-card text-text-body border border-border-mid active:bg-panel active:scale-[0.97] transition-all disabled:opacity-40"
+                  >
+                    {libraryBusy ? '处理中…' : savedToLibrary ? '已存入卡库' : '存入卡库'}
+                  </button>
+                </div>
+              )}
+              {libraryError && (
+                <p className="mb-3 text-[11px] text-[#c04040] text-center">{libraryError}</p>
+              )}
+              {libraryOpen && (
+                <div className="mb-3 rounded-sm border border-border-mid bg-card p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-text-primary">我的角色卡</span>
+                    <button
+                      type="button"
+                      onClick={() => setLibraryOpen(false)}
+                      className="text-[11px] text-text-muted"
+                    >
+                      收起
+                    </button>
+                  </div>
+                  {libraryCards === null && <p className="text-[11px] text-text-dim">加载中…</p>}
+                  {libraryCards !== null && libraryCards.length === 0 && (
+                    <p className="text-[11px] text-text-dim">卡库里还没有角色卡。</p>
+                  )}
+                  {libraryCards?.map((card) => (
+                    <button
+                      key={card.templateId}
+                      type="button"
+                      onClick={() => handleUseLibraryCard(card.templateId)}
+                      disabled={libraryBusy}
+                      className="w-full text-left px-3 py-2 rounded-sm border border-border-light active:bg-panel active:scale-[0.99] transition-all disabled:opacity-60"
+                    >
+                      <span className="text-xs font-semibold text-text-primary">{card.name}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
               <div className="character-create__quick-wrap mb-3">
                 <button
                   type="button"

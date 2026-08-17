@@ -7,46 +7,82 @@ import { useCharacterStore } from '@/stores/character-store'
 import { updateProfile, fetchMe, logout as logoutFromServer } from '@/services/auth'
 import { friendlyErrorMessage } from '@/services/api-client'
 
+export function archiveNumber(userId: string | null): string {
+  if (!userId) return '----'
+
+  let hash = 0
+  for (const character of userId) {
+    hash = (hash * 31 + character.charCodeAt(0)) % 10_000
+  }
+  return hash.toString().padStart(4, '0')
+}
+
 export default function ProfilePage() {
   const navigate = useNavigate()
+  const userId = useAuthStore((state) => state.userId)
+  const nickname = useAuthStore((state) => state.nickname)
+  const setNickname = useAuthStore((state) => state.setNickname)
+  const clearAuthStore = useAuthStore((state) => state.logout)
+  const resetRoomStore = useRoomStore((state) => state.reset)
+  const clearCharacterStore = useCharacterStore((state) => state.clear)
   const [account, setAccount] = useState('')
-  const nickname = useAuthStore((s) => s.nickname)
-  const setNickname = useAuthStore((s) => s.setNickname)
-  const clearAuthStore = useAuthStore((s) => s.logout)
-  const resetRoomStore = useRoomStore((s) => s.reset)
-  const clearCharacterStore = useCharacterStore((s) => s.clear)
   const [draft, setDraft] = useState(nickname || '')
+  const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [loggingOut, setLoggingOut] = useState(false)
   const [error, setError] = useState('')
   const [saved, setSaved] = useState(false)
 
   useEffect(() => {
-    fetchMe().then((me) => { if (me) setAccount(me.account) })
-  }, [])
+    let active = true
+
+    fetchMe()
+      .then((me) => {
+        if (!active) return
+        if (!me) {
+          setError('档案读取失败，请稍后重试')
+          return
+        }
+        setAccount(me.account)
+        setDraft(me.nickname)
+        setNickname(me.nickname)
+      })
+      .catch(() => {
+        if (active) setError('档案读取失败，请稍后重试')
+      })
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [setNickname])
+
+  const trimmedDraft = draft.trim()
+  const canSave = !loading && !saving && Boolean(trimmedDraft) && trimmedDraft !== nickname
 
   const handleSave = async () => {
-    if (!draft.trim() || draft === nickname) return
+    if (!canSave) return
     setSaving(true)
     setError('')
     setSaved(false)
     try {
-      const res = await updateProfile(draft.trim())
-      setNickname(res.nickname)
+      const result = await updateProfile(trimmedDraft)
+      setDraft(result.nickname)
+      setNickname(result.nickname)
       setSaved(true)
-    } catch (err) {
-      setError(friendlyErrorMessage(err, '保存失败'))
+    } catch (caughtError) {
+      setError(friendlyErrorMessage(caughtError, '保存失败，请稍后重试'))
     } finally {
       setSaving(false)
     }
   }
 
   const handleLogout = async () => {
-    // 之前只清了 auth-store 的内存状态，没调用 services/auth.ts 里真正撤销
-    // 后端会话 + 清掉 localStorage token 的 logout()——退出后刷新页面，
-    // App 的 fetchMe() 会拿着还没失效的 token 把用户自动重新登进去。
-    await logoutFromServer().catch(() => {
-      // 后端调用失败也无所谓，本地状态照样清掉，让用户回到登录页。
-    })
+    if (loggingOut) return
+    setLoggingOut(true)
+    await logoutFromServer().catch(() => undefined)
     clearAuthStore()
     resetRoomStore()
     clearCharacterStore()
@@ -54,54 +90,124 @@ export default function ProfilePage() {
   }
 
   return (
-    <div className="animate-screen-in min-h-screen bg-page pb-10">
-      <div className="flex items-center gap-2.5 px-5 pt-3 pb-2">
-        <button onClick={() => navigate('/home')} className="w-[34px] h-[34px] rounded-full bg-card border border-border-light flex items-center justify-center active:bg-panel active:scale-[0.94] transition-all">
-          <ArrowLeft className="w-[18px] h-[18px] text-text-muted" strokeWidth={2.5} />
-        </button>
-        <h2 className="text-lg font-bold text-text-primary">个人信息</h2>
-      </div>
-
-      <div className="px-5 flex flex-col items-center pt-6 pb-8">
-        <div className="w-16 h-16 rounded-full bg-brass/15 text-brass-dark text-2xl font-bold flex items-center justify-center">
-          {(draft || nickname)?.charAt(0) || '?'}
-        </div>
-      </div>
-
-      <div className="px-5 space-y-3.5">
-        <div className="bg-card border border-border-light rounded-md p-[18px]">
-          <label className="text-[11px] font-medium text-text-muted mb-1 block">昵称</label>
-          <input
-            value={draft}
-            onChange={(e) => { setDraft(e.target.value); setSaved(false) }}
-            placeholder="输入昵称"
-            className="w-full px-3.5 py-2.5 rounded-[6px] bg-input border border-border-light text-text-primary text-[15px] outline-none focus:border-brass"
-          />
-        </div>
-
-        <div className="bg-card border border-border-light rounded-md p-[18px]">
-          <label className="text-[11px] font-medium text-text-muted mb-1 block">账号</label>
-          <p className="text-[15px] text-text-dim">{account}</p>
-        </div>
-
-        {error && <p className="text-[11px] text-[#c04040] text-center">{error}</p>}
-        {saved && <p className="text-[11px] text-brass-dark text-center">已保存</p>}
+    <section className="profile-scene" aria-labelledby="profile-page-title">
+      <div className="profile-scene__artboard">
+        <img
+          className="profile-scene__background"
+          src="/assets/profile/background.webp"
+          alt=""
+          aria-hidden="true"
+          width={864}
+          height={1821}
+        />
 
         <button
-          onClick={handleSave}
-          disabled={saving || !draft.trim() || draft === nickname}
-          className="w-full py-3.5 rounded-sm text-sm font-semibold transition-all bg-brass text-white active:bg-brass-dark active:scale-[0.97] disabled:opacity-40 disabled:cursor-not-allowed"
+          type="button"
+          className="profile-scene__back"
+          onClick={() => navigate('/home')}
+          aria-label="返回首页"
         >
-          {saving ? '保存中…' : '保存'}
+          <ArrowLeft aria-hidden="true" />
         </button>
 
-        <button
-          onClick={handleLogout}
-          className="w-full py-3.5 rounded-sm text-sm font-semibold border border-[#c04040]/40 text-[#c04040] flex items-center justify-center gap-2 active:bg-[#c04040]/5 transition-all"
+        <img
+          className="profile-scene__title"
+          src="/assets/profile/title-plaque.webp"
+          alt=""
+          aria-hidden="true"
+          width={471}
+          height={129}
+        />
+        <h1 id="profile-page-title" className="sr-only">个人档案</h1>
+
+        <img
+          className="profile-scene__dossier"
+          src="/assets/profile/dossier.webp"
+          alt=""
+          aria-hidden="true"
+          width={865}
+          height={1455}
+        />
+
+        <div className="profile-scene__identity" aria-label="档案身份">
+          <strong title={nickname || '未设置昵称'}>{nickname || '未设置昵称'}</strong>
+          <span>
+            DM 档案库编号： <b className="profile-scene__archive-number">{archiveNumber(userId)}</b>
+          </span>
+        </div>
+
+        <form
+          className="profile-scene__form"
+          onSubmit={(event) => {
+            event.preventDefault()
+            void handleSave()
+          }}
         >
-          <LogOut className="w-[16px] h-[16px]" /> 退出登录
+          <div className="profile-scene__field">
+            <label htmlFor="profile-nickname">昵称</label>
+            <div className="profile-scene__control">
+              <input
+                id="profile-nickname"
+                value={draft}
+                onChange={(event) => {
+                  setDraft(event.target.value)
+                  setSaved(false)
+                  setError('')
+                }}
+                disabled={loading || saving}
+                maxLength={50}
+                autoComplete="nickname"
+                placeholder={loading ? '正在读取档案…' : '输入昵称'}
+              />
+            </div>
+          </div>
+
+          <div className="profile-scene__field">
+            <label htmlFor="profile-account">账号</label>
+            <div className="profile-scene__control is-readonly">
+              <input
+                id="profile-account"
+                value={loading ? '' : account}
+                placeholder={loading ? '正在读取档案…' : '暂无账号信息'}
+                readOnly
+                aria-readonly="true"
+              />
+              <span className="profile-scene__readonly">只读</span>
+            </div>
+          </div>
+
+          <div className="profile-scene__status" role="status" aria-live="polite">
+            {error && <span className="is-error">{error}</span>}
+            {!error && saved && <span>修改已保存</span>}
+          </div>
+
+          <button
+            type="submit"
+            className="profile-scene__save"
+            disabled={!canSave}
+            aria-label={saving ? '正在保存修改' : '保存修改'}
+          >
+            <img
+              src="/assets/profile/save-button.webp"
+              alt=""
+              aria-hidden="true"
+              width={480}
+              height={128}
+            />
+            {saving && <span>保存中…</span>}
+          </button>
+        </form>
+
+        <button
+          type="button"
+          className="profile-scene__logout"
+          onClick={() => void handleLogout()}
+          disabled={loggingOut}
+        >
+          <LogOut aria-hidden="true" />
+          <span>{loggingOut ? '正在退出…' : '退出登录'}</span>
         </button>
       </div>
-    </div>
+    </section>
   )
 }

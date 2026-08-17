@@ -9,7 +9,6 @@ import { createCharacterDraft, saveCharacter, completeCharacter, fetchCharacter,
 import type { CharacterTemplate } from '@/services/character/template-api'
 import {
   characterReadFromTemplate,
-  createCharacterTemplate,
   listCharacterTemplates,
   getCharacterTemplate,
   quickGenerateResultAsCharacter,
@@ -458,7 +457,6 @@ export default function CharacterPage() {
   const [libraryCards, setLibraryCards] = useState<CharacterTemplate[] | null>(null)
   const [libraryError, setLibraryError] = useState('')
   const [libraryBusy, setLibraryBusy] = useState(false)
-  const [savedToLibrary, setSavedToLibrary] = useState(false)
   const [showQuickGenerateConfirm, setShowQuickGenerateConfirm] = useState(false)
 
   const selectedOcc = useMemo(() => {
@@ -1174,56 +1172,6 @@ export default function CharacterPage() {
     void handleSubmit()
   }
 
-  // 「已存入卡库」只对存下去的那一版成立。玩家继续改卡之后按钮还挂着这句话，
-  // 等于告诉他改动也保存了——而卡库里那张还是旧的。任何一处建卡输入变化就撤回
-  // 这个状态。
-  useEffect(() => {
-    setSavedToLibrary(false)
-  }, [info, attr, skillAlloc, occupationChoiceSkillIds, equipment, serializedBackground, notes])
-
-  // 把当前正在捏的这张存进卡库。存的是建卡态，不带衍生值——后端 complete 时按
-  // 属性权威重算，存一份只会过期。
-  const handleSaveToLibrary = async () => {
-    if (libraryBusy) return
-    setLibraryBusy(true)
-    setLibraryError('')
-    setSavedToLibrary(false)
-    try {
-      const { preview: finalPreview, skillValues: skillsPayload } =
-        await previewWithAllocations(
-          attr,
-          info.occupationId,
-          skillAlloc,
-          occupationChoiceSkillIds,
-          generationMethod,
-        )
-      const finalDerived = normalizeDerivedStats(finalPreview.derivedStats)
-      await createCharacterTemplate(
-        info.name.trim() || '未命名调查员',
-        templateDataFromBuilt({
-          name: info.name,
-          age: info.age ? Number(info.age) : null,
-          gender: info.gender || null,
-          residence: info.residence,
-          birthplace: info.birthplace,
-          attr,
-          derived: { hp: finalDerived.hp, san: finalDerived.san, mp: finalDerived.mp },
-          skillValues: skillsPayload,
-          occupationChoiceSkillIds,
-          equipment,
-          occupationName: selectedOcc?.name ?? null,
-          background: serializedBackground,
-          notes,
-        }),
-      )
-      setSavedToLibrary(true)
-    } catch (err) {
-      setLibraryError(friendlyErrorMessage(err, '保存到角色卡库失败'))
-    } finally {
-      setLibraryBusy(false)
-    }
-  }
-
   const handleOpenLibrary = async () => {
     setLibraryOpen(true)
     setLibraryError('')
@@ -1503,23 +1451,18 @@ export default function CharacterPage() {
             <div id="character-step-info" role="tabpanel" aria-labelledby="character-tab-info" className="character-create__page character-create__page--info px-5 pb-20 animate-screen-in">
               {/* 车卡界面与卡库的两条通路（#337）。只对房间宿主显示——卡库宿主
                   本身就在编辑卡库卡，"存进卡库"和"从卡库选"都没有意义。 */}
+              {/* 只放"从卡库选卡"。存卡入口在 /room/ready——那才是卡建好的时刻，
+                  而且手动「完成创建」和「一键生成」都落在那里；放在这一步的话，
+                  一键生成会直接跳走，玩家再也见不到存卡按钮。 */}
               {!isTemplateHost && roomId && (
-                <div className="mb-3 flex items-center gap-2">
+                <div className="mb-3">
                   <button
                     type="button"
                     onClick={handleOpenLibrary}
                     disabled={libraryBusy}
-                    className="flex-1 px-3 py-2 rounded-sm text-xs font-semibold bg-card text-text-body border border-border-mid active:bg-panel active:scale-[0.97] transition-all disabled:opacity-60"
+                    className="w-full px-3 py-2 rounded-sm text-xs font-semibold bg-card text-text-body border border-border-mid active:bg-panel active:scale-[0.97] transition-all disabled:opacity-60"
                   >
                     从卡库选卡
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleSaveToLibrary}
-                    disabled={libraryBusy || !info.name.trim()}
-                    className="flex-1 px-3 py-2 rounded-sm text-xs font-semibold bg-card text-text-body border border-border-mid active:bg-panel active:scale-[0.97] transition-all disabled:opacity-40"
-                  >
-                    {libraryBusy ? '处理中…' : savedToLibrary ? '已存入卡库' : '存入卡库'}
                   </button>
                 </div>
               )}

@@ -6,9 +6,15 @@ import {
   UserPlus,
   Eye,
   ImagePlus,
+  BookmarkPlus,
 } from 'lucide-react'
 import { useCharacterStore } from '@/stores/character-store'
 import { fetchCharacter } from '@/services/character/character-api'
+import {
+  createCharacterTemplate,
+  templateDataFromBuilt,
+} from '@/services/character/template-api'
+import { friendlyErrorMessage } from '@/services/api-client'
 import { useRoomStore } from '@/stores/room-store'
 import { useAuthStore } from '@/stores/auth-store'
 import { connectWebSocket, disconnectWebSocket, sdk, waitForWsOpen } from '@/services/api-client'
@@ -127,6 +133,12 @@ export default function CharacterReadyPage() {
   const [starting, setStarting] = useState(false)
   const [startError, setStartError] = useState('')
   const [confirmExit, setConfirmExit] = useState(false)
+  // 「存入卡库」放在这一页而不是建卡向导里（#337）：手动「完成创建」和一键生成
+  // 都落在这里，这才是"卡已经建好"的时刻。放在向导第一步时卡还是空的，而且一键
+  // 生成会直接跳到本页，那个按钮玩家根本来不及看见。
+  const [savingToLibrary, setSavingToLibrary] = useState(false)
+  const [savedToLibrary, setSavedToLibrary] = useState(false)
+  const [libraryError, setLibraryError] = useState('')
   const cancelExitRef = useRef<HTMLButtonElement>(null)
   const roomId = useRoomStore((s) => s.roomId)
   const cachedCharacter = useCharacterStore((s) => (roomId ? s.getForRoom(roomId) : null))
@@ -259,6 +271,40 @@ export default function CharacterReadyPage() {
     navigate('/room/play')
   }
 
+  const handleSaveToLibrary = async () => {
+    if (!character || savingToLibrary) return
+    setSavingToLibrary(true)
+    setLibraryError('')
+    try {
+      // 这一页拿到的是已经完成的卡：`skillFinalValues` 就是后端权威算过的最终值，
+      // 不需要再跑一次 preview。
+      await createCharacterTemplate(
+        character.info.name.trim() || '未命名调查员',
+        templateDataFromBuilt({
+          name: character.info.name,
+          age: character.info.age ? Number(character.info.age) : null,
+          gender: character.info.gender || null,
+          residence: character.info.residence,
+          birthplace: character.info.birthplace,
+          attr: character.attr,
+          derived: character.derived,
+          skillValues: character.skillFinalValues ?? {},
+          occupationChoiceSkillIds: character.occupationChoiceSkillIds ?? [],
+          equipment: character.equipment,
+          occupationName:
+            readyRuleset?.occupations.find((o) => o.id === character.info.occupationId)?.name ?? null,
+          background: character.background,
+          notes: character.notes,
+        }),
+      )
+      setSavedToLibrary(true)
+    } catch (err) {
+      setLibraryError(friendlyErrorMessage(err, '存入角色卡库失败'))
+    } finally {
+      setSavingToLibrary(false)
+    }
+  }
+
   const handleEditCharacter = () => {
     navigate('/room/character', { state: { fromCharacterReady: true } })
   }
@@ -363,6 +409,16 @@ export default function CharacterReadyPage() {
                             <button type="button" onClick={() => setShowPortraitGenerator(true)} aria-label="生成角色图片" title="生成角色图片"><ImagePlus /><span>生图</span></button>
                           )}
                           <button type="button" onClick={handleEditCharacter}><span>编辑</span></button>
+                          <button
+                            type="button"
+                            onClick={handleSaveToLibrary}
+                            disabled={savingToLibrary || savedToLibrary}
+                            aria-label="把这张调查员存进我的角色卡库"
+                            title="存进我的角色卡库，下次开局可以直接选"
+                          >
+                            <BookmarkPlus />
+                            <span>{savingToLibrary ? '存卡中' : savedToLibrary ? '已存卡' : '存卡'}</span>
+                          </button>
                         </>
                       ) : (
                         <button type="button" className="is-create" onClick={handleEditCharacter}><UserPlus /><span>创建人物卡</span></button>
@@ -383,6 +439,7 @@ export default function CharacterReadyPage() {
       </main>
 
       <footer className="lobby-scene__footer character-ready-scene__footer">
+        {libraryError && <p className="lobby-scene__start-error" role="alert">{libraryError}</p>}
         {startError && <p className="lobby-scene__start-error" role="alert">{startError}</p>}
         {isHost ? (
           <button

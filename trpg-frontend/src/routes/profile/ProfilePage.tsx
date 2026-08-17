@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, LogOut } from 'lucide-react'
+import { ArrowLeft, ChevronRight, LogOut, Users } from 'lucide-react'
 import { useAuthStore } from '@/stores/auth-store'
 import { useRoomStore } from '@/stores/room-store'
 import { useCharacterStore } from '@/stores/character-store'
@@ -83,6 +83,18 @@ export default function ProfilePage() {
           <label className="text-[11px] font-medium text-text-muted mb-1 block">账号</label>
           <p className="text-[15px] text-text-dim">{account}</p>
         </div>
+
+        {/* 卡库入口暂时挂在这里而不是首页（#337）：首页是一张手工排版的插画
+            场景，纸片上的文字画在图里、位置和红绳都按三格调过，加第四格需要一张
+            新美术资源并重调版面。等资源到位再挪上去。 */}
+        <button
+          onClick={() => navigate('/home/characters')}
+          className="w-full bg-card border border-border-light rounded-md p-[18px] flex items-center gap-3 active:bg-panel active:scale-[0.99] transition-all"
+        >
+          <Users className="w-[18px] h-[18px] text-brass-dark" />
+          <span className="flex-1 text-left text-[15px] text-text-primary">我的角色卡</span>
+          <ChevronRight className="w-[16px] h-[16px] text-text-muted" />
+        </button>
 
         {error && <p className="text-[11px] text-[#c04040] text-center">{error}</p>}
         {saved && <p className="text-[11px] text-brass-dark text-center">已保存</p>}

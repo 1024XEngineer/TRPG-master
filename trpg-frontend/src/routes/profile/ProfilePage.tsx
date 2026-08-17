@@ -38,7 +38,11 @@ export default function ProfilePage() {
 
     fetchMe()
       .then((me) => {
-        if (!active || !me) return
+        if (!active) return
+        if (!me) {
+          setError('档案读取失败，请稍后重试')
+          return
+        }
         setAccount(me.account)
         setDraft(me.nickname)
         setNickname(me.nickname)

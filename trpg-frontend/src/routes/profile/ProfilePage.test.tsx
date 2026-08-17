@@ -92,6 +92,15 @@ describe('ProfilePage', () => {
     expect(screen.getByRole('button', { name: '保存修改' })).toBeDisabled()
   })
 
+  it('shows a read error when the profile service returns no user', async () => {
+    vi.mocked(fetchMe).mockResolvedValue(null)
+    renderProfile()
+
+    expect(await screen.findByText('档案读取失败，请稍后重试')).toBeInTheDocument()
+    expect(screen.getByLabelText('账号')).toHaveValue('')
+    expect(screen.getByLabelText('账号')).toHaveAttribute('placeholder', '暂无账号信息')
+  })
+
   it('saves a changed nickname and updates the global identity', async () => {
     vi.mocked(updateProfile).mockResolvedValue({
       userId: 'user-1',

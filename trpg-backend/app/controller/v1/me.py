@@ -1,15 +1,26 @@
-"""Controller 层：`/api/v1/me` 路由 —— 当前用户相关接口（issue #77 补充"我的
-常用角色卡库" 4 个端点，本期均为 NOT_IMPLEMENTED 桩，见 issue 决策 5）。
+"""Controller 层：`/api/v1/me` 路由 —— 当前用户相关接口。
+
+「我的常用角色卡库」在 #77 铺好协议位置、#337 落地实现：卡库卡是玩家自己的
+第一等资产，房间角色卡是它的一份拷贝。
 """
 
-from fastapi import APIRouter, Depends, Header, status
+from fastapi import APIRouter, Body, Depends, Header, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.controller.dependencies import extract_bearer_token, get_current_user
+from app.core.coc7_character_generation import CharacterGenerationError
 from app.core.db import get_db
 from app.core.errors import AppException, ErrorCode
-from app.dto.character import CharacterTemplateCreateBody, CharacterTemplateRead
+from app.dto.character import (
+    CharacterTemplateCreateBody,
+    CharacterTemplateRead,
+    CharacterTemplateUpdateBody,
+    QuickGenerateRequest,
+    RollAttributesResult,
+    SystemQuickGenerateResult,
+)
 from app.dto.common import ApiResponse
+from app.dto.game import RulesetRead
 from app.dto.room import MyRoomSummary
 from app.models.user import User
 from app.service import auth as auth_service
@@ -43,13 +54,27 @@ async def _require_user_id(authorization: str | None, db: AsyncSession) -> str:
     return me.user_id
 
 
+def _not_found(exc: Exception) -> AppException:
+    """卡库的「不存在」和「不是你的」共用 404（见 service 层 `_own_template`）。"""
+    return AppException(ErrorCode.NOT_FOUND, str(exc), status.HTTP_404_NOT_FOUND)
+
+
+def _invalid_data(exc: Exception) -> AppException:
+    return AppException(ErrorCode.VALIDATION_ERROR, str(exc), status.HTTP_422_UNPROCESSABLE_CONTENT)
+
+
 @router.get("/character-templates", response_model=ApiResponse[list[CharacterTemplateRead]])
 async def list_character_templates(
-    authorization: str | None = Header(default=None), db: AsyncSession = Depends(get_db)
+    system_id: str | None = Query(default=None, alias="systemId", min_length=1),
+    authorization: str | None = Header(default=None),
+    db: AsyncSession = Depends(get_db),
 ) -> ApiResponse[list[CharacterTemplateRead]]:
-    """GET /api/v1/me/character-templates —— 我的卡库列表（issue 决策 5，本期未实现）。"""
+    """GET /api/v1/me/character-templates —— 我的卡库列表，最近更新的在前。
+
+    `systemId` 给车卡界面用：只列出能用在这个规则系统的卡。
+    """
     user_id = await _require_user_id(authorization, db)
-    templates = await character_service.list_character_templates(db, user_id)
+    templates = await character_service.list_character_templates(db, user_id, system_id)
     return ApiResponse.ok(templates)
 
 
@@ -63,9 +88,14 @@ async def create_character_template(
     authorization: str | None = Header(default=None),
     db: AsyncSession = Depends(get_db),
 ) -> ApiResponse[CharacterTemplateRead]:
-    """POST /api/v1/me/character-templates —— 把一张角色卡保存为常用卡（本期未实现）。"""
+    """POST /api/v1/me/character-templates —— 把一张角色卡保存为常用卡。"""
     user_id = await _require_user_id(authorization, db)
-    template = await character_service.create_character_template(db, user_id, payload)
+    try:
+        template = await character_service.create_character_template(db, user_id, payload)
+    except character_service.CharacterNotFoundError as exc:
+        raise _not_found(exc) from exc
+    except character_service.CharacterInvalidDataError as exc:
+        raise _invalid_data(exc) from exc
     return ApiResponse.ok(template)
 
 
@@ -75,9 +105,37 @@ async def get_character_template(
     authorization: str | None = Header(default=None),
     db: AsyncSession = Depends(get_db),
 ) -> ApiResponse[CharacterTemplateRead]:
-    """GET /api/v1/me/character-templates/{templateId} —— 卡库详情（本期未实现）。"""
+    """GET /api/v1/me/character-templates/{templateId} —— 卡库详情。"""
     user_id = await _require_user_id(authorization, db)
-    template = await character_service.get_character_template(db, user_id, template_id)
+    try:
+        template = await character_service.get_character_template(db, user_id, template_id)
+    except character_service.CharacterNotFoundError as exc:
+        raise _not_found(exc) from exc
+    return ApiResponse.ok(template)
+
+
+@router.patch(
+    "/character-templates/{template_id}", response_model=ApiResponse[CharacterTemplateRead]
+)
+async def update_character_template(
+    template_id: str,
+    payload: CharacterTemplateUpdateBody,
+    authorization: str | None = Header(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[CharacterTemplateRead]:
+    """PATCH /api/v1/me/character-templates/{templateId} —— 改名或覆盖建卡态数据。
+
+    卡库同时是建卡宿主（#337 决策 A），不依赖房间的建卡向导每一步都存到这里。
+    """
+    user_id = await _require_user_id(authorization, db)
+    try:
+        template = await character_service.update_character_template(
+            db, user_id, template_id, payload
+        )
+    except character_service.CharacterNotFoundError as exc:
+        raise _not_found(exc) from exc
+    except character_service.CharacterInvalidDataError as exc:
+        raise _invalid_data(exc) from exc
     return ApiResponse.ok(template)
 
 
@@ -87,7 +145,86 @@ async def delete_character_template(
     authorization: str | None = Header(default=None),
     db: AsyncSession = Depends(get_db),
 ) -> ApiResponse[None]:
-    """DELETE /api/v1/me/character-templates/{templateId} —— 删除常用卡（本期未实现）。"""
+    """DELETE /api/v1/me/character-templates/{templateId} —— 删除常用卡。
+
+    引用过它的房间角色卡不受影响，只是出处被置空（见 service 层说明）。
+    """
     user_id = await _require_user_id(authorization, db)
-    await character_service.delete_character_template(db, user_id, template_id)
+    try:
+        await character_service.delete_character_template(db, user_id, template_id)
+    except character_service.CharacterNotFoundError as exc:
+        raise _not_found(exc) from exc
     return ApiResponse.ok(None)
+
+
+# ── 不依赖房间的建卡（#337 决策 A） ─────────────────────────────────────────
+#
+# 挂在卡库卡下面而不是 `/systems/{systemId}` 下：服务端必须**把掷骰结果写进那张
+# 卡**，「属性是掷出来的」才算数。做成无状态、把点数交回客户端再让它自己 PATCH
+# 的话，服务端无从区分「这是我掷的」和「客户端自己填的」——而这正是 `complete`
+# 跳过点数预算校验的依据，客户端一旦能自称 roll，8 项全 90 也能过关。
+
+
+async def _template_ruleset(
+    db: AsyncSession, user_id: str, template_id: str
+) -> tuple[str, RulesetRead]:
+    """解析这张卡库卡所属规则系统的 ruleset，顺带确认卡是这个人的。"""
+    template = await character_service.get_character_template(db, user_id, template_id)
+    try:
+        return template.template_id, await room_service.require_ruleset(db, template.system_id)
+    except room_service.ModuleNotFoundError as exc:
+        raise AppException(ErrorCode.NOT_FOUND, str(exc), status.HTTP_404_NOT_FOUND) from exc
+    except room_service.RulesetNotConfiguredError as exc:
+        raise AppException(
+            ErrorCode.RULESET_NOT_CONFIGURED, str(exc), status.HTTP_409_CONFLICT
+        ) from exc
+
+
+@router.post(
+    "/character-templates/{template_id}/roll-attributes",
+    response_model=ApiResponse[RollAttributesResult],
+)
+async def roll_template_attributes(
+    template_id: str,
+    authorization: str | None = Header(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[RollAttributesResult]:
+    """POST /api/v1/me/character-templates/{templateId}/roll-attributes。
+
+    服务端权威掷骰，结果直接写进这张卡并背书为 roll。之后任何改动属性的 PATCH
+    都会把这条背书退回点数购买法。
+    """
+    user_id = await _require_user_id(authorization, db)
+    try:
+        await _template_ruleset(db, user_id, template_id)
+        result = await character_service.roll_template_attributes(db, user_id, template_id)
+    except character_service.CharacterNotFoundError as exc:
+        raise _not_found(exc) from exc
+    return ApiResponse.ok(result)
+
+
+@router.post(
+    "/character-templates/{template_id}/quick-generate",
+    response_model=ApiResponse[SystemQuickGenerateResult],
+)
+async def quick_generate_template(
+    template_id: str,
+    payload: QuickGenerateRequest | None = Body(default=None),
+    authorization: str | None = Header(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[SystemQuickGenerateResult]:
+    """POST /api/v1/me/character-templates/{templateId}/quick-generate。
+
+    一键生成一整份建卡态数据并写进这张卡。不生成 AI 背景故事（见 service 层）。
+    """
+    user_id = await _require_user_id(authorization, db)
+    try:
+        _, ruleset = await _template_ruleset(db, user_id, template_id)
+        result = await character_service.quick_generate_template(
+            db, user_id, template_id, ruleset, payload
+        )
+    except character_service.CharacterNotFoundError as exc:
+        raise _not_found(exc) from exc
+    except CharacterGenerationError as exc:
+        raise AppException(ErrorCode.CONFLICT, str(exc), status.HTTP_409_CONFLICT) from exc
+    return ApiResponse.ok(result)

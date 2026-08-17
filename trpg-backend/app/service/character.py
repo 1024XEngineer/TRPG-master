@@ -9,7 +9,7 @@
 import random
 from dataclasses import asdict, replace
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,7 +24,6 @@ from app.core.coc7_rules import (
     validate_age,
     validate_character,
 )
-from app.core.errors import not_implemented
 from app.core.seed import BUILTIN_SYSTEM_ID
 from app.dto.character import (
     CharacterComputeResult,
@@ -33,13 +32,16 @@ from app.dto.character import (
     CharacterRead,
     CharacterTemplateCreateBody,
     CharacterTemplateRead,
+    CharacterTemplateUpdateBody,
     CharacterUpdateBody,
     QuickGenerateRequest,
     QuickGenerateResult,
     RollAttributesResult,
+    SystemQuickGenerateResult,
 )
 from app.dto.character_background import CharacterBackgroundContext, CharacterBackgroundSkill
 from app.dto.game import RulesetRead
+from app.models.content import GameSystem
 from app.models.room import Character, Player, Room
 from app.models.user import UserCharacterTemplate
 from app.service.character_background import CharacterBackgroundService
@@ -54,6 +56,10 @@ from app.service.room import (
 
 class CharacterNotFoundError(ValueError):
     """角色不存在。"""
+
+
+class CharacterInvalidDataError(ValueError):
+    """卡库卡的建卡态数据形状不合法（字段类型或长度），映射成 422。"""
 
 
 class CharacterInvalidError(ValueError):
@@ -75,13 +81,14 @@ def _require_character_editable(room: Room) -> None:
 
 
 async def _mark_character_modified(db: AsyncSession, character: Character) -> None:
-    """把一次房间建卡写入标记为尚未完成，并与旧用户卡解除关联。
+    """把一次房间建卡写入标记为尚未完成。
 
-    已完成的用户卡不原地覆盖：玩家再次修改同一房间 Character 后，下一次
-    complete 会生成一条新的用户卡记录。当前从零建卡的主流程仍然只操作房间
-    Character，不要求前端感知用户卡库。
+    以前这里还会顺手 `based_on_template_id = None`，因为那个列同时被当成
+    「自动保存的去重闩」用：清空它，下一次 complete 才会再存一张用户卡。#337
+    把方向倒了过来——卡库卡是玩家自己的资产，只由显式保存产生，房间卡是它的
+    一份拷贝——这个列于是退回纯粹的出处记录。出处不因为玩家改了几笔就不成立，
+    所以不再清空。
     """
-    character.based_on_template_id = None
     if character.status != "complete":
         return
     character.status = "draft"
@@ -113,19 +120,73 @@ def _character_template_data(character: Character) -> dict[str, object]:
     }
 
 
+# `characters` 上这几列的长度上限。卡库卡的 `data` 是客户端自由写入的 JSON，
+# 只校验总大小的话，一条 200 字的 name 能顺利存进卡库、却在播种时撑爆
+# `characters.name VARCHAR(100)`——SQLite 不强制长度所以本地和测试都看不见，
+# PostgreSQL 上是一个合法保存的卡永远播种不了（DataError → 500）。在保存卡库卡
+# 这一步就拦住，而不是等到播种时才失败。
+_SEEDABLE_MAX_LENGTHS: dict[str, int] = {
+    "name": 100,
+    "gender": 20,
+    "residence": 100,
+    "birthplace": 100,
+    "occupation": 100,
+    "background": 4000,
+    "notes": 4000,
+}
+
+
+def _require_seedable_lengths(data: dict) -> None:
+    for key, limit in _SEEDABLE_MAX_LENGTHS.items():
+        value = data.get(key)
+        if value is None:
+            continue
+        if not isinstance(value, str):
+            raise CharacterInvalidDataError(f"角色卡字段 {key} 必须是字符串")
+        if len(value) > limit:
+            raise CharacterInvalidDataError(f"角色卡字段 {key} 超过 {limit} 字上限")
+
+
+def _seed_character_from_template(character: Character, template: UserCharacterTemplate) -> None:
+    """把卡库卡的建卡态字段拷进一张新的房间草稿。
+
+    只认 `_character_template_data()` 写出来的那几个键，逐个取值而不是整体
+    `**data`：`data` 是 JSON 列，多出来的键不该变成房间角色卡的字段，缺失的键
+    要落到与「从零建卡」一致的默认值上，而不是 None 一路带下去。
+
+    局内状态（HP / 理智 / 疯狂）本来就不在 `data` 里，这里也不会凭空造：
+    `derived_stats` 留空，等 complete 时服务端按属性权威重算。
+    """
+    data = dict(template.data or {})
+    character.based_on_template_id = template.id
+    character.generation_method = data.get("generation_method") or GENERATION_POINT_BUY
+    character.name = data.get("name")
+    character.age = data.get("age")
+    character.gender = data.get("gender")
+    character.residence = data.get("residence") or ""
+    character.birthplace = data.get("birthplace") or ""
+    character.attributes = dict(data.get("attributes") or {})
+    character.skills = dict(data.get("skills") or {})
+    character.occupation_choice_skill_ids = data.get("occupation_choice_skill_ids")
+    character.equipment = list(data.get("equipment") or [])
+    character.occupation = data.get("occupation")
+    character.background = data.get("background") or ""
+    character.notes = data.get("notes") or ""
+
+
 async def create_character_draft(
     db: AsyncSession, room_id: str, reconnect_token: str | None, based_on_template_id: str | None
 ) -> CharacterDraftResult:
     """房间内玩家创建一份角色草稿。
 
-    `based_on_template_id`（issue #77 新增第三条建卡路径，issue 决策 5）：
-    带了这个字段说明玩家想复用自己的常用卡，但"复制模板数据进草稿"这条读写
-    本期没有实现（决策 5 原文：本期只铺表与接口，不实现），直接 NOT_IMPLEMENTED，
-    不创建任何草稿；不带这个字段则完全是原来"从零建卡"的行为，不受影响。
-    """
-    if based_on_template_id is not None:
-        raise not_implemented("复用常用角色卡本期尚未实现")
+    `based_on_template_id`（#337 落地）：带了这个字段就从玩家自己的卡库卡播种
+    一张新草稿，把建卡态字段整体拷进来。拷贝之后房间角色卡是自足的，卡库卡后来
+    改了或删了都不影响这一局。
 
+    已经有草稿时**带模板会 409**，不会静默返回既有那张。前端多半在进页面时就建好
+    了草稿，所以「从卡库选卡」几乎必然撞上它；返回 201 加一张原封不动的空卡，看
+    起来是成功的、实际什么都没发生。要不要冲掉玩家已有的草稿，得让玩家自己决定。
+    """
     room = await find_room_by_id(db, room_id)
     _require_character_editable(room)
     player = await get_player_by_reconnect_token(db, reconnect_token)
@@ -139,12 +200,24 @@ async def create_character_draft(
         )
     )
     if existing is not None:
+        if based_on_template_id is not None:
+            raise RoomConflictError("本房间已有角色卡草稿，不能直接套用卡库角色卡")
         return CharacterDraftResult(
             character_id=existing.id,
             status=existing.status,
         )
 
     character = Character(room_id=room_id, player_id=player.id, status="draft")
+    if based_on_template_id is not None:
+        if player.user_id is None:
+            raise RoomAuthorizationError("匿名玩家没有角色卡库")
+        template = await _own_template(db, player.user_id, based_on_template_id)
+        # 规则系统不匹配就拒绝：COC7 的卡拿去玩别的系统，属性和技能对不上，
+        # 与其静默拷进去等 complete 时校验炸掉，不如在这里说清楚。
+        room_system_id = room.system_id or BUILTIN_SYSTEM_ID
+        if template.system_id != room_system_id:
+            raise RoomConflictError("这张角色卡属于其他规则系统，不能用在本房间")
+        _seed_character_from_template(character, template)
     db.add(character)
     try:
         await db.commit()
@@ -161,6 +234,10 @@ async def create_character_draft(
         )
         if existing is None:
             raise
+        # 并发下另一个请求先建成了草稿。带模板的请求在这里也必须报冲突，否则
+        # 前置查询挡住的那条路会从这里绕回来——又变成「201 成功但模板没应用」。
+        if based_on_template_id is not None:
+            raise RoomConflictError("本房间已有角色卡草稿，不能直接套用卡库角色卡") from None
         return CharacterDraftResult(
             character_id=existing.id,
             status=existing.status,
@@ -275,16 +352,9 @@ async def complete_character(
         player = await db.get(Player, character.player_id)
         if player is not None:
             player.has_character = True
-            if player.user_id is not None and character.based_on_template_id is None:
-                template = UserCharacterTemplate(
-                    user_id=player.user_id,
-                    system_id=room.system_id or BUILTIN_SYSTEM_ID,
-                    name=character.name or "未命名角色",
-                    data=_character_template_data(character),
-                )
-                db.add(template)
-                await db.flush()
-                character.based_on_template_id = template.id
+        # 这里曾经隐式写一张用户卡（#121）。#337 去掉了：玩家从来看不到也删不掉
+        # 它，而「改一笔再完成一次」就会再存一条，卡库只进不出。卡库现在只由
+        # `POST /me/character-templates` 显式产生。
         await db.commit()
     except Exception:
         await db.rollback()
@@ -508,24 +578,235 @@ async def quick_generate_character(
     )
 
 
-# ── 我的常用角色卡库（完成建卡自动写入；显式 CRUD 仍留待后续） ──
+# ── 我的常用角色卡库（#337：卡库卡是第一等实体，房间角色卡是它的一份拷贝） ──
 
 
-async def list_character_templates(db: AsyncSession, user_id: str) -> list[CharacterTemplateRead]:
-    raise not_implemented("我的常用角色卡库本期尚未实现")
+def _template_read(template: UserCharacterTemplate) -> CharacterTemplateRead:
+    return CharacterTemplateRead(
+        template_id=template.id,
+        name=template.name,
+        system_id=template.system_id,
+        data=dict(template.data or {}),
+        created_at=template.created_at,
+        updated_at=template.updated_at,
+    )
+
+
+def _data_with_attested_generation_method(
+    stored: dict[str, object], incoming: dict[str, object]
+) -> dict[str, object]:
+    """`generation_method` 只能由服务端背书，客户端改不动它。
+
+    「属性是掷出来的」这条声明的唯一作用，是让 `complete` 跳过点数购买法的总预算
+    校验（掷骰结果经常超 480）。所以它必须来自服务端自己掷的那一次，否则客户端
+    写上 roll 就能让 8 项全 90 过关。
+
+    保留 roll 的唯一条件是这次写入**没有改动属性**——玩家改的是姓名、背景、技能
+    分配这些。一旦属性变了，就说明属性不再是服务端掷出来的那一份，退回点数购买法。
+    这跟房间版 `update_character` 里那道闸是同一个判据。
+    """
+    attested = stored.get("generation_method") == GENERATION_ROLL and incoming.get(
+        "attributes"
+    ) == stored.get("attributes")
+    return {
+        **incoming,
+        "generation_method": GENERATION_ROLL if attested else GENERATION_POINT_BUY,
+    }
+
+
+async def _own_template(db: AsyncSession, user_id: str, template_id: str) -> UserCharacterTemplate:
+    """按 (id, user_id) 取卡；别人的卡一律当作不存在。
+
+    刻意不分「不存在」和「不是你的」：两者返回同一个 404，否则拿别人的
+    templateId 试一遍就能问出「这张卡存在」。
+    """
+    template = await db.scalar(
+        select(UserCharacterTemplate).where(
+            UserCharacterTemplate.id == template_id,
+            UserCharacterTemplate.user_id == user_id,
+        )
+    )
+    if template is None:
+        raise CharacterNotFoundError("角色卡不存在")
+    return template
+
+
+async def list_character_templates(
+    db: AsyncSession, user_id: str, system_id: str | None = None
+) -> list[CharacterTemplateRead]:
+    """我的卡库列表，最近更新的在前。
+
+    `system_id` 过滤给车卡界面用：COC7 的卡不该出现在别的规则系统的房间里，
+    表结构本来就按 system 约束死了这张卡能用在哪。
+    """
+    statement = select(UserCharacterTemplate).where(UserCharacterTemplate.user_id == user_id)
+    if system_id is not None:
+        statement = statement.where(UserCharacterTemplate.system_id == system_id)
+    rows = await db.scalars(statement.order_by(UserCharacterTemplate.updated_at.desc()))
+    return [_template_read(template) for template in rows]
 
 
 async def create_character_template(
     db: AsyncSession, user_id: str, payload: CharacterTemplateCreateBody
 ) -> CharacterTemplateRead:
-    raise not_implemented("我的常用角色卡库本期尚未实现")
+    """显式保存一张卡库卡。
+
+    落库前把 `generation_method` 压成点数购买法：客户端提交的数据里那个字段没有
+    任何背书价值，而它恰好是 `complete` 用来跳过点数预算校验的开关。
+
+    `system_id` 也要先确认存在。它是指向 `game_systems` 的外键，而本地和测试跑的
+    SQLite 关着外键约束、随便写什么都能落库；线上 PostgreSQL 会在 commit 那一刻
+    抛 IntegrityError，表现成 500。校验放在这里，两种方言都给同一个 404。
+    """
+    if await db.get(GameSystem, payload.system_id) is None:
+        raise CharacterNotFoundError("规则系统不存在")
+    _require_seedable_lengths(payload.data)
+    template = UserCharacterTemplate(
+        user_id=user_id,
+        system_id=payload.system_id,
+        name=payload.name,
+        data={**dict(payload.data), "generation_method": GENERATION_POINT_BUY},
+    )
+    db.add(template)
+    await db.commit()
+    return _template_read(template)
 
 
 async def get_character_template(
     db: AsyncSession, user_id: str, template_id: str
 ) -> CharacterTemplateRead:
-    raise not_implemented("我的常用角色卡库本期尚未实现")
+    return _template_read(await _own_template(db, user_id, template_id))
+
+
+async def update_character_template(
+    db: AsyncSession, user_id: str, template_id: str, payload: CharacterTemplateUpdateBody
+) -> CharacterTemplateRead:
+    """改名或整体覆盖卡库卡的建卡态数据。
+
+    卡库现在也是建卡的宿主（#337 决策 A），建卡向导的每一次保存都落到这里，
+    所以 `data` 是整体覆盖而不是合并——合并语义下前端删掉一项技能就永远删不掉。
+    """
+    template = await _own_template(db, user_id, template_id)
+    if payload.name is not None:
+        template.name = payload.name
+    if payload.data is not None:
+        _require_seedable_lengths(payload.data)
+        template.data = _data_with_attested_generation_method(
+            dict(template.data or {}), dict(payload.data)
+        )
+    await db.commit()
+    return _template_read(template)
 
 
 async def delete_character_template(db: AsyncSession, user_id: str, template_id: str) -> None:
-    raise not_implemented("我的常用角色卡库本期尚未实现")
+    """删除一张卡库卡，并把引用过它的房间角色卡的出处置空。
+
+    置空是在这里显式做的，没有依赖数据库的 `ON DELETE SET NULL`：本地和全部
+    测试跑的 SQLite `PRAGMA foreign_keys = 0`，外键根本不生效，而线上 PostgreSQL
+    上这个 FK 是 `NO ACTION`——同一段代码两种行为（SQLite 静默留下悬空指针，
+    PostgreSQL 直接 IntegrityError）。放在数据库层的话，测试里那条约束永远不会
+    触发，等于写了个测不到的保证。
+
+    房间角色卡本身不受影响：它在播种那一刻就把数据拷走了，是自足的，丢掉的只是
+    「这张卡当初从哪来」这条出处信息。
+    """
+    template = await _own_template(db, user_id, template_id)
+    await db.execute(
+        update(Character)
+        .where(Character.based_on_template_id == template_id)
+        .values(based_on_template_id=None)
+    )
+    await db.delete(template)
+    await db.commit()
+
+
+# ── 不依赖房间的建卡（#337 决策 A：卡库也是建卡宿主） ──
+#
+# 这两个端点挂在卡库卡下面而不是 `/systems/{id}` 下，是因为「属性是掷出来的」
+# 必须由服务端写进那张卡才算数。做成无状态、把点数交回客户端再让它自己 PATCH
+# 的话，服务端就无从区分「这是我掷的」和「客户端自己填的」——而这正是
+# `complete` 跳过点数预算校验的依据。
+
+
+async def roll_template_attributes(
+    db: AsyncSession, user_id: str, template_id: str
+) -> RollAttributesResult:
+    """服务端权威掷属性，直接写进这张卡库卡并背书为 roll。"""
+    template = await _own_template(db, user_id, template_id)
+    attributes = {
+        "STR": _roll(3, 6) * 5,
+        "CON": _roll(3, 6) * 5,
+        "DEX": _roll(3, 6) * 5,
+        "APP": _roll(3, 6) * 5,
+        "POW": _roll(3, 6) * 5,
+        "SIZ": (_roll(2, 6) + 6) * 5,
+        "INT": (_roll(2, 6) + 6) * 5,
+        "EDU": (_roll(2, 6) + 6) * 5,
+        "LUCK": _roll(3, 6) * 5,
+    }
+    template.data = {
+        **dict(template.data or {}),
+        "attributes": attributes,
+        "generation_method": GENERATION_ROLL,
+    }
+    await db.commit()
+    return RollAttributesResult(
+        attributes=attributes,
+        derived_stats={
+            "HP": (attributes["CON"] + attributes["SIZ"]) // 10,
+            "MP": attributes["POW"] // 5,
+            "SAN": attributes["POW"],
+        },
+    )
+
+
+async def quick_generate_template(
+    db: AsyncSession,
+    user_id: str,
+    template_id: str,
+    ruleset: RulesetRead,
+    identity: QuickGenerateRequest | None = None,
+) -> SystemQuickGenerateResult:
+    """一键生成一整份建卡态数据，写进这张卡库卡。
+
+    不生成 AI 背景故事：房间版那条链路会调模型，而卡库建卡是玩家在自己账号下
+    随手捏卡，不该每点一次就产生一次计费请求。想要生成的背景，进房建卡时再要。
+    """
+    template = await _own_template(db, user_id, template_id)
+    generated = generate_character_draft(ruleset)
+    if identity is not None:
+        generated = replace(
+            generated,
+            name=(
+                identity.name.strip() if identity.name and identity.name.strip() else generated.name
+            ),
+            age=identity.age if identity.age is not None else generated.age,
+            gender=identity.gender or generated.gender,
+            residence=identity.residence or generated.residence,
+            birthplace=identity.birthplace or generated.birthplace,
+        )
+    data: dict[str, object] = {
+        "generation_method": GENERATION_ROLL,
+        "name": generated.name,
+        "age": generated.age,
+        "gender": generated.gender,
+        "residence": generated.residence,
+        "birthplace": generated.birthplace,
+        "attributes": dict(generated.attributes),
+        "skills": dict(generated.skills),
+        "occupation_choice_skill_ids": list(generated.occupation_choice_skill_ids),
+        "equipment": list(generated.equipment),
+        "occupation": generated.occupation,
+        "background": generated.background,
+        "notes": generated.notes,
+    }
+    template.data = data
+    # 卡库列表展示的是顶层 name，不是 data.name。只更新后者的话，玩家一键生成出
+    # 「叶探员」，列表里还挂着建卡时那个占位名。
+    template.name = generated.name
+    await db.commit()
+    return SystemQuickGenerateResult(
+        data=data,
+        occupation_id=generated.occupation_id,
+        compute=CharacterComputeResult(**asdict(generated.compute_result)),
+    )

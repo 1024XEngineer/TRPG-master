@@ -44,6 +44,8 @@ export type {
   // 我的卡库（issue #77 决策 5）—— 对应后端 dto/character.py
   CharacterTemplateCreateBody as SaveCharacterTemplateInput,
   CharacterTemplateRead as CharacterTemplate,
+  CharacterTemplateUpdateBody as UpdateCharacterTemplateInput,
+  SystemQuickGenerateResult as SystemQuickGenerateOutput,
   // 建卡计算/校验预览（issue #84 S2）—— 对应后端 dto/character.py
   CharacterPreviewRequest as PreviewCharacterInput,
   CharacterComputeResult,

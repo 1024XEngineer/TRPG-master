@@ -2,6 +2,7 @@ import { useNavigate } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import type { ModuleDetail } from 'trpg-sdk'
 import { Plus, Minus } from 'lucide-react'
+import { ModuleCover } from '@/components/ModuleCover'
 import { FIXED_TRPG } from '@/config/games'
 import { ROUTES } from '@/config/routes'
 import { useGameStore } from '@/stores/game-store'
@@ -40,6 +41,8 @@ export default function CreateRoomPage() {
   const [createError, setCreateError] = useState('')
 
   const [selectedScenario, setSelectedScenario] = useState<ModuleDetail | null>(null)
+  const [scenarioStatus, setScenarioStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
+  const [scenarioError, setScenarioError] = useState('')
   const hasSelection = !!store.sceneId
   const playerMin = selectedScenario?.playersMin ?? MIN_PLAYERS
   const playerMax = selectedScenario?.playersMax ?? MAX_PLAYERS
@@ -47,15 +50,27 @@ export default function CreateRoomPage() {
   useEffect(() => {
     if (!store.sceneId) {
       setSelectedScenario(null)
+      setScenarioStatus('idle')
+      setScenarioError('')
       return
     }
     let cancelled = false
+    setSelectedScenario(null)
+    setScenarioStatus('loading')
+    setScenarioError('')
     getModuleDetail(store.sceneId)
       .then((module) => {
-        if (!cancelled) setSelectedScenario(module)
+        if (!cancelled) {
+          setSelectedScenario(module)
+          setScenarioStatus('ready')
+        }
       })
-      .catch(() => {
-        if (!cancelled) setSelectedScenario(null)
+      .catch((error) => {
+        if (!cancelled) {
+          setSelectedScenario(null)
+          setScenarioStatus('error')
+          setScenarioError(friendlyErrorMessage(error, '模组详情加载失败'))
+        }
       })
     return () => {
       cancelled = true
@@ -103,11 +118,16 @@ export default function CreateRoomPage() {
     setMaxPlayers(nextMaxPlayers)
     setMaxPlayersInput(String(nextMaxPlayers))
     setCreateForm({ roomName, maxPlayers: nextMaxPlayers })
-    // 游戏和规则系统是产品固定配置，不再存进可变 store；重新选择时只需要
-    // 清除之前的模组和当前流程阶段。
-    store.reset()
     navigate(ROUTES.MODULES)
   }
+
+  const stampLabel = selectedScenario
+    ? `更改模组：${selectedScenario.title}`
+    : scenarioStatus === 'loading'
+      ? '正在加载已选模组'
+      : scenarioStatus === 'error'
+        ? `更改模组：当前模组加载失败，${scenarioError}`
+        : '选择模组'
 
   return (
     <div className="create-room-scene animate-screen-in">
@@ -226,7 +246,7 @@ export default function CreateRoomPage() {
       <button
         type="button"
         className="create-room-scene__game-stamp"
-        aria-label={hasSelection ? '更换模组' : '选择模组'}
+        aria-label={stampLabel}
         onClick={handleSelectModule}
       >
         <img
@@ -235,15 +255,44 @@ export default function CreateRoomPage() {
           alt=""
           aria-hidden="true"
         />
-        <img
-          className="create-room-scene__dice"
-          src="/assets/rooms/create/dice.webp"
-          alt=""
-          aria-hidden="true"
-        />
-        <span className="create-room-scene__select-module-title" aria-hidden="true">
-          选择模组
-        </span>
+        {scenarioStatus === 'ready' && selectedScenario && store.sceneId ? (
+          <span className="create-room-scene__selected-module">
+            <ModuleCover
+              moduleId={store.sceneId}
+              title={selectedScenario.title}
+              className="create-room-scene__selected-module-cover"
+              imageClassName="create-room-scene__selected-module-cover-image"
+              framed={false}
+            />
+            <span className="create-room-scene__selected-module-copy">
+              <strong>{selectedScenario.title}</strong>
+              <span>更改模组</span>
+            </span>
+          </span>
+        ) : scenarioStatus === 'loading' ? (
+          <span className="create-room-scene__module-status" aria-live="polite">
+            <span className="create-room-scene__module-spinner" aria-hidden="true" />
+            <strong>正在加载模组</strong>
+            <span>请稍候…</span>
+          </span>
+        ) : scenarioStatus === 'error' ? (
+          <span className="create-room-scene__module-status create-room-scene__module-status--error" role="alert">
+            <strong>模组加载失败</strong>
+            <span>前往更改模组</span>
+          </span>
+        ) : (
+          <>
+            <img
+              className="create-room-scene__dice"
+              src="/assets/rooms/create/dice.webp"
+              alt=""
+              aria-hidden="true"
+            />
+            <span className="create-room-scene__select-module-title" aria-hidden="true">
+              选择模组
+            </span>
+          </>
+        )}
       </button>
 
       <img

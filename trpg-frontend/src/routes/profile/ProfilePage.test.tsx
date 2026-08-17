@@ -100,7 +100,7 @@ describe('ProfilePage', () => {
     expect(screen.getByLabelText('账号')).toHaveValue('')
     expect(screen.getByLabelText('账号')).toHaveAttribute('placeholder', '暂无账号信息')
   })
-  it('saves a changed nickname and updates the global identity', async () => {
+    it('saves a changed nickname and updates the global identity', async () => {
     vi.mocked(updateProfile).mockResolvedValue({
       userId: 'user-1',
       account: 'detective@example.com',

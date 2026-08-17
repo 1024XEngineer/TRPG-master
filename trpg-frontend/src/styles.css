@@ -1555,6 +1555,333 @@
   user-select: none;
 }
 
+/* ─── Profile: personal investigator archive ──────────────────────────── */
+.profile-scene {
+  position: relative;
+  isolation: isolate;
+  width: 100%;
+  min-height: 100%;
+  overflow: hidden;
+  color: #422b18;
+  background: #171009;
+  font-family: Georgia, 'STKaiti', 'KaiTi', 'Songti SC', 'STSong', serif;
+}
+
+.profile-scene__artboard {
+  position: relative;
+  isolation: isolate;
+  container-type: inline-size;
+  width: 100%;
+  aspect-ratio: 864 / 1821;
+  overflow: hidden;
+}
+
+.profile-scene__background,
+.profile-scene__dossier {
+  position: absolute;
+  pointer-events: none;
+  user-select: none;
+}
+
+.profile-scene__background {
+  inset: 0;
+  z-index: -3;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+}
+
+.profile-scene__back {
+  position: absolute;
+  top: max(3.8cqw, env(safe-area-inset-top));
+  left: 3.8cqw;
+  z-index: 5;
+  display: grid;
+  width: 11.2cqw;
+  min-width: 2.75rem;
+  aspect-ratio: 1;
+  place-items: center;
+  padding: 0;
+  border: 0.32cqw solid #cba96d;
+  border-radius: 50%;
+  color: #d8b678;
+  background: rgb(19 14 10 / 72%);
+  box-shadow: inset 0 0 0 0.18cqw rgb(37 23 13 / 90%), 0 0.5cqw 1.2cqw rgb(0 0 0 / 42%);
+  cursor: pointer;
+  transition: filter 150ms ease, transform 150ms ease;
+}
+
+.profile-scene__back svg {
+  width: 5.7cqw;
+  height: 5.7cqw;
+  stroke-width: 2.8;
+}
+
+.profile-scene__title {
+  position: absolute;
+  top: 5.8%;
+  left: 25.1%;
+  z-index: 4;
+  width: 52.7%;
+  height: auto;
+  filter: drop-shadow(0 0.45cqw 0.4cqw rgb(0 0 0 / 72%));
+  pointer-events: none;
+  user-select: none;
+}
+
+.profile-scene__dossier {
+  top: 14.05%;
+  left: 5.8%;
+  z-index: 1;
+  width: 88.4%;
+  height: auto;
+  filter: drop-shadow(0 0.7cqw 0.75cqw rgb(0 0 0 / 48%));
+}
+
+.profile-scene__identity {
+  position: absolute;
+  top: 46.3%;
+  left: 28%;
+  z-index: 3;
+  display: flex;
+  width: 44%;
+  min-width: 0;
+  flex-direction: column;
+  align-items: center;
+  color: #3d2614;
+  text-align: center;
+  text-shadow: 0 0.15cqw rgb(255 236 193 / 48%);
+}
+
+.profile-scene__identity strong {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  font-size: clamp(1rem, 5.1cqw, 1.58rem);
+  font-weight: 500;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profile-scene__identity span {
+  max-width: 100%;
+  margin-top: 1.25cqw;
+  padding: 0.35cqw 1.25cqw;
+  border: 0.16cqw solid rgb(96 61 31 / 47%);
+  border-radius: 999px;
+  font-size: clamp(0.52rem, 2.45cqw, 0.75rem);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.profile-scene__archive-number {
+  font-family: 'Times New Roman', Times, serif;
+  font-feature-settings: 'lnum' 1, 'tnum' 1;
+  font-variant-numeric: lining-nums tabular-nums;
+  font-weight: 500;
+}
+
+.profile-scene__form {
+  position: absolute;
+  top: 53.95%;
+  left: 21.2%;
+  z-index: 3;
+  width: 58.5%;
+}
+
+.profile-scene__field {
+  min-width: 0;
+}
+
+.profile-scene__field + .profile-scene__field {
+  margin-top: 4.25cqw;
+}
+
+.profile-scene__field label {
+  display: block;
+  padding-left: 5cqw;
+  color: #432a17;
+  font-size: clamp(0.82rem, 3.85cqw, 1.15rem);
+  font-weight: 800;
+  line-height: 1.15;
+}
+
+.profile-scene__field:first-child label {
+  transform: translateY(-1.5cqw);
+}
+
+.profile-scene__field + .profile-scene__field label {
+  transform: translateY(-1.3cqw);
+}
+
+.profile-scene__control {
+  position: relative;
+  display: flex;
+  width: calc(100% + 2.3cqw);
+  margin-left: -2.3cqw;
+  min-width: 0;
+  align-items: center;
+  border-bottom: 0.22cqw dashed rgb(103 68 35 / 44%);
+}
+
+.profile-scene__control input {
+  width: 100%;
+  min-width: 0;
+  height: 6.5cqw;
+  padding: 0 7cqw 0 7.3cqw;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  color: #58402b;
+  background: transparent;
+  box-shadow: none;
+  font-family: Georgia, 'STKaiti', 'KaiTi', 'Songti SC', 'STSong', serif;
+  font-size: clamp(0.82rem, 3.75cqw, 1.1rem);
+  line-height: 1;
+  text-overflow: ellipsis;
+}
+
+.profile-scene__control input::placeholder {
+  color: #795f45;
+  opacity: 0.72;
+}
+
+.profile-scene__control input:focus-visible {
+  outline: 0;
+}
+
+.profile-scene__control:focus-within {
+  border-bottom-color: #5a381c;
+  background: rgb(164 111 54 / 8%);
+  box-shadow: 0 0.35cqw 0 rgb(83 49 22 / 9%);
+}
+
+.profile-scene__control.is-readonly input {
+  padding-right: 9cqw;
+  cursor: default;
+}
+
+.profile-scene__readonly {
+  position: absolute;
+  right: 1.4cqw;
+  color: #775a3d;
+  font-family: 'PingFang SC', sans-serif;
+  font-size: clamp(0.48rem, 1.95cqw, 0.6rem);
+  font-weight: 700;
+}
+
+.profile-scene__status {
+  position: absolute;
+  top: 25.8cqw;
+  left: 0;
+  width: 100%;
+  min-height: 3.4cqw;
+  color: #5b6737;
+  font-family: 'PingFang SC', sans-serif;
+  font-size: clamp(0.52rem, 2.1cqw, 0.66rem);
+  font-weight: 650;
+  line-height: 1.25;
+  text-align: center;
+}
+
+.profile-scene__status .is-error {
+  color: #8c352b;
+}
+
+.profile-scene__save {
+  position: absolute;
+  top: 29.2cqw;
+  left: 2%;
+  display: grid;
+  width: 96%;
+  min-height: 3rem;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  transition: filter 150ms ease, transform 150ms ease, opacity 150ms ease;
+}
+
+.profile-scene__save img {
+  display: block;
+  width: 100%;
+  height: auto;
+  pointer-events: none;
+  user-select: none;
+}
+
+.profile-scene__save span {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #eed39b;
+  background: rgb(49 29 16 / 76%);
+  font-size: clamp(0.78rem, 3.2cqw, 1rem);
+  text-shadow: 0 1px 2px #160c06;
+}
+
+.profile-scene__save:disabled {
+  cursor: not-allowed;
+  filter: grayscale(0.3) brightness(0.75);
+  opacity: 0.72;
+}
+
+.profile-scene__logout {
+  position: absolute;
+  top: 83.35%;
+  left: 31%;
+  z-index: 3;
+  display: flex;
+  width: 38%;
+  min-height: 3.2rem;
+  align-items: center;
+  justify-content: center;
+  gap: 1.8cqw;
+  padding: 0.6cqw;
+  border: 0;
+  color: #8a3e2d;
+  background: transparent;
+  font-family: 'STKaiti', 'KaiTi', 'PingFang SC', sans-serif;
+  font-size: clamp(0.92rem, 4cqw, 1.25rem);
+  font-weight: 800;
+  cursor: pointer;
+  transition: filter 150ms ease, transform 150ms ease;
+}
+
+.profile-scene__logout svg {
+  width: 5cqw;
+  height: 5cqw;
+  flex: 0 0 auto;
+  stroke-width: 2.2;
+}
+
+.profile-scene__back:hover,
+.profile-scene__save:not(:disabled):hover,
+.profile-scene__logout:not(:disabled):hover {
+  filter: brightness(1.14);
+}
+
+.profile-scene__back:active,
+.profile-scene__save:not(:disabled):active,
+.profile-scene__logout:not(:disabled):active {
+  transform: scale(0.96);
+}
+
+.profile-scene__back:focus-visible,
+.profile-scene__save:focus-visible,
+.profile-scene__logout:focus-visible {
+  outline: 3px solid #f2d38d;
+  outline-offset: 2px;
+}
+
+.profile-scene__logout:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
 .create-room-scene {
   position: relative;
   isolation: isolate;

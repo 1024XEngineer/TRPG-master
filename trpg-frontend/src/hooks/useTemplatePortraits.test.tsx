@@ -66,4 +66,27 @@ describe('useTemplatePortraits', () => {
     expect(result.current).toEqual({})
     expect(createObjectURL).not.toHaveBeenCalled()
   })
+
+  it('请求未完成时模板被移除，不会让旧响应重新写回头像', async () => {
+    let resolvePortrait: ((blob: Blob) => void) | undefined
+    vi.mocked(getCharacterTemplatePortrait).mockImplementation(
+      () => new Promise((resolve) => { resolvePortrait = resolve }),
+    )
+    const { result, rerender } = renderHook(
+      ({ templates }) => useTemplatePortraits(templates),
+      { initialProps: { templates: [template('version-1')] } },
+    )
+    await waitFor(() => expect(getCharacterTemplatePortrait).toHaveBeenCalledOnce())
+    const signal = vi.mocked(getCharacterTemplatePortrait).mock.calls[0]?.[2]
+
+    await act(async () => rerender({ templates: [] }))
+    expect(signal?.aborted).toBe(true)
+
+    await act(async () => {
+      resolvePortrait?.(new Blob(['stale'], { type: 'image/png' }))
+      await Promise.resolve()
+    })
+    expect(result.current).toEqual({})
+    expect(createObjectURL).not.toHaveBeenCalled()
+  })
 })

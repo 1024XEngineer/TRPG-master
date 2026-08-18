@@ -52,7 +52,12 @@ export default function CharacterLibraryPage() {
     setCreating(true)
     setError('')
     try {
-      const created = await createCharacterTemplate('未命名调查员')
+      // 空白卡之间也会撞去重约束（#337：两张都是空的就是"一模一样"）。所以新建
+      // 时先挑一个当前列表里没用过的名字，而不是让玩家点第二次"新建"就吃 409。
+      const used = new Set((templates ?? []).map((item) => item.name))
+      let name = '未命名调查员'
+      for (let n = 2; used.has(name); n += 1) name = `未命名调查员 ${n}`
+      const created = await createCharacterTemplate(name)
       navigate(`/home/characters/${created.templateId}`)
     } catch (err) {
       setError(friendlyErrorMessage(err, '新建角色卡失败'))

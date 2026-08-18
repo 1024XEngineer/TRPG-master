@@ -25,6 +25,10 @@ class ErrorCode(StrEnum):
     FORBIDDEN = "FORBIDDEN"  # 已登录但没权限 → 403（同上，先占位）
     NOT_FOUND = "NOT_FOUND"  # 资源不存在 → 404
     CONFLICT = "CONFLICT"  # 资源冲突，比如同名记录已存在 → 409
+    # 卡库里已经有一张内容完全相同的角色卡（#337）→ 409。判据是内容不是名字：
+    # 两张真不同的卡可以同名，字节相同的才算重复。`details` 带上既有那张的
+    # templateId，前端据此把"存卡"按钮指向它，而不是再存一份。
+    CHARACTER_TEMPLATE_DUPLICATE = "CHARACTER_TEMPLATE_DUPLICATE"
     INTERNAL_ERROR = "INTERNAL_ERROR"  # 未预期的服务器内部错误 → 500
 
     # ── 以下 9 个是 issue #77 §4 新增的业务语义码（架构文档定过、代码里原来

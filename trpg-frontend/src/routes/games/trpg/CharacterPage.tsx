@@ -1195,9 +1195,21 @@ export default function CharacterPage() {
       const characterId = await createCharacterDraft(roomId, templateId)
       setCharacterId(characterId)
       setLibraryOpen(false)
-      // 草稿已经带着卡库卡的数据落库了，重新进这个页面让既有的水合逻辑把它读回
-      // 表单——不在这里再抄一遍字段映射。
-      navigate(0)
+      // 卡库卡通常已经是捏好的，没道理再让玩家把四步向导点一遍。直接完成建卡进
+      // 准备页——准备页本来就自己从后端拉角色卡，不需要这里再拼一份 store 数据。
+      //
+      // 完不成的情况是真实存在的（例如玩家刚在卡库里新建了一张空白卡就拿来用），
+      // 后端会用 422 明确拒绝。那时候退回向导让玩家补完，而不是卡在一个说不清
+      // 为什么失败的准备页。
+      try {
+        await completeCharacter(roomId, characterId)
+        navigate('/room/ready')
+      } catch {
+        setLibraryError('这张卡还没建完，先在这里补完剩下的部分。')
+        // 草稿已经带着卡库卡的数据落库了，重新进这个页面让既有的水合逻辑把它读
+        // 回表单——不在这里再抄一遍字段映射。
+        navigate(0)
+      }
     } catch (err) {
       setLibraryError(
         err instanceof ApiError && err.status === 409

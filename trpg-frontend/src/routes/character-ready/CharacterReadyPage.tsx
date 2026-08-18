@@ -7,14 +7,16 @@ import {
   Eye,
   ImagePlus,
   BookmarkPlus,
+  BookmarkCheck,
 } from 'lucide-react'
 import { useCharacterStore } from '@/stores/character-store'
 import { fetchCharacter } from '@/services/character/character-api'
 import {
   createCharacterTemplate,
+  deleteCharacterTemplate,
   templateDataFromBuilt,
 } from '@/services/character/template-api'
-import { friendlyErrorMessage } from '@/services/api-client'
+import { ApiError, friendlyErrorMessage } from '@/services/api-client'
 import { useRoomStore } from '@/stores/room-store'
 import { useAuthStore } from '@/stores/auth-store'
 import { connectWebSocket, disconnectWebSocket, sdk, waitForWsOpen } from '@/services/api-client'
@@ -137,7 +139,9 @@ export default function CharacterReadyPage() {
   // 都落在这里，这才是"卡已经建好"的时刻。放在向导第一步时卡还是空的，而且一键
   // 生成会直接跳到本页，那个按钮玩家根本来不及看见。
   const [savingToLibrary, setSavingToLibrary] = useState(false)
-  const [savedToLibrary, setSavedToLibrary] = useState(false)
+  // 存的是"这一次存进去的那张卡库卡的 id"，不是一个布尔。只有记下 id 才撤得掉：
+  // 存卡每次都会新建一条卡库记录，撤销就是把刚建的那条删掉。
+  const [savedTemplateId, setSavedTemplateId] = useState<string | null>(null)
   const [libraryError, setLibraryError] = useState('')
   const cancelExitRef = useRef<HTMLButtonElement>(null)
   const roomId = useRoomStore((s) => s.roomId)
@@ -271,14 +275,28 @@ export default function CharacterReadyPage() {
     navigate('/room/play')
   }
 
-  const handleSaveToLibrary = async () => {
+  const handleToggleLibrary = async () => {
     if (!character || savingToLibrary) return
     setSavingToLibrary(true)
     setLibraryError('')
+    // 已经存过就是撤销：删掉刚才那一条。存卡每次新建一条记录，所以撤销只需要
+    // 删掉这次建的，不会碰到玩家卡库里别的卡。
+    if (savedTemplateId) {
+      try {
+        await deleteCharacterTemplate(savedTemplateId)
+        setSavedTemplateId(null)
+        setLibraryError('')
+      } catch (err) {
+        setLibraryError(friendlyErrorMessage(err, '取消存卡失败'))
+      } finally {
+        setSavingToLibrary(false)
+      }
+      return
+    }
     try {
       // 这一页拿到的是已经完成的卡：`skillFinalValues` 就是后端权威算过的最终值，
       // 不需要再跑一次 preview。
-      await createCharacterTemplate(
+      const saved = await createCharacterTemplate(
         character.info.name.trim() || '未命名调查员',
         templateDataFromBuilt({
           name: character.info.name,
@@ -297,9 +315,17 @@ export default function CharacterReadyPage() {
           notes: character.notes,
         }),
       )
-      setSavedToLibrary(true)
+      setSavedTemplateId(saved.templateId)
     } catch (err) {
-      setLibraryError(friendlyErrorMessage(err, '存入角色卡库失败'))
+      // 卡库里已经有一张一模一样的（比如刷新后又点了一次）。这不是失败——那张卡
+      // 就在库里。如实说明，并把按钮指向既有那张，撤销依然可用。
+      if (err instanceof ApiError && err.code === 'CHARACTER_TEMPLATE_DUPLICATE') {
+        const existingId = err.details?.[0]?.templateId
+        if (existingId) setSavedTemplateId(existingId)
+        setLibraryError('这张角色卡已经在卡库里了，没有重复保存。')
+      } else {
+        setLibraryError(friendlyErrorMessage(err, '存入角色卡库失败'))
+      }
     } finally {
       setSavingToLibrary(false)
     }
@@ -411,13 +437,24 @@ export default function CharacterReadyPage() {
                           <button type="button" onClick={handleEditCharacter}><span>编辑</span></button>
                           <button
                             type="button"
-                            onClick={handleSaveToLibrary}
-                            disabled={savingToLibrary || savedToLibrary}
-                            aria-label="把这张调查员存进我的角色卡库"
-                            title="存进我的角色卡库，下次开局可以直接选"
+                            onClick={handleToggleLibrary}
+                            disabled={savingToLibrary}
+                            aria-pressed={savedTemplateId !== null}
+                            aria-label={
+                              savedTemplateId
+                                ? '已存进我的角色卡库，点击撤销'
+                                : '把这张调查员存进我的角色卡库'
+                            }
+                            title={
+                              savedTemplateId
+                                ? '已存进卡库，点击把刚存的这张删掉'
+                                : '存进我的角色卡库，下次开局可以直接选'
+                            }
                           >
-                            <BookmarkPlus />
-                            <span>{savingToLibrary ? '存卡中' : savedToLibrary ? '已存卡' : '存卡'}</span>
+                            {savedTemplateId ? <BookmarkCheck /> : <BookmarkPlus />}
+                            <span>
+                              {savingToLibrary ? '处理中' : savedTemplateId ? '已存卡' : '存卡'}
+                            </span>
                           </button>
                         </>
                       ) : (

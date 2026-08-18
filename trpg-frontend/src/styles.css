@@ -2226,6 +2226,115 @@
   user-select: none;
 }
 
+.create-room-scene__selected-module {
+  position: absolute;
+  top: -1%;
+  left: 6%;
+  display: grid;
+  grid-template-columns: 36% minmax(0, 1fr);
+  align-items: center;
+  gap: 5%;
+  width: 88%;
+  height: 68%;
+  color: #2b1b0f;
+  transform: rotate(-5deg);
+  pointer-events: none;
+}
+
+.create-room-scene__selected-module-cover {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  overflow: hidden;
+  border: 2px solid rgb(75 43 22 / 72%);
+  background: #d1b17b;
+  box-shadow: 0 2px 4px rgb(45 24 10 / 38%);
+  transform: translateX(4cqw);
+}
+
+.create-room-scene__selected-module-cover-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  transform: scale(1.1);
+}
+
+.create-room-scene__selected-module-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 1.8cqw;
+  text-align: center;
+}
+
+.create-room-scene__selected-module-copy strong {
+  width: 100%;
+  overflow: hidden;
+  font-size: clamp(17px, 5.8cqw, 27px);
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.create-room-scene__selected-module-copy > span {
+  width: 100%;
+  padding-top: 1.5cqw;
+  border-top: 1px solid rgb(75 43 22 / 55%);
+  font-size: clamp(12px, 3.6cqw, 16px);
+  font-weight: 700;
+  line-height: 1;
+  text-align: center;
+}
+
+.create-room-scene__module-status {
+  position: absolute;
+  top: 13%;
+  left: 20%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 66%;
+  height: 43%;
+  flex-direction: column;
+  gap: 1.2cqw;
+  color: #2b1b0f;
+  text-align: center;
+  transform: rotate(-5deg);
+  pointer-events: none;
+}
+
+.create-room-scene__module-status strong {
+  font-size: clamp(13px, 4.4cqw, 20px);
+  line-height: 1.1;
+}
+
+.create-room-scene__module-status > span:last-child {
+  font-size: clamp(9px, 2.8cqw, 13px);
+  font-weight: 700;
+}
+
+.create-room-scene__module-status--error {
+  color: #65281e;
+}
+
+.create-room-scene__module-spinner {
+  width: clamp(18px, 6cqw, 28px);
+  aspect-ratio: 1;
+  border: 2px solid rgb(75 43 22 / 24%);
+  border-top-color: #4b2b16;
+  border-radius: 50%;
+  animation: create-module-spin 800ms linear infinite;
+}
+
+@keyframes create-module-spin {
+  to { transform: rotate(360deg); }
+}
+
 .create-room-scene__cat {
   position: absolute;
   top: 35.5%;
@@ -3910,7 +4019,7 @@
   filter: drop-shadow(0 0.2rem 0.18rem rgb(39 18 6 / 42%));
 }
 
-.scenario-module-card__cover--default {
+.scenario-module-card__cover.is-default-cover {
   width: min(104%, 7.35rem);
 }
 
@@ -4350,7 +4459,7 @@
   width: 7rem;
 }
 
-.scenario-module-detail__header .scenario-module-card__cover--default {
+.scenario-module-detail__header .scenario-module-card__cover.is-default-cover {
   width: 6.35rem;
 }
 
@@ -4617,7 +4726,7 @@
     width: 5.5rem;
   }
 
-  .scenario-module-detail__header .scenario-module-card__cover--default {
+  .scenario-module-detail__header .scenario-module-card__cover.is-default-cover {
     width: 5rem;
   }
 
@@ -4637,6 +4746,10 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .create-room-scene__module-spinner {
+    animation: none;
+  }
+
   .scenario-selection-state__spinner {
     animation-duration: 1800ms;
   }

@@ -40,6 +40,21 @@ const moduleDetail: ModuleDetail = {
   ],
 }
 
+const replacementModuleSummary: ModuleSummary = {
+  ...moduleSummary,
+  id: 'arkham-files-coc7',
+  title: '阿卡姆档案',
+  nameEn: 'Arkham Files',
+  playersMin: 2,
+  playersMax: 4,
+  synopsis: '一份没有专属封面的测试模组。',
+}
+
+const replacementModuleDetail: ModuleDetail = {
+  ...moduleDetail,
+  ...replacementModuleSummary,
+}
+
 afterEach(() => {
   cleanup()
   vi.clearAllMocks()
@@ -334,6 +349,115 @@ describe('content selection pages', () => {
       createFormMaxPlayers: 6,
     })
     expect(useGameStore.getState().sceneId).toBeNull()
+  })
+
+  it('shows the selected module cover, name, and change action on the create-room stamp', async () => {
+    useGameStore.getState().setScene(moduleSummary.id)
+    vi.mocked(getModuleDetail).mockResolvedValue(moduleDetail)
+
+    render(
+      <MemoryRouter initialEntries={['/home/create']}>
+        <CreateRoomPage />
+      </MemoryRouter>,
+    )
+
+    const stamp = await screen.findByRole('button', { name: '更改模组：追书人' })
+    expect(within(stamp).getByText('追书人')).toBeVisible()
+    expect(within(stamp).getByText('更改模组')).toBeVisible()
+    expect(within(stamp).getByAltText('追书人模组封面')).toHaveAttribute(
+      'src',
+      '/assets/rooms/scenarios/cover-paper-chase.webp',
+    )
+  })
+
+  it('keeps the current module when opening the catalog and returning directly', async () => {
+    useGameStore.getState().setScene(moduleSummary.id)
+    vi.mocked(listModules).mockResolvedValue([moduleSummary, replacementModuleSummary])
+    vi.mocked(getModuleDetail).mockImplementation(async (moduleId) => (
+      moduleId === moduleSummary.id ? moduleDetail : replacementModuleDetail
+    ))
+
+    render(
+      <MemoryRouter initialEntries={['/home/create']}>
+        <Routes>
+          <Route path="/home/create" element={<CreateRoomPage />} />
+          <Route path="/home/create/modules" element={<ScenarioSelectionPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    fireEvent.click(await screen.findByRole('button', { name: '更改模组：追书人' }))
+    expect(await screen.findByText('已选择')).toBeInTheDocument()
+    expect(useGameStore.getState().sceneId).toBe(moduleSummary.id)
+
+    fireEvent.click(screen.getByRole('button', { name: '返回创建房间' }))
+    expect(await screen.findByRole('button', { name: '更改模组：追书人' })).toBeInTheDocument()
+    expect(useGameStore.getState().sceneId).toBe(moduleSummary.id)
+  })
+
+  it('replaces the current module only after another module is confirmed', async () => {
+    useGameStore.getState().setScene(moduleSummary.id)
+    vi.mocked(listModules).mockResolvedValue([moduleSummary, replacementModuleSummary])
+    vi.mocked(getModuleDetail).mockImplementation(async (moduleId) => (
+      moduleId === moduleSummary.id ? moduleDetail : replacementModuleDetail
+    ))
+
+    render(
+      <MemoryRouter initialEntries={['/home/create']}>
+        <Routes>
+          <Route path="/home/create" element={<CreateRoomPage />} />
+          <Route path="/home/create/modules" element={<ScenarioSelectionPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    fireEvent.click(await screen.findByRole('button', { name: '更改模组：追书人' }))
+    fireEvent.click(await screen.findByRole('button', { name: '查看模组 阿卡姆档案 详情' }))
+    expect(useGameStore.getState().sceneId).toBe(moduleSummary.id)
+
+    fireEvent.click(await screen.findByRole('button', { name: '选择此模组' }))
+
+    const stamp = await screen.findByRole('button', { name: '更改模组：阿卡姆档案' })
+    expect(useGameStore.getState().sceneId).toBe(replacementModuleSummary.id)
+    expect(within(stamp).getByAltText('阿卡姆档案模组封面')).toHaveAttribute(
+      'src',
+      '/assets/rooms/scenarios/cover-default.webp',
+    )
+  })
+
+  it('falls back to the default cover when a dedicated image fails to load', async () => {
+    useGameStore.getState().setScene(moduleSummary.id)
+    vi.mocked(getModuleDetail).mockResolvedValue(moduleDetail)
+
+    render(
+      <MemoryRouter>
+        <CreateRoomPage />
+      </MemoryRouter>,
+    )
+
+    const cover = await screen.findByAltText('追书人模组封面')
+    fireEvent.error(cover)
+    expect(cover).toHaveAttribute('src', '/assets/rooms/scenarios/cover-default.webp')
+  })
+
+  it('shows explicit loading and error states for the selected module', async () => {
+    useGameStore.getState().setScene(moduleSummary.id)
+    let rejectDetail!: (reason: Error) => void
+    vi.mocked(getModuleDetail).mockReturnValue(new Promise((_, reject) => {
+      rejectDetail = reject
+    }))
+
+    render(
+      <MemoryRouter>
+        <CreateRoomPage />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByText('正在加载模组')).toBeVisible()
+    rejectDetail(new Error('network unavailable'))
+    expect(await screen.findByText('模组加载失败')).toBeVisible()
+    expect(screen.getByText('前往更改模组')).toBeVisible()
+    expect(screen.queryByText('选择模组')).not.toBeInTheDocument()
   })
 
   it('locks the create-room player control to the selected module range', async () => {

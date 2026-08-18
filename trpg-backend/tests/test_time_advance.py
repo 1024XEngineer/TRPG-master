@@ -331,7 +331,6 @@ async def test_engine_commit_before_proposal_commit_is_reconciled_as_approved(
         action_id="time-crash-window-349",
     )
     await time_advance.create_from_adjudication(db_session, request)
-    record = await _proposal(db_session, room.id)
     await engine.submit_with_time_consent(
         request,
         consent_player_ids=tuple(sorted(player.id for player in players)),

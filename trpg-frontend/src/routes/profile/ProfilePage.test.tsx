@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { fetchMe, logout, updateProfile } from '@/services/auth'
 import { useAuthStore } from '@/stores/auth-store'
-import ProfilePage, { archiveNumber } from './ProfilePage'
+import { archiveNumber } from '@/utils/archive-number'
+import ProfilePage from './ProfilePage'
 
 const storeMocks = vi.hoisted(() => ({
   resetRoom: vi.fn(),

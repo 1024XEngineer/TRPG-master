@@ -6,16 +6,7 @@ import { useRoomStore } from '@/stores/room-store'
 import { useCharacterStore } from '@/stores/character-store'
 import { updateProfile, fetchMe, logout as logoutFromServer } from '@/services/auth'
 import { friendlyErrorMessage } from '@/services/api-client'
-
-export function archiveNumber(userId: string | null): string {
-  if (!userId) return '----'
-
-  let hash = 0
-  for (const character of userId) {
-    hash = (hash * 31 + character.charCodeAt(0)) % 10_000
-  }
-  return hash.toString().padStart(4, '0')
-}
+import { archiveNumber } from '@/utils/archive-number'
 
 export default function ProfilePage() {
   const navigate = useNavigate()

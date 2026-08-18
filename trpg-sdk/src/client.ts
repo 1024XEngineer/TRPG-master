@@ -9,12 +9,26 @@ import type { ApiResponse } from './types';
 export class ApiError extends Error {
   readonly code: string;
   readonly status: number;
+  /**
+   * 后端 `AppException.details` 的原样透传。
+   *
+   * 有些错误码光靠 message 用不起来：比如 `CHARACTER_TEMPLATE_DUPLICATE` 会带上
+   * 卡库里既有那张卡的 `templateId`，调用方要据此把界面指向它，而不是丢一句
+   * "保存失败"。
+   */
+  readonly details: Array<Record<string, string>> | null;
 
-  constructor(code: string, message: string, status: number) {
+  constructor(
+    code: string,
+    message: string,
+    status: number,
+    details: Array<Record<string, string>> | null = null
+  ) {
     super(message);
     this.name = 'ApiError';
     this.code = code;
     this.status = status;
+    this.details = details;
   }
 }
 
@@ -74,7 +88,8 @@ export class ApiClient {
       throw new ApiError(
         body.error?.code ?? 'UNKNOWN_ERROR',
         body.error?.message ?? '请求失败',
-        response.status
+        response.status,
+        body.error?.details ?? null
       );
     }
 
@@ -100,7 +115,8 @@ export class ApiClient {
       throw new ApiError(
         body?.error?.code ?? 'UNKNOWN_ERROR',
         body?.error?.message ?? '请求失败',
-        response.status
+        response.status,
+        body?.error?.details ?? null
       );
     }
     return response.blob();

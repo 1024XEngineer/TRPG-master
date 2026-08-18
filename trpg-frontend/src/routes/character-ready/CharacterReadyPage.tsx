@@ -6,9 +6,17 @@ import {
   UserPlus,
   Eye,
   ImagePlus,
+  BookmarkPlus,
+  BookmarkCheck,
 } from 'lucide-react'
 import { useCharacterStore } from '@/stores/character-store'
-import { fetchCharacter } from '@/services/character/character-api'
+import { useRoomCharacter } from '@/hooks/useRoomCharacter'
+import {
+  createCharacterTemplate,
+  deleteCharacterTemplate,
+  templateDataFromBuilt,
+} from '@/services/character/template-api'
+import { ApiError, friendlyErrorMessage } from '@/services/api-client'
 import { useRoomStore } from '@/stores/room-store'
 import { useAuthStore } from '@/stores/auth-store'
 import { connectWebSocket, disconnectWebSocket, sdk, waitForWsOpen } from '@/services/api-client'
@@ -16,7 +24,6 @@ import { useRoomPlayers } from '@/hooks/useRoomPlayers'
 import { usePlayerPortraits } from '@/hooks/usePlayerPortraits'
 import { useRuleset } from '@/hooks/useRuleset'
 import { PortraitGenerationModal } from './PortraitGenerationModal'
-import { normalizeDerivedStats } from '@/data/derived-stats'
 import { OnboardingTrigger } from '@/features/onboarding'
 import { PortraitImage } from '@/features/portrait/PortraitImage'
 import { CharacterBasicInfo } from '@/features/character/CharacterBasicInfo'
@@ -127,68 +134,27 @@ export default function CharacterReadyPage() {
   const [starting, setStarting] = useState(false)
   const [startError, setStartError] = useState('')
   const [confirmExit, setConfirmExit] = useState(false)
+  // 「存入卡库」放在这一页而不是建卡向导里（#337）：手动「完成创建」和一键生成
+  // 都落在这里，这才是"卡已经建好"的时刻。放在向导第一步时卡还是空的，而且一键
+  // 生成会直接跳到本页，那个按钮玩家根本来不及看见。
+  const [savingToLibrary, setSavingToLibrary] = useState(false)
+  // 存的是"这一次存进去的那张卡库卡的 id"，不是一个布尔。只有记下 id 才撤得掉：
+  // 存卡每次都会新建一条卡库记录，撤销就是把刚建的那条删掉。
+  const [savedTemplateId, setSavedTemplateId] = useState<string | null>(null)
+  const [libraryError, setLibraryError] = useState('')
   const cancelExitRef = useRef<HTMLButtonElement>(null)
   const roomId = useRoomStore((s) => s.roomId)
-  const cachedCharacter = useCharacterStore((s) => (roomId ? s.getForRoom(roomId) : null))
   const characterId = useRoomStore((s) => s.characterId)
   const { ruleset: readyRuleset } = useRuleset()
-
-  // 角色卡以**后端**为准，本地缓存只作首屏占位（issue #96）。
+  // 以后端为准、缓存只作首屏占位（issue #96）。这段逻辑原本就长在这一页，#337
+  // 之后抽成了 hook——游戏内的 RoomPage 需要同一份，那里原来只读本地缓存。
+  const { character, basedOnTemplateId } = useRoomCharacter()
+  // 这张房间卡是从卡库播种来的，那它**本来就在卡库里**，按钮一进来就该是"已存卡"。
   //
-  // 之前这里只读 localStorage：清掉缓存（或换浏览器）后，明明后端有这张卡，
-  // 页面却显示成"还没建卡"。现在有了 GET 端点，就该以后端那份为准——本地缓存
-  // 保留是为了拉取回来之前不闪空白，不是权威源。
-  const characterIdentity = roomId && characterId ? `${roomId}:${characterId}` : null
-  const [remoteCharacter, setRemoteCharacter] = useState<{
-    identity: string
-    character: NonNullable<typeof cachedCharacter>
-  } | null>(null)
-  useEffect(() => {
-    // 组件可能在不卸载的情况下切换房间。上一身份的远程角色不能继续压过
-    // 新房间的缓存，更不能让没有 characterId 的房间误判为已经建卡。
-    setRemoteCharacter(null)
-    if (!roomId || !characterId || !readyRuleset || !characterIdentity) return
-    let cancelled = false
-    fetchCharacter(roomId, characterId)
-      .then((saved) => {
-        if (cancelled || !saved.name) return
-        const occupationId =
-          readyRuleset.occupations.find((o) => o.name === saved.occupation)?.id ?? null
-        const derived = normalizeDerivedStats(saved.derivedStats ?? {})
-        setRemoteCharacter({
-          identity: characterIdentity,
-          character: {
-            info: {
-              name: saved.name,
-              playerName: '',
-              age: saved.age != null ? String(saved.age) : '',
-              gender: saved.gender ?? '',
-              residence: saved.residence ?? '',
-              birthplace: saved.birthplace ?? '',
-              occupationId,
-            },
-            attr: { ...saved.attributes },
-            skillAlloc: {},
-            skillFinalValues: { ...saved.skills },
-            occupationChoiceSkillIds: saved.occupationChoiceSkillIds ?? [],
-            equipment: (saved.equipment ?? []).join('、'),
-            background: saved.background ?? '',
-            notes: saved.notes ?? '',
-            derived,
-          },
-        })
-      })
-      .catch(() => {
-        // 拉不到就沿用本地缓存（比如还没建过卡），不打断这个页面。
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [roomId, characterId, characterIdentity, readyRuleset])
-
-  const character = remoteCharacter?.identity === characterIdentity
-    ? remoteCharacter.character
-    : cachedCharacter
+  // 不能只靠内容哈希判断：卡库里那张可能是服务端背书的 roll，而重新保存时客户端
+  // 不被允许声称 roll（会被压成 pointbuy），内容必然不同，永远判不出"存过"——
+  // 实测就是这样多出一张重复卡的。出处才是可靠判据。
+  const alreadyInLibrary = savedTemplateId ?? basedOnTemplateId
   const roomCode = useRoomStore((s) => s.roomCode)
   const isHost = useRoomStore((s) => s.isHost)
   const playerId = useRoomStore((s) => s.playerId)
@@ -257,6 +223,62 @@ export default function CharacterReadyPage() {
     // AI 生成旁白的时间，RoomPage 大概率已经挂载好在等了。
     advancedRef.current = true
     navigate('/room/play')
+  }
+
+  const handleToggleLibrary = async () => {
+    if (!character || savingToLibrary) return
+    setSavingToLibrary(true)
+    setLibraryError('')
+    // 已经存过就是撤销：删掉刚才那一条。存卡每次新建一条记录，所以撤销只需要
+    // 删掉这次建的，不会碰到玩家卡库里别的卡。
+    if (alreadyInLibrary) {
+      try {
+        await deleteCharacterTemplate(alreadyInLibrary)
+        setSavedTemplateId(null)
+        setLibraryError('')
+      } catch (err) {
+        setLibraryError(friendlyErrorMessage(err, '取消存卡失败'))
+      } finally {
+        setSavingToLibrary(false)
+      }
+      return
+    }
+    try {
+      // 这一页拿到的是已经完成的卡：`skillFinalValues` 就是后端权威算过的最终值，
+      // 不需要再跑一次 preview。
+      const saved = await createCharacterTemplate(
+        character.info.name.trim() || '未命名调查员',
+        templateDataFromBuilt({
+          name: character.info.name,
+          age: character.info.age ? Number(character.info.age) : null,
+          gender: character.info.gender || null,
+          residence: character.info.residence,
+          birthplace: character.info.birthplace,
+          attr: character.attr,
+          derived: character.derived,
+          skillValues: character.skillFinalValues ?? {},
+          occupationChoiceSkillIds: character.occupationChoiceSkillIds ?? [],
+          equipment: character.equipment,
+          occupationName:
+            readyRuleset?.occupations.find((o) => o.id === character.info.occupationId)?.name ?? null,
+          background: character.background,
+          notes: character.notes,
+        }),
+      )
+      setSavedTemplateId(saved.templateId)
+    } catch (err) {
+      // 卡库里已经有一张一模一样的（比如刷新后又点了一次）。这不是失败——那张卡
+      // 就在库里。如实说明，并把按钮指向既有那张，撤销依然可用。
+      if (err instanceof ApiError && err.code === 'CHARACTER_TEMPLATE_DUPLICATE') {
+        const existingId = err.details?.[0]?.templateId
+        if (existingId) setSavedTemplateId(existingId)
+        setLibraryError('这张角色卡已经在卡库里了，没有重复保存。')
+      } else {
+        setLibraryError(friendlyErrorMessage(err, '存入角色卡库失败'))
+      }
+    } finally {
+      setSavingToLibrary(false)
+    }
   }
 
   const handleEditCharacter = () => {
@@ -363,6 +385,27 @@ export default function CharacterReadyPage() {
                             <button type="button" onClick={() => setShowPortraitGenerator(true)} aria-label="生成角色图片" title="生成角色图片"><ImagePlus /><span>生图</span></button>
                           )}
                           <button type="button" onClick={handleEditCharacter}><span>编辑</span></button>
+                          <button
+                            type="button"
+                            onClick={handleToggleLibrary}
+                            disabled={savingToLibrary}
+                            aria-pressed={alreadyInLibrary !== null}
+                            aria-label={
+                              alreadyInLibrary
+                                ? '已存进我的角色卡库，点击撤销'
+                                : '把这张调查员存进我的角色卡库'
+                            }
+                            title={
+                              alreadyInLibrary
+                                ? '已存进卡库，点击把刚存的这张删掉'
+                                : '存进我的角色卡库，下次开局可以直接选'
+                            }
+                          >
+                            {alreadyInLibrary ? <BookmarkCheck /> : <BookmarkPlus />}
+                            <span>
+                              {savingToLibrary ? '处理中' : alreadyInLibrary ? '已存卡' : '存卡'}
+                            </span>
+                          </button>
                         </>
                       ) : (
                         <button type="button" className="is-create" onClick={handleEditCharacter}><UserPlus /><span>创建人物卡</span></button>
@@ -383,6 +426,7 @@ export default function CharacterReadyPage() {
       </main>
 
       <footer className="lobby-scene__footer character-ready-scene__footer">
+        {libraryError && <p className="lobby-scene__start-error" role="alert">{libraryError}</p>}
         {startError && <p className="lobby-scene__start-error" role="alert">{startError}</p>}
         {isHost ? (
           <button

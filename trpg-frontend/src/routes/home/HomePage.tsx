@@ -98,6 +98,18 @@ export default function HomePage() {
             height={565}
             onClick={() => navigate('/home/my-rooms')}
           />
+          {/* 纸片上的文字是画进图里的，`label` 只喂 aria-label / 读屏。
+              `my-characters-paper.webp` 目前是 my-games-paper 的副本占位，美术
+              替换这一个文件即可，不需要动代码。
+              还需要美术一并处理的：木框和红绳是按三格排的，第四张现在会掉到
+              框外、也没有绳子串上去。 */}
+          <SceneAction
+            label="我的角色卡"
+            image="/assets/home/my-characters-paper.webp"
+            width={914}
+            height={565}
+            onClick={() => navigate('/home/characters')}
+          />
           <img
             className="home-scene__pins"
             src="/assets/home/pins-and-string.webp"

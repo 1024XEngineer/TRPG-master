@@ -4,7 +4,7 @@ import { ArrowLeft, Users, Map, MapPin, BookOpen, ScrollText, Star, X, SendHoriz
 import { useCallback, useState, useRef, useEffect, useMemo, type Dispatch, type FormEvent, type SetStateAction } from 'react'
 import { useRoomStore } from '@/stores/room-store'
 import { useAuthStore } from '@/stores/auth-store'
-import { useCharacterStore } from '@/stores/character-store'
+import { useRoomCharacter } from '@/hooks/useRoomCharacter'
 import { connectWebSocket, waitForWsOpen, sdk, onWsMessage, disconnectWebSocket, friendlyErrorMessage, getAuthToken } from '@/services/api-client'
 import { confirmEndingDraft, createEndingDraft, endGame } from '@/services/room'
 import { useRoomPlayers } from '@/hooks/useRoomPlayers'
@@ -1246,9 +1246,10 @@ export default function RoomPage() {
   const characterId = useRoomStore((s) => s.characterId)
   const reconnectToken = useRoomStore((s) => s.reconnectToken)
   const nickname = useAuthStore((s) => s.nickname)
-  // 按房间取角色卡，而不是直接读 s.character——本地缓存不按房间区分的话，
-  // 换房间会把上一个房间的角色数据错误地展示出来（见 PR #67 review）。
-  const character = useCharacterStore((s) => (roomId ? s.getForRoom(roomId) : null))
+  // 以后端为准，本地缓存只作首屏占位。原来这里只读 useCharacterStore，而那个
+  // store 全仓库只有建卡向导的两处提交会写——任何绕开向导的建卡路径（#337 的
+  // 「从卡库选卡」就是一条）在准备页看着正常，进游戏这个面板就是空的。
+  const { character } = useRoomCharacter()
   const senderName = character?.info.name || nickname || '你'
   const { ruleset } = useRuleset()
   const roomInfo = useRoomPlayers(roomCode)

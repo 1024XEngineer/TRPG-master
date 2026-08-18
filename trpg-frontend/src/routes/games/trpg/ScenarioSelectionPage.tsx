@@ -4,11 +4,12 @@ import { useNavigate } from 'react-router-dom'
 import type { ModuleDetail, ModuleSummary } from 'trpg-sdk'
 import { FIXED_TRPG } from '@/config/games'
 import { ROUTES } from '@/config/routes'
+import { ModuleCover, MODULE_ASSET_ROOT } from '@/components/ModuleCover'
 import { friendlyErrorMessage } from '@/services/api-client'
 import { getModuleDetail, listModules } from '@/services/room'
 import { useGameStore } from '@/stores/game-store'
 
-const ASSET_ROOT = '/assets/rooms/scenarios'
+const ASSET_ROOT = MODULE_ASSET_ROOT
 const MAX_IMPORT_SIZE = 20 * 1024 * 1024
 const ACCEPTED_FILE_TYPES = '.pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 const CARD_BACKGROUNDS = [
@@ -16,9 +17,6 @@ const CARD_BACKGROUNDS = [
   `${ASSET_ROOT}/module-card-2.webp`,
   `${ASSET_ROOT}/module-card-3.webp`,
 ]
-const MODULE_COVERS: Record<string, string> = {
-  'paper-chase-zh-coc7': `${ASSET_ROOT}/cover-paper-chase.webp`,
-}
 const MODULE_PREPARATION_PAGE_INDEXES: Record<string, readonly number[]> = {
   'paper-chase-zh-coc7': [1],
 }
@@ -36,10 +34,6 @@ interface PendingImport {
   extension: 'PDF' | 'DOCX'
 }
 
-function moduleCover(moduleId: string) {
-  return MODULE_COVERS[moduleId] ?? `${ASSET_ROOT}/cover-default.webp`
-}
-
 function playerRange(module: ModuleSummary) {
   return module.playersMin === module.playersMax
     ? `${module.playersMin} 人`
@@ -52,29 +46,6 @@ function readableFileSize(size: number) {
 
 function contentSentences(content: string) {
   return content.match(/[^。！？]+[。！？]?/g)?.map((sentence) => sentence.trim()).filter(Boolean) ?? [content]
-}
-
-function CoverImage({ moduleId, title }: { moduleId: string; title: string }) {
-  const usesDefaultCover = !MODULE_COVERS[moduleId]
-  return (
-    <span className={`scenario-module-card__cover${usesDefaultCover ? ' scenario-module-card__cover--default' : ''}`}>
-      <img
-        className="scenario-module-card__cover-image"
-        src={moduleCover(moduleId)}
-        alt={`${title}模组封面`}
-        onError={(event) => {
-          const fallback = `${ASSET_ROOT}/cover-default.webp`
-          if (!event.currentTarget.src.endsWith(fallback)) event.currentTarget.src = fallback
-        }}
-      />
-      <img
-        className="scenario-module-card__cover-frame"
-        src={`${ASSET_ROOT}/cover-frame.webp`}
-        alt=""
-        aria-hidden="true"
-      />
-    </span>
-  )
 }
 
 export default function ScenarioSelectionPage() {
@@ -291,7 +262,13 @@ export default function ScenarioSelectionPage() {
               aria-hidden="true"
             />
             <div className="scenario-module-card__content">
-              <CoverImage moduleId={pendingImport.id} title={pendingImport.title} />
+              <ModuleCover
+                moduleId={pendingImport.id}
+                title={pendingImport.title}
+                className="scenario-module-card__cover"
+                imageClassName="scenario-module-card__cover-image"
+                frameClassName="scenario-module-card__cover-frame"
+              />
               <div className="scenario-module-card__information">
                 <div className="scenario-module-card__heading">
                   <h2>{pendingImport.title}</h2>
@@ -363,7 +340,13 @@ export default function ScenarioSelectionPage() {
                 aria-hidden="true"
               />
               <div className="scenario-module-card__content">
-                <CoverImage moduleId={module.id} title={module.title} />
+                <ModuleCover
+                  moduleId={module.id}
+                  title={module.title}
+                  className="scenario-module-card__cover"
+                  imageClassName="scenario-module-card__cover-image"
+                  frameClassName="scenario-module-card__cover-frame"
+                />
                 <div className="scenario-module-card__information">
                   <div className="scenario-module-card__heading">
                     <h2>{module.title}</h2>
@@ -439,7 +422,13 @@ export default function ScenarioSelectionPage() {
             </button>
 
             <div className="scenario-module-detail__header">
-              <CoverImage moduleId={detailSummary.id} title={detailSummary.title} />
+              <ModuleCover
+                moduleId={detailSummary.id}
+                title={detailSummary.title}
+                className="scenario-module-card__cover"
+                imageClassName="scenario-module-card__cover-image"
+                frameClassName="scenario-module-card__cover-frame"
+              />
               <div className="scenario-module-detail__identity">
                 <span>{detail?.storyLabel || FIXED_TRPG.systemCatalogName}</span>
                 <h2 id="scenario-module-detail-title">{detailSummary.title}</h2>

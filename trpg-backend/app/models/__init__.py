@@ -34,7 +34,7 @@ from app.models.engine import (
 from app.models.event import CheckResult, Event
 from app.models.replay import ModuleImportJob, RoomSummary
 from app.models.room import Character, CharacterPortrait, Note, Player, Room
-from app.models.user import User, UserCharacterTemplate, UserSession
+from app.models.user import User, UserCharacterTemplate, UserCharacterTemplatePortrait, UserSession
 
 __all__ = [
     "ActionExecution",
@@ -72,6 +72,7 @@ __all__ = [
     "ScenarioScene",
     "User",
     "UserCharacterTemplate",
+    "UserCharacterTemplatePortrait",
     "UserSession",
     "World",
 ]

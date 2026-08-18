@@ -14,7 +14,8 @@ import type {
  * （不是房间的重连凭证）。
  *
  * #337 起卡库同时是建卡的宿主：卡库卡由玩家显式保存产生，房间角色卡是它的一份
- * 拷贝，两者之后互不影响。
+ * 拷贝。普通角色字段之后互不影响；头像是明确例外，模板派生角色生图后会更新模板
+ * 当前头像，供下一次跨房间复用。
  */
 export class CharacterTemplatesResource {
   constructor(private readonly client: ApiClient) {}
@@ -51,6 +52,21 @@ export class CharacterTemplatesResource {
       `/me/character-templates/${templateId}`,
       this.authenticated(token)
     );
+  }
+
+  /** GET /api/v1/me/character-templates/{templateId}/portrait — 读取账号级模板头像。 */
+  getPortrait(
+    templateId: string,
+    version: string,
+    token: string,
+    signal?: AbortSignal
+  ): Promise<Blob> {
+    const path = `/me/character-templates/${encodeURIComponent(templateId)}/portrait?v=${encodeURIComponent(version)}`;
+    return this.client.requestBlob(path, {
+      ...this.authenticated(token),
+      method: 'GET',
+      signal
+    });
   }
 
   /**

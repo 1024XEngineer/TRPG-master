@@ -176,6 +176,8 @@ class CharacterTemplateRead(CamelModel):
     name: str
     system_id: str
     data: dict
+    has_portrait: bool = False
+    portrait_version: str | None = None
     created_at: UtcDatetime
     updated_at: UtcDatetime
 

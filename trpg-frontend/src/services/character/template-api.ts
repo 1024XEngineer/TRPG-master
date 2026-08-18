@@ -58,6 +58,14 @@ export function getCharacterTemplate(templateId: string): Promise<CharacterTempl
   return sdk.characterTemplates.get(templateId, requireAuthToken());
 }
 
+export function getCharacterTemplatePortrait(
+  templateId: string,
+  version: string,
+  signal?: AbortSignal
+): Promise<Blob> {
+  return sdk.characterTemplates.getPortrait(templateId, version, requireAuthToken(), signal);
+}
+
 export async function createCharacterTemplate(
   name: string,
   data: CharacterTemplateData = {}

@@ -1,9 +1,11 @@
 """我的角色卡库（#337）。
 
 卡库卡是玩家自己的第一等资产，房间角色卡是它的一份拷贝。这个方向决定了这里
-每一条断言：卡库能独立于房间存在、删卡不会被历史房间卡拖住、拷贝之后两边互不
-影响。
+每一条断言：卡库能独立于房间存在、删卡不会被历史房间卡拖住、普通角色字段在
+拷贝之后两边互不影响。头像是 #352 明确引入的同步例外。
 """
+
+from hashlib import sha256
 
 from httpx import AsyncClient
 from sqlalchemy import func, select
@@ -11,8 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.seed import BUILTIN_GAME_ID, BUILTIN_SYSTEM_ID
 from app.models.content import GameSystem
-from app.models.room import Character
-from app.models.user import UserCharacterTemplate
+from app.models.room import Character, CharacterPortrait
+from app.models.user import UserCharacterTemplate, UserCharacterTemplatePortrait
 from tests.helpers import ROOMS_BASE, bearer, create_room, register
 
 TEMPLATES_BASE = "/api/v1/me/character-templates"
@@ -160,6 +162,46 @@ async def test_another_players_template_is_indistinguishable_from_a_missing_one(
     assert still_there.json()["data"]["name"] == "陈探员"
 
 
+async def test_template_portrait_metadata_read_and_account_isolation(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    owner_token = await register(client)
+    other_token = await register(client)
+    template = await _create_template(client, owner_token)
+    content = b"template-portrait"
+    version = sha256(content).hexdigest()
+    db_session.add(
+        UserCharacterTemplatePortrait(
+            template_id=template["templateId"],
+            content=content,
+            content_type="image/png",
+            size_bytes=len(content),
+            content_hash=version,
+        )
+    )
+    await db_session.commit()
+
+    listed = await client.get(TEMPLATES_BASE, headers=bearer(owner_token))
+    entry = listed.json()["data"][0]
+    assert entry["hasPortrait"] is True
+    assert entry["portraitVersion"] == version
+
+    portrait_url = f"{TEMPLATES_BASE}/{template['templateId']}/portrait"
+    portrait = await client.get(portrait_url, headers=bearer(owner_token))
+    assert portrait.status_code == 200
+    assert portrait.content == content
+    assert portrait.headers["content-type"] == "image/png"
+    assert portrait.headers["etag"] == f'"{version}"'
+
+    cached = await client.get(
+        portrait_url,
+        headers={**bearer(owner_token), "If-None-Match": f'W/"{version}"'},
+    )
+    assert cached.status_code == 304
+    assert cached.content == b""
+    assert (await client.get(portrait_url, headers=bearer(other_token))).status_code == 404
+
+
 async def test_list_can_be_filtered_by_system(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
@@ -221,6 +263,38 @@ async def test_seeding_a_room_draft_copies_the_card_and_then_stands_alone(
     assert stored.based_on_template_id == template["templateId"]
 
 
+async def test_seeding_a_room_draft_copies_the_template_portrait(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    token = await register(client)
+    template = await _create_template(client, token)
+    content = b"reusable-portrait"
+    version = sha256(content).hexdigest()
+    db_session.add(
+        UserCharacterTemplatePortrait(
+            template_id=template["templateId"],
+            content=content,
+            content_type="image/png",
+            size_bytes=len(content),
+            content_hash=version,
+        )
+    )
+    await db_session.commit()
+    room = await create_room(client, token=token)
+
+    draft = await client.post(
+        f"{ROOMS_BASE}/{room['roomId']}/characters",
+        json={"basedOnTemplateId": template["templateId"]},
+        headers={"X-Reconnect-Token": room["reconnectToken"]},
+    )
+    assert draft.status_code == 201, draft.text
+
+    copied = await db_session.get(CharacterPortrait, draft.json()["data"]["characterId"])
+    assert copied is not None
+    assert copied.content == content
+    assert copied.content_hash == version
+
+
 async def test_deleting_a_referenced_card_clears_provenance_instead_of_failing(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
@@ -239,6 +313,17 @@ async def test_deleting_a_referenced_card_clears_provenance_instead_of_failing(
         headers={"X-Reconnect-Token": room["reconnectToken"]},
     )
     character_id = draft.json()["data"]["characterId"]
+    portrait_content = b"delete-template-portrait"
+    db_session.add(
+        UserCharacterTemplatePortrait(
+            template_id=template["templateId"],
+            content=portrait_content,
+            content_type="image/png",
+            size_bytes=len(portrait_content),
+            content_hash=sha256(portrait_content).hexdigest(),
+        )
+    )
+    await db_session.commit()
 
     deleted = await client.delete(
         f"{TEMPLATES_BASE}/{template['templateId']}", headers=bearer(token)
@@ -247,6 +332,10 @@ async def test_deleting_a_referenced_card_clears_provenance_instead_of_failing(
     assert deleted.status_code == 200
     db_session.expire_all()
     assert await db_session.scalar(select(func.count()).select_from(UserCharacterTemplate)) == 0
+    assert (
+        await db_session.scalar(select(func.count()).select_from(UserCharacterTemplatePortrait))
+        == 0
+    )
     stored = await db_session.get(Character, character_id)
     assert stored is not None
     assert stored.based_on_template_id is None

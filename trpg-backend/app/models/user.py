@@ -9,7 +9,17 @@ Issue #121 起，完成房间 Character 会自动写入该表；卡库列表、�
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import JSON, DateTime, ForeignKey, String, UniqueConstraint, Uuid
+from sqlalchemy import (
+    JSON,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Integer,
+    LargeBinary,
+    String,
+    UniqueConstraint,
+    Uuid,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base
@@ -103,4 +113,35 @@ class UserCharacterTemplate(Base):
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
+    )
+
+
+class UserCharacterTemplatePortrait(Base):
+    """角色卡库当前头像；与房间头像分开存储，跨房间复用时复制。"""
+
+    __tablename__ = "user_character_template_portraits"
+    __table_args__ = (
+        CheckConstraint(
+            "size_bytes > 0",
+            name="ck_user_character_template_portraits_size_positive",
+        ),
+    )
+
+    template_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False),
+        ForeignKey("user_character_templates.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    content: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    content_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+        nullable=False,
     )

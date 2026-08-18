@@ -21,7 +21,7 @@ from app.adapters.image_generation import (
 from app.adapters.portrait_prompt import DeepSeekPortraitPromptComposer
 from app.core.coc7_content import build_coc7_ruleset
 from app.core.config import Settings
-from app.core.seed import BUILTIN_MODULE_ID
+from app.core.seed import BUILTIN_MODULE_ID, BUILTIN_SYSTEM_ID
 from app.dto.portrait import CharacterPortraitSnapshot, PortraitPrompt, PortraitSkillSnapshot
 from app.main import app
 from app.models.room import Character
@@ -38,7 +38,7 @@ from app.service.portrait_generation import (
 )
 from app.service.portrait_image import MaterializedPortraitImage, PortraitImageMaterializer
 from app.service.portrait_reference import PortraitReferenceImage, load_portrait_reference_image
-from tests.helpers import ROOMS_BASE, create_room, join_room, reconnect, register
+from tests.helpers import ROOMS_BASE, bearer, create_room, join_room, reconnect, register
 
 ATTRIBUTES = {
     "STR": 70,
@@ -475,6 +475,118 @@ async def test_completed_character_generates_real_provider_result_and_prompt_fal
     )
     assert player["hasPortrait"] is True
     assert player["portraitVersion"] == data["portraitVersion"]
+
+
+async def test_template_derived_generation_updates_library_and_next_room(
+    client: AsyncClient,
+    install_portrait_service: Callable[[PortraitGenerationService], None],
+) -> None:
+    token = await register(client)
+    template_response = await client.post(
+        "/api/v1/me/character-templates",
+        json={
+            "name": "陈探员",
+            "systemId": BUILTIN_SYSTEM_ID,
+            "data": {
+                "name": BUILT_CHARACTER["name"],
+                "age": BUILT_CHARACTER["age"],
+                "gender": BUILT_CHARACTER["gender"],
+                "residence": BUILT_CHARACTER["residence"],
+                "birthplace": BUILT_CHARACTER["birthplace"],
+                "attributes": BUILT_CHARACTER["attributes"],
+                "skills": BUILT_CHARACTER["skills"],
+                "equipment": ["左轮手枪", "手电筒"],
+                "occupation": BUILT_CHARACTER["occupation"],
+                "background": BUILT_CHARACTER["background"],
+                "notes": BUILT_CHARACTER["notes"],
+            },
+        },
+        headers=bearer(token),
+    )
+    assert template_response.status_code == 201, template_response.text
+    template_id = template_response.json()["data"]["templateId"]
+
+    room = await create_room(client, token=token, max_players=1)
+    selected = await client.post(
+        f"{ROOMS_BASE}/{room['roomId']}/module",
+        json={"moduleId": BUILTIN_MODULE_ID, "attributeGenMethod": "point_buy"},
+        headers=reconnect(room["reconnectToken"]),
+    )
+    assert selected.status_code == 200
+    draft = await client.post(
+        f"{ROOMS_BASE}/{room['roomId']}/characters",
+        json={"basedOnTemplateId": template_id},
+        headers=reconnect(room["reconnectToken"]),
+    )
+    assert draft.status_code == 201, draft.text
+    character_id = draft.json()["data"]["characterId"]
+    completed = await client.post(
+        f"{ROOMS_BASE}/{room['roomId']}/characters/{character_id}/complete",
+        headers=reconnect(room["reconnectToken"]),
+    )
+    assert completed.status_code == 200, completed.text
+
+    service, _composer, _provider = make_service()
+    install_portrait_service(service)
+    generation_url = f"{ROOMS_BASE}/{room['roomId']}/characters/{character_id}/portrait-generations"
+    created = await client.post(generation_url, json={}, headers=reconnect(room["reconnectToken"]))
+    terminal = await wait_for_generation(
+        client,
+        generation_url,
+        reconnect(room["reconnectToken"]),
+        created.json()["data"]["generationId"],
+    )
+    assert terminal["status"] == "completed"
+
+    listed = await client.get("/api/v1/me/character-templates", headers=bearer(token))
+    template = next(item for item in listed.json()["data"] if item["templateId"] == template_id)
+    assert template["hasPortrait"] is True
+    assert template["portraitVersion"] == terminal["portraitVersion"]
+    template_portrait = await client.get(
+        f"/api/v1/me/character-templates/{template_id}/portrait",
+        headers=bearer(token),
+    )
+    assert template_portrait.content == b"persisted-png"
+
+    replacement_service = PortraitGenerationService(
+        enabled=True,
+        prompt_composer=FixedPromptComposer(),
+        fallback_prompt_composer=DeterministicPromptComposer(),
+        image_provider=RecordingImageProvider(),
+        image_materializer=FixedImageMaterializer(b"regenerated-png"),
+    )
+    install_portrait_service(replacement_service)
+    regenerated = await client.post(
+        generation_url,
+        json={},
+        headers=reconnect(room["reconnectToken"]),
+    )
+    regenerated_terminal = await wait_for_generation(
+        client,
+        generation_url,
+        reconnect(room["reconnectToken"]),
+        regenerated.json()["data"]["generationId"],
+    )
+    assert regenerated_terminal["portraitVersion"] != terminal["portraitVersion"]
+    latest_template_portrait = await client.get(
+        f"/api/v1/me/character-templates/{template_id}/portrait",
+        headers=bearer(token),
+    )
+    assert latest_template_portrait.content == b"regenerated-png"
+
+    next_room = await create_room(client, token=token)
+    next_draft = await client.post(
+        f"{ROOMS_BASE}/{next_room['roomId']}/characters",
+        json={"basedOnTemplateId": template_id},
+        headers=reconnect(next_room["reconnectToken"]),
+    )
+    assert next_draft.status_code == 201, next_draft.text
+    inherited = await client.get(
+        f"{ROOMS_BASE}/{next_room['roomId']}/players/{next_room['playerId']}/portrait",
+        headers=reconnect(next_room["reconnectToken"]),
+    )
+    assert inherited.status_code == 200
+    assert inherited.content == b"regenerated-png"
 
 
 async def test_portrait_read_requires_same_room_membership(

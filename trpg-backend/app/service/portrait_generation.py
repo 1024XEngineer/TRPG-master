@@ -31,6 +31,7 @@ from app.dto.portrait import (
 from app.models.content import Scenario
 from app.models.engine import ModuleVersion
 from app.models.room import Character, CharacterPortrait, Player, PortraitGenerationTask, Room
+from app.models.user import UserCharacterTemplate, UserCharacterTemplatePortrait
 from app.service.portrait_reference import PortraitReferenceImage, load_portrait_reference_image
 from app.service.room import (
     RoomAuthorizationError,
@@ -88,6 +89,49 @@ class StoredPortrait:
     content: bytes
     content_type: str
     content_hash: str
+
+
+async def _sync_template_portrait(
+    db: AsyncSession,
+    character: Character,
+    image: MaterializedPortrait,
+    now: datetime,
+) -> None:
+    """将模板派生角色的最新头像回写到其账号级角色卡。"""
+    if character.based_on_template_id is None:
+        return
+    user_id = await db.scalar(select(Player.user_id).where(Player.id == character.player_id))
+    if user_id is None:
+        return
+    template = await db.scalar(
+        select(UserCharacterTemplate)
+        .where(
+            UserCharacterTemplate.id == character.based_on_template_id,
+            UserCharacterTemplate.user_id == user_id,
+        )
+        .with_for_update()
+    )
+    if template is None:
+        return
+    portrait = await db.get(UserCharacterTemplatePortrait, template.id)
+    if portrait is None:
+        db.add(
+            UserCharacterTemplatePortrait(
+                template_id=template.id,
+                content=image.content,
+                content_type=image.content_type,
+                size_bytes=len(image.content),
+                content_hash=image.content_hash,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        return
+    portrait.content = image.content
+    portrait.content_type = image.content_type
+    portrait.size_bytes = len(image.content)
+    portrait.content_hash = image.content_hash
+    portrait.updated_at = now
 
 
 class PortraitPromptComposer(Protocol):
@@ -630,9 +674,13 @@ class PortraitGenerationService:
                 await db.rollback()
                 await self._finish_cancelled(generation_id)
                 return
-            await db.scalar(
+            locked_character = await db.scalar(
                 select(Character).where(Character.id == task.character_id).with_for_update()
             )
+            if locked_character is None:
+                await db.rollback()
+                await self._fail(generation_id, "materialization_failed")
+                return
             portrait = await db.get(CharacterPortrait, task.character_id)
             if portrait is None:
                 portrait = CharacterPortrait(
@@ -652,6 +700,7 @@ class PortraitGenerationService:
                     image.content_hash,
                     now,
                 )
+            await _sync_template_portrait(db, locked_character, image, now)
             await db.commit()
 
     async def _finish_cancelled(self, generation_id: str) -> None:
@@ -775,6 +824,7 @@ class PortraitGenerationService:
                 portrait.size_bytes = len(image.content)
                 portrait.content_hash = image.content_hash
                 portrait.updated_at = now
+            await _sync_template_portrait(db, locked_character, image, now)
             await db.commit()
         except PortraitCharacterNotFoundError:
             await db.rollback()

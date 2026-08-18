@@ -4,7 +4,7 @@
 第一等资产，房间角色卡是它的一份拷贝。
 """
 
-from fastapi import APIRouter, Body, Depends, Header, Query, status
+from fastapi import APIRouter, Body, Depends, Header, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.controller.dependencies import extract_bearer_token, get_current_user
@@ -77,6 +77,15 @@ def _duplicate(exc: character_service.CharacterTemplateDuplicateError) -> AppExc
     )
 
 
+def _etag_matches(if_none_match: str | None, current_etag: str) -> bool:
+    if not if_none_match:
+        return False
+    return any(
+        candidate.strip() == "*" or candidate.strip().removeprefix("W/") == current_etag
+        for candidate in if_none_match.split(",")
+    )
+
+
 @router.get("/character-templates", response_model=ApiResponse[list[CharacterTemplateRead]])
 async def list_character_templates(
     system_id: str | None = Query(default=None, alias="systemId", min_length=1),
@@ -128,6 +137,36 @@ async def get_character_template(
     except character_service.CharacterNotFoundError as exc:
         raise _not_found(exc) from exc
     return ApiResponse.ok(template)
+
+
+@router.get("/character-templates/{template_id}/portrait", response_class=Response)
+async def get_character_template_portrait(
+    template_id: str,
+    _version: str | None = Query(default=None, alias="v"),
+    authorization: str | None = Header(default=None),
+    if_none_match: str | None = Header(default=None, alias="If-None-Match"),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """GET /me/character-templates/{templateId}/portrait —— 鉴权读取模板头像。"""
+    del _version  # 仅作为浏览器缓存分版参数，身份和内容均以后端存储为准。
+    user_id = await _require_user_id(authorization, db)
+    try:
+        portrait = await character_service.get_character_template_portrait(db, user_id, template_id)
+    except character_service.CharacterNotFoundError as exc:
+        raise _not_found(exc) from exc
+    etag = f'"{portrait.content_hash}"'
+    cache_headers = {
+        "ETag": etag,
+        "Cache-Control": "private, max-age=3600",
+        "X-Content-Type-Options": "nosniff",
+    }
+    if _etag_matches(if_none_match, etag):
+        return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=cache_headers)
+    return Response(
+        content=portrait.content,
+        media_type=portrait.content_type,
+        headers={"Content-Length": str(portrait.size_bytes), **cache_headers},
+    )
 
 
 @router.patch(

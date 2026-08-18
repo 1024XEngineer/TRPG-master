@@ -44,8 +44,8 @@ from app.dto.character import (
 from app.dto.character_background import CharacterBackgroundContext, CharacterBackgroundSkill
 from app.dto.game import RulesetRead
 from app.models.content import GameSystem
-from app.models.room import Character, Player, Room
-from app.models.user import UserCharacterTemplate
+from app.models.room import Character, CharacterPortrait, Player, Room
+from app.models.user import UserCharacterTemplate, UserCharacterTemplatePortrait
 from app.service.character_background import CharacterBackgroundService
 from app.service.room import (
     RoomAuthorizationError,
@@ -222,6 +222,7 @@ async def create_character_draft(
         )
 
     character = Character(room_id=room_id, player_id=player.id, status="draft")
+    template_portrait: UserCharacterTemplatePortrait | None = None
     if based_on_template_id is not None:
         if player.user_id is None:
             raise RoomAuthorizationError("匿名玩家没有角色卡库")
@@ -232,8 +233,22 @@ async def create_character_draft(
         if template.system_id != room_system_id:
             raise RoomConflictError("这张角色卡属于其他规则系统，不能用在本房间")
         _seed_character_from_template(character, template)
+        template_portrait = await db.get(UserCharacterTemplatePortrait, template.id)
     db.add(character)
     try:
+        # UUID 默认值在 INSERT 时生成；先 flush 拿到角色 id，再把模板头像复制成
+        # 房间自己的快照。之后模板换图或被删除都不会改动已经开出的角色。
+        await db.flush()
+        if template_portrait is not None:
+            db.add(
+                CharacterPortrait(
+                    character_id=character.id,
+                    content=template_portrait.content,
+                    content_type=template_portrait.content_type,
+                    size_bytes=template_portrait.size_bytes,
+                    content_hash=template_portrait.content_hash,
+                )
+            )
         await db.commit()
     except IntegrityError:
         # A concurrent request may have won the unique (room, player) insert.
@@ -643,12 +658,16 @@ async def _require_no_duplicate(
         raise CharacterTemplateDuplicateError(existing.id, "卡库里已经有一张一模一样的角色卡")
 
 
-def _template_read(template: UserCharacterTemplate) -> CharacterTemplateRead:
+def _template_read(
+    template: UserCharacterTemplate, portrait_version: str | None = None
+) -> CharacterTemplateRead:
     return CharacterTemplateRead(
         template_id=template.id,
         name=template.name,
         system_id=template.system_id,
         data=dict(template.data or {}),
+        has_portrait=portrait_version is not None,
+        portrait_version=portrait_version,
         created_at=template.created_at,
         updated_at=template.updated_at,
     )
@@ -701,11 +720,18 @@ async def list_character_templates(
     `system_id` 过滤给车卡界面用：COC7 的卡不该出现在别的规则系统的房间里，
     表结构本来就按 system 约束死了这张卡能用在哪。
     """
-    statement = select(UserCharacterTemplate).where(UserCharacterTemplate.user_id == user_id)
+    statement = (
+        select(UserCharacterTemplate, UserCharacterTemplatePortrait.content_hash)
+        .outerjoin(
+            UserCharacterTemplatePortrait,
+            UserCharacterTemplatePortrait.template_id == UserCharacterTemplate.id,
+        )
+        .where(UserCharacterTemplate.user_id == user_id)
+    )
     if system_id is not None:
         statement = statement.where(UserCharacterTemplate.system_id == system_id)
-    rows = await db.scalars(statement.order_by(UserCharacterTemplate.updated_at.desc()))
-    return [_template_read(template) for template in rows]
+    rows = await db.execute(statement.order_by(UserCharacterTemplate.updated_at.desc()))
+    return [_template_read(template, portrait_version) for template, portrait_version in rows]
 
 
 async def create_character_template(
@@ -743,7 +769,24 @@ async def create_character_template(
 async def get_character_template(
     db: AsyncSession, user_id: str, template_id: str
 ) -> CharacterTemplateRead:
-    return _template_read(await _own_template(db, user_id, template_id))
+    template = await _own_template(db, user_id, template_id)
+    portrait_version = await db.scalar(
+        select(UserCharacterTemplatePortrait.content_hash).where(
+            UserCharacterTemplatePortrait.template_id == template.id
+        )
+    )
+    return _template_read(template, portrait_version)
+
+
+async def get_character_template_portrait(
+    db: AsyncSession, user_id: str, template_id: str
+) -> UserCharacterTemplatePortrait:
+    """读取自己的模板头像；别人的模板与没有头像都返回同一种 404。"""
+    template = await _own_template(db, user_id, template_id)
+    portrait = await db.get(UserCharacterTemplatePortrait, template.id)
+    if portrait is None:
+        raise CharacterNotFoundError("角色卡头像不存在")
+    return portrait
 
 
 async def _restamp_content_hash(db: AsyncSession, template: UserCharacterTemplate) -> None:
@@ -781,7 +824,12 @@ async def update_character_template(
     # **不能静默合并**——玩家正在编辑的这张会凭空消失。明确拒绝，让前端提示。
     await _restamp_content_hash(db, template)
     await db.commit()
-    return _template_read(template)
+    portrait_version = await db.scalar(
+        select(UserCharacterTemplatePortrait.content_hash).where(
+            UserCharacterTemplatePortrait.template_id == template.id
+        )
+    )
+    return _template_read(template, portrait_version)
 
 
 async def delete_character_template(db: AsyncSession, user_id: str, template_id: str) -> None:
@@ -802,6 +850,10 @@ async def delete_character_template(db: AsyncSession, user_id: str, template_id:
         .where(Character.based_on_template_id == template_id)
         .values(based_on_template_id=None)
     )
+    # 测试和部分本地 SQLite 关闭了外键约束，不能只依赖 ON DELETE CASCADE。
+    portrait = await db.get(UserCharacterTemplatePortrait, template_id)
+    if portrait is not None:
+        await db.delete(portrait)
     await db.delete(template)
     await db.commit()
 

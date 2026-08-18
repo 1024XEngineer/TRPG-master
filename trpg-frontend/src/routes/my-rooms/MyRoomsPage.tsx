@@ -175,10 +175,7 @@ export default function MyRoomsPage() {
             <button
               type="button"
               className="my-games-scene__character-library"
-              disabled
-              aria-label="角色卡管理（即将开放）"
-              title="角色卡管理将在角色卡库合入后开放"
-              data-route="/home/characters"
+              onClick={() => navigate('/home/characters')}
             >
               <BookOpen aria-hidden="true" />
               <span>角色卡管理</span>

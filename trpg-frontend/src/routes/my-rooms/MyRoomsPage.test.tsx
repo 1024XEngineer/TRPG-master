@@ -114,11 +114,7 @@ describe('MyRoomsPage', () => {
     expect(screen.getByText('badada')).toBeInTheDocument()
     expect(screen.getByText(archiveNumber('user-1'))).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '个人档案' })).toBeEnabled()
-    expect(screen.getByRole('button', { name: '角色卡管理（即将开放）' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: '角色卡管理（即将开放）' })).toHaveAttribute(
-      'data-route',
-      '/home/characters',
-    )
+    expect(screen.getByRole('button', { name: '角色卡管理' })).toBeEnabled()
 
     expect(await screen.findByRole('heading', { name: '书店疑云' })).toBeInTheDocument()
     expect(screen.getAllByText('追书人')).toHaveLength(2)
@@ -131,7 +127,7 @@ describe('MyRoomsPage', () => {
     )
   })
 
-  it('keeps home, profile, and completed-game navigation available', async () => {
+  it('keeps home, profile, character-library, and completed-game navigation available', async () => {
     const firstView = renderPage()
     await screen.findByRole('heading', { name: '旧案归档' })
 
@@ -142,6 +138,11 @@ describe('MyRoomsPage', () => {
     renderPage()
     fireEvent.click(screen.getByRole('button', { name: '个人档案' }))
     expect(screen.getByTestId('location')).toHaveTextContent('/home/profile')
+
+    cleanup()
+    renderPage()
+    fireEvent.click(screen.getByRole('button', { name: '角色卡管理' }))
+    expect(screen.getByTestId('location')).toHaveTextContent('/home/characters')
 
     cleanup()
     renderPage()

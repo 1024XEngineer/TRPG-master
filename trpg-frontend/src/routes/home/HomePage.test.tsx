@@ -38,6 +38,7 @@ describe('HomePage', () => {
     expect(screen.getByRole('button', { name: '加入房间' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '创建房间' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '我的游戏' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '我的角色卡' })).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '加入房间' }))
     expect(screen.getByTestId('location')).toHaveTextContent('/home/join')

@@ -1791,7 +1791,7 @@
   height: 3.7cqw;
 }
 
-.my-games-scene__character-library {
+.my-games-scene__character-library:disabled {
   color: #b18a58;
   border-color: #845b30;
   background: linear-gradient(180deg, rgb(57 35 21 / 86%), rgb(38 23 14 / 90%));
@@ -2109,6 +2109,7 @@
 
 .my-games-scene__back:hover,
 .my-games-scene__profile:hover,
+.my-games-scene__character-library:hover:not(:disabled),
 .my-games-scene__record > button:hover:not(:disabled),
 .my-games-scene__empty button:hover,
 .my-games-scene__error button:hover {
@@ -2117,6 +2118,7 @@
 
 .my-games-scene__back:active,
 .my-games-scene__profile:active,
+.my-games-scene__character-library:active:not(:disabled),
 .my-games-scene__record > button:active:not(:disabled),
 .my-games-scene__empty button:active,
 .my-games-scene__error button:active {

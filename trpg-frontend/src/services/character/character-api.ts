@@ -28,8 +28,21 @@ function requireReconnectToken(): string {
   return token;
 }
 
-export async function createCharacterDraft(roomId: string): Promise<string> {
-  const res = await sdk.characters.createDraft(roomId, requireReconnectToken());
+/**
+ * 建一份房间角色草稿。
+ *
+ * `basedOnTemplateId`（#337）：从卡库卡播种。房间里已有草稿时后端返回 409——
+ * 不静默忽略，因为玩家可能已经在那份草稿上改了半天。
+ */
+export async function createCharacterDraft(
+  roomId: string,
+  basedOnTemplateId?: string
+): Promise<string> {
+  const res = await sdk.characters.createDraft(
+    roomId,
+    requireReconnectToken(),
+    basedOnTemplateId
+  );
   return res.characterId;
 }
 
@@ -58,7 +71,7 @@ export async function saveCharacter(
             .map((name) => ({ name }))
         : built.equipment
           ? built.equipment
-              .split(/[,，\n]/)
+              .split(/[,，、\n]/)
               .map((s) => s.trim())
               .filter(Boolean)
               .map((name) => ({ name }))

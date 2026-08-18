@@ -63,6 +63,20 @@ def _invalid_data(exc: Exception) -> AppException:
     return AppException(ErrorCode.VALIDATION_ERROR, str(exc), status.HTTP_422_UNPROCESSABLE_CONTENT)
 
 
+def _duplicate(exc: character_service.CharacterTemplateDuplicateError) -> AppException:
+    """内容重复不是"保存失败"，而是"它已经在库里了"（#337）。
+
+    `details` 带上既有那张的 templateId，前端据此把"存卡"按钮指向它——玩家该看到
+    的是「这张卡已经在卡库里了」，不是一句无从下手的错误。
+    """
+    return AppException(
+        ErrorCode.CHARACTER_TEMPLATE_DUPLICATE,
+        str(exc),
+        status.HTTP_409_CONFLICT,
+        details=[{"templateId": exc.template_id}],
+    )
+
+
 @router.get("/character-templates", response_model=ApiResponse[list[CharacterTemplateRead]])
 async def list_character_templates(
     system_id: str | None = Query(default=None, alias="systemId", min_length=1),
@@ -96,6 +110,8 @@ async def create_character_template(
         raise _not_found(exc) from exc
     except character_service.CharacterInvalidDataError as exc:
         raise _invalid_data(exc) from exc
+    except character_service.CharacterTemplateDuplicateError as exc:
+        raise _duplicate(exc) from exc
     return ApiResponse.ok(template)
 
 
@@ -136,6 +152,8 @@ async def update_character_template(
         raise _not_found(exc) from exc
     except character_service.CharacterInvalidDataError as exc:
         raise _invalid_data(exc) from exc
+    except character_service.CharacterTemplateDuplicateError as exc:
+        raise _duplicate(exc) from exc
     return ApiResponse.ok(template)
 
 
@@ -200,6 +218,8 @@ async def roll_template_attributes(
         result = await character_service.roll_template_attributes(db, user_id, template_id)
     except character_service.CharacterNotFoundError as exc:
         raise _not_found(exc) from exc
+    except character_service.CharacterTemplateDuplicateError as exc:
+        raise _duplicate(exc) from exc
     return ApiResponse.ok(result)
 
 
@@ -225,6 +245,8 @@ async def quick_generate_template(
         )
     except character_service.CharacterNotFoundError as exc:
         raise _not_found(exc) from exc
+    except character_service.CharacterTemplateDuplicateError as exc:
+        raise _duplicate(exc) from exc
     except CharacterGenerationError as exc:
         raise AppException(ErrorCode.CONFLICT, str(exc), status.HTTP_409_CONFLICT) from exc
     return ApiResponse.ok(result)

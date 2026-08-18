@@ -91,7 +91,6 @@ export default function ProfilePage() {
           width={864}
           height={1821}
         />
-
         <button
           type="button"
           className="profile-scene__back"

@@ -235,6 +235,7 @@ export interface CharacterPreviewRequest {
 export interface CharacterRead {
   id: string;
   status: string;
+  basedOnTemplateId?: string | null;
   generationMethod: string;
   name?: string | null;
   age?: number | null;
@@ -556,6 +557,7 @@ export type ErrorCode =
   | "FORBIDDEN"
   | "NOT_FOUND"
   | "CONFLICT"
+  | "CHARACTER_TEMPLATE_DUPLICATE"
   | "INTERNAL_ERROR"
   | "ROOM_NOT_FOUND"
   | "ROOM_FULL"

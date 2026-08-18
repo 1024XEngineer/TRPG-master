@@ -15,6 +15,7 @@ const JoinRoomPage = lazy(() => import('@/routes/join/JoinRoomPage'));
 const CreateRoomPage = lazy(() => import('@/routes/create/CreateRoomPage'));
 const ScenarioSelectionPage = lazy(() => import('@/routes/games/trpg/ScenarioSelectionPage'));
 const CharacterPage = lazy(() => import('@/routes/games/trpg/CharacterPage'));
+const CharacterLibraryPage = lazy(() => import('@/routes/character-library/CharacterLibraryPage'));
 const LobbyPage = lazy(() => import('@/routes/lobby/LobbyPage'));
 const CharacterReadyPage = lazy(() => import('@/routes/character-ready/CharacterReadyPage'));
 const RoomPage = lazy(() => import('@/routes/games/trpg/RoomPage'));
@@ -83,6 +84,10 @@ function App() {
           <Route path="/home/my-rooms" element={<MyRoomsPage />} />
           <Route path="/home/my-rooms/review/:roomCode" element={<ReviewPage />} />
           <Route path="/home/profile" element={<ProfilePage />} />
+          <Route path="/home/characters" element={<CharacterLibraryPage />} />
+          {/* 建卡向导的第二个宿主（#337 决策 A）：同一个页面，带 templateId 时
+              建的是卡库卡，不需要任何房间。 */}
+          <Route path="/home/characters/:templateId" element={<CharacterPage />} />
 
           {/* /room/* —— 已经加入/创建了房间之后的整条游戏内流程：大厅→建卡→
               建卡准备→聊天室，都是同一个房间生命周期里的阶段。 */}

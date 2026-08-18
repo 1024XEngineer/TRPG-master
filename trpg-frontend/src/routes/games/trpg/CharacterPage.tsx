@@ -1,13 +1,23 @@
-import { useLocation, useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { Plus, Minus, Search, Shield, Heart, Brain, Zap, Eye, Maximize2, Lightbulb, BookOpen, ChevronDown, ChevronUp, X, Info, Clover, Sparkles } from 'lucide-react'
 import type { CharacterComputeResult, SkillComputeView } from 'trpg-sdk'
 import type { Attributes, InvestigatorInfo } from '@/data/character-model'
 import { useCharacterStore } from '@/stores/character-store'
 import { useRoomStore } from '@/stores/room-store'
-import { createCharacterDraft, saveCharacter, completeCharacter, fetchCharacter, quickGenerateCharacter } from '@/services/character/character-api'
+import { createCharacterDraft, saveCharacter, completeCharacter, fetchCharacter, quickGenerateCharacter, type BuiltCharacter } from '@/services/character/character-api'
+import type { CharacterTemplate } from '@/services/character/template-api'
+import {
+  characterReadFromTemplate,
+  listCharacterTemplates,
+  getCharacterTemplate,
+  quickGenerateResultAsCharacter,
+  quickGenerateTemplate,
+  templateDataFromBuilt,
+  updateCharacterTemplate,
+} from '@/services/character/template-api'
 import { previewCharacter, translateCharacterValidationError } from '@/services/character/ruleset-api'
-import { disconnectWebSocket, friendlyErrorMessage } from '@/services/api-client'
+import { ApiError, disconnectWebSocket, friendlyErrorMessage } from '@/services/api-client'
 import { useRuleset } from '@/hooks/useRuleset'
 import type { OccupationSpec, SkillSpec } from '@/data/types'
 import {
@@ -197,6 +207,13 @@ function SkillRow({
 
 // ─── Main Page ───────────────────────────────────────
 export default function CharacterPage() {
+  // 建卡宿主（#337 决策 A）：路由带 templateId 就是在给卡库卡建卡，否则是房间卡。
+  // 两者共用整套向导——它们本来就是同一种东西的两份拷贝，区别只在"存到哪、
+  // 存完去哪"。房间卡还要 complete（房间状态机要知道这个人准备好了），卡库卡
+  // 没有这一步：它不属于任何一局。
+  const { templateId } = useParams<{ templateId: string }>()
+  const templateHostId = templateId ?? null
+  const isTemplateHost = templateHostId !== null
   const location = useLocation()
   const navigate = useNavigate()
   const [step, setStep] = useState(0)
@@ -256,12 +273,20 @@ export default function CharacterPage() {
   // 本地存的 8 键旧卡再打开就被后端的 9 键校验拒了，玩家的卡直接编辑不了）。
   // 有 characterId 就以后端那份为准覆盖表单，清掉浏览器缓存也照样能继续编辑。
   useEffect(() => {
+    if (!ruleset) return
     const roomId = useRoomStore.getState().roomId
     const characterId = useRoomStore.getState().characterId
-    if (!roomId || !characterId || !ruleset) return
+    // 卡库宿主没有房间，也没有 characterId；读的是那张卡库卡，摊平成向导已经
+    // 会读的形状后走同一条水合路径（属性 → 权威 preview 反推技能点 → 填表单）。
+    const load = templateHostId
+      ? getCharacterTemplate(templateHostId).then(characterReadFromTemplate)
+      : roomId && characterId
+        ? fetchCharacter(roomId, characterId)
+        : null
+    if (!load) return
 
     let cancelled = false
-    fetchCharacter(roomId, characterId)
+    load
       .then(async saved => {
         if (cancelled || !saved.attributes || Object.keys(saved.attributes).length === 0) return
         // 存成局部常量：下面几处在闭包里用到它，直接写 saved.attributes 会丢掉
@@ -366,7 +391,7 @@ export default function CharacterPage() {
         // 读不回来（比如还没建过草稿）就沿用本地缓存/空白表单，不打断建卡。
       })
     return () => { cancelled = true }
-  }, [ruleset])
+  }, [ruleset, templateHostId])
 
   // ruleset 到达后，把缺失的属性补上默认值。
   //
@@ -426,6 +451,12 @@ export default function CharacterPage() {
   const [choiceActionError, setChoiceActionError] = useState('')
   const [quickGenerating, setQuickGenerating] = useState(false)
   const [quickGenerateError, setQuickGenerateError] = useState('')
+  // 车卡界面与卡库之间的两条通路（#337）：把当前这张存进卡库，或从卡库选一张
+  // 播种成本房间的草稿。只对房间宿主成立——卡库宿主本身就在编辑卡库卡。
+  const [libraryOpen, setLibraryOpen] = useState(false)
+  const [libraryCards, setLibraryCards] = useState<CharacterTemplate[] | null>(null)
+  const [libraryError, setLibraryError] = useState('')
+  const [libraryBusy, setLibraryBusy] = useState(false)
   const [showQuickGenerateConfirm, setShowQuickGenerateConfirm] = useState(false)
 
   const selectedOcc = useMemo(() => {
@@ -899,8 +930,11 @@ export default function CharacterPage() {
   const hydrateQuickGeneratedCharacter = async (
     result: Awaited<ReturnType<typeof quickGenerateCharacter>>,
     roomId: string,
-    characterId: string,
     playerInfo: InvestigatorInfo,
+    // 生成结果怎么落库由宿主决定：房间要 save + complete，卡库那边服务端在
+    // quick-generate 里已经写进卡了，这里就什么都不用做。把这一步做成参数，
+    // 免得为第二个宿主复制一份状态回填代码（那才是真正长的部分）。
+    persist: (built: BuiltCharacter) => Promise<void>,
   ) => {
     const generated = result.character
     const generatedOccupation = ruleset?.occupations.find(occupation => occupation.id === result.occupationId)
@@ -924,7 +958,7 @@ export default function CharacterPage() {
       result.compute.skillView.map(skill => [skill.id, skill.current])
     )
 
-    await saveCharacter(roomId, characterId, {
+    await persist({
       name: playerInfo.name.trim(),
       age: playerInfo.age ? Number(playerInfo.age) : null,
       gender: playerInfo.gender || null,
@@ -939,10 +973,6 @@ export default function CharacterPage() {
       background: generated.background ?? '',
       notes: generated.notes ?? '',
     })
-
-    // 一键生成的接口先保存为草稿；进入 ready 前完成同一张卡，确保房间状态和
-    // 头像生成接口都能把它视为已完成角色，而不是一个无法生图的半成品。
-    await completeCharacter(roomId, characterId)
 
     setGenerationMethod('roll')
     const generatedInfo: InvestigatorInfo = {
@@ -997,22 +1027,54 @@ export default function CharacterPage() {
       },
       roomId
     )
-    navigate('/room/ready')
+    navigate(isTemplateHost ? '/home/characters' : '/room/ready')
   }
 
   const runQuickGenerate = async () => {
-    if (!roomId || !ruleset || quickGenerating) return
+    if (!ruleset || quickGenerating) return
+    if (!templateHostId && !roomId) return
     setQuickGenerating(true)
     setQuickGenerateError('')
     setShowQuickGenerateConfirm(false)
     try {
+      if (templateHostId) {
+        // 服务端在 quick-generate 里已经把结果写进这张卡并背书 roll 了，所以
+        // 回填之后不再写一次——再 PATCH 一遍属性反而会把那条背书降级成点数
+        // 购买法（见后端 `_data_with_attested_generation_method`）。
+        const generated = await quickGenerateTemplate(templateHostId, {
+          name: info.name,
+          age: info.age ? Number(info.age) : null,
+          gender: info.gender,
+          residence: info.residence,
+          birthplace: info.birthplace,
+        })
+        const asCharacter = quickGenerateResultAsCharacter(
+          templateHostId,
+          info.name.trim(),
+          generated,
+        )
+        await hydrateQuickGeneratedCharacter(
+          { character: asCharacter, occupationId: generated.occupationId ?? 0, compute: generated.compute! },
+          '',
+          { ...info },
+          async () => {},
+        )
+        return
+      }
+      const activeRoomId = roomId as string
       let characterId = useRoomStore.getState().characterId
       if (!characterId) {
-        characterId = await createCharacterDraft(roomId)
+        characterId = await createCharacterDraft(activeRoomId)
         setCharacterId(characterId)
       }
-      const result = await quickGenerateCharacter(roomId, characterId, { ...info })
-      await hydrateQuickGeneratedCharacter(result, roomId, characterId, { ...info })
+      const result = await quickGenerateCharacter(activeRoomId, characterId, { ...info })
+      const draftId = characterId
+      await hydrateQuickGeneratedCharacter(result, activeRoomId, { ...info }, async (built) => {
+        await saveCharacter(activeRoomId, draftId, built)
+        // 一键生成的接口先保存为草稿；进入 ready 前完成同一张卡，确保房间状态和
+        // 头像生成接口都能把它视为已完成角色，而不是一个无法生图的半成品。
+        await completeCharacter(activeRoomId, draftId)
+      })
     } catch (err) {
       setQuickGenerateError(friendlyErrorMessage(err, '一键生成失败，请稍后重试'))
     } finally {
@@ -1110,8 +1172,57 @@ export default function CharacterPage() {
     void handleSubmit()
   }
 
+  const handleOpenLibrary = async () => {
+    setLibraryOpen(true)
+    setLibraryError('')
+    // 每次打开都重新拉：玩家可能刚点过"存入卡库"，缓存住的话新卡不会出现在
+    // 这个面板里，看起来就像刚才那次保存没生效。
+    setLibraryCards(null)
+    try {
+      setLibraryCards(await listCharacterTemplates())
+    } catch (err) {
+      setLibraryError(friendlyErrorMessage(err, '加载角色卡库失败'))
+    }
+  }
+
+  // 用卡库的卡开这一局。后端在已有草稿时会 409（不静默忽略玩家改了一半的
+  // 草稿），这里把它翻成人话而不是抛一个通用错误。
+  const handleUseLibraryCard = async (templateId: string) => {
+    if (!roomId || libraryBusy) return
+    setLibraryBusy(true)
+    setLibraryError('')
+    try {
+      const characterId = await createCharacterDraft(roomId, templateId)
+      setCharacterId(characterId)
+      setLibraryOpen(false)
+      // 卡库卡通常已经是捏好的，没道理再让玩家把四步向导点一遍。直接完成建卡进
+      // 准备页——准备页本来就自己从后端拉角色卡，不需要这里再拼一份 store 数据。
+      //
+      // 完不成的情况是真实存在的（例如玩家刚在卡库里新建了一张空白卡就拿来用），
+      // 后端会用 422 明确拒绝。那时候退回向导让玩家补完，而不是卡在一个说不清
+      // 为什么失败的准备页。
+      try {
+        await completeCharacter(roomId, characterId)
+        navigate('/room/ready')
+      } catch {
+        setLibraryError('这张卡还没建完，先在这里补完剩下的部分。')
+        // 草稿已经带着卡库卡的数据落库了，重新进这个页面让既有的水合逻辑把它读
+        // 回表单——不在这里再抄一遍字段映射。
+        navigate(0)
+      }
+    } catch (err) {
+      setLibraryError(
+        err instanceof ApiError && err.status === 409
+          ? '本房间已经有一张角色卡草稿了。想换成卡库里的卡，请先处理掉当前草稿。'
+          : friendlyErrorMessage(err, '套用角色卡失败'),
+      )
+    } finally {
+      setLibraryBusy(false)
+    }
+  }
+
   const handleSubmit = async () => {
-    if (!roomId) {
+    if (!isTemplateHost && !roomId) {
       setSubmitError('房间信息丢失，请重新创建/加入房间')
       return
     }
@@ -1141,17 +1252,7 @@ export default function CharacterPage() {
         finalPreview.skillView.map(v => [v.id, v.current])
       )
 
-      // 已经有草稿就复用，不要每次提交都新建一条。原来无条件 createCharacterDraft，
-      // 「编辑已有角色 → 再次完成创建」会在 characters 表里再插一行，上一条就成了
-      // 孤儿记录（改几次就攒几条），而房间里真正生效的只有最后那条。
-      let characterId = useRoomStore.getState().characterId
-      if (!characterId) {
-        characterId = await createCharacterDraft(roomId)
-        // Persist the draft identity before PATCH/complete. If either later
-        // request fails, the next submission resumes this same server draft.
-        setCharacterId(characterId)
-      }
-      await saveCharacter(roomId, characterId, {
+      const built: BuiltCharacter = {
         name: info.name,
         age: info.age ? Number(info.age) : null,
         gender: info.gender || null,
@@ -1165,8 +1266,32 @@ export default function CharacterPage() {
         occupationName: selectedOcc?.name ?? null,
         background: serializedBackground,
         notes,
-      })
-      await completeCharacter(roomId, characterId)
+      }
+
+      if (templateHostId) {
+        // 卡库卡没有 complete：它不属于任何一局，"完成"就是存下来。顶层 name
+        // 也一起更新——卡库列表展示的是它，不是 data.name。
+        await updateCharacterTemplate(templateHostId, {
+          name: info.name.trim() || '未命名调查员',
+          data: templateDataFromBuilt(built),
+        })
+        navigate('/home/characters')
+        return
+      }
+
+      const activeRoomId = roomId as string
+      // 已经有草稿就复用，不要每次提交都新建一条。原来无条件 createCharacterDraft，
+      // 「编辑已有角色 → 再次完成创建」会在 characters 表里再插一行，上一条就成了
+      // 孤儿记录（改几次就攒几条），而房间里真正生效的只有最后那条。
+      let characterId = useRoomStore.getState().characterId
+      if (!characterId) {
+        characterId = await createCharacterDraft(activeRoomId)
+        // Persist the draft identity before PATCH/complete. If either later
+        // request fails, the next submission resumes this same server draft.
+        setCharacterId(characterId)
+      }
+      await saveCharacter(activeRoomId, characterId, built)
+      await completeCharacter(activeRoomId, characterId)
       useCharacterStore.getState().setCharacter(
         {
           info: { ...info, playerName: info.playerName || info.name },
@@ -1178,7 +1303,7 @@ export default function CharacterPage() {
           equipment, background: serializedBackground, notes,
           derived: finalDerived,
         },
-        roomId
+        activeRoomId
       )
       navigate('/room/ready')
     } catch (err) {
@@ -1194,6 +1319,10 @@ export default function CharacterPage() {
   )
 
   const handleLeaveCharacterPage = () => {
+    if (isTemplateHost) {
+      navigate('/home/characters')
+      return
+    }
     if (isEditingExistingCharacter) {
       navigate(-1)
       return
@@ -1319,8 +1448,9 @@ export default function CharacterPage() {
             ))}
           </div>
 
-          {/* ★ 提前告知"没有房间"这件事，不要等填完四步、点完成创建才在最后一刻报错。 */}
-          {!roomId && (
+          {/* ★ 提前告知"没有房间"这件事，不要等填完四步、点完成创建才在最后一刻报错。
+              卡库宿主没有房间是正常的（#337 决策 A），这条警告只对房间建卡成立。 */}
+          {!isTemplateHost && !roomId && (
             <div className="character-create__room-warning">
               当前未加入房间，创建的角色不会被保存。请先返回创建或加入一个房间。
             </div>
@@ -1331,12 +1461,61 @@ export default function CharacterPage() {
           {/* ═══════════════ Step 0: Info + Occupation ═══════════════ */}
           {step === 0 && (
             <div id="character-step-info" role="tabpanel" aria-labelledby="character-tab-info" className="character-create__page character-create__page--info px-5 pb-20 animate-screen-in">
+              {/* 车卡界面与卡库的两条通路（#337）。只对房间宿主显示——卡库宿主
+                  本身就在编辑卡库卡，"存进卡库"和"从卡库选"都没有意义。 */}
+              {/* 只放"从卡库选卡"。存卡入口在 /room/ready——那才是卡建好的时刻，
+                  而且手动「完成创建」和「一键生成」都落在那里；放在这一步的话，
+                  一键生成会直接跳走，玩家再也见不到存卡按钮。 */}
+              {!isTemplateHost && roomId && (
+                <div className="mb-3">
+                  <button
+                    type="button"
+                    onClick={handleOpenLibrary}
+                    disabled={libraryBusy}
+                    className="w-full px-3 py-2 rounded-sm text-xs font-semibold bg-card text-text-body border border-border-mid active:bg-panel active:scale-[0.97] transition-all disabled:opacity-60"
+                  >
+                    从卡库选卡
+                  </button>
+                </div>
+              )}
+              {libraryError && (
+                <p className="mb-3 text-[11px] text-[#c04040] text-center">{libraryError}</p>
+              )}
+              {libraryOpen && (
+                <div className="mb-3 rounded-sm border border-border-mid bg-card p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-text-primary">我的角色卡</span>
+                    <button
+                      type="button"
+                      onClick={() => setLibraryOpen(false)}
+                      className="text-[11px] text-text-muted"
+                    >
+                      收起
+                    </button>
+                  </div>
+                  {libraryCards === null && <p className="text-[11px] text-text-dim">加载中…</p>}
+                  {libraryCards !== null && libraryCards.length === 0 && (
+                    <p className="text-[11px] text-text-dim">卡库里还没有角色卡。</p>
+                  )}
+                  {libraryCards?.map((card) => (
+                    <button
+                      key={card.templateId}
+                      type="button"
+                      onClick={() => handleUseLibraryCard(card.templateId)}
+                      disabled={libraryBusy}
+                      className="w-full text-left px-3 py-2 rounded-sm border border-border-light active:bg-panel active:scale-[0.99] transition-all disabled:opacity-60"
+                    >
+                      <span className="text-xs font-semibold text-text-primary">{card.name}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
               <div className="character-create__quick-wrap mb-3">
                 <button
                   type="button"
                   aria-label="一键生成调查员"
                   onClick={handleQuickGenerate}
-                  disabled={quickGenerating || !roomId}
+                  disabled={quickGenerating || (!isTemplateHost && !roomId)}
                   className="character-create__quick flex flex-col items-center justify-center text-sm font-semibold transition-all disabled:opacity-60"
                 >
                   {quickGenerating ? (

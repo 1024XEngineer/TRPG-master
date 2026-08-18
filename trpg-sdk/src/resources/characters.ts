@@ -22,10 +22,21 @@ export class CharactersResource {
   }
 
   /** POST /api/v1/rooms/{roomId}/characters — 创建一份角色草稿 */
-  createDraft(roomId: string, reconnectToken: string): Promise<CharacterDraftResult> {
+  /**
+   * POST /api/v1/rooms/{roomId}/characters — 建一份房间角色草稿。
+   *
+   * `basedOnTemplateId`（#337）：从玩家自己的卡库卡播种这份草稿，建卡态字段整体
+   * 拷进来，拷完房间卡就自足了。房间里**已经有草稿时会 409**——要不要冲掉玩家
+   * 已经改了一半的草稿，得让玩家自己决定，不能静默忽略。
+   */
+  createDraft(
+    roomId: string,
+    reconnectToken: string,
+    basedOnTemplateId?: string
+  ): Promise<CharacterDraftResult> {
     return this.client.post<CharacterDraftResult>(
       `/rooms/${roomId}/characters`,
-      null,
+      basedOnTemplateId ? { basedOnTemplateId } : null,
       this.authenticated(reconnectToken)
     );
   }

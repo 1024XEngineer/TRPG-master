@@ -1,44 +1,358 @@
-.join-room-page {
-  display: flex;
+.join-room-scene {
+  position: relative;
+  isolation: isolate;
+  width: 100%;
   min-height: 100%;
-  flex-direction: column;
-  padding-bottom: env(safe-area-inset-bottom);
+  overflow: hidden;
+  color: #e7c98d;
+  background: #160d07;
+  font-family: Georgia, 'STKaiti', 'KaiTi', 'Songti SC', 'STSong', serif;
 }
 
-.join-room-page__header {
-  flex: none;
-  padding-top: max(0.75rem, env(safe-area-inset-top));
+.join-room-scene__artboard {
+  position: relative;
+  container-type: inline-size;
+  width: 100%;
+  aspect-ratio: 853 / 1844;
+  min-height: 100%;
 }
 
-.join-room-page__back {
-  width: 2.5rem;
-  height: 2.5rem;
-  flex: none;
+.join-room-scene button,
+.join-room-scene input {
+  font: inherit;
 }
 
-.join-room-page__form {
-  min-height: 0;
-  padding-top: clamp(2rem, 7dvh, 3rem);
-  padding-bottom: max(1.5rem, env(safe-area-inset-bottom));
+.join-room-scene__background {
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  pointer-events: none;
+  user-select: none;
 }
 
-.join-room-page__field,
-.join-room-page__form button[type='submit'] {
-  scroll-margin-block: max(1rem, env(safe-area-inset-top)) max(2rem, 28dvh);
+.join-room-scene__header {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 4;
+  height: 25%;
+  padding-top: max(0%, env(safe-area-inset-top));
+  text-align: center;
 }
 
-@media (max-height: 600px) {
-  .join-room-page__form {
-    padding-top: 1.25rem;
+.join-room-scene__back {
+  position: absolute;
+  top: max(3.8cqw, env(safe-area-inset-top));
+  left: 4.5cqw;
+  z-index: 2;
+  display: grid;
+  width: 10.5cqw;
+  height: 10.5cqw;
+  place-items: center;
+  padding: 0;
+  border: 1px solid #d3a45d;
+  border-radius: 50%;
+  color: #e9c274;
+  background: #3c210f;
+  box-shadow: inset 0 0 0 2px rgb(34 16 7 / 72%), 0 3px 8px rgb(0 0 0 / 44%);
+  cursor: pointer;
+  transition: filter 150ms ease, transform 150ms ease;
+}
+
+.join-room-scene__back svg {
+  width: 47%;
+  height: 47%;
+  stroke-width: 2.5;
+}
+
+.join-room-scene__heading {
+  position: absolute;
+  top: max(3.8cqw, env(safe-area-inset-top));
+  right: 0;
+  left: 0;
+  display: flex;
+  height: 10.5cqw;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.join-room-scene__heading h1 {
+  margin: 0;
+  color: #ecd09a;
+  font-size: clamp(24px, 7.2cqw, 32px);
+  font-weight: 700;
+  line-height: 1.1;
+  text-shadow: 0 2px 3px #1a0b04, 0 0 12px rgb(195 137 61 / 24%);
+}
+
+.join-room-scene__heading-flourish {
+  display: none;
+}
+
+.join-room-scene__header > p {
+  position: absolute;
+  top: 42%;
+  right: 0;
+  left: 0;
+  margin: 0;
+  color: #cfa96b;
+  font-size: clamp(14px, 4.5cqw, 20px);
+  font-weight: 600;
+  text-shadow: 0 1px 2px #180b05;
+  pointer-events: none;
+}
+
+.join-room-scene__dossier {
+  position: absolute;
+  top: 17.5%;
+  left: 8.5%;
+  z-index: 2;
+  width: 83%;
+  aspect-ratio: 694 / 580;
+  padding: 0;
+  border: 0;
+  color: #4a2c17;
+  background: transparent;
+  filter: drop-shadow(0 9px 10px rgb(0 0 0 / 43%));
+  text-align: center;
+}
+
+.join-room-scene__dossier-art {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  pointer-events: none;
+  user-select: none;
+}
+
+.join-room-scene__dossier label {
+  position: absolute;
+  top: 17%;
+  right: 10%;
+  left: 10%;
+  z-index: 2;
+  display: block;
+  font-size: clamp(18px, 5.5cqw, 24px);
+  font-weight: 700;
+}
+
+.join-room-scene__code {
+  position: absolute;
+  top: 32.6%;
+  left: 11.2%;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 1.55cqw;
+  width: 77.6%;
+  height: 19.8%;
+}
+
+.join-room-scene__code-cell {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  place-items: center;
+  border: 0;
+  color: #3d220f;
+  background: transparent;
+  box-shadow: none;
+  font-family: 'Courier New', 'SF Mono', monospace;
+  font-size: clamp(20px, 6.7cqw, 29px);
+  font-weight: 700;
+  line-height: 1;
+}
+
+.join-room-scene__code--focused .join-room-scene__code-cell {
+  background: rgb(255 236 194 / 14%);
+}
+
+.join-room-scene__code-cell--cursor::after {
+  width: 1px;
+  height: 45%;
+  background: #4b2a13;
+  content: '';
+  animation: join-room-caret 900ms steps(1) infinite;
+}
+
+@keyframes join-room-caret {
+  50% { opacity: 0; }
+}
+
+.join-room-scene__code-input {
+  position: absolute;
+  top: 32.6%;
+  left: 11.2%;
+  z-index: 3;
+  width: 77.6%;
+  height: 19.8%;
+  padding: 0;
+  border: 0;
+  color: transparent;
+  background: transparent;
+  caret-color: transparent;
+  cursor: text;
+  opacity: 0.02;
+}
+
+.join-room-scene__code-input:focus {
+  outline: none;
+}
+
+.join-room-scene__error-slot {
+  position: absolute;
+  top: 60.5%;
+  right: 12%;
+  left: 12%;
+  z-index: 3;
+  display: grid;
+  height: 7%;
+  place-items: center;
+}
+
+.join-room-scene__error-slot p {
+  max-width: 100%;
+  margin: 0;
+  color: #7a241c;
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-size: clamp(11px, 3.1cqw, 14px);
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.join-room-scene__join {
+  position: absolute;
+  top: 68.6%;
+  left: 10.5%;
+  z-index: 3;
+  display: grid;
+  width: 79%;
+  height: 17.2%;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  color: #f0d49d;
+  background: transparent;
+  box-shadow: none;
+  font-size: clamp(16px, 4.5cqw, 20px);
+  font-weight: 700;
+  text-shadow: 0 1px 2px #281006;
+  cursor: pointer;
+  transition: filter 150ms ease, opacity 150ms ease, transform 150ms ease;
+}
+
+.join-room-scene__join > span:not(.sr-only) {
+  padding: 1.1cqw 3cqw;
+  border-radius: 999px;
+  background: rgb(42 16 6 / 82%);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 28%);
+}
+
+.join-room-scene__join:disabled {
+  background: rgb(39 24 14 / 32%);
+  box-shadow: inset 0 0 0 1px rgb(65 40 20 / 20%);
+  cursor: not-allowed;
+}
+
+.join-room-scene__poster {
+  position: absolute;
+  top: 1.5%;
+  right: -2%;
+  left: auto;
+  z-index: 3;
+  width: 22%;
+  height: auto;
+  filter: drop-shadow(0 6px 7px rgb(0 0 0 / 46%));
+  pointer-events: none;
+  transform: rotate(7deg);
+  user-select: none;
+}
+
+.join-room-scene__create-entry {
+  position: absolute;
+  top: 52.5%;
+  right: auto;
+  left: 50%;
+  z-index: 2;
+  width: 58%;
+  text-align: center;
+  transform: translateX(-50%);
+}
+
+.join-room-scene__create-entry > p {
+  display: flex;
+  align-items: center;
+  gap: 2cqw;
+  justify-content: center;
+  margin: 0 0 4cqw;
+  color: #d4ad6c;
+  font-size: clamp(14px, 4.4cqw, 19px);
+  font-weight: 600;
+  text-shadow: 0 1px 2px #160a04;
+}
+
+.join-room-scene__create-entry > p::before,
+.join-room-scene__create-entry > p::after {
+  width: 8cqw;
+  height: 1px;
+  background: #a97c40;
+  content: '';
+}
+
+.join-room-scene__create-entry button {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  transition: filter 150ms ease, transform 150ms ease;
+}
+
+.join-room-scene__create-entry button img {
+  display: block;
+  width: 100%;
+  height: auto;
+  pointer-events: none;
+  user-select: none;
+}
+
+.join-room-scene__back:hover,
+.join-room-scene__join:hover:not(:disabled),
+.join-room-scene__create-entry button:hover {
+  filter: brightness(1.14);
+}
+
+.join-room-scene__back:active,
+.join-room-scene__join:active:not(:disabled),
+.join-room-scene__create-entry button:active {
+  transform: scale(0.96);
+}
+
+.join-room-scene__back:focus-visible,
+.join-room-scene__join:focus-visible,
+.join-room-scene__create-entry button:focus-visible {
+  outline: 3px solid #f2d38d;
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .join-room-scene__back,
+  .join-room-scene__join,
+  .join-room-scene__create-entry button {
+    transition: none;
   }
 
-  .join-room-page__form > svg {
-    width: 2.5rem;
-    height: 2.5rem;
-    margin-bottom: 0.65rem;
-  }
-
-  .join-room-page__form > p:first-of-type {
-    margin-bottom: 1rem;
+  .join-room-scene__code-cell--cursor::after {
+    animation: none;
   }
 }

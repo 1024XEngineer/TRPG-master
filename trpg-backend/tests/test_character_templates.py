@@ -514,3 +514,145 @@ async def test_quick_generate_syncs_the_display_name(client: AsyncClient) -> Non
         item for item in listed.json()["data"] if item["templateId"] == template["templateId"]
     )
     assert entry["name"] == "叶探员"
+
+
+async def test_saving_an_identical_card_twice_is_refused_with_the_existing_id(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """一模一样的卡不能存两份（#337）。
+
+    判据是**内容**：刷新页面后再点一次存卡，前端拿不到上次的 templateId，会再发
+    一次 POST。没有这条约束就会静默多出一张一模一样的卡，玩家只能自己去卡库数。
+
+    返回 409 而不是幂等地返回既有那张：玩家点了存卡却什么都没多出来，得有人告诉
+    他为什么。`details` 里带既有那张的 id，前端据此把按钮指向它。
+    """
+    token = await register(client)
+    first = await _create_template(client, token)
+
+    again = await client.post(
+        TEMPLATES_BASE,
+        json={"name": "陈探员", "systemId": BUILTIN_SYSTEM_ID, "data": TEMPLATE_DATA},
+        headers=bearer(token),
+    )
+
+    assert again.status_code == 409, again.text
+    body = again.json()["error"]
+    assert body["code"] == "CHARACTER_TEMPLATE_DUPLICATE"
+    assert body["details"] == [{"templateId": first["templateId"]}]
+    assert await db_session.scalar(select(func.count()).select_from(UserCharacterTemplate)) == 1
+
+
+async def test_same_name_with_different_content_is_allowed(client: AsyncClient) -> None:
+    """判据是内容不是名字：两张真不同的卡完全可以同名。"""
+    token = await register(client)
+    await _create_template(client, token, name="陈探员")
+
+    other = await client.post(
+        TEMPLATES_BASE,
+        json={
+            "name": "陈探员",
+            "systemId": BUILTIN_SYSTEM_ID,
+            "data": {**TEMPLATE_DATA, "occupation": "记者"},
+        },
+        headers=bearer(token),
+    )
+
+    assert other.status_code == 201, other.text
+    listed = await client.get(TEMPLATES_BASE, headers=bearer(token))
+    assert len(listed.json()["data"]) == 2
+
+
+async def test_another_players_identical_card_does_not_collide(client: AsyncClient) -> None:
+    """去重只在自己的卡库里做——别人存过同样的卡不该挡住我。"""
+    first_token = await register(client)
+    await _create_template(client, first_token)
+    second_token = await register(client)
+
+    mine = await client.post(
+        TEMPLATES_BASE,
+        json={"name": "陈探员", "systemId": BUILTIN_SYSTEM_ID, "data": TEMPLATE_DATA},
+        headers=bearer(second_token),
+    )
+
+    assert mine.status_code == 201, mine.text
+
+
+async def test_editing_a_card_into_an_exact_copy_is_refused(client: AsyncClient) -> None:
+    """改着改着跟另一张重了，不能静默合并——玩家正在编辑的这张会凭空消失。"""
+    token = await register(client)
+    await _create_template(client, token, name="陈探员")
+    editing = await client.post(
+        TEMPLATES_BASE,
+        json={
+            "name": "另一张",
+            "systemId": BUILTIN_SYSTEM_ID,
+            "data": {**TEMPLATE_DATA, "occupation": "记者"},
+        },
+        headers=bearer(token),
+    )
+    assert editing.status_code == 201
+
+    collide = await client.patch(
+        f"{TEMPLATES_BASE}/{editing.json()['data']['templateId']}",
+        json={"name": "陈探员", "data": TEMPLATE_DATA},
+        headers=bearer(token),
+    )
+
+    assert collide.status_code == 409, collide.text
+    assert collide.json()["error"]["code"] == "CHARACTER_TEMPLATE_DUPLICATE"
+
+
+async def test_editing_a_card_without_colliding_still_works(client: AsyncClient) -> None:
+    """自己改自己不算跟自己重复——排除自身那条判断要真的生效。"""
+    token = await register(client)
+    created = await _create_template(client, token)
+
+    renamed = await client.patch(
+        f"{TEMPLATES_BASE}/{created['templateId']}",
+        json={"name": "陈探员（二版）"},
+        headers=bearer(token),
+    )
+
+    assert renamed.status_code == 200, renamed.text
+    assert renamed.json()["data"]["name"] == "陈探员（二版）"
+
+
+async def test_seeded_room_card_reports_where_it_came_from(client: AsyncClient) -> None:
+    """播种来的房间卡要能说出出处（#337）。
+
+    前端靠这个判断"它已经在卡库里了"。光比内容不够：卡库那张可能是服务端背书的
+    roll，而重新保存时客户端不被允许声称 roll（会被压成 pointbuy），内容必然不
+    同——于是"存过的卡"每次都被当成新卡，卡库里堆出重复。
+    """
+    token = await register(client)
+    template = await _create_template(client, token)
+    room = await create_room(client, token=token)
+    draft = await client.post(
+        f"{ROOMS_BASE}/{room['roomId']}/characters",
+        json={"basedOnTemplateId": template["templateId"]},
+        headers={"X-Reconnect-Token": room["reconnectToken"]},
+    )
+
+    read = await client.get(
+        f"{ROOMS_BASE}/{room['roomId']}/characters/{draft.json()['data']['characterId']}",
+        headers={"X-Reconnect-Token": room["reconnectToken"]},
+    )
+
+    assert read.json()["data"]["basedOnTemplateId"] == template["templateId"]
+
+
+async def test_a_from_scratch_room_card_has_no_provenance(client: AsyncClient) -> None:
+    """从零建的卡没有出处，按钮就该是"存卡"而不是"已存卡"。"""
+    room = await create_room(client)
+    draft = await client.post(
+        f"{ROOMS_BASE}/{room['roomId']}/characters",
+        headers={"X-Reconnect-Token": room["reconnectToken"]},
+    )
+
+    read = await client.get(
+        f"{ROOMS_BASE}/{room['roomId']}/characters/{draft.json()['data']['characterId']}",
+        headers={"X-Reconnect-Token": room["reconnectToken"]},
+    )
+
+    assert read.json()["data"]["basedOnTemplateId"] is None

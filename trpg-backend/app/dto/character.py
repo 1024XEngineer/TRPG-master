@@ -65,6 +65,10 @@ class CharacterRead(CamelModel):
 
     id: str
     status: str
+    # 这张房间卡是从哪张卡库卡播种来的（#337）。前端据此判断"它已经在卡库里了"——
+    # 光靠内容哈希不够：卡库里那张可能是服务端背书的 roll，而重新保存时客户端不
+    # 被允许声称 roll，于是内容必然不同，永远判不出"存过"。
+    based_on_template_id: str | None = None
     generation_method: str
     name: str | None = None
     age: int | None = None

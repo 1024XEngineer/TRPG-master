@@ -235,6 +235,7 @@ export interface CharacterPreviewRequest {
 export interface CharacterRead {
   id: string;
   status: string;
+  basedOnTemplateId?: string | null;
   generationMethod: string;
   name?: string | null;
   age?: number | null;

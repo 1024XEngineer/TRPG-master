@@ -18,7 +18,13 @@ type RoomCharacter = ReturnType<typeof useCharacterStore.getState>['character']
  * 抽成 hook 而不是在那条新路径上补一次 `setCharacter`：补那一处只堵得住那一条
  * 路，而"缓存是权威源"这个错误本身还留在 RoomPage 里，下一条新路径照样会踩。
  */
-export function useRoomCharacter(): RoomCharacter {
+export interface RoomCharacterView {
+  character: RoomCharacter
+  /** 这张房间卡是从哪张卡库卡播种来的；没有出处就是 null。 */
+  basedOnTemplateId: string | null
+}
+
+export function useRoomCharacter(): RoomCharacterView {
   const roomId = useRoomStore((s) => s.roomId)
   const characterId = useRoomStore((s) => s.characterId)
   // 按房间取缓存，而不是直接读 s.character——本地缓存不按房间区分的话，换房间
@@ -27,7 +33,11 @@ export function useRoomCharacter(): RoomCharacter {
   const { ruleset } = useRuleset()
 
   const identity = roomId && characterId ? `${roomId}:${characterId}` : null
-  const [remote, setRemote] = useState<{ identity: string; character: NonNullable<RoomCharacter> } | null>(null)
+  const [remote, setRemote] = useState<{
+    identity: string
+    character: NonNullable<RoomCharacter>
+    basedOnTemplateId: string | null
+  } | null>(null)
 
   useEffect(() => {
     // 组件可能在不卸载的情况下切换房间。上一身份的远程角色不能继续压过新房间的
@@ -41,6 +51,7 @@ export function useRoomCharacter(): RoomCharacter {
         const occupationId = ruleset.occupations.find((o) => o.name === saved.occupation)?.id ?? null
         setRemote({
           identity,
+          basedOnTemplateId: saved.basedOnTemplateId ?? null,
           character: {
             info: {
               name: saved.name,
@@ -70,5 +81,7 @@ export function useRoomCharacter(): RoomCharacter {
     }
   }, [roomId, characterId, identity, ruleset])
 
-  return remote?.identity === identity ? remote.character : cached
+  return remote?.identity === identity
+    ? { character: remote.character, basedOnTemplateId: remote.basedOnTemplateId }
+    : { character: cached, basedOnTemplateId: null }
 }

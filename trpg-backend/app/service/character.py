@@ -388,6 +388,7 @@ async def get_character(
     return CharacterRead(
         id=character.id,
         status=character.status,
+        based_on_template_id=character.based_on_template_id,
         generation_method=character.generation_method,
         name=character.name,
         age=character.age,

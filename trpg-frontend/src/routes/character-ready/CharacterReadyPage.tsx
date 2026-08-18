@@ -148,7 +148,13 @@ export default function CharacterReadyPage() {
   const { ruleset: readyRuleset } = useRuleset()
   // 以后端为准、缓存只作首屏占位（issue #96）。这段逻辑原本就长在这一页，#337
   // 之后抽成了 hook——游戏内的 RoomPage 需要同一份，那里原来只读本地缓存。
-  const character = useRoomCharacter()
+  const { character, basedOnTemplateId } = useRoomCharacter()
+  // 这张房间卡是从卡库播种来的，那它**本来就在卡库里**，按钮一进来就该是"已存卡"。
+  //
+  // 不能只靠内容哈希判断：卡库里那张可能是服务端背书的 roll，而重新保存时客户端
+  // 不被允许声称 roll（会被压成 pointbuy），内容必然不同，永远判不出"存过"——
+  // 实测就是这样多出一张重复卡的。出处才是可靠判据。
+  const alreadyInLibrary = savedTemplateId ?? basedOnTemplateId
   const roomCode = useRoomStore((s) => s.roomCode)
   const isHost = useRoomStore((s) => s.isHost)
   const playerId = useRoomStore((s) => s.playerId)
@@ -225,9 +231,9 @@ export default function CharacterReadyPage() {
     setLibraryError('')
     // 已经存过就是撤销：删掉刚才那一条。存卡每次新建一条记录，所以撤销只需要
     // 删掉这次建的，不会碰到玩家卡库里别的卡。
-    if (savedTemplateId) {
+    if (alreadyInLibrary) {
       try {
-        await deleteCharacterTemplate(savedTemplateId)
+        await deleteCharacterTemplate(alreadyInLibrary)
         setSavedTemplateId(null)
         setLibraryError('')
       } catch (err) {
@@ -383,21 +389,21 @@ export default function CharacterReadyPage() {
                             type="button"
                             onClick={handleToggleLibrary}
                             disabled={savingToLibrary}
-                            aria-pressed={savedTemplateId !== null}
+                            aria-pressed={alreadyInLibrary !== null}
                             aria-label={
-                              savedTemplateId
+                              alreadyInLibrary
                                 ? '已存进我的角色卡库，点击撤销'
                                 : '把这张调查员存进我的角色卡库'
                             }
                             title={
-                              savedTemplateId
+                              alreadyInLibrary
                                 ? '已存进卡库，点击把刚存的这张删掉'
                                 : '存进我的角色卡库，下次开局可以直接选'
                             }
                           >
-                            {savedTemplateId ? <BookmarkCheck /> : <BookmarkPlus />}
+                            {alreadyInLibrary ? <BookmarkCheck /> : <BookmarkPlus />}
                             <span>
-                              {savingToLibrary ? '处理中' : savedTemplateId ? '已存卡' : '存卡'}
+                              {savingToLibrary ? '处理中' : alreadyInLibrary ? '已存卡' : '存卡'}
                             </span>
                           </button>
                         </>

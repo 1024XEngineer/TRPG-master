@@ -71,7 +71,7 @@ export async function saveCharacter(
             .map((name) => ({ name }))
         : built.equipment
           ? built.equipment
-              .split(/[,，\n]/)
+              .split(/[,，、\n]/)
               .map((s) => s.trim())
               .filter(Boolean)
               .map((name) => ({ name }))

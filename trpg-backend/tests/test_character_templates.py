@@ -616,3 +616,43 @@ async def test_editing_a_card_without_colliding_still_works(client: AsyncClient)
 
     assert renamed.status_code == 200, renamed.text
     assert renamed.json()["data"]["name"] == "陈探员（二版）"
+
+
+async def test_seeded_room_card_reports_where_it_came_from(client: AsyncClient) -> None:
+    """播种来的房间卡要能说出出处（#337）。
+
+    前端靠这个判断"它已经在卡库里了"。光比内容不够：卡库那张可能是服务端背书的
+    roll，而重新保存时客户端不被允许声称 roll（会被压成 pointbuy），内容必然不
+    同——于是"存过的卡"每次都被当成新卡，卡库里堆出重复。
+    """
+    token = await register(client)
+    template = await _create_template(client, token)
+    room = await create_room(client, token=token)
+    draft = await client.post(
+        f"{ROOMS_BASE}/{room['roomId']}/characters",
+        json={"basedOnTemplateId": template["templateId"]},
+        headers={"X-Reconnect-Token": room["reconnectToken"]},
+    )
+
+    read = await client.get(
+        f"{ROOMS_BASE}/{room['roomId']}/characters/{draft.json()['data']['characterId']}",
+        headers={"X-Reconnect-Token": room["reconnectToken"]},
+    )
+
+    assert read.json()["data"]["basedOnTemplateId"] == template["templateId"]
+
+
+async def test_a_from_scratch_room_card_has_no_provenance(client: AsyncClient) -> None:
+    """从零建的卡没有出处，按钮就该是"存卡"而不是"已存卡"。"""
+    room = await create_room(client)
+    draft = await client.post(
+        f"{ROOMS_BASE}/{room['roomId']}/characters",
+        headers={"X-Reconnect-Token": room["reconnectToken"]},
+    )
+
+    read = await client.get(
+        f"{ROOMS_BASE}/{room['roomId']}/characters/{draft.json()['data']['characterId']}",
+        headers={"X-Reconnect-Token": room["reconnectToken"]},
+    )
+
+    assert read.json()["data"]["basedOnTemplateId"] is None

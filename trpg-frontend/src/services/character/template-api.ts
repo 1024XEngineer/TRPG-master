@@ -117,7 +117,7 @@ export function templateDataFromBuilt(built: BuiltCharacter): CharacterTemplateD
       ? built.equipment.map((item) => item.trim()).filter(Boolean)
       : built.equipment
         ? built.equipment
-            .split(/[,，\n]/)
+            .split(/[,，、\n]/)
             .map((item) => item.trim())
             .filter(Boolean)
         : [],

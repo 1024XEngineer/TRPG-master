@@ -1249,7 +1249,7 @@ export default function RoomPage() {
   // 以后端为准，本地缓存只作首屏占位。原来这里只读 useCharacterStore，而那个
   // store 全仓库只有建卡向导的两处提交会写——任何绕开向导的建卡路径（#337 的
   // 「从卡库选卡」就是一条）在准备页看着正常，进游戏这个面板就是空的。
-  const character = useRoomCharacter()
+  const { character } = useRoomCharacter()
   const senderName = character?.info.name || nickname || '你'
   const { ruleset } = useRuleset()
   const roomInfo = useRoomPlayers(roomCode)

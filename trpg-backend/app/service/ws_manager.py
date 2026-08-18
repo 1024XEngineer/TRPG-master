@@ -12,9 +12,16 @@ from fastapi import WebSocket
 class ConnectionManager:
     def __init__(self) -> None:
         self._rooms: dict[str, set[WebSocket]] = {}
+        self._players: dict[tuple[str, str], set[WebSocket]] = {}
+        self._identity_by_socket: dict[WebSocket, tuple[str, str]] = {}
 
-    def add(self, room_id: str, websocket: WebSocket) -> None:
+    def add(self, room_id: str, player_id: str, websocket: WebSocket) -> None:
+        """登记房间广播与玩家单播索引，支持同一玩家多标签页重连。"""
+
         self._rooms.setdefault(room_id, set()).add(websocket)
+        identity = (room_id, player_id)
+        self._players.setdefault(identity, set()).add(websocket)
+        self._identity_by_socket[websocket] = identity
 
     def remove(self, room_id: str, websocket: WebSocket) -> None:
         connections = self._rooms.get(room_id)
@@ -23,6 +30,18 @@ class ConnectionManager:
         connections.discard(websocket)
         if not connections:
             del self._rooms[room_id]
+        identity = self._identity_by_socket.pop(websocket, None)
+        if identity is not None:
+            player_connections = self._players.get(identity)
+            if player_connections is not None:
+                player_connections.discard(websocket)
+                if not player_connections:
+                    del self._players[identity]
+
+    def player_connections(self, room_id: str, player_id: str) -> tuple[WebSocket, ...]:
+        """返回玩家当前连接快照，避免发送期间断线修改原集合。"""
+
+        return tuple(self._players.get((room_id, player_id), ()))
 
     async def broadcast(self, room_id: str, message: dict) -> None:
         # 复制一份快照再遍历：广播过程中某个连接掉线触发 remove() 会改动

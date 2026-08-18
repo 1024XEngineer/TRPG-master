@@ -90,9 +90,9 @@ from .rules_v3 import (
     agent_match_scope_admits,
     create_rule_agenda,
     effects_after_degree,
+    entity_state,
     matching_event_rules,
     pending_check_for,
-    entity_state,
     resolve_rule_option,
     walk_rule,
 )
@@ -545,6 +545,33 @@ class AdjudicationEngineService:
             )
 
     async def submit(self, request: SubmitAdjudicationRequest) -> AdjudicationExecution:
+        """提交普通裁决；多人共享时间仍必须先经过应用层全员确认。"""
+
+        return await self._submit(request, consent_player_ids=None)
+
+    async def submit_with_time_consent(
+        self,
+        request: SubmitAdjudicationRequest,
+        *,
+        consent_player_ids: tuple[str, ...],
+    ) -> AdjudicationExecution:
+        """在应用层已冻结并收集全员同意后提交原裁决。
+
+        Engine 会再次对比当前 Actor 对应的玩家集合，防止成员变化后复用
+        旧授权。该入口不对 Agent 或客户端暴露。
+        """
+
+        return await self._submit(
+            request,
+            consent_player_ids=tuple(sorted(consent_player_ids)),
+        )
+
+    async def _submit(
+        self,
+        request: SubmitAdjudicationRequest,
+        *,
+        consent_player_ids: tuple[str, ...] | None,
+    ) -> AdjudicationExecution:
         async with self._store.transaction(request.room_id) as transaction:
             runtime = await transaction.load_runtime()
             self._validate_identity(
@@ -576,7 +603,24 @@ class AdjudicationEngineService:
                 request.adjudication.source_revision,
                 runtime.revision,
             )
-            self._validate_adjudication(runtime, request.adjudication)
+            allow_party_time_advance = False
+            if consent_player_ids is not None:
+                current_players = tuple(
+                    sorted({actor.player_id for actor in runtime.game_state.actors.values()})
+                )
+                if consent_player_ids != current_players or len(current_players) <= 1:
+                    self._reject_validation(
+                        "TIME_CONSENT_STALE",
+                        repairability="requires_player_choice",
+                        fault="player",
+                        player_safe_reason="房间成员已变化，需要重新确认时间推进",
+                    )
+                allow_party_time_advance = True
+            self._validate_adjudication(
+                runtime,
+                request.adjudication,
+                allow_party_time_advance=allow_party_time_advance,
+            )
             proposal_validation, proposal_committed_level = (
                 self._build_submission_validation(
                     runtime,
@@ -1278,6 +1322,8 @@ class AdjudicationEngineService:
         self,
         runtime: EngineRuntimeSnapshot,
         adjudication: ActionAdjudication,
+        *,
+        allow_party_time_advance: bool = False,
     ) -> None:
         state = runtime.game_state
         target = adjudication.target
@@ -1344,8 +1390,16 @@ class AdjudicationEngineService:
                     fault="agent",
                     player_safe_reason=persistent_problem.player_safe_reason,
                 )
-        self._validate_effect_sequence(runtime, adjudication.success_effects)
-        self._validate_effect_sequence(runtime, adjudication.failure_effects)
+        self._validate_effect_sequence(
+            runtime,
+            adjudication.success_effects,
+            allow_party_time_advance=allow_party_time_advance,
+        )
+        self._validate_effect_sequence(
+            runtime,
+            adjudication.failure_effects,
+            allow_party_time_advance=allow_party_time_advance,
+        )
         if adjudication.check.mode != "none":
             self._validated_options(runtime, adjudication)
 
@@ -1353,6 +1407,8 @@ class AdjudicationEngineService:
         self,
         runtime: EngineRuntimeSnapshot,
         effects: tuple[ActionEffect, ...],
+        *,
+        allow_party_time_advance: bool = False,
     ) -> None:
         information_ids = runtime.canon_information_ids
         entity_ids = (
@@ -1383,6 +1439,7 @@ class AdjudicationEngineService:
                 location_ids=location_ids,
                 portable_item_ids=portable_item_ids,
                 world_time=world_time,
+                allow_party_time_advance=allow_party_time_advance,
             )
             if isinstance(effect, EnsureRuntimeLocationEffect):
                 location_ids.add(effect.location_id)
@@ -1466,6 +1523,7 @@ class AdjudicationEngineService:
         location_ids: set[str],
         portable_item_ids: set[str],
         world_time: WorldTimeState | None = None,
+        allow_party_time_advance: bool = False,
     ) -> None:
         state = runtime.game_state
         if isinstance(effect, RevealInformationEffect | HideInformationEffect):
@@ -1587,7 +1645,7 @@ class AdjudicationEngineService:
                     player_safe_reason="当前时间目标与世界时间线不一致",
                 )
             blocked = time_advance_block_reason(tuple(state.actors))
-            if blocked is not None:
+            if blocked is not None and not allow_party_time_advance:
                 self._reject_validation(
                     "TIME_ADVANCE_BLOCKED",
                     repairability="requires_player_choice",

@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom'
-import { RoomSocketServerError, TurnFailedError, type AdjudicationPendingPayload, type AgentPlayerView, type AgentTurnPhase, type CheckRequestPayload, type CheckResultPayload, type EndingDraft, type NarrationPushPayload, type RoomConversationEvent, type RoomPlayerSummary } from 'trpg-sdk'
-import { ArrowLeft, Users, Map, MapPin, BookOpen, ScrollText, Star, X, SendHorizontal, Plus, Save, FlagOff, Heart, Brain, Volume2, Pause, Play, Square, RotateCcw, Mic, LoaderCircle } from 'lucide-react'
+import { RoomSocketServerError, TurnFailedError, type AdjudicationPendingPayload, type AgentPlayerView, type AgentTurnPhase, type CheckRequestPayload, type CheckResultPayload, type EndingDraft, type NarrationPushPayload, type RoomConversationEvent, type RoomPlayerSummary, type TimeAdvancePendingPayload } from 'trpg-sdk'
+import { ArrowLeft, Users, Map, MapPin, BookOpen, ScrollText, Star, X, SendHorizontal, Plus, Save, FlagOff, Heart, Brain, Volume2, Pause, Play, Square, RotateCcw, Mic, LoaderCircle, Clock3, Check } from 'lucide-react'
 import { useCallback, useState, useRef, useEffect, useMemo, type Dispatch, type FormEvent, type SetStateAction } from 'react'
 import { useRoomStore } from '@/stores/room-store'
 import { useAuthStore } from '@/stores/auth-store'
@@ -1316,6 +1316,9 @@ export default function RoomPage() {
   const [pendingCheck, setPendingCheck] = useState<CheckRequestPayload | null>(null)
   const [pendingAdjudication, setPendingAdjudication] =
     useState<AdjudicationPendingPayload | null>(null)
+  const [pendingTimeAdvance, setPendingTimeAdvance] =
+    useState<TimeAdvancePendingPayload | null>(null)
+  const [timeAdvanceResponding, setTimeAdvanceResponding] = useState(false)
   const selectedAdjudicationOptionRef = useRef<{
     correlationId: string
     option: UiPendingCheckDecisionView['options'][number]
@@ -1729,6 +1732,17 @@ export default function RoomPage() {
             openDiceForCheck()
           }
         }
+      } else if (envelope.type === 'time.advance.pending') {
+        setPendingTimeAdvance(envelope.payload)
+        setTimeAdvanceResponding(false)
+        setTyping(false)
+        setProgressLabel('等待全员确认时间推进')
+      } else if (envelope.type === 'time.advance.resolved') {
+        setPendingTimeAdvance((current) =>
+          current?.proposalId === envelope.payload.proposalId ? null : current,
+        )
+        setTimeAdvanceResponding(false)
+        setProgressLabel(null)
       } else if (
         envelope.type === 'plan.started' ||
         envelope.type === 'plan.step_changed' ||
@@ -2220,6 +2234,68 @@ export default function RoomPage() {
         </div>
       )}
       </section>
+
+      {pendingTimeAdvance && (
+        <div className="room-play__time-consent" role="status" aria-live="polite">
+          <div className="room-play__time-consent-summary">
+            <Clock3 aria-hidden="true" strokeWidth={2} />
+            <div>
+              <strong>{formatWorldTime(
+                pendingTimeAdvance.targetDayIndex,
+                pendingTimeAdvance.targetHourOfDay,
+              )}</strong>
+              <span>
+                {pendingTimeAdvance.acceptedPlayerIds.length}/
+                {pendingTimeAdvance.requiredPlayerIds.length} 人已确认
+              </span>
+            </div>
+          </div>
+          <div className="room-play__time-consent-actions">
+            <button
+              type="button"
+              className="room-play__time-consent-button room-play__time-consent-button--reject"
+              disabled={timeAdvanceResponding || !playerId}
+              onClick={() => {
+                if (!playerId) return
+                setTimeAdvanceResponding(true)
+                sdk.roomSocket.respondToTimeAdvance(playerId, {
+                  proposalId: pendingTimeAdvance.proposalId,
+                  proposalVersion: pendingTimeAdvance.proposalVersion,
+                  sourceRevision: pendingTimeAdvance.sourceRevision,
+                  accept: false,
+                })
+              }}
+            >
+              <X aria-hidden="true" />
+              拒绝
+            </button>
+            <button
+              type="button"
+              className="room-play__time-consent-button room-play__time-consent-button--accept"
+              disabled={
+                timeAdvanceResponding ||
+                !playerId ||
+                pendingTimeAdvance.acceptedPlayerIds.includes(playerId)
+              }
+              onClick={() => {
+                if (!playerId) return
+                setTimeAdvanceResponding(true)
+                sdk.roomSocket.respondToTimeAdvance(playerId, {
+                  proposalId: pendingTimeAdvance.proposalId,
+                  proposalVersion: pendingTimeAdvance.proposalVersion,
+                  sourceRevision: pendingTimeAdvance.sourceRevision,
+                  accept: true,
+                })
+              }}
+            >
+              <Check aria-hidden="true" />
+              {playerId && pendingTimeAdvance.acceptedPlayerIds.includes(playerId)
+                ? '已同意'
+                : '同意'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Input area */}
       <div className="room-play__composer">

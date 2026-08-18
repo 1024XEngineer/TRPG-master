@@ -1501,6 +1501,43 @@ export interface SystemQuickGenerateResult {
   compute?: CharacterComputeResult | null;
 }
 
+/**
+ * 广播完整待确认状态，供所有客户端幂等覆盖本地确认条。
+ */
+export interface TimeAdvancePendingPayload {
+  proposalId: string;
+  proposalVersion: number;
+  sourceRevision: string;
+  targetPointId: string;
+  targetDayIndex: number;
+  targetHourOfDay: number;
+  requesterPlayerId: string;
+  requiredPlayerIds: string[];
+  acceptedPlayerIds: string[];
+  expiresAt: string;
+}
+
+/**
+ * 广播提案终态；批准时附带已经提交的权威世界时间。
+ */
+export interface TimeAdvanceResolvedPayload {
+  proposalId: string;
+  status: "approved" | "rejected" | "expired" | "stale";
+  targetDayIndex: number;
+  targetHourOfDay: number;
+  committedRevision?: string | null;
+}
+
+/**
+ * 玩家对一个冻结的共享时间推进提案作出同意或拒绝。
+ */
+export interface TimeAdvanceRespondPayload {
+  proposalId: string;
+  proposalVersion: number;
+  sourceRevision: string;
+  accept: boolean;
+}
+
 export interface ToolCompletedPayload {
   correlationId: string;
   toolName: string;

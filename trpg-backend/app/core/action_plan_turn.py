@@ -18,6 +18,7 @@ from collaboration_framework.contracts import (
     ActionPlanStep,
     ActionTarget,
     AdjudicationExecution,
+    AdvanceWorldTimeEffect,
     CancelActionPlanRequest,
     CancelCheckChoice,
     CheckDecisionRequest,
@@ -125,7 +126,7 @@ class ActionPlanTurnResult:
 
     @property
     def waiting_for_player(self) -> bool:
-        return self.status == "waiting_for_player"
+        return self.status in {"waiting_for_player", "awaiting_time_consent"}
 
 
 @dataclass(frozen=True)
@@ -139,6 +140,33 @@ class DeterministicHostTurnDecisionModel:
 
     async def generate(self, context: HostAgentContext) -> HostTurnDecision:
         utterance = context.player_input.utterance
+        time = context.keeper_capabilities.time if context.keeper_capabilities else None
+        if (
+            "下一个时间点" in utterance
+            and any(word in utterance for word in ("等", "等待", "休息"))
+            and time is not None
+            and time.blocked_reason is None
+            and time.next_point_id is not None
+        ):
+            # 离线 Fake 只认这一条无歧义表达，供本地与 E2E 稳定覆盖时间推进。
+            # “等到晚上”等需要跨越几个点的语义仍交给真实模型判断。
+            return SingleActionDecision(
+                adjudication=ActionAdjudication(
+                    request_id="application-owned",
+                    source_revision=context.player_view.revision,
+                    actor_id=context.player_input.actor_id,
+                    summary=utterance,
+                    target=ActionTarget(
+                        kind="location",
+                        id=context.player_view.scene.id,
+                    ),
+                    method=ActionMethod(family="wait", description=utterance),
+                    check=NoAdjudicationCheck(),
+                    success_effects=(
+                        AdvanceWorldTimeEffect(to_point_id=time.next_point_id),
+                    ),
+                )
+            )
         separators = ("然后", "接着", "随后", "再去", "，再", ";", "；")
         pieces = [utterance]
         for separator in separators:
@@ -767,8 +795,10 @@ class ActionPlanTurnApplication:
         if result.execution.status in {
             "awaiting_skill_choice",
             "awaiting_post_roll_decision",
+            "awaiting_time_consent",
         }:
-            await _emit_phase(on_phase, "waiting_for_check")
+            if result.execution.status != "awaiting_time_consent":
+                await _emit_phase(on_phase, "waiting_for_check")
         else:
             await _emit_phase(on_phase, "refreshing_player_view")
             await _emit_phase(on_phase, "generating_narration")
@@ -804,8 +834,9 @@ class ActionPlanTurnApplication:
         on_phase: TurnPhaseObserver | None,
         verify_fingerprint: bool = True,
     ) -> ActionPlanTurnResult:
-        if result.run.status == "waiting_for_player":
-            await _emit_phase(on_phase, "waiting_for_check")
+        if result.run.status in {"waiting_for_player", "awaiting_time_consent"}:
+            if result.run.status == "waiting_for_player":
+                await _emit_phase(on_phase, "waiting_for_check")
         elif result.run.status in {
             "awaiting_narration",
             "completed",
@@ -948,8 +979,10 @@ class ActionPlanTurnApplication:
         if recovery.execution.status in {
             "awaiting_skill_choice",
             "awaiting_post_roll_decision",
+            "awaiting_time_consent",
         }:
-            await _emit_phase(on_phase, "waiting_for_check")
+            if recovery.execution.status != "awaiting_time_consent":
+                await _emit_phase(on_phase, "waiting_for_check")
         else:
             await _emit_phase(on_phase, "refreshing_player_view")
             await _emit_phase(on_phase, "generating_narration")
@@ -1174,6 +1207,14 @@ class ActionPlanTurnApplication:
                 execution=result.latest_execution,
                 plan_id=run.plan_id,
             )
+        if run.status == "awaiting_time_consent":
+            return ActionPlanTurnResult(
+                player_input=player_input,
+                player_view=result.player_view,
+                status=run.status,
+                execution=result.latest_execution,
+                plan_id=run.plan_id,
+            )
         if run.status == "retryable_failure":
             raise TurnExecutionError(
                 run.steps[run.current_step_index].safe_failure_code or "PLAN_RETRYABLE_FAILURE",
@@ -1213,11 +1254,19 @@ class ActionPlanTurnApplication:
         result: SingleActionTurnResult,
     ) -> ActionPlanTurnResult:
         execution = result.execution
-        if execution.status in {"awaiting_skill_choice", "awaiting_post_roll_decision"}:
+        if execution.status in {
+            "awaiting_skill_choice",
+            "awaiting_post_roll_decision",
+            "awaiting_time_consent",
+        }:
             return ActionPlanTurnResult(
                 player_input=player_input,
                 player_view=result.player_view,
-                status="waiting_for_player",
+                status=(
+                    "awaiting_time_consent"
+                    if execution.status == "awaiting_time_consent"
+                    else "waiting_for_player"
+                ),
                 execution=execution,
             )
         if execution.outcome == "success":
@@ -1548,6 +1597,7 @@ def build_action_plan_turn_application(
     settings=None,
     client=None,
     recent_history_source: RecentHistorySource | None = None,
+    time_consent_session_factory=None,
 ) -> ActionPlanTurnApplication:
     """Compose the finite-plan path without changing the single-intent Engine."""
 
@@ -1611,10 +1661,18 @@ def build_action_plan_turn_application(
         max_chars=resolved.recent_history_max_chars,
     )
     history_source = recent_history_source or _EmptyRecentHistorySource()
+    consent_aware_engine = adjudication_engine
+    if time_consent_session_factory is not None:
+        from app.service.time_advance import ConsentAwareAdjudicationEngine
+
+        consent_aware_engine = ConsentAwareAdjudicationEngine(
+            adjudication_engine,
+            time_consent_session_factory,
+        )
     orchestrator = ActionPlanOrchestrator(
         store=plan_store,
         adjudicator=adjudicator,
-        executor=adjudication_engine,
+        executor=consent_aware_engine,
         player_view_projector=projector,
         policy=policy,
         on_step_failure=_log_step_adjudication_failure,
@@ -1624,7 +1682,7 @@ def build_action_plan_turn_application(
     return ActionPlanTurnApplication(
         store=store,
         engine=engine,
-        adjudication_engine=adjudication_engine,
+        adjudication_engine=consent_aware_engine,
         planner=planner,
         orchestrator=orchestrator,
         narrator=ActionPlanNarrator(narration_model),
@@ -2224,6 +2282,7 @@ def _production_application() -> ActionPlanTurnApplication:
         adjudication_engine=adjudication_engine_service,
         plan_store=action_plan_store,
         recent_history_source=SqlAlchemyRecentHistorySource(async_session_factory),
+        time_consent_session_factory=async_session_factory,
     )
 
 

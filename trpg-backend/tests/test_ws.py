@@ -7,9 +7,11 @@ from collaboration_framework.contracts import (
     ActionAdjudication,
     ActionMethod,
     ActionTarget,
+    AdvanceWorldTimeEffect,
     ContractError,
     JsonObject,
     NarrativeOnlyEffect,
+    NoAdjudicationCheck,
     RequiredAdjudicationCheck,
     SingleActionDecision,
     SkillCheckCandidate,
@@ -117,6 +119,24 @@ class _WsSingleActionCheckPlanner:
                     )
                 ),
                 success_effects=(NarrativeOnlyEffect(),),
+            )
+        )
+
+
+class _WsAdvanceTimePlanner:
+    """生成确定性的单步时间裁决，避免 WebSocket 集成测试依赖模型输出。"""
+
+    async def generate(self, context) -> SingleActionDecision:
+        return SingleActionDecision(
+            adjudication=ActionAdjudication(
+                request_id="application-owned",
+                source_revision=context.player_view.revision,
+                actor_id=context.player_input.actor_id,
+                summary="全队等待到下一个时间点",
+                target=ActionTarget(kind="world", id="coc-7e"),
+                method=ActionMethod(family="wait", description="共同等待"),
+                check=NoAdjudicationCheck(),
+                success_effects=(AdvanceWorldTimeEffect(),),
             )
         )
 
@@ -1151,6 +1171,123 @@ def test_action_plan_submit_emits_safe_progress_and_one_parent_completion(
     ]
     assert len(persisted_actions) == 1
     assert persisted_actions[0]["payload"]["utterance"] == "先观察房间，然后询问眼前的人"
+
+
+def test_multiplayer_time_advance_waits_for_all_players_and_resumes_narration(
+    sync_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """双连接覆盖 pending/respond/resolved，并验证最后一票恢复原行动叙事。"""
+
+    host_token = register_and_login(sync_client, "time_consent_host_349")
+    room = create_room(sync_client, host_token, max_players=2)
+    guest = join_as(sync_client, room["roomCode"], "time_consent_guest_349")
+    advance_to_building(sync_client, room)
+    complete_character(sync_client, room["roomId"], room["reconnectToken"], "陈探员")
+    complete_character(sync_client, room["roomId"], guest["reconnectToken"], "林记者")
+    start_game(sync_client, room, host_token)
+    narration_model = _WsCountingActionPlanNarration()
+    monkeypatch.setattr(
+        ws_controller.action_plan_turn_application,
+        "_planner",
+        _WsAdvanceTimePlanner(),
+    )
+    monkeypatch.setattr(
+        ws_controller.action_plan_turn_application,
+        "_narrator",
+        ActionPlanNarrator(narration_model),
+    )
+
+    action_id = "time-consent-ws-349"
+    with (
+        sync_client.websocket_connect(f"/ws/{room['roomId']}?token={host_token}") as host_ws,
+        sync_client.websocket_connect(
+            f"/ws/{room['roomId']}?token={guest['authToken']}"
+        ) as guest_ws,
+    ):
+        host_ws.send_json(
+            {
+                "type": "room.join",
+                "playerId": room["playerId"],
+                "payload": {"reconnectToken": room["reconnectToken"]},
+            }
+        )
+        host_ws.receive_json()  # session.bound
+        initial_view = host_ws.receive_json()
+        receive_replayed_opening(host_ws)
+        guest_ws.send_json(
+            {
+                "type": "room.join",
+                "playerId": guest["playerId"],
+                "payload": {"reconnectToken": guest["reconnectToken"]},
+            }
+        )
+        guest_ws.receive_json()  # session.bound
+        guest_ws.receive_json()  # current view.updated
+        receive_replayed_opening(guest_ws)
+
+        host_ws.send_json(
+            {
+                "type": "action.plan.submit",
+                "playerId": room["playerId"],
+                "payload": {
+                    "clientActionId": action_id,
+                    "utterance": "大家在这里等一会儿",
+                },
+            }
+        )
+        host_pending, host_progress = receive_until(
+            host_ws,
+            lambda message: message.get("type") == "time.advance.pending",
+            limit=40,
+        )
+        guest_pending, _ = receive_until(
+            guest_ws,
+            lambda message: message.get("type") == "time.advance.pending",
+        )
+        assert guest_pending == host_pending
+        assert host_pending["payload"]["acceptedPlayerIds"] == [room["playerId"]]
+        assert set(host_pending["payload"]["requiredPlayerIds"]) == {
+            room["playerId"],
+            guest["playerId"],
+        }
+        assert all(message.get("message_type") != "turn.completed" for message in host_progress)
+
+        guest_ws.send_json(
+            {
+                "type": "time.advance.respond",
+                "playerId": guest["playerId"],
+                "payload": {
+                    "proposalId": host_pending["payload"]["proposalId"],
+                    "proposalVersion": host_pending["payload"]["proposalVersion"],
+                    "sourceRevision": host_pending["payload"]["sourceRevision"],
+                    "accept": True,
+                },
+            }
+        )
+        guest_resolved, _ = receive_until(
+            guest_ws,
+            lambda message: message.get("type") == "time.advance.resolved",
+        )
+        host_completed, host_completion_events = receive_until(
+            host_ws,
+            lambda message: message.get("message_type") == "turn.completed",
+            limit=40,
+        )
+
+    host_resolved = next(
+        message
+        for message in host_completion_events
+        if message.get("type") == "time.advance.resolved"
+    )
+    assert guest_resolved["payload"]["status"] == "approved"
+    assert host_resolved == guest_resolved
+    assert host_completed["correlation_id"] == action_id
+    assert (
+        host_completed["payload"]["player_view"]["revision"]
+        != initial_view["payload"]["playerView"]["revision"]
+    )
+    assert narration_model.calls == 1
 
 
 def test_single_action_pending_resumes_without_plan_run(

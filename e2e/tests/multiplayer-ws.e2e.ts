@@ -222,6 +222,105 @@ test('WS 生命周期：开局后重连会重放同一条权威开场', async ()
   }
 })
 
+test('多人推进时间需全员确认，最后一票只提交一次并恢复原行动', async () => {
+  const room = await createRoomWithModule('time-consent', 2)
+  const guest = await registerPlayer('time-consent-guest')
+  const joined = await guest.sdk.rooms.join(
+    room.roomCode,
+    { nickname: '访客' },
+    guest.token,
+  )
+  await room.host.sdk.rooms.startStory(room.roomId, room.reconnectToken)
+  await buildCharacter(room.host.sdk, room.roomId, room.reconnectToken, '房主调查员')
+  await buildCharacter(guest.sdk, room.roomId, joined.reconnectToken, '访客调查员')
+
+  const hostSocket = room.host.sdk.roomSocket.connect(room.roomId, room.host.token)
+  try {
+    await room.host.sdk.roomSocket.waitForOpen(hostSocket)
+    const hostBound = waitForEvent(room.host.sdk, (event) => event.type === 'session.bound')
+    room.host.sdk.roomSocket.joinRoom(room.hostPlayerId, {
+      reconnectToken: room.reconnectToken,
+    })
+    await hostBound
+
+    const guestSocket = guest.sdk.roomSocket.connect(room.roomId, guest.token)
+    await guest.sdk.roomSocket.waitForOpen(guestSocket)
+    const guestBound = waitForEvent(guest.sdk, (event) => event.type === 'session.bound')
+    guest.sdk.roomSocket.joinRoom(joined.playerId, {
+      reconnectToken: joined.reconnectToken,
+    })
+    await guestBound
+
+    const openingForHost = waitForEvent(
+      room.host.sdk,
+      (event) => event.type === 'narration.push' && event.payload.messageId === 'game-opening',
+    )
+    const openingForGuest = waitForEvent(
+      guest.sdk,
+      (event) => event.type === 'narration.push' && event.payload.messageId === 'game-opening',
+    )
+    room.host.sdk.roomSocket.startGame(room.hostPlayerId)
+    await Promise.all([openingForHost, openingForGuest])
+    const initialRevision = room.host.sdk.roomSocket.getPlayerView()?.revision
+    assert.ok(initialRevision)
+
+    const hostPendingPromise = waitForEvent(
+      room.host.sdk,
+      (event) => event.type === 'time.advance.pending',
+    )
+    const guestPendingPromise = waitForEvent(
+      guest.sdk,
+      (event) => event.type === 'time.advance.pending',
+    )
+    const actionId = `e2e-time-consent-${Date.now()}`
+    const completedPromise = room.host.sdk.roomSocket.submitPlannedAction(
+      room.hostPlayerId,
+      {
+        clientActionId: actionId,
+        utterance: '全队等待到下一个时间点',
+      },
+    )
+    const [hostPending, guestPending] = await Promise.all([
+      hostPendingPromise,
+      guestPendingPromise,
+    ])
+    assert.equal(hostPending.type, 'time.advance.pending')
+    assert.equal(guestPending.type, 'time.advance.pending')
+    assert.deepEqual(guestPending.payload, hostPending.payload)
+    assert.deepEqual(hostPending.payload.acceptedPlayerIds, [room.hostPlayerId])
+
+    const hostResolvedPromise = waitForEvent(
+      room.host.sdk,
+      (event) => event.type === 'time.advance.resolved',
+    )
+    const guestResolvedPromise = waitForEvent(
+      guest.sdk,
+      (event) => event.type === 'time.advance.resolved',
+    )
+    guest.sdk.roomSocket.respondToTimeAdvance(joined.playerId, {
+      proposalId: hostPending.payload.proposalId,
+      proposalVersion: hostPending.payload.proposalVersion,
+      sourceRevision: hostPending.payload.sourceRevision,
+      accept: true,
+    })
+    const [hostResolved, guestResolved, completed] = await Promise.all([
+      hostResolvedPromise,
+      guestResolvedPromise,
+      completedPromise,
+    ])
+
+    assert.equal(hostResolved.type, 'time.advance.resolved')
+    assert.equal(guestResolved.type, 'time.advance.resolved')
+    assert.equal(hostResolved.payload.status, 'approved')
+    assert.deepEqual(guestResolved.payload, hostResolved.payload)
+    assert.equal(completed.player_id, room.hostPlayerId)
+    assert.notEqual(completed.player_view.revision, initialRevision)
+  } finally {
+    room.host.sdk.roomSocket.disconnect()
+    guest.sdk.roomSocket.disconnect()
+  }
+})
+
 test('提交行动会广播给房间里的所有人（不只是发起者）', async () => {
   const room = await createRoomWithModule('broadcast', 2)
   const guest = await registerPlayer('bcguest')

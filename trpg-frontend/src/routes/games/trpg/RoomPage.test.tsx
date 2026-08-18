@@ -107,6 +107,7 @@ const {
   mockSelectAdjudication,
   mockDecidePostRoll,
   mockCancelActionPlan,
+  mockRespondToTimeAdvance,
   mockWaitForWsOpen,
   mockCreateEndingDraft,
   mockConfirmEndingDraft,
@@ -143,6 +144,7 @@ const {
     mockSelectAdjudication: vi.fn(),
     mockDecidePostRoll: vi.fn(),
     mockCancelActionPlan: vi.fn(),
+    mockRespondToTimeAdvance: vi.fn(),
     mockWaitForWsOpen: vi.fn(() => Promise.resolve()),
     mockCreateEndingDraft: vi.fn(),
     mockConfirmEndingDraft: vi.fn(),
@@ -175,6 +177,7 @@ vi.mock('@/services/api-client', () => ({
       selectAdjudication: mockSelectAdjudication,
       decidePostRoll: mockDecidePostRoll,
       cancelActionPlan: mockCancelActionPlan,
+      respondToTimeAdvance: mockRespondToTimeAdvance,
     },
   },
 }))
@@ -519,6 +522,51 @@ describe('RoomPage conversation history', () => {
       expect(
         screen.queryByText('仅用于确认视图不会生成开场的场景描述'),
       ).not.toBeInTheDocument()
+    })
+  })
+
+  it('显示固定高度的全员时间确认条并发送当前版本', async () => {
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    emitWsMessage({
+      type: 'time.advance.pending',
+      payload: {
+        proposalId: 'time-349',
+        proposalVersion: 3,
+        sourceRevision: '8',
+        targetPointId: 'hour_20',
+        targetDayIndex: 2,
+        targetHourOfDay: 20,
+        requesterPlayerId: 'player-2',
+        requiredPlayerIds: ['player-1', 'player-2'],
+        acceptedPlayerIds: ['player-2'],
+        expiresAt: '2026-08-18T20:05:00Z',
+      },
+    })
+
+    expect(await screen.findByText('第 3 天 20:00')).toBeInTheDocument()
+    expect(screen.getByText('1/2 人已确认')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '同意' }))
+    expect(mockRespondToTimeAdvance).toHaveBeenCalledWith('player-1', {
+      proposalId: 'time-349',
+      proposalVersion: 3,
+      sourceRevision: '8',
+      accept: true,
+    })
+
+    emitWsMessage({
+      type: 'time.advance.resolved',
+      payload: {
+        proposalId: 'time-349',
+        status: 'approved',
+        targetDayIndex: 2,
+        targetHourOfDay: 20,
+        committedRevision: '9',
+      },
+    })
+    await waitFor(() => {
+      expect(screen.queryByText('第 3 天 20:00')).not.toBeInTheDocument()
     })
   })
 

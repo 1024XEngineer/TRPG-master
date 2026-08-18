@@ -15,6 +15,7 @@ from datetime import UTC, datetime
 from sqlalchemy import (
     JSON,
     BigInteger,
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -95,6 +96,71 @@ class GameSession(Base):
     agenda_state_version: Mapped[int] = mapped_column(
         BigInteger, nullable=False, default=0, server_default="0"
     )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+
+class TimeAdvanceProposalRecord(Base):
+    """多人房间推进共享世界时间时使用的持久化全员确认提案。"""
+
+    __tablename__ = "time_advance_proposals"
+    __table_args__ = (
+        PrimaryKeyConstraint("room_id", "proposal_id", name="pk_time_advance_proposals"),
+        UniqueConstraint(
+            "room_id",
+            "source_revision",
+            name="uq_time_advance_room_revision",
+        ),
+        CheckConstraint("proposal_version >= 1", name="ck_time_advance_proposal_version"),
+        CheckConstraint(
+            "status IN ('pending', 'approved', 'rejected', 'expired', 'stale')",
+            name="ck_time_advance_proposal_status",
+        ),
+        Index(
+            "ix_time_advance_proposals_room_status",
+            "room_id",
+            "status",
+            "updated_at",
+        ),
+    )
+
+    room_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("game_sessions.room_id"), nullable=False
+    )
+    proposal_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    source_revision: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    proposal_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    player_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    action_request_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    # 单动作直接等于 action_request_id；ActionPlan 在返回等待态时会绑定到
+    # 父行动 ID，最终确认后据此恢复整条原计划，而不是把步骤 ID 当作计划 ID。
+    parent_action_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    requester_player_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    target_point_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    target_day_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    target_hour_of_day: Mapped[int] = mapped_column(Integer, nullable=False)
+    required_player_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    accepted_player_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    # 冻结 Agent 已产生的原裁决与应用层等待状态，不在最后一票时重新
+    # 调用模型。两者均由强类型 Contract 序列化，读取时必须再校验。
+    adjudication_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    execution_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    committed_revision: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    narration_persisted: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="0",
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
     )
@@ -352,6 +418,7 @@ class ActionPlanRunRecord(Base):
         ),
         CheckConstraint(
             "status IN ('active', 'checkpointed', 'waiting_for_player', "
+            "'awaiting_time_consent', "
             "'needs_clarification', 'retryable_failure', 'awaiting_narration', "
             "'completed', 'cancelled', 'stopped')",
             name="ck_action_plan_runs_status",

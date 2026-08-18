@@ -16,6 +16,8 @@ import type {
   HostSpeechSettingsUpdatedPayload,
   MyRoomSummary as GeneratedMyRoomSummary,
   PlanProgressPayload,
+  TimeAdvancePendingPayload,
+  TimeAdvanceResolvedPayload,
 } from './generated/dto';
 
 export type {
@@ -83,6 +85,9 @@ export type {
   NarrationChunkPayload,
   OpeningStartedPayload,
   PlanProgressPayload,
+  TimeAdvanceRespondPayload,
+  TimeAdvancePendingPayload,
+  TimeAdvanceResolvedPayload,
   // WebSocket 新增 14 个事件（issue #77）
   CheckRollPayload,
   SanCheckRollPayload,
@@ -195,6 +200,8 @@ export type ServerToClientEvent =
   | { type: 'plan.stopped'; payload: PlanProgressPayload }
   | { type: 'plan.completed'; payload: PlanProgressPayload }
   | { type: 'adjudication.pending'; payload: AdjudicationPendingPayload }
+  | { type: 'time.advance.pending'; payload: TimeAdvancePendingPayload }
+  | { type: 'time.advance.resolved'; payload: TimeAdvanceResolvedPayload }
   | { type: 'view.updated'; payload: ViewUpdatedPayload }
   | { type: 'room.state'; payload: RoomStatePayload }
   | { type: 'player.joined'; payload: PlayerJoinedPayload }

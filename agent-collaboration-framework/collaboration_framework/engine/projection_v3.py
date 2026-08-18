@@ -23,6 +23,8 @@ from collaboration_framework.contracts import (
     AgentMatchTriggerSpec,
     ContractError,
     EntitySpecV3,
+    InventoryItemView,
+    ItemInstance,
     KeeperCapabilityView,
     KeeperEndingCapability,
     KeeperEntityCapability,
@@ -31,8 +33,6 @@ from collaboration_framework.contracts import (
     KeeperRuleCandidate,
     KeeperRuleOption,
     KeeperTimeCapability,
-    InventoryItemView,
-    ItemInstance,
     LocationKnowledge,
     LocationSpecV3,
     ModuleContentV3,
@@ -57,8 +57,8 @@ from collaboration_framework.contracts import (
 from .models import EngineRuntimeSnapshot, GameState
 from .navigation import effective_location_knowledge, runtime_location_edges
 from .persistent_results import PUBLIC_STATE_KEYS
-from .timeline import next_point_after, ordered_points, time_advance_block_reason
 from .rules_v3 import agent_match_scope_admits, evaluate_condition, pending_check_for
+from .timeline import next_point_after, ordered_points, time_advance_block_reason
 
 # Visibility levels an authored node may carry, ordered from most to least open.
 _PLAYER_VISIBLE = {"public", "party"}
@@ -840,6 +840,10 @@ def _time_capability(
     state: GameState,
 ) -> KeeperTimeCapability:
     blocked = time_advance_block_reason(tuple(state.actors))
+    if blocked is not None and blocked.startswith("time_advance_requires_party_ready"):
+        # 多人确认已由应用层持久化协调；Agent 仍应当产生标准
+        # advance_world_time 效果，再由裁决边界暂停并发起全员确认。
+        blocked = None
     try:
         next_point, _ = next_point_after(module, state.world_time)
         next_point_id = next_point.id

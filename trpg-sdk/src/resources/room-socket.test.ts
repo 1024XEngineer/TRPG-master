@@ -246,6 +246,52 @@ test('isValidServerEvent：拒绝 payload 字段缺失或类型不对', () => {
   );
 });
 
+test('isValidServerEvent：校验共享时间提案与终态', () => {
+  assert.equal(
+    isValidServerEvent({
+      type: 'time.advance.pending',
+      payload: {
+        proposalId: 'time-349',
+        proposalVersion: 2,
+        sourceRevision: '8',
+        targetPointId: 'hour_20',
+        targetDayIndex: 1,
+        targetHourOfDay: 20,
+        requesterPlayerId: 'player-1',
+        requiredPlayerIds: ['player-1', 'player-2'],
+        acceptedPlayerIds: ['player-1'],
+        expiresAt: '2026-08-18T12:00:00Z',
+      },
+    }),
+    true
+  );
+  assert.equal(
+    isValidServerEvent({
+      type: 'time.advance.pending',
+      payload: {
+        proposalId: 'time-349',
+        proposalVersion: '2',
+        requiredPlayerIds: [],
+        acceptedPlayerIds: [],
+      },
+    }),
+    false
+  );
+  assert.equal(
+    isValidServerEvent({
+      type: 'time.advance.resolved',
+      payload: {
+        proposalId: 'time-349',
+        status: 'approved',
+        targetDayIndex: 1,
+        targetHourOfDay: 20,
+        committedRevision: '9',
+      },
+    }),
+    true
+  );
+});
+
 test('isValidTurnCompleted：接受 Agent v1 回合结果', () => {
   assert.equal(isValidTurnCompleted(completedEvent), true);
 });

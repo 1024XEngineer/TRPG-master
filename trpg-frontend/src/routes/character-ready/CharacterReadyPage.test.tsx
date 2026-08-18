@@ -6,6 +6,8 @@ import { usePortraitGenerationStore } from '@/stores/portrait-generation-store'
 
 const mocks = vi.hoisted(() => ({
   navigate: vi.fn(),
+  deleteCharacterTemplate: vi.fn(),
+  createCharacterTemplate: vi.fn(),
   room: {
     roomId: 'room-1',
     roomCode: 'ABC123',
@@ -65,6 +67,11 @@ vi.mock('@/hooks/useRuleset', () => ({
   }),
 }))
 vi.mock('@/services/character/character-api', () => ({ fetchCharacter: vi.fn() }))
+vi.mock('@/services/character/template-api', () => ({
+  createCharacterTemplate: mocks.createCharacterTemplate,
+  deleteCharacterTemplate: mocks.deleteCharacterTemplate,
+  templateDataFromBuilt: vi.fn((value: unknown) => value),
+}))
 vi.mock('@/services/api-client', () => ({
   connectWebSocket: vi.fn(),
   disconnectWebSocket: vi.fn(),
@@ -81,6 +88,8 @@ describe('CharacterReadyPage', () => {
     mocks.room.roomId = 'room-1'
     mocks.room.characterId = null
     vi.mocked(fetchCharacter).mockReset()
+    mocks.deleteCharacterTemplate.mockReset()
+    mocks.createCharacterTemplate.mockReset()
     usePortraitGenerationStore.setState({ tasks: {}, cancelling: {}, notices: [], portraitVersions: {} })
   })
   afterEach(cleanup)
@@ -116,6 +125,37 @@ describe('CharacterReadyPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '编辑' }))
     expect(mocks.navigate).toHaveBeenCalledWith('/room/character', { state: { fromCharacterReady: true } })
+  })
+
+  it('从卡库播种的房间角色不会在准备页删除源卡', async () => {
+    mocks.room.characterId = 'character-1'
+    vi.mocked(fetchCharacter).mockResolvedValue({
+      id: 'character-1',
+      status: 'Completed',
+      generationMethod: 'manual',
+      name: '林默',
+      age: 28,
+      gender: '男',
+      residence: '阿卡姆',
+      birthplace: '波士顿',
+      occupation: '会计师',
+      attributes: { STR: 55 },
+      skills: { accounting: 65 },
+      occupationChoiceSkillIds: [],
+      equipment: [],
+      background: '',
+      notes: '',
+      derivedStats: { hp: 10, san: 50, mp: 10 },
+      basedOnTemplateId: 'template-1',
+    } as Awaited<ReturnType<typeof fetchCharacter>>)
+    render(<CharacterReadyPage />)
+
+    const libraryStatus = await screen.findByRole('button', {
+      name: '这张调查员已在我的角色卡库',
+    })
+    expect(libraryStatus).toBeDisabled()
+    fireEvent.click(libraryStatus)
+    expect(mocks.deleteCharacterTemplate).not.toHaveBeenCalled()
   })
 
   it('切换到没有角色的房间时不会保留上一房间的远程角色', async () => {

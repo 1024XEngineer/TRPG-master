@@ -155,6 +155,19 @@ export default function CharacterReadyPage() {
   // 不被允许声称 roll（会被压成 pointbuy），内容必然不同，永远判不出"存过"——
   // 实测就是这样多出一张重复卡的。出处才是可靠判据。
   const alreadyInLibrary = savedTemplateId ?? basedOnTemplateId
+  // 从卡库播种的房间卡只是源卡的一份拷贝，准备页只能显示“已存卡”状态，不能把
+  // 源卡当成当前页面可撤销的新保存记录。只有本页刚创建的 savedTemplateId 可撤销。
+  const librarySourceIsReadOnly = savedTemplateId === null && basedOnTemplateId !== null
+  const libraryButtonLabel = librarySourceIsReadOnly
+    ? '这张调查员已在我的角色卡库'
+    : alreadyInLibrary
+      ? '已存进我的角色卡库，点击撤销'
+      : '把这张调查员存进我的角色卡库'
+  const libraryButtonTitle = librarySourceIsReadOnly
+    ? '这张房间角色来自我的角色卡库，源卡会一直保留'
+    : alreadyInLibrary
+      ? '已存进卡库，点击把刚存的这张删掉'
+      : '存进我的角色卡库，下次开局可以直接选'
   const roomCode = useRoomStore((s) => s.roomCode)
   const isHost = useRoomStore((s) => s.isHost)
   const playerId = useRoomStore((s) => s.playerId)
@@ -226,14 +239,14 @@ export default function CharacterReadyPage() {
   }
 
   const handleToggleLibrary = async () => {
-    if (!character || savingToLibrary) return
+    if (!character || savingToLibrary || librarySourceIsReadOnly) return
     setSavingToLibrary(true)
     setLibraryError('')
     // 已经存过就是撤销：删掉刚才那一条。存卡每次新建一条记录，所以撤销只需要
     // 删掉这次建的，不会碰到玩家卡库里别的卡。
-    if (alreadyInLibrary) {
+    if (savedTemplateId) {
       try {
-        await deleteCharacterTemplate(alreadyInLibrary)
+        await deleteCharacterTemplate(savedTemplateId)
         setSavedTemplateId(null)
         setLibraryError('')
       } catch (err) {
@@ -388,18 +401,10 @@ export default function CharacterReadyPage() {
                           <button
                             type="button"
                             onClick={handleToggleLibrary}
-                            disabled={savingToLibrary}
+                            disabled={savingToLibrary || librarySourceIsReadOnly}
                             aria-pressed={alreadyInLibrary !== null}
-                            aria-label={
-                              alreadyInLibrary
-                                ? '已存进我的角色卡库，点击撤销'
-                                : '把这张调查员存进我的角色卡库'
-                            }
-                            title={
-                              alreadyInLibrary
-                                ? '已存进卡库，点击把刚存的这张删掉'
-                                : '存进我的角色卡库，下次开局可以直接选'
-                            }
+                            aria-label={libraryButtonLabel}
+                            title={libraryButtonTitle}
                           >
                             {alreadyInLibrary ? <BookmarkCheck /> : <BookmarkPlus />}
                             <span>

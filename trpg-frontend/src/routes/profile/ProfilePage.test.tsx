@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { fetchMe, logout, updateProfile } from '@/services/auth'
 import { useAuthStore } from '@/stores/auth-store'
-import ProfilePage, { archiveNumber } from './ProfilePage'
+import { archiveNumber } from '@/utils/archive-number'
+import ProfilePage from './ProfilePage'
 
 const storeMocks = vi.hoisted(() => ({
   resetRoom: vi.fn(),
@@ -100,8 +101,7 @@ describe('ProfilePage', () => {
     expect(screen.getByLabelText('账号')).toHaveValue('')
     expect(screen.getByLabelText('账号')).toHaveAttribute('placeholder', '暂无账号信息')
   })
-
-  it('saves a changed nickname and updates the global identity', async () => {
+    it('saves a changed nickname and updates the global identity', async () => {
     vi.mocked(updateProfile).mockResolvedValue({
       userId: 'user-1',
       account: 'detective@example.com',

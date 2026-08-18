@@ -1555,6 +1555,586 @@
   user-select: none;
 }
 
+/* My games: investigator's recent case ledger --------------------------- */
+.my-games-scene {
+  position: relative;
+  isolation: isolate;
+  width: 100%;
+  min-height: 100%;
+  overflow: hidden;
+  color: #d8b477;
+  background: #171009;
+  font-family: Georgia, 'STKaiti', 'KaiTi', 'Songti SC', 'STSong', serif;
+}
+
+/* Keep the last visible row clear of the phone frame while the long page scrolls. */
+.my-games-viewport-bottom-gap {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 30;
+  height: max(1.25rem, env(safe-area-inset-bottom));
+  border: 0;
+  background: linear-gradient(
+    180deg,
+    rgb(33 21 13 / 0%),
+    rgb(33 21 13 / 84%) 38%,
+    rgb(33 21 13 / 98%)
+  );
+  pointer-events: none;
+}
+
+.my-games-scene__artboard {
+  position: relative;
+  isolation: isolate;
+  container-type: inline-size;
+  width: 100%;
+  min-height: 216.18cqw;
+  overflow: hidden;
+  background: #21150d url('/assets/rooms/my-games/wood-repeat.jpg') center top / 100% auto repeat-y;
+}
+
+.my-games-scene__background {
+  position: absolute;
+  inset: 0 auto auto 0;
+  z-index: -2;
+  display: block;
+  width: 100%;
+  height: auto;
+  pointer-events: none;
+  user-select: none;
+}
+
+.my-games-scene__artboard::after {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(90deg, rgb(9 5 3 / 24%), transparent 20%, transparent 80%, rgb(9 5 3 / 26%));
+  content: '';
+  pointer-events: none;
+}
+
+.my-games-scene__back {
+  position: absolute;
+  top: max(4.3cqw, env(safe-area-inset-top));
+  left: 5.5cqw;
+  z-index: 7;
+  display: grid;
+  width: 10.5cqw;
+  min-width: 2.7rem;
+  aspect-ratio: 1;
+  place-items: center;
+  padding: 0;
+  border: 0.34cqw solid #c79755;
+  border-radius: 50%;
+  color: #e0bb7b;
+  background: rgb(35 21 12 / 82%);
+  box-shadow: inset 0 0 0 0.2cqw rgb(99 59 27 / 70%), 0 0.7cqw 1.5cqw rgb(0 0 0 / 48%);
+  cursor: pointer;
+}
+
+.my-games-scene__back svg {
+  width: 5.5cqw;
+  height: 5.5cqw;
+  stroke-width: 2.6;
+}
+
+.my-games-scene__header {
+  position: absolute;
+  top: max(6.2cqw, env(safe-area-inset-top));
+  left: 19.5cqw;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 2.1cqw;
+  color: #ddb576;
+  text-shadow: 0 0.45cqw 0.45cqw #090503, 0 0 1.2cqw rgb(191 126 57 / 24%);
+}
+
+.my-games-scene__header h1 {
+  font-size: clamp(1.55rem, 8.4cqw, 2.15rem);
+  font-weight: 650;
+  line-height: 1;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+.my-games-scene__header > svg {
+  width: 4.3cqw;
+  height: 4.3cqw;
+  fill: currentColor;
+  stroke-width: 1.5;
+}
+
+.my-games-scene__header > svg:last-child {
+  width: 3.5cqw;
+  height: 3.5cqw;
+  transform: rotate(22deg);
+}
+
+.my-games-scene__case-note {
+  position: absolute;
+  top: -2.4cqw;
+  right: -5.5cqw;
+  z-index: 2;
+  display: block;
+  width: 37.5cqw;
+  height: auto;
+  filter: drop-shadow(0 1cqw 1.3cqw rgb(0 0 0 / 52%));
+  pointer-events: none;
+  user-select: none;
+}
+
+.my-games-scene__identity {
+  position: absolute;
+  top: 21.5cqw;
+  right: 9.2cqw;
+  left: 9.2cqw;
+  z-index: 4;
+  display: grid;
+  grid-template-columns: 20.5cqw minmax(0, 1fr) 25cqw;
+  align-items: center;
+  gap: 3cqw;
+}
+
+.my-games-scene__identity > img {
+  display: block;
+  width: 20.5cqw;
+  height: 20.5cqw;
+  object-fit: cover;
+  object-position: center 40%;
+  filter: drop-shadow(0 0.7cqw 0.65cqw rgb(0 0 0 / 62%));
+}
+
+.my-games-scene__identity-copy {
+  min-width: 0;
+}
+
+.my-games-scene__identity-copy strong {
+  display: block;
+  overflow: hidden;
+  color: #dfbd83;
+  font-size: clamp(1.1rem, 6cqw, 1.65rem);
+  font-weight: 500;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  text-shadow: 0 0.35cqw 0.4cqw #090503;
+  white-space: nowrap;
+}
+
+.my-games-scene__identity-copy > span {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  margin-top: 2.4cqw;
+  overflow: hidden;
+  color: #bd925a;
+  font-size: clamp(0.62rem, 3.15cqw, 0.88rem);
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.my-games-scene__identity-copy > span svg {
+  width: 3.4cqw;
+  height: 3.4cqw;
+  margin-right: 1.2cqw;
+  fill: currentColor;
+  stroke-width: 1.2;
+}
+
+.my-games-scene__identity-copy b {
+  margin-left: 0.7cqw;
+  font-family: 'Times New Roman', Times, serif;
+  font-feature-settings: 'lnum' 1, 'tnum' 1;
+  font-variant-numeric: lining-nums tabular-nums;
+  font-weight: 500;
+}
+
+.my-games-scene__identity-actions {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2cqw;
+}
+
+.my-games-scene__profile,
+.my-games-scene__character-library {
+  display: flex;
+  width: 100%;
+  min-height: 8.8cqw;
+  align-items: center;
+  justify-content: center;
+  gap: 1.2cqw;
+  padding: 1.2cqw 1.6cqw;
+  border: 0.28cqw solid #a56d32;
+  border-radius: 999px;
+  color: #e0bd7e;
+  background: linear-gradient(180deg, rgb(67 40 23 / 90%), rgb(41 24 14 / 92%));
+  box-shadow: inset 0 0 0 0.18cqw rgb(226 164 87 / 12%), 0 0.55cqw 1cqw rgb(0 0 0 / 36%);
+  font-family: inherit;
+  font-size: clamp(0.68rem, 3.25cqw, 0.9rem);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.my-games-scene__profile svg:first-child,
+.my-games-scene__character-library svg:first-child {
+  width: 4.2cqw;
+  height: 4.2cqw;
+}
+
+.my-games-scene__profile svg:last-child,
+.my-games-scene__character-library svg:last-child {
+  width: 3.7cqw;
+  height: 3.7cqw;
+}
+
+.my-games-scene__character-library:disabled {
+  color: #b18a58;
+  border-color: #845b30;
+  background: linear-gradient(180deg, rgb(57 35 21 / 86%), rgb(38 23 14 / 90%));
+  cursor: not-allowed;
+  filter: saturate(0.72);
+  opacity: 0.86;
+}
+
+.my-games-scene__records {
+  position: relative;
+  z-index: 3;
+  width: 100%;
+  min-height: 216.18cqw;
+  padding: 47.5cqw 9cqw max(20cqw, calc(12cqw + env(safe-area-inset-bottom)));
+}
+
+.my-games-scene__section-title {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 2cqw;
+  margin-bottom: 3.2cqw;
+}
+
+.my-games-scene__section-title > span,
+.my-games-scene__end > span {
+  height: 0.25cqw;
+  background: linear-gradient(90deg, transparent, #805523 22%, #b67c39 70%, transparent);
+}
+
+.my-games-scene__section-title > span:last-child {
+  transform: scaleX(-1);
+}
+
+.my-games-scene__section-title > div {
+  display: flex;
+  min-height: 9.2cqw;
+  align-items: center;
+  gap: 1.7cqw;
+  padding: 0 4cqw;
+  border: 0.22cqw solid #70461f;
+  color: #d5ad72;
+  background: linear-gradient(180deg, rgb(75 43 23 / 94%), rgb(46 27 16 / 96%));
+  box-shadow: inset 0 0 0 0.25cqw rgb(151 94 39 / 28%), 0 0.65cqw 1.2cqw rgb(0 0 0 / 42%);
+  border-radius: 1.2cqw;
+}
+
+.my-games-scene__section-title h2 {
+  font-size: clamp(0.88rem, 4.7cqw, 1.22rem);
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.my-games-scene__section-title svg {
+  width: 3.3cqw;
+  height: 3.3cqw;
+  fill: currentColor;
+  stroke-width: 1.2;
+}
+
+.my-games-scene__list {
+  display: grid;
+  gap: 1.6cqw;
+}
+
+.my-games-scene__record {
+  display: grid;
+  min-height: 13.8cqw;
+  grid-template-columns: 12cqw minmax(0, 1fr) 19.5cqw;
+  align-items: center;
+  gap: 2.3cqw;
+  padding: 0.9cqw 2.1cqw 0.9cqw 1.2cqw;
+  border: 0.2cqw solid rgb(133 80 34 / 68%);
+  border-radius: 1.6cqw;
+  background: linear-gradient(100deg, rgb(45 28 17 / 88%), rgb(72 42 23 / 88%) 55%, rgb(48 29 18 / 92%));
+  box-shadow: inset 0 0 2cqw rgb(196 125 55 / 5%), 0 0.65cqw 1.35cqw rgb(0 0 0 / 36%);
+}
+
+.my-games-scene__thumbnail {
+  width: 12cqw;
+  aspect-ratio: 1;
+  overflow: hidden;
+  border: 0.32cqw solid #b17a3d;
+  border-radius: 50%;
+  background: #21160e;
+  box-shadow: inset 0 0 0 0.25cqw #4c2d17, 0 0.4cqw 0.7cqw rgb(0 0 0 / 60%);
+}
+
+.my-games-scene__thumbnail img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: sepia(0.24) saturate(0.82) brightness(0.78) contrast(1.08);
+}
+
+.my-games-scene__record-copy {
+  min-width: 0;
+}
+
+.my-games-scene__record-copy h3 {
+  overflow: hidden;
+  color: #dcb87c;
+  font-size: clamp(0.72rem, 3.75cqw, 1rem);
+  font-weight: 600;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.my-games-scene__record-number {
+  font-family: 'Times New Roman', Times, serif;
+  font-feature-settings: 'lnum' 1, 'tnum' 1;
+  font-variant-numeric: lining-nums tabular-nums;
+}
+
+.my-games-scene__record-copy p {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.9cqw;
+  margin-top: 0.8cqw;
+  overflow: hidden;
+  color: #b68a53;
+  font-size: clamp(0.48rem, 2.5cqw, 0.66rem);
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.my-games-scene__record-copy p span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.my-games-scene__record-copy p span:nth-of-type(2),
+.my-games-scene__record-copy time,
+.my-games-scene__record-copy i {
+  flex: 0 0 auto;
+}
+
+.my-games-scene__record-copy i {
+  font-style: normal;
+  opacity: 0.72;
+}
+
+.my-games-scene__record > button {
+  display: flex;
+  width: 100%;
+  min-height: 8.6cqw;
+  align-items: center;
+  justify-content: center;
+  gap: 1.2cqw;
+  padding: 0.8cqw 1.3cqw;
+  border: 0.25cqw solid #a86f32;
+  border-radius: 999px;
+  color: #e0bd7e;
+  background: linear-gradient(180deg, #53321d, #352014);
+  box-shadow: inset 0 0 0 0.18cqw rgb(230 169 91 / 12%), 0 0.45cqw 0.8cqw rgb(0 0 0 / 38%);
+  font-family: inherit;
+  font-size: clamp(0.62rem, 3.25cqw, 0.86rem);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.my-games-scene__record > button svg {
+  width: 3.9cqw;
+  height: 3.9cqw;
+  flex: 0 0 auto;
+  stroke-width: 1.7;
+}
+
+.my-games-scene__record > button.is-review svg {
+  width: 3.6cqw;
+  height: 3.6cqw;
+}
+
+.my-games-scene__record > button:disabled {
+  cursor: wait;
+  filter: grayscale(0.45) brightness(0.7);
+  opacity: 0.7;
+}
+
+.my-games-scene__end {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto 1fr;
+  align-items: center;
+  gap: 1.3cqw;
+  margin-top: 5cqw;
+  color: #89633b;
+  font-size: clamp(0.55rem, 2.8cqw, 0.75rem);
+  white-space: nowrap;
+}
+
+.my-games-scene__end svg {
+  width: 2.7cqw;
+  height: 2.7cqw;
+  fill: currentColor;
+  stroke-width: 1.1;
+}
+
+.my-games-scene__error {
+  display: flex;
+  min-height: 8cqw;
+  align-items: center;
+  justify-content: center;
+  gap: 2cqw;
+  margin-bottom: 2cqw;
+  padding: 1.2cqw 2.5cqw;
+  border: 0.2cqw solid rgb(150 73 46 / 76%);
+  border-radius: 1cqw;
+  color: #e1b083;
+  background: rgb(82 35 25 / 88%);
+  font-family: 'PingFang SC', sans-serif;
+  font-size: clamp(0.58rem, 2.7cqw, 0.75rem);
+  text-align: center;
+}
+
+.my-games-scene__error button {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.8cqw;
+  padding: 1cqw 1.8cqw;
+  border: 0.2cqw solid currentColor;
+  border-radius: 999px;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.my-games-scene__error button svg {
+  width: 3cqw;
+  height: 3cqw;
+}
+
+.my-games-scene__loading {
+  display: grid;
+  gap: 1.6cqw;
+}
+
+.my-games-scene__loading span {
+  display: block;
+  height: 13.8cqw;
+  border: 0.2cqw solid rgb(133 80 34 / 42%);
+  border-radius: 1.6cqw;
+  background: linear-gradient(100deg, rgb(45 28 17 / 75%) 20%, rgb(91 57 31 / 82%) 42%, rgb(45 28 17 / 75%) 64%);
+  background-size: 250% 100%;
+  animation: myGamesShimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes myGamesShimmer {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
+}
+
+.my-games-scene__empty {
+  display: flex;
+  min-height: 72cqw;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3cqw;
+  color: #b88d58;
+  text-align: center;
+}
+
+.my-games-scene__empty > svg {
+  width: 11cqw;
+  height: 11cqw;
+  opacity: 0.72;
+  stroke-width: 1.35;
+}
+
+.my-games-scene__empty p {
+  font-size: clamp(0.72rem, 3.6cqw, 1rem);
+}
+
+.my-games-scene__empty > div {
+  display: flex;
+  gap: 2.5cqw;
+}
+
+.my-games-scene__empty button {
+  display: flex;
+  min-width: 25cqw;
+  min-height: 9.5cqw;
+  align-items: center;
+  justify-content: center;
+  gap: 1.2cqw;
+  padding: 1.2cqw 2.5cqw;
+  border: 0.25cqw solid #a86f32;
+  border-radius: 999px;
+  color: #e0bd7e;
+  background: linear-gradient(180deg, #53321d, #352014);
+  font-family: inherit;
+  font-size: clamp(0.62rem, 3cqw, 0.82rem);
+  cursor: pointer;
+}
+
+.my-games-scene__empty button svg {
+  width: 3.8cqw;
+  height: 3.8cqw;
+}
+
+.my-games-scene__back,
+.my-games-scene__profile,
+.my-games-scene__character-library,
+.my-games-scene__record > button,
+.my-games-scene__empty button,
+.my-games-scene__error button {
+  transition: filter 150ms ease, transform 150ms ease;
+}
+
+.my-games-scene__back:hover,
+.my-games-scene__profile:hover,
+.my-games-scene__character-library:hover:not(:disabled),
+.my-games-scene__record > button:hover:not(:disabled),
+.my-games-scene__empty button:hover,
+.my-games-scene__error button:hover {
+  filter: brightness(1.16) saturate(1.08);
+}
+
+.my-games-scene__back:active,
+.my-games-scene__profile:active,
+.my-games-scene__character-library:active:not(:disabled),
+.my-games-scene__record > button:active:not(:disabled),
+.my-games-scene__empty button:active,
+.my-games-scene__error button:active {
+  transform: scale(0.96);
+}
+
+.my-games-scene__back:focus-visible,
+.my-games-scene__profile:focus-visible,
+.my-games-scene__character-library:focus-visible,
+.my-games-scene__record > button:focus-visible,
+.my-games-scene__empty button:focus-visible,
+.my-games-scene__error button:focus-visible {
+  outline: 3px solid #f2d38d;
+  outline-offset: 2px;
+}
+
 /* ─── Profile: personal investigator archive ──────────────────────────── */
 .profile-scene {
   position: relative;
@@ -2536,11 +3116,20 @@
 
   .home-scene__identity,
   .home-scene__action,
+  .my-games-scene__back,
+  .my-games-scene__profile,
+  .my-games-scene__record > button,
+  .my-games-scene__empty button,
+  .my-games-scene__error button,
   .create-room-scene__back,
   .create-room-scene__game-stamp,
   .create-room-scene__create,
   .create-room-scene__player-control > button {
     transition: none;
+  }
+
+  .my-games-scene__loading span {
+    animation: none;
   }
 }
 

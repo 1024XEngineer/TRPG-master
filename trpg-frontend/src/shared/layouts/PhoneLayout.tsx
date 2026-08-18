@@ -21,6 +21,7 @@ export default function PhoneLayout({ children }: PhoneLayoutProps) {
   return (
     <>
       <main ref={mainRef} className="animate-screen-in h-full overflow-y-auto overflow-x-hidden">{children}</main>
+      {pathname === '/home/my-rooms' && <div className="my-games-viewport-bottom-gap" aria-hidden="true" />}
       <OnboardingLayer />
     </>
   )

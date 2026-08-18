@@ -10,7 +10,7 @@ import {
   BookmarkCheck,
 } from 'lucide-react'
 import { useCharacterStore } from '@/stores/character-store'
-import { fetchCharacter } from '@/services/character/character-api'
+import { useRoomCharacter } from '@/hooks/useRoomCharacter'
 import {
   createCharacterTemplate,
   deleteCharacterTemplate,
@@ -24,7 +24,6 @@ import { useRoomPlayers } from '@/hooks/useRoomPlayers'
 import { usePlayerPortraits } from '@/hooks/usePlayerPortraits'
 import { useRuleset } from '@/hooks/useRuleset'
 import { PortraitGenerationModal } from './PortraitGenerationModal'
-import { normalizeDerivedStats } from '@/data/derived-stats'
 import { OnboardingTrigger } from '@/features/onboarding'
 import { PortraitImage } from '@/features/portrait/PortraitImage'
 import { CharacterBasicInfo } from '@/features/character/CharacterBasicInfo'
@@ -145,66 +144,11 @@ export default function CharacterReadyPage() {
   const [libraryError, setLibraryError] = useState('')
   const cancelExitRef = useRef<HTMLButtonElement>(null)
   const roomId = useRoomStore((s) => s.roomId)
-  const cachedCharacter = useCharacterStore((s) => (roomId ? s.getForRoom(roomId) : null))
   const characterId = useRoomStore((s) => s.characterId)
   const { ruleset: readyRuleset } = useRuleset()
-
-  // 角色卡以**后端**为准，本地缓存只作首屏占位（issue #96）。
-  //
-  // 之前这里只读 localStorage：清掉缓存（或换浏览器）后，明明后端有这张卡，
-  // 页面却显示成"还没建卡"。现在有了 GET 端点，就该以后端那份为准——本地缓存
-  // 保留是为了拉取回来之前不闪空白，不是权威源。
-  const characterIdentity = roomId && characterId ? `${roomId}:${characterId}` : null
-  const [remoteCharacter, setRemoteCharacter] = useState<{
-    identity: string
-    character: NonNullable<typeof cachedCharacter>
-  } | null>(null)
-  useEffect(() => {
-    // 组件可能在不卸载的情况下切换房间。上一身份的远程角色不能继续压过
-    // 新房间的缓存，更不能让没有 characterId 的房间误判为已经建卡。
-    setRemoteCharacter(null)
-    if (!roomId || !characterId || !readyRuleset || !characterIdentity) return
-    let cancelled = false
-    fetchCharacter(roomId, characterId)
-      .then((saved) => {
-        if (cancelled || !saved.name) return
-        const occupationId =
-          readyRuleset.occupations.find((o) => o.name === saved.occupation)?.id ?? null
-        const derived = normalizeDerivedStats(saved.derivedStats ?? {})
-        setRemoteCharacter({
-          identity: characterIdentity,
-          character: {
-            info: {
-              name: saved.name,
-              playerName: '',
-              age: saved.age != null ? String(saved.age) : '',
-              gender: saved.gender ?? '',
-              residence: saved.residence ?? '',
-              birthplace: saved.birthplace ?? '',
-              occupationId,
-            },
-            attr: { ...saved.attributes },
-            skillAlloc: {},
-            skillFinalValues: { ...saved.skills },
-            occupationChoiceSkillIds: saved.occupationChoiceSkillIds ?? [],
-            equipment: (saved.equipment ?? []).join('、'),
-            background: saved.background ?? '',
-            notes: saved.notes ?? '',
-            derived,
-          },
-        })
-      })
-      .catch(() => {
-        // 拉不到就沿用本地缓存（比如还没建过卡），不打断这个页面。
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [roomId, characterId, characterIdentity, readyRuleset])
-
-  const character = remoteCharacter?.identity === characterIdentity
-    ? remoteCharacter.character
-    : cachedCharacter
+  // 以后端为准、缓存只作首屏占位（issue #96）。这段逻辑原本就长在这一页，#337
+  // 之后抽成了 hook——游戏内的 RoomPage 需要同一份，那里原来只读本地缓存。
+  const character = useRoomCharacter()
   const roomCode = useRoomStore((s) => s.roomCode)
   const isHost = useRoomStore((s) => s.isHost)
   const playerId = useRoomStore((s) => s.playerId)

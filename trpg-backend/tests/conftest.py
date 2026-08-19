@@ -84,6 +84,7 @@ ws_controller.action_plan_turn_application = build_action_plan_turn_application(
     adjudication_engine=AdjudicationEngineService(_test_turn_store),
     plan_store=_test_plan_store,
     settings=Settings(host_model_provider="fake", opening_narration_mode="template"),
+    time_consent_session_factory=TestSessionLocal,
 )
 ws_controller.adjudication_engine_service = AdjudicationEngineService(_test_turn_store)
 

@@ -529,6 +529,7 @@
       "enum": [
         "awaiting_skill_choice",
         "awaiting_post_roll_decision",
+        "awaiting_time_consent",
         "resolved",
         "cancelled"
       ],
@@ -571,6 +572,19 @@
         }
       ],
       "default": null
+    },
+    "time_advance_proposal_id": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Time Advance Proposal Id"
     },
     "event_refs": {
       "default": [],

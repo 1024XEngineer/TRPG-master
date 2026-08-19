@@ -24,6 +24,26 @@ Redis，注释在此立此存照。
 
 import time
 import uuid
+from dataclasses import dataclass
+from datetime import UTC, datetime
+
+
+@dataclass(frozen=True)
+class RoomActionSnapshot:
+    """记录尚未持久化为 ActionPlan 的房间行动，供忙碌状态广播与重连查询。"""
+
+    player_id: str
+    actor_id: str
+    client_action_id: str
+    started_at: datetime
+    revision: str
+
+
+@dataclass(frozen=True)
+class _LockEntry:
+    expires_at: float
+    token: str
+    snapshot: RoomActionSnapshot
 
 
 class RoomActionLockManager:
@@ -35,24 +55,53 @@ class RoomActionLockManager:
         # room_id -> (到期时刻, token)
         # token 用于所有权校验：A 超时后 B 拿到新 token，A 的 finally release
         # 因 token 不匹配而成为空操作，不会误删 B 的锁。
-        self._locks: dict[str, tuple[float, str]] = {}
+        self._locks: dict[str, _LockEntry] = {}
 
-    def try_acquire(self, room_id: str) -> str | None:
+    def try_acquire(
+        self,
+        room_id: str,
+        *,
+        player_id: str,
+        actor_id: str,
+        client_action_id: str,
+        revision: str,
+    ) -> str | None:
         """尝试拿锁：没人持有、或持有者已过期（超时兜底）→ 拿到，返回 token；
         否则返回 None，调用方应拒绝这次提交。"""
         now = time.monotonic()
         entry = self._locks.get(room_id)
-        if entry is not None and now < entry[0]:
+        if entry is not None and now < entry.expires_at:
             return None
         token = str(uuid.uuid4())
-        self._locks[room_id] = (now + self.LOCK_TIMEOUT_SECONDS, token)
+        self._locks[room_id] = _LockEntry(
+            expires_at=now + self.LOCK_TIMEOUT_SECONDS,
+            token=token,
+            snapshot=RoomActionSnapshot(
+                player_id=player_id,
+                actor_id=actor_id,
+                client_action_id=client_action_id,
+                started_at=datetime.now(UTC),
+                revision=revision,
+            ),
+        )
         return token
+
+    def snapshot(self, room_id: str) -> RoomActionSnapshot | None:
+        """返回当前锁所有者；已超时的记录在读取时惰性清理。"""
+
+        entry = self._locks.get(room_id)
+        if entry is None:
+            return None
+        if time.monotonic() >= entry.expires_at:
+            del self._locks[room_id]
+            return None
+        return entry.snapshot
 
     def release(self, room_id: str, token: str) -> None:
         """释放锁。只有持有匹配 token 的调用方才能真正释放——防止超时后旧持有者
         误删新持有者的锁。token 不匹配或锁不存在均为无害空操作。"""
         entry = self._locks.get(room_id)
-        if entry is not None and entry[1] == token:
+        if entry is not None and entry.token == token:
             del self._locks[room_id]
 
 

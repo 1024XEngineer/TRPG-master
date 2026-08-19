@@ -30,6 +30,7 @@ PlanRunStatus = Literal[
     "active",
     "checkpointed",
     "waiting_for_player",
+    "awaiting_time_consent",
     "needs_clarification",
     "retryable_failure",
     "awaiting_narration",
@@ -42,6 +43,7 @@ PlanStepStatus = Literal[
     "adjudicating",
     "ready",
     "waiting_for_player",
+    "awaiting_time_consent",
     "completed",
     "stopped",
 ]
@@ -52,6 +54,7 @@ RESERVING_PLAN_STATUSES = frozenset(
         "active",
         "checkpointed",
         "waiting_for_player",
+        "awaiting_time_consent",
         "needs_clarification",
         "retryable_failure",
         "awaiting_narration",
@@ -128,12 +131,13 @@ class ActionPlanStepRun(ContractModel):
             if self.event_refs != self.adjudication_execution.event_refs:
                 raise ValueError("step event_refs 与 execution 不一致")
         if (
-            self.status in {"ready", "waiting_for_player", "completed"}
+            self.status
+            in {"ready", "waiting_for_player", "awaiting_time_consent", "completed"}
             and self.adjudication is None
         ):
             raise ValueError(f"{self.status} step 必须冻结 adjudication")
         if (
-            self.status in {"waiting_for_player", "completed"}
+            self.status in {"waiting_for_player", "awaiting_time_consent", "completed"}
             and self.adjudication_execution is None
         ):
             raise ValueError(f"{self.status} step 必须包含 execution")
@@ -142,6 +146,15 @@ class ActionPlanStepRun(ContractModel):
             and self.pending_action_request_id is None
         ):
             raise ValueError("waiting_for_player step 必须记录 pending action request")
+        if (
+            self.status == "awaiting_time_consent"
+            and (
+                self.pending_action_request_id is None
+                or self.adjudication_execution is None
+                or self.adjudication_execution.status != "awaiting_time_consent"
+            )
+        ):
+            raise ValueError("awaiting_time_consent step 必须绑定待确认时间提案")
         return self
 
 
@@ -229,6 +242,7 @@ class ActionPlanRun(ContractModel):
                 "active": {"pending", "adjudicating", "ready"},
                 "checkpointed": {"pending"},
                 "waiting_for_player": {"waiting_for_player"},
+                "awaiting_time_consent": {"awaiting_time_consent"},
                 "needs_clarification": {"stopped"},
                 "retryable_failure": {"pending"},
                 "cancelled": {"stopped"},

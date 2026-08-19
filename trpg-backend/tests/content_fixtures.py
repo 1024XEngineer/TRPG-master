@@ -28,7 +28,7 @@ async def publish_multiplayer_module(db: AsyncSession) -> None:
     presentation = payload["presentation"]
     presentation["title"] = "追书人（E2E 双人夹具）"
     presentation["name_en"] = "E2E Multiplayer Fixture"
-    presentation["players_max"] = 2
+    presentation["players_max"] = 3
     content = ModuleContentV3.model_validate(payload)
     assert content.presentation is not None
 

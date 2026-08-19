@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, Plus, Trash2, User } from 'lucide-react'
+import { ArrowLeft, LoaderCircle, PawPrint, Plus, RefreshCw, UserRound } from 'lucide-react'
 import { friendlyErrorMessage } from '@/services/api-client'
 import { useTemplatePortraits } from '@/hooks/useTemplatePortraits'
 import {
@@ -10,29 +10,103 @@ import {
   type CharacterTemplate,
 } from '@/services/character/template-api'
 
-// 后端返回的是 ISO-8601 字符串（pydantic 的 datetime 序列化结果），不是毫秒
-// 时间戳——直接参与算术会得到 NaN，一路落到 "Invalid Date"。这个坑在
-// MyRoomsPage 上真踩过（issue #75），这里沿用同一份处理。
 function formatTime(ts: string): string {
   const parsed = Date.parse(ts)
   if (Number.isNaN(parsed)) return '未知时间'
   const diffMin = Math.round((Date.now() - parsed) / 60000)
-  if (diffMin < 1) return '刚刚'
-  if (diffMin < 60) return `${diffMin} 分钟前`
+  if (diffMin < 1) return '刚刚更新'
+  if (diffMin < 60) return `${diffMin} 分钟前更新`
   const diffHour = Math.round(diffMin / 60)
-  if (diffHour < 24) return `${diffHour} 小时前`
-  return new Date(parsed).toLocaleDateString('zh-CN')
+  if (diffHour < 24) return `${diffHour} 小时前更新`
+  return `${new Date(parsed).toLocaleDateString('zh-CN')} 更新`
 }
 
 function summarize(template: CharacterTemplate): string {
   const data = (template.data ?? {}) as Record<string, unknown>
   const occupation = typeof data.occupation === 'string' ? data.occupation : ''
-  // 属性为空说明这张卡刚建、还没捏——如实说，不要显示成一张完整的卡。
   const attributes = data.attributes
   const started =
     attributes !== null && typeof attributes === 'object' && Object.keys(attributes).length > 0
   if (!started) return '尚未开始建卡'
   return occupation || '未选择职业'
+}
+
+function CharacterCard({
+  template,
+  portraitUrl,
+  pendingDelete,
+  deleting,
+  onOpen,
+  onAskDelete,
+  onDelete,
+  onCancelDelete,
+}: {
+  template: CharacterTemplate
+  portraitUrl?: string
+  pendingDelete: boolean
+  deleting: boolean
+  onOpen: () => void
+  onAskDelete: () => void
+  onDelete: () => void
+  onCancelDelete: () => void
+}) {
+  return (
+    <article className="character-library__card" data-testid={`character-card-${template.templateId}`}>
+      <button
+        type="button"
+        className="character-library__card-open"
+        onClick={onOpen}
+        aria-label={`打开 ${template.name} 的角色卡`}
+      >
+        <img
+          className="character-library__card-frame"
+          src="/assets/characters/library/card-frame.webp"
+          alt=""
+          aria-hidden="true"
+          width={314}
+          height={553}
+        />
+        <img
+          className="character-library__paperclip"
+          src="/assets/characters/library/paperclip.webp"
+          alt=""
+          aria-hidden="true"
+          width={87}
+          height={104}
+        />
+        <span className="character-library__portrait">
+          {portraitUrl ? (
+            <img src={portraitUrl} alt={`${template.name}的人物图片`} />
+          ) : (
+            <UserRound aria-hidden="true" />
+          )}
+        </span>
+        <span className="character-library__name">{template.name}</span>
+        <span className="character-library__occupation">{summarize(template)}</span>
+        <span className="character-library__updated">{formatTime(template.updatedAt)}</span>
+      </button>
+
+      <div className="character-library__delete-wrap">
+        {pendingDelete ? (
+          <div className="character-library__confirm" role="group" aria-label={`确认删除 ${template.name}`}>
+            <span>删除这张卡？</span>
+            <div>
+              <button type="button" onClick={onDelete} disabled={deleting}>
+                {deleting ? '删除中…' : '确认'}
+              </button>
+              <button type="button" onClick={onCancelDelete} disabled={deleting}>
+                取消
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button type="button" className="character-library__delete" onClick={onAskDelete} aria-label={`删除 ${template.name}`}>
+            <img src="/assets/characters/library/delete-button.webp" alt="" aria-hidden="true" width={102} height={105} />
+          </button>
+        )}
+      </div>
+    </article>
+  )
 }
 
 export default function CharacterLibraryPage() {
@@ -44,18 +118,23 @@ export default function CharacterLibraryPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const portraitUrls = useTemplatePortraits(templates)
 
-  useEffect(() => {
-    listCharacterTemplates()
+  const loadTemplates = useCallback(() => {
+    setError('')
+    setTemplates(null)
+    void listCharacterTemplates()
       .then(setTemplates)
       .catch((err) => setError(friendlyErrorMessage(err, '加载角色卡库失败')))
   }, [])
 
+  useEffect(() => {
+    loadTemplates()
+  }, [loadTemplates])
+
   const handleCreate = async () => {
+    if (creating) return
     setCreating(true)
     setError('')
     try {
-      // 空白卡之间也会撞去重约束（#337：两张都是空的就是"一模一样"）。所以新建
-      // 时先挑一个当前列表里没用过的名字，而不是让玩家点第二次"新建"就吃 409。
       const used = new Set((templates ?? []).map((item) => item.name))
       let name = '未命名调查员'
       for (let n = 2; used.has(name); n += 1) name = `未命名调查员 ${n}`
@@ -69,13 +148,12 @@ export default function CharacterLibraryPage() {
   }
 
   const handleDelete = async (templateId: string) => {
+    if (deletingId) return
     setDeletingId(templateId)
     setError('')
     try {
       await deleteCharacterTemplate(templateId)
-      setTemplates((current) =>
-        (current ?? []).filter((item) => item.templateId !== templateId)
-      )
+      setTemplates((current) => (current ?? []).filter((item) => item.templateId !== templateId))
       setPendingDelete(null)
     } catch (err) {
       setError(friendlyErrorMessage(err, '删除角色卡失败'))
@@ -84,115 +162,80 @@ export default function CharacterLibraryPage() {
     }
   }
 
+  const isLoading = templates === null && !error
+
   return (
-    <div className="animate-screen-in min-h-screen bg-page pb-10">
-      <div className="flex items-center gap-2.5 px-5 pt-3 pb-2">
-        <button
-          onClick={() => navigate('/home')}
-          aria-label="返回"
-          className="w-[34px] h-[34px] rounded-full bg-card border border-border-light flex items-center justify-center active:bg-panel active:scale-[0.94] transition-all"
-        >
-          <ArrowLeft className="w-[18px] h-[18px] text-text-muted" strokeWidth={2.5} />
+    <section className="character-library-scene" aria-labelledby="character-library-page-title">
+      <div className="character-library-scene__artboard">
+        <img
+          className="character-library-scene__background"
+          src="/assets/characters/library/background.webp"
+          alt=""
+          aria-hidden="true"
+          width={853}
+          height={1844}
+        />
+        <button type="button" className="character-library__back" onClick={() => navigate('/home')} aria-label="返回首页">
+          <ArrowLeft aria-hidden="true" />
         </button>
-        <h2 className="text-lg font-bold text-text-primary">我的角色卡</h2>
-      </div>
-
-      <div className="px-5 space-y-5">
-        {error && <p className="text-[11px] text-[#c04040] text-center">{error}</p>}
-
-        {templates === null && !error && (
-          <p className="text-center text-sm text-text-dim py-10">加载中…</p>
-        )}
-
-        {templates !== null && templates.length === 0 && (
-          <div className="text-center py-16 space-y-4">
-            <p className="text-sm text-text-dim">卡库里还没有角色卡</p>
-            <p className="text-[11px] text-text-muted px-8">
-              建好的调查员存在这里，下次开局可以直接选，不用从头再捏一遍。
-            </p>
+        <header className="character-library__header">
+          <PawPrint aria-hidden="true" />
+          <div>
+            <h1 id="character-library-page-title">我的角色卡</h1>
+            <p>管理你的角色卡片</p>
           </div>
-        )}
+          <PawPrint aria-hidden="true" />
+        </header>
 
-        {templates !== null && templates.length > 0 && (
-          <div className="space-y-2.5">
-            {templates.map((template) => (
-              <div
-                key={template.templateId}
-                className="bg-card border border-border-light rounded-md p-[14px] flex items-center gap-3"
+        <section className="character-library__content" aria-labelledby="character-library-title">
+          <h2 id="character-library-title" className="sr-only">我的角色卡列表</h2>
+          {error && (
+            <div className="character-library__error" role="alert">
+              <span>{error}</span>
+              <button type="button" onClick={loadTemplates} aria-label="重试加载角色卡">
+                <RefreshCw aria-hidden="true" /> 重试
+              </button>
+            </div>
+          )}
+          {isLoading && (
+            <div className="character-library__status" role="status" aria-label="正在加载角色卡">
+              <LoaderCircle aria-hidden="true" />
+              <span>正在整理档案…</span>
+            </div>
+          )}
+          {templates !== null && (
+            <div
+              className="character-library__grid"
+              tabIndex={0}
+              aria-label="角色卡列表，可纵向滚动"
+            >
+              {templates.map((template) => (
+                <CharacterCard
+                  key={template.templateId}
+                  template={template}
+                  portraitUrl={portraitUrls[template.templateId]}
+                  pendingDelete={pendingDelete === template.templateId}
+                  deleting={deletingId === template.templateId}
+                  onOpen={() => navigate(`/home/characters/${template.templateId}`)}
+                  onAskDelete={() => setPendingDelete(template.templateId)}
+                  onDelete={() => void handleDelete(template.templateId)}
+                  onCancelDelete={() => setPendingDelete(null)}
+                />
+              ))}
+              <button
+                type="button"
+                className="character-library__new-card"
+                onClick={() => void handleCreate()}
+                disabled={creating}
+                aria-label="从空白卡新建角色卡"
               >
-                <button
-                  type="button"
-                  onClick={() => navigate(`/home/characters/${template.templateId}`)}
-                  className="flex flex-1 min-w-0 items-center gap-3 text-left"
-                >
-                  <div className="h-14 w-14 flex-shrink-0 overflow-hidden rounded-sm border border-border-light bg-input flex items-center justify-center">
-                    {portraitUrls[template.templateId] ? (
-                      <img
-                        src={portraitUrls[template.templateId]}
-                        alt={`${template.name}的人物图片`}
-                        className="h-full w-full object-cover"
-                      />
-                    ) : (
-                      <User className="h-6 w-6 text-text-dim" aria-hidden="true" />
-                    )}
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-sm font-semibold text-text-primary truncate">
-                      {template.name}
-                    </div>
-                    <div className="text-[11px] text-text-muted mt-0.5">
-                      {summarize(template)} · {formatTime(template.updatedAt)}
-                    </div>
-                  </div>
-                </button>
-                {pendingDelete === template.templateId ? (
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      onClick={() => handleDelete(template.templateId)}
-                      disabled={deletingId === template.templateId}
-                      className="px-3 py-2 rounded-sm text-xs font-semibold bg-[#c04040] text-white active:scale-[0.96] transition-all disabled:opacity-60"
-                    >
-                      {deletingId === template.templateId ? '删除中…' : '确认删除'}
-                    </button>
-                    <button
-                      onClick={() => setPendingDelete(null)}
-                      className="px-3 py-2 rounded-sm text-xs font-semibold bg-card text-text-body border border-border-mid active:bg-panel active:scale-[0.96] transition-all"
-                    >
-                      取消
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    onClick={() => setPendingDelete(template.templateId)}
-                    aria-label={`删除 ${template.name}`}
-                    className="w-[34px] h-[34px] rounded-sm border border-border-mid flex items-center justify-center text-text-muted active:bg-panel active:scale-[0.96] transition-all"
-                  >
-                    <Trash2 className="w-[16px] h-[16px]" />
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-
-        {templates !== null && (
-          <button
-            onClick={handleCreate}
-            disabled={creating}
-            className="flex items-center justify-center gap-2 px-6 py-3 w-full rounded-sm text-sm font-semibold bg-brass text-white active:bg-brass-dark active:scale-[0.97] transition-all disabled:opacity-60"
-          >
-            {creating ? (
-              <>
-                <User className="w-[16px] h-[16px]" /> 新建中…
-              </>
-            ) : (
-              <>
-                <Plus className="w-[16px] h-[16px]" /> 新建角色卡
-              </>
-            )}
-          </button>
-        )}
+                {creating ? <LoaderCircle aria-hidden="true" /> : <Plus aria-hidden="true" />}
+                <span>{creating ? '正在创建…' : '新建角色卡'}</span>
+              </button>
+            </div>
+          )}
+        </section>
       </div>
-    </div>
+    </section>
   )
 }

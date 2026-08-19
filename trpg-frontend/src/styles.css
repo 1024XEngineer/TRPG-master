@@ -1560,29 +1560,12 @@
   position: relative;
   isolation: isolate;
   width: 100%;
-  min-height: 100%;
+  height: 100%;
+  min-height: 0;
   overflow: hidden;
   color: #d8b477;
   background: #171009;
   font-family: Georgia, 'STKaiti', 'KaiTi', 'Songti SC', 'STSong', serif;
-}
-
-/* Keep the last visible row clear of the phone frame while the long page scrolls. */
-.my-games-viewport-bottom-gap {
-  position: fixed;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  z-index: 30;
-  height: max(1.25rem, env(safe-area-inset-bottom));
-  border: 0;
-  background: linear-gradient(
-    180deg,
-    rgb(33 21 13 / 0%),
-    rgb(33 21 13 / 84%) 38%,
-    rgb(33 21 13 / 98%)
-  );
-  pointer-events: none;
 }
 
 .my-games-scene__artboard {
@@ -1590,7 +1573,8 @@
   isolation: isolate;
   container-type: inline-size;
   width: 100%;
-  min-height: 216.18cqw;
+  height: 100%;
+  min-height: 0;
   overflow: hidden;
   background: #21150d url('/assets/rooms/my-games/wood-repeat.jpg') center top / 100% auto repeat-y;
 }
@@ -1601,7 +1585,9 @@
   z-index: -2;
   display: block;
   width: 100%;
-  height: auto;
+  height: 100%;
+  object-fit: cover;
+  object-position: center top;
   pointer-events: none;
   user-select: none;
 }
@@ -1801,11 +1787,29 @@
 }
 
 .my-games-scene__records {
-  position: relative;
+  position: absolute;
+  inset: 47.5cqw 0 0;
   z-index: 3;
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
   width: 100%;
-  min-height: 216.18cqw;
-  padding: 47.5cqw 9cqw max(20cqw, calc(12cqw + env(safe-area-inset-bottom)));
+  padding: 0 9cqw max(5cqw, env(safe-area-inset-bottom));
+}
+
+.my-games-scene__records-scroll {
+  min-height: 0;
+  flex: 1 1 auto;
+  padding: 0 0 max(10cqw, env(safe-area-inset-bottom));
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.my-games-scene__records-scroll::-webkit-scrollbar {
+  display: none;
 }
 
 .my-games-scene__section-title {

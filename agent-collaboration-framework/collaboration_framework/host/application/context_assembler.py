@@ -1,18 +1,10 @@
 """Pure assembly of model-visible contexts from already safe contracts."""
 
-from collaboration_framework.contracts import (
-    ActionResult,
-    Intent,
-    PlayerInput,
-    PlayerView,
-)
+from collaboration_framework.contracts import PlayerView
 from collaboration_framework.host.schemas import (
-    IntentContext,
-    NarrationContext,
     OpeningNarrationContext,
     OpeningParticipant,
     OpeningSceneContext,
-    RecentTurnContext,
 )
 
 
@@ -54,37 +46,4 @@ class ContextAssembler:
                 if len(participants) == 1
                 else ""
             ),
-        )
-
-    def for_intent(
-        self,
-        player_input: PlayerInput,
-        player_view: PlayerView,
-        recent_history: RecentTurnContext,
-    ) -> IntentContext:
-        """Bind the real player action to its safe view and bounded history."""
-
-        return IntentContext(
-            player_input=player_input,
-            player_view=player_view,
-            recent_history=recent_history,
-        )
-
-    def for_narration(
-        self,
-        player_input: PlayerInput,
-        intent: Intent,
-        action_result: ActionResult,
-        player_view: PlayerView,
-        recent_history: RecentTurnContext,
-    ) -> NarrationContext:
-        """Build post-action narration input from already-authoritative results."""
-
-        return NarrationContext(
-            background=player_view.background,
-            player_input=player_input,
-            intent=intent,
-            action_result=action_result,
-            player_view=player_view,
-            recent_history=recent_history,
         )

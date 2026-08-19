@@ -12,7 +12,6 @@ from collaboration_framework.contracts import (
     ActionResult,
     ContractError,
     Intent,
-    JsonObject,
     MatchedTarget,
     ModuleCheck,
     PlayerViewScope,
@@ -28,7 +27,6 @@ from collaboration_framework.engine import (
     RuleEngineService,
     StateModifiedEvent,
 )
-from collaboration_framework.host.schemas import IntentContext
 from httpx import AsyncClient
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -69,23 +67,6 @@ _CHARACTER_PAYLOAD = {
     "background": "",
     "notes": "",
 }
-
-
-class _CandidateIntentModel:
-    async def generate(self, context: IntentContext) -> JsonObject:
-        return {
-            "kind": "action",
-            "verb": "investigate",
-            "target": {
-                "matched": True,
-                "id": context.player_view.scene.id,
-            },
-            "check": {
-                "route": "default",
-                "proposed_skills": ["spot-hidden", "stealth"],
-            },
-            "summary": context.player_input.utterance,
-        }
 
 
 def _uuid(prefix: int, value: int) -> str:

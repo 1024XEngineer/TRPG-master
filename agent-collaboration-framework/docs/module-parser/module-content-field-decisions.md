@@ -1,7 +1,7 @@
 # ModuleContent v1 最终契约决议
 
 - 状态：**Accepted / Published**
-- 适用范围：Module Parser、Rule Engine 与 Host Agent 的模组内容边界
+- 适用范围：Module Parser、Rule Engine 与 Host Planner 的模组内容边界
 - 锚定代码：`collaboration_framework/contracts/module.py`
 - 生成 Schema：`schemas/module-content.schema.json`
 
@@ -69,7 +69,7 @@ Module Parser 先产生私有 `ModuleDraft`，再经过确定性 Validation 构�
 - 不泄密的世界状态或社会背景。
 
 它先由规则侧投影进入 `PlayerView`，主持编排只从安全投影构造
-`NarrationContext`。它不能替代已发现 InformationItem 成为调查事实。
+`ActionPlanNarrationContext`。它不能替代已发现 InformationItem 成为调查事实。
 
 ### 3.1 `presentation` 的内容与传播
 
@@ -258,7 +258,8 @@ Validation 收集稳定错误码并返回 `pass`、`needs_revision` 或 `blocked
 - Validation 负责结构、引用、状态路径和 Ruleset ID 的确定性校验。
 - Publish 只发布验证通过的 `ModuleContent`。
 - Rule Engine 负责权威状态、Event、检定和已实现的规则语义。
-- Host Agent 只消费玩家安全投影和叙述上下文，不直接修改 ModuleContent 或 GameState。
+- Host Planner 只消费玩家安全投影与受控 Keeper capability，不直接修改 ModuleContent
+  或 GameState；叙事层只消费已提交的 player-safe evidence。
 - `background` 只稳定叙事基调；可见事实仍以 PlayerView、ActionResult 和显式信息政策为准。
 
 ## 9. 当前示例

@@ -33,7 +33,8 @@ ModuleContent
 
 `background` 是顶层必填的模组级叙述上下文，提炼原文开头的时代、地点、
 玩家侧故事前提和叙事基调。规则投影会先把它放入 `PlayerView`，主持编排再从
-`PlayerView` 构造 `NarrationContext`；它不能代替已发现信息成为新的调查事实。
+`PlayerView` 和已提交 evidence 构造 `ActionPlanNarrationContext`；它不能代替已发现信息
+成为新的调查事实。
 未揭示的幕后真相必须继续放在 `secrets` 或受可见性约束的信息项中，不得写入
 `background`。
 
@@ -47,7 +48,7 @@ ModuleContent
 | `player_visible_description` | `"昏黄灯光下，书架、木柜..."` | 玩家当前可感知描述；不得从 `content` 自动兜底 |
 | `narrative_details` | `[{"id":"opened-cabinet",...}]` | 通过状态门后持续投影的安全细节 |
 | `entity_ids` | `["butler","bookshelf","cabinet"]` | 索引：这个场景里有哪些实体。B 的引擎据此决定 PlayerView 展示什么 |
-| `checkpoint_ids` | `["investigate_bookshelf","smash_cabinet"]` | 索引：这个场景里能做什么动作。A 的 IntentParser 据此匹配玩家语义 |
+| `checkpoint_ids` | `["investigate_bookshelf","smash_cabinet"]` | 索引：这个场景里能做什么动作。当前步骤 adjudicator 据此匹配玩家语义 |
 | `exits` | `["garden"]` | 可达 Scene 限制；空数组表示可自由前往其他 Scene，非空时只允许列出的 Scene |
 | `available_exits` | `[{"id":"north-door",...}]` | 可选的出口展示/可见性覆盖；省略时由 `exits` 和 Scene 安全名称自动派生 |
 

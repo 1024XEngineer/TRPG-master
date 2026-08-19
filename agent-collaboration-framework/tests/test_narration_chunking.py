@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from collaboration_framework.host.application.narrator import split_narration_chunks
+from collaboration_framework.host.application.narration_policy import split_narration_chunks
 
 
 class NarrationChunkingTests(unittest.TestCase):

@@ -27,7 +27,7 @@ import uuid
 
 
 class RoomActionLockManager:
-    # 模型调用自身超时 30s（Settings.host_agent_timeout_seconds），锁的过期时间
+    # 结构化模型调用默认超时 30s，锁的过期时间
     # 给出一倍余量：正常路径远在 60s 内走到 finally release，走不到时这里兜底。
     LOCK_TIMEOUT_SECONDS = 60.0
 

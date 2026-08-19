@@ -5,28 +5,9 @@ from __future__ import annotations
 from pydantic import Field, model_validator
 
 from collaboration_framework.contracts import (
-    ActionResult,
     ContractModel,
-    Intent,
     NarrativeDetailView,
-    PlayerInput,
-    PlayerView,
 )
-from collaboration_framework.host.schemas.history import RecentTurnContext
-
-
-class IntentContext(ContractModel):
-    player_input: PlayerInput
-    player_view: PlayerView
-    recent_history: RecentTurnContext
-
-    @model_validator(mode="after")
-    def validate_scope(self) -> IntentContext:
-        self.recent_history.validate_for(
-            player_input=self.player_input,
-            player_view=self.player_view,
-        )
-        return self
 
 
 class OpeningSceneContext(ContractModel):
@@ -66,24 +47,4 @@ class OpeningNarrationContext(ContractModel):
             raise ValueError("OpeningNarrationContext participant actor_id 必须唯一")
         if len(self.participants) > 1 and self.solo_background_summary:
             raise ValueError("多人公共开场不得包含单人背景摘要")
-        return self
-
-
-class NarrationContext(ContractModel):
-    background: str = Field(
-        min_length=1,
-        description="本次叙述必须遵循的模组时代、故事前提与叙事基调。",
-    )
-    player_input: PlayerInput
-    intent: Intent
-    action_result: ActionResult
-    player_view: PlayerView
-    recent_history: RecentTurnContext
-
-    @model_validator(mode="after")
-    def validate_scope(self) -> NarrationContext:
-        self.recent_history.validate_for(
-            player_input=self.player_input,
-            player_view=self.player_view,
-        )
         return self

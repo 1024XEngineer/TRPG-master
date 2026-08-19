@@ -6,13 +6,7 @@ import json
 import unittest
 from pathlib import Path
 
-from collaboration_framework.contracts import (
-    MatchedTarget,
-    ModuleCheck,
-    ModuleContent,
-    PlayerInput,
-    PlayerViewScope,
-)
+from collaboration_framework.contracts import ModuleContent, PlayerInput, PlayerViewScope
 from collaboration_framework.engine import (
     ActorResources,
     ActorState,
@@ -20,29 +14,13 @@ from collaboration_framework.engine import (
     InMemoryEngineStore,
     RuleEngineService,
 )
-from collaboration_framework.host.adapters.fakes import FakeIntentModel
-from collaboration_framework.host.application import (
-    IntentParser,
-    PlayerViewProjector,
-)
-from collaboration_framework.host.schemas import IntentContext, RecentTurnContext
+from collaboration_framework.host.application import PlayerViewProjector
 
 ROOT = Path(__file__).resolve().parents[1]
 KEEPER_SECRET = "KEEPER_ONLY_SCENE_INSTRUCTIONS"
 RAW_STATE_SECRET = "RAW_ENTITY_STATE_SECRET"
 OTHER_CARD_SECRET = "OTHER_ACTOR_PRIVATE_CARD"
 PRIVATE_NOTE = "PLAYER_PRIVATE_NOTE"
-
-
-def intent_context(*, player_input: PlayerInput, player_view) -> IntentContext:
-    return IntentContext(
-        player_input=player_input,
-        player_view=player_view,
-        recent_history=RecentTurnContext.empty(
-            player_input=player_input,
-            player_view=player_view,
-        ),
-    )
 
 
 def player_view_module() -> ModuleContent:
@@ -133,26 +111,6 @@ def player_view_module() -> ModuleContent:
                 "visibility": {"audience": "keeper"},
             },
         ]
-    )
-    return ModuleContent.model_validate(payload)
-
-
-def route_module(exits: list[str]) -> ModuleContent:
-    payload = player_view_module().to_json_dict()
-    study = payload["scenes"][0]
-    study["exits"] = exits
-    study["available_exits"] = []
-    payload["scenes"].append(
-        {
-            "id": "attic",
-            "name": "Keeper Attic",
-            "content": "Keeper-only attic logic.",
-            "player_visible_name": "阁楼",
-            "player_visible_description": "低矮的阁楼里积着灰尘。",
-            "entity_ids": [],
-            "checkpoint_ids": [],
-            "exits": [],
-        }
     )
     return ModuleContent.model_validate(payload)
 
@@ -343,41 +301,6 @@ class PlayerViewV2Tests(unittest.IsolatedAsyncioTestCase):
             "private_clue",
             {item.id for item in other.known_information},
         )
-
-    async def test_visible_door_checkpoint_takes_priority_over_scene_travel(
-        self,
-    ) -> None:
-        payload = route_module(["garden"]).to_json_dict()
-        cabinet = next(
-            entity for entity in payload["entities"] if entity["id"] == "cabinet"
-        )
-        cabinet["name"] = "通往花园的门"
-        cabinet["aliases"] = ["花园门"]
-        cabinet["player_visible_name"] = "通往花园的门"
-        cabinet["player_visible_aliases"] = ["花园门"]
-        checkpoint = next(
-            item for item in payload["checkpoints"] if item["id"] == "smash_cabinet"
-        )
-        checkpoint["action"] = "open"
-        module = ModuleContent.model_validate(payload)
-        store = InMemoryEngineStore()
-        store.register_room(module_content=module, initial_state=self.state)
-        service = RuleEngineService(store)
-        view = await PlayerViewProjector(service).project(player_input())
-        context = intent_context(
-            player_input=player_input(utterance="打开花园门"),
-            player_view=view,
-        )
-
-        raw = await FakeIntentModel().generate(context)
-        intent = IntentParser.parse(raw, context)
-
-        assert isinstance(intent.target, MatchedTarget)
-        self.assertEqual(intent.target.id, "cabinet")
-        self.assertEqual(intent.verb, "open")
-        assert isinstance(intent.check, ModuleCheck)
-        self.assertEqual(intent.check.route, "module")
-        self.assertEqual(intent.check.checkpoint_id, "smash_cabinet")
 
 if __name__ == "__main__":
     unittest.main()

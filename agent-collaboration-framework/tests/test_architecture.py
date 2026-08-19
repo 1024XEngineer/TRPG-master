@@ -56,71 +56,48 @@ class ArchitectureTests(unittest.TestCase):
                     f"{path.relative_to(PACKAGE)}: {imported}",
                 )
 
-    def test_host_agent_port_is_host_private_and_sdk_independent(self) -> None:
-        from collaboration_framework.host.ports import HostAgentPort
+    def test_obsolete_v2_host_surface_is_removed(self) -> None:
+        obsolete = (
+            "application/host_agent_intent_resolver.py",
+            "application/intent_parser.py",
+            "application/intent_aligner.py",
+            "application/narrator.py",
+            "application/tool_registry.py",
+            "ports/host_agent.py",
+            "ports/intent_model.py",
+            "ports/narration_model.py",
+            "ports/turn.py",
+            "schemas/agent.py",
+            "schemas/tools.py",
+            "schemas/turn.py",
+            "adapters/one_shot.py",
+        )
+        for relative in obsolete:
+            self.assertFalse((PACKAGE / "host" / relative).exists(), relative)
+        for relative in ("adapters/openai_agents", "tools"):
+            self.assertFalse(any((PACKAGE / "host" / relative).glob("*.py")), relative)
 
-        self.assertFalse((PACKAGE / "ports" / "host_agent.py").exists())
-        self.assertTrue((PACKAGE / "host" / "ports" / "host_agent.py").is_file())
+    def test_active_host_contracts_have_stable_imports(self) -> None:
+        from collaboration_framework.contracts import ActionPlanPolicy, Intent
+        from collaboration_framework.host.application.errors import (
+            TurnExecutionError,
+        )
+        from collaboration_framework.host.prompts.action_plan import (
+            PROMPT_VERSION,
+            current_step_adjudication_instructions,
+            host_turn_decision_instructions,
+        )
+        from collaboration_framework.host.schemas import HostAgentContext
+
         self.assertEqual(
-            {
-                name
-                for name in HostAgentPort.__dict__
-                if not name.startswith("_")
-            },
-            {"astream"},
+            TurnExecutionError.__module__,
+            "collaboration_framework.host.application.errors",
         )
-
-        stable_host_agent_files = (
-            PACKAGE / "host" / "schemas" / "agent.py",
-            PACKAGE / "host" / "ports" / "host_agent.py",
-        )
-        forbidden_prefixes = (
-            "agents",
-            "openai",
-            "collaboration_framework.engine",
-            "collaboration_framework.module",
-            "collaboration_framework.ports",
-        )
-        for path in stable_host_agent_files:
-            for imported in imports_for(path):
-                self.assertFalse(
-                    imported.startswith(forbidden_prefixes),
-                    f"{path.relative_to(PACKAGE)}: {imported}",
-                )
-
-    def test_host_agent_tools_are_read_only_and_authority_independent(self) -> None:
-        from collaboration_framework.host.tools import (
-            build_player_view_tool_registry,
-        )
-
-        tool_paths = (
-            PACKAGE / "host" / "application" / "tool_registry.py",
-            PACKAGE / "host" / "schemas" / "tools.py",
-            PACKAGE / "host" / "tools" / "visible_entities.py",
-        )
-        forbidden_prefixes = (
-            "agents",
-            "openai",
-            "collaboration_framework.engine",
-            "collaboration_framework.module",
-            "collaboration_framework.ports",
-        )
-        for path in tool_paths:
-            self.assertTrue(path.is_file(), path)
-            for imported in imports_for(path):
-                self.assertFalse(
-                    imported.startswith(forbidden_prefixes),
-                    f"{path.relative_to(PACKAGE)}: {imported}",
-                )
-
-        definitions = build_player_view_tool_registry().definitions
-        self.assertEqual(
-            {definition.name for definition in definitions},
-            {"search_visible_entities", "get_visible_entity"},
-        )
-        self.assertTrue(
-            all(definition.access == "read_only" for definition in definitions)
-        )
+        self.assertTrue(HostAgentContext.model_fields)
+        self.assertTrue(Intent.model_fields)
+        self.assertEqual(PROMPT_VERSION, "trpg-host-intent-v5")
+        self.assertTrue(host_turn_decision_instructions(ActionPlanPolicy()))
+        self.assertTrue(current_step_adjudication_instructions())
 
     def test_engine_does_not_import_host(self) -> None:
         for path in (PACKAGE / "engine").rglob("*.py"):
@@ -139,34 +116,25 @@ class ArchitectureTests(unittest.TestCase):
                     str(path.relative_to(PACKAGE)),
                 )
 
-        public_module_api = (PACKAGE / "module" / "__init__.py").read_text(
-            encoding="utf-8"
-        )
+        public_module_api = (PACKAGE / "module" / "__init__.py").read_text(encoding="utf-8")
         self.assertNotIn("ModuleDraft", public_module_api)
 
-    def test_provider_sdks_are_isolated_to_adapter_and_bootstrap(self) -> None:
-        adapter_root = PACKAGE / "host" / "adapters" / "openai_agents"
-        bootstrap_file = PACKAGE / "bootstrap" / "host_agent.py"
+    def test_removed_provider_sdks_have_no_framework_imports_or_dependencies(
+        self,
+    ) -> None:
         provider_prefixes = ("agents", "openai")
         for path in PACKAGE.rglob("*.py"):
             provider_imports = {
-                imported
-                for imported in imports_for(path)
-                if imported.startswith(provider_prefixes)
+                imported for imported in imports_for(path) if imported.startswith(provider_prefixes)
             }
-            if not provider_imports:
-                continue
-            self.assertTrue(
-                path.is_relative_to(adapter_root) or path == bootstrap_file,
-                (
-                    f"provider SDK import outside private adapter/bootstrap: "
-                    f"{path.relative_to(ROOT)}: {sorted(provider_imports)}"
-                ),
+            self.assertFalse(
+                provider_imports,
+                f"{path.relative_to(ROOT)}: {sorted(provider_imports)}",
             )
 
         project = (ROOT / "pyproject.toml").read_text(encoding="utf-8").lower()
-        self.assertIn('"openai==2.44.0"', project)
-        self.assertIn('"openai-agents==0.8.4"', project)
+        self.assertNotIn('"openai', project)
+        self.assertNotIn('"openai-agents', project)
 
     def test_pydantic_ai_and_langgraph_remain_globally_forbidden(self) -> None:
         forbidden = ("pydantic_ai", "langgraph")
@@ -190,9 +158,7 @@ class ArchitectureTests(unittest.TestCase):
         self.assertIn("docs/数据模型设计.md", readme)
         self.assertFalse((docs / "archive").exists())
 
-        architecture_decisions = sorted(
-            path.name for path in (docs / "architecture").glob("*.md")
-        )
+        architecture_decisions = sorted(path.name for path in (docs / "architecture").glob("*.md"))
         self.assertEqual(
             architecture_decisions,
             [
@@ -202,9 +168,7 @@ class ArchitectureTests(unittest.TestCase):
             ],
         )
 
-        module_decisions = sorted(
-            path.name for path in (docs / "module-parser").glob("*.md")
-        )
+        module_decisions = sorted(path.name for path in (docs / "module-parser").glob("*.md"))
         self.assertEqual(
             module_decisions,
             [
@@ -244,26 +208,8 @@ class ArchitectureTests(unittest.TestCase):
             StateModifiedPayload,
         )
         from collaboration_framework.host.schemas import (
-            GetVisibleEntityArgs,
-            GetVisibleEntityResult,
-            HostAgentCompleted,
             HostAgentContext,
-            HostAgentFailed,
-            HostAgentToolCompleted,
-            HostAgentToolStarted,
-            HostAgentUsage,
-            IntentContext,
-            NarrationContext,
             NarrationOutput,
-            PlayerTurnPayload,
-            SearchVisibleEntitiesArgs,
-            SearchVisibleEntitiesResult,
-            ToolError,
-            ToolErrorResult,
-            TurnOutput,
-            TurnState,
-            VisibleEntitySummary,
-            WebSocketOutput,
         )
 
         models = (
@@ -273,26 +219,8 @@ class ArchitectureTests(unittest.TestCase):
             Intent,
             ActionRequest,
             ActionResult,
-            IntentContext,
-            NarrationContext,
             NarrationOutput,
             HostAgentContext,
-            HostAgentUsage,
-            HostAgentToolStarted,
-            HostAgentToolCompleted,
-            HostAgentCompleted,
-            HostAgentFailed,
-            SearchVisibleEntitiesArgs,
-            VisibleEntitySummary,
-            SearchVisibleEntitiesResult,
-            GetVisibleEntityArgs,
-            GetVisibleEntityResult,
-            ToolError,
-            ToolErrorResult,
-            PlayerTurnPayload,
-            WebSocketOutput,
-            TurnOutput,
-            TurnState,
             ActorState,
             GameState,
             StateChange,
@@ -313,15 +241,12 @@ class ArchitectureTests(unittest.TestCase):
             WinConditionSpec,
             ModuleContent,
         )
-        document = (ROOT / "docs" / "数据模型设计.md").read_text(
-            encoding="utf-8"
-        )
+        document = (ROOT / "docs" / "数据模型设计.md").read_text(encoding="utf-8")
         for model in models:
             with self.subTest(model=model.__name__):
                 self.assertIn(model.__name__, document)
                 for field_name in model.model_fields:
                     self.assertIn(field_name, document)
-
 
 
 class WriteBoundaryTests(unittest.TestCase):
@@ -341,6 +266,7 @@ class WriteBoundaryTests(unittest.TestCase):
                 hasattr(AdjudicationEngineService, method),
                 f"具体实现缺少写入口方法: {method}",
             )
+
 
 if __name__ == "__main__":
     unittest.main()

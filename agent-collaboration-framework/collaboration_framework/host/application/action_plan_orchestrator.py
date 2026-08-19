@@ -13,10 +13,10 @@ from uuid import uuid4
 from collaboration_framework.contracts import (
     ActionAdjudication,
     ActionPlan,
-    ActionPlanStep,
     ActionPlanPolicy,
     ActionPlanPolicyError,
     ActionPlanProgressEvent,
+    ActionPlanStep,
     AdjudicationExecution,
     AdjudicationValidationError,
     CancelActionPlanRequest,
@@ -55,7 +55,7 @@ from collaboration_framework.host.schemas import (
     SingleActionTurnResult,
 )
 
-from .host_agent_intent_resolver import TurnExecutionError
+from .errors import TurnExecutionError
 from .player_view_projector import PlayerViewProjector
 from .semantic_preservation import compare_repair_semantics
 

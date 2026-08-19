@@ -1,234 +1,126 @@
 # Agent Collaboration Framework
 
-这是成员 A（主持编排）、成员 B（确定性规则引擎）和成员 C（模组解析/审查）共同使用的模块化单体骨架。当前版本提供稳定边界、可运行的离线纵切、面向持久化的 `RuleEngineService + InMemoryEngineStore`，以及已经接入统一 Host 意图阶段的 OpenAI Agents SDK + OpenAI-compatible Host Agent Adapter；不接 LangGraph、PostgreSQL 或 FastAPI。
+这是 TRPG 主持编排、确定性规则引擎和模组发布共同使用的模块化单体框架。它提供
+Pydantic 契约、玩家安全投影、ActionPlan 编排、Opening/ActionPlan 叙事校验、规则引擎
+端口、离线 Fake 和 JSON Schema 导出；生产 HTTP、WebSocket、SQL 与模型 Provider 适配位于
+`trpg-backend`。
 
 ## 阅读入口
 
-核心阅读入口：
+1. [`docs/architecture.md`](docs/architecture.md)：现役生产链路、依赖方向和所有权边界。
+2. [`docs/数据模型设计.md`](docs/数据模型设计.md)：当前模型字段、revision、幂等和安全语义。
+3. [`docs/module-parser/MODULECONTENT-README.md`](docs/module-parser/MODULECONTENT-README.md)：模组发布语言与验证入口。
+4. [`docs/architecture/issue-208-action-plan.md`](docs/architecture/issue-208-action-plan.md)：有限 ActionPlan、步骤幂等和恢复设计。
 
-1. 当前文件：项目入口、运行方法和目录总览。
-2. [`docs/architecture.md`](docs/architecture.md)：唯一现行架构文档，包含 16 项统一决议、依赖方向和接口边界。
-3. [`docs/数据模型设计.md`](docs/数据模型设计.md)：当前 Pydantic 模型、字段、所有权、revision 和幂等语义。
-4. [`docs/module-parser/MODULECONTENT-README.md`](docs/module-parser/MODULECONTENT-README.md)：B/C 发布语言、字段设计和 Parser 验证入口。
-5. [`docs/module-parser/module-content-field-decisions.md`](docs/module-parser/module-content-field-decisions.md)：ModuleContent v1 当前生效的完整契约决议。
-6. [`docs/architecture/adr-module-parser-architecture.md`](docs/architecture/adr-module-parser-architecture.md)：已接受的 Module Parser 实施架构。
-7. [`docs/architecture/issue-208-action-plan.md`](docs/architecture/issue-208-action-plan.md)：Issue #225 已确认的有限 ActionPlan、步骤幂等与恢复设计。
-
-`docs/` 只保留当前生效的决议、使用说明和四个模组的验证产物，不保留已被吸收的
-Proposal、RFC、对比报告或阶段性讨论。
-
-## 唯一回合主链
+## 当前回合链路
 
 ```text
 PlayerInput
-  -> PlayerViewProjector.project()
-  -> HostAgentIntentResolver.resolve()
-       -> HostAgentPort.astream()        # Fake / compatible provider / OneShot
-       -> IntentParser.parse()           # Pydantic + 可信候选校验
-  -> ActionExecutor.execute()            # 每个合法 Intent 恰好调用一次
-  -> PlayerViewProjector.refresh()
-  -> ContextAssembler.for_narration()
-  -> NarrationModelPort.generate()       # Fake 返回原始 JSON
-  -> Narrator.narrate()                  # Pydantic + 事实引用校验
-  -> WebSocketGateway.handle()
+  -> PlayerView + KeeperCapabilityView
+  -> HostTurnDecisionModel.generate(HostAgentContext)
+  -> HostTurnDecisionParser
+       -> single_action: AdjudicationEngine
+       -> action_plan: ActionPlanOrchestrator
+            -> 每步刷新 PlayerView
+            -> ActionPlanStepAdjudicator
+            -> AdjudicationEngine
+  -> ActionPlanNarrator
+  -> narration policy
+  -> backend WebSocket turn.completed
 ```
 
-`Orchestrator.run()` 是离线演示和契约测试的兼容入口，复用同一个
-`HostAgentIntentResolver`，但不是 FastAPI 的生产主链。生产环境由 backend 的
-`TurnApplication.prepare()/complete()` 负责 SQL Runtime、持久化幂等和两阶段检定；
-禁止再复制第三套完整回合流程。
+`HostAgentContext` 是当前 Planner 的稳定输入，只包含可信 `PlayerInput`、玩家安全
+`PlayerView`、同作用域近期历史和受控 `KeeperCapabilityView`。它校验 room/player/actor、
+revision 与 Keeper scope 一致性，不允许模型读取数据库、完整 `GameState` 或完整
+`ModuleContent`。
 
-ModuleContent v3 的复合行动走独立的 `HostTurnDecisionExecutor`：单动作直接提交一个
-`ActionAdjudication`，复合动作交给 `ActionPlanOrchestrator`。后者只保存玩家安全的顺序
-语义步骤，每步开始时重新读取最新 PlayerView，再把一个单意图裁决交给 Engine。默认
-32 步技术上限和 3 步软调度窗口由冻结的 `ActionPlanPolicy` 控制；软窗口不是产品上限。
+模型只负责规划、当前步骤裁决候选和叙事候选。`AdjudicationEngine` 重新校验身份、revision、
+目标、规则和效果，并独占状态、骰点和 Event 提交。`ActionPlanNarrator` 只能表达已提交的
+player-safe evidence；`OpeningNarrator` 使用独立的开场上下文。共享
+`host/application/narration_policy.py` 统一处理文本规范化、协议残留拒绝、主体所有权和分句。
 
-当前 `HostAgentContext` 会把完整 PlayerView v2 交给一次 Host Agent run：其中包含同一 revision 的 `self_actor`、安全 `scene`
-（实体、人物、出口）、`known_information` 与可信 `checkpoint_options`。后端的
-OpenAI-compatible Prompt Adapter 直接序列化这份 Context；不会附加 GameState、数据库记录
-或完整 ModuleContent。Host Agent 的只读工具也只绑定这一份 PlayerView。
-
-## Host Agent 契约
-
-`host/ports/HostAgentPort` 是成员 A 在规则引擎之前进行意图理解的内部端口，不是新的 A/B/C 共享业务契约。它只有一个
-`astream(HostAgentContext)` 流式入口：接收可信 `PlayerInput` 和 B 已去密的 `PlayerView`，可产生零到多个脱敏的工具进度事件，
-最后必须以且仅以一个 `agent.completed` 或 `agent.failed` 结束。
-
-`agent.completed.raw_output` 只是普通、不可信的 JSON candidate；后续仍必须由 `IntentParser` 做确定性校验。当前已有
-`host/tools` 中绑定 `HostAgentContext.player_view` 的两个只读工具，以及拒绝模型自行传入身份作用域的框架无关
-`ToolRegistry`。它们只搜索/读取当前 `PlayerView`，不访问引擎、数据库或完整模组。
-
-`host/adapters/openai_agents/OpenAICompatibleHostAgentAdapter` 通过 OpenAI-compatible Chat Completions 运行兼容 provider，并使用
-OpenAI Agents SDK 自带的 model/tool 循环。每次 `astream()` 独立绑定当前 Context 与两个只读工具；Adapter 负责
-最大模型轮数、工具调用预算、单工具/整轮 timeout、脱敏事件、部分 usage 和严格 final JSON 对象边界。SDK/provider
-类型只存在于该私有 Adapter 和 bootstrap 组合根。
-
-`FakeHostAgent`、真实 Adapter 和无工具的一次性模型兼容 Adapter 都通过
-`HostAgentIntentResolver` 进入同一意图阶段。Resolver 要求流中恰好一个终止事件，
-并将 `agent.completed.raw_output` 交给纯确定性的 `IntentParser`；失败、缺失/重复
-终止或非法输出全部 fail closed。Adapter 和 Resolver 都不调用 `ActionExecutor`，
-不执行规则动作或状态写入。
-
-显式构造 compatible Adapter 时，由调用方在 bootstrap 阶段提供以下环境变量；模块 import 不读取环境或创建网络客户端：
-
-| 环境变量 | 默认值 | 说明 |
-|---|---|---|
-| `HOST_AGENT_API_KEY` | 无 | 必填；错误、日志和 `repr` 不输出明文 |
-| `HOST_AGENT_BASE_URL` | `https://dashscope.aliyuncs.com/compatible-mode/v1` | 必须是 HTTP(S) URL |
-| `HOST_AGENT_MODEL` | `qwen-plus` | 非空模型名 |
-| `HOST_AGENT_MAX_TURNS` | `6` | SDK Runner 最大轮数 |
-| `HOST_AGENT_MAX_TOOL_CALLS` | `8` | 第 9 次尝试在调用 handler 前失败 |
-| `HOST_AGENT_TOOL_TIMEOUT_SECONDS` | `5` | 单工具 timeout，安全回填 `TOOL_TIMEOUT` |
-| `HOST_AGENT_TIMEOUT_SECONDS` | `30` | 整轮 timeout |
-
-复制 `.env.example` 只用于准备非敏感默认项；项目不会在 import 时自动加载 `.env`。调用
-`bootstrap.host_agent.build_qwen_host_agent()` 或 `build_deepseek_host_agent()` 才会验证配置并构造客户端。
-
-## 2、3、4 点的统一结论
-
-- `Intent` 不再包含 `execution`，不存在由主持层决定“绕过引擎”的分支。
-- 对话、未知意图、`check.route="none"` 和需要检定的动作，只要已通过 Schema 校验，均通过同一个 `ActionExecutor.execute()` 边界恰好一次。
-- `Intent` 保留 `check`、`checkpoint_id` 和 `proposed_skills`。主持 Agent 根据玩家语义，从当前 `PlayerView.checkpoint_options` 的可信候选中选择 Checkpoint。
-- Checkpoint 的 `action` 只是语义提示，不是穷举式动词白名单。规则引擎不以 `intent.verb == checkpoint.action` 作为合法性条件。
-- 规则引擎仍负责复核房间、Actor、视图版本、Scene、Target、Checkpoint 和技能候选，并独占状态修改、Event、骰子与确定性规则执行。
-
-这同时避免两种失败模式：主持层无法凭 `execution` 绕开权威执行边界；规则引擎也不需要用有限动词表重新理解玩家自由语言。
+`Intent`、`ActionRequest`、`ActionResult`、`CompletedAction` 与
+`EngineExecutionResult` 仍是引擎及历史数据读取契约，但不是当前 Host 应用入口或发布的
+Host API。
 
 ## 模块边界
 
 ```mermaid
 flowchart LR
-    WS["host/gateway<br/>WebSocket"] --> ORCH["host/application<br/>Orchestrator"]
-    ORCH --> HPORT["host/ports<br/>模型端口"]
-    ORCH --> XPORT["ports<br/>跨组件端口"]
-    ORCH --> CONTRACTS["contracts<br/>稳定数据契约"]
-    HFAKE["host/adapters/fakes"] --> HPORT
-    HFAKE --> CONTRACTS
-    ENGINE["engine<br/>B 内部实现"] --> XPORT
+    BACKEND["trpg-backend<br/>HTTP / WebSocket / SQL / Provider"] --> HAPP["host/application<br/>ActionPlan + Narration"]
+    HAPP --> HPORTS["host/ports<br/>Planner step / Narration / History"]
+    HAPP --> XPORTS["ports<br/>Adjudication + PlayerView"]
+    HAPP --> CONTRACTS["contracts<br/>稳定数据契约"]
+    ADAPTERS["host/adapters<br/>Persistence + Fake"] --> HPORTS
+    ENGINE["engine<br/>权威规则与状态"] --> XPORTS
     ENGINE --> CONTRACTS
-    MODULE["module<br/>C 的发布校验"] --> CONTRACTS
-    BOOT["bootstrap<br/>组合根"] --> WS
-    BOOT --> HFAKE
-    BOOT --> ENGINE
-    BOOT --> MODULE
-
-    style CONTRACTS fill:#eef,stroke:#446
+    MODULE["module<br/>发布验证"] --> CONTRACTS
 ```
 
-依赖约束：
-
-- `contracts` 不依赖 A、B、C 的实现。
-- `host` 不 import `engine`、`module`、`GameState`、Event 或 `ModuleContent`。
-- `engine` 不 import `host`。
-- `module` 只负责把输入验证为发布契约，不参与运行时状态和 Event。
-- `bootstrap` 是唯一知道具体实现并完成装配的地方。
+- `contracts` 不依赖 Host、Engine、Module 或 Provider。
+- `host` 不 import Engine/Module 实现，也不写权威状态。
+- `engine` 不 import Host，并独占规则执行与持久化提交语义。
+- `module` 只验证并发布 `ModuleContent`，不参与运行时状态。
+- Provider prompt/client/retry 属于 backend；Framework 只保留 provider-neutral prompt contract。
 
 ## 目录
 
 ```text
 collaboration_framework/
-├── contracts/                 # 跨边界 Pydantic 数据契约
-│   ├── action.py              # Intent / ActionRequest / 安全 ActionResult
-│   ├── module.py              # B/C 共审的声明式 ModuleContent
-│   ├── player_view.py         # ProjectionSnapshot / PlayerView
-│   └── runtime.py             # PlayerInput
-├── ports/                     # A/B 跨组件端口
-│   ├── action_executor.py     # 唯一权威命令：execute()
-│   └── player_view_source.py  # 只读投影源：read()
-├── host/                      # 成员 A：主持编排
-│   ├── application/           # 普通 async 工作流与应用服务
-│   ├── ports/                 # Intent/Narration/Host Agent 模型抽象及 TurnPort
-│   ├── adapters/fakes/        # 无网络、无 API Key 的离线 Fake
-│   ├── adapters/openai_agents/# 私有 OpenAI Agents SDK + compatible Adapter
-│   ├── schemas/               # A 内部 Agent/Context/Turn/Narration Schema
-│   ├── tools/                 # 绑定当前 PlayerView 的 player-safe 只读工具
-│   └── gateway/               # Player-safe WebSocket 输出
-├── engine/                    # 成员 B：Service、Kernel、Store 端口/适配器与内部模型
-│   ├── service.py            # 跨房间复用的 ActionExecutor / PlayerViewSource
-│   ├── kernel.py             # 无存储依赖的确定性规则求值
-│   ├── ports/                # B 私有 EngineStore / Transaction 接缝
-│   └── adapters/             # 完整离线 InMemoryEngineStore
-├── module/                    # 成员 C：ModuleContent 发布校验入口
-├── bootstrap/                 # 组合根；装配 A/B/C 的具体实现
-├── schema_export.py           # 从 Pydantic 唯一事实源导出 JSON Schema
-└── cli.py                     # 完全离线的 Fake 演示入口
+├── contracts/             # ActionPlan、legacy action、PlayerView、ModuleContent
+├── ports/                 # AdjudicationExecutor、PlayerViewSource
+├── host/
+│   ├── application/       # ActionPlan、Opening/ActionPlan Narrator、共享 policy
+│   ├── ports/             # 现役模型、历史与持久化端口
+│   ├── prompts/           # provider-neutral ActionPlan prompt contract
+│   ├── schemas/           # Planner、ActionPlan、Opening、History、Narration
+│   └── adapters/          # ActionPlan persistence 与离线 Fake
+├── engine/                # 确定性规则、Store 端口/适配器和内部模型
+├── module/                # ModuleContent 发布验证
+└── schema_export.py       # 从 Pydantic 事实源导出 JSON Schema
 ```
 
 ## 关键所有权
 
-| 契约/能力 | 所有者 | 消费者 | 说明 |
-|---|---|---|---|
-| `PlayerInput` | 协作层 | A | 可信连接身份在进入应用前建立 |
-| `ProjectionSnapshot` | A/B 共审 | A | B 提供的只读、无 `GameState` 投影源 |
-| `PlayerView` | A | A 的模型端口、Gateway | 完整、不可变、revision-bound 的玩家安全角色/场景/知识快照和可信候选 |
-| `Intent` | A/B 共审 | B | 语义提议；无 `execution` |
-| `ActionExecutor.execute()` | B 提供、A 消费 | A/B | 唯一可能产生权威副作用的命令边界 |
-| `ActionResult` | A/B 共审 | A | Player-safe；不暴露 StateChange/Event payload |
-| `EngineExecutionResult` | B | B | 内部含 StateChange、Event 和版本信息 |
-| `EngineRuntimeSnapshot`/`CompletedAction` | B | B | Store 加载快照与幂等执行记录 |
-| `NarrationOutput` | A | Gateway | 模型原始 JSON 经 Pydantic 和事实引用校验后的输出 |
-| `HostAgentContext`/`HostAgentEvent`/`HostAgentUsage` | A | A 的 Host Agent Adapter | A 内部、框架无关；经 Resolver 接入意图阶段，不成为 A/B/C 共享契约 |
-| `ToolRegistry` 与 player-safe 工具 | A | A 的 Host Agent Adapter | 绑定当前 Context，只读；参数/结果均由项目 Schema 校验 |
-| `ActionPlan` / `ActionPlanPolicy` | A/B 共审 | A、Gateway | 有限顺序语义计划；不含未来裁决、效果、身份或 revision |
-| `ActionPlanRun` / `ActionPlanRunStore` | A，B 提供 Adapter | A/B | 独立于 Engine Store 的编排游标、CAS、lease、占用和恢复记录 |
-| `ActionPlanOrchestrator` | A | A | 每次只向 Engine 提交当前 revision 上的一个 `ActionAdjudication` |
-| `ModuleContent`/`CheckpointSpec`/`RuleSpec` | B/C 共审 | B、C | 声明式内容语言；A 不直接消费 |
+| 契约/能力 | 所有者 | 说明 |
+|---|---|---|
+| `PlayerInput` / `PlayerView` | A/B 共审 | 可信身份与 revision-bound 玩家安全投影 |
+| `HostAgentContext` | Host | Planner 输入；含 scope 校验的安全上下文 |
+| `HostTurnDecision` / `ActionPlan` | A/B 共审 | 单动作或有限顺序语义计划；不含未来效果 |
+| `AdjudicationExecutor` | Engine 提供、Host 消费 | 唯一权威写入边界 |
+| `ActionPlanRun` / Store | Host | CAS、lease、步骤游标和恢复状态 |
+| `NarrationOutput` | Host | Opening、ActionPlan、持久化与发送共享的安全叙事输出 |
+| `ModuleContent` | B/C 共审 | C 发布、B 执行的声明式内容语言 |
+| legacy action/engine records | Engine/Storage | 保持历史 SQL 记录和表达式兼容读取 |
 
-## ModuleContent 为什么在 `contracts/module.py`
+## Schema 发布
 
-`ModuleContent` 是 C 发布、B 执行的跨成员协议，而不是 C 的私有解析中间态，也不是 B 的运行时内部对象。把它与声明式 `CheckpointSpec`、`RuleSpec` 放在 `contracts/module.py`，可以让 B/C 共同评审和版本化同一个发布语言，并让 `module/validation.py` 保持为薄适配层。
+运行 `python -m collaboration_framework.schema_export` 会从 Pydantic 唯一事实源生成
+`schemas/*.schema.json`。发布面包括 Module、PlayerView、Adjudication、ActionPlan、Opening、
+Narration、RecentHistory 与 `HostAgentContext`；backend WebSocket DTO 由 backend 自己维护，
+不会从 Framework exporter 生成。
 
-这里的 `RuleSpec`/`CheckpointSpec` 只描述模组声明了什么；Hook 调度、骰子、状态迁移、Event 和执行期缓存仍属于 `engine/`。A 不 import `ModuleContent`，只从 `PlayerViewSource` 取得经过安全过滤的 `ProjectionSnapshot`，再自行构造 `PlayerView`。
+## 验证
 
-## 运行与验证
-
-要求 Python 3.11+：
+要求 Python 3.11+ 和 `uv`：
 
 ```bash
-python -m collaboration_framework.schema_export
-python -m unittest discover -s tests -v
+uv run python -m collaboration_framework.schema_export
+uv run ruff check .
+uv run ruff format --check .
+uv run ty check
 ```
 
-离线演示：
+Framework 测试依赖由仓库 backend 开发环境提供时，可在 `trpg-backend` 执行：
 
 ```bash
-python -m collaboration_framework.cli \
-  --module fixtures/demo-module.json \
-  --state fixtures/demo-state.json \
-  --input fixtures/demo-turn.json
+uv run pytest ../agent-collaboration-framework/tests
 ```
 
-组合根会注册房间的 `ModuleContent + GameState`，并装配一个可服务多个房间的 `RuleEngineService`。后续数据库接入只需实现相同的 `EngineStore` / `EngineTransaction` 语义并替换 adapter；不修改 Host 端口、RuleKernel 或公共 Schema。
+## 明确边界
 
-Schema 文件由 Pydantic 模型自动生成，不应手工维护：
-
-- `schemas/module-content.schema.json`
-- `schemas/player-input.schema.json`
-- `schemas/projection-snapshot.schema.json`
-- `schemas/player-view.schema.json`
-- `schemas/intent.schema.json`
-- `schemas/action-request.schema.json`
-- `schemas/action-result.schema.json`
-- `schemas/action-plan.schema.json`
-- `schemas/action-plan-policy.schema.json`
-- `schemas/action-plan-progress.schema.json`
-- `schemas/cancel-action-plan-request.schema.json`
-- `schemas/get-adjudication-status-request.schema.json`
-- `schemas/adjudication-status.schema.json`
-- `schemas/narration-output.schema.json`
-- `schemas/websocket-output.schema.json`
-- `schemas/host-agent-context.schema.json`（A 内部 Adapter 边界）
-- `schemas/host-agent-usage.schema.json`（A 内部 Adapter 边界）
-- `schemas/host-agent-event.schema.json`（A 内部 Adapter 边界）
-
-工具参数与结果不额外生成一组仓库级 Schema 文件。`ToolDefinition.arguments_json_schema()` /
-`result_json_schema()` 直接从对应的严格 Pydantic 模型产生 Adapter 可消费的 Schema，避免第二份手写协议。
-
-## 当前明确不做
-
-- 不让 Host Agent 调用 `ActionExecutor`、决定规则结果或修改权威状态。
-- 不实现数据库/RAG/网络搜索、并行工具调用或任何写工具。
-- 不使用 LangGraph。
-- 不由主持层实现 Rule、Hook、Checkpoint 执行、Dice、GameState 修改或 Event 写入。
-- 不把 `TurnState`、`EngineExecutionResult`、Event 或摘要 Outbox 暴露为跨组件公共契约。
-- 不把 `components/` 当成第二套永久架构；统一代码直接按所有权进入上述模块。
+- 不让模型直接提交 `GameState`、Event、骰点或数据库写入。
+- 不把 Keeper capability、完整规则结果或历史私有文本发送给玩家。
+- 不让未来步骤提前获得裁决；每步必须基于最新 PlayerView。
+- 不把 Provider SDK 类型、客户端或配置引入 Framework 核心。
+- 不将 legacy 数据读取契约重新暴露为当前 Host API。

@@ -11,7 +11,7 @@ from collaboration_framework.host.schemas.action_plan import (
     ActionPlanNarrationOutput,
 )
 
-from .narrator import (
+from .narration_policy import (
     narration_subject_rejection_reason,
     narration_text_rejection_reason,
     normalize_narration_text,

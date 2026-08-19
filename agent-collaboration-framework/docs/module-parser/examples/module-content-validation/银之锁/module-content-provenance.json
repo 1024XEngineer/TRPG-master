@@ -1,0 +1,271 @@
+{
+  "_comment": "本文件记录结构化内容对应的银之锁.docx非空段落号，供人工逐项复核。",
+  "source": "银之锁.docx",
+  "paragraph_numbering": "解压 word/document.xml 后按非空 w:p 顺序从 1 编号",
+  "module_id": "silver-lock",
+  "version": "3.0.0",
+  "locations": {
+    "sealed_room": [
+      11,
+      13,
+      17,
+      20,
+      26,
+      45,
+      50,
+      53
+    ],
+    "corridor": [
+      57,
+      58,
+      60,
+      61,
+      62,
+      63
+    ],
+    "outside": [
+      57,
+      63
+    ]
+  },
+  "information": {
+    "restraints_removed": [
+      11,
+      12,
+      13,
+      14
+    ],
+    "wall_key_found": [
+      17,
+      18,
+      19
+    ],
+    "bed_key_found": [
+      15,
+      16
+    ],
+    "vent_key_found": [
+      20,
+      22,
+      23
+    ],
+    "flashlight_materialized": [
+      30,
+      31,
+      32
+    ],
+    "cutters_materialized": [
+      33,
+      34,
+      48
+    ],
+    "porridge_materialized": [
+      33,
+      34,
+      49
+    ],
+    "danger_note_read": [
+      35,
+      36,
+      37,
+      38
+    ],
+    "bast_contacted": [
+      39,
+      40,
+      41,
+      42,
+      43
+    ],
+    "bast_rescued": [
+      45,
+      46,
+      47,
+      48
+    ],
+    "bast_trusted": [
+      49
+    ],
+    "rat_thing_seen": [
+      22,
+      24,
+      25
+    ],
+    "door_ghost_seen": [
+      50,
+      51
+    ],
+    "captured_and_returned": [
+      58,
+      60,
+      61
+    ],
+    "silver_lock_broken": [
+      55,
+      56,
+      58,
+      62,
+      63
+    ],
+    "kidnapper_defeated": [
+      60,
+      62,
+      63
+    ],
+    "investigator_escaped": [
+      57,
+      63
+    ],
+    "bed_search_hint": [
+      12,
+      13,
+      14
+    ],
+    "bed_move_hint": [
+      15,
+      16
+    ],
+    "wardrobe_sound": [
+      45,
+      46
+    ]
+  },
+  "rules": {
+    "cut_restraints_with_knife": [
+      11,
+      63
+    ],
+    "cut_restraints_on_bed_corner": [
+      11,
+      63
+    ],
+    "search_bed": [
+      11,
+      63
+    ],
+    "move_bed": [
+      11,
+      63
+    ],
+    "inspect_wall_painting": [
+      11,
+      63
+    ],
+    "open_top_drawer": [
+      11,
+      63
+    ],
+    "open_middle_drawer": [
+      11,
+      63
+    ],
+    "materialize_flashlight": [
+      11,
+      63
+    ],
+    "materialize_bolt_cutters": [
+      11,
+      63
+    ],
+    "materialize_osmanthus_porridge": [
+      11,
+      63
+    ],
+    "light_vent": [
+      11,
+      63
+    ],
+    "open_bottom_drawer": [
+      11,
+      63
+    ],
+    "contact_bast_with_white_paper": [
+      11,
+      63
+    ],
+    "contact_bast_with_last_page": [
+      11,
+      63
+    ],
+    "listen_to_wardrobe": [
+      11,
+      63
+    ],
+    "cut_wardrobe_chain": [
+      11,
+      63
+    ],
+    "feed_bast": [
+      11,
+      63
+    ],
+    "inspect_door_monitor": [
+      11,
+      63
+    ],
+    "ask_bast_to_open_door": [
+      11,
+      63
+    ],
+    "enter_corridor": [
+      11,
+      63
+    ],
+    "bast_breaks_silver_lock": [
+      11,
+      63
+    ],
+    "kidnapper_returns_unprotected_actor": [
+      11,
+      63
+    ],
+    "rat_thing_sanity": [
+      11,
+      63
+    ],
+    "door_ghost_sanity": [
+      11,
+      63
+    ],
+    "fight_blinded_kidnapper": [
+      11,
+      63
+    ],
+    "escape_through_exit": [
+      11,
+      63
+    ]
+  },
+  "knowledge_goals": {
+    "free_investigator": [
+      11,
+      63
+    ],
+    "obtain_fixed_tools": [
+      11,
+      63
+    ],
+    "rescue_and_befriend_bast": [
+      11,
+      63
+    ],
+    "break_silver_lock": [
+      11,
+      63
+    ],
+    "reach_exit": [
+      11,
+      63
+    ]
+  },
+  "ending_anchors": {
+    "kill_kidnapper_then_escape": [
+      62,
+      63
+    ],
+    "escape_after_lock_breaks": [
+      62,
+      63
+    ]
+  }
+}

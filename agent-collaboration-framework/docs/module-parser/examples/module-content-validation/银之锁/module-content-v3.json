@@ -1,0 +1,3323 @@
+{
+  "content_schema_version": 3,
+  "module_id": "silver-lock",
+  "version": "3.0.0",
+  "world_ref": "coc-7e",
+  "background": "当代。单名调查员在昏暗的银色房间醒来，失去近期记忆且手脚被捆。叙事保持幽闭、失忆与超现实谜题交织的基调；芭斯特身份、银之锁原理、绑架者出现条件及抽屉内容在对应线索提交前不得泄露。",
+  "information": [
+    {
+      "id": "restraints_removed",
+      "kind": "fact",
+      "title": "摆脱束缚",
+      "keeper_content": "调查员已用铅笔刀或床角铁皮割断绳索。",
+      "player_content": "绳索已经被割断，你恢复了行动自由。",
+      "criticality": "essential",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "wall_key_found",
+      "kind": "fact",
+      "title": "挂画后的钥匙",
+      "keeper_content": "挂画后的暗格藏着上层抽屉钥匙。",
+      "player_content": "挂画后的暗格里藏着一把小钥匙。",
+      "criticality": "supporting",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "bed_key_found",
+      "kind": "fact",
+      "title": "床下的钥匙",
+      "keeper_content": "移动床后可以取得中层抽屉钥匙。",
+      "player_content": "床被移开后，墙角的小钥匙终于可以拿到了。",
+      "criticality": "supporting",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "vent_key_found",
+      "kind": "fact",
+      "title": "通风管钥匙",
+      "keeper_content": "手电照明可以发现通风管口的下层抽屉钥匙。",
+      "player_content": "手电光照亮管口，一把很小的钥匙卡在那里。",
+      "criticality": "supporting",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "flashlight_materialized",
+      "kind": "fact",
+      "title": "速写本中的手电",
+      "keeper_content": "撕下预先画有手电的一页会显现唯一手电。",
+      "player_content": "纸页化成了一柄可以使用的手电。",
+      "criticality": "essential",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "cutters_materialized",
+      "kind": "fact",
+      "title": "速写本中的钢钳",
+      "keeper_content": "固定钢钳页显现后不可再次生成。",
+      "player_content": "画中的钢钳从纸上显现出来。",
+      "criticality": "essential",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "porridge_materialized",
+      "kind": "fact",
+      "title": "速写本中的糖粥",
+      "keeper_content": "固定糖粥页显现后不可再次生成。",
+      "player_content": "一碗桂花糯米糖粥从纸上显现出来。",
+      "criticality": "essential",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "danger_note_read",
+      "kind": "fact",
+      "title": "门后的危险",
+      "keeper_content": "中层抽屉字条提示开门后仍有危险。",
+      "player_content": "字条写着：当你以为安全的时候，就是你最危险的时候。",
+      "criticality": "supporting",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "bast_contacted",
+      "kind": "fact",
+      "title": "时空箱另一端的回应",
+      "keeper_content": "下层抽屉可与被囚的芭斯特交流。",
+      "player_content": "白纸从抽屉另一端回来，上面出现了陌生的回应。",
+      "criticality": "supporting",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "bast_rescued",
+      "kind": "fact",
+      "title": "衣柜中的猫",
+      "keeper_content": "钢钳剪断锁链后救出被封住口和四肢的芭斯特。",
+      "player_content": "衣柜中被束缚的猫已经获救。",
+      "criticality": "essential",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "bast_trusted",
+      "kind": "fact",
+      "title": "芭斯特的信任",
+      "keeper_content": "糖粥使芭斯特信任并跟随调查员。",
+      "player_content": "猫吃下糖粥，愿意跟在你身边。",
+      "criticality": "essential",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "rat_thing_seen",
+      "kind": "fact",
+      "title": "通风管中的人面鼠",
+      "keeper_content": "人面鼠只用于正式 SAN 检定，不进入战斗。",
+      "player_content": "光束中显出一只长着微缩人脸和黄色獠牙的怪物。",
+      "criticality": "supporting",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "door_ghost_seen",
+      "kind": "fact",
+      "title": "显示器中的虚影",
+      "keeper_content": "首次查看门外显示器会看见虚影并触发 SAN 检定。",
+      "player_content": "显示器里，一个模糊的鬼魂虚影正站在门外。",
+      "criticality": "supporting",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "captured_and_returned",
+      "kind": "fact",
+      "title": "再次被抓回房间",
+      "keeper_content": "未获芭斯特保护时，绑架者把调查员抓回房间并重置逃脱边界。",
+      "player_content": "你再次在银色房间中醒来；已经获得的线索和工具仍在。",
+      "criticality": "supporting",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "silver_lock_broken",
+      "kind": "fact",
+      "title": "银之锁解除",
+      "keeper_content": "芭斯特牺牲后法术核心消失，银锁解除。",
+      "player_content": "芭斯特扑向绑架者后倒下，束缚脚踝的力量随之消失。",
+      "criticality": "essential",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "kidnapper_defeated",
+      "kind": "fact",
+      "title": "绑架者被击败",
+      "keeper_content": "调查员夺取匕首并结束绑架者威胁。",
+      "player_content": "你夺下匕首，绑架者再也无法阻止你。",
+      "criticality": "supporting",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "investigator_escaped",
+      "kind": "fact",
+      "title": "抵达出口",
+      "keeper_content": "调查员在银锁解除后到达长廊外。",
+      "player_content": "你穿过透着光的门，终于逃离了银之锁的范围。",
+      "criticality": "essential",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "bed_search_hint",
+      "kind": "fact",
+      "title": "床边的替代办法",
+      "keeper_content": "侦查失败不锁死主线，提示铅笔刀和锋利铁皮。",
+      "player_content": "即使没看清床下，你仍能用随身的铅笔刀处理绳索。",
+      "criticality": "supporting",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "bed_move_hint",
+      "kind": "fact",
+      "title": "移动床的提示",
+      "keeper_content": "力量失败后仍允许重试或使用杠杆。",
+      "player_content": "床只是卡住了；调整受力点或借助工具仍可再次尝试。",
+      "criticality": "supporting",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "wardrobe_sound",
+      "kind": "fact",
+      "title": "衣柜中的动静",
+      "keeper_content": "聆听可确认衣柜内有活物，但不是开锁前置条件。",
+      "player_content": "衣柜深处传来微弱的呻吟和沙沙声。",
+      "criticality": "supporting",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    }
+  ],
+  "knowledge_goals": [
+    {
+      "id": "free_investigator",
+      "target_information_ids": [
+        "restraints_removed"
+      ],
+      "completion": "all",
+      "required_for_core_resolution": true
+    },
+    {
+      "id": "obtain_fixed_tools",
+      "target_information_ids": [
+        "flashlight_materialized",
+        "cutters_materialized",
+        "porridge_materialized"
+      ],
+      "completion": "all",
+      "required_for_core_resolution": true
+    },
+    {
+      "id": "rescue_and_befriend_bast",
+      "target_information_ids": [
+        "bast_rescued",
+        "bast_trusted"
+      ],
+      "completion": "all",
+      "required_for_core_resolution": true
+    },
+    {
+      "id": "break_silver_lock",
+      "target_information_ids": [
+        "silver_lock_broken"
+      ],
+      "completion": "all",
+      "required_for_core_resolution": true
+    },
+    {
+      "id": "reach_exit",
+      "target_information_ids": [
+        "investigator_escaped"
+      ],
+      "completion": "all",
+      "required_for_core_resolution": true
+    }
+  ],
+  "entities": [
+    {
+      "id": "restraint_rope",
+      "kind": "object",
+      "name": "细绳",
+      "player_visible_name": "细绳",
+      "description": "捆住调查员手脚的细绳。",
+      "located_in": "sealed_room",
+      "state": {
+        "cut": false
+      },
+      "visibility": "public",
+      "plot_relevance": true
+    },
+    {
+      "id": "pencil_knife",
+      "kind": "object",
+      "name": "铅笔刀",
+      "player_visible_name": "铅笔刀",
+      "description": "调查员醒来时仍随身带着的小刀。",
+      "located_in": "sealed_room",
+      "state": {},
+      "visibility": "public",
+      "plot_relevance": true,
+      "item_component": {
+        "portable": true,
+        "unique": true,
+        "quantity": 1
+      }
+    },
+    {
+      "id": "bed",
+      "kind": "object",
+      "name": "单人床",
+      "player_visible_name": "单人床",
+      "description": "调查员醒来时躺着的床，床角铁皮翘起。",
+      "located_in": "sealed_room",
+      "state": {
+        "moved": false
+      },
+      "visibility": "public",
+      "plot_relevance": true
+    },
+    {
+      "id": "sharp_bed_corner",
+      "kind": "object",
+      "name": "锋利铁皮",
+      "player_visible_name": "锋利铁皮",
+      "description": "床角翘起的一片锋利铁皮。",
+      "located_in": "sealed_room",
+      "state": {
+        "noticed": false
+      },
+      "visibility": "public",
+      "plot_relevance": true
+    },
+    {
+      "id": "wall_painting",
+      "kind": "object",
+      "name": "猫与糖粥的挂画",
+      "player_visible_name": "猫与糖粥的挂画",
+      "description": "墙上的大幅挂画，无法整幅取下。",
+      "located_in": "sealed_room",
+      "state": {
+        "inspected": false
+      },
+      "visibility": "public",
+      "plot_relevance": true
+    },
+    {
+      "id": "wall_key",
+      "kind": "object",
+      "name": "暗格钥匙",
+      "player_visible_name": "暗格钥匙",
+      "description": "打开上层抽屉的钥匙。",
+      "located_in": "sealed_room",
+      "state": {
+        "found": false
+      },
+      "visibility": "public",
+      "plot_relevance": true,
+      "visibility_conditions": [
+        {
+          "op": "predicate",
+          "predicate": "entity_state_is",
+          "args": {
+            "entity_id": "wall_key",
+            "key": "found",
+            "value": true
+          }
+        }
+      ],
+      "item_component": {
+        "portable": true,
+        "unique": true,
+        "quantity": 1
+      }
+    },
+    {
+      "id": "bed_key",
+      "kind": "object",
+      "name": "床下钥匙",
+      "player_visible_name": "床下钥匙",
+      "description": "打开中层抽屉的钥匙。",
+      "located_in": "sealed_room",
+      "state": {
+        "found": false
+      },
+      "visibility": "public",
+      "plot_relevance": true,
+      "visibility_conditions": [
+        {
+          "op": "predicate",
+          "predicate": "entity_state_is",
+          "args": {
+            "entity_id": "bed_key",
+            "key": "found",
+            "value": true
+          }
+        }
+      ],
+      "item_component": {
+        "portable": true,
+        "unique": true,
+        "quantity": 1
+      }
+    },
+    {
+      "id": "vent_key",
+      "kind": "object",
+      "name": "通风管钥匙",
+      "player_visible_name": "通风管钥匙",
+      "description": "打开下层抽屉的钥匙。",
+      "located_in": "sealed_room",
+      "state": {
+        "found": false
+      },
+      "visibility": "public",
+      "plot_relevance": true,
+      "visibility_conditions": [
+        {
+          "op": "predicate",
+          "predicate": "entity_state_is",
+          "args": {
+            "entity_id": "vent_key",
+            "key": "found",
+            "value": true
+          }
+        }
+      ],
+      "item_component": {
+        "portable": true,
+        "unique": true,
+        "quantity": 1
+      }
+    },
+    {
+      "id": "top_drawer",
+      "kind": "object",
+      "name": "上层抽屉",
+      "player_visible_name": "上层抽屉",
+      "description": "由暗格钥匙开启。",
+      "located_in": "sealed_room",
+      "state": {
+        "opened": false
+      },
+      "visibility": "public",
+      "plot_relevance": true
+    },
+    {
+      "id": "middle_drawer",
+      "kind": "object",
+      "name": "中层抽屉",
+      "player_visible_name": "中层抽屉",
+      "description": "由床下钥匙开启。",
+      "located_in": "sealed_room",
+      "state": {
+        "opened": false
+      },
+      "visibility": "public",
+      "plot_relevance": true
+    },
+    {
+      "id": "bottom_drawer",
+      "kind": "object",
+      "name": "下层抽屉",
+      "player_visible_name": "下层抽屉",
+      "description": "由通风管钥匙开启，是临时构建的时空箱。",
+      "located_in": "sealed_room",
+      "state": {
+        "opened": false
+      },
+      "visibility": "public",
+      "plot_relevance": true
+    },
+    {
+      "id": "sketchbook",
+      "kind": "object",
+      "name": "四页速写本",
+      "player_visible_name": "四页速写本",
+      "description": "只允许显现手电、钢钳和糖粥；最后一页仅用于通信。",
+      "located_in": "sealed_room",
+      "state": {
+        "found": false
+      },
+      "visibility": "public",
+      "plot_relevance": true
+    },
+    {
+      "id": "flashlight_page",
+      "kind": "object",
+      "name": "手电纸页",
+      "player_visible_name": "手电纸页",
+      "description": "预先画有手电的一页。",
+      "located_in": "sealed_room",
+      "state": {
+        "consumed": false
+      },
+      "visibility": "public",
+      "plot_relevance": true,
+      "visibility_conditions": [
+        {
+          "op": "predicate",
+          "predicate": "entity_state_is",
+          "args": {
+            "entity_id": "sketchbook",
+            "key": "found",
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "cutters_page",
+      "kind": "object",
+      "name": "钢钳纸页",
+      "player_visible_name": "钢钳纸页",
+      "description": "只能用于固定钢钳的一页。",
+      "located_in": "sealed_room",
+      "state": {
+        "consumed": false
+      },
+      "visibility": "public",
+      "plot_relevance": true,
+      "visibility_conditions": [
+        {
+          "op": "predicate",
+          "predicate": "entity_state_is",
+          "args": {
+            "entity_id": "sketchbook",
+            "key": "found",
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "porridge_page",
+      "kind": "object",
+      "name": "糖粥纸页",
+      "player_visible_name": "糖粥纸页",
+      "description": "只能用于固定糖粥的一页。",
+      "located_in": "sealed_room",
+      "state": {
+        "consumed": false
+      },
+      "visibility": "public",
+      "plot_relevance": true,
+      "visibility_conditions": [
+        {
+          "op": "predicate",
+          "predicate": "entity_state_is",
+          "args": {
+            "entity_id": "sketchbook",
+            "key": "found",
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "communication_page",
+      "kind": "object",
+      "name": "通信纸页",
+      "player_visible_name": "通信纸页",
+      "description": "最后一页，只能替代白纸与芭斯特交流。",
+      "located_in": "sealed_room",
+      "state": {
+        "consumed": false
+      },
+      "visibility": "public",
+      "plot_relevance": true,
+      "visibility_conditions": [
+        {
+          "op": "predicate",
+          "predicate": "entity_state_is",
+          "args": {
+            "entity_id": "sketchbook",
+            "key": "found",
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "flashlight",
+      "kind": "object",
+      "name": "手电",
+      "player_visible_name": "手电",
+      "description": "速写本固定显现的手电。",
+      "located_in": "sealed_room",
+      "state": {
+        "materialized": false
+      },
+      "visibility": "public",
+      "plot_relevance": true,
+      "visibility_conditions": [
+        {
+          "op": "predicate",
+          "predicate": "entity_state_is",
+          "args": {
+            "entity_id": "flashlight",
+            "key": "materialized",
+            "value": true
+          }
+        }
+      ],
+      "item_component": {
+        "portable": true,
+        "unique": true,
+        "quantity": 1
+      }
+    },
+    {
+      "id": "bolt_cutters",
+      "kind": "object",
+      "name": "钢钳",
+      "player_visible_name": "钢钳",
+      "description": "速写本固定显现的钢钳。",
+      "located_in": "sealed_room",
+      "state": {
+        "materialized": false
+      },
+      "visibility": "public",
+      "plot_relevance": true,
+      "visibility_conditions": [
+        {
+          "op": "predicate",
+          "predicate": "entity_state_is",
+          "args": {
+            "entity_id": "bolt_cutters",
+            "key": "materialized",
+            "value": true
+          }
+        }
+      ],
+      "item_component": {
+        "portable": true,
+        "unique": true,
+        "quantity": 1
+      }
+    },
+    {
+      "id": "osmanthus_porridge",
+      "kind": "object",
+      "name": "桂花糯米糖粥",
+      "player_visible_name": "桂花糯米糖粥",
+      "description": "速写本固定显现的一碗糖粥。",
+      "located_in": "sealed_room",
+      "state": {
+        "materialized": false,
+        "fed": false
+      },
+      "visibility": "public",
+      "plot_relevance": true,
+      "visibility_conditions": [
+        {
+          "op": "predicate",
+          "predicate": "entity_state_is",
+          "args": {
+            "entity_id": "osmanthus_porridge",
+            "key": "materialized",
+            "value": true
+          }
+        }
+      ],
+      "item_component": {
+        "portable": true,
+        "unique": true,
+        "quantity": 1
+      }
+    },
+    {
+      "id": "white_paper",
+      "kind": "object",
+      "name": "白纸",
+      "player_visible_name": "白纸",
+      "description": "中层抽屉中的通信纸。",
+      "located_in": "sealed_room",
+      "state": {
+        "found": false,
+        "used": false
+      },
+      "visibility": "public",
+      "plot_relevance": true,
+      "visibility_conditions": [
+        {
+          "op": "predicate",
+          "predicate": "entity_state_is",
+          "args": {
+            "entity_id": "white_paper",
+            "key": "found",
+            "value": true
+          }
+        }
+      ],
+      "item_component": {
+        "portable": true,
+        "unique": true,
+        "quantity": 1
+      }
+    },
+    {
+      "id": "vent",
+      "kind": "object",
+      "name": "通风管道",
+      "player_visible_name": "通风管道",
+      "description": "高处的通风管道，手电能照亮管口。",
+      "located_in": "sealed_room",
+      "state": {
+        "lit": false
+      },
+      "visibility": "public",
+      "plot_relevance": true
+    },
+    {
+      "id": "rat_thing",
+      "kind": "npc",
+      "name": "人面鼠",
+      "player_visible_name": "人面鼠",
+      "description": "藏在通风管中监视房间的怪物。",
+      "located_in": "sealed_room",
+      "state": {
+        "seen": false,
+        "san_resolved": false
+      },
+      "visibility": "public",
+      "plot_relevance": true,
+      "visibility_conditions": [
+        {
+          "op": "predicate",
+          "predicate": "entity_state_is",
+          "args": {
+            "entity_id": "rat_thing",
+            "key": "seen",
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "wardrobe",
+      "kind": "object",
+      "name": "锁链衣柜",
+      "player_visible_name": "锁链衣柜",
+      "description": "把手缠着手指粗锁链的衣柜。",
+      "located_in": "sealed_room",
+      "state": {
+        "opened": false
+      },
+      "visibility": "public",
+      "plot_relevance": true
+    },
+    {
+      "id": "bast",
+      "kind": "npc",
+      "name": "芭斯特",
+      "player_visible_name": "芭斯特",
+      "description": "被囚禁在衣柜中的猫。",
+      "located_in": "sealed_room",
+      "state": {
+        "freed": false,
+        "contacted": false,
+        "trusted": false,
+        "following": false,
+        "alive": true
+      },
+      "visibility": "public",
+      "plot_relevance": true,
+      "visibility_conditions": [
+        {
+          "op": "predicate",
+          "predicate": "entity_state_is",
+          "args": {
+            "entity_id": "bast",
+            "key": "freed",
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "door_monitor",
+      "kind": "object",
+      "name": "门外显示器",
+      "player_visible_name": "门外显示器",
+      "description": "银门旁用于观察门外的显示器。",
+      "located_in": "sealed_room",
+      "state": {
+        "ghost_seen": false,
+        "san_resolved": false
+      },
+      "visibility": "public",
+      "plot_relevance": true
+    },
+    {
+      "id": "silver_door",
+      "kind": "object",
+      "name": "银白色房门",
+      "player_visible_name": "银白色房门",
+      "description": "通向长廊的金属门。",
+      "located_in": "sealed_room",
+      "state": {
+        "opened": false
+      },
+      "visibility": "public",
+      "plot_relevance": true
+    },
+    {
+      "id": "silver_lock",
+      "kind": "object",
+      "name": "银之锁",
+      "player_visible_name": "银之锁",
+      "description": "以活着生灵为核心的区域束缚。",
+      "located_in": "corridor",
+      "state": {
+        "active": true,
+        "boundary_triggered": false
+      },
+      "visibility": "public",
+      "plot_relevance": true
+    },
+    {
+      "id": "kidnapper",
+      "kind": "npc",
+      "name": "绑架者",
+      "player_visible_name": "绑架者",
+      "description": "持匕首接近倒地调查员的人。",
+      "located_in": "corridor",
+      "state": {
+        "revealed": false,
+        "blinded": false,
+        "defeated": false
+      },
+      "visibility": "public",
+      "plot_relevance": true,
+      "visibility_conditions": [
+        {
+          "op": "predicate",
+          "predicate": "entity_state_is",
+          "args": {
+            "entity_id": "kidnapper",
+            "key": "revealed",
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "dagger",
+      "kind": "object",
+      "name": "匕首",
+      "player_visible_name": "匕首",
+      "description": "绑架者手中的匕首。",
+      "located_in": "corridor",
+      "state": {
+        "available": false
+      },
+      "visibility": "public",
+      "plot_relevance": true,
+      "visibility_conditions": [
+        {
+          "op": "predicate",
+          "predicate": "entity_state_is",
+          "args": {
+            "entity_id": "dagger",
+            "key": "available",
+            "value": true
+          }
+        }
+      ],
+      "item_component": {
+        "portable": true,
+        "unique": true,
+        "quantity": 1
+      }
+    }
+  ],
+  "locations": [
+    {
+      "id": "sealed_room",
+      "kind": "room",
+      "name": "银色房间",
+      "player_visible_name": "银色房间",
+      "player_visible_description": "约十平方米、墙壁刷着银漆的昏暗房间。",
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "corridor",
+      "kind": "connector",
+      "name": "银锁长廊",
+      "player_visible_name": "银白长廊",
+      "player_visible_description": "银门外的长廊，左侧尽头有一扇透着光的门。",
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "outside",
+      "kind": "site",
+      "name": "银之锁范围外",
+      "player_visible_name": "出口之外",
+      "player_visible_description": "银之锁失效后才能真正抵达的自由空间。",
+      "plot_relevance": true,
+      "lifecycle": "session"
+    }
+  ],
+  "location_edges": [
+    {
+      "id": "room_to_corridor",
+      "from_location_id": "sealed_room",
+      "to_location_id": "corridor",
+      "kind": "private",
+      "traversal": "gated",
+      "visibility": "public",
+      "access_point_id": "silver_door",
+      "conditions": [
+        {
+          "op": "predicate",
+          "predicate": "entity_state_is",
+          "args": {
+            "entity_id": "silver_door",
+            "key": "opened",
+            "value": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "corridor_to_room",
+      "from_location_id": "corridor",
+      "to_location_id": "sealed_room",
+      "kind": "private",
+      "traversal": "automatic",
+      "visibility": "public"
+    },
+    {
+      "id": "corridor_to_outside",
+      "from_location_id": "corridor",
+      "to_location_id": "outside",
+      "kind": "private",
+      "traversal": "gated",
+      "visibility": "public",
+      "access_point_id": "silver_lock",
+      "conditions": [
+        {
+          "op": "predicate",
+          "predicate": "entity_state_is",
+          "args": {
+            "entity_id": "silver_lock",
+            "key": "active",
+            "value": false
+          }
+        }
+      ]
+    }
+  ],
+  "rules": [
+    {
+      "id": "cut_restraints_with_knife",
+      "trigger": {
+        "kind": "agent_match",
+        "scope": {
+          "action_families": [
+            "cut",
+            "use"
+          ],
+          "location_ids": [
+            "sealed_room"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "restraint_rope"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "铅笔刀",
+            "割断绳索"
+          ]
+        },
+        "options": [
+          {
+            "id": "pencil-knife",
+            "semantic_hints": [
+              "铅笔刀",
+              "割断绳索"
+            ]
+          }
+        ]
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "pencil-knife",
+            "entry_step_id": "success_0"
+          }
+        ],
+        "steps": [
+          {
+            "id": "success_0",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "restraint_rope",
+              "key": "cut",
+              "value": true
+            },
+            "next_step_id": "success_1"
+          },
+          {
+            "id": "success_1",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "restraints_removed",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      }
+    },
+    {
+      "id": "cut_restraints_on_bed_corner",
+      "trigger": {
+        "kind": "agent_match",
+        "scope": {
+          "action_families": [
+            "cut",
+            "rub"
+          ],
+          "location_ids": [
+            "sealed_room"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "sharp_bed_corner"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "锋利铁皮",
+            "磨断绳索"
+          ]
+        },
+        "options": [
+          {
+            "id": "sharp-corner",
+            "semantic_hints": [
+              "锋利铁皮",
+              "磨断绳索"
+            ]
+          }
+        ]
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "sharp-corner",
+            "entry_step_id": "success_0"
+          }
+        ],
+        "steps": [
+          {
+            "id": "success_0",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "sharp_bed_corner",
+              "key": "noticed",
+              "value": true
+            },
+            "next_step_id": "success_1"
+          },
+          {
+            "id": "success_1",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "restraint_rope",
+              "key": "cut",
+              "value": true
+            },
+            "next_step_id": "success_2"
+          },
+          {
+            "id": "success_2",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "restraints_removed",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      }
+    },
+    {
+      "id": "search_bed",
+      "trigger": {
+        "kind": "agent_match",
+        "scope": {
+          "action_families": [
+            "search",
+            "observe"
+          ],
+          "location_ids": [
+            "sealed_room"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "bed"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "spot-hidden",
+            "spot-hidden"
+          ]
+        },
+        "options": [
+          {
+            "id": "spot-hidden",
+            "semantic_hints": [
+              "spot-hidden",
+              "spot-hidden"
+            ]
+          }
+        ]
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "spot-hidden",
+            "entry_step_id": "check"
+          }
+        ],
+        "steps": [
+          {
+            "id": "check",
+            "kind": "check",
+            "check": {
+              "profile_id": "coc7.skill",
+              "actor_binding": "actor",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "spot-hidden"
+              },
+              "difficulty": "regular"
+            },
+            "result_routes": {
+              "critical_success": "success_0",
+              "extreme_success": "success_0",
+              "hard_success": "success_0",
+              "regular_success": "success_0",
+              "failure": "failure_0",
+              "fumble": "failure_0"
+            }
+          },
+          {
+            "id": "success_0",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "bed_key",
+              "key": "found",
+              "value": true
+            },
+            "next_step_id": "success_1"
+          },
+          {
+            "id": "success_1",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "bed_key_found",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "failure_0",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "bed_search_hint",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      }
+    },
+    {
+      "id": "move_bed",
+      "trigger": {
+        "kind": "agent_match",
+        "scope": {
+          "action_families": [
+            "move"
+          ],
+          "location_ids": [
+            "sealed_room"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "bed"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "STR",
+            "STR"
+          ]
+        },
+        "options": [
+          {
+            "id": "STR",
+            "semantic_hints": [
+              "STR",
+              "STR"
+            ]
+          }
+        ]
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "STR",
+            "entry_step_id": "check"
+          }
+        ],
+        "steps": [
+          {
+            "id": "check",
+            "kind": "check",
+            "check": {
+              "profile_id": "coc7.skill",
+              "actor_binding": "actor",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "STR"
+              },
+              "difficulty": "regular"
+            },
+            "result_routes": {
+              "critical_success": "success_0",
+              "extreme_success": "success_0",
+              "hard_success": "success_0",
+              "regular_success": "success_0",
+              "failure": "failure_0",
+              "fumble": "failure_0"
+            }
+          },
+          {
+            "id": "success_0",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "bed",
+              "key": "moved",
+              "value": true
+            },
+            "next_step_id": "success_1"
+          },
+          {
+            "id": "success_1",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "bed_key",
+              "key": "found",
+              "value": true
+            },
+            "next_step_id": "success_2"
+          },
+          {
+            "id": "success_2",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "bed_key_found",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "failure_0",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "bed_move_hint",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      }
+    },
+    {
+      "id": "inspect_wall_painting",
+      "trigger": {
+        "kind": "agent_match",
+        "scope": {
+          "action_families": [
+            "inspect",
+            "search"
+          ],
+          "location_ids": [
+            "sealed_room"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "wall_painting"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "掀开挂画",
+            "检查暗格"
+          ]
+        },
+        "options": [
+          {
+            "id": "lift-painting",
+            "semantic_hints": [
+              "掀开挂画",
+              "检查暗格"
+            ]
+          }
+        ]
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "lift-painting",
+            "entry_step_id": "success_0"
+          }
+        ],
+        "steps": [
+          {
+            "id": "success_0",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "wall_painting",
+              "key": "inspected",
+              "value": true
+            },
+            "next_step_id": "success_1"
+          },
+          {
+            "id": "success_1",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "wall_key",
+              "key": "found",
+              "value": true
+            },
+            "next_step_id": "success_2"
+          },
+          {
+            "id": "success_2",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "wall_key_found",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      }
+    },
+    {
+      "id": "open_top_drawer",
+      "trigger": {
+        "kind": "agent_match",
+        "scope": {
+          "action_families": [
+            "unlock",
+            "open"
+          ],
+          "location_ids": [
+            "sealed_room"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "top_drawer"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "暗格钥匙",
+            "上层抽屉"
+          ]
+        },
+        "options": [
+          {
+            "id": "wall-key",
+            "semantic_hints": [
+              "暗格钥匙",
+              "上层抽屉"
+            ]
+          }
+        ]
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "wall-key",
+            "entry_step_id": "success_0"
+          }
+        ],
+        "steps": [
+          {
+            "id": "success_0",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "top_drawer",
+              "key": "opened",
+              "value": true
+            },
+            "next_step_id": "success_1"
+          },
+          {
+            "id": "success_1",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "sketchbook",
+              "key": "found",
+              "value": true
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      }
+    },
+    {
+      "id": "open_middle_drawer",
+      "trigger": {
+        "kind": "agent_match",
+        "scope": {
+          "action_families": [
+            "unlock",
+            "open"
+          ],
+          "location_ids": [
+            "sealed_room"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "middle_drawer"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "床下钥匙",
+            "中层抽屉"
+          ]
+        },
+        "options": [
+          {
+            "id": "bed-key",
+            "semantic_hints": [
+              "床下钥匙",
+              "中层抽屉"
+            ]
+          }
+        ]
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "bed-key",
+            "entry_step_id": "success_0"
+          }
+        ],
+        "steps": [
+          {
+            "id": "success_0",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "middle_drawer",
+              "key": "opened",
+              "value": true
+            },
+            "next_step_id": "success_1"
+          },
+          {
+            "id": "success_1",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "white_paper",
+              "key": "found",
+              "value": true
+            },
+            "next_step_id": "success_2"
+          },
+          {
+            "id": "success_2",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "danger_note_read",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      }
+    },
+    {
+      "id": "materialize_flashlight",
+      "trigger": {
+        "kind": "agent_match",
+        "scope": {
+          "action_families": [
+            "tear",
+            "use"
+          ],
+          "location_ids": [
+            "sealed_room"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "flashlight_page"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "撕下手电纸页"
+          ]
+        },
+        "options": [
+          {
+            "id": "fixed-flashlight",
+            "semantic_hints": [
+              "撕下手电纸页"
+            ]
+          }
+        ]
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "fixed-flashlight",
+            "entry_step_id": "success_0"
+          }
+        ],
+        "steps": [
+          {
+            "id": "success_0",
+            "kind": "effect",
+            "effect": {
+              "type": "consume_entity",
+              "entity_id": "flashlight_page"
+            },
+            "next_step_id": "success_1"
+          },
+          {
+            "id": "success_1",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "flashlight",
+              "key": "materialized",
+              "value": true
+            },
+            "next_step_id": "success_2"
+          },
+          {
+            "id": "success_2",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "flashlight_materialized",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      }
+    },
+    {
+      "id": "materialize_bolt_cutters",
+      "trigger": {
+        "kind": "agent_match",
+        "scope": {
+          "action_families": [
+            "draw",
+            "tear"
+          ],
+          "location_ids": [
+            "sealed_room"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "cutters_page"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "画钢钳",
+            "撕下钢钳纸页"
+          ]
+        },
+        "options": [
+          {
+            "id": "fixed-cutters",
+            "semantic_hints": [
+              "画钢钳",
+              "撕下钢钳纸页"
+            ]
+          }
+        ]
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "fixed-cutters",
+            "entry_step_id": "success_0"
+          }
+        ],
+        "steps": [
+          {
+            "id": "success_0",
+            "kind": "effect",
+            "effect": {
+              "type": "consume_entity",
+              "entity_id": "cutters_page"
+            },
+            "next_step_id": "success_1"
+          },
+          {
+            "id": "success_1",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "bolt_cutters",
+              "key": "materialized",
+              "value": true
+            },
+            "next_step_id": "success_2"
+          },
+          {
+            "id": "success_2",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "cutters_materialized",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      }
+    },
+    {
+      "id": "materialize_osmanthus_porridge",
+      "trigger": {
+        "kind": "agent_match",
+        "scope": {
+          "action_families": [
+            "draw",
+            "tear"
+          ],
+          "location_ids": [
+            "sealed_room"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "porridge_page"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "画桂花糯米糖粥",
+            "撕下糖粥纸页"
+          ]
+        },
+        "options": [
+          {
+            "id": "fixed-porridge",
+            "semantic_hints": [
+              "画桂花糯米糖粥",
+              "撕下糖粥纸页"
+            ]
+          }
+        ]
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "fixed-porridge",
+            "entry_step_id": "success_0"
+          }
+        ],
+        "steps": [
+          {
+            "id": "success_0",
+            "kind": "effect",
+            "effect": {
+              "type": "consume_entity",
+              "entity_id": "porridge_page"
+            },
+            "next_step_id": "success_1"
+          },
+          {
+            "id": "success_1",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "osmanthus_porridge",
+              "key": "materialized",
+              "value": true
+            },
+            "next_step_id": "success_2"
+          },
+          {
+            "id": "success_2",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "porridge_materialized",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      }
+    },
+    {
+      "id": "light_vent",
+      "trigger": {
+        "kind": "agent_match",
+        "scope": {
+          "action_families": [
+            "illuminate",
+            "inspect"
+          ],
+          "location_ids": [
+            "sealed_room"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "vent"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "用手电照通风管"
+          ]
+        },
+        "options": [
+          {
+            "id": "flashlight",
+            "semantic_hints": [
+              "用手电照通风管"
+            ]
+          }
+        ]
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "flashlight",
+            "entry_step_id": "success_0"
+          }
+        ],
+        "steps": [
+          {
+            "id": "success_0",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "vent",
+              "key": "lit",
+              "value": true
+            },
+            "next_step_id": "success_1"
+          },
+          {
+            "id": "success_1",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "vent_key",
+              "key": "found",
+              "value": true
+            },
+            "next_step_id": "success_2"
+          },
+          {
+            "id": "success_2",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "rat_thing",
+              "key": "seen",
+              "value": true
+            },
+            "next_step_id": "success_3"
+          },
+          {
+            "id": "success_3",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "vent_key_found",
+              "scope": "party"
+            },
+            "next_step_id": "success_4"
+          },
+          {
+            "id": "success_4",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "rat_thing_seen",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      }
+    },
+    {
+      "id": "open_bottom_drawer",
+      "trigger": {
+        "kind": "agent_match",
+        "scope": {
+          "action_families": [
+            "unlock",
+            "open"
+          ],
+          "location_ids": [
+            "sealed_room"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "bottom_drawer"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "通风管钥匙",
+            "下层抽屉"
+          ]
+        },
+        "options": [
+          {
+            "id": "vent-key",
+            "semantic_hints": [
+              "通风管钥匙",
+              "下层抽屉"
+            ]
+          }
+        ]
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "vent-key",
+            "entry_step_id": "success_0"
+          }
+        ],
+        "steps": [
+          {
+            "id": "success_0",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "bottom_drawer",
+              "key": "opened",
+              "value": true
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      }
+    },
+    {
+      "id": "contact_bast_with_white_paper",
+      "trigger": {
+        "kind": "agent_match",
+        "scope": {
+          "action_families": [
+            "write",
+            "communicate"
+          ],
+          "location_ids": [
+            "sealed_room"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "white_paper"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "把白纸放进下层抽屉"
+          ]
+        },
+        "options": [
+          {
+            "id": "use-white-paper",
+            "semantic_hints": [
+              "把白纸放进下层抽屉"
+            ]
+          }
+        ]
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "use-white-paper",
+            "entry_step_id": "success_0"
+          }
+        ],
+        "steps": [
+          {
+            "id": "success_0",
+            "kind": "effect",
+            "effect": {
+              "type": "consume_entity",
+              "entity_id": "white_paper"
+            },
+            "next_step_id": "success_1"
+          },
+          {
+            "id": "success_1",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "bast",
+              "key": "contacted",
+              "value": true
+            },
+            "next_step_id": "success_2"
+          },
+          {
+            "id": "success_2",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "bast_contacted",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      }
+    },
+    {
+      "id": "contact_bast_with_last_page",
+      "trigger": {
+        "kind": "agent_match",
+        "scope": {
+          "action_families": [
+            "write",
+            "communicate"
+          ],
+          "location_ids": [
+            "sealed_room"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "communication_page"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "用最后一页替代白纸"
+          ]
+        },
+        "options": [
+          {
+            "id": "use-last-page",
+            "semantic_hints": [
+              "用最后一页替代白纸"
+            ]
+          }
+        ]
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "use-last-page",
+            "entry_step_id": "success_0"
+          }
+        ],
+        "steps": [
+          {
+            "id": "success_0",
+            "kind": "effect",
+            "effect": {
+              "type": "consume_entity",
+              "entity_id": "communication_page"
+            },
+            "next_step_id": "success_1"
+          },
+          {
+            "id": "success_1",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "bast",
+              "key": "contacted",
+              "value": true
+            },
+            "next_step_id": "success_2"
+          },
+          {
+            "id": "success_2",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "bast_contacted",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      }
+    },
+    {
+      "id": "listen_to_wardrobe",
+      "trigger": {
+        "kind": "agent_match",
+        "scope": {
+          "action_families": [
+            "listen"
+          ],
+          "location_ids": [
+            "sealed_room"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "wardrobe"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "listen",
+            "listen"
+          ]
+        },
+        "options": [
+          {
+            "id": "listen",
+            "semantic_hints": [
+              "listen",
+              "listen"
+            ]
+          }
+        ]
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "listen",
+            "entry_step_id": "check"
+          }
+        ],
+        "steps": [
+          {
+            "id": "check",
+            "kind": "check",
+            "check": {
+              "profile_id": "coc7.skill",
+              "actor_binding": "actor",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "listen"
+              },
+              "difficulty": "regular"
+            },
+            "result_routes": {
+              "critical_success": "success_0",
+              "extreme_success": "success_0",
+              "hard_success": "success_0",
+              "regular_success": "success_0",
+              "failure": "failure_0",
+              "fumble": "failure_0"
+            }
+          },
+          {
+            "id": "success_0",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "wardrobe_sound",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "failure_0",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "wardrobe_sound",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      }
+    },
+    {
+      "id": "cut_wardrobe_chain",
+      "trigger": {
+        "kind": "agent_match",
+        "scope": {
+          "action_families": [
+            "cut",
+            "open"
+          ],
+          "location_ids": [
+            "sealed_room"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "wardrobe"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "用钢钳剪开锁链"
+          ]
+        },
+        "options": [
+          {
+            "id": "bolt-cutters",
+            "semantic_hints": [
+              "用钢钳剪开锁链"
+            ]
+          }
+        ]
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "bolt-cutters",
+            "entry_step_id": "success_0"
+          }
+        ],
+        "steps": [
+          {
+            "id": "success_0",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "wardrobe",
+              "key": "opened",
+              "value": true
+            },
+            "next_step_id": "success_1"
+          },
+          {
+            "id": "success_1",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "bast",
+              "key": "freed",
+              "value": true
+            },
+            "next_step_id": "success_2"
+          },
+          {
+            "id": "success_2",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "bast_rescued",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      }
+    },
+    {
+      "id": "feed_bast",
+      "trigger": {
+        "kind": "agent_match",
+        "scope": {
+          "action_families": [
+            "feed",
+            "offer"
+          ],
+          "location_ids": [
+            "sealed_room"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "bast"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "喂桂花糯米糖粥"
+          ]
+        },
+        "options": [
+          {
+            "id": "osmanthus-porridge",
+            "semantic_hints": [
+              "喂桂花糯米糖粥"
+            ]
+          }
+        ]
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "osmanthus-porridge",
+            "entry_step_id": "success_0"
+          }
+        ],
+        "steps": [
+          {
+            "id": "success_0",
+            "kind": "effect",
+            "effect": {
+              "type": "consume_entity",
+              "entity_id": "osmanthus_porridge"
+            },
+            "next_step_id": "success_1"
+          },
+          {
+            "id": "success_1",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "bast",
+              "key": "trusted",
+              "value": true
+            },
+            "next_step_id": "success_2"
+          },
+          {
+            "id": "success_2",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "bast",
+              "key": "following",
+              "value": true
+            },
+            "next_step_id": "success_3"
+          },
+          {
+            "id": "success_3",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "bast_trusted",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      }
+    },
+    {
+      "id": "inspect_door_monitor",
+      "trigger": {
+        "kind": "agent_match",
+        "scope": {
+          "action_families": [
+            "inspect",
+            "observe"
+          ],
+          "location_ids": [
+            "sealed_room"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "door_monitor"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "查看门外显示器"
+          ]
+        },
+        "options": [
+          {
+            "id": "watch-monitor",
+            "semantic_hints": [
+              "查看门外显示器"
+            ]
+          }
+        ]
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "watch-monitor",
+            "entry_step_id": "success_0"
+          }
+        ],
+        "steps": [
+          {
+            "id": "success_0",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "door_monitor",
+              "key": "ghost_seen",
+              "value": true
+            },
+            "next_step_id": "success_1"
+          },
+          {
+            "id": "success_1",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "door_ghost_seen",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      }
+    },
+    {
+      "id": "ask_bast_to_open_door",
+      "trigger": {
+        "kind": "agent_match",
+        "scope": {
+          "action_families": [
+            "ask",
+            "open"
+          ],
+          "location_ids": [
+            "sealed_room"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "bast"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "请芭斯特打开银门"
+          ]
+        },
+        "options": [
+          {
+            "id": "bast-opens-door",
+            "semantic_hints": [
+              "请芭斯特打开银门"
+            ]
+          }
+        ]
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "bast-opens-door",
+            "entry_step_id": "success_0"
+          }
+        ],
+        "steps": [
+          {
+            "id": "success_0",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "silver_door",
+              "key": "opened",
+              "value": true
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      }
+    },
+    {
+      "id": "enter_corridor",
+      "trigger": {
+        "kind": "agent_match",
+        "scope": {
+          "action_families": [
+            "enter",
+            "leave"
+          ],
+          "location_ids": [
+            "sealed_room"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "silver_door"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "穿过银门进入长廊"
+          ]
+        },
+        "options": [
+          {
+            "id": "cross-silver-door",
+            "semantic_hints": [
+              "穿过银门进入长廊"
+            ]
+          }
+        ]
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "cross-silver-door",
+            "entry_step_id": "success_0"
+          }
+        ],
+        "steps": [
+          {
+            "id": "success_0",
+            "kind": "effect",
+            "effect": {
+              "type": "enter_location",
+              "location_id": "corridor"
+            },
+            "next_step_id": "success_1"
+          },
+          {
+            "id": "success_1",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "silver_lock",
+              "key": "boundary_triggered",
+              "value": true
+            },
+            "next_step_id": "success_2"
+          },
+          {
+            "id": "success_2",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "kidnapper",
+              "key": "revealed",
+              "value": true
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      }
+    },
+    {
+      "id": "bast_breaks_silver_lock",
+      "trigger": {
+        "kind": "event",
+        "event_type": "entity.state_changed",
+        "when": {
+          "op": "all",
+          "items": [
+            {
+              "op": "predicate",
+              "predicate": "entity_state_is",
+              "args": {
+                "entity_id": "silver_lock",
+                "key": "boundary_triggered",
+                "value": true
+              }
+            },
+            {
+              "op": "predicate",
+              "predicate": "entity_state_is",
+              "args": {
+                "entity_id": "bast",
+                "key": "trusted",
+                "value": true
+              }
+            },
+            {
+              "op": "predicate",
+              "predicate": "entity_state_is",
+              "args": {
+                "entity_id": "bast",
+                "key": "alive",
+                "value": true
+              }
+            },
+            {
+              "op": "predicate",
+              "predicate": "entity_state_is",
+              "args": {
+                "entity_id": "silver_lock",
+                "key": "active",
+                "value": true
+              }
+            }
+          ]
+        },
+        "entry_branch_id": "default"
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "default",
+            "entry_step_id": "sacrifice"
+          }
+        ],
+        "steps": [
+          {
+            "id": "sacrifice",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "bast",
+              "key": "alive",
+              "value": false
+            },
+            "next_step_id": "blind"
+          },
+          {
+            "id": "blind",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "kidnapper",
+              "key": "blinded",
+              "value": true
+            },
+            "next_step_id": "dagger"
+          },
+          {
+            "id": "dagger",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "dagger",
+              "key": "available",
+              "value": true
+            },
+            "next_step_id": "unlock"
+          },
+          {
+            "id": "unlock",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "silver_lock",
+              "key": "active",
+              "value": false
+            },
+            "next_step_id": "reveal"
+          },
+          {
+            "id": "reveal",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "silver_lock_broken",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      }
+    },
+    {
+      "id": "kidnapper_returns_unprotected_actor",
+      "trigger": {
+        "kind": "event",
+        "event_type": "entity.state_changed",
+        "when": {
+          "op": "all",
+          "items": [
+            {
+              "op": "predicate",
+              "predicate": "entity_state_is",
+              "args": {
+                "entity_id": "silver_lock",
+                "key": "boundary_triggered",
+                "value": true
+              }
+            },
+            {
+              "op": "predicate",
+              "predicate": "entity_state_is",
+              "args": {
+                "entity_id": "bast",
+                "key": "trusted",
+                "value": false
+              }
+            },
+            {
+              "op": "predicate",
+              "predicate": "entity_state_is",
+              "args": {
+                "entity_id": "silver_lock",
+                "key": "active",
+                "value": true
+              }
+            }
+          ]
+        },
+        "entry_branch_id": "default"
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "default",
+            "entry_step_id": "close_door"
+          }
+        ],
+        "steps": [
+          {
+            "id": "close_door",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "silver_door",
+              "key": "opened",
+              "value": false
+            },
+            "next_step_id": "reset_boundary"
+          },
+          {
+            "id": "reset_boundary",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "silver_lock",
+              "key": "boundary_triggered",
+              "value": false
+            },
+            "next_step_id": "return_room"
+          },
+          {
+            "id": "return_room",
+            "kind": "effect",
+            "effect": {
+              "type": "enter_location",
+              "location_id": "sealed_room"
+            },
+            "next_step_id": "reveal"
+          },
+          {
+            "id": "reveal",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "captured_and_returned",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      }
+    },
+    {
+      "id": "rat_thing_sanity",
+      "trigger": {
+        "kind": "event",
+        "event_type": "entity.state_changed",
+        "when": {
+          "op": "all",
+          "items": [
+            {
+              "op": "predicate",
+              "predicate": "entity_state_is",
+              "args": {
+                "entity_id": "rat_thing",
+                "key": "seen",
+                "value": true
+              }
+            },
+            {
+              "op": "predicate",
+              "predicate": "entity_state_is",
+              "args": {
+                "entity_id": "rat_thing",
+                "key": "san_resolved",
+                "value": false
+              }
+            }
+          ]
+        },
+        "entry_branch_id": "default"
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "default",
+            "entry_step_id": "mark"
+          }
+        ],
+        "steps": [
+          {
+            "id": "mark",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "rat_thing",
+              "key": "san_resolved",
+              "value": true
+            },
+            "next_step_id": "san"
+          },
+          {
+            "id": "san",
+            "kind": "check",
+            "check": {
+              "profile_id": "coc7.sanity",
+              "actor_binding": "actor",
+              "initiation_kind": "passive_rule",
+              "parameters": {
+                "success_loss": "0",
+                "failure_loss": "1d6"
+              }
+            },
+            "result_routes": {
+              "critical_success": "finish",
+              "extreme_success": "finish",
+              "hard_success": "finish",
+              "regular_success": "finish",
+              "failure": "finish",
+              "fumble": "finish"
+            }
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      }
+    },
+    {
+      "id": "door_ghost_sanity",
+      "trigger": {
+        "kind": "event",
+        "event_type": "entity.state_changed",
+        "when": {
+          "op": "all",
+          "items": [
+            {
+              "op": "predicate",
+              "predicate": "entity_state_is",
+              "args": {
+                "entity_id": "door_monitor",
+                "key": "ghost_seen",
+                "value": true
+              }
+            },
+            {
+              "op": "predicate",
+              "predicate": "entity_state_is",
+              "args": {
+                "entity_id": "door_monitor",
+                "key": "san_resolved",
+                "value": false
+              }
+            }
+          ]
+        },
+        "entry_branch_id": "default"
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "default",
+            "entry_step_id": "mark"
+          }
+        ],
+        "steps": [
+          {
+            "id": "mark",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "door_monitor",
+              "key": "san_resolved",
+              "value": true
+            },
+            "next_step_id": "san"
+          },
+          {
+            "id": "san",
+            "kind": "check",
+            "check": {
+              "profile_id": "coc7.sanity",
+              "actor_binding": "actor",
+              "initiation_kind": "passive_rule",
+              "parameters": {
+                "success_loss": "1",
+                "failure_loss": "1d3"
+              }
+            },
+            "result_routes": {
+              "critical_success": "finish",
+              "extreme_success": "finish",
+              "hard_success": "finish",
+              "regular_success": "finish",
+              "failure": "finish",
+              "fumble": "finish"
+            }
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      }
+    },
+    {
+      "id": "fight_blinded_kidnapper",
+      "trigger": {
+        "kind": "agent_match",
+        "scope": {
+          "action_families": [
+            "fight",
+            "attack",
+            "disarm"
+          ],
+          "location_ids": [
+            "corridor"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "kidnapper"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "夺取匕首",
+            "反击绑架者"
+          ]
+        },
+        "options": [
+          {
+            "id": "fight-back",
+            "semantic_hints": [
+              "夺取匕首",
+              "反击绑架者"
+            ]
+          }
+        ]
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "fight-back",
+            "entry_step_id": "check"
+          }
+        ],
+        "steps": [
+          {
+            "id": "check",
+            "kind": "adjudicated_check",
+            "adjudication_ref": "current",
+            "effect_authority": "rule",
+            "result_routes": {
+              "critical_success": "success_0",
+              "extreme_success": "success_0",
+              "hard_success": "success_0",
+              "regular_success": "success_0",
+              "failure": "failure_0",
+              "fumble": "failure_0"
+            },
+            "cancel_step_id": "finish"
+          },
+          {
+            "id": "success_0",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "kidnapper",
+              "key": "defeated",
+              "value": true
+            },
+            "next_step_id": "success_1"
+          },
+          {
+            "id": "success_1",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "kidnapper_defeated",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "failure_0",
+            "kind": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      }
+    },
+    {
+      "id": "escape_through_exit",
+      "trigger": {
+        "kind": "agent_match",
+        "scope": {
+          "action_families": [
+            "escape",
+            "enter",
+            "leave"
+          ],
+          "location_ids": [
+            "corridor"
+          ],
+          "target_kinds": [
+            "location"
+          ],
+          "target_ids": [
+            "outside"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "穿过亮门",
+            "逃离"
+          ]
+        },
+        "options": [
+          {
+            "id": "escape",
+            "semantic_hints": [
+              "穿过亮门",
+              "逃离"
+            ]
+          }
+        ]
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "escape",
+            "entry_step_id": "success_0"
+          }
+        ],
+        "steps": [
+          {
+            "id": "success_0",
+            "kind": "effect",
+            "effect": {
+              "type": "enter_location",
+              "location_id": "outside"
+            },
+            "next_step_id": "success_1"
+          },
+          {
+            "id": "success_1",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "investigator_escaped",
+              "scope": "party"
+            },
+            "next_step_id": "success_2"
+          },
+          {
+            "id": "success_2",
+            "kind": "effect",
+            "effect": {
+              "type": "mark_core_resolved"
+            },
+            "next_step_id": "success_3"
+          },
+          {
+            "id": "success_3",
+            "kind": "effect",
+            "effect": {
+              "type": "set_ending_availability",
+              "available": true
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      }
+    }
+  ],
+  "core_resolution": {
+    "required_goal_ids": [
+      "free_investigator",
+      "obtain_fixed_tools",
+      "rescue_and_befriend_bast",
+      "break_silver_lock",
+      "reach_exit"
+    ],
+    "completion": "all"
+  },
+  "ending_policy": {
+    "allow_continue_after_core_resolution": true,
+    "require_no_pending_action": true,
+    "allow_grounded_variations": true,
+    "facets": [
+      "investigator_fate",
+      "kidnapper_fate",
+      "bast_sacrifice"
+    ]
+  },
+  "ending_anchors": [
+    {
+      "id": "kill_kidnapper_then_escape",
+      "tone": "grim",
+      "required_fact_refs": [
+        "silver_lock_broken",
+        "kidnapper_defeated",
+        "investigator_escaped"
+      ],
+      "forbidden_claims": [
+        "uncommitted_investigator_death",
+        "uncommitted_hp_or_san_change"
+      ]
+    },
+    {
+      "id": "escape_after_lock_breaks",
+      "tone": "somber",
+      "required_fact_refs": [
+        "silver_lock_broken",
+        "investigator_escaped"
+      ],
+      "forbidden_claims": [
+        "uncommitted_kidnapper_death",
+        "uncommitted_investigator_death"
+      ]
+    }
+  ],
+  "presentation": {
+    "title": "银之锁",
+    "name_en": "Silver Lock",
+    "synopsis": "在昏暗的银色房间醒来后，调查员必须解开束缚、破解三把钥匙与速写本的谜题，并找到逃离银之锁的方法。",
+    "players_min": 1,
+    "players_max": 1,
+    "difficulty": 1,
+    "estimated_duration": "1-2 小时",
+    "story_label": "SILVER LOCK",
+    "subtitle": "银色房间中的单人逃脱",
+    "authors": [
+      "夕影"
+    ],
+    "tags": [
+      "当代",
+      "密室逃脱",
+      "新人向"
+    ],
+    "player_intro_pages": [
+      {
+        "title": "内容提示",
+        "content": "本模组包含绑架、拘禁、动物死亡，以及由玩家选择的致命反击。请在开始前确认这些内容适合当前参与者。"
+      },
+      {
+        "title": "调查员准备",
+        "content": "本模组由一名调查员进行，适合新人体验。侦查、聆听和生活常识有助于理解环境，但关键谜题均保留失败后的提示或替代路径。"
+      },
+      {
+        "title": "醒来",
+        "content": "你在一间昏暗的银色房间中醒来，近期记忆一片空白，手脚被细绳紧紧捆住。衣服仍完好，随身物品只剩一把铅笔刀。"
+      }
+    ]
+  },
+  "initial_state": {
+    "start_location_id": "sealed_room",
+    "default_actor_placement": {
+      "location_id": "sealed_room"
+    },
+    "start_time_point_id": "hour_12"
+  },
+  "world_profile": {
+    "era": "当代",
+    "region": "来历不明的封闭空间",
+    "technology_level": "现代日常技术",
+    "tone": "幽闭、失忆、克制的超现实恐怖",
+    "forbidden_content": [
+      "提前揭示芭斯特身份",
+      "提前解释银之锁原理",
+      "虚构调查员死亡或 HP/SAN 变化",
+      "生成速写本固定清单以外的物品"
+    ]
+  }
+}

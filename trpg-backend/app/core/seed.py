@@ -8,7 +8,7 @@
 `GET /systems/{systemId}/ruleset` 返回。
 
 issue #141 起，``Scenario`` 只保存目录和展示信息。规则引擎消费的完整内容由
-本地追书人加载脚本经过 Validation 后写入不可变的 ``ModuleVersion``；Seed
+内置模组加载器经过 Validation 后写入不可变的 ``ModuleVersion``；Seed
 不再内嵌或发布简化版 ModuleContent。
 
 用固定 UUID + 幂等插入（先查是否已存在）：应用启动时、测试 fixture 里都可以
@@ -19,26 +19,28 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.coc7_content import build_coc7_ruleset
 from app.models.content import Game, GameSystem, Scenario, World
-from app.service.paper_chase_loader import (
-    PAPER_CHASE_MODULE_ID,
-    PAPER_CHASE_VERSION,
-    PAPER_CHASE_WORLD_REF,
-    read_paper_chase_presentation,
+from app.service.builtin_module_loader import (
+    BUILTIN_MODULE_SPECS,
+    PAPER_CHASE_SPEC,
+    SILVER_LOCK_SPEC,
+    read_builtin_presentation,
 )
 
 BUILTIN_GAME_ID = "00000000-0000-0000-0000-000000000001"
 BUILTIN_SYSTEM_ID = "00000000-0000-0000-0000-000000000002"
-BUILTIN_SCENARIO_ID = "00000000-0000-0000-0000-000000000003"
+BUILTIN_SCENARIO_ID = PAPER_CHASE_SPEC.scenario_id
 BUILTIN_WORLD_ID = "00000000-0000-0000-0000-000000000004"
-BUILTIN_MODULE_ID = PAPER_CHASE_MODULE_ID
-BUILTIN_MODULE_VERSION = PAPER_CHASE_VERSION
-BUILTIN_WORLD_REF = PAPER_CHASE_WORLD_REF
+BUILTIN_MODULE_ID = PAPER_CHASE_SPEC.module_id
+BUILTIN_MODULE_VERSION = PAPER_CHASE_SPEC.version
+BUILTIN_WORLD_REF = PAPER_CHASE_SPEC.world_ref
+SILVER_LOCK_SCENARIO_ID = SILVER_LOCK_SPEC.scenario_id
+SILVER_LOCK_MODULE_ID = SILVER_LOCK_SPEC.module_id
+SILVER_LOCK_MODULE_VERSION = SILVER_LOCK_SPEC.version
 
 
 async def ensure_seed_content(db: AsyncSession) -> None:
-    """插入内置的"克苏鲁的呼唤 / COC7 / 追书人"种子数据（如果还不存在）。"""
+    """插入 COC7 规则、世界和全部内置模组目录种子。"""
     coc7_ruleset = build_coc7_ruleset().model_dump(mode="json")
-    presentation = read_paper_chase_presentation()
 
     game = await db.get(Game, BUILTIN_GAME_ID)
     if game is None:
@@ -92,36 +94,40 @@ async def ensure_seed_content(db: AsyncSession) -> None:
         system.world_ref = BUILTIN_WORLD_REF
         system.ruleset = coc7_ruleset
 
-    scenario = await db.get(Scenario, BUILTIN_SCENARIO_ID)
-    if scenario is None:
-        scenario = Scenario(
-            id=BUILTIN_SCENARIO_ID,
-            module_id=BUILTIN_MODULE_ID,
-            world_id=BUILTIN_WORLD_ID,
-            game_system_id=BUILTIN_SYSTEM_ID,
-            title=presentation.title,
-            version=BUILTIN_MODULE_VERSION,
-            authors=list(presentation.authors),
-            players_min=presentation.players_min,
-            players_max=presentation.players_max,
-            difficulty=presentation.difficulty,
-            estimated_duration=presentation.estimated_duration,
-            synopsis=presentation.synopsis,
-            status="wip",
-            name_en=presentation.name_en,
-            story_label=presentation.story_label,
-            subtitle=presentation.subtitle,
-            story_pages=[],
-        )
-        db.add(scenario)
-    else:
-        # 已发布目录由加载器和不可变 ModuleVersion 更新；Seed 不得把旧 ready
-        # 版本改成与尚未加载的新版本不一致的展示数据。
-        scenario.module_id = BUILTIN_MODULE_ID
-        scenario.world_id = BUILTIN_WORLD_ID
+    for spec in BUILTIN_MODULE_SPECS:
+        presentation = read_builtin_presentation(spec)
+        scenario = await db.get(Scenario, spec.scenario_id)
+        if scenario is None:
+            scenario = Scenario(
+                id=spec.scenario_id,
+                module_id=spec.module_id,
+                world_id=spec.world_id,
+                game_system_id=BUILTIN_SYSTEM_ID,
+                title=presentation.title,
+                version=spec.version,
+                authors=list(presentation.authors),
+                players_min=presentation.players_min,
+                players_max=presentation.players_max,
+                difficulty=presentation.difficulty,
+                estimated_duration=presentation.estimated_duration,
+                synopsis=presentation.synopsis,
+                status="wip",
+                name_en=presentation.name_en,
+                story_label=presentation.story_label,
+                subtitle=presentation.subtitle,
+                story_pages=[],
+            )
+            db.add(scenario)
+            continue
+
+        # 已发布目录由加载器更新；Seed 不得把 ready 版本降回 wip 或覆盖展示。
+        scenario.module_id = spec.module_id
+        scenario.world_id = spec.world_id
+        scenario.game_system_id = BUILTIN_SYSTEM_ID
         if scenario.status != "ready":
             scenario.title = presentation.title
             scenario.name_en = presentation.name_en
+            scenario.version = spec.version
             scenario.players_min = presentation.players_min
             scenario.players_max = presentation.players_max
             scenario.difficulty = presentation.difficulty

@@ -28,12 +28,15 @@ from collaboration_framework.contracts.module_v3 import (
     CreateNpcActionOpportunityStep,
     EffectStep,
     EventTriggerSpec,
+    InvokeRulesetActionStep,
     ModuleContentV3,
     NotCondition,
     PredicateCondition,
     RuleSpecV3,
+    RuleStepSpec,
 )
 from collaboration_framework.registry import predicates as predicate_registry
+from collaboration_framework.registry import rule_steps as rule_step_registry
 
 from .validation import ValidationIssue, ValidationReport
 
@@ -388,6 +391,7 @@ def _rule_issues(
                     message="检定步骤必须至少路由一个结果等级",
                 )
             )
+        issues.extend(_actor_binding_issues(step, step_path))
 
     if rule.presentation is not None:
         presentation_ids = {rule.presentation.id}
@@ -405,6 +409,33 @@ def _rule_issues(
                     )
                 )
     return issues
+
+
+def _actor_binding_issues(step: RuleStepSpec, step_path: str) -> list[ValidationIssue]:
+    """Check `actor_binding` against the registered value space (#347 §4.8).
+
+    Nothing reads this field yet — resolving a binding into actual actors is a
+    later issue. Registering the value space and rejecting anything outside it
+    is the whole of what this phase does with it, per #347 §4.7's
+    "migrate and load completely, do not implement".
+    """
+
+    if isinstance(step, CheckStep):
+        binding, path = step.check.actor_binding, f"{step_path}.check.actor_binding"
+    elif isinstance(step, InvokeRulesetActionStep):
+        binding, path = step.actor_binding, f"{step_path}.actor_binding"
+    else:
+        return []
+    if rule_step_registry.is_registered_actor_binding(binding):
+        return []
+    return [
+        ValidationIssue(
+            severity="error",
+            code="MODULE_V3_ACTOR_BINDING_UNKNOWN",
+            path=path,
+            message=f"引用了未注册的 actor_binding: {binding}",
+        )
+    ]
 
 
 def _reachable_steps(rule: RuleSpecV3) -> set[str]:

@@ -73,6 +73,70 @@ class ConditionIssuesTests(unittest.TestCase):
         self.assertEqual(issues[0].path, "path.item.items.1.predicate")
 
 
+class ActorBindingValidationTests(unittest.TestCase):
+    """`actor_binding` is checked against the registered value space (#347 §4.8)."""
+
+    def _check_step(self, binding: str):
+        from collaboration_framework.contracts.module_v3 import CheckStep, RuleCheckSpec
+        from collaboration_framework.module.validation_v3 import _actor_binding_issues
+
+        step = CheckStep(
+            id="s1",
+            check=RuleCheckSpec(
+                profile_id="p",
+                actor_binding=binding,
+                initiation_kind="active_action",
+            ),
+            result_routes={"regular_success": "s2"},
+        )
+        return _actor_binding_issues(step, "rules.0.execution.steps.0")
+
+    def test_registered_binding_passes(self) -> None:
+        self.assertEqual(self._check_step("actor"), [])
+
+    def test_unregistered_binding_is_rejected_with_a_path(self) -> None:
+        issues = self._check_step("everyone")
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0].code, "MODULE_V3_ACTOR_BINDING_UNKNOWN")
+        self.assertEqual(
+            issues[0].path, "rules.0.execution.steps.0.check.actor_binding"
+        )
+
+    def test_steps_without_the_field_are_skipped(self) -> None:
+        from collaboration_framework.contracts.module_v3 import FinishStep
+        from collaboration_framework.module.validation_v3 import _actor_binding_issues
+
+        self.assertEqual(_actor_binding_issues(FinishStep(id="s1"), "path"), [])
+
+
+class UnimplementedStepKindsStillPublishTests(unittest.TestCase):
+    """#347 §4.7: a declared field with no consumer is not a publish failure.
+
+    `invoke_ruleset_action` has no executor and `registry/world_actions.py` is
+    empty, so it is tempting to start refusing these modules at publish time.
+    That would be a behaviour change, and a content-wide one. "No executor"
+    must stay a runtime outcome.
+    """
+
+    def test_invoke_ruleset_action_publishes_with_any_action_id(self) -> None:
+        from collaboration_framework.contracts.module_v3 import (
+            InvokeRulesetActionStep,
+        )
+        from collaboration_framework.module.validation_v3 import (
+            _actor_binding_issues,
+        )
+
+        step = InvokeRulesetActionStep(
+            id="s1",
+            action_id="an.action.no.executor.exists.for",
+            actor_binding="actor",
+            next_step_id="s2",
+        )
+        # The action_id itself is never consulted against the world action
+        # registry — only the binding, which is registered.
+        self.assertEqual(_actor_binding_issues(step, "path"), [])
+
+
 class RealFixturesStillPublishTests(unittest.TestCase):
     """The predicate names real, already-shipping modules use must all be
     registered — otherwise this phase would break existing content on the day
@@ -92,13 +156,17 @@ class RealFixturesStillPublishTests(unittest.TestCase):
                     content_path.read_text(encoding="utf-8")
                 )
                 report = validate_module_v3(content)
-                predicate_issues = [
+                registry_issues = [
                     issue
                     for issue in report.errors
                     if issue.code
-                    in ("MODULE_V3_PREDICATE_UNKNOWN", "MODULE_V3_PREDICATE_EMPTY")
+                    in (
+                        "MODULE_V3_PREDICATE_UNKNOWN",
+                        "MODULE_V3_PREDICATE_EMPTY",
+                        "MODULE_V3_ACTOR_BINDING_UNKNOWN",
+                    )
                 ]
-                self.assertEqual(predicate_issues, [])
+                self.assertEqual(registry_issues, [])
 
 
 if __name__ == "__main__":

@@ -16,27 +16,25 @@ from collaboration_framework.contracts import (
     AgentMatchTriggerSpec,
     AllCondition,
     AnyCondition,
-    ConditionExpr,
-    EffectStep,
     CheckStep,
+    ConditionExpr,
     ContractError,
     EventTriggerSpec,
-    FinishStep,
     ModuleContentV3,
     NotCondition,
     PredicateCondition,
     RuleSpecV3,
 )
-
 from collaboration_framework.registry import predicates as predicate_registry
-
-from .models import AgendaItem, AgendaSource, DomainEvent, GameState, RuleAgenda
+from collaboration_framework.registry import rule_steps as rule_step_registry
 
 # `entity_state` used to live here; it now lives in `registry/predicates.py`
 # (the shared read every predicate evaluator uses). Re-imported by name so
 # `adjudication.py` and `navigation.py` can keep doing
 # `from .rules_v3 import entity_state` unchanged.
 from collaboration_framework.registry.predicates import entity_state  # noqa: F401
+
+from .models import AgendaItem, AgendaSource, DomainEvent, GameState, RuleAgenda
 
 
 @dataclass
@@ -156,10 +154,11 @@ def walk_rule_from(rule: RuleSpecV3, step_id: str) -> RuleWalk:
             walk.suspended_at = cursor
             walk.suspended_kind = "unknown_step"
             return walk
-        if isinstance(step, FinishStep):
+        behavior = rule_step_registry.walk_behavior_of(step)
+        if behavior == "terminal":
             walk.completed = True
             return walk
-        if isinstance(step, EffectStep):
+        if behavior == "produces_effect_and_continues":
             walk.effects.append(step.effect)
             cursor = step.next_step_id
             continue
@@ -221,27 +220,22 @@ def agenda_item_for_event(rule: RuleSpecV3, event: DomainEvent) -> AgendaItem:
 
 
 def agenda_status_for_walk(rule: RuleSpecV3, walk: RuleWalk) -> str:
-    """Map a blocking step to the authoritative Agenda boundary."""
+    """Map a blocking step to the authoritative Agenda boundary.
+
+    The per-kind mapping lives in `registry/rule_steps.py` (#347). The three
+    outcomes handled here are not step kinds at all — they are ways the walk
+    itself failed — and a walk that never suspended is simply stable.
+    """
 
     if walk.suspended_kind in {"loop", "step_budget", "unknown_step"}:
         return "failed"
-    if walk.suspended_kind == "check":
-        step = next(
-            (item for item in rule.execution.steps if item.id == walk.suspended_at),
-            None,
-        )
-        if isinstance(step, CheckStep) and step.check.initiation_kind == "passive_rule":
-            return "awaiting_passive_check"
-        return "awaiting_active_check"
-    if walk.suspended_kind == "adjudicated_check":
-        return "awaiting_active_check"
-    if walk.suspended_kind == "presentation":
-        return "awaiting_presentation"
-    if walk.suspended_kind == "await_player_input":
-        return "awaiting_player_input"
-    if walk.suspended_at is not None:
-        return "running"
-    return "stable"
+    if walk.suspended_kind is None:
+        return "stable" if walk.suspended_at is None else "running"
+    step = next(
+        (item for item in rule.execution.steps if item.id == walk.suspended_at),
+        None,
+    )
+    return rule_step_registry.agenda_status_for(walk.suspended_kind, step)
 
 
 def agenda_claim_key(agenda: RuleAgenda) -> tuple[int, int, str, str]:

@@ -28,8 +28,8 @@ from app.core.db import Base, get_db
 from app.core.seed import ensure_seed_content
 from app.core.turn import build_session_view_application
 from app.main import app
+from app.service.builtin_module_loader import load_builtin_modules
 from app.service.character_background import CharacterBackgroundService
-from app.service.paper_chase_loader import load_paper_chase
 from tests.content_fixtures import publish_multiplayer_module
 
 # 用临时文件 SQLite，不用 ":memory:"+StaticPool。关键原因是并发模型：异步 HTTP
@@ -100,7 +100,7 @@ async def _prepare_database() -> AsyncGenerator[None, None]:
     # 依赖内置模组的用例（建房选模组、GET /modules 等）会因为库里没有模组而失败。
     async with TestSessionLocal() as session:
         await ensure_seed_content(session)
-        await load_paper_chase(session)
+        await load_builtin_modules(session)
         await publish_multiplayer_module(session)
     yield
     async with test_engine.begin() as conn:

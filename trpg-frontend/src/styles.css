@@ -4986,12 +4986,16 @@
 }
 
 .scenario-module-detail__dialog {
+  /* 内容页增多时仍把完整弹窗限制在视口内，正文只在内部滚动。 */
   position: relative;
   display: flex;
   flex-direction: column;
+  box-sizing: border-box;
   width: 100%;
-  height: min(94%, 48rem);
-  max-height: 48rem;
+  height: min(48rem, calc(100vh - 1.5rem));
+  height: min(48rem, calc(100dvh - 1.5rem));
+  max-height: calc(100vh - 1.5rem);
+  max-height: calc(100dvh - 1.5rem);
   overflow: hidden;
   border: 2px solid #b78a4c;
   border-radius: 1.1rem;

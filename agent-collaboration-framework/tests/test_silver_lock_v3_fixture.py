@@ -1,0 +1,338 @@
+"""验证《银之锁》不仅结构合法，而且能由真实 v3 引擎完成和恢复。"""
+
+from __future__ import annotations
+
+import json
+import unittest
+from pathlib import Path
+
+from collaboration_framework.contracts import (
+    ActionAdjudication,
+    ActionMethod,
+    ActionTarget,
+    CheckDecisionRequest,
+    ModuleContentV3,
+    NoAdjudicationCheck,
+    PlayerViewScope,
+    PostRollDecisionRequest,
+    RequiredAdjudicationCheck,
+    RuleDecisionRef,
+    SelectCheckChoice,
+    SkillCheckCandidate,
+    SubmitAdjudicationRequest,
+)
+from collaboration_framework.engine import (
+    ActorState,
+    AdjudicationEngineService,
+    DiceRoller,
+    GameState,
+    InMemoryEngineStore,
+    RuleEngineService,
+    SequenceDiceSource,
+    audit_runtime_capabilities,
+)
+from collaboration_framework.engine.initialization import create_initial_game_state
+from collaboration_framework.module import validate_module_v3
+
+FIXTURE_DIR = (
+    Path(__file__).resolve().parents[1]
+    / "docs"
+    / "module-parser"
+    / "examples"
+    / "module-content-validation"
+    / "银之锁"
+)
+FIXTURE = FIXTURE_DIR / "module-content-v3.json"
+ROOM = "silver-lock-room"
+PLAYER = "silver-lock-player"
+ACTOR = "silver-lock-actor"
+
+
+def load_module() -> ModuleContentV3:
+    """读取本次发布的固定版本，测试不得回退到旧 v2 草稿。"""
+
+    return ModuleContentV3.model_validate_json(FIXTURE.read_text(encoding="utf-8"))
+
+
+def state(*, trusted: bool = False) -> GameState:
+    """构造接近真实建卡结果的单人房间状态。"""
+
+    content = load_module()
+    seeded = create_initial_game_state(
+        content,
+        room_id=ROOM,
+        actors={
+            ACTOR: ActorState(
+                player_id=PLAYER,
+                name="测试调查员",
+                source_character_id="silver-lock-character",
+                source_character_version=1,
+                state={
+                    "skills": {"spot-hidden": 70, "listen": 60, "brawl": 65},
+                    "attributes": {"STR": 60},
+                },
+            )
+        },
+    )
+    entities = {entity_id: dict(values) for entity_id, values in seeded.entities.items()}
+    # 主线测试跳过被动 SAN 的交互 UI；对应规则能力由独立断言覆盖。
+    entities["rat_thing"]["san_resolved"] = True
+    entities["door_monitor"]["san_resolved"] = True
+    entities["bast"].update({"trusted": trusted, "following": trusted})
+    return seeded.model_copy(update={"entities": entities}, deep=True)
+
+
+class SilverLockContentGateTests(unittest.TestCase):
+    """覆盖发布前必须全绿的静态质量门禁。"""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.content = load_module()
+
+    def test_schema_semantics_and_runtime_capabilities_pass(self) -> None:
+        report = validate_module_v3(self.content)
+        self.assertEqual(report.status, "pass", report.errors)
+        self.assertEqual(audit_runtime_capabilities(self.content), ())
+
+    def test_all_travelable_locations_are_reachable(self) -> None:
+        adjacency: dict[str, list[str]] = {}
+        for edge in self.content.location_edges:
+            adjacency.setdefault(edge.from_location_id, []).append(edge.to_location_id)
+        reached = {self.content.initial_state.start_location_id}
+        frontier = list(reached)
+        while frontier:
+            for neighbour in adjacency.get(frontier.pop(), []):
+                if neighbour not in reached:
+                    reached.add(neighbour)
+                    frontier.append(neighbour)
+        self.assertEqual(reached, {location.id for location in self.content.locations})
+
+    def test_every_review_object_has_source_mapping(self) -> None:
+        mapping = json.loads(
+            (FIXTURE_DIR / "module-content-provenance.json").read_text(encoding="utf-8")
+        )
+        expected = {
+            "locations": {item.id for item in self.content.locations},
+            "information": {item.id for item in self.content.information},
+            "rules": {item.id for item in self.content.rules},
+            "knowledge_goals": {item.id for item in self.content.knowledge_goals},
+            "ending_anchors": {item.id for item in self.content.ending_anchors},
+        }
+        for collection, ids in expected.items():
+            self.assertEqual(set(mapping[collection]), ids, collection)
+            self.assertTrue(all(mapping[collection][item_id] for item_id in ids))
+
+    def test_sketchbook_has_only_three_fixed_products(self) -> None:
+        fixed_rules = {
+            rule.id for rule in self.content.rules if rule.id.startswith("materialize_")
+        }
+        self.assertEqual(
+            fixed_rules,
+            {
+                "materialize_flashlight",
+                "materialize_bolt_cutters",
+                "materialize_osmanthus_porridge",
+            },
+        )
+        serialized = FIXTURE.read_text(encoding="utf-8")
+        self.assertNotIn("ensure_runtime_entity", serialized)
+        self.assertNotIn("commit_terminal_ending", serialized)
+        self.assertNotIn("inventory.has", serialized)
+
+    def test_sanity_and_fight_use_supported_check_steps(self) -> None:
+        rules = {rule.id: rule for rule in self.content.rules}
+        for rule_id in ("rat_thing_sanity", "door_ghost_sanity"):
+            profiles = {
+                step.check.profile_id
+                for step in rules[rule_id].execution.steps
+                if step.kind == "check"
+            }
+            self.assertEqual(profiles, {"coc7.sanity"})
+        self.assertIn(
+            "adjudicated_check",
+            {step.kind for step in rules["fight_blinded_kidnapper"].execution.steps},
+        )
+
+    def test_specific_ending_precedes_generic_escape(self) -> None:
+        self.assertEqual(self.content.ending_anchors[0].id, "kill_kidnapper_then_escape")
+        self.assertEqual(self.content.ending_anchors[1].id, "escape_after_lock_breaks")
+
+
+class SilverLockRuntimeTests(unittest.IsolatedAsyncioTestCase):
+    """用真实规则服务与裁决服务执行主线和抓回恢复。"""
+
+    def setUp(self) -> None:
+        self.content = load_module()
+        self.store = InMemoryEngineStore()
+        self.store.register_room(module_content=self.content, initial_state=state())
+        self.engine = AdjudicationEngineService(
+            self.store,
+            dice=DiceRoller(SequenceDiceSource([5] * 20)),
+        )
+        self.rules = RuleEngineService(self.store)
+        self.sequence = 0
+
+    async def revision(self) -> str:
+        """每次提交前读取最新 revision，确保测试也服从 CAS。"""
+
+        view = await self.rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        return view.revision
+
+    async def choose(
+        self,
+        rule_id: str,
+        option_id: str,
+        family: str,
+        target_kind: str,
+        target_id: str,
+        *,
+        check_skill: str | None = None,
+    ) -> None:
+        """提交一个真实规则候选，并在需要时完成选骰和落骰确认。"""
+
+        self.sequence += 1
+        request_id = f"silver-lock-{self.sequence}"
+        check = NoAdjudicationCheck()
+        if check_skill is not None:
+            check = RequiredAdjudicationCheck(
+                candidates=(
+                    SkillCheckCandidate(
+                        candidate_id=option_id,
+                        skill_id=check_skill,
+                        difficulty="regular",
+                        method_summary=f"使用 {check_skill}",
+                        player_safe_reason="这是当前声明的行动方式",
+                    ),
+                )
+            )
+        execution = await self.engine.submit(
+            SubmitAdjudicationRequest(
+                room_id=ROOM,
+                player_id=PLAYER,
+                adjudication=ActionAdjudication(
+                    request_id=request_id,
+                    source_revision=await self.revision(),
+                    actor_id=ACTOR,
+                    summary=f"执行 {rule_id}",
+                    target=ActionTarget(kind=target_kind, id=target_id),
+                    method=ActionMethod(family=family, description=family),
+                    rule_decision=RuleDecisionRef(rule_id=rule_id, option_id=option_id),
+                    check=check,
+                    success_effects=(),
+                    failure_effects=(),
+                ),
+            )
+        )
+        if check_skill is None:
+            return
+        pending = execution.pending_decision
+        self.assertIsNotNone(pending)
+        assert pending is not None
+        rolled = await self.engine.decide(
+            CheckDecisionRequest(
+                request_id=f"{request_id}:select",
+                room_id=ROOM,
+                player_id=PLAYER,
+                source_revision=execution.view_revision,
+                decision_id=pending.decision_id,
+                decision_version=pending.decision_version,
+                choice=SelectCheckChoice(candidate_id=option_id),
+            )
+        )
+        self.assertIsNotNone(rolled.check_run)
+        assert rolled.check_run is not None
+        await self.engine.decide_post_roll(
+            PostRollDecisionRequest(
+                request_id=f"{request_id}:accept",
+                room_id=ROOM,
+                player_id=PLAYER,
+                source_revision=rolled.view_revision,
+                check_id=rolled.check_run.check_id,
+                check_version=rolled.check_run.version,
+                option_id="accept-current",
+            )
+        )
+
+    async def prepare_bast_and_door(self, *, feed_bast: bool) -> None:
+        """执行房间谜题，按参数决定芭斯特是否跟随。"""
+
+        actions = [
+            ("cut_restraints_with_knife", "pencil-knife", "cut", "entity", "restraint_rope", None),
+            ("inspect_wall_painting", "lift-painting", "inspect", "entity", "wall_painting", None),
+            ("open_top_drawer", "wall-key", "open", "entity", "top_drawer", None),
+            ("materialize_flashlight", "fixed-flashlight", "tear", "entity", "flashlight_page", None),
+            ("materialize_bolt_cutters", "fixed-cutters", "draw", "entity", "cutters_page", None),
+            ("materialize_osmanthus_porridge", "fixed-porridge", "draw", "entity", "porridge_page", None),
+            ("move_bed", "STR", "move", "entity", "bed", "STR"),
+            ("open_middle_drawer", "bed-key", "open", "entity", "middle_drawer", None),
+            ("light_vent", "flashlight", "illuminate", "entity", "vent", None),
+            ("open_bottom_drawer", "vent-key", "open", "entity", "bottom_drawer", None),
+            ("contact_bast_with_white_paper", "use-white-paper", "write", "entity", "white_paper", None),
+            ("cut_wardrobe_chain", "bolt-cutters", "cut", "entity", "wardrobe", None),
+        ]
+        for action in actions:
+            await self.choose(*action[:5], check_skill=action[5])
+        if feed_bast:
+            await self.choose(
+                "feed_bast", "osmanthus-porridge", "feed", "entity", "bast"
+            )
+        await self.choose(
+            "ask_bast_to_open_door", "bast-opens-door", "ask", "entity", "bast"
+        )
+
+    async def test_mainline_reaches_specific_ending_facts(self) -> None:
+        await self.prepare_bast_and_door(feed_bast=True)
+        await self.choose(
+            "enter_corridor",
+            "cross-silver-door",
+            "enter",
+            "entity",
+            "silver_door",
+        )
+        current = self.store.inspect_state(ROOM)
+        self.assertEqual(current.scene_id, "corridor")
+        self.assertIs(current.entities["silver_lock"]["active"], False)
+        self.assertIs(current.entities["bast"]["alive"], False)
+
+        await self.choose(
+            "fight_blinded_kidnapper",
+            "fight-back",
+            "fight",
+            "entity",
+            "kidnapper",
+            check_skill="brawl",
+        )
+        await self.choose(
+            "escape_through_exit", "escape", "escape", "location", "outside"
+        )
+        finished = self.store.inspect_state(ROOM)
+        self.assertEqual(finished.scene_id, "outside")
+        self.assertTrue(finished.core_resolved)
+        self.assertTrue(finished.ending_available)
+        self.assertLessEqual(
+            {"silver_lock_broken", "kidnapper_defeated", "investigator_escaped"},
+            set(finished.discovered_facts),
+        )
+
+    async def test_unprotected_attempt_returns_to_room_and_preserves_progress(self) -> None:
+        await self.prepare_bast_and_door(feed_bast=False)
+        await self.choose(
+            "enter_corridor",
+            "cross-silver-door",
+            "enter",
+            "entity",
+            "silver_door",
+        )
+        returned = self.store.inspect_state(ROOM)
+        self.assertEqual(returned.scene_id, "sealed_room")
+        self.assertIs(returned.entities["silver_door"]["opened"], False)
+        self.assertIs(returned.entities["silver_lock"]["boundary_triggered"], False)
+        self.assertIs(returned.entities["sketchbook"]["found"], True)
+        self.assertIs(returned.entities["bast"]["freed"], True)
+        self.assertIn("captured_and_returned", returned.discovered_facts)
+
+
+if __name__ == "__main__":
+    unittest.main()

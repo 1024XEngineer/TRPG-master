@@ -121,6 +121,11 @@ describe('MyRoomsPage', () => {
     expect(screen.getByText('游戏进行中')).toBeInTheDocument()
     expect(screen.getByText('游戏已完成')).toBeInTheDocument()
     expect(screen.getByText('已加载全部记录')).toBeInTheDocument()
+    expect(container.querySelector('.my-games-scene__records-scroll')).toHaveAttribute(
+      'aria-label',
+      '游戏记录，可纵向滚动',
+    )
+    expect(container.querySelector('.my-games-scene__records-scroll')).toHaveAttribute('tabindex', '0')
     expect(container.querySelector('.my-games-scene__thumbnail img')).toHaveAttribute(
       'src',
       roomScene('room-in-game'),

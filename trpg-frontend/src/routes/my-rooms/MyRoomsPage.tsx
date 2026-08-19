@@ -195,6 +195,11 @@ export default function MyRoomsPage() {
             <span />
           </div>
 
+          <div
+            className="my-games-scene__records-scroll"
+            tabIndex={0}
+            aria-label="游戏记录，可纵向滚动"
+          >
           {error && (
             <div className="my-games-scene__error" role="alert">
               <span>{error}</span>
@@ -281,6 +286,7 @@ export default function MyRoomsPage() {
               </div>
             </>
           )}
+          </div>
         </section>
       </div>
     </section>

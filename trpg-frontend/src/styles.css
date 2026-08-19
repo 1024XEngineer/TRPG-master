@@ -2221,7 +2221,7 @@
   z-index: 4;
   display: flex;
   width: 66cqw;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
   gap: 1.6cqw;
   transform: translateX(-50%);
@@ -2234,6 +2234,7 @@
   width: 4.2cqw;
   height: 4.2cqw;
   flex: 0 0 auto;
+  margin-top: 1.4cqw;
   fill: currentColor;
   stroke-width: 1.1;
 }

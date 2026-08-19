@@ -150,9 +150,7 @@ async def load_builtin_module(
             rendered = "; ".join(
                 f"{issue.owner}->{issue.capability}" for issue in capability_issues
             )
-            raise BuiltinModuleLoadError(
-                f"{spec.display_name}运行能力审计未通过: {rendered}"
-            )
+            raise BuiltinModuleLoadError(f"{spec.display_name}运行能力审计未通过: {rendered}")
 
         expected_identity = (spec.module_id, spec.version, spec.world_ref)
         actual_identity = (content.module_id, content.version, content.world_ref)

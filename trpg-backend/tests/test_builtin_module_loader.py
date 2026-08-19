@@ -126,9 +126,7 @@ async def test_catalog_and_selection_use_silver_lock_publication(
     assert silver["authors"] == ["夕影"]
     assert silver["playersMin"] == silver["playersMax"] == 1
 
-    detail = (
-        await client.get(f"/api/v1/modules/{SILVER_LOCK_MODULE_ID}")
-    ).json()["data"]
+    detail = (await client.get(f"/api/v1/modules/{SILVER_LOCK_MODULE_ID}")).json()["data"]
     assert detail["storyPages"][0]["title"] == "内容提示"
     assert "动物死亡" in detail["storyPages"][0]["content"]
 

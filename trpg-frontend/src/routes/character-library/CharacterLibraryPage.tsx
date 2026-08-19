@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ArrowLeft, Plus, Trash2, User } from 'lucide-react'
 import { friendlyErrorMessage } from '@/services/api-client'
+import { useTemplatePortraits } from '@/hooks/useTemplatePortraits'
 import {
   createCharacterTemplate,
   deleteCharacterTemplate,
@@ -41,6 +42,7 @@ export default function CharacterLibraryPage() {
   const [creating, setCreating] = useState(false)
   const [pendingDelete, setPendingDelete] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const portraitUrls = useTemplatePortraits(templates)
 
   useEffect(() => {
     listCharacterTemplates()
@@ -121,13 +123,26 @@ export default function CharacterLibraryPage() {
                 <button
                   type="button"
                   onClick={() => navigate(`/home/characters/${template.templateId}`)}
-                  className="flex-1 min-w-0 text-left"
+                  className="flex flex-1 min-w-0 items-center gap-3 text-left"
                 >
-                  <div className="text-sm font-semibold text-text-primary truncate">
-                    {template.name}
+                  <div className="h-14 w-14 flex-shrink-0 overflow-hidden rounded-sm border border-border-light bg-input flex items-center justify-center">
+                    {portraitUrls[template.templateId] ? (
+                      <img
+                        src={portraitUrls[template.templateId]}
+                        alt={`${template.name}的人物图片`}
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <User className="h-6 w-6 text-text-dim" aria-hidden="true" />
+                    )}
                   </div>
-                  <div className="text-[11px] text-text-muted mt-0.5">
-                    {summarize(template)} · {formatTime(template.updatedAt)}
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-text-primary truncate">
+                      {template.name}
+                    </div>
+                    <div className="text-[11px] text-text-muted mt-0.5">
+                      {summarize(template)} · {formatTime(template.updatedAt)}
+                    </div>
                   </div>
                 </button>
                 {pendingDelete === template.templateId ? (

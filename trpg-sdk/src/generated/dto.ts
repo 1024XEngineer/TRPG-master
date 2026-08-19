@@ -284,6 +284,8 @@ export interface CharacterTemplateRead {
   data: {
     [k: string]: unknown;
   };
+  hasPortrait?: boolean;
+  portraitVersion?: string | null;
   createdAt: string;
   updatedAt: string;
 }

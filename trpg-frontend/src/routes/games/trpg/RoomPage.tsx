@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom'
-import { RoomSocketServerError, TurnFailedError, type AdjudicationPendingPayload, type AgentPlayerView, type AgentTurnPhase, type CheckRequestPayload, type CheckResultPayload, type EndingDraft, type NarrationPushPayload, type RoomConversationEvent, type RoomPlayerSummary } from 'trpg-sdk'
-import { ArrowLeft, Users, Map, MapPin, BookOpen, ScrollText, Star, X, SendHorizontal, Plus, Save, FlagOff, Heart, Brain, Volume2, Pause, Play, Square, RotateCcw, Mic, LoaderCircle } from 'lucide-react'
+import { RoomSocketServerError, TurnFailedError, type AdjudicationPendingPayload, type AgentPlayerView, type AgentTurnPhase, type CheckRequestPayload, type CheckResultPayload, type EndingDraft, type NarrationPushPayload, type RoomActionStatePayload, type RoomConversationEvent, type RoomPlayerSummary, type TimeAdvancePendingPayload } from 'trpg-sdk'
+import { ArrowLeft, Users, Map, MapPin, BookOpen, ScrollText, Star, X, SendHorizontal, Plus, Save, FlagOff, Heart, Brain, Volume2, Pause, Play, Square, RotateCcw, Mic, LoaderCircle, Clock3, Check } from 'lucide-react'
 import { useCallback, useState, useRef, useEffect, useMemo, type Dispatch, type FormEvent, type SetStateAction } from 'react'
 import { useRoomStore } from '@/stores/room-store'
 import { useAuthStore } from '@/stores/auth-store'
@@ -1316,6 +1316,10 @@ export default function RoomPage() {
   const [pendingCheck, setPendingCheck] = useState<CheckRequestPayload | null>(null)
   const [pendingAdjudication, setPendingAdjudication] =
     useState<AdjudicationPendingPayload | null>(null)
+  const [pendingTimeAdvance, setPendingTimeAdvance] =
+    useState<TimeAdvancePendingPayload | null>(null)
+  const [roomActionState, setRoomActionState] = useState<RoomActionStatePayload | null>(null)
+  const [timeAdvanceResponding, setTimeAdvanceResponding] = useState(false)
   const selectedAdjudicationOptionRef = useRef<{
     correlationId: string
     option: UiPendingCheckDecisionView['options'][number]
@@ -1394,6 +1398,17 @@ export default function RoomPage() {
   const organizingPhaseStartedAtRef = useRef<number | null>(null)
   const progressClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const suspended = (roomPhase || roomInfo?.phase) === 'Suspended'
+  const ownsRoomAction = roomActionState?.playerId === playerId
+  const actionSubmissionBlocked = roomActionState !== null && roomActionState.status !== 'idle' && (
+    roomActionState.status === 'processing' ||
+    !ownsRoomAction ||
+    pendingAdjudication !== null ||
+    pendingTimeAdvance !== null
+  )
+  const composerDisabled = suspended || (isActionChannel && actionSubmissionBlocked)
+  const actionOwnerName = roomActionState?.playerId === playerId
+    ? senderName
+    : roomPlayers.find((player) => player.playerId === roomActionState?.playerId)?.nickname ?? '其他调查员'
   const mapLocations = mapLocationsFromPlayerView(playerView)
   const currentLocationImage = playerView ? LOCATION_IMAGE_BY_ID[playerView.scene.id] : undefined
   const liveResources = liveResourcesOf(playerView)
@@ -1625,6 +1640,16 @@ export default function RoomPage() {
         setProgressLabel('守秘人正在生成开场叙事')
       } else if (envelope.type === 'room.state') {
         setRoomPhase(envelope.payload.phase)
+      } else if (envelope.type === 'room.action.state') {
+        setRoomActionState(envelope.payload)
+        if (envelope.payload.status === 'idle') {
+          // idle 是服务端的完整终态快照；重连时用它清除浏览器残留的旧检定控件。
+          setPendingAdjudication(null)
+          setPendingCheck(null)
+          setPendingCheckDice(null)
+          setAuthoritativeDiceRoll(null)
+          setPendingAction(null)
+        }
       } else if (envelope.type === 'host_speech.settings_updated') {
         handleHostSpeechSettingsUpdated(envelope.payload.voiceType)
       } else if (envelope.type === 'chat.message') {
@@ -1729,6 +1754,17 @@ export default function RoomPage() {
             openDiceForCheck()
           }
         }
+      } else if (envelope.type === 'time.advance.pending') {
+        setPendingTimeAdvance(envelope.payload)
+        setTimeAdvanceResponding(false)
+        setTyping(false)
+        setProgressLabel('等待全员确认时间推进')
+      } else if (envelope.type === 'time.advance.resolved') {
+        setPendingTimeAdvance((current) =>
+          current?.proposalId === envelope.payload.proposalId ? null : current,
+        )
+        setTimeAdvanceResponding(false)
+        setProgressLabel(null)
       } else if (
         envelope.type === 'plan.started' ||
         envelope.type === 'plan.step_changed' ||
@@ -1809,7 +1845,7 @@ export default function RoomPage() {
   }, [clearBackendProgress, clearSettledAction, enqueueHostSpeech, handleHostSpeechSettingsUpdated, openDiceForCheck, playerId, senderName, showBackendPhase])
 
   const submitPlayerAction = (action: { clientActionId: string; utterance: string }) => {
-    if (!playerId || suspended) return
+    if (!playerId || suspended || actionSubmissionBlocked) return
     pendingNarrationActionIdRef.current = action.clientActionId
     setPendingAction(action)
     setActionError('')
@@ -1862,7 +1898,7 @@ export default function RoomPage() {
   const sendMessage = (e?: FormEvent) => {
     e?.preventDefault()
     const text = input.trim()
-    if (!text || !playerId || suspended) return
+    if (!text || !playerId || suspended || (isActionChannel && actionSubmissionBlocked)) return
     // 发送前先关闭识别结果闸门，防止浏览器稍后返回的文本写入已清空的输入框。
     cancelSpeechInput()
     setInput('')
@@ -2221,6 +2257,89 @@ export default function RoomPage() {
       )}
       </section>
 
+      {pendingTimeAdvance && (
+        <div className="room-play__time-consent" role="status" aria-live="polite">
+          <div className="room-play__time-consent-summary">
+            <Clock3 aria-hidden="true" strokeWidth={2} />
+            <div>
+              <strong>{formatWorldTime(
+                pendingTimeAdvance.targetDayIndex,
+                pendingTimeAdvance.targetHourOfDay,
+              )}</strong>
+              <span>
+                {pendingTimeAdvance.acceptedPlayerIds.length}/
+                {pendingTimeAdvance.requiredPlayerIds.length} 人已确认
+              </span>
+            </div>
+          </div>
+          <div className="room-play__time-consent-actions">
+            <button
+              type="button"
+              className="room-play__time-consent-button room-play__time-consent-button--reject"
+              disabled={
+                timeAdvanceResponding ||
+                !playerId ||
+                pendingTimeAdvance.acceptedPlayerIds.includes(playerId)
+              }
+              onClick={() => {
+                if (!playerId) return
+                setTimeAdvanceResponding(true)
+                sdk.roomSocket.respondToTimeAdvance(playerId, {
+                  proposalId: pendingTimeAdvance.proposalId,
+                  proposalVersion: pendingTimeAdvance.proposalVersion,
+                  sourceRevision: pendingTimeAdvance.sourceRevision,
+                  accept: false,
+                })
+              }}
+            >
+              <X aria-hidden="true" />
+              拒绝
+            </button>
+            <button
+              type="button"
+              className="room-play__time-consent-button room-play__time-consent-button--accept"
+              disabled={
+                timeAdvanceResponding ||
+                !playerId ||
+                pendingTimeAdvance.acceptedPlayerIds.includes(playerId)
+              }
+              onClick={() => {
+                if (!playerId) return
+                setTimeAdvanceResponding(true)
+                sdk.roomSocket.respondToTimeAdvance(playerId, {
+                  proposalId: pendingTimeAdvance.proposalId,
+                  proposalVersion: pendingTimeAdvance.proposalVersion,
+                  sourceRevision: pendingTimeAdvance.sourceRevision,
+                  accept: true,
+                })
+              }}
+            >
+              <Check aria-hidden="true" />
+              {playerId && pendingTimeAdvance.acceptedPlayerIds.includes(playerId)
+                ? '已同意'
+                : '同意'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {roomActionState && roomActionState.status !== 'idle' && (
+        <div className="room-play__action-state" role="status" aria-live="polite">
+          <LoaderCircle
+            aria-hidden="true"
+            className={roomActionState.status === 'processing' ? 'animate-spin' : ''}
+          />
+          <strong>{actionOwnerName}</strong>
+          <span>
+            {roomActionState.status === 'processing'
+              ? '的行动正在处理中'
+              : ownsRoomAction
+                ? '的行动正在等待你操作'
+                : '的行动正在等待其操作'}
+          </span>
+        </div>
+      )}
+
       {/* Input area */}
       <div className="room-play__composer">
         {suspended && (
@@ -2287,7 +2406,7 @@ export default function RoomPage() {
               aria-label="骰子"
               data-onboarding-target="dice-button"
               onClick={() => setShowDice(true)}
-              disabled={suspended}
+              disabled={composerDisabled}
               className="room-play__composer-button room-play__dice-button"
             >
               <IsometricDiceIcon />
@@ -2304,8 +2423,14 @@ export default function RoomPage() {
               e.preventDefault()
               sendMessage()
             }}
-            disabled={suspended}
-            placeholder={suspended ? '游戏已挂起' : '输入行动…'}
+            disabled={composerDisabled}
+            placeholder={
+              suspended
+                ? '游戏已挂起'
+                : isActionChannel && actionSubmissionBlocked
+                  ? '等待当前行动完成'
+                  : '输入行动…'
+            }
             className="room-play__input"
           />
           {speechInput.status === 'listening' ? (
@@ -2314,7 +2439,7 @@ export default function RoomPage() {
               aria-label="停止语音输入并采用文字"
               title="停止并采用识别文字"
               onClick={speechInput.stop}
-              disabled={suspended}
+              disabled={composerDisabled}
               className="room-play__composer-button room-play__composer-button--danger"
             >
               <Square className="w-4 h-4" fill="currentColor" strokeWidth={2} />
@@ -2326,7 +2451,7 @@ export default function RoomPage() {
               title={speechInput.unavailableReason ?? '开始语音输入'}
               onClick={speechInput.start}
               disabled={
-                suspended ||
+                composerDisabled ||
                 !speechInput.supported ||
                 speechInput.status === 'requesting_permission' ||
                 speechInput.status === 'processing'
@@ -2355,7 +2480,7 @@ export default function RoomPage() {
             <button
               type="submit"
               aria-label="发送消息"
-              disabled={suspended || !input.trim()}
+              disabled={composerDisabled || !input.trim()}
               className="room-play__composer-button room-play__send-button"
             >
               <SendHorizontal className="w-[18px] h-[18px]" strokeWidth={2.5} />

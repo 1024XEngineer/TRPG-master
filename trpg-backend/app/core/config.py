@@ -93,10 +93,6 @@ class Settings(BaseSettings):
     # 一键建卡的规则数值始终由本地 COC7 生成器负责；此开关只决定八项背景文字
     # 是否交给 DeepSeek 创作。模型失败时服务层会回退到生成器内置模板。
     character_background_provider: Literal["deterministic", "deepseek"] = "deterministic"
-    host_agent_max_turns: int = Field(default=6, gt=0, le=20)
-    host_agent_max_tool_calls: int = Field(default=8, gt=0, le=50)
-    host_agent_tool_timeout_seconds: float = Field(default=5.0, gt=0, le=30)
-    host_agent_timeout_seconds: float = Field(default=30.0, gt=0, le=120)
     opening_narration_mode: Literal["model", "template"] = "model"
     # 10 秒对真实 provider 太紧：DeepSeek 生成开场稳定在 10s 上下，几乎每局都
     # 撞上超时、退回确定性模板——玩家看到的就是"开场变死板了"，而日志里是

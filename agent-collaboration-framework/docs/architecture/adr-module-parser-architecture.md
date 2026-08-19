@@ -71,11 +71,13 @@ Validation（确定性 Python，三层，非 LLM）
 | Validation | 普通 Python + Pydantic | 非 LLM |
 | Publish | 普通 Python | 非 LLM |
 | 编排 | 普通 Python async（当前 Orchestrator） | 不引入 LangGraph |
-| Agent SDK | 候选默认 OpenAI Agents SDK；PydanticAI 为对比候选 | 不侵入 Validation / Publish / Runtime |
+| 模型适配 | provider-neutral structured model client | Provider SDK 不侵入 Validation / Publish / Runtime |
 
 **LangGraph 引入条件**：仅当出现以下至少一项时重新评估——跨进程暂停恢复、复杂循环编排、持久化 Human-in-the-loop 恢复。当前所有流程均为线性单次执行，不需要。
 
-**Agent SDK 边界**：仅进入 `host/adapters/` 和未来的 `module/adapters/`，作为 `ParserModelPort` / `NarrationModelPort` 的 Adapter 实现。不进入 `contracts/`、`engine/`、`module/validation.py`。
+**模型 Provider 边界**：客户端、认证、重试和 Provider 特有配置只进入未来的
+`module/adapters/` 或 backend adapter，作为 `ParserModelPort` / `ReviewModelPort` 的实现；
+不进入 `contracts/`、`engine/` 或 `module/validation.py`。
 
 ---
 
@@ -191,10 +193,10 @@ agent-collaboration-framework（本仓库）
 
 ```
 ✅ 完整链路已冻结（DocumentAdapter → SourceFragment → Parser → Validation → Publish → Runtime）
-✅ 技术选型已冻结（何处 Agent SDK、何处普通 Python、不引入 LangGraph）
+✅ 技术选型已冻结（何处模型 Adapter、何处普通 Python、不引入 LangGraph）
 ✅ ParserModelPort 输入输出已定义
 ✅ Review Pass 定位已明确（Phase 2 实现，不取消）
-✅ Agent SDK 边界已明确（仅模型 Adapter，不侵入 Validation/Publish/Runtime）
+✅ Provider 边界已明确（仅模型 Adapter，不侵入 Validation/Publish/Runtime）
 ✅ Module Parser Agent 是一级业务边界，Parser/Review Pass 是内部阶段
 ```
 

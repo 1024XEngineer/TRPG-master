@@ -42,11 +42,11 @@ from collaboration_framework.contracts import (
 from collaboration_framework.engine import InMemoryEngineStore, RuleEngineService
 from collaboration_framework.engine.initialization import create_initial_game_state
 from collaboration_framework.engine.models import ActorState
-from collaboration_framework.host.adapters.openai_agents import (
+from collaboration_framework.host.application import PlayerViewProjector, TurnExecutionError
+from collaboration_framework.host.prompts.action_plan import (
     current_step_adjudication_instructions,
     host_turn_decision_instructions,
 )
-from collaboration_framework.host.application import PlayerViewProjector, TurnExecutionError
 from collaboration_framework.host.schemas import (
     ActionPlanStepContext,
     HostAgentContext,

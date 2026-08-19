@@ -1872,7 +1872,7 @@
     }
   },
   "additionalProperties": false,
-  "description": "Trusted player input paired with B's player-safe scoped view.",
+  "description": "Trusted player input paired with the active turn's scoped views.",
   "properties": {
     "player_input": {
       "$ref": "#/$defs/PlayerInput"

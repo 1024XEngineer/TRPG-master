@@ -32,7 +32,7 @@ class ContractGuardTests(unittest.TestCase):
 
     def test_exported_schemas_match_pydantic_source(self) -> None:
         expected = rendered_schemas()
-        self.assertEqual(len(expected), 29)
+        self.assertEqual(len(expected), 25)
         self.assertIn("keeper-capability-view.schema.json", expected)
         self.assertIn("module-content-v3.schema.json", expected)
         self.assertIn("action-adjudication.schema.json", expected)
@@ -44,8 +44,13 @@ class ContractGuardTests(unittest.TestCase):
         self.assertIn("adjudication-status.schema.json", expected)
         self.assertIn("cancel-action-plan-request.schema.json", expected)
         self.assertIn("host-agent-context.schema.json", expected)
-        self.assertIn("host-agent-usage.schema.json", expected)
-        self.assertIn("host-agent-event.schema.json", expected)
+        self.assertIn("narration-output.schema.json", expected)
+        self.assertIn("opening-narration-context.schema.json", expected)
+        self.assertIn("recent-turn-context.schema.json", expected)
+        self.assertNotIn("intent.schema.json", expected)
+        self.assertNotIn("host-agent-usage.schema.json", expected)
+        self.assertNotIn("host-agent-event.schema.json", expected)
+        self.assertNotIn("websocket-output.schema.json", expected)
         self.assertNotIn("turn-state.schema.json", expected)
         self.assertNotIn("event.schema.json", expected)
         self.assertNotIn("summary-operation.schema.json", expected)
@@ -90,6 +95,7 @@ class ContractGuardTests(unittest.TestCase):
                     "summary": "打开柜子",
                 }
             )
+
 
 if __name__ == "__main__":
     unittest.main()

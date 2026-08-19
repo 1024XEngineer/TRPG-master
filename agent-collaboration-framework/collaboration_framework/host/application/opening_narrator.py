@@ -7,11 +7,11 @@ from typing import Literal
 from collaboration_framework.contracts import ContractError
 from collaboration_framework.host.ports import OpeningNarrationModelPort
 from collaboration_framework.host.schemas import (
-    OpeningNarrationContext,
     NarrationOutput,
+    OpeningNarrationContext,
 )
 
-from .narrator import narration_text_rejection_reason, normalize_narration_text
+from .narration_policy import narration_text_rejection_reason, normalize_narration_text
 
 OpeningRejectionReason = Literal[
     "outer_schema",

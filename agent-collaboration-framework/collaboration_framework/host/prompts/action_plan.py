@@ -2,6 +2,8 @@
 
 from collaboration_framework.contracts import ActionPlanPolicy
 
+PROMPT_VERSION = "trpg-host-intent-v5"
+
 
 def host_turn_decision_instructions(policy: ActionPlanPolicy) -> str:
     """Describe product semantics without turning the soft window into a step cap."""

@@ -9,11 +9,11 @@ from pydantic import Field, model_validator
 
 from collaboration_framework.contracts import (
     ActionAdjudication,
-    CommittedResult,
     ActionPlan,
     ActionPlanPolicy,
     ActionPlanStep,
     AdjudicationExecution,
+    CommittedResult,
     ContractModel,
     JsonObject,
     KeeperCapabilityView,
@@ -23,8 +23,8 @@ from collaboration_framework.contracts import (
     ValidationFeedback,
     WorldClockView,
 )
-from collaboration_framework.host.schemas.agent import _validate_keeper_scope
 from collaboration_framework.host.schemas.history import RecentTurnContext
+from collaboration_framework.host.schemas.planner_context import _validate_keeper_scope
 
 PlanRunStatus = Literal[
     "active",

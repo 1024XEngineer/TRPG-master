@@ -23,7 +23,6 @@ from collaboration_framework.engine import EngineStore, RuleEngineService
 from collaboration_framework.host.adapters.fakes import (
     FakeOpeningNarrationModel,
 )
-from collaboration_framework.host.adapters.openai_agents import PROMPT_VERSION
 from collaboration_framework.host.application import (
     ContextAssembler,
     OpeningNarrationValidationError,
@@ -34,6 +33,7 @@ from collaboration_framework.host.application import (
 from collaboration_framework.host.ports import (
     OpeningNarrationModelPort,
 )
+from collaboration_framework.host.prompts.action_plan import PROMPT_VERSION
 from collaboration_framework.host.schemas import (
     NarrationOutput,
     RecentHistoryBudget,

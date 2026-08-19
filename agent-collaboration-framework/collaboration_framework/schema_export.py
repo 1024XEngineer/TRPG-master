@@ -1,4 +1,4 @@
-"""Generate JSON Schema for stable boundaries and host-private Agent DTOs."""
+"""Generate JSON Schema for active contracts and planner context."""
 
 from __future__ import annotations
 
@@ -19,7 +19,6 @@ from collaboration_framework.contracts import (
     CancelActionPlanRequest,
     CheckDecisionRequest,
     GetAdjudicationStatusRequest,
-    Intent,
     KeeperCapabilityView,
     ModuleContent,
     ModuleContentV3,
@@ -33,12 +32,9 @@ from collaboration_framework.contracts import (
 )
 from collaboration_framework.host.schemas import (
     HostAgentContext,
-    HostAgentEventSchema,
-    HostAgentUsage,
     NarrationOutput,
     OpeningNarrationContext,
     RecentTurnContext,
-    WebSocketOutput,
 )
 
 SCHEMA_MODELS: dict[str, type[BaseModel]] = {
@@ -48,7 +44,6 @@ SCHEMA_MODELS: dict[str, type[BaseModel]] = {
     "projection-snapshot.schema.json": ProjectionSnapshot,
     "player-view.schema.json": PlayerView,
     "keeper-capability-view.schema.json": KeeperCapabilityView,
-    "intent.schema.json": Intent,
     "action-request.schema.json": ActionRequest,
     "action-result.schema.json": ActionResult,
     "action-adjudication.schema.json": ActionAdjudication,
@@ -66,10 +61,7 @@ SCHEMA_MODELS: dict[str, type[BaseModel]] = {
     "validation-feedback.schema.json": ValidationFeedback,
     "narration-output.schema.json": NarrationOutput,
     "opening-narration-context.schema.json": OpeningNarrationContext,
-    "websocket-output.schema.json": WebSocketOutput,
     "host-agent-context.schema.json": HostAgentContext,
-    "host-agent-usage.schema.json": HostAgentUsage,
-    "host-agent-event.schema.json": HostAgentEventSchema,
     "recent-turn-context.schema.json": RecentTurnContext,
 }
 

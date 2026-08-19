@@ -15,16 +15,9 @@ from collaboration_framework.contracts import (
     SkillCheckCandidate,
 )
 from collaboration_framework.engine import DiceRoller, SequenceDiceSource
-from collaboration_framework.host.adapters.fakes import (
-    FakeNarrationModel,
-    FakeOpeningNarrationModel,
-)
+from collaboration_framework.host.adapters.fakes import FakeOpeningNarrationModel
 from collaboration_framework.host.application import ActionPlanNarrator
-from collaboration_framework.host.schemas import (
-    IntentContext,
-    NarrationContext,
-    OpeningNarrationContext,
-)
+from collaboration_framework.host.schemas import OpeningNarrationContext
 from starlette.testclient import TestClient
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
@@ -32,57 +25,6 @@ from app.controller import ws as ws_controller
 from app.main import app
 
 ROOMS_BASE = "/api/v1/rooms"
-
-
-class _WsCandidateIntentModel:
-    async def generate(self, context: IntentContext) -> JsonObject:
-        return {
-            "kind": "action",
-            "verb": "investigate",
-            "target": {"matched": True, "id": context.player_view.scene.id},
-            "check": {
-                "route": "default",
-                "proposed_skills": ["library-use", "stealth"],
-            },
-            "summary": context.player_input.utterance,
-        }
-
-
-class _WsAttackThenPlainIntentModel:
-    def __init__(self) -> None:
-        self.calls = 0
-
-    async def generate(self, context: IntentContext) -> JsonObject:
-        self.calls += 1
-        if self.calls == 1:
-            return {
-                "kind": "action",
-                "verb": "attack",
-                "target": {"matched": True, "id": "thomas"},
-                "check": {
-                    "route": "default",
-                    "proposed_skills": ["fighting-brawl"],
-                },
-                "summary": context.player_input.utterance,
-            }
-        return {
-            "kind": "action",
-            "verb": "talk",
-            "target": {"matched": True, "id": "thomas"},
-            "check": {"route": "none"},
-            "summary": context.player_input.utterance,
-        }
-
-
-class _WsPlainIntentModel:
-    async def generate(self, context: IntentContext) -> JsonObject:
-        return {
-            "kind": "dialogue",
-            "verb": "talk",
-            "target": {"matched": True, "id": "thomas"},
-            "check": {"route": "none"},
-            "summary": context.player_input.utterance,
-        }
 
 
 class _WsSingleActionCheckPlanner:
@@ -147,35 +89,6 @@ class _WsFirstPersonThenSafeNarration:
             "kind": "narration",
             "text": ("我带着你们进入墓地。" if self.calls == 1 else "你带着托马斯进入墓地。"),
             "claimed_evidence_refs": [],
-            "suggested_actions": [],
-        }
-
-
-class _WsInvalidTwiceThenSafeNarration:
-    leaked_text = "托马斯看着你。 claimed_fact_ids: [],"
-
-    def __init__(self) -> None:
-        self.calls = 0
-        self._fake = FakeNarrationModel()
-
-    async def generate(self, context: NarrationContext) -> JsonObject:
-        self.calls += 1
-        if self.calls <= 2:
-            return {
-                "kind": "narration",
-                "text": self.leaked_text,
-                "claimed_fact_ids": [],
-                "suggested_actions": [],
-            }
-        return await self._fake.generate(context)
-
-
-class _WsEscapedNewlineNarration:
-    async def generate(self, context: NarrationContext) -> JsonObject:
-        return {
-            "kind": "narration",
-            "text": "第一段\\r\\n第二段\\n第三段",
-            "claimed_fact_ids": [],
             "suggested_actions": [],
         }
 

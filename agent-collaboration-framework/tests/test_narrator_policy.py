@@ -8,9 +8,7 @@ from collaboration_framework.host.application.action_plan_narrator import (
     ActionPlanNarrationValidationError,
     ActionPlanNarrator,
 )
-from collaboration_framework.host.application.narrator import (
-    NarrationValidationError,
-    Narrator,
+from collaboration_framework.host.application.narration_policy import (
     narration_subject_rejection_reason,
     narration_text_rejection_reason,
     normalize_narration_text,
@@ -141,34 +139,6 @@ class NarrationTextPolicyTests(unittest.TestCase):
         for text in cases:
             with self.subTest(text=text):
                 self.assertIsNone(narration_subject_rejection_reason(text))
-
-
-class _CandidateNarrationModel:
-    def __init__(self, text: str) -> None:
-        self.text = text
-
-    async def generate(self, context):
-        del context
-        return {
-            "kind": "narration",
-            "text": self.text,
-            "claimed_fact_ids": [],
-            "suggested_actions": [],
-        }
-
-
-class NarratorSubjectPolicyTests(unittest.IsolatedAsyncioTestCase):
-    async def test_narrator_rejects_first_person_subject_in_prose(self) -> None:
-        context = SimpleNamespace(
-            action_result=SimpleNamespace(visible_facts=()),
-        )
-
-        with self.assertRaises(NarrationValidationError) as raised:
-            await Narrator(_CandidateNarrationModel("我带着你们进入墓园。")).narrate(
-                context
-            )
-
-        self.assertEqual(raised.exception.reason, "subject_ownership")
 
 
 class _PersistentNarrationModel:

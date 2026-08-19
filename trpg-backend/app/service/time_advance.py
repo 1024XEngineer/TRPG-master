@@ -206,7 +206,11 @@ async def create_from_adjudication(
     db: AsyncSession,
     request: SubmitAdjudicationRequest,
 ) -> AdjudicationExecution:
-    """冻结一条已被 Engine 识别为“多人需确认”的无检定时间裁决。"""
+    """冻结任意已绑定玩家发起的多人时间裁决，不检查房主身份。
+
+    发起者只是自动拥有一票；房主与其他玩家完全等价，最终仍要求冻结的
+    全体玩家集合确认后才提交世界时间。
+    """
 
     adjudication = request.adjudication
     if adjudication.check.mode != "none":

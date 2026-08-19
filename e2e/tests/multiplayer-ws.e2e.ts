@@ -296,8 +296,9 @@ test('三人推进时间需全员确认，最后一票只提交一次并恢复�
       (event) => event.type === 'time.advance.pending',
     )
     const actionId = `e2e-time-consent-${Date.now()}`
-    const completedPromise = room.host.sdk.roomSocket.submitPlannedAction(
-      room.hostPlayerId,
+    // 时间提案不属于房主权限：由普通访客发起，房主只作为全员中的一票。
+    const completedPromise = guest.sdk.roomSocket.submitPlannedAction(
+      joined.playerId,
       {
         clientActionId: actionId,
         utterance: '全队等待到下一个时间点',
@@ -313,7 +314,9 @@ test('三人推进时间需全员确认，最后一票只提交一次并恢复�
     assert.equal(thirdPending.type, 'time.advance.pending')
     assert.deepEqual(guestPending.payload, hostPending.payload)
     assert.deepEqual(thirdPending.payload, hostPending.payload)
-    assert.deepEqual(hostPending.payload.acceptedPlayerIds, [room.hostPlayerId])
+    assert.deepEqual(hostPending.payload.acceptedPlayerIds, [joined.playerId])
+    assert.equal(hostPending.payload.requesterPlayerId, joined.playerId)
+    assert.notEqual(hostPending.payload.requesterPlayerId, room.hostPlayerId)
 
     const thirdUpdatedPromise = waitForEvent(
       third.sdk,
@@ -321,7 +324,7 @@ test('三人推进时间需全员确认，最后一票只提交一次并恢复�
         event.type === 'time.advance.pending' &&
         event.payload.acceptedPlayerIds.includes(joined.playerId),
     )
-    guest.sdk.roomSocket.respondToTimeAdvance(joined.playerId, {
+    room.host.sdk.roomSocket.respondToTimeAdvance(room.hostPlayerId, {
       proposalId: hostPending.payload.proposalId,
       proposalVersion: hostPending.payload.proposalVersion,
       sourceRevision: hostPending.payload.sourceRevision,
@@ -361,7 +364,7 @@ test('三人推进时间需全员确认，最后一票只提交一次并恢复�
     assert.equal(hostResolved.payload.status, 'approved')
     assert.deepEqual(guestResolved.payload, hostResolved.payload)
     assert.deepEqual(thirdResolved.payload, hostResolved.payload)
-    assert.equal(completed.player_id, room.hostPlayerId)
+    assert.equal(completed.player_id, joined.playerId)
     assert.notEqual(completed.player_view.revision, initialRevision)
   } finally {
     room.host.sdk.roomSocket.disconnect()

@@ -33,6 +33,7 @@ from collaboration_framework.contracts.module_v3 import (
     PredicateCondition,
     RuleSpecV3,
 )
+from collaboration_framework.registry import predicates as predicate_registry
 
 from .validation import ValidationIssue, ValidationReport
 
@@ -297,7 +298,16 @@ def _location_cycle_issues(content: ModuleContentV3) -> list[ValidationIssue]:
 
 
 def _condition_issues(condition: ConditionExpr, path: str) -> list[ValidationIssue]:
-    """Reject empty logical nodes; a predicate's name is checked at load time."""
+    """Reject empty or unregistered predicate names (#347 Phase 1).
+
+    The predicate *name* is now checked against `registry/predicates.py` —
+    the one deliberate, called-out behaviour change in issue #347's otherwise
+    pure-refactor scope: a typo'd or made-up predicate name used to pass
+    publish and just silently never fire at runtime
+    (`_UNKNOWN_PREDICATE_IS_FALSE`); it is now rejected here instead, with the
+    rule pinpointed. Argument *shape* is deliberately still not checked here
+    (see `registry/predicates.py` module docstring) — only the name.
+    """
 
     if isinstance(condition, AllCondition | AnyCondition):
         issues: list[ValidationIssue] = []
@@ -306,15 +316,25 @@ def _condition_issues(condition: ConditionExpr, path: str) -> list[ValidationIss
         return issues
     if isinstance(condition, NotCondition):
         return _condition_issues(condition.item, f"{path}.item")
-    if isinstance(condition, PredicateCondition) and not condition.predicate.strip():
-        return [
-            ValidationIssue(
-                severity="error",
-                code="MODULE_V3_PREDICATE_EMPTY",
-                path=f"{path}.predicate",
-                message="predicate 名称不能为空",
-            )
-        ]
+    if isinstance(condition, PredicateCondition):
+        if not condition.predicate.strip():
+            return [
+                ValidationIssue(
+                    severity="error",
+                    code="MODULE_V3_PREDICATE_EMPTY",
+                    path=f"{path}.predicate",
+                    message="predicate 名称不能为空",
+                )
+            ]
+        if not predicate_registry.is_registered(condition.predicate):
+            return [
+                ValidationIssue(
+                    severity="error",
+                    code="MODULE_V3_PREDICATE_UNKNOWN",
+                    path=f"{path}.predicate",
+                    message=f"引用了未注册的 predicate: {condition.predicate}",
+                )
+            ]
     return []
 
 

@@ -28,11 +28,15 @@ from collaboration_framework.contracts import (
     RuleSpecV3,
 )
 
+from collaboration_framework.registry import predicates as predicate_registry
+
 from .models import AgendaItem, AgendaSource, DomainEvent, GameState, RuleAgenda
 
-# Predicates a rule may name. #226 §1 forbids scripts and arbitrary state paths,
-# so a rule can only ask questions the Engine registered.
-_UNKNOWN_PREDICATE_IS_FALSE = False
+# `entity_state` used to live here; it now lives in `registry/predicates.py`
+# (the shared read every predicate evaluator uses). Re-imported by name so
+# `adjudication.py` and `navigation.py` can keep doing
+# `from .rules_v3 import entity_state` unchanged.
+from collaboration_framework.registry.predicates import entity_state  # noqa: F401
 
 
 @dataclass
@@ -101,53 +105,20 @@ def _evaluate_predicate(
     state: GameState,
     actor_id: str,
 ) -> bool:
-    args = condition.args
-    if condition.predicate == "entity_state_is":
-        entity_id = args.get("entity_id")
-        key = args.get("key")
-        if not isinstance(entity_id, str) or not isinstance(key, str):
-            return False
-        expected = args.get("value", True)
-        current = entity_state(state, entity_id).get(key)
-        # An absent flag reads as False, which is how the authored `== false`
-        # conditions are meant to fire on a fresh room.
-        return (current if current is not None else False) == expected
-    if condition.predicate == "time_of_day_is":
-        return state.world_time.time_of_day == args.get("value")
-    if condition.predicate == "information_is":
-        information_id = args.get("id")
-        if not isinstance(information_id, str):
-            return False
-        return information_id in set(state.discovered_facts) | set(
-            state.actor_discovered_facts.get(actor_id, ())
-        )
-    if condition.predicate == "core_resolved":
-        return state.core_resolved is bool(args.get("value", True))
-    return _UNKNOWN_PREDICATE_IS_FALSE
+    """Delegates to `registry/predicates.py` (#347 Phase 1).
 
-
-def entity_state(state: GameState, entity_id: str) -> dict:
-    """The one authoritative read of an entity's state flags.
-
-    An entity carrying an `item_component` gets materialised into
-    `item_instances`, and `ChangeEntityStateEffect` then writes **only** to that
-    record (it is the versioned one). Reading just `runtime_entities`/`entities`
-    therefore never observes those writes: the authored defaults sit on one side
-    while every subsequent update lands on the other, so any condition gated on
-    such a flag — `visibility_conditions`, gated edges, event triggers — stays
-    frozen at its initial value forever.
-
-    Resolving here in the same precedence the write side uses (item wins) keeps
-    a single source of truth per flag. The authored state stays the base so
-    defaults survive: a fresh item instance starts with empty `values`.
+    An unregistered predicate name still reads False here, exactly as the
+    inline `_UNKNOWN_PREDICATE_IS_FALSE` fallback did before the registry
+    existed — this function's job is now just the lookup, not the four
+    branches themselves.
     """
 
-    runtime = state.runtime_entities.get(entity_id)
-    base = runtime if runtime is not None else state.entities.get(entity_id, {})
-    item = state.item_instances.get(entity_id)
-    if item is None:
-        return base
-    return {**base, **item.state.values}
+    return predicate_registry.evaluate(
+        condition.predicate,
+        condition.args,
+        state=state,
+        actor_id=actor_id,
+    )
 
 
 def walk_rule(rule: RuleSpecV3, *, branch_id: str | None = None) -> RuleWalk:

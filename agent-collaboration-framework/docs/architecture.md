@@ -117,6 +117,7 @@ capability 看到与当前回合有关的内容。
 flowchart TD
     CONTRACTS["contracts"]
     XPORTS["ports"] --> CONTRACTS
+    REGISTRY["registry"] --> CONTRACTS
     HSCHEMA["host/schemas"] --> CONTRACTS
     HPORTS["host/ports"] --> CONTRACTS
     HAPP["host/application"] --> HSCHEMA
@@ -127,15 +128,23 @@ flowchart TD
     HADAPTER["host/adapters"] --> HPORTS
     ENGINE["engine"] --> XPORTS
     ENGINE --> CONTRACTS
+    ENGINE --> REGISTRY
     MODULE["module"] --> CONTRACTS
+    MODULE --> REGISTRY
     BACKEND["backend adapters/controllers"] --> HAPP
     BACKEND --> HPROMPT
     BACKEND --> ENGINE
 ```
 
+`registry`（#347）是引擎自带的封闭登记表：Rule 只能引用表里已登记的条目，模组数据不能定义新条目。
+它同时被 `engine`（执行期求值）和 `module`（发布期校验）读取，而 `module -> engine` 是禁止的，
+所以它与 `contracts` 同级、作为叶子存在，运行时只依赖 `contracts`；求值函数需要的引擎状态模型
+一律放在 `TYPE_CHECKING` 块里，只用于类型注解，不构成运行时依赖边。
+
 禁止反向依赖：
 
-- `contracts -> host/engine/module`
+- `contracts -> host/engine/module/registry`
+- `registry -> host/engine/module`（仅允许 `TYPE_CHECKING` 下的类型注解导入）
 - `engine -> host`
 - `host -> engine/module`
 - `module -> engine/host`

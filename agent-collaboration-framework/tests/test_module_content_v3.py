@@ -79,7 +79,15 @@ def module_payload() -> dict[str, Any]:
                 "traversal": "gated",
                 "access_point_id": "library_door",
                 "conditions": [
-                    {"op": "predicate", "predicate": "door_unlocked", "args": {"id": "library_door"}}
+                    {
+                        "op": "predicate",
+                        "predicate": "entity_state_is",
+                        "args": {
+                            "entity_id": "library_door",
+                            "key": "unlocked",
+                            "value": True,
+                        },
+                    }
                 ],
                 "travel_cost": {"minutes": 10},
             }

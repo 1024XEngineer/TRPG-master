@@ -19,9 +19,49 @@ def imports_for(path: Path) -> set[str]:
     return imports
 
 
+def runtime_imports_for(path: Path) -> set[str]:
+    """`imports_for`, minus anything only imported for type annotations.
+
+    A name imported inside `if TYPE_CHECKING:` never executes, so it creates
+    no runtime dependency edge — the distinction that lets a leaf package
+    annotate against a component's models without depending on it.
+    """
+
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    type_checking_nodes: set[int] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.If):
+            continue
+        test = node.test
+        is_type_checking = (isinstance(test, ast.Name) and test.id == "TYPE_CHECKING") or (
+            isinstance(test, ast.Attribute) and test.attr == "TYPE_CHECKING"
+        )
+        if is_type_checking:
+            for child in ast.walk(node):
+                type_checking_nodes.add(id(child))
+
+    imports: set[str] = set()
+    for node in ast.walk(tree):
+        if id(node) in type_checking_nodes:
+            continue
+        if isinstance(node, ast.Import):
+            imports.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imports.add(node.module)
+    return imports
+
+
 class ArchitectureTests(unittest.TestCase):
     def test_modular_monolith_directories_exist(self) -> None:
-        for name in ("contracts", "ports", "host", "engine", "module", "bootstrap"):
+        for name in (
+            "contracts",
+            "ports",
+            "host",
+            "engine",
+            "module",
+            "bootstrap",
+            "registry",
+        ):
             self.assertTrue((PACKAGE / name).is_dir(), name)
 
     def test_obsolete_flat_modules_are_removed(self) -> None:
@@ -38,6 +78,7 @@ class ArchitectureTests(unittest.TestCase):
                             "collaboration_framework.engine",
                             "collaboration_framework.module",
                             "collaboration_framework.bootstrap",
+                            "collaboration_framework.registry",
                         )
                     ),
                     f"{path.name}: {imported}",
@@ -104,6 +145,33 @@ class ArchitectureTests(unittest.TestCase):
             for imported in imports_for(path):
                 self.assertFalse(
                     imported.startswith("collaboration_framework.host"),
+                    f"{path.relative_to(PACKAGE)}: {imported}",
+                )
+
+    def test_registry_stays_a_leaf(self) -> None:
+        """The #347 registry tables are engine-shipped lookup data, not
+        orchestration.
+
+        Both `engine` (execution time) and `module` (publish-time validation)
+        read these tables, and §6 of docs/architecture.md forbids
+        `module -> engine`. So the tables cannot live under `engine/`: they sit
+        alongside `contracts/` as a leaf, and must not import any component
+        package at runtime. An evaluator needing an engine state model imports
+        it under `TYPE_CHECKING` for annotations only, which is why this check
+        ignores type-checking blocks.
+        """
+
+        for path in (PACKAGE / "registry").rglob("*.py"):
+            for imported in runtime_imports_for(path):
+                self.assertFalse(
+                    imported.startswith(
+                        (
+                            "collaboration_framework.host",
+                            "collaboration_framework.engine",
+                            "collaboration_framework.module",
+                            "collaboration_framework.bootstrap",
+                        )
+                    ),
                     f"{path.relative_to(PACKAGE)}: {imported}",
                 )
 

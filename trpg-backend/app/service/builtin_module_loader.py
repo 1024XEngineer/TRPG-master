@@ -38,7 +38,6 @@ class BuiltinModuleSpec:
     source_path: Path
     display_name: str
     world_id: str | None = None
-    content_schema_version: int = 3
 
 
 PAPER_CHASE_SPEC = BuiltinModuleSpec(
@@ -177,14 +176,13 @@ async def load_builtin_module(
                 module_id=spec.module_id,
                 version=spec.version,
                 world_ref=spec.world_ref,
-                content_schema_version=spec.content_schema_version,
+                content_schema_version=3,
                 content_json=normalized_content,
             )
             db.add(module_version)
             outcome = "inserted"
         elif (
             module_version.world_ref == spec.world_ref
-            and module_version.content_schema_version == spec.content_schema_version
             and module_version.content_json == normalized_content
         ):
             outcome = "unchanged"

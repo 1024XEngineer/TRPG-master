@@ -86,15 +86,12 @@ async def _runtime(
     state = GameState.model_validate(deepcopy(session.state_json))
     version = await db.get(ModuleVersion, (session.module_id, session.module_version))
     if version is None:
-        raise InventoryConflictError("背包运行时只支持 ModuleContent v3 房间")
+        raise InventoryConflictError("房间绑定的 ModuleVersion 不存在")
     content = load_module_content(
         module_id=version.module_id,
         version=version.version,
-        content_schema_version=version.content_schema_version,
         content_json=version.content_json,
     )
-    if not isinstance(content, ModuleContentV3):
-        raise InventoryConflictError("背包运行时只支持 ModuleContent v3 房间")
     return session, state, content
 
 

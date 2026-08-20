@@ -63,15 +63,12 @@ async def _runtime(
     await db.refresh(session)
     version = await db.get(ModuleVersion, (session.module_id, session.module_version))
     if version is None:
-        raise EndingUnavailableError("结局草稿只支持 ModuleContent v3 房间")
+        raise EndingUnavailableError("房间绑定的 ModuleVersion 不存在")
     content = load_module_content(
         module_id=version.module_id,
         version=version.version,
-        content_schema_version=version.content_schema_version,
         content_json=version.content_json,
     )
-    if not isinstance(content, ModuleContentV3):
-        raise EndingUnavailableError("结局草稿只支持 ModuleContent v3 房间")
     return (
         session,
         GameState.model_validate(deepcopy(session.state_json)),

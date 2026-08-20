@@ -8,7 +8,6 @@ commits them without interpreting player language.
 from __future__ import annotations
 
 import logging
-from copy import deepcopy
 from typing import Literal, NoReturn
 from uuid import uuid4
 
@@ -23,37 +22,15 @@ from collaboration_framework.contracts import (
     AdjudicationRecovery,
     AdjudicationStatusView,
     AdvanceWorldTimeEffect,
-    ChangeEntityStateEffect,
     CheckDecisionRequest,
-    CommitTerminalEndingEffect,
-    ConsumeEntityEffect,
     ContractError,
-    EnsureRuntimeEntityEffect,
-    EnsureRuntimeLocationEffect,
-    EnterLocationEffect,
     GetAdjudicationStatusRequest,
-    HideInformationEffect,
-    ItemAcquisition,
-    ItemComponent,
-    ItemCustody,
-    ItemDisplay,
-    ItemInstance,
-    ItemKnowledge,
-    LocationKnowledge,
-    MarkCoreResolvedEffect,
-    MoveEntityEffect,
     NarrationEvidence,
-    NarrativeOnlyEffect,
     PendingCheckOption,
     PostRollDecisionRequest,
     PushOption,
-    RevealInformationEffect,
-    SetEndingAvailabilityEffect,
-    SetVisibilityEffect,
     SpendResourceOption,
     SubmitAdjudicationRequest,
-    TravelInterrupted,
-    TravelResolved,
 )
 from collaboration_framework.contracts.adjudication import CheckDegree, CheckRoll
 from collaboration_framework.contracts.validation import (
@@ -74,8 +51,9 @@ from .models import (
     EngineRuntimeSnapshot,
     GameState,
     PendingCheckDecision,
-    WorldTimeState,
 )
+from collaboration_framework.registry import effects as effect_registry
+
 from .navigation import resolve_location_target
 from .persistent_results import (
     committed_results_from_events,
@@ -99,6 +77,17 @@ from .rules_v3 import (
 from .timeline import advanced_to_next, next_point_after, time_advance_block_reason
 
 logger = logging.getLogger(__name__)
+
+# The engine logic `registry/effects.py` needs but may not import: it is a leaf
+# so that `module` can read the same tables at publish time (#347, and
+# docs/architecture.md §6 forbidding `module -> engine`).
+_EFFECT_SERVICES = effect_registry.EffectServices(
+    resolve_location_target=resolve_location_target,
+    advanced_to_next=advanced_to_next,
+    next_point_after=next_point_after,
+    time_advance_block_reason=time_advance_block_reason,
+    is_public_standard_state=is_public_standard_state,
+)
 
 
 def _target_kinds_matching(
@@ -159,26 +148,6 @@ def _normalize_target_kind(
     )
     return adjudication.model_copy(
         update={"target": ActionTarget(kind=resolved, id=target.id)}
-    )
-
-
-def _visibility_knowledge(
-    location_id: str,
-    *,
-    scope: str,
-    visible: bool,
-    previous: LocationKnowledge | None,
-) -> LocationKnowledge:
-    return LocationKnowledge(
-        location_id=location_id,
-        scope="actor" if scope == "actor" else "party",
-        existence="known" if visible else "unknown",
-        localization="located" if visible else "unknown",
-        access=(previous.access if visible and previous is not None else "unknown"),
-        visited=bool(visible and previous and previous.visited),
-        known_connection_ids=(
-            previous.known_connection_ids if visible and previous is not None else ()
-        ),
     )
 
 
@@ -244,103 +213,18 @@ class AdjudicationEngineService:
         branch: Literal["success", "failure", "selected"],
         check_floor: bool = False,
     ) -> tuple[AuthorityLevel | None, tuple[EffectValidationDetail, ...]]:
-        """Classify only Agent-owned effects; Rule-owned effects are explicit."""
+        """Classify only Agent-owned effects; Rule-owned effects are explicit.
+
+        The per-type authority rules live in `registry/effects.py` (#347); what
+        stays here is the sequence walk and the detail record it builds.
+        """
 
         details: list[EffectValidationDetail] = []
         levels: list[AuthorityLevel] = ["L3"] if check_floor else []
-        v3 = runtime.v3 if runtime.is_v3 else None
-        entity_specs = {item.id: item for item in v3.entities} if v3 else {}
-        information_specs = {item.id: item for item in v3.information} if v3 else {}
-        core_goal_ids = {
-            info_id
-            for goal in (v3.knowledge_goals if v3 else ())
-            if goal.required_for_core_resolution
-            for info_id in goal.target_information_ids
-        }
-        runtime_entity_ids = set(runtime.game_state.runtime_entities)
-        runtime_location_ids = set(runtime.game_state.runtime_locations)
+        classification = effect_registry.classification_context(runtime)
 
         for index, effect in enumerate(effects):
-            level: AuthorityLevel
-            target_ref: str | None = None
-            if isinstance(effect, NarrativeOnlyEffect):
-                level = "L0"
-            elif isinstance(
-                effect, (EnsureRuntimeLocationEffect, EnsureRuntimeEntityEffect)
-            ):
-                level = "L1"
-                target_ref = getattr(effect, "location_id", None) or getattr(
-                    effect, "entity_id", None
-                )
-            elif isinstance(effect, EnterLocationEffect):
-                level = "L2"
-                target_ref = effect.location_id
-            elif isinstance(effect, MoveEntityEffect):
-                level = "L3" if effect.holder_actor_id is not None else "L2"
-                target_ref = effect.entity_id
-            elif isinstance(effect, AdvanceWorldTimeEffect):
-                level = "L2"
-            elif isinstance(effect, (RevealInformationEffect, HideInformationEffect)):
-                info = information_specs.get(effect.information_id)
-                level = (
-                    "L4"
-                    if (
-                        info is not None
-                        and (
-                            info.criticality == "essential"
-                            or effect.information_id in core_goal_ids
-                        )
-                    )
-                    else "L2"
-                )
-                target_ref = effect.information_id
-            elif isinstance(effect, ChangeEntityStateEffect):
-                target_ref = effect.entity_id
-                level = "L1" if effect.entity_id in runtime_entity_ids else "L3"
-            elif isinstance(effect, ConsumeEntityEffect):
-                target_ref = effect.entity_id
-                entity = entity_specs.get(effect.entity_id)
-                level = (
-                    "L4"
-                    if entity is not None and entity.visibility == "keeper"
-                    else "L3"
-                )
-            elif isinstance(effect, SetVisibilityEffect):
-                target_ref = effect.target_id
-                if effect.target_kind == "information":
-                    info = information_specs.get(effect.target_id)
-                    level = (
-                        "L4"
-                        if (
-                            info is not None
-                            and (
-                                info.criticality == "essential"
-                                or effect.target_id in core_goal_ids
-                            )
-                        )
-                        else "L2"
-                    )
-                elif (
-                    effect.target_id in runtime_entity_ids
-                    or effect.target_id in runtime_location_ids
-                ):
-                    level = "L1"
-                elif effect.target_kind == "entity" and (
-                    entity_specs.get(effect.target_id) is not None
-                    and entity_specs[effect.target_id].visibility == "keeper"
-                ):
-                    level = "L4"
-                else:
-                    level = "L3"
-            elif isinstance(
-                effect, (MarkCoreResolvedEffect, SetEndingAvailabilityEffect)
-            ):
-                level = "L4"
-            elif isinstance(effect, CommitTerminalEndingEffect):
-                level = "L5"
-                target_ref = effect.ending_id
-            else:  # pragma: no cover - ActionEffect is a closed discriminated union.
-                continue
+            level, target_ref = effect_registry.classify(effect, classification)
             levels.append(level)
             details.append(
                 EffectValidationDetail(
@@ -1354,44 +1238,47 @@ class AdjudicationEngineService:
         runtime: EngineRuntimeSnapshot,
         effects: tuple[ActionEffect, ...],
     ) -> None:
-        information_ids = runtime.canon_information_ids
-        entity_ids = (
-            runtime.canon_entity_ids
-            | set(runtime.game_state.runtime_entities)
-            | set(runtime.game_state.item_instances)
+        """Walk one atomic sequence, checking each effect against the ids in
+        scope at that point.
+
+        The linker-style two-pass resolution of #347 §4.3: the vocabulary starts
+        as what the published module and current state already contain, and each
+        accepted effect folds its `writes` in before the next one is checked.
+        That is what makes "create the room, then walk into it" legal inside one
+        adjudication while still refusing a reference to something nothing
+        created.
+        """
+
+        vocabulary = effect_registry.ValidationVocabulary(
+            information_ids=runtime.canon_information_ids,
+            entity_ids=(
+                runtime.canon_entity_ids
+                | set(runtime.game_state.runtime_entities)
+                | set(runtime.game_state.item_instances)
+            ),
+            location_ids=(
+                runtime.canon_location_ids | set(runtime.game_state.runtime_locations)
+            ),
+            # ``holder_actor_id`` is inventory custody, not a generic entity
+            # position.  Track real portable item instances separately from the
+            # wider entity vocabulary so a Canon prop/NPC cannot acquire a
+            # holder-only shadow state that PlayerView.inventory will never read.
+            # A v3 runtime object becomes portable as soon as an earlier effect in
+            # this same atomic sequence creates it.
+            portable_item_ids=set(runtime.game_state.item_instances),
+            actor_ids=set(runtime.game_state.actors),
+            # Sleeping until 20:00 is several jumps in one adjudication, so each
+            # one has to be checked against the clock the previous jump left
+            # behind — not against the clock this action started on.
+            world_time=runtime.game_state.world_time,
         )
-        location_ids = runtime.canon_location_ids | set(
-            runtime.game_state.runtime_locations
-        )
-        # ``holder_actor_id`` is inventory custody, not a generic entity
-        # position.  Track real portable item instances separately from the
-        # wider entity vocabulary so a Canon prop/NPC cannot acquire a
-        # holder-only shadow state that PlayerView.inventory will never read.
-        # A v3 runtime object becomes portable as soon as an earlier effect in
-        # this same atomic sequence creates it.
-        portable_item_ids = set(runtime.game_state.item_instances)
-        # Sleeping until 20:00 is several jumps in one adjudication, so each one
-        # has to be checked against the clock the previous jump left behind —
-        # not against the clock this action started on.
-        world_time = runtime.game_state.world_time
         for effect in effects:
-            self._validate_effect(
-                runtime,
-                effect,
-                information_ids=information_ids,
-                entity_ids=entity_ids,
-                location_ids=location_ids,
-                portable_item_ids=portable_item_ids,
-                world_time=world_time,
-            )
-            if isinstance(effect, EnsureRuntimeLocationEffect):
-                location_ids.add(effect.location_id)
-            elif isinstance(effect, EnsureRuntimeEntityEffect):
-                entity_ids.add(effect.entity_id)
-                if runtime.is_v3 and effect.entity_kind == "object":
-                    portable_item_ids.add(effect.entity_id)
-            elif isinstance(effect, AdvanceWorldTimeEffect):
-                world_time = advanced_to_next(runtime.v3, world_time)
+            self._validate_effect(runtime, effect, vocabulary=vocabulary)
+            effect_registry.absorb_writes(effect, vocabulary, is_v3=runtime.is_v3)
+            if isinstance(effect, AdvanceWorldTimeEffect):
+                vocabulary.world_time = advanced_to_next(
+                    runtime.v3, vocabulary.world_time
+                )
 
     def _validated_options(
         self,
@@ -1461,162 +1348,11 @@ class AdjudicationEngineService:
         runtime: EngineRuntimeSnapshot,
         effect: ActionEffect,
         *,
-        information_ids: set[str],
-        entity_ids: set[str],
-        location_ids: set[str],
-        portable_item_ids: set[str],
-        world_time: WorldTimeState | None = None,
+        vocabulary: effect_registry.ValidationVocabulary,
     ) -> None:
-        state = runtime.game_state
-        if isinstance(effect, RevealInformationEffect | HideInformationEffect):
-            if effect.information_id not in information_ids:
-                self._reject_validation(
-                    "TARGET_NOT_FOUND",
-                    repairability="auto_repairable",
-                    fault="agent",
-                    player_safe_reason="当前目标不可用于这次行动",
-                )
-        elif isinstance(effect, SetVisibilityEffect):
-            valid = {
-                "information": information_ids,
-                "entity": entity_ids,
-                "location": location_ids,
-            }[effect.target_kind]
-            if effect.target_id not in valid:
-                self._reject_validation(
-                    "TARGET_NOT_FOUND",
-                    repairability="auto_repairable",
-                    fault="agent",
-                    player_safe_reason="当前目标不可用于这次行动",
-                )
-        elif isinstance(effect, EnterLocationEffect):
-            if effect.location_id not in location_ids:
-                self._reject_validation(
-                    "TARGET_NOT_FOUND",
-                    repairability="auto_repairable",
-                    fault="agent",
-                    player_safe_reason="当前目标不可用于这次行动",
-                )
-        elif isinstance(effect, EnsureRuntimeLocationEffect):
-            if (
-                effect.location_id in location_ids
-                or effect.connected_location_id not in location_ids
-            ):
-                self._reject_validation(
-                    "CANON_SHADOW",
-                    repairability="auto_repairable",
-                    fault="agent",
-                    player_safe_reason="当前目标不可用于这次行动",
-                )
-            if (
-                effect.parent_location_id is not None
-                and effect.parent_location_id not in location_ids
-            ):
-                self._reject_validation(
-                    "TARGET_NOT_FOUND",
-                    repairability="auto_repairable",
-                    fault="agent",
-                    player_safe_reason="当前目标不可用于这次行动",
-                )
-        elif isinstance(effect, EnsureRuntimeEntityEffect):
-            if effect.entity_id in entity_ids or effect.location_id not in location_ids:
-                self._reject_validation(
-                    "CANON_SHADOW",
-                    repairability="auto_repairable",
-                    fault="agent",
-                    player_safe_reason="当前目标不可用于这次行动",
-                )
-            if (
-                runtime.is_v3
-                and effect.entity_kind == "object"
-                and (len(effect.entity_id) > 100 or len(effect.name) > 200)
-            ):
-                self._reject_validation(
-                    "RUNTIME_ITEM_TOO_LARGE",
-                    repairability="auto_repairable",
-                    fault="agent",
-                    player_safe_reason="临时物品描述超过当前系统限制",
-                )
-        elif isinstance(
-            effect, MoveEntityEffect | ChangeEntityStateEffect | ConsumeEntityEffect
-        ):
-            if effect.entity_id not in entity_ids:
-                self._reject_validation(
-                    "TARGET_NOT_FOUND",
-                    repairability="auto_repairable",
-                    fault="agent",
-                    player_safe_reason="当前目标不可用于这次行动",
-                )
-            if isinstance(effect, MoveEntityEffect):
-                if (
-                    effect.location_id is not None
-                    and effect.location_id not in location_ids
-                ):
-                    self._reject_validation(
-                        "TARGET_NOT_FOUND",
-                        repairability="auto_repairable",
-                        fault="agent",
-                        player_safe_reason="当前目标不可用于这次行动",
-                    )
-                if (
-                    effect.holder_actor_id is not None
-                    and effect.holder_actor_id not in state.actors
-                ):
-                    self._reject_validation(
-                        "TARGET_NOT_FOUND",
-                        repairability="auto_repairable",
-                        fault="agent",
-                        player_safe_reason="当前目标不可用于这次行动",
-                    )
-                if (
-                    effect.holder_actor_id is not None
-                    and effect.entity_id not in portable_item_ids
-                ):
-                    self._reject_validation(
-                        "INVENTORY_TARGET_NOT_PORTABLE",
-                        repairability="auto_repairable",
-                        fault="agent",
-                        player_safe_reason="这个对象不是可携带物品，不能放入背包",
-                    )
-        elif isinstance(effect, AdvanceWorldTimeEffect):
-            if not runtime.is_v3:
-                self._reject_validation(
-                    "TIME_POINT_MISMATCH",
-                    repairability="auto_repairable",
-                    fault="agent",
-                    player_safe_reason="当前时间目标与世界时间线不一致",
-                )
-            blocked = time_advance_block_reason(tuple(state.actors))
-            if blocked is not None:
-                self._reject_validation(
-                    "TIME_ADVANCE_BLOCKED",
-                    repairability="requires_player_choice",
-                    fault="player",
-                    player_safe_reason="当前存在需要玩家先处理的事项，不能推进时间",
-                    internal_reason=blocked,
-                )
-            target, _ = next_point_after(
-                runtime.v3, world_time if world_time is not None else state.world_time
-            )
-            if effect.to_point_id is not None and effect.to_point_id != target.id:
-                self._reject_validation(
-                    "TIME_POINT_MISMATCH",
-                    repairability="auto_repairable",
-                    fault="agent",
-                    player_safe_reason="当前时间目标与世界时间线不一致",
-                    internal_reason=(
-                        "advance_world_time 声明的时间点不是时间线上的下一个点: "
-                        f"{effect.to_point_id} != {target.id}"
-                    ),
-                )
-        elif isinstance(effect, CommitTerminalEndingEffect):
-            self._reject_validation(
-                "ENDING_REQUIRES_DRAFT",
-                repairability="hard_reject",
-                fault="agent",
-                player_safe_reason="终局必须经过明确确认后才能提交",
-                internal_reason="终局不能由行动效果直接提交，必须确认 EndingDraft",
-            )
+        """Refuse an ill-formed effect; the per-type rules live in the registry."""
+
+        effect_registry.validate(effect, vocabulary, runtime, _EFFECT_SERVICES)
 
     def _roll(self, target_value: int, difficulty: str) -> CheckRoll:
         value = self._dice.percentile()
@@ -2144,449 +1880,39 @@ class AdjudicationEngineService:
         actor_id: str,
         offset: int,
     ) -> tuple[GameState, tuple[DomainEvent, ...]]:
-        event_type: str | None = None
-        effect_event_id: str | None = None
-        payload: dict[str, JsonValue] = {}
-        if isinstance(effect, NarrativeOnlyEffect):
-            return state, ()
-        if isinstance(effect, RevealInformationEffect | HideInformationEffect):
-            reveal = isinstance(effect, RevealInformationEffect)
-            if effect.scope == "party":
-                facts = set(state.discovered_facts)
-                (facts.add if reveal else facts.discard)(effect.information_id)
-                state = state.model_copy(
-                    update={"discovered_facts": tuple(sorted(facts))},
-                    deep=True,
-                )
-            else:
-                actor_facts = deepcopy(state.actor_discovered_facts)
-                facts = set(actor_facts.get(actor_id, ()))
-                (facts.add if reveal else facts.discard)(effect.information_id)
-                actor_facts[actor_id] = tuple(sorted(facts))
-                state = state.model_copy(
-                    update={"actor_discovered_facts": actor_facts},
-                    deep=True,
-                )
-            event_type = "information.revealed" if reveal else "information.hidden"
-            payload = {"information_id": effect.information_id, "scope": effect.scope}
-        elif isinstance(effect, SetVisibilityEffect):
-            overrides = dict(state.visibility_overrides)
-            # Party scope must not be keyed by the acting actor, or no other
-            # actor could ever find the override again. Actor scope keeps the
-            # actor id and wins over the party entry when both exist
-            # (see RuleEngineService._override_allows).
-            key = (
-                f"actor:{actor_id}:{effect.target_kind}:{effect.target_id}"
-                if effect.scope == "actor"
-                else f"party:{effect.target_kind}:{effect.target_id}"
-            )
-            overrides[key] = effect.visible
-            updates: dict[str, object] = {"visibility_overrides": overrides}
-            if effect.target_kind == "location":
-                knowledge_by_scope = (
-                    deepcopy(state.actor_location_knowledge)
-                    if effect.scope == "actor"
-                    else deepcopy(state.party_location_knowledge)
-                )
-                if effect.scope == "actor":
-                    actor_knowledge = knowledge_by_scope.setdefault(actor_id, {})
-                    previous_knowledge = actor_knowledge.get(effect.target_id)
-                    actor_knowledge[effect.target_id] = _visibility_knowledge(
-                        effect.target_id,
-                        scope="actor",
-                        visible=effect.visible,
-                        previous=previous_knowledge,
-                    )
-                    updates["actor_location_knowledge"] = knowledge_by_scope
-                else:
-                    previous_knowledge = knowledge_by_scope.get(effect.target_id)
-                    knowledge_by_scope[effect.target_id] = _visibility_knowledge(
-                        effect.target_id,
-                        scope="party",
-                        visible=effect.visible,
-                        previous=previous_knowledge,
-                    )
-                    updates["party_location_knowledge"] = knowledge_by_scope
-            state = state.model_copy(update=updates, deep=True)
-            event_type = "visibility.changed"
-            payload = {
-                "target_kind": effect.target_kind,
-                "target_id": effect.target_id,
-                "visible": effect.visible,
-                "scope": effect.scope,
-            }
-        elif isinstance(effect, EnterLocationEffect):
-            if not runtime.is_v3:
-                previous = state.scene_id
-                state = state.model_copy(
-                    update={"scene_id": effect.location_id}, deep=True
-                )
-                event_type = "location.entered"
-                payload = {
-                    "location_id": effect.location_id,
-                    "from_location_id": previous,
-                }
-            else:
-                resolution = resolve_location_target(
-                    runtime.v3,
-                    state,
-                    actor_id=actor_id,
-                    target_id=effect.location_id,
-                )
-                contexts = dict(state.actor_position_contexts)
-                knowledge = dict(state.party_location_knowledge)
-                previous_knowledge = knowledge.get(effect.location_id)
-                if resolution.status == "known_reachable":
-                    contexts.pop(actor_id, None)
-                    knowledge[effect.location_id] = LocationKnowledge(
-                        location_id=effect.location_id,
-                        scope="party",
-                        existence="known",
-                        localization="located",
-                        access="reachable",
-                        visited=True,
-                        known_connection_ids=(
-                            previous_knowledge.known_connection_ids
-                            if previous_knowledge is not None
-                            else ()
-                        ),
-                    )
-                    travel = TravelResolved(
-                        destination_id=effect.location_id,
-                        path=resolution.path,
-                    )
-                    state = state.model_copy(
-                        update={
-                            "scene_id": effect.location_id,
-                            "party_location_knowledge": knowledge,
-                            "actor_position_contexts": contexts,
-                        },
-                        deep=True,
-                    )
-                    event_type = "travel.resolved"
-                    payload = {
-                        "destination_id": travel.destination_id,
-                        "path": list(travel.path),
-                    }
-                elif resolution.status == "known_blocked":
-                    assert resolution.boundary is not None
-                    assert resolution.reached_location_id is not None
-                    travel = TravelInterrupted(
-                        destination_id=effect.location_id,
-                        current_location_id=resolution.reached_location_id,
-                        path=resolution.path,
-                        reached_boundary=resolution.boundary,
-                    )
-                    contexts[actor_id] = travel
-                    knowledge[effect.location_id] = LocationKnowledge(
-                        location_id=effect.location_id,
-                        scope="party",
-                        existence="known",
-                        localization="located",
-                        access="blocked",
-                        visited=bool(previous_knowledge and previous_knowledge.visited),
-                        known_connection_ids=(
-                            previous_knowledge.known_connection_ids
-                            if previous_knowledge is not None
-                            else ()
-                        ),
-                    )
-                    state = state.model_copy(
-                        update={
-                            "scene_id": travel.current_location_id,
-                            "party_location_knowledge": knowledge,
-                            "actor_position_contexts": contexts,
-                        },
-                        deep=True,
-                    )
-                    event_type = "travel.interrupted"
-                    payload = {
-                        "destination_id": travel.destination_id,
-                        "current_location_id": travel.current_location_id,
-                        "path": list(travel.path),
-                        "reached_boundary": travel.reached_boundary.to_json_dict(),
-                    }
-                else:
-                    self._reject_validation(
-                        "TARGET_NOT_FOUND",
-                        repairability="auto_repairable",
-                        fault="agent",
-                        player_safe_reason="当前目标不可用于这次行动",
-                        internal_reason=(
-                            resolution.safe_reason or "当前没有可确认的目标路线"
-                        ),
-                    )
-        elif isinstance(effect, EnsureRuntimeLocationEffect):
-            locations = deepcopy(state.runtime_locations)
-            locations[effect.location_id] = {
-                "name": effect.name,
-                "parent_location_id": effect.parent_location_id,
-                "connected_location_id": effect.connected_location_id,
-                "provenance": "agent_adjudication",
-            }
-            knowledge = dict(state.party_location_knowledge)
-            knowledge[effect.location_id] = LocationKnowledge(
-                location_id=effect.location_id,
-                existence="known",
-                localization="located",
-                access="reachable",
-            )
-            state = state.model_copy(
-                update={
-                    "runtime_locations": locations,
-                    "party_location_knowledge": knowledge,
-                },
-                deep=True,
-            )
-            event_type = "location.created"
-            payload = {"location_id": effect.location_id}
-        elif isinstance(effect, EnsureRuntimeEntityEffect):
-            if runtime.is_v3 and effect.entity_kind == "object":
-                effect_event_id = self._new_id("evt")
-                revision = str(state.event_sequence + offset)
-                items = deepcopy(state.item_instances)
-                items[effect.entity_id] = ItemInstance(
-                    id=effect.entity_id,
-                    room_id=room_id,
-                    origin="runtime",
-                    definition_id=effect.entity_id,
-                    display=ItemDisplay(name=effect.name),
-                    item_component=ItemComponent(),
-                    custody=ItemCustody(
-                        kind="location",
-                        ref_id=effect.location_id,
-                        form="loose",
-                    ),
-                    acquisition=ItemAcquisition(
-                        source_type="runtime",
-                        source_id=effect.location_id,
-                        player_safe_label="行动中发现",
-                        event_id=effect_event_id,
-                        revision=revision,
-                    ),
-                    created_event_id=effect_event_id,
-                    last_event_id=effect_event_id,
-                    updated_revision=revision,
-                )
-                party_knowledge = deepcopy(state.party_item_knowledge)
-                party_knowledge[effect.entity_id] = ItemKnowledge(
-                    item_id=effect.entity_id,
-                    identity="recognized",
-                )
-                state = state.model_copy(
-                    update={
-                        "item_instances": items,
-                        "party_item_knowledge": party_knowledge,
-                    },
-                    deep=True,
-                )
-            else:
-                entities = deepcopy(state.runtime_entities)
-                entities[effect.entity_id] = {
-                    "kind": effect.entity_kind,
-                    "name": effect.name,
-                    "location_id": effect.location_id,
-                    "provenance": "agent_adjudication",
-                }
-                state = state.model_copy(
-                    update={"runtime_entities": entities}, deep=True
-                )
-            event_type = "entity.created"
-            payload = {"entity_id": effect.entity_id, "location_id": effect.location_id}
-        elif isinstance(effect, MoveEntityEffect):
-            item = state.item_instances.get(effect.entity_id)
-            if item is not None:
-                effect_event_id = self._new_id("evt")
-                revision = str(state.event_sequence + offset)
-                custody = (
-                    ItemCustody(
-                        kind="actor_inventory",
-                        ref_id=effect.holder_actor_id,
-                        form="carried",
-                    )
-                    if effect.holder_actor_id is not None
-                    else ItemCustody(
-                        kind="location",
-                        ref_id=effect.location_id,
-                        form="placed",
-                    )
-                )
-                items = deepcopy(state.item_instances)
-                items[effect.entity_id] = item.model_copy(
-                    update={
-                        "custody": custody,
-                        "version": item.version + 1,
-                        "last_event_id": effect_event_id,
-                        "updated_revision": revision,
-                    }
-                )
-                updates: dict[str, object] = {"item_instances": items}
-                if effect.holder_actor_id is not None:
-                    actor_knowledge = deepcopy(state.actor_item_knowledge)
-                    actor_knowledge.setdefault(effect.holder_actor_id, {})[
-                        effect.entity_id
-                    ] = ItemKnowledge(
-                        item_id=effect.entity_id,
-                        scope="actor",
-                        identity="known",
-                    )
-                    updates["actor_item_knowledge"] = actor_knowledge
-                else:
-                    party_knowledge = deepcopy(state.party_item_knowledge)
-                    party_knowledge[effect.entity_id] = ItemKnowledge(
-                        item_id=effect.entity_id,
-                        identity="recognized",
-                    )
-                    updates["party_item_knowledge"] = party_knowledge
-                state = state.model_copy(update=updates, deep=True)
-            else:
-                if effect.holder_actor_id is not None:
-                    # Defense in depth for authored/rule-owned effects and any
-                    # future caller that reaches application without the
-                    # proposal validator.  Generic entities may move between
-                    # locations, but only ItemInstances have inventory custody.
-                    self._reject_validation(
-                        "INVENTORY_TARGET_NOT_PORTABLE",
-                        repairability="auto_repairable",
-                        fault="agent",
-                        player_safe_reason="这个对象不是可携带物品，不能放入背包",
-                    )
-                runtime_entities = deepcopy(state.runtime_entities)
-                entity_states = deepcopy(state.entities)
-                target = runtime_entities.get(effect.entity_id)
-                if target is None:
-                    target = entity_states.setdefault(effect.entity_id, {})
-                target["location_id"] = effect.location_id
-                target["holder_actor_id"] = effect.holder_actor_id
-                state = state.model_copy(
-                    update={
-                        "runtime_entities": runtime_entities,
-                        "entities": entity_states,
-                    },
-                    deep=True,
-                )
-            event_type = "entity.moved"
-            payload = {
-                "entity_id": effect.entity_id,
-                "location_id": effect.location_id,
-                "holder_actor_id": effect.holder_actor_id,
-            }
-        elif isinstance(effect, ChangeEntityStateEffect):
-            item = state.item_instances.get(effect.entity_id)
-            if item is not None:
-                effect_event_id = self._new_id("evt")
-                revision = str(state.event_sequence + offset)
-                values = deepcopy(item.state.values)
-                values[effect.key] = effect.value
-                items = deepcopy(state.item_instances)
-                items[effect.entity_id] = item.model_copy(
-                    update={
-                        "state": item.state.model_copy(update={"values": values}),
-                        "version": item.version + 1,
-                        "last_event_id": effect_event_id,
-                        "updated_revision": revision,
-                    }
-                )
-                updates: dict[str, object] = {"item_instances": items}
-            else:
-                runtime_entities = deepcopy(state.runtime_entities)
-                entity_states = deepcopy(state.entities)
-                target = runtime_entities.get(effect.entity_id)
-                if target is None:
-                    target = entity_states.setdefault(effect.entity_id, {})
-                target[effect.key] = effect.value
-                updates = {
-                    "runtime_entities": runtime_entities,
-                    "entities": entity_states,
-                }
-            if is_public_standard_state(effect):
-                public_keys = deepcopy(state.public_entity_state_keys)
-                keys = set(public_keys.get(effect.entity_id, ()))
-                keys.add(effect.key)
-                public_keys[effect.entity_id] = tuple(sorted(keys))
-                updates["public_entity_state_keys"] = public_keys
-            state = state.model_copy(update=updates, deep=True)
-            event_type = "entity.state_changed"
-            payload = {
-                "entity_id": effect.entity_id,
-                "key": effect.key,
-                "value": effect.value,
-            }
-        elif isinstance(effect, ConsumeEntityEffect):
-            item = state.item_instances.get(effect.entity_id)
-            if item is not None:
-                effect_event_id = self._new_id("evt")
-                revision = str(state.event_sequence + offset)
-                items = deepcopy(state.item_instances)
-                items[effect.entity_id] = item.model_copy(
-                    update={
-                        "state": item.state.model_copy(update={"status": "retired"}),
-                        "version": item.version + 1,
-                        "last_event_id": effect_event_id,
-                        "updated_revision": revision,
-                    }
-                )
-                state = state.model_copy(update={"item_instances": items}, deep=True)
-            else:
-                runtime_entities = deepcopy(state.runtime_entities)
-                entity_states = deepcopy(state.entities)
-                target = runtime_entities.get(effect.entity_id)
-                if target is None:
-                    target = entity_states.setdefault(effect.entity_id, {})
-                target["consumed"] = True
-                state = state.model_copy(
-                    update={
-                        "runtime_entities": runtime_entities,
-                        "entities": entity_states,
-                    },
-                    deep=True,
-                )
-            event_type = "entity.consumed"
-            payload = {"entity_id": effect.entity_id}
-        elif isinstance(effect, AdvanceWorldTimeEffect):
-            advanced = advanced_to_next(runtime.v3, state.world_time)
-            state = state.model_copy(update={"world_time": advanced}, deep=True)
-            event_type = "time.point_entered"
-            payload = {
-                "point_id": advanced.current_point_id,
-                "day_index": advanced.current.day_index,
-                "hour_of_day": advanced.current.hour_of_day,
-                "time_of_day": advanced.time_of_day,
-            }
-        elif isinstance(effect, MarkCoreResolvedEffect):
-            state = state.model_copy(update={"core_resolved": True}, deep=True)
-            event_type = "core.resolved"
-        elif isinstance(effect, SetEndingAvailabilityEffect):
-            state = state.model_copy(
-                update={"ending_available": effect.available}, deep=True
-            )
-            event_type = "ending.availability_changed"
-            payload = {"available": effect.available}
-        elif isinstance(effect, CommitTerminalEndingEffect):
-            self._reject_validation(
-                "ENDING_REQUIRES_DRAFT",
-                repairability="hard_reject",
-                fault="engine",
-                player_safe_reason="终局必须经过明确确认后才能提交",
-                classification_coverage="rule_effects_excluded",
-            )
-        if event_type is None:
-            self._reject_validation(
-                "EFFECT_NOT_REGISTERED",
-                repairability="hard_reject",
-                fault="engine",
-                player_safe_reason="规则引擎无法处理当前效果",
-            )
-        return state, (
+        """Execute one already-validated effect.
+
+        The per-type state changes live in `registry/effects.py` (#347); what
+        stays here is the flow skeleton — handing the handler its context and
+        turning what it reports into a DomainEvent. A registration that declares
+        `emits_event=False` (only `narrative_only` today) commits state without
+        recording one.
+        """
+
+        result = effect_registry.apply(
+            effect,
+            effect_registry.ApplyContext(
+                runtime=runtime,
+                state=state,
+                services=_EFFECT_SERVICES,
+                room_id=room_id,
+                request_id=request_id,
+                actor_id=actor_id,
+                offset=offset,
+            ),
+        )
+        if result.event_type is None:
+            return result.state, ()
+        return result.state, (
             self._event_from_state(
-                state,
+                result.state,
                 room_id=room_id,
                 offset=offset,
                 request_id=request_id,
                 actor_id=actor_id,
-                event_type=event_type,
-                payload=payload,
-                event_id=effect_event_id,
+                event_type=result.event_type,
+                payload=result.payload,
+                event_id=result.event_id,
             ),
         )
 

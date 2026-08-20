@@ -1,0 +1,166 @@
+"""Direct unit coverage for ``rules_v3._evaluate_predicate`` (issue #347 Phase 0).
+
+Every known predicate branch, plus the unknown-name fallback, is exercised here
+directly against a minimal ``GameState`` — no module fixture needed. Before this
+file existed, none of the four known branches had a direct test; only the
+unknown-predicate fallback was covered indirectly via
+``test_projection_v3.py::test_an_unregistered_predicate_never_fires_a_rule``.
+This is the safety net issue #347 Phase 1 (``registry/predicates.py``) extracts
+against, so these assertions must keep passing unchanged after that refactor.
+"""
+
+from __future__ import annotations
+
+import unittest
+
+from collaboration_framework.contracts import PredicateCondition
+from collaboration_framework.engine import ActorState, GameState
+from collaboration_framework.engine.models import WorldTimePoint, WorldTimeState
+from collaboration_framework.engine.rules_v3 import _evaluate_predicate
+
+ROOM = "predicate-room"
+ACTOR = "predicate-actor"
+PLAYER = "predicate-player"
+
+
+def game_state(**overrides) -> GameState:
+    base = {
+        "room_id": ROOM,
+        "scene_id": "start",
+        "actors": {
+            ACTOR: ActorState(
+                player_id=PLAYER,
+                name="调查员",
+                source_character_id="character",
+                source_character_version=1,
+            )
+        },
+        "entities": {},
+    }
+    base.update(overrides)
+    return GameState(**base)
+
+
+def predicate(name: str, **args) -> PredicateCondition:
+    return PredicateCondition(predicate=name, args=args)
+
+
+class EntityStateIsTests(unittest.TestCase):
+    def test_matches_when_flag_equals_expected_value(self) -> None:
+        state = game_state(entities={"door": {"locked": True}})
+        condition = predicate("entity_state_is", entity_id="door", key="locked", value=True)
+        self.assertTrue(_evaluate_predicate(condition, state=state, actor_id=ACTOR))
+
+    def test_mismatched_value_reads_false(self) -> None:
+        state = game_state(entities={"door": {"locked": False}})
+        condition = predicate("entity_state_is", entity_id="door", key="locked", value=True)
+        self.assertFalse(_evaluate_predicate(condition, state=state, actor_id=ACTOR))
+
+    def test_missing_key_reads_false_by_default(self) -> None:
+        # The docstring on entity_state()/_evaluate_predicate says an absent flag
+        # reads as False, which is how authored `== false` conditions are meant
+        # to fire on a fresh room. A missing key defaults `value` to True, so the
+        # comparison (False == True) must be False.
+        state = game_state(entities={"door": {}})
+        condition = predicate("entity_state_is", entity_id="door", key="locked")
+        self.assertFalse(_evaluate_predicate(condition, state=state, actor_id=ACTOR))
+
+    def test_missing_key_matches_explicit_false_expectation(self) -> None:
+        state = game_state(entities={"door": {}})
+        condition = predicate("entity_state_is", entity_id="door", key="locked", value=False)
+        self.assertTrue(_evaluate_predicate(condition, state=state, actor_id=ACTOR))
+
+    def test_non_string_entity_id_reads_false(self) -> None:
+        state = game_state()
+        condition = predicate("entity_state_is", entity_id=1, key="locked")
+        self.assertFalse(_evaluate_predicate(condition, state=state, actor_id=ACTOR))
+
+    def test_non_string_key_reads_false(self) -> None:
+        state = game_state(entities={"door": {"locked": True}})
+        condition = predicate("entity_state_is", entity_id="door", key=1)
+        self.assertFalse(_evaluate_predicate(condition, state=state, actor_id=ACTOR))
+
+
+class TimeOfDayIsTests(unittest.TestCase):
+    def test_default_world_time_is_day(self) -> None:
+        state = game_state()  # WorldTimeState default is hour 12 -> "day"
+        condition = predicate("time_of_day_is", value="day")
+        self.assertTrue(_evaluate_predicate(condition, state=state, actor_id=ACTOR))
+
+    def test_default_world_time_does_not_match_night(self) -> None:
+        state = game_state()
+        condition = predicate("time_of_day_is", value="night")
+        self.assertFalse(_evaluate_predicate(condition, state=state, actor_id=ACTOR))
+
+    def test_night_hour_matches_night(self) -> None:
+        state = game_state(
+            world_time=WorldTimeState(
+                current=WorldTimePoint(day_index=0, hour_of_day=2),
+                current_point_id="hour_02",
+            )
+        )
+        condition = predicate("time_of_day_is", value="night")
+        self.assertTrue(_evaluate_predicate(condition, state=state, actor_id=ACTOR))
+
+
+class InformationIsTests(unittest.TestCase):
+    def test_party_wide_discovered_fact_matches(self) -> None:
+        state = game_state(discovered_facts=("clue_a",))
+        condition = predicate("information_is", id="clue_a")
+        self.assertTrue(_evaluate_predicate(condition, state=state, actor_id=ACTOR))
+
+    def test_actor_scoped_discovered_fact_matches(self) -> None:
+        state = game_state(actor_discovered_facts={ACTOR: ("clue_b",)})
+        condition = predicate("information_is", id="clue_b")
+        self.assertTrue(_evaluate_predicate(condition, state=state, actor_id=ACTOR))
+
+    def test_undiscovered_fact_reads_false(self) -> None:
+        state = game_state()
+        condition = predicate("information_is", id="clue_c")
+        self.assertFalse(_evaluate_predicate(condition, state=state, actor_id=ACTOR))
+
+    def test_another_actors_fact_does_not_leak(self) -> None:
+        state = game_state(actor_discovered_facts={"someone-else": ("clue_d",)})
+        condition = predicate("information_is", id="clue_d")
+        self.assertFalse(_evaluate_predicate(condition, state=state, actor_id=ACTOR))
+
+    def test_non_string_id_reads_false(self) -> None:
+        state = game_state()
+        condition = predicate("information_is", id=1)
+        self.assertFalse(_evaluate_predicate(condition, state=state, actor_id=ACTOR))
+
+
+class CoreResolvedTests(unittest.TestCase):
+    def test_default_args_expect_true_and_matches_resolved_state(self) -> None:
+        state = game_state(core_resolved=True)
+        condition = predicate("core_resolved")
+        self.assertTrue(_evaluate_predicate(condition, state=state, actor_id=ACTOR))
+
+    def test_default_args_do_not_match_unresolved_state(self) -> None:
+        state = game_state(core_resolved=False)
+        condition = predicate("core_resolved")
+        self.assertFalse(_evaluate_predicate(condition, state=state, actor_id=ACTOR))
+
+    def test_explicit_false_matches_unresolved_state(self) -> None:
+        state = game_state(core_resolved=False)
+        condition = predicate("core_resolved", value=False)
+        self.assertTrue(_evaluate_predicate(condition, state=state, actor_id=ACTOR))
+
+
+class UnknownPredicateFallbackTests(unittest.TestCase):
+    def test_unknown_predicate_name_reads_false(self) -> None:
+        state = game_state()
+        condition = predicate("made_up_predicate", anything="here")
+        self.assertFalse(_evaluate_predicate(condition, state=state, actor_id=ACTOR))
+
+    def test_unknown_predicate_name_does_not_raise(self) -> None:
+        state = game_state()
+        condition = predicate("another_unregistered_name")
+        try:
+            _evaluate_predicate(condition, state=state, actor_id=ACTOR)
+        except Exception as exc:  # pragma: no cover - failure path only
+            self.fail(f"unknown predicate must not raise, got {exc!r}")
+
+
+if __name__ == "__main__":
+    unittest.main()

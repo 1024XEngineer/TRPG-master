@@ -19,6 +19,7 @@ const CARD_BACKGROUNDS = [
 ]
 const MODULE_PREPARATION_PAGE_INDEXES: Record<string, readonly number[]> = {
   'paper-chase-zh-coc7': [1],
+  'silver-lock': [1],
 }
 
 const difficultyLabel: Record<number, string> = {

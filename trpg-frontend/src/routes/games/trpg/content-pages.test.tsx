@@ -40,6 +40,28 @@ const moduleDetail: ModuleDetail = {
   ],
 }
 
+const silverLockSummary: ModuleSummary = {
+  ...moduleSummary,
+  id: 'silver-lock',
+  title: '银之锁',
+  nameEn: 'Silver Lock',
+  version: '3.0.0',
+  authors: ['夕影'],
+  synopsis: '在银色房间醒来后，找到解除束缚与逃离的方法。',
+}
+
+const silverLockDetail: ModuleDetail = {
+  ...moduleDetail,
+  ...silverLockSummary,
+  storyLabel: 'SILVER LOCK',
+  subtitle: '银色房间中的单人逃脱',
+  storyPages: [
+    { title: '内容提示', content: '包含绑架、拘禁、动物死亡和可选致命反击。' },
+    { title: '调查员准备', content: '本模组由一名调查员进行，适合新人体验。' },
+    { title: '醒来', content: '你在一间昏暗的银色房间中醒来。' },
+  ],
+}
+
 const replacementModuleSummary: ModuleSummary = {
   ...moduleSummary,
   id: 'arkham-files-coc7',
@@ -119,6 +141,32 @@ describe('content selection pages', () => {
     )
     expect(screen.queryByText('其他规则模组')).not.toBeInTheDocument()
     expect(screen.queryByText(/MS1 骨架联调/)).not.toBeInTheDocument()
+  })
+
+  it('renders silver lock as a second API module with default cover and preparation page', async () => {
+    vi.mocked(listModules).mockResolvedValue([moduleSummary, silverLockSummary])
+    vi.mocked(getModuleDetail).mockResolvedValue(silverLockDetail)
+
+    render(
+      <MemoryRouter initialEntries={['/home/create/modules']}>
+        <ScenarioSelectionPage />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('Paper Chase')).toBeInTheDocument()
+    expect(screen.getByText('Silver Lock')).toBeInTheDocument()
+    expect(screen.getAllByText('1 人')).toHaveLength(2)
+    expect(screen.getByAltText('银之锁模组封面')).toHaveAttribute(
+      'src',
+      '/assets/rooms/scenarios/cover-default.webp',
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '查看模组 银之锁 详情' }))
+    const openingSection = (await screen.findByRole('heading', { name: '开局提示' })).closest('section')
+    const preparationSection = screen.getByRole('heading', { name: '调查员准备' }).closest('section')
+    expect(within(openingSection as HTMLElement).getByText(/动物死亡/)).toBeInTheDocument()
+    expect(within(openingSection as HTMLElement).getByText(/银色房间中醒来/)).toBeInTheDocument()
+    expect(within(preparationSection as HTMLElement).getByText(/一名调查员/)).toBeInTheDocument()
   })
 
   it('shows a themed catalog error and retries the request', async () => {

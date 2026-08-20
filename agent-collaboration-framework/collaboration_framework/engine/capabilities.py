@@ -67,8 +67,13 @@ def audit_runtime_capabilities(
 
     v3 needs a much shorter audit than v2: hooks and free-form operations are
     gone, and a v3 Rule can only reference registered Steps, Effects and
-    Predicates — the contract and its validator already enforce that statically
-    (#226 §1). What is left to check at load time is the world ruleset.
+    Predicates (#226 §1). Steps and Effects are enforced by their discriminated
+    unions in `contracts/module_v3.py`; Predicate *names* are enforced at
+    publish time by `module/validation_v3.py` against
+    `engine/registry/predicates.py` (#347). Until that registry existed this
+    docstring overstated the guarantee — an unregistered predicate name passed
+    every static check and only ever read false at runtime. What is left to
+    check here at load time is the world ruleset.
     """
 
     if isinstance(module_content, ModuleContentV3):

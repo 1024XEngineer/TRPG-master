@@ -25,6 +25,7 @@ from app.core.errors import AppException, ErrorCode
 from app.core.logging import configure_logging
 from app.core.seed import ensure_seed_content
 from app.dto.common import ApiResponse
+from app.service.builtin_module_loader import load_builtin_modules
 from app.service.character_background import build_character_background_service
 from app.service.host_speech import build_host_speech_service
 from app.service.portrait_generation import (
@@ -65,6 +66,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """
     async with async_session_factory() as db:
         await ensure_seed_content(db)
+        # 直接运行应用时也发布全部内置模组，不能只依赖 Docker 入口脚本。
+        await load_builtin_modules(db)
     portrait_service: PortraitGenerationService = app.state.portrait_generation_service
     await portrait_service.recover_interrupted()
     logger.info("app_started")

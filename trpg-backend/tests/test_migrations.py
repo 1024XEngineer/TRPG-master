@@ -86,8 +86,10 @@ def test_migration_upgrades_empty_sqlite_and_round_trips(tmp_path: Path) -> None
         "character_portraits",
         "user_character_template_portraits",
         "portrait_generation_tasks",
-        "time_advance_proposals",
-    }.issubset(tables)
+            "time_advance_proposals",
+            "memory_entries",
+            "conversation_summaries",
+        }.issubset(tables)
     assert "decision_schema_version" in _column_names(
         database,
         "pending_check_decisions",

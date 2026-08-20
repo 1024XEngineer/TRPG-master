@@ -34,6 +34,7 @@ from .output import (
     NarrationOutput,
 )
 from .planner_context import HostAgentContext
+from .memory import ConversationSummary, MemoryContext, MemoryEntry
 
 __all__ = [
     "ActionPlanAdvanceResult",
@@ -44,6 +45,9 @@ __all__ = [
     "ActionPlanStepRun",
     "CompletedPlanStepSummary",
     "HostAgentContext",
+    "ConversationSummary",
+    "MemoryContext",
+    "MemoryEntry",
     "HistoryVisibility",
     "NarrationOutput",
     "OpeningNarrationContext",

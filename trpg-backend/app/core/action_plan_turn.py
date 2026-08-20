@@ -66,6 +66,7 @@ from collaboration_framework.host.schemas import (
     ActionPlanStepContext,
     CompletedPlanStepSummary,
     HostAgentContext,
+    MemoryContext,
     RecentHistoryBudget,
     RecentTurnContext,
     SingleActionClarificationResult,
@@ -102,6 +103,21 @@ class _ActionAdjudicationService(Protocol):
         self,
         request: PostRollDecisionRequest,
     ) -> AdjudicationExecution: ...
+
+
+class _MemorySource(Protocol):
+    async def read_context(
+        self,
+        *,
+        room_id: str,
+        player_id: str,
+        actor_id: str,
+        revision: str,
+        entity_ids: tuple[str, ...] = (),
+        location_id: str | None = None,
+        limit: int = 8,
+        max_chars: int = 2500,
+    ) -> MemoryContext: ...
 
 
 async def _emit_phase(observer: TurnPhaseObserver | None, phase: TurnPhase) -> None:
@@ -667,6 +683,7 @@ class ActionPlanTurnApplication:
         recent_history_source: RecentHistorySource,
         recent_history_budget: RecentHistoryBudget,
         recent_history_enabled: bool,
+        memory_source: _MemorySource | None = None,
     ) -> None:
         self._store = store
         self._engine = engine
@@ -676,6 +693,7 @@ class ActionPlanTurnApplication:
         self._recent_history_source = recent_history_source
         self._recent_history_budget = recent_history_budget
         self._recent_history_enabled = recent_history_enabled
+        self._memory_source = memory_source
         self._narrator = narrator
         self._projector = PlayerViewProjector(engine)
         self._dispatcher = HostTurnDecisionExecutor(
@@ -760,12 +778,18 @@ class ActionPlanTurnApplication:
             player_input=player_input,
             player_view=view,
         )
+        memory_context = await self._read_memory_context(
+            player_input=player_input,
+            player_view=view,
+        )
         try:
             decision = await self._planner.generate(
                 HostAgentContext(
                     player_input=player_input,
                     player_view=view,
                     recent_history=recent_history,
+                    memories=memory_context.entries,
+                    conversation_summary=memory_context.conversation_summary,
                     # A single action is adjudicated right here in the planner call,
                     # so it needs the same Keeper vocabulary a plan step gets.
                     keeper_capabilities=keeper_capabilities,
@@ -1361,6 +1385,17 @@ class ActionPlanTurnApplication:
         self,
         context: ActionPlanNarrationContext,
     ) -> ActionPlanNarrationOutput:
+        if hasattr(context.player_input, "room_id") and hasattr(context.player_view, "revision"):
+            memory_context = await self._read_memory_context(
+                player_input=context.player_input,
+                player_view=context.player_view,
+            )
+            context = context.model_copy(
+                update={
+                    "memories": memory_context.entries,
+                    "conversation_summary": memory_context.conversation_summary,
+                }
+            )
         for attempt in range(2):
             try:
                 return await self._narrator.narrate(context)
@@ -1582,6 +1617,33 @@ class ActionPlanTurnApplication:
             )
         return recent_history
 
+    async def _read_memory_context(
+        self,
+        *,
+        player_input: PlayerInput,
+        player_view: PlayerView,
+    ) -> MemoryContext:
+        """读取可选长期上下文；失败只降级为空，不阻断当前回合。"""
+        empty = MemoryContext(
+            room_id=player_input.room_id,
+            player_id=player_input.player_id,
+            actor_id=player_input.actor_id,
+            as_of_revision=player_view.revision,
+        )
+        if self._memory_source is None:
+            return empty
+        try:
+            return await self._memory_source.read_context(
+                room_id=player_input.room_id,
+                player_id=player_input.player_id,
+                actor_id=player_input.actor_id,
+                revision=player_view.revision,
+                location_id=player_view.scene_id,
+            )
+        except Exception as exc:  # noqa: BLE001 - 读模型故障必须 fail-open
+            logger.warning("memory_context_degraded", error_type=type(exc).__name__)
+            return empty
+
     async def _resolve_actor_id(self, room_id: str, player_id: str) -> str:
         async with self._store.transaction(room_id) as transaction:
             runtime = await transaction.load_runtime()
@@ -1621,6 +1683,7 @@ def build_action_plan_turn_application(
     settings=None,
     client=None,
     recent_history_source: RecentHistorySource | None = None,
+    memory_source: _MemorySource | None = None,
     time_consent_session_factory=None,
 ) -> ActionPlanTurnApplication:
     """Compose the finite-plan path without changing the single-intent Engine."""
@@ -1685,6 +1748,11 @@ def build_action_plan_turn_application(
         max_chars=resolved.recent_history_max_chars,
     )
     history_source = recent_history_source or _EmptyRecentHistorySource()
+    if memory_source is None:
+        from app.adapters.sqlalchemy_memory import SqlAlchemyMemoryStore
+        from app.core.db import async_session_factory
+
+        memory_source = SqlAlchemyMemoryStore(async_session_factory)
     consent_aware_engine = adjudication_engine
     if time_consent_session_factory is not None:
         from app.service.time_advance import ConsentAwareAdjudicationEngine
@@ -1713,6 +1781,7 @@ def build_action_plan_turn_application(
         recent_history_source=history_source,
         recent_history_budget=recent_history_budget,
         recent_history_enabled=resolved.recent_history_enabled,
+        memory_source=memory_source,
     )
 
 

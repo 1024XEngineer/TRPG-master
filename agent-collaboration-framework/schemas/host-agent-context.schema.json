@@ -204,6 +204,76 @@
       "title": "CheckpointOption",
       "type": "object"
     },
+    "ConversationSummary": {
+      "additionalProperties": false,
+      "description": "当前玩家可见的玩家与主持对话滚动摘要。",
+      "properties": {
+        "room_id": {
+          "minLength": 1,
+          "title": "Room Id",
+          "type": "string"
+        },
+        "player_id": {
+          "minLength": 1,
+          "title": "Player Id",
+          "type": "string"
+        },
+        "summary": {
+          "default": "",
+          "maxLength": 6000,
+          "title": "Summary",
+          "type": "string"
+        },
+        "unresolved_questions": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Unresolved Questions",
+          "type": "array"
+        },
+        "important_entities": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Important Entities",
+          "type": "array"
+        },
+        "through_event_sequence": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Through Event Sequence",
+          "type": "integer"
+        },
+        "source_revision": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Revision"
+        },
+        "source_event_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Source Event Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "room_id",
+        "player_id"
+      ],
+      "title": "ConversationSummary",
+      "type": "object"
+    },
     "ExitDestinationView": {
       "additionalProperties": false,
       "properties": {
@@ -942,6 +1012,133 @@
         "current_location_id"
       ],
       "title": "LocationContextView",
+      "type": "object"
+    },
+    "MemoryEntry": {
+      "additionalProperties": false,
+      "description": "一条可追溯、只读的长期经历投影。",
+      "properties": {
+        "memory_id": {
+          "minLength": 1,
+          "title": "Memory Id",
+          "type": "string"
+        },
+        "room_id": {
+          "minLength": 1,
+          "title": "Room Id",
+          "type": "string"
+        },
+        "subject_id": {
+          "minLength": 1,
+          "title": "Subject Id",
+          "type": "string"
+        },
+        "object_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Object Id"
+        },
+        "kind": {
+          "enum": [
+            "action",
+            "visit",
+            "conversation",
+            "clue",
+            "world_event",
+            "relationship_change",
+            "goal"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "content": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Content",
+          "type": "string"
+        },
+        "epistemic_status": {
+          "enum": [
+            "confirmed",
+            "experienced",
+            "heard",
+            "asserted",
+            "presentation"
+          ],
+          "title": "Epistemic Status",
+          "type": "string"
+        },
+        "visibility": {
+          "enum": [
+            "public",
+            "player_scoped",
+            "entity_scoped"
+          ],
+          "title": "Visibility",
+          "type": "string"
+        },
+        "participants": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Participants",
+          "type": "array"
+        },
+        "location_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Location Id"
+        },
+        "source_event_id": {
+          "minLength": 1,
+          "title": "Source Event Id",
+          "type": "string"
+        },
+        "source_sequence": {
+          "minimum": 0,
+          "title": "Source Sequence",
+          "type": "integer"
+        },
+        "source_revision": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Revision"
+        }
+      },
+      "required": [
+        "memory_id",
+        "room_id",
+        "subject_id",
+        "kind",
+        "content",
+        "epistemic_status",
+        "visibility",
+        "source_event_id",
+        "source_sequence"
+      ],
+      "title": "MemoryEntry",
       "type": "object"
     },
     "NarrativeDetailView": {
@@ -1882,6 +2079,25 @@
     },
     "recent_history": {
       "$ref": "#/$defs/RecentTurnContext"
+    },
+    "memories": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/MemoryEntry"
+      },
+      "title": "Memories",
+      "type": "array"
+    },
+    "conversation_summary": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ConversationSummary"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "keeper_capabilities": {
       "anyOf": [

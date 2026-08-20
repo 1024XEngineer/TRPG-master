@@ -24,6 +24,7 @@ from collaboration_framework.contracts import (
     WorldClockView,
 )
 from collaboration_framework.host.schemas.history import RecentTurnContext
+from collaboration_framework.host.schemas.memory import ConversationSummary, MemoryEntry
 from collaboration_framework.host.schemas.planner_context import _validate_keeper_scope
 
 PlanRunStatus = Literal[
@@ -322,6 +323,8 @@ class ActionPlanStepContext(ContractModel):
     # ordinary detail that was narrated in the same continuous scene; the
     # adjudicator must still materialize that detail through Runtime creation.
     recent_history: RecentTurnContext | None = None
+    memories: tuple[MemoryEntry, ...] = ()
+    conversation_summary: ConversationSummary | None = None
     # Set only after the Engine refused a proposal for this same step. It carries
     # a stable player-safe code/reason, never hidden module content.
     #

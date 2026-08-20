@@ -27,6 +27,7 @@ from app.core.seed import ensure_seed_content
 from app.dto.common import ApiResponse
 from app.service.builtin_module_loader import load_builtin_modules
 from app.service.character_background import build_character_background_service
+from app.service.conversation_summary import build_conversation_summary_service
 from app.service.host_speech import build_host_speech_service
 from app.service.portrait_generation import (
     PortraitGenerationService,
@@ -70,11 +71,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await load_builtin_modules(db)
     portrait_service: PortraitGenerationService = app.state.portrait_generation_service
     await portrait_service.recover_interrupted()
+    await app.state.conversation_summary_service.start()
     logger.info("app_started")
     try:
         yield
     finally:
         await portrait_service.shutdown()
+        await app.state.conversation_summary_service.stop()
         logger.info("app_stopped")
 
 
@@ -101,6 +104,10 @@ def create_app() -> FastAPI:
     app.state.character_background_service = build_character_background_service(settings)
     app.state.portrait_generation_service = build_portrait_generation_service(settings)
     app.state.host_speech = build_host_speech_service(settings)
+    app.state.conversation_summary_service = build_conversation_summary_service(
+        settings,
+        async_session_factory,
+    )
 
     # 允许配置里列出的前端源发起跨域请求（本地开发场景下 Vite 默认跑在
     # 9877 端口，跟后端的 8000 端口不同源，没有这个中间件浏览器会拦截请求）。

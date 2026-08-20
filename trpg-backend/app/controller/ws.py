@@ -629,6 +629,10 @@ async def _send_completed_turn_message(
         scene_id=player_view.scene_id,
         view_revision=player_view.revision,
     )
+    # 摘要是异步可重建读模型，不能阻塞本回合的权威叙事发送。
+    summary_service = getattr(websocket.app.state, "conversation_summary_service", None)
+    if summary_service is not None:
+        await summary_service.enqueue_if_needed(room_id=room_id, player_id=player_id)
     return recorded
 
 

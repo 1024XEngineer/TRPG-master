@@ -135,6 +135,7 @@ from app.models.engine import (
     RoomActionReservation,
     TimeAdvanceProposalRecord,
 )
+from app.models.room import Player
 from app.service import auth as auth_service
 from app.service import chat as chat_service
 from app.service import room as room_service
@@ -632,7 +633,23 @@ async def _send_completed_turn_message(
     # 摘要是异步可重建读模型，不能阻塞本回合的权威叙事发送。
     summary_service = getattr(websocket.app.state, "conversation_summary_service", None)
     if summary_service is not None:
-        await summary_service.enqueue_if_needed(room_id=room_id, player_id=player_id)
+        # 公开事件对房间内所有仍在场玩家可见；摘要必须逐玩家入队，
+        # 私有事件则由 enqueue_if_needed 内部再次按 player_id 过滤。
+        player_ids = list(
+            (
+                await db.scalars(
+                    select(Player.id).where(
+                        Player.room_id == room_id,
+                        Player.left_at.is_(None),
+                    )
+                )
+            ).all()
+        )
+        for visible_player_id in player_ids:
+            await summary_service.enqueue_if_needed(
+                room_id=room_id,
+                player_id=visible_player_id,
+            )
     return recorded
 
 

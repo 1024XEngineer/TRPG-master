@@ -177,6 +177,9 @@ class SqlAlchemyMemoryStore:
                     or_(
                         MemoryEntryRecord.location_id == location_id,
                         MemoryEntryRecord.object_id.in_(entity_ids),
+                        # 没有地点的全局权威事件仍然是可召回的长期事实；外层
+                        # room/visibility/participant 条件继续负责权限隔离。
+                        MemoryEntryRecord.location_id.is_(None),
                     )
                 )
             records = list(

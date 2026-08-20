@@ -79,6 +79,18 @@ from app.core.turn_events import TurnPhase
 
 logger = structlog.get_logger()
 
+
+def _matching_visible_entity_ids(utterance: str, player_view: PlayerView) -> tuple[str, ...]:
+    """从玩家原话确定性匹配当前可见实体，供长期记忆按实体优先检索。"""
+    text = utterance.casefold()
+    matches: list[str] = []
+    for entity in player_view.scene.visible_entities:
+        names = (entity.name, *entity.aliases)
+        if any(name and name.casefold() in text for name in names):
+            matches.append(entity.id)
+    return tuple(matches)
+
+
 TurnPhaseObserver = Callable[[TurnPhase], Awaitable[None]]
 
 
@@ -1633,12 +1645,17 @@ class ActionPlanTurnApplication:
         if self._memory_source is None:
             return empty
         try:
+            entity_ids = _matching_visible_entity_ids(
+                player_input.utterance,
+                player_view,
+            )
             return await self._memory_source.read_context(
                 room_id=player_input.room_id,
                 player_id=player_input.player_id,
                 actor_id=player_input.actor_id,
                 revision=player_view.revision,
                 location_id=player_view.scene_id,
+                entity_ids=entity_ids,
             )
         except Exception as exc:  # noqa: BLE001 - 读模型故障必须 fail-open
             logger.warning("memory_context_degraded", error_type=type(exc).__name__)

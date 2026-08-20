@@ -6,7 +6,7 @@ import uuid
 from datetime import UTC, datetime
 
 from collaboration_framework.host.schemas import ConversationSummary, MemoryContext, MemoryEntry
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, case, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.models.engine import GameEvent
@@ -163,6 +163,8 @@ class SqlAlchemyMemoryStore:
         async with self._session_factory() as session:
             conditions = [
                 MemoryEntryRecord.room_id == room_id,
+                # Engine 的内部裁决原因只服务审计，不应占用 Host 的剧情记忆预算。
+                ~MemoryEntryRecord.content.startswith("adjudication:"),
                 or_(
                     MemoryEntryRecord.visibility == "public",
                     and_(
@@ -188,6 +190,11 @@ class SqlAlchemyMemoryStore:
                         select(MemoryEntryRecord)
                         .where(*conditions)
                         .order_by(
+                            case(
+                                (MemoryEntryRecord.kind == "conversation", 0),
+                                (MemoryEntryRecord.epistemic_status == "presentation", 1),
+                                else_=2,
+                            ),
                             MemoryEntryRecord.source_sequence.desc(),
                             MemoryEntryRecord.created_at.desc(),
                         )

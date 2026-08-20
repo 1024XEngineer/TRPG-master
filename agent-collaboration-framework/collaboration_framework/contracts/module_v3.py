@@ -6,11 +6,10 @@ runtime counterparts (RuleAgenda, WorldTimeState, KnowledgeResolution, EndingDra
 DomainEventV3, ActorLocationState …) belong to later items and are deliberately
 absent here.
 
-Why a new module instead of extending `contracts/module.py`: #226 freezes the
-migration as *Breaking*, with Checkpoint / `module_rules` / `event_rules` losing
-their runtime compatibility layer. v2 `ModuleContent` therefore has to survive
-untouched — not as a runtime format, but as the **migration input** every v3
-module is compiled from.
+This started as a separate module because #226 froze the migration as *Breaking*
+and v2 `ModuleContent` still had to survive as the migration input. That input is
+gone: every published module is v3, and the v1/v2 contract was deleted in #384.
+What is left here is simply the one module content contract.
 
 Domain nodes and their owners:
 

@@ -31,7 +31,7 @@ from collaboration_framework.contracts import (
     PendingCheckDecisionView,
     PlayerView,
 )
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 
 from app.dto.common import CamelModel, UtcDatetime
 from app.dto.room import RoomPlayerRead
@@ -161,6 +161,15 @@ class ChatSendPayload(CamelModel):
     client_message_id: str = Field(..., min_length=1, max_length=64)
 
 
+class TimeAdvanceRespondPayload(CamelModel):
+    """玩家对一个冻结的共享时间推进提案作出同意或拒绝。"""
+
+    proposal_id: str = Field(..., min_length=1, max_length=100)
+    proposal_version: int = Field(..., ge=1)
+    source_revision: str = Field(..., min_length=1)
+    accept: bool
+
+
 # ── 服务端 → 客户端 ──────────────────────────────
 
 
@@ -208,6 +217,51 @@ class ChatMessagePayload(CamelModel):
     text: str
     sent_at: UtcDatetime
     client_message_id: str
+
+
+class TimeAdvancePendingPayload(CamelModel):
+    """广播完整待确认状态，供所有客户端幂等覆盖本地确认条。"""
+
+    proposal_id: str
+    proposal_version: int = Field(..., ge=1)
+    source_revision: str
+    target_point_id: str
+    target_day_index: int = Field(..., ge=0)
+    target_hour_of_day: int = Field(..., ge=0, le=23)
+    requester_player_id: str
+    required_player_ids: list[str]
+    accepted_player_ids: list[str]
+    expires_at: UtcDatetime
+
+
+class TimeAdvanceResolvedPayload(CamelModel):
+    """广播提案终态；批准时附带已经提交的权威世界时间。"""
+
+    proposal_id: str
+    status: Literal["approved", "rejected", "expired", "stale"]
+    target_day_index: int = Field(..., ge=0)
+    target_hour_of_day: int = Field(..., ge=0, le=23)
+    committed_revision: str | None = None
+
+
+class RoomActionStatePayload(CamelModel):
+    """房间当前行动所有权的可重放快照，不包含模型计划或私密裁决。"""
+
+    status: Literal["idle", "processing", "awaiting_player"]
+    player_id: str | None = None
+    actor_id: str | None = None
+    client_action_id: str | None = None
+    started_at: UtcDatetime | None = None
+    revision: str = Field(..., min_length=1)
+
+    @model_validator(mode="after")
+    def validate_owner(self) -> "RoomActionStatePayload":
+        owner = (self.player_id, self.actor_id, self.client_action_id, self.started_at)
+        if self.status == "idle" and any(value is not None for value in owner):
+            raise ValueError("idle 行动状态不得包含行动所有者")
+        if self.status != "idle" and any(value is None for value in owner):
+            raise ValueError("非 idle 行动状态必须包含完整行动所有者")
+        return self
 
 
 class ActionBroadcastPayload(CamelModel):

@@ -171,6 +171,11 @@ _MODELS: list[type[BaseModel]] = [
     ws.ChatSendPayload,
     ws.ChatMessagePayload,
     ws.ActionBroadcastPayload,
+    # 多人共享时间推进确认（issue #349）
+    ws.TimeAdvanceRespondPayload,
+    ws.TimeAdvancePendingPayload,
+    ws.TimeAdvanceResolvedPayload,
+    ws.RoomActionStatePayload,
     # 讨论区历史消息 REST（issue #107）
     chat.ChatMessageRead,
 ]

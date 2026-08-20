@@ -7,7 +7,7 @@ import re
 import traceback
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Literal, Protocol
 
 import structlog
 from collaboration_framework.contracts import (
@@ -18,6 +18,9 @@ from collaboration_framework.contracts import (
     ActionPlanStep,
     ActionTarget,
     AdjudicationExecution,
+    AdjudicationRecovery,
+    AdjudicationStatusView,
+    AdvanceWorldTimeEffect,
     CancelActionPlanRequest,
     CancelCheckChoice,
     CheckDecisionRequest,
@@ -37,6 +40,8 @@ from collaboration_framework.contracts import (
     RuleDecisionRef,
     SingleActionDecision,
     SkillCheckCandidate,
+    SubmitAdjudicationRequest,
+    WorldClockView,
 )
 from collaboration_framework.engine import AdjudicationEngineService, EngineStore, RuleEngineService
 from collaboration_framework.host.adapters import InMemoryActionPlanRunStore
@@ -59,6 +64,7 @@ from collaboration_framework.host.schemas import (
     ActionPlanNarrationOutput,
     ActionPlanRun,
     ActionPlanStepContext,
+    CompletedPlanStepSummary,
     HostAgentContext,
     RecentHistoryBudget,
     RecentTurnContext,
@@ -71,6 +77,22 @@ from app.core.turn_events import TurnPhase
 logger = structlog.get_logger()
 
 TurnPhaseObserver = Callable[[TurnPhase], Awaitable[None]]
+
+
+class _ActionAdjudicationService(Protocol):
+    """ActionPlan 所需的最小裁决接口，允许时间确认装饰器保持可替换。"""
+
+    async def submit(self, request: SubmitAdjudicationRequest) -> AdjudicationExecution: ...
+
+    async def get_status(self, request: GetAdjudicationStatusRequest) -> AdjudicationStatusView: ...
+
+    async def recover_action(
+        self, request: GetAdjudicationStatusRequest
+    ) -> AdjudicationRecovery | None: ...
+
+    async def decide(self, request: CheckDecisionRequest) -> AdjudicationExecution: ...
+
+    async def decide_post_roll(self, request: PostRollDecisionRequest) -> AdjudicationExecution: ...
 
 
 async def _emit_phase(observer: TurnPhaseObserver | None, phase: TurnPhase) -> None:
@@ -121,7 +143,7 @@ class ActionPlanTurnResult:
 
     @property
     def waiting_for_player(self) -> bool:
-        return self.status == "waiting_for_player"
+        return self.status in {"waiting_for_player", "awaiting_time_consent"}
 
 
 @dataclass(frozen=True)
@@ -135,6 +157,26 @@ class DeterministicHostTurnDecisionModel:
 
     async def generate(self, context: HostAgentContext) -> HostTurnDecision:
         utterance = context.player_input.utterance
+        time = context.keeper_capabilities.time if context.keeper_capabilities else None
+        if (
+            "下一个时间点" in utterance
+            and any(word in utterance for word in ("等", "等待", "休息"))
+            and time is not None
+            and time.blocked_reason is None
+            and time.next_point_id is not None
+        ):
+            return SingleActionDecision(
+                adjudication=ActionAdjudication(
+                    request_id="application-owned",
+                    source_revision=context.player_view.revision,
+                    actor_id=context.player_input.actor_id,
+                    summary=utterance,
+                    target=ActionTarget(kind="location", id=context.player_view.scene.id),
+                    method=ActionMethod(family="wait", description=utterance),
+                    check=NoAdjudicationCheck(),
+                    success_effects=(AdvanceWorldTimeEffect(to_point_id=time.next_point_id),),
+                )
+            )
         separators = ("然后", "接着", "随后", "再去", "，再", ";", "；")
         pieces = [utterance]
         for separator in separators:
@@ -604,7 +646,7 @@ class ActionPlanTurnApplication:
         *,
         store: EngineStore,
         engine: RuleEngineService,
-        adjudication_engine: AdjudicationEngineService,
+        adjudication_engine: _ActionAdjudicationService,
         planner: HostTurnDecisionModel,
         orchestrator: ActionPlanOrchestrator,
         narrator: ActionPlanNarrator,
@@ -771,8 +813,9 @@ class ActionPlanTurnApplication:
         on_phase: TurnPhaseObserver | None,
         verify_fingerprint: bool = True,
     ) -> ActionPlanTurnResult:
-        if result.run.status == "waiting_for_player":
-            await _emit_phase(on_phase, "waiting_for_check")
+        if result.run.status in {"waiting_for_player", "awaiting_time_consent"}:
+            if result.run.status == "waiting_for_player":
+                await _emit_phase(on_phase, "waiting_for_check")
         elif result.run.status in {
             "awaiting_narration",
             "completed",
@@ -870,6 +913,81 @@ class ActionPlanTurnApplication:
             parent_action_id=parent_action_id,
             on_progress=on_progress,
             on_phase=on_phase,
+        )
+
+    async def finish_legacy_recovery(
+        self,
+        recovery: AdjudicationRecovery,
+        *,
+        room_id: str,
+        player_id: str,
+        on_phase: TurnPhaseObserver | None = None,
+    ) -> ActionPlanTurnResult:
+        """Render one already-settled pre-cutover Engine action.
+
+        This is intentionally isolated from normal turn creation and never
+        writes an ActionPlanRun. The caller must first validate eligibility via
+        ``LegacySingleActionRecoveryAdapter``.
+        """
+        execution = recovery.execution
+        player_input = PlayerInput(
+            room_id=room_id,
+            player_id=player_id,
+            actor_id=recovery.actor_id,
+            client_action_id=recovery.action_request_id,
+            utterance=recovery.summary,
+        )
+        view = await self._projector.refresh_adjudication(player_input, execution)
+        if execution.status in {"awaiting_skill_choice", "awaiting_post_roll_decision"}:
+            await _emit_phase(on_phase, "waiting_for_check")
+            return ActionPlanTurnResult(
+                player_input=player_input,
+                player_view=view,
+                status="waiting_for_player",
+                execution=execution,
+            )
+        if execution.outcome not in {"success", "failure", "cancelled"}:
+            raise TurnExecutionError(
+                "PENDING_EXECUTION_NOT_WAITING",
+                "行动状态尚未完成，请重试",
+                retryable=True,
+            )
+        completed_outcome: Literal["success", "failure", "cancelled"]
+        if execution.outcome == "success":
+            completed_outcome = "success"
+        elif execution.outcome == "failure":
+            completed_outcome = "failure"
+        else:
+            completed_outcome = "cancelled"
+        await _emit_phase(on_phase, "refreshing_player_view")
+        await _emit_phase(on_phase, "generating_narration")
+        summary = CompletedPlanStepSummary(
+            step_index=0,
+            semantic_goal=recovery.summary,
+            outcome=completed_outcome,
+            view_revision=execution.view_revision,
+            world_time_after=WorldClockView.from_world(view.world),
+            event_refs=execution.public_event_refs,
+            narration_evidence=execution.narration_evidence,
+            committed_results=execution.committed_results,
+        )
+        context = ActionPlanNarrationContext(
+            background=view.background,
+            player_input=player_input,
+            plan_goal=recovery.summary,
+            termination_status=("cancelled" if execution.status == "cancelled" else "resolved"),
+            completed_steps=(summary,),
+            player_view=view,
+            opening_world_time=None,
+            allowed_evidence_refs=execution.public_event_refs,
+            narration_evidence=execution.narration_evidence,
+        )
+        return ActionPlanTurnResult(
+            player_input=player_input,
+            player_view=view,
+            status="completed",
+            execution=execution,
+            narration=await self._narrate(context),
         )
 
     async def active_for_room(self, room_id: str):
@@ -1083,7 +1201,7 @@ class ActionPlanTurnApplication:
         verify_fingerprint: bool = True,
     ) -> ActionPlanTurnResult:
         run = result.run
-        if run.status == "waiting_for_player":
+        if run.status in {"waiting_for_player", "awaiting_time_consent"}:
             return ActionPlanTurnResult(
                 player_input=player_input,
                 player_view=result.player_view,
@@ -1387,6 +1505,7 @@ def build_action_plan_turn_application(
     settings=None,
     client=None,
     recent_history_source: RecentHistorySource | None = None,
+    time_consent_session_factory=None,
 ) -> ActionPlanTurnApplication:
     """Compose the finite-plan path without changing the single-intent Engine."""
 
@@ -1450,10 +1569,18 @@ def build_action_plan_turn_application(
         max_chars=resolved.recent_history_max_chars,
     )
     history_source = recent_history_source or _EmptyRecentHistorySource()
+    consent_aware_engine = adjudication_engine
+    if time_consent_session_factory is not None:
+        from app.service.time_advance import ConsentAwareAdjudicationEngine
+
+        consent_aware_engine = ConsentAwareAdjudicationEngine(
+            adjudication_engine,
+            time_consent_session_factory,
+        )
     orchestrator = ActionPlanOrchestrator(
         store=plan_store,
         adjudicator=adjudicator,
-        executor=adjudication_engine,
+        executor=consent_aware_engine,
         player_view_projector=projector,
         policy=policy,
         on_step_failure=_log_step_adjudication_failure,
@@ -1463,7 +1590,7 @@ def build_action_plan_turn_application(
     return ActionPlanTurnApplication(
         store=store,
         engine=engine,
-        adjudication_engine=adjudication_engine,
+        adjudication_engine=consent_aware_engine,
         planner=planner,
         orchestrator=orchestrator,
         narrator=ActionPlanNarrator(narration_model),
@@ -2063,6 +2190,7 @@ def _production_application() -> ActionPlanTurnApplication:
         adjudication_engine=adjudication_engine_service,
         plan_store=action_plan_store,
         recent_history_source=SqlAlchemyRecentHistorySource(async_session_factory),
+        time_consent_session_factory=async_session_factory,
     )
 
 

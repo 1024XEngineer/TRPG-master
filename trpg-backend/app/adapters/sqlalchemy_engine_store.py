@@ -49,6 +49,7 @@ from app.models.engine import (
     PendingCheckDecisionRecord,
 )
 from app.models.room import Room
+from app.service.module_content_cache import load_module_content
 
 # 落库 JSON 的 schema 版本。#310 给 CheckRun / CheckRunView 各加了字段，老行没有
 # 这些键，直接 model_validate 会当场失败——正卡在 awaiting_post_roll_decision 的
@@ -375,11 +376,13 @@ class _SqlAlchemyEngineTransaction(EngineTransaction):
         # life: a republished module never silently changes the meaning of a
         # session already in flight (#226 §1).
         self._content_schema_version = module_version.content_schema_version
-        payload = deepcopy(module_version.content_json)
-        module_content: ModuleContent | ModuleContentV3 = (
-            ModuleContentV3.model_validate(payload)
-            if module_version.content_schema_version == 3
-            else ModuleContent.model_validate(payload)
+        # 已发布的模组内容不可变，解析结果按 (module_id, version, 内容指纹)
+        # 复用；返回值仍与缓存和 content_json 完全隔离 (#347 P4)。
+        module_content: ModuleContent | ModuleContentV3 = load_module_content(
+            module_id=module_version.module_id,
+            version=module_version.version,
+            content_schema_version=module_version.content_schema_version,
+            content_json=module_version.content_json,
         )
         if (
             module_content.module_id != module_version.module_id

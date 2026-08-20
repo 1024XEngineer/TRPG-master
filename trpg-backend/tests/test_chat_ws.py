@@ -15,6 +15,7 @@ e2e/tests/discussion-chat.e2e.ts，那边有完整的双客户端覆盖；这里
 """
 
 from collections.abc import Iterator
+from dataclasses import replace
 from uuid import uuid4
 
 import pytest
@@ -199,23 +200,43 @@ def test_action_lock_semantics() -> None:
     """
     manager = RoomActionLockManager()
 
-    token1 = manager.try_acquire("room-1")
+    def acquire(room_id: str, action_id: str = "action-1") -> str | None:
+        return manager.try_acquire(
+            room_id,
+            player_id="player-1",
+            actor_id="actor-1",
+            client_action_id=action_id,
+            revision="0",
+        )
+
+    token1 = acquire("room-1")
     assert token1 is not None
-    assert manager.try_acquire("room-1") is None, "占用中必须拒绝"
-    assert manager.try_acquire("room-2") is not None, "锁按房间隔离"
+    snapshot = manager.snapshot("room-1")
+    assert snapshot is not None
+    assert (
+        snapshot.player_id,
+        snapshot.actor_id,
+        snapshot.client_action_id,
+        snapshot.revision,
+    ) == ("player-1", "actor-1", "action-1", "0")
+    assert acquire("room-1") is None, "占用中必须拒绝"
+    assert acquire("room-2") is not None, "锁按房间隔离"
 
     manager.release("room-1", token1)
-    token2 = manager.try_acquire("room-1")
+    token2 = acquire("room-1", "action-2")
     assert token2 is not None, "释放后必须可再次获取"
 
     # stale release：旧 token 不能释放新持有者的锁
     manager.release("room-1", token1)  # token1 已过期，不匹配 token2
-    assert manager.try_acquire("room-1") is None, "旧 token release 不能误删新锁"
+    assert acquire("room-1") is None, "旧 token release 不能误删新锁"
     manager.release("room-1", token2)  # 正确 token 才能释放
 
     # 超时兜底：把到期时间人为拨到过去，模拟"拿了锁但 release 没被走到"。
-    manager._locks["room-1"] = (0.0, "stale-token")
-    assert manager.try_acquire("room-1") is not None, "过期的锁必须能被抢占（防永久锁死）"
+    assert acquire("room-1", "action-3") is not None
+    current = manager._locks["room-1"]
+    manager._locks["room-1"] = replace(current, expires_at=0.0)
+    assert manager.snapshot("room-1") is None, "读取快照时应惰性清理过期锁"
+    assert acquire("room-1") is not None, "过期的锁必须能被抢占（防永久锁死）"
 
     manager.release("room-does-not-exist", "any-token")  # 释放不存在的锁是无害空操作
 

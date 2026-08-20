@@ -15,6 +15,13 @@ Protocol 和 RuleKernel 的前提下，实现 `SqlAlchemyEngineStore`、完成�
 多个发布版本。房间选择模组后使用 `rooms.scenario_id + rooms.module_version` 固定
 到明确版本，不跟随目录推荐版本变化。
 
+因为发布内容不可变，`load_runtime` 不再每次都重新深拷贝并校验整份
+`content_json`：解析结果按 `(module_id, version, 内容指纹)` 在进程内缓存复用
+（`app/service/module_content_cache.py`，#347 P4）。缓存返回的仍是彼此隔离的
+新对象，调用方就地修改既不会影响下一次读取，也不会写回行上的
+`content_json`。键里带内容指纹，是因为 `version` 是模组作者手填的自由字符串：
+万一同一版本号下的内容真的变了，那是一次重新解析，而不是一次静默的过期命中。
+
 ## 权威运行数据
 
 - `game_sessions`：`room_id` 同时是主键和 Room 外键，因此一个 Room 只能运行一局；
@@ -102,6 +109,16 @@ Lobby → Building → InGame ⇄ Suspended → Completed
 WebSocket exactly-once 投递；是否发送、重试时是否重发由后续 Issue 的业务流程决定。
 
 ## 迁移安全
+
+TurnRun cutover 表只在 migration 阶段创建，不会自动写入切换时间。部署必须按以下顺序执行：
+
+1. 执行 Alembic migration，创建 `turn_run_cutover` 表；
+2. 停止或替换仍会创建 Engine-only action 的旧 writer；
+3. 调用 `app.core.legacy_turn_run.activate_turn_run_cutover` 写入 singleton（默认保留 30 天恢复窗口）；
+4. 启动并逐步放量新 TurnRun writer。
+
+窗口到期后，旧 Engine-only action 不再恢复；新版本缺少 `ActionPlanRun` 会明确报告数据损坏，
+不会回退到 Engine-only 状态机。
 
 迁移在执行任何 DDL 前检查：
 

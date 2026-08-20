@@ -4,7 +4,7 @@
 ## 发布身份
 
 - `module_id`: `silver-lock`
-- `version`: `3.0.0`
+- `version`: `3.0.1`
 - `world_ref`: `coc-7e`
 - 原作者：夕影
 - 权威来源：`银之锁.docx`
@@ -15,7 +15,7 @@
 | 对象 | 数量 | 已映射 |
 | --- | ---: | ---: |
 | Location | 3 | 3 |
-| Information | 20 | 20 |
+| Information | 21 | 21 |
 | Rule | 26 | 26 |
 | KnowledgeGoal | 5 | 5 |
 | EndingAnchor | 2 | 2 |

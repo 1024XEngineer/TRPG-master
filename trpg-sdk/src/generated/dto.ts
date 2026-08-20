@@ -1213,6 +1213,18 @@ export interface RollAttributesResult {
 }
 
 /**
+ * 房间当前行动所有权的可重放快照，不包含模型计划或私密裁决。
+ */
+export interface RoomActionStatePayload {
+  status: "idle" | "processing" | "awaiting_player";
+  playerId?: string | null;
+  actorId?: string | null;
+  clientActionId?: string | null;
+  startedAt?: string | null;
+  revision: string;
+}
+
+/**
  * GET /api/v1/rooms/{roomId}/conversation 返回项。
  *
  * 它面向房间页恢复当前对话 UI：讨论区消息继续来自 `chat_messages`，行动频道
@@ -1501,6 +1513,43 @@ export interface SystemQuickGenerateResult {
   };
   occupationId?: number | null;
   compute?: CharacterComputeResult | null;
+}
+
+/**
+ * 广播完整待确认状态，供所有客户端幂等覆盖本地确认条。
+ */
+export interface TimeAdvancePendingPayload {
+  proposalId: string;
+  proposalVersion: number;
+  sourceRevision: string;
+  targetPointId: string;
+  targetDayIndex: number;
+  targetHourOfDay: number;
+  requesterPlayerId: string;
+  requiredPlayerIds: string[];
+  acceptedPlayerIds: string[];
+  expiresAt: string;
+}
+
+/**
+ * 广播提案终态；批准时附带已经提交的权威世界时间。
+ */
+export interface TimeAdvanceResolvedPayload {
+  proposalId: string;
+  status: "approved" | "rejected" | "expired" | "stale";
+  targetDayIndex: number;
+  targetHourOfDay: number;
+  committedRevision?: string | null;
+}
+
+/**
+ * 玩家对一个冻结的共享时间推进提案作出同意或拒绝。
+ */
+export interface TimeAdvanceRespondPayload {
+  proposalId: string;
+  proposalVersion: number;
+  sourceRevision: string;
+  accept: boolean;
 }
 
 export interface ToolCompletedPayload {

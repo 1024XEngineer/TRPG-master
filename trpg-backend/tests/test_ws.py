@@ -294,6 +294,8 @@ def receive_replayed_opening(ws) -> dict:
     """Consume and validate the persisted opening sent after an in-game join."""
 
     opening = ws.receive_json()
+    if opening.get("type") == "room.action.state":
+        opening = ws.receive_json()
     assert opening["type"] == "narration.push"
     assert opening["payload"]["messageId"] == "game-opening"
     return opening

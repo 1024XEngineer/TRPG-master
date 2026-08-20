@@ -104,6 +104,7 @@ class AdjudicationStatusView(ContractModel):
         "not_submitted",
         "awaiting_skill_choice",
         "awaiting_post_roll_decision",
+        "awaiting_time_consent",
         "resolved",
         "cancelled",
     ]

@@ -1,7 +1,7 @@
 {
   "content_schema_version": 3,
   "module_id": "silver-lock",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "world_ref": "coc-7e",
   "background": "当代。单名调查员在昏暗的银色房间醒来，失去近期记忆且手脚被捆。叙事保持幽闭、失忆与超现实谜题交织的基调；芭斯特身份、银之锁原理、绑架者出现条件及抽屉内容在对应线索提交前不得泄露。",
   "information": [
@@ -27,6 +27,21 @@
       "keeper_content": "挂画后的暗格藏着上层抽屉钥匙。",
       "player_content": "挂画后的暗格里藏着一把小钥匙。",
       "criticality": "supporting",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "sketchbook_found",
+      "kind": "fact",
+      "title": "上层抽屉中的速写本",
+      "keeper_content": "暗格钥匙打开上层抽屉后，调查员发现四页速写本。前三页固定用于显现手电、钢钳和桂花糯米糖粥，第四页只能替代白纸进行通信；禁止生成清单以外的物品。",
+      "player_content": "你打开上层抽屉，发现里面放着一本只剩四页的速写本。书中夹着一张纸条，上面写着：“用法：撕下。请节约使用。”四张纸页分别对应手电、钢钳、桂花糯米糖粥和通信，不能用于显现其他物品。",
+      "criticality": "essential",
       "recovery": {
         "policy": "adaptive",
         "allowed_source_types": [
@@ -512,13 +527,19 @@
       "kind": "object",
       "name": "上层抽屉",
       "player_visible_name": "上层抽屉",
-      "description": "由暗格钥匙开启。",
+      "description": "书桌最上方的抽屉，抽屉上着锁。",
       "located_in": "sealed_room",
       "state": {
-        "opened": false
+        "open": false
       },
       "visibility": "public",
-      "plot_relevance": true
+      "plot_relevance": true,
+      "relations": [
+        {
+          "kind": "contains",
+          "target_id": "sketchbook"
+        }
+      ]
     },
     {
       "id": "middle_drawer",
@@ -551,20 +572,31 @@
       "kind": "object",
       "name": "四页速写本",
       "player_visible_name": "四页速写本",
-      "description": "只允许显现手电、钢钳和糖粥；最后一页仅用于通信。",
+      "description": "一本从上层抽屉中找到的速写本，只剩四页，里面夹着一张写有“用法：撕下。请节约使用。”的纸条。四页分别用于显现手电、钢钳、桂花糯米糖粥以及通信，不能显现清单之外的物品。",
       "located_in": "sealed_room",
       "state": {
-        "found": false
+        "discovered": false
       },
       "visibility": "public",
-      "plot_relevance": true
+      "plot_relevance": true,
+      "visibility_conditions": [
+        {
+          "op": "predicate",
+          "predicate": "entity_state_is",
+          "args": {
+            "entity_id": "sketchbook",
+            "key": "discovered",
+            "value": true
+          }
+        }
+      ]
     },
     {
       "id": "flashlight_page",
       "kind": "object",
       "name": "手电纸页",
       "player_visible_name": "手电纸页",
-      "description": "预先画有手电的一页。",
+      "description": "预先画有手电的一页，撕下后显现手电。",
       "located_in": "sealed_room",
       "state": {
         "consumed": false
@@ -577,7 +609,7 @@
           "predicate": "entity_state_is",
           "args": {
             "entity_id": "sketchbook",
-            "key": "found",
+            "key": "discovered",
             "value": true
           }
         }
@@ -588,7 +620,7 @@
       "kind": "object",
       "name": "钢钳纸页",
       "player_visible_name": "钢钳纸页",
-      "description": "只能用于固定钢钳的一页。",
+      "description": "固定用于显现钢钳的一页。",
       "located_in": "sealed_room",
       "state": {
         "consumed": false
@@ -601,7 +633,7 @@
           "predicate": "entity_state_is",
           "args": {
             "entity_id": "sketchbook",
-            "key": "found",
+            "key": "discovered",
             "value": true
           }
         }
@@ -612,7 +644,7 @@
       "kind": "object",
       "name": "糖粥纸页",
       "player_visible_name": "糖粥纸页",
-      "description": "只能用于固定糖粥的一页。",
+      "description": "固定用于显现桂花糯米糖粥的一页。",
       "located_in": "sealed_room",
       "state": {
         "consumed": false
@@ -625,7 +657,7 @@
           "predicate": "entity_state_is",
           "args": {
             "entity_id": "sketchbook",
-            "key": "found",
+            "key": "discovered",
             "value": true
           }
         }
@@ -649,7 +681,7 @@
           "predicate": "entity_state_is",
           "args": {
             "entity_id": "sketchbook",
-            "key": "found",
+            "key": "discovered",
             "value": true
           }
         }
@@ -1533,7 +1565,7 @@
             "effect": {
               "type": "change_entity_state",
               "entity_id": "top_drawer",
-              "key": "opened",
+              "key": "open",
               "value": true
             },
             "next_step_id": "success_1"
@@ -1544,8 +1576,18 @@
             "effect": {
               "type": "change_entity_state",
               "entity_id": "sketchbook",
-              "key": "found",
+              "key": "discovered",
               "value": true
+            },
+            "next_step_id": "success_2"
+          },
+          {
+            "id": "success_2",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "sketchbook_found",
+              "scope": "party"
             },
             "next_step_id": "finish"
           },

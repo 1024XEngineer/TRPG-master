@@ -16,6 +16,7 @@ import type {
   RoomRejoinPayload,
   SanCheckRollPayload,
   ServerToClientEvent,
+  TimeAdvanceRespondPayload,
   TurnCompletedEvent,
 } from '../types';
 
@@ -343,6 +344,43 @@ const PAYLOAD_VALIDATORS: {
       p.status === 'awaiting_post_roll_decision') &&
     (p.status !== 'awaiting_skill_choice' || isRecord(p.pendingDecision)) &&
     (p.status !== 'awaiting_post_roll_decision' || isRecord(p.checkRun)),
+  'room.action.state': (p) => {
+    if (
+      (p.status !== 'idle' && p.status !== 'processing' && p.status !== 'awaiting_player') ||
+      typeof p.revision !== 'string'
+    ) return false;
+    const owner = [p.playerId, p.actorId, p.clientActionId, p.startedAt];
+    return p.status === 'idle'
+      ? owner.every((value) => value === null || value === undefined)
+      : owner.every((value) => typeof value === 'string' && value.length > 0);
+  },
+  'time.advance.pending': (p) =>
+    typeof p.proposalId === 'string' &&
+    typeof p.proposalVersion === 'number' &&
+    Number.isInteger(p.proposalVersion) &&
+    typeof p.sourceRevision === 'string' &&
+    typeof p.targetPointId === 'string' &&
+    typeof p.targetDayIndex === 'number' &&
+    Number.isInteger(p.targetDayIndex) &&
+    typeof p.targetHourOfDay === 'number' &&
+    Number.isInteger(p.targetHourOfDay) &&
+    typeof p.requesterPlayerId === 'string' &&
+    isStringArray(p.requiredPlayerIds) &&
+    isStringArray(p.acceptedPlayerIds) &&
+    typeof p.expiresAt === 'string',
+  'time.advance.resolved': (p) =>
+    typeof p.proposalId === 'string' &&
+    (p.status === 'approved' ||
+      p.status === 'rejected' ||
+      p.status === 'expired' ||
+      p.status === 'stale') &&
+    typeof p.targetDayIndex === 'number' &&
+    Number.isInteger(p.targetDayIndex) &&
+    typeof p.targetHourOfDay === 'number' &&
+    Number.isInteger(p.targetHourOfDay) &&
+    (p.committedRevision === null ||
+      p.committedRevision === undefined ||
+      typeof p.committedRevision === 'string'),
   'view.updated': (p) =>
     typeof p.playerId === 'string' &&
     isValidPlayerView(p.playerView) &&
@@ -631,6 +669,11 @@ export class RoomSocket {
 
   decidePostRoll(playerId: string, payload: AdjudicationPostRollPayload): void {
     this.send('adjudication.post_roll', playerId, payload);
+  }
+
+  /** 回复多人共享时间提案；重试时必须复用服务端最新版本。 */
+  respondToTimeAdvance(playerId: string, payload: TimeAdvanceRespondPayload): void {
+    this.send('time.advance.respond', playerId, payload);
   }
 
   cancelActionPlan(playerId: string, payload: ActionPlanCancelPayload): void {

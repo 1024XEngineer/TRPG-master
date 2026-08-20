@@ -250,6 +250,8 @@ class ValidationVocabulary:
     portable_item_ids: set[str]
     actor_ids: set[str]
     world_time: WorldTimeState | None = None
+    # 仅由 Engine 的内部全员确认入口设置；普通 Agent 裁决不能绕过多人时间门禁。
+    allow_party_time_advance: bool = False
 
 
 @dataclass(frozen=True)
@@ -970,7 +972,7 @@ def _validate_advance_world_time(
             player_safe_reason="当前时间目标与世界时间线不一致",
         )
     blocked = services.time_advance_block_reason(tuple(vocab.actor_ids))
-    if blocked is not None:
+    if blocked is not None and not vocab.allow_party_time_advance:
         reject(
             "TIME_ADVANCE_BLOCKED",
             repairability="requires_player_choice",

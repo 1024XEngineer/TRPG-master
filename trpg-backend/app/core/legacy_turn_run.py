@@ -8,7 +8,7 @@ projection while the rollout window recorded in the database is still open.
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from collaboration_framework.contracts import (
     AdjudicationRecovery,
@@ -19,6 +19,32 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.models.engine import TurnRunCutoverRecord
+
+
+async def activate_turn_run_cutover(
+    session_factory: async_sessionmaker[AsyncSession],
+    *,
+    recovery_days: int = 30,
+    now: datetime | None = None,
+) -> TurnRunCutoverRecord:
+    """Atomically activate the legacy recovery window after writer cutover."""
+    if recovery_days < 1:
+        raise ValueError("recovery_days must be positive")
+    activated_at = now or datetime.now(UTC)
+    if activated_at.tzinfo is None:
+        activated_at = activated_at.replace(tzinfo=UTC)
+    async with session_factory() as session:
+        existing = await session.get(TurnRunCutoverRecord, 1)
+        if existing is not None:
+            return existing
+        record = TurnRunCutoverRecord(
+            id=1,
+            cutover_at=activated_at,
+            legacy_recovery_until=activated_at + timedelta(days=recovery_days),
+        )
+        session.add(record)
+        await session.commit()
+        return record
 
 
 class LegacySingleActionRecoveryAdapter:

@@ -6,6 +6,9 @@ and the ActionPlan runtime commit through the same transaction — so the payloa
 is now assembled by hand and the assertions are unchanged: a stale revision
 rejects the whole commit, a mid-commit failure leaves nothing behind, and a
 successful commit publishes state, events and the completed action together.
+
+Nothing here is version-specific: the store never looks inside `module_content`.
+It rides on the v3 fixture only because that is the one published schema (#384).
 """
 
 from __future__ import annotations
@@ -20,9 +23,10 @@ from collaboration_framework.contracts import (
     Intent,
     MatchedTarget,
     ModuleCheck,
-    ModuleContent,
+    ModuleContentV3,
 )
 from collaboration_framework.engine import (
+    ActorState,
     CompletedAction,
     EngineExecutionResult,
     GameState,
@@ -31,37 +35,67 @@ from collaboration_framework.engine import (
     StateModifiedEvent,
 )
 
-ROOT = Path(__file__).resolve().parents[1]
+FIXTURE = (
+    Path(__file__).resolve().parents[1]
+    / "docs"
+    / "module-parser"
+    / "examples"
+    / "module-content-validation"
+    / "追书人"
+    / "module-content-v3.json"
+)
+ROOM = "room_01"
+ACTOR = "pc_1"
+PLAYER = "player_01"
+# 一个带布尔状态的 Canon 实体，用来做「翻一位」的最小提交载荷。
+ENTITY = "douglas_diary"
 
 
-def load_model(path: str, model_type):
-    return model_type.model_validate_json((ROOT / path).read_text(encoding="utf-8"))
+def module() -> ModuleContentV3:
+    return ModuleContentV3.model_validate_json(FIXTURE.read_text(encoding="utf-8"))
+
+
+def game_state(content: ModuleContentV3) -> GameState:
+    return GameState(
+        room_id=ROOM,
+        scene_id=content.initial_state.start_location_id,
+        actors={
+            ACTOR: ActorState(
+                player_id=PLAYER,
+                name="陈探员",
+                source_character_id="character_v3",
+                source_character_version=1,
+                state={"skills": {"spot-hidden": 60}},
+            )
+        },
+        entities={ENTITY: {"found": False, "read": False}},
+    )
 
 
 def checkpoint_request(*, request_id: str) -> ActionRequest:
     return ActionRequest(
         request_id=request_id,
-        room_id="room_01",
-        player_id="player_01",
-        actor_id="pc_1",
+        room_id=ROOM,
+        player_id=PLAYER,
+        actor_id=ACTOR,
         source_view_revision="0",
         intent=Intent(
             kind="action",
             verb="inspect",
-            target=MatchedTarget(id="bookshelf"),
+            target=MatchedTarget(id=ENTITY),
             check=ModuleCheck(
-                checkpoint_id="investigate_bookshelf",
+                checkpoint_id="investigate_diary",
                 proposed_skills=("spot-hidden",),
             ),
-            summary="检查 bookshelf",
+            summary=f"检查 {ENTITY}",
         ),
     )
 
 
 class InMemoryEngineStoreContractTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
-        self.module = load_model("fixtures/demo-module.json", ModuleContent)
-        self.state = load_model("fixtures/demo-state.json", GameState)
+        self.module = module()
+        self.state = game_state(self.module)
 
     def store(self, **kwargs) -> InMemoryEngineStore:
         store = InMemoryEngineStore(**kwargs)
@@ -75,10 +109,10 @@ class InMemoryEngineStoreContractTests(unittest.IsolatedAsyncioTestCase):
         self,
         request: ActionRequest,
     ) -> tuple[GameState, tuple[StateModifiedEvent, ...], CompletedAction]:
-        """One well-formed write: flip `bookshelf.key_found` and record it."""
+        """One well-formed write: flip `douglas_diary.found` and record it."""
 
         new_state = self.state.model_copy(deep=True)
-        new_state.entities["bookshelf"]["key_found"] = True
+        new_state.entities[ENTITY]["found"] = True
         new_state = new_state.model_copy(
             update={"event_sequence": self.state.event_sequence + 1}
         )
@@ -91,7 +125,7 @@ class InMemoryEngineStoreContractTests(unittest.IsolatedAsyncioTestCase):
                 client_action_id=request.request_id,
                 cause=f"action:{request.request_id}",
                 payload={
-                    "path": "entities.bookshelf.key_found",
+                    "path": f"entities.{ENTITY}.found",
                     "from": False,
                     "to": True,
                 },
@@ -116,7 +150,7 @@ class InMemoryEngineStoreContractTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_runtime_identifies_bound_module_version(self) -> None:
         store = self.store()
-        async with store.transaction("room_01") as transaction:
+        async with store.transaction(ROOM) as transaction:
             runtime = await transaction.load_runtime()
 
         self.assertEqual(runtime.module_id, self.module.module_id)
@@ -125,25 +159,22 @@ class InMemoryEngineStoreContractTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_loaded_models_are_deep_copy_isolated(self) -> None:
         store = self.store()
-        async with store.transaction("room_01") as transaction:
+        async with store.transaction(ROOM) as transaction:
             runtime = await transaction.load_runtime()
-            runtime.game_state.entities["bookshelf"]["key_found"] = True
-            runtime.module_content.entities[0].direct_responses["invented"] = "泄漏"
+            runtime.game_state.entities[ENTITY]["found"] = True
+            runtime.module_content.entities[0].state["invented"] = "泄漏"
 
-        async with store.transaction("room_01") as transaction:
+        async with store.transaction(ROOM) as transaction:
             reloaded = await transaction.load_runtime()
 
-        self.assertFalse(reloaded.game_state.entities["bookshelf"]["key_found"])
-        self.assertNotIn(
-            "invented",
-            reloaded.module_content.entities[0].direct_responses,
-        )
+        self.assertFalse(reloaded.game_state.entities[ENTITY]["found"])
+        self.assertNotIn("invented", reloaded.module_content.entities[0].state)
 
     async def test_stale_expected_revision_rejects_entire_commit(self) -> None:
         store = self.store()
         request = checkpoint_request(request_id="stale_commit_001")
         new_state, events, completed = self.commit_payload(request)
-        async with store.transaction("room_01") as transaction:
+        async with store.transaction(ROOM) as transaction:
             await transaction.load_runtime()
             with self.assertRaises(RevisionConflictError):
                 await transaction.commit(
@@ -153,10 +184,10 @@ class InMemoryEngineStoreContractTests(unittest.IsolatedAsyncioTestCase):
                     completed_action=completed,
                 )
 
-        self.assertEqual(store.inspect_state("room_01"), self.state)
-        self.assertEqual(store.inspect_events("room_01"), ())
+        self.assertEqual(store.inspect_state(ROOM), self.state)
+        self.assertEqual(store.inspect_events(ROOM), ())
         with self.assertRaises(ContractError):
-            store.inspect_completed_action("room_01", request.request_id)
+            store.inspect_completed_action(ROOM, request.request_id)
 
     async def test_commit_failure_has_no_partial_writes(self) -> None:
         def fail_before_commit(room_id: str) -> None:
@@ -167,7 +198,7 @@ class InMemoryEngineStoreContractTests(unittest.IsolatedAsyncioTestCase):
         new_state, events, completed = self.commit_payload(request)
 
         with self.assertRaisesRegex(RuntimeError, "simulated failure"):
-            async with store.transaction("room_01") as transaction:
+            async with store.transaction(ROOM) as transaction:
                 runtime = await transaction.load_runtime()
                 await transaction.commit(
                     expected_revision=runtime.revision,
@@ -176,16 +207,16 @@ class InMemoryEngineStoreContractTests(unittest.IsolatedAsyncioTestCase):
                     completed_action=completed,
                 )
 
-        self.assertEqual(store.inspect_state("room_01"), self.state)
-        self.assertEqual(store.inspect_events("room_01"), ())
+        self.assertEqual(store.inspect_state(ROOM), self.state)
+        self.assertEqual(store.inspect_events(ROOM), ())
         with self.assertRaises(ContractError):
-            store.inspect_completed_action("room_01", request.request_id)
+            store.inspect_completed_action(ROOM, request.request_id)
 
     async def test_successful_commit_publishes_all_records(self) -> None:
         store = self.store()
         request = checkpoint_request(request_id="atomic_001")
         new_state, events, completed = self.commit_payload(request)
-        async with store.transaction("room_01") as transaction:
+        async with store.transaction(ROOM) as transaction:
             runtime = await transaction.load_runtime()
             await transaction.commit(
                 expected_revision=runtime.revision,
@@ -194,9 +225,9 @@ class InMemoryEngineStoreContractTests(unittest.IsolatedAsyncioTestCase):
                 completed_action=completed,
             )
 
-        state = store.inspect_state("room_01")
-        stored_events = store.inspect_events("room_01")
-        stored = store.inspect_completed_action("room_01", request.request_id)
+        state = store.inspect_state(ROOM)
+        stored_events = store.inspect_events(ROOM)
+        stored = store.inspect_completed_action(ROOM, request.request_id)
 
         self.assertEqual(state.event_sequence, 1)
         self.assertEqual(

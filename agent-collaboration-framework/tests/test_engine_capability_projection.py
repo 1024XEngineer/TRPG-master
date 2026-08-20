@@ -9,6 +9,9 @@ only. These tests pin the projection side of each one.
 `KeeperCapabilityView` is covered here too, because it is the reason the Agent
 can name the ids these effects need — and because the same tests are the right
 place to prove it does not leak into the player-safe view.
+
+The effects and the projection are both schema-independent; only the ids these
+assertions name are not. They now come from the v3 fixture (#384).
 """
 
 from __future__ import annotations
@@ -27,7 +30,7 @@ from collaboration_framework.contracts import (
     EnterLocationEffect,
     ContractError,
     MarkCoreResolvedEffect,
-    ModuleContent,
+    ModuleContentV3,
     MoveEntityEffect,
     NoAdjudicationCheck,
     PlayerViewScope,
@@ -37,24 +40,50 @@ from collaboration_framework.contracts import (
     SubmitAdjudicationRequest,
 )
 from collaboration_framework.engine import (
+    ActorState,
     AdjudicationEngineService,
     GameState,
     InMemoryEngineStore,
     RuleEngineService,
 )
 
-ROOT = Path(__file__).resolve().parents[1]
+FIXTURE = (
+    Path(__file__).resolve().parents[1]
+    / "docs"
+    / "module-parser"
+    / "examples"
+    / "module-content-validation"
+    / "追书人"
+    / "module-content-v3.json"
+)
 SCOPE = PlayerViewScope(room_id="room_01", player_id="player_01", actor_id="pc_1")
-
-
-def load_model(path: str, model_type):
-    return model_type.model_validate_json((ROOT / path).read_text(encoding="utf-8"))
+# 开局所在地点，以及站在那里的 Canon NPC。
+START = "thomas_office"
+CANON_NPC = "thomas"
+# 一条开局尚未被发现的 Canon Information，和一个结局锚点。
+INFORMATION = "lyla_cemetery_sighting"
+ENDING = "ending_douglas_departs"
 
 
 class EngineCapabilityProjectionTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
-        self.module = load_model("fixtures/demo-module.json", ModuleContent)
-        state = load_model("fixtures/demo-state.json", GameState)
+        self.module = ModuleContentV3.model_validate_json(
+            FIXTURE.read_text(encoding="utf-8")
+        )
+        state = GameState(
+            room_id=SCOPE.room_id,
+            scene_id=self.module.initial_state.start_location_id,
+            actors={
+                SCOPE.actor_id: ActorState(
+                    player_id=SCOPE.player_id,
+                    name="陈探员",
+                    source_character_id="character_v3",
+                    source_character_version=1,
+                    state={"skills": {"spot-hidden": 60}},
+                )
+            },
+            entities={},
+        )
         self.store = InMemoryEngineStore()
         self.store.register_room(module_content=self.module, initial_state=state)
         self.engine = RuleEngineService(self.store)
@@ -85,10 +114,10 @@ class EngineCapabilityProjectionTests(unittest.IsolatedAsyncioTestCase):
         before = await self.engine.read(SCOPE)
         self.assertEqual(before.known_information, ())
 
-        await self.commit("reveal-1", RevealInformationEffect(information_id="document_truth"))
+        await self.commit("reveal-1", RevealInformationEffect(information_id=INFORMATION))
 
         after = await self.engine.read(SCOPE)
-        self.assertEqual([item.id for item in after.known_information], ["document_truth"])
+        self.assertEqual([item.id for item in after.known_information], [INFORMATION])
         self.assertEqual(after.known_information[0].scope, "party")
 
     async def test_runtime_entity_becomes_visible_in_the_current_scene(self) -> None:
@@ -98,7 +127,7 @@ class EngineCapabilityProjectionTests(unittest.IsolatedAsyncioTestCase):
                 entity_id="night_clerk",
                 entity_kind="npc",
                 name="值班的管理员",
-                location_id="study",
+                location_id=START,
             ),
         )
 
@@ -115,7 +144,7 @@ class EngineCapabilityProjectionTests(unittest.IsolatedAsyncioTestCase):
             EnsureRuntimeLocationEffect(
                 location_id="corridor",
                 name="走廊",
-                connected_location_id="study",
+                connected_location_id=START,
             ),
         )
         await self.commit(
@@ -140,7 +169,7 @@ class EngineCapabilityProjectionTests(unittest.IsolatedAsyncioTestCase):
             EnsureRuntimeLocationEffect(
                 location_id="cellar",
                 name="地窖",
-                connected_location_id="study",
+                connected_location_id=START,
             ),
         )
 
@@ -157,7 +186,7 @@ class EngineCapabilityProjectionTests(unittest.IsolatedAsyncioTestCase):
         # location must not silently open travel to every Canon Scene.
         self.assertEqual(
             {item.destination.scene_id for item in inside.scene.available_exits},
-            {"study"},
+            {START},
         )
 
     async def test_generic_entity_cannot_claim_item_inventory_custody(self) -> None:
@@ -166,13 +195,13 @@ class EngineCapabilityProjectionTests(unittest.IsolatedAsyncioTestCase):
             EnsureRuntimeLocationEffect(
                 location_id="attic",
                 name="阁楼",
-                connected_location_id="study",
+                connected_location_id=START,
             ),
         )
         with self.assertRaises(AdjudicationValidationError) as raised:
             await self.commit(
                 "take-document",
-                MoveEntityEffect(entity_id="document", holder_actor_id="pc_1"),
+                MoveEntityEffect(entity_id="study_window", holder_actor_id="pc_1"),
             )
 
         self.assertEqual(
@@ -180,24 +209,24 @@ class EngineCapabilityProjectionTests(unittest.IsolatedAsyncioTestCase):
             "INVENTORY_TARGET_NOT_PORTABLE",
         )
         state = self.store.inspect_state(SCOPE.room_id)
-        self.assertNotIn("holder_actor_id", state.entities.get("document", {}))
+        self.assertNotIn("holder_actor_id", state.entities.get("study_window", {}))
 
     async def test_party_scoped_set_visibility_hides_a_canon_entity(self) -> None:
         before = await self.engine.read(SCOPE)
-        self.assertIn("window", {entity.id for entity in before.scene.visible_entities})
+        self.assertIn(CANON_NPC, {entity.id for entity in before.scene.visible_entities})
 
         await self.commit(
             "hide-window",
             SetVisibilityEffect(
                 target_kind="entity",
-                target_id="window",
+                target_id=CANON_NPC,
                 visible=False,
                 scope="party",
             ),
         )
 
         after = await self.engine.read(SCOPE)
-        self.assertNotIn("window", {entity.id for entity in after.scene.visible_entities})
+        self.assertNotIn(CANON_NPC, {entity.id for entity in after.scene.visible_entities})
 
     async def test_world_time_is_projected_as_a_discrete_point(self) -> None:
         """时间只在离散点上，投影出的是 day_index + hour_of_day，不是流逝分钟数。"""
@@ -223,7 +252,7 @@ class EngineCapabilityProjectionTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ContractError, "EndingDraft"):
             await self.commit(
                 "confirm-ending",
-                CommitTerminalEndingEffect(ending_id="ending_document_recovered"),
+                CommitTerminalEndingEffect(ending_id=ENDING),
             )
 
     async def test_keeper_capabilities_name_ids_the_player_view_withholds(self) -> None:
@@ -233,19 +262,19 @@ class EngineCapabilityProjectionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(capabilities.revision, snapshot.revision)
         # The Canon Information is keeper-only until an effect releases it: the
         # Agent can name it, the player cannot see it.
-        self.assertIn("document_truth", {item.id for item in capabilities.information})
+        self.assertIn(INFORMATION, {item.id for item in capabilities.information})
         self.assertEqual(snapshot.known_information, ())
         undiscovered = next(
-            item for item in capabilities.information if item.id == "document_truth"
+            item for item in capabilities.information if item.id == INFORMATION
         )
         self.assertFalse(undiscovered.known_by_party)
         self.assertIn(
-            "ending_document_recovered",
+            ENDING,
             {item.id for item in capabilities.endings},
         )
         self.assertEqual(
             {item.id for item in capabilities.locations if item.is_current},
-            {"study"},
+            {START},
         )
 
     async def test_keeper_capabilities_publish_the_only_legal_world_target(self) -> None:
@@ -279,25 +308,25 @@ class EngineCapabilityProjectionTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_keeper_capabilities_track_committed_effects(self) -> None:
-        await self.commit("reveal-2", RevealInformationEffect(information_id="document_truth"))
+        await self.commit("reveal-2", RevealInformationEffect(information_id=INFORMATION))
         await self.commit(
             "runtime-entity-3",
             EnsureRuntimeEntityEffect(
                 entity_id="street_vendor",
                 entity_kind="npc",
                 name="街边小贩",
-                location_id="study",
+                location_id=START,
             ),
         )
 
         capabilities = await self.engine.read_keeper_capabilities(SCOPE)
         revealed = next(
-            item for item in capabilities.information if item.id == "document_truth"
+            item for item in capabilities.information if item.id == INFORMATION
         )
         self.assertTrue(revealed.known_by_party)
         vendor = next(item for item in capabilities.entities if item.id == "street_vendor")
         self.assertEqual(vendor.origin, "runtime")
-        self.assertEqual(vendor.location_id, "study")
+        self.assertEqual(vendor.location_id, START)
 
     async def test_engine_still_refuses_ids_that_are_not_in_the_capability_list(self) -> None:
         """The capability view is vocabulary, not authorization."""

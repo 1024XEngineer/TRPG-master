@@ -27,18 +27,14 @@ sequenceDiagram
     W->>P: generate(HostAgentContext)
     P-->>W: structured HostTurnDecision candidate
     W->>W: parse and validate decision
-    alt single action
-        W->>E: submit ActionAdjudication
-        E-->>W: committed player-safe execution
-    else action plan
-        W->>O: start/advance finite semantic plan
-        loop current step only
-            O->>V: refresh latest PlayerView
-            O->>E: submit current-step adjudication
-            E-->>O: committed execution or pending boundary
-        end
-        O-->>W: run + latest safe execution
+    W->>W: normalize producer output into ActionPlanRun(1..N)
+    W->>O: start/advance finite semantic plan
+    loop current step only
+        O->>V: refresh latest PlayerView
+        O->>E: submit current-step adjudication
+        E-->>O: committed execution or pending boundary
     end
+    O-->>W: run + latest safe execution
     W->>N: narrate committed evidence
     N-->>W: validated NarrationOutput
     W-->>W: persist history and send turn.completed

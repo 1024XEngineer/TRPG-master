@@ -41,6 +41,7 @@ from collaboration_framework.contracts.validation import (
     Repairability,
     ValidationResult,
 )
+from collaboration_framework.registry import effects as effect_registry
 
 from .dice import DiceRoller, coc7_success_level, passes_difficulty
 from .models import (
@@ -52,8 +53,6 @@ from .models import (
     GameState,
     PendingCheckDecision,
 )
-from collaboration_framework.registry import effects as effect_registry
-
 from .navigation import resolve_location_target
 from .persistent_results import (
     committed_results_from_events,
@@ -68,9 +67,9 @@ from .rules_v3 import (
     agent_match_scope_admits,
     create_rule_agenda,
     effects_after_degree,
+    entity_state,
     matching_event_rules,
     pending_check_for,
-    entity_state,
     resolve_rule_option,
     walk_rule,
 )
@@ -425,6 +424,7 @@ class AdjudicationEngineService:
                 action_request_id=request.action_request_id,
                 actor_id=adjudication.actor_id,
                 summary=adjudication.summary,
+                created_at=command.created_at,
                 execution=command.execution,
             )
 
@@ -958,7 +958,9 @@ class AdjudicationEngineService:
                         if isinstance(option, PushOption)
                         else "accept_result"
                     ),
-                    "luck_spent": option.cost if isinstance(option, SpendResourceOption) else None,
+                    "luck_spent": option.cost
+                    if isinstance(option, SpendResourceOption)
+                    else None,
                 },
                 deep=True,
             )
@@ -1091,9 +1093,7 @@ class AdjudicationEngineService:
         evidence: list[NarrationEvidence] = []
         for event in candidate_events:
             entity_id = event.payload.get("entity_id")
-            if (
-                not isinstance(entity_id, str)
-            ):
+            if not isinstance(entity_id, str):
                 continue
             projected = visible.get(entity_id)
             if projected is None:

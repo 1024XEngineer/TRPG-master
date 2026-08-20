@@ -7,6 +7,7 @@ domain effects instead of arbitrary state paths.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Annotated, Literal, TypeAlias
 
 from pydantic import (
@@ -23,8 +24,8 @@ from pydantic.json_schema import SkipJsonSchema
 
 from .common import ContractModel
 
-CheckDifficulty: TypeAlias = Literal["regular", "hard", "extreme"]  # noqa: UP040
-CheckDegree: TypeAlias = Literal[  # noqa: UP040
+CheckDifficulty: TypeAlias = Literal["regular", "hard", "extreme"]
+CheckDegree: TypeAlias = Literal[
     "critical_success",
     "extreme_success",
     "hard_success",
@@ -32,7 +33,7 @@ CheckDegree: TypeAlias = Literal[  # noqa: UP040
     "failure",
     "fumble",
 ]
-PersistenceIntent: TypeAlias = Literal[  # noqa: UP040
+PersistenceIntent: TypeAlias = Literal[
     "none",
     "character_state",
     "object_state",
@@ -490,4 +491,5 @@ class AdjudicationRecovery(ContractModel):
     action_request_id: str = Field(min_length=1, max_length=200)
     actor_id: str = Field(min_length=1)
     summary: str = Field(min_length=1)
+    created_at: datetime
     execution: AdjudicationExecution

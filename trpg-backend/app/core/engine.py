@@ -9,6 +9,7 @@ from collaboration_framework.engine import (
 from app.adapters import SqlAlchemyActionPlanRunStore, SqlAlchemyEngineStore
 from app.core.config import get_settings
 from app.core.db import async_session_factory
+from app.core.legacy_turn_run import LegacySingleActionRecoveryAdapter
 
 
 class _FixedDiceSource:
@@ -31,10 +32,15 @@ _dice = (
 )
 adjudication_engine_service = AdjudicationEngineService(engine_store, dice=_dice)
 rule_engine_service = RuleEngineService(engine_store)
+legacy_single_action_recovery = LegacySingleActionRecoveryAdapter(
+    engine=adjudication_engine_service,
+    session_factory=async_session_factory,
+)
 
 __all__ = [
     "adjudication_engine_service",
     "action_plan_store",
     "engine_store",
     "rule_engine_service",
+    "legacy_single_action_recovery",
 ]

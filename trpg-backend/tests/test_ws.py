@@ -1066,7 +1066,7 @@ def test_action_plan_submit_emits_safe_progress_and_one_parent_completion(
     assert persisted_actions[0]["payload"]["utterance"] == "先观察房间，然后询问眼前的人"
 
 
-def test_single_action_pending_resumes_without_plan_run(
+def test_single_action_pending_resumes_through_one_step_plan_run(
     sync_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1120,7 +1120,7 @@ def test_single_action_pending_resumes_without_plan_run(
             ws,
             lambda message: message.get("type") == "adjudication.pending",
         )
-        assert pending["payload"]["planId"] is None
+        assert pending["payload"]["planId"].startswith("plan-")
         assert all(message.get("type") != "turn.failed" for message in pending_events)
         assert [
             message["payload"]["phase"]

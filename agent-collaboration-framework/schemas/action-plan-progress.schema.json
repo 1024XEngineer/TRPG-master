@@ -30,7 +30,7 @@
       "type": "integer"
     },
     "total_steps": {
-      "minimum": 2,
+      "minimum": 1,
       "title": "Total Steps",
       "type": "integer"
     },

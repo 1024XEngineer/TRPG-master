@@ -30,6 +30,7 @@ from app.models.engine import (
     ModuleVersion,
     PendingCheckDecisionRecord,
     RoomActionReservation,
+    TurnRunCutoverRecord,
 )
 from app.models.event import CheckResult, Event
 from app.models.replay import ModuleImportJob, RoomSummary
@@ -67,6 +68,7 @@ __all__ = [
     "PendingCheckDecisionRecord",
     "Room",
     "RoomActionReservation",
+    "TurnRunCutoverRecord",
     "RoomSummary",
     "Scenario",
     "ScenarioScene",

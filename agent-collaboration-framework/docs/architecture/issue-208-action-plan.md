@@ -122,7 +122,7 @@ ActionPlan
 独立 `ActionPlanRunStore` 端口；B 提供其 InMemory/SQL 实现。该 Store 可以与 Engine
 使用同一数据库，但不得扩张 Engine 的单意图职责。
 
-### 4.2 单动作快路径保持不变
+### 4.2 单动作 producer 兼容与统一 ingress
 
 Host 的顶层决策是有鉴别字段的 union：
 
@@ -134,11 +134,13 @@ SingleActionDecision
 ActionPlan
   kind = action_plan
   goal
-  steps[2..N]
+  steps[1..N]
 ```
 
-单一行动直接提交一个 `ActionAdjudication`：不创建 PlanRun、不产生额外步骤级 Host
-调用、不改变现有 Engine 幂等语义。
+`SingleActionDecision` 只在 producer/ingress 边界保留。Host ingress 会把它立即转换为
+只有一个 step 的 `ActionPlanRun`，并将 producer 已生成的 `ActionAdjudication` 冻结到
+step 0；因此正常路径不再额外调用 Step Adjudicator，也不改变 Engine 的单意图幂等语义。
+一步 Run 与 2..N Run 共用提交、恢复、修复、取消和 Narrator 状态机。
 
 ### 4.3 ActionPlan 只保存语义目标
 
@@ -163,7 +165,7 @@ ActionPlan
 
 约束：
 
-- `steps.length` 至少为 2；上限不写死在公共 Schema，由运行时 `ActionPlanPolicy` 校验；
+- `steps.length` 至少为 1；上限不写死在公共 Schema，由运行时 `ActionPlanPolicy` 校验；
 - `step.kind` 只能是 `travel | wait | rest | action | dialogue`；它只用于有限计划策略、
   进度和停止校验，不替代当前步的 `ActionAdjudication`；
 - 顺序依赖由数组位置表达，不能携带图、分支、循环或并行依赖；
@@ -172,7 +174,8 @@ ActionPlan
 - Plan 只按玩家目标中的状态依赖边界拆步；单个 `ActionAdjudication` 可以原子提交多个
   已注册高层效果，不能因为内部有多条 Event/数据库写入就拆成多个 Plan step；
 - 模型不能指定权威 `plan_id`、`step_id`、`request_id`、revision、status 或 retry count；
-- 一步目标应返回 `single_action`；无法安全切分时应请求澄清，不能静默丢步骤。
+- 一步目标可以由 producer 返回 `single_action`；ingress 统一转换为一步 Run。无法安全
+  切分时应请求澄清，不能静默丢步骤。
 
 步骤预算分为两层，避免把安全预算误写成产品能力上限：
 
@@ -322,7 +325,7 @@ ActionPlanRun
   current_step_index
   policy_snapshot
   plan: ActionPlan
-  steps: ActionPlanStepRun[2..max_plan_steps]
+  steps: ActionPlanStepRun[1..max_plan_steps]
 
 ActionPlanStepRun
   step_id
@@ -499,7 +502,7 @@ request id 只在服务端审计和幂等层使用。
 ### A. 契约与 Planner/Adjudicator
 
 - [ ] 增加 `HostTurnDecision = SingleActionDecision | ActionPlan`；
-- [ ] 增加可变长度 `ActionPlan` / `ActionPlanStep`（至少 2 步、顺序、无分支）；
+- [x] 增加可变长度 `ActionPlan` / `ActionPlanStep`（至少 1 步、顺序、无分支）；
 - [ ] 增加可配置 `ActionPlanPolicy`，默认 `max_plan_steps=32`、
   `max_steps_per_advance=3`，并在 PlanRun 中冻结快照；
 - [ ] 更新 provider-neutral Prompt、structured output schema 和 deterministic parser；
@@ -545,10 +548,11 @@ request id 只在服务端审计和幂等层使用。
 
 ### 12.1 有限计划与单动作兼容
 
-- [ ] 自然语言单动作继续走 `SingleActionDecision → ActionAdjudication` 快路径，不创建
-  PlanRun、不增加步骤级 Host/Engine 调用；
-- [ ] ActionPlan 支持从 2 到运行时技术上限的可变数量顺序步骤；4 步输入不会因固定
-  Schema 上限失败；1 步继续走 single action；分支、循环、并行和动态追加仍拒绝；
+- [x] 自然语言单动作继续由 producer 返回 `SingleActionDecision → ActionAdjudication`，
+  ingress 在 Engine submit 前创建一步 PlanRun；已冻结的 step 0 不增加 Step
+  Adjudicator 调用；
+- [x] ActionPlan 支持从 1 到运行时技术上限的可变数量顺序步骤；4 步输入不会因固定
+  Schema 上限失败；一步 Run 与多步 Run 共享执行链；分支、循环、并行和动态追加仍拒绝；
 - [ ] 默认技术上限为 32 且可配置；超过上限返回 `PLAN_TOO_LARGE`，不会静默截断、部分
   执行或丢失后续玩家目标；
 - [ ] 默认每次推进窗口为 3 且可配置；4 步以上计划跨窗口自动续跑时仍保持同一 parent、

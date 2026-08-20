@@ -4,7 +4,11 @@ from .action_plan_narrator import (
     ActionPlanNarrationValidationError,
     ActionPlanNarrator,
 )
-from .action_plan_orchestrator import ActionPlanOrchestrator, HostTurnDecisionExecutor
+from .action_plan_orchestrator import (
+    ActionPlanOrchestrator,
+    HostTurnDecisionExecutor,
+    SingleActionDecisionAdapter,
+)
 from .action_plan_parser import HostTurnDecisionParser
 from .context_assembler import ContextAssembler
 from .errors import TurnExecutionError
@@ -36,6 +40,7 @@ __all__ = [
     "OpeningNarrator",
     "PlayerViewProjector",
     "SemanticPreservationResult",
+    "SingleActionDecisionAdapter",
     "TurnExecutionError",
     "compare_repair_semantics",
     "deterministic_opening_narration",

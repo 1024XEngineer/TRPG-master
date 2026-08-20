@@ -74,7 +74,7 @@ from app.core.action_plan_turn import (
     action_plan_turn_application,
 )
 from app.core.db import async_session_factory
-from app.core.engine import adjudication_engine_service
+from app.core.engine import adjudication_engine_service, legacy_single_action_recovery
 from app.core.turn import (
     ActorResolutionError,
     session_view_application,
@@ -450,7 +450,7 @@ async def _recover_persisted_turn_narration(
             return False
         actor_id = active.actor_id
     else:
-        recovery = await adjudication_engine_service.recover_action(
+        recovery = await legacy_single_action_recovery.recover(
             GetAdjudicationStatusRequest(
                 room_id=room_id,
                 player_id=player_id,
@@ -1177,32 +1177,59 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                                 ).model_dump(by_alias=True),
                                             )
                             else:
-                                # No ActionPlan-driven pending decision — but a
-                                # standalone single-action check (not part of a
-                                # plan) has no room/player-scoped record the
-                                # client can rediscover on its own after a
-                                # refresh drops its local pendingAdjudication
-                                # state; look one up explicitly so reconnect
-                                # resurfaces it exactly like the plan case above.
-                                action_request_id = (
+                                legacy_request_id = (
                                     await adjudication_engine_service.find_active_action_for_player(
                                         room_id=room_id,
                                         player_id=bound_player_id,
                                     )
                                 )
-                                if action_request_id is not None:
-                                    recovered = await action_plan_turn_application.resume_single(
-                                        room_id=room_id,
-                                        player_id=bound_player_id,
-                                        parent_action_id=action_request_id,
+                                if legacy_request_id is not None:
+                                    recovery = await legacy_single_action_recovery.recover(
+                                        GetAdjudicationStatusRequest(
+                                            room_id=room_id,
+                                            player_id=bound_player_id,
+                                            action_request_id=legacy_request_id,
+                                        )
                                     )
-                                    await _send_action_plan_result(
-                                        db,
-                                        websocket,
-                                        room_id,
-                                        bound_player_id,
-                                        recovered,
-                                    )
+                                    if recovery is not None and recovery.execution.status in {
+                                        "awaiting_skill_choice",
+                                        "awaiting_post_roll_decision",
+                                    }:
+                                        execution = recovery.execution
+                                        pending = AdjudicationPendingPayload(
+                                            correlation_id=legacy_request_id,
+                                            plan_id=None,
+                                            source_revision=execution.view_revision,
+                                            status=_require_pending_adjudication_status(
+                                                execution.status
+                                            ),
+                                            pending_decision=execution.pending_decision,
+                                            check_run=execution.check_run,
+                                        )
+                                        await _send_to_player(
+                                            websocket,
+                                            ServerEnvelope(
+                                                type="adjudication.pending",
+                                                payload=pending.model_dump(
+                                                    by_alias=True,
+                                                    mode="json",
+                                                ),
+                                            ).model_dump(by_alias=True),
+                                        )
+                                    else:
+                                        logger.error(
+                                            "turn_run_missing_on_reconnect",
+                                            room=room_id,
+                                            player=bound_player_id,
+                                            action=legacy_request_id,
+                                            reason="engine_action_not_legacy_eligible",
+                                        )
+                                        await _send_error(
+                                            websocket,
+                                            "PLAN_RUN_MISSING",
+                                            "行动运行记录缺失，无法安全恢复；请重新提交行动",
+                                            correlation_id=legacy_request_id,
+                                        )
                         else:
                             return
                         continue

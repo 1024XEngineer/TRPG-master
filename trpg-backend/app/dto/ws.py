@@ -259,7 +259,7 @@ class PlanProgressPayload(CamelModel):
     correlation_id: str
     current_step: int = Field(..., ge=1)
     completed_steps: int = Field(..., ge=0)
-    total_steps: int = Field(..., ge=2)
+    total_steps: int = Field(..., ge=1)
     phase: Literal[
         "understanding",
         "executing",

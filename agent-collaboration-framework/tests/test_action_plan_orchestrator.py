@@ -66,11 +66,10 @@ from collaboration_framework.host.ports import (
     ActionPlanVersionConflictError,
 )
 from collaboration_framework.host.schemas import (
+    ActionPlanAdvanceResult,
     ActionPlanRun,
     ActionPlanStepContext,
     ActionPlanStepRun,
-    SingleActionClarificationResult,
-    SingleActionTurnResult,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -652,7 +651,7 @@ async def test_persisted_narration_recovery_finishes_plan_without_replaying_engi
 
 
 def test_decision_parser_accepts_variable_lengths_and_rejects_invalid_shape() -> None:
-    for length in (2, 3, 4, 5):
+    for length in (1, 2, 3, 4, 5):
         parsed = HostTurnDecisionParser.parse(plan(length).to_json_dict())
         assert isinstance(parsed, ActionPlan)
         assert len(parsed.steps) == length
@@ -662,8 +661,9 @@ def test_decision_parser_accepts_variable_lengths_and_rejects_invalid_shape() ->
         "goal": "只有一步",
         "steps": [{"kind": "action", "semantic_goal": "执行"}],
     }
-    with pytest.raises(ContractError, match="结构校验"):
-        HostTurnDecisionParser.parse(one_step)
+    parsed_one_step = HostTurnDecisionParser.parse(one_step)
+    assert isinstance(parsed_one_step, ActionPlan)
+    assert len(parsed_one_step.steps) == 1
     with pytest.raises(ActionPlanPolicyError) as raised:
         HostTurnDecisionParser.parse(
             plan(5).to_json_dict(),
@@ -1668,7 +1668,7 @@ async def test_reservation_within_ttl_still_blocks_the_room() -> None:
 
 
 @pytest.mark.asyncio
-async def test_single_action_fast_path_creates_no_plan_run() -> None:
+async def test_single_action_fast_path_creates_one_step_plan_run() -> None:
     service, _, engine, store, engine_store = orchestrator()
     original = player_input("single-action", "观察四周")
     decision = SingleActionDecision(
@@ -1691,10 +1691,13 @@ async def test_single_action_fast_path_creates_no_plan_run() -> None:
 
     result = await dispatcher.execute(original, decision)
 
-    assert isinstance(result, SingleActionTurnResult)
-    assert result.execution.status == "resolved"
-    assert result.execution.action_request_id == original.client_action_id
-    assert await store.load("room_01", original.client_action_id) is None
+    assert isinstance(result, ActionPlanAdvanceResult)
+    assert result.run.status == "awaiting_narration"
+    assert result.latest_execution is not None
+    assert result.latest_execution.status == "resolved"
+    assert len(result.run.steps) == 1
+    assert result.run.steps[0].status == "completed"
+    assert await store.load("room_01", original.client_action_id) is not None
     assert len(engine_store.inspect_domain_events("room_01")) == 1
 
 
@@ -1734,7 +1737,7 @@ def single_travel_decision(*, target_id: str) -> SingleActionDecision:
 
 
 @pytest.mark.asyncio
-async def test_single_action_auto_repair_succeeds_without_creating_plan_run() -> None:
+async def test_single_action_auto_repair_succeeds_in_plan_run() -> None:
     module, engine_store, projector = runtime()
     plan_store = InMemoryActionPlanRunStore()
     engine = AdjudicationEngineService(engine_store)
@@ -1773,19 +1776,20 @@ async def test_single_action_auto_repair_succeeds_without_creating_plan_run() ->
         decision,
     )
 
-    assert isinstance(result, SingleActionTurnResult)
-    assert result.execution.status == "resolved"
-    assert result.execution.action_request_id == original.client_action_id
+    assert isinstance(result, ActionPlanAdvanceResult)
+    assert result.run.status == "awaiting_narration"
+    assert result.latest_execution is not None
+    assert result.latest_execution.status == "resolved"
     assert len(repair_adjudicator.contexts) == 1
     context = repair_adjudicator.contexts[0]
-    assert context.step_request_id == original.client_action_id
+    assert context.step_request_id == result.run.steps[0].step_request_id
     assert context.previous_rejection is not None
     assert context.previous_rejection.startswith(
         "TARGET_UNAVAILABLE: 当前目标不可用于这次行动"
     )
     # #313：光有错误码定位不到问题，指引必须跟着一起回到修复裁决器。
     assert "keeper_capabilities" in context.previous_rejection
-    assert await plan_store.load(original.room_id, original.client_action_id) is None
+    assert await plan_store.load(original.room_id, original.client_action_id) is not None
     assert len(engine_store.inspect_domain_events(original.room_id)) == 1
 
 
@@ -1817,8 +1821,9 @@ async def test_single_travel_repair_with_changed_effect_requires_clarification()
         single_travel_decision(target_id="missing-location"),
     )
 
-    assert isinstance(result, SingleActionClarificationResult)
-    assert result.player_safe_reason == "修复方案可能改变原本行动，需要玩家确认下一步"
+    assert isinstance(result, ActionPlanAdvanceResult)
+    assert result.run.status == "needs_clarification"
+    assert result.run.steps[0].safe_failure_code == "SEMANTIC_REPAIR_REQUIRES_CLARIFICATION"
     assert len(repair_adjudicator.contexts) == 1
     context = repair_adjudicator.contexts[0]
     assert context.step.kind == "travel"
@@ -1828,7 +1833,7 @@ async def test_single_travel_repair_with_changed_effect_requires_clarification()
     )
     # #313：光有错误码定位不到问题，指引必须跟着一起回到修复裁决器。
     assert "keeper_capabilities" in context.previous_rejection
-    assert await plan_store.load(original.room_id, original.client_action_id) is None
+    assert await plan_store.load(original.room_id, original.client_action_id) is not None
     assert engine_store.inspect_domain_events(original.room_id) == ()
 
 
@@ -1858,10 +1863,11 @@ async def test_single_action_repair_budget_is_finite() -> None:
         single_action_decision(world_ref=module.world_ref, valid_target=False),
     )
 
-    assert isinstance(result, SingleActionClarificationResult)
-    assert "确认具体目标" in result.player_safe_reason
+    assert isinstance(result, ActionPlanAdvanceResult)
+    assert result.run.status == "needs_clarification"
+    assert result.run.steps[0].safe_failure_code == "REPAIR_BUDGET_EXHAUSTED"
     assert len(repair_adjudicator.contexts) == 1
-    assert await plan_store.load(original.room_id, original.client_action_id) is None
+    assert await plan_store.load(original.room_id, original.client_action_id) is not None
     assert engine_store.inspect_domain_events(original.room_id) == ()
 
 
@@ -1896,10 +1902,13 @@ async def test_single_action_non_repairable_feedback_does_not_call_agent(
         single_action_decision(world_ref=module.world_ref, valid_target=True),
     )
 
-    assert isinstance(result, SingleActionClarificationResult)
-    assert result.player_safe_reason == "这次行动需要停下确认"
+    assert isinstance(result, ActionPlanAdvanceResult)
+    assert result.run.status == (
+        "needs_clarification" if repairability == "requires_player_choice" else "stopped"
+    )
+    assert result.run.steps[0].safe_failure_code == "TEST_VALIDATION_REJECTION"
     assert repair_adjudicator.contexts == []
-    assert await plan_store.load(original.room_id, original.client_action_id) is None
+    assert await plan_store.load(original.room_id, original.client_action_id) is not None
     assert engine_store.inspect_domain_events(original.room_id) == ()
 
 
@@ -1930,8 +1939,10 @@ async def test_single_action_reconciles_commit_response_failure_without_repair()
         single_action_decision(world_ref=module.world_ref, valid_target=True),
     )
 
-    assert isinstance(result, SingleActionTurnResult)
-    assert result.execution.action_request_id == original.client_action_id
+    assert isinstance(result, ActionPlanAdvanceResult)
+    assert result.run.status == "awaiting_narration"
+    assert result.latest_execution is not None
+    assert result.latest_execution.action_request_id == result.run.steps[0].step_request_id
     assert repair_adjudicator.contexts == []
     assert len(engine_store.inspect_domain_events(original.room_id)) == 1
 

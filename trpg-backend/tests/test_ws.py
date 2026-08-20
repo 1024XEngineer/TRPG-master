@@ -25,6 +25,8 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from app.controller import ws as ws_controller
 from app.main import app
+from app.service.paper_chase_loader import PAPER_CHASE_MODULE_ID
+from tests.content_fixtures import MULTIPLAYER_MODULE_ID
 
 ROOMS_BASE = "/api/v1/rooms"
 
@@ -234,21 +236,19 @@ def complete_character(
 
 
 def advance_to_building(client: TestClient, room: dict) -> None:
+    """按房间人数显式选择《追书人》或其多人测试克隆，禁止依赖目录顺序。"""
+
     headers = {"X-Reconnect-Token": room["reconnectToken"]}
     preview = client.get(f"{ROOMS_BASE}/{room['roomCode']}").json()["data"]
-    max_players = preview["maxPlayers"]
-    modules = client.get("/api/v1/modules").json()["data"]
-    module_id = next(
-        module["id"]
-        for module in modules
-        if module["playersMin"] <= max_players <= module["playersMax"]
-    )
-    client.post(
+    module_id = PAPER_CHASE_MODULE_ID if preview["maxPlayers"] == 1 else MULTIPLAYER_MODULE_ID
+    selected = client.post(
         f"{ROOMS_BASE}/{room['roomId']}/module",
         json={"moduleId": module_id, "attributeGenMethod": "point_buy"},
         headers=headers,
     )
-    client.post(f"{ROOMS_BASE}/{room['roomId']}/start-story", headers=headers)
+    assert selected.status_code == 200, selected.text
+    started = client.post(f"{ROOMS_BASE}/{room['roomId']}/start-story", headers=headers)
+    assert started.status_code == 200, started.text
 
 
 def start_game(client: TestClient, room: dict, token: str) -> None:

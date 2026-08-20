@@ -21,6 +21,7 @@ from app.core.coc7_content import build_coc7_ruleset
 from app.models.content import Game, GameSystem, Scenario, World
 from app.service.builtin_module_loader import (
     BUILTIN_MODULE_SPECS,
+    LINXI_SINS_SPEC,
     PAPER_CHASE_SPEC,
     SILVER_LOCK_SPEC,
     read_builtin_presentation,
@@ -36,6 +37,9 @@ BUILTIN_WORLD_REF = PAPER_CHASE_SPEC.world_ref
 SILVER_LOCK_SCENARIO_ID = SILVER_LOCK_SPEC.scenario_id
 SILVER_LOCK_MODULE_ID = SILVER_LOCK_SPEC.module_id
 SILVER_LOCK_MODULE_VERSION = SILVER_LOCK_SPEC.version
+LINXI_SINS_SCENARIO_ID = LINXI_SINS_SPEC.scenario_id
+LINXI_SINS_MODULE_ID = LINXI_SINS_SPEC.module_id
+LINXI_SINS_MODULE_VERSION = LINXI_SINS_SPEC.version
 
 
 async def ensure_seed_content(db: AsyncSession) -> None:

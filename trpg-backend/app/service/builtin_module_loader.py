@@ -58,7 +58,15 @@ SILVER_LOCK_SPEC = BuiltinModuleSpec(
     source_path=MODULE_FIXTURE_ROOT / "银之锁" / "module-content-v3.json",
     display_name="银之锁",
 )
-BUILTIN_MODULE_SPECS = (PAPER_CHASE_SPEC, SILVER_LOCK_SPEC)
+LINXI_SINS_SPEC = BuiltinModuleSpec(
+    scenario_id="00000000-0000-0000-0000-000000000006",
+    module_id="linxi-sins-zh-coc7",
+    version="3.0.0",
+    world_ref="coc-7e",
+    source_path=MODULE_FIXTURE_ROOT / "林隙的罪恶" / "module-content-v3.json",
+    display_name="林隙的罪恶",
+)
+BUILTIN_MODULE_SPECS = (PAPER_CHASE_SPEC, SILVER_LOCK_SPEC, LINXI_SINS_SPEC)
 
 
 class BuiltinModuleLoadError(RuntimeError):

@@ -9,7 +9,12 @@ from httpx import AsyncClient
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.seed import SILVER_LOCK_MODULE_ID, SILVER_LOCK_SCENARIO_ID
+from app.core.seed import (
+    LINXI_SINS_MODULE_ID,
+    LINXI_SINS_SCENARIO_ID,
+    SILVER_LOCK_MODULE_ID,
+    SILVER_LOCK_SCENARIO_ID,
+)
 from app.models.content import Scenario
 from app.models.engine import ModuleVersion
 from app.models.room import Room
@@ -29,6 +34,7 @@ async def test_all_builtin_modules_load_idempotently(db_session: AsyncSession) -
     assert [(result.module_id, result.outcome) for result in results] == [
         ("paper-chase-zh-coc7", "unchanged"),
         (SILVER_LOCK_MODULE_ID, "unchanged"),
+        (LINXI_SINS_MODULE_ID, "unchanged"),
     ]
 
     scenario = await db_session.get(Scenario, SILVER_LOCK_SCENARIO_ID)
@@ -42,6 +48,12 @@ async def test_all_builtin_modules_load_idempotently(db_session: AsyncSession) -
     assert scenario.players_min == scenario.players_max == 1
     assert version is not None
     assert version.content_schema_version == 3
+
+    linxi = await db_session.get(Scenario, LINXI_SINS_SCENARIO_ID)
+    assert linxi is not None
+    assert linxi.status == "ready"
+    assert linxi.players_min == 1
+    assert linxi.players_max == 3
 
 
 async def test_silver_lock_rejects_changed_immutable_version(
@@ -120,6 +132,7 @@ async def test_catalog_and_selection_use_silver_lock_publication(
     assert {
         "paper-chase-zh-coc7",
         SILVER_LOCK_MODULE_ID,
+        LINXI_SINS_MODULE_ID,
     } <= {module["id"] for module in catalog}
     silver = next(module for module in catalog if module["id"] == SILVER_LOCK_MODULE_ID)
     assert silver["title"] == "银之锁"

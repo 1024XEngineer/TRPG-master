@@ -1,0 +1,216 @@
+{
+  "locations": {
+    "cabin_exterior": {
+      "doc_paragraphs": [
+        1
+      ],
+      "source": "林隙的罪恶-Butterrr.doc"
+    },
+    "cabin": {
+      "doc_paragraphs": [
+        1
+      ],
+      "source": "林隙的罪恶-Butterrr.doc"
+    },
+    "esau_bedroom": {
+      "doc_paragraphs": [
+        1
+      ],
+      "source": "林隙的罪恶-Butterrr.doc"
+    },
+    "basement": {
+      "doc_paragraphs": [
+        1
+      ],
+      "source": "林隙的罪恶-Butterrr.doc"
+    },
+    "forest": {
+      "doc_paragraphs": [
+        1
+      ],
+      "source": "林隙的罪恶-Butterrr.doc"
+    }
+  },
+  "information": {
+    "cabin_layout": {
+      "doc_paragraphs": [
+        1
+      ],
+      "source": "林隙的罪恶-Butterrr.doc"
+    },
+    "animal_traps": {
+      "doc_paragraphs": [
+        1
+      ],
+      "source": "林隙的罪恶-Butterrr.doc"
+    },
+    "esau_sick": {
+      "doc_paragraphs": [
+        1
+      ],
+      "source": "林隙的罪恶-Butterrr.doc"
+    },
+    "diary_truth": {
+      "doc_paragraphs": [
+        1
+      ],
+      "source": "林隙的罪恶-Butterrr.doc"
+    },
+    "basement_horror": {
+      "doc_paragraphs": [
+        1
+      ],
+      "source": "林隙的罪恶-Butterrr.doc"
+    },
+    "night_attack": {
+      "doc_paragraphs": [
+        1
+      ],
+      "source": "林隙的罪恶-Butterrr.doc"
+    },
+    "esau_defeated": {
+      "doc_paragraphs": [
+        1
+      ],
+      "source": "林隙的罪恶-Butterrr.doc"
+    },
+    "escape_route": {
+      "doc_paragraphs": [
+        1
+      ],
+      "source": "林隙的罪恶-Butterrr.doc"
+    },
+    "shoggoth_revealed": {
+      "doc_paragraphs": [
+        1
+      ],
+      "source": "林隙的罪恶-Butterrr.doc"
+    },
+    "investigator_escaped": {
+      "doc_paragraphs": [
+        1
+      ],
+      "source": "林隙的罪恶-Butterrr.doc"
+    }
+  },
+  "rules": {
+    "enter_cabin": {
+      "doc_paragraphs": [
+        1
+      ],
+      "source": "林隙的罪恶-Butterrr.doc"
+    },
+    "enter_esau_bedroom": {
+      "doc_paragraphs": [
+        1
+      ],
+      "source": "林隙的罪恶-Butterrr.doc"
+    },
+    "enter_basement": {
+      "doc_paragraphs": [
+        1
+      ],
+      "source": "林隙的罪恶-Butterrr.doc"
+    },
+    "enter_forest": {
+      "doc_paragraphs": [
+        1
+      ],
+      "source": "林隙的罪恶-Butterrr.doc"
+    },
+    "leave_forest": {
+      "doc_paragraphs": [
+        1
+      ],
+      "source": "林隙的罪恶-Butterrr.doc"
+    },
+    "inspect_cabin": {
+      "doc_paragraphs": [
+        1
+      ],
+      "source": "林隙的罪恶-Butterrr.doc"
+    },
+    "find_traps": {
+      "doc_paragraphs": [
+        1
+      ],
+      "source": "林隙的罪恶-Butterrr.doc"
+    },
+    "assess_esau": {
+      "doc_paragraphs": [
+        1
+      ],
+      "source": "林隙的罪恶-Butterrr.doc"
+    },
+    "open_wood_shed": {
+      "doc_paragraphs": [
+        1
+      ],
+      "source": "林隙的罪恶-Butterrr.doc"
+    },
+    "read_esau_diary": {
+      "doc_paragraphs": [
+        1
+      ],
+      "source": "林隙的罪恶-Butterrr.doc"
+    },
+    "inspect_basement": {
+      "doc_paragraphs": [
+        1
+      ],
+      "source": "林隙的罪恶-Butterrr.doc"
+    },
+    "night_listen": {
+      "doc_paragraphs": [
+        1
+      ],
+      "source": "林隙的罪恶-Butterrr.doc"
+    },
+    "escape_house": {
+      "doc_paragraphs": [
+        1
+      ],
+      "source": "林隙的罪恶-Butterrr.doc"
+    },
+    "confront_esau": {
+      "doc_paragraphs": [
+        1
+      ],
+      "source": "林隙的罪恶-Butterrr.doc"
+    }
+  },
+  "knowledge_goals": {
+    "understand_cabin": {
+      "doc_paragraphs": [
+        1
+      ],
+      "source": "林隙的罪恶-Butterrr.doc"
+    },
+    "discover_truth": {
+      "doc_paragraphs": [
+        1
+      ],
+      "source": "林隙的罪恶-Butterrr.doc"
+    },
+    "escape_alive": {
+      "doc_paragraphs": [
+        1
+      ],
+      "source": "林隙的罪恶-Butterrr.doc"
+    }
+  },
+  "ending_anchors": {
+    "escape_after_confrontation": {
+      "doc_paragraphs": [
+        1
+      ],
+      "source": "林隙的罪恶-Butterrr.doc"
+    },
+    "escape_without_fight": {
+      "doc_paragraphs": [
+        1
+      ],
+      "source": "林隙的罪恶-Butterrr.doc"
+    }
+  }
+}

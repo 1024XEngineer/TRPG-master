@@ -62,6 +62,17 @@ const silverLockDetail: ModuleDetail = {
   ],
 }
 
+const linxiSummary: ModuleSummary = {
+  ...moduleSummary,
+  id: 'linxi-sins-zh-coc7',
+  title: '林隙的罪恶',
+  nameEn: 'The Sins in the Forest',
+  version: '3.0.0',
+  authors: ['Butterrr'],
+  playersMax: 3,
+  estimatedDuration: '2-4 小时',
+}
+
 const replacementModuleSummary: ModuleSummary = {
   ...moduleSummary,
   id: 'arkham-files-coc7',
@@ -167,6 +178,23 @@ describe('content selection pages', () => {
     expect(within(openingSection as HTMLElement).getByText(/动物死亡/)).toBeInTheDocument()
     expect(within(openingSection as HTMLElement).getByText(/银色房间中醒来/)).toBeInTheDocument()
     expect(within(preparationSection as HTMLElement).getByText(/一名调查员/)).toBeInTheDocument()
+  })
+
+  it('renders the multiplayer forest module from the API with its 1-3 player range', async () => {
+    vi.mocked(listModules).mockResolvedValue([moduleSummary, silverLockSummary, linxiSummary])
+
+    render(
+      <MemoryRouter initialEntries={['/home/create/modules']}>
+        <ScenarioSelectionPage />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('The Sins in the Forest')).toBeInTheDocument()
+    expect(screen.getByText('1-3 人')).toBeInTheDocument()
+    expect(screen.getByAltText('林隙的罪恶模组封面')).toHaveAttribute(
+      'src',
+      '/assets/rooms/scenarios/cover-default.webp',
+    )
   })
 
   it('shows a themed catalog error and retries the request', async () => {

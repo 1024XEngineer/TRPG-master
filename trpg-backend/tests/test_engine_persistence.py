@@ -143,6 +143,51 @@ async def test_loader_persists_valid_playable_module_version(db_session: AsyncSe
     assert repeated.outcome == "unchanged"
 
 
+async def test_non_v3_module_version_is_rejected_by_the_database(
+    db_session: AsyncSession,
+) -> None:
+    """非 3 的 schema version 在写入时就被约束拒绝 (#384)。
+
+    v1/v2 的契约与执行路由都删掉之后，一行非 v3 的内容在运行时只会以一个语焉不详的
+    解析错误暴露出来。约束把它挡在写入口。
+    """
+
+    db_session.add(
+        ModuleVersion(
+            module_id=BUILTIN_MODULE_ID,
+            version="0.0.1-legacy",
+            world_ref=BUILTIN_WORLD_REF,
+            content_schema_version=2,
+            content_json={},
+        )
+    )
+    try:
+        await db_session.commit()
+        raise AssertionError("数据库必须拒绝非 v3 的 ModuleVersion")
+    except IntegrityError:
+        await db_session.rollback()
+
+
+async def test_module_version_defaults_to_v3(db_session: AsyncSession) -> None:
+    """不显式给 schema version 时默认落 3，不会撞上刚收紧的约束 (#384)。
+
+    约束收到 `= 3` 而列默认值还留在 1 的话，任何依赖默认值的插入都会必然失败——
+    这条用例把默认值和约束绑在一起。
+    """
+
+    module_version = ModuleVersion(
+        module_id=BUILTIN_MODULE_ID,
+        version="9.9.9-default-probe",
+        world_ref=BUILTIN_WORLD_REF,
+        content_json={},
+    )
+    db_session.add(module_version)
+    await db_session.commit()
+    await db_session.refresh(module_version)
+
+    assert module_version.content_schema_version == 3
+
+
 async def test_seed_does_not_overwrite_published_module_content(
     db_session: AsyncSession,
 ) -> None:

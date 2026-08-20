@@ -15,6 +15,10 @@ from pydantic import Field, JsonValue, model_serializer, model_validator
 from .adjudication import ActionEffect
 from .common import ContractModel
 
+# 搬到 v3 契约里去了（#384）：它描述的是模组怎么呈现给玩家，与 schema 版本无关。
+# v1 契约本身随后就会删除，这个反向依赖只是过渡。
+from .module_v3 import ModulePresentation
+
 RuleHook: TypeAlias = Literal[  # noqa: UP040 -- package still supports Python 3.11
     "on_attack_declare",
     "on_difficulty_calc",
@@ -398,36 +402,6 @@ class InformationItem(ContractModel):
     def validate_static_visibility(self) -> InformationItem:
         if self.visibility.requires_discovery:
             raise ValueError("InformationItem 不得声明 discovery 规则")
-        return self
-
-
-class ModuleStoryPage(ContractModel):
-    """A player-safe page shown before character creation."""
-
-    title: str = ""
-    content: str = Field(min_length=1)
-
-
-class ModulePresentation(ContractModel):
-    """Player-facing publication metadata, separate from keeper context."""
-
-    title: str = Field(min_length=1)
-    name_en: str | None = None
-    synopsis: str = Field(min_length=1)
-    players_min: int = Field(ge=1)
-    players_max: int = Field(ge=1)
-    difficulty: int = Field(ge=1, le=3)
-    estimated_duration: str = Field(min_length=1)
-    story_label: str | None = None
-    subtitle: str | None = None
-    authors: tuple[str, ...] = ()
-    tags: tuple[str, ...] = ()
-    player_intro_pages: tuple[ModuleStoryPage, ...] = Field(min_length=1)
-
-    @model_validator(mode="after")
-    def validate_player_range(self) -> ModulePresentation:
-        if self.players_min > self.players_max:
-            raise ValueError("players_min 不能大于 players_max")
         return self
 
 

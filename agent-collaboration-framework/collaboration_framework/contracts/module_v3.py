@@ -37,7 +37,45 @@ from pydantic import Field, JsonValue, model_validator
 from .adjudication import ActionEffect, CheckDegree
 from .common import ContractModel
 from .inventory import ItemComponent
-from .module import ModulePresentation
+
+# --------------------------------------------------------------------------- #
+# player-facing publication metadata
+#
+# 这两个类原本住在 v1 的 contracts/module.py 里，但它们描述的是「模组怎么呈现
+# 给玩家」，与 schema 版本无关，v3 一直在用（`ModuleContentV3.presentation`）。
+# v1 契约删除时它们必须留下，所以先搬到这里 (#384)。
+# --------------------------------------------------------------------------- #
+
+
+class ModuleStoryPage(ContractModel):
+    """A player-safe page shown before character creation."""
+
+    title: str = ""
+    content: str = Field(min_length=1)
+
+
+class ModulePresentation(ContractModel):
+    """Player-facing publication metadata, separate from keeper context."""
+
+    title: str = Field(min_length=1)
+    name_en: str | None = None
+    synopsis: str = Field(min_length=1)
+    players_min: int = Field(ge=1)
+    players_max: int = Field(ge=1)
+    difficulty: int = Field(ge=1, le=3)
+    estimated_duration: str = Field(min_length=1)
+    story_label: str | None = None
+    subtitle: str | None = None
+    authors: tuple[str, ...] = ()
+    tags: tuple[str, ...] = ()
+    player_intro_pages: tuple[ModuleStoryPage, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_player_range(self) -> ModulePresentation:
+        if self.players_min > self.players_max:
+            raise ValueError("players_min 不能大于 players_max")
+        return self
+
 
 # --------------------------------------------------------------------------- #
 # shared vocabularies

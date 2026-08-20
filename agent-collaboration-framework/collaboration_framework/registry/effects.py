@@ -252,6 +252,8 @@ class ValidationVocabulary:
     world_time: WorldTimeState | None = None
     # 仅由 Engine 的内部全员确认入口设置；普通 Agent 裁决不能绕过多人时间门禁。
     allow_party_time_advance: bool = False
+    # 仅由 Engine 的内部全员确认入口设置；普通 Agent 裁决不能绕过多人场景门禁。
+    allow_party_scene_transition: bool = False
 
 
 @dataclass(frozen=True)
@@ -470,6 +472,14 @@ def _validate_enter_location(
 ) -> None:
     if effect.location_id not in vocab.location_ids:
         _reject_target_not_found()
+    if len(vocab.actor_ids) > 1 and not vocab.allow_party_scene_transition:
+        reject(
+            "SCENE_TRANSITION_BLOCKED",
+            repairability="requires_player_choice",
+            fault="player",
+            player_safe_reason="多人房间切换场景需要全员确认",
+            internal_reason="多人共享场景切换未经过全员确认",
+        )
 
 
 def _apply_enter_location(effect: EnterLocationEffect, ctx: ApplyContext) -> ApplyResult:

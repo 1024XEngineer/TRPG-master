@@ -167,6 +167,61 @@ class TimeAdvanceProposalRecord(Base):
     )
 
 
+class SceneTransitionProposalRecord(Base):
+    """多人房间切换共享场景时使用的持久化全员确认提案。"""
+
+    __tablename__ = "scene_transition_proposals"
+    __table_args__ = (
+        PrimaryKeyConstraint("room_id", "proposal_id", name="pk_scene_transition_proposals"),
+        CheckConstraint("proposal_version >= 1", name="ck_scene_transition_proposal_version"),
+        CheckConstraint(
+            "status IN ('pending', 'approved', 'rejected', 'expired', 'stale')",
+            name="ck_scene_transition_proposal_status",
+        ),
+        Index(
+            "ix_scene_transition_proposals_room_status",
+            "room_id",
+            "status",
+            "updated_at",
+        ),
+    )
+
+    room_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("game_sessions.room_id"), nullable=False
+    )
+    proposal_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    source_revision: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    proposal_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    player_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    action_request_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    parent_action_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    requester_player_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    source_scene_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    target_scene_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    required_player_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    accepted_player_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    adjudication_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    execution_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    committed_revision: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    narration_persisted: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="0",
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+
 class GameEvent(Base):
     """规则引擎产生的权威、只追加状态变化 Event。"""
 
@@ -413,7 +468,7 @@ class ActionPlanRunRecord(Base):
         ),
         CheckConstraint(
             "status IN ('active', 'checkpointed', 'waiting_for_player', "
-            "'awaiting_time_consent', "
+            "'awaiting_time_consent', 'awaiting_scene_consent', "
             "'needs_clarification', 'retryable_failure', 'awaiting_narration', "
             "'completed', 'cancelled', 'stopped')",
             name="ck_action_plan_runs_status",

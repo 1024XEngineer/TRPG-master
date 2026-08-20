@@ -175,6 +175,9 @@ _MODELS: list[type[BaseModel]] = [
     ws.TimeAdvanceRespondPayload,
     ws.TimeAdvancePendingPayload,
     ws.TimeAdvanceResolvedPayload,
+    ws.SceneTransitionRespondPayload,
+    ws.SceneTransitionPendingPayload,
+    ws.SceneTransitionResolvedPayload,
     ws.RoomActionStatePayload,
     # 讨论区历史消息 REST（issue #107）
     chat.ChatMessageRead,

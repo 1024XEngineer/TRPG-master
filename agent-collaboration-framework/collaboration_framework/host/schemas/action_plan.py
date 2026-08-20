@@ -31,6 +31,7 @@ PlanRunStatus = Literal[
     "checkpointed",
     "waiting_for_player",
     "awaiting_time_consent",
+    "awaiting_scene_consent",
     "needs_clarification",
     "retryable_failure",
     "awaiting_narration",
@@ -44,6 +45,7 @@ PlanStepStatus = Literal[
     "ready",
     "waiting_for_player",
     "awaiting_time_consent",
+    "awaiting_scene_consent",
     "completed",
     "stopped",
 ]
@@ -55,6 +57,7 @@ RESERVING_PLAN_STATUSES = frozenset(
         "checkpointed",
         "waiting_for_player",
         "awaiting_time_consent",
+        "awaiting_scene_consent",
         "needs_clarification",
         "retryable_failure",
         "awaiting_narration",
@@ -132,12 +135,24 @@ class ActionPlanStepRun(ContractModel):
                 raise ValueError("step event_refs 与 execution 不一致")
         if (
             self.status
-            in {"ready", "waiting_for_player", "awaiting_time_consent", "completed"}
+            in {
+                "ready",
+                "waiting_for_player",
+                "awaiting_time_consent",
+                "awaiting_scene_consent",
+                "completed",
+            }
             and self.adjudication is None
         ):
             raise ValueError(f"{self.status} step 必须冻结 adjudication")
         if (
-            self.status in {"waiting_for_player", "awaiting_time_consent", "completed"}
+            self.status
+            in {
+                "waiting_for_player",
+                "awaiting_time_consent",
+                "awaiting_scene_consent",
+                "completed",
+            }
             and self.adjudication_execution is None
         ):
             raise ValueError(f"{self.status} step 必须包含 execution")
@@ -155,6 +170,15 @@ class ActionPlanStepRun(ContractModel):
             )
         ):
             raise ValueError("awaiting_time_consent step 必须绑定待确认时间提案")
+        if (
+            self.status == "awaiting_scene_consent"
+            and (
+                self.adjudication_execution is None
+                or self.adjudication_execution.status != "awaiting_scene_consent"
+                or self.adjudication_execution.scene_transition_proposal_id is None
+            )
+        ):
+            raise ValueError("awaiting_scene_consent step 必须绑定待确认场景提案")
         return self
 
 
@@ -243,6 +267,7 @@ class ActionPlanRun(ContractModel):
                 "checkpointed": {"pending"},
                 "waiting_for_player": {"waiting_for_player"},
                 "awaiting_time_consent": {"awaiting_time_consent"},
+                "awaiting_scene_consent": {"awaiting_scene_consent"},
                 "needs_clarification": {"stopped"},
                 "retryable_failure": {"pending"},
                 "cancelled": {"stopped"},

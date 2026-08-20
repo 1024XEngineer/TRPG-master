@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { RoomSocketServerError, TurnFailedError, type AdjudicationPendingPayload, type AgentPlayerView, type AgentTurnPhase, type CheckRequestPayload, type CheckResultPayload, type EndingDraft, type NarrationPushPayload, type RoomActionStatePayload, type RoomConversationEvent, type RoomPlayerSummary, type TimeAdvancePendingPayload } from 'trpg-sdk'
+import { RoomSocketServerError, TurnFailedError, type AdjudicationPendingPayload, type AgentPlayerView, type AgentTurnPhase, type CheckRequestPayload, type CheckResultPayload, type EndingDraft, type NarrationPushPayload, type RoomActionStatePayload, type RoomConversationEvent, type RoomPlayerSummary, type SceneTransitionPendingPayload, type TimeAdvancePendingPayload } from 'trpg-sdk'
 import { ArrowLeft, Users, Map, MapPin, BookOpen, ScrollText, Star, X, SendHorizontal, Plus, Save, FlagOff, Heart, Brain, Volume2, Pause, Play, Square, RotateCcw, Mic, LoaderCircle, Clock3, Check } from 'lucide-react'
 import { useCallback, useState, useRef, useEffect, useMemo, type Dispatch, type FormEvent, type SetStateAction } from 'react'
 import { useRoomStore } from '@/stores/room-store'
@@ -1318,6 +1318,8 @@ export default function RoomPage() {
     useState<AdjudicationPendingPayload | null>(null)
   const [pendingTimeAdvance, setPendingTimeAdvance] =
     useState<TimeAdvancePendingPayload | null>(null)
+  const [pendingSceneTransition, setPendingSceneTransition] =
+    useState<SceneTransitionPendingPayload | null>(null)
   const [roomActionState, setRoomActionState] = useState<RoomActionStatePayload | null>(null)
   const [timeAdvanceResponding, setTimeAdvanceResponding] = useState(false)
   const selectedAdjudicationOptionRef = useRef<{
@@ -1404,12 +1406,17 @@ export default function RoomPage() {
     !ownsRoomAction ||
     pendingAdjudication !== null ||
     pendingTimeAdvance !== null
+      || pendingSceneTransition !== null
   )
   const composerDisabled = suspended || (isActionChannel && actionSubmissionBlocked)
   const actionOwnerName = roomActionState?.playerId === playerId
     ? senderName
     : roomPlayers.find((player) => player.playerId === roomActionState?.playerId)?.nickname ?? '其他调查员'
   const mapLocations = mapLocationsFromPlayerView(playerView)
+  const sceneTransitionTargetName = pendingSceneTransition
+    ? mapLocations.find((location) => location.id === pendingSceneTransition.targetSceneId)?.name
+      ?? pendingSceneTransition.targetSceneId
+    : null
   const currentLocationImage = playerView ? LOCATION_IMAGE_BY_ID[playerView.scene.id] : undefined
   const liveResources = liveResourcesOf(playerView)
   const currentHp = resourceValue(playerView, 'hp') ?? character?.derived.hp ?? null
@@ -1761,6 +1768,17 @@ export default function RoomPage() {
         setProgressLabel('等待全员确认时间推进')
       } else if (envelope.type === 'time.advance.resolved') {
         setPendingTimeAdvance((current) =>
+          current?.proposalId === envelope.payload.proposalId ? null : current,
+        )
+        setTimeAdvanceResponding(false)
+        setProgressLabel(null)
+      } else if (envelope.type === 'scene.transition.pending') {
+        setPendingSceneTransition(envelope.payload)
+        setTimeAdvanceResponding(false)
+        setTyping(false)
+        setProgressLabel('等待全员确认场景切换')
+      } else if (envelope.type === 'scene.transition.resolved') {
+        setPendingSceneTransition((current) =>
           current?.proposalId === envelope.payload.proposalId ? null : current,
         )
         setTimeAdvanceResponding(false)
@@ -2316,6 +2334,69 @@ export default function RoomPage() {
             >
               <Check aria-hidden="true" />
               {playerId && pendingTimeAdvance.acceptedPlayerIds.includes(playerId)
+                ? '已同意'
+                : '同意'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {pendingSceneTransition && (
+        <div className="room-play__time-consent" role="status" aria-live="polite">
+          <div className="room-play__time-consent-summary">
+            <MapPin aria-hidden="true" strokeWidth={2} />
+            <div>
+              <strong>前往 {sceneTransitionTargetName}</strong>
+              <span>
+                {pendingSceneTransition.acceptedPlayerIds.length}/
+                {pendingSceneTransition.requiredPlayerIds.length} 人已确认
+              </span>
+            </div>
+          </div>
+          <div className="room-play__time-consent-actions">
+            <button
+              type="button"
+              className="room-play__time-consent-button room-play__time-consent-button--reject"
+              disabled={
+                timeAdvanceResponding ||
+                !playerId ||
+                pendingSceneTransition.acceptedPlayerIds.includes(playerId)
+              }
+              onClick={() => {
+                if (!playerId) return
+                setTimeAdvanceResponding(true)
+                sdk.roomSocket.respondToSceneTransition(playerId, {
+                  proposalId: pendingSceneTransition.proposalId,
+                  proposalVersion: pendingSceneTransition.proposalVersion,
+                  sourceRevision: pendingSceneTransition.sourceRevision,
+                  accept: false,
+                })
+              }}
+            >
+              <X aria-hidden="true" />
+              拒绝
+            </button>
+            <button
+              type="button"
+              className="room-play__time-consent-button room-play__time-consent-button--accept"
+              disabled={
+                timeAdvanceResponding ||
+                !playerId ||
+                pendingSceneTransition.acceptedPlayerIds.includes(playerId)
+              }
+              onClick={() => {
+                if (!playerId) return
+                setTimeAdvanceResponding(true)
+                sdk.roomSocket.respondToSceneTransition(playerId, {
+                  proposalId: pendingSceneTransition.proposalId,
+                  proposalVersion: pendingSceneTransition.proposalVersion,
+                  sourceRevision: pendingSceneTransition.sourceRevision,
+                  accept: true,
+                })
+              }}
+            >
+              <Check aria-hidden="true" />
+              {playerId && pendingSceneTransition.acceptedPlayerIds.includes(playerId)
                 ? '已同意'
                 : '同意'}
             </button>

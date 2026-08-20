@@ -17,6 +17,8 @@ import type {
   MyRoomSummary as GeneratedMyRoomSummary,
   PlanProgressPayload,
   RoomActionStatePayload,
+  SceneTransitionPendingPayload,
+  SceneTransitionResolvedPayload,
   TimeAdvancePendingPayload,
   TimeAdvanceResolvedPayload,
 } from './generated/dto';
@@ -90,6 +92,9 @@ export type {
   TimeAdvanceRespondPayload,
   TimeAdvancePendingPayload,
   TimeAdvanceResolvedPayload,
+  SceneTransitionRespondPayload,
+  SceneTransitionPendingPayload,
+  SceneTransitionResolvedPayload,
   // WebSocket 新增 14 个事件（issue #77）
   CheckRollPayload,
   SanCheckRollPayload,
@@ -205,6 +210,8 @@ export type ServerToClientEvent =
   | { type: 'room.action.state'; payload: RoomActionStatePayload }
   | { type: 'time.advance.pending'; payload: TimeAdvancePendingPayload }
   | { type: 'time.advance.resolved'; payload: TimeAdvanceResolvedPayload }
+  | { type: 'scene.transition.pending'; payload: SceneTransitionPendingPayload }
+  | { type: 'scene.transition.resolved'; payload: SceneTransitionResolvedPayload }
   | { type: 'view.updated'; payload: ViewUpdatedPayload }
   | { type: 'room.state'; payload: RoomStatePayload }
   | { type: 'player.joined'; payload: PlayerJoinedPayload }

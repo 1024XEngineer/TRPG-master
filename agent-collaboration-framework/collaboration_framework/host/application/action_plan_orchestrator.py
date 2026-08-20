@@ -262,10 +262,18 @@ class ActionPlanOrchestrator:
         latest: AdjudicationExecution | None = None
         completed_in_window = 0
 
-        if run.status in {"waiting_for_player", "awaiting_time_consent"}:
+        if run.status in {
+            "waiting_for_player",
+            "awaiting_time_consent",
+            "awaiting_scene_consent",
+        }:
             waiting_step_index = run.current_step_index
             run, latest = await self._reconcile_waiting(run, player_input)
-            if run.status in {"waiting_for_player", "awaiting_time_consent"}:
+            if run.status in {
+                "waiting_for_player",
+                "awaiting_time_consent",
+                "awaiting_scene_consent",
+            }:
                 run = await self._release_lease(run)
                 return ActionPlanAdvanceResult(
                     run=run,
@@ -1139,6 +1147,7 @@ class ActionPlanOrchestrator:
             "awaiting_skill_choice",
             "awaiting_post_roll_decision",
             "awaiting_time_consent",
+            "awaiting_scene_consent",
         }:
             return run, status.execution
         if status.execution is None:
@@ -1211,6 +1220,20 @@ class ActionPlanOrchestrator:
                 run,
                 tuple(steps),
                 status="awaiting_time_consent",
+            )
+        if execution.status == "awaiting_scene_consent":
+            steps[index] = current.model_copy(
+                update={
+                    **common,
+                    "status": "awaiting_scene_consent",
+                    "pending_action_request_id": current.step_request_id,
+                },
+                deep=True,
+            )
+            return await self._replace_steps(
+                run,
+                tuple(steps),
+                status="awaiting_scene_consent",
             )
         if execution.status == "cancelled" or execution.outcome in {
             "failure",

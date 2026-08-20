@@ -152,7 +152,11 @@ class ActionPlanTurnResult:
 
     @property
     def waiting_for_player(self) -> bool:
-        return self.status in {"waiting_for_player", "awaiting_time_consent"}
+        return self.status in {
+            "waiting_for_player",
+            "awaiting_time_consent",
+            "awaiting_scene_consent",
+        }
 
 
 @dataclass(frozen=True)
@@ -820,8 +824,12 @@ class ActionPlanTurnApplication:
             "awaiting_skill_choice",
             "awaiting_post_roll_decision",
             "awaiting_time_consent",
+            "awaiting_scene_consent",
         }:
-            if result.execution.status != "awaiting_time_consent":
+            if result.execution.status not in {
+                "awaiting_time_consent",
+                "awaiting_scene_consent",
+            }:
                 await _emit_phase(on_phase, "waiting_for_check")
         else:
             await _emit_phase(on_phase, "refreshing_player_view")
@@ -858,7 +866,11 @@ class ActionPlanTurnApplication:
         on_phase: TurnPhaseObserver | None,
         verify_fingerprint: bool = True,
     ) -> ActionPlanTurnResult:
-        if result.run.status in {"waiting_for_player", "awaiting_time_consent"}:
+        if result.run.status in {
+            "waiting_for_player",
+            "awaiting_time_consent",
+            "awaiting_scene_consent",
+        }:
             if result.run.status == "waiting_for_player":
                 await _emit_phase(on_phase, "waiting_for_check")
         elif result.run.status in {
@@ -1004,8 +1016,12 @@ class ActionPlanTurnApplication:
             "awaiting_skill_choice",
             "awaiting_post_roll_decision",
             "awaiting_time_consent",
+            "awaiting_scene_consent",
         }:
-            if recovery.execution.status != "awaiting_time_consent":
+            if recovery.execution.status not in {
+                "awaiting_time_consent",
+                "awaiting_scene_consent",
+            }:
                 await _emit_phase(on_phase, "waiting_for_check")
         else:
             await _emit_phase(on_phase, "refreshing_player_view")
@@ -1239,6 +1255,14 @@ class ActionPlanTurnApplication:
                 execution=result.latest_execution,
                 plan_id=run.plan_id,
             )
+        if run.status == "awaiting_scene_consent":
+            return ActionPlanTurnResult(
+                player_input=player_input,
+                player_view=result.player_view,
+                status=run.status,
+                execution=result.latest_execution,
+                plan_id=run.plan_id,
+            )
         if run.status == "retryable_failure":
             raise TurnExecutionError(
                 run.steps[run.current_step_index].safe_failure_code or "PLAN_RETRYABLE_FAILURE",
@@ -1282,6 +1306,7 @@ class ActionPlanTurnApplication:
             "awaiting_skill_choice",
             "awaiting_post_roll_decision",
             "awaiting_time_consent",
+            "awaiting_scene_consent",
         }:
             return ActionPlanTurnResult(
                 player_input=player_input,
@@ -1289,7 +1314,11 @@ class ActionPlanTurnApplication:
                 status=(
                     "awaiting_time_consent"
                     if execution.status == "awaiting_time_consent"
-                    else "waiting_for_player"
+                    else (
+                        "awaiting_scene_consent"
+                        if execution.status == "awaiting_scene_consent"
+                        else "waiting_for_player"
+                    )
                 ),
                 execution=execution,
             )

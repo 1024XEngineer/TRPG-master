@@ -15,6 +15,7 @@ import type {
   RoomJoinPayload,
   RoomRejoinPayload,
   SanCheckRollPayload,
+  SceneTransitionRespondPayload,
   ServerToClientEvent,
   TimeAdvanceRespondPayload,
   TurnCompletedEvent,
@@ -380,6 +381,28 @@ const PAYLOAD_VALIDATORS: {
     (p.committedRevision === null ||
       p.committedRevision === undefined ||
       typeof p.committedRevision === 'string'),
+  'scene.transition.pending': (p) =>
+    typeof p.proposalId === 'string' &&
+    typeof p.proposalVersion === 'number' &&
+    Number.isInteger(p.proposalVersion) &&
+    typeof p.sourceRevision === 'string' &&
+    typeof p.sourceSceneId === 'string' &&
+    typeof p.targetSceneId === 'string' &&
+    typeof p.requesterPlayerId === 'string' &&
+    isStringArray(p.requiredPlayerIds) &&
+    isStringArray(p.acceptedPlayerIds) &&
+    typeof p.expiresAt === 'string',
+  'scene.transition.resolved': (p) =>
+    typeof p.proposalId === 'string' &&
+    (p.status === 'approved' ||
+      p.status === 'rejected' ||
+      p.status === 'expired' ||
+      p.status === 'stale') &&
+    typeof p.sourceSceneId === 'string' &&
+    typeof p.targetSceneId === 'string' &&
+    (p.committedRevision === null ||
+      p.committedRevision === undefined ||
+      typeof p.committedRevision === 'string'),
   'view.updated': (p) =>
     typeof p.playerId === 'string' &&
     isValidPlayerView(p.playerView) &&
@@ -673,6 +696,11 @@ export class RoomSocket {
   /** 回复多人共享时间提案；重试时必须复用服务端最新版本。 */
   respondToTimeAdvance(playerId: string, payload: TimeAdvanceRespondPayload): void {
     this.send('time.advance.respond', playerId, payload);
+  }
+
+  /** 回复多人共享场景切换提案；重试时必须复用服务端最新版本。 */
+  respondToSceneTransition(playerId: string, payload: SceneTransitionRespondPayload): void {
+    this.send('scene.transition.respond', playerId, payload);
   }
 
   cancelActionPlan(playerId: string, payload: ActionPlanCancelPayload): void {

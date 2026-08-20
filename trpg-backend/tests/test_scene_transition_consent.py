@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -19,6 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dto.ws import SceneTransitionPendingPayload, SceneTransitionResolvedPayload
+from app.main import app
 from app.models.engine import GameSession, SceneTransitionProposalRecord
 from app.service import scene_transition
 from tests.test_engine_runtime import _start_room
@@ -150,6 +152,153 @@ async def test_three_players_confirm_scene_transition_exactly_once(
     )
     assert duplicate == resolved
     assert duplicate_player is duplicate_action is None
+
+
+async def _synchronize_empty_active_reads(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Force both creators past the check-before-insert window."""
+
+    original = scene_transition._active_record
+    both_empty = asyncio.Event()
+    empty_reads = 0
+    counter_lock = asyncio.Lock()
+
+    async def synchronized(db: AsyncSession, room_id: str):  # noqa: ANN202
+        nonlocal empty_reads
+        record = await original(db, room_id)
+        if record is not None:
+            return record
+        async with counter_lock:
+            empty_reads += 1
+            if empty_reads == 2:
+                both_empty.set()
+        await both_empty.wait()
+        return None
+
+    monkeypatch.setattr(scene_transition, "_active_record", synchronized)
+
+
+@pytest.mark.asyncio
+async def test_concurrent_duplicate_scene_proposals_reuse_database_winner(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    room, players, _ = await _start_room(
+        db_session,
+        room_number=3655,
+        player_count=2,
+        prepare_checkpoint=True,
+    )
+    session = await db_session.get(GameSession, room.id)
+    assert session is not None
+    room_id = room.id
+    request = _request(
+        room_id=room_id,
+        player_id=players[0].id,
+        revision=session.state_version,
+        action_id="scene-concurrent-duplicate-389",
+    )
+    await _synchronize_empty_active_reads(monkeypatch)
+
+    async def create():  # noqa: ANN202
+        async with app.state.test_session_factory() as isolated_db:
+            return await scene_transition.create_from_adjudication(isolated_db, request)
+
+    first, second = await asyncio.gather(create(), create())
+
+    assert first.scene_transition_proposal_id == second.scene_transition_proposal_id
+    records = (
+        await db_session.scalars(
+            select(SceneTransitionProposalRecord).where(
+                SceneTransitionProposalRecord.room_id == room_id
+            )
+        )
+    ).all()
+    assert len(records) == 1
+    assert records[0].status == "pending"
+
+
+@pytest.mark.asyncio
+async def test_concurrent_distinct_scene_proposals_allow_only_one_pending(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    room, players, _ = await _start_room(
+        db_session,
+        room_number=3656,
+        player_count=2,
+        prepare_checkpoint=True,
+    )
+    session = await db_session.get(GameSession, room.id)
+    assert session is not None
+    requests = tuple(
+        _request(
+            room_id=room.id,
+            player_id=players[0].id,
+            revision=session.state_version,
+            action_id=f"scene-concurrent-distinct-389-{index}",
+        )
+        for index in range(2)
+    )
+    await _synchronize_empty_active_reads(monkeypatch)
+
+    async def create(request: SubmitAdjudicationRequest):  # noqa: ANN202
+        async with app.state.test_session_factory() as isolated_db:
+            return await scene_transition.create_from_adjudication(isolated_db, request)
+
+    results = await asyncio.gather(
+        *(create(request) for request in requests),
+        return_exceptions=True,
+    )
+
+    assert sum(not isinstance(result, Exception) for result in results) == 1
+    assert sum(isinstance(result, scene_transition.SceneTransitionError) for result in results) == 1
+    records = (
+        await db_session.scalars(
+            select(SceneTransitionProposalRecord).where(
+                SceneTransitionProposalRecord.room_id == room.id,
+                SceneTransitionProposalRecord.status == "pending",
+            )
+        )
+    ).all()
+    assert len(records) == 1
+
+
+@pytest.mark.asyncio
+async def test_terminal_scene_proposal_retry_reuses_request_record(
+    db_session: AsyncSession,
+) -> None:
+    room, players, _ = await _start_room(
+        db_session,
+        room_number=3657,
+        player_count=2,
+        prepare_checkpoint=True,
+    )
+    session = await db_session.get(GameSession, room.id)
+    assert session is not None
+    room_id = room.id
+    request = _request(
+        room_id=room_id,
+        player_id=players[0].id,
+        revision=session.state_version,
+        action_id="scene-terminal-retry-389",
+    )
+    first = await scene_transition.create_from_adjudication(db_session, request)
+    record = await _proposal(db_session, room_id)
+    record.status = "rejected"
+    await db_session.commit()
+
+    retried = await scene_transition.create_from_adjudication(db_session, request)
+
+    assert retried.scene_transition_proposal_id == first.scene_transition_proposal_id
+    records = (
+        await db_session.scalars(
+            select(SceneTransitionProposalRecord).where(
+                SceneTransitionProposalRecord.room_id == room_id
+            )
+        )
+    ).all()
+    assert len(records) == 1
+    assert records[0].status == "rejected"
 
 
 async def _proposal(db: AsyncSession, room_id: str) -> SceneTransitionProposalRecord:

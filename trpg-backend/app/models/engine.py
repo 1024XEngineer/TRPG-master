@@ -27,6 +27,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     Uuid,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -173,6 +174,11 @@ class SceneTransitionProposalRecord(Base):
     __tablename__ = "scene_transition_proposals"
     __table_args__ = (
         PrimaryKeyConstraint("room_id", "proposal_id", name="pk_scene_transition_proposals"),
+        UniqueConstraint(
+            "room_id",
+            "action_request_id",
+            name="uq_scene_transition_proposals_room_action",
+        ),
         CheckConstraint("proposal_version >= 1", name="ck_scene_transition_proposal_version"),
         CheckConstraint(
             "status IN ('pending', 'approved', 'rejected', 'expired', 'stale')",
@@ -183,6 +189,13 @@ class SceneTransitionProposalRecord(Base):
             "room_id",
             "status",
             "updated_at",
+        ),
+        Index(
+            "uq_scene_transition_proposals_pending_room",
+            "room_id",
+            unique=True,
+            sqlite_where=text("status = 'pending'"),
+            postgresql_where=text("status = 'pending'"),
         ),
     )
 

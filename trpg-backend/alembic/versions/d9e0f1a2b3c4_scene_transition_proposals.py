@@ -53,12 +53,25 @@ def upgrade() -> None:
             "proposal_id",
             name="pk_scene_transition_proposals",
         ),
+        sa.UniqueConstraint(
+            "room_id",
+            "action_request_id",
+            name="uq_scene_transition_proposals_room_action",
+        ),
     )
     op.create_index(
         "ix_scene_transition_proposals_room_status",
         "scene_transition_proposals",
         ["room_id", "status", "updated_at"],
         unique=False,
+    )
+    op.create_index(
+        "uq_scene_transition_proposals_pending_room",
+        "scene_transition_proposals",
+        ["room_id"],
+        unique=True,
+        sqlite_where=sa.text("status = 'pending'"),
+        postgresql_where=sa.text("status = 'pending'"),
     )
     with op.batch_alter_table("action_plan_runs") as batch_op:
         batch_op.drop_constraint("ck_action_plan_runs_status", type_="check")
@@ -80,6 +93,10 @@ def downgrade() -> None:
             "'awaiting_time_consent', 'needs_clarification', 'retryable_failure', "
             "'awaiting_narration', 'completed', 'cancelled', 'stopped')",
         )
+    op.drop_index(
+        "uq_scene_transition_proposals_pending_room",
+        table_name="scene_transition_proposals",
+    )
     op.drop_index(
         "ix_scene_transition_proposals_room_status",
         table_name="scene_transition_proposals",

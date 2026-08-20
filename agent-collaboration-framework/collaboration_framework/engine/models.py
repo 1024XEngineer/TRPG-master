@@ -13,10 +13,8 @@ from collaboration_framework.contracts import (
     ActionResult,
     AdjudicationExecution,
     CheckDecisionRequest,
-    ContractError,
     ContractModel,
     EndingResolution,
-    ModuleContent,
     ModuleContentV3,
     LocationKnowledge,
     ItemInstance,
@@ -326,31 +324,13 @@ class EngineRuntimeSnapshot(ContractModel):
 
     module_id: str = Field(min_length=1)
     module_version: str = Field(min_length=1)
-    # v2 and v3 both appear here during the #212 migration: the loader decides
-    # which one a room is pinned to, and every consumer dispatches on the type.
-    # The v2 arm is deleted in the same PR that switches the published fixture
-    # (#226 forbids a runtime compatibility layer in the shipped product).
-    module_content: ModuleContent | ModuleContentV3
+    module_content: ModuleContentV3
     game_state: GameState
     revision: str = Field(min_length=1)
 
     @property
-    def is_v3(self) -> bool:
-        return isinstance(self.module_content, ModuleContentV3)
-
-    @property
-    def v3(self) -> ModuleContentV3:
-        if not isinstance(self.module_content, ModuleContentV3):
-            raise ContractError("当前房间绑定的是 ModuleContent v2")
-        return self.module_content
-
-    @property
     def canon_information_ids(self) -> set[str]:
-        """Canon Information ids, whichever schema this room is pinned to."""
-
-        if isinstance(self.module_content, ModuleContentV3):
-            return {item.id for item in self.module_content.information}
-        return {item.id for item in self.module_content.information_items}
+        return {item.id for item in self.module_content.information}
 
     @property
     def canon_entity_ids(self) -> set[str]:
@@ -358,23 +338,11 @@ class EngineRuntimeSnapshot(ContractModel):
 
     @property
     def canon_location_ids(self) -> set[str]:
-        """v2 called them Scenes; v3 calls them Locations."""
-
-        if isinstance(self.module_content, ModuleContentV3):
-            return {item.id for item in self.module_content.locations}
-        return {item.id for item in self.module_content.scenes}
+        return {item.id for item in self.module_content.locations}
 
     @property
     def canon_ending_ids(self) -> set[str]:
-        if isinstance(self.module_content, ModuleContentV3):
-            return {item.id for item in self.module_content.ending_anchors}
-        return {item.id for item in self.module_content.win_conditions}
-
-    @property
-    def v2(self) -> ModuleContent:
-        if isinstance(self.module_content, ModuleContentV3):
-            raise ContractError("当前房间绑定的是 ModuleContent v3")
-        return self.module_content
+        return {item.id for item in self.module_content.ending_anchors}
 
 
 class CompletedAction(ContractModel):

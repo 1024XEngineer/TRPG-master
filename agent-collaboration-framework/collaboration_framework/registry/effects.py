@@ -217,13 +217,13 @@ class ClassificationContext:
 
 
 def classification_context(runtime: EngineRuntimeSnapshot) -> ClassificationContext:
-    v3 = runtime.v3 if runtime.is_v3 else None
+    module = runtime.module_content
     return ClassificationContext(
-        entity_specs={item.id: item for item in v3.entities} if v3 else {},
-        information_specs={item.id: item for item in v3.information} if v3 else {},
+        entity_specs={item.id: item for item in module.entities},
+        information_specs={item.id: item for item in module.information},
         core_goal_ids=frozenset(
             info_id
-            for goal in (v3.knowledge_goals if v3 else ())
+            for goal in module.knowledge_goals
             if goal.required_for_core_resolution
             for info_id in goal.target_information_ids
         ),
@@ -474,20 +474,8 @@ def _validate_enter_location(
 
 def _apply_enter_location(effect: EnterLocationEffect, ctx: ApplyContext) -> ApplyResult:
     state = ctx.state
-    if not ctx.runtime.is_v3:
-        previous = state.scene_id
-        state = state.model_copy(update={"scene_id": effect.location_id}, deep=True)
-        return ApplyResult(
-            state=state,
-            event_type="location.entered",
-            payload={
-                "location_id": effect.location_id,
-                "from_location_id": previous,
-            },
-        )
-
     resolution = ctx.services.resolve_location_target(
-        ctx.runtime.v3,
+        ctx.runtime.module_content,
         state,
         actor_id=ctx.actor_id,
         target_id=effect.location_id,
@@ -648,10 +636,8 @@ def _validate_ensure_runtime_entity(
 ) -> None:
     if effect.entity_id in vocab.entity_ids or effect.location_id not in vocab.location_ids:
         _reject_canon_shadow()
-    if (
-        runtime.is_v3
-        and effect.entity_kind == "object"
-        and (len(effect.entity_id) > 100 or len(effect.name) > 200)
+    if effect.entity_kind == "object" and (
+        len(effect.entity_id) > 100 or len(effect.name) > 200
     ):
         reject(
             "RUNTIME_ITEM_TOO_LARGE",
@@ -667,7 +653,7 @@ def _apply_ensure_runtime_entity(
 ) -> ApplyResult:
     state = ctx.state
     event_id: str | None = None
-    if ctx.runtime.is_v3 and effect.entity_kind == "object":
+    if effect.entity_kind == "object":
         event_id = ctx.services.new_event_id()
         revision = str(state.event_sequence + ctx.offset)
         items = deepcopy(state.item_instances)
@@ -964,13 +950,6 @@ def _validate_advance_world_time(
     runtime: EngineRuntimeSnapshot,
     services: EffectServices,
 ) -> None:
-    if not runtime.is_v3:
-        reject(
-            "TIME_POINT_MISMATCH",
-            repairability="auto_repairable",
-            fault="agent",
-            player_safe_reason="当前时间目标与世界时间线不一致",
-        )
     blocked = services.time_advance_block_reason(tuple(vocab.actor_ids))
     if blocked is not None and not vocab.allow_party_time_advance:
         reject(
@@ -981,7 +960,7 @@ def _validate_advance_world_time(
             internal_reason=blocked,
         )
     target, _ = services.next_point_after(
-        runtime.v3,
+        runtime.module_content,
         vocab.world_time if vocab.world_time is not None else runtime.game_state.world_time,
     )
     if effect.to_point_id is not None and effect.to_point_id != target.id:
@@ -1001,7 +980,7 @@ def _apply_advance_world_time(
     effect: AdvanceWorldTimeEffect,
     ctx: ApplyContext,
 ) -> ApplyResult:
-    advanced = ctx.services.advanced_to_next(ctx.runtime.v3, ctx.state.world_time)
+    advanced = ctx.services.advanced_to_next(ctx.runtime.module_content, ctx.state.world_time)
     state = ctx.state.model_copy(update={"world_time": advanced}, deep=True)
     return ApplyResult(
         state=state,
@@ -1240,7 +1219,7 @@ def apply(effect: ActionEffect, ctx: ApplyContext) -> ApplyResult:
     return result
 
 
-def absorb_writes(effect: ActionEffect, vocab: ValidationVocabulary, *, is_v3: bool) -> None:
+def absorb_writes(effect: ActionEffect, vocab: ValidationVocabulary) -> None:
     """Fold an accepted effect's `writes` into the vocabulary.
 
     The first pass of #347 §4.3's two-pass resolution: what an effect
@@ -1256,9 +1235,8 @@ def absorb_writes(effect: ActionEffect, vocab: ValidationVocabulary, *, is_v3: b
             vocab.location_ids.add(value)
         elif ref.vocabulary == "entities":
             vocab.entity_ids.add(value)
-            # v3 materialises a runtime object into `item_instances`, which is
-            # what makes it portable; a v2 entity or an NPC never becomes one.
-            if is_v3 and getattr(effect, "entity_kind", None) == "object":
+            # 运行时对象会被落成 `item_instances`，这才让它可携带；NPC 不会。
+            if getattr(effect, "entity_kind", None) == "object":
                 vocab.portable_item_ids.add(value)
 
 

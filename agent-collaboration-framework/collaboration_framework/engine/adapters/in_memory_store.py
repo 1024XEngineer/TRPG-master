@@ -10,7 +10,6 @@ from datetime import datetime
 
 from collaboration_framework.contracts import (
     ContractError,
-    ModuleContent,
     ModuleContentV3,
 )
 
@@ -31,7 +30,7 @@ from ..rules_v3 import agenda_claim_key, agenda_is_claimable
 
 @dataclass(frozen=True)
 class _RoomData:
-    module_content: ModuleContent | ModuleContentV3
+    module_content: ModuleContentV3
     game_state: GameState
     revision: str
     events: tuple[StateModifiedEvent, ...]
@@ -62,7 +61,7 @@ class InMemoryEngineStore:
     def register_room(
         self,
         *,
-        module_content: ModuleContent | ModuleContentV3,
+        module_content: ModuleContentV3,
         initial_state: GameState,
     ) -> None:
         room_id = initial_state.room_id

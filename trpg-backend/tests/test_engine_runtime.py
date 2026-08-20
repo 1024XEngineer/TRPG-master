@@ -642,13 +642,13 @@ async def test_loaded_runtime_is_deep_copy_isolated(
     async with store.transaction(room.id) as transaction:
         runtime = await transaction.load_runtime()
         runtime.game_state.entities["case_tracker"]["investigator_disappeared"] = True
-        runtime.v3.entities[0].state["invented"] = "泄漏"
+        runtime.module_content.entities[0].state["invented"] = "泄漏"
 
     async with store.transaction(room.id) as transaction:
         reloaded = await transaction.load_runtime()
 
     assert reloaded.game_state.entities["case_tracker"]["investigator_disappeared"] is False
-    assert "invented" not in reloaded.v3.entities[0].state
+    assert "invented" not in reloaded.module_content.entities[0].state
 
 
 async def test_store_rejects_stale_revision_without_partial_writes(

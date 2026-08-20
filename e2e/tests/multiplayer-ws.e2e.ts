@@ -1,7 +1,7 @@
 /**
  * 多人 + WebSocket 的端到端验证。
  *
- * 这是 SDK 层 e2e 相对浏览器 e2e 最有价值的地方：**在一个进程里起两个客户端**，
+ * 这是 SDK 层 e2e 相对浏览器 e2e 最有价值的地方：**在一个进程里起三个客户端**，
  * 比开两个浏览器上下文便宜一个数量级，所以「第二个人加入房间」「广播有没有到达
  * 另一个人」这类断言才做得起。
  */
@@ -222,6 +222,157 @@ test('WS 生命周期：开局后重连会重放同一条权威开场', async ()
   }
 })
 
+test('三人推进时间需全员确认，最后一票只提交一次并恢复原行动', async () => {
+  const room = await createRoomWithModule('time-consent', 3)
+  const guest = await registerPlayer('time-consent-guest')
+  const joined = await guest.sdk.rooms.join(
+    room.roomCode,
+    { nickname: '访客' },
+    guest.token,
+  )
+  const third = await registerPlayer('time-consent-third')
+  const thirdJoined = await third.sdk.rooms.join(
+    room.roomCode,
+    { nickname: '第三位玩家' },
+    third.token,
+  )
+  await room.host.sdk.rooms.startStory(room.roomId, room.reconnectToken)
+  await buildCharacter(room.host.sdk, room.roomId, room.reconnectToken, '房主调查员')
+  await buildCharacter(guest.sdk, room.roomId, joined.reconnectToken, '访客调查员')
+  await buildCharacter(third.sdk, room.roomId, thirdJoined.reconnectToken, '第三位调查员')
+
+  const hostSocket = room.host.sdk.roomSocket.connect(room.roomId, room.host.token)
+  try {
+    await room.host.sdk.roomSocket.waitForOpen(hostSocket)
+    const hostBound = waitForEvent(room.host.sdk, (event) => event.type === 'session.bound')
+    room.host.sdk.roomSocket.joinRoom(room.hostPlayerId, {
+      reconnectToken: room.reconnectToken,
+    })
+    await hostBound
+
+    const guestSocket = guest.sdk.roomSocket.connect(room.roomId, guest.token)
+    await guest.sdk.roomSocket.waitForOpen(guestSocket)
+    const guestBound = waitForEvent(guest.sdk, (event) => event.type === 'session.bound')
+    guest.sdk.roomSocket.joinRoom(joined.playerId, {
+      reconnectToken: joined.reconnectToken,
+    })
+    await guestBound
+
+    const thirdSocket = third.sdk.roomSocket.connect(room.roomId, third.token)
+    await third.sdk.roomSocket.waitForOpen(thirdSocket)
+    const thirdBound = waitForEvent(third.sdk, (event) => event.type === 'session.bound')
+    third.sdk.roomSocket.joinRoom(thirdJoined.playerId, {
+      reconnectToken: thirdJoined.reconnectToken,
+    })
+    await thirdBound
+
+    const openingForHost = waitForEvent(
+      room.host.sdk,
+      (event) => event.type === 'narration.push' && event.payload.messageId === 'game-opening',
+    )
+    const openingForGuest = waitForEvent(
+      guest.sdk,
+      (event) => event.type === 'narration.push' && event.payload.messageId === 'game-opening',
+    )
+    const openingForThird = waitForEvent(
+      third.sdk,
+      (event) => event.type === 'narration.push' && event.payload.messageId === 'game-opening',
+    )
+    room.host.sdk.roomSocket.startGame(room.hostPlayerId)
+    await Promise.all([openingForHost, openingForGuest, openingForThird])
+    const initialRevision = room.host.sdk.roomSocket.getPlayerView()?.revision
+    assert.ok(initialRevision)
+
+    const hostPendingPromise = waitForEvent(
+      room.host.sdk,
+      (event) => event.type === 'time.advance.pending',
+    )
+    const guestPendingPromise = waitForEvent(
+      guest.sdk,
+      (event) => event.type === 'time.advance.pending',
+    )
+    const thirdPendingPromise = waitForEvent(
+      third.sdk,
+      (event) => event.type === 'time.advance.pending',
+    )
+    const actionId = `e2e-time-consent-${Date.now()}`
+    // 时间提案不属于房主权限：由普通访客发起，房主只作为全员中的一票。
+    const completedPromise = guest.sdk.roomSocket.submitPlannedAction(
+      joined.playerId,
+      {
+        clientActionId: actionId,
+        utterance: '全队等待到下一个时间点',
+      },
+    )
+    const [hostPending, guestPending, thirdPending] = await Promise.all([
+      hostPendingPromise,
+      guestPendingPromise,
+      thirdPendingPromise,
+    ])
+    assert.equal(hostPending.type, 'time.advance.pending')
+    assert.equal(guestPending.type, 'time.advance.pending')
+    assert.equal(thirdPending.type, 'time.advance.pending')
+    assert.deepEqual(guestPending.payload, hostPending.payload)
+    assert.deepEqual(thirdPending.payload, hostPending.payload)
+    assert.deepEqual(hostPending.payload.acceptedPlayerIds, [joined.playerId])
+    assert.equal(hostPending.payload.requesterPlayerId, joined.playerId)
+    assert.notEqual(hostPending.payload.requesterPlayerId, room.hostPlayerId)
+
+    const thirdUpdatedPromise = waitForEvent(
+      third.sdk,
+      (event) =>
+        event.type === 'time.advance.pending' &&
+        event.payload.acceptedPlayerIds.includes(joined.playerId),
+    )
+    room.host.sdk.roomSocket.respondToTimeAdvance(room.hostPlayerId, {
+      proposalId: hostPending.payload.proposalId,
+      proposalVersion: hostPending.payload.proposalVersion,
+      sourceRevision: hostPending.payload.sourceRevision,
+      accept: true,
+    })
+    await thirdUpdatedPromise
+
+    const hostResolvedPromise = waitForEvent(
+      room.host.sdk,
+      (event) => event.type === 'time.advance.resolved',
+    )
+    const guestResolvedPromise = waitForEvent(
+      guest.sdk,
+      (event) => event.type === 'time.advance.resolved',
+    )
+    const thirdResolvedPromise = waitForEvent(
+      third.sdk,
+      (event) => event.type === 'time.advance.resolved',
+    )
+    // 刻意复用三端最初收到的旧版本，验证别的玩家先确认后不会丢掉最后一票。
+    third.sdk.roomSocket.respondToTimeAdvance(thirdJoined.playerId, {
+      proposalId: hostPending.payload.proposalId,
+      proposalVersion: hostPending.payload.proposalVersion,
+      sourceRevision: hostPending.payload.sourceRevision,
+      accept: true,
+    })
+    const [hostResolved, guestResolved, thirdResolved, completed] = await Promise.all([
+      hostResolvedPromise,
+      guestResolvedPromise,
+      thirdResolvedPromise,
+      completedPromise,
+    ])
+
+    assert.equal(hostResolved.type, 'time.advance.resolved')
+    assert.equal(guestResolved.type, 'time.advance.resolved')
+    assert.equal(thirdResolved.type, 'time.advance.resolved')
+    assert.equal(hostResolved.payload.status, 'approved')
+    assert.deepEqual(guestResolved.payload, hostResolved.payload)
+    assert.deepEqual(thirdResolved.payload, hostResolved.payload)
+    assert.equal(completed.player_id, joined.playerId)
+    assert.notEqual(completed.player_view.revision, initialRevision)
+  } finally {
+    room.host.sdk.roomSocket.disconnect()
+    guest.sdk.roomSocket.disconnect()
+    third.sdk.roomSocket.disconnect()
+  }
+})
+
 test('提交行动会广播给房间里的所有人（不只是发起者）', async () => {
   const room = await createRoomWithModule('broadcast', 2)
   const guest = await registerPlayer('bcguest')
@@ -279,6 +430,177 @@ test('提交行动会广播给房间里的所有人（不只是发起者）', as
   } finally {
     room.host.sdk.roomSocket.disconnect()
     guest.sdk.roomSocket.disconnect()
+  }
+})
+
+test('三客户端串行动作、私有检定与重连快照保持隔离', async () => {
+  const room = await createRoomWithModule('three-client', 3)
+  const guest = await registerPlayer('three-client-guest')
+  const third = await registerPlayer('three-client-third')
+  const joined = await guest.sdk.rooms.join(room.roomCode, { nickname: '访客' }, guest.token)
+  const thirdJoined = await third.sdk.rooms.join(
+    room.roomCode,
+    { nickname: '第三位玩家' },
+    third.token,
+  )
+  await room.host.sdk.rooms.startStory(room.roomId, room.reconnectToken)
+  await buildCharacter(room.host.sdk, room.roomId, room.reconnectToken, '房主调查员')
+  await buildCharacter(guest.sdk, room.roomId, joined.reconnectToken, '访客调查员')
+  await buildCharacter(third.sdk, room.roomId, thirdJoined.reconnectToken, '第三位调查员')
+
+  const hostEvents: ServerToClientEvent[] = []
+  const guestEvents: ServerToClientEvent[] = []
+  const thirdEvents: ServerToClientEvent[] = []
+  const offHost = room.host.sdk.roomSocket.onMessage((event) => hostEvents.push(event))
+  const offGuest = guest.sdk.roomSocket.onMessage((event) => guestEvents.push(event))
+  const offThird = third.sdk.roomSocket.onMessage((event) => thirdEvents.push(event))
+  const hostSocket = room.host.sdk.roomSocket.connect(room.roomId, room.host.token)
+  try {
+    await room.host.sdk.roomSocket.waitForOpen(hostSocket)
+    const hostBound = waitForEvent(room.host.sdk, (event) => event.type === 'session.bound')
+    room.host.sdk.roomSocket.joinRoom(room.hostPlayerId, {
+      reconnectToken: room.reconnectToken,
+    })
+    await hostBound
+
+    const guestSocket = guest.sdk.roomSocket.connect(room.roomId, guest.token)
+    await guest.sdk.roomSocket.waitForOpen(guestSocket)
+    const guestBound = waitForEvent(guest.sdk, (event) => event.type === 'session.bound')
+    guest.sdk.roomSocket.joinRoom(joined.playerId, { reconnectToken: joined.reconnectToken })
+    await guestBound
+
+    const thirdSocket = third.sdk.roomSocket.connect(room.roomId, third.token)
+    await third.sdk.roomSocket.waitForOpen(thirdSocket)
+    const thirdBound = waitForEvent(third.sdk, (event) => event.type === 'session.bound')
+    third.sdk.roomSocket.joinRoom(thirdJoined.playerId, {
+      reconnectToken: thirdJoined.reconnectToken,
+    })
+    await thirdBound
+
+    const hostOpeningView = waitForEvent(room.host.sdk, (event) => event.type === 'view.updated')
+    const guestOpeningView = waitForEvent(guest.sdk, (event) => event.type === 'view.updated')
+    const thirdOpeningView = waitForEvent(third.sdk, (event) => event.type === 'view.updated')
+    const allOpenings = [room.host.sdk, guest.sdk, third.sdk].map((sdk) =>
+      waitForEvent(
+        sdk,
+        (event) => event.type === 'narration.push' && event.payload.messageId === 'game-opening',
+      )
+    )
+    room.host.sdk.roomSocket.startGame(room.hostPlayerId)
+    const [hostView, guestView, thirdView] = await Promise.all([
+      hostOpeningView,
+      guestOpeningView,
+      thirdOpeningView,
+      ...allOpenings,
+    ])
+    assert.equal(hostView.type, 'view.updated')
+    assert.equal(guestView.type, 'view.updated')
+    assert.equal(thirdView.type, 'view.updated')
+    assert.equal(hostView.payload.playerId, room.hostPlayerId)
+    assert.equal(guestView.payload.playerId, joined.playerId)
+    assert.equal(thirdView.payload.playerId, thirdJoined.playerId)
+
+    const travelActionId = `three-client-travel-${Date.now()}`
+    const guestSeesProcessing = waitForEvent(
+      guest.sdk,
+      (event) =>
+        event.type === 'room.action.state' &&
+        event.payload.status === 'processing' &&
+        event.payload.clientActionId === travelActionId,
+    )
+    const travelled = room.host.sdk.roomSocket.submitPlannedAction(room.hostPlayerId, {
+      clientActionId: travelActionId,
+      utterance: '我前往阿诺兹堡图书馆',
+    })
+    await guestSeesProcessing
+
+    const rejectedActionId = `three-client-conflict-${Date.now()}`
+    await assert.rejects(
+      guest.sdk.roomSocket.submitPlannedAction(joined.playerId, {
+        clientActionId: rejectedActionId,
+        utterance: '我同时翻查书架',
+      }),
+      (error: unknown) =>
+        error instanceof Error &&
+        'code' in error &&
+        error.code === 'ACTION_IN_PROGRESS',
+    )
+    const travelTurn = await travelled
+    assert.equal(travelTurn.player_view.scene.id, 'library')
+    assert.equal(
+      thirdEvents.some(
+        (event) =>
+          event.type === 'action.broadcast' &&
+          event.payload.clientActionId === rejectedActionId,
+      ),
+      false,
+    )
+
+    const retried = await guest.sdk.roomSocket.submitPlannedAction(joined.playerId, {
+      clientActionId: `three-client-retry-${Date.now()}`,
+      utterance: '我在图书馆整理刚才的路线',
+    })
+    assert.equal(retried.player_id, joined.playerId)
+
+    const checkActionId = `three-client-check-${Date.now()}`
+    const guestPrivateStart = guestEvents.length
+    const thirdPrivateStart = thirdEvents.length
+    const checkRequested = waitForEvent(
+      room.host.sdk,
+      (event) =>
+        event.type === 'adjudication.pending' &&
+        event.payload.correlationId === checkActionId &&
+        event.payload.status === 'awaiting_skill_choice',
+    )
+    const guestHearsResult = waitForEvent(
+      guest.sdk,
+      (event) =>
+        event.type === 'narration.push' && event.payload.messageId === checkActionId,
+    )
+    const thirdHearsResult = waitForEvent(
+      third.sdk,
+      (event) =>
+        event.type === 'narration.push' && event.payload.messageId === checkActionId,
+    )
+    const checked = room.host.sdk.roomSocket.submitPlannedAction(room.hostPlayerId, {
+      clientActionId: checkActionId,
+      utterance: '我查阅当地旧报档案',
+    })
+    const pending = await checkRequested
+    assert.equal(pending.type, 'adjudication.pending')
+    await selectSkillAndAcceptResult(room.host.sdk, room.hostPlayerId, pending, checkActionId)
+    const [checkedTurn] = await Promise.all([checked, guestHearsResult, thirdHearsResult])
+    const guestPrivateEvents = guestEvents.slice(guestPrivateStart)
+    const thirdPrivateEvents = thirdEvents.slice(thirdPrivateStart)
+    for (const events of [guestPrivateEvents, thirdPrivateEvents]) {
+      assert.equal(events.some((event) => event.type === 'adjudication.pending'), false)
+      assert.equal(events.some((event) => event.type === 'check.result'), false)
+      assert.ok(events.some((event) => event.type === 'narration.push'))
+    }
+
+    guest.sdk.roomSocket.disconnect()
+    const reconnected = guest.sdk.roomSocket.connect(room.roomId, guest.token)
+    await guest.sdk.roomSocket.waitForOpen(reconnected)
+    const rebound = waitForEvent(guest.sdk, (event) => event.type === 'session.bound')
+    const restoredView = waitForEvent(guest.sdk, (event) => event.type === 'view.updated')
+    const restoredIdle = waitForEvent(
+      guest.sdk,
+      (event) => event.type === 'room.action.state' && event.payload.status === 'idle',
+    )
+    guest.sdk.roomSocket.joinRoom(joined.playerId, { reconnectToken: joined.reconnectToken })
+    await rebound
+    const [viewAfterReconnect] = await Promise.all([restoredView, restoredIdle])
+    assert.equal(viewAfterReconnect.type, 'view.updated')
+    assert.equal(viewAfterReconnect.payload.playerId, joined.playerId)
+    assert.equal(viewAfterReconnect.payload.playerView.scene.id, checkedTurn.player_view.scene.id)
+    assert.equal(viewAfterReconnect.payload.playerView.revision, checkedTurn.player_view.revision)
+  } finally {
+    offHost()
+    offGuest()
+    offThird()
+    room.host.sdk.roomSocket.disconnect()
+    guest.sdk.roomSocket.disconnect()
+    third.sdk.roomSocket.disconnect()
   }
 })
 

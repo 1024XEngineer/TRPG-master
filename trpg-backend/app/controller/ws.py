@@ -61,9 +61,10 @@ from collaboration_framework.host.application import (
     normalize_narration_text,
     split_narration_chunks,
 )
-from collaboration_framework.host.schemas import NarrationOutput
+from collaboration_framework.host.schemas import NarrationOutput, reservation_is_expired
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field, ValidationError
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.websockets import WebSocketState
@@ -112,11 +113,15 @@ from app.dto.ws import (
     OpeningStartedPayload,
     PlanProgressPayload,
     PlayerReadyPayload,
+    RoomActionStatePayload,
     RoomJoinPayload,
     RoomRejoinPayload,
     SanCheckRollPayload,
     ServerEnvelope,
     SessionBoundPayload,
+    TimeAdvancePendingPayload,
+    TimeAdvanceResolvedPayload,
+    TimeAdvanceRespondPayload,
     ToolCompletedPayload,
     ToolStartedPayload,
     TurnFailedPayload,
@@ -124,9 +129,16 @@ from app.dto.ws import (
     TurnStartedPayload,
     ViewUpdatedPayload,
 )
+from app.models.engine import (
+    ActionPlanRunRecord,
+    GameSession,
+    RoomActionReservation,
+    TimeAdvanceProposalRecord,
+)
 from app.service import auth as auth_service
 from app.service import chat as chat_service
 from app.service import room as room_service
+from app.service import time_advance as time_advance_service
 from app.service.action_lock import action_lock_manager
 from app.service.ws_events import broadcast_room_state
 from app.service.ws_manager import manager
@@ -137,6 +149,151 @@ logger = structlog.get_logger()
 _UNAUTHORIZED_CLOSE_CODE = 4401
 _NOT_FOUND_CLOSE_CODE = 4404
 _OPENING_MESSAGE_ID = "game-opening"
+
+
+async def _current_room_action_state(
+    db: AsyncSession,
+    room_id: str,
+) -> RoomActionStatePayload | None:
+    """合并持久化 ActionPlan 与短暂进程锁，生成可在重连时重放的行动状态。"""
+
+    session = await db.get(GameSession, room_id)
+    if session is None:
+        return None
+    reservation = await db.get(RoomActionReservation, room_id)
+    if reservation is not None and not reservation_is_expired(reservation.updated_at):
+        active = await db.get(
+            ActionPlanRunRecord,
+            (room_id, reservation.parent_action_id),
+        )
+    else:
+        active = None
+    if active is not None:
+        waiting = active.status in {
+            "waiting_for_player",
+            "awaiting_time_consent",
+            "needs_clarification",
+            "retryable_failure",
+        }
+        return RoomActionStatePayload(
+            status="awaiting_player" if waiting else "processing",
+            player_id=active.player_id,
+            actor_id=active.actor_id,
+            client_action_id=active.parent_action_id,
+            started_at=active.created_at,
+            revision=str(session.state_version),
+        )
+    # 单动作不会创建 ActionPlanRun；此时由持久化时间提案继续占有房间行动槽。
+    # approved 且叙事未落库表示最后一票已提交、原行动正在恢复，不可提前显示 idle。
+    time_proposal = await db.scalar(
+        select(TimeAdvanceProposalRecord)
+        .where(
+            TimeAdvanceProposalRecord.room_id == room_id,
+            TimeAdvanceProposalRecord.status.in_(("pending", "approved")),
+            TimeAdvanceProposalRecord.narration_persisted.is_(False),
+        )
+        .order_by(TimeAdvanceProposalRecord.created_at.desc())
+        .limit(1)
+    )
+    if time_proposal is not None:
+        actor_id = time_proposal.adjudication_json.get("actor_id")
+        if not isinstance(actor_id, str) or not actor_id:
+            raise ContractError("时间提案缺少行动 Actor")
+        return RoomActionStatePayload(
+            status=("awaiting_player" if time_proposal.status == "pending" else "processing"),
+            player_id=time_proposal.player_id,
+            actor_id=actor_id,
+            client_action_id=time_proposal.parent_action_id,
+            started_at=time_proposal.created_at,
+            revision=str(session.state_version),
+        )
+    snapshot = action_lock_manager.snapshot(room_id)
+    if snapshot is not None:
+        return RoomActionStatePayload(
+            status="processing",
+            player_id=snapshot.player_id,
+            actor_id=snapshot.actor_id,
+            client_action_id=snapshot.client_action_id,
+            started_at=snapshot.started_at,
+            revision=str(session.state_version),
+        )
+    return RoomActionStatePayload(status="idle", revision=str(session.state_version))
+
+
+async def _broadcast_room_action_state(
+    db: AsyncSession,
+    room_id: str,
+    *,
+    force_processing: bool = False,
+) -> None:
+    """广播完整快照而非增量，使丢包和重连都能直接覆盖客户端状态。"""
+
+    state = await _current_room_action_state(db, room_id)
+    if state is None:
+        return
+    if force_processing and state.status != "idle":
+        # ActionPlan 在处理玩家回复时仍持久化为 waiting；短暂执行态只用于 UI，
+        # 不额外写库，崩溃后仍从权威等待状态恢复。
+        state = state.model_copy(update={"status": "processing"})
+    envelope = ServerEnvelope(
+        type="room.action.state",
+        payload=state.model_dump(by_alias=True, mode="json"),
+    )
+    await manager.broadcast(room_id, envelope.model_dump(by_alias=True))
+
+
+async def _broadcast_room_action_state_fresh(room_id: str) -> None:
+    """在原消息事务已被断线取消时，用独立短会话完成最终 idle 广播。"""
+
+    async with async_session_factory() as db:
+        await _broadcast_room_action_state(db, room_id)
+
+
+async def _send_room_action_state(
+    db: AsyncSession,
+    websocket: WebSocket,
+    room_id: str,
+) -> None:
+    """在玩家加入时单播当前行动状态，恢复处理中或等待玩家的界面。"""
+
+    state = await _current_room_action_state(db, room_id)
+    if state is None:
+        return
+    await _send_to_player(
+        websocket,
+        ServerEnvelope(
+            type="room.action.state",
+            payload=state.model_dump(by_alias=True, mode="json"),
+        ).model_dump(by_alias=True),
+    )
+
+
+async def _broadcast_player_views(room_id: str) -> None:
+    """分别投影并单播每名在线玩家的视图，绝不复用发起者的私有视图。"""
+
+    for player_id in manager.player_ids(room_id):
+        try:
+            view = await session_view_application.current_player_view(
+                room_id=room_id,
+                player_id=player_id,
+            )
+        except Exception:
+            logger.exception(
+                "multiplayer_view_projection_failed",
+                room_id=room_id,
+                player_id=player_id,
+            )
+            continue
+        payload = ViewUpdatedPayload(player_id=player_id, player_view=view)
+        envelope = ServerEnvelope(
+            type="view.updated",
+            payload=payload.model_dump(by_alias=True, mode="json"),
+        )
+        await manager.send_to_player(
+            room_id,
+            player_id,
+            envelope.model_dump(by_alias=True),
+        )
 
 
 class _PersistedTurnCompletion(BaseModel):
@@ -219,6 +376,24 @@ async def _send_error(
     payload = ErrorPayload(code=code, message=message, correlation_id=correlation_id)
     envelope = ServerEnvelope(type="error", payload=payload.model_dump(by_alias=True))
     await _send_to_player(websocket, envelope.model_dump(by_alias=True))
+
+
+async def _broadcast_time_advance(
+    room_id: str,
+    payload: TimeAdvancePendingPayload | TimeAdvanceResolvedPayload,
+) -> None:
+    """广播完整提案快照，让各客户端用同一权威状态覆盖本地 UI。"""
+
+    event_type = (
+        "time.advance.pending"
+        if isinstance(payload, TimeAdvancePendingPayload)
+        else "time.advance.resolved"
+    )
+    envelope = ServerEnvelope(
+        type=event_type,
+        payload=payload.model_dump(by_alias=True, mode="json"),
+    )
+    await manager.broadcast(room_id, envelope.model_dump(by_alias=True))
 
 
 async def _send_turn_event(
@@ -335,6 +510,27 @@ async def _send_action_plan_result(
         execution = result.execution
         if execution is None:
             raise ContractError("waiting_for_player 缺少 adjudication execution")
+        if execution.status == "awaiting_time_consent":
+            if execution.time_advance_proposal_id is None:
+                raise ContractError("待确认行动缺少时间提案 ID")
+            await time_advance_service.bind_parent_action(
+                db,
+                room_id=room_id,
+                proposal_id=execution.time_advance_proposal_id,
+                player_id=player_id,
+                parent_action_id=result.player_input.client_action_id,
+            )
+            pending_time = await time_advance_service.get_pending(
+                db,
+                room_id,
+                engine=adjudication_engine_service,
+            )
+            if not isinstance(pending_time, TimeAdvancePendingPayload):
+                raise ContractError("待确认行动缺少持久化时间提案")
+            # 先发布等待态，再发布具体提案，前端收到按钮时不会短暂保留 processing。
+            await _broadcast_room_action_state(db, room_id)
+            await _broadcast_time_advance(room_id, pending_time)
+            return False
         pending = AdjudicationPendingPayload(
             correlation_id=result.player_input.client_action_id,
             plan_id=result.plan_id,
@@ -350,6 +546,8 @@ async def _send_action_plan_result(
                 payload=pending.model_dump(by_alias=True, mode="json"),
             ).model_dump(by_alias=True),
         )
+        await _broadcast_player_views(room_id)
+        await _broadcast_room_action_state(db, room_id)
         return False
 
     narration = result.narration
@@ -361,6 +559,9 @@ async def _send_action_plan_result(
         claimed_fact_ids=narration.claimed_evidence_refs,
         suggested_actions=narration.suggested_actions,
     )
+    # 权威状态已经提交，先为每名在线玩家独立投影；最终叙事发出后客户端可立即断开，
+    # 因此不能把这项数据库工作留在叙事之后。
+    await _broadcast_player_views(room_id)
     recorded = await _send_completed_turn_message(
         db,
         websocket,
@@ -371,11 +572,20 @@ async def _send_action_plan_result(
         player_view=result.player_view,
         narration=output,
     )
-    await action_plan_turn_application.mark_narration_persisted(
-        room_id=room_id,
-        parent_action_id=result.player_input.client_action_id,
-        on_progress=lambda event: _send_plan_progress(websocket, event),
-    )
+    # 客户端收到最终叙事后可能立即断开；尾部持久化必须屏蔽连接取消，否则会留下
+    # 已发叙事但 ActionPlan 仍占用房间的半完成状态。
+    with anyio.CancelScope(shield=True):
+        await time_advance_service.mark_narration_persisted(
+            db,
+            room_id=room_id,
+            parent_action_id=result.player_input.client_action_id,
+        )
+        await action_plan_turn_application.mark_narration_persisted(
+            room_id=room_id,
+            parent_action_id=result.player_input.client_action_id,
+            on_progress=lambda event: _send_plan_progress(websocket, event),
+        )
+        await _broadcast_room_action_state(db, room_id)
     return recorded
 
 
@@ -1020,7 +1230,7 @@ async def _handle_room_join(
         await websocket.close(code=_NOT_FOUND_CLOSE_CODE)
         return False
     assert player_id is not None  # 上面能走到这里，player_id 必然非空（见 get_player 调用）
-    manager.add(room_id, websocket)
+    manager.add(room_id, player_id, websocket)
     await room_service.set_player_connected(db, player_id, True)
     payload = SessionBoundPayload(room_id=room_id, player_id=player_id)
     envelope = ServerEnvelope(type="session.bound", payload=payload.model_dump(by_alias=True))
@@ -1097,16 +1307,62 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                     bound_player_id,
                                     current_view,
                                 )
+                                await _send_room_action_state(db, websocket, room_id)
                             # Registering the socket happens inside _handle_room_join
                             # before this lookup. Together with broadcast-after-commit,
                             # that ordering guarantees a reconnecting client receives
                             # either the live opening or this persisted replay.
+                            pending_time = await time_advance_service.get_pending(
+                                db,
+                                room_id,
+                                engine=adjudication_engine_service,
+                            )
+                            # 先完成所有恢复查询，再发应用层可能立即关闭连接的
+                            # 权威开场，避免取消落在 SQLite cursor 中间。
                             await _send_persisted_opening(db, websocket, room_id)
+                            if pending_time is not None:
+                                event_type = (
+                                    "time.advance.pending"
+                                    if isinstance(pending_time, TimeAdvancePendingPayload)
+                                    else "time.advance.resolved"
+                                )
+                                await _send_to_player(
+                                    websocket,
+                                    ServerEnvelope(
+                                        type=event_type,
+                                        payload=pending_time.model_dump(
+                                            by_alias=True,
+                                            mode="json",
+                                        ),
+                                    ).model_dump(by_alias=True),
+                                )
                             active_plan = await action_plan_turn_application.active_for_room(
                                 room_id
                             )
                             if active_plan is not None and active_plan.player_id == bound_player_id:
-                                if active_plan.pending_cancel_request_id is not None:
+                                if active_plan.status == "awaiting_time_consent" and not isinstance(
+                                    pending_time,
+                                    TimeAdvancePendingPayload,
+                                ):
+                                    # 服务在 Engine 提交后、PlanRun 恢复前退出时，
+                                    # 重连作为恢复 worker 继续原计划并生成叙事。
+                                    recovered = await action_plan_turn_application.resume_owned(
+                                        room_id=room_id,
+                                        player_id=bound_player_id,
+                                        parent_action_id=active_plan.parent_action_id,
+                                        on_progress=lambda event: _send_plan_progress(
+                                            websocket,
+                                            event,
+                                        ),
+                                    )
+                                    await _send_action_plan_result(
+                                        db,
+                                        websocket,
+                                        room_id,
+                                        bound_player_id,
+                                        recovered,
+                                    )
+                                elif active_plan.pending_cancel_request_id is not None:
                                     # A reconnect is also a recovery worker. The
                                     # durable intent owns the Engine command;
                                     # never replay the stale post-roll menu.
@@ -1143,7 +1399,11 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                                 "total_steps": len(active_plan.steps),
                                                 "phase": (
                                                     "waiting_for_player"
-                                                    if active_plan.status == "waiting_for_player"
+                                                    if active_plan.status
+                                                    in {
+                                                        "waiting_for_player",
+                                                        "awaiting_time_consent",
+                                                    }
                                                     else "understanding"
                                                 ),
                                                 "public_progress_label": None,
@@ -1191,18 +1451,34 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                     )
                                 )
                                 if action_request_id is not None:
-                                    recovered = await action_plan_turn_application.resume_single(
-                                        room_id=room_id,
-                                        player_id=bound_player_id,
-                                        parent_action_id=action_request_id,
-                                    )
-                                    await _send_action_plan_result(
+                                    replayed = await _recover_persisted_turn_narration(
                                         db,
                                         websocket,
-                                        room_id,
-                                        bound_player_id,
-                                        recovered,
+                                        room_id=room_id,
+                                        player_id=bound_player_id,
+                                        client_action_id=action_request_id,
                                     )
+                                    if replayed:
+                                        await time_advance_service.mark_narration_persisted(
+                                            db,
+                                            room_id=room_id,
+                                            parent_action_id=action_request_id,
+                                        )
+                                    else:
+                                        recovered = (
+                                            await action_plan_turn_application.resume_single(
+                                                room_id=room_id,
+                                                player_id=bound_player_id,
+                                                parent_action_id=action_request_id,
+                                            )
+                                        )
+                                        await _send_action_plan_result(
+                                            db,
+                                            websocket,
+                                            room_id,
+                                            bound_player_id,
+                                            recovered,
+                                        )
                         else:
                             return
                         continue
@@ -1238,11 +1514,8 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                             room_id=room_id,
                             player_id=bound_player_id,
                         )
-                        await _send_view_updated(
-                            websocket,
-                            bound_player_id,
-                            initial_view,
-                        )
+                        await _broadcast_player_views(room_id)
+                        await _broadcast_room_action_state(db, room_id)
                         await broadcast_room_state(db, room_id)
                         await _ensure_opening_narration(
                             db,
@@ -1258,6 +1531,50 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                             bound_player_id,
                             chat_payload,
                         )
+                    elif event_type == "time.advance.respond":
+                        response_payload = TimeAdvanceRespondPayload.model_validate(raw_payload)
+                        try:
+                            (
+                                result,
+                                resume_player_id,
+                                action_request_id,
+                            ) = await time_advance_service.respond(
+                                db,
+                                engine=adjudication_engine_service,
+                                room_id=room_id,
+                                player_id=bound_player_id,
+                                proposal_id=response_payload.proposal_id,
+                                proposal_version=response_payload.proposal_version,
+                                source_revision=response_payload.source_revision,
+                                accept=response_payload.accept,
+                            )
+                        except time_advance_service.TimeAdvanceError as exc:
+                            await _send_error(websocket, "TIME_ADVANCE_CONFLICT", str(exc))
+                            continue
+                        await _broadcast_time_advance(room_id, result)
+                        if resume_player_id is not None and action_request_id is not None:
+                            await _broadcast_room_action_state(
+                                db,
+                                room_id,
+                                force_processing=True,
+                            )
+                            resumed = await action_plan_turn_application.resume_pending(
+                                room_id=room_id,
+                                player_id=resume_player_id,
+                                parent_action_id=action_request_id,
+                            )
+                            # 最后一票可能来自队友，语叙和私有视图必须发给原行动者。
+                            for target_socket in manager.player_connections(
+                                room_id,
+                                resume_player_id,
+                            ):
+                                await _send_action_plan_result(
+                                    db,
+                                    target_socket,
+                                    room_id,
+                                    resume_player_id,
+                                    resumed,
+                                )
                     elif event_type == "action.plan.submit":
                         submit_payload = ActionSubmitPayload.model_validate(raw_payload)
                         if submit_payload.visibility == "private":
@@ -1276,7 +1593,27 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                             client_action_id=submit_payload.client_action_id,
                         ):
                             continue
-                        lock_token = action_lock_manager.try_acquire(room_id)
+                        try:
+                            action_view = await session_view_application.current_player_view(
+                                room_id=room_id,
+                                player_id=bound_player_id,
+                            )
+                        except Exception as exc:
+                            # 尚未建立游戏运行时等前置失败不会取得房间锁；向发起者返回
+                            # 原有 turn.failed，并保持连接可立即重试。
+                            await _send_turn_failed(
+                                websocket,
+                                submit_payload.client_action_id,
+                                exc,
+                            )
+                            continue
+                        lock_token = action_lock_manager.try_acquire(
+                            room_id,
+                            player_id=bound_player_id,
+                            actor_id=action_view.self_actor.id,
+                            client_action_id=submit_payload.client_action_id,
+                            revision=action_view.revision,
+                        )
                         if lock_token is None:
                             await _send_error(
                                 websocket,
@@ -1313,6 +1650,7 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 websocket,
                                 TurnStarted(correlation_id=submit_payload.client_action_id),
                             )
+                            await _broadcast_room_action_state(db, room_id)
                             result = await action_plan_turn_application.start(
                                 room_id=room_id,
                                 player_id=bound_player_id,
@@ -1356,7 +1694,11 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 exc,
                             )
                         finally:
-                            action_lock_manager.release(room_id, lock_token)
+                            # 最终叙事到达后连接可能立刻关闭；仍须按 token 释放锁并
+                            # 广播 idle，避免旧行动长期阻塞房间。
+                            with anyio.CancelScope(shield=True):
+                                action_lock_manager.release(room_id, lock_token)
+                                await _broadcast_room_action_state_fresh(room_id)
                     elif event_type == "adjudication.select":
                         choice = AdjudicationChoicePayload.model_validate(raw_payload)
                         if choice.cancel:
@@ -1372,6 +1714,11 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                             )
                             continue
                         try:
+                            await _broadcast_room_action_state(
+                                db,
+                                room_id,
+                                force_processing=True,
+                            )
                             execution = await adjudication_engine_service.decide(
                                 CheckDecisionRequest(
                                     request_id=choice.request_id,
@@ -1433,9 +1780,15 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 exc=exc,
                             )
                             await _send_turn_failed(websocket, choice.client_action_id, exc)
+                            await _broadcast_room_action_state(db, room_id)
                     elif event_type == "adjudication.post_roll":
                         choice = AdjudicationPostRollPayload.model_validate(raw_payload)
                         try:
+                            await _broadcast_room_action_state(
+                                db,
+                                room_id,
+                                force_processing=True,
+                            )
                             execution = await adjudication_engine_service.decide_post_roll(
                                 PostRollDecisionRequest(
                                     request_id=choice.request_id,
@@ -1502,9 +1855,15 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 exc=exc,
                             )
                             await _send_turn_failed(websocket, choice.client_action_id, exc)
+                            await _broadcast_room_action_state(db, room_id)
                     elif event_type == "action.plan.cancel":
                         cancel = ActionPlanCancelPayload.model_validate(raw_payload)
                         try:
+                            await _broadcast_room_action_state(
+                                db,
+                                room_id,
+                                force_processing=True,
+                            )
                             result = await action_plan_turn_application.cancel_remaining(
                                 room_id=room_id,
                                 player_id=bound_player_id,
@@ -1530,6 +1889,7 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 exc=exc,
                             )
                             await _send_turn_failed(websocket, cancel.client_action_id, exc)
+                            await _broadcast_room_action_state(db, room_id)
                     elif event_type == "san.check.roll":
                         SanCheckRollPayload.model_validate(raw_payload)
                         await _send_error(

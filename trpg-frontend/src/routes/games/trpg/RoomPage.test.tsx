@@ -107,6 +107,7 @@ const {
   mockSelectAdjudication,
   mockDecidePostRoll,
   mockCancelActionPlan,
+  mockRespondToTimeAdvance,
   mockWaitForWsOpen,
   mockCreateEndingDraft,
   mockConfirmEndingDraft,
@@ -143,6 +144,7 @@ const {
     mockSelectAdjudication: vi.fn(),
     mockDecidePostRoll: vi.fn(),
     mockCancelActionPlan: vi.fn(),
+    mockRespondToTimeAdvance: vi.fn(),
     mockWaitForWsOpen: vi.fn(() => Promise.resolve()),
     mockCreateEndingDraft: vi.fn(),
     mockConfirmEndingDraft: vi.fn(),
@@ -175,6 +177,7 @@ vi.mock('@/services/api-client', () => ({
       selectAdjudication: mockSelectAdjudication,
       decidePostRoll: mockDecidePostRoll,
       cancelActionPlan: mockCancelActionPlan,
+      respondToTimeAdvance: mockRespondToTimeAdvance,
     },
   },
 }))
@@ -519,6 +522,114 @@ describe('RoomPage conversation history', () => {
       expect(
         screen.queryByText('仅用于确认视图不会生成开场的场景描述'),
       ).not.toBeInTheDocument()
+    })
+  })
+
+  it('显示固定高度的全员时间确认条并发送当前版本', async () => {
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    emitWsMessage({
+      type: 'time.advance.pending',
+      payload: {
+        proposalId: 'time-349',
+        proposalVersion: 3,
+        sourceRevision: '8',
+        targetPointId: 'hour_20',
+        targetDayIndex: 2,
+        targetHourOfDay: 20,
+        requesterPlayerId: 'player-2',
+        requiredPlayerIds: ['player-1', 'player-2'],
+        acceptedPlayerIds: ['player-2'],
+        expiresAt: '2026-08-18T20:05:00Z',
+      },
+    })
+
+    expect(await screen.findByText('第 3 天 20:00')).toBeInTheDocument()
+    expect(screen.getByText('1/2 人已确认')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '同意' }))
+    expect(mockRespondToTimeAdvance).toHaveBeenCalledWith('player-1', {
+      proposalId: 'time-349',
+      proposalVersion: 3,
+      sourceRevision: '8',
+      accept: true,
+    })
+
+    emitWsMessage({
+      type: 'time.advance.pending',
+      payload: {
+        proposalId: 'time-349',
+        proposalVersion: 4,
+        sourceRevision: '8',
+        targetPointId: 'hour_20',
+        targetDayIndex: 2,
+        targetHourOfDay: 20,
+        requesterPlayerId: 'player-2',
+        requiredPlayerIds: ['player-1', 'player-2'],
+        acceptedPlayerIds: ['player-1', 'player-2'],
+        expiresAt: '2026-08-18T20:05:00Z',
+      },
+    })
+    expect(screen.getByRole('button', { name: '拒绝' })).toBeDisabled()
+
+    emitWsMessage({
+      type: 'time.advance.resolved',
+      payload: {
+        proposalId: 'time-349',
+        status: 'approved',
+        targetDayIndex: 2,
+        targetHourOfDay: 20,
+        committedRevision: '9',
+      },
+    })
+    await waitFor(() => {
+      expect(screen.queryByText('第 3 天 20:00')).not.toBeInTheDocument()
+    })
+  })
+
+  it('行动状态只禁用行动频道，并允许所有者在等待阶段补充输入', async () => {
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    emitWsMessage({
+      type: 'room.action.state',
+      payload: {
+        status: 'processing',
+        playerId: 'player-2',
+        actorId: 'actor-2',
+        clientActionId: 'action-376',
+        startedAt: '2026-08-19T10:00:00Z',
+        revision: '8',
+      },
+    })
+
+    expect(await screen.findByText('的行动正在处理中')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('等待当前行动完成')).toBeDisabled()
+
+    fireEvent.click(screen.getByRole('button', { name: '讨论区' }))
+    expect(screen.getByPlaceholderText('输入行动…')).not.toBeDisabled()
+
+    fireEvent.click(screen.getByRole('button', { name: '行动' }))
+    emitWsMessage({
+      type: 'room.action.state',
+      payload: {
+        status: 'awaiting_player',
+        playerId: 'player-1',
+        actorId: 'actor-1',
+        clientActionId: 'action-377',
+        startedAt: '2026-08-19T10:01:00Z',
+        revision: '8',
+      },
+    })
+    expect(await screen.findByText('的行动正在等待你操作')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('输入行动…')).not.toBeDisabled()
+
+    emitWsMessage({
+      type: 'room.action.state',
+      payload: { status: 'idle', revision: '9' },
+    })
+    await waitFor(() => {
+      expect(screen.queryByText('的行动正在等待你操作')).not.toBeInTheDocument()
     })
   })
 

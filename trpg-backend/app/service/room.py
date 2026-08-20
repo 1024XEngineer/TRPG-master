@@ -13,7 +13,6 @@ from datetime import UTC, datetime
 
 from collaboration_framework.contracts import (
     ContractError,
-    ModuleContent,
     ModuleContentV3,
 )
 from collaboration_framework.engine import (
@@ -52,18 +51,11 @@ from app.models.user import User
 from app.service import chat as chat_service
 
 
-def parse_module_content(module_version) -> ModuleContent | ModuleContentV3:
-    """Parse a published module at whatever schema version it was pinned to.
+def parse_module_content(module_version) -> ModuleContentV3:
+    """Parse a published module. Rooms only need `presentation` and the identity
+    triple, but the whole tree still has to validate."""
 
-    Rooms only need `presentation` and the identity triple here, and both
-    versions carry those — but they must be parsed with the matching model or
-    every field of the other version reads as an error.
-    """
-
-    payload = module_version.content_json
-    if getattr(module_version, "content_schema_version", 2) == 3:
-        return ModuleContentV3.model_validate(payload)
-    return ModuleContent.model_validate(payload)
+    return ModuleContentV3.model_validate(module_version.content_json)
 
 
 class RoomNotFoundError(ValueError):
@@ -500,11 +492,8 @@ async def begin_game(db: AsyncSession, room_id: str, player_id: str) -> bool:
         or module_content.world_ref != module_version.world_ref
     ):
         raise RoomConflictError("模组发布内容与版本记录不一致")
-    if isinstance(module_content, ModuleContentV3):
-        if not module_content.locations:
-            raise RoomConflictError("模组没有可作为初始地点的 Location")
-    elif not module_content.scenes:
-        raise RoomConflictError("模组没有可作为初始场景的 Scene")
+    if not module_content.locations:
+        raise RoomConflictError("模组没有可作为初始地点的 Location")
     try:
         require_runtime_capabilities(module_content)
     except ContractError as exc:

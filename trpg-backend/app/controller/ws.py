@@ -34,6 +34,7 @@ WebSocket 可能存活很久，用一个 session 包住整条连接会在这期�
 连接取消时短 session 的 close/rollback 会在 shield 中完成，避免遗留锁。
 """
 
+import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from functools import partial
@@ -135,7 +136,6 @@ from app.models.engine import (
     RoomActionReservation,
     TimeAdvanceProposalRecord,
 )
-from app.models.room import Player
 from app.service import auth as auth_service
 from app.service import chat as chat_service
 from app.service import room as room_service
@@ -633,23 +633,11 @@ async def _send_completed_turn_message(
     # 摘要是异步可重建读模型，不能阻塞本回合的权威叙事发送。
     summary_service = getattr(websocket.app.state, "conversation_summary_service", None)
     if summary_service is not None:
-        # 公开事件对房间内所有仍在场玩家可见；摘要必须逐玩家入队，
-        # 私有事件则由 enqueue_if_needed 内部再次按 player_id 过滤。
-        player_ids = list(
-            (
-                await db.scalars(
-                    select(Player.id).where(
-                        Player.room_id == room_id,
-                        Player.left_at.is_(None),
-                    )
-                )
-            ).all()
+        # 摘要是异步读模型；公开事件为所有玩家入队，但不能阻塞回合响应。
+        asyncio.create_task(
+            summary_service.enqueue_room_if_needed(room_id=room_id),
+            name=f"enqueue-conversation-summary-{room_id}",
         )
-        for visible_player_id in player_ids:
-            await summary_service.enqueue_if_needed(
-                room_id=room_id,
-                player_id=visible_player_id,
-            )
     return recorded
 
 

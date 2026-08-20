@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.adapters.conversation_summary import ConversationSummaryModel
 from app.models.event import Event
 from app.models.memory import ConversationSummaryRecord
+from app.models.room import Player
 
 logger = structlog.get_logger()
 
@@ -108,6 +109,25 @@ class ConversationSummaryService:
                 record.status = "pending"
                 record.updated_at = datetime.now(UTC)
             await session.commit()
+
+    async def enqueue_room_if_needed(self, *, room_id: str) -> None:
+        """为房间内所有仍在场玩家推进摘要；调用方可放入后台任务。"""
+        try:
+            async with self._session_factory() as session:
+                player_ids = list(
+                    (
+                        await session.scalars(
+                            select(Player.id).where(
+                                Player.room_id == room_id,
+                                Player.left_at.is_(None),
+                            )
+                        )
+                    ).all()
+                )
+            for player_id in player_ids:
+                await self.enqueue_if_needed(room_id=room_id, player_id=player_id)
+        except Exception as exc:  # noqa: BLE001 - 后台入队失败不能影响回合
+            logger.warning("conversation_summary_enqueue_failed", error_type=type(exc).__name__)
 
     async def process_once(self) -> bool:
         """处理一个到期任务，使用短 lease 避免多 worker 重复调用。"""

@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 
 import structlog
 from collaboration_framework.host.schemas import ConversationSummary
-from sqlalchemy import or_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.adapters.conversation_summary import ConversationSummaryModel
@@ -16,6 +16,9 @@ from app.models.event import Event
 from app.models.memory import ConversationSummaryRecord
 
 logger = structlog.get_logger()
+
+# 达到上限后保留失败状态，后续新事件或全量重建可以再次触发。
+_MAX_ATTEMPTS = 5
 
 
 class DeterministicConversationSummaryModel:
@@ -74,17 +77,19 @@ class ConversationSummaryService:
                     ConversationSummaryRecord.player_id == player_id,
                 )
             )
-            current = record.pending_through_sequence if record else 0
+            previous_through = record.through_event_sequence if record else 0
+            new_events = events[previous_through:]
+            new_chars = sum(len(str(event.payload.get("text", ""))) for event in new_events)
             scene_changed = bool(
-                current
-                and current < len(events)
+                previous_through
+                and previous_through < len(events)
                 and any(
-                    event.scene_id != events[current - 1].scene_id
-                    for event in events[current:]
+                    event.scene_id != events[previous_through - 1].scene_id
+                    for event in events[previous_through:]
                     if event.scene_id is not None
                 )
             )
-            if len(events) - current < 10 and not scene_changed:
+            if len(events) - previous_through < 10 and new_chars < 6000 and not scene_changed:
                 return
             if record is None:
                 record = ConversationSummaryRecord(
@@ -112,9 +117,18 @@ class ConversationSummaryService:
             record = await session.scalar(
                 select(ConversationSummaryRecord)
                 .where(
-                    ConversationSummaryRecord.status.in_(("pending", "retry")),
-                    (ConversationSummaryRecord.next_attempt_at.is_(None))
-                    | (ConversationSummaryRecord.next_attempt_at <= now),
+                    or_(
+                        and_(
+                            ConversationSummaryRecord.status.in_(("pending", "retry")),
+                            (ConversationSummaryRecord.next_attempt_at.is_(None))
+                            | (ConversationSummaryRecord.next_attempt_at <= now),
+                        ),
+                        and_(
+                            ConversationSummaryRecord.status == "running",
+                            ConversationSummaryRecord.lease_expires_at.is_not(None),
+                            ConversationSummaryRecord.lease_expires_at <= now,
+                        ),
+                    ),
                 )
                 .order_by(ConversationSummaryRecord.updated_at)
                 .with_for_update()
@@ -127,6 +141,7 @@ class ConversationSummaryService:
             await session.commit()
             room_id, player_id = record.room_id, record.player_id
             through = record.pending_through_sequence
+            previous_through = record.through_event_sequence
             previous = (
                 ConversationSummary.model_validate(record.summary_json)
                 if record.summary_json
@@ -149,9 +164,10 @@ class ConversationSummaryService:
                     )
                 ).all()
             )
+        # 只压缩上次成功游标之后的新事件，避免重复发送整局记录。
         visible = tuple(
             {"id": event.id, "text": event.payload.get("text", ""), "type": event.event_type}
-            for event in events[:through]
+            for event in events[previous_through:through]
         )
         try:
             summary = await self._model.summarize(
@@ -168,14 +184,20 @@ class ConversationSummaryService:
                     select(ConversationSummaryRecord).where(
                         ConversationSummaryRecord.room_id == room_id,
                         ConversationSummaryRecord.player_id == player_id,
+                        ConversationSummaryRecord.status == "running",
+                        ConversationSummaryRecord.lease_owner == owner,
                     )
                 )
                 if record:
-                    record.status = "retry"
                     record.attempt_count += 1
-                    record.next_attempt_at = datetime.now(UTC) + timedelta(
-                        seconds=min(300, 2 ** min(record.attempt_count, 8))
-                    )
+                    if record.attempt_count >= _MAX_ATTEMPTS:
+                        record.status = "failed"
+                        record.next_attempt_at = None
+                    else:
+                        record.status = "retry"
+                        record.next_attempt_at = datetime.now(UTC) + timedelta(
+                            seconds=min(300, 2 ** min(record.attempt_count, 8))
+                        )
                     record.lease_owner = None
                     record.lease_expires_at = None
                     await session.commit()
@@ -187,6 +209,8 @@ class ConversationSummaryService:
                 select(ConversationSummaryRecord).where(
                     ConversationSummaryRecord.room_id == room_id,
                     ConversationSummaryRecord.player_id == player_id,
+                    ConversationSummaryRecord.status == "running",
+                    ConversationSummaryRecord.lease_owner == owner,
                 )
             )
             if record:

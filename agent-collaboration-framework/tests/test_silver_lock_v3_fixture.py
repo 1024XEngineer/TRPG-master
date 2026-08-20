@@ -10,6 +10,7 @@ from collaboration_framework.contracts import (
     ActionAdjudication,
     ActionMethod,
     ActionTarget,
+    AdjudicationExecution,
     CheckDecisionRequest,
     ModuleContentV3,
     NoAdjudicationCheck,
@@ -139,6 +140,16 @@ class SilverLockContentGateTests(unittest.TestCase):
         self.assertNotIn("commit_terminal_ending", serialized)
         self.assertNotIn("inventory.has", serialized)
 
+    def test_top_drawer_contains_sketchbook(self) -> None:
+        entities = {entity.id: entity for entity in self.content.entities}
+        self.assertIn(
+            ("contains", "sketchbook"),
+            {
+                (relation.kind, relation.target_id)
+                for relation in entities["top_drawer"].relations
+            },
+        )
+
     def test_sanity_and_fight_use_supported_check_steps(self) -> None:
         rules = {rule.id: rule for rule in self.content.rules}
         for rule_id in ("rat_thing_sanity", "door_ghost_sanity"):
@@ -189,7 +200,7 @@ class SilverLockRuntimeTests(unittest.IsolatedAsyncioTestCase):
         target_id: str,
         *,
         check_skill: str | None = None,
-    ) -> None:
+    ) -> AdjudicationExecution:
         """提交一个真实规则候选，并在需要时完成选骰和落骰确认。"""
 
         self.sequence += 1
@@ -226,7 +237,7 @@ class SilverLockRuntimeTests(unittest.IsolatedAsyncioTestCase):
             )
         )
         if check_skill is None:
-            return
+            return execution
         pending = execution.pending_decision
         self.assertIsNotNone(pending)
         assert pending is not None
@@ -243,7 +254,7 @@ class SilverLockRuntimeTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsNotNone(rolled.check_run)
         assert rolled.check_run is not None
-        await self.engine.decide_post_roll(
+        return await self.engine.decide_post_roll(
             PostRollDecisionRequest(
                 request_id=f"{request_id}:accept",
                 room_id=ROOM,
@@ -254,6 +265,71 @@ class SilverLockRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 option_id="accept-current",
             )
         )
+
+    async def test_opening_top_drawer_reveals_sketchbook(self) -> None:
+        before = await self.rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        initially_visible = {entity.id for entity in before.scene.visible_entities}
+        self.assertNotIn("sketchbook", initially_visible)
+        self.assertTrue(
+            {"flashlight_page", "cutters_page", "porridge_page", "communication_page"}
+            .isdisjoint(initially_visible)
+        )
+
+        await self.choose(
+            "inspect_wall_painting",
+            "lift-painting",
+            "inspect",
+            "entity",
+            "wall_painting",
+        )
+        execution = await self.choose(
+            "open_top_drawer",
+            "wall-key",
+            "open",
+            "entity",
+            "top_drawer",
+        )
+
+        discovered = tuple(
+            evidence
+            for evidence in execution.narration_evidence
+            if evidence.subject_id == "sketchbook"
+        )
+        self.assertEqual(len(discovered), 1)
+        self.assertTrue(discovered[0].required_in_narration)
+        self.assertIn("四页速写本", discovered[0].subject_name)
+        self.assertIn(
+            ("top_drawer", "open", True),
+            {
+                (result.target_id, result.state_key, result.state_value)
+                for result in execution.committed_results
+            },
+        )
+
+        after = await self.rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        visible = {entity.id: entity for entity in after.scene.visible_entities}
+        self.assertLessEqual(
+            {
+                "sketchbook",
+                "flashlight_page",
+                "cutters_page",
+                "porridge_page",
+                "communication_page",
+            },
+            set(visible),
+        )
+        self.assertIn("不能显现清单之外的物品", visible["sketchbook"].description)
+        self.assertIn(
+            "sketchbook_found",
+            {information.id for information in after.known_information},
+        )
+        current = self.store.inspect_state(ROOM)
+        self.assertIs(current.entities["top_drawer"]["open"], True)
+        self.assertIs(current.entities["sketchbook"]["discovered"], True)
 
     async def prepare_bast_and_door(self, *, feed_bast: bool) -> None:
         """执行房间谜题，按参数决定芭斯特是否跟随。"""
@@ -329,7 +405,7 @@ class SilverLockRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(returned.scene_id, "sealed_room")
         self.assertIs(returned.entities["silver_door"]["opened"], False)
         self.assertIs(returned.entities["silver_lock"]["boundary_triggered"], False)
-        self.assertIs(returned.entities["sketchbook"]["found"], True)
+        self.assertIs(returned.entities["sketchbook"]["discovered"], True)
         self.assertIs(returned.entities["bast"]["freed"], True)
         self.assertIn("captured_and_returned", returned.discovered_facts)
 

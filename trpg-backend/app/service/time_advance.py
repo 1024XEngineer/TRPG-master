@@ -13,6 +13,7 @@ from typing import Literal, Protocol
 from uuid import uuid4
 
 from collaboration_framework.contracts import (
+    COMMITTED_ADJUDICATION_STATUSES,
     ActionAdjudication,
     AdjudicationExecution,
     AdjudicationRecovery,
@@ -182,7 +183,10 @@ async def get_pending(
                 action_request_id=record.action_request_id,
             )
         )
-        if engine_status.status == "resolved" and engine_status.execution is not None:
+        if (
+            engine_status.status in COMMITTED_ADJUDICATION_STATUSES
+            and engine_status.execution is not None
+        ):
             # Engine 与提案分别提交。重连必须主动修复“世界时间已推进、
             # 提案仍是 pending”的崩溃窗口，随后由 ActionPlan 恢复 worker 续跑。
             record.status = "approved"
@@ -499,7 +503,10 @@ async def _respond_locked(
             action_request_id=record.action_request_id,
         )
     )
-    if engine_status.status == "resolved" and engine_status.execution is not None:
+    if (
+        engine_status.status in COMMITTED_ADJUDICATION_STATUSES
+        and engine_status.execution is not None
+    ):
         record.status = "approved"
         record.accepted_player_ids = sorted(record.required_player_ids)
         record.committed_revision = int(engine_status.execution.view_revision)

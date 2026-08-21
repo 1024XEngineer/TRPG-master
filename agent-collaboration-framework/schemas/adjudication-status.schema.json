@@ -43,6 +43,7 @@
             "awaiting_time_consent",
             "awaiting_scene_consent",
             "resolved",
+            "rule_failed",
             "cancelled"
           ],
           "title": "Status",
@@ -62,6 +63,19 @@
           ],
           "title": "Outcome",
           "type": "string"
+        },
+        "rule_failure_code": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rule Failure Code"
         },
         "pending_decision": {
           "anyOf": [
@@ -660,6 +674,7 @@
         "awaiting_time_consent",
         "awaiting_scene_consent",
         "resolved",
+        "rule_failed",
         "cancelled"
       ],
       "title": "Status",

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import copy
 from collections.abc import Callable
+from typing import Literal
 
 from collaboration_framework.contracts import (
     ActionAdjudication,
@@ -84,7 +85,12 @@ def _observe_visit(room_id: str, player_id: str, actor_id: str, revision: str):
     )
 
 
-def _dead_agenda(agenda_id: str, room_id: str, session: GameSession, status: str):
+def _dead_agenda(
+    agenda_id: str,
+    room_id: str,
+    session: GameSession,
+    status: Literal["stable", "failed"],
+):
     return RuleAgenda(
         agenda_id=agenda_id,
         room_id=room_id,

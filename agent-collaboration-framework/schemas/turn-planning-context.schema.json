@@ -1,0 +1,785 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "turn-planning-context.schema.json",
+  "$defs": {
+    "ActionPlanPolicy": {
+      "additionalProperties": false,
+      "description": "A frozen runtime policy, not a product-level schema length limit.",
+      "properties": {
+        "policy_schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Policy Schema Version",
+          "type": "integer"
+        },
+        "max_plan_steps": {
+          "default": 32,
+          "maximum": 1024,
+          "minimum": 1,
+          "title": "Max Plan Steps",
+          "type": "integer"
+        },
+        "max_steps_per_advance": {
+          "default": 3,
+          "maximum": 1024,
+          "minimum": 1,
+          "title": "Max Steps Per Advance",
+          "type": "integer"
+        },
+        "max_repair_attempts": {
+          "default": 1,
+          "maximum": 8,
+          "minimum": 0,
+          "title": "Max Repair Attempts",
+          "type": "integer"
+        }
+      },
+      "title": "ActionPlanPolicy",
+      "type": "object"
+    },
+    "ConversationSummary": {
+      "additionalProperties": false,
+      "description": "当前玩家可见的玩家与主持对话滚动摘要。",
+      "properties": {
+        "room_id": {
+          "minLength": 1,
+          "title": "Room Id",
+          "type": "string"
+        },
+        "player_id": {
+          "minLength": 1,
+          "title": "Player Id",
+          "type": "string"
+        },
+        "summary": {
+          "default": "",
+          "maxLength": 6000,
+          "title": "Summary",
+          "type": "string"
+        },
+        "unresolved_questions": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Unresolved Questions",
+          "type": "array"
+        },
+        "important_entities": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Important Entities",
+          "type": "array"
+        },
+        "through_event_sequence": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Through Event Sequence",
+          "type": "integer"
+        },
+        "source_revision": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Revision"
+        },
+        "source_event_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Source Event Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "room_id",
+        "player_id"
+      ],
+      "title": "ConversationSummary",
+      "type": "object"
+    },
+    "MemoryEntry": {
+      "additionalProperties": false,
+      "description": "一条可追溯、只读的长期经历投影。",
+      "properties": {
+        "memory_id": {
+          "minLength": 1,
+          "title": "Memory Id",
+          "type": "string"
+        },
+        "room_id": {
+          "minLength": 1,
+          "title": "Room Id",
+          "type": "string"
+        },
+        "subject_id": {
+          "minLength": 1,
+          "title": "Subject Id",
+          "type": "string"
+        },
+        "object_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Object Id"
+        },
+        "kind": {
+          "enum": [
+            "action",
+            "visit",
+            "conversation",
+            "clue",
+            "world_event",
+            "relationship_change",
+            "goal"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "content": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Content",
+          "type": "string"
+        },
+        "epistemic_status": {
+          "enum": [
+            "confirmed",
+            "experienced",
+            "heard",
+            "asserted",
+            "presentation"
+          ],
+          "title": "Epistemic Status",
+          "type": "string"
+        },
+        "visibility": {
+          "enum": [
+            "public",
+            "player_scoped",
+            "entity_scoped"
+          ],
+          "title": "Visibility",
+          "type": "string"
+        },
+        "participants": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Participants",
+          "type": "array"
+        },
+        "listener_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Listener Ids",
+          "type": "array"
+        },
+        "location_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Location Id"
+        },
+        "source_event_id": {
+          "minLength": 1,
+          "title": "Source Event Id",
+          "type": "string"
+        },
+        "source_sequence": {
+          "minimum": 0,
+          "title": "Source Sequence",
+          "type": "integer"
+        },
+        "source_revision": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Revision"
+        }
+      },
+      "required": [
+        "memory_id",
+        "room_id",
+        "subject_id",
+        "kind",
+        "content",
+        "epistemic_status",
+        "visibility",
+        "source_event_id",
+        "source_sequence"
+      ],
+      "title": "MemoryEntry",
+      "type": "object"
+    },
+    "PlayerInput": {
+      "additionalProperties": false,
+      "properties": {
+        "room_id": {
+          "minLength": 1,
+          "title": "Room Id",
+          "type": "string"
+        },
+        "player_id": {
+          "minLength": 1,
+          "title": "Player Id",
+          "type": "string"
+        },
+        "actor_id": {
+          "minLength": 1,
+          "title": "Actor Id",
+          "type": "string"
+        },
+        "client_action_id": {
+          "minLength": 1,
+          "title": "Client Action Id",
+          "type": "string"
+        },
+        "utterance": {
+          "minLength": 1,
+          "title": "Utterance",
+          "type": "string"
+        }
+      },
+      "required": [
+        "room_id",
+        "player_id",
+        "actor_id",
+        "client_action_id",
+        "utterance"
+      ],
+      "title": "PlayerInput",
+      "type": "object"
+    },
+    "RecentSafeResult": {
+      "additionalProperties": false,
+      "description": "The deliberately small, player-safe projection of an ActionResult.",
+      "properties": {
+        "resolution": {
+          "enum": [
+            "checkpoint",
+            "direct",
+            "blocked",
+            "unrecognized"
+          ],
+          "title": "Resolution",
+          "type": "string"
+        },
+        "outcome": {
+          "enum": [
+            "success",
+            "failure",
+            "not_applicable"
+          ],
+          "title": "Outcome",
+          "type": "string"
+        },
+        "check_result": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RuleCheckResult"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "visible_facts": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/VisibleFact"
+          },
+          "title": "Visible Facts",
+          "type": "array"
+        }
+      },
+      "required": [
+        "resolution",
+        "outcome"
+      ],
+      "title": "RecentSafeResult",
+      "type": "object"
+    },
+    "RecentTurn": {
+      "additionalProperties": false,
+      "description": "One prior action and only the evidence safe for the current viewer.",
+      "properties": {
+        "correlation_id": {
+          "minLength": 1,
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "source_player_id": {
+          "minLength": 1,
+          "title": "Source Player Id",
+          "type": "string"
+        },
+        "source_actor_id": {
+          "minLength": 1,
+          "title": "Source Actor Id",
+          "type": "string"
+        },
+        "scene_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Scene Id"
+        },
+        "source_view_revision": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source View Revision"
+        },
+        "committed_view_revision": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Committed View Revision"
+        },
+        "participants": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Participants",
+          "type": "array"
+        },
+        "player_utterance": {
+          "$ref": "#/$defs/VisibleHistoryText"
+        },
+        "accepted_intent_summary": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Accepted Intent Summary"
+        },
+        "player_safe_result": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecentSafeResult"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "published_narration": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/VisibleHistoryText"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "evidence_refs": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Evidence Refs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "correlation_id",
+        "source_player_id",
+        "source_actor_id",
+        "player_utterance"
+      ],
+      "title": "RecentTurn",
+      "type": "object"
+    },
+    "RecentTurnContext": {
+      "additionalProperties": false,
+      "description": "A revision-bound sequence of recent turns visible to one player.",
+      "properties": {
+        "room_id": {
+          "minLength": 1,
+          "title": "Room Id",
+          "type": "string"
+        },
+        "viewer_player_id": {
+          "minLength": 1,
+          "title": "Viewer Player Id",
+          "type": "string"
+        },
+        "as_of_revision": {
+          "minLength": 1,
+          "title": "As Of Revision",
+          "type": "string"
+        },
+        "turns": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/RecentTurn"
+          },
+          "title": "Turns",
+          "type": "array"
+        }
+      },
+      "required": [
+        "room_id",
+        "viewer_player_id",
+        "as_of_revision"
+      ],
+      "title": "RecentTurnContext",
+      "type": "object"
+    },
+    "RuleCheckResult": {
+      "additionalProperties": false,
+      "description": "Player-safe evidence for one authoritative percentile check.",
+      "properties": {
+        "checkpoint_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Checkpoint Id"
+        },
+        "skill_id": {
+          "minLength": 1,
+          "title": "Skill Id",
+          "type": "string"
+        },
+        "target_value": {
+          "minimum": 0,
+          "title": "Target Value",
+          "type": "integer"
+        },
+        "roll_value": {
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Roll Value",
+          "type": "integer"
+        },
+        "difficulty": {
+          "enum": [
+            "regular",
+            "hard",
+            "extreme"
+          ],
+          "title": "Difficulty",
+          "type": "string"
+        },
+        "success_level": {
+          "enum": [
+            "critical",
+            "extreme",
+            "hard",
+            "regular",
+            "failure",
+            "fumble"
+          ],
+          "title": "Success Level",
+          "type": "string"
+        },
+        "passed": {
+          "title": "Passed",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "skill_id",
+        "target_value",
+        "roll_value",
+        "difficulty",
+        "success_level",
+        "passed"
+      ],
+      "title": "RuleCheckResult",
+      "type": "object"
+    },
+    "TurnPlanningReference": {
+      "additionalProperties": false,
+      "description": "One player-visible label useful for semantic target disambiguation.",
+      "properties": {
+        "kind": {
+          "maxLength": 40,
+          "minLength": 1,
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 300,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "aliases": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Aliases",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "name"
+      ],
+      "title": "TurnPlanningReference",
+      "type": "object"
+    },
+    "TurnPlanningView": {
+      "additionalProperties": false,
+      "description": "Token-bounded player-safe projection used only for semantic planning.",
+      "properties": {
+        "room_id": {
+          "minLength": 1,
+          "title": "Room Id",
+          "type": "string"
+        },
+        "player_id": {
+          "minLength": 1,
+          "title": "Player Id",
+          "type": "string"
+        },
+        "actor_id": {
+          "minLength": 1,
+          "title": "Actor Id",
+          "type": "string"
+        },
+        "revision": {
+          "minLength": 1,
+          "title": "Revision",
+          "type": "string"
+        },
+        "self_name": {
+          "minLength": 1,
+          "title": "Self Name",
+          "type": "string"
+        },
+        "current_scene_name": {
+          "minLength": 1,
+          "title": "Current Scene Name",
+          "type": "string"
+        },
+        "location_breadcrumbs": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Location Breadcrumbs",
+          "type": "array"
+        },
+        "visible_entities": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/TurnPlanningReference"
+          },
+          "title": "Visible Entities",
+          "type": "array"
+        },
+        "visible_actors": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/TurnPlanningReference"
+          },
+          "title": "Visible Actors",
+          "type": "array"
+        },
+        "available_destinations": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/TurnPlanningReference"
+          },
+          "title": "Available Destinations",
+          "type": "array"
+        },
+        "known_locations": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/TurnPlanningReference"
+          },
+          "title": "Known Locations",
+          "type": "array"
+        },
+        "inventory_items": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/TurnPlanningReference"
+          },
+          "title": "Inventory Items",
+          "type": "array"
+        },
+        "known_information": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/TurnPlanningReference"
+          },
+          "title": "Known Information",
+          "type": "array"
+        }
+      },
+      "required": [
+        "room_id",
+        "player_id",
+        "actor_id",
+        "revision",
+        "self_name",
+        "current_scene_name"
+      ],
+      "title": "TurnPlanningView",
+      "type": "object"
+    },
+    "VisibleFact": {
+      "additionalProperties": false,
+      "description": "One fact confirmed for the current action result.",
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "text"
+      ],
+      "title": "VisibleFact",
+      "type": "object"
+    },
+    "VisibleHistoryText": {
+      "additionalProperties": false,
+      "description": "Text already visible to the current viewer at publication time.",
+      "properties": {
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "visibility": {
+          "enum": [
+            "public",
+            "player_scoped"
+          ],
+          "title": "Visibility",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "visibility"
+      ],
+      "title": "VisibleHistoryText",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Pure semantic-planning input with no Keeper or adjudication capability data.",
+  "properties": {
+    "player_input": {
+      "$ref": "#/$defs/PlayerInput"
+    },
+    "planning_view": {
+      "$ref": "#/$defs/TurnPlanningView"
+    },
+    "recent_history": {
+      "$ref": "#/$defs/RecentTurnContext"
+    },
+    "memories": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/MemoryEntry"
+      },
+      "title": "Memories",
+      "type": "array"
+    },
+    "conversation_summary": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ConversationSummary"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "policy": {
+      "$ref": "#/$defs/ActionPlanPolicy"
+    }
+  },
+  "required": [
+    "player_input",
+    "planning_view",
+    "recent_history"
+  ],
+  "title": "TurnPlanningContext",
+  "type": "object"
+}

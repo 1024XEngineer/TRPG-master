@@ -34,6 +34,7 @@ from collaboration_framework.host.schemas import (
     NarrationOutput,
     OpeningNarrationContext,
     RecentTurnContext,
+    TurnPlanningContext,
 )
 
 SCHEMA_MODELS: dict[str, type[BaseModel]] = {
@@ -60,6 +61,7 @@ SCHEMA_MODELS: dict[str, type[BaseModel]] = {
     "narration-output.schema.json": NarrationOutput,
     "opening-narration-context.schema.json": OpeningNarrationContext,
     "host-agent-context.schema.json": HostAgentContext,
+    "turn-planning-context.schema.json": TurnPlanningContext,
     "recent-turn-context.schema.json": RecentTurnContext,
 }
 

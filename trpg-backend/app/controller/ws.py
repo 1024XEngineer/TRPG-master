@@ -35,6 +35,7 @@ WebSocket 可能存活很久，用一个 session 包住整条连接会在这期�
 """
 
 import asyncio
+import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from functools import partial
@@ -92,6 +93,7 @@ from app.core.turn_events import (
     TurnToolStarted,
 )
 from app.core.turn_observability import (
+    log_action_plan_latency,
     log_check_result,
     log_narration_output,
     log_player_input,
@@ -2274,6 +2276,7 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 websocket,
                                 TurnStarted(correlation_id=submit_payload.client_action_id),
                             )
+                            turn_started_at = time.monotonic()
                             await _broadcast_room_action_state(db, room_id)
                             result = await action_plan_turn_application.start(
                                 room_id=room_id,
@@ -2294,6 +2297,11 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                     db,
                                 ),
                             )
+                            narration_ready_ms = (
+                                int((time.monotonic() - turn_started_at) * 1000)
+                                if result.narration is not None
+                                else None
+                            )
 
                             async def _release_action_before_completed(
                                 token: str = lock_token,
@@ -2313,6 +2321,20 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                     if not result.waiting_for_player
                                     else None
                                 ),
+                            )
+                            completed_ms = int((time.monotonic() - turn_started_at) * 1000)
+                            log_action_plan_latency(
+                                room_id=room_id,
+                                correlation_id=submit_payload.client_action_id,
+                                status=result.status,
+                                time_to_waiting_check_ms=(
+                                    completed_ms if result.waiting_for_player else None
+                                ),
+                                time_to_first_narration_ms=narration_ready_ms,
+                                time_to_final_narration_ms=(
+                                    completed_ms if result.narration is not None else None
+                                ),
+                                end_to_end_ms=completed_ms,
                             )
                         except Exception as exc:
                             code, _, _ = _map_turn_error(exc)

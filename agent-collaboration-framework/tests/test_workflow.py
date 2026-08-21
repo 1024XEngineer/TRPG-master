@@ -13,9 +13,10 @@ import json
 import unittest
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from collaboration_framework.contracts import Intent, MatchedTarget, ModuleCheck
 from collaboration_framework.schema_export import rendered_schemas
-from pydantic import ValidationError
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -32,7 +33,7 @@ class ContractGuardTests(unittest.TestCase):
 
     def test_exported_schemas_match_pydantic_source(self) -> None:
         expected = rendered_schemas()
-        self.assertEqual(len(expected), 24)
+        self.assertEqual(len(expected), 25)
         self.assertIn("keeper-capability-view.schema.json", expected)
         self.assertIn("module-content-v3.schema.json", expected)
         self.assertNotIn("module-content.schema.json", expected)

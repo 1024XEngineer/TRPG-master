@@ -9,6 +9,8 @@ from typing import Any
 SENSITIVE_FIELD_FRAGMENTS = frozenset(
     {
         "api_key",
+        "api_token",
+        "access_token",
         "capabilit",
         "context",
         "message_text",
@@ -18,7 +20,6 @@ SENSITIVE_FIELD_FRAGMENTS = frozenset(
         "prompt",
         "raw",
         "secret",
-        "token",
         "utterance",
     }
 )
@@ -43,6 +44,7 @@ def latency_summary(values: Iterable[float]) -> dict[str, float | int | None]:
         "min": min(samples) if samples else None,
         "p50": nearest_rank_percentile(samples, 50),
         "p95": nearest_rank_percentile(samples, 95),
+        "p99": nearest_rank_percentile(samples, 99),
         "max": max(samples) if samples else None,
     }
 
@@ -79,6 +81,8 @@ def aggregate_scenario(samples: list[dict[str, Any]]) -> dict[str, Any]:
     """Aggregate already-sanitized samples without retaining per-turn identifiers."""
 
     count_fields = (
+        "model_calls",
+        "transport_calls",
         "planner_calls",
         "step_adjudicator_calls",
         "narrator_calls",
@@ -88,6 +92,11 @@ def aggregate_scenario(samples: list[dict[str, Any]]) -> dict[str, Any]:
         "plan_cas_calls",
         "repair_calls",
         "model_transport_retries",
+        "structured_retries",
+        "input_tokens",
+        "output_tokens",
+        "deterministic_hits",
+        "rule_first_hits",
     )
     result: dict[str, Any] = {
         "sample_count": len(samples),
@@ -113,7 +122,12 @@ def aggregate_scenario(samples: list[dict[str, Any]]) -> dict[str, Any]:
             sample["end_to_end_ms"] for sample in samples if sample["end_to_end_ms"] is not None
         ),
         "first_narration_completion_ms": latency_summary(
-            sample["end_to_end_ms"]
+            sample.get("first_narration_ms", sample["end_to_end_ms"])
+            for sample in samples
+            if sample["failure_code"] is None and sample["end_to_end_ms"] is not None
+        ),
+        "final_narration_completion_ms": latency_summary(
+            sample.get("final_narration_ms", sample["end_to_end_ms"])
             for sample in samples
             if sample["failure_code"] is None and sample["end_to_end_ms"] is not None
         ),
@@ -124,6 +138,13 @@ def aggregate_scenario(samples: list[dict[str, Any]]) -> dict[str, Any]:
         ),
     }
     for field in count_fields:
-        result[field] = count_summary(sample[field] for sample in samples)
+        result[field] = count_summary(sample.get(field, 0) for sample in samples)
+    adjudicated = sum(sample.get("step_adjudicator_calls", 0) for sample in samples)
+    fast_path = sum(
+        sample.get("deterministic_hits", 0) + sample.get("rule_first_hits", 0) for sample in samples
+    )
+    result["deterministic_rule_first_rate"] = (
+        round(fast_path / adjudicated, 4) if adjudicated else None
+    )
     assert_sanitized_report(result)
     return result

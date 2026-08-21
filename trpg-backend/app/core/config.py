@@ -90,6 +90,17 @@ class Settings(BaseSettings):
     # 与 429；其余 4xx 立即失败。默认一次重试，避免一次瞬态故障就让整个回合报废。
     model_client_max_attempts: int = Field(default=2, ge=1, le=5)
     model_client_retry_backoff_seconds: float = Field(default=0.5, gt=0, le=10)
+    # Issue #357 semantic Planner is independently deployable from the larger
+    # step-adjudication and narration model. A non-zero rollout requires every
+    # field explicitly so production cannot silently reuse the Host model.
+    turn_planner_provider: Literal["fake", "openai", "qwen", "deepseek"] | None = None
+    turn_planner_api_key: SecretStr | None = None
+    turn_planner_base_url: str | None = Field(default=None, min_length=1)
+    turn_planner_model: str | None = Field(default=None, min_length=1)
+    turn_planner_timeout_seconds: float = Field(default=5.0, gt=0, le=30)
+    turn_planner_max_attempts: int = Field(default=2, ge=1, le=5)
+    turn_planner_retry_backoff_seconds: float = Field(default=0.25, gt=0, le=5)
+    turn_planner_rollout_percent: int = Field(default=0, ge=0, le=100)
     # 一键建卡的规则数值始终由本地 COC7 生成器负责；此开关只决定八项背景文字
     # 是否交给 DeepSeek 创作。模型失败时服务层会回退到生成器内置模板。
     character_background_provider: Literal["deterministic", "deepseek"] = "deterministic"
@@ -161,6 +172,28 @@ class Settings(BaseSettings):
             self.deepseek_api_key is None or not secret_value(self.deepseek_api_key).strip()
         ):
             raise ValueError("HOST_MODEL_PROVIDER=deepseek 时必须设置 DEEPSEEK_API_KEY")
+        if self.turn_planner_rollout_percent > 0:
+            missing = []
+            if self.turn_planner_provider is None:
+                missing.append("TURN_PLANNER_PROVIDER")
+            if self.turn_planner_provider not in {None, "fake"}:
+                missing.extend(
+                    name
+                    for name, value in {
+                        "TURN_PLANNER_BASE_URL": self.turn_planner_base_url,
+                        "TURN_PLANNER_MODEL": self.turn_planner_model,
+                    }.items()
+                    if value is None or not value.strip()
+                )
+                if (
+                    self.turn_planner_api_key is None
+                    or not secret_value(self.turn_planner_api_key).strip()
+                ):
+                    missing.append("TURN_PLANNER_API_KEY")
+            if missing:
+                raise ValueError(
+                    "TURN_PLANNER_ROLLOUT_PERCENT > 0 时缺少配置：" + ", ".join(missing)
+                )
         if self.character_background_provider == "deepseek" and (
             self.deepseek_api_key is None or not secret_value(self.deepseek_api_key).strip()
         ):
@@ -218,6 +251,15 @@ def model_client_retry_policy(settings: Settings) -> ModelClientRetryPolicy:
     return ModelClientRetryPolicy(
         max_attempts=settings.model_client_max_attempts,
         backoff_seconds=settings.model_client_retry_backoff_seconds,
+    )
+
+
+def turn_planner_retry_policy(settings: Settings) -> ModelClientRetryPolicy:
+    from app.adapters.structured_http import ModelClientRetryPolicy
+
+    return ModelClientRetryPolicy(
+        max_attempts=settings.turn_planner_max_attempts,
+        backoff_seconds=settings.turn_planner_retry_backoff_seconds,
     )
 
 

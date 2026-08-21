@@ -155,6 +155,30 @@ def log_turn_completed(
     )
 
 
+def log_action_plan_latency(
+    *,
+    room_id: str,
+    correlation_id: str,
+    status: str,
+    end_to_end_ms: int,
+    time_to_waiting_check_ms: int | None = None,
+    time_to_first_narration_ms: int | None = None,
+    time_to_final_narration_ms: int | None = None,
+) -> None:
+    """Emit an allowlisted latency summary without player or model content."""
+
+    logger.info(
+        "action_plan_turn_latency",
+        room=_short_ref(room_id),
+        action=_short_ref(correlation_id),
+        status=status,
+        time_to_waiting_check_ms=time_to_waiting_check_ms,
+        time_to_first_narration_ms=time_to_first_narration_ms,
+        time_to_final_narration_ms=time_to_final_narration_ms,
+        end_to_end_ms=max(0, end_to_end_ms),
+    )
+
+
 def log_turn_failed(
     *,
     room_id: str,
@@ -194,6 +218,7 @@ def log_turn_failed(
 
 __all__ = [
     "log_check_result",
+    "log_action_plan_latency",
     "log_narration_output",
     "log_player_input",
     "log_state_changes",

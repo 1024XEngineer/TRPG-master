@@ -99,12 +99,15 @@ class _ConversationClarificationIntentModel:
         }
 
 
+_PUBLIC_CLARIFICATION_TEXT = "陈探员是想去吃午饭，还是晚饭？"
+
+
 class _PublicClarificationNarrationModel:
     async def generate(self, context):  # noqa: ANN001
         del context
         return {
             "kind": "clarification",
-            "text": "你是想去吃午饭，还是晚饭？",
+            "text": _PUBLIC_CLARIFICATION_TEXT,
             "claimed_evidence_refs": [],
             "suggested_actions": [],
         }
@@ -232,7 +235,7 @@ def test_clarification_narration_is_visible_to_other_players(
 
     assert narration["type"] == "narration.push"
     assert narration["payload"]["messageId"] == action_id
-    assert narration["payload"]["text"] == "你是想去吃午饭，还是晚饭？"
+    assert narration["payload"]["text"] == _PUBLIC_CLARIFICATION_TEXT
     assert all(message.get("type") != "turn.failed" for message in seen)
 
     guest_headers = {"X-Reconnect-Token": guest["reconnectToken"]}
@@ -246,7 +249,7 @@ def test_clarification_narration_is_visible_to_other_players(
         if event["type"] == "narration.push" and event["payload"].get("messageId") == action_id
     ]
     assert len(guest_narrations) == 1
-    assert guest_narrations[0]["payload"]["text"] == "你是想去吃午饭，还是晚饭？"
+    assert guest_narrations[0]["payload"]["text"] == _PUBLIC_CLARIFICATION_TEXT
 
     guest_replay = sync_client.get(
         f"{ROOMS_BASE}/{room['roomId']}/replay",
@@ -258,7 +261,7 @@ def test_clarification_narration_is_visible_to_other_players(
         if event["eventType"] == "narration.push" and event["payload"].get("messageId") == action_id
     ]
     assert len(replay_narrations) == 1
-    assert replay_narrations[0]["payload"]["text"] == "你是想去吃午饭，还是晚饭？"
+    assert replay_narrations[0]["payload"]["text"] == _PUBLIC_CLARIFICATION_TEXT
 
 
 # ── 行动锁 ───────────────────────────────────────────

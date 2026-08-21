@@ -1092,6 +1092,14 @@
           "title": "Participants",
           "type": "array"
         },
+        "listener_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Listener Ids",
+          "type": "array"
+        },
         "location_id": {
           "anyOf": [
             {

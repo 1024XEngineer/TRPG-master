@@ -125,6 +125,44 @@ class NarrationTextPolicyTests(unittest.TestCase):
                     "subject_ownership",
                 )
 
+    def test_named_actor_rejects_unquoted_second_person(self) -> None:
+        self.assertEqual(
+            narration_subject_rejection_reason(
+                "你打开了抽屉。",
+                addressing_mode="named_actor",
+            ),
+            "subject_ownership",
+        )
+        self.assertEqual(
+            narration_subject_rejection_reason(
+                "陈探员打开了抽屉。",
+                addressing_mode="named_actor",
+            ),
+            None,
+        )
+
+    def test_named_actor_allows_second_person_in_dialogue(self) -> None:
+        self.assertIsNone(
+            narration_subject_rejection_reason(
+                "托马斯问：「你是谁？」",
+                addressing_mode="named_actor",
+            )
+        )
+        self.assertIsNone(
+            narration_subject_rejection_reason(
+                "陈探员对托马斯说：“我会保护你们。”",
+                addressing_mode="named_actor",
+            )
+        )
+
+    def test_second_person_mode_still_allows_unquoted_you(self) -> None:
+        self.assertIsNone(
+            narration_subject_rejection_reason(
+                "你打开了抽屉。",
+                addressing_mode="second_person",
+            )
+        )
+
     def test_allows_first_person_in_dialogue_and_quoted_titles(self) -> None:
         cases = (
             "你对托马斯说：“我会保护你们。”",
@@ -188,6 +226,19 @@ class PersistentNarrationPolicyTests(unittest.IsolatedAsyncioTestCase):
             player_view=view,
             allowed_evidence_refs=("event-1",),
         )
+
+    async def test_named_actor_mode_rejects_unquoted_you(self):
+        context = self._context().model_copy(
+            update={
+                "addressing_mode": "named_actor",
+                "acting_character_name": "陈探员",
+            }
+        )
+        with self.assertRaises(ActionPlanNarrationValidationError) as raised:
+            await ActionPlanNarrator(
+                _PersistentNarrationModel("你打开了抽屉。")
+            ).narrate(context)
+        self.assertEqual(raised.exception.reason, "subject_ownership")
 
     async def test_rejects_uncommitted_unconscious_claim(self):
         with self.assertRaises(ActionPlanNarrationValidationError):

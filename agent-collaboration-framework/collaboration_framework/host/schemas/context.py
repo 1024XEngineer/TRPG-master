@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import Field, model_validator
 
 from collaboration_framework.contracts import (
@@ -39,6 +41,7 @@ class OpeningNarrationContext(ContractModel):
     scene: OpeningSceneContext
     participants: tuple[OpeningParticipant, ...] = Field(min_length=1)
     solo_background_summary: str = ""
+    addressing_mode: Literal["second_person", "named_actor"] = "second_person"
 
     @model_validator(mode="after")
     def validate_public_scope(self) -> OpeningNarrationContext:

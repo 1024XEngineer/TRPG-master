@@ -1957,6 +1957,10 @@ export default function RoomPage() {
   useEffect(() => {
     const field = composerInputRef.current
     if (!field) return
+    if (!input) {
+      field.style.height = ''
+      return
+    }
     field.style.height = 'auto'
     field.style.height = `${field.scrollHeight}px`
   }, [input])

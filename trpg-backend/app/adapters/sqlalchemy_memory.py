@@ -191,6 +191,7 @@ class SqlAlchemyMemoryStore:
 
     async def project_room_events(self, room_id: str) -> MemoryProjectionResult:
         """只投影房间游标后的新事件，并以单事务提交记忆和高水位。"""
+        room_id = _canonical_id(room_id) or room_id
         async with self._session_factory() as session:
             result = await self._project_room_events(session, room_id)
             await session.commit()
@@ -198,6 +199,7 @@ class SqlAlchemyMemoryStore:
 
     async def rebuild_room_events(self, room_id: str) -> MemoryProjectionResult:
         """在单事务中替换指定房间的记忆投影，保留摘要和权威事件。"""
+        room_id = _canonical_id(room_id) or room_id
         async with self._session_factory() as session:
             await session.execute(
                 delete(MemoryEntryRecord).where(MemoryEntryRecord.room_id == room_id)
@@ -375,7 +377,8 @@ class SqlAlchemyMemoryStore:
         max_chars: int = 4000,
     ) -> MemoryContext:
         """按服务端作用域过滤记忆，模型不能自行扩大查询范围。"""
-        await self.project_room_events(room_id)
+        stored_room_id = _canonical_id(room_id) or room_id
+        await self.project_room_events(stored_room_id)
         async with self._session_factory() as session:
             player_scope_ids = _scope_ids(player_id)
             actor_scope_ids = _scope_ids(actor_id)
@@ -383,7 +386,7 @@ class SqlAlchemyMemoryStore:
                 item for entity_id in entity_ids for item in _scope_ids(entity_id)
             )
             conditions = [
-                MemoryEntryRecord.room_id == room_id,
+                MemoryEntryRecord.room_id == stored_room_id,
                 # Engine 的内部裁决原因只服务审计，不应占用 Host 的剧情记忆预算。
                 ~MemoryEntryRecord.content.startswith("adjudication:"),
                 or_(
@@ -403,10 +406,15 @@ class SqlAlchemyMemoryStore:
                 ),
             ]
             if location_id:
+                entity_relevance = or_(
+                    MemoryEntryRecord.subject_id.in_(entity_scope_ids),
+                    MemoryEntryRecord.object_id.in_(entity_scope_ids),
+                    *(MemoryEntryRecord.participants.contains([item]) for item in entity_scope_ids),
+                )
                 conditions.append(
                     or_(
                         MemoryEntryRecord.location_id == location_id,
-                        MemoryEntryRecord.object_id.in_(entity_scope_ids),
+                        entity_relevance,
                         # 没有地点的全局权威事件仍然是可召回的长期事实；外层
                         # room/visibility/participant 条件继续负责权限隔离。
                         MemoryEntryRecord.location_id.is_(None),
@@ -443,7 +451,8 @@ class SqlAlchemyMemoryStore:
                 entry = MemoryEntry.model_validate(
                     {
                         "memory_id": record.id,
-                        "room_id": record.room_id,
+                        # 数据库 UUID 可能是 canonical 形式，契约必须回显调用方作用域。
+                        "room_id": room_id,
                         "subject_id": record.subject_id,
                         "object_id": record.object_id,
                         "kind": record.kind,
@@ -464,13 +473,17 @@ class SqlAlchemyMemoryStore:
                 total += len(entry.content)
             summary_record = await session.scalar(
                 select(ConversationSummaryRecord).where(
-                    ConversationSummaryRecord.room_id == room_id,
+                    ConversationSummaryRecord.room_id == stored_room_id,
                     ConversationSummaryRecord.player_id.in_(player_scope_ids),
                 )
             )
             summary = None
             if summary_record and summary_record.summary_json:
-                summary = ConversationSummary.model_validate(summary_record.summary_json)
+                summary_payload = dict(summary_record.summary_json)
+                # 摘要 JSON 是模型生成时保存的外部 ID，读取时统一回显当前作用域。
+                summary_payload["room_id"] = room_id
+                summary_payload["player_id"] = player_id
+                summary = ConversationSummary.model_validate(summary_payload)
             return MemoryContext(
                 room_id=room_id,
                 player_id=player_id,

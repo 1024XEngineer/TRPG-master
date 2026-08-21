@@ -374,3 +374,54 @@ async def test_summary_enqueue_preserves_running_lease(
     assert record.status == "running"
     assert record.lease_owner == "worker-1"
     assert record.pending_through_sequence == 13
+
+
+@pytest.mark.asyncio
+async def test_read_context_normalizes_uuid_scope_and_entity_memory(
+    db_session: AsyncSession,
+    memory_store,
+) -> None:  # noqa: ANN001
+    """带连字符 UUID 和跨地点 NPC 记忆仍能安全进入当前 Host 上下文。"""
+    room, player, actor_id = await _create_memory_room(db_session, 16)
+    db_session.add_all(
+        [
+            Event(
+                id=str(uuid.uuid4()),
+                room_id=room.id,
+                player_id=player.id,
+                actor_id=actor_id,
+                event_type="action.broadcast",
+                visibility="public",
+                scene_id="thomas_office",
+                payload={
+                    "utterance": "告诉托马斯记住蓝色钟摆的三个节拍。",
+                    "speaker_id": actor_id,
+                    "listener_ids": ["thomas"],
+                },
+                created_at=datetime(2026, 8, 5, tzinfo=UTC),
+            ),
+            ConversationSummaryRecord(
+                room_id=room.id,
+                player_id=player.id,
+                summary_json={
+                    "room_id": room.id,
+                    "player_id": player.id,
+                    "summary": "托马斯听过一段重要咒语。",
+                },
+            ),
+        ]
+    )
+    await db_session.commit()
+
+    context = await memory_store.read_context(
+        room_id=room.id,
+        player_id=player.id,
+        actor_id=actor_id,
+        revision="1",
+        entity_ids=("thomas",),
+        location_id="arnoldsburg_streets",
+    )
+    assert any(entry.epistemic_status == "experienced" for entry in context.entries)
+    assert context.conversation_summary is not None
+    assert context.conversation_summary.room_id == room.id
+    assert context.conversation_summary.player_id == player.id

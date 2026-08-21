@@ -11,6 +11,7 @@ from typing import Literal, Protocol
 
 import structlog
 from collaboration_framework.contracts import (
+    TERMINAL_ADJUDICATION_STATUSES,
     ActionAdjudication,
     ActionMethod,
     ActionPlan,
@@ -1085,6 +1086,15 @@ class ActionPlanTurnApplication:
             if status.execution is not None:
                 execution = status.execution
             pending = execution.pending_decision if execution is not None else None
+            if pending is not None and not pending.allow_cancel:
+                # 规则强制的被动检定没有取消路由（`CheckStep` 不带
+                # `cancel_step_id`），引擎会硬拒。这里必须先拦下来给玩家一句能
+                # 看懂的话，否则「取消剩余步骤」会撞成一次内部错误（#398）。
+                raise TurnExecutionError(
+                    "PLAN_CANCEL_BLOCKED_BY_RULE_CHECK",
+                    "这次检定由规则强制，必须先完成才能取消后续步骤",
+                    retryable=False,
+                )
             if (
                 execution is not None
                 and execution.status == "awaiting_skill_choice"
@@ -1172,7 +1182,7 @@ class ActionPlanTurnApplication:
                 action_request_id=current.step_request_id,
             )
         )
-        if status.status in {"resolved", "cancelled"}:
+        if status.status in TERMINAL_ADJUDICATION_STATUSES:
             return
         if status.status != "awaiting_post_roll_decision" or status.execution is None:
             raise TurnExecutionError(

@@ -27,7 +27,8 @@ export interface PendingCheckDecisionView {
   actor_id: string
   summary: string
   options: PendingCheckOption[]
-  allow_cancel: true
+  // false 表示这次检定由规则强制：没有取消路由，玩家只能掷。
+  allow_cancel: boolean
 }
 
 export interface CheckRoll {

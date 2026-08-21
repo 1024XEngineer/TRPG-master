@@ -8,6 +8,7 @@ commits them without interpreting player language.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import Literal, NoReturn
 from uuid import uuid4
 
@@ -23,6 +24,8 @@ from collaboration_framework.contracts import (
     AdjudicationStatusView,
     AdvanceWorldTimeEffect,
     CheckDecisionRequest,
+    CheckRunView,
+    CheckStep,
     ContractError,
     GetAdjudicationStatusRequest,
     NarrationEvidence,
@@ -41,10 +44,13 @@ from collaboration_framework.contracts.validation import (
     Repairability,
     ValidationResult,
 )
+from collaboration_framework.registry import check_profiles as check_profile_registry
 from collaboration_framework.registry import effects as effect_registry
 
+from .agenda_execution import RuleSettlement, SettlementResult
 from .dice import DiceRoller, coc7_success_level, passes_difficulty
 from .models import (
+    AgendaParentContinuation,
     AgendaSource,
     CheckRun,
     CompletedAdjudicationCommand,
@@ -52,6 +58,7 @@ from .models import (
     EngineRuntimeSnapshot,
     GameState,
     PendingCheckDecision,
+    RuleCheckOrigin,
 )
 from .navigation import resolve_location_target
 from .persistent_results import (
@@ -62,13 +69,10 @@ from .persistent_results import (
 from .ports import EngineStore
 from .projection_v3 import project_v3
 from .rules_v3 import (
-    agenda_item_for_event,
-    agenda_status_for_walk,
     agent_match_scope_admits,
     create_rule_agenda,
     effects_after_degree,
     entity_state,
-    matching_event_rules,
     pending_check_for,
     resolve_rule_option,
     walk_rule,
@@ -76,6 +80,90 @@ from .rules_v3 import (
 from .timeline import advanced_to_next, next_point_after, time_advance_block_reason
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class ActionFinalization:
+    """一次动作提交完效果、结算完规则之后的全部产物。
+
+    在 #398 之前这里是一个 `(state, events)` 二元组。规则链现在有三种收场
+    ——跑完、失败、挂在一次被动检定上——每一种调用方都要区别对待，元组已经
+    表达不下了。
+    """
+
+    state: GameState
+    events: tuple[DomainEvent, ...]
+    agenda_failure_code: str | None = None
+    # 非空即：规则要求一次检定，这次动作到此暂停，等玩家掷完骰再从同一个
+    # Agenda 恢复。
+    pending_decision: PendingCheckDecision | None = None
+
+
+class _SettlementRunner:
+    """Hands `RuleSettlement` the three Engine capabilities it needs.
+
+    The settler owns *when* a rule's effects run; the service still owns *how*.
+    Binding room/request/actor once here keeps the settler's call sites free of
+    arguments that never vary within one action.
+    """
+
+    def __init__(
+        self,
+        service: AdjudicationEngineService,
+        runtime: EngineRuntimeSnapshot,
+        request_id: str,
+        actor_id: str,
+    ) -> None:
+        self._service = service
+        self._room_id = runtime.game_state.room_id
+        self._request_id = request_id
+        self._actor_id = actor_id
+
+    def validate_effects(
+        self,
+        runtime: EngineRuntimeSnapshot,
+        effects: tuple[ActionEffect, ...],
+    ) -> None:
+        self._service._validate_effect_sequence(runtime, effects)
+
+    def apply_effect(
+        self,
+        runtime: EngineRuntimeSnapshot,
+        state: GameState,
+        effect: ActionEffect,
+        *,
+        offset: int,
+    ) -> tuple[GameState, tuple[DomainEvent, ...]]:
+        return self._service._apply_effect(
+            runtime,
+            state,
+            effect,
+            room_id=self._room_id,
+            request_id=self._request_id,
+            actor_id=self._actor_id,
+            offset=offset,
+        )
+
+    def emit_event(
+        self,
+        state: GameState,
+        *,
+        offset: int,
+        event_type: str,
+        payload: dict,
+        visibility: str = "public",
+    ) -> DomainEvent:
+        return self._service._event_from_state(
+            state,
+            room_id=self._room_id,
+            offset=offset,
+            request_id=self._request_id,
+            actor_id=self._actor_id,
+            event_type=event_type,
+            payload=payload,
+            visibility=visibility,
+        )
+
 
 # The engine logic `registry/effects.py` needs but may not import: it is a leaf
 # so that `module` can read the same tables at publish time (#347, and
@@ -543,35 +631,29 @@ class AdjudicationEngineService:
             )
 
             if request.adjudication.check.mode == "none":
-                new_state, events = self._finalize_action(
+                final = self._finalize_action(
                     runtime,
                     request_id=request.adjudication.request_id,
                     adjudication=request.adjudication,
                     passed=True,
+                    player_id=request.player_id,
                     prefix_events=(),
                 )
-                execution = AdjudicationExecution(
+                new_state, events = final.state, final.events
+                execution = self._execution_for(
+                    runtime,
+                    final,
                     request_id=request.adjudication.request_id,
                     action_request_id=request.adjudication.request_id,
-                    status="resolved",
-                    view_revision=str(new_state.event_sequence),
                     outcome="success",
-                    event_refs=tuple(event.event_id for event in events),
-                    public_event_refs=self._public_event_refs(events),
-                    narration_evidence=self._narration_evidence(
-                        runtime,
-                        new_state=new_state,
-                        events=events,
-                        player_id=request.player_id,
-                        actor_id=request.adjudication.actor_id,
-                    ),
-                    committed_results=committed_results_from_events(events),
+                    player_id=request.player_id,
+                    actor_id=request.adjudication.actor_id,
                 )
                 await transaction.commit_adjudication(
                     expected_revision=runtime.revision,
                     new_state=new_state,
                     events=events,
-                    decision=None,
+                    decision=final.pending_decision,
                     check_run=None,
                     completed_command=CompletedAdjudicationCommand(
                         request_id=request.adjudication.request_id,
@@ -683,6 +765,16 @@ class AdjudicationEngineService:
                 )
 
             if request.choice.kind == "cancel":
+                if not decision.allow_cancel:
+                    # 规则强制的检定没有取消路由：`CheckStep` 不像
+                    # `AdjudicatedCheckStep` 那样带 `cancel_step_id`，取消它就是
+                    # 把 Agenda 永久卡在这里（#398 §阶段三）。
+                    self._reject_validation(
+                        "CHECK_NOT_CANCELLABLE",
+                        repairability="requires_player_choice",
+                        fault="player",
+                        player_safe_reason="这次检定由规则强制，必须先完成",
+                    )
                 event = self._event(
                     runtime,
                     offset=1,
@@ -826,31 +918,24 @@ class AdjudicationEngineService:
                 },
                 deep=True,
             )
-            new_state, events = self._finalize_action(
+            final = self._settle_check(
                 runtime,
                 request_id=request.request_id,
-                adjudication=decision.adjudication,
+                decision=decision,
+                check_run=check_run,
                 passed=roll.passed,
                 prefix_events=(rolled_event,),
-                check_run=check_run,
             )
-            execution = AdjudicationExecution(
+            new_state, events = final.state, final.events
+            execution = self._execution_for(
+                runtime,
+                final,
                 request_id=request.request_id,
                 action_request_id=decision.action_request_id,
-                status="resolved",
-                view_revision=str(new_state.event_sequence),
                 outcome="success" if roll.passed else "failure",
+                player_id=decision.player_id,
+                actor_id=decision.actor_id,
                 check_run=self._run_view(check_run),
-                event_refs=tuple(event.event_id for event in events),
-                public_event_refs=self._public_event_refs(events),
-                narration_evidence=self._narration_evidence(
-                    runtime,
-                    new_state=new_state,
-                    events=events,
-                    player_id=decision.player_id,
-                    actor_id=decision.actor_id,
-                ),
-                committed_results=committed_results_from_events(events),
             )
             rule_effects_excluded = decision.adjudication.rule_decision is not None
             selected_effects = (
@@ -874,6 +959,9 @@ class AdjudicationEngineService:
                 events=events,
                 decision=resolved_decision,
                 check_run=check_run,
+                additional_decisions=(
+                    () if final.pending_decision is None else (final.pending_decision,)
+                ),
                 completed_command=CompletedAdjudicationCommand(
                     request_id=request.request_id,
                     request=request,
@@ -1051,31 +1139,24 @@ class AdjudicationEngineService:
                 },
                 deep=True,
             )
-            new_state, events = self._finalize_action(
+            final = self._settle_check(
                 runtime_after_resource,
                 request_id=request.request_id,
-                adjudication=check_run.adjudication,
+                decision=decision,
+                check_run=resolved_run,
                 passed=final_roll.passed,
                 prefix_events=tuple(prefix),
-                check_run=resolved_run,
             )
-            execution = AdjudicationExecution(
+            new_state, events = final.state, final.events
+            execution = self._execution_for(
+                runtime_after_resource,
+                final,
                 request_id=request.request_id,
                 action_request_id=check_run.action_request_id,
-                status="resolved",
-                view_revision=str(new_state.event_sequence),
                 outcome="success" if final_roll.passed else "failure",
+                player_id=decision.player_id,
+                actor_id=decision.actor_id,
                 check_run=self._run_view(resolved_run),
-                event_refs=tuple(event.event_id for event in events),
-                public_event_refs=self._public_event_refs(events),
-                narration_evidence=self._narration_evidence(
-                    runtime_after_resource,
-                    new_state=new_state,
-                    events=events,
-                    player_id=decision.player_id,
-                    actor_id=decision.actor_id,
-                ),
-                committed_results=committed_results_from_events(events),
             )
             rule_effects_excluded = check_run.adjudication.rule_decision is not None
             selected_effects = (
@@ -1099,6 +1180,9 @@ class AdjudicationEngineService:
                 events=events,
                 decision=resolved_decision,
                 check_run=resolved_run,
+                additional_decisions=(
+                    () if final.pending_decision is None else (final.pending_decision,)
+                ),
                 completed_command=CompletedAdjudicationCommand(
                     request_id=request.request_id,
                     request=request,
@@ -1109,6 +1193,65 @@ class AdjudicationEngineService:
                 ),
             )
             return execution
+
+    def _execution_for(
+        self,
+        runtime: EngineRuntimeSnapshot,
+        final: ActionFinalization,
+        *,
+        request_id: str,
+        action_request_id: str,
+        outcome: str,
+        player_id: str,
+        actor_id: str,
+        check_run: CheckRunView | None = None,
+    ) -> AdjudicationExecution:
+        """把一次结算的产物投影成 execution，三条提交路径共用。
+
+        规则要求了检定时，这次动作还没结束——状态复用既有的
+        `awaiting_skill_choice`，玩家看到的是同一个检定面板。已经提交的效果照常
+        进 evidence 与 committed_results：它们是真的发生了，只是行动还没走完。
+        """
+
+        common = {
+            "request_id": request_id,
+            "action_request_id": action_request_id,
+            "view_revision": str(final.state.event_sequence),
+            "event_refs": tuple(event.event_id for event in final.events),
+            "public_event_refs": self._public_event_refs(final.events),
+            "narration_evidence": self._narration_evidence(
+                runtime,
+                new_state=final.state,
+                events=final.events,
+                player_id=player_id,
+                actor_id=actor_id,
+            ),
+            "committed_results": committed_results_from_events(final.events),
+        }
+        if final.pending_decision is not None:
+            return AdjudicationExecution(
+                **common,
+                status="awaiting_skill_choice",
+                outcome="pending",
+                pending_decision=final.pending_decision.player_view(),
+            )
+        return AdjudicationExecution(
+            **common,
+            status=self._settled_status(final.agenda_failure_code),
+            rule_failure_code=final.agenda_failure_code,
+            outcome=outcome,
+            check_run=check_run,
+        )
+
+    @staticmethod
+    def _settled_status(agenda_failure_code: str | None) -> str:
+        """`resolved`，除非这次动作触发的规则链没能跑完。
+
+        两者都是终态、都已提交效果；区别只是后者必须把「规则链停在哪」说出来，
+        而不是像 #398 之前那样静默返回 `resolved`。
+        """
+
+        return "resolved" if agenda_failure_code is None else "rule_failed"
 
     @staticmethod
     def _public_event_refs(events: tuple[DomainEvent, ...]) -> tuple[str, ...]:
@@ -1574,26 +1717,31 @@ class AdjudicationEngineService:
         request_id: str,
         adjudication: ActionAdjudication,
         passed: bool,
+        player_id: str,
         prefix_events: tuple[DomainEvent, ...],
         check_run: CheckRun | None = None,
-    ) -> tuple[GameState, tuple[DomainEvent, ...]]:
+    ) -> ActionFinalization:
+        """Commit this action's effects and settle the Rules they triggered.
+
+        The effects no longer all run first. Each one commits, its events are
+        settled against the world *as it is at that moment*, and only a stable
+        Rule chain lets the next effect run (#398 §阶段二). An action can
+        therefore end suspended, with the rest of its effects parked on the
+        Agenda as a continuation.
+        """
+
         state = runtime.game_state.model_copy(deep=True)
         events = list(prefix_events)
         if check_run is not None:
             events.append(
-                self._event_from_state(
+                self._check_resolved_event(
                     state,
-                    room_id=runtime.game_state.room_id,
-                    offset=len(events) + 1,
+                    runtime=runtime,
                     request_id=request_id,
                     actor_id=adjudication.actor_id,
-                    event_type="check.resolved",
-                    payload={
-                        "check_id": check_run.check_id,
-                        "action_request_id": check_run.action_request_id,
-                        "passed": passed,
-                        "degree": (check_run.final_result or check_run.roll).degree,
-                    },
+                    check_run=check_run,
+                    passed=passed,
+                    offset=len(events) + 1,
                 )
             )
         selected_effects = self._owned_effects(
@@ -1602,17 +1750,443 @@ class AdjudicationEngineService:
             passed=passed,
             check_run=check_run,
         )
-        for effect in selected_effects:
+        settlement = self._new_settlement(
+            runtime, request_id=request_id, actor_id=adjudication.actor_id
+        )
+        continuation = AgendaParentContinuation(
+            action_request_id=adjudication.request_id,
+            passed=passed,
+            remaining_effects=selected_effects,
+        )
+        return self._drive_continuation(
+            runtime,
+            settlement=settlement,
+            state=state,
+            events=events,
+            continuation=continuation,
+            request_id=request_id,
+            adjudication=adjudication,
+            player_id=player_id,
+            result=None,
+        )
+
+    def _settle_check(
+        self,
+        runtime: EngineRuntimeSnapshot,
+        *,
+        request_id: str,
+        decision: PendingCheckDecision,
+        check_run: CheckRun,
+        passed: bool,
+        prefix_events: tuple[DomainEvent, ...],
+    ) -> ActionFinalization:
+        """检定结算完之后走哪条路，取决于这次检定是谁的。
+
+        玩家自己的行动检定：提交 Agent 裁决好的 success/failure 效果。
+        规则拥有的被动检定：回到挂起的 Agenda，按 `result_routes` 走它的分支，
+        Agent 不再参与后果裁决（#226 §5）。
+        """
+
+        if decision.rule_origin is not None:
+            return self._resume_rule_check(
+                runtime,
+                request_id=request_id,
+                decision=decision,
+                check_run=check_run,
+                passed=passed,
+                prefix_events=prefix_events,
+            )
+        return self._finalize_action(
+            runtime,
+            request_id=request_id,
+            adjudication=decision.adjudication,
+            passed=passed,
+            player_id=decision.player_id,
+            prefix_events=prefix_events,
+            check_run=check_run,
+        )
+
+    def _resume_rule_check(
+        self,
+        runtime: EngineRuntimeSnapshot,
+        *,
+        request_id: str,
+        decision: PendingCheckDecision,
+        check_run: CheckRun,
+        passed: bool,
+        prefix_events: tuple[DomainEvent, ...],
+    ) -> ActionFinalization:
+        """检定结算完，从**同一个 Agenda** 的 `result_routes` 分支接着走。
+
+        这是被动检定与主动检定最本质的差别：主动检定结算的是 Agent 裁决好的
+        success/failure 效果；被动检定结算的是规则自己的分支，Agent 不再参与
+        后果裁决（#226 §5）。
+        """
+
+        origin = decision.rule_origin
+        assert origin is not None
+        state = runtime.game_state.model_copy(deep=True)
+        events = [
+            *prefix_events,
+            self._check_resolved_event(
+                state,
+                runtime=runtime,
+                request_id=request_id,
+                actor_id=decision.actor_id,
+                check_run=check_run,
+                passed=passed,
+                offset=len(prefix_events) + 1,
+            ),
+        ]
+        agenda = state.rule_agendas.get(origin.agenda_id)
+        rule = next(
+            (
+                item
+                for item in runtime.module_content.rules
+                if item.id == origin.rule_id
+            ),
+            None,
+        )
+        step = (
+            next(
+                (item for item in rule.execution.steps if item.id == origin.step_id),
+                None,
+            )
+            if rule is not None
+            else None
+        )
+        if agenda is None or rule is None or not isinstance(step, CheckStep):
+            # 游标指向的东西不在了——模组被换版、或者 Agenda 已被别的路径收掉。
+            # 半截恢复比显式失败更糟，所以这里直接拒绝。
+            self._reject_validation(
+                "RULE_AGENDA_UNRESUMABLE",
+                repairability="hard_reject",
+                fault="engine",
+                player_safe_reason="规则处理暂时无法完成",
+                internal_reason=(
+                    f"Agenda {origin.agenda_id} 的游标 "
+                    f"{origin.rule_id}/{origin.step_id} 无法恢复"
+                ),
+                classification_coverage="rule_effects_excluded",
+            )
+        settlement = RuleSettlement(
+            agenda=agenda,
+            runtime=runtime,
+            actor_id=decision.actor_id,
+            runner=_SettlementRunner(self, runtime, request_id, decision.actor_id),
+            queue=list(agenda.queue),
+            source_event_ids=list(agenda.source_event_ids),
+            suspended=True,
+        )
+        degree = (check_run.final_result or check_run.roll).degree
+        result = settlement.resume_rule(
+            rule, step.result_routes.get(degree), state, events
+        )
+        continuation = agenda.parent_continuation or AgendaParentContinuation(
+            action_request_id=decision.action_request_id,
+            passed=passed,
+            completion_emitted=True,
+        )
+        return self._drive_continuation(
+            runtime,
+            settlement=settlement,
+            state=result.state,
+            events=events,
+            continuation=continuation,
+            request_id=request_id,
+            adjudication=decision.adjudication,
+            player_id=decision.player_id,
+            result=result,
+        )
+
+    def _drive_continuation(
+        self,
+        runtime: EngineRuntimeSnapshot,
+        *,
+        settlement: RuleSettlement,
+        state: GameState,
+        events: list[DomainEvent],
+        continuation: AgendaParentContinuation,
+        request_id: str,
+        adjudication: ActionAdjudication,
+        player_id: str,
+        result: SettlementResult | None,
+    ) -> ActionFinalization:
+        """跑完父动作还欠的那部分，再把 Agenda 封存。
+
+        首次提交和检定恢复走的是同一条路：区别只在于进来时 continuation 里还剩
+        多少效果、完成事件发过没有。
+        """
+
+        actor_id = adjudication.actor_id
+        remaining = continuation.remaining_effects
+        completion_emitted = continuation.completion_emitted
+        if result is None or not result.blocked:
+            state, result, remaining = self._drive_with_barrier(
+                settlement,
+                state,
+                events,
+                remaining,
+                runtime=runtime,
+                request_id=request_id,
+                actor_id=actor_id,
+            )
+        if not result.blocked and not completion_emitted:
+            state, result = self._complete_parent_action(
+                settlement,
+                state,
+                events,
+                runtime=runtime,
+                request_id=request_id,
+                adjudication=adjudication,
+                passed=continuation.passed,
+            )
+            completion_emitted = True
+
+        pending_decision: PendingCheckDecision | None = None
+        if result.status == "suspended":
+            # 规则链还没稳定，父动作剩下的效果不能就这么丢掉，也不能抢在规则
+            # 前面跑完——存进 Agenda，等恢复时接着来（#398 §阶段二）。
+            settlement.agenda = settlement.agenda.model_copy(
+                update={
+                    "parent_continuation": continuation.model_copy(
+                        update={
+                            "remaining_effects": remaining,
+                            "completion_emitted": completion_emitted,
+                        }
+                    )
+                }
+            )
+            pending_decision = self._passive_check_decision(
+                runtime,
+                settlement=settlement,
+                state=state,
+                adjudication=adjudication,
+                player_id=player_id,
+            )
+        state, agenda_failure_code = settlement.finish(state, events)
+        state = state.model_copy(
+            update={"event_sequence": runtime.game_state.event_sequence + len(events)},
+            deep=True,
+        )
+        return ActionFinalization(
+            state=state,
+            events=tuple(events),
+            agenda_failure_code=agenda_failure_code,
+            pending_decision=pending_decision,
+        )
+
+    def _check_resolved_event(
+        self,
+        state: GameState,
+        *,
+        runtime: EngineRuntimeSnapshot,
+        request_id: str,
+        actor_id: str,
+        check_run: CheckRun,
+        passed: bool,
+        offset: int,
+    ) -> DomainEvent:
+        return self._event_from_state(
+            state,
+            room_id=runtime.game_state.room_id,
+            offset=offset,
+            request_id=request_id,
+            actor_id=actor_id,
+            event_type="check.resolved",
+            payload={
+                "check_id": check_run.check_id,
+                "action_request_id": check_run.action_request_id,
+                "passed": passed,
+                "degree": (check_run.final_result or check_run.roll).degree,
+            },
+        )
+
+    def _passive_check_decision(
+        self,
+        runtime: EngineRuntimeSnapshot,
+        *,
+        settlement: RuleSettlement,
+        state: GameState,
+        adjudication: ActionAdjudication,
+        player_id: str,
+    ) -> PendingCheckDecision | None:
+        """把 `CheckStep(initiation_kind="passive_rule")` 接到既有检定工作流上。
+
+        在 #398 之前，Agenda 挂到 `awaiting_passive_check` 上就没了下文——这个
+        状态在 `trpg-backend/app` 与 `collaboration_framework/host` 下 grep 零
+        命中。表现是规则在检定前的效果照常提交、**检定本身静默丢失**：世界推进
+        了，骰子没出现。
+
+        被动检定与主动检定的差别只有两处，其余整条链路（PendingCheckDecision →
+        CheckRun → WebSocket → CheckWorkflowPanel）原样复用：
+
+        * `options` 只有一条，由规则的 check spec 写死，Agent 不再选技能；
+        * `allow_cancel=False`——`CheckStep` 不像 `AdjudicatedCheckStep` 那样带
+          `cancel_step_id`，规则强制的检定没有取消路由。
+        """
+
+        agenda = settlement.agenda
+        if agenda.status != "awaiting_passive_check":
+            return None
+        rule = next(
+            (
+                item
+                for item in runtime.module_content.rules
+                if item.id == agenda.current_rule_id
+            ),
+            None,
+        )
+        step = (
+            next(
+                (
+                    item
+                    for item in rule.execution.steps
+                    if item.id == agenda.current_step_id
+                ),
+                None,
+            )
+            if rule is not None
+            else None
+        )
+        if rule is None or not isinstance(step, CheckStep):
+            settlement.fail("passive_check_step_not_found")
+            return None
+
+        option = self._passive_check_option(state, adjudication.actor_id, step)
+        if option is None:
+            # 停在一个引擎读不出目标值的检定上。此前这类情况会静默挂着；现在
+            # 它和其他「引擎做不到」一样显式失败并留痕（#398 §阶段一）。
+            settlement.fail("check_profile_unavailable")
+            return None
+
+        source_event_id = next(
+            (
+                item.source_event_id
+                for item in settlement.queue
+                if item.rule_id == rule.id and item.status == "running"
+            ),
+            None,
+        )
+        if source_event_id is None:
+            settlement.fail("passive_check_step_not_found")
+            return None
+
+        decision = PendingCheckDecision(
+            decision_id=self._new_id("check_decision"),
+            room_id=runtime.game_state.room_id,
+            player_id=player_id,
+            actor_id=adjudication.actor_id,
+            # 沿用父动作的 request id：ActionPlan 的当前步骤、重连恢复和命令
+            # 日志都以它为键。数据库那条「一个动作至多一次检定」的唯一约束因此
+            # 放宽成「至多一次**未结算**的检定」（见 b8c9d0e1f2a3 迁移）。
+            action_request_id=adjudication.request_id,
+            source_revision=runtime.revision,
+            status="awaiting_skill_choice",
+            adjudication=adjudication,
+            options=(option,),
+            rule_origin=RuleCheckOrigin(
+                agenda_id=agenda.agenda_id,
+                rule_id=rule.id,
+                branch_id=agenda.current_branch_id or "default",
+                step_id=step.id,
+                source_event_id=source_event_id,
+            ),
+            allow_cancel=False,
+        )
+        settlement.agenda = agenda.model_copy(
+            update={"pending_check_id": decision.decision_id}
+        )
+        return decision
+
+    def _passive_check_option(
+        self,
+        state: GameState,
+        actor_id: str,
+        step: CheckStep,
+    ) -> PendingCheckOption | None:
+        """规则自己指定技能，所以菜单只有一条。
+
+        这是 `RuleCheckSpec.profile_id` / `parameters` 的第一个真实消费者——在
+        此之前这两个字段除契约、测试与 build 脚本外零消费者。
+        """
+
+        profile = check_profile_registry.registration_for(step.check.profile_id)
+        if profile is None:
+            return None
+        actor = state.actors.get(actor_id)
+        if actor is None:
+            return None
+        target_value = getattr(actor.resources, profile.resource, None)
+        if not isinstance(target_value, int) or not 0 <= target_value <= 100:
+            return None
+        return PendingCheckOption(
+            candidate_id=f"rule:{step.id}",
+            skill_id=profile.resource,
+            display_name=profile.display_name,
+            target_value=target_value,
+            difficulty=step.check.difficulty or profile.default_difficulty,
+            method_summary=profile.method_summary,
+            player_safe_reason=profile.player_safe_reason,
+        )
+
+    def _drive_with_barrier(
+        self,
+        settlement: RuleSettlement,
+        state: GameState,
+        events: list[DomainEvent],
+        effects: tuple[ActionEffect, ...],
+        *,
+        runtime: EngineRuntimeSnapshot,
+        request_id: str,
+        actor_id: str,
+    ) -> tuple[GameState, SettlementResult, tuple[ActionEffect, ...]]:
+        """执行一个效果 → 提交它的事件 → 立即结算该事件的规则 → 再下一个。
+
+        返回停下时的 state、最后一次结算结果，以及**还没执行**的效果。
+
+        先结算一次再进循环：`check.rolled` / `check.resolved` 这些前置事件同样
+        是规则输入，它们的规则也必须在第一个效果之前就位。
+        """
+
+        result = settlement.advance(state, events)
+        if result.blocked:
+            return result.state, result, effects
+        state = result.state
+        for index, effect in enumerate(effects):
             state, emitted = self._apply_effect(
                 runtime,
                 state,
                 effect,
                 room_id=runtime.game_state.room_id,
                 request_id=request_id,
-                actor_id=adjudication.actor_id,
+                actor_id=actor_id,
                 offset=len(events) + 1,
             )
             events.extend(emitted)
+            result = settlement.advance(state, events)
+            state = result.state
+            if result.blocked:
+                return state, result, effects[index + 1 :]
+        return state, result, ()
+
+    def _complete_parent_action(
+        self,
+        settlement: RuleSettlement,
+        state: GameState,
+        events: list[DomainEvent],
+        *,
+        runtime: EngineRuntimeSnapshot,
+        request_id: str,
+        adjudication: ActionAdjudication,
+        passed: bool,
+    ) -> tuple[GameState, SettlementResult]:
+        """Agenda 稳定之后才发完成事件，然后结算它自己触发的规则。
+
+        `action.succeeded` 是「这次行动到此为止」的断言。规则链还挂着的时候发它
+        就是在说谎——#398 §阶段二 明确要求 Agenda 未稳定前不得发布它。
+        """
+
         events.append(
             self._event_from_state(
                 state,
@@ -1624,18 +2198,8 @@ class AdjudicationEngineService:
                 payload={"action_request_id": adjudication.request_id},
             )
         )
-        state, events = self._apply_event_rules(
-            runtime,
-            state=state,
-            events=events,
-            request_id=request_id,
-            actor_id=adjudication.actor_id,
-        )
-        state = state.model_copy(
-            update={"event_sequence": runtime.game_state.event_sequence + len(events)},
-            deep=True,
-        )
-        return state, tuple(events)
+        settled = settlement.advance(state, events)
+        return settled.state, settled
 
     def _apply_event_rules(
         self,
@@ -1645,7 +2209,7 @@ class AdjudicationEngineService:
         events: list[DomainEvent],
         request_id: str,
         actor_id: str,
-    ) -> tuple[GameState, list[DomainEvent]]:
+    ) -> tuple[GameState, list[DomainEvent], str | None]:
         return self._apply_v3_event_rules(
             runtime,
             state=state,
@@ -1662,192 +2226,40 @@ class AdjudicationEngineService:
         events: list[DomainEvent],
         request_id: str,
         actor_id: str,
-    ) -> tuple[GameState, list[DomainEvent]]:
+    ) -> tuple[GameState, list[DomainEvent], str | None]:
         """Run event Rules in queue order and persist the first blocked cursor.
 
         Effects and the resulting Agenda are returned in the same ``new_state``
         and therefore committed atomically by ``commit_adjudication``.
         """
 
-        agenda = create_rule_agenda(
-            agenda_id=self._new_id("agenda"),
-            room_id=runtime.game_state.room_id,
-            module=runtime.module_content,
-            correlation_id=request_id,
-            root_source=AgendaSource(kind="action", id=request_id),
-            revision=str(runtime.game_state.event_sequence),
+        settlement = self._new_settlement(
+            runtime, request_id=request_id, actor_id=actor_id
         )
-        queue = []
-        source_event_ids: list[str] = []
-        fired: set[tuple[str, str]] = set()
-        cursor = 0
-        suspended = False
+        result = settlement.advance(state, events)
+        state, failure_code = settlement.finish(result.state, events)
+        return state, events, failure_code
 
-        while cursor < len(events) and not suspended:
-            source_event = events[cursor]
-            cursor += 1
-            # Workflow/audit signals are never gameplay Rule inputs (#226 §4).
-            if source_event.type == "rule.triggered":
-                continue
-            rules = matching_event_rules(
-                runtime.module_content,
-                event_type=source_event.type,
-                state=state,
-                actor_id=actor_id,
-            )
-            pending_rules = []
-            for rule in rules:
-                fire_key = (rule.id, source_event.event_id)
-                if fire_key in fired:
-                    continue
-                fired.add(fire_key)
-                pending_rules.append(rule)
-                queue.append(agenda_item_for_event(rule, source_event))
-            if pending_rules:
-                source_event_ids.append(source_event.event_id)
-
-            for rule in pending_rules:
-                item_index = next(
-                    index
-                    for index, item in enumerate(queue)
-                    if item.source_event_id == source_event.event_id
-                    and item.rule_id == rule.id
-                    and item.status == "queued"
-                )
-                queue[item_index] = queue[item_index].model_copy(
-                    update={"status": "running"}
-                )
-                next_depth = agenda.chain_depth + 1
-                max_chain_depth = min(
-                    agenda.max_chain_depth, rule.limits.max_chain_depth
-                )
-                max_steps = min(agenda.max_steps, rule.limits.max_steps)
-                agenda = agenda.model_copy(
-                    update={
-                        "chain_depth": next_depth,
-                        "max_chain_depth": max_chain_depth,
-                        "max_steps": max_steps,
-                    }
-                )
-                if next_depth > max_chain_depth:
-                    queue[item_index] = queue[item_index].model_copy(
-                        update={"status": "failed"}
-                    )
-                    agenda = agenda.model_copy(
-                        update={
-                            "status": "failed",
-                            "failure_code": "agenda_budget_exceeded",
-                            "current_rule_id": rule.id,
-                            "current_branch_id": queue[item_index].branch_id,
-                        }
-                    )
-                    suspended = True
-                    break
-
-                walk = walk_rule(rule, branch_id=queue[item_index].branch_id)
-                next_step_count = agenda.step_count + walk.step_count
-                if next_step_count > max_steps:
-                    queue[item_index] = queue[item_index].model_copy(
-                        update={"status": "failed"}
-                    )
-                    agenda = agenda.model_copy(
-                        update={
-                            "status": "failed",
-                            "failure_code": "agenda_budget_exceeded",
-                            "current_rule_id": rule.id,
-                            "current_branch_id": queue[item_index].branch_id,
-                            "current_step_id": walk.suspended_at
-                            or next(
-                                branch.entry_step_id
-                                for branch in rule.execution.branches
-                                if branch.id == queue[item_index].branch_id
-                            ),
-                            "step_count": next_step_count,
-                        }
-                    )
-                    suspended = True
-                    break
-                agenda = agenda.model_copy(update={"step_count": next_step_count})
-
-                events.append(
-                    self._event_from_state(
-                        state,
-                        room_id=runtime.game_state.room_id,
-                        offset=len(events) + 1,
-                        request_id=request_id,
-                        actor_id=actor_id,
-                        event_type="rule.triggered",
-                        payload={
-                            "rule_id": rule.id,
-                            "source_event_id": source_event.event_id,
-                            "agenda_id": agenda.agenda_id,
-                        },
-                        visibility="hidden",
-                    )
-                )
-                rule_runtime = runtime.model_copy(
-                    update={"game_state": state}, deep=True
-                )
-                self._validate_effect_sequence(rule_runtime, tuple(walk.effects))
-                for effect in walk.effects:
-                    state, emitted = self._apply_effect(
-                        runtime,
-                        state,
-                        effect,
-                        room_id=runtime.game_state.room_id,
-                        request_id=request_id,
-                        actor_id=actor_id,
-                        offset=len(events) + 1,
-                    )
-                    events.extend(emitted)
-
-                status = agenda_status_for_walk(rule, walk)
-                if status == "stable":
-                    queue[item_index] = queue[item_index].model_copy(
-                        update={"status": "completed"}
-                    )
-                    continue
-                queue[item_index] = queue[item_index].model_copy(
-                    update={"status": "failed" if status == "failed" else "running"}
-                )
-                agenda = agenda.model_copy(
-                    update={
-                        "status": status,
-                        "failure_code": (
-                            "agenda_budget_exceeded" if status == "failed" else None
-                        ),
-                        "current_rule_id": rule.id,
-                        "current_branch_id": queue[item_index].branch_id,
-                        "current_step_id": walk.suspended_at,
-                    }
-                )
-                suspended = True
-                break
-
-        if not queue:
-            return state, events
-        if not suspended:
-            agenda = agenda.model_copy(
-                update={
-                    "status": "stable",
-                    "current_rule_id": None,
-                    "current_branch_id": None,
-                    "current_step_id": None,
-                }
-            )
-        final_revision = str(runtime.game_state.event_sequence + len(events))
-        agenda = agenda.model_copy(
-            update={
-                "source_event_ids": tuple(source_event_ids),
-                "queue": tuple(queue),
-                "revision": final_revision,
-            },
-            deep=True,
+    def _new_settlement(
+        self,
+        runtime: EngineRuntimeSnapshot,
+        *,
+        request_id: str,
+        actor_id: str,
+    ) -> RuleSettlement:
+        return RuleSettlement(
+            agenda=create_rule_agenda(
+                agenda_id=self._new_id("agenda"),
+                room_id=runtime.game_state.room_id,
+                module=runtime.module_content,
+                correlation_id=request_id,
+                root_source=AgendaSource(kind="action", id=request_id),
+                revision=str(runtime.game_state.event_sequence),
+            ),
+            runtime=runtime,
+            actor_id=actor_id,
+            runner=_SettlementRunner(self, runtime, request_id, actor_id),
         )
-        agendas = dict(state.rule_agendas)
-        agendas[agenda.agenda_id] = agenda
-        state = state.model_copy(update={"rule_agendas": agendas}, deep=True)
-        return state, events
 
     def _apply_effect(
         self,

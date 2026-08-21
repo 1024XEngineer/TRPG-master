@@ -393,21 +393,10 @@ def _rule_issues(
             )
         issues.extend(_actor_binding_issues(step, step_path))
 
-    if rule.presentation is not None:
-        presentation_ids = {rule.presentation.id}
-        for index, step in enumerate(rule.execution.steps):
-            if (
-                getattr(step, "kind", None) == "presentation"
-                and step.presentation_id not in presentation_ids
-            ):
-                issues.append(
-                    ValidationIssue(
-                        severity="error",
-                        code="MODULE_V3_RULE_PRESENTATION_NOT_FOUND",
-                        path=f"{path}.execution.steps.{index}.presentation_id",
-                        message=f"引用了未声明的展示片段: {step.presentation_id}",
-                    )
-                )
+    # 这里曾校验 `presentation` step 的 `presentation_id` 指向 `rule.presentation`
+    # 声明过的片段。随 `RulePresentationSpec` 一起删除（#288 结案、#398 执行）：
+    # 被引用的一侧不存在了，这条检查也就无从谈起。`PresentationStep` 仍在 union
+    # 里但依旧不接通，两个已发布模组都没有用过它。
     return issues
 
 

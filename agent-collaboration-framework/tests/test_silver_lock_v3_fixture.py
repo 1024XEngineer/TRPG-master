@@ -11,6 +11,8 @@ from collaboration_framework.contracts import (
     ActionMethod,
     ActionTarget,
     AdjudicationExecution,
+    CancelCheckChoice,
+    ChangeEntityStateEffect,
     CheckDecisionRequest,
     ModuleContentV3,
     NoAdjudicationCheck,
@@ -22,7 +24,11 @@ from collaboration_framework.contracts import (
     SkillCheckCandidate,
     SubmitAdjudicationRequest,
 )
+from collaboration_framework.contracts.validation import (
+    AdjudicationValidationError,
+)
 from collaboration_framework.engine import (
+    ActorResources,
     ActorState,
     AdjudicationEngineService,
     DiceRoller,
@@ -72,6 +78,9 @@ def state(*, trusted: bool = False) -> GameState:
                     "skills": {"spot-hidden": 70, "listen": 60, "brawl": 65},
                     "attributes": {"STR": 60},
                 },
+                # 被动理智检定的目标值读这里；真实建卡由
+                # `room.py::_character_runtime_resources` 从 derived_stats 填入。
+                resources=ActorResources(san=60, luck=45),
             )
         },
     )
@@ -408,6 +417,177 @@ class SilverLockRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(returned.entities["sketchbook"]["discovered"], True)
         self.assertIs(returned.entities["bast"]["freed"], True)
         self.assertIn("captured_and_returned", returned.discovered_facts)
+
+
+class SilverLockPassiveCheckTests(unittest.IsolatedAsyncioTestCase):
+    """银之锁的两处被动理智检定必须真的弹出来（#398 §阶段三）。
+
+    主线测试把 `san_resolved` 预置成 True 跳过了这两处——因为在 #398 之前它们
+    根本走不通：`awaiting_passive_check` 在 `trpg-backend/app` 与
+    `collaboration_framework/host` 下 grep 零命中，规则前面的 `mark` 效果照常
+    提交，检定本身静默丢失。这里把 `san_resolved` 放回 False，钉住它们现在会
+    经由既有检定工作流正常出现并结算。
+    """
+
+    def _room(self) -> tuple[InMemoryEngineStore, AdjudicationEngineService, GameState]:
+        content = load_module()
+        initial = state()
+        entities = {key: dict(value) for key, value in initial.entities.items()}
+        # 放回未结算：主线测试为了跳过 UI 交互才把它们设成 True。
+        entities["rat_thing"].update({"seen": False, "san_resolved": False})
+        entities["door_monitor"].update({"ghost_seen": False, "san_resolved": False})
+        store = InMemoryEngineStore()
+        store.register_room(
+            module_content=content,
+            initial_state=initial.model_copy(
+                update={"entities": entities}, deep=True
+            ),
+        )
+        return store, AdjudicationEngineService(store), initial
+
+    async def _sight(
+        self,
+        engine: AdjudicationEngineService,
+        *,
+        request_id: str,
+        entity_id: str,
+        key: str,
+    ):
+        return await engine.submit(
+            SubmitAdjudicationRequest(
+                room_id=ROOM,
+                player_id=PLAYER,
+                adjudication=ActionAdjudication(
+                    request_id=request_id,
+                    source_revision="0",
+                    actor_id=ACTOR,
+                    summary="看清眼前的东西",
+                    target=ActionTarget(kind="entity", id=entity_id),
+                    method=ActionMethod(family="observe", description="定睛细看"),
+                    check=NoAdjudicationCheck(),
+                    success_effects=(
+                        ChangeEntityStateEffect(
+                            entity_id=entity_id, key=key, value=True
+                        ),
+                    ),
+                ),
+            )
+        )
+
+    async def test_rat_thing_sanity_reaches_the_player(self) -> None:
+        store, engine, _ = self._room()
+
+        execution = await self._sight(
+            engine, request_id="see-rat", entity_id="rat_thing", key="seen"
+        )
+
+        self.assertEqual(execution.status, "awaiting_skill_choice")
+        pending = execution.pending_decision
+        assert pending is not None
+        self.assertEqual(len(pending.options), 1)
+        self.assertEqual(pending.options[0].display_name, "理智")
+        self.assertEqual(pending.options[0].target_value, 60)
+        self.assertFalse(pending.allow_cancel)
+        # 检定之前的 `mark` 效果照常提交。
+        self.assertIs(
+            store.inspect_state(ROOM).entities["rat_thing"]["san_resolved"], True
+        )
+        # Agenda 还在途，游标停在检定步上。
+        agenda = next(iter(store.inspect_state(ROOM).rule_agendas.values()))
+        self.assertEqual(agenda.status, "awaiting_passive_check")
+        self.assertEqual(agenda.current_rule_id, "rat_thing_sanity")
+        self.assertEqual(agenda.current_step_id, "san")
+        self.assertEqual(agenda.pending_check_id, pending.decision_id)
+
+    async def test_door_ghost_sanity_reaches_the_player(self) -> None:
+        store, engine, _ = self._room()
+
+        execution = await self._sight(
+            engine,
+            request_id="see-ghost",
+            entity_id="door_monitor",
+            key="ghost_seen",
+        )
+
+        self.assertEqual(execution.status, "awaiting_skill_choice")
+        pending = execution.pending_decision
+        assert pending is not None
+        self.assertEqual(pending.options[0].display_name, "理智")
+        self.assertFalse(pending.allow_cancel)
+        agenda = next(iter(store.inspect_state(ROOM).rule_agendas.values()))
+        self.assertEqual(agenda.current_rule_id, "door_ghost_sanity")
+
+    async def test_a_rule_forced_check_cannot_be_cancelled(self) -> None:
+        """`CheckStep` 没有 `cancel_step_id`，取消它就是把 Agenda 永久卡住。"""
+
+        _, engine, _ = self._room()
+        execution = await self._sight(
+            engine, request_id="see-rat", entity_id="rat_thing", key="seen"
+        )
+        pending = execution.pending_decision
+        assert pending is not None
+
+        with self.assertRaises(AdjudicationValidationError) as caught:
+            await engine.decide(
+                CheckDecisionRequest(
+                    request_id="cancel-rat-san",
+                    room_id=ROOM,
+                    player_id=PLAYER,
+                    source_revision=execution.view_revision,
+                    decision_id=pending.decision_id,
+                    decision_version=pending.decision_version,
+                    choice=CancelCheckChoice(),
+                )
+            )
+        self.assertEqual(caught.exception.result.code, "CHECK_NOT_CANCELLABLE")
+
+    async def test_the_agenda_resumes_and_settles(self) -> None:
+        store = InMemoryEngineStore()
+        content = load_module()
+        initial = state()
+        entities = {key: dict(value) for key, value in initial.entities.items()}
+        entities["rat_thing"].update({"seen": False, "san_resolved": False})
+        store.register_room(
+            module_content=content,
+            initial_state=initial.model_copy(update={"entities": entities}, deep=True),
+        )
+        engine = AdjudicationEngineService(
+            store, dice=DiceRoller(SequenceDiceSource([12]))
+        )
+
+        execution = await self._sight(
+            engine, request_id="see-rat", entity_id="rat_thing", key="seen"
+        )
+        pending = execution.pending_decision
+        assert pending is not None
+        rolled = await engine.decide(
+            CheckDecisionRequest(
+                request_id="rat-san-roll",
+                room_id=ROOM,
+                player_id=PLAYER,
+                source_revision=execution.view_revision,
+                decision_id=pending.decision_id,
+                decision_version=pending.decision_version,
+                choice=SelectCheckChoice(candidate_id=pending.options[0].candidate_id),
+            )
+        )
+        assert rolled.check_run is not None
+        resolved = await engine.decide_post_roll(
+            PostRollDecisionRequest(
+                request_id="rat-san-accept",
+                room_id=ROOM,
+                player_id=PLAYER,
+                source_revision=rolled.view_revision,
+                check_id=rolled.check_run.check_id,
+                check_version=rolled.check_run.version,
+                option_id="accept-current",
+            )
+        )
+
+        self.assertEqual(resolved.status, "resolved")
+        # 六个 degree 全部路由到 finish，所以这里只验证「恢复到稳定」本身。
+        # 让检定产生分叉属模组内容工作，扣 SAN 属 #401——都不在本 Issue 范围内。
+        self.assertEqual(store.inspect_state(ROOM).rule_agendas, {})
 
 
 if __name__ == "__main__":

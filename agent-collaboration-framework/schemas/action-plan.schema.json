@@ -65,7 +65,7 @@
       "items": {
         "$ref": "#/$defs/ActionPlanStep"
       },
-      "minItems": 2,
+      "minItems": 1,
       "title": "Steps",
       "type": "array"
     }

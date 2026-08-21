@@ -479,6 +479,15 @@ class RoomActionReservation(Base):
     )
 
 
+class TurnRunCutoverRecord(Base):
+    """Singleton rollout window for the temporary Engine-only recovery adapter."""
+
+    __tablename__ = "turn_run_cutover"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    cutover_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    legacy_recovery_until: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class InventoryImportDraftRecord(Base):
     """Reviewable character-sheet item import before it mutates room state."""
 

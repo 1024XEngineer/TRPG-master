@@ -110,6 +110,16 @@ WebSocket exactly-once 投递；是否发送、重试时是否重发由后续 Is
 
 ## 迁移安全
 
+TurnRun cutover 表只在 migration 阶段创建，不会自动写入切换时间。部署必须按以下顺序执行：
+
+1. 执行 Alembic migration，创建 `turn_run_cutover` 表；
+2. 停止或替换仍会创建 Engine-only action 的旧 writer；
+3. 调用 `app.core.legacy_turn_run.activate_turn_run_cutover` 写入 singleton（默认保留 30 天恢复窗口）；
+4. 启动并逐步放量新 TurnRun writer。
+
+窗口到期后，旧 Engine-only action 不再恢复；新版本缺少 `ActionPlanRun` 会明确报告数据损坏，
+不会回退到 Engine-only 状态机。
+
 迁移在执行任何 DDL 前检查：
 
 - `characters` 是否存在重复 `(room_id, player_id)`；

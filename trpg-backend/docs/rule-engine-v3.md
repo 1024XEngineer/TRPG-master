@@ -143,7 +143,7 @@ HostTurnDecision
        -> 当前步 resolved 后才可进入下一步
 ```
 
-`ActionPlan` 是变长顺序数组，公共 Schema 只要求至少两步；运行时
+`ActionPlan` 是变长顺序数组，公共 Schema 只要求至少一步；运行时
 `ActionPlanPolicy.max_plan_steps` 默认 32，`max_steps_per_advance` 默认 3。后者只是持久化
 调度窗口，4/5 步计划会在 checkpoint 后续跑同一 parent action，不会截断或要求玩家重输。
 

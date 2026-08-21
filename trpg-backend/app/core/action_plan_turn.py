@@ -7,7 +7,7 @@ import re
 import traceback
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Literal, Protocol
 
 import structlog
 from collaboration_framework.contracts import (
@@ -68,8 +68,6 @@ from collaboration_framework.host.schemas import (
     HostAgentContext,
     RecentHistoryBudget,
     RecentTurnContext,
-    SingleActionClarificationResult,
-    SingleActionTurnResult,
 )
 from pydantic import ValidationError
 from sqlalchemy.exc import SQLAlchemyError
@@ -86,22 +84,15 @@ class _ActionAdjudicationService(Protocol):
 
     async def submit(self, request: SubmitAdjudicationRequest) -> AdjudicationExecution: ...
 
-    async def get_status(
-        self,
-        request: GetAdjudicationStatusRequest,
-    ) -> AdjudicationStatusView: ...
+    async def get_status(self, request: GetAdjudicationStatusRequest) -> AdjudicationStatusView: ...
 
     async def recover_action(
-        self,
-        request: GetAdjudicationStatusRequest,
+        self, request: GetAdjudicationStatusRequest
     ) -> AdjudicationRecovery | None: ...
 
     async def decide(self, request: CheckDecisionRequest) -> AdjudicationExecution: ...
 
-    async def decide_post_roll(
-        self,
-        request: PostRollDecisionRequest,
-    ) -> AdjudicationExecution: ...
+    async def decide_post_roll(self, request: PostRollDecisionRequest) -> AdjudicationExecution: ...
 
 
 async def _emit_phase(observer: TurnPhaseObserver | None, phase: TurnPhase) -> None:
@@ -174,18 +165,13 @@ class DeterministicHostTurnDecisionModel:
             and time.blocked_reason is None
             and time.next_point_id is not None
         ):
-            # 离线 Fake 只认这一条无歧义表达，供本地与 E2E 稳定覆盖时间推进。
-            # “等到晚上”等需要跨越几个点的语义仍交给真实模型判断。
             return SingleActionDecision(
                 adjudication=ActionAdjudication(
                     request_id="application-owned",
                     source_revision=context.player_view.revision,
                     actor_id=context.player_input.actor_id,
                     summary=utterance,
-                    target=ActionTarget(
-                        kind="location",
-                        id=context.player_view.scene.id,
-                    ),
+                    target=ActionTarget(kind="location", id=context.player_view.scene.id),
                     method=ActionMethod(family="wait", description=utterance),
                     check=NoAdjudicationCheck(),
                     success_effects=(AdvanceWorldTimeEffect(to_point_id=time.next_point_id),),
@@ -680,10 +666,6 @@ class ActionPlanTurnApplication:
         self._projector = PlayerViewProjector(engine)
         self._dispatcher = HostTurnDecisionExecutor(
             plan_orchestrator=orchestrator,
-            executor=adjudication_engine,
-            player_view_projector=self._projector,
-            repair_adjudicator=orchestrator.adjudicator,
-            policy=orchestrator.policy,
         )
 
     async def start(
@@ -798,38 +780,11 @@ class ActionPlanTurnApplication:
             player_input,
             decision,
             on_progress=on_progress,
-            recent_history=recent_history,
         )
-        if isinstance(result, ActionPlanAdvanceResult):
-            return await self._finish_plan_with_phases(
-                player_input,
-                result,
-                on_phase=on_phase,
-            )
-        if not isinstance(decision, SingleActionDecision):
-            raise TypeError("single result 必须对应 SingleActionDecision")
-        if isinstance(result, SingleActionClarificationResult):
-            await _emit_phase(on_phase, "refreshing_player_view")
-            await _emit_phase(on_phase, "generating_narration")
-            return await self._from_single_clarification(
-                player_input,
-                decision.adjudication.summary,
-                result,
-            )
-        if result.execution.status in {
-            "awaiting_skill_choice",
-            "awaiting_post_roll_decision",
-            "awaiting_time_consent",
-        }:
-            if result.execution.status != "awaiting_time_consent":
-                await _emit_phase(on_phase, "waiting_for_check")
-        else:
-            await _emit_phase(on_phase, "refreshing_player_view")
-            await _emit_phase(on_phase, "generating_narration")
-        return await self._from_single(
+        return await self._finish_plan_with_phases(
             player_input,
-            decision.adjudication.summary,
             result,
+            on_phase=on_phase,
         )
 
     @staticmethod
@@ -944,73 +899,96 @@ class ActionPlanTurnApplication:
         on_progress: Callable[[object], Awaitable[None]] | None = None,
         on_phase: TurnPhaseObserver | None = None,
     ) -> ActionPlanTurnResult:
-        """Resume either a durable ActionPlan or a persisted single action."""
+        """Resume a durable TurnRun; new actions never fall back to Engine-only."""
 
-        if await self._orchestrator.get_run(room_id, parent_action_id) is not None:
-            return await self.resume_owned(
-                room_id=room_id,
-                player_id=player_id,
-                parent_action_id=parent_action_id,
-                on_progress=on_progress,
-                on_phase=on_phase,
+        if await self._orchestrator.get_run(room_id, parent_action_id) is None:
+            raise TurnExecutionError(
+                "PLAN_RUN_MISSING",
+                "行动运行记录缺失，无法安全恢复",
+                retryable=False,
             )
-        return await self.resume_single(
+        return await self.resume_owned(
             room_id=room_id,
             player_id=player_id,
             parent_action_id=parent_action_id,
+            on_progress=on_progress,
             on_phase=on_phase,
         )
 
-    async def resume_single(
+    async def finish_legacy_recovery(
         self,
+        recovery: AdjudicationRecovery,
         *,
         room_id: str,
         player_id: str,
-        parent_action_id: str,
         on_phase: TurnPhaseObserver | None = None,
     ) -> ActionPlanTurnResult:
-        """Finish a single ActionAdjudication without creating a PlanRun."""
+        """Render one already-settled pre-cutover Engine action.
 
-        recovery = await self._adjudication_engine.recover_action(
-            GetAdjudicationStatusRequest(
-                room_id=room_id,
-                player_id=player_id,
-                action_request_id=parent_action_id,
-            )
-        )
-        if recovery is None:
-            raise TurnExecutionError(
-                "ACTION_NOT_FOUND",
-                "没有找到可恢复的单动作裁决",
-                retryable=True,
-            )
+        This is intentionally isolated from normal turn creation and never
+        writes an ActionPlanRun. The caller must first validate eligibility via
+        ``LegacySingleActionRecoveryAdapter``.
+        """
+        execution = recovery.execution
         player_input = PlayerInput(
             room_id=room_id,
             player_id=player_id,
             actor_id=recovery.actor_id,
-            client_action_id=parent_action_id,
-            # The original player utterance is not part of the Engine contract;
-            # the frozen adjudication summary is the safe recovery label.
+            client_action_id=recovery.action_request_id,
             utterance=recovery.summary,
         )
-        result = SingleActionTurnResult(
-            execution=recovery.execution,
-            player_view=await self._projector.refresh_adjudication(
-                player_input,
-                recovery.execution,
-            ),
-        )
-        if recovery.execution.status in {
-            "awaiting_skill_choice",
-            "awaiting_post_roll_decision",
-            "awaiting_time_consent",
-        }:
-            if recovery.execution.status != "awaiting_time_consent":
-                await _emit_phase(on_phase, "waiting_for_check")
+        view = await self._projector.refresh_adjudication(player_input, execution)
+        if execution.status in {"awaiting_skill_choice", "awaiting_post_roll_decision"}:
+            await _emit_phase(on_phase, "waiting_for_check")
+            return ActionPlanTurnResult(
+                player_input=player_input,
+                player_view=view,
+                status="waiting_for_player",
+                execution=execution,
+            )
+        if execution.outcome not in {"success", "failure", "cancelled"}:
+            raise TurnExecutionError(
+                "PENDING_EXECUTION_NOT_WAITING",
+                "行动状态尚未完成，请重试",
+                retryable=True,
+            )
+        completed_outcome: Literal["success", "failure", "cancelled"]
+        if execution.outcome == "success":
+            completed_outcome = "success"
+        elif execution.outcome == "failure":
+            completed_outcome = "failure"
         else:
-            await _emit_phase(on_phase, "refreshing_player_view")
-            await _emit_phase(on_phase, "generating_narration")
-        return await self._from_single(player_input, recovery.summary, result)
+            completed_outcome = "cancelled"
+        await _emit_phase(on_phase, "refreshing_player_view")
+        await _emit_phase(on_phase, "generating_narration")
+        summary = CompletedPlanStepSummary(
+            step_index=0,
+            semantic_goal=recovery.summary,
+            outcome=completed_outcome,
+            view_revision=execution.view_revision,
+            world_time_after=WorldClockView.from_world(view.world),
+            event_refs=execution.public_event_refs,
+            narration_evidence=execution.narration_evidence,
+            committed_results=execution.committed_results,
+        )
+        context = ActionPlanNarrationContext(
+            background=view.background,
+            player_input=player_input,
+            plan_goal=recovery.summary,
+            termination_status=("cancelled" if execution.status == "cancelled" else "resolved"),
+            completed_steps=(summary,),
+            player_view=view,
+            opening_world_time=None,
+            allowed_evidence_refs=execution.public_event_refs,
+            narration_evidence=execution.narration_evidence,
+        )
+        return ActionPlanTurnResult(
+            player_input=player_input,
+            player_view=view,
+            status="completed",
+            execution=execution,
+            narration=await self._narrate(context),
+        )
 
     async def active_for_room(self, room_id: str):
         return await self._orchestrator.active_for_room(room_id)
@@ -1223,15 +1201,7 @@ class ActionPlanTurnApplication:
         verify_fingerprint: bool = True,
     ) -> ActionPlanTurnResult:
         run = result.run
-        if run.status == "waiting_for_player":
-            return ActionPlanTurnResult(
-                player_input=player_input,
-                player_view=result.player_view,
-                status=run.status,
-                execution=result.latest_execution,
-                plan_id=run.plan_id,
-            )
-        if run.status == "awaiting_time_consent":
+        if run.status in {"waiting_for_player", "awaiting_time_consent"}:
             return ActionPlanTurnResult(
                 player_input=player_input,
                 player_view=result.player_view,
@@ -1269,92 +1239,6 @@ class ActionPlanTurnApplication:
             execution=result.latest_execution,
             narration=narration,
             plan_id=run.plan_id,
-        )
-
-    async def _from_single(
-        self,
-        player_input: PlayerInput,
-        summary: str,
-        result: SingleActionTurnResult,
-    ) -> ActionPlanTurnResult:
-        execution = result.execution
-        if execution.status in {
-            "awaiting_skill_choice",
-            "awaiting_post_roll_decision",
-            "awaiting_time_consent",
-        }:
-            return ActionPlanTurnResult(
-                player_input=player_input,
-                player_view=result.player_view,
-                status=(
-                    "awaiting_time_consent"
-                    if execution.status == "awaiting_time_consent"
-                    else "waiting_for_player"
-                ),
-                execution=execution,
-            )
-        if execution.outcome == "success":
-            completed_outcome = "success"
-        elif execution.outcome == "failure":
-            completed_outcome = "failure"
-        elif execution.outcome == "cancelled":
-            completed_outcome = "cancelled"
-        else:
-            raise TurnExecutionError(
-                "PENDING_EXECUTION_NOT_WAITING",
-                "行动状态尚未完成，请重试",
-                retryable=True,
-            )
-        completed_summary = CompletedPlanStepSummary(
-            step_index=0,
-            semantic_goal=summary,
-            outcome=completed_outcome,
-            view_revision=execution.view_revision,
-            world_time_after=WorldClockView.from_world(result.player_view.world),
-            event_refs=execution.public_event_refs,
-            narration_evidence=execution.narration_evidence,
-            committed_results=execution.committed_results,
-        )
-        context = ActionPlanNarrationContext(
-            background=result.player_view.background,
-            player_input=player_input,
-            plan_goal=summary,
-            termination_status=("cancelled" if execution.status == "cancelled" else "resolved"),
-            completed_steps=(completed_summary,),
-            player_view=result.player_view,
-            opening_world_time=result.opening_world_time,
-            allowed_evidence_refs=execution.public_event_refs,
-            narration_evidence=execution.narration_evidence,
-        )
-        return ActionPlanTurnResult(
-            player_input=player_input,
-            player_view=result.player_view,
-            status="completed",
-            execution=execution,
-            narration=await self._narrate(context),
-        )
-
-    async def _from_single_clarification(
-        self,
-        player_input: PlayerInput,
-        summary: str,
-        result: SingleActionClarificationResult,
-    ) -> ActionPlanTurnResult:
-        """把未发生任何权威写入的单动作失败转换成自然主持人澄清。"""
-
-        context = ActionPlanNarrationContext(
-            background=result.player_view.background,
-            player_input=player_input,
-            plan_goal=summary,
-            termination_status="needs_clarification",
-            player_view=result.player_view,
-            opening_world_time=result.opening_world_time,
-        )
-        return ActionPlanTurnResult(
-            player_input=player_input,
-            player_view=result.player_view,
-            status="needs_clarification",
-            narration=await self._narrate(context),
         )
 
     async def _narrate(

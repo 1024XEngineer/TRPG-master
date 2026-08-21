@@ -1718,6 +1718,12 @@ export default function RoomPage() {
             : '守秘人等待玩家决定检定结果',
         )
         setPendingAdjudication(envelope.payload)
+        // One-step TurnRuns intentionally suppress plan progress events. The
+        // pending payload is therefore the authoritative cancellation handle
+        // for both one-step and multi-step runs.
+        if (envelope.payload.planId) {
+          setActivePlanId(envelope.payload.correlationId)
+        }
         const checkRun = envelope.payload.checkRun
         const selected = selectedAdjudicationOptionRef.current
         if (

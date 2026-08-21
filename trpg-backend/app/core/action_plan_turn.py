@@ -11,6 +11,7 @@ from typing import Literal, Protocol
 
 import structlog
 from collaboration_framework.contracts import (
+    TERMINAL_ADJUDICATION_STATUSES,
     ActionAdjudication,
     ActionMethod,
     ActionPlan,
@@ -1172,7 +1173,7 @@ class ActionPlanTurnApplication:
                 action_request_id=current.step_request_id,
             )
         )
-        if status.status in {"resolved", "cancelled"}:
+        if status.status in TERMINAL_ADJUDICATION_STATUSES:
             return
         if status.status != "awaiting_post_roll_decision" or status.execution is None:
             raise TurnExecutionError(

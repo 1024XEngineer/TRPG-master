@@ -107,6 +107,7 @@ class AdjudicationStatusView(ContractModel):
         "awaiting_time_consent",
         "awaiting_scene_consent",
         "resolved",
+        "rule_failed",
         "cancelled",
     ]
     execution: AdjudicationExecution | None = None

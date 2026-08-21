@@ -43,6 +43,7 @@ from typing import Literal
 import anyio
 import structlog
 from collaboration_framework.contracts import (
+    TERMINAL_ADJUDICATION_STATUSES,
     ActorBindingError,
     AdjudicationExecution,
     AdjudicationValidationError,
@@ -1050,7 +1051,7 @@ async def _recover_persisted_turn_narration(
                 action_request_id=client_action_id,
             )
         )
-        if recovery is None or recovery.execution.status not in {"resolved", "cancelled"}:
+        if recovery is None or recovery.execution.status not in TERMINAL_ADJUDICATION_STATUSES:
             return False
         actor_id = recovery.actor_id
 

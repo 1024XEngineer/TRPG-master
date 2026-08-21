@@ -227,6 +227,17 @@ async def test_natural_chinese_action_family_reaches_the_unique_rule() -> None:
     assert isinstance(adjudication.check, RequiredAdjudicationCheck)
 
 
+async def test_environment_observation_near_grave_does_not_target_caretaker() -> None:
+    """只观察墓碑周围环境时，不应凭空把目标改成守墓人。"""
+
+    adjudication = await _DeterministicStepAdjudicator().adjudicate(
+        await _cemetery_context("在墓碑附近用侦查观察周围环境")
+    )
+
+    assert adjudication.rule_decision is None
+    assert adjudication.target.kind != "entity"
+
+
 async def test_fake_single_action_uses_the_same_rule_match_view() -> None:
     """单动作不能绕过 v3 Rule Match 而静默退化成纯叙事。"""
 

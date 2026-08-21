@@ -7,6 +7,7 @@ from app.adapters.openai_models import (
     PromptActionPlanStepAdjudicator,
     PromptHostTurnDecisionModel,
     PromptOpeningNarrationModel,
+    PromptTurnPlanner,
 )
 from app.adapters.qwen_models import QwenChatCompletionsJsonClient
 from app.adapters.sqlalchemy_action_plan_store import SqlAlchemyActionPlanRunStore
@@ -18,6 +19,7 @@ __all__ = [
     "PromptActionPlanNarrationModel",
     "PromptActionPlanStepAdjudicator",
     "PromptHostTurnDecisionModel",
+    "PromptTurnPlanner",
     "DeepSeekChatCompletionsJsonClient",
     "PromptOpeningNarrationModel",
     "QwenChatCompletionsJsonClient",

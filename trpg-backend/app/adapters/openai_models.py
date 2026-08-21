@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Protocol
 
 import httpx
 import structlog
 from collaboration_framework.contracts import (
     ActionAdjudication,
+    ActionPlan,
     ActionPlanPolicy,
     ContractError,
     HostTurnDecision,
@@ -21,6 +23,7 @@ from collaboration_framework.host.application import (
 from collaboration_framework.host.prompts.action_plan import (
     current_step_adjudication_instructions,
     host_turn_decision_instructions,
+    turn_planning_instructions,
 )
 from collaboration_framework.host.schemas import (
     ActionPlanNarrationContext,
@@ -29,14 +32,17 @@ from collaboration_framework.host.schemas import (
     HostAgentContext,
     NarrationOutput,
     OpeningNarrationContext,
+    TurnPlanningContext,
 )
 from pydantic import TypeAdapter, ValidationError
 
 from app.adapters.structured_http import (
+    ModelCallTrace,
     ModelClientRetryPolicy,
     StructuredOutputError,
     decode_structured_json,
     is_transient_model_error,
+    log_structured_output_failure,
     post_structured_json,
     read_structured_payload,
 )
@@ -391,6 +397,13 @@ class OpenAIResponsesJsonClient:
             },
             "store": False,
         }
+        started_at = time.monotonic()
+        trace = ModelCallTrace(
+            correlation_id=_safe_correlation_id(input_payload),
+            stage=schema_name,
+            provider="openai",
+            model=self._model,
+        )
         async with httpx.AsyncClient(
             headers={
                 "Authorization": f"Bearer {self._api_key}",
@@ -399,22 +412,39 @@ class OpenAIResponsesJsonClient:
             timeout=self._timeout_seconds,
             transport=self._transport,
         ) as client:
-            response = await post_structured_json(
+            transport_result = await post_structured_json(
                 client,
                 f"{self._base_url}/responses",
                 json=request_payload,
                 provider="openai",
                 retry_policy=self._retry_policy,
+                trace=trace,
             )
-        response_payload = read_structured_payload(response, provider_name="OpenAI")
+        try:
+            response_payload = read_structured_payload(
+                transport_result.response,
+                provider_name="OpenAI",
+            )
+            output_text = _response_output_text(response_payload)
+            result = decode_structured_json(output_text, provider_name="OpenAI")
+        except StructuredOutputError as exc:
+            log_structured_output_failure(
+                trace=trace,
+                duration_ms=int((time.monotonic() - started_at) * 1000),
+                transport_attempts=transport_result.transport_attempts,
+                error=exc,
+            )
+            raise
         _log_structured_usage(
             response_payload,
             provider="openai",
             model=self._model,
             schema_name=schema_name,
+            duration_ms=int((time.monotonic() - started_at) * 1000),
+            correlation_id=trace.correlation_id,
+            transport_attempts=transport_result.transport_attempts,
         )
-        output_text = _response_output_text(response_payload)
-        return decode_structured_json(output_text, provider_name="OpenAI")
+        return result
 
 
 class PromptOpeningNarrationModel:
@@ -486,6 +516,73 @@ class PromptHostTurnDecisionModel:
         raise TurnExecutionError(
             "MODEL_OUTPUT_UNREADABLE",
             "主持模型返回了无法解读的结果，本次动作未生效，请重试",
+            retryable=True,
+        ) from last_error
+
+
+class PromptTurnPlanner:
+    """Generate only a finite player-safe semantic ActionPlan."""
+
+    def __init__(
+        self,
+        client: StructuredJsonClient,
+        *,
+        policy: ActionPlanPolicy | None = None,
+    ) -> None:
+        self._client = client
+        self._policy = policy or ActionPlanPolicy()
+
+    async def generate(self, context: TurnPlanningContext) -> ActionPlan:
+        instructions = turn_planning_instructions(self._policy)
+        last_error: Exception | None = None
+        for attempt in range(2):
+            try:
+                raw = await self._client.generate(
+                    schema_name="trpg_turn_plan",
+                    schema=ActionPlan.model_json_schema(mode="serialization"),
+                    instructions=(
+                        instructions
+                        if attempt == 0
+                        else (
+                            f"{instructions}\n\n"
+                            "上一份返回未通过 ActionPlan 结构校验，请严格按 schema 重新生成。"
+                        )
+                    ),
+                    input_payload=context.to_json_dict(),
+                )
+                plan = ActionPlan.model_validate(raw)
+                self._policy.require_plan(plan)
+                logger.info(
+                    "turn_planner_completed",
+                    action=context.player_input.client_action_id[:12],
+                    attempts=attempt + 1,
+                    step_count=len(plan.steps),
+                    one_step=len(plan.steps) == 1,
+                )
+                return plan
+            except Exception as exc:  # classification below is deliberately narrow
+                if is_transient_model_error(exc):
+                    raise TurnExecutionError(
+                        "MODEL_UPSTREAM_UNAVAILABLE",
+                        "主持模型暂时不可用，本次动作未生效，请重试",
+                        retryable=True,
+                    ) from exc
+                if not isinstance(
+                    exc,
+                    (StructuredOutputError, ContractError, ValidationError),
+                ):
+                    raise
+                last_error = exc
+                logger.warning(
+                    "turn_planner_rejected",
+                    action=context.player_input.client_action_id[:12],
+                    attempt=attempt + 1,
+                    error_type=type(exc).__name__,
+                    issues=_validation_issue_paths(exc),
+                )
+        raise TurnExecutionError(
+            "MODEL_OUTPUT_UNREADABLE",
+            "主持模型返回了无法解读的计划，本次动作未生效，请重试",
             retryable=True,
         ) from last_error
 
@@ -643,23 +740,46 @@ def _log_structured_usage(
     provider: str,
     model: str,
     schema_name: str,
+    duration_ms: int,
+    correlation_id: str | None,
+    transport_attempts: int,
 ) -> None:
-    if schema_name != "trpg_opening_narration" or not isinstance(payload, dict):
-        return
-    usage = payload.get("usage")
-    if not isinstance(usage, dict):
-        return
+    usage = payload.get("usage") if isinstance(payload, dict) else None
+    usage = usage if isinstance(usage, dict) else {}
     prompt_tokens = usage.get("prompt_tokens", usage.get("input_tokens"))
     completion_tokens = usage.get("completion_tokens", usage.get("output_tokens"))
     total_tokens = usage.get("total_tokens")
     logger.info(
-        "opening_narration_model_usage",
+        "structured_model_call_completed",
+        stage=schema_name,
+        action=correlation_id,
         provider=provider,
         model=model,
+        duration_ms=max(0, duration_ms),
+        transport_attempts=max(1, transport_attempts),
         prompt_tokens=prompt_tokens if isinstance(prompt_tokens, int) else None,
         completion_tokens=(completion_tokens if isinstance(completion_tokens, int) else None),
         total_tokens=total_tokens if isinstance(total_tokens, int) else None,
     )
+    if schema_name == "trpg_opening_narration":
+        # Preserve the established opening-specific event while dashboards
+        # migrate to the generic structured call event above.
+        logger.info(
+            "opening_narration_model_usage",
+            provider=provider,
+            model=model,
+            prompt_tokens=prompt_tokens if isinstance(prompt_tokens, int) else None,
+            completion_tokens=(completion_tokens if isinstance(completion_tokens, int) else None),
+            total_tokens=total_tokens if isinstance(total_tokens, int) else None,
+        )
+
+
+def _safe_correlation_id(input_payload: JsonObject) -> str | None:
+    player_input = input_payload.get("player_input")
+    if not isinstance(player_input, dict):
+        return None
+    value = player_input.get("client_action_id", player_input.get("clientActionId"))
+    return value[:12] if isinstance(value, str) else None
 
 
 def _response_output_text(payload: object) -> str:

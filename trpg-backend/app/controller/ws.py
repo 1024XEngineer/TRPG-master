@@ -780,17 +780,6 @@ async def _send_completed_turn_message(
         },
     )
     await _send_view_updated(websocket, player_id, player_view)
-    recorded = await _deliver_turn_narration(
-        db,
-        websocket,
-        room_id,
-        player_id,
-        client_action_id=client_action_id,
-        narration=narration,
-        actor_id=actor_id,
-        scene_id=player_view.scene_id,
-        view_revision=player_view.revision,
-    )
     if recorded:
         await _emit_turn_narration(
             websocket,

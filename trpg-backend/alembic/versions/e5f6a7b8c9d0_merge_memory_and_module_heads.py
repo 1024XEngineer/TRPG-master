@@ -3,7 +3,7 @@
 from collections.abc import Sequence
 
 revision: str = "e5f6a7b8c9d0"
-down_revision: tuple[str, str] = ("c3d4e5f6a7b8", "d4f1a2b3c5e7")
+down_revision: tuple[str, str] = ("c3d4e5f6a7b8", "f4a5b6c7d8e9")
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

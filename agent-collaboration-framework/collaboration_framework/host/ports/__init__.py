@@ -12,6 +12,7 @@ from .action_plan import (
     ActionPlanStoreError,
     ActionPlanVersionConflictError,
     SingleAdjudicationExecutor,
+    TurnPlannerPort,
 )
 from .opening_narration_model import OpeningNarrationModelPort
 from .recent_history import RecentHistorySource
@@ -30,4 +31,5 @@ __all__ = [
     "OpeningNarrationModelPort",
     "RecentHistorySource",
     "SingleAdjudicationExecutor",
+    "TurnPlannerPort",
 ]

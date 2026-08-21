@@ -5,7 +5,7 @@
 
 ## 1. 目标和边界
 
-- A（Host）负责玩家安全上下文、单动作/ActionPlan 决策、逐步编排和安全叙事。
+- A（Host）负责玩家安全语义规划、逐步裁决编排和安全叙事。
 - B（Engine）负责规则、目标、revision、检定、状态、Event 和持久化提交。
 - C（Module）负责把草稿验证并发布为 B 可执行的声明式 `ModuleContentV3`。
 - backend 负责 HTTP/WebSocket、SQL、Provider client、结构化 JSON 重试和依赖装配。
@@ -17,17 +17,20 @@
 sequenceDiagram
     participant W as WebSocket controller
     participant V as PlayerView/Keeper projection
-    participant P as HostTurnDecision model
+    participant P as TurnPlannerPort
+    participant R as Prerequisite resolver
     participant O as ActionPlan orchestrator
     participant E as Adjudication engine
     participant N as ActionPlan narrator
 
     W->>V: read trusted scope and revision
-    V-->>W: PlayerView + KeeperCapabilityView
-    W->>P: generate(HostAgentContext)
-    P-->>W: structured HostTurnDecision candidate
-    W->>W: parse and validate decision
-    W->>W: normalize producer output into ActionPlanRun(1..N)
+    V-->>W: player-safe TurnPlanningView
+    W->>P: generate(TurnPlanningContext)
+    P-->>W: ActionPlan(1..N)
+    W->>V: refresh latest PlayerView
+    W->>R: bounded player-safe prerequisite facts
+    R-->>W: unchanged/expanded plan or clarification
+    W->>W: create ActionPlanRun(1..N)
     W->>O: start/advance finite semantic plan
     loop current step only
         O->>V: refresh latest PlayerView
@@ -40,24 +43,29 @@ sequenceDiagram
     W-->>W: persist history and send turn.completed
 ```
 
-开场叙事独立走 `OpeningNarrator`，不伪造一次行动。当前链路不会把 legacy action 数据模型
-当作 Host 入口，但 Engine 与 SQL compatibility reader 继续使用这些模型读取历史记录。
+开场叙事独立走 `OpeningNarrator`，不伪造一次行动。Issue #357 灰度期临时保留旧
+`HostTurnDecision` producer，并按 `room_id + client_action_id` 稳定桶路由；semantic 桶只走
+上图链路，失败时不会在同一回合回退 legacy。发布门槛通过后才删除旧 producer。升级前
+Engine-only pending recovery adapter 不属于 producer contract。
 
 ## 3. Host 应用边界
 
 ### 3.1 Planner context
 
-`HostAgentContext` 位于 `host/schemas/planner_context.py`，是当前 Planner 的稳定输入：
+`TurnPlanningContext` 位于 `host/schemas/planner_context.py`，是 semantic Planner 的稳定输入：
 
-- `player_input`、`player_view` 与 `recent_history` 必须属于同一 room/player/actor scope；
-- `keeper_capabilities` 若存在，必须匹配 room/actor/revision；
-- `PlayerView` 是玩家安全、不可变且 revision-bound 的事实视图；
-- Keeper capability 是受控词汇表，不是绕过 Engine 校验的授权；
+- `player_input`、精简 `planning_view` 与 `recent_history` 必须属于同一 scope/revision；
+- 可带玩家安全 `memories` 与 `conversation_summary`，维持跨回合指代能力；
+- 只含场景/可见对象名称、公开出口、已知地点、背包与已知信息标签；
+- 不含 Keeper capability、规则候选、目标 ID、检定、效果、持久意图或未来裁决；
 - 上下文不包含数据库 session、完整 `GameState`、完整模组或其他玩家私有数据。
+
+灰度期的 legacy 桶仍使用 `HostAgentContext`。Planner 完成后应用重新投影最新 PlayerView；
+`KeeperCapabilityView` 只进入无模型、无写入的有限前置条件解析和当前 Step Adjudicator。
 
 ### 3.2 Decision and orchestration
 
-`HostTurnDecisionParser` 将 Provider 返回的普通 JSON 校验为单动作或 `ActionPlan`。
+`TurnPlannerPort.generate()` 对所有输入只返回 `ActionPlan(1..N)`，一步行动就是一个 step。
 `ActionPlan` 只保存玩家安全的顺序语义步骤，不保存未来裁决、效果、隐藏信息、身份或 revision。
 `ActionPlanOrchestrator` 每次只裁决当前步骤，并在步骤边界刷新 PlayerView。冻结的
 `ActionPlanPolicy` 管理技术上限、软推进窗口和修复预算；软窗口不是玩家能力上限。
@@ -148,9 +156,9 @@ flowchart TD
 
 ## 7. Provider 边界
 
-backend 当前保留四类 Prompt 模型：Host decision、当前步骤 adjudication、ActionPlan narration
-和 Opening narration。它们使用 structured JSON client；DeepSeek/Qwen 的重试、Schema 和错误
-映射留在 backend adapter。
+backend 灰度期保留五类 Prompt 模型：semantic Turn Planner、legacy Host decision、当前步骤
+adjudication、ActionPlan narration 和 Opening narration。Planner 使用独立 client、provider、
+model、5 秒 timeout 与 retry policy；其余真实 Host 配置不随 Planner 切换。
 
 ActionPlan 决策与当前步骤裁决的指令位于 `host/prompts/action_plan.py`，属于
 provider-neutral contract。backend 可以替换 client/provider，但不得改变 parser、Engine 写入
@@ -164,7 +172,8 @@ Framework exporter 当前发布：
 - 投影：`PlayerInput`、`ProjectionSnapshot`、`PlayerView`、`KeeperCapabilityView`；
 - Adjudication：request、execution、status、cancel/status request；
 - ActionPlan：plan、policy、progress；
-- Host：`HostAgentContext`、`OpeningNarrationContext`、`NarrationOutput`、`RecentTurnContext`。
+- Host：`TurnPlanningContext`、灰度期 `HostAgentContext`、`OpeningNarrationContext`、
+  `NarrationOutput`、`RecentTurnContext`。
 
 `Intent` 等 legacy 类型仍可从 Python contracts 导入，但不作为当前 Host API 单独发布。
 backend DTO、WebSocket protocol 与 `trpg-sdk` 类型由各自生成链维护，不由 Framework exporter

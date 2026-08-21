@@ -59,6 +59,18 @@ async def _noon_with_surveillance_closed(db: AsyncSession, room_id: str) -> str:
     return next(iter(state.actors))
 
 
+async def _committed_state(db: AsyncSession, room_id: str) -> GameState:
+    """重新读回权威状态。
+
+    `db_session.expire_all()` 之后必须真的再查一次：引擎写在另一个 session 里，
+    这个 session 缓存的对象是旧的。
+    """
+
+    reloaded = await db.get(GameSession, room_id)
+    assert reloaded is not None
+    return GameState.model_validate(reloaded.state_json)
+
+
 async def test_night_rule_matches_the_snapshot_of_its_own_time_point(
     db_session: AsyncSession,
     engine_store_factory: Callable[..., SqlAlchemyEngineStore],
@@ -91,7 +103,7 @@ async def test_night_rule_matches_the_snapshot_of_its_own_time_point(
 
     assert execution.status == "resolved"
     db_session.expire_all()
-    committed = GameState.model_validate((await db_session.get(GameSession, room_id)).state_json)
+    committed = await _committed_state(db_session, room_id)
     # 四跳都跑完了，世界确实到了第二天早晨。
     assert committed.world_time.current_point_id == "hour_06"
     assert committed.world_time.current.day_index == 1

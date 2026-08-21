@@ -108,6 +108,18 @@ def _see_true_form(room_id: str, player_id: str, actor_id: str, revision: str):
     )
 
 
+async def _committed_state(db: AsyncSession, room_id: str) -> GameState:
+    """重新读回权威状态。
+
+    `db_session.expire_all()` 之后必须真的再查一次：引擎写在另一个 session 里，
+    这个 session 缓存的对象是旧的。
+    """
+
+    reloaded = await db.get(GameSession, room_id)
+    assert reloaded is not None
+    return GameState.model_validate(reloaded.state_json)
+
+
 async def test_passive_check_persists_and_resumes_across_a_store_restart(
     db_session: AsyncSession,
     engine_store_factory: Callable[..., SqlAlchemyEngineStore],
@@ -133,7 +145,7 @@ async def test_passive_check_persists_and_resumes_across_a_store_restart(
     assert pending.allow_cancel is False
 
     db_session.expire_all()
-    committed = GameState.model_validate((await db_session.get(GameSession, room_id)).state_json)
+    committed = await _committed_state(db_session, room_id)
     # 检定之前的效果照常提交……
     assert committed.entities["cemetery_figure"]["true_form_seen"] is True
     assert committed.entities["case_tracker"]["first_ghoul_sight_resolved"] is True
@@ -192,7 +204,7 @@ async def test_passive_check_persists_and_resumes_across_a_store_restart(
 
     assert resolved.status == "resolved"
     db_session.expire_all()
-    settled = GameState.model_validate((await db_session.get(GameSession, room_id)).state_json)
+    settled = await _committed_state(db_session, room_id)
     # Agenda 稳定之后，父动作剩下的效果接着跑完。
     assert settled.entities["cemetery_figure"]["willing_to_talk"] is True
     # 游标跑完就不该留在 state 里（#398 §阶段一）。

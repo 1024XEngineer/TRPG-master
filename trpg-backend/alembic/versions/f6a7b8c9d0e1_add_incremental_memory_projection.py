@@ -20,11 +20,15 @@ def upgrade() -> None:
             "source_created_at",
             sa.DateTime(timezone=True),
             nullable=False,
-            server_default=sa.func.now(),
+            # SQLite 的 ALTER TABLE 只接受字面量默认值；后面统一回填真实来源时间。
+            server_default="1970-01-01 00:00:00",
         ),
     )
     # 历史记录无法再可靠区分两类来源时间，使用原投影时间保持稳定顺序。
     op.execute(sa.text("UPDATE memory_entries SET source_created_at = created_at"))
+    # 回填后移除临时默认值，避免新记录误用 epoch。
+    with op.batch_alter_table("memory_entries") as batch_op:
+        batch_op.alter_column("source_created_at", server_default=None)
     op.create_index(
         "ix_memory_entries_room_source_created",
         "memory_entries",

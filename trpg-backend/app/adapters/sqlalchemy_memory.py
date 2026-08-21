@@ -191,7 +191,7 @@ class SqlAlchemyMemoryStore:
 
     async def project_room_events(self, room_id: str) -> MemoryProjectionResult:
         """只投影房间游标后的新事件，并以单事务提交记忆和高水位。"""
-        room_id = _canonical_id(room_id) or room_id
+        # 房间主键使用数据库中的原始 UUID 文本；canonicalize 只适用于实体参与者。
         async with self._session_factory() as session:
             result = await self._project_room_events(session, room_id)
             await session.commit()
@@ -199,7 +199,6 @@ class SqlAlchemyMemoryStore:
 
     async def rebuild_room_events(self, room_id: str) -> MemoryProjectionResult:
         """在单事务中替换指定房间的记忆投影，保留摘要和权威事件。"""
-        room_id = _canonical_id(room_id) or room_id
         async with self._session_factory() as session:
             await session.execute(
                 delete(MemoryEntryRecord).where(MemoryEntryRecord.room_id == room_id)
@@ -377,7 +376,8 @@ class SqlAlchemyMemoryStore:
         max_chars: int = 4000,
     ) -> MemoryContext:
         """按服务端作用域过滤记忆，模型不能自行扩大查询范围。"""
-        stored_room_id = _canonical_id(room_id) or room_id
+        # 不规范化 room_id，否则 SQLite 的 Uuid(as_uuid=False) 会出现外键/查询不一致。
+        stored_room_id = room_id
         await self.project_room_events(stored_room_id)
         async with self._session_factory() as session:
             player_scope_ids = _scope_ids(player_id)

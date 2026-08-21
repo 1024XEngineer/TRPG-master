@@ -10,7 +10,7 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 PREVIOUS_REVISION = "1a02058345ee"
 ENGINE_IDENTITY_PREVIOUS_REVISION = "9c4e7a2b1d6f"
 # 记忆与 main 分支的模组迁移通过 merge migration 汇合为当前 head。
-HEAD_REVISION = "e5f6a7b8c9d0"
+HEAD_REVISION = "f6a7b8c9d0e1"
 
 
 def _run_alembic(database: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -90,6 +90,7 @@ def test_migration_upgrades_empty_sqlite_and_round_trips(tmp_path: Path) -> None
         "time_advance_proposals",
         "memory_entries",
         "conversation_summaries",
+        "memory_projection_cursors",
         "turn_run_cutover",
         "scene_transition_proposals",
     }.issubset(tables)
@@ -173,6 +174,7 @@ def test_migration_upgrades_empty_sqlite_and_round_trips(tmp_path: Path) -> None
         "view_revision",
     }.issubset(_column_names(database, "events"))
     assert ("room_id", "event_type", "correlation_id") in _unique_column_sets(database, "events")
+    assert "source_created_at" in _column_names(database, "memory_entries")
 
     downgrade = _run_alembic(database, "downgrade", PREVIOUS_REVISION)
     assert downgrade.returncode == 0, downgrade.stdout + downgrade.stderr

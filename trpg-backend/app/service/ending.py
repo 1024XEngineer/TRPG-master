@@ -31,6 +31,7 @@ from app.models.engine import (
 )
 from app.models.room import Player, Room
 from app.service import chat as chat_service
+from app.service.module_content_cache import load_module_content
 
 
 class EndingError(RuntimeError):
@@ -61,12 +62,17 @@ async def _runtime(
         raise EndingNotFoundError("房间运行时不存在")
     await db.refresh(session)
     version = await db.get(ModuleVersion, (session.module_id, session.module_version))
-    if version is None or version.content_schema_version != 3:
-        raise EndingUnavailableError("结局草稿只支持 ModuleContent v3 房间")
+    if version is None:
+        raise EndingUnavailableError("房间绑定的 ModuleVersion 不存在")
+    content = load_module_content(
+        module_id=version.module_id,
+        version=version.version,
+        content_json=version.content_json,
+    )
     return (
         session,
         GameState.model_validate(deepcopy(session.state_json)),
-        ModuleContentV3.model_validate(deepcopy(version.content_json)),
+        content,
     )
 
 

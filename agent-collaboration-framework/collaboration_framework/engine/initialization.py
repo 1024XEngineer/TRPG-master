@@ -11,7 +11,6 @@ from collaboration_framework.contracts import (
     ItemDisplay,
     ItemInstance,
     ItemKnowledge,
-    ModuleContent,
     ModuleContentV3,
 )
 
@@ -19,7 +18,7 @@ from .models import ActorState, GameState, WorldTimePoint, WorldTimeState
 
 
 def create_initial_game_state(
-    module_content: ModuleContent | ModuleContentV3,
+    module_content: ModuleContentV3,
     *,
     room_id: str,
     actors: Mapping[str, ActorState],
@@ -27,38 +26,30 @@ def create_initial_game_state(
 ) -> GameState:
     """Hydrate the module-declared opening location and entity state defaults."""
 
-    if isinstance(module_content, ModuleContentV3):
-        initial = module_content.initial_state
-        entities = {entity.id: dict(entity.state) for entity in module_content.entities}
-        # `initial_state.entity_state` is an authored override on top of each
-        # Entity's own defaults, so it is merged last.
-        for entity_id, overrides in initial.entity_state.items():
-            entities.setdefault(entity_id, {}).update(overrides)
-        items = _initial_items(module_content, room_id)
-        carried, carried_knowledge = _initial_carried_equipment(actors, room_id)
-        items.update(carried)
-        return GameState(
-            room_id=room_id,
-            scene_id=initial.start_location_id,
-            actors=dict(actors),
-            entities=entities,
-            world_time=world_time or _world_time_for(module_content),
-            discovered_facts=tuple(sorted(initial.revealed_information_ids)),
-            item_instances=items,
-            party_item_knowledge={
-                item.id: ItemKnowledge(item_id=item.id, identity="known")
-                for entity in module_content.entities
-                if (item := items.get(entity.id)) is not None
-                and entity.visibility in {"public", "party"}
-            },
-            actor_item_knowledge=carried_knowledge,
-        )
+    initial = module_content.initial_state
+    entities = {entity.id: dict(entity.state) for entity in module_content.entities}
+    # `initial_state.entity_state` is an authored override on top of each
+    # Entity's own defaults, so it is merged last.
+    for entity_id, overrides in initial.entity_state.items():
+        entities.setdefault(entity_id, {}).update(overrides)
+    items = _initial_items(module_content, room_id)
+    carried, carried_knowledge = _initial_carried_equipment(actors, room_id)
+    items.update(carried)
     return GameState(
         room_id=room_id,
-        scene_id=module_content.initial_scene_id,
+        scene_id=initial.start_location_id,
         actors=dict(actors),
-        entities={entity.id: dict(entity.state) for entity in module_content.entities},
-        world_time=world_time or WorldTimeState(),
+        entities=entities,
+        world_time=world_time or _world_time_for(module_content),
+        discovered_facts=tuple(sorted(initial.revealed_information_ids)),
+        item_instances=items,
+        party_item_knowledge={
+            item.id: ItemKnowledge(item_id=item.id, identity="known")
+            for entity in module_content.entities
+            if (item := items.get(entity.id)) is not None
+            and entity.visibility in {"public", "party"}
+        },
+        actor_item_knowledge=carried_knowledge,
     )
 
 

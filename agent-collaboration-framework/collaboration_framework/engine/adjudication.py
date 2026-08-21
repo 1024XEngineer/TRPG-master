@@ -241,7 +241,7 @@ class AdjudicationEngineService:
         runtime: EngineRuntimeSnapshot,
         adjudication: ActionAdjudication,
     ) -> tuple[ValidationResult, AuthorityLevel | None]:
-        if adjudication.rule_decision is not None and runtime.is_v3:
+        if adjudication.rule_decision is not None:
             success_level, success_details = self._classify_effects(
                 runtime,
                 adjudication.success_effects,
@@ -822,9 +822,7 @@ class AdjudicationEngineService:
                 ),
                 committed_results=committed_results_from_events(events),
             )
-            rule_effects_excluded = (
-                decision.adjudication.rule_decision is not None and runtime.is_v3
-            )
+            rule_effects_excluded = decision.adjudication.rule_decision is not None
             selected_effects = (
                 ()
                 if rule_effects_excluded
@@ -1049,9 +1047,7 @@ class AdjudicationEngineService:
                 ),
                 committed_results=committed_results_from_events(events),
             )
-            rule_effects_excluded = (
-                check_run.adjudication.rule_decision is not None and runtime.is_v3
-            )
+            rule_effects_excluded = check_run.adjudication.rule_decision is not None
             selected_effects = (
                 ()
                 if rule_effects_excluded
@@ -1099,8 +1095,6 @@ class AdjudicationEngineService:
     ) -> tuple[NarrationEvidence, ...]:
         """Project newly discovered entities through the final player-safe view."""
 
-        if not runtime.is_v3:
-            return ()
         candidate_events = tuple(
             event
             for event in events
@@ -1220,19 +1214,10 @@ class AdjudicationEngineService:
                 internal_reason="ActionAdjudication target 引用了不存在或隐藏的对象",
             )
         if adjudication.rule_decision is not None:
-            if not runtime.is_v3:
-                self._reject_validation(
-                    "RULE_OUT_OF_SCOPE",
-                    # 规则真实存在，只是 Agent 绑定了错误的动作族或目标；允许使用
-                    # 最新 PlayerView 重裁决一次，不应直接把内部错误抛给玩家。
-                    repairability="auto_repairable",
-                    fault="agent",
-                    player_safe_reason="当前行动不能使用该规则选项",
-                )
             # Refuses an id the module never declared, so a model cannot invent
             # a rule or reach a branch its option does not select.
             rule, _ = resolve_rule_option(
-                runtime.v3,
+                runtime.module_content,
                 rule_id=adjudication.rule_decision.rule_id,
                 option_id=adjudication.rule_decision.option_id,
             )
@@ -1331,10 +1316,10 @@ class AdjudicationEngineService:
         )
         for effect in effects:
             self._validate_effect(runtime, effect, vocabulary=vocabulary)
-            effect_registry.absorb_writes(effect, vocabulary, is_v3=runtime.is_v3)
+            effect_registry.absorb_writes(effect, vocabulary)
             if isinstance(effect, AdvanceWorldTimeEffect):
                 vocabulary.world_time = advanced_to_next(
-                    runtime.v3, vocabulary.world_time
+                    runtime.module_content, vocabulary.world_time
                 )
 
     def _validated_options(
@@ -1505,12 +1490,12 @@ class AdjudicationEngineService:
         """
 
         decision = adjudication.rule_decision
-        if decision is None or not runtime.is_v3:
+        if decision is None:
             return (
                 adjudication.success_effects if passed else adjudication.failure_effects
             )
         rule, branch_id = resolve_rule_option(
-            runtime.v3,
+            runtime.module_content,
             rule_id=decision.rule_id,
             option_id=decision.option_id,
         )
@@ -1626,68 +1611,13 @@ class AdjudicationEngineService:
         request_id: str,
         actor_id: str,
     ) -> tuple[GameState, list[DomainEvent]]:
-        if runtime.is_v3:
-            return self._apply_v3_event_rules(
-                runtime,
-                state=state,
-                events=events,
-                request_id=request_id,
-                actor_id=actor_id,
-            )
-
-        cursor = 0
-        fired: set[tuple[str, str]] = set()
-        while cursor < len(events):
-            source_event = events[cursor]
-            cursor += 1
-            for rule_id, effects in self._triggered_rule_effects(
-                runtime,
-                state=state,
-                source_event=source_event,
-                actor_id=actor_id,
-            ):
-                fire_key = (rule_id, source_event.event_id)
-                if fire_key in fired:
-                    continue
-                fired.add(fire_key)
-                if len(events) >= 100:
-                    self._reject_validation(
-                        "RULE_BUDGET_EXCEEDED",
-                        repairability="hard_reject",
-                        fault="engine",
-                        player_safe_reason="规则处理暂时无法完成",
-                    )
-                events.append(
-                    self._event_from_state(
-                        state,
-                        room_id=runtime.game_state.room_id,
-                        offset=len(events) + 1,
-                        request_id=request_id,
-                        actor_id=actor_id,
-                        event_type="rule.triggered",
-                        payload={
-                            "rule_id": rule_id,
-                            "source_event_id": source_event.event_id,
-                        },
-                        visibility="hidden",
-                    )
-                )
-                rule_runtime = runtime.model_copy(
-                    update={"game_state": state}, deep=True
-                )
-                self._validate_effect_sequence(rule_runtime, tuple(effects))
-                for effect in effects:
-                    state, emitted = self._apply_effect(
-                        runtime,
-                        state,
-                        effect,
-                        room_id=runtime.game_state.room_id,
-                        request_id=request_id,
-                        actor_id=actor_id,
-                        offset=len(events) + 1,
-                    )
-                    events.extend(emitted)
-        return state, events
+        return self._apply_v3_event_rules(
+            runtime,
+            state=state,
+            events=events,
+            request_id=request_id,
+            actor_id=actor_id,
+        )
 
     def _apply_v3_event_rules(
         self,
@@ -1707,7 +1637,7 @@ class AdjudicationEngineService:
         agenda = create_rule_agenda(
             agenda_id=self._new_id("agenda"),
             room_id=runtime.game_state.room_id,
-            module=runtime.v3,
+            module=runtime.module_content,
             correlation_id=request_id,
             root_source=AgendaSource(kind="action", id=request_id),
             revision=str(runtime.game_state.event_sequence),
@@ -1725,7 +1655,7 @@ class AdjudicationEngineService:
             if source_event.type == "rule.triggered":
                 continue
             rules = matching_event_rules(
-                runtime.v3,
+                runtime.module_content,
                 event_type=source_event.type,
                 state=state,
                 actor_id=actor_id,
@@ -1883,48 +1813,6 @@ class AdjudicationEngineService:
         agendas[agenda.agenda_id] = agenda
         state = state.model_copy(update={"rule_agendas": agendas}, deep=True)
         return state, events
-
-    @staticmethod
-    def _triggered_rule_effects(
-        runtime: EngineRuntimeSnapshot,
-        *,
-        state: GameState,
-        source_event: DomainEvent,
-        actor_id: str,
-    ) -> list[tuple[str, list[ActionEffect]]]:
-        """Rules this event fires, already reduced to the effects they commit.
-
-        v3 rules are step graphs, so the effects are whatever the walk collects
-        before it has to suspend (see engine/rules_v3.py).
-        """
-
-        if not runtime.is_v3:
-            return [
-                (rule.id, list(rule.effects))
-                for rule in sorted(
-                    (
-                        rule
-                        for rule in runtime.v2.event_rules
-                        if rule.event_type == source_event.type
-                        and all(
-                            source_event.payload.get(key) == value
-                            for key, value in rule.payload_matches.items()
-                        )
-                    ),
-                    key=lambda rule: (-rule.priority, rule.id),
-                )
-            ]
-        triggered = []
-        for rule in matching_event_rules(
-            runtime.v3,
-            event_type=source_event.type,
-            state=state,
-            actor_id=actor_id,
-        ):
-            walk = walk_rule(rule)
-            if walk.effects:
-                triggered.append((rule.id, walk.effects))
-        return triggered
 
     def _apply_effect(
         self,

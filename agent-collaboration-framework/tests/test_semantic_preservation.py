@@ -12,7 +12,7 @@ from collaboration_framework.contracts import (
     ConsumeEntityEffect,
     EnterLocationEffect,
     EnsureRuntimeEntityEffect,
-    ModuleContent,
+    ModuleContentV3,
     MoveEntityEffect,
     NarrativeOnlyEffect,
     NoAdjudicationCheck,
@@ -23,6 +23,7 @@ from collaboration_framework.contracts import (
     ValidationFeedback,
 )
 from collaboration_framework.engine import (
+    ActorState,
     GameState,
     InMemoryEngineStore,
     RuleEngineService,
@@ -33,11 +34,25 @@ from collaboration_framework.host.application.semantic_preservation import (
 )
 
 ROOT = Path(__file__).resolve().parents[1]
+V3_FIXTURE = (
+    ROOT
+    / "docs"
+    / "module-parser"
+    / "examples"
+    / "module-content-validation"
+    / "追书人"
+    / "module-content-v3.json"
+)
+# 开局唯一可见的 Canon 实体；语义匹配要靠它的玩家可见名。
+TARGET = "thomas"
+TARGET_LABEL = "托马斯·金博尔"
+# 开局已知但不在场的另一个可见目标，用来构造「一句话点到两个目标」。
+OTHER_LABEL = "阿诺兹堡图书馆"
 
 
 def player_input(
     action_id: str = "semantic-test",
-    utterance: str = "调查书架",
+    utterance: str = f"查看{TARGET_LABEL}",
 ) -> PlayerInput:
     return PlayerInput(
         room_id="room_01",
@@ -49,11 +64,20 @@ def player_input(
 
 
 def runtime():
-    module = ModuleContent.model_validate_json(
-        (ROOT / "fixtures/demo-module.json").read_text(encoding="utf-8")
-    )
-    state = GameState.model_validate_json(
-        (ROOT / "fixtures/demo-state.json").read_text(encoding="utf-8")
+    module = ModuleContentV3.model_validate_json(V3_FIXTURE.read_text(encoding="utf-8"))
+    state = GameState(
+        room_id="room_01",
+        scene_id=module.initial_state.start_location_id,
+        actors={
+            "pc_1": ActorState(
+                player_id="player_01",
+                name="陈探员",
+                source_character_id="character_v3",
+                source_character_version=1,
+                state={"skills": {"spot-hidden": 60}},
+            )
+        },
+        entities={},
     )
     store = InMemoryEngineStore()
     store.register_room(module_content=module, initial_state=state)
@@ -80,9 +104,9 @@ def _action(*, target_id: str, family: str = "action", effects=()) -> ActionAdju
         request_id="request",
         source_revision="0",
         actor_id="pc_1",
-        summary="调查书架",
+        summary=f"查看{TARGET_LABEL}",
         target=ActionTarget(kind="entity", id=target_id),
-        method=ActionMethod(family=family, description="调查书架"),
+        method=ActionMethod(family=family, description=f"查看{TARGET_LABEL}"),
         check=NoAdjudicationCheck(),
         success_effects=effects,
     )
@@ -90,14 +114,14 @@ def _action(*, target_id: str, family: str = "action", effects=()) -> ActionAdju
 
 def test_visible_target_id_correction_is_preserved() -> None:
     _, _, projector = runtime()
-    original = _action(target_id="missing-bookshelf")
-    repaired = _action(target_id="bookshelf")
-    view = asyncio.run(projector.project(player_input(utterance="调查书架")))
+    original = _action(target_id="missing-entity")
+    repaired = _action(target_id=TARGET)
+    view = asyncio.run(projector.project(player_input(utterance=f"查看{TARGET_LABEL}")))
 
     result = compare_repair_semantics(
-        player_input=player_input(utterance="调查书架"),
-        plan_goal="调查书架",
-        step=ActionPlanStep(kind="action", semantic_goal="调查书架"),
+        player_input=player_input(utterance=f"查看{TARGET_LABEL}"),
+        plan_goal=f"查看{TARGET_LABEL}",
+        step=ActionPlanStep(kind="action", semantic_goal=f"查看{TARGET_LABEL}"),
         original=original,
         repaired=repaired,
         validation_feedback=_feedback(),
@@ -111,27 +135,27 @@ def test_visible_target_id_correction_is_preserved() -> None:
 def test_target_id_correction_can_update_matching_effect_reference() -> None:
     _, _, projector = runtime()
     original = _action(
-        target_id="missing-bookshelf",
+        target_id="missing-entity",
         effects=(
             ChangeEntityStateEffect(
-                entity_id="missing-bookshelf",
+                entity_id="missing-entity",
                 key="seen",
                 value=True,
             ),
         ),
     )
     repaired = _action(
-        target_id="bookshelf",
+        target_id=TARGET,
         effects=(
-            ChangeEntityStateEffect(entity_id="bookshelf", key="seen", value=True),
+            ChangeEntityStateEffect(entity_id=TARGET, key="seen", value=True),
         ),
     )
-    view = asyncio.run(projector.project(player_input(utterance="调查书架")))
+    view = asyncio.run(projector.project(player_input(utterance=f"查看{TARGET_LABEL}")))
 
     result = compare_repair_semantics(
-        player_input=player_input(utterance="调查书架"),
-        plan_goal="调查书架",
-        step=ActionPlanStep(kind="action", semantic_goal="调查书架"),
+        player_input=player_input(utterance=f"查看{TARGET_LABEL}"),
+        plan_goal=f"查看{TARGET_LABEL}",
+        step=ActionPlanStep(kind="action", semantic_goal=f"查看{TARGET_LABEL}"),
         original=original,
         repaired=repaired,
         validation_feedback=_feedback(),
@@ -144,14 +168,14 @@ def test_target_id_correction_can_update_matching_effect_reference() -> None:
 
 def test_target_drift_is_rejected_even_when_validator_would_accept_it() -> None:
     _, _, projector = runtime()
-    original = _action(target_id="missing-bookshelf")
-    repaired = _action(target_id="cabinet")
-    view = asyncio.run(projector.project(player_input(utterance="调查书架")))
+    original = _action(target_id="missing-entity")
+    repaired = _action(target_id="melodias")
+    view = asyncio.run(projector.project(player_input(utterance=f"查看{TARGET_LABEL}")))
 
     result = compare_repair_semantics(
-        player_input=player_input(utterance="调查书架"),
-        plan_goal="调查书架",
-        step=ActionPlanStep(kind="action", semantic_goal="调查书架"),
+        player_input=player_input(utterance=f"查看{TARGET_LABEL}"),
+        plan_goal=f"查看{TARGET_LABEL}",
+        step=ActionPlanStep(kind="action", semantic_goal=f"查看{TARGET_LABEL}"),
         original=original,
         repaired=repaired,
         validation_feedback=_feedback(),
@@ -193,10 +217,10 @@ def _checked_action(**candidate_updates) -> ActionAdjudication:
         candidate_id="spot-candidate",
         skill_id="spot-hidden",
         difficulty="regular",
-        method_summary="调查书架",
+        method_summary=f"查看{TARGET_LABEL}",
         player_safe_reason="使用侦查能力",
     ).model_copy(update=candidate_updates)
-    return _action(target_id="bookshelf").model_copy(
+    return _action(target_id=TARGET).model_copy(
         update={"check": RequiredAdjudicationCheck(candidates=(candidate,))},
         deep=True,
     )
@@ -205,12 +229,12 @@ def _checked_action(**candidate_updates) -> ActionAdjudication:
 def test_unchanged_check_candidate_is_preserved() -> None:
     _, _, projector = runtime()
     original = _checked_action()
-    view = asyncio.run(projector.project(player_input(utterance="调查书架")))
+    view = asyncio.run(projector.project(player_input(utterance=f"查看{TARGET_LABEL}")))
 
     result = compare_repair_semantics(
-        player_input=player_input(utterance="调查书架"),
-        plan_goal="调查书架",
-        step=ActionPlanStep(kind="action", semantic_goal="调查书架"),
+        player_input=player_input(utterance=f"查看{TARGET_LABEL}"),
+        plan_goal=f"查看{TARGET_LABEL}",
+        step=ActionPlanStep(kind="action", semantic_goal=f"查看{TARGET_LABEL}"),
         original=original,
         repaired=original.model_copy(deep=True),
         validation_feedback=_feedback(),
@@ -224,7 +248,7 @@ def test_unchanged_check_candidate_is_preserved() -> None:
 def test_changed_check_candidate_identity_is_rejected() -> None:
     _, _, projector = runtime()
     original = _checked_action()
-    view = asyncio.run(projector.project(player_input(utterance="调查书架")))
+    view = asyncio.run(projector.project(player_input(utterance=f"查看{TARGET_LABEL}")))
 
     changed_fields = (
         {"candidate_id": "listen-candidate"},
@@ -233,9 +257,9 @@ def test_changed_check_candidate_identity_is_rejected() -> None:
     )
     for candidate_updates in changed_fields:
         result = compare_repair_semantics(
-            player_input=player_input(utterance="调查书架"),
-            plan_goal="调查书架",
-            step=ActionPlanStep(kind="action", semantic_goal="调查书架"),
+            player_input=player_input(utterance=f"查看{TARGET_LABEL}"),
+            plan_goal=f"查看{TARGET_LABEL}",
+            step=ActionPlanStep(kind="action", semantic_goal=f"查看{TARGET_LABEL}"),
             original=original,
             repaired=_checked_action(**candidate_updates),
             validation_feedback=_feedback(),
@@ -249,26 +273,26 @@ def test_changed_check_candidate_identity_is_rejected() -> None:
 def test_ambiguous_visible_target_mentions_require_clarification() -> None:
     _, _, projector = runtime()
     original = _action(target_id="missing-target")
-    repaired = _action(target_id="bookshelf")
+    repaired = _action(target_id=TARGET)
     view = asyncio.run(
-        projector.project(player_input(utterance="调查书架和柜子"))
+        projector.project(player_input(utterance=f"查看{TARGET_LABEL}和{OTHER_LABEL}"))
     )
 
     result = compare_repair_semantics(
-        player_input=player_input(utterance="调查书架和柜子"),
-        plan_goal="调查书架和柜子",
-        step=ActionPlanStep(kind="action", semantic_goal="调查书架和柜子"),
+        player_input=player_input(utterance=f"查看{TARGET_LABEL}和{OTHER_LABEL}"),
+        plan_goal=f"查看{TARGET_LABEL}和{OTHER_LABEL}",
+        step=ActionPlanStep(kind="action", semantic_goal=f"查看{TARGET_LABEL}和{OTHER_LABEL}"),
         original=original.model_copy(
             update={
-                "summary": "调查书架和柜子",
-                "method": ActionMethod(family="action", description="调查书架和柜子"),
+                "summary": f"查看{TARGET_LABEL}和{OTHER_LABEL}",
+                "method": ActionMethod(family="action", description=f"查看{TARGET_LABEL}和{OTHER_LABEL}"),
             },
             deep=True,
         ),
         repaired=repaired.model_copy(
             update={
-                "summary": "调查书架和柜子",
-                "method": ActionMethod(family="action", description="调查书架和柜子"),
+                "summary": f"查看{TARGET_LABEL}和{OTHER_LABEL}",
+                "method": ActionMethod(family="action", description=f"查看{TARGET_LABEL}和{OTHER_LABEL}"),
             },
             deep=True,
         ),
@@ -282,14 +306,14 @@ def test_ambiguous_visible_target_mentions_require_clarification() -> None:
 
 def test_method_family_change_is_rejected() -> None:
     _, _, projector = runtime()
-    original = _action(target_id="bookshelf", family="dialogue")
-    repaired = _action(target_id="bookshelf", family="action")
-    view = asyncio.run(projector.project(player_input(utterance="调查书架")))
+    original = _action(target_id=TARGET, family="dialogue")
+    repaired = _action(target_id=TARGET, family="action")
+    view = asyncio.run(projector.project(player_input(utterance=f"查看{TARGET_LABEL}")))
 
     result = compare_repair_semantics(
-        player_input=player_input(utterance="调查书架"),
-        plan_goal="调查书架",
-        step=ActionPlanStep(kind="dialogue", semantic_goal="调查书架"),
+        player_input=player_input(utterance=f"查看{TARGET_LABEL}"),
+        plan_goal=f"查看{TARGET_LABEL}",
+        step=ActionPlanStep(kind="dialogue", semantic_goal=f"查看{TARGET_LABEL}"),
         original=original,
         repaired=repaired,
         validation_feedback=_feedback(),
@@ -303,8 +327,8 @@ def test_method_family_change_is_rejected() -> None:
 def test_explicit_no_harm_limit_is_not_overridden_by_repair() -> None:
     _, _, projector = runtime()
     input_value = player_input(utterance="说服守卫放行，不伤害守卫")
-    original = _action(target_id="butler", family="dialogue")
-    repaired = _action(target_id="butler", family="combat")
+    original = _action(target_id=TARGET, family="dialogue")
+    repaired = _action(target_id=TARGET, family="combat")
     view = asyncio.run(projector.project(input_value))
 
     result = compare_repair_semantics(
@@ -324,22 +348,22 @@ def test_explicit_no_harm_limit_is_not_overridden_by_repair() -> None:
 def test_only_validator_rejected_effect_can_be_removed() -> None:
     _, _, projector = runtime()
     original = _action(
-        target_id="bookshelf",
+        target_id=TARGET,
         effects=(
-            ChangeEntityStateEffect(entity_id="bookshelf", key="seen", value=True),
-            ConsumeEntityEffect(entity_id="bookshelf"),
+            ChangeEntityStateEffect(entity_id=TARGET, key="seen", value=True),
+            ConsumeEntityEffect(entity_id=TARGET),
         ),
     )
     repaired = _action(
-        target_id="bookshelf",
-        effects=(ChangeEntityStateEffect(entity_id="bookshelf", key="seen", value=True),),
+        target_id=TARGET,
+        effects=(ChangeEntityStateEffect(entity_id=TARGET, key="seen", value=True),),
     )
-    view = asyncio.run(projector.project(player_input(utterance="调查书架")))
+    view = asyncio.run(projector.project(player_input(utterance=f"查看{TARGET_LABEL}")))
 
     result = compare_repair_semantics(
-        player_input=player_input(utterance="调查书架"),
-        plan_goal="调查书架",
-        step=ActionPlanStep(kind="action", semantic_goal="调查书架"),
+        player_input=player_input(utterance=f"查看{TARGET_LABEL}"),
+        plan_goal=f"查看{TARGET_LABEL}",
+        step=ActionPlanStep(kind="action", semantic_goal=f"查看{TARGET_LABEL}"),
         original=original,
         repaired=repaired,
         validation_feedback=_feedback(
@@ -355,17 +379,17 @@ def test_only_validator_rejected_effect_can_be_removed() -> None:
 
 def test_new_irreversible_effect_requires_clarification() -> None:
     _, _, projector = runtime()
-    original = _action(target_id="bookshelf")
+    original = _action(target_id=TARGET)
     repaired = _action(
-        target_id="bookshelf",
-        effects=(EnterLocationEffect(location_id="study"),),
+        target_id=TARGET,
+        effects=(EnterLocationEffect(location_id="thomas_office"),),
     )
-    view = asyncio.run(projector.project(player_input(utterance="调查书架")))
+    view = asyncio.run(projector.project(player_input(utterance=f"查看{TARGET_LABEL}")))
 
     result = compare_repair_semantics(
-        player_input=player_input(utterance="调查书架"),
-        plan_goal="调查书架",
-        step=ActionPlanStep(kind="action", semantic_goal="调查书架"),
+        player_input=player_input(utterance=f"查看{TARGET_LABEL}"),
+        plan_goal=f"查看{TARGET_LABEL}",
+        step=ActionPlanStep(kind="action", semantic_goal=f"查看{TARGET_LABEL}"),
         original=original,
         repaired=repaired,
         validation_feedback=_feedback(),
@@ -379,19 +403,19 @@ def test_new_irreversible_effect_requires_clarification() -> None:
 def test_same_length_effect_replacement_requires_clarification() -> None:
     _, _, projector = runtime()
     original = _action(
-        target_id="bookshelf",
-        effects=(ChangeEntityStateEffect(entity_id="bookshelf", key="seen", value=True),),
+        target_id=TARGET,
+        effects=(ChangeEntityStateEffect(entity_id=TARGET, key="seen", value=True),),
     )
     repaired = _action(
-        target_id="bookshelf",
-        effects=(ConsumeEntityEffect(entity_id="bookshelf"),),
+        target_id=TARGET,
+        effects=(ConsumeEntityEffect(entity_id=TARGET),),
     )
-    view = asyncio.run(projector.project(player_input(utterance="调查书架")))
+    view = asyncio.run(projector.project(player_input(utterance=f"查看{TARGET_LABEL}")))
 
     result = compare_repair_semantics(
-        player_input=player_input(utterance="调查书架"),
-        plan_goal="调查书架",
-        step=ActionPlanStep(kind="action", semantic_goal="调查书架"),
+        player_input=player_input(utterance=f"查看{TARGET_LABEL}"),
+        plan_goal=f"查看{TARGET_LABEL}",
+        step=ActionPlanStep(kind="action", semantic_goal=f"查看{TARGET_LABEL}"),
         original=original,
         repaired=repaired,
         validation_feedback=_feedback(),
@@ -408,7 +432,7 @@ def _greeting(*, rule: RuleDecisionRef | None) -> ActionAdjudication:
         source_revision="0",
         actor_id="pc_1",
         summary="跟邻居打个招呼",
-        target=ActionTarget(kind="entity", id="bookshelf"),
+        target=ActionTarget(kind="entity", id=TARGET),
         method=ActionMethod(family="social", description="打招呼"),
         check=NoAdjudicationCheck(),
         rule_decision=rule,
@@ -484,12 +508,12 @@ def test_nonportable_pickup_can_be_repaired_to_runtime_item_creation() -> None:
         source_revision="0",
         actor_id="pc_1",
         summary="拿起刚才提到的普通册子",
-        target=ActionTarget(kind="entity", id="bookshelf"),
+        target=ActionTarget(kind="entity", id=TARGET),
         method=ActionMethod(family="pick_up", description="拿起刚才提到的普通册子"),
         persistence_intent="inventory",
         check=NoAdjudicationCheck(),
         success_effects=(
-            MoveEntityEffect(entity_id="bookshelf", holder_actor_id="pc_1"),
+            MoveEntityEffect(entity_id=TARGET, holder_actor_id="pc_1"),
         ),
     )
     repaired = original.model_copy(
@@ -531,12 +555,12 @@ def test_nonportable_pickup_can_be_narrowed_to_zero_write_obstruction() -> None:
         source_revision="0",
         actor_id="pc_1",
         summary="拿起固定陈设",
-        target=ActionTarget(kind="entity", id="bookshelf"),
+        target=ActionTarget(kind="entity", id=TARGET),
         method=ActionMethod(family="pick_up", description="拿起固定陈设"),
         persistence_intent="inventory",
         check=NoAdjudicationCheck(),
         success_effects=(
-            MoveEntityEffect(entity_id="bookshelf", holder_actor_id="pc_1"),
+            MoveEntityEffect(entity_id=TARGET, holder_actor_id="pc_1"),
         ),
     )
     repaired = original.model_copy(

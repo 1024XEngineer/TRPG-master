@@ -40,7 +40,7 @@ class ModuleVersion(Base):
     __table_args__ = (
         PrimaryKeyConstraint("module_id", "version", name="pk_module_versions"),
         CheckConstraint(
-            "content_schema_version >= 1",
+            "content_schema_version = 3",
             name="ck_module_versions_content_schema_version",
         ),
     )
@@ -51,7 +51,7 @@ class ModuleVersion(Base):
     version: Mapped[str] = mapped_column(String(50), nullable=False)
     world_ref: Mapped[str] = mapped_column(String(200), nullable=False)
     content_schema_version: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=1, server_default="1"
+        Integer, nullable=False, default=3, server_default="3"
     )
     content_json: Mapped[dict] = mapped_column(JSON, nullable=False)
     created_at: Mapped[datetime] = mapped_column(

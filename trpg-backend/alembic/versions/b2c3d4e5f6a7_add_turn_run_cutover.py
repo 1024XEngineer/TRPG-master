@@ -1,7 +1,7 @@
 """record the TurnRun cutover and bounded legacy recovery window
 
 Revision ID: b2c3d4e5f6a7
-Revises: c7d8e9f0a1b2
+Revises: d4f1a2b3c5e7
 Create Date: 2026-08-20
 """
 
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "b2c3d4e5f6a7"
-down_revision: str | Sequence[str] | None = "c7d8e9f0a1b2"
+down_revision: str | Sequence[str] | None = "d4f1a2b3c5e7"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

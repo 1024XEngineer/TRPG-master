@@ -13,7 +13,7 @@ from collaboration_framework.contracts import (
     ActionPlan,
     ActionPlanStep,
     Intent,
-    ModuleContent,
+    ModuleContentV3,
     PlayerInput,
     PlayerView,
     SceneView,
@@ -74,7 +74,7 @@ def test_action_plan_narration_preserves_completed_travel_before_clarification()
     assert "绝不得说\n该地点没找到" in _ACTION_PLAN_NARRATION_INSTRUCTIONS
 
 
-def load_paper_chase() -> ModuleContent:
+def load_paper_chase() -> ModuleContentV3:
     examples = (
         ROOT
         / "agent-collaboration-framework"
@@ -83,19 +83,21 @@ def load_paper_chase() -> ModuleContent:
         / "examples"
         / "module-content-validation"
     )
-    for path in examples.rglob("module-content-draft.json"):
+    for path in examples.rglob("module-content-v3.json"):
         payload = path.read_text(encoding="utf-8")
         if '"module_id": "paper-chase-zh-coc7"' in payload:
-            return ModuleContent.model_validate_json(payload)
-    raise AssertionError("Paper Chase ModuleContent fixture was not found")
+            return ModuleContentV3.model_validate_json(payload)
+    raise AssertionError("Paper Chase ModuleContentV3 fixture was not found")
 
 
-def conversation_state(module: ModuleContent) -> GameState:
+def conversation_state(module: ModuleContentV3) -> GameState:
+    """站在地穴里，面前是一个愿意开口的人影——这里要的是一个能对话的场面。"""
+
     entities = {entity.id: dict(entity.state) for entity in module.entities}
     entities["cemetery_figure"]["willing_to_talk"] = True
     return GameState(
         room_id="room_llm",
-        scene_id="conversation",
+        scene_id="crypt",
         actors={
             "actor_1": ActorState(
                 player_id="player_1",

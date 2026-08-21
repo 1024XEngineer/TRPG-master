@@ -69,7 +69,12 @@ async def test_paper_chase_models_caretaker_bottle_as_discoverable_state() -> No
 
 
 def test_paper_chase_keeps_previous_v2_snapshots() -> None:
-    """切到 v3 不删旧快照——已经开局的房间可能还钉在某个 v2 版本上。"""
+    """切到 v3 不删旧快照——它们是这次迁移的出处记录。
+
+    原来的理由是「已经开局的房间可能还钉在某个 v2 版本上」，#384 之后这不再可能：
+    数据库只接受 v3。留着这几个文件是为了另一件事——`test_paper_chase_v3_fixture`
+    要拿 v2 草稿逐条核对每个 checkpoint 都有 v3 后继规则，删了就没法证明迁移是完整的。
+    """
 
     current = json.loads(loader.PAPER_CHASE_SOURCE_PATH.read_text(encoding="utf-8"))
     assert current["version"] == "3.0.6"
@@ -187,23 +192,29 @@ async def test_loader_does_not_overwrite_different_immutable_version(
     assert unchanged.content_json == changed_content
 
 
-async def test_loader_preserves_rooms_pinned_legacy_version(
+async def test_loader_preserves_rooms_pinned_older_version(
     db_session: AsyncSession,
 ) -> None:
+    """加载器只写自己那一行，房间锁定的旧版本原样保留。
+
+    这条用例原本用一行 v1 内容当「旧版本」，但 #384 之后数据库只接受 v3，非 3 的行
+    根本插不进来。被测的不变量与 schema 版本无关——加载器不能碰 `(module_id,
+    version)` 不是自己的那些行——所以改用一个更早的 v3 版本号承载。
+    """
+
     current = await db_session.get(
         ModuleVersion,
         (BUILTIN_MODULE_ID, BUILTIN_MODULE_VERSION),
     )
     assert current is not None
-    legacy_path = loader.PAPER_CHASE_SOURCE_PATH.with_name("module-content-1.0.1.json")
-    legacy_content = json.loads(legacy_path.read_text(encoding="utf-8"))
+    pinned_content = json.loads(json.dumps(current.content_json))
+    pinned_content["version"] = "3.0.5"
     db_session.add(
         ModuleVersion(
             module_id=BUILTIN_MODULE_ID,
-            version="1.0.1",
+            version="3.0.5",
             world_ref=current.world_ref,
-            content_schema_version=1,
-            content_json=legacy_content,
+            content_json=pinned_content,
         )
     )
     await db_session.commit()
@@ -211,9 +222,10 @@ async def test_loader_preserves_rooms_pinned_legacy_version(
     result = await loader.load_paper_chase(db_session)
 
     assert result.version == "3.0.6"
-    legacy = await db_session.get(ModuleVersion, (BUILTIN_MODULE_ID, "1.0.1"))
-    assert legacy is not None
-    assert legacy.content_json == legacy_content
+    pinned = await db_session.get(ModuleVersion, (BUILTIN_MODULE_ID, "3.0.5"))
+    assert pinned is not None
+    assert pinned.content_json == pinned_content
+    assert pinned.content_schema_version == 3
 
 
 async def test_loader_rolls_back_module_and_ready_status_together(

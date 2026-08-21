@@ -433,7 +433,18 @@ async def _drain_host_action_queue(room_id: str) -> None:
                         room_id=room_id,
                         player_id=item.player_id,
                     )
-                except Exception:
+                except Exception as exc:
+                    # 只有身份已经失效才丢弃。投影层的瞬时失败（库锁、运行时
+                    # 还在恢复）必须把已接受的队列项留着，等下一次出队再试。
+                    if not _is_stale_queued_actor_error(exc):
+                        logger.warning(
+                            "host_queue_projection_deferred",
+                            room_id=room_id,
+                            client_action_id=item.client_action_id,
+                            error_type=type(exc).__name__,
+                            error_reason=_turn_error_reason(exc),
+                        )
+                        return
                     await host_action_queue_service.discard(db, item)
                     continue
                 if view.self_actor.id != item.actor_id:
@@ -1326,6 +1337,12 @@ async def _emit_turn_narration(
         payload=push.model_dump(by_alias=True),
     )
     await send(envelope.model_dump(by_alias=True))
+
+
+def _is_stale_queued_actor_error(exc: Exception) -> bool:
+    """Queue items are discarded only when the frozen actor is gone or rebound."""
+
+    return isinstance(exc, (ActorResolutionError, ActorBindingError))
 
 
 def _map_turn_error(exc: Exception) -> tuple[str, str, bool]:

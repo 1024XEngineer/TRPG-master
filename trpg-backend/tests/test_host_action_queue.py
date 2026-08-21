@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
+from collaboration_framework.contracts import ContractError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.controller import ws as ws_controller
+from app.core.turn import ActorResolutionError
 from app.service import host_action_queue
 from app.service.host_action_queue import HostActionQueueError
 from tests.test_engine_runtime import _start_room
@@ -190,3 +195,76 @@ async def test_cancel_and_discard_player_queued_items(db_session: AsyncSession) 
     assert await host_action_queue.list_queued(db_session, room.id) == []
     peeked = await host_action_queue.peek_next(db_session, room.id)
     assert peeked is None
+
+
+async def _enqueue_one(db_session: AsyncSession, room_number: int) -> tuple[str, str]:
+    room, players, _ = await _start_room(
+        db_session,
+        room_number=room_number,
+        player_count=1,
+        prepare_checkpoint=False,
+    )
+    await host_action_queue.enqueue(
+        db_session,
+        room_id=room.id,
+        player_id=players[0].id,
+        actor_id="actor-a",
+        client_action_id="queued-action",
+        utterance="我搜查客厅",
+    )
+    return room.id, players[0].id
+
+
+def _stub_player_view(current_player_view):  # noqa: ANN001
+    return SimpleNamespace(current_player_view=current_player_view)
+
+
+@pytest.mark.asyncio
+async def test_drain_keeps_queued_item_when_player_view_is_temporarily_unavailable(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    room_id, _ = await _enqueue_one(db_session, 3975)
+
+    async def boom(*, room_id: str, player_id: str):  # noqa: ARG001
+        raise ContractError(f"房间运行时不存在: {room_id}")
+
+    monkeypatch.setattr(ws_controller, "session_view_application", _stub_player_view(boom))
+    await ws_controller._drain_host_action_queue(room_id)
+
+    queued = await host_action_queue.peek_next(db_session, room_id)
+    assert queued is not None
+    assert queued.client_action_id == "queued-action"
+    assert queued.status == "queued"
+
+
+@pytest.mark.asyncio
+async def test_drain_discards_queued_item_when_actor_is_unbound(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    room_id, _ = await _enqueue_one(db_session, 3976)
+
+    async def unbound(*, room_id: str, player_id: str):  # noqa: ARG001
+        raise ActorResolutionError("当前玩家没有唯一绑定的局内 Actor")
+
+    monkeypatch.setattr(ws_controller, "session_view_application", _stub_player_view(unbound))
+    await ws_controller._drain_host_action_queue(room_id)
+
+    assert await host_action_queue.peek_next(db_session, room_id) is None
+
+
+@pytest.mark.asyncio
+async def test_drain_discards_queued_item_when_actor_id_changed(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    room_id, _ = await _enqueue_one(db_session, 3977)
+
+    async def rebound(*, room_id: str, player_id: str):  # noqa: ARG001
+        return SimpleNamespace(self_actor=SimpleNamespace(id="actor-other"), revision="9")
+
+    monkeypatch.setattr(ws_controller, "session_view_application", _stub_player_view(rebound))
+    await ws_controller._drain_host_action_queue(room_id)
+
+    assert await host_action_queue.peek_next(db_session, room_id) is None

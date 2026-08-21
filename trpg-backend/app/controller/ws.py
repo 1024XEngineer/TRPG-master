@@ -553,6 +553,7 @@ async def _send_action_plan_result(
     room_id: str,
     player_id: str,
     result: ActionPlanTurnResult,
+    before_completed: Callable[[], Awaitable[None]] | None = None,
 ) -> bool:
     if result.waiting_for_player:
         execution = result.execution
@@ -610,6 +611,34 @@ async def _send_action_plan_result(
     # 权威状态已经提交，先为每名在线玩家独立投影；最终叙事发出后客户端可立即断开，
     # 因此不能把这项数据库工作留在叙事之后。
     await _broadcast_player_views(room_id)
+
+    deferred_progress: list[object] = []
+
+    async def _defer_plan_progress(event: object) -> None:
+        deferred_progress.append(event)
+
+    async def _finalize_before_completed() -> None:
+        # The narration event is already durable when this callback runs. Finish the
+        # Run before publishing turn.completed so an immediate next action cannot
+        # observe the previous Run as active.
+        with anyio.CancelScope(shield=True):
+            await time_advance_service.mark_narration_persisted(
+                db,
+                room_id=room_id,
+                parent_action_id=result.player_input.client_action_id,
+            )
+            await action_plan_turn_application.mark_narration_persisted(
+                room_id=room_id,
+                parent_action_id=result.player_input.client_action_id,
+                on_progress=_defer_plan_progress,
+            )
+            if before_completed is not None:
+                await before_completed()
+
+    async def _flush_deferred_progress() -> None:
+        for event in deferred_progress:
+            await _send_plan_progress(websocket, event)
+
     recorded = await _send_completed_turn_message(
         db,
         websocket,
@@ -619,20 +648,10 @@ async def _send_action_plan_result(
         client_action_id=result.player_input.client_action_id,
         player_view=result.player_view,
         narration=output,
+        before_completed=_finalize_before_completed,
+        after_narration=_flush_deferred_progress,
     )
-    # 客户端收到最终叙事后可能立即断开；尾部持久化必须屏蔽连接取消，否则会留下
-    # 已发叙事但 ActionPlan 仍占用房间的半完成状态。
     with anyio.CancelScope(shield=True):
-        await time_advance_service.mark_narration_persisted(
-            db,
-            room_id=room_id,
-            parent_action_id=result.player_input.client_action_id,
-        )
-        await action_plan_turn_application.mark_narration_persisted(
-            room_id=room_id,
-            parent_action_id=result.player_input.client_action_id,
-            on_progress=lambda event: _send_plan_progress(websocket, event),
-        )
         await _broadcast_room_action_state(db, room_id)
     return recorded
 
@@ -647,9 +666,23 @@ async def _send_completed_turn_message(
     client_action_id: str,
     player_view: PlayerView,
     narration: NarrationOutput,
+    before_completed: Callable[[], Awaitable[None]] | None = None,
+    after_narration: Callable[[], Awaitable[None]] | None = None,
 ) -> bool:
-    """Send one completed turn and persist its authoritative narration once."""
+    """Make completion durable, then preserve the established socket event order."""
 
+    recorded, persisted_narration = await _persist_turn_narration(
+        db,
+        room_id,
+        player_id,
+        client_action_id=client_action_id,
+        narration=narration,
+        actor_id=actor_id,
+        scene_id=player_view.scene_id,
+        view_revision=player_view.revision,
+    )
+    if before_completed is not None:
+        await before_completed()
     await _send_to_player(
         websocket,
         {
@@ -666,17 +699,15 @@ async def _send_completed_turn_message(
         },
     )
     await _send_view_updated(websocket, player_id, player_view)
-    recorded = await _deliver_turn_narration(
-        db,
-        websocket,
-        room_id,
-        player_id,
-        client_action_id=client_action_id,
-        narration=narration,
-        actor_id=actor_id,
-        scene_id=player_view.scene_id,
-        view_revision=player_view.revision,
-    )
+    if recorded:
+        await _emit_turn_narration(
+            websocket,
+            room_id,
+            client_action_id=client_action_id,
+            narration=persisted_narration,
+        )
+    if after_narration is not None:
+        await after_narration()
     return recorded
 
 
@@ -926,9 +957,8 @@ async def _ensure_opening_narration(
     return True
 
 
-async def _deliver_turn_narration(
+async def _persist_turn_narration(
     db: AsyncSession,
-    websocket: WebSocket,
     room_id: str,
     player_id: str,
     *,
@@ -937,8 +967,8 @@ async def _deliver_turn_narration(
     actor_id: str,
     scene_id: str,
     view_revision: str,
-) -> bool:
-    """持久化去重成功后才发送一次动作叙事。"""
+) -> tuple[bool, NarrationOutput]:
+    """Persist one authoritative narration before its completion is announced."""
 
     text = normalize_narration_text(narration.text)
     completion = narration.model_copy(update={"text": text})
@@ -965,31 +995,46 @@ async def _deliver_turn_narration(
         correlation_id=client_action_id,
     )
     if not recorded:
-        return False
+        return False, completion
     log_narration_output(
         room_id=room_id,
         correlation_id=client_action_id,
         text=text,
         clarification=completion.kind == "clarification",
     )
+    return True, completion
+
+
+async def _emit_turn_narration(
+    websocket: WebSocket,
+    room_id: str,
+    *,
+    client_action_id: str,
+    narration: NarrationOutput,
+) -> None:
+    """Emit a narration that has already passed validation and persistence."""
+
+    push = NarrationPushPayload(
+        message_id=client_action_id,
+        text=narration.text,
+    )
     # 澄清叙事只对发起者可见，它的渐进片段必须走同一条投递通道，
     # 否则片段会广播给全房间、泄露只该给一个人看的内容。
     send = (
         partial(_send_to_player, websocket)
-        if completion.kind == "clarification"
+        if narration.kind == "clarification"
         else partial(manager.broadcast, room_id)
     )
     await _stream_narration_chunks(
         send,
         message_id=client_action_id,
-        text=text,
+        text=narration.text,
     )
     envelope = ServerEnvelope(
         type="narration.push",
         payload=push.model_dump(by_alias=True),
     )
     await send(envelope.model_dump(by_alias=True))
-    return True
 
 
 def _map_turn_error(exc: Exception) -> tuple[str, str, bool]:
@@ -1737,12 +1782,25 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                     db,
                                 ),
                             )
+
+                            async def _release_action_before_completed(
+                                token: str = lock_token,
+                            ) -> None:
+                                with anyio.CancelScope(shield=True):
+                                    action_lock_manager.release(room_id, token)
+                                    await _broadcast_room_action_state_fresh(room_id)
+
                             await _send_action_plan_result(
                                 db,
                                 websocket,
                                 room_id,
                                 bound_player_id,
                                 result,
+                                before_completed=(
+                                    _release_action_before_completed
+                                    if not result.waiting_for_player
+                                    else None
+                                ),
                             )
                         except Exception as exc:
                             code, _, _ = _map_turn_error(exc)

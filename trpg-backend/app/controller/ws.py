@@ -157,7 +157,7 @@ _DIRECT_SPEECH_MARKERS = ("告诉", "询问", "问", "提醒", "威胁", "喊", 
 
 
 def _listener_ids_for_utterance(utterance: str, player_view: PlayerView) -> tuple[str, ...]:
-    """只有明确的对话动词才把可见实体认定为听众，避免把“去找 NPC”记成对话。"""
+    """只根据明确点名和当前 PlayerView 确定听众，不猜测自然语言意图。"""
     if not any(marker in utterance for marker in _DIRECT_SPEECH_MARKERS):
         return ()
     return _matching_visible_entity_ids(utterance, player_view)

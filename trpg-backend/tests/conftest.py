@@ -153,6 +153,12 @@ def recent_history_source() -> SqlAlchemyRecentHistorySource:
 
 
 @pytest.fixture
+def memory_store() -> SqlAlchemyMemoryStore:
+    """返回绑定文件型 SQLite 的记忆存储，供真实并发事务测试使用。"""
+    return SqlAlchemyMemoryStore(TestSessionLocal)
+
+
+@pytest.fixture
 def sql_counter() -> Generator[list[str], None, None]:
     """记录这段测试期间真实执行的 SQL 语句，用来断言"查询数不随数据量增长"。
 

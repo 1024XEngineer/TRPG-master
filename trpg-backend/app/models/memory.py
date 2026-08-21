@@ -34,6 +34,7 @@ class MemoryEntryRecord(Base):
         ),
         Index("ix_memory_entries_scope", "room_id", "subject_id", "visibility"),
         Index("ix_memory_entries_entity", "room_id", "object_id", "location_id"),
+        Index("ix_memory_entries_room_source_created", "room_id", "source_created_at"),
     )
 
     id: Mapped[str] = mapped_column(
@@ -55,8 +56,33 @@ class MemoryEntryRecord(Base):
     source_event_id: Mapped[str] = mapped_column(String(100), nullable=False)
     source_sequence: Mapped[int] = mapped_column(BigInteger, nullable=False)
     source_revision: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # 两类来源事件的 sequence 不可直接比较，统一用真实发生时间决定同级记忆的新旧。
+    source_created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+
+
+class MemoryProjectionCursor(Base):
+    """记录房间两类事件流的投影高水位，避免每次读取都重放全量历史。"""
+
+    __tablename__ = "memory_projection_cursors"
+
+    room_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("game_sessions.room_id"), primary_key=True
+    )
+    event_created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    event_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    game_sequence: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
 
 

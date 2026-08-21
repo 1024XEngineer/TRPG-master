@@ -741,6 +741,11 @@ export class RoomSocket {
     this.send('chat.send', playerId, payload);
   }
 
+  /** action.chat.send —— 行动区普通消息，广播原话但不进入主持主链。 */
+  sendActionChat(playerId: string, payload: ChatSendPayload): void {
+    this.send('action.chat.send', playerId, payload);
+  }
+
   /** san.check.roll —— 理智检定摇骰（issue #77 新增，后端本期回 NOT_IMPLEMENTED）。 */
   rollSanCheck(playerId: string, payload: SanCheckRollPayload): void {
     this.send('san.check.roll', playerId, payload);

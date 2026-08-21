@@ -1413,7 +1413,7 @@ export default function RoomPage() {
     (pendingAdjudication !== null || pendingTimeAdvance !== null || pendingSceneTransition !== null)
   const actionSubmissionBlocked = mustAnswerCurrent
   const queuedActions = roomActionState?.queued ?? []
-  const composerDisabled = suspended || (isActionChannel && actionSubmissionBlocked)
+  const composerDisabled = suspended
   const actionOwnerName = roomActionState?.playerId === playerId
     ? senderName
     : roomPlayers.find((player) => player.playerId === roomActionState?.playerId)?.nickname ?? '其他调查员'
@@ -1927,7 +1927,7 @@ export default function RoomPage() {
   const sendMessage = (e?: FormEvent) => {
     e?.preventDefault()
     const text = input.trim()
-    if (!text || !playerId || suspended || (isActionChannel && actionSubmissionBlocked)) return
+    if (!text || !playerId || suspended) return
     // 发送前先关闭识别结果闸门，防止浏览器稍后返回的文本写入已清空的输入框。
     cancelSpeechInput()
     setInput('')
@@ -1937,10 +1937,11 @@ export default function RoomPage() {
     }
     const hostUtterance = hostUtteranceFromActionInput(text)
     if (hostUtterance) {
+      if (actionSubmissionBlocked) return
       submitPlayerAction({ clientActionId: randomActionId(), utterance: hostUtterance })
       return
     }
-    sdk.roomSocket.sendChat(playerId, { text, clientMessageId: randomActionId() })
+    sdk.roomSocket.sendActionChat(playerId, { text, clientMessageId: randomActionId() })
   }
 
   useEffect(() => {
@@ -2552,10 +2553,8 @@ export default function RoomPage() {
             placeholder={
               suspended
                 ? '游戏已挂起'
-                : isActionChannel && actionSubmissionBlocked
-                  ? '请先完成当前检定或确认'
-                  : isActionChannel
-                    ? '输入 @主持人 触发行动'
+                : isActionChannel
+                    ? '输入消息，@主持人 触发行动'
                     : '输入行动…'
             }
             className="room-play__input"

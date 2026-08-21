@@ -1482,46 +1482,71 @@ async def _broadcast_action_utterance(
 ) -> None:
     """广播玩家原话，但不把讨论区消息混入叙事事件历史。"""
 
-    player = await room_service.get_player(db, player_input.player_id)
-    nickname = player.nickname if player is not None else "玩家"
-    character_name = await room_service.get_player_character_name(
+    await _broadcast_action_line(
         db,
-        player_input.player_id,
-        fallback=nickname,
-    )
-    payload = ActionBroadcastPayload(
+        room_id=player_input.room_id,
         player_id=player_input.player_id,
         client_action_id=player_input.client_action_id,
-        nickname=nickname,
-        character_name=character_name,
         utterance=player_input.utterance,
-    )
-    recorded = await room_service.record_event(
-        db,
-        player_input.room_id,
-        player_input.player_id,
-        "action.broadcast",
-        payload.model_dump(by_alias=True, mode="json"),
-        visibility="public",
         actor_id=player_input.actor_id,
         scene_id=player_view.scene_id,
         view_revision=player_view.revision,
-        correlation_id=player_input.client_action_id,
+    )
+
+
+async def _broadcast_action_line(
+    db: AsyncSession,
+    *,
+    room_id: str,
+    player_id: str,
+    client_action_id: str,
+    utterance: str,
+    actor_id: str | None,
+    scene_id: str | None,
+    view_revision: str | None,
+) -> None:
+    """把行动区原话广播给全房间，不进入主持主链。"""
+
+    player = await room_service.get_player(db, player_id)
+    nickname = player.nickname if player is not None else "玩家"
+    character_name = await room_service.get_player_character_name(
+        db,
+        player_id,
+        fallback=nickname,
+    )
+    payload = ActionBroadcastPayload(
+        player_id=player_id,
+        client_action_id=client_action_id,
+        nickname=nickname,
+        character_name=character_name,
+        utterance=utterance,
+    )
+    recorded = await room_service.record_event(
+        db,
+        room_id,
+        player_id,
+        "action.broadcast",
+        payload.model_dump(by_alias=True, mode="json"),
+        visibility="public",
+        actor_id=actor_id,
+        scene_id=scene_id,
+        view_revision=view_revision,
+        correlation_id=client_action_id,
     )
     if not recorded:
         return
     log_player_input(
-        room_id=player_input.room_id,
-        player_id=player_input.player_id,
+        room_id=room_id,
+        player_id=player_id,
         character_name=character_name,
-        correlation_id=player_input.client_action_id,
-        utterance=player_input.utterance,
+        correlation_id=client_action_id,
+        utterance=utterance,
     )
     envelope = ServerEnvelope(
         type="action.broadcast",
         payload=payload.model_dump(by_alias=True),
     )
-    await manager.broadcast(player_input.room_id, envelope.model_dump(by_alias=True))
+    await manager.broadcast(room_id, envelope.model_dump(by_alias=True))
 
 
 async def _handle_chat_send(
@@ -1563,6 +1588,50 @@ async def _handle_chat_send(
         payload=chat_payload.model_dump(by_alias=True, mode="json"),
     )
     await manager.broadcast(room_id, envelope.model_dump(by_alias=True))
+
+
+async def _handle_action_chat_send(
+    db: AsyncSession,
+    websocket: WebSocket,
+    room_id: str,
+    player_id: str,
+    payload: ChatSendPayload,
+) -> None:
+    """行动区普通消息：落成 action.broadcast，不调模型、不占行动槽。"""
+
+    text = payload.text.strip()
+    if not text:
+        return
+    player = await room_service.get_player(db, player_id)
+    if player is None or player.room_id != room_id:
+        return
+    room = await room_service.find_room_by_id(db, room_id)
+    if room.phase == "Completed":
+        await _send_error(websocket, "FORBIDDEN", "游戏已结束，无法发送消息")
+        return
+    actor_id: str | None = None
+    scene_id: str | None = None
+    view_revision: str | None = None
+    try:
+        view = await session_view_application.current_player_view(
+            room_id=room_id,
+            player_id=player_id,
+        )
+        actor_id = view.self_actor.id
+        scene_id = view.scene_id
+        view_revision = view.revision
+    except Exception:
+        pass
+    await _broadcast_action_line(
+        db,
+        room_id=room_id,
+        player_id=player_id,
+        client_action_id=payload.client_message_id,
+        utterance=text,
+        actor_id=actor_id,
+        scene_id=scene_id,
+        view_revision=view_revision,
+    )
 
 
 async def _handle_room_join(
@@ -1939,6 +2008,15 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                             room_id,
                             bound_player_id,
                             chat_payload,
+                        )
+                    elif event_type == "action.chat.send":
+                        action_chat = ChatSendPayload.model_validate(raw_payload)
+                        await _handle_action_chat_send(
+                            db,
+                            websocket,
+                            room_id,
+                            bound_player_id,
+                            action_chat,
                         )
                     elif event_type == "time.advance.respond":
                         response_payload = TimeAdvanceRespondPayload.model_validate(raw_payload)

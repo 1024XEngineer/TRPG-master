@@ -672,6 +672,36 @@ describe('RoomPage conversation history', () => {
         revision: '8',
       },
     })
+    expect(screen.queryByText('的行动正在等待你操作')).not.toBeInTheDocument()
+    emitWsMessage({
+      type: 'adjudication.pending',
+      payload: {
+        correlationId: 'action-377',
+        planId: 'plan-377',
+        sourceRevision: '8',
+        status: 'awaiting_skill_choice',
+        pendingDecision: {
+          decision_id: 'decision-377',
+          action_request_id: 'action-377',
+          source_revision: '8',
+          decision_version: 1,
+          actor_id: 'actor-1',
+          summary: '调查书房',
+          options: [
+            {
+              candidate_id: 'library',
+              skill_id: 'library-use',
+              display_name: '图书馆使用',
+              target_value: 50,
+              difficulty: 'regular',
+              method_summary: '检查书架',
+              player_safe_reason: '现场可见的调查方式',
+            },
+          ],
+          allow_cancel: true,
+        },
+      },
+    })
     expect(await screen.findByText('的行动正在等待你操作')).toBeInTheDocument()
     expect(screen.getByPlaceholderText('输入消息，@主持人 触发行动')).not.toBeDisabled()
 

@@ -177,13 +177,14 @@ async def _current_room_action_state(
         )
     else:
         active = None
-    if active is not None:
+    if active is not None and active.status not in {
+        "needs_clarification",
+        "retryable_failure",
+    }:
         waiting = active.status in {
             "waiting_for_player",
             "awaiting_time_consent",
             "awaiting_scene_consent",
-            "needs_clarification",
-            "retryable_failure",
         }
         return RoomActionStatePayload(
             status="awaiting_player" if waiting else "processing",

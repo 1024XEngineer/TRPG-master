@@ -1832,6 +1832,7 @@ async def test_single_travel_repair_with_changed_effect_requires_clarification()
 
     assert isinstance(result, ActionPlanAdvanceResult)
     assert result.run.status == "needs_clarification"
+    assert await plan_store.load_active_for_room(original.room_id) is None
     assert result.run.steps[0].safe_failure_code == "SEMANTIC_REPAIR_REQUIRES_CLARIFICATION"
     assert len(repair_adjudicator.contexts) == 1
     context = repair_adjudicator.contexts[0]

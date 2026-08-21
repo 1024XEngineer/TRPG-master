@@ -1413,6 +1413,16 @@ export default function RoomPage() {
     (pendingAdjudication !== null || pendingTimeAdvance !== null || pendingSceneTransition !== null)
   const actionSubmissionBlocked = mustAnswerCurrent
   const queuedActions = roomActionState?.queued ?? []
+  const waitingForPlayerAction =
+    roomActionState?.status === 'awaiting_player' && (
+      pendingAdjudication !== null ||
+      pendingTimeAdvance !== null ||
+      pendingSceneTransition !== null
+    )
+  const showRoomActionBanner =
+    roomActionState !== null &&
+    roomActionState.status !== 'idle' &&
+    (roomActionState.status === 'processing' || waitingForPlayerAction)
   const composerDisabled = suspended
   const actionOwnerName = roomActionState?.playerId === playerId
     ? senderName
@@ -2421,7 +2431,7 @@ export default function RoomPage() {
         </div>
       )}
 
-      {roomActionState && roomActionState.status !== 'idle' && (
+      {showRoomActionBanner && roomActionState && (
         <div className="room-play__action-state" role="status" aria-live="polite">
           <LoaderCircle
             aria-hidden="true"

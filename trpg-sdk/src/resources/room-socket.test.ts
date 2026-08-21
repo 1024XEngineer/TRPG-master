@@ -133,6 +133,34 @@ test('isValidServerEvent：接受已知类型的合法事件', () => {
   );
 });
 
+test('isValidServerEvent：一步计划 pending 的 planId 保持可取消关联', () => {
+  const base = {
+    type: 'adjudication.pending',
+    payload: {
+      correlationId: 'action-1',
+      planId: 'plan-room-action',
+      sourceRevision: 'rev-1',
+      status: 'awaiting_skill_choice',
+      pendingDecision: { decisionId: 'decision-1' },
+    },
+  };
+  assert.equal(isValidServerEvent(base), true);
+  assert.equal(
+    isValidServerEvent({
+      ...base,
+      payload: { ...base.payload, planId: null },
+    }),
+    true,
+  );
+  assert.equal(
+    isValidServerEvent({
+      ...base,
+      payload: { ...base.payload, planId: 1 },
+    }),
+    false,
+  );
+});
+
 test('isValidServerEvent：拒绝未知 type', () => {
   assert.equal(isValidServerEvent({ type: 'not.a.real.event', payload: {} }), false);
 });

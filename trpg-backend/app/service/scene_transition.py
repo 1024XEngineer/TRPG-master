@@ -457,6 +457,7 @@ async def recover_action(
         action_request_id=record.action_request_id,
         actor_id=adjudication.actor_id,
         summary=adjudication.summary,
+        created_at=record.created_at,
         execution=execution,
     )
 

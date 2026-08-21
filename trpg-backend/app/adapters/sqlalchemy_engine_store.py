@@ -70,6 +70,12 @@ class SqlAlchemyEngineStore(EngineStore):
         self._session_factory = session_factory
         self._before_commit = before_commit
 
+    @property
+    def session_factory(self) -> async_sessionmaker[AsyncSession]:
+        """Application-only access for isolated legacy recovery reads."""
+
+        return self._session_factory
+
     @asynccontextmanager
     async def transaction(self, room_id: str) -> AsyncIterator[EngineTransaction]:
         async with self._session_factory() as session:
@@ -280,6 +286,7 @@ class _SqlAlchemyEngineTransaction(EngineTransaction):
             {
                 "request_id": record.request_id,
                 "request": deepcopy(record.request_json),
+                "created_at": record.created_at,
                 **result_payload,
             }
         )

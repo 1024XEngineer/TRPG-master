@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Literal
 
 from pydantic import Field, JsonValue
@@ -12,21 +12,21 @@ from collaboration_framework.contracts import (
     ActionRequest,
     ActionResult,
     AdjudicationExecution,
+    AuthorityLevel,
     CheckDecisionRequest,
+    ClassificationCoverage,
     ContractModel,
     EndingResolution,
-    ModuleContentV3,
-    LocationKnowledge,
     ItemInstance,
     ItemKnowledge,
+    LocationKnowledge,
+    ModuleContentV3,
     PendingCheckDecisionView,
     PendingCheckOption,
     PostRollDecisionRequest,
     PostRollOption,
     SubmitAdjudicationRequest,
     TravelInterrupted,
-    AuthorityLevel,
-    ClassificationCoverage,
     ValidationResult,
 )
 from collaboration_framework.contracts.adjudication import CheckRoll
@@ -190,15 +190,11 @@ class GameState(ContractModel):
     runtime_entities: dict[str, dict[str, JsonValue]] = Field(default_factory=dict)
     visibility_overrides: dict[str, bool] = Field(default_factory=dict)
     party_location_knowledge: dict[str, LocationKnowledge] = Field(default_factory=dict)
-    actor_location_knowledge: dict[str, dict[str, LocationKnowledge]] = Field(
-        default_factory=dict
-    )
+    actor_location_knowledge: dict[str, dict[str, LocationKnowledge]] = Field(default_factory=dict)
     actor_position_contexts: dict[str, TravelInterrupted] = Field(default_factory=dict)
     item_instances: dict[str, ItemInstance] = Field(default_factory=dict)
     party_item_knowledge: dict[str, ItemKnowledge] = Field(default_factory=dict)
-    actor_item_knowledge: dict[str, dict[str, ItemKnowledge]] = Field(
-        default_factory=dict
-    )
+    actor_item_knowledge: dict[str, dict[str, ItemKnowledge]] = Field(default_factory=dict)
     rule_agendas: dict[str, RuleAgenda] = Field(default_factory=dict)
     core_resolved: bool = False
     ending_available: bool = False
@@ -295,15 +291,14 @@ class CheckRun(ContractModel):
     adjudication: ActionAdjudication
 
 
-WorkflowRequest = (
-    SubmitAdjudicationRequest | CheckDecisionRequest | PostRollDecisionRequest
-)
+WorkflowRequest = SubmitAdjudicationRequest | CheckDecisionRequest | PostRollDecisionRequest
 
 
 class CompletedAdjudicationCommand(ContractModel):
     request_id: str = Field(min_length=1)
     request: WorkflowRequest
     execution: AdjudicationExecution
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     validation: ValidationResult | None = None
     committed_authority_level: AuthorityLevel | None = None
     classification_coverage: ClassificationCoverage = "complete"

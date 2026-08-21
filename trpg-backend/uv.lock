@@ -21,6 +21,13 @@ dependencies = [
 [package.metadata]
 requires-dist = [{ name = "pydantic", specifier = ">=2.13,<3" }]
 
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=8.0,<9.0" },
+    { name = "pytest-asyncio", specifier = ">=0.24,<1.0" },
+    { name = "ruff", specifier = ">=0.7,<1.0" },
+]
+
 [[package]]
 name = "aiosqlite"
 version = "0.22.1"

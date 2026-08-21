@@ -32,6 +32,7 @@ from app.models.engine import (
     RoomActionReservation,
     SceneTransitionProposalRecord,
     TimeAdvanceProposalRecord,
+    TurnRunCutoverRecord,
 )
 from app.models.event import CheckResult, Event
 from app.models.replay import ModuleImportJob, RoomSummary
@@ -71,6 +72,7 @@ __all__ = [
     "RoomActionReservation",
     "SceneTransitionProposalRecord",
     "TimeAdvanceProposalRecord",
+    "TurnRunCutoverRecord",
     "RoomSummary",
     "Scenario",
     "ScenarioScene",

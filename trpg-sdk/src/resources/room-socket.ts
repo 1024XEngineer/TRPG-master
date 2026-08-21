@@ -340,6 +340,7 @@ const PAYLOAD_VALIDATORS: {
   'plan.completed': isValidPlanProgress,
   'adjudication.pending': (p) =>
     typeof p.correlationId === 'string' &&
+    (p.planId === undefined || p.planId === null || typeof p.planId === 'string') &&
     (p.status === 'awaiting_skill_choice' ||
       p.status === 'awaiting_post_roll_decision') &&
     (p.status !== 'awaiting_skill_choice' || isRecord(p.pendingDecision)) &&

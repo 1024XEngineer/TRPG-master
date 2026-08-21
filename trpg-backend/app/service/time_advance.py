@@ -119,7 +119,6 @@ async def _active_record(
         )
         .order_by(TimeAdvanceProposalRecord.created_at.desc())
         .limit(1)
-        .with_for_update()
     )
 
 
@@ -590,6 +589,7 @@ class ConsentAwareAdjudicationEngine:
                 action_request_id=record.action_request_id,
                 actor_id=adjudication.actor_id,
                 summary=adjudication.summary,
+                created_at=record.created_at,
                 execution=execution,
             )
 

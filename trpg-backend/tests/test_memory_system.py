@@ -1,6 +1,7 @@
 """记忆契约、摘要模型和确定性降级的最小回归测试。"""
 
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 from collaboration_framework.host.schemas import (
@@ -11,6 +12,7 @@ from collaboration_framework.host.schemas import (
 )
 
 from app.adapters.sqlalchemy_memory import _listener_memories
+from app.models.event import Event
 from app.service.conversation_summary import (
     DeterministicConversationSummaryModel,
     _event_text,
@@ -105,7 +107,7 @@ def test_listener_event_projects_experienced_npc_memory() -> None:
             "listener_ids": ["thomas"],
         },
     )
-    entries = _listener_memories(event)
+    entries = _listener_memories(cast(Event, event))
     assert len(entries) == 1
     assert entries[0].subject_id == "thomas"
     assert entries[0].epistemic_status == "experienced"
@@ -120,7 +122,7 @@ def test_listener_projection_skips_unproven_listener() -> None:
         event_type="action.broadcast",
         payload={"utterance": "我检查了钟摆。"},
     )
-    assert _listener_memories(event) == ()
+    assert _listener_memories(cast(Event, event)) == ()
 
 
 def test_summary_reads_broadcast_utterance() -> None:
@@ -128,4 +130,4 @@ def test_summary_reads_broadcast_utterance() -> None:
     event = SimpleNamespace(
         payload={"utterance": "告诉托马斯钟摆停在第三声之后。"},
     )
-    assert _event_text(event) == "告诉托马斯钟摆停在第三声之后。"
+    assert _event_text(cast(Event, event)) == "告诉托马斯钟摆停在第三声之后。"

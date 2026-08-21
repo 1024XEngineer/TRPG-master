@@ -54,7 +54,11 @@ def _memory_from_event(event: Event) -> MemoryEntry | None:
         content=text,
         epistemic_status="presentation" if kind == "conversation" else "asserted",
         visibility="player_scoped" if event.visibility == "player_scoped" else "public",
-        participants=tuple(_canonical_id(x) for x in (event.player_id, event.actor_id) if x),
+        participants=tuple(
+            canonical
+            for x in (event.player_id, event.actor_id)
+            if (canonical := _canonical_id(x)) is not None
+        ),
         listener_ids=tuple(
             _canonical_id(str(item)) or str(item)
             for item in event.payload.get("listener_ids", event.payload.get("listenerIds", ()))

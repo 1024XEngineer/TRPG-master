@@ -762,6 +762,23 @@ describe('RoomPage conversation history', () => {
     )
   })
 
+  it('long-pressing the keeper avatar inserts @主持人', async () => {
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+    act(() => emitWsMessage({
+      type: 'narration.push',
+      payload: { messageId: 'keeper-avatar-1', text: '厅里很安静。' },
+    }))
+    const avatar = await screen.findByRole('button', { name: '长按 @主持人' })
+    vi.useFakeTimers()
+    fireEvent.pointerDown(avatar)
+    act(() => {
+      vi.advanceTimersByTime(450)
+    })
+    expect(screen.getByPlaceholderText('输入消息…')).toHaveValue('@主持人 ')
+    fireEvent.pointerUp(avatar)
+  })
+
   it('deduplicates game-opening when history arrives before realtime', async () => {
     mockListConversation.mockResolvedValue([
       {

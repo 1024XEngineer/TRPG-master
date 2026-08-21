@@ -137,6 +137,42 @@ function hostUtteranceFromActionInput(text: string): string | null {
   return rest.length > 0 ? rest : null
 }
 
+const HOST_MENTION_LONG_PRESS_MS = 450
+
+function KeeperAvatar({ onLongPress }: { onLongPress: () => void }) {
+  const timerRef = useRef<number | null>(null)
+
+  const clearTimer = () => {
+    if (timerRef.current !== null) {
+      window.clearTimeout(timerRef.current)
+      timerRef.current = null
+    }
+  }
+
+  useEffect(() => clearTimer, [])
+
+  return (
+    <button
+      type="button"
+      aria-label="长按 @主持人"
+      className="room-play__avatar room-play__avatar--keeper"
+      onPointerDown={() => {
+        clearTimer()
+        timerRef.current = window.setTimeout(() => {
+          timerRef.current = null
+          onLongPress()
+        }, HOST_MENTION_LONG_PRESS_MS)
+      }}
+      onPointerUp={clearTimer}
+      onPointerCancel={clearTimer}
+      onPointerLeave={clearTimer}
+      onContextMenu={(event) => event.preventDefault()}
+    >
+      <img src="/assets/rooms/play/keeper-cat.webp" alt="" aria-hidden="true" draggable={false} />
+    </button>
+  )
+}
+
 // ─── Types ───────────────────────────────────────────
 interface Message {
   type: 'system' | 'narr' | 'player' | 'dice'
@@ -1935,14 +1971,19 @@ export default function RoomPage() {
   }
 
   const insertHostMention = () => {
-    if (composerDisabled) return
-    setInput((current) => (
-      current.includes('@主持人')
-        ? current
-        : current.trim()
-          ? `@主持人 ${current.trim()}`
-          : '@主持人 '
-    ))
+    if (suspended) return
+    setChannel('action')
+    setDrafts((current) => {
+      const value = current.action
+      return {
+        ...current,
+        action: value.includes('@主持人')
+          ? value
+          : value.trim()
+            ? `@主持人 ${value.trim()}`
+            : '@主持人 ',
+      }
+    })
     requestAnimationFrame(() => {
       const field = composerInputRef.current
       if (!field) return
@@ -2177,17 +2218,19 @@ export default function RoomPage() {
 
           return (
             <div key={i} className={`room-play__message ${isPlayer ? 'room-play__message--self' : ''} ${isNarr ? 'room-play__message--narration' : ''} animate-[msgIn_0.3s_ease]`}>
-              <div className={`room-play__avatar ${isNarr ? 'room-play__avatar--keeper' : ''}`}>
-                {msg.type === 'player' && portraitUrl ? (
-                  <img
-                    src={portraitUrl}
-                    alt={`${msg.sender ?? '玩家'}的头像`}
-                    className="h-full w-full object-cover"
-                  />
-                ) : isNarr ? (
-                  <img src="/assets/rooms/play/keeper-cat.webp" alt="" aria-hidden="true" />
-                ) : msg.type === 'player' ? '🔍' : '🤖'}
-              </div>
+              {isNarr ? (
+                <KeeperAvatar onLongPress={insertHostMention} />
+              ) : (
+                <div className="room-play__avatar">
+                  {msg.type === 'player' && portraitUrl ? (
+                    <img
+                      src={portraitUrl}
+                      alt={`${msg.sender ?? '玩家'}的头像`}
+                      className="h-full w-full object-cover"
+                    />
+                  ) : msg.type === 'player' ? '🔍' : '🤖'}
+                </div>
+              )}
               <div className="room-play__message-body">
                 <div className="room-play__sender">
                   {msg.sender}
@@ -2233,9 +2276,7 @@ export default function RoomPage() {
             进度指示器都不经过 messages，漏进讨论区过（issue #304）。*/}
         {isActionChannel && streamingNarration && streamingNarration.revealed > 0 && (
           <div className="room-play__message room-play__message--narration animate-[msgIn_0.3s_ease]">
-            <div className="room-play__avatar room-play__avatar--keeper">
-              <img src="/assets/rooms/play/keeper-cat.webp" alt="" aria-hidden="true" />
-            </div>
+            <KeeperAvatar onLongPress={insertHostMention} />
             <div className="room-play__message-body">
               <div className="room-play__sender">守秘人</div>
               <div className="room-play__message-card room-play__narration-card">
@@ -2252,9 +2293,7 @@ export default function RoomPage() {
             避免出现一个空气泡。*/}
         {isActionChannel && (progressLabel !== null || typing || (streamingNarration !== null && streamingNarration.revealed === 0)) && (
           <div className="room-play__message room-play__message--narration animate-[msgIn_0.3s_ease]">
-            <div className="room-play__avatar room-play__avatar--keeper">
-              <img src="/assets/rooms/play/keeper-cat.webp" alt="" aria-hidden="true" />
-            </div>
+            <KeeperAvatar onLongPress={insertHostMention} />
             <div className="room-play__typing">
               <div className="inline-flex gap-1">
                 {[0, 1, 2].map((i) => (

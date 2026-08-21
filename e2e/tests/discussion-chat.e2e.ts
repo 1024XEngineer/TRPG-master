@@ -2,18 +2,16 @@
  * issue #107 端到端：玩家讨论区与主持人对话分流。
  *
  * 覆盖：讨论区广播 / 重发去重 / 玩家原话广播（修"聊天记录像被隔离"的 bug）/
- * 行动锁的并发拒绝与释放 / 退房清空聊天 / 复盘纯净。
+ * 行动锁占用时他人提交入队 / 退房清空聊天 / 复盘纯净。
  *
- * 锁窗口不再需要人为延迟钩子：v2 的单轮 narrator 同步秒回，窗口只有微秒级，
- * 当时要靠 NARRATOR_DELAY_SECONDS=1 才压得中 ACTION_IN_PROGRESS；现在一个回合
- * 要走完 ActionPlan 的规划、逐步裁决和叙事，窗口天然足够宽。下面用
- * `action.broadcast` 到达（证明提交已被受理、锁已被持有）作为抢锁的时机。
+ * 锁窗口不再需要人为延迟钩子：下面用 `action.broadcast` 到达（证明提交已被
+ * 受理、锁已被持有）作为后续玩家入队的时机。
  */
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { test } from 'node:test'
 
-import { RoomSocketServerError, type ServerToClientEvent } from 'trpg-sdk'
+import { type ServerToClientEvent } from 'trpg-sdk'
 
 import { createRoomWithModule, legalCharacterPayload, registerPlayer } from './helpers.ts'
 
@@ -187,7 +185,7 @@ test('🔴 所有人都能看到发起者的原话 + 守秘人回复（修"聊�
   }
 })
 
-test('🔴 行动锁：处理中他人提交被拒（ACTION_IN_PROGRESS），完成后恢复', async () => {
+test('行动锁：处理中他人提交进入队列，完成后自动出队', async () => {
   const room = await createRoomWithModule('lock', 2)
   const guest = await registerPlayer('lockguest')
   const joined = await guest.sdk.rooms.join(room.roomCode, { nickname: '抢话访客' }, guest.token)
@@ -217,58 +215,26 @@ test('🔴 行动锁：处理中他人提交被拒（ACTION_IN_PROGRESS），完
     })
     await hostEcho
 
-    // 访客在锁窗口内提交 → 被拒，且 error 只发给访客自己
-    const guestRejected = waitForEvent(
+    const guestQueued = waitForEvent(
       guest.sdk,
-      (e) => e.type === 'error' && e.payload.code === 'ACTION_IN_PROGRESS'
+      (e) =>
+        e.type === 'room.action.state' &&
+        Array.isArray(e.payload.queued) &&
+        e.payload.queued.some((item) => item.clientActionId === 'action-lock-guest-queued')
     )
-    const rejectedAction = guest.sdk.roomSocket.submitPlannedAction(joined.playerId, {
-      clientActionId: 'action-lock-guest-rejected',
+    const guestEcho = waitForEvent(
+      guest.sdk,
+      (e) => e.type === 'action.broadcast' && e.payload.utterance === '我翻抽屉'
+    )
+    const queuedAction = guest.sdk.roomSocket.submitPlannedAction(joined.playerId, {
+      clientActionId: 'action-lock-guest-queued',
       utterance: '我翻抽屉',
     })
-    const rejected = assert.rejects(
-      rejectedAction,
-      (error: unknown) =>
-        error instanceof RoomSocketServerError && error.code === 'ACTION_IN_PROGRESS'
-    )
-    await Promise.all([guestRejected, rejected])
+    await Promise.all([guestQueued, guestEcho])
 
-    // 房主的叙事回复到达后访客再提交。⚠️ 用重试而不是一次命中：锁的释放在
-    // narration 广播**之后**的 finally 里，两者之间有毫秒级窗口——真人手速
-    // 不可能踩中，但 e2e 代码速度可以，首发正好撞上就又吃一次
-    // ACTION_IN_PROGRESS（这本来就是产品行为：被拒了稍后重试即可）。
     await Promise.all([hostNarration, hostCompleted])
-    let accepted = false
-    for (let attempt = 0; attempt < 10 && !accepted; attempt++) {
-      const outcome = waitForEvent(
-        guest.sdk,
-        (e) =>
-          (e.type === 'action.broadcast' && e.payload.utterance === '我查看托马斯') ||
-          (e.type === 'error' && e.payload.code === 'ACTION_IN_PROGRESS')
-      )
-      const submitted = guest.sdk.roomSocket.submitPlannedAction(joined.playerId, {
-        clientActionId: 'action-lock-guest-retry',
-        utterance: '我查看托马斯',
-      })
-      let submitError: unknown
-      const settled = submitted.catch((error: unknown) => {
-        submitError = error
-        return null
-      })
-      const event = await outcome
-      await settled
-      if (event.type === 'action.broadcast') {
-        assert.equal(submitError, undefined)
-        accepted = true
-      } else {
-        assert.ok(
-          submitError instanceof RoomSocketServerError &&
-          submitError.code === 'ACTION_IN_PROGRESS'
-        )
-        await new Promise((r) => setTimeout(r, 100))
-      }
-    }
-    assert.ok(accepted, '锁释放后访客的提交应当被受理')
+    const queuedCompleted = await queuedAction
+    assert.equal(queuedCompleted.player_view.player_id, joined.playerId)
   } finally {
     room.host.sdk.roomSocket.disconnect()
     guest.sdk.roomSocket.disconnect()

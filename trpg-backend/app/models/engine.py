@@ -519,6 +519,59 @@ class ActionPlanRunRecord(Base):
     )
 
 
+class HostActionQueueItem(Base):
+    """Accepted host actions waiting for the room action slot."""
+
+    __tablename__ = "host_action_queue"
+    __table_args__ = (
+        PrimaryKeyConstraint("room_id", "item_id", name="pk_host_action_queue"),
+        UniqueConstraint(
+            "room_id",
+            "client_action_id",
+            name="uq_host_action_queue_client_action",
+        ),
+        CheckConstraint("position >= 1", name="ck_host_action_queue_position"),
+        CheckConstraint(
+            "status IN ('queued', 'started', 'cancelled', 'discarded')",
+            name="ck_host_action_queue_status",
+        ),
+        Index(
+            "ix_host_action_queue_room_status_position",
+            "room_id",
+            "status",
+            "position",
+        ),
+        Index(
+            "uq_host_action_queue_pending_player",
+            "room_id",
+            "player_id",
+            unique=True,
+            sqlite_where=text("status = 'queued'"),
+            postgresql_where=text("status = 'queued'"),
+        ),
+    )
+
+    room_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("game_sessions.room_id"), nullable=False
+    )
+    item_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    client_action_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    player_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    actor_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    utterance: Mapped[str] = mapped_column(Text, nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="queued")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+
 class RoomActionReservation(Base):
     """One durable active parent action owner per room."""
 

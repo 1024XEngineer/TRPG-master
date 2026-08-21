@@ -131,6 +131,48 @@ function checkResultContent(payload: CheckResultPayload): string {
   return `${payload.skillName} ${payload.targetValue}% · D100 ${payload.rollValue}${resolutionLabel}`
 }
 
+function hostUtteranceFromActionInput(text: string): string | null {
+  if (!text.includes('@主持人')) return null
+  const rest = text.split('@主持人').join(' ').replace(/\s+/g, ' ').trim()
+  return rest.length > 0 ? rest : null
+}
+
+const HOST_MENTION_LONG_PRESS_MS = 450
+
+function KeeperAvatar({ onLongPress }: { onLongPress: () => void }) {
+  const timerRef = useRef<number | null>(null)
+
+  const clearTimer = () => {
+    if (timerRef.current !== null) {
+      window.clearTimeout(timerRef.current)
+      timerRef.current = null
+    }
+  }
+
+  useEffect(() => clearTimer, [])
+
+  return (
+    <button
+      type="button"
+      aria-label="长按 @主持人"
+      className="room-play__avatar room-play__avatar--keeper"
+      onPointerDown={() => {
+        clearTimer()
+        timerRef.current = window.setTimeout(() => {
+          timerRef.current = null
+          onLongPress()
+        }, HOST_MENTION_LONG_PRESS_MS)
+      }}
+      onPointerUp={clearTimer}
+      onPointerCancel={clearTimer}
+      onPointerLeave={clearTimer}
+      onContextMenu={(event) => event.preventDefault()}
+    >
+      <img src="/assets/rooms/play/keeper-cat.webp" alt="" aria-hidden="true" draggable={false} />
+    </button>
+  )
+}
+
 // ─── Types ───────────────────────────────────────────
 interface Message {
   type: 'system' | 'narr' | 'player' | 'dice'
@@ -1401,17 +1443,30 @@ export default function RoomPage() {
   const progressClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const suspended = (roomPhase || roomInfo?.phase) === 'Suspended'
   const ownsRoomAction = roomActionState?.playerId === playerId
-  const actionSubmissionBlocked = roomActionState !== null && roomActionState.status !== 'idle' && (
-    roomActionState.status === 'processing' ||
-    !ownsRoomAction ||
-    pendingAdjudication !== null ||
-    pendingTimeAdvance !== null
-      || pendingSceneTransition !== null
-  )
-  const composerDisabled = suspended || (isActionChannel && actionSubmissionBlocked)
+  const mustAnswerCurrent =
+    ownsRoomAction &&
+    roomActionState?.status === 'awaiting_player' &&
+    (pendingAdjudication !== null || pendingTimeAdvance !== null || pendingSceneTransition !== null)
+  const actionSubmissionBlocked = mustAnswerCurrent
+  const queuedActions = roomActionState?.queued ?? []
+  const waitingForPlayerAction =
+    roomActionState?.status === 'awaiting_player' && (
+      pendingAdjudication !== null ||
+      pendingTimeAdvance !== null ||
+      pendingSceneTransition !== null
+    )
+  const showRoomActionBanner =
+    roomActionState !== null &&
+    roomActionState.status !== 'idle' &&
+    (roomActionState.status === 'processing' || waitingForPlayerAction)
+  const composerDisabled = suspended
   const actionOwnerName = roomActionState?.playerId === playerId
     ? senderName
-    : roomPlayers.find((player) => player.playerId === roomActionState?.playerId)?.nickname ?? '其他调查员'
+    : displayName(
+        roomPlayers.find((player) => player.playerId === roomActionState?.playerId)?.characterName,
+        roomPlayers.find((player) => player.playerId === roomActionState?.playerId)?.nickname,
+        '其他调查员',
+      )
   const mapLocations = mapLocationsFromPlayerView(playerView)
   const sceneTransitionTargetName = pendingSceneTransition
     ? mapLocations.find((location) => location.id === pendingSceneTransition.targetSceneId)?.name
@@ -1837,12 +1892,15 @@ export default function RoomPage() {
         // 只中止揭示，不清待提交队列：队列里的都是已经落库的权威消息（push 紧跟
         // 片段到达），清掉等于丢服务端认定已发生的叙事。中止后它们会立即落地。
         setStreamingNarration(null)
+        pendingNarrationActionIdRef.current = null
+        if (envelope.payload.code === 'ACTION_CANCELLED') {
+          return
+        }
         setActionError(envelope.payload.publicMessage)
         setActionErrorRetryable(envelope.payload.retryable)
         setActionErrorIsGuidance(envelope.payload.code === 'HOST_AGENT_INVALID_OUTPUT')
         setActionErrorCode(envelope.payload.code)
         setActionErrorCorrelationId(envelope.payload.correlationId)
-        pendingNarrationActionIdRef.current = null
       } else if (envelope.type === 'view.updated') {
         if (envelope.payload.playerId === playerId) {
           setPlayerView(envelope.payload.playerView)
@@ -1919,23 +1977,56 @@ export default function RoomPage() {
       })
   }
 
+  const insertHostMention = () => {
+    if (suspended) return
+    setChannel('action')
+    setDrafts((current) => {
+      const value = current.action
+      return {
+        ...current,
+        action: value.includes('@主持人')
+          ? value
+          : value.trim()
+            ? `@主持人 ${value.trim()}`
+            : '@主持人 ',
+      }
+    })
+    requestAnimationFrame(() => {
+      const field = composerInputRef.current
+      if (!field) return
+      field.focus()
+      const cursor = field.value.length
+      field.setSelectionRange(cursor, cursor)
+    })
+  }
+
   const sendMessage = (e?: FormEvent) => {
     e?.preventDefault()
     const text = input.trim()
-    if (!text || !playerId || suspended || (isActionChannel && actionSubmissionBlocked)) return
+    if (!text || !playerId || suspended) return
     // 发送前先关闭识别结果闸门，防止浏览器稍后返回的文本写入已清空的输入框。
     cancelSpeechInput()
     setInput('')
     if (channel === 'discussion') {
       sdk.roomSocket.sendChat(playerId, { text, clientMessageId: randomActionId() })
-    } else {
-      submitPlayerAction({ clientActionId: randomActionId(), utterance: text })
+      return
     }
+    const hostUtterance = hostUtteranceFromActionInput(text)
+    if (hostUtterance) {
+      if (actionSubmissionBlocked) return
+      submitPlayerAction({ clientActionId: randomActionId(), utterance: hostUtterance })
+      return
+    }
+    sdk.roomSocket.sendActionChat(playerId, { text, clientMessageId: randomActionId() })
   }
 
   useEffect(() => {
     const field = composerInputRef.current
     if (!field) return
+    if (!input) {
+      field.style.height = ''
+      return
+    }
     field.style.height = 'auto'
     field.style.height = `${field.scrollHeight}px`
   }, [input])
@@ -2134,17 +2225,19 @@ export default function RoomPage() {
 
           return (
             <div key={i} className={`room-play__message ${isPlayer ? 'room-play__message--self' : ''} ${isNarr ? 'room-play__message--narration' : ''} animate-[msgIn_0.3s_ease]`}>
-              <div className={`room-play__avatar ${isNarr ? 'room-play__avatar--keeper' : ''}`}>
-                {msg.type === 'player' && portraitUrl ? (
-                  <img
-                    src={portraitUrl}
-                    alt={`${msg.sender ?? '玩家'}的头像`}
-                    className="h-full w-full object-cover"
-                  />
-                ) : isNarr ? (
-                  <img src="/assets/rooms/play/keeper-cat.webp" alt="" aria-hidden="true" />
-                ) : msg.type === 'player' ? '🔍' : '🤖'}
-              </div>
+              {isNarr ? (
+                <KeeperAvatar onLongPress={insertHostMention} />
+              ) : (
+                <div className="room-play__avatar">
+                  {msg.type === 'player' && portraitUrl ? (
+                    <img
+                      src={portraitUrl}
+                      alt={`${msg.sender ?? '玩家'}的头像`}
+                      className="h-full w-full object-cover"
+                    />
+                  ) : msg.type === 'player' ? '🔍' : '🤖'}
+                </div>
+              )}
               <div className="room-play__message-body">
                 <div className="room-play__sender">
                   {msg.sender}
@@ -2190,9 +2283,7 @@ export default function RoomPage() {
             进度指示器都不经过 messages，漏进讨论区过（issue #304）。*/}
         {isActionChannel && streamingNarration && streamingNarration.revealed > 0 && (
           <div className="room-play__message room-play__message--narration animate-[msgIn_0.3s_ease]">
-            <div className="room-play__avatar room-play__avatar--keeper">
-              <img src="/assets/rooms/play/keeper-cat.webp" alt="" aria-hidden="true" />
-            </div>
+            <KeeperAvatar onLongPress={insertHostMention} />
             <div className="room-play__message-body">
               <div className="room-play__sender">守秘人</div>
               <div className="room-play__message-card room-play__narration-card">
@@ -2209,9 +2300,7 @@ export default function RoomPage() {
             避免出现一个空气泡。*/}
         {isActionChannel && (progressLabel !== null || typing || (streamingNarration !== null && streamingNarration.revealed === 0)) && (
           <div className="room-play__message room-play__message--narration animate-[msgIn_0.3s_ease]">
-            <div className="room-play__avatar room-play__avatar--keeper">
-              <img src="/assets/rooms/play/keeper-cat.webp" alt="" aria-hidden="true" />
-            </div>
+            <KeeperAvatar onLongPress={insertHostMention} />
             <div className="room-play__typing">
               <div className="inline-flex gap-1">
                 {[0, 1, 2].map((i) => (
@@ -2410,7 +2499,7 @@ export default function RoomPage() {
         </div>
       )}
 
-      {roomActionState && roomActionState.status !== 'idle' && (
+      {showRoomActionBanner && roomActionState && (
         <div className="room-play__action-state" role="status" aria-live="polite">
           <LoaderCircle
             aria-hidden="true"
@@ -2424,6 +2513,37 @@ export default function RoomPage() {
                 ? '的行动正在等待你操作'
                 : '的行动正在等待其操作'}
           </span>
+        </div>
+      )}
+      {queuedActions.length > 0 && (
+        <div className="room-play__action-state" role="status" aria-live="polite">
+          <span>等待主持：</span>
+          {queuedActions.map((item) => {
+            const name = displayName(
+              roomPlayers.find((player) => player.playerId === item.playerId)?.characterName,
+              roomPlayers.find((player) => player.playerId === item.playerId)?.nickname,
+              '调查员',
+            )
+            const isSelf = item.playerId === playerId
+            return (
+              <span key={item.clientActionId} className="inline-flex items-center gap-1">
+                <strong>{name}</strong>
+                <span>{item.utterance}</span>
+                {isSelf && playerId && (
+                  <button
+                    type="button"
+                    className="text-[11px] underline"
+                    onClick={() => sdk.roomSocket.cancelActionPlan(playerId, {
+                      clientActionId: item.clientActionId,
+                      requestId: randomActionId(),
+                    })}
+                  >
+                    取消
+                  </button>
+                )}
+              </span>
+            )
+          })}
         </div>
       )}
 
@@ -2499,6 +2619,18 @@ export default function RoomPage() {
               <IsometricDiceIcon />
             </button>
           )}
+          {isActionChannel && (
+            <button
+              type="button"
+              aria-label="插入 @主持人"
+              title="@主持人"
+              onClick={insertHostMention}
+              disabled={composerDisabled}
+              className={`room-play__composer-button room-play__host-mention-button${input.includes('@主持人') ? ' is-active' : ''}`}
+            >
+              <span aria-hidden="true">@</span>
+            </button>
+          )}
           <textarea
             ref={composerInputRef}
             rows={1}
@@ -2514,9 +2646,9 @@ export default function RoomPage() {
             placeholder={
               suspended
                 ? '游戏已挂起'
-                : isActionChannel && actionSubmissionBlocked
-                  ? '等待当前行动完成'
-                  : '输入行动…'
+                : isActionChannel
+                    ? '输入消息…'
+                    : '输入行动…'
             }
             className="room-play__input"
           />

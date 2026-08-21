@@ -9,8 +9,8 @@ from pathlib import Path
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 PREVIOUS_REVISION = "1a02058345ee"
 ENGINE_IDENTITY_PREVIOUS_REVISION = "9c4e7a2b1d6f"
-# 记忆与 main 分支的模组迁移通过 merge migration 汇合为当前 head。
-HEAD_REVISION = "a7b8c9d0e1f2"
+# 记忆链 head 是 a7b8c9d0e1f2；主持队列接在它后面。
+HEAD_REVISION = "b9c0d1e2f3a4"
 
 
 def _run_alembic(database: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -93,6 +93,7 @@ def test_migration_upgrades_empty_sqlite_and_round_trips(tmp_path: Path) -> None
         "memory_projection_cursors",
         "turn_run_cutover",
         "scene_transition_proposals",
+        "host_action_queue",
     }.issubset(tables)
     assert "decision_schema_version" in _column_names(
         database,
@@ -112,6 +113,7 @@ def test_migration_upgrades_empty_sqlite_and_round_trips(tmp_path: Path) -> None
         _column_names(database, "action_plan_runs")
     )
     assert ("room_id",) in _unique_column_sets(database, "room_action_reservations")
+    assert ("room_id", "client_action_id") in _unique_column_sets(database, "host_action_queue")
     assert "room_sessions" not in tables
     assert {"status", "name_en", "story_label", "subtitle", "story_pages"}.issubset(
         _column_names(database, "scenarios")

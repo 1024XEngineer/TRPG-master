@@ -569,6 +569,7 @@ export type ErrorCode =
   | "MODULE_VALIDATION_FAILED"
   | "NOT_YOUR_TURN"
   | "ACTION_IN_PROGRESS"
+  | "ACTION_QUEUE_FULL"
   | "CHARACTER_INCOMPLETE"
   | "MODULE_NOT_SELECTED"
   | "MODULE_PLAYER_COUNT_MISMATCH"
@@ -1216,6 +1217,18 @@ export interface RollAttributesResult {
 }
 
 /**
+ * 已接受、尚未开始的主持行动。
+ */
+export interface RoomActionQueueItemPayload {
+  playerId: string;
+  actorId: string;
+  clientActionId: string;
+  position: number;
+  utterance: string;
+  acceptedAt: string;
+}
+
+/**
  * 房间当前行动所有权的可重放快照，不包含模型计划或私密裁决。
  */
 export interface RoomActionStatePayload {
@@ -1225,6 +1238,7 @@ export interface RoomActionStatePayload {
   clientActionId?: string | null;
   startedAt?: string | null;
   revision: string;
+  queued?: RoomActionQueueItemPayload[];
 }
 
 /**
@@ -1296,6 +1310,7 @@ export interface RoomJoinPayload {
 export interface RoomPlayerRead {
   playerId: string;
   nickname: string;
+  characterName?: string | null;
   isHost: boolean;
   ready: boolean;
   hasCharacter: boolean;

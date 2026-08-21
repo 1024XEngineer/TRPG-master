@@ -59,7 +59,6 @@ RESERVING_PLAN_STATUSES = frozenset(
         "waiting_for_player",
         "awaiting_time_consent",
         "awaiting_scene_consent",
-        "needs_clarification",
         "retryable_failure",
         "awaiting_narration",
     }
@@ -72,6 +71,9 @@ RESERVING_PLAN_STATUSES = frozenset(
 # 取值不能照抄那 60s：`waiting_for_player` 也在 RESERVING_PLAN_STATUSES 里，
 # 玩家正在挑技能、决定要不要烧幸运时计划就停在这个状态。太短会在人还在思考时
 # 抽走占用，随后 CAS 抛 PLAN_RESERVATION_LOST 把回合打死——比它要修的 bug 更糟。
+#
+# `needs_clarification` 不占槽：澄清叙事已经发给玩家，这一回合结束。继续占着
+# 会让发起者看到「自己的行动正在等待自己操作」，刷新后又因占用过期而消失。
 RESERVATION_TTL = timedelta(minutes=5)
 
 

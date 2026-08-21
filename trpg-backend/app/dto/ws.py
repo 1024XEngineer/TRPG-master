@@ -277,6 +277,17 @@ class SceneTransitionResolvedPayload(CamelModel):
     committed_revision: str | None = None
 
 
+class RoomActionQueueItemPayload(CamelModel):
+    """已接受、尚未开始的主持行动。"""
+
+    player_id: str
+    actor_id: str
+    client_action_id: str
+    position: int = Field(..., ge=1)
+    utterance: str
+    accepted_at: UtcDatetime
+
+
 class RoomActionStatePayload(CamelModel):
     """房间当前行动所有权的可重放快照，不包含模型计划或私密裁决。"""
 
@@ -286,6 +297,7 @@ class RoomActionStatePayload(CamelModel):
     client_action_id: str | None = None
     started_at: UtcDatetime | None = None
     revision: str = Field(..., min_length=1)
+    queued: list[RoomActionQueueItemPayload] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_owner(self) -> "RoomActionStatePayload":

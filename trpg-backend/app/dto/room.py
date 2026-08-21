@@ -91,6 +91,7 @@ class RoomPlayerRead(CamelModel):
     model_config = {"from_attributes": True}
     player_id: str
     nickname: str
+    character_name: str | None = None
     is_host: bool
     ready: bool
     has_character: bool

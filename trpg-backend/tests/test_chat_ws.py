@@ -19,8 +19,10 @@ from dataclasses import replace
 from uuid import uuid4
 
 import pytest
+from collaboration_framework.host.application import ActionPlanNarrator
 from starlette.testclient import TestClient
 
+from app.controller import ws as ws_controller
 from app.main import app
 from app.service.action_lock import RoomActionLockManager
 from tests.test_ws import (
@@ -28,6 +30,7 @@ from tests.test_ws import (
     advance_to_building,
     complete_character,
     create_room,
+    join_as,
     receive_until,
     register_and_login,
     start_game,
@@ -93,6 +96,17 @@ class _ConversationClarificationIntentModel:
             "check": {"route": "none"},
             "summary": "需要澄清",
             "clarification_question": "你指的是哪一本书？",
+        }
+
+
+class _PublicClarificationNarrationModel:
+    async def generate(self, context):  # noqa: ANN001
+        del context
+        return {
+            "kind": "clarification",
+            "text": "你是想去吃午饭，还是晚饭？",
+            "claimed_evidence_refs": [],
+            "suggested_actions": [],
         }
 
 
@@ -170,6 +184,81 @@ def test_action_submit_broadcasts_utterance_then_narration(sync_client: TestClie
     assert echo["payload"]["playerId"] == room["playerId"]
     assert narration["type"] == "narration.push"
     assert narration["payload"]["text"]
+
+
+def test_clarification_narration_is_visible_to_other_players(
+    sync_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """澄清问话曾经按发起者 player_scoped 单播，同桌其他人看不到主持人回答。
+
+    落库必须是 public：TestClient 同房双连接会跨循环挂死，所以这里用访客的
+    conversation / replay 证明刷新后也能看到，而不是再开第二条 WS。
+    """
+    token = register_and_login(sync_client, "clarify_host")
+    room = create_room(sync_client, token, max_players=2)
+    guest = join_as(sync_client, room["roomCode"], "clarify_guest")
+    advance_to_building(sync_client, room)
+    complete_character(sync_client, room["roomId"], room["reconnectToken"])
+    complete_character(sync_client, room["roomId"], guest["reconnectToken"])
+    start_game(sync_client, room, token)
+    monkeypatch.setattr(
+        ws_controller.action_plan_turn_application,
+        "_narrator",
+        ActionPlanNarrator(_PublicClarificationNarrationModel()),
+    )
+    action_id = "clarify-public-397"
+
+    with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
+        _join_ws(ws, room)
+        ws.send_json(
+            {
+                "type": "action.plan.submit",
+                "playerId": room["playerId"],
+                "payload": {
+                    "clientActionId": action_id,
+                    "utterance": "我要去吃饭",
+                },
+            }
+        )
+        receive_until(ws, lambda message: message.get("type") == "action.broadcast")
+        narration, seen = receive_until(
+            ws,
+            lambda message: (
+                message.get("type") == "narration.push"
+                and message.get("payload", {}).get("messageId") == action_id
+            ),
+        )
+
+    assert narration["type"] == "narration.push"
+    assert narration["payload"]["messageId"] == action_id
+    assert narration["payload"]["text"] == "你是想去吃午饭，还是晚饭？"
+    assert all(message.get("type") != "turn.failed" for message in seen)
+
+    guest_headers = {"X-Reconnect-Token": guest["reconnectToken"]}
+    guest_conversation = sync_client.get(
+        f"{ROOMS_BASE}/{room['roomId']}/conversation",
+        headers=guest_headers,
+    ).json()["data"]
+    guest_narrations = [
+        event
+        for event in guest_conversation
+        if event["type"] == "narration.push" and event["payload"].get("messageId") == action_id
+    ]
+    assert len(guest_narrations) == 1
+    assert guest_narrations[0]["payload"]["text"] == "你是想去吃午饭，还是晚饭？"
+
+    guest_replay = sync_client.get(
+        f"{ROOMS_BASE}/{room['roomId']}/replay",
+        headers=guest_headers,
+    ).json()["data"]
+    replay_narrations = [
+        event
+        for event in guest_replay
+        if event["eventType"] == "narration.push" and event["payload"].get("messageId") == action_id
+    ]
+    assert len(replay_narrations) == 1
+    assert replay_narrations[0]["payload"]["text"] == "你是想去吃午饭，还是晚饭？"
 
 
 # ── 行动锁 ───────────────────────────────────────────

@@ -1054,7 +1054,7 @@ export interface PendingCheckDecisionView {
    * @minItems 1
    */
   options: [PendingCheckOption, ...PendingCheckOption[]];
-  allow_cancel?: true;
+  allow_cancel?: boolean;
 }
 
 export interface PendingCheckOption {

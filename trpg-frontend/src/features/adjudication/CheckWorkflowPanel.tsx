@@ -58,7 +58,9 @@ export function CheckWorkflowPanel({
           <div className="mb-3 flex items-start gap-2">
             <Dices className="mt-0.5 h-5 w-5 shrink-0 text-brass" aria-hidden="true" />
             <div>
-              <h3 className="text-sm font-bold text-text-primary">选择检定方式</h3>
+              <h3 className="text-sm font-bold text-text-primary">
+                {decision.allow_cancel ? '选择检定方式' : '规则要求的检定'}
+              </h3>
               <p className="mt-0.5 text-xs text-text-muted">{decision.summary}</p>
             </div>
           </div>
@@ -86,6 +88,11 @@ export function CheckWorkflowPanel({
               </button>
             ))}
           </div>
+          {!decision.allow_cancel && (
+            <p className="mt-3 text-[11px] text-text-dim">
+              这次检定由规则强制，无法取消。
+            </p>
+          )}
           {decision.allow_cancel && (
             <button
               type="button"

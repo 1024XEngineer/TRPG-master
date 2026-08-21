@@ -24,9 +24,7 @@ def upgrade() -> None:
         ),
     )
     # 历史记录无法再可靠区分两类来源时间，使用原投影时间保持稳定顺序。
-    op.execute(
-        sa.text("UPDATE memory_entries SET source_created_at = created_at")
-    )
+    op.execute(sa.text("UPDATE memory_entries SET source_created_at = created_at"))
     op.create_index(
         "ix_memory_entries_room_source_created",
         "memory_entries",

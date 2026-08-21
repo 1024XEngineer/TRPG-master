@@ -178,6 +178,7 @@ _MODELS: list[type[BaseModel]] = [
     ws.SceneTransitionRespondPayload,
     ws.SceneTransitionPendingPayload,
     ws.SceneTransitionResolvedPayload,
+    ws.RoomActionQueueItemPayload,
     ws.RoomActionStatePayload,
     # 讨论区历史消息 REST（issue #107）
     chat.ChatMessageRead,

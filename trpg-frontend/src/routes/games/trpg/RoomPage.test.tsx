@@ -620,7 +620,7 @@ describe('RoomPage conversation history', () => {
     })
   })
 
-  it('行动状态只禁用行动频道，并允许所有者在等待阶段补充输入', async () => {
+  it('他人行动处理中仍可提交主持行动，确认等待才禁用行动输入', async () => {
     renderRoomPage()
     await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
 
@@ -633,14 +633,29 @@ describe('RoomPage conversation history', () => {
         clientActionId: 'action-376',
         startedAt: '2026-08-19T10:00:00Z',
         revision: '8',
+        queued: [
+          {
+            playerId: 'player-1',
+            actorId: 'actor-1',
+            clientActionId: 'action-queued',
+            position: 1,
+            utterance: '我翻书桌',
+            acceptedAt: '2026-08-19T10:00:01Z',
+          },
+        ],
       },
     })
 
     expect(await screen.findByText('的行动正在处理中')).toBeInTheDocument()
-    expect(screen.getByPlaceholderText('等待当前行动完成')).toBeDisabled()
+    expect(screen.getByText('我翻书桌')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('输入行动…')).not.toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    expect(mockCancelActionPlan).toHaveBeenCalledWith('player-1', expect.objectContaining({
+      clientActionId: 'action-queued',
+    }))
 
     fireEvent.click(screen.getByRole('button', { name: '讨论区' }))
-    expect(screen.getByPlaceholderText('输入行动…')).not.toBeDisabled()
+    expect(screen.getByPlaceholderText('输入讨论，或 @主持人 提交行动')).not.toBeDisabled()
 
     fireEvent.click(screen.getByRole('button', { name: '行动' }))
     emitWsMessage({
@@ -664,6 +679,22 @@ describe('RoomPage conversation history', () => {
     await waitFor(() => {
       expect(screen.queryByText('的行动正在等待你操作')).not.toBeInTheDocument()
     })
+  })
+
+  it('discussion @主持人 submits a host action instead of chat', async () => {
+    mockSubmitPlannedAction.mockReturnValue(new Promise(() => undefined))
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    fireEvent.click(screen.getByRole('button', { name: '讨论区' }))
+    const field = screen.getByPlaceholderText('输入讨论，或 @主持人 提交行动')
+    fireEvent.change(field, { target: { value: '@主持人 我搜查书桌' } })
+    fireEvent.submit(field.closest('form')!)
+    await waitFor(() => expect(mockSubmitPlannedAction).toHaveBeenCalled())
+    expect(mockSubmitPlannedAction.mock.calls[0][1]).toEqual(
+      expect.objectContaining({ utterance: '我搜查书桌' }),
+    )
+    expect(mockSendChat).not.toHaveBeenCalled()
   })
 
   it('deduplicates game-opening when history arrives before realtime', async () => {
@@ -856,11 +887,12 @@ describe('RoomPage conversation history', () => {
       renderRoomPage()
       await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
 
-      const field = () => screen.getByPlaceholderText('输入行动…')
-      fireEvent.change(field(), { target: { value: '这是行动区的草稿' } })
+      const actionField = () => screen.getByPlaceholderText('输入行动…')
+      const discussionField = () => screen.getByPlaceholderText('输入讨论，或 @主持人 提交行动')
+      fireEvent.change(actionField(), { target: { value: '这是行动区的草稿' } })
 
       switchToDiscussion()
-      fireEvent.change(field(), { target: { value: '我们先商量一下路线' } })
+      fireEvent.change(discussionField(), { target: { value: '我们先商量一下路线' } })
 
       await act(async () => {
         emitWsMessage({
@@ -876,9 +908,9 @@ describe('RoomPage conversation history', () => {
       })
 
       // 被拉回行动区，输入框里必须是行动区自己的草稿，不能是讨论区那句。
-      expect(field()).toHaveValue('这是行动区的草稿')
+      expect(actionField()).toHaveValue('这是行动区的草稿')
 
-      fireEvent.submit(field().closest('form')!)
+      fireEvent.submit(actionField().closest('form')!)
       await waitFor(() => expect(mockSubmitPlannedAction).toHaveBeenCalledTimes(1))
       expect(mockSubmitPlannedAction.mock.calls[0][1]).toEqual(
         expect.objectContaining({ utterance: '这是行动区的草稿' }),
@@ -886,7 +918,7 @@ describe('RoomPage conversation history', () => {
 
       // 讨论区那句原样还在，没被顺手清掉也没被提交。
       switchToDiscussion()
-      expect(field()).toHaveValue('我们先商量一下路线')
+      expect(discussionField()).toHaveValue('我们先商量一下路线')
     })
 
     it('switches back to the action channel when a check arrives during discussion', async () => {
@@ -1973,7 +2005,7 @@ describe('RoomPage conversation history', () => {
       resultIndex: 0,
       results: [Object.assign([{ transcript: '不应进入讨论区' }], { isFinal: true })],
     }))
-    expect(screen.getByPlaceholderText('输入行动…')).toHaveValue('')
+    expect(screen.getByPlaceholderText('输入讨论，或 @主持人 提交行动')).toHaveValue('')
   })
 
   it('reports an insecure HTTP page instead of attempting recognition', () => {

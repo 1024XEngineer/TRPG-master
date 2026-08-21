@@ -131,6 +131,12 @@ function checkResultContent(payload: CheckResultPayload): string {
   return `${payload.skillName} ${payload.targetValue}% · D100 ${payload.rollValue}${resolutionLabel}`
 }
 
+function hostUtteranceFromDiscussion(text: string): string | null {
+  if (!text.includes('@主持人')) return null
+  const rest = text.split('@主持人').join(' ').replace(/\s+/g, ' ').trim()
+  return rest.length > 0 ? rest : null
+}
+
 // ─── Types ───────────────────────────────────────────
 interface Message {
   type: 'system' | 'narr' | 'player' | 'dice'
@@ -1401,13 +1407,12 @@ export default function RoomPage() {
   const progressClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const suspended = (roomPhase || roomInfo?.phase) === 'Suspended'
   const ownsRoomAction = roomActionState?.playerId === playerId
-  const actionSubmissionBlocked = roomActionState !== null && roomActionState.status !== 'idle' && (
-    roomActionState.status === 'processing' ||
-    !ownsRoomAction ||
-    pendingAdjudication !== null ||
-    pendingTimeAdvance !== null
-      || pendingSceneTransition !== null
-  )
+  const mustAnswerCurrent =
+    ownsRoomAction &&
+    roomActionState?.status === 'awaiting_player' &&
+    (pendingAdjudication !== null || pendingTimeAdvance !== null || pendingSceneTransition !== null)
+  const actionSubmissionBlocked = mustAnswerCurrent
+  const queuedActions = roomActionState?.queued ?? []
   const composerDisabled = suspended || (isActionChannel && actionSubmissionBlocked)
   const actionOwnerName = roomActionState?.playerId === playerId
     ? senderName
@@ -1927,7 +1932,12 @@ export default function RoomPage() {
     cancelSpeechInput()
     setInput('')
     if (channel === 'discussion') {
-      sdk.roomSocket.sendChat(playerId, { text, clientMessageId: randomActionId() })
+      const hostUtterance = hostUtteranceFromDiscussion(text)
+      if (hostUtterance) {
+        submitPlayerAction({ clientActionId: randomActionId(), utterance: hostUtterance })
+      } else {
+        sdk.roomSocket.sendChat(playerId, { text, clientMessageId: randomActionId() })
+      }
     } else {
       submitPlayerAction({ clientActionId: randomActionId(), utterance: text })
     }
@@ -2426,6 +2436,34 @@ export default function RoomPage() {
           </span>
         </div>
       )}
+      {queuedActions.length > 0 && (
+        <div className="room-play__action-state" role="status" aria-live="polite">
+          <span>等待主持：</span>
+          {queuedActions.map((item) => {
+            const name = roomPlayers.find((player) => player.playerId === item.playerId)?.nickname
+              ?? '调查员'
+            const isSelf = item.playerId === playerId
+            return (
+              <span key={item.clientActionId} className="inline-flex items-center gap-1">
+                <strong>{name}</strong>
+                <span>{item.utterance}</span>
+                {isSelf && playerId && (
+                  <button
+                    type="button"
+                    className="text-[11px] underline"
+                    onClick={() => sdk.roomSocket.cancelActionPlan(playerId, {
+                      clientActionId: item.clientActionId,
+                      requestId: randomActionId(),
+                    })}
+                  >
+                    取消
+                  </button>
+                )}
+              </span>
+            )
+          })}
+        </div>
+      )}
 
       {/* Input area */}
       <div className="room-play__composer">
@@ -2515,8 +2553,10 @@ export default function RoomPage() {
               suspended
                 ? '游戏已挂起'
                 : isActionChannel && actionSubmissionBlocked
-                  ? '等待当前行动完成'
-                  : '输入行动…'
+                  ? '请先完成当前检定或确认'
+                  : isActionChannel
+                    ? '输入行动…'
+                    : '输入讨论，或 @主持人 提交行动'
             }
             className="room-play__input"
           />

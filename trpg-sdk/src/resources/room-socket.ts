@@ -350,6 +350,20 @@ const PAYLOAD_VALIDATORS: {
       (p.status !== 'idle' && p.status !== 'processing' && p.status !== 'awaiting_player') ||
       typeof p.revision !== 'string'
     ) return false;
+    if (p.queued !== undefined) {
+      if (!Array.isArray(p.queued)) return false;
+      for (const item of p.queued) {
+        if (
+          !isRecord(item) ||
+          typeof item.playerId !== 'string' ||
+          typeof item.actorId !== 'string' ||
+          typeof item.clientActionId !== 'string' ||
+          typeof item.position !== 'number' ||
+          typeof item.utterance !== 'string' ||
+          typeof item.acceptedAt !== 'string'
+        ) return false;
+      }
+    }
     const owner = [p.playerId, p.actorId, p.clientActionId, p.startedAt];
     return p.status === 'idle'
       ? owner.every((value) => value === null || value === undefined)

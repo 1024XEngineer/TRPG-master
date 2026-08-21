@@ -525,17 +525,23 @@ test('三客户端串行动作、私有检定与重连快照保持隔离', async
       utterance: '我前往阿诺兹堡图书馆',
     })
     await guestSeesProcessing
-    const rejectedActionId = `three-client-conflict-${Date.now()}`
-    await assert.rejects(
-      guest.sdk.roomSocket.submitPlannedAction(joined.playerId, {
-        clientActionId: rejectedActionId,
-        utterance: '我同时翻查书架',
-      }),
-      (error: unknown) =>
-        error instanceof Error &&
-        'code' in error &&
-        error.code === 'ACTION_IN_PROGRESS',
+    const queuedActionId = `three-client-queued-${Date.now()}`
+    const guestSeesQueued = waitForEvent(
+      guest.sdk,
+      (event) =>
+        event.type === 'room.action.state' &&
+        Array.isArray(event.payload.queued) &&
+        event.payload.queued.some((item) => item.clientActionId === queuedActionId),
     )
+    void guest.sdk.roomSocket.submitPlannedAction(joined.playerId, {
+      clientActionId: queuedActionId,
+      utterance: '我同时翻查书架',
+    })
+    await guestSeesQueued
+    guest.sdk.roomSocket.cancelActionPlan(joined.playerId, {
+      clientActionId: queuedActionId,
+      requestId: `cancel-${queuedActionId}`,
+    })
 
     const [hostPending, guestPending, thirdPending] = await Promise.all([
       hostPendingPromise,
@@ -600,9 +606,9 @@ test('三客户端串行动作、私有检定与重连快照保持隔离', async
       thirdEvents.some(
         (event) =>
           event.type === 'action.broadcast' &&
-          event.payload.clientActionId === rejectedActionId,
+          event.payload.clientActionId === queuedActionId,
       ),
-      false,
+      true,
     )
 
     const retried = await guest.sdk.roomSocket.submitPlannedAction(joined.playerId, {

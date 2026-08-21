@@ -34,6 +34,7 @@ WebSocket 可能存活很久，用一个 session 包住整条连接会在这期�
 连接取消时短 session 的 close/rollback 会在 shield 中完成，避免遗留锁。
 """
 
+import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from functools import partial
@@ -141,10 +142,12 @@ from app.models.engine import (
 )
 from app.service import auth as auth_service
 from app.service import chat as chat_service
+from app.service import host_action_queue as host_action_queue_service
 from app.service import room as room_service
 from app.service import scene_transition as scene_transition_service
 from app.service import time_advance as time_advance_service
 from app.service.action_lock import action_lock_manager
+from app.service.host_action_queue import HostActionQueueError
 from app.service.ws_events import broadcast_room_state
 from app.service.ws_manager import manager
 
@@ -165,6 +168,7 @@ async def _current_room_action_state(
     session = await db.get(GameSession, room_id)
     if session is None:
         return None
+    queued = await host_action_queue_service.list_queued(db, room_id)
     reservation = await db.get(RoomActionReservation, room_id)
     if reservation is not None and not reservation_is_expired(reservation.updated_at):
         active = await db.get(
@@ -188,6 +192,7 @@ async def _current_room_action_state(
             client_action_id=active.parent_action_id,
             started_at=active.created_at,
             revision=str(session.state_version),
+            queued=queued,
         )
     # 单动作不会创建 ActionPlanRun；此时由持久化时间提案继续占有房间行动槽。
     # approved 且叙事未落库表示最后一票已提交、原行动正在恢复，不可提前显示 idle。
@@ -212,6 +217,7 @@ async def _current_room_action_state(
             client_action_id=time_proposal.parent_action_id,
             started_at=time_proposal.created_at,
             revision=str(session.state_version),
+            queued=queued,
         )
     scene_proposal = await db.scalar(
         select(SceneTransitionProposalRecord)
@@ -234,6 +240,7 @@ async def _current_room_action_state(
             client_action_id=scene_proposal.parent_action_id,
             started_at=scene_proposal.created_at,
             revision=str(session.state_version),
+            queued=queued,
         )
     snapshot = action_lock_manager.snapshot(room_id)
     if snapshot is not None:
@@ -244,8 +251,13 @@ async def _current_room_action_state(
             client_action_id=snapshot.client_action_id,
             started_at=snapshot.started_at,
             revision=str(session.state_version),
+            queued=queued,
         )
-    return RoomActionStatePayload(status="idle", revision=str(session.state_version))
+    return RoomActionStatePayload(
+        status="idle",
+        revision=str(session.state_version),
+        queued=queued,
+    )
 
 
 async def _broadcast_room_action_state(
@@ -294,6 +306,186 @@ async def _send_room_action_state(
             payload=state.model_dump(by_alias=True, mode="json"),
         ).model_dump(by_alias=True),
     )
+
+
+_OWN_WAITING_STATUSES = {
+    "waiting_for_player",
+    "awaiting_time_consent",
+    "awaiting_scene_consent",
+}
+_OWN_SUPERSEDE_STATUSES = {"needs_clarification", "retryable_failure"}
+_host_drain_locks: dict[str, asyncio.Lock] = {}
+
+
+def _host_drain_lock(room_id: str) -> asyncio.Lock:
+    lock = _host_drain_locks.get(room_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _host_drain_locks[room_id] = lock
+    return lock
+
+
+def schedule_host_action_drain(room_id: str) -> None:
+    """出队不得绑在提交者的 WebSocket 回调上；用当前事件循环后台任务执行。"""
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    loop.create_task(_drain_host_action_queue(room_id))
+
+
+async def _queue_decision_for_submit(
+    db: AsyncSession,
+    *,
+    room_id: str,
+    player_id: str,
+    client_action_id: str,
+    state,
+) -> str:
+    """Return start | enqueue | reject for an action.plan.submit."""
+
+    if state is None or state.status == "idle":
+        return "start"
+    if state.client_action_id == client_action_id:
+        return "start"
+    active = await action_plan_turn_application.active_for_room(room_id)
+    if active is not None and active.parent_action_id == client_action_id:
+        return "start"
+    if active is not None and active.player_id == player_id:
+        if active.status in _OWN_SUPERSEDE_STATUSES:
+            return "start"
+        if active.status in _OWN_WAITING_STATUSES:
+            return "reject"
+        return "enqueue"
+    if state.player_id == player_id and state.status == "awaiting_player":
+        return "reject"
+    return "enqueue"
+
+
+async def _enqueue_host_action(
+    db: AsyncSession,
+    websocket: WebSocket,
+    *,
+    room_id: str,
+    player_id: str,
+    actor_id: str,
+    client_action_id: str,
+    utterance: str,
+    player_view: PlayerView,
+) -> None:
+    try:
+        item, created = await host_action_queue_service.enqueue(
+            db,
+            room_id=room_id,
+            player_id=player_id,
+            actor_id=actor_id,
+            client_action_id=client_action_id,
+            utterance=utterance,
+        )
+    except HostActionQueueError as exc:
+        await _send_error(
+            websocket,
+            exc.code,
+            exc.message,
+            correlation_id=client_action_id,
+        )
+        return
+    if created:
+        await _broadcast_action_utterance(
+            db,
+            PlayerInput(
+                room_id=room_id,
+                player_id=player_id,
+                actor_id=item.actor_id,
+                client_action_id=item.client_action_id,
+                utterance=item.utterance,
+            ),
+            player_view,
+        )
+    await _broadcast_room_action_state(db, room_id)
+
+
+async def _drain_host_action_queue(room_id: str) -> None:
+    async with _host_drain_lock(room_id):
+        while True:
+            async with _short_db_session() as db:
+                state = await _current_room_action_state(db, room_id)
+                if state is None or state.status != "idle":
+                    return
+                item = await host_action_queue_service.peek_next(db, room_id)
+                if item is None:
+                    return
+                try:
+                    view = await session_view_application.current_player_view(
+                        room_id=room_id,
+                        player_id=item.player_id,
+                    )
+                except Exception:
+                    await host_action_queue_service.discard(db, item)
+                    continue
+                if view.self_actor.id != item.actor_id:
+                    await host_action_queue_service.discard(db, item)
+                    continue
+                lock_token = action_lock_manager.try_acquire(
+                    room_id,
+                    player_id=item.player_id,
+                    actor_id=item.actor_id,
+                    client_action_id=item.client_action_id,
+                    revision=view.revision,
+                )
+                if lock_token is None:
+                    return
+                connections = manager.player_connections(room_id, item.player_id)
+                websocket = connections[0] if connections else None
+                try:
+                    await _send_turn_event(
+                        websocket,
+                        TurnStarted(correlation_id=item.client_action_id),
+                    )
+                    await _broadcast_room_action_state(db, room_id)
+                    result = await action_plan_turn_application.start(
+                        room_id=room_id,
+                        player_id=item.player_id,
+                        client_action_id=item.client_action_id,
+                        utterance=item.utterance,
+                        on_progress=lambda event, target=websocket: _send_plan_progress(
+                            target,
+                            event,
+                        ),
+                        on_phase=partial(
+                            _send_turn_phase,
+                            websocket,
+                            item.client_action_id,
+                        ),
+                        on_input_accepted=None,
+                    )
+                    await host_action_queue_service.mark_started(db, item)
+                    await _send_action_plan_result(
+                        db,
+                        websocket,
+                        room_id,
+                        item.player_id,
+                        result,
+                    )
+                    if result.waiting_for_player:
+                        return
+                except Exception as exc:
+                    await host_action_queue_service.discard(db, item)
+                    log_turn_failed(
+                        room_id=room_id,
+                        stage="队列出队",
+                        code=_map_turn_error(exc)[0],
+                        correlation_id=item.client_action_id,
+                        error_type=type(exc).__name__,
+                        error_reason=_turn_error_reason(exc),
+                        exc=exc,
+                    )
+                    await _send_turn_failed(websocket, item.client_action_id, exc)
+                finally:
+                    with anyio.CancelScope(shield=True):
+                        action_lock_manager.release(room_id, lock_token)
+                        await _broadcast_room_action_state_fresh(room_id)
 
 
 async def _broadcast_player_views(room_id: str) -> None:
@@ -365,7 +557,7 @@ def _connection_is_gone(websocket: WebSocket, exc: Exception) -> bool:
     )
 
 
-async def _send_to_player(websocket: WebSocket, message: dict) -> bool:
+async def _send_to_player(websocket: WebSocket | None, message: dict) -> bool:
     """单播一帧；对端已经断了就丢掉这一帧，不打断正在跑的回合。
 
     回合是在收消息循环里内联跑完的，进度、阶段和结算帧都直接写这个 socket。
@@ -378,6 +570,8 @@ async def _send_to_player(websocket: WebSocket, message: dict) -> bool:
     连接不该影响这一回合能不能跑完、能不能落库。
     """
 
+    if websocket is None:
+        return False
     try:
         await websocket.send_json(message)
     except Exception as exc:
@@ -441,7 +635,7 @@ async def _broadcast_scene_transition(
 
 
 async def _send_turn_event(
-    websocket: WebSocket,
+    websocket: WebSocket | None,
     event: TurnEvent,
 ) -> None:
     payload: (
@@ -485,7 +679,7 @@ async def _send_turn_event(
 
 
 async def _send_turn_failed(
-    websocket: WebSocket,
+    websocket: WebSocket | None,
     correlation_id: str,
     exc: Exception,
 ) -> None:
@@ -502,7 +696,7 @@ async def _send_turn_failed(
 
 
 async def _send_turn_phase(
-    websocket: WebSocket,
+    websocket: WebSocket | None,
     correlation_id: str,
     phase: TurnPhase,
 ) -> None:
@@ -512,7 +706,7 @@ async def _send_turn_phase(
     )
 
 
-async def _send_plan_progress(websocket: WebSocket, event) -> None:
+async def _send_plan_progress(websocket: WebSocket | None, event) -> None:
     # One-step runs are internal normalization and do not expose a useless
     # 1/1 progress timeline. Keep this gate here so reconnect replay and live
     # observer events share exactly the same behavior.
@@ -593,7 +787,7 @@ def _require_pending_adjudication_status(
 
 async def _send_action_plan_result(
     db: AsyncSession,
-    websocket: WebSocket,
+    websocket: WebSocket | None,
     room_id: str,
     player_id: str,
     result: ActionPlanTurnResult,
@@ -722,12 +916,13 @@ async def _send_action_plan_result(
     )
     with anyio.CancelScope(shield=True):
         await _broadcast_room_action_state(db, room_id)
+    schedule_host_action_drain(room_id)
     return recorded
 
 
 async def _send_completed_turn_message(
     db: AsyncSession,
-    websocket: WebSocket,
+    websocket: WebSocket | None,
     room_id: str,
     player_id: str,
     *,
@@ -878,7 +1073,7 @@ async def _recover_persisted_turn_narration(
 
 
 async def _send_view_updated(
-    websocket: WebSocket,
+    websocket: WebSocket | None,
     player_id: str,
     player_view: PlayerView,
 ) -> None:
@@ -1075,7 +1270,7 @@ async def _persist_turn_narration(
 
 
 async def _emit_turn_narration(
-    websocket: WebSocket,
+    websocket: WebSocket | None,
     room_id: str,
     *,
     client_action_id: str,
@@ -1471,6 +1666,7 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                     current_view,
                                 )
                                 await _send_room_action_state(db, websocket, room_id)
+                                schedule_host_action_drain(room_id)
                             # Registering the socket happens inside _handle_room_join
                             # before this lookup. Together with broadcast-after-commit,
                             # that ordering guarantees a reconnecting client receives
@@ -1864,6 +2060,34 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 exc,
                             )
                             continue
+                        occupancy = await _current_room_action_state(db, room_id)
+                        decision = await _queue_decision_for_submit(
+                            db,
+                            room_id=room_id,
+                            player_id=bound_player_id,
+                            client_action_id=submit_payload.client_action_id,
+                            state=occupancy,
+                        )
+                        if decision == "enqueue":
+                            await _enqueue_host_action(
+                                db,
+                                websocket,
+                                room_id=room_id,
+                                player_id=bound_player_id,
+                                actor_id=action_view.self_actor.id,
+                                client_action_id=submit_payload.client_action_id,
+                                utterance=submit_payload.utterance,
+                                player_view=action_view,
+                            )
+                            continue
+                        if decision == "reject":
+                            await _send_error(
+                                websocket,
+                                "ACTION_IN_PROGRESS",
+                                "请先完成或取消当前检定/确认，再提交新的主持行动",
+                                correlation_id=submit_payload.client_action_id,
+                            )
+                            continue
                         lock_token = action_lock_manager.try_acquire(
                             room_id,
                             player_id=bound_player_id,
@@ -1872,11 +2096,15 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                             revision=action_view.revision,
                         )
                         if lock_token is None:
-                            await _send_error(
+                            await _enqueue_host_action(
+                                db,
                                 websocket,
-                                "ACTION_IN_PROGRESS",
-                                "守秘人正在处理其他玩家的行动，请稍候",
-                                correlation_id=submit_payload.client_action_id,
+                                room_id=room_id,
+                                player_id=bound_player_id,
+                                actor_id=action_view.self_actor.id,
+                                client_action_id=submit_payload.client_action_id,
+                                utterance=submit_payload.utterance,
+                                player_view=action_view,
                             )
                             continue
                         try:
@@ -1896,11 +2124,16 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                     and active_plan.player_id == bound_player_id
                                 )
                             ):
-                                await _send_error(
+                                action_lock_manager.release(room_id, lock_token)
+                                await _enqueue_host_action(
+                                    db,
                                     websocket,
-                                    "ACTION_IN_PROGRESS",
-                                    "守秘人正在处理其他玩家的行动计划，请稍候",
-                                    correlation_id=submit_payload.client_action_id,
+                                    room_id=room_id,
+                                    player_id=bound_player_id,
+                                    actor_id=action_view.self_actor.id,
+                                    client_action_id=submit_payload.client_action_id,
+                                    utterance=submit_payload.utterance,
+                                    player_view=action_view,
                                 )
                                 continue
                             await _send_turn_event(
@@ -1969,6 +2202,7 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                             with anyio.CancelScope(shield=True):
                                 action_lock_manager.release(room_id, lock_token)
                                 await _broadcast_room_action_state_fresh(room_id)
+                            schedule_host_action_drain(room_id)
                     elif event_type == "adjudication.select":
                         choice = AdjudicationChoicePayload.model_validate(raw_payload)
                         if choice.cancel:
@@ -2130,6 +2364,14 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                             await _broadcast_room_action_state(db, room_id)
                     elif event_type == "action.plan.cancel":
                         cancel = ActionPlanCancelPayload.model_validate(raw_payload)
+                        if await host_action_queue_service.cancel(
+                            db,
+                            room_id=room_id,
+                            player_id=bound_player_id,
+                            client_action_id=cancel.client_action_id,
+                        ):
+                            await _broadcast_room_action_state(db, room_id)
+                            continue
                         try:
                             await _broadcast_room_action_state(
                                 db,
@@ -2149,6 +2391,7 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 bound_player_id,
                                 result,
                             )
+                            schedule_host_action_drain(room_id)
                         except Exception as exc:
                             code, _, _ = _map_turn_error(exc)
                             log_turn_failed(

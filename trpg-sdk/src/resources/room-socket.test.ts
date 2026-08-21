@@ -378,6 +378,30 @@ test('isValidServerEvent：校验可重放的房间行动状态', () => {
   assert.equal(
     isValidServerEvent({
       type: 'room.action.state',
+      payload: {
+        status: 'processing',
+        playerId: 'player-1',
+        actorId: 'actor-1',
+        clientActionId: 'action-1',
+        startedAt: '2026-08-19T10:00:00Z',
+        revision: '8',
+        queued: [
+          {
+            playerId: 'player-2',
+            actorId: 'actor-2',
+            clientActionId: 'action-2',
+            position: 1,
+            utterance: '我翻书桌',
+            acceptedAt: '2026-08-19T10:00:01Z',
+          },
+        ],
+      },
+    }),
+    true
+  );
+  assert.equal(
+    isValidServerEvent({
+      type: 'room.action.state',
       payload: { status: 'awaiting_player', playerId: 'player-1', revision: '9' },
     }),
     false

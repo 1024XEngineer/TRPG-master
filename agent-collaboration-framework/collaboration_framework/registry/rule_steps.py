@@ -10,15 +10,26 @@ continue, finish, or suspend here), `engine/rules_v3.py::agenda_status_for_walk`
 publish time). A kind added to the union but missed in one of the four failed
 silently.
 
-## Scope: registration and static checking only
+## Registration still adds no execution — but it no longer hides its absence
 
-This phase deliberately implements **no new execution**. In particular
-`invoke_ruleset_action` has no executor anywhere in the repository and must
-still have none after this: a rule reaching that step suspends, exactly as
-before, and is refused downstream as `RULE_BUDGET_EXCEEDED`. Publish-time
-validation likewise does not gain an "is there an executor for this
-action_id" check — #347 §4.7 is explicit that a declared-but-unconsumed field
-is not a publish failure. Giving that kind real behaviour is a separate issue.
+#347 registered `invoke_ruleset_action`, `create_npc_action_opportunity`,
+`create_time_task` and `cancel_time_task` as suspending onto the Agenda with
+status `running`, because that is what the pre-registry code reported. No
+worker has ever existed to resume them, so `running` meant "parked forever,
+with no signal": the Agenda sat in `GameState`, nothing advanced it, and the
+execution still reported success.
+
+#398 §阶段一 keeps the "no new execution" scope — none of these four gain an
+executor here — and changes only how their absence is reported. They now map
+to `failed` with a `failure_code`, so the Agenda fails loudly and auditably
+instead of hanging silently. Publish-time validation still does not gain an
+"is there an executor for this action_id" check — #347 §4.7 is explicit that a
+declared-but-unconsumed field is not a publish failure.
+
+The one place that must NOT change is `adjudication.py::_owned_effects`: on
+the agent_match path a suspended walk is already refused *visibly* as
+`RULE_BUDGET_EXCEEDED`, and #398 lists removing that hard reject as out of
+scope until executors exist.
 
 ## Why `next_step_ids` delegates instead of owning
 
@@ -50,13 +61,23 @@ WalkBehavior = Literal["terminal", "produces_effect_and_continues", "suspends"]
 
 # The Agenda boundary a suspension maps to. `check` is the one kind whose
 # answer is not fixed: it depends on the step's own `initiation_kind`.
+#
+# `failed` is a boundary like any other here: reaching a kind the Engine cannot
+# execute is a definite answer about where the Agenda stopped, not an unknown.
 AgendaStatus = Literal[
     "awaiting_active_check",
     "awaiting_passive_check",
     "awaiting_presentation",
     "awaiting_player_input",
     "running",
+    "failed",
 ]
+
+# Why an Agenda that reached a step kind stopped. Only failing statuses carry
+# one; the codes are stable strings because they are published in the
+# `rule.agenda_failed` audit event and in `AdjudicationExecution`.
+STEP_KIND_HAS_NO_EXECUTOR = "step_kind_has_no_executor"
+UNREGISTERED_STEP_KIND = "unregistered_step_kind"
 
 
 @dataclass(frozen=True)
@@ -67,6 +88,8 @@ class RuleStepRegistration:
     # None for kinds that never suspend (`effect`, `finish`); for `check` the
     # value here is the active-check default and `agenda_status_for` refines it.
     agenda_status: AgendaStatus | None = None
+    # Set only where `agenda_status == "failed"`: the reason to publish.
+    failure_code: str | None = None
 
 
 STEP_KINDS: dict[str, RuleStepRegistration] = {
@@ -88,24 +111,29 @@ STEP_KINDS: dict[str, RuleStepRegistration] = {
         walk_behavior="suspends",
         agenda_status="awaiting_player_input",
     ),
-    # The four below suspend onto the Agenda and currently have no worker that
-    # resumes them; `running` is what the pre-registry code reported for them
-    # and must stay that way until an issue gives them behaviour.
+    # The four below suspend onto the Agenda and have no worker that resumes
+    # them. Until #398 they reported `running`, which is indistinguishable from
+    # "a worker is about to pick this up" — so the Agenda hung with no signal.
+    # They fail instead: same absence of an executor, now visible.
     "invoke_ruleset_action": RuleStepRegistration(
         walk_behavior="suspends",
-        agenda_status="running",
+        agenda_status="failed",
+        failure_code=STEP_KIND_HAS_NO_EXECUTOR,
     ),
     "create_npc_action_opportunity": RuleStepRegistration(
         walk_behavior="suspends",
-        agenda_status="running",
+        agenda_status="failed",
+        failure_code=STEP_KIND_HAS_NO_EXECUTOR,
     ),
     "create_time_task": RuleStepRegistration(
         walk_behavior="suspends",
-        agenda_status="running",
+        agenda_status="failed",
+        failure_code=STEP_KIND_HAS_NO_EXECUTOR,
     ),
     "cancel_time_task": RuleStepRegistration(
         walk_behavior="suspends",
-        agenda_status="running",
+        agenda_status="failed",
+        failure_code=STEP_KIND_HAS_NO_EXECUTOR,
     ),
 }
 
@@ -140,11 +168,17 @@ def walk_behavior_of(step: RuleStepSpec) -> WalkBehavior:
 
 
 def agenda_status_for(kind: str, step: RuleStepSpec | None) -> AgendaStatus:
-    """The Agenda boundary that suspending on this kind means."""
+    """The Agenda boundary that suspending on this kind means.
+
+    An unregistered kind fails rather than parking on `running`. Publish-time
+    validation already rejects kinds outside the union, so reaching one at
+    runtime means the graph outran the Engine — and there is by definition no
+    executor for a kind nobody registered.
+    """
 
     registration = STEP_KINDS.get(kind)
     if registration is None or registration.agenda_status is None:
-        return "running"
+        return "failed"
     # A passive rule check is the Engine asking on the rule's behalf; an active
     # one is the player's own action waiting on a roll.
     if (
@@ -154,6 +188,15 @@ def agenda_status_for(kind: str, step: RuleStepSpec | None) -> AgendaStatus:
     ):
         return "awaiting_passive_check"
     return registration.agenda_status
+
+
+def agenda_failure_code_for(kind: str) -> str | None:
+    """Why suspending on this kind is a failure, or None if it is not one."""
+
+    registration = STEP_KINDS.get(kind)
+    if registration is None:
+        return UNREGISTERED_STEP_KIND
+    return registration.failure_code
 
 
 def next_step_ids(step: RuleStepSpec) -> tuple[str, ...]:
@@ -173,9 +216,12 @@ def is_registered_actor_binding(value: str) -> bool:
 __all__ = [
     "ACTOR_BINDINGS",
     "STEP_KINDS",
+    "STEP_KIND_HAS_NO_EXECUTOR",
+    "UNREGISTERED_STEP_KIND",
     "AgendaStatus",
     "RuleStepRegistration",
     "WalkBehavior",
+    "agenda_failure_code_for",
     "agenda_status_for",
     "is_registered",
     "is_registered_actor_binding",

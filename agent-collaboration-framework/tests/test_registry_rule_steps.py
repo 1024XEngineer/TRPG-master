@@ -61,9 +61,14 @@ class AgendaStatusTests(unittest.TestCase):
                     rule_step_registry.agenda_status_for(kind, None), expected
                 )
 
-    def test_kinds_without_a_worker_report_running(self) -> None:
-        """These four park on the Agenda with nothing to resume them. That was
-        true before the registry and must stay true after it."""
+    def test_kinds_without_a_worker_fail_instead_of_hanging(self) -> None:
+        """These four park on the Agenda with nothing to resume them.
+
+        Until #398 they reported `running`, which is exactly what a kind that
+        *does* have a worker reports while waiting for it — so an Agenda that
+        would never move looked identical to one about to. They fail, and say
+        why.
+        """
 
         for kind in (
             "invoke_ruleset_action",
@@ -73,8 +78,22 @@ class AgendaStatusTests(unittest.TestCase):
         ):
             with self.subTest(kind=kind):
                 self.assertEqual(
-                    rule_step_registry.agenda_status_for(kind, None), "running"
+                    rule_step_registry.agenda_status_for(kind, None), "failed"
                 )
+                self.assertEqual(
+                    rule_step_registry.agenda_failure_code_for(kind),
+                    rule_step_registry.STEP_KIND_HAS_NO_EXECUTOR,
+                )
+
+    def test_kinds_with_a_boundary_carry_no_failure_code(self) -> None:
+        for kind in (
+            "check",
+            "adjudicated_check",
+            "presentation",
+            "await_player_input",
+        ):
+            with self.subTest(kind=kind):
+                self.assertIsNone(rule_step_registry.agenda_failure_code_for(kind))
 
     def test_check_splits_on_its_own_initiation_kind(self) -> None:
         from collaboration_framework.contracts.module_v3 import CheckStep, RuleCheckSpec
@@ -99,9 +118,17 @@ class AgendaStatusTests(unittest.TestCase):
             "awaiting_active_check",
         )
 
-    def test_an_unregistered_kind_reports_running(self) -> None:
+    def test_an_unregistered_kind_fails(self) -> None:
+        """Publish-time validation rejects kinds outside the union, so reaching
+        one here means the graph outran the Engine — and a kind nobody
+        registered has, by definition, no executor."""
+
         self.assertEqual(
-            rule_step_registry.agenda_status_for("made_up_kind", None), "running"
+            rule_step_registry.agenda_status_for("made_up_kind", None), "failed"
+        )
+        self.assertEqual(
+            rule_step_registry.agenda_failure_code_for("made_up_kind"),
+            rule_step_registry.UNREGISTERED_STEP_KIND,
         )
 
 

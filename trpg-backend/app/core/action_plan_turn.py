@@ -1402,11 +1402,22 @@ class ActionPlanTurnApplication:
                 player_input=context.player_input,
                 player_view=context.player_view,
             )
-            context = context.model_copy(
-                update={
-                    "memories": memory_context.entries,
-                    "conversation_summary": memory_context.conversation_summary,
-                }
+            # 在最终调用 Narrator 前显式构造完整契约，避免依赖未知字段注入或
+            # 让记忆只存在于 Python 对象而没有进入序列化 payload。
+            context = ActionPlanNarrationContext(
+                background=context.background,
+                player_input=context.player_input,
+                plan_id=context.plan_id,
+                plan_goal=context.plan_goal,
+                termination_status=context.termination_status,
+                completed_steps=context.completed_steps,
+                player_view=context.player_view,
+                memories=memory_context.entries,
+                conversation_summary=memory_context.conversation_summary,
+                opening_world_time=context.opening_world_time,
+                allowed_evidence_refs=context.allowed_evidence_refs,
+                narration_evidence=context.narration_evidence,
+                narration_retry_hint=context.narration_retry_hint,
             )
         for attempt in range(2):
             try:

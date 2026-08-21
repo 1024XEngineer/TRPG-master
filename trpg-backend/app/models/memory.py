@@ -49,6 +49,8 @@ class MemoryEntryRecord(Base):
     epistemic_status: Mapped[str] = mapped_column(String(30), nullable=False)
     visibility: Mapped[str] = mapped_column(String(30), nullable=False)
     participants: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    # 与 participants 分开保存，避免把“共同参与”误当成“亲自听到”。
+    listener_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     location_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     source_event_id: Mapped[str] = mapped_column(String(100), nullable=False)
     source_sequence: Mapped[int] = mapped_column(BigInteger, nullable=False)

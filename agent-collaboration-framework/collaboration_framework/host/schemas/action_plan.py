@@ -378,7 +378,7 @@ class SingleActionClarificationResult(ContractModel):
 
 
 class ActionPlanNarrationContext(ContractModel):
-    """Player-safe evidence for one final or partial ActionPlan narration."""
+    """Player-safe evidence and bounded memory for one ActionPlan narration."""
 
     background: str = Field(min_length=1)
     player_input: PlayerInput
@@ -392,6 +392,9 @@ class ActionPlanNarrationContext(ContractModel):
     ]
     completed_steps: tuple[CompletedPlanStepSummary, ...] = ()
     player_view: PlayerView
+    # 记忆是只读的玩家安全上下文；它不能替代当前 PlayerView 或提交事实。
+    memories: tuple[MemoryEntry, ...] = ()
+    conversation_summary: ConversationSummary | None = None
     # `player_view` is the post-turn state, so it is the *only* clock the
     # Narrator would otherwise see. This is where the turn started; each step
     # then carries the clock it ended on.
@@ -410,6 +413,14 @@ class ActionPlanNarrationContext(ContractModel):
             or self.player_input.actor_id != self.player_view.actor_id
         ):
             raise ValueError("ActionPlanNarrationContext identity scope 不一致")
+        # 记忆和摘要必须与当前玩家请求同房间、同玩家，防止只读上下文越权。
+        if any(entry.room_id != self.player_input.room_id for entry in self.memories):
+            raise ValueError("ActionPlanNarrationContext memories room_id 不一致")
+        if self.conversation_summary is not None and (
+            self.conversation_summary.room_id != self.player_input.room_id
+            or self.conversation_summary.player_id != self.player_input.player_id
+        ):
+            raise ValueError("ActionPlanNarrationContext conversation_summary 作用域不一致")
         evidence = tuple(
             ref for step in self.completed_steps for ref in step.event_refs
         )

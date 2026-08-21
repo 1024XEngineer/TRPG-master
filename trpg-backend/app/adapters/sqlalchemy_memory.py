@@ -14,6 +14,22 @@ from app.models.event import Event
 from app.models.memory import ConversationSummaryRecord, MemoryEntryRecord
 
 
+def _canonical_id(value: str | None) -> str | None:
+    """统一 UUID 的连字符表示；非 UUID 的 actor/entity ID 保持原样。"""
+    if not value:
+        return value
+    try:
+        return uuid.UUID(value).hex
+    except (ValueError, AttributeError):
+        return value
+
+
+def _scope_ids(value: str) -> tuple[str, ...]:
+    """查询同时兼容历史带连字符 ID 和新 canonical ID。"""
+    canonical = _canonical_id(value) or value
+    return tuple(dict.fromkeys((value, canonical)))
+
+
 def _text(payload: dict) -> str:
     """只抽取玩家安全的展示文本，未知 payload 不升级为事实。"""
     for key in ("text", "utterance", "summary", "description", "content"):
@@ -32,17 +48,66 @@ def _memory_from_event(event: Event) -> MemoryEntry | None:
     return MemoryEntry(
         memory_id=f"event:{event.id}",
         room_id=event.room_id,
-        subject_id=event.actor_id or event.player_id or "room",
+        subject_id=_canonical_id(event.actor_id or event.player_id) or "room",
         object_id=None,
         kind=kind,
         content=text,
         epistemic_status="presentation" if kind == "conversation" else "asserted",
         visibility="player_scoped" if event.visibility == "player_scoped" else "public",
-        participants=tuple(x for x in (event.player_id, event.actor_id) if x),
+        participants=tuple(_canonical_id(x) for x in (event.player_id, event.actor_id) if x),
+        listener_ids=tuple(
+            _canonical_id(str(item)) or str(item)
+            for item in event.payload.get("listener_ids", event.payload.get("listenerIds", ()))
+            if item
+        ),
         location_id=event.scene_id,
         source_event_id=event.id,
         source_sequence=0,
         source_revision=event.view_revision,
+    )
+
+
+def _listener_memories(event: Event) -> tuple[MemoryEntry, ...]:
+    """把服务端确认的听众投影为 NPC 的亲历记忆，不依赖模型猜测。"""
+    if event.event_type != "action.broadcast":
+        return ()
+    payload = event.payload or {}
+    listener_ids = tuple(
+        _canonical_id(str(item)) or str(item)
+        for item in payload.get("listener_ids", payload.get("listenerIds", ()))
+        if item
+    )
+    utterance = str(payload.get("utterance", "")).strip()
+    speaker_id = (
+        _canonical_id(
+            str(
+                payload.get("speaker_id") or payload.get("speakerId") or event.actor_id or ""
+            ).strip()
+        )
+        or ""
+    )
+    if not listener_ids or not utterance or not speaker_id:
+        return ()
+    return tuple(
+        MemoryEntry(
+            memory_id=f"event:{event.id}:listener:{listener_id}",
+            room_id=event.room_id,
+            subject_id=listener_id,
+            object_id=None,
+            kind="conversation",
+            content=(
+                f'玩家角色 {speaker_id} 对实体 {listener_id} 说："{utterance}"；该实体在场并听到。'
+            ),
+            epistemic_status="experienced",
+            visibility="public" if event.visibility == "public" else "player_scoped",
+            participants=(speaker_id, listener_id),
+            listener_ids=(listener_id,),
+            location_id=event.scene_id,
+            source_event_id=f"{event.id}:listener:{listener_id}",
+            source_sequence=0,
+            source_revision=event.view_revision,
+        )
+        for listener_id in listener_ids
     )
 
 
@@ -68,6 +133,7 @@ def _memory_from_game_event(event: GameEvent) -> MemoryEntry | None:
         epistemic_status="confirmed",
         visibility="public" if event.visibility == "public" else "entity_scoped",
         participants=(event.actor_id,),
+        listener_ids=(),
         source_event_id=event.event_id,
         source_sequence=event.sequence,
     )
@@ -112,6 +178,9 @@ class SqlAlchemyMemoryStore:
             count = 0
             candidates = [entry for event in events if (entry := _memory_from_event(event))]
             candidates.extend(
+                listener for event in events for listener in _listener_memories(event)
+            )
+            candidates.extend(
                 entry for event in game_events if (entry := _memory_from_game_event(event))
             )
             for entry in candidates:
@@ -136,6 +205,7 @@ class SqlAlchemyMemoryStore:
                         epistemic_status=entry.epistemic_status,
                         visibility=entry.visibility,
                         participants=list(entry.participants),
+                        listener_ids=list(entry.listener_ids),
                         location_id=entry.location_id,
                         source_event_id=entry.source_event_id,
                         source_sequence=entry.source_sequence,
@@ -155,12 +225,17 @@ class SqlAlchemyMemoryStore:
         revision: str,
         entity_ids: tuple[str, ...] = (),
         location_id: str | None = None,
-        limit: int = 8,
-        max_chars: int = 2500,
+        limit: int = 12,
+        max_chars: int = 4000,
     ) -> MemoryContext:
         """按服务端作用域过滤记忆，模型不能自行扩大查询范围。"""
         await self.project_room_events(room_id)
         async with self._session_factory() as session:
+            player_scope_ids = _scope_ids(player_id)
+            actor_scope_ids = _scope_ids(actor_id)
+            entity_scope_ids = tuple(
+                item for entity_id in entity_ids for item in _scope_ids(entity_id)
+            )
             conditions = [
                 MemoryEntryRecord.room_id == room_id,
                 # Engine 的内部裁决原因只服务审计，不应占用 Host 的剧情记忆预算。
@@ -169,16 +244,23 @@ class SqlAlchemyMemoryStore:
                     MemoryEntryRecord.visibility == "public",
                     and_(
                         MemoryEntryRecord.visibility == "player_scoped",
-                        MemoryEntryRecord.participants.contains([player_id]),
+                        or_(
+                            *(
+                                MemoryEntryRecord.participants.contains([item])
+                                for item in player_scope_ids
+                            )
+                        ),
                     ),
-                    MemoryEntryRecord.subject_id.in_((player_id, actor_id, *entity_ids)),
+                    MemoryEntryRecord.subject_id.in_(
+                        (*player_scope_ids, *actor_scope_ids, *entity_scope_ids)
+                    ),
                 ),
             ]
             if location_id:
                 conditions.append(
                     or_(
                         MemoryEntryRecord.location_id == location_id,
-                        MemoryEntryRecord.object_id.in_(entity_ids),
+                        MemoryEntryRecord.object_id.in_(entity_scope_ids),
                         # 没有地点的全局权威事件仍然是可召回的长期事实；外层
                         # room/visibility/participant 条件继续负责权限隔离。
                         MemoryEntryRecord.location_id.is_(None),
@@ -191,9 +273,15 @@ class SqlAlchemyMemoryStore:
                         .where(*conditions)
                         .order_by(
                             case(
-                                (MemoryEntryRecord.kind == "conversation", 0),
-                                (MemoryEntryRecord.epistemic_status == "presentation", 1),
-                                else_=2,
+                                (
+                                    MemoryEntryRecord.epistemic_status.in_(
+                                        ("experienced", "heard")
+                                    ),
+                                    0,
+                                ),
+                                (MemoryEntryRecord.kind == "conversation", 1),
+                                (MemoryEntryRecord.epistemic_status == "presentation", 2),
+                                else_=3,
                             ),
                             MemoryEntryRecord.source_sequence.desc(),
                             MemoryEntryRecord.created_at.desc(),
@@ -216,6 +304,7 @@ class SqlAlchemyMemoryStore:
                         "epistemic_status": record.epistemic_status,
                         "visibility": record.visibility,
                         "participants": tuple(record.participants or ()),
+                        "listener_ids": tuple(record.listener_ids or ()),
                         "location_id": record.location_id,
                         "source_event_id": record.source_event_id,
                         "source_sequence": record.source_sequence,
@@ -229,7 +318,7 @@ class SqlAlchemyMemoryStore:
             summary_record = await session.scalar(
                 select(ConversationSummaryRecord).where(
                     ConversationSummaryRecord.room_id == room_id,
-                    ConversationSummaryRecord.player_id == player_id,
+                    ConversationSummaryRecord.player_id.in_(player_scope_ids),
                 )
             )
             summary = None

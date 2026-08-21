@@ -35,6 +35,8 @@ class MemoryEntry(ContractModel):
     epistemic_status: MemoryEpistemicStatus
     visibility: MemoryVisibility
     participants: tuple[str, ...] = ()
+    # 明确在场并听到该互动的实体；空值表示系统无法证明听众。
+    listener_ids: tuple[str, ...] = ()
     location_id: str | None = None
     source_event_id: str = Field(min_length=1)
     source_sequence: int = Field(ge=0)

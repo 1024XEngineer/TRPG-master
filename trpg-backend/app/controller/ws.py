@@ -73,6 +73,7 @@ from starlette.websockets import WebSocketState
 from app.adapters.structured_http import StructuredOutputError, is_transient_model_error
 from app.core.action_plan_turn import (
     ActionPlanTurnResult,
+    _matching_visible_entity_ids,
     action_plan_turn_application,
 )
 from app.core.db import async_session_factory
@@ -146,6 +147,16 @@ from app.service.ws_manager import manager
 
 router = APIRouter()
 logger = structlog.get_logger()
+
+_DIRECT_SPEECH_MARKERS = ("告诉", "询问", "问", "提醒", "威胁", "喊", "说", "请")
+
+
+def _listener_ids_for_utterance(utterance: str, player_view: PlayerView) -> tuple[str, ...]:
+    """只有明确的对话动词才把可见实体认定为听众，避免把“去找 NPC”记成对话。"""
+    if not any(marker in utterance for marker in _DIRECT_SPEECH_MARKERS):
+        return ()
+    return _matching_visible_entity_ids(utterance, player_view)
+
 
 _UNAUTHORIZED_CLOSE_CODE = 4401
 _NOT_FOUND_CLOSE_CODE = 4404
@@ -1141,12 +1152,16 @@ async def _broadcast_action_utterance(
         player_input.player_id,
         fallback=nickname,
     )
+    listener_ids = _listener_ids_for_utterance(player_input.utterance, player_view)
     payload = ActionBroadcastPayload(
         player_id=player_input.player_id,
         client_action_id=player_input.client_action_id,
         nickname=nickname,
         character_name=character_name,
         utterance=player_input.utterance,
+        speaker_id=player_input.actor_id,
+        listener_ids=listener_ids,
+        participant_ids=(player_input.actor_id, *listener_ids),
     )
     recorded = await room_service.record_event(
         db,

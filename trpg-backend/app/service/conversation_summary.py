@@ -22,13 +22,40 @@ logger = structlog.get_logger()
 _MAX_ATTEMPTS = 5
 
 
+def _scope_ids(value: str) -> tuple[str, ...]:
+    """摘要查询兼容历史带连字符 UUID 与 canonical UUID。"""
+    try:
+        canonical = uuid.UUID(value).hex
+    except (ValueError, AttributeError):
+        canonical = value
+    return tuple(dict.fromkeys((value, canonical)))
+
+
+def _event_text(event: Event) -> str:
+    """统一提取摘要可见文本；action.broadcast 使用 utterance 字段。"""
+    payload = event.payload or {}
+    for key in ("text", "utterance", "summary", "description", "content"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
 class DeterministicConversationSummaryModel:
     """Fake provider 的低成本摘要，保证离线测试不依赖真实模型。"""
 
     async def summarize(self, **kwargs) -> ConversationSummary:  # noqa: ANN003
         previous = kwargs.get("previous")
         events = kwargs.get("visible_events", ())
-        lines = [str(item.get("text", "")).strip() for item in events if item.get("text")]
+        lines = []
+        for item in events:
+            text = str(item.get("text", "")).strip()
+            if not text:
+                continue
+            # Fake 摘要也必须保留主张边界，不能把玩家原话伪装成已确认事实。
+            if item.get("type") == "action.broadcast":
+                text = f"玩家声称/行动：{text}"
+            lines.append(text)
         text = (previous.summary + "\n" if previous and previous.summary else "") + "\n".join(
             lines[-10:]
         )
@@ -57,13 +84,17 @@ class ConversationSummaryService:
     async def enqueue_if_needed(self, *, room_id: str, player_id: str) -> None:
         """根据可见事件游标判断是否达到摘要阈值。"""
         async with self._session_factory() as session:
+            player_scope_ids = _scope_ids(player_id)
             events = list(
                 (
                     await session.scalars(
                         select(Event)
                         .where(
                             Event.room_id == room_id,
-                            or_(Event.player_id == player_id, Event.visibility == "public"),
+                            or_(
+                                Event.player_id.in_(player_scope_ids),
+                                Event.visibility == "public",
+                            ),
                             Event.event_type.in_(
                                 ("action.broadcast", "narration.push", "check.result")
                             ),
@@ -80,7 +111,7 @@ class ConversationSummaryService:
             )
             previous_through = record.through_event_sequence if record else 0
             new_events = events[previous_through:]
-            new_chars = sum(len(str(event.payload.get("text", ""))) for event in new_events)
+            new_chars = sum(len(_event_text(event)) for event in new_events)
             scene_changed = bool(
                 previous_through
                 and previous_through < len(events)
@@ -105,8 +136,11 @@ class ConversationSummaryService:
                 )
                 session.add(record)
             else:
-                record.pending_through_sequence = len(events)
-                record.status = "pending"
+                # 运行中的旧任务保留 lease，只推进目标游标；旧结果保存后会
+                # 自动转回 pending，交给下一次 worker 处理新增事件。
+                record.pending_through_sequence = max(record.pending_through_sequence, len(events))
+                if record.status != "running":
+                    record.status = "pending"
                 record.updated_at = datetime.now(UTC)
             await session.commit()
 
@@ -175,7 +209,10 @@ class ConversationSummaryService:
                         select(Event)
                         .where(
                             Event.room_id == room_id,
-                            or_(Event.player_id == player_id, Event.visibility == "public"),
+                            or_(
+                                Event.player_id.in_(_scope_ids(player_id)),
+                                Event.visibility == "public",
+                            ),
                             Event.event_type.in_(
                                 ("action.broadcast", "narration.push", "check.result")
                             ),
@@ -186,7 +223,7 @@ class ConversationSummaryService:
             )
         # 只压缩上次成功游标之后的新事件，避免重复发送整局记录。
         visible = tuple(
-            {"id": event.id, "text": event.payload.get("text", ""), "type": event.event_type}
+            {"id": event.id, "text": _event_text(event), "type": event.event_type}
             for event in events[previous_through:through]
         )
         try:
@@ -236,7 +273,11 @@ class ConversationSummaryService:
             if record:
                 record.summary_json = summary.model_dump(mode="json")
                 record.through_event_sequence = summary.through_event_sequence
-                record.status = "idle"
+                record.status = (
+                    "pending"
+                    if record.pending_through_sequence > summary.through_event_sequence
+                    else "idle"
+                )
                 record.attempt_count = 0
                 record.next_attempt_at = None
                 record.lease_owner = None

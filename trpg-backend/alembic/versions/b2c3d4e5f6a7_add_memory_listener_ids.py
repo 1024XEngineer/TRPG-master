@@ -23,6 +23,6 @@ def upgrade() -> None:
 def downgrade() -> None:
     # 某些旧数据库可能已标记过升级但实际缺列，回滚也必须保持幂等。
     bind = op.get_bind()
-    columns = {row[1] for row in bind.execute(sa.text("PRAGMA table_info(memory_entries)"))}
+    columns = {column["name"] for column in sa.inspect(bind).get_columns("memory_entries")}
     if "listener_ids" in columns:
         op.drop_column("memory_entries", "listener_ids")

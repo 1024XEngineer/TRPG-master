@@ -15,9 +15,7 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     # 线上/本地可能已经被错误标记到 b2；检查后再补列，保证重复升级安全。
     bind = op.get_bind()
-    columns = {
-        row[1] for row in bind.execute(sa.text("PRAGMA table_info(memory_entries)"))
-    }
+    columns = {column["name"] for column in sa.inspect(bind).get_columns("memory_entries")}
     if "listener_ids" not in columns:
         op.add_column(
             "memory_entries",
@@ -27,8 +25,6 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     bind = op.get_bind()
-    columns = {
-        row[1] for row in bind.execute(sa.text("PRAGMA table_info(memory_entries)"))
-    }
+    columns = {column["name"] for column in sa.inspect(bind).get_columns("memory_entries")}
     if "listener_ids" in columns:
         op.drop_column("memory_entries", "listener_ids")

@@ -15,7 +15,7 @@
   阶段或玩家状态变化后广播 `room.state`；
 - `action.plan.submit` 必须携带 `clientActionId`，由 ActionPlanTurnApplication
   完成身份绑定、编排、幂等去重和 PlayerView 投影；框架回包只发给动作发起者，
-  普通叙事广播全房间，需要澄清的叙事只发给发起者；
+  `narration.push`（含澄清问话）广播全房间；
 - 需要检定时由 ActionPlan 暂停并下发待决策载荷；玩家用 `adjudication.select`
   选技能、`adjudication.post_roll` 处理奖惩骰与孤注一掷，随后计划继续推进。
   旧的 `action.submit`/`check.roll` 单动作通道已随 Checkpoint 运行时一并移除
@@ -1253,7 +1253,9 @@ async def _persist_turn_narration(
         player_id,
         "narration.push",
         payload,
-        visibility="player_scoped" if completion.kind == "clarification" else "public",
+        # 澄清问话也是桌面上的主持人发言，同房其他玩家必须能看到、刷新后也能
+        # 从 conversation 拉回来。真正的私密信息不走 narration.push（#48/#68）。
+        visibility="public",
         actor_id=actor_id,
         scene_id=scene_id,
         view_revision=view_revision,
@@ -1271,25 +1273,23 @@ async def _persist_turn_narration(
 
 
 async def _emit_turn_narration(
-    websocket: WebSocket | None,
+    _websocket: WebSocket | None,
     room_id: str,
     *,
     client_action_id: str,
     narration: NarrationOutput,
 ) -> None:
-    """Emit a narration that has already passed validation and persistence."""
+    """Emit a narration that has already passed validation and persistence.
+
+    `_websocket` 是历史参数：澄清曾经按发起者单播，队列出队时用该连接。
+    `narration.push` 现已一律房间广播，同桌其他人必须能听到主持人问话。
+    """
 
     push = NarrationPushPayload(
         message_id=client_action_id,
         text=narration.text,
     )
-    # 澄清叙事只对发起者可见，它的渐进片段必须走同一条投递通道，
-    # 否则片段会广播给全房间、泄露只该给一个人看的内容。
-    send = (
-        partial(_send_to_player, websocket)
-        if narration.kind == "clarification"
-        else partial(manager.broadcast, room_id)
-    )
+    send = partial(manager.broadcast, room_id)
     await _stream_narration_chunks(
         send,
         message_id=client_action_id,

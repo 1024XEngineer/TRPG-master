@@ -137,17 +137,6 @@ class WorldActionRegistryTests(unittest.TestCase):
             with self.subTest(action_id=action_id):
                 self.assertFalse(world_action_registry.is_registered(action_id))
 
-    def test_v2_force_action_names_were_not_migrated_in(self) -> None:
-        """`engine/capabilities.py` still carries v2's `_SUPPORTED_FORCE_ACTIONS`.
-        Those belong to a runtime that no longer exists; migrating them here
-        would claim v3 capabilities nothing implements."""
-
-        from collaboration_framework.engine.capabilities import _SUPPORTED_FORCE_ACTIONS
-
-        for action in _SUPPORTED_FORCE_ACTIONS:
-            with self.subTest(action=action):
-                self.assertFalse(world_action_registry.is_registered(action))
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -5,7 +5,6 @@ from copy import deepcopy
 
 import pytest
 from collaboration_framework.contracts import ModuleContentV3
-from pydantic import ValidationError
 
 from app.service import module_content_cache
 from app.service.builtin_module_loader import PAPER_CHASE_SPEC
@@ -25,7 +24,6 @@ def _load(content_json: dict, *, version: str = "3.0.6") -> ModuleContentV3:
     content = module_content_cache.load_module_content(
         module_id="paper-chase-zh-coc7",
         version=version,
-        content_schema_version=3,
         content_json=content_json,
     )
     assert isinstance(content, ModuleContentV3)
@@ -121,15 +119,3 @@ def test_the_oldest_entry_is_the_one_evicted(content_json: dict) -> None:
     _load(content_json, version="oldest")
 
     assert module_content_cache.cache_info().hits == hits_before
-
-
-def test_a_non_v3_schema_version_routes_to_the_v1_model(content_json: dict) -> None:
-    """schema version 决定用哪个契约模型解析，v3 内容不能从 v1 分支通过。"""
-
-    with pytest.raises(ValidationError):
-        module_content_cache.load_module_content(
-            module_id="paper-chase-zh-coc7",
-            version="3.0.6",
-            content_schema_version=1,
-            content_json=content_json,
-        )

@@ -41,13 +41,13 @@ from copy import deepcopy
 from hashlib import blake2b
 from typing import NamedTuple
 
-from collaboration_framework.contracts import ModuleContent, ModuleContentV3
+from collaboration_framework.contracts import ModuleContentV3
 
 # 一个进程同时在玩的模组版本数远小于这个上限；留出余量后按 LRU 淘汰，
 # 避免作者反复改内容不改版本号时条目无限增长。单条约 60KB。
 MAX_ENTRIES = 16
 
-_CacheKey = tuple[str, str, int, bytes]
+_CacheKey = tuple[str, str, bytes]
 
 _entries: OrderedDict[_CacheKey, bytes] = OrderedDict()
 _hits = 0
@@ -84,9 +84,8 @@ def load_module_content(
     *,
     module_id: str,
     version: str,
-    content_schema_version: int,
     content_json: dict,
-) -> ModuleContent | ModuleContentV3:
+) -> ModuleContentV3:
     """返回一棵与缓存、与 `content_json` 都完全隔离的模组内容树。
 
     调用方可以随意就地修改返回值，既不会影响下一次调用，也不会写回
@@ -98,7 +97,6 @@ def load_module_content(
     key: _CacheKey = (
         module_id,
         version,
-        content_schema_version,
         _fingerprint(content_json),
     )
     blob = _entries.get(key)
@@ -109,12 +107,7 @@ def load_module_content(
 
     _misses += 1
     # 未命中时逐字沿用改动前的解析方式：先深拷贝再校验，保证行为完全一致。
-    payload = deepcopy(content_json)
-    content: ModuleContent | ModuleContentV3 = (
-        ModuleContentV3.model_validate(payload)
-        if content_schema_version == 3
-        else ModuleContent.model_validate(payload)
-    )
+    content = ModuleContentV3.model_validate(deepcopy(content_json))
     _entries[key] = pickle.dumps(content, protocol=pickle.HIGHEST_PROTOCOL)
     _entries.move_to_end(key)
     while len(_entries) > MAX_ENTRIES:

@@ -32,9 +32,10 @@ class ContractGuardTests(unittest.TestCase):
 
     def test_exported_schemas_match_pydantic_source(self) -> None:
         expected = rendered_schemas()
-        self.assertEqual(len(expected), 25)
+        self.assertEqual(len(expected), 24)
         self.assertIn("keeper-capability-view.schema.json", expected)
         self.assertIn("module-content-v3.schema.json", expected)
+        self.assertNotIn("module-content.schema.json", expected)
         self.assertIn("action-adjudication.schema.json", expected)
         self.assertIn("adjudication-execution.schema.json", expected)
         self.assertIn("action-plan.schema.json", expected)
@@ -54,6 +55,12 @@ class ContractGuardTests(unittest.TestCase):
         self.assertNotIn("turn-state.schema.json", expected)
         self.assertNotIn("event.schema.json", expected)
         self.assertNotIn("summary-operation.schema.json", expected)
+        # 目录内容必须与导出集合**双向**一致。原来只断言「每个 expected 都在盘上」，
+        # 少了反向那一半：一个已经不再导出的 schema 留在 schemas/ 里不会被任何检查
+        # 发现，消费者照样能枚举到它。#384 删掉 v1 导出项时就漏下了
+        # `module-content.schema.json`。
+        shipped = {path.name for path in (ROOT / "schemas").glob("*.schema.json")}
+        self.assertEqual(shipped, set(expected))
         for filename, content in expected.items():
             with self.subTest(filename=filename):
                 self.assertEqual(load_text(f"schemas/{filename}"), content)

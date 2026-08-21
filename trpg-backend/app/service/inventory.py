@@ -37,6 +37,7 @@ from app.models.engine import (
     ModuleVersion,
 )
 from app.models.room import Player
+from app.service.module_content_cache import load_module_content
 
 
 class InventoryError(RuntimeError):
@@ -84,9 +85,14 @@ async def _runtime(
     await db.refresh(session)
     state = GameState.model_validate(deepcopy(session.state_json))
     version = await db.get(ModuleVersion, (session.module_id, session.module_version))
-    if version is None or version.content_schema_version != 3:
-        raise InventoryConflictError("背包运行时只支持 ModuleContent v3 房间")
-    return session, state, ModuleContentV3.model_validate(deepcopy(version.content_json))
+    if version is None:
+        raise InventoryConflictError("房间绑定的 ModuleVersion 不存在")
+    content = load_module_content(
+        module_id=version.module_id,
+        version=version.version,
+        content_json=version.content_json,
+    )
+    return session, state, content
 
 
 def _normalized_definition(claim) -> ItemDefinition:

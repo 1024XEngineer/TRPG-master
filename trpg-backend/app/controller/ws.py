@@ -2502,6 +2502,15 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                             player_id=bound_player_id,
                             client_action_id=cancel.client_action_id,
                         ):
+                            await _send_turn_event(
+                                websocket,
+                                TurnFailed(
+                                    correlation_id=cancel.client_action_id,
+                                    code="ACTION_CANCELLED",
+                                    public_message="已取消排队中的主持行动",
+                                    retryable=False,
+                                ),
+                            )
                             await _broadcast_room_action_state(db, room_id)
                             continue
                         try:

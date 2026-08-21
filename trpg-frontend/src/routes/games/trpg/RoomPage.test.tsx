@@ -2035,6 +2035,17 @@ describe('RoomPage conversation history', () => {
     expect(screen.getByRole('button', { name: '复制错误详情' })).toHaveTextContent(
       'TURN_CONTRACT_INVALID',
     )
+
+    act(() => emitWsMessage({
+      type: 'turn.failed',
+      payload: {
+        correlationId: 'queued-cancel',
+        code: 'ACTION_CANCELLED',
+        publicMessage: '已取消排队中的主持行动',
+        retryable: false,
+      },
+    }))
+    expect(screen.queryByText('已取消排队中的主持行动')).not.toBeInTheDocument()
   })
 
   it('shows a disabled microphone with a clear message when speech input is unavailable', () => {

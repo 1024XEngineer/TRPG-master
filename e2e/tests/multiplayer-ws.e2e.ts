@@ -8,7 +8,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import type { ServerToClientEvent } from 'trpg-sdk'
+import { TurnFailedError, type ServerToClientEvent } from 'trpg-sdk'
 
 import { createRoomWithModule, legalCharacterPayload, registerPlayer } from './helpers.ts'
 
@@ -533,7 +533,7 @@ test('三客户端串行动作、私有检定与重连快照保持隔离', async
         Array.isArray(event.payload.queued) &&
         event.payload.queued.some((item) => item.clientActionId === queuedActionId),
     )
-    void guest.sdk.roomSocket.submitPlannedAction(joined.playerId, {
+    const queuedSubmit = guest.sdk.roomSocket.submitPlannedAction(joined.playerId, {
       clientActionId: queuedActionId,
       utterance: '我同时翻查书架',
     })
@@ -541,6 +541,11 @@ test('三客户端串行动作、私有检定与重连快照保持隔离', async
     guest.sdk.roomSocket.cancelActionPlan(joined.playerId, {
       clientActionId: queuedActionId,
       requestId: `cancel-${queuedActionId}`,
+    })
+    await assert.rejects(queuedSubmit, (error: unknown) => {
+      assert.ok(error instanceof TurnFailedError)
+      assert.equal(error.code, 'ACTION_CANCELLED')
+      return true
     })
 
     const [hostPending, guestPending, thirdPending] = await Promise.all([

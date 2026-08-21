@@ -1892,12 +1892,15 @@ export default function RoomPage() {
         // 只中止揭示，不清待提交队列：队列里的都是已经落库的权威消息（push 紧跟
         // 片段到达），清掉等于丢服务端认定已发生的叙事。中止后它们会立即落地。
         setStreamingNarration(null)
+        pendingNarrationActionIdRef.current = null
+        if (envelope.payload.code === 'ACTION_CANCELLED') {
+          return
+        }
         setActionError(envelope.payload.publicMessage)
         setActionErrorRetryable(envelope.payload.retryable)
         setActionErrorIsGuidance(envelope.payload.code === 'HOST_AGENT_INVALID_OUTPUT')
         setActionErrorCode(envelope.payload.code)
         setActionErrorCorrelationId(envelope.payload.correlationId)
-        pendingNarrationActionIdRef.current = null
       } else if (envelope.type === 'view.updated') {
         if (envelope.payload.playerId === playerId) {
           setPlayerView(envelope.payload.playerView)

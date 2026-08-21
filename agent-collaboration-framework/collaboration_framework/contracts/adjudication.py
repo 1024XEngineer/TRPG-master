@@ -330,7 +330,10 @@ class PendingCheckDecisionView(ContractModel):
     actor_id: str = Field(min_length=1)
     summary: str = Field(min_length=1)
     options: tuple[PendingCheckOption, ...] = Field(min_length=1)
-    allow_cancel: Literal[True] = True
+    # 规则强制的被动检定不可取消：`CheckStep` 不像 `AdjudicatedCheckStep` 那样带
+    # `cancel_step_id`，所以取消根本没有可走的路由。此前这里是 `Literal[True]`，
+    # 于是这件事在契约层就说不出口（#398 §阶段三）。
+    allow_cancel: bool = True
 
 
 class SelectCheckChoice(ContractModel):

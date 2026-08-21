@@ -9,8 +9,9 @@ from pathlib import Path
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 PREVIOUS_REVISION = "1a02058345ee"
 ENGINE_IDENTITY_PREVIOUS_REVISION = "9c4e7a2b1d6f"
-# PR2 NPC 对话迁移直接接在 PR1 输入路由 head 后面。
-HEAD_REVISION = "d1e2f3a4b5c6"
+# PR2 NPC 对话迁移（d1e2f3a4b5c6）接在 PR1 输入路由 head 后面，#398 的检定唯一
+# 约束放宽再接在它之后。
+HEAD_REVISION = "b8c9d0e1f2a3"
 
 
 def _run_alembic(database: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -39,6 +40,11 @@ def _table_names(database: Path) -> set[str]:
             row[0]
             for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
         }
+
+
+def _index_names(database: Path, table: str) -> set[str]:
+    with sqlite3.connect(database) as connection:
+        return {row[1] for row in connection.execute(f"PRAGMA index_list('{table}')")}
 
 
 def _column_names(database: Path, table: str) -> set[str]:
@@ -205,6 +211,11 @@ def test_migration_upgrades_empty_sqlite_and_round_trips(tmp_path: Path) -> None
     with sqlite3.connect(database) as connection:
         revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
     assert revision == (HEAD_REVISION,)
+    # #398：「一个动作至多一次检定」放宽为「至多一次**未结算**的检定」，
+    # 规则要能在动作的效果链中间再要求一次被动检定。
+    indexes = _index_names(database, "pending_check_decisions")
+    assert "uq_pending_check_decisions_room_action" not in indexes
+    assert "uq_pending_check_decisions_room_action_open" in indexes
 
 
 def test_recent_history_migration_backfills_visibility_conservatively(

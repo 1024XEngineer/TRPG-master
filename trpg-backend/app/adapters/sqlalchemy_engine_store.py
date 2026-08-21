@@ -486,11 +486,20 @@ class _SqlAlchemyEngineTransaction(EngineTransaction):
         action_request_id: str,
     ) -> PendingCheckDecision | None:
         self._ensure_active()
+        # 一个动作可以先后有多次检定（#398 §阶段三：规则能在效果链中间要求一次
+        # 被动检定），所以这里不能再靠唯一约束保证只有一行。未结算的那一条永远
+        # 优先——调用方要么在问「现在还挂着检定吗」，要么在恢复当前进度。
         record = await self._session.scalar(
-            select(PendingCheckDecisionRecord).where(
+            select(PendingCheckDecisionRecord)
+            .where(
                 PendingCheckDecisionRecord.room_id == self._room_id,
                 PendingCheckDecisionRecord.action_request_id == action_request_id,
             )
+            .order_by(
+                PendingCheckDecisionRecord.status.notin_(("awaiting_skill_choice", "rolled")),
+                PendingCheckDecisionRecord.updated_at.desc(),
+            )
+            .limit(1)
         )
         return self._decision_from_record(record)
 
@@ -695,6 +704,7 @@ class _SqlAlchemyEngineTransaction(EngineTransaction):
         decision: PendingCheckDecision | None,
         check_run: CheckRun | None,
         completed_command: CompletedAdjudicationCommand,
+        additional_decisions: tuple[PendingCheckDecision, ...] = (),
     ) -> None:
         self._ensure_active()
         if self._committed:
@@ -781,6 +791,8 @@ class _SqlAlchemyEngineTransaction(EngineTransaction):
         )
         if decision is not None:
             await self._save_decision(decision, now)
+        for extra in additional_decisions:
+            await self._save_decision(extra, now)
         if check_run is not None:
             await self._save_check_run(check_run, now)
         self._session.add(

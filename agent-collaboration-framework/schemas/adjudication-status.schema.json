@@ -504,7 +504,6 @@
           "type": "array"
         },
         "allow_cancel": {
-          "const": true,
           "default": true,
           "title": "Allow Cancel",
           "type": "boolean"

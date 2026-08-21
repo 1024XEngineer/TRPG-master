@@ -5,10 +5,12 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import Any
+from typing import cast as typing_cast
 
 from collaboration_framework.host.schemas import ConversationSummary, MemoryContext, MemoryEntry
-from sqlalchemy import and_, case, delete, or_, select, update
+from sqlalchemy import and_, case, cast, delete, exists, func, or_, select, update
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import CursorResult
@@ -306,7 +308,7 @@ class SqlAlchemyMemoryStore:
         ]
         inserted = 0
         if values:
-            insert_result = cast(
+            insert_result = typing_cast(
                 CursorResult[Any],
                 await session.execute(
                     _insert_ignore(
@@ -380,6 +382,14 @@ class SqlAlchemyMemoryStore:
         stored_room_id = room_id
         await self.project_room_events(stored_room_id)
         async with self._session_factory() as session:
+            # JSON.contains([item]) 在 SQLite 会按文本片段匹配，无法识别多参与者数组。
+            # 使用 json_each/JSONB 成员运算保证两种数据库都按数组元素比较。
+            def participant_has(item: str):
+                if session.get_bind().dialect.name == "sqlite":
+                    values = func.json_each(MemoryEntryRecord.participants).table_valued("value")
+                    return exists(select(1).select_from(values).where(values.c.value == item))
+                return cast(MemoryEntryRecord.participants, JSONB).contains([item])
+
             player_scope_ids = _scope_ids(player_id)
             actor_scope_ids = _scope_ids(actor_id)
             entity_scope_ids = tuple(
@@ -393,12 +403,7 @@ class SqlAlchemyMemoryStore:
                     MemoryEntryRecord.visibility == "public",
                     and_(
                         MemoryEntryRecord.visibility == "player_scoped",
-                        or_(
-                            *(
-                                MemoryEntryRecord.participants.contains([item])
-                                for item in player_scope_ids
-                            )
-                        ),
+                        or_(*(participant_has(item) for item in player_scope_ids)),
                     ),
                     MemoryEntryRecord.subject_id.in_(
                         (*player_scope_ids, *actor_scope_ids, *entity_scope_ids)
@@ -409,7 +414,7 @@ class SqlAlchemyMemoryStore:
                 entity_relevance = or_(
                     MemoryEntryRecord.subject_id.in_(entity_scope_ids),
                     MemoryEntryRecord.object_id.in_(entity_scope_ids),
-                    *(MemoryEntryRecord.participants.contains([item]) for item in entity_scope_ids),
+                    *(participant_has(item) for item in entity_scope_ids),
                 )
                 conditions.append(
                     or_(

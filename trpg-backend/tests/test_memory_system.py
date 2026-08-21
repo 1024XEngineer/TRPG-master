@@ -425,3 +425,38 @@ async def test_read_context_normalizes_uuid_scope_and_entity_memory(
     assert context.conversation_summary is not None
     assert context.conversation_summary.room_id == room.id
     assert context.conversation_summary.player_id == player.id
+
+
+@pytest.mark.asyncio
+async def test_read_context_matches_multi_participant_json_array(
+    db_session: AsyncSession, memory_store
+) -> None:  # noqa: ANN001
+    """多参与者数组按单个元素匹配，而不是要求完整数组相等。"""
+    room, player, actor_id = await _create_memory_room(db_session, 19)
+    db_session.add(
+        MemoryEntryRecord(
+            room_id=room.id,
+            subject_id="other_npc",
+            kind="conversation",
+            content="NPC 听到了测试短语。",
+            epistemic_status="experienced",
+            visibility="public",
+            participants=[actor_id, "other_npc"],
+            listener_ids=["other_npc"],
+            location_id="other_scene",
+            source_event_id="multi-participant-event",
+            source_sequence=1,
+            source_revision="1",
+            source_created_at=datetime.now(UTC),
+        )
+    )
+    await db_session.commit()
+    context = await memory_store.read_context(
+        room_id=room.id,
+        player_id=player.id,
+        actor_id=actor_id,
+        revision="1",
+        entity_ids=("other_npc",),
+        location_id="current_scene",
+    )
+    assert any(entry.source_event_id == "multi-participant-event" for entry in context.entries)

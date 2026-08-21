@@ -35,6 +35,7 @@ from app.models.engine import (
     TurnRunCutoverRecord,
 )
 from app.models.event import CheckResult, Event
+from app.models.memory import ConversationSummaryRecord, MemoryEntryRecord
 from app.models.replay import ModuleImportJob, RoomSummary
 from app.models.room import Character, CharacterPortrait, Note, Player, Room
 from app.models.user import User, UserCharacterTemplate, UserCharacterTemplatePortrait, UserSession
@@ -81,4 +82,6 @@ __all__ = [
     "UserCharacterTemplatePortrait",
     "UserSession",
     "World",
+    "ConversationSummaryRecord",
+    "MemoryEntryRecord",
 ]

@@ -32,6 +32,7 @@ from .output import (
     NarrationOutput,
 )
 from .planner_context import HostAgentContext
+from .memory import ConversationSummary, MemoryContext, MemoryEntry
 
 __all__ = [
     "RESERVATION_TTL",
@@ -44,8 +45,11 @@ __all__ = [
     "ActionPlanStepContext",
     "ActionPlanStepRun",
     "CompletedPlanStepSummary",
-    "HistoryVisibility",
     "HostAgentContext",
+    "ConversationSummary",
+    "MemoryContext",
+    "MemoryEntry",
+    "HistoryVisibility",
     "NarrationOutput",
     "OpeningNarrationContext",
     "OpeningParticipant",

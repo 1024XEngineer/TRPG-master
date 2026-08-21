@@ -7,7 +7,7 @@
 
 - A（Host）负责玩家安全上下文、单动作/ActionPlan 决策、逐步编排和安全叙事。
 - B（Engine）负责规则、目标、revision、检定、状态、Event 和持久化提交。
-- C（Module）负责把草稿验证并发布为 B 可执行的声明式 `ModuleContent`。
+- C（Module）负责把草稿验证并发布为 B 可执行的声明式 `ModuleContentV3`。
 - backend 负责 HTTP/WebSocket、SQL、Provider client、结构化 JSON 重试和依赖装配。
 - Framework 不依赖 Provider SDK，不定义 backend WebSocket DTO，也不读取环境变量。
 
@@ -101,15 +101,15 @@ Engine/legacy persistence 契约，不代表当前 Host 有第二套应用入口
 flowchart LR
     RAW["Raw input"] --> DRAFT["C private draft"]
     DRAFT --> VALIDATE["Module validation"]
-    VALIDATE --> CONTRACT["ModuleContent + declarative specs"]
+    VALIDATE --> CONTRACT["ModuleContentV3 + declarative specs"]
     CONTRACT --> ENGINE["Engine compile / match / execute"]
     ENGINE --> SNAP["ProjectionSnapshot"]
     SNAP --> VIEW["PlayerView"]
 ```
 
-`ModuleDraft` 是 C 私有类型。正式 `ModuleContent` 位于 `contracts/module.py`，由 B/C 共同
-评审。Host 和 backend 不得绕过 validation 直接消费草稿；A 只能通过安全投影和受控
-capability 看到与当前回合有关的内容。
+正式 `ModuleContentV3` 位于 `contracts/module_v3.py`，由 B/C 共同评审，是仓库里唯一的模组
+内容版本——v1/v2 的契约与发布链路已随 #384 删除。Host 和 backend 不得绕过 validation 直接
+消费未校验内容；A 只能通过安全投影和受控 capability 看到与当前回合有关的内容。
 
 ## 6. 依赖方向
 
@@ -164,7 +164,7 @@ provider-neutral contract。backend 可以替换 client/provider，但不得改�
 
 Framework exporter 当前发布：
 
-- Module 与校验：`ModuleContent`、`ModuleContentV3`、validation models；
+- Module 与校验：`ModuleContentV3`、validation models；
 - 投影：`PlayerInput`、`ProjectionSnapshot`、`PlayerView`、`KeeperCapabilityView`；
 - Adjudication：request、execution、status、cancel/status request；
 - ActionPlan：plan、policy、progress；

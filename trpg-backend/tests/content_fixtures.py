@@ -7,7 +7,6 @@ from app.core.seed import BUILTIN_SYSTEM_ID
 from app.models.content import GameSystem, Scenario
 from app.models.engine import ModuleVersion
 from app.service.paper_chase_loader import (
-    PAPER_CHASE_CONTENT_SCHEMA_VERSION,
     PAPER_CHASE_SOURCE_PATH,
 )
 
@@ -63,7 +62,7 @@ async def publish_multiplayer_module(db: AsyncSession) -> None:
             module_id=MULTIPLAYER_MODULE_ID,
             version=MULTIPLAYER_VERSION,
             world_ref=content.world_ref,
-            content_schema_version=PAPER_CHASE_CONTENT_SCHEMA_VERSION,
+            content_schema_version=3,
             content_json=content.to_json_dict(),
         )
     )

@@ -70,7 +70,7 @@ def project_v3(
     player_id: str,
     actor_id: str,
 ) -> ProjectionSnapshot:
-    module = runtime.v3
+    module = runtime.module_content
     state = runtime.game_state
     location = _current_location(module, state)
     actor = state.actors[actor_id]
@@ -729,7 +729,7 @@ def keeper_capabilities_v3(
     at submit time.
     """
 
-    module = runtime.v3
+    module = runtime.module_content
     state = runtime.game_state
     canon_entity_ids = {entity.id for entity in module.entities}
     party_known = set(state.discovered_facts)

@@ -73,6 +73,7 @@ def entity(
     location: str = "sealed_room",
     state: dict[str, Any] | None = None,
     visible_when: dict[str, Any] | None = None,
+    relations: list[dict[str, str]] | None = None,
     portable: bool = False,
 ) -> dict[str, Any]:
     """构造 Canon Entity；可携带物只声明既有实体，不在运行时创造。"""
@@ -88,6 +89,8 @@ def entity(
         "visibility": "public",
         "plot_relevance": True,
     }
+    if relations:
+        payload["relations"] = relations
     if visible_when is not None:
         payload["visibility_conditions"] = [visible_when]
     if portable:
@@ -250,6 +253,13 @@ def build_module() -> dict[str, Any]:
     info = [
         information("restraints_removed", "摆脱束缚", "调查员已用铅笔刀或床角铁皮割断绳索。", "绳索已经被割断，你恢复了行动自由。", criticality="essential"),
         information("wall_key_found", "挂画后的钥匙", "挂画后的暗格藏着上层抽屉钥匙。", "挂画后的暗格里藏着一把小钥匙。"),
+        information(
+            "sketchbook_found",
+            "上层抽屉中的速写本",
+            "暗格钥匙打开上层抽屉后，调查员发现四页速写本。前三页固定用于显现手电、钢钳和桂花糯米糖粥，第四页只能替代白纸进行通信；禁止生成清单以外的物品。",
+            "你打开上层抽屉，发现里面放着一本只剩四页的速写本。书中夹着一张纸条，上面写着：“用法：撕下。请节约使用。”四张纸页分别对应手电、钢钳、桂花糯米糖粥和通信，不能用于显现其他物品。",
+            criticality="essential",
+        ),
         information("bed_key_found", "床下的钥匙", "移动床后可以取得中层抽屉钥匙。", "床被移开后，墙角的小钥匙终于可以拿到了。"),
         information("vent_key_found", "通风管钥匙", "手电照明可以发现通风管口的下层抽屉钥匙。", "手电光照亮管口，一把很小的钥匙卡在那里。"),
         information("flashlight_materialized", "速写本中的手电", "撕下预先画有手电的一页会显现唯一手电。", "纸页化成了一柄可以使用的手电。", criticality="essential"),
@@ -279,14 +289,26 @@ def build_module() -> dict[str, Any]:
         entity("wall_key", "暗格钥匙", "打开上层抽屉的钥匙。", state={"found": False}, visible_when=state_is("wall_key", "found", True), portable=True),
         entity("bed_key", "床下钥匙", "打开中层抽屉的钥匙。", state={"found": False}, visible_when=state_is("bed_key", "found", True), portable=True),
         entity("vent_key", "通风管钥匙", "打开下层抽屉的钥匙。", state={"found": False}, visible_when=state_is("vent_key", "found", True), portable=True),
-        entity("top_drawer", "上层抽屉", "由暗格钥匙开启。", state={"opened": False}),
+        entity(
+            "top_drawer",
+            "上层抽屉",
+            "书桌最上方的抽屉，抽屉上着锁。",
+            state={"open": False},
+            relations=[{"kind": "contains", "target_id": "sketchbook"}],
+        ),
         entity("middle_drawer", "中层抽屉", "由床下钥匙开启。", state={"opened": False}),
         entity("bottom_drawer", "下层抽屉", "由通风管钥匙开启，是临时构建的时空箱。", state={"opened": False}),
-        entity("sketchbook", "四页速写本", "只允许显现手电、钢钳和糖粥；最后一页仅用于通信。", state={"found": False}),
-        entity("flashlight_page", "手电纸页", "预先画有手电的一页。", state={"consumed": False}, visible_when=state_is("sketchbook", "found", True)),
-        entity("cutters_page", "钢钳纸页", "只能用于固定钢钳的一页。", state={"consumed": False}, visible_when=state_is("sketchbook", "found", True)),
-        entity("porridge_page", "糖粥纸页", "只能用于固定糖粥的一页。", state={"consumed": False}, visible_when=state_is("sketchbook", "found", True)),
-        entity("communication_page", "通信纸页", "最后一页，只能替代白纸与芭斯特交流。", state={"consumed": False}, visible_when=state_is("sketchbook", "found", True)),
+        entity(
+            "sketchbook",
+            "四页速写本",
+            "一本从上层抽屉中找到的速写本，只剩四页，里面夹着一张写有“用法：撕下。请节约使用。”的纸条。四页分别用于显现手电、钢钳、桂花糯米糖粥以及通信，不能显现清单之外的物品。",
+            state={"discovered": False},
+            visible_when=state_is("sketchbook", "discovered", True),
+        ),
+        entity("flashlight_page", "手电纸页", "预先画有手电的一页，撕下后显现手电。", state={"consumed": False}, visible_when=state_is("sketchbook", "discovered", True)),
+        entity("cutters_page", "钢钳纸页", "固定用于显现钢钳的一页。", state={"consumed": False}, visible_when=state_is("sketchbook", "discovered", True)),
+        entity("porridge_page", "糖粥纸页", "固定用于显现桂花糯米糖粥的一页。", state={"consumed": False}, visible_when=state_is("sketchbook", "discovered", True)),
+        entity("communication_page", "通信纸页", "最后一页，只能替代白纸与芭斯特交流。", state={"consumed": False}, visible_when=state_is("sketchbook", "discovered", True)),
         entity("flashlight", "手电", "速写本固定显现的手电。", state={"materialized": False}, visible_when=state_is("flashlight", "materialized", True), portable=True),
         entity("bolt_cutters", "钢钳", "速写本固定显现的钢钳。", state={"materialized": False}, visible_when=state_is("bolt_cutters", "materialized", True), portable=True),
         entity("osmanthus_porridge", "桂花糯米糖粥", "速写本固定显现的一碗糖粥。", state={"materialized": False, "fed": False}, visible_when=state_is("osmanthus_porridge", "materialized", True), portable=True),
@@ -310,7 +332,7 @@ def build_module() -> dict[str, Any]:
             check_rule("search_bed", families=["search", "observe"], target_kind="entity", target_id="bed", option_id="spot-hidden", skill_id="spot-hidden", success_effects=[{"type": "change_entity_state", "entity_id": "bed_key", "key": "found", "value": True}, {"type": "reveal_information", "information_id": "bed_key_found", "scope": "party"}], failure_effects=[{"type": "reveal_information", "information_id": "bed_search_hint", "scope": "party"}]),
             check_rule("move_bed", families=["move"], target_kind="entity", target_id="bed", option_id="STR", skill_id="STR", success_effects=[{"type": "change_entity_state", "entity_id": "bed", "key": "moved", "value": True}, {"type": "change_entity_state", "entity_id": "bed_key", "key": "found", "value": True}, {"type": "reveal_information", "information_id": "bed_key_found", "scope": "party"}], failure_effects=[{"type": "reveal_information", "information_id": "bed_move_hint", "scope": "party"}]),
             effect_rule("inspect_wall_painting", families=["inspect", "search"], location_ids=["sealed_room"], target_kind="entity", target_id="wall_painting", option_id="lift-painting", hints=["掀开挂画", "检查暗格"], effects=[{"type": "change_entity_state", "entity_id": "wall_painting", "key": "inspected", "value": True}, {"type": "change_entity_state", "entity_id": "wall_key", "key": "found", "value": True}, {"type": "reveal_information", "information_id": "wall_key_found", "scope": "party"}]),
-            effect_rule("open_top_drawer", families=["unlock", "open"], location_ids=["sealed_room"], target_kind="entity", target_id="top_drawer", option_id="wall-key", hints=["暗格钥匙", "上层抽屉"], effects=[{"type": "change_entity_state", "entity_id": "top_drawer", "key": "opened", "value": True}, {"type": "change_entity_state", "entity_id": "sketchbook", "key": "found", "value": True}]),
+            effect_rule("open_top_drawer", families=["unlock", "open"], location_ids=["sealed_room"], target_kind="entity", target_id="top_drawer", option_id="wall-key", hints=["暗格钥匙", "上层抽屉"], effects=[{"type": "change_entity_state", "entity_id": "top_drawer", "key": "open", "value": True}, {"type": "change_entity_state", "entity_id": "sketchbook", "key": "discovered", "value": True}, {"type": "reveal_information", "information_id": "sketchbook_found", "scope": "party"}]),
             effect_rule("open_middle_drawer", families=["unlock", "open"], location_ids=["sealed_room"], target_kind="entity", target_id="middle_drawer", option_id="bed-key", hints=["床下钥匙", "中层抽屉"], effects=[{"type": "change_entity_state", "entity_id": "middle_drawer", "key": "opened", "value": True}, {"type": "change_entity_state", "entity_id": "white_paper", "key": "found", "value": True}, {"type": "reveal_information", "information_id": "danger_note_read", "scope": "party"}]),
             effect_rule("materialize_flashlight", families=["tear", "use"], location_ids=["sealed_room"], target_kind="entity", target_id="flashlight_page", option_id="fixed-flashlight", hints=["撕下手电纸页"], effects=[{"type": "consume_entity", "entity_id": "flashlight_page"}, {"type": "change_entity_state", "entity_id": "flashlight", "key": "materialized", "value": True}, {"type": "reveal_information", "information_id": "flashlight_materialized", "scope": "party"}]),
             effect_rule("materialize_bolt_cutters", families=["draw", "tear"], location_ids=["sealed_room"], target_kind="entity", target_id="cutters_page", option_id="fixed-cutters", hints=["画钢钳", "撕下钢钳纸页"], effects=[{"type": "consume_entity", "entity_id": "cutters_page"}, {"type": "change_entity_state", "entity_id": "bolt_cutters", "key": "materialized", "value": True}, {"type": "reveal_information", "information_id": "cutters_materialized", "scope": "party"}]),
@@ -379,7 +401,7 @@ def build_module() -> dict[str, Any]:
     return {
         "content_schema_version": 3,
         "module_id": "silver-lock",
-        "version": "3.0.0",
+        "version": "3.0.1",
         "world_ref": "coc-7e",
         "background": "当代。单名调查员在昏暗的银色房间醒来，失去近期记忆且手脚被捆。叙事保持幽闭、失忆与超现实谜题交织的基调；芭斯特身份、银之锁原理、绑架者出现条件及抽屉内容在对应线索提交前不得泄露。",
         "information": info,
@@ -449,7 +471,7 @@ def provenance(module: dict[str, Any]) -> dict[str, Any]:
         mappings["knowledge_goals"][goal["id"]] = [11, 63]
     # 细化关键来源，避免审查时只能看到过宽的整段范围。
     mappings["information"].update({
-        "restraints_removed": [11, 12, 13, 14], "wall_key_found": [17, 18, 19], "bed_key_found": [15, 16], "vent_key_found": [20, 22, 23],
+        "restraints_removed": [11, 12, 13, 14], "wall_key_found": [17, 18, 19], "sketchbook_found": [27, 28, 29, 30, 31, 32], "bed_key_found": [15, 16], "vent_key_found": [20, 22, 23],
         "flashlight_materialized": [30, 31, 32], "cutters_materialized": [33, 34, 48], "porridge_materialized": [33, 34, 49], "danger_note_read": [35, 36, 37, 38],
         "bast_contacted": [39, 40, 41, 42, 43], "bast_rescued": [45, 46, 47, 48], "bast_trusted": [49], "rat_thing_seen": [22, 24, 25],
         "door_ghost_seen": [50, 51], "captured_and_returned": [58, 60, 61], "silver_lock_broken": [55, 56, 58, 62, 63], "kidnapper_defeated": [60, 62, 63],

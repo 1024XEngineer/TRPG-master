@@ -6,11 +6,10 @@ runtime counterparts (RuleAgenda, WorldTimeState, KnowledgeResolution, EndingDra
 DomainEventV3, ActorLocationState …) belong to later items and are deliberately
 absent here.
 
-Why a new module instead of extending `contracts/module.py`: #226 freezes the
-migration as *Breaking*, with Checkpoint / `module_rules` / `event_rules` losing
-their runtime compatibility layer. v2 `ModuleContent` therefore has to survive
-untouched — not as a runtime format, but as the **migration input** every v3
-module is compiled from.
+This started as a separate module because #226 froze the migration as *Breaking*
+and v2 `ModuleContent` still had to survive as the migration input. That input is
+gone: every published module is v3, and the v1/v2 contract was deleted in #384.
+What is left here is simply the one module content contract.
 
 Domain nodes and their owners:
 
@@ -37,7 +36,45 @@ from pydantic import Field, JsonValue, model_validator
 from .adjudication import ActionEffect, CheckDegree
 from .common import ContractModel
 from .inventory import ItemComponent
-from .module import ModulePresentation
+
+# --------------------------------------------------------------------------- #
+# player-facing publication metadata
+#
+# 这两个类原本住在 v1 的 contracts/module.py 里，但它们描述的是「模组怎么呈现
+# 给玩家」，与 schema 版本无关，v3 一直在用（`ModuleContentV3.presentation`）。
+# v1 契约删除时它们必须留下，所以先搬到这里 (#384)。
+# --------------------------------------------------------------------------- #
+
+
+class ModuleStoryPage(ContractModel):
+    """A player-safe page shown before character creation."""
+
+    title: str = ""
+    content: str = Field(min_length=1)
+
+
+class ModulePresentation(ContractModel):
+    """Player-facing publication metadata, separate from keeper context."""
+
+    title: str = Field(min_length=1)
+    name_en: str | None = None
+    synopsis: str = Field(min_length=1)
+    players_min: int = Field(ge=1)
+    players_max: int = Field(ge=1)
+    difficulty: int = Field(ge=1, le=3)
+    estimated_duration: str = Field(min_length=1)
+    story_label: str | None = None
+    subtitle: str | None = None
+    authors: tuple[str, ...] = ()
+    tags: tuple[str, ...] = ()
+    player_intro_pages: tuple[ModuleStoryPage, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_player_range(self) -> ModulePresentation:
+        if self.players_min > self.players_max:
+            raise ValueError("players_min 不能大于 players_max")
+        return self
+
 
 # --------------------------------------------------------------------------- #
 # shared vocabularies

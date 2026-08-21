@@ -2258,6 +2258,9 @@ def _match_rule_candidate(capabilities, text: str, target_id: str | None):
         return None, None
     scored = []
     for candidate in capabilities.rule_candidates:
+        # 面向具体实体的规则必须先有明确目标，避免环境观察被误套到 NPC 上。
+        if target_id is None and "entity" in candidate.target_kinds:
+            continue
         if target_id is not None and candidate.target_ids and target_id not in candidate.target_ids:
             continue
         family_hits = [

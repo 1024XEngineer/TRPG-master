@@ -9,7 +9,7 @@ from pathlib import Path
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 PREVIOUS_REVISION = "1a02058345ee"
 ENGINE_IDENTITY_PREVIOUS_REVISION = "9c4e7a2b1d6f"
-HEAD_REVISION = "d9e0f1a2b3c4"
+HEAD_REVISION = "e0f1a2b3c4d5"
 
 
 def _run_alembic(database: Path, *args: str) -> subprocess.CompletedProcess[str]:

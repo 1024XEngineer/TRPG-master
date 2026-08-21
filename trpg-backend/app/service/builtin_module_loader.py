@@ -38,7 +38,6 @@ class BuiltinModuleSpec:
     source_path: Path
     display_name: str
     world_id: str | None = None
-    content_schema_version: int = 3
 
 
 PAPER_CHASE_SPEC = BuiltinModuleSpec(
@@ -53,7 +52,7 @@ PAPER_CHASE_SPEC = BuiltinModuleSpec(
 SILVER_LOCK_SPEC = BuiltinModuleSpec(
     scenario_id="00000000-0000-0000-0000-000000000005",
     module_id="silver-lock",
-    version="3.0.0",
+    version="3.0.1",
     world_ref="coc-7e",
     source_path=MODULE_FIXTURE_ROOT / "银之锁" / "module-content-v3.json",
     display_name="银之锁",
@@ -177,14 +176,13 @@ async def load_builtin_module(
                 module_id=spec.module_id,
                 version=spec.version,
                 world_ref=spec.world_ref,
-                content_schema_version=spec.content_schema_version,
+                content_schema_version=3,
                 content_json=normalized_content,
             )
             db.add(module_version)
             outcome = "inserted"
         elif (
             module_version.world_ref == spec.world_ref
-            and module_version.content_schema_version == spec.content_schema_version
             and module_version.content_json == normalized_content
         ):
             outcome = "unchanged"

@@ -38,7 +38,7 @@ from app.core.seed import (
     BUILTIN_SCENARIO_ID,
     BUILTIN_SYSTEM_ID,
 )
-from app.models.engine import ActionExecution, GameEvent, GameSession, ModuleVersion
+from app.models.engine import ActionExecution, GameEvent, GameSession
 from app.models.room import Character, Player, Room
 from app.service import room as room_service
 from tests.helpers import create_room, reconnect
@@ -569,48 +569,6 @@ async def test_suspended_room_rejects_commits_and_resume_restores_them(
     )
 
 
-async def test_pre_v3_room_is_read_only(
-    db_session: AsyncSession,
-    engine_store_factory: Callable[..., SqlAlchemyEngineStore],
-) -> None:
-    """v3 之前的房间只读：能打开查看，不能再推进。
-
-    v2 的 `action.submit` 执行链已经删除，这类房间载入得了却动不了。与其让玩家
-    在中途某一步撞见语焉不详的错误，不如在写入口明确拒绝，并在文案里说清要新建
-    房间（PR #267 review，WELT5350）。
-    """
-
-    room, players, _ = await _start_room(db_session)
-    store = engine_store_factory()
-
-    # 先在 v3 下取得一份合法的提交载荷。
-    async with store.transaction(room.id) as transaction:
-        runtime = await transaction.load_runtime()
-    request = _checkpoint_request(room_id=room.id, player_id=players[0].id)
-    new_state, events, completed = _commit_payload(request, runtime)
-
-    # 再把 ModuleVersion 标成 v2，模拟遗留测试房间。
-    game_session = await db_session.get(GameSession, room.id)
-    assert game_session is not None
-    module_version = await db_session.get(
-        ModuleVersion, (game_session.module_id, game_session.module_version)
-    )
-    assert module_version is not None
-    module_version.content_schema_version = 2
-    await db_session.commit()
-
-    # 写被明确拒绝，且文案要能指导玩家，而不是抛一个 schema 解析错误。
-    with pytest.raises(ContractError, match="ROOM_READ_ONLY"):
-        async with store.transaction(room.id) as transaction:
-            await transaction.commit(
-                expected_revision=runtime.revision,
-                new_state=new_state,
-                events=events,
-                completed_action=completed,
-            )
-    assert await _counts(db_session, room.id) == (0, 0)
-
-
 async def test_manual_end_from_suspended_syncs_room_and_game_state(
     db_session: AsyncSession,
     sql_counter: list[str],
@@ -684,13 +642,13 @@ async def test_loaded_runtime_is_deep_copy_isolated(
     async with store.transaction(room.id) as transaction:
         runtime = await transaction.load_runtime()
         runtime.game_state.entities["case_tracker"]["investigator_disappeared"] = True
-        runtime.v3.entities[0].state["invented"] = "泄漏"
+        runtime.module_content.entities[0].state["invented"] = "泄漏"
 
     async with store.transaction(room.id) as transaction:
         reloaded = await transaction.load_runtime()
 
     assert reloaded.game_state.entities["case_tracker"]["investigator_disappeared"] is False
-    assert "invented" not in reloaded.v3.entities[0].state
+    assert "invented" not in reloaded.module_content.entities[0].state
 
 
 async def test_store_rejects_stale_revision_without_partial_writes(

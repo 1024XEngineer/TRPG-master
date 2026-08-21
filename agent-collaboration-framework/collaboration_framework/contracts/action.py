@@ -12,11 +12,17 @@ from .player_view import VisibleFact
 ENGINE_AUTHORED_INTENT_CONTEXT: dict[str, str] = {"intent_source": "engine"}
 """The only validation context allowed to construct an engine-initiated Intent.
 
-`initiated_by_target` is authority-bearing: it reaches rule evaluation directly
-(`engine/expression.py`), so a player-sourced Intent that carried it would let
-untrusted model output pick which authored rules fire. Requiring this context
-makes the invariant fail closed — a call site that bypasses the Host aligner and
-validates raw model output is rejected rather than silently trusted.
+`initiated_by_target` is authority-bearing: a player-sourced Intent that carried
+it would let untrusted model output pick which authored rules fire. Requiring
+this context makes the invariant fail closed — a call site that bypasses the Host
+aligner and validates raw model output is rejected rather than silently trusted.
+
+Its only reader used to be the v2 string-expression evaluator, which exposed the
+flag as a rule variable; that evaluator was deleted with the v2 arm (#384), and
+v3 rules match through registered predicates rather than scripts (#226 §1). So
+nothing reads the flag today. The guard stays because the field is still on the
+wire: dropping it while leaving the field settable is exactly the ordering that
+turns an unread flag into an authority hole the day something starts reading it.
 
 Engine-internal construction opts in explicitly::
 

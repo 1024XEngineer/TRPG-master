@@ -249,21 +249,12 @@ class ArchitectureTests(unittest.TestCase):
         from collaboration_framework.contracts import (
             ActionRequest,
             ActionResult,
-            AllowOperationSpec,
-            CheckpointOutcomeSpec,
-            CheckpointOutcomesSpec,
-            CheckpointSpec,
-            ConditionSpec,
-            EntitySpec,
             Intent,
-            ModifyOperationSpec,
-            ModuleContent,
+            ModuleContentV3,
+            ModulePresentation,
             PlayerInput,
             PlayerView,
             ProjectionSnapshot,
-            RuleSpec,
-            SceneSpec,
-            WinConditionSpec,
         )
         from collaboration_framework.engine.models import (
             ActorState,
@@ -297,17 +288,8 @@ class ArchitectureTests(unittest.TestCase):
             EngineExecutionResult,
             EngineRuntimeSnapshot,
             CompletedAction,
-            ConditionSpec,
-            AllowOperationSpec,
-            ModifyOperationSpec,
-            RuleSpec,
-            SceneSpec,
-            EntitySpec,
-            CheckpointOutcomeSpec,
-            CheckpointOutcomesSpec,
-            CheckpointSpec,
-            WinConditionSpec,
-            ModuleContent,
+            ModulePresentation,
+            ModuleContentV3,
         )
         document = (ROOT / "docs" / "数据模型设计.md").read_text(encoding="utf-8")
         for model in models:

@@ -21,7 +21,6 @@ from collaboration_framework.contracts import (
     ContractError,
     EnterLocationEffect,
     GetAdjudicationStatusRequest,
-    ModuleContent,
     ModuleContentV3,
     NarrationEvidence,
     NarrativeOnlyEffect,
@@ -31,7 +30,6 @@ from collaboration_framework.contracts import (
     PushAdjudication,
     Repairability,
     RequiredAdjudicationCheck,
-    SceneSpec,
     SelectCheckChoice,
     SingleActionDecision,
     SkillCheckCandidate,
@@ -74,10 +72,22 @@ from collaboration_framework.host.schemas import (
 )
 
 ROOT = Path(__file__).resolve().parents[1]
-
-
-def load_model(path: str, model_type):
-    return model_type.model_validate_json((ROOT / path).read_text(encoding="utf-8"))
+V3_FIXTURE = (
+    ROOT
+    / "docs"
+    / "module-parser"
+    / "examples"
+    / "module-content-validation"
+    / "追书人"
+    / "module-content-v3.json"
+)
+# 开局地点站着的 Canon NPC，和调查员手上唯一一项技能。
+START_ENTITY = "thomas"
+SKILL = "spot-hidden"
+# 需要「先走一段路」的用例：镇上街道能通到公墓，看守在公墓里，出发时看不见。
+TRAVEL_ORIGIN = "arnoldsburg_streets"
+TRAVEL_DESTINATION = "cemetery"
+DESTINATION_NPC = "melodias"
 
 
 def player_input(
@@ -119,8 +129,8 @@ class RecordingAdjudicator:
             check = RequiredAdjudicationCheck(
                 candidates=(
                     SkillCheckCandidate(
-                        candidate_id="spot",
-                        skill_id="spot",
+                        candidate_id=SKILL,
+                        skill_id=SKILL,
                         difficulty="regular",
                         method_summary="仔细观察",
                         player_safe_reason="侧重发现细节",
@@ -146,8 +156,8 @@ class CanonTravelAdjudicator(RecordingAdjudicator):
     async def adjudicate(self, context):
         self.contexts.append(context)
         if context.step_index == 0:
-            assert context.player_view.scene.id == "study"
-            assert "cemetery" not in {
+            assert context.player_view.scene.id == TRAVEL_ORIGIN
+            assert DESTINATION_NPC not in {
                 entity.id for entity in context.player_view.scene.visible_entities
             }
             return ActionAdjudication(
@@ -155,13 +165,13 @@ class CanonTravelAdjudicator(RecordingAdjudicator):
                 source_revision="untrusted",
                 actor_id="untrusted",
                 summary="前往墓地",
-                target=ActionTarget(kind="location", id="cemetery"),
+                target=ActionTarget(kind="location", id=TRAVEL_DESTINATION),
                 method=ActionMethod(family="travel", description="沿道路前往墓地"),
                 check=NoAdjudicationCheck(),
-                success_effects=(EnterLocationEffect(location_id="cemetery"),),
+                success_effects=(EnterLocationEffect(location_id=TRAVEL_DESTINATION),),
             )
-        assert context.player_view.scene.id == "cemetery"
-        assert "butler" in {
+        assert context.player_view.scene.id == TRAVEL_DESTINATION
+        assert DESTINATION_NPC in {
             entity.id for entity in context.player_view.scene.visible_entities
         }
         return ActionAdjudication(
@@ -169,7 +179,7 @@ class CanonTravelAdjudicator(RecordingAdjudicator):
             source_revision="untrusted",
             actor_id="untrusted",
             summary="询问守墓人",
-            target=ActionTarget(kind="entity", id="butler"),
+            target=ActionTarget(kind="entity", id=DESTINATION_NPC),
             method=ActionMethod(family="dialogue", description="询问最近的异常"),
             check=NoAdjudicationCheck(),
             success_effects=(NarrativeOnlyEffect(),),
@@ -297,9 +307,9 @@ class MissingTargetAdjudicator(RecordingAdjudicator):
                 request_id="untrusted",
                 source_revision="untrusted",
                 actor_id="untrusted",
-                summary="调查书架",
-                target=ActionTarget(kind="entity", id="bookshelf"),
-                method=ActionMethod(family="action", description="调查书架"),
+                summary="查看托马斯·金博尔",
+                target=ActionTarget(kind="entity", id=START_ENTITY),
+                method=ActionMethod(family="action", description="查看托马斯·金博尔"),
                 check=NoAdjudicationCheck(),
                 success_effects=(NarrativeOnlyEffect(),),
             )
@@ -308,9 +318,9 @@ class MissingTargetAdjudicator(RecordingAdjudicator):
             request_id="untrusted",
             source_revision="untrusted",
             actor_id="untrusted",
-            summary="调查书架",
-            target=ActionTarget(kind="entity", id="missing-bookshelf"),
-            method=ActionMethod(family="action", description="调查书架"),
+            summary="查看托马斯·金博尔",
+            target=ActionTarget(kind="entity", id="missing-entity"),
+            method=ActionMethod(family="action", description="查看托马斯·金博尔"),
             check=NoAdjudicationCheck(),
             success_effects=(NarrativeOnlyEffect(),),
         )
@@ -325,8 +335,8 @@ class SemanticallyDriftingRepairAdjudicator(MissingTargetAdjudicator):
                 source_revision="untrusted",
                 actor_id="untrusted",
                 summary=context.step.semantic_goal,
-                target=ActionTarget(kind="entity", id="butler"),
-                method=ActionMethod(family="combat", description="攻击管家"),
+                target=ActionTarget(kind="entity", id=DESTINATION_NPC),
+                method=ActionMethod(family="combat", description="攻击墓地看守"),
                 check=NoAdjudicationCheck(),
                 success_effects=(NarrativeOnlyEffect(),),
             )
@@ -342,7 +352,7 @@ class VisibleTargetRepairAdjudicator(RecordingAdjudicator):
                 source_revision="untrusted",
                 actor_id="untrusted",
                 summary=context.step.semantic_goal,
-                target=ActionTarget(kind="entity", id="bookshelf"),
+                target=ActionTarget(kind="entity", id=START_ENTITY),
                 method=ActionMethod(
                     family="observe", description=context.step.semantic_goal
                 ),
@@ -431,7 +441,7 @@ class PersistentRepairAdjudicator(RecordingAdjudicator):
                 source_revision="untrusted",
                 actor_id="untrusted",
                 summary="击晕守墓人",
-                target=ActionTarget(kind="entity", id="butler"),
+                target=ActionTarget(kind="entity", id=DESTINATION_NPC),
                 method=ActionMethod(family="knock_out", description="用撬棍砸晕他"),
                 persistence_intent="character_state",
                 check=NoAdjudicationCheck(),
@@ -441,13 +451,13 @@ class PersistentRepairAdjudicator(RecordingAdjudicator):
             source_revision="untrusted",
             actor_id="untrusted",
             summary="击晕守墓人",
-            target=ActionTarget(kind="entity", id="butler"),
+            target=ActionTarget(kind="entity", id=DESTINATION_NPC),
             method=ActionMethod(family="knock_out", description="用撬棍砸晕他"),
             persistence_intent="character_state",
             check=NoAdjudicationCheck(),
             success_effects=(
                 ChangeEntityStateEffect(
-                    entity_id="butler",
+                    entity_id=DESTINATION_NPC,
                     key="consciousness",
                     value="unconscious",
                 ),
@@ -463,7 +473,7 @@ class PersistentEmptyAdjudicator(PersistentRepairAdjudicator):
             source_revision="untrusted",
             actor_id="untrusted",
             summary="击晕守墓人",
-            target=ActionTarget(kind="entity", id="butler"),
+            target=ActionTarget(kind="entity", id=DESTINATION_NPC),
             method=ActionMethod(family="knock_out", description="用撬棍砸晕他"),
             persistence_intent="character_state",
             check=NoAdjudicationCheck(),
@@ -520,28 +530,27 @@ class AliasRequiredEvidenceNarrationModel:
         }
 
 
-def runtime(*, two_scenes: bool = False):
-    module = load_model("fixtures/demo-module.json", ModuleContent)
-    if two_scenes:
-        cemetery = SceneSpec(
-            id="cemetery",
-            name="墓地",
-            content="墓碑之间站着一位守墓人。",
-            player_visible_name="墓地",
-            player_visible_description="墓碑之间站着一位守墓人。",
-            entity_ids=("butler",),
-        )
-        module = module.model_copy(
-            update={"scenes": (*module.scenes, cemetery)},
-            deep=True,
-        )
-    state = load_model("fixtures/demo-state.json", GameState)
-    actor = state.actors["pc_1"]
-    actor_state = dict(actor.state)
-    actor_state.update({"skills": {"spot": 60}, "skill_labels": {"spot": "侦查"}})
-    actors = dict(state.actors)
-    actors["pc_1"] = actor.model_copy(update={"state": actor_state}, deep=True)
-    state = state.model_copy(update={"actors": actors}, deep=True)
+def runtime(*, start: str | None = None):
+    """房间运行时。`start` 覆盖开局地点，给需要「走一段路」的用例用。"""
+
+    module = ModuleContentV3.model_validate_json(V3_FIXTURE.read_text(encoding="utf-8"))
+    state = GameState(
+        room_id="room_01",
+        scene_id=start or module.initial_state.start_location_id,
+        actors={
+            "pc_1": ActorState(
+                player_id="player_01",
+                name="陈探员",
+                source_character_id="character_v3",
+                source_character_version=1,
+                state={
+                    "skills": {SKILL: 60},
+                    "skill_labels": {SKILL: "侦查"},
+                },
+            )
+        },
+        entities={},
+    )
     engine_store = InMemoryEngineStore()
     engine_store.register_room(module_content=module, initial_state=state)
     view_projector = PlayerViewProjector(RuleEngineService(engine_store))
@@ -554,10 +563,10 @@ def orchestrator(
     adjudicator=None,
     executor=None,
     policy=None,
-    two_scenes: bool = False,
+    start: str | None = None,
     on_step_failure=None,
 ):
-    module, engine_store, projector = runtime(two_scenes=two_scenes)
+    module, engine_store, projector = runtime(start=start)
     adjudicator = adjudicator or RecordingAdjudicator(module.world_ref)
     service = executor or AdjudicationEngineService(engine_store)
     plan_store = action_plan_store or InMemoryActionPlanRunStore()
@@ -689,7 +698,7 @@ async def test_plan_too_large_rejects_before_store_or_engine_write() -> None:
 
 @pytest.mark.asyncio
 async def test_destination_step_is_adjudicated_only_after_travel_revision() -> None:
-    module, engine_store, projector = runtime(two_scenes=True)
+    module, engine_store, projector = runtime(start=TRAVEL_ORIGIN)
     adjudicator = CanonTravelAdjudicator(module.world_ref)
     service = ActionPlanOrchestrator(
         store=InMemoryActionPlanRunStore(),
@@ -712,8 +721,8 @@ async def test_destination_step_is_adjudicated_only_after_travel_revision() -> N
 
     assert result.run.status == "awaiting_narration"
     assert [context.player_view.scene.id for context in adjudicator.contexts] == [
-        "study",
-        "cemetery",
+        TRAVEL_ORIGIN,
+        TRAVEL_DESTINATION,
     ]
     assert adjudicator.contexts[1].player_view.revision == "2"
 
@@ -749,7 +758,7 @@ async def test_pending_check_stops_plan_and_resumes_same_step_after_decision() -
             source_revision=pending.view_revision,
             decision_id=pending.pending_decision.decision_id,
             decision_version=pending.pending_decision.decision_version,
-            choice=SelectCheckChoice(candidate_id="spot"),
+            choice=SelectCheckChoice(candidate_id=SKILL),
         )
     )
     assert resolved.status == "awaiting_post_roll_decision"
@@ -817,7 +826,7 @@ async def test_post_roll_cancel_accepts_current_roll_and_stops_remaining_steps(
             source_revision=pending.view_revision,
             decision_id=pending.pending_decision.decision_id,
             decision_version=pending.pending_decision.decision_version,
-            choice=SelectCheckChoice(candidate_id="spot"),
+            choice=SelectCheckChoice(candidate_id=SKILL),
         )
     )
     assert rolled.status == "awaiting_post_roll_decision"
@@ -919,7 +928,7 @@ async def test_post_roll_retry_resolves_plan_once_without_duplicate_effects() ->
             source_revision=pending.view_revision,
             decision_id=pending.pending_decision.decision_id,
             decision_version=pending.pending_decision.decision_version,
-            choice=SelectCheckChoice(candidate_id="spot"),
+            choice=SelectCheckChoice(candidate_id=SKILL),
         )
     )
     assert rolled.status == "awaiting_post_roll_decision"
@@ -986,7 +995,7 @@ async def test_failed_plan_step_leaves_a_run_that_can_still_be_loaded() -> None:
             source_revision=pending.view_revision,
             decision_id=pending.pending_decision.decision_id,
             decision_version=pending.pending_decision.decision_version,
-            choice=SelectCheckChoice(candidate_id="spot"),
+            choice=SelectCheckChoice(candidate_id=SKILL),
         )
     )
     assert rolled.status == "awaiting_post_roll_decision"
@@ -1752,15 +1761,15 @@ async def test_single_action_auto_repair_succeeds_without_creating_plan_run() ->
         repair_adjudicator=repair_adjudicator,
         policy=ActionPlanPolicy(),
     )
-    original = player_input("single-repair-parent", "检查书架")
+    original = player_input("single-repair-parent", "查看托马斯·金博尔")
     decision = single_action_decision(world_ref=module.world_ref, valid_target=False)
     decision = decision.model_copy(
         update={
             "adjudication": decision.adjudication.model_copy(
                 update={
-                    "summary": "检查书架",
-                    "target": ActionTarget(kind="entity", id="missing-bookshelf"),
-                    "method": ActionMethod(family="observe", description="检查书架"),
+                    "summary": "查看托马斯·金博尔",
+                    "target": ActionTarget(kind="entity", id="missing-entity"),
+                    "method": ActionMethod(family="observe", description="查看托马斯·金博尔"),
                 },
                 deep=True,
             )
@@ -2103,15 +2112,6 @@ async def test_progress_delivery_failure_does_not_change_authoritative_execution
     assert len(engine_store.inspect_domain_events("room_01")) == 2
 
 
-V3_FIXTURE = (
-    ROOT
-    / "docs"
-    / "module-parser"
-    / "examples"
-    / "module-content-validation"
-    / "追书人"
-    / "module-content-v3.json"
-)
 
 
 class SleepAfterTravelAdjudicator:

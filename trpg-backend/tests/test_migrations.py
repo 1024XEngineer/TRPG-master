@@ -10,7 +10,7 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 PREVIOUS_REVISION = "1a02058345ee"
 ENGINE_IDENTITY_PREVIOUS_REVISION = "9c4e7a2b1d6f"
 # 记忆与 main 分支的模组迁移通过 merge migration 汇合为当前 head。
-HEAD_REVISION = "f6a7b8c9d0e1"
+HEAD_REVISION = "a7b8c9d0e1f2"
 
 
 def _run_alembic(database: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -355,3 +355,36 @@ def test_module_identity_migration_rejects_existing_catalog_data(tmp_path: Path)
     assert "game_systems 存在历史数据" in result.stdout + result.stderr
     assert "world_ref" not in _column_names(database, "game_systems")
     assert "module_id" not in _column_names(database, "scenarios")
+
+
+def test_memory_source_time_reconciliation_repairs_stamped_database(tmp_path: Path) -> None:
+    """数据库已标记旧 head 但缺列时，新迁移仍能补列、回填数据并创建索引。"""
+    database = tmp_path / "memory-source-time-drift.db"
+    _upgrade_or_fail(database, "f6a7b8c9d0e1")
+
+    with sqlite3.connect(database) as connection:
+        connection.execute("DROP INDEX ix_memory_entries_room_source_created")
+        connection.execute("ALTER TABLE memory_entries DROP COLUMN source_created_at")
+        connection.execute(
+            """
+            INSERT INTO memory_entries (
+                id, room_id, subject_id, kind, content, epistemic_status,
+                visibility, participants, listener_ids, source_event_id,
+                source_sequence, created_at
+            ) VALUES (
+                '10000000000000000000000000000001',
+                '10000000000000000000000000000002',
+                'actor_1', 'action', '历史行动', 'asserted', 'public',
+                '[]', '[]', 'event-1', 0, '2026-08-20 12:34:56'
+            )
+            """
+        )
+
+    _upgrade_or_fail(database, "head")
+    with sqlite3.connect(database) as connection:
+        source_created_at = connection.execute(
+            "SELECT source_created_at FROM memory_entries WHERE source_event_id = 'event-1'"
+        ).fetchone()
+        indexes = {row[1] for row in connection.execute("PRAGMA index_list('memory_entries')")}
+    assert source_created_at == ("2026-08-20 12:34:56",)
+    assert "ix_memory_entries_room_source_created" in indexes

@@ -6,6 +6,7 @@
 指向内存数据库的版本，路由代码本身完全不用感知"现在跑的是测试"。
 """
 
+import asyncio
 import tempfile
 from collections.abc import AsyncGenerator, Callable, Generator
 from pathlib import Path
@@ -13,6 +14,7 @@ from pathlib import Path
 import pytest
 from collaboration_framework.engine import AdjudicationEngineService, RuleEngineService
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -50,7 +52,11 @@ _TEST_DB_PATH = Path(tempfile.mkdtemp(prefix="trpg-test-")) / "test.db"
 # 它自己 portal 线程的事件循环里，如果连接被池缓存下来、下一个用例（在别的
 # 循环里）又拿到这个绑定在旧循环上的连接，就会挂死。NullPool 让每次都开一个
 # 干净的新连接，避免跨事件循环复用。
-test_engine = create_async_engine(f"sqlite+aiosqlite:///{_TEST_DB_PATH}", poolclass=NullPool)
+test_engine = create_async_engine(
+    f"sqlite+aiosqlite:///{_TEST_DB_PATH}",
+    poolclass=NullPool,
+    connect_args={"timeout": 30},
+)
 TestSessionLocal = async_sessionmaker(test_engine, expire_on_commit=False)
 
 
@@ -114,8 +120,20 @@ async def _prepare_database() -> AsyncGenerator[None, None]:
         await load_builtin_modules(session)
         await publish_multiplayer_module(session)
     yield
-    async with test_engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
+    # TestClient WS 会在独立事件循环里留下出队/摘要任务，drop_all 偶发
+    # "database is locked"。忙等几下，避免后一个用例撞上没拆干净的表。
+    last_error: OperationalError | None = None
+    for _ in range(20):
+        try:
+            async with test_engine.begin() as conn:
+                await conn.run_sync(Base.metadata.drop_all)
+            break
+        except OperationalError as exc:
+            last_error = exc
+            await asyncio.sleep(0.05)
+    else:
+        assert last_error is not None
+        raise last_error
 
 
 @pytest.fixture

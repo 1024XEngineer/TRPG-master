@@ -326,14 +326,16 @@ _OWN_WAITING_STATUSES = {
     "awaiting_scene_consent",
 }
 _OWN_SUPERSEDE_STATUSES = {"needs_clarification", "retryable_failure"}
-_host_drain_locks: dict[str, asyncio.Lock] = {}
+_host_drain_locks: dict[tuple[int, str], asyncio.Lock] = {}
 
 
 def _host_drain_lock(room_id: str) -> asyncio.Lock:
-    lock = _host_drain_locks.get(room_id)
+    loop = asyncio.get_running_loop()
+    key = (id(loop), room_id)
+    lock = _host_drain_locks.get(key)
     if lock is None:
         lock = asyncio.Lock()
-        _host_drain_locks[room_id] = lock
+        _host_drain_locks[key] = lock
     return lock
 
 

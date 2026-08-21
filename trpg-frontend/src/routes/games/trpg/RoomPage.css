@@ -703,6 +703,17 @@
   height: 1.2rem;
 }
 
+.room-play__host-mention-button {
+  font-size: 1.05rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.room-play__host-mention-button.is-active {
+  color: #f8e8c7;
+  background: #9b6428;
+}
+
 .room-play__send-button {
   color: #f8e8c7;
   background: #9b6428;

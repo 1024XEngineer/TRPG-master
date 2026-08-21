@@ -1934,6 +1934,24 @@ export default function RoomPage() {
       })
   }
 
+  const insertHostMention = () => {
+    if (composerDisabled) return
+    setInput((current) => (
+      current.includes('@主持人')
+        ? current
+        : current.trim()
+          ? `@主持人 ${current.trim()}`
+          : '@主持人 '
+    ))
+    requestAnimationFrame(() => {
+      const field = composerInputRef.current
+      if (!field) return
+      field.focus()
+      const cursor = field.value.length
+      field.setSelectionRange(cursor, cursor)
+    })
+  }
+
   const sendMessage = (e?: FormEvent) => {
     e?.preventDefault()
     const text = input.trim()
@@ -2550,6 +2568,18 @@ export default function RoomPage() {
               className="room-play__composer-button room-play__dice-button"
             >
               <IsometricDiceIcon />
+            </button>
+          )}
+          {isActionChannel && (
+            <button
+              type="button"
+              aria-label="插入 @主持人"
+              title="@主持人"
+              onClick={insertHostMention}
+              disabled={composerDisabled}
+              className={`room-play__composer-button room-play__host-mention-button${input.includes('@主持人') ? ' is-active' : ''}`}
+            >
+              <span aria-hidden="true">@</span>
             </button>
           )}
           <textarea

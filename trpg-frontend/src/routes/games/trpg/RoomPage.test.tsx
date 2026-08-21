@@ -747,6 +747,21 @@ describe('RoomPage conversation history', () => {
     expect(mockSubmitPlannedAction).toHaveBeenCalledTimes(1)
   })
 
+  it('action channel @ button inserts a host mention', async () => {
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    const actionField = screen.getByPlaceholderText('输入消息，@主持人 触发行动')
+    fireEvent.change(actionField, { target: { value: '我搜查书桌' } })
+    fireEvent.click(screen.getByRole('button', { name: '插入 @主持人' }))
+    expect(actionField).toHaveValue('@主持人 我搜查书桌')
+    fireEvent.submit(actionField.closest('form')!)
+    await waitFor(() => expect(mockSubmitPlannedAction).toHaveBeenCalled())
+    expect(mockSubmitPlannedAction.mock.calls[0][1]).toEqual(
+      expect.objectContaining({ utterance: '我搜查书桌' }),
+    )
+  })
+
   it('deduplicates game-opening when history arrives before realtime', async () => {
     mockListConversation.mockResolvedValue([
       {

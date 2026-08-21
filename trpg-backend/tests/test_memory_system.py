@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from typing import cast
 
 import pytest
+from collaboration_framework.contracts import PlayerView
 from collaboration_framework.host.schemas import (
     ActionPlanNarrationContext,
     ConversationSummary,
@@ -17,6 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapters.sqlalchemy_memory import _listener_memories
+from app.controller.ws import _listener_ids_for_utterance
 from app.models.engine import GameEvent, GameSession, ModuleVersion
 from app.models.event import Event
 from app.models.memory import (
@@ -183,6 +185,39 @@ def test_listener_projection_skips_unproven_listener() -> None:
         payload={"utterance": "我检查了钟摆。"},
     )
     assert _listener_memories(cast(Event, event)) == ()
+
+
+def test_single_visible_npc_is_listener_for_direct_you_address() -> None:
+    """单 NPC 场景中的“我跟你说/记住”必须生成该 NPC 的亲历记忆。"""
+    view = SimpleNamespace(
+        scene=SimpleNamespace(
+            visible_entities=(
+                SimpleNamespace(
+                    id="gravedigger", kind="npc", name="守墓人", aliases=()
+                ),
+            )
+        )
+    )
+    assert _listener_ids_for_utterance(
+        "我跟你说：月影钟响三次，记住了", cast(PlayerView, view)
+    ) == (
+        "gravedigger",
+    )
+
+
+def test_ambiguous_you_address_does_not_pick_one_of_multiple_npcs() -> None:
+    """多人场景的模糊“你”不能把秘密错误归给任意 NPC。"""
+    view = SimpleNamespace(
+        scene=SimpleNamespace(
+            visible_entities=(
+                SimpleNamespace(id="thomas", kind="npc", name="托马斯", aliases=()),
+                SimpleNamespace(id="gravedigger", kind="npc", name="守墓人", aliases=()),
+            )
+        )
+    )
+    assert _listener_ids_for_utterance(
+        "我跟你说：月影钟响三次，记住了", cast(PlayerView, view)
+    ) == ()
 
 
 def test_summary_reads_broadcast_utterance() -> None:

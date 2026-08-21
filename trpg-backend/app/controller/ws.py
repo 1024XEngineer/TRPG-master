@@ -154,13 +154,39 @@ router = APIRouter()
 logger = structlog.get_logger()
 
 _DIRECT_SPEECH_MARKERS = ("告诉", "询问", "问", "提醒", "威胁", "喊", "说", "请")
+_DIRECT_ADDRESS_MARKERS = (
+    "跟你",
+    "对你",
+    "告诉你",
+    "问你",
+    "和你",
+    "你记住",
+    "记住了",
+    "记住",
+)
 
 
 def _listener_ids_for_utterance(utterance: str, player_view: PlayerView) -> tuple[str, ...]:
-    """只有明确的对话动词才把可见实体认定为听众，避免把“去找 NPC”记成对话。"""
-    if not any(marker in utterance for marker in _DIRECT_SPEECH_MARKERS):
+    """确定性识别听众：点名优先，单 NPC 的直接称呼可使用“你”指代。"""
+    if not any(marker in utterance for marker in _DIRECT_SPEECH_MARKERS) and not any(
+        marker in utterance for marker in _DIRECT_ADDRESS_MARKERS
+    ):
+        # “我跟你说/记住”没有传统的“告诉/说”动词组合，但仍是明确的当面发言。
         return ()
-    return _matching_visible_entity_ids(utterance, player_view)
+    matched = _matching_visible_entity_ids(utterance, player_view)
+    if matched:
+        return matched
+    # 只有当前场景恰好有一个可见 NPC 时，服务端才允许把“你”绑定到它；
+    # 多 NPC 场景继续保守返回空，避免把秘密错误记给旁人。
+    if any(marker in utterance for marker in _DIRECT_ADDRESS_MARKERS):
+        npcs = tuple(
+            entity.id
+            for entity in player_view.scene.visible_entities
+            if entity.kind == "npc"
+        )
+        if len(npcs) == 1:
+            return npcs
+    return ()
 
 
 _UNAUTHORIZED_CLOSE_CODE = 4401

@@ -218,6 +218,15 @@ async def _to_room_preview(db: AsyncSession, room: Room) -> RoomPreview:
     portrait_versions: dict[str, str] = {}
     for player_id, content_hash in portrait_rows.tuples().all():
         portrait_versions[player_id] = content_hash
+    character_rows = await db.execute(
+        select(Character.player_id, Character.name, Character.status).where(
+            Character.room_id == room.id
+        )
+    )
+    character_names: dict[str, str] = {}
+    for player_id, name, status in character_rows.tuples().all():
+        if status == "complete" and isinstance(name, str) and name.strip():
+            character_names[player_id] = name.strip()
     return RoomPreview(
         room_id=room.id,
         room_code=room.room_code,
@@ -234,6 +243,7 @@ async def _to_room_preview(db: AsyncSession, room: Room) -> RoomPreview:
             RoomPlayerRead(
                 player_id=p.id,
                 nickname=p.nickname,
+                character_name=character_names.get(p.id),
                 is_host=p.is_host,
                 ready=p.ready,
                 has_character=p.has_character,

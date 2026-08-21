@@ -265,8 +265,17 @@ vi.mock('@/hooks/useRoomPlayers', () => ({
     players: [
       {
         playerId: 'player-1',
-        nickname: '陈探员',
+        nickname: 'lmh1',
+        characterName: '陈探员',
         isHost: true,
+        ready: true,
+        hasCharacter: true,
+      },
+      {
+        playerId: 'player-2',
+        nickname: 'nik',
+        characterName: '赌博庄家',
+        isHost: false,
         ready: true,
         hasCharacter: true,
       },
@@ -649,7 +658,10 @@ describe('RoomPage conversation history', () => {
       },
     })
 
-    expect(await screen.findByText('的行动正在处理中')).toBeInTheDocument()
+    const banners = await screen.findAllByRole('status')
+    expect(banners[0]).toHaveTextContent('赌博庄家')
+    expect(banners[0]).not.toHaveTextContent('nik')
+    expect(banners[0]).toHaveTextContent('的行动正在处理中')
     expect(screen.getByText('我翻书桌')).toBeInTheDocument()
     expect(screen.getByPlaceholderText('输入消息…')).not.toBeDisabled()
     fireEvent.click(screen.getByRole('button', { name: '取消' }))

@@ -1462,7 +1462,11 @@ export default function RoomPage() {
   const composerDisabled = suspended
   const actionOwnerName = roomActionState?.playerId === playerId
     ? senderName
-    : roomPlayers.find((player) => player.playerId === roomActionState?.playerId)?.nickname ?? '其他调查员'
+    : displayName(
+        roomPlayers.find((player) => player.playerId === roomActionState?.playerId)?.characterName,
+        roomPlayers.find((player) => player.playerId === roomActionState?.playerId)?.nickname,
+        '其他调查员',
+      )
   const mapLocations = mapLocationsFromPlayerView(playerView)
   const sceneTransitionTargetName = pendingSceneTransition
     ? mapLocations.find((location) => location.id === pendingSceneTransition.targetSceneId)?.name
@@ -2512,8 +2516,11 @@ export default function RoomPage() {
         <div className="room-play__action-state" role="status" aria-live="polite">
           <span>等待主持：</span>
           {queuedActions.map((item) => {
-            const name = roomPlayers.find((player) => player.playerId === item.playerId)?.nickname
-              ?? '调查员'
+            const name = displayName(
+              roomPlayers.find((player) => player.playerId === item.playerId)?.characterName,
+              roomPlayers.find((player) => player.playerId === item.playerId)?.nickname,
+              '调查员',
+            )
             const isSelf = item.playerId === playerId
             return (
               <span key={item.clientActionId} className="inline-flex items-center gap-1">

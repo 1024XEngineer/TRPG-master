@@ -1307,6 +1307,7 @@ export interface RoomJoinPayload {
 export interface RoomPlayerRead {
   playerId: string;
   nickname: string;
+  characterName?: string | null;
   isHost: boolean;
   ready: boolean;
   hasCharacter: boolean;

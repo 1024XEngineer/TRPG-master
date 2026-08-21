@@ -175,6 +175,25 @@ ChatMessage = 玩家之间的讨论区消息
 不作为 NPC 知识来源
 ```
 
+PR #404 中的两个自由交流入口也必须遵守同一边界：
+
+```text
+chat.send / action.chat.send
+    玩家自由交流
+    不调用 Host
+    不占用主持行动槽
+    不进入 MemoryEntry
+    不进入 ConversationSummary
+
+明确的 Host 请求（例如 @主持人）
+    才进入 action.plan.submit 和主持行动队列
+```
+
+`action.chat.send` 不能因为显示在行动频道就复用会被记忆投影读取的
+`action.broadcast` 事件类型；如果保留行动频道广播，必须使用独立事件类型，或在
+Memory/ConversationSummary 查询中明确排除它。否则玩家的闲聊、猜测和临时计划会在
+长团中被误当成剧情记忆。
+
 ### 5.2 玩家对话事件
 
 推荐结构：
@@ -272,6 +291,10 @@ NPC 回复由 Host 生成，但服务端必须验证：
 这里没有看到守墓人。你是要和托马斯交谈，还是先前往墓地？
 ```
 
+NPC 身份必须来自 ModuleContent/Engine 的稳定实体 ID。名称、别名和自然语言只用于
+界面展示或辅助搜索，不能作为权限判断或事件主体。服务端还要明确 NPC 在死亡、隐藏、
+离场和不可交互状态下的判定结果；这些状态都必须以当前 `PlayerView` 为准。
+
 ### 6.3 多 NPC 回复
 
 一个对话步骤可以允许多个 NPC 按顺序回复，但每个说话者都必须满足：
@@ -293,6 +316,27 @@ NPC 回复由 Host 生成，但服务端必须验证：
 ```
 
 这是一次 Host 调用中生成多个结构化 NPC 消息，不是启动多个 NPC Agent。
+
+### 6.4 实现前必须固定的六项契约
+
+以下约束属于跨模块契约，不能留给某个具体 PR 临时决定：
+
+1. **NPC 身份来源**：`interlocutor_id` 使用稳定实体 ID；服务端以当前
+   `PlayerView` 验证存在、可见、可交互和状态有效。
+2. **事件权限**：事件保留服务端确认的 `speaker_id`、`listener_ids` 和
+   `participant_ids`。广播、回放和记忆投影都按这些字段与 `visibility` 过滤，不能只靠
+   一段自由文本推断谁听到了。
+3. **幂等与顺序**：固定 `dialogue_id`、`source_action_id`、`step_id` 和
+   `source_revision` 的关系；重试不得重复广播、写 Memory 或推进 ActionPlan。
+4. **Host 输出失败**：场景外 speaker、无效 listener、越权记忆、超出消息预算或非法
+   引用必须进入拒绝、澄清或重试路径之一，服务端不能猜测修正后继续。
+5. **摘要信任边界**：`viewer-scoped Summary` 只能由该 viewer 有权读取的
+   canonical `MemoryEntry` 重建，不能先生成全知共享自由文本再做字符串裁剪。
+6. **ActionPlan 恢复**：明确 dialogue step 或等价中间阶段的持久化状态，并覆盖断线、
+   lease 过期、取消、部分完成和重复恢复。NPC 回复落库前不得执行依赖它的后续行动。
+
+这些约束应在契约测试和恢复测试中先固定，再接入真实 Host；它们不是模型提示词可以
+替代的规则。
 
 ---
 
@@ -762,39 +806,45 @@ max_chars
 
 ## 16. 推荐交付拆分
 
-不扩大已合并的 PR #393。基于最新 `main` 从 Issue #402 新开 PR，建议拆成以下几个可审查提交或子 PR：
+不扩大已合并的 PR #393。基于最新 `main` 从 Issue #402 开发，但不把契约、运行时、
+记忆和 UI 拆成七个互相等待的 Issue。推荐三个可独立验收、可回滚的垂直阶段：
 
-### PR 1：结构化 NPC 对话契约
+### 阶段 A：NPC 对话契约与事件链路
 
-- `interlocutor_id`；
-- `dialogue.player` / `dialogue.npc`；
-- NPC 可见性验证；
-- 公开和私密权限；
-- 回放兼容；
-- 契约测试。
+- `interlocutor_id` 及稳定 NPC ID；
+- `dialogue.player` / `dialogue.npc` / `narration.keeper` 契约；
+- 当前 `PlayerView` 的可见性与可交互校验；
+- `speaker_id`、`listener_ids`、`participant_ids`、`visibility`；
+- `dialogue_id`、`source_action_id`、`step_id`、`source_revision` 幂等关系；
+- WebSocket、SDK、回放和基础权限测试。
 
-### PR 2：对话中间结果和分步执行
+验收：合法公开/私密对话可以落库、广播和回放；场景外、隐藏或无权 NPC 不能回复；
+旧客户端遇到未知事件仍能安全降级。
 
-- dialogue step 中间回复；
-- 回复落库后再推进后续行动；
-- 重连、幂等、失败恢复；
-- 多 NPC 有序回复。
+### 阶段 B：Host 对话执行与 ActionPlan 恢复
 
-### PR 3：NPC 长期记忆和摘要
+- Host 的结构化 NPC 输出和 speaker/listener 白名单校验；
+- 一个对话步骤中多个 NPC 的有序回复和消息预算；
+- “玩家发言落库 → NPC 回复落库 → 再执行后续 ActionPlan → Engine 裁决 → 守秘人叙事”；
+- 对话中间态、断线、取消、lease 过期、模型失败和重复恢复；
+- 非法模型输出进入拒绝、澄清或重试，不猜测修复。
 
-- NPC MemoryEntry 作用域；
-- NPC 近期对话；
-- viewer-scoped NPC Summary；
-- 长团和隐私测试。
+验收：`@NPC 提问 → NPC 回复 → 后续行动 → 守秘人叙事` 不乱序、不重复，NPC 文本不
+直接修改 Engine 状态。
 
-### PR 4：历史按需召回与前端展示
+### 阶段 C：NPC 记忆、摘要、历史召回与展示
 
-- 原始对话查询；
-- 地点/行动/线索回顾；
-- 前端角色消息展示；
-- 回放和重连完整验收。
+- NPC canonical `MemoryEntry`、近期对话和 viewer-scoped Summary；
+- 只从 viewer 有权限的 canonical entries 重建摘要；
+- 原始 `dialogue.player` Event 的按需精确查询；
+- 前端区分玩家、NPC、守秘人消息，兼容回放和重连；
+- 长团、多玩家隐私、记忆污染和真实 Host 测试。
 
-如果实际改动量较小，可以合并 PR 1 和 PR 2；但不建议把全部内容一次性塞进一个 PR。
+验收：NPC 能回忆自己听到的旧对话，但不能读取其他 NPC 或玩家的私密记忆；
+`chat.send` / `action.chat.send` 不进入 Host、Memory 或 Summary。
+
+每个阶段可以包含多个提交，但不再为每个 DTO、查询或 UI 细节单独开 Issue。只有当某个
+阶段实际规模过大、需要独立发布或存在不同负责人时，才再拆出子 Issue。
 
 ---
 

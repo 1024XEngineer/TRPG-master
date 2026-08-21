@@ -43,6 +43,7 @@ from collaboration_framework.contracts.validation import (
 )
 from collaboration_framework.registry import effects as effect_registry
 
+from .agenda_execution import RuleSettlement
 from .dice import DiceRoller, coc7_success_level, passes_difficulty
 from .models import (
     AgendaSource,
@@ -62,14 +63,10 @@ from .persistent_results import (
 from .ports import EngineStore
 from .projection_v3 import project_v3
 from .rules_v3 import (
-    agenda_failure_code_for_walk,
-    agenda_item_for_event,
-    agenda_status_for_walk,
     agent_match_scope_admits,
     create_rule_agenda,
     effects_after_degree,
     entity_state,
-    matching_event_rules,
     pending_check_for,
     resolve_rule_option,
     walk_rule,
@@ -78,29 +75,72 @@ from .timeline import advanced_to_next, next_point_after, time_advance_block_rea
 
 logger = logging.getLogger(__name__)
 
-# 一个 Agenda 到了这两个状态就再没有推进的余地，也没有任何读者。
-_SETTLED_AGENDA_STATUSES = frozenset({"stable", "failed"})
 
-# 引擎自己发的审计信号，永远不是规则的输入（#226 §4）。
-_AUDIT_EVENT_TYPES = frozenset({"rule.triggered", "rule.agenda_failed"})
+class _SettlementRunner:
+    """Hands `RuleSettlement` the three Engine capabilities it needs.
 
-
-def _without_settled_agendas(state: GameState) -> GameState:
-    """丢弃已经终态的 RuleAgenda，只留在途游标。
-
-    存量房间的 `game_state` 里已经积了历史死数据（#398 之前无条件落库且全仓库
-    没有删除路径），所以这里同时承担清理职责：任何一次会走到事件规则结算的动作
-    都会顺手把它们扫掉，不需要单独的数据迁移。
+    The settler owns *when* a rule's effects run; the service still owns *how*.
+    Binding room/request/actor once here keeps the settler's call sites free of
+    arguments that never vary within one action.
     """
 
-    live = {
-        agenda_id: agenda
-        for agenda_id, agenda in state.rule_agendas.items()
-        if agenda.status not in _SETTLED_AGENDA_STATUSES
-    }
-    if len(live) == len(state.rule_agendas):
-        return state
-    return state.model_copy(update={"rule_agendas": live}, deep=True)
+    def __init__(
+        self,
+        service: AdjudicationEngineService,
+        runtime: EngineRuntimeSnapshot,
+        request_id: str,
+        actor_id: str,
+    ) -> None:
+        self._service = service
+        self._room_id = runtime.game_state.room_id
+        self._request_id = request_id
+        self._actor_id = actor_id
+
+    def validate_effects(
+        self,
+        runtime: EngineRuntimeSnapshot,
+        effects: tuple[ActionEffect, ...],
+    ) -> None:
+        self._service._validate_effect_sequence(runtime, effects)
+
+    def apply_effect(
+        self,
+        runtime: EngineRuntimeSnapshot,
+        state: GameState,
+        effect: ActionEffect,
+        *,
+        offset: int,
+    ) -> tuple[GameState, tuple[DomainEvent, ...]]:
+        return self._service._apply_effect(
+            runtime,
+            state,
+            effect,
+            room_id=self._room_id,
+            request_id=self._request_id,
+            actor_id=self._actor_id,
+            offset=offset,
+        )
+
+    def emit_event(
+        self,
+        state: GameState,
+        *,
+        offset: int,
+        event_type: str,
+        payload: dict,
+        visibility: str = "public",
+    ) -> DomainEvent:
+        return self._service._event_from_state(
+            state,
+            room_id=self._room_id,
+            offset=offset,
+            request_id=self._request_id,
+            actor_id=self._actor_id,
+            event_type=event_type,
+            payload=payload,
+            visibility=visibility,
+        )
+
 
 # The engine logic `registry/effects.py` needs but may not import: it is a leaf
 # so that `module` can read the same tables at publish time (#347, and
@@ -1715,223 +1755,33 @@ class AdjudicationEngineService:
         and therefore committed atomically by ``commit_adjudication``.
         """
 
-        agenda = create_rule_agenda(
-            agenda_id=self._new_id("agenda"),
-            room_id=runtime.game_state.room_id,
-            module=runtime.module_content,
-            correlation_id=request_id,
-            root_source=AgendaSource(kind="action", id=request_id),
-            revision=str(runtime.game_state.event_sequence),
+        settlement = self._new_settlement(
+            runtime, request_id=request_id, actor_id=actor_id
         )
-        queue = []
-        source_event_ids: list[str] = []
-        fired: set[tuple[str, str]] = set()
-        cursor = 0
-        suspended = False
+        result = settlement.advance(state, events)
+        state, failure_code = settlement.finish(result.state, events)
+        return state, events, failure_code
 
-        while cursor < len(events) and not suspended:
-            source_event = events[cursor]
-            cursor += 1
-            # Workflow/audit signals are never gameplay Rule inputs (#226 §4).
-            if source_event.type in _AUDIT_EVENT_TYPES:
-                continue
-            rules = matching_event_rules(
-                runtime.module_content,
-                event_type=source_event.type,
-                state=state,
-                actor_id=actor_id,
-            )
-            pending_rules = []
-            for rule in rules:
-                fire_key = (rule.id, source_event.event_id)
-                if fire_key in fired:
-                    continue
-                fired.add(fire_key)
-                pending_rules.append(rule)
-                queue.append(agenda_item_for_event(rule, source_event))
-            if pending_rules:
-                source_event_ids.append(source_event.event_id)
-
-            for rule in pending_rules:
-                item_index = next(
-                    index
-                    for index, item in enumerate(queue)
-                    if item.source_event_id == source_event.event_id
-                    and item.rule_id == rule.id
-                    and item.status == "queued"
-                )
-                queue[item_index] = queue[item_index].model_copy(
-                    update={"status": "running"}
-                )
-                next_depth = agenda.chain_depth + 1
-                max_chain_depth = min(
-                    agenda.max_chain_depth, rule.limits.max_chain_depth
-                )
-                max_steps = min(agenda.max_steps, rule.limits.max_steps)
-                agenda = agenda.model_copy(
-                    update={
-                        "chain_depth": next_depth,
-                        "max_chain_depth": max_chain_depth,
-                        "max_steps": max_steps,
-                    }
-                )
-                if next_depth > max_chain_depth:
-                    queue[item_index] = queue[item_index].model_copy(
-                        update={"status": "failed"}
-                    )
-                    agenda = agenda.model_copy(
-                        update={
-                            "status": "failed",
-                            "failure_code": "agenda_budget_exceeded",
-                            "current_rule_id": rule.id,
-                            "current_branch_id": queue[item_index].branch_id,
-                        }
-                    )
-                    suspended = True
-                    break
-
-                walk = walk_rule(rule, branch_id=queue[item_index].branch_id)
-                next_step_count = agenda.step_count + walk.step_count
-                if next_step_count > max_steps:
-                    queue[item_index] = queue[item_index].model_copy(
-                        update={"status": "failed"}
-                    )
-                    agenda = agenda.model_copy(
-                        update={
-                            "status": "failed",
-                            "failure_code": "agenda_budget_exceeded",
-                            "current_rule_id": rule.id,
-                            "current_branch_id": queue[item_index].branch_id,
-                            "current_step_id": walk.suspended_at
-                            or next(
-                                branch.entry_step_id
-                                for branch in rule.execution.branches
-                                if branch.id == queue[item_index].branch_id
-                            ),
-                            "step_count": next_step_count,
-                        }
-                    )
-                    suspended = True
-                    break
-                agenda = agenda.model_copy(update={"step_count": next_step_count})
-
-                events.append(
-                    self._event_from_state(
-                        state,
-                        room_id=runtime.game_state.room_id,
-                        offset=len(events) + 1,
-                        request_id=request_id,
-                        actor_id=actor_id,
-                        event_type="rule.triggered",
-                        payload={
-                            "rule_id": rule.id,
-                            "source_event_id": source_event.event_id,
-                            "agenda_id": agenda.agenda_id,
-                        },
-                        visibility="hidden",
-                    )
-                )
-                rule_runtime = runtime.model_copy(
-                    update={"game_state": state}, deep=True
-                )
-                self._validate_effect_sequence(rule_runtime, tuple(walk.effects))
-                for effect in walk.effects:
-                    state, emitted = self._apply_effect(
-                        runtime,
-                        state,
-                        effect,
-                        room_id=runtime.game_state.room_id,
-                        request_id=request_id,
-                        actor_id=actor_id,
-                        offset=len(events) + 1,
-                    )
-                    events.extend(emitted)
-
-                status = agenda_status_for_walk(rule, walk)
-                if status == "stable":
-                    queue[item_index] = queue[item_index].model_copy(
-                        update={"status": "completed"}
-                    )
-                    continue
-                queue[item_index] = queue[item_index].model_copy(
-                    update={"status": "failed" if status == "failed" else "running"}
-                )
-                agenda = agenda.model_copy(
-                    update={
-                        "status": status,
-                        # 失败原因来自 walk 本身（循环 / 步数 / 未知步）或它停在的
-                        # step kind（四种无执行器 kind）。此前这里一律写
-                        # `agenda_budget_exceeded`，把「模组要求引擎做不到的事」
-                        # 和「规则链跑飞了」混成同一个码。
-                        "failure_code": (
-                            agenda_failure_code_for_walk(walk)
-                            if status == "failed"
-                            else None
-                        ),
-                        "current_rule_id": rule.id,
-                        "current_branch_id": queue[item_index].branch_id,
-                        "current_step_id": walk.suspended_at,
-                    }
-                )
-                suspended = True
-                break
-
-        if not queue:
-            return _without_settled_agendas(state), events, None
-        if not suspended:
-            agenda = agenda.model_copy(
-                update={
-                    "status": "stable",
-                    "current_rule_id": None,
-                    "current_branch_id": None,
-                    "current_step_id": None,
-                }
-            )
-        if agenda.status == "failed":
-            # 失败必须留下痕迹。在 #398 之前，Agenda 落到 failed 只是改一个字段，
-            # 不发任何事件，execution 照常返回 resolved——运维手上没有任何信号可查。
-            events.append(
-                self._event_from_state(
-                    state,
-                    room_id=runtime.game_state.room_id,
-                    offset=len(events) + 1,
-                    request_id=request_id,
-                    actor_id=actor_id,
-                    event_type="rule.agenda_failed",
-                    payload={
-                        "agenda_id": agenda.agenda_id,
-                        "failure_code": agenda.failure_code,
-                        "rule_id": agenda.current_rule_id,
-                        "branch_id": agenda.current_branch_id,
-                        "step_id": agenda.current_step_id,
-                        "source_event_ids": list(source_event_ids),
-                    },
-                    visibility="hidden",
-                )
-            )
-        final_revision = str(runtime.game_state.event_sequence + len(events))
-        agenda = agenda.model_copy(
-            update={
-                "source_event_ids": tuple(source_event_ids),
-                "queue": tuple(queue),
-                "revision": final_revision,
-            },
-            deep=True,
+    def _new_settlement(
+        self,
+        runtime: EngineRuntimeSnapshot,
+        *,
+        request_id: str,
+        actor_id: str,
+    ) -> RuleSettlement:
+        return RuleSettlement(
+            agenda=create_rule_agenda(
+                agenda_id=self._new_id("agenda"),
+                room_id=runtime.game_state.room_id,
+                module=runtime.module_content,
+                correlation_id=request_id,
+                root_source=AgendaSource(kind="action", id=request_id),
+                revision=str(runtime.game_state.event_sequence),
+            ),
+            runtime=runtime,
+            actor_id=actor_id,
+            runner=_SettlementRunner(self, runtime, request_id, actor_id),
         )
-        agendas = {
-            agenda_id: item
-            for agenda_id, item in state.rule_agendas.items()
-            if item.status not in _SETTLED_AGENDA_STATUSES
-        }
-        if agenda.status not in _SETTLED_AGENDA_STATUSES:
-            # 只有在途 Agenda 才落库。跑完即 stable 的 Agenda 零读者：幂等由命令
-            # 日志 `find_adjudication_command` 承担，审计由 `rule.triggered` 事件
-            # payload 里的 `agenda_id` 承担，Agenda 本身只是游标。此前它无条件
-            # 落库、且全仓库没有任何删除路径，于是每个触发规则的动作都往一份
-            # 每回合要全量 deepcopy 的 state 里永久追加一条死数据（#398 §阶段一）。
-            agendas[agenda.agenda_id] = agenda
-        state = state.model_copy(update={"rule_agendas": agendas}, deep=True)
-        return state, events, agenda.failure_code
 
     def _apply_effect(
         self,

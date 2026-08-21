@@ -131,7 +131,7 @@ function checkResultContent(payload: CheckResultPayload): string {
   return `${payload.skillName} ${payload.targetValue}% · D100 ${payload.rollValue}${resolutionLabel}`
 }
 
-function hostUtteranceFromDiscussion(text: string): string | null {
+function hostUtteranceFromActionInput(text: string): string | null {
   if (!text.includes('@主持人')) return null
   const rest = text.split('@主持人').join(' ').replace(/\s+/g, ' ').trim()
   return rest.length > 0 ? rest : null
@@ -1932,15 +1932,15 @@ export default function RoomPage() {
     cancelSpeechInput()
     setInput('')
     if (channel === 'discussion') {
-      const hostUtterance = hostUtteranceFromDiscussion(text)
-      if (hostUtterance) {
-        submitPlayerAction({ clientActionId: randomActionId(), utterance: hostUtterance })
-      } else {
-        sdk.roomSocket.sendChat(playerId, { text, clientMessageId: randomActionId() })
-      }
-    } else {
-      submitPlayerAction({ clientActionId: randomActionId(), utterance: text })
+      sdk.roomSocket.sendChat(playerId, { text, clientMessageId: randomActionId() })
+      return
     }
+    const hostUtterance = hostUtteranceFromActionInput(text)
+    if (hostUtterance) {
+      submitPlayerAction({ clientActionId: randomActionId(), utterance: hostUtterance })
+      return
+    }
+    sdk.roomSocket.sendChat(playerId, { text, clientMessageId: randomActionId() })
   }
 
   useEffect(() => {
@@ -2555,8 +2555,8 @@ export default function RoomPage() {
                 : isActionChannel && actionSubmissionBlocked
                   ? '请先完成当前检定或确认'
                   : isActionChannel
-                    ? '输入行动…'
-                    : '输入讨论，或 @主持人 提交行动'
+                    ? '输入 @主持人 触发行动'
+                    : '输入行动…'
             }
             className="room-play__input"
           />

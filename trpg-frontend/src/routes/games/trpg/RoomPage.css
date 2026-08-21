@@ -758,6 +758,9 @@
 
 .room-play__input::placeholder {
   color: #a68b65;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .room-play__input:focus {

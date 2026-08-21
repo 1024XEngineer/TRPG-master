@@ -651,7 +651,7 @@ describe('RoomPage conversation history', () => {
 
     expect(await screen.findByText('的行动正在处理中')).toBeInTheDocument()
     expect(screen.getByText('我翻书桌')).toBeInTheDocument()
-    expect(screen.getByPlaceholderText('输入消息，@主持人 触发行动')).not.toBeDisabled()
+    expect(screen.getByPlaceholderText('输入消息…')).not.toBeDisabled()
     fireEvent.click(screen.getByRole('button', { name: '取消' }))
     expect(mockCancelActionPlan).toHaveBeenCalledWith('player-1', expect.objectContaining({
       clientActionId: 'action-queued',
@@ -703,7 +703,7 @@ describe('RoomPage conversation history', () => {
       },
     })
     expect(await screen.findByText('的行动正在等待你操作')).toBeInTheDocument()
-    expect(screen.getByPlaceholderText('输入消息，@主持人 触发行动')).not.toBeDisabled()
+    expect(screen.getByPlaceholderText('输入消息…')).not.toBeDisabled()
 
     emitWsMessage({
       type: 'room.action.state',
@@ -719,7 +719,7 @@ describe('RoomPage conversation history', () => {
     renderRoomPage()
     await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
 
-    const actionField = screen.getByPlaceholderText('输入消息，@主持人 触发行动')
+    const actionField = screen.getByPlaceholderText('输入消息…')
     fireEvent.change(actionField, { target: { value: '我先看看四周' } })
     fireEvent.submit(actionField.closest('form')!)
     await waitFor(() => expect(mockSendActionChat).toHaveBeenCalledWith(
@@ -751,7 +751,7 @@ describe('RoomPage conversation history', () => {
     renderRoomPage()
     await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
 
-    const actionField = screen.getByPlaceholderText('输入消息，@主持人 触发行动')
+    const actionField = screen.getByPlaceholderText('输入消息…')
     fireEvent.change(actionField, { target: { value: '我搜查书桌' } })
     fireEvent.click(screen.getByRole('button', { name: '插入 @主持人' }))
     expect(actionField).toHaveValue('@主持人 我搜查书桌')
@@ -921,7 +921,7 @@ describe('RoomPage conversation history', () => {
       renderRoomPage()
       await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
 
-      const field = screen.getByPlaceholderText('输入消息，@主持人 触发行动')
+      const field = screen.getByPlaceholderText('输入消息…')
       fireEvent.change(field, { target: { value: '@主持人 我查看书架' } })
       fireEvent.submit(field.closest('form')!)
 
@@ -952,7 +952,7 @@ describe('RoomPage conversation history', () => {
       renderRoomPage()
       await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
 
-      const actionField = () => screen.getByPlaceholderText('输入消息，@主持人 触发行动')
+      const actionField = () => screen.getByPlaceholderText('输入消息…')
       const discussionField = () => screen.getByPlaceholderText('输入行动…')
       fireEvent.change(actionField(), { target: { value: '@主持人 这是行动区的草稿' } })
 
@@ -1964,7 +1964,7 @@ describe('RoomPage conversation history', () => {
     })
     renderRoomPage()
 
-    const input = screen.getByPlaceholderText('输入消息，@主持人 触发行动')
+    const input = screen.getByPlaceholderText('输入消息…')
     fireEvent.change(input, { target: { value: '@主持人 我调查书架' } })
     fireEvent.submit(input.closest('form')!)
     await waitFor(() => expect(mockSubmitPlannedAction).toHaveBeenCalledTimes(1))
@@ -2011,7 +2011,7 @@ describe('RoomPage conversation history', () => {
   it('shows a disabled microphone with a clear message when speech input is unavailable', () => {
     renderRoomPage()
 
-    expect(screen.getByPlaceholderText('输入消息，@主持人 触发行动').tagName).toBe('TEXTAREA')
+    expect(screen.getByPlaceholderText('输入消息…').tagName).toBe('TEXTAREA')
     expect(screen.getByRole('button', { name: '语音输入不可用' })).toBeDisabled()
     expect(screen.getByText('当前浏览器不支持语音输入，请继续使用键盘输入')).toBeInTheDocument()
   })
@@ -2020,7 +2020,7 @@ describe('RoomPage conversation history', () => {
     installRoomSpeechRecognition()
     renderRoomPage()
 
-    const input = screen.getByPlaceholderText('输入消息，@主持人 触发行动')
+    const input = screen.getByPlaceholderText('输入消息…')
     fireEvent.change(input, { target: { value: '我先观察' } })
     fireEvent.click(screen.getByRole('button', { name: '开始语音输入' }))
     const actionRecognition = RoomSpeechRecognition.instances[0]
@@ -2095,7 +2095,7 @@ describe('RoomPage conversation history', () => {
     )
     renderRoomPage()
 
-    const input = screen.getByPlaceholderText('输入消息，@主持人 触发行动')
+    const input = screen.getByPlaceholderText('输入消息…')
     fireEvent.change(input, { target: { value: '@主持人 我要撬开抽屉' } })
     fireEvent.submit(input.closest('form')!)
     await waitFor(() => expect(mockSubmitPlannedAction).toHaveBeenCalled())
@@ -2444,7 +2444,7 @@ describe('RoomPage conversation history', () => {
   it('submits the room input through ActionPlan and clears stale decisions', async () => {
     renderRoomPage()
 
-    const input = screen.getByPlaceholderText('输入消息，@主持人 触发行动')
+    const input = screen.getByPlaceholderText('输入消息…')
     fireEvent.change(input, { target: { value: '@主持人 去书房找线索' } })
     fireEvent.submit(input.closest('form')!)
     await waitFor(() =>

@@ -2598,7 +2598,7 @@ export default function RoomPage() {
               suspended
                 ? '游戏已挂起'
                 : isActionChannel
-                    ? '输入消息，@主持人 触发行动'
+                    ? '输入消息…'
                     : '输入行动…'
             }
             className="room-play__input"

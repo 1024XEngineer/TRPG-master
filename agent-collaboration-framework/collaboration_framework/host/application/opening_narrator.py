@@ -11,7 +11,11 @@ from collaboration_framework.host.schemas import (
     OpeningNarrationContext,
 )
 
-from .narration_policy import narration_text_rejection_reason, normalize_narration_text
+from .narration_policy import (
+    narration_subject_rejection_reason,
+    narration_text_rejection_reason,
+    normalize_narration_text,
+)
 
 OpeningRejectionReason = Literal[
     "outer_schema",
@@ -19,6 +23,7 @@ OpeningRejectionReason = Literal[
     "participant_coverage",
     "protocol_tail",
     "schema_fragment",
+    "subject_ownership",
 ]
 
 
@@ -55,6 +60,12 @@ class OpeningNarrator:
         rejection_reason = narration_text_rejection_reason(output.text)
         if rejection_reason is not None:
             raise OpeningNarrationValidationError(rejection_reason)
+        subject_rejection = narration_subject_rejection_reason(
+            output.text,
+            addressing_mode=getattr(context, "addressing_mode", "second_person"),
+        )
+        if subject_rejection is not None:
+            raise OpeningNarrationValidationError("subject_ownership")
         if any(
             participant.name not in output.text for participant in context.participants
         ):

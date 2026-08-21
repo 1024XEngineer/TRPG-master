@@ -79,7 +79,10 @@ class ActionPlanNarrator:
         rejection = narration_text_rejection_reason(output.text)
         if rejection is not None:
             raise ActionPlanNarrationValidationError(rejection)
-        subject_rejection = narration_subject_rejection_reason(output.text)
+        subject_rejection = narration_subject_rejection_reason(
+            output.text,
+            addressing_mode=getattr(context, "addressing_mode", "second_person"),
+        )
         if subject_rejection is not None:
             raise ActionPlanNarrationValidationError(subject_rejection)
         committed_results = tuple(

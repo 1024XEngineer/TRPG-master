@@ -145,6 +145,15 @@
       "default": "",
       "title": "Solo Background Summary",
       "type": "string"
+    },
+    "addressing_mode": {
+      "default": "second_person",
+      "enum": [
+        "second_person",
+        "named_actor"
+      ],
+      "title": "Addressing Mode",
+      "type": "string"
     }
   },
   "required": [

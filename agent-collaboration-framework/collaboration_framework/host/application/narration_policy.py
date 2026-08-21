@@ -96,6 +96,7 @@ _QUOTED_SPAN_DELIMITERS = {
     "《": "》",
 }
 _FIRST_PERSON_RE = re.compile(r"[我咱]")
+_SECOND_PERSON_RE = re.compile(r"您(?!们)|你(?!们)")
 
 
 def normalize_narration_text(text: str) -> str:
@@ -185,8 +186,14 @@ def narration_text_rejection_reason(
 
 def narration_subject_rejection_reason(
     text: str,
+    *,
+    addressing_mode: Literal["second_person", "named_actor"] = "second_person",
 ) -> Literal["subject_ownership"] | None:
-    """Reject first-person ownership in prose while preserving quoted speech."""
+    """Reject first-person ownership in prose while preserving quoted speech.
+
+    In named_actor mode, also reject unquoted second-person references to the
+    acting character. Quoted dialogue may still contain 你/您.
+    """
 
     quoted = [False] * len(text)
     for opening, closing in _QUOTED_SPAN_DELIMITERS.items():
@@ -209,5 +216,7 @@ def narration_subject_rejection_reason(
 
     prose = "".join(character for index, character in enumerate(text) if not quoted[index])
     if _FIRST_PERSON_RE.search(prose):
+        return "subject_ownership"
+    if addressing_mode == "named_actor" and _SECOND_PERSON_RE.search(prose):
         return "subject_ownership"
     return None

@@ -583,12 +583,6 @@ def _step_targets(step: RuleStepSpec) -> tuple[str, ...]:
     return (step.next_step_id,)
 
 
-class RulePresentationSpec(ContractModel):
-    id: Identifier
-    player_safe_summary: str = Field(default="", max_length=500)
-    narration_constraints: tuple[str, ...] = ()
-
-
 class RuleLimitsSpec(ContractModel):
     max_chain_depth: int = Field(default=16, ge=1, le=64)
     max_steps: int = Field(default=128, ge=1, le=1024)
@@ -606,7 +600,10 @@ class RuleSpecV3(ContractModel):
     priority: int = Field(default=0, ge=-1000, le=1000)
     trigger: RuleTriggerSpec
     execution: RuleExecutionSpec
-    presentation: RulePresentationSpec | None = None
+    # `presentation: RulePresentationSpec | None` 曾在这里。它从未有过任何读者，
+    # #288 已结案为删除（#398 §范围「顺带清理」执行）。`PresentationStep` 本身
+    # 保留但依旧不接通，所以它的 `presentation_id` 现在没有可解析的目标——两个
+    # 已发布模组都没有声明过 presentation 或 presentation step。
     limits: RuleLimitsSpec = Field(default_factory=RuleLimitsSpec)
 
     @model_validator(mode="after")
@@ -840,7 +837,6 @@ __all__ = [
     "RuleCheckSpec",
     "RuleExecutionSpec",
     "RuleLimitsSpec",
-    "RulePresentationSpec",
     "RuleSpecV3",
     "RuleStepSpec",
     "RuleTriggerSpec",

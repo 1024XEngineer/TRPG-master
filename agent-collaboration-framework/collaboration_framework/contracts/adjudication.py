@@ -459,10 +459,18 @@ class AdjudicationExecution(ContractModel):
         "awaiting_time_consent",
         "awaiting_scene_consent",
         "resolved",
+        # 动作本身的效果已提交，但它触发的规则链停在引擎无法推进的地方。
+        # 与 resolved 一样是终态，区别只在于「规则链没跑完」这件事必须说出来：
+        # 在 #398 之前这种情况静默返回 resolved，Agenda 挂在 running 上无人过问。
+        "rule_failed",
         "cancelled",
     ]
     view_revision: str = Field(min_length=1)
+    # 动作自身的成败。规则链失败不改写它——玩家撬开的门确实开了，
+    # 哪怕门后那条规则没能跑完。两件事分别由 outcome 与 status 承担。
     outcome: Literal["success", "failure", "cancelled", "pending"]
+    # 仅 rule_failed 时非空：来自 registry/rule_steps.py 与 rules_v3.py 的稳定码。
+    rule_failure_code: str | None = Field(default=None, min_length=1)
     pending_decision: PendingCheckDecisionView | None = None
     check_run: CheckRunView | None = None
     # 只保存提案标识；完整的玩家列表、目标时间和过期时间由服务端
@@ -491,6 +499,10 @@ class AdjudicationExecution(ContractModel):
             and self.scene_transition_proposal_id is None
         ):
             raise ValueError("awaiting_scene_consent 必须包含场景提案标识")
+        if self.status == "rule_failed" and self.rule_failure_code is None:
+            raise ValueError("rule_failed 必须包含 rule_failure_code")
+        if self.status != "rule_failed" and self.rule_failure_code is not None:
+            raise ValueError("只有 rule_failed 可以携带 rule_failure_code")
         if not set(self.public_event_refs).issubset(self.event_refs):
             raise ValueError("public_event_refs 必须是 event_refs 的子集")
         evidence_refs = tuple(item.ref for item in self.narration_evidence)
@@ -499,6 +511,19 @@ class AdjudicationExecution(ContractModel):
         if not set(evidence_refs).issubset(self.public_event_refs):
             raise ValueError("narration_evidence 必须引用 public_event_refs")
         return self
+
+
+# 动作的效果已经提交、不再等待任何人。`rule_failed` 与 `resolved` 的差别只在于
+# 「它触发的规则链没跑完」——效果一样已经落库，所以凡是问「这次裁决提交了没有」
+# 的地方都必须把它算进来。集中在这里而不是散在调用点，是因为 #398 新增
+# `rule_failed` 时，正是这些散落的 `== "resolved"` 最容易漏。
+COMMITTED_ADJUDICATION_STATUSES: frozenset[str] = frozenset(
+    {"resolved", "rule_failed"}
+)
+# 再没有下一步的状态：要么已提交，要么已取消。
+TERMINAL_ADJUDICATION_STATUSES: frozenset[str] = COMMITTED_ADJUDICATION_STATUSES | {
+    "cancelled"
+}
 
 
 class AdjudicationRecovery(ContractModel):

@@ -464,51 +464,57 @@ def _run_sample(
     failure_code: str | None = None
     first_pending_ms: float | None = None
     start = 0.0
+    end_to_end_ms = 0.0
     with _application_components(application), _mute_content_logs():
         lose_response = False if real_mode else _configure_fake(application, scenario)
         with _Probe(application, lose_first_commit_response=lose_response) as probe:
             socket, ws = _join(client, token, room)
             try:
                 start = time.perf_counter()
-                _submit(ws, room, action_id, scenario)
-                stop, _ = receive_until(
-                    ws,
-                    lambda message: (
-                        _is_completed(message)
-                        or message.get("type") in {"adjudication.pending", "turn.failed"}
-                    ),
-                    limit=60,
-                )
-                if stop.get("type") == "adjudication.pending":
-                    first_pending_ms = (time.perf_counter() - start) * 1000
-                    if scenario == "single_pending_cancel" and not real_mode:
-                        payload = stop["payload"]
-                        decision = payload["pendingDecision"]
-                        ws.send_json(
-                            {
-                                "type": "adjudication.select",
-                                "playerId": room["playerId"],
-                                "payload": {
-                                    "clientActionId": action_id,
-                                    "requestId": f"bench-cancel-{uuid.uuid4().hex[:8]}",
-                                    "sourceRevision": payload["sourceRevision"],
-                                    "decisionId": decision["decision_id"],
-                                    "decisionVersion": decision["decision_version"],
-                                    "cancel": True,
-                                },
-                            }
-                        )
-                        stop, _ = receive_until(ws, _is_completed, limit=60)
-                    else:
-                        stop, _ = _settle_pending(ws, room, stop)
-                if stop.get("type") == "turn.failed":
-                    failure_code = str(stop.get("payload", {}).get("code", "TURN_FAILED"))
-                if scenario == "single_narrator_retry" and not real_mode:
-                    if failure_code != "PLAN_NARRATOR_FAILED":
-                        raise AssertionError(f"expected narrator failure, got {failure_code}")
-                    failure_code = None
+                try:
                     _submit(ws, room, action_id, scenario)
-                    stop, _ = receive_until(ws, _is_completed, limit=60)
+                    stop, _ = receive_until(
+                        ws,
+                        lambda message: (
+                            _is_completed(message)
+                            or message.get("type") in {"adjudication.pending", "turn.failed"}
+                        ),
+                        limit=60,
+                    )
+                    if stop.get("type") == "adjudication.pending":
+                        first_pending_ms = (time.perf_counter() - start) * 1000
+                        if scenario == "single_pending_cancel" and not real_mode:
+                            payload = stop["payload"]
+                            decision = payload["pendingDecision"]
+                            ws.send_json(
+                                {
+                                    "type": "adjudication.select",
+                                    "playerId": room["playerId"],
+                                    "payload": {
+                                        "clientActionId": action_id,
+                                        "requestId": f"bench-cancel-{uuid.uuid4().hex[:8]}",
+                                        "sourceRevision": payload["sourceRevision"],
+                                        "decisionId": decision["decision_id"],
+                                        "decisionVersion": decision["decision_version"],
+                                        "cancel": True,
+                                    },
+                                }
+                            )
+                            stop, _ = receive_until(ws, _is_completed, limit=60)
+                        else:
+                            stop, _ = _settle_pending(ws, room, stop)
+                    if stop.get("type") == "turn.failed":
+                        failure_code = str(stop.get("payload", {}).get("code", "TURN_FAILED"))
+                    if scenario == "single_narrator_retry" and not real_mode:
+                        if failure_code != "PLAN_NARRATOR_FAILED":
+                            raise AssertionError(f"expected narrator failure, got {failure_code}")
+                        failure_code = None
+                        _submit(ws, room, action_id, scenario)
+                        stop, _ = receive_until(ws, _is_completed, limit=60)
+                except AssertionError:
+                    if not real_mode:
+                        raise
+                    failure_code = "BENCHMARK_TIMEOUT"
                 end_to_end_ms = (time.perf_counter() - start) * 1000
             finally:
                 socket.__exit__(None, None, None)

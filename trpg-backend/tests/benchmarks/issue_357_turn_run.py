@@ -33,6 +33,9 @@ def test_issue_357_semantic_turn_run_benchmark(
     repeats = int(os.getenv("ISSUE_357_TURN_BENCHMARK_REPEATS", "20"))
     if repeats < 1:
         raise ValueError("ISSUE_357_TURN_BENCHMARK_REPEATS must be >= 1")
+    transport_call_budget = int(os.getenv("ISSUE_357_TRANSPORT_CALL_BUDGET", "0")) or None
+    if transport_call_budget is not None and transport_call_budget < 1:
+        raise ValueError("ISSUE_357_TRANSPORT_CALL_BUDGET must be >= 1")
     output_path = Path(
         os.getenv(
             "ISSUE_357_TURN_BENCHMARK_OUTPUT",
@@ -74,6 +77,15 @@ def test_issue_357_semantic_turn_run_benchmark(
                         real_mode=True,
                     )
                 )
+                used = sum(
+                    sample["transport_calls"]
+                    for samples in sample_results.values()
+                    for sample in samples
+                )
+                if transport_call_budget is not None and used > transport_call_budget:
+                    raise RuntimeError(
+                        f"transport call budget exceeded: {used} > {transport_call_budget}"
+                    )
     finally:
         ws_controller.action_plan_turn_application = original_application
 
@@ -95,6 +107,7 @@ def test_issue_357_semantic_turn_run_benchmark(
             else settings.openai_model
         ),
         "runtime": {
+            "machine": platform.node(),
             "python": platform.python_version(),
             "os": platform.system(),
             "architecture": platform.machine(),
@@ -106,8 +119,17 @@ def test_issue_357_semantic_turn_run_benchmark(
             "planner_max_attempts": settings.turn_planner_max_attempts,
             "planner_retry_backoff_seconds": (settings.turn_planner_retry_backoff_seconds),
             "rollout_percent": 100,
+            "transport_call_budget": transport_call_budget,
+            "host_max_attempts": settings.model_client_max_attempts,
+            "host_retry_backoff_seconds": settings.model_client_retry_backoff_seconds,
         },
         "overall": aggregate_scenario(all_samples),
+        "cohorts": {
+            "one_action": aggregate_scenario(
+                sample_results["real_observation"] + sample_results["real_investigation"]
+            ),
+            "multi_target": aggregate_scenario(sample_results["real_multi_step"]),
+        },
         "scenarios": {
             scenario: aggregate_scenario(samples) for scenario, samples in sample_results.items()
         },

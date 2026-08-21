@@ -54,6 +54,7 @@ from tests.test_ws import (
 
 COUNT_FIELDS = (
     "model_calls",
+    "transport_calls",
     "planner_calls",
     "step_adjudicator_calls",
     "narrator_calls",
@@ -246,6 +247,10 @@ class _Probe:
         def measured_warning(event: str, *args, **kwargs):  # noqa: ANN002, ANN003, ANN202
             if event == "structured_json_request_retry":
                 self.counts["model_transport_retries"] += 1
+                self.counts["transport_calls"] += 1
+            elif event == "structured_model_call_failed":
+                self.counts["model_calls"] += 1
+                self.counts["transport_calls"] += 1
             return original_warning(event, *args, **kwargs)
 
         self._restores.append((structured_http.logger, "warning", original_warning))
@@ -254,6 +259,7 @@ class _Probe:
         def measured_model_info(event: str, *args, **kwargs):  # noqa: ANN002, ANN003, ANN202
             if event == "structured_model_call_completed":
                 self.counts["model_calls"] += 1
+                self.counts["transport_calls"] += 1
                 self.counts["input_tokens"] += int(kwargs.get("prompt_tokens") or 0)
                 self.counts["output_tokens"] += int(kwargs.get("completion_tokens") or 0)
             return original_model_info(event, *args, **kwargs)
@@ -263,7 +269,7 @@ class _Probe:
             *args,
             **kwargs,  # noqa: ANN002, ANN003
         ):
-            if event == "turn_planner_rejected":
+            if event in {"host_turn_decision_rejected", "turn_planner_rejected"}:
                 self.counts["structured_retries"] += 1
             return original_model_warning(event, *args, **kwargs)
 
@@ -615,6 +621,9 @@ def test_issue_356_turn_run_benchmark(
     repeats = int(os.getenv("ISSUE_356_BENCHMARK_REPEATS", "3" if mode == "fake" else "2"))
     if repeats < 1:
         raise ValueError("ISSUE_356_BENCHMARK_REPEATS must be >= 1")
+    transport_call_budget = int(os.getenv("ISSUE_357_TRANSPORT_CALL_BUDGET", "0")) or None
+    if transport_call_budget is not None and transport_call_budget < 1:
+        raise ValueError("ISSUE_357_TRANSPORT_CALL_BUDGET must be >= 1")
     output_path = Path(
         os.getenv("ISSUE_356_BENCHMARK_OUTPUT", f"/tmp/issue-356-{mode}-benchmark.json")
     )
@@ -666,6 +675,15 @@ def test_issue_356_turn_run_benchmark(
                         real_mode=mode == "real",
                     )
                 )
+                used = sum(
+                    sample["transport_calls"]
+                    for samples in sample_results.values()
+                    for sample in samples
+                )
+                if transport_call_budget is not None and used > transport_call_budget:
+                    raise RuntimeError(
+                        f"transport call budget exceeded: {used} > {transport_call_budget}"
+                    )
     finally:
         ws_controller.action_plan_turn_application = original_application
 
@@ -676,16 +694,33 @@ def test_issue_356_turn_run_benchmark(
         "subject_revision": os.getenv("ISSUE_356_SUBJECT_REVISION", _git_revision()),
         "benchmark_tool_revision": _git_revision(),
         "mode": mode,
+        "producer": "legacy" if mode == "real" else "synthetic",
         "provider": provider,
         "model": model,
         "runtime": {
+            "machine": platform.node(),
             "python": platform.python_version(),
             "os": platform.system(),
             "architecture": platform.machine(),
         },
         "percentile_method": "nearest-rank",
         "scenario_repeats": repeats,
+        "configuration": {
+            "transport_call_budget": transport_call_budget,
+            "host_max_attempts": settings.model_client_max_attempts,
+            "host_retry_backoff_seconds": settings.model_client_retry_backoff_seconds,
+        },
         "overall": aggregate_scenario(all_samples),
+        "cohorts": (
+            {
+                "one_action": aggregate_scenario(
+                    sample_results["real_observation"] + sample_results["real_investigation"]
+                ),
+                "multi_target": aggregate_scenario(sample_results["real_multi_step"]),
+            }
+            if mode == "real"
+            else {}
+        ),
         "scenarios": {
             scenario: aggregate_scenario(samples) for scenario, samples in sample_results.items()
         },

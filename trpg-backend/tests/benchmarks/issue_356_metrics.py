@@ -82,6 +82,7 @@ def aggregate_scenario(samples: list[dict[str, Any]]) -> dict[str, Any]:
 
     count_fields = (
         "model_calls",
+        "transport_calls",
         "planner_calls",
         "step_adjudicator_calls",
         "narrator_calls",

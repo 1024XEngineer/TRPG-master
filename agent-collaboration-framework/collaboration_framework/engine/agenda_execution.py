@@ -38,6 +38,7 @@ from .rules_v3 import (
     agenda_status_for_walk,
     matching_event_rules,
     walk_rule,
+    walk_rule_from,
 )
 
 # 引擎自己发的审计信号，永远不是规则的输入（#226 §4）。
@@ -257,6 +258,100 @@ class RuleSettlement:
         self.suspended = True
         return state, False
 
+    def resume_rule(
+        self,
+        rule: RuleSpecV3,
+        resume_step_id: str | None,
+        state: GameState,
+        events: list[DomainEvent],
+    ) -> SettlementResult:
+        """Continue the suspended rule from where its check routed it.
+
+        `resume_step_id` is None when the authored `result_routes` says nothing
+        about the degree that was rolled. That is not a failure — a branch is
+        allowed to care about only some outcomes — the rule simply has nothing
+        further to say and its queue item completes.
+        """
+
+        item_index = self._running_item_index(rule.id)
+        if resume_step_id is None:
+            self._set_item(item_index, "completed")
+            self.suspended = False
+            self._clear_cursor()
+            return self.advance(state, events)
+
+        walk = walk_rule_from(rule, resume_step_id)
+        next_step_count = self.agenda.step_count + walk.step_count
+        if next_step_count > self.agenda.max_steps:
+            self._fail_budget(
+                item_index,
+                rule,
+                step_id=walk.suspended_at or resume_step_id,
+                step_count=next_step_count,
+            )
+            return self._result(state)
+        self.agenda = self.agenda.model_copy(update={"step_count": next_step_count})
+        state = self.commit_effects(state, walk.effects, events)
+
+        status = agenda_status_for_walk(rule, walk)
+        if status == "stable":
+            self._set_item(item_index, "completed")
+            self.suspended = False
+            self._clear_cursor()
+            # 恢复出来的效果本身也是事件，也可能唤醒别的规则——它们进同一个
+            # Agenda，直到整条链稳定为止（#398 §目标 4）。
+            return self.advance(state, events)
+        self._set_item(item_index, "failed" if status == "failed" else "running")
+        self.agenda = self.agenda.model_copy(
+            update={
+                "status": status,
+                "failure_code": (
+                    agenda_failure_code_for_walk(walk) if status == "failed" else None
+                ),
+                "current_rule_id": rule.id,
+                "current_branch_id": self.queue[item_index].branch_id,
+                "current_step_id": walk.suspended_at,
+            }
+        )
+        self.suspended = True
+        return self._result(state)
+
+    def _running_item_index(self, rule_id: str) -> int:
+        return next(
+            index
+            for index, item in enumerate(self.queue)
+            if item.rule_id == rule_id and item.status == "running"
+        )
+
+    def fail(self, code: str) -> None:
+        """Force the Agenda to a failed cursor the Engine could not act on.
+
+        Used when the suspension point itself is unusable — a check profile
+        this Engine does not implement, or an actor with no value to roll
+        against. The alternative is raising, which would abort an action whose
+        effects have already committed.
+        """
+
+        self.agenda = self.agenda.model_copy(
+            update={"status": "failed", "failure_code": code}
+        )
+        for index, item in enumerate(self.queue):
+            if item.status == "running":
+                self._set_item(index, "failed")
+        self.suspended = True
+
+    def _clear_cursor(self) -> None:
+        self.agenda = self.agenda.model_copy(
+            update={
+                "status": "running",
+                "failure_code": None,
+                "current_rule_id": None,
+                "current_branch_id": None,
+                "current_step_id": None,
+                "pending_check_id": None,
+            }
+        )
+
     def commit_effects(
         self,
         state: GameState,
@@ -367,7 +462,11 @@ class RuleSettlement:
         agendas = {
             agenda_id: item
             for agenda_id, item in state.rule_agendas.items()
-            if item.status not in SETTLED_AGENDA_STATUSES
+            # 排除自己：`state` 里可能还留着上一次事务写下的、状态为
+            # awaiting_* 的旧副本。恢复之后权威版本是手上这个，旧的必须让位，
+            # 否则跑完的 Agenda 会以挂起态永远留在库里。
+            if agenda_id != self.agenda.agenda_id
+            and item.status not in SETTLED_AGENDA_STATUSES
         }
         if self.agenda.status not in SETTLED_AGENDA_STATUSES:
             # 只有在途 Agenda 才落库（#398 §阶段一）。

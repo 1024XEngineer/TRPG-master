@@ -16,6 +16,7 @@ from collaboration_framework.contracts import (
     SubmitAdjudicationRequest,
 )
 from collaboration_framework.engine import (
+    ActorResources,
     ActorState,
     AdjudicationEngineService,
     AgendaItem,
@@ -58,6 +59,9 @@ def game_state(**updates) -> GameState:
                 name="调查员",
                 source_character_id="character",
                 source_character_version=1,
+                # 被动理智检定的目标值读 `resources.san`；真实建卡由
+                # `room.py::_character_runtime_resources` 从 derived_stats 填入。
+                resources=ActorResources(san=55, luck=50),
             )
         },
         "entities": {

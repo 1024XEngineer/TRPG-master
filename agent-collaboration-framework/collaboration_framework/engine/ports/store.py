@@ -88,6 +88,10 @@ class EngineTransaction(Protocol):
         decision: PendingCheckDecision | None,
         check_run: CheckRun | None,
         completed_command: CompletedAdjudicationCommand,
+        # 规则在这次提交里新要求的检定。它和 `decision` 不是一回事：`decision`
+        # 是这条命令**结算掉**的那个（可能刚变成 resolved），而这些是规则链在
+        # 效果中间新挂起来的被动检定，必须与效果同一个事务落库（#398 §阶段三）。
+        additional_decisions: tuple[PendingCheckDecision, ...] = (),
     ) -> None: ...
 
 

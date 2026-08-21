@@ -11,6 +11,7 @@ from collaboration_framework.contracts import (
     PlayerView,
 )
 from collaboration_framework.host.schemas.history import RecentTurnContext
+from collaboration_framework.host.schemas.memory import ConversationSummary, MemoryEntry
 
 
 def _validate_keeper_scope(
@@ -33,6 +34,8 @@ class HostAgentContext(ContractModel):
     player_input: PlayerInput
     player_view: PlayerView
     recent_history: RecentTurnContext
+    memories: tuple[MemoryEntry, ...] = ()
+    conversation_summary: ConversationSummary | None = None
     keeper_capabilities: KeeperCapabilityView | None = None
 
     @model_validator(mode="after")

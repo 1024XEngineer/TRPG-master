@@ -73,6 +73,7 @@ from starlette.websockets import WebSocketState
 from app.adapters.structured_http import StructuredOutputError, is_transient_model_error
 from app.core.action_plan_turn import (
     ActionPlanTurnResult,
+    _matching_visible_entity_ids,
     action_plan_turn_application,
 )
 from app.core.db import async_session_factory
@@ -153,6 +154,16 @@ from app.service.ws_manager import manager
 
 router = APIRouter()
 logger = structlog.get_logger()
+
+_DIRECT_SPEECH_MARKERS = ("告诉", "询问", "问", "提醒", "威胁", "喊", "说", "请")
+
+
+def _listener_ids_for_utterance(utterance: str, player_view: PlayerView) -> tuple[str, ...]:
+    """只根据明确点名和当前 PlayerView 确定听众，不猜测自然语言意图。"""
+    if not any(marker in utterance for marker in _DIRECT_SPEECH_MARKERS):
+        return ()
+    return _matching_visible_entity_ids(utterance, player_view)
+
 
 _UNAUTHORIZED_CLOSE_CODE = 4401
 _NOT_FOUND_CLOSE_CODE = 4404
@@ -971,6 +982,21 @@ async def _send_completed_turn_message(
             client_action_id=client_action_id,
             narration=persisted_narration,
         )
+    # 摘要是异步可重建读模型，不能阻塞本回合的权威叙事发送。
+    # 队列出队时 websocket 可能是 None，回退到应用单例上的同一服务。
+    summary_service = None
+    if websocket is not None:
+        summary_service = getattr(websocket.app.state, "conversation_summary_service", None)
+    if summary_service is None:
+        from app.main import app as fastapi_app
+
+        summary_service = getattr(fastapi_app.state, "conversation_summary_service", None)
+    if summary_service is not None:
+        # 摘要是异步读模型；公开事件为所有玩家入队，但不能阻塞回合响应。
+        asyncio.create_task(
+            summary_service.enqueue_room_if_needed(room_id=room_id),
+            name=f"enqueue-conversation-summary-{room_id}",
+        )
     if after_narration is not None:
         await after_narration()
     return recorded
@@ -1492,6 +1518,7 @@ async def _broadcast_action_utterance(
         actor_id=player_input.actor_id,
         scene_id=player_view.scene_id,
         view_revision=player_view.revision,
+        player_view=player_view,
     )
 
 
@@ -1505,6 +1532,7 @@ async def _broadcast_action_line(
     actor_id: str | None,
     scene_id: str | None,
     view_revision: str | None,
+    player_view: PlayerView | None = None,
 ) -> None:
     """把行动区原话广播给全房间，不进入主持主链。"""
 
@@ -1515,12 +1543,18 @@ async def _broadcast_action_line(
         player_id,
         fallback=nickname,
     )
+    listener_ids = (
+        _listener_ids_for_utterance(utterance, player_view) if player_view is not None else ()
+    )
     payload = ActionBroadcastPayload(
         player_id=player_id,
         client_action_id=client_action_id,
         nickname=nickname,
         character_name=character_name,
         utterance=utterance,
+        speaker_id=actor_id,
+        listener_ids=listener_ids,
+        participant_ids=((actor_id,) if actor_id else ()) + listener_ids,
     )
     recorded = await room_service.record_event(
         db,
@@ -1613,6 +1647,7 @@ async def _handle_action_chat_send(
     actor_id: str | None = None
     scene_id: str | None = None
     view_revision: str | None = None
+    view: PlayerView | None = None
     try:
         view = await session_view_application.current_player_view(
             room_id=room_id,
@@ -1622,7 +1657,7 @@ async def _handle_action_chat_send(
         scene_id = view.scene_id
         view_revision = view.revision
     except Exception:
-        pass
+        view = None
     await _broadcast_action_line(
         db,
         room_id=room_id,
@@ -1632,6 +1667,7 @@ async def _handle_action_chat_send(
         actor_id=actor_id,
         scene_id=scene_id,
         view_revision=view_revision,
+        player_view=view,
     )
 
 

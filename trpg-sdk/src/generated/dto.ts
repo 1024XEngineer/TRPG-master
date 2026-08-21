@@ -15,7 +15,7 @@ export interface AcceptResultOption {
 }
 
 /**
- * action.plan.submit 原话广播 payload。
+ * action.plan.submit 原话及服务端确认的公开互动参与者。
  */
 export interface ActionBroadcastPayload {
   playerId: string;
@@ -23,6 +23,9 @@ export interface ActionBroadcastPayload {
   nickname: string;
   characterName?: string | null;
   utterance: string;
+  speakerId?: string | null;
+  listenerIds?: string[];
+  participantIds?: string[];
 }
 
 /**

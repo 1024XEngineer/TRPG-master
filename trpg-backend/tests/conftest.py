@@ -21,6 +21,7 @@ from app.adapters import (
     SqlAlchemyEngineStore,
     SqlAlchemyRecentHistorySource,
 )
+from app.adapters.sqlalchemy_memory import SqlAlchemyMemoryStore
 from app.controller import ws as ws_controller
 from app.core.action_plan_turn import build_action_plan_turn_application
 from app.core.config import Settings
@@ -30,6 +31,10 @@ from app.core.turn import build_session_view_application
 from app.main import app
 from app.service.builtin_module_loader import load_builtin_modules
 from app.service.character_background import CharacterBackgroundService
+from app.service.conversation_summary import (
+    ConversationSummaryService,
+    DeterministicConversationSummaryModel,
+)
 from tests.content_fixtures import publish_multiplayer_module
 
 # 用临时文件 SQLite，不用 ":memory:"+StaticPool。关键原因是并发模型：异步 HTTP
@@ -64,6 +69,10 @@ app.dependency_overrides[get_db] = override_get_db
 # 请求和费用；专门注入确定性实现，真实 provider 由 adapter 单测覆盖。
 app.state.character_background_service = CharacterBackgroundService()
 app.state.test_session_factory = TestSessionLocal
+app.state.conversation_summary_service = ConversationSummaryService(
+    TestSessionLocal,
+    DeterministicConversationSummaryModel(),
+)
 
 # WS 路由（app/controller/ws.py）是原生 websocket handler，拿不到 FastAPI 的
 # Depends(get_db)，而是直接 `async with async_session_factory() as db`——也就是
@@ -84,6 +93,7 @@ ws_controller.action_plan_turn_application = build_action_plan_turn_application(
     adjudication_engine=AdjudicationEngineService(_test_turn_store),
     plan_store=_test_plan_store,
     settings=Settings(host_model_provider="fake", opening_narration_mode="template"),
+    memory_source=SqlAlchemyMemoryStore(TestSessionLocal),
     time_consent_session_factory=TestSessionLocal,
 )
 ws_controller.adjudication_engine_service = AdjudicationEngineService(_test_turn_store)
@@ -140,6 +150,12 @@ def action_plan_store_factory() -> Callable[[], SqlAlchemyActionPlanRunStore]:
 @pytest.fixture
 def recent_history_source() -> SqlAlchemyRecentHistorySource:
     return SqlAlchemyRecentHistorySource(TestSessionLocal)
+
+
+@pytest.fixture
+def memory_store() -> SqlAlchemyMemoryStore:
+    """返回绑定文件型 SQLite 的记忆存储，供真实并发事务测试使用。"""
+    return SqlAlchemyMemoryStore(TestSessionLocal)
 
 
 @pytest.fixture

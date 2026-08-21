@@ -310,13 +310,17 @@ class RoomActionStatePayload(CamelModel):
 
 
 class ActionBroadcastPayload(CamelModel):
-    """action.plan.submit 原话广播 payload。"""
+    """action.plan.submit 原话及服务端确认的公开互动参与者。"""
 
     player_id: str
     client_action_id: str
     nickname: str
     character_name: str | None = None
     utterance: str
+    # 只有服务端能证明当前可见实体在场并被原话明确指向时才填写。
+    speaker_id: str | None = None
+    listener_ids: tuple[str, ...] = ()
+    participant_ids: tuple[str, ...] = ()
 
 
 class TurnStartedPayload(CamelModel):

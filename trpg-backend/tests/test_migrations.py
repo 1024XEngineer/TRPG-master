@@ -9,7 +9,8 @@ from pathlib import Path
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 PREVIOUS_REVISION = "1a02058345ee"
 ENGINE_IDENTITY_PREVIOUS_REVISION = "9c4e7a2b1d6f"
-HEAD_REVISION = "a7b8c9d0e1f2"
+# 记忆链 head 是 a7b8c9d0e1f2；主持队列接在它后面。
+HEAD_REVISION = "b9c0d1e2f3a4"
 
 
 def _run_alembic(database: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -87,6 +88,9 @@ def test_migration_upgrades_empty_sqlite_and_round_trips(tmp_path: Path) -> None
         "user_character_template_portraits",
         "portrait_generation_tasks",
         "time_advance_proposals",
+        "memory_entries",
+        "conversation_summaries",
+        "memory_projection_cursors",
         "turn_run_cutover",
         "scene_transition_proposals",
         "host_action_queue",
@@ -172,6 +176,7 @@ def test_migration_upgrades_empty_sqlite_and_round_trips(tmp_path: Path) -> None
         "view_revision",
     }.issubset(_column_names(database, "events"))
     assert ("room_id", "event_type", "correlation_id") in _unique_column_sets(database, "events")
+    assert "source_created_at" in _column_names(database, "memory_entries")
 
     downgrade = _run_alembic(database, "downgrade", PREVIOUS_REVISION)
     assert downgrade.returncode == 0, downgrade.stdout + downgrade.stderr
@@ -352,3 +357,36 @@ def test_module_identity_migration_rejects_existing_catalog_data(tmp_path: Path)
     assert "game_systems 存在历史数据" in result.stdout + result.stderr
     assert "world_ref" not in _column_names(database, "game_systems")
     assert "module_id" not in _column_names(database, "scenarios")
+
+
+def test_memory_source_time_reconciliation_repairs_stamped_database(tmp_path: Path) -> None:
+    """数据库已标记旧 head 但缺列时，新迁移仍能补列、回填数据并创建索引。"""
+    database = tmp_path / "memory-source-time-drift.db"
+    _upgrade_or_fail(database, "f6a7b8c9d0e1")
+
+    with sqlite3.connect(database) as connection:
+        connection.execute("DROP INDEX ix_memory_entries_room_source_created")
+        connection.execute("ALTER TABLE memory_entries DROP COLUMN source_created_at")
+        connection.execute(
+            """
+            INSERT INTO memory_entries (
+                id, room_id, subject_id, kind, content, epistemic_status,
+                visibility, participants, listener_ids, source_event_id,
+                source_sequence, created_at
+            ) VALUES (
+                '10000000000000000000000000000001',
+                '10000000000000000000000000000002',
+                'actor_1', 'action', '历史行动', 'asserted', 'public',
+                '[]', '[]', 'event-1', 0, '2026-08-20 12:34:56'
+            )
+            """
+        )
+
+    _upgrade_or_fail(database, "head")
+    with sqlite3.connect(database) as connection:
+        source_created_at = connection.execute(
+            "SELECT source_created_at FROM memory_entries WHERE source_event_id = 'event-1'"
+        ).fetchone()
+        indexes = {row[1] for row in connection.execute("PRAGMA index_list('memory_entries')")}
+    assert source_created_at == ("2026-08-20 12:34:56",)
+    assert "ix_memory_entries_room_source_created" in indexes

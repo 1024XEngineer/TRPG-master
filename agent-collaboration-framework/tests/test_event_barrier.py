@@ -38,6 +38,7 @@ from collaboration_framework.engine import (
     GameState,
     InMemoryEngineStore,
 )
+from collaboration_framework.engine.models import WorldTimePoint, WorldTimeState
 
 FIXTURE = (
     Path(__file__).resolve().parents[1]
@@ -75,7 +76,10 @@ def noon_state() -> GameState:
             )
         },
         entities={"case_tracker": {"surveillance_available": False}},
-        world_time={"current_point_id": "hour_12", "current": {"day_index": 0, "hour_of_day": 12}},
+        world_time=WorldTimeState(
+            current_point_id="hour_12",
+            current=WorldTimePoint(day_index=0, hour_of_day=12),
+        ),
     )
 
 

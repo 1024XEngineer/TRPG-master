@@ -143,7 +143,11 @@ class ActionPlanTurnResult:
 
     @property
     def waiting_for_player(self) -> bool:
-        return self.status in {"waiting_for_player", "awaiting_time_consent"}
+        return self.status in {
+            "waiting_for_player",
+            "awaiting_time_consent",
+            "awaiting_scene_consent",
+        }
 
 
 @dataclass(frozen=True)
@@ -813,7 +817,11 @@ class ActionPlanTurnApplication:
         on_phase: TurnPhaseObserver | None,
         verify_fingerprint: bool = True,
     ) -> ActionPlanTurnResult:
-        if result.run.status in {"waiting_for_player", "awaiting_time_consent"}:
+        if result.run.status in {
+            "waiting_for_player",
+            "awaiting_time_consent",
+            "awaiting_scene_consent",
+        }:
             if result.run.status == "waiting_for_player":
                 await _emit_phase(on_phase, "waiting_for_check")
         elif result.run.status in {
@@ -1202,6 +1210,14 @@ class ActionPlanTurnApplication:
     ) -> ActionPlanTurnResult:
         run = result.run
         if run.status in {"waiting_for_player", "awaiting_time_consent"}:
+            return ActionPlanTurnResult(
+                player_input=player_input,
+                player_view=result.player_view,
+                status=run.status,
+                execution=result.latest_execution,
+                plan_id=run.plan_id,
+            )
+        if run.status == "awaiting_scene_consent":
             return ActionPlanTurnResult(
                 player_input=player_input,
                 player_view=result.player_view,

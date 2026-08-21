@@ -30,6 +30,7 @@ from app.models.engine import (
     ModuleVersion,
     PendingCheckDecisionRecord,
     RoomActionReservation,
+    SceneTransitionProposalRecord,
     TimeAdvanceProposalRecord,
     TurnRunCutoverRecord,
 )
@@ -69,6 +70,7 @@ __all__ = [
     "PendingCheckDecisionRecord",
     "Room",
     "RoomActionReservation",
+    "SceneTransitionProposalRecord",
     "TimeAdvanceProposalRecord",
     "TurnRunCutoverRecord",
     "RoomSummary",

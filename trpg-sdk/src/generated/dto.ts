@@ -1388,6 +1388,42 @@ export interface SanCheckResultPayload {
  */
 export interface SanCheckRollPayload {}
 
+/**
+ * 广播完整待确认场景状态，供所有客户端幂等覆盖本地确认条。
+ */
+export interface SceneTransitionPendingPayload {
+  proposalId: string;
+  proposalVersion: number;
+  sourceRevision: string;
+  sourceSceneId: string;
+  targetSceneId: string;
+  requesterPlayerId: string;
+  requiredPlayerIds: string[];
+  acceptedPlayerIds: string[];
+  expiresAt: string;
+}
+
+/**
+ * 广播场景提案终态；批准时附带已经提交的权威 revision。
+ */
+export interface SceneTransitionResolvedPayload {
+  proposalId: string;
+  status: "approved" | "rejected" | "expired" | "stale";
+  sourceSceneId: string;
+  targetSceneId: string;
+  committedRevision?: string | null;
+}
+
+/**
+ * 玩家对一个冻结的共享场景切换提案作出同意或拒绝。
+ */
+export interface SceneTransitionRespondPayload {
+  proposalId: string;
+  proposalVersion: number;
+  sourceRevision: string;
+  accept: boolean;
+}
+
 export interface SceneView {
   id: string;
   name: string;

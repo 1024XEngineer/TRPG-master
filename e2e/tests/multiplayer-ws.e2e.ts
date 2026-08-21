@@ -508,12 +508,23 @@ test('三客户端串行动作、私有检定与重连快照保持隔离', async
         event.payload.status === 'processing' &&
         event.payload.clientActionId === travelActionId,
     )
+    const hostPendingPromise = waitForEvent(
+      room.host.sdk,
+      (event) => event.type === 'scene.transition.pending',
+    )
+    const guestPendingPromise = waitForEvent(
+      guest.sdk,
+      (event) => event.type === 'scene.transition.pending',
+    )
+    const thirdPendingPromise = waitForEvent(
+      third.sdk,
+      (event) => event.type === 'scene.transition.pending',
+    )
     const travelled = room.host.sdk.roomSocket.submitPlannedAction(room.hostPlayerId, {
       clientActionId: travelActionId,
       utterance: '我前往阿诺兹堡图书馆',
     })
     await guestSeesProcessing
-
     const rejectedActionId = `three-client-conflict-${Date.now()}`
     await assert.rejects(
       guest.sdk.roomSocket.submitPlannedAction(joined.playerId, {
@@ -525,7 +536,65 @@ test('三客户端串行动作、私有检定与重连快照保持隔离', async
         'code' in error &&
         error.code === 'ACTION_IN_PROGRESS',
     )
-    const travelTurn = await travelled
+
+    const [hostPending, guestPending, thirdPending] = await Promise.all([
+      hostPendingPromise,
+      guestPendingPromise,
+      thirdPendingPromise,
+    ])
+    assert.equal(hostPending.type, 'scene.transition.pending')
+    assert.equal(guestPending.type, 'scene.transition.pending')
+    assert.equal(thirdPending.type, 'scene.transition.pending')
+    assert.deepEqual(guestPending.payload, hostPending.payload)
+    assert.deepEqual(thirdPending.payload, hostPending.payload)
+    assert.deepEqual(hostPending.payload.acceptedPlayerIds, [room.hostPlayerId])
+    assert.equal(hostPending.payload.requesterPlayerId, room.hostPlayerId)
+    for (const playerId of [room.hostPlayerId, joined.playerId, thirdJoined.playerId]) {
+      assert.ok(hostPending.payload.requiredPlayerIds.includes(playerId))
+    }
+
+    const thirdPendingAfterGuest = waitForEvent(
+      third.sdk,
+      (event) =>
+        event.type === 'scene.transition.pending' &&
+        event.payload.acceptedPlayerIds.includes(joined.playerId),
+    )
+    guest.sdk.roomSocket.respondToSceneTransition(joined.playerId, {
+      proposalId: hostPending.payload.proposalId,
+      proposalVersion: hostPending.payload.proposalVersion,
+      sourceRevision: hostPending.payload.sourceRevision,
+      accept: true,
+    })
+    await thirdPendingAfterGuest
+
+    const hostResolvedPromise = waitForEvent(
+      room.host.sdk,
+      (event) => event.type === 'scene.transition.resolved',
+    )
+    const guestResolvedPromise = waitForEvent(
+      guest.sdk,
+      (event) => event.type === 'scene.transition.resolved',
+    )
+    const thirdResolvedPromise = waitForEvent(
+      third.sdk,
+      (event) => event.type === 'scene.transition.resolved',
+    )
+    third.sdk.roomSocket.respondToSceneTransition(thirdJoined.playerId, {
+      proposalId: hostPending.payload.proposalId,
+      proposalVersion: hostPending.payload.proposalVersion,
+      sourceRevision: hostPending.payload.sourceRevision,
+      accept: true,
+    })
+    const [hostResolved, guestResolved, thirdResolved, travelTurn] = await Promise.all([
+      hostResolvedPromise,
+      guestResolvedPromise,
+      thirdResolvedPromise,
+      travelled,
+    ])
+    assert.equal(hostResolved.type, 'scene.transition.resolved')
+    assert.equal(hostResolved.payload.status, 'approved')
+    assert.deepEqual(guestResolved.payload, hostResolved.payload)
+    assert.deepEqual(thirdResolved.payload, hostResolved.payload)
     assert.equal(travelTurn.player_view.scene.id, 'library')
     assert.equal(
       thirdEvents.some(

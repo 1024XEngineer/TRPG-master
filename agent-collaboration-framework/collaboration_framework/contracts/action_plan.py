@@ -105,6 +105,7 @@ class AdjudicationStatusView(ContractModel):
         "awaiting_skill_choice",
         "awaiting_post_roll_decision",
         "awaiting_time_consent",
+        "awaiting_scene_consent",
         "resolved",
         "cancelled",
     ]

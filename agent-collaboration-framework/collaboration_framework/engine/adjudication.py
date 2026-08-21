@@ -448,6 +448,21 @@ class AdjudicationEngineService:
         return await self._submit(
             request,
             consent_player_ids=tuple(sorted(consent_player_ids)),
+            scene_consent_player_ids=None,
+        )
+
+    async def submit_with_scene_consent(
+        self,
+        request: SubmitAdjudicationRequest,
+        *,
+        consent_player_ids: tuple[str, ...],
+    ) -> AdjudicationExecution:
+        """在应用层已冻结并收集全员同意后提交场景切换裁决。"""
+
+        return await self._submit(
+            request,
+            consent_player_ids=None,
+            scene_consent_player_ids=tuple(sorted(consent_player_ids)),
         )
 
     async def _submit(
@@ -455,6 +470,7 @@ class AdjudicationEngineService:
         request: SubmitAdjudicationRequest,
         *,
         consent_player_ids: tuple[str, ...] | None,
+        scene_consent_player_ids: tuple[str, ...] | None = None,
     ) -> AdjudicationExecution:
         async with self._store.transaction(request.room_id) as transaction:
             runtime = await transaction.load_runtime()
@@ -488,6 +504,7 @@ class AdjudicationEngineService:
                 runtime.revision,
             )
             allow_party_time_advance = False
+            allow_party_scene_transition = False
             if consent_player_ids is not None:
                 current_players = tuple(
                     sorted({actor.player_id for actor in runtime.game_state.actors.values()})
@@ -500,10 +517,23 @@ class AdjudicationEngineService:
                         player_safe_reason="房间成员已变化，需要重新确认时间推进",
                     )
                 allow_party_time_advance = True
+            if scene_consent_player_ids is not None:
+                current_players = tuple(
+                    sorted({actor.player_id for actor in runtime.game_state.actors.values()})
+                )
+                if scene_consent_player_ids != current_players or len(current_players) <= 1:
+                    self._reject_validation(
+                        "SCENE_CONSENT_STALE",
+                        repairability="requires_player_choice",
+                        fault="player",
+                        player_safe_reason="房间成员已变化，需要重新确认场景切换",
+                    )
+                allow_party_scene_transition = True
             self._validate_adjudication(
                 runtime,
                 request.adjudication,
                 allow_party_time_advance=allow_party_time_advance,
+                allow_party_scene_transition=allow_party_scene_transition,
             )
             proposal_validation, proposal_committed_level = (
                 self._build_submission_validation(
@@ -1202,6 +1232,7 @@ class AdjudicationEngineService:
         adjudication: ActionAdjudication,
         *,
         allow_party_time_advance: bool = False,
+        allow_party_scene_transition: bool = False,
     ) -> None:
         state = runtime.game_state
         target = adjudication.target
@@ -1263,11 +1294,13 @@ class AdjudicationEngineService:
             runtime,
             adjudication.success_effects,
             allow_party_time_advance=allow_party_time_advance,
+            allow_party_scene_transition=allow_party_scene_transition,
         )
         self._validate_effect_sequence(
             runtime,
             adjudication.failure_effects,
             allow_party_time_advance=allow_party_time_advance,
+            allow_party_scene_transition=allow_party_scene_transition,
         )
         if adjudication.check.mode != "none":
             self._validated_options(runtime, adjudication)
@@ -1278,6 +1311,7 @@ class AdjudicationEngineService:
         effects: tuple[ActionEffect, ...],
         *,
         allow_party_time_advance: bool = False,
+        allow_party_scene_transition: bool = False,
     ) -> None:
         """Walk one atomic sequence, checking each effect against the ids in
         scope at that point.
@@ -1313,6 +1347,7 @@ class AdjudicationEngineService:
             # behind — not against the clock this action started on.
             world_time=runtime.game_state.world_time,
             allow_party_time_advance=allow_party_time_advance,
+            allow_party_scene_transition=allow_party_scene_transition,
         )
         for effect in effects:
             self._validate_effect(runtime, effect, vocabulary=vocabulary)

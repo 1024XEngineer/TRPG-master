@@ -80,6 +80,8 @@ jobs:
           DEEPSEEK_API_KEY: ${{ secrets.PREVIEW_DEEPSEEK_API_KEY }}
           DEEPSEEK_BASE_URL: ${{ vars.PREVIEW_DEEPSEEK_BASE_URL }}
           DEEPSEEK_MODEL: ${{ vars.PREVIEW_DEEPSEEK_MODEL }}
+          TURN_PLANNER_MODEL: ${{ vars.PREVIEW_TURN_PLANNER_MODEL }}
+          TURN_PLANNER_ROLLOUT_PERCENT: ${{ vars.PREVIEW_TURN_PLANNER_ROLLOUT_PERCENT }}
           # 当前凭证同时支持 DeepSeek v4 Pro 和 Sufy Gemini 生图；仍按用途
           # 使用两个 Secret 名称，后续可以独立轮换。不要把图片 key 放进前端。
           SUFY_API_KEY: ${{ secrets.PREVIEW_SUFY_API_KEY }}
@@ -91,6 +93,8 @@ jobs:
         run: |
           SUFY_BASE_URL="${SUFY_BASE_URL:-https://openai.sufy.com/v1}"
           SUFY_IMAGE_MODEL="${SUFY_IMAGE_MODEL:-google/gemini-3-pro-image}"
+          TURN_PLANNER_MODEL="${TURN_PLANNER_MODEL:-deepseek/deepseek-v4-flash}"
+          TURN_PLANNER_ROLLOUT_PERCENT="${TURN_PLANNER_ROLLOUT_PERCENT:-0}"
           # DeepSeek 与 Sufy 是同一条角色生图链路的两个阶段：前者整理提示词，
           # 后者生成图片。两套 key 必须成对存在；只配置一套会让预览出现
           # 难以发现的半真实链路，因此在部署前直接失败。
@@ -120,6 +124,7 @@ jobs:
               exit 1
             fi
             HOST_MODEL_PROVIDER=deepseek
+            TURN_PLANNER_PROVIDER=deepseek
             CHARACTER_BACKGROUND_PROVIDER=deepseek
             PORTRAIT_PROMPT_PROVIDER=deepseek
             PORTRAIT_IMAGE_PROVIDER=sufy
@@ -129,6 +134,8 @@ jobs:
               exit 1
             fi
             HOST_MODEL_PROVIDER=fake
+            TURN_PLANNER_PROVIDER=fake
+            TURN_PLANNER_ROLLOUT_PERCENT=0
             CHARACTER_BACKGROUND_PROVIDER=deterministic
             PORTRAIT_PROMPT_PROVIDER=deterministic
             PORTRAIT_IMAGE_PROVIDER=mock
@@ -141,6 +148,7 @@ jobs:
           DEEPSEEK_API_KEY_B64=$(printf '%s' "$DEEPSEEK_API_KEY" | base64 | tr -d '\n')
           DEEPSEEK_BASE_URL_B64=$(printf '%s' "$DEEPSEEK_BASE_URL" | base64 | tr -d '\n')
           DEEPSEEK_MODEL_B64=$(printf '%s' "$DEEPSEEK_MODEL" | base64 | tr -d '\n')
+          TURN_PLANNER_MODEL_B64=$(printf '%s' "$TURN_PLANNER_MODEL" | base64 | tr -d '\n')
           if [ -n "$DEEPSEEK_API_KEY_B64" ]; then
             echo "::add-mask::$DEEPSEEK_API_KEY_B64"
           fi
@@ -170,6 +178,14 @@ jobs:
             export DEEPSEEK_API_KEY="\$(printf '%s' '$DEEPSEEK_API_KEY_B64' | base64 -d)"
             export DEEPSEEK_BASE_URL="\$(printf '%s' '$DEEPSEEK_BASE_URL_B64' | base64 -d)"
             export DEEPSEEK_MODEL="\$(printf '%s' '$DEEPSEEK_MODEL_B64' | base64 -d)"
+            export TURN_PLANNER_PROVIDER="$TURN_PLANNER_PROVIDER"
+            export TURN_PLANNER_API_KEY="\$(printf '%s' '$DEEPSEEK_API_KEY_B64' | base64 -d)"
+            export TURN_PLANNER_BASE_URL="\$(printf '%s' '$DEEPSEEK_BASE_URL_B64' | base64 -d)"
+            export TURN_PLANNER_MODEL="\$(printf '%s' '$TURN_PLANNER_MODEL_B64' | base64 -d)"
+            export TURN_PLANNER_TIMEOUT_SECONDS=5
+            export TURN_PLANNER_MAX_ATTEMPTS=2
+            export TURN_PLANNER_RETRY_BACKOFF_SECONDS=0.25
+            export TURN_PLANNER_ROLLOUT_PERCENT="$TURN_PLANNER_ROLLOUT_PERCENT"
             export CHARACTER_PORTRAIT_ENABLED=true
             export PORTRAIT_PROMPT_PROVIDER="$PORTRAIT_PROMPT_PROVIDER"
             export PORTRAIT_IMAGE_PROVIDER="$PORTRAIT_IMAGE_PROVIDER"
@@ -187,6 +203,11 @@ jobs:
             CONFIGURED_BACKGROUND_PROVIDER=\$(docker compose config | awk '/CHARACTER_BACKGROUND_PROVIDER:/{print \$2; exit}')
             if [ "\$CONFIGURED_BACKGROUND_PROVIDER" != "$CHARACTER_BACKGROUND_PROVIDER" ]; then
               echo "固定 compose 模板未透传 CHARACTER_BACKGROUND_PROVIDER（期望 $CHARACTER_BACKGROUND_PROVIDER，实际 \${CONFIGURED_BACKGROUND_PROVIDER:-未配置})" >&2
+              exit 1
+            fi
+            CONFIGURED_PLANNER_PROVIDER=\$(docker compose config | awk '/TURN_PLANNER_PROVIDER:/{print \$2; exit}')
+            if [ "\$CONFIGURED_PLANNER_PROVIDER" != "$TURN_PLANNER_PROVIDER" ]; then
+              echo "固定 compose 模板未透传 TURN_PLANNER_PROVIDER（期望 $TURN_PLANNER_PROVIDER，实际 \${CONFIGURED_PLANNER_PROVIDER:-未配置})" >&2
               exit 1
             fi
             docker compose -p main-preview pull

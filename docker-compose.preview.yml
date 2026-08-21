@@ -51,6 +51,14 @@ services:
       # Variables 显式覆盖，通用后端配置不受这里的 Preview 默认值影响。
       DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.qnaigc.com/v1}
       DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek/deepseek-v4-pro-202606}
+      TURN_PLANNER_PROVIDER: ${TURN_PLANNER_PROVIDER:-fake}
+      TURN_PLANNER_API_KEY: ${TURN_PLANNER_API_KEY:-}
+      TURN_PLANNER_BASE_URL: ${TURN_PLANNER_BASE_URL:-https://api.qnaigc.com/v1}
+      TURN_PLANNER_MODEL: ${TURN_PLANNER_MODEL:-deepseek/deepseek-v4-flash}
+      TURN_PLANNER_TIMEOUT_SECONDS: ${TURN_PLANNER_TIMEOUT_SECONDS:-5}
+      TURN_PLANNER_MAX_ATTEMPTS: ${TURN_PLANNER_MAX_ATTEMPTS:-2}
+      TURN_PLANNER_RETRY_BACKOFF_SECONDS: ${TURN_PLANNER_RETRY_BACKOFF_SECONDS:-0.25}
+      TURN_PLANNER_ROLLOUT_PERCENT: ${TURN_PLANNER_ROLLOUT_PERCENT:-0}
       CHARACTER_BACKGROUND_PROVIDER: ${CHARACTER_BACKGROUND_PROVIDER:-deterministic}
       # 角色生图的提示词与图片生成是两段独立链路：DeepSeek 负责提示词，
       # Sufy Gemini 负责图片。CI 在两套 key 都存在时启用真实链路，否则

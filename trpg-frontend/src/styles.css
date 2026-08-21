@@ -68,6 +68,7 @@
 }
 
 .check-workflow-dialog {
+  position: relative;
   width: min(100%, 25rem);
   max-height: min(82vh, 42rem);
   aspect-ratio: 1;
@@ -78,12 +79,37 @@
 }
 
 .check-workflow-dialog__content {
-  height: 100%;
-  padding: 15% 13% 11%;
+  position: absolute;
+  inset: 15% 13%;
+  min-height: 0;
+  padding: 0;
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: none;
+}
+
+.check-workflow-options {
+  display: grid;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.check-workflow-option {
+  min-width: 0;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.check-workflow-option > span {
+  min-width: 0;
+}
+
+.check-workflow-option > span:first-child > span:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .check-workflow-dialog__content::-webkit-scrollbar {

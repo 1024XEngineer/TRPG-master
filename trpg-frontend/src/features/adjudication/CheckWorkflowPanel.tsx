@@ -62,14 +62,14 @@ export function CheckWorkflowPanel({
               <p className="mt-0.5 text-xs text-text-muted">{decision.summary}</p>
             </div>
           </div>
-          <div className="space-y-2">
+          <div className="check-workflow-options">
             {decision.options.map((option) => (
               <button
                 key={option.candidate_id}
                 type="button"
                 disabled={busy}
                 onClick={() => onSelectSkill(option.candidate_id)}
-                className="w-full rounded-lg border border-border-light bg-white p-3 text-left disabled:opacity-50"
+                className="check-workflow-option w-full rounded-lg border border-border-light bg-white p-3 text-left disabled:opacity-50"
               >
                 <span className="flex items-center justify-between gap-3">
                   <span className="text-sm font-semibold text-text-primary">

@@ -7,6 +7,7 @@ domain effects instead of arbitrary state paths.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Annotated, Literal, TypeAlias
 
 from pydantic import (
@@ -23,8 +24,8 @@ from pydantic.json_schema import SkipJsonSchema
 
 from .common import ContractModel
 
-CheckDifficulty: TypeAlias = Literal["regular", "hard", "extreme"]  # noqa: UP040
-CheckDegree: TypeAlias = Literal[  # noqa: UP040
+CheckDifficulty: TypeAlias = Literal["regular", "hard", "extreme"]
+CheckDegree: TypeAlias = Literal[
     "critical_success",
     "extreme_success",
     "hard_success",
@@ -32,7 +33,7 @@ CheckDegree: TypeAlias = Literal[  # noqa: UP040
     "failure",
     "fumble",
 ]
-PersistenceIntent: TypeAlias = Literal[  # noqa: UP040
+PersistenceIntent: TypeAlias = Literal[
     "none",
     "character_state",
     "object_state",
@@ -456,6 +457,7 @@ class AdjudicationExecution(ContractModel):
         "awaiting_skill_choice",
         "awaiting_post_roll_decision",
         "awaiting_time_consent",
+        "awaiting_scene_consent",
         "resolved",
         "cancelled",
     ]
@@ -466,6 +468,7 @@ class AdjudicationExecution(ContractModel):
     # 只保存提案标识；完整的玩家列表、目标时间和过期时间由服务端
     # 持久化提案记录管理，不复制到 Engine 命令历史中。
     time_advance_proposal_id: str | None = Field(default=None, min_length=1)
+    scene_transition_proposal_id: str | None = Field(default=None, min_length=1)
     event_refs: tuple[str, ...] = ()
     public_event_refs: tuple[str, ...] = ()
     narration_evidence: tuple[NarrationEvidence, ...] = ()
@@ -483,6 +486,11 @@ class AdjudicationExecution(ContractModel):
             and self.time_advance_proposal_id is None
         ):
             raise ValueError("awaiting_time_consent 必须包含时间提案标识")
+        if (
+            self.status == "awaiting_scene_consent"
+            and self.scene_transition_proposal_id is None
+        ):
+            raise ValueError("awaiting_scene_consent 必须包含场景提案标识")
         if not set(self.public_event_refs).issubset(self.event_refs):
             raise ValueError("public_event_refs 必须是 event_refs 的子集")
         evidence_refs = tuple(item.ref for item in self.narration_evidence)
@@ -499,4 +507,5 @@ class AdjudicationRecovery(ContractModel):
     action_request_id: str = Field(min_length=1, max_length=200)
     actor_id: str = Field(min_length=1)
     summary: str = Field(min_length=1)
+    created_at: datetime
     execution: AdjudicationExecution

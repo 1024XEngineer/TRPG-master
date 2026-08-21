@@ -1,6 +1,6 @@
 """The only host command that may cause authoritative game-state effects."""
 
-from typing import Protocol
+from typing import ClassVar, Protocol
 
 from collaboration_framework.contracts import (
     AdjudicationExecution,
@@ -25,6 +25,14 @@ class AdjudicationExecutor(Protocol):
     idempotency itself; naming a rule hands the outcome to that published rule
     (#226 §5), so a caller can never choose consequences directly.
     """
+
+    # Keep a stable introspection surface for architecture checks across the
+    # Python 3.11/3.12 Protocol implementations.
+    __protocol_attrs__: ClassVar[tuple[str, ...]] = (
+        "submit",
+        "decide",
+        "decide_post_roll",
+    )
 
     async def submit(self, request: SubmitAdjudicationRequest) -> AdjudicationExecution: ...
 

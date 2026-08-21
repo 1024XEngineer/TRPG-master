@@ -530,6 +530,7 @@
         "awaiting_skill_choice",
         "awaiting_post_roll_decision",
         "awaiting_time_consent",
+        "awaiting_scene_consent",
         "resolved",
         "cancelled"
       ],
@@ -585,6 +586,19 @@
       ],
       "default": null,
       "title": "Time Advance Proposal Id"
+    },
+    "scene_transition_proposal_id": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Scene Transition Proposal Id"
     },
     "event_refs": {
       "default": [],

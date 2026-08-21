@@ -90,6 +90,8 @@ def test_migration_upgrades_empty_sqlite_and_round_trips(tmp_path: Path) -> None
         "time_advance_proposals",
         "memory_entries",
         "conversation_summaries",
+        "turn_run_cutover",
+        "scene_transition_proposals",
     }.issubset(tables)
     assert "decision_schema_version" in _column_names(
         database,

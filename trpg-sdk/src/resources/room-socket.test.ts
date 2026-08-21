@@ -133,6 +133,34 @@ test('isValidServerEvent：接受已知类型的合法事件', () => {
   );
 });
 
+test('isValidServerEvent：一步计划 pending 的 planId 保持可取消关联', () => {
+  const base = {
+    type: 'adjudication.pending',
+    payload: {
+      correlationId: 'action-1',
+      planId: 'plan-room-action',
+      sourceRevision: 'rev-1',
+      status: 'awaiting_skill_choice',
+      pendingDecision: { decisionId: 'decision-1' },
+    },
+  };
+  assert.equal(isValidServerEvent(base), true);
+  assert.equal(
+    isValidServerEvent({
+      ...base,
+      payload: { ...base.payload, planId: null },
+    }),
+    true,
+  );
+  assert.equal(
+    isValidServerEvent({
+      ...base,
+      payload: { ...base.payload, planId: 1 },
+    }),
+    false,
+  );
+});
+
 test('isValidServerEvent：拒绝未知 type', () => {
   assert.equal(isValidServerEvent({ type: 'not.a.real.event', payload: {} }), false);
 });
@@ -289,6 +317,39 @@ test('isValidServerEvent：校验共享时间提案与终态', () => {
       },
     }),
     true
+  );
+});
+
+test('isValidServerEvent：校验共享场景提案与终态', () => {
+  assert.equal(
+    isValidServerEvent({
+      type: 'scene.transition.pending',
+      payload: {
+        proposalId: 'scene-365',
+        proposalVersion: 2,
+        sourceRevision: '8',
+        sourceSceneId: 'living-room',
+        targetSceneId: 'study',
+        requesterPlayerId: 'player-2',
+        requiredPlayerIds: ['player-1', 'player-2'],
+        acceptedPlayerIds: ['player-2'],
+        expiresAt: '2026-08-20T20:05:00Z',
+      },
+    }),
+    true,
+  );
+  assert.equal(
+    isValidServerEvent({
+      type: 'scene.transition.resolved',
+      payload: {
+        proposalId: 'scene-365',
+        status: 'approved',
+        sourceSceneId: 'living-room',
+        targetSceneId: 'study',
+        committedRevision: '9',
+      },
+    }),
+    true,
   );
 });
 

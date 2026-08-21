@@ -108,6 +108,7 @@ const {
   mockDecidePostRoll,
   mockCancelActionPlan,
   mockRespondToTimeAdvance,
+  mockRespondToSceneTransition,
   mockWaitForWsOpen,
   mockCreateEndingDraft,
   mockConfirmEndingDraft,
@@ -145,6 +146,7 @@ const {
     mockDecidePostRoll: vi.fn(),
     mockCancelActionPlan: vi.fn(),
     mockRespondToTimeAdvance: vi.fn(),
+    mockRespondToSceneTransition: vi.fn(),
     mockWaitForWsOpen: vi.fn(() => Promise.resolve()),
     mockCreateEndingDraft: vi.fn(),
     mockConfirmEndingDraft: vi.fn(),
@@ -178,6 +180,7 @@ vi.mock('@/services/api-client', () => ({
       decidePostRoll: mockDecidePostRoll,
       cancelActionPlan: mockCancelActionPlan,
       respondToTimeAdvance: mockRespondToTimeAdvance,
+      respondToSceneTransition: mockRespondToSceneTransition,
     },
   },
 }))
@@ -584,6 +587,36 @@ describe('RoomPage conversation history', () => {
     })
     await waitFor(() => {
       expect(screen.queryByText('第 3 天 20:00')).not.toBeInTheDocument()
+    })
+  })
+
+  it('显示固定高度的全员场景切换确认条并发送当前版本', async () => {
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    emitWsMessage({
+      type: 'scene.transition.pending',
+      payload: {
+        proposalId: 'scene-365',
+        proposalVersion: 2,
+        sourceRevision: '8',
+        sourceSceneId: 'thomas_office',
+        targetSceneId: 'kimball_study',
+        requesterPlayerId: 'player-2',
+        requiredPlayerIds: ['player-1', 'player-2'],
+        acceptedPlayerIds: ['player-2'],
+        expiresAt: '2026-08-20T20:05:00Z',
+      },
+    })
+
+    expect(await screen.findByText(/前往/)).toBeInTheDocument()
+    expect(screen.getByText('1/2 人已确认')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '同意' }))
+    expect(mockRespondToSceneTransition).toHaveBeenCalledWith('player-1', {
+      proposalId: 'scene-365',
+      proposalVersion: 2,
+      sourceRevision: '8',
+      accept: true,
     })
   })
 

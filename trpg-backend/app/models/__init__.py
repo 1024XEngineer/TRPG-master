@@ -30,7 +30,9 @@ from app.models.engine import (
     ModuleVersion,
     PendingCheckDecisionRecord,
     RoomActionReservation,
+    SceneTransitionProposalRecord,
     TimeAdvanceProposalRecord,
+    TurnRunCutoverRecord,
 )
 from app.models.event import CheckResult, Event
 from app.models.memory import ConversationSummaryRecord, MemoryEntryRecord
@@ -69,7 +71,9 @@ __all__ = [
     "PendingCheckDecisionRecord",
     "Room",
     "RoomActionReservation",
+    "SceneTransitionProposalRecord",
     "TimeAdvanceProposalRecord",
+    "TurnRunCutoverRecord",
     "RoomSummary",
     "Scenario",
     "ScenarioScene",

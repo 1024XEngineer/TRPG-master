@@ -119,7 +119,6 @@ async def _active_record(
         )
         .order_by(TimeAdvanceProposalRecord.created_at.desc())
         .limit(1)
-        .with_for_update()
     )
 
 
@@ -504,6 +503,11 @@ class ConsentAwareAdjudicationEngine:
         try:
             return await self._engine.submit(request)
         except AdjudicationValidationError as exc:
+            if exc.result.code == "SCENE_TRANSITION_BLOCKED":
+                from app.service import scene_transition
+
+                async with self._session_factory() as db:
+                    return await scene_transition.create_from_adjudication(db, request)
             if exc.result.code != "TIME_ADVANCE_BLOCKED":
                 raise
             async with self._session_factory() as db:
@@ -514,6 +518,16 @@ class ConsentAwareAdjudicationEngine:
         request: GetAdjudicationStatusRequest,
     ) -> AdjudicationStatusView:
         async with self._session_factory() as db:
+            from app.service import scene_transition
+
+            scene_status = await scene_transition.get_status(
+                db,
+                room_id=request.room_id,
+                player_id=request.player_id,
+                action_request_id=request.action_request_id,
+            )
+            if scene_status is not None:
+                return scene_status
             record = await _record_for_action(
                 db,
                 room_id=request.room_id,
@@ -547,6 +561,16 @@ class ConsentAwareAdjudicationEngine:
         if recovered is not None:
             return recovered
         async with self._session_factory() as db:
+            from app.service import scene_transition
+
+            scene_recovered = await scene_transition.recover_action(
+                db,
+                room_id=request.room_id,
+                player_id=request.player_id,
+                action_request_id=request.action_request_id,
+            )
+            if scene_recovered is not None:
+                return scene_recovered
             record = await _record_for_action(
                 db,
                 room_id=request.room_id,
@@ -565,6 +589,7 @@ class ConsentAwareAdjudicationEngine:
                 action_request_id=record.action_request_id,
                 actor_id=adjudication.actor_id,
                 summary=adjudication.summary,
+                created_at=record.created_at,
                 execution=execution,
             )
 
@@ -575,6 +600,15 @@ class ConsentAwareAdjudicationEngine:
         player_id: str,
     ) -> str | None:
         async with self._session_factory() as db:
+            from app.service import scene_transition
+
+            scene_action = await scene_transition.find_active_action_for_player(
+                db,
+                room_id=room_id,
+                player_id=player_id,
+            )
+            if scene_action is not None:
+                return scene_action
             record = await db.scalar(
                 select(TimeAdvanceProposalRecord)
                 .where(
@@ -590,6 +624,17 @@ class ConsentAwareAdjudicationEngine:
         return await self._engine.find_active_action_for_player(
             room_id=room_id,
             player_id=player_id,
+        )
+
+    async def submit_with_scene_consent(
+        self,
+        request: SubmitAdjudicationRequest,
+        *,
+        consent_player_ids: tuple[str, ...],
+    ) -> AdjudicationExecution:
+        return await self._engine.submit_with_scene_consent(
+            request,
+            consent_player_ids=consent_player_ids,
         )
 
     async def decide(self, request):  # noqa: ANN001, ANN201

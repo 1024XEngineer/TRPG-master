@@ -170,6 +170,15 @@ class TimeAdvanceRespondPayload(CamelModel):
     accept: bool
 
 
+class SceneTransitionRespondPayload(CamelModel):
+    """玩家对一个冻结的共享场景切换提案作出同意或拒绝。"""
+
+    proposal_id: str = Field(..., min_length=1, max_length=100)
+    proposal_version: int = Field(..., ge=1)
+    source_revision: str = Field(..., min_length=1)
+    accept: bool
+
+
 # ── 服务端 → 客户端 ──────────────────────────────
 
 
@@ -241,6 +250,30 @@ class TimeAdvanceResolvedPayload(CamelModel):
     status: Literal["approved", "rejected", "expired", "stale"]
     target_day_index: int = Field(..., ge=0)
     target_hour_of_day: int = Field(..., ge=0, le=23)
+    committed_revision: str | None = None
+
+
+class SceneTransitionPendingPayload(CamelModel):
+    """广播完整待确认场景状态，供所有客户端幂等覆盖本地确认条。"""
+
+    proposal_id: str
+    proposal_version: int = Field(..., ge=1)
+    source_revision: str
+    source_scene_id: str
+    target_scene_id: str
+    requester_player_id: str
+    required_player_ids: list[str]
+    accepted_player_ids: list[str]
+    expires_at: UtcDatetime
+
+
+class SceneTransitionResolvedPayload(CamelModel):
+    """广播场景提案终态；批准时附带已经提交的权威 revision。"""
+
+    proposal_id: str
+    status: Literal["approved", "rejected", "expired", "stale"]
+    source_scene_id: str
+    target_scene_id: str
     committed_revision: str | None = None
 
 
@@ -317,7 +350,7 @@ class PlanProgressPayload(CamelModel):
     correlation_id: str
     current_step: int = Field(..., ge=1)
     completed_steps: int = Field(..., ge=0)
-    total_steps: int = Field(..., ge=2)
+    total_steps: int = Field(..., ge=1)
     phase: Literal[
         "understanding",
         "executing",

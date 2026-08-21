@@ -77,7 +77,7 @@ from app.core.action_plan_turn import (
     action_plan_turn_application,
 )
 from app.core.db import async_session_factory
-from app.core.engine import adjudication_engine_service
+from app.core.engine import adjudication_engine_service, legacy_single_action_recovery
 from app.core.turn import (
     ActorResolutionError,
     session_view_application,
@@ -119,6 +119,9 @@ from app.dto.ws import (
     RoomJoinPayload,
     RoomRejoinPayload,
     SanCheckRollPayload,
+    SceneTransitionPendingPayload,
+    SceneTransitionResolvedPayload,
+    SceneTransitionRespondPayload,
     ServerEnvelope,
     SessionBoundPayload,
     TimeAdvancePendingPayload,
@@ -135,11 +138,13 @@ from app.models.engine import (
     ActionPlanRunRecord,
     GameSession,
     RoomActionReservation,
+    SceneTransitionProposalRecord,
     TimeAdvanceProposalRecord,
 )
 from app.service import auth as auth_service
 from app.service import chat as chat_service
 from app.service import room as room_service
+from app.service import scene_transition as scene_transition_service
 from app.service import time_advance as time_advance_service
 from app.service.action_lock import action_lock_manager
 from app.service.ws_events import broadcast_room_state
@@ -184,6 +189,7 @@ async def _current_room_action_state(
         waiting = active.status in {
             "waiting_for_player",
             "awaiting_time_consent",
+            "awaiting_scene_consent",
             "needs_clarification",
             "retryable_failure",
         }
@@ -217,6 +223,28 @@ async def _current_room_action_state(
             actor_id=actor_id,
             client_action_id=time_proposal.parent_action_id,
             started_at=time_proposal.created_at,
+            revision=str(session.state_version),
+        )
+    scene_proposal = await db.scalar(
+        select(SceneTransitionProposalRecord)
+        .where(
+            SceneTransitionProposalRecord.room_id == room_id,
+            SceneTransitionProposalRecord.status.in_(("pending", "approved")),
+            SceneTransitionProposalRecord.narration_persisted.is_(False),
+        )
+        .order_by(SceneTransitionProposalRecord.created_at.desc())
+        .limit(1)
+    )
+    if scene_proposal is not None:
+        actor_id = scene_proposal.adjudication_json.get("actor_id")
+        if not isinstance(actor_id, str) or not actor_id:
+            raise ContractError("场景提案缺少行动 Actor")
+        return RoomActionStatePayload(
+            status=("awaiting_player" if scene_proposal.status == "pending" else "processing"),
+            player_id=scene_proposal.player_id,
+            actor_id=actor_id,
+            client_action_id=scene_proposal.parent_action_id,
+            started_at=scene_proposal.created_at,
             revision=str(session.state_version),
         )
     snapshot = action_lock_manager.snapshot(room_id)
@@ -408,6 +436,22 @@ async def _broadcast_time_advance(
     await manager.broadcast(room_id, envelope.model_dump(by_alias=True))
 
 
+async def _broadcast_scene_transition(
+    room_id: str,
+    payload: SceneTransitionPendingPayload | SceneTransitionResolvedPayload,
+) -> None:
+    event_type = (
+        "scene.transition.pending"
+        if isinstance(payload, SceneTransitionPendingPayload)
+        else "scene.transition.resolved"
+    )
+    envelope = ServerEnvelope(
+        type=event_type,
+        payload=payload.model_dump(by_alias=True, mode="json"),
+    )
+    await manager.broadcast(room_id, envelope.model_dump(by_alias=True))
+
+
 async def _send_turn_event(
     websocket: WebSocket,
     event: TurnEvent,
@@ -481,6 +525,15 @@ async def _send_turn_phase(
 
 
 async def _send_plan_progress(websocket: WebSocket, event) -> None:
+    # One-step runs are internal normalization and do not expose a useless
+    # 1/1 progress timeline. Keep this gate here so reconnect replay and live
+    # observer events share exactly the same behavior.
+    if event.total_steps == 1 and event.type in {
+        "plan.started",
+        "plan.step_changed",
+        "plan.completed",
+    }:
+        return
     payload = PlanProgressPayload(
         correlation_id=event.correlation_id,
         current_step=event.current_step,
@@ -496,6 +549,45 @@ async def _send_plan_progress(websocket: WebSocket, event) -> None:
             type=event.type,
             payload=payload.model_dump(by_alias=True),
         ).model_dump(by_alias=True),
+    )
+
+
+async def _resume_after_authoritative_decision(
+    db: AsyncSession,
+    *,
+    room_id: str,
+    player_id: str,
+    parent_action_id: str,
+    on_progress=None,
+    on_phase=None,
+) -> ActionPlanTurnResult:
+    """Resume a Run, or render a verified pre-cutover Engine action."""
+    if await action_plan_turn_application.get_plan(room_id, parent_action_id) is not None:
+        return await action_plan_turn_application.resume_pending(
+            room_id=room_id,
+            player_id=player_id,
+            parent_action_id=parent_action_id,
+            on_progress=on_progress,
+            on_phase=on_phase,
+        )
+    recovery = await legacy_single_action_recovery.recover(
+        GetAdjudicationStatusRequest(
+            room_id=room_id,
+            player_id=player_id,
+            action_request_id=parent_action_id,
+        )
+    )
+    if recovery is None:
+        raise TurnExecutionError(
+            "PLAN_RUN_MISSING",
+            "行动运行记录缺失，无法安全恢复",
+            retryable=False,
+        )
+    return await action_plan_turn_application.finish_legacy_recovery(
+        recovery,
+        room_id=room_id,
+        player_id=player_id,
+        on_phase=on_phase,
     )
 
 
@@ -517,6 +609,7 @@ async def _send_action_plan_result(
     room_id: str,
     player_id: str,
     result: ActionPlanTurnResult,
+    before_completed: Callable[[], Awaitable[None]] | None = None,
 ) -> bool:
     if result.waiting_for_player:
         execution = result.execution
@@ -542,6 +635,26 @@ async def _send_action_plan_result(
             # 先发布等待态，再发布具体提案，前端收到按钮时不会短暂保留 processing。
             await _broadcast_room_action_state(db, room_id)
             await _broadcast_time_advance(room_id, pending_time)
+            return False
+        if execution.status == "awaiting_scene_consent":
+            if execution.scene_transition_proposal_id is None:
+                raise ContractError("待确认行动缺少场景提案 ID")
+            await scene_transition_service.bind_parent_action(
+                db,
+                room_id=room_id,
+                proposal_id=execution.scene_transition_proposal_id,
+                player_id=player_id,
+                parent_action_id=result.player_input.client_action_id,
+            )
+            pending_scene = await scene_transition_service.get_pending(
+                db,
+                room_id,
+                engine=adjudication_engine_service,
+            )
+            if not isinstance(pending_scene, SceneTransitionPendingPayload):
+                raise ContractError("待确认行动缺少持久化场景提案")
+            await _broadcast_room_action_state(db, room_id)
+            await _broadcast_scene_transition(room_id, pending_scene)
             return False
         pending = AdjudicationPendingPayload(
             correlation_id=result.player_input.client_action_id,
@@ -574,6 +687,39 @@ async def _send_action_plan_result(
     # 权威状态已经提交，先为每名在线玩家独立投影；最终叙事发出后客户端可立即断开，
     # 因此不能把这项数据库工作留在叙事之后。
     await _broadcast_player_views(room_id)
+
+    deferred_progress: list[object] = []
+
+    async def _defer_plan_progress(event: object) -> None:
+        deferred_progress.append(event)
+
+    async def _finalize_before_completed() -> None:
+        # The narration event is already durable when this callback runs. Finish the
+        # Run before publishing turn.completed so an immediate next action cannot
+        # observe the previous Run as active.
+        with anyio.CancelScope(shield=True):
+            await time_advance_service.mark_narration_persisted(
+                db,
+                room_id=room_id,
+                parent_action_id=result.player_input.client_action_id,
+            )
+            await scene_transition_service.mark_narration_persisted(
+                db,
+                room_id=room_id,
+                parent_action_id=result.player_input.client_action_id,
+            )
+            await action_plan_turn_application.mark_narration_persisted(
+                room_id=room_id,
+                parent_action_id=result.player_input.client_action_id,
+                on_progress=_defer_plan_progress,
+            )
+            if before_completed is not None:
+                await before_completed()
+
+    async def _flush_deferred_progress() -> None:
+        for event in deferred_progress:
+            await _send_plan_progress(websocket, event)
+
     recorded = await _send_completed_turn_message(
         db,
         websocket,
@@ -583,20 +729,10 @@ async def _send_action_plan_result(
         client_action_id=result.player_input.client_action_id,
         player_view=result.player_view,
         narration=output,
+        before_completed=_finalize_before_completed,
+        after_narration=_flush_deferred_progress,
     )
-    # 客户端收到最终叙事后可能立即断开；尾部持久化必须屏蔽连接取消，否则会留下
-    # 已发叙事但 ActionPlan 仍占用房间的半完成状态。
     with anyio.CancelScope(shield=True):
-        await time_advance_service.mark_narration_persisted(
-            db,
-            room_id=room_id,
-            parent_action_id=result.player_input.client_action_id,
-        )
-        await action_plan_turn_application.mark_narration_persisted(
-            room_id=room_id,
-            parent_action_id=result.player_input.client_action_id,
-            on_progress=lambda event: _send_plan_progress(websocket, event),
-        )
         await _broadcast_room_action_state(db, room_id)
     return recorded
 
@@ -611,9 +747,23 @@ async def _send_completed_turn_message(
     client_action_id: str,
     player_view: PlayerView,
     narration: NarrationOutput,
+    before_completed: Callable[[], Awaitable[None]] | None = None,
+    after_narration: Callable[[], Awaitable[None]] | None = None,
 ) -> bool:
-    """Send one completed turn and persist its authoritative narration once."""
+    """Make completion durable, then preserve the established socket event order."""
 
+    recorded, persisted_narration = await _persist_turn_narration(
+        db,
+        room_id,
+        player_id,
+        client_action_id=client_action_id,
+        narration=narration,
+        actor_id=actor_id,
+        scene_id=player_view.scene_id,
+        view_revision=player_view.revision,
+    )
+    if before_completed is not None:
+        await before_completed()
     await _send_to_player(
         websocket,
         {
@@ -641,6 +791,13 @@ async def _send_completed_turn_message(
         scene_id=player_view.scene_id,
         view_revision=player_view.revision,
     )
+    if recorded:
+        await _emit_turn_narration(
+            websocket,
+            room_id,
+            client_action_id=client_action_id,
+            narration=persisted_narration,
+        )
     # 摘要是异步可重建读模型，不能阻塞本回合的权威叙事发送。
     summary_service = getattr(websocket.app.state, "conversation_summary_service", None)
     if summary_service is not None:
@@ -649,6 +806,8 @@ async def _send_completed_turn_message(
             summary_service.enqueue_room_if_needed(room_id=room_id),
             name=f"enqueue-conversation-summary-{room_id}",
         )
+    if after_narration is not None:
+        await after_narration()
     return recorded
 
 
@@ -680,7 +839,7 @@ async def _recover_persisted_turn_narration(
             return False
         actor_id = active.actor_id
     else:
-        recovery = await adjudication_engine_service.recover_action(
+        recovery = await legacy_single_action_recovery.recover(
             GetAdjudicationStatusRequest(
                 room_id=room_id,
                 player_id=player_id,
@@ -898,9 +1057,8 @@ async def _ensure_opening_narration(
     return True
 
 
-async def _deliver_turn_narration(
+async def _persist_turn_narration(
     db: AsyncSession,
-    websocket: WebSocket,
     room_id: str,
     player_id: str,
     *,
@@ -909,8 +1067,8 @@ async def _deliver_turn_narration(
     actor_id: str,
     scene_id: str,
     view_revision: str,
-) -> bool:
-    """持久化去重成功后才发送一次动作叙事。"""
+) -> tuple[bool, NarrationOutput]:
+    """Persist one authoritative narration before its completion is announced."""
 
     text = normalize_narration_text(narration.text)
     completion = narration.model_copy(update={"text": text})
@@ -937,31 +1095,46 @@ async def _deliver_turn_narration(
         correlation_id=client_action_id,
     )
     if not recorded:
-        return False
+        return False, completion
     log_narration_output(
         room_id=room_id,
         correlation_id=client_action_id,
         text=text,
         clarification=completion.kind == "clarification",
     )
+    return True, completion
+
+
+async def _emit_turn_narration(
+    websocket: WebSocket,
+    room_id: str,
+    *,
+    client_action_id: str,
+    narration: NarrationOutput,
+) -> None:
+    """Emit a narration that has already passed validation and persistence."""
+
+    push = NarrationPushPayload(
+        message_id=client_action_id,
+        text=narration.text,
+    )
     # 澄清叙事只对发起者可见，它的渐进片段必须走同一条投递通道，
     # 否则片段会广播给全房间、泄露只该给一个人看的内容。
     send = (
         partial(_send_to_player, websocket)
-        if completion.kind == "clarification"
+        if narration.kind == "clarification"
         else partial(manager.broadcast, room_id)
     )
     await _stream_narration_chunks(
         send,
         message_id=client_action_id,
-        text=text,
+        text=narration.text,
     )
     envelope = ServerEnvelope(
         type="narration.push",
         payload=push.model_dump(by_alias=True),
     )
     await send(envelope.model_dump(by_alias=True))
-    return True
 
 
 def _map_turn_error(exc: Exception) -> tuple[str, str, bool]:
@@ -1315,6 +1488,7 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                         ):
                             bound_player_id = player_id
                             assert bound_player_id is not None
+                            current_view = None
                             try:
                                 current_view = await session_view_application.current_player_view(
                                     room_id=room_id,
@@ -1336,7 +1510,21 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                             # before this lookup. Together with broadcast-after-commit,
                             # that ordering guarantees a reconnecting client receives
                             # either the live opening or this persisted replay.
-                            pending_time = await time_advance_service.get_pending(
+                            active_plan = await action_plan_turn_application.active_for_room(
+                                room_id
+                            )
+                            pending_time = None
+                            if (
+                                current_view is not None
+                                and active_plan is not None
+                                and active_plan.status == "awaiting_time_consent"
+                            ):
+                                pending_time = await time_advance_service.get_pending(
+                                    db,
+                                    room_id,
+                                    engine=adjudication_engine_service,
+                                )
+                            pending_scene = await scene_transition_service.get_pending(
                                 db,
                                 room_id,
                                 engine=adjudication_engine_service,
@@ -1360,13 +1548,37 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                         ),
                                     ).model_dump(by_alias=True),
                                 )
-                            active_plan = await action_plan_turn_application.active_for_room(
-                                room_id
-                            )
+                            if pending_scene is not None:
+                                event_type = (
+                                    "scene.transition.pending"
+                                    if isinstance(pending_scene, SceneTransitionPendingPayload)
+                                    else "scene.transition.resolved"
+                                )
+                                await _send_to_player(
+                                    websocket,
+                                    ServerEnvelope(
+                                        type=event_type,
+                                        payload=pending_scene.model_dump(
+                                            by_alias=True,
+                                            mode="json",
+                                        ),
+                                    ).model_dump(by_alias=True),
+                                )
                             if active_plan is not None and active_plan.player_id == bound_player_id:
-                                if active_plan.status == "awaiting_time_consent" and not isinstance(
-                                    pending_time,
-                                    TimeAdvancePendingPayload,
+                                if (
+                                    active_plan.status
+                                    in {
+                                        "awaiting_time_consent",
+                                        "awaiting_scene_consent",
+                                    }
+                                    and not isinstance(
+                                        pending_time,
+                                        TimeAdvancePendingPayload,
+                                    )
+                                    and not isinstance(
+                                        pending_scene,
+                                        SceneTransitionPendingPayload,
+                                    )
                                 ):
                                     # 服务在 Engine 提交后、PlanRun 恢复前退出时，
                                     # 重连作为恢复 worker 继续原计划并生成叙事。
@@ -1427,6 +1639,7 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                                     in {
                                                         "waiting_for_player",
                                                         "awaiting_time_consent",
+                                                        "awaiting_scene_consent",
                                                     }
                                                     else "understanding"
                                                 ),
@@ -1461,47 +1674,58 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                                 ).model_dump(by_alias=True),
                                             )
                             else:
-                                # No ActionPlan-driven pending decision — but a
-                                # standalone single-action check (not part of a
-                                # plan) has no room/player-scoped record the
-                                # client can rediscover on its own after a
-                                # refresh drops its local pendingAdjudication
-                                # state; look one up explicitly so reconnect
-                                # resurfaces it exactly like the plan case above.
-                                action_request_id = (
+                                legacy_request_id = (
                                     await adjudication_engine_service.find_active_action_for_player(
                                         room_id=room_id,
                                         player_id=bound_player_id,
                                     )
                                 )
-                                if action_request_id is not None:
-                                    replayed = await _recover_persisted_turn_narration(
-                                        db,
-                                        websocket,
-                                        room_id=room_id,
-                                        player_id=bound_player_id,
-                                        client_action_id=action_request_id,
-                                    )
-                                    if replayed:
-                                        await time_advance_service.mark_narration_persisted(
-                                            db,
+                                if legacy_request_id is not None:
+                                    recovery = await legacy_single_action_recovery.recover(
+                                        GetAdjudicationStatusRequest(
                                             room_id=room_id,
-                                            parent_action_id=action_request_id,
+                                            player_id=bound_player_id,
+                                            action_request_id=legacy_request_id,
+                                        )
+                                    )
+                                    if recovery is not None and recovery.execution.status in {
+                                        "awaiting_skill_choice",
+                                        "awaiting_post_roll_decision",
+                                    }:
+                                        execution = recovery.execution
+                                        pending = AdjudicationPendingPayload(
+                                            correlation_id=legacy_request_id,
+                                            plan_id=None,
+                                            source_revision=execution.view_revision,
+                                            status=_require_pending_adjudication_status(
+                                                execution.status
+                                            ),
+                                            pending_decision=execution.pending_decision,
+                                            check_run=execution.check_run,
+                                        )
+                                        await _send_to_player(
+                                            websocket,
+                                            ServerEnvelope(
+                                                type="adjudication.pending",
+                                                payload=pending.model_dump(
+                                                    by_alias=True,
+                                                    mode="json",
+                                                ),
+                                            ).model_dump(by_alias=True),
                                         )
                                     else:
-                                        recovered = (
-                                            await action_plan_turn_application.resume_single(
-                                                room_id=room_id,
-                                                player_id=bound_player_id,
-                                                parent_action_id=action_request_id,
-                                            )
+                                        logger.error(
+                                            "turn_run_missing_on_reconnect",
+                                            room=room_id,
+                                            player=bound_player_id,
+                                            action=legacy_request_id,
+                                            reason="engine_action_not_legacy_eligible",
                                         )
-                                        await _send_action_plan_result(
-                                            db,
+                                        await _send_error(
                                             websocket,
-                                            room_id,
-                                            bound_player_id,
-                                            recovered,
+                                            "PLAN_RUN_MISSING",
+                                            "行动运行记录缺失，无法安全恢复；请重新提交行动",
+                                            correlation_id=legacy_request_id,
                                         )
                         else:
                             return
@@ -1582,12 +1806,56 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 room_id,
                                 force_processing=True,
                             )
-                            resumed = await action_plan_turn_application.resume_pending(
+                            resumed = await _resume_after_authoritative_decision(
+                                db,
                                 room_id=room_id,
                                 player_id=resume_player_id,
                                 parent_action_id=action_request_id,
                             )
                             # 最后一票可能来自队友，语叙和私有视图必须发给原行动者。
+                            for target_socket in manager.player_connections(
+                                room_id,
+                                resume_player_id,
+                            ):
+                                await _send_action_plan_result(
+                                    db,
+                                    target_socket,
+                                    room_id,
+                                    resume_player_id,
+                                    resumed,
+                                )
+                    elif event_type == "scene.transition.respond":
+                        response_payload = SceneTransitionRespondPayload.model_validate(raw_payload)
+                        try:
+                            (
+                                result,
+                                resume_player_id,
+                                action_request_id,
+                            ) = await scene_transition_service.respond(
+                                db,
+                                engine=adjudication_engine_service,
+                                room_id=room_id,
+                                player_id=bound_player_id,
+                                proposal_id=response_payload.proposal_id,
+                                proposal_version=response_payload.proposal_version,
+                                source_revision=response_payload.source_revision,
+                                accept=response_payload.accept,
+                            )
+                        except scene_transition_service.SceneTransitionError as exc:
+                            await _send_error(websocket, "SCENE_TRANSITION_CONFLICT", str(exc))
+                            continue
+                        await _broadcast_scene_transition(room_id, result)
+                        if resume_player_id is not None and action_request_id is not None:
+                            await _broadcast_room_action_state(
+                                db,
+                                room_id,
+                                force_processing=True,
+                            )
+                            resumed = await action_plan_turn_application.resume_pending(
+                                room_id=room_id,
+                                player_id=resume_player_id,
+                                parent_action_id=action_request_id,
+                            )
                             for target_socket in manager.player_connections(
                                 room_id,
                                 resume_player_id,
@@ -1694,12 +1962,25 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                     db,
                                 ),
                             )
+
+                            async def _release_action_before_completed(
+                                token: str = lock_token,
+                            ) -> None:
+                                with anyio.CancelScope(shield=True):
+                                    action_lock_manager.release(room_id, token)
+                                    await _broadcast_room_action_state_fresh(room_id)
+
                             await _send_action_plan_result(
                                 db,
                                 websocket,
                                 room_id,
                                 bound_player_id,
                                 result,
+                                before_completed=(
+                                    _release_action_before_completed
+                                    if not result.waiting_for_player
+                                    else None
+                                ),
                             )
                         except Exception as exc:
                             code, _, _ = _map_turn_error(exc)
@@ -1771,7 +2052,8 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 client_action_id=choice.client_action_id,
                             ):
                                 continue
-                            result = await action_plan_turn_application.resume_pending(
+                            result = await _resume_after_authoritative_decision(
+                                db,
                                 room_id=room_id,
                                 player_id=bound_player_id,
                                 parent_action_id=choice.client_action_id,
@@ -1846,7 +2128,8 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 client_action_id=choice.client_action_id,
                             ):
                                 continue
-                            result = await action_plan_turn_application.resume_pending(
+                            result = await _resume_after_authoritative_decision(
+                                db,
                                 room_id=room_id,
                                 player_id=bound_player_id,
                                 parent_action_id=choice.client_action_id,

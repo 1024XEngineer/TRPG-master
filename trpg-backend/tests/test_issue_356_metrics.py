@@ -51,4 +51,7 @@ def test_aggregate_scenario_keeps_counts_and_percentiles_but_not_sample_data() -
     assert summary["first_narration_completion_ms"]["p95"] == 30.0
     assert summary["end_to_end_ms"]["p95"] == 30.0
     assert summary["planner_calls"]["per_sample_mean"] == 1.0
+    assert summary["model_calls"]["total"] == 0
+    assert summary["input_tokens"]["total"] == 0
+    assert summary["deterministic_rule_first_rate"] is None
     assert "samples" not in summary

@@ -35,8 +35,9 @@ from collaboration_framework.contracts import (
 from collaboration_framework.host.application import ActionPlanNarrator
 from starlette.testclient import TestClient
 
-from app.adapters import structured_http
+from app.adapters import openai_models, structured_http
 from app.controller import ws as ws_controller
+from app.core import action_plan_turn
 from app.core.action_plan_turn import build_action_plan_turn_application
 from app.core.config import Settings
 from app.main import app
@@ -52,6 +53,7 @@ from tests.test_ws import (
 )
 
 COUNT_FIELDS = (
+    "model_calls",
     "planner_calls",
     "step_adjudicator_calls",
     "narrator_calls",
@@ -61,6 +63,11 @@ COUNT_FIELDS = (
     "plan_cas_calls",
     "repair_calls",
     "model_transport_retries",
+    "structured_retries",
+    "input_tokens",
+    "output_tokens",
+    "deterministic_hits",
+    "rule_first_hits",
 )
 
 
@@ -209,6 +216,9 @@ class _Probe:
 
     def __enter__(self) -> _Probe:
         self._wrap_async(self.application._planner, "generate", "planner_calls")
+        semantic_planner = getattr(self.application, "_semantic_planner", None)
+        if semantic_planner is not None:
+            self._wrap_async(semantic_planner, "generate", "planner_calls")
         adjudicator = self.application._orchestrator._adjudicator
         self._wrap_async(
             adjudicator,
@@ -229,6 +239,9 @@ class _Probe:
         self._wrap_async(store, "create", "plan_create_calls")
         self._wrap_async(store, "compare_and_swap", "plan_cas_calls")
         original_warning = structured_http.logger.warning
+        original_model_info = openai_models.logger.info
+        original_model_warning = openai_models.logger.warning
+        original_turn_info = action_plan_turn.logger.info
 
         def measured_warning(event: str, *args, **kwargs):  # noqa: ANN002, ANN003, ANN202
             if event == "structured_json_request_retry":
@@ -237,6 +250,42 @@ class _Probe:
 
         self._restores.append((structured_http.logger, "warning", original_warning))
         structured_http.logger.warning = measured_warning
+
+        def measured_model_info(event: str, *args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+            if event == "structured_model_call_completed":
+                self.counts["model_calls"] += 1
+                self.counts["input_tokens"] += int(kwargs.get("prompt_tokens") or 0)
+                self.counts["output_tokens"] += int(kwargs.get("completion_tokens") or 0)
+            return original_model_info(event, *args, **kwargs)
+
+        def measured_model_warning(  # noqa: ANN202
+            event: str,
+            *args,
+            **kwargs,  # noqa: ANN002, ANN003
+        ):
+            if event == "turn_planner_rejected":
+                self.counts["structured_retries"] += 1
+            return original_model_warning(event, *args, **kwargs)
+
+        def measured_turn_info(event: str, *args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+            if event == "action_plan_step_adjudicator_completed":
+                path = kwargs.get("path")
+                if path == "deterministic":
+                    self.counts["deterministic_hits"] += 1
+                elif path == "rule_first":
+                    self.counts["rule_first_hits"] += 1
+            return original_turn_info(event, *args, **kwargs)
+
+        self._restores.extend(
+            (
+                (openai_models.logger, "info", original_model_info),
+                (openai_models.logger, "warning", original_model_warning),
+                (action_plan_turn.logger, "info", original_turn_info),
+            )
+        )
+        openai_models.logger.info = measured_model_info
+        openai_models.logger.warning = measured_model_warning
+        action_plan_turn.logger.info = measured_turn_info
         return self
 
     def __exit__(self, exc_type, exc, traceback) -> None:  # noqa: ANN001

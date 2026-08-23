@@ -46,11 +46,42 @@ from tests.test_ws import (
     advance_to_building,
     complete_character,
     create_room,
+    receive_json,
     receive_replayed_opening,
-    receive_until,
     register_and_login,
     start_game,
 )
+
+
+def _benchmark_receive_timeout_seconds() -> float:
+    timeout_seconds = float(os.getenv("ISSUE_357_BENCHMARK_RECEIVE_TIMEOUT_SECONDS", "30"))
+    if timeout_seconds <= 0:
+        raise ValueError("ISSUE_357_BENCHMARK_RECEIVE_TIMEOUT_SECONDS must be positive")
+    return timeout_seconds
+
+
+def _benchmark_receive_until(
+    ws,
+    predicate,
+    *,
+    limit: int = 24,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Receive benchmark events with a deadline large enough for real models.
+
+    The normal websocket tests intentionally use a five-second assertion
+    timeout. A real turn can legitimately spend several seconds inside each
+    structured model call, so the benchmark needs its own deadline instead of
+    classifying a slow but successful turn as a provider failure.
+    """
+    timeout_seconds = _benchmark_receive_timeout_seconds()
+    seen: list[dict[str, Any]] = []
+    for _ in range(limit):
+        message = receive_json(ws, timeout=timeout_seconds)
+        seen.append(message)
+        if predicate(message):
+            return message, seen
+    raise AssertionError(f"expected WebSocket event not found; seen_count={len(seen)}")
+
 
 COUNT_FIELDS = (
     "model_calls",
@@ -69,6 +100,13 @@ COUNT_FIELDS = (
     "output_tokens",
     "deterministic_hits",
     "rule_first_hits",
+    "comparable_adjudicator_calls",
+    "comparable_deterministic_hits",
+    "comparable_rule_first_hits",
+    "adjudicator_deterministic_paths",
+    "adjudicator_rule_first_paths",
+    "adjudicator_model_paths",
+    "adjudicator_repair_paths",
 )
 
 
@@ -233,6 +271,10 @@ class _Probe:
     def __init__(self, application, *, lose_first_commit_response: bool = False) -> None:  # noqa: ANN001
         self.application = application
         self.counts: defaultdict[str, int] = defaultdict(int)
+        self.last_structured_stage: str | None = None
+        self.last_structured_failure_stage: str | None = None
+        self.last_failure_stage: str | None = None
+        self.stage_latencies: defaultdict[str, list[float]] = defaultdict(list)
         self._lose_first_commit_response = lose_first_commit_response
         self._commit_response_lost = False
         self._restores: list[tuple[object, str, object]] = []
@@ -265,6 +307,20 @@ class _Probe:
         original_model_info = openai_models.logger.info
         original_model_warning = openai_models.logger.warning
         original_turn_info = action_plan_turn.logger.info
+        original_turn_warning = action_plan_turn.logger.warning
+
+        def model_stage(schema_name: object) -> str | None:
+            if not isinstance(schema_name, str):
+                return None
+            if schema_name == "trpg_turn_plan":
+                return "planner"
+            if schema_name == "trpg_host_turn_decision":
+                return "legacy_producer"
+            if schema_name == "trpg_action_plan_step_adjudication":
+                return "step_adjudicator"
+            if schema_name == "trpg_action_plan_narration":
+                return "narrator"
+            return None
 
         def measured_warning(event: str, *args, **kwargs):  # noqa: ANN002, ANN003, ANN202
             if event == "structured_json_request_retry":
@@ -273,6 +329,12 @@ class _Probe:
             elif event == "structured_model_call_failed":
                 self.counts["model_calls"] += 1
                 self.counts["transport_calls"] += 1
+                stage = model_stage(kwargs.get("stage"))
+                if stage is not None and kwargs.get("duration_ms") is not None:
+                    self.stage_latencies[stage].append(float(kwargs["duration_ms"]))
+                self.last_structured_stage = stage
+                self.last_structured_failure_stage = stage
+                self.last_failure_stage = stage
             return original_warning(event, *args, **kwargs)
 
         self._restores.append((structured_http.logger, "warning", original_warning))
@@ -284,6 +346,10 @@ class _Probe:
                 self.counts["transport_calls"] += 1
                 self.counts["input_tokens"] += int(kwargs.get("prompt_tokens") or 0)
                 self.counts["output_tokens"] += int(kwargs.get("completion_tokens") or 0)
+                stage = model_stage(kwargs.get("stage"))
+                if stage is not None and kwargs.get("duration_ms") is not None:
+                    self.stage_latencies[stage].append(float(kwargs["duration_ms"]))
+                self.last_structured_stage = stage
             return original_model_info(event, *args, **kwargs)
 
         def measured_model_warning(  # noqa: ANN202
@@ -298,22 +364,45 @@ class _Probe:
         def measured_turn_info(event: str, *args, **kwargs):  # noqa: ANN002, ANN003, ANN202
             if event == "action_plan_step_adjudicator_completed":
                 path = kwargs.get("path")
+                step_index = kwargs.get("step_index")
+                if isinstance(step_index, int) and step_index > 0:
+                    self.counts["comparable_adjudicator_calls"] += 1
                 if path == "deterministic":
                     self.counts["deterministic_hits"] += 1
+                    self.counts["adjudicator_deterministic_paths"] += 1
+                    if isinstance(step_index, int) and step_index > 0:
+                        self.counts["comparable_deterministic_hits"] += 1
                 elif path == "rule_first":
                     self.counts["rule_first_hits"] += 1
+                    self.counts["adjudicator_rule_first_paths"] += 1
+                    if isinstance(step_index, int) and step_index > 0:
+                        self.counts["comparable_rule_first_hits"] += 1
+                elif path == "model":
+                    self.counts["adjudicator_model_paths"] += 1
+                elif path == "repair":
+                    self.counts["adjudicator_repair_paths"] += 1
             return original_turn_info(event, *args, **kwargs)
+
+        def measured_turn_warning(event: str, *args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+            if event in {
+                "action_plan_step_adjudication_failed",
+                "action_plan_step_adjudication_unclassified",
+            }:
+                self.last_failure_stage = "step_adjudicator"
+            return original_turn_warning(event, *args, **kwargs)
 
         self._restores.extend(
             (
                 (openai_models.logger, "info", original_model_info),
                 (openai_models.logger, "warning", original_model_warning),
                 (action_plan_turn.logger, "info", original_turn_info),
+                (action_plan_turn.logger, "warning", original_turn_warning),
             )
         )
         openai_models.logger.info = measured_model_info
         openai_models.logger.warning = measured_model_warning
         action_plan_turn.logger.info = measured_turn_info
+        action_plan_turn.logger.warning = measured_turn_warning
         return self
 
     def __exit__(self, exc_type, exc, traceback) -> None:  # noqa: ANN001
@@ -512,7 +601,7 @@ def _settle_pending(ws, room: dict[str, Any], pending: dict[str, Any]) -> tuple[
             )
         else:
             raise AssertionError(f"unsupported pending status: {status}")
-        stop, seen = receive_until(
+        stop, seen = _benchmark_receive_until(
             ws,
             lambda message: (
                 _is_completed(message)
@@ -542,6 +631,8 @@ def _run_sample(
     first_pending_ms: float | None = None
     start = 0.0
     end_to_end_ms = 0.0
+    terminal_event = "none"
+    failure_stage: str | None = None
     with _application_components(application), _mute_content_logs():
         lose_response = False if real_mode else _configure_fake(application, scenario)
         with _Probe(application, lose_first_commit_response=lose_response) as probe:
@@ -550,7 +641,7 @@ def _run_sample(
                 start = time.perf_counter()
                 try:
                     _submit(ws, room, action_id, scenario)
-                    stop, _ = receive_until(
+                    stop, _ = _benchmark_receive_until(
                         ws,
                         lambda message: (
                             _is_completed(message)
@@ -577,22 +668,36 @@ def _run_sample(
                                     },
                                 }
                             )
-                            stop, _ = receive_until(ws, _is_completed, limit=60)
+                            stop, _ = _benchmark_receive_until(ws, _is_completed, limit=60)
                         else:
                             stop, _ = _settle_pending(ws, room, stop)
                     if stop.get("type") == "turn.failed":
                         failure_code = str(stop.get("payload", {}).get("code", "TURN_FAILED"))
+                        terminal_event = "failed"
+                    elif _is_completed(stop):
+                        terminal_event = "completed"
                     if scenario == "single_narrator_retry" and not real_mode:
                         if failure_code != "PLAN_NARRATOR_FAILED":
                             raise AssertionError(f"expected narrator failure, got {failure_code}")
                         failure_code = None
                         _submit(ws, room, action_id, scenario)
-                        stop, _ = receive_until(ws, _is_completed, limit=60)
+                        stop, _ = _benchmark_receive_until(ws, _is_completed, limit=60)
+                        terminal_event = "completed"
                 except AssertionError:
                     if not real_mode:
                         raise
                     failure_code = "BENCHMARK_TIMEOUT"
+                    terminal_event = "none"
                 end_to_end_ms = (time.perf_counter() - start) * 1000
+                if failure_code is not None:
+                    if failure_code == "BENCHMARK_TIMEOUT":
+                        failure_stage = "websocket_wait"
+                    elif failure_code == "PLAN_NARRATOR_FAILED":
+                        failure_stage = "narrator"
+                    elif failure_code == "MODEL_OUTPUT_UNREADABLE":
+                        failure_stage = probe.last_failure_stage or "step_adjudicator"
+                    else:
+                        failure_stage = probe.last_failure_stage or "unknown"
             finally:
                 socket.__exit__(None, None, None)
         counts = {field: probe.counts[field] for field in COUNT_FIELDS}
@@ -605,9 +710,14 @@ def _run_sample(
     step_count = len(run.steps) if run is not None else expected_steps
     sample = {
         "failure_code": failure_code,
+        "failure_stage": failure_stage,
+        "terminal_event": terminal_event,
         "step_count": step_count,
         "end_to_end_ms": end_to_end_ms,
         "first_pending_ms": first_pending_ms,
+        "model_stage_latency_ms": {
+            stage: list(values) for stage, values in probe.stage_latencies.items()
+        },
         **counts,
     }
     assert_sanitized_report(sample)
@@ -730,6 +840,7 @@ def test_issue_356_turn_run_benchmark(
         "scenario_repeats": repeats,
         "configuration": {
             "transport_call_budget": transport_call_budget,
+            "websocket_receive_timeout_seconds": _benchmark_receive_timeout_seconds(),
             "host_max_attempts": settings.model_client_max_attempts,
             "host_retry_backoff_seconds": settings.model_client_retry_backoff_seconds,
         },

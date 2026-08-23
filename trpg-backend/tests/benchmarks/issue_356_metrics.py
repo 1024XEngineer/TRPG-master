@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections import Counter
 from collections.abc import Iterable, Mapping
 from typing import Any
 
@@ -97,6 +98,13 @@ def aggregate_scenario(samples: list[dict[str, Any]]) -> dict[str, Any]:
         "output_tokens",
         "deterministic_hits",
         "rule_first_hits",
+        "comparable_adjudicator_calls",
+        "comparable_deterministic_hits",
+        "comparable_rule_first_hits",
+        "adjudicator_deterministic_paths",
+        "adjudicator_rule_first_paths",
+        "adjudicator_model_paths",
+        "adjudicator_repair_paths",
     )
     result: dict[str, Any] = {
         "sample_count": len(samples),
@@ -117,7 +125,25 @@ def aggregate_scenario(samples: list[dict[str, Any]]) -> dict[str, Any]:
                 if sample["failure_code"] is not None
             }
         ),
+        "failure_stages": dict(
+            sorted(
+                Counter(
+                    str(sample["failure_stage"])
+                    for sample in samples
+                    if sample.get("failure_stage") is not None
+                ).items()
+            )
+        ),
+        "terminal_events": dict(
+            sorted(Counter(str(sample.get("terminal_event", "none")) for sample in samples).items())
+        ),
         "step_counts": sorted({int(sample["step_count"]) for sample in samples}),
+        "step_count_distribution": {
+            str(step_count): count
+            for step_count, count in sorted(
+                Counter(int(sample["step_count"]) for sample in samples).items()
+            )
+        },
         "end_to_end_ms": latency_summary(
             sample["end_to_end_ms"] for sample in samples if sample["end_to_end_ms"] is not None
         ),
@@ -146,5 +172,28 @@ def aggregate_scenario(samples: list[dict[str, Any]]) -> dict[str, Any]:
     result["deterministic_rule_first_rate"] = (
         round(fast_path / adjudicated, 4) if adjudicated else None
     )
+    stage_latency_values: dict[str, list[float]] = {}
+    for sample in samples:
+        for stage, values in sample.get("model_stage_latency_ms", {}).items():
+            stage_latency_values.setdefault(str(stage), []).extend(float(value) for value in values)
+    result["model_stage_latency_ms"] = {
+        stage: latency_summary(values) for stage, values in sorted(stage_latency_values.items())
+    }
+    comparable_adjudicated = sum(
+        sample.get("comparable_adjudicator_calls", 0) for sample in samples
+    )
+    comparable_fast_path = sum(
+        sample.get("comparable_deterministic_hits", 0) + sample.get("comparable_rule_first_hits", 0)
+        for sample in samples
+    )
+    result["comparable_deterministic_rule_first_rate"] = (
+        round(comparable_fast_path / comparable_adjudicated, 4) if comparable_adjudicated else None
+    )
+    result["step_adjudicator_paths"] = {
+        "deterministic": result["adjudicator_deterministic_paths"],
+        "rule_first": result["adjudicator_rule_first_paths"],
+        "model": result["adjudicator_model_paths"],
+        "repair": result["adjudicator_repair_paths"],
+    }
     assert_sanitized_report(result)
     return result

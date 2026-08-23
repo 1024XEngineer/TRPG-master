@@ -3,7 +3,7 @@
 from collaboration_framework.contracts import ActionPlanPolicy
 
 PROMPT_VERSION = "trpg-host-intent-v5"
-TURN_PLANNER_PROMPT_VERSION = "trpg-turn-planner-v1"
+TURN_PLANNER_PROMPT_VERSION = "trpg-turn-planner-v2"
 
 
 def turn_planning_instructions(policy: ActionPlanPolicy) -> str:
@@ -21,6 +21,11 @@ def turn_planning_instructions(policy: ActionPlanPolicy) -> str:
   wait 生成独立步骤。不得预判目的地中的人物、物品、状态或结果。
 - step.kind 只能是 travel、wait、rest、action、dialogue；步骤不得分支、循环、并行或动态追加。
 - plan.goal、semantic_goal 和 public_progress_label 必须完全玩家安全，只描述玩家希望完成的事。
+- 玩家明确说出的 PlayerView 公开地点、人物、物件名称或别名，以及动作限定词，必须在对应
+  semantic_goal 中保留足以让后续基于最新 PlayerView 唯一识别目标的公开文字。不得把明确名称
+  泛化成“眼前的人”“那里”或其他会丢失唯一识别线索的说法；玩家原本只使用代词时才保留代词。
+- 公开文字锚点只能来自玩家输入或 PlayerView 的公开字段；不得补写 Keeper-only 名称、目标 ID、
+  裁决、效果、检定或任何隐藏信息，也不得用相似名称替换玩家明确指定的目标。
 - 严格只输出 ActionPlan schema 已声明的字段；不得添加执行细节、对象标识、规则结论、
   隐藏信息或未来结果。
 - 当前技术上限是 {policy.max_plan_steps} 步。超过上限时不得截断或假装完成，应请求玩家缩小目标。

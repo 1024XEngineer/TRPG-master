@@ -22,6 +22,7 @@ from app.core.config import Settings
 from app.main import app
 from tests.benchmarks.issue_356_metrics import aggregate_scenario, assert_sanitized_report
 from tests.benchmarks.issue_356_turn_run import (
+    _benchmark_receive_timeout_seconds,
     _disable_background_summary,
     _git_revision,
     _run_sample,
@@ -46,6 +47,21 @@ def test_issue_357_semantic_turn_run_benchmark(
     settings = Settings()
     if settings.host_model_provider == "fake":
         raise RuntimeError("semantic E2E benchmark requires a real HOST_MODEL_PROVIDER")
+    missing_planner_env = [
+        name
+        for name in (
+            "TURN_PLANNER_PROVIDER",
+            "TURN_PLANNER_API_KEY",
+            "TURN_PLANNER_BASE_URL",
+            "TURN_PLANNER_MODEL",
+        )
+        if not os.environ.get(name, "").strip()
+    ]
+    if missing_planner_env:
+        raise RuntimeError(
+            "semantic E2E benchmark requires explicit Planner configuration: "
+            + ", ".join(missing_planner_env)
+        )
     if settings.turn_planner_provider == "fake" or settings.turn_planner_provider is None:
         raise RuntimeError("semantic E2E benchmark requires a real TURN_PLANNER_PROVIDER")
     settings = settings.model_copy(update={"turn_planner_rollout_percent": 100})
@@ -122,6 +138,7 @@ def test_issue_357_semantic_turn_run_benchmark(
             "planner_retry_backoff_seconds": (settings.turn_planner_retry_backoff_seconds),
             "rollout_percent": 100,
             "transport_call_budget": transport_call_budget,
+            "websocket_receive_timeout_seconds": _benchmark_receive_timeout_seconds(),
             "host_max_attempts": settings.model_client_max_attempts,
             "host_retry_backoff_seconds": settings.model_client_retry_backoff_seconds,
         },

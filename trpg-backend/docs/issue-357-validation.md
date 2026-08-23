@@ -36,13 +36,16 @@ cd trpg-backend
 脚本把 `TURN_PLANNER_TIMEOUT_SECONDS=5`、`TURN_PLANNER_MAX_ATTEMPTS=2` 和
 `TURN_PLANNER_RETRY_BACKOFF_SECONDS=0.25` 固定在测试进程内。全局
 `TURN_PLANNER_ROLLOUT_PERCENT` 保持 `0`；仅 semantic E2E 工具在进程内构造 100% 的应用，
-不修改部署配置。默认结果目录为 `/tmp/issue-357-validation-<timestamp>`，权限由 `umask 077`
+不修改部署配置。benchmark 的 WebSocket 单次接收等待默认是 `30s`，可用
+`ISSUE_357_BENCHMARK_RECEIVE_TIMEOUT_SECONDS` 覆盖；它与模型请求 timeout 分开，避免把真实
+模型处理时间误报成 `BENCHMARK_TIMEOUT`。默认结果目录为 `/tmp/issue-357-validation-<timestamp>`，权限由 `umask 077`
 限制。环境文件内容、单条输入、Prompt、模型正文、Keeper payload 和逐次样本均不写入报告。
 
-本机 `.env` 如果只有原有的 `DEEPSEEK_*` 配置，可以不重复填写 `TURN_PLANNER_*`；脚本会在
-进程内将 Planner 的 provider、endpoint、key 和模型映射为同一组值，同时仍创建独立 Planner
-client。当前官方 endpoint 的可用模型是 `deepseek-chat`，因此本次验证使用它；此前的
-`deepseek/deepseek-v4-flash` 是兼容网关模型名，不能与 `https://api.deepseek.com` 混用。
+即使 Planner 与 Host 目前使用相同的 DeepSeek key、endpoint 或模型，也必须在环境文件中
+显式填写全部 `TURN_PLANNER_*` 字段。验证脚本不再从 `DEEPSEEK_*` 静默回退，避免把
+“独立 Planner 配置”误报成独立模型结果。当前官方 endpoint 的可用模型是 `deepseek-chat`，
+因此可以显式把 Planner 也锁定为 `deepseek-chat`；`deepseek/deepseek-v4-flash` 是兼容网关
+模型名，不能与 `https://api.deepseek.com` 混用。
 
 ## 执行规模
 
@@ -66,7 +69,9 @@ Round 1 按 legacy、semantic 顺序执行；Round 2 立即反转为 semantic、
 40 项玩家安全语料覆盖确定性行动、复杂一步、对话与 Runtime 创建、2..N 多目标、同行前置、
 pending、Narrator、多语言、标点和模糊指代。E2E 固定覆盖 `real_observation`、
 `real_investigation`、`real_multi_step`。两类 producer 使用同一 `PlayerView`；legacy 通过
-`PromptHostTurnDecisionModel`，semantic 通过 `PromptTurnPlanner`。
+`PromptHostTurnDecisionModel`，semantic 通过 `PromptTurnPlanner`（当前 prompt version 为
+`trpg-turn-planner-v2`）。semantic step 必须保留玩家明确提供的公开名称、别名和动作限定，
+但不得输出目标 ID、Keeper-only 名称或裁决信息。
 
 ## 报告与门槛
 
@@ -79,11 +84,14 @@ pending、Narrator、多语言、标点和模糊指代。E2E 固定覆盖 `real_
 - semantic Planner 和 semantic E2E terminal failure rate 分别不超过 `2%`。
 - semantic `multi` cohort 的 step-count 与 kind 顺序准确率分别至少 `95%`。
 - semantic Planner 经一次结构重试后的结构成功率至少 `99%`。
-- semantic deterministic/rule-first 命中率相对 legacy 下降不超过 5 个百分点。
+- semantic 与 legacy 在双方都经过当前 Step Adjudicator 的共同步骤（多步计划从第二步开始）上，
+  deterministic/rule-first 命中率相对下降不超过 5 个百分点；报告仍保留全步骤速率作为诊断，
+  但不再把 legacy producer 的首步预冻结路径与 semantic 当前步骤直接相减。
 - smoke 加两轮的累计 transport calls 不超过 `2500`。
 
-报告同时包含 P50/P95/P99、首轮结构成功率、transport/structured retry、场景 step-count、
-模型调用数和 input/output token。只有显式提供可验证的 input/output 单价时才计算货币成本；
+报告同时包含 P50/P95/P99、首轮结构成功率、transport/structured retry、场景 step-count 及其
+分布、Step Adjudicator 的 `deterministic/rule_first/model/repair` 路径计数、模型调用数、
+input/output token、failure stage、terminal event 和 Narrator 重试信息。只有显式提供可验证的 input/output 单价时才计算货币成本；
 默认标记为 unavailable，不推测价格。
 
 任何一轮 no-go 时脚本以非零状态退出，Draft PR 保持 Draft，PR3 继续阻塞。修改代码、Prompt

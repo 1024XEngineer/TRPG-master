@@ -321,8 +321,28 @@ def compare_round(
         _nested(semantic_corpus, "overall", "structured_success_rate"),
         "structured success rate",
     )
+    # The legacy producer freezes its first adjudication inside the producer,
+    # while semantic runs every current step through the Step Adjudicator. Use
+    # only the shared post-first-step cohort for the hard gate; retain the old
+    # all-step rates as diagnostics for historical reports.
+    legacy_comparable_value = _nested(
+        legacy_e2e,
+        "overall",
+        "comparable_deterministic_rule_first_rate",
+    )
+    semantic_comparable_value = _nested(
+        semantic_e2e,
+        "overall",
+        "comparable_deterministic_rule_first_rate",
+    )
     legacy_fast_value = _nested(legacy_e2e, "overall", "deterministic_rule_first_rate")
     semantic_fast_value = _nested(semantic_e2e, "overall", "deterministic_rule_first_rate")
+    comparable_metrics_available = (
+        legacy_comparable_value is not None and semantic_comparable_value is not None
+    )
+    if comparable_metrics_available:
+        legacy_fast_value = legacy_comparable_value
+        semantic_fast_value = semantic_comparable_value
     legacy_fast_rate = (
         0.0 if legacy_fast_value is None else _rate(legacy_fast_value, "legacy fast rate")
     )
@@ -444,6 +464,23 @@ def compare_round(
             "multi_kind_sequence_accuracy": multi_kind_accuracy,
             "legacy_deterministic_rule_first_rate": legacy_fast_rate,
             "semantic_deterministic_rule_first_rate": semantic_fast_rate,
+            "legacy_all_step_deterministic_rule_first_rate": (
+                0.0
+                if _nested(legacy_e2e, "overall", "deterministic_rule_first_rate") is None
+                else _rate(
+                    _nested(legacy_e2e, "overall", "deterministic_rule_first_rate"),
+                    "legacy all-step fast rate",
+                )
+            ),
+            "semantic_all_step_deterministic_rule_first_rate": (
+                0.0
+                if _nested(semantic_e2e, "overall", "deterministic_rule_first_rate") is None
+                else _rate(
+                    _nested(semantic_e2e, "overall", "deterministic_rule_first_rate"),
+                    "semantic all-step fast rate",
+                )
+            ),
+            "comparable_fast_path_metrics_available": comparable_metrics_available,
             "deterministic_rule_first_drop": round(fast_path_drop, 6),
         },
         "scenario_step_counts": {
@@ -452,6 +489,26 @@ def compare_round(
             },
             "semantic": {
                 name: value["step_counts"] for name, value in semantic_e2e["scenarios"].items()
+            },
+        },
+        "scenario_step_count_distributions": {
+            "legacy": {
+                name: value.get("step_count_distribution", {})
+                for name, value in legacy_e2e["scenarios"].items()
+            },
+            "semantic": {
+                name: value.get("step_count_distribution", {})
+                for name, value in semantic_e2e["scenarios"].items()
+            },
+        },
+        "scenario_adjudicator_paths": {
+            "legacy": {
+                name: value.get("step_adjudicator_paths", {})
+                for name, value in legacy_e2e["scenarios"].items()
+            },
+            "semantic": {
+                name: value.get("step_adjudicator_paths", {})
+                for name, value in semantic_e2e["scenarios"].items()
             },
         },
         "totals": totals,
@@ -514,6 +571,8 @@ def summarize_rounds(
 
 def render_round_markdown(report: dict[str, Any]) -> str:
     assert_sanitized_report(report)
+    semantic_step_distributions = report["scenario_step_count_distributions"]["semantic"]
+    semantic_adjudicator_paths = report["scenario_adjudicator_paths"]["semantic"]
     rows = [
         "| Gate | Observed | Threshold | Result |",
         "| --- | ---: | ---: | :---: |",
@@ -534,6 +593,8 @@ def render_round_markdown(report: dict[str, Any]) -> str:
             f"- Transport calls: {report['totals']['transport_calls']}",
             f"- Input/output tokens: {report['totals']['input_tokens']} / "
             f"{report['totals']['output_tokens']}",
+            f"- Semantic step-count distributions: `{semantic_step_distributions}`",
+            f"- Semantic adjudicator paths: `{semantic_adjudicator_paths}`",
             "",
             *rows,
             "",

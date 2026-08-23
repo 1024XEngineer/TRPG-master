@@ -407,6 +407,66 @@ async def test_runtime_venue_can_be_reused_through_a_synonym() -> None:
 
 
 @pytest.mark.asyncio
+async def test_untargeted_public_observation_uses_zero_write_deterministic_path() -> None:
+    context = await _cemetery_context("观察当前房间")
+
+    adjudication = _deterministic_step_adjudication(context)
+
+    assert adjudication is not None
+    assert adjudication.method.family == "observe"
+    assert adjudication.target == ActionTarget(kind="location", id="cemetery")
+    assert adjudication.check == NoAdjudicationCheck()
+    assert adjudication.success_effects == (NarrativeOnlyEffect(),)
+
+
+@pytest.mark.asyncio
+async def test_generic_dialogue_pronoun_resolves_only_one_visible_npc() -> None:
+    context = await _cemetery_context("询问眼前的人", step_kind="dialogue")
+    visible_npc = next(
+        entity for entity in context.player_view.scene.visible_entities if entity.kind == "npc"
+    )
+    current_view = context.player_view.model_copy(
+        update={
+            "scene": context.player_view.scene.model_copy(
+                update={"visible_entities": (visible_npc,)},
+                deep=True,
+            )
+        },
+        deep=True,
+    )
+    context = context.model_copy(update={"player_view": current_view}, deep=True)
+
+    adjudication = _deterministic_step_adjudication(context)
+
+    assert adjudication is not None
+    assert adjudication.method.family == "talk"
+    assert adjudication.target == ActionTarget(kind="entity", id=visible_npc.id)
+    assert adjudication.success_effects == (NarrativeOnlyEffect(),)
+
+
+@pytest.mark.asyncio
+async def test_generic_dialogue_pronoun_stays_unresolved_for_multiple_visible_npcs() -> None:
+    context = await _cemetery_context("询问眼前的人", step_kind="dialogue")
+    visible_npcs = tuple(
+        entity for entity in context.player_view.scene.visible_entities if entity.kind == "npc"
+    )
+    if len(visible_npcs) < 2:
+        pytest.skip()
+    current_view = context.player_view.model_copy(
+        update={
+            "scene": context.player_view.scene.model_copy(
+                update={"visible_entities": visible_npcs[:2]},
+                deep=True,
+            )
+        },
+        deep=True,
+    )
+    context = context.model_copy(update={"player_view": current_view}, deep=True)
+
+    assert _deterministic_step_adjudication(context) is None
+
+
+@pytest.mark.asyncio
 async def test_travel_to_current_runtime_venue_is_a_successful_noop() -> None:
     """已在同一 Runtime 地点时，同义地名不应触发重复进入或澄清。"""
 

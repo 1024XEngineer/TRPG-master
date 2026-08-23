@@ -108,6 +108,7 @@ def _e2e(producer: str) -> dict:
             "output_tokens": _counts(600),
             "model_transport_retries": _counts(0),
             "structured_retries": _counts(0),
+            "comparable_deterministic_rule_first_rate": 0.5,
         },
         "cohorts": {
             "one_action": {
@@ -227,7 +228,7 @@ def test_compare_smoke_requires_all_four_paths_to_be_clean() -> None:
         (
             "deterministic_rule_first_drop",
             lambda reports: reports["semantic_e2e"]["overall"].update(
-                deterministic_rule_first_rate=0.449
+                comparable_deterministic_rule_first_rate=0.449
             ),
         ),
         (

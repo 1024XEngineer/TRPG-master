@@ -42,6 +42,7 @@ from collaboration_framework.contracts import (
     SingleActionDecision,
     SkillCheckCandidate,
     SubmitAdjudicationRequest,
+    VisibleEntity,
     WorldClockView,
 )
 from collaboration_framework.engine import AdjudicationEngineService, EngineStore, RuleEngineService
@@ -77,6 +78,7 @@ from collaboration_framework.host.schemas import (
 from pydantic import ValidationError
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.adapters.structured_http import StructuredOutputError
 from app.core.turn_events import TurnPhase
 
 logger = structlog.get_logger()
@@ -1637,6 +1639,27 @@ class ActionPlanTurnApplication:
                         duration_ms=int((time.monotonic() - started_at) * 1000),
                     )
                     return narration
+            except StructuredOutputError:
+                # A 200 response with unreadable structured content is safe to retry
+                # once. Exhaustion falls back to the same deterministic, evidence-only
+                # narration used for validation failures; transport/runtime failures
+                # keep their existing PLAN_NARRATOR_FAILED contract below.
+                logger.warning(
+                    "action_plan_narration_structured_retry",
+                    action=context.player_input.client_action_id[:12],
+                    attempt=attempt + 1,
+                    failure_code="structured_output_unreadable",
+                )
+                if attempt == 1:
+                    narration = self._deterministic_narration_fallback(context)
+                    logger.info(
+                        "action_plan_narration_completed",
+                        action=context.player_input.client_action_id[:12],
+                        attempts=attempt + 1,
+                        path="deterministic_fallback",
+                        duration_ms=int((time.monotonic() - started_at) * 1000),
+                    )
+                    return narration
             except Exception as exc:
                 # 传输层的瞬态失败已经由 StructuredJsonClient 自己重试过了
                 # （见 adapters/structured_http.py）。在这里再整体重试一轮，两层
@@ -2295,10 +2318,33 @@ def _deterministic_step_adjudication(
             failure_effects=(),
         )
 
+    if target is None and _is_public_observation_goal(action_text):
+        # Pure observation with no named target has no safe effect, check, or
+        # hidden fact to adjudicate. Keep it on the current scene and let the
+        # Narrator describe only the committed public outcome.
+        return ActionAdjudication(
+            request_id=context.step_request_id,
+            source_revision=context.player_view.revision,
+            actor_id=context.player_input.actor_id,
+            summary=context.step.semantic_goal,
+            target=ActionTarget(kind="location", id=context.player_view.scene.id),
+            method=ActionMethod(
+                family="observe",
+                description=context.step.semantic_goal,
+            ),
+            check=NoAdjudicationCheck(),
+            success_effects=(NarrativeOnlyEffect(),),
+        )
+
     # Once the planner has identified a visible conversation partner, ordinary
     # dialogue needs no second model call to invent an adjudication.  Keeping
     # this path narrative-only is also an information boundary: authored rules
     # remain the only way to reveal facts or mutate state.
+    if context.step.kind == "dialogue":
+        target = target or _match_generic_dialogue_target(
+            context.player_view,
+            action_text,
+        )
     if context.step.kind == "dialogue" and target is not None:
         return ActionAdjudication(
             request_id=context.step_request_id,
@@ -2314,6 +2360,33 @@ def _deterministic_step_adjudication(
             success_effects=(NarrativeOnlyEffect(),),
         )
     return None
+
+
+_PUBLIC_OBSERVATION_MARKERS = (
+    "观察",
+    "查看",
+    "看看",
+    "留意",
+    "打量",
+    "审视",
+)
+
+
+def _is_public_observation_goal(text: str) -> bool:
+    """Recognize only read-only, untargeted observation language."""
+
+    return any(marker in text for marker in _PUBLIC_OBSERVATION_MARKERS) and not any(
+        marker in text for marker in ("拿", "取", "使用", "攻击", "打开", "移动", "进入", "离开")
+    )
+
+
+def _match_generic_dialogue_target(view: PlayerView, text: str) -> VisibleEntity | None:
+    """Resolve a generic dialogue pronoun only for one visible NPC."""
+
+    if not any(marker in text for marker in ("眼前的人", "面前的人", "在场的人", "身边的人")):
+        return None
+    visible_npcs = tuple(entity for entity in view.scene.visible_entities if entity.kind == "npc")
+    return visible_npcs[0] if len(visible_npcs) == 1 else None
 
 
 def _match_visible_entity(view: PlayerView, text: str):

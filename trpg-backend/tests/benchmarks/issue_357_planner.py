@@ -272,6 +272,21 @@ def _planner(
         )
         return PromptHostTurnDecisionModel(client), provider, model
 
+    missing_planner_env = [
+        name
+        for name in (
+            "TURN_PLANNER_PROVIDER",
+            "TURN_PLANNER_API_KEY",
+            "TURN_PLANNER_BASE_URL",
+            "TURN_PLANNER_MODEL",
+        )
+        if not os.environ.get(name, "").strip()
+    ]
+    if missing_planner_env:
+        raise ValueError(
+            "semantic Planner benchmark requires explicit configuration: "
+            + ", ".join(missing_planner_env)
+        )
     provider = settings.turn_planner_provider
     if provider not in client_types:
         raise ValueError("TURN_PLANNER_PROVIDER must be openai, qwen, or deepseek")

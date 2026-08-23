@@ -2,7 +2,7 @@
 
 ## 1. 文档定位
 
-本文档沉淀当前项目关于 NPC 对话、AI 主持人扮演方式和长期记忆升级的最终方案，作为后续实现 Issue 及其 PR 的设计基线。
+本文档沉淀当前项目关于 NPC 对话、AI 主持人扮演方式和长期记忆升级的最终方案，作为后续实现 PR 的设计基线。
 
 当前结论是：不为每个 NPC 创建独立 Agent，而是在现有 AI Host/Narrator 基础上，增加结构化 NPC 对话消息、NPC 独立认知记忆和按需历史召回。
 
@@ -11,8 +11,8 @@
 - Issue #363：跨回合上下文压缩与持久化总体设计，已关闭；
 - PR #393：长期记忆增量投影、游标、并发安全、来源时间和房间级重建，已合并；
 - Issue #402：NPC 共享长期记忆与按需历史召回，已关闭，其权限和召回决策已并入本文；
-- Issue #406 / PR #407：本文档的设计评审载体。PR #407 合并后只新建一个实现 Issue，
-  用阶段 A/B/C 管理交付，不再为每个 DTO 或数据库字段拆独立 Issue。
+- Issue #406 / PR #407：本文档的设计评审载体，不要求先合并，也不再新建总 Issue；后续
+  实现 PR 直接引用 #407，并按阶段 A/B/C 交付。
 
 ---
 
@@ -98,8 +98,8 @@ NPC 的对白目前主要埋在 Narrator 的自由文本中，例如：
 3. NPC 只使用自己的认知记忆，不读取其他 NPC 的知识；
 4. 玩家不再需要从一大段叙事中寻找 NPC 对白；
 5. NPC 对话可以单独落库、检索、摘要和回放；
-6. 玩家说完话后，NPC 回复先落库，再执行玩家后续行动；
-7. 一个对话步骤允许多个当前可见 NPC 按顺序回复；
+6. `@NPC` 的整条输入只作为玩家对 NPC 的发言，不拆出技能、旅行或其他 Engine 行动；
+7. 一次 NPC 对话允许多个当前可见 NPC 按顺序回复；
 8. NPC 的主张不能绕过 Engine 变成世界事实；
 9. 长团中可以回忆几十甚至几百回合前的具体对话、地点、行动和线索；
 10. 多人房间中不能通过 NPC 绕过玩家权限泄露私密内容。
@@ -141,7 +141,9 @@ NPC 仍由当前 AI 主持人扮演。拆分的是消息协议、上下文作用
 }
 ```
 
-内部复用现有 `step.kind=dialogue`，但不建立独立的 NPC Agent 或复杂会话状态机。
+`recipient.kind=npc` 由应用层直接路由到纯对话服务，不调用 Keeper Planner，也不建立
+ActionPlan。整条 `utterance` 原样写入 `dialogue.player`，不让模型切分或改写所谓“对白
+片段”。NPC 回复仍由当前 Host provider 生成，但使用受限 NPC 上下文和结构化输出契约。
 
 ### 4.3 Engine 仍然是唯一事实源
 
@@ -154,7 +156,9 @@ NPC 仍由当前 AI 主持人扮演。拆分的是消息协议、上下文作用
 - 某个地点是否存在；
 - 某个玩家是否完成行动。
 
-NPC 的对白只表示 NPC 的认知、猜测、主张或记忆。需要改变世界状态时，必须重新提交玩家行动并由 Engine 裁决。
+NPC 的对白只表示 NPC 的认知、猜测、主张或记忆。玩家在 `@NPC` 消息中说“我要去地下室并
+使用侦查”，只证明 NPC 听见了这项计划，不能证明玩家已经移动或完成检定。需要改变世界
+状态时，玩家必须另发 `@守秘人` 输入；单人房间也可以使用无 `@` 的默认守秘人输入。
 
 ---
 
@@ -250,7 +254,6 @@ PR #404 中的两个自由交流入口也必须遵守同一边界。输入是否
   "audience_player_ids": ["player-1", "player-2"],
   "scene_id": "thomas_office",
   "source_action_id": "action-1",
-  "step_id": "step-1",
   "source_revision": "42"
 }
 ```
@@ -293,7 +296,6 @@ JSON 示例中的 `audience_player_ids` 是从该表生成的服务端读模型�
   "scene_id": "thomas_office",
   "source_dialogue_id": "dialogue-player-1",
   "source_action_id": "action-1",
-  "step_id": "step-1",
   "ordinal": 0,
   "source_revision": "42"
 }
@@ -318,7 +320,7 @@ NPC 回复由 Host 生成，但服务端必须验证：
 ```json
 {
   "type": "narration.push",
-  "text": "托马斯说完后，你推开了沉重的木门。",
+  "text": "你随后另行决定推开沉重的木门。",
   "claimed_evidence_refs": ["event-42"],
   "visibility": "public"
 }
@@ -326,7 +328,8 @@ NPC 回复由 Host 生成，但服务端必须验证：
 
 前端可以把这些消息合并为一个连续回合，但后端必须把 `dialogue.npc` 和
 `narration.push` 分开保存。旧客户端继续正常识别 `narration.push`；新客户端把它显示为
-守秘人消息。
+守秘人消息。两者可能来自玩家先后提交的 NPC 对话和守秘人行动，不能因为 UI 连续展示就
+合并成同一个 request 或让前一条 `@NPC` 自动推进后一项行动。
 
 ### 5.5 NPC 头像、独立声线与语音播报预留
 
@@ -389,7 +392,7 @@ npc_voice_bindings
 当前阶段不为 `EntitySpecV3` 增加 Provider 专属头像或 `voice_type`。只有实际匹配质量证明
 名称、描述和模组背景不足时，再增加与供应商无关的 `voice_profile`（例如年龄感、音高、
 语速和口音倾向）。缺少绑定、音色下架或 TTS 失败时回退到通用 NPC/主持人音色；文本
-对话、Memory 投影和后续 ActionPlan 必须继续正常完成。
+对话和 Memory 投影必须继续正常完成。
 
 ---
 
@@ -418,15 +421,37 @@ npc_voice_bindings
 - 明确 `@NPC`：`kind=npc, entity_id=<稳定实体 ID>, explicit=true`；
 - 多人游戏未 `@`：不创建 Host 请求，直接走玩家聊天协议。
 
+接收者同时决定执行权限：
+
+```text
+recipient.kind = npc
+  → 整条 utterance 是角色内发言
+  → 只创建 dialogue.player / dialogue.npc
+  → 不调用 Keeper Planner、ActionPlan、技能检定或 Engine
+
+recipient.kind = keeper
+  → 才允许进入现有 Keeper Planner / ActionPlan / Engine
+```
+
+因此 `@NPC` 后即使出现“去某地”“使用某技能”“拿走物品”等行动词，也不能被服务端或
+模型提升为实际行动。NPC 可以基于自身认知提出建议或回应玩家计划，但不得声称这些行动
+已经发生。玩家要执行计划必须再提交一条守秘人输入。
+
 服务端根据房间模式验证该组合，多人游戏不能接受隐式 Keeper 请求。NPC 的
 `entity_id` 随后映射为本方案其他部分使用的 `interlocutor_id`。不允许后端从“你”、
 “记住”“跟你说”等自然语言关键词猜测听众。
 
-第一版 `@NPC` 与 `@守秘人` 统一复用 PR #404 已有的房间主持行动队列，包括纯 NPC
-对话。这样可以直接复用现有 FIFO、行动占用、断线恢复和限流，不在首版新增第二套并发
-队列。纯对话可能短暂等待当前世界行动，这是有意的最小实现取舍；只有实际长局数据证明
-等待不可接受时，才增加按 `(room_id, npc_id)` 串行的 NPC 专用队列。届时仍必须解决
-NPC 对话和世界行动同时改变 PlayerView revision 的竞态，不能仅在内存中并发调用模型。
+第一版 `@NPC` 与 `@守秘人` 统一复用 PR #404 已有的房间主持行动队列，但出队后按
+`recipient.kind` 分流：Keeper 项进入现有 ActionPlan，NPC 项进入专用 `NpcDialogueService`。
+这样复用 FIFO、行动占用和限流，同时不会让 NPC 对话经过 Keeper Planner。纯对话可能
+短暂等待当前世界行动，这是有意的最小实现取舍；只有实际长局数据证明等待不可接受时，
+才增加按 `(room_id, npc_id)` 串行的 NPC 专用队列。
+
+为支持服务重启和 Provider 失败恢复，现有 `host_action_queue` 在实现 NPC 路径时增加最小
+任务字段：`lease_owner/lease_expires_at/attempt_count/next_attempt_at/result_event_ids`，状态扩展
+为 `queued → processing → completed | retryable_failure`，并保留 `cancelled/discarded` 终态。
+这只服务主持队列，不建立通用任务平台。`dialogue.player` 先幂等落库；模型成功后，全部
+`dialogue.npc`、Outbox 和队列完成状态在同一事务提交，禁止出现只发布一半 NPC 回复的状态。
 
 ### 6.2 服务端验证
 
@@ -468,17 +493,17 @@ dialogue、Memory 和 Summary 都以 `(room_id, entity_id)` 隔离，runtime NPC
 
 ### 6.3 多 NPC 回复
 
-一个对话步骤可以允许多个 NPC 按顺序回复，但每个说话者都必须满足：
+一次 NPC 对话可以允许多个 NPC 按顺序回复，但每个说话者都必须满足：
 
 - 当前可见；
 - 属于本次对话参与者；
 - 由结构化上下文允许；
 - 不能由模型凭空添加场景外 NPC。
 
-第一版固定每个对话步骤最多 3 条 NPC 消息。服务端在对话开始时从同场景可见、可交互
+第一版固定每次 NPC 对话最多 3 条 NPC 消息。服务端在对话开始时从同场景可见、可交互
 NPC 生成 `allowed_responder_ids`；主要 `interlocutor_id` 必须是第一名回复者，其他 NPC
 可以选择不回复，但模型不得跳过主要目标后只让旁人代答。每条回复单独落库并保留 ordinal，
-前端按 ordinal 展示。每条消息最多 1000 字符，同一步全部 NPC 消息合计最多 2400 字符。
+前端按 ordinal 展示。每条消息最多 1000 字符，同一次对话的全部 NPC 消息合计最多 2400 字符。
 
 示例：
 
@@ -500,21 +525,20 @@ NPC 生成 `allowed_responder_ids`；主要 `interlocutor_id` 必须是第一名
 2. **事件权限**：`speaker_id/listener_ids` 表示世界中的说话者和听众；
    `audience_player_ids` 表示哪些玩家有权接收和回放，两者不得混用。场景受众在
    `dialogue.player` 实际生成时冻结到 `event_audiences`，回放时不能按当前场景重算。
-3. **幂等与顺序**：`dialogue.player` correlation 固定为
-   `{source_action_id}:{step_id}:player`；每条 `dialogue.npc` 固定为
-   `{source_action_id}:{step_id}:npc:{ordinal}`。重复提交不得重复广播、写 Memory 或推进
-   ActionPlan。
+3. **幂等与顺序**：`dialogue.player` correlation 固定为 `{source_action_id}:player`；每条
+   `dialogue.npc` 固定为 `{source_action_id}:npc:{ordinal}`。重复提交不得重复广播、写
+   Memory 或重复完成队列项。
 4. **Host 输出失败**：目标无效时直接澄清且不调用模型；schema 错误、非法 speaker、
    越权 memory ref 或超预算时携带玩家安全反馈重试一次；Provider 超时或第二次
-   仍非法时进入 `retryable_failure`，不继续依赖该回复的后续行动。
+   仍非法时进入 `retryable_failure`，保留已落库的玩家发言。
 5. **摘要信任边界**：`viewer-scoped Summary` 只能由该 viewer 有权读取的
    canonical `MemoryEntry` 重建，不能先生成全知共享自由文本再做字符串裁剪。
-6. **ActionPlan 恢复**：复用现有 `dialogue` step，增加持久化 `awaiting_dialogue` 状态和
-   `dialogue_event_ids`；NPC 回复落库前不得执行依赖它的后续行动。
-7. **广播闸门**：后续步骤只等待 NPC 回复成功落库，不等待 WebSocket 客户端确认。玩家
-   断线时仍继续执行，重连通过权威 Event 回放恢复。
-8. **取消语义**：NPC 回复已经落库后收到取消，只停止尚未执行的后续 ActionPlan step，
-   不删除或回滚已经发生的对白。
+6. **纯对话边界**：NPC 队列项直接进入 `NpcDialogueService`，不得创建 ActionPlan、
+   ActionAdjudication、技能检定或 Engine effect。
+7. **广播闸门**：队列完成只等待 NPC 回复成功落库，不等待 WebSocket 客户端确认。玩家
+   断线时仍可完成，重连通过权威 Event 回放恢复。
+8. **取消语义**：`dialogue.player` 已经落库后收到取消，不删除或回滚已经发生的发言；只
+   阻止尚未生成的 NPC 回复。
 9. **第一版隐私范围**：普通 NPC 对话只支持场景公开，不实现同场景私聊或小组私聊；
    clarification 和既有玩家私有事件仍沿用 `player_scoped`。
 10. **自由交流边界**：无 `@` 的 `roleplay/discussion` 都落入 ChatMessage，不进入 Event、
@@ -522,94 +546,74 @@ NPC 生成 `allowed_responder_ids`；主要 `interlocutor_id` 必须是第一名
 11. **公开听众边界**：`dialogue.player` 的 NPC listener 是全部 allowed responder；每条
     `dialogue.npc` 的 listener 是同场景玩家角色和其他 allowed responder。模型只生成
     `speaker_id + text`，不能自行增删听众。
+12. **接收者权限边界**：`@NPC` 整条原文都是对白。行动式措辞只保存在
+    `experienced conversation` 中，并明确写成玩家的未确认声称/计划；不得据此生成
+    `action/visit` Memory，更不能触发旅行、检定、物品变化或其他权威状态修改。
 
 这些约束应在契约测试和恢复测试中先固定，再接入真实 Host；它们不是模型提示词可以
 替代的规则。
 
 ---
 
-## 7. ActionPlan 分步执行方案
+## 7. 纯 NPC 对话执行方案
 
-### 7.1 现状问题
+### 7.1 路由原则
 
-当前 ActionPlan 可以在语义上拆成多个步骤，但通常是所有 Engine 步骤完成后才统一调用 Narrator。
-
-例如：
-
-```text
-我问托马斯门后有什么，然后推门。
-```
-
-当前容易变成：
+`recipient.kind` 在进入模型前已经由客户端选择和服务端验证。应用层不得再让模型决定一条
+`@NPC` 输入究竟是对话还是行动：
 
 ```text
-执行对话步骤
-执行推门步骤
-最后一次性生成 Narrator 文本
+@NPC 我准备去地下室并使用侦查检查门
+  → NPC 听见玩家陈述计划
+  → 可以给出角色内回应
+  → 不移动玩家，不创建检定，不改变门
+
+@守秘人 我去地下室并使用侦查检查门
+  → 进入现有 Keeper Planner / ActionPlan
+  → Engine 分别裁决旅行、技能和目标
+  → narration.push 描述权威结果
 ```
 
-这会让 NPC 回复变成事后旁白，无法真正影响玩家对后续行动的理解。
+第一版不支持“一条 `@NPC` 消息先让 NPC 回答，再自动执行同条消息中的玩家行动”。玩家
+必须分成两次提交。该限制换来清晰的权限边界、准确的 NPC 原话记忆，以及无需猜测自然
+语言片段的确定性实现。
 
-### 7.2 升级后的时序
-
-采用中间对话结果：
+### 7.2 NPC 对话时序
 
 ```text
-玩家输入
+带 recipient.kind=npc 的输入进入 HostActionQueue
   ↓
-Planner 拆出 dialogue step + action step
+出队时重新验证 interlocutor_id 和最新 PlayerView
   ↓
-使用冻结 recipient 生成 dialogue adjudication
-要求 ActionAdjudication.target.id == recipient.entity_id
+冻结 listener、allowed_responder 和 event audience
   ↓
-出队时重新验证 interlocutor_id 和最新 revision
+按 {source_action_id}:player 幂等落库整条 dialogue.player 原文
   ↓
-生成并落库 dialogue.player
+NpcDialogueService 读取受限 NPC Context 和安全历史召回
   ↓
-Host 生成一条或多条 dialogue.npc
+Host provider 只生成一至三条 speaker_id + text
   ↓
-dialogue.npc 落库并投影 NPC 记忆
+服务端校验 speaker、长度、权限和消息预算
   ↓
-尝试向场景受众发送 NPC 消息
+全部 dialogue.npc + Outbox + 队列 completed 在同一事务提交
   ↓
-重新读取最新 PlayerView
-  ↓
-Engine 裁决后续 action step
-  ↓
-提交 Engine 结果
-  ↓
-Host 生成 narration.push
-  ↓
-向前端发送守秘人描述
+异步投影 NPC Memory 和 Summary
 ```
 
-### 7.3 重要边界
+NPC Context 不包含 `keeper_capabilities`、隐藏 ModuleContent 或 Engine 写能力。模型即使在
+文本中声称“你已经到达地下室”也不能改变 PlayerView；这类无证据结果应由输出审查测试和
+提示词约束避免，但权威安全最终由“该路径根本不调用 Engine”保证。
 
-NPC 说完后，后续玩家行动必须重新经过 Engine。NPC 说“门后有石阶”不等于门后一定有石阶；玩家推门时仍以当前 Engine 状态为准。
+### 7.3 恢复和取消
 
-如果只是纯对话，没有后续状态变化，可以只生成 NPC 回复，不再额外生成守秘人叙事。
+`NpcDialogueService` 不创建 ActionPlanRun。队列 lease 过期后重新领取时，先按固定
+correlation 查询 Event：
 
-现有 `ActionPlanStep.kind="dialogue"` 和 NarrativeOnly adjudication 继续复用，不建立平行的
-NPC Agent 状态机。为持久化中间回复，扩展既有 PlanRun：
-
-```text
-PlanRunStatus += awaiting_dialogue
-PlanStepStatus += awaiting_dialogue
-ActionPlanStepRun.dialogue_event_ids: tuple[str, ...]
-ActionPlanStepRun.dialogue_source_revision: str | None
-```
-
-dialogue step 的状态固定为：
-
-```text
-pending → adjudicating → ready → awaiting_dialogue → completed
-```
-
-进入 `awaiting_dialogue` 前必须冻结服务端确认的 target 和 adjudication execution；Host
-回复成功落库后，在同一 CAS 更新中保存 `dialogue_event_ids` 并完成 step。worker 崩溃或
-lease 过期后，恢复流程先按固定 correlation 查询 `dialogue.player/dialogue.npc`：事件已经
-齐全则直接推进，只有事件不存在时才重新调用模型。部分落库时保留已提交事件，并使用
-ordinal 补齐缺失回复，不能重新生成已经发布的前序消息。
+- `dialogue.player` 已存在时不重复广播，只继续生成 NPC 回复；
+- 任一 `dialogue.npc` 已存在意味着上一批回复事务已经提交，直接恢复
+  `result_event_ids` 并完成队列项；
+- Provider 失败保留玩家发言并按有限退避重试，不产生虚假的 NPC 回复；
+- 玩家发言落库后的取消不能删除这句话，只能阻止尚未开始的回复调用。
 
 ---
 
@@ -659,13 +663,18 @@ epistemic_status = experienced
 listener_ids = [npc_id]
 ```
 
+这里的 `experienced` 只确认 NPC 亲自听见了这句话，不确认话中描述的行动已经发生。例如
+玩家说“我准备去地下室”，记忆内容应是“NPC 听见玩家声称/计划去地下室”，不能投影为
+已到访地下室的 `visit` 或 `confirmed` 行动。
+
 没有在场、没有明确听众或没有告知证据时，不生成 NPC `experienced` 记忆。
 
 Narrator 写出“NPC 点头”“NPC 似乎记住了”不能单独生成记忆。
 
 新写入的 NPC `experienced` 对话记忆只从服务端确认的 `dialogue.player` 投影。
 `action.broadcast` 不再通过“说、问、告诉、记住”等中文关键词猜 listener，也不再作为新
-NPC 对话认知的来源；结构化 recipient 和 dialogue adjudication 才是听众证据。历史已经
+NPC 对话认知的来源；经过当前 PlayerView 验证的结构化 recipient 和服务端冻结的
+`dialogue.player.listener_ids` 才是听众证据。历史已经
 带 listener_ids 的旧 action.broadcast 可以保留兼容投影，但不得影响新写入路径。
 
 为清理 PR #404 已经写成 action.broadcast 的无 `@` roleplay，Memory 和玩家摘要重建只把
@@ -734,6 +743,9 @@ updated_at
 推进，只扫描该 NPC 与 viewer 有权读取的新 dialogue。满足 10 条新 dialogue、6000 个新
 字符或玩家离开当前对话场景之一时异步入队；失败保留旧摘要，不阻塞回合。
 
+摘要遇到 `@NPC` 中的行动式说法时必须保留认知边界，例如写成“玩家声称准备前往地下室”，
+不得压缩成“玩家前往了地下室”。只有之后独立的 Keeper/Engine Event 才能确认行动结果。
+
 ---
 
 ## 9. 多人隐私设计
@@ -778,11 +790,10 @@ NPC canonical Memory 记录认知，同时冻结 audience_player_ids
 
 ### 10.1 NPC 对话输入
 
-当当前步骤是 NPC 对话时，Host 应获得：
+处理 NPC 对话队列项时，Host 应获得：
 
 ```text
 当前 PlayerView
-当前 ActionPlan step
 当前 interlocutor_id
 服务端冻结的 allowed_responder_ids / audience_player_ids
 NPC 可见描述和状态
@@ -790,7 +801,6 @@ NPC 近期对话
 NPC 相关 MemoryEntry
 NPC viewer-scoped ConversationSummary
 当前玩家原话
-已提交 evidence
 ```
 
 优先级保持：
@@ -822,8 +832,8 @@ PlayerView
 
 `npc_messages` 固定 `min_length=1, max_length=3`。模型只返回服务端允许的 speaker 和文本，
 不返回 listener、audience、visibility 或未来 Keeper 叙事；这些字段全部从冻结对话上下文
-确定性生成。需要执行后续行动时，Engine 完成后继续调用现有 ActionPlan Narrator，产生
-普通 `narration.push`。
+确定性生成。该队列项在 NPC 回复落库后结束；需要执行行动时，玩家另行提交守秘人输入，
+由现有 ActionPlan Narrator 产生普通 `narration.push`。
 
 服务端需要校验：
 
@@ -834,7 +844,8 @@ PlayerView
 - 输出没有未经证据支持的持久化事实；
 - 返回数量、字符和建议动作不超过预算。
 
-模型输出非法时不猜测修复，不生成 NPC 记忆；保留已提交的玩家输入和 Engine 结果，并走可见的澄清/降级路径。
+模型输出非法时不猜测修复，不生成虚假的 NPC 回复；保留已提交的玩家发言，并走可见的
+澄清、有限重试或降级路径。
 
 NPC 上下文必须由新的 `read_npc_context(room_id, npc_id, viewer_player_id, actor_id,
 revision, ...)` 组装。它先按 `audience_player_ids` 和 Event visibility 过滤，再做 NPC、地点、
@@ -862,30 +873,19 @@ limit
 max_chars
 ```
 
-当前 Host 端口是结构化单次生成，不假设存在 Agent 工具循环。第一版在 ActionPlan 的
-dialogue step 增加可选的玩家安全查询意图：
+当前 Host 端口是结构化单次生成，不假设存在 Agent 工具循环，也不依赖 ActionPlan
+Planner 提供查询意图。`NpcDialogueService` 在每次模型调用前，将当前玩家原话截断到
+最多 200 字符作为 `query_text`，强制绑定当前
+`room_id/viewer_player_id/actor_id/interlocutor_id`，先执行有界 Memory 和原始 dialogue Event
+查询，再把有限结果放入 NPC Context。客户端和模型都不能提供房间、玩家或其他 NPC 作用域。
 
-```json
-{
-  "history_query": {
-    "kind": "exact_quote",
-    "query_text": "之前告诉你的钟声暗号"
-  }
-}
-```
+查询必须使用数据库条件和固定预算，不能把房间全量 Event 拉到内存扫描。原始 Event 查询
+始终先按当前 actor 与 interlocutor 的 dialogue 关系过滤，再做关键词和来源时间排序。玩家
+明确给出主题或原话片段时可以返回精确候选；玩家只问“我以前跟你说过什么”而没有范围时，
+服务端只返回有限候选元数据，由 NPC 请求玩家补充条件，不能擅自选择一条冒充唯一答案。
 
-`kind` 第一版只允许 `exact_quote | memory_search`。Planner 可以提供查询文本，但服务端
-强制绑定当前 `room_id/viewer_player_id/actor_id/interlocutor_id`，不能接受模型给出的房间、
-玩家或其他 NPC 作用域。查询结果在 NPC Narrator 调用前由应用层预取并放入有限上下文，
-不是由 Narrator 自由扩大搜索范围。
-
-`history_query.query_text` 最多 200 字符，只允许出现在 `kind=dialogue` 的 ActionPlanStep；
-其他 step 携带该字段必须被契约拒绝。没有 history_query 时不扫描全量原始 Event，只使用
-固定的近期窗口、相关 Memory 和 NPC Summary。
-
-`exact_quote` 查询始终先按当前 actor 与 interlocutor 的 dialogue 关系过滤，再做文本匹配。
-玩家只问“我以前跟你说过什么”而没有主题或时间范围时，服务端返回有限候选元数据；如果
-候选不唯一，NPC 应请求玩家补充主题或时间，不能擅自选择一条冒充唯一答案。
+没有足够关键词时只使用固定的近期窗口、相关 Memory 和 NPC Summary，不扩大原始 Event
+扫描范围。
 
 查询顺序：
 
@@ -952,28 +952,27 @@ dialogue step 增加可选的玩家安全查询意图：
 
 主要风险：前端、WebSocket、Event replay 和 Host schema 需要保持兼容。
 
-### 阶段 2：对话中间结果和分步执行
+### 阶段 2：纯对话服务和恢复
 
 工作内容：
 
-- 复用 dialogue step 并增加 `awaiting_dialogue` 和 `dialogue_event_ids`；
-- dialogue adjudication 冻结的 target.id 必须等于 recipient.entity_id；
-- 玩家发言落库后生成 NPC 回复；
-- NPC 回复落库后再继续后续 ActionPlan step；
-- 后续 Engine 行动重新读取 PlayerView；
-- Engine 结果完成后再生成守秘人叙事；
-- 对原有单步骤行动保持兼容。
+- 新增最小 `NpcDialogueService`，`recipient.kind=npc` 出队后直接调用；
+- 明确绕过 Keeper Planner、ActionPlan、ActionAdjudication 和 Engine；
+- 整条玩家原话按固定 correlation 幂等写入 `dialogue.player`；
+- 组装受限 NPC Context，并调用 Host provider 生成结构化 NPC 回复；
+- NPC 回复、Outbox 和队列完成状态在同一事务提交；
+- 扩展主持队列 lease、有限重试、退避和结果事件恢复；
+- 对原有 Keeper ActionPlan 保持兼容。
 
-难度：高。
+难度：中高。
 
-这是整个方案最复杂的部分，因为它改变了当前“Plan 完成后统一 Narrator”的时序，需要处理：
+主要复杂度集中在持久化恢复，而不是 ActionPlan 时序：
 
-- ActionPlan 持久化游标；
 - 重连和恢复；
-- lease 过期和部分 NPC 消息已落库；
+- lease 过期和玩家发言已经落库；
 - NPC 回复生成失败；
-- 中间事件重复提交；
-- 后续步骤等待玩家检定；
+- Event/Outbox/队列状态的事务一致性；
+- 重复提交和重复模型调用；
 - 旧客户端只识别 `narration.push` 的兼容。
 
 ### 阶段 3：NPC Memory 和 Summary
@@ -997,7 +996,7 @@ dialogue step 增加可选的玩家安全查询意图：
 工作内容：
 
 - 增加服务端只读查询服务；
-- 增加 dialogue step 的结构化 `history_query`，由应用层在 Narrator 前预取；
+- `NpcDialogueService` 使用当前原话执行受限查询，并在 Narrator 前预取；
 - 支持 NPC、地点、实体、记忆类型和关键词过滤；
 - 固定条数和字符预算；
 - 玩家明确追问原话时查询原始 Event；
@@ -1036,8 +1035,9 @@ dialogue step 增加可选的玩家安全查询意图：
   event_audiences(event_id, player_id)
 
 阶段 B
-  action_plan_runs 状态约束支持 awaiting_dialogue
-  run_json schema version 兼容 dialogue_event_ids
+  host_action_queue lease / retry / result_event_ids
+  host_action_queue 状态约束支持 processing / completed / retryable_failure
+  旧 started 行缺少可恢复 lease 和结果游标，保守迁移为 completed，保留 cancelled / discarded
 
 阶段 C
   memory_entries.audience_player_ids（旧 public 行为空数组）
@@ -1061,6 +1061,9 @@ dialogue step 增加可选的玩家安全查询意图：
 - 多人房间断线或重连不会改变上述路由；
 - `@守秘人` / `@主持人` 生成 Keeper Host 请求，`@NPC` 生成带稳定
   `interlocutor_id` 的 NPC Host 请求；
+- `@NPC` 中包含地点、技能、物品或攻击措辞时仍只生成 dialogue Event；
+- `@NPC` 不创建 ActionPlan、ActionAdjudication、PendingCheck 或 Engine Event；
+- Fake provider 断言 `@NPC` 不调用 Keeper Planner，只调用一次 NPC Narrator；
 - `interlocutor_id` 不在当前场景时被拒绝；
 - 当前场景没有目标 NPC 时触发澄清；
 - 隐藏 NPC 不能生成回复；
@@ -1073,24 +1076,27 @@ dialogue step 增加可选的玩家安全查询意图：
 - 跨房间、跨玩家、跨 NPC 记忆被拒绝；
 - 私密 NPC 记忆不会出现在其他玩家上下文。
 
-### 13.2 多消息和时序
+### 13.2 多消息和恢复
 
-- 一个 dialogue step 可以返回两个或三个可见 NPC 的有序回复；
+- 一次 NPC 对话可以返回两个或三个可见 NPC 的有序回复；
 - 不允许场景外 NPC 插入消息；
-- NPC 回复落库后才执行后续 Engine action；
-- NPC 回复失败时不执行后续依赖该回复的行动；
+- NPC 回复落库后队列项直接结束，不执行任何 Engine action；
+- NPC 回复失败时保留玩家发言并按有限退避重试；
 - 重连后不会重复生成 NPC 回复；
-- worker 在第 1 条 NPC 回复落库后退出，恢复时只补齐缺失 ordinal；
-- NPC 回复落库后玩家断线，后续 action 仍继续，重连通过 Event 恢复对白；
-- NPC 回复落库后取消，只停止后续 action，不删除对白；
-- 后续行动使用 NPC 回复完成后的最新 PlayerView。
+- NPC 回复批次、Outbox 和 completed 状态原子提交，不出现部分 ordinal；
+- NPC 回复落库后玩家断线，重连通过 Event 恢复对白；
+- `dialogue.player` 落库后的取消不删除对白，只阻止尚未开始的回复调用；
+- 同一 `client_action_id` 重试不会重复写入或重复广播。
 
 ### 13.3 记忆和摘要
 
 - NPC 亲自听到的话生成 `experienced`；
+- NPC 听见行动计划只生成 `experienced conversation`，内容明确标记为玩家声称/计划；
+- 上述发言不会额外生成 `action`、`visit` 或 `confirmed` Memory；
 - 没有听众证据时保持 `asserted`；
 - Narrator 的“点头”“记住了”不会自动升级事实；
 - NPC 摘要按 viewer 玩家隔离；
+- NPC 摘要将行动式发言保留为“玩家声称/计划”，不会写成已发生事实；
 - 摘要失败不阻塞当前回合；
 - 10 条 dialogue、6000 字符和离开场景分别触发 NPC 摘要；
 - NPC 摘要运行期间追加事件时复合游标只前进、不覆盖新 pending 目标；
@@ -1103,7 +1109,8 @@ dialogue step 增加可选的玩家安全查询意图：
 
 - NPC 的主张不能直接修改 GameState；
 - NPC 说门后有石阶不等于 Engine 确认石阶存在；
-- 玩家推门时重新进行 Engine 裁决；
+- 玩家对 NPC 说“我要去地下室并使用侦查”不会移动、检定或创建 ActionPlan；
+- 玩家另行向守秘人提交推门等行动时才进行 Engine 裁决；
 - 当前 PlayerView 与旧 NPC 记忆冲突时以当前 PlayerView 为准。
 
 ### 13.5 多人和回放
@@ -1128,11 +1135,11 @@ dialogue step 增加可选的玩家安全查询意图：
 
 | 子系统 | 难度 | 主要原因 |
 |---|---:|---|
-| `interlocutor_id` 和可见性验证 | 中 | 需要贯通前端、WebSocket、ActionPlan 和 PlayerView |
+| `interlocutor_id` 和可见性验证 | 中 | 需要贯通前端、WebSocket、主持队列和 PlayerView |
 | ChatMessage 双频道 | 中 | 需要迁移 channel/actor_id 并改掉 action.broadcast 写入路径 |
 | 结构化 dialogue 事件 | 中高 | 需要场景受众、回放、权限和幂等兼容 |
 | NPC 多消息回复 | 中高 | 需要限制 speaker、顺序、数量和参与者 |
-| 对话后再执行后续行动 | 高 | 改变 ActionPlan/Narrator 时序，涉及恢复和失败处理 |
+| 纯对话任务恢复 | 中高 | 需要队列 lease、Event 幂等和批量事务提交 |
 | NPC Memory 投影 | 中 | 复用已有 MemoryEntry 和增量投影基础 |
 | NPC Summary | 中高 | 需要解决共享认知和 viewer 隔离 |
 | 历史按需查询 | 中 | 第一版 SQL 关键词检索即可，不需要向量系统 |
@@ -1155,9 +1162,11 @@ dialogue step 增加可选的玩家安全查询意图：
 缓解：NPC 认知主体与玩家受众分字段；场景受众在提交时冻结；canonical memory 和
 viewer-scoped summary 分离；所有查询先做服务端权限过滤。
 
-### 风险三：对话回复和行动顺序错乱
+### 风险三：NPC 对话被误当成实际行动
 
-缓解：NPC 回复落库后才推进后续 ActionPlan；每个后续行动重新投影 PlayerView。
+缓解：按结构化 recipient 在应用层分流；NPC 路径根本不调用 Keeper Planner、ActionPlan
+或 Engine。行动式文字只进入 `experienced conversation`，内容明确保留为未确认声称/计划，
+且不投影 `action/visit` Memory。
 
 ### 风险四：新增事件导致旧客户端无法显示
 
@@ -1165,7 +1174,8 @@ viewer-scoped summary 分离；所有查询先做服务端权限过滤。
 
 ### 风险五：模型调用增加导致延迟上升
 
-缓解：纯对话只调用一次；后续行动完成后才按需调用守秘人叙事；摘要异步；不创建常驻 NPC Agent。
+缓解：纯对话只调用一次；摘要异步；不创建常驻 NPC Agent。玩家另行提交守秘人行动时才
+产生该行动原本需要的模型调用。
 
 ### 风险六：自由文本摘要泄露私密信息
 
@@ -1191,9 +1201,8 @@ viewer-scoped summary 分离；所有查询先做服务端权限过滤。
 
 ## 16. 推荐交付拆分
 
-不扩大已合并的 PR #393。PR #407 合并后，从包含 PR #404 的最新 `main` 新建一个实现
-Issue 和开发分支，不把契约、运行时、记忆和 UI 拆成七个互相等待的 Issue。推荐三个可
-独立验收、可回滚的垂直阶段：
+不扩大已合并的 PR #393，也不要求先合并文档 PR #407 或新建总 Issue。直接从包含 PR #404
+的最新 `main` 创建实现分支，各实现 PR 引用 #407。推荐三个可独立验收、可回滚的垂直阶段：
 
 ### 阶段 A：NPC 对话契约与事件链路
 
@@ -1203,28 +1212,29 @@ Issue 和开发分支，不把契约、运行时、记忆和 UI 拆成七个互�
 - `dialogue.player` / `dialogue.npc` 契约，守秘人继续使用 `narration.push`；
 - 当前 `PlayerView` 的可见性与可交互校验；
 - `speaker_id`、`listener_ids`、`allowed_responder_ids`、冻结 event audience；
-- 固定 correlation、source_action_id、step_id、ordinal、source_revision 幂等关系；
+- 固定 correlation、source_action_id、ordinal、source_revision 幂等关系；
 - WebSocket、SDK、回放和基础权限测试。
 
 验收：单人无 `@` 能进入 Keeper Host，多人无 `@` 按频道生成角色扮演或玩家讨论消息；
 合法场景对话可以落库并只向冻结受众广播和回放；场景外、隐藏或无权 NPC 不能回复；
 旧客户端遇到未知事件仍能安全降级。
 
-### 阶段 B：Host 对话执行与 ActionPlan 恢复
+### 阶段 B：Host 纯对话执行与队列恢复
 
 - Host 的结构化 NPC 输出和 speaker 白名单校验；listener/audience 由服务端生成；
-- 一个对话步骤中多个 NPC 的有序回复和消息预算；
-- “玩家发言落库 → NPC 回复落库 → 再执行后续 ActionPlan → Engine 裁决 → 守秘人叙事”；
-- `awaiting_dialogue`、dialogue_event_ids、断线、取消、lease 过期、部分落库和重复恢复；
+- 一次对话中多个 NPC 的有序回复和消息预算；
+- `recipient.kind=npc` 直接进入 NpcDialogueService，禁止调用 ActionPlan 或 Engine；
+- “玩家发言幂等落库 → NPC 回复批量落库 → 队列完成”，不执行后续行动；
+- 队列 lease、result_event_ids、断线、取消、Provider 失败和重复恢复；
 - 目标失效直接澄清；非法模型输出反馈重试一次，仍失败进入 retryable_failure。
 
-验收：`@NPC 提问 → NPC 回复 → 后续行动 → 守秘人叙事` 不乱序、不重复，NPC 文本不
-直接修改 Engine 状态。
+验收：`@NPC` 中即使包含旅行、技能或物品动作，也只产生玩家和 NPC 对话，不创建检定或
+修改 Engine；回复不乱序、不重复，玩家另行提交 `@守秘人` 后才执行实际行动。
 
 ### 阶段 C：NPC 记忆、摘要、历史召回与展示
 
 - NPC canonical `MemoryEntry.audience_player_ids`、近期对话和专用 viewer-scoped Summary；
-- 严格 `read_npc_context` 和结构化 history_query；
+- 严格 `read_npc_context` 和基于当前原话的受限历史预取；
 - 只从 viewer 有权限的 canonical entries 重建摘要；
 - 原始 `dialogue.player` Event 的按需精确查询；
 - `location.entered → visit.location_id` 投影；
@@ -1253,8 +1263,10 @@ Issue 和开发分支，不把契约、运行时、记忆和 UI 拆成七个互�
 - [x] 目标不存在时触发澄清，不传送玩家或让 NPC 隔空回复；
 - [x] 玩家对话和 NPC 回复结构化落库；
 - [x] 主要 NPC 必须先回复，同场景 allowed responders 最多产生 3 条有序回复；
-- [x] NPC 回复先落库，再执行后续玩家行动；
-- [x] 后续行动重新读取 PlayerView 并由 Engine 裁决；
+- [x] `@NPC` 整条原文只进入纯对话服务，不调用 Keeper Planner、ActionPlan 或 Engine；
+- [x] `@NPC` 中的行动式措辞只进入 experienced conversation，并标记为未确认计划；不生成
+  action/visit Memory，也不触发地点、技能、物品或状态变化；
+- [x] 玩家必须另行提交守秘人输入，才会执行实际行动和技能检定；
 - [x] NPC 仍然不能直接改变世界事实；
 - [x] 单人未 `@` 默认与守秘人交互；
 - [x] 多人行动区未 `@` 是玩家角色间 roleplay，讨论区未 `@` 是玩家本人 discussion；
@@ -1269,7 +1281,7 @@ Issue 和开发分支，不把契约、运行时、记忆和 UI 拆成七个互�
 - [x] NPC canonical MemoryEntry 按房间和 NPC 共享，同时保留 audience_player_ids；
 - [x] NPC Summary 使用独立表并按 npc_id + viewer_player_id 隔离；
 - [x] 原始 Event 保留，用于精确回忆原话；
-- [x] 当前 Host 不依赖工具循环，由 dialogue history_query 触发应用层安全预取；
+- [x] 当前 Host 不依赖工具循环，由 NpcDialogueService 使用玩家原话安全预取历史；
 - [x] 守秘人继续使用 `narration.push`，不新增同义 narration.keeper；
 - [x] `dialogue.npc` 保留稳定 `event_id` 和 `speaker_id`，支持未来按 NPC 选择声线；
 - [x] 第一版不实现 NPC 生图、音色匹配或 TTS，只保留稳定 speaker_id；
@@ -1277,7 +1289,7 @@ Issue 和开发分支，不把契约、运行时、记忆和 UI 拆成七个互�
 - [x] 第一版使用结构化 SQL/关键词查询，不引入向量数据库；
 - [x] 不实现 NPC 自主行动；
 - [x] 不增加 encounter 计数；
-- [x] PR #393 不再扩大范围；PR #407 合并后只新建一个实现 Issue。
+- [x] PR #393 不再扩大范围；PR #407 不必先合并，也不再新建总实现 Issue。
 
 ---
 
@@ -1291,7 +1303,7 @@ Issue 和开发分支，不把契约、运行时、记忆和 UI 拆成七个互�
 + 结构化守秘人叙事
 + NPC 独立认知记忆
 + viewer 级别隐私过滤
-+ 分步 ActionPlan 执行
++ NPC 纯对话与守秘人 ActionPlan 分流
 ```
 
 它不会把项目变成多个 NPC Agent，也不会让 NPC 脱离 AI 主持自行行动。它解决的是当前 Narrator 把 NPC 对白、守秘人描述和行动结果混在一起的问题，同时为 NPC 长期记忆、多人权限和长团历史召回提供可靠的数据基础。
@@ -1303,7 +1315,9 @@ Issue 和开发分支，不把契约、运行时、记忆和 UI 拆成七个互�
 
 托马斯：门后有一条向下的石阶。
 
-守秘人：托马斯说完后，你推开了木门。
+你：@守秘人，我推开木门。
+
+守秘人：你推开木门，看到石阶通向黑暗。
 ```
 
 玩家不需要从一大段主持人文本中寻找 NPC 的话，而系统也能准确记录谁说了什么、谁听到了什么，以及这些内容是否可以在几十回合后被 NPC 回忆。

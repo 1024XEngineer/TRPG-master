@@ -784,9 +784,43 @@ NPC canonical Memory 记录认知，同时冻结 audience_player_ids
 - `ChatMessage` 的 `discussion/roleplay` 消息：沿用房间受众，永远不进入 NPC 记忆和摘要；
 - 守秘人回复玩家时，仍按当前玩家的 PlayerView 和可见事件过滤。
 
+### 9.4 守秘人全局认知与玩家安全输出
+
+守秘人系统在逻辑上全知：应用层的 Keeper Planner 可以读取当前房间全部已经提交的
+`GameState`、`GameEvent`、权威 `Event`、`ActionExecution`、`MemoryEntry` 和隐藏
+`ModuleContent`，包括不同玩家和 NPC 的私密经历。这个权限用于维持世界连续性和正确裁决，
+例如知道某名玩家已经触发隐藏机关，即使当前回应的另一名玩家尚未发现原因。
+
+“全知”表示拥有房间级检索权限，不表示每轮把所有历史塞进 Prompt，也不表示所有记录都是
+确认事实：`asserted/heard/presentation` 的认知等级仍然保留，Memory 也不能覆盖当前
+GameState。`ChatMessage`、尚未执行的队列原话和未提交结果不属于游戏记忆，守秘人同样不读。
+
+守秘人的内部裁决和玩家可见回复必须使用两份独立上下文：
+
+```text
+Keeper Planner 内部上下文
+  → 当前房间全部权威状态和隐藏模组信息
+  → 全房间相关 Event / Memory 的有界检索结果
+  → 只用于规划和维持世界连续性
+
+Engine
+  → 只接收经过契约校验的命令
+  → 不读取 Memory / Summary，继续以 GameState 为唯一事实源
+
+Keeper Narrator 玩家安全上下文
+  → 当前玩家的 PlayerView
+  → 当前玩家可见的 committed evidence / Event / Memory / Summary
+  → 只生成该玩家有权看到的 narration.push
+```
+
+两次 Host 调用不得复用跨权限的会话历史、`previous_response_id` 或包含全局上下文的缓存
+transcript。Planner 结果进入 Narrator 前必须转换成玩家安全 DTO，只允许当前 PlayerView、
+已提交且可见的 evidence 和公开执行结果跨越边界；隐藏事件原文、其他玩家私密记忆和隐藏
+ModuleContent 不能进入 Narrator payload。
+
 ---
 
-## 10. Narrator 输入和输出
+## 10. Host 输入和输出
 
 ### 10.1 NPC 对话输入
 
@@ -852,6 +886,27 @@ revision, ...)` 组装。它先按 `audience_player_ids` 和 Event visibility �
 关键词和时间排序；禁止通过现有玩家 `read_context(entity_ids=(npc_id,))` 的实体相关性分支
 直接取得 NPC 的全部 canonical 私密记忆。
 
+### 10.3 守秘人上下文
+
+新增仅供后端应用层调用的 `read_keeper_context(room_id, revision, ...)`。它复用现有 Event、
+GameEvent 和 Memory 存储，不复制一套“守秘人记忆”，也不接受客户端或模型指定
+`room_id`、`player_id`、visibility 或 subject 来扩大权限。房间 ID 必须来自当前已认证的
+主持队列项，读取结果必须绑定当前 revision。
+
+Keeper Planner 每轮固定获得精简 GameState、当前行动相关隐藏规则和有界全局记忆；检索
+优先当前地点、行动目标、输入提及实体、未解决目标和最近权威变化。旧细节仍保存在原始
+Event 中，应用层按需查询。第一版复用已有 Memory/Event 查询；现有按玩家隔离的
+ConversationSummary 仍然只进入对应玩家的 Narrator 上下文，不能
+合并成全知摘要。第一版不新增全房间自由文本摘要表；只有长团测试证明结构化召回不足时，
+再设计专用 Keeper Campaign Summary。
+
+Planner 可以依据全局历史理解因果关系并提出计划，但不能凭 Memory 直接修改状态；计划仍须
+经过现有契约校验和 Engine 裁决。Engine 不新增 `read_keeper_context` 依赖。
+
+Narrator 不调用 `read_keeper_context`。它继续使用当前玩家作用域的 `read_context()` 和
+`ConversationSummary`，并以当前 PlayerView 为最高优先级。因此守秘人系统可以知道所有
+事情，但面向玩家时只说出该玩家此刻能够观察或已经获知的部分。
+
 ---
 
 ## 11. 历史按需召回
@@ -872,6 +927,15 @@ query_text（可选）
 limit
 max_chars
 ```
+
+查询服务必须有两个不可混用的服务端入口：
+
+- `read_keeper_context`：仅 Keeper Planner 内部使用，先强制绑定当前房间，再对全房间已
+  提交记录执行有界相关性检索；
+- `read_npc_context/read_context`：继续按 `viewer_player_id`、actor、事件受众和 visibility
+  过滤，供 NPC 回复和玩家可见 Narrator 使用。
+
+不能通过一个来自客户端的 `include_private=true` 或可伪造 scope 参数切换到守秘人权限。
 
 当前 Host 端口是结构化单次生成，不假设存在 Agent 工具循环，也不依赖 ActionPlan
 Planner 提供查询意图。`NpcDialogueService` 在每次模型调用前，将当前玩家原话截断到
@@ -985,7 +1049,9 @@ Planner 提供查询意图。`NpcDialogueService` 在每次模型调用前，将
 - 增加 NPC 近期对话窗口；
 - 新增 `npc_conversation_summaries`，不修改现有玩家摘要 owner 语义；
 - 按 npc_id + viewer_player_id 生成 NPC 摘要并使用事件复合游标；
-- 保留原始 Event 作为精确回忆来源。
+- 保留原始 Event 作为精确回忆来源；
+- 增加内部 `read_keeper_context`，复用现有房间 Event/Memory 存储，不新建重复记忆表；
+- 将 Keeper Planner 全局上下文与 Narrator 玩家安全上下文拆成独立 DTO 和独立模型请求。
 
 难度：中高。
 
@@ -1103,7 +1169,12 @@ Planner 提供查询意图。`NpcDialogueService` 在每次模型调用前，将
 - 原始 Event 可以返回精确对话；
 - 玩家追问原话但没有匹配 Event 时，NPC 不会用摘要伪造引号；
 - `location.entered` 重建后 visit Memory 带正确 location_id；
-- 连续 300～500 个回合、至少 3 次摘要压缩后仍能按需找回指定 NPC 的旧对话。
+- 连续 300～500 个回合、至少 3 次摘要压缩后仍能按需找回指定 NPC 的旧对话；
+- Keeper Planner 能检索同房间不同玩家和 NPC 的已提交私密 Event/Memory；
+- Keeper Planner 仍保留 `asserted/heard/presentation` 等认知等级，不把所有记忆升级为事实；
+- `ChatMessage` 和尚未执行的队列原话不会进入 Keeper 全局上下文；
+- 玩家询问自己去过哪里、做过什么时，Narrator 能从玩家安全历史返回可审计结果；
+- 玩家询问其他玩家的私密经历时，Narrator 不会因 Keeper Planner 全知而泄露内容。
 
 ### 13.4 Engine 边界
 
@@ -1111,7 +1182,9 @@ Planner 提供查询意图。`NpcDialogueService` 在每次模型调用前，将
 - NPC 说门后有石阶不等于 Engine 确认石阶存在；
 - 玩家对 NPC 说“我要去地下室并使用侦查”不会移动、检定或创建 ActionPlan；
 - 玩家另行向守秘人提交推门等行动时才进行 Engine 裁决；
-- 当前 PlayerView 与旧 NPC 记忆冲突时以当前 PlayerView 为准。
+- 当前 PlayerView 与旧 NPC 记忆冲突时以当前 PlayerView 为准；
+- Keeper 全局 Memory 不能直接修改 GameState，状态变化仍必须来自 Engine 提交。
+- Engine 不读取 `read_keeper_context`、Memory 或 Summary，Fake store 可断言没有新增调用。
 
 ### 13.5 多人和回放
 
@@ -1120,7 +1193,10 @@ Planner 提供查询意图。`NpcDialogueService` 在每次模型调用前，将
 - 场景对话只向冻结 event audience 广播和回放；
 - 玩家明确要求同场景 NPC 私聊时返回“不支持私聊”的澄清，不落库、不调用 NPC
   Narrator，也不能静默改成场景公开；
-- 旧 `narration.push` 回放不受新事件类型影响。
+- 旧 `narration.push` 回放不受新事件类型影响；
+- 其他玩家的私密 Event 可以进入 Keeper Planner，但绝不进入当前玩家的 Narrator payload；
+- Planner 与 Narrator 不复用跨权限模型会话，玩家回复不能泄露 Planner 看到的隐藏原文；
+- 隐藏世界变化可以通过当前 PlayerView 中已经可观察的结果呈现，但不能披露隐藏原因。
 
 ### 13.6 头像与声线扩展边界
 
@@ -1142,6 +1218,7 @@ Planner 提供查询意图。`NpcDialogueService` 在每次模型调用前，将
 | 纯对话任务恢复 | 中高 | 需要队列 lease、Event 幂等和批量事务提交 |
 | NPC Memory 投影 | 中 | 复用已有 MemoryEntry 和增量投影基础 |
 | NPC Summary | 中高 | 需要解决共享认知和 viewer 隔离 |
+| Keeper 全局检索隔离 | 中高 | Planner 全知但 Narrator 必须保持玩家安全，需独立 DTO 和模型请求 |
 | 历史按需查询 | 中 | 第一版 SQL 关键词检索即可，不需要向量系统 |
 | 前端消息展示 | 中 | 新事件类型、旧回放兼容和顺序显示 |
 | 头像/声线预留 | 低 | 第一版只保证稳定 speaker_id，不接媒体 Provider |
@@ -1197,6 +1274,12 @@ viewer-scoped summary 分离；所有查询先做服务端权限过滤。
 缓解：第一版优先保证顺序、权限和恢复正确，并记录排队等待时间；只有监控证明纯对话
 等待影响体验时，再增加 NPC 专用队列，避免提前维护第二套持久化并发状态机。
 
+### 风险十：守秘人全局认知泄露到玩家回复
+
+缓解：Keeper Planner 和 Narrator 使用独立上下文 DTO 与独立模型请求；禁止复用跨权限会话
+标识或 transcript。只有玩家可见的 PlayerView、committed evidence 和公开执行结果可以传给
+Narrator，并用 Fake provider 直接断言 payload 中不存在其他玩家私密 Event 和隐藏模组原文。
+
 ---
 
 ## 16. 推荐交付拆分
@@ -1237,12 +1320,15 @@ viewer-scoped summary 分离；所有查询先做服务端权限过滤。
 - 严格 `read_npc_context` 和基于当前原话的受限历史预取；
 - 只从 viewer 有权限的 canonical entries 重建摘要；
 - 原始 `dialogue.player` Event 的按需精确查询；
+- Keeper Planner 使用内部 `read_keeper_context` 有界检索全房间已提交历史，Narrator 继续
+  使用当前玩家安全上下文；
 - `location.entered → visit.location_id` 投影；
 - 前端区分玩家、NPC、守秘人消息，兼容回放和重连；
 - 使用稳定 `speaker_id` 查询静态立绘或默认头像，只预留未来声线/生图扩展；
 - 长团、多玩家隐私、记忆污染和真实 Host 测试。
 
-验收：NPC 能回忆自己听到的旧对话，但不能读取其他 NPC 或玩家的私密记忆；
+验收：NPC 能回忆自己听到的旧对话，但不能读取其他 NPC 或玩家的私密记忆；Keeper Planner
+可以使用全房间已提交历史维持连续性，但 Narrator payload 不包含当前玩家无权读取的内容；
 `chat.send` / `action.chat.send` 不进入 Host、Event、Memory 或 Summary；300～500 回合后
 仍可从原始 Event 召回目标 NPC 的旧对话和玩家地点历史。
 
@@ -1282,6 +1368,13 @@ viewer-scoped summary 分离；所有查询先做服务端权限过滤。
 - [x] NPC Summary 使用独立表并按 npc_id + viewer_player_id 隔离；
 - [x] 原始 Event 保留，用于精确回忆原话；
 - [x] 当前 Host 不依赖工具循环，由 NpcDialogueService 使用玩家原话安全预取历史；
+- [x] 守秘人系统逻辑上全知，Keeper Planner 可有界检索同房间全部已提交权威历史；
+- [x] 全知不等于每轮注入全部历史，也不改变 Memory 的认知等级或 Engine 事实边界；
+- [x] Keeper Planner 与玩家可见 Narrator 使用独立上下文 DTO 和独立模型请求；
+- [x] Engine 不读取 Keeper Memory 或 Summary，继续以 GameState 和已校验命令为唯一输入；
+- [x] Narrator 只读取当前玩家可见的 PlayerView、Event、Memory 和 Summary，不泄露其他
+  玩家私密经历或隐藏 ModuleContent；
+- [x] 第一版不新增 Keeper 全局摘要表，先复用现有 Event/Memory 的有界检索；
 - [x] 守秘人继续使用 `narration.push`，不新增同义 narration.keeper；
 - [x] `dialogue.npc` 保留稳定 `event_id` 和 `speaker_id`，支持未来按 NPC 选择声线；
 - [x] 第一版不实现 NPC 生图、音色匹配或 TTS，只保留稳定 speaker_id；
@@ -1303,6 +1396,7 @@ viewer-scoped summary 分离；所有查询先做服务端权限过滤。
 + 结构化守秘人叙事
 + NPC 独立认知记忆
 + viewer 级别隐私过滤
++ 守秘人全局裁决认知与玩家安全叙事隔离
 + NPC 纯对话与守秘人 ActionPlan 分流
 ```
 

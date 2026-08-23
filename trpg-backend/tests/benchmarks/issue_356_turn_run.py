@@ -77,13 +77,21 @@ def _disable_background_summary() -> Iterator[None]:
     """避免非本 benchmark 的后台写入与 SQLite 回合写入争锁。"""
     original = getattr(app.state, "conversation_summary_service", None)
     original_drain = ws_controller.schedule_host_action_drain
+
+    def discard_scheduled_drain(room_id: str) -> None:
+        del room_id
+
     app.state.conversation_summary_service = None
-    ws_controller.schedule_host_action_drain = lambda room_id: None
+    setattr(  # noqa: B010 - module monkeypatch keeps benchmark isolation local
+        ws_controller, "schedule_host_action_drain", discard_scheduled_drain
+    )
     try:
         yield
     finally:
         app.state.conversation_summary_service = original
-        ws_controller.schedule_host_action_drain = original_drain
+        setattr(  # noqa: B010 - restore the production function after the benchmark
+            ws_controller, "schedule_host_action_drain", original_drain
+        )
 
 
 class _SingleNoCheckPlanner:

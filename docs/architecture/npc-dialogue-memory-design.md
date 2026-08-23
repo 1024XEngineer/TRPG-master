@@ -265,6 +265,56 @@ NPC 回复由 Host 生成，但服务端必须验证：
 
 前端可以把这些消息合并为一个连续回合，但后端必须分开保存。
 
+### 5.5 NPC 独立声线与语音播报预留
+
+NPC 对话第一版不实现声线匹配和语音生成，但结构化事件必须保证未来可以按说话者选择
+音色。每一条 `dialogue.npc` 都必须有稳定的 `event_id`、`speaker_id`、`text` 和
+`visibility`；多个 NPC 的回复分别落成多个事件，不能合并成一段待解析的自由文本。
+
+未来语音链路复用现有 Host Speech 的 Provider、分句、限流、请求合并和音频缓存：
+
+```text
+dialogue.npc 权威事件
+  → 校验当前玩家有权读取该事件
+  → 根据 speaker_id 查 NPC 声线绑定
+  → 使用现有 TTS Provider 合成
+  → 按事件和分句返回音频
+```
+
+推荐提供与现有主持人语音清单相同形态的只读接口，例如：
+
+```text
+GET /rooms/{room_id}/dialogues/{event_id}/speech
+GET /rooms/{room_id}/dialogues/{event_id}/speech/sentences/{sentence_index}
+```
+
+接口只能读取已落库的权威事件，不能接受前端任意提交的 `text + speaker_id`。这样语音
+接口与对话事件使用同一套多人可见性规则，不会通过 TTS 绕过私密对话权限。
+
+Provider 音色 ID 不写入不可变 `ModuleContentV3`，避免更换供应商或音色下架后污染模组
+契约。未来用独立绑定保存部署相关配置：
+
+```text
+npc_voice_bindings
+  module_id
+  module_version
+  entity_id
+  provider
+  voice_type
+  updated_at
+
+唯一键：(module_id, module_version, entity_id, provider)
+```
+
+同一模组版本的 NPC 声线可以被所有房间复用。自动匹配时，可使用 NPC 名称、描述与
+模组 `world_profile`，在当前 Provider 的允许音色清单中选择并保存绑定；选择逻辑放在
+后端应用层，不进入 Engine，也不能修改 NPC 的权威状态。
+
+当前阶段不为 `EntitySpecV3` 增加 Provider 专属 `voice_type`。只有实际匹配质量证明
+名称、描述和模组背景不足时，再增加与供应商无关的 `voice_profile`（例如年龄感、音高、
+语速和口音倾向）。缺少绑定、音色下架或 TTS 失败时回退到通用 NPC/主持人音色；文本
+对话、Memory 投影和后续 ActionPlan 必须继续正常完成。
+
 ---
 
 ## 6. `@NPC` 和目标验证
@@ -723,6 +773,8 @@ max_chars
 - 玩家消息、NPC 消息和守秘人描述按事件顺序混合显示；
 - 兼容旧 `narration.push`；
 - 刷新、重连、历史回放保持同样顺序。
+- 语音播放入口按 `dialogue.npc.event_id` 请求，不从展示文本猜测 NPC；
+- 第一版允许 NPC 语音不可用，不阻塞文本消息和回合执行。
 
 难度：中等。
 
@@ -782,6 +834,15 @@ max_chars
 - 私密对话只发给授权玩家；
 - 旧 `narration.push` 回放不受新事件类型影响。
 
+### 13.6 NPC 声线扩展
+
+- 两个 NPC 在同一回合分别回复时，语音服务根据各自 `speaker_id` 使用不同绑定；
+- 守秘人叙事继续使用房间主持人音色，不与 NPC 声线混用；
+- 私密 `dialogue.npc` 的语音接口拒绝未授权玩家；
+- 前端不能提交任意 `text + speaker_id` 绕过权威事件进行合成；
+- NPC 没有绑定、绑定音色下架或 Provider 失败时回退且文本回合仍成功；
+- 相同 Provider、音色和文本复用现有语音缓存，不重复产生供应商费用。
+
 ---
 
 ## 14. 开发难度评估
@@ -796,6 +857,7 @@ max_chars
 | NPC Summary | 中高 | 需要解决共享认知和 viewer 隔离 |
 | 历史按需查询 | 中 | 第一版 SQL 关键词检索即可，不需要向量系统 |
 | 前端消息展示 | 中 | 新事件类型、旧回放兼容和顺序显示 |
+| NPC 独立声线 | 中 | 可复用现有 Host Speech，新增实体绑定和事件级鉴权 |
 | 端到端长团测试 | 高 | 需要多场景、多人、重连和真实 Host 试玩 |
 
 总体评估：中高难度，预计明显大于 PR #393，但不需要重写 Engine，也不需要引入独立 Agent 框架。
@@ -827,6 +889,11 @@ max_chars
 ### 风险六：自由文本摘要泄露私密信息
 
 缓解：按 viewer_player_id 生成摘要，或者只对公开记忆生成共享摘要；禁止直接共享未经裁剪的 NPC 摘要。
+
+### 风险七：语音 Provider 配置污染模组或泄露私密对白
+
+缓解：Provider 音色使用独立 `npc_voice_bindings`，不写入 ModuleContent；语音接口只读取
+已授权的 `dialogue.npc` 权威事件，TTS 失败只降级为文本。
 
 ---
 
@@ -866,6 +933,7 @@ max_chars
 - 只从 viewer 有权限的 canonical entries 重建摘要；
 - 原始 `dialogue.player` Event 的按需精确查询；
 - 前端区分玩家、NPC、守秘人消息，兼容回放和重连；
+- 基于稳定 `speaker_id` 接入 NPC 声线绑定和现有 Host Speech；
 - 长团、多玩家隐私、记忆污染和真实 Host 测试。
 
 验收：NPC 能回忆自己听到的旧对话，但不能读取其他 NPC 或玩家的私密记忆；
@@ -898,6 +966,9 @@ max_chars
 - [x] NPC canonical MemoryEntry 按房间和 NPC 共享；
 - [x] NPC Summary 按 viewer_player_id 隔离；
 - [x] 原始 Event 保留，用于精确回忆原话；
+- [x] `dialogue.npc` 保留稳定 `event_id` 和 `speaker_id`，支持未来按 NPC 选择声线；
+- [x] NPC Provider 音色绑定独立保存，不写入 ModuleContent 或 Engine 状态；
+- [x] NPC 语音复用现有 Host Speech，失败只降级为文本；
 - [x] 第一版使用结构化 SQL/关键词查询，不引入向量数据库；
 - [x] 不实现 NPC 自主行动；
 - [x] 不增加 encounter 计数；

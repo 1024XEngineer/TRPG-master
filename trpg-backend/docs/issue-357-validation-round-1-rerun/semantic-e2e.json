@@ -1,0 +1,1457 @@
+{
+  "benchmark_tool_revision": "aca238b48441de688ced4d57545f61d57374e71e",
+  "cohorts": {
+    "multi_target": {
+      "adjudicator_deterministic_paths": {
+        "per_sample_max": 2,
+        "per_sample_mean": 2.0,
+        "per_sample_min": 2,
+        "total": 40
+      },
+      "adjudicator_model_paths": {
+        "per_sample_max": 0,
+        "per_sample_mean": 0.0,
+        "per_sample_min": 0,
+        "total": 0
+      },
+      "adjudicator_repair_paths": {
+        "per_sample_max": 0,
+        "per_sample_mean": 0.0,
+        "per_sample_min": 0,
+        "total": 0
+      },
+      "adjudicator_rule_first_paths": {
+        "per_sample_max": 0,
+        "per_sample_mean": 0.0,
+        "per_sample_min": 0,
+        "total": 0
+      },
+      "comparable_adjudicator_calls": {
+        "per_sample_max": 1,
+        "per_sample_mean": 1.0,
+        "per_sample_min": 1,
+        "total": 20
+      },
+      "comparable_deterministic_hits": {
+        "per_sample_max": 1,
+        "per_sample_mean": 1.0,
+        "per_sample_min": 1,
+        "total": 20
+      },
+      "comparable_deterministic_rule_first_rate": 1.0,
+      "comparable_rule_first_hits": {
+        "per_sample_max": 0,
+        "per_sample_mean": 0.0,
+        "per_sample_min": 0,
+        "total": 0
+      },
+      "deterministic_hits": {
+        "per_sample_max": 2,
+        "per_sample_mean": 2.0,
+        "per_sample_min": 2,
+        "total": 40
+      },
+      "deterministic_rule_first_rate": 1.0,
+      "end_to_end_ms": {
+        "max": 7992.586,
+        "min": 2960.524,
+        "p50": 4811.594,
+        "p95": 5851.18,
+        "p99": 7992.586,
+        "samples": 20
+      },
+      "engine_status_calls": {
+        "per_sample_max": 0,
+        "per_sample_mean": 0.0,
+        "per_sample_min": 0,
+        "total": 0
+      },
+      "engine_submit_calls": {
+        "per_sample_max": 2,
+        "per_sample_mean": 2.0,
+        "per_sample_min": 2,
+        "total": 40
+      },
+      "failure_codes": [],
+      "failure_rate": 0.0,
+      "failure_stages": {},
+      "failures": 0,
+      "final_narration_completion_ms": {
+        "max": 7992.586,
+        "min": 2960.524,
+        "p50": 4811.594,
+        "p95": 5851.18,
+        "p99": 7992.586,
+        "samples": 20
+      },
+      "first_narration_completion_ms": {
+        "max": 7992.586,
+        "min": 2960.524,
+        "p50": 4811.594,
+        "p95": 5851.18,
+        "p99": 7992.586,
+        "samples": 20
+      },
+      "first_pending_ms": {
+        "max": null,
+        "min": null,
+        "p50": null,
+        "p95": null,
+        "p99": null,
+        "samples": 0
+      },
+      "input_tokens": {
+        "per_sample_max": 8065,
+        "per_sample_mean": 8018.05,
+        "per_sample_min": 7960,
+        "total": 160361
+      },
+      "model_calls": {
+        "per_sample_max": 2,
+        "per_sample_mean": 2.0,
+        "per_sample_min": 2,
+        "total": 40
+      },
+      "model_stage_latency_ms": {
+        "narrator": {
+          "max": 4265.0,
+          "min": 1683.0,
+          "p50": 2973.0,
+          "p95": 4095.0,
+          "p99": 4265.0,
+          "samples": 20
+        },
+        "planner": {
+          "max": 5129.0,
+          "min": 937.0,
+          "p50": 1120.0,
+          "p95": 1477.0,
+          "p99": 5129.0,
+          "samples": 20
+        }
+      },
+      "model_transport_retries": {
+        "per_sample_max": 0,
+        "per_sample_mean": 0.0,
+        "per_sample_min": 0,
+        "total": 0
+      },
+      "narrator_calls": {
+        "per_sample_max": 1,
+        "per_sample_mean": 1.0,
+        "per_sample_min": 1,
+        "total": 20
+      },
+      "output_tokens": {
+        "per_sample_max": 473,
+        "per_sample_mean": 337.6,
+        "per_sample_min": 226,
+        "total": 6752
+      },
+      "plan_cas_calls": {
+        "per_sample_max": 8,
+        "per_sample_mean": 8.0,
+        "per_sample_min": 8,
+        "total": 160
+      },
+      "plan_create_calls": {
+        "per_sample_max": 1,
+        "per_sample_mean": 1.0,
+        "per_sample_min": 1,
+        "total": 20
+      },
+      "planner_calls": {
+        "per_sample_max": 1,
+        "per_sample_mean": 1.0,
+        "per_sample_min": 1,
+        "total": 20
+      },
+      "repair_calls": {
+        "per_sample_max": 0,
+        "per_sample_mean": 0.0,
+        "per_sample_min": 0,
+        "total": 0
+      },
+      "rule_first_hits": {
+        "per_sample_max": 0,
+        "per_sample_mean": 0.0,
+        "per_sample_min": 0,
+        "total": 0
+      },
+      "sample_count": 20,
+      "step_adjudicator_calls": {
+        "per_sample_max": 2,
+        "per_sample_mean": 2.0,
+        "per_sample_min": 2,
+        "total": 40
+      },
+      "step_adjudicator_paths": {
+        "deterministic": {
+          "per_sample_max": 2,
+          "per_sample_mean": 2.0,
+          "per_sample_min": 2,
+          "total": 40
+        },
+        "model": {
+          "per_sample_max": 0,
+          "per_sample_mean": 0.0,
+          "per_sample_min": 0,
+          "total": 0
+        },
+        "repair": {
+          "per_sample_max": 0,
+          "per_sample_mean": 0.0,
+          "per_sample_min": 0,
+          "total": 0
+        },
+        "rule_first": {
+          "per_sample_max": 0,
+          "per_sample_mean": 0.0,
+          "per_sample_min": 0,
+          "total": 0
+        }
+      },
+      "step_count_distribution": {
+        "2": 20
+      },
+      "step_counts": [
+        2
+      ],
+      "structured_retries": {
+        "per_sample_max": 0,
+        "per_sample_mean": 0.0,
+        "per_sample_min": 0,
+        "total": 0
+      },
+      "successes": 20,
+      "terminal_events": {
+        "completed": 20
+      },
+      "transport_calls": {
+        "per_sample_max": 2,
+        "per_sample_mean": 2.0,
+        "per_sample_min": 2,
+        "total": 40
+      }
+    },
+    "one_action": {
+      "adjudicator_deterministic_paths": {
+        "per_sample_max": 1,
+        "per_sample_mean": 0.5,
+        "per_sample_min": 0,
+        "total": 20
+      },
+      "adjudicator_model_paths": {
+        "per_sample_max": 1,
+        "per_sample_mean": 0.5,
+        "per_sample_min": 0,
+        "total": 20
+      },
+      "adjudicator_repair_paths": {
+        "per_sample_max": 1,
+        "per_sample_mean": 0.025,
+        "per_sample_min": 0,
+        "total": 1
+      },
+      "adjudicator_rule_first_paths": {
+        "per_sample_max": 0,
+        "per_sample_mean": 0.0,
+        "per_sample_min": 0,
+        "total": 0
+      },
+      "comparable_adjudicator_calls": {
+        "per_sample_max": 0,
+        "per_sample_mean": 0.0,
+        "per_sample_min": 0,
+        "total": 0
+      },
+      "comparable_deterministic_hits": {
+        "per_sample_max": 0,
+        "per_sample_mean": 0.0,
+        "per_sample_min": 0,
+        "total": 0
+      },
+      "comparable_deterministic_rule_first_rate": null,
+      "comparable_rule_first_hits": {
+        "per_sample_max": 0,
+        "per_sample_mean": 0.0,
+        "per_sample_min": 0,
+        "total": 0
+      },
+      "deterministic_hits": {
+        "per_sample_max": 1,
+        "per_sample_mean": 0.5,
+        "per_sample_min": 0,
+        "total": 20
+      },
+      "deterministic_rule_first_rate": 0.4878,
+      "end_to_end_ms": {
+        "max": 9885.35,
+        "min": 2752.739,
+        "p50": 5326.787,
+        "p95": 7860.309,
+        "p99": 9885.35,
+        "samples": 40
+      },
+      "engine_status_calls": {
+        "per_sample_max": 2,
+        "per_sample_mean": 0.125,
+        "per_sample_min": 0,
+        "total": 5
+      },
+      "engine_submit_calls": {
+        "per_sample_max": 1,
+        "per_sample_mean": 1.0,
+        "per_sample_min": 1,
+        "total": 40
+      },
+      "failure_codes": [],
+      "failure_rate": 0.0,
+      "failure_stages": {},
+      "failures": 0,
+      "final_narration_completion_ms": {
+        "max": 9885.35,
+        "min": 2752.739,
+        "p50": 5326.787,
+        "p95": 7860.309,
+        "p99": 9885.35,
+        "samples": 40
+      },
+      "first_narration_completion_ms": {
+        "max": 9885.35,
+        "min": 2752.739,
+        "p50": 5326.787,
+        "p95": 7860.309,
+        "p99": 9885.35,
+        "samples": 40
+      },
+      "first_pending_ms": {
+        "max": 3406.113,
+        "min": 3328.365,
+        "p50": 3328.365,
+        "p95": 3406.113,
+        "p99": 3406.113,
+        "samples": 2
+      },
+      "input_tokens": {
+        "per_sample_max": 47609,
+        "per_sample_mean": 17496.75,
+        "per_sample_min": 7818,
+        "total": 699870
+      },
+      "model_calls": {
+        "per_sample_max": 5,
+        "per_sample_mean": 2.675,
+        "per_sample_min": 2,
+        "total": 107
+      },
+      "model_stage_latency_ms": {
+        "narrator": {
+          "max": 4172.0,
+          "min": 1314.0,
+          "p50": 2414.0,
+          "p95": 3739.0,
+          "p99": 4172.0,
+          "samples": 46
+        },
+        "planner": {
+          "max": 1462.0,
+          "min": 693.0,
+          "p50": 1005.0,
+          "p95": 1178.0,
+          "p99": 1462.0,
+          "samples": 40
+        },
+        "step_adjudicator": {
+          "max": 3247.0,
+          "min": 1706.0,
+          "p50": 1959.0,
+          "p95": 2383.0,
+          "p99": 3247.0,
+          "samples": 21
+        }
+      },
+      "model_transport_retries": {
+        "per_sample_max": 0,
+        "per_sample_mean": 0.0,
+        "per_sample_min": 0,
+        "total": 0
+      },
+      "narrator_calls": {
+        "per_sample_max": 2,
+        "per_sample_mean": 1.15,
+        "per_sample_min": 1,
+        "total": 46
+      },
+      "output_tokens": {
+        "per_sample_max": 576,
+        "per_sample_mean": 334.15,
+        "per_sample_min": 163,
+        "total": 13366
+      },
+      "plan_cas_calls": {
+        "per_sample_max": 8,
+        "per_sample_mean": 5.125,
+        "per_sample_min": 5,
+        "total": 205
+      },
+      "plan_create_calls": {
+        "per_sample_max": 1,
+        "per_sample_mean": 1.0,
+        "per_sample_min": 1,
+        "total": 40
+      },
+      "planner_calls": {
+        "per_sample_max": 1,
+        "per_sample_mean": 1.0,
+        "per_sample_min": 1,
+        "total": 40
+      },
+      "repair_calls": {
+        "per_sample_max": 1,
+        "per_sample_mean": 0.025,
+        "per_sample_min": 0,
+        "total": 1
+      },
+      "rule_first_hits": {
+        "per_sample_max": 0,
+        "per_sample_mean": 0.0,
+        "per_sample_min": 0,
+        "total": 0
+      },
+      "sample_count": 40,
+      "step_adjudicator_calls": {
+        "per_sample_max": 2,
+        "per_sample_mean": 1.025,
+        "per_sample_min": 1,
+        "total": 41
+      },
+      "step_adjudicator_paths": {
+        "deterministic": {
+          "per_sample_max": 1,
+          "per_sample_mean": 0.5,
+          "per_sample_min": 0,
+          "total": 20
+        },
+        "model": {
+          "per_sample_max": 1,
+          "per_sample_mean": 0.5,
+          "per_sample_min": 0,
+          "total": 20
+        },
+        "repair": {
+          "per_sample_max": 1,
+          "per_sample_mean": 0.025,
+          "per_sample_min": 0,
+          "total": 1
+        },
+        "rule_first": {
+          "per_sample_max": 0,
+          "per_sample_mean": 0.0,
+          "per_sample_min": 0,
+          "total": 0
+        }
+      },
+      "step_count_distribution": {
+        "1": 40
+      },
+      "step_counts": [
+        1
+      ],
+      "structured_retries": {
+        "per_sample_max": 0,
+        "per_sample_mean": 0.0,
+        "per_sample_min": 0,
+        "total": 0
+      },
+      "successes": 40,
+      "terminal_events": {
+        "completed": 40
+      },
+      "transport_calls": {
+        "per_sample_max": 5,
+        "per_sample_mean": 2.675,
+        "per_sample_min": 2,
+        "total": 107
+      }
+    }
+  },
+  "configuration": {
+    "host_max_attempts": 2,
+    "host_retry_backoff_seconds": 0.5,
+    "planner_max_attempts": 2,
+    "planner_retry_backoff_seconds": 0.25,
+    "planner_timeout_seconds": 5.0,
+    "rollout_percent": 100,
+    "transport_call_budget": 1882,
+    "websocket_receive_timeout_seconds": 30.0
+  },
+  "host_model": "deepseek-chat",
+  "host_provider": "deepseek",
+  "issue": 357,
+  "overall": {
+    "adjudicator_deterministic_paths": {
+      "per_sample_max": 2,
+      "per_sample_mean": 1.0,
+      "per_sample_min": 0,
+      "total": 60
+    },
+    "adjudicator_model_paths": {
+      "per_sample_max": 1,
+      "per_sample_mean": 0.333,
+      "per_sample_min": 0,
+      "total": 20
+    },
+    "adjudicator_repair_paths": {
+      "per_sample_max": 1,
+      "per_sample_mean": 0.017,
+      "per_sample_min": 0,
+      "total": 1
+    },
+    "adjudicator_rule_first_paths": {
+      "per_sample_max": 0,
+      "per_sample_mean": 0.0,
+      "per_sample_min": 0,
+      "total": 0
+    },
+    "comparable_adjudicator_calls": {
+      "per_sample_max": 1,
+      "per_sample_mean": 0.333,
+      "per_sample_min": 0,
+      "total": 20
+    },
+    "comparable_deterministic_hits": {
+      "per_sample_max": 1,
+      "per_sample_mean": 0.333,
+      "per_sample_min": 0,
+      "total": 20
+    },
+    "comparable_deterministic_rule_first_rate": 1.0,
+    "comparable_rule_first_hits": {
+      "per_sample_max": 0,
+      "per_sample_mean": 0.0,
+      "per_sample_min": 0,
+      "total": 0
+    },
+    "deterministic_hits": {
+      "per_sample_max": 2,
+      "per_sample_mean": 1.0,
+      "per_sample_min": 0,
+      "total": 60
+    },
+    "deterministic_rule_first_rate": 0.7407,
+    "end_to_end_ms": {
+      "max": 9885.35,
+      "min": 2752.739,
+      "p50": 4956.953,
+      "p95": 7860.309,
+      "p99": 9885.35,
+      "samples": 60
+    },
+    "engine_status_calls": {
+      "per_sample_max": 2,
+      "per_sample_mean": 0.083,
+      "per_sample_min": 0,
+      "total": 5
+    },
+    "engine_submit_calls": {
+      "per_sample_max": 2,
+      "per_sample_mean": 1.333,
+      "per_sample_min": 1,
+      "total": 80
+    },
+    "failure_codes": [],
+    "failure_rate": 0.0,
+    "failure_stages": {},
+    "failures": 0,
+    "final_narration_completion_ms": {
+      "max": 9885.35,
+      "min": 2752.739,
+      "p50": 4956.953,
+      "p95": 7860.309,
+      "p99": 9885.35,
+      "samples": 60
+    },
+    "first_narration_completion_ms": {
+      "max": 9885.35,
+      "min": 2752.739,
+      "p50": 4956.953,
+      "p95": 7860.309,
+      "p99": 9885.35,
+      "samples": 60
+    },
+    "first_pending_ms": {
+      "max": 3406.113,
+      "min": 3328.365,
+      "p50": 3328.365,
+      "p95": 3406.113,
+      "p99": 3406.113,
+      "samples": 2
+    },
+    "input_tokens": {
+      "per_sample_max": 47609,
+      "per_sample_mean": 14337.183,
+      "per_sample_min": 7818,
+      "total": 860231
+    },
+    "model_calls": {
+      "per_sample_max": 5,
+      "per_sample_mean": 2.45,
+      "per_sample_min": 2,
+      "total": 147
+    },
+    "model_stage_latency_ms": {
+      "narrator": {
+        "max": 4265.0,
+        "min": 1314.0,
+        "p50": 2565.0,
+        "p95": 3949.0,
+        "p99": 4265.0,
+        "samples": 66
+      },
+      "planner": {
+        "max": 5129.0,
+        "min": 693.0,
+        "p50": 1063.0,
+        "p95": 1378.0,
+        "p99": 5129.0,
+        "samples": 60
+      },
+      "step_adjudicator": {
+        "max": 3247.0,
+        "min": 1706.0,
+        "p50": 1959.0,
+        "p95": 2383.0,
+        "p99": 3247.0,
+        "samples": 21
+      }
+    },
+    "model_transport_retries": {
+      "per_sample_max": 0,
+      "per_sample_mean": 0.0,
+      "per_sample_min": 0,
+      "total": 0
+    },
+    "narrator_calls": {
+      "per_sample_max": 2,
+      "per_sample_mean": 1.1,
+      "per_sample_min": 1,
+      "total": 66
+    },
+    "output_tokens": {
+      "per_sample_max": 576,
+      "per_sample_mean": 335.3,
+      "per_sample_min": 163,
+      "total": 20118
+    },
+    "plan_cas_calls": {
+      "per_sample_max": 8,
+      "per_sample_mean": 6.083,
+      "per_sample_min": 5,
+      "total": 365
+    },
+    "plan_create_calls": {
+      "per_sample_max": 1,
+      "per_sample_mean": 1.0,
+      "per_sample_min": 1,
+      "total": 60
+    },
+    "planner_calls": {
+      "per_sample_max": 1,
+      "per_sample_mean": 1.0,
+      "per_sample_min": 1,
+      "total": 60
+    },
+    "repair_calls": {
+      "per_sample_max": 1,
+      "per_sample_mean": 0.017,
+      "per_sample_min": 0,
+      "total": 1
+    },
+    "rule_first_hits": {
+      "per_sample_max": 0,
+      "per_sample_mean": 0.0,
+      "per_sample_min": 0,
+      "total": 0
+    },
+    "sample_count": 60,
+    "step_adjudicator_calls": {
+      "per_sample_max": 2,
+      "per_sample_mean": 1.35,
+      "per_sample_min": 1,
+      "total": 81
+    },
+    "step_adjudicator_paths": {
+      "deterministic": {
+        "per_sample_max": 2,
+        "per_sample_mean": 1.0,
+        "per_sample_min": 0,
+        "total": 60
+      },
+      "model": {
+        "per_sample_max": 1,
+        "per_sample_mean": 0.333,
+        "per_sample_min": 0,
+        "total": 20
+      },
+      "repair": {
+        "per_sample_max": 1,
+        "per_sample_mean": 0.017,
+        "per_sample_min": 0,
+        "total": 1
+      },
+      "rule_first": {
+        "per_sample_max": 0,
+        "per_sample_mean": 0.0,
+        "per_sample_min": 0,
+        "total": 0
+      }
+    },
+    "step_count_distribution": {
+      "1": 40,
+      "2": 20
+    },
+    "step_counts": [
+      1,
+      2
+    ],
+    "structured_retries": {
+      "per_sample_max": 0,
+      "per_sample_mean": 0.0,
+      "per_sample_min": 0,
+      "total": 0
+    },
+    "successes": 60,
+    "terminal_events": {
+      "completed": 60
+    },
+    "transport_calls": {
+      "per_sample_max": 5,
+      "per_sample_mean": 2.45,
+      "per_sample_min": 2,
+      "total": 147
+    }
+  },
+  "percentile_method": "nearest-rank",
+  "planner_model": "deepseek-chat",
+  "planner_provider": "deepseek",
+  "producer": "semantic",
+  "runtime": {
+    "architecture": "arm64",
+    "machine": "JHMac.local",
+    "os": "Darwin",
+    "python": "3.13.14"
+  },
+  "scenario_repeats": 20,
+  "scenarios": {
+    "real_investigation": {
+      "adjudicator_deterministic_paths": {
+        "per_sample_max": 0,
+        "per_sample_mean": 0.0,
+        "per_sample_min": 0,
+        "total": 0
+      },
+      "adjudicator_model_paths": {
+        "per_sample_max": 1,
+        "per_sample_mean": 1.0,
+        "per_sample_min": 1,
+        "total": 20
+      },
+      "adjudicator_repair_paths": {
+        "per_sample_max": 1,
+        "per_sample_mean": 0.05,
+        "per_sample_min": 0,
+        "total": 1
+      },
+      "adjudicator_rule_first_paths": {
+        "per_sample_max": 0,
+        "per_sample_mean": 0.0,
+        "per_sample_min": 0,
+        "total": 0
+      },
+      "comparable_adjudicator_calls": {
+        "per_sample_max": 0,
+        "per_sample_mean": 0.0,
+        "per_sample_min": 0,
+        "total": 0
+      },
+      "comparable_deterministic_hits": {
+        "per_sample_max": 0,
+        "per_sample_mean": 0.0,
+        "per_sample_min": 0,
+        "total": 0
+      },
+      "comparable_deterministic_rule_first_rate": null,
+      "comparable_rule_first_hits": {
+        "per_sample_max": 0,
+        "per_sample_mean": 0.0,
+        "per_sample_min": 0,
+        "total": 0
+      },
+      "deterministic_hits": {
+        "per_sample_max": 0,
+        "per_sample_mean": 0.0,
+        "per_sample_min": 0,
+        "total": 0
+      },
+      "deterministic_rule_first_rate": 0.0,
+      "end_to_end_ms": {
+        "max": 9885.35,
+        "min": 5030.505,
+        "p50": 6069.359,
+        "p95": 8160.014,
+        "p99": 9885.35,
+        "samples": 20
+      },
+      "engine_status_calls": {
+        "per_sample_max": 2,
+        "per_sample_mean": 0.25,
+        "per_sample_min": 0,
+        "total": 5
+      },
+      "engine_submit_calls": {
+        "per_sample_max": 1,
+        "per_sample_mean": 1.0,
+        "per_sample_min": 1,
+        "total": 20
+      },
+      "failure_codes": [],
+      "failure_rate": 0.0,
+      "failure_stages": {},
+      "failures": 0,
+      "final_narration_completion_ms": {
+        "max": 9885.35,
+        "min": 5030.505,
+        "p50": 6069.359,
+        "p95": 8160.014,
+        "p99": 9885.35,
+        "samples": 20
+      },
+      "first_narration_completion_ms": {
+        "max": 9885.35,
+        "min": 5030.505,
+        "p50": 6069.359,
+        "p95": 8160.014,
+        "p99": 9885.35,
+        "samples": 20
+      },
+      "first_pending_ms": {
+        "max": 3406.113,
+        "min": 3328.365,
+        "p50": 3328.365,
+        "p95": 3406.113,
+        "p99": 3406.113,
+        "samples": 2
+      },
+      "input_tokens": {
+        "per_sample_max": 47609,
+        "per_sample_mean": 26535.95,
+        "per_sample_min": 24387,
+        "total": 530719
+      },
+      "model_calls": {
+        "per_sample_max": 5,
+        "per_sample_mean": 3.25,
+        "per_sample_min": 3,
+        "total": 65
+      },
+      "model_stage_latency_ms": {
+        "narrator": {
+          "max": 3766.0,
+          "min": 1314.0,
+          "p50": 2448.0,
+          "p95": 3739.0,
+          "p99": 3766.0,
+          "samples": 24
+        },
+        "planner": {
+          "max": 1354.0,
+          "min": 693.0,
+          "p50": 998.0,
+          "p95": 1132.0,
+          "p99": 1354.0,
+          "samples": 20
+        },
+        "step_adjudicator": {
+          "max": 3247.0,
+          "min": 1706.0,
+          "p50": 1959.0,
+          "p95": 2383.0,
+          "p99": 3247.0,
+          "samples": 21
+        }
+      },
+      "model_transport_retries": {
+        "per_sample_max": 0,
+        "per_sample_mean": 0.0,
+        "per_sample_min": 0,
+        "total": 0
+      },
+      "narrator_calls": {
+        "per_sample_max": 2,
+        "per_sample_mean": 1.2,
+        "per_sample_min": 1,
+        "total": 24
+      },
+      "output_tokens": {
+        "per_sample_max": 576,
+        "per_sample_mean": 429.55,
+        "per_sample_min": 336,
+        "total": 8591
+      },
+      "plan_cas_calls": {
+        "per_sample_max": 8,
+        "per_sample_mean": 5.25,
+        "per_sample_min": 5,
+        "total": 105
+      },
+      "plan_create_calls": {
+        "per_sample_max": 1,
+        "per_sample_mean": 1.0,
+        "per_sample_min": 1,
+        "total": 20
+      },
+      "planner_calls": {
+        "per_sample_max": 1,
+        "per_sample_mean": 1.0,
+        "per_sample_min": 1,
+        "total": 20
+      },
+      "repair_calls": {
+        "per_sample_max": 1,
+        "per_sample_mean": 0.05,
+        "per_sample_min": 0,
+        "total": 1
+      },
+      "rule_first_hits": {
+        "per_sample_max": 0,
+        "per_sample_mean": 0.0,
+        "per_sample_min": 0,
+        "total": 0
+      },
+      "sample_count": 20,
+      "step_adjudicator_calls": {
+        "per_sample_max": 2,
+        "per_sample_mean": 1.05,
+        "per_sample_min": 1,
+        "total": 21
+      },
+      "step_adjudicator_paths": {
+        "deterministic": {
+          "per_sample_max": 0,
+          "per_sample_mean": 0.0,
+          "per_sample_min": 0,
+          "total": 0
+        },
+        "model": {
+          "per_sample_max": 1,
+          "per_sample_mean": 1.0,
+          "per_sample_min": 1,
+          "total": 20
+        },
+        "repair": {
+          "per_sample_max": 1,
+          "per_sample_mean": 0.05,
+          "per_sample_min": 0,
+          "total": 1
+        },
+        "rule_first": {
+          "per_sample_max": 0,
+          "per_sample_mean": 0.0,
+          "per_sample_min": 0,
+          "total": 0
+        }
+      },
+      "step_count_distribution": {
+        "1": 20
+      },
+      "step_counts": [
+        1
+      ],
+      "structured_retries": {
+        "per_sample_max": 0,
+        "per_sample_mean": 0.0,
+        "per_sample_min": 0,
+        "total": 0
+      },
+      "successes": 20,
+      "terminal_events": {
+        "completed": 20
+      },
+      "transport_calls": {
+        "per_sample_max": 5,
+        "per_sample_mean": 3.25,
+        "per_sample_min": 3,
+        "total": 65
+      }
+    },
+    "real_multi_step": {
+      "adjudicator_deterministic_paths": {
+        "per_sample_max": 2,
+        "per_sample_mean": 2.0,
+        "per_sample_min": 2,
+        "total": 40
+      },
+      "adjudicator_model_paths": {
+        "per_sample_max": 0,
+        "per_sample_mean": 0.0,
+        "per_sample_min": 0,
+        "total": 0
+      },
+      "adjudicator_repair_paths": {
+        "per_sample_max": 0,
+        "per_sample_mean": 0.0,
+        "per_sample_min": 0,
+        "total": 0
+      },
+      "adjudicator_rule_first_paths": {
+        "per_sample_max": 0,
+        "per_sample_mean": 0.0,
+        "per_sample_min": 0,
+        "total": 0
+      },
+      "comparable_adjudicator_calls": {
+        "per_sample_max": 1,
+        "per_sample_mean": 1.0,
+        "per_sample_min": 1,
+        "total": 20
+      },
+      "comparable_deterministic_hits": {
+        "per_sample_max": 1,
+        "per_sample_mean": 1.0,
+        "per_sample_min": 1,
+        "total": 20
+      },
+      "comparable_deterministic_rule_first_rate": 1.0,
+      "comparable_rule_first_hits": {
+        "per_sample_max": 0,
+        "per_sample_mean": 0.0,
+        "per_sample_min": 0,
+        "total": 0
+      },
+      "deterministic_hits": {
+        "per_sample_max": 2,
+        "per_sample_mean": 2.0,
+        "per_sample_min": 2,
+        "total": 40
+      },
+      "deterministic_rule_first_rate": 1.0,
+      "end_to_end_ms": {
+        "max": 7992.586,
+        "min": 2960.524,
+        "p50": 4811.594,
+        "p95": 5851.18,
+        "p99": 7992.586,
+        "samples": 20
+      },
+      "engine_status_calls": {
+        "per_sample_max": 0,
+        "per_sample_mean": 0.0,
+        "per_sample_min": 0,
+        "total": 0
+      },
+      "engine_submit_calls": {
+        "per_sample_max": 2,
+        "per_sample_mean": 2.0,
+        "per_sample_min": 2,
+        "total": 40
+      },
+      "failure_codes": [],
+      "failure_rate": 0.0,
+      "failure_stages": {},
+      "failures": 0,
+      "final_narration_completion_ms": {
+        "max": 7992.586,
+        "min": 2960.524,
+        "p50": 4811.594,
+        "p95": 5851.18,
+        "p99": 7992.586,
+        "samples": 20
+      },
+      "first_narration_completion_ms": {
+        "max": 7992.586,
+        "min": 2960.524,
+        "p50": 4811.594,
+        "p95": 5851.18,
+        "p99": 7992.586,
+        "samples": 20
+      },
+      "first_pending_ms": {
+        "max": null,
+        "min": null,
+        "p50": null,
+        "p95": null,
+        "p99": null,
+        "samples": 0
+      },
+      "input_tokens": {
+        "per_sample_max": 8065,
+        "per_sample_mean": 8018.05,
+        "per_sample_min": 7960,
+        "total": 160361
+      },
+      "model_calls": {
+        "per_sample_max": 2,
+        "per_sample_mean": 2.0,
+        "per_sample_min": 2,
+        "total": 40
+      },
+      "model_stage_latency_ms": {
+        "narrator": {
+          "max": 4265.0,
+          "min": 1683.0,
+          "p50": 2973.0,
+          "p95": 4095.0,
+          "p99": 4265.0,
+          "samples": 20
+        },
+        "planner": {
+          "max": 5129.0,
+          "min": 937.0,
+          "p50": 1120.0,
+          "p95": 1477.0,
+          "p99": 5129.0,
+          "samples": 20
+        }
+      },
+      "model_transport_retries": {
+        "per_sample_max": 0,
+        "per_sample_mean": 0.0,
+        "per_sample_min": 0,
+        "total": 0
+      },
+      "narrator_calls": {
+        "per_sample_max": 1,
+        "per_sample_mean": 1.0,
+        "per_sample_min": 1,
+        "total": 20
+      },
+      "output_tokens": {
+        "per_sample_max": 473,
+        "per_sample_mean": 337.6,
+        "per_sample_min": 226,
+        "total": 6752
+      },
+      "plan_cas_calls": {
+        "per_sample_max": 8,
+        "per_sample_mean": 8.0,
+        "per_sample_min": 8,
+        "total": 160
+      },
+      "plan_create_calls": {
+        "per_sample_max": 1,
+        "per_sample_mean": 1.0,
+        "per_sample_min": 1,
+        "total": 20
+      },
+      "planner_calls": {
+        "per_sample_max": 1,
+        "per_sample_mean": 1.0,
+        "per_sample_min": 1,
+        "total": 20
+      },
+      "repair_calls": {
+        "per_sample_max": 0,
+        "per_sample_mean": 0.0,
+        "per_sample_min": 0,
+        "total": 0
+      },
+      "rule_first_hits": {
+        "per_sample_max": 0,
+        "per_sample_mean": 0.0,
+        "per_sample_min": 0,
+        "total": 0
+      },
+      "sample_count": 20,
+      "step_adjudicator_calls": {
+        "per_sample_max": 2,
+        "per_sample_mean": 2.0,
+        "per_sample_min": 2,
+        "total": 40
+      },
+      "step_adjudicator_paths": {
+        "deterministic": {
+          "per_sample_max": 2,
+          "per_sample_mean": 2.0,
+          "per_sample_min": 2,
+          "total": 40
+        },
+        "model": {
+          "per_sample_max": 0,
+          "per_sample_mean": 0.0,
+          "per_sample_min": 0,
+          "total": 0
+        },
+        "repair": {
+          "per_sample_max": 0,
+          "per_sample_mean": 0.0,
+          "per_sample_min": 0,
+          "total": 0
+        },
+        "rule_first": {
+          "per_sample_max": 0,
+          "per_sample_mean": 0.0,
+          "per_sample_min": 0,
+          "total": 0
+        }
+      },
+      "step_count_distribution": {
+        "2": 20
+      },
+      "step_counts": [
+        2
+      ],
+      "structured_retries": {
+        "per_sample_max": 0,
+        "per_sample_mean": 0.0,
+        "per_sample_min": 0,
+        "total": 0
+      },
+      "successes": 20,
+      "terminal_events": {
+        "completed": 20
+      },
+      "transport_calls": {
+        "per_sample_max": 2,
+        "per_sample_mean": 2.0,
+        "per_sample_min": 2,
+        "total": 40
+      }
+    },
+    "real_observation": {
+      "adjudicator_deterministic_paths": {
+        "per_sample_max": 1,
+        "per_sample_mean": 1.0,
+        "per_sample_min": 1,
+        "total": 20
+      },
+      "adjudicator_model_paths": {
+        "per_sample_max": 0,
+        "per_sample_mean": 0.0,
+        "per_sample_min": 0,
+        "total": 0
+      },
+      "adjudicator_repair_paths": {
+        "per_sample_max": 0,
+        "per_sample_mean": 0.0,
+        "per_sample_min": 0,
+        "total": 0
+      },
+      "adjudicator_rule_first_paths": {
+        "per_sample_max": 0,
+        "per_sample_mean": 0.0,
+        "per_sample_min": 0,
+        "total": 0
+      },
+      "comparable_adjudicator_calls": {
+        "per_sample_max": 0,
+        "per_sample_mean": 0.0,
+        "per_sample_min": 0,
+        "total": 0
+      },
+      "comparable_deterministic_hits": {
+        "per_sample_max": 0,
+        "per_sample_mean": 0.0,
+        "per_sample_min": 0,
+        "total": 0
+      },
+      "comparable_deterministic_rule_first_rate": null,
+      "comparable_rule_first_hits": {
+        "per_sample_max": 0,
+        "per_sample_mean": 0.0,
+        "per_sample_min": 0,
+        "total": 0
+      },
+      "deterministic_hits": {
+        "per_sample_max": 1,
+        "per_sample_mean": 1.0,
+        "per_sample_min": 1,
+        "total": 20
+      },
+      "deterministic_rule_first_rate": 1.0,
+      "end_to_end_ms": {
+        "max": 7566.361,
+        "min": 2752.739,
+        "p50": 3744.2,
+        "p95": 6145.98,
+        "p99": 7566.361,
+        "samples": 20
+      },
+      "engine_status_calls": {
+        "per_sample_max": 0,
+        "per_sample_mean": 0.0,
+        "per_sample_min": 0,
+        "total": 0
+      },
+      "engine_submit_calls": {
+        "per_sample_max": 1,
+        "per_sample_mean": 1.0,
+        "per_sample_min": 1,
+        "total": 20
+      },
+      "failure_codes": [],
+      "failure_rate": 0.0,
+      "failure_stages": {},
+      "failures": 0,
+      "final_narration_completion_ms": {
+        "max": 7566.361,
+        "min": 2752.739,
+        "p50": 3744.2,
+        "p95": 6145.98,
+        "p99": 7566.361,
+        "samples": 20
+      },
+      "first_narration_completion_ms": {
+        "max": 7566.361,
+        "min": 2752.739,
+        "p50": 3744.2,
+        "p95": 6145.98,
+        "p99": 7566.361,
+        "samples": 20
+      },
+      "first_pending_ms": {
+        "max": null,
+        "min": null,
+        "p50": null,
+        "p95": null,
+        "p99": null,
+        "samples": 0
+      },
+      "input_tokens": {
+        "per_sample_max": 13892,
+        "per_sample_mean": 8457.55,
+        "per_sample_min": 7818,
+        "total": 169151
+      },
+      "model_calls": {
+        "per_sample_max": 3,
+        "per_sample_mean": 2.1,
+        "per_sample_min": 2,
+        "total": 42
+      },
+      "model_stage_latency_ms": {
+        "narrator": {
+          "max": 4172.0,
+          "min": 1710.0,
+          "p50": 2409.0,
+          "p95": 2919.0,
+          "p99": 4172.0,
+          "samples": 22
+        },
+        "planner": {
+          "max": 1462.0,
+          "min": 735.0,
+          "p50": 1014.0,
+          "p95": 1178.0,
+          "p99": 1462.0,
+          "samples": 20
+        }
+      },
+      "model_transport_retries": {
+        "per_sample_max": 0,
+        "per_sample_mean": 0.0,
+        "per_sample_min": 0,
+        "total": 0
+      },
+      "narrator_calls": {
+        "per_sample_max": 2,
+        "per_sample_mean": 1.1,
+        "per_sample_min": 1,
+        "total": 22
+      },
+      "output_tokens": {
+        "per_sample_max": 512,
+        "per_sample_mean": 238.75,
+        "per_sample_min": 163,
+        "total": 4775
+      },
+      "plan_cas_calls": {
+        "per_sample_max": 5,
+        "per_sample_mean": 5.0,
+        "per_sample_min": 5,
+        "total": 100
+      },
+      "plan_create_calls": {
+        "per_sample_max": 1,
+        "per_sample_mean": 1.0,
+        "per_sample_min": 1,
+        "total": 20
+      },
+      "planner_calls": {
+        "per_sample_max": 1,
+        "per_sample_mean": 1.0,
+        "per_sample_min": 1,
+        "total": 20
+      },
+      "repair_calls": {
+        "per_sample_max": 0,
+        "per_sample_mean": 0.0,
+        "per_sample_min": 0,
+        "total": 0
+      },
+      "rule_first_hits": {
+        "per_sample_max": 0,
+        "per_sample_mean": 0.0,
+        "per_sample_min": 0,
+        "total": 0
+      },
+      "sample_count": 20,
+      "step_adjudicator_calls": {
+        "per_sample_max": 1,
+        "per_sample_mean": 1.0,
+        "per_sample_min": 1,
+        "total": 20
+      },
+      "step_adjudicator_paths": {
+        "deterministic": {
+          "per_sample_max": 1,
+          "per_sample_mean": 1.0,
+          "per_sample_min": 1,
+          "total": 20
+        },
+        "model": {
+          "per_sample_max": 0,
+          "per_sample_mean": 0.0,
+          "per_sample_min": 0,
+          "total": 0
+        },
+        "repair": {
+          "per_sample_max": 0,
+          "per_sample_mean": 0.0,
+          "per_sample_min": 0,
+          "total": 0
+        },
+        "rule_first": {
+          "per_sample_max": 0,
+          "per_sample_mean": 0.0,
+          "per_sample_min": 0,
+          "total": 0
+        }
+      },
+      "step_count_distribution": {
+        "1": 20
+      },
+      "step_counts": [
+        1
+      ],
+      "structured_retries": {
+        "per_sample_max": 0,
+        "per_sample_mean": 0.0,
+        "per_sample_min": 0,
+        "total": 0
+      },
+      "successes": 20,
+      "terminal_events": {
+        "completed": 20
+      },
+      "transport_calls": {
+        "per_sample_max": 3,
+        "per_sample_mean": 2.1,
+        "per_sample_min": 2,
+        "total": 42
+      }
+    }
+  },
+  "schema_version": 1,
+  "subject_revision": "aca238b48441de688ced4d57545f61d57374e71e"
+}

@@ -48,6 +48,29 @@ semantic E2E 的聚合失败分类为 `BENCHMARK_TIMEOUT` 和 `MODEL_OUTPUT_UNRE
 也出现少量 benchmark timeout/narrator failure。Planner 语料本身没有 terminal failure，且多目标
 step count/kind 顺序全部正确。
 
+## Round 1 重跑
+
+上一轮结果和报告保持不变，作为历史失败证据保留在
+`issue-357-validation-round-1/`。针对上一轮的后台任务/锁竞争和配置问题修复后，使用同一语料、
+同一 E2E 场景和同一 provider/model 在 revision `aca238b48441de688ced4d57545f61d57374e71e`
+重新从 smoke 开始执行。重跑报告位于 `issue-357-validation-round-1-rerun/`，smoke 比较报告为
+`issue-357-validation-smoke-rerun.json` 与 `issue-357-validation-smoke-rerun.md`。
+
+- Smoke：四条路径均通过，`95 / 2500` transport calls。
+- Round 1：520 个正式样本，legacy/semantic corpus 各 200，legacy/semantic E2E 各 60；
+  `1288 / 2500` cumulative transport calls。
+- Planner terminal failure rate：`0%`；semantic E2E terminal failure rate：`0%`。
+- 多目标 step-count 与 kind 顺序准确率均为 `100%`；结构化输出经重试后的成功率为 `100%`。
+- semantic 一步 P95：`7860.309ms`，超过 `6500ms`；复杂一步 P95 相对 legacy 增量为
+  `2203.02ms / 36.9821%`，超过 `1500ms / 25%`。
+- Round 1 重跑仍为 **NO-GO**，因此没有执行 Round 2，也没有进入 PR3。
+
+重跑显示主要瓶颈是一步复杂行动的额外裁决调用：semantic 的
+`real_investigation` 在 `20/20` 个回合进入 Step Adjudicator 的 model 路径，而 legacy 首步的
+旧 producer 调用已经包含同等裁决；semantic Step Adjudicator P95 约 `2383ms`。Planner 自身
+P95 约 `1132ms`，并非主要失败来源。该差异说明当前语义 Planner 到当前步骤策略之间仍缺少
+足够的确定性/rule-first 覆盖，不能据此删除旧 producer contract。
+
 ## 后续状态
 
 - Round 2：未执行。根据协议，任一轮失败必须先定位问题，不能用第二轮平均值掩盖 Round 1。

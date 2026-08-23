@@ -2101,6 +2101,10 @@ class _RuleFirstStepAdjudicator:
                 path="rule_first" if adjudication.rule_decision is not None else "deterministic",
             )
             return adjudication
+        _log_deterministic_adjudication_miss(
+            context,
+            reason=_deterministic_adjudication_miss_reason(context),
+        )
         adjudication = await self._fallback.adjudicate(context)
         _log_step_adjudicator_path(
             context,
@@ -2164,6 +2168,60 @@ def _log_step_adjudicator_path(
         path=path,
         has_check=not isinstance(adjudication.check, NoAdjudicationCheck),
     )
+
+
+def _log_deterministic_adjudication_miss(
+    context: ActionPlanStepContext,
+    *,
+    reason: str,
+) -> None:
+    """Record why the safe fast path deferred to the model, without content."""
+
+    logger.info(
+        "action_plan_step_adjudicator_deterministic_miss",
+        action=context.player_input.client_action_id[:12],
+        step_index=context.step_index,
+        step_kind=context.step.kind,
+        reason=reason,
+    )
+
+
+def _deterministic_adjudication_miss_reason(context: ActionPlanStepContext) -> str:
+    """Classify a deterministic miss using only player-safe projection metadata."""
+
+    if context.step.kind in {"wait", "rest"}:
+        return "time_target_semantics"
+    if context.step.kind == "travel":
+        destination = _match_travel_target(context.player_view, context.step.semantic_goal)
+        if context.plan_id == "single-action":
+            destination = (
+                _match_travel_target(context.player_view, context.player_input.utterance)
+                or destination
+            )
+        return "travel_destination_unresolved" if destination is None else "travel_policy_fallback"
+
+    action_text = context.step.semantic_goal.replace(
+        context.player_view.scene.name,
+        "",
+    ).strip(" ，,。")
+    target, target_status = _match_visible_entity_with_status(
+        context.player_view,
+        action_text,
+    )
+    if target_status == "ambiguous":
+        return "target_ambiguous"
+    candidate, option = _match_rule_candidate(
+        context.keeper_capabilities,
+        action_text,
+        target.id if target is not None else None,
+    )
+    if candidate is None or option is None:
+        if context.step.kind == "dialogue":
+            return "dialogue_target_unresolved"
+        if target is None and _is_public_observation_goal(action_text):
+            return "observation_policy_fallback"
+        return "rule_candidate_unresolved" if target is not None else "target_missing"
+    return "adjudication_policy_fallback"
 
 
 def _deterministic_step_adjudication(
@@ -2390,17 +2448,24 @@ def _match_generic_dialogue_target(view: PlayerView, text: str) -> VisibleEntity
 
 
 def _match_visible_entity(view: PlayerView, text: str):
+    return _match_visible_entity_with_status(view, text)[0]
+
+
+def _match_visible_entity_with_status(
+    view: PlayerView,
+    text: str,
+) -> tuple[VisibleEntity | None, Literal["missing", "ambiguous", "matched"]]:
     matches = []
     for entity in view.scene.visible_entities:
         overlap = _best_label_overlap(text, (entity.id, entity.name, *entity.aliases))
         if overlap is not None:
             matches.append((len(overlap), entity.id, entity))
     if not matches:
-        return None
+        return None, "missing"
     matches.sort(key=lambda item: (-item[0], item[1]))
     if len(matches) > 1 and matches[0][0] == matches[1][0]:
-        return None
-    return matches[0][2]
+        return None, "ambiguous"
+    return matches[0][2], "matched"
 
 
 def _companion_move_effects(

@@ -62,6 +62,7 @@ from app.adapters.openai_models import _SAFE_ADJUDICATION_INSTRUCTIONS, PromptTu
 from app.core.action_plan_turn import (
     DeterministicHostTurnDecisionModel,
     PlanPrerequisiteResolver,
+    _deterministic_adjudication_miss_reason,
     _deterministic_step_adjudication,
     _DeterministicStepAdjudicator,
     _match_travel_target,
@@ -464,6 +465,20 @@ async def test_generic_dialogue_pronoun_stays_unresolved_for_multiple_visible_np
     context = context.model_copy(update={"player_view": current_view}, deep=True)
 
     assert _deterministic_step_adjudication(context) is None
+
+
+@pytest.mark.asyncio
+async def test_deterministic_miss_reason_is_player_safe_metadata() -> None:
+    context = await _cemetery_context("仔细检查书架上的文件")
+
+    assert _deterministic_adjudication_miss_reason(context) == "target_missing"
+
+
+@pytest.mark.asyncio
+async def test_dialogue_miss_reason_does_not_include_player_text() -> None:
+    context = await _cemetery_context("询问眼前的人", step_kind="dialogue")
+
+    assert _deterministic_adjudication_miss_reason(context) == "dialogue_target_unresolved"
 
 
 @pytest.mark.asyncio

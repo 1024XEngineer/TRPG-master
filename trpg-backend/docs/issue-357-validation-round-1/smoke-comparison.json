@@ -1,0 +1,47 @@
+{
+  "failure_rates": {
+    "legacy_corpus": 0.0,
+    "legacy_e2e": 0.0,
+    "semantic_corpus": 0.0,
+    "semantic_e2e": 0.0
+  },
+  "gates": {
+    "legacy_corpus_clean": {
+      "comparison": "max",
+      "observed": 0.0,
+      "passed": true,
+      "threshold": 0.0
+    },
+    "legacy_e2e_clean": {
+      "comparison": "max",
+      "observed": 0.0,
+      "passed": true,
+      "threshold": 0.0
+    },
+    "semantic_corpus_clean": {
+      "comparison": "max",
+      "observed": 0.0,
+      "passed": true,
+      "threshold": 0.0
+    },
+    "semantic_e2e_clean": {
+      "comparison": "max",
+      "observed": 0.0,
+      "passed": true,
+      "threshold": 0.0
+    },
+    "transport_call_cap": {
+      "comparison": "max",
+      "observed": 97.0,
+      "passed": true,
+      "threshold": 2500.0
+    }
+  },
+  "issue": 357,
+  "schema_version": 1,
+  "stage": "smoke",
+  "subject_revision": "d6bd38aa68949cb5882d0ff09253ea12bc8309ae",
+  "transport_call_cap": 2500,
+  "transport_calls": 97,
+  "verdict": "go"
+}

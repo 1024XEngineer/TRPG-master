@@ -1,0 +1,157 @@
+{
+  "cost": {
+    "availability": "unavailable",
+    "estimated_total": null
+  },
+  "gates": {
+    "complex_p95_absolute_increase": {
+      "comparison": "max",
+      "observed": 1320.257,
+      "passed": true,
+      "threshold": 1500.0
+    },
+    "complex_p95_relative_increase": {
+      "comparison": "max",
+      "observed": 0.200625,
+      "passed": true,
+      "threshold": 0.25
+    },
+    "deterministic_rule_first_drop": {
+      "comparison": "max",
+      "observed": 0.1451,
+      "passed": false,
+      "threshold": 0.05
+    },
+    "multi_kind_sequence_accuracy": {
+      "comparison": "min",
+      "observed": 1.0,
+      "passed": true,
+      "threshold": 0.95
+    },
+    "multi_step_count_accuracy": {
+      "comparison": "min",
+      "observed": 1.0,
+      "passed": true,
+      "threshold": 0.95
+    },
+    "planner_terminal_failure_rate": {
+      "comparison": "max",
+      "observed": 0.0,
+      "passed": true,
+      "threshold": 0.02
+    },
+    "semantic_e2e_terminal_failure_rate": {
+      "comparison": "max",
+      "observed": 0.05,
+      "passed": false,
+      "threshold": 0.02
+    },
+    "semantic_one_action_p95": {
+      "comparison": "max",
+      "observed": 7577.76,
+      "passed": false,
+      "threshold": 6500.0
+    },
+    "structured_success_after_retry": {
+      "comparison": "min",
+      "observed": 1.0,
+      "passed": true,
+      "threshold": 0.99
+    },
+    "transport_call_cap": {
+      "comparison": "max",
+      "observed": 849.0,
+      "passed": true,
+      "threshold": 2500.0
+    }
+  },
+  "issue": 357,
+  "latency_ms": {
+    "complex_absolute_increase": 1320.257,
+    "complex_relative_increase": 0.200625,
+    "legacy_complex_p95": 6580.706,
+    "legacy_overall": {
+      "max": 10673.195,
+      "min": 3273.78,
+      "p50": 4617.663,
+      "p95": 8753.386,
+      "p99": 10673.195,
+      "samples": 60
+    },
+    "semantic_complex_p95": 7900.963,
+    "semantic_one_action": {
+      "max": 10744.544,
+      "min": 3041.768,
+      "p50": 5435.536,
+      "p95": 7577.76,
+      "p99": 10744.544,
+      "samples": 40
+    },
+    "semantic_overall": {
+      "max": 10744.544,
+      "min": 3041.768,
+      "p50": 5971.839,
+      "p95": 9110.419,
+      "p99": 10744.544,
+      "samples": 60
+    }
+  },
+  "providers": {
+    "legacy": {
+      "model": "deepseek-chat",
+      "provider": "deepseek"
+    },
+    "semantic": {
+      "model": "deepseek-chat",
+      "provider": "deepseek"
+    }
+  },
+  "quality": {
+    "deterministic_rule_first_drop": 0.1451,
+    "first_structure_success_rate": 1.0,
+    "legacy_deterministic_rule_first_rate": 0.1951,
+    "multi_kind_sequence_accuracy": 1.0,
+    "multi_step_count_accuracy": 1.0,
+    "planner_terminal_failure_rate": 0.0,
+    "semantic_deterministic_rule_first_rate": 0.05,
+    "semantic_e2e_terminal_failure_rate": 0.05,
+    "structured_success_rate": 1.0
+  },
+  "round": 1,
+  "scenario_step_counts": {
+    "legacy": {
+      "real_investigation": [
+        1
+      ],
+      "real_multi_step": [
+        2
+      ],
+      "real_observation": [
+        1
+      ]
+    },
+    "semantic": {
+      "real_investigation": [
+        1
+      ],
+      "real_multi_step": [
+        2
+      ],
+      "real_observation": [
+        1
+      ]
+    }
+  },
+  "schema_version": 1,
+  "subject_revision": "d6bd38aa68949cb5882d0ff09253ea12bc8309ae",
+  "totals": {
+    "cumulative_transport_calls": 849,
+    "input_tokens": 5863233,
+    "model_calls": 752,
+    "output_tokens": 87807,
+    "structured_retries": 2,
+    "transport_calls": 752,
+    "transport_retries": 0
+  },
+  "verdict": "no-go"
+}

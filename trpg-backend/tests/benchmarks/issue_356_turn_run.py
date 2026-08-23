@@ -72,6 +72,17 @@ COUNT_FIELDS = (
 )
 
 
+@contextmanager
+def _disable_background_summary() -> Iterator[None]:
+    """避免非本 benchmark 的摘要写入与 SQLite 回合写入争锁。"""
+    original = getattr(app.state, "conversation_summary_service", None)
+    app.state.conversation_summary_service = None
+    try:
+        yield
+    finally:
+        app.state.conversation_summary_service = original
+
+
 class _SingleNoCheckPlanner:
     async def generate(self, context) -> SingleActionDecision:  # noqa: ANN001
         text = context.player_input.utterance
@@ -662,28 +673,29 @@ def test_issue_356_turn_run_benchmark(
     )
     sample_results: dict[str, list[dict[str, Any]]] = {scenario: [] for scenario in scenarios}
     try:
-        sample_number = 0
-        for scenario in scenarios:
-            for _ in range(repeats):
-                sample_number += 1
-                sample_results[scenario].append(
-                    _run_sample(
-                        sync_client,
-                        application,
-                        scenario=scenario,
-                        sample_number=sample_number,
-                        real_mode=mode == "real",
+        with _disable_background_summary():
+            sample_number = 0
+            for scenario in scenarios:
+                for _ in range(repeats):
+                    sample_number += 1
+                    sample_results[scenario].append(
+                        _run_sample(
+                            sync_client,
+                            application,
+                            scenario=scenario,
+                            sample_number=sample_number,
+                            real_mode=mode == "real",
+                        )
                     )
-                )
-                used = sum(
-                    sample["transport_calls"]
-                    for samples in sample_results.values()
-                    for sample in samples
-                )
-                if transport_call_budget is not None and used > transport_call_budget:
-                    raise RuntimeError(
-                        f"transport call budget exceeded: {used} > {transport_call_budget}"
+                    used = sum(
+                        sample["transport_calls"]
+                        for samples in sample_results.values()
+                        for sample in samples
                     )
+                    if transport_call_budget is not None and used > transport_call_budget:
+                        raise RuntimeError(
+                            f"transport call budget exceeded: {used} > {transport_call_budget}"
+                        )
     finally:
         ws_controller.action_plan_turn_application = original_application
 

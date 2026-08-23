@@ -22,6 +22,7 @@ from app.core.config import Settings
 from app.main import app
 from tests.benchmarks.issue_356_metrics import aggregate_scenario, assert_sanitized_report
 from tests.benchmarks.issue_356_turn_run import (
+    _disable_background_summary,
     _git_revision,
     _run_sample,
 )
@@ -64,28 +65,29 @@ def test_issue_357_semantic_turn_run_benchmark(
     sample_results: dict[str, list[dict[str, Any]]] = {name: [] for name in scenarios}
     sync_client = TestClient(app)
     try:
-        sample_number = 0
-        for scenario in scenarios:
-            for _ in range(repeats):
-                sample_number += 1
-                sample_results[scenario].append(
-                    _run_sample(
-                        sync_client,
-                        application,
-                        scenario=scenario,
-                        sample_number=sample_number,
-                        real_mode=True,
+        with _disable_background_summary():
+            sample_number = 0
+            for scenario in scenarios:
+                for _ in range(repeats):
+                    sample_number += 1
+                    sample_results[scenario].append(
+                        _run_sample(
+                            sync_client,
+                            application,
+                            scenario=scenario,
+                            sample_number=sample_number,
+                            real_mode=True,
+                        )
                     )
-                )
-                used = sum(
-                    sample["transport_calls"]
-                    for samples in sample_results.values()
-                    for sample in samples
-                )
-                if transport_call_budget is not None and used > transport_call_budget:
-                    raise RuntimeError(
-                        f"transport call budget exceeded: {used} > {transport_call_budget}"
+                    used = sum(
+                        sample["transport_calls"]
+                        for samples in sample_results.values()
+                        for sample in samples
                     )
+                    if transport_call_budget is not None and used > transport_call_budget:
+                        raise RuntimeError(
+                            f"transport call budget exceeded: {used} > {transport_call_budget}"
+                        )
     finally:
         ws_controller.action_plan_turn_application = original_application
 

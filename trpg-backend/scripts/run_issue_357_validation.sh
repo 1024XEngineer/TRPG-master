@@ -45,10 +45,15 @@ set +a
 : "${DEEPSEEK_API_KEY:?DEEPSEEK_API_KEY is required for the Host model}"
 : "${DEEPSEEK_BASE_URL:?DEEPSEEK_BASE_URL is required for the Host model}"
 : "${DEEPSEEK_MODEL:?DEEPSEEK_MODEL is required for the Host model}"
-: "${TURN_PLANNER_PROVIDER:?TURN_PLANNER_PROVIDER is required}"
-: "${TURN_PLANNER_API_KEY:?TURN_PLANNER_API_KEY is required}"
-: "${TURN_PLANNER_BASE_URL:?TURN_PLANNER_BASE_URL is required}"
-: "${TURN_PLANNER_MODEL:?TURN_PLANNER_MODEL is required}"
+
+# The Planner still gets its own client and retry policy. When a local dotenv
+# only contains the existing DeepSeek Host settings, reuse those values without
+# requiring a second credential; deployments may override each TURN_PLANNER_*
+# variable independently.
+export TURN_PLANNER_PROVIDER=${TURN_PLANNER_PROVIDER:-${HOST_MODEL_PROVIDER}}
+export TURN_PLANNER_API_KEY=${TURN_PLANNER_API_KEY:-${DEEPSEEK_API_KEY}}
+export TURN_PLANNER_BASE_URL=${TURN_PLANNER_BASE_URL:-${DEEPSEEK_BASE_URL}}
+export TURN_PLANNER_MODEL=${TURN_PLANNER_MODEL:-${DEEPSEEK_MODEL}}
 
 if [[ "${HOST_MODEL_PROVIDER}" != "deepseek" ]]; then
   echo "Issue #357 protocol requires HOST_MODEL_PROVIDER=deepseek" >&2
@@ -58,8 +63,8 @@ if [[ "${TURN_PLANNER_PROVIDER}" != "deepseek" ]]; then
   echo "Issue #357 protocol requires TURN_PLANNER_PROVIDER=deepseek" >&2
   exit 2
 fi
-if [[ "${TURN_PLANNER_MODEL}" != "deepseek/deepseek-v4-flash" ]]; then
-  echo "Issue #357 protocol requires TURN_PLANNER_MODEL=deepseek/deepseek-v4-flash" >&2
+if [[ "${TURN_PLANNER_MODEL}" != "${DEEPSEEK_MODEL}" ]]; then
+  echo "Issue #357 benchmark requires TURN_PLANNER_MODEL to match the selected endpoint's model" >&2
   exit 2
 fi
 

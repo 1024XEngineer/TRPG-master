@@ -21,7 +21,7 @@ DEEPSEEK_MODEL=...
 TURN_PLANNER_PROVIDER=deepseek
 TURN_PLANNER_API_KEY=...
 TURN_PLANNER_BASE_URL=...
-TURN_PLANNER_MODEL=deepseek/deepseek-v4-flash
+TURN_PLANNER_MODEL=deepseek-chat
 ```
 
 然后执行：
@@ -38,6 +38,11 @@ cd trpg-backend
 `TURN_PLANNER_ROLLOUT_PERCENT` 保持 `0`；仅 semantic E2E 工具在进程内构造 100% 的应用，
 不修改部署配置。默认结果目录为 `/tmp/issue-357-validation-<timestamp>`，权限由 `umask 077`
 限制。环境文件内容、单条输入、Prompt、模型正文、Keeper payload 和逐次样本均不写入报告。
+
+本机 `.env` 如果只有原有的 `DEEPSEEK_*` 配置，可以不重复填写 `TURN_PLANNER_*`；脚本会在
+进程内将 Planner 的 provider、endpoint、key 和模型映射为同一组值，同时仍创建独立 Planner
+client。当前官方 endpoint 的可用模型是 `deepseek-chat`，因此本次验证使用它；此前的
+`deepseek/deepseek-v4-flash` 是兼容网关模型名，不能与 `https://api.deepseek.com` 混用。
 
 ## 执行规模
 

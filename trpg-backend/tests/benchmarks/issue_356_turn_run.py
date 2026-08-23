@@ -74,13 +74,16 @@ COUNT_FIELDS = (
 
 @contextmanager
 def _disable_background_summary() -> Iterator[None]:
-    """避免非本 benchmark 的摘要写入与 SQLite 回合写入争锁。"""
+    """避免非本 benchmark 的后台写入与 SQLite 回合写入争锁。"""
     original = getattr(app.state, "conversation_summary_service", None)
+    original_drain = ws_controller.schedule_host_action_drain
     app.state.conversation_summary_service = None
+    ws_controller.schedule_host_action_drain = lambda room_id: None
     try:
         yield
     finally:
         app.state.conversation_summary_service = original
+        ws_controller.schedule_host_action_drain = original_drain
 
 
 class _SingleNoCheckPlanner:

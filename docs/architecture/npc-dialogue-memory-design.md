@@ -12,7 +12,7 @@
 - PR #393：长期记忆增量投影、游标、并发安全、来源时间和房间级重建，已合并；
 - Issue #402：NPC 共享长期记忆与按需历史召回，已关闭，其权限和召回决策已并入本文；
 - Issue #406 / PR #407：本文档的设计评审载体，不要求先合并，也不再新建总 Issue；后续
-  实现 PR 直接引用 #407，并按阶段 A/B/C 交付。
+  四个实现 PR 直接引用 #407，只有某个 PR 需要独立延期、换负责人或单独追踪时才补 Issue。
 
 ---
 
@@ -981,132 +981,112 @@ Planner 提供查询意图。`NpcDialogueService` 在每次模型调用前，将
 
 ---
 
-## 12. 实现步骤
+## 12. 四个实现 PR
 
-### 阶段 0：契约和现状梳理
+PR #404 已经合并，四个实现 PR 都从当时最新 `main` 顺序开发。每个 PR 必须包含自己的
+迁移、契约、运行时测试和 codegen 检查，不把“稍后在下一个 PR 补测试”作为合并条件。
 
-工作内容：
-
-- 从包含 PR #404 的最新 `main` 创建实现分支；
-- 为现有 ActionPlan、HostActionQueue、Event、ChatMessage、MemoryEntry 和
-  ConversationSummary 写迁移前基线测试；
-- 固定 schema/codegen 漂移检查，保证 Framework、Backend、SDK 和 Frontend 使用同一事件
-  union。
-
-难度：低。
-
-风险：如果直接在 WebSocket 层猜 NPC，容易重新引入之前的监听人误判问题。
-
-### 阶段 1：结构化对话契约
+### 12.1 PR1：输入路由与接收者契约
 
 工作内容：
 
-- 增加 `interlocutor_id`；
-- 在 ActionSubmitPayload 和 HostActionQueue 冻结结构化 recipient；
-- 增加 `dialogue.player` 和 `dialogue.npc` 事件契约；
-- 复用 `narration.push`，不新增 `narration.keeper`；
-- 增加 `scene_scoped` 和持久化 `event_audiences`；
-- 服务端在入队和出队时分别验证 NPC 当前可见且可交互；
-- 增加主要目标、多 NPC responder 白名单和最多 3 条消息的约束；
-- 为 `ChatMessage` 增加 `discussion/roleplay` channel 和 roleplay actor_id；
-- 旧 ChatMessage 的 channel 迁移默认回填 discussion，新 roleplay 必须带 actor_id；
-- 停止为新 action.broadcast 推断 listener，并增加 PR #404 历史自由消息的重建兼容规则。
+- 为 `ChatMessage` 增加 `discussion/roleplay` channel 和 roleplay `actor_id`；
+- 多人行动区无 `@` 时写入 roleplay ChatMessage，停止生成 `action.broadcast`；
+- 固定单人默认 Keeper、多人显式 `@守秘人/@NPC` 的路由语义；
+- 在 ActionSubmitPayload 和 HostActionQueue 保存结构化 `recipient.kind/entity_id`；
+- 生成 Framework、Backend、SDK 和 Frontend 共享契约；
+- 增加旧 ChatMessage 回填、重连去重、伪造 NPC recipient 拒绝和路由回归测试。
+
+边界：本 PR 不生成 dialogue Event、不调用 NPC 模型，也不在正式 UI 开放 NPC 选择。若客户端
+提前伪造 `recipient.kind=npc`，服务端必须在入队前明确拒绝，不能回退到 Keeper 主链。
+
+验收：单人未 `@` 继续调用 Keeper；多人 roleplay/discussion 均不调用 Host、不占行动槽、
+不进入 Event/Memory/Summary；现有 `@守秘人` 队列和 ActionPlan 行为不变。
 
 难度：中等。
 
-主要风险：前端、WebSocket、Event replay 和 Host schema 需要保持兼容。
-
-### 阶段 2：纯对话服务和恢复
+### 12.2 PR2：可试玩的 NPC 对话垂直链路
 
 工作内容：
 
-- 新增最小 `NpcDialogueService`，`recipient.kind=npc` 出队后直接调用；
-- 明确绕过 Keeper Planner、ActionPlan、ActionAdjudication 和 Engine；
-- 整条玩家原话按固定 correlation 幂等写入 `dialogue.player`；
-- 组装受限 NPC Context，并调用 Host provider 生成结构化 NPC 回复；
-- NPC 回复、Outbox 和队列完成状态在同一事务提交；
-- 扩展主持队列 lease、有限重试、退避和结果事件恢复；
-- 对原有 Keeper ActionPlan 保持兼容。
+- 增加 `dialogue.player/dialogue.npc`、`scene_scoped` 和持久化 `event_audiences`；
+- 服务端在入队和出队时验证 `interlocutor_id` 当前可见且可交互；
+- 新增最小 `NpcDialogueService`，NPC 路径绕过 Keeper Planner、ActionPlan 和 Engine；
+- 增加主要 NPC、allowed responder 白名单、最多 3 条有序回复和消息预算；
+- 玩家原话幂等落库，NPC 回复批次、Outbox 和队列完成状态原子提交；
+- 扩展 HostActionQueue 的 lease、有限重试、退避、result_event_ids 和恢复语义；
+- 前端增加 NPC/守秘人基础消息样式、稳定 speaker_id、默认头像、刷新和回放支持；
+- 完成本 PR 后才在正式 UI 开放 `@NPC` 或 NPC 目标选择。
 
-难度：中高。
+验收：玩家可以完成“`@NPC → NPC 回复 → 刷新后仍存在”的完整流程；行动式措辞仍只产生
+对白，不创建检定或修改 Engine；Provider 失败、断线和重复提交不会丢失或重复回复。
 
-主要复杂度集中在持久化恢复，而不是 ActionPlan 时序：
+难度：高。
 
-- 重连和恢复；
-- lease 过期和玩家发言已经落库；
-- NPC 回复生成失败；
-- Event/Outbox/队列状态的事务一致性；
-- 重复提交和重复模型调用；
-- 旧客户端只识别 `narration.push` 的兼容。
-
-### 阶段 3：NPC Memory 和 Summary
+### 12.3 PR3：NPC 长期记忆与安全历史查询
 
 工作内容：
 
 - 为 MemoryEntry 增加冻结 `audience_player_ids`；
-- 增加严格的 `read_npc_context`，不得通过普通实体相关性绕过 viewer 权限；
-- 将结构化 dialogue 事件投影为 `experienced/heard`；
-- 增加 NPC 近期对话窗口；
-- 新增 `npc_conversation_summaries`，不修改现有玩家摘要 owner 语义；
-- 按 npc_id + viewer_player_id 生成 NPC 摘要并使用事件复合游标；
-- 保留原始 Event 作为精确回忆来源；
-- 增加内部 `read_keeper_context`，复用现有房间 Event/Memory 存储，不新建重复记忆表；
-- 将 Keeper Planner 全局上下文与 Narrator 玩家安全上下文拆成独立 DTO 和独立模型请求。
+- 将 dialogue Event 确定性投影为 NPC `experienced/heard`，并排除 ChatMessage；
+- 增加 NPC 近期对话窗口和严格的 `read_npc_context`；
+- 使用当前原话执行有界 SQL/关键词检索，明确追问时查询原始 dialogue Event；
+- `location.entered` 确定性写入 `visit.location_id`；
+- 增加内部 `read_keeper_context`，复用现有 Event/Memory 存储；
+- 将 Keeper Planner 全局上下文与 Narrator 玩家安全上下文拆成独立 DTO 和独立模型请求；
+- 覆盖 NPC、玩家、房间、viewer 和隐藏 ModuleContent 的权限隔离测试。
+
+边界：本 PR 不新增 NPC Summary 表或摘要任务。旧对话依靠原始 Event、近期窗口和结构化
+Memory 召回，第一版不引入 Embedding 或向量数据库。
+
+验收：NPC 能回忆自己听到的旧对话且不能读取其他 NPC 的知识；守秘人能回顾玩家去过的
+地点和完成的行动；Keeper Planner 可使用全房间历史，但 Narrator payload 不泄露其他玩家
+私密经历。
 
 难度：中高。
 
-主要风险：NPC 共享认知和玩家隐私之间需要严格的查询过滤，不能把一份未经裁剪的自由文本摘要发给所有玩家。
-
-### 阶段 4：历史按需召回
+### 12.4 PR4：NPC 摘要与长团加固
 
 工作内容：
 
-- 增加服务端只读查询服务；
-- `NpcDialogueService` 使用当前原话执行受限查询，并在 Narrator 前预取；
-- 支持 NPC、地点、实体、记忆类型和关键词过滤；
-- 固定条数和字符预算；
-- 玩家明确追问原话时查询原始 Event；
-- `location.entered` 确定性写入 visit.location_id；
-- 禁止模型扩大查询范围。
+- 新增 `npc_conversation_summaries`，按 `(room_id, npc_id, viewer_player_id)` 隔离；
+- 使用 Event `(created_at, id)` 复合游标推进摘要；
+- 实现 10 条新 dialogue、6000 字符或离开场景触发；
+- 复用现有结构化模型 client、lease、有限重试和退避模式；
+- 增加摘要重建、运行期间追加事件、失败保留旧摘要和多人隔离测试；
+- 完成 300～500 回合、至少 3 次摘要压缩、重连和真实 Host 试玩；
+- 验证 Prompt 预算不会随总回合数无限增长。
 
-难度：中等。
+边界：不实现 NPC 生图、音色匹配、TTS、独立 NPC Agent、向量数据库或 Keeper 全局摘要表。
 
-第一版不做向量搜索，先使用结构化 SQL 和关键词查询，降低维护成本。
+验收：经过多次摘要压缩后，NPC 仍能按需找回指定旧对话；摘要不会把玩家计划改写成已发生
+事实，也不会泄露其他玩家私密内容。
 
-### 阶段 5：前端展示和回放
+难度：中高。
 
-工作内容：
+### 12.5 迁移与兼容顺序
 
-- NPC 消息显示明确说话者名称；有静态立绘时显示头像，没有时使用默认头像；
-- 守秘人叙事使用独立样式；
-- 玩家消息、NPC 消息和守秘人描述按事件顺序混合显示；
-- 兼容旧 `narration.push`；
-- 刷新、重连、历史回放保持同样顺序。
-- 第一版只保证稳定 `speaker_id` 可供未来头像与语音接口查询，不实现 NPC 生图、音色匹配
-  或 TTS 接口。
-
-难度：中等。
-
-注意：后端必须结构化保存，但前端不必变成传统多人聊天软件。视觉上仍然可以保持跑团叙事风格。
-
-### 12.6 迁移与兼容顺序
-
-每个阶段只增加自己需要的迁移，并直接接在开发时最新 Alembic head 后：
+每个 PR 只增加自己需要的迁移，并直接接在开发时最新 Alembic head 后：
 
 ```text
-阶段 A
-  host_action_queue.recipient_kind / recipient_entity_id
+PR1
+  host_action_queue.recipient_kind / recipient_entity_id（旧行 recipient_kind=keeper）
+  recipient_kind/entity_id 组合约束
   chat_messages.channel / actor_id（旧行 channel=discussion）
+
+PR2
   events.visibility 支持 scene_scoped
   event_audiences(event_id, player_id)
-
-阶段 B
   host_action_queue lease / retry / result_event_ids
   host_action_queue 状态约束支持 processing / completed / retryable_failure
-  旧 started 行缺少可恢复 lease 和结果游标，保守迁移为 completed，保留 cancelled / discarded
+  旧 started 行缺少可恢复 lease 和结果游标，保守迁移为 completed
+  保留旧 cancelled / discarded 终态
 
-阶段 C
+PR3
   memory_entries.audience_player_ids（旧 public 行为空数组）
+  dialogue / Memory 受限查询索引
+
+PR4
   npc_conversation_summaries 及任务索引、事件复合游标索引
 ```
 
@@ -1282,58 +1262,20 @@ Narrator，并用 Fake provider 直接断言 payload 中不存在其他玩家私
 
 ---
 
-## 16. 推荐交付拆分
+## 16. 交付与分支策略
 
-不扩大已合并的 PR #393，也不要求先合并文档 PR #407 或新建总 Issue。直接从包含 PR #404
-的最新 `main` 创建实现分支，各实现 PR 引用 #407。推荐三个可独立验收、可回滚的垂直阶段：
-
-### 阶段 A：NPC 对话契约与事件链路
-
-- 单人/多人房间的接收者路由契约和稳定 `recipient.kind`；
-- `interlocutor_id` 及稳定 NPC ID；
-- `discussion/roleplay` ChatMessage 路由，彻底停止无 `@` action.broadcast；
-- `dialogue.player` / `dialogue.npc` 契约，守秘人继续使用 `narration.push`；
-- 当前 `PlayerView` 的可见性与可交互校验；
-- `speaker_id`、`listener_ids`、`allowed_responder_ids`、冻结 event audience；
-- 固定 correlation、source_action_id、ordinal、source_revision 幂等关系；
-- WebSocket、SDK、回放和基础权限测试。
-
-验收：单人无 `@` 能进入 Keeper Host，多人无 `@` 按频道生成角色扮演或玩家讨论消息；
-合法场景对话可以落库并只向冻结受众广播和回放；场景外、隐藏或无权 NPC 不能回复；
-旧客户端遇到未知事件仍能安全降级。
-
-### 阶段 B：Host 纯对话执行与队列恢复
-
-- Host 的结构化 NPC 输出和 speaker 白名单校验；listener/audience 由服务端生成；
-- 一次对话中多个 NPC 的有序回复和消息预算；
-- `recipient.kind=npc` 直接进入 NpcDialogueService，禁止调用 ActionPlan 或 Engine；
-- “玩家发言幂等落库 → NPC 回复批量落库 → 队列完成”，不执行后续行动；
-- 队列 lease、result_event_ids、断线、取消、Provider 失败和重复恢复；
-- 目标失效直接澄清；非法模型输出反馈重试一次，仍失败进入 retryable_failure。
-
-验收：`@NPC` 中即使包含旅行、技能或物品动作，也只产生玩家和 NPC 对话，不创建检定或
-修改 Engine；回复不乱序、不重复，玩家另行提交 `@守秘人` 后才执行实际行动。
-
-### 阶段 C：NPC 记忆、摘要、历史召回与展示
-
-- NPC canonical `MemoryEntry.audience_player_ids`、近期对话和专用 viewer-scoped Summary；
-- 严格 `read_npc_context` 和基于当前原话的受限历史预取；
-- 只从 viewer 有权限的 canonical entries 重建摘要；
-- 原始 `dialogue.player` Event 的按需精确查询；
-- Keeper Planner 使用内部 `read_keeper_context` 有界检索全房间已提交历史，Narrator 继续
-  使用当前玩家安全上下文；
-- `location.entered → visit.location_id` 投影；
-- 前端区分玩家、NPC、守秘人消息，兼容回放和重连；
-- 使用稳定 `speaker_id` 查询静态立绘或默认头像，只预留未来声线/生图扩展；
-- 长团、多玩家隐私、记忆污染和真实 Host 测试。
-
-验收：NPC 能回忆自己听到的旧对话，但不能读取其他 NPC 或玩家的私密记忆；Keeper Planner
-可以使用全房间已提交历史维持连续性，但 Narrator payload 不包含当前玩家无权读取的内容；
-`chat.send` / `action.chat.send` 不进入 Host、Event、Memory 或 Summary；300～500 回合后
-仍可从原始 Event 召回目标 NPC 的旧对话和玩家地点历史。
-
-每个阶段可以包含多个提交，但不再为每个 DTO、查询或 UI 细节单独开 Issue。只有当某个
-阶段实际规模过大、需要独立发布或存在不同负责人时，才再拆出子 Issue。
+- 不扩大已合并的 PR #393；PR #404 已经进入 `main`，是四个实现 PR 的共同基础；
+- PR #407 是设计基线，不要求先合并；四个实现 PR 都在描述中引用 #407；
+- 默认按 PR1 → PR2 → PR3 → PR4 顺序合并，每个分支从包含前一项的最新 `main` 创建；
+- 若团队需要并行开发，可以临时使用 stacked PR，但前一项合并后必须 rebase 到最新 `main`
+  并重新运行完整 CI，不能长期依赖未合并分支；
+- 用户从 PR2 开始可以试玩 NPC 对话；验证长期记忆时测试 PR3，验证完整长团能力时只测试
+  最新 PR4；
+- 不为四个 PR 分别创建 Issue。只有某个 PR 被独立延期、换负责人、需要不同发布周期或出现
+  超出本文范围的新需求时，才单独补 Issue；
+- PR1 和 PR2 默认不合并为一个大 PR，因为路由回归与 Host 运行时故障面不同；若 PR1 实际
+  只剩很小的契约改动，可以在开发前并入 PR2，但不能省略 PR1 的独立验收项；
+- PR3 和 PR4 默认分开，避免把基础召回错误和摘要压缩错误混在一起排查。
 
 ---
 
@@ -1382,7 +1324,9 @@ Narrator，并用 Fake provider 直接断言 payload 中不存在其他玩家私
 - [x] 第一版使用结构化 SQL/关键词查询，不引入向量数据库；
 - [x] 不实现 NPC 自主行动；
 - [x] 不增加 encounter 计数；
-- [x] PR #393 不再扩大范围；PR #407 不必先合并，也不再新建总实现 Issue。
+- [x] PR #393 不再扩大范围，PR #407 不必先合并；
+- [x] 实现按 PR1～PR4 顺序交付，不为每个 PR 预先创建 Issue；只有独立延期、换负责人或
+  超出本文范围时才补 Issue。
 
 ---
 

@@ -175,24 +175,31 @@ ChatMessage = 玩家之间的讨论区消息
 不作为 NPC 知识来源
 ```
 
-PR #404 中的两个自由交流入口也必须遵守同一边界：
+PR #404 中的两个自由交流入口也必须遵守同一边界。输入是否默认交给 Host，取决于
+房间的稳定游戏模式，而不是当前在线人数：
 
 ```text
-chat.send / action.chat.send
-    玩家自由交流
-    不调用 Host
-    不占用主持行动槽
-    不进入 MemoryEntry
-    不进入 ConversationSummary
+单人游戏
+    未 @ 任何对象 → 默认提交给守秘人，调用 Host
+    @守秘人       → 提交给守秘人，调用 Host
+    @NPC           → 提交结构化 NPC 对话，调用 Host
 
-明确的 Host 请求（例如 @主持人）
-    才进入 action.plan.submit 和主持行动队列
+多人游戏
+    未 @ 任何对象 → 玩家自由交流，不调用 Host
+    @守秘人       → 提交给守秘人，进入主持行动队列
+    @NPC           → 提交结构化 NPC 对话，进入主持行动队列
 ```
 
+多人游戏中未指定对象的消息，无论前端显示在讨论区还是行动区，语义都是玩家自由交流：
+不占主持行动槽，不进入 `MemoryEntry`、`ConversationSummary` 或 NPC 知识来源。
 `action.chat.send` 不能因为显示在行动频道就复用会被记忆投影读取的
 `action.broadcast` 事件类型；如果保留行动频道广播，必须使用独立事件类型，或在
 Memory/ConversationSummary 查询中明确排除它。否则玩家的闲聊、猜测和临时计划会在
 长团中被误当成剧情记忆。
+
+房间模式必须来自创建房间时不会随连接变化的配置。第一版如果尚无独立 `play_mode`，
+可以使用 `max_players == 1` 判定单人游戏；不能根据当前在线人数或当前在局人数判断，
+避免队友断线后同一句无 `@` 输入突然从玩家聊天变成 Host 行动。
 
 ### 5.2 玩家对话事件
 
@@ -264,15 +271,29 @@ NPC 回复由 Host 生成，但服务端必须验证：
 
 ### 6.1 `@` 的真实含义
 
-`@NPC` 只是 UI 语法，后端真正接收的是结构化 `interlocutor_id`：
+`@守秘人`、`@主持人` 和 `@NPC` 都只是 UI 语法，进入后端时必须转换成结构化接收者，
+不能由 WebSocket 层重新解析自然语言：
 
 ```json
 {
-  "interlocutor_id": "thomas"
+  "recipient": {
+    "kind": "npc",
+    "entity_id": "thomas",
+    "explicit": true
+  }
 }
 ```
 
-不允许后端从“你”“记住”“跟你说”等自然语言关键词猜测听众。
+接收者规则固定为：
+
+- 单人游戏未 `@`：`kind=keeper, explicit=false`；
+- 明确 `@守秘人` 或 `@主持人`：`kind=keeper, explicit=true`；
+- 明确 `@NPC`：`kind=npc, entity_id=<稳定实体 ID>, explicit=true`；
+- 多人游戏未 `@`：不创建 Host 请求，直接走玩家聊天协议。
+
+服务端根据房间模式验证该组合，多人游戏不能接受隐式 Keeper 请求。NPC 的
+`entity_id` 随后映射为本方案其他部分使用的 `interlocutor_id`。不允许后端从“你”、
+“记住”“跟你说”等自然语言关键词猜测听众。
 
 ### 6.2 服务端验证
 
@@ -713,6 +734,11 @@ max_chars
 
 ### 13.1 契约和权限
 
+- 单人房间未 `@` 的输入默认生成 Keeper Host 请求；
+- 多人房间未 `@` 的输入只生成玩家聊天，不调用 Host、不占行动槽、不进入 Memory/Summary；
+- 多人房间断线或重连不会改变上述路由；
+- `@守秘人` / `@主持人` 生成 Keeper Host 请求，`@NPC` 生成带稳定
+  `interlocutor_id` 的 NPC Host 请求；
 - `interlocutor_id` 不在当前场景时被拒绝；
 - 当前场景没有目标 NPC 时触发澄清；
 - 隐藏 NPC 不能生成回复；
@@ -811,6 +837,7 @@ max_chars
 
 ### 阶段 A：NPC 对话契约与事件链路
 
+- 单人/多人房间的接收者路由契约和稳定 `recipient.kind`；
 - `interlocutor_id` 及稳定 NPC ID；
 - `dialogue.player` / `dialogue.npc` / `narration.keeper` 契约；
 - 当前 `PlayerView` 的可见性与可交互校验；
@@ -818,7 +845,8 @@ max_chars
 - `dialogue_id`、`source_action_id`、`step_id`、`source_revision` 幂等关系；
 - WebSocket、SDK、回放和基础权限测试。
 
-验收：合法公开/私密对话可以落库、广播和回放；场景外、隐藏或无权 NPC 不能回复；
+验收：单人无 `@` 能进入 Keeper Host，多人无 `@` 只能玩家聊天；合法公开/私密对话可以
+落库、广播和回放；场景外、隐藏或无权 NPC 不能回复；
 旧客户端遇到未知事件仍能安全降级。
 
 ### 阶段 B：Host 对话执行与 ActionPlan 恢复
@@ -862,6 +890,9 @@ max_chars
 - [x] NPC 回复先落库，再执行后续玩家行动；
 - [x] 后续行动重新读取 PlayerView 并由 Engine 裁决；
 - [x] NPC 仍然不能直接改变世界事实；
+- [x] 单人未 `@` 默认与守秘人交互；
+- [x] 多人未 `@` 默认是玩家自由交流，不进入 Host、Memory 或 Summary；
+- [x] `@守秘人` / `@主持人` 和 `@NPC` 才能在多人游戏中触发 Host；
 - [x] 普通公开对话广播，私密对话按 player scope 隔离；
 - [x] `ChatMessage` 不进入 NPC 记忆；
 - [x] NPC canonical MemoryEntry 按房间和 NPC 共享；

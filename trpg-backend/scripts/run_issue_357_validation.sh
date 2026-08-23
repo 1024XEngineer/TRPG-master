@@ -133,6 +133,14 @@ run_corpus semantic 1 "${OUTPUT_DIR}/smoke/semantic-corpus.json"
 run_e2e legacy 1 "${OUTPUT_DIR}/smoke/legacy-e2e.json"
 run_e2e semantic 1 "${OUTPUT_DIR}/smoke/semantic-e2e.json"
 SMOKE_CALLS=${USED_CALLS}
+uv run python tests/benchmarks/issue_357_compare.py smoke \
+  --legacy-corpus "${OUTPUT_DIR}/smoke/legacy-corpus.json" \
+  --semantic-corpus "${OUTPUT_DIR}/smoke/semantic-corpus.json" \
+  --legacy-e2e "${OUTPUT_DIR}/smoke/legacy-e2e.json" \
+  --semantic-e2e "${OUTPUT_DIR}/smoke/semantic-e2e.json" \
+  --transport-call-cap "${TRANSPORT_CALL_CAP}" \
+  --json-output "${OUTPUT_DIR}/smoke/comparison.json" \
+  --markdown-output "${OUTPUT_DIR}/smoke/comparison.md"
 
 echo "Running Issue #357 Round 1 (legacy first)"
 run_corpus legacy 5 "${OUTPUT_DIR}/round-1/legacy-corpus.json"

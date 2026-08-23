@@ -7,6 +7,7 @@ import pytest
 from tests.benchmarks.issue_357_compare import (
     ReportCompatibilityError,
     compare_round,
+    compare_smoke,
     render_round_markdown,
     summarize_rounds,
 )
@@ -142,6 +143,26 @@ def test_compare_round_passes_every_gate_and_keeps_aggregate_only_output() -> No
     assert all(gate["passed"] for gate in report["gates"].values())
     assert report["cost"] == {"availability": "unavailable", "estimated_total": None}
     assert "cases" not in report
+
+
+def test_compare_smoke_requires_all_four_paths_to_be_clean() -> None:
+    reports = _inputs()
+    for report in reports.values():
+        report["overall"]["sample_count"] = (
+            40
+            if report["producer"] in {"legacy", "semantic"}
+            and "cohorts" in report
+            and "multi" in report["cohorts"]
+            else 3
+        )
+
+    passed = compare_smoke(**reports)
+    reports["semantic_corpus"]["overall"]["terminal_failure_rate"] = 0.025
+    failed = compare_smoke(**reports)
+
+    assert passed["verdict"] == "go"
+    assert failed["verdict"] == "no-go"
+    assert failed["gates"]["semantic_corpus_clean"]["passed"] is False
 
 
 @pytest.mark.parametrize(

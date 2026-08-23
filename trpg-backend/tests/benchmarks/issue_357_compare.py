@@ -179,6 +179,73 @@ def _gate(observed: float, *, threshold: float, comparison: str) -> dict[str, An
     }
 
 
+def compare_smoke(
+    *,
+    legacy_corpus: dict[str, Any],
+    semantic_corpus: dict[str, Any],
+    legacy_e2e: dict[str, Any],
+    semantic_e2e: dict[str, Any],
+    transport_call_cap: int = DEFAULT_TRANSPORT_CALL_CAP,
+) -> dict[str, Any]:
+    """Require a clean, compatible smoke before any formal samples run."""
+
+    for report in (legacy_corpus, semantic_corpus, legacy_e2e, semantic_e2e):
+        assert_sanitized_report(report)
+    revision = _validate_inputs(
+        legacy_corpus=legacy_corpus,
+        semantic_corpus=semantic_corpus,
+        legacy_e2e=legacy_e2e,
+        semantic_e2e=semantic_e2e,
+        expected_corpus_samples=40,
+        expected_e2e_samples=3,
+    )
+    _require(transport_call_cap >= 1, "transport call cap must be positive")
+    reports = (legacy_corpus, semantic_corpus, legacy_e2e, semantic_e2e)
+    transport_calls = sum(_count_total(report, "transport_calls") for report in reports)
+    failure_rates = {
+        "legacy_corpus": _rate(
+            _nested(legacy_corpus, "overall", "terminal_failure_rate"),
+            "legacy corpus smoke failure rate",
+        ),
+        "semantic_corpus": _rate(
+            _nested(semantic_corpus, "overall", "terminal_failure_rate"),
+            "semantic corpus smoke failure rate",
+        ),
+        "legacy_e2e": _rate(
+            _nested(legacy_e2e, "overall", "failure_rate"),
+            "legacy E2E smoke failure rate",
+        ),
+        "semantic_e2e": _rate(
+            _nested(semantic_e2e, "overall", "failure_rate"),
+            "semantic E2E smoke failure rate",
+        ),
+    }
+    gates = {
+        **{
+            f"{name}_clean": _gate(value, threshold=0.0, comparison="max")
+            for name, value in failure_rates.items()
+        },
+        "transport_call_cap": _gate(
+            float(transport_calls),
+            threshold=float(transport_call_cap),
+            comparison="max",
+        ),
+    }
+    report = {
+        "schema_version": 1,
+        "issue": 357,
+        "stage": "smoke",
+        "subject_revision": revision,
+        "verdict": "go" if all(item["passed"] for item in gates.values()) else "no-go",
+        "transport_calls": transport_calls,
+        "transport_call_cap": transport_call_cap,
+        "failure_rates": failure_rates,
+        "gates": gates,
+    }
+    assert_sanitized_report(report)
+    return report
+
+
 def compare_round(
     *,
     round_number: int,
@@ -474,6 +541,28 @@ def render_round_markdown(report: dict[str, Any]) -> str:
     )
 
 
+def render_smoke_markdown(report: dict[str, Any]) -> str:
+    assert_sanitized_report(report)
+    rows = [
+        "| Smoke path | Failure rate | Result |",
+        "| --- | ---: | :---: |",
+    ]
+    for name, rate in report["failure_rates"].items():
+        rows.append(f"| `{name}` | {rate} | {'PASS' if rate == 0 else 'FAIL'} |")
+    return "\n".join(
+        [
+            "# Issue #357 Real-model Smoke",
+            "",
+            f"- Revision: `{report['subject_revision']}`",
+            f"- Verdict: **{report['verdict'].upper()}**",
+            f"- Transport calls: {report['transport_calls']} / {report['transport_call_cap']}",
+            "",
+            *rows,
+            "",
+        ]
+    )
+
+
 def render_summary_markdown(report: dict[str, Any]) -> str:
     assert_sanitized_report(report)
     round_lines = [
@@ -512,6 +601,14 @@ def _write(
 def main() -> None:
     parser = argparse.ArgumentParser()
     commands = parser.add_subparsers(dest="command", required=True)
+    smoke_parser = commands.add_parser("smoke")
+    smoke_parser.add_argument("--legacy-corpus", type=Path, required=True)
+    smoke_parser.add_argument("--semantic-corpus", type=Path, required=True)
+    smoke_parser.add_argument("--legacy-e2e", type=Path, required=True)
+    smoke_parser.add_argument("--semantic-e2e", type=Path, required=True)
+    smoke_parser.add_argument("--json-output", type=Path, required=True)
+    smoke_parser.add_argument("--markdown-output", type=Path, required=True)
+    smoke_parser.add_argument("--transport-call-cap", type=int, default=DEFAULT_TRANSPORT_CALL_CAP)
     round_parser = commands.add_parser("round")
     round_parser.add_argument("--round", type=int, choices=(1, 2), required=True)
     round_parser.add_argument("--legacy-corpus", type=Path, required=True)
@@ -537,7 +634,16 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    if args.command == "round":
+    if args.command == "smoke":
+        report = compare_smoke(
+            legacy_corpus=_load(args.legacy_corpus),
+            semantic_corpus=_load(args.semantic_corpus),
+            legacy_e2e=_load(args.legacy_e2e),
+            semantic_e2e=_load(args.semantic_e2e),
+            transport_call_cap=args.transport_call_cap,
+        )
+        markdown = render_smoke_markdown(report)
+    elif args.command == "round":
         report = compare_round(
             round_number=args.round,
             legacy_corpus=_load(args.legacy_corpus),

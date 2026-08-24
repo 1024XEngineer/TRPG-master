@@ -78,6 +78,29 @@ class GameStartPayload(CamelModel):
     """
 
 
+class ActionRecipientPayload(CamelModel):
+    """玩家输入的结构化接收者；自然语言 mention 只允许在客户端解析一次。"""
+
+    kind: Literal["keeper", "npc"]
+    entity_id: str | None = Field(default=None, max_length=200)
+    explicit: bool
+
+    @model_validator(mode="after")
+    def validate_recipient(self) -> "ActionRecipientPayload":
+        """保证接收者种类、实体 ID 和显式选择三者不会形成歧义组合。"""
+
+        if self.kind == "keeper":
+            if self.entity_id is not None:
+                raise ValueError("守秘人接收者不能携带实体 ID")
+            return self
+        if self.entity_id is None or not self.entity_id.strip():
+            raise ValueError("NPC 接收者必须携带实体 ID")
+        if not self.explicit:
+            raise ValueError("NPC 接收者必须由玩家显式选择")
+        self.entity_id = self.entity_id.strip()
+        return self
+
+
 class ActionSubmitPayload(CamelModel):
     """action.plan.submit 事件 payload。
 
@@ -87,6 +110,7 @@ class ActionSubmitPayload(CamelModel):
 
     client_action_id: str = Field(..., min_length=1, max_length=200)
     utterance: str = Field(..., min_length=1, max_length=2000)
+    recipient: ActionRecipientPayload
     summarized_from: list[str] | None = None
     visibility: Literal["public", "private"] | None = None
 
@@ -218,11 +242,14 @@ class OpeningStartedPayload(CamelModel):
 
 
 class ChatMessagePayload(CamelModel):
-    """chat.message 讨论区广播 payload。"""
+    """chat.message 广播 payload；channel 区分玩家讨论和角色扮演。"""
 
     message_id: str
     player_id: str
     nickname: str
+    channel: Literal["discussion", "roleplay"]
+    actor_id: str | None = None
+    actor_name: str | None = None
     text: str
     sent_at: UtcDatetime
     client_message_id: str
@@ -283,6 +310,7 @@ class RoomActionQueueItemPayload(CamelModel):
     player_id: str
     actor_id: str
     client_action_id: str
+    recipient: ActionRecipientPayload
     position: int = Field(..., ge=1)
     utterance: str
     accepted_at: UtcDatetime

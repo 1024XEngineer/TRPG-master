@@ -45,6 +45,15 @@ export interface ActionPlanCancelPayload {
 }
 
 /**
+ * 玩家输入的结构化接收者；自然语言 mention 只允许在客户端解析一次。
+ */
+export interface ActionRecipientPayload {
+  kind: "keeper" | "npc";
+  entityId?: string | null;
+  explicit: boolean;
+}
+
+/**
  * action.plan.submit 事件 payload。
  *
  * `client_action_id` 是客户端为一次逻辑动作生成的稳定幂等键；网络重试必须
@@ -53,6 +62,7 @@ export interface ActionPlanCancelPayload {
 export interface ActionSubmitPayload {
   clientActionId: string;
   utterance: string;
+  recipient: ActionRecipientPayload;
   summarizedFrom?: string[] | null;
   visibility?: ("public" | "private") | null;
 }
@@ -338,25 +348,31 @@ export interface CharacterUpdateBody {
 }
 
 /**
- * chat.message 讨论区广播 payload。
+ * chat.message 广播 payload；channel 区分玩家讨论和角色扮演。
  */
 export interface ChatMessagePayload {
   messageId: string;
   playerId: string;
   nickname: string;
+  channel: "discussion" | "roleplay";
+  actorId?: string | null;
+  actorName?: string | null;
   text: string;
   sentAt: string;
   clientMessageId: string;
 }
 
 /**
- * 讨论区一条消息。`sent_at` 用 UtcDatetime（对外时间字段的统一约定，
+ * 讨论区分页接口的一条消息。`sent_at` 用 UtcDatetime（对外时间字段的统一约定，
  * 见 app/dto/common.py）。
  */
 export interface ChatMessageRead {
   messageId: string;
   playerId: string;
   nickname: string;
+  channel: "discussion" | "roleplay";
+  actorId?: string | null;
+  actorName?: string | null;
   text: string;
   sentAt: string;
   clientMessageId: string;
@@ -1223,6 +1239,7 @@ export interface RoomActionQueueItemPayload {
   playerId: string;
   actorId: string;
   clientActionId: string;
+  recipient: ActionRecipientPayload;
   position: number;
   utterance: string;
   acceptedAt: string;

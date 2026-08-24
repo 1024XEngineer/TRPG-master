@@ -13,6 +13,7 @@ from collaboration_framework.contracts import (
     ActionPlanPolicyError,
     ActionPlanStep,
     ActionTarget,
+    AdjudicationExecution,
     AdjudicationValidationError,
     AdvanceWorldTimeEffect,
     CancelActionPlanRequest,
@@ -2102,6 +2103,159 @@ async def test_needs_clarification_can_be_cancelled_without_running_later_steps(
 
     assert cancelled.status == "cancelled"
     assert engine_store.inspect_domain_events("room_01") == ()
+
+
+async def _force_consent_status(
+    store,
+    run: ActionPlanRun,
+    *,
+    status: str,
+    execution: AdjudicationExecution,
+    adjudication: ActionAdjudication,
+) -> ActionPlanRun:
+    current = run.steps[run.current_step_index]
+    steps = list(run.steps)
+    steps[run.current_step_index] = current.model_copy(
+        update={
+            "status": status,
+            "source_revision": adjudication.source_revision,
+            "adjudication": adjudication,
+            "adjudication_execution": execution,
+            "pending_action_request_id": current.step_request_id,
+        },
+        deep=True,
+    )
+    updated = run.model_copy(
+        update={
+            "status": status,
+            "steps": tuple(steps),
+            "run_version": run.run_version + 1,
+            "lease_owner": None,
+            "lease_expires_at": None,
+        },
+        deep=True,
+    )
+    return await store.compare_and_swap(
+        expected_run_version=run.run_version,
+        updated_run=updated,
+    )
+
+
+@pytest.mark.asyncio
+async def test_cancel_remaining_at_scene_consent_keeps_completed_steps() -> None:
+    service, _, _, store, engine_store = orchestrator()
+    original = player_input("scene-consent-cancel")
+    checkpointed = await service.start_or_resume(
+        original,
+        plan=plan(4),
+        worker_id="worker-1",
+        auto_continue=False,
+    )
+    assert checkpointed.run.status == "checkpointed"
+    current = checkpointed.run.steps[checkpointed.run.current_step_index]
+    adjudication = ActionAdjudication(
+        request_id=current.step_request_id,
+        source_revision=checkpointed.run.steps[0].source_revision or "0",
+        actor_id="pc_1",
+        summary="前往墓地",
+        target=ActionTarget(kind="location", id="cemetery"),
+        method=ActionMethod(family="travel", description="前往墓地"),
+        check=NoAdjudicationCheck(),
+        success_effects=(EnterLocationEffect(location_id="cemetery"),),
+    )
+    waiting = await _force_consent_status(
+        store,
+        checkpointed.run,
+        status="awaiting_scene_consent",
+        adjudication=adjudication,
+        execution=AdjudicationExecution(
+            request_id=current.step_request_id,
+            action_request_id=current.step_request_id,
+            status="awaiting_scene_consent",
+            view_revision=adjudication.source_revision,
+            outcome="pending",
+            scene_transition_proposal_id="scene_cancel_test",
+        ),
+    )
+
+    cancelled = await service.cancel_remaining(
+        CancelActionPlanRequest(
+            request_id="cancel-scene-consent",
+            room_id=original.room_id,
+            player_id=original.player_id,
+            actor_id=original.actor_id,
+            parent_action_id=original.client_action_id,
+        )
+    )
+    replay = await service.cancel_remaining(
+        CancelActionPlanRequest(
+            request_id="cancel-scene-consent",
+            room_id=original.room_id,
+            player_id=original.player_id,
+            actor_id=original.actor_id,
+            parent_action_id=original.client_action_id,
+        )
+    )
+
+    assert waiting.status == "awaiting_scene_consent"
+    assert cancelled.status == "cancelled"
+    assert replay == cancelled
+    assert cancelled.completed_steps == 3
+    assert cancelled.steps[3].status == "stopped"
+    assert len(engine_store.inspect_domain_events("room_01")) == 3
+
+
+@pytest.mark.asyncio
+async def test_cancel_remaining_at_time_consent_does_not_require_check_boundary() -> (
+    None
+):
+    service, _, _, store, engine_store = orchestrator()
+    original = player_input("time-consent-cancel")
+    checkpointed = await service.start_or_resume(
+        original,
+        plan=plan(4),
+        worker_id="worker-1",
+        auto_continue=False,
+    )
+    current = checkpointed.run.steps[checkpointed.run.current_step_index]
+    adjudication = ActionAdjudication(
+        request_id=current.step_request_id,
+        source_revision=checkpointed.run.steps[0].source_revision or "0",
+        actor_id="pc_1",
+        summary="等到下一个时间点",
+        target=ActionTarget(kind="world", id="coc-7e"),
+        method=ActionMethod(family="wait", description="等待"),
+        check=NoAdjudicationCheck(),
+        success_effects=(AdvanceWorldTimeEffect(),),
+    )
+    await _force_consent_status(
+        store,
+        checkpointed.run,
+        status="awaiting_time_consent",
+        adjudication=adjudication,
+        execution=AdjudicationExecution(
+            request_id=current.step_request_id,
+            action_request_id=current.step_request_id,
+            status="awaiting_time_consent",
+            view_revision=adjudication.source_revision,
+            outcome="pending",
+            time_advance_proposal_id="time_cancel_test",
+        ),
+    )
+
+    cancelled = await service.cancel_remaining(
+        CancelActionPlanRequest(
+            request_id="cancel-time-consent",
+            room_id=original.room_id,
+            player_id=original.player_id,
+            actor_id=original.actor_id,
+            parent_action_id=original.client_action_id,
+        )
+    )
+
+    assert cancelled.status == "cancelled"
+    assert cancelled.completed_steps == 3
+    assert len(engine_store.inspect_domain_events("room_01")) == 3
 
 
 @pytest.mark.asyncio

@@ -426,3 +426,83 @@ async def test_cancel_paths_never_change_shared_scene(
     refreshed = await db_session.get(GameSession, room.id)
     assert refreshed is not None
     assert GameState.model_validate(refreshed.state_json).scene_id == initial_scene
+
+
+@pytest.mark.asyncio
+async def test_initiator_abort_rejects_pending_scene_and_blocks_later_accept(
+    db_session: AsyncSession,
+    engine_store_factory,
+) -> None:
+    room, players, _ = await _start_room(
+        db_session,
+        room_number=4120,
+        player_count=3,
+        prepare_checkpoint=True,
+    )
+    session = await db_session.get(GameSession, room.id)
+    assert session is not None
+    initial_scene = GameState.model_validate(session.state_json).scene_id
+    engine = AdjudicationEngineService(engine_store_factory())
+    request = _request(
+        room_id=room.id,
+        player_id=players[0].id,
+        revision=session.state_version,
+        action_id="scene-abort-412",
+    )
+    await scene_transition.create_from_adjudication(db_session, request)
+    record = await _proposal(db_session, room.id)
+    await scene_transition.bind_parent_action(
+        db_session,
+        room_id=room.id,
+        proposal_id=record.proposal_id,
+        player_id=players[0].id,
+        parent_action_id="scene-parent-412",
+    )
+
+    with pytest.raises(scene_transition.SceneTransitionError, match="不能撤回"):
+        await scene_transition.respond(
+            db_session,
+            engine=engine,
+            room_id=room.id,
+            player_id=players[0].id,
+            proposal_id=record.proposal_id,
+            proposal_version=record.proposal_version,
+            source_revision=str(record.source_revision),
+            accept=False,
+        )
+
+    aborted = await scene_transition.abort_pending(
+        db_session,
+        engine=engine,
+        room_id=room.id,
+        player_id=players[0].id,
+        parent_action_id="scene-parent-412",
+    )
+    replay = await scene_transition.abort_pending(
+        db_session,
+        engine=engine,
+        room_id=room.id,
+        player_id=players[0].id,
+        parent_action_id="scene-parent-412",
+    )
+
+    assert isinstance(aborted, SceneTransitionResolvedPayload)
+    assert aborted.status == "rejected"
+    assert replay is None
+
+    later, resume_player, action_id = await scene_transition.respond(
+        db_session,
+        engine=engine,
+        room_id=room.id,
+        player_id=players[2].id,
+        proposal_id=record.proposal_id,
+        proposal_version=record.proposal_version,
+        source_revision=str(record.source_revision),
+        accept=True,
+    )
+    assert isinstance(later, SceneTransitionResolvedPayload)
+    assert later.status == "rejected"
+    assert resume_player is action_id is None
+    refreshed = await db_session.get(GameSession, room.id)
+    assert refreshed is not None
+    assert GameState.model_validate(refreshed.state_json).scene_id == initial_scene

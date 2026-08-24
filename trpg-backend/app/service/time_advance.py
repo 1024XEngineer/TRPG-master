@@ -26,11 +26,15 @@ from collaboration_framework.contracts.validation import AdjudicationValidationE
 from collaboration_framework.engine import AdjudicationEngineService
 from collaboration_framework.engine.models import GameState
 from collaboration_framework.engine.timeline import advanced_to_next
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.dto.ws import TimeAdvancePendingPayload, TimeAdvanceResolvedPayload
+from app.dto.ws import (
+    SceneTransitionResolvedPayload,
+    TimeAdvancePendingPayload,
+    TimeAdvanceResolvedPayload,
+)
 from app.models.engine import GameSession, ModuleVersion, TimeAdvanceProposalRecord
 from app.models.room import Room
 
@@ -349,6 +353,75 @@ async def mark_narration_persisted(
         await db.commit()
 
 
+async def abort_pending(
+    db: AsyncSession,
+    *,
+    engine: AdjudicationEngineService,
+    room_id: str,
+    player_id: str,
+    parent_action_id: str,
+    action_request_id: str | None = None,
+) -> TimeAdvanceResolvedPayload | None:
+    """发起者中止剩余计划时作废待确认时间提案。"""
+
+    async with _response_lock(room_id):
+        matchers = [
+            TimeAdvanceProposalRecord.parent_action_id == parent_action_id,
+            TimeAdvanceProposalRecord.action_request_id == parent_action_id,
+        ]
+        if action_request_id:
+            matchers.extend(
+                (
+                    TimeAdvanceProposalRecord.parent_action_id == action_request_id,
+                    TimeAdvanceProposalRecord.action_request_id == action_request_id,
+                )
+            )
+        record = await db.scalar(
+            select(TimeAdvanceProposalRecord)
+            .where(
+                TimeAdvanceProposalRecord.room_id == room_id,
+                TimeAdvanceProposalRecord.player_id == player_id,
+                TimeAdvanceProposalRecord.status == "pending",
+                or_(*matchers),
+            )
+            .order_by(TimeAdvanceProposalRecord.created_at.desc())
+            .limit(1)
+            .with_for_update()
+        )
+        if record is None:
+            return None
+        engine_status = await engine.get_status(
+            GetAdjudicationStatusRequest(
+                room_id=record.room_id,
+                player_id=record.player_id,
+                action_request_id=record.action_request_id,
+            )
+        )
+        if engine_status.status == "resolved" and engine_status.execution is not None:
+            record.status = "approved"
+            record.accepted_player_ids = sorted(record.required_player_ids)
+            record.committed_revision = int(engine_status.execution.view_revision)
+            record.proposal_version += 1
+            record.updated_at = datetime.now(UTC)
+            await db.commit()
+            return _resolved_payload(record)
+        if _aware(record.expires_at) <= datetime.now(UTC):
+            record.status = "expired"
+            record.proposal_version += 1
+            await db.commit()
+            return _resolved_payload(record)
+        if await _is_stale(db, record):
+            record.status = "stale"
+            record.proposal_version += 1
+            await db.commit()
+            return _resolved_payload(record)
+        record.status = "rejected"
+        record.proposal_version += 1
+        record.updated_at = datetime.now(UTC)
+        await db.commit()
+        return _resolved_payload(record)
+
+
 async def respond(
     db: AsyncSession,
     *,
@@ -647,10 +720,47 @@ class ConsentAwareAdjudicationEngine:
 
         return await self._engine.decide_post_roll(request)
 
+    async def abort_consent(
+        self,
+        *,
+        room_id: str,
+        player_id: str,
+        parent_action_id: str,
+        action_request_id: str | None = None,
+    ) -> tuple[SceneTransitionResolvedPayload | TimeAdvanceResolvedPayload, ...]:
+        """作废当前计划挂起的场景或时间提案，供取消剩余步骤之前调用。"""
+
+        from app.service import scene_transition
+
+        payloads: list[SceneTransitionResolvedPayload | TimeAdvanceResolvedPayload] = []
+        async with self._session_factory() as db:
+            scene_payload = await scene_transition.abort_pending(
+                db,
+                engine=self._engine,
+                room_id=room_id,
+                player_id=player_id,
+                parent_action_id=parent_action_id,
+                action_request_id=action_request_id,
+            )
+            if scene_payload is not None:
+                payloads.append(scene_payload)
+            time_payload = await abort_pending(
+                db,
+                engine=self._engine,
+                room_id=room_id,
+                player_id=player_id,
+                parent_action_id=parent_action_id,
+                action_request_id=action_request_id,
+            )
+            if time_payload is not None:
+                payloads.append(time_payload)
+        return tuple(payloads)
+
 
 __all__ = [
     "ConsentAwareAdjudicationEngine",
     "TimeAdvanceError",
+    "abort_pending",
     "bind_parent_action",
     "create_from_adjudication",
     "get_pending",

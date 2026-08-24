@@ -383,6 +383,43 @@ class AgendaHygieneTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(store.inspect_state(ROOM).rule_agendas, {})
             self.assertTrue(store.inspect_state(ROOM).entities["study_window"]["broken"])
 
+    async def test_agenda_count_does_not_grow_when_the_rule_chain_fails(self) -> None:
+        """失败的规则链同样不留痕——上一条测的是跑到 stable 的规则。
+
+        `test_agenda_count_does_not_grow_with_actions` 里那条规则每次都跑完，所以
+        `rule_agendas == {}` 几乎是白给的：真正会积压的是**停下来**的 Agenda。这里
+        让同一条规则每回合都撞死在没有执行器的 step 上，断言条目数照样不增长，
+        而且每一次都留下一条可审计的失败。
+        """
+
+        store = InMemoryEngineStore()
+        store.register_room(
+            module_content=module_with_unexecutable_step(),
+            initial_state=window_state(
+                entities={
+                    "cemetery_figure": {
+                        "visit_observed": True,
+                        "true_form_seen": False,
+                    },
+                    "study_window": {"locked": True, "broken": True},
+                    "case_tracker": {"first_ghoul_sight_resolved": False},
+                }
+            ),
+        )
+        engine = AdjudicationEngineService(store)
+
+        for index in range(5):
+            revision = str(store.inspect_state(ROOM).event_sequence)
+            execution = await engine.submit(repair_window(f"repair-{index}", revision))
+            self.assertEqual(execution.status, "rule_failed")
+            self.assertEqual(store.inspect_state(ROOM).rule_agendas, {})
+            failures = [
+                event
+                for event in store.inspect_domain_events(ROOM)
+                if event.type == "rule.agenda_failed"
+            ]
+            self.assertEqual(len(failures), index + 1)
+
     async def test_pre_existing_settled_agendas_are_pruned(self) -> None:
         """存量房间里已经积下的死数据随正常回合被扫掉，不需要单独的数据迁移。"""
 
@@ -476,6 +513,8 @@ class AgendaFailureAuditTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(failure.payload["failure_code"], "step_kind_has_no_executor")
         self.assertEqual(failure.payload["rule_id"], "locked_study_window_breaks")
         self.assertEqual(failure.payload["step_id"], "apply_condition")
+        # 失败的 Agenda 不落库，被跳过的规则只能靠 payload 留痕。
+        self.assertEqual(failure.payload["skipped_rule_ids"], [])
         self.assertIn(failure.event_id, execution.event_refs)
         # 审计信号从不是规则的输入。
         self.assertNotIn(failure.event_id, execution.public_event_refs)

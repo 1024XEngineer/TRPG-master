@@ -62,6 +62,8 @@ from .persistent_results import (
 from .ports import EngineStore
 from .projection_v3 import project_v3
 from .rules_v3 import (
+    AGENDA_CHAIN_DEPTH_EXCEEDED,
+    AGENDA_STEP_BUDGET_EXCEEDED,
     agenda_failure_code_for_walk,
     agenda_item_for_event,
     agenda_status_for_walk,
@@ -1139,11 +1141,17 @@ class AdjudicationEngineService:
             return execution
 
     @staticmethod
-    def _settled_status(agenda_failure_code: str | None) -> str:
+    def _settled_status(
+        agenda_failure_code: str | None,
+    ) -> Literal["resolved", "rule_failed"]:
         """`resolved`，除非这次动作触发的规则链没能跑完。
 
         两者都是终态、都已提交效果；区别只是后者必须把「规则链停在哪」说出来，
         而不是像 #398 之前那样静默返回 `resolved`。
+
+        返回值收窄成 Literal 而不是 str：三个调用点都把它直接赋给
+        `AdjudicationExecution.status`（一个 Literal 字段），写成 str 等于在每个
+        调用点丢掉这层检查，而 framework 没有自己的 CI。
         """
 
         return "resolved" if agenda_failure_code is None else "rule_failed"
@@ -1782,7 +1790,7 @@ class AdjudicationEngineService:
                     agenda = agenda.model_copy(
                         update={
                             "status": "failed",
-                            "failure_code": "agenda_budget_exceeded",
+                            "failure_code": AGENDA_CHAIN_DEPTH_EXCEEDED,
                             "current_rule_id": rule.id,
                             "current_branch_id": queue[item_index].branch_id,
                         }
@@ -1799,7 +1807,7 @@ class AdjudicationEngineService:
                     agenda = agenda.model_copy(
                         update={
                             "status": "failed",
-                            "failure_code": "agenda_budget_exceeded",
+                            "failure_code": AGENDA_STEP_BUDGET_EXCEEDED,
                             "current_rule_id": rule.id,
                             "current_branch_id": queue[item_index].branch_id,
                             "current_step_id": walk.suspended_at
@@ -1905,9 +1913,24 @@ class AdjudicationEngineService:
                         "branch_id": agenda.current_branch_id,
                         "step_id": agenda.current_step_id,
                         "source_event_ids": list(source_event_ids),
+                        # 停在这条规则上，队列里排在它后面的就再没跑过。失败的
+                        # Agenda 不再落库，不写进 payload 就彻底查不到了。
+                        "skipped_rule_ids": [
+                            item.rule_id for item in queue if item.status == "queued"
+                        ],
                     },
                     visibility="hidden",
                 )
+            )
+            # 隐藏事件只有查库才看得到。运维要的是「规则链在生产上断了」这件事
+            # 本身可告警，所以同一份信息也走一条日志（#398 §目标 5）。
+            logger.warning(
+                "规则链失败: agenda=%s code=%s rule=%s step=%s room=%s",
+                agenda.agenda_id,
+                agenda.failure_code,
+                agenda.current_rule_id,
+                agenda.current_step_id,
+                runtime.game_state.room_id,
             )
         final_revision = str(runtime.game_state.event_sequence + len(events))
         agenda = agenda.model_copy(

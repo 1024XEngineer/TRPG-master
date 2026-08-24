@@ -8,8 +8,10 @@ step graph instead of replaying already committed effects.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
+from types import MappingProxyType
 
 from collaboration_framework.contracts import (
     AdjudicatedCheckStep,
@@ -221,11 +223,24 @@ def agenda_item_for_event(rule: RuleSpecV3, event: DomainEvent) -> AgendaItem:
 
 # The three ways the walk itself — rather than the step it reached — failed.
 # They are not step kinds, so the step registry has nothing to say about them.
-WALK_FAILURE_CODES: dict[str, str] = {
-    "loop": "rule_walk_loop",
-    "step_budget": "rule_step_budget_exceeded",
-    "unknown_step": "rule_step_not_found",
-}
+#
+# Read-only: these strings are published verbatim in the `rule.agenda_failed`
+# audit event and in `AdjudicationExecution.rule_failure_code`, so an importer
+# that mutated the table would silently change what operators alert on.
+WALK_FAILURE_CODES: Mapping[str, str] = MappingProxyType(
+    {
+        "loop": "rule_walk_loop",
+        "step_budget": "rule_step_budget_exceeded",
+        "unknown_step": "rule_step_not_found",
+    }
+)
+
+# The two ways the *Agenda* — rather than one rule's walk inside it — ran out
+# of budget. Both used to publish the single string `agenda_budget_exceeded`,
+# which told an operator neither which budget was hit nor how it differed from
+# `rule_step_budget_exceeded` above. Three causes, three codes.
+AGENDA_CHAIN_DEPTH_EXCEEDED = "agenda_chain_depth_exceeded"
+AGENDA_STEP_BUDGET_EXCEEDED = "agenda_step_budget_exceeded"
 
 
 def agenda_status_for_walk(rule: RuleSpecV3, walk: RuleWalk) -> str:
@@ -301,6 +316,8 @@ def resume_agenda_rule(
 
 
 __all__ = [
+    "AGENDA_CHAIN_DEPTH_EXCEEDED",
+    "AGENDA_STEP_BUDGET_EXCEEDED",
     "WALK_FAILURE_CODES",
     "RuleWalk",
     "agenda_claim_key",

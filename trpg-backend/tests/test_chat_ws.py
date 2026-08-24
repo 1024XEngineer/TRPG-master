@@ -256,8 +256,8 @@ def test_single_player_action_chat_is_rejected(sync_client: TestClient) -> None:
     assert error["payload"]["code"] == "BAD_REQUEST"
 
 
-def test_npc_recipient_is_rejected_before_host_processing(sync_client: TestClient) -> None:
-    """PR1 只预留 NPC recipient，不能误入 Keeper 主链。"""
+def test_npc_recipient_bypasses_keeper_processing(sync_client: TestClient) -> None:
+    """PR2 开放 NPC recipient，但仍不能误入 Keeper ActionPlan 主链。"""
 
     token = register_and_login(sync_client, "npc_recipient_reject")
     room = create_room(sync_client, token, max_players=1)
@@ -278,9 +278,15 @@ def test_npc_recipient_is_rejected_before_host_processing(sync_client: TestClien
                 },
             }
         )
-        error = receive_until(ws, lambda item: item.get("type") == "error")[0]
+        reply, seen = receive_until(ws, lambda item: item.get("type") == "dialogue.npc")
 
-    assert error["payload"]["code"] == "NOT_IMPLEMENTED"
+    assert reply["payload"]["speakerId"] == "thomas"
+    assert any(item.get("type") == "dialogue.player" for item in seen)
+    assert not any(
+        item.get("type") in {"action.broadcast", "check.request", "check.result"}
+        or item.get("message_type") == "turn.completed"
+        for item in seen
+    )
 
 
 def test_single_player_accepts_implicit_keeper_recipient(sync_client: TestClient) -> None:

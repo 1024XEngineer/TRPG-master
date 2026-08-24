@@ -351,6 +351,46 @@ class ActionBroadcastPayload(CamelModel):
     participant_ids: tuple[str, ...] = ()
 
 
+class DialoguePlayerPayload(CamelModel):
+    """玩家对场景 NPC 的结构化发言；受众在对话开始时冻结。"""
+
+    message_id: str = Field(..., min_length=1)
+    player_id: str = Field(..., min_length=1)
+    client_action_id: str = Field(..., min_length=1, max_length=200)
+    nickname: str = Field(..., min_length=1)
+    character_name: str = Field(..., min_length=1)
+    speaker_id: str = Field(..., min_length=1)
+    interlocutor_id: str = Field(..., min_length=1)
+    interlocutor_name: str = Field(..., min_length=1)
+    listener_ids: tuple[str, ...] = ()
+    participant_ids: tuple[str, ...] = ()
+    allowed_responder_ids: tuple[str, ...] = ()
+    utterance: str = Field(..., min_length=1, max_length=2000)
+    scene_id: str = Field(..., min_length=1)
+    source_revision: str = Field(..., min_length=1)
+    sent_at: UtcDatetime
+    audience_player_ids: tuple[str, ...] = ()
+
+
+class DialogueNpcPayload(CamelModel):
+    """Host 以 NPC 身份生成的单条回复；头像 URL 仅为展示派生字段。"""
+
+    message_id: str = Field(..., min_length=1)
+    speaker_id: str = Field(..., min_length=1)
+    speaker_name: str = Field(..., min_length=1)
+    avatar_url: str | None = None
+    listener_ids: tuple[str, ...] = ()
+    participant_ids: tuple[str, ...] = ()
+    text: str = Field(..., min_length=1, max_length=1000)
+    scene_id: str = Field(..., min_length=1)
+    source_dialogue_id: str = Field(..., min_length=1)
+    source_action_id: str = Field(..., min_length=1, max_length=200)
+    ordinal: int = Field(..., ge=0, le=2)
+    source_revision: str = Field(..., min_length=1)
+    sent_at: UtcDatetime
+    audience_player_ids: tuple[str, ...] = ()
+
+
 class TurnStartedPayload(CamelModel):
     correlation_id: str
 

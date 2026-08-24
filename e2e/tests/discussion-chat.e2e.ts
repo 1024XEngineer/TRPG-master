@@ -263,6 +263,93 @@ test('多人 roleplay 不调用主持，也不写入权威事件、记忆或摘�
   }
 })
 
+test('NPC 对话使用结构化接收者、独立气泡事件并可从历史恢复', async () => {
+  const room = await createRoomWithModule('npcdialogue')
+  const actionId = `npc-dialogue-${randomUUID()}`
+  const utterance = `我去地下室并使用侦查，请记住蓝色钟摆-${randomUUID()}`
+
+  await room.host.sdk.rooms.startStory(room.roomId, room.reconnectToken)
+  await buildCharacter(room.host.sdk, room.roomId, room.reconnectToken)
+
+  try {
+    await bindSocket(
+      room.host.sdk,
+      room.roomId,
+      room.host.token,
+      room.hostPlayerId,
+      room.reconnectToken,
+    )
+    const opening = waitForEvent(room.host.sdk, (event) => event.type === 'narration.push')
+    room.host.sdk.roomSocket.startGame(room.hostPlayerId)
+    await opening
+    const view = room.host.sdk.roomSocket.getPlayerView()
+    const npc = view?.scene.visible_entities.find((entity) => entity.kind === 'npc')
+    assert.ok(npc, '开场 PlayerView 应提供可选择的 NPC')
+
+    const playerDialogue = waitForEvent(
+      room.host.sdk,
+      (event) => event.type === 'dialogue.player' && event.payload.clientActionId === actionId,
+    )
+    const npcDialogue = waitForEvent(
+      room.host.sdk,
+      (event) => event.type === 'dialogue.npc' && event.payload.sourceActionId === actionId,
+    )
+    assert.equal(
+      room.host.sdk.roomSocket.submitNpcDialogue(room.hostPlayerId, {
+        clientActionId: actionId,
+        utterance,
+        recipient: { kind: 'npc', entityId: npc.id, explicit: true },
+      }),
+      true,
+    )
+    const [playerEvent, npcEvent] = await Promise.all([playerDialogue, npcDialogue])
+    assert.equal(playerEvent.type, 'dialogue.player')
+    assert.equal(npcEvent.type, 'dialogue.npc')
+    if (playerEvent.type === 'dialogue.player' && npcEvent.type === 'dialogue.npc') {
+      assert.equal(playerEvent.payload.interlocutorId, npc.id)
+      assert.equal(playerEvent.payload.utterance, utterance)
+      assert.equal(npcEvent.payload.speakerId, npc.id)
+    }
+
+    const conversation = await room.host.sdk.rooms.listConversation(
+      room.roomId,
+      room.reconnectToken,
+    )
+    assert.equal(
+      conversation.some(
+        (event) => event.type === 'dialogue.player' && event.payload.utterance === utterance,
+      ),
+      true,
+    )
+    assert.equal(
+      conversation.some(
+        (event) => event.type === 'dialogue.npc' && event.payload.sourceActionId === actionId,
+      ),
+      true,
+    )
+
+    const db = new DatabaseSync(DB_FILE, { readOnly: true })
+    try {
+      const actionPlan = db.prepare(
+        'SELECT COUNT(*) AS count FROM action_plan_runs WHERE room_id = ? AND parent_action_id = ?',
+      ).get(room.roomId, actionId) as { count: number }
+      const gameEvents = db.prepare(
+        'SELECT COUNT(*) AS count FROM game_events WHERE room_id = ? AND client_action_id = ?',
+      ).get(room.roomId, actionId) as { count: number }
+      const memories = db.prepare(
+        'SELECT COUNT(*) AS count FROM memory_entries WHERE room_id = ? AND content LIKE ?',
+      ).get(room.roomId, `%${utterance}%`) as { count: number }
+      assert.equal(actionPlan.count, 0)
+      assert.equal(gameEvents.count, 0)
+      assert.equal(memories.count, 0)
+    } finally {
+      db.close()
+    }
+  } finally {
+    room.host.sdk.roomSocket.disconnect()
+  }
+})
+
 test('🔴 所有人都能看到发起者的原话 + 守秘人回复（修"聊天像被隔离"bug）', async () => {
   const room = await createRoomWithModule('actbc', 2)
   const guest = await registerPlayer('actbcguest')

@@ -10,6 +10,7 @@ import secrets
 import string
 from copy import deepcopy
 from datetime import UTC, datetime
+from typing import Literal, cast
 
 from collaboration_framework.contracts import (
     ContractError,
@@ -45,7 +46,7 @@ from app.dto.room import (
 from app.models.chat import ChatMessage
 from app.models.content import Game, GameSystem, Scenario, World
 from app.models.engine import GameSession, ModuleVersion
-from app.models.event import Event
+from app.models.event import Event, EventAudience
 from app.models.room import Character, CharacterPortrait, Player, Room
 from app.models.user import User
 from app.service import chat as chat_service
@@ -1062,6 +1063,7 @@ async def get_replay(
     player = await require_room_member(db, room_id, reconnect_token)
     result = await db.scalars(
         select(Event)
+        .outerjoin(EventAudience, EventAudience.event_id == Event.id)
         .where(
             Event.room_id == room_id,
             or_(
@@ -1070,8 +1072,13 @@ async def get_replay(
                     Event.visibility == "player_scoped",
                     Event.player_id == player.id,
                 ),
+                and_(
+                    Event.visibility == "scene_scoped",
+                    EventAudience.player_id == player.id,
+                ),
             ),
         )
+        .distinct()
         .order_by(Event.created_at)
     )
     replay: list[ReplayEventRead] = []
@@ -1149,15 +1156,29 @@ async def list_conversation_events(
             select(Event)
             .where(
                 Event.room_id == room_id,
-                Event.event_type.in_(["action.broadcast", "narration.push", "check.result"]),
+                Event.event_type.in_(
+                    [
+                        "action.broadcast",
+                        "narration.push",
+                        "check.result",
+                        "dialogue.player",
+                        "dialogue.npc",
+                    ]
+                ),
                 or_(
                     Event.visibility == "public",
                     and_(
                         Event.visibility == "player_scoped",
                         Event.player_id == player.id,
                     ),
+                    and_(
+                        Event.visibility == "scene_scoped",
+                        EventAudience.player_id == player.id,
+                    ),
                 ),
             )
+            .outerjoin(EventAudience, EventAudience.event_id == Event.id)
+            .distinct()
             .order_by(Event.created_at, Event.id)
         )
     ).scalars()
@@ -1189,6 +1210,29 @@ async def list_conversation_events(
                     type="check.result",
                     channel="action",
                     payload=event.payload,
+                    created_at=event.created_at,
+                )
+            )
+        elif event.event_type in {"dialogue.player", "dialogue.npc"}:
+            payload = dict(event.payload)
+            if event.event_type == "dialogue.npc":
+                # Event 中只保存稳定 speaker ID；URL 是可替换的展示资产。
+                from app.service.npc_dialogue import npc_dialogue_service
+
+                payload["avatarUrl"] = await npc_dialogue_service.portrait_url(
+                    db,
+                    room_id=room_id,
+                    entity_id=str(payload.get("speakerId", "")),
+                )
+            conversation.append(
+                RoomConversationEventRead(
+                    id=event.id,
+                    type=cast(
+                        Literal["dialogue.player", "dialogue.npc"],
+                        event.event_type,
+                    ),
+                    channel="action",
+                    payload=payload,
                     created_at=event.created_at,
                 )
             )

@@ -82,6 +82,8 @@ export type {
   AdjudicationPendingPayload,
   AdjudicationPostRollPayload,
   ActionBroadcastPayload,
+  DialoguePlayerPayload,
+  DialogueNpcPayload,
   GameStartPayload,
   SessionBoundPayload,
   NarrationPushPayload,
@@ -164,6 +166,8 @@ import type {
   CheckRequestPayload,
   CheckResultPayload,
   ClueGrantedPayload,
+  DialogueNpcPayload,
+  DialoguePlayerPayload,
   ErrorPayload,
   GameEndedPayload,
   NarrationChunkPayload,
@@ -222,6 +226,8 @@ export type ServerToClientEvent =
   | { type: 'check.result'; payload: CheckResultPayload }
   | { type: 'chat.message'; payload: ChatMessagePayload }
   | { type: 'action.broadcast'; payload: ActionBroadcastPayload }
+  | { type: 'dialogue.player'; payload: DialoguePlayerPayload }
+  | { type: 'dialogue.npc'; payload: DialogueNpcPayload }
   | { type: 'host_speech.settings_updated'; payload: HostSpeechSettingsUpdatedPayload }
   | { type: 'san.check.request'; payload: SanCheckRequestPayload }
   | { type: 'san.check.result'; payload: SanCheckResultPayload }

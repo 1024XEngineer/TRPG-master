@@ -521,6 +521,48 @@ export interface CreateInventoryImportDraftRequest {
   claims: ItemClaim[];
 }
 
+/**
+ * Host 以 NPC 身份生成的单条回复；头像 URL 仅为展示派生字段。
+ */
+export interface DialogueNpcPayload {
+  messageId: string;
+  speakerId: string;
+  speakerName: string;
+  avatarUrl?: string | null;
+  listenerIds?: string[];
+  participantIds?: string[];
+  text: string;
+  sceneId: string;
+  sourceDialogueId: string;
+  sourceActionId: string;
+  ordinal: number;
+  sourceRevision: string;
+  sentAt: string;
+  audiencePlayerIds?: string[];
+}
+
+/**
+ * 玩家对场景 NPC 的结构化发言；受众在对话开始时冻结。
+ */
+export interface DialoguePlayerPayload {
+  messageId: string;
+  playerId: string;
+  clientActionId: string;
+  nickname: string;
+  characterName: string;
+  speakerId: string;
+  interlocutorId: string;
+  interlocutorName: string;
+  listenerIds?: string[];
+  participantIds?: string[];
+  allowedResponderIds?: string[];
+  utterance: string;
+  sceneId: string;
+  sourceRevision: string;
+  sentAt: string;
+  audiencePlayerIds?: string[];
+}
+
 export interface EndingDraft {
   draft_id: string;
   request_id: string;
@@ -1267,7 +1309,7 @@ export interface RoomActionStatePayload {
  */
 export interface RoomConversationEventRead {
   id: string;
-  type: "chat.message" | "action.broadcast" | "narration.push" | "check.result";
+  type: "chat.message" | "action.broadcast" | "narration.push" | "check.result" | "dialogue.player" | "dialogue.npc";
   channel: "discussion" | "action";
   payload: {
     [k: string]: unknown;

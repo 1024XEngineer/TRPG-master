@@ -36,8 +36,10 @@ WebSocket 可能存活很久，用一个 session 包住整条连接会在这期�
 
 import asyncio
 import time
+import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from functools import partial
 from typing import Literal, cast
 
@@ -111,6 +113,8 @@ from app.dto.ws import (
     ChatSendPayload,
     CheckResultPayload,
     ClientEnvelope,
+    DialogueNpcPayload,
+    DialoguePlayerPayload,
     ErrorPayload,
     GameStartPayload,
     NarrationChunkPayload,
@@ -144,6 +148,8 @@ from app.models.engine import (
     SceneTransitionProposalRecord,
     TimeAdvanceProposalRecord,
 )
+from app.models.event import Event
+from app.models.room import Player
 from app.service import auth as auth_service
 from app.service import chat as chat_service
 from app.service import host_action_queue as host_action_queue_service
@@ -152,6 +158,7 @@ from app.service import scene_transition as scene_transition_service
 from app.service import time_advance as time_advance_service
 from app.service.action_lock import action_lock_manager
 from app.service.host_action_queue import HostActionQueueError
+from app.service.npc_dialogue import npc_dialogue_service, require_dialogue_npc
 from app.service.ws_events import broadcast_room_state
 from app.service.ws_manager import manager
 
@@ -410,7 +417,9 @@ async def _enqueue_host_action(
             correlation_id=client_action_id,
         )
         return
-    if created:
+    # NPC 原话必须等出队后二次验证和受众冻结完成再落 dialogue.player；
+    # 不能先写 action.broadcast，否则会误入 Keeper Memory 和摘要。
+    if created and recipient.kind == "keeper":
         await _broadcast_action_utterance(
             db,
             PlayerInput(
@@ -422,7 +431,224 @@ async def _enqueue_host_action(
             ),
             player_view,
         )
+    elif not created and recipient.kind == "npc" and item.status == "completed":
+        correlations = (
+            f"{client_action_id}:player",
+            *(f"{client_action_id}:npc:{ordinal}" for ordinal in range(3)),
+        )
+        events = tuple(
+            await db.scalars(
+                select(Event)
+                .where(
+                    Event.room_id == room_id,
+                    Event.correlation_id.in_(correlations),
+                )
+                .order_by(Event.created_at, Event.id)
+            )
+        )
+        for event in events:
+            audience = tuple(str(value) for value in event.payload.get("audiencePlayerIds", ()))
+            await _broadcast_dialogue_event(db, event, audience)
     await _broadcast_room_action_state(db, room_id)
+
+
+async def _npc_dialogue_audience(
+    db: AsyncSession,
+    *,
+    room_id: str,
+    scene_id: str,
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """投影所有房间成员并冻结同场景玩家和 Actor；任一失败均整体重试。"""
+
+    player_ids = tuple(await db.scalars(select(Player.id).where(Player.room_id == room_id)))
+    audience_players: list[str] = []
+    audience_actors: list[str] = []
+    for player_id in player_ids:
+        view = await session_view_application.current_player_view(
+            room_id=room_id,
+            player_id=player_id,
+        )
+        if view.scene.id == scene_id:
+            audience_players.append(player_id)
+            audience_actors.append(view.self_actor.id)
+    return tuple(audience_players), tuple(audience_actors)
+
+
+async def _broadcast_dialogue_event(
+    db: AsyncSession,
+    event: Event,
+    audience_player_ids: tuple[str, ...],
+) -> None:
+    """提交成功后按冻结受众单播；离线玩家稍后通过 Event 回放恢复。"""
+
+    raw_payload = dict(event.payload)
+    if event.event_type == "dialogue.player":
+        payload = DialoguePlayerPayload.model_validate(raw_payload)
+    else:
+        avatar_url = await npc_dialogue_service.portrait_url(
+            db,
+            room_id=event.room_id,
+            entity_id=str(raw_payload.get("speakerId", "")),
+        )
+        payload = DialogueNpcPayload.model_validate({**raw_payload, "avatarUrl": avatar_url})
+    envelope = ServerEnvelope(
+        type=event.event_type,
+        payload=payload.model_dump(by_alias=True, mode="json"),
+    ).model_dump(by_alias=True)
+    for target_player_id in audience_player_ids:
+        await manager.send_to_player(event.room_id, target_player_id, envelope)
+
+
+async def _persist_npc_unavailable(
+    db: AsyncSession,
+    item,
+    text: str,
+) -> None:
+    """NPC 出队时已失效，只向发起玩家保存并发送安全澄清。"""
+
+    correlation = f"{item.client_action_id}:npc-unavailable"
+    event = await room_service.get_correlated_event(
+        db,
+        item.room_id,
+        "narration.push",
+        correlation,
+    )
+    if event is None:
+        event = Event(
+            id=str(uuid.uuid4()),
+            room_id=item.room_id,
+            player_id=item.player_id,
+            event_type="narration.push",
+            correlation_id=correlation,
+            visibility="player_scoped",
+            actor_id=item.actor_id,
+            payload=NarrationPushPayload(
+                message_id=correlation,
+                text=text,
+            ).model_dump(by_alias=True),
+            created_at=datetime.now(UTC),
+        )
+        db.add(event)
+        await db.commit()
+    envelope = ServerEnvelope(
+        type="narration.push",
+        payload=event.payload,
+    ).model_dump(by_alias=True)
+    await manager.send_to_player(item.room_id, item.player_id, envelope)
+
+
+async def _run_npc_dialogue(
+    db: AsyncSession,
+    item,
+    view: PlayerView,
+) -> None:
+    """执行一项 NPC 对话；玩家发言先落库，回复与队列终态同事务提交。"""
+
+    claimed = await host_action_queue_service.claim_npc(
+        db,
+        item,
+        lease_seconds=npc_dialogue_service.lease_seconds,
+    )
+    if claimed is None:
+        return
+    item = claimed
+    try:
+        require_dialogue_npc(view, item.recipient_entity_id or "")
+        try:
+            audience_player_ids, audience_actor_ids = await _npc_dialogue_audience(
+                db,
+                room_id=item.room_id,
+                scene_id=view.scene.id,
+            )
+        except Exception:
+            # 受众必须完整冻结，任何成员投影失败都不能提交半套 audience。
+            await host_action_queue_service.mark_npc_retryable(db, item)
+            asyncio.get_running_loop().call_later(
+                5,
+                schedule_host_action_drain,
+                item.room_id,
+            )
+            return
+        if item.player_id not in audience_player_ids:
+            raise RuntimeError("NPC 对话发起者不在冻结场景受众中")
+        player = await db.get(Player, item.player_id)
+        if player is None:
+            raise ValueError("玩家已不在房间中")
+        await db.refresh(item)
+        if item.status == "cancelled":
+            # 发言尚未落库时取消，整段对话都不应发生。
+            return
+        player_event = await npc_dialogue_service.persist_player_event(
+            db,
+            item=item,
+            view=view,
+            audience_player_ids=audience_player_ids,
+            nickname=player.nickname,
+        )
+        await _broadcast_dialogue_event(db, player_event, audience_player_ids)
+        existing_replies = tuple(
+            await db.scalars(
+                select(Event)
+                .where(
+                    Event.room_id == item.room_id,
+                    Event.event_type == "dialogue.npc",
+                    Event.correlation_id.in_(
+                        tuple(f"{item.client_action_id}:npc:{ordinal}" for ordinal in range(3))
+                    ),
+                )
+                .order_by(Event.correlation_id)
+            )
+        )
+        if existing_replies:
+            # 回复事务已提交但进程在广播前退出时，按固定 correlation 恢复，
+            # 绝不能再次调用模型生成另一组内容。
+            item.status = "completed"
+            item.result_event_ids = [event.id for event in existing_replies]
+            item.lease_owner = None
+            item.lease_expires_at = None
+            item.updated_at = datetime.now(UTC)
+            await db.commit()
+            for reply in existing_replies:
+                await _broadcast_dialogue_event(db, reply, audience_player_ids)
+            return
+        await db.refresh(item)
+        if item.status == "cancelled":
+            # 玩家原话已经发生并保留；模型尚未开始时取消只阻止 NPC 回复。
+            return
+        output = await npc_dialogue_service.generate(
+            db,
+            view=view,
+            player_id=item.player_id,
+            utterance=item.utterance,
+            interlocutor_id=item.recipient_entity_id or "",
+        )
+        reply_events = await npc_dialogue_service.persist_replies(
+            db,
+            item=item,
+            view=view,
+            player_event=player_event,
+            audience_player_ids=audience_player_ids,
+            output=output,
+            audience_actor_ids=audience_actor_ids,
+        )
+        for reply in reply_events:
+            await _broadcast_dialogue_event(db, reply, audience_player_ids)
+    except ValueError as exc:
+        await host_action_queue_service.mark_npc_failed(db, item)
+        for target_socket in manager.player_connections(item.room_id, item.player_id):
+            await _send_turn_failed(target_socket, item.client_action_id, exc)
+    except Exception as exc:
+        if item.attempt_count < 2 and is_transient_model_error(exc):
+            await host_action_queue_service.mark_npc_retryable(db, item)
+            asyncio.get_running_loop().call_later(
+                5,
+                schedule_host_action_drain,
+                item.room_id,
+            )
+            return
+        await host_action_queue_service.mark_npc_failed(db, item)
+        for target_socket in manager.player_connections(item.room_id, item.player_id):
+            await _send_turn_failed(target_socket, item.client_action_id, exc)
 
 
 async def _drain_host_action_queue(room_id: str) -> None:
@@ -435,16 +661,6 @@ async def _drain_host_action_queue(room_id: str) -> None:
                 item = await host_action_queue_service.peek_next(db, room_id)
                 if item is None:
                     return
-                # PR1 尚未实现 NPC 对话；即使数据库被手工写入也不能误走 Keeper 主链。
-                if item.recipient_kind != "keeper":
-                    logger.error(
-                        "unsupported_host_queue_recipient",
-                        room_id=room_id,
-                        client_action_id=item.client_action_id,
-                        recipient_kind=item.recipient_kind,
-                    )
-                    await host_action_queue_service.discard(db, item)
-                    continue
                 try:
                     view = await session_view_application.current_player_view(
                         room_id=room_id,
@@ -467,6 +683,17 @@ async def _drain_host_action_queue(room_id: str) -> None:
                 if view.self_actor.id != item.actor_id:
                     await host_action_queue_service.discard(db, item)
                     continue
+                if item.recipient_kind == "npc":
+                    try:
+                        require_dialogue_npc(view, item.recipient_entity_id or "")
+                    except ValueError:
+                        await _persist_npc_unavailable(
+                            db,
+                            item,
+                            "你想交谈的 NPC 已不在当前场景，或现在无法回应。",
+                        )
+                        await host_action_queue_service.discard(db, item)
+                        continue
                 lock_token = action_lock_manager.try_acquire(
                     room_id,
                     player_id=item.player_id,
@@ -484,6 +711,9 @@ async def _drain_host_action_queue(room_id: str) -> None:
                         TurnStarted(correlation_id=item.client_action_id),
                     )
                     await _broadcast_room_action_state(db, room_id)
+                    if item.recipient_kind == "npc":
+                        await _run_npc_dialogue(db, item, view)
+                        continue
                     result = await action_plan_turn_application.start(
                         room_id=room_id,
                         player_id=item.player_id,
@@ -2220,16 +2450,6 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 )
                     elif event_type == "action.plan.submit":
                         submit_payload = ActionSubmitPayload.model_validate(raw_payload)
-                        # 接收者决定后续执行边界，必须在恢复旧 Turn、读取 PlayerView、
-                        # 写事件或入队之前完成拒绝，绝不能把 NPC 请求回退到 Keeper。
-                        if submit_payload.recipient.kind == "npc":
-                            await _send_error(
-                                websocket,
-                                "NOT_IMPLEMENTED",
-                                "NPC 对话将在下一阶段开放",
-                                correlation_id=submit_payload.client_action_id,
-                            )
-                            continue
                         room = await room_service.find_room_by_id(db, room_id)
                         if room.max_players > 1 and not submit_payload.recipient.explicit:
                             await _send_error(
@@ -2247,12 +2467,15 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 correlation_id=submit_payload.client_action_id,
                             )
                             continue
-                        if await _recover_persisted_turn_narration(
-                            db,
-                            websocket,
-                            room_id=room_id,
-                            player_id=bound_player_id,
-                            client_action_id=submit_payload.client_action_id,
+                        if (
+                            submit_payload.recipient.kind == "keeper"
+                            and await _recover_persisted_turn_narration(
+                                db,
+                                websocket,
+                                room_id=room_id,
+                                player_id=bound_player_id,
+                                client_action_id=submit_payload.client_action_id,
+                            )
                         ):
                             continue
                         try:
@@ -2268,6 +2491,34 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 submit_payload.client_action_id,
                                 exc,
                             )
+                            continue
+                        if submit_payload.recipient.kind == "npc":
+                            try:
+                                require_dialogue_npc(
+                                    action_view,
+                                    submit_payload.recipient.entity_id or "",
+                                )
+                            except ValueError as exc:
+                                await _send_error(
+                                    websocket,
+                                    "VALIDATION_ERROR",
+                                    str(exc),
+                                    correlation_id=submit_payload.client_action_id,
+                                )
+                                continue
+                            # NPC 对话始终进入房间 FIFO；它不会恢复或占用 Keeper Turn。
+                            await _enqueue_host_action(
+                                db,
+                                websocket,
+                                room_id=room_id,
+                                player_id=bound_player_id,
+                                actor_id=action_view.self_actor.id,
+                                client_action_id=submit_payload.client_action_id,
+                                utterance=submit_payload.utterance,
+                                player_view=action_view,
+                                recipient=submit_payload.recipient,
+                            )
+                            schedule_host_action_drain(room_id)
                             continue
                         occupancy = await _current_room_action_state(db, room_id)
                         decision = await _queue_decision_for_submit(

@@ -37,6 +37,7 @@ from app.service.conversation_summary import (
     ConversationSummaryService,
     DeterministicConversationSummaryModel,
 )
+from app.service.npc_dialogue import build_npc_dialogue_service
 from tests.content_fixtures import publish_multiplayer_module
 
 # 用临时文件 SQLite，不用 ":memory:"+StaticPool。关键原因是并发模型：异步 HTTP
@@ -103,6 +104,9 @@ ws_controller.action_plan_turn_application = build_action_plan_turn_application(
     time_consent_session_factory=TestSessionLocal,
 )
 ws_controller.adjudication_engine_service = AdjudicationEngineService(_test_turn_store)
+ws_controller.npc_dialogue_service = build_npc_dialogue_service(  # type: ignore[assignment]
+    Settings(host_model_provider="fake")
+)
 
 
 @pytest.fixture(autouse=True)

@@ -290,6 +290,22 @@
   -webkit-touch-callout: none;
 }
 
+.room-play__avatar--npc {
+  width: 2.75rem;
+  height: 2.75rem;
+  flex-basis: 2.75rem;
+  border: 1px solid rgb(150 105 53 / 45%);
+  color: #6f4c25;
+  background: #ecd5a8;
+  font-size: 0.62rem;
+  font-weight: 800;
+}
+
+.room-play__npc-card {
+  border-color: rgb(117 137 106 / 38%);
+  background: #edf0df;
+}
+
 .room-play__avatar--dice {
   color: #79552d;
   background: #e6d6ad;
@@ -687,9 +703,9 @@
 
 .room-play__composer-button {
   display: grid;
-  width: 2.4rem;
-  height: 2.4rem;
-  flex: 0 0 2.4rem;
+  width: 2.75rem;
+  height: 2.75rem;
+  flex: 0 0 2.75rem;
   place-items: center;
   border: 1.5px solid rgb(245 222 178 / 68%);
   border-radius: 999px;
@@ -700,6 +716,41 @@
     inset 0 0 0 2px rgb(132 84 35 / 10%);
   cursor: pointer;
   transition: filter 160ms ease, transform 160ms ease;
+}
+
+.room-play__recipient-menu {
+  display: grid;
+  max-height: 14rem;
+  margin: 0 0 0.45rem 3.1rem;
+  border: 1px solid rgb(139 91 38 / 35%);
+  border-radius: 0.4rem;
+  overflow-y: auto;
+  background: #f7e7c7;
+  box-shadow: 0 0.35rem 0.8rem rgb(42 24 10 / 18%);
+}
+
+.room-play__recipient-menu button {
+  display: flex;
+  min-height: 2.75rem;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.5rem 0.75rem;
+  color: #4b321b;
+  text-align: left;
+}
+
+.room-play__recipient-menu button.is-active,
+.room-play__recipient-menu button:focus-visible {
+  outline: 2px solid #9b6428;
+  outline-offset: -2px;
+  background: rgb(213 170 104 / 24%);
+}
+
+.room-play__recipient-menu button span {
+  min-width: 2rem;
+  color: #806126;
+  font-size: 0.62rem;
+  font-weight: 800;
 }
 
 .room-play__composer-button svg {
@@ -1110,10 +1161,10 @@
   }
 
   .room-play__composer-button {
-    width: 2.25rem;
-    height: 2.25rem;
-    min-height: 2.25rem;
-    flex-basis: 2.25rem;
+    width: 2.75rem;
+    height: 2.75rem;
+    min-height: 2.75rem;
+    flex-basis: 2.75rem;
   }
 }
 

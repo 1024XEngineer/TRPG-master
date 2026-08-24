@@ -180,9 +180,44 @@ function KeeperAvatar({ onLongPress }: { onLongPress: () => void }) {
   )
 }
 
+function NpcAvatar({
+  name,
+  url,
+  onLongPress,
+}: {
+  name: string
+  url?: string
+  onLongPress?: () => void
+}) {
+  const timerRef = useRef<number | null>(null)
+  const clearTimer = () => {
+    if (timerRef.current !== null) window.clearTimeout(timerRef.current)
+    timerRef.current = null
+  }
+  useEffect(() => clearTimer, [])
+  return (
+    <button
+      type="button"
+      aria-label={onLongPress ? `长按 @${name}` : `${name}的头像`}
+      className="room-play__avatar room-play__avatar--npc"
+      onPointerDown={() => {
+        if (!onLongPress) return
+        clearTimer()
+        timerRef.current = window.setTimeout(onLongPress, HOST_MENTION_LONG_PRESS_MS)
+      }}
+      onPointerUp={clearTimer}
+      onPointerCancel={clearTimer}
+      onPointerLeave={clearTimer}
+      onContextMenu={(event) => event.preventDefault()}
+    >
+      {url ? <img src={url} alt="" aria-hidden="true" /> : <span aria-hidden="true">NPC</span>}
+    </button>
+  )
+}
+
 // ─── Types ───────────────────────────────────────────
 interface Message {
-  type: 'system' | 'narr' | 'player' | 'dice'
+  type: 'system' | 'narr' | 'player' | 'npc' | 'dice'
   channel?: 'action' | 'discussion'
   messageId?: string
   narrationId?: string
@@ -191,6 +226,14 @@ interface Message {
   time: string
   isSelf?: boolean
   playerId?: string
+  speakerId?: string
+  avatarUrl?: string
+}
+
+interface SelectedRecipient {
+  kind: 'keeper' | 'npc'
+  entityId: string | null
+  name: string
 }
 
 const EMPTY_ROOM_PLAYERS: RoomPlayerSummary[] = []
@@ -529,6 +572,46 @@ function conversationEventToMessage(
       content: checkResultContent(payload),
       time: formatRoomTime(event.createdAt),
       isSelf: payload.playerId === selfPlayerId,
+    }
+  }
+  if (event.type === 'dialogue.player') {
+    const payload = event.payload as {
+      messageId: string
+      playerId: string
+      characterName: string
+      interlocutorName: string
+      utterance: string
+      sentAt: string
+    }
+    return {
+      type: 'player',
+      channel: 'action',
+      messageId: conversationMessageId(event.type, payload.messageId),
+      sender: payload.characterName,
+      content: `@${payload.interlocutorName} ${payload.utterance}`,
+      time: formatRoomTime(payload.sentAt),
+      isSelf: payload.playerId === selfPlayerId,
+      playerId: payload.playerId,
+    }
+  }
+  if (event.type === 'dialogue.npc') {
+    const payload = event.payload as {
+      messageId: string
+      speakerId: string
+      speakerName: string
+      avatarUrl?: string | null
+      text: string
+      sentAt: string
+    }
+    return {
+      type: 'npc',
+      channel: 'action',
+      messageId: conversationMessageId(event.type, payload.messageId),
+      sender: payload.speakerName,
+      speakerId: payload.speakerId,
+      avatarUrl: payload.avatarUrl ?? undefined,
+      content: payload.text,
+      time: formatRoomTime(payload.sentAt),
     }
   }
   return null
@@ -1333,6 +1416,9 @@ export default function RoomPage() {
   const [showPortraitGenerator, setShowPortraitGenerator] = useState(false)
   const [messages, setMessages] = useState<Message[]>([])
   const [channel, setChannel] = useState<'action' | 'discussion'>('action')
+  const [selectedRecipient, setSelectedRecipient] = useState<SelectedRecipient | null>(null)
+  const [recipientMenuOpen, setRecipientMenuOpen] = useState(false)
+  const [recipientMenuIndex, setRecipientMenuIndex] = useState(0)
   const isActionChannel = channel === 'action'
   /**
    * 草稿按频道各存各的（issue #304）。
@@ -1482,6 +1568,23 @@ export default function RoomPage() {
         '其他调查员',
       )
   const mapLocations = mapLocationsFromPlayerView(playerView)
+  const visibleNpcs = useMemo(
+    () => (playerView?.scene.visible_entities ?? []).filter((entity) => {
+      if (entity.kind !== 'npc') return false
+      const consciousness = entity.observable_state.find(
+        (state) => state.key === 'consciousness',
+      )?.value
+      return consciousness !== 'dead' && consciousness !== 'unconscious'
+    }),
+    [playerView],
+  )
+  const recipientOptions = useMemo(
+    () => [
+      { kind: 'keeper' as const, entityId: null, name: '主持人' },
+      ...visibleNpcs.map((npc) => ({ kind: 'npc' as const, entityId: npc.id, name: npc.name })),
+    ],
+    [visibleNpcs],
+  )
   const sceneTransitionTargetName = pendingSceneTransition
     ? mapLocations.find((location) => location.id === pendingSceneTransition.targetSceneId)?.name
       ?? pendingSceneTransition.targetSceneId
@@ -1542,7 +1645,22 @@ export default function RoomPage() {
   useEffect(() => {
     // 输入框在行动和讨论区复用；切换频道时丢弃尚未完成的识别，避免结果进入新频道。
     cancelSpeechInput()
+    if (channel === 'discussion') {
+      setSelectedRecipient(null)
+      setRecipientMenuOpen(false)
+    }
   }, [cancelSpeechInput, channel])
+
+  useEffect(() => {
+    if (
+      selectedRecipient?.kind === 'npc' &&
+      !visibleNpcs.some((npc) => npc.id === selectedRecipient.entityId)
+    ) {
+      // PlayerView 是权威候选源；NPC 离场后旧选择立即失效。
+      setSelectedRecipient(null)
+      setRecipientMenuOpen(false)
+    }
+  }, [selectedRecipient, visibleNpcs])
 
   useEffect(() => {
     if (suspended) cancelSpeechInput()
@@ -1753,6 +1871,30 @@ export default function RoomPage() {
           time: formatRoomTime(new Date()),
           isSelf: envelope.payload.playerId === playerId,
           playerId: envelope.payload.playerId,
+        }))
+      } else if (envelope.type === 'dialogue.player') {
+        setMessages((prev) => appendLiveMessage(prev, {
+          type: 'player',
+          channel: 'action',
+          messageId: conversationMessageId('dialogue.player', envelope.payload.messageId),
+          sender: envelope.payload.characterName,
+          content: `@${envelope.payload.interlocutorName} ${envelope.payload.utterance}`,
+          time: formatRoomTime(envelope.payload.sentAt),
+          isSelf: envelope.payload.playerId === playerId,
+          playerId: envelope.payload.playerId,
+        }))
+      } else if (envelope.type === 'dialogue.npc') {
+        setTyping(false)
+        clearBackendProgress()
+        setMessages((prev) => appendLiveMessage(prev, {
+          type: 'npc',
+          channel: 'action',
+          messageId: conversationMessageId('dialogue.npc', envelope.payload.messageId),
+          sender: envelope.payload.speakerName,
+          speakerId: envelope.payload.speakerId,
+          avatarUrl: envelope.payload.avatarUrl ?? undefined,
+          content: envelope.payload.text,
+          time: formatRoomTime(envelope.payload.sentAt),
         }))
       } else if (envelope.type === 'check.request') {
         setTyping(false)
@@ -1995,18 +2137,21 @@ export default function RoomPage() {
       })
   }
 
-  const insertHostMention = () => {
+  const selectRecipient = (recipient: SelectedRecipient) => {
     if (suspended) return
     setChannel('action')
+    setSelectedRecipient(recipient)
+    setRecipientMenuOpen(false)
     setDrafts((current) => {
       const value = current.action
+      const withoutMention = value.trim() === '@'
+        ? ''
+        : value.replace(/^\s*@[^\s，。！？；：、,.!?;:]+[\s，。！？；：、,.!?;:]*/u, '')
       return {
         ...current,
-        action: hostUtteranceFromActionInput(value) !== null
-          ? value
-          : value.trim()
-            ? `@主持人 ${value.trim()}`
-            : '@主持人 ',
+        action: withoutMention.trim()
+          ? `@${recipient.name} ${withoutMention.trim()}`
+          : `@${recipient.name} `,
       }
     })
     requestAnimationFrame(() => {
@@ -2016,6 +2161,10 @@ export default function RoomPage() {
       const cursor = field.value.length
       field.setSelectionRange(cursor, cursor)
     })
+  }
+
+  const insertHostMention = () => {
+    selectRecipient({ kind: 'keeper', entityId: null, name: '主持人' })
   }
 
   const sendMessage = (e?: FormEvent) => {
@@ -2030,6 +2179,40 @@ export default function RoomPage() {
     setInput('')
     if (channel === 'discussion') {
       sdk.roomSocket.sendChat(playerId, { text, clientMessageId: randomActionId() })
+      return
+    }
+    if (selectedRecipient?.kind === 'npc') {
+      const prefix = `@${selectedRecipient.name}`
+      if (!text.startsWith(prefix)) {
+        setInput(text)
+        setActionError('NPC 接收者已失效，请从 @ 菜单重新选择')
+        return
+      }
+      const utterance = text.slice(prefix.length).replace(/^[\s，。！？；：、,.!?;:]+/u, '').trim()
+      if (!utterance || !selectedRecipient.entityId) return
+      const clientActionId = randomActionId()
+      setTyping(true)
+      setActionError('')
+      const sent = sdk.roomSocket.submitNpcDialogue(playerId, {
+        clientActionId,
+        utterance,
+        recipient: {
+          kind: 'npc',
+          entityId: selectedRecipient.entityId,
+          explicit: true,
+        },
+      })
+      if (!sent) {
+        setTyping(false)
+        setActionError('NPC 对话发送失败，请检查连接后重试')
+      }
+      setSelectedRecipient(null)
+      setRecipientMenuOpen(false)
+      return
+    }
+    if (/^\s*@/u.test(text) && !hostRequest) {
+      setInput(text)
+      setActionError('请从 @ 菜单选择当前场景中的守秘人或 NPC')
       return
     }
     const singlePlayer = roomInfo?.maxPlayers === 1
@@ -2250,12 +2433,25 @@ export default function RoomPage() {
 
           const isPlayer = msg.type === 'player' && msg.isSelf
           const isNarr = msg.type === 'narr'
+          const isNpc = msg.type === 'npc'
           const portraitUrl = msg.playerId ? portraitUrls[msg.playerId] : undefined
 
           return (
             <div key={i} className={`room-play__message ${isPlayer ? 'room-play__message--self' : ''} ${isNarr ? 'room-play__message--narration' : ''} animate-[msgIn_0.3s_ease]`}>
               {isNarr ? (
                 <KeeperAvatar onLongPress={insertHostMention} />
+              ) : isNpc ? (
+                <NpcAvatar
+                  name={msg.sender ?? 'NPC'}
+                  url={msg.avatarUrl}
+                  onLongPress={msg.speakerId && visibleNpcs.some((npc) => npc.id === msg.speakerId)
+                    ? () => selectRecipient({
+                        kind: 'npc',
+                        entityId: msg.speakerId ?? null,
+                        name: msg.sender ?? 'NPC',
+                      })
+                    : undefined}
+                />
               ) : (
                 <div className="room-play__avatar">
                   {msg.type === 'player' && portraitUrl ? (
@@ -2271,7 +2467,7 @@ export default function RoomPage() {
                 <div className="room-play__sender">
                   {msg.sender}
                 </div>
-                <div className={`room-play__message-card ${isNarr ? 'room-play__narration-card' : ''}`}>
+                <div className={`room-play__message-card ${isNarr ? 'room-play__narration-card' : ''} ${isNpc ? 'room-play__npc-card' : ''}`}>
                   <div className="room-play__narration-text whitespace-pre-wrap">
                     {isNarr && msg.narrationId === hostSpeech.currentMessageId && hostSpeech.currentSentences.length > 0
                       ? hostSpeech.currentSentences.map((sentence) => (
@@ -2586,7 +2782,7 @@ export default function RoomPage() {
         {isActionChannel && actionError && !suspended && (
           <div className="pb-1.5 px-1">
             <div className="flex items-center justify-between gap-2">
-              <p className={`text-[11px] ${actionErrorIsGuidance ? 'text-[#8a642d]' : 'text-[#c04040]'}`}>
+              <p role="alert" className={`text-[11px] ${actionErrorIsGuidance ? 'text-[#8a642d]' : 'text-[#c04040]'}`}>
                 {actionErrorIsGuidance ? `守秘人提示：${actionError}` : actionError}
               </p>
               {pendingAction && actionErrorRetryable && (
@@ -2634,6 +2830,29 @@ export default function RoomPage() {
                     : speechInput.error}
           </p>
         )}
+        {isActionChannel && recipientMenuOpen && (
+          <div
+            id="dialogue-recipient-list"
+            role="listbox"
+            aria-label="选择消息接收者"
+            className="room-play__recipient-menu"
+          >
+            {recipientOptions.map((option, index) => (
+              <button
+                key={`${option.kind}:${option.entityId ?? 'keeper'}`}
+                type="button"
+                role="option"
+                aria-selected={recipientMenuIndex === index}
+                className={recipientMenuIndex === index ? 'is-active' : ''}
+                onMouseEnter={() => setRecipientMenuIndex(index)}
+                onClick={() => selectRecipient(option)}
+              >
+                <span aria-hidden="true">{option.kind === 'keeper' ? 'KP' : 'NPC'}</span>
+                {option.name}
+              </button>
+            ))}
+          </div>
+        )}
         <form data-onboarding-target="action-input" onSubmit={sendMessage} className="room-play__composer-form">
           {/* 讨论区只承载玩家之间的讨论，不提供掷骰入口（issue #304）。 */}
           {isActionChannel && (
@@ -2651,11 +2870,16 @@ export default function RoomPage() {
           {isActionChannel && (
             <button
               type="button"
-              aria-label="插入 @主持人"
-              title="@主持人"
-              onClick={insertHostMention}
+              aria-label="选择消息接收者"
+              title="选择守秘人或 NPC"
+              aria-expanded={recipientMenuOpen}
+              aria-controls="dialogue-recipient-list"
+              onClick={() => {
+                setRecipientMenuIndex(0)
+                setRecipientMenuOpen((open) => !open)
+              }}
               disabled={composerDisabled}
-              className={`room-play__composer-button room-play__host-mention-button${input.includes('@主持人') ? ' is-active' : ''}`}
+              className={`room-play__composer-button room-play__host-mention-button${selectedRecipient ? ' is-active' : ''}`}
             >
               <span aria-hidden="true">@</span>
             </button>
@@ -2665,8 +2889,46 @@ export default function RoomPage() {
             rows={1}
             wrap="soft"
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            role={isActionChannel ? 'combobox' : undefined}
+            aria-autocomplete={isActionChannel ? 'list' : undefined}
+            aria-expanded={isActionChannel ? recipientMenuOpen : undefined}
+            aria-controls={isActionChannel ? 'dialogue-recipient-list' : undefined}
+            onChange={(e) => {
+              const value = e.target.value
+              setInput(value)
+              if (
+                selectedRecipient &&
+                !value.trimStart().startsWith(`@${selectedRecipient.name}`)
+              ) {
+                setSelectedRecipient(null)
+              }
+              if (isActionChannel && /^\s*@[^\s]*$/u.test(value) && !selectedRecipient) {
+                setRecipientMenuIndex(0)
+                setRecipientMenuOpen(true)
+              }
+            }}
             onKeyDown={(e) => {
+              if (recipientMenuOpen) {
+                if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                  e.preventDefault()
+                  const delta = e.key === 'ArrowDown' ? 1 : -1
+                  setRecipientMenuIndex((current) =>
+                    (current + delta + recipientOptions.length) % recipientOptions.length
+                  )
+                  return
+                }
+                if (e.key === 'Escape') {
+                  e.preventDefault()
+                  setRecipientMenuOpen(false)
+                  return
+                }
+                if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                  e.preventDefault()
+                  const option = recipientOptions[recipientMenuIndex]
+                  if (option) selectRecipient(option)
+                  return
+                }
+              }
               if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return
               e.preventDefault()
               sendMessage()

@@ -57,8 +57,8 @@ Round runner，不用于当前 hybrid 验收。
 - smoke 不出现 terminal provider/structured failure，报告不包含敏感正文。
 
 已完成的 hybrid smoke 结果记录在 `docs/issue-357-validation-results.md`。不再运行连续 Round 1/2，
-也不把它们列为 PR 的未完成项。原因是两轮协议原本用于判断“所有输入切到 semantic 并删除旧
-producer”是否可行，而 hybrid 决策已经撤销了这个目标。
+因为两轮协议原本用于判断“所有输入切到 semantic 并删除旧 producer”是否可行，而 hybrid 决策
+已经撤销了这个目标。
 
 40 项玩家安全语料仍覆盖确定性行动、复杂一步、对话与 Runtime 创建、2..N 多目标、同行前置、
 pending、Narrator、多语言、标点和模糊指代。E2E 固定覆盖 `real_observation`、
@@ -69,7 +69,7 @@ pending、Narrator、多语言、标点和模糊指代。E2E 固定覆盖 `real_
 `issue-357-validation-round-1/` 和 `issue-357-validation-round-1-rerun/` 是纯 semantic 全量替换
 方案的历史验证证据。它们证明结构正确性达标，但一步复杂行动的额外串行裁决调用使延迟超过
 门槛，因此促成 hybrid 决策。仓库保留 runner 和脱敏聚合报告以便复现和审计，但不要求再次
-执行，也不把 Round 2 缺失视为当前实现缺口。
+执行；这些报告仅用于记录当时的架构取舍。
 
 ## 单独运行工具
 

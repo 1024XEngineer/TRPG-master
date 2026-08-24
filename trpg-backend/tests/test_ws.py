@@ -22,6 +22,7 @@ from starlette.testclient import TestClient
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from app.controller import ws as ws_controller
+from app.core.seed import BUILTIN_MODULE_ID
 from app.main import app
 
 ROOMS_BASE = "/api/v1/rooms"
@@ -221,7 +222,8 @@ def advance_to_building(client: TestClient, room: dict) -> None:
     module_id = next(
         module["id"]
         for module in modules
-        if module["playersMin"] <= max_players <= module["playersMax"]
+        if module["id"] == BUILTIN_MODULE_ID
+        and module["playersMin"] <= max_players <= module["playersMax"]
     )
     client.post(
         f"{ROOMS_BASE}/{room['roomId']}/module",

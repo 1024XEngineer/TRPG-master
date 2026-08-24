@@ -275,6 +275,8 @@ class _Probe:
         self.last_structured_failure_stage: str | None = None
         self.last_failure_stage: str | None = None
         self.stage_latencies: defaultdict[str, list[float]] = defaultdict(list)
+        self.route_counts: defaultdict[str, int] = defaultdict(int)
+        self.route_reason_counts: defaultdict[str, int] = defaultdict(int)
         self._lose_first_commit_response = lose_first_commit_response
         self._commit_response_lost = False
         self._restores: list[tuple[object, str, object]] = []
@@ -362,7 +364,16 @@ class _Probe:
             return original_model_warning(event, *args, **kwargs)
 
         def measured_turn_info(event: str, *args, **kwargs):  # noqa: ANN002, ANN003, ANN202
-            if event == "action_plan_step_adjudicator_completed":
+            if event == "turn_planner_route_selected":
+                route = kwargs.get("route")
+                if route == "legacy":
+                    self.route_counts["legacy_fast"] += 1
+                elif route == "semantic":
+                    self.route_counts["semantic"] += 1
+                reason = kwargs.get("route_reason")
+                if isinstance(reason, str):
+                    self.route_reason_counts[reason] += 1
+            elif event == "action_plan_step_adjudicator_completed":
                 path = kwargs.get("path")
                 step_index = kwargs.get("step_index")
                 if isinstance(step_index, int) and step_index > 0:
@@ -718,6 +729,8 @@ def _run_sample(
         "model_stage_latency_ms": {
             stage: list(values) for stage, values in probe.stage_latencies.items()
         },
+        "route_counts": dict(probe.route_counts),
+        "route_reason_counts": dict(probe.route_reason_counts),
         **counts,
     }
     assert_sanitized_report(sample)

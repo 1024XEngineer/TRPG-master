@@ -195,5 +195,16 @@ def aggregate_scenario(samples: list[dict[str, Any]]) -> dict[str, Any]:
         "model": result["adjudicator_model_paths"],
         "repair": result["adjudicator_repair_paths"],
     }
+    route_counts: Counter[str] = Counter()
+    route_reason_counts: Counter[str] = Counter()
+    for sample in samples:
+        route_counts.update(
+            {str(key): int(value) for key, value in sample.get("route_counts", {}).items()}
+        )
+        route_reason_counts.update(
+            {str(key): int(value) for key, value in sample.get("route_reason_counts", {}).items()}
+        )
+    result["route_counts"] = dict(sorted(route_counts.items()))
+    result["route_reason_counts"] = dict(sorted(route_reason_counts.items()))
     assert_sanitized_report(result)
     return result

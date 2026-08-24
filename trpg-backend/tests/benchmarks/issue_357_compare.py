@@ -105,7 +105,11 @@ def _validate_inputs(
         "semantic corpus producer mismatch",
     )
     _require(legacy_e2e.get("producer") == "legacy", "legacy E2E producer mismatch")
-    _require(semantic_e2e.get("producer") == "semantic", "semantic E2E producer mismatch")
+    _require(semantic_e2e.get("producer") == "hybrid", "hybrid E2E producer mismatch")
+    _require(
+        semantic_e2e.get("route_policy") == "eligible_input_gate_v1",
+        "hybrid E2E route policy mismatch",
+    )
     _require(legacy_e2e.get("mode") == "real", "legacy E2E is not in real mode")
 
     revisions = {

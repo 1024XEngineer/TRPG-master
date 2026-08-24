@@ -1,6 +1,6 @@
 # Issue #357 PR1/PR2 连续真实模型验证
 
-本页定义 legacy 融合 producer 与 semantic Turn Planner 的同环境、同语料验证方式。
+本页定义 legacy 融合 producer 与 hybrid producer（按输入门控 semantic Turn Planner）的同环境、同语料验证方式。
 固定 `24/24/48` 小时观察窗口已取消，替换为一次 smoke 和连续两轮正式测试。工具不会
 人为等待；仅真实请求耗时和配置的 `0.25s` transport retry 退避会占用时间。
 
@@ -64,7 +64,7 @@ cd trpg-backend
 Smoke 不计入正式质量指标，但计入 2500 次 transport call 总预算：
 
 - legacy 与 semantic 各运行 40 项语料一次。
-- legacy 与 semantic 各运行三个 E2E 场景一次。
+- legacy 与 hybrid 各运行三个 E2E 场景一次；hybrid 报告同时记录实际 `legacy_fast`/`semantic` 路由。
 - 认证、配置、脱敏和 E2E 基础设施全部正常后才进入正式轮次。
 
 每轮正式测试包含：
@@ -72,7 +72,7 @@ Smoke 不计入正式质量指标，但计入 2500 次 transport call 总预算�
 - legacy 语料 `40 x 5 = 200`。
 - semantic 语料 `40 x 5 = 200`。
 - legacy E2E `3 x 20 = 60`。
-- semantic E2E `3 x 20 = 60`。
+- hybrid E2E `3 x 20 = 60`。
 
 Round 1 按 legacy、semantic 顺序执行；Round 2 立即反转为 semantic、legacy，不加入固定等待。
 两轮合计 1040 个语料/回合执行。E2E 每回合可能有 Planner、Step Adjudicator、Narrator 等
@@ -81,7 +81,7 @@ Round 1 按 legacy、semantic 顺序执行；Round 2 立即反转为 semantic、
 40 项玩家安全语料覆盖确定性行动、复杂一步、对话与 Runtime 创建、2..N 多目标、同行前置、
 pending、Narrator、多语言、标点和模糊指代。E2E 固定覆盖 `real_observation`、
 `real_investigation`、`real_multi_step`。两类 producer 使用同一 `PlayerView`；legacy 通过
-`PromptHostTurnDecisionModel`，semantic 通过 `PromptTurnPlanner`（当前 prompt version 为
+`PromptHostTurnDecisionModel`，hybrid 对 semantic eligible 输入通过 `PromptTurnPlanner`（当前 prompt version 为
 `trpg-turn-planner-v2`）。semantic step 必须保留玩家明确提供的公开名称、别名和动作限定，
 但不得输出目标 ID、Keeper-only 名称或裁决信息。
 
@@ -92,8 +92,8 @@ pending、Narrator、多语言、标点和模糊指代。E2E 固定覆盖 `real_
 再逐轮独立判定：
 
 - `real_investigation` P95 增量同时不超过 `1500ms` 和 `25%`。
-- semantic 一步场景总体 P95 不超过 `6500ms`。
-- semantic Planner 和 semantic E2E terminal failure rate 分别不超过 `2%`。
+- hybrid 一步场景总体 P95 不超过 `6500ms`。
+- semantic Planner 和 hybrid E2E terminal failure rate 分别不超过 `2%`。
 - semantic `multi` cohort 的 step-count 与 kind 顺序准确率分别至少 `95%`。
 - semantic Planner 经一次结构重试后的结构成功率至少 `99%`。
 - semantic 与 legacy 在双方都经过当前 Step Adjudicator 的共同步骤（多步计划从第二步开始）上，

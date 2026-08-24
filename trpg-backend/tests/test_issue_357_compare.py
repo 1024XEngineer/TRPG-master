@@ -74,7 +74,8 @@ def _e2e(producer: str) -> dict:
         "issue": 356 if legacy else 357,
         "subject_revision": "revision-357",
         "benchmark_tool_revision": "tool-revision",
-        "producer": producer,
+        "producer": "legacy" if legacy else "hybrid",
+        **({} if legacy else {"route_policy": "eligible_input_gate_v1"}),
         "mode": "real" if legacy else None,
         "runtime": {
             "machine": "benchmark-machine",

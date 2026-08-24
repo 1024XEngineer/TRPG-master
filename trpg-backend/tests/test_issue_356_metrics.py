@@ -43,6 +43,8 @@ def test_aggregate_scenario_keeps_counts_and_percentiles_but_not_sample_data() -
             "adjudicator_rule_first_paths": 0,
             "adjudicator_model_paths": 0,
             "adjudicator_repair_paths": 0,
+            "route_counts": {"legacy_fast": 1 if duration == 10.0 else 0},
+            "route_reason_counts": {"fast_single_step": 1 if duration == 10.0 else 0},
             "model_stage_latency_ms": {"planner": [duration + 100]},
         }
         for duration in (10.0, 30.0, 20.0)
@@ -62,5 +64,7 @@ def test_aggregate_scenario_keeps_counts_and_percentiles_but_not_sample_data() -
     assert summary["step_count_distribution"] == {"1": 3}
     assert summary["step_adjudicator_paths"]["deterministic"]["total"] == 1
     assert summary["step_adjudicator_paths"]["model"]["total"] == 0
+    assert summary["route_counts"] == {"legacy_fast": 1}
+    assert summary["route_reason_counts"] == {"fast_single_step": 1}
     assert summary["model_stage_latency_ms"]["planner"]["p95"] == 130.0
     assert "samples" not in summary

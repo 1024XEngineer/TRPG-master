@@ -1,4 +1,4 @@
-"""Explicit semantic-producer WebSocket benchmark for Issue #357.
+"""Explicit hybrid-producer WebSocket benchmark for Issue #357.
 
 This file is not collected by the default test suite. It uses the configured
 real Host Adjudicator/Narrator plus the independent semantic Planner at 100%,
@@ -113,7 +113,8 @@ def test_issue_357_semantic_turn_run_benchmark(
         "issue": 357,
         "subject_revision": os.getenv("ISSUE_357_SUBJECT_REVISION", _git_revision()),
         "benchmark_tool_revision": _git_revision(),
-        "producer": "semantic",
+        "producer": "hybrid",
+        "route_policy": "eligible_input_gate_v1",
         "planner_provider": settings.turn_planner_provider,
         "planner_model": settings.turn_planner_model,
         "host_provider": settings.host_model_provider,

@@ -229,6 +229,7 @@ class PlayerViewProjector:
                     id=item.id,
                     kind=item.kind,
                     name=item.name,
+                    aliases=item.aliases,
                     description=item.description,
                     parent_location_id=item.parent_location_id,
                     region_id=item.region_id,

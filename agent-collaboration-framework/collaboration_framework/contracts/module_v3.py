@@ -1,30 +1,24 @@
-"""Authoring-time ModuleContent v3 contract (issues #212 / #226 / #240 / #245).
+"""编写阶段的 ModuleContent v3 契约（issues #212 / #226 / #240 / #245）。
 
-This is item 1 of the implementation split in #212 §13: the public v3 contract and
-its JSON Schema. It defines **what a module author writes**, nothing else — the
-runtime counterparts (RuleAgenda, WorldTimeState, KnowledgeResolution, EndingDraft,
-DomainEventV3, ActorLocationState …) belong to later items and are deliberately
-absent here.
+这是 #212 §13 实施拆分中的第 1 项：定义公开的 v3 契约及其 JSON Schema。
+它只定义**模组作者需要编写的内容**；运行时对应对象（RuleAgenda、WorldTimeState、
+KnowledgeResolution、EndingDraft、DomainEventV3、ActorLocationState 等）属于后续工作，
+因此有意不在此处定义。
 
-This started as a separate module because #226 froze the migration as *Breaking*
-and v2 `ModuleContent` still had to survive as the migration input. That input is
-gone: every published module is v3, and the v1/v2 contract was deleted in #384.
-What is left here is simply the one module content contract.
+最初单独建立此模块，是因为 #226 将迁移冻结为 *Breaking*，而 v2 的 `ModuleContent`
+仍需作为迁移输入保留。现在该输入已经移除：所有发布的模组都是 v3，v1/v2 契约已在
+#384 中删除。这里剩下的就是唯一的模组内容契约。
 
-Domain nodes and their owners:
+领域节点及其职责：
 
-* `Information` / `Entity` / `Location` are Canon world nodes (#212 §3.1).
-* `Rule` is a deterministic trigger declaration, never a natural-language
-  matcher: an `agent_match` rule hands the Agent an opaque candidate menu, an
-  `event` rule matches committed domain events (#226 §1–§2).
-* Time is authored as `ModuleTimePolicySpec` only; the world clock itself is
-  runtime state (#245).
+* `Information` / `Entity` / `Location` 是 Canon 世界节点（#212 §3.1）。
+* `Rule` 是确定性的触发声明，而不是自然语言匹配器：`agent_match` 规则向 Agent
+  提供不透明的候选菜单，`event` 规则匹配已经提交的领域事件（#226 §1–§2）。
+* 编写阶段只定义 `ModuleTimePolicySpec`；世界时钟本身属于运行时状态（#245）。
 
-Two root fields — `initial_state` and `world_profile` — are named in #212 §3.1
-but never given a field design in any of the four issues. They are modelled here
-with the minimum the rest of the contract actually references, and marked
-provisional in their own docstrings so a later issue can extend them without
-having to undo guesses.
+两个根字段 `initial_state` 和 `world_profile` 虽在 #212 §3.1 中被命名，但四个 issue
+都没有给出具体字段设计。这里仅按契约其余部分实际引用的内容建立最小模型，并在各自的
+docstring 中标记为临时设计，便于后续 issue 扩展，而不必推翻当前的猜测。
 """
 
 from __future__ import annotations
@@ -38,7 +32,7 @@ from .common import ContractModel
 from .inventory import ItemComponent
 
 # --------------------------------------------------------------------------- #
-# player-facing publication metadata
+# 面向玩家的发布元数据
 #
 # 这两个类原本住在 v1 的 contracts/module.py 里，但它们描述的是「模组怎么呈现
 # 给玩家」，与 schema 版本无关，v3 一直在用（`ModuleContentV3.presentation`）。
@@ -47,14 +41,14 @@ from .inventory import ItemComponent
 
 
 class ModuleStoryPage(ContractModel):
-    """A player-safe page shown before character creation."""
+    """创建角色前向玩家展示的安全页面。"""
 
     title: str = ""
     content: str = Field(min_length=1)
 
 
 class ModulePresentation(ContractModel):
-    """Player-facing publication metadata, separate from keeper context."""
+    """面向玩家的发布元数据，与主持人上下文分离。"""
 
     title: str = Field(min_length=1)
     name_en: str | None = None
@@ -77,7 +71,7 @@ class ModulePresentation(ContractModel):
 
 
 # --------------------------------------------------------------------------- #
-# shared vocabularies
+# 共享词汇
 # --------------------------------------------------------------------------- #
 
 IDENTIFIER_PATTERN = r"^[A-Za-z0-9_][A-Za-z0-9_.-]*$"
@@ -97,12 +91,12 @@ def _require_unique_ids(items: tuple[object, ...], label: str) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# information (#212 §4.2)
+# 信息（#212 §4.2）
 # --------------------------------------------------------------------------- #
 
 
 class InformationDiscoverySpec(ContractModel):
-    """Whether the fact starts hidden, and who shares it once discovered."""
+    """事实是否在开局隐藏，以及发现后与谁共享。"""
 
     initial: Literal["hidden", "known"] = "hidden"
     scope: Literal["party", "actor"] = "party"
@@ -119,12 +113,11 @@ class InformationPresentationSpec(ContractModel):
 
 
 class InformationRecoverySpec(ContractModel):
-    """How hard the module insists on *this* route to the fact.
+    """模组对通过*指定路径*获取事实的要求程度。
 
-    `strict` must honour the declared sources; `adaptive` / `guaranteed` let the
-    Agent reach the same Canon Information through a reasonable Runtime source —
-    a neighbour, a public record, a clerk who looks it up — without ever letting
-    it invent a fact that is not already Canon (#212 §4.2, §4.3).
+    `strict` 必须遵守声明的来源；`adaptive` / `guaranteed` 允许 Agent 通过合理的运行时
+    来源（邻居、公共记录或代为查询的职员等）获得同一条 Canon 信息，但绝不允许它编造
+    不属于 Canon 的事实（#212 §4.2、§4.3）。
     """
 
     policy: Literal["strict", "adaptive", "guaranteed"] = "adaptive"
@@ -149,15 +142,15 @@ class InformationRecoverySpec(ContractModel):
 
 
 class InformationSpecV3(ContractModel):
-    """One Canon fact, separated from every carrier that can deliver it."""
+    """一条 Canon 事实，与所有可能承载和提供它的对象分离。"""
 
     id: Identifier
     kind: Literal["clue", "fact", "rumor", "testimony", "record"] = "clue"
     title: str = Field(min_length=1, max_length=200)
-    # Keeper-only text. Never projected into PlayerView; the Agent sees it only
-    # through the controlled Keeper capability view.
+    # 仅供 Keeper 使用的文本。绝不会投影到 PlayerView；Agent 只能通过受控的
+    # Keeper 能力视图看到它。
     keeper_content: str = Field(min_length=1)
-    # What the player is allowed to read once the fact is released.
+    # 事实公开后允许玩家阅读的内容。
     player_content: str = Field(min_length=1)
     discovery: InformationDiscoverySpec = Field(
         default_factory=InformationDiscoverySpec
@@ -171,7 +164,7 @@ class InformationSpecV3(ContractModel):
 
 
 class KnowledgeGoalSpec(ContractModel):
-    """What the party must end up *knowing*, independent of how they learn it."""
+    """队伍最终必须*知道的内容*，与获取这些内容的路径无关。"""
 
     id: Identifier
     target_information_ids: tuple[Identifier, ...] = Field(min_length=1)
@@ -186,7 +179,7 @@ class KnowledgeGoalSpec(ContractModel):
 
 
 # --------------------------------------------------------------------------- #
-# entities (#212 §8.2)
+# 实体（#212 §8.2）
 # --------------------------------------------------------------------------- #
 
 EntityRelationKind: TypeAlias = Literal[
@@ -202,11 +195,10 @@ EntityRelationKind: TypeAlias = Literal[
 
 
 class EntityRelationSpec(ContractModel):
-    """A semantic relation only.
+    """仅表示语义关系。
 
-    `owns` / `carried_by` / `contains` deliberately do not imply custody: an
-    item's authoritative position is `ItemCustody` runtime state, and capacity,
-    equipment slots and stacking are explicitly not frozen yet (#212 §8.2).
+    `owns` / `carried_by` / `contains` 有意不表示物品保管关系：物品的权威位置由运行时
+    `ItemCustody` 状态决定，容量、装备槽和堆叠规则目前也明确没有冻结（#212 §8.2）。
     """
 
     kind: EntityRelationKind
@@ -214,11 +206,10 @@ class EntityRelationSpec(ContractModel):
 
 
 class EntitySpecV3(ContractModel):
-    """A Canon NPC or object.
+    """一个 Canon 人物或物体。
 
-    Runtime entities the Agent proposes mid-session are not authored here; they
-    carry `origin="runtime"` and live in GameState, and may never shadow a Canon
-    id (#212 §8.2).
+    Agent 在会话中途提出的运行时实体不在这里编写；它们带有 `origin="runtime"`，存放在
+    GameState 中，并且永远不能遮蔽 Canon ID（#212 §8.2）。
     """
 
     id: Identifier
@@ -233,25 +224,23 @@ class EntitySpecV3(ContractModel):
     state: dict[str, JsonValue] = Field(default_factory=dict)
     item_component: ItemComponent | None = None
     visibility: Literal["public", "party", "actor", "keeper"] = "public"
-    # Audience and discovery are separate concerns. A public entity may still
-    # stay out of every player projection until registered, deterministic
-    # predicates say it has been discovered.
+    # 受众与发现是两个独立概念。即使实体是 public，在已注册的确定性谓词确认其
+    # 被发现之前，也可以不出现在任何玩家投影中。
     visibility_conditions: tuple[ConditionExpr, ...] = ()
     plot_relevance: bool = True
     lifecycle: Literal["campaign", "session"] = "campaign"
 
 
 # --------------------------------------------------------------------------- #
-# locations (#212 §7.3)
+# 地点（#212 §7.3）
 # --------------------------------------------------------------------------- #
 
 
 class LocationSpecV3(ContractModel):
-    """A place.
+    """一个地点。
 
-    `parent_location_id` drives the UI breadcrumb; reachability is a separate
-    graph (`LocationEdgeSpec`). Conflating the two is what made v2 Scene exits
-    unable to express "standing at the locked study door" (#212 §7.3, §7.4).
+    `parent_location_id` 用于驱动 UI 面包屑；可达性由独立的图（`LocationEdgeSpec`）表示。
+    v2 将两者混为一谈，导致 Scene 出口无法表达“站在上锁的书房门口”（#212 §7.3、§7.4）。
     """
 
     id: Identifier
@@ -260,6 +249,7 @@ class LocationSpecV3(ContractModel):
     name: str = Field(min_length=1, max_length=200)
     player_visible_name: str = ""
     player_visible_description: str = ""
+    aliases: tuple[str, ...] = Field(default=(), exclude_if=lambda value: not value)
     parent_location_id: Identifier | None = None
     region_id: Identifier | None = None
     relations: tuple[EntityRelationSpec, ...] = ()
@@ -278,12 +268,11 @@ class TravelCostSpec(ContractModel):
 
 
 class LocationEdgeSpec(ContractModel):
-    """One directed route in the navigation graph.
+    """导航图中的一条有向路径。
 
-    `access_point_id` is the Entity that gates the edge (a door, a gate). When it
-    is set and locked, travel stops at that boundary instead of failing — that is
-    what lets the player be "at the study door" rather than either inside or
-    nowhere.
+    `access_point_id` 是控制该路径的 Entity（例如门或闸）。设置该字段且实体处于锁定
+    状态时，移动会停在边界处而不是直接失败，这样玩家可以处于“书房门口”，而不是已经
+    进入书房或被当作无处可去。
     """
 
     id: Identifier
@@ -307,7 +296,7 @@ class LocationEdgeSpec(ContractModel):
 
 
 # --------------------------------------------------------------------------- #
-# rule conditions (#226 §2)
+# 规则条件（#226 §2）
 # --------------------------------------------------------------------------- #
 
 
@@ -327,10 +316,10 @@ class NotCondition(ContractModel):
 
 
 class PredicateCondition(ContractModel):
-    """A registered predicate, never a script.
+    """已注册的谓词，绝不是脚本。
 
-    #226 §1 forbids scripts, database paths and arbitrary event payloads in
-    rules; the predicate name must resolve to something the Engine registered.
+    #226 §1 禁止规则包含脚本、数据库路径和任意事件载荷；谓词名称必须解析到 Engine
+    已注册的实现。
     """
 
     op: Literal["predicate"] = "predicate"
@@ -345,17 +334,16 @@ ConditionExpr: TypeAlias = Annotated[
 
 
 # --------------------------------------------------------------------------- #
-# rule triggers (#226 §2, #240 §5)
+# 规则触发器（#226 §2、#240 §5）
 # --------------------------------------------------------------------------- #
 
 
 class CandidateScopeSpec(ContractModel):
-    """Which situations may surface this rule as an Agent candidate.
+    """哪些情形可以将这条规则呈现为 Agent 候选。
 
-    #226 writes this as `scene_ids`; #240 §5 rules that a scene is a narrative
-    chapter and is no longer the authoritative actor position, so v3 scopes by
-    `location_ids` instead — the same reconciliation that moved
-    `RuleMatchContextRefs` onto `actor_location_id` / `target_location_id`.
+    #226 将此字段写作 `scene_ids`；#240 §5 规定 scene 是叙事章节，不再是 Actor 位置的
+    权威来源，因此 v3 改用 `location_ids` 限定范围。这也是将 `RuleMatchContextRefs`
+    迁移到 `actor_location_id` / `target_location_id` 的同一项协调结果。
     """
 
     action_families: tuple[str, ...] = ()
@@ -370,11 +358,10 @@ class MatchQuestionSpec(ContractModel):
 
 
 class MatchOptionAuthorSpec(ContractModel):
-    """One opaque choice offered to the Agent.
+    """提供给 Agent 的一个不透明选项。
 
-    The Agent submits `id` and nothing else; the mapping from option to
-    consequence exists only server-side, so a compromised or creative model
-    cannot pick an outcome (#226 §1 设计结论).
+    Agent 只提交 `id`，不提交其他内容；选项到后果的映射只存在于服务端，因此即使模型
+    被操纵或过度发挥，也不能自行选择结果（#226 §1 设计结论）。
     """
 
     id: Identifier
@@ -392,6 +379,10 @@ class AgentMatchTriggerSpec(ContractModel):
     required: bool = True
     decision_mode: Literal["selective", "exhaustive_for_scope"] = "selective"
     scope: CandidateScopeSpec = Field(default_factory=CandidateScopeSpec)
+    # `when` was added after existing v3 modules had already been published.
+    # Keep the absent value out of serialized content so those immutable module
+    # versions retain their original normalized payload and content hash.
+    when: ConditionExpr | None = Field(default=None, exclude_if=lambda value: value is None)
     question: MatchQuestionSpec
     options: tuple[MatchOptionAuthorSpec, ...] = Field(min_length=1)
     bindings: tuple[BindingSlotSpec, ...] = ()
@@ -406,7 +397,7 @@ class AgentMatchTriggerSpec(ContractModel):
 
 
 class EventTriggerSpec(ContractModel):
-    """Matches a committed domain event, never the player's words (#212 §3.3)."""
+    """匹配已提交的领域事件，而不是玩家的话语（#212 §3.3）。"""
 
     kind: Literal["event"] = "event"
     event_type: str = Field(min_length=1, max_length=100)
@@ -421,15 +412,15 @@ RuleTriggerSpec: TypeAlias = Annotated[
 
 
 # --------------------------------------------------------------------------- #
-# rule execution steps (#226 §4, §5)
+# 规则执行步骤（#226 §4、§5）
 # --------------------------------------------------------------------------- #
 
 
 class RuleCheckSpec(ContractModel):
-    """A check owned by the rule rather than proposed by the Agent.
+    """由规则负责的检定，而不是由 Agent 提议的检定。
 
-    `parameters` may only carry fields the named Check Profile registered — the
-    rule cannot restate the system's dice algebra (#226 §5).
+    `parameters` 只能携带指定 Check Profile 已注册的字段，规则不能重新定义系统的骰子
+    运算规则（#226 §5）。
     """
 
     profile_id: str = Field(min_length=1, max_length=100)
@@ -456,10 +447,10 @@ class CheckStep(ContractModel):
 
 
 class AdjudicatedCheckStep(ContractModel):
-    """Take over the check the Agent already proposed for this action.
+    """接管 Agent 已经为本次行动提出的检定。
 
-    `effect_authority="rule"` is the point: the player picked the skill, but the
-    published rule — not the Agent — owns what the result does.
+    `effect_authority="rule"` 是关键：玩家选择技能，但检定结果如何产生效果由已发布的
+    规则负责，而不是由 Agent 决定。
     """
 
     id: Identifier
@@ -480,7 +471,7 @@ class InvokeRulesetActionStep(ContractModel):
 
 
 class CreateNpcActionOpportunityStep(ContractModel):
-    """Positive authorisation for an NPC to act; nothing acts implicitly."""
+    """明确授权 NPC 执行行动；任何行动都不会隐式发生。"""
 
     id: Identifier
     kind: Literal["create_npc_action_opportunity"] = "create_npc_action_opportunity"
@@ -490,7 +481,7 @@ class CreateNpcActionOpportunityStep(ContractModel):
 
 
 class CreateTimeTaskStep(ContractModel):
-    """Schema owned by #245; referenced here so a rule can schedule one."""
+    """由 #245 所属的 Schema；在这里引用，以便规则可以安排时间任务。"""
 
     id: Identifier
     kind: Literal["create_time_task"] = "create_time_task"
@@ -506,7 +497,7 @@ class CancelTimeTaskStep(ContractModel):
 
 
 class PresentationStep(ContractModel):
-    """Hand the Narrator a reference, not prose to copy."""
+    """向叙述器传递引用，而不是让它照抄一段 prose。"""
 
     id: Identifier
     kind: Literal["presentation"] = "presentation"
@@ -515,7 +506,7 @@ class PresentationStep(ContractModel):
 
 
 class AwaitPlayerInputStep(ContractModel):
-    """Suspend the agenda until the player speaks again (#226 §4)."""
+    """暂停议程，直到玩家再次发言（#226 §4）。"""
 
     id: Identifier
     kind: Literal["await_player_input"] = "await_player_input"
@@ -569,7 +560,7 @@ class RuleExecutionSpec(ContractModel):
 
 
 def _step_targets(step: RuleStepSpec) -> tuple[str, ...]:
-    """Every step id this step can hand control to."""
+    """该步骤可能将控制权交给的所有步骤 ID。"""
 
     if isinstance(step, CheckStep | AdjudicatedCheckStep):
         routes = tuple(step.result_routes.values())
@@ -589,11 +580,10 @@ class RuleLimitsSpec(ContractModel):
 
 
 class RuleSpecV3(ContractModel):
-    """One authored rule.
+    """一条编写好的规则。
 
-    Its immutable identity is `(module_id, module_version, rule_id)`; a running
-    session pins a ModuleVersion so a republished rule can never change the
-    meaning of an agenda already in flight (#226 §1).
+    它的不可变身份是 `(module_id, module_version, rule_id)`；运行中的会话会固定一个
+    ModuleVersion，因此重新发布规则也不会改变正在执行的议程含义（#226 §1）。
     """
 
     id: Identifier
@@ -616,8 +606,8 @@ class RuleSpecV3(ContractModel):
                     f"{self.trigger.entry_branch_id}"
                 )
         else:
-            # An agent_match rule routes by option id: every option the Agent can
-            # pick must land on a declared branch, or picking it would dead-end.
+            # agent_match 规则按选项 ID 路由：Agent 能选择的每个选项都必须落到已声明的
+            # 分支上，否则选择该选项就会无路可走。
             missing = [
                 option.id
                 for option in self.trigger.options
@@ -631,7 +621,7 @@ class RuleSpecV3(ContractModel):
 
 
 # --------------------------------------------------------------------------- #
-# resolution and endings (#212 §10.2)
+# 主线解决与结局（#212 §10.2）
 # --------------------------------------------------------------------------- #
 
 
@@ -641,10 +631,10 @@ class CoreResolutionSpec(ContractModel):
 
 
 class EndingPolicySpec(ContractModel):
-    """Reaching the core resolution opens the ending; it does not force it.
+    """达到主线解决状态后开放结局，但不会强制立即结束。
 
-    `allow_continue_after_core_resolution` is the fix for v2's habit of ending
-    the session the moment the main thread closed (#212 §1).
+    `allow_continue_after_core_resolution` 用于修复 v2 在主线闭合的瞬间就结束会话的行为
+    （#212 §1）。
     """
 
     allow_continue_after_core_resolution: bool = True
@@ -661,7 +651,7 @@ class EndingAnchorSpec(ContractModel):
 
 
 # --------------------------------------------------------------------------- #
-# time policy (#245 §二.1)
+# 时间政策（#245 §二.1）
 # --------------------------------------------------------------------------- #
 
 
@@ -680,7 +670,7 @@ DEFAULT_TIME_POINTS: tuple[TimePointSpec, ...] = (
 
 
 class ModuleTimePolicySpec(ContractModel):
-    """Discrete time points; the clock jumps between them, it does not tick."""
+    """离散时间点；时钟在时间点之间跳转，而不是连续滴答推进。"""
 
     default_points: tuple[TimePointSpec, ...] = DEFAULT_TIME_POINTS
     storage_precision: Literal["hour"] = "hour"
@@ -703,16 +693,15 @@ class ModuleTimePolicySpec(ContractModel):
 
 
 # --------------------------------------------------------------------------- #
-# provisional roots (#212 §3.1 names them; no issue gives a field design)
+# 临时根字段（#212 §3.1 提到这些字段，但没有 issue 给出字段设计）
 # --------------------------------------------------------------------------- #
 
 
 class WorldProfileSpec(ContractModel):
-    """Setting constraints the Agent must respect when proposing Runtime content.
+    """Agent 提议运行时内容时必须遵守的设定约束。
 
-    Provisional: #212 §7.5 only requires that an Agent-proposed inn "符合
-    world_profile". Modelled with the minimum needed to judge that, so a later
-    issue can extend it without unwinding invented structure.
+    临时设计：#212 §7.5 只要求 Agent 提议的客栈“符合 world_profile”。这里按判断该要求
+    所需的最小字段建模，后续 issue 可以直接扩展，而无需撤销当前人为引入的结构。
     """
 
     era: str = Field(default="", max_length=100)
@@ -723,16 +712,15 @@ class WorldProfileSpec(ContractModel):
 
 
 class ActorPlacementSpec(ContractModel):
-    """Where investigators start. Actor position is runtime state (#240 §1)."""
+    """调查者的起始位置。Actor 位置属于运行时状态（#240 §1）。"""
 
     location_id: Identifier
 
 
 class InitialStateSpec(ContractModel):
-    """The opening world snapshot.
+    """开局时的世界快照。
 
-    Provisional, same reason as `WorldProfileSpec`: only the fields the rest of
-    this contract references are modelled.
+    临时设计，原因与 `WorldProfileSpec` 相同：这里只建模本契约其余部分实际引用的字段。
     """
 
     start_location_id: Identifier
@@ -743,17 +731,16 @@ class InitialStateSpec(ContractModel):
 
 
 # --------------------------------------------------------------------------- #
-# root
+# 根模型
 # --------------------------------------------------------------------------- #
 
 
 class ModuleContentV3(ContractModel):
-    """The v3 module file (#212 §3.1).
+    """v3 模组文件（#212 §3.1）。
 
-    Structural invariants only live here; cross-collection reference checks
-    (does this goal name a real Information? does this edge name a real
-    Location?) belong to the semantic validator, which can report every problem
-    at once instead of aborting on the first.
+    这里只保存结构不变量；跨集合引用检查（例如目标是否引用真实的 Information、边是否
+    引用真实的 Location）属于语义校验器。语义校验器可以一次报告所有问题，而不是遇到
+    第一个问题就中止。
     """
 
     content_schema_version: Literal[3] = 3

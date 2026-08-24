@@ -355,7 +355,7 @@
     },
     "WorldProfileSpec": {
       "additionalProperties": false,
-      "description": "Setting constraints the Agent must respect when proposing Runtime content.\n\nProvisional: #212 §7.5 only requires that an Agent-proposed inn \"符合\nworld_profile\". Modelled with the minimum needed to judge that, so a later\nissue can extend it without unwinding invented structure.",
+      "description": "Agent 提议运行时内容时必须遵守的设定约束。\n\n临时设计：#212 §7.5 只要求 Agent 提议的客栈“符合 world_profile”。这里按判断该要求\n所需的最小字段建模，后续 issue 可以直接扩展，而无需撤销当前人为引入的结构。",
       "properties": {
         "era": {
           "default": "",

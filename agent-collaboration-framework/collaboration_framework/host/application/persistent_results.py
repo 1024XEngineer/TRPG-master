@@ -42,6 +42,9 @@ _INVENTORY_ACQUISITION = re.compile(
     r"(?:放|装|塞|收)(?:入|进|到).{0,10}(?:背包|行囊|口袋|物品栏)|"
     r"(?:背包|行囊|口袋|物品栏)(?:里|中)?(?:多了|有了|装着|放着|收着)"
 )
+_TRANSIENT_HANDLING = re.compile(
+    r"查看|察看|翻看|阅读|端详|观察|检查|展开|翻阅|仔细看|研究"
+)
 _NON_ASSERTIVE_ACQUISITION = re.compile(
     r"未|没有|没能|并未|不能|无法|不曾|试图|尝试|打算|准备|想要|却没"
 )
@@ -161,6 +164,11 @@ def unsupported_inventory_acquisition_claim(
     for sentence in re.split(r"[。！？!?]", asserted_text):
         match = _INVENTORY_ACQUISITION.search(sentence)
         if match is None:
+            continue
+        # “拿起传单仔细查看”只描述本次检查时的临时持握，并不声明物品已经
+        # 进入背包或由玩家持续保管。持久取得仍由“拿走/收好/放进背包”等措辞
+        # 以及最终 inventory 交叉确认；不要让常见的检查叙事触发误报。
+        if match.group(0) in {"拿起", "拾起"} and _TRANSIENT_HANDLING.search(sentence):
             continue
         prefix = sentence[max(0, match.start() - 12) : match.start()]
         if _NON_ASSERTIVE_ACQUISITION.search(prefix):

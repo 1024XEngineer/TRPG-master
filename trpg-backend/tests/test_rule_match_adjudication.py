@@ -482,6 +482,46 @@ async def test_dialogue_miss_reason_does_not_include_player_text() -> None:
 
 
 @pytest.mark.asyncio
+async def test_travel_alias_targets_real_room_instead_of_matching_region() -> None:
+    """建筑层级名应解析到其入口房间，region 本身不能成为旅行目标。"""
+
+    context = await _cemetery_context("进入别墅", step_kind="travel")
+    template = context.player_view.known_locations[0]
+    villa_region = template.model_copy(
+        update={
+            "id": "resort_villa",
+            "kind": "region",
+            "name": "度假村别墅",
+            "access": "blocked",
+        }
+    )
+    reception = template.model_copy(
+        update={
+            "id": "resort_reception",
+            "kind": "room",
+            "name": "一层接待大厅",
+            "aliases": ("度假村别墅", "别墅", "别墅入口"),
+            "access": "reachable",
+        }
+    )
+    view = context.player_view.model_copy(
+        update={
+            "known_locations": (
+                *context.player_view.known_locations,
+                villa_region,
+                reception,
+            )
+        },
+        deep=True,
+    )
+
+    destination = _match_travel_target(view, "进入别墅")
+
+    assert destination is not None
+    assert destination.id == "resort_reception"
+
+
+@pytest.mark.asyncio
 async def test_travel_to_current_runtime_venue_is_a_successful_noop() -> None:
     """已在同一 Runtime 地点时，同义地名不应触发重复进入或澄清。"""
 

@@ -273,6 +273,7 @@ def _known_locations(
                 id=location.id,
                 kind=location.kind,
                 name=location.player_visible_name or location.name,
+                aliases=location.aliases,
                 description=location.player_visible_description,
                 parent_location_id=location.parent_location_id,
                 region_id=location.region_id,
@@ -401,16 +402,19 @@ def _available_exits(
         runtime_destination = state.runtime_locations.get(edge.to_location_id)
         if destination is not None:
             name = destination.player_visible_name or destination.name
+            aliases = destination.aliases
         elif runtime_destination is not None:
             name = (
                 _optional_text(runtime_destination.get("name")) or edge.to_location_id
             )
+            aliases = ()
         else:
             continue
         exits.append(
             ProjectionAvailableExit(
                 id=edge.id,
                 name=name,
+                aliases=aliases,
                 target_id=edge.access_point_id,
                 description="",
                 destination=ProjectionExitDestination(
@@ -677,7 +681,13 @@ def _optional_text(value) -> str | None:
     return value if isinstance(value, str) and value.strip() else None
 
 
-def _rule_candidates(module, location_id: str) -> tuple[KeeperRuleCandidate, ...]:
+def _rule_candidates(
+    module,
+    location_id: str,
+    *,
+    state: GameState,
+    actor_id: str,
+) -> tuple[KeeperRuleCandidate, ...]:
     """agent_match Rules whose scope covers where the actor is standing.
 
     Scope filtering is the Engine's job so the Agent never sees rules for places
@@ -691,7 +701,12 @@ def _rule_candidates(module, location_id: str) -> tuple[KeeperRuleCandidate, ...
         if not isinstance(trigger, AgentMatchTriggerSpec):
             continue
         # 同一个谓词也用在提交侧，两边不会各自漂移。
-        if not agent_match_scope_admits(rule, location_id=location_id):
+        if not agent_match_scope_admits(
+            rule,
+            location_id=location_id,
+            state=state,
+            actor_id=actor_id,
+        ):
             continue
         scope = trigger.scope
         candidates.append(
@@ -828,7 +843,12 @@ def keeper_capabilities_v3(
             )
             for anchor in module.ending_anchors
         ),
-        rule_candidates=_rule_candidates(module, state.scene_id),
+        rule_candidates=_rule_candidates(
+            module,
+            state.scene_id,
+            state=state,
+            actor_id=actor_id,
+        ),
         time=_time_capability(module, state),
         core_resolved=state.core_resolved,
         ending_available=state.ending_available,

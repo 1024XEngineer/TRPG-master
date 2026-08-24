@@ -1413,6 +1413,8 @@ class AdjudicationEngineService:
                 action_family=adjudication.method.family,
                 target_kind=adjudication.target.kind,
                 target_id=adjudication.target.id,
+                state=state,
+                actor_id=adjudication.actor_id,
             ):
                 # 可自动修复，不是死路。菜单是按「玩家站在哪」发布的，这里才
                 # 第一次用上 method.family 和 target —— 也就是说模型看得到的

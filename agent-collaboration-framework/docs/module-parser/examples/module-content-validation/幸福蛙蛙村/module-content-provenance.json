@@ -1,0 +1,653 @@
+{
+  "_comment": "来源段落为 python-docx Document.paragraphs 的 0-based 索引，供人工逐项核验。",
+  "source": "模组幸福蛙蛙村.docx",
+  "paragraph_numbering": "python-docx Document.paragraphs 0-based index",
+  "module_id": "happy-frog-village",
+  "version": "3.0.0",
+  "locations": {
+    "lane_manor": [
+      47,
+      50,
+      51,
+      53,
+      55,
+      57
+    ],
+    "pretrip_investigation": [
+      69,
+      72,
+      74,
+      77,
+      85,
+      94
+    ],
+    "forest_road": [
+      99,
+      100,
+      104,
+      105
+    ],
+    "frog_resort": [
+      131,
+      132,
+      133,
+      138,
+      195,
+      196,
+      239,
+      424
+    ],
+    "resort_villa": [
+      138,
+      140,
+      146,
+      195,
+      196,
+      206,
+      301,
+      305,
+      308
+    ],
+    "resort_ground_floor": [
+      138,
+      140,
+      146,
+      148,
+      206,
+      207,
+      212,
+      213
+    ],
+    "resort_second_floor": [
+      195,
+      201,
+      203,
+      204,
+      301,
+      305,
+      308
+    ],
+    "resort_reception": [
+      131,
+      138,
+      140,
+      146,
+      148
+    ],
+    "guest_room": [
+      195,
+      201,
+      203,
+      204
+    ],
+    "dining_kitchen": [
+      206,
+      212,
+      213,
+      215,
+      235,
+      236
+    ],
+    "frog_pond": [
+      239,
+      244,
+      246,
+      248,
+      251,
+      312,
+      313
+    ],
+    "crystal_shore": [
+      316,
+      317,
+      318,
+      320,
+      321,
+      322,
+      447,
+      448,
+      449,
+      450
+    ],
+    "staff_area": [
+      301,
+      302,
+      303
+    ],
+    "storage_room": [
+      305,
+      306
+    ],
+    "messenger_bedroom": [
+      308,
+      309,
+      310
+    ],
+    "resort_boundary": [
+      424,
+      425,
+      431,
+      432
+    ],
+    "outside": [
+      431,
+      432,
+      434
+    ]
+  },
+  "information": {
+    "commission_received": [
+      50,
+      51,
+      53,
+      55,
+      57
+    ],
+    "frog_resort_flyer": [
+      33,
+      34,
+      35,
+      36,
+      37,
+      38,
+      39,
+      57,
+      69,
+      70
+    ],
+    "flyer_is_hand_drawn": [
+      41
+    ],
+    "missing_people_pattern": [
+      74,
+      75,
+      77,
+      79,
+      80,
+      81,
+      82
+    ],
+    "villagers_shared_dreams": [
+      85,
+      86,
+      88,
+      90,
+      92
+    ],
+    "resort_has_no_registration": [
+      94,
+      95,
+      96,
+      97
+    ],
+    "ezra_warning": [
+      99,
+      100,
+      104,
+      105,
+      111,
+      112,
+      114,
+      116,
+      117,
+      119,
+      120,
+      121,
+      122,
+      123,
+      124
+    ],
+    "staff_are_conditioned": [
+      140,
+      144,
+      154,
+      155,
+      156,
+      157,
+      161
+    ],
+    "messenger_happiness_logic": [
+      148,
+      149,
+      151,
+      152,
+      298,
+      299,
+      324,
+      325,
+      326,
+      361,
+      467,
+      468
+    ],
+    "james_refuses_home": [
+      156,
+      163,
+      164,
+      165,
+      166,
+      167,
+      168,
+      169
+    ],
+    "james_resists_forced_removal": [
+      167,
+      168,
+      169
+    ],
+    "james_forced_removal_tragedy": [
+      171,
+      172,
+      173,
+      174,
+      175
+    ],
+    "happiness_booklet_doctrine": [
+      201
+    ],
+    "guests_show_mutation": [
+      182,
+      183,
+      185,
+      187,
+      189,
+      203,
+      204,
+      278,
+      284,
+      286,
+      288,
+      290,
+      291,
+      292,
+      293
+    ],
+    "all_liquids_use_pond_water": [
+      206,
+      207,
+      208,
+      209,
+      212,
+      213,
+      215,
+      216,
+      235,
+      236,
+      237
+    ],
+    "water_causes_hallucinations": [
+      218,
+      219,
+      220,
+      222,
+      223,
+      225,
+      226,
+      227,
+      229,
+      230,
+      232,
+      233,
+      251,
+      252,
+      254,
+      255,
+      257,
+      258,
+      259,
+      261,
+      262,
+      264,
+      266,
+      268,
+      269,
+      271
+    ],
+    "frogs_were_people": [
+      239,
+      244,
+      246,
+      248,
+      249,
+      387,
+      388,
+      398
+    ],
+    "staff_notes_confessions": [
+      301,
+      302,
+      303
+    ],
+    "messenger_origin_notes": [
+      308,
+      309,
+      310
+    ],
+    "night_has_fallen": [
+      280,
+      281,
+      282,
+      312
+    ],
+    "night_ritual_seen": [
+      312,
+      313,
+      314
+    ],
+    "crystal_is_power_core": [
+      313,
+      316,
+      317,
+      320,
+      321,
+      322,
+      447
+    ],
+    "crystal_retrieved": [
+      316,
+      317,
+      318,
+      320,
+      321,
+      322
+    ],
+    "debate_failed_hint": [
+      324,
+      325,
+      326,
+      436,
+      437,
+      439
+    ],
+    "messenger_convinced": [
+      436,
+      437,
+      439,
+      441,
+      443,
+      444
+    ],
+    "crystal_destroyed": [
+      447,
+      448,
+      449,
+      450
+    ],
+    "victims_released": [
+      439,
+      443,
+      444,
+      447,
+      448,
+      449
+    ],
+    "james_returns_home": [
+      439,
+      444,
+      459,
+      461,
+      463,
+      464
+    ],
+    "escaped_unresolved": [
+      424,
+      425,
+      431,
+      432,
+      433,
+      434
+    ],
+    "accepted_happiness": [
+      452,
+      453,
+      455,
+      456
+    ]
+  },
+  "rules": {
+    "accept_lane_commission": [
+      50,
+      51,
+      53,
+      55,
+      57
+    ],
+    "inspect_resort_flyer": [
+      41
+    ],
+    "research_missing_people": [
+      74,
+      75,
+      77,
+      79,
+      80,
+      81,
+      82
+    ],
+    "ask_villagers_about_dreams": [
+      85,
+      86,
+      88,
+      90,
+      92
+    ],
+    "calm_ezra": [
+      99,
+      100,
+      104,
+      105,
+      111,
+      112,
+      114,
+      116,
+      117,
+      119,
+      120,
+      121,
+      122,
+      123,
+      124
+    ],
+    "read_messenger_intent": [
+      140,
+      144,
+      146,
+      148,
+      149,
+      151,
+      152
+    ],
+    "talk_to_james": [
+      163,
+      164,
+      165,
+      166,
+      167,
+      168,
+      169
+    ],
+    "force_james_against_his_will": [
+      167,
+      168,
+      169
+    ],
+    "force_james_out_of_resort": [
+      171,
+      172,
+      173,
+      174,
+      175
+    ],
+    "read_happiness_booklet": [
+      201
+    ],
+    "inspect_mutating_guest": [
+      203,
+      204,
+      278
+    ],
+    "trace_kitchen_water": [
+      212,
+      213,
+      215,
+      216,
+      235,
+      236,
+      237
+    ],
+    "resist_happiness_water": [
+      215,
+      216,
+      218,
+      219,
+      220,
+      222,
+      223,
+      229,
+      230
+    ],
+    "study_dream_frogs": [
+      239,
+      244,
+      246,
+      248,
+      249
+    ],
+    "infiltrate_staff_area": [
+      301,
+      302,
+      303
+    ],
+    "read_staff_notes": [
+      301,
+      302,
+      303
+    ],
+    "read_messenger_notes": [
+      308,
+      309,
+      310
+    ],
+    "observe_night_ritual": [
+      312,
+      313,
+      314
+    ],
+    "retrieve_dream_crystal": [
+      316,
+      317,
+      318,
+      320,
+      321,
+      322
+    ],
+    "persuade_happiness_messenger": [
+      324,
+      325,
+      326,
+      436,
+      437,
+      439,
+      443,
+      444
+    ],
+    "destroy_dream_crystal": [
+      447,
+      448,
+      449,
+      450
+    ],
+    "leave_frog_resort": [
+      424,
+      425,
+      431,
+      432,
+      433,
+      434
+    ],
+    "accept_messengers_happiness": [
+      452,
+      453,
+      455,
+      456
+    ],
+    "night_ritual_begins": [
+      280,
+      281,
+      282,
+      312
+    ],
+    "final_debate_becomes_available": [
+      239,
+      248,
+      298,
+      299,
+      324,
+      325,
+      326
+    ]
+  },
+  "knowledge_goals": {
+    "understand_resort_truth": [
+      239,
+      248,
+      309,
+      310,
+      312,
+      313,
+      321,
+      322
+    ],
+    "choose_frog_village_outcome": [
+      175,
+      424,
+      425,
+      431,
+      436,
+      439,
+      447,
+      452,
+      455
+    ]
+  },
+  "ending_anchors": {
+    "persuade_messenger_and_rescue_james": [
+      436,
+      437,
+      439,
+      443,
+      444,
+      459,
+      461,
+      463,
+      464
+    ],
+    "break_crystal_and_wake_victims": [
+      447,
+      448,
+      449,
+      450
+    ],
+    "accept_eternal_happiness": [
+      452,
+      453,
+      455,
+      456
+    ],
+    "leave_before_resolving_mystery": [
+      424,
+      425,
+      431,
+      432,
+      433,
+      434
+    ],
+    "force_james_out_and_lose_him": [
+      171,
+      172,
+      173,
+      174,
+      175
+    ]
+  }
+}

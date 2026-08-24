@@ -309,6 +309,15 @@ class PersistentNarrationPolicyTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("放进背包", output.text)
 
+    async def test_allows_transient_handling_during_inspection_without_inventory_move(self):
+        output = await ActionPlanNarrator(
+            _PersistentNarrationModel(
+                "你拿起传单仔细查看，发现它并不是印刷品，而是精确的手绘作品。"
+            )
+        ).narrate(self._context())
+
+        self.assertIn("手绘作品", output.text)
+
     async def test_rejects_different_item_even_when_another_pickup_was_confirmed(self):
         result = CommittedResult(
             kind="inventory",

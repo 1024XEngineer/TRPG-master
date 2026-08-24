@@ -409,6 +409,14 @@
           "title": "Name",
           "type": "string"
         },
+        "aliases": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Aliases",
+          "type": "array"
+        },
         "description": {
           "default": "",
           "title": "Description",

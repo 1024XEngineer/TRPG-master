@@ -134,6 +134,7 @@ class ProjectionKnownLocation(ContractModel):
     id: str = Field(min_length=1)
     kind: Literal["region", "site", "room", "connector"]
     name: str = Field(min_length=1)
+    aliases: tuple[str, ...] = ()
     description: str = ""
     parent_location_id: str | None = Field(default=None, min_length=1)
     region_id: str | None = Field(default=None, min_length=1)
@@ -342,6 +343,7 @@ class KnownLocationView(ContractModel):
     id: str = Field(min_length=1)
     kind: Literal["region", "site", "room", "connector"]
     name: str = Field(min_length=1)
+    aliases: tuple[str, ...] = ()
     description: str = ""
     parent_location_id: str | None = Field(default=None, min_length=1)
     region_id: str | None = Field(default=None, min_length=1)

@@ -2521,6 +2521,24 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 room_id,
                                 force_processing=True,
                             )
+                            scene_aborted = await scene_transition_service.abort_pending(
+                                db,
+                                engine=adjudication_engine_service,
+                                room_id=room_id,
+                                player_id=bound_player_id,
+                                parent_action_id=cancel.client_action_id,
+                            )
+                            if scene_aborted is not None:
+                                await _broadcast_scene_transition(room_id, scene_aborted)
+                            time_aborted = await time_advance_service.abort_pending(
+                                db,
+                                engine=adjudication_engine_service,
+                                room_id=room_id,
+                                player_id=bound_player_id,
+                                parent_action_id=cancel.client_action_id,
+                            )
+                            if time_aborted is not None:
+                                await _broadcast_time_advance(room_id, time_aborted)
                             result = await action_plan_turn_application.cancel_remaining(
                                 room_id=room_id,
                                 player_id=bound_player_id,

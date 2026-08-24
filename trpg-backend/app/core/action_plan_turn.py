@@ -1090,6 +1090,25 @@ class ActionPlanTurnApplication:
             existing is not None
             and existing.player_id == player_id
             and existing.actor_id == actor_id
+            and existing.status in {"awaiting_scene_consent", "awaiting_time_consent"}
+        ):
+            abort_consent = getattr(self._adjudication_engine, "abort_consent", None)
+            if abort_consent is not None:
+                current = (
+                    existing.steps[existing.current_step_index]
+                    if existing.current_step_index < len(existing.steps)
+                    else None
+                )
+                await abort_consent(
+                    room_id=room_id,
+                    player_id=player_id,
+                    parent_action_id=parent_action_id,
+                    action_request_id=(current.step_request_id if current is not None else None),
+                )
+        if (
+            existing is not None
+            and existing.player_id == player_id
+            and existing.actor_id == actor_id
             and existing.status == "waiting_for_player"
             and existing.current_step_index < len(existing.steps)
         ):

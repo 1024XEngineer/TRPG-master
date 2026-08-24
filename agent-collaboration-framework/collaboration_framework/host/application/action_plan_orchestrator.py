@@ -559,7 +559,11 @@ class ActionPlanOrchestrator:
             return run
         if run.is_terminal and run.status != "stopped":
             return run
-        if run.status == "waiting_for_player":
+        if run.status in {
+            "waiting_for_player",
+            "awaiting_time_consent",
+            "awaiting_scene_consent",
+        }:
             current = run.steps[run.current_step_index]
             status = await self._executor.get_status(
                 GetAdjudicationStatusRequest(
@@ -573,7 +577,12 @@ class ActionPlanOrchestrator:
         if run.current_step_index < len(run.steps):
             current = run.steps[run.current_step_index]
             cancellable_boundary = (
-                current.status == "pending"
+                current.status
+                in {
+                    "pending",
+                    "awaiting_time_consent",
+                    "awaiting_scene_consent",
+                }
                 or (
                     run.status == "needs_clarification"
                     and current.status == "stopped"

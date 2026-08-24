@@ -78,11 +78,16 @@ def deterministic_opening_narration(
 ) -> NarrationOutput:
     """Build a public, deterministic opening without exposing private actor data."""
 
-    scene_lines = [
-        line
-        for line in (context.scene.name.strip(), context.scene.description.strip())
-        if line
-    ]
+    addressing_mode = getattr(context, "addressing_mode", "second_person")
+    scene_name = context.scene.name.strip()
+    scene_description = context.scene.description.strip()
+    if scene_description and narration_subject_rejection_reason(
+        scene_description,
+        addressing_mode=addressing_mode,
+    ):
+        # 模组可见描述可能含未加引号的「你」；named_actor 下整段丢掉，不改写原文。
+        scene_description = ""
+    scene_lines = [line for line in (scene_name, scene_description) if line]
     participant_labels = []
     for participant in context.participants:
         public_details = [

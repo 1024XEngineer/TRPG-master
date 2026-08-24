@@ -316,6 +316,52 @@ async def test_narration_falls_back_to_required_player_safe_evidence() -> None:
     assert "。。" not in narration.text
 
 
+def test_required_evidence_fallback_omits_second_person_description_in_named_actor() -> None:
+    context = SimpleNamespace(
+        addressing_mode="named_actor",
+        acting_character_name="陈探员",
+        narration_evidence=(
+            NarrationEvidence(
+                ref="evt-road-discovered",
+                kind="entity_discovered",
+                subject_id="kimball-road",
+                subject_name="宅外道路",
+                description="你可以在阴影中观察周围动静。",
+                required_in_narration=True,
+            ),
+        ),
+    )
+
+    output = ActionPlanTurnApplication._required_evidence_fallback(cast(Any, context))
+
+    assert "陈探员" in output.text
+    assert "宅外道路" in output.text
+    assert "你可以在阴影中观察周围动静" not in output.text
+    assert output.claimed_evidence_refs == ("evt-road-discovered",)
+
+
+def test_required_evidence_fallback_keeps_description_in_second_person() -> None:
+    context = SimpleNamespace(
+        addressing_mode="second_person",
+        acting_character_name="陈探员",
+        narration_evidence=(
+            NarrationEvidence(
+                ref="evt-road-discovered",
+                kind="entity_discovered",
+                subject_id="kimball-road",
+                subject_name="宅外道路",
+                description="你可以在阴影中观察周围动静。",
+                required_in_narration=True,
+            ),
+        ),
+    )
+
+    output = ActionPlanTurnApplication._required_evidence_fallback(cast(Any, context))
+
+    assert "你可以在阴影中观察周围动静" in output.text
+    assert output.claimed_evidence_refs == ("evt-road-discovered",)
+
+
 @pytest.mark.asyncio
 async def test_required_evidence_fallback_never_changes_clarification_scope() -> None:
     application = object.__new__(ActionPlanTurnApplication)

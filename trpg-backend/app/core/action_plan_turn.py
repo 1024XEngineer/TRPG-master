@@ -52,6 +52,7 @@ from collaboration_framework.host.application import (
     HostTurnDecisionExecutor,
     PlayerViewProjector,
     TurnExecutionError,
+    narration_subject_rejection_reason,
 )
 from collaboration_framework.host.ports import (
     ActionPlanStepAdjudicator,
@@ -1414,13 +1415,22 @@ class ActionPlanTurnApplication:
                 retryable=True,
             )
         sentences: list[str] = []
+        addressing_mode = getattr(context, "addressing_mode", "second_person")
         for item in required:
             sentences.append(
                 f"随着调查深入，{_acting_address(context)}很快辨认出{item.subject_name}。"
             )
             description = item.description.strip()
             if description:
-                sentences.append(description.rstrip("。！？!?；;，,") + "。")
+                sentence = description.rstrip("。！？!?；;，,") + "。"
+                if (
+                    narration_subject_rejection_reason(
+                        sentence,
+                        addressing_mode=addressing_mode,
+                    )
+                    is None
+                ):
+                    sentences.append(sentence)
         return ActionPlanNarrationOutput(
             text="".join(sentences),
             claimed_evidence_refs=tuple(item.ref for item in required),

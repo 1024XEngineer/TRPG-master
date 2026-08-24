@@ -9,7 +9,10 @@
  */
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
+import { dirname, resolve } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { test } from 'node:test'
+import { fileURLToPath } from 'node:url'
 
 import { type ServerToClientEvent } from 'trpg-sdk'
 
@@ -20,6 +23,10 @@ const LEGAL_ATTRIBUTES = {
   APP: 50, SIZ: 50, INT: 50, EDU: 50, LUCK: 50,
 }
 const EXPLICIT_KEEPER = { kind: 'keeper', entityId: null, explicit: true } as const
+const DB_FILE = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  '../../trpg-backend/e2e.db'
+)
 
 function waitForEvent(
   socketOwner: { roomSocket: { onMessage: (h: (e: ServerToClientEvent) => void) => () => void } },
@@ -131,6 +138,128 @@ test('🔴 重发相同 clientMessageId 不产生重复记录（重连去重）'
     assert.equal(history.length, 1)
   } finally {
     room.host.sdk.roomSocket.disconnect()
+  }
+})
+
+test('多人 roleplay 不调用主持，也不写入权威事件、记忆或摘要', async () => {
+  const room = await createRoomWithModule('roleplay', 2)
+  const guest = await registerPlayer('roleplayguest')
+  const joined = await guest.sdk.rooms.join(room.roomCode, { nickname: '扮演访客' }, guest.token)
+  const roleplayId = `roleplay-${randomUUID()}`
+  const roleplayText = `伊莱亚斯敲了两下桌面-${randomUUID()}`
+
+  await room.host.sdk.rooms.startStory(room.roomId, room.reconnectToken)
+  await buildCharacter(room.host.sdk, room.roomId, room.reconnectToken)
+  await buildCharacter(guest.sdk, room.roomId, joined.reconnectToken)
+
+  try {
+    await bindSocket(
+      room.host.sdk, room.roomId, room.host.token, room.hostPlayerId, room.reconnectToken
+    )
+    await bindSocket(guest.sdk, room.roomId, guest.token, joined.playerId, joined.reconnectToken)
+
+    const hostOpening = waitForEvent(room.host.sdk, (e) => e.type === 'narration.push')
+    const guestOpening = waitForEvent(guest.sdk, (e) => e.type === 'narration.push')
+    room.host.sdk.roomSocket.startGame(room.hostPlayerId)
+    await Promise.all([hostOpening, guestOpening])
+
+    const observedTypes: string[] = []
+    const off = guest.sdk.roomSocket.onMessage((event) => observedTypes.push(event.type))
+    const hostHearsRoleplay = waitForEvent(
+      room.host.sdk,
+      (event) => event.type === 'chat.message' && event.payload.text === roleplayText,
+    )
+    guest.sdk.roomSocket.sendActionChat(joined.playerId, {
+      text: roleplayText,
+      clientMessageId: roleplayId,
+    })
+    const roleplay = await hostHearsRoleplay
+    assert.equal(roleplay.type, 'chat.message')
+    if (roleplay.type === 'chat.message') {
+      assert.equal(roleplay.payload.channel, 'roleplay')
+      assert.ok(roleplay.payload.actorId)
+      assert.equal(roleplay.payload.actorName, 'E2E 调查员')
+    }
+
+    // 用后一条讨论消息作为屏障：收到它时，前一条 roleplay 的服务端处理已完整结束。
+    const barrierText = `处理屏障-${randomUUID()}`
+    const barrier = waitForEvent(
+      room.host.sdk,
+      (event) => event.type === 'chat.message' && event.payload.text === barrierText,
+    )
+    guest.sdk.roomSocket.sendChat(joined.playerId, {
+      text: barrierText,
+      clientMessageId: randomUUID(),
+    })
+    await barrier
+    off()
+    assert.equal(observedTypes.includes('turn.started'), false)
+    assert.equal(observedTypes.includes('narration.push'), false)
+
+    const conversation = await room.host.sdk.rooms.listConversation(
+      room.roomId,
+      room.reconnectToken,
+    )
+    assert.equal(
+      conversation.some(
+        (event) =>
+          event.type === 'chat.message' &&
+          event.payload.channel === 'roleplay' &&
+          event.payload.text === roleplayText,
+      ),
+      true,
+    )
+
+    const db = new DatabaseSync(DB_FILE, { readOnly: true })
+    try {
+      const marker = `%${roleplayText}%`
+      const traces = [
+        [
+          'events',
+          'SELECT COUNT(*) AS count FROM events WHERE room_id = ? AND (correlation_id = ? OR CAST(payload AS TEXT) LIKE ?)',
+          [room.roomId, roleplayId, marker],
+        ],
+        [
+          'game_events',
+          'SELECT COUNT(*) AS count FROM game_events WHERE room_id = ? AND (client_action_id = ? OR CAST(payload AS TEXT) LIKE ?)',
+          [room.roomId, roleplayId, marker],
+        ],
+        [
+          'action_executions',
+          'SELECT COUNT(*) AS count FROM action_executions WHERE room_id = ? AND request_id = ?',
+          [room.roomId, roleplayId],
+        ],
+        [
+          'action_plan_runs',
+          'SELECT COUNT(*) AS count FROM action_plan_runs WHERE room_id = ? AND parent_action_id = ?',
+          [room.roomId, roleplayId],
+        ],
+        [
+          'host_action_queue',
+          'SELECT COUNT(*) AS count FROM host_action_queue WHERE room_id = ? AND client_action_id = ?',
+          [room.roomId, roleplayId],
+        ],
+        [
+          'memory_entries',
+          'SELECT COUNT(*) AS count FROM memory_entries WHERE room_id = ? AND content LIKE ?',
+          [room.roomId, marker],
+        ],
+        [
+          'conversation_summaries',
+          'SELECT COUNT(*) AS count FROM conversation_summaries WHERE room_id = ? AND CAST(summary_json AS TEXT) LIKE ?',
+          [room.roomId, marker],
+        ],
+      ] as const
+      for (const [table, sql, parameters] of traces) {
+        const row = db.prepare(sql).get(...parameters) as { count: number }
+        assert.equal(row.count, 0, `${table} 不应留下 roleplay 痕迹`)
+      }
+    } finally {
+      db.close()
+    }
+  } finally {
+    room.host.sdk.roomSocket.disconnect()
+    guest.sdk.roomSocket.disconnect()
   }
 })
 

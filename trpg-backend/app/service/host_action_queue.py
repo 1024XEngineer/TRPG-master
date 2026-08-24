@@ -79,7 +79,7 @@ async def enqueue(
     actor_id: str,
     client_action_id: str,
     utterance: str,
-    recipient: ActionRecipientPayload | None = None,
+    recipient: ActionRecipientPayload,
 ) -> tuple[HostActionQueueItem, bool]:
     """Accept a host action into the room FIFO.
 
@@ -89,9 +89,6 @@ async def enqueue(
     utterance can be published.
     """
 
-    # 直接调用这个 service 的旧内部任务没有 recipient 时，按历史 Keeper 行为兼容；
-    # WebSocket 边界仍要求 DTO 显式携带 recipient，不能靠这里绕过校验。
-    recipient = recipient or ActionRecipientPayload(kind="keeper", entity_id=None, explicit=True)
     existing_id = await get_queued_by_client_action(db, room_id, client_action_id)
     if existing_id is not None:
         return existing_id, False

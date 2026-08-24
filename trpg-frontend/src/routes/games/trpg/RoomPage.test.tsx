@@ -806,6 +806,25 @@ describe('RoomPage conversation history', () => {
     ))
   })
 
+  it('accepts Chinese punctuation after a leading keeper mention', async () => {
+    mockSubmitPlannedAction.mockReturnValue(new Promise(() => undefined))
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    const actionField = screen.getByPlaceholderText('输入消息…')
+    fireEvent.change(actionField, { target: { value: '@守秘人：我查看窗外' } })
+    fireEvent.submit(actionField.closest('form')!)
+
+    await waitFor(() => expect(mockSubmitPlannedAction).toHaveBeenCalledWith(
+      'player-1',
+      expect.objectContaining({
+        utterance: '我查看窗外',
+        recipient: { kind: 'keeper', entityId: null, explicit: true },
+      }),
+    ))
+    expect(mockSendActionChat).not.toHaveBeenCalled()
+  })
+
   it('disables action submission until room mode is known but keeps discussion available', async () => {
     roomInfoState.maxPlayers = null
     renderRoomPage()
@@ -834,6 +853,20 @@ describe('RoomPage conversation history', () => {
     expect(mockSubmitPlannedAction.mock.calls[0][1]).toEqual(
       expect.objectContaining({ utterance: '我搜查书桌' }),
     )
+  })
+
+  it('action channel @ button moves a mid-text mention to the routing position', async () => {
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    const actionField = screen.getByPlaceholderText('输入消息…')
+    fireEvent.change(actionField, { target: { value: '我稍后再问@主持人' } })
+    fireEvent.click(screen.getByRole('button', { name: '插入 @主持人' }))
+    expect(actionField).toHaveValue('@主持人 我稍后再问@主持人')
+
+    fireEvent.change(actionField, { target: { value: '@守秘人 我查看窗外' } })
+    fireEvent.click(screen.getByRole('button', { name: '插入 @主持人' }))
+    expect(actionField).toHaveValue('@守秘人 我查看窗外')
   })
 
   it('long-pressing the keeper avatar inserts @主持人', async () => {

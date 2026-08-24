@@ -132,7 +132,9 @@ function checkResultContent(payload: CheckResultPayload): string {
 }
 
 function hostUtteranceFromActionInput(text: string): { utterance: string; explicit: true } | null {
-  const mention = /^\s*@(主持人|守秘人)(?=\s|$)/u.exec(text)
+  // 中文输入习惯会直接在 mention 后接逗号或冒号；这些标点属于分隔符，
+  // 不应让一条明确发给守秘人的消息误落成多人 roleplay。
+  const mention = /^\s*@(主持人|守秘人)(?:\s+|[，。！？；：、,.!?;:]\s*|$)/u.exec(text)
   if (!mention) return null
   const rest = text.slice(mention[0].length).replace(/\s+/g, ' ').trim()
   return { utterance: rest, explicit: true }
@@ -1996,7 +1998,7 @@ export default function RoomPage() {
       const value = current.action
       return {
         ...current,
-        action: value.includes('@主持人')
+        action: hostUtteranceFromActionInput(value) !== null
           ? value
           : value.trim()
             ? `@主持人 ${value.trim()}`

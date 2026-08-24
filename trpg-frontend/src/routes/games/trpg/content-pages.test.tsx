@@ -24,7 +24,7 @@ const moduleSummary: ModuleSummary = {
   status: 'ready',
   authors: [],
   playersMin: 1,
-  playersMax: 1,
+  playersMax: 4,
   difficulty: 1,
   estimatedDuration: '1-2 小时',
   synopsis: '禁酒令时期的阿诺兹堡，五本珍藏旧书失窃。',
@@ -47,6 +47,8 @@ const silverLockSummary: ModuleSummary = {
   nameEn: 'Silver Lock',
   version: '3.0.0',
   authors: ['夕影'],
+  playersMin: 1,
+  playersMax: 1,
   synopsis: '在银色房间醒来后，找到解除束缚与逃离的方法。',
 }
 
@@ -133,7 +135,7 @@ describe('content selection pages', () => {
     expect(await screen.findByRole('heading', { name: '选择模组' })).toBeInTheDocument()
     await waitFor(() => expect(screen.getByText('Paper Chase')).toBeInTheDocument())
     expect(screen.getByText('禁酒令时期的阿诺兹堡，五本珍藏旧书失窃。')).toBeInTheDocument()
-    expect(screen.getByText('1 人')).toBeInTheDocument()
+    expect(screen.getByText('1-4 人')).toBeInTheDocument()
     expect(screen.getByText('1-2 小时')).toBeInTheDocument()
     expect(screen.getByAltText('未配置封面模组封面')).toHaveAttribute(
       'src',
@@ -155,7 +157,8 @@ describe('content selection pages', () => {
 
     expect(await screen.findByText('Paper Chase')).toBeInTheDocument()
     expect(screen.getByText('Silver Lock')).toBeInTheDocument()
-    expect(screen.getAllByText('1 人')).toHaveLength(2)
+    expect(screen.getByText('1-4 人')).toBeInTheDocument()
+    expect(screen.getByText('1 人')).toBeInTheDocument()
     expect(screen.getByAltText('银之锁模组封面')).toHaveAttribute(
       'src',
       '/assets/rooms/scenarios/cover-default.webp',
@@ -522,9 +525,9 @@ describe('content selection pages', () => {
     const createButton = screen.getByRole('button', { name: '创建房间' })
     expect(screen.getByRole('textbox', { name: '房间名称' })).toHaveAttribute('maxLength', '200')
     expect(createButton).toBeDisabled()
-    await waitFor(() => expect(screen.getByRole('spinbutton')).toHaveValue(1))
-    expect(screen.getByText('本模组要求 1 人')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '减少人数' })).toBeDisabled()
+    await waitFor(() => expect(screen.getByRole('spinbutton')).toHaveValue(4))
+    expect(screen.getByText('本模组要求 1-4 人')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '减少人数' })).toBeEnabled()
     expect(screen.getByRole('button', { name: '增加人数' })).toBeDisabled()
     expect(createButton).toBeEnabled()
   })

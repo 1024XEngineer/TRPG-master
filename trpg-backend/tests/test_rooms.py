@@ -385,7 +385,7 @@ async def test_module_catalog_filters_hidden_and_rejects_wip_selection(
     assert detail["title"] == "追书人"
     assert detail["nameEn"] == "Paper Chase"
     assert detail["playersMin"] == 1
-    assert detail["playersMax"] == 1
+    assert detail["playersMax"] == 4
     assert detail["estimatedDuration"] == "1-2 小时"
     assert detail["synopsis"]
     assert detail["storyPages"][0]["title"]
@@ -404,24 +404,23 @@ async def test_module_catalog_filters_hidden_and_rejects_wip_selection(
 
 
 async def test_module_selection_enforces_published_player_range(client: AsyncClient) -> None:
-    module_id = (await client.get("/api/v1/modules")).json()["data"][0]["id"]
-
-    oversized = await create_room(client, max_players=4)
+    oversized = await create_room(client, max_players=5)
     rejected = await client.post(
         f"{ROOMS_BASE}/{oversized['roomId']}/module",
-        json={"moduleId": module_id, "attributeGenMethod": "point_buy"},
+        json={"moduleId": BUILTIN_MODULE_ID, "attributeGenMethod": "point_buy"},
         headers=reconnect(oversized["reconnectToken"]),
     )
     assert rejected.status_code == 409
     assert rejected.json()["error"]["code"] == "MODULE_PLAYER_COUNT_MISMATCH"
 
-    valid = await create_room(client, max_players=1)
-    accepted = await client.post(
-        f"{ROOMS_BASE}/{valid['roomId']}/module",
-        json={"moduleId": module_id, "attributeGenMethod": "point_buy"},
-        headers=reconnect(valid["reconnectToken"]),
-    )
-    assert accepted.status_code == 200, accepted.text
+    for size in (1, 4):
+        valid = await create_room(client, max_players=size)
+        accepted = await client.post(
+            f"{ROOMS_BASE}/{valid['roomId']}/module",
+            json={"moduleId": BUILTIN_MODULE_ID, "attributeGenMethod": "point_buy"},
+            headers=reconnect(valid["reconnectToken"]),
+        )
+        assert accepted.status_code == 200, accepted.text
 
 
 async def test_create_and_join_require_login(client: AsyncClient) -> None:

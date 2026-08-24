@@ -274,6 +274,48 @@ test('isValidServerEvent：拒绝 payload 字段缺失或类型不对', () => {
   );
 });
 
+test('isValidServerEvent：校验结构化 NPC 对话事件', () => {
+  const player = {
+    type: 'dialogue.player',
+    payload: {
+      messageId: 'dialogue-player-1',
+      playerId: 'player-1',
+      clientActionId: 'action-1',
+      speakerId: 'actor-1',
+      interlocutorId: 'caretaker',
+      interlocutorName: '守墓人',
+      utterance: '请记住蓝色钟摆。',
+      sceneId: 'cemetery',
+      audiencePlayerIds: ['player-1'],
+    },
+  };
+  const npc = {
+    type: 'dialogue.npc',
+    payload: {
+      messageId: 'dialogue-npc-1',
+      speakerId: 'caretaker',
+      speakerName: '守墓人',
+      text: '我记住了。',
+      sceneId: 'cemetery',
+      sourceDialogueId: 'dialogue-player-1',
+      sourceActionId: 'action-1',
+      ordinal: 0,
+      audiencePlayerIds: ['player-1'],
+    },
+  };
+
+  assert.equal(isValidServerEvent(player), true);
+  assert.equal(isValidServerEvent(npc), true);
+  assert.equal(
+    isValidServerEvent({ ...npc, payload: { ...npc.payload, ordinal: 0.5 } }),
+    false
+  );
+  assert.equal(
+    isValidServerEvent({ ...player, payload: { ...player.payload, audiencePlayerIds: 'all' } }),
+    false
+  );
+});
+
 test('isValidServerEvent：校验共享时间提案与终态', () => {
   assert.equal(
     isValidServerEvent({

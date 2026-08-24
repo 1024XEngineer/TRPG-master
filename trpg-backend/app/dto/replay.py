@@ -39,7 +39,14 @@ class RoomConversationEventRead(CamelModel):
     """
 
     id: str
-    type: Literal["chat.message", "action.broadcast", "narration.push", "check.result"]
+    type: Literal[
+        "chat.message",
+        "action.broadcast",
+        "narration.push",
+        "check.result",
+        "dialogue.player",
+        "dialogue.npc",
+    ]
     channel: Literal["discussion", "action"]
     payload: dict
     created_at: UtcDatetime

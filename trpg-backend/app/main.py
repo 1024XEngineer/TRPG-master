@@ -6,6 +6,7 @@
 重复写 try/except。
 """
 
+import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -72,6 +73,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     portrait_service: PortraitGenerationService = app.state.portrait_generation_service
     await portrait_service.recover_interrupted()
     await app.state.conversation_summary_service.start()
+    # NPC 对话队列是持久化任务；进程重启后恢复到期 lease 和待处理房间。
+    from app.controller.ws import schedule_host_action_drain
+    from app.service.host_action_queue import recovery_schedule
+
+    async with async_session_factory() as db:
+        for room_id, delay_seconds in await recovery_schedule(db):
+            # 按持久化时间精确恢复，不建立通用任务调度平台，也不让后续任务越过队首。
+            asyncio.get_running_loop().call_later(
+                delay_seconds,
+                schedule_host_action_drain,
+                room_id,
+            )
     logger.info("app_started")
     try:
         yield

@@ -532,12 +532,21 @@ class HostActionQueueItem(Base):
         ),
         CheckConstraint("position >= 1", name="ck_host_action_queue_position"),
         CheckConstraint(
-            "status IN ('queued', 'started', 'cancelled', 'discarded')",
+            "status IN ('queued', 'processing', 'retryable_failure', 'completed', "
+            "'failed', 'cancelled', 'discarded')",
             name="ck_host_action_queue_status",
         ),
         CheckConstraint(
             "recipient_kind IN ('keeper', 'npc')",
             name="ck_host_action_queue_recipient_kind",
+        ),
+        CheckConstraint("attempt_count >= 0", name="ck_host_action_queue_attempt_count"),
+        CheckConstraint(
+            "(status = 'processing' AND lease_owner IS NOT NULL "
+            "AND lease_expires_at IS NOT NULL) OR "
+            "(status != 'processing' AND lease_owner IS NULL "
+            "AND lease_expires_at IS NULL)",
+            name="ck_host_action_queue_processing_lease",
         ),
         CheckConstraint(
             "(recipient_kind = 'keeper' AND recipient_entity_id IS NULL) OR "
@@ -579,6 +588,17 @@ class HostActionQueueItem(Base):
     )
     position: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="queued")
+    attempt_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    lease_owner: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    result_event_ids: Mapped[list[str]] = mapped_column(
+        JSON, nullable=False, default=list, server_default="[]"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
     )

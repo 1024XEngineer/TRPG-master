@@ -489,6 +489,27 @@ const PAYLOAD_VALIDATORS: {
       p.characterName === null ||
       p.characterName === undefined) &&
     typeof p.utterance === 'string',
+  'dialogue.player': (p) =>
+    typeof p.messageId === 'string' &&
+    typeof p.playerId === 'string' &&
+    typeof p.clientActionId === 'string' &&
+    typeof p.speakerId === 'string' &&
+    typeof p.interlocutorId === 'string' &&
+    typeof p.interlocutorName === 'string' &&
+    typeof p.utterance === 'string' &&
+    typeof p.sceneId === 'string' &&
+    isStringArray(p.audiencePlayerIds),
+  'dialogue.npc': (p) =>
+    typeof p.messageId === 'string' &&
+    typeof p.speakerId === 'string' &&
+    typeof p.speakerName === 'string' &&
+    typeof p.text === 'string' &&
+    typeof p.sceneId === 'string' &&
+    typeof p.sourceDialogueId === 'string' &&
+    typeof p.sourceActionId === 'string' &&
+    typeof p.ordinal === 'number' &&
+    Number.isInteger(p.ordinal) &&
+    isStringArray(p.audiencePlayerIds),
   'san.check.request': (p) => typeof p.playerId === 'string',
   'san.check.result': (p) =>
     typeof p.playerId === 'string' &&
@@ -714,6 +735,12 @@ export class RoomSocket {
       reject(new RoomSocketTransportError('WebSocket is not connected'));
     }
     return promise;
+  }
+
+  /** NPC 对话不产生 Agent turn.completed；回复通过 dialogue.* 事件到达。 */
+  submitNpcDialogue(playerId: string, payload: ActionSubmitPayload): boolean {
+    if (payload.recipient.kind !== 'npc') return false;
+    return this.send('action.plan.submit', playerId, payload);
   }
 
   selectAdjudication(playerId: string, payload: AdjudicationChoicePayload): void {

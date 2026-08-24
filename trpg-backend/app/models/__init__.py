@@ -35,7 +35,7 @@ from app.models.engine import (
     TimeAdvanceProposalRecord,
     TurnRunCutoverRecord,
 )
-from app.models.event import CheckResult, Event
+from app.models.event import CheckResult, Event, EventAudience
 from app.models.memory import (
     ConversationSummaryRecord,
     MemoryEntryRecord,
@@ -58,6 +58,7 @@ __all__ = [
     "CharacterPortrait",
     "Entity",
     "Event",
+    "EventAudience",
     "Game",
     "GameEvent",
     "GameSession",

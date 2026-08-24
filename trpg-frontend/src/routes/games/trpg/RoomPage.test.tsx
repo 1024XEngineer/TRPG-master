@@ -105,6 +105,7 @@ const {
   mockSendActionChat,
   mockSubmitAction,
   mockSubmitPlannedAction,
+  mockSubmitNpcDialogue,
   mockSelectAdjudication,
   mockDecidePostRoll,
   mockCancelActionPlan,
@@ -146,6 +147,7 @@ const {
     }),
     mockSubmitAction: vi.fn(),
     mockSubmitPlannedAction: vi.fn(),
+    mockSubmitNpcDialogue: vi.fn(),
     mockSelectAdjudication: vi.fn(),
     mockDecidePostRoll: vi.fn(),
     mockCancelActionPlan: vi.fn(),
@@ -181,6 +183,7 @@ vi.mock('@/services/api-client', () => ({
       sendActionChat: mockSendActionChat,
       submitAction: mockSubmitAction,
       submitPlannedAction: mockSubmitPlannedAction,
+      submitNpcDialogue: mockSubmitNpcDialogue,
       selectAdjudication: mockSelectAdjudication,
       decidePostRoll: mockDecidePostRoll,
       cancelActionPlan: mockCancelActionPlan,
@@ -465,6 +468,7 @@ describe('RoomPage conversation history', () => {
     })
     mockSubmitAction.mockReturnValue(new Promise(() => undefined))
     mockSubmitPlannedAction.mockReturnValue(new Promise(() => undefined))
+    mockSubmitNpcDialogue.mockReturnValue(true)
   })
 
   afterEach(() => {
@@ -825,6 +829,25 @@ describe('RoomPage conversation history', () => {
     expect(mockSendActionChat).not.toHaveBeenCalled()
   })
 
+  it('accepts a leading keeper mention even when the正文紧跟在 mention 后面', async () => {
+    mockSubmitPlannedAction.mockReturnValue(new Promise(() => undefined))
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    const actionField = screen.getByPlaceholderText('输入消息…')
+    fireEvent.change(actionField, { target: { value: '@主持人我去图书馆' } })
+    fireEvent.submit(actionField.closest('form')!)
+
+    await waitFor(() => expect(mockSubmitPlannedAction).toHaveBeenCalledWith(
+      'player-1',
+      expect.objectContaining({
+        utterance: '我去图书馆',
+        recipient: { kind: 'keeper', entityId: null, explicit: true },
+      }),
+    ))
+    expect(mockSendActionChat).not.toHaveBeenCalled()
+  })
+
   it('disables action submission until room mode is known but keeps discussion available', async () => {
     roomInfoState.maxPlayers = null
     renderRoomPage()
@@ -840,13 +863,14 @@ describe('RoomPage conversation history', () => {
     expect(mockSubmitPlannedAction).not.toHaveBeenCalled()
   })
 
-  it('action channel @ button inserts a host mention', async () => {
+  it('action channel @ menu inserts a host mention', async () => {
     renderRoomPage()
     await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
 
     const actionField = screen.getByPlaceholderText('输入消息…')
     fireEvent.change(actionField, { target: { value: '我搜查书桌' } })
-    fireEvent.click(screen.getByRole('button', { name: '插入 @主持人' }))
+    fireEvent.click(screen.getByRole('button', { name: '选择消息接收者' }))
+    fireEvent.click(screen.getByRole('option', { name: /主持人/ }))
     expect(actionField).toHaveValue('@主持人 我搜查书桌')
     fireEvent.submit(actionField.closest('form')!)
     await waitFor(() => expect(mockSubmitPlannedAction).toHaveBeenCalled())
@@ -855,18 +879,120 @@ describe('RoomPage conversation history', () => {
     )
   })
 
-  it('action channel @ button moves a mid-text mention to the routing position', async () => {
+  it('action channel @ menu moves a mid-text mention to the routing position', async () => {
     renderRoomPage()
     await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
 
     const actionField = screen.getByPlaceholderText('输入消息…')
     fireEvent.change(actionField, { target: { value: '我稍后再问@主持人' } })
-    fireEvent.click(screen.getByRole('button', { name: '插入 @主持人' }))
+    fireEvent.click(screen.getByRole('button', { name: '选择消息接收者' }))
+    fireEvent.click(screen.getByRole('option', { name: /主持人/ }))
     expect(actionField).toHaveValue('@主持人 我稍后再问@主持人')
 
     fireEvent.change(actionField, { target: { value: '@守秘人 我查看窗外' } })
-    fireEvent.click(screen.getByRole('button', { name: '插入 @主持人' }))
-    expect(actionField).toHaveValue('@守秘人 我查看窗外')
+    fireEvent.click(screen.getByRole('button', { name: '选择消息接收者' }))
+    fireEvent.click(screen.getByRole('option', { name: /主持人/ }))
+    expect(actionField).toHaveValue('@主持人 我查看窗外')
+  })
+
+  it('selects a visible NPC by stable id and renders independent dialogue bubbles', async () => {
+    const view = playerViewFixture()
+    mockGetPlayerView.mockReturnValue({
+      ...view,
+      scene: {
+        ...view.scene,
+        visible_entities: [{
+          id: 'caretaker',
+          kind: 'npc',
+          name: '守墓人',
+          aliases: ['老人'],
+          description: '沉默寡言的守墓人。',
+          narrative_details: [],
+          observable_state: [],
+        }],
+      },
+    })
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    fireEvent.click(screen.getByRole('button', { name: '选择消息接收者' }))
+    fireEvent.click(screen.getByRole('option', { name: /守墓人/ }))
+    const actionField = screen.getByPlaceholderText('输入消息…')
+    fireEvent.change(actionField, { target: { value: '@守墓人 请记住蓝色钟摆。' } })
+    fireEvent.submit(actionField.closest('form')!)
+
+    expect(mockSubmitNpcDialogue).toHaveBeenCalledWith('player-1', expect.objectContaining({
+      utterance: '请记住蓝色钟摆。',
+      recipient: { kind: 'npc', entityId: 'caretaker', explicit: true },
+    }))
+    act(() => emitWsMessage({
+      type: 'dialogue.player',
+      payload: {
+        messageId: 'dialogue-player-1',
+        playerId: 'player-1',
+        clientActionId: 'action-dialogue-1',
+        nickname: '陈探员',
+        characterName: '杜调查员',
+        speakerId: 'actor-1',
+        interlocutorId: 'caretaker',
+        interlocutorName: '守墓人',
+        listenerIds: ['caretaker'],
+        participantIds: ['actor-1', 'caretaker'],
+        allowedResponderIds: ['caretaker'],
+        utterance: '请记住蓝色钟摆。',
+        sceneId: 'scene-1',
+        sourceRevision: 'revision-1',
+        sentAt: '2026-08-24T12:00:00Z',
+        audiencePlayerIds: ['player-1'],
+      },
+    }))
+    act(() => emitWsMessage({
+      type: 'dialogue.npc',
+      payload: {
+        messageId: 'dialogue-npc-1',
+        speakerId: 'caretaker',
+        speakerName: '守墓人',
+        avatarUrl: null,
+        listenerIds: ['actor-1'],
+        participantIds: ['caretaker', 'actor-1'],
+        text: '我记住了。',
+        sceneId: 'scene-1',
+        sourceDialogueId: 'dialogue-player-1',
+        sourceActionId: 'action-dialogue-1',
+        ordinal: 0,
+        sourceRevision: 'revision-1',
+        sentAt: '2026-08-24T12:00:01Z',
+        audiencePlayerIds: ['player-1'],
+      },
+    }))
+
+    expect(screen.getByText('@守墓人 请记住蓝色钟摆。')).toBeInTheDocument()
+    expect(screen.getByText('我记住了。')).toBeInTheDocument()
+    vi.useFakeTimers()
+    fireEvent.pointerDown(screen.getByRole('button', { name: '长按 @守墓人' }))
+    act(() => vi.advanceTimersByTime(450))
+    expect(actionField).toHaveValue('@守墓人 ')
+  })
+
+  it('supports keyboard selection in the recipient list', async () => {
+    const view = playerViewFixture()
+    mockGetPlayerView.mockReturnValue({
+      ...view,
+      scene: {
+        ...view.scene,
+        visible_entities: [{
+          id: 'thomas', kind: 'npc', name: '托马斯', aliases: [],
+          description: '戴眼镜的学者。', narrative_details: [], observable_state: [],
+        }],
+      },
+    })
+    renderRoomPage()
+    const actionField = await screen.findByPlaceholderText('输入消息…')
+    fireEvent.change(actionField, { target: { value: '@' } })
+    fireEvent.keyDown(actionField, { key: 'ArrowDown' })
+    fireEvent.keyDown(actionField, { key: 'Enter' })
+
+    expect(actionField).toHaveValue('@托马斯 ')
   })
 
   it('long-pressing the keeper avatar inserts @主持人', async () => {
@@ -1072,7 +1198,7 @@ describe('RoomPage conversation history', () => {
     // 输入框在两个频道复用过，草稿会跟着频道一起漂移：在讨论区打了一半、
     // 检定到达把频道切回行动区，那段本来要说给队友听的话再一按发送就提交给
     // 引擎了（#306 review 指出）。草稿必须按频道各存各的。
-    it('keeps each channel draft to itself when a check pulls the player back', async () => {
+  it('keeps each channel draft to itself when a check pulls the player back', async () => {
       renderRoomPage()
       await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
 
@@ -1108,6 +1234,64 @@ describe('RoomPage conversation history', () => {
       // 讨论区那句原样还在，没被顺手清掉也没被提交。
       switchToDiscussion()
       expect(discussionField()).toHaveValue('我们先商量一下路线')
+    })
+
+    it('keeps the action draft when a pending adjudication blocks new keeper submissions', async () => {
+      renderRoomPage()
+      await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+      const actionField = () => screen.getByPlaceholderText('输入消息…')
+      fireEvent.change(actionField(), { target: { value: '@主持人 这是等待中的草稿' } })
+
+      await act(async () => {
+        emitWsMessage({
+          type: 'room.action.state',
+          payload: {
+            status: 'awaiting_player',
+            playerId: 'player-1',
+            actorId: 'actor-1',
+            clientActionId: 'pending-action',
+            startedAt: '2026-08-24T10:01:00Z',
+            revision: '8',
+          },
+        })
+        emitWsMessage({
+          type: 'adjudication.pending',
+          payload: {
+            correlationId: 'pending-action',
+            planId: 'plan-pending',
+            sourceRevision: '8',
+            status: 'awaiting_skill_choice',
+            pendingDecision: {
+              decision_id: 'decision-pending',
+              action_request_id: 'pending-action',
+              source_revision: '8',
+              decision_version: 1,
+              actor_id: 'actor-1',
+              summary: '调查书房',
+              options: [
+                {
+                  candidate_id: 'library',
+                  skill_id: 'library-use',
+                  display_name: '图书馆使用',
+                  target_value: 50,
+                  difficulty: 'regular',
+                  method_summary: '检查书架',
+                  player_safe_reason: '现场可见的调查方式',
+                },
+              ],
+              allow_cancel: true,
+            },
+          },
+        })
+      })
+
+      fireEvent.submit(actionField().closest('form')!)
+
+      expect(actionField()).toHaveValue('@主持人 这是等待中的草稿')
+      expect(mockSubmitPlannedAction).not.toHaveBeenCalled()
+      expect(mockSendActionChat).not.toHaveBeenCalled()
+      expect(mockSendChat).not.toHaveBeenCalled()
     })
 
     it('switches back to the action channel when a check arrives during discussion', async () => {

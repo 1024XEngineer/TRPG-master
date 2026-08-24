@@ -19,6 +19,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    PrimaryKeyConstraint,
     String,
     UniqueConstraint,
     Uuid,
@@ -38,7 +39,7 @@ class Event(Base):
             name="uq_events_room_type_correlation",
         ),
         CheckConstraint(
-            "visibility IN ('public', 'player_scoped')",
+            "visibility IN ('public', 'player_scoped', 'scene_scoped')",
             name="ck_events_visibility",
         ),
         CheckConstraint(
@@ -77,6 +78,23 @@ class Event(Base):
     payload: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
+
+
+class EventAudience(Base):
+    """冻结场景事件发生时有权接收和回放该事件的玩家。"""
+
+    __tablename__ = "event_audiences"
+    __table_args__ = (
+        PrimaryKeyConstraint("event_id", "player_id", name="pk_event_audiences"),
+        Index("ix_event_audiences_player_event", "player_id", "event_id"),
+    )
+
+    event_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("events.id", ondelete="CASCADE"), nullable=False
+    )
+    player_id: Mapped[str] = mapped_column(
+        Uuid(as_uuid=False), ForeignKey("players.id", ondelete="CASCADE"), nullable=False
     )
 
 

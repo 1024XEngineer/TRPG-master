@@ -17,9 +17,11 @@ silently.
 status `running`, because that is what the pre-registry code reported. No
 worker has ever existed to resume them, so `running` meant "parked forever,
 with no signal": the Agenda sat in `GameState`, nothing advanced it, and the
-execution still reported success.
+execution still reported success. `presentation` and `await_player_input`
+were the same hang wearing a more specific name — `awaiting_presentation` and
+`awaiting_player_input` have never had a consumer either.
 
-#398 §阶段一 keeps the "no new execution" scope — none of these four gain an
+#398 §阶段一 keeps the "no new execution" scope — none of these six gain an
 executor here — and changes only how their absence is reported. They now map
 to `failed` with a `failure_code`, so the Agenda fails loudly and auditably
 instead of hanging silently. Publish-time validation still does not gain an
@@ -78,6 +80,13 @@ AgendaStatus = Literal[
 # `rule.agenda_failed` audit event and in `AdjudicationExecution`.
 STEP_KIND_HAS_NO_EXECUTOR = "step_kind_has_no_executor"
 UNREGISTERED_STEP_KIND = "unregistered_step_kind"
+# A walk stopped on a kind that has no suspension semantics at all (`effect`,
+# `finish`). `agenda_status_for` has always answered `failed` here — reaching
+# it means the walk disagrees with the registry — but the paired code was None,
+# and a `failed` Agenda with no code reports `resolved` again through
+# `_settled_status`. That is the silent success #398 removes, so the two must
+# never disagree.
+STEP_KIND_CANNOT_SUSPEND = "step_kind_cannot_suspend"
 
 
 @dataclass(frozen=True)
@@ -88,7 +97,9 @@ class RuleStepRegistration:
     # None for kinds that never suspend (`effect`, `finish`); for `check` the
     # value here is the active-check default and `agenda_status_for` refines it.
     agenda_status: AgendaStatus | None = None
-    # Set only where `agenda_status == "failed"`: the reason to publish.
+    # Set only where `agenda_status == "failed"`: the reason to publish. Kinds
+    # that never suspend leave it None and get `STEP_KIND_CANNOT_SUSPEND` from
+    # `agenda_failure_code_for` instead.
     failure_code: str | None = None
 
 
@@ -103,18 +114,30 @@ STEP_KINDS: dict[str, RuleStepRegistration] = {
         walk_behavior="suspends",
         agenda_status="awaiting_active_check",
     ),
+    # The six below suspend onto the Agenda and have no worker that resumes
+    # them. Until #398 the last four reported `running`, which is
+    # indistinguishable from "a worker is about to pick this up" — so the
+    # Agenda hung with no signal. They fail instead: same absence of an
+    # executor, now visible.
+    #
+    # `presentation` and `await_player_input` belong here for the same reason
+    # and not a weaker one. #288 §6 closed `PresentationStep` as *not wired*,
+    # and no one claims a rule-owned player-input boundary either: grep
+    # `awaiting_presentation` and `awaiting_player_input` across
+    # `trpg-backend/app` and `collaboration_framework/host` and there are zero
+    # consumers. A status nobody advances is a hang, and #398 §目标 5 requires
+    # a suspension point the Engine cannot move past to fail visibly. Neither
+    # kind appears in any published module, so nothing authored today changes.
     "presentation": RuleStepRegistration(
         walk_behavior="suspends",
-        agenda_status="awaiting_presentation",
+        agenda_status="failed",
+        failure_code=STEP_KIND_HAS_NO_EXECUTOR,
     ),
     "await_player_input": RuleStepRegistration(
         walk_behavior="suspends",
-        agenda_status="awaiting_player_input",
+        agenda_status="failed",
+        failure_code=STEP_KIND_HAS_NO_EXECUTOR,
     ),
-    # The four below suspend onto the Agenda and have no worker that resumes
-    # them. Until #398 they reported `running`, which is indistinguishable from
-    # "a worker is about to pick this up" — so the Agenda hung with no signal.
-    # They fail instead: same absence of an executor, now visible.
     "invoke_ruleset_action": RuleStepRegistration(
         walk_behavior="suspends",
         agenda_status="failed",
@@ -191,11 +214,19 @@ def agenda_status_for(kind: str, step: RuleStepSpec | None) -> AgendaStatus:
 
 
 def agenda_failure_code_for(kind: str) -> str | None:
-    """Why suspending on this kind is a failure, or None if it is not one."""
+    """Why suspending on this kind is a failure, or None if it is not one.
+
+    The branches mirror `agenda_status_for` one for one, and they have to: a
+    `failed` status with no code collapses back to `resolved` in
+    `_settled_status`. `test_registry_rule_steps` locks the two together across
+    every registered kind.
+    """
 
     registration = STEP_KINDS.get(kind)
     if registration is None:
         return UNREGISTERED_STEP_KIND
+    if registration.agenda_status is None:
+        return STEP_KIND_CANNOT_SUSPEND
     return registration.failure_code
 
 
@@ -216,6 +247,7 @@ def is_registered_actor_binding(value: str) -> bool:
 __all__ = [
     "ACTOR_BINDINGS",
     "STEP_KINDS",
+    "STEP_KIND_CANNOT_SUSPEND",
     "STEP_KIND_HAS_NO_EXECUTOR",
     "UNREGISTERED_STEP_KIND",
     "AgendaStatus",

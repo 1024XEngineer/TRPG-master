@@ -22,6 +22,9 @@ import type { ServerToClientEvent } from 'trpg-sdk'
 
 import { createRoomWithModule, legalCharacterPayload, registerPlayer } from './helpers.ts'
 
+// #413 之后行动提交必须带结构化接收者；与其余 e2e 用例保持一致。
+const EXPLICIT_KEEPER = { kind: 'keeper', entityId: null, explicit: true } as const
+
 const DB_FILE = resolve(
   dirname(fileURLToPath(import.meta.url)),
   '../../trpg-backend/e2e.db'
@@ -181,6 +184,7 @@ test(
       void room.host.sdk.roomSocket.submitPlannedAction(room.hostPlayerId, {
         clientActionId: actionId,
         utterance: '屏住呼吸钻进石板下的地穴入口',
+        recipient: EXPLICIT_KEEPER,
       })
       const pendingEvent = (await pendingPromise) as PendingAdjudicationEvent
 

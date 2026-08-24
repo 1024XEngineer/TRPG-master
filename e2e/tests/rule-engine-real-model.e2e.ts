@@ -33,6 +33,8 @@ const LEGAL_ATTRIBUTES = {
   STR: 50, CON: 50, POW: 50, DEX: 50,
   APP: 50, SIZ: 50, INT: 50, EDU: 50, LUCK: 50,
 }
+// #413 之后行动提交必须带结构化接收者；与其余 e2e 用例保持一致。
+const EXPLICIT_KEEPER = { kind: 'keeper', entityId: null, explicit: true } as const
 const REAL_MODEL = process.env.E2E_REAL_MODEL === '1'
 const EVENT_TIMEOUT_MS = 240_000
 const TEST_TIMEOUT_MS = 900_000
@@ -190,7 +192,11 @@ test(
           (event) => event.type === 'narration.push',
         )
         room.host.sdk.roomSocket
-          .submitPlannedAction(room.hostPlayerId, { clientActionId: actionId, utterance })
+          .submitPlannedAction(room.hostPlayerId, {
+            clientActionId: actionId,
+            utterance,
+            recipient: EXPLICIT_KEEPER,
+          })
           .catch(() => {})
         await settled
 
@@ -330,6 +336,7 @@ test(
         .submitPlannedAction(room.hostPlayerId, {
           clientActionId: actionId,
           utterance: '用力量掀开墓地里那块盖住地穴入口的石板',
+          recipient: EXPLICIT_KEEPER,
         })
         .catch(() => {})
       const pendingEvent = await waitForRuleOwnedCheck(room, actionId)

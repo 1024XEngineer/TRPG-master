@@ -9,8 +9,8 @@ from pathlib import Path
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 PREVIOUS_REVISION = "1a02058345ee"
 ENGINE_IDENTITY_PREVIOUS_REVISION = "9c4e7a2b1d6f"
-# 记忆链 head 是 a7b8c9d0e1f2；主持队列接在它后面。
-HEAD_REVISION = "c0d1e2f3a4b5"
+# PR2 NPC 对话迁移直接接在 PR1 输入路由 head 后面。
+HEAD_REVISION = "d1e2f3a4b5c6"
 
 
 def _run_alembic(database: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -94,6 +94,7 @@ def test_migration_upgrades_empty_sqlite_and_round_trips(tmp_path: Path) -> None
         "turn_run_cutover",
         "scene_transition_proposals",
         "host_action_queue",
+        "event_audiences",
     }.issubset(tables)
     assert "decision_schema_version" in _column_names(
         database,
@@ -118,7 +119,13 @@ def test_migration_upgrades_empty_sqlite_and_round_trips(tmp_path: Path) -> None
         "recipient_kind",
         "recipient_entity_id",
         "recipient_explicit",
+        "attempt_count",
+        "next_attempt_at",
+        "lease_owner",
+        "lease_expires_at",
+        "result_event_ids",
     }.issubset(_column_names(database, "host_action_queue"))
+    assert "entity_id" in _column_names(database, "module_assets")
     assert {"channel", "actor_id"}.issubset(_column_names(database, "chat_messages"))
     assert "room_sessions" not in tables
     assert {"status", "name_en", "story_label", "subtitle", "story_pages"}.issubset(
@@ -307,6 +314,65 @@ def test_message_channel_and_recipient_migration_backfills_old_rows(tmp_path: Pa
 
     assert chat == ("discussion", None)
     assert recipient == ("keeper", None, 1)
+
+
+def test_npc_dialogue_migration_backfills_started_queue(tmp_path: Path) -> None:
+    """PR2 把旧 started 收敛为不可重复执行的 completed，并初始化恢复字段。"""
+
+    database = tmp_path / "npc-dialogue-backfill.db"
+    _upgrade_or_fail(database, "c0d1e2f3a4b5")
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            """
+            INSERT INTO host_action_queue (
+                room_id, item_id, client_action_id, player_id, actor_id,
+                utterance, recipient_kind, recipient_entity_id,
+                recipient_explicit, position, status, created_at, updated_at
+            ) VALUES (
+                'room-1', 'old-started', 'old-started-action', 'player-1', 'actor-1',
+                '已经由旧服务接管', 'keeper', NULL, 1, 1, 'started',
+                '2026-08-23 00:00:00', '2026-08-23 00:00:00'
+            )
+            """
+        )
+
+    _upgrade_or_fail(database, "head")
+    with sqlite3.connect(database) as connection:
+        row = connection.execute(
+            """
+            SELECT status, attempt_count, result_event_ids
+            FROM host_action_queue WHERE item_id = 'old-started'
+            """
+        ).fetchone()
+
+    assert row == ("completed", 0, "[]")
+
+
+def test_npc_dialogue_downgrade_keeps_scene_events_private(tmp_path: Path) -> None:
+    """旧版本不支持冻结受众时，降级只能收窄到发起玩家，不能扩大为公开事件。"""
+
+    database = tmp_path / "npc-dialogue-downgrade.db"
+    _upgrade_or_fail(database, "head")
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            """
+            INSERT INTO events (
+                id, room_id, player_id, event_type, payload, visibility, created_at
+            ) VALUES (
+                '90000000-0000-0000-0000-000000000001',
+                'room-1', 'player-1', 'dialogue.player', '{}', 'scene_scoped',
+                '2026-08-24 00:00:00'
+            )
+            """
+        )
+
+    result = _run_alembic(database, "downgrade", "c0d1e2f3a4b5")
+    assert result.returncode == 0, result.stdout + result.stderr
+    with sqlite3.connect(database) as connection:
+        visibility = connection.execute(
+            "SELECT visibility FROM events WHERE event_type = 'dialogue.player'",
+        ).fetchone()
+    assert visibility == ("player_scoped",)
 
 
 def test_migration_rejects_duplicate_characters_before_ddl(tmp_path: Path) -> None:

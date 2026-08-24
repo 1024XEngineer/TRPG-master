@@ -301,6 +301,78 @@ def receive_replayed_opening(ws) -> dict:
     return opening
 
 
+def test_npc_recipient_uses_dialogue_path_without_engine_action(sync_client: TestClient) -> None:
+    """NPC 收到动作措辞也只回复对话，不进入 Keeper 的行动与检定链路。"""
+
+    token = register_and_login(sync_client, "npc-dialogue-host")
+    room = create_room(sync_client, token)
+    advance_to_building(sync_client, room)
+    complete_character(sync_client, room["roomId"], room["reconnectToken"])
+    start_game(sync_client, room, token)
+
+    with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as websocket:
+        websocket.send_json(
+            {
+                "type": "room.join",
+                "playerId": room["playerId"],
+                "payload": {"reconnectToken": room["reconnectToken"]},
+            }
+        )
+        websocket.receive_json()  # session.bound
+        view_event = websocket.receive_json()
+        assert view_event["type"] == "view.updated"
+        visible_npcs = [
+            entity
+            for entity in view_event["payload"]["playerView"]["scene"]["visible_entities"]
+            if entity["kind"] == "npc"
+        ]
+        assert visible_npcs, "内置模组开场必须至少有一名可见 NPC"
+        target = visible_npcs[0]
+        receive_replayed_opening(websocket)
+
+        websocket.send_json(
+            {
+                "type": "action.plan.submit",
+                "playerId": room["playerId"],
+                "payload": {
+                    "clientActionId": "npc-dialogue-action-1",
+                    "utterance": "我去地下室并使用侦查检查门，请你记住这句话。",
+                    "recipient": {
+                        "kind": "npc",
+                        "entityId": target["id"],
+                        "explicit": True,
+                    },
+                },
+            }
+        )
+        npc_reply, preceding = receive_until(
+            websocket,
+            lambda message: message.get("type") == "dialogue.npc",
+        )
+
+    player_dialogue = next(
+        message for message in preceding if message.get("type") == "dialogue.player"
+    )
+    assert player_dialogue["payload"]["interlocutorId"] == target["id"]
+    assert npc_reply["payload"]["speakerId"] == target["id"]
+    assert not any(
+        message.get("type") in {"action.broadcast", "check.request", "check.result"}
+        or message.get("message_type") == "turn.completed"
+        for message in preceding
+    )
+
+    conversation = sync_client.get(
+        f"{ROOMS_BASE}/{room['roomId']}/conversation",
+        headers={"X-Reconnect-Token": room["reconnectToken"]},
+    )
+    assert conversation.status_code == 200
+    event_types = [item["type"] for item in conversation.json()["data"]]
+    assert "dialogue.player" in event_types
+    assert "dialogue.npc" in event_types
+    assert "action.broadcast" not in event_types
+    assert "check.result" not in event_types
+
+
 def receive_narration_stream(ws, *, limit: int = 60) -> tuple[dict, list[dict]]:
     """Receive up to the authoritative `narration.push`, returning it with its chunks."""
 

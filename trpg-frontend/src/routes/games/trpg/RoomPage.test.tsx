@@ -105,6 +105,7 @@ const {
   mockSendActionChat,
   mockSubmitAction,
   mockSubmitPlannedAction,
+  mockSubmitNpcDialogue,
   mockSelectAdjudication,
   mockDecidePostRoll,
   mockCancelActionPlan,
@@ -146,6 +147,7 @@ const {
     }),
     mockSubmitAction: vi.fn(),
     mockSubmitPlannedAction: vi.fn(),
+    mockSubmitNpcDialogue: vi.fn(),
     mockSelectAdjudication: vi.fn(),
     mockDecidePostRoll: vi.fn(),
     mockCancelActionPlan: vi.fn(),
@@ -181,6 +183,7 @@ vi.mock('@/services/api-client', () => ({
       sendActionChat: mockSendActionChat,
       submitAction: mockSubmitAction,
       submitPlannedAction: mockSubmitPlannedAction,
+      submitNpcDialogue: mockSubmitNpcDialogue,
       selectAdjudication: mockSelectAdjudication,
       decidePostRoll: mockDecidePostRoll,
       cancelActionPlan: mockCancelActionPlan,
@@ -465,6 +468,7 @@ describe('RoomPage conversation history', () => {
     })
     mockSubmitAction.mockReturnValue(new Promise(() => undefined))
     mockSubmitPlannedAction.mockReturnValue(new Promise(() => undefined))
+    mockSubmitNpcDialogue.mockReturnValue(true)
   })
 
   afterEach(() => {
@@ -840,13 +844,14 @@ describe('RoomPage conversation history', () => {
     expect(mockSubmitPlannedAction).not.toHaveBeenCalled()
   })
 
-  it('action channel @ button inserts a host mention', async () => {
+  it('action channel @ menu inserts a host mention', async () => {
     renderRoomPage()
     await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
 
     const actionField = screen.getByPlaceholderText('输入消息…')
     fireEvent.change(actionField, { target: { value: '我搜查书桌' } })
-    fireEvent.click(screen.getByRole('button', { name: '插入 @主持人' }))
+    fireEvent.click(screen.getByRole('button', { name: '选择消息接收者' }))
+    fireEvent.click(screen.getByRole('option', { name: /主持人/ }))
     expect(actionField).toHaveValue('@主持人 我搜查书桌')
     fireEvent.submit(actionField.closest('form')!)
     await waitFor(() => expect(mockSubmitPlannedAction).toHaveBeenCalled())
@@ -855,18 +860,120 @@ describe('RoomPage conversation history', () => {
     )
   })
 
-  it('action channel @ button moves a mid-text mention to the routing position', async () => {
+  it('action channel @ menu moves a mid-text mention to the routing position', async () => {
     renderRoomPage()
     await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
 
     const actionField = screen.getByPlaceholderText('输入消息…')
     fireEvent.change(actionField, { target: { value: '我稍后再问@主持人' } })
-    fireEvent.click(screen.getByRole('button', { name: '插入 @主持人' }))
+    fireEvent.click(screen.getByRole('button', { name: '选择消息接收者' }))
+    fireEvent.click(screen.getByRole('option', { name: /主持人/ }))
     expect(actionField).toHaveValue('@主持人 我稍后再问@主持人')
 
     fireEvent.change(actionField, { target: { value: '@守秘人 我查看窗外' } })
-    fireEvent.click(screen.getByRole('button', { name: '插入 @主持人' }))
-    expect(actionField).toHaveValue('@守秘人 我查看窗外')
+    fireEvent.click(screen.getByRole('button', { name: '选择消息接收者' }))
+    fireEvent.click(screen.getByRole('option', { name: /主持人/ }))
+    expect(actionField).toHaveValue('@主持人 我查看窗外')
+  })
+
+  it('selects a visible NPC by stable id and renders independent dialogue bubbles', async () => {
+    const view = playerViewFixture()
+    mockGetPlayerView.mockReturnValue({
+      ...view,
+      scene: {
+        ...view.scene,
+        visible_entities: [{
+          id: 'caretaker',
+          kind: 'npc',
+          name: '守墓人',
+          aliases: ['老人'],
+          description: '沉默寡言的守墓人。',
+          narrative_details: [],
+          observable_state: [],
+        }],
+      },
+    })
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    fireEvent.click(screen.getByRole('button', { name: '选择消息接收者' }))
+    fireEvent.click(screen.getByRole('option', { name: /守墓人/ }))
+    const actionField = screen.getByPlaceholderText('输入消息…')
+    fireEvent.change(actionField, { target: { value: '@守墓人 请记住蓝色钟摆。' } })
+    fireEvent.submit(actionField.closest('form')!)
+
+    expect(mockSubmitNpcDialogue).toHaveBeenCalledWith('player-1', expect.objectContaining({
+      utterance: '请记住蓝色钟摆。',
+      recipient: { kind: 'npc', entityId: 'caretaker', explicit: true },
+    }))
+    act(() => emitWsMessage({
+      type: 'dialogue.player',
+      payload: {
+        messageId: 'dialogue-player-1',
+        playerId: 'player-1',
+        clientActionId: 'action-dialogue-1',
+        nickname: '陈探员',
+        characterName: '杜调查员',
+        speakerId: 'actor-1',
+        interlocutorId: 'caretaker',
+        interlocutorName: '守墓人',
+        listenerIds: ['caretaker'],
+        participantIds: ['actor-1', 'caretaker'],
+        allowedResponderIds: ['caretaker'],
+        utterance: '请记住蓝色钟摆。',
+        sceneId: 'scene-1',
+        sourceRevision: 'revision-1',
+        sentAt: '2026-08-24T12:00:00Z',
+        audiencePlayerIds: ['player-1'],
+      },
+    }))
+    act(() => emitWsMessage({
+      type: 'dialogue.npc',
+      payload: {
+        messageId: 'dialogue-npc-1',
+        speakerId: 'caretaker',
+        speakerName: '守墓人',
+        avatarUrl: null,
+        listenerIds: ['actor-1'],
+        participantIds: ['caretaker', 'actor-1'],
+        text: '我记住了。',
+        sceneId: 'scene-1',
+        sourceDialogueId: 'dialogue-player-1',
+        sourceActionId: 'action-dialogue-1',
+        ordinal: 0,
+        sourceRevision: 'revision-1',
+        sentAt: '2026-08-24T12:00:01Z',
+        audiencePlayerIds: ['player-1'],
+      },
+    }))
+
+    expect(screen.getByText('@守墓人 请记住蓝色钟摆。')).toBeInTheDocument()
+    expect(screen.getByText('我记住了。')).toBeInTheDocument()
+    vi.useFakeTimers()
+    fireEvent.pointerDown(screen.getByRole('button', { name: '长按 @守墓人' }))
+    act(() => vi.advanceTimersByTime(450))
+    expect(actionField).toHaveValue('@守墓人 ')
+  })
+
+  it('supports keyboard selection in the recipient list', async () => {
+    const view = playerViewFixture()
+    mockGetPlayerView.mockReturnValue({
+      ...view,
+      scene: {
+        ...view.scene,
+        visible_entities: [{
+          id: 'thomas', kind: 'npc', name: '托马斯', aliases: [],
+          description: '戴眼镜的学者。', narrative_details: [], observable_state: [],
+        }],
+      },
+    })
+    renderRoomPage()
+    const actionField = await screen.findByPlaceholderText('输入消息…')
+    fireEvent.change(actionField, { target: { value: '@' } })
+    fireEvent.keyDown(actionField, { key: 'ArrowDown' })
+    fireEvent.keyDown(actionField, { key: 'Enter' })
+
+    expect(actionField).toHaveValue('@托马斯 ')
   })
 
   it('long-pressing the keeper avatar inserts @主持人', async () => {

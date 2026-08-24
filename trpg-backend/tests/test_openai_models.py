@@ -42,6 +42,7 @@ from pydantic import ValidationError
 from app.adapters.deepseek_models import DeepSeekChatCompletionsJsonClient
 from app.adapters.openai_models import (
     _ACTION_PLAN_NARRATION_INSTRUCTIONS,
+    _OPENING_NARRATION_INSTRUCTIONS,
     OpenAIResponsesJsonClient,
     PromptActionPlanStepAdjudicator,
     PromptHostTurnDecisionModel,
@@ -67,6 +68,16 @@ def test_action_plan_narration_uses_final_post_roll_outcome() -> None:
     assert "消耗幸运" in _ACTION_PLAN_NARRATION_INSTRUCTIONS
     assert "outcome=success" in _ACTION_PLAN_NARRATION_INSTRUCTIONS
     assert "最终权威结果" in _ACTION_PLAN_NARRATION_INSTRUCTIONS
+
+
+def test_action_plan_narration_requires_named_actor_in_multiplayer() -> None:
+    assert "addressing_mode=named_actor" in _ACTION_PLAN_NARRATION_INSTRUCTIONS
+    assert "acting_character_name" in _ACTION_PLAN_NARRATION_INSTRUCTIONS
+    assert "对白中的第二人称合法" in _ACTION_PLAN_NARRATION_INSTRUCTIONS
+
+
+def test_opening_narration_mentions_named_actor_mode() -> None:
+    assert "addressing_mode 为 named_actor" in _OPENING_NARRATION_INSTRUCTIONS
 
 
 def test_action_plan_narration_preserves_completed_travel_before_clarification() -> None:

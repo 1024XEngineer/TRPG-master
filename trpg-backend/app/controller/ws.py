@@ -555,9 +555,7 @@ async def _emit_keeper_followup_dialogue(
     if narration.kind != "narration" or not narration.npc_replies:
         return
     visible_ids = {npc.id for npc in visible_dialogue_npcs(player_view)}
-    valid_replies = tuple(
-        item for item in narration.npc_replies if item.speaker_id in visible_ids
-    )
+    valid_replies = tuple(item for item in narration.npc_replies if item.speaker_id in visible_ids)
     if not valid_replies:
         return
     audience_player_ids, audience_actor_ids = await _npc_dialogue_audience(

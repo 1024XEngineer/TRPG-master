@@ -1624,8 +1624,7 @@ def test_keeper_turn_emits_followup_npc_dialogue_and_recovers_it(
     persisted = [
         event
         for event in conversation.json()["data"]
-        if event["type"] == "dialogue.npc"
-        and event["payload"].get("sourceActionId") == action_id
+        if event["type"] == "dialogue.npc" and event["payload"].get("sourceActionId") == action_id
     ]
     assert len(persisted) == 1
     assert persisted[0]["payload"]["speakerId"] == "thomas"

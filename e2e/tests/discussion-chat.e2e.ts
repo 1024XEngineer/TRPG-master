@@ -211,6 +211,7 @@ test('多人 roleplay 不调用主持，也不写入权威事件、记忆或摘�
     )
 
     const db = new DatabaseSync(DB_FILE, { readOnly: true })
+    db.exec('PRAGMA busy_timeout = 5000')
     try {
       const marker = `%${roleplayText}%`
       const traces = [
@@ -329,6 +330,7 @@ test('NPC 对话使用结构化接收者、独立气泡事件并可从历史恢�
     )
 
     const db = new DatabaseSync(DB_FILE, { readOnly: true })
+    db.exec('PRAGMA busy_timeout = 5000')
     try {
       const actionPlan = db.prepare(
         'SELECT COUNT(*) AS count FROM action_plan_runs WHERE room_id = ? AND parent_action_id = ?',

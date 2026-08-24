@@ -19,9 +19,9 @@ test('世界标签、追书人 v3 发布元数据和玩家安全开局简介正�
   assert.ok(paperChase)
   assert.equal(paperChase.title, '追书人')
   assert.equal(paperChase.nameEn, 'Paper Chase')
-  assert.equal(paperChase.version, '3.0.6')
+  assert.equal(paperChase.version, '3.0.7')
   assert.equal(paperChase.playersMin, 1)
-  assert.equal(paperChase.playersMax, 1)
+  assert.equal(paperChase.playersMax, 4)
   assert.equal(paperChase.estimatedDuration, '1-2 小时')
   assert.ok(!paperChase.synopsis?.includes('MS1'))
 
@@ -34,24 +34,34 @@ test('世界标签、追书人 v3 发布元数据和玩家安全开局简介正�
 
 test('房间人数必须符合追书人发布范围', async () => {
   const player = await registerPlayer('module-range')
-  const room = await player.sdk.rooms.create(
-    { roomName: '人数校验', nickname: player.account, maxPlayers: 4 },
-    player.token,
-  )
   const module = (await player.sdk.rooms.listModules()).find(
     (item) => item.id === 'paper-chase-zh-coc7'
   )
   assert.ok(module)
 
+  const four = await player.sdk.rooms.create(
+    { roomName: '四人校验', nickname: player.account, maxPlayers: 4 },
+    player.token,
+  )
+  await player.sdk.rooms.selectModule(
+    four.roomId,
+    { moduleId: module.id, attributeGenMethod: 'point_buy' },
+    four.reconnectToken,
+  )
+
+  const five = await player.sdk.rooms.create(
+    { roomName: '五人校验', nickname: player.account, maxPlayers: 5 },
+    player.token,
+  )
   await assert.rejects(
     () =>
       player.sdk.rooms.selectModule(
-        room.roomId,
+        five.roomId,
         { moduleId: module.id, attributeGenMethod: 'point_buy' },
-        room.reconnectToken,
+        five.reconnectToken,
       ),
     (error: Error) => {
-      assert.match(error.message, /MODULE_PLAYER_COUNT_MISMATCH|要求 1-1/)
+      assert.match(error.message, /MODULE_PLAYER_COUNT_MISMATCH|要求 1-4/)
       return true
     },
   )

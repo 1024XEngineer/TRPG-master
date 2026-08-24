@@ -423,6 +423,24 @@ async def test_begin_game_creates_stable_actor_snapshots(
     )
 
 
+async def test_paper_chase_four_players_share_start_location(
+    db_session: AsyncSession,
+) -> None:
+    room, players, _ = await _start_room(
+        db_session,
+        room_number=4160,
+        player_count=4,
+        prepare_checkpoint=False,
+    )
+    session = await db_session.get(GameSession, room.id)
+    assert session is not None
+    state = GameState.model_validate(session.state_json)
+    assert len(players) == 4
+    assert list(state.actors) == ["actor_1", "actor_2", "actor_3", "actor_4"]
+    assert {actor.player_id for actor in state.actors.values()} == {player.id for player in players}
+    assert state.scene_id == "thomas_office"
+
+
 async def test_load_runtime_backfills_ruleset_skills_for_legacy_actor(
     db_session: AsyncSession,
     engine_store_factory: Callable[..., SqlAlchemyEngineStore],

@@ -497,7 +497,16 @@ async def get_status(
         )
     if record.status in {"rejected", "expired", "stale"}:
         execution = execution.model_copy(
-            update={"status": "cancelled", "outcome": "cancelled"},
+            update={
+                "status": "cancelled",
+                "outcome": "cancelled",
+                # `model_copy` 不跑 `model_validator(mode="after")`，而
+                # `AdjudicationExecution` 要求只有 rule_failed 能带
+                # `rule_failure_code`。不清掉的话这里写出去的记录当场没人
+                # 拦，等到 `model_validate(record.execution_json)` 读回来
+                # 才炸（#398 §阶段一）。
+                "rule_failure_code": None,
+            },
             deep=True,
         )
         return AdjudicationStatusView(
@@ -525,7 +534,16 @@ async def recover_action(
     execution = _execution(record)
     if record.status in {"rejected", "expired", "stale"}:
         execution = execution.model_copy(
-            update={"status": "cancelled", "outcome": "cancelled"},
+            update={
+                "status": "cancelled",
+                "outcome": "cancelled",
+                # `model_copy` 不跑 `model_validator(mode="after")`，而
+                # `AdjudicationExecution` 要求只有 rule_failed 能带
+                # `rule_failure_code`。不清掉的话这里写出去的记录当场没人
+                # 拦，等到 `model_validate(record.execution_json)` 读回来
+                # 才炸（#398 §阶段一）。
+                "rule_failure_code": None,
+            },
             deep=True,
         )
     adjudication = _adjudication(record)

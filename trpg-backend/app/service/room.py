@@ -1101,8 +1101,15 @@ async def list_conversation_events(
 
     chat_rows = (
         await db.execute(
-            select(ChatMessage, Player.nickname)
+            select(ChatMessage, Player.nickname, Character.name, Character.status)
             .join(Player, ChatMessage.player_id == Player.id)
+            .outerjoin(
+                Character,
+                and_(
+                    Character.room_id == ChatMessage.room_id,
+                    Character.player_id == ChatMessage.player_id,
+                ),
+            )
             .where(ChatMessage.room_id == room_id)
             .order_by(ChatMessage.created_at, ChatMessage.id)
         )
@@ -1111,18 +1118,30 @@ async def list_conversation_events(
         RoomConversationEventRead(
             id=message.id,
             type="chat.message",
-            channel="discussion",
+            channel="action" if message.channel == "roleplay" else "discussion",
             payload={
                 "messageId": message.id,
                 "playerId": message.player_id,
                 "nickname": nickname,
+                "channel": message.channel,
+                "actorId": message.actor_id,
+                "actorName": (
+                    character_name.strip()
+                    if message.channel == "roleplay"
+                    and character_status == "complete"
+                    and isinstance(character_name, str)
+                    and character_name.strip()
+                    else nickname
+                    if message.channel == "roleplay"
+                    else None
+                ),
                 "text": message.text,
                 "sentAt": message.created_at,
                 "clientMessageId": message.client_message_id,
             },
             created_at=message.created_at,
         )
-        for message, nickname in chat_rows
+        for message, nickname, character_name, character_status in chat_rows
     ]
 
     event_rows = (

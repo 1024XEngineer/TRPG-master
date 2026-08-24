@@ -16,6 +16,7 @@ const LEGAL_ATTRIBUTES = {
   STR: 50, CON: 50, POW: 50, DEX: 50,
   APP: 50, SIZ: 50, INT: 50, EDU: 50, LUCK: 50,
 }
+const EXPLICIT_KEEPER = { kind: 'keeper', entityId: null, explicit: true } as const
 
 /**
  * 真实 provider 一次结构化输出要几十秒，一个两步计划要跑 planner + 两次步骤裁决
@@ -304,7 +305,7 @@ for (const canon of CANON_CASES) {
       )
       const turnPromise = room.host.sdk.roomSocket.submitPlannedAction(
         room.hostPlayerId,
-        { clientActionId: actionId, utterance: canon.utterance },
+        { clientActionId: actionId, utterance: canon.utterance, recipient: EXPLICIT_KEEPER },
       )
       const pendingEvent = await pendingPromise
       assert.equal(pendingEvent.type, 'adjudication.pending')
@@ -437,6 +438,7 @@ test('Issue #246 恢复：断线重连后用原 parent 恢复 pending，重复�
     const lostTurn = room.host.sdk.roomSocket.submitPlannedAction(room.hostPlayerId, {
       clientActionId: actionId,
       utterance: '去图书馆查旧报纸',
+      recipient: EXPLICIT_KEEPER,
     })
     const pending = await firstPending
     assert.equal(pending.type, 'adjudication.pending')
@@ -466,6 +468,7 @@ test('Issue #246 恢复：断线重连后用原 parent 恢复 pending，重复�
     const recoveredTurn = room.host.sdk.roomSocket.submitPlannedAction(room.hostPlayerId, {
       clientActionId: actionId,
       utterance: '去图书馆查旧报纸',
+      recipient: EXPLICIT_KEEPER,
     })
     const resumed = await resumedPending
     assert.equal(resumed.type, 'adjudication.pending')
@@ -552,6 +555,7 @@ test('Issue #246 恢复：取消保留已提交 travel 且停止剩余步骤', {
     const turnPromise = room.host.sdk.roomSocket.submitPlannedAction(room.hostPlayerId, {
       clientActionId: actionId,
       utterance: '去书房用侦查搜索线索',
+      recipient: EXPLICIT_KEEPER,
     })
     await pending
     const completedEvent = waitForEvent(

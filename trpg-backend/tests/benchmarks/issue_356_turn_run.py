@@ -379,6 +379,7 @@ def _submit(ws, room: dict[str, Any], action_id: str, label: str) -> None:  # no
             "payload": {
                 "clientActionId": action_id,
                 "utterance": inputs.get(label, f"benchmark-{label}"),
+                "recipient": {"kind": "keeper", "entityId": None, "explicit": True},
             },
         }
     )

@@ -19,6 +19,7 @@ const LEGAL_ATTRIBUTES = {
   STR: 50, CON: 50, POW: 50, DEX: 50,
   APP: 50, SIZ: 50, INT: 50, EDU: 50, LUCK: 50,
 }
+const EXPLICIT_KEEPER = { kind: 'keeper', entityId: null, explicit: true } as const
 
 function waitForEvent(
   socketOwner: { roomSocket: { onMessage: (h: (e: ServerToClientEvent) => void) => () => void } },
@@ -164,6 +165,7 @@ test('🔴 所有人都能看到发起者的原话 + 守秘人回复（修"聊�
     const completed = room.host.sdk.roomSocket.submitPlannedAction(room.hostPlayerId, {
       clientActionId: 'discussion-echo-host',
       utterance: '我与托马斯交谈',
+      recipient: EXPLICIT_KEEPER,
     })
     const echo = await guestSeesUtterance
     if (echo.type === 'action.broadcast') {
@@ -212,6 +214,7 @@ test('行动锁：处理中他人提交进入队列，完成后自动出队', as
     const hostCompleted = room.host.sdk.roomSocket.submitPlannedAction(room.hostPlayerId, {
       clientActionId: 'action-lock-host',
       utterance: '我与托马斯交谈',
+      recipient: EXPLICIT_KEEPER,
     })
     await hostEcho
 
@@ -229,6 +232,7 @@ test('行动锁：处理中他人提交进入队列，完成后自动出队', as
     const queuedAction = guest.sdk.roomSocket.submitPlannedAction(joined.playerId, {
       clientActionId: 'action-lock-guest-queued',
       utterance: '我翻抽屉',
+      recipient: EXPLICIT_KEEPER,
     })
     await Promise.all([guestQueued, guestEcho])
 

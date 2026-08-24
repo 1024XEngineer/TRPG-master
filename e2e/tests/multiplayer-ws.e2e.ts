@@ -16,6 +16,7 @@ const LEGAL_ATTRIBUTES = {
   STR: 50, CON: 50, POW: 50, DEX: 50,
   APP: 50, SIZ: 50, INT: 50, EDU: 50, LUCK: 50,
 }
+const EXPLICIT_KEEPER = { kind: 'keeper', entityId: null, explicit: true } as const
 
 /** 等一个满足条件的服务端事件，超时就失败——不要用固定 sleep。 */
 function waitForEvent(
@@ -302,6 +303,7 @@ test('三人推进时间需全员确认，最后一票只提交一次并恢复�
       {
         clientActionId: actionId,
         utterance: '全队等待到下一个时间点',
+        recipient: EXPLICIT_KEEPER,
       },
     )
     const [hostPending, guestPending, thirdPending] = await Promise.all([
@@ -422,6 +424,7 @@ test('提交行动会广播给房间里的所有人（不只是发起者）', as
     const completed = room.host.sdk.roomSocket.submitPlannedAction(room.hostPlayerId, {
       clientActionId: actionId,
       utterance: '我询问托马斯藏书的情况',
+      recipient: EXPLICIT_KEEPER,
     })
     const [guestNarration, turn] = await Promise.all([guestHears, completed])
     assert.equal(guestNarration.type, 'narration.push')
@@ -523,6 +526,7 @@ test('三客户端串行动作、私有检定与重连快照保持隔离', async
     const travelled = room.host.sdk.roomSocket.submitPlannedAction(room.hostPlayerId, {
       clientActionId: travelActionId,
       utterance: '我前往阿诺兹堡图书馆',
+      recipient: EXPLICIT_KEEPER,
     })
     await guestSeesProcessing
     const queuedActionId = `three-client-queued-${Date.now()}`
@@ -536,6 +540,7 @@ test('三客户端串行动作、私有检定与重连快照保持隔离', async
     const queuedSubmit = guest.sdk.roomSocket.submitPlannedAction(joined.playerId, {
       clientActionId: queuedActionId,
       utterance: '我同时翻查书架',
+      recipient: EXPLICIT_KEEPER,
     })
     await guestSeesQueued
     guest.sdk.roomSocket.cancelActionPlan(joined.playerId, {
@@ -619,6 +624,7 @@ test('三客户端串行动作、私有检定与重连快照保持隔离', async
     const retried = await guest.sdk.roomSocket.submitPlannedAction(joined.playerId, {
       clientActionId: `three-client-retry-${Date.now()}`,
       utterance: '我在图书馆整理刚才的路线',
+      recipient: EXPLICIT_KEEPER,
     })
     assert.equal(retried.player_id, joined.playerId)
 
@@ -645,6 +651,7 @@ test('三客户端串行动作、私有检定与重连快照保持隔离', async
     const checked = room.host.sdk.roomSocket.submitPlannedAction(room.hostPlayerId, {
       clientActionId: checkActionId,
       utterance: '我查阅当地旧报档案',
+      recipient: EXPLICIT_KEEPER,
     })
     const pending = await checkRequested
     assert.equal(pending.type, 'adjudication.pending')
@@ -729,11 +736,13 @@ test('追书人纵切：首场景 → 托马斯 → 图书馆 → 旧报检定 �
     await room.host.sdk.roomSocket.submitPlannedAction(room.hostPlayerId, {
       clientActionId: `ask-thomas-${Date.now()}`,
       utterance: '我询问托马斯失踪藏书和叔叔的情况',
+      recipient: EXPLICIT_KEEPER,
     })
 
     const travelled = await room.host.sdk.roomSocket.submitPlannedAction(room.hostPlayerId, {
       clientActionId: `travel-library-${Date.now()}`,
       utterance: '我前往阿诺兹堡图书馆',
+      recipient: EXPLICIT_KEEPER,
     })
     assert.equal(travelled.player_view.scene.id, 'library')
     assert.equal(room.host.sdk.roomSocket.getPlayerView()?.scene.id, 'library')
@@ -749,6 +758,7 @@ test('追书人纵切：首场景 → 托马斯 → 图书馆 → 旧报检定 �
     const completed = room.host.sdk.roomSocket.submitPlannedAction(room.hostPlayerId, {
       clientActionId: checkActionId,
       utterance: '我查阅当地旧报档案，研究报纸旧刊',
+      recipient: EXPLICIT_KEEPER,
     })
     const request = await checkRequested
     assert.equal(request.type, 'adjudication.pending')
@@ -820,6 +830,7 @@ test('v3 规则检定完成后仍可继续提交行动', async () => {
     await room.host.sdk.roomSocket.submitPlannedAction(room.hostPlayerId, {
       clientActionId: `travel-library-continuation-${Date.now()}`,
       utterance: '我前往阿诺兹堡图书馆',
+      recipient: EXPLICIT_KEEPER,
     })
 
     const researchActionId = `research-library-continuation-${Date.now()}`
@@ -833,6 +844,7 @@ test('v3 规则检定完成后仍可继续提交行动', async () => {
     const checkedAction = room.host.sdk.roomSocket.submitPlannedAction(room.hostPlayerId, {
       clientActionId: researchActionId,
       utterance: '我查阅当地旧报档案',
+      recipient: EXPLICIT_KEEPER,
     })
     const request = await checkRequested
     assert.equal(request.type, 'adjudication.pending')
@@ -855,6 +867,7 @@ test('v3 规则检定完成后仍可继续提交行动', async () => {
     const nextTurn = await room.host.sdk.roomSocket.submitPlannedAction(room.hostPlayerId, {
       clientActionId: `after-v3-check-${Date.now()}`,
       utterance: '我在图书馆整理刚才查到的资料',
+      recipient: EXPLICIT_KEEPER,
     })
     assert.equal(nextTurn.player_id, room.hostPlayerId)
     assert.doesNotMatch(nextTurn.narration.text, /CHECK_PENDING|契约校验/)

@@ -695,6 +695,7 @@ def test_action_submit_broadcasts_narration_to_room_only(sync_client: TestClient
                 "payload": {
                     "clientActionId": "action-broadcast-122",
                     "utterance": "我看看托马斯",
+                    "recipient": {"kind": "keeper", "entityId": None, "explicit": True},
                 },
             }
         )
@@ -722,6 +723,7 @@ def test_action_submit_broadcasts_narration_to_room_only(sync_client: TestClient
                 "payload": {
                     "clientActionId": "action-broadcast-122",
                     "utterance": "我看看托马斯",
+                    "recipient": {"kind": "keeper", "entityId": None, "explicit": True},
                 },
             }
         )
@@ -906,6 +908,7 @@ def test_disconnected_socket_does_not_lose_the_turn_narration(
                 "payload": {
                     "clientActionId": action_id,
                     "utterance": "先观察房间，然后询问眼前的人",
+                    "recipient": {"kind": "keeper", "entityId": None, "explicit": True},
                 },
             }
         )
@@ -977,6 +980,7 @@ def test_a_send_failure_that_is_not_a_disconnect_still_fails_the_turn(
                 "payload": {
                     "clientActionId": "send-failure-not-disconnect",
                     "utterance": "先观察房间，然后询问眼前的人",
+                    "recipient": {"kind": "keeper", "entityId": None, "explicit": True},
                 },
             }
         )
@@ -1016,6 +1020,7 @@ def test_action_plan_submit_emits_safe_progress_and_one_parent_completion(
                 "payload": {
                     "clientActionId": "parent-plan-ws-225",
                     "utterance": "先观察房间，然后询问眼前的人",
+                    "recipient": {"kind": "keeper", "entityId": None, "explicit": True},
                 },
             }
         )
@@ -1115,6 +1120,7 @@ def test_single_action_pending_resumes_through_one_step_plan_run(
                 "payload": {
                     "clientActionId": action_id,
                     "utterance": "仔细检查书架上的文件",
+                    "recipient": {"kind": "keeper", "entityId": None, "explicit": True},
                 },
             }
         )
@@ -1214,6 +1220,7 @@ def test_single_action_pending_resumes_through_one_step_plan_run(
                 "payload": {
                     "clientActionId": action_id,
                     "utterance": "仔细检查书架上的文件",
+                    "recipient": {"kind": "keeper", "entityId": None, "explicit": True},
                 },
             }
         )
@@ -1317,6 +1324,7 @@ def test_action_plan_narrator_failure_retries_narration_without_replaying_steps(
         "payload": {
             "clientActionId": "plan-narrator-retry-246",
             "utterance": "先观察房间，然后询问眼前的人",
+            "recipient": {"kind": "keeper", "entityId": None, "explicit": True},
         },
     }
 
@@ -1394,6 +1402,7 @@ def test_subject_ownership_failure_retries_before_publishing_narration(
                 "payload": {
                     "clientActionId": action_id,
                     "utterance": "带托马斯去墓地",
+                    "recipient": {"kind": "keeper", "entityId": None, "explicit": True},
                 },
             }
         )

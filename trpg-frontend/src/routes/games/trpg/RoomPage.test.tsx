@@ -829,6 +829,25 @@ describe('RoomPage conversation history', () => {
     expect(mockSendActionChat).not.toHaveBeenCalled()
   })
 
+  it('accepts a leading keeper mention even when the正文紧跟在 mention 后面', async () => {
+    mockSubmitPlannedAction.mockReturnValue(new Promise(() => undefined))
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    const actionField = screen.getByPlaceholderText('输入消息…')
+    fireEvent.change(actionField, { target: { value: '@主持人我去图书馆' } })
+    fireEvent.submit(actionField.closest('form')!)
+
+    await waitFor(() => expect(mockSubmitPlannedAction).toHaveBeenCalledWith(
+      'player-1',
+      expect.objectContaining({
+        utterance: '我去图书馆',
+        recipient: { kind: 'keeper', entityId: null, explicit: true },
+      }),
+    ))
+    expect(mockSendActionChat).not.toHaveBeenCalled()
+  })
+
   it('disables action submission until room mode is known but keeps discussion available', async () => {
     roomInfoState.maxPlayers = null
     renderRoomPage()
@@ -1179,7 +1198,7 @@ describe('RoomPage conversation history', () => {
     // 输入框在两个频道复用过，草稿会跟着频道一起漂移：在讨论区打了一半、
     // 检定到达把频道切回行动区，那段本来要说给队友听的话再一按发送就提交给
     // 引擎了（#306 review 指出）。草稿必须按频道各存各的。
-    it('keeps each channel draft to itself when a check pulls the player back', async () => {
+  it('keeps each channel draft to itself when a check pulls the player back', async () => {
       renderRoomPage()
       await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
 
@@ -1215,6 +1234,64 @@ describe('RoomPage conversation history', () => {
       // 讨论区那句原样还在，没被顺手清掉也没被提交。
       switchToDiscussion()
       expect(discussionField()).toHaveValue('我们先商量一下路线')
+    })
+
+    it('keeps the action draft when a pending adjudication blocks new keeper submissions', async () => {
+      renderRoomPage()
+      await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+      const actionField = () => screen.getByPlaceholderText('输入消息…')
+      fireEvent.change(actionField(), { target: { value: '@主持人 这是等待中的草稿' } })
+
+      await act(async () => {
+        emitWsMessage({
+          type: 'room.action.state',
+          payload: {
+            status: 'awaiting_player',
+            playerId: 'player-1',
+            actorId: 'actor-1',
+            clientActionId: 'pending-action',
+            startedAt: '2026-08-24T10:01:00Z',
+            revision: '8',
+          },
+        })
+        emitWsMessage({
+          type: 'adjudication.pending',
+          payload: {
+            correlationId: 'pending-action',
+            planId: 'plan-pending',
+            sourceRevision: '8',
+            status: 'awaiting_skill_choice',
+            pendingDecision: {
+              decision_id: 'decision-pending',
+              action_request_id: 'pending-action',
+              source_revision: '8',
+              decision_version: 1,
+              actor_id: 'actor-1',
+              summary: '调查书房',
+              options: [
+                {
+                  candidate_id: 'library',
+                  skill_id: 'library-use',
+                  display_name: '图书馆使用',
+                  target_value: 50,
+                  difficulty: 'regular',
+                  method_summary: '检查书架',
+                  player_safe_reason: '现场可见的调查方式',
+                },
+              ],
+              allow_cancel: true,
+            },
+          },
+        })
+      })
+
+      fireEvent.submit(actionField().closest('form')!)
+
+      expect(actionField()).toHaveValue('@主持人 这是等待中的草稿')
+      expect(mockSubmitPlannedAction).not.toHaveBeenCalled()
+      expect(mockSendActionChat).not.toHaveBeenCalled()
+      expect(mockSendChat).not.toHaveBeenCalled()
     })
 
     it('switches back to the action channel when a check arrives during discussion', async () => {

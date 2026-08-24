@@ -2171,6 +2171,7 @@ export default function RoomPage() {
     e?.preventDefault()
     const text = input.trim()
     if (!text || !playerId || suspended) return
+    if (channel === 'action' && actionSubmissionBlocked) return
     const hostRequest = channel === 'action' ? hostUtteranceFromActionInput(text) : null
     // 只有 mention 没有正文时保留草稿，避免在多人房间误发成 roleplay。
     if (hostRequest && !hostRequest.utterance) return
@@ -2217,7 +2218,6 @@ export default function RoomPage() {
     }
     const singlePlayer = roomInfo?.maxPlayers === 1
     if (hostRequest || singlePlayer) {
-      if (actionSubmissionBlocked) return
       submitPlayerAction({
         clientActionId: randomActionId(),
         utterance: hostRequest?.utterance ?? text,

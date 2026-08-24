@@ -19,6 +19,7 @@ from collaboration_framework.host.application import (
     OpeningNarrationValidationError,
     OpeningNarrator,
     deterministic_opening_narration,
+    narration_subject_rejection_reason,
 )
 from collaboration_framework.host.schemas import (
     OpeningNarrationContext,
@@ -209,3 +210,46 @@ class OpeningNarratorTests(unittest.IsolatedAsyncioTestCase):
         for expected in ("旧宅门厅", "昏黄灯光", "杜明", "记者", "林夏", "医生"):
             with self.subTest(expected=expected):
                 self.assertIn(expected, text)
+
+    def test_named_actor_opening_fallback_omits_second_person_scene_description(
+        self,
+    ) -> None:
+        context = OpeningNarrationContext(
+            background="1920 年代的阿卡姆。",
+            scene=OpeningSceneContext(
+                id="kimball-house-outside",
+                name="金博尔宅外",
+                description="夜色笼罩着金博尔宅与通往公墓的道路，你可以在阴影中观察周围动静。",
+            ),
+            participants=(
+                OpeningParticipant(actor_id="actor-1", name="陈探员", occupation="警探"),
+                OpeningParticipant(actor_id="actor-2", name="杜明", occupation="记者"),
+            ),
+            addressing_mode="named_actor",
+        )
+        text = deterministic_opening_narration(context).text
+
+        self.assertIn("金博尔宅外", text)
+        self.assertIn("陈探员", text)
+        self.assertIn("杜明", text)
+        self.assertNotIn("你可以在阴影中观察周围动静", text)
+        self.assertIsNone(
+            narration_subject_rejection_reason(text, addressing_mode="named_actor")
+        )
+
+    def test_second_person_opening_fallback_keeps_scene_description(self) -> None:
+        context = OpeningNarrationContext(
+            background="1920 年代的阿卡姆。",
+            scene=OpeningSceneContext(
+                id="kimball-house-outside",
+                name="金博尔宅外",
+                description="夜色笼罩着金博尔宅与通往公墓的道路，你可以在阴影中观察周围动静。",
+            ),
+            participants=(
+                OpeningParticipant(actor_id="actor-1", name="陈探员", occupation="警探"),
+            ),
+            addressing_mode="second_person",
+        )
+        text = deterministic_opening_narration(context).text
+
+        self.assertIn("你可以在阴影中观察周围动静", text)

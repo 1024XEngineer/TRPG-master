@@ -82,6 +82,9 @@ jobs:
           DEEPSEEK_MODEL: ${{ vars.PREVIEW_DEEPSEEK_MODEL }}
           TURN_PLANNER_MODEL: ${{ vars.PREVIEW_TURN_PLANNER_MODEL }}
           TURN_PLANNER_ROLLOUT_PERCENT: ${{ vars.PREVIEW_TURN_PLANNER_ROLLOUT_PERCENT }}
+          QWEN_API_KEY: ${{ secrets.PREVIEW_QWEN_API_KEY }}
+          QWEN_BASE_URL: ${{ vars.PREVIEW_QWEN_BASE_URL }}
+          QWEN_MODEL: ${{ vars.PREVIEW_QWEN_MODEL }}
           # 当前凭证同时支持 DeepSeek v4 Pro 和 Sufy Gemini 生图；仍按用途
           # 使用两个 Secret 名称，后续可以独立轮换。不要把图片 key 放进前端。
           SUFY_API_KEY: ${{ secrets.PREVIEW_SUFY_API_KEY }}
@@ -140,6 +143,23 @@ jobs:
             PORTRAIT_PROMPT_PROVIDER=deterministic
             PORTRAIT_IMAGE_PROVIDER=mock
           fi
+          QWEN_BASE_URL="${QWEN_BASE_URL:-https://openai.sufy.com/v1}"
+          QWEN_MODEL="${QWEN_MODEL:-qwen/qwen3.7-plus}"
+          if [ -n "$QWEN_API_KEY" ]; then
+            if [ -z "$QWEN_BASE_URL" ] || [ -z "$QWEN_MODEL" ]; then
+              echo "::error::已配置 PREVIEW_QWEN_API_KEY，但缺少 PREVIEW_QWEN_BASE_URL 或 PREVIEW_QWEN_MODEL"
+              exit 1
+            fi
+            if [[ ! "$QWEN_BASE_URL" =~ ^https?://[^/[:space:]]+(/.*)?$ ]]; then
+              echo "::error::PREVIEW_QWEN_BASE_URL 必须是包含主机名的 HTTP(S) 根地址"
+              exit 1
+            fi
+            if [[ "$QWEN_BASE_URL" == */chat/completions* ]]; then
+              echo "::error::PREVIEW_QWEN_BASE_URL 应填写 API 根地址，不能包含 /chat/completions"
+              exit 1
+            fi
+            HOST_MODEL_PROVIDER=qwen
+          fi
           if [ -n "$DOUBAO_TTS_API_KEY" ] && [ -n "$DOUBAO_TTS_VOICES" ] && [ -n "$DOUBAO_TTS_DEFAULT_VOICE_TYPE" ]; then
             HOST_SPEECH_PROVIDER=doubao
           else
@@ -151,6 +171,12 @@ jobs:
           TURN_PLANNER_MODEL_B64=$(printf '%s' "$TURN_PLANNER_MODEL" | base64 | tr -d '\n')
           if [ -n "$DEEPSEEK_API_KEY_B64" ]; then
             echo "::add-mask::$DEEPSEEK_API_KEY_B64"
+          fi
+          QWEN_API_KEY_B64=$(printf '%s' "$QWEN_API_KEY" | base64 | tr -d '\n')
+          QWEN_BASE_URL_B64=$(printf '%s' "$QWEN_BASE_URL" | base64 | tr -d '\n')
+          QWEN_MODEL_B64=$(printf '%s' "$QWEN_MODEL" | base64 | tr -d '\n')
+          if [ -n "$QWEN_API_KEY_B64" ]; then
+            echo "::add-mask::$QWEN_API_KEY_B64"
           fi
           SUFY_API_KEY_B64=$(printf '%s' "$SUFY_API_KEY" | base64 | tr -d '\n')
           SUFY_BASE_URL_B64=$(printf '%s' "$SUFY_BASE_URL" | base64 | tr -d '\n')
@@ -186,6 +212,9 @@ jobs:
             export TURN_PLANNER_MAX_ATTEMPTS=2
             export TURN_PLANNER_RETRY_BACKOFF_SECONDS=0.25
             export TURN_PLANNER_ROLLOUT_PERCENT="$TURN_PLANNER_ROLLOUT_PERCENT"
+            export QWEN_API_KEY="\$(printf '%s' '$QWEN_API_KEY_B64' | base64 -d)"
+            export QWEN_BASE_URL="\$(printf '%s' '$QWEN_BASE_URL_B64' | base64 -d)"
+            export QWEN_MODEL="\$(printf '%s' '$QWEN_MODEL_B64' | base64 -d)"
             export CHARACTER_PORTRAIT_ENABLED=true
             export PORTRAIT_PROMPT_PROVIDER="$PORTRAIT_PROMPT_PROVIDER"
             export PORTRAIT_IMAGE_PROVIDER="$PORTRAIT_IMAGE_PROVIDER"
@@ -208,6 +237,10 @@ jobs:
             CONFIGURED_PLANNER_PROVIDER=\$(docker compose config | awk '/TURN_PLANNER_PROVIDER:/{print \$2; exit}')
             if [ "\$CONFIGURED_PLANNER_PROVIDER" != "$TURN_PLANNER_PROVIDER" ]; then
               echo "固定 compose 模板未透传 TURN_PLANNER_PROVIDER（期望 $TURN_PLANNER_PROVIDER，实际 \${CONFIGURED_PLANNER_PROVIDER:-未配置})" >&2
+              exit 1
+            fi
+            if [ "$HOST_MODEL_PROVIDER" = "qwen" ] && ! docker compose config | grep -q 'QWEN_API_KEY:'; then
+              echo "固定 compose 模板未透传 QWEN_API_KEY，无法把主持模型切到千问" >&2
               exit 1
             fi
             docker compose -p main-preview pull

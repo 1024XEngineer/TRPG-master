@@ -10,7 +10,7 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 PREVIOUS_REVISION = "1a02058345ee"
 ENGINE_IDENTITY_PREVIOUS_REVISION = "9c4e7a2b1d6f"
 # 记忆链 head 是 a7b8c9d0e1f2；主持队列接在它后面。
-HEAD_REVISION = "b9c0d1e2f3a4"
+HEAD_REVISION = "c0d1e2f3a4b5"
 
 
 def _run_alembic(database: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -114,6 +114,12 @@ def test_migration_upgrades_empty_sqlite_and_round_trips(tmp_path: Path) -> None
     )
     assert ("room_id",) in _unique_column_sets(database, "room_action_reservations")
     assert ("room_id", "client_action_id") in _unique_column_sets(database, "host_action_queue")
+    assert {
+        "recipient_kind",
+        "recipient_entity_id",
+        "recipient_explicit",
+    }.issubset(_column_names(database, "host_action_queue"))
+    assert {"channel", "actor_id"}.issubset(_column_names(database, "chat_messages"))
     assert "room_sessions" not in tables
     assert {"status", "name_en", "story_label", "subtitle", "story_pages"}.issubset(
         _column_names(database, "scenarios")
@@ -256,6 +262,51 @@ def test_recent_history_migration_backfills_visibility_conservatively(
         "ix_events_room_created",
         "ix_events_room_visibility_player_created",
     }.issubset(indexes)
+
+
+def test_message_channel_and_recipient_migration_backfills_old_rows(tmp_path: Path) -> None:
+    """PR1 迁移必须让既有讨论消息和主持队列继续保持原来的语义。"""
+
+    database = tmp_path / "message-recipient-backfill.db"
+    _upgrade_or_fail(database, "b9c0d1e2f3a4")
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            """
+            INSERT INTO chat_messages (
+                id, room_id, player_id, client_message_id, text, created_at
+            ) VALUES (
+                '80000000-0000-0000-0000-000000000001',
+                'room-1', 'player-1', 'old-chat', '旧讨论消息', '2026-08-23 00:00:00'
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO host_action_queue (
+                room_id, item_id, client_action_id, player_id, actor_id,
+                utterance, position, status, created_at, updated_at
+            ) VALUES (
+                'room-1', 'old-item', 'old-action', 'player-1', 'actor-1',
+                '旧主持行动', 1, 'queued',
+                '2026-08-23 00:00:00', '2026-08-23 00:00:00'
+            )
+            """
+        )
+
+    _upgrade_or_fail(database, "head")
+    with sqlite3.connect(database) as connection:
+        chat = connection.execute(
+            "SELECT channel, actor_id FROM chat_messages WHERE client_message_id = 'old-chat'"
+        ).fetchone()
+        recipient = connection.execute(
+            """
+            SELECT recipient_kind, recipient_entity_id, recipient_explicit
+            FROM host_action_queue WHERE client_action_id = 'old-action'
+            """
+        ).fetchone()
+
+    assert chat == ("discussion", None)
+    assert recipient == ("keeper", None, 1)
 
 
 def test_migration_rejects_duplicate_characters_before_ddl(tmp_path: Path) -> None:

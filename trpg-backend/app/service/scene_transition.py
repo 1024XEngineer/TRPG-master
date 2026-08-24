@@ -19,7 +19,7 @@ from collaboration_framework.contracts import (
 from collaboration_framework.contracts.validation import AdjudicationValidationError
 from collaboration_framework.engine import AdjudicationEngineService
 from collaboration_framework.engine.models import GameState
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -299,6 +299,75 @@ async def mark_narration_persisted(
         await db.commit()
 
 
+async def abort_pending(
+    db: AsyncSession,
+    *,
+    engine: AdjudicationEngineService,
+    room_id: str,
+    player_id: str,
+    parent_action_id: str,
+    action_request_id: str | None = None,
+) -> SceneTransitionResolvedPayload | None:
+    """发起者中止剩余计划时作废待确认提案，不能经 respond(False) 撤回已投票。"""
+
+    async with _response_lock(room_id):
+        matchers = [
+            SceneTransitionProposalRecord.parent_action_id == parent_action_id,
+            SceneTransitionProposalRecord.action_request_id == parent_action_id,
+        ]
+        if action_request_id:
+            matchers.extend(
+                (
+                    SceneTransitionProposalRecord.parent_action_id == action_request_id,
+                    SceneTransitionProposalRecord.action_request_id == action_request_id,
+                )
+            )
+        record = await db.scalar(
+            select(SceneTransitionProposalRecord)
+            .where(
+                SceneTransitionProposalRecord.room_id == room_id,
+                SceneTransitionProposalRecord.player_id == player_id,
+                SceneTransitionProposalRecord.status == "pending",
+                or_(*matchers),
+            )
+            .order_by(SceneTransitionProposalRecord.created_at.desc())
+            .limit(1)
+            .with_for_update()
+        )
+        if record is None:
+            return None
+        engine_status = await engine.get_status(
+            GetAdjudicationStatusRequest(
+                room_id=record.room_id,
+                player_id=record.player_id,
+                action_request_id=record.action_request_id,
+            )
+        )
+        if engine_status.status == "resolved" and engine_status.execution is not None:
+            record.status = "approved"
+            record.accepted_player_ids = sorted(record.required_player_ids)
+            record.committed_revision = int(engine_status.execution.view_revision)
+            record.proposal_version += 1
+            record.updated_at = datetime.now(UTC)
+            await db.commit()
+            return _resolved_payload(record)
+        if _aware(record.expires_at) <= datetime.now(UTC):
+            record.status = "expired"
+            record.proposal_version += 1
+            await db.commit()
+            return _resolved_payload(record)
+        if await _is_stale(db, record):
+            record.status = "stale"
+            record.proposal_version += 1
+            await db.commit()
+            return _resolved_payload(record)
+        record.status = "rejected"
+        record.proposal_version += 1
+        record.updated_at = datetime.now(UTC)
+        await db.commit()
+        return _resolved_payload(record)
+
+
 async def respond(
     db: AsyncSession,
     *,
@@ -483,6 +552,7 @@ async def find_active_action_for_player(
 
 __all__ = [
     "SceneTransitionError",
+    "abort_pending",
     "bind_parent_action",
     "create_from_adjudication",
     "find_active_action_for_player",

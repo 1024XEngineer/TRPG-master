@@ -39,7 +39,7 @@ import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from functools import partial
-from typing import Literal
+from typing import Literal, cast
 
 import anyio
 import structlog
@@ -102,6 +102,7 @@ from app.core.turn_observability import (
 from app.dto.ws import (
     ActionBroadcastPayload,
     ActionPlanCancelPayload,
+    ActionRecipientPayload,
     ActionSubmitPayload,
     AdjudicationChoicePayload,
     AdjudicationPendingPayload,
@@ -389,6 +390,7 @@ async def _enqueue_host_action(
     client_action_id: str,
     utterance: str,
     player_view: PlayerView,
+    recipient: ActionRecipientPayload,
 ) -> None:
     try:
         item, created = await host_action_queue_service.enqueue(
@@ -398,6 +400,7 @@ async def _enqueue_host_action(
             actor_id=actor_id,
             client_action_id=client_action_id,
             utterance=utterance,
+            recipient=recipient,
         )
     except HostActionQueueError as exc:
         await _send_error(
@@ -432,6 +435,16 @@ async def _drain_host_action_queue(room_id: str) -> None:
                 item = await host_action_queue_service.peek_next(db, room_id)
                 if item is None:
                     return
+                # PR1 尚未实现 NPC 对话；即使数据库被手工写入也不能误走 Keeper 主链。
+                if item.recipient_kind != "keeper":
+                    logger.error(
+                        "unsupported_host_queue_recipient",
+                        room_id=room_id,
+                        client_action_id=item.client_action_id,
+                        recipient_kind=item.recipient_kind,
+                    )
+                    await host_action_queue_service.discard(db, item)
+                    continue
                 try:
                     view = await session_view_application.current_player_view(
                         room_id=room_id,
@@ -1630,11 +1643,22 @@ async def _handle_chat_send(
         player_id,
         text,
         payload.client_message_id,
+        channel="discussion",
+    )
+    # 幂等键跨两个聊天入口共享；若旧请求已经落成 roleplay，广播必须忠实返回
+    # 数据库中的原消息，不能按本次 chat.send 入口伪造频道或角色身份。
+    actor_name = (
+        await room_service.get_player_character_name(db, player_id, fallback=player.nickname)
+        if message.channel == "roleplay"
+        else None
     )
     chat_payload = ChatMessagePayload(
         message_id=message.id,
         player_id=message.player_id,
         nickname=player.nickname,
+        channel=cast(Literal["discussion", "roleplay"], message.channel),
+        actor_id=message.actor_id,
+        actor_name=actor_name,
         text=message.text,
         sent_at=message.created_at,
         client_message_id=message.client_message_id,
@@ -1653,7 +1677,7 @@ async def _handle_action_chat_send(
     player_id: str,
     payload: ChatSendPayload,
 ) -> None:
-    """行动区普通消息：落成 action.broadcast，不调模型、不占行动槽。"""
+    """多人行动区普通消息：保存为角色扮演聊天，不进入事件或 Host 上下文。"""
 
     text = payload.text.strip()
     if not text:
@@ -1665,30 +1689,60 @@ async def _handle_action_chat_send(
     if room.phase == "Completed":
         await _send_error(websocket, "FORBIDDEN", "游戏已结束，无法发送消息")
         return
-    actor_id: str | None = None
-    scene_id: str | None = None
-    view_revision: str | None = None
-    view: PlayerView | None = None
+    if room.max_players == 1:
+        await _send_error(
+            websocket,
+            "BAD_REQUEST",
+            "单人游戏行动区输入应提交给守秘人",
+            correlation_id=payload.client_message_id,
+        )
+        return
     try:
         view = await session_view_application.current_player_view(
             room_id=room_id,
             player_id=player_id,
         )
-        actor_id = view.self_actor.id
-        scene_id = view.scene_id
-        view_revision = view.revision
     except Exception:
-        view = None
-    await _broadcast_action_line(
+        await _send_error(
+            websocket,
+            "BAD_REQUEST",
+            "当前无法确认角色身份，请稍后重试",
+            correlation_id=payload.client_message_id,
+        )
+        return
+    message = await chat_service.save_chat_message(
         db,
-        room_id=room_id,
-        player_id=player_id,
-        client_action_id=payload.client_message_id,
-        utterance=text,
-        actor_id=actor_id,
-        scene_id=scene_id,
-        view_revision=view_revision,
-        player_view=view,
+        room_id,
+        player_id,
+        text,
+        payload.client_message_id,
+        channel="roleplay",
+        actor_id=view.self_actor.id,
+    )
+    # 重试若撞到同一玩家先前的 discussion 消息，以已落库频道为准，避免
+    # 返回 roleplay + 空 actor 或 discussion + 非空 actor 的非法组合。
+    actor_name = (
+        await room_service.get_player_character_name(db, player_id, fallback=player.nickname)
+        if message.channel == "roleplay"
+        else None
+    )
+    chat_payload = ChatMessagePayload(
+        message_id=message.id,
+        player_id=message.player_id,
+        nickname=player.nickname,
+        channel=cast(Literal["discussion", "roleplay"], message.channel),
+        actor_id=message.actor_id,
+        actor_name=actor_name,
+        text=message.text,
+        sent_at=message.created_at,
+        client_message_id=message.client_message_id,
+    )
+    await manager.broadcast(
+        room_id,
+        ServerEnvelope(
+            type="chat.message",
+            payload=chat_payload.model_dump(by_alias=True, mode="json"),
+        ).model_dump(by_alias=True),
     )
 
 
@@ -2166,6 +2220,25 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 )
                     elif event_type == "action.plan.submit":
                         submit_payload = ActionSubmitPayload.model_validate(raw_payload)
+                        # 接收者决定后续执行边界，必须在恢复旧 Turn、读取 PlayerView、
+                        # 写事件或入队之前完成拒绝，绝不能把 NPC 请求回退到 Keeper。
+                        if submit_payload.recipient.kind == "npc":
+                            await _send_error(
+                                websocket,
+                                "NOT_IMPLEMENTED",
+                                "NPC 对话将在下一阶段开放",
+                                correlation_id=submit_payload.client_action_id,
+                            )
+                            continue
+                        room = await room_service.find_room_by_id(db, room_id)
+                        if room.max_players > 1 and not submit_payload.recipient.explicit:
+                            await _send_error(
+                                websocket,
+                                "BAD_REQUEST",
+                                "多人游戏必须明确 @守秘人 后才能提交主持行动",
+                                correlation_id=submit_payload.client_action_id,
+                            )
+                            continue
                         if submit_payload.visibility == "private":
                             await _send_error(
                                 websocket,
@@ -2214,6 +2287,7 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 client_action_id=submit_payload.client_action_id,
                                 utterance=submit_payload.utterance,
                                 player_view=action_view,
+                                recipient=submit_payload.recipient,
                             )
                             continue
                         if decision == "reject":
@@ -2241,6 +2315,7 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 client_action_id=submit_payload.client_action_id,
                                 utterance=submit_payload.utterance,
                                 player_view=action_view,
+                                recipient=submit_payload.recipient,
                             )
                             continue
                         try:
@@ -2270,6 +2345,7 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                     client_action_id=submit_payload.client_action_id,
                                     utterance=submit_payload.utterance,
                                     player_view=action_view,
+                                    recipient=submit_payload.recipient,
                                 )
                                 continue
                             await _send_turn_event(
@@ -2543,6 +2619,24 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 room_id,
                                 force_processing=True,
                             )
+                            scene_aborted = await scene_transition_service.abort_pending(
+                                db,
+                                engine=adjudication_engine_service,
+                                room_id=room_id,
+                                player_id=bound_player_id,
+                                parent_action_id=cancel.client_action_id,
+                            )
+                            if scene_aborted is not None:
+                                await _broadcast_scene_transition(room_id, scene_aborted)
+                            time_aborted = await time_advance_service.abort_pending(
+                                db,
+                                engine=adjudication_engine_service,
+                                room_id=room_id,
+                                player_id=bound_player_id,
+                                parent_action_id=cancel.client_action_id,
+                            )
+                            if time_aborted is not None:
+                                await _broadcast_time_advance(room_id, time_aborted)
                             result = await action_plan_turn_application.cancel_remaining(
                                 room_id=room_id,
                                 player_id=bound_player_id,
@@ -2586,6 +2680,16 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                         event_type=event_type,
                         validation_error_count=exc.error_count(),
                     )
+                    if event_type == "action.plan.submit":
+                        correlation_id = raw_payload.get("clientActionId")
+                        await _send_error(
+                            websocket,
+                            "VALIDATION_ERROR",
+                            "行动接收者或输入格式无效",
+                            correlation_id=(
+                                correlation_id if isinstance(correlation_id, str) else None
+                            ),
+                        )
                     continue
     except WebSocketDisconnect:
         pass

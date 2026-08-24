@@ -136,7 +136,7 @@ async def test_loader_persists_valid_playable_module_version(db_session: AsyncSe
     assert publication.background
     assert publication.presentation is not None
     assert publication.presentation.players_min == 1
-    assert publication.presentation.players_max == 1
+    assert publication.presentation.players_max == 4
 
     await db_session.commit()
     repeated = await load_paper_chase(db_session)

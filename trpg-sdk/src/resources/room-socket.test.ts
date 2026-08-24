@@ -390,6 +390,7 @@ test('isValidServerEvent：校验可重放的房间行动状态', () => {
             playerId: 'player-2',
             actorId: 'actor-2',
             clientActionId: 'action-2',
+            recipient: { kind: 'keeper', entityId: null, explicit: true },
             position: 1,
             utterance: '我翻书桌',
             acceptedAt: '2026-08-19T10:00:01Z',
@@ -403,6 +404,59 @@ test('isValidServerEvent：校验可重放的房间行动状态', () => {
     isValidServerEvent({
       type: 'room.action.state',
       payload: { status: 'awaiting_player', playerId: 'player-1', revision: '9' },
+    }),
+    false
+  );
+  assert.equal(
+    isValidServerEvent({
+      type: 'room.action.state',
+      payload: {
+        status: 'idle',
+        revision: '9',
+        queued: [
+          {
+            playerId: 'player-2',
+            actorId: 'actor-2',
+            clientActionId: 'action-2',
+            recipient: { kind: 'npc', entityId: 'thomas', explicit: false },
+            position: 1,
+            utterance: '你好',
+            acceptedAt: '2026-08-19T10:00:01Z',
+          },
+        ],
+      },
+    }),
+    false
+  );
+});
+
+test('isValidServerEvent：聊天频道与角色身份必须匹配', () => {
+  const base = {
+    messageId: 'message-1',
+    playerId: 'player-1',
+    nickname: '玩家',
+    text: '晚上好',
+    sentAt: '2026-08-19T10:00:00Z',
+    clientMessageId: 'client-message-1',
+  };
+  assert.equal(
+    isValidServerEvent({
+      type: 'chat.message',
+      payload: { ...base, channel: 'discussion', actorId: null, actorName: null },
+    }),
+    true
+  );
+  assert.equal(
+    isValidServerEvent({
+      type: 'chat.message',
+      payload: { ...base, channel: 'roleplay', actorId: 'actor-1', actorName: '陈探员' },
+    }),
+    true
+  );
+  assert.equal(
+    isValidServerEvent({
+      type: 'chat.message',
+      payload: { ...base, channel: 'roleplay', actorId: null, actorName: null },
     }),
     false
   );
@@ -574,6 +628,7 @@ test('turn.failed reject pending action，view.updated 更新同一份缓存', a
     const pending = socket.submitPlannedAction('player-1', {
       clientActionId: 'failed-action',
       utterance: '调查书架',
+      recipient: { kind: 'keeper', entityId: null, explicit: true },
     });
     transport.emit({
       type: 'turn.failed',
@@ -597,6 +652,7 @@ test('turn.failed reject pending action，view.updated 更新同一份缓存', a
     const rejectedAction = socket.submitPlannedAction('player-1', {
       clientActionId: 'busy-action',
       utterance: '继续调查书架',
+      recipient: { kind: 'keeper', entityId: null, explicit: true },
     });
     transport.emit({
       type: 'error',
@@ -617,6 +673,7 @@ test('turn.failed reject pending action，view.updated 更新同一份缓存', a
     const retriedAction = socket.submitPlannedAction('player-1', {
       clientActionId: 'busy-action',
       utterance: '继续调查书架',
+      recipient: { kind: 'keeper', entityId: null, explicit: true },
     });
     assert.notEqual(retriedAction, rejectedAction);
     transport.emit({
@@ -628,6 +685,7 @@ test('turn.failed reject pending action，view.updated 更新同一份缓存', a
     const interruptedAction = socket.submitPlannedAction('player-1', {
       clientActionId: 'interrupted-action',
       utterance: '查看门外',
+      recipient: { kind: 'keeper', entityId: null, explicit: true },
     });
     transport.emitClose();
     await assert.rejects(
@@ -650,6 +708,7 @@ test('未连接时 submitPlannedAction reject RoomSocketTransportError', async (
     socket.submitPlannedAction('player-1', {
       clientActionId: 'not-connected',
       utterance: '调查书架',
+      recipient: { kind: 'keeper', entityId: null, explicit: true },
     }),
     (error: unknown) =>
       error instanceof RoomSocketTransportError &&

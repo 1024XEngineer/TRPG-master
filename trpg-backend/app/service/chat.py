@@ -1,6 +1,6 @@
-"""玩家讨论区的 service 层（issue #107）。
+"""玩家临时聊天的 service 层（issue #107）。
 
-讨论区跟「对 AI 主持人说话」是两条独立通道（两个界面）：这里的消息只在
+讨论区/角色扮演聊天跟「对 AI 主持人说话」是独立通道：这里的消息只在
 玩家之间流转，**永远不进任何 LLM 上下文**——这条约定要靠代码结构保证：
 AI 相关代码（narrator / 未来的编排层）没有任何 import 指向本模块或
 `ChatMessage` 模型，一旦有人"顺手把聊天也塞进 prompt"，成本和玩法两个
@@ -17,7 +17,14 @@ from app.models.room import Player
 
 
 async def save_chat_message(
-    db: AsyncSession, room_id: str, player_id: str, text: str, client_message_id: str
+    db: AsyncSession,
+    room_id: str,
+    player_id: str,
+    text: str,
+    client_message_id: str,
+    *,
+    channel: str = "discussion",
+    actor_id: str | None = None,
 ) -> ChatMessage:
     """落一条讨论区消息；重发（相同 `(player_id, client_message_id)`）幂等地
     返回已存在的那条，不产生重复记录。
@@ -29,7 +36,12 @@ async def save_chat_message(
     同 `join_room` 的处理方式）。
     """
     message = ChatMessage(
-        room_id=room_id, player_id=player_id, text=text, client_message_id=client_message_id
+        room_id=room_id,
+        player_id=player_id,
+        text=text,
+        client_message_id=client_message_id,
+        channel=channel,
+        actor_id=actor_id,
     )
     try:
         async with db.begin_nested():
@@ -60,7 +72,11 @@ async def list_chat_messages(
     的消息，补上主键作次序钉死全序。`before` 传上一页最后一条的 message_id。
     """
     query = select(ChatMessage, Player.nickname).join(Player, ChatMessage.player_id == Player.id)
-    query = query.where(ChatMessage.room_id == room_id)
+    # `/messages` 是原有讨论区分页接口；角色扮演历史统一由 `/conversation` 恢复。
+    query = query.where(
+        ChatMessage.room_id == room_id,
+        ChatMessage.channel == "discussion",
+    )
 
     if before is not None:
         anchor = await db.get(ChatMessage, before)
@@ -80,6 +96,9 @@ async def list_chat_messages(
             message_id=message.id,
             player_id=message.player_id,
             nickname=nickname,
+            channel=message.channel,
+            actor_id=None,
+            actor_name=None,
             text=message.text,
             sent_at=message.created_at,
             client_message_id=message.client_message_id,

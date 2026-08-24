@@ -410,6 +410,8 @@ class ActionPlanNarrationContext(ContractModel):
     ]
     completed_steps: tuple[CompletedPlanStepSummary, ...] = ()
     player_view: PlayerView
+    addressing_mode: Literal["second_person", "named_actor"] = "second_person"
+    acting_character_name: str = ""
     # 记忆是只读的玩家安全上下文；它不能替代当前 PlayerView 或提交事实。
     memories: tuple[MemoryEntry, ...] = ()
     conversation_summary: ConversationSummary | None = None

@@ -592,3 +592,73 @@ async def test_wrapper_recovers_pending_and_cancelled_status(
         )
     )
     assert cancelled.status == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_initiator_abort_rejects_pending_time_and_blocks_later_accept(
+    db_session: AsyncSession,
+    engine_store_factory,
+) -> None:
+    room, players, _ = await _start_room(
+        db_session,
+        room_number=4121,
+        player_count=3,
+        prepare_checkpoint=False,
+    )
+    session = await db_session.get(GameSession, room.id)
+    assert session is not None
+    engine = AdjudicationEngineService(engine_store_factory())
+    request = _request(
+        room_id=room.id,
+        player_id=players[0].id,
+        actor_id="actor_1",
+        revision=session.state_version,
+        action_id="time-abort-412",
+    )
+    await time_advance.create_from_adjudication(db_session, request)
+    record = await _proposal(db_session, room.id)
+    await time_advance.bind_parent_action(
+        db_session,
+        room_id=room.id,
+        proposal_id=record.proposal_id,
+        player_id=players[0].id,
+        parent_action_id="time-parent-412",
+    )
+    initial_time = GameState.model_validate(session.state_json).world_time.current
+
+    aborted = await time_advance.abort_pending(
+        db_session,
+        engine=engine,
+        room_id=room.id,
+        player_id=players[0].id,
+        parent_action_id="time-parent-412",
+    )
+    replay = await time_advance.abort_pending(
+        db_session,
+        engine=engine,
+        room_id=room.id,
+        player_id=players[0].id,
+        parent_action_id="time-parent-412",
+    )
+
+    assert isinstance(aborted, TimeAdvanceResolvedPayload)
+    assert aborted.status == "rejected"
+    assert replay is None
+    assert await _time_event_count(db_session, room.id) == 0
+
+    later, resume_player, action_id = await time_advance.respond(
+        db_session,
+        engine=engine,
+        room_id=room.id,
+        player_id=players[2].id,
+        proposal_id=record.proposal_id,
+        proposal_version=record.proposal_version,
+        source_revision=str(record.source_revision),
+        accept=True,
+    )
+    assert isinstance(later, TimeAdvanceResolvedPayload)
+    assert later.status == "rejected"
+    assert resume_player is action_id is None
+    await db_session.refresh(session)
+    assert GameState.model_validate(session.state_json).world_time.current == initial_time
+    assert await _time_event_count(db_session, room.id) == 0

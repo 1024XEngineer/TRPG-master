@@ -20,7 +20,7 @@ def content_json() -> dict:
     return json.loads(PAPER_CHASE_SPEC.source_path.read_text(encoding="utf-8"))
 
 
-def _load(content_json: dict, *, version: str = "3.0.6") -> ModuleContentV3:
+def _load(content_json: dict, *, version: str = PAPER_CHASE_SPEC.version) -> ModuleContentV3:
     content = module_content_cache.load_module_content(
         module_id="paper-chase-zh-coc7",
         version=version,

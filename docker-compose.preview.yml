@@ -59,6 +59,10 @@ services:
       TURN_PLANNER_MAX_ATTEMPTS: ${TURN_PLANNER_MAX_ATTEMPTS:-2}
       TURN_PLANNER_RETRY_BACKOFF_SECONDS: ${TURN_PLANNER_RETRY_BACKOFF_SECONDS:-0.25}
       TURN_PLANNER_ROLLOUT_PERCENT: ${TURN_PLANNER_ROLLOUT_PERCENT:-0}
+      QWEN_API_KEY: ${QWEN_API_KEY:-}
+      QWEN_BASE_URL: ${QWEN_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+      QWEN_MODEL: ${QWEN_MODEL:-qwen3.7-plus}
+      QWEN_TIMEOUT_SECONDS: ${QWEN_TIMEOUT_SECONDS:-30}
       CHARACTER_BACKGROUND_PROVIDER: ${CHARACTER_BACKGROUND_PROVIDER:-deterministic}
       # 角色生图的提示词与图片生成是两段独立链路：DeepSeek 负责提示词，
       # Sufy Gemini 负责图片。CI 在两套 key 都存在时启用真实链路，否则

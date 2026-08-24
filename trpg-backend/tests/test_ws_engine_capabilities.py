@@ -123,6 +123,7 @@ def _play_one_action(
                 "payload": {
                     "clientActionId": f"{account}-action",
                     "utterance": "我按自己的想法行动",
+                    "recipient": {"kind": "keeper", "entityId": None, "explicit": True},
                 },
             }
         )

@@ -68,7 +68,11 @@ def _submit_action(ws, player: dict, utterance: str) -> None:
         {
             "type": "action.plan.submit",
             "playerId": player["playerId"],
-            "payload": {"clientActionId": str(uuid4()), "utterance": utterance},
+            "payload": {
+                "clientActionId": str(uuid4()),
+                "utterance": utterance,
+                "recipient": {"kind": "keeper", "entityId": None, "explicit": True},
+            },
         }
     )
 
@@ -99,12 +103,15 @@ class _ConversationClarificationIntentModel:
         }
 
 
+_PUBLIC_CLARIFICATION_TEXT = "陈探员是想去吃午饭，还是晚饭？"
+
+
 class _PublicClarificationNarrationModel:
     async def generate(self, context):  # noqa: ANN001
         del context
         return {
             "kind": "clarification",
-            "text": "你是想去吃午饭，还是晚饭？",
+            "text": _PUBLIC_CLARIFICATION_TEXT,
             "claimed_evidence_refs": [],
             "suggested_actions": [],
         }
@@ -155,6 +162,179 @@ def test_chat_send_is_idempotent_on_duplicate_client_message_id(
         headers={"X-Reconnect-Token": room["reconnectToken"]},
     ).json()["data"]
     assert len(history) == 1
+
+
+def test_multiplayer_action_chat_is_roleplay_and_not_host_event(
+    sync_client: TestClient,
+) -> None:
+    """多人行动区无接收者时只保存角色扮演消息，不触发主持或记忆事件。"""
+
+    token = register_and_login(sync_client, "roleplay_host")
+    room = create_room(sync_client, token, max_players=2)
+    advance_to_building(sync_client, room)
+    complete_character(sync_client, room["roomId"], room["reconnectToken"])
+    start_game(sync_client, room, token)
+
+    with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
+        _join_ws(ws, room)
+        ws.send_json(
+            {
+                "type": "action.chat.send",
+                "playerId": room["playerId"],
+                "payload": {"text": "我对队友点了点头", "clientMessageId": "roleplay-1"},
+            }
+        )
+        message = receive_until(ws, lambda item: item.get("type") == "chat.message")[0]
+
+    assert message["payload"]["channel"] == "roleplay"
+    assert message["payload"]["actorId"]
+    assert message["payload"]["actorName"] == "陈探员"
+    conversation = sync_client.get(
+        f"{ROOMS_BASE}/{room['roomId']}/conversation",
+        headers={"X-Reconnect-Token": room["reconnectToken"]},
+    ).json()["data"]
+    roleplay = [item for item in conversation if item["payload"].get("channel") == "roleplay"]
+    assert len(roleplay) == 1
+    assert all(item["type"] != "action.broadcast" for item in conversation)
+    messages = sync_client.get(
+        f"{ROOMS_BASE}/{room['roomId']}/messages",
+        headers={"X-Reconnect-Token": room["reconnectToken"]},
+    ).json()["data"]
+    assert messages == []
+
+
+def test_chat_idempotency_keeps_original_channel_and_actor_shape(
+    sync_client: TestClient,
+) -> None:
+    """同一幂等键跨入口重试时，实时回显仍以首次落库的频道和身份为准。"""
+
+    token = register_and_login(sync_client, "cross_channel_retry")
+    room = create_room(sync_client, token, max_players=2)
+    advance_to_building(sync_client, room)
+    complete_character(sync_client, room["roomId"], room["reconnectToken"])
+    start_game(sync_client, room, token)
+
+    with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
+        _join_ws(ws, room)
+        _send_chat(ws, room, "首次落成讨论消息", "shared-id-1")
+        first = receive_until(ws, lambda item: item.get("type") == "chat.message")[0]
+        ws.send_json(
+            {
+                "type": "action.chat.send",
+                "playerId": room["playerId"],
+                "payload": {"text": "不会覆盖首次消息", "clientMessageId": "shared-id-1"},
+            }
+        )
+        retried = receive_until(ws, lambda item: item.get("type") == "chat.message")[0]
+
+    assert retried["payload"]["messageId"] == first["payload"]["messageId"]
+    assert retried["payload"]["channel"] == "discussion"
+    assert retried["payload"]["actorId"] is None
+    assert retried["payload"]["actorName"] is None
+
+
+def test_single_player_action_chat_is_rejected(sync_client: TestClient) -> None:
+    """单人旧 action.chat.send 路径不能绕过默认 Keeper 路由。"""
+
+    token = register_and_login(sync_client, "single_roleplay_reject")
+    room = create_room(sync_client, token, max_players=1)
+    advance_to_building(sync_client, room)
+    complete_character(sync_client, room["roomId"], room["reconnectToken"])
+    start_game(sync_client, room, token)
+
+    with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
+        _join_ws(ws, room)
+        ws.send_json(
+            {
+                "type": "action.chat.send",
+                "playerId": room["playerId"],
+                "payload": {"text": "不应降级", "clientMessageId": "roleplay-single-1"},
+            }
+        )
+        error = receive_until(ws, lambda item: item.get("type") == "error")[0]
+
+    assert error["payload"]["code"] == "BAD_REQUEST"
+
+
+def test_npc_recipient_is_rejected_before_host_processing(sync_client: TestClient) -> None:
+    """PR1 只预留 NPC recipient，不能误入 Keeper 主链。"""
+
+    token = register_and_login(sync_client, "npc_recipient_reject")
+    room = create_room(sync_client, token, max_players=1)
+    advance_to_building(sync_client, room)
+    complete_character(sync_client, room["roomId"], room["reconnectToken"])
+    start_game(sync_client, room, token)
+
+    with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
+        _join_ws(ws, room)
+        ws.send_json(
+            {
+                "type": "action.plan.submit",
+                "playerId": room["playerId"],
+                "payload": {
+                    "clientActionId": "npc-recipient-1",
+                    "utterance": "你好",
+                    "recipient": {"kind": "npc", "entityId": "thomas", "explicit": True},
+                },
+            }
+        )
+        error = receive_until(ws, lambda item: item.get("type") == "error")[0]
+
+    assert error["payload"]["code"] == "NOT_IMPLEMENTED"
+
+
+def test_single_player_accepts_implicit_keeper_recipient(sync_client: TestClient) -> None:
+    """单人模式允许前端明确提交 implicit Keeper，但 recipient 字段本身仍然必填。"""
+
+    token = register_and_login(sync_client, "implicit_keeper_single")
+    room = create_room(sync_client, token, max_players=1)
+    advance_to_building(sync_client, room)
+    complete_character(sync_client, room["roomId"], room["reconnectToken"])
+    start_game(sync_client, room, token)
+
+    with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
+        _join_ws(ws, room)
+        ws.send_json(
+            {
+                "type": "action.plan.submit",
+                "playerId": room["playerId"],
+                "payload": {
+                    "clientActionId": "implicit-keeper-1",
+                    "utterance": "查看托马斯",
+                    "recipient": {"kind": "keeper", "entityId": None, "explicit": False},
+                },
+            }
+        )
+        echo = receive_until(ws, lambda item: item.get("type") == "action.broadcast")[0]
+
+    assert echo["payload"]["clientActionId"] == "implicit-keeper-1"
+
+
+def test_multiplayer_rejects_implicit_keeper_recipient(sync_client: TestClient) -> None:
+    """多人模式必须明确 @守秘人，服务端不能信任客户端路由。"""
+
+    token = register_and_login(sync_client, "implicit_keeper_multi")
+    room = create_room(sync_client, token, max_players=2)
+    advance_to_building(sync_client, room)
+    complete_character(sync_client, room["roomId"], room["reconnectToken"])
+    start_game(sync_client, room, token)
+
+    with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
+        _join_ws(ws, room)
+        ws.send_json(
+            {
+                "type": "action.plan.submit",
+                "playerId": room["playerId"],
+                "payload": {
+                    "clientActionId": "implicit-keeper-multi-1",
+                    "utterance": "查看托马斯",
+                    "recipient": {"kind": "keeper", "entityId": None, "explicit": False},
+                },
+            }
+        )
+        error = receive_until(ws, lambda item: item.get("type") == "error")[0]
+
+    assert error["payload"]["code"] == "BAD_REQUEST"
 
 
 # ── action.plan.submit：原话广播 + 叙事回复 ───────────
@@ -218,6 +398,7 @@ def test_clarification_narration_is_visible_to_other_players(
                 "payload": {
                     "clientActionId": action_id,
                     "utterance": "我要去吃饭",
+                    "recipient": {"kind": "keeper", "entityId": None, "explicit": True},
                 },
             }
         )
@@ -232,7 +413,7 @@ def test_clarification_narration_is_visible_to_other_players(
 
     assert narration["type"] == "narration.push"
     assert narration["payload"]["messageId"] == action_id
-    assert narration["payload"]["text"] == "你是想去吃午饭，还是晚饭？"
+    assert narration["payload"]["text"] == _PUBLIC_CLARIFICATION_TEXT
     assert all(message.get("type") != "turn.failed" for message in seen)
 
     guest_headers = {"X-Reconnect-Token": guest["reconnectToken"]}
@@ -246,7 +427,7 @@ def test_clarification_narration_is_visible_to_other_players(
         if event["type"] == "narration.push" and event["payload"].get("messageId") == action_id
     ]
     assert len(guest_narrations) == 1
-    assert guest_narrations[0]["payload"]["text"] == "你是想去吃午饭，还是晚饭？"
+    assert guest_narrations[0]["payload"]["text"] == _PUBLIC_CLARIFICATION_TEXT
 
     guest_replay = sync_client.get(
         f"{ROOMS_BASE}/{room['roomId']}/replay",
@@ -258,7 +439,7 @@ def test_clarification_narration_is_visible_to_other_players(
         if event["eventType"] == "narration.push" and event["payload"].get("messageId") == action_id
     ]
     assert len(replay_narrations) == 1
-    assert replay_narrations[0]["payload"]["text"] == "你是想去吃午饭，还是晚饭？"
+    assert replay_narrations[0]["payload"]["text"] == _PUBLIC_CLARIFICATION_TEXT
 
 
 # ── 行动锁 ───────────────────────────────────────────

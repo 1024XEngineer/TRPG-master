@@ -54,6 +54,7 @@ from collaboration_framework.host.application import (
     HostTurnDecisionExecutor,
     PlayerViewProjector,
     TurnExecutionError,
+    narration_subject_rejection_reason,
 )
 from collaboration_framework.host.ports import (
     ActionPlanStepAdjudicator,
@@ -836,14 +837,27 @@ def _deterministic_clarification_text(context: ActionPlanNarrationContext) -> st
         _explicit_travel_phrase(getattr(step, "semantic_goal", "")) is not None
         for step in successful_steps
     )
+    actor = _acting_address(context)
     if completed_travel:
         scene_name = getattr(context.player_view.scene, "name", "") or "当前地点"
-        return f"你已经抵达{scene_name}，但后续行动尚未形成可确认的结果。"
+        return f"{actor}已经抵达{scene_name}，但后续行动尚未形成可确认的结果。"
     if successful_steps:
         return "此前已经完成的行动仍然有效，但后续行动尚未形成可确认的结果。"
     if _explicit_travel_phrase(context.player_input.utterance) is not None:
-        return "你没有在当前能够确认的道路和周边找到与描述相符的地点，因此仍停留在原处。"
-    return "你暂时无法确认这次行动的具体对象或结果。"
+        return f"{actor}没有在当前能够确认的道路和周边找到与描述相符的地点，因此仍停留在原处。"
+    return f"{actor}暂时无法确认这次行动的具体对象或结果。"
+
+
+def _acting_address(context: ActionPlanNarrationContext) -> str:
+    if getattr(context, "addressing_mode", "second_person") == "named_actor":
+        name = getattr(context, "acting_character_name", "") or ""
+        if name:
+            return name
+    return "你"
+
+
+def _view_actor_name(player_view: PlayerView) -> str:
+    return getattr(getattr(player_view, "self_actor", None), "name", None) or "你"
 
 
 def _best_label_overlap(text: str, labels: tuple[str, ...]) -> str | None:
@@ -878,13 +892,14 @@ class DeterministicActionPlanNarrationModel:
             kind = "narration"
         else:
             goal = completed or _quote_action_summary(context.plan_goal)
-            text = f"你依次完成了：{goal}。"
+            text = f"{_acting_address(context)}依次完成了：{goal}。"
             kind = "narration"
         required_refs = tuple(
             item.ref for item in context.narration_evidence if item.required_in_narration
         )
         required_text = "；".join(
-            f"你发现了{item.subject_name}" + (f"：{item.description}" if item.description else "")
+            f"{_acting_address(context)}发现了{item.subject_name}"
+            + (f"：{item.description}" if item.description else "")
             for item in context.narration_evidence
             if item.required_in_narration
         )
@@ -1140,7 +1155,11 @@ class ActionPlanTurnApplication:
             status="needs_clarification",
             narration=ActionPlanNarrationOutput(
                 kind="clarification",
-                text="我暂时没能准确理解这次行动。请再明确一下你想做什么，以及行动的对象或地点。",
+                text=(
+                    "我暂时没能准确理解这次行动。"
+                    f"请再明确一下{_view_actor_name(player_view)}"
+                    "想做什么，以及行动的对象或地点。"
+                ),
             ),
         )
 
@@ -1389,6 +1408,25 @@ class ActionPlanTurnApplication:
             existing is not None
             and existing.player_id == player_id
             and existing.actor_id == actor_id
+            and existing.status in {"awaiting_scene_consent", "awaiting_time_consent"}
+        ):
+            abort_consent = getattr(self._adjudication_engine, "abort_consent", None)
+            if abort_consent is not None:
+                current = (
+                    existing.steps[existing.current_step_index]
+                    if existing.current_step_index < len(existing.steps)
+                    else None
+                )
+                await abort_consent(
+                    room_id=room_id,
+                    player_id=player_id,
+                    parent_action_id=parent_action_id,
+                    action_request_id=(current.step_request_id if current is not None else None),
+                )
+        if (
+            existing is not None
+            and existing.player_id == player_id
+            and existing.actor_id == actor_id
             and existing.status == "waiting_for_player"
             and existing.current_step_index < len(existing.steps)
         ):
@@ -1615,7 +1653,10 @@ class ActionPlanTurnApplication:
         self,
         context: ActionPlanNarrationContext,
     ) -> ActionPlanNarrationOutput:
-        if hasattr(context.player_input, "room_id") and hasattr(context.player_view, "revision"):
+        addressing_mode, acting_character_name = await self._narration_addressing(context)
+        if isinstance(context, ActionPlanNarrationContext) and hasattr(
+            context.player_view, "revision"
+        ):
             memory_context = await self._read_memory_context(
                 player_input=context.player_input,
                 player_view=context.player_view,
@@ -1630,12 +1671,21 @@ class ActionPlanTurnApplication:
                 termination_status=context.termination_status,
                 completed_steps=context.completed_steps,
                 player_view=context.player_view,
+                addressing_mode=addressing_mode,
+                acting_character_name=acting_character_name,
                 memories=memory_context.entries,
                 conversation_summary=memory_context.conversation_summary,
                 opening_world_time=context.opening_world_time,
                 allowed_evidence_refs=context.allowed_evidence_refs,
                 narration_evidence=context.narration_evidence,
                 narration_retry_hint=context.narration_retry_hint,
+            )
+        elif isinstance(context, ActionPlanNarrationContext):
+            context = context.model_copy(
+                update={
+                    "addressing_mode": addressing_mode,
+                    "acting_character_name": acting_character_name,
+                }
             )
         started_at = time.monotonic()
         for attempt in range(2):
@@ -1741,11 +1791,22 @@ class ActionPlanTurnApplication:
                 retryable=True,
             )
         sentences: list[str] = []
+        addressing_mode = getattr(context, "addressing_mode", "second_person")
         for item in required:
-            sentences.append(f"随着调查深入，你很快辨认出{item.subject_name}。")
+            sentences.append(
+                f"随着调查深入，{_acting_address(context)}很快辨认出{item.subject_name}。"
+            )
             description = item.description.strip()
             if description:
-                sentences.append(description.rstrip("。！？!?；;，,") + "。")
+                sentence = description.rstrip("。！？!?；;，,") + "。"
+                if (
+                    narration_subject_rejection_reason(
+                        sentence,
+                        addressing_mode=addressing_mode,
+                    )
+                    is None
+                ):
+                    sentences.append(sentence)
         return ActionPlanNarrationOutput(
             text="".join(sentences),
             claimed_evidence_refs=tuple(item.ref for item in required),
@@ -1773,7 +1834,8 @@ class ActionPlanTurnApplication:
                 return ActionPlanNarrationOutput(
                     kind="clarification",
                     text=(
-                        f"{names}的尸体就在当前场景中。你想检查尸体、搜查随身物品，还是处理现场？"
+                        f"{names}的尸体就在当前场景中。"
+                        f"{_acting_address(context)}是想检查尸体、搜查随身物品，还是处理现场？"
                     ),
                 )
             return ActionPlanNarrationOutput(
@@ -1812,7 +1874,8 @@ class ActionPlanTurnApplication:
             if result.kind == "inventory" and result.target_id in inventory_names
         )
         statements.extend(
-            f"{inventory_names[result.target_id]}已经放入你的背包。" for result in inventory_results
+            f"{inventory_names[result.target_id]}已经放入{_acting_address(context)}的背包。"
+            for result in inventory_results
         )
         refs = tuple(
             result.event_ref
@@ -1928,6 +1991,27 @@ class ActionPlanTurnApplication:
         except Exception as exc:  # noqa: BLE001 - 读模型故障必须 fail-open
             logger.warning("memory_context_degraded", error_type=type(exc).__name__)
             return empty
+
+    async def _narration_addressing(
+        self,
+        context: ActionPlanNarrationContext,
+    ) -> tuple[Literal["second_person", "named_actor"], str]:
+        acting_name = ""
+        self_actor = getattr(context.player_view, "self_actor", None)
+        if self_actor is not None:
+            acting_name = getattr(self_actor, "name", "") or ""
+        mode = "second_person"
+        room_id = getattr(context.player_input, "room_id", None)
+        if room_id:
+            try:
+                async with self._store.transaction(room_id) as transaction:
+                    runtime = await transaction.load_runtime()
+                bound = [actor for actor in runtime.game_state.actors.values() if actor.player_id]
+                if len(bound) >= 2:
+                    mode = "named_actor"
+            except Exception:  # noqa: BLE001 - 读不到运行时时按单人称呼，避免阻断叙事
+                mode = "second_person"
+        return mode, acting_name
 
     async def _resolve_actor_id(self, room_id: str, player_id: str) -> str:
         async with self._store.transaction(room_id) as transaction:

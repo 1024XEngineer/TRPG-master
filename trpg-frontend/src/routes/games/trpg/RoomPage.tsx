@@ -1496,6 +1496,10 @@ export default function RoomPage() {
     if (!correlationId) return
     setActivePlanId((current) => current === correlationId ? null : current)
   }, [clearSettledAdjudication])
+  // 规则强制的检定（`allow_cancel: false`）挂着时，plan 级的「停止后续行动」
+  // 会被后端硬拒，所以干脆不渲染。
+  const ruleForcedCheckPending =
+    pendingAdjudication?.pendingDecision?.allow_cancel === false
   const [pendingCheckDice, setPendingCheckDice] = useState<PendingCheckDiceState | null>(null)
   const [playerView, setPlayerView] = useState<AgentPlayerView | null>(() => {
     const cached = sdk.roomSocket.getPlayerView()
@@ -2041,7 +2045,13 @@ export default function RoomPage() {
         setTyping(false)
         setProgressLabel(null)
         setSecondaryProgressLabel(null)
-        setPendingAdjudication(null)
+        // 取消被规则强制的检定挡下来时，服务端那条 PendingCheckDecision 还好好
+        // 挂着——把弹窗清掉，玩家就只剩一行报错、再也掷不了骰，而 activePlanId
+        // 没清，唯一还能点的按钮只会复现同一个错误。这是个死局，所以这一种失败
+        // 不动待决检定。
+        if (envelope.payload.code !== 'PLAN_CANCEL_BLOCKED_BY_RULE_CHECK') {
+          setPendingAdjudication(null)
+        }
         // 片段只在叙事落库成功后才会下发，回合失败时不存在对应的权威消息——
         // 留着半截文字会让玩家以为那是这回合的结果。
         //
@@ -3437,7 +3447,11 @@ export default function RoomPage() {
       </BottomPanel>
 
       {/* ── Dice Modal ── */}
-      {activePlanId && playerId && (
+      {/* 规则强制的检定挂着时不给这个按钮：后端会以
+          PLAN_CANCEL_BLOCKED_BY_RULE_CHECK 硬拒，而且连跟这次检定无关的后续
+          步骤也一起拒掉。CheckWorkflowPanel 已经按 allow_cancel 藏了自己的取消
+          按钮，这个兄弟按钮当时漏了（#398 §阶段三）。 */}
+      {activePlanId && playerId && !ruleForcedCheckPending && (
         <div className="mx-4 mb-3">
           <button
             type="button"

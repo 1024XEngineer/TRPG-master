@@ -8,6 +8,7 @@ called-out behaviour change in issue #347's otherwise pure-refactor scope
 
 from __future__ import annotations
 
+import json
 import unittest
 from pathlib import Path
 
@@ -17,6 +18,7 @@ from collaboration_framework.contracts.module_v3 import (
     NotCondition,
     PredicateCondition,
 )
+from collaboration_framework.registry import check_profiles as check_profile_registry
 from collaboration_framework.module.validation_v3 import (
     _condition_issues,
     validate_module_v3,
@@ -137,6 +139,61 @@ class UnimplementedStepKindsStillPublishTests(unittest.TestCase):
         self.assertEqual(_actor_binding_issues(step, "path"), [])
 
 
+class CheckProfileValidationTests(unittest.TestCase):
+    """被动检定的 profile 必须注册过，主动检定的不校验（#398 §阶段三）。"""
+
+    @staticmethod
+    def _module_with_passive_profile(profile_id: str) -> ModuleContentV3:
+        path = FIXTURES / "追书人" / "module-content-v3.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        rule = next(
+            item for item in data["rules"] if item["id"] == "first_sight_of_douglas"
+        )
+        step = next(
+            item for item in rule["execution"]["steps"] if item["id"] == "san_check"
+        )
+        step["check"]["profile_id"] = profile_id
+        return ModuleContentV3.model_validate(data)
+
+    def test_an_unregistered_passive_profile_is_rejected(self) -> None:
+        report = validate_module_v3(self._module_with_passive_profile("coc7.luck"))
+        codes = [issue.code for issue in report.errors]
+        self.assertIn("MODULE_V3_CHECK_PROFILE_NOT_REGISTERED", codes)
+
+    def test_the_registered_passive_profile_publishes(self) -> None:
+        report = validate_module_v3(self._module_with_passive_profile("coc7.sanity"))
+        self.assertNotIn(
+            "MODULE_V3_CHECK_PROFILE_NOT_REGISTERED",
+            [issue.code for issue in report.errors],
+        )
+
+    def test_active_checks_are_deliberately_not_validated(self) -> None:
+        """`coc7.skill` 按设计不在表里——主动检定走 Agent 候选菜单。
+
+        不收窄到 `passive_rule` 的话，这条校验会当场拒掉两个线上模组全部 26 处
+        主动检定。这条测试就是钉住那个收窄。
+        """
+
+        path = FIXTURES / "追书人" / "module-content-v3.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        actives = [
+            step
+            for rule in data["rules"]
+            for step in rule["execution"]["steps"]
+            if step.get("kind") == "check"
+            and step["check"]["initiation_kind"] == "active_action"
+        ]
+        self.assertTrue(actives)
+        self.assertEqual({step["check"]["profile_id"] for step in actives}, {"coc7.skill"})
+        self.assertFalse(check_profile_registry.is_registered("coc7.skill"))
+
+        report = validate_module_v3(ModuleContentV3.model_validate(data))
+        self.assertNotIn(
+            "MODULE_V3_CHECK_PROFILE_NOT_REGISTERED",
+            [issue.code for issue in report.errors],
+        )
+
+
 class RealFixturesStillPublishTests(unittest.TestCase):
     """The predicate names real, already-shipping modules use must all be
     registered — otherwise this phase would break existing content on the day
@@ -164,6 +221,7 @@ class RealFixturesStillPublishTests(unittest.TestCase):
                         "MODULE_V3_PREDICATE_UNKNOWN",
                         "MODULE_V3_PREDICATE_EMPTY",
                         "MODULE_V3_ACTOR_BINDING_UNKNOWN",
+                        "MODULE_V3_CHECK_PROFILE_NOT_REGISTERED",
                     )
                 ]
                 self.assertEqual(registry_issues, [])

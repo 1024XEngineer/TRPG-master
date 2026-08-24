@@ -321,10 +321,16 @@ class PendingCheckDecisionRecord(Base):
     __tablename__ = "pending_check_decisions"
     __table_args__ = (
         PrimaryKeyConstraint("room_id", "decision_id", name="pk_pending_check_decisions"),
-        UniqueConstraint(
+        # 条件唯一：同一个动作不能同时挂着两个**未结算**的检定，但可以先后有
+        # 多次。#398 §阶段三 让规则能在动作的效果链中间要求一次被动检定，而那个
+        # 动作自己可能已经掷过骰了——原来的无条件唯一约束把这件事挡死在 schema 层。
+        Index(
+            "uq_pending_check_decisions_room_action_open",
             "room_id",
             "action_request_id",
-            name="uq_pending_check_decisions_room_action",
+            unique=True,
+            sqlite_where=text("status IN ('awaiting_skill_choice', 'rolled')"),
+            postgresql_where=text("status IN ('awaiting_skill_choice', 'rolled')"),
         ),
         CheckConstraint("decision_version >= 1", name="ck_pending_check_decision_version"),
         CheckConstraint(

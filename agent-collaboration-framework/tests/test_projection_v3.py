@@ -45,6 +45,7 @@ from collaboration_framework.contracts import (
     SubmitAdjudicationRequest,
 )
 from collaboration_framework.engine import (
+    ActorResources,
     ActorState,
     AdjudicationEngineService,
     DiceRoller,
@@ -92,6 +93,9 @@ def game_state(content: ModuleContentV3, **overrides) -> GameState:
                     "attributes": {"STR": 45},
                     "occupation": "私家侦探",
                 },
+                # 真实建卡会从 derived_stats["SAN"] 填进来（room.py 的
+                # `_character_runtime_resources`）。被动理智检定的目标值就读这里。
+                resources=ActorResources(san=55, luck=50),
             )
         },
         "entities": {},
@@ -1345,12 +1349,16 @@ class RuleOwnedCheckTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_rule_without_a_check_still_commits_its_effects(self) -> None:
-        """纯效果规则也必须真的生效（#226 §5）。
+        """纯效果规则也必须真的生效（#226 §5），而被动检定必须真的出现（#398）。
 
-        `enter_crypt/proceed` 不掷骰，整条分支就是它的后果。此前这里返回空元组、
-        注释声称「链在提交时已经跑过了」，但没有任何地方跑它——Agenda 只装 event
-        规则。结果是《追书人》整条地穴终局（进入、对话、让他离开、跟随、呼喊、
-        逃离）都不改变任何状态。
+        `enter_crypt/proceed` 不掷骰，整条分支就是它的后果。此前 `_owned_effects`
+        返回空元组、注释声称「链在提交时已经跑过了」，但没有任何地方跑它。
+
+        这条链还是失败案例 B 的最短复现：分支的第三个效果把
+        `cemetery_figure.true_form_seen` 翻成 true，`first_sight_of_douglas`
+        随即要求一次被动理智检定。#398 之前**检定静默丢失**——规则前面的效果照常
+        提交，骰子却从不出现，世界就这么继续往下走。现在它在检定处停住，结算完
+        才继续跑父动作剩下的效果。
         """
 
         store = InMemoryEngineStore()
@@ -1358,7 +1366,9 @@ class RuleOwnedCheckTests(unittest.IsolatedAsyncioTestCase):
             module_content=self.content,
             initial_state=game_state(self.content, scene_id="crypt"),
         )
-        engine = AdjudicationEngineService(store, dice=DiceRoller(SequenceDiceSource([5])))
+        engine = AdjudicationEngineService(
+            store, dice=DiceRoller(SequenceDiceSource([5, 5]))
+        )
         rules = RuleEngineService(store)
         snapshot = await rules.read(
             PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
@@ -1386,13 +1396,62 @@ class RuleOwnedCheckTests(unittest.IsolatedAsyncioTestCase):
             )
         )
 
-        self.assertEqual(execution.outcome, "success")
+        # 停在规则要求的那次检定上，而不是一路跑到底。
+        self.assertEqual(execution.status, "awaiting_skill_choice")
+        pending = execution.pending_decision
+        assert pending is not None
+        # 规则自己指定技能，所以菜单只有一条；规则强制的检定也不能取消。
+        self.assertEqual(len(pending.options), 1)
+        self.assertEqual(pending.options[0].display_name, "理智")
+        self.assertEqual(pending.options[0].target_value, 55)
+        self.assertFalse(pending.allow_cancel)
+
         state = store.inspect_state(ROOM)
-        self.assertIs(state.entities["crypt_entrance"]["entered"], True)
         figure = state.entities["cemetery_figure"]
+        # 检定之前的效果照常提交……
+        self.assertIs(state.entities["crypt_entrance"]["entered"], True)
         self.assertIs(figure["sighted"], True)
         self.assertIs(figure["true_form_seen"], True)
-        self.assertIs(figure["willing_to_talk"], True)
+        self.assertIs(
+            state.entities["case_tracker"]["first_ghoul_sight_resolved"], True
+        )
+        # ……但触发检定之后的那个效果被屏障挡住了，等结算。
+        self.assertNotIn("willing_to_talk", figure)
+
+        rolled = await engine.decide(
+            CheckDecisionRequest(
+                request_id="enter-crypt-1-san",
+                room_id=ROOM,
+                player_id=PLAYER,
+                source_revision=execution.view_revision,
+                decision_id=pending.decision_id,
+                decision_version=pending.decision_version,
+                choice=SelectCheckChoice(candidate_id=pending.options[0].candidate_id),
+            )
+        )
+        # 被动检定走的就是既有的检定工作流，奖惩骰确认这一步也一样。
+        self.assertEqual(rolled.status, "awaiting_post_roll_decision")
+        assert rolled.check_run is not None
+        self.assertEqual(rolled.check_run.selected_skill_name, "理智")
+        resolved = await engine.decide_post_roll(
+            PostRollDecisionRequest(
+                request_id="enter-crypt-1-san-accept",
+                room_id=ROOM,
+                player_id=PLAYER,
+                source_revision=rolled.view_revision,
+                check_id=rolled.check_run.check_id,
+                check_version=rolled.check_run.version,
+                option_id="accept-current",
+            )
+        )
+
+        self.assertEqual(resolved.status, "resolved")
+        self.assertEqual(resolved.outcome, "success")
+        state = store.inspect_state(ROOM)
+        # 规则稳定之后，父动作剩下的效果接着跑完。
+        self.assertIs(state.entities["cemetery_figure"]["willing_to_talk"], True)
+        # Agenda 是游标，不是记录：跑完就不该留在 state 里（#398 §阶段一）。
+        self.assertEqual(state.rule_agendas, {})
 
     async def test_the_crypt_endgame_is_reachable_and_commits(self) -> None:
         """把地穴终局整段钉住：搬石板 → 进地穴 → 与身影对话 → 主线收束。

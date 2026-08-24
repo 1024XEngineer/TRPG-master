@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
+from typing import Literal, cast
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dto.ws import RoomActionQueueItemPayload
+from app.dto.ws import ActionRecipientPayload, RoomActionQueueItemPayload
 from app.models.engine import HostActionQueueItem
 from app.models.room import Player
 
@@ -28,6 +29,11 @@ def _payload(item: HostActionQueueItem) -> RoomActionQueueItemPayload:
         player_id=item.player_id,
         actor_id=item.actor_id,
         client_action_id=item.client_action_id,
+        recipient=ActionRecipientPayload(
+            kind=cast(Literal["keeper", "npc"], item.recipient_kind),
+            entity_id=item.recipient_entity_id,
+            explicit=item.recipient_explicit,
+        ),
         position=item.position,
         utterance=item.utterance,
         accepted_at=item.created_at,
@@ -73,6 +79,7 @@ async def enqueue(
     actor_id: str,
     client_action_id: str,
     utterance: str,
+    recipient: ActionRecipientPayload,
 ) -> tuple[HostActionQueueItem, bool]:
     """Accept a host action into the room FIFO.
 
@@ -98,6 +105,9 @@ async def enqueue(
         own.client_action_id = client_action_id
         own.actor_id = actor_id
         own.utterance = utterance
+        own.recipient_kind = recipient.kind
+        own.recipient_entity_id = recipient.entity_id
+        own.recipient_explicit = recipient.explicit
         own.updated_at = now
         await db.commit()
         await db.refresh(own)
@@ -130,6 +140,9 @@ async def enqueue(
         player_id=player_id,
         actor_id=actor_id,
         utterance=utterance,
+        recipient_kind=recipient.kind,
+        recipient_entity_id=recipient.entity_id,
+        recipient_explicit=recipient.explicit,
         position=(max_position or 0) + 1,
         status=_QUEUED,
         created_at=now,

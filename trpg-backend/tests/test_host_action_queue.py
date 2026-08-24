@@ -10,9 +10,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.controller import ws as ws_controller
 from app.core.turn import ActorResolutionError
+from app.dto.ws import ActionRecipientPayload
 from app.service import host_action_queue
 from app.service.host_action_queue import HostActionQueueError
 from tests.test_engine_runtime import _start_room
+
+_KEEPER_RECIPIENT = ActionRecipientPayload(kind="keeper", entity_id=None, explicit=True)
 
 
 @pytest.mark.asyncio
@@ -31,6 +34,7 @@ async def test_enqueue_is_fifo_and_idempotent(db_session: AsyncSession) -> None:
         actor_id="actor-a",
         client_action_id="action-a",
         utterance="我搜查客厅",
+        recipient=_KEEPER_RECIPIENT,
     )
     assert created
     second, created = await host_action_queue.enqueue(
@@ -40,6 +44,7 @@ async def test_enqueue_is_fifo_and_idempotent(db_session: AsyncSession) -> None:
         actor_id="actor-b",
         client_action_id="action-b",
         utterance="我查看书桌",
+        recipient=_KEEPER_RECIPIENT,
     )
     assert created
     again, created = await host_action_queue.enqueue(
@@ -49,6 +54,7 @@ async def test_enqueue_is_fifo_and_idempotent(db_session: AsyncSession) -> None:
         actor_id="actor-a",
         client_action_id="action-a",
         utterance="我搜查客厅",
+        recipient=_KEEPER_RECIPIENT,
     )
     assert not created
     assert again.item_id == first.item_id
@@ -75,6 +81,7 @@ async def test_player_can_replace_queued_item_without_losing_place(
         actor_id="actor-a",
         client_action_id="action-a1",
         utterance="我先看窗",
+        recipient=_KEEPER_RECIPIENT,
     )
     await host_action_queue.enqueue(
         db_session,
@@ -83,6 +90,7 @@ async def test_player_can_replace_queued_item_without_losing_place(
         actor_id="actor-b",
         client_action_id="action-b",
         utterance="我搜查抽屉",
+        recipient=_KEEPER_RECIPIENT,
     )
     replaced, created = await host_action_queue.enqueue(
         db_session,
@@ -91,6 +99,7 @@ async def test_player_can_replace_queued_item_without_losing_place(
         actor_id="actor-a",
         client_action_id="action-a2",
         utterance="我改去翻书架",
+        recipient=_KEEPER_RECIPIENT,
     )
     assert created
     assert replaced.item_id == first.item_id
@@ -117,6 +126,7 @@ async def test_queue_rejects_when_every_player_already_has_an_item(
         actor_id="actor-a",
         client_action_id="action-a",
         utterance="我搜查客厅",
+        recipient=_KEEPER_RECIPIENT,
     )
     await host_action_queue.enqueue(
         db_session,
@@ -125,6 +135,7 @@ async def test_queue_rejects_when_every_player_already_has_an_item(
         actor_id="actor-b",
         client_action_id="action-b",
         utterance="我查看书桌",
+        recipient=_KEEPER_RECIPIENT,
     )
     with pytest.raises(HostActionQueueError) as raised:
         await host_action_queue.enqueue(
@@ -134,6 +145,7 @@ async def test_queue_rejects_when_every_player_already_has_an_item(
             actor_id="actor-ghost",
             client_action_id="action-overflow",
             utterance="这句不该进队",
+            recipient=_KEEPER_RECIPIENT,
         )
     assert raised.value.code == "ACTION_QUEUE_FULL"
     # replace keeps the cap: same player updating the existing item is allowed
@@ -144,6 +156,7 @@ async def test_queue_rejects_when_every_player_already_has_an_item(
         actor_id="actor-b",
         client_action_id="action-b2",
         utterance="我改口搜查书桌",
+        recipient=_KEEPER_RECIPIENT,
     )
     assert replaced.client_action_id == "action-b2"
 
@@ -163,6 +176,7 @@ async def test_cancel_and_discard_player_queued_items(db_session: AsyncSession) 
         actor_id="actor-a",
         client_action_id="action-a",
         utterance="我搜查客厅",
+        recipient=_KEEPER_RECIPIENT,
     )
     await host_action_queue.enqueue(
         db_session,
@@ -171,6 +185,7 @@ async def test_cancel_and_discard_player_queued_items(db_session: AsyncSession) 
         actor_id="actor-b",
         client_action_id="action-b",
         utterance="我查看书桌",
+        recipient=_KEEPER_RECIPIENT,
     )
     assert await host_action_queue.cancel(
         db_session,
@@ -211,6 +226,7 @@ async def _enqueue_one(db_session: AsyncSession, room_number: int) -> tuple[str,
         actor_id="actor-a",
         client_action_id="queued-action",
         utterance="我搜查客厅",
+        recipient=_KEEPER_RECIPIENT,
     )
     return room.id, players[0].id
 

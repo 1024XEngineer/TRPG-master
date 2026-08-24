@@ -117,6 +117,7 @@ const {
   dice3dSupported,
   dice3dBehavior,
   dice3dRolls,
+  roomInfoState,
 } = vi.hoisted(() => {
   const handlers = new Set<(event: ServerToClientEvent) => void>()
   return {
@@ -124,6 +125,7 @@ const {
     dice3dSupported: { value: false },
     dice3dBehavior: { value: 'unsupported' as 'unsupported' | 'manual' },
     dice3dRolls: [] as Array<{ token: string; settle: (value: number) => void }>,
+    roomInfoState: { maxPlayers: 2 as number | null },
     emitWsMessage: (event: ServerToClientEvent) => {
       for (const handler of handlers) handler(event)
     },
@@ -259,7 +261,8 @@ vi.mock('@/features/dice3d', async () => {
 })
 
 vi.mock('@/hooks/useRoomPlayers', () => ({
-  useRoomPlayers: () => ({
+  useRoomPlayers: () => roomInfoState.maxPlayers === null ? null : ({
+    maxPlayers: roomInfoState.maxPlayers,
     phase: 'InGame',
     moduleTitle: '追书人',
     players: [
@@ -430,6 +433,7 @@ describe('RoomPage conversation history', () => {
     dice3dSupported.value = false
     dice3dBehavior.value = 'unsupported'
     dice3dRolls.length = 0
+    roomInfoState.maxPlayers = 2
     Object.defineProperty(window, 'speechSynthesis', { configurable: true, value: undefined })
     Object.defineProperty(window, 'SpeechSynthesisUtterance', { configurable: true, value: undefined })
     Object.defineProperty(window, 'isSecureContext', { configurable: true, value: true })
@@ -650,6 +654,7 @@ describe('RoomPage conversation history', () => {
             playerId: 'player-1',
             actorId: 'actor-1',
             clientActionId: 'action-queued',
+            recipient: { kind: 'keeper', entityId: null, explicit: true },
             position: 1,
             utterance: '我翻书桌',
             acceptedAt: '2026-08-19T10:00:01Z',
@@ -759,6 +764,82 @@ describe('RoomPage conversation history', () => {
     expect(mockSubmitPlannedAction).toHaveBeenCalledTimes(1)
   })
 
+  it('single-player action input defaults to an implicit keeper recipient', async () => {
+    roomInfoState.maxPlayers = 1
+    mockSubmitPlannedAction.mockReturnValue(new Promise(() => undefined))
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    const actionField = screen.getByPlaceholderText('输入消息…')
+    fireEvent.change(actionField, { target: { value: '我检查门锁' } })
+    fireEvent.submit(actionField.closest('form')!)
+
+    await waitFor(() => expect(mockSubmitPlannedAction).toHaveBeenCalledWith(
+      'player-1',
+      expect.objectContaining({
+        utterance: '我检查门锁',
+        recipient: { kind: 'keeper', entityId: null, explicit: false },
+      }),
+    ))
+    expect(mockSendActionChat).not.toHaveBeenCalled()
+  })
+
+  it('only treats a leading keeper mention as explicit host routing', async () => {
+    mockSubmitPlannedAction.mockReturnValue(new Promise(() => undefined))
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+    const actionField = screen.getByPlaceholderText('输入消息…')
+
+    fireEvent.change(actionField, { target: { value: '我告诉队友稍后再问@主持人' } })
+    fireEvent.submit(actionField.closest('form')!)
+    await waitFor(() => expect(mockSendActionChat).toHaveBeenCalled())
+    expect(mockSubmitPlannedAction).not.toHaveBeenCalled()
+
+    fireEvent.change(actionField, { target: { value: '@守秘人 我查看窗外' } })
+    fireEvent.submit(actionField.closest('form')!)
+    await waitFor(() => expect(mockSubmitPlannedAction).toHaveBeenCalledWith(
+      'player-1',
+      expect.objectContaining({
+        utterance: '我查看窗外',
+        recipient: { kind: 'keeper', entityId: null, explicit: true },
+      }),
+    ))
+  })
+
+  it('accepts Chinese punctuation after a leading keeper mention', async () => {
+    mockSubmitPlannedAction.mockReturnValue(new Promise(() => undefined))
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    const actionField = screen.getByPlaceholderText('输入消息…')
+    fireEvent.change(actionField, { target: { value: '@守秘人：我查看窗外' } })
+    fireEvent.submit(actionField.closest('form')!)
+
+    await waitFor(() => expect(mockSubmitPlannedAction).toHaveBeenCalledWith(
+      'player-1',
+      expect.objectContaining({
+        utterance: '我查看窗外',
+        recipient: { kind: 'keeper', entityId: null, explicit: true },
+      }),
+    ))
+    expect(mockSendActionChat).not.toHaveBeenCalled()
+  })
+
+  it('disables action submission until room mode is known but keeps discussion available', async () => {
+    roomInfoState.maxPlayers = null
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    expect(screen.getByPlaceholderText('输入消息…')).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: '讨论区' }))
+    const discussionField = screen.getByPlaceholderText('输入行动…')
+    expect(discussionField).not.toBeDisabled()
+    fireEvent.change(discussionField, { target: { value: '@主持人 这里只是玩家讨论' } })
+    fireEvent.submit(discussionField.closest('form')!)
+    await waitFor(() => expect(mockSendChat).toHaveBeenCalled())
+    expect(mockSubmitPlannedAction).not.toHaveBeenCalled()
+  })
+
   it('action channel @ button inserts a host mention', async () => {
     renderRoomPage()
     await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
@@ -772,6 +853,20 @@ describe('RoomPage conversation history', () => {
     expect(mockSubmitPlannedAction.mock.calls[0][1]).toEqual(
       expect.objectContaining({ utterance: '我搜查书桌' }),
     )
+  })
+
+  it('action channel @ button moves a mid-text mention to the routing position', async () => {
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    const actionField = screen.getByPlaceholderText('输入消息…')
+    fireEvent.change(actionField, { target: { value: '我稍后再问@主持人' } })
+    fireEvent.click(screen.getByRole('button', { name: '插入 @主持人' }))
+    expect(actionField).toHaveValue('@主持人 我稍后再问@主持人')
+
+    fireEvent.change(actionField, { target: { value: '@守秘人 我查看窗外' } })
+    fireEvent.click(screen.getByRole('button', { name: '插入 @主持人' }))
+    expect(actionField).toHaveValue('@守秘人 我查看窗外')
   })
 
   it('long-pressing the keeper avatar inserts @主持人', async () => {

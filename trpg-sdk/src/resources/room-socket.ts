@@ -358,6 +358,14 @@ const PAYLOAD_VALIDATORS: {
           typeof item.playerId !== 'string' ||
           typeof item.actorId !== 'string' ||
           typeof item.clientActionId !== 'string' ||
+          !isRecord(item.recipient) ||
+          (item.recipient.kind !== 'keeper' && item.recipient.kind !== 'npc') ||
+          (item.recipient.kind === 'keeper' && item.recipient.entityId !== null) ||
+          (item.recipient.kind === 'npc' &&
+            (typeof item.recipient.entityId !== 'string' ||
+              !item.recipient.entityId ||
+              item.recipient.explicit !== true)) ||
+          typeof item.recipient.explicit !== 'boolean' ||
           typeof item.position !== 'number' ||
           typeof item.utterance !== 'string' ||
           typeof item.acceptedAt !== 'string'
@@ -462,6 +470,14 @@ const PAYLOAD_VALIDATORS: {
     typeof p.messageId === 'string' &&
     typeof p.playerId === 'string' &&
     typeof p.nickname === 'string' &&
+    (p.channel === 'discussion' || p.channel === 'roleplay') &&
+    (p.channel === 'discussion'
+      ? (p.actorId === null || p.actorId === undefined) &&
+        (p.actorName === null || p.actorName === undefined)
+      : typeof p.actorId === 'string' &&
+        p.actorId.length > 0 &&
+        typeof p.actorName === 'string' &&
+        p.actorName.length > 0) &&
     typeof p.text === 'string' &&
     typeof p.sentAt === 'string' &&
     typeof p.clientMessageId === 'string',

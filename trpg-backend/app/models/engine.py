@@ -535,6 +535,16 @@ class HostActionQueueItem(Base):
             "status IN ('queued', 'started', 'cancelled', 'discarded')",
             name="ck_host_action_queue_status",
         ),
+        CheckConstraint(
+            "recipient_kind IN ('keeper', 'npc')",
+            name="ck_host_action_queue_recipient_kind",
+        ),
+        CheckConstraint(
+            "(recipient_kind = 'keeper' AND recipient_entity_id IS NULL) OR "
+            "(recipient_kind = 'npc' AND recipient_entity_id IS NOT NULL "
+            "AND length(trim(recipient_entity_id)) > 0 AND recipient_explicit)",
+            name="ck_host_action_queue_recipient",
+        ),
         Index(
             "ix_host_action_queue_room_status_position",
             "room_id",
@@ -559,6 +569,14 @@ class HostActionQueueItem(Base):
     player_id: Mapped[str] = mapped_column(String(100), nullable=False)
     actor_id: Mapped[str] = mapped_column(String(100), nullable=False)
     utterance: Mapped[str] = mapped_column(Text, nullable=False)
+    # 接收者必须随队列项持久化，服务重启后不能重新从原话猜测路由。
+    recipient_kind: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="keeper", server_default="keeper"
+    )
+    recipient_entity_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    recipient_explicit: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="1"
+    )
     position: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="queued")
     created_at: Mapped[datetime] = mapped_column(

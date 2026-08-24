@@ -131,10 +131,13 @@ function checkResultContent(payload: CheckResultPayload): string {
   return `${payload.skillName} ${payload.targetValue}% · D100 ${payload.rollValue}${resolutionLabel}`
 }
 
-function hostUtteranceFromActionInput(text: string): string | null {
-  if (!text.includes('@主持人')) return null
-  const rest = text.split('@主持人').join(' ').replace(/\s+/g, ' ').trim()
-  return rest.length > 0 ? rest : null
+function hostUtteranceFromActionInput(text: string): { utterance: string; explicit: true } | null {
+  // 中文输入习惯会直接在 mention 后接逗号或冒号；这些标点属于分隔符，
+  // 不应让一条明确发给守秘人的消息误落成多人 roleplay。
+  const mention = /^\s*@(主持人|守秘人)(?:\s+|[，。！？；：、,.!?;:]\s*|$)/u.exec(text)
+  if (!mention) return null
+  const rest = text.slice(mention[0].length).replace(/\s+/g, ' ').trim()
+  return { utterance: rest, explicit: true }
 }
 
 const HOST_MENTION_LONG_PRESS_MS = 450
@@ -459,15 +462,18 @@ function conversationEventToMessage(
       messageId: string
       playerId: string
       nickname: string
+      channel?: 'discussion' | 'roleplay'
+      actorId?: string | null
+      actorName?: string | null
       text: string
       sentAt: string
       clientMessageId: string
     }
     return {
       type: 'player',
-      channel: 'discussion',
+      channel: payload.channel === 'roleplay' ? 'action' : 'discussion',
       messageId: conversationMessageId(event.type, event.id),
-      sender: payload.nickname,
+      sender: displayName(payload.actorName, payload.nickname),
       content: payload.text,
       time: formatRoomTime(payload.sentAt),
       isSelf: payload.playerId === selfPlayerId,
@@ -1354,7 +1360,11 @@ export default function RoomPage() {
   // 单独取稳定方法，避免 effect 依赖每次渲染都会新建的 Hook 返回对象。
   const cancelSpeechInput = speechInput.cancel
   const [typing, setTyping] = useState(false)
-  const [pendingAction, setPendingAction] = useState<{ clientActionId: string; utterance: string } | null>(null)
+  const [pendingAction, setPendingAction] = useState<{
+    clientActionId: string
+    utterance: string
+    recipient: { kind: 'keeper'; entityId: null; explicit: boolean }
+  } | null>(null)
   const [pendingCheck, setPendingCheck] = useState<CheckRequestPayload | null>(null)
   const [pendingAdjudication, setPendingAdjudication] =
     useState<AdjudicationPendingPayload | null>(null)
@@ -1459,7 +1469,7 @@ export default function RoomPage() {
     roomActionState !== null &&
     roomActionState.status !== 'idle' &&
     (roomActionState.status === 'processing' || waitingForPlayerAction)
-  const composerDisabled = suspended
+  const composerDisabled = suspended || (isActionChannel && roomInfo === null)
   const actionOwnerName = roomActionState?.playerId === playerId
     ? senderName
     : displayName(
@@ -1720,9 +1730,9 @@ export default function RoomPage() {
           if (prev.some((item) => item.messageId === messageId)) return prev
           return appendLiveMessage(prev, {
             type: 'player',
-            channel: 'discussion',
+            channel: envelope.payload.channel === 'roleplay' ? 'action' : 'discussion',
             messageId,
-            sender: envelope.payload.nickname,
+            sender: displayName(envelope.payload.actorName, envelope.payload.nickname),
             content: envelope.payload.text,
             time: formatRoomTime(envelope.payload.sentAt),
             isSelf: envelope.payload.playerId === playerId,
@@ -1926,7 +1936,11 @@ export default function RoomPage() {
     return off
   }, [clearBackendProgress, clearSettledAction, enqueueHostSpeech, handleHostSpeechSettingsUpdated, openDiceForCheck, playerId, senderName, showBackendPhase])
 
-  const submitPlayerAction = (action: { clientActionId: string; utterance: string }) => {
+  const submitPlayerAction = (action: {
+    clientActionId: string
+    utterance: string
+    recipient: { kind: 'keeper'; entityId: null; explicit: boolean }
+  }) => {
     if (!playerId || suspended || actionSubmissionBlocked) return
     pendingNarrationActionIdRef.current = action.clientActionId
     setPendingAction(action)
@@ -1984,7 +1998,7 @@ export default function RoomPage() {
       const value = current.action
       return {
         ...current,
-        action: value.includes('@主持人')
+        action: hostUtteranceFromActionInput(value) !== null
           ? value
           : value.trim()
             ? `@主持人 ${value.trim()}`
@@ -2004,6 +2018,9 @@ export default function RoomPage() {
     e?.preventDefault()
     const text = input.trim()
     if (!text || !playerId || suspended) return
+    const hostRequest = channel === 'action' ? hostUtteranceFromActionInput(text) : null
+    // 只有 mention 没有正文时保留草稿，避免在多人房间误发成 roleplay。
+    if (hostRequest && !hostRequest.utterance) return
     // 发送前先关闭识别结果闸门，防止浏览器稍后返回的文本写入已清空的输入框。
     cancelSpeechInput()
     setInput('')
@@ -2011,10 +2028,18 @@ export default function RoomPage() {
       sdk.roomSocket.sendChat(playerId, { text, clientMessageId: randomActionId() })
       return
     }
-    const hostUtterance = hostUtteranceFromActionInput(text)
-    if (hostUtterance) {
+    const singlePlayer = roomInfo?.maxPlayers === 1
+    if (hostRequest || singlePlayer) {
       if (actionSubmissionBlocked) return
-      submitPlayerAction({ clientActionId: randomActionId(), utterance: hostUtterance })
+      submitPlayerAction({
+        clientActionId: randomActionId(),
+        utterance: hostRequest?.utterance ?? text,
+        recipient: {
+          kind: 'keeper',
+          entityId: null,
+          explicit: hostRequest?.explicit ?? false,
+        },
+      })
       return
     }
     sdk.roomSocket.sendActionChat(playerId, { text, clientMessageId: randomActionId() })

@@ -996,7 +996,7 @@ async def test_semantic_one_step_creates_and_executes_normal_run() -> None:
         room_id="semantic-room",
         player_id="semantic-player",
         client_action_id="semantic-one-step",
-        utterance="观察当前房间",
+        utterance="仔细检查书架上的文件",
     )
 
     assert result.status in {"awaiting_narration", "completed"}
@@ -1020,12 +1020,35 @@ async def test_semantic_malformed_plan_returns_clarification_without_run() -> No
         room_id="semantic-room",
         player_id="semantic-player",
         client_action_id="semantic-invalid",
-        utterance="观察当前房间",
+        utterance="仔细检查书架上的文件",
     )
 
     assert result.status == "needs_clarification"
     assert result.narration is not None
     assert await application.get_plan("semantic-room", "semantic-invalid") is None
+
+
+async def test_clear_single_step_uses_legacy_fast_producer_when_semantic_is_enabled() -> None:
+    application = await _semantic_application()
+
+    class InvalidSemanticClient:
+        async def generate(self, **kwargs):
+            del kwargs
+            raise AssertionError("clear single-step input must not enter semantic Planner")
+
+    application._semantic_planner = PromptTurnPlanner(InvalidSemanticClient())
+
+    result = await application.start(
+        room_id="semantic-room",
+        player_id="semantic-player",
+        client_action_id="semantic-fast-path",
+        utterance="观察当前房间",
+    )
+
+    assert result.status in {"awaiting_narration", "completed"}
+    run = await application.get_plan("semantic-room", "semantic-fast-path")
+    assert run is not None
+    assert len(run.steps) == 1
 
 
 @pytest.mark.asyncio

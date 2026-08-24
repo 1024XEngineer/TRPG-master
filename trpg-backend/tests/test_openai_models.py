@@ -57,6 +57,7 @@ from app.adapters.structured_http import (
 )
 from app.core.action_plan_turn import (
     build_action_plan_turn_application,
+    semantic_planner_required,
     semantic_planner_selected,
 )
 from app.core.config import Settings, model_client_retry_policy
@@ -95,6 +96,25 @@ def test_semantic_planner_rollout_bucket_is_stable() -> None:
     assert semantic_planner_selected(
         room_id="room-1", client_action_id="action-1", rollout_percent=100
     )
+
+
+@pytest.mark.parametrize(
+    ("utterance", "reason"),
+    [
+        ("观察当前房间", "explicit_single_step"),
+        ("仔细检查书架上的文件", "semantic_uncertainty_marker"),
+        ("先观察房间，然后询问眼前的人", "multi_step_marker"),
+        ("观察房间和窗户", "multi_target_marker"),
+    ],
+)
+def test_semantic_planner_route_preserves_fast_path_for_clear_single_steps(
+    utterance: str,
+    reason: str,
+) -> None:
+    required, actual_reason = semantic_planner_required(utterance)
+
+    assert actual_reason == reason
+    assert required is (reason != "explicit_single_step")
 
 
 def test_semantic_planner_rollout_requires_independent_configuration() -> None:

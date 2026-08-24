@@ -182,6 +182,52 @@ def semantic_planner_selected(
     return int.from_bytes(digest[:8], "big") % 100 < rollout_percent
 
 
+_SEMANTIC_MULTI_STEP_MARKERS = (
+    "先",
+    "然后",
+    "接着",
+    "随后",
+    "再去",
+    "再到",
+    "之后",
+)
+_SEMANTIC_MULTI_TARGET_MARKERS = ("分别", "每个", "所有", "多个", "和", "以及")
+_SEMANTIC_UNCERTAIN_ACTION_MARKERS = (
+    "仔细",
+    "调查",
+    "搜索",
+    "搜查",
+    "查找",
+    "研究",
+    "线索",
+    "眼前的人",
+    "这里",
+    "那里",
+    "什么",
+    "某个",
+)
+
+
+def semantic_planner_required(utterance: str) -> tuple[bool, str]:
+    """Select semantic planning only where a fast single-step producer is unsafe.
+
+    This is deliberately a conservative, player-input-only gate. It does not infer
+    targets, rules, checks, effects, or hidden facts. Those remain the responsibility
+    of the current-step adjudicator after the plan is created.
+    """
+
+    text = utterance.strip()
+    if not text:
+        return True, "empty_input"
+    if any(marker in text for marker in _SEMANTIC_MULTI_STEP_MARKERS):
+        return True, "multi_step_marker"
+    if any(marker in text for marker in _SEMANTIC_MULTI_TARGET_MARKERS):
+        return True, "multi_target_marker"
+    if any(marker in text for marker in _SEMANTIC_UNCERTAIN_ACTION_MARKERS):
+        return True, "semantic_uncertainty_marker"
+    return False, "explicit_single_step"
+
+
 @dataclass(frozen=True)
 class PlanPrerequisiteResolution:
     plan: ActionPlan | None
@@ -973,10 +1019,15 @@ class ActionPlanTurnApplication:
             player_input=player_input,
             player_view=view,
         )
-        use_semantic_planner = self._semantic_planner is not None and semantic_planner_selected(
-            room_id=room_id,
-            client_action_id=client_action_id,
-            rollout_percent=self._semantic_planner_rollout_percent,
+        semantic_required, semantic_reason = semantic_planner_required(utterance)
+        use_semantic_planner = (
+            self._semantic_planner is not None
+            and semantic_required
+            and semantic_planner_selected(
+                room_id=room_id,
+                client_action_id=client_action_id,
+                rollout_percent=self._semantic_planner_rollout_percent,
+            )
         )
         keeper_capabilities = None
         try:
@@ -1056,6 +1107,12 @@ class ActionPlanTurnApplication:
             "turn_planner_route_selected",
             action=client_action_id[:12],
             route="semantic" if use_semantic_planner else "legacy",
+            route_reason=(semantic_reason if semantic_required else "fast_single_step"),
+            rollout_selected=semantic_planner_selected(
+                room_id=room_id,
+                client_action_id=client_action_id,
+                rollout_percent=self._semantic_planner_rollout_percent,
+            ),
         )
         await _emit_phase(on_phase, "executing_action")
         result = await self._dispatcher.execute(

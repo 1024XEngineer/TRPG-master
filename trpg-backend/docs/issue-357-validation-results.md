@@ -77,3 +77,16 @@ P95 约 `1132ms`，并非主要失败来源。该差异说明当前语义 Planne
 - PR3：不具备数据门槛，不删除旧 producer 或 `SingleActionDecision`。
 - Draft PR #403：保持 Draft；后续若修复模型配置、Prompt 或 benchmark 基础设施，必须从 smoke
   和两轮正式测试全部重跑，旧失败报告保留为证据。
+
+## 架构决策更新
+
+基于上述失败证据和 2026-08-24 的诊断 micro benchmark，Issue #357 改采用“统一执行层、保留低延迟 producer”的路线。
+
+- `ActionPlan(1..N)`、`ActionPlanRun`、Engine 单步边界、恢复/取消/幂等和 Narrator 状态机继续统一；
+- 明确的一步输入继续走 legacy fast producer，并由现有内部 adapter 转成 `ActionPlan(1)`；
+- 多步、多目标、顺序依赖和语义不确定输入进入 semantic Planner；
+- `real_investigation` 的 `target_missing` 仍由当前 Step Adjudicator 裁决，不能伪造 deterministic 成功；
+- 原性能门槛没有降低，旧 NO-GO 结果仍然有效；
+- `SingleActionDecision` 暂作为内部过渡 adapter 保留，PR3 不启动。
+
+完整决策、路由安全边界和剩余风险见 `docs/issue-357-architecture-decision.md`。

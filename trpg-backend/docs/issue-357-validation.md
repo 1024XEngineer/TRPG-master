@@ -4,6 +4,18 @@
 固定 `24/24/48` 小时观察窗口已取消，替换为一次 smoke 和连续两轮正式测试。工具不会
 人为等待；仅真实请求耗时和配置的 `0.25s` transport retry 退避会占用时间。
 
+### 当前架构决策
+
+真实 Round 1 重跑与后续 micro benchmark 证明：统一 `ActionPlan(1..N)` 执行层是可行的，
+但复杂一步行动可能因独立 Step Adjudicator 而增加一次串行模型调用。Issue #357 当前采用
+“统一执行层、保留低延迟 producer”的路线：明确一步输入走 legacy fast producer 并由内部
+adapter 转成 `ActionPlan(1)`；多步、多目标、顺序依赖和语义不确定输入才按稳定 rollout bucket
+进入 semantic Planner。详见 `docs/issue-357-architecture-decision.md`。
+
+因此，原性能门槛仍然是报告门槛，不会因为保留 fast producer 而被修改；当前决策也不等于
+PR3 已获准执行。`SingleActionDecision` 暂作为内部过渡 adapter 保留，直到新的 fast producer
+contract 能直接返回统一 `ActionPlan(1)` 并完成独立回归验证。
+
 测试通过只表示 PR1 的真实 legacy 基线和 PR2 的真实对比达到进入 PR3 的数据门槛，
 不会自动合并 Draft PR、提高生产 rollout 或删除旧链路。连续测试不覆盖长时间生产流量波动，
 这是取消时间灰度后明确接受并记录的剩余风险。

@@ -26,6 +26,7 @@ from collaboration_framework.contracts import (
     CheckDecisionRequest,
     CheckRunView,
     CheckStep,
+    RuleCheckSpec,
     ContractError,
     GetAdjudicationStatusRequest,
     NarrationEvidence,
@@ -836,11 +837,14 @@ class AdjudicationEngineService:
                     player_safe_reason="所选检定方式不在当前可用列表中",
                 )
             roll = self._roll(option.target_value, option.difficulty)
+            rule_check = self._rule_check_spec(runtime, decision)
             post_options = self._post_roll_options(
                 runtime,
                 actor_id=decision.actor_id,
                 option=option,
                 roll=roll,
+                allow_push=rule_check is None or rule_check.allow_push is not False,
+                allow_luck=rule_check is None or rule_check.allow_luck is not False,
             )
             check_run = CheckRun(
                 check_id=self._new_id("check"),
@@ -1234,6 +1238,11 @@ class AdjudicationEngineService:
                 status="awaiting_skill_choice",
                 outcome="pending",
                 pending_decision=final.pending_decision.player_view(),
+                # 规则可以在玩家自己那次掷骰刚结算完之后马上再要一次检定。丢掉
+                # `check_run` 的话 `ws.py::_emit_check_result` 会直接短路：不发
+                # `check.result`、不落 `events`，replay 与 recent-history 里都没有
+                # 这一掷。玩家看到的是一个新骰子面板，而刚才那次掷骰不存在。
+                check_run=check_run,
             )
         return AdjudicationExecution(
             **common,
@@ -1595,7 +1604,16 @@ class AdjudicationEngineService:
         actor_id: str,
         option: PendingCheckOption,
         roll: CheckRoll,
+        allow_push: bool = True,
+        allow_luck: bool = True,
     ) -> tuple[AcceptResultOption | SpendResourceOption | PushOption, ...]:
+        """奖惩骰菜单。`allow_push` / `allow_luck` 只有规则拥有的检定才会传。
+
+        `RuleCheckSpec` 一直带着这两个字段，但在 #398 之前零消费者——被动检定
+        根本还没接通，所以一条规则说不出「这次不许 push」。两个字段默认 None，
+        调用方译成 True，所以现有内容行为不变。
+        """
+
         options: list[AcceptResultOption | SpendResourceOption | PushOption] = [
             AcceptResultOption(option_id="accept-current")
         ]
@@ -1610,7 +1628,8 @@ class AdjudicationEngineService:
         luck_value = actor.resources.luck if actor is not None else None
         cost = roll.value - threshold
         if (
-            roll.degree != "fumble"
+            allow_luck
+            and roll.degree != "fumble"
             and cost > 0
             and luck_value is not None
             and luck_value >= cost
@@ -1626,13 +1645,41 @@ class AdjudicationEngineService:
                     }[option.difficulty],
                 )
             )
-        options.append(
-            PushOption(
-                option_id="push-once",
-                player_safe_risk_summary="再次尝试会承担更严重的失败后果",
+        if allow_push:
+            options.append(
+                PushOption(
+                    option_id="push-once",
+                    player_safe_risk_summary="再次尝试会承担更严重的失败后果",
+                )
             )
-        )
         return tuple(options)
+
+    @staticmethod
+    def _rule_check_spec(
+        runtime: EngineRuntimeSnapshot,
+        decision: PendingCheckDecision,
+    ) -> RuleCheckSpec | None:
+        """规则拥有的检定回它的 spec；玩家自己发起的检定回 None。
+
+        `rule_origin` 非空即「这是规则拥有的检定」，游标足够把 `CheckStep` 找回
+        来——`_resume_rule_check` 做的是同一件事。`PendingCheckOption` 只带得动
+        技能与目标值，带不动出处，所以在调用点解析而不是塞进 option。
+        """
+
+        origin = decision.rule_origin
+        if origin is None:
+            return None
+        rule = next(
+            (item for item in runtime.module_content.rules if item.id == origin.rule_id),
+            None,
+        )
+        if rule is None:
+            return None
+        step = next(
+            (item for item in rule.execution.steps if item.id == origin.step_id),
+            None,
+        )
+        return step.check if isinstance(step, CheckStep) else None
 
     @staticmethod
     def _spend_luck(state: GameState, actor_id: str, cost: int) -> GameState:
@@ -1754,7 +1801,6 @@ class AdjudicationEngineService:
             runtime, request_id=request_id, actor_id=adjudication.actor_id
         )
         continuation = AgendaParentContinuation(
-            action_request_id=adjudication.request_id,
             passed=passed,
             remaining_effects=selected_effects,
         )
@@ -1876,6 +1922,7 @@ class AdjudicationEngineService:
             runner=_SettlementRunner(self, runtime, request_id, decision.actor_id),
             queue=list(agenda.queue),
             source_event_ids=list(agenda.source_event_ids),
+            carried=list(agenda.carried_events),
             suspended=True,
         )
         degree = (check_run.final_result or check_run.roll).degree
@@ -1883,7 +1930,6 @@ class AdjudicationEngineService:
             rule, step.result_routes.get(degree), state, events
         )
         continuation = agenda.parent_continuation or AgendaParentContinuation(
-            action_request_id=decision.action_request_id,
             passed=passed,
             completion_emitted=True,
         )
@@ -1964,7 +2010,47 @@ class AdjudicationEngineService:
                 adjudication=adjudication,
                 player_id=player_id,
             )
-        state, agenda_failure_code = settlement.finish(state, events)
+            if pending_decision is None:
+                # 挂起点没能变成一个真的能掷的检定——`_passive_check_decision`
+                # 已经把 Agenda 打成 failed 了，重新取一次结果走下面的终态分支。
+                result = settlement.result(state)
+
+        unsettled_effects = 0
+        if result.status == "failed":
+            # 规则链失败是规则侧的问题，不构成对玩家动作的否决。#398 的零回归
+            # 要求写得很直白：「新增执行屏障不得改变无阻塞动作的既有结果」——
+            # 屏障管的是结算时机，不是否决权。屏障之前这些效果本来就会全部执行。
+            #
+            # 在此之前它们被静默丢弃，而 execution 照样报 outcome=success，
+            # ActionPlan 于是踩着一个只做了一半的世界继续往下走。
+            #
+            # Agenda 已是终态，`advance()` 不会再前进，所以这些效果不再参与规则
+            # 结算——数量写进审计事件，不当作没发生过。
+            state, unsettled_effects = self._apply_effects_unsettled(
+                state,
+                events,
+                remaining,
+                runtime=runtime,
+                request_id=request_id,
+                actor_id=actor_id,
+            )
+            remaining = ()
+            if not completion_emitted:
+                events.append(
+                    self._completion_event(
+                        state,
+                        runtime=runtime,
+                        request_id=request_id,
+                        adjudication=adjudication,
+                        passed=continuation.passed,
+                        offset=len(events) + 1,
+                    )
+                )
+                completion_emitted = True
+
+        state, agenda_failure_code = settlement.finish(
+            state, events, unsettled_effects=unsettled_effects
+        )
         state = state.model_copy(
             update={"event_sequence": runtime.game_state.event_sequence + len(events)},
             deep=True,
@@ -2028,6 +2114,17 @@ class AdjudicationEngineService:
 
         agenda = settlement.agenda
         if agenda.status != "awaiting_passive_check":
+            # 事件规则挂在了别的边界上。`awaiting_active_check` /
+            # `awaiting_presentation` / `awaiting_player_input` 都没有任何东西
+            # 会推进（#405 已把后两者从登记表层面改成直接 failed，这里兜住剩下
+            # 的一种）。直接 return None 的话 `agenda_failure_code` 是空的，
+            # execution 报 resolved，而一个永远不会动的 Agenda 留在库里——正是
+            # #398 §目标 5 要消灭的静默挂死。
+            #
+            # 事件规则走不到这里是有依据的：两个线上模组的 26 处 active check
+            # 与唯一一处 adjudicated_check 全在 agent_match 规则里，而
+            # `matching_event_rules` 只筛 EventTriggerSpec。
+            settlement.fail(f"rule_boundary_unsupported:{agenda.status}")
             return None
         rule = next(
             (
@@ -2051,6 +2148,13 @@ class AdjudicationEngineService:
         )
         if rule is None or not isinstance(step, CheckStep):
             settlement.fail("passive_check_step_not_found")
+            return None
+
+        if step.check.actor_binding != "actor":
+            # 引擎只会替行动者掷骰。把绑定解析成真实角色是新能力（#347 §4.8 明确
+            # 排除），但静默替错人掷骰比不掷更糟：那会让规则拿着别人的属性走
+            # `result_routes`，而且没有任何痕迹。
+            settlement.fail("rule_check_actor_binding_unsupported")
             return None
 
         option = self._passive_check_option(state, adjudication.actor_id, step)
@@ -2188,57 +2292,74 @@ class AdjudicationEngineService:
         """
 
         events.append(
-            self._event_from_state(
+            self._completion_event(
                 state,
-                room_id=runtime.game_state.room_id,
-                offset=len(events) + 1,
+                runtime=runtime,
                 request_id=request_id,
-                actor_id=adjudication.actor_id,
-                event_type="action.succeeded" if passed else "action.failed",
-                payload={"action_request_id": adjudication.request_id},
+                adjudication=adjudication,
+                passed=passed,
+                offset=len(events) + 1,
             )
         )
         settled = settlement.advance(state, events)
         return settled.state, settled
 
-    def _apply_event_rules(
+    def _completion_event(
         self,
-        runtime: EngineRuntimeSnapshot,
-        *,
         state: GameState,
-        events: list[DomainEvent],
-        request_id: str,
-        actor_id: str,
-    ) -> tuple[GameState, list[DomainEvent], str | None]:
-        return self._apply_v3_event_rules(
-            runtime,
-            state=state,
-            events=events,
-            request_id=request_id,
-            actor_id=actor_id,
-        )
-
-    def _apply_v3_event_rules(
-        self,
-        runtime: EngineRuntimeSnapshot,
         *,
-        state: GameState,
-        events: list[DomainEvent],
+        runtime: EngineRuntimeSnapshot,
         request_id: str,
-        actor_id: str,
-    ) -> tuple[GameState, list[DomainEvent], str | None]:
-        """Run event Rules in queue order and persist the first blocked cursor.
+        adjudication: ActionAdjudication,
+        passed: bool,
+        offset: int,
+    ) -> DomainEvent:
+        """只造事件，不结算。
 
-        Effects and the resulting Agenda are returned in the same ``new_state``
-        and therefore committed atomically by ``commit_adjudication``.
+        规则链已经失败时也要发这条——动作确实到此为止了——但那时 Agenda 是终态，
+        再调一次 `advance()` 只会立刻返回，写成结算是在假装还在结算。
         """
 
-        settlement = self._new_settlement(
-            runtime, request_id=request_id, actor_id=actor_id
+        return self._event_from_state(
+            state,
+            room_id=runtime.game_state.room_id,
+            offset=offset,
+            request_id=request_id,
+            actor_id=adjudication.actor_id,
+            event_type="action.succeeded" if passed else "action.failed",
+            payload={"action_request_id": adjudication.request_id},
         )
-        result = settlement.advance(state, events)
-        state, failure_code = settlement.finish(result.state, events)
-        return state, events, failure_code
+
+    def _apply_effects_unsettled(
+        self,
+        state: GameState,
+        events: list[DomainEvent],
+        effects: tuple[ActionEffect, ...],
+        *,
+        runtime: EngineRuntimeSnapshot,
+        request_id: str,
+        actor_id: str,
+    ) -> tuple[GameState, int]:
+        """执行父动作剩下的效果，但不再结算它们唤醒的规则。
+
+        只在规则链已经 `failed` 时走这里。Agenda 是终态、没有恢复的余地，所以
+        没有「同一个 Agenda」可以继续收这些事件；硬造一个新的等于让一条失败的
+        规则链自己复活。效果照跑（否则玩家的动作被一条坏规则否决了一半），
+        数量记进 `rule.agenda_failed` 的 `unsettled_effect_count`。
+        """
+
+        for effect in effects:
+            state, emitted = self._apply_effect(
+                runtime,
+                state,
+                effect,
+                room_id=runtime.game_state.room_id,
+                request_id=request_id,
+                actor_id=actor_id,
+                offset=len(events) + 1,
+            )
+            events.extend(emitted)
+        return state, len(effects)
 
     def _new_settlement(
         self,

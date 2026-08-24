@@ -158,9 +158,9 @@ async def test_passive_check_persists_and_resumes_across_a_store_restart(
     assert len(agenda.parent_continuation.remaining_effects) == 1
     assert agenda.parent_continuation.completion_emitted is False
 
-    # 这条决策必须真的落库。原来的 uq_pending_check_decisions_room_action 唯一
-    # 约束会在这里炸掉——父动作虽然没掷骰，但同一个 action_request_id 上先后
-    # 出现两条决策的能力正是迁移 b8c9d0e1f2a3 放开的。
+    # 这条决策必须真的落库。同一个 action_request_id 上出现**第二条**决策的
+    # 场景由 `test_two_open_decisions_...` 单独覆盖——那才是迁移 b8c9d0e1f2a3
+    # 真正放开的能力。
     records = (
         await db_session.scalars(
             select(PendingCheckDecisionRecord).where(
@@ -246,3 +246,158 @@ async def test_a_replayed_check_decision_does_not_run_the_rule_twice(
 
     assert replay.check_run == first.check_run
     assert replay.event_refs == first.event_refs
+
+
+async def _arm_two_rules_on_one_event(db: AsyncSession, room_id: str) -> str:
+    """摆成「一条 entity.state_changed 同时点着两条规则」的局面。
+
+    `ghoul_crowd_sanity`（priority 180）与 `first_sight_of_douglas`（120）的触发
+    条件互不相干，所以任何一条 `entity.state_changed` 都会同时命中两者——这正是
+    #398 失败案例 B。
+    """
+
+    game_session = await db.get(GameSession, room_id)
+    assert game_session is not None
+    state = GameState.model_validate(game_session.state_json)
+    actor_id = next(iter(state.actors))
+    actor = state.actors[actor_id]
+    entities = dict(state.entities)
+    entities["ghoul_crowd"] = {**entities.get("ghoul_crowd", {}), "revealed": True}
+    entities["cemetery_figure"] = {
+        **entities["cemetery_figure"],
+        "true_form_seen": True,
+    }
+    entities["case_tracker"] = {
+        **entities["case_tracker"],
+        "crowd_sight_resolved": False,
+        "first_ghoul_sight_resolved": False,
+    }
+    entities["favorite_grave"] = {
+        **entities.get("favorite_grave", {}),
+        "examined": False,
+    }
+    game_session.state_json = state.model_copy(
+        update={
+            "entities": entities,
+            "actors": {
+                actor_id: actor.model_copy(
+                    update={"resources": ActorResources(san=55, luck=50)}, deep=True
+                )
+            },
+        },
+        deep=True,
+    ).to_json_dict()
+    await db.commit()
+    return actor_id
+
+
+async def test_two_open_decisions_never_coexist_on_one_action(
+    db_session: AsyncSession,
+    engine_store_factory: Callable[..., SqlAlchemyEngineStore],
+) -> None:
+    """迁移 b8c9d0e1f2a3 的真正验收：一个动作先后挂两次检定。
+
+    旧约束 `uq_pending_check_decisions_room_action` 把「一个动作至多一个检定」
+    写死在 schema 里。真正要守的不变量是「同一个动作不能同时挂着两个**未结算**
+    的检定」，所以迁移换成了只在 `awaiting_skill_choice` / `rolled` 上生效的条件
+    唯一索引。
+
+    要逼出这条路径，得让同一个动作先后要两次检定：第一条决策必须在第二条插入的
+    **同一个事务**里被改成 `resolved`（`commit_adjudication` 的
+    `additional_decisions` 就是干这个的），否则条件唯一索引当场炸。
+
+    在此之前这条路径在任何一层都没有覆盖：原来那条测试断言 `len(records) == 1`，
+    而单独一行在旧约束下同样成立。
+    """
+
+    room, players, _ = await _start_room(db_session, room_number=96)
+    room_id, player_id = room.id, players[0].id
+    actor_id = await _arm_two_rules_on_one_event(db_session, room_id)
+
+    store = engine_store_factory()
+    async with store.transaction(room_id) as transaction:
+        runtime = await transaction.load_runtime()
+    action_id = "issue398-two-checks"
+    execution = await AdjudicationEngineService(store).submit(
+        SubmitAdjudicationRequest(
+            room_id=room_id,
+            player_id=player_id,
+            adjudication=ActionAdjudication(
+                request_id=action_id,
+                source_revision=runtime.revision,
+                actor_id=actor_id,
+                summary="细看那座常去的坟",
+                target=ActionTarget(kind="entity", id="favorite_grave"),
+                method=ActionMethod(family="observe", description="俯身细看"),
+                check=NoAdjudicationCheck(),
+                success_effects=(
+                    ChangeEntityStateEffect(entity_id="favorite_grave", key="examined", value=True),
+                ),
+            ),
+        )
+    )
+
+    # 优先级高的先挂起。
+    assert execution.status == "awaiting_skill_choice"
+    first = execution.pending_decision
+    assert first is not None
+
+    rolled = await AdjudicationEngineService(
+        engine_store_factory(), dice=DiceRoller(SequenceDiceSource([12]))
+    ).decide(
+        CheckDecisionRequest(
+            request_id="issue398-two-checks-roll-1",
+            room_id=room_id,
+            player_id=player_id,
+            source_revision=execution.view_revision,
+            decision_id=first.decision_id,
+            decision_version=first.decision_version,
+            choice=SelectCheckChoice(candidate_id=first.options[0].candidate_id),
+        )
+    )
+    assert rolled.check_run is not None
+    second = await AdjudicationEngineService(engine_store_factory()).decide_post_roll(
+        PostRollDecisionRequest(
+            request_id="issue398-two-checks-accept-1",
+            room_id=room_id,
+            player_id=player_id,
+            source_revision=rolled.view_revision,
+            check_id=rolled.check_run.check_id,
+            check_version=rolled.check_run.version,
+            option_id="accept-current",
+        )
+    )
+
+    # 第二条规则接着挂起——同一个动作上的第二次检定。
+    assert second.status == "awaiting_skill_choice"
+    assert second.pending_decision is not None
+    assert second.pending_decision.decision_id != first.decision_id
+    # 刚掷完的那一骰必须跟着回去，否则 `ws._emit_check_result` 会短路，
+    # 玩家看到一个新骰子面板而刚才那次掷骰不存在。
+    assert second.check_run is not None
+    assert second.check_run.status == "resolved"
+
+    db_session.expire_all()
+    records = (
+        await db_session.scalars(
+            select(PendingCheckDecisionRecord).where(
+                PendingCheckDecisionRecord.room_id == room_id,
+                PendingCheckDecisionRecord.action_request_id == action_id,
+            )
+        )
+    ).all()
+    # 两条决策共享一个 action_request_id——旧的唯一约束会在这里炸。
+    assert len(records) == 2
+    open_records = [
+        record for record in records if record.status in {"awaiting_skill_choice", "rolled"}
+    ]
+    # 而条件唯一索引要守的那条仍然成立：未结算的只有一条。
+    assert len(open_records) == 1
+    assert open_records[0].decision_id == second.pending_decision.decision_id
+
+    # `find_pending_check_by_action` 的新排序必须挑出未结算的那条。
+    lookup_store = engine_store_factory()
+    async with lookup_store.transaction(room_id) as transaction:
+        found = await transaction.find_pending_check_by_action(action_id)
+    assert found is not None
+    assert found.decision_id == second.pending_decision.decision_id

@@ -3,15 +3,23 @@
 from __future__ import annotations
 
 import json
+import time
 
 import httpx
 from collaboration_framework.contracts import JsonObject
 
-from app.adapters.openai_models import StructuredJsonClient, _log_structured_usage
+from app.adapters.openai_models import (
+    StructuredJsonClient,
+    _log_structured_usage,
+    _safe_correlation_id,
+)
 from app.adapters.qwen_models import chat_completion_output_text
 from app.adapters.structured_http import (
+    ModelCallTrace,
     ModelClientRetryPolicy,
+    StructuredOutputError,
     decode_structured_json,
+    log_structured_output_failure,
     post_structured_json,
     read_structured_payload,
 )
@@ -74,6 +82,13 @@ class DeepSeekChatCompletionsJsonClient(StructuredJsonClient):
             # 只是字段名不同。
             "thinking": {"type": "disabled"},
         }
+        started_at = time.monotonic()
+        trace = ModelCallTrace(
+            correlation_id=_safe_correlation_id(input_payload),
+            stage=schema_name,
+            provider="deepseek",
+            model=self._model,
+        )
         async with httpx.AsyncClient(
             headers={
                 "Authorization": f"Bearer {self._api_key}",
@@ -82,26 +97,43 @@ class DeepSeekChatCompletionsJsonClient(StructuredJsonClient):
             timeout=self._timeout_seconds,
             transport=self._transport,
         ) as client:
-            response = await post_structured_json(
+            transport_result = await post_structured_json(
                 client,
                 f"{self._base_url}/chat/completions",
                 json=request_payload,
                 provider="deepseek",
                 retry_policy=self._retry_policy,
+                trace=trace,
             )
 
-        response_payload = read_structured_payload(response, provider_name="DeepSeek")
+        try:
+            response_payload = read_structured_payload(
+                transport_result.response,
+                provider_name="DeepSeek",
+            )
+            output_text = chat_completion_output_text(
+                response_payload,
+                provider_name="DeepSeek",
+            )
+            result = decode_structured_json(output_text, provider_name="DeepSeek")
+        except StructuredOutputError as exc:
+            log_structured_output_failure(
+                trace=trace,
+                duration_ms=int((time.monotonic() - started_at) * 1000),
+                transport_attempts=transport_result.transport_attempts,
+                error=exc,
+            )
+            raise
         _log_structured_usage(
             response_payload,
             provider="deepseek",
             model=self._model,
             schema_name=schema_name,
+            duration_ms=int((time.monotonic() - started_at) * 1000),
+            correlation_id=trace.correlation_id,
+            transport_attempts=transport_result.transport_attempts,
         )
-        output_text = chat_completion_output_text(
-            response_payload,
-            provider_name="DeepSeek",
-        )
-        return decode_structured_json(output_text, provider_name="DeepSeek")
+        return result
 
 
 __all__ = ["DeepSeekChatCompletionsJsonClient"]

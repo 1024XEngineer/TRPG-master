@@ -28,11 +28,16 @@ from .history import (
     RecentTurnContext,
     VisibleHistoryText,
 )
+from .memory import ConversationSummary, MemoryContext, MemoryEntry
 from .output import (
     NarrationOutput,
 )
-from .planner_context import HostAgentContext
-from .memory import ConversationSummary, MemoryContext, MemoryEntry
+from .planner_context import (
+    HostAgentContext,
+    TurnPlanningContext,
+    TurnPlanningReference,
+    TurnPlanningView,
+)
 
 __all__ = [
     "RESERVATION_TTL",
@@ -45,11 +50,11 @@ __all__ = [
     "ActionPlanStepContext",
     "ActionPlanStepRun",
     "CompletedPlanStepSummary",
-    "HostAgentContext",
     "ConversationSummary",
+    "HistoryVisibility",
+    "HostAgentContext",
     "MemoryContext",
     "MemoryEntry",
-    "HistoryVisibility",
     "NarrationOutput",
     "OpeningNarrationContext",
     "OpeningParticipant",
@@ -60,6 +65,9 @@ __all__ = [
     "RecentSafeResult",
     "RecentTurn",
     "RecentTurnContext",
+    "TurnPlanningContext",
+    "TurnPlanningReference",
+    "TurnPlanningView",
     "VisibleHistoryText",
     "reservation_is_expired",
 ]

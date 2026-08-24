@@ -51,6 +51,10 @@ services:
       # Variables 显式覆盖，通用后端配置不受这里的 Preview 默认值影响。
       DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.qnaigc.com/v1}
       DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek/deepseek-v4-pro-202606}
+      QWEN_API_KEY: ${QWEN_API_KEY:-}
+      QWEN_BASE_URL: ${QWEN_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+      QWEN_MODEL: ${QWEN_MODEL:-qwen3.7-plus}
+      QWEN_TIMEOUT_SECONDS: ${QWEN_TIMEOUT_SECONDS:-30}
       CHARACTER_BACKGROUND_PROVIDER: ${CHARACTER_BACKGROUND_PROVIDER:-deterministic}
       # 角色生图的提示词与图片生成是两段独立链路：DeepSeek 负责提示词，
       # Sufy Gemini 负责图片。CI 在两套 key 都存在时启用真实链路，否则

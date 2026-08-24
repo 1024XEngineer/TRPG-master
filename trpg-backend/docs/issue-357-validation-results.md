@@ -1,4 +1,4 @@
-# Issue #357 连续真实模型验证结果
+# Issue #357 真实模型验证与架构结论
 
 ## 测试环境
 
@@ -71,12 +71,11 @@ step count/kind 顺序全部正确。
 P95 约 `1132ms`，并非主要失败来源。该差异说明当前语义 Planner 到当前步骤策略之间仍缺少
 足够的确定性/rule-first 覆盖，不能据此删除旧 producer contract。
 
-## 后续状态
+## 纯 semantic 方案结论
 
-- Round 2：未执行。根据协议，任一轮失败必须先定位问题，不能用第二轮平均值掩盖 Round 1。
-- PR3：不具备数据门槛，不删除旧 producer 或 `SingleActionDecision`。
-- Draft PR #403：保持 Draft；后续若修复模型配置、Prompt 或 benchmark 基础设施，必须从 smoke
-  和两轮正式测试全部重跑，旧失败报告保留为证据。
+- Round 1 重跑已经证明纯 semantic 全量替换不满足性能门槛；Round 2 因而没有必要执行。
+- 原 PR3 不再执行，不删除 legacy producer 或 `SingleActionDecision`。
+- 这些结果只作为架构决策证据保留，不是 hybrid 方案尚待完成的测试清单。
 
 ## 架构决策更新
 
@@ -96,10 +95,11 @@ P95 约 `1132ms`，并非主要失败来源。该差异说明当前语义 Planne
 本 issue 的实现方向已收敛为 hybrid producer，不再继续追逐纯 semantic producer 的 PR3 删除路径：
 
 - hybrid smoke 已通过：legacy corpus、semantic corpus、legacy E2E、hybrid E2E 均无 terminal failure，实际路由和 Step Adjudicator 路径符合架构决策；
-- 正式 Round 1 未完成，不将中止的 200 样本 runner 解释为 GO 或 NO-GO；
 - 原有 Round 1 重跑的 `NO-GO` 仍保留为纯 semantic producer 的历史性能证据；
 - `ActionPlan(1..N)` 执行层统一继续保留；
 - `SingleActionDecision`、legacy fast producer 和 rollout 配置继续保留；
-- PR3 不执行，Draft PR #403 不合并。
+- PR3 不执行。
 
-后续若重新启动正式 Round，必须先单独改进 runner 的进度和超时边界；这不再属于当前架构收敛工作，不能以重复真实模型调用替代决策。
+Round 1/2 是纯 semantic 全量替换方案的旧验收协议，不再是 hybrid 方案的合并门槛。hybrid
+方案以标准自动化测试、路由定向回归和上述真实模型 smoke 作为当前验收依据，不再启动大批量
+真实模型 Round。

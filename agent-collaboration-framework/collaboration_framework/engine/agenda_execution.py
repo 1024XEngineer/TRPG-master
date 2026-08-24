@@ -33,6 +33,7 @@ from .models import (
     RuleAgenda,
 )
 from .rules_v3 import (
+    AGENDA_STEP_BUDGET_EXCEEDED,
     agenda_failure_code_for_walk,
     agenda_item_for_event,
     agenda_status_for_walk,
@@ -46,6 +47,10 @@ AUDIT_EVENT_TYPES = frozenset({"rule.triggered", "rule.agenda_failed"})
 
 # 一个 Agenda 到了这两个状态就再没有推进的余地，也没有任何读者。
 SETTLED_AGENDA_STATUSES = frozenset({"stable", "failed"})
+
+# 队列里的规则在模组换版之后找不到了。与 `RULE_AGENDA_UNRESUMABLE` 同源：
+# 游标指向的东西不在了，半截执行比显式失败更糟。
+QUEUED_RULE_NOT_FOUND = "queued_rule_not_found"
 
 SettlementStatus = Literal["stable", "suspended", "failed"]
 
@@ -114,11 +119,21 @@ class RuleSettlement:
 
     queue: list[AgendaItem] = field(default_factory=list)
     source_event_ids: list[str] = field(default_factory=list)
+    # 上一次请求挂起时还没读到的事件。它们已经落库了，所以**不能**并回 `events`
+    # （那个列表会被整体当成新事件写出去），只能单独排在前面消费。
+    carried: list[DomainEvent] = field(default_factory=list)
     # (rule_id, source_event_id) 已经点过火的组合。一条规则对同一个事件只触发
     # 一次，跨 advance() 调用同样成立——所以它和 cursor 一样是实例状态。
     fired: set[tuple[str, str]] = field(default_factory=set)
     cursor: int = 0
     suspended: bool = False
+
+    def __post_init__(self) -> None:
+        # `_enqueue_matching` 每点一次火就正好追加一个队列项，两者严格 1:1，所以
+        # `fired` 可以从 `queue` 重建，不必单独持久化一份。跨请求恢复时调用方只
+        # 传得回 `queue`——不重建的话 `fired` 是空的，同一条规则会对同一个事件
+        # 再触发一次（#398 验收：重试 / 重连 / 进程重启后保持幂等）。
+        self.fired |= {(item.rule_id, item.source_event_id) for item in self.queue}
 
     @property
     def module(self) -> ModuleContentV3:
@@ -131,21 +146,100 @@ class RuleSettlement:
     ) -> SettlementResult:
         """Settle every event appended since the last call.
 
-        `events` is appended to in place: rule effects emit their own events,
-        and those events are themselves rule inputs, so the loop's bound is
+        Two phases, in this order: drain whatever is already queued, then read
+        one more event. `events` is appended to in place — rule effects emit
+        their own events and those are themselves rule inputs — so the bound is
         re-read each pass rather than captured up front.
+
+        入队与执行原来是同一步：`_enqueue_matching` 把刚入队的规则返回给调用方，
+        调用方在一个遇挂起就 `break` 的 `for` 循环里跑它们。于是还留在那个循环里
+        的规则再也无人问津——全仓库没有任何地方读 `queued` 项。一个事件匹配到两
+        条规则、第一条挂起，第二条就永远不会触发。
+
+        《追书人》的 `ghoul_crowd_sanity`（priority 180）与
+        `first_sight_of_douglas`（120）——#398 失败案例 B 点名的那两条——正好匹配
+        同一条 `entity.state_changed`。拆成两相之后，队列成为「还有什么没跑」的
+        唯一事实源，这次请求和恢复它的那次请求读的是同一份。
         """
 
-        while self.cursor < len(events) and not self.suspended:
-            source_event = events[self.cursor]
-            self.cursor += 1
+        while not self.suspended:
+            state, ran = self._drain_queue(state, events)
+            if ran:
+                # 跑一条规则可能又追加了事件，也可能刚好挂起——两种情况都要
+                # 回到循环顶部重新判断，而不是接着往下读事件。
+                continue
+            source_event = self._next_source_event(events)
+            if source_event is None:
+                break
             if source_event.type in AUDIT_EVENT_TYPES:
                 continue
-            for rule in self._enqueue_matching(state, source_event):
-                state, keep_going = self._run_rule(rule, source_event, state, events)
-                if not keep_going:
-                    break
+            self._enqueue_matching(state, source_event)
         return self._result(state)
+
+    def result(self, state: GameState) -> SettlementResult:
+        """当前结算状态。`fail()` 之后调用方要能重新取一次。"""
+
+        return self._result(state)
+
+    def _next_source_event(self, events: list[DomainEvent]) -> DomainEvent | None:
+        """先还上一次请求欠的事件，再读这一次的。
+
+        `carried` 里的事件在时间上都早于本次请求，所以排在前面。它们是按**恢复
+        时**的 state 匹配的，不是发生当时的快照——房间锁与挂起的检定决策挡住了
+        其他提交，所以偏差只限于「这次检定 result_routes 分支的效果」这一项。
+        要做到完全精确得给每条事件存一份 state 快照，远超 #398 的范围。
+        """
+
+        if self.carried:
+            return self.carried.pop(0)
+        if self.cursor < len(events):
+            event = events[self.cursor]
+            self.cursor += 1
+            return event
+        return None
+
+    def _drain_queue(
+        self,
+        state: GameState,
+        events: list[DomainEvent],
+    ) -> tuple[GameState, bool]:
+        """Run the next queued item, if there is one.
+
+        FIFO is the deterministic order: `_enqueue_matching` appends in
+        `matching_event_rules` order（priority DESC, id ASC）and events are read
+        in sequence, so the queue already holds the exact order #226 §4 froze.
+        """
+
+        index = next(
+            (i for i, item in enumerate(self.queue) if item.status == "queued"),
+            None,
+        )
+        if index is None:
+            return state, False
+        item = self.queue[index]
+        rule = next(
+            (
+                candidate
+                for candidate in self.module.rules
+                if candidate.id == item.rule_id
+            ),
+            None,
+        )
+        if rule is None:
+            # 模组换版之后队列里的规则不在了。半截执行比显式失败更糟。
+            self._set_item(index, "failed")
+            self.agenda = self.agenda.model_copy(
+                update={
+                    "status": "failed",
+                    "failure_code": QUEUED_RULE_NOT_FOUND,
+                    "current_rule_id": item.rule_id,
+                    "current_branch_id": item.branch_id,
+                }
+            )
+            self.suspended = True
+            return state, False
+        state, _ = self._run_rule(rule, item.source_event_id, state, events)
+        return state, True
 
     # ------------------------------------------------------------------ #
     # internals
@@ -155,8 +249,8 @@ class RuleSettlement:
         self,
         state: GameState,
         source_event: DomainEvent,
-    ) -> list[RuleSpecV3]:
-        pending_rules: list[RuleSpecV3] = []
+    ) -> None:
+        matched = False
         for rule in matching_event_rules(
             self.module,
             event_type=source_event.type,
@@ -167,25 +261,30 @@ class RuleSettlement:
             if fire_key in self.fired:
                 continue
             self.fired.add(fire_key)
-            pending_rules.append(rule)
+            matched = True
             self.queue.append(agenda_item_for_event(rule, source_event))
-        if pending_rules:
+        if matched:
             self.source_event_ids.append(source_event.event_id)
-        return pending_rules
 
     def _run_rule(
         self,
         rule: RuleSpecV3,
-        source_event: DomainEvent,
+        source_event_id: str,
         state: GameState,
         events: list[DomainEvent],
     ) -> tuple[GameState, bool]:
-        """Walk one rule. The flag is False when the Agenda stopped here."""
+        """Walk one rule. The flag is False when the Agenda stopped here.
+
+        Takes the source event's id rather than the event itself: that is all
+        this method ever needed（队列项定位 + `rule.triggered` 的 payload），and
+        `AgendaItem.source_event_id` 已经持久化了。所以恢复一条 `queued` 项不需
+        要把原始 `DomainEvent` 也存一份。
+        """
 
         item_index = next(
             index
             for index, item in enumerate(self.queue)
-            if item.source_event_id == source_event.event_id
+            if item.source_event_id == source_event_id
             and item.rule_id == rule.id
             and item.status == "queued"
         )
@@ -229,7 +328,7 @@ class RuleSettlement:
                 event_type="rule.triggered",
                 payload={
                     "rule_id": rule.id,
-                    "source_event_id": source_event.event_id,
+                    "source_event_id": source_event_id,
                     "agenda_id": self.agenda.agenda_id,
                 },
                 visibility="hidden",
@@ -386,7 +485,7 @@ class RuleSettlement:
         self._set_item(item_index, "failed")
         update: dict = {
             "status": "failed",
-            "failure_code": "agenda_budget_exceeded",
+            "failure_code": AGENDA_STEP_BUDGET_EXCEEDED,
             "current_rule_id": rule.id,
             "current_branch_id": self.queue[item_index].branch_id,
         }
@@ -417,6 +516,8 @@ class RuleSettlement:
         self,
         state: GameState,
         events: list[DomainEvent],
+        *,
+        unsettled_effects: int = 0,
     ) -> tuple[GameState, str | None]:
         """Seal the Agenda and write only what is still in flight into `state`."""
 
@@ -446,6 +547,16 @@ class RuleSettlement:
                         "branch_id": self.agenda.current_branch_id,
                         "step_id": self.agenda.current_step_id,
                         "source_event_ids": list(self.source_event_ids),
+                        # 停在这条规则上，队列里排在它后面的就再没跑过。失败的
+                        # Agenda 不落库，不写进 payload 就彻底查不到了。
+                        "skipped_rule_ids": [
+                            item.rule_id
+                            for item in self.queue
+                            if item.status == "queued"
+                        ],
+                        # 链失败之后父动作剩下的效果照常执行（失败的规则链不否决
+                        # 玩家的动作），但它们不再参与规则结算——这件事必须说出来。
+                        "unsettled_effect_count": unsettled_effects,
                     },
                     visibility="hidden",
                 )
@@ -456,6 +567,12 @@ class RuleSettlement:
                 "source_event_ids": tuple(self.source_event_ids),
                 "queue": tuple(self.queue),
                 "revision": final_revision,
+                # 挂起时还没读到的事件。规则在挂起**之前**已经把 `rule.triggered`
+                # 和自己前置效果的事件追加进 `events` 了，游标却停在它们前面；
+                # 不带走的话，恢复后拿到的是一个全新的 events 列表，这些事件就
+                # 再也不会被任何规则匹配。只在途 Agenda 才落库，所以随 Agenda
+                # 一起消失，不会累积。
+                "carried_events": tuple(self.carried) + tuple(events[self.cursor :]),
             },
             deep=True,
         )

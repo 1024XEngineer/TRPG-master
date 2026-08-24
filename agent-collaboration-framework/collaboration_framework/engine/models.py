@@ -141,7 +141,6 @@ class AgendaParentContinuation(ContractModel):
     `action.succeeded` 触发的规则上」——后者不能再补发一次完成事件。
     """
 
-    action_request_id: str = Field(min_length=1)
     passed: bool
     remaining_effects: tuple[ActionEffect, ...] = ()
     completion_emitted: bool = False
@@ -177,6 +176,11 @@ class RuleAgenda(ContractModel):
     current_step_id: str | None = None
     pending_check_id: str | None = None
     parent_continuation: AgendaParentContinuation | None = None
+    # 挂起时游标还没读到的 DomainEvent。规则在挂起前已经发过 `rule.triggered`
+    # 和自己前置效果的事件，恢复时那些事件不在新的 events 列表里，不带走就
+    # 永远不会被匹配。只有在途 Agenda 落库，所以它随 Agenda 一起消失；上界由
+    # 既有的 `max_steps` 约束，不另设预算。
+    carried_events: tuple[DomainEvent, ...] = ()
     pending_boundary_id: str | None = None
     pending_rule_input_id: str | None = None
     revision: str = Field(min_length=1)

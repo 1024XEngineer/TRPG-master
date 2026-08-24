@@ -132,11 +132,15 @@ function checkResultContent(payload: CheckResultPayload): string {
 }
 
 function hostUtteranceFromActionInput(text: string): { utterance: string; explicit: true } | null {
-  // 中文输入习惯会直接在 mention 后接逗号或冒号；这些标点属于分隔符，
-  // 不应让一条明确发给守秘人的消息误落成多人 roleplay。
-  const mention = /^\s*@(主持人|守秘人)(?:\s+|[，。！？；：、,.!?;:]\s*|$)/u.exec(text)
+  // 中文输入习惯会直接在 mention 后接正文；这里把行首 @主持人/@守秘人 视为
+  // 显式主持路由，后面的空白或标点只是分隔符，不影响路由判定。
+  const mention = /^\s*@(主持人|守秘人)(?=(?:\s|[，。！？；：、,.!?;:]|$|[^A-Za-z0-9_]))/u.exec(text)
   if (!mention) return null
-  const rest = text.slice(mention[0].length).replace(/\s+/g, ' ').trim()
+  const rest = text
+    .slice(mention[0].length)
+    .replace(/^[\s，。！？；：、,.!?;:]+/u, '')
+    .replace(/\s+/g, ' ')
+    .trim()
   return { utterance: rest, explicit: true }
 }
 

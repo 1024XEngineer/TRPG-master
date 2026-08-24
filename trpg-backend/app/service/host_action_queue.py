@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Literal, cast
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -66,7 +66,22 @@ async def get_queued_by_client_action(
         select(HostActionQueueItem).where(
             HostActionQueueItem.room_id == room_id,
             HostActionQueueItem.client_action_id == client_action_id,
-            HostActionQueueItem.status == _QUEUED,
+            HostActionQueueItem.status.in_(("queued", "processing", "retryable_failure")),
+        )
+    )
+
+
+async def get_by_client_action(
+    db: AsyncSession,
+    room_id: str,
+    client_action_id: str,
+) -> HostActionQueueItem | None:
+    """读取任意状态的幂等队列项，终态重复提交也不能触发新任务。"""
+
+    return await db.scalar(
+        select(HostActionQueueItem).where(
+            HostActionQueueItem.room_id == room_id,
+            HostActionQueueItem.client_action_id == client_action_id,
         )
     )
 
@@ -89,7 +104,7 @@ async def enqueue(
     utterance can be published.
     """
 
-    existing_id = await get_queued_by_client_action(db, room_id, client_action_id)
+    existing_id = await get_by_client_action(db, room_id, client_action_id)
     if existing_id is not None:
         return existing_id, False
 
@@ -153,7 +168,7 @@ async def enqueue(
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
-        raced = await get_queued_by_client_action(db, room_id, client_action_id)
+        raced = await get_by_client_action(db, room_id, client_action_id)
         if raced is not None:
             return raced, False
         raise HostActionQueueError(
@@ -175,31 +190,132 @@ async def cancel(
     if item is None or item.player_id != player_id:
         return False
     item.status = "cancelled"
+    item.lease_owner = None
+    item.lease_expires_at = None
+    item.next_attempt_at = None
     item.updated_at = datetime.now(UTC)
     await db.commit()
     return True
 
 
 async def peek_next(db: AsyncSession, room_id: str) -> HostActionQueueItem | None:
-    return await db.scalar(
+    """只检查 FIFO 队首；队首尚在 lease/退避期时禁止后续任务插队。"""
+
+    now = datetime.now(UTC)
+    item = await db.scalar(
         select(HostActionQueueItem)
         .where(
             HostActionQueueItem.room_id == room_id,
-            HostActionQueueItem.status == _QUEUED,
+            HostActionQueueItem.status.in_(("queued", "processing", "retryable_failure")),
         )
         .order_by(HostActionQueueItem.position.asc())
         .limit(1)
     )
+    if item is None:
+        return None
+    if item.status == "retryable_failure" and _utc(item.next_attempt_at) > now:
+        return None
+    if item.status == "processing" and _utc(item.lease_expires_at) > now:
+        return None
+    return item
 
 
 async def mark_started(db: AsyncSession, item: HostActionQueueItem) -> None:
-    item.status = "started"
+    """Keeper 已接管队列项；旧 started 语义在新状态机中对应 completed。"""
+
+    item.status = "completed"
+    item.updated_at = datetime.now(UTC)
+    await db.commit()
+
+
+async def claim_npc(
+    db: AsyncSession,
+    item: HostActionQueueItem,
+    *,
+    lease_seconds: int = 180,
+) -> HostActionQueueItem | None:
+    """用数据库条件更新原子领取 NPC 项，避免并发 drain 重复调用模型。"""
+
+    now = datetime.now(UTC)
+    owner = str(uuid.uuid4())
+    eligible = or_(
+        HostActionQueueItem.status == "queued",
+        and_(
+            HostActionQueueItem.status == "retryable_failure",
+            or_(
+                HostActionQueueItem.next_attempt_at.is_(None),
+                HostActionQueueItem.next_attempt_at <= now,
+            ),
+        ),
+        and_(
+            HostActionQueueItem.status == "processing",
+            HostActionQueueItem.lease_expires_at <= now,
+        ),
+    )
+    result = await db.execute(
+        update(HostActionQueueItem)
+        .where(
+            HostActionQueueItem.room_id == item.room_id,
+            HostActionQueueItem.item_id == item.item_id,
+            HostActionQueueItem.recipient_kind == "npc",
+            eligible,
+        )
+        .values(
+            status="processing",
+            lease_owner=owner,
+            lease_expires_at=now + timedelta(seconds=max(180, lease_seconds)),
+            attempt_count=HostActionQueueItem.attempt_count + 1,
+            next_attempt_at=None,
+            updated_at=now,
+        )
+        .returning(HostActionQueueItem.item_id)
+    )
+    claimed_item_id = result.scalar_one_or_none()
+    await db.commit()
+    if claimed_item_id is None:
+        return None
+    return await db.scalar(
+        select(HostActionQueueItem).where(
+            HostActionQueueItem.room_id == item.room_id,
+            HostActionQueueItem.item_id == item.item_id,
+            HostActionQueueItem.lease_owner == owner,
+        )
+    )
+
+
+async def mark_npc_retryable(
+    db: AsyncSession,
+    item: HostActionQueueItem,
+    *,
+    delay_seconds: int = 5,
+) -> None:
+    """保留已经落库的玩家发言，释放 lease 并安排唯一一次队列级重试。"""
+
+    now = datetime.now(UTC)
+    item.status = "retryable_failure"
+    item.next_attempt_at = now + timedelta(seconds=delay_seconds)
+    item.lease_owner = None
+    item.lease_expires_at = None
+    item.updated_at = now
+    await db.commit()
+
+
+async def mark_npc_failed(db: AsyncSession, item: HostActionQueueItem) -> None:
+    """将不可恢复的 NPC 请求置为终态，并释放房间行动槽。"""
+
+    item.status = "failed"
+    item.next_attempt_at = None
+    item.lease_owner = None
+    item.lease_expires_at = None
     item.updated_at = datetime.now(UTC)
     await db.commit()
 
 
 async def discard(db: AsyncSession, item: HostActionQueueItem) -> None:
     item.status = "discarded"
+    item.lease_owner = None
+    item.lease_expires_at = None
+    item.next_attempt_at = None
     item.updated_at = datetime.now(UTC)
     await db.commit()
 
@@ -226,3 +342,39 @@ async def discard_player(
     if rows:
         await db.commit()
     return len(rows)
+
+
+def _utc(value: datetime | None) -> datetime:
+    """SQLite 可能返回无时区时间；统一为 UTC 后再计算恢复延迟。"""
+
+    if value is None:
+        return datetime.min.replace(tzinfo=UTC)
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+
+async def recovery_schedule(db: AsyncSession) -> tuple[tuple[str, float], ...]:
+    """按每个房间 FIFO 队首计算启动恢复时间，避免轮询和任务越序。"""
+
+    rows = (
+        await db.scalars(
+            select(HostActionQueueItem)
+            .where(
+                HostActionQueueItem.status.in_(("queued", "processing", "retryable_failure")),
+            )
+            .order_by(HostActionQueueItem.room_id, HostActionQueueItem.position)
+        )
+    ).all()
+    now = datetime.now(UTC)
+    result: list[tuple[str, float]] = []
+    seen_rooms: set[str] = set()
+    for item in rows:
+        if item.room_id in seen_rooms:
+            continue
+        seen_rooms.add(item.room_id)
+        ready_at = now
+        if item.status == "retryable_failure":
+            ready_at = _utc(item.next_attempt_at)
+        elif item.status == "processing":
+            ready_at = _utc(item.lease_expires_at)
+        result.append((item.room_id, max(0.0, (ready_at - now).total_seconds())))
+    return tuple(result)

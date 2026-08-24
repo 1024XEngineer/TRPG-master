@@ -7,6 +7,7 @@ from .action_plan import (
     ActionPlanAdvanceResult,
     ActionPlanNarrationContext,
     ActionPlanNarrationOutput,
+    ActionPlanNpcReply,
     ActionPlanRun,
     ActionPlanStepContext,
     ActionPlanStepRun,
@@ -28,11 +29,11 @@ from .history import (
     RecentTurnContext,
     VisibleHistoryText,
 )
+from .memory import ConversationSummary, MemoryContext, MemoryEntry
 from .output import (
     NarrationOutput,
 )
 from .planner_context import HostAgentContext
-from .memory import ConversationSummary, MemoryContext, MemoryEntry
 
 __all__ = [
     "RESERVATION_TTL",
@@ -40,6 +41,7 @@ __all__ = [
     "TERMINAL_PLAN_STATUSES",
     "ActionPlanAdvanceResult",
     "ActionPlanNarrationContext",
+    "ActionPlanNpcReply",
     "ActionPlanNarrationOutput",
     "ActionPlanRun",
     "ActionPlanStepContext",

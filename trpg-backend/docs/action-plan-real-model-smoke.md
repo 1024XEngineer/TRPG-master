@@ -38,14 +38,3 @@
 本次真实模型记录验证了自然语言输入能够到达严格的单动作/ActionPlan 契约边界；
 最终是否执行由 `ActionPlanPolicy` 再次校验，Engine 仍只接收单个
 `ActionAdjudication`。步骤数不是产品固定值，当前默认技术上限为 32，可由策略配置调整。
-
-## Issue #357 semantic Planner
-
-新的 `PromptTurnPlanner` 使用独立 `TURN_PLANNER_*` 配置和
-`deepseek/deepseek-v4-flash`，只接收 `TurnPlanningContext` 并只返回 `ActionPlan(1..N)`。
-固定 40 项语料、重复次数、脱敏报告格式和发布门槛见
-[`issue-357-validation.md`](issue-357-validation.md)。真实 provider benchmark 必须显式运行；
-默认 pytest 不读取凭证也不产生费用。
-
-灰度期保留本页前两节的 legacy 记录用于同环境对比，不代表 semantic 请求会失败回退 legacy。
-PR3 只有在 Preview 100% 与生产 5%/25%/100% 窗口全部通过后才删除旧 producer contract。

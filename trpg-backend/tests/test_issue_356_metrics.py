@@ -39,13 +39,6 @@ def test_aggregate_scenario_keeps_counts_and_percentiles_but_not_sample_data() -
             "plan_cas_calls": 6,
             "repair_calls": 0,
             "model_transport_retries": 0,
-            "adjudicator_deterministic_paths": 1 if duration == 10.0 else 0,
-            "adjudicator_rule_first_paths": 0,
-            "adjudicator_model_paths": 0,
-            "adjudicator_repair_paths": 0,
-            "route_counts": {"legacy_fast": 1 if duration == 10.0 else 0},
-            "route_reason_counts": {"fast_single_step": 1 if duration == 10.0 else 0},
-            "model_stage_latency_ms": {"planner": [duration + 100]},
         }
         for duration in (10.0, 30.0, 20.0)
     ]
@@ -58,13 +51,4 @@ def test_aggregate_scenario_keeps_counts_and_percentiles_but_not_sample_data() -
     assert summary["first_narration_completion_ms"]["p95"] == 30.0
     assert summary["end_to_end_ms"]["p95"] == 30.0
     assert summary["planner_calls"]["per_sample_mean"] == 1.0
-    assert summary["model_calls"]["total"] == 0
-    assert summary["input_tokens"]["total"] == 0
-    assert summary["deterministic_rule_first_rate"] is None
-    assert summary["step_count_distribution"] == {"1": 3}
-    assert summary["step_adjudicator_paths"]["deterministic"]["total"] == 1
-    assert summary["step_adjudicator_paths"]["model"]["total"] == 0
-    assert summary["route_counts"] == {"legacy_fast": 1}
-    assert summary["route_reason_counts"] == {"fast_single_step": 1}
-    assert summary["model_stage_latency_ms"]["planner"]["p95"] == 130.0
     assert "samples" not in summary

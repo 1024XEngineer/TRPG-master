@@ -51,21 +51,28 @@ class RegistryCompletenessTests(unittest.TestCase):
 
 class AgendaStatusTests(unittest.TestCase):
     def test_simple_kinds_map_to_their_boundary(self) -> None:
-        for kind, expected in (
-            ("adjudicated_check", "awaiting_active_check"),
-            ("presentation", "awaiting_presentation"),
-            ("await_player_input", "awaiting_player_input"),
-        ):
-            with self.subTest(kind=kind):
-                self.assertEqual(
-                    rule_step_registry.agenda_status_for(kind, None), expected
-                )
+        self.assertEqual(
+            rule_step_registry.agenda_status_for("adjudicated_check", None),
+            "awaiting_active_check",
+        )
 
-    def test_kinds_without_a_worker_report_running(self) -> None:
-        """These four park on the Agenda with nothing to resume them. That was
-        true before the registry and must stay true after it."""
+    def test_kinds_without_a_worker_fail_instead_of_hanging(self) -> None:
+        """These six park on the Agenda with nothing to resume them.
+
+        Until #398 the last four reported `running`, which is exactly what a
+        kind that *does* have a worker reports while waiting for it — so an
+        Agenda that would never move looked identical to one about to. They
+        fail, and say why.
+
+        `presentation` and `await_player_input` wore a more specific name for
+        the same hang: `awaiting_presentation` and `awaiting_player_input` have
+        zero consumers anywhere, so nothing was ever going to advance them
+        either (#288 §6 closed `PresentationStep` as not wired).
+        """
 
         for kind in (
+            "presentation",
+            "await_player_input",
             "invoke_ruleset_action",
             "create_npc_action_opportunity",
             "create_time_task",
@@ -73,7 +80,49 @@ class AgendaStatusTests(unittest.TestCase):
         ):
             with self.subTest(kind=kind):
                 self.assertEqual(
-                    rule_step_registry.agenda_status_for(kind, None), "running"
+                    rule_step_registry.agenda_status_for(kind, None), "failed"
+                )
+                self.assertEqual(
+                    rule_step_registry.agenda_failure_code_for(kind),
+                    rule_step_registry.STEP_KIND_HAS_NO_EXECUTOR,
+                )
+
+    def test_kinds_with_a_boundary_carry_no_failure_code(self) -> None:
+        for kind in ("check", "adjudicated_check"):
+            with self.subTest(kind=kind):
+                self.assertIsNone(rule_step_registry.agenda_failure_code_for(kind))
+
+    def test_a_failing_status_always_comes_with_a_code(self) -> None:
+        """`failed` without a code silently becomes `resolved` again.
+
+        `_settled_status(None)` reads "the rule chain finished", so a boundary
+        that answers `failed` and then hands back `None` re-creates the exact
+        silent success #398 exists to remove. The pair is asserted over every
+        registered kind — plus `effect` / `finish`, which answer `failed`
+        because they have no suspension semantics at all, and which the old
+        version of this test happened to leave out — and over an unregistered
+        one.
+        """
+
+        for kind in (*rule_step_registry.STEP_KINDS, "kind_nobody_registered"):
+            with self.subTest(kind=kind):
+                status = rule_step_registry.agenda_status_for(kind, None)
+                code = rule_step_registry.agenda_failure_code_for(kind)
+                self.assertEqual(
+                    status == "failed",
+                    code is not None,
+                    f"{kind}: status={status!r} code={code!r}",
+                )
+
+    def test_kinds_that_never_suspend_say_so_when_a_walk_stops_on_them(self) -> None:
+        for kind in ("effect", "finish"):
+            with self.subTest(kind=kind):
+                self.assertEqual(
+                    rule_step_registry.agenda_status_for(kind, None), "failed"
+                )
+                self.assertEqual(
+                    rule_step_registry.agenda_failure_code_for(kind),
+                    rule_step_registry.STEP_KIND_CANNOT_SUSPEND,
                 )
 
     def test_check_splits_on_its_own_initiation_kind(self) -> None:
@@ -99,9 +148,17 @@ class AgendaStatusTests(unittest.TestCase):
             "awaiting_active_check",
         )
 
-    def test_an_unregistered_kind_reports_running(self) -> None:
+    def test_an_unregistered_kind_fails(self) -> None:
+        """Publish-time validation rejects kinds outside the union, so reaching
+        one here means the graph outran the Engine — and a kind nobody
+        registered has, by definition, no executor."""
+
         self.assertEqual(
-            rule_step_registry.agenda_status_for("made_up_kind", None), "running"
+            rule_step_registry.agenda_status_for("made_up_kind", None), "failed"
+        )
+        self.assertEqual(
+            rule_step_registry.agenda_failure_code_for("made_up_kind"),
+            rule_step_registry.UNREGISTERED_STEP_KIND,
         )
 
 

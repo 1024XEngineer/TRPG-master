@@ -2551,37 +2551,6 @@
       "title": "RuleLimitsSpec",
       "type": "object"
     },
-    "RulePresentationSpec": {
-      "additionalProperties": false,
-      "properties": {
-        "id": {
-          "maxLength": 100,
-          "minLength": 1,
-          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
-          "title": "Id",
-          "type": "string"
-        },
-        "player_safe_summary": {
-          "default": "",
-          "maxLength": 500,
-          "title": "Player Safe Summary",
-          "type": "string"
-        },
-        "narration_constraints": {
-          "default": [],
-          "items": {
-            "type": "string"
-          },
-          "title": "Narration Constraints",
-          "type": "array"
-        }
-      },
-      "required": [
-        "id"
-      ],
-      "title": "RulePresentationSpec",
-      "type": "object"
-    },
     "RuleSpecV3": {
       "additionalProperties": false,
       "description": "One authored rule.\n\nIts immutable identity is `(module_id, module_version, rule_id)`; a running\nsession pins a ModuleVersion so a republished rule can never change the\nmeaning of an agenda already in flight (#226 §1).",
@@ -2620,17 +2589,6 @@
         },
         "execution": {
           "$ref": "#/$defs/RuleExecutionSpec"
-        },
-        "presentation": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/RulePresentationSpec"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
         },
         "limits": {
           "$ref": "#/$defs/RuleLimitsSpec"

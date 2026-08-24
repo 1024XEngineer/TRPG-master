@@ -62,6 +62,9 @@ from .persistent_results import (
 from .ports import EngineStore
 from .projection_v3 import project_v3
 from .rules_v3 import (
+    AGENDA_CHAIN_DEPTH_EXCEEDED,
+    AGENDA_STEP_BUDGET_EXCEEDED,
+    agenda_failure_code_for_walk,
     agenda_item_for_event,
     agenda_status_for_walk,
     agent_match_scope_admits,
@@ -76,6 +79,30 @@ from .rules_v3 import (
 from .timeline import advanced_to_next, next_point_after, time_advance_block_reason
 
 logger = logging.getLogger(__name__)
+
+# 一个 Agenda 到了这两个状态就再没有推进的余地，也没有任何读者。
+_SETTLED_AGENDA_STATUSES = frozenset({"stable", "failed"})
+
+# 引擎自己发的审计信号，永远不是规则的输入（#226 §4）。
+_AUDIT_EVENT_TYPES = frozenset({"rule.triggered", "rule.agenda_failed"})
+
+
+def _without_settled_agendas(state: GameState) -> GameState:
+    """丢弃已经终态的 RuleAgenda，只留在途游标。
+
+    存量房间的 `game_state` 里已经积了历史死数据（#398 之前无条件落库且全仓库
+    没有删除路径），所以这里同时承担清理职责：任何一次会走到事件规则结算的动作
+    都会顺手把它们扫掉，不需要单独的数据迁移。
+    """
+
+    live = {
+        agenda_id: agenda
+        for agenda_id, agenda in state.rule_agendas.items()
+        if agenda.status not in _SETTLED_AGENDA_STATUSES
+    }
+    if len(live) == len(state.rule_agendas):
+        return state
+    return state.model_copy(update={"rule_agendas": live}, deep=True)
 
 # The engine logic `registry/effects.py` needs but may not import: it is a leaf
 # so that `module` can read the same tables at publish time (#347, and
@@ -543,7 +570,7 @@ class AdjudicationEngineService:
             )
 
             if request.adjudication.check.mode == "none":
-                new_state, events = self._finalize_action(
+                new_state, events, agenda_failure_code = self._finalize_action(
                     runtime,
                     request_id=request.adjudication.request_id,
                     adjudication=request.adjudication,
@@ -553,7 +580,8 @@ class AdjudicationEngineService:
                 execution = AdjudicationExecution(
                     request_id=request.adjudication.request_id,
                     action_request_id=request.adjudication.request_id,
-                    status="resolved",
+                    status=self._settled_status(agenda_failure_code),
+                    rule_failure_code=agenda_failure_code,
                     view_revision=str(new_state.event_sequence),
                     outcome="success",
                     event_refs=tuple(event.event_id for event in events),
@@ -826,7 +854,7 @@ class AdjudicationEngineService:
                 },
                 deep=True,
             )
-            new_state, events = self._finalize_action(
+            new_state, events, agenda_failure_code = self._finalize_action(
                 runtime,
                 request_id=request.request_id,
                 adjudication=decision.adjudication,
@@ -837,7 +865,8 @@ class AdjudicationEngineService:
             execution = AdjudicationExecution(
                 request_id=request.request_id,
                 action_request_id=decision.action_request_id,
-                status="resolved",
+                status=self._settled_status(agenda_failure_code),
+                rule_failure_code=agenda_failure_code,
                 view_revision=str(new_state.event_sequence),
                 outcome="success" if roll.passed else "failure",
                 check_run=self._run_view(check_run),
@@ -1051,7 +1080,7 @@ class AdjudicationEngineService:
                 },
                 deep=True,
             )
-            new_state, events = self._finalize_action(
+            new_state, events, agenda_failure_code = self._finalize_action(
                 runtime_after_resource,
                 request_id=request.request_id,
                 adjudication=check_run.adjudication,
@@ -1062,7 +1091,8 @@ class AdjudicationEngineService:
             execution = AdjudicationExecution(
                 request_id=request.request_id,
                 action_request_id=check_run.action_request_id,
-                status="resolved",
+                status=self._settled_status(agenda_failure_code),
+                rule_failure_code=agenda_failure_code,
                 view_revision=str(new_state.event_sequence),
                 outcome="success" if final_roll.passed else "failure",
                 check_run=self._run_view(resolved_run),
@@ -1109,6 +1139,22 @@ class AdjudicationEngineService:
                 ),
             )
             return execution
+
+    @staticmethod
+    def _settled_status(
+        agenda_failure_code: str | None,
+    ) -> Literal["resolved", "rule_failed"]:
+        """`resolved`，除非这次动作触发的规则链没能跑完。
+
+        两者都是终态、都已提交效果；区别只是后者必须把「规则链停在哪」说出来，
+        而不是像 #398 之前那样静默返回 `resolved`。
+
+        返回值收窄成 Literal 而不是 str：三个调用点都把它直接赋给
+        `AdjudicationExecution.status`（一个 Literal 字段），写成 str 等于在每个
+        调用点丢掉这层检查，而 framework 没有自己的 CI。
+        """
+
+        return "resolved" if agenda_failure_code is None else "rule_failed"
 
     @staticmethod
     def _public_event_refs(events: tuple[DomainEvent, ...]) -> tuple[str, ...]:
@@ -1576,7 +1622,15 @@ class AdjudicationEngineService:
         passed: bool,
         prefix_events: tuple[DomainEvent, ...],
         check_run: CheckRun | None = None,
-    ) -> tuple[GameState, tuple[DomainEvent, ...]]:
+    ) -> tuple[GameState, tuple[DomainEvent, ...], str | None]:
+        """Commit this action's effects and settle the Rules they triggered.
+
+        The third element is the Agenda failure code, if the Rule chain this
+        action started could not be driven to a stable end. It is not an error
+        — the action's own effects committed — but the caller must report it
+        instead of claiming a clean `resolved` (#398 §阶段一).
+        """
+
         state = runtime.game_state.model_copy(deep=True)
         events = list(prefix_events)
         if check_run is not None:
@@ -1624,7 +1678,7 @@ class AdjudicationEngineService:
                 payload={"action_request_id": adjudication.request_id},
             )
         )
-        state, events = self._apply_event_rules(
+        state, events, agenda_failure_code = self._apply_event_rules(
             runtime,
             state=state,
             events=events,
@@ -1635,7 +1689,7 @@ class AdjudicationEngineService:
             update={"event_sequence": runtime.game_state.event_sequence + len(events)},
             deep=True,
         )
-        return state, tuple(events)
+        return state, tuple(events), agenda_failure_code
 
     def _apply_event_rules(
         self,
@@ -1645,7 +1699,7 @@ class AdjudicationEngineService:
         events: list[DomainEvent],
         request_id: str,
         actor_id: str,
-    ) -> tuple[GameState, list[DomainEvent]]:
+    ) -> tuple[GameState, list[DomainEvent], str | None]:
         return self._apply_v3_event_rules(
             runtime,
             state=state,
@@ -1662,7 +1716,7 @@ class AdjudicationEngineService:
         events: list[DomainEvent],
         request_id: str,
         actor_id: str,
-    ) -> tuple[GameState, list[DomainEvent]]:
+    ) -> tuple[GameState, list[DomainEvent], str | None]:
         """Run event Rules in queue order and persist the first blocked cursor.
 
         Effects and the resulting Agenda are returned in the same ``new_state``
@@ -1687,7 +1741,7 @@ class AdjudicationEngineService:
             source_event = events[cursor]
             cursor += 1
             # Workflow/audit signals are never gameplay Rule inputs (#226 §4).
-            if source_event.type == "rule.triggered":
+            if source_event.type in _AUDIT_EVENT_TYPES:
                 continue
             rules = matching_event_rules(
                 runtime.module_content,
@@ -1736,7 +1790,7 @@ class AdjudicationEngineService:
                     agenda = agenda.model_copy(
                         update={
                             "status": "failed",
-                            "failure_code": "agenda_budget_exceeded",
+                            "failure_code": AGENDA_CHAIN_DEPTH_EXCEEDED,
                             "current_rule_id": rule.id,
                             "current_branch_id": queue[item_index].branch_id,
                         }
@@ -1753,7 +1807,7 @@ class AdjudicationEngineService:
                     agenda = agenda.model_copy(
                         update={
                             "status": "failed",
-                            "failure_code": "agenda_budget_exceeded",
+                            "failure_code": AGENDA_STEP_BUDGET_EXCEEDED,
                             "current_rule_id": rule.id,
                             "current_branch_id": queue[item_index].branch_id,
                             "current_step_id": walk.suspended_at
@@ -1813,8 +1867,14 @@ class AdjudicationEngineService:
                 agenda = agenda.model_copy(
                     update={
                         "status": status,
+                        # 失败原因来自 walk 本身（循环 / 步数 / 未知步）或它停在的
+                        # step kind（四种无执行器 kind）。此前这里一律写
+                        # `agenda_budget_exceeded`，把「模组要求引擎做不到的事」
+                        # 和「规则链跑飞了」混成同一个码。
                         "failure_code": (
-                            "agenda_budget_exceeded" if status == "failed" else None
+                            agenda_failure_code_for_walk(walk)
+                            if status == "failed"
+                            else None
                         ),
                         "current_rule_id": rule.id,
                         "current_branch_id": queue[item_index].branch_id,
@@ -1825,7 +1885,7 @@ class AdjudicationEngineService:
                 break
 
         if not queue:
-            return state, events
+            return _without_settled_agendas(state), events, None
         if not suspended:
             agenda = agenda.model_copy(
                 update={
@@ -1834,6 +1894,43 @@ class AdjudicationEngineService:
                     "current_branch_id": None,
                     "current_step_id": None,
                 }
+            )
+        if agenda.status == "failed":
+            # 失败必须留下痕迹。在 #398 之前，Agenda 落到 failed 只是改一个字段，
+            # 不发任何事件，execution 照常返回 resolved——运维手上没有任何信号可查。
+            events.append(
+                self._event_from_state(
+                    state,
+                    room_id=runtime.game_state.room_id,
+                    offset=len(events) + 1,
+                    request_id=request_id,
+                    actor_id=actor_id,
+                    event_type="rule.agenda_failed",
+                    payload={
+                        "agenda_id": agenda.agenda_id,
+                        "failure_code": agenda.failure_code,
+                        "rule_id": agenda.current_rule_id,
+                        "branch_id": agenda.current_branch_id,
+                        "step_id": agenda.current_step_id,
+                        "source_event_ids": list(source_event_ids),
+                        # 停在这条规则上，队列里排在它后面的就再没跑过。失败的
+                        # Agenda 不再落库，不写进 payload 就彻底查不到了。
+                        "skipped_rule_ids": [
+                            item.rule_id for item in queue if item.status == "queued"
+                        ],
+                    },
+                    visibility="hidden",
+                )
+            )
+            # 隐藏事件只有查库才看得到。运维要的是「规则链在生产上断了」这件事
+            # 本身可告警，所以同一份信息也走一条日志（#398 §目标 5）。
+            logger.warning(
+                "规则链失败: agenda=%s code=%s rule=%s step=%s room=%s",
+                agenda.agenda_id,
+                agenda.failure_code,
+                agenda.current_rule_id,
+                agenda.current_step_id,
+                runtime.game_state.room_id,
             )
         final_revision = str(runtime.game_state.event_sequence + len(events))
         agenda = agenda.model_copy(
@@ -1844,10 +1941,20 @@ class AdjudicationEngineService:
             },
             deep=True,
         )
-        agendas = dict(state.rule_agendas)
-        agendas[agenda.agenda_id] = agenda
+        agendas = {
+            agenda_id: item
+            for agenda_id, item in state.rule_agendas.items()
+            if item.status not in _SETTLED_AGENDA_STATUSES
+        }
+        if agenda.status not in _SETTLED_AGENDA_STATUSES:
+            # 只有在途 Agenda 才落库。跑完即 stable 的 Agenda 零读者：幂等由命令
+            # 日志 `find_adjudication_command` 承担，审计由 `rule.triggered` 事件
+            # payload 里的 `agenda_id` 承担，Agenda 本身只是游标。此前它无条件
+            # 落库、且全仓库没有任何删除路径，于是每个触发规则的动作都往一份
+            # 每回合要全量 deepcopy 的 state 里永久追加一条死数据（#398 §阶段一）。
+            agendas[agenda.agenda_id] = agenda
         state = state.model_copy(update={"rule_agendas": agendas}, deep=True)
-        return state, events
+        return state, events, agenda.failure_code
 
     def _apply_effect(
         self,

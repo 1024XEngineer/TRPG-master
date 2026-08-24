@@ -10,6 +10,7 @@ from collaboration_framework.contracts import (
     ActionAdjudication,
     ActionMethod,
     ActionTarget,
+    AdjudicationExecution,
     AdvanceWorldTimeEffect,
     NoAdjudicationCheck,
     SubmitAdjudicationRequest,
@@ -662,3 +663,77 @@ async def test_initiator_abort_rejects_pending_time_and_blocks_later_accept(
     await db_session.refresh(session)
     assert GameState.model_validate(session.state_json).world_time.current == initial_time
     assert await _time_event_count(db_session, room.id) == 0
+
+
+@pytest.mark.asyncio
+async def test_cancelling_a_rule_failed_execution_clears_its_failure_code(
+    db_session: AsyncSession,
+    engine_store_factory,
+) -> None:
+    """取消一个带 `rule_failure_code` 的 execution 不能写出读不回来的记录。
+
+    `AdjudicationExecution` 有一条跨字段不变量：只有 `rule_failed` 能带
+    `rule_failure_code`（#398 §阶段一）。但取消路径用的是 `model_copy`，而
+    `model_copy` 不跑 `model_validator(mode="after")`——`ContractModel` 也没开
+    `revalidate_instances`。所以「改 status 但留着旧的 failure_code」当场没人
+    拦，等到 `model_validate(record.execution_json)` 把它读回来才炸，而那时已经
+    是另一个请求了。
+
+    今天存进 `execution_json` 的永远是 `awaiting_time_consent`，所以这条是潜在的；
+    这里把存量记录直接改成 `rule_failed` 来把它逼出来。`scene_transition.py` 的
+    两处是同一份代码、同一个修法。
+    """
+
+    room, players, _ = await _start_room(
+        db_session,
+        room_number=3512,
+        player_count=2,
+        prepare_checkpoint=False,
+    )
+    session = await db_session.get(GameSession, room.id)
+    assert session is not None
+    raw_engine = AdjudicationEngineService(engine_store_factory())
+    wrapper = time_advance.ConsentAwareAdjudicationEngine(
+        raw_engine,
+        app.state.test_session_factory,
+    )
+    request = _request(
+        room_id=room.id,
+        player_id=players[0].id,
+        actor_id="actor_1",
+        revision=session.state_version,
+        action_id="time-rule-failed-398",
+    )
+    assert (await wrapper.submit(request)).status == "awaiting_time_consent"
+
+    record = await time_advance._record_for_action(
+        db_session,
+        room_id=room.id,
+        action_request_id=request.adjudication.request_id,
+    )
+    assert record is not None
+    stored = AdjudicationExecution.model_validate(record.execution_json)
+    record.execution_json = stored.model_copy(
+        update={
+            "status": "rule_failed",
+            "outcome": "success",
+            "rule_failure_code": "step_kind_has_no_executor",
+            "time_advance_proposal_id": None,
+        }
+    ).to_json_dict()
+    record.status = "rejected"
+    await db_session.commit()
+
+    cancelled = await wrapper.get_status(
+        time_advance.GetAdjudicationStatusRequest(
+            room_id=room.id,
+            player_id=players[0].id,
+            action_request_id=request.adjudication.request_id,
+        )
+    )
+
+    assert cancelled.status == "cancelled"
+    assert cancelled.execution is not None
+    assert cancelled.execution.rule_failure_code is None
+    # 真正的验收：这份 execution 能被重新读回来，而不是下一次读取才抛。
+    AdjudicationExecution.model_validate(cancelled.execution.to_json_dict())

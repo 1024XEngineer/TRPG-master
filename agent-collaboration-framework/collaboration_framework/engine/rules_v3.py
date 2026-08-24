@@ -8,8 +8,10 @@ step graph instead of replaying already committed effects.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
+from types import MappingProxyType
 
 from collaboration_framework.contracts import (
     AdjudicatedCheckStep,
@@ -219,15 +221,37 @@ def agenda_item_for_event(rule: RuleSpecV3, event: DomainEvent) -> AgendaItem:
     )
 
 
+# The three ways the walk itself — rather than the step it reached — failed.
+# They are not step kinds, so the step registry has nothing to say about them.
+#
+# Read-only: these strings are published verbatim in the `rule.agenda_failed`
+# audit event and in `AdjudicationExecution.rule_failure_code`, so an importer
+# that mutated the table would silently change what operators alert on.
+WALK_FAILURE_CODES: Mapping[str, str] = MappingProxyType(
+    {
+        "loop": "rule_walk_loop",
+        "step_budget": "rule_step_budget_exceeded",
+        "unknown_step": "rule_step_not_found",
+    }
+)
+
+# The two ways the *Agenda* — rather than one rule's walk inside it — ran out
+# of budget. Both used to publish the single string `agenda_budget_exceeded`,
+# which told an operator neither which budget was hit nor how it differed from
+# `rule_step_budget_exceeded` above. Three causes, three codes.
+AGENDA_CHAIN_DEPTH_EXCEEDED = "agenda_chain_depth_exceeded"
+AGENDA_STEP_BUDGET_EXCEEDED = "agenda_step_budget_exceeded"
+
+
 def agenda_status_for_walk(rule: RuleSpecV3, walk: RuleWalk) -> str:
     """Map a blocking step to the authoritative Agenda boundary.
 
     The per-kind mapping lives in `registry/rule_steps.py` (#347). The three
-    outcomes handled here are not step kinds at all — they are ways the walk
-    itself failed — and a walk that never suspended is simply stable.
+    outcomes in `WALK_FAILURE_CODES` are not step kinds at all — they are ways
+    the walk itself failed — and a walk that never suspended is simply stable.
     """
 
-    if walk.suspended_kind in {"loop", "step_budget", "unknown_step"}:
+    if walk.suspended_kind in WALK_FAILURE_CODES:
         return "failed"
     if walk.suspended_kind is None:
         return "stable" if walk.suspended_at is None else "running"
@@ -236,6 +260,25 @@ def agenda_status_for_walk(rule: RuleSpecV3, walk: RuleWalk) -> str:
         None,
     )
     return rule_step_registry.agenda_status_for(walk.suspended_kind, step)
+
+
+def agenda_failure_code_for_walk(walk: RuleWalk) -> str | None:
+    """The stable reason this walk failed, or None if it did not fail.
+
+    Callers used to hardcode `agenda_budget_exceeded` for every failure,
+    including a walk that stopped on a step kind with no executor. That made
+    the one failure mode operators actually need to distinguish — "the module
+    asked for something this Engine cannot do" — indistinguishable from a
+    runaway rule chain (#398 §阶段一).
+    """
+
+    kind = walk.suspended_kind
+    if kind is None:
+        return None
+    walk_failure = WALK_FAILURE_CODES.get(kind)
+    if walk_failure is not None:
+        return walk_failure
+    return rule_step_registry.agenda_failure_code_for(kind)
 
 
 def agenda_claim_key(agenda: RuleAgenda) -> tuple[int, int, str, str]:
@@ -273,14 +316,18 @@ def resume_agenda_rule(
 
 
 __all__ = [
+    "AGENDA_CHAIN_DEPTH_EXCEEDED",
+    "AGENDA_STEP_BUDGET_EXCEEDED",
+    "WALK_FAILURE_CODES",
     "RuleWalk",
     "agenda_claim_key",
+    "agenda_failure_code_for_walk",
     "agenda_is_claimable",
     "agenda_item_for_event",
     "agenda_item_key",
     "agenda_status_for_walk",
-    "create_rule_agenda",
     "agent_match_scope_admits",
+    "create_rule_agenda",
     "effects_after_cancel",
     "effects_after_degree",
     "evaluate_condition",

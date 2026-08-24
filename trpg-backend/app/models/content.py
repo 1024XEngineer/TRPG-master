@@ -9,7 +9,17 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, Integer, String, Text, Uuid
+from sqlalchemy import (
+    JSON,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    Uuid,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base
@@ -250,6 +260,18 @@ class ModuleAsset(Base):
     """模组素材（地图/立绘等静态资源的引用）。"""
 
     __tablename__ = "module_assets"
+    __table_args__ = (
+        UniqueConstraint(
+            "scenario_id",
+            "entity_id",
+            "asset_type",
+            name="uq_module_assets_entity_type",
+        ),
+        CheckConstraint(
+            "entity_id IS NULL OR length(trim(entity_id)) > 0",
+            name="ck_module_assets_entity_id_nonempty",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(
         Uuid(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4())
@@ -258,6 +280,8 @@ class ModuleAsset(Base):
         Uuid(as_uuid=False), ForeignKey("scenarios.id"), nullable=False
     )
     asset_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    # Entity 存在于 ModuleContent JSON，无法建立关系型外键；稳定 ID 仍比名称匹配可靠。
+    entity_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
     name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(

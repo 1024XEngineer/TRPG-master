@@ -1,6 +1,6 @@
 """剥离 RulePresentationSpec 删除后残留在模组快照里的死字段 (#398)
 
-Revision ID: d1e2f3a4b5c6
+Revision ID: e2f3a4b5c6d7
 Revises: b8c9d0e1f2a3
 
 `2c1162e refactor(contracts): 删除零消费者的 RulePresentationSpec` 把规则级的
@@ -40,7 +40,7 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision: str = "d1e2f3a4b5c6"
+revision: str = "e2f3a4b5c6d7"
 down_revision: str | Sequence[str] | None = "b8c9d0e1f2a3"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None

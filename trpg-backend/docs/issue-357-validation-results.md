@@ -90,3 +90,16 @@ P95 约 `1132ms`，并非主要失败来源。该差异说明当前语义 Planne
 - `SingleActionDecision` 暂作为内部过渡 adapter 保留，PR3 不启动。
 
 完整决策、路由安全边界和剩余风险见 `docs/issue-357-architecture-decision.md`。
+
+## 当前收口状态
+
+本 issue 的实现方向已收敛为 hybrid producer，不再继续追逐纯 semantic producer 的 PR3 删除路径：
+
+- hybrid smoke 已通过：legacy corpus、semantic corpus、legacy E2E、hybrid E2E 均无 terminal failure，实际路由和 Step Adjudicator 路径符合架构决策；
+- 正式 Round 1 未完成，不将中止的 200 样本 runner 解释为 GO 或 NO-GO；
+- 原有 Round 1 重跑的 `NO-GO` 仍保留为纯 semantic producer 的历史性能证据；
+- `ActionPlan(1..N)` 执行层统一继续保留；
+- `SingleActionDecision`、legacy fast producer 和 rollout 配置继续保留；
+- PR3 不执行，Draft PR #403 不合并。
+
+后续若重新启动正式 Round，必须先单独改进 runner 的进度和超时边界；这不再属于当前架构收敛工作，不能以重复真实模型调用替代决策。

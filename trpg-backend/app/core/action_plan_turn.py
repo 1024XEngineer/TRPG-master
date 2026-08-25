@@ -130,6 +130,7 @@ class _MemorySource(Protocol):
         max_chars: int = 2500,
     ) -> MemoryContext: ...
 
+
 async def _emit_phase(observer: TurnPhaseObserver | None, phase: TurnPhase) -> None:
     if observer is not None:
         await observer(phase)

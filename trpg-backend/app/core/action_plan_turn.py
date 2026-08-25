@@ -849,19 +849,12 @@ def _deterministic_clarification_text(context: ActionPlanNarrationContext) -> st
     return f"{actor}暂时无法确认这次行动的具体对象或结果。"
 
 
-def _same_scene_previous_narration(
-    recent_history: RecentTurnContext,
-    scene_id: str | None,
-) -> str | None:
-    """Return the latest published narration that is still in this scene."""
+def _latest_previous_narration(recent_history: RecentTurnContext) -> str | None:
+    """Return the latest published narration already visible to this viewer."""
 
-    if not scene_id:
-        return None
     for turn in reversed(recent_history.turns):
         narration = turn.published_narration
         if narration is None:
-            continue
-        if turn.scene_id is not None and turn.scene_id != scene_id:
             continue
         text = narration.text.strip()
         if text:
@@ -1713,9 +1706,9 @@ class ActionPlanTurnApplication:
                 allowed_evidence_refs=context.allowed_evidence_refs,
                 narration_evidence=context.narration_evidence,
                 narration_retry_hint=context.narration_retry_hint,
-                previous_published_narration=_same_scene_previous_narration(
-                    recent_history,
-                    getattr(context.player_view, "scene_id", None),
+                previous_published_narration=await self._previous_published_narration(
+                    player_input=context.player_input,
+                    recent_history=recent_history,
                 ),
             )
         elif isinstance(context, ActionPlanNarrationContext):
@@ -1764,8 +1757,8 @@ class ActionPlanTurnApplication:
                     context = context.model_copy(
                         update={
                             "narration_retry_hint": (
-                                "上一句已发布叙事已经交代了当前地点的氛围。"
-                                "本回合不得用相同或几乎相同的环境开场重铺画面，"
+                                "上一句已发布叙事已经交代了当前的时间、光线或氛围。"
+                                "本回合不得再用午后阳光、夜色、窗景等环境开场重铺，"
                                 "必须先写本回合的结果、现场变化或最小澄清。"
                             )
                         }
@@ -2007,6 +2000,25 @@ class ActionPlanTurnApplication:
                 player_view=player_view,
             )
         return recent_history
+
+    async def _previous_published_narration(
+        self,
+        *,
+        player_input: PlayerInput,
+        recent_history: RecentTurnContext,
+    ) -> str | None:
+        latest_fn = getattr(self._recent_history_source, "latest_published_narration", None)
+        if callable(latest_fn):
+            try:
+                text = await latest_fn(
+                    room_id=player_input.room_id,
+                    exclude_correlation_id=player_input.client_action_id,
+                )
+            except (SQLAlchemyError, OSError, TimeoutError):
+                text = None
+            if isinstance(text, str) and text.strip():
+                return text.strip()[:2000]
+        return _latest_previous_narration(recent_history)
 
     async def _read_memory_context(
         self,

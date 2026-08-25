@@ -340,8 +340,10 @@ outcome=failure 时不得叙述成功后果。若最终 player_view.known_inform
 - 只写本回合 completed_steps 或 needs_clarification 必须交代的变化、结果或最小澄清。
 - background 里的风格意象只约束语气，不是每句都要从夜色、墓园或地点简介重新起笔。
 - player_view.scene 是在场事实，不得把场景描述或上一句氛围当散文模板复述。
-- 若输入提供 previous_published_narration，那是同一连续场景里已经发布的画面；
-  本回合不得用相同或几乎相同的环境开场重铺。
+- 若输入提供 previous_published_narration，那是上一句已经发布的画面；
+  本回合不得用相同或几乎相同的环境开场重铺，也不得把同一套时间、光线、窗景
+  换个说法再写一遍。上一句已经写过「午后阳光透过百叶窗」时，不要再从午后的光、
+  百叶窗或窗景起笔，必须先写本回合的行动、结果或最小澄清。
 - 等待、提问、失败或澄清等几乎没有新 committed 结果时，一两句现场反应即可，
   不要再写一整段地点简介。
 - 本回合有 required_in_narration 的结果必须写明，不得为了变短而漏报。

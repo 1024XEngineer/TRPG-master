@@ -228,6 +228,15 @@ def narration_subject_rejection_reason(
 
 
 _ATMOSPHERE_OPENING_MIN_CHARS = 12
+_ATMOSPHERE_TIME_AFTERNOON_RE = re.compile(r"午后|下午|正午")
+_ATMOSPHERE_TIME_MORNING_RE = re.compile(r"清晨|黎明|晨光|凌晨")
+_ATMOSPHERE_TIME_DUSK_RE = re.compile(r"黄昏|傍晚")
+_ATMOSPHERE_TIME_NIGHT_RE = re.compile(r"夜里|夜晚|夜色|深夜")
+_ATMOSPHERE_LIGHT_RE = re.compile(r"阳光|月光|光线|日光|灯光|烛光|夜色如墨|的光")
+_ATMOSPHERE_WINDOW_RE = re.compile(r"百叶窗|窗棂|玻璃窗|窗户")
+_ATMOSPHERE_SILENCE_RE = re.compile(r"死一般的寂静|死寂|沉浸在")
+_ATMOSPHERE_TIME_KEYS = frozenset({"afternoon", "morning", "dusk", "night"})
+_ATMOSPHERE_SETTING_KEYS = frozenset({"light", "window", "silence"})
 
 
 def _first_narration_sentence(text: str) -> str:
@@ -238,27 +247,61 @@ def _first_narration_sentence(text: str) -> str:
     return stripped[:40].strip()
 
 
+def _opening_window(text: str, *, sentences: int) -> str:
+    stripped = text.strip()
+    seen = 0
+    for index, character in enumerate(stripped):
+        if character in _SENTENCE_END_CHARS:
+            seen += 1
+            if seen >= sentences:
+                return stripped[: index + 1].strip()
+    return stripped[:160].strip()
+
+
+def _atmosphere_keys(text: str) -> frozenset[str]:
+    keys: set[str] = set()
+    if _ATMOSPHERE_TIME_AFTERNOON_RE.search(text):
+        keys.add("afternoon")
+    if _ATMOSPHERE_TIME_MORNING_RE.search(text):
+        keys.add("morning")
+    if _ATMOSPHERE_TIME_DUSK_RE.search(text):
+        keys.add("dusk")
+    if _ATMOSPHERE_TIME_NIGHT_RE.search(text):
+        keys.add("night")
+    if _ATMOSPHERE_LIGHT_RE.search(text):
+        keys.add("light")
+    if _ATMOSPHERE_WINDOW_RE.search(text):
+        keys.add("window")
+    if _ATMOSPHERE_SILENCE_RE.search(text):
+        keys.add("silence")
+    return frozenset(keys)
+
+
 def narration_atmosphere_rejection_reason(
     text: str,
     previous_published_narration: str | None,
 ) -> Literal["atmosphere_repeat"] | None:
-    """Reject recopying the previous turn's scene-setting opening sentence.
+    """Reject recopying or paraphrasing the previous turn's scene-setting opening.
 
-    Opening narration and a newly arrived location have no previous same-scene
-    text, so callers pass None and this returns None. Quoted speech is not
-    stripped: an identical atmospheric opener is wrong even if it later quotes
-    an NPC.
+    Callers pass None when there is no prior published narration; this then
+    returns None so an opening or first arrival can establish the shot. Quoted
+    speech is not stripped: an atmospheric opener is wrong even if it later
+    quotes an NPC.
     """
 
     if not previous_published_narration or not text.strip():
         return None
-    new_open = _first_narration_sentence(text)
-    old_open = _first_narration_sentence(previous_published_narration)
-    if len(new_open) < _ATMOSPHERE_OPENING_MIN_CHARS:
-        return None
-    if new_open == old_open:
-        return "atmosphere_repeat"
-    shorter, longer = sorted((new_open, old_open), key=len)
-    if len(shorter) >= _ATMOSPHERE_OPENING_MIN_CHARS and longer.startswith(shorter):
+    new_first = _first_narration_sentence(text)
+    old_first = _first_narration_sentence(previous_published_narration)
+    if len(new_first) >= _ATMOSPHERE_OPENING_MIN_CHARS:
+        if new_first == old_first:
+            return "atmosphere_repeat"
+        shorter, longer = sorted((new_first, old_first), key=len)
+        if len(shorter) >= _ATMOSPHERE_OPENING_MIN_CHARS and longer.startswith(shorter):
+            return "atmosphere_repeat"
+    new_open = _opening_window(text, sentences=2)
+    old_open = _opening_window(previous_published_narration, sentences=3)
+    shared = _atmosphere_keys(new_open) & _atmosphere_keys(old_open)
+    if (shared & _ATMOSPHERE_TIME_KEYS) and (shared & _ATMOSPHERE_SETTING_KEYS):
         return "atmosphere_repeat"
     return None

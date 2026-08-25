@@ -188,6 +188,44 @@ class NarrationTextPolicyTests(unittest.TestCase):
             narration_atmosphere_rejection_reason("石板纹丝不动。", previous)
         )
 
+    def test_rejects_paraphrased_afternoon_window_openings(self) -> None:
+        opening = (
+            "大厦，午后阳光透过办公室的百叶窗，洒在托马斯·金博尔那张布满皱纹的脸上。"
+            "他双手交叉放在桌上，身前摊开一封泛黄的信件。"
+        )
+        accept = (
+            "午后的光从金博尔宅会客室的百叶窗渗进来，你在托马斯·金博尔对面缓缓坐下，"
+            "把手里的公文包搁在膝上。他略略向前倾身，眼神里既有期待，也有一丝不易察觉的疲惫。"
+        )
+        study = (
+            "你从托马斯的会客室起身，穿过金博尔宅安静的走廊，推开书房的门。"
+            "午后的光线透过木框玻璃窗洒进来，落在满架的书籍上。"
+        )
+        leave = (
+            "午后的阳光透过书房的窗户洒在排列整齐的书脊上。"
+            "你把笔记本收进公文包，关上书房的门。"
+        )
+        self.assertEqual(
+            narration_atmosphere_rejection_reason(accept, opening),
+            "atmosphere_repeat",
+        )
+        self.assertEqual(
+            narration_atmosphere_rejection_reason(leave, study),
+            "atmosphere_repeat",
+        )
+        self.assertIsNone(
+            narration_atmosphere_rejection_reason(
+                "你点了点头，接下这份委托。托马斯像是松了一口气。",
+                opening,
+            )
+        )
+        self.assertIsNone(
+            narration_atmosphere_rejection_reason(
+                "你把笔记本收进公文包，关上书房的门，走向公共墓地。",
+                study,
+            )
+        )
+
     def test_allows_first_person_in_dialogue_and_quoted_titles(self) -> None:
         cases = (
             "你对托马斯说：“我会保护你们。”",
@@ -279,6 +317,26 @@ class PersistentNarrationPolicyTests(unittest.IsolatedAsyncioTestCase):
                 _PersistentNarrationModel(
                     "夜色如墨，阿诺兹堡公共墓地沉浸在死一般的寂静中。"
                     "JOJO 站在石板旁，却说不清为什么打不开。"
+                )
+            ).narrate(context)
+        self.assertEqual(raised.exception.reason, "atmosphere_repeat")
+
+    async def test_named_actor_mode_rejects_paraphrased_afternoon_opening(self):
+        opening = (
+            "大厦，午后阳光透过办公室的百叶窗，洒在托马斯·金博尔那张布满皱纹的脸上。"
+        )
+        context = self._context().model_copy(
+            update={
+                "addressing_mode": "named_actor",
+                "acting_character_name": "大厦",
+                "previous_published_narration": opening,
+            }
+        )
+        with self.assertRaises(ActionPlanNarrationValidationError) as raised:
+            await ActionPlanNarrator(
+                _PersistentNarrationModel(
+                    "午后的光从金博尔宅会客室的百叶窗渗进来，"
+                    "大厦在托马斯·金博尔对面坐下，接下委托。"
                 )
             ).narrate(context)
         self.assertEqual(raised.exception.reason, "atmosphere_repeat")

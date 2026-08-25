@@ -159,6 +159,42 @@ class SqlAlchemyRecentHistorySource:
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         self._session_factory = session_factory
 
+    async def latest_published_narration(
+        self,
+        *,
+        room_id: str,
+        exclude_correlation_id: str,
+    ) -> str | None:
+        """Return the latest public narration.push already visible in this room.
+
+        Includes opening narration, which is not an action.broadcast and therefore
+        does not appear in RecentTurnContext. Do not filter by scene: a travel
+        turn often recopies the previous room's weather after scene_id has already
+        changed.
+        """
+
+        async with self._session_factory() as session:
+            event = await session.scalar(
+                select(Event)
+                .where(
+                    Event.room_id == room_id,
+                    Event.event_type == "narration.push",
+                    Event.visibility == "public",
+                    or_(
+                        Event.correlation_id.is_(None),
+                        Event.correlation_id != exclude_correlation_id,
+                    ),
+                )
+                .order_by(Event.created_at.desc(), Event.id.desc())
+                .limit(1)
+            )
+        if event is None or not isinstance(event.payload, dict):
+            return None
+        text = event.payload.get("text")
+        if not isinstance(text, str) or not text.strip():
+            return None
+        return text.strip()[:2000]
+
     async def read(
         self,
         *,

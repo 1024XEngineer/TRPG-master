@@ -31,6 +31,8 @@ from typing import TYPE_CHECKING
 
 from pydantic import JsonValue
 
+from collaboration_framework.contracts import matches_time_query
+
 if TYPE_CHECKING:  # annotations only — see this package's __init__ docstring.
     # `module/validation_v3.py` imports this table to check predicate *names*
     # at publish time. Importing GameState for real would make that a
@@ -77,7 +79,14 @@ def _entity_state_is(args: dict[str, JsonValue], state: GameState, actor_id: str
 
 
 def _time_of_day_is(args: dict[str, JsonValue], state: GameState, actor_id: str) -> bool:
-    return state.world_time.time_of_day == args.get("value")
+    """通用规则层唯一能跨模组提问的时间语义（#415 §阶段一）。
+
+    查询传四段值时精确匹配，传 `day` / `night` 时按别名集合匹配，所以既有的
+    `time_of_day_is night` 不需要迁移，而新规则又能把同为夜晚的凌晨与晚上
+    区分开——追书人的 `surveillance_available` 布尔闩就是因为区分不开才存在的。
+    """
+
+    return matches_time_query(state.world_time.time_segment, args.get("value"))
 
 
 def _information_is(args: dict[str, JsonValue], state: GameState, actor_id: str) -> bool:

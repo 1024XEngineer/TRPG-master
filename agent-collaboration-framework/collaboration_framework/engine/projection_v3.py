@@ -20,6 +20,7 @@ id; renaming the field is a storage change and belongs with the loader switch.
 from __future__ import annotations
 
 from collaboration_framework.contracts import (
+    DAY_SEGMENTS,
     AgentMatchTriggerSpec,
     ContractError,
     EntitySpecV3,
@@ -87,6 +88,9 @@ def project_v3(
     )
 
     visible_entities = _visible_entities(module, state, location.id, actor_id)
+    # 玩家侧仍投粗粒度 day/night，直到 #415 §阶段二把这两个字段整体换成模组
+    # 声明的 label。存储值已经是四段的，这里只是按别名集合折回二值。
+    coarse_time_of_day = "day" if state.world_time.time_segment in DAY_SEGMENTS else "night"
     return ProjectionSnapshot(
         room_id=state.room_id,
         player_id=player_id,
@@ -100,7 +104,7 @@ def project_v3(
             id=location.id,
             name=location.player_visible_name or location.name,
             description=location.player_visible_description,
-            time=state.world_time.time_of_day,
+            time=coarse_time_of_day,
             visible_entities=visible_entities,
             visible_actors=tuple(
                 ProjectionVisibleActor(
@@ -127,7 +131,7 @@ def project_v3(
         world=ProjectionWorldState(
             day_index=state.world_time.current.day_index,
             hour_of_day=state.world_time.current.hour_of_day,
-            time_of_day=state.world_time.time_of_day,
+            time_of_day=coarse_time_of_day,
             core_resolved=state.core_resolved,
             ending_available=state.ending_available,
             ending_id=state.ending_id,

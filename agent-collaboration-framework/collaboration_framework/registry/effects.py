@@ -999,7 +999,9 @@ def _apply_advance_world_time(
             "point_id": advanced.current_point_id,
             "day_index": advanced.current.day_index,
             "hour_of_day": advanced.current.hour_of_day,
-            "time_of_day": advanced.time_of_day,
+            # 引擎内部事件，不是玩家投影：精确字段照常保留，只有粗粒度的
+            # `time_of_day` 换成四段 canonical segment（#415 §阶段一）。
+            "time_segment": advanced.time_segment,
         },
     )
 

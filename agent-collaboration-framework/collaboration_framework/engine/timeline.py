@@ -65,10 +65,18 @@ def advanced_to_next(
     module_content: ModuleContentV3,
     world_time: WorldTimeState,
 ) -> WorldTimeState:
-    """Pure resolution of one jump; committing it is the caller's transaction."""
+    """Pure resolution of one jump; committing it is the caller's transaction.
+
+    这里同时把目标点声明的时段解析进运行态：谓词只拿得到 `GameState`，模组
+    逐点声明的 `time_segment` 只能在这一刻落库（#415 §阶段一）。
+    """
 
     target, moment = next_point_after(module_content, world_time)
-    return WorldTimeState(current=moment, current_point_id=target.id)
+    return WorldTimeState(
+        current=moment,
+        current_point_id=target.id,
+        current_time_segment=target.resolved_segment,
+    )
 
 
 def time_advance_block_reason(actor_ids: Sequence[str]) -> str | None:

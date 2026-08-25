@@ -66,13 +66,44 @@ class DiscreteTimelineTests(unittest.TestCase):
 
         self.assertLess(earlier.absolute_hour, later.absolute_hour)
 
-    def test_time_of_day_is_derived_not_stored(self) -> None:
-        self.assertEqual(WorldTimePoint(hour_of_day=6).time_of_day, "day")
-        self.assertEqual(WorldTimePoint(hour_of_day=17).time_of_day, "day")
-        self.assertEqual(WorldTimePoint(hour_of_day=18).time_of_day, "night")
-        self.assertEqual(WorldTimePoint(hour_of_day=5).time_of_day, "night")
-        # 跨天不影响昼夜：只看小时。
-        self.assertEqual(WorldTimePoint(day_index=3, hour_of_day=1).time_of_day, "night")
+    def test_advancing_resolves_the_declared_segment_into_the_state(self) -> None:
+        """谓词拿不到 module_content，所以时段只能在推进这一刻落库。"""
+
+        content = self.content.model_copy(
+            update={
+                "time_policy": self.content.time_policy.model_copy(
+                    update={
+                        "default_points": (
+                            TimePointSpec(id="hour_00", hour_of_day=0, order=0),
+                            # 05:00 声明成黎明：硬编码 06–18 的旧推导会判成 night。
+                            TimePointSpec(
+                                id="hour_05",
+                                hour_of_day=5,
+                                order=1,
+                                time_segment="morning",
+                                label="黎明",
+                            ),
+                        )
+                    }
+                )
+            },
+            deep=True,
+        )
+
+        world = advanced_to_next(content, self.at("hour_00", hour=0))
+
+        self.assertEqual(world.current_point_id, "hour_05")
+        self.assertEqual(world.current_time_segment, "morning")
+        self.assertEqual(world.time_segment, "morning")
+
+    def test_a_room_without_a_stored_segment_falls_back_to_the_hour(self) -> None:
+        """既有房间的快照里没有这个字段，读取时回退，下一次推进后写入解析值。"""
+
+        world = self.at("hour_18", hour=18)
+
+        self.assertIsNone(world.current_time_segment)
+        self.assertEqual(world.time_segment, "evening")
+        self.assertEqual(WorldTimeState().time_segment, "afternoon")
 
     def test_unknown_current_point_is_refused_rather_than_relocated(self) -> None:
         """房间停在这个模组版本已经不再声明的点上时，拒绝比"悄悄挪到别的小时"安全。"""
@@ -94,7 +125,7 @@ class DiscreteTimelineTests(unittest.TestCase):
 
         self.assertEqual(state.world_time.current_point_id, "hour_18")
         self.assertEqual(state.world_time.current.hour_of_day, 18)
-        self.assertEqual(state.world_time.time_of_day, "night")
+        self.assertEqual(state.world_time.current_time_segment, "evening")
 
     def test_module_without_a_declared_start_opens_on_the_first_point(self) -> None:
         """必须开在某个点"上"，否则之后每次跳转都没有可解析的起点。"""

@@ -27,8 +27,10 @@ from collaboration_framework.contracts import (
     PostRollDecisionRequest,
     PostRollOption,
     SubmitAdjudicationRequest,
+    TimeSegment,
     TravelInterrupted,
     ValidationResult,
+    segment_at_hour,
 )
 from collaboration_framework.contracts.adjudication import CheckRoll
 
@@ -53,21 +55,6 @@ class ActorState(ContractModel):
     conditions: tuple[str, ...] = ()
 
 
-DAY_STARTS_HOUR = 6
-NIGHT_STARTS_HOUR = 18
-
-
-def time_of_day_at_hour(hour_of_day: int) -> Literal["day", "night"]:
-    """The single day/night boundary: 06:00–18:00 is day.
-
-    Derived, never stored. Two places used to compute this independently and gave
-    different answers; they only agreed because the v2 fixture opened at midnight
-    (#226).
-    """
-
-    return "day" if DAY_STARTS_HOUR <= hour_of_day < NIGHT_STARTS_HOUR else "night"
-
-
 class WorldTimePoint(ContractModel):
     """An exact hour on the world calendar (#245 §二.2)."""
 
@@ -79,10 +66,6 @@ class WorldTimePoint(ContractModel):
         """Total ordering across days, so "next point" is a plain comparison."""
 
         return self.day_index * 24 + self.hour_of_day
-
-    @property
-    def time_of_day(self) -> Literal["day", "night"]:
-        return time_of_day_at_hour(self.hour_of_day)
 
 
 class WorldTimeState(ContractModel):
@@ -99,17 +82,29 @@ class WorldTimeState(ContractModel):
     The read-side view assembles the full shape from both (S2).
     """
 
-    # 默认落在正午而不是午夜：v2 房间没有 time_policy，起点是任选的，而
-    # time_of_day 现在是推导出来的——午夜会让"没声明时间的房间一开局就是夜里"。
+    # 默认落在正午而不是午夜：v2 房间没有 time_policy，起点是任选的，而没有
+    # 存过时段的房间按小时回退——午夜会让"没声明时间的房间一开局就是夜里"。
     # v3 房间一律由 initial_state.start_time_point_id 覆盖这个默认值。
     current: WorldTimePoint = Field(
         default_factory=lambda: WorldTimePoint(day_index=0, hour_of_day=12)
     )
     current_point_id: str = Field(default="hour_12", min_length=1)
+    # 模组声明的时段，在**推进时**解析完存进来（#415 §阶段一）。
+    #
+    # 谓词签名是 `(args, GameState, actor_id) -> bool`，拿不到
+    # `module_content`，所以模组逐点声明的 `time_segment` 不可能在谓词里
+    # 查表。加宽签名会动整个谓词注册表契约，连带 #401 的 E7 数值谓词；
+    # 存进运行态则与既有的 `current_point_id` 同构。
+    #
+    # 可空是为了既有房间：它们的快照里没有这个字段，读取时按小时回退，
+    # 下一次推进后写入解析值。
+    current_time_segment: TimeSegment | None = None
 
     @property
-    def time_of_day(self) -> Literal["day", "night"]:
-        return self.current.time_of_day
+    def time_segment(self) -> TimeSegment:
+        """当前时段：存过就用存的，没存过按小时回退。"""
+
+        return self.current_time_segment or segment_at_hour(self.current.hour_of_day)
 
 
 class AgendaSource(ContractModel):

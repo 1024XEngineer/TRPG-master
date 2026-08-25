@@ -102,6 +102,66 @@ class TimeOfDayIsTests(unittest.TestCase):
         condition = predicate("time_of_day_is", value="night")
         self.assertTrue(_evaluate_predicate(condition, state=state, actor_id=ACTOR))
 
+    def test_the_stored_segment_wins_over_the_hour(self) -> None:
+        """05:00 声明成 morning 之后，day 谓词在这一点成立（#415 §阶段一）。
+
+        硬编码 06–18 的旧推导会把它判成 night——这是逐点覆盖要解决的事。
+        """
+
+        state = game_state(
+            world_time=WorldTimeState(
+                current=WorldTimePoint(day_index=0, hour_of_day=5),
+                current_point_id="hour_05",
+                current_time_segment="morning",
+            )
+        )
+
+        self.assertTrue(
+            _evaluate_predicate(
+                predicate("time_of_day_is", value="day"), state=state, actor_id=ACTOR
+            )
+        )
+        self.assertFalse(
+            _evaluate_predicate(
+                predicate("time_of_day_is", value="night"), state=state, actor_id=ACTOR
+            )
+        )
+
+    def test_four_segment_values_separate_two_points_that_are_both_night(self) -> None:
+        """追书人的 `surveillance_available` 布尔闩就是因为这里区分不开才存在的。
+
+        22:00 与 02:00 都读作 night，粗粒度谓词会在两个点各触发一次；四段值
+        让规则说得出「只在凌晨」。
+        """
+
+        evening = game_state(
+            world_time=WorldTimeState(
+                current=WorldTimePoint(day_index=0, hour_of_day=22),
+                current_point_id="hour_22",
+                current_time_segment="evening",
+            )
+        )
+        late_night = game_state(
+            world_time=WorldTimeState(
+                current=WorldTimePoint(day_index=1, hour_of_day=2),
+                current_point_id="hour_02",
+                current_time_segment="late_night",
+            )
+        )
+        query = predicate("time_of_day_is", value="late_night")
+
+        self.assertFalse(_evaluate_predicate(query, state=evening, actor_id=ACTOR))
+        self.assertTrue(_evaluate_predicate(query, state=late_night, actor_id=ACTOR))
+        # 而粗粒度的 night 对两者都成立——既有写法不需要迁移。
+        coarse = predicate("time_of_day_is", value="night")
+        self.assertTrue(_evaluate_predicate(coarse, state=evening, actor_id=ACTOR))
+        self.assertTrue(_evaluate_predicate(coarse, state=late_night, actor_id=ACTOR))
+
+    def test_an_unknown_query_value_reads_false(self) -> None:
+        state = game_state()
+        condition = predicate("time_of_day_is", value="dusk")
+        self.assertFalse(_evaluate_predicate(condition, state=state, actor_id=ACTOR))
+
 
 class InformationIsTests(unittest.TestCase):
     def test_party_wide_discovered_fact_matches(self) -> None:

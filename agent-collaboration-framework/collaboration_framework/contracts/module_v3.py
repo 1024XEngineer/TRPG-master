@@ -708,12 +708,18 @@ _DEFAULT_SEGMENT_LABELS: dict[TimeSegment, str] = {
 
 
 def segment_at_hour(hour_of_day: int) -> TimeSegment:
-    """00–05 late_night / 06–11 morning / 12–17 afternoon / 18–23 evening。"""
+    """00–05 late_night / 06–11 morning / 12–17 afternoon / 18–23 evening。
 
+    两端都校验。这个函数从公共 contracts 导出，绕过 `TimePointSpec` 直接调用
+    它的消费者不该把非法输入静默归类——只查上界的话 `-1` 会安静地变成凌晨。
+    """
+
+    if not 0 <= hour_of_day <= 23:
+        raise ValueError(f"hour_of_day 必须落在 0–23: {hour_of_day}")
     for upper_bound, segment in _SEGMENT_HOUR_BOUNDS:
         if hour_of_day < upper_bound:
             return segment
-    raise ValueError(f"hour_of_day 必须落在 0–23: {hour_of_day}")
+    raise AssertionError("unreachable: 上面的区间已经覆盖 0–23")
 
 
 def default_label_for(segment: TimeSegment) -> str:
@@ -786,8 +792,9 @@ class ModuleTimePolicySpec(ContractModel):
     `initial_state.start_time_point_id` 落在环上任意一点，越过末点时回卷并
     `day_index + 1`。跨午夜的夜晚因此今天就能表达，不需要按时序声明：
 
-        声明 18/20/22/00/02（按小时升序），起点 18:00
+        按小时升序声明 00/02/18/20/22，起点指定 hour_18
           D0 18:00 → D0 20:00 → D0 22:00 → D1 00:00 → D1 02:00 → D1 18:00
+                                            ^^^^^^ 越过末点回卷，day_index + 1
 
     下面 `validate_points` 的「`hour_of_day` 必须随 `order` 严格递增」是**声明
     顺序**约束，不是表达力约束——它保证 `order` 就是环上的位置，别的什么都不

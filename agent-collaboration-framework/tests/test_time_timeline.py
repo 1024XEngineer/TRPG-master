@@ -28,7 +28,10 @@ from collaboration_framework.engine.models import (
     WorldTimePoint,
     WorldTimeState,
 )
-from collaboration_framework.engine.projection_v3 import keeper_capabilities_v3, project_v3
+from collaboration_framework.engine.projection_v3 import (
+    keeper_capabilities_v3,
+    project_v3,
+)
 from collaboration_framework.engine.timeline import (
     advanced_to_next,
     next_point_after,
@@ -36,7 +39,6 @@ from collaboration_framework.engine.timeline import (
     terminal_reached,
     time_advance_block_reason,
 )
-
 from tests.test_projection_v3 import ACTOR, module
 from tests.time_fixtures import SINGLE_NIGHT_POINTS, single_night_module
 
@@ -62,11 +64,22 @@ class DiscreteTimelineTests(unittest.TestCase):
         seen = []
         for _ in range(4):
             world = advanced_to_next(self.content, world)
-            seen.append((world.current_point_id, world.current.day_index, world.current.hour_of_day))
+            seen.append(
+                (
+                    world.current_point_id,
+                    world.current.day_index,
+                    world.current.hour_of_day,
+                )
+            )
 
         self.assertEqual(
             seen,
-            [("hour_06", 0, 6), ("hour_12", 0, 12), ("hour_18", 0, 18), ("hour_20", 0, 20)],
+            [
+                ("hour_06", 0, 6),
+                ("hour_12", 0, 12),
+                ("hour_18", 0, 18),
+                ("hour_20", 0, 20),
+            ],
         )
 
     def test_last_point_of_the_day_rolls_into_the_next_day(self) -> None:
@@ -173,9 +186,13 @@ class TerminalTimePointTests(unittest.TestCase):
 
     def test_a_single_night_module_walks_five_points_across_midnight(self) -> None:
         content = single_night_module()
-        state = create_initial_game_state(content, room_id="room_01", actors={}).world_time
+        state = create_initial_game_state(
+            content, room_id="room_01", actors={}
+        ).world_time
 
-        self.assertEqual((state.current_point_id, state.current.day_index), ("hour_18", 0))
+        self.assertEqual(
+            (state.current_point_id, state.current.day_index), ("hour_18", 0)
+        )
         final, seen = self.walk(content, state, 4)
 
         self.assertEqual(
@@ -188,7 +205,9 @@ class TerminalTimePointTests(unittest.TestCase):
 
     def test_reaching_the_terminal_point_refuses_further_advance(self) -> None:
         content = single_night_module()
-        state = create_initial_game_state(content, room_id="room_01", actors={}).world_time
+        state = create_initial_game_state(
+            content, room_id="room_01", actors={}
+        ).world_time
         final, _ = self.walk(content, state, 4)
 
         self.assertTrue(terminal_reached(content, final))
@@ -213,7 +232,9 @@ class TerminalTimePointTests(unittest.TestCase):
         )
 
         wrapped = advanced_to_next(without_terminal, at_end)
-        self.assertEqual((wrapped.current_point_id, wrapped.current.day_index), ("hour_18", 1))
+        self.assertEqual(
+            (wrapped.current_point_id, wrapped.current.day_index), ("hour_18", 1)
+        )
         self.assertFalse(terminal_reached(without_terminal, at_end))
 
     def test_a_multi_day_module_only_stops_on_the_declared_occurrence(self) -> None:
@@ -232,6 +253,7 @@ class TerminalTimePointTests(unittest.TestCase):
             },
             deep=True,
         )
+
         def at(point_id: str, day: int, hour: int) -> WorldTimeState:
             return WorldTimeState(
                 current=WorldTimePoint(day_index=day, hour_of_day=hour),
@@ -257,7 +279,9 @@ class TerminalTimePointTests(unittest.TestCase):
 
     def test_block_reason_carries_a_stable_code_not_a_parsed_string(self) -> None:
         content = single_night_module()
-        state = create_initial_game_state(content, room_id="room_01", actors={}).world_time
+        state = create_initial_game_state(
+            content, room_id="room_01", actors={}
+        ).world_time
         final, _ = self.walk(content, state, 4)
 
         blocked = time_advance_block_reason(
@@ -267,14 +291,18 @@ class TerminalTimePointTests(unittest.TestCase):
         self.assertEqual(blocked.code, "terminal_point_reached")
         # 单人房间在终点之前没有任何阻塞。
         self.assertIsNone(
-            time_advance_block_reason(("actor_1",), module_content=content, world_time=state)
+            time_advance_block_reason(
+                ("actor_1",), module_content=content, world_time=state
+            )
         )
 
     def test_the_terminal_outranks_the_party_consent_round(self) -> None:
         """多人房间在终点根本不该创建提案，让玩家投完票才被拒最难看。"""
 
         content = single_night_module()
-        state = create_initial_game_state(content, room_id="room_01", actors={}).world_time
+        state = create_initial_game_state(
+            content, room_id="room_01", actors={}
+        ).world_time
         final, _ = self.walk(content, state, 4)
 
         blocked = time_advance_block_reason(
@@ -291,7 +319,10 @@ class TerminalTimePointTests(unittest.TestCase):
         """
 
         payload = single_night_module().model_dump(mode="json")
-        payload["time_policy"]["terminal_point"] = {"point_id": "hour_00", "day_index": 0}
+        payload["time_policy"]["terminal_point"] = {
+            "point_id": "hour_00",
+            "day_index": 0,
+        }
 
         with self.assertRaisesRegex(ValidationError, "不可达"):
             ModuleContentV3.model_validate(payload)
@@ -300,7 +331,10 @@ class TerminalTimePointTests(unittest.TestCase):
         """回卷之后的 D1 00:00 就在 walk 上，只有 D0 那一次不在。"""
 
         payload = single_night_module().model_dump(mode="json")
-        payload["time_policy"]["terminal_point"] = {"point_id": "hour_00", "day_index": 1}
+        payload["time_policy"]["terminal_point"] = {
+            "point_id": "hour_00",
+            "day_index": 1,
+        }
 
         content = ModuleContentV3.model_validate(payload)
         self.assertEqual(content.time_policy.terminal_point.point_id, "hour_00")
@@ -328,11 +362,17 @@ class TerminalTimePointTests(unittest.TestCase):
 
     def test_keeper_sees_no_next_point_and_a_structured_reason_at_the_end(self) -> None:
         content = single_night_module()
-        start = create_initial_game_state(content, room_id="room_01", actors={}).world_time
+        start = create_initial_game_state(
+            content, room_id="room_01", actors={}
+        ).world_time
         final, _ = self.walk(content, start, 4)
 
-        before = keeper_capabilities_v3(self.snapshot(content, start), actor_id=ACTOR).time
-        after = keeper_capabilities_v3(self.snapshot(content, final), actor_id=ACTOR).time
+        before = keeper_capabilities_v3(
+            self.snapshot(content, start), actor_id=ACTOR
+        ).time
+        after = keeper_capabilities_v3(
+            self.snapshot(content, final), actor_id=ACTOR
+        ).time
         assert before is not None and after is not None
 
         self.assertEqual(before.next_point_id, "hour_20")
@@ -348,7 +388,9 @@ class TerminalTimePointTests(unittest.TestCase):
         """玩家侧只投 can_advance_time，看不到终点是哪个点、哪一刻。"""
 
         content = single_night_module()
-        start = create_initial_game_state(content, room_id="room_01", actors={}).world_time
+        start = create_initial_game_state(
+            content, room_id="room_01", actors={}
+        ).world_time
         final, _ = self.walk(content, start, 4)
 
         before = project_v3(
@@ -390,9 +432,12 @@ class TimeSegmentDerivationTests(unittest.TestCase):
             ],
         )
 
-    def test_hour_outside_the_day_is_refused_rather_than_clamped(self) -> None:
-        with self.assertRaises(ValueError):
-            segment_at_hour(24)
+    def test_hours_outside_the_day_are_refused_at_both_ends(self) -> None:
+        """只查上界的话 -1 会安静地变成凌晨；这个函数是公共导出的。"""
+
+        for hour in (-1, -24, 24, 99):
+            with self.subTest(hour=hour), self.assertRaises(ValueError):
+                segment_at_hour(hour)
 
     def test_default_label_follows_the_derived_segment(self) -> None:
         point = TimePointSpec(id="hour_22", hour_of_day=22, order=0)

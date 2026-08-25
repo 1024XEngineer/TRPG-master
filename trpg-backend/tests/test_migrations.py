@@ -593,8 +593,7 @@ def test_time_point_backfill_makes_old_snapshots_reload_unchanged(
     with sqlite3.connect(database) as connection:
         stored = json.loads(
             connection.execute(
-                "SELECT content_json FROM module_versions "
-                "WHERE module_id = 'legacy-time-module'"
+                "SELECT content_json FROM module_versions WHERE module_id = 'legacy-time-module'"
             ).fetchone()[0]
         )
 

@@ -48,7 +48,9 @@ def runtime_task_id(rule_id: str, task_key: str, bindings: dict) -> str:
     """
 
     digest = blake2s(
-        json.dumps([rule_id, task_key, bindings], sort_keys=True, ensure_ascii=False).encode(),
+        json.dumps(
+            [rule_id, task_key, bindings], sort_keys=True, ensure_ascii=False
+        ).encode(),
         digest_size=8,
     ).hexdigest()
     return f"task_{digest}"
@@ -67,7 +69,11 @@ def resolve_target(
 
     if target.point_id is not None:
         point = next(
-            (item for item in ordered_points(module_content) if item.id == target.point_id),
+            (
+                item
+                for item in ordered_points(module_content)
+                if item.id == target.point_id
+            ),
             None,
         )
         if point is None:
@@ -91,10 +97,30 @@ def _next_occurrence_of_hour(state: GameState, hour_of_day: int) -> WorldTimePoi
     区分它们；已经过去的那一次绑上去就永远不会到期。
     """
 
-    today = WorldTimePoint(day_index=state.world_time.current.day_index, hour_of_day=hour_of_day)
+    today = WorldTimePoint(
+        day_index=state.world_time.current.day_index, hour_of_day=hour_of_day
+    )
     if today.absolute_hour > state.world_time.current.absolute_hour:
         return today
     return WorldTimePoint(day_index=today.day_index + 1, hour_of_day=hour_of_day)
+
+
+def _refuse_already_past(state: GameState, moment: WorldTimePoint) -> None:
+    """目标必须严格晚于现在（#415）。
+
+    落在当前时刻或更早的任务永远不会到期：到期结算只发生在**进入**某一刻时，
+    而那一刻已经进过了。任务会永久停在 `scheduled`，`time.task_due` 永不发布,
+    挂在它上面的剧情就静默失效——比创建时直接拒绝难查得多。
+
+    「就是现在」也拒绝，而不是立即到期：立即到期意味着在排任务的那条规则还没
+    走完时就回头触发它自己的 on_due 分支，那是重入，不是定时。
+    """
+
+    if moment.absolute_hour <= state.world_time.current.absolute_hour:
+        raise ContractError(
+            f"{INVALID_TIME_TASK_TARGET}: 目标不晚于当前时刻，任务永远不会到期: "
+            f"D{moment.day_index} {moment.hour_of_day:02d}:00"
+        )
 
 
 def _refuse_beyond_terminal(
@@ -136,6 +162,7 @@ def create_time_task(
         )
 
     moment = resolve_target(module_content, state, step.task.target)
+    _refuse_already_past(state, moment)
     _refuse_beyond_terminal(module_content, moment)
 
     occurrence_id = occurrence_id_for(moment)
@@ -143,7 +170,8 @@ def create_time_task(
     created: TimePointOccurrence | None = None
 
     lands_on_default_point = any(
-        item.hour_of_day == moment.hour_of_day for item in ordered_points(module_content)
+        item.hour_of_day == moment.hour_of_day
+        for item in ordered_points(module_content)
     )
     # 目标恰好是默认点时直接绑那一次到达；同一刻已经有别的任务时复用它排出来
     # 的那个点。两种情况都不该再造一个重复 occurrence。
@@ -213,7 +241,11 @@ def cancel_time_task(
         item.occurrence_id == task.occurrence_id and item.status == "scheduled"
         for item in tasks.values()
     )
-    if occurrence is not None and occurrence.origin == "time_task" and not still_scheduled:
+    if (
+        occurrence is not None
+        and occurrence.origin == "time_task"
+        and not still_scheduled
+    ):
         del occurrences[task.occurrence_id]
 
     return (
@@ -262,11 +294,17 @@ def active_occurrences(state: GameState) -> tuple[TimePointOccurrence, ...]:
     """还有任务等着的临时点，按绝对时刻排序。"""
 
     live = {
-        task.occurrence_id for task in state.time_tasks.values() if task.status == "scheduled"
+        task.occurrence_id
+        for task in state.time_tasks.values()
+        if task.status == "scheduled"
     }
     return tuple(
         sorted(
-            (item for item in state.time_occurrences.values() if item.occurrence_id in live),
+            (
+                item
+                for item in state.time_occurrences.values()
+                if item.occurrence_id in live
+            ),
             key=lambda item: item.absolute_hour,
         )
     )

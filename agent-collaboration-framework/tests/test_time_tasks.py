@@ -423,6 +423,41 @@ class TimeTaskExecutorTests(unittest.TestCase):
         with self.assertRaisesRegex(ContractError, "invalid_time_task_target"):
             create_time_task(content, self.state, step, rule_id="night_watch")
 
+    def test_a_target_in_the_past_is_refused_at_creation(self) -> None:
+        """落在过去的任务永远不会到期，留着就是一条静默失效的剧情线。"""
+
+        step = CreateTimeTaskStep(
+            id="schedule",
+            # 房间从 D0 12:00 开局，06:00 已经过去了。
+            task=task_spec(target=TimeTaskTargetSpec(day_index=0, hour_of_day=6)),
+            next_step_id="finish",
+        )
+
+        with self.assertRaisesRegex(ContractError, "invalid_time_task_target"):
+            create_time_task(self.content, self.state, step, rule_id="night_watch")
+
+    def test_a_target_at_the_current_moment_is_refused_too(self) -> None:
+        """「就是现在」不是定时，是重入：排任务那条规则还没走完就回头触发自己。"""
+
+        step = CreateTimeTaskStep(
+            id="schedule",
+            task=task_spec(target=TimeTaskTargetSpec(day_index=0, hour_of_day=12)),
+            next_step_id="finish",
+        )
+
+        with self.assertRaisesRegex(ContractError, "invalid_time_task_target"):
+            create_time_task(self.content, self.state, step, rule_id="night_watch")
+
+    def test_a_relative_target_of_zero_hours_is_refused(self) -> None:
+        step = CreateTimeTaskStep(
+            id="schedule",
+            task=task_spec(target=TimeTaskTargetSpec(hour_of_day=0, relative=True)),
+            next_step_id="finish",
+        )
+
+        with self.assertRaisesRegex(ContractError, "invalid_time_task_target"):
+            create_time_task(self.content, self.state, step, rule_id="night_watch")
+
     def test_a_target_exactly_on_the_terminal_point_is_allowed(self) -> None:
         content = self.content.model_copy(
             update={
@@ -489,7 +524,13 @@ class TimeTaskThroughARuleTests(unittest.IsolatedAsyncioTestCase):
                     "entry_branch_id": "default",
                 },
                 "execution": {
-                    "branches": [{"id": "default", "entry_step_id": "schedule"}],
+                    # on_due 必须是独立分支：指回 `default` 会让到期事件重新走
+                    # 一遍排任务那一步，而那时世界已经在 21:00，新任务的目标
+                    # 不晚于当前时刻，永远不会到期（#415）。
+                    "branches": [
+                        {"id": "default", "entry_step_id": "schedule"},
+                        {"id": "on_due", "entry_step_id": "arrived"},
+                    ],
                     "steps": [
                         {
                             "id": "schedule",
@@ -497,7 +538,18 @@ class TimeTaskThroughARuleTests(unittest.IsolatedAsyncioTestCase):
                             "task": {
                                 "task_key": "late_visitor",
                                 "target": {"day_index": 0, "hour_of_day": 21},
-                                "on_due_branch_id": "default",
+                                "on_due_branch_id": "on_due",
+                            },
+                            "next_step_id": "finish",
+                        },
+                        {
+                            "id": "arrived",
+                            "kind": "effect",
+                            "effect": {
+                                "type": "change_entity_state",
+                                "entity_id": "case_tracker",
+                                "key": "late_visitor_arrived",
+                                "value": True,
                             },
                             "next_step_id": "finish",
                         },
@@ -929,7 +981,7 @@ class TemporaryPointWalkTests(unittest.IsolatedAsyncioTestCase):
     ) -> None:
         """12:00 →(15:00 任务)→ 15:00 → 18:00。第二跳才是这条测试的重点。"""
 
-        content, store, engine, task = self.build_with_task()
+        _, store, engine, task = self.build_with_task()
 
         await self.advance(
             store, engine, to_point_id=task.occurrence_id, tag="into-temp"

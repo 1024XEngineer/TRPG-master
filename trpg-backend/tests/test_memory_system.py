@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapters.sqlalchemy_memory import _listener_memories
 from app.models.engine import GameEvent, GameSession, ModuleVersion
-from app.models.event import Event
+from app.models.event import Event, EventAudience
 from app.models.memory import (
     ConversationSummaryRecord,
     MemoryEntryRecord,
@@ -118,7 +118,7 @@ async def test_fake_summary_preserves_scope_and_source_cursor() -> None:
     assert summary.through_event_sequence == 2
     assert summary.source_event_ids == ("event-2",)
     assert "旧宅" in summary.summary
-    assert "玩家声称/行动" in summary.summary
+    assert "玩家声称/计划" in summary.summary
 
 
 def test_narrator_context_serializes_memory_and_summary() -> None:
@@ -376,6 +376,94 @@ async def test_summary_enqueue_preserves_running_lease(
     assert record.status == "running"
     assert record.lease_owner == "worker-1"
     assert record.pending_through_sequence == 13
+
+
+@pytest.mark.asyncio
+async def test_summary_enqueue_uses_dialogue_event_cursor(
+    db_session: AsyncSession,
+    memory_store,
+) -> None:  # noqa: ANN001
+    """十条 dialogue 会触发摘要，并把最后一条 Event 写入复合游标。"""
+    room, player, actor_id = await _create_memory_room(db_session, 17)
+    base = datetime(2026, 8, 6, tzinfo=UTC)
+    events = [
+        Event(
+            id=str(uuid.uuid4()),
+            room_id=room.id,
+            player_id=player.id,
+            actor_id=actor_id,
+            event_type="dialogue.player",
+            visibility="scene_scoped",
+            scene_id="study",
+            payload={"utterance": f"记住短语 {index}"},
+            created_at=base + timedelta(seconds=index),
+        )
+        for index in range(10)
+    ]
+    db_session.add_all(events)
+    db_session.add_all([EventAudience(event_id=event.id, player_id=player.id) for event in events])
+    await db_session.commit()
+
+    service = ConversationSummaryService(
+        memory_store._session_factory,  # noqa: SLF001
+        DeterministicConversationSummaryModel(),
+    )
+    await service.enqueue_if_needed(room_id=room.id, player_id=player.id)
+
+    async with service._session_factory() as session:  # noqa: SLF001
+        record = await session.scalar(
+            select(ConversationSummaryRecord).where(
+                ConversationSummaryRecord.room_id == room.id,
+                ConversationSummaryRecord.player_id == player.id,
+            )
+        )
+    assert record is not None
+    assert record.pending_event_id == events[-1].id
+    assert record.pending_event_created_at == events[-1].created_at.replace(tzinfo=None)
+
+
+@pytest.mark.asyncio
+async def test_summary_process_advances_composite_cursor(
+    db_session: AsyncSession,
+    memory_store,
+) -> None:  # noqa: ANN001
+    """摘要成功后同时保存内容和复合游标，下一次不会重复压缩旧 dialogue。"""
+    room, player, actor_id = await _create_memory_room(db_session, 18)
+    base = datetime(2026, 8, 7, tzinfo=UTC)
+    events = [
+        Event(
+            id=str(uuid.uuid4()),
+            room_id=room.id,
+            player_id=player.id,
+            actor_id=actor_id,
+            event_type="dialogue.player",
+            visibility="public",
+            scene_id="study",
+            payload={"utterance": f"旧对话 {index}"},
+            created_at=base + timedelta(seconds=index),
+        )
+        for index in range(10)
+    ]
+    db_session.add_all(events)
+    await db_session.commit()
+    service = ConversationSummaryService(
+        memory_store._session_factory,  # noqa: SLF001
+        DeterministicConversationSummaryModel(),
+    )
+    await service.enqueue_if_needed(room_id=room.id, player_id=player.id)
+    assert await service.process_once()
+    assert not await service.process_once()
+
+    async with service._session_factory() as session:  # noqa: SLF001
+        record = await session.scalar(
+            select(ConversationSummaryRecord).where(
+                ConversationSummaryRecord.room_id == room.id,
+                ConversationSummaryRecord.player_id == player.id,
+            )
+        )
+    assert record is not None
+    assert record.summary_json["summary"].count("旧对话") == 10
+    assert record.through_event_id == events[-1].id
 
 
 @pytest.mark.asyncio

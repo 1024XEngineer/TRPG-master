@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from math import ceil
 from typing import Protocol
 
@@ -404,6 +404,9 @@ class NpcDialogueService:
             if existing is not None:
                 events.append(existing)
                 continue
+            # 同一批回复共享同一个事务时间窗，但重放时仍需要稳定顺序；因此在微秒级
+            # 递增 created_at/sent_at，避免多个事件完全同秒时只能退化到随机 UUID 排序。
+            sent_at = now + timedelta(microseconds=ordinal)
             event = Event(
                 id=str(uuid.uuid4()),
                 room_id=item.room_id,
@@ -414,7 +417,7 @@ class NpcDialogueService:
                 actor_id=message.speaker_id,
                 scene_id=view.scene.id,
                 view_revision=view.revision,
-                created_at=now,
+                created_at=sent_at,
                 payload={},
             )
             listeners = (
@@ -433,7 +436,7 @@ class NpcDialogueService:
                 source_action_id=item.client_action_id,
                 ordinal=ordinal,
                 source_revision=view.revision,
-                sent_at=now,
+                sent_at=sent_at,
                 audience_player_ids=audience_player_ids,
             )
             event.payload = payload.model_dump(by_alias=True, mode="json", exclude={"avatar_url"})
@@ -450,6 +453,83 @@ class NpcDialogueService:
         item.lease_expires_at = None
         item.next_attempt_at = None
         item.updated_at = now
+        await db.commit()
+        return tuple(events)
+
+    async def persist_scripted_replies(
+        self,
+        db: AsyncSession,
+        *,
+        room_id: str,
+        player_id: str,
+        client_action_id: str,
+        view: PlayerView,
+        source_dialogue_id: str,
+        audience_player_ids: tuple[str, ...],
+        audience_actor_ids: tuple[str, ...],
+        npc_messages: tuple[tuple[str, str], ...],
+    ) -> tuple[Event, ...]:
+        """把守秘人回合后的结构化 NPC 跟进发言复用成 dialogue.npc 事件。"""
+
+        names = {npc.id: npc.name for npc in visible_dialogue_npcs(view)}
+        responders = tuple(names)
+        events: list[Event] = []
+        now = datetime.now(UTC)
+        for ordinal, (speaker_id, text) in enumerate(npc_messages):
+            if speaker_id not in names:
+                # 只跳过这条越权回复，不把已经完成的守秘人结果回滚成失败。
+                continue
+            correlation = f"{client_action_id}:followup-npc:{ordinal}"
+            existing = await db.scalar(
+                select(Event).where(
+                    Event.room_id == room_id,
+                    Event.event_type == "dialogue.npc",
+                    Event.correlation_id == correlation,
+                )
+            )
+            if existing is not None:
+                events.append(existing)
+                continue
+            sent_at = now + timedelta(microseconds=ordinal)
+            event = Event(
+                id=str(uuid.uuid4()),
+                room_id=room_id,
+                player_id=player_id,
+                event_type="dialogue.npc",
+                correlation_id=correlation,
+                visibility="scene_scoped",
+                actor_id=speaker_id,
+                scene_id=view.scene.id,
+                view_revision=view.revision,
+                created_at=sent_at,
+                payload={},
+            )
+            listeners = (
+                *audience_actor_ids,
+                *(npc_id for npc_id in responders if npc_id != speaker_id),
+            )
+            payload = DialogueNpcPayload(
+                message_id=event.id,
+                speaker_id=speaker_id,
+                speaker_name=names[speaker_id],
+                listener_ids=listeners,
+                participant_ids=(speaker_id, *listeners),
+                text=text,
+                scene_id=view.scene.id,
+                source_dialogue_id=source_dialogue_id,
+                source_action_id=client_action_id,
+                ordinal=ordinal,
+                source_revision=view.revision,
+                sent_at=sent_at,
+                audience_player_ids=audience_player_ids,
+            )
+            event.payload = payload.model_dump(by_alias=True, mode="json", exclude={"avatar_url"})
+            db.add(event)
+            db.add_all(
+                EventAudience(event_id=event.id, player_id=target_id)
+                for target_id in audience_player_ids
+            )
+            events.append(event)
         await db.commit()
         return tuple(events)
 

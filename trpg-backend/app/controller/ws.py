@@ -159,7 +159,11 @@ from app.service import scene_transition as scene_transition_service
 from app.service import time_advance as time_advance_service
 from app.service.action_lock import action_lock_manager
 from app.service.host_action_queue import HostActionQueueError
-from app.service.npc_dialogue import npc_dialogue_service, require_dialogue_npc
+from app.service.npc_dialogue import (
+    npc_dialogue_service,
+    require_dialogue_npc,
+    visible_dialogue_npcs,
+)
 from app.service.ws_events import broadcast_room_state
 from app.service.ws_manager import manager
 
@@ -482,6 +486,14 @@ async def _broadcast_dialogue_event(
 ) -> None:
     """提交成功后按冻结受众单播；离线玩家稍后通过 Event 回放恢复。"""
 
+    envelope = await _dialogue_event_envelope(db, event)
+    for target_player_id in audience_player_ids:
+        await manager.send_to_player(event.room_id, target_player_id, envelope)
+
+
+async def _dialogue_event_envelope(db: AsyncSession, event: Event) -> dict:
+    """把 dialogue Event 还原成统一的 WS 信封，供广播和断线恢复复用。"""
+
     raw_payload = dict(event.payload)
     if event.event_type == "dialogue.player":
         payload = DialoguePlayerPayload.model_validate(raw_payload)
@@ -496,8 +508,85 @@ async def _broadcast_dialogue_event(
         type=event.event_type,
         payload=payload.model_dump(by_alias=True, mode="json"),
     ).model_dump(by_alias=True)
-    for target_player_id in audience_player_ids:
-        await manager.send_to_player(event.room_id, target_player_id, envelope)
+    return envelope
+
+
+async def _recover_persisted_turn_followup_dialogue(
+    db: AsyncSession,
+    websocket: WebSocket,
+    *,
+    room_id: str,
+    player_id: str,
+    client_action_id: str,
+    npc_reply_count: int,
+) -> None:
+    """断线恢复时补发同回合追加的 NPC 回复，保持 narration 之后的展示顺序。"""
+
+    correlations = tuple(
+        f"{client_action_id}:followup-npc:{ordinal}" for ordinal in range(npc_reply_count)
+    )
+    if not correlations:
+        return
+    reply_events = tuple(
+        event
+        for event in await db.scalars(
+            select(Event)
+            .where(
+                Event.room_id == room_id,
+                Event.event_type == "dialogue.npc",
+                Event.correlation_id.in_(correlations),
+            )
+            .order_by(Event.created_at.asc(), Event.id.asc())
+        )
+        if player_id in tuple(event.payload.get("audiencePlayerIds", ()))
+    )
+    for event in reply_events:
+        await _send_to_player(websocket, await _dialogue_event_envelope(db, event))
+
+
+async def _emit_keeper_followup_dialogue(
+    db: AsyncSession,
+    *,
+    room_id: str,
+    player_id: str,
+    client_action_id: str,
+    player_view: PlayerView,
+    narration,
+) -> None:
+    """守秘人叙事落库并广播后，再按顺序补发结构化 NPC 台词。"""
+
+    if narration.kind != "narration" or not narration.npc_replies:
+        return
+    visible_ids = {npc.id for npc in visible_dialogue_npcs(player_view)}
+    valid_replies = tuple(item for item in narration.npc_replies if item.speaker_id in visible_ids)
+    if not valid_replies:
+        return
+    audience_player_ids, audience_actor_ids = await _npc_dialogue_audience(
+        db,
+        room_id=room_id,
+        scene_id=player_view.scene.id,
+    )
+    source_event = await room_service.get_correlated_event(
+        db,
+        room_id,
+        "narration.push",
+        client_action_id,
+    )
+    if source_event is None:
+        raise RuntimeError("守秘人叙事已发送但 narration.push 未持久化")
+    reply_events = await npc_dialogue_service.persist_scripted_replies(
+        db,
+        room_id=room_id,
+        player_id=player_id,
+        client_action_id=client_action_id,
+        view=player_view,
+        source_dialogue_id=source_event.id,
+        audience_player_ids=audience_player_ids,
+        audience_actor_ids=audience_actor_ids,
+        npc_messages=tuple((item.speaker_id, item.text) for item in valid_replies),
+    )
+    for event in reply_events:
+        await _broadcast_dialogue_event(db, event, audience_player_ids)
 
 
 async def _persist_npc_unavailable(
@@ -793,6 +882,9 @@ class _PersistedTurnCompletion(BaseModel):
     kind: Literal["narration", "clarification"] = "narration"
     claimed_fact_ids: tuple[str, ...] = ()
     suggested_actions: tuple[str, ...] = Field(default=(), max_length=3)
+    # 只记录是否存在以及有几条 follow-up NPC；这样旧回合恢复时没有这项就完全
+    # 不必额外查询 dialogue.npc，避免把原本稳定的恢复路径拖进无意义 SQL。
+    npc_reply_count: int = Field(default=0, ge=0, le=3)
 
 
 @asynccontextmanager
@@ -1173,6 +1265,28 @@ async def _send_action_plan_result(
         for event in deferred_progress:
             await _send_plan_progress(websocket, event)
 
+    async def _after_turn_narration() -> None:
+        await _flush_deferred_progress()
+        try:
+            # Keeper 权威结果先提交；后续 NPC 台词只是追加展示，失败时绝不能把本回合
+            # 回滚成 turn.failed，更不能影响已经提交的 PlayerView。
+            await _emit_keeper_followup_dialogue(
+                db,
+                room_id=room_id,
+                player_id=player_id,
+                client_action_id=result.player_input.client_action_id,
+                player_view=result.player_view,
+                narration=narration,
+            )
+        except Exception:
+            logger.warning(
+                "keeper_followup_dialogue_failed",
+                room_id=room_id,
+                player_id=player_id,
+                action_id=result.player_input.client_action_id,
+                exc_info=True,
+            )
+
     recorded = await _send_completed_turn_message(
         db,
         websocket,
@@ -1182,8 +1296,9 @@ async def _send_action_plan_result(
         client_action_id=result.player_input.client_action_id,
         player_view=result.player_view,
         narration=output,
+        npc_reply_count=len(narration.npc_replies),
         before_completed=_finalize_before_completed,
-        after_narration=_flush_deferred_progress,
+        after_narration=_after_turn_narration,
     )
     with anyio.CancelScope(shield=True):
         await _broadcast_room_action_state(db, room_id)
@@ -1201,6 +1316,7 @@ async def _send_completed_turn_message(
     client_action_id: str,
     player_view: PlayerView,
     narration: NarrationOutput,
+    npc_reply_count: int = 0,
     before_completed: Callable[[], Awaitable[None]] | None = None,
     after_narration: Callable[[], Awaitable[None]] | None = None,
 ) -> bool:
@@ -1215,6 +1331,7 @@ async def _send_completed_turn_message(
         actor_id=actor_id,
         scene_id=player_view.scene_id,
         view_revision=player_view.revision,
+        npc_reply_count=npc_reply_count,
     )
     if before_completed is not None:
         await before_completed()
@@ -1348,6 +1465,15 @@ async def _recover_persisted_turn_narration(
             payload=persisted.model_dump(by_alias=True),
         ).model_dump(by_alias=True),
     )
+    if raw_completion is not None and completion.npc_reply_count > 0:
+        await _recover_persisted_turn_followup_dialogue(
+            db,
+            websocket,
+            room_id=room_id,
+            player_id=player_id,
+            client_action_id=client_action_id,
+            npc_reply_count=completion.npc_reply_count,
+        )
     await _send_view_updated(websocket, player_id, view)
     if active is not None:
         await action_plan_turn_application.mark_narration_persisted(
@@ -1517,6 +1643,7 @@ async def _persist_turn_narration(
     actor_id: str,
     scene_id: str,
     view_revision: str,
+    npc_reply_count: int = 0,
 ) -> tuple[bool, NarrationOutput]:
     """Persist one authoritative narration before its completion is announced."""
 
@@ -1531,6 +1658,7 @@ async def _persist_turn_narration(
         "kind": completion.kind,
         "claimed_fact_ids": list(completion.claimed_fact_ids),
         "suggested_actions": list(completion.suggested_actions),
+        "npc_reply_count": npc_reply_count,
     }
     recorded = await room_service.record_event(
         db,

@@ -78,7 +78,7 @@ from .rules_v3 import (
     resolve_rule_option,
     walk_rule,
 )
-from .time_tasks import active_occurrences
+from .time_tasks import active_occurrences, settle_due_tasks
 from .timeline import advanced_to_next, next_point_after, time_advance_block_reason
 
 logger = logging.getLogger(__name__)
@@ -175,6 +175,7 @@ _EFFECT_SERVICES = effect_registry.EffectServices(
     advanced_to_next=advanced_to_next,
     next_point_after=next_point_after,
     active_occurrences=active_occurrences,
+    settle_due_tasks=settle_due_tasks,
     time_advance_block_reason=time_advance_block_reason,
     is_public_standard_state=is_public_standard_state,
 )
@@ -2420,7 +2421,7 @@ class AdjudicationEngineService:
         )
         if result.event_type is None:
             return result.state, ()
-        return result.state, (
+        emitted = [
             self._event_from_state(
                 result.state,
                 room_id=room_id,
@@ -2430,8 +2431,24 @@ class AdjudicationEngineService:
                 event_type=result.event_type,
                 payload=result.payload,
                 event_id=result.event_id,
-            ),
-        )
+            )
+        ]
+        # 附带事件与主事件同一次提交，序号顺延。`time.task_due` 走这条路：
+        # 到期是「进入这一刻」的一部分，不是它之后的另一次写入。
+        for index, extra in enumerate(result.extra_events, start=1):
+            emitted.append(
+                self._event_from_state(
+                    result.state,
+                    room_id=room_id,
+                    offset=offset + index,
+                    request_id=request_id,
+                    actor_id=actor_id,
+                    event_type=extra.event_type,
+                    payload=extra.payload,
+                    visibility=extra.visibility,
+                )
+            )
+        return result.state, tuple(emitted)
 
     @staticmethod
     def _run_view(check_run: CheckRun):

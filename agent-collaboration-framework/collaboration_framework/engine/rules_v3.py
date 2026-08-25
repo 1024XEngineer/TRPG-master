@@ -223,8 +223,29 @@ def agenda_item_for_event(rule: RuleSpecV3, event: DomainEvent) -> AgendaItem:
         event_sequence=event.sequence,
         rule_id=rule.id,
         rule_priority=rule.priority,
-        branch_id=trigger.entry_branch_id,
+        branch_id=_entry_branch_for(rule, trigger, event),
     )
+
+
+def _entry_branch_for(
+    rule: RuleSpecV3,
+    trigger: EventTriggerSpec,
+    event: DomainEvent,
+) -> str:
+    """规则从哪个分支开始跑。
+
+    通常是 trigger 声明的入口分支。`time.task_due` 是例外：任务在排定时就声明
+    了 `on_due_branch_id`，同一条规则可以为不同任务排不同的后续（#245 §5）。
+    载荷里的分支必须真实存在，否则按入口分支来——事件载荷是引擎自己写的，但
+    模组换版之后那个分支可能已经没了。
+    """
+
+    requested = event.payload.get("branch_id") if event.type == "time.task_due" else None
+    if isinstance(requested, str) and any(
+        branch.id == requested for branch in rule.execution.branches
+    ):
+        return requested
+    return trigger.entry_branch_id
 
 
 # The three ways the walk itself — rather than the step it reached — failed.

@@ -4,7 +4,7 @@
 
 本文档沉淀当前项目关于 NPC 对话、AI 主持人扮演方式和长期记忆升级的最终方案，作为后续实现 PR 的设计基线。
 
-当前结论是：不为每个 NPC 创建独立 Agent，而是在现有 AI Host/Narrator 基础上，增加结构化 NPC 对话消息、NPC 独立认知记忆和按需历史召回。
+当前结论是：不为每个 NPC 创建独立 Agent，而是在现有 AI Host/Narrator 基础上，增加结构化 NPC 对话消息、共享记忆上的 NPC 定向检索和按需历史召回。
 
 相关基础工作：
 
@@ -97,7 +97,7 @@ NPC 的对白目前主要埋在 Narrator 的自由文本中，例如：
 2. Host 清楚知道当前是在替哪个 NPC 说话；
 3. NPC 只使用自己的认知记忆，不读取其他 NPC 的知识；
 4. 玩家不再需要从一大段叙事中寻找 NPC 对白；
-5. NPC 对话可以单独落库、检索、摘要和回放；
+5. NPC 对话可以单独落库、检索和回放，但长期记忆继续复用共享 MemoryEntry / ConversationSummary，不新增独立 NPC 记忆系统；
 6. `@NPC` 的整条输入只作为玩家对 NPC 的发言，不拆出技能、旅行或其他 Engine 行动；
 7. 一次 NPC 对话允许多个当前可见 NPC 按顺序回复；
 8. NPC 的主张不能绕过 Engine 变成世界事实；
@@ -119,16 +119,16 @@ NPC 的对白目前主要埋在 Narrator 的自由文本中，例如：
 ```text
 NPC Entity
     ↓
-NPC MemoryEntry / NPC Summary
+共享 MemoryEntry / 现有 ConversationSummary / 近期 dialogue 窗口
     ↓
-当前 AI Host 读取对应 NPC 上下文
+按 interlocutor_id、scene、viewer 过滤后的 NPC 上下文
     ↓
-Host 以 NPC 视角生成结构化回复
+当前 AI Host 以 NPC 视角生成结构化回复
     ↓
 写入 dialogue.npc 事件
 ```
 
-NPC 仍由当前 AI 主持人扮演。拆分的是消息协议、上下文作用域和前端展示，不是新增一套 NPC Agent 系统。
+NPC 仍由当前 AI 主持人扮演。拆分的是消息协议、上下文作用域和前端展示，不是新增一套 NPC Agent 系统，也不是新增一套 NPC 独立记忆系统。
 
 ### 4.2 不需要复杂的 Mode 状态机
 
@@ -634,18 +634,18 @@ correlation 查询 Event：
 
 ---
 
-## 8. NPC 独立长期记忆
+## 8. 共享记忆上的 NPC 定向检索
 
-### 8.1 记忆主体
+### 8.1 记忆主体仍是共享 `MemoryEntry`
 
-NPC 使用现有 `MemoryEntry`，但查询主体从玩家扩展为 NPC：
+NPC 继续使用现有 `MemoryEntry` 和 `ConversationSummary` 作为共享记忆基础，只是读取时按当前交互对象、场景和 viewer 做定向过滤。
 
 ```text
-玩家记忆：room_id + player_id
-NPC 记忆：room_id + npc_id
+共享记忆：room_id + subject_id + audience_player_ids
+NPC 定向上下文：interlocutor_id + scene + viewer_player_id
 ```
 
-同一房间中的同一个 NPC 只有一份 canonical 认知记忆。
+同一房间中的同一个 NPC 不再拥有独立记忆子系统，而是共享记忆上的一组稳定投影与检索视图。
 
 为区分“NPC 知道”和“哪些玩家有权在 Host 回复中看到”，MemoryEntry 增加服务端生成的
 受众字段：
@@ -717,48 +717,31 @@ NPC Memory 的 subject 反推玩家权限。
 
 如果 NPC 回复只是模型主张而非 Engine 事实，则不能使用 `confirmed`。
 
-### 8.4 NPC 近期对话和摘要
+### 8.4 NPC 近期对话和轻量摘要
 
 NPC 对话上下文分为：
 
 ```text
 近期对话：最近若干条 dialogue.player / dialogue.npc
 长期 MemoryEntry：可审计的亲历、听闻、主张和事实
-NPC Summary：长期剧情和对话概况
+现有 ConversationSummary：房间/玩家级长期概况，按当前 NPC / 场景 / viewer 过滤后复用
 原始 Event：精确逐字回忆来源
 ```
 
-普通回合只加载摘要、近期对话和相关记忆；玩家明确追问原话时，再按权限查询原始事件。
+普通回合只加载近期对话、相关记忆和现有摘要片段；玩家明确追问原话时，再按权限查询原始事件。第一版不新增 NPC 独立摘要表，只在共享摘要基础上做定向截取。
 
 第一版固定预算：
 
 ```text
 当前 NPC + viewer 近期 dialogue：最多 8 条、3000 字符
 相关长期 MemoryEntry：最多 12 条、4000 字符
-NPC Summary：最多 6000 字符
+现有 ConversationSummary 片段：最多 6000 字符
 ```
 
-NPC Summary 不扩展现有 `(room_id, player_id)` 的 `conversation_summaries` 多态语义，而是
-新增专用 `npc_conversation_summaries`：
+不新增 `npc_conversation_summaries` 独立表。若后续仍需要更强连续性，只在现有
+`conversation_summaries` 的能力上做过滤和截取，不把 NPC 变成一套新的长期摘要系统。
 
-```text
-room_id
-npc_id
-viewer_player_id
-summary_json
-through_event_created_at / through_event_id
-pending_through_event_created_at / pending_through_event_id
-source_revision / source_event_ids
-status / attempt_count / next_attempt_at / lease_owner / lease_expires_at
-updated_at
-
-唯一键：(room_id, npc_id, viewer_player_id)
-```
-
-复用现有 ConversationSummary 的结构化模型 client、lease、有限重试和退避处理思路，但
-不复用“可见事件数组下标”作为 NPC 游标。NPC 摘要按来源 Event 的 `(created_at, id)` 单调
-推进，只扫描该 NPC 与 viewer 有权读取的新 dialogue。满足 10 条新 dialogue、6000 个新
-字符或玩家离开当前对话场景之一时异步入队；失败保留旧摘要，不阻塞回合。
+复用现有 ConversationSummary 的结构化模型 client、lease、有限重试和退避处理思路，但不把它扩展成一套 NPC 专用持久化表。共享摘要按来源 Event 的 `(created_at, id)` 单调推进，只扫描当前 NPC 与 viewer 有权读取的新 dialogue。满足 10 条新 dialogue、6000 个新字符或玩家离开当前对话场景之一时异步入队；失败保留旧摘要，不阻塞回合。
 
 摘要遇到 `@NPC` 中的行动式说法时必须保留认知边界，例如写成“玩家声称准备前往地下室”，
 不得压缩成“玩家前往了地下室”。只有之后独立的 Keeper/Engine Event 才能确认行动结果。
@@ -850,7 +833,7 @@ ModuleContent 不能进入 Narrator payload。
 NPC 可见描述和状态
 NPC 近期对话
 NPC 相关 MemoryEntry
-NPC viewer-scoped ConversationSummary
+现有 ConversationSummary（按 NPC / viewer 过滤）
 当前玩家原话
 ```
 
@@ -861,7 +844,7 @@ PlayerView
 > committed evidence
 > experienced/heard MemoryEntry
 > confirmed MemoryEntry
-> NPC Summary
+> 现有 ConversationSummary
 > RecentTurnContext
 > asserted/presentation
 ```
@@ -965,7 +948,7 @@ Planner 提供查询意图。`NpcDialogueService` 在每次模型调用前，将
 明确给出主题或原话片段时可以返回精确候选；玩家只问“我以前跟你说过什么”而没有范围时，
 服务端只返回有限候选元数据，由 NPC 请求玩家补充条件，不能擅自选择一条冒充唯一答案。
 
-没有足够关键词时只使用固定的近期窗口、相关 Memory 和 NPC Summary，不扩大原始 Event
+没有足够关键词时只使用固定的近期窗口、相关 Memory 和现有 Summary 片段，不扩大原始 Event
 扫描范围。
 
 查询顺序：
@@ -1067,21 +1050,21 @@ NPC 参与的回合行为保持现状。
 
 难度：中高。
 
-### 12.4 PR4：NPC 长期记忆与安全历史查询
+### 12.4 PR4：共享记忆上的 NPC 定向检索与安全历史查询
 
 工作内容：
 
 - 为 MemoryEntry 增加冻结 `audience_player_ids`；
 - 将 dialogue Event 确定性投影为 NPC `experienced/heard`，并排除 ChatMessage；
-- 增加 NPC 近期对话窗口和严格的 `read_npc_context`；
+- 增加 NPC 近期对话窗口、共享记忆定向检索和严格的 `read_npc_context`；
 - 使用当前原话执行有界 SQL/关键词检索，明确追问时查询原始 dialogue Event；
 - `location.entered` 确定性写入 `visit.location_id`；
 - 增加内部 `read_keeper_context`，复用现有 Event/Memory 存储；
 - 将 Keeper Planner 全局上下文与 Narrator 玩家安全上下文拆成独立 DTO 和独立模型请求；
 - 覆盖 NPC、玩家、房间、viewer 和隐藏 ModuleContent 的权限隔离测试。
 
-边界：本 PR 不新增 NPC Summary 表或摘要任务。旧对话依靠原始 Event、近期窗口和结构化
-Memory 召回，第一版不引入 Embedding 或向量数据库。
+边界：本 PR 不新增 NPC Summary 表或独立摘要任务。旧对话依靠原始 Event、近期窗口、共享
+Memory 和现有 Summary 召回，第一版不引入 Embedding 或向量数据库。
 
 验收：NPC 能回忆自己听到的旧对话且不能读取其他 NPC 的知识；守秘人能回顾玩家去过的
 地点和完成的行动；Keeper Planner 可使用全房间历史，但 Narrator payload 不泄露其他玩家
@@ -1089,19 +1072,21 @@ Memory 召回，第一版不引入 Embedding 或向量数据库。
 
 难度：中高。
 
-### 12.5 PR5：NPC 摘要与长团加固
+### 12.5 PR5：轻量摘要与长团加固
 
 工作内容：
 
-- 新增 `npc_conversation_summaries`，按 `(room_id, npc_id, viewer_player_id)` 隔离；
-- 使用 Event `(created_at, id)` 复合游标推进摘要；
+- 不新增 `npc_conversation_summaries` 独立表；
+- 继续复用现有 `conversation_summaries` / 近期窗口做轻量摘要截取与过滤；
+- 使用 Event `(created_at, id)` 复合游标推进现有摘要；
 - 实现 10 条新 dialogue、6000 字符或离开场景触发；
 - 复用现有结构化模型 client、lease、有限重试和退避模式；
 - 增加摘要重建、运行期间追加事件、失败保留旧摘要和多人隔离测试；
 - 完成 300～500 回合、至少 3 次摘要压缩、重连和真实 Host 试玩；
 - 验证 Prompt 预算不会随总回合数无限增长。
 
-边界：不实现 NPC 生图、音色匹配、TTS、独立 NPC Agent、向量数据库或 Keeper 全局摘要表。
+边界：不实现 NPC 生图、音色匹配、TTS、独立 NPC Agent、独立 NPC 记忆系统、向量数据库
+或 Keeper 全局摘要表。
 
 验收：经过多次摘要压缩后，NPC 仍能按需找回指定旧对话；摘要不会把玩家计划改写成已发生
 事实，也不会泄露其他玩家私密内容。
@@ -1132,10 +1117,10 @@ PR3
 
 PR4
   memory_entries.audience_player_ids（旧 public 行为空数组）
-  dialogue / Memory 受限查询索引
+  dialogue / Memory / Summary 受限查询索引
 
 PR5
-  npc_conversation_summaries 及任务索引、事件复合游标索引
+  仅补轻量摘要相关索引，不新增 npc_conversation_summaries
 ```
 
 迁移必须同时覆盖 SQLite 和 PostgreSQL。旧客户端继续读取 `narration.push`；新 dialogue
@@ -1245,7 +1230,7 @@ PR5
 | NPC 多消息回复 | 中高 | 需要限制 speaker、顺序、数量和参与者 |
 | 纯对话任务恢复 | 中高 | 需要队列 lease、Event 幂等和批量事务提交 |
 | NPC Memory 投影 | 中 | 复用已有 MemoryEntry 和增量投影基础 |
-| NPC Summary | 中高 | 需要解决共享认知和 viewer 隔离 |
+| NPC 定向检索 / 轻量窗口 | 中 | 复用共享 Memory 和现有 Summary，关键是作用域过滤 |
 | Keeper 全局检索隔离 | 中高 | Planner 全知但 Narrator 必须保持玩家安全，需独立 DTO 和模型请求 |
 | 历史按需查询 | 中 | 第一版 SQL 关键词检索即可，不需要向量系统 |
 | 前端消息展示 | 中 | 新事件类型、旧回放兼容和顺序显示 |
@@ -1355,8 +1340,8 @@ Narrator，并用 Fake provider 直接断言 payload 中不存在其他玩家私
 - [x] 第一版 NPC 对话向当时同场景的全部冻结玩家受众广播，不实现同场景私聊；
 - [x] allowed responder NPC 会彼此听见公开对白，并分别形成 experienced 记忆；
 - [x] `ChatMessage` 不进入 NPC 记忆；
-- [x] NPC canonical MemoryEntry 按房间和 NPC 共享，同时保留 audience_player_ids；
-- [x] NPC Summary 使用独立表并按 npc_id + viewer_player_id 隔离；
+- [x] NPC canonical MemoryEntry 继续复用共享表，同时保留 audience_player_ids；
+- [x] 不再新增 NPC Summary 独立表，改为复用现有 Summary / 近期窗口做定向检索；
 - [x] 原始 Event 保留，用于精确回忆原话；
 - [x] 当前 Host 不依赖工具循环，由 NpcDialogueService 使用玩家原话安全预取历史；
 - [x] 守秘人系统逻辑上全知，Keeper Planner 可有界检索同房间全部已提交权威历史；
@@ -1387,7 +1372,7 @@ Narrator，并用 Fake provider 直接断言 payload 中不存在其他玩家私
 一个 AI 主持
 + 结构化 NPC 对话
 + 结构化守秘人叙事
-+ NPC 独立认知记忆
++ 共享记忆上的 NPC 定向检索
 + viewer 级别隐私过滤
 + 守秘人全局裁决认知与玩家安全叙事隔离
 + NPC 纯对话与守秘人 ActionPlan 分流

@@ -34,7 +34,7 @@ from .models import (
     WorldTimePoint,
     WorldTimeState,
 )
-from .timeline import ordered_points, terminal_reached
+from .timeline import occurrence_id_for, ordered_points, terminal_reached
 
 # 目标晚于终点。任务永远不会到期，所以创建时就拒绝（#415 §阶段二）。
 INVALID_TIME_TASK_TARGET = "invalid_time_task_target"
@@ -52,12 +52,6 @@ def runtime_task_id(rule_id: str, task_key: str, bindings: dict) -> str:
         digest_size=8,
     ).hexdigest()
     return f"task_{digest}"
-
-
-def _occurrence_id(day_index: int, hour_of_day: int) -> str:
-    """同日同小时落在同一个 occurrence 上——这就是任务间共享点的机制。"""
-
-    return f"occ_d{day_index}_h{hour_of_day:02d}"
 
 
 def resolve_target(
@@ -144,7 +138,7 @@ def create_time_task(
     moment = resolve_target(module_content, state, step.task.target)
     _refuse_beyond_terminal(module_content, moment)
 
-    occurrence_id = _occurrence_id(moment.day_index, moment.hour_of_day)
+    occurrence_id = occurrence_id_for(moment)
     occurrences = dict(state.time_occurrences)
     created: TimePointOccurrence | None = None
 
@@ -228,16 +222,6 @@ def cancel_time_task(
         ),
         tasks[task_id],
     )
-
-
-def occurrence_id_for(moment: WorldTimePoint) -> str:
-    """这一刻对应的 occurrence id。
-
-    默认点和临时点用同一个公式，所以「任务绑在默认点上」和「任务绑在插出来的
-    临时点上」在到期查找时是同一条路径。
-    """
-
-    return _occurrence_id(moment.day_index, moment.hour_of_day)
 
 
 def settle_due_tasks(

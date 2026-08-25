@@ -29,6 +29,10 @@ from collaboration_framework.contracts import (
 from collaboration_framework.contracts.validation import AdjudicationValidationError
 from collaboration_framework.engine import AdjudicationEngineService
 from collaboration_framework.engine.models import GameState
+from collaboration_framework.engine.time_tasks import (
+    active_occurrences,
+    settle_due_tasks,
+)
 from collaboration_framework.engine.timeline import (
     advanced_to_next,
     player_time_label,
@@ -277,13 +281,21 @@ async def create_from_adjudication(
     # （#415 §阶段二）。
     if terminal_reached(module, state.world_time):
         raise TimeAdvanceError("故事已经走到最后一个时间点，时间不会再推进了")
+    # 逐跳解析必须与 Engine 走同一套：它在校验和应用 advance_world_time 时都传
+    # 了活动临时点，这里不传就会把「下一跳是定时任务插入的 15:00」算成默认的
+    # 18:00——显式 to_point_id 因此被误判「不是下一个点」，临时任务在多人房间
+    # 永远到不了（#415）。
+    projected = state
     target_time = state.world_time
     for effect in jumps:
         try:
-            target_time = advanced_to_next(module, target_time)
+            target_time = advanced_to_next(module, target_time, active_occurrences(projected))
         except ContractError as exc:
             # 一次裁决里的多跳可能中途撞上终点：前几跳合法，某一跳越界。
             raise TimeAdvanceError("冻结裁决越过了模组时间线的终点") from exc
+        # 进入这一刻的同时，等在这一刻的任务就到期了，它排出来的临时点也就不再
+        # 是后续跳转的候选。多跳要跟着推演，否则第二跳还会看见已经用掉的点。
+        projected, _ = settle_due_tasks(projected, target_time)
         if effect.to_point_id is not None and effect.to_point_id != target_time.current_point_id:
             raise TimeAdvanceError("冻结裁决的目标不是时间线上的下一个点")
 

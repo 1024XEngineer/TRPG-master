@@ -736,6 +736,17 @@ class ConsentAwareAdjudicationEngine:
             consent_player_ids=consent_player_ids,
         )
 
+    async def submit_with_time_consent(
+        self,
+        request: SubmitAdjudicationRequest,
+        *,
+        consent_player_ids: tuple[str, ...],
+    ) -> AdjudicationExecution:
+        return await self._engine.submit_with_time_consent(
+            request,
+            consent_player_ids=consent_player_ids,
+        )
+
     async def decide(self, request):  # noqa: ANN001, ANN201
         """检定结算后，若成功效果含未提交的场景切换，再开全员确认。"""
 

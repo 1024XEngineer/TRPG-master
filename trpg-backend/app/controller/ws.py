@@ -164,6 +164,7 @@ from app.service.npc_dialogue import (
     require_dialogue_npc,
     visible_dialogue_npcs,
 )
+from app.service.time_advance import ConsentAwareAdjudicationEngine
 from app.service.ws_events import broadcast_room_state
 from app.service.ws_manager import manager
 
@@ -1134,6 +1135,15 @@ async def _resume_after_authoritative_decision(
         player_id=player_id,
         on_phase=on_phase,
     )
+
+
+def _check_decision_engine() -> ConsentAwareAdjudicationEngine:
+    """检定结算必须经过确认装饰器，才能在成功的换场景效果上开全员确认。"""
+
+    engine = adjudication_engine_service
+    if isinstance(engine, ConsentAwareAdjudicationEngine):
+        return engine
+    return ConsentAwareAdjudicationEngine(engine, async_session_factory)
 
 
 def _require_pending_adjudication_status(
@@ -2835,7 +2845,7 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 room_id,
                                 force_processing=True,
                             )
-                            execution = await adjudication_engine_service.decide(
+                            execution = await _check_decision_engine().decide(
                                 CheckDecisionRequest(
                                     request_id=choice.request_id,
                                     room_id=room_id,
@@ -2906,7 +2916,7 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 room_id,
                                 force_processing=True,
                             )
-                            execution = await adjudication_engine_service.decide_post_roll(
+                            execution = await _check_decision_engine().decide_post_roll(
                                 PostRollDecisionRequest(
                                     request_id=choice.request_id,
                                     room_id=room_id,

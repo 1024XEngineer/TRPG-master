@@ -1100,6 +1100,14 @@
           "title": "Listener Ids",
           "type": "array"
         },
+        "audience_player_ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Audience Player Ids",
+          "type": "array"
+        },
         "location_id": {
           "anyOf": [
             {

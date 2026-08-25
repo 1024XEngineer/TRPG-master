@@ -130,6 +130,19 @@ class _MemorySource(Protocol):
         max_chars: int = 2500,
     ) -> MemoryContext: ...
 
+    async def read_keeper_context(
+        self,
+        *,
+        room_id: str,
+        player_id: str,
+        actor_id: str,
+        revision: str,
+        entity_ids: tuple[str, ...] = (),
+        location_id: str | None = None,
+        limit: int = 8,
+        max_chars: int = 2500,
+    ) -> MemoryContext: ...
+
 
 async def _emit_phase(observer: TurnPhaseObserver | None, phase: TurnPhase) -> None:
     if observer is not None:
@@ -965,6 +978,8 @@ class ActionPlanTurnApplication:
         player_id: str,
         client_action_id: str,
         utterance: str,
+        interlocutor_id: str | None = None,
+        interlocutor_name: str | None = None,
         on_progress: Callable[[object], Awaitable[None]] | None = None,
         on_phase: TurnPhaseObserver | None = None,
         on_input_accepted: (Callable[[PlayerInput, PlayerView], Awaitable[None]] | None) = None,
@@ -977,6 +992,8 @@ class ActionPlanTurnApplication:
             actor_id=actor_id,
             client_action_id=client_action_id,
             utterance=utterance,
+            interlocutor_id=interlocutor_id,
+            interlocutor_name=interlocutor_name,
         )
         existing = await self._orchestrator.get_run(room_id, client_action_id)
         if existing is not None:
@@ -990,6 +1007,13 @@ class ActionPlanTurnApplication:
                 player_input,
                 advanced,
                 on_phase=on_phase,
+            )
+        if _requires_mixed_dialogue_clarification(player_input):
+            view = await self._projector.project(player_input)
+            await _emit_phase(on_phase, "generating_narration")
+            return self._planning_failure_clarification(
+                player_input=player_input,
+                player_view=view,
             )
 
         # A plan stuck in needs_clarification never produced any committed step
@@ -1031,7 +1055,7 @@ class ActionPlanTurnApplication:
             player_input=player_input,
             player_view=view,
         )
-        memory_context = await self._read_memory_context(
+        keeper_memory_context = await self._read_keeper_memory_context(
             player_input=player_input,
             player_view=view,
         )
@@ -1054,8 +1078,8 @@ class ActionPlanTurnApplication:
                         player_input=player_input,
                         planning_view=TurnPlanningView.from_player_view(view),
                         recent_history=recent_history,
-                        memories=memory_context.entries,
-                        conversation_summary=memory_context.conversation_summary,
+                        memories=keeper_memory_context.entries,
+                        conversation_summary=keeper_memory_context.conversation_summary,
                         policy=self._orchestrator.policy,
                     )
                 )
@@ -1066,8 +1090,8 @@ class ActionPlanTurnApplication:
                         player_input=player_input,
                         player_view=view,
                         recent_history=recent_history,
-                        memories=memory_context.entries,
-                        conversation_summary=memory_context.conversation_summary,
+                        memories=keeper_memory_context.entries,
+                        conversation_summary=keeper_memory_context.conversation_summary,
                         # Legacy fusion adjudicates a single action in this call.
                         keeper_capabilities=keeper_capabilities,
                     )
@@ -1990,7 +2014,17 @@ class ActionPlanTurnApplication:
                 player_input.utterance,
                 player_view,
             )
-            return await self._memory_source.read_context(
+            if (
+                player_input.interlocutor_id is not None
+                and player_input.interlocutor_id not in entity_ids
+            ):
+                # 玩家明确 @ 了某个 NPC 时，这个对象本身就是当前上下文的一部分，
+                # 不能只靠自然语言相似度去猜，免得对话目标在记忆检索里消失。
+                entity_ids = (*entity_ids, player_input.interlocutor_id)
+            read_npc_context = getattr(self._memory_source, "read_npc_context", None)
+            if read_npc_context is None:
+                read_npc_context = self._memory_source.read_context
+            return await read_npc_context(
                 room_id=player_input.room_id,
                 player_id=player_input.player_id,
                 actor_id=player_input.actor_id,
@@ -2000,6 +2034,47 @@ class ActionPlanTurnApplication:
             )
         except Exception as exc:  # noqa: BLE001 - 读模型故障必须 fail-open
             logger.warning("memory_context_degraded", error_type=type(exc).__name__)
+            return empty
+
+    async def _read_keeper_memory_context(
+        self,
+        *,
+        player_input: PlayerInput,
+        player_view: PlayerView,
+    ) -> MemoryContext:
+        """Keeper 读取保持 room 级历史，不再按玩家受众收窄。"""
+
+        empty = MemoryContext(
+            room_id=player_input.room_id,
+            player_id=player_input.player_id,
+            actor_id=player_input.actor_id,
+            as_of_revision=player_view.revision,
+        )
+        if self._memory_source is None:
+            return empty
+        try:
+            entity_ids = _matching_visible_entity_ids(
+                player_input.utterance,
+                player_view,
+            )
+            if (
+                player_input.interlocutor_id is not None
+                and player_input.interlocutor_id not in entity_ids
+            ):
+                entity_ids = (*entity_ids, player_input.interlocutor_id)
+            read_keeper_context = getattr(self._memory_source, "read_keeper_context", None)
+            if read_keeper_context is None:
+                read_keeper_context = self._memory_source.read_context
+            return await read_keeper_context(
+                room_id=player_input.room_id,
+                player_id=player_input.player_id,
+                actor_id=player_input.actor_id,
+                revision=player_view.revision,
+                location_id=player_view.scene_id,
+                entity_ids=entity_ids,
+            )
+        except Exception as exc:  # noqa: BLE001 - 读模型故障必须 fail-open
+            logger.warning("keeper_memory_context_degraded", error_type=type(exc).__name__)
             return empty
 
     async def _narration_addressing(
@@ -2468,6 +2543,19 @@ def _deterministic_step_adjudication(
         "",
     ).strip(" ，,。")
     target = _match_visible_entity(context.player_view, action_text)
+    if (
+        target is None
+        and context.step.kind == "dialogue"
+        and context.player_input.interlocutor_id is not None
+    ):
+        target = next(
+            (
+                entity
+                for entity in context.player_view.scene.visible_entities
+                if entity.id == context.player_input.interlocutor_id
+            ),
+            None,
+        )
     candidate, option = _match_rule_candidate(
         context.keeper_capabilities,
         action_text,
@@ -2617,6 +2705,35 @@ def _match_visible_entity_with_status(
     if len(matches) > 1 and matches[0][0] == matches[1][0]:
         return None, "ambiguous"
     return matches[0][2], "matched"
+
+
+def _requires_mixed_dialogue_clarification(player_input: PlayerInput) -> bool:
+    """只拦截很明显的「一句里既在对话又要立刻行动」；保守到宁可少拦。"""
+
+    if player_input.interlocutor_id is None:
+        return False
+    text = player_input.utterance
+    if not any(
+        marker in text for marker in ("然后", "再", "接着", "之后", "同时", "顺便", "并", "并且")
+    ):
+        return False
+    return any(
+        keyword in text
+        for keyword in (
+            "去",
+            "前往",
+            "进入",
+            "撬",
+            "打开",
+            "调查",
+            "搜索",
+            "检查",
+            "使用",
+            "拿",
+            "攻击",
+            "推门",
+        )
+    )
 
 
 def _companion_move_effects(

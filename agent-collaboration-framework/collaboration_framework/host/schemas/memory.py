@@ -37,6 +37,8 @@ class MemoryEntry(ContractModel):
     participants: tuple[str, ...] = ()
     # 明确在场并听到该互动的实体；空值表示系统无法证明听众。
     listener_ids: tuple[str, ...] = ()
+    # 允许读取这条记忆的玩家受众；空数组表示该条记忆不绑定冻结受众。
+    audience_player_ids: tuple[str, ...] = ()
     location_id: str | None = None
     source_event_id: str = Field(min_length=1)
     source_sequence: int = Field(ge=0)

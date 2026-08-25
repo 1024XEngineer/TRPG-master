@@ -665,10 +665,94 @@ class EndingAnchorSpec(ContractModel):
 # --------------------------------------------------------------------------- #
 
 
+# 三件事以前挤在 `time_of_day` 一个值上，这里把它们拆开（#415 §阶段一）：
+#
+# | 层       | 字段                 | 谁写                         | 谁读                        |
+# |----------|----------------------|------------------------------|-----------------------------|
+# | 精确身份 | `id` / `hour_of_day` | 模组                         | 引擎排序、`time_point_is`   |
+# | 规则语义 | `time_segment`       | 模组逐点声明，缺省按小时推导 | 通用规则层 `time_of_day_is` |
+# | 玩家措辞 | `label`              | 模组                         | 仅投影，规则不得读          |
+#
+# `label` 不能替代枚举：它是自由文本，通用规则若匹配「晚上」这个显示字符串，
+# 模组改写成「深夜」就失效，等于把模组的表达习惯塞进通用契约——#401 §1 明令
+# 禁止的方向。枚举也不能替代 `label`：通用 CoC7 规则（夜间侦查减值、只在夜里
+# 出现的生物）必须对所有 CoC 7e 模组成立，它问得出「现在是不是夜里」，问不出
+# 「现在是不是 `h02`」，后者是模组私有 id。
+TimeSegment: TypeAlias = Literal["late_night", "morning", "afternoon", "evening"]
+
+# `time_of_day_is` 的查询值空间。粗粒度别名**只在查询里存在**，不作为运行态
+# 存储值：存 `night` 就再也分不出凌晨和晚上，而那正是本 Issue 要解决的问题。
+TimeOfDayQuery: TypeAlias = Literal[
+    "day", "night", "late_night", "morning", "afternoon", "evening"
+]
+
+DAY_SEGMENTS: frozenset[TimeSegment] = frozenset({"morning", "afternoon"})
+NIGHT_SEGMENTS: frozenset[TimeSegment] = frozenset({"evening", "late_night"})
+
+# 缺省推导表，写成上界序列而不是四个 if：新增段位只需要插一行，边界不会
+# 在两个地方各写一遍。旧的 `time_of_day_at_hour` 硬编码 06–18，声明 05:00
+# 表示「黎明」的模组会被判成 night，这就是它被替换掉的原因。
+_SEGMENT_HOUR_BOUNDS: tuple[tuple[int, TimeSegment], ...] = (
+    (6, "late_night"),
+    (12, "morning"),
+    (18, "afternoon"),
+    (24, "evening"),
+)
+
+_DEFAULT_SEGMENT_LABELS: dict[TimeSegment, str] = {
+    "late_night": "凌晨",
+    "morning": "上午",
+    "afternoon": "下午",
+    "evening": "晚上",
+}
+
+
+def segment_at_hour(hour_of_day: int) -> TimeSegment:
+    """00–05 late_night / 06–11 morning / 12–17 afternoon / 18–23 evening。"""
+
+    for upper_bound, segment in _SEGMENT_HOUR_BOUNDS:
+        if hour_of_day < upper_bound:
+            return segment
+    raise ValueError(f"hour_of_day 必须落在 0–23: {hour_of_day}")
+
+
+def default_label_for(segment: TimeSegment) -> str:
+    """没有声明 `label` 的时间点给玩家看什么。"""
+
+    return _DEFAULT_SEGMENT_LABELS[segment]
+
+
+def matches_time_query(segment: TimeSegment, query: object) -> bool:
+    """四段值精确匹配，`day` / `night` 按别名集合匹配。
+
+    追书人既有的 `time_of_day_is night` 因此不经迁移继续成立。
+    """
+
+    if query == "day":
+        return segment in DAY_SEGMENTS
+    if query == "night":
+        return segment in NIGHT_SEGMENTS
+    return segment == query
+
+
 class TimePointSpec(ContractModel):
     id: Identifier
     hour_of_day: int = Field(ge=0, le=23)
     order: int = Field(ge=0)
+    # 规则语义时段，缺省由 `hour_of_day` 推导，模组可逐点覆盖：05:00 声明成
+    # `morning` 之后，通用的 `time_of_day_is day` 就在这一点成立。
+    time_segment: TimeSegment | None = None
+    # 玩家可见短措辞（「黎明」「深夜」）。**规则不得读取**，也不得把剧情正文
+    # 塞进来——长度上限的作用就是让后者在发布期失败，而不是在玩家屏幕上。
+    label: str | None = Field(default=None, min_length=1, max_length=20)
+
+    @property
+    def resolved_segment(self) -> TimeSegment:
+        return self.time_segment or segment_at_hour(self.hour_of_day)
+
+    @property
+    def resolved_label(self) -> str:
+        return self.label or default_label_for(self.resolved_segment)
 
 
 DEFAULT_TIME_POINTS: tuple[TimePointSpec, ...] = (
@@ -680,7 +764,23 @@ DEFAULT_TIME_POINTS: tuple[TimePointSpec, ...] = (
 
 
 class ModuleTimePolicySpec(ContractModel):
-    """Discrete time points; the clock jumps between them, it does not tick."""
+    """Discrete time points; the clock jumps between them, it does not tick.
+
+    时间线是一个**按 `hour_of_day` 升序声明的环**。起点由
+    `initial_state.start_time_point_id` 落在环上任意一点，越过末点时回卷并
+    `day_index + 1`。跨午夜的夜晚因此今天就能表达，不需要按时序声明：
+
+        声明 18/20/22/00/02（按小时升序），起点 18:00
+          D0 18:00 → D0 20:00 → D0 22:00 → D1 00:00 → D1 02:00 → D1 18:00
+
+    下面 `validate_points` 的「`hour_of_day` 必须随 `order` 严格递增」是**声明
+    顺序**约束，不是表达力约束——它保证 `order` 就是环上的位置，别的什么都不
+    保证（#415 §一条需要先澄清的非缺口）。
+
+    `default_points` 是**完整覆盖**，解析侧不得把模组自定义的点与默认四点机械
+    合并：多合出来的点会制造额外推进边界，也会让同一条 night 规则在一天里命中
+    两次（#415 §与解析侧的分界）。
+    """
 
     default_points: tuple[TimePointSpec, ...] = DEFAULT_TIME_POINTS
     storage_precision: Literal["hour"] = "hour"
@@ -791,8 +891,10 @@ class ModuleContentV3(ContractModel):
 
 
 __all__ = [
+    "DAY_SEGMENTS",
     "DEFAULT_TIME_POINTS",
     "IDENTIFIER_PATTERN",
+    "NIGHT_SEGMENTS",
     "ActorPlacementSpec",
     "AdjudicatedCheckStep",
     "AgentMatchTriggerSpec",
@@ -841,7 +943,12 @@ __all__ = [
     "RuleStepSpec",
     "RuleTriggerSpec",
     "TargetKind",
+    "TimeOfDayQuery",
     "TimePointSpec",
+    "TimeSegment",
     "TravelCostSpec",
     "WorldProfileSpec",
+    "default_label_for",
+    "matches_time_query",
+    "segment_at_hour",
 ]

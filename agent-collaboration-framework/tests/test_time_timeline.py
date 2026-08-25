@@ -8,7 +8,16 @@ from __future__ import annotations
 
 import unittest
 
-from collaboration_framework.contracts import ContractError
+from pydantic import ValidationError
+
+from collaboration_framework.contracts import (
+    DAY_SEGMENTS,
+    NIGHT_SEGMENTS,
+    ContractError,
+    TimePointSpec,
+    matches_time_query,
+    segment_at_hour,
+)
 from collaboration_framework.engine.initialization import create_initial_game_state
 from collaboration_framework.engine.models import WorldTimePoint, WorldTimeState
 from collaboration_framework.engine.timeline import advanced_to_next, next_point_after
@@ -103,6 +112,82 @@ class DiscreteTimelineTests(unittest.TestCase):
 
         self.assertEqual(state.world_time.current_point_id, "hour_00")
         self.assertEqual(state.world_time.current.hour_of_day, 0)
+
+
+class TimeSegmentDerivationTests(unittest.TestCase):
+    """作者态的四段推导与查询别名（#415 §阶段一）。"""
+
+    def test_canonical_segment_boundaries(self) -> None:
+        self.assertEqual(
+            [segment_at_hour(hour) for hour in (0, 5, 6, 11, 12, 17, 18, 23)],
+            [
+                "late_night",
+                "late_night",
+                "morning",
+                "morning",
+                "afternoon",
+                "afternoon",
+                "evening",
+                "evening",
+            ],
+        )
+
+    def test_hour_outside_the_day_is_refused_rather_than_clamped(self) -> None:
+        with self.assertRaises(ValueError):
+            segment_at_hour(24)
+
+    def test_default_label_follows_the_derived_segment(self) -> None:
+        point = TimePointSpec(id="hour_22", hour_of_day=22, order=0)
+
+        self.assertEqual(point.resolved_segment, "evening")
+        self.assertEqual(point.resolved_label, "晚上")
+
+    def test_a_module_may_override_both_layers_per_point(self) -> None:
+        """05:00 是黎明：规则按 morning/day 判断，玩家只看到「黎明」。
+
+        硬编码 06–18 的旧推导会把它判成 night，这正是逐点覆盖要解决的事。
+        """
+
+        point = TimePointSpec(
+            id="hour_05",
+            hour_of_day=5,
+            order=0,
+            time_segment="morning",
+            label="黎明",
+        )
+
+        self.assertEqual(point.resolved_segment, "morning")
+        self.assertEqual(point.resolved_label, "黎明")
+        self.assertTrue(matches_time_query(point.resolved_segment, "day"))
+
+    def test_label_is_a_short_player_facing_phrase_not_prose(self) -> None:
+        """长度上限让「把剧情正文塞进 label」在发布期失败，而不是在玩家屏幕上。"""
+
+        with self.assertRaises(ValidationError):
+            TimePointSpec(id="hour_22", hour_of_day=22, order=0, label="夜" * 21)
+
+    def test_day_and_night_match_as_alias_sets(self) -> None:
+        """追书人既有的 `time_of_day_is night` 因此不经迁移继续成立。"""
+
+        self.assertEqual(DAY_SEGMENTS, {"morning", "afternoon"})
+        self.assertEqual(NIGHT_SEGMENTS, {"evening", "late_night"})
+        for segment in DAY_SEGMENTS:
+            self.assertTrue(matches_time_query(segment, "day"))
+            self.assertFalse(matches_time_query(segment, "night"))
+        for segment in NIGHT_SEGMENTS:
+            self.assertTrue(matches_time_query(segment, "night"))
+            self.assertFalse(matches_time_query(segment, "day"))
+
+    def test_a_four_segment_query_matches_exactly(self) -> None:
+        """同为 night 的凌晨与晚上必须区分得开——这是布尔闩存在的原因。"""
+
+        self.assertTrue(matches_time_query("evening", "evening"))
+        self.assertFalse(matches_time_query("evening", "late_night"))
+        self.assertFalse(matches_time_query("late_night", "evening"))
+
+    def test_an_unknown_query_value_matches_nothing(self) -> None:
+        self.assertFalse(matches_time_query("evening", "dusk"))
+        self.assertFalse(matches_time_query("evening", None))
 
 
 if __name__ == "__main__":

@@ -137,7 +137,9 @@ from .inventory import (
     ItemTargetSelector,
 )
 from .module_v3 import (
+    DAY_SEGMENTS,
     DEFAULT_TIME_POINTS,
+    NIGHT_SEGMENTS,
     ActorPlacementSpec,
     AdjudicatedCheckStep,
     AgentMatchTriggerSpec,
@@ -185,9 +187,14 @@ from .module_v3 import (
     RuleSpecV3,
     RuleStepSpec,
     RuleTriggerSpec,
+    TimeOfDayQuery,
     TimePointSpec,
+    TimeSegment,
     TravelCostSpec,
     WorldProfileSpec,
+    default_label_for,
+    matches_time_query,
+    segment_at_hour,
 )
 from .navigation import (
     AccessBoundary,

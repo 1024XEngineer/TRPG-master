@@ -2120,29 +2120,37 @@
     },
     "ModuleTimePolicySpec": {
       "additionalProperties": false,
-      "description": "Discrete time points; the clock jumps between them, it does not tick.",
+      "description": "Discrete time points; the clock jumps between them, it does not tick.\n\n时间线是一个**按 `hour_of_day` 升序声明的环**。起点由\n`initial_state.start_time_point_id` 落在环上任意一点，越过末点时回卷并\n`day_index + 1`。跨午夜的夜晚因此今天就能表达，不需要按时序声明：\n\n    声明 18/20/22/00/02（按小时升序），起点 18:00\n      D0 18:00 → D0 20:00 → D0 22:00 → D1 00:00 → D1 02:00 → D1 18:00\n\n下面 `validate_points` 的「`hour_of_day` 必须随 `order` 严格递增」是**声明\n顺序**约束，不是表达力约束——它保证 `order` 就是环上的位置，别的什么都不\n保证（#415 §一条需要先澄清的非缺口）。\n\n`default_points` 是**完整覆盖**，解析侧不得把模组自定义的点与默认四点机械\n合并：多合出来的点会制造额外推进边界，也会让同一条 night 规则在一天里命中\n两次（#415 §与解析侧的分界）。",
       "properties": {
         "default_points": {
           "default": [
             {
               "id": "hour_00",
               "hour_of_day": 0,
-              "order": 0
+              "order": 0,
+              "time_segment": null,
+              "label": null
             },
             {
               "id": "hour_06",
               "hour_of_day": 6,
-              "order": 1
+              "order": 1,
+              "time_segment": null,
+              "label": null
             },
             {
               "id": "hour_12",
               "hour_of_day": 12,
-              "order": 2
+              "order": 2,
+              "time_segment": null,
+              "label": null
             },
             {
               "id": "hour_18",
               "hour_of_day": 18,
-              "order": 3
+              "order": 3,
+              "time_segment": null,
+              "label": null
             }
           ],
           "items": {
@@ -2687,6 +2695,38 @@
           "minimum": 0,
           "title": "Order",
           "type": "integer"
+        },
+        "time_segment": {
+          "anyOf": [
+            {
+              "enum": [
+                "late_night",
+                "morning",
+                "afternoon",
+                "evening"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Time Segment"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "maxLength": 20,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Label"
         }
       },
       "required": [

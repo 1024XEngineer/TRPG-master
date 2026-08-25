@@ -164,6 +164,12 @@ def walk_rule_from(rule: RuleSpecV3, step_id: str) -> RuleWalk:
             walk.effects.append(step.effect)
             cursor = step.next_step_id
             continue
+        if behavior == "schedules_time_task_and_continues":
+            # 步骤本身进队列，不是它的某个字段：目标时间要等到提交那一刻才
+            # 解析得出来，相对目标依赖当时的世界时钟（#415 §阶段四）。
+            walk.effects.append(step)
+            cursor = step.next_step_id
+            continue
         # Everything else needs the persisted agenda.
         walk.suspended_at = step.id
         walk.suspended_kind = step.kind

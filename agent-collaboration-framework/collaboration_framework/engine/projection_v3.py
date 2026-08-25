@@ -59,6 +59,7 @@ from .models import EngineRuntimeSnapshot, GameState
 from .navigation import effective_location_knowledge, runtime_location_edges
 from .persistent_results import PUBLIC_STATE_KEYS
 from .rules_v3 import agent_match_scope_admits, evaluate_condition, pending_check_for
+from .time_tasks import active_occurrences
 from .timeline import (
     next_point_after,
     ordered_points,
@@ -858,7 +859,9 @@ def _time_capability(
         # advance_world_time 效果，再由裁决边界暂停并发起全员确认。
         blocked = None
     try:
-        next_point, _ = next_point_after(module, state.world_time)
+        next_point, _ = next_point_after(
+            module, state.world_time, active_occurrences(state)
+        )
         next_point_id = next_point.id
     except ContractError:
         # 走到终点，或者房间停在这个模组版本已经不再声明的点上。两种情况都

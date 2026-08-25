@@ -78,6 +78,7 @@ from .rules_v3 import (
     resolve_rule_option,
     walk_rule,
 )
+from .time_tasks import active_occurrences
 from .timeline import advanced_to_next, next_point_after, time_advance_block_reason
 
 logger = logging.getLogger(__name__)
@@ -173,6 +174,7 @@ _EFFECT_SERVICES = effect_registry.EffectServices(
     resolve_location_target=resolve_location_target,
     advanced_to_next=advanced_to_next,
     next_point_after=next_point_after,
+    active_occurrences=active_occurrences,
     time_advance_block_reason=time_advance_block_reason,
     is_public_standard_state=is_public_standard_state,
 )
@@ -1506,7 +1508,9 @@ class AdjudicationEngineService:
             effect_registry.absorb_writes(effect, vocabulary)
             if isinstance(effect, AdvanceWorldTimeEffect):
                 vocabulary.world_time = advanced_to_next(
-                    runtime.module_content, vocabulary.world_time
+                    runtime.module_content,
+                    vocabulary.world_time,
+                    active_occurrences(runtime.game_state),
                 )
 
     def _validated_options(

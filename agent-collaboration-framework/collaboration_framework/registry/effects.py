@@ -164,6 +164,7 @@ class EffectServices:
     resolve_location_target: Callable[..., object]
     advanced_to_next: Callable[..., object]
     next_point_after: Callable[..., object]
+    active_occurrences: Callable[..., object]
     time_advance_block_reason: Callable[..., TimeAdvanceBlockReason | None]
     is_public_standard_state: Callable[..., bool]
     new_event_id: Callable[[], str] = lambda: f"evt_{uuid4().hex}"
@@ -984,7 +985,11 @@ def _validate_advance_world_time(
             player_safe_reason="当前存在需要玩家先处理的事项，不能推进时间",
             internal_reason=f"{blocked.code}: {blocked.message}",
         )
-    target, _ = services.next_point_after(runtime.module_content, world_time)
+    target, _ = services.next_point_after(
+        runtime.module_content,
+        world_time,
+        services.active_occurrences(runtime.game_state),
+    )
     if effect.to_point_id is not None and effect.to_point_id != target.id:
         reject(
             "TIME_POINT_MISMATCH",
@@ -1002,7 +1007,13 @@ def _apply_advance_world_time(
     effect: AdvanceWorldTimeEffect,
     ctx: ApplyContext,
 ) -> ApplyResult:
-    advanced = ctx.services.advanced_to_next(ctx.runtime.module_content, ctx.state.world_time)
+    advanced = ctx.services.advanced_to_next(
+        ctx.runtime.module_content,
+        ctx.state.world_time,
+        # 剧情临时点也是可以进入的时刻：15:00 的任务让下一跳落在 15:00，
+        # 而不是默认的 18:00（#415 §阶段四）。
+        ctx.services.active_occurrences(ctx.state),
+    )
     state = ctx.state.model_copy(update={"world_time": advanced}, deep=True)
     return ApplyResult(
         state=state,

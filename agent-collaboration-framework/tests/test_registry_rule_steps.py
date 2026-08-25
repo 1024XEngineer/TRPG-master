@@ -22,9 +22,12 @@ SUSPENDING_KINDS = {
     "await_player_input",
     "invoke_ruleset_action",
     "create_npc_action_opportunity",
-    "create_time_task",
-    "cancel_time_task",
 }
+
+# 就地做完然后接着往下走的 kind。它们和 `effect` 是同一类行为，只是待提交的
+# 东西不是 `step.effect` 而是步骤自身——目标时间要等到提交那一刻才解析得出来
+# （#415 §阶段四）。
+SCHEDULING_KINDS = {"create_time_task", "cancel_time_task"}
 
 
 def step_kind_names() -> set[str]:
@@ -40,13 +43,25 @@ class RegistryCompletenessTests(unittest.TestCase):
 
         self.assertEqual(step_kind_names(), set(rule_step_registry.STEP_KINDS))
 
-    def test_exactly_two_kinds_drive_the_walk(self) -> None:
+    def test_only_the_registered_kinds_drive_the_walk(self) -> None:
         behaviors: dict[str, set[str]] = {}
         for kind, registration in rule_step_registry.STEP_KINDS.items():
             behaviors.setdefault(registration.walk_behavior, set()).add(kind)
         self.assertEqual(behaviors["terminal"], {"finish"})
         self.assertEqual(behaviors["produces_effect_and_continues"], {"effect"})
+        self.assertEqual(
+            behaviors["schedules_time_task_and_continues"], SCHEDULING_KINDS
+        )
         self.assertEqual(behaviors["suspends"], SUSPENDING_KINDS)
+
+    def test_the_two_time_task_kinds_no_longer_park_the_agenda(self) -> None:
+        """#415 §阶段四 给了它们执行器，所以不再是「无人推进的挂起点」。"""
+
+        for kind in SCHEDULING_KINDS:
+            with self.subTest(kind=kind):
+                registration = rule_step_registry.STEP_KINDS[kind]
+                self.assertIsNone(registration.agenda_status)
+                self.assertIsNone(registration.failure_code)
 
 
 class AgendaStatusTests(unittest.TestCase):
@@ -57,17 +72,20 @@ class AgendaStatusTests(unittest.TestCase):
         )
 
     def test_kinds_without_a_worker_fail_instead_of_hanging(self) -> None:
-        """These six park on the Agenda with nothing to resume them.
+        """These four park on the Agenda with nothing to resume them.
 
-        Until #398 the last four reported `running`, which is exactly what a
-        kind that *does* have a worker reports while waiting for it — so an
-        Agenda that would never move looked identical to one about to. They
-        fail, and say why.
+        Until #398 they reported `running`, which is exactly what a kind that
+        *does* have a worker reports while waiting for it — so an Agenda that
+        would never move looked identical to one about to. They fail, and
+        say why.
 
         `presentation` and `await_player_input` wore a more specific name for
         the same hang: `awaiting_presentation` and `awaiting_player_input` have
         zero consumers anywhere, so nothing was ever going to advance them
         either (#288 §6 closed `PresentationStep` as not wired).
+
+        `create_time_task` / `cancel_time_task` 曾经也在这份名单上，#415
+        §阶段四 给了它们执行器之后移出去了。
         """
 
         for kind in (
@@ -75,8 +93,6 @@ class AgendaStatusTests(unittest.TestCase):
             "await_player_input",
             "invoke_ruleset_action",
             "create_npc_action_opportunity",
-            "create_time_task",
-            "cancel_time_task",
         ):
             with self.subTest(kind=kind):
                 self.assertEqual(

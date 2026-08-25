@@ -44,6 +44,7 @@ from .rules_v3 import (
     agenda_item_for_event,
     agenda_status_for_walk,
     matching_event_rules,
+    task_due_item,
     walk_rule,
     walk_rule_from,
 )
@@ -262,6 +263,17 @@ class RuleSettlement:
         state: GameState,
         source_event: DomainEvent,
     ) -> None:
+        # 定时任务到期直接投递给排它的那条规则，不走 trigger 匹配：排任务这个
+        # 动作本身就是订阅，rule_id + branch_id 已经是完整答案（#415）。
+        due = task_due_item(self.module, source_event)
+        if due is not None:
+            fire_key = (due.rule_id, source_event.event_id)
+            if fire_key not in self.fired:
+                self.fired.add(fire_key)
+                self.queue.append(due)
+                self.source_event_ids.append(source_event.event_id)
+            return
+
         matched = False
         for rule in matching_event_rules(
             self.module,

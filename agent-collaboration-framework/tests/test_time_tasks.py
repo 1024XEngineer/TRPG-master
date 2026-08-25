@@ -618,10 +618,14 @@ class TaskDueTests(unittest.IsolatedAsyncioTestCase):
     """到期结算：单次发布、稳定顺序、隐藏边界（#415 §阶段四）。"""
 
     def module_with_due_rule(self) -> ModuleContentV3:
-        """21:00 排一个任务，到期时把 case_tracker 上的一个标记翻真。
+        """一条规则：进入 18:00 时排一个 21:00 的隐藏任务，到期走自己的 on_due 分支。
 
-        规则的入口分支故意写成 `never`，任务声明的是 `on_due`——只有
-        `on_due_branch_id` 被真正采纳，标记才会翻。
+        `on_due_branch_id` 是**排任务那条规则自己的**分支——排任务这个动作本身
+        就是订阅，任务上记的 rule_id + branch_id 已经是「谁关心、从哪继续」的
+        完整答案，不需要另写一条监听 `time.task_due` 的规则。
+
+        另外挂一条也监听 `time.task_due` 的无关规则，用来钉住它**不会**被别人
+        的任务到期唤醒。
         """
 
         content = module()
@@ -640,7 +644,10 @@ class TaskDueTests(unittest.IsolatedAsyncioTestCase):
                     "entry_branch_id": "default",
                 },
                 "execution": {
-                    "branches": [{"id": "default", "entry_step_id": "schedule"}],
+                    "branches": [
+                        {"id": "default", "entry_step_id": "schedule"},
+                        {"id": "on_due", "entry_step_id": "arrive"},
+                    ],
                     "steps": [
                         {
                             "id": "schedule",
@@ -653,26 +660,6 @@ class TaskDueTests(unittest.IsolatedAsyncioTestCase):
                             },
                             "next_step_id": "finish",
                         },
-                        {"id": "finish", "kind": "finish"},
-                    ],
-                },
-            }
-        )
-        on_due = RuleSpecV3.model_validate(
-            {
-                "id": "late_visitor_arrives",
-                "priority": 50,
-                "trigger": {
-                    "kind": "event",
-                    "event_type": "time.task_due",
-                    "entry_branch_id": "never",
-                },
-                "execution": {
-                    "branches": [
-                        {"id": "never", "entry_step_id": "wrong"},
-                        {"id": "on_due", "entry_step_id": "arrive"},
-                    ],
-                    "steps": [
                         {
                             "id": "arrive",
                             "kind": "effect",
@@ -684,13 +671,30 @@ class TaskDueTests(unittest.IsolatedAsyncioTestCase):
                             },
                             "next_step_id": "finish",
                         },
+                        {"id": "finish", "kind": "finish"},
+                    ],
+                },
+            }
+        )
+        eavesdropper = RuleSpecV3.model_validate(
+            {
+                "id": "unrelated_due_listener",
+                "priority": 50,
+                "trigger": {
+                    "kind": "event",
+                    "event_type": "time.task_due",
+                    "entry_branch_id": "default",
+                },
+                "execution": {
+                    "branches": [{"id": "default", "entry_step_id": "meddle"}],
+                    "steps": [
                         {
-                            "id": "wrong",
+                            "id": "meddle",
                             "kind": "effect",
                             "effect": {
                                 "type": "change_entity_state",
                                 "entity_id": "case_tracker",
-                                "key": "took_the_wrong_branch",
+                                "key": "someone_elses_task_fired",
                                 "value": True,
                             },
                             "next_step_id": "finish",
@@ -701,7 +705,7 @@ class TaskDueTests(unittest.IsolatedAsyncioTestCase):
             }
         )
         return content.model_copy(
-            update={"rules": (*content.rules, scheduler, on_due)}, deep=True
+            update={"rules": (*content.rules, scheduler, eavesdropper)}, deep=True
         )
 
     async def walk_to_the_task(self, engine, store):
@@ -792,7 +796,7 @@ class TaskDueTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(again.time_tasks, state.time_tasks)
 
     async def test_the_due_event_enters_the_branch_the_task_declared(self) -> None:
-        """规则的入口分支是 `never`，任务声明的是 `on_due`。"""
+        """排任务时走 default 分支，到期走 on_due——同一条规则的两个分支。"""
 
         _, store, engine = self.build()
 
@@ -800,7 +804,16 @@ class TaskDueTests(unittest.IsolatedAsyncioTestCase):
 
         entities = store.inspect_state(ROOM).entities["case_tracker"]
         self.assertIs(entities.get("visitor_arrived"), True)
-        self.assertNotIn("took_the_wrong_branch", entities)
+
+    async def test_a_due_event_never_wakes_someone_elses_due_rule(self) -> None:
+        """一个任务到期不该带出另一条规则的剧情后果。"""
+
+        _, store, engine = self.build()
+
+        await self.walk_to_the_task(engine, store)
+
+        entities = store.inspect_state(ROOM).entities["case_tracker"]
+        self.assertNotIn("someone_elses_task_fired", entities)
 
     async def test_a_hidden_task_never_reaches_the_player(self) -> None:
         """隐藏任务的存在、来源与后果都不进玩家侧投影。"""

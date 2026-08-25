@@ -61,6 +61,8 @@ def matching_event_rules(
 
     Ordering is `priority DESC, id ASC` — the same stable rule v2 used, so a
     module author's priorities keep meaning what they meant.
+
+    定时任务到期不走这里：排任务本身就是订阅，`task_due_item` 直接投递。
     """
 
     matched = [
@@ -72,6 +74,40 @@ def matching_event_rules(
     ]
     matched.sort(key=lambda rule: (-rule.priority, rule.id))
     return tuple(matched)
+
+
+def task_due_item(module: ModuleContentV3, event: DomainEvent) -> AgendaItem | None:
+    """把一次到期直接投递给排它的那条规则（#415）。
+
+    定时任务不走 trigger 匹配。排任务这个动作**本身就是订阅**：
+    `RuntimeTimeTask` 上记着 rule_id 与 branch_id，那就是「谁关心、从哪继续」的
+    完整答案。按 event_type 广播反而会出两个错——所有监听 `time.task_due` 的
+    规则一起入队（一个任务到期带出另一个任务的剧情后果），而真正排了任务的那条
+    规则如果 trigger 写的是别的事件（通常如此，它得先被什么东西唤醒才会去排
+    任务），反倒收不到自己的到期。
+
+    返回 None 表示这条事件不该进队列：规则或分支在模组换版之后没了。半截执行
+    比不执行更糟，所以宁可不排。
+    """
+
+    if event.type != "time.task_due":
+        return None
+    rule_id = event.payload.get("rule_id")
+    branch_id = event.payload.get("branch_id")
+    if not isinstance(rule_id, str) or not isinstance(branch_id, str):
+        return None
+    rule = next((item for item in module.rules if item.id == rule_id), None)
+    if rule is None or not any(
+        branch.id == branch_id for branch in rule.execution.branches
+    ):
+        return None
+    return AgendaItem(
+        source_event_id=event.event_id,
+        event_sequence=event.sequence,
+        rule_id=rule.id,
+        rule_priority=rule.priority,
+        branch_id=branch_id,
+    )
 
 
 def evaluate_condition(
@@ -223,29 +259,8 @@ def agenda_item_for_event(rule: RuleSpecV3, event: DomainEvent) -> AgendaItem:
         event_sequence=event.sequence,
         rule_id=rule.id,
         rule_priority=rule.priority,
-        branch_id=_entry_branch_for(rule, trigger, event),
+        branch_id=trigger.entry_branch_id,
     )
-
-
-def _entry_branch_for(
-    rule: RuleSpecV3,
-    trigger: EventTriggerSpec,
-    event: DomainEvent,
-) -> str:
-    """规则从哪个分支开始跑。
-
-    通常是 trigger 声明的入口分支。`time.task_due` 是例外：任务在排定时就声明
-    了 `on_due_branch_id`，同一条规则可以为不同任务排不同的后续（#245 §5）。
-    载荷里的分支必须真实存在，否则按入口分支来——事件载荷是引擎自己写的，但
-    模组换版之后那个分支可能已经没了。
-    """
-
-    requested = event.payload.get("branch_id") if event.type == "time.task_due" else None
-    if isinstance(requested, str) and any(
-        branch.id == requested for branch in rule.execution.branches
-    ):
-        return requested
-    return trigger.entry_branch_id
 
 
 # The three ways the walk itself — rather than the step it reached — failed.

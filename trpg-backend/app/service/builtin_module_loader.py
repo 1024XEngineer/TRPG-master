@@ -43,7 +43,7 @@ class BuiltinModuleSpec:
 PAPER_CHASE_SPEC = BuiltinModuleSpec(
     scenario_id="00000000-0000-0000-0000-000000000003",
     module_id="paper-chase-zh-coc7",
-    version="3.0.7",
+    version="3.0.8",
     world_ref="coc-7e",
     source_path=MODULE_FIXTURE_ROOT / "追书人" / "module-content-v3.json",
     display_name="追书人",

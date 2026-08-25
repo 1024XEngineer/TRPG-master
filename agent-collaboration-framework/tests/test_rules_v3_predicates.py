@@ -163,6 +163,113 @@ class TimeOfDayIsTests(unittest.TestCase):
         self.assertFalse(_evaluate_predicate(condition, state=state, actor_id=ACTOR))
 
 
+class TimePointIsTests(unittest.TestCase):
+    """#245 §8 的 CurrentTimePointPredicate（#415 §阶段三）。"""
+
+    def at(self, point_id: str, *, day: int = 0, hour: int = 0) -> GameState:
+        return game_state(
+            world_time=WorldTimeState(
+                current=WorldTimePoint(day_index=day, hour_of_day=hour),
+                current_point_id=point_id,
+            )
+        )
+
+    def test_matches_only_the_exact_declared_point(self) -> None:
+        state = self.at("hour_20", hour=20)
+
+        self.assertTrue(
+            _evaluate_predicate(
+                predicate("time_point_is", value="hour_20"), state=state, actor_id=ACTOR
+            )
+        )
+        # hour_18 与 hour_20 同为 evening，粗粒度谓词分不开，这个谓词分得开。
+        self.assertFalse(
+            _evaluate_predicate(
+                predicate("time_point_is", value="hour_18"), state=state, actor_id=ACTOR
+            )
+        )
+
+    def test_a_missing_or_non_string_value_reads_false(self) -> None:
+        state = self.at("hour_20", hour=20)
+
+        self.assertFalse(
+            _evaluate_predicate(predicate("time_point_is"), state=state, actor_id=ACTOR)
+        )
+        self.assertFalse(
+            _evaluate_predicate(
+                predicate("time_point_is", value=20), state=state, actor_id=ACTOR
+            )
+        )
+
+
+class WorldTimeAtLeastTests(unittest.TestCase):
+    def at(self, *, day: int, hour: int) -> GameState:
+        return game_state(
+            world_time=WorldTimeState(
+                current=WorldTimePoint(day_index=day, hour_of_day=hour),
+                current_point_id="point",
+            )
+        )
+
+    def test_compares_on_the_absolute_hour_across_days(self) -> None:
+        """跨天由 `absolute_hour` 保证：D1 02:00 晚于 D0 18:00。"""
+
+        query = predicate("world_time_at_least", day_index=1, hour_of_day=0)
+
+        self.assertFalse(
+            _evaluate_predicate(query, state=self.at(day=0, hour=18), actor_id=ACTOR)
+        )
+        self.assertTrue(
+            _evaluate_predicate(query, state=self.at(day=1, hour=2), actor_id=ACTOR)
+        )
+
+    def test_the_boundary_moment_itself_counts_as_at_least(self) -> None:
+        query = predicate("world_time_at_least", day_index=1, hour_of_day=2)
+
+        self.assertTrue(
+            _evaluate_predicate(query, state=self.at(day=1, hour=2), actor_id=ACTOR)
+        )
+
+    def test_a_non_integer_bound_reads_false(self) -> None:
+        state = self.at(day=3, hour=12)
+
+        for args in ({"day_index": "1"}, {"hour_of_day": None}, {"day_index": True}):
+            with self.subTest(args=args):
+                self.assertFalse(
+                    _evaluate_predicate(
+                        predicate("world_time_at_least", **args), state=state, actor_id=ACTOR
+                    )
+                )
+
+
+class DaysElapsedAtLeastTests(unittest.TestCase):
+    def on_day(self, day: int) -> GameState:
+        return game_state(
+            world_time=WorldTimeState(
+                current=WorldTimePoint(day_index=day, hour_of_day=12),
+                current_point_id="hour_12",
+            )
+        )
+
+    def test_opening_day_is_zero(self) -> None:
+        """与运行态一致：开局当天是第 0 天，所以「第三天」写作 2。"""
+
+        query = predicate("days_elapsed_at_least", value=2)
+
+        self.assertFalse(_evaluate_predicate(query, state=self.on_day(1), actor_id=ACTOR))
+        self.assertTrue(_evaluate_predicate(query, state=self.on_day(2), actor_id=ACTOR))
+        self.assertTrue(_evaluate_predicate(query, state=self.on_day(5), actor_id=ACTOR))
+
+    def test_a_non_integer_value_reads_false(self) -> None:
+        self.assertFalse(
+            _evaluate_predicate(
+                predicate("days_elapsed_at_least", value="2"),
+                state=self.on_day(5),
+                actor_id=ACTOR,
+            )
+        )
+
+
 class InformationIsTests(unittest.TestCase):
     def test_party_wide_discovered_fact_matches(self) -> None:
         state = game_state(discovered_facts=("clue_a",))

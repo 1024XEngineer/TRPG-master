@@ -89,6 +89,43 @@ def _time_of_day_is(args: dict[str, JsonValue], state: GameState, actor_id: str)
     return matches_time_query(state.world_time.time_segment, args.get("value"))
 
 
+def _time_point_is(args: dict[str, JsonValue], state: GameState, actor_id: str) -> bool:
+    """当前停在哪个模组声明的时间点上（#245 §8 的 CurrentTimePointPredicate）。
+
+    这是模组私有的精确身份，`time_of_day_is` 答不了：追书人同时声明了
+    `hour_18` 与 `hour_20`，两者都是 evening，粗粒度谓词在两个点各触发一次，
+    所以模组只能拿一个布尔闩去手工去重。有了这个谓词，规则可以直接说清楚
+    自己挂在哪一个点上。
+    """
+
+    return state.world_time.current_point_id == args.get("value")
+
+
+def _world_time_at_least(args: dict[str, JsonValue], state: GameState, actor_id: str) -> bool:
+    """世界时间是否已经走到（或越过）某个绝对时刻。
+
+    比较走 `WorldTimePoint.absolute_hour`——那个属性早就存在且是全序，在这之前
+    零消费者。跨天不需要调用方自己算：D0 18:00 < D1 02:00 由属性本身保证。
+    """
+
+    day_index = args.get("day_index", 0)
+    hour_of_day = args.get("hour_of_day", 0)
+    if not isinstance(day_index, int) or not isinstance(hour_of_day, int):
+        return False
+    if isinstance(day_index, bool) or isinstance(hour_of_day, bool):
+        return False
+    return state.world_time.current.absolute_hour >= day_index * 24 + hour_of_day
+
+
+def _days_elapsed_at_least(args: dict[str, JsonValue], state: GameState, actor_id: str) -> bool:
+    """开局当天是第 0 天，所以「第三天」写作 `{value: 2}`。"""
+
+    value = args.get("value")
+    if not isinstance(value, int) or isinstance(value, bool):
+        return False
+    return state.world_time.current.day_index >= value
+
+
 def _information_is(args: dict[str, JsonValue], state: GameState, actor_id: str) -> bool:
     information_id = args.get("id")
     if not isinstance(information_id, str):
@@ -105,6 +142,9 @@ def _core_resolved(args: dict[str, JsonValue], state: GameState, actor_id: str) 
 PREDICATES: dict[str, PredicateEvaluator] = {
     "entity_state_is": _entity_state_is,
     "time_of_day_is": _time_of_day_is,
+    "time_point_is": _time_point_is,
+    "world_time_at_least": _world_time_at_least,
+    "days_elapsed_at_least": _days_elapsed_at_least,
     "information_is": _information_is,
     "core_resolved": _core_resolved,
 }

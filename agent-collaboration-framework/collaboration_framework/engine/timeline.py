@@ -6,9 +6,10 @@ never say *how far* to advance; they say `advance_to_next` and the timeline
 answers with exactly one point.
 
 Scope note: this module resolves **default** points only. Story temporary points
-(§一.5) insert extra occurrences between two default points and are resolved by
-the same `next_point_after` once RuntimeTimeTask lands — the signature is chosen
-so that adding them does not change any caller.
+(§一.5) insert extra occurrences between two default points; the models exist
+(`TimePointOccurrence` / `RuntimeTimeTask`) but the executor that creates them
+does not yet — until it does, `ordered_points` sees only what the module
+declared.
 """
 
 from __future__ import annotations

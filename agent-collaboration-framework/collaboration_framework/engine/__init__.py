@@ -36,7 +36,9 @@ from .models import (
     GameState,
     PendingCheckDecision,
     RuleAgenda,
+    RuntimeTimeTask,
     StateModifiedEvent,
+    TimePointOccurrence,
 )
 from .ports import EngineStore, EngineTransaction, RevisionConflictError
 from .service import RuleEngineService
@@ -63,11 +65,13 @@ __all__ = [
     "InMemoryEngineStore",
     "PendingCheckDecision",
     "RuleAgenda",
+    "RuntimeTimeTask",
     "RevisionConflictError",
     "RuntimeCapabilityIssue",
     "RuleEngineService",
     "SequenceDiceSource",
     "StateModifiedEvent",
+    "TimePointOccurrence",
     "SystemDiceSource",
     "audit_runtime_capabilities",
     "create_initial_game_state",

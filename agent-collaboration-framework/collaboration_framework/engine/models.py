@@ -107,6 +107,52 @@ class WorldTimeState(ContractModel):
         return self.current_time_segment or segment_at_hour(self.current.hour_of_day)
 
 
+class TimePointOccurrence(ContractModel):
+    """时间线上的一次具体到达（#245 §一.5 / #415 §阶段四）。
+
+    默认点每天都会来一次，剧情临时点只来一次。两者用**同一套绝对时间排序**，
+    所以「15:00 的任务插在 12 与 18 之间」不需要任何特殊分支——把临时点混进
+    默认点再按 `absolute_hour` 重排就是了。
+
+    `point_id` 为 None 表示这一刻不对应任何模组声明的点，只由 TimeTask 排出来。
+    那条路径拿不到 `TimePointSpec`，玩家措辞因此回退到 `time_segment` 的缺省值。
+    """
+
+    occurrence_id: str = Field(min_length=1)
+    point_id: str | None = Field(default=None, min_length=1)
+    day_index: int = Field(ge=0)
+    hour_of_day: int = Field(ge=0, le=23)
+    time_segment: TimeSegment
+    origin: Literal["default", "time_task"] = "time_task"
+
+    @property
+    def absolute_hour(self) -> int:
+        return self.day_index * 24 + self.hour_of_day
+
+
+class RuntimeTimeTask(ContractModel):
+    """一个已经排好、等着到期的定时任务（#245 §5）。
+
+    #245 冻结了这个形状，但类一直不存在——只在 `engine/timeline.py` 的注释里
+    被提过一次。任务绑到 occurrence 而不是绑到时刻，因为同日同小时的多个任务
+    共享同一个 occurrence：取消其中一个不该动其他任务，也不该动那个点。
+    """
+
+    task_id: str = Field(min_length=1)
+    task_key: str = Field(min_length=1)
+    rule_id: str = Field(min_length=1)
+    branch_id: str = Field(min_length=1)
+    occurrence_id: str = Field(min_length=1)
+    priority: int = 0
+    visibility: Literal["public", "hidden"] = "public"
+    # `completed` 之后不会再发第二次 `time.task_due`：单次发布靠的是「把状态
+    # 翻成 completed」和「发事件」落在同一次提交里，而不是靠调用方自觉。
+    status: Literal["scheduled", "completed", "cancelled"] = "scheduled"
+    bindings: dict[str, JsonValue] = Field(default_factory=dict)
+    # 取消时记下来的原因码，进审计事件。
+    cancel_reason_code: str | None = Field(default=None, min_length=1)
+
+
 class AgendaSource(ContractModel):
     """The committed fact that created a durable RuleAgenda (#226 §4)."""
 
@@ -214,6 +260,10 @@ class GameState(ContractModel):
     party_item_knowledge: dict[str, ItemKnowledge] = Field(default_factory=dict)
     actor_item_knowledge: dict[str, dict[str, ItemKnowledge]] = Field(default_factory=dict)
     rule_agendas: dict[str, RuleAgenda] = Field(default_factory=dict)
+    # 只保存**临时** occurrence：默认点每天都会来，从 module_content 现推就行，
+    # 存一份等于把模组内容复制进房间状态，换版本时必然漂移。
+    time_occurrences: dict[str, TimePointOccurrence] = Field(default_factory=dict)
+    time_tasks: dict[str, RuntimeTimeTask] = Field(default_factory=dict)
     core_resolved: bool = False
     ending_available: bool = False
     ending_resolution: EndingResolution | None = None

@@ -10,6 +10,7 @@ from app.adapters import SqlAlchemyActionPlanRunStore, SqlAlchemyEngineStore
 from app.core.config import get_settings
 from app.core.db import async_session_factory
 from app.core.legacy_turn_run import LegacySingleActionRecoveryAdapter
+from app.service.time_advance import ConsentAwareAdjudicationEngine
 
 
 class _FixedDiceSource:
@@ -30,10 +31,14 @@ _dice = (
     if _settings.app_env == "test" and _settings.test_fixed_dice_roll is not None
     else None
 )
-adjudication_engine_service = AdjudicationEngineService(engine_store, dice=_dice)
+_raw_adjudication_engine = AdjudicationEngineService(engine_store, dice=_dice)
+adjudication_engine_service = ConsentAwareAdjudicationEngine(
+    _raw_adjudication_engine,
+    async_session_factory,
+)
 rule_engine_service = RuleEngineService(engine_store)
 legacy_single_action_recovery = LegacySingleActionRecoveryAdapter(
-    engine=adjudication_engine_service,
+    engine=_raw_adjudication_engine,
     session_factory=async_session_factory,
 )
 

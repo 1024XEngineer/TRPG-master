@@ -526,3 +526,69 @@ def test_memory_source_time_reconciliation_repairs_stamped_database(tmp_path: Pa
         indexes = {row[1] for row in connection.execute("PRAGMA index_list('memory_entries')")}
     assert source_created_at == ("2026-08-20 12:34:56",)
     assert "ix_memory_entries_room_source_created" in indexes
+
+
+def test_summary_cursor_migration_preserves_scene_audience_and_pending_target(
+    tmp_path: Path,
+) -> None:
+    """旧摘要回填必须包含冻结场景受众，并保留任务原有 pending 上界。"""
+    database = tmp_path / "summary-cursor-backfill.db"
+    _upgrade_or_fail(database, "f7a8b9c0d1e2")
+    room_id = "21000000000000000000000000000001"
+    player_id = "21000000000000000000000000000002"
+    event_ids = [
+        "21000000000000000000000000000011",
+        "21000000000000000000000000000012",
+        "21000000000000000000000000000013",
+    ]
+    with sqlite3.connect(database) as connection:
+        connection.executemany(
+            """
+            INSERT INTO events (
+                id, room_id, player_id, event_type, payload, visibility, created_at
+            ) VALUES (?, ?, ?, ?, '{}', ?, ?)
+            """,
+            [
+                (
+                    event_ids[0],
+                    room_id,
+                    player_id,
+                    "action.broadcast",
+                    "public",
+                    "2026-08-01 00:00:01",
+                ),
+                (
+                    event_ids[1],
+                    room_id,
+                    player_id,
+                    "narration.push",
+                    "scene_scoped",
+                    "2026-08-01 00:00:02",
+                ),
+                (event_ids[2], room_id, player_id, "check.result", "public", "2026-08-01 00:00:03"),
+            ],
+        )
+        connection.execute(
+            "INSERT INTO event_audiences (event_id, player_id) VALUES (?, ?)",
+            (event_ids[1], player_id),
+        )
+        connection.execute(
+            """
+            INSERT INTO conversation_summaries (
+                id, room_id, player_id, summary_json,
+                through_event_sequence, pending_through_sequence,
+                status, attempt_count, updated_at
+            ) VALUES (?, ?, ?, '{}', 2, 3, 'pending', 0, '2026-08-01 00:00:04')
+            """,
+            ("21000000000000000000000000000020", room_id, player_id),
+        )
+
+    _upgrade_or_fail(database, "head")
+    with sqlite3.connect(database) as connection:
+        cursor = connection.execute(
+            """
+            SELECT through_event_id, pending_event_id
+            FROM conversation_summaries
+            """
+        ).fetchone()
+    assert cursor == (event_ids[1], event_ids[2])

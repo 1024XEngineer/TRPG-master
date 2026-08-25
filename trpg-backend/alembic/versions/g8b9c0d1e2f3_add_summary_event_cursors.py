@@ -1,5 +1,6 @@
 """为长局摘要增加基于 Event 时间和 ID 的复合游标。"""
 
+import uuid
 from collections.abc import Sequence
 
 import sqlalchemy as sa
@@ -44,8 +45,11 @@ def upgrade() -> None:
         sa.column("room_id", sa.String()),
         sa.column("player_id", sa.String()),
         sa.column("through_event_sequence", sa.Integer()),
+        sa.column("pending_through_sequence", sa.Integer()),
         sa.column("through_event_created_at", sa.DateTime(timezone=True)),
         sa.column("through_event_id", sa.String()),
+        sa.column("pending_event_created_at", sa.DateTime(timezone=True)),
+        sa.column("pending_event_id", sa.String()),
     )
     events = sa.table(
         "events",
@@ -56,42 +60,72 @@ def upgrade() -> None:
         sa.column("visibility", sa.String()),
         sa.column("created_at", sa.DateTime(timezone=True)),
     )
-    rows = bind.execute(sa.select(summaries)).mappings().all()
-    event_types = (
-        "action.broadcast",
-        "narration.push",
-        "check.result",
-        "dialogue.player",
-        "dialogue.npc",
+    event_audiences = sa.table(
+        "event_audiences",
+        sa.column("event_id", sa.String()),
+        sa.column("player_id", sa.String()),
     )
+    rows = bind.execute(sa.select(summaries)).mappings().all()
+    # 旧 sequence 只统计 PR4 之前的三类事件；dialogue 从 PR5 开始增量进入摘要。
+    event_types = ("action.broadcast", "narration.push", "check.result")
+
+    def _scope_ids(value: str) -> tuple[str, ...]:
+        """迁移时兼容历史带连字符和 canonical UUID。"""
+        try:
+            canonical = uuid.UUID(value).hex
+        except (ValueError, AttributeError):
+            canonical = value
+        return tuple(dict.fromkeys((value, canonical)))
+
     for row in rows:
-        sequence = int(row["through_event_sequence"] or 0)
-        if sequence <= 0:
-            continue
-        cursor = bind.execute(
+        player_scope_ids = _scope_ids(row["player_id"])
+        visible = sa.or_(
+            events.c.visibility == "public",
+            sa.and_(
+                events.c.visibility == "player_scoped",
+                events.c.player_id.in_(player_scope_ids),
+            ),
+            sa.and_(
+                events.c.visibility == "scene_scoped",
+                sa.exists(
+                    sa.select(event_audiences.c.event_id).where(
+                        event_audiences.c.event_id == events.c.id,
+                        event_audiences.c.player_id.in_(player_scope_ids),
+                    )
+                ),
+            ),
+        )
+        base_query = (
             sa.select(events.c.created_at, events.c.id)
             .where(
                 events.c.room_id == row["room_id"],
                 events.c.event_type.in_(event_types),
-                sa.or_(
-                    events.c.visibility == "public",
-                    events.c.player_id == row["player_id"],
-                ),
+                visible,
             )
             .order_by(events.c.created_at, events.c.id)
-            .offset(sequence - 1)
-            .limit(1)
-        ).first()
-        if cursor is None:
-            continue
-        bind.execute(
-            summaries.update()
-            .where(summaries.c.id == row["id"])
-            .values(
-                through_event_created_at=cursor.created_at,
-                through_event_id=cursor.id,
-            )
         )
+
+        def _cursor_at(sequence: int, query=base_query):  # noqa: ANN001
+            if sequence <= 0:
+                return None
+            return bind.execute(query.offset(sequence - 1).limit(1)).first()
+
+        through_cursor = _cursor_at(int(row["through_event_sequence"] or 0))
+        pending_cursor = _cursor_at(int(row["pending_through_sequence"] or 0))
+        if through_cursor is None and pending_cursor is None:
+            continue
+        values = {}
+        if through_cursor is not None:
+            values.update(
+                through_event_created_at=through_cursor.created_at,
+                through_event_id=through_cursor.id,
+            )
+        if pending_cursor is not None:
+            values.update(
+                pending_event_created_at=pending_cursor.created_at,
+                pending_event_id=pending_cursor.id,
+            )
+        bind.execute(summaries.update().where(summaries.c.id == row["id"]).values(**values))
 
 
 def downgrade() -> None:

@@ -22,7 +22,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dto.ws import TimeAdvancePendingPayload, TimeAdvanceResolvedPayload
 from app.main import app
-from app.models.engine import GameEvent, GameSession, TimeAdvanceProposalRecord
+from app.models.engine import (
+    GameEvent,
+    GameSession,
+    ModuleVersion,
+    TimeAdvanceProposalRecord,
+)
 from app.service import time_advance
 from tests.test_engine_runtime import _start_room
 
@@ -202,6 +207,49 @@ async def test_broadcast_payloads_carry_only_the_module_wording(
     leaked = {"targetPointId", "targetDayIndex", "targetHourOfDay"}
     assert not leaked & pending.keys()
     assert not leaked & resolved.keys()
+
+
+@pytest.mark.asyncio
+async def test_terminal_point_refuses_before_any_vote_is_collected(
+    db_session: AsyncSession,
+) -> None:
+    """多人房间在终点根本不该创建提案（#415 §阶段二）。
+
+    让全员投完票才被拒是最难看的一种拒绝方式，所以应用层在建提案**之前**就要
+    执行和 Engine 提交时同一个 `terminal_reached`。
+    """
+
+    room, players, _ = await _start_room(
+        db_session,
+        room_number=3496,
+        player_count=2,
+        prepare_checkpoint=False,
+    )
+    session = await db_session.get(GameSession, room.id)
+    assert session is not None
+    version = await db_session.get(ModuleVersion, (session.module_id, session.module_version))
+    assert version is not None
+    # 追书人从 hour_12 开局；把开局那一刻本身声明成终点，房间一上来就在终点上。
+    content = dict(version.content_json)
+    content["time_policy"] = dict(content["time_policy"]) | {
+        "terminal_point": {"point_id": "hour_12", "day_index": 0}
+    }
+    version.content_json = content
+    await db_session.commit()
+
+    with pytest.raises(time_advance.TimeAdvanceError, match="最后一个时间点"):
+        await time_advance.create_from_adjudication(
+            db_session,
+            _request(
+                room_id=room.id,
+                player_id=players[0].id,
+                actor_id="actor_1",
+                revision=session.state_version,
+                action_id="time-terminal-415",
+            ),
+        )
+
+    assert await time_advance._active_record(db_session, room.id) is None
 
 
 @pytest.mark.asyncio

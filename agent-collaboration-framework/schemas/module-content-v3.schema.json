@@ -2176,6 +2176,17 @@
           "default": "multiple",
           "title": "Actions Per Point",
           "type": "string"
+        },
+        "terminal_point": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TerminalTimePointSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "title": "ModuleTimePolicySpec",
@@ -2673,6 +2684,30 @@
         "visible"
       ],
       "title": "SetVisibilityEffect",
+      "type": "object"
+    },
+    "TerminalTimePointSpec": {
+      "additionalProperties": false,
+      "description": "时间线的最后一刻（#415 §阶段二）。\n\n终点必须标识时间点的某一次 **occurrence**，不能只给 point id：时间线是个\n环，`hour_18` 每天都会来一次，「第三天 18:00 结束」和「明天 18:00 结束」\n是两件事。`day_index` 与运行态一致，开局当天为 0，所以第三天 18:00 写作\n`{point_id: \"hour_18\", day_index: 2}`。\n\n不重复保存 `hour_of_day`：它由 `point_id` 对应的 `TimePointSpec` 唯一确定，\n两个字段互相矛盾比少一个字段更糟。",
+      "properties": {
+        "point_id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+          "title": "Point Id",
+          "type": "string"
+        },
+        "day_index": {
+          "minimum": 0,
+          "title": "Day Index",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "point_id",
+        "day_index"
+      ],
+      "title": "TerminalTimePointSpec",
       "type": "object"
     },
     "TimePointSpec": {

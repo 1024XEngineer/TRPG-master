@@ -14,15 +14,30 @@ from collaboration_framework.contracts import (
     DAY_SEGMENTS,
     NIGHT_SEGMENTS,
     ContractError,
+    ModuleContentV3,
+    ModuleTimePolicySpec,
+    TerminalTimePointSpec,
     TimePointSpec,
     matches_time_query,
     segment_at_hour,
 )
 from collaboration_framework.engine.initialization import create_initial_game_state
-from collaboration_framework.engine.models import WorldTimePoint, WorldTimeState
-from collaboration_framework.engine.timeline import advanced_to_next, next_point_after
+from collaboration_framework.engine.models import (
+    ActorState,
+    EngineRuntimeSnapshot,
+    WorldTimePoint,
+    WorldTimeState,
+)
+from collaboration_framework.engine.projection_v3 import keeper_capabilities_v3, project_v3
+from collaboration_framework.engine.timeline import (
+    advanced_to_next,
+    next_point_after,
+    player_time_label,
+    terminal_reached,
+    time_advance_block_reason,
+)
 
-from tests.test_projection_v3 import module
+from tests.test_projection_v3 import ACTOR, module
 
 
 class DiscreteTimelineTests(unittest.TestCase):
@@ -143,6 +158,246 @@ class DiscreteTimelineTests(unittest.TestCase):
 
         self.assertEqual(state.world_time.current_point_id, "hour_00")
         self.assertEqual(state.world_time.current.hour_of_day, 0)
+
+
+# 《林隙的罪恶》那类单夜模组：按小时升序声明，起点落在环上的 18:00，
+# 越过 22:00 之后回卷进第二天的 00:00 / 02:00，02:00 是最后一刻。
+SINGLE_NIGHT_POINTS = (
+    TimePointSpec(id="hour_00", hour_of_day=0, order=0),
+    TimePointSpec(id="hour_02", hour_of_day=2, order=1),
+    TimePointSpec(id="hour_18", hour_of_day=18, order=2),
+    TimePointSpec(id="hour_20", hour_of_day=20, order=3),
+    TimePointSpec(id="hour_22", hour_of_day=22, order=4, label="深夜"),
+)
+
+
+def single_night_module():
+    """跨午夜的单夜模组，终点是 D1 02:00。"""
+
+    content = module()
+    return content.model_copy(
+        update={
+            "time_policy": ModuleTimePolicySpec(
+                default_points=SINGLE_NIGHT_POINTS,
+                terminal_point=TerminalTimePointSpec(point_id="hour_02", day_index=1),
+            ),
+            "initial_state": content.initial_state.model_copy(
+                update={"start_time_point_id": "hour_18"}
+            ),
+        },
+        deep=True,
+    )
+
+
+class TerminalTimePointTests(unittest.TestCase):
+    """时间线的终点与推进边界（#415 §阶段二）。"""
+
+    def walk(self, content, state, steps: int):
+        seen = []
+        for _ in range(steps):
+            state = advanced_to_next(content, state)
+            seen.append((state.current_point_id, state.current.day_index))
+        return state, seen
+
+    def test_a_single_night_module_walks_five_points_across_midnight(self) -> None:
+        content = single_night_module()
+        state = create_initial_game_state(content, room_id="room_01", actors={}).world_time
+
+        self.assertEqual((state.current_point_id, state.current.day_index), ("hour_18", 0))
+        final, seen = self.walk(content, state, 4)
+
+        self.assertEqual(
+            seen,
+            [("hour_20", 0), ("hour_22", 0), ("hour_00", 1), ("hour_02", 1)],
+        )
+        # 玩家依次看到 晚上 / 晚上 / 深夜 / 凌晨 / 凌晨。
+        self.assertEqual(player_time_label(content, state), "晚上")
+        self.assertEqual(player_time_label(content, final), "凌晨")
+
+    def test_reaching_the_terminal_point_refuses_further_advance(self) -> None:
+        content = single_night_module()
+        state = create_initial_game_state(content, room_id="room_01", actors={}).world_time
+        final, _ = self.walk(content, state, 4)
+
+        self.assertTrue(terminal_reached(content, final))
+        with self.assertRaisesRegex(ContractError, "terminal_point_reached"):
+            next_point_after(content, final)
+
+    def test_the_ring_no_longer_wraps_into_a_repeating_night(self) -> None:
+        """没有终点时走到 02:00 会回卷到 D1 18:00，夜晚无限重复。"""
+
+        content = single_night_module()
+        without_terminal = content.model_copy(
+            update={
+                "time_policy": content.time_policy.model_copy(
+                    update={"terminal_point": None}
+                )
+            },
+            deep=True,
+        )
+        at_end = WorldTimeState(
+            current=WorldTimePoint(day_index=1, hour_of_day=2),
+            current_point_id="hour_02",
+        )
+
+        wrapped = advanced_to_next(without_terminal, at_end)
+        self.assertEqual((wrapped.current_point_id, wrapped.current.day_index), ("hour_18", 1))
+        self.assertFalse(terminal_reached(without_terminal, at_end))
+
+    def test_a_multi_day_module_only_stops_on_the_declared_occurrence(self) -> None:
+        """第三天 18:00 结束：前两次进入 hour_18 仍可继续。"""
+
+        content = module()
+        content = content.model_copy(
+            update={
+                "time_policy": content.time_policy.model_copy(
+                    update={
+                        "terminal_point": TerminalTimePointSpec(
+                            point_id="hour_18", day_index=2
+                        )
+                    }
+                )
+            },
+            deep=True,
+        )
+        def at(point_id: str, day: int, hour: int) -> WorldTimeState:
+            return WorldTimeState(
+                current=WorldTimePoint(day_index=day, hour_of_day=hour),
+                current_point_id=point_id,
+            )
+
+        self.assertFalse(terminal_reached(content, at("hour_18", 0, 18)))
+        self.assertFalse(terminal_reached(content, at("hour_18", 1, 18)))
+        self.assertTrue(terminal_reached(content, at("hour_18", 2, 18)))
+
+    def test_a_room_that_somehow_overshot_the_terminal_fails_closed(self) -> None:
+        """越过终点还能继续走，等于让时间线在作者没写过的地方跑。"""
+
+        content = single_night_module()
+        overshot = WorldTimeState(
+            current=WorldTimePoint(day_index=3, hour_of_day=20),
+            current_point_id="hour_20",
+        )
+
+        self.assertTrue(terminal_reached(content, overshot))
+        with self.assertRaisesRegex(ContractError, "terminal_point_reached"):
+            next_point_after(content, overshot)
+
+    def test_block_reason_carries_a_stable_code_not_a_parsed_string(self) -> None:
+        content = single_night_module()
+        state = create_initial_game_state(content, room_id="room_01", actors={}).world_time
+        final, _ = self.walk(content, state, 4)
+
+        blocked = time_advance_block_reason(
+            ("actor_1",), module_content=content, world_time=final
+        )
+        assert blocked is not None
+        self.assertEqual(blocked.code, "terminal_point_reached")
+        # 单人房间在终点之前没有任何阻塞。
+        self.assertIsNone(
+            time_advance_block_reason(("actor_1",), module_content=content, world_time=state)
+        )
+
+    def test_the_terminal_outranks_the_party_consent_round(self) -> None:
+        """多人房间在终点根本不该创建提案，让玩家投完票才被拒最难看。"""
+
+        content = single_night_module()
+        state = create_initial_game_state(content, room_id="room_01", actors={}).world_time
+        final, _ = self.walk(content, state, 4)
+
+        blocked = time_advance_block_reason(
+            ("actor_1", "actor_2"), module_content=content, world_time=final
+        )
+        assert blocked is not None
+        self.assertEqual(blocked.code, "terminal_point_reached")
+
+    def test_a_terminal_before_the_opening_moment_is_refused_at_publish(self) -> None:
+        """18:00 开局配「第一天 00:00 结束」不可达——那一刻在开局之前。
+
+        校验只能落在根上：终点声明在 `time_policy` 里，开局时刻在
+        `initial_state` 里，`ModuleTimePolicySpec` 自己看不到后者。
+        """
+
+        payload = single_night_module().model_dump(mode="json")
+        payload["time_policy"]["terminal_point"] = {"point_id": "hour_00", "day_index": 0}
+
+        with self.assertRaisesRegex(ValidationError, "不可达"):
+            ModuleContentV3.model_validate(payload)
+
+    def test_the_same_terminal_one_day_later_is_reachable(self) -> None:
+        """回卷之后的 D1 00:00 就在 walk 上，只有 D0 那一次不在。"""
+
+        payload = single_night_module().model_dump(mode="json")
+        payload["time_policy"]["terminal_point"] = {"point_id": "hour_00", "day_index": 1}
+
+        content = ModuleContentV3.model_validate(payload)
+        self.assertEqual(content.time_policy.terminal_point.point_id, "hour_00")
+
+    def snapshot(self, content, world_time):
+        state = create_initial_game_state(
+            content,
+            room_id="room_01",
+            actors={
+                ACTOR: ActorState(
+                    player_id="player_1",
+                    name="陈探员",
+                    source_character_id="character_v3",
+                    source_character_version=1,
+                )
+            },
+        )
+        return EngineRuntimeSnapshot(
+            module_id=content.module_id,
+            module_version=content.version,
+            module_content=content,
+            game_state=state.model_copy(update={"world_time": world_time}, deep=True),
+            revision="1",
+        )
+
+    def test_keeper_sees_no_next_point_and_a_structured_reason_at_the_end(self) -> None:
+        content = single_night_module()
+        start = create_initial_game_state(content, room_id="room_01", actors={}).world_time
+        final, _ = self.walk(content, start, 4)
+
+        before = keeper_capabilities_v3(self.snapshot(content, start), actor_id=ACTOR).time
+        after = keeper_capabilities_v3(self.snapshot(content, final), actor_id=ACTOR).time
+        assert before is not None and after is not None
+
+        self.assertEqual(before.next_point_id, "hour_20")
+        self.assertIsNone(before.blocked_reason)
+        # 精确时刻在 Keeper 侧照常保留，收窄的只是玩家侧投影。
+        self.assertEqual(after.current_hour_of_day, 2)
+        self.assertEqual(after.current_day_index, 1)
+        self.assertIsNone(after.next_point_id)
+        assert after.blocked_reason is not None
+        self.assertEqual(after.blocked_reason.code, "terminal_point_reached")
+
+    def test_players_only_learn_that_the_button_is_dead(self) -> None:
+        """玩家侧只投 can_advance_time，看不到终点是哪个点、哪一刻。"""
+
+        content = single_night_module()
+        start = create_initial_game_state(content, room_id="room_01", actors={}).world_time
+        final, _ = self.walk(content, start, 4)
+
+        before = project_v3(
+            self.snapshot(content, start), player_id="player_1", actor_id=ACTOR
+        ).world
+        after = project_v3(
+            self.snapshot(content, final), player_id="player_1", actor_id=ACTOR
+        ).world
+
+        self.assertTrue(before.can_advance_time)
+        self.assertFalse(after.can_advance_time)
+        # 终点不自动结束游戏。
+        self.assertFalse(after.core_resolved)
+        self.assertIsNone(after.ending_id)
+
+    def test_a_terminal_naming_an_undeclared_point_is_refused(self) -> None:
+        with self.assertRaisesRegex(ValidationError, "不存在的时间点"):
+            ModuleTimePolicySpec(
+                default_points=SINGLE_NIGHT_POINTS,
+                terminal_point=TerminalTimePointSpec(point_id="hour_99", day_index=1),
+            )
 
 
 class TimeSegmentDerivationTests(unittest.TestCase):

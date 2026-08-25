@@ -57,6 +57,7 @@ const completedEvent = {
       },
       world: {
         time_label: '晚上',
+        can_advance_time: true,
         core_resolved: false,
         ending_available: false,
         ending_id: null,

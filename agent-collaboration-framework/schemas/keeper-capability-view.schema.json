@@ -293,7 +293,7 @@
     },
     "KeeperTimeCapability": {
       "additionalProperties": false,
-      "description": "What one `advance_world_time` effect would do, and whether it may run.\n\nThe Agent has to be able to count jumps (\"sleep until 20:00\" is two of\nthem), so it needs the ordered points, not just the next one. `blocked_reason`\nis populated instead of hiding the capability, because \"you cannot advance\ntime here, and here is why\" is what lets the Agent say something true to the\nplayer rather than silently doing nothing.",
+      "description": "What one `advance_world_time` effect would do, and whether it may run.\n\nThe Agent has to be able to count jumps (\"sleep until 20:00\" is two of\nthem), so it needs the ordered points, not just the next one. `blocked_reason`\nis populated instead of hiding the capability, because \"you cannot advance\ntime here, and here is why\" is what lets the Agent say something true to the\nplayer rather than silently doing nothing.\n\n走到时间线终点时 `next_point_id` 为 None，`blocked_reason.code` 是\n`terminal_point_reached`。玩家侧只投影 `can_advance_time`，看不到这里的\n任何精确时刻。",
       "properties": {
         "current_point_id": {
           "minLength": 1,
@@ -335,14 +335,13 @@
         "blocked_reason": {
           "anyOf": [
             {
-              "type": "string"
+              "$ref": "#/$defs/TimeAdvanceBlockReason"
             },
             {
               "type": "null"
             }
           ],
-          "default": null,
-          "title": "Blocked Reason"
+          "default": null
         }
       },
       "required": [
@@ -351,6 +350,32 @@
         "current_day_index"
       ],
       "title": "KeeperTimeCapability",
+      "type": "object"
+    },
+    "TimeAdvanceBlockReason": {
+      "additionalProperties": false,
+      "description": "时间推不动的原因，带稳定 code（#415 §阶段二）。\n\n以前这里是一个裸字符串，调用方靠 `startswith(\"time_advance_requires_...\")`\n去解析它。那让内部措辞变成了事实上的契约：改一个字的文案就会静默改掉一个\n分支的行为。code 是稳定的，`message` 只给人看。",
+      "properties": {
+        "code": {
+          "enum": [
+            "time_advance_requires_party_ready",
+            "terminal_point_reached",
+            "time_next_point_not_found"
+          ],
+          "title": "Code",
+          "type": "string"
+        },
+        "message": {
+          "minLength": 1,
+          "title": "Message",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "title": "TimeAdvanceBlockReason",
       "type": "object"
     },
     "WorldProfileSpec": {

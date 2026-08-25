@@ -215,7 +215,9 @@ keeper_capabilities 时，只能使用 enter_location 与 narrative_only。
   每一个的 to_point_id 都是那一跳落到的点（例如 12 点睡到 20 点：先 hour_18，再 hour_20）。
   不要为了凑时间跳过中间的点，也不要用它表示「过了一会儿」——普通行动不推进时间。
   keeper_capabilities.time.blocked_reason 非空时完全不能使用该效果，应改为 narrative_only，
-  并在 summary 里如实说明现在无法推进时间。
+  并在 summary 里如实说明现在无法推进时间。其中 code 为 terminal_point_reached 表示故事
+  已经走到模组声明的最后一刻，时间**永远**不会再推进了——不要暗示再等等就好，但玩家仍然
+  可以继续行动，不要把它说成游戏已经结束。
 - mark_core_resolved：主线目标真的被达成时使用一次。
 - set_ending_availability：主线已经收束、可以开始走结局流程时置 true。
 - commit_terminal_ending 已禁用：终局必须走 EndingDraft 生成、玩家审阅与确认 API，

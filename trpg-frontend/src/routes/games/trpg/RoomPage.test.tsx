@@ -357,6 +357,7 @@ function playerViewFixture(): AgentPlayerView {
     },
     world: {
       time_label: '下午',
+      can_advance_time: true,
       core_resolved: false,
       ending_available: false,
       ending_id: null,
@@ -2877,6 +2878,7 @@ describe('RoomPage conversation history', () => {
             ...playerViewFixture(),
             world: {
               time_label: '晚上',
+              can_advance_time: true,
               core_resolved: true,
               ending_available: true,
               ending_id: null,
@@ -2920,6 +2922,7 @@ describe('RoomPage conversation history', () => {
             revision: '8',
             world: {
               time_label: '下午',
+              can_advance_time: true,
               core_resolved: true,
               ending_available: true,
               ending_id: null,
@@ -2953,6 +2956,32 @@ describe('RoomPage conversation history', () => {
     fireEvent.click(screen.getByRole('button', { name: '地图' }))
 
     expect(screen.getByText('下午')).toBeInTheDocument()
+    expect(screen.queryByLabelText('主线进度')).not.toBeInTheDocument()
+  })
+
+  it('marks the timeline as finished from can_advance_time alone', async () => {
+    // 终点判断只能来自引擎投影的这一个布尔。前端按 label 或 point id 推断，
+    // 等于把终点规则实现两遍（#415 §阶段二）。
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    const view = playerViewFixture()
+    act(() =>
+      emitWsMessage({
+        type: 'view.updated',
+        payload: {
+          playerId: 'player-1',
+          playerView: {
+            ...view,
+            world: { ...view.world, time_label: '凌晨', can_advance_time: false },
+          },
+        },
+      }),
+    )
+    fireEvent.click(screen.getByRole('button', { name: '地图' }))
+
+    expect(screen.getByText(/凌晨 · 时间不会再推进了/)).toBeInTheDocument()
+    // 终点只停时间，不结束游戏：行动入口照常在。
     expect(screen.queryByLabelText('主线进度')).not.toBeInTheDocument()
   })
 

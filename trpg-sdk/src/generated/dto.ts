@@ -1768,6 +1768,7 @@ export interface VisibleEntity {
  */
 export interface WorldStateView {
   time_label?: string;
+  can_advance_time?: boolean;
   core_resolved?: boolean;
   ending_available?: boolean;
   ending_id?: string | null;

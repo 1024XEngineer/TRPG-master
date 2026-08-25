@@ -75,6 +75,7 @@ from collaboration_framework.contracts import (
     RevealInformationEffect,
     SetEndingAvailabilityEffect,
     SetVisibilityEffect,
+    TimeAdvanceBlockReason,
     TravelInterrupted,
     TravelResolved,
 )
@@ -163,7 +164,7 @@ class EffectServices:
     resolve_location_target: Callable[..., object]
     advanced_to_next: Callable[..., object]
     next_point_after: Callable[..., object]
-    time_advance_block_reason: Callable[..., str | None]
+    time_advance_block_reason: Callable[..., TimeAdvanceBlockReason | None]
     is_public_standard_state: Callable[..., bool]
     new_event_id: Callable[[], str] = lambda: f"evt_{uuid4().hex}"
 
@@ -960,19 +961,30 @@ def _validate_advance_world_time(
     runtime: EngineRuntimeSnapshot,
     services: EffectServices,
 ) -> None:
-    blocked = services.time_advance_block_reason(tuple(vocab.actor_ids))
+    world_time = vocab.world_time if vocab.world_time is not None else runtime.game_state.world_time
+    blocked = services.time_advance_block_reason(
+        tuple(vocab.actor_ids),
+        module_content=runtime.module_content,
+        world_time=world_time,
+    )
+    # 终点不是"玩家先处理完就能推"的事项，全员确认的豁免不适用于它。
+    if blocked is not None and blocked.code == "terminal_point_reached":
+        reject(
+            "TIME_ADVANCE_BLOCKED",
+            repairability="hard_reject",
+            fault="agent",
+            player_safe_reason=blocked.message,
+            internal_reason=f"{blocked.code}: {blocked.message}",
+        )
     if blocked is not None and not vocab.allow_party_time_advance:
         reject(
             "TIME_ADVANCE_BLOCKED",
             repairability="requires_player_choice",
             fault="player",
             player_safe_reason="当前存在需要玩家先处理的事项，不能推进时间",
-            internal_reason=blocked,
+            internal_reason=f"{blocked.code}: {blocked.message}",
         )
-    target, _ = services.next_point_after(
-        runtime.module_content,
-        vocab.world_time if vocab.world_time is not None else runtime.game_state.world_time,
-    )
+    target, _ = services.next_point_after(runtime.module_content, world_time)
     if effect.to_point_id is not None and effect.to_point_id != target.id:
         reject(
             "TIME_POINT_MISMATCH",

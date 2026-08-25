@@ -19,6 +19,7 @@ from collaboration_framework.contracts import (
     AdjudicationRecovery,
     AdjudicationStatusView,
     AdvanceWorldTimeEffect,
+    ContractError,
     GetAdjudicationStatusRequest,
     ModuleContentV3,
     SubmitAdjudicationRequest,
@@ -28,7 +29,11 @@ from collaboration_framework.contracts import (
 from collaboration_framework.contracts.validation import AdjudicationValidationError
 from collaboration_framework.engine import AdjudicationEngineService
 from collaboration_framework.engine.models import GameState
-from collaboration_framework.engine.timeline import advanced_to_next, player_time_label
+from collaboration_framework.engine.timeline import (
+    advanced_to_next,
+    player_time_label,
+    terminal_reached,
+)
 from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -265,9 +270,18 @@ async def create_from_adjudication(
     if version is None or version.content_schema_version != 3:
         raise TimeAdvanceError("当前模组没有可推进的离散时间线")
     module = ModuleContentV3.model_validate(version.content_json)
+    # 终点校验必须落在创建提案**之前**：让全员投完票才被拒是最难看的一种拒绝
+    # 方式。Engine 提交时还会再校验一次，两处走的是同一个 `terminal_reached`
+    # （#415 §阶段二）。
+    if terminal_reached(module, state.world_time):
+        raise TimeAdvanceError("故事已经走到最后一个时间点，时间不会再推进了")
     target_time = state.world_time
     for effect in jumps:
-        target_time = advanced_to_next(module, target_time)
+        try:
+            target_time = advanced_to_next(module, target_time)
+        except ContractError as exc:
+            # 一次裁决里的多跳可能中途撞上终点：前几跳合法，某一跳越界。
+            raise TimeAdvanceError("冻结裁决越过了模组时间线的终点") from exc
         if effect.to_point_id is not None and effect.to_point_id != target_time.current_point_id:
             raise TimeAdvanceError("冻结裁决的目标不是时间线上的下一个点")
 

@@ -847,6 +847,11 @@
           "title": "Time Label",
           "type": "string"
         },
+        "can_advance_time": {
+          "default": true,
+          "title": "Can Advance Time",
+          "type": "boolean"
+        },
         "core_resolved": {
           "default": false,
           "title": "Core Resolved",

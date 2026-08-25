@@ -170,6 +170,7 @@ function isValidWorldState(value: unknown): boolean {
   return (
     // 玩家侧只拿得到模组允许他看到的措辞；精确时刻不再过网（#415 §阶段一）。
     typeof value.time_label === 'string' &&
+    typeof value.can_advance_time === 'boolean' &&
     typeof value.core_resolved === 'boolean' &&
     typeof value.ending_available === 'boolean' &&
     (value.ending_id === null || typeof value.ending_id === 'string')

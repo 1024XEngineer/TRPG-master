@@ -52,6 +52,7 @@ from collaboration_framework.contracts import (
     ProjectionSnapshot,
     ProjectionVisibleActor,
     ProjectionWorldState,
+    TimeAdvanceBlockReason,
 )
 
 from .models import EngineRuntimeSnapshot, GameState
@@ -62,6 +63,7 @@ from .timeline import (
     next_point_after,
     ordered_points,
     player_time_label,
+    terminal_reached,
     time_advance_block_reason,
 )
 
@@ -132,6 +134,9 @@ def project_v3(
         inventory=inventory,
         world=ProjectionWorldState(
             time_label=time_label,
+            # 玩家侧只需要知道按钮能不能按。为什么不能按（终点？还是等别人
+            # 确认？）是 Keeper 侧的事，前端不得据 label 或 point id 去推断。
+            can_advance_time=not terminal_reached(module, state.world_time),
             core_resolved=state.core_resolved,
             ending_available=state.ending_available,
             ending_id=state.ending_id,
@@ -843,8 +848,12 @@ def _time_capability(
     module: ModuleContentV3,
     state: GameState,
 ) -> KeeperTimeCapability:
-    blocked = time_advance_block_reason(tuple(state.actors))
-    if blocked is not None and blocked.startswith("time_advance_requires_party_ready"):
+    blocked = time_advance_block_reason(
+        tuple(state.actors),
+        module_content=module,
+        world_time=state.world_time,
+    )
+    if blocked is not None and blocked.code == "time_advance_requires_party_ready":
         # 多人确认已由应用层持久化协调；Agent 仍应当产生标准
         # advance_world_time 效果，再由裁决边界暂停并发起全员确认。
         blocked = None
@@ -852,10 +861,13 @@ def _time_capability(
         next_point, _ = next_point_after(module, state.world_time)
         next_point_id = next_point.id
     except ContractError:
-        # The room is parked on a point this module version no longer declares.
-        # Reporting "no next point" beats guessing one.
+        # 走到终点，或者房间停在这个模组版本已经不再声明的点上。两种情况都
+        # 没有下一个点可报，猜一个比说"没有"更糟。
         next_point_id = None
-        blocked = blocked or "time_next_point_not_found: 当前时间点不在模组时间线上"
+        blocked = blocked or TimeAdvanceBlockReason(
+            code="time_next_point_not_found",
+            message="当前时间点不在模组时间线上",
+        )
     return KeeperTimeCapability(
         current_point_id=state.world_time.current_point_id,
         current_hour_of_day=state.world_time.current.hour_of_day,

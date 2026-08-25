@@ -112,6 +112,7 @@ from .keeper_view import (
     KeeperRuleCandidate,
     KeeperRuleOption,
     KeeperTimeCapability,
+    TimeAdvanceBlockReason,
 )
 from .inventory import (
     ChangeItemCustodyRequest,
@@ -187,6 +188,7 @@ from .module_v3 import (
     RuleSpecV3,
     RuleStepSpec,
     RuleTriggerSpec,
+    TerminalTimePointSpec,
     TimeOfDayQuery,
     TimePointSpec,
     TimeSegment,

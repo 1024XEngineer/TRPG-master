@@ -242,6 +242,7 @@ class PlayerViewProjector:
             inventory=snapshot.inventory,
             world=WorldStateView(
                 time_label=snapshot.world.time_label,
+                can_advance_time=snapshot.world.can_advance_time,
                 core_resolved=snapshot.world.core_resolved,
                 ending_available=snapshot.world.ending_available,
                 ending_id=snapshot.world.ending_id,

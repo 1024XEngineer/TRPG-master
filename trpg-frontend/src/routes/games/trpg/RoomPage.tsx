@@ -3135,6 +3135,13 @@ export default function RoomPage() {
           {playerView?.world && (
             <span className="text-[10px] text-text-dim mt-1">
               {playerView.world.time_label}
+              {/*
+                时间线走到终点。只据 can_advance_time 判断——按 time_label 去
+                推断等于在玩家侧重新实现一遍终点规则，而权威副本在引擎里
+                （#415 §阶段二）。终点只是时间不再推进，不是游戏结束，所以
+                这里只加一句提示，不禁用任何行动入口。
+              */}
+              {!playerView.world.can_advance_time && ' · 时间不会再推进了'}
             </span>
           )}
           </div>

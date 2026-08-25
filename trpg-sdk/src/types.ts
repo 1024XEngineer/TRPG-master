@@ -383,6 +383,11 @@ export interface AgentWorldState {
    * 精确的 day_index / hour_of_day 是权威状态，留在 Keeper 侧（#415 §阶段一）。
    */
   time_label: string;
+  /**
+   * 时间线走到终点后为 false。UI 只据这一个字段禁用「下一个时间点」，不要按
+   * time_label 或 point id 去推断终点（#415 §阶段二）。
+   */
+  can_advance_time: boolean;
   core_resolved: boolean;
   ending_available: boolean;
   ending_id: string | null;

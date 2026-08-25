@@ -763,6 +763,22 @@ DEFAULT_TIME_POINTS: tuple[TimePointSpec, ...] = (
 )
 
 
+class TerminalTimePointSpec(ContractModel):
+    """时间线的最后一刻（#415 §阶段二）。
+
+    终点必须标识时间点的某一次 **occurrence**，不能只给 point id：时间线是个
+    环，`hour_18` 每天都会来一次，「第三天 18:00 结束」和「明天 18:00 结束」
+    是两件事。`day_index` 与运行态一致，开局当天为 0，所以第三天 18:00 写作
+    `{point_id: "hour_18", day_index: 2}`。
+
+    不重复保存 `hour_of_day`：它由 `point_id` 对应的 `TimePointSpec` 唯一确定，
+    两个字段互相矛盾比少一个字段更糟。
+    """
+
+    point_id: Identifier
+    day_index: int = Field(ge=0)
+
+
 class ModuleTimePolicySpec(ContractModel):
     """Discrete time points; the clock jumps between them, it does not tick.
 
@@ -786,6 +802,9 @@ class ModuleTimePolicySpec(ContractModel):
     storage_precision: Literal["hour"] = "hour"
     progression: Literal["host_controlled_discrete"] = "host_controlled_discrete"
     actions_per_point: Literal["multiple"] = "multiple"
+    # 没声明终点的模组维持现有环形回卷，既有模组不受影响。声明了终点的模组
+    # 走到那一刻之后拒绝继续推进——单夜模组不再"一觉睡到第二天"。
+    terminal_point: TerminalTimePointSpec | None = None
 
     @model_validator(mode="after")
     def validate_points(self) -> ModuleTimePolicySpec:
@@ -799,6 +818,12 @@ class ModuleTimePolicySpec(ContractModel):
         hours = [point.hour_of_day for point in by_order]
         if hours != sorted(hours) or len(hours) != len(set(hours)):
             raise ValueError("TimePoint hour_of_day 必须随 order 严格递增")
+        if self.terminal_point is not None and not any(
+            point.id == self.terminal_point.point_id for point in self.default_points
+        ):
+            raise ValueError(
+                f"terminal_point 引用了不存在的时间点: {self.terminal_point.point_id}"
+            )
         return self
 
 
@@ -889,6 +914,41 @@ class ModuleContentV3(ContractModel):
         _require_unique_ids(self.ending_anchors, "Ending anchor")
         return self
 
+    @model_validator(mode="after")
+    def validate_terminal_point_is_reachable(self) -> ModuleContentV3:
+        """终点必须落在从开局时刻出发的那条 walk 上（#415 §阶段二）。
+
+        只能在根上校验：终点声明在 `time_policy` 里，开局时刻在 `initial_state`
+        里，`ModuleTimePolicySpec` 自己看不到后者。
+
+        环从起点开始走：起点及其之后的点当天到达，起点之前的点要等回卷之后的
+        第二天。所以「第一天 00:00 结束」配上「18:00 开局」是不可达的——那一刻
+        在开局之前，游戏会开在一条已经越过终点的时间线上。
+        """
+
+        terminal = self.time_policy.terminal_point
+        if terminal is None:
+            return self
+
+        points = sorted(self.time_policy.default_points, key=lambda point: point.order)
+        start_id = self.initial_state.start_time_point_id
+        # 与 engine.initialization._world_time_for 同一条回退：声明的起点不在
+        # 点列表里时开在第一个点上。
+        start_index = next(
+            (index for index, point in enumerate(points) if point.id == start_id),
+            0,
+        )
+        terminal_index = next(
+            index for index, point in enumerate(points) if point.id == terminal.point_id
+        )
+        first_reachable_day = 0 if terminal_index >= start_index else 1
+        if terminal.day_index < first_reachable_day:
+            raise ValueError(
+                f"terminal_point 从开局时刻不可达: {terminal.point_id} 最早出现在第 "
+                f"{first_reachable_day} 天，声明的却是第 {terminal.day_index} 天"
+            )
+        return self
+
 
 __all__ = [
     "DAY_SEGMENTS",
@@ -943,6 +1003,7 @@ __all__ = [
     "RuleStepSpec",
     "RuleTriggerSpec",
     "TargetKind",
+    "TerminalTimePointSpec",
     "TimeOfDayQuery",
     "TimePointSpec",
     "TimeSegment",

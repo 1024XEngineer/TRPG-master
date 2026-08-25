@@ -158,6 +158,10 @@ class ProjectionWorldState(ContractModel):
     """
 
     time_label: str = Field(default="下午", min_length=1)
+    # 时间线走到终点后为 False。前端**只**据这一个字段把「下一个时间点」按钮
+    # 置灰——按 label 或 point id 去推断等于让玩家侧重新实现一遍终点规则，而
+    # 那条规则的权威副本在引擎里（#415 §阶段二）。
+    can_advance_time: bool = True
     core_resolved: bool = False
     ending_available: bool = False
     ending_id: str | None = Field(default=None, min_length=1)
@@ -362,6 +366,7 @@ class WorldStateView(ContractModel):
     """
 
     time_label: str = Field(default="下午", min_length=1)
+    can_advance_time: bool = True
     core_resolved: bool = False
     ending_available: bool = False
     ending_id: str | None = Field(default=None, min_length=1)

@@ -20,6 +20,14 @@ def upgrade() -> None:
         sa.Column("audience_player_ids", sa.JSON(), nullable=False, server_default="[]"),
     )
     op.execute(sa.text("UPDATE memory_entries SET audience_player_ids = '[]'"))
+    # 新版本开始投影 dialogue.player/dialogue.npc；重置普通 Event 高水位，
+    # 让升级后的首次投影幂等重放历史对话，而不会被旧 narration 高水位跳过。
+    op.execute(
+        sa.text(
+            "UPDATE memory_projection_cursors "
+            "SET event_created_at = NULL, event_id = NULL"
+        )
+    )
     with op.batch_alter_table("memory_entries") as batch_op:
         batch_op.alter_column("audience_player_ids", server_default=None)
 

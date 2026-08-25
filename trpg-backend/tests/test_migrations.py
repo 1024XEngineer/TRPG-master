@@ -197,6 +197,7 @@ def test_migration_upgrades_empty_sqlite_and_round_trips(tmp_path: Path) -> None
     }.issubset(_column_names(database, "events"))
     assert ("room_id", "event_type", "correlation_id") in _unique_column_sets(database, "events")
     assert "source_created_at" in _column_names(database, "memory_entries")
+    assert "audience_player_ids" in _column_names(database, "memory_entries")
 
     downgrade = _run_alembic(database, "downgrade", PREVIOUS_REVISION)
     assert downgrade.returncode == 0, downgrade.stdout + downgrade.stderr

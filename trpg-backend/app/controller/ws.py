@@ -67,6 +67,7 @@ from collaboration_framework.host.application import (
     split_narration_chunks,
 )
 from collaboration_framework.host.schemas import NarrationOutput, reservation_is_expired
+from collaboration_framework.host.schemas.action_plan import ActionPlanNpcReply
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import select
@@ -518,17 +519,32 @@ async def _recover_persisted_turn_followup_dialogue(
     room_id: str,
     player_id: str,
     client_action_id: str,
-    npc_reply_count: int,
+    player_view: PlayerView,
+    npc_replies: tuple[ActionPlanNpcReply, ...],
 ) -> None:
     """断线恢复时补发同回合追加的 NPC 回复，保持 narration 之后的展示顺序。"""
 
-    correlations = tuple(
-        f"{client_action_id}:followup-npc:{ordinal}" for ordinal in range(npc_reply_count)
-    )
-    if not correlations:
+    if not npc_replies:
         return
-    reply_events = tuple(
-        event
+    correlations = tuple(
+        f"{client_action_id}:followup-npc:{ordinal}" for ordinal in range(len(npc_replies))
+    )
+    source_event = await room_service.get_correlated_event(
+        db,
+        room_id,
+        "narration.push",
+        client_action_id,
+    )
+    if source_event is None:
+        raise RuntimeError("守秘人叙事已发送但 narration.push 未持久化")
+    audience_player_ids, audience_actor_ids = await _npc_dialogue_audience(
+        db,
+        room_id=room_id,
+        scene_id=player_view.scene.id,
+    )
+    visible_ids = {npc.id for npc in visible_dialogue_npcs(player_view)}
+    existing_events = {
+        event.correlation_id: event
         for event in await db.scalars(
             select(Event)
             .where(
@@ -538,10 +554,34 @@ async def _recover_persisted_turn_followup_dialogue(
             )
             .order_by(Event.created_at.asc(), Event.id.asc())
         )
-        if player_id in tuple(event.payload.get("audiencePlayerIds", ()))
-    )
+    }
+    reply_events: list[Event | None] = [None] * len(npc_replies)
+    for ordinal, reply in enumerate(npc_replies):
+        if reply.speaker_id not in visible_ids:
+            continue
+        correlation = f"{client_action_id}:followup-npc:{ordinal}"
+        existing = existing_events.get(correlation)
+        if existing is not None:
+            reply_events[ordinal] = existing
+            continue
+        persisted = await npc_dialogue_service.persist_scripted_replies(
+            db,
+            room_id=room_id,
+            player_id=player_id,
+            client_action_id=client_action_id,
+            view=player_view,
+            source_dialogue_id=source_event.id,
+            audience_player_ids=audience_player_ids,
+            audience_actor_ids=audience_actor_ids,
+            npc_messages=((reply.speaker_id, reply.text),),
+        )
+        reply_events[ordinal] = persisted[0]
     for event in reply_events:
-        await _send_to_player(websocket, await _dialogue_event_envelope(db, event))
+        if event is None:
+            continue
+        # 恢复时也按冻结受众广播；仅回复当前重连玩家会让同场景其他玩家永久漏掉
+        # 这条已经补写的 NPC 台词。事件已按 correlation 幂等，重复恢复不会重复落库。
+        await _broadcast_dialogue_event(db, event, audience_player_ids)
 
 
 async def _emit_keeper_followup_dialogue(

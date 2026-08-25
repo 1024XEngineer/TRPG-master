@@ -35,6 +35,20 @@ FIXTURES = (
 
 
 class ConditionIssuesTests(unittest.TestCase):
+    def test_absent_agent_match_when_does_not_rewrite_old_module_json(self) -> None:
+        path = FIXTURES / "银之锁" / "module-content-v3.json"
+        content = ModuleContentV3.model_validate_json(path.read_text(encoding="utf-8"))
+
+        authored = json.loads(path.read_text(encoding="utf-8"))
+        normalized = content.to_json_dict()
+        for authored_rule, normalized_rule in zip(
+            authored["rules"], normalized["rules"], strict=True
+        ):
+            if authored_rule["trigger"]["kind"] != "agent_match":
+                continue
+            self.assertNotIn("when", authored_rule["trigger"])
+            self.assertNotIn("when", normalized_rule["trigger"])
+
     def test_registered_predicate_name_has_no_issue(self) -> None:
         condition = PredicateCondition(predicate="entity_state_is", args={})
         self.assertEqual(_condition_issues(condition, "path"), [])

@@ -396,7 +396,13 @@ class AgentMatchTriggerSpec(ContractModel):
     # that authored opportunity exists in the current authoritative state.
     # Keeping the condition on the trigger lets publication and submission
     # evaluate the exact same expression instead of trusting a stale menu.
-    when: ConditionExpr | None = None
+    # Omit the default from persisted ModuleVersion JSON. Adding this optional
+    # field must not rewrite every existing agent_match as ``"when": null``;
+    # immutable snapshots compare normalized JSON for same-version drift.
+    when: ConditionExpr | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
     question: MatchQuestionSpec
     options: tuple[MatchOptionAuthorSpec, ...] = Field(min_length=1)
     bindings: tuple[BindingSlotSpec, ...] = ()

@@ -356,9 +356,7 @@ function playerViewFixture(): AgentPlayerView {
       available_exits: [],
     },
     world: {
-      day_index: 0,
-      hour_of_day: 12,
-      time_of_day: 'day',
+      time_label: '下午',
       core_resolved: false,
       ending_available: false,
       ending_id: null,
@@ -558,9 +556,7 @@ describe('RoomPage conversation history', () => {
         proposalId: 'time-349',
         proposalVersion: 3,
         sourceRevision: '8',
-        targetPointId: 'hour_20',
-        targetDayIndex: 2,
-        targetHourOfDay: 20,
+        targetLabel: '晚上',
         requesterPlayerId: 'player-2',
         requiredPlayerIds: ['player-1', 'player-2'],
         acceptedPlayerIds: ['player-2'],
@@ -568,7 +564,7 @@ describe('RoomPage conversation history', () => {
       },
     })
 
-    expect(await screen.findByText('第 3 天 20:00')).toBeInTheDocument()
+    expect(await screen.findByText('晚上')).toBeInTheDocument()
     expect(screen.getByText('1/2 人已确认')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '同意' }))
     expect(mockRespondToTimeAdvance).toHaveBeenCalledWith('player-1', {
@@ -584,9 +580,7 @@ describe('RoomPage conversation history', () => {
         proposalId: 'time-349',
         proposalVersion: 4,
         sourceRevision: '8',
-        targetPointId: 'hour_20',
-        targetDayIndex: 2,
-        targetHourOfDay: 20,
+        targetLabel: '晚上',
         requesterPlayerId: 'player-2',
         requiredPlayerIds: ['player-1', 'player-2'],
         acceptedPlayerIds: ['player-1', 'player-2'],
@@ -600,13 +594,12 @@ describe('RoomPage conversation history', () => {
       payload: {
         proposalId: 'time-349',
         status: 'approved',
-        targetDayIndex: 2,
-        targetHourOfDay: 20,
+        targetLabel: '晚上',
         committedRevision: '9',
       },
     })
     await waitFor(() => {
-      expect(screen.queryByText('第 3 天 20:00')).not.toBeInTheDocument()
+      expect(screen.queryByText('晚上')).not.toBeInTheDocument()
     })
   })
 
@@ -2883,9 +2876,7 @@ describe('RoomPage conversation history', () => {
           playerView: {
             ...playerViewFixture(),
             world: {
-              day_index: 1,
-              hour_of_day: 18,
-              time_of_day: 'night',
+              time_label: '晚上',
               core_resolved: true,
               ending_available: true,
               ending_id: null,
@@ -2896,7 +2887,7 @@ describe('RoomPage conversation history', () => {
     )
     fireEvent.click(screen.getByRole('button', { name: '地图' }))
 
-    expect(screen.getByText('夜晚 · 第 2 天 18:00')).toBeInTheDocument()
+    expect(screen.getByText('晚上')).toBeInTheDocument()
     expect(
       screen.getByText('主线已经收束，可以选择如何收尾'),
     ).toBeInTheDocument()
@@ -2928,9 +2919,7 @@ describe('RoomPage conversation history', () => {
             ...playerViewFixture(),
             revision: '8',
             world: {
-              day_index: 0,
-              hour_of_day: 12,
-              time_of_day: 'day',
+              time_label: '下午',
               core_resolved: true,
               ending_available: true,
               ending_id: null,
@@ -2963,7 +2952,7 @@ describe('RoomPage conversation history', () => {
     )
     fireEvent.click(screen.getByRole('button', { name: '地图' }))
 
-    expect(screen.getByText('白天 · 第 1 天 12:00')).toBeInTheDocument()
+    expect(screen.getByText('下午')).toBeInTheDocument()
     expect(screen.queryByLabelText('主线进度')).not.toBeInTheDocument()
   })
 

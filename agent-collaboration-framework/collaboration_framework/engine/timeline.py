@@ -15,7 +15,12 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from collaboration_framework.contracts import ContractError, ModuleContentV3, TimePointSpec
+from collaboration_framework.contracts import (
+    ContractError,
+    ModuleContentV3,
+    TimePointSpec,
+    default_label_for,
+)
 
 from .models import WorldTimePoint, WorldTimeState
 
@@ -77,6 +82,28 @@ def advanced_to_next(
         current_point_id=target.id,
         current_time_segment=target.resolved_segment,
     )
+
+
+def player_time_label(module_content: ModuleContentV3, world_time: WorldTimeState) -> str:
+    """玩家能看到的全部时间信息（#415 §阶段一）。
+
+    模组逐点声明的 `label` 优先；没声明时按该点的 canonical segment 取缺省
+    措辞。房间停在模组不再声明的点上（或阶段四的运行时临时点上）时，回退到
+    运行态存下来的时段——那条路径拿不到 `TimePointSpec`，但玩家该看到的东西
+    和精确小时无关，所以回退是安全的，不需要为它暴露 `hour_of_day`。
+    """
+
+    point = next(
+        (
+            item
+            for item in module_content.time_policy.default_points
+            if item.id == world_time.current_point_id
+        ),
+        None,
+    )
+    if point is not None:
+        return point.resolved_label
+    return default_label_for(world_time.time_segment)
 
 
 def time_advance_block_reason(actor_ids: Sequence[str]) -> str | None:

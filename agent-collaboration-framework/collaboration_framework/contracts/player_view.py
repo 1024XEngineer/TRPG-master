@@ -150,11 +150,14 @@ class ProjectionWorldState(ContractModel):
     `set_ending_availability` and confirmed EndingResolution: without them
     an Engine commit changes authoritative state that neither the Agent's next
     turn nor the player can observe.
+
+    时间只投模组允许玩家看到的措辞。`day_index` / `hour_of_day` 是权威状态，
+    不是显示文案——玩家看到「第 1 天 22:00」既越过了模组的叙事措辞，也把只有
+    Keeper 该知道的精确时刻交了出去（#415 §阶段一）。精确值继续保留在
+    `GameState` 与 `KeeperTimeCapability`，这里不做数据降精度，只做投影收窄。
     """
 
-    day_index: int = Field(default=0, ge=0)
-    hour_of_day: int = Field(default=0, ge=0, le=23)
-    time_of_day: Literal["day", "night"] = "day"
+    time_label: str = Field(default="下午", min_length=1)
     core_resolved: bool = False
     ending_available: bool = False
     ending_id: str | None = Field(default=None, min_length=1)
@@ -358,9 +361,7 @@ class WorldStateView(ContractModel):
     side of the projector.
     """
 
-    day_index: int = Field(default=0, ge=0)
-    hour_of_day: int = Field(default=0, ge=0, le=23)
-    time_of_day: Literal["day", "night"] = "day"
+    time_label: str = Field(default="下午", min_length=1)
     core_resolved: bool = False
     ending_available: bool = False
     ending_id: str | None = Field(default=None, min_length=1)
@@ -375,19 +376,16 @@ class WorldClockView(ContractModel):
     walk to the inn at noon, sleep until eight, narrated as arriving after dark.
     This is the one field that repairs that, so it deliberately carries the clock
     alone and none of the other world flags.
+
+    措辞同样只到 label 为止：Narrator 只能说模组允许玩家看到的措辞，不能报出
+    精确小时（#415 §阶段一）。
     """
 
-    day_index: int = Field(default=0, ge=0)
-    hour_of_day: int = Field(default=0, ge=0, le=23)
-    time_of_day: Literal["day", "night"] = "day"
+    time_label: str = Field(default="下午", min_length=1)
 
     @classmethod
     def from_world(cls, world: WorldStateView) -> WorldClockView:
-        return cls(
-            day_index=world.day_index,
-            hour_of_day=world.hour_of_day,
-            time_of_day=world.time_of_day,
-        )
+        return cls(time_label=world.time_label)
 
 
 class KnownInformationView(ContractModel):

@@ -256,14 +256,17 @@ class ChatMessagePayload(CamelModel):
 
 
 class TimeAdvancePendingPayload(CamelModel):
-    """广播完整待确认状态，供所有客户端幂等覆盖本地确认条。"""
+    """广播完整待确认状态，供所有客户端幂等覆盖本地确认条。
+
+    只投模组允许玩家看到的措辞。精确目标留在提案记录里做校验与恢复——
+    只删 PlayerView 字段而让确认弹窗照旧显示「第 1 天 22:00」，等于没收窄
+    （#415 §阶段一）。`target_point_id` 一并去掉：`hour_22` 反推得出小时。
+    """
 
     proposal_id: str
     proposal_version: int = Field(..., ge=1)
     source_revision: str
-    target_point_id: str
-    target_day_index: int = Field(..., ge=0)
-    target_hour_of_day: int = Field(..., ge=0, le=23)
+    target_label: str = Field(..., min_length=1)
     requester_player_id: str
     required_player_ids: list[str]
     accepted_player_ids: list[str]
@@ -271,12 +274,11 @@ class TimeAdvancePendingPayload(CamelModel):
 
 
 class TimeAdvanceResolvedPayload(CamelModel):
-    """广播提案终态；批准时附带已经提交的权威世界时间。"""
+    """广播提案终态；批准时附带已经提交的 revision 与玩家可见措辞。"""
 
     proposal_id: str
     status: Literal["approved", "rejected", "expired", "stale"]
-    target_day_index: int = Field(..., ge=0)
-    target_hour_of_day: int = Field(..., ge=0, le=23)
+    target_label: str = Field(..., min_length=1)
     committed_revision: str | None = None
 
 

@@ -11,7 +11,7 @@ PREVIOUS_REVISION = "1a02058345ee"
 ENGINE_IDENTITY_PREVIOUS_REVISION = "9c4e7a2b1d6f"
 # PR2 NPC 对话迁移（d1e2f3a4b5c6）接在 PR1 输入路由 head 后面；#398 的检定唯一
 # 约束放宽（b8c9d0e1f2a3）再接在它之后，最后是模组快照的死字段剥离。
-HEAD_REVISION = "e2f3a4b5c6d7"
+HEAD_REVISION = "f7b9c2d4e6a8"
 
 
 def _run_alembic(database: Path, *args: str) -> subprocess.CompletedProcess[str]:

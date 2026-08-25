@@ -376,10 +376,13 @@ export interface AgentKnownInformation {
 }
 
 export interface AgentWorldState {
-  /** 离散世界时间（#245）：时间只在授权的时间点之间跳转，不按分钟流逝。 */
-  day_index: number;
-  hour_of_day: number;
-  time_of_day: 'day' | 'night';
+  /**
+   * 离散世界时间（#245）：时间只在授权的时间点之间跳转，不按分钟流逝。
+   *
+   * 玩家侧只拿得到模组声明的措辞（「晚上」「黎明」），不是「第 1 天 22:00」。
+   * 精确的 day_index / hour_of_day 是权威状态，留在 Keeper 侧（#415 §阶段一）。
+   */
+  time_label: string;
   core_resolved: boolean;
   ending_available: boolean;
   ending_id: string | null;

@@ -228,13 +228,14 @@ class EngineCapabilityProjectionTests(unittest.IsolatedAsyncioTestCase):
         after = await self.engine.read(SCOPE)
         self.assertNotIn(CANON_NPC, {entity.id for entity in after.scene.visible_entities})
 
-    async def test_world_time_is_projected_as_a_discrete_point(self) -> None:
-        """时间只在离散点上，投影出的是 day_index + hour_of_day，不是流逝分钟数。"""
+    async def test_world_time_is_projected_as_the_module_declared_wording(self) -> None:
+        """玩家侧只拿得到措辞；精确时刻是 Keeper capability 的事（#415）。"""
 
         snapshot = await self.engine.read(SCOPE)
-        self.assertEqual(snapshot.world.day_index, 0)
-        self.assertEqual(snapshot.world.hour_of_day, 12)
-        self.assertEqual(snapshot.world.time_of_day, "day")
+        self.assertEqual(snapshot.world.time_label, "下午")
+        # 反向断言：可反推出小时的字段一个都不能留在玩家侧。
+        for field in ("day_index", "hour_of_day", "time_of_day"):
+            self.assertNotIn(field, snapshot.world.model_dump())
 
     async def test_core_resolution_opens_draft_but_direct_ending_is_refused(self) -> None:
         await self.commit(

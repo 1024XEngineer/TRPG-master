@@ -363,8 +363,6 @@ const PHASE_LABELS: Record<AgentTurnPhase, string> = {
 
 const ORGANIZING_PHASE_MIN_MS = 600
 
-const TIME_OF_DAY_LABELS = { day: '白天', night: '夜晚' } as const
-
 /**
  * 3D 掷骰从受理到定格的上限。超过就退回 2D 把这次掷骰补完。
  *
@@ -374,11 +372,6 @@ const TIME_OF_DAY_LABELS = { day: '白天', night: '夜晚' } as const
  * 死锁的兜底，不是性能预算，宁可晚一点也不能误伤。
  */
 const DICE_3D_SETTLE_TIMEOUT_MS = 15000
-
-/** Render the Engine's authoritative discrete world-time point. */
-function formatWorldTime(dayIndex: number, hourOfDay: number): string {
-  return `第 ${dayIndex + 1} 天 ${String(hourOfDay).padStart(2, '0')}:00`
-}
 
 /**
  * PlayerView 的当前资源，按小写 id 索引，供角色卡面板显示活的 HP/SAN/MP/幸运。
@@ -2610,10 +2603,7 @@ export default function RoomPage() {
           <div className="room-play__time-consent-summary">
             <Clock3 aria-hidden="true" strokeWidth={2} />
             <div>
-              <strong>{formatWorldTime(
-                pendingTimeAdvance.targetDayIndex,
-                pendingTimeAdvance.targetHourOfDay,
-              )}</strong>
+              <strong>{pendingTimeAdvance.targetLabel}</strong>
               <span>
                 {pendingTimeAdvance.acceptedPlayerIds.length}/
                 {pendingTimeAdvance.requiredPlayerIds.length} 人已确认
@@ -3144,8 +3134,7 @@ export default function RoomPage() {
           </span>
           {playerView?.world && (
             <span className="text-[10px] text-text-dim mt-1">
-              {TIME_OF_DAY_LABELS[playerView.world.time_of_day]} ·{' '}
-              {formatWorldTime(playerView.world.day_index, playerView.world.hour_of_day)}
+              {playerView.world.time_label}
             </span>
           )}
           </div>

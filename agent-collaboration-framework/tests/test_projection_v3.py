@@ -542,9 +542,10 @@ class ProjectionV3Tests(unittest.IsolatedAsyncioTestCase):
 
     async def test_world_block_carries_the_time_point_and_ending_state(self) -> None:
         snapshot = await self.project(game_state(self.content))
-        self.assertEqual(snapshot.world.day_index, 0)
-        self.assertEqual(snapshot.world.hour_of_day, 12)
-        self.assertEqual(snapshot.world.time_of_day, "day")
+        # 玩家只看到模组允许他看到的措辞：12:00 没声明 label，走 afternoon
+        # 的缺省推导。精确的 day_index / hour_of_day 留在权威状态里。
+        self.assertEqual(snapshot.world.time_label, "下午")
+        self.assertEqual(snapshot.scene.time, "下午")
         self.assertFalse(snapshot.world.core_resolved)
         self.assertFalse(snapshot.world.ending_available)
 
@@ -827,8 +828,7 @@ class AdjudicationAgainstV3Tests(unittest.IsolatedAsyncioTestCase):
         snapshot = await rules.read(
             PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
         )
-        self.assertEqual(snapshot.world.hour_of_day, 12)
-        self.assertEqual(snapshot.world.time_of_day, "day")
+        self.assertEqual(snapshot.world.time_label, "下午")
 
         await self.submit(
             engine,
@@ -840,10 +840,10 @@ class AdjudicationAgainstV3Tests(unittest.IsolatedAsyncioTestCase):
         after = await rules.read(
             PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
         )
-        self.assertEqual(after.world.hour_of_day, 20)
-        self.assertEqual(after.world.day_index, 0)
-        self.assertEqual(after.world.time_of_day, "night")
+        self.assertEqual(after.world.time_label, "晚上")
 
+        # 两跳都真的发生过——这一点由权威事件负责证明，不由玩家侧投影负责：
+        # hour_18 与 hour_20 同为 evening，玩家看到的措辞本来就该一样。
         entered = [
             event
             for event in store.inspect_domain_events(ROOM)

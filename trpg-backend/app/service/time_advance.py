@@ -22,11 +22,13 @@ from collaboration_framework.contracts import (
     GetAdjudicationStatusRequest,
     ModuleContentV3,
     SubmitAdjudicationRequest,
+    default_label_for,
+    segment_at_hour,
 )
 from collaboration_framework.contracts.validation import AdjudicationValidationError
 from collaboration_framework.engine import AdjudicationEngineService
 from collaboration_framework.engine.models import GameState
-from collaboration_framework.engine.timeline import advanced_to_next
+from collaboration_framework.engine.timeline import advanced_to_next, player_time_label
 from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -57,6 +59,16 @@ def _aware(value: datetime) -> datetime:
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
+def _target_label(record: TimeAdvanceProposalRecord) -> str:
+    """广播出去的那一个字符串（#415 §阶段一）。
+
+    迁移之前建的提案没有存过 label，按目标小时回退到 canonical segment 的
+    缺省措辞：玩家该看到的东西和精确小时无关，回退比让广播炸掉便宜。
+    """
+
+    return record.target_label or default_label_for(segment_at_hour(record.target_hour_of_day))
+
+
 def _pending_payload(record: TimeAdvanceProposalRecord) -> TimeAdvancePendingPayload:
     """将持久化记录投影成可以在断线后整体覆盖 UI 的快照。"""
 
@@ -64,9 +76,7 @@ def _pending_payload(record: TimeAdvanceProposalRecord) -> TimeAdvancePendingPay
         proposal_id=record.proposal_id,
         proposal_version=record.proposal_version,
         source_revision=str(record.source_revision),
-        target_point_id=record.target_point_id,
-        target_day_index=record.target_day_index,
-        target_hour_of_day=record.target_hour_of_day,
+        target_label=_target_label(record),
         requester_player_id=record.requester_player_id,
         required_player_ids=list(record.required_player_ids),
         accepted_player_ids=list(record.accepted_player_ids),
@@ -89,8 +99,7 @@ def _resolved_payload(record: TimeAdvanceProposalRecord) -> TimeAdvanceResolvedP
     return TimeAdvanceResolvedPayload(
         proposal_id=record.proposal_id,
         status=status,
-        target_day_index=record.target_day_index,
-        target_hour_of_day=record.target_hour_of_day,
+        target_label=_target_label(record),
         committed_revision=(
             str(record.committed_revision) if record.committed_revision is not None else None
         ),
@@ -285,6 +294,8 @@ async def create_from_adjudication(
         target_point_id=target_time.current_point_id,
         target_day_index=target_time.current.day_index,
         target_hour_of_day=target_time.current.hour_of_day,
+        # 建提案时解析一次，之后广播路径只读列，不再碰模组快照。
+        target_label=player_time_label(module, target_time),
         required_player_ids=required,
         accepted_player_ids=[request.player_id],
         adjudication_json=adjudication.model_dump(

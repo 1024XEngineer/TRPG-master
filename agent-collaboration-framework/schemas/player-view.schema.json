@@ -845,26 +845,10 @@
       "additionalProperties": false,
       "description": "Player-safe world facts committed outside the current scene.\n\nSee :class:`ProjectionWorldState`; this is the same data on the model/UI\nside of the projector.",
       "properties": {
-        "day_index": {
-          "default": 0,
-          "minimum": 0,
-          "title": "Day Index",
-          "type": "integer"
-        },
-        "hour_of_day": {
-          "default": 0,
-          "maximum": 23,
-          "minimum": 0,
-          "title": "Hour Of Day",
-          "type": "integer"
-        },
-        "time_of_day": {
-          "default": "day",
-          "enum": [
-            "day",
-            "night"
-          ],
-          "title": "Time Of Day",
+        "time_label": {
+          "default": "下午",
+          "minLength": 1,
+          "title": "Time Label",
           "type": "string"
         },
         "core_resolved": {

@@ -157,6 +157,85 @@ async def test_proposal_creation_is_idempotent_per_room_revision(
 
 
 @pytest.mark.asyncio
+async def test_broadcast_payloads_carry_only_the_module_wording(
+    db_session: AsyncSession,
+) -> None:
+    """确认弹窗不能是玩家侧收窄的漏洞（#415 §阶段一）。
+
+    只删 PlayerView 字段而让弹窗照旧显示「第 3 天 20:00」等于没收窄，所以
+    广播载荷里既不能有精确时刻，也不能有能反推出小时的 point id。精确目标
+    仍留在提案记录上——它是提交校验与断线恢复的依据。
+    """
+
+    room, players, _ = await _start_room(
+        db_session,
+        room_number=3494,
+        player_count=2,
+        prepare_checkpoint=False,
+    )
+    session = await db_session.get(GameSession, room.id)
+    assert session is not None
+    await time_advance.create_from_adjudication(
+        db_session,
+        _request(
+            room_id=room.id,
+            player_id=players[0].id,
+            actor_id="actor_1",
+            revision=session.state_version,
+            action_id="time-label-415",
+        ),
+    )
+
+    record = await time_advance._active_record(db_session, room.id)
+    assert record is not None
+    # 追书人从 hour_12 起步，下一个点是 hour_18，走 evening 的缺省措辞。
+    assert record.target_point_id == "hour_18"
+    assert record.target_hour_of_day == 18
+    assert record.target_label == "晚上"
+
+    pending = time_advance._pending_payload(record).model_dump(by_alias=True)
+    assert pending["targetLabel"] == "晚上"
+    record.status = "approved"
+    resolved = time_advance._resolved_payload(record).model_dump(by_alias=True)
+    assert resolved["targetLabel"] == "晚上"
+
+    leaked = {"targetPointId", "targetDayIndex", "targetHourOfDay"}
+    assert not leaked & pending.keys()
+    assert not leaked & resolved.keys()
+
+
+@pytest.mark.asyncio
+async def test_a_proposal_from_before_the_label_column_falls_back_to_the_hour(
+    db_session: AsyncSession,
+) -> None:
+    """迁移前建的提案没有 label，按目标小时回退，不让广播炸掉。"""
+
+    room, players, _ = await _start_room(
+        db_session,
+        room_number=3495,
+        player_count=2,
+        prepare_checkpoint=False,
+    )
+    session = await db_session.get(GameSession, room.id)
+    assert session is not None
+    await time_advance.create_from_adjudication(
+        db_session,
+        _request(
+            room_id=room.id,
+            player_id=players[0].id,
+            actor_id="actor_1",
+            revision=session.state_version,
+            action_id="time-label-fallback-415",
+        ),
+    )
+    record = await time_advance._active_record(db_session, room.id)
+    assert record is not None
+    record.target_label = None
+
+    assert time_advance._pending_payload(record).target_label == "晚上"
+
+
+@pytest.mark.asyncio
 async def test_three_players_wait_then_commit_exactly_once(
     db_session: AsyncSession,
     engine_store_factory,

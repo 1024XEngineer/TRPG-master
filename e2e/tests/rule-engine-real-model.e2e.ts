@@ -237,7 +237,14 @@ test(
       )
       assert.ok(triggers.length >= 1)
       assert.equal(triggers[0].sourceType, 'time.point_entered')
-      assert.equal(triggers[0].sourcePayload?.time_of_day, 'night')
+      // 载荷从粗粒度 time_of_day 换成四段 canonical segment（#415 §阶段一）；
+      // 触发这条规则的点必须是夜里的某一段，具体哪一段取决于模型推到了哪。
+      assert.ok(
+        ['evening', 'late_night'].includes(
+          triggers[0].sourcePayload?.time_segment as string,
+        ),
+        `触发点不是夜间时段: ${JSON.stringify(triggers[0].sourcePayload)}`,
+      )
     } finally {
       room.host.sdk.roomSocket.disconnect()
     }

@@ -1630,14 +1630,16 @@ export interface SystemQuickGenerateResult {
 
 /**
  * 广播完整待确认状态，供所有客户端幂等覆盖本地确认条。
+ *
+ * 只投模组允许玩家看到的措辞。精确目标留在提案记录里做校验与恢复——
+ * 只删 PlayerView 字段而让确认弹窗照旧显示「第 1 天 22:00」，等于没收窄
+ * （#415 §阶段一）。`target_point_id` 一并去掉：`hour_22` 反推得出小时。
  */
 export interface TimeAdvancePendingPayload {
   proposalId: string;
   proposalVersion: number;
   sourceRevision: string;
-  targetPointId: string;
-  targetDayIndex: number;
-  targetHourOfDay: number;
+  targetLabel: string;
   requesterPlayerId: string;
   requiredPlayerIds: string[];
   acceptedPlayerIds: string[];
@@ -1645,13 +1647,12 @@ export interface TimeAdvancePendingPayload {
 }
 
 /**
- * 广播提案终态；批准时附带已经提交的权威世界时间。
+ * 广播提案终态；批准时附带已经提交的 revision 与玩家可见措辞。
  */
 export interface TimeAdvanceResolvedPayload {
   proposalId: string;
   status: "approved" | "rejected" | "expired" | "stale";
-  targetDayIndex: number;
-  targetHourOfDay: number;
+  targetLabel: string;
   committedRevision?: string | null;
 }
 
@@ -1766,9 +1767,7 @@ export interface VisibleEntity {
  * side of the projector.
  */
 export interface WorldStateView {
-  day_index?: number;
-  hour_of_day?: number;
-  time_of_day?: "day" | "night";
+  time_label?: string;
   core_resolved?: boolean;
   ending_available?: boolean;
   ending_id?: string | null;

@@ -2362,21 +2362,12 @@ async def test_narration_context_dates_each_step_by_its_own_clock() -> None:
     context = await service.build_narration_context(original)
 
     assert context.opening_world_time is not None
-    assert (
-        context.opening_world_time.hour_of_day,
-        context.opening_world_time.time_of_day,
-    ) == (
-        12,
-        "day",
-    )
-    clocks = [
-        (step.world_time_after.hour_of_day, step.world_time_after.time_of_day)
-        for step in context.completed_steps
-    ]
-    assert clocks == [(12, "day"), (20, "night")]
+    assert context.opening_world_time.time_label == "下午"
+    clocks = [step.world_time_after.time_label for step in context.completed_steps]
+    assert clocks == ["下午", "晚上"]
     # The final view is still the post-turn state; it is simply no longer the
     # only clock the Narrator can see.
-    assert context.player_view.world.hour_of_day == 20
+    assert context.player_view.world.time_label == "晚上"
 
 
 @pytest.mark.asyncio

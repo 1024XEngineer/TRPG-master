@@ -20,7 +20,6 @@ id; renaming the field is a storage change and belongs with the loader switch.
 from __future__ import annotations
 
 from collaboration_framework.contracts import (
-    DAY_SEGMENTS,
     AgentMatchTriggerSpec,
     ContractError,
     EntitySpecV3,
@@ -59,7 +58,12 @@ from .models import EngineRuntimeSnapshot, GameState
 from .navigation import effective_location_knowledge, runtime_location_edges
 from .persistent_results import PUBLIC_STATE_KEYS
 from .rules_v3 import agent_match_scope_admits, evaluate_condition, pending_check_for
-from .timeline import next_point_after, ordered_points, time_advance_block_reason
+from .timeline import (
+    next_point_after,
+    ordered_points,
+    player_time_label,
+    time_advance_block_reason,
+)
 
 # Visibility levels an authored node may carry, ordered from most to least open.
 _PLAYER_VISIBLE = {"public", "party"}
@@ -88,9 +92,7 @@ def project_v3(
     )
 
     visible_entities = _visible_entities(module, state, location.id, actor_id)
-    # 玩家侧仍投粗粒度 day/night，直到 #415 §阶段二把这两个字段整体换成模组
-    # 声明的 label。存储值已经是四段的，这里只是按别名集合折回二值。
-    coarse_time_of_day = "day" if state.world_time.time_segment in DAY_SEGMENTS else "night"
+    time_label = player_time_label(module, state.world_time)
     return ProjectionSnapshot(
         room_id=state.room_id,
         player_id=player_id,
@@ -104,7 +106,7 @@ def project_v3(
             id=location.id,
             name=location.player_visible_name or location.name,
             description=location.player_visible_description,
-            time=coarse_time_of_day,
+            time=time_label,
             visible_entities=visible_entities,
             visible_actors=tuple(
                 ProjectionVisibleActor(
@@ -129,9 +131,7 @@ def project_v3(
         known_locations=_known_locations(module, state, location_knowledge),
         inventory=inventory,
         world=ProjectionWorldState(
-            day_index=state.world_time.current.day_index,
-            hour_of_day=state.world_time.current.hour_of_day,
-            time_of_day=coarse_time_of_day,
+            time_label=time_label,
             core_resolved=state.core_resolved,
             ending_available=state.ending_available,
             ending_id=state.ending_id,

@@ -241,9 +241,7 @@ class PlayerViewProjector:
             ),
             inventory=snapshot.inventory,
             world=WorldStateView(
-                day_index=snapshot.world.day_index,
-                hour_of_day=snapshot.world.hour_of_day,
-                time_of_day=snapshot.world.time_of_day,
+                time_label=snapshot.world.time_label,
                 core_resolved=snapshot.world.core_resolved,
                 ending_available=snapshot.world.ending_available,
                 ending_id=snapshot.world.ending_id,

@@ -995,6 +995,8 @@ class ActionPlanTurnApplication:
                 advanced,
                 on_phase=on_phase,
             )
+        # 结构化 @NPC 输入仍由统一 Host 判断对白、施压和行动意图；路由层不能先返回
+        # 澄清，否则连 NPC 的独立回复都不会生成。NPC 的行动语义仍由 Host/Engine 契约裁决。
         if _requires_mixed_dialogue_clarification(player_input):
             view = await self._projector.project(player_input)
             await _emit_phase(on_phase, "generating_narration")
@@ -2700,6 +2702,10 @@ def _requires_mixed_dialogue_clarification(player_input: PlayerInput) -> bool:
     if player_input.interlocutor_id is None:
         return False
     text = player_input.utterance
+    # 正式结构化 recipient 的原话已由服务端剥离展示用 mention；这类输入交给
+    # 统一 Host 判断。只有旧客户端把 @NPC 混在原文里时，才在路由层要求拆句。
+    if not text.lstrip().startswith("@"):
+        return False
     if not any(
         marker in text for marker in ("然后", "再", "接着", "之后", "同时", "顺便", "并", "并且")
     ):

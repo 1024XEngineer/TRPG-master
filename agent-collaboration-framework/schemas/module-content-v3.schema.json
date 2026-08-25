@@ -139,6 +139,40 @@
         "scope": {
           "$ref": "#/$defs/CandidateScopeSpec"
         },
+        "when": {
+          "anyOf": [
+            {
+              "discriminator": {
+                "mapping": {
+                  "all": "#/$defs/AllCondition",
+                  "any": "#/$defs/AnyCondition",
+                  "not": "#/$defs/NotCondition",
+                  "predicate": "#/$defs/PredicateCondition"
+                },
+                "propertyName": "op"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/AllCondition"
+                },
+                {
+                  "$ref": "#/$defs/AnyCondition"
+                },
+                {
+                  "$ref": "#/$defs/NotCondition"
+                },
+                {
+                  "$ref": "#/$defs/PredicateCondition"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "When"
+        },
         "question": {
           "$ref": "#/$defs/MatchQuestionSpec"
         },

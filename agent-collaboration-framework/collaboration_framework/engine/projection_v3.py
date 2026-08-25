@@ -58,7 +58,7 @@ from collaboration_framework.contracts import (
 from .models import EngineRuntimeSnapshot, GameState
 from .navigation import effective_location_knowledge, runtime_location_edges
 from .persistent_results import PUBLIC_STATE_KEYS
-from .rules_v3 import agent_match_scope_admits, evaluate_condition, pending_check_for
+from .rules_v3 import agent_match_admits, evaluate_condition, pending_check_for
 from .time_tasks import active_occurrences
 from .timeline import (
     next_point_after,
@@ -688,12 +688,16 @@ def _optional_text(value) -> str | None:
     return value if isinstance(value, str) and value.strip() else None
 
 
-def _rule_candidates(module, location_id: str) -> tuple[KeeperRuleCandidate, ...]:
-    """agent_match Rules whose scope covers where the actor is standing.
+def _rule_candidates(
+    module,
+    state: GameState,
+    actor_id: str,
+) -> tuple[KeeperRuleCandidate, ...]:
+    """agent_match Rules available to this actor in the current state.
 
-    Scope filtering is the Engine's job so the Agent never sees rules for places
-    it is not in; picking among the remaining options is the Agent's job. An
-    empty `location_ids` means the rule is not location-bound.
+    Scope and authored ``when`` filtering are the Engine's job so the Agent
+    never sees rules for another place or another world state. Picking among
+    the remaining options is the Agent's job.
     """
 
     candidates = []
@@ -702,7 +706,12 @@ def _rule_candidates(module, location_id: str) -> tuple[KeeperRuleCandidate, ...
         if not isinstance(trigger, AgentMatchTriggerSpec):
             continue
         # 同一个谓词也用在提交侧，两边不会各自漂移。
-        if not agent_match_scope_admits(rule, location_id=location_id):
+        if not agent_match_admits(
+            rule,
+            state=state,
+            actor_id=actor_id,
+            location_id=state.scene_id,
+        ):
             continue
         scope = trigger.scope
         candidates.append(
@@ -839,7 +848,7 @@ def keeper_capabilities_v3(
             )
             for anchor in module.ending_anchors
         ),
-        rule_candidates=_rule_candidates(module, state.scene_id),
+        rule_candidates=_rule_candidates(module, state, actor_id),
         time=_time_capability(module, state),
         core_resolved=state.core_resolved,
         ending_available=state.ending_available,

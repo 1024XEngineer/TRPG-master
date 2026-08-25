@@ -368,6 +368,7 @@ __all__ = [
     "agenda_item_for_event",
     "agenda_item_key",
     "agenda_status_for_walk",
+    "agent_match_admits",
     "agent_match_scope_admits",
     "create_rule_agenda",
     "effects_after_cancel",
@@ -437,16 +438,55 @@ def agent_match_scope_admits(
     scope = trigger.scope
     if scope.location_ids and location_id not in scope.location_ids:
         return False
-    if action_family is not None and scope.action_families:
-        if action_family not in scope.action_families:
-            return False
-    if target_kind is not None and scope.target_kinds:
-        if target_kind not in scope.target_kinds:
-            return False
-    if target_id is not None and scope.target_ids:
-        if target_id not in scope.target_ids:
-            return False
-    return True
+    if (
+        action_family is not None
+        and scope.action_families
+        and action_family not in scope.action_families
+    ):
+        return False
+    if (
+        target_kind is not None
+        and scope.target_kinds
+        and target_kind not in scope.target_kinds
+    ):
+        return False
+    return not (
+        target_id is not None
+        and scope.target_ids
+        and target_id not in scope.target_ids
+    )
+
+
+def agent_match_admits(
+    rule: RuleSpecV3,
+    *,
+    state: GameState,
+    actor_id: str,
+    location_id: str,
+    action_family: str | None = None,
+    target_kind: str | None = None,
+    target_id: str | None = None,
+) -> bool:
+    """Whether an ``agent_match`` Rule is available in the current state.
+
+    ``scope`` is the structural half of admission; ``when`` is the stateful
+    half. Candidate publication and adjudication submission both call this
+    function so a Rule hidden during the day, or invalidated after publication,
+    cannot be selected by naming its id directly.
+    """
+
+    if not agent_match_scope_admits(
+        rule,
+        location_id=location_id,
+        action_family=action_family,
+        target_kind=target_kind,
+        target_id=target_id,
+    ):
+        return False
+    trigger = rule.trigger
+    if not isinstance(trigger, AgentMatchTriggerSpec):
+        return False
+    return evaluate_condition(trigger.when, state=state, actor_id=actor_id)
 
 
 def pending_check_for(rule: RuleSpecV3, branch_id: str):

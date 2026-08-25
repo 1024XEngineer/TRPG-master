@@ -38,11 +38,12 @@ from collaboration_framework.contracts import (
     PostRollDecisionRequest,
     PredicateCondition,
     RequiredAdjudicationCheck,
+    RevealInformationEffect,
     RuleDecisionRef,
     SelectCheckChoice,
     SkillCheckCandidate,
-    RevealInformationEffect,
     SubmitAdjudicationRequest,
+    TimeSegment,
 )
 from collaboration_framework.engine import (
     ActorResources,
@@ -53,6 +54,8 @@ from collaboration_framework.engine import (
     InMemoryEngineStore,
     RuleEngineService,
     SequenceDiceSource,
+    WorldTimePoint,
+    WorldTimeState,
 )
 from collaboration_framework.engine.initialization import create_initial_game_state
 from collaboration_framework.engine.navigation import resolve_location_target
@@ -691,6 +694,97 @@ class AdjudicationAgainstV3Tests(unittest.IsolatedAsyncioTestCase):
             initial_state=game_state(self.content, **overrides),
         )
         return store, AdjudicationEngineService(store), RuleEngineService(store)
+
+    def condition_night_watch_on_night(self) -> None:
+        """Give the real Paper Chase candidate the small engine extension under test."""
+
+        rules = []
+        for rule in self.content.rules:
+            if rule.id != "keep_night_watch":
+                rules.append(rule)
+                continue
+            rules.append(
+                rule.model_copy(
+                    update={
+                        "trigger": rule.trigger.model_copy(
+                            update={
+                                "when": PredicateCondition(
+                                    predicate="time_of_day_is",
+                                    args={"value": "night"},
+                                )
+                            },
+                            deep=True,
+                        )
+                    },
+                    deep=True,
+                )
+            )
+        self.content = self.content.model_copy(update={"rules": tuple(rules)}, deep=True)
+
+    @staticmethod
+    def at_time(point_id: str, hour: int, segment: TimeSegment) -> WorldTimeState:
+        return WorldTimeState(
+            current_point_id=point_id,
+            current=WorldTimePoint(day_index=0, hour_of_day=hour),
+            current_time_segment=segment,
+        )
+
+    async def test_agent_match_when_filters_the_published_candidate(self) -> None:
+        self.condition_night_watch_on_night()
+
+        async def candidates(world_time: WorldTimeState) -> set[str]:
+            _, _, rules = self.build(
+                scene_id="surveillance_point",
+                world_time=world_time,
+            )
+            view = await rules.read_keeper_capabilities(
+                PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+            )
+            return {candidate.rule_id for candidate in view.rule_candidates}
+
+        day = await candidates(self.at_time("hour_06", 6, "morning"))
+        night = await candidates(self.at_time("hour_18", 18, "evening"))
+
+        self.assertNotIn("keep_night_watch", day)
+        self.assertIn("keep_night_watch", night)
+
+    async def test_agent_match_when_is_rechecked_on_submission(self) -> None:
+        """Naming a hidden or stale candidate id cannot bypass its state condition."""
+
+        self.condition_night_watch_on_night()
+        store, engine, rules = self.build(
+            scene_id="surveillance_point",
+            world_time=self.at_time("hour_06", 6, "morning"),
+        )
+        snapshot = await rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+
+        with self.assertRaises(AdjudicationValidationError) as rejected:
+            await engine.submit(
+                SubmitAdjudicationRequest(
+                    room_id=ROOM,
+                    player_id=PLAYER,
+                    adjudication=ActionAdjudication(
+                        request_id="night-watch-during-day",
+                        source_revision=snapshot.revision,
+                        actor_id=ACTOR,
+                        summary="白天点名夜间监视规则",
+                        target=ActionTarget(kind="entity", id="surveillance_area"),
+                        method=ActionMethod(family="surveil", description="监视环境"),
+                        rule_decision=RuleDecisionRef(
+                            rule_id="keep_night_watch",
+                            option_id="luck",
+                        ),
+                        check=NoAdjudicationCheck(),
+                        success_effects=(),
+                        failure_effects=(),
+                    ),
+                )
+            )
+
+        self.assertEqual(rejected.exception.result.code, "RULE_OUT_OF_SCOPE")
+        self.assertEqual(len(store.inspect_domain_events(ROOM)), 0)
 
     async def submit(self, engine, revision, *effects, target=None):
         return await engine.submit(

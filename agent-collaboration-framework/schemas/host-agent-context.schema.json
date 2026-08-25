@@ -1241,6 +1241,32 @@
           "minLength": 1,
           "title": "Utterance",
           "type": "string"
+        },
+        "interlocutor_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Interlocutor Id"
+        },
+        "interlocutor_name": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Interlocutor Name"
         }
       },
       "required": [

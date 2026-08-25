@@ -392,6 +392,11 @@ class AgentMatchTriggerSpec(ContractModel):
     required: bool = True
     decision_mode: Literal["selective", "exhaustive_for_scope"] = "selective"
     scope: CandidateScopeSpec = Field(default_factory=CandidateScopeSpec)
+    # scope answers "what kind of action could match"; when answers whether
+    # that authored opportunity exists in the current authoritative state.
+    # Keeping the condition on the trigger lets publication and submission
+    # evaluate the exact same expression instead of trusting a stale menu.
+    when: ConditionExpr | None = None
     question: MatchQuestionSpec
     options: tuple[MatchOptionAuthorSpec, ...] = Field(min_length=1)
     bindings: tuple[BindingSlotSpec, ...] = ()

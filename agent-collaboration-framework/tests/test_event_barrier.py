@@ -124,13 +124,9 @@ class EventBarrierTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(state.entities["case_tracker"]["surveillance_available"], True)
 
     async def test_the_rule_fires_once_even_across_three_night_points(self) -> None:
-        """18 / 20 / 00 三个点都是夜里，但规则只在其中一个点上成立。
+        """18 / 20 / 00 三个点都是夜里，但规则的条件自己会关掉它。
 
-        屏障不负责去重——规则自己的条件负责。#415 §阶段三之前那是
-        `surveillance_available == false` 这个手工布尔闩，因为粗粒度的
-        `time_of_day_is night` 对三个点都判真；现在是 `time_point_is hour_18`，
-        规则直接说清楚自己挂在哪一个点上。
-
+        屏障不负责去重——`surveillance_available == false` 这个前置条件负责。
         钉住它是为了确认屏障没有把「每个事件都重新匹配一遍」变成「同一条规则
         被跑了三次」。
         """
@@ -172,47 +168,6 @@ class EventBarrierTests(unittest.IsolatedAsyncioTestCase):
         source = next(event for event in events if event.event_id == source_id)
         self.assertEqual(source.type, "time.point_entered")
         self.assertEqual(source.payload["point_id"], "hour_18")
-
-    async def test_the_night_watch_rule_no_longer_needs_a_manual_latch(self) -> None:
-        """《追书人》去掉布尔闩后，开监视的时刻与去掉之前完全一致（#415 §阶段三）。
-
-        闩存在的唯一原因是 `time_of_day_is night` 分不开 hour_18 和 hour_20；
-        `time_point_is` 分得开，所以规则的触发条件里不再读任何实体状态——它只
-        写，不再既读又写。
-        """
-
-        content = module()
-        rule = next(item for item in content.rules if item.id == "enable_night_surveillance")
-        condition = rule.trigger.when
-        assert condition is not None
-        self.assertEqual(condition.predicate, "time_point_is")
-        self.assertEqual(condition.args, {"value": "hour_18"})
-
-        store = InMemoryEngineStore()
-        store.register_room(module_content=content, initial_state=noon_state())
-        engine = AdjudicationEngineService(store)
-
-        # 只走到 hour_18 就该开出来，和闩还在的时候是同一跳。
-        await engine.submit(
-            SubmitAdjudicationRequest(
-                room_id=ROOM,
-                player_id=PLAYER,
-                adjudication=ActionAdjudication(
-                    request_id="sleep-until-evening",
-                    source_revision="0",
-                    actor_id=ACTOR,
-                    summary="等到入夜",
-                    target=ActionTarget(kind="location", id="thomas_office"),
-                    method=ActionMethod(family="rest", description="等待"),
-                    check=NoAdjudicationCheck(),
-                    success_effects=(AdvanceWorldTimeEffect(to_point_id="hour_18"),),
-                ),
-            )
-        )
-
-        state = store.inspect_state(ROOM)
-        self.assertEqual(state.world_time.current_point_id, "hour_18")
-        self.assertIs(state.entities["case_tracker"]["surveillance_available"], True)
 
     async def test_an_unblocked_action_still_runs_every_effect(self) -> None:
         """零回归：没有规则挡路时，效果序列的结果与屏障之前完全一致。"""

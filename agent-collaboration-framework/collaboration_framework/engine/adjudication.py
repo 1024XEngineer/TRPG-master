@@ -23,17 +23,17 @@ from collaboration_framework.contracts import (
     AdjudicationRecovery,
     AdjudicationStatusView,
     AdvanceWorldTimeEffect,
-    EnterLocationEffect,
     CheckDecisionRequest,
     CheckRunView,
     CheckStep,
-    RuleCheckSpec,
     ContractError,
+    EnterLocationEffect,
     GetAdjudicationStatusRequest,
     NarrationEvidence,
     PendingCheckOption,
     PostRollDecisionRequest,
     PushOption,
+    RuleCheckSpec,
     SpendResourceOption,
     SubmitAdjudicationRequest,
 )
@@ -71,7 +71,7 @@ from .persistent_results import (
 from .ports import EngineStore
 from .projection_v3 import project_v3
 from .rules_v3 import (
-    agent_match_scope_admits,
+    agent_match_admits,
     create_rule_agenda,
     effects_after_degree,
     entity_state,
@@ -1437,8 +1437,10 @@ class AdjudicationEngineService:
             # 存在性不等于「此时此地可用」。候选菜单是按当前场景发布的，提交时
             # 必须用同一个谓词重新绑定：否则模型可以点名另一个地点的规则，把它
             # 的后果带到这里来 —— 范围校验等于交给了模型自觉。
-            if not agent_match_scope_admits(
+            if not agent_match_admits(
                 rule,
+                state=state,
+                actor_id=adjudication.actor_id,
                 location_id=state.scene_id,
                 action_family=adjudication.method.family,
                 target_kind=adjudication.target.kind,

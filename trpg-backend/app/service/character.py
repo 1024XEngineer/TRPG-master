@@ -10,8 +10,9 @@ import hashlib
 import json
 import random
 from dataclasses import asdict, replace
+from typing import cast
 
-from sqlalchemy import select, update
+from sqlalchemy import CursorResult, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -180,8 +181,10 @@ def _seed_character_from_template(character: Character, template: UserCharacterT
     character.gender = data.get("gender")
     character.residence = data.get("residence") or ""
     character.birthplace = data.get("birthplace") or ""
-    character.attributes = dict(data.get("attributes") or {})
-    character.attributes.pop("LUCK", None)
+    attributes = dict(data.get("attributes") or {})
+    # 卡库中的幸运值属于旧游戏；复制到新房间后必须等待本局重新掷骰。
+    attributes.pop("LUCK", None)
+    character.attributes = attributes
     character.skills = dict(data.get("skills") or {})
     character.occupation_choice_skill_ids = data.get("occupation_choice_skill_ids")
     character.equipment = list(data.get("equipment") or [])
@@ -517,11 +520,11 @@ async def roll_luck(
     attributes = dict(character.attributes or {})
     attributes["LUCK"] = luck
     # 用版本条件完成原子写入：两个并发请求最多一个成功，后到者不能覆盖先到结果。
-    result = await db.execute(
+    result = cast(CursorResult[tuple[()],], await db.execute(
         update(Character)
         .where(Character.id == character.id, Character.version == character.version)
         .values(attributes=attributes, version=character.version + 1)
-    )
+    ))
     if result.rowcount != 1:
         await db.rollback()
         raise RoomConflictError("幸运值已经掷出，不能重复掷骰")

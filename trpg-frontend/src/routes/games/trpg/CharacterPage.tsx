@@ -78,22 +78,37 @@ const EMPTY_CHOICE_SELECTIONS: string[][] = []
 function LuckDiceAnimation({ dice, onDone }: { dice: [number, number, number]; onDone: () => void }) {
   const stageRef = useRef<Dice3DHandle>(null)
   const [index, setIndex] = useState(0)
+  const [displayValue, setDisplayValue] = useState(1)
   const [use3D, setUse3D] = useState(() => supports3DDice())
   const token = `luck-${index}`
 
   useEffect(() => {
+    if (use3D) {
+      // 和游戏内骰盘一样，目标点数只交给 3D 舞台用于定格，不直接显示结果。
+      const timer = window.setTimeout(() => {
+        if (!stageRef.current?.roll(token, dice[index])) setUse3D(false)
+      }, 0)
+      return () => window.clearTimeout(timer)
+    }
+
+    // 无 WebGL 时复用游戏骰盘的 700ms 2D 掷骰节奏，最后才定格到服务端点数。
+    const interval = window.setInterval(() => {
+      setDisplayValue(Math.floor(Math.random() * 6) + 1)
+    }, 80)
     const timer = window.setTimeout(() => {
-      if (!use3D) {
-        if (index >= dice.length - 1) onDone()
-        else setIndex(current => current + 1)
-        return
-      }
-      if (!stageRef.current?.roll(token, dice[index])) setUse3D(false)
-    }, use3D ? 0 : 350)
-    return () => window.clearTimeout(timer)
+      window.clearInterval(interval)
+      setDisplayValue(dice[index])
+      if (index >= dice.length - 1) onDone()
+      else setIndex(current => current + 1)
+    }, 700)
+    return () => {
+      window.clearInterval(interval)
+      window.clearTimeout(timer)
+    }
   }, [dice, index, onDone, token, use3D])
 
   const settle = () => {
+    setDisplayValue(dice[index])
     if (index >= dice.length - 1) onDone()
     else setIndex(current => current + 1)
   }
@@ -111,7 +126,7 @@ function LuckDiceAnimation({ dice, onDone }: { dice: [number, number, number]; o
         />
       ) : (
         <span className="flex h-14 w-14 items-center justify-center rounded-md border border-[#c9a86a] bg-[#f8e7c2] text-2xl font-bold text-[#4a3520]">
-          {dice[index]}
+          {displayValue}
         </span>
       )}
       <span className="ml-2 text-xs text-[#f8e7c2]">第 {index + 1}/3 颗</span>
@@ -959,6 +974,7 @@ export default function CharacterPage() {
         setCharacterId(characterId)
       }
       const result = await rollLuckCharacter(roomId, characterId)
+      // 服务端结果先写入草稿供规则预览使用；幸运行在动画结束前仍显示“掷骰中”。
       setAttr(previous => ({ ...previous, LUCK: result.luck }))
       setLuckDice(result.dice)
     } catch (error) {
@@ -1940,7 +1956,7 @@ export default function CharacterPage() {
                           </div>
                           <div className="character-create__attribute-note text-[10px] mt-0.5">不占属性点数（规则为独立掷 <span className="character-create__number">{attribute.generation}</span>，由当前生成方式决定）</div>
                         </div>
-                        <span className="character-create__attribute-static-value character-create__attribute-static-value--plain text-[17px] font-bold font-mono text-text-primary min-w-[36px] text-center">{luckReady ? attr[attribute.key] : '待掷'}</span>
+                        <span className="character-create__attribute-static-value character-create__attribute-static-value--plain text-[17px] font-bold font-mono text-text-primary min-w-[36px] text-center">{luckRolling ? '掷骰中' : luckReady ? attr[attribute.key] : '待掷'}</span>
                         {!isTemplateHost && (
                           <button
                             type="button"

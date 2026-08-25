@@ -1,4 +1,5 @@
 import asyncio
+from typing import cast
 
 from httpx import AsyncClient
 from sqlalchemy import func, select
@@ -389,7 +390,9 @@ async def test_complete_character_without_luck_roll_is_rejected(client: AsyncCli
     without_luck = {
         **BUILT_CHARACTER,
         "attributes": {
-            key: value for key, value in BUILT_CHARACTER["attributes"].items() if key != "LUCK"
+            key: value
+            for key, value in cast(dict[str, int], BUILT_CHARACTER["attributes"]).items()
+            if key != "LUCK"
         },
     }
     await client.patch(

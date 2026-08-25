@@ -192,6 +192,8 @@ from .module_v3 import (
     TimeOfDayQuery,
     TimePointSpec,
     TimeSegment,
+    TimeTaskSpec,
+    TimeTaskTargetSpec,
     TravelCostSpec,
     WorldProfileSpec,
     default_label_for,

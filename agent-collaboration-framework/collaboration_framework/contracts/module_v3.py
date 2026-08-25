@@ -489,19 +489,86 @@ class CreateNpcActionOpportunityStep(ContractModel):
     next_step_id: Identifier
 
 
+class TimeTaskTargetSpec(ContractModel):
+    """定时任务在哪一刻到期（#245 §5 / #415 §阶段四）。
+
+    两种写法二选一：
+
+    - `point_id` —— 绑到模组已经声明的默认点上。不必再写小时，它由
+      `TimePointSpec` 唯一确定。
+    - `day_index` + `hour_of_day` —— 剧情临时点，引擎会在两个默认点之间插入
+      一次性 occurrence。
+
+    两个都给或都不给都是错的：前者可能自相矛盾，后者根本没说到期时间。
+    """
+
+    point_id: Identifier | None = None
+    day_index: int | None = Field(default=None, ge=0)
+    hour_of_day: int | None = Field(default=None, ge=0, le=23)
+    # 相对当前时刻还是绝对日历。默认点写法只能用绝对（点本身带着小时），
+    # 临时点两种都行：「三小时后」是相对，「第二天凌晨两点」是绝对。
+    relative: bool = False
+
+    @model_validator(mode="after")
+    def validate_target(self) -> TimeTaskTargetSpec:
+        by_point = self.point_id is not None
+        by_clock = self.hour_of_day is not None
+        if by_point == by_clock:
+            raise ValueError("TimeTaskTarget 必须二选一：point_id 或 hour_of_day")
+        if by_point and (self.day_index is not None or self.relative):
+            raise ValueError("绑定默认点的 TimeTaskTarget 不能再声明 day_index 或 relative")
+        if by_clock and not self.relative and self.day_index is None:
+            raise ValueError("绝对时刻的 TimeTaskTarget 必须声明 day_index")
+        return self
+
+
+class TimeTaskSpec(ContractModel):
+    """一次定时任务的作者态声明（#245 §5）。
+
+    `task_key` 不是运行时 id：同一条规则可能为不同的绑定各排一个任务
+    （「每个被跟踪的 NPC 三小时后现身」），运行时 id 由 key + bindings 生成。
+    `cancel_time_task` 也是按 key + bindings 定位的，所以两边必须对得上。
+    """
+
+    task_key: Identifier
+    target: TimeTaskTargetSpec
+    # 同一刻到期的多个任务按 `priority` 再按 task_id 稳定排序，避免同点多任务
+    # 的结算顺序随字典遍历漂移。
+    priority: int = 0
+    # `hidden` 的任务不向玩家暴露它插出来的那个临时点是什么时候、为什么。
+    visibility: Literal["public", "hidden"] = "public"
+    # 到期时从这条规则的哪个分支继续结算。
+    on_due_branch_id: Identifier
+    bindings: dict[str, JsonValue] = Field(default_factory=dict)
+
+
 class CreateTimeTaskStep(ContractModel):
-    """Schema owned by #245; referenced here so a rule can schedule one."""
+    """Schema owned by #245; referenced here so a rule can schedule one.
+
+    以前这里只有一个 `task_id`，没有目标时间——也就是说这个 step **根本无法
+    实际创建任务**，它在 registry 里被登记成 `step_kind_has_no_executor` 是
+    诚实的。改成携带完整 `TimeTaskSpec`（#415 §阶段四）。
+    """
 
     id: Identifier
     kind: Literal["create_time_task"] = "create_time_task"
-    task_id: Identifier
+    task: TimeTaskSpec
     next_step_id: Identifier
 
 
 class CancelTimeTaskStep(ContractModel):
+    """按 key + bindings 定位并取消，不按运行时 id。
+
+    规则写的时候还不知道运行时 id 长什么样；它知道的是自己当初用哪个
+    `task_key` 和哪组绑定排的任务。
+    """
+
     id: Identifier
     kind: Literal["cancel_time_task"] = "cancel_time_task"
-    task_id: Identifier
+    task_key: Identifier
+    bindings: dict[str, JsonValue] = Field(default_factory=dict)
+    # 取消是有原因的（目标已死、玩家先一步阻止了它），原因要能进审计事件。
+    reason_code: str = Field(min_length=1, max_length=64)
     next_step_id: Identifier
 
 
@@ -1007,6 +1074,8 @@ __all__ = [
     "TimeOfDayQuery",
     "TimePointSpec",
     "TimeSegment",
+    "TimeTaskSpec",
+    "TimeTaskTargetSpec",
     "TravelCostSpec",
     "WorldProfileSpec",
     "default_label_for",

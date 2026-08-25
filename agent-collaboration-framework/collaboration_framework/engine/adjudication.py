@@ -1574,6 +1574,12 @@ class AdjudicationEngineService:
             value = skills.get(candidate.skill_id)
             if value is None:
                 value = attribute_map.get(candidate.skill_id)
+            # CoC7 幸运是 ActorResources 上会消耗、会持久化的权威资源，不是
+            # skills/attributes 中的一项。作者态主动规则仍用统一的
+            # SkillCheckCandidate 形状表达它；只在解析目标值时接回资源，避免
+            # 《追书人》的幸运检定被误判成角色没有这个“技能”。
+            if value is None and candidate.skill_id == "luck":
+                value = actor.resources.luck
             if (
                 not isinstance(value, int)
                 or isinstance(value, bool)
@@ -1588,7 +1594,11 @@ class AdjudicationEngineService:
                         f"技能候选不属于 Actor 或数值非法: {candidate.skill_id}"
                     ),
                 )
-            label = label_map.get(candidate.skill_id)
+            label = (
+                "幸运"
+                if candidate.skill_id == "luck"
+                else label_map.get(candidate.skill_id)
+            )
             options.append(
                 PendingCheckOption(
                     candidate_id=candidate.candidate_id,

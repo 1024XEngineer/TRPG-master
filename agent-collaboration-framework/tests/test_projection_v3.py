@@ -786,6 +786,56 @@ class AdjudicationAgainstV3Tests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rejected.exception.result.code, "RULE_OUT_OF_SCOPE")
         self.assertEqual(len(store.inspect_domain_events(ROOM)), 0)
 
+    async def test_active_luck_check_reads_the_actor_resource(self) -> None:
+        """Luck is an ActorResource, not a synthetic entry in the skill map."""
+
+        store, engine, rules = self.build(
+            scene_id="surveillance_point",
+            world_time=self.at_time("hour_18", 18, "evening"),
+            entities={
+                "case_tracker": {"night_watch_checked": False},
+                "cemetery_figure": {"visit_observed": False},
+            },
+        )
+        snapshot = await rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        execution = await engine.submit(
+            SubmitAdjudicationRequest(
+                room_id=ROOM,
+                player_id=PLAYER,
+                adjudication=ActionAdjudication(
+                    request_id="night-watch-luck-resource",
+                    source_revision=snapshot.revision,
+                    actor_id=ACTOR,
+                    summary="在夜间监视区域留意动静",
+                    target=ActionTarget(kind="entity", id="surveillance_area"),
+                    method=ActionMethod(family="surveil", description="监视环境"),
+                    rule_decision=RuleDecisionRef(
+                        rule_id="keep_night_watch",
+                        option_id="luck",
+                    ),
+                    check=RequiredAdjudicationCheck(
+                        candidates=(
+                            SkillCheckCandidate(
+                                candidate_id="luck",
+                                skill_id="luck",
+                                difficulty="regular",
+                                method_summary="留守观察",
+                                player_safe_reason="规则要求进行幸运检定",
+                            ),
+                        )
+                    ),
+                ),
+            )
+        )
+
+        pending = execution.pending_decision
+        assert pending is not None
+        self.assertEqual(pending.options[0].display_name, "幸运")
+        self.assertEqual(pending.options[0].target_value, 50)
+        self.assertNotIn("luck", store.inspect_state(ROOM).actors[ACTOR].state["skills"])
+
     async def submit(self, engine, revision, *effects, target=None):
         return await engine.submit(
             SubmitAdjudicationRequest(

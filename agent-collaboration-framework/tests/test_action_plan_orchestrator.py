@@ -1544,6 +1544,68 @@ def test_legacy_plan_run_restores_default_persistence_intent_as_omitted() -> Non
     assert restored_adjudication.persistence_intent_explicit is False
 
 
+def test_a_run_persisted_before_the_clock_narrowing_still_recovers() -> None:
+    """收窄前存下的 run_json 必须还能恢复（#415）。
+
+    `WorldClockView` 以前是 `{day_index, hour_of_day, time_of_day}`，现在只有
+    `time_label`；两者都被原样写进 `action_plan_runs.run_json`，而
+    `ContractModel` 是 `extra="forbid"` 的。不迁移的话，发布瞬间处于
+    active / waiting / awaiting_consent 的计划全部恢复不了，玩家当前行动卡死。
+    """
+
+    original = player_input("legacy-clock-parent")
+    plan_value = plan(2)
+    created_at = datetime.now(UTC)
+    run = ActionPlanRun(
+        plan_id="legacy-clock-plan",
+        parent_action_id=original.client_action_id,
+        parent_input_fingerprint=("0" * 64),
+        parent_utterance=original.utterance,
+        room_id=original.room_id,
+        player_id=original.player_id,
+        actor_id=original.actor_id,
+        created_revision="0",
+        policy_snapshot=ActionPlanPolicy(),
+        plan=plan_value,
+        steps=(
+            ActionPlanStepRun(
+                step_id="step-0",
+                step_request_id="request-0",
+                step=plan_value.steps[0],
+            ),
+            ActionPlanStepRun(
+                step_id="step-1",
+                step_request_id="request-1",
+                step=plan_value.steps[1],
+            ),
+        ),
+        created_at=created_at,
+        updated_at=created_at,
+    )
+
+    payload = run.model_dump(mode="json")
+    # 手工还原收窄前那份序列化：开局时钟与第一步结束时钟都是旧三字段。
+    payload["opening_world_time"] = {
+        "day_index": 0,
+        "hour_of_day": 12,
+        "time_of_day": "day",
+    }
+    payload["steps"][0]["world_time_after"] = {
+        "day_index": 1,
+        "hour_of_day": 22,
+        "time_of_day": "night",
+    }
+
+    restored = ActionPlanRun.from_persistence_json_dict(payload)
+
+    assert restored.opening_world_time is not None
+    assert restored.opening_world_time.time_label == "下午"
+    assert restored.steps[0].world_time_after is not None
+    assert restored.steps[0].world_time_after.time_label == "晚上"
+    # 没存过时钟的步骤保持 None，不该被伪造出一个。
+    assert restored.steps[1].world_time_after is None
+
+
 @pytest.mark.asyncio
 async def test_safe_validation_feedback_maximum_length_fits_step_context() -> None:
     _, _, projector = runtime()
@@ -1773,7 +1835,9 @@ async def test_single_action_auto_repair_succeeds_in_plan_run() -> None:
                 update={
                     "summary": "查看托马斯·金博尔",
                     "target": ActionTarget(kind="entity", id="missing-entity"),
-                    "method": ActionMethod(family="observe", description="查看托马斯·金博尔"),
+                    "method": ActionMethod(
+                        family="observe", description="查看托马斯·金博尔"
+                    ),
                 },
                 deep=True,
             )
@@ -1799,7 +1863,9 @@ async def test_single_action_auto_repair_succeeds_in_plan_run() -> None:
     )
     # #313：光有错误码定位不到问题，指引必须跟着一起回到修复裁决器。
     assert "keeper_capabilities" in context.previous_rejection
-    assert await plan_store.load(original.room_id, original.client_action_id) is not None
+    assert (
+        await plan_store.load(original.room_id, original.client_action_id) is not None
+    )
     assert len(engine_store.inspect_domain_events(original.room_id)) == 1
 
 
@@ -1834,7 +1900,10 @@ async def test_single_travel_repair_with_changed_effect_requires_clarification()
     assert isinstance(result, ActionPlanAdvanceResult)
     assert result.run.status == "needs_clarification"
     assert await plan_store.load_active_for_room(original.room_id) is None
-    assert result.run.steps[0].safe_failure_code == "SEMANTIC_REPAIR_REQUIRES_CLARIFICATION"
+    assert (
+        result.run.steps[0].safe_failure_code
+        == "SEMANTIC_REPAIR_REQUIRES_CLARIFICATION"
+    )
     assert len(repair_adjudicator.contexts) == 1
     context = repair_adjudicator.contexts[0]
     assert context.step.kind == "travel"
@@ -1844,7 +1913,9 @@ async def test_single_travel_repair_with_changed_effect_requires_clarification()
     )
     # #313：光有错误码定位不到问题，指引必须跟着一起回到修复裁决器。
     assert "keeper_capabilities" in context.previous_rejection
-    assert await plan_store.load(original.room_id, original.client_action_id) is not None
+    assert (
+        await plan_store.load(original.room_id, original.client_action_id) is not None
+    )
     assert engine_store.inspect_domain_events(original.room_id) == ()
 
 
@@ -1878,7 +1949,9 @@ async def test_single_action_repair_budget_is_finite() -> None:
     assert result.run.status == "needs_clarification"
     assert result.run.steps[0].safe_failure_code == "REPAIR_BUDGET_EXHAUSTED"
     assert len(repair_adjudicator.contexts) == 1
-    assert await plan_store.load(original.room_id, original.client_action_id) is not None
+    assert (
+        await plan_store.load(original.room_id, original.client_action_id) is not None
+    )
     assert engine_store.inspect_domain_events(original.room_id) == ()
 
 
@@ -1915,11 +1988,15 @@ async def test_single_action_non_repairable_feedback_does_not_call_agent(
 
     assert isinstance(result, ActionPlanAdvanceResult)
     assert result.run.status == (
-        "needs_clarification" if repairability == "requires_player_choice" else "stopped"
+        "needs_clarification"
+        if repairability == "requires_player_choice"
+        else "stopped"
     )
     assert result.run.steps[0].safe_failure_code == "TEST_VALIDATION_REJECTION"
     assert repair_adjudicator.contexts == []
-    assert await plan_store.load(original.room_id, original.client_action_id) is not None
+    assert (
+        await plan_store.load(original.room_id, original.client_action_id) is not None
+    )
     assert engine_store.inspect_domain_events(original.room_id) == ()
 
 
@@ -1953,7 +2030,9 @@ async def test_single_action_reconciles_commit_response_failure_without_repair()
     assert isinstance(result, ActionPlanAdvanceResult)
     assert result.run.status == "awaiting_narration"
     assert result.latest_execution is not None
-    assert result.latest_execution.action_request_id == result.run.steps[0].step_request_id
+    assert (
+        result.latest_execution.action_request_id == result.run.steps[0].step_request_id
+    )
     assert repair_adjudicator.contexts == []
     assert len(engine_store.inspect_domain_events(original.room_id)) == 1
 
@@ -2276,8 +2355,6 @@ async def test_progress_delivery_failure_does_not_change_authoritative_execution
     assert result.run.status == "awaiting_narration"
     assert result.run.completed_steps == 2
     assert len(engine_store.inspect_domain_events("room_01")) == 2
-
-
 
 
 class SleepAfterTravelAdjudicator:

@@ -67,6 +67,7 @@ from collaboration_framework.host.schemas import (
     ActionPlanAdvanceResult,
     ActionPlanNarrationContext,
     ActionPlanNarrationOutput,
+    ActionPlanNpcReply,
     ActionPlanRun,
     ActionPlanStepContext,
     CompletedPlanStepSummary,
@@ -1721,6 +1722,29 @@ class ActionPlanTurnApplication:
                     path="model",
                     duration_ms=int((time.monotonic() - started_at) * 1000),
                 )
+                if context.player_input.interlocutor_id and not narration.npc_replies:
+                    # 结构化 @NPC 必须至少产生一条独立 NPC 气泡；模型只返回守秘人正文
+                    # 时使用安全的最小兜底，不改变 Engine 裁决结果，也不伪造 NPC 事实。
+                    npc = next(
+                        (
+                            entity
+                            for entity in context.player_view.scene.visible_entities
+                            if entity.id == context.player_input.interlocutor_id
+                            and entity.kind == "npc"
+                        ),
+                        None,
+                    )
+                    if npc is not None:
+                        narration = narration.model_copy(
+                            update={
+                                "npc_replies": (
+                                    ActionPlanNpcReply(
+                                        speaker_id=npc.id,
+                                        text="我听见了你的话。",
+                                    ),
+                                )
+                            }
+                        )
                 return narration
             except ActionPlanNarrationValidationError as exc:
                 # 只记录校验类别和权威结果，不记录模型正文或其他敏感上下文。

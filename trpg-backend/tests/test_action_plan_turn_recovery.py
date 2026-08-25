@@ -338,7 +338,7 @@ async def test_narration_retries_atmosphere_repeat_with_hint() -> None:
 
     assert narrate.await_count == 2
     retry_context = narrate.await_args_list[1].args[0]
-    assert "不得用相同或几乎相同的环境开场" in retry_context.narration_retry_hint
+    assert "不得再用午后阳光、夜色、窗景等环境开场重铺" in retry_context.narration_retry_hint
     assert narration.kind == "narration"
     assert "这次行动已经按当前可确认的结果完成" in narration.text
 

@@ -1,15 +1,14 @@
-"""NPC 场景对话应用服务：构造玩家安全上下文、调用 Host 并持久化冻结受众事件。"""
+"""NPC 场景对话事件服务：冻结受众、持久化玩家原话和 NPC 回放。"""
 
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from math import ceil
-from typing import Protocol
 
 from collaboration_framework.contracts import JsonObject, PlayerView, VisibleEntity
 from pydantic import BaseModel, Field, ValidationError, model_validator
-from sqlalchemy import and_, or_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapters.openai_models import StructuredJsonClient
@@ -18,7 +17,6 @@ from app.core.config import (
     Settings,
     get_settings,
     model_client_retry_policy,
-    secret_value,
 )
 from app.dto.ws import DialogueNpcPayload, DialoguePlayerPayload
 from app.models.content import ModuleAsset
@@ -85,10 +83,6 @@ class NpcDialogueContext(BaseModel):
     allowed_responders: tuple[NpcPublicSnapshot, ...]
     recent_dialogue: tuple[RecentDialogueItem, ...] = ()
     utterance: str
-
-
-class NpcDialogueModel(Protocol):
-    async def generate(self, context: NpcDialogueContext) -> NpcDialogueOutput: ...
 
 
 class FakeNpcDialogueModel:
@@ -180,115 +174,10 @@ def require_dialogue_npc(view: PlayerView, entity_id: str) -> VisibleEntity:
 
 
 class NpcDialogueService:
-    """协调近期窗口、模型生成与 Event/Audience 原子写入。"""
+    """只负责 NPC 对话事件的持久化、受众冻结和回放恢复。"""
 
-    def __init__(self, model: NpcDialogueModel, *, lease_seconds: int = 180) -> None:
-        self._model = model
+    def __init__(self, *, lease_seconds: int = 180) -> None:
         self.lease_seconds = max(180, lease_seconds)
-
-    async def recent_dialogue(
-        self,
-        db: AsyncSession,
-        *,
-        room_id: str,
-        player_id: str,
-        npc_id: str,
-    ) -> tuple[RecentDialogueItem, ...]:
-        """只读取冻结受众内涉及指定 NPC 的最近八条对话。"""
-
-        rows = (
-            await db.scalars(
-                select(Event)
-                .outerjoin(EventAudience, EventAudience.event_id == Event.id)
-                .where(
-                    Event.room_id == room_id,
-                    Event.event_type.in_(("dialogue.player", "dialogue.npc")),
-                    or_(
-                        Event.visibility == "public",
-                        and_(
-                            Event.visibility == "player_scoped",
-                            Event.player_id == player_id,
-                        ),
-                        and_(
-                            Event.visibility == "scene_scoped",
-                            EventAudience.player_id == player_id,
-                        ),
-                    ),
-                )
-                .order_by(Event.created_at.desc(), Event.id.desc())
-                .limit(64)
-            )
-        ).all()
-        result: list[RecentDialogueItem] = []
-        for event in rows:
-            participant_ids = event.payload.get("participantIds", ())
-            if npc_id not in participant_ids:
-                continue
-            result.append(
-                RecentDialogueItem(
-                    speaker_id=str(event.payload.get("speakerId", "unknown")),
-                    speaker_name=str(
-                        event.payload.get("speakerName")
-                        or event.payload.get("characterName")
-                        or "玩家"
-                    ),
-                    text=str(event.payload.get("text") or event.payload.get("utterance") or ""),
-                )
-            )
-            if len(result) == 8:
-                break
-        return tuple(reversed(result))
-
-    async def generate(
-        self,
-        db: AsyncSession,
-        *,
-        view: PlayerView,
-        player_id: str,
-        utterance: str,
-        interlocutor_id: str,
-    ) -> NpcDialogueOutput:
-        """构造最小玩家安全上下文，并校验模型不能越权添加说话者。"""
-
-        responders = visible_dialogue_npcs(view)
-        require_dialogue_npc(view, interlocutor_id)
-        context = NpcDialogueContext(
-            room_id=view.room_id,
-            player_id=player_id,
-            actor_id=view.self_actor.id,
-            actor_name=view.self_actor.name,
-            actor_public_status=view.self_actor.public_status_summary,
-            scene_id=view.scene.id,
-            scene_name=view.scene.name,
-            scene_description=view.scene.description,
-            interlocutor_id=interlocutor_id,
-            allowed_responders=tuple(
-                NpcPublicSnapshot(
-                    id=item.id,
-                    name=item.name,
-                    aliases=item.aliases,
-                    description=item.description,
-                    observable_state=tuple(
-                        state.model_dump(mode="json") for state in item.observable_state
-                    ),
-                )
-                for item in responders
-            ),
-            recent_dialogue=await self.recent_dialogue(
-                db,
-                room_id=view.room_id,
-                player_id=player_id,
-                npc_id=interlocutor_id,
-            ),
-            utterance=utterance,
-        )
-        output = await self._model.generate(context)
-        allowed_ids = {item.id for item in responders}
-        if output.npc_messages[0].speaker_id != interlocutor_id:
-            raise ValueError("主要 NPC 必须第一条回复")
-        if any(item.speaker_id not in allowed_ids for item in output.npc_messages):
-            raise ValueError("NPC 模型返回了场景外说话者")
-        return output
 
     async def portrait_url(
         self,
@@ -375,6 +264,75 @@ class NpcDialogueService:
         await db.refresh(event)
         return event
 
+    async def persist_player_dialogue(
+        self,
+        db: AsyncSession,
+        *,
+        view: PlayerView,
+        player_id: str,
+        actor_id: str,
+        client_action_id: str,
+        utterance: str,
+        interlocutor_id: str,
+        audience_player_ids: tuple[str, ...],
+        nickname: str,
+    ) -> Event:
+        """把 @NPC 的原话落成 dialogue.player；回放时仍按冻结受众恢复。"""
+
+        correlation = f"{client_action_id}:player"
+        existing = await db.scalar(
+            select(Event).where(
+                Event.room_id == view.room_id,
+                Event.event_type == "dialogue.player",
+                Event.correlation_id == correlation,
+            )
+        )
+        if existing is not None:
+            return existing
+        primary = require_dialogue_npc(view, interlocutor_id)
+        responders = visible_dialogue_npcs(view)
+        now = datetime.now(UTC)
+        event = Event(
+            id=str(uuid.uuid4()),
+            room_id=view.room_id,
+            player_id=player_id,
+            event_type="dialogue.player",
+            correlation_id=correlation,
+            visibility="scene_scoped",
+            actor_id=actor_id,
+            scene_id=view.scene.id,
+            view_revision=view.revision,
+            created_at=now,
+            payload={},
+        )
+        payload = DialoguePlayerPayload(
+            message_id=event.id,
+            player_id=player_id,
+            client_action_id=client_action_id,
+            nickname=nickname,
+            character_name=view.self_actor.name,
+            speaker_id=actor_id,
+            interlocutor_id=primary.id,
+            interlocutor_name=primary.name,
+            listener_ids=tuple(npc.id for npc in responders),
+            participant_ids=(actor_id, *(npc.id for npc in responders)),
+            allowed_responder_ids=tuple(npc.id for npc in responders),
+            utterance=utterance,
+            scene_id=view.scene.id,
+            source_revision=view.revision,
+            sent_at=now,
+            audience_player_ids=audience_player_ids,
+        )
+        event.payload = payload.model_dump(by_alias=True, mode="json")
+        db.add(event)
+        db.add_all(
+            EventAudience(event_id=event.id, player_id=target_id)
+            for target_id in audience_player_ids
+        )
+        await db.commit()
+        await db.refresh(event)
+        return event
+
     async def persist_replies(
         self,
         db: AsyncSession,
@@ -404,6 +362,9 @@ class NpcDialogueService:
             if existing is not None:
                 events.append(existing)
                 continue
+            # 同一批回复共享同一个事务时间窗，但重放时仍需要稳定顺序；因此在微秒级
+            # 递增 created_at/sent_at，避免多个事件完全同秒时只能退化到随机 UUID 排序。
+            sent_at = now + timedelta(microseconds=ordinal)
             event = Event(
                 id=str(uuid.uuid4()),
                 room_id=item.room_id,
@@ -414,7 +375,7 @@ class NpcDialogueService:
                 actor_id=message.speaker_id,
                 scene_id=view.scene.id,
                 view_revision=view.revision,
-                created_at=now,
+                created_at=sent_at,
                 payload={},
             )
             listeners = (
@@ -433,7 +394,7 @@ class NpcDialogueService:
                 source_action_id=item.client_action_id,
                 ordinal=ordinal,
                 source_revision=view.revision,
-                sent_at=now,
+                sent_at=sent_at,
                 audience_player_ids=audience_player_ids,
             )
             event.payload = payload.model_dump(by_alias=True, mode="json", exclude={"avatar_url"})
@@ -453,64 +414,102 @@ class NpcDialogueService:
         await db.commit()
         return tuple(events)
 
+    async def persist_scripted_replies(
+        self,
+        db: AsyncSession,
+        *,
+        room_id: str,
+        player_id: str,
+        client_action_id: str,
+        view: PlayerView,
+        source_dialogue_id: str,
+        audience_player_ids: tuple[str, ...],
+        audience_actor_ids: tuple[str, ...],
+        npc_messages: tuple[tuple[str, str], ...],
+    ) -> tuple[Event, ...]:
+        """把守秘人回合后的结构化 NPC 跟进发言复用成 dialogue.npc 事件。"""
+
+        names = {npc.id: npc.name for npc in visible_dialogue_npcs(view)}
+        responders = tuple(names)
+        events: list[Event] = []
+        now = datetime.now(UTC)
+        for ordinal, (speaker_id, text) in enumerate(npc_messages):
+            if speaker_id not in names:
+                # 只跳过这条越权回复，不把已经完成的守秘人结果回滚成失败。
+                continue
+            correlation = f"{client_action_id}:followup-npc:{ordinal}"
+            existing = await db.scalar(
+                select(Event).where(
+                    Event.room_id == room_id,
+                    Event.event_type == "dialogue.npc",
+                    Event.correlation_id == correlation,
+                )
+            )
+            if existing is not None:
+                events.append(existing)
+                continue
+            sent_at = now + timedelta(microseconds=ordinal)
+            event = Event(
+                id=str(uuid.uuid4()),
+                room_id=room_id,
+                player_id=player_id,
+                event_type="dialogue.npc",
+                correlation_id=correlation,
+                visibility="scene_scoped",
+                actor_id=speaker_id,
+                scene_id=view.scene.id,
+                view_revision=view.revision,
+                created_at=sent_at,
+                payload={},
+            )
+            listeners = (
+                *audience_actor_ids,
+                *(npc_id for npc_id in responders if npc_id != speaker_id),
+            )
+            payload = DialogueNpcPayload(
+                message_id=event.id,
+                speaker_id=speaker_id,
+                speaker_name=names[speaker_id],
+                listener_ids=listeners,
+                participant_ids=(speaker_id, *listeners),
+                text=text,
+                scene_id=view.scene.id,
+                source_dialogue_id=source_dialogue_id,
+                source_action_id=client_action_id,
+                ordinal=ordinal,
+                source_revision=view.revision,
+                sent_at=sent_at,
+                audience_player_ids=audience_player_ids,
+            )
+            event.payload = payload.model_dump(by_alias=True, mode="json", exclude={"avatar_url"})
+            db.add(event)
+            db.add_all(
+                EventAudience(event_id=event.id, player_id=target_id)
+                for target_id in audience_player_ids
+            )
+            events.append(event)
+        await db.commit()
+        return tuple(events)
+
 
 def build_npc_dialogue_service(settings: Settings | None = None) -> NpcDialogueService:
-    """按当前 Host provider 构造 NPC 对话服务，不增加独立 provider 配置。"""
+    """按当前 Host provider 计算 lease，但不再构造独立 NPC 生成模型。"""
 
     resolved = settings or get_settings()
-    if resolved.host_model_provider == "fake":
-        return NpcDialogueService(FakeNpcDialogueModel())
-
-    from app.adapters import (
-        DeepSeekChatCompletionsJsonClient,
-        OpenAIResponsesJsonClient,
-        QwenChatCompletionsJsonClient,
-    )
-
     if resolved.host_model_provider == "deepseek":
-        client_type = DeepSeekChatCompletionsJsonClient
-        api_key, base_url, model, timeout = (
-            resolved.deepseek_api_key,
-            resolved.deepseek_base_url,
-            resolved.deepseek_model,
-            resolved.deepseek_timeout_seconds,
-        )
+        timeout = resolved.deepseek_timeout_seconds
     elif resolved.host_model_provider == "qwen":
-        client_type = QwenChatCompletionsJsonClient
-        api_key, base_url, model, timeout = (
-            resolved.qwen_api_key,
-            resolved.qwen_base_url,
-            resolved.qwen_model,
-            resolved.qwen_timeout_seconds,
-        )
+        timeout = resolved.qwen_timeout_seconds
     else:
-        client_type = OpenAIResponsesJsonClient
-        api_key, base_url, model, timeout = (
-            resolved.openai_api_key,
-            resolved.openai_base_url,
-            resolved.openai_model,
-            resolved.openai_timeout_seconds,
-        )
-    if api_key is None:
-        raise ValueError("NPC 对话模型缺少 Host provider API key")
+        timeout = resolved.openai_timeout_seconds
     retry_policy = model_client_retry_policy(resolved)
-    client = client_type(
-        api_key=secret_value(api_key),
-        base_url=base_url,
-        model=model,
-        timeout_seconds=timeout,
-        retry_policy=retry_policy,
-    )
     # 一次生成最多包含“原请求 + 一次结构修复”；lease 必须覆盖两次请求各自的
     # 传输重试和指数退避，避免慢模型尚未返回就被其他 worker 重复领取。
     request_window = timeout * retry_policy.max_attempts + sum(
         retry_policy.delay_before(attempt) for attempt in range(1, retry_policy.max_attempts)
     )
     lease_seconds = ceil(request_window * 2 + 5)
-    return NpcDialogueService(
-        PromptNpcDialogueModel(client),
-        lease_seconds=lease_seconds,
-    )
+    return NpcDialogueService(lease_seconds=lease_seconds)
 
 
 npc_dialogue_service = build_npc_dialogue_service()

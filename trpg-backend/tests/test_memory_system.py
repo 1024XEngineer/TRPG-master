@@ -132,6 +132,7 @@ def test_narrator_context_serializes_memory_and_summary() -> None:
         epistemic_status="experienced",
         visibility="public",
         listener_ids=("thomas",),
+        audience_player_ids=("player-1",),
         source_event_id="event-1",
         source_sequence=1,
     )
@@ -147,6 +148,7 @@ def test_narrator_context_serializes_memory_and_summary() -> None:
     payload = context.to_json_dict()
     assert payload["memories"][0]["epistemic_status"] == "experienced"
     assert payload["memories"][0]["listener_ids"] == ["thomas"]
+    assert payload["memories"][0]["audience_player_ids"] == ["player-1"]
     assert payload["conversation_summary"]["player_id"] == "p1"
 
 
@@ -460,3 +462,59 @@ async def test_read_context_matches_multi_participant_json_array(
         location_id="current_scene",
     )
     assert any(entry.source_event_id == "multi-participant-event" for entry in context.entries)
+
+
+@pytest.mark.asyncio
+async def test_npc_context_respects_frozen_audience_and_keeper_does_not(
+    db_session: AsyncSession,
+    memory_store,
+) -> None:
+    """NPC 读取要按冻结受众收口，但 Keeper 仍能看到房间历史。"""
+
+    room, player, actor_id = await _create_memory_room(db_session, 20)
+    other_player = Player(id=str(uuid.uuid4()), room_id=room.id, nickname="旁观者")
+    db_session.add(other_player)
+    db_session.add(
+        MemoryEntryRecord(
+            room_id=room.id,
+            subject_id="caretaker",
+            kind="conversation",
+            content="我听到了那句测试短语。",
+            epistemic_status="experienced",
+            visibility="public",
+            participants=[actor_id, "caretaker"],
+            listener_ids=["caretaker"],
+            audience_player_ids=[player.id],
+            location_id="study",
+            source_event_id="audience-event",
+            source_sequence=1,
+            source_created_at=datetime.now(UTC),
+        )
+    )
+    await db_session.commit()
+
+    npc_context = await memory_store.read_npc_context(
+        room_id=room.id,
+        player_id=player.id,
+        actor_id=actor_id,
+        revision="1",
+        interlocutor_id="caretaker",
+    )
+    other_npc_context = await memory_store.read_npc_context(
+        room_id=room.id,
+        player_id=other_player.id,
+        actor_id=actor_id,
+        revision="1",
+        interlocutor_id="caretaker",
+    )
+    keeper_context = await memory_store.read_keeper_context(
+        room_id=room.id,
+        player_id=other_player.id,
+        actor_id=actor_id,
+        revision="1",
+        entity_ids=("caretaker",),
+    )
+
+    assert any(entry.source_event_id == "audience-event" for entry in npc_context.entries)
+    assert all(entry.source_event_id != "audience-event" for entry in other_npc_context.entries)
+    assert any(entry.source_event_id == "audience-event" for entry in keeper_context.entries)

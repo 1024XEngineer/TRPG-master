@@ -13,7 +13,8 @@ PREVIOUS_REVISION = "1a02058345ee"
 ENGINE_IDENTITY_PREVIOUS_REVISION = "9c4e7a2b1d6f"
 # PR2 NPC 对话迁移（d1e2f3a4b5c6）接在 PR1 输入路由 head 后面；#398 的检定唯一
 # 约束放宽（b8c9d0e1f2a3）再接在它之后，最后是模组快照的死字段剥离。
-HEAD_REVISION = "a2c5e8b1d3f4"
+# 记忆投影与时间点回填各自形成分支后，由空迁移重新汇合为单一 head。
+HEAD_REVISION = "b3d6f9a2c4e7"
 
 
 def _run_alembic(database: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -198,6 +199,7 @@ def test_migration_upgrades_empty_sqlite_and_round_trips(tmp_path: Path) -> None
     }.issubset(_column_names(database, "events"))
     assert ("room_id", "event_type", "correlation_id") in _unique_column_sets(database, "events")
     assert "source_created_at" in _column_names(database, "memory_entries")
+    assert "audience_player_ids" in _column_names(database, "memory_entries")
 
     downgrade = _run_alembic(database, "downgrade", PREVIOUS_REVISION)
     assert downgrade.returncode == 0, downgrade.stdout + downgrade.stderr

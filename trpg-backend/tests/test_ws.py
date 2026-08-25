@@ -93,6 +93,44 @@ class _WsFirstPersonThenSafeNarration:
         }
 
 
+class _WsNarrationWithNpcFollowup:
+    """守秘人先给权威叙事，再让当前场景 NPC 追加一条独立回复。"""
+
+    async def generate(self, context) -> JsonObject:
+        del context
+        return {
+            "kind": "narration",
+            "text": "你抬头看向托马斯。",
+            "claimed_evidence_refs": [],
+            "suggested_actions": [],
+            "npc_replies": [
+                {
+                    "speaker_id": "thomas",
+                    "text": "我记得这间屋子的每一道裂缝。",
+                }
+            ],
+        }
+
+
+class _WsNarrationWithInvalidNpcFollowup:
+    """模型若塞进场景外 speaker，守秘人结果仍然应该成功落地。"""
+
+    async def generate(self, context) -> JsonObject:
+        del context
+        return {
+            "kind": "narration",
+            "text": "你抬头看向托马斯。",
+            "claimed_evidence_refs": [],
+            "suggested_actions": [],
+            "npc_replies": [
+                {
+                    "speaker_id": "offscene-npc",
+                    "text": "这句不该被广播。",
+                }
+            ],
+        }
+
+
 class _WsMissingParticipantOpening:
     async def generate(self, context: OpeningNarrationContext) -> JsonObject:
         del context
@@ -301,14 +339,22 @@ def receive_replayed_opening(ws) -> dict:
     return opening
 
 
-def test_npc_recipient_uses_dialogue_path_without_engine_action(sync_client: TestClient) -> None:
-    """NPC 收到动作措辞也只回复对话，不进入 Keeper 的行动与检定链路。"""
+def test_npc_recipient_uses_main_host_chain_and_keeps_separate_bubbles(
+    sync_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """@NPC 仍走统一主持主链，但玩家原话和 NPC 回复要拆成独立气泡。"""
 
     token = register_and_login(sync_client, "npc-dialogue-host")
     room = create_room(sync_client, token)
     advance_to_building(sync_client, room)
     complete_character(sync_client, room["roomId"], room["reconnectToken"])
     start_game(sync_client, room, token)
+    monkeypatch.setattr(
+        ws_controller.action_plan_turn_application,
+        "_narrator",
+        ActionPlanNarrator(_WsNarrationWithNpcFollowup()),
+    )
 
     with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as websocket:
         websocket.send_json(
@@ -336,7 +382,9 @@ def test_npc_recipient_uses_dialogue_path_without_engine_action(sync_client: Tes
                 "playerId": room["playerId"],
                 "payload": {
                     "clientActionId": "npc-dialogue-action-1",
-                    "utterance": "我去地下室并使用侦查检查门，请你记住这句话。",
+                    "utterance": (
+                        "你私藏酒瓶是吧？如果你不告诉我关于道格拉斯的消息，我就不会放过你。"
+                    ),
                     "recipient": {
                         "kind": "npc",
                         "entityId": target["id"],
@@ -345,21 +393,24 @@ def test_npc_recipient_uses_dialogue_path_without_engine_action(sync_client: Tes
                 },
             }
         )
-        npc_reply, preceding = receive_until(
+        completed, before_completed = receive_until(
+            websocket,
+            lambda message: message.get("message_type") == "turn.completed",
+        )
+        npc_reply, seen = receive_until(
             websocket,
             lambda message: message.get("type") == "dialogue.npc",
         )
 
     player_dialogue = next(
-        message for message in preceding if message.get("type") == "dialogue.player"
+        message for message in before_completed if message.get("type") == "dialogue.player"
     )
     assert player_dialogue["payload"]["interlocutorId"] == target["id"]
+    assert completed["payload"]["narration"]["kind"] == "narration"
     assert npc_reply["payload"]["speakerId"] == target["id"]
-    assert not any(
-        message.get("type") in {"action.broadcast", "check.request", "check.result"}
-        or message.get("message_type") == "turn.completed"
-        for message in preceding
-    )
+    assert "action.broadcast" not in {message.get("type") for message in before_completed}
+    assert "check.request" not in {message.get("type") for message in before_completed}
+    assert "check.result" not in {message.get("type") for message in before_completed}
 
     conversation = sync_client.get(
         f"{ROOMS_BASE}/{room['roomId']}/conversation",
@@ -371,6 +422,61 @@ def test_npc_recipient_uses_dialogue_path_without_engine_action(sync_client: Tes
     assert "dialogue.npc" in event_types
     assert "action.broadcast" not in event_types
     assert "check.result" not in event_types
+
+
+def test_npc_mixed_input_requests_clarification(
+    sync_client: TestClient,
+) -> None:
+    """一句里同时塞对话和立即行动时，系统应该先要求拆句，而不是自动拆分执行。"""
+
+    token = register_and_login(sync_client, "npc-dialogue-mixed")
+    room = create_room(sync_client, token)
+    advance_to_building(sync_client, room)
+    complete_character(sync_client, room["roomId"], room["reconnectToken"])
+    start_game(sync_client, room, token)
+
+    with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as websocket:
+        websocket.send_json(
+            {
+                "type": "room.join",
+                "playerId": room["playerId"],
+                "payload": {"reconnectToken": room["reconnectToken"]},
+            }
+        )
+        websocket.receive_json()
+        view_event = websocket.receive_json()
+        assert view_event["type"] == "view.updated"
+        visible_npcs = [
+            entity
+            for entity in view_event["payload"]["playerView"]["scene"]["visible_entities"]
+            if entity["kind"] == "npc"
+        ]
+        assert visible_npcs, "内置模组开场必须至少有一名可见 NPC"
+        target = visible_npcs[0]
+        receive_replayed_opening(websocket)
+
+        websocket.send_json(
+            {
+                "type": "action.plan.submit",
+                "playerId": room["playerId"],
+                "payload": {
+                    "clientActionId": "npc-mixed-action-1",
+                    "utterance": "@守墓人 你先等一下，然后我去地下室撬门。",
+                    "recipient": {
+                        "kind": "npc",
+                        "entityId": target["id"],
+                        "explicit": True,
+                    },
+                },
+            }
+        )
+        completed, seen = receive_until(
+            websocket,
+            lambda message: message.get("message_type") == "turn.completed",
+        )
+
+    assert completed["payload"]["narration"]["kind"] == "clarification"
+    assert all(message.get("type") not in {"dialogue.player", "dialogue.npc"} for message in seen)
 
 
 def receive_narration_stream(ws, *, limit: int = 60) -> tuple[dict, list[dict]]:
@@ -1493,3 +1599,265 @@ def test_subject_ownership_failure_retries_before_publishing_narration(
     assert completed["payload"]["narration"]["text"] == "你带着托马斯进入墓地。"
     assert narration["payload"]["text"] == "你带着托马斯进入墓地。"
     assert all("我带着你们进入墓地" not in str(message) for message in seen)
+
+
+def test_keeper_turn_emits_followup_npc_dialogue_and_recovers_it(
+    sync_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """同回合里 narration.push 之后应继续发出独立的 dialogue.npc。"""
+
+    token = register_and_login(sync_client, "keeper_followup_dialogue")
+    room = create_room(sync_client, token)
+    advance_to_building(sync_client, room)
+    complete_character(sync_client, room["roomId"], room["reconnectToken"])
+    start_game(sync_client, room, token)
+    monkeypatch.setattr(
+        ws_controller.action_plan_turn_application,
+        "_narrator",
+        ActionPlanNarrator(_WsNarrationWithNpcFollowup()),
+    )
+    action_id = "keeper-followup-npc-411"
+
+    with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
+        ws.send_json(
+            {
+                "type": "room.join",
+                "playerId": room["playerId"],
+                "payload": {"reconnectToken": room["reconnectToken"]},
+            }
+        )
+        ws.receive_json()
+        ws.receive_json()
+        receive_replayed_opening(ws)
+        ws.send_json(
+            {
+                "type": "action.plan.submit",
+                "playerId": room["playerId"],
+                "payload": {
+                    "clientActionId": action_id,
+                    "utterance": "我看看托马斯",
+                    "recipient": {"kind": "keeper", "entityId": None, "explicit": True},
+                },
+            }
+        )
+        completed, _ = receive_until(
+            ws,
+            lambda message: message.get("message_type") == "turn.completed",
+            limit=40,
+        )
+        dialogue, seen = receive_until(
+            ws,
+            lambda message: message.get("type") == "dialogue.npc",
+            limit=30,
+        )
+
+        ws.send_json(
+            {
+                "type": "action.plan.submit",
+                "playerId": room["playerId"],
+                "payload": {
+                    "clientActionId": action_id,
+                    "utterance": "我看看托马斯",
+                    "recipient": {"kind": "keeper", "entityId": None, "explicit": True},
+                },
+            }
+        )
+        retried_completed, _ = receive_until(
+            ws,
+            lambda message: message.get("message_type") == "turn.completed",
+            limit=20,
+        )
+        retried_dialogue, retried_seen = receive_until(
+            ws,
+            lambda message: message.get("type") == "dialogue.npc",
+            limit=20,
+        )
+
+    event_types = [message.get("type") for message in seen if message.get("type")]
+    retried_event_types = [message.get("type") for message in retried_seen if message.get("type")]
+    assert completed["payload"]["narration"]["text"] == "你抬头看向托马斯。"
+    assert dialogue["payload"]["speakerId"] == "thomas"
+    assert dialogue["payload"]["text"] == "我记得这间屋子的每一道裂缝。"
+    assert event_types.index("narration.push") < event_types.index("dialogue.npc")
+    assert retried_completed["payload"]["narration"] == completed["payload"]["narration"]
+    assert retried_dialogue["payload"] == dialogue["payload"]
+    assert retried_event_types.index("narration.push") < retried_event_types.index("dialogue.npc")
+
+    conversation = sync_client.get(
+        f"{ROOMS_BASE}/{room['roomId']}/conversation",
+        headers={"X-Reconnect-Token": room["reconnectToken"]},
+    )
+    assert conversation.status_code == 200
+    persisted = [
+        event
+        for event in conversation.json()["data"]
+        if event["type"] == "dialogue.npc" and event["payload"].get("sourceActionId") == action_id
+    ]
+    assert len(persisted) == 1
+    assert persisted[0]["payload"]["speakerId"] == "thomas"
+
+
+def test_keeper_turn_recovers_followup_npc_dialogue_from_completion_metadata(
+    sync_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """即使首次回合的 follow-up 还没落库，重发同一动作也应能从完成元数据补回。"""
+
+    token = register_and_login(sync_client, "keeper_followup_metadata_recovery")
+    room = create_room(sync_client, token)
+    advance_to_building(sync_client, room)
+    complete_character(sync_client, room["roomId"], room["reconnectToken"])
+    start_game(sync_client, room, token)
+    monkeypatch.setattr(
+        ws_controller.action_plan_turn_application,
+        "_narrator",
+        ActionPlanNarrator(_WsNarrationWithNpcFollowup()),
+    )
+
+    async def _skip_followup(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(ws_controller, "_emit_keeper_followup_dialogue", _skip_followup)
+    action_id = "keeper-followup-metadata-412"
+
+    with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
+        ws.send_json(
+            {
+                "type": "room.join",
+                "playerId": room["playerId"],
+                "payload": {"reconnectToken": room["reconnectToken"]},
+            }
+        )
+        ws.receive_json()
+        ws.receive_json()
+        receive_replayed_opening(ws)
+        ws.send_json(
+            {
+                "type": "action.plan.submit",
+                "playerId": room["playerId"],
+                "payload": {
+                    "clientActionId": action_id,
+                    "utterance": "我看看托马斯",
+                    "recipient": {"kind": "keeper", "entityId": None, "explicit": True},
+                },
+            }
+        )
+        completed, seen = receive_until(
+            ws,
+            lambda message: message.get("message_type") == "turn.completed",
+            limit=40,
+        )
+        narration, _ = receive_until(
+            ws,
+            lambda message: message.get("type") == "narration.push",
+            limit=20,
+        )
+        assert completed["payload"]["narration"]["text"] == "你抬头看向托马斯。"
+        assert narration["payload"]["text"] == "你抬头看向托马斯。"
+        assert all(message.get("type") != "dialogue.npc" for message in seen)
+
+    with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
+        ws.send_json(
+            {
+                "type": "room.join",
+                "playerId": room["playerId"],
+                "payload": {"reconnectToken": room["reconnectToken"]},
+            }
+        )
+        ws.receive_json()
+        ws.receive_json()
+        receive_replayed_opening(ws)
+        ws.send_json(
+            {
+                "type": "action.plan.submit",
+                "playerId": room["playerId"],
+                "payload": {
+                    "clientActionId": action_id,
+                    "utterance": "我看看托马斯",
+                    "recipient": {"kind": "keeper", "entityId": None, "explicit": True},
+                },
+            }
+        )
+        recovered_completed, recovered_seen = receive_until(
+            ws,
+            lambda message: message.get("message_type") == "turn.completed",
+            limit=40,
+        )
+        recovered_dialogue, recovered_seen = receive_until(
+            ws,
+            lambda message: message.get("type") == "dialogue.npc",
+            limit=40,
+        )
+
+    assert recovered_completed["payload"]["narration"] == completed["payload"]["narration"]
+    assert recovered_dialogue["payload"]["speakerId"] == "thomas"
+    assert recovered_dialogue["payload"]["text"] == "我记得这间屋子的每一道裂缝。"
+    assert "dialogue.npc" not in {message.get("type") for message in recovered_seen[:-1]}
+
+
+def test_keeper_turn_ignores_invalid_followup_npc_speaker(
+    sync_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """越权 speaker 只丢弃 NPC 跟进，不影响守秘人主回复。"""
+
+    token = register_and_login(sync_client, "keeper_followup_invalid")
+    room = create_room(sync_client, token)
+    advance_to_building(sync_client, room)
+    complete_character(sync_client, room["roomId"], room["reconnectToken"])
+    start_game(sync_client, room, token)
+    monkeypatch.setattr(
+        ws_controller.action_plan_turn_application,
+        "_narrator",
+        ActionPlanNarrator(_WsNarrationWithInvalidNpcFollowup()),
+    )
+
+    with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
+        ws.send_json(
+            {
+                "type": "room.join",
+                "playerId": room["playerId"],
+                "payload": {"reconnectToken": room["reconnectToken"]},
+            }
+        )
+        ws.receive_json()
+        ws.receive_json()
+        receive_replayed_opening(ws)
+        ws.send_json(
+            {
+                "type": "action.plan.submit",
+                "playerId": room["playerId"],
+                "payload": {
+                    "clientActionId": "keeper-followup-invalid-412",
+                    "utterance": "我看看托马斯",
+                    "recipient": {"kind": "keeper", "entityId": None, "explicit": True},
+                },
+            }
+        )
+        completed, _ = receive_until(
+            ws,
+            lambda message: message.get("message_type") == "turn.completed",
+            limit=40,
+        )
+        narration, seen = receive_until(
+            ws,
+            lambda message: message.get("type") == "narration.push",
+            limit=20,
+        )
+
+    assert completed["payload"]["narration"]["text"] == "你抬头看向托马斯。"
+    assert narration["payload"]["text"] == "你抬头看向托马斯。"
+    assert all(message.get("type") != "dialogue.npc" for message in seen)
+
+    conversation = sync_client.get(
+        f"{ROOMS_BASE}/{room['roomId']}/conversation",
+        headers={"X-Reconnect-Token": room["reconnectToken"]},
+    )
+    assert conversation.status_code == 200
+    assert not [
+        event
+        for event in conversation.json()["data"]
+        if event["type"] == "dialogue.npc"
+        and event["payload"].get("sourceActionId") == "keeper-followup-invalid-412"
+    ]

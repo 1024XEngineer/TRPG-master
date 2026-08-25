@@ -10,12 +10,22 @@ from collaboration_framework.contracts import (
     ActionAdjudication,
     ActionMethod,
     ActionTarget,
+    CheckDecisionRequest,
     EnterLocationEffect,
     NoAdjudicationCheck,
+    PostRollDecisionRequest,
+    RequiredAdjudicationCheck,
+    SelectCheckChoice,
+    SkillCheckCandidate,
     SubmitAdjudicationRequest,
 )
 from collaboration_framework.contracts.validation import AdjudicationValidationError
-from collaboration_framework.engine import AdjudicationEngineService, GameState
+from collaboration_framework.engine import (
+    AdjudicationEngineService,
+    DiceRoller,
+    GameState,
+    SequenceDiceSource,
+)
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,6 +33,7 @@ from app.dto.ws import SceneTransitionPendingPayload, SceneTransitionResolvedPay
 from app.main import app
 from app.models.engine import GameSession, SceneTransitionProposalRecord
 from app.service import scene_transition
+from app.service.time_advance import ConsentAwareAdjudicationEngine
 from tests.test_engine_runtime import _start_room
 
 
@@ -506,3 +517,272 @@ async def test_initiator_abort_rejects_pending_scene_and_blocks_later_accept(
     refreshed = await db_session.get(GameSession, room.id)
     assert refreshed is not None
     assert GameState.model_validate(refreshed.state_json).scene_id == initial_scene
+
+
+def _checked_request(
+    *,
+    room_id: str,
+    player_id: str,
+    revision: int,
+    action_id: str,
+) -> SubmitAdjudicationRequest:
+    return SubmitAdjudicationRequest(
+        room_id=room_id,
+        player_id=player_id,
+        adjudication=ActionAdjudication(
+            request_id=action_id,
+            source_revision=str(revision),
+            actor_id="actor_1",
+            summary="撬开门锁进入公共墓地",
+            target=ActionTarget(kind="location", id="cemetery"),
+            method=ActionMethod(family="travel", description="撬开门锁进入公共墓地"),
+            check=RequiredAdjudicationCheck(
+                candidates=(
+                    SkillCheckCandidate(
+                        candidate_id="brawl",
+                        skill_id="fighting-brawl",
+                        difficulty="regular",
+                        method_summary="撬开门锁",
+                        player_safe_reason="进入前需要通过检定",
+                    ),
+                )
+            ),
+            success_effects=(EnterLocationEffect(location_id="cemetery"),),
+        ),
+    )
+
+
+async def _roll_checked_transition(
+    *,
+    db_session: AsyncSession,
+    engine_store_factory,
+    dice: int,
+    room_number: int,
+    action_id: str,
+):
+    room, players, _ = await _start_room(
+        db_session,
+        room_number=room_number,
+        player_count=2,
+        prepare_checkpoint=False,
+    )
+    session = await db_session.get(GameSession, room.id)
+    assert session is not None
+    wrapper = ConsentAwareAdjudicationEngine(
+        AdjudicationEngineService(
+            engine_store_factory(),
+            dice=DiceRoller(SequenceDiceSource([dice])),
+        ),
+        app.state.test_session_factory,
+    )
+    request = _checked_request(
+        room_id=room.id,
+        player_id=players[0].id,
+        revision=session.state_version,
+        action_id=action_id,
+    )
+    initial_scene = GameState.model_validate(session.state_json).scene_id
+    pending = await wrapper.submit(request)
+    assert pending.status == "awaiting_skill_choice"
+    assert pending.pending_decision is not None
+    await db_session.refresh(session)
+    assert GameState.model_validate(session.state_json).scene_id == initial_scene
+    execution = await wrapper.decide(
+        CheckDecisionRequest(
+            request_id=f"{action_id}-choice",
+            room_id=room.id,
+            player_id=players[0].id,
+            source_revision=pending.view_revision,
+            decision_id=pending.pending_decision.decision_id,
+            decision_version=pending.pending_decision.decision_version,
+            choice=SelectCheckChoice(candidate_id="brawl"),
+        )
+    )
+    if execution.status == "awaiting_post_roll_decision":
+        assert execution.check_run is not None
+        execution = await wrapper.decide_post_roll(
+            PostRollDecisionRequest(
+                request_id=f"{action_id}-accept",
+                room_id=room.id,
+                player_id=players[0].id,
+                source_revision=execution.view_revision,
+                check_id=execution.check_run.check_id,
+                check_version=execution.check_run.version,
+                option_id="accept-current",
+            )
+        )
+    await db_session.refresh(session)
+    return room, players, session, wrapper, execution, initial_scene
+
+
+@pytest.mark.asyncio
+async def test_checked_scene_transition_waits_for_roll_not_consent(
+    db_session: AsyncSession,
+    engine_store_factory,
+) -> None:
+    room, players, _ = await _start_room(
+        db_session,
+        room_number=4391,
+        player_count=2,
+        prepare_checkpoint=False,
+    )
+    session = await db_session.get(GameSession, room.id)
+    assert session is not None
+    engine = AdjudicationEngineService(engine_store_factory())
+    request = _checked_request(
+        room_id=room.id,
+        player_id=players[0].id,
+        revision=session.state_version,
+        action_id="scene-check-submit-439",
+    )
+
+    initial_scene = GameState.model_validate(session.state_json).scene_id
+    pending = await engine.submit(request)
+    assert pending.status == "awaiting_skill_choice"
+    assert await scene_transition.get_pending(db_session, room.id) is None
+    await db_session.refresh(session)
+    assert GameState.model_validate(session.state_json).scene_id == initial_scene
+
+
+@pytest.mark.asyncio
+async def test_checked_scene_transition_failure_skips_consent(
+    db_session: AsyncSession,
+    engine_store_factory,
+) -> None:
+    room, players, session, _, execution, initial_scene = await _roll_checked_transition(
+        db_session=db_session,
+        engine_store_factory=engine_store_factory,
+        dice=100,
+        room_number=4392,
+        action_id="scene-check-fail-439",
+    )
+    assert execution.status == "resolved"
+    assert execution.outcome == "failure"
+    assert await scene_transition.get_pending(db_session, room.id) is None
+    assert GameState.model_validate(session.state_json).scene_id == initial_scene
+
+
+@pytest.mark.asyncio
+async def test_checked_scene_transition_success_opens_consent_then_commits(
+    db_session: AsyncSession,
+    engine_store_factory,
+) -> None:
+    room, players, session, wrapper, execution, initial_scene = await _roll_checked_transition(
+        db_session=db_session,
+        engine_store_factory=engine_store_factory,
+        dice=1,
+        room_number=4393,
+        action_id="scene-check-pass-439",
+    )
+    assert execution.status == "awaiting_scene_consent"
+    assert execution.check_run is not None
+    pending = await scene_transition.get_pending(db_session, room.id)
+    assert isinstance(pending, SceneTransitionPendingPayload)
+    assert GameState.model_validate(session.state_json).scene_id == initial_scene
+
+    resolved, resume_player, action_id = await scene_transition.respond(
+        db_session,
+        engine=wrapper,
+        room_id=room.id,
+        player_id=players[1].id,
+        proposal_id=pending.proposal_id,
+        proposal_version=pending.proposal_version,
+        source_revision=pending.source_revision,
+        accept=True,
+    )
+    assert isinstance(resolved, SceneTransitionResolvedPayload)
+    assert resolved.status == "approved"
+    assert resume_player == players[0].id
+    assert action_id == "scene-check-pass-439"
+    await db_session.refresh(session)
+    assert GameState.model_validate(session.state_json).scene_id == "cemetery"
+
+
+@pytest.mark.asyncio
+async def test_checked_scene_transition_reject_keeps_check_without_moving(
+    db_session: AsyncSession,
+    engine_store_factory,
+) -> None:
+    room, players, session, wrapper, execution, initial_scene = await _roll_checked_transition(
+        db_session=db_session,
+        engine_store_factory=engine_store_factory,
+        dice=1,
+        room_number=4394,
+        action_id="scene-check-reject-439",
+    )
+    pending = await scene_transition.get_pending(db_session, room.id)
+    assert isinstance(pending, SceneTransitionPendingPayload)
+    resolved, _, _ = await scene_transition.respond(
+        db_session,
+        engine=wrapper,
+        room_id=room.id,
+        player_id=players[1].id,
+        proposal_id=pending.proposal_id,
+        proposal_version=pending.proposal_version,
+        source_revision=pending.source_revision,
+        accept=False,
+    )
+    assert isinstance(resolved, SceneTransitionResolvedPayload)
+    assert resolved.status == "rejected"
+    await db_session.refresh(session)
+    assert GameState.model_validate(session.state_json).scene_id == initial_scene
+    assert execution.check_run is not None
+
+
+@pytest.mark.asyncio
+async def test_single_player_checked_scene_transition_commits_without_consent(
+    db_session: AsyncSession,
+    engine_store_factory,
+) -> None:
+    room, players, _ = await _start_room(
+        db_session,
+        room_number=4395,
+        player_count=1,
+        prepare_checkpoint=False,
+    )
+    session = await db_session.get(GameSession, room.id)
+    assert session is not None
+    wrapper = ConsentAwareAdjudicationEngine(
+        AdjudicationEngineService(
+            engine_store_factory(),
+            dice=DiceRoller(SequenceDiceSource([1])),
+        ),
+        app.state.test_session_factory,
+    )
+    request = _checked_request(
+        room_id=room.id,
+        player_id=players[0].id,
+        revision=session.state_version,
+        action_id="scene-check-solo-439",
+    )
+    pending = await wrapper.submit(request)
+    assert pending.pending_decision is not None
+    execution = await wrapper.decide(
+        CheckDecisionRequest(
+            request_id="scene-check-solo-439-choice",
+            room_id=room.id,
+            player_id=players[0].id,
+            source_revision=pending.view_revision,
+            decision_id=pending.pending_decision.decision_id,
+            decision_version=pending.pending_decision.decision_version,
+            choice=SelectCheckChoice(candidate_id="brawl"),
+        )
+    )
+    if execution.status == "awaiting_post_roll_decision":
+        assert execution.check_run is not None
+        execution = await wrapper.decide_post_roll(
+            PostRollDecisionRequest(
+                request_id="scene-check-solo-439-accept",
+                room_id=room.id,
+                player_id=players[0].id,
+                source_revision=execution.view_revision,
+                check_id=execution.check_run.check_id,
+                check_version=execution.check_run.version,
+                option_id="accept-current",
+            )
+        )
+    assert execution.status == "resolved"
+    assert execution.outcome == "success"
+    assert await scene_transition.get_pending(db_session, room.id) is None
+    await db_session.refresh(session)
+    assert GameState.model_validate(session.state_json).scene_id == "cemetery"

@@ -239,6 +239,8 @@ class ActionPlanRun(ContractModel):
     plan_id: str = Field(min_length=1, max_length=100)
     parent_action_id: str = Field(min_length=1, max_length=200)
     parent_input_fingerprint: str = Field(min_length=64, max_length=64)
+    parent_interlocutor_id: str | None = Field(default=None, min_length=1)
+    parent_interlocutor_name: str | None = Field(default=None, min_length=1)
     # The verbatim utterance the fingerprint above was computed from. Needed to
     # rebuild a fingerprint-matching PlayerInput on resume: `plan.goal` is a
     # model-authored paraphrase and is not guaranteed to match the original
@@ -509,8 +511,30 @@ class ActionPlanNarrationContext(ContractModel):
         return self
 
 
+class ActionPlanNpcReply(ContractModel):
+    """同回合中由守秘人编排出的单条 NPC 跟进发言。"""
+
+    speaker_id: str = Field(min_length=1)
+    text: str = Field(min_length=1, max_length=1000)
+
+
 class ActionPlanNarrationOutput(ContractModel):
+    """守秘人叙事输出：主 narration 可附带少量结构化 NPC 跟进发言。"""
+
     kind: Literal["narration", "clarification"] = "narration"
     text: str = Field(min_length=1)
     claimed_evidence_refs: tuple[str, ...] = ()
     suggested_actions: tuple[str, ...] = Field(default=(), max_length=3)
+    # 同回合最多跟进 3 条 NPC 发言；超出部分由 schema 直接拒绝，避免前后端排序复杂化。
+    npc_replies: tuple[ActionPlanNpcReply, ...] = Field(default=(), max_length=3)
+
+    @model_validator(mode="after")
+    def validate_npc_replies(self) -> ActionPlanNarrationOutput:
+        """限制跟进 NPC 发言的总预算，并阻止同一回合同一 NPC 重复开口。"""
+
+        if sum(len(item.text) for item in self.npc_replies) > 2400:
+            raise ValueError("npc_replies 总长度不能超过 2400 字")
+        speaker_ids = [item.speaker_id for item in self.npc_replies]
+        if len(speaker_ids) != len(set(speaker_ids)):
+            raise ValueError("npc_replies 不允许重复 speaker_id")
+        return self

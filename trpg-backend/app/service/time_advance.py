@@ -20,6 +20,7 @@ from collaboration_framework.contracts import (
     AdjudicationStatusView,
     AdvanceWorldTimeEffect,
     ContractError,
+    EnterLocationEffect,
     GetAdjudicationStatusRequest,
     ModuleContentV3,
     SubmitAdjudicationRequest,
@@ -774,15 +775,85 @@ class ConsentAwareAdjudicationEngine:
             consent_player_ids=consent_player_ids,
         )
 
-    async def decide(self, request):  # noqa: ANN001, ANN201
-        """检定决策不属于时间确认，原样交给 Engine。"""
+    async def submit_with_time_consent(
+        self,
+        request: SubmitAdjudicationRequest,
+        *,
+        consent_player_ids: tuple[str, ...],
+    ) -> AdjudicationExecution:
+        return await self._engine.submit_with_time_consent(
+            request,
+            consent_player_ids=consent_player_ids,
+        )
 
-        return await self._engine.decide(request)
+    async def decide(self, request):  # noqa: ANN001, ANN201
+        """检定结算后，若成功效果含未提交的场景切换，再开全员确认。"""
+
+        execution = await self._engine.decide(request)
+        return await self._open_scene_consent_after_check(
+            execution,
+            room_id=request.room_id,
+            player_id=request.player_id,
+        )
 
     async def decide_post_roll(self, request):  # noqa: ANN001, ANN201
-        """检定后决策不属于时间确认，原样交给 Engine。"""
+        """奖惩骰结算后同样检查是否还需要场景确认。"""
 
-        return await self._engine.decide_post_roll(request)
+        execution = await self._engine.decide_post_roll(request)
+        return await self._open_scene_consent_after_check(
+            execution,
+            room_id=request.room_id,
+            player_id=request.player_id,
+        )
+
+    async def load_action_adjudication(
+        self,
+        *,
+        room_id: str,
+        action_request_id: str,
+    ) -> ActionAdjudication | None:
+        return await self._engine.load_action_adjudication(
+            room_id=room_id,
+            action_request_id=action_request_id,
+        )
+
+    async def _open_scene_consent_after_check(
+        self,
+        execution: AdjudicationExecution,
+        *,
+        room_id: str,
+        player_id: str,
+    ) -> AdjudicationExecution:
+        if execution.outcome != "success" or execution.status != "resolved":
+            return execution
+        adjudication = await self._engine.load_action_adjudication(
+            room_id=room_id,
+            action_request_id=execution.action_request_id,
+        )
+        if adjudication is None or not any(
+            isinstance(effect, EnterLocationEffect) for effect in adjudication.success_effects
+        ):
+            return execution
+        from app.service import scene_transition
+
+        async with self._session_factory() as db:
+            try:
+                waiting = await scene_transition.create_from_adjudication(
+                    db,
+                    SubmitAdjudicationRequest(
+                        room_id=room_id,
+                        player_id=player_id,
+                        adjudication=adjudication,
+                    ),
+                )
+            except scene_transition.SceneTransitionError:
+                return execution
+        if waiting.check_run is None and execution.check_run is not None:
+            waiting = waiting.model_copy(
+                update={"check_run": execution.check_run},
+                deep=True,
+            )
+        return waiting
 
     async def abort_consent(
         self,

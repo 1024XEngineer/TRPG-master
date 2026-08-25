@@ -257,7 +257,7 @@ def test_single_player_action_chat_is_rejected(sync_client: TestClient) -> None:
 
 
 def test_npc_recipient_bypasses_keeper_processing(sync_client: TestClient) -> None:
-    """PR2 开放 NPC recipient，但仍不能误入 Keeper ActionPlan 主链。"""
+    """NPC 请求进入统一 Host 主链，但不能产生行动或检定副作用。"""
 
     token = register_and_login(sync_client, "npc_recipient_reject")
     room = create_room(sync_client, token, max_players=1)
@@ -283,9 +283,7 @@ def test_npc_recipient_bypasses_keeper_processing(sync_client: TestClient) -> No
     assert reply["payload"]["speakerId"] == "thomas"
     assert any(item.get("type") == "dialogue.player" for item in seen)
     assert not any(
-        item.get("type") in {"action.broadcast", "check.request", "check.result"}
-        or item.get("message_type") == "turn.completed"
-        for item in seen
+        item.get("type") in {"action.broadcast", "check.request", "check.result"} for item in seen
     )
 
 

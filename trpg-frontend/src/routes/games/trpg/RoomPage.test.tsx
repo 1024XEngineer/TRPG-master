@@ -752,7 +752,7 @@ describe('RoomPage conversation history', () => {
     fireEvent.submit(actionField.closest('form')!)
     await waitFor(() => expect(mockSubmitPlannedAction).toHaveBeenCalled())
     expect(mockSubmitPlannedAction.mock.calls[0][1]).toEqual(
-      expect.objectContaining({ utterance: '我搜查书桌' }),
+      expect.objectContaining({ utterance: '@主持人 我搜查书桌' }),
     )
 
     fireEvent.click(screen.getByRole('button', { name: '讨论区' }))
@@ -802,7 +802,7 @@ describe('RoomPage conversation history', () => {
     await waitFor(() => expect(mockSubmitPlannedAction).toHaveBeenCalledWith(
       'player-1',
       expect.objectContaining({
-        utterance: '我查看窗外',
+        utterance: '@守秘人 我查看窗外',
         recipient: { kind: 'keeper', entityId: null, explicit: true },
       }),
     ))
@@ -820,7 +820,7 @@ describe('RoomPage conversation history', () => {
     await waitFor(() => expect(mockSubmitPlannedAction).toHaveBeenCalledWith(
       'player-1',
       expect.objectContaining({
-        utterance: '我查看窗外',
+        utterance: '@守秘人：我查看窗外',
         recipient: { kind: 'keeper', entityId: null, explicit: true },
       }),
     ))
@@ -839,7 +839,7 @@ describe('RoomPage conversation history', () => {
     await waitFor(() => expect(mockSubmitPlannedAction).toHaveBeenCalledWith(
       'player-1',
       expect.objectContaining({
-        utterance: '我去图书馆',
+        utterance: '@主持人我去图书馆',
         recipient: { kind: 'keeper', entityId: null, explicit: true },
       }),
     ))
@@ -873,7 +873,7 @@ describe('RoomPage conversation history', () => {
     fireEvent.submit(actionField.closest('form')!)
     await waitFor(() => expect(mockSubmitPlannedAction).toHaveBeenCalled())
     expect(mockSubmitPlannedAction.mock.calls[0][1]).toEqual(
-      expect.objectContaining({ utterance: '我搜查书桌' }),
+      expect.objectContaining({ utterance: '@主持人 我搜查书桌' }),
     )
   })
 
@@ -1226,7 +1226,7 @@ describe('RoomPage conversation history', () => {
       fireEvent.submit(actionField().closest('form')!)
       await waitFor(() => expect(mockSubmitPlannedAction).toHaveBeenCalledTimes(1))
       expect(mockSubmitPlannedAction.mock.calls[0][1]).toEqual(
-        expect.objectContaining({ utterance: '这是行动区的草稿' }),
+        expect.objectContaining({ utterance: '@主持人 这是行动区的草稿' }),
       )
 
       // 讨论区那句原样还在，没被顺手清掉也没被提交。
@@ -2767,7 +2767,7 @@ describe('RoomPage conversation history', () => {
     await waitFor(() =>
       expect(mockSubmitPlannedAction).toHaveBeenCalledWith(
         'player-1',
-        expect.objectContaining({ utterance: '去书房找线索' }),
+        expect.objectContaining({ utterance: '@主持人 去书房找线索' }),
       ),
     )
     expect(mockSubmitAction).not.toHaveBeenCalled()

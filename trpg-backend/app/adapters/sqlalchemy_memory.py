@@ -17,7 +17,7 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.models.engine import GameEvent
-from app.models.event import Event
+from app.models.event import Event, EventAudience
 from app.models.memory import (
     ConversationSummaryRecord,
     MemoryEntryRecord,
@@ -81,12 +81,25 @@ def _text(payload: dict) -> str:
     return ""
 
 
-def _memory_from_event(event: Event) -> MemoryEntry | None:
+def _memory_from_event(
+    event: Event,
+    *,
+    audience_player_ids: tuple[str, ...] = (),
+) -> MemoryEntry | None:
     """把公开行动/叙事事件转换成可审计的 presentation 记忆。"""
     text = _text(event.payload or {})
     if not text:
         return None
-    kind = "conversation" if event.event_type == "narration.push" else "action"
+    if event.event_type in {"narration.push", "dialogue.player", "dialogue.npc"}:
+        kind = "conversation"
+    else:
+        kind = "action"
+    if event.event_type == "narration.push":
+        epistemic_status = "presentation"
+    elif event.event_type == "dialogue.npc":
+        epistemic_status = "experienced"
+    else:
+        epistemic_status = "asserted"
     return MemoryEntry(
         memory_id=f"event:{event.id}",
         room_id=event.room_id,
@@ -94,7 +107,7 @@ def _memory_from_event(event: Event) -> MemoryEntry | None:
         object_id=None,
         kind=kind,
         content=text,
-        epistemic_status="presentation" if kind == "conversation" else "asserted",
+        epistemic_status=epistemic_status,
         visibility="player_scoped" if event.visibility == "player_scoped" else "public",
         participants=tuple(
             canonical
@@ -106,6 +119,7 @@ def _memory_from_event(event: Event) -> MemoryEntry | None:
             for item in event.payload.get("listener_ids", event.payload.get("listenerIds", ()))
             if item
         ),
+        audience_player_ids=audience_player_ids,
         location_id=event.scene_id,
         source_event_id=event.id,
         source_sequence=0,
@@ -113,9 +127,13 @@ def _memory_from_event(event: Event) -> MemoryEntry | None:
     )
 
 
-def _listener_memories(event: Event) -> tuple[MemoryEntry, ...]:
+def _listener_memories(
+    event: Event,
+    *,
+    audience_player_ids: tuple[str, ...] = (),
+) -> tuple[MemoryEntry, ...]:
     """把服务端确认的听众投影为 NPC 的亲历记忆，不依赖模型猜测。"""
-    if event.event_type != "action.broadcast":
+    if event.event_type not in {"action.broadcast", "dialogue.player"}:
         return ()
     payload = event.payload or {}
     listener_ids = tuple(
@@ -148,6 +166,7 @@ def _listener_memories(event: Event) -> tuple[MemoryEntry, ...]:
             visibility="public" if event.visibility == "public" else "player_scoped",
             participants=(speaker_id, listener_id),
             listener_ids=(listener_id,),
+            audience_player_ids=audience_player_ids,
             location_id=event.scene_id,
             source_event_id=f"{event.id}:listener:{listener_id}",
             source_sequence=0,
@@ -180,9 +199,21 @@ def _memory_from_game_event(event: GameEvent) -> MemoryEntry | None:
         visibility="public" if event.visibility == "public" else "entity_scoped",
         participants=(event.actor_id,),
         listener_ids=(),
+        audience_player_ids=(),
         source_event_id=event.event_id,
         source_sequence=event.sequence,
     )
+
+
+def _event_audience_lookup(rows: list[tuple[str, str]]) -> dict[str, tuple[str, ...]]:
+    """把冻结受众行折叠成 event_id -> audience_player_ids 的稳定映射。"""
+
+    audiences: dict[str, list[str]] = {}
+    for event_id, player_id in rows:
+        audiences.setdefault(event_id, []).append(_canonical_id(player_id) or player_id)
+    return {
+        event_id: tuple(dict.fromkeys(player_ids)) for event_id, player_ids in audiences.items()
+    }
 
 
 class SqlAlchemyMemoryStore:
@@ -241,7 +272,15 @@ class SqlAlchemyMemoryStore:
 
         event_conditions = [
             Event.room_id == room_id,
-            Event.event_type.in_(("action.broadcast", "narration.push", "check.result")),
+            Event.event_type.in_(
+                (
+                    "action.broadcast",
+                    "narration.push",
+                    "check.result",
+                    "dialogue.player",
+                    "dialogue.npc",
+                )
+            ),
             or_(Event.visibility == "public", Event.player_id.is_not(None)),
         ]
         if cursor.event_created_at is not None and cursor.event_id is not None:
@@ -275,11 +314,35 @@ class SqlAlchemyMemoryStore:
             ).all()
         )
 
+        event_audiences: dict[str, tuple[str, ...]] = {}
+        if events:
+            audience_rows = list(
+                (
+                    await session.execute(
+                        select(EventAudience.event_id, EventAudience.player_id).where(
+                            EventAudience.event_id.in_(tuple(event.id for event in events))
+                        )
+                    )
+                ).all()
+            )
+            event_audiences = _event_audience_lookup(
+                [(str(event_id), str(player_id)) for event_id, player_id in audience_rows]
+            )
+
         candidates: list[tuple[MemoryEntry, datetime]] = []
         for event in events:
-            if entry := _memory_from_event(event):
+            if event.visibility == "player_scoped" and event.player_id:
+                audience_player_ids = (_canonical_id(event.player_id) or event.player_id,)
+            elif event.visibility == "scene_scoped":
+                audience_player_ids = event_audiences.get(event.id, ())
+            else:
+                audience_player_ids = ()
+            if entry := _memory_from_event(event, audience_player_ids=audience_player_ids):
                 candidates.append((entry, event.created_at))
-            candidates.extend((entry, event.created_at) for entry in _listener_memories(event))
+            candidates.extend(
+                (entry, event.created_at)
+                for entry in _listener_memories(event, audience_player_ids=audience_player_ids)
+            )
         candidates.extend(
             (entry, event.created_at)
             for event in game_events
@@ -297,6 +360,7 @@ class SqlAlchemyMemoryStore:
                 "visibility": entry.visibility,
                 "participants": list(entry.participants),
                 "listener_ids": list(entry.listener_ids),
+                "audience_player_ids": list(entry.audience_player_ids),
                 "location_id": entry.location_id,
                 "source_event_id": entry.source_event_id,
                 "source_sequence": entry.source_sequence,
@@ -377,18 +441,124 @@ class SqlAlchemyMemoryStore:
         limit: int = 12,
         max_chars: int = 4000,
     ) -> MemoryContext:
-        """按服务端作用域过滤记忆，模型不能自行扩大查询范围。"""
-        # 不规范化 room_id，否则 SQLite 的 Uuid(as_uuid=False) 会出现外键/查询不一致。
+        """保留旧接口兼容；等价于玩家安全的 NPC 读取路径。"""
+
+        return await self._read_context(
+            room_id=room_id,
+            player_id=player_id,
+            actor_id=actor_id,
+            revision=revision,
+            entity_ids=entity_ids,
+            location_id=location_id,
+            limit=limit,
+            max_chars=max_chars,
+            mode="npc",
+        )
+
+    async def read_npc_context(
+        self,
+        *,
+        room_id: str,
+        player_id: str,
+        actor_id: str,
+        revision: str,
+        interlocutor_id: str | None = None,
+        entity_ids: tuple[str, ...] = (),
+        location_id: str | None = None,
+        limit: int = 12,
+        max_chars: int = 4000,
+    ) -> MemoryContext:
+        """给 NPC 回话使用的定向读取：自动把当前交互对象纳入检索范围。"""
+
+        if interlocutor_id is not None:
+            entity_ids = tuple(dict.fromkeys((*entity_ids, interlocutor_id)))
+        return await self._read_context(
+            room_id=room_id,
+            player_id=player_id,
+            actor_id=actor_id,
+            revision=revision,
+            entity_ids=entity_ids,
+            location_id=location_id,
+            limit=limit,
+            max_chars=max_chars,
+            mode="npc",
+        )
+
+    async def read_keeper_context(
+        self,
+        *,
+        room_id: str,
+        player_id: str,
+        actor_id: str,
+        revision: str,
+        entity_ids: tuple[str, ...] = (),
+        location_id: str | None = None,
+        limit: int = 12,
+        max_chars: int = 4000,
+    ) -> MemoryContext:
+        """Keeper 读取保留 room 级历史，不再按玩家受众收窄。"""
+
+        return await self._read_context(
+            room_id=room_id,
+            player_id=player_id,
+            actor_id=actor_id,
+            revision=revision,
+            entity_ids=entity_ids,
+            location_id=location_id,
+            limit=limit,
+            max_chars=max_chars,
+            mode="keeper",
+        )
+
+    async def _read_context(
+        self,
+        *,
+        room_id: str,
+        player_id: str,
+        actor_id: str,
+        revision: str,
+        entity_ids: tuple[str, ...] = (),
+        location_id: str | None = None,
+        limit: int = 12,
+        max_chars: int = 4000,
+        mode: str,
+    ) -> MemoryContext:
+        """共享的有限读取实现；mode 只决定 keeper 是否跳过玩家受众裁剪。"""
+
         stored_room_id = room_id
         await self.project_room_events(stored_room_id)
         async with self._session_factory() as session:
-            # JSON.contains([item]) 在 SQLite 会按文本片段匹配，无法识别多参与者数组。
-            # 使用 json_each/JSONB 成员运算保证两种数据库都按数组元素比较。
+
             def participant_has(item: str):
                 if session.get_bind().dialect.name == "sqlite":
                     values = func.json_each(MemoryEntryRecord.participants).table_valued("value")
                     return exists(select(1).select_from(values).where(values.c.value == item))
                 return cast(MemoryEntryRecord.participants, JSONB).contains([item])
+
+            def audience_has(item: str):
+                if session.get_bind().dialect.name == "sqlite":
+                    values = func.json_each(MemoryEntryRecord.audience_player_ids).table_valued(
+                        "value"
+                    )
+                    return exists(select(1).select_from(values).where(values.c.value == item))
+                return cast(MemoryEntryRecord.audience_player_ids, JSONB).contains([item])
+
+            def audience_empty():
+                if session.get_bind().dialect.name == "sqlite":
+                    return (
+                        func.coalesce(
+                            func.json_array_length(MemoryEntryRecord.audience_player_ids),
+                            0,
+                        )
+                        == 0
+                    )
+                return (
+                    func.coalesce(
+                        func.jsonb_array_length(cast(MemoryEntryRecord.audience_player_ids, JSONB)),
+                        0,
+                    )
+                    == 0
+                )
 
             player_scope_ids = _scope_ids(player_id)
             actor_scope_ids = _scope_ids(actor_id)
@@ -397,19 +567,30 @@ class SqlAlchemyMemoryStore:
             )
             conditions = [
                 MemoryEntryRecord.room_id == stored_room_id,
-                # Engine 的内部裁决原因只服务审计，不应占用 Host 的剧情记忆预算。
                 ~MemoryEntryRecord.content.startswith("adjudication:"),
-                or_(
-                    MemoryEntryRecord.visibility == "public",
-                    and_(
-                        MemoryEntryRecord.visibility == "player_scoped",
-                        or_(*(participant_has(item) for item in player_scope_ids)),
-                    ),
-                    MemoryEntryRecord.subject_id.in_(
-                        (*player_scope_ids, *actor_scope_ids, *entity_scope_ids)
-                    ),
-                ),
             ]
+            if mode == "npc":
+                conditions.append(
+                    or_(
+                        MemoryEntryRecord.visibility == "public",
+                        and_(
+                            MemoryEntryRecord.visibility == "player_scoped",
+                            or_(*(participant_has(item) for item in player_scope_ids)),
+                        ),
+                        MemoryEntryRecord.subject_id.in_(
+                            (*player_scope_ids, *actor_scope_ids, *entity_scope_ids)
+                        ),
+                    )
+                )
+                conditions.append(
+                    or_(
+                        audience_empty(),
+                        and_(
+                            ~audience_empty(),
+                            or_(*(audience_has(item) for item in player_scope_ids)),
+                        ),
+                    )
+                )
             if location_id:
                 entity_relevance = or_(
                     MemoryEntryRecord.subject_id.in_(entity_scope_ids),
@@ -420,8 +601,6 @@ class SqlAlchemyMemoryStore:
                     or_(
                         MemoryEntryRecord.location_id == location_id,
                         entity_relevance,
-                        # 没有地点的全局权威事件仍然是可召回的长期事实；外层
-                        # room/visibility/participant 条件继续负责权限隔离。
                         MemoryEntryRecord.location_id.is_(None),
                     )
                 )
@@ -456,7 +635,6 @@ class SqlAlchemyMemoryStore:
                 entry = MemoryEntry.model_validate(
                     {
                         "memory_id": record.id,
-                        # 数据库 UUID 可能是 canonical 形式，契约必须回显调用方作用域。
                         "room_id": room_id,
                         "subject_id": record.subject_id,
                         "object_id": record.object_id,
@@ -466,6 +644,7 @@ class SqlAlchemyMemoryStore:
                         "visibility": record.visibility,
                         "participants": tuple(record.participants or ()),
                         "listener_ids": tuple(record.listener_ids or ()),
+                        "audience_player_ids": tuple(record.audience_player_ids or ()),
                         "location_id": record.location_id,
                         "source_event_id": record.source_event_id,
                         "source_sequence": record.source_sequence,
@@ -485,7 +664,6 @@ class SqlAlchemyMemoryStore:
             summary = None
             if summary_record and summary_record.summary_json:
                 summary_payload = dict(summary_record.summary_json)
-                # 摘要 JSON 是模型生成时保存的外部 ID，读取时统一回显当前作用域。
                 summary_payload["room_id"] = room_id
                 summary_payload["player_id"] = player_id
                 summary = ConversationSummary.model_validate(summary_payload)

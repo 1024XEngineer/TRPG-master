@@ -36,6 +36,7 @@ from collaboration_framework.host.schemas import (
     RecentTurnContext,
     TurnPlanningContext,
 )
+
 SCHEMA_MODELS: dict[str, type[BaseModel]] = {
     "module-content-v3.schema.json": ModuleContentV3,
     "player-input.schema.json": PlayerInput,

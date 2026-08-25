@@ -38,6 +38,7 @@ from collaboration_framework.engine.timeline import (
 )
 
 from tests.test_projection_v3 import ACTOR, module
+from tests.time_fixtures import SINGLE_NIGHT_POINTS, single_night_module
 
 
 class DiscreteTimelineTests(unittest.TestCase):
@@ -158,35 +159,6 @@ class DiscreteTimelineTests(unittest.TestCase):
 
         self.assertEqual(state.world_time.current_point_id, "hour_00")
         self.assertEqual(state.world_time.current.hour_of_day, 0)
-
-
-# 《林隙的罪恶》那类单夜模组：按小时升序声明，起点落在环上的 18:00，
-# 越过 22:00 之后回卷进第二天的 00:00 / 02:00，02:00 是最后一刻。
-SINGLE_NIGHT_POINTS = (
-    TimePointSpec(id="hour_00", hour_of_day=0, order=0),
-    TimePointSpec(id="hour_02", hour_of_day=2, order=1),
-    TimePointSpec(id="hour_18", hour_of_day=18, order=2),
-    TimePointSpec(id="hour_20", hour_of_day=20, order=3),
-    TimePointSpec(id="hour_22", hour_of_day=22, order=4, label="深夜"),
-)
-
-
-def single_night_module():
-    """跨午夜的单夜模组，终点是 D1 02:00。"""
-
-    content = module()
-    return content.model_copy(
-        update={
-            "time_policy": ModuleTimePolicySpec(
-                default_points=SINGLE_NIGHT_POINTS,
-                terminal_point=TerminalTimePointSpec(point_id="hour_02", day_index=1),
-            ),
-            "initial_state": content.initial_state.model_copy(
-                update={"start_time_point_id": "hour_18"}
-            ),
-        },
-        deep=True,
-    )
 
 
 class TerminalTimePointTests(unittest.TestCase):

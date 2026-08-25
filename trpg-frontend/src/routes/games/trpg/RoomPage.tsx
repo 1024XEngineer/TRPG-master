@@ -131,17 +131,19 @@ function checkResultContent(payload: CheckResultPayload): string {
   return `${payload.skillName} ${payload.targetValue}% · D100 ${payload.rollValue}${resolutionLabel}`
 }
 
-function hostUtteranceFromActionInput(text: string): { utterance: string; explicit: true } | null {
+function hostUtteranceFromActionInput(
+  text: string,
+): { utterance: string; body: string; explicit: true } | null {
   // 中文输入习惯会直接在 mention 后接正文；这里把行首 @主持人/@守秘人 视为
-  // 显式主持路由，后面的空白或标点只是分隔符，不影响路由判定。
+  // 显式主持路由，但原文要原样保留，方便其他玩家在回放里看到完整转述。
   const mention = /^\s*@(主持人|守秘人)(?=(?:\s|[，。！？；：、,.!?;:]|$|[^A-Za-z0-9_]))/u.exec(text)
   if (!mention) return null
-  const rest = text
+  const body = text
     .slice(mention[0].length)
     .replace(/^[\s，。！？；：、,.!?;:]+/u, '')
     .replace(/\s+/g, ' ')
     .trim()
-  return { utterance: rest, explicit: true }
+  return { utterance: text, body, explicit: true }
 }
 
 const HOST_MENTION_LONG_PRESS_MS = 450
@@ -2184,7 +2186,7 @@ export default function RoomPage() {
     if (channel === 'action' && actionSubmissionBlocked) return
     const hostRequest = channel === 'action' ? hostUtteranceFromActionInput(text) : null
     // 只有 mention 没有正文时保留草稿，避免在多人房间误发成 roleplay。
-    if (hostRequest && !hostRequest.utterance) return
+    if (hostRequest && !hostRequest.body) return
     // 发送前先关闭识别结果闸门，防止浏览器稍后返回的文本写入已清空的输入框。
     cancelSpeechInput()
     setInput('')

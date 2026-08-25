@@ -192,6 +192,22 @@ class _PersistentNarrationModel:
         }
 
 
+class _PersistentNarrationWithNpcRepliesModel:
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+    async def generate(self, context):
+        return {
+            "kind": "narration",
+            "text": self.text,
+            "claimed_evidence_refs": [],
+            "suggested_actions": [],
+            "npc_replies": [
+                {"speaker_id": "thomas", "text": "我已经记住了。"},
+            ],
+        }
+
+
 class PersistentNarrationPolicyTests(unittest.IsolatedAsyncioTestCase):
     def _context(self, *, results=(), inventory=(), utterance="行动"):
         view = SimpleNamespace(
@@ -398,6 +414,16 @@ class PersistentNarrationPolicyTests(unittest.IsolatedAsyncioTestCase):
             _PersistentNarrationModel("你们正坐在旅店的桌边。")
         ).narrate(self._context())
         self.assertEqual(plural_output.text, "你们正坐在旅店的桌边。")
+
+    async def test_rejects_embedded_npc_dialogue_when_followup_replies_exist(self):
+        with self.assertRaises(ActionPlanNarrationValidationError) as raised:
+            await ActionPlanNarrator(
+                _PersistentNarrationWithNpcRepliesModel(
+                    '托马斯笑了笑，说：“我已经记住了。”'
+                )
+            ).narrate(self._context())
+
+        self.assertEqual(raised.exception.reason, "npc_dialogue_embedded_in_text")
 
 
 if __name__ == "__main__":

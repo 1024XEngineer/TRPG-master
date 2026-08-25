@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { CheckWorkflowPanel } from './CheckWorkflowPanel'
@@ -36,6 +36,7 @@ const decision: PendingCheckDecisionView = {
 }
 
 describe('CheckWorkflowPanel', () => {
+
   it('shows safe skill choices and lets the player cancel before rolling', () => {
     const onSelect = vi.fn()
     const onCancel = vi.fn()
@@ -108,5 +109,39 @@ describe('CheckWorkflowPanel', () => {
       'push-once',
       '先按年份缩小范围后重新检索',
     )
+  })
+  it('hides cancel and says why when the rule forces the check', () => {
+    // 被动检定（#398 §阶段三）：规则自己指定技能，菜单只有一条，而且
+    // `CheckStep` 不带 `cancel_step_id`——没有可走的取消路由。
+    const forced: PendingCheckDecisionView = {
+      ...decision,
+      allow_cancel: false,
+      summary: '看清墓地里那个身影的真容',
+      options: [
+        {
+          candidate_id: 'rule:san_check',
+          skill_id: 'san',
+          display_name: '理智',
+          target_value: 55,
+          difficulty: 'regular',
+          method_summary: '眼前的景象直接冲击神智',
+          player_safe_reason: '规则要求此刻进行一次理智检定',
+        },
+      ],
+    }
+
+    const { container } = render(
+      <CheckWorkflowPanel
+        decision={forced}
+        onSelectSkill={vi.fn()}
+        onCancel={vi.fn()}
+        onPostRollOption={vi.fn()}
+      />,
+    )
+
+    expect(within(container).getByText('规则要求的检定')).toBeInTheDocument()
+    expect(within(container).getByText('这次检定由规则强制，无法取消。')).toBeInTheDocument()
+    expect(within(container).queryByText('取消行动（不会掷骰）')).not.toBeInTheDocument()
+    expect(within(container).getByText('理智 · 55%')).toBeInTheDocument()
   })
 })

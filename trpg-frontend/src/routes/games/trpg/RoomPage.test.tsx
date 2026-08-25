@@ -3160,6 +3160,106 @@ describe('RoomPage conversation history', () => {
     expect(screen.queryByRole('button', { name: /停止后续行动/ })).not.toBeInTheDocument()
   })
 
+  it('hides the plan stop button while a rule-forced check is pending', () => {
+    // CheckWorkflowPanel 已经按 allow_cancel 藏了自己的取消按钮，但 plan 级的
+    // 「停止后续行动」当时漏了。点它必然吃 PLAN_CANCEL_BLOCKED_BY_RULE_CHECK，
+    // 而且连跟这次检定无关的后续步骤也一起被拒（#398 §阶段三）。
+    renderRoomPage()
+
+    act(() => emitWsMessage({
+      type: 'plan.started',
+      payload: {
+        correlationId: 'passive-plan',
+        currentStep: 1,
+        completedSteps: 0,
+        totalSteps: 2,
+        phase: 'executing',
+      },
+    }))
+    expect(screen.getByRole('button', { name: /停止后续行动/ })).toBeInTheDocument()
+
+    act(() => emitWsMessage({
+      type: 'adjudication.pending',
+      payload: {
+        correlationId: 'passive-plan',
+        planId: 'passive-plan',
+        sourceRevision: 'revision-1',
+        status: 'awaiting_skill_choice',
+        pendingDecision: {
+          decision_id: 'decision-passive',
+          action_request_id: 'passive-plan',
+          source_revision: 'revision-1',
+          decision_version: 1,
+          actor_id: 'actor-1',
+          summary: '看见食尸鬼群',
+          options: [
+            {
+              candidate_id: 'rule:crowd_san',
+              skill_id: 'san',
+              display_name: '理智',
+              target_value: 55,
+              difficulty: 'regular',
+              method_summary: '直面眼前的景象',
+              player_safe_reason: '规则要求的检定',
+            },
+          ],
+          allow_cancel: false,
+        },
+      },
+    }))
+
+    expect(screen.queryByRole('button', { name: /停止后续行动/ })).not.toBeInTheDocument()
+  })
+
+  it('keeps the dice dialog when a cancel is refused by the rule-forced check', () => {
+    // 服务端那条 PendingCheckDecision 还挂着。清掉弹窗玩家就只剩一行报错、
+    // 再也掷不了骰，而 activePlanId 没清，唯一能点的按钮只会复现同一个错误。
+    renderRoomPage()
+
+    act(() => emitWsMessage({
+      type: 'adjudication.pending',
+      payload: {
+        correlationId: 'refused-cancel',
+        planId: 'refused-cancel',
+        sourceRevision: 'revision-1',
+        status: 'awaiting_skill_choice',
+        pendingDecision: {
+          decision_id: 'decision-refused',
+          action_request_id: 'refused-cancel',
+          source_revision: 'revision-1',
+          decision_version: 1,
+          actor_id: 'actor-1',
+          summary: '看见食尸鬼群',
+          options: [
+            {
+              candidate_id: 'rule:crowd_san',
+              skill_id: 'san',
+              display_name: '理智',
+              target_value: 55,
+              difficulty: 'regular',
+              method_summary: '直面眼前的景象',
+              player_safe_reason: '规则要求的检定',
+            },
+          ],
+          allow_cancel: false,
+        },
+      },
+    }))
+    expect(screen.getByRole('dialog', { name: '待处理检定' })).toBeInTheDocument()
+
+    act(() => emitWsMessage({
+      type: 'turn.failed',
+      payload: {
+        correlationId: 'refused-cancel',
+        code: 'PLAN_CANCEL_BLOCKED_BY_RULE_CHECK',
+        publicMessage: '这次检定由规则强制，必须先完成才能取消后续步骤',
+        retryable: false,
+      },
+    }))
+
+    expect(screen.getByRole('dialog', { name: '待处理检定' })).toBeInTheDocument()
+  })
+
   it('renders invalid Agent output as keeper guidance', () => {
     renderRoomPage()
 

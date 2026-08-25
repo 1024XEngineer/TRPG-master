@@ -9,6 +9,7 @@ from pydantic import Field, JsonValue
 
 from collaboration_framework.contracts import (
     ActionAdjudication,
+    ActionEffect,
     ActionRequest,
     ActionResult,
     AdjudicationExecution,
@@ -129,6 +130,22 @@ class AgendaItem(ContractModel):
     status: Literal["queued", "running", "completed", "skipped", "failed"] = "queued"
 
 
+class AgendaParentContinuation(ContractModel):
+    """父动作里还没执行的那一半，等规则链稳定后接着跑（#398 §阶段二）。
+
+    事件屏障要求「规则没结算完就不能执行下一个效果」，所以一次动作可能停在
+    效果序列中间。这里保存的就是停下时剩的部分：Agenda 恢复后按原顺序补完，
+    或者被规则取消掉。
+
+    `completion_emitted` 区分「停在效果之间」和「效果都跑完了、卡在
+    `action.succeeded` 触发的规则上」——后者不能再补发一次完成事件。
+    """
+
+    passed: bool
+    remaining_effects: tuple[ActionEffect, ...] = ()
+    completion_emitted: bool = False
+
+
 class RuleAgenda(ContractModel):
     """Persisted Rule cursor, queue, budgets, and worker lease (#226 §4).
 
@@ -158,6 +175,12 @@ class RuleAgenda(ContractModel):
     current_branch_id: str | None = None
     current_step_id: str | None = None
     pending_check_id: str | None = None
+    parent_continuation: AgendaParentContinuation | None = None
+    # 挂起时游标还没读到的 DomainEvent。规则在挂起前已经发过 `rule.triggered`
+    # 和自己前置效果的事件，恢复时那些事件不在新的 events 列表里，不带走就
+    # 永远不会被匹配。只有在途 Agenda 落库，所以它随 Agenda 一起消失；上界由
+    # 既有的 `max_steps` 约束，不另设预算。
+    carried_events: tuple[DomainEvent, ...] = ()
     pending_boundary_id: str | None = None
     pending_rule_input_id: str | None = None
     revision: str = Field(min_length=1)
@@ -240,6 +263,25 @@ class DomainEvent(ContractModel):
     payload: dict[str, JsonValue] = Field(default_factory=dict)
 
 
+class RuleCheckOrigin(ContractModel):
+    """把一次检定钉回它所属的 Agenda 游标（#398 §阶段三）。
+
+    被动检定不是玩家发起的，是规则走到 `CheckStep` 时引擎替规则问的。结算之后
+    要恢复的也不是「这次行动的成功/失败效果」，而是**同一条规则的
+    `result_routes` 分支**——所以必须记住是哪个 Agenda、哪条规则、哪个分支、
+    哪一步、由哪个事件触发。
+
+    不另加恢复令牌：`PendingCheckDecision.decision_version` 已经承担版本与恢复
+    职责，再加一个只会多出一个可能不同步的事实源。
+    """
+
+    agenda_id: str = Field(min_length=1)
+    rule_id: str = Field(min_length=1)
+    branch_id: str = Field(min_length=1)
+    step_id: str = Field(min_length=1)
+    source_event_id: str = Field(min_length=1)
+
+
 class PendingCheckDecision(ContractModel):
     decision_id: str = Field(min_length=1)
     room_id: str = Field(min_length=1)
@@ -251,6 +293,10 @@ class PendingCheckDecision(ContractModel):
     status: Literal["awaiting_skill_choice", "rolled", "resolved", "cancelled"]
     adjudication: ActionAdjudication
     options: tuple[PendingCheckOption, ...] = Field(min_length=1)
+    # 非空即「这是规则拥有的检定」：结算走 result_routes，不走 adjudication 的
+    # success/failure 效果。
+    rule_origin: RuleCheckOrigin | None = None
+    allow_cancel: bool = True
 
     def player_view(self) -> PendingCheckDecisionView:
         if self.status != "awaiting_skill_choice":
@@ -263,6 +309,7 @@ class PendingCheckDecision(ContractModel):
             actor_id=self.actor_id,
             summary=self.adjudication.summary,
             options=self.options,
+            allow_cancel=self.allow_cancel,
         )
 
 

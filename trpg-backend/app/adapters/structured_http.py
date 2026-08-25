@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from dataclasses import dataclass
 
 import httpx
@@ -48,6 +49,26 @@ class ModelClientRetryPolicy:
         return self.backoff_seconds * (2 ** (attempt - 1))
 
 
+@dataclass(frozen=True)
+class ModelCallTrace:
+    """Allowlisted metadata for one structured model call.
+
+    The trace intentionally cannot carry prompts, model output, player text, or
+    Keeper payloads. Callers may omit it for non-turn model traffic.
+    """
+
+    correlation_id: str | None
+    stage: str
+    provider: str
+    model: str
+
+
+@dataclass(frozen=True)
+class StructuredHttpResponse:
+    response: httpx.Response
+    transport_attempts: int
+
+
 def is_transient_model_error(exc: BaseException) -> bool:
     """判断异常是否值得重试：超时、连接错误、5xx 与 429。"""
 
@@ -65,16 +86,36 @@ async def post_structured_json(
     json: object,
     provider: str,
     retry_policy: ModelClientRetryPolicy,
-) -> httpx.Response:
+    trace: ModelCallTrace | None = None,
+) -> StructuredHttpResponse:
     """POST 一次结构化输出请求，瞬态失败按 `retry_policy` 重试。"""
 
+    started_at = time.monotonic()
     for attempt in range(1, retry_policy.max_attempts + 1):
         try:
             response = await client.post(url, json=json)
             response.raise_for_status()
-            return response
+            return StructuredHttpResponse(
+                response=response,
+                transport_attempts=attempt,
+            )
         except Exception as exc:
             if not is_transient_model_error(exc) or attempt == retry_policy.max_attempts:
+                logger.warning(
+                    "structured_model_call_failed",
+                    provider=provider,
+                    action=trace.correlation_id if trace is not None else None,
+                    stage=trace.stage if trace is not None else None,
+                    model=trace.model if trace is not None else None,
+                    duration_ms=int((time.monotonic() - started_at) * 1000),
+                    transport_attempts=attempt,
+                    failure_code=(
+                        "transport_exhausted"
+                        if is_transient_model_error(exc)
+                        else "http_or_transport_rejected"
+                    ),
+                    error_type=type(exc).__name__,
+                )
                 raise
             delay = retry_policy.delay_before(attempt)
             logger.warning(
@@ -84,9 +125,34 @@ async def post_structured_json(
                 max_attempts=retry_policy.max_attempts,
                 delay_seconds=delay,
                 error_type=type(exc).__name__,
+                action=trace.correlation_id if trace is not None else None,
+                stage=trace.stage if trace is not None else None,
+                model=trace.model if trace is not None else None,
             )
             await asyncio.sleep(delay)
     raise AssertionError("unreachable")
+
+
+def log_structured_output_failure(
+    *,
+    trace: ModelCallTrace,
+    duration_ms: int,
+    transport_attempts: int,
+    error: BaseException,
+) -> None:
+    """Record a safe failure after HTTP succeeds but structured decoding fails."""
+
+    logger.warning(
+        "structured_model_call_failed",
+        provider=trace.provider,
+        action=trace.correlation_id,
+        stage=trace.stage,
+        model=trace.model,
+        duration_ms=max(0, duration_ms),
+        transport_attempts=max(1, transport_attempts),
+        failure_code="structured_output_unreadable",
+        error_type=type(error).__name__,
+    )
 
 
 def read_structured_payload(response: httpx.Response, *, provider_name: str) -> object:
@@ -117,9 +183,12 @@ def decode_structured_json(output_text: str, *, provider_name: str) -> JsonObjec
 
 __all__ = [
     "ModelClientRetryPolicy",
+    "ModelCallTrace",
+    "StructuredHttpResponse",
     "StructuredOutputError",
     "decode_structured_json",
     "is_transient_model_error",
+    "log_structured_output_failure",
     "post_structured_json",
     "read_structured_payload",
 ]

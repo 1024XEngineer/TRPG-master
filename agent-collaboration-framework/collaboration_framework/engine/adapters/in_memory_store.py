@@ -27,6 +27,9 @@ from ..models import (
 from ..ports import EngineTransaction, RevisionConflictError
 from ..rules_v3 import agenda_claim_key, agenda_is_claimable
 
+# 还挂在玩家面前、没有结算的检定决策。
+_OPEN_DECISION_STATUSES = frozenset({"awaiting_skill_choice", "rolled"})
+
 
 @dataclass(frozen=True)
 class _RoomData:
@@ -322,13 +325,16 @@ class _InMemoryEngineTransaction(EngineTransaction):
         action_request_id: str,
     ) -> PendingCheckDecision | None:
         self._ensure_active()
+        # 一个动作可以先后有多次检定（#398 §阶段三），未结算的那一条优先——
+        # 与 SqlAlchemyEngineStore 的排序保持一致。
+        matches = [
+            item
+            for item in self._record.data.pending_checks.values()
+            if item.action_request_id == action_request_id
+        ]
         decision = next(
-            (
-                item
-                for item in self._record.data.pending_checks.values()
-                if item.action_request_id == action_request_id
-            ),
-            None,
+            (item for item in matches if item.status in _OPEN_DECISION_STATUSES),
+            matches[-1] if matches else None,
         )
         return decision.model_copy(deep=True) if decision is not None else None
 
@@ -445,6 +451,7 @@ class _InMemoryEngineTransaction(EngineTransaction):
         decision: PendingCheckDecision | None,
         check_run: CheckRun | None,
         completed_command: CompletedAdjudicationCommand,
+        additional_decisions: tuple[PendingCheckDecision, ...] = (),
     ) -> None:
         self._ensure_active()
         if self._committed:
@@ -472,6 +479,8 @@ class _InMemoryEngineTransaction(EngineTransaction):
         }
         if decision is not None:
             decisions[decision.decision_id] = decision.model_copy(deep=True)
+        for extra in additional_decisions:
+            decisions[extra.decision_id] = extra.model_copy(deep=True)
         runs = {
             key: value.model_copy(deep=True)
             for key, value in current.check_runs.items()

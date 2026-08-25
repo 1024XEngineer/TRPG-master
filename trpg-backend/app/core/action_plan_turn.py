@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import time
 import traceback
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -11,6 +12,7 @@ from typing import Literal, Protocol
 
 import structlog
 from collaboration_framework.contracts import (
+    TERMINAL_ADJUDICATION_STATUSES,
     ActionAdjudication,
     ActionMethod,
     ActionPlan,
@@ -41,6 +43,7 @@ from collaboration_framework.contracts import (
     SingleActionDecision,
     SkillCheckCandidate,
     SubmitAdjudicationRequest,
+    VisibleEntity,
     WorldClockView,
 )
 from collaboration_framework.engine import AdjudicationEngineService, EngineStore, RuleEngineService
@@ -58,6 +61,7 @@ from collaboration_framework.host.ports import (
     ActionPlanStepAdjudicator,
     ActionPlanStepFailure,
     RecentHistorySource,
+    TurnPlannerPort,
 )
 from collaboration_framework.host.schemas import (
     ActionPlanAdvanceResult,
@@ -70,10 +74,13 @@ from collaboration_framework.host.schemas import (
     MemoryContext,
     RecentHistoryBudget,
     RecentTurnContext,
+    TurnPlanningContext,
+    TurnPlanningView,
 )
 from pydantic import ValidationError
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.adapters.structured_http import StructuredOutputError
 from app.core.turn_events import TurnPhase
 
 logger = structlog.get_logger()
@@ -159,6 +166,199 @@ async def _log_step_adjudication_failure(failure: ActionPlanStepFailure) -> None
 
 class HostTurnDecisionModel(Protocol):
     async def generate(self, context: HostAgentContext) -> HostTurnDecision: ...
+
+
+def semantic_planner_selected(
+    *,
+    room_id: str,
+    client_action_id: str,
+    rollout_percent: int,
+) -> bool:
+    """Choose a stable rollout bucket for every replay of one client action."""
+
+    if rollout_percent <= 0:
+        return False
+    if rollout_percent >= 100:
+        return True
+    digest = hashlib.sha256(f"{room_id}\0{client_action_id}".encode()).digest()
+    return int.from_bytes(digest[:8], "big") % 100 < rollout_percent
+
+
+_SEMANTIC_MULTI_STEP_MARKERS = (
+    "先",
+    "然后",
+    "接着",
+    "随后",
+    "再去",
+    "再到",
+    "之后",
+)
+_SEMANTIC_MULTI_TARGET_MARKERS = ("分别", "每个", "所有", "多个", "和", "以及")
+_SEMANTIC_UNCERTAIN_ACTION_MARKERS = (
+    "仔细",
+    "调查",
+    "搜索",
+    "搜查",
+    "查找",
+    "研究",
+    "线索",
+    "眼前的人",
+    "这里",
+    "那里",
+    "什么",
+    "某个",
+)
+
+
+def semantic_planner_required(utterance: str) -> tuple[bool, str]:
+    """Select semantic planning only where a fast single-step producer is unsafe.
+
+    This is deliberately a conservative, player-input-only gate. It does not infer
+    targets, rules, checks, effects, or hidden facts. Those remain the responsibility
+    of the current-step adjudicator after the plan is created.
+    """
+
+    text = utterance.strip()
+    if not text:
+        return True, "empty_input"
+    if any(marker in text for marker in _SEMANTIC_MULTI_STEP_MARKERS):
+        return True, "multi_step_marker"
+    if any(marker in text for marker in _SEMANTIC_MULTI_TARGET_MARKERS):
+        return True, "multi_target_marker"
+    if any(marker in text for marker in _SEMANTIC_UNCERTAIN_ACTION_MARKERS):
+        return True, "semantic_uncertainty_marker"
+    return False, "explicit_single_step"
+
+
+@dataclass(frozen=True)
+class PlanPrerequisiteResolution:
+    plan: ActionPlan | None
+    failure_code: str | None = None
+
+
+@dataclass(frozen=True)
+class CompanionPrerequisiteFact:
+    """Narrow, player-safe companion fact allowed to reach the resolver."""
+
+    name: str
+    present: bool
+    rendezvous_location_name: str | None = None
+
+
+@dataclass(frozen=True)
+class PlanPrerequisiteFacts:
+    companions: tuple[CompanionPrerequisiteFact, ...] = ()
+
+
+class PlanPrerequisiteResolver:
+    """Bounded deterministic expansion for explicitly requested companions."""
+
+    def __init__(self, policy: ActionPlanPolicy) -> None:
+        self._policy = policy
+
+    def resolve(
+        self,
+        *,
+        plan: ActionPlan,
+        facts: PlanPrerequisiteFacts,
+    ) -> PlanPrerequisiteResolution:
+        if not facts.companions:
+            return PlanPrerequisiteResolution(plan=plan)
+        steps = list(plan.steps)
+        for index, step in enumerate(steps):
+            if step.kind != "travel":
+                continue
+            offscene = tuple(item for item in facts.companions if not item.present)
+            if not offscene:
+                continue
+            if len(offscene) != 1:
+                return PlanPrerequisiteResolution(
+                    plan=None,
+                    failure_code="PLAN_PREREQUISITE_AMBIGUOUS",
+                )
+            companion = offscene[0]
+            source_name = companion.rendezvous_location_name
+            if source_name is None:
+                return PlanPrerequisiteResolution(
+                    plan=None,
+                    failure_code="PLAN_PREREQUISITE_UNRESOLVED",
+                )
+            current_is_meeting = (
+                companion.name in step.semantic_goal
+                and _best_label_overlap(step.semantic_goal, (source_name,)) is not None
+                and any(marker in step.semantic_goal for marker in ("会合", "找到", "找"))
+            )
+            if current_is_meeting:
+                continue
+            already_planned = any(
+                companion.name in prior.semantic_goal
+                and _best_label_overlap(prior.semantic_goal, (source_name,)) is not None
+                for prior in steps[:index]
+            )
+            if already_planned:
+                continue
+            steps.insert(
+                index,
+                ActionPlanStep(
+                    kind="travel",
+                    semantic_goal=f"前往{source_name}与{companion.name}会合",
+                    public_progress_label=f"前往{source_name}会合",
+                ),
+            )
+            expanded = plan.model_copy(update={"steps": tuple(steps)}, deep=True)
+            try:
+                self._policy.require_plan(expanded)
+            except ContractError:
+                return PlanPrerequisiteResolution(
+                    plan=None,
+                    failure_code="PLAN_PREREQUISITE_TOO_LARGE",
+                )
+            return PlanPrerequisiteResolution(plan=expanded)
+        return PlanPrerequisiteResolution(plan=plan)
+
+
+def _project_plan_prerequisite_facts(
+    *,
+    player_input: PlayerInput,
+    plan: ActionPlan,
+    player_view: PlayerView,
+    capabilities: KeeperCapabilityView | None,
+) -> PlanPrerequisiteFacts:
+    """Project the full capability view into the resolver's narrow fact set."""
+
+    semantic_text = " ".join(step.semantic_goal for step in plan.steps)
+    companions = _requested_companions(
+        player_input=player_input,
+        semantic_text=semantic_text,
+        capabilities=capabilities,
+    )
+    combined = f"{player_input.utterance} {semantic_text}"
+    projected: list[CompanionPrerequisiteFact] = []
+    for companion in companions:
+        short_name = companion.name.split("·", 1)[0]
+        public_name = next(
+            (label for label in (companion.name, short_name) if label and label in combined),
+            "同行者",
+        )
+        known_source = next(
+            (
+                location
+                for location in player_view.known_locations
+                if location.id == companion.location_id
+                and location.existence == "known"
+                and location.localization == "located"
+                and location.access == "reachable"
+            ),
+            None,
+        )
+        projected.append(
+            CompanionPrerequisiteFact(
+                name=public_name,
+                present=companion.location_id == player_view.scene.id,
+                rendezvous_location_name=(known_source.name if known_source is not None else None),
+            )
+        )
+    return PlanPrerequisiteFacts(companions=tuple(projected))
 
 
 @dataclass(frozen=True)
@@ -293,6 +493,39 @@ class DeterministicHostTurnDecisionModel:
                 success_effects=(NarrativeOnlyEffect(),),
             )
         )
+
+
+class DeterministicTurnPlanner:
+    """Offline semantic planner that always returns ActionPlan(1..N)."""
+
+    async def generate(self, context: TurnPlanningContext) -> ActionPlan:
+        utterance = context.player_input.utterance
+        pieces = [utterance]
+        for separator in ("然后", "接着", "随后", "再去", "，再", ";", "；"):
+            if separator in utterance:
+                pieces = [part.strip(" ，,。") for part in utterance.split(separator)]
+                pieces = [part for part in pieces if part]
+                break
+
+        def kind_for(text: str) -> Literal["travel", "wait", "rest", "action", "dialogue"]:
+            if any(word in text for word in ("休息", "睡", "歇")):
+                return "rest"
+            if any(word in text for word in ("等待", "等候")):
+                return "wait"
+            if any(word in text for word in ("询问", "问", "交谈", "聊天")):
+                return "dialogue"
+            if any(word in text for word in ("去", "前往", "进入", "抵达")):
+                return "travel"
+            return "action"
+
+        plan = ActionPlan(
+            goal=utterance,
+            steps=tuple(
+                ActionPlanStep(kind=kind_for(piece), semantic_goal=piece) for piece in pieces
+            ),
+        )
+        context.policy.require_plan(plan)
+        return plan
 
 
 def _compact_travel_plan(view: PlayerView, utterance: str) -> ActionPlan | None:
@@ -700,12 +933,20 @@ class ActionPlanTurnApplication:
         recent_history_source: RecentHistorySource,
         recent_history_budget: RecentHistoryBudget,
         recent_history_enabled: bool,
+        semantic_planner: TurnPlannerPort | None = None,
+        semantic_planner_rollout_percent: int = 0,
+        prerequisite_resolver: PlanPrerequisiteResolver | None = None,
         memory_source: _MemorySource | None = None,
     ) -> None:
         self._store = store
         self._engine = engine
         self._adjudication_engine = adjudication_engine
         self._planner = planner
+        self._semantic_planner = semantic_planner
+        self._semantic_planner_rollout_percent = semantic_planner_rollout_percent
+        self._prerequisite_resolver = prerequisite_resolver or PlanPrerequisiteResolver(
+            orchestrator.policy
+        )
         self._orchestrator = orchestrator
         self._recent_history_source = recent_history_source
         self._recent_history_budget = recent_history_budget
@@ -786,7 +1027,6 @@ class ActionPlanTurnApplication:
         if on_input_accepted is not None:
             await on_input_accepted(player_input, view)
         await _emit_phase(on_phase, "understanding_action")
-        keeper_capabilities = await self._keeper_capabilities(player_input, view)
         recent_history = await self._read_recent_history(
             player_input=player_input,
             player_view=view,
@@ -795,19 +1035,43 @@ class ActionPlanTurnApplication:
             player_input=player_input,
             player_view=view,
         )
-        try:
-            decision = await self._planner.generate(
-                HostAgentContext(
-                    player_input=player_input,
-                    player_view=view,
-                    recent_history=recent_history,
-                    memories=memory_context.entries,
-                    conversation_summary=memory_context.conversation_summary,
-                    # A single action is adjudicated right here in the planner call,
-                    # so it needs the same Keeper vocabulary a plan step gets.
-                    keeper_capabilities=keeper_capabilities,
-                )
+        semantic_required, semantic_reason = semantic_planner_required(utterance)
+        use_semantic_planner = (
+            self._semantic_planner is not None
+            and semantic_required
+            and semantic_planner_selected(
+                room_id=room_id,
+                client_action_id=client_action_id,
+                rollout_percent=self._semantic_planner_rollout_percent,
             )
+        )
+        keeper_capabilities = None
+        try:
+            if use_semantic_planner:
+                assert self._semantic_planner is not None
+                decision: HostTurnDecision = await self._semantic_planner.generate(
+                    TurnPlanningContext(
+                        player_input=player_input,
+                        planning_view=TurnPlanningView.from_player_view(view),
+                        recent_history=recent_history,
+                        memories=memory_context.entries,
+                        conversation_summary=memory_context.conversation_summary,
+                        policy=self._orchestrator.policy,
+                    )
+                )
+            else:
+                keeper_capabilities = await self._keeper_capabilities(player_input, view)
+                decision = await self._planner.generate(
+                    HostAgentContext(
+                        player_input=player_input,
+                        player_view=view,
+                        recent_history=recent_history,
+                        memories=memory_context.entries,
+                        conversation_summary=memory_context.conversation_summary,
+                        # Legacy fusion adjudicates a single action in this call.
+                        keeper_capabilities=keeper_capabilities,
+                    )
+                )
         except TurnExecutionError as exc:
             if exc.code != "MODEL_OUTPUT_UNREADABLE":
                 raise
@@ -824,11 +1088,47 @@ class ActionPlanTurnApplication:
                 player_input=player_input,
                 player_view=view,
             )
-        decision = _normalize_single_travel_decision(
-            decision,
-            player_input=player_input,
-            view=view,
-            capabilities=keeper_capabilities,
+        if use_semantic_planner:
+            latest_view = await self._projector.project(player_input)
+            keeper_capabilities = await self._keeper_capabilities(player_input, latest_view)
+            assert isinstance(decision, ActionPlan)
+            prerequisite = self._prerequisite_resolver.resolve(
+                plan=decision,
+                facts=_project_plan_prerequisite_facts(
+                    player_input=player_input,
+                    plan=decision,
+                    player_view=latest_view,
+                    capabilities=keeper_capabilities,
+                ),
+            )
+            if prerequisite.plan is None:
+                logger.info(
+                    "turn_plan_prerequisite_stopped",
+                    action=client_action_id[:12],
+                    code=prerequisite.failure_code,
+                )
+                return self._prerequisite_clarification(
+                    player_input=player_input,
+                    player_view=latest_view,
+                )
+            decision = prerequisite.plan
+        else:
+            decision = _normalize_single_travel_decision(
+                decision,
+                player_input=player_input,
+                view=view,
+                capabilities=keeper_capabilities,
+            )
+        logger.info(
+            "turn_planner_route_selected",
+            action=client_action_id[:12],
+            route="semantic" if use_semantic_planner else "legacy",
+            route_reason=(semantic_reason if semantic_required else "fast_single_step"),
+            rollout_selected=semantic_planner_selected(
+                room_id=room_id,
+                client_action_id=client_action_id,
+                rollout_percent=self._semantic_planner_rollout_percent,
+            ),
         )
         await _emit_phase(on_phase, "executing_action")
         result = await self._dispatcher.execute(
@@ -860,6 +1160,25 @@ class ActionPlanTurnApplication:
                     "我暂时没能准确理解这次行动。"
                     f"请再明确一下{_view_actor_name(player_view)}"
                     "想做什么，以及行动的对象或地点。"
+                ),
+            ),
+        )
+
+    @staticmethod
+    def _prerequisite_clarification(
+        *,
+        player_input: PlayerInput,
+        player_view: PlayerView,
+    ) -> ActionPlanTurnResult:
+        return ActionPlanTurnResult(
+            player_input=player_input,
+            player_view=player_view,
+            status="needs_clarification",
+            narration=ActionPlanNarrationOutput(
+                kind="clarification",
+                text=(
+                    "同行者目前不在身边，我无法在不暴露或猜测会合地点的情况下安全安排这次行动。"
+                    "请先说明如何与同行者会合，或先单独行动。"
                 ),
             ),
         )
@@ -1123,6 +1442,15 @@ class ActionPlanTurnApplication:
             if status.execution is not None:
                 execution = status.execution
             pending = execution.pending_decision if execution is not None else None
+            if pending is not None and not pending.allow_cancel:
+                # 规则强制的被动检定没有取消路由（`CheckStep` 不带
+                # `cancel_step_id`），引擎会硬拒。这里必须先拦下来给玩家一句能
+                # 看懂的话，否则「取消剩余步骤」会撞成一次内部错误（#398）。
+                raise TurnExecutionError(
+                    "PLAN_CANCEL_BLOCKED_BY_RULE_CHECK",
+                    "这次检定由规则强制，必须先完成才能取消后续步骤",
+                    retryable=False,
+                )
             if (
                 execution is not None
                 and execution.status == "awaiting_skill_choice"
@@ -1210,7 +1538,7 @@ class ActionPlanTurnApplication:
                 action_request_id=current.step_request_id,
             )
         )
-        if status.status in {"resolved", "cancelled"}:
+        if status.status in TERMINAL_ADJUDICATION_STATUSES:
             return
         if status.status != "awaiting_post_roll_decision" or status.execution is None:
             raise TurnExecutionError(
@@ -1369,14 +1697,23 @@ class ActionPlanTurnApplication:
                     "acting_character_name": acting_character_name,
                 }
             )
+        started_at = time.monotonic()
         for attempt in range(2):
             try:
-                return await self._narrator.narrate(context)
+                narration = await self._narrator.narrate(context)
+                logger.info(
+                    "action_plan_narration_completed",
+                    action=context.player_input.client_action_id[:12],
+                    attempts=attempt + 1,
+                    path="model",
+                    duration_ms=int((time.monotonic() - started_at) * 1000),
+                )
+                return narration
             except ActionPlanNarrationValidationError as exc:
                 # 只记录校验类别和权威结果，不记录模型正文或其他敏感上下文。
                 logger.warning(
                     "action_plan_narration_rejected",
-                    action=context.player_input.client_action_id,
+                    action=context.player_input.client_action_id[:12],
                     attempt=attempt + 1,
                     reason=exc.reason,
                     outcomes=tuple(step.outcome for step in context.completed_steps),
@@ -1408,8 +1745,38 @@ class ActionPlanTurnApplication:
                                 if item.required_in_narration
                             ],
                         )
-                        return self._required_evidence_fallback(context)
-                    return self._deterministic_narration_fallback(context)
+                        narration = self._required_evidence_fallback(context)
+                    else:
+                        narration = self._deterministic_narration_fallback(context)
+                    logger.info(
+                        "action_plan_narration_completed",
+                        action=context.player_input.client_action_id[:12],
+                        attempts=attempt + 1,
+                        path="deterministic_fallback",
+                        duration_ms=int((time.monotonic() - started_at) * 1000),
+                    )
+                    return narration
+            except StructuredOutputError:
+                # A 200 response with unreadable structured content is safe to retry
+                # once. Exhaustion falls back to the same deterministic, evidence-only
+                # narration used for validation failures; transport/runtime failures
+                # keep their existing PLAN_NARRATOR_FAILED contract below.
+                logger.warning(
+                    "action_plan_narration_structured_retry",
+                    action=context.player_input.client_action_id[:12],
+                    attempt=attempt + 1,
+                    failure_code="structured_output_unreadable",
+                )
+                if attempt == 1:
+                    narration = self._deterministic_narration_fallback(context)
+                    logger.info(
+                        "action_plan_narration_completed",
+                        action=context.player_input.client_action_id[:12],
+                        attempts=attempt + 1,
+                        path="deterministic_fallback",
+                        duration_ms=int((time.monotonic() - started_at) * 1000),
+                    )
+                    return narration
             except Exception as exc:
                 # 传输层的瞬态失败已经由 StructuredJsonClient 自己重试过了
                 # （见 adapters/structured_http.py）。在这里再整体重试一轮，两层
@@ -1694,6 +2061,7 @@ def build_action_plan_turn_application(
     plan_store=None,
     settings=None,
     client=None,
+    planner_client=None,
     recent_history_source: RecentHistorySource | None = None,
     memory_source: _MemorySource | None = None,
     time_consent_session_factory=None,
@@ -1706,9 +2074,15 @@ def build_action_plan_turn_application(
         PromptActionPlanNarrationModel,
         PromptActionPlanStepAdjudicator,
         PromptHostTurnDecisionModel,
+        PromptTurnPlanner,
         QwenChatCompletionsJsonClient,
     )
-    from app.core.config import get_settings, model_client_retry_policy, secret_value
+    from app.core.config import (
+        get_settings,
+        model_client_retry_policy,
+        secret_value,
+        turn_planner_retry_policy,
+    )
 
     resolved = settings or get_settings()
     policy = ActionPlanPolicy(
@@ -1753,6 +2127,35 @@ def build_action_plan_turn_application(
         adjudicator = _RuleFirstStepAdjudicator(PromptActionPlanStepAdjudicator(client))
         narration_model = PromptActionPlanNarrationModel(client)
 
+    semantic_planner: TurnPlannerPort | None = None
+    if resolved.turn_planner_rollout_percent > 0:
+        if resolved.turn_planner_provider == "fake":
+            semantic_planner = DeterministicTurnPlanner()
+        else:
+            if planner_client is None:
+                planner_client_types = {
+                    "deepseek": DeepSeekChatCompletionsJsonClient,
+                    "qwen": QwenChatCompletionsJsonClient,
+                    "openai": OpenAIResponsesJsonClient,
+                }
+                provider = resolved.turn_planner_provider
+                if provider not in planner_client_types:
+                    raise ValueError("Semantic Turn Planner provider 未配置")
+                if (
+                    resolved.turn_planner_api_key is None
+                    or resolved.turn_planner_base_url is None
+                    or resolved.turn_planner_model is None
+                ):
+                    raise ValueError("Semantic Turn Planner 模型配置不完整")
+                planner_client = planner_client_types[provider](
+                    api_key=secret_value(resolved.turn_planner_api_key),
+                    base_url=resolved.turn_planner_base_url,
+                    model=resolved.turn_planner_model,
+                    timeout_seconds=resolved.turn_planner_timeout_seconds,
+                    retry_policy=turn_planner_retry_policy(resolved),
+                )
+            semantic_planner = PromptTurnPlanner(planner_client, policy=policy)
+
     plan_store = plan_store or InMemoryActionPlanRunStore()
     projector = PlayerViewProjector(engine)
     recent_history_budget = RecentHistoryBudget(
@@ -1788,6 +2191,9 @@ def build_action_plan_turn_application(
         engine=engine,
         adjudication_engine=consent_aware_engine,
         planner=planner,
+        semantic_planner=semantic_planner,
+        semantic_planner_rollout_percent=resolved.turn_planner_rollout_percent,
+        prerequisite_resolver=PlanPrerequisiteResolver(policy),
         orchestrator=orchestrator,
         narrator=ActionPlanNarrator(narration_model),
         recent_history_source=history_source,
@@ -1804,6 +2210,7 @@ class _DeterministicStepAdjudicator:
     async def adjudicate(self, context: ActionPlanStepContext) -> ActionAdjudication:
         adjudication = _deterministic_step_adjudication(context)
         if adjudication is not None:
+            _log_step_adjudicator_path(context, adjudication, path="deterministic")
             return adjudication
 
         action_text = context.step.semantic_goal.replace(
@@ -1813,7 +2220,7 @@ class _DeterministicStepAdjudicator:
         target = _match_visible_entity(context.player_view, action_text)
         target_kind = "entity" if target is not None else "location"
         target_id = target.id if target is not None else context.player_view.scene.id
-        return ActionAdjudication(
+        adjudication = ActionAdjudication(
             request_id=context.step_request_id,
             source_revision=context.player_view.revision,
             actor_id=context.player_input.actor_id,
@@ -1826,6 +2233,8 @@ class _DeterministicStepAdjudicator:
             check=NoAdjudicationCheck(),
             success_effects=(NarrativeOnlyEffect(),),
         )
+        _log_step_adjudicator_path(context, adjudication, path="deterministic")
+        return adjudication
 
 
 class _RuleFirstStepAdjudicator:
@@ -1837,8 +2246,22 @@ class _RuleFirstStepAdjudicator:
     async def adjudicate(self, context: ActionPlanStepContext) -> ActionAdjudication:
         adjudication = _deterministic_step_adjudication(context)
         if adjudication is not None:
+            _log_step_adjudicator_path(
+                context,
+                adjudication,
+                path="rule_first" if adjudication.rule_decision is not None else "deterministic",
+            )
             return adjudication
+        _log_deterministic_adjudication_miss(
+            context,
+            reason=_deterministic_adjudication_miss_reason(context),
+        )
         adjudication = await self._fallback.adjudicate(context)
+        _log_step_adjudicator_path(
+            context,
+            adjudication,
+            path="repair" if context.previous_rejection is not None else "model",
+        )
         if (
             context.step.kind == "travel"
             and _explicit_travel_phrase(context.player_input.utterance) is not None
@@ -1879,6 +2302,77 @@ class _RuleFirstStepAdjudicator:
                 deep=True,
             )
         return adjudication
+
+
+def _log_step_adjudicator_path(
+    context: ActionPlanStepContext,
+    adjudication: ActionAdjudication,
+    *,
+    path: Literal["deterministic", "rule_first", "model", "repair"],
+) -> None:
+    """Record only route metadata, never semantic text or adjudication payloads."""
+
+    logger.info(
+        "action_plan_step_adjudicator_completed",
+        action=context.player_input.client_action_id[:12],
+        step_index=context.step_index,
+        path=path,
+        has_check=not isinstance(adjudication.check, NoAdjudicationCheck),
+    )
+
+
+def _log_deterministic_adjudication_miss(
+    context: ActionPlanStepContext,
+    *,
+    reason: str,
+) -> None:
+    """Record why the safe fast path deferred to the model, without content."""
+
+    logger.info(
+        "action_plan_step_adjudicator_deterministic_miss",
+        action=context.player_input.client_action_id[:12],
+        step_index=context.step_index,
+        step_kind=context.step.kind,
+        reason=reason,
+    )
+
+
+def _deterministic_adjudication_miss_reason(context: ActionPlanStepContext) -> str:
+    """Classify a deterministic miss using only player-safe projection metadata."""
+
+    if context.step.kind in {"wait", "rest"}:
+        return "time_target_semantics"
+    if context.step.kind == "travel":
+        destination = _match_travel_target(context.player_view, context.step.semantic_goal)
+        if context.plan_id == "single-action":
+            destination = (
+                _match_travel_target(context.player_view, context.player_input.utterance)
+                or destination
+            )
+        return "travel_destination_unresolved" if destination is None else "travel_policy_fallback"
+
+    action_text = context.step.semantic_goal.replace(
+        context.player_view.scene.name,
+        "",
+    ).strip(" ，,。")
+    target, target_status = _match_visible_entity_with_status(
+        context.player_view,
+        action_text,
+    )
+    if target_status == "ambiguous":
+        return "target_ambiguous"
+    candidate, option = _match_rule_candidate(
+        context.keeper_capabilities,
+        action_text,
+        target.id if target is not None else None,
+    )
+    if candidate is None or option is None:
+        if context.step.kind == "dialogue":
+            return "dialogue_target_unresolved"
+        if target is None and _is_public_observation_goal(action_text):
+            return "observation_policy_fallback"
+        return "rule_candidate_unresolved" if target is not None else "target_missing"
+    return "adjudication_policy_fallback"
 
 
 def _deterministic_step_adjudication(
@@ -2033,10 +2527,33 @@ def _deterministic_step_adjudication(
             failure_effects=(),
         )
 
+    if target is None and _is_public_observation_goal(action_text):
+        # Pure observation with no named target has no safe effect, check, or
+        # hidden fact to adjudicate. Keep it on the current scene and let the
+        # Narrator describe only the committed public outcome.
+        return ActionAdjudication(
+            request_id=context.step_request_id,
+            source_revision=context.player_view.revision,
+            actor_id=context.player_input.actor_id,
+            summary=context.step.semantic_goal,
+            target=ActionTarget(kind="location", id=context.player_view.scene.id),
+            method=ActionMethod(
+                family="observe",
+                description=context.step.semantic_goal,
+            ),
+            check=NoAdjudicationCheck(),
+            success_effects=(NarrativeOnlyEffect(),),
+        )
+
     # Once the planner has identified a visible conversation partner, ordinary
     # dialogue needs no second model call to invent an adjudication.  Keeping
     # this path narrative-only is also an information boundary: authored rules
     # remain the only way to reveal facts or mutate state.
+    if context.step.kind == "dialogue":
+        target = target or _match_generic_dialogue_target(
+            context.player_view,
+            action_text,
+        )
     if context.step.kind == "dialogue" and target is not None:
         return ActionAdjudication(
             request_id=context.step_request_id,
@@ -2054,18 +2571,52 @@ def _deterministic_step_adjudication(
     return None
 
 
+_PUBLIC_OBSERVATION_MARKERS = (
+    "观察",
+    "查看",
+    "看看",
+    "留意",
+    "打量",
+    "审视",
+)
+
+
+def _is_public_observation_goal(text: str) -> bool:
+    """Recognize only read-only, untargeted observation language."""
+
+    return any(marker in text for marker in _PUBLIC_OBSERVATION_MARKERS) and not any(
+        marker in text for marker in ("拿", "取", "使用", "攻击", "打开", "移动", "进入", "离开")
+    )
+
+
+def _match_generic_dialogue_target(view: PlayerView, text: str) -> VisibleEntity | None:
+    """Resolve a generic dialogue pronoun only for one visible NPC."""
+
+    if not any(marker in text for marker in ("眼前的人", "面前的人", "在场的人", "身边的人")):
+        return None
+    visible_npcs = tuple(entity for entity in view.scene.visible_entities if entity.kind == "npc")
+    return visible_npcs[0] if len(visible_npcs) == 1 else None
+
+
 def _match_visible_entity(view: PlayerView, text: str):
+    return _match_visible_entity_with_status(view, text)[0]
+
+
+def _match_visible_entity_with_status(
+    view: PlayerView,
+    text: str,
+) -> tuple[VisibleEntity | None, Literal["missing", "ambiguous", "matched"]]:
     matches = []
     for entity in view.scene.visible_entities:
         overlap = _best_label_overlap(text, (entity.id, entity.name, *entity.aliases))
         if overlap is not None:
             matches.append((len(overlap), entity.id, entity))
     if not matches:
-        return None
+        return None, "missing"
     matches.sort(key=lambda item: (-item[0], item[1]))
     if len(matches) > 1 and matches[0][0] == matches[1][0]:
-        return None
-    return matches[0][2]
+        return None, "ambiguous"
+    return matches[0][2], "matched"
 
 
 def _companion_move_effects(

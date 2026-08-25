@@ -14,6 +14,8 @@ from collaboration_framework.host.schemas import (
     RecentSafeResult,
     RecentTurn,
     RecentTurnContext,
+    TurnPlanningContext,
+    TurnPlanningView,
     VisibleHistoryText,
 )
 from collaboration_framework.schema_export import rendered_schemas
@@ -89,6 +91,33 @@ def test_recent_history_scope_and_host_contract_are_required() -> None:
         HostAgentContext(
             player_input=player_input,
             player_view=player_view,
+            recent_history=recent_history.model_copy(update={"as_of_revision": "6"}),
+        )
+
+
+def test_turn_planning_context_is_player_safe_and_revision_bound() -> None:
+    player_input, player_view = scope()
+    recent_history = RecentTurnContext.empty(
+        player_input=player_input,
+        player_view=player_view,
+    )
+    context = TurnPlanningContext(
+        player_input=player_input,
+        planning_view=TurnPlanningView.from_player_view(player_view),
+        recent_history=recent_history,
+    )
+
+    payload = context.to_json_dict()
+    encoded = json.dumps(payload, ensure_ascii=False)
+    assert "keeper_capabilities" not in encoded
+    assert "success_effects" not in encoded
+    assert "check" not in encoded
+    assert payload["planning_view"]["current_scene_name"] == "书房"
+
+    with pytest.raises(ValidationError, match="recent_history scope"):
+        TurnPlanningContext(
+            player_input=player_input,
+            planning_view=TurnPlanningView.from_player_view(player_view),
             recent_history=recent_history.model_copy(update={"as_of_revision": "6"}),
         )
 

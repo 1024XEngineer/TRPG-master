@@ -9,13 +9,18 @@ from typing import Protocol
 
 from collaboration_framework.contracts import (
     ActionAdjudication,
+    ActionPlan,
     ActionPlanProgressEvent,
     AdjudicationExecution,
     AdjudicationStatusView,
     GetAdjudicationStatusRequest,
     SubmitAdjudicationRequest,
 )
-from collaboration_framework.host.schemas import ActionPlanRun, ActionPlanStepContext
+from collaboration_framework.host.schemas import (
+    ActionPlanRun,
+    ActionPlanStepContext,
+    TurnPlanningContext,
+)
 from collaboration_framework.host.schemas.action_plan import (
     ActionPlanNarrationContext,
 )
@@ -44,7 +49,9 @@ class ActionPlanBusyError(ActionPlanStoreError):
 class ActionPlanRunStore(Protocol):
     async def create(self, run: ActionPlanRun) -> ActionPlanRun: ...
 
-    async def load(self, room_id: str, parent_action_id: str) -> ActionPlanRun | None: ...
+    async def load(
+        self, room_id: str, parent_action_id: str
+    ) -> ActionPlanRun | None: ...
 
     async def load_active_for_player(
         self,
@@ -75,7 +82,15 @@ class ActionPlanRunStore(Protocol):
 class ActionPlanStepAdjudicator(Protocol):
     """Generate one proposal from only the current step and latest PlayerView."""
 
-    async def adjudicate(self, context: ActionPlanStepContext) -> ActionAdjudication: ...
+    async def adjudicate(
+        self, context: ActionPlanStepContext
+    ) -> ActionAdjudication: ...
+
+
+class TurnPlannerPort(Protocol):
+    """Generate a finite semantic plan without adjudicating any step."""
+
+    async def generate(self, context: TurnPlanningContext) -> ActionPlan: ...
 
 
 @dataclass(frozen=True)
@@ -95,7 +110,9 @@ class ActionPlanStepFailure:
 
 
 class SingleAdjudicationExecutor(Protocol):
-    async def submit(self, request: SubmitAdjudicationRequest) -> AdjudicationExecution: ...
+    async def submit(
+        self, request: SubmitAdjudicationRequest
+    ) -> AdjudicationExecution: ...
 
     async def get_status(
         self,

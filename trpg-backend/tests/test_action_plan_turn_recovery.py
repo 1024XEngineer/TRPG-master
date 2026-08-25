@@ -16,6 +16,7 @@ from collaboration_framework.host.application import (
 )
 from collaboration_framework.host.schemas import ActionPlanNarrationContext
 
+from app.adapters.structured_http import StructuredOutputError
 from app.core.action_plan_turn import ActionPlanTurnApplication
 
 
@@ -385,6 +386,36 @@ async def test_required_evidence_fallback_never_changes_clarification_scope() ->
     assert evidence.subject_name not in narration.text
     assert narration.claimed_evidence_refs == ()
     assert narrate.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_narration_retries_unreadable_structured_output_then_uses_safe_fallback() -> None:
+    application = object.__new__(ActionPlanTurnApplication)
+    narrate = AsyncMock(
+        side_effect=[
+            StructuredOutputError("response is not valid structured output"),
+            StructuredOutputError("response is still not valid structured output"),
+        ]
+    )
+    application._narrator = SimpleNamespace(narrate=narrate)
+    evidence = NarrationEvidence(
+        ref="evt-1",
+        kind="entity_discovered",
+        subject_id="x",
+        subject_name="公开结果",
+        description="结果已确认。",
+        required_in_narration=False,
+    )
+    context = cast(
+        ActionPlanNarrationContext,
+        _NarrationContextStub(evidence, "resolved"),
+    )
+
+    narration = await application._narrate(context)
+
+    assert narrate.await_count == 2
+    assert narration.kind == "narration"
+    assert "公开结果" not in narration.text
 
 
 @pytest.mark.asyncio

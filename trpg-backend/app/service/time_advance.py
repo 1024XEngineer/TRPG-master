@@ -13,6 +13,7 @@ from typing import Literal, Protocol
 from uuid import uuid4
 
 from collaboration_framework.contracts import (
+    COMMITTED_ADJUDICATION_STATUSES,
     ActionAdjudication,
     AdjudicationExecution,
     AdjudicationRecovery,
@@ -182,7 +183,10 @@ async def get_pending(
                 action_request_id=record.action_request_id,
             )
         )
-        if engine_status.status == "resolved" and engine_status.execution is not None:
+        if (
+            engine_status.status in COMMITTED_ADJUDICATION_STATUSES
+            and engine_status.execution is not None
+        ):
             # Engine 与提案分别提交。重连必须主动修复“世界时间已推进、
             # 提案仍是 pending”的崩溃窗口，随后由 ActionPlan 恢复 worker 续跑。
             record.status = "approved"
@@ -499,7 +503,10 @@ async def _respond_locked(
             action_request_id=record.action_request_id,
         )
     )
-    if engine_status.status == "resolved" and engine_status.execution is not None:
+    if (
+        engine_status.status in COMMITTED_ADJUDICATION_STATUSES
+        and engine_status.execution is not None
+    ):
         record.status = "approved"
         record.accepted_player_ids = sorted(record.required_player_ids)
         record.committed_revision = int(engine_status.execution.view_revision)
@@ -616,7 +623,16 @@ class ConsentAwareAdjudicationEngine:
                     )
                 if record.status in {"rejected", "expired", "stale"}:
                     execution = _execution(record).model_copy(
-                        update={"status": "cancelled", "outcome": "cancelled"},
+                        update={
+                            "status": "cancelled",
+                            "outcome": "cancelled",
+                            # `model_copy` 不跑 `model_validator(mode="after")`，而
+                            # `AdjudicationExecution` 要求只有 rule_failed 能带
+                            # `rule_failure_code`。不清掉的话这里写出去的记录当场没人
+                            # 拦，等到 `model_validate(record.execution_json)` 读回来
+                            # 才炸（#398 §阶段一）。
+                            "rule_failure_code": None,
+                        },
                         deep=True,
                     )
                     return AdjudicationStatusView(
@@ -654,7 +670,16 @@ class ConsentAwareAdjudicationEngine:
             execution = _execution(record)
             if record.status in {"rejected", "expired", "stale"}:
                 execution = execution.model_copy(
-                    update={"status": "cancelled", "outcome": "cancelled"},
+                    update={
+                        "status": "cancelled",
+                        "outcome": "cancelled",
+                        # `model_copy` 不跑 `model_validator(mode="after")`，而
+                        # `AdjudicationExecution` 要求只有 rule_failed 能带
+                        # `rule_failure_code`。不清掉的话这里写出去的记录当场没人
+                        # 拦，等到 `model_validate(record.execution_json)` 读回来
+                        # 才炸（#398 §阶段一）。
+                        "rule_failure_code": None,
+                    },
                     deep=True,
                 )
             adjudication = _adjudication(record)

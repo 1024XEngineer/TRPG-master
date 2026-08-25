@@ -35,6 +35,7 @@ from collaboration_framework.contracts.module_v3 import (
     RuleSpecV3,
     RuleStepSpec,
 )
+from collaboration_framework.registry import check_profiles as check_profile_registry
 from collaboration_framework.registry import predicates as predicate_registry
 from collaboration_framework.registry import rule_steps as rule_step_registry
 
@@ -392,22 +393,12 @@ def _rule_issues(
                 )
             )
         issues.extend(_actor_binding_issues(step, step_path))
+        issues.extend(_check_profile_issues(step, step_path))
 
-    if rule.presentation is not None:
-        presentation_ids = {rule.presentation.id}
-        for index, step in enumerate(rule.execution.steps):
-            if (
-                getattr(step, "kind", None) == "presentation"
-                and step.presentation_id not in presentation_ids
-            ):
-                issues.append(
-                    ValidationIssue(
-                        severity="error",
-                        code="MODULE_V3_RULE_PRESENTATION_NOT_FOUND",
-                        path=f"{path}.execution.steps.{index}.presentation_id",
-                        message=f"引用了未声明的展示片段: {step.presentation_id}",
-                    )
-                )
+    # 这里曾校验 `presentation` step 的 `presentation_id` 指向 `rule.presentation`
+    # 声明过的片段。随 `RulePresentationSpec` 一起删除（#288 结案、#398 执行）：
+    # 被引用的一侧不存在了，这条检查也就无从谈起。`PresentationStep` 仍在 union
+    # 里但依旧不接通，两个已发布模组都没有用过它。
     return issues
 
 
@@ -434,6 +425,34 @@ def _actor_binding_issues(step: RuleStepSpec, step_path: str) -> list[Validation
             code="MODULE_V3_ACTOR_BINDING_UNKNOWN",
             path=path,
             message=f"引用了未注册的 actor_binding: {binding}",
+        )
+    ]
+
+
+def _check_profile_issues(step: RuleStepSpec, step_path: str) -> list[ValidationIssue]:
+    """被动检定的 `profile_id` 必须在 `registry/check_profiles.py` 里注册过。
+
+    只校验 `initiation_kind == "passive_rule"`，这是刻意收窄，不是遗漏。主动检定
+    的 `profile_id` 走的是 Agent 候选菜单，压根不经过这张表——两个线上模组的 26
+    处主动检定全写着 `coc7.skill`，而 `coc7.skill` 按设计**不**在表里。不收窄的
+    话这条校验会当场拒掉全部已发布内容。
+
+    被动检定不一样：引擎必须自己把 `profile_id` 译成「掷什么、对多少」，译不出来
+    就只能在运行时 `settlement.fail("check_profile_unavailable")`——那时效果已经
+    提交了一半。同样一件事，发布期说比运行时说好。这也让
+    `check_profiles.is_registered` 有了真实消费者。
+    """
+
+    if not isinstance(step, CheckStep) or step.check.initiation_kind != "passive_rule":
+        return []
+    if check_profile_registry.is_registered(step.check.profile_id):
+        return []
+    return [
+        ValidationIssue(
+            severity="error",
+            code="MODULE_V3_CHECK_PROFILE_NOT_REGISTERED",
+            path=f"{step_path}.check.profile_id",
+            message=f"被动检定引用了未注册的 check profile: {step.check.profile_id}",
         )
     ]
 

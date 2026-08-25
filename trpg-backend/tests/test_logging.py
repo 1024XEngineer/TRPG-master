@@ -7,6 +7,7 @@ from structlog.testing import capture_logs
 
 from app.core.logging import AccessNoiseFilter
 from app.core.turn_observability import (
+    log_action_plan_latency,
     log_check_result,
     log_narration_output,
     log_player_input,
@@ -146,5 +147,32 @@ def test_turn_failure_log_has_stable_diagnostics() -> None:
             "error_reason": "",
             "event": "【回合失败】",
             "log_level": "warning",
+        }
+    ]
+
+
+def test_action_plan_latency_log_contains_only_safe_aggregate_fields() -> None:
+    with capture_logs() as logs:
+        log_action_plan_latency(
+            room_id="room-12345678-secret",
+            correlation_id="action-12345678-secret",
+            status="completed",
+            time_to_waiting_check_ms=None,
+            time_to_first_narration_ms=37,
+            time_to_final_narration_ms=42,
+            end_to_end_ms=42,
+        )
+
+    assert logs == [
+        {
+            "room": "room",
+            "action": "action",
+            "status": "completed",
+            "time_to_waiting_check_ms": None,
+            "time_to_first_narration_ms": 37,
+            "time_to_final_narration_ms": 42,
+            "end_to_end_ms": 42,
+            "event": "action_plan_turn_latency",
+            "log_level": "info",
         }
     ]

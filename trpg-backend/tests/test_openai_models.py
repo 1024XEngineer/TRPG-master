@@ -35,9 +35,11 @@ from collaboration_framework.host.schemas import (
     HostAgentContext,
     RecentTurn,
     RecentTurnContext,
+    TurnPlanningContext,
     VisibleHistoryText,
 )
 from pydantic import ValidationError
+from structlog.testing import capture_logs
 
 from app.adapters.deepseek_models import DeepSeekChatCompletionsJsonClient
 from app.adapters.openai_models import (
@@ -46,6 +48,7 @@ from app.adapters.openai_models import (
     OpenAIResponsesJsonClient,
     PromptActionPlanStepAdjudicator,
     PromptHostTurnDecisionModel,
+    PromptTurnPlanner,
 )
 from app.adapters.qwen_models import QwenChatCompletionsJsonClient
 from app.adapters.structured_http import (
@@ -53,7 +56,11 @@ from app.adapters.structured_http import (
     StructuredOutputError,
     is_transient_model_error,
 )
-from app.core.action_plan_turn import build_action_plan_turn_application
+from app.core.action_plan_turn import (
+    build_action_plan_turn_application,
+    semantic_planner_required,
+    semantic_planner_selected,
+)
 from app.core.config import Settings, model_client_retry_policy
 from app.core.turn import _configured_opening_models
 from app.service.character_background import build_character_background_service
@@ -68,6 +75,58 @@ def test_action_plan_narration_uses_final_post_roll_outcome() -> None:
     assert "消耗幸运" in _ACTION_PLAN_NARRATION_INSTRUCTIONS
     assert "outcome=success" in _ACTION_PLAN_NARRATION_INSTRUCTIONS
     assert "最终权威结果" in _ACTION_PLAN_NARRATION_INSTRUCTIONS
+
+
+def test_semantic_planner_rollout_bucket_is_stable() -> None:
+    first = semantic_planner_selected(
+        room_id="room-1",
+        client_action_id="action-1",
+        rollout_percent=25,
+    )
+    assert (
+        semantic_planner_selected(
+            room_id="room-1",
+            client_action_id="action-1",
+            rollout_percent=25,
+        )
+        is first
+    )
+    assert not semantic_planner_selected(
+        room_id="room-1", client_action_id="action-1", rollout_percent=0
+    )
+    assert semantic_planner_selected(
+        room_id="room-1", client_action_id="action-1", rollout_percent=100
+    )
+
+
+@pytest.mark.parametrize(
+    ("utterance", "reason"),
+    [
+        ("观察当前房间", "explicit_single_step"),
+        ("仔细检查书架上的文件", "semantic_uncertainty_marker"),
+        ("先观察房间，然后询问眼前的人", "multi_step_marker"),
+        ("观察房间和窗户", "multi_target_marker"),
+    ],
+)
+def test_semantic_planner_route_preserves_fast_path_for_clear_single_steps(
+    utterance: str,
+    reason: str,
+) -> None:
+    required, actual_reason = semantic_planner_required(utterance)
+
+    assert actual_reason == reason
+    assert required is (reason != "explicit_single_step")
+
+
+def test_semantic_planner_rollout_requires_independent_configuration() -> None:
+    with pytest.raises(ValidationError, match="TURN_PLANNER_PROVIDER"):
+        Settings(host_model_provider="fake", turn_planner_rollout_percent=1)
+    settings = Settings(
+        host_model_provider="fake",
+        turn_planner_provider="fake",
+        turn_planner_rollout_percent=100,
+    )
+    assert settings.turn_planner_rollout_percent == 100
 
 
 def test_action_plan_narration_requires_named_actor_in_multiplayer() -> None:
@@ -246,6 +305,101 @@ async def test_turn_planner_classifies_two_schema_failures_as_model_output() -> 
     assert caught.value.code == "MODEL_OUTPUT_UNREADABLE"
     assert caught.value.retryable is True
     assert client.calls == 2
+
+
+class SemanticPlanClient:
+    def __init__(self, results: list[dict]) -> None:
+        self.results = results
+        self.calls = 0
+
+    async def generate(self, *, schema_name, schema, instructions, input_payload):
+        assert schema_name == "trpg_turn_plan"
+        assert schema["title"] == "ActionPlan"
+        assert "SingleActionDecision" not in json.dumps(schema)
+        assert "ActionAdjudication" not in instructions
+        assert "keeper_capabilities" not in input_payload
+        result = self.results[self.calls]
+        self.calls += 1
+        return result
+
+
+async def test_semantic_turn_planner_returns_action_plan_only() -> None:
+    client = SemanticPlanClient(
+        [
+            {
+                "kind": "action_plan",
+                "goal": "观察房间",
+                "steps": [{"kind": "action", "semantic_goal": "观察房间"}],
+            }
+        ]
+    )
+    context = cast(
+        TurnPlanningContext,
+        SimpleNamespace(
+            player_input=SimpleNamespace(client_action_id="semantic-1"),
+            to_json_dict=lambda: {"player_input": {"utterance": "观察房间"}},
+        ),
+    )
+
+    plan = await PromptTurnPlanner(client).generate(context)
+
+    assert isinstance(plan, ActionPlan)
+    assert len(plan.steps) == 1
+
+
+async def test_semantic_turn_planner_retries_bad_structure_once() -> None:
+    client = SemanticPlanClient(
+        [
+            {"kind": "single_action"},
+            {
+                "kind": "action_plan",
+                "goal": "先观察再询问",
+                "steps": [
+                    {"kind": "action", "semantic_goal": "观察"},
+                    {"kind": "dialogue", "semantic_goal": "询问"},
+                ],
+            },
+        ]
+    )
+    context = cast(
+        TurnPlanningContext,
+        SimpleNamespace(
+            player_input=SimpleNamespace(client_action_id="semantic-2"),
+            to_json_dict=lambda: {"player_input": {"utterance": "先观察再询问"}},
+        ),
+    )
+
+    plan = await PromptTurnPlanner(client).generate(context)
+
+    assert len(plan.steps) == 2
+    assert client.calls == 2
+
+
+async def test_semantic_turn_planner_classifies_transient_provider_failure() -> None:
+    failure = httpx.ReadTimeout(
+        "timeout",
+        request=httpx.Request("POST", "https://example.test/chat/completions"),
+    )
+
+    class FailingClient:
+        async def generate(self, **kwargs):
+            del kwargs
+            raise failure
+
+    context = cast(
+        TurnPlanningContext,
+        SimpleNamespace(
+            player_input=SimpleNamespace(client_action_id="semantic-timeout"),
+            to_json_dict=lambda: {"player_input": {"utterance": "观察房间"}},
+        ),
+    )
+
+    with pytest.raises(TurnExecutionError) as caught:
+        await PromptTurnPlanner(FailingClient()).generate(context)
+
+    assert caught.value.code == "MODEL_UPSTREAM_UNAVAILABLE"
+    assert caught.value.retryable is True
+    assert caught.value.__cause__ is failure
 
 
 async def test_responses_client_posts_strict_schema_and_parses_output() -> None:
@@ -679,6 +833,57 @@ async def test_structured_client_retries_after_timeout_and_succeeds() -> None:
     assert attempts["count"] == 2
 
 
+async def test_structured_client_logs_allowlisted_trace_usage_and_attempts() -> None:
+    attempts = {"count": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise httpx.ReadTimeout("upstream timed out", request=request)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"message": {"content": '{"kind":"unknown"}'}}],
+                "usage": {
+                    "prompt_tokens": 13,
+                    "completion_tokens": 5,
+                    "total_tokens": 18,
+                },
+            },
+        )
+
+    with capture_logs() as logs:
+        result = await _deepseek_client(handler).generate(
+            schema_name="trpg_turn_plan",
+            schema={"type": "object"},
+            instructions="secret-prompt-must-not-appear",
+            input_payload={
+                "player_input": {
+                    "client_action_id": "action-1234567890-secret-tail",
+                    "utterance": "secret-utterance-must-not-appear",
+                },
+                "keeper_capabilities": {"secret": "keeper-payload-must-not-appear"},
+            },
+        )
+
+    assert result == {"kind": "unknown"}
+    completed = next(item for item in logs if item["event"] == "structured_model_call_completed")
+    assert completed["action"] == "action-12345"
+    assert completed["stage"] == "trpg_turn_plan"
+    assert completed["provider"] == "deepseek"
+    assert completed["model"] == "deepseek-chat"
+    assert completed["transport_attempts"] == 2
+    assert completed["prompt_tokens"] == 13
+    assert completed["completion_tokens"] == 5
+    assert completed["total_tokens"] == 18
+    assert isinstance(completed["duration_ms"], int)
+    rendered = json.dumps(logs, ensure_ascii=False)
+    assert "secret-prompt-must-not-appear" not in rendered
+    assert "secret-utterance-must-not-appear" not in rendered
+    assert "keeper-payload-must-not-appear" not in rendered
+    assert "secret-tail" not in rendered
+
+
 async def test_structured_client_retries_after_server_error_and_succeeds() -> None:
     attempts = {"count": 0}
 
@@ -701,10 +906,14 @@ async def test_structured_client_reraises_original_error_after_retries_exhausted
         attempts["count"] += 1
         raise httpx.ReadTimeout("upstream timed out", request=request)
 
-    with pytest.raises(httpx.ReadTimeout):
+    with capture_logs() as logs, pytest.raises(httpx.ReadTimeout):
         await _generate(_deepseek_client(handler))
 
     assert attempts["count"] == 2
+    failed = next(item for item in logs if item["event"] == "structured_model_call_failed")
+    assert failed["failure_code"] == "transport_exhausted"
+    assert failed["transport_attempts"] == 2
+    assert failed["provider"] == "deepseek"
 
 
 async def test_structured_client_does_not_retry_client_errors() -> None:
@@ -1002,8 +1211,13 @@ async def test_client_raises_structured_output_error_on_unparsable_body() -> Non
             },
         )
 
-    with pytest.raises(StructuredOutputError):
+    with capture_logs() as logs, pytest.raises(StructuredOutputError):
         await _generate(_deepseek_client(handler))
+
+    failed = next(item for item in logs if item["event"] == "structured_model_call_failed")
+    assert failed["failure_code"] == "structured_output_unreadable"
+    assert failed["transport_attempts"] == 1
+    assert not any(item["event"] == "structured_model_call_completed" for item in logs)
 
 
 async def test_client_raises_structured_output_error_when_json_is_not_an_object() -> None:

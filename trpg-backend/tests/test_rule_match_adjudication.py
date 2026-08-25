@@ -39,7 +39,11 @@ from collaboration_framework.contracts import (
     RequiredAdjudicationCheck,
     SingleActionDecision,
 )
-from collaboration_framework.engine import InMemoryEngineStore, RuleEngineService
+from collaboration_framework.engine import (
+    AdjudicationEngineService,
+    InMemoryEngineStore,
+    RuleEngineService,
+)
 from collaboration_framework.engine.initialization import create_initial_game_state
 from collaboration_framework.engine.models import ActorState
 from collaboration_framework.host.application import PlayerViewProjector, TurnExecutionError
@@ -50,18 +54,24 @@ from collaboration_framework.host.prompts.action_plan import (
 from collaboration_framework.host.schemas import (
     ActionPlanStepContext,
     HostAgentContext,
+    MemoryContext,
     RecentTurnContext,
 )
 
-from app.adapters.openai_models import _SAFE_ADJUDICATION_INSTRUCTIONS
+from app.adapters.openai_models import _SAFE_ADJUDICATION_INSTRUCTIONS, PromptTurnPlanner
 from app.core.action_plan_turn import (
     DeterministicHostTurnDecisionModel,
+    PlanPrerequisiteResolver,
+    _deterministic_adjudication_miss_reason,
     _deterministic_step_adjudication,
     _DeterministicStepAdjudicator,
     _match_travel_target,
     _normalize_single_travel_decision,
+    _project_plan_prerequisite_facts,
     _RuleFirstStepAdjudicator,
+    build_action_plan_turn_application,
 )
+from app.core.config import Settings
 
 FIXTURE = (
     pathlib.Path(__file__).resolve().parents[2]
@@ -398,6 +408,80 @@ async def test_runtime_venue_can_be_reused_through_a_synonym() -> None:
 
 
 @pytest.mark.asyncio
+async def test_untargeted_public_observation_uses_zero_write_deterministic_path() -> None:
+    context = await _cemetery_context("观察当前房间")
+
+    adjudication = _deterministic_step_adjudication(context)
+
+    assert adjudication is not None
+    assert adjudication.method.family == "observe"
+    assert adjudication.target == ActionTarget(kind="location", id="cemetery")
+    assert adjudication.check == NoAdjudicationCheck()
+    assert adjudication.success_effects == (NarrativeOnlyEffect(),)
+
+
+@pytest.mark.asyncio
+async def test_generic_dialogue_pronoun_resolves_only_one_visible_npc() -> None:
+    context = await _cemetery_context("询问眼前的人", step_kind="dialogue")
+    visible_npc = next(
+        entity for entity in context.player_view.scene.visible_entities if entity.kind == "npc"
+    )
+    current_view = context.player_view.model_copy(
+        update={
+            "scene": context.player_view.scene.model_copy(
+                update={"visible_entities": (visible_npc,)},
+                deep=True,
+            )
+        },
+        deep=True,
+    )
+    context = context.model_copy(update={"player_view": current_view}, deep=True)
+
+    adjudication = _deterministic_step_adjudication(context)
+
+    assert adjudication is not None
+    assert adjudication.method.family == "talk"
+    assert adjudication.target == ActionTarget(kind="entity", id=visible_npc.id)
+    assert adjudication.success_effects == (NarrativeOnlyEffect(),)
+
+
+@pytest.mark.asyncio
+async def test_generic_dialogue_pronoun_stays_unresolved_for_multiple_visible_npcs() -> None:
+    context = await _cemetery_context("询问眼前的人", step_kind="dialogue")
+    visible_npcs = tuple(
+        entity for entity in context.player_view.scene.visible_entities if entity.kind == "npc"
+    )
+    if len(visible_npcs) < 2:
+        pytest.skip()
+    current_view = context.player_view.model_copy(
+        update={
+            "scene": context.player_view.scene.model_copy(
+                update={"visible_entities": visible_npcs[:2]},
+                deep=True,
+            )
+        },
+        deep=True,
+    )
+    context = context.model_copy(update={"player_view": current_view}, deep=True)
+
+    assert _deterministic_step_adjudication(context) is None
+
+
+@pytest.mark.asyncio
+async def test_deterministic_miss_reason_is_player_safe_metadata() -> None:
+    context = await _cemetery_context("仔细检查书架上的文件")
+
+    assert _deterministic_adjudication_miss_reason(context) == "target_missing"
+
+
+@pytest.mark.asyncio
+async def test_dialogue_miss_reason_does_not_include_player_text() -> None:
+    context = await _cemetery_context("询问眼前的人", step_kind="dialogue")
+
+    assert _deterministic_adjudication_miss_reason(context) == "dialogue_target_unresolved"
+
+
+@pytest.mark.asyncio
 async def test_travel_to_current_runtime_venue_is_a_successful_noop() -> None:
     """已在同一 Runtime 地点时，同义地名不应触发重复进入或澄清。"""
 
@@ -712,6 +796,259 @@ async def test_single_travel_builds_plan_when_companion_is_elsewhere() -> None:
     assert "托马斯" in normalized.steps[0].semantic_goal
     assert "会客室" in normalized.steps[0].semantic_goal
     assert "墓地" in normalized.steps[1].semantic_goal
+
+
+async def test_semantic_plan_expands_public_companion_prerequisite() -> None:
+    context = await _cemetery_context("带托马斯去墓地", step_kind="travel")
+    plan = ActionPlan(
+        goal=context.player_input.utterance,
+        steps=(ActionPlanStep(kind="travel", semantic_goal="带托马斯去墓地"),),
+    )
+
+    resolution = PlanPrerequisiteResolver(ActionPlanPolicy()).resolve(
+        plan=plan,
+        facts=_project_plan_prerequisite_facts(
+            player_input=context.player_input,
+            plan=plan,
+            player_view=context.player_view,
+            capabilities=context.keeper_capabilities,
+        ),
+    )
+
+    assert resolution.plan is not None
+    assert len(resolution.plan.steps) == 2
+    assert "托马斯" in resolution.plan.steps[0].semantic_goal
+    assert "会客室" in resolution.plan.steps[0].semantic_goal
+
+
+async def test_semantic_plan_does_not_reveal_hidden_companion_location() -> None:
+    context = await _cemetery_context("带托马斯去墓地", step_kind="travel")
+    hidden_view = context.player_view.model_copy(update={"known_locations": ()}, deep=True)
+    plan = ActionPlan(
+        goal=context.player_input.utterance,
+        steps=(ActionPlanStep(kind="travel", semantic_goal="带托马斯去墓地"),),
+    )
+
+    resolution = PlanPrerequisiteResolver(ActionPlanPolicy()).resolve(
+        plan=plan,
+        facts=_project_plan_prerequisite_facts(
+            player_input=context.player_input,
+            plan=plan,
+            player_view=hidden_view,
+            capabilities=context.keeper_capabilities,
+        ),
+    )
+
+    assert resolution.plan is None
+    assert resolution.failure_code == "PLAN_PREREQUISITE_UNRESOLVED"
+
+
+async def test_semantic_plan_keeps_companion_already_present() -> None:
+    context = await _cemetery_context(
+        "带托马斯去墓地",
+        step_kind="travel",
+        scene_id="thomas_office",
+    )
+    plan = ActionPlan(
+        goal=context.player_input.utterance,
+        steps=(ActionPlanStep(kind="travel", semantic_goal="带托马斯去墓地"),),
+    )
+
+    resolution = PlanPrerequisiteResolver(ActionPlanPolicy()).resolve(
+        plan=plan,
+        facts=_project_plan_prerequisite_facts(
+            player_input=context.player_input,
+            plan=plan,
+            player_view=context.player_view,
+            capabilities=context.keeper_capabilities,
+        ),
+    )
+
+    assert resolution.plan == plan
+
+
+async def test_semantic_plan_does_not_duplicate_explicit_meeting_step() -> None:
+    context = await _cemetery_context("先去会客室找托马斯，再带他去墓地", step_kind="travel")
+    plan = ActionPlan(
+        goal=context.player_input.utterance,
+        steps=(
+            ActionPlanStep(kind="travel", semantic_goal="前往会客室找到托马斯"),
+            ActionPlanStep(kind="travel", semantic_goal="带托马斯前往墓地"),
+        ),
+    )
+
+    resolution = PlanPrerequisiteResolver(ActionPlanPolicy()).resolve(
+        plan=plan,
+        facts=_project_plan_prerequisite_facts(
+            player_input=context.player_input,
+            plan=plan,
+            player_view=context.player_view,
+            capabilities=context.keeper_capabilities,
+        ),
+    )
+
+    assert resolution.plan == plan
+
+
+async def test_semantic_plan_rejects_multiple_offscene_companions() -> None:
+    context = await _cemetery_context("带托马斯和亨利一起去墓地", step_kind="travel")
+    assert context.keeper_capabilities is not None
+    thomas = next(
+        entity for entity in context.keeper_capabilities.entities if "托马斯" in entity.name
+    )
+    capabilities = context.keeper_capabilities.model_copy(
+        update={
+            "entities": (
+                *context.keeper_capabilities.entities,
+                thomas.model_copy(
+                    update={"id": "henry", "name": "亨利", "location_id": "thomas_office"}
+                ),
+            )
+        },
+        deep=True,
+    )
+    plan = ActionPlan(
+        goal=context.player_input.utterance,
+        steps=(ActionPlanStep(kind="travel", semantic_goal=context.player_input.utterance),),
+    )
+
+    resolution = PlanPrerequisiteResolver(ActionPlanPolicy()).resolve(
+        plan=plan,
+        facts=_project_plan_prerequisite_facts(
+            player_input=context.player_input,
+            plan=plan,
+            player_view=context.player_view,
+            capabilities=capabilities,
+        ),
+    )
+
+    assert resolution.plan is None
+    assert resolution.failure_code == "PLAN_PREREQUISITE_AMBIGUOUS"
+
+
+async def test_semantic_plan_rejects_prerequisite_policy_overflow() -> None:
+    context = await _cemetery_context("带托马斯去墓地", step_kind="travel")
+    plan = ActionPlan(
+        goal=context.player_input.utterance,
+        steps=(ActionPlanStep(kind="travel", semantic_goal=context.player_input.utterance),),
+    )
+
+    resolution = PlanPrerequisiteResolver(ActionPlanPolicy(max_plan_steps=1)).resolve(
+        plan=plan,
+        facts=_project_plan_prerequisite_facts(
+            player_input=context.player_input,
+            plan=plan,
+            player_view=context.player_view,
+            capabilities=context.keeper_capabilities,
+        ),
+    )
+
+    assert resolution.plan is None
+    assert resolution.failure_code == "PLAN_PREREQUISITE_TOO_LARGE"
+
+
+class _EmptyMemorySource:
+    async def read_context(self, **kwargs) -> MemoryContext:
+        return MemoryContext(
+            room_id=kwargs["room_id"],
+            player_id=kwargs["player_id"],
+            actor_id=kwargs["actor_id"],
+            as_of_revision=kwargs["revision"],
+        )
+
+
+async def _semantic_application():
+    content = _content()
+    state = create_initial_game_state(
+        content,
+        room_id="semantic-room",
+        actors={
+            "semantic-actor": ActorState(
+                player_id="semantic-player",
+                name="调查员",
+                source_character_id="semantic-character",
+                source_character_version=1,
+                state={"skills": {}},
+            )
+        },
+    )
+    store = InMemoryEngineStore()
+    store.register_room(module_content=content, initial_state=state)
+    engine = RuleEngineService(store)
+    application = build_action_plan_turn_application(
+        store=store,
+        engine=engine,
+        adjudication_engine=AdjudicationEngineService(store),
+        settings=Settings(
+            host_model_provider="fake",
+            turn_planner_provider="fake",
+            turn_planner_rollout_percent=100,
+        ),
+        memory_source=_EmptyMemorySource(),
+    )
+    return application
+
+
+async def test_semantic_one_step_creates_and_executes_normal_run() -> None:
+    application = await _semantic_application()
+
+    result = await application.start(
+        room_id="semantic-room",
+        player_id="semantic-player",
+        client_action_id="semantic-one-step",
+        utterance="仔细检查书架上的文件",
+    )
+
+    assert result.status in {"awaiting_narration", "completed"}
+    run = await application.get_plan("semantic-room", "semantic-one-step")
+    assert run is not None
+    assert len(run.steps) == 1
+    assert run.steps[0].adjudication is not None
+
+
+async def test_semantic_malformed_plan_returns_clarification_without_run() -> None:
+    application = await _semantic_application()
+
+    class InvalidClient:
+        async def generate(self, **kwargs):
+            del kwargs
+            return {"kind": "single_action"}
+
+    application._semantic_planner = PromptTurnPlanner(InvalidClient())
+
+    result = await application.start(
+        room_id="semantic-room",
+        player_id="semantic-player",
+        client_action_id="semantic-invalid",
+        utterance="仔细检查书架上的文件",
+    )
+
+    assert result.status == "needs_clarification"
+    assert result.narration is not None
+    assert await application.get_plan("semantic-room", "semantic-invalid") is None
+
+
+async def test_clear_single_step_uses_legacy_fast_producer_when_semantic_is_enabled() -> None:
+    application = await _semantic_application()
+
+    class InvalidSemanticClient:
+        async def generate(self, **kwargs):
+            del kwargs
+            raise AssertionError("clear single-step input must not enter semantic Planner")
+
+    application._semantic_planner = PromptTurnPlanner(InvalidSemanticClient())
+
+    result = await application.start(
+        room_id="semantic-room",
+        player_id="semantic-player",
+        client_action_id="semantic-fast-path",
+        utterance="观察当前房间",
+    )
+
+    assert result.status in {"awaiting_narration", "completed"}
+    run = await application.get_plan("semantic-room", "semantic-fast-path")
+    assert run is not None
+    assert len(run.steps) == 1
 
 
 @pytest.mark.asyncio

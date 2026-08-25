@@ -516,7 +516,14 @@ class TimeTaskTargetSpec(ContractModel):
         if by_point == by_clock:
             raise ValueError("TimeTaskTarget 必须二选一：point_id 或 hour_of_day")
         if by_point and (self.day_index is not None or self.relative):
-            raise ValueError("绑定默认点的 TimeTaskTarget 不能再声明 day_index 或 relative")
+            raise ValueError(
+                "绑定默认点的 TimeTaskTarget 不能再声明 day_index 或 relative"
+            )
+        if self.relative and self.day_index is not None:
+            # `relative` 说 hour_of_day 是偏移量，`day_index` 属于绝对日历那一
+            # 套。两个一起给就是两种寻址模式并存，而契约没有、也不该有优先级
+            # 规则——到期语义对调度器是歧义的，只能在发布期拒绝。
+            raise ValueError("relative 的 TimeTaskTarget 不能再声明 day_index")
         if by_clock and not self.relative and self.day_index is None:
             raise ValueError("绝对时刻的 TimeTaskTarget 必须声明 day_index")
         return self

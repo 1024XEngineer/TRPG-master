@@ -55,6 +55,27 @@ def _is_time_task_step(item: object) -> bool:
     return isinstance(item, CreateTimeTaskStep | CancelTimeTaskStep)
 
 
+def _ordered_chunks(effects: list[ActionEffect]) -> list[object]:
+    """把有序列表切成「连续效果批」与「单个任务步骤」交替的序列。
+
+    保住作者顺序的同时，让每一批效果都对着它真正会被应用时的那个状态校验。
+    """
+
+    chunks: list[object] = []
+    run: list[ActionEffect] = []
+    for item in effects:
+        if _is_time_task_step(item):
+            if run:
+                chunks.append(run)
+                run = []
+            chunks.append(item)
+            continue
+        run.append(item)
+    if run:
+        chunks.append(run)
+    return chunks
+
+
 # 引擎自己发的审计信号，永远不是规则的输入（#226 §4）。
 AUDIT_EVENT_TYPES = frozenset({"rule.triggered", "rule.agenda_failed"})
 
@@ -485,24 +506,30 @@ class RuleSettlement:
     ) -> GameState:
         """Validate a rule's own effects against the world it sees, then run them."""
 
-        rule_runtime = self.runtime.model_copy(update={"game_state": state}, deep=True)
-        # 定时任务步骤不是 ActionEffect，走的也不是效果登记表；它们与效果共用
-        # 这一个有序列表只是为了保住作者顺序（#415 §阶段四）。
-        self.runner.validate_effects(
-            rule_runtime,
-            tuple(item for item in effects if not _is_time_task_step(item)),
-        )
-        for effect in effects:
-            if _is_time_task_step(effect):
-                state = self._commit_time_task(state, effect, events, rule_id=rule_id)
+        # 校验与提交按列表顺序**交错**。定时任务步骤会改状态（插/删临时
+        # occurrence），一次性把所有效果拿到最初的状态上校验，看到的世界就和
+        # 实际应用时的不是同一个：规则写「创建 19:00 任务 → 推进到 19:00」时
+        # 校验仍以为下一点是默认的 20:00 而拒绝（#415）。
+        #
+        # 一段连续的效果仍然整批校验，因为校验会在效果之间累积 vocabulary
+        # （比如连续两次 advance_world_time 要各自对着前一跳的时钟校验）。
+        # 任务步骤是这些批次的分界。
+        for chunk in _ordered_chunks(effects):
+            if _is_time_task_step(chunk):
+                state = self._commit_time_task(state, chunk, events, rule_id=rule_id)
                 continue
-            state, emitted = self.runner.apply_effect(
-                self.runtime,
-                state,
-                effect,
-                offset=len(events) + 1,
+            rule_runtime = self.runtime.model_copy(
+                update={"game_state": state}, deep=True
             )
-            events.extend(emitted)
+            self.runner.validate_effects(rule_runtime, tuple(chunk))
+            for effect in chunk:
+                state, emitted = self.runner.apply_effect(
+                    rule_runtime,
+                    state,
+                    effect,
+                    offset=len(events) + 1,
+                )
+                events.extend(emitted)
         return state
 
     def _commit_time_task(

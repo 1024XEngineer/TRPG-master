@@ -102,6 +102,12 @@ class TimeTaskTargetTests(unittest.TestCase):
         with self.assertRaisesRegex(ValidationError, "不能再声明"):
             TimeTaskTargetSpec(point_id="hour_18", day_index=1)
 
+    def test_a_relative_target_may_not_also_carry_a_day(self) -> None:
+        """两种寻址模式并存，而契约没有优先级规则——到期语义是歧义的。"""
+
+        with self.assertRaisesRegex(ValidationError, "不能再声明 day_index"):
+            TimeTaskTargetSpec(hour_of_day=3, day_index=1, relative=True)
+
     def test_an_absolute_target_without_a_day_is_refused(self) -> None:
         with self.assertRaisesRegex(ValidationError, "必须声明 day_index"):
             TimeTaskTargetSpec(hour_of_day=15)
@@ -664,6 +670,109 @@ class TimeTaskThroughARuleTests(unittest.IsolatedAsyncioTestCase):
         # 临时点没有 TimePointSpec，玩家措辞回退到 segment 的缺省值。
         self.assertEqual(after.world_time.current_time_segment, "evening")
         self.assertEqual(player_time_label(content, after.world_time), "晚上")
+
+
+class OrderedValidationTests(unittest.IsolatedAsyncioTestCase):
+    """任务步骤之后的效果，要对着任务已经生效的那个世界校验（#415）。"""
+
+    def module_that_schedules_then_advances(self) -> ModuleContentV3:
+        """进入 18:00 时排一个 19:00 的任务，紧接着推进到它。
+
+        19:00 不是默认点。校验若还看着排任务**之前**的状态，就会以为下一跳是
+        默认的 20:00，把这条合法的推进按「不是下一个点」拒掉。
+        """
+
+        content = module()
+        rule = RuleSpecV3.model_validate(
+            {
+                "id": "schedule_then_step_into_it",
+                "priority": 90,
+                "trigger": {
+                    "kind": "event",
+                    "event_type": "time.point_entered",
+                    "when": {
+                        "op": "predicate",
+                        "predicate": "time_point_is",
+                        "args": {"value": "hour_18"},
+                    },
+                    "entry_branch_id": "default",
+                },
+                "execution": {
+                    "branches": [
+                        {"id": "default", "entry_step_id": "schedule"},
+                        {"id": "on_due", "entry_step_id": "arrived"},
+                    ],
+                    "steps": [
+                        {
+                            "id": "schedule",
+                            "kind": "create_time_task",
+                            "task": {
+                                "task_key": "immediate_visitor",
+                                "target": {"day_index": 0, "hour_of_day": 19},
+                                "on_due_branch_id": "on_due",
+                            },
+                            "next_step_id": "step_into_it",
+                        },
+                        {
+                            "id": "step_into_it",
+                            "kind": "effect",
+                            "effect": {
+                                "type": "advance_world_time",
+                                "to_point_id": "occ_d0_h19",
+                            },
+                            "next_step_id": "finish",
+                        },
+                        {
+                            "id": "arrived",
+                            "kind": "effect",
+                            "effect": {
+                                "type": "change_entity_state",
+                                "entity_id": "case_tracker",
+                                "key": "immediate_visitor_arrived",
+                                "value": True,
+                            },
+                            "next_step_id": "finish",
+                        },
+                        {"id": "finish", "kind": "finish"},
+                    ],
+                },
+            }
+        )
+        return content.model_copy(update={"rules": (*content.rules, rule)}, deep=True)
+
+    async def test_an_effect_after_a_task_step_sees_the_task_it_just_created(
+        self,
+    ) -> None:
+        content = self.module_that_schedules_then_advances()
+        store = InMemoryEngineStore()
+        store.register_room(module_content=content, initial_state=game_state(content))
+        engine = AdjudicationEngineService(store)
+
+        await engine.submit(
+            SubmitAdjudicationRequest(
+                room_id=ROOM,
+                player_id=PLAYER,
+                adjudication=ActionAdjudication(
+                    request_id="schedule-then-advance",
+                    source_revision="0",
+                    actor_id=ACTOR,
+                    summary="等到入夜",
+                    target=ActionTarget(kind="location", id="thomas_office"),
+                    method=ActionMethod(family="rest", description="等待"),
+                    check=NoAdjudicationCheck(),
+                    success_effects=(AdvanceWorldTimeEffect(to_point_id="hour_18"),),
+                ),
+            )
+        )
+
+        state = store.inspect_state(ROOM)
+        # 规则里那一跳真的落在了自己刚排出来的临时点上。
+        self.assertEqual(state.world_time.current_point_id, "occ_d0_h19")
+        self.assertEqual(state.world_time.current.hour_of_day, 19)
+        # 而且进入即到期，on_due 分支跑过了。
+        self.assertIs(
+            state.entities["case_tracker"].get("immediate_visitor_arrived"), True
+        )
 
 
 class TaskDueTests(unittest.IsolatedAsyncioTestCase):

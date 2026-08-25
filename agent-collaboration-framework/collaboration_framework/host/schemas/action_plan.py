@@ -424,6 +424,9 @@ class ActionPlanNarrationContext(ContractModel):
     # Only populated for the bounded second narration attempt; contains no
     # hidden data, just the player-safe requirement the first output missed.
     narration_retry_hint: str | None = Field(default=None, max_length=500)
+    # Same-scene published narration from a prior turn. Player-safe only;
+    # the Narrator must not recopy it as a fresh scene-setting opening.
+    previous_published_narration: str | None = Field(default=None, max_length=2000)
 
     @model_validator(mode="after")
     def validate_narration_scope(self) -> ActionPlanNarrationContext:

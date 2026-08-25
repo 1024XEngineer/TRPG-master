@@ -13,6 +13,7 @@ from .action_plan_parser import HostTurnDecisionParser
 from .context_assembler import ContextAssembler
 from .errors import TurnExecutionError
 from .narration_policy import (
+    narration_atmosphere_rejection_reason,
     narration_subject_rejection_reason,
     narration_text_rejection_reason,
     normalize_narration_text,
@@ -44,6 +45,7 @@ __all__ = [
     "TurnExecutionError",
     "compare_repair_semantics",
     "deterministic_opening_narration",
+    "narration_atmosphere_rejection_reason",
     "narration_subject_rejection_reason",
     "narration_text_rejection_reason",
     "normalize_narration_text",

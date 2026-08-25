@@ -1542,6 +1542,8 @@ export default function RoomPage() {
   const [lastSaved, setLastSaved] = useState<string | null>(() => (notesKey ? localStorage.getItem(notesKey) : null) ? new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const composerInputRef = useRef<HTMLTextAreaElement>(null)
+  const recipientMenuRef = useRef<HTMLDivElement>(null)
+  const mentionButtonRef = useRef<HTMLButtonElement>(null)
   const pendingNarrationActionIdRef = useRef<string | null>(null)
   const organizingPhaseStartedAtRef = useRef<number | null>(null)
   const progressClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -1636,6 +1638,19 @@ export default function RoomPage() {
       setProgressLabel(null)
     }, remaining)
   }, [])
+
+  useEffect(() => {
+    if (!recipientMenuOpen) return
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target
+      if (!(target instanceof Node)) return
+      if (recipientMenuRef.current?.contains(target)) return
+      if (mentionButtonRef.current?.contains(target)) return
+      setRecipientMenuOpen(false)
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    return () => document.removeEventListener('pointerdown', onPointerDown)
+  }, [recipientMenuOpen])
 
   useEffect(
     () => () => {
@@ -2840,8 +2855,10 @@ export default function RoomPage() {
                     : speechInput.error}
           </p>
         )}
+        <div className="room-play__composer-anchor">
         {isActionChannel && recipientMenuOpen && (
           <div
+            ref={recipientMenuRef}
             id="dialogue-recipient-list"
             role="listbox"
             aria-label="选择消息接收者"
@@ -2879,6 +2896,7 @@ export default function RoomPage() {
           )}
           {isActionChannel && (
             <button
+              ref={mentionButtonRef}
               type="button"
               aria-label="选择消息接收者"
               title="选择守秘人或 NPC"
@@ -3007,6 +3025,7 @@ export default function RoomPage() {
             </button>
           )}
         </form>
+        </div>
       </div>
 
       {/* ── Panels ── */}

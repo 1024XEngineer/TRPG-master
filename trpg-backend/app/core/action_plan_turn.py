@@ -849,6 +849,26 @@ def _deterministic_clarification_text(context: ActionPlanNarrationContext) -> st
     return f"{actor}暂时无法确认这次行动的具体对象或结果。"
 
 
+def _same_scene_previous_narration(
+    recent_history: RecentTurnContext,
+    scene_id: str | None,
+) -> str | None:
+    """Return the latest published narration that is still in this scene."""
+
+    if not scene_id:
+        return None
+    for turn in reversed(recent_history.turns):
+        narration = turn.published_narration
+        if narration is None:
+            continue
+        if turn.scene_id is not None and turn.scene_id != scene_id:
+            continue
+        text = narration.text.strip()
+        if text:
+            return text[:2000]
+    return None
+
+
 def _acting_address(context: ActionPlanNarrationContext) -> str:
     if getattr(context, "addressing_mode", "second_person") == "named_actor":
         name = getattr(context, "acting_character_name", "") or ""
@@ -1671,6 +1691,10 @@ class ActionPlanTurnApplication:
                 player_input=context.player_input,
                 player_view=context.player_view,
             )
+            recent_history = await self._read_recent_history(
+                player_input=context.player_input,
+                player_view=context.player_view,
+            )
             # 在最终调用 Narrator 前显式构造完整契约，避免依赖未知字段注入或
             # 让记忆只存在于 Python 对象而没有进入序列化 payload。
             context = ActionPlanNarrationContext(
@@ -1689,6 +1713,10 @@ class ActionPlanTurnApplication:
                 allowed_evidence_refs=context.allowed_evidence_refs,
                 narration_evidence=context.narration_evidence,
                 narration_retry_hint=context.narration_retry_hint,
+                previous_published_narration=_same_scene_previous_narration(
+                    recent_history,
+                    getattr(context.player_view, "scene_id", None),
+                ),
             )
         elif isinstance(context, ActionPlanNarrationContext):
             context = context.model_copy(
@@ -1729,6 +1757,16 @@ class ActionPlanTurnApplication:
                                 "上一版叙事遗漏了已提交的玩家可见结果："
                                 + "、".join(item.subject_name for item in missing)
                                 + "。必须在正文明确写出，并 claim 对应 evidence ref。"
+                            )
+                        }
+                    )
+                elif attempt == 0 and exc.reason == "atmosphere_repeat":
+                    context = context.model_copy(
+                        update={
+                            "narration_retry_hint": (
+                                "上一句已发布叙事已经交代了当前地点的氛围。"
+                                "本回合不得用相同或几乎相同的环境开场重铺画面，"
+                                "必须先写本回合的结果、现场变化或最小澄清。"
                             )
                         }
                     )

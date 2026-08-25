@@ -9,6 +9,7 @@ from collaboration_framework.host.application.action_plan_narrator import (
     ActionPlanNarrator,
 )
 from collaboration_framework.host.application.narration_policy import (
+    narration_atmosphere_rejection_reason,
     narration_subject_rejection_reason,
     narration_text_rejection_reason,
     normalize_narration_text,
@@ -163,6 +164,30 @@ class NarrationTextPolicyTests(unittest.TestCase):
             )
         )
 
+    def test_rejects_repeated_atmosphere_opening_from_previous_narration(self) -> None:
+        previous = (
+            "夜色如墨，阿诺兹堡公共墓地沉浸在死一般的寂静中。"
+            "凌铭辉守在那块沉重的石板旁。"
+        )
+        repeated = (
+            "夜色如墨，阿诺兹堡公共墓地沉浸在死一般的寂静中。"
+            "JOJO 站在那块沉重的石板旁，想知道为什么打不开。"
+        )
+        self.assertEqual(
+            narration_atmosphere_rejection_reason(repeated, previous),
+            "atmosphere_repeat",
+        )
+        self.assertIsNone(
+            narration_atmosphere_rejection_reason(
+                "石板纹丝不动。缝隙里只有陈腐的气味，没有能撬开的着力点。",
+                previous,
+            )
+        )
+        self.assertIsNone(narration_atmosphere_rejection_reason(repeated, None))
+        self.assertIsNone(
+            narration_atmosphere_rejection_reason("石板纹丝不动。", previous)
+        )
+
     def test_allows_first_person_in_dialogue_and_quoted_titles(self) -> None:
         cases = (
             "你对托马斯说：“我会保护你们。”",
@@ -239,6 +264,24 @@ class PersistentNarrationPolicyTests(unittest.IsolatedAsyncioTestCase):
                 _PersistentNarrationModel("你打开了抽屉。")
             ).narrate(context)
         self.assertEqual(raised.exception.reason, "subject_ownership")
+
+    async def test_named_actor_mode_rejects_repeated_atmosphere_opening(self):
+        previous = "夜色如墨，阿诺兹堡公共墓地沉浸在死一般的寂静中。凌铭辉守在石板旁。"
+        context = self._context().model_copy(
+            update={
+                "addressing_mode": "named_actor",
+                "acting_character_name": "JOJO",
+                "previous_published_narration": previous,
+            }
+        )
+        with self.assertRaises(ActionPlanNarrationValidationError) as raised:
+            await ActionPlanNarrator(
+                _PersistentNarrationModel(
+                    "夜色如墨，阿诺兹堡公共墓地沉浸在死一般的寂静中。"
+                    "JOJO 站在石板旁，却说不清为什么打不开。"
+                )
+            ).narrate(context)
+        self.assertEqual(raised.exception.reason, "atmosphere_repeat")
 
     async def test_rejects_uncommitted_unconscious_claim(self):
         with self.assertRaises(ActionPlanNarrationValidationError):

@@ -5,7 +5,12 @@ from __future__ import annotations
 import re
 from typing import Literal
 
-NarrationRejectionReason = Literal["protocol_tail", "schema_fragment", "subject_ownership"]
+NarrationRejectionReason = Literal[
+    "protocol_tail",
+    "schema_fragment",
+    "subject_ownership",
+    "atmosphere_repeat",
+]
 
 _NARRATION_FIELD = (
     r"(?<![A-Za-z0-9_])"
@@ -219,4 +224,41 @@ def narration_subject_rejection_reason(
         return "subject_ownership"
     if addressing_mode == "named_actor" and _SECOND_PERSON_RE.search(prose):
         return "subject_ownership"
+    return None
+
+
+_ATMOSPHERE_OPENING_MIN_CHARS = 12
+
+
+def _first_narration_sentence(text: str) -> str:
+    stripped = text.strip()
+    for index, character in enumerate(stripped):
+        if character in _SENTENCE_END_CHARS:
+            return stripped[: index + 1].strip()
+    return stripped[:40].strip()
+
+
+def narration_atmosphere_rejection_reason(
+    text: str,
+    previous_published_narration: str | None,
+) -> Literal["atmosphere_repeat"] | None:
+    """Reject recopying the previous turn's scene-setting opening sentence.
+
+    Opening narration and a newly arrived location have no previous same-scene
+    text, so callers pass None and this returns None. Quoted speech is not
+    stripped: an identical atmospheric opener is wrong even if it later quotes
+    an NPC.
+    """
+
+    if not previous_published_narration or not text.strip():
+        return None
+    new_open = _first_narration_sentence(text)
+    old_open = _first_narration_sentence(previous_published_narration)
+    if len(new_open) < _ATMOSPHERE_OPENING_MIN_CHARS:
+        return None
+    if new_open == old_open:
+        return "atmosphere_repeat"
+    shorter, longer = sorted((new_open, old_open), key=len)
+    if len(shorter) >= _ATMOSPHERE_OPENING_MIN_CHARS and longer.startswith(shorter):
+        return "atmosphere_repeat"
     return None

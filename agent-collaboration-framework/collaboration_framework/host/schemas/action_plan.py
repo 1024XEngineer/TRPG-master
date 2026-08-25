@@ -188,15 +188,16 @@ class ActionPlanStepRun(ContractModel):
 def _migrate_persisted_clock(value: object) -> object:
     """把收窄前存下的时钟快照翻译成 `WorldClockView` 现在的形状（#415）。
 
-    `WorldClockView` 以前是 `{day_index, hour_of_day, time_of_day}`，现在只有
-    `time_label`。两者都被 `to_persistence_json_dict()` 原样写进
+    `WorldClockView` 以前是 `{day_index, hour_of_day, time_of_day}`，现在是
+    `{time_label, day_index}`。两者都被 `to_persistence_json_dict()` 原样写进
     `action_plan_runs.run_json`，而 `ContractModel` 是 `extra="forbid"` 的——
     发布瞬间处于 active / waiting / awaiting_consent 的计划会在恢复时直接
     ValidationError，玩家当前行动卡死。
 
     旧记录里没有 label 可用（那时模组还不能声明），只能由小时推导 canonical
     segment 的缺省措辞。这与既有房间 `WorldTimeState` 缺 segment 时的回退是
-    同一条：玩家该看到的东西和精确小时无关，回退是安全的。
+    同一条：玩家该看到的东西和精确小时无关，回退是安全的。`day_index` 不在
+    收窄范围内，旧记录里存着就照搬。
     """
 
     if not isinstance(value, dict) or "time_label" in value:
@@ -204,7 +205,12 @@ def _migrate_persisted_clock(value: object) -> object:
     hour = value.get("hour_of_day")
     if not isinstance(hour, int) or isinstance(hour, bool):
         return value
-    return {"time_label": default_label_for(segment_at_hour(hour))}
+    day = value.get("day_index")
+    migrated: JsonObject = {"time_label": default_label_for(segment_at_hour(hour))}
+    # 天数不在收窄范围内，旧记录里存着就照搬，不必由小时推。
+    if isinstance(day, int) and not isinstance(day, bool):
+        migrated["day_index"] = day
+    return migrated
 
 
 def _migrate_persisted_clocks(value: JsonObject) -> JsonObject:

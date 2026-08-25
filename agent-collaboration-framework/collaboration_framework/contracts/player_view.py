@@ -151,13 +151,17 @@ class ProjectionWorldState(ContractModel):
     an Engine commit changes authoritative state that neither the Agent's next
     turn nor the player can observe.
 
-    时间只投模组允许玩家看到的措辞。`day_index` / `hour_of_day` 是权威状态，
-    不是显示文案——玩家看到「第 1 天 22:00」既越过了模组的叙事措辞，也把只有
-    Keeper 该知道的精确时刻交了出去（#415 §阶段一）。精确值继续保留在
-    `GameState` 与 `KeeperTimeCapability`，这里不做数据降精度，只做投影收窄。
+    收窄掉的是**小时**：「22:00」是模组的叙事特权，让引擎替它决定措辞就越过了
+    作者；而且精确时刻只有 Keeper 该知道（#415 §阶段一）。`hour_of_day` 因此
+    只留在 `GameState` 与 `KeeperTimeCapability`。
+
+    天数不在收窄范围内。它比小时粗一个量级，泄露不了模组想藏的东西，却是玩家
+    唯一能感知调查节奏的坐标——多日模组里只说「下午」，玩家分不清这是第一天
+    还是第三天。
     """
 
     time_label: str = Field(default="下午", min_length=1)
+    day_index: int = Field(default=0, ge=0)
     # 时间线走到终点后为 False。前端**只**据这一个字段把「下一个时间点」按钮
     # 置灰——按 label 或 point id 去推断等于让玩家侧重新实现一遍终点规则，而
     # 那条规则的权威副本在引擎里（#415 §阶段二）。
@@ -366,6 +370,7 @@ class WorldStateView(ContractModel):
     """
 
     time_label: str = Field(default="下午", min_length=1)
+    day_index: int = Field(default=0, ge=0)
     can_advance_time: bool = True
     core_resolved: bool = False
     ending_available: bool = False
@@ -382,15 +387,16 @@ class WorldClockView(ContractModel):
     This is the one field that repairs that, so it deliberately carries the clock
     alone and none of the other world flags.
 
-    措辞同样只到 label 为止：Narrator 只能说模组允许玩家看到的措辞，不能报出
-    精确小时（#415 §阶段一）。
+    措辞到 label 与天数为止：Narrator 能说「下午」「第二天」，不能报出精确小时
+    （#415 §阶段一）。
     """
 
     time_label: str = Field(default="下午", min_length=1)
+    day_index: int = Field(default=0, ge=0)
 
     @classmethod
     def from_world(cls, world: WorldStateView) -> WorldClockView:
-        return cls(time_label=world.time_label)
+        return cls(time_label=world.time_label, day_index=world.day_index)
 
 
 class KnownInformationView(ContractModel):

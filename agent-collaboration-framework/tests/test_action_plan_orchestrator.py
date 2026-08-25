@@ -1600,8 +1600,11 @@ def test_a_run_persisted_before_the_clock_narrowing_still_recovers() -> None:
 
     assert restored.opening_world_time is not None
     assert restored.opening_world_time.time_label == "下午"
+    assert restored.opening_world_time.day_index == 0
     assert restored.steps[0].world_time_after is not None
     assert restored.steps[0].world_time_after.time_label == "晚上"
+    # 天数不在收窄范围内，旧记录里存着就照搬，不由小时推。
+    assert restored.steps[0].world_time_after.day_index == 1
     # 没存过时钟的步骤保持 None，不该被伪造出一个。
     assert restored.steps[1].world_time_after is None
 

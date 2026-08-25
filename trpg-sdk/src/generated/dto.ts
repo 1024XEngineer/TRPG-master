@@ -1631,15 +1631,19 @@ export interface SystemQuickGenerateResult {
 /**
  * 广播完整待确认状态，供所有客户端幂等覆盖本地确认条。
  *
- * 只投模组允许玩家看到的措辞。精确目标留在提案记录里做校验与恢复——
- * 只删 PlayerView 字段而让确认弹窗照旧显示「第 1 天 22:00」，等于没收窄
- * （#415 §阶段一）。`target_point_id` 一并去掉：`hour_22` 反推得出小时。
+ * 投模组允许玩家看到的措辞加天数，不投精确小时。收窄掉的是「22:00」——那是
+ * 模组的叙事特权，也是只有 Keeper 该知道的东西；`target_point_id` 一并去掉，
+ * `hour_22` 反推得出小时（#415 §阶段一）。
+ *
+ * 天数留着：要不要同意「睡到第二天」，玩家得先知道这一跳跨不跨天。精确目标
+ * 仍在提案记录里，做提交校验与断线恢复。
  */
 export interface TimeAdvancePendingPayload {
   proposalId: string;
   proposalVersion: number;
   sourceRevision: string;
   targetLabel: string;
+  targetDayIndex: number;
   requesterPlayerId: string;
   requiredPlayerIds: string[];
   acceptedPlayerIds: string[];
@@ -1653,6 +1657,7 @@ export interface TimeAdvanceResolvedPayload {
   proposalId: string;
   status: "approved" | "rejected" | "expired" | "stale";
   targetLabel: string;
+  targetDayIndex: number;
   committedRevision?: string | null;
 }
 
@@ -1768,6 +1773,7 @@ export interface VisibleEntity {
  */
 export interface WorldStateView {
   time_label?: string;
+  day_index?: number;
   can_advance_time?: boolean;
   core_resolved?: boolean;
   ending_available?: boolean;

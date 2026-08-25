@@ -204,7 +204,10 @@ async def test_broadcast_payloads_carry_only_the_module_wording(
     resolved = time_advance._resolved_payload(record).model_dump(by_alias=True)
     assert resolved["targetLabel"] == "晚上"
 
-    leaked = {"targetPointId", "targetDayIndex", "targetHourOfDay"}
+    assert pending["targetDayIndex"] == 0
+    assert resolved["targetDayIndex"] == 0
+    # 小时与能反推出小时的 point id 仍然不许过网；天数不在收窄范围内。
+    leaked = {"targetPointId", "targetHourOfDay"}
     assert not leaked & pending.keys()
     assert not leaked & resolved.keys()
 

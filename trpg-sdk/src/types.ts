@@ -379,10 +379,11 @@ export interface AgentWorldState {
   /**
    * 离散世界时间（#245）：时间只在授权的时间点之间跳转，不按分钟流逝。
    *
-   * 玩家侧只拿得到模组声明的措辞（「晚上」「黎明」），不是「第 1 天 22:00」。
-   * 精确的 day_index / hour_of_day 是权威状态，留在 Keeper 侧（#415 §阶段一）。
+   * 玩家侧拿到的是模组声明的措辞（「晚上」「黎明」）加天数，不是「22:00」。
+   * 精确的 hour_of_day 是权威状态，只留在 Keeper 侧（#415 §阶段一）。
    */
   time_label: string;
+  day_index: number;
   /**
    * 时间线走到终点后为 false。UI 只据这一个字段禁用「下一个时间点」，不要按
    * time_label 或 point id 去推断终点（#415 §阶段二）。

@@ -134,6 +134,7 @@ def project_v3(
         inventory=inventory,
         world=ProjectionWorldState(
             time_label=time_label,
+            day_index=state.world_time.current.day_index,
             # 玩家侧只需要知道按钮能不能按。为什么不能按（终点？还是等别人
             # 确认？）是 Keeper 侧的事，前端不得据 label 或 point id 去推断。
             can_advance_time=not terminal_reached(module, state.world_time),

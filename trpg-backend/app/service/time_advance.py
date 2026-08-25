@@ -82,6 +82,7 @@ def _pending_payload(record: TimeAdvanceProposalRecord) -> TimeAdvancePendingPay
         proposal_version=record.proposal_version,
         source_revision=str(record.source_revision),
         target_label=_target_label(record),
+        target_day_index=record.target_day_index,
         requester_player_id=record.requester_player_id,
         required_player_ids=list(record.required_player_ids),
         accepted_player_ids=list(record.accepted_player_ids),
@@ -105,6 +106,7 @@ def _resolved_payload(record: TimeAdvanceProposalRecord) -> TimeAdvanceResolvedP
         proposal_id=record.proposal_id,
         status=status,
         target_label=_target_label(record),
+        target_day_index=record.target_day_index,
         committed_revision=(
             str(record.committed_revision) if record.committed_revision is not None else None
         ),

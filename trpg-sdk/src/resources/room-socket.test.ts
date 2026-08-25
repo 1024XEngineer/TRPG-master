@@ -57,6 +57,7 @@ const completedEvent = {
       },
       world: {
         time_label: '晚上',
+        day_index: 1,
         can_advance_time: true,
         core_resolved: false,
         ending_available: false,
@@ -324,6 +325,7 @@ test('isValidServerEvent：校验共享时间提案与终态', () => {
         proposalVersion: 2,
         sourceRevision: '8',
         targetLabel: '晚上',
+        targetDayIndex: 1,
         requesterPlayerId: 'player-1',
         requiredPlayerIds: ['player-1', 'player-2'],
         acceptedPlayerIds: ['player-1'],
@@ -351,6 +353,7 @@ test('isValidServerEvent：校验共享时间提案与终态', () => {
         proposalId: 'time-349',
         status: 'approved',
         targetLabel: '晚上',
+        targetDayIndex: 1,
         committedRevision: '9',
       },
     }),

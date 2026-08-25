@@ -364,6 +364,16 @@ const PHASE_LABELS: Record<AgentTurnPhase, string> = {
 const ORGANIZING_PHASE_MIN_MS = 600
 
 /**
+ * 世界时间的天数：day_index 从 0 起算，玩家看到的是「第 1 天」。
+ *
+ * 只格式化天数，不碰小时——小时是模组的叙事特权，玩家侧只拿得到模组声明的
+ * 措辞（#415）。
+ */
+function formatDay(dayIndex: number): string {
+  return `第 ${dayIndex + 1} 天`
+}
+
+/**
  * 3D 掷骰从受理到定格的上限。超过就退回 2D 把这次掷骰补完。
  *
  * 必须明显高于动画自身的封顶：引擎是 MAX_TUMBLE_SECONDS 4.5s + SETTLE 0.55s
@@ -2603,7 +2613,10 @@ export default function RoomPage() {
           <div className="room-play__time-consent-summary">
             <Clock3 aria-hidden="true" strokeWidth={2} />
             <div>
-              <strong>{pendingTimeAdvance.targetLabel}</strong>
+              <strong>
+                {pendingTimeAdvance.targetLabel} ·{' '}
+                {formatDay(pendingTimeAdvance.targetDayIndex)}
+              </strong>
               <span>
                 {pendingTimeAdvance.acceptedPlayerIds.length}/
                 {pendingTimeAdvance.requiredPlayerIds.length} 人已确认
@@ -3134,7 +3147,7 @@ export default function RoomPage() {
           </span>
           {playerView?.world && (
             <span className="text-[10px] text-text-dim mt-1">
-              {playerView.world.time_label}
+              {playerView.world.time_label} · {formatDay(playerView.world.day_index)}
               {/*
                 时间线走到终点。只据 can_advance_time 判断——按 time_label 去
                 推断等于在玩家侧重新实现一遍终点规则，而权威副本在引擎里

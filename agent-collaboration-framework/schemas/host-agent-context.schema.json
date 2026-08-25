@@ -2057,6 +2057,12 @@
           "title": "Time Label",
           "type": "string"
         },
+        "day_index": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Day Index",
+          "type": "integer"
+        },
         "can_advance_time": {
           "default": true,
           "title": "Can Advance Time",

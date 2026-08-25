@@ -23,7 +23,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal, Protocol
 
-from collaboration_framework.contracts import ActionEffect, ModuleContentV3, RuleSpecV3
+from collaboration_framework.contracts import (
+    ActionEffect,
+    CancelTimeTaskStep,
+    CreateTimeTaskStep,
+    ModuleContentV3,
+    RuleSpecV3,
+)
 
 from .models import (
     AgendaItem,
@@ -41,6 +47,12 @@ from .rules_v3 import (
     walk_rule,
     walk_rule_from,
 )
+from .time_tasks import cancel_time_task, create_time_task
+
+
+def _is_time_task_step(item: object) -> bool:
+    return isinstance(item, CreateTimeTaskStep | CancelTimeTaskStep)
+
 
 # 引擎自己发的审计信号，永远不是规则的输入（#226 §4）。
 AUDIT_EVENT_TYPES = frozenset({"rule.triggered", "rule.agenda_failed"})
@@ -334,7 +346,7 @@ class RuleSettlement:
                 visibility="hidden",
             )
         )
-        state = self.commit_effects(state, walk.effects, events)
+        state = self.commit_effects(state, walk.effects, events, rule_id=rule.id)
 
         status = agenda_status_for_walk(rule, walk)
         if status == "stable":
@@ -390,7 +402,7 @@ class RuleSettlement:
             )
             return self._result(state)
         self.agenda = self.agenda.model_copy(update={"step_count": next_step_count})
-        state = self.commit_effects(state, walk.effects, events)
+        state = self.commit_effects(state, walk.effects, events, rule_id=rule.id)
 
         status = agenda_status_for_walk(rule, walk)
         if status == "stable":
@@ -456,12 +468,22 @@ class RuleSettlement:
         state: GameState,
         effects: list[ActionEffect],
         events: list[DomainEvent],
+        *,
+        rule_id: str,
     ) -> GameState:
         """Validate a rule's own effects against the world it sees, then run them."""
 
         rule_runtime = self.runtime.model_copy(update={"game_state": state}, deep=True)
-        self.runner.validate_effects(rule_runtime, tuple(effects))
+        # 定时任务步骤不是 ActionEffect，走的也不是效果登记表；它们与效果共用
+        # 这一个有序列表只是为了保住作者顺序（#415 §阶段四）。
+        self.runner.validate_effects(
+            rule_runtime,
+            tuple(item for item in effects if not _is_time_task_step(item)),
+        )
         for effect in effects:
+            if _is_time_task_step(effect):
+                state = self._commit_time_task(state, effect, events, rule_id=rule_id)
+                continue
             state, emitted = self.runner.apply_effect(
                 self.runtime,
                 state,
@@ -469,6 +491,58 @@ class RuleSettlement:
                 offset=len(events) + 1,
             )
             events.extend(emitted)
+        return state
+
+    def _commit_time_task(
+        self,
+        state: GameState,
+        step: CreateTimeTaskStep | CancelTimeTaskStep,
+        events: list[DomainEvent],
+        *,
+        rule_id: str,
+    ) -> GameState:
+        """就地排定 / 取消一个任务，然后继续往下走，不挂起 Agenda。
+
+        目标时间在**这一刻**才解析：相对目标依赖当时的世界时钟，而同一条规则
+        里前面的效果可能已经推进过时间。
+
+        `rule_id` 由调用方传进来而不是读 `agenda.current_rule_id`——后者只在
+        walk **挂起**时才写，正常跑完的 walk 上它是空的。任务 id 从
+        rule + key + bindings 推导，rule 拿错等于任务永远取消不掉。
+        """
+
+        if isinstance(step, CreateTimeTaskStep):
+            state, task, occurrence = create_time_task(
+                self.runtime.module_content, state, step, rule_id=rule_id
+            )
+            payload: dict = {
+                "task_id": task.task_id,
+                "task_key": task.task_key,
+                "rule_id": task.rule_id,
+                "occurrence_id": task.occurrence_id,
+                # 隐藏任务的临时点只向 Host 暴露；事件本身是 hidden 的。
+                "created_occurrence": occurrence is not None,
+            }
+            event_type = "time.task_scheduled"
+        else:
+            state, cancelled = cancel_time_task(state, step, rule_id=rule_id)
+            payload = {
+                "task_key": step.task_key,
+                "rule_id": rule_id,
+                "reason_code": step.reason_code,
+                # 取消一个不存在或已结算的任务不是错误，但要能在审计里看出来。
+                "cancelled": cancelled is not None,
+            }
+            event_type = "time.task_cancelled"
+        events.append(
+            self.runner.emit_event(
+                state,
+                offset=len(events) + 1,
+                event_type=event_type,
+                payload=payload,
+                visibility="hidden",
+            )
+        )
         return state
 
     def _set_item(self, index: int, status: str) -> None:

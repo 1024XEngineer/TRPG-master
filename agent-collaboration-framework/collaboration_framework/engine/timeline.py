@@ -24,10 +24,17 @@ from collaboration_framework.contracts import (
     default_label_for,
 )
 
-from .models import WorldTimePoint, WorldTimeState
+from .models import TimePointOccurrence, WorldTimePoint, WorldTimeState
 
 
 def ordered_points(module_content: ModuleContentV3) -> tuple[TimePointSpec, ...]:
+    """模组声明的默认点，按 `order`（也就是环上的位置）排序。
+
+    只有默认点。剧情临时点是运行态，由 `next_point_after` 在解析下一跳时合并
+    进来——它们不属于模组内容，混进这里会让「模组声明了哪些点」这个问题变得
+    依赖房间状态。
+    """
+
     return tuple(sorted(module_content.time_policy.default_points, key=lambda item: item.order))
 
 
@@ -77,6 +84,7 @@ def terminal_reached(
 def next_point_after(
     module_content: ModuleContentV3,
     world_time: WorldTimeState,
+    occurrences: Sequence[TimePointOccurrence] = (),
 ) -> tuple[TimePointSpec, WorldTimePoint]:
     """The single point the room is allowed to enter next.
 
@@ -116,12 +124,52 @@ def next_point_after(
     else:
         target = points[0]
         day_index = world_time.current.day_index + 1
-    return target, WorldTimePoint(day_index=day_index, hour_of_day=target.hour_of_day)
+    moment = WorldTimePoint(day_index=day_index, hour_of_day=target.hour_of_day)
+
+    # 剧情临时点插在两个默认点之间：如果还有任务等在「现在」和「默认的下一
+    # 跳」之间，那一刻才是真正的下一跳（#245 §一.5 / #415 §阶段四）。
+    pending = _earliest_pending_occurrence(
+        occurrences,
+        after=world_time.current.absolute_hour,
+        before=moment.absolute_hour,
+    )
+    if pending is not None:
+        return (
+            TimePointSpec(
+                id=pending.occurrence_id,
+                hour_of_day=pending.hour_of_day,
+                # 临时点不在环上，`order` 只是为了满足契约；排序走的是绝对
+                # 时刻，不是这个字段。
+                order=0,
+                time_segment=pending.time_segment,
+            ),
+            WorldTimePoint(day_index=pending.day_index, hour_of_day=pending.hour_of_day),
+        )
+    return target, moment
+
+
+def _earliest_pending_occurrence(
+    occurrences: Sequence[TimePointOccurrence],
+    *,
+    after: int,
+    before: int,
+) -> TimePointOccurrence | None:
+    """严格落在这两个绝对时刻之间的最早那个临时点。
+
+    两端都是开区间：等于 `after` 的点就是现在，已经到过了；等于 `before` 的
+    点和默认的下一跳同刻，绑的是那个点本身，不需要额外插一次。
+    """
+
+    candidates = [item for item in occurrences if after < item.absolute_hour < before]
+    if not candidates:
+        return None
+    return min(candidates, key=lambda item: item.absolute_hour)
 
 
 def advanced_to_next(
     module_content: ModuleContentV3,
     world_time: WorldTimeState,
+    occurrences: Sequence[TimePointOccurrence] = (),
 ) -> WorldTimeState:
     """Pure resolution of one jump; committing it is the caller's transaction.
 
@@ -129,7 +177,7 @@ def advanced_to_next(
     逐点声明的 `time_segment` 只能在这一刻落库（#415 §阶段一）。
     """
 
-    target, moment = next_point_after(module_content, world_time)
+    target, moment = next_point_after(module_content, world_time, occurrences)
     return WorldTimeState(
         current=moment,
         current_point_id=target.id,

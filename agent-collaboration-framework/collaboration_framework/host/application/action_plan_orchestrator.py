@@ -197,6 +197,8 @@ class ActionPlanOrchestrator:
             # fall back to the paraphrase only for runs persisted before
             # parent_utterance existed.
             utterance=run.parent_utterance or run.plan.goal,
+            interlocutor_id=run.parent_interlocutor_id,
+            interlocutor_name=run.parent_interlocutor_name,
         )
         return await self._advance_loaded(
             player_input,
@@ -866,6 +868,8 @@ class ActionPlanOrchestrator:
             plan_id=plan_id,
             parent_action_id=player_input.client_action_id,
             parent_input_fingerprint=player_input_fingerprint(player_input),
+            parent_interlocutor_id=player_input.interlocutor_id,
+            parent_interlocutor_name=player_input.interlocutor_name,
             parent_utterance=player_input.utterance,
             room_id=player_input.room_id,
             player_id=player_input.player_id,
@@ -1421,6 +1425,8 @@ class ActionPlanOrchestrator:
             or run.actor_id != player_input.actor_id
             or run.parent_action_id != player_input.client_action_id
             or run.parent_input_fingerprint != player_input_fingerprint(player_input)
+            or run.parent_interlocutor_id != player_input.interlocutor_id
+            or run.parent_interlocutor_name != player_input.interlocutor_name
         ):
             raise ActionPlanPolicyError(
                 "PARENT_ACTION_CONFLICT",

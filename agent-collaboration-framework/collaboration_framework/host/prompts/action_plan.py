@@ -74,6 +74,10 @@ def host_turn_decision_instructions(policy: ActionPlanPolicy) -> str:
 - 当前绝对技术安全上限是 {policy.max_plan_steps} 步。若玩家明确目标超过该上限，
   不得截断或假装完成，应该请求玩家拆分或缩小目标。
 - 无法安全切分时请求澄清，不能丢失玩家表达的后续目标。
+- 如果 player_input.interlocutor_id / interlocutor_name 存在，说明这句话主要是说给一个
+  具体且当前可见的 NPC 听，不是切到“纯聊天模式”。主持仍然要理解威胁、说服、套话、
+  逼供、试探等社交意图；如果同一句里既在和 NPC 说话，又顺手塞进了明确的旅行、检定、
+  撬门、攻击或使用物品等立即行动，就先澄清整句，不要自动拆成两次执行。
 """.strip()
 
 

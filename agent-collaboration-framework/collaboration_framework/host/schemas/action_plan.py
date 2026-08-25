@@ -193,6 +193,8 @@ class ActionPlanRun(ContractModel):
     plan_id: str = Field(min_length=1, max_length=100)
     parent_action_id: str = Field(min_length=1, max_length=200)
     parent_input_fingerprint: str = Field(min_length=64, max_length=64)
+    parent_interlocutor_id: str | None = Field(default=None, min_length=1)
+    parent_interlocutor_name: str | None = Field(default=None, min_length=1)
     # The verbatim utterance the fingerprint above was computed from. Needed to
     # rebuild a fingerprint-matching PlayerInput on resume: `plan.goal` is a
     # model-authored paraphrase and is not guaranteed to match the original

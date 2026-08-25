@@ -12,11 +12,16 @@ from collaboration_framework.contracts import (
     ActionTarget,
     AdjudicationExecution,
     AdvanceWorldTimeEffect,
+    CreateTimeTaskStep,
+    ModuleContentV3,
     NoAdjudicationCheck,
     SubmitAdjudicationRequest,
+    TimeTaskSpec,
+    TimeTaskTargetSpec,
 )
 from collaboration_framework.contracts.validation import AdjudicationValidationError
 from collaboration_framework.engine import AdjudicationEngineService, GameState
+from collaboration_framework.engine.time_tasks import create_time_task
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -253,6 +258,64 @@ async def test_terminal_point_refuses_before_any_vote_is_collected(
         )
 
     assert await time_advance._active_record(db_session, room.id) is None
+
+
+@pytest.mark.asyncio
+async def test_proposal_targets_the_temporary_point_the_engine_would_enter(
+    db_session: AsyncSession,
+) -> None:
+    """多人提案必须和引擎用同一套推进解析（#415）。
+
+    Engine 校验/应用 advance_world_time 时传了 active_occurrences，应用层冻结
+    目标时没传。只要下一跳是定时任务插入的临时点，两边就会算出不同的点：显式
+    to_point_id 被误判「不是下一个点」，省略时存下的 label 与最终提交不一致 ——
+    临时任务在多人房间永远到不了。
+    """
+
+    room, players, _ = await _start_room(
+        db_session,
+        room_number=3497,
+        player_count=2,
+        prepare_checkpoint=False,
+    )
+    session = await db_session.get(GameSession, room.id)
+    assert session is not None
+    version = await db_session.get(ModuleVersion, (session.module_id, session.module_version))
+    assert version is not None
+    module = ModuleContentV3.model_validate(version.content_json)
+
+    # 房间从 hour_12 开局；在 12 与 18 之间排一个 15:00 的任务。
+    state = GameState.model_validate(session.state_json)
+    step = CreateTimeTaskStep(
+        id="schedule",
+        task=TimeTaskSpec(
+            task_key="afternoon_visitor",
+            target=TimeTaskTargetSpec(day_index=0, hour_of_day=15),
+            on_due_branch_id="default",
+        ),
+        next_step_id="finish",
+    )
+    state, task, _ = create_time_task(module, state, step, rule_id="scheduler")
+    session.state_json = state.model_dump(mode="json")
+    await db_session.commit()
+
+    await time_advance.create_from_adjudication(
+        db_session,
+        _request(
+            room_id=room.id,
+            player_id=players[0].id,
+            actor_id="actor_1",
+            revision=session.state_version,
+            action_id="time-temp-point-415",
+        ),
+    )
+
+    record = await time_advance._active_record(db_session, room.id)
+    assert record is not None
+    # 下一跳是 15:00 那个临时点，不是默认的 hour_18。
+    assert record.target_point_id == task.occurrence_id
+    assert record.target_hour_of_day == 15
+    assert record.target_label == "下午"
 
 
 @pytest.mark.asyncio

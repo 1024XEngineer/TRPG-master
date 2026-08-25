@@ -93,6 +93,44 @@ class _WsFirstPersonThenSafeNarration:
         }
 
 
+class _WsNarrationWithNpcFollowup:
+    """守秘人先给权威叙事，再让当前场景 NPC 追加一条独立回复。"""
+
+    async def generate(self, context) -> JsonObject:
+        del context
+        return {
+            "kind": "narration",
+            "text": "你抬头看向托马斯。",
+            "claimed_evidence_refs": [],
+            "suggested_actions": [],
+            "npc_replies": [
+                {
+                    "speaker_id": "thomas",
+                    "text": "我记得这间屋子的每一道裂缝。",
+                }
+            ],
+        }
+
+
+class _WsNarrationWithInvalidNpcFollowup:
+    """模型若塞进场景外 speaker，守秘人结果仍然应该成功落地。"""
+
+    async def generate(self, context) -> JsonObject:
+        del context
+        return {
+            "kind": "narration",
+            "text": "你抬头看向托马斯。",
+            "claimed_evidence_refs": [],
+            "suggested_actions": [],
+            "npc_replies": [
+                {
+                    "speaker_id": "offscene-npc",
+                    "text": "这句不该被广播。",
+                }
+            ],
+        }
+
+
 class _WsMissingParticipantOpening:
     async def generate(self, context: OpeningNarrationContext) -> JsonObject:
         del context
@@ -1493,3 +1531,167 @@ def test_subject_ownership_failure_retries_before_publishing_narration(
     assert completed["payload"]["narration"]["text"] == "你带着托马斯进入墓地。"
     assert narration["payload"]["text"] == "你带着托马斯进入墓地。"
     assert all("我带着你们进入墓地" not in str(message) for message in seen)
+
+
+def test_keeper_turn_emits_followup_npc_dialogue_and_recovers_it(
+    sync_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """同回合里 narration.push 之后应继续发出独立的 dialogue.npc。"""
+
+    token = register_and_login(sync_client, "keeper_followup_dialogue")
+    room = create_room(sync_client, token)
+    advance_to_building(sync_client, room)
+    complete_character(sync_client, room["roomId"], room["reconnectToken"])
+    start_game(sync_client, room, token)
+    monkeypatch.setattr(
+        ws_controller.action_plan_turn_application,
+        "_narrator",
+        ActionPlanNarrator(_WsNarrationWithNpcFollowup()),
+    )
+    action_id = "keeper-followup-npc-411"
+
+    with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
+        ws.send_json(
+            {
+                "type": "room.join",
+                "playerId": room["playerId"],
+                "payload": {"reconnectToken": room["reconnectToken"]},
+            }
+        )
+        ws.receive_json()
+        ws.receive_json()
+        receive_replayed_opening(ws)
+        ws.send_json(
+            {
+                "type": "action.plan.submit",
+                "playerId": room["playerId"],
+                "payload": {
+                    "clientActionId": action_id,
+                    "utterance": "我看看托马斯",
+                    "recipient": {"kind": "keeper", "entityId": None, "explicit": True},
+                },
+            }
+        )
+        completed, _ = receive_until(
+            ws,
+            lambda message: message.get("message_type") == "turn.completed",
+            limit=40,
+        )
+        dialogue, seen = receive_until(
+            ws,
+            lambda message: message.get("type") == "dialogue.npc",
+            limit=30,
+        )
+
+        ws.send_json(
+            {
+                "type": "action.plan.submit",
+                "playerId": room["playerId"],
+                "payload": {
+                    "clientActionId": action_id,
+                    "utterance": "我看看托马斯",
+                    "recipient": {"kind": "keeper", "entityId": None, "explicit": True},
+                },
+            }
+        )
+        retried_completed, _ = receive_until(
+            ws,
+            lambda message: message.get("message_type") == "turn.completed",
+            limit=20,
+        )
+        retried_dialogue, retried_seen = receive_until(
+            ws,
+            lambda message: message.get("type") == "dialogue.npc",
+            limit=20,
+        )
+
+    event_types = [message.get("type") for message in seen if message.get("type")]
+    retried_event_types = [message.get("type") for message in retried_seen if message.get("type")]
+    assert completed["payload"]["narration"]["text"] == "你抬头看向托马斯。"
+    assert dialogue["payload"]["speakerId"] == "thomas"
+    assert dialogue["payload"]["text"] == "我记得这间屋子的每一道裂缝。"
+    assert event_types.index("narration.push") < event_types.index("dialogue.npc")
+    assert retried_completed["payload"]["narration"] == completed["payload"]["narration"]
+    assert retried_dialogue["payload"] == dialogue["payload"]
+    assert retried_event_types.index("narration.push") < retried_event_types.index("dialogue.npc")
+
+    conversation = sync_client.get(
+        f"{ROOMS_BASE}/{room['roomId']}/conversation",
+        headers={"X-Reconnect-Token": room["reconnectToken"]},
+    )
+    assert conversation.status_code == 200
+    persisted = [
+        event
+        for event in conversation.json()["data"]
+        if event["type"] == "dialogue.npc" and event["payload"].get("sourceActionId") == action_id
+    ]
+    assert len(persisted) == 1
+    assert persisted[0]["payload"]["speakerId"] == "thomas"
+
+
+def test_keeper_turn_ignores_invalid_followup_npc_speaker(
+    sync_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """越权 speaker 只丢弃 NPC 跟进，不影响守秘人主回复。"""
+
+    token = register_and_login(sync_client, "keeper_followup_invalid")
+    room = create_room(sync_client, token)
+    advance_to_building(sync_client, room)
+    complete_character(sync_client, room["roomId"], room["reconnectToken"])
+    start_game(sync_client, room, token)
+    monkeypatch.setattr(
+        ws_controller.action_plan_turn_application,
+        "_narrator",
+        ActionPlanNarrator(_WsNarrationWithInvalidNpcFollowup()),
+    )
+
+    with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
+        ws.send_json(
+            {
+                "type": "room.join",
+                "playerId": room["playerId"],
+                "payload": {"reconnectToken": room["reconnectToken"]},
+            }
+        )
+        ws.receive_json()
+        ws.receive_json()
+        receive_replayed_opening(ws)
+        ws.send_json(
+            {
+                "type": "action.plan.submit",
+                "playerId": room["playerId"],
+                "payload": {
+                    "clientActionId": "keeper-followup-invalid-412",
+                    "utterance": "我看看托马斯",
+                    "recipient": {"kind": "keeper", "entityId": None, "explicit": True},
+                },
+            }
+        )
+        completed, _ = receive_until(
+            ws,
+            lambda message: message.get("message_type") == "turn.completed",
+            limit=40,
+        )
+        narration, seen = receive_until(
+            ws,
+            lambda message: message.get("type") == "narration.push",
+            limit=20,
+        )
+
+    assert completed["payload"]["narration"]["text"] == "你抬头看向托马斯。"
+    assert narration["payload"]["text"] == "你抬头看向托马斯。"
+    assert all(message.get("type") != "dialogue.npc" for message in seen)
+
+    conversation = sync_client.get(
+        f"{ROOMS_BASE}/{room['roomId']}/conversation",
+        headers={"X-Reconnect-Token": room["reconnectToken"]},
+    )
+    assert conversation.status_code == 200
+    assert not [
+        event
+        for event in conversation.json()["data"]
+        if event["type"] == "dialogue.npc"
+        and event["payload"].get("sourceActionId") == "keeper-followup-invalid-412"
+    ]

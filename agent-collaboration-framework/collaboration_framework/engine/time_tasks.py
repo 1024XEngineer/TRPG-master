@@ -27,7 +27,13 @@ from collaboration_framework.contracts import (
     segment_at_hour,
 )
 
-from .models import GameState, RuntimeTimeTask, TimePointOccurrence, WorldTimePoint
+from .models import (
+    GameState,
+    RuntimeTimeTask,
+    TimePointOccurrence,
+    WorldTimePoint,
+    WorldTimeState,
+)
 from .timeline import ordered_points, terminal_reached
 
 # 目标晚于终点。任务永远不会到期，所以创建时就拒绝（#415 §阶段二）。
@@ -224,6 +230,50 @@ def cancel_time_task(
     )
 
 
+def occurrence_id_for(moment: WorldTimePoint) -> str:
+    """这一刻对应的 occurrence id。
+
+    默认点和临时点用同一个公式，所以「任务绑在默认点上」和「任务绑在插出来的
+    临时点上」在到期查找时是同一条路径。
+    """
+
+    return _occurrence_id(moment.day_index, moment.hour_of_day)
+
+
+def settle_due_tasks(
+    state: GameState,
+    world_time: WorldTimeState,
+) -> tuple[GameState, tuple[RuntimeTimeTask, ...]]:
+    """把停在这一刻的任务标记完成，并返回它们的稳定结算顺序。
+
+    单次发布不靠调用方自觉：状态翻成 `completed` 和发 `time.task_due` 出自
+    同一个 `ApplyResult`，由引擎在同一次事务里提交。重试从已经 completed 的
+    状态重跑，这里返回空元组，第二条事件不会存在（#415 §阶段四）。
+    """
+
+    occurrence_id = occurrence_id_for(world_time.current)
+    due = due_tasks(state, occurrence_id)
+    if not due:
+        return state, ()
+
+    tasks = dict(state.time_tasks)
+    for task in due:
+        tasks[task.task_id] = task.model_copy(update={"status": "completed"})
+
+    # 临时点是一次性的：进入之后它不该再出现在后续的排序里。
+    occurrences = {
+        key: value
+        for key, value in state.time_occurrences.items()
+        if key != occurrence_id
+    }
+    return (
+        state.model_copy(
+            update={"time_tasks": tasks, "time_occurrences": occurrences}, deep=True
+        ),
+        due,
+    )
+
+
 def active_occurrences(state: GameState) -> tuple[TimePointOccurrence, ...]:
     """还有任务等着的临时点，按绝对时刻排序。"""
 
@@ -263,6 +313,8 @@ __all__ = [
     "cancel_time_task",
     "create_time_task",
     "due_tasks",
+    "occurrence_id_for",
     "resolve_target",
     "runtime_task_id",
+    "settle_due_tasks",
 ]

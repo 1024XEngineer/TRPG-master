@@ -116,6 +116,16 @@ class RollAttributesResult(CamelModel):
     derived_stats: dict[str, int]
 
 
+class RollLuckResult(CamelModel):
+    """POST /api/v1/rooms/{roomId}/characters/{characterId}/roll-luck 返回。
+
+    服务端返回三颗 d6 的明细和最终幸运值，客户端只负责展示动画，不参与结果计算。
+    """
+
+    dice: list[int] = Field(..., min_length=3, max_length=3)
+    luck: int
+
+
 # 卡库卡的 `data` 是 JSON 列，写入方是客户端。不设上限的话一次 PATCH 就能往
 # 单行里塞进任意大小的内容（实测 2MB 直接 201）。建卡态数据满打满算也就几 KB。
 CHARACTER_TEMPLATE_DATA_MAX_BYTES = 64 * 1024

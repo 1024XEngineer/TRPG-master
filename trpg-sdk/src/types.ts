@@ -46,6 +46,7 @@ export type {
   QuickGenerateRequest as QuickGenerateInput,
   QuickGenerateResult,
   RollAttributesResult,
+  RollLuckResult,
   // 我的卡库（issue #77 决策 5）—— 对应后端 dto/character.py
   CharacterTemplateCreateBody as SaveCharacterTemplateInput,
   CharacterTemplateRead as CharacterTemplate,

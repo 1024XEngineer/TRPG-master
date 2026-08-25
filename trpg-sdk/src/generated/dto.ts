@@ -1217,6 +1217,20 @@ export interface RollAttributesResult {
 }
 
 /**
+ * POST /api/v1/rooms/{roomId}/characters/{characterId}/roll-luck 返回。
+ *
+ * 服务端返回三颗 d6 的明细和最终幸运值，客户端只负责展示动画，不参与结果计算。
+ */
+export interface RollLuckResult {
+  /**
+   * @minItems 3
+   * @maxItems 3
+   */
+  dice: [number, number, number];
+  luck: number;
+}
+
+/**
  * 已接受、尚未开始的主持行动。
  */
 export interface RoomActionQueueItemPayload {

@@ -6,7 +6,7 @@ import type { Attributes, InvestigatorInfo } from '@/data/character-model'
 import { useCharacterStore } from '@/stores/character-store'
 import { useRoomStore } from '@/stores/room-store'
 import { createCharacterDraft, saveCharacter, completeCharacter, fetchCharacter, quickGenerateCharacter, rollLuckCharacter, type BuiltCharacter } from '@/services/character/character-api'
-import { Dice3DStage, supports3DDice, type Dice3DHandle } from '@/features/dice3d'
+import { DiceModal } from './RoomPage'
 import type { CharacterTemplate } from '@/services/character/template-api'
 import {
   characterReadFromTemplate,
@@ -73,66 +73,6 @@ const BACKGROUND_PLACEHOLDERS: Record<BackgroundSectionKey, string> = {
 }
 
 const EMPTY_CHOICE_SELECTIONS: string[][] = []
-
-/** 播放服务端已经确定的三颗 d6；3D 不可用时由现有骰子组件通知降级完成。 */
-function LuckDiceAnimation({ dice, onDone }: { dice: [number, number, number]; onDone: () => void }) {
-  const stageRef = useRef<Dice3DHandle>(null)
-  const [index, setIndex] = useState(0)
-  const [displayValue, setDisplayValue] = useState(1)
-  const [use3D, setUse3D] = useState(() => supports3DDice())
-  const token = `luck-${index}`
-
-  useEffect(() => {
-    if (use3D) {
-      // 和游戏内骰盘一样，目标点数只交给 3D 舞台用于定格，不直接显示结果。
-      const timer = window.setTimeout(() => {
-        if (!stageRef.current?.roll(token, dice[index])) setUse3D(false)
-      }, 0)
-      return () => window.clearTimeout(timer)
-    }
-
-    // 无 WebGL 时复用游戏骰盘的 700ms 2D 掷骰节奏，最后才定格到服务端点数。
-    const interval = window.setInterval(() => {
-      setDisplayValue(Math.floor(Math.random() * 6) + 1)
-    }, 80)
-    const timer = window.setTimeout(() => {
-      window.clearInterval(interval)
-      setDisplayValue(dice[index])
-      if (index >= dice.length - 1) onDone()
-      else setIndex(current => current + 1)
-    }, 700)
-    return () => {
-      window.clearInterval(interval)
-      window.clearTimeout(timer)
-    }
-  }, [dice, index, onDone, token, use3D])
-
-  const settle = () => {
-    setDisplayValue(dice[index])
-    if (index >= dice.length - 1) onDone()
-    else setIndex(current => current + 1)
-  }
-
-  return (
-    <div className="mt-2 flex h-20 items-center justify-center rounded-md bg-[#2d241b]" aria-label="幸运骰子动画">
-      {use3D ? (
-        <Dice3DStage
-          ref={stageRef}
-          kind="d6"
-          className="h-20 w-24"
-          onSettled={settle}
-          onUnsupported={() => setUse3D(false)}
-          onRollAbandoned={() => setUse3D(false)}
-        />
-      ) : (
-        <span className="flex h-14 w-14 items-center justify-center rounded-md border border-[#c9a86a] bg-[#f8e7c2] text-2xl font-bold text-[#4a3520]">
-          {displayValue}
-        </span>
-      )}
-      <span className="ml-2 text-xs text-[#f8e7c2]">第 {index + 1}/3 颗</span>
-    </div>
-  )
-}
 
 function occupationIcon(occupation: Pick<OccupationSpec, 'icon'>): string {
   return occupation.icon ?? '·'
@@ -313,6 +253,11 @@ export default function CharacterPage() {
   const [luckRolling, setLuckRolling] = useState(false)
   const [luckError, setLuckError] = useState('')
   const [luckDice, setLuckDice] = useState<[number, number, number] | null>(null)
+  const [luckDiceOpen, setLuckDiceOpen] = useState(false)
+  const [luckRollComplete, setLuckRollComplete] = useState(
+    typeof existingCharacter?.attr.LUCK === 'number'
+  )
+  const [luckAccumulated, setLuckAccumulated] = useState(0)
 
   // 职业自选技能按槽位分组保存在表单中；提交时再按槽位顺序压平成 API 的
   // occupationChoiceSkillIds。occupationId 跟选择放在同一份状态里，避免异步
@@ -412,6 +357,7 @@ export default function CharacterPage() {
         }
 
         setAttr({ ...savedAttrs })
+        setLuckRollComplete(typeof savedAttrs.LUCK === 'number')
         setGenerationMethod(savedGenerationMethod)
         // 输入框的字符串镜像必须一起重建。它平时只在「属性项集合变化」时同步
         // 一次（见下面 attrInputs 那个 effect：跟着 attr 走的话，每敲一个字都会
@@ -726,6 +672,10 @@ export default function CharacterPage() {
   const interestPointsTotal = preview?.interestSkillPoints.budget ?? 0
 
   const previewValidationIssues = preview?.validation ?? []
+  // 幸运值允许在属性页之后才掷；缺少 LUCK 不能提前污染属性/技能页提示。
+  const visibleRuleIssues = previewValidationIssues.filter(
+    issue => !(issue.field === 'attributes' && issue.message.includes('缺少 LUCK'))
+  )
 
   // 兴趣技能的局部分配量需要单独保存；职业技能可以先吃职业池，再按 COC7
   // 规则使用剩余兴趣点，因此它们只保存在总分配 skillAlloc 中。
@@ -974,9 +924,11 @@ export default function CharacterPage() {
         setCharacterId(characterId)
       }
       const result = await rollLuckCharacter(roomId, characterId)
-      // 服务端结果先写入草稿供规则预览使用；幸运行在动画结束前仍显示“掷骰中”。
-      setAttr(previous => ({ ...previous, LUCK: result.luck }))
+      // 服务端只先返回目标点数；每颗骰子由玩家确认后才把当前累计值写回草稿。
       setLuckDice(result.dice)
+      setLuckAccumulated(0)
+      setLuckRollComplete(false)
+      setLuckDiceOpen(true)
     } catch (error) {
       setLuckRolling(false)
       setLuckError(friendlyErrorMessage(error, '幸运掷骰失败，请重试'))
@@ -1223,9 +1175,6 @@ export default function CharacterPage() {
       )
       issues.push(missingSlot ? `请完成职业自选技能：${missingSlot.label}` : '请完成职业自选技能')
     }
-    if (!isTemplateHost && targetStep >= 4 && typeof attr.LUCK !== 'number') {
-      issues.push('请先掷出幸运值')
-    }
     if (targetStep >= 4 && serializedBackground.length > CHARACTER_BACKGROUND_MAX_LENGTH) {
       issues.push(`背景故事不能超过 ${CHARACTER_BACKGROUND_MAX_LENGTH} 个字符`)
     }
@@ -1238,7 +1187,7 @@ export default function CharacterPage() {
       } else if (previewStatus !== 'ready') {
         issues.push('规则预览尚未准备好，请稍后')
       } else {
-        issues.push(...previewValidationIssues
+        issues.push(...visibleRuleIssues
           .filter(issue => issue.code !== 'OCCUPATION_CHOICES_INCOMPLETE')
           .map(issue => issue.message))
       }
@@ -1304,6 +1253,12 @@ export default function CharacterPage() {
       return
     }
     if (!ruleset) return
+    if (!isTemplateHost && (!luckRollComplete || typeof attr.LUCK !== 'number')) {
+      setValidationAttempted(true)
+      setSubmitError('请先完成幸运值掷骰，再完成建卡')
+      setStep(1)
+      return
+    }
     const issues = getBlockingIssues(4)
     if (issues.length > 0) {
       setValidationAttempted(true)
@@ -1391,7 +1346,7 @@ export default function CharacterPage() {
   }
 
   const currentNavigationIssues = validationAttempted ? getBlockingIssues(step < 3 ? step + 1 : 4) : []
-  const visiblePreviewIssues = previewValidationIssues.filter(
+  const visiblePreviewIssues = visibleRuleIssues.filter(
     issue => issue.code !== 'OCCUPATION_CHOICES_INCOMPLETE'
   )
 
@@ -1956,12 +1911,12 @@ export default function CharacterPage() {
                           </div>
                           <div className="character-create__attribute-note text-[10px] mt-0.5">不占属性点数（规则为独立掷 <span className="character-create__number">{attribute.generation}</span>，由当前生成方式决定）</div>
                         </div>
-                        <span className="character-create__attribute-static-value character-create__attribute-static-value--plain text-[17px] font-bold font-mono text-text-primary min-w-[36px] text-center">{luckRolling ? '掷骰中' : luckReady ? attr[attribute.key] : '待掷'}</span>
+                        <span className="character-create__attribute-static-value character-create__attribute-static-value--plain text-[17px] font-bold font-mono text-text-primary min-w-[36px] text-center">{luckReady ? attr[attribute.key] : luckAccumulated > 0 ? luckAccumulated * 5 : '待掷'}</span>
                         {!isTemplateHost && (
                           <button
                             type="button"
                             onClick={handleLuckRoll}
-                            disabled={luckRolling || luckReady}
+                            disabled={luckRolling || luckDiceOpen || luckReady}
                             aria-label={luckReady ? '幸运值已确定' : '掷幸运骰'}
                             title={luckReady ? '幸运值已确定' : '掷幸运骰'}
                             className="flex min-h-8 items-center gap-1 rounded-sm border border-brass px-2 text-[11px] font-semibold text-brass-dark transition-colors active:bg-brass/10 disabled:cursor-not-allowed disabled:opacity-50"
@@ -1971,11 +1926,11 @@ export default function CharacterPage() {
                           </button>
                         )}
                       </div>
-                      {!isTemplateHost && luckRolling && luckDice && (
-                        <LuckDiceAnimation
-                          dice={luckDice}
-                          onDone={() => setLuckRolling(false)}
-                        />
+                      {!isTemplateHost && luckRolling && (
+                        <p className="mt-2 text-center text-[11px] text-text-muted">请完成幸运骰后继续</p>
+                      )}
+                      {!isTemplateHost && luckRollComplete && (
+                        <p className="mt-2 text-center text-[11px] text-text-muted">本局幸运值已确定：{attr[attribute.key] ?? luckAccumulated * 5}</p>
                       )}
                       {!isTemplateHost && luckError && (
                         <p className="mt-2 text-[11px] text-[#c04040]">{luckError}</p>
@@ -1989,6 +1944,31 @@ export default function CharacterPage() {
                   )
                 })}
               </div>
+
+              {!isTemplateHost && luckDice && (
+                <DiceModal
+                  open={luckDiceOpen}
+                  onClose={() => {
+                    // 连续幸运骰必须由玩家逐颗确认，未完成前不允许关闭面板跳过。
+                    if (luckRollComplete) setLuckDiceOpen(false)
+                  }}
+                  onResult={() => undefined}
+                  checkRequest={null}
+                  checkDiceState={null}
+                  setCheckDiceState={() => undefined}
+                  sequentialTargets={luckDice}
+                  onSequentialRoll={(value, index) => {
+                    const next = luckAccumulated + value
+                    setLuckAccumulated(next)
+                    setAttr(previous => ({ ...previous, LUCK: next * 5 }))
+                    if (index === luckDice.length - 1) {
+                      setLuckRollComplete(true)
+                      setLuckDiceOpen(false)
+                      setLuckRolling(false)
+                    }
+                  }}
+                />
+              )}
 
               {/* Derived Stats */}
               <div className="character-create__derived mt-3">

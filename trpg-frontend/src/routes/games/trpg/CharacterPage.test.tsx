@@ -222,6 +222,15 @@ describe('CharacterPage', () => {
     })
   }
 
+  async function confirmLuckDicePanel() {
+    for (let index = 0; index < 3; index += 1) {
+      fireEvent.click(await screen.findByRole('button', { name: '掷骰' }))
+      fireEvent.click(await screen.findByRole('button', {
+        name: index === 2 ? '确认幸运值' : '继续投骰',
+      }))
+    }
+  }
+
   async function advanceToAttributesAfterOccupationPreview() {
     await waitFor(() => {
       expect(mockPreviewCharacter).toHaveBeenCalledWith(expect.objectContaining({ occupationId: 1 }))
@@ -235,8 +244,14 @@ describe('CharacterPage', () => {
       const previewCalls = mockPreviewCharacter.mock.calls.length
       fireEvent.click(luckButton)
       await waitFor(() => expect(mockCharacterApi.rollLuckCharacter).toHaveBeenCalledWith('room-1', 'draft-1'))
+      await confirmLuckDicePanel()
       // 幸运回填会触发一次新的规则预览，等它完成后再继续后续页面操作。
-      await waitFor(() => expect(mockPreviewCharacter.mock.calls.length).toBeGreaterThan(previewCalls))
+      await waitFor(() => {
+        expect(mockPreviewCharacter.mock.calls.length).toBeGreaterThan(previewCalls)
+        expect(mockPreviewCharacter).toHaveBeenLastCalledWith(
+          expect.objectContaining({ attributes: expect.objectContaining({ LUCK: 60 }) })
+        )
+      })
     }
   }
 
@@ -265,6 +280,12 @@ describe('CharacterPage', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: '掷幸运骰' }))
     await waitFor(() => expect(mockCharacterApi.rollLuckCharacter).toHaveBeenCalledWith('room-1', 'draft-1'))
+    await confirmLuckDicePanel()
+    await waitFor(() => {
+      expect(mockPreviewCharacter).toHaveBeenLastCalledWith(
+        expect.objectContaining({ attributes: expect.objectContaining({ LUCK: 60 }) })
+      )
+    })
     await waitFor(() => {
       fireEvent.click(screen.getByRole('button', { name: /下一步/ }))
       expect(screen.getByTestId('occupation-choice-panel')).toBeInTheDocument()

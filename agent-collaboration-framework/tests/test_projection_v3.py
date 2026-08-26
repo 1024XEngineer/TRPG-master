@@ -855,12 +855,11 @@ class AdjudicationAgainstV3Tests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_greeting_a_neighbour_is_repairable_not_a_dead_turn(self) -> None:
-        """#313 复现：在 neighborhood 说「跟邻居打个招呼」被直接判死。
+        """#313 回归：动作族不同也不能阻断结构范围匹配的规则。
 
         菜单是按「玩家站在哪」发布的，所以 `question_neighbors` 会出现在候选里；
-        但它另外要求 `family=interview` 且 `target=lyla`，提交时才第一次校验这两
-        项。模型把打招呼归成 `social` 是它自己的错（`fault="agent"`），而放弃
-        rule_decision 就能退回一次普通叙事裁决——没有任何理由让玩家的回合死在这。
+        `target=lyla` 仍需在提交时复查，但模型把打招呼归成 `social` 不再导致
+        `RULE_OUT_OF_SCOPE`。
         """
 
         store, engine, rules = self.build(scene_id="neighborhood")
@@ -885,31 +884,13 @@ class AdjudicationAgainstV3Tests(unittest.IsolatedAsyncioTestCase):
                 rule_id="question_neighbors", option_id="fast-talk"
             ),
         )
-        with self.assertRaises(AdjudicationValidationError) as rejected:
-            await engine.submit(
-                SubmitAdjudicationRequest(
-                    room_id=ROOM, player_id=PLAYER, adjudication=greeting
-                )
-            )
-
-        result = rejected.exception.result
-        self.assertEqual(result.code, "RULE_OUT_OF_SCOPE")
-        self.assertEqual(result.fault, "agent")
-        # 关键断言：修复循环只认 auto_repairable / retry_with_latest_revision，
-        # hard_reject 会被直接抛出去变成 turn.failed。
-        self.assertEqual(result.repairability, "auto_repairable")
-        self.assertEqual(self.store_events(store), 0)
-
-        # 放弃这条规则之后，同一句话应当照常裁决完成。
-        repaired = greeting.model_copy(
-            update={"request_id": "greet-neighbour-313-repaired", "rule_decision": None},
-            deep=True,
-        )
-        await engine.submit(
+        execution = await engine.submit(
             SubmitAdjudicationRequest(
-                room_id=ROOM, player_id=PLAYER, adjudication=repaired
+                room_id=ROOM, player_id=PLAYER, adjudication=greeting
             )
         )
+        self.assertEqual(execution.status, "resolved")
+        self.assertGreater(self.store_events(store), 0)
 
     @staticmethod
     def store_events(store: InMemoryEngineStore) -> int:
@@ -1847,15 +1828,27 @@ class RuleOwnedCheckTests(unittest.IsolatedAsyncioTestCase):
                 family="research",
             )
 
-    async def test_rule_decision_with_a_foreign_action_family_is_refused(self) -> None:
-        """scope.action_families 声明了 research，用恐吓去触发它不成立。"""
+    async def test_rule_decision_with_a_foreign_action_family_is_admitted(self) -> None:
+        """开放动作族只作参考，结构范围匹配时不能阻断规则。"""
+
+        execution = await self._submit_rule_decision(
+            scene_id="crypt",
+            rule_id="enter_crypt",
+            option_id="proceed",
+            target=ActionTarget(kind="entity", id="crypt_entrance"),
+            family="travel",
+        )
+        self.assertIn(execution.status, {"resolved", "awaiting_skill_choice"})
+
+    async def test_rule_decision_with_a_foreign_family_keeps_target_scope_hard(self) -> None:
+        """放宽 family 不得放宽规则声明的目标范围。"""
 
         with self.assertRaises(ContractError):
             await self._submit_rule_decision(
                 scene_id="library",
                 rule_id="research_library_archive",
                 option_id="library-use",
-                target=ActionTarget(kind="entity", id="newspaper_archive"),
+                target=ActionTarget(kind="entity", id="melodias"),
                 family="intimidate",
             )
 

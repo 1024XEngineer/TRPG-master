@@ -3086,11 +3086,14 @@ def _match_rule_candidate(capabilities, text: str, target_id: str | None):
     return candidate, candidate.options[0] if candidate.options else None
 
 
-# Match View action families are stable contract identifiers. These localized
-# words merely recognize the player's explicit verb; they do not add a rule or
-# reveal module-only facts. Ties still yield no match below.
+# Match View action families are stable contract identifiers. This small local
+# vocabulary is intentionally not exhaustive: these words only recognize a
+# player's explicit verb and never act as a rule admission gate. Ties still
+# yield no match below.
+# 这里的词汇只是离线测试/兜底提示，不是模组动作族的完整注册表。
 _ACTION_FAMILY_HINTS: dict[str, tuple[str, ...]] = {
     "observe": ("仔细观察", "观察", "察看", "查看"),
+    "surveil": ("监视", "观察周围", "留意动静", "观察"),
     "search": ("搜索", "搜查", "查找", "找线索", "寻找"),
     "research": ("研究", "查阅", "检索", "翻阅", "查旧报"),
     "social": ("留下好印象", "博取信任", "说服"),

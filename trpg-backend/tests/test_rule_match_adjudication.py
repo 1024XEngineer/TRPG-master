@@ -196,6 +196,22 @@ def test_prompt_teaches_the_model_to_use_rule_candidates() -> None:
     assert "option_id" in _SAFE_ADJUDICATION_INSTRUCTIONS
 
 
+def test_prompt_treats_action_families_as_advisory() -> None:
+    """提示词不能把开放动作族重新描述成逐字硬闸。"""
+
+    assert "不要求与最终 `method.family` 逐字相等" in _SAFE_ADJUDICATION_INSTRUCTIONS
+    instructions = current_step_adjudication_instructions()
+    assert "不能仅因动作族词汇不同就放弃" in instructions
+
+
+def test_offline_match_recognizes_surveillance_wording() -> None:
+    """离线兜底至少覆盖 #453 的自然中文观察说法。"""
+
+    from app.core.action_plan_turn import _ACTION_FAMILY_HINTS
+
+    assert "观察周围" in _ACTION_FAMILY_HINTS["surveil"]
+
+
 async def test_matched_rule_hands_ownership_to_the_rule() -> None:
     """命中规则时：交出 rule_decision 与检定，且不自带任何效果（#226 §5）。
 

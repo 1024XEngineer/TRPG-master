@@ -1436,7 +1436,8 @@ class AdjudicationEngineService:
             )
             # 存在性不等于「此时此地可用」。候选菜单是按当前场景发布的，提交时
             # 必须用同一个谓词重新绑定：否则模型可以点名另一个地点的规则，把它
-            # 的后果带到这里来 —— 范围校验等于交给了模型自觉。
+            # 的后果带到这里来。action_family 是开放词表，仅作语义参考，不参与
+            # 这里的硬拒绝；地点、目标类型、目标 ID 和 when 才是权威范围。
             if not agent_match_admits(
                 rule,
                 state=state,
@@ -1446,13 +1447,9 @@ class AdjudicationEngineService:
                 target_kind=adjudication.target.kind,
                 target_id=adjudication.target.id,
             ):
-                # 可自动修复，不是死路。菜单是按「玩家站在哪」发布的，这里才
-                # 第一次用上 method.family 和 target —— 也就是说模型看得到的
-                # 候选，提交时完全可能不适用（#313：在 neighborhood 说「跟邻居
-                # 打个招呼」，菜单里有 question_neighbors，但它只认
-                # family=interview + target=lyla）。这是 fault="agent" 的错，
-                # 而放弃 rule_decision 就能变回一次普通叙事裁决，没有任何理由
-                # 让玩家的回合直接死在这里。
+                # 可自动修复，不是死路。target 或结构范围不匹配时，
+                # 放弃 rule_decision 就能变回一次普通叙事裁决；单纯的 family
+                # 词汇差异不会进入此分支（#453）。
                 self._reject_validation(
                     "RULE_OUT_OF_SCOPE",
                     repairability="auto_repairable",

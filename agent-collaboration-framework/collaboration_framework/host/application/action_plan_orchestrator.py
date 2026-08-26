@@ -76,11 +76,11 @@ _REPAIR_HINTS: dict[str, str] = {
         "kind=location + player_view.scene.id 为目标返回 narrative_only。"
     ),
     "RULE_OUT_OF_SCOPE": (
-        "所选 rule_decision 与本次 method.family 或 target 不匹配。"
-        "keeper_capabilities.rule_candidates 里一条候选的 action_families、"
+        "所选 rule_decision 的地点、目标类型、目标 ID 或 when 条件不匹配。"
+        "action_families 是开放的语义参考，不要求与 method.family 逐字相等；"
+        "不能仅因动作族词汇不同就去掉一个结构性范围仍然匹配的 rule_decision。"
         "target_kinds、target_ids 为空即表示该维度不设限，非空才要求本次裁决落在"
-        "其中——逐个字段判断，非空的都命中才能保留 rule_decision；一条都对不上就"
-        "去掉 rule_decision，按普通裁决重新给出这一步。"
+        "其中。确认硬约束不匹配后，才去掉 rule_decision，按普通裁决重新给出这一步。"
     ),
     "INVENTORY_TARGET_NOT_PORTABLE": (
         "holder_actor_id 只接受 player_view.scene.loose_items、player_view.inventory，"

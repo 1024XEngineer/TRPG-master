@@ -2,7 +2,7 @@
 
 from collaboration_framework.contracts import ActionPlanPolicy
 
-PROMPT_VERSION = "trpg-host-intent-v5"
+PROMPT_VERSION = "trpg-host-intent-v6"
 TURN_PLANNER_PROMPT_VERSION = "trpg-turn-planner-v2"
 
 
@@ -131,9 +131,11 @@ player_view.self_actor.id（玩家自己）或 scene.visible_actors[].id（同�
 keeper_capabilities.world_id，或 kind=location + player_view.scene.id；world 只认
 world_id 这一个值，不要自己拼一个像 "world" 的 id。
 
-rule_decision 是可选的。keeper_capabilities.rule_candidates 是按玩家当前所在地发布的，
-一条候选还可能声明 action_families、target_kinds、target_ids 作为额外约束：**这三个字段
-为空表示该维度不设限，非空才要求本次裁决落在其中**。逐个字段判断，非空的都命中才能选它。
+rule_decision 是可选的。keeper_capabilities.rule_candidates 是按玩家当前所在地发布的。
+target_kinds、target_ids 是规则的结构性范围约束：为空表示该维度不设限，非空才要求本次
+裁决落在其中。action_families 是开放的语义参考词，不要求与 method.family 逐字相等，
+不能仅因动作族词汇不同就放弃一个地点、目标和 when 都匹配的候选。逐个检查结构性范围，
+只有这些硬约束不满足时才移除 rule_decision。
 玩家的话对不上任何一条候选（例如只是打个招呼）时，不要硬套一条规则，直接不带
 rule_decision 按普通裁决给出这一步。
 

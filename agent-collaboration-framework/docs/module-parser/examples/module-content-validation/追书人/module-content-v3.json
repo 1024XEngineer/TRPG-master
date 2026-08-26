@@ -970,7 +970,7 @@
         "question": {
           "kind": "method",
           "semantic_hints": [
-            "interview",
+            "询问莱拉近况",
             "莱拉·奥戴尔"
           ]
         },
@@ -1126,7 +1126,7 @@
         "question": {
           "kind": "method",
           "semantic_hints": [
-            "social",
+            "给守墓人留下好印象",
             "梅洛迪亚斯·杰弗逊"
           ]
         },
@@ -1219,7 +1219,7 @@
         "question": {
           "kind": "method",
           "semantic_hints": [
-            "observe",
+            "仔细观察守墓人",
             "梅洛迪亚斯·杰弗逊"
           ]
         },
@@ -1321,7 +1321,7 @@
         "question": {
           "kind": "method",
           "semantic_hints": [
-            "intimidate",
+            "威吓守墓人",
             "梅洛迪亚斯·杰弗逊"
           ]
         },
@@ -1424,7 +1424,7 @@
         "question": {
           "kind": "method",
           "semantic_hints": [
-            "bribe",
+            "贿赂守墓人",
             "梅洛迪亚斯·杰弗逊"
           ]
         },
@@ -1602,7 +1602,7 @@
         "question": {
           "kind": "method",
           "semantic_hints": [
-            "research",
+            "查阅当地旧报档案",
             "当地旧报档案"
           ]
         },
@@ -1694,7 +1694,7 @@
         "question": {
           "kind": "method",
           "semantic_hints": [
-            "request_access",
+            "请求查阅当地旧报档案",
             "当地旧报档案"
           ]
         },
@@ -1893,7 +1893,7 @@
         "question": {
           "kind": "method",
           "semantic_hints": [
-            "search",
+            "搜索当地旧报档案",
             "当地旧报档案"
           ]
         },
@@ -2007,7 +2007,7 @@
         "question": {
           "kind": "method",
           "semantic_hints": [
-            "search",
+            "向镇民打听消息",
             "打听地下酒吧的位置"
           ]
         },
@@ -2121,7 +2121,7 @@
         "question": {
           "kind": "method",
           "semantic_hints": [
-            "search",
+            "寻找一品脱酒",
             "一品脱酒"
           ]
         },
@@ -2203,7 +2203,7 @@
         "question": {
           "kind": "method",
           "semantic_hints": [
-            "search",
+            "搜索道格拉斯的书房",
             "道格拉斯的书房"
           ]
         },
@@ -2285,7 +2285,7 @@
         "question": {
           "kind": "method",
           "semantic_hints": [
-            "read",
+            "阅读道格拉斯的旧日记",
             "道格拉斯的旧日记"
           ]
         },
@@ -2377,7 +2377,7 @@
         "question": {
           "kind": "method",
           "semantic_hints": [
-            "surveil",
+            "监视夜间区域",
             "夜间监视区域"
           ]
         },
@@ -2470,7 +2470,7 @@
         "question": {
           "kind": "method",
           "semantic_hints": [
-            "call_name",
+            "呼唤墓地中的人影",
             "墓地中的人影"
           ]
         },
@@ -2542,7 +2542,7 @@
         "question": {
           "kind": "method",
           "semantic_hints": [
-            "track",
+            "追踪道格拉斯常坐的墓碑",
             "道格拉斯常坐的墓碑"
           ]
         },
@@ -2635,7 +2635,7 @@
         "question": {
           "kind": "method",
           "semantic_hints": [
-            "move",
+            "搬开石板",
             "石板下的地穴入口"
           ]
         },
@@ -2717,7 +2717,7 @@
         "question": {
           "kind": "method",
           "semantic_hints": [
-            "enter",
+            "进入地穴",
             "石板下的地穴入口"
           ]
         },
@@ -2811,7 +2811,7 @@
         "question": {
           "kind": "method",
           "semantic_hints": [
-            "talk",
+            "与墓地中的人影交谈",
             "墓地中的人影"
           ]
         },
@@ -2909,7 +2909,7 @@
         "question": {
           "kind": "method",
           "semantic_hints": [
-            "let_leave",
+            "让墓地中的人影离开",
             "墓地中的人影"
           ]
         },
@@ -2970,7 +2970,7 @@
         "question": {
           "kind": "method",
           "semantic_hints": [
-            "follow",
+            "跟随墓地中的人影",
             "墓地中的人影"
           ]
         },
@@ -3031,7 +3031,7 @@
         "question": {
           "kind": "method",
           "semantic_hints": [
-            "flee",
+            "逃离食尸鬼群",
             "食尸鬼群"
           ]
         },

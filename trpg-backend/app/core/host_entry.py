@@ -283,7 +283,7 @@ class HostEntryModel(Protocol):
 class DeterministicHostEntryModel:
     """Offline fake model.  It is injectable and intentionally conservative."""
 
-    async def generate(self, context: HostPublicContext) -> Mapping[str, object]:
+    async def generate(self, context: HostPublicContext | HostEntryContext) -> Mapping[str, object]:
         text = context.current_keeper_text.strip()
         answer = (context.player_answer or "").strip()
         if answer:

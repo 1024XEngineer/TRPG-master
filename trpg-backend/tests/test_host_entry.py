@@ -1,3 +1,5 @@
+from typing import Any, cast
+
 import pytest
 from pydantic import ValidationError
 
@@ -39,7 +41,9 @@ def test_route_text_contract_is_strict() -> None:
     with pytest.raises(ValidationError):
         HostEntryDecision(route="delegate_to_legacy", text="不能带文本")
     with pytest.raises(ValidationError):
-        HostEntryDecision(route="direct_response", text="x", extra_field="bad")
+        HostEntryDecision.model_validate(
+            {"route": "direct_response", "text": "x", "extra_field": "bad"}
+        )
     rule = HostEntryDecision(route="rule_once", rule_id="r1", option_id="o1")
     assert rule.rule_id == "r1"
     with pytest.raises(ValidationError):
@@ -74,7 +78,7 @@ def test_rule_match_context_is_allow_listed() -> None:
             ),
         ),
     )
-    payload = context_value.to_model_payload()
+    payload = cast(dict[str, Any], context_value.to_model_payload())
     assert payload["rule_match"]["rule_candidates"][0]["rule_id"] == "rule-1"
     assert "content" not in str(payload)
     assert "private" not in str(payload)
@@ -117,10 +121,7 @@ def test_safety_policy_rejects_every_issue_authority_claim(text: str) -> None:
 
 
 def test_projector_does_not_expose_ids_or_private_fields_and_bounds_history() -> None:
-    class FakeView:
-        pass
-
-    view = FakeView()
+    view: Any = type("FakeView", (), {})()
     view.scene = type(
         "Scene",
         (),
@@ -152,25 +153,28 @@ def test_public_history_accepts_direct_response_source() -> None:
         text="邻居礼貌地点了点头。",
     )
     projected = HostPublicContextProjector(max_turns=3).project(
-        type(
-            "View",
-            (),
-            {
-                "scene": type(
-                    "Scene",
-                    (),
-                    {
-                        "name": "客厅",
-                        "description": "公开场景",
-                        "time": "白天",
-                        "narrative_details": (),
-                        "visible_actors": (),
-                        "visible_entities": (),
-                    },
-                )(),
-                "location_context": None,
-            },
-        )(),
+        cast(
+            Any,
+            type(
+                "View",
+                (),
+                {
+                    "scene": type(
+                        "Scene",
+                        (),
+                        {
+                            "name": "客厅",
+                            "description": "公开场景",
+                            "time": "白天",
+                            "narrative_details": (),
+                            "visible_actors": (),
+                            "visible_entities": (),
+                        },
+                    )(),
+                    "location_context": None,
+                },
+            )(),
+        ),
         current_keeper_text="你好",
         public_history=(entry,),
     )
@@ -182,7 +186,7 @@ async def test_router_retries_once_then_uses_fixed_clarification() -> None:
     class BadModel:
         calls = 0
 
-        async def generate(self, _context):
+        async def generate(self, context):
             self.calls += 1
             return {"route": "direct_response", "text": "检定成功"}
 

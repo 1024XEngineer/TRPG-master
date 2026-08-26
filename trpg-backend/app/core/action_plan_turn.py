@@ -3286,6 +3286,9 @@ def build_rule_once_adjudication(
     visible_targets.update(("actor", item.id) for item in player_view.scene.visible_actors)
     if not candidate.target_ids and (target_kind, target_id) not in visible_targets:
         raise ValueError("RULE_TARGET_NOT_VISIBLE")
+    resolved_target_kind = cast(
+        Literal["information", "entity", "location", "actor", "world"], target_kind
+    )
     skill_ids = {item.id for item in player_view.self_actor.skills}
     check = NoAdjudicationCheck()
     if option.requires_check:
@@ -3308,7 +3311,7 @@ def build_rule_once_adjudication(
         source_revision=player_view.revision,
         actor_id=player_input.actor_id,
         summary=description,
-        target=ActionTarget(kind=target_kind, id=target_id),
+        target=ActionTarget(kind=resolved_target_kind, id=target_id),
         method=ActionMethod(
             family=candidate.action_families[0] if candidate.action_families else "action",
             description=description,

@@ -277,15 +277,17 @@ def module_with_unexecutable_step() -> ModuleContentV3:
 def window_state(**updates) -> GameState:
     """开局：调查员还没看到墓地探访，书房窗户锁着且完好。
 
-    随后把 `visit_observed` 翻成 true 就会触发 `locked_study_window_breaks`——
-    这是《追书人》里唯一一条不掷骰、跑完就 stable 的 event 规则。
+    随后把 `case_tracker.books_taken` 翻成 true 就会触发
+    `locked_study_window_breaks`——这是《追书人》里唯一一条不掷骰、跑完就 stable
+    的 event 规则。#451 之后它挂在「他确实进屋取到了书」上，而不是「你看见了他」：
+    看见与翻窗发生在不同时刻，挂在前者会让人影同时出现在监视点和书房。
     """
 
     values = {
         "entities": {
             "cemetery_figure": {"visit_observed": False, "true_form_seen": False},
             "study_window": {"locked": True, "broken": False},
-            "case_tracker": {"first_ghoul_sight_resolved": False},
+            "case_tracker": {"first_ghoul_sight_resolved": False, "books_taken": False},
         }
     }
     values.update(updates)
@@ -300,14 +302,14 @@ def observe_visit(request_id: str, source_revision: str) -> SubmitAdjudicationRe
             request_id=request_id,
             source_revision=source_revision,
             actor_id=ACTOR,
-            summary="留意墓地里的探访",
-            target=ActionTarget(kind="entity", id="cemetery_figure"),
-            method=ActionMethod(family="observe", description="远远看着"),
+            summary="确认他这一夜取走了书",
+            target=ActionTarget(kind="entity", id="case_tracker"),
+            method=ActionMethod(family="observe", description="清点少掉的书"),
             check=NoAdjudicationCheck(),
             success_effects=(
                 ChangeEntityStateEffect(
-                    entity_id="cemetery_figure",
-                    key="visit_observed",
+                    entity_id="case_tracker",
+                    key="books_taken",
                     value=True,
                 ),
             ),
@@ -374,7 +376,10 @@ class AgendaHygieneTests(unittest.IsolatedAsyncioTestCase):
                         "true_form_seen": False,
                     },
                     "study_window": {"locked": True, "broken": True},
-                    "case_tracker": {"first_ghoul_sight_resolved": False},
+                    "case_tracker": {
+                        "first_ghoul_sight_resolved": False,
+                        "books_taken": True,
+                    },
                 }
             ),
         )
@@ -406,7 +411,10 @@ class AgendaHygieneTests(unittest.IsolatedAsyncioTestCase):
                         "true_form_seen": False,
                     },
                     "study_window": {"locked": True, "broken": True},
-                    "case_tracker": {"first_ghoul_sight_resolved": False},
+                    "case_tracker": {
+                        "first_ghoul_sight_resolved": False,
+                        "books_taken": True,
+                    },
                 }
             ),
         )

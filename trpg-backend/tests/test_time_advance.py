@@ -198,16 +198,17 @@ async def test_broadcast_payloads_carry_only_the_module_wording(
 
     record = await time_advance._active_record(db_session, room.id)
     assert record is not None
-    # 追书人从 hour_12 起步，下一个点是 hour_18，走 evening 的缺省措辞。
+    # 追书人从 hour_06 起步，下一个点是 hour_18。该点自己声明了 label，广播用的
+    # 是模组的措辞「夜晚」，而不是 evening 的缺省措辞「晚上」。
     assert record.target_point_id == "hour_18"
     assert record.target_hour_of_day == 18
-    assert record.target_label == "晚上"
+    assert record.target_label == "夜晚"
 
     pending = time_advance._pending_payload(record).model_dump(by_alias=True)
-    assert pending["targetLabel"] == "晚上"
+    assert pending["targetLabel"] == "夜晚"
     record.status = "approved"
     resolved = time_advance._resolved_payload(record).model_dump(by_alias=True)
-    assert resolved["targetLabel"] == "晚上"
+    assert resolved["targetLabel"] == "夜晚"
 
     assert pending["targetDayIndex"] == 0
     assert resolved["targetDayIndex"] == 0
@@ -237,10 +238,10 @@ async def test_terminal_point_refuses_before_any_vote_is_collected(
     assert session is not None
     version = await db_session.get(ModuleVersion, (session.module_id, session.module_version))
     assert version is not None
-    # 追书人从 hour_12 开局；把开局那一刻本身声明成终点，房间一上来就在终点上。
+    # 追书人从 hour_06 开局；把开局那一刻本身声明成终点，房间一上来就在终点上。
     content = dict(version.content_json)
     content["time_policy"] = dict(content["time_policy"]) | {
-        "terminal_point": {"point_id": "hour_12", "day_index": 0}
+        "terminal_point": {"point_id": "hour_06", "day_index": 0}
     }
     version.content_json = content
     await db_session.commit()

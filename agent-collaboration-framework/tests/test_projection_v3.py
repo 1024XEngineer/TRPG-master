@@ -61,6 +61,7 @@ from collaboration_framework.engine.initialization import create_initial_game_st
 from collaboration_framework.engine.navigation import resolve_location_target
 from collaboration_framework.engine.projection_v3 import location_breadcrumbs
 from collaboration_framework.engine.rules_v3 import evaluate_condition, walk_rule
+from tests.time_fixtures import day_cycle_module
 
 FIXTURE = (
     Path(__file__).resolve().parents[1]
@@ -71,6 +72,7 @@ FIXTURE = (
     / "追书人"
     / "module-content-v3.json"
 )
+
 ROOM = "room_v3"
 ACTOR = "pc_1"
 PLAYER = "player_v3"
@@ -156,7 +158,7 @@ class ProjectionV3Tests(unittest.IsolatedAsyncioTestCase):
             if exit_.destination
         }
         self.assertNotIn("crypt", destinations)
-        self.assertIn("surveillance_point", destinations)
+        self.assertIn("kimball_grounds", destinations)
 
     async def test_inventory_and_loose_items_require_separate_knowledge(self) -> None:
         held = ItemInstance(
@@ -734,7 +736,7 @@ class AdjudicationAgainstV3Tests(unittest.IsolatedAsyncioTestCase):
 
         async def candidates(world_time: WorldTimeState) -> set[str]:
             _, _, rules = self.build(
-                scene_id="surveillance_point",
+                scene_id="kimball_grounds",
                 world_time=world_time,
             )
             view = await rules.read_keeper_capabilities(
@@ -753,7 +755,7 @@ class AdjudicationAgainstV3Tests(unittest.IsolatedAsyncioTestCase):
 
         self.condition_night_watch_on_night()
         store, engine, rules = self.build(
-            scene_id="surveillance_point",
+            scene_id="kimball_grounds",
             world_time=self.at_time("hour_06", 6, "morning"),
         )
         snapshot = await rules.read(
@@ -769,8 +771,8 @@ class AdjudicationAgainstV3Tests(unittest.IsolatedAsyncioTestCase):
                         request_id="night-watch-during-day",
                         source_revision=snapshot.revision,
                         actor_id=ACTOR,
-                        summary="白天点名夜间监视规则",
-                        target=ActionTarget(kind="entity", id="surveillance_area"),
+                        summary="白天点名守夜规则",
+                        target=ActionTarget(kind="location", id="kimball_grounds"),
                         method=ActionMethod(family="surveil", description="监视环境"),
                         rule_decision=RuleDecisionRef(
                             rule_id="keep_night_watch",
@@ -790,7 +792,7 @@ class AdjudicationAgainstV3Tests(unittest.IsolatedAsyncioTestCase):
         """Luck is an ActorResource, not a synthetic entry in the skill map."""
 
         store, engine, rules = self.build(
-            scene_id="surveillance_point",
+            scene_id="kimball_grounds",
             world_time=self.at_time("hour_18", 18, "evening"),
             entities={
                 "case_tracker": {"night_watch_checked": False},
@@ -808,8 +810,8 @@ class AdjudicationAgainstV3Tests(unittest.IsolatedAsyncioTestCase):
                     request_id="night-watch-luck-resource",
                     source_revision=snapshot.revision,
                     actor_id=ACTOR,
-                    summary="在夜间监视区域留意动静",
-                    target=ActionTarget(kind="entity", id="surveillance_area"),
+                    summary="在宅子外围留意动静",
+                    target=ActionTarget(kind="location", id="kimball_grounds"),
                     method=ActionMethod(family="surveil", description="监视环境"),
                     rule_decision=RuleDecisionRef(
                         rule_id="keep_night_watch",
@@ -945,11 +947,21 @@ class AdjudicationAgainstV3Tests(unittest.IsolatedAsyncioTestCase):
     ) -> None:
         """「睡一觉，到晚上八点」= 12 点 → 18 点 → 20 点，两跳，两个事件。
 
-        一次 advance_world_time 只走一个点，中间的 hour_18 不能被跳过：
-        夜间监视那条规则就挂在 `time.point_entered` 上，跳过点等于跳过规则。
+        一次 advance_world_time 只走一个点，中间的 hour_18 不能被跳过：挂在
+        `time.point_entered` 上的规则，跳过点就等于跳过规则。
+
+        走的是时间线 fixture 而不是真实模组：这条断言只关心引擎怎么走点，而
+        《追书人》的 time_policy 是模组内容，会随模组改版而变（#451 已把它收敛成
+        昼夜两点，20 点不复存在）。
         """
 
-        store, engine, rules = self.build()
+        content = day_cycle_module()
+        store = InMemoryEngineStore()
+        store.register_room(
+            module_content=content, initial_state=game_state(content)
+        )
+        engine = AdjudicationEngineService(store)
+        rules = RuleEngineService(store)
         snapshot = await rules.read(
             PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
         )
@@ -960,6 +972,7 @@ class AdjudicationAgainstV3Tests(unittest.IsolatedAsyncioTestCase):
             snapshot.revision,
             AdvanceWorldTimeEffect(to_point_id="hour_18"),
             AdvanceWorldTimeEffect(to_point_id="hour_20"),
+            target=ActionTarget(kind="location", id="only_room"),
         )
 
         after = await rules.read(
@@ -1154,8 +1167,10 @@ class EventRuleChainingTests(unittest.IsolatedAsyncioTestCase):
         self.content = module()
 
     async def test_a_state_change_fires_the_rule_that_watches_it(self) -> None:
-        # locked_study_window_breaks fires once the visit is observed and the
-        # window is still locked and unbroken.
+        # locked_study_window_breaks fires once he has actually got inside and
+        # taken the books, with the window still locked and unbroken. #451 moved
+        # the trigger off "you saw him": being seen at the watch point and
+        # climbing through the study window happen at different moments.
         store = InMemoryEngineStore()
         store.register_room(
             module_content=self.content,
@@ -1164,7 +1179,7 @@ class EventRuleChainingTests(unittest.IsolatedAsyncioTestCase):
                 scene_id="kimball_study",
                 entities={
                     "study_window": {"locked": True, "broken": False},
-                    "cemetery_figure": {"visit_observed": False},
+                    "case_tracker": {"books_taken": False},
                 },
             ),
         )
@@ -1181,14 +1196,14 @@ class EventRuleChainingTests(unittest.IsolatedAsyncioTestCase):
                     request_id="observe-visit",
                     source_revision=snapshot.revision,
                     actor_id=ACTOR,
-                    summary="看到有人来过",
-                    target=ActionTarget(kind="entity", id="cemetery_figure"),
-                    method=ActionMethod(family="observe", description="看到有人来过"),
+                    summary="确认他取走了书",
+                    target=ActionTarget(kind="entity", id="case_tracker"),
+                    method=ActionMethod(family="observe", description="清点少掉的书"),
                     check=NoAdjudicationCheck(),
                     success_effects=(
                         ChangeEntityStateEffect(
-                            entity_id="cemetery_figure",
-                            key="visit_observed",
+                            entity_id="case_tracker",
+                            key="books_taken",
                             value=True,
                         ),
                     ),

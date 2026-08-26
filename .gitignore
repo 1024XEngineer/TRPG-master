@@ -25,3 +25,8 @@ __pycache__/
 # 片段既不是独立可运行模块（引用 OccupationSpec 等未 import 的名字，ruff 会报
 # 一堆 F821），也跟 coc7_content.py 内容重复，所以不进 git。
 trpg-backend/scripts/coc7_occupations/generated_occupations.py
+
+# 《追书人》夜间监视的本地验收用例：跑它要连真实大模型、耗时长，属于人工回归而
+# 不是 CI 资产。通用引擎能力由 tests/test_projection_v3.py 与 tests/time_fixtures.py
+# 覆盖，模组内容本身由 trpg-backend/tests/test_paper_chase_loader.py 钉住。
+agent-collaboration-framework/tests/test_paper_chase_night_watch_local.py

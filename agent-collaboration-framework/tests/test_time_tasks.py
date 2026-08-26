@@ -55,7 +55,8 @@ from collaboration_framework.engine.time_tasks import (
     settle_due_tasks,
 )
 from collaboration_framework.engine.timeline import next_point_after, player_time_label
-from tests.test_projection_v3 import ACTOR, PLAYER, ROOM, game_state, module
+from tests.test_projection_v3 import ACTOR, PLAYER, ROOM, game_state
+from tests.time_fixtures import day_cycle_module as module
 
 
 def task_spec(**overrides) -> TimeTaskSpec:
@@ -132,13 +133,13 @@ class TimeTaskStepTests(unittest.TestCase):
         step = CancelTimeTaskStep(
             id="call_it_off",
             task_key="ghoul_arrives",
-            bindings={"entity_id": "cemetery_figure"},
+            bindings={"entity_id": "some_entity"},
             reason_code="target_already_dead",
             next_step_id="finish",
         )
 
         self.assertEqual(step.task_key, "ghoul_arrives")
-        self.assertEqual(step.bindings, {"entity_id": "cemetery_figure"})
+        self.assertEqual(step.bindings, {"entity_id": "some_entity"})
         self.assertEqual(step.reason_code, "target_already_dead")
 
     def test_cancelling_without_a_reason_is_refused(self) -> None:
@@ -224,7 +225,7 @@ class TimeTaskExecutorTests(unittest.TestCase):
     """排定 / 取消与临时点排序（#415 §阶段四）。"""
 
     def setUp(self) -> None:
-        # 追书人声明了 00 / 06 / 12 / 18 / 20，房间从 hour_12 开局。
+        # fixture 声明了 00 / 06 / 12 / 18 / 20，房间从 hour_12 开局。
         self.content = module()
         self.state = create_initial_game_state(
             self.content, room_id="room_01", actors={}
@@ -509,7 +510,7 @@ class TimeTaskThroughARuleTests(unittest.IsolatedAsyncioTestCase):
     """执行器要真的接在 RuleAgenda 上，不只是能被直接调用（#415 §阶段四）。"""
 
     def module_with_scheduling_rule(self) -> ModuleContentV3:
-        """给追书人加一条规则：进入 18:00 时排一个 21:00 的任务。
+        """给 fixture 加一条规则：进入 18:00 时排一个 21:00 的任务。
 
         21:00 不在模组声明的 00/06/12/18/20 里，所以它必须插一个临时点。
         """
@@ -580,7 +581,7 @@ class TimeTaskThroughARuleTests(unittest.IsolatedAsyncioTestCase):
                     source_revision=revision,
                     actor_id=ACTOR,
                     summary="等到入夜",
-                    target=ActionTarget(kind="location", id="thomas_office"),
+                    target=ActionTarget(kind="location", id="only_room"),
                     method=ActionMethod(family="rest", description="等待"),
                     check=NoAdjudicationCheck(),
                     success_effects=tuple(
@@ -757,7 +758,7 @@ class OrderedValidationTests(unittest.IsolatedAsyncioTestCase):
                     source_revision="0",
                     actor_id=ACTOR,
                     summary="等到入夜",
-                    target=ActionTarget(kind="location", id="thomas_office"),
+                    target=ActionTarget(kind="location", id="only_room"),
                     method=ActionMethod(family="rest", description="等待"),
                     check=NoAdjudicationCheck(),
                     success_effects=(AdvanceWorldTimeEffect(to_point_id="hour_18"),),
@@ -879,7 +880,7 @@ class TaskDueTests(unittest.IsolatedAsyncioTestCase):
                     source_revision="0",
                     actor_id=ACTOR,
                     summary="等到晚上八点",
-                    target=ActionTarget(kind="location", id="thomas_office"),
+                    target=ActionTarget(kind="location", id="only_room"),
                     method=ActionMethod(family="rest", description="等待"),
                     check=NoAdjudicationCheck(),
                     success_effects=(
@@ -900,7 +901,7 @@ class TaskDueTests(unittest.IsolatedAsyncioTestCase):
                     source_revision=str(state.event_sequence),
                     actor_id=ACTOR,
                     summary="再等一会",
-                    target=ActionTarget(kind="location", id="thomas_office"),
+                    target=ActionTarget(kind="location", id="only_room"),
                     method=ActionMethod(family="rest", description="等待"),
                     check=NoAdjudicationCheck(),
                     success_effects=(
@@ -1077,7 +1078,7 @@ class TemporaryPointWalkTests(unittest.IsolatedAsyncioTestCase):
                     source_revision=revision,
                     actor_id=ACTOR,
                     summary="等待",
-                    target=ActionTarget(kind="location", id="thomas_office"),
+                    target=ActionTarget(kind="location", id="only_room"),
                     method=ActionMethod(family="wait", description="等待"),
                     check=NoAdjudicationCheck(),
                     success_effects=(AdvanceWorldTimeEffect(to_point_id=to_point_id),),

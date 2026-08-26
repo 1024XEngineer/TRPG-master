@@ -132,7 +132,7 @@ async def test_loader_persists_valid_playable_module_version(db_session: AsyncSe
     assert publication.world_ref == module_version.world_ref
     assert publication.world_ref == BUILTIN_WORLD_REF
     assert len(publication.locations) == 12
-    assert len(publication.entities) == 15
+    assert len(publication.entities) == 14
     assert publication.background
     assert publication.presentation is not None
     assert publication.presentation.players_min == 1

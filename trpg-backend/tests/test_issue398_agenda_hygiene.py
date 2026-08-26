@@ -34,8 +34,9 @@ from app.adapters import SqlAlchemyEngineStore
 from app.models.engine import GameEvent, GameSession, ModuleVersion
 from tests.test_engine_runtime import _start_room
 
-# 《追书人》里唯一一条不掷骰、跑完就 stable 的 event 规则：看到墓地探访之后，
-# 锁着且完好的书房窗户会被撞开。
+# 《追书人》里唯一一条不掷骰、跑完就 stable 的 event 规则：他确实进屋取走了书之后，
+# 锁着且完好的书房窗户会被撞开。#451 之后触发条件从「你看见了他」改成「他取到了
+# 书」——被目击与翻窗发生在不同时刻，挂在前者会让人影同时出现在两个地点。
 TRIGGER_RULE = "locked_study_window_breaks"
 
 
@@ -46,9 +47,9 @@ async def _prepare_window(db: AsyncSession, room_id: str) -> str:
     assert game_session is not None
     state = GameState.model_validate(game_session.state_json)
     entities = dict(state.entities)
-    entities["cemetery_figure"] = {
-        **entities["cemetery_figure"],
-        "visit_observed": False,
+    entities["case_tracker"] = {
+        **entities["case_tracker"],
+        "books_taken": False,
     }
     entities["study_window"] = {
         **entities.get("study_window", {}),
@@ -70,14 +71,14 @@ def _observe_visit(room_id: str, player_id: str, actor_id: str, revision: str):
             request_id="issue398-observe",
             source_revision=revision,
             actor_id=actor_id,
-            summary="留意墓地里的探访",
-            target=ActionTarget(kind="entity", id="cemetery_figure"),
-            method=ActionMethod(family="observe", description="远远看着"),
+            summary="确认他取走了书",
+            target=ActionTarget(kind="entity", id="case_tracker"),
+            method=ActionMethod(family="observe", description="清点少掉的书"),
             check=NoAdjudicationCheck(),
             success_effects=(
                 ChangeEntityStateEffect(
-                    entity_id="cemetery_figure",
-                    key="visit_observed",
+                    entity_id="case_tracker",
+                    key="books_taken",
                     value=True,
                 ),
             ),

@@ -1,7 +1,7 @@
 {
   "content_schema_version": 3,
   "module_id": "paper-chase-zh-coc7",
-  "version": "3.0.7",
+  "version": "3.0.11",
   "world_ref": "coc-7e",
   "background": "时代与地点为美国禁酒令时期的密歇根州阿诺兹堡。调查员受托马斯·金博尔委托，从五本失窃的旧书和叔叔道格拉斯一年前的失踪案入手，走访旧宅、图书馆与公共墓地。叙事应保持安静、克制而带哥特气息，以夜色、旧书、墓园和孤独感作为反复意象；面对异常时不要急于渲染纯粹敌意，应为同情、选择与淡淡哀伤保留空间。任何尚未由线索确认的真相都不得提前告知玩家。",
   "information": [
@@ -570,7 +570,7 @@
       "description": "用于记录失踪与盗书调查的进展。",
       "located_in": null,
       "state": {
-        "surveillance_available": false,
+        "night_watch_checked": false,
         "first_ghoul_sight_resolved": false,
         "douglas_identity_shock_resolved": false,
         "crowd_sight_resolved": false,
@@ -2374,6 +2374,36 @@
             "surveillance_area"
           ]
         },
+        "when": {
+          "op": "all",
+          "items": [
+            {
+              "op": "predicate",
+              "predicate": "time_of_day_is",
+              "args": {
+                "value": "night"
+              }
+            },
+            {
+              "op": "predicate",
+              "predicate": "entity_state_is",
+              "args": {
+                "entity_id": "case_tracker",
+                "key": "night_watch_checked",
+                "value": false
+              }
+            },
+            {
+              "op": "predicate",
+              "predicate": "entity_state_is",
+              "args": {
+                "entity_id": "cemetery_figure",
+                "key": "visit_observed",
+                "value": false
+              }
+            }
+          ]
+        },
         "question": {
           "kind": "method",
           "semantic_hints": [
@@ -2404,6 +2434,17 @@
             "kind": "finish"
           },
           {
+            "id": "mark_checked",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "case_tracker",
+              "key": "night_watch_checked",
+              "value": true
+            },
+            "next_step_id": "finish"
+          },
+          {
             "id": "succeed_0",
             "kind": "effect",
             "effect": {
@@ -2423,7 +2464,7 @@
               "key": "visit_observed",
               "value": true
             },
-            "next_step_id": "finish"
+            "next_step_id": "mark_checked"
           },
           {
             "id": "check_luck",
@@ -2442,8 +2483,8 @@
               "extreme_success": "succeed_0",
               "hard_success": "succeed_0",
               "regular_success": "succeed_0",
-              "failure": "finish",
-              "fumble": "finish"
+              "failure": "mark_checked",
+              "fumble": "mark_checked"
             }
           }
         ]
@@ -3379,7 +3420,7 @@
       }
     },
     {
-      "id": "enable_night_surveillance",
+      "id": "reset_night_watch_during_day",
       "priority": 30,
       "trigger": {
         "kind": "event",
@@ -3391,7 +3432,7 @@
               "op": "predicate",
               "predicate": "time_of_day_is",
               "args": {
-                "value": "night"
+                "value": "day"
               }
             },
             {
@@ -3399,7 +3440,16 @@
               "predicate": "entity_state_is",
               "args": {
                 "entity_id": "case_tracker",
-                "key": "surveillance_available",
+                "key": "night_watch_checked",
+                "value": true
+              }
+            },
+            {
+              "op": "predicate",
+              "predicate": "entity_state_is",
+              "args": {
+                "entity_id": "cemetery_figure",
+                "key": "visit_observed",
                 "value": false
               }
             }
@@ -3411,18 +3461,18 @@
         "branches": [
           {
             "id": "default",
-            "entry_step_id": "open_surveillance"
+            "entry_step_id": "reset_checked"
           }
         ],
         "steps": [
           {
-            "id": "open_surveillance",
+            "id": "reset_checked",
             "kind": "effect",
             "effect": {
               "type": "change_entity_state",
               "entity_id": "case_tracker",
-              "key": "surveillance_available",
-              "value": true
+              "key": "night_watch_checked",
+              "value": false
             },
             "next_step_id": "finish"
           },
@@ -3629,11 +3679,20 @@
   },
   "time_policy": {
     "default_points": [
-      { "id": "hour_00", "hour_of_day": 0, "order": 0 },
-      { "id": "hour_06", "hour_of_day": 6, "order": 1 },
-      { "id": "hour_12", "hour_of_day": 12, "order": 2 },
-      { "id": "hour_18", "hour_of_day": 18, "order": 3 },
-      { "id": "hour_20", "hour_of_day": 20, "order": 4 }
+      {
+        "id": "hour_06",
+        "hour_of_day": 6,
+        "order": 0,
+        "time_segment": "morning",
+        "label": "白天"
+      },
+      {
+        "id": "hour_18",
+        "hour_of_day": 18,
+        "order": 1,
+        "time_segment": "evening",
+        "label": "夜晚"
+      }
     ],
     "storage_precision": "hour",
     "progression": "host_controlled_discrete",
@@ -3644,7 +3703,7 @@
     "default_actor_placement": {
       "location_id": "thomas_office"
     },
-    "start_time_point_id": "hour_12"
+    "start_time_point_id": "hour_06"
   },
   "world_profile": {
     "era": "1920s 美国禁酒令时期",

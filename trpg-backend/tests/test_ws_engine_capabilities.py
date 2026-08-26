@@ -240,9 +240,10 @@ def test_world_time_reaches_the_client_as_a_discrete_point(
         RevealInformationEffect(information_id=KEEPER_INFORMATION),
     )
 
-    # 追书人 v3 的 initial_state.start_time_point_id 是 hour_12，该点没有声明
-    # label，所以玩家看到 afternoon 的缺省措辞。天数从 0 起算，前端显示第 1 天。
-    assert view["world"]["time_label"] == "下午"
+    # 追书人 v3 的 initial_state.start_time_point_id 是 hour_06，该点自己声明了
+    # label「白天」，玩家看到的就是模组的措辞而不是 morning 的缺省措辞。天数从
+    # 0 起算，前端显示第 1 天。
+    assert view["world"]["time_label"] == "白天"
     assert view["world"]["day_index"] == 0
     # 精确小时以及能反推出小时的粗粒度字段不能过网（#415 §阶段一）。
     assert not {"hour_of_day", "time_of_day"} & view["world"].keys()

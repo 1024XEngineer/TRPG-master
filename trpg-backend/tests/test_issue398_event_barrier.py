@@ -33,24 +33,33 @@ from tests.test_engine_runtime import _start_room
 
 # 《追书人》的时间线是 00 / 06 / 12 / 18 / 20，夜间为 18:00–06:00。
 # 中午躺下、睡到第二天早晨要跨过 18 → 20 → 00 → 06，其中前三个点是夜里。
-SLEEP_UNTIL_MORNING = ("hour_18", "hour_20", "hour_00", "hour_06")
+# 追书人自 #451 起只有昼夜两点。夜里躺下、睡过白天、再到入夜：终态又是夜晚，
+# 但中间真的跨过了白天那一个点。挂在白天上的规则该不该触发，只有按**它自己那条
+# 事件**当时的世界才判得出来——这正是屏障要回答的问题。
+SLEEP_ACROSS_DAY = ("hour_06", "hour_18")
 
 
-async def _noon_with_surveillance_closed(db: AsyncSession, room_id: str) -> str:
+async def _night_with_watch_already_checked(db: AsyncSession, room_id: str) -> str:
+    """入夜、本夜已检定过、且还没目击到人影——白天重置规则的三个前置条件。"""
+
     game_session = await db.get(GameSession, room_id)
     assert game_session is not None
     state = GameState.model_validate(game_session.state_json)
     entities = dict(state.entities)
     entities["case_tracker"] = {
         **entities["case_tracker"],
-        "surveillance_available": False,
+        "night_watch_checked": True,
+    }
+    entities["cemetery_figure"] = {
+        **entities.get("cemetery_figure", {}),
+        "visit_observed": False,
     }
     game_session.state_json = state.model_copy(
         update={
             "entities": entities,
             "world_time": WorldTimeState(
-                current_point_id="hour_12",
-                current=WorldTimePoint(day_index=0, hour_of_day=12),
+                current_point_id="hour_18",
+                current=WorldTimePoint(day_index=0, hour_of_day=18),
             ),
         },
         deep=True,
@@ -71,13 +80,13 @@ async def _committed_state(db: AsyncSession, room_id: str) -> GameState:
     return GameState.model_validate(reloaded.state_json)
 
 
-async def test_night_rule_matches_the_snapshot_of_its_own_time_point(
+async def test_a_rule_matches_the_snapshot_of_its_own_time_point(
     db_session: AsyncSession,
     engine_store_factory: Callable[..., SqlAlchemyEngineStore],
 ) -> None:
     room, players, _ = await _start_room(db_session, room_number=97)
     room_id, player_id = room.id, players[0].id
-    actor_id = await _noon_with_surveillance_closed(db_session, room_id)
+    actor_id = await _night_with_watch_already_checked(db_session, room_id)
 
     store = engine_store_factory()
     async with store.transaction(room_id) as transaction:
@@ -90,12 +99,12 @@ async def test_night_rule_matches_the_snapshot_of_its_own_time_point(
                 request_id="issue398-sleep",
                 source_revision=runtime.revision,
                 actor_id=actor_id,
-                summary="睡到第二天早晨",
+                summary="睡过白天，再到入夜",
                 target=ActionTarget(kind="location", id="thomas_office"),
                 method=ActionMethod(family="rest", description="和衣睡下"),
                 check=NoAdjudicationCheck(),
                 success_effects=tuple(
-                    AdvanceWorldTimeEffect(to_point_id=point) for point in SLEEP_UNTIL_MORNING
+                    AdvanceWorldTimeEffect(to_point_id=point) for point in SLEEP_ACROSS_DAY
                 ),
             ),
         )
@@ -104,13 +113,13 @@ async def test_night_rule_matches_the_snapshot_of_its_own_time_point(
     assert execution.status == "resolved"
     db_session.expire_all()
     committed = await _committed_state(db_session, room_id)
-    # 四跳都跑完了，世界确实到了第二天早晨。
-    assert committed.world_time.current_point_id == "hour_06"
+    # 两跳都跑完了，世界回到了第二天的夜里。
+    assert committed.world_time.current_point_id == "hour_18"
     assert committed.world_time.current.day_index == 1
-    # 而 18:00 那一跳按**当时**的世界匹配，夜间监视点开了出来。
-    # 修好之前这里是 False：终态是 06:00，`time_of_day_is night` 判否，于是
-    # 叙事只能写成「安稳睡到早晨」。
-    assert committed.entities["case_tracker"]["surveillance_available"] is True
+    # 而 06:00 那一跳按**当时**的世界匹配，守夜闩被白天重置了出来。
+    # 没有屏障的话这里会是 True：终态是 18:00，`time_of_day_is day` 判否，
+    # 于是那条规则整个被跳过，玩家第二夜再也守不了。
+    assert committed.entities["case_tracker"]["night_watch_checked"] is False
 
     triggered = (
         await db_session.scalars(
@@ -121,10 +130,10 @@ async def test_night_rule_matches_the_snapshot_of_its_own_time_point(
         )
     ).all()
     night_rule = [
-        event for event in triggered if event.payload["rule_id"] == "enable_night_surveillance"
+        event for event in triggered if event.payload["rule_id"] == "reset_night_watch_during_day"
     ]
-    # 三个夜间点，但规则自己的 `surveillance_available == false` 前置条件
-    # 只让它触发一次——屏障没有把「每个事件重新匹配」变成「同一条规则跑三遍」。
+    # 规则自己的 `night_watch_checked == true` 前置条件只让它触发一次——屏障没有
+    # 把「每个事件重新匹配」变成「同一条规则跑多遍」。
     assert len(night_rule) == 1
     source = next(
         event
@@ -134,4 +143,4 @@ async def test_night_rule_matches_the_snapshot_of_its_own_time_point(
         if event.event_id == night_rule[0].payload["source_event_id"]
     )
     assert source.type == "time.point_entered"
-    assert source.payload["point_id"] == "hour_18"
+    assert source.payload["point_id"] == "hour_06"

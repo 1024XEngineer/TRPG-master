@@ -39,7 +39,7 @@ const ROOM_SCENES = [
   '/assets/rooms/play/location-kimball-study.webp',
   '/assets/rooms/play/location-neighborhood.webp',
   '/assets/rooms/play/location-newspaper-office.webp',
-  '/assets/rooms/play/location-surveillance-point.webp',
+  '/assets/rooms/play/location-kimball-grounds.webp',
   '/assets/rooms/play/location-thomas-office.webp',
   '/assets/rooms/play/location-arnoldsburg-streets.webp',
 ]

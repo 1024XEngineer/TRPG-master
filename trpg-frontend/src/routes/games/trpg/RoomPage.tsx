@@ -258,7 +258,7 @@ const LOCATION_IMAGE_BY_ID: Record<string, string> = {
   cemetery: '/assets/rooms/play/location-cemetery.webp',
   library: '/assets/rooms/play/location-library.webp',
   newspaper_office: '/assets/rooms/play/location-newspaper-office.webp',
-  surveillance_point: '/assets/rooms/play/location-surveillance-point.webp',
+  kimball_grounds: '/assets/rooms/play/location-kimball-grounds.webp',
   kimball_study: '/assets/rooms/play/location-kimball-study.webp',
 }
 

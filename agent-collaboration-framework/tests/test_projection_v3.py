@@ -158,7 +158,7 @@ class ProjectionV3Tests(unittest.IsolatedAsyncioTestCase):
             if exit_.destination
         }
         self.assertNotIn("crypt", destinations)
-        self.assertIn("surveillance_point", destinations)
+        self.assertIn("kimball_grounds", destinations)
 
     async def test_inventory_and_loose_items_require_separate_knowledge(self) -> None:
         held = ItemInstance(
@@ -736,7 +736,7 @@ class AdjudicationAgainstV3Tests(unittest.IsolatedAsyncioTestCase):
 
         async def candidates(world_time: WorldTimeState) -> set[str]:
             _, _, rules = self.build(
-                scene_id="surveillance_point",
+                scene_id="kimball_grounds",
                 world_time=world_time,
             )
             view = await rules.read_keeper_capabilities(
@@ -755,7 +755,7 @@ class AdjudicationAgainstV3Tests(unittest.IsolatedAsyncioTestCase):
 
         self.condition_night_watch_on_night()
         store, engine, rules = self.build(
-            scene_id="surveillance_point",
+            scene_id="kimball_grounds",
             world_time=self.at_time("hour_06", 6, "morning"),
         )
         snapshot = await rules.read(
@@ -771,8 +771,8 @@ class AdjudicationAgainstV3Tests(unittest.IsolatedAsyncioTestCase):
                         request_id="night-watch-during-day",
                         source_revision=snapshot.revision,
                         actor_id=ACTOR,
-                        summary="白天点名夜间监视规则",
-                        target=ActionTarget(kind="entity", id="surveillance_area"),
+                        summary="白天点名守夜规则",
+                        target=ActionTarget(kind="location", id="kimball_grounds"),
                         method=ActionMethod(family="surveil", description="监视环境"),
                         rule_decision=RuleDecisionRef(
                             rule_id="keep_night_watch",
@@ -792,7 +792,7 @@ class AdjudicationAgainstV3Tests(unittest.IsolatedAsyncioTestCase):
         """Luck is an ActorResource, not a synthetic entry in the skill map."""
 
         store, engine, rules = self.build(
-            scene_id="surveillance_point",
+            scene_id="kimball_grounds",
             world_time=self.at_time("hour_18", 18, "evening"),
             entities={
                 "case_tracker": {"night_watch_checked": False},
@@ -810,8 +810,8 @@ class AdjudicationAgainstV3Tests(unittest.IsolatedAsyncioTestCase):
                     request_id="night-watch-luck-resource",
                     source_revision=snapshot.revision,
                     actor_id=ACTOR,
-                    summary="在夜间监视区域留意动静",
-                    target=ActionTarget(kind="entity", id="surveillance_area"),
+                    summary="在宅子外围留意动静",
+                    target=ActionTarget(kind="location", id="kimball_grounds"),
                     method=ActionMethod(family="surveil", description="监视环境"),
                     rule_decision=RuleDecisionRef(
                         rule_id="keep_night_watch",

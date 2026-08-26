@@ -1,7 +1,7 @@
 {
   "content_schema_version": 3,
   "module_id": "paper-chase-zh-coc7",
-  "version": "3.0.14",
+  "version": "3.0.15",
   "world_ref": "coc-7e",
   "background": "时代与地点为美国禁酒令时期的密歇根州阿诺兹堡。调查员受托马斯·金博尔委托，从五本失窃的旧书和叔叔道格拉斯一年前的失踪案入手，走访旧宅、图书馆与公共墓地。叙事应保持安静、克制而带哥特气息，以夜色、旧书、墓园和孤独感作为反复意象；面对异常时不要急于渲染纯粹敌意，应为同情、选择与淡淡哀伤保留空间。任何尚未由线索确认的真相都不得提前告知玩家。",
   "information": [
@@ -584,21 +584,6 @@
       },
       "visibility": "keeper",
       "plot_relevance": false
-    },
-    {
-      "id": "surveillance_area",
-      "kind": "object",
-      "name": "夜间监视区域",
-      "player_visible_name": "夜间监视区域",
-      "player_visible_aliases": [
-        "监视点",
-        "道路"
-      ],
-      "description": "金博尔宅、书房窗户与通往公墓的道路都在监视范围内。",
-      "located_in": "surveillance_point",
-      "state": {},
-      "visibility": "public",
-      "plot_relevance": true
     }
   ],
   "locations": [
@@ -693,11 +678,11 @@
       "region_id": "arnoldsburg"
     },
     {
-      "id": "surveillance_point",
-      "kind": "room",
-      "name": "夜间监视",
-      "player_visible_name": "夜间监视点",
-      "player_visible_description": "夜色笼罩着金博尔宅与通往公墓的道路，你可以在阴影中观察周围动静。",
+      "id": "kimball_grounds",
+      "kind": "site",
+      "name": "金博尔宅外围",
+      "player_visible_name": "宅子外围",
+      "player_visible_description": "院墙外是一圈没铺石板的空地，书房那扇窗正对着这边；再往北，铁栅栏后面就是公墓。",
       "parent_location_id": "arnoldsburg",
       "region_id": "arnoldsburg"
     },
@@ -915,17 +900,17 @@
       }
     },
     {
-      "id": "edge_cemetery_to_surveillance",
+      "id": "edge_cemetery_to_grounds",
       "from_location_id": "cemetery",
-      "to_location_id": "surveillance_point",
+      "to_location_id": "kimball_grounds",
       "kind": "private",
       "travel_cost": {
         "minutes": 5
       }
     },
     {
-      "id": "edge_surveillance_to_cemetery",
-      "from_location_id": "surveillance_point",
+      "id": "edge_grounds_to_cemetery",
+      "from_location_id": "kimball_grounds",
       "to_location_id": "cemetery",
       "kind": "private",
       "travel_cost": {
@@ -933,17 +918,17 @@
       }
     },
     {
-      "id": "edge_kimball_house_to_surveillance",
+      "id": "edge_kimball_house_to_grounds",
       "from_location_id": "kimball_house",
-      "to_location_id": "surveillance_point",
+      "to_location_id": "kimball_grounds",
       "kind": "private",
       "travel_cost": {
         "minutes": 5
       }
     },
     {
-      "id": "edge_surveillance_to_kimball_house",
-      "from_location_id": "surveillance_point",
+      "id": "edge_grounds_to_kimball_house",
+      "from_location_id": "kimball_grounds",
       "to_location_id": "kimball_house",
       "kind": "private",
       "travel_cost": {
@@ -2365,7 +2350,7 @@
         "kind": "agent_match",
         "scope": {
           "location_ids": [
-            "surveillance_point"
+            "kimball_grounds"
           ]
         },
         "when": {
@@ -2478,7 +2463,7 @@
             "effect": {
               "type": "move_entity",
               "entity_id": "cemetery_figure",
-              "location_id": "surveillance_point"
+              "location_id": "kimball_grounds"
             },
             "next_step_id": "succeed_3"
           },
@@ -2537,7 +2522,7 @@
             "call_name"
           ],
           "location_ids": [
-            "surveillance_point"
+            "kimball_grounds"
           ],
           "target_kinds": [
             "entity"

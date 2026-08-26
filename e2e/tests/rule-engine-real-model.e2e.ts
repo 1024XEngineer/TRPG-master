@@ -396,8 +396,9 @@ test(
  * 又停在 `crypt`，于是玩家侧什么都没发生——实测那一夜叙事写的是「周围始终是静
  * 悄悄的」。`call_to_figure` 因此永远没人去点，理智检定也就永远不触发。
  *
- * 前半截仍然是 A 侧模型行为（它得把「监视」映射到 `surveil` + `surveillance_area`），
- * Fake planner 结构上产不出来；后半截才是 #451 修的东西。
+ * 前半截仍然是 A 侧模型行为（规则改地点驱动后不再要求指名目标物，但它仍得把一句
+ * 「盯着周围」判成命中 keep_night_watch 的守夜），Fake planner 结构上产不出来；
+ * 后半截才是 #451 修的东西。
  */
 async function settleChecksFor(
   room: Awaited<ReturnType<typeof openRoom>>,
@@ -479,7 +480,7 @@ test(
     const room = await openRoom('issue451-real-watch')
     try {
       patchState(room.roomId, (state) => {
-        state.scene_id = 'surveillance_point'
+        state.scene_id = 'kimball_grounds'
         state.world_time = {
           current_point_id: 'hour_18',
           current: { day_index: 0, hour_of_day: 18 },
@@ -533,8 +534,8 @@ test(
       assert.equal(figure.sighted, true, '守夜幸运成功必须置 sighted')
       assert.equal(
         figure.location_id,
-        'surveillance_point',
-        '人影必须被搬到监视点，否则玩家视图里没有可指对象',
+        'kimball_grounds',
+        '人影必须被搬到宅子外围，否则玩家视图里没有可指对象',
       )
       assert.equal(figure.discovered, true, 'discovered 是强制叙述钩子唯一认的键')
       // 引擎侧 required_in_narration=True 会拒掉不提人影的叙事，所以这条是硬的。

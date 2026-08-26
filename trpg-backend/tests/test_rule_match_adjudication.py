@@ -155,9 +155,7 @@ async def _cemetery_context(
 
 
 async def _happy_frog_night_context(utterance: str) -> ActionPlanStepContext:
-    content = ModuleContentV3.model_validate_json(
-        HAPPY_FROG_FIXTURE.read_text(encoding="utf-8")
-    )
+    content = ModuleContentV3.model_validate_json(HAPPY_FROG_FIXTURE.read_text(encoding="utf-8"))
     base_state = create_initial_game_state(
         content,
         room_id="happy-frog-room",

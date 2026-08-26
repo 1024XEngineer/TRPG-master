@@ -7,9 +7,11 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "h1i2j3k4l5m6"
-# The repository currently has the user reconciliation head and the summary
-# cursor head.  Depend on both so this migration does not create a third head.
-down_revision: str | Sequence[str] | None = ("b1c2d3e4f5a6", "g8b9c0d1e2f3")
+# The repository's latest main branch has already merged the time-point and
+# summary chains at c4e7f1a5b8d2.  Keep the independent time-proposal repair
+# head in the merge as well, so A1 leaves exactly one Alembic head on both the
+# pre-415 and current migration graphs.
+down_revision: str | Sequence[str] | None = ("c4e7f1a5b8d2", "b1c2d3e4f5a6")
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

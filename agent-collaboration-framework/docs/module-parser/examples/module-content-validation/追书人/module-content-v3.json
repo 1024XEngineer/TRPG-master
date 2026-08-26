@@ -1,7 +1,7 @@
 {
   "content_schema_version": 3,
   "module_id": "paper-chase-zh-coc7",
-  "version": "3.0.11",
+  "version": "3.0.12",
   "world_ref": "coc-7e",
   "background": "时代与地点为美国禁酒令时期的密歇根州阿诺兹堡。调查员受托马斯·金博尔委托，从五本失窃的旧书和叔叔道格拉斯一年前的失踪案入手，走访旧宅、图书馆与公共墓地。叙事应保持安静、克制而带哥特气息，以夜色、旧书、墓园和孤独感作为反复意象；面对异常时不要急于渲染纯粹敌意，应为同情、选择与淡淡哀伤保留空间。任何尚未由线索确认的真相都不得提前告知玩家。",
   "information": [
@@ -223,12 +223,14 @@
       "state": {
         "alive": true,
         "sighted": false,
+        "discovered": false,
         "true_form_seen": false,
         "visit_observed": false,
         "willing_to_talk": false,
         "truth_told": false,
         "corpse_identified": false,
-        "left_forever": false
+        "left_forever": false,
+        "at_surveillance_point": false
       },
       "visibility": "public",
       "visibility_conditions": [
@@ -2464,6 +2466,38 @@
               "key": "visit_observed",
               "value": true
             },
+            "next_step_id": "succeed_2"
+          },
+          {
+            "id": "succeed_2",
+            "kind": "effect",
+            "effect": {
+              "type": "move_entity",
+              "entity_id": "cemetery_figure",
+              "location_id": "surveillance_point"
+            },
+            "next_step_id": "succeed_3"
+          },
+          {
+            "id": "succeed_3",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "cemetery_figure",
+              "key": "at_surveillance_point",
+              "value": true
+            },
+            "next_step_id": "succeed_4"
+          },
+          {
+            "id": "succeed_4",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "cemetery_figure",
+              "key": "discovered",
+              "value": true
+            },
             "next_step_id": "mark_checked"
           },
           {
@@ -2556,6 +2590,27 @@
               "entity_id": "cemetery_figure",
               "key": "true_form_seen",
               "value": true
+            },
+            "next_step_id": "succeed_2"
+          },
+          {
+            "id": "succeed_2",
+            "kind": "effect",
+            "effect": {
+              "type": "move_entity",
+              "entity_id": "cemetery_figure",
+              "location_id": "crypt"
+            },
+            "next_step_id": "succeed_3"
+          },
+          {
+            "id": "succeed_3",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "cemetery_figure",
+              "key": "at_surveillance_point",
+              "value": false
             },
             "next_step_id": "finish"
           }
@@ -3472,6 +3527,71 @@
               "type": "change_entity_state",
               "entity_id": "case_tracker",
               "key": "night_watch_checked",
+              "value": false
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      }
+    },
+    {
+      "id": "figure_returns_to_crypt_at_day",
+      "priority": 40,
+      "trigger": {
+        "kind": "event",
+        "event_type": "time.point_entered",
+        "when": {
+          "op": "all",
+          "items": [
+            {
+              "op": "predicate",
+              "predicate": "time_of_day_is",
+              "args": {
+                "value": "day"
+              }
+            },
+            {
+              "op": "predicate",
+              "predicate": "entity_state_is",
+              "args": {
+                "entity_id": "cemetery_figure",
+                "key": "at_surveillance_point",
+                "value": true
+              }
+            }
+          ]
+        },
+        "entry_branch_id": "default"
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "default",
+            "entry_step_id": "return_to_crypt"
+          }
+        ],
+        "steps": [
+          {
+            "id": "return_to_crypt",
+            "kind": "effect",
+            "effect": {
+              "type": "move_entity",
+              "entity_id": "cemetery_figure",
+              "location_id": "crypt"
+            },
+            "next_step_id": "clear_away_flag"
+          },
+          {
+            "id": "clear_away_flag",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "cemetery_figure",
+              "key": "at_surveillance_point",
               "value": false
             },
             "next_step_id": "finish"

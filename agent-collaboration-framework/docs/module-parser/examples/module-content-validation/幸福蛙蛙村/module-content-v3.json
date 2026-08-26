@@ -1,0 +1,5586 @@
+{
+  "content_schema_version": 3,
+  "module_id": "happy-frog-village",
+  "version": "3.0.8",
+  "world_ref": "coc-7e",
+  "background": "默认采用现代城郊。莱恩夫妇委托调查员寻找失踪的儿子詹姆斯，线索指向不存在于官方记录的蛙蛙度假村。叙事从温馨田园与整齐笑容逐渐滑向梦境、身体异变和选择权被剥夺的恐怖；信使本体、青蛙来源和水晶弱点只能随权威信息揭示。",
+  "information": [
+    {
+      "id": "commission_received",
+      "kind": "fact",
+      "title": "寻找詹姆斯的委托",
+      "keeper_content": "莱恩夫妇委托调查员寻找失踪一周的儿子詹姆斯。",
+      "player_content": "莱恩夫妇请你们寻找失踪一周的詹姆斯，并提供了照片和预付金。",
+      "discovery": {
+        "initial": "hidden",
+        "scope": "party"
+      },
+      "audience": {
+        "keeper": true,
+        "player_when_discovered": true
+      },
+      "presentation": {
+        "channels": [
+          "narration"
+        ],
+        "show_in_ui": true
+      },
+      "criticality": "essential",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "frog_resort_flyer",
+      "kind": "fact",
+      "title": "蛙蛙度假村传单",
+      "keeper_content": "所有导入最终都把调查员引向同一张传单和城郊老林地。",
+      "player_content": "传单邀请生活陷入低谷的人免费前往城郊的蛙蛙度假村寻找幸福。",
+      "discovery": {
+        "initial": "hidden",
+        "scope": "party"
+      },
+      "audience": {
+        "keeper": true,
+        "player_when_discovered": true
+      },
+      "presentation": {
+        "channels": [
+          "narration"
+        ],
+        "show_in_ui": true
+      },
+      "criticality": "essential",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "flyer_is_hand_drawn",
+      "kind": "fact",
+      "title": "手绘传单",
+      "keeper_content": "传单看似印刷，实际是逐字手绘，并带有青蛙般的气味。",
+      "player_content": "细看后，你发现传单并非印刷品，而是精确得异乎寻常的手绘作品。",
+      "discovery": {
+        "initial": "hidden",
+        "scope": "party"
+      },
+      "audience": {
+        "keeper": true,
+        "player_when_discovered": true
+      },
+      "presentation": {
+        "channels": [
+          "narration"
+        ],
+        "show_in_ui": true
+      },
+      "criticality": "supporting",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "missing_people_pattern",
+      "kind": "fact",
+      "title": "重复发生的失踪",
+      "keeper_content": "过去三至六个月至少七名处于人生低谷者在前往不存在的度假区后失踪。",
+      "player_content": "近期多起失踪案都有相同模式：当事人处于低谷，声称要去安静地方，随后消失。",
+      "discovery": {
+        "initial": "hidden",
+        "scope": "party"
+      },
+      "audience": {
+        "keeper": true,
+        "player_when_discovered": true
+      },
+      "presentation": {
+        "channels": [
+          "narration"
+        ],
+        "show_in_ui": true
+      },
+      "criticality": "essential",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "villagers_shared_dreams",
+      "kind": "fact",
+      "title": "村民们的共同梦境",
+      "keeper_content": "周边村民梦到逝者或白色少女询问是否幸福，梦后有人走入树林失踪。",
+      "player_content": "不同村民做过相似的美梦：白色少女不断询问“你幸福吗”，随后有人走入树林。",
+      "discovery": {
+        "initial": "hidden",
+        "scope": "party"
+      },
+      "audience": {
+        "keeper": true,
+        "player_when_discovered": true
+      },
+      "presentation": {
+        "channels": [
+          "narration"
+        ],
+        "show_in_ui": true
+      },
+      "criticality": "supporting",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "resort_has_no_registration",
+      "kind": "fact",
+      "title": "官方记录中的空白",
+      "keeper_content": "旅游、规划、电话系统均无蛙蛙度假村记录。",
+      "player_content": "官方机构一致否认度假村存在，地址所在区域也不允许商业开发。",
+      "discovery": {
+        "initial": "hidden",
+        "scope": "party"
+      },
+      "audience": {
+        "keeper": true,
+        "player_when_discovered": true
+      },
+      "presentation": {
+        "channels": [
+          "narration"
+        ],
+        "show_in_ui": true
+      },
+      "criticality": "supporting",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "ezra_warning",
+      "kind": "fact",
+      "title": "埃兹拉的警告",
+      "keeper_content": "幸存者埃兹拉确认白发少女、美梦、身体异变和池塘青蛙都属于陷阱。",
+      "player_content": "路边的幸存者警告你们：幸福是陷阱，梦会吞噬人，池塘里的青蛙也不正常。",
+      "discovery": {
+        "initial": "hidden",
+        "scope": "party"
+      },
+      "audience": {
+        "keeper": true,
+        "player_when_discovered": true
+      },
+      "presentation": {
+        "channels": [
+          "narration"
+        ],
+        "show_in_ui": true
+      },
+      "criticality": "essential",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "staff_are_conditioned",
+      "kind": "fact",
+      "title": "整齐得过分的员工",
+      "keeper_content": "员工被信使同化，笑容与语调缺乏个人情感。",
+      "player_content": "度假村员工的笑容和语调像经过统一训练，热情中缺少真实情绪。",
+      "discovery": {
+        "initial": "hidden",
+        "scope": "party"
+      },
+      "audience": {
+        "keeper": true,
+        "player_when_discovered": true
+      },
+      "presentation": {
+        "channels": [
+          "narration"
+        ],
+        "show_in_ui": true
+      },
+      "criticality": "supporting",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "messenger_happiness_logic",
+      "kind": "fact",
+      "title": "信使对幸福的理解",
+      "keeper_content": "信使真诚地认为消除选择、让人永眠就是幸福。",
+      "player_content": "信使并非假装善意，但她把“永远不用面对痛苦”当成唯一正确的幸福。",
+      "discovery": {
+        "initial": "hidden",
+        "scope": "party"
+      },
+      "audience": {
+        "keeper": true,
+        "player_when_discovered": true
+      },
+      "presentation": {
+        "channels": [
+          "narration"
+        ],
+        "show_in_ui": true
+      },
+      "criticality": "essential",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "james_refuses_home",
+      "kind": "fact",
+      "title": "詹姆斯拒绝回家",
+      "keeper_content": "詹姆斯已深度依赖美梦并把度假村视作家。",
+      "player_content": "詹姆斯拒绝离开，坚称这里才是他的家，并劝你们也留下。",
+      "discovery": {
+        "initial": "hidden",
+        "scope": "party"
+      },
+      "audience": {
+        "keeper": true,
+        "player_when_discovered": true
+      },
+      "presentation": {
+        "channels": [
+          "narration"
+        ],
+        "show_in_ui": true
+      },
+      "criticality": "essential",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "james_resists_forced_removal",
+      "kind": "fact",
+      "title": "詹姆斯抗拒强行带离",
+      "keeper_content": "在信使影响解除前强行控制詹姆斯，会使他歇斯底里地挣扎呼救，并惊动员工与幸福信使。",
+      "player_content": "詹姆斯剧烈挣扎并向信使呼救；继续强行带他离开只会加重他的痛苦。",
+      "discovery": {
+        "initial": "hidden",
+        "scope": "party"
+      },
+      "audience": {
+        "keeper": true,
+        "player_when_discovered": true
+      },
+      "presentation": {
+        "channels": [
+          "narration"
+        ],
+        "show_in_ui": true
+      },
+      "criticality": "essential",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "james_forced_removal_tragedy",
+      "kind": "fact",
+      "title": "强行带离的悲剧",
+      "keeper_content": "未解除信使影响便强行把詹姆斯带出度假村，会引发严重戒断和精神崩溃；他最终会在返程途中自尽，安眠或击晕不能规避这一来源结局。",
+      "player_content": "远离度假村后，詹姆斯出现严重戒断与精神崩溃，最终在返程途中结束了自己的生命。强行带离没能救回他。",
+      "discovery": {
+        "initial": "hidden",
+        "scope": "party"
+      },
+      "audience": {
+        "keeper": true,
+        "player_when_discovered": true
+      },
+      "presentation": {
+        "channels": [
+          "narration"
+        ],
+        "show_in_ui": true
+      },
+      "criticality": "essential",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "happiness_booklet_doctrine",
+      "kind": "fact",
+      "title": "《来一起拥抱幸福吧！》",
+      "keeper_content": "手册用放下自我、融入自然与无忧梦境包装同化理念。",
+      "player_content": "客房手册反复写着“放下自我、融入自然”和“幸福即在无忧的梦中”。",
+      "discovery": {
+        "initial": "hidden",
+        "scope": "party"
+      },
+      "audience": {
+        "keeper": true,
+        "player_when_discovered": true
+      },
+      "presentation": {
+        "channels": [
+          "narration"
+        ],
+        "show_in_ui": true
+      },
+      "criticality": "supporting",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "guests_show_mutation",
+      "kind": "fact",
+      "title": "游客的青蛙特征",
+      "keeper_content": "部分游客已出现湿冷皮肤、蹼膜或青蛙头等异变。",
+      "player_content": "仔细观察后，你发现部分游客身上已经出现不属于人类的青蛙特征。",
+      "discovery": {
+        "initial": "hidden",
+        "scope": "party"
+      },
+      "audience": {
+        "keeper": true,
+        "player_when_discovered": true
+      },
+      "presentation": {
+        "channels": [
+          "narration"
+        ],
+        "show_in_ui": true
+      },
+      "criticality": "essential",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "all_liquids_use_pond_water",
+      "kind": "fact",
+      "title": "餐饮中的幸福之水",
+      "keeper_content": "汤、饮料和供水都来自蛙鸣泉，饮用会产生幻觉并加速异变。",
+      "player_content": "厨房用带着微光的池水烹调汤和饮料，员工称它为“幸福之水”。",
+      "discovery": {
+        "initial": "hidden",
+        "scope": "party"
+      },
+      "audience": {
+        "keeper": true,
+        "player_when_discovered": true
+      },
+      "presentation": {
+        "channels": [
+          "narration"
+        ],
+        "show_in_ui": true
+      },
+      "criticality": "essential",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "water_causes_hallucinations",
+      "kind": "fact",
+      "title": "外来的幸福感",
+      "keeper_content": "池水会针对内心渴望制造幻觉；首版不伪造逐角色变异状态。",
+      "player_content": "接触这里的水会带来不属于自己的舒适感和私人幻觉，清醒后仍令人不安。",
+      "discovery": {
+        "initial": "hidden",
+        "scope": "party"
+      },
+      "audience": {
+        "keeper": true,
+        "player_when_discovered": true
+      },
+      "presentation": {
+        "channels": [
+          "narration"
+        ],
+        "show_in_ui": true
+      },
+      "criticality": "supporting",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "frogs_were_people",
+      "kind": "fact",
+      "title": "梦游青蛙的真相",
+      "keeper_content": "青蛙跨物种和平共处、发出人声，实为被转化并沉浸美梦的受害者。",
+      "player_content": "蛙鸣中夹杂着人类话语；这些呆滞的青蛙很可能曾经是人。",
+      "discovery": {
+        "initial": "hidden",
+        "scope": "party"
+      },
+      "audience": {
+        "keeper": true,
+        "player_when_discovered": true
+      },
+      "presentation": {
+        "channels": [
+          "narration"
+        ],
+        "show_in_ui": true
+      },
+      "criticality": "essential",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "staff_notes_confessions",
+      "kind": "fact",
+      "title": "员工留下的纸条",
+      "keeper_content": "纸条显示萨曼莎想传播幸福，詹姆斯爱慕并依赖信使。",
+      "player_content": "员工纸条表明，他们并非普通雇员，而是在主动帮助信使传播“幸福”。",
+      "discovery": {
+        "initial": "hidden",
+        "scope": "party"
+      },
+      "audience": {
+        "keeper": true,
+        "player_when_discovered": true
+      },
+      "presentation": {
+        "channels": [
+          "narration"
+        ],
+        "show_in_ui": true
+      },
+      "criticality": "supporting",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "messenger_origin_notes",
+      "kind": "fact",
+      "title": "信使笔记中的来历",
+      "keeper_content": "信使来自异界，为降低维持美梦的消耗而把沉睡者变成青蛙。",
+      "player_content": "笔记说明信使来自遥远世界；访客过多后，她把做梦的人变成青蛙以节省力量。",
+      "discovery": {
+        "initial": "hidden",
+        "scope": "party"
+      },
+      "audience": {
+        "keeper": true,
+        "player_when_discovered": true
+      },
+      "presentation": {
+        "channels": [
+          "narration"
+        ],
+        "show_in_ui": true
+      },
+      "criticality": "essential",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "night_has_fallen",
+      "kind": "fact",
+      "title": "第一夜来临",
+      "keeper_content": "夜晚会出现低语，信使前往池塘为水晶补充能量。",
+      "player_content": "夜色降临，温柔的声音在耳边询问：“对你而言，什么是幸福？”",
+      "discovery": {
+        "initial": "hidden",
+        "scope": "party"
+      },
+      "audience": {
+        "keeper": true,
+        "player_when_discovered": true
+      },
+      "presentation": {
+        "channels": [
+          "narration"
+        ],
+        "show_in_ui": true
+      },
+      "criticality": "supporting",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "messenger_leaves_at_night",
+      "kind": "fact",
+      "title": "信使深夜离开",
+      "keeper_content": "第一夜深夜，幸福信使独自前往池塘为梦境水晶补充能量。",
+      "player_content": "夜深后，你注意到幸福信使独自离开别墅，朝蛙鸣泉的方向走去。她的行动与白天明显不同。",
+      "discovery": {
+        "initial": "hidden",
+        "scope": "party"
+      },
+      "audience": {
+        "keeper": true,
+        "player_when_discovered": true
+      },
+      "presentation": {
+        "channels": [
+          "narration"
+        ],
+        "show_in_ui": true
+      },
+      "criticality": "supporting",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "night_ritual_seen",
+      "kind": "fact",
+      "title": "池塘边的夜间仪式",
+      "keeper_content": "信使从池底取出水晶并注入能量；仪式结束后，她把水晶放回池底，独自离开蛙鸣泉。青蛙如朝圣般面向她。",
+      "player_content": "你看到信使从池底取出透明水晶注入微光。仪式结束后，她把水晶重新放回池底，随后独自离开；青蛙始终朝她伏下。",
+      "discovery": {
+        "initial": "hidden",
+        "scope": "party"
+      },
+      "audience": {
+        "keeper": true,
+        "player_when_discovered": true
+      },
+      "presentation": {
+        "channels": [
+          "narration"
+        ],
+        "show_in_ui": true
+      },
+      "criticality": "essential",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "crystal_is_power_core",
+      "kind": "fact",
+      "title": "梦境水晶的作用",
+      "keeper_content": "透明水晶借水等媒介传播美梦，也是度假村力量的可破坏核心。",
+      "player_content": "水晶通过池水传播美梦；离开媒介或被破坏，度假村的力量就会失去核心。",
+      "discovery": {
+        "initial": "hidden",
+        "scope": "party"
+      },
+      "audience": {
+        "keeper": true,
+        "player_when_discovered": true
+      },
+      "presentation": {
+        "channels": [
+          "narration"
+        ],
+        "show_in_ui": true
+      },
+      "criticality": "essential",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "crystal_retrieved",
+      "kind": "fact",
+      "title": "水晶被带到岸边",
+      "keeper_content": "困难潜水成功后，调查员把既有 Canon 水晶带到岸边。",
+      "player_content": "你把透明水晶从池底带到了岸边。",
+      "discovery": {
+        "initial": "hidden",
+        "scope": "party"
+      },
+      "audience": {
+        "keeper": true,
+        "player_when_discovered": true
+      },
+      "presentation": {
+        "channels": [
+          "narration"
+        ],
+        "show_in_ui": true
+      },
+      "criticality": "essential",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "debate_failed_hint",
+      "kind": "fact",
+      "title": "信使仍未动摇",
+      "keeper_content": "说服失败不会锁死，玩家可补充选择权、痛苦与爱的证据后重试。",
+      "player_content": "信使仍不理解。也许需要用已经发现的受害者、选择权和真实关系反驳她。",
+      "discovery": {
+        "initial": "hidden",
+        "scope": "party"
+      },
+      "audience": {
+        "keeper": true,
+        "player_when_discovered": true
+      },
+      "presentation": {
+        "channels": [
+          "narration"
+        ],
+        "show_in_ui": true
+      },
+      "criticality": "supporting",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "messenger_convinced",
+      "kind": "fact",
+      "title": "信使承认错误",
+      "keeper_content": "调查员以证据和论证动摇信使，她主动终止美梦。",
+      "player_content": "信使终于理解：被剥夺选择的幸福并不是真正的幸福。她决定释放所有人。",
+      "discovery": {
+        "initial": "hidden",
+        "scope": "party"
+      },
+      "audience": {
+        "keeper": true,
+        "player_when_discovered": true
+      },
+      "presentation": {
+        "channels": [
+          "narration"
+        ],
+        "show_in_ui": true
+      },
+      "criticality": "essential",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "crystal_destroyed",
+      "kind": "fact",
+      "title": "梦境核心被破坏",
+      "keeper_content": "水晶被破坏，度假村的转化力量消散。",
+      "player_content": "水晶碎裂后，覆盖度假村的微光与雾气开始消散。",
+      "discovery": {
+        "initial": "hidden",
+        "scope": "party"
+      },
+      "audience": {
+        "keeper": true,
+        "player_when_discovered": true
+      },
+      "presentation": {
+        "channels": [
+          "narration"
+        ],
+        "show_in_ui": true
+      },
+      "criticality": "essential",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "victims_released",
+      "kind": "fact",
+      "title": "受害者恢复人形",
+      "keeper_content": "信使放弃计划或水晶被破坏后，青蛙受害者与员工恢复。",
+      "player_content": "池塘里的青蛙和被同化的员工逐渐恢复为人类。",
+      "discovery": {
+        "initial": "hidden",
+        "scope": "party"
+      },
+      "audience": {
+        "keeper": true,
+        "player_when_discovered": true
+      },
+      "presentation": {
+        "channels": [
+          "narration"
+        ],
+        "show_in_ui": true
+      },
+      "criticality": "essential",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "james_returns_home",
+      "kind": "fact",
+      "title": "詹姆斯获救",
+      "keeper_content": "解除力量后，詹姆斯清醒并能随调查员回到莱恩家。",
+      "player_content": "詹姆斯从美梦中清醒，愿意和你们离开度假村。",
+      "discovery": {
+        "initial": "hidden",
+        "scope": "party"
+      },
+      "audience": {
+        "keeper": true,
+        "player_when_discovered": true
+      },
+      "presentation": {
+        "channels": [
+          "narration"
+        ],
+        "show_in_ui": true
+      },
+      "criticality": "essential",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "escaped_unresolved",
+      "kind": "fact",
+      "title": "主动离开度假村",
+      "keeper_content": "调查员可以随时离开；未破坏核心时度假村仍可能在别处出现。",
+      "player_content": "你们离开了度假村，但它的真相和失踪者仍留在雾中。未来或许还会有人收到传单。",
+      "discovery": {
+        "initial": "hidden",
+        "scope": "party"
+      },
+      "audience": {
+        "keeper": true,
+        "player_when_discovered": true
+      },
+      "presentation": {
+        "channels": [
+          "narration"
+        ],
+        "show_in_ui": true
+      },
+      "criticality": "essential",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
+      "id": "accepted_happiness",
+      "kind": "fact",
+      "title": "选择留下",
+      "keeper_content": "只有玩家明确接受信使理念时才能开放留下结局，不自动永久退役角色。",
+      "player_content": "你明确选择留在这里，接受信使所说的“幸福”。最终后果仍需在结局确认时决定。",
+      "discovery": {
+        "initial": "hidden",
+        "scope": "party"
+      },
+      "audience": {
+        "keeper": true,
+        "player_when_discovered": true
+      },
+      "presentation": {
+        "channels": [
+          "narration"
+        ],
+        "show_in_ui": true
+      },
+      "criticality": "essential",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    }
+  ],
+  "knowledge_goals": [
+    {
+      "id": "understand_resort_truth",
+      "target_information_ids": [
+        "messenger_happiness_logic",
+        "frogs_were_people",
+        "crystal_is_power_core"
+      ],
+      "completion": "any",
+      "required_for_core_resolution": false
+    },
+    {
+      "id": "choose_frog_village_outcome",
+      "target_information_ids": [
+        "messenger_convinced",
+        "crystal_destroyed",
+        "escaped_unresolved",
+        "accepted_happiness"
+      ],
+      "completion": "any",
+      "required_for_core_resolution": true
+    }
+  ],
+  "entities": [
+    {
+      "id": "lane_commission",
+      "kind": "object",
+      "origin": "canon",
+      "name": "莱恩夫妇的委托",
+      "player_visible_name": "莱恩夫妇的委托",
+      "player_visible_aliases": [],
+      "description": "寻找詹姆斯的正式委托。",
+      "located_in": "lane_manor",
+      "relations": [],
+      "state": {},
+      "item_component": null,
+      "visibility": "public",
+      "visibility_conditions": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "resort_flyer",
+      "kind": "object",
+      "origin": "canon",
+      "name": "蛙蛙度假村传单",
+      "player_visible_name": "蛙蛙度假村传单",
+      "player_visible_aliases": [],
+      "description": "设计精美、地址模糊的彩色传单。",
+      "located_in": "lane_manor",
+      "relations": [],
+      "state": {},
+      "item_component": {
+        "portable": true,
+        "unique": true,
+        "quantity": 1,
+        "capabilities": []
+      },
+      "visibility": "public",
+      "visibility_conditions": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "missing_files",
+      "kind": "object",
+      "origin": "canon",
+      "name": "近期失踪档案",
+      "player_visible_name": "近期失踪档案",
+      "player_visible_aliases": [],
+      "description": "警局近期失踪人口报告。",
+      "located_in": "pretrip_investigation",
+      "relations": [],
+      "state": {},
+      "item_component": null,
+      "visibility": "public",
+      "visibility_conditions": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "villager_accounts",
+      "kind": "npc",
+      "origin": "canon",
+      "name": "周边村民",
+      "player_visible_name": "周边村民",
+      "player_visible_aliases": [],
+      "description": "对林地与共同梦境讳莫如深的居民。",
+      "located_in": "pretrip_investigation",
+      "relations": [],
+      "state": {},
+      "item_component": null,
+      "visibility": "public",
+      "visibility_conditions": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "ezra",
+      "kind": "npc",
+      "origin": "canon",
+      "name": "埃兹拉",
+      "player_visible_name": "埃兹拉",
+      "player_visible_aliases": [],
+      "description": "从度假村逃出的推销员，手指间仍有淡绿色蹼膜。",
+      "located_in": "forest_road",
+      "relations": [],
+      "state": {},
+      "item_component": null,
+      "visibility": "public",
+      "visibility_conditions": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "messenger",
+      "kind": "npc",
+      "origin": "canon",
+      "name": "幸福信使",
+      "player_visible_name": "幸福信使",
+      "player_visible_aliases": [],
+      "description": "白发、绿色斗篷、真诚地宣称要带来幸福的少女。",
+      "located_in": "resort_reception",
+      "relations": [],
+      "state": {
+        "convinced": false
+      },
+      "item_component": null,
+      "visibility": "public",
+      "visibility_conditions": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "emily",
+      "kind": "npc",
+      "origin": "canon",
+      "name": "艾米丽",
+      "player_visible_name": "艾米丽",
+      "player_visible_aliases": [],
+      "description": "笑容完美无瑕的接待女仆。",
+      "located_in": "resort_reception",
+      "relations": [],
+      "state": {},
+      "item_component": null,
+      "visibility": "public",
+      "visibility_conditions": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "james",
+      "kind": "npc",
+      "origin": "canon",
+      "name": "詹姆斯·莱恩",
+      "player_visible_name": "詹姆斯·莱恩",
+      "player_visible_aliases": [],
+      "description": "调查员寻找的失踪青年。",
+      "located_in": "resort_reception",
+      "relations": [],
+      "state": {
+        "released": false,
+        "under_forced_custody": false,
+        "accompanying_party": false,
+        "alive": true
+      },
+      "item_component": null,
+      "visibility": "public",
+      "visibility_conditions": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "staff_door",
+      "kind": "object",
+      "origin": "canon",
+      "name": "员工区入口",
+      "player_visible_name": "员工区入口",
+      "player_visible_aliases": [],
+      "description": "不向游客开放的员工通道。",
+      "located_in": "resort_reception",
+      "relations": [],
+      "state": {
+        "open": false
+      },
+      "item_component": null,
+      "visibility": "public",
+      "visibility_conditions": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "happiness_booklet",
+      "kind": "object",
+      "origin": "canon",
+      "name": "《来一起拥抱幸福吧！》",
+      "player_visible_name": "《来一起拥抱幸福吧！》",
+      "player_visible_aliases": [],
+      "description": "客房床头的宣传手册。",
+      "located_in": "guest_room",
+      "relations": [],
+      "state": {},
+      "item_component": null,
+      "visibility": "public",
+      "visibility_conditions": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "frog_head_guest",
+      "kind": "npc",
+      "origin": "canon",
+      "name": "宽衣游客",
+      "player_visible_name": "宽衣游客",
+      "player_visible_aliases": [],
+      "description": "用宽大衣物遮挡身体异样的游客。",
+      "located_in": "guest_room",
+      "relations": [],
+      "state": {},
+      "item_component": null,
+      "visibility": "public",
+      "visibility_conditions": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "contaminated_water",
+      "kind": "object",
+      "origin": "canon",
+      "name": "汤品与饮料",
+      "player_visible_name": "汤品与饮料",
+      "player_visible_aliases": [],
+      "description": "由蛙鸣泉池水制作的饮品与汤。",
+      "located_in": "dining_kitchen",
+      "relations": [],
+      "state": {},
+      "item_component": null,
+      "visibility": "public",
+      "visibility_conditions": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "kitchen_barrel",
+      "kind": "object",
+      "origin": "canon",
+      "name": "厨房水桶",
+      "player_visible_name": "厨房水桶",
+      "player_visible_aliases": [],
+      "description": "装着带微弱磷光池水的大桶。",
+      "located_in": "dining_kitchen",
+      "relations": [],
+      "state": {},
+      "item_component": null,
+      "visibility": "public",
+      "visibility_conditions": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "frog_pond",
+      "kind": "object",
+      "origin": "canon",
+      "name": "蛙鸣泉",
+      "player_visible_name": "蛙鸣泉",
+      "player_visible_aliases": [],
+      "description": "度假村中心、遍布异常青蛙的池塘。",
+      "located_in": "frog_pond",
+      "relations": [],
+      "state": {},
+      "item_component": null,
+      "visibility": "public",
+      "visibility_conditions": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "dream_frogs",
+      "kind": "npc",
+      "origin": "canon",
+      "name": "梦游青蛙",
+      "player_visible_name": "梦游青蛙",
+      "player_visible_aliases": [],
+      "description": "几乎不躲避来人的鲜艳青蛙。",
+      "located_in": "frog_pond",
+      "relations": [],
+      "state": {},
+      "item_component": null,
+      "visibility": "public",
+      "visibility_conditions": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "night_ritual",
+      "kind": "object",
+      "origin": "canon",
+      "name": "池塘边的微光",
+      "player_visible_name": "池塘边的微光",
+      "player_visible_aliases": [],
+      "description": "夜间池塘出现的规律微光与朝圣般蛙群。",
+      "located_in": "frog_pond",
+      "relations": [],
+      "state": {
+        "active": false
+      },
+      "item_component": null,
+      "visibility": "public",
+      "visibility_conditions": [
+        {
+          "op": "predicate",
+          "predicate": "entity_state_is",
+          "args": {
+            "entity_id": "night_ritual",
+            "key": "active",
+            "value": true
+          }
+        }
+      ],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "dream_crystal",
+      "kind": "object",
+      "origin": "canon",
+      "name": "梦境水晶",
+      "player_visible_name": "梦境水晶",
+      "player_visible_aliases": [],
+      "description": "信使从池底取出的透明水晶。",
+      "located_in": "frog_pond",
+      "relations": [],
+      "state": {
+        "known": false,
+        "retrieved": false,
+        "broken": false
+      },
+      "item_component": null,
+      "visibility": "public",
+      "visibility_conditions": [
+        {
+          "op": "predicate",
+          "predicate": "entity_state_is",
+          "args": {
+            "entity_id": "dream_crystal",
+            "key": "known",
+            "value": true
+          }
+        }
+      ],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "staff_notes",
+      "kind": "object",
+      "origin": "canon",
+      "name": "员工纸条",
+      "player_visible_name": "员工纸条",
+      "player_visible_aliases": [],
+      "description": "未完成传单间夹着的零散纸条。",
+      "located_in": "staff_area",
+      "relations": [],
+      "state": {},
+      "item_component": null,
+      "visibility": "public",
+      "visibility_conditions": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "messenger_notes",
+      "kind": "object",
+      "origin": "canon",
+      "name": "信使的私人笔记",
+      "player_visible_name": "信使的私人笔记",
+      "player_visible_aliases": [],
+      "description": "记录她的来历、目标和转化原因。",
+      "located_in": "messenger_bedroom",
+      "relations": [],
+      "state": {},
+      "item_component": null,
+      "visibility": "public",
+      "visibility_conditions": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "nutrient_barrels",
+      "kind": "object",
+      "origin": "canon",
+      "name": "营养液桶",
+      "player_visible_name": "营养液桶",
+      "player_visible_aliases": [],
+      "description": "散发甜腻气味的营养液。",
+      "located_in": "storage_room",
+      "relations": [],
+      "state": {},
+      "item_component": null,
+      "visibility": "public",
+      "visibility_conditions": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "final_debate",
+      "kind": "object",
+      "origin": "canon",
+      "name": "关于幸福的最终辩论",
+      "player_visible_name": "关于幸福的最终辩论",
+      "player_visible_aliases": [],
+      "description": "只有掌握信使逻辑和受害者证据后才有意义的对话。",
+      "located_in": "resort_reception",
+      "relations": [],
+      "state": {
+        "available": false
+      },
+      "item_component": null,
+      "visibility": "public",
+      "visibility_conditions": [
+        {
+          "op": "predicate",
+          "predicate": "entity_state_is",
+          "args": {
+            "entity_id": "final_debate",
+            "key": "available",
+            "value": true
+          }
+        }
+      ],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "resort_exit",
+      "kind": "object",
+      "origin": "canon",
+      "name": "返程道路",
+      "player_visible_name": "返程道路",
+      "player_visible_aliases": [],
+      "description": "穿过雾气离开度假村的道路。",
+      "located_in": "resort_boundary",
+      "relations": [],
+      "state": {
+        "open": true
+      },
+      "item_component": null,
+      "visibility": "public",
+      "visibility_conditions": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "resort_state",
+      "kind": "object",
+      "origin": "canon",
+      "name": "度假村力量",
+      "player_visible_name": "度假村力量",
+      "player_visible_aliases": [],
+      "description": "只保存共享、可审计的结局状态，不替代逐角色异变。",
+      "located_in": "resort_reception",
+      "relations": [],
+      "state": {
+        "victims_released": false,
+        "core_broken": false
+      },
+      "item_component": null,
+      "visibility": "keeper",
+      "visibility_conditions": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    }
+  ],
+  "locations": [
+    {
+      "id": "lane_manor",
+      "kind": "site",
+      "origin": "canon",
+      "name": "莱恩庄园",
+      "player_visible_name": "莱恩庄园",
+      "player_visible_description": "寻人委托开始的庄园会客厅。",
+      "parent_location_id": null,
+      "region_id": null,
+      "relations": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "pretrip_investigation",
+      "kind": "site",
+      "origin": "canon",
+      "name": "老林地周边村镇",
+      "player_visible_name": "老林地周边村镇",
+      "player_visible_description": "村民、警局档案和地方机构提供互相印证的线索。",
+      "parent_location_id": null,
+      "region_id": null,
+      "relations": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "forest_road",
+      "kind": "connector",
+      "origin": "canon",
+      "name": "老林地碎石路",
+      "player_visible_name": "老林地碎石路",
+      "player_visible_description": "通往度假村的潮湿林间道路。",
+      "parent_location_id": null,
+      "region_id": null,
+      "relations": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "frog_resort",
+      "kind": "site",
+      "origin": "canon",
+      "name": "蛙蛙度假村",
+      "player_visible_name": "蛙蛙度假村",
+      "player_visible_description": "被雾气与老林环绕的田园度假村。沿碎石路望去，一栋醒目的两层别墅坐落在修剪整齐的草坪后方；别墅正门通向一层接待大厅，附近还能看到通往蛙鸣泉与度假村边界的小径。",
+      "parent_location_id": null,
+      "region_id": null,
+      "relations": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "resort_villa",
+      "kind": "region",
+      "origin": "canon",
+      "name": "度假村别墅",
+      "player_visible_name": "度假村别墅",
+      "player_visible_description": "接待、客房和员工区域所在的两层别墅。",
+      "parent_location_id": "frog_resort",
+      "region_id": null,
+      "relations": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "resort_ground_floor",
+      "kind": "region",
+      "origin": "canon",
+      "name": "别墅一层",
+      "player_visible_name": "别墅一层",
+      "player_visible_description": "接待大厅与餐厅厨房所在楼层。",
+      "parent_location_id": "resort_villa",
+      "region_id": null,
+      "relations": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "resort_second_floor",
+      "kind": "region",
+      "origin": "canon",
+      "name": "别墅二层",
+      "player_visible_name": "别墅二层",
+      "player_visible_description": "客房与非公开员工区域所在楼层。",
+      "parent_location_id": "resort_villa",
+      "region_id": null,
+      "relations": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "resort_reception",
+      "kind": "room",
+      "origin": "canon",
+      "name": "一层接待大厅",
+      "player_visible_name": "一层接待大厅",
+      "player_visible_description": "卡通青蛙木牌后的明亮接待区。",
+      "aliases": [
+        "度假村别墅",
+        "别墅",
+        "别墅入口"
+      ],
+      "parent_location_id": "resort_ground_floor",
+      "region_id": null,
+      "relations": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "guest_room",
+      "kind": "room",
+      "origin": "canon",
+      "name": "客房",
+      "player_visible_name": "客房",
+      "player_visible_description": "整洁舒适，却处处重复幸福口号。",
+      "parent_location_id": "resort_second_floor",
+      "region_id": null,
+      "relations": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "dining_kitchen",
+      "kind": "room",
+      "origin": "canon",
+      "name": "用餐区与厨房",
+      "player_visible_name": "用餐区与厨房",
+      "player_visible_description": "所有汤水都带着蛙鸣泉的微光。",
+      "parent_location_id": "resort_ground_floor",
+      "region_id": null,
+      "relations": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "frog_pond",
+      "kind": "site",
+      "origin": "canon",
+      "name": "蛙鸣泉",
+      "player_visible_name": "蛙鸣泉",
+      "player_visible_description": "度假村中心、聚集大量青蛙的池塘。",
+      "parent_location_id": "frog_resort",
+      "region_id": null,
+      "relations": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "crystal_shore",
+      "kind": "site",
+      "origin": "canon",
+      "name": "水晶池岸",
+      "player_visible_name": "水晶池岸",
+      "player_visible_description": "调查员将梦境水晶带上岸后，才形成的结局行动位置。",
+      "parent_location_id": "frog_resort",
+      "region_id": null,
+      "relations": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "staff_area",
+      "kind": "room",
+      "origin": "canon",
+      "name": "员工区",
+      "player_visible_name": "员工区",
+      "player_visible_description": "堆放制服、传单和员工纸条的非公开区域。",
+      "parent_location_id": "resort_second_floor",
+      "region_id": null,
+      "relations": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "storage_room",
+      "kind": "room",
+      "origin": "canon",
+      "name": "二楼杂物间",
+      "player_visible_name": "二楼杂物间",
+      "player_visible_description": "堆满甜腻营养液桶的房间。",
+      "parent_location_id": "resort_second_floor",
+      "region_id": null,
+      "relations": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "messenger_bedroom",
+      "kind": "room",
+      "origin": "canon",
+      "name": "信使卧室",
+      "player_visible_name": "信使卧室",
+      "player_visible_description": "保存信使私人笔记的简单卧室。",
+      "parent_location_id": "resort_second_floor",
+      "region_id": null,
+      "relations": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "resort_boundary",
+      "kind": "connector",
+      "origin": "canon",
+      "name": "度假村边界",
+      "player_visible_name": "度假村边界",
+      "player_visible_description": "雾气包围的返程道路。",
+      "parent_location_id": "frog_resort",
+      "region_id": null,
+      "relations": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    },
+    {
+      "id": "outside",
+      "kind": "site",
+      "origin": "canon",
+      "name": "城郊道路",
+      "player_visible_name": "城郊道路",
+      "player_visible_description": "离开度假村后的现实道路。",
+      "parent_location_id": null,
+      "region_id": null,
+      "relations": [],
+      "plot_relevance": true,
+      "lifecycle": "session"
+    }
+  ],
+  "location_edges": [
+    {
+      "id": "manor_to_investigation",
+      "from_location_id": "lane_manor",
+      "to_location_id": "pretrip_investigation",
+      "kind": "public_network",
+      "traversal": "automatic",
+      "visibility": "public",
+      "access_point_id": null,
+      "conditions": [],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
+      "id": "manor_to_investigation_back",
+      "from_location_id": "pretrip_investigation",
+      "to_location_id": "lane_manor",
+      "kind": "public_network",
+      "traversal": "automatic",
+      "visibility": "public",
+      "access_point_id": null,
+      "conditions": [],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
+      "id": "investigation_to_forest",
+      "from_location_id": "pretrip_investigation",
+      "to_location_id": "forest_road",
+      "kind": "public_network",
+      "traversal": "automatic",
+      "visibility": "public",
+      "access_point_id": null,
+      "conditions": [],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
+      "id": "investigation_to_forest_back",
+      "from_location_id": "forest_road",
+      "to_location_id": "pretrip_investigation",
+      "kind": "public_network",
+      "traversal": "automatic",
+      "visibility": "public",
+      "access_point_id": null,
+      "conditions": [],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
+      "id": "forest_to_resort",
+      "from_location_id": "forest_road",
+      "to_location_id": "frog_resort",
+      "kind": "public_network",
+      "traversal": "automatic",
+      "visibility": "public",
+      "access_point_id": null,
+      "conditions": [],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
+      "id": "forest_to_resort_back",
+      "from_location_id": "frog_resort",
+      "to_location_id": "forest_road",
+      "kind": "public_network",
+      "traversal": "automatic",
+      "visibility": "public",
+      "access_point_id": null,
+      "conditions": [],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
+      "id": "resort_to_reception",
+      "from_location_id": "frog_resort",
+      "to_location_id": "resort_reception",
+      "kind": "public_network",
+      "traversal": "automatic",
+      "visibility": "public",
+      "access_point_id": null,
+      "conditions": [],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
+      "id": "resort_to_reception_back",
+      "from_location_id": "resort_reception",
+      "to_location_id": "frog_resort",
+      "kind": "public_network",
+      "traversal": "automatic",
+      "visibility": "public",
+      "access_point_id": null,
+      "conditions": [],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
+      "id": "reception_to_dining",
+      "from_location_id": "resort_reception",
+      "to_location_id": "dining_kitchen",
+      "kind": "public_network",
+      "traversal": "automatic",
+      "visibility": "public",
+      "access_point_id": null,
+      "conditions": [],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
+      "id": "reception_to_dining_back",
+      "from_location_id": "dining_kitchen",
+      "to_location_id": "resort_reception",
+      "kind": "public_network",
+      "traversal": "automatic",
+      "visibility": "public",
+      "access_point_id": null,
+      "conditions": [],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
+      "id": "reception_stairs_to_guest",
+      "from_location_id": "resort_reception",
+      "to_location_id": "guest_room",
+      "kind": "public_network",
+      "traversal": "automatic",
+      "visibility": "public",
+      "access_point_id": null,
+      "conditions": [],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
+      "id": "reception_stairs_to_guest_back",
+      "from_location_id": "guest_room",
+      "to_location_id": "resort_reception",
+      "kind": "public_network",
+      "traversal": "automatic",
+      "visibility": "public",
+      "access_point_id": null,
+      "conditions": [],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
+      "id": "resort_to_pond",
+      "from_location_id": "frog_resort",
+      "to_location_id": "frog_pond",
+      "kind": "public_network",
+      "traversal": "automatic",
+      "visibility": "public",
+      "access_point_id": null,
+      "conditions": [],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
+      "id": "resort_to_pond_back",
+      "from_location_id": "frog_pond",
+      "to_location_id": "frog_resort",
+      "kind": "public_network",
+      "traversal": "automatic",
+      "visibility": "public",
+      "access_point_id": null,
+      "conditions": [],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
+      "id": "pond_to_crystal_shore",
+      "from_location_id": "frog_pond",
+      "to_location_id": "crystal_shore",
+      "kind": "public_network",
+      "traversal": "automatic",
+      "visibility": "public",
+      "access_point_id": null,
+      "conditions": [
+        {
+          "op": "predicate",
+          "predicate": "entity_state_is",
+          "args": {
+            "entity_id": "dream_crystal",
+            "key": "retrieved",
+            "value": true
+          }
+        }
+      ],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
+      "id": "pond_to_crystal_shore_back",
+      "from_location_id": "crystal_shore",
+      "to_location_id": "frog_pond",
+      "kind": "public_network",
+      "traversal": "automatic",
+      "visibility": "public",
+      "access_point_id": null,
+      "conditions": [],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
+      "id": "resort_to_boundary",
+      "from_location_id": "frog_resort",
+      "to_location_id": "resort_boundary",
+      "kind": "public_network",
+      "traversal": "automatic",
+      "visibility": "public",
+      "access_point_id": null,
+      "conditions": [],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
+      "id": "resort_to_boundary_back",
+      "from_location_id": "resort_boundary",
+      "to_location_id": "frog_resort",
+      "kind": "public_network",
+      "traversal": "automatic",
+      "visibility": "public",
+      "access_point_id": null,
+      "conditions": [],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
+      "id": "reception_to_staff",
+      "from_location_id": "resort_reception",
+      "to_location_id": "staff_area",
+      "kind": "private",
+      "traversal": "gated",
+      "visibility": "public",
+      "access_point_id": "staff_door",
+      "conditions": [
+        {
+          "op": "predicate",
+          "predicate": "entity_state_is",
+          "args": {
+            "entity_id": "staff_door",
+            "key": "open",
+            "value": true
+          }
+        }
+      ],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
+      "id": "reception_to_staff_back",
+      "from_location_id": "staff_area",
+      "to_location_id": "resort_reception",
+      "kind": "public_network",
+      "traversal": "automatic",
+      "visibility": "public",
+      "access_point_id": null,
+      "conditions": [],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
+      "id": "guest_to_staff",
+      "from_location_id": "guest_room",
+      "to_location_id": "staff_area",
+      "kind": "private",
+      "traversal": "gated",
+      "visibility": "public",
+      "access_point_id": "staff_door",
+      "conditions": [
+        {
+          "op": "predicate",
+          "predicate": "entity_state_is",
+          "args": {
+            "entity_id": "staff_door",
+            "key": "open",
+            "value": true
+          }
+        }
+      ],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
+      "id": "guest_to_staff_back",
+      "from_location_id": "staff_area",
+      "to_location_id": "guest_room",
+      "kind": "public_network",
+      "traversal": "automatic",
+      "visibility": "public",
+      "access_point_id": null,
+      "conditions": [],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
+      "id": "staff_to_storage",
+      "from_location_id": "staff_area",
+      "to_location_id": "storage_room",
+      "kind": "public_network",
+      "traversal": "automatic",
+      "visibility": "public",
+      "access_point_id": null,
+      "conditions": [],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
+      "id": "staff_to_storage_back",
+      "from_location_id": "storage_room",
+      "to_location_id": "staff_area",
+      "kind": "public_network",
+      "traversal": "automatic",
+      "visibility": "public",
+      "access_point_id": null,
+      "conditions": [],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
+      "id": "staff_to_bedroom",
+      "from_location_id": "staff_area",
+      "to_location_id": "messenger_bedroom",
+      "kind": "public_network",
+      "traversal": "automatic",
+      "visibility": "public",
+      "access_point_id": null,
+      "conditions": [],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
+      "id": "staff_to_bedroom_back",
+      "from_location_id": "messenger_bedroom",
+      "to_location_id": "staff_area",
+      "kind": "public_network",
+      "traversal": "automatic",
+      "visibility": "public",
+      "access_point_id": null,
+      "conditions": [],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
+      "id": "boundary_to_outside",
+      "from_location_id": "resort_boundary",
+      "to_location_id": "outside",
+      "kind": "public_network",
+      "traversal": "automatic",
+      "visibility": "public",
+      "access_point_id": null,
+      "conditions": [],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    },
+    {
+      "id": "boundary_to_outside_back",
+      "from_location_id": "outside",
+      "to_location_id": "resort_boundary",
+      "kind": "public_network",
+      "traversal": "automatic",
+      "visibility": "public",
+      "access_point_id": null,
+      "conditions": [],
+      "travel_cost": {
+        "minutes": 0
+      },
+      "origin": "authored"
+    }
+  ],
+  "rules": [
+    {
+      "id": "accept_lane_commission",
+      "priority": 0,
+      "trigger": {
+        "kind": "agent_match",
+        "required": true,
+        "decision_mode": "selective",
+        "scope": {
+          "action_families": [
+            "accept",
+            "investigate",
+            "talk"
+          ],
+          "location_ids": [
+            "lane_manor"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "lane_commission"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "接受寻人委托",
+            "寻找詹姆斯"
+          ]
+        },
+        "options": [
+          {
+            "id": "take-case",
+            "semantic_hints": [
+              "接受寻人委托",
+              "寻找詹姆斯"
+            ]
+          }
+        ],
+        "bindings": []
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "take-case",
+            "entry_step_id": "effect_0"
+          }
+        ],
+        "steps": [
+          {
+            "id": "effect_0",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "commission_received",
+              "scope": "party"
+            },
+            "next_step_id": "effect_1"
+          },
+          {
+            "id": "effect_1",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "frog_resort_flyer",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "limits": {
+        "max_chain_depth": 16,
+        "max_steps": 128
+      }
+    },
+    {
+      "id": "inspect_resort_flyer",
+      "priority": 0,
+      "trigger": {
+        "kind": "agent_match",
+        "required": true,
+        "decision_mode": "selective",
+        "scope": {
+          "action_families": [
+            "inspect",
+            "research"
+          ],
+          "location_ids": [
+            "lane_manor"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "resort_flyer"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "resort_flyer"
+          ]
+        },
+        "options": [
+          {
+            "id": "library-use",
+            "semantic_hints": [
+              "resort_flyer"
+            ]
+          }
+        ],
+        "bindings": []
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "library-use",
+            "entry_step_id": "check"
+          }
+        ],
+        "steps": [
+          {
+            "id": "check",
+            "kind": "check",
+            "check": {
+              "profile_id": "coc7.skill",
+              "actor_binding": "actor",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "library-use"
+              },
+              "difficulty": "regular",
+              "allow_luck": true,
+              "allow_push": true
+            },
+            "result_routes": {
+              "critical_success": "success_0",
+              "extreme_success": "success_0",
+              "hard_success": "success_0",
+              "regular_success": "success_0",
+              "failure": "failure_0",
+              "fumble": "failure_0"
+            }
+          },
+          {
+            "id": "success_0",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "flyer_is_hand_drawn",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "failure_0",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "frog_resort_flyer",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "limits": {
+        "max_chain_depth": 16,
+        "max_steps": 128
+      }
+    },
+    {
+      "id": "research_missing_people",
+      "priority": 0,
+      "trigger": {
+        "kind": "agent_match",
+        "required": true,
+        "decision_mode": "selective",
+        "scope": {
+          "action_families": [
+            "research",
+            "search"
+          ],
+          "location_ids": [
+            "pretrip_investigation"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "missing_files"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "missing_files"
+          ]
+        },
+        "options": [
+          {
+            "id": "library-use",
+            "semantic_hints": [
+              "missing_files"
+            ]
+          }
+        ],
+        "bindings": []
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "library-use",
+            "entry_step_id": "check"
+          }
+        ],
+        "steps": [
+          {
+            "id": "check",
+            "kind": "check",
+            "check": {
+              "profile_id": "coc7.skill",
+              "actor_binding": "actor",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "library-use"
+              },
+              "difficulty": "regular",
+              "allow_luck": true,
+              "allow_push": true
+            },
+            "result_routes": {
+              "critical_success": "success_0",
+              "extreme_success": "success_0",
+              "hard_success": "success_0",
+              "regular_success": "success_0",
+              "failure": "failure_0",
+              "fumble": "failure_0"
+            }
+          },
+          {
+            "id": "success_0",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "missing_people_pattern",
+              "scope": "party"
+            },
+            "next_step_id": "success_1"
+          },
+          {
+            "id": "success_1",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "resort_has_no_registration",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "failure_0",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "missing_people_pattern",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "limits": {
+        "max_chain_depth": 16,
+        "max_steps": 128
+      }
+    },
+    {
+      "id": "ask_villagers_about_dreams",
+      "priority": 0,
+      "trigger": {
+        "kind": "agent_match",
+        "required": true,
+        "decision_mode": "selective",
+        "scope": {
+          "action_families": [
+            "ask",
+            "persuade",
+            "talk"
+          ],
+          "location_ids": [
+            "pretrip_investigation"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "villager_accounts"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "villager_accounts"
+          ]
+        },
+        "options": [
+          {
+            "id": "persuade",
+            "semantic_hints": [
+              "villager_accounts"
+            ]
+          }
+        ],
+        "bindings": []
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "persuade",
+            "entry_step_id": "check"
+          }
+        ],
+        "steps": [
+          {
+            "id": "check",
+            "kind": "check",
+            "check": {
+              "profile_id": "coc7.skill",
+              "actor_binding": "actor",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "persuade"
+              },
+              "difficulty": "regular",
+              "allow_luck": true,
+              "allow_push": true
+            },
+            "result_routes": {
+              "critical_success": "success_0",
+              "extreme_success": "success_0",
+              "hard_success": "success_0",
+              "regular_success": "success_0",
+              "failure": "failure_0",
+              "fumble": "failure_0"
+            }
+          },
+          {
+            "id": "success_0",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "villagers_shared_dreams",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "failure_0",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "resort_has_no_registration",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "limits": {
+        "max_chain_depth": 16,
+        "max_steps": 128
+      }
+    },
+    {
+      "id": "calm_ezra",
+      "priority": 0,
+      "trigger": {
+        "kind": "agent_match",
+        "required": true,
+        "decision_mode": "selective",
+        "scope": {
+          "action_families": [
+            "calm",
+            "talk",
+            "analyze"
+          ],
+          "location_ids": [
+            "forest_road"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "ezra"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "ezra"
+          ]
+        },
+        "options": [
+          {
+            "id": "psychoanalysis",
+            "semantic_hints": [
+              "ezra"
+            ]
+          }
+        ],
+        "bindings": []
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "psychoanalysis",
+            "entry_step_id": "check"
+          }
+        ],
+        "steps": [
+          {
+            "id": "check",
+            "kind": "check",
+            "check": {
+              "profile_id": "coc7.skill",
+              "actor_binding": "actor",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "psychoanalysis"
+              },
+              "difficulty": "regular",
+              "allow_luck": true,
+              "allow_push": true
+            },
+            "result_routes": {
+              "critical_success": "success_0",
+              "extreme_success": "success_0",
+              "hard_success": "success_0",
+              "regular_success": "success_0",
+              "failure": "failure_0",
+              "fumble": "failure_0"
+            }
+          },
+          {
+            "id": "success_0",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "ezra_warning",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "failure_0",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "ezra_warning",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "limits": {
+        "max_chain_depth": 16,
+        "max_steps": 128
+      }
+    },
+    {
+      "id": "read_messenger_intent",
+      "priority": 0,
+      "trigger": {
+        "kind": "agent_match",
+        "required": true,
+        "decision_mode": "selective",
+        "scope": {
+          "action_families": [
+            "observe",
+            "analyze",
+            "talk"
+          ],
+          "location_ids": [
+            "resort_reception"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "messenger"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "messenger"
+          ]
+        },
+        "options": [
+          {
+            "id": "psychology",
+            "semantic_hints": [
+              "messenger"
+            ]
+          }
+        ],
+        "bindings": []
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "psychology",
+            "entry_step_id": "check"
+          }
+        ],
+        "steps": [
+          {
+            "id": "check",
+            "kind": "check",
+            "check": {
+              "profile_id": "coc7.skill",
+              "actor_binding": "actor",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "psychology"
+              },
+              "difficulty": "regular",
+              "allow_luck": true,
+              "allow_push": true
+            },
+            "result_routes": {
+              "critical_success": "success_0",
+              "extreme_success": "success_0",
+              "hard_success": "success_0",
+              "regular_success": "success_0",
+              "failure": "failure_0",
+              "fumble": "failure_0"
+            }
+          },
+          {
+            "id": "success_0",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "messenger_happiness_logic",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "failure_0",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "staff_are_conditioned",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "limits": {
+        "max_chain_depth": 16,
+        "max_steps": 128
+      }
+    },
+    {
+      "id": "talk_to_james",
+      "priority": 0,
+      "trigger": {
+        "kind": "agent_match",
+        "required": true,
+        "decision_mode": "selective",
+        "scope": {
+          "action_families": [
+            "ask",
+            "talk",
+            "rescue"
+          ],
+          "location_ids": [
+            "resort_reception"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "james"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "询问詹姆斯",
+            "请他回家"
+          ]
+        },
+        "options": [
+          {
+            "id": "ask-to-return",
+            "semantic_hints": [
+              "询问詹姆斯",
+              "请他回家"
+            ]
+          }
+        ],
+        "bindings": []
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "ask-to-return",
+            "entry_step_id": "effect_0"
+          }
+        ],
+        "steps": [
+          {
+            "id": "effect_0",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "james_refuses_home",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "limits": {
+        "max_chain_depth": 16,
+        "max_steps": 128
+      }
+    },
+    {
+      "id": "force_james_against_his_will",
+      "priority": 0,
+      "trigger": {
+        "kind": "agent_match",
+        "required": true,
+        "decision_mode": "selective",
+        "scope": {
+          "action_families": [
+            "attack",
+            "force",
+            "restrain"
+          ],
+          "location_ids": [
+            "resort_reception",
+            "resort_boundary"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "james"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "击晕詹姆斯",
+            "用安眠药控制詹姆斯",
+            "捆绑詹姆斯",
+            "违背詹姆斯意愿控制他"
+          ]
+        },
+        "options": [
+          {
+            "id": "force-james",
+            "semantic_hints": [
+              "击晕詹姆斯",
+              "用安眠药控制詹姆斯",
+              "捆绑詹姆斯",
+              "违背詹姆斯意愿控制他"
+            ]
+          }
+        ],
+        "bindings": []
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "force-james",
+            "entry_step_id": "effect_0"
+          }
+        ],
+        "steps": [
+          {
+            "id": "effect_0",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "james",
+              "key": "under_forced_custody",
+              "value": true
+            },
+            "next_step_id": "effect_1"
+          },
+          {
+            "id": "effect_1",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "james_resists_forced_removal",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "limits": {
+        "max_chain_depth": 16,
+        "max_steps": 128
+      }
+    },
+    {
+      "id": "carry_james_against_his_will",
+      "priority": 0,
+      "trigger": {
+        "kind": "agent_match",
+        "required": true,
+        "decision_mode": "selective",
+        "scope": {
+          "action_families": [
+            "carry",
+            "drag",
+            "force"
+          ],
+          "location_ids": [
+            "resort_reception",
+            "resort_boundary"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "james"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "扛起詹姆斯",
+            "拖着詹姆斯",
+            "强行携带詹姆斯"
+          ]
+        },
+        "options": [
+          {
+            "id": "carry-james",
+            "semantic_hints": [
+              "扛起詹姆斯",
+              "拖着詹姆斯",
+              "强行携带詹姆斯"
+            ]
+          }
+        ],
+        "bindings": []
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "carry-james",
+            "entry_step_id": "effect_0"
+          }
+        ],
+        "steps": [
+          {
+            "id": "effect_0",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "james",
+              "key": "under_forced_custody",
+              "value": true
+            },
+            "next_step_id": "effect_1"
+          },
+          {
+            "id": "effect_1",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "james",
+              "key": "accompanying_party",
+              "value": true
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "limits": {
+        "max_chain_depth": 16,
+        "max_steps": 128
+      }
+    },
+    {
+      "id": "stop_carrying_james",
+      "priority": 0,
+      "trigger": {
+        "kind": "agent_match",
+        "required": true,
+        "decision_mode": "selective",
+        "scope": {
+          "action_families": [
+            "drop",
+            "leave",
+            "abandon"
+          ],
+          "location_ids": [
+            "resort_reception",
+            "resort_boundary"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "james"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "放下詹姆斯",
+            "留下詹姆斯",
+            "放弃携带詹姆斯"
+          ]
+        },
+        "options": [
+          {
+            "id": "stop-carrying-james",
+            "semantic_hints": [
+              "放下詹姆斯",
+              "留下詹姆斯",
+              "放弃携带詹姆斯"
+            ]
+          }
+        ],
+        "bindings": []
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "stop-carrying-james",
+            "entry_step_id": "effect_0"
+          }
+        ],
+        "steps": [
+          {
+            "id": "effect_0",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "james",
+              "key": "accompanying_party",
+              "value": false
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "limits": {
+        "max_chain_depth": 16,
+        "max_steps": 128
+      }
+    },
+    {
+      "id": "release_james_from_forced_custody",
+      "priority": 0,
+      "trigger": {
+        "kind": "agent_match",
+        "required": true,
+        "decision_mode": "selective",
+        "scope": {
+          "action_families": [
+            "release",
+            "free",
+            "untie"
+          ],
+          "location_ids": [
+            "resort_reception",
+            "resort_boundary"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "james"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "释放詹姆斯",
+            "给詹姆斯松绑",
+            "解除对詹姆斯的物理控制"
+          ]
+        },
+        "options": [
+          {
+            "id": "release-james",
+            "semantic_hints": [
+              "释放詹姆斯",
+              "给詹姆斯松绑",
+              "解除对詹姆斯的物理控制"
+            ]
+          }
+        ],
+        "bindings": []
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "release-james",
+            "entry_step_id": "effect_0"
+          }
+        ],
+        "steps": [
+          {
+            "id": "effect_0",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "james",
+              "key": "under_forced_custody",
+              "value": false
+            },
+            "next_step_id": "effect_1"
+          },
+          {
+            "id": "effect_1",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "james",
+              "key": "accompanying_party",
+              "value": false
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "limits": {
+        "max_chain_depth": 16,
+        "max_steps": 128
+      }
+    },
+    {
+      "id": "force_james_out_of_resort",
+      "priority": 100,
+      "trigger": {
+        "kind": "agent_match",
+        "required": true,
+        "decision_mode": "selective",
+        "scope": {
+          "action_families": [
+            "attack",
+            "force",
+            "restrain",
+            "carry",
+            "drag",
+            "escape",
+            "leave",
+            "travel"
+          ],
+          "location_ids": [
+            "resort_reception",
+            "resort_boundary"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "james"
+          ]
+        },
+        "when": {
+          "op": "predicate",
+          "predicate": "entity_state_is",
+          "args": {
+            "entity_id": "james",
+            "key": "released",
+            "value": false
+          }
+        },
+        "question": {
+          "kind": "intent_relation",
+          "semantic_hints": [
+            "强行把詹姆斯带出去",
+            "把詹姆斯带出度假村",
+            "控制詹姆斯并带离度假村",
+            "无视詹姆斯反抗继续带走他"
+          ]
+        },
+        "options": [
+          {
+            "id": "force-james-out",
+            "semantic_hints": [
+              "强行把詹姆斯带出去",
+              "把詹姆斯带出度假村",
+              "控制詹姆斯并带离度假村",
+              "无视詹姆斯反抗继续带走他"
+            ]
+          }
+        ],
+        "bindings": []
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "force-james-out",
+            "entry_step_id": "effect_0"
+          }
+        ],
+        "steps": [
+          {
+            "id": "effect_0",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "james",
+              "key": "under_forced_custody",
+              "value": true
+            },
+            "next_step_id": "effect_1"
+          },
+          {
+            "id": "effect_1",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "james",
+              "key": "accompanying_party",
+              "value": true
+            },
+            "next_step_id": "effect_2"
+          },
+          {
+            "id": "effect_2",
+            "kind": "effect",
+            "effect": {
+              "type": "enter_location",
+              "location_id": "outside"
+            },
+            "next_step_id": "effect_3"
+          },
+          {
+            "id": "effect_3",
+            "kind": "effect",
+            "effect": {
+              "type": "move_entity",
+              "entity_id": "james",
+              "location_id": "outside",
+              "holder_actor_id": null
+            },
+            "next_step_id": "effect_4"
+          },
+          {
+            "id": "effect_4",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "james",
+              "key": "alive",
+              "value": false
+            },
+            "next_step_id": "effect_5"
+          },
+          {
+            "id": "effect_5",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "james_forced_removal_tragedy",
+              "scope": "party"
+            },
+            "next_step_id": "effect_6"
+          },
+          {
+            "id": "effect_6",
+            "kind": "effect",
+            "effect": {
+              "type": "mark_core_resolved"
+            },
+            "next_step_id": "effect_7"
+          },
+          {
+            "id": "effect_7",
+            "kind": "effect",
+            "effect": {
+              "type": "set_ending_availability",
+              "available": true
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "limits": {
+        "max_chain_depth": 16,
+        "max_steps": 128
+      }
+    },
+    {
+      "id": "read_happiness_booklet",
+      "priority": 0,
+      "trigger": {
+        "kind": "agent_match",
+        "required": true,
+        "decision_mode": "selective",
+        "scope": {
+          "action_families": [
+            "read",
+            "inspect"
+          ],
+          "location_ids": [
+            "guest_room"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "happiness_booklet"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "阅读客房手册",
+            "理解幸福宣传"
+          ]
+        },
+        "options": [
+          {
+            "id": "read-booklet",
+            "semantic_hints": [
+              "阅读客房手册",
+              "理解幸福宣传"
+            ]
+          }
+        ],
+        "bindings": []
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "read-booklet",
+            "entry_step_id": "effect_0"
+          }
+        ],
+        "steps": [
+          {
+            "id": "effect_0",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "happiness_booklet_doctrine",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "limits": {
+        "max_chain_depth": 16,
+        "max_steps": 128
+      }
+    },
+    {
+      "id": "inspect_mutating_guest",
+      "priority": 0,
+      "trigger": {
+        "kind": "agent_match",
+        "required": true,
+        "decision_mode": "selective",
+        "scope": {
+          "action_families": [
+            "inspect",
+            "observe"
+          ],
+          "location_ids": [
+            "guest_room"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "frog_head_guest"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "frog_head_guest"
+          ]
+        },
+        "options": [
+          {
+            "id": "spot-hidden",
+            "semantic_hints": [
+              "frog_head_guest"
+            ]
+          }
+        ],
+        "bindings": []
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "spot-hidden",
+            "entry_step_id": "check"
+          }
+        ],
+        "steps": [
+          {
+            "id": "check",
+            "kind": "check",
+            "check": {
+              "profile_id": "coc7.skill",
+              "actor_binding": "actor",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "spot-hidden"
+              },
+              "difficulty": "regular",
+              "allow_luck": true,
+              "allow_push": true
+            },
+            "result_routes": {
+              "critical_success": "success_0",
+              "extreme_success": "success_0",
+              "hard_success": "success_0",
+              "regular_success": "success_0",
+              "failure": "failure_0",
+              "fumble": "failure_0"
+            }
+          },
+          {
+            "id": "success_0",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "guests_show_mutation",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "failure_0",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "staff_are_conditioned",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "limits": {
+        "max_chain_depth": 16,
+        "max_steps": 128
+      }
+    },
+    {
+      "id": "trace_kitchen_water",
+      "priority": 0,
+      "trigger": {
+        "kind": "agent_match",
+        "required": true,
+        "decision_mode": "selective",
+        "scope": {
+          "action_families": [
+            "inspect",
+            "trace",
+            "ask"
+          ],
+          "location_ids": [
+            "dining_kitchen"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "kitchen_barrel"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "kitchen_barrel"
+          ]
+        },
+        "options": [
+          {
+            "id": "spot-hidden",
+            "semantic_hints": [
+              "kitchen_barrel"
+            ]
+          }
+        ],
+        "bindings": []
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "spot-hidden",
+            "entry_step_id": "check"
+          }
+        ],
+        "steps": [
+          {
+            "id": "check",
+            "kind": "check",
+            "check": {
+              "profile_id": "coc7.skill",
+              "actor_binding": "actor",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "spot-hidden"
+              },
+              "difficulty": "regular",
+              "allow_luck": true,
+              "allow_push": true
+            },
+            "result_routes": {
+              "critical_success": "success_0",
+              "extreme_success": "success_0",
+              "hard_success": "success_0",
+              "regular_success": "success_0",
+              "failure": "failure_0",
+              "fumble": "failure_0"
+            }
+          },
+          {
+            "id": "success_0",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "all_liquids_use_pond_water",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "failure_0",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "all_liquids_use_pond_water",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "limits": {
+        "max_chain_depth": 16,
+        "max_steps": 128
+      }
+    },
+    {
+      "id": "resist_happiness_water",
+      "priority": 0,
+      "trigger": {
+        "kind": "agent_match",
+        "required": true,
+        "decision_mode": "selective",
+        "scope": {
+          "action_families": [
+            "drink",
+            "taste"
+          ],
+          "location_ids": [
+            "dining_kitchen"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "contaminated_water"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "contaminated_water"
+          ]
+        },
+        "options": [
+          {
+            "id": "POW",
+            "semantic_hints": [
+              "contaminated_water"
+            ]
+          }
+        ],
+        "bindings": []
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "POW",
+            "entry_step_id": "check"
+          }
+        ],
+        "steps": [
+          {
+            "id": "check",
+            "kind": "check",
+            "check": {
+              "profile_id": "coc7.skill",
+              "actor_binding": "actor",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "POW"
+              },
+              "difficulty": "regular",
+              "allow_luck": true,
+              "allow_push": true
+            },
+            "result_routes": {
+              "critical_success": "success_0",
+              "extreme_success": "success_0",
+              "hard_success": "success_0",
+              "regular_success": "success_0",
+              "failure": "failure_0",
+              "fumble": "failure_0"
+            }
+          },
+          {
+            "id": "success_0",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "water_causes_hallucinations",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "failure_0",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "water_causes_hallucinations",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "limits": {
+        "max_chain_depth": 16,
+        "max_steps": 128
+      }
+    },
+    {
+      "id": "study_dream_frogs",
+      "priority": 0,
+      "trigger": {
+        "kind": "agent_match",
+        "required": true,
+        "decision_mode": "selective",
+        "scope": {
+          "action_families": [
+            "study",
+            "inspect",
+            "listen"
+          ],
+          "location_ids": [
+            "frog_pond"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "dream_frogs"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "dream_frogs"
+          ]
+        },
+        "options": [
+          {
+            "id": "natural-world",
+            "semantic_hints": [
+              "dream_frogs"
+            ]
+          }
+        ],
+        "bindings": []
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "natural-world",
+            "entry_step_id": "check"
+          }
+        ],
+        "steps": [
+          {
+            "id": "check",
+            "kind": "check",
+            "check": {
+              "profile_id": "coc7.skill",
+              "actor_binding": "actor",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "natural-world"
+              },
+              "difficulty": "regular",
+              "allow_luck": true,
+              "allow_push": true
+            },
+            "result_routes": {
+              "critical_success": "success_0",
+              "extreme_success": "success_0",
+              "hard_success": "success_0",
+              "regular_success": "success_0",
+              "failure": "failure_0",
+              "fumble": "failure_0"
+            }
+          },
+          {
+            "id": "success_0",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "frogs_were_people",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "failure_0",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "guests_show_mutation",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "limits": {
+        "max_chain_depth": 16,
+        "max_steps": 128
+      }
+    },
+    {
+      "id": "infiltrate_staff_area",
+      "priority": 0,
+      "trigger": {
+        "kind": "agent_match",
+        "required": true,
+        "decision_mode": "selective",
+        "scope": {
+          "action_families": [
+            "sneak",
+            "enter",
+            "distract"
+          ],
+          "location_ids": [
+            "resort_reception"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "staff_door"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "staff_door"
+          ]
+        },
+        "options": [
+          {
+            "id": "stealth",
+            "semantic_hints": [
+              "staff_door"
+            ]
+          }
+        ],
+        "bindings": []
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "stealth",
+            "entry_step_id": "check"
+          }
+        ],
+        "steps": [
+          {
+            "id": "check",
+            "kind": "check",
+            "check": {
+              "profile_id": "coc7.skill",
+              "actor_binding": "actor",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "stealth"
+              },
+              "difficulty": "regular",
+              "allow_luck": true,
+              "allow_push": true
+            },
+            "result_routes": {
+              "critical_success": "success_0",
+              "extreme_success": "success_0",
+              "hard_success": "success_0",
+              "regular_success": "success_0",
+              "failure": "failure_0",
+              "fumble": "failure_0"
+            }
+          },
+          {
+            "id": "success_0",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "staff_door",
+              "key": "open",
+              "value": true
+            },
+            "next_step_id": "success_1"
+          },
+          {
+            "id": "success_1",
+            "kind": "effect",
+            "effect": {
+              "type": "enter_location",
+              "location_id": "staff_area"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "failure_0",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "staff_are_conditioned",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "limits": {
+        "max_chain_depth": 16,
+        "max_steps": 128
+      }
+    },
+    {
+      "id": "read_staff_notes",
+      "priority": 0,
+      "trigger": {
+        "kind": "agent_match",
+        "required": true,
+        "decision_mode": "selective",
+        "scope": {
+          "action_families": [
+            "read",
+            "search"
+          ],
+          "location_ids": [
+            "staff_area"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "staff_notes"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "阅读员工纸条",
+            "调查未完成传单"
+          ]
+        },
+        "options": [
+          {
+            "id": "read-notes",
+            "semantic_hints": [
+              "阅读员工纸条",
+              "调查未完成传单"
+            ]
+          }
+        ],
+        "bindings": []
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "read-notes",
+            "entry_step_id": "effect_0"
+          }
+        ],
+        "steps": [
+          {
+            "id": "effect_0",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "staff_notes_confessions",
+              "scope": "party"
+            },
+            "next_step_id": "effect_1"
+          },
+          {
+            "id": "effect_1",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "james_refuses_home",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "limits": {
+        "max_chain_depth": 16,
+        "max_steps": 128
+      }
+    },
+    {
+      "id": "read_messenger_notes",
+      "priority": 0,
+      "trigger": {
+        "kind": "agent_match",
+        "required": true,
+        "decision_mode": "selective",
+        "scope": {
+          "action_families": [
+            "read",
+            "research"
+          ],
+          "location_ids": [
+            "messenger_bedroom"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "messenger_notes"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "messenger_notes"
+          ]
+        },
+        "options": [
+          {
+            "id": "library-use",
+            "semantic_hints": [
+              "messenger_notes"
+            ]
+          }
+        ],
+        "bindings": []
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "library-use",
+            "entry_step_id": "check"
+          }
+        ],
+        "steps": [
+          {
+            "id": "check",
+            "kind": "check",
+            "check": {
+              "profile_id": "coc7.skill",
+              "actor_binding": "actor",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "library-use"
+              },
+              "difficulty": "regular",
+              "allow_luck": true,
+              "allow_push": true
+            },
+            "result_routes": {
+              "critical_success": "success_0",
+              "extreme_success": "success_0",
+              "hard_success": "success_0",
+              "regular_success": "success_0",
+              "failure": "failure_0",
+              "fumble": "failure_0"
+            }
+          },
+          {
+            "id": "success_0",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "messenger_origin_notes",
+              "scope": "party"
+            },
+            "next_step_id": "success_1"
+          },
+          {
+            "id": "success_1",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "messenger_happiness_logic",
+              "scope": "party"
+            },
+            "next_step_id": "success_2"
+          },
+          {
+            "id": "success_2",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "frogs_were_people",
+              "scope": "party"
+            },
+            "next_step_id": "success_3"
+          },
+          {
+            "id": "success_3",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "crystal_is_power_core",
+              "scope": "party"
+            },
+            "next_step_id": "success_4"
+          },
+          {
+            "id": "success_4",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "dream_crystal",
+              "key": "known",
+              "value": true
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "failure_0",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "messenger_origin_notes",
+              "scope": "party"
+            },
+            "next_step_id": "failure_1"
+          },
+          {
+            "id": "failure_1",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "messenger_happiness_logic",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "limits": {
+        "max_chain_depth": 16,
+        "max_steps": 128
+      }
+    },
+    {
+      "id": "follow_messenger_to_pond",
+      "priority": 0,
+      "trigger": {
+        "kind": "agent_match",
+        "required": true,
+        "decision_mode": "selective",
+        "scope": {
+          "action_families": [
+            "follow",
+            "trail",
+            "sneak"
+          ],
+          "location_ids": [
+            "resort_reception",
+            "guest_room",
+            "dining_kitchen",
+            "staff_area",
+            "storage_room",
+            "messenger_bedroom",
+            "frog_resort"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "messenger"
+          ]
+        },
+        "when": {
+          "op": "all",
+          "items": [
+            {
+              "op": "predicate",
+              "predicate": "entity_state_is",
+              "args": {
+                "entity_id": "night_ritual",
+                "key": "active",
+                "value": true
+              }
+            },
+            {
+              "op": "predicate",
+              "predicate": "information_is",
+              "args": {
+                "id": "messenger_leaves_at_night"
+              }
+            }
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "跟踪",
+            "尾随",
+            "悄悄跟踪",
+            "messenger"
+          ]
+        },
+        "options": [
+          {
+            "id": "spot-hidden",
+            "semantic_hints": [
+              "跟踪",
+              "尾随",
+              "悄悄跟踪",
+              "messenger"
+            ]
+          }
+        ],
+        "bindings": []
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "spot-hidden",
+            "entry_step_id": "check"
+          }
+        ],
+        "steps": [
+          {
+            "id": "check",
+            "kind": "check",
+            "check": {
+              "profile_id": "coc7.skill",
+              "actor_binding": "actor",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "spot-hidden"
+              },
+              "difficulty": "regular",
+              "allow_luck": true,
+              "allow_push": true
+            },
+            "result_routes": {
+              "critical_success": "success_0",
+              "extreme_success": "success_0",
+              "hard_success": "success_0",
+              "regular_success": "success_0",
+              "failure": "failure_0",
+              "fumble": "failure_0"
+            }
+          },
+          {
+            "id": "success_0",
+            "kind": "effect",
+            "effect": {
+              "type": "enter_location",
+              "location_id": "frog_pond"
+            },
+            "next_step_id": "success_1"
+          },
+          {
+            "id": "success_1",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "night_ritual_seen",
+              "scope": "party"
+            },
+            "next_step_id": "success_2"
+          },
+          {
+            "id": "success_2",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "crystal_is_power_core",
+              "scope": "party"
+            },
+            "next_step_id": "success_3"
+          },
+          {
+            "id": "success_3",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "dream_crystal",
+              "key": "known",
+              "value": true
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "failure_0",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "night_has_fallen",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "limits": {
+        "max_chain_depth": 16,
+        "max_steps": 128
+      }
+    },
+    {
+      "id": "observe_night_ritual",
+      "priority": 0,
+      "trigger": {
+        "kind": "agent_match",
+        "required": true,
+        "decision_mode": "selective",
+        "scope": {
+          "action_families": [
+            "observe",
+            "follow",
+            "hide"
+          ],
+          "location_ids": [
+            "frog_pond"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "night_ritual"
+          ]
+        },
+        "when": {
+          "op": "predicate",
+          "predicate": "entity_state_is",
+          "args": {
+            "entity_id": "night_ritual",
+            "key": "active",
+            "value": true
+          }
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "night_ritual"
+          ]
+        },
+        "options": [
+          {
+            "id": "spot-hidden",
+            "semantic_hints": [
+              "night_ritual"
+            ]
+          }
+        ],
+        "bindings": []
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "spot-hidden",
+            "entry_step_id": "check"
+          }
+        ],
+        "steps": [
+          {
+            "id": "check",
+            "kind": "check",
+            "check": {
+              "profile_id": "coc7.skill",
+              "actor_binding": "actor",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "spot-hidden"
+              },
+              "difficulty": "regular",
+              "allow_luck": true,
+              "allow_push": true
+            },
+            "result_routes": {
+              "critical_success": "success_0",
+              "extreme_success": "success_0",
+              "hard_success": "success_0",
+              "regular_success": "success_0",
+              "failure": "failure_0",
+              "fumble": "failure_0"
+            }
+          },
+          {
+            "id": "success_0",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "night_ritual_seen",
+              "scope": "party"
+            },
+            "next_step_id": "success_1"
+          },
+          {
+            "id": "success_1",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "crystal_is_power_core",
+              "scope": "party"
+            },
+            "next_step_id": "success_2"
+          },
+          {
+            "id": "success_2",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "dream_crystal",
+              "key": "known",
+              "value": true
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "failure_0",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "night_has_fallen",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "limits": {
+        "max_chain_depth": 16,
+        "max_steps": 128
+      }
+    },
+    {
+      "id": "observe_messenger_at_night_ritual",
+      "priority": 0,
+      "trigger": {
+        "kind": "agent_match",
+        "required": true,
+        "decision_mode": "selective",
+        "scope": {
+          "action_families": [
+            "observe",
+            "watch",
+            "inspect"
+          ],
+          "location_ids": [
+            "frog_pond"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "messenger"
+          ]
+        },
+        "when": {
+          "op": "predicate",
+          "predicate": "entity_state_is",
+          "args": {
+            "entity_id": "night_ritual",
+            "key": "active",
+            "value": true
+          }
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "观察幸福信使",
+            "看信使在做什么",
+            "监视池塘边的信使"
+          ]
+        },
+        "options": [
+          {
+            "id": "spot-hidden",
+            "semantic_hints": [
+              "观察幸福信使",
+              "看信使在做什么",
+              "监视池塘边的信使"
+            ]
+          }
+        ],
+        "bindings": []
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "spot-hidden",
+            "entry_step_id": "check"
+          }
+        ],
+        "steps": [
+          {
+            "id": "check",
+            "kind": "check",
+            "check": {
+              "profile_id": "coc7.skill",
+              "actor_binding": "actor",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "spot-hidden"
+              },
+              "difficulty": "regular",
+              "allow_luck": true,
+              "allow_push": true
+            },
+            "result_routes": {
+              "critical_success": "success_0",
+              "extreme_success": "success_0",
+              "hard_success": "success_0",
+              "regular_success": "success_0",
+              "failure": "failure_0",
+              "fumble": "failure_0"
+            }
+          },
+          {
+            "id": "success_0",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "night_ritual_seen",
+              "scope": "party"
+            },
+            "next_step_id": "success_1"
+          },
+          {
+            "id": "success_1",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "crystal_is_power_core",
+              "scope": "party"
+            },
+            "next_step_id": "success_2"
+          },
+          {
+            "id": "success_2",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "dream_crystal",
+              "key": "known",
+              "value": true
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "failure_0",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "night_has_fallen",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "limits": {
+        "max_chain_depth": 16,
+        "max_steps": 128
+      }
+    },
+    {
+      "id": "retrieve_dream_crystal",
+      "priority": 0,
+      "trigger": {
+        "kind": "agent_match",
+        "required": true,
+        "decision_mode": "selective",
+        "scope": {
+          "action_families": [
+            "dive",
+            "retrieve",
+            "swim"
+          ],
+          "location_ids": [
+            "frog_pond"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "dream_crystal"
+          ]
+        },
+        "when": {
+          "op": "all",
+          "items": [
+            {
+              "op": "predicate",
+              "predicate": "entity_state_is",
+              "args": {
+                "entity_id": "dream_crystal",
+                "key": "known",
+                "value": true
+              }
+            },
+            {
+              "op": "predicate",
+              "predicate": "entity_state_is",
+              "args": {
+                "entity_id": "dream_crystal",
+                "key": "retrieved",
+                "value": false
+              }
+            }
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "潜入池底取出梦境水晶",
+            "跳进蛙鸣泉寻找水晶",
+            "游到水下打捞水晶",
+            "从池底把水晶带到岸边",
+            "潜水取水晶"
+          ]
+        },
+        "options": [
+          {
+            "id": "swim",
+            "semantic_hints": [
+              "潜入池底取出梦境水晶",
+              "跳进蛙鸣泉寻找水晶",
+              "游到水下打捞水晶",
+              "从池底把水晶带到岸边",
+              "潜水取水晶"
+            ]
+          }
+        ],
+        "bindings": []
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "swim",
+            "entry_step_id": "check"
+          }
+        ],
+        "steps": [
+          {
+            "id": "check",
+            "kind": "check",
+            "check": {
+              "profile_id": "coc7.skill",
+              "actor_binding": "actor",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "swim"
+              },
+              "difficulty": "hard",
+              "allow_luck": true,
+              "allow_push": true
+            },
+            "result_routes": {
+              "critical_success": "success_0",
+              "extreme_success": "success_0",
+              "hard_success": "success_0",
+              "regular_success": "failure_0",
+              "failure": "failure_0",
+              "fumble": "failure_0"
+            }
+          },
+          {
+            "id": "success_0",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "dream_crystal",
+              "key": "retrieved",
+              "value": true
+            },
+            "next_step_id": "success_1"
+          },
+          {
+            "id": "success_1",
+            "kind": "effect",
+            "effect": {
+              "type": "move_entity",
+              "entity_id": "dream_crystal",
+              "location_id": "crystal_shore",
+              "holder_actor_id": null
+            },
+            "next_step_id": "success_2"
+          },
+          {
+            "id": "success_2",
+            "kind": "effect",
+            "effect": {
+              "type": "enter_location",
+              "location_id": "crystal_shore"
+            },
+            "next_step_id": "success_3"
+          },
+          {
+            "id": "success_3",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "crystal_retrieved",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "failure_0",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "crystal_is_power_core",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "limits": {
+        "max_chain_depth": 16,
+        "max_steps": 128
+      }
+    },
+    {
+      "id": "persuade_happiness_messenger",
+      "priority": 0,
+      "trigger": {
+        "kind": "agent_match",
+        "required": true,
+        "decision_mode": "selective",
+        "scope": {
+          "action_families": [
+            "persuade",
+            "debate",
+            "appeal"
+          ],
+          "location_ids": [
+            "resort_reception"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "final_debate"
+          ]
+        },
+        "when": {
+          "op": "predicate",
+          "predicate": "entity_state_is",
+          "args": {
+            "entity_id": "final_debate",
+            "key": "available",
+            "value": true
+          }
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "final_debate"
+          ]
+        },
+        "options": [
+          {
+            "id": "persuade-with-evidence",
+            "semantic_hints": [
+              "final_debate"
+            ]
+          }
+        ],
+        "bindings": []
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "persuade-with-evidence",
+            "entry_step_id": "check"
+          }
+        ],
+        "steps": [
+          {
+            "id": "check",
+            "kind": "check",
+            "check": {
+              "profile_id": "coc7.skill",
+              "actor_binding": "actor",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "persuade"
+              },
+              "difficulty": "hard",
+              "allow_luck": true,
+              "allow_push": true
+            },
+            "result_routes": {
+              "critical_success": "success_0",
+              "extreme_success": "success_0",
+              "hard_success": "success_0",
+              "regular_success": "failure_0",
+              "failure": "failure_0",
+              "fumble": "failure_0"
+            }
+          },
+          {
+            "id": "success_0",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "messenger",
+              "key": "convinced",
+              "value": true
+            },
+            "next_step_id": "success_1"
+          },
+          {
+            "id": "success_1",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "resort_state",
+              "key": "victims_released",
+              "value": true
+            },
+            "next_step_id": "success_2"
+          },
+          {
+            "id": "success_2",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "james",
+              "key": "released",
+              "value": true
+            },
+            "next_step_id": "success_3"
+          },
+          {
+            "id": "success_3",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "james",
+              "key": "under_forced_custody",
+              "value": false
+            },
+            "next_step_id": "success_4"
+          },
+          {
+            "id": "success_4",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "james",
+              "key": "accompanying_party",
+              "value": false
+            },
+            "next_step_id": "success_5"
+          },
+          {
+            "id": "success_5",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "messenger_convinced",
+              "scope": "party"
+            },
+            "next_step_id": "success_6"
+          },
+          {
+            "id": "success_6",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "victims_released",
+              "scope": "party"
+            },
+            "next_step_id": "success_7"
+          },
+          {
+            "id": "success_7",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "james_returns_home",
+              "scope": "party"
+            },
+            "next_step_id": "success_8"
+          },
+          {
+            "id": "success_8",
+            "kind": "effect",
+            "effect": {
+              "type": "mark_core_resolved"
+            },
+            "next_step_id": "success_9"
+          },
+          {
+            "id": "success_9",
+            "kind": "effect",
+            "effect": {
+              "type": "set_ending_availability",
+              "available": true
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "failure_0",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "debate_failed_hint",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "limits": {
+        "max_chain_depth": 16,
+        "max_steps": 128
+      }
+    },
+    {
+      "id": "destroy_dream_crystal",
+      "priority": 0,
+      "trigger": {
+        "kind": "agent_match",
+        "required": true,
+        "decision_mode": "selective",
+        "scope": {
+          "action_families": [
+            "destroy",
+            "break"
+          ],
+          "location_ids": [
+            "crystal_shore"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "dream_crystal"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "破坏已经带上岸的水晶",
+            "终止美梦核心"
+          ]
+        },
+        "options": [
+          {
+            "id": "break-crystal",
+            "semantic_hints": [
+              "破坏已经带上岸的水晶",
+              "终止美梦核心"
+            ]
+          }
+        ],
+        "bindings": []
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "break-crystal",
+            "entry_step_id": "effect_0"
+          }
+        ],
+        "steps": [
+          {
+            "id": "effect_0",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "dream_crystal",
+              "key": "broken",
+              "value": true
+            },
+            "next_step_id": "effect_1"
+          },
+          {
+            "id": "effect_1",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "resort_state",
+              "key": "core_broken",
+              "value": true
+            },
+            "next_step_id": "effect_2"
+          },
+          {
+            "id": "effect_2",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "resort_state",
+              "key": "victims_released",
+              "value": true
+            },
+            "next_step_id": "effect_3"
+          },
+          {
+            "id": "effect_3",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "james",
+              "key": "released",
+              "value": true
+            },
+            "next_step_id": "effect_4"
+          },
+          {
+            "id": "effect_4",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "james",
+              "key": "under_forced_custody",
+              "value": false
+            },
+            "next_step_id": "effect_5"
+          },
+          {
+            "id": "effect_5",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "james",
+              "key": "accompanying_party",
+              "value": false
+            },
+            "next_step_id": "effect_6"
+          },
+          {
+            "id": "effect_6",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "crystal_destroyed",
+              "scope": "party"
+            },
+            "next_step_id": "effect_7"
+          },
+          {
+            "id": "effect_7",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "victims_released",
+              "scope": "party"
+            },
+            "next_step_id": "effect_8"
+          },
+          {
+            "id": "effect_8",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "james_returns_home",
+              "scope": "party"
+            },
+            "next_step_id": "effect_9"
+          },
+          {
+            "id": "effect_9",
+            "kind": "effect",
+            "effect": {
+              "type": "mark_core_resolved"
+            },
+            "next_step_id": "effect_10"
+          },
+          {
+            "id": "effect_10",
+            "kind": "effect",
+            "effect": {
+              "type": "set_ending_availability",
+              "available": true
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "limits": {
+        "max_chain_depth": 16,
+        "max_steps": 128
+      }
+    },
+    {
+      "id": "leave_frog_resort",
+      "priority": 0,
+      "trigger": {
+        "kind": "agent_match",
+        "required": true,
+        "decision_mode": "selective",
+        "scope": {
+          "action_families": [
+            "escape",
+            "leave",
+            "drive",
+            "travel"
+          ],
+          "location_ids": [
+            "resort_boundary"
+          ],
+          "target_kinds": [
+            "location"
+          ],
+          "target_ids": [
+            "outside"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "独自离开度假村",
+            "放弃调查后返回城市"
+          ]
+        },
+        "options": [
+          {
+            "id": "leave-now",
+            "semantic_hints": [
+              "独自离开度假村",
+              "放弃调查后返回城市"
+            ]
+          }
+        ],
+        "bindings": []
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "leave-now",
+            "entry_step_id": "effect_0"
+          }
+        ],
+        "steps": [
+          {
+            "id": "effect_0",
+            "kind": "effect",
+            "effect": {
+              "type": "enter_location",
+              "location_id": "outside"
+            },
+            "next_step_id": "effect_1"
+          },
+          {
+            "id": "effect_1",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "escaped_unresolved",
+              "scope": "party"
+            },
+            "next_step_id": "effect_2"
+          },
+          {
+            "id": "effect_2",
+            "kind": "effect",
+            "effect": {
+              "type": "mark_core_resolved"
+            },
+            "next_step_id": "effect_3"
+          },
+          {
+            "id": "effect_3",
+            "kind": "effect",
+            "effect": {
+              "type": "set_ending_availability",
+              "available": true
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "limits": {
+        "max_chain_depth": 16,
+        "max_steps": 128
+      }
+    },
+    {
+      "id": "accept_messengers_happiness",
+      "priority": 0,
+      "trigger": {
+        "kind": "agent_match",
+        "required": true,
+        "decision_mode": "selective",
+        "scope": {
+          "action_families": [
+            "accept",
+            "surrender",
+            "stay"
+          ],
+          "location_ids": [
+            "resort_reception"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "messenger"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "明确选择留下",
+            "接受信使的幸福"
+          ]
+        },
+        "options": [
+          {
+            "id": "choose-happiness",
+            "semantic_hints": [
+              "明确选择留下",
+              "接受信使的幸福"
+            ]
+          }
+        ],
+        "bindings": []
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "choose-happiness",
+            "entry_step_id": "effect_0"
+          }
+        ],
+        "steps": [
+          {
+            "id": "effect_0",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "accepted_happiness",
+              "scope": "party"
+            },
+            "next_step_id": "effect_1"
+          },
+          {
+            "id": "effect_1",
+            "kind": "effect",
+            "effect": {
+              "type": "mark_core_resolved"
+            },
+            "next_step_id": "effect_2"
+          },
+          {
+            "id": "effect_2",
+            "kind": "effect",
+            "effect": {
+              "type": "set_ending_availability",
+              "available": true
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "limits": {
+        "max_chain_depth": 16,
+        "max_steps": 128
+      }
+    },
+    {
+      "id": "night_ritual_begins",
+      "priority": 0,
+      "trigger": {
+        "kind": "event",
+        "event_type": "time.point_entered",
+        "when": {
+          "op": "all",
+          "items": [
+            {
+              "op": "predicate",
+              "predicate": "time_of_day_is",
+              "args": {
+                "value": "night"
+              }
+            },
+            {
+              "op": "predicate",
+              "predicate": "entity_state_is",
+              "args": {
+                "entity_id": "night_ritual",
+                "key": "active",
+                "value": false
+              }
+            }
+          ]
+        },
+        "entry_branch_id": "default"
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "default",
+            "entry_step_id": "effect_0"
+          }
+        ],
+        "steps": [
+          {
+            "id": "effect_0",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "night_ritual",
+              "key": "active",
+              "value": true
+            },
+            "next_step_id": "effect_1"
+          },
+          {
+            "id": "effect_1",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "night_has_fallen",
+              "scope": "party"
+            },
+            "next_step_id": "effect_2"
+          },
+          {
+            "id": "effect_2",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "messenger_leaves_at_night",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "limits": {
+        "max_chain_depth": 16,
+        "max_steps": 128
+      }
+    },
+    {
+      "id": "messenger_arrives_at_night_ritual",
+      "priority": 0,
+      "trigger": {
+        "kind": "event",
+        "event_type": "travel.resolved",
+        "when": {
+          "op": "predicate",
+          "predicate": "entity_state_is",
+          "args": {
+            "entity_id": "night_ritual",
+            "key": "active",
+            "value": true
+          }
+        },
+        "entry_branch_id": "default"
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "default",
+            "entry_step_id": "effect_0"
+          }
+        ],
+        "steps": [
+          {
+            "id": "effect_0",
+            "kind": "effect",
+            "effect": {
+              "type": "move_entity",
+              "entity_id": "messenger",
+              "location_id": "frog_pond",
+              "holder_actor_id": null
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "limits": {
+        "max_chain_depth": 16,
+        "max_steps": 128
+      }
+    },
+    {
+      "id": "night_ritual_ends",
+      "priority": 0,
+      "trigger": {
+        "kind": "event",
+        "event_type": "time.point_entered",
+        "when": {
+          "op": "all",
+          "items": [
+            {
+              "op": "predicate",
+              "predicate": "time_of_day_is",
+              "args": {
+                "value": "day"
+              }
+            },
+            {
+              "op": "predicate",
+              "predicate": "entity_state_is",
+              "args": {
+                "entity_id": "night_ritual",
+                "key": "active",
+                "value": true
+              }
+            }
+          ]
+        },
+        "entry_branch_id": "default"
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "default",
+            "entry_step_id": "effect_0"
+          }
+        ],
+        "steps": [
+          {
+            "id": "effect_0",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "night_ritual",
+              "key": "active",
+              "value": false
+            },
+            "next_step_id": "effect_1"
+          },
+          {
+            "id": "effect_1",
+            "kind": "effect",
+            "effect": {
+              "type": "move_entity",
+              "entity_id": "messenger",
+              "location_id": "resort_reception",
+              "holder_actor_id": null
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "limits": {
+        "max_chain_depth": 16,
+        "max_steps": 128
+      }
+    },
+    {
+      "id": "final_debate_becomes_available",
+      "priority": 0,
+      "trigger": {
+        "kind": "event",
+        "event_type": "information.revealed",
+        "when": {
+          "op": "all",
+          "items": [
+            {
+              "op": "predicate",
+              "predicate": "information_is",
+              "args": {
+                "id": "messenger_happiness_logic"
+              }
+            },
+            {
+              "op": "predicate",
+              "predicate": "information_is",
+              "args": {
+                "id": "frogs_were_people"
+              }
+            },
+            {
+              "op": "predicate",
+              "predicate": "entity_state_is",
+              "args": {
+                "entity_id": "final_debate",
+                "key": "available",
+                "value": false
+              }
+            }
+          ]
+        },
+        "entry_branch_id": "default"
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "default",
+            "entry_step_id": "effect_0"
+          }
+        ],
+        "steps": [
+          {
+            "id": "effect_0",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "final_debate",
+              "key": "available",
+              "value": true
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "limits": {
+        "max_chain_depth": 16,
+        "max_steps": 128
+      }
+    }
+  ],
+  "core_resolution": {
+    "required_goal_ids": [
+      "choose_frog_village_outcome"
+    ],
+    "completion": "all"
+  },
+  "ending_policy": {
+    "allow_continue_after_core_resolution": true,
+    "require_no_pending_action": true,
+    "allow_grounded_variations": true,
+    "facets": [
+      "chosen_happiness",
+      "james_fate",
+      "victims_fate",
+      "resort_fate"
+    ]
+  },
+  "ending_anchors": [
+    {
+      "id": "persuade_messenger_and_rescue_james",
+      "tone": "hopeful",
+      "required_fact_refs": [
+        "messenger_convinced",
+        "victims_released",
+        "james_returns_home"
+      ],
+      "forbidden_claims": [
+        "uncommitted_actor_stat_change",
+        "uncommitted_death"
+      ]
+    },
+    {
+      "id": "break_crystal_and_wake_victims",
+      "tone": "harrowing",
+      "required_fact_refs": [
+        "crystal_destroyed",
+        "victims_released"
+      ],
+      "forbidden_claims": [
+        "uncommitted_actor_stat_change",
+        "invented_battle_result"
+      ]
+    },
+    {
+      "id": "accept_eternal_happiness",
+      "tone": "uncanny",
+      "required_fact_refs": [
+        "accepted_happiness"
+      ],
+      "forbidden_claims": [
+        "automatic_character_retirement",
+        "unconfirmed_transformation"
+      ]
+    },
+    {
+      "id": "leave_before_resolving_mystery",
+      "tone": "ominous",
+      "required_fact_refs": [
+        "escaped_unresolved"
+      ],
+      "forbidden_claims": [
+        "james_rescued",
+        "resort_destroyed",
+        "victims_released"
+      ]
+    },
+    {
+      "id": "force_james_out_and_lose_him",
+      "tone": "tragic",
+      "required_fact_refs": [
+        "james_forced_removal_tragedy"
+      ],
+      "forbidden_claims": [
+        "james_rescued",
+        "james_returned_alive",
+        "mission_completed_successfully"
+      ]
+    }
+  ],
+  "presentation": {
+    "title": "幸福蛙蛙村",
+    "name_en": "Happy Frog Village",
+    "synopsis": "受托寻找失踪青年后，调查员来到一座以幸福为名的林间度假村，在甜美梦境、身体异变与自由选择之间追查真相。",
+    "players_min": 1,
+    "players_max": 4,
+    "difficulty": 2,
+    "estimated_duration": "4-6 小时",
+    "story_label": "HAPPY FROG VILLAGE",
+    "subtitle": "甜美梦境中的选择",
+    "authors": [
+      "一只小小信"
+    ],
+    "tags": [
+      "现代",
+      "调查",
+      "多结局",
+      "心理恐怖"
+    ],
+    "player_intro_pages": [
+      {
+        "title": "内容提示",
+        "content": "本模组包含失踪、精神影响、身体异变、成瘾暗示、受害者失去自主、自杀后果，以及由玩家明确选择的留下结局。开始前请确认边界与安全工具。"
+      },
+      {
+        "title": "调查员准备",
+        "content": "适合 1-4 名调查员。推荐图书馆使用、侦查、心理学、精神分析、博物学、意志、体质和说服类技能。关键真相均有重试或替代来源。"
+      },
+      {
+        "title": "寻人委托",
+        "content": "企业家理查德·莱恩的儿子詹姆斯失踪一周。唯一线索是一张邀请人前往城郊寻找幸福的度假村传单。莱恩夫妇请你们找到他，并尽可能安全地带他回来。"
+      }
+    ]
+  },
+  "initial_state": {
+    "start_location_id": "lane_manor",
+    "default_actor_placement": {
+      "location_id": "lane_manor"
+    },
+    "revealed_information_ids": [
+      "commission_received",
+      "frog_resort_flyer"
+    ],
+    "start_time_point_id": "hour_12",
+    "entity_state": {}
+  },
+  "world_profile": {
+    "era": "现代（可由主持人改编到 1920 年代）",
+    "region": "调查员所在城市近郊的老林地",
+    "technology_level": "现代日常技术",
+    "tone": "温馨田园逐步滑向甜美、潮湿且剥夺选择的诡异",
+    "forbidden_content": [
+      "提前揭示信使本体或水晶弱点",
+      "用 Narrator 文本提交 HP、SAN、死亡或永久退役",
+      "虚构逐角色四阶段变异已被运行时提交",
+      "把未发生的战斗写成既成事实",
+      "在詹姆斯尚未解除信使影响时把强行带离叙述为安全救援"
+    ]
+  },
+  "time_policy": {
+    "default_points": [
+      {
+        "id": "hour_08",
+        "hour_of_day": 8,
+        "order": 0,
+        "time_segment": null,
+        "label": null
+      },
+      {
+        "id": "hour_12",
+        "hour_of_day": 12,
+        "order": 1,
+        "time_segment": null,
+        "label": null
+      },
+      {
+        "id": "hour_18",
+        "hour_of_day": 18,
+        "order": 2,
+        "time_segment": null,
+        "label": null
+      },
+      {
+        "id": "hour_22",
+        "hour_of_day": 22,
+        "order": 3,
+        "time_segment": null,
+        "label": null
+      }
+    ],
+    "storage_precision": "hour",
+    "progression": "host_controlled_discrete",
+    "actions_per_point": "multiple",
+    "terminal_point": null
+  }
+}

@@ -284,6 +284,7 @@ def _known_locations(
                 id=location.id,
                 kind=location.kind,
                 name=location.player_visible_name or location.name,
+                aliases=location.aliases,
                 description=location.player_visible_description,
                 parent_location_id=location.parent_location_id,
                 region_id=location.region_id,
@@ -422,16 +423,19 @@ def _available_exits(
         runtime_destination = state.runtime_locations.get(edge.to_location_id)
         if destination is not None:
             name = destination.player_visible_name or destination.name
+            aliases = destination.aliases
         elif runtime_destination is not None:
             name = (
                 _optional_text(runtime_destination.get("name")) or edge.to_location_id
             )
+            aliases = ()
         else:
             continue
         exits.append(
             ProjectionAvailableExit(
                 id=edge.id,
                 name=name,
+                aliases=aliases,
                 target_id=edge.access_point_id,
                 description="",
                 destination=ProjectionExitDestination(

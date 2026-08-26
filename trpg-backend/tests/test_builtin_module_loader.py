@@ -1,4 +1,4 @@
-"""验证双内置模组的发布、目录和单人选择行为。"""
+"""验证三个内置模组的发布、目录和选模组行为。"""
 
 from __future__ import annotations
 
@@ -9,11 +9,17 @@ from httpx import AsyncClient
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.seed import SILVER_LOCK_MODULE_ID, SILVER_LOCK_SCENARIO_ID
+from app.core.seed import (
+    HAPPY_FROG_VILLAGE_MODULE_ID,
+    HAPPY_FROG_VILLAGE_SCENARIO_ID,
+    SILVER_LOCK_MODULE_ID,
+    SILVER_LOCK_SCENARIO_ID,
+)
 from app.models.content import Scenario
 from app.models.engine import ModuleVersion
 from app.models.room import Room
 from app.service.builtin_module_loader import (
+    HAPPY_FROG_VILLAGE_SPEC,
     SILVER_LOCK_SPEC,
     BuiltinModuleLoadError,
     load_builtin_module,
@@ -29,6 +35,7 @@ async def test_all_builtin_modules_load_idempotently(db_session: AsyncSession) -
     assert [(result.module_id, result.outcome) for result in results] == [
         ("paper-chase-zh-coc7", "unchanged"),
         (SILVER_LOCK_MODULE_ID, "unchanged"),
+        (HAPPY_FROG_VILLAGE_MODULE_ID, "unchanged"),
     ]
 
     scenario = await db_session.get(Scenario, SILVER_LOCK_SCENARIO_ID)
@@ -149,3 +156,36 @@ async def test_catalog_and_selection_use_silver_lock_publication(
     assert room is not None
     assert room.scenario_id == SILVER_LOCK_SCENARIO_ID
     assert room.module_version == SILVER_LOCK_SPEC.version
+
+
+async def test_catalog_and_selection_use_happy_frog_village_publication(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    """第三个预设在目录中展示，且 1-4 人房间可钉住其不可变版本。"""
+
+    catalog = (await client.get("/api/v1/modules")).json()["data"]
+    frog = next(module for module in catalog if module["id"] == HAPPY_FROG_VILLAGE_MODULE_ID)
+    assert frog["title"] == "幸福蛙蛙村"
+    assert frog["authors"] == ["一只小小信"]
+    assert frog["playersMin"] == 1
+    assert frog["playersMax"] == 4
+
+    detail = (await client.get(f"/api/v1/modules/{HAPPY_FROG_VILLAGE_MODULE_ID}")).json()["data"]
+    assert detail["storyPages"][0]["title"] == "内容提示"
+    assert "身体异变" in detail["storyPages"][0]["content"]
+
+    room_data = await create_room(client, max_players=4)
+    accepted = await client.post(
+        f"{ROOMS_BASE}/{room_data['roomId']}/module",
+        json={
+            "moduleId": HAPPY_FROG_VILLAGE_MODULE_ID,
+            "attributeGenMethod": "point_buy",
+        },
+        headers=reconnect(room_data["reconnectToken"]),
+    )
+    assert accepted.status_code == 200
+    room = await db_session.get(Room, room_data["roomId"])
+    assert room is not None
+    assert room.scenario_id == HAPPY_FROG_VILLAGE_SCENARIO_ID
+    assert room.module_version == HAPPY_FROG_VILLAGE_SPEC.version

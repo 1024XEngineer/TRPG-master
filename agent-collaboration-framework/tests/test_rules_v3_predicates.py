@@ -297,6 +297,28 @@ class InformationIsTests(unittest.TestCase):
         self.assertFalse(_evaluate_predicate(condition, state=state, actor_id=ACTOR))
 
 
+class PartyLocationIsTests(unittest.TestCase):
+    def test_matches_committed_party_location(self) -> None:
+        condition = predicate("party_location_is", id="start")
+        self.assertTrue(_evaluate_predicate(condition, state=game_state(), actor_id=ACTOR))
+
+    def test_rejects_other_or_malformed_location(self) -> None:
+        self.assertFalse(
+            _evaluate_predicate(
+                predicate("party_location_is", id="outside"),
+                state=game_state(),
+                actor_id=ACTOR,
+            )
+        )
+        self.assertFalse(
+            _evaluate_predicate(
+                predicate("party_location_is", id=1),
+                state=game_state(),
+                actor_id=ACTOR,
+            )
+        )
+
+
 class CoreResolvedTests(unittest.TestCase):
     def test_default_args_expect_true_and_matches_resolved_state(self) -> None:
         state = game_state(core_resolved=True)

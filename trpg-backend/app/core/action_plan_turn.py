@@ -735,11 +735,21 @@ def _match_travel_target(view: PlayerView, text: str) -> _TravelTarget | None:
         match_text = text[arrival_marker + 1 :]
     matches: list[tuple[tuple[int, int], str, _TravelTarget]] = []
     for location in view.known_locations:
+        # Region nodes are containment breadcrumbs, not actor destinations.
+        # Letting their labels compete with a real entrance produces a false
+        # blocked target such as "度假村别墅" instead of its reception room.
+        if location.kind == "region":
+            continue
         if location.existence != "known" or location.localization != "located":
             continue
         score = _best_travel_label_score(
             match_text,
-            (location.name, location.id, *_ambient_venue_aliases(location.id)),
+            (
+                location.name,
+                location.id,
+                *location.aliases,
+                *_ambient_venue_aliases(location.id),
+            ),
         )
         if score is not None:
             matches.append((score, location.id, _TravelTarget(location.id, location.name)))

@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapters.sqlalchemy_memory import _listener_memories
 from app.models.engine import GameEvent, GameSession, ModuleVersion
-from app.models.event import Event
+from app.models.event import Event, EventAudience
 from app.models.memory import (
     ConversationSummaryRecord,
     MemoryEntryRecord,
@@ -118,7 +118,7 @@ async def test_fake_summary_preserves_scope_and_source_cursor() -> None:
     assert summary.through_event_sequence == 2
     assert summary.source_event_ids == ("event-2",)
     assert "旧宅" in summary.summary
-    assert "玩家声称/行动" in summary.summary
+    assert "玩家声称/计划" in summary.summary
 
 
 def test_narrator_context_serializes_memory_and_summary() -> None:
@@ -132,6 +132,7 @@ def test_narrator_context_serializes_memory_and_summary() -> None:
         epistemic_status="experienced",
         visibility="public",
         listener_ids=("thomas",),
+        audience_player_ids=("player-1",),
         source_event_id="event-1",
         source_sequence=1,
     )
@@ -147,6 +148,7 @@ def test_narrator_context_serializes_memory_and_summary() -> None:
     payload = context.to_json_dict()
     assert payload["memories"][0]["epistemic_status"] == "experienced"
     assert payload["memories"][0]["listener_ids"] == ["thomas"]
+    assert payload["memories"][0]["audience_player_ids"] == ["player-1"]
     assert payload["conversation_summary"]["player_id"] == "p1"
 
 
@@ -377,6 +379,94 @@ async def test_summary_enqueue_preserves_running_lease(
 
 
 @pytest.mark.asyncio
+async def test_summary_enqueue_uses_dialogue_event_cursor(
+    db_session: AsyncSession,
+    memory_store,
+) -> None:  # noqa: ANN001
+    """十条 dialogue 会触发摘要，并把最后一条 Event 写入复合游标。"""
+    room, player, actor_id = await _create_memory_room(db_session, 17)
+    base = datetime(2026, 8, 6, tzinfo=UTC)
+    events = [
+        Event(
+            id=str(uuid.uuid4()),
+            room_id=room.id,
+            player_id=player.id,
+            actor_id=actor_id,
+            event_type="dialogue.player",
+            visibility="scene_scoped",
+            scene_id="study",
+            payload={"utterance": f"记住短语 {index}"},
+            created_at=base + timedelta(seconds=index),
+        )
+        for index in range(10)
+    ]
+    db_session.add_all(events)
+    db_session.add_all([EventAudience(event_id=event.id, player_id=player.id) for event in events])
+    await db_session.commit()
+
+    service = ConversationSummaryService(
+        memory_store._session_factory,  # noqa: SLF001
+        DeterministicConversationSummaryModel(),
+    )
+    await service.enqueue_if_needed(room_id=room.id, player_id=player.id)
+
+    async with service._session_factory() as session:  # noqa: SLF001
+        record = await session.scalar(
+            select(ConversationSummaryRecord).where(
+                ConversationSummaryRecord.room_id == room.id,
+                ConversationSummaryRecord.player_id == player.id,
+            )
+        )
+    assert record is not None
+    assert record.pending_event_id == events[-1].id
+    assert record.pending_event_created_at == events[-1].created_at.replace(tzinfo=None)
+
+
+@pytest.mark.asyncio
+async def test_summary_process_advances_composite_cursor(
+    db_session: AsyncSession,
+    memory_store,
+) -> None:  # noqa: ANN001
+    """摘要成功后同时保存内容和复合游标，下一次不会重复压缩旧 dialogue。"""
+    room, player, actor_id = await _create_memory_room(db_session, 18)
+    base = datetime(2026, 8, 7, tzinfo=UTC)
+    events = [
+        Event(
+            id=str(uuid.uuid4()),
+            room_id=room.id,
+            player_id=player.id,
+            actor_id=actor_id,
+            event_type="dialogue.player",
+            visibility="public",
+            scene_id="study",
+            payload={"utterance": f"旧对话 {index}"},
+            created_at=base + timedelta(seconds=index),
+        )
+        for index in range(10)
+    ]
+    db_session.add_all(events)
+    await db_session.commit()
+    service = ConversationSummaryService(
+        memory_store._session_factory,  # noqa: SLF001
+        DeterministicConversationSummaryModel(),
+    )
+    await service.enqueue_if_needed(room_id=room.id, player_id=player.id)
+    assert await service.process_once()
+    assert not await service.process_once()
+
+    async with service._session_factory() as session:  # noqa: SLF001
+        record = await session.scalar(
+            select(ConversationSummaryRecord).where(
+                ConversationSummaryRecord.room_id == room.id,
+                ConversationSummaryRecord.player_id == player.id,
+            )
+        )
+    assert record is not None
+    assert record.summary_json["summary"].count("旧对话") == 10
+    assert record.through_event_id == events[-1].id
+
+
+@pytest.mark.asyncio
 async def test_read_context_normalizes_uuid_scope_and_entity_memory(
     db_session: AsyncSession,
     memory_store,
@@ -460,3 +550,59 @@ async def test_read_context_matches_multi_participant_json_array(
         location_id="current_scene",
     )
     assert any(entry.source_event_id == "multi-participant-event" for entry in context.entries)
+
+
+@pytest.mark.asyncio
+async def test_npc_context_respects_frozen_audience_and_keeper_does_not(
+    db_session: AsyncSession,
+    memory_store,
+) -> None:
+    """NPC 读取要按冻结受众收口，但 Keeper 仍能看到房间历史。"""
+
+    room, player, actor_id = await _create_memory_room(db_session, 20)
+    other_player = Player(id=str(uuid.uuid4()), room_id=room.id, nickname="旁观者")
+    db_session.add(other_player)
+    db_session.add(
+        MemoryEntryRecord(
+            room_id=room.id,
+            subject_id="caretaker",
+            kind="conversation",
+            content="我听到了那句测试短语。",
+            epistemic_status="experienced",
+            visibility="public",
+            participants=[actor_id, "caretaker"],
+            listener_ids=["caretaker"],
+            audience_player_ids=[player.id],
+            location_id="study",
+            source_event_id="audience-event",
+            source_sequence=1,
+            source_created_at=datetime.now(UTC),
+        )
+    )
+    await db_session.commit()
+
+    npc_context = await memory_store.read_npc_context(
+        room_id=room.id,
+        player_id=player.id,
+        actor_id=actor_id,
+        revision="1",
+        interlocutor_id="caretaker",
+    )
+    other_npc_context = await memory_store.read_npc_context(
+        room_id=room.id,
+        player_id=other_player.id,
+        actor_id=actor_id,
+        revision="1",
+        interlocutor_id="caretaker",
+    )
+    keeper_context = await memory_store.read_keeper_context(
+        room_id=room.id,
+        player_id=other_player.id,
+        actor_id=actor_id,
+        revision="1",
+        entity_ids=("caretaker",),
+    )
+
+    assert any(entry.source_event_id == "audience-event" for entry in npc_context.entries)
+    assert all(entry.source_event_id != "audience-event" for entry in other_npc_context.entries)
+    assert any(entry.source_event_id == "audience-event" for entry in keeper_context.entries)

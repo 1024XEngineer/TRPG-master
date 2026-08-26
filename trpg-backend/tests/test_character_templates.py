@@ -244,7 +244,9 @@ async def test_seeding_a_room_draft_copies_the_card_and_then_stands_alone(
     )
     body = read.json()["data"]
     assert body["name"] == "陈探员"
-    assert body["attributes"] == TEMPLATE_ATTRIBUTES
+    assert body["attributes"] == {
+        key: value for key, value in TEMPLATE_ATTRIBUTES.items() if key != "LUCK"
+    }
     assert body["skills"] == TEMPLATE_DATA["skills"]
     assert body["occupation"] == "私家侦探"
     # 局内状态不跟着卡库走：衍生值等 complete 时服务端按属性权威重算。
@@ -341,7 +343,9 @@ async def test_deleting_a_referenced_card_clears_provenance_instead_of_failing(
     assert stored.based_on_template_id is None
     # 房间卡自己的数据一点没少。
     assert stored.name == "陈探员"
-    assert stored.attributes == TEMPLATE_ATTRIBUTES
+    assert stored.attributes == {
+        key: value for key, value in TEMPLATE_ATTRIBUTES.items() if key != "LUCK"
+    }
 
 
 async def test_seeding_refuses_a_card_from_another_rule_system(
@@ -456,6 +460,12 @@ async def test_a_client_cannot_claim_its_attributes_were_rolled(client: AsyncCli
         json={"basedOnTemplateId": template_id},
         headers={"X-Reconnect-Token": room["reconnectToken"]},
     )
+    room_character = await client.get(
+        f"{ROOMS_BASE}/{room['roomId']}/characters/{draft.json()['data']['characterId']}",
+        headers={"X-Reconnect-Token": room["reconnectToken"]},
+    )
+    assert "LUCK" not in room_character.json()["data"]["attributes"]
+    assert created.json()["data"]["data"]["attributes"]["LUCK"] == 90
     completed = await client.post(
         f"{ROOMS_BASE}/{room['roomId']}/characters/{draft.json()['data']['characterId']}/complete",
         headers={"X-Reconnect-Token": room["reconnectToken"]},

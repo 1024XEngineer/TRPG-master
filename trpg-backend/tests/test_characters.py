@@ -1,3 +1,6 @@
+import asyncio
+from typing import cast
+
 from httpx import AsyncClient
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -347,6 +350,79 @@ async def test_roll_attributes_marks_card_as_rolled(client: AsyncClient) -> None
         headers=reconnect(room["reconnectToken"]),
     )
     assert read_back.json()["data"]["generationMethod"] == "roll"
+
+
+async def test_roll_luck_persists_one_server_authoritative_result(client: AsyncClient) -> None:
+    """幸运值只掷一次，服务端保存三颗 d6 明细并拒绝覆盖既有结果。"""
+    room = await create_room(client)
+    headers = reconnect(room["reconnectToken"])
+    draft = await client.post(f"{ROOMS_BASE}/{room['roomId']}/characters", headers=headers)
+    character_id = draft.json()["data"]["characterId"]
+
+    rolled = await client.post(
+        f"{ROOMS_BASE}/{room['roomId']}/characters/{character_id}/roll-luck",
+        headers=headers,
+    )
+
+    assert rolled.status_code == 200, rolled.text
+    result = rolled.json()["data"]
+    assert len(result["dice"]) == 3
+    assert all(1 <= die <= 6 for die in result["dice"])
+    assert result["luck"] == sum(result["dice"]) * 5
+    reread = await client.get(
+        f"{ROOMS_BASE}/{room['roomId']}/characters/{character_id}", headers=headers
+    )
+    assert reread.json()["data"]["attributes"]["LUCK"] == result["luck"]
+
+    duplicate = await client.post(
+        f"{ROOMS_BASE}/{room['roomId']}/characters/{character_id}/roll-luck",
+        headers=headers,
+    )
+    assert duplicate.status_code == 409
+
+
+async def test_complete_character_without_luck_roll_is_rejected(client: AsyncClient) -> None:
+    """没有幸运值时，完成接口不能把默认值或缺失值当成已掷结果。"""
+    room = await create_room(client)
+    headers = reconnect(room["reconnectToken"])
+    draft = await client.post(f"{ROOMS_BASE}/{room['roomId']}/characters", headers=headers)
+    character_id = draft.json()["data"]["characterId"]
+    without_luck = {
+        **BUILT_CHARACTER,
+        "attributes": {
+            key: value
+            for key, value in cast(dict[str, int], BUILT_CHARACTER["attributes"]).items()
+            if key != "LUCK"
+        },
+    }
+    await client.patch(
+        f"{ROOMS_BASE}/{room['roomId']}/characters/{character_id}",
+        json=without_luck,
+        headers=headers,
+    )
+
+    completed = await client.post(
+        f"{ROOMS_BASE}/{room['roomId']}/characters/{character_id}/complete",
+        headers=headers,
+    )
+    assert completed.status_code == 422
+    assert completed.json()["error"]["code"] == "CHARACTER_INVALID"
+
+
+async def test_concurrent_luck_rolls_only_persist_one_result(client: AsyncClient) -> None:
+    """并发双击也只能有一次成功，后到请求不能覆盖已经落库的幸运值。"""
+    room = await create_room(client)
+    headers = reconnect(room["reconnectToken"])
+    draft = await client.post(f"{ROOMS_BASE}/{room['roomId']}/characters", headers=headers)
+    character_id = draft.json()["data"]["characterId"]
+    path = f"{ROOMS_BASE}/{room['roomId']}/characters/{character_id}/roll-luck"
+
+    first, second = await asyncio.gather(
+        client.post(path, headers=headers),
+        client.post(path, headers=headers),
+    )
+
+    assert sorted((first.status_code, second.status_code)) == [200, 409]
 
 
 async def test_quick_generate_saves_a_complete_rule_valid_draft(client: AsyncClient) -> None:

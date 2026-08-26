@@ -193,6 +193,8 @@ class ActionPlanRun(ContractModel):
     plan_id: str = Field(min_length=1, max_length=100)
     parent_action_id: str = Field(min_length=1, max_length=200)
     parent_input_fingerprint: str = Field(min_length=64, max_length=64)
+    parent_interlocutor_id: str | None = Field(default=None, min_length=1)
+    parent_interlocutor_name: str | None = Field(default=None, min_length=1)
     # The verbatim utterance the fingerprint above was computed from. Needed to
     # rebuild a fingerprint-matching PlayerInput on resume: `plan.goal` is a
     # model-authored paraphrase and is not guaranteed to match the original
@@ -424,6 +426,9 @@ class ActionPlanNarrationContext(ContractModel):
     # Only populated for the bounded second narration attempt; contains no
     # hidden data, just the player-safe requirement the first output missed.
     narration_retry_hint: str | None = Field(default=None, max_length=500)
+    # Latest already-published narration the viewer can see. Player-safe only;
+    # the Narrator must not recopy or paraphrase it as a fresh scene-setting opening.
+    previous_published_narration: str | None = Field(default=None, max_length=2000)
 
     @model_validator(mode="after")
     def validate_narration_scope(self) -> ActionPlanNarrationContext:

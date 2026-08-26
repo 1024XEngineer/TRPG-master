@@ -15,6 +15,7 @@ from collaboration_framework.contracts import (
     AdjudicationStatusView,
     EnterLocationEffect,
     GetAdjudicationStatusRequest,
+    NoAdjudicationCheck,
     SubmitAdjudicationRequest,
 )
 from collaboration_framework.contracts.validation import AdjudicationValidationError
@@ -187,11 +188,10 @@ async def create_from_adjudication(
     db: AsyncSession,
     request: SubmitAdjudicationRequest,
 ) -> AdjudicationExecution:
-    adjudication = request.adjudication
-    if adjudication.check.mode != "none":
-        raise SceneTransitionError("带检定的场景切换必须先完成检定")
+    original = request.adjudication
+    original_action_id = original.request_id
     effects = tuple(
-        effect for effect in adjudication.success_effects if isinstance(effect, EnterLocationEffect)
+        effect for effect in original.success_effects if isinstance(effect, EnterLocationEffect)
     )
     if not effects:
         raise SceneTransitionError("裁决中没有可确认的场景切换效果")
@@ -200,8 +200,22 @@ async def create_from_adjudication(
     if session is None:
         raise SceneTransitionError("游戏尚未开始")
     source_revision = session.state_version
-    if adjudication.source_revision != str(source_revision):
+    if original.check.mode == "none" and original.source_revision != str(source_revision):
         raise SceneTransitionError("房间状态已变化，请刷新后重试")
+    adjudication = original
+    if original.check.mode != "none":
+        # 检定已经提交；提案只冻结剩余的 EnterLocation，避免同意后再次开检定。
+        adjudication = original.model_copy(
+            update={
+                "request_id": f"{original_action_id}:scene-consent",
+                "source_revision": str(source_revision),
+                "check": NoAdjudicationCheck(),
+                "success_effects": effects,
+                "failure_effects": (),
+                "persistence_intent": "location",
+            },
+            deep=True,
+        )
     state = GameState.model_validate(session.state_json)
     player_by_actor = {actor_id: actor.player_id for actor_id, actor in state.actors.items()}
     if player_by_actor.get(adjudication.actor_id) != request.player_id:
@@ -211,17 +225,17 @@ async def create_from_adjudication(
         raise SceneTransitionError("单人房间不需要全员确认")
     existing = await _active_record(db, request.room_id)
     if existing is not None:
-        if existing.action_request_id == adjudication.request_id:
+        if existing.action_request_id == original_action_id:
             return _execution(existing)
         raise SceneTransitionError("房间已有待确认的场景提案")
 
     now = datetime.now(UTC)
     proposal_id = f"scene_{uuid4().hex}"
     execution = AdjudicationExecution(
-        request_id=adjudication.request_id,
-        action_request_id=adjudication.request_id,
+        request_id=original_action_id,
+        action_request_id=original_action_id,
         status="awaiting_scene_consent",
-        view_revision=adjudication.source_revision,
+        view_revision=str(source_revision),
         outcome="pending",
         scene_transition_proposal_id=proposal_id,
     )
@@ -232,8 +246,8 @@ async def create_from_adjudication(
         proposal_version=1,
         status="pending",
         player_id=request.player_id,
-        action_request_id=adjudication.request_id,
-        parent_action_id=adjudication.request_id,
+        action_request_id=original_action_id,
+        parent_action_id=original_action_id,
         requester_player_id=request.player_id,
         source_scene_id=state.scene_id,
         target_scene_id=target_scene_id,
@@ -256,7 +270,7 @@ async def create_from_adjudication(
         winner = await _record_for_action(
             db,
             room_id=request.room_id,
-            action_request_id=adjudication.request_id,
+            action_request_id=original_action_id,
         )
         if winner is not None:
             return _execution(winner)
@@ -468,6 +482,13 @@ async def respond(
         await db.refresh(record)
         record.status = "approved"
         record.committed_revision = int(execution.view_revision)
+        record.execution_json = execution.model_copy(
+            update={
+                "request_id": record.action_request_id,
+                "action_request_id": record.action_request_id,
+            },
+            deep=True,
+        ).model_dump(mode="json")
         record.proposal_version += 1
         record.updated_at = datetime.now(UTC)
         await db.commit()
@@ -512,6 +533,12 @@ async def get_status(
         return AdjudicationStatusView(
             action_request_id=action_request_id,
             status="cancelled",
+            execution=execution,
+        )
+    if record.status == "approved":
+        return AdjudicationStatusView(
+            action_request_id=action_request_id,
+            status=execution.status,
             execution=execution,
         )
     return None

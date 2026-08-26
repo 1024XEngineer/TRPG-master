@@ -23,6 +23,7 @@ from app.dto.character import (
     QuickGenerateRequest,
     QuickGenerateResult,
     RollAttributesResult,
+    RollLuckResult,
 )
 from app.dto.chat import ChatMessageRead
 from app.dto.common import ApiResponse
@@ -453,6 +454,30 @@ async def roll_attributes(
     """
     try:
         result = await character_service.roll_attributes(db, room_id, character_id, reconnect_token)
+    except (
+        character_service.CharacterNotFoundError,
+        room_service.RoomAuthenticationError,
+        room_service.RoomAuthorizationError,
+        room_service.RoomConflictError,
+    ) as exc:
+        _raise_service_error(exc)
+    return ApiResponse.ok(result)
+
+
+@router.post(
+    "/{room_id}/characters/{character_id}/roll-luck",
+    response_model=ApiResponse[RollLuckResult],
+    tags=["characters"],
+)
+async def roll_luck(
+    room_id: str,
+    character_id: str,
+    reconnect_token: str | None = Header(default=None, alias="X-Reconnect-Token"),
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[RollLuckResult]:
+    """POST /api/v1/rooms/{roomId}/characters/{characterId}/roll-luck —— 单独确定本局幸运值。"""
+    try:
+        result = await character_service.roll_luck(db, room_id, character_id, reconnect_token)
     except (
         character_service.CharacterNotFoundError,
         room_service.RoomAuthenticationError,

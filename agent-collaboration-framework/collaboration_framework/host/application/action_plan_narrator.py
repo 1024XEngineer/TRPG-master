@@ -12,6 +12,7 @@ from collaboration_framework.host.schemas.action_plan import (
 )
 
 from .narration_policy import (
+    narration_atmosphere_rejection_reason,
     narration_subject_rejection_reason,
     narration_text_rejection_reason,
     normalize_narration_text,
@@ -31,6 +32,10 @@ class ActionPlanNarrationValidationError(ContractError):
 _CORPSE_SEARCH_QUESTION = re.compile(
     r"(?:从哪里|哪里).{0,12}(?:找|搜)|(?:寻找|搜寻).{0,12}(?:尸体|遗体)"
 )
+
+# 只要本回合已经要单独发 NPC 回复，守秘人正文里就别再塞 NPC 的直接引语了；
+# 否则前端还是会像一整段守秘人口吻那样显示，分气泡就失去意义。
+_EMBEDDED_DIALOGUE_RE = re.compile(r"[“”「」『』‘’\"']")
 
 
 class ActionPlanNarrator:
@@ -79,12 +84,20 @@ class ActionPlanNarrator:
         rejection = narration_text_rejection_reason(output.text)
         if rejection is not None:
             raise ActionPlanNarrationValidationError(rejection)
+        if output.npc_replies and _EMBEDDED_DIALOGUE_RE.search(output.text):
+            raise ActionPlanNarrationValidationError("npc_dialogue_embedded_in_text")
         subject_rejection = narration_subject_rejection_reason(
             output.text,
             addressing_mode=getattr(context, "addressing_mode", "second_person"),
         )
         if subject_rejection is not None:
             raise ActionPlanNarrationValidationError(subject_rejection)
+        atmosphere_rejection = narration_atmosphere_rejection_reason(
+            output.text,
+            getattr(context, "previous_published_narration", None),
+        )
+        if atmosphere_rejection is not None:
+            raise ActionPlanNarrationValidationError(atmosphere_rejection)
         committed_results = tuple(
             result
             for step in context.completed_steps

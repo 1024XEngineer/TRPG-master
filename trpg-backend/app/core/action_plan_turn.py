@@ -67,6 +67,7 @@ from collaboration_framework.host.schemas import (
     ActionPlanAdvanceResult,
     ActionPlanNarrationContext,
     ActionPlanNarrationOutput,
+    ActionPlanNpcReply,
     ActionPlanRun,
     ActionPlanStepContext,
     CompletedPlanStepSummary,
@@ -859,6 +860,19 @@ def _deterministic_clarification_text(context: ActionPlanNarrationContext) -> st
     return f"{actor}暂时无法确认这次行动的具体对象或结果。"
 
 
+def _latest_previous_narration(recent_history: RecentTurnContext) -> str | None:
+    """Return the latest published narration already visible to this viewer."""
+
+    for turn in reversed(recent_history.turns):
+        narration = turn.published_narration
+        if narration is None:
+            continue
+        text = narration.text.strip()
+        if text:
+            return text[:2000]
+    return None
+
+
 def _acting_address(context: ActionPlanNarrationContext) -> str:
     if getattr(context, "addressing_mode", "second_person") == "named_actor":
         name = getattr(context, "acting_character_name", "") or ""
@@ -975,6 +989,8 @@ class ActionPlanTurnApplication:
         player_id: str,
         client_action_id: str,
         utterance: str,
+        interlocutor_id: str | None = None,
+        interlocutor_name: str | None = None,
         on_progress: Callable[[object], Awaitable[None]] | None = None,
         on_phase: TurnPhaseObserver | None = None,
         on_input_accepted: (Callable[[PlayerInput, PlayerView], Awaitable[None]] | None) = None,
@@ -987,6 +1003,8 @@ class ActionPlanTurnApplication:
             actor_id=actor_id,
             client_action_id=client_action_id,
             utterance=utterance,
+            interlocutor_id=interlocutor_id,
+            interlocutor_name=interlocutor_name,
         )
         existing = await self._orchestrator.get_run(room_id, client_action_id)
         if existing is not None:
@@ -1000,6 +1018,15 @@ class ActionPlanTurnApplication:
                 player_input,
                 advanced,
                 on_phase=on_phase,
+            )
+        # 结构化 @NPC 输入仍由统一 Host 判断对白、施压和行动意图；路由层不能先返回
+        # 澄清，否则连 NPC 的独立回复都不会生成。NPC 的行动语义仍由 Host/Engine 契约裁决。
+        if _requires_mixed_dialogue_clarification(player_input):
+            view = await self._projector.project(player_input)
+            await _emit_phase(on_phase, "generating_narration")
+            return self._planning_failure_clarification(
+                player_input=player_input,
+                player_view=view,
             )
 
         # A plan stuck in needs_clarification never produced any committed step
@@ -1041,7 +1068,7 @@ class ActionPlanTurnApplication:
             player_input=player_input,
             player_view=view,
         )
-        memory_context = await self._read_memory_context(
+        keeper_memory_context = await self._read_keeper_memory_context(
             player_input=player_input,
             player_view=view,
         )
@@ -1064,8 +1091,8 @@ class ActionPlanTurnApplication:
                         player_input=player_input,
                         planning_view=TurnPlanningView.from_player_view(view),
                         recent_history=recent_history,
-                        memories=memory_context.entries,
-                        conversation_summary=memory_context.conversation_summary,
+                        memories=keeper_memory_context.entries,
+                        conversation_summary=keeper_memory_context.conversation_summary,
                         policy=self._orchestrator.policy,
                     )
                 )
@@ -1076,8 +1103,8 @@ class ActionPlanTurnApplication:
                         player_input=player_input,
                         player_view=view,
                         recent_history=recent_history,
-                        memories=memory_context.entries,
-                        conversation_summary=memory_context.conversation_summary,
+                        memories=keeper_memory_context.entries,
+                        conversation_summary=keeper_memory_context.conversation_summary,
                         # Legacy fusion adjudicates a single action in this call.
                         keeper_capabilities=keeper_capabilities,
                     )
@@ -1681,6 +1708,10 @@ class ActionPlanTurnApplication:
                 player_input=context.player_input,
                 player_view=context.player_view,
             )
+            recent_history = await self._read_recent_history(
+                player_input=context.player_input,
+                player_view=context.player_view,
+            )
             # 在最终调用 Narrator 前显式构造完整契约，避免依赖未知字段注入或
             # 让记忆只存在于 Python 对象而没有进入序列化 payload。
             context = ActionPlanNarrationContext(
@@ -1699,6 +1730,10 @@ class ActionPlanTurnApplication:
                 allowed_evidence_refs=context.allowed_evidence_refs,
                 narration_evidence=context.narration_evidence,
                 narration_retry_hint=context.narration_retry_hint,
+                previous_published_narration=await self._previous_published_narration(
+                    player_input=context.player_input,
+                    recent_history=recent_history,
+                ),
             )
         elif isinstance(context, ActionPlanNarrationContext):
             context = context.model_copy(
@@ -1718,6 +1753,29 @@ class ActionPlanTurnApplication:
                     path="model",
                     duration_ms=int((time.monotonic() - started_at) * 1000),
                 )
+                if context.player_input.interlocutor_id and not narration.npc_replies:
+                    # 结构化 @NPC 必须至少产生一条独立 NPC 气泡；模型只返回守秘人正文
+                    # 时使用安全的最小兜底，不改变 Engine 裁决结果，也不伪造 NPC 事实。
+                    npc = next(
+                        (
+                            entity
+                            for entity in context.player_view.scene.visible_entities
+                            if entity.id == context.player_input.interlocutor_id
+                            and entity.kind == "npc"
+                        ),
+                        None,
+                    )
+                    if npc is not None:
+                        narration = narration.model_copy(
+                            update={
+                                "npc_replies": (
+                                    ActionPlanNpcReply(
+                                        speaker_id=npc.id,
+                                        text="我听见了你的话。",
+                                    ),
+                                )
+                            }
+                        )
                 return narration
             except ActionPlanNarrationValidationError as exc:
                 # 只记录校验类别和权威结果，不记录模型正文或其他敏感上下文。
@@ -1739,6 +1797,16 @@ class ActionPlanTurnApplication:
                                 "上一版叙事遗漏了已提交的玩家可见结果："
                                 + "、".join(item.subject_name for item in missing)
                                 + "。必须在正文明确写出，并 claim 对应 evidence ref。"
+                            )
+                        }
+                    )
+                elif attempt == 0 and exc.reason == "atmosphere_repeat":
+                    context = context.model_copy(
+                        update={
+                            "narration_retry_hint": (
+                                "上一句已发布叙事已经交代了当前的时间、光线或氛围。"
+                                "本回合不得再用午后阳光、夜色、窗景等环境开场重铺，"
+                                "必须先写本回合的结果、现场变化或最小澄清。"
                             )
                         }
                     )
@@ -1980,6 +2048,25 @@ class ActionPlanTurnApplication:
             )
         return recent_history
 
+    async def _previous_published_narration(
+        self,
+        *,
+        player_input: PlayerInput,
+        recent_history: RecentTurnContext,
+    ) -> str | None:
+        latest_fn = getattr(self._recent_history_source, "latest_published_narration", None)
+        if callable(latest_fn):
+            try:
+                text = await latest_fn(
+                    room_id=player_input.room_id,
+                    exclude_correlation_id=player_input.client_action_id,
+                )
+            except (SQLAlchemyError, OSError, TimeoutError):
+                text = None
+            if isinstance(text, str) and text.strip():
+                return text.strip()[:2000]
+        return _latest_previous_narration(recent_history)
+
     async def _read_memory_context(
         self,
         *,
@@ -2000,7 +2087,17 @@ class ActionPlanTurnApplication:
                 player_input.utterance,
                 player_view,
             )
-            return await self._memory_source.read_context(
+            if (
+                player_input.interlocutor_id is not None
+                and player_input.interlocutor_id not in entity_ids
+            ):
+                # 玩家明确 @ 了某个 NPC 时，这个对象本身就是当前上下文的一部分，
+                # 不能只靠自然语言相似度去猜，免得对话目标在记忆检索里消失。
+                entity_ids = (*entity_ids, player_input.interlocutor_id)
+            read_npc_context = getattr(self._memory_source, "read_npc_context", None)
+            if read_npc_context is None:
+                read_npc_context = self._memory_source.read_context
+            return await read_npc_context(
                 room_id=player_input.room_id,
                 player_id=player_input.player_id,
                 actor_id=player_input.actor_id,
@@ -2010,6 +2107,47 @@ class ActionPlanTurnApplication:
             )
         except Exception as exc:  # noqa: BLE001 - 读模型故障必须 fail-open
             logger.warning("memory_context_degraded", error_type=type(exc).__name__)
+            return empty
+
+    async def _read_keeper_memory_context(
+        self,
+        *,
+        player_input: PlayerInput,
+        player_view: PlayerView,
+    ) -> MemoryContext:
+        """Keeper 读取保持 room 级历史，不再按玩家受众收窄。"""
+
+        empty = MemoryContext(
+            room_id=player_input.room_id,
+            player_id=player_input.player_id,
+            actor_id=player_input.actor_id,
+            as_of_revision=player_view.revision,
+        )
+        if self._memory_source is None:
+            return empty
+        try:
+            entity_ids = _matching_visible_entity_ids(
+                player_input.utterance,
+                player_view,
+            )
+            if (
+                player_input.interlocutor_id is not None
+                and player_input.interlocutor_id not in entity_ids
+            ):
+                entity_ids = (*entity_ids, player_input.interlocutor_id)
+            read_keeper_context = getattr(self._memory_source, "read_keeper_context", None)
+            if read_keeper_context is None:
+                read_keeper_context = self._memory_source.read_context
+            return await read_keeper_context(
+                room_id=player_input.room_id,
+                player_id=player_input.player_id,
+                actor_id=player_input.actor_id,
+                revision=player_view.revision,
+                location_id=player_view.scene_id,
+                entity_ids=entity_ids,
+            )
+        except Exception as exc:  # noqa: BLE001 - 读模型故障必须 fail-open
+            logger.warning("keeper_memory_context_degraded", error_type=type(exc).__name__)
             return empty
 
     async def _narration_addressing(
@@ -2478,6 +2616,19 @@ def _deterministic_step_adjudication(
         "",
     ).strip(" ，,。")
     target = _match_visible_entity(context.player_view, action_text)
+    if (
+        target is None
+        and context.step.kind == "dialogue"
+        and context.player_input.interlocutor_id is not None
+    ):
+        target = next(
+            (
+                entity
+                for entity in context.player_view.scene.visible_entities
+                if entity.id == context.player_input.interlocutor_id
+            ),
+            None,
+        )
     candidate, option = _match_rule_candidate(
         context.keeper_capabilities,
         action_text,
@@ -2627,6 +2778,39 @@ def _match_visible_entity_with_status(
     if len(matches) > 1 and matches[0][0] == matches[1][0]:
         return None, "ambiguous"
     return matches[0][2], "matched"
+
+
+def _requires_mixed_dialogue_clarification(player_input: PlayerInput) -> bool:
+    """只拦截很明显的「一句里既在对话又要立刻行动」；保守到宁可少拦。"""
+
+    if player_input.interlocutor_id is None:
+        return False
+    text = player_input.utterance
+    # 正式结构化 recipient 的原话已由服务端剥离展示用 mention；这类输入交给
+    # 统一 Host 判断。只有旧客户端把 @NPC 混在原文里时，才在路由层要求拆句。
+    if not text.lstrip().startswith("@"):
+        return False
+    if not any(
+        marker in text for marker in ("然后", "再", "接着", "之后", "同时", "顺便", "并", "并且")
+    ):
+        return False
+    return any(
+        keyword in text
+        for keyword in (
+            "去",
+            "前往",
+            "进入",
+            "撬",
+            "打开",
+            "调查",
+            "搜索",
+            "检查",
+            "使用",
+            "拿",
+            "攻击",
+            "推门",
+        )
+    )
 
 
 def _companion_move_effects(

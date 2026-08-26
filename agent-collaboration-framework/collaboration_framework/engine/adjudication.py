@@ -23,6 +23,7 @@ from collaboration_framework.contracts import (
     AdjudicationRecovery,
     AdjudicationStatusView,
     AdvanceWorldTimeEffect,
+    EnterLocationEffect,
     CheckDecisionRequest,
     CheckRunView,
     CheckStep,
@@ -466,6 +467,27 @@ class AdjudicationEngineService:
         async with self._store.transaction(room_id) as transaction:
             return await transaction.find_active_action_for_player(player_id)
 
+    async def load_action_adjudication(
+        self,
+        *,
+        room_id: str,
+        action_request_id: str,
+    ) -> ActionAdjudication | None:
+        """Return the frozen ActionAdjudication for one action, if it still exists."""
+
+        async with self._store.transaction(room_id) as transaction:
+            pending = await transaction.find_pending_check_by_action(action_request_id)
+            if pending is not None:
+                return pending.adjudication
+            command = await transaction.find_latest_adjudication_command_by_action(
+                action_request_id
+            )
+            if command is None:
+                return None
+            if isinstance(command.request, SubmitAdjudicationRequest):
+                return command.request.adjudication
+            return None
+
     async def recover_action(
         self,
         request: GetAdjudicationStatusRequest,
@@ -622,7 +644,11 @@ class AdjudicationEngineService:
                 runtime,
                 request.adjudication,
                 allow_party_time_advance=allow_party_time_advance,
-                allow_party_scene_transition=allow_party_scene_transition,
+                # 带检定的 EnterLocation 此时还不会落世界：先过检定，再由应用层开确认。
+                allow_party_scene_transition=(
+                    allow_party_scene_transition
+                    or request.adjudication.check.mode != "none"
+                ),
             )
             proposal_validation, proposal_committed_level = (
                 self._build_submission_validation(
@@ -639,6 +665,7 @@ class AdjudicationEngineService:
                     passed=True,
                     player_id=request.player_id,
                     prefix_events=(),
+                    allow_party_scene_transition=allow_party_scene_transition,
                 )
                 new_state, events = final.state, final.events
                 execution = self._execution_for(
@@ -1769,6 +1796,7 @@ class AdjudicationEngineService:
         player_id: str,
         prefix_events: tuple[DomainEvent, ...],
         check_run: CheckRun | None = None,
+        allow_party_scene_transition: bool = False,
     ) -> ActionFinalization:
         """Commit this action's effects and settle the Rules they triggered.
 
@@ -1799,6 +1827,12 @@ class AdjudicationEngineService:
             passed=passed,
             check_run=check_run,
         )
+        if not allow_party_scene_transition and len(runtime.game_state.actors) > 1:
+            selected_effects = tuple(
+                effect
+                for effect in selected_effects
+                if not isinstance(effect, EnterLocationEffect)
+            )
         settlement = self._new_settlement(
             runtime, request_id=request_id, actor_id=adjudication.actor_id
         )

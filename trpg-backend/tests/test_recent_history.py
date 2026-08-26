@@ -346,3 +346,81 @@ async def test_sql_history_selection_keeps_adjacent_then_prefers_same_scene(
     )
     assert [turn.correlation_id for turn in minimum_budget_context.turns] == ["prior-7"]
     assert sum(len(turn.player_utterance.text) for turn in minimum_budget_context.turns) <= 2
+
+
+async def test_latest_published_narration_includes_opening_across_scenes(
+    db_session: AsyncSession,
+    recent_history_source: SqlAlchemyRecentHistorySource,
+) -> None:
+    room_id = "70000000-0000-0000-0000-000000000001"
+    viewer_id = "70000000-0000-0000-0000-000000000002"
+    db_session.add(Room(id=room_id, room_code="RH0170", room_name="开场叙事", max_players=1))
+    db_session.add(
+        Player(
+            id=viewer_id,
+            room_id=room_id,
+            nickname="调查员",
+            reconnect_token="70000000-0000-0000-0000-000000000012",
+        )
+    )
+    base = datetime(2026, 7, 29, tzinfo=UTC)
+    opening = "大厦，午后阳光透过办公室的百叶窗，洒在托马斯·金博尔那张布满皱纹的脸上。"
+    db_session.add_all(
+        [
+            Event(
+                id="70000000-0000-0000-0000-000000000101",
+                room_id=room_id,
+                player_id=None,
+                event_type="narration.push",
+                correlation_id="game-opening",
+                visibility="public",
+                actor_id=None,
+                scene_id="office",
+                view_revision="1",
+                payload={"text": opening},
+                created_at=base,
+            ),
+            Event(
+                id="70000000-0000-0000-0000-000000000102",
+                room_id=room_id,
+                player_id=viewer_id,
+                event_type="action.broadcast",
+                correlation_id="current",
+                visibility="public",
+                actor_id="actor-viewer",
+                scene_id="office",
+                view_revision="2",
+                payload={"utterance": "我要接下委托"},
+                created_at=base + timedelta(seconds=1),
+            ),
+        ]
+    )
+    await db_session.commit()
+
+    text = await recent_history_source.latest_published_narration(
+        room_id=room_id,
+        exclude_correlation_id="current",
+    )
+    assert text == opening
+
+    db_session.add(
+        Event(
+            id="70000000-0000-0000-0000-000000000103",
+            room_id=room_id,
+            player_id=viewer_id,
+            event_type="narration.push",
+            correlation_id="travel",
+            visibility="public",
+            actor_id="actor-viewer",
+            scene_id="cemetery",
+            view_revision="3",
+            payload={"text": "你离开书房，走向公共墓地。"},
+            created_at=base + timedelta(seconds=2),
+        )
+    )
+    await db_session.commit()
+    later = await recent_history_source.latest_published_narration(
+        room_id=room_id,
+        exclude_correlation_id="current",
+    )
+    assert later == "你离开书房，走向公共墓地。"

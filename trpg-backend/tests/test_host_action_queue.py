@@ -426,7 +426,7 @@ async def test_npc_cancel_before_player_event_persists_nothing(
         return (players[0].id,), ("actor-a",)
 
     monkeypatch.setattr(ws_controller, "_npc_dialogue_audience", cancel_while_freezing)
-    await ws_controller._run_npc_dialogue(db_session, item, view)
+    await ws_controller._run_queued_host_action(db_session, item, view)
 
     persisted = await db_session.scalar(
         select(func.count())

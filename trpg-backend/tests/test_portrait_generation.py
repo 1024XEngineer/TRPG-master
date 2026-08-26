@@ -520,6 +520,15 @@ async def test_template_derived_generation_updates_library_and_next_room(
     )
     assert draft.status_code == 201, draft.text
     character_id = draft.json()["data"]["characterId"]
+    # 卡库副本会清除旧幸运值，新房间必须按本局流程重新掷骰。
+    rolled = await client.post(
+        f"{ROOMS_BASE}/{room['roomId']}/characters/{character_id}/roll-luck",
+        headers=reconnect(room["reconnectToken"]),
+    )
+    assert rolled.status_code == 200, rolled.text
+    roll_data = rolled.json()["data"]
+    assert len(roll_data["dice"]) == 3
+    assert roll_data["luck"] == sum(roll_data["dice"]) * 5
     completed = await client.post(
         f"{ROOMS_BASE}/{room['roomId']}/characters/{character_id}/complete",
         headers=reconnect(room["reconnectToken"]),

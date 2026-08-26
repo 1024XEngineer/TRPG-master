@@ -10,8 +10,9 @@ import hashlib
 import json
 import random
 from dataclasses import asdict, replace
+from typing import cast
 
-from sqlalchemy import select, update
+from sqlalchemy import CursorResult, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -39,6 +40,7 @@ from app.dto.character import (
     QuickGenerateRequest,
     QuickGenerateResult,
     RollAttributesResult,
+    RollLuckResult,
     SystemQuickGenerateResult,
 )
 from app.dto.character_background import CharacterBackgroundContext, CharacterBackgroundSkill
@@ -179,7 +181,10 @@ def _seed_character_from_template(character: Character, template: UserCharacterT
     character.gender = data.get("gender")
     character.residence = data.get("residence") or ""
     character.birthplace = data.get("birthplace") or ""
-    character.attributes = dict(data.get("attributes") or {})
+    attributes = dict(data.get("attributes") or {})
+    # 卡库中的幸运值属于旧游戏；复制到新房间后必须等待本局重新掷骰。
+    attributes.pop("LUCK", None)
+    character.attributes = attributes
     character.skills = dict(data.get("skills") or {})
     character.occupation_choice_skill_ids = data.get("occupation_choice_skill_ids")
     character.equipment = list(data.get("equipment") or [])
@@ -493,6 +498,41 @@ async def roll_attributes(
     character.version += 1
     await db.commit()
     return RollAttributesResult(attributes=attributes, derived_stats=derived_stats)
+
+
+async def roll_luck(
+    db: AsyncSession, room_id: str, character_id: str, reconnect_token: str | None
+) -> RollLuckResult:
+    """为房间角色草稿单独掷一次幸运值，并把结果写入服务端。
+
+    幸运值是每局角色的初始状态：已有合法结果时拒绝再次掷骰，避免重复点击覆盖
+    玩家已经确认的结果；其他属性和属性点购买来源保持不变。
+    """
+    character = await _get_own_character(db, room_id, character_id, reconnect_token)
+    room = await find_room_by_id(db, room_id)
+    _require_character_editable(room)
+    current_luck = (character.attributes or {}).get("LUCK")
+    if isinstance(current_luck, int) and 1 <= current_luck <= 99:
+        raise RoomConflictError("幸运值已经掷出，不能重复掷骰")
+
+    dice = [random.randint(1, 6) for _ in range(3)]
+    luck = sum(dice) * 5
+    attributes = dict(character.attributes or {})
+    attributes["LUCK"] = luck
+    # 用版本条件完成原子写入：两个并发请求最多一个成功，后到者不能覆盖先到结果。
+    result = cast(
+        CursorResult[tuple[()],],
+        await db.execute(
+            update(Character)
+            .where(Character.id == character.id, Character.version == character.version)
+            .values(attributes=attributes, version=character.version + 1)
+        ),
+    )
+    if result.rowcount != 1:
+        await db.rollback()
+        raise RoomConflictError("幸运值已经掷出，不能重复掷骰")
+    await db.commit()
+    return RollLuckResult(dice=dice, luck=luck)
 
 
 async def quick_generate_character(

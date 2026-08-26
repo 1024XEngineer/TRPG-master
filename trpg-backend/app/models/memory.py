@@ -52,6 +52,8 @@ class MemoryEntryRecord(Base):
     participants: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     # 与 participants 分开保存，避免把“共同参与”误当成“亲自听到”。
     listener_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    # 冻结受众是玩家权限，不是世界内认知；空数组表示这条记忆对所有 viewer 都可见。
+    audience_player_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     location_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     source_event_id: Mapped[str] = mapped_column(String(100), nullable=False)
     source_sequence: Mapped[int] = mapped_column(BigInteger, nullable=False)
@@ -105,6 +107,16 @@ class ConversationSummaryRecord(Base):
         Uuid(as_uuid=False), ForeignKey("players.id"), nullable=False
     )
     summary_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    # 摘要游标使用 Event 的真实发生时间和稳定 ID，避免不同事件流的 sequence 混比。
+    through_event_created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    through_event_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    pending_event_created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    pending_event_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # 旧字段保留给历史客户端和摘要 DTO；新的查询不再用它比较事件新旧。
     through_event_sequence: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     pending_through_sequence: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     source_revision: Mapped[str | None] = mapped_column(String(100), nullable=True)

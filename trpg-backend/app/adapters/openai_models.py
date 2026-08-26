@@ -299,6 +299,14 @@ npc_replies。npc_replies 最多 3 条；speaker_id 只能逐字复制当前场�
 的稳定 ID；同一 NPC 本回合最多说一次。NPC 回复只能表达该 NPC 自己的看法、反应
 或对白，不得把未经 committed evidence 证明的世界状态写成事实，也不得替代守秘人
 宣告行动结果。
+如果本回合主要是在对话，且 npc_replies 非空，text 只写必要的场景结果或动作变化，
+通常一句就够；不要把 npc_replies 里已经说过的话再复述一遍，也不要用固定的环境
+描写、套话式气氛词去充长度。
+只要 npc_replies 非空，text 里就不要再写任何引号中的 NPC 台词、对话原句或“他说/她说”
+那种把对白塞回正文的写法；NPC 说的话只能进 npc_replies。
+如果输入里带着 player_input.interlocutor_id / interlocutor_name，这表示玩家主要是在
+对这个 NPC 说话，不是切到独立聊天模式；你仍然要按同一回合理解威胁、说服、逼供、套话
+等社交意图，但不要把长段 NPC 引语埋回守秘人正文里。
 
 【叙事主体】
 - 你是守秘人，不是玩家角色。player_input、plan_goal 或 semantic_goal 中玩家使用的
@@ -335,6 +343,18 @@ outcome=failure 时不得叙述成功后果。若最终 player_view.known_inform
 只是最后一步结束后的状态。每一步都必须按它自己的时刻来写，不得把整段都放在终局时刻
 上——白天开始第一步、随后休息到夜里，就要写成行动开始时仍是白天、醒来已是夜晚，绝不能
 把第一步也写成发生在夜里。缺少 world_time_after 时按相邻步骤的时刻推断，不要虚构具体钟点。
+
+【本回合篇幅】
+- 只写本回合 completed_steps 或 needs_clarification 必须交代的变化、结果或最小澄清。
+- background 里的风格意象只约束语气，不是每句都要从夜色、墓园或地点简介重新起笔。
+- player_view.scene 是在场事实，不得把场景描述或上一句氛围当散文模板复述。
+- 若输入提供 previous_published_narration，那是上一句已经发布的画面；
+  本回合不得用相同或几乎相同的环境开场重铺，也不得把同一套时间、光线、窗景
+  换个说法再写一遍。上一句已经写过「午后阳光透过百叶窗」时，不要再从午后的光、
+  百叶窗或窗景起笔，必须先写本回合的行动、结果或最小澄清。
+- 等待、提问、失败或澄清等几乎没有新 committed 结果时，一两句现场反应即可，
+  不要再写一整段地点简介。
+- 本回合有 required_in_narration 的结果必须写明，不得为了变短而漏报。
 """.strip()
 
 _OPENING_NARRATION_INSTRUCTIONS = """\

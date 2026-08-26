@@ -39,13 +39,17 @@ from collaboration_framework.engine.timeline import (
     terminal_reached,
     time_advance_block_reason,
 )
-from tests.test_projection_v3 import ACTOR, module
-from tests.time_fixtures import SINGLE_NIGHT_POINTS, single_night_module
+from tests.test_projection_v3 import ACTOR
+from tests.time_fixtures import (
+    SINGLE_NIGHT_POINTS,
+    day_cycle_module,
+    single_night_module,
+)
 
 
 class DiscreteTimelineTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.content = module()
+        self.content = day_cycle_module()
 
     def at(self, point_id: str, *, day_index: int = 0, hour: int = 0) -> WorldTimeState:
         return WorldTimeState(
@@ -54,10 +58,11 @@ class DiscreteTimelineTests(unittest.TestCase):
         )
 
     def test_cycle_walks_the_module_declared_points(self) -> None:
-        """《追书人》声明了自己的 time_policy，夜里多一个 20 点。
+        """模组声明几个点，环就走几个点——引擎不替它补也不替它并。
 
-        20 点不是装饰：夜间监视和「睡到晚上八点再出门」都要落在一个真实存在的
-        时间点上，否则 Agent 无从映射（见 module-content-v3.json time_policy）。
+        fixture 在夜里多声明一个 20 点，为的就是问这件事：「睡到晚上八点再出门」
+        要落在一个真实存在的时间点上，否则 Agent 无从映射。形状由 fixture 自己
+        拥有，不再借真实模组的 time_policy（#451 起模组已收敛成昼夜两点）。
         """
 
         world = self.at("hour_00", hour=0)
@@ -240,7 +245,7 @@ class TerminalTimePointTests(unittest.TestCase):
     def test_a_multi_day_module_only_stops_on_the_declared_occurrence(self) -> None:
         """第三天 18:00 结束：前两次进入 hour_18 仍可继续。"""
 
-        content = module()
+        content = day_cycle_module()
         content = content.model_copy(
             update={
                 "time_policy": content.time_policy.model_copy(

@@ -70,6 +70,7 @@ from collaboration_framework.host.schemas import (
     ActionPlanStepContext,
     ActionPlanStepRun,
 )
+from tests.time_fixtures import day_cycle_module
 
 ROOT = Path(__file__).resolve().parents[1]
 V3_FIXTURE = (
@@ -2388,11 +2389,14 @@ class SleepAfterTravelAdjudicator:
 
 
 def v3_orchestrator(adjudicator):
-    """Only a v3 room has a discrete timeline for a step to advance."""
+    """Only a v3 room has a discrete timeline for a step to advance.
 
-    content = ModuleContentV3.model_validate_json(
-        V3_FIXTURE.read_text(encoding="utf-8")
-    )
+    走时间线 fixture 而不是《追书人》：这里要的只是「一个有离散时间线、正午开局、
+    夜里还有两个点可走」的房间。绑真实模组的话，模组一改版这条断言就断——#451 把
+    《追书人》收敛成昼夜两点之后 `hour_20` 就不存在了。
+    """
+
+    content = day_cycle_module()
     engine_store = InMemoryEngineStore()
     engine_store.register_room(
         module_content=content,

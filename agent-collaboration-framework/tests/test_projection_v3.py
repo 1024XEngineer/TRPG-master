@@ -61,6 +61,7 @@ from collaboration_framework.engine.initialization import create_initial_game_st
 from collaboration_framework.engine.navigation import resolve_location_target
 from collaboration_framework.engine.projection_v3 import location_breadcrumbs
 from collaboration_framework.engine.rules_v3 import evaluate_condition, walk_rule
+from tests.time_fixtures import day_cycle_module
 
 FIXTURE = (
     Path(__file__).resolve().parents[1]
@@ -71,6 +72,7 @@ FIXTURE = (
     / "追书人"
     / "module-content-v3.json"
 )
+
 ROOM = "room_v3"
 ACTOR = "pc_1"
 PLAYER = "player_v3"
@@ -945,11 +947,21 @@ class AdjudicationAgainstV3Tests(unittest.IsolatedAsyncioTestCase):
     ) -> None:
         """「睡一觉，到晚上八点」= 12 点 → 18 点 → 20 点，两跳，两个事件。
 
-        一次 advance_world_time 只走一个点，中间的 hour_18 不能被跳过：
-        夜间监视那条规则就挂在 `time.point_entered` 上，跳过点等于跳过规则。
+        一次 advance_world_time 只走一个点，中间的 hour_18 不能被跳过：挂在
+        `time.point_entered` 上的规则，跳过点就等于跳过规则。
+
+        走的是时间线 fixture 而不是真实模组：这条断言只关心引擎怎么走点，而
+        《追书人》的 time_policy 是模组内容，会随模组改版而变（#451 已把它收敛成
+        昼夜两点，20 点不复存在）。
         """
 
-        store, engine, rules = self.build()
+        content = day_cycle_module()
+        store = InMemoryEngineStore()
+        store.register_room(
+            module_content=content, initial_state=game_state(content)
+        )
+        engine = AdjudicationEngineService(store)
+        rules = RuleEngineService(store)
         snapshot = await rules.read(
             PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
         )
@@ -960,6 +972,7 @@ class AdjudicationAgainstV3Tests(unittest.IsolatedAsyncioTestCase):
             snapshot.revision,
             AdvanceWorldTimeEffect(to_point_id="hour_18"),
             AdvanceWorldTimeEffect(to_point_id="hour_20"),
+            target=ActionTarget(kind="location", id="only_room"),
         )
 
         after = await rules.read(

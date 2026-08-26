@@ -44,6 +44,7 @@ from collaboration_framework.engine import (
 )
 from collaboration_framework.engine.dice import DiceRoller, SequenceDiceSource
 from collaboration_framework.engine.models import WorldTimePoint, WorldTimeState
+from tests.time_fixtures import NIGHT_LATCH_RULE, day_cycle_module
 
 FIXTURE = (
     Path(__file__).resolve().parents[1]
@@ -58,8 +59,13 @@ ROOM = "barrier-room"
 PLAYER = "barrier-player"
 ACTOR = "barrier-actor"
 
-# 《追书人》的时间线：00 / 06 / 12 / 18 / 20，夜间是 18:00–06:00。
+# 时间线 fixture 的点：00 / 06 / 12 / 18 / 20，夜间是 18:00–06:00。
 # 中午躺下、睡到第二天早晨要跨过 18 → 20 → 00 → 06 四个点，其中前三个是夜里。
+#
+# 屏障要问的那个问题需要「连跨三个夜点、终态却是白天」这个形状。它此前是借
+# 《追书人》的 time_policy 与 `enable_night_surveillance` 规则问出来的，于是这组
+# 引擎测试被模组内容绑住——#451 把模组收敛成昼夜两点、并重写了那条规则之后就一起
+# 断掉。形状与规则现在由 `tests/time_fixtures.py` 自己拥有。
 SLEEP_UNTIL_MORNING = ("hour_18", "hour_20", "hour_00", "hour_06")
 
 
@@ -67,10 +73,16 @@ def module() -> ModuleContentV3:
     return ModuleContentV3.model_validate_json(FIXTURE.read_text(encoding="utf-8"))
 
 
+def barrier_module() -> ModuleContentV3:
+    """带一条夜间闩规则的时间线 fixture，供屏障用例使用。"""
+
+    return day_cycle_module(rules=(NIGHT_LATCH_RULE,))
+
+
 def noon_state() -> GameState:
     return GameState(
         room_id=ROOM,
-        scene_id="thomas_office",
+        scene_id="only_room",
         actors={
             ACTOR: ActorState(
                 player_id=PLAYER,
@@ -80,7 +92,7 @@ def noon_state() -> GameState:
                 resources=ActorResources(san=55, luck=50),
             )
         },
-        entities={"case_tracker": {"surveillance_available": False}},
+        entities={"case_tracker": {"night_seen": False}},
         world_time=WorldTimeState(
             current_point_id="hour_12",
             current=WorldTimePoint(day_index=0, hour_of_day=12),
@@ -91,7 +103,7 @@ def noon_state() -> GameState:
 class EventBarrierTests(unittest.IsolatedAsyncioTestCase):
     async def test_night_rule_fires_on_the_point_it_was_written_against(self) -> None:
         store = InMemoryEngineStore()
-        store.register_room(module_content=module(), initial_state=noon_state())
+        store.register_room(module_content=barrier_module(), initial_state=noon_state())
         engine = AdjudicationEngineService(store)
 
         execution = await engine.submit(
@@ -103,7 +115,7 @@ class EventBarrierTests(unittest.IsolatedAsyncioTestCase):
                     source_revision="0",
                     actor_id=ACTOR,
                     summary="睡到第二天早晨",
-                    target=ActionTarget(kind="location", id="thomas_office"),
+                    target=ActionTarget(kind="location", id="only_room"),
                     method=ActionMethod(family="rest", description="和衣睡下"),
                     check=NoAdjudicationCheck(),
                     success_effects=tuple(
@@ -121,7 +133,7 @@ class EventBarrierTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state.world_time.current.day_index, 1)
         # 而 18:00 那一跳按**当时**的世界匹配，夜间监视点开了出来。
         # 修好之前这里是 False：终态是 06:00，`time_of_day_is night` 判否。
-        self.assertIs(state.entities["case_tracker"]["surveillance_available"], True)
+        self.assertIs(state.entities["case_tracker"]["night_seen"], True)
 
     async def test_the_rule_fires_once_even_across_three_night_points(self) -> None:
         """18 / 20 / 00 三个点都是夜里，但规则的条件自己会关掉它。
@@ -132,7 +144,7 @@ class EventBarrierTests(unittest.IsolatedAsyncioTestCase):
         """
 
         store = InMemoryEngineStore()
-        store.register_room(module_content=module(), initial_state=noon_state())
+        store.register_room(module_content=barrier_module(), initial_state=noon_state())
         engine = AdjudicationEngineService(store)
 
         await engine.submit(
@@ -144,7 +156,7 @@ class EventBarrierTests(unittest.IsolatedAsyncioTestCase):
                     source_revision="0",
                     actor_id=ACTOR,
                     summary="睡到第二天早晨",
-                    target=ActionTarget(kind="location", id="thomas_office"),
+                    target=ActionTarget(kind="location", id="only_room"),
                     method=ActionMethod(family="rest", description="和衣睡下"),
                     check=NoAdjudicationCheck(),
                     success_effects=tuple(
@@ -160,7 +172,7 @@ class EventBarrierTests(unittest.IsolatedAsyncioTestCase):
             event
             for event in events
             if event.type == "rule.triggered"
-            and event.payload["rule_id"] == "enable_night_surveillance"
+            and event.payload["rule_id"] == "night_latch"
         ]
         self.assertEqual(len(triggered), 1)
         # 触发它的是 18:00 那条事件，不是最后那条。
@@ -173,7 +185,7 @@ class EventBarrierTests(unittest.IsolatedAsyncioTestCase):
         """零回归：没有规则挡路时，效果序列的结果与屏障之前完全一致。"""
 
         store = InMemoryEngineStore()
-        store.register_room(module_content=module(), initial_state=noon_state())
+        store.register_room(module_content=barrier_module(), initial_state=noon_state())
         engine = AdjudicationEngineService(store)
 
         execution = await engine.submit(

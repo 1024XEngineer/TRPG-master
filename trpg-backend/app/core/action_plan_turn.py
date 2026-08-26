@@ -3093,7 +3093,7 @@ def _match_rule_candidate(capabilities, text: str, target_id: str | None):
 # 这里的词汇只是离线测试/兜底提示，不是模组动作族的完整注册表。
 _ACTION_FAMILY_HINTS: dict[str, tuple[str, ...]] = {
     "observe": ("仔细观察", "观察", "察看", "查看"),
-    "surveil": ("监视", "观察周围", "留意动静", "观察"),
+    "surveil": ("监视", "观察周围", "留意动静"),
     "search": ("搜索", "搜查", "查找", "找线索", "寻找"),
     "research": ("研究", "查阅", "检索", "翻阅", "查旧报"),
     "social": ("留下好印象", "博取信任", "说服"),

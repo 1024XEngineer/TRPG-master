@@ -177,8 +177,12 @@ def check_rule(
     success_effects: list[dict[str, Any]],
     failure_effects: list[dict[str, Any]],
     difficulty: str = "regular",
+    hints: list[str] | None = None,
 ) -> dict[str, Any]:
-    """构造失败后仍可重试的正式 COC7 检定规则。"""
+    """构造失败后仍可重试的正式 COC7 检定规则。
+
+    hint 必须描述玩家实际动作；未传入时才回退到技能/选项的兼容默认值。
+    """
 
     steps: list[dict[str, Any]] = [
         {
@@ -214,7 +218,7 @@ def check_rule(
             target_kind,
             target_id,
             option_id,
-            [skill_id, option_id],
+            hints if hints is not None else [skill_id, option_id],
         ),
         "execution": {
             "branches": [{"id": option_id, "entry_step_id": "check"}],
@@ -329,8 +333,8 @@ def build_module() -> dict[str, Any]:
         [
             effect_rule("cut_restraints_with_knife", families=["cut", "use"], location_ids=["sealed_room"], target_kind="entity", target_id="restraint_rope", option_id="pencil-knife", hints=["铅笔刀", "割断绳索"], effects=[{"type": "change_entity_state", "entity_id": "restraint_rope", "key": "cut", "value": True}, {"type": "reveal_information", "information_id": "restraints_removed", "scope": "party"}]),
             effect_rule("cut_restraints_on_bed_corner", families=["cut", "rub"], location_ids=["sealed_room"], target_kind="entity", target_id="sharp_bed_corner", option_id="sharp-corner", hints=["锋利铁皮", "磨断绳索"], effects=[{"type": "change_entity_state", "entity_id": "sharp_bed_corner", "key": "noticed", "value": True}, {"type": "change_entity_state", "entity_id": "restraint_rope", "key": "cut", "value": True}, {"type": "reveal_information", "information_id": "restraints_removed", "scope": "party"}]),
-            check_rule("search_bed", families=["search", "observe"], target_kind="entity", target_id="bed", option_id="spot-hidden", skill_id="spot-hidden", success_effects=[{"type": "change_entity_state", "entity_id": "bed_key", "key": "found", "value": True}, {"type": "reveal_information", "information_id": "bed_key_found", "scope": "party"}], failure_effects=[{"type": "reveal_information", "information_id": "bed_search_hint", "scope": "party"}]),
-            check_rule("move_bed", families=["move"], target_kind="entity", target_id="bed", option_id="STR", skill_id="STR", success_effects=[{"type": "change_entity_state", "entity_id": "bed", "key": "moved", "value": True}, {"type": "change_entity_state", "entity_id": "bed_key", "key": "found", "value": True}, {"type": "reveal_information", "information_id": "bed_key_found", "scope": "party"}], failure_effects=[{"type": "reveal_information", "information_id": "bed_move_hint", "scope": "party"}]),
+            check_rule("search_bed", families=["search", "observe"], target_kind="entity", target_id="bed", option_id="spot-hidden", skill_id="spot-hidden", hints=["仔细搜索床铺", "寻找床铺中的隐藏物品"], success_effects=[{"type": "change_entity_state", "entity_id": "bed_key", "key": "found", "value": True}, {"type": "reveal_information", "information_id": "bed_key_found", "scope": "party"}], failure_effects=[{"type": "reveal_information", "information_id": "bed_search_hint", "scope": "party"}]),
+            check_rule("move_bed", families=["move"], target_kind="entity", target_id="bed", option_id="STR", skill_id="STR", hints=["移动床铺", "挪开床铺"], success_effects=[{"type": "change_entity_state", "entity_id": "bed", "key": "moved", "value": True}, {"type": "change_entity_state", "entity_id": "bed_key", "key": "found", "value": True}, {"type": "reveal_information", "information_id": "bed_key_found", "scope": "party"}], failure_effects=[{"type": "reveal_information", "information_id": "bed_move_hint", "scope": "party"}]),
             effect_rule("inspect_wall_painting", families=["inspect", "search"], location_ids=["sealed_room"], target_kind="entity", target_id="wall_painting", option_id="lift-painting", hints=["掀开挂画", "检查暗格"], effects=[{"type": "change_entity_state", "entity_id": "wall_painting", "key": "inspected", "value": True}, {"type": "change_entity_state", "entity_id": "wall_key", "key": "found", "value": True}, {"type": "reveal_information", "information_id": "wall_key_found", "scope": "party"}]),
             effect_rule("open_top_drawer", families=["unlock", "open"], location_ids=["sealed_room"], target_kind="entity", target_id="top_drawer", option_id="wall-key", hints=["暗格钥匙", "上层抽屉"], effects=[{"type": "change_entity_state", "entity_id": "top_drawer", "key": "open", "value": True}, {"type": "change_entity_state", "entity_id": "sketchbook", "key": "discovered", "value": True}, {"type": "reveal_information", "information_id": "sketchbook_found", "scope": "party"}]),
             effect_rule("open_middle_drawer", families=["unlock", "open"], location_ids=["sealed_room"], target_kind="entity", target_id="middle_drawer", option_id="bed-key", hints=["床下钥匙", "中层抽屉"], effects=[{"type": "change_entity_state", "entity_id": "middle_drawer", "key": "opened", "value": True}, {"type": "change_entity_state", "entity_id": "white_paper", "key": "found", "value": True}, {"type": "reveal_information", "information_id": "danger_note_read", "scope": "party"}]),
@@ -341,7 +345,7 @@ def build_module() -> dict[str, Any]:
             effect_rule("open_bottom_drawer", families=["unlock", "open"], location_ids=["sealed_room"], target_kind="entity", target_id="bottom_drawer", option_id="vent-key", hints=["通风管钥匙", "下层抽屉"], effects=[{"type": "change_entity_state", "entity_id": "bottom_drawer", "key": "opened", "value": True}]),
             effect_rule("contact_bast_with_white_paper", families=["write", "communicate"], location_ids=["sealed_room"], target_kind="entity", target_id="white_paper", option_id="use-white-paper", hints=["把白纸放进下层抽屉"], effects=[{"type": "consume_entity", "entity_id": "white_paper"}, {"type": "change_entity_state", "entity_id": "bast", "key": "contacted", "value": True}, {"type": "reveal_information", "information_id": "bast_contacted", "scope": "party"}]),
             effect_rule("contact_bast_with_last_page", families=["write", "communicate"], location_ids=["sealed_room"], target_kind="entity", target_id="communication_page", option_id="use-last-page", hints=["用最后一页替代白纸"], effects=[{"type": "consume_entity", "entity_id": "communication_page"}, {"type": "change_entity_state", "entity_id": "bast", "key": "contacted", "value": True}, {"type": "reveal_information", "information_id": "bast_contacted", "scope": "party"}]),
-            check_rule("listen_to_wardrobe", families=["listen"], target_kind="entity", target_id="wardrobe", option_id="listen", skill_id="listen", success_effects=[{"type": "reveal_information", "information_id": "wardrobe_sound", "scope": "party"}], failure_effects=[{"type": "reveal_information", "information_id": "wardrobe_sound", "scope": "party"}]),
+            check_rule("listen_to_wardrobe", families=["listen"], target_kind="entity", target_id="wardrobe", option_id="listen", skill_id="listen", hints=["倾听衣柜", "仔细听衣柜里的动静"], success_effects=[{"type": "reveal_information", "information_id": "wardrobe_sound", "scope": "party"}], failure_effects=[{"type": "reveal_information", "information_id": "wardrobe_sound", "scope": "party"}]),
             effect_rule("cut_wardrobe_chain", families=["cut", "open"], location_ids=["sealed_room"], target_kind="entity", target_id="wardrobe", option_id="bolt-cutters", hints=["用钢钳剪开锁链"], effects=[{"type": "change_entity_state", "entity_id": "wardrobe", "key": "opened", "value": True}, {"type": "change_entity_state", "entity_id": "bast", "key": "freed", "value": True}, {"type": "reveal_information", "information_id": "bast_rescued", "scope": "party"}]),
             effect_rule("feed_bast", families=["feed", "offer"], location_ids=["sealed_room"], target_kind="entity", target_id="bast", option_id="osmanthus-porridge", hints=["喂桂花糯米糖粥"], effects=[{"type": "consume_entity", "entity_id": "osmanthus_porridge"}, {"type": "change_entity_state", "entity_id": "bast", "key": "trusted", "value": True}, {"type": "change_entity_state", "entity_id": "bast", "key": "following", "value": True}, {"type": "reveal_information", "information_id": "bast_trusted", "scope": "party"}]),
             effect_rule("inspect_door_monitor", families=["inspect", "observe"], location_ids=["sealed_room"], target_kind="entity", target_id="door_monitor", option_id="watch-monitor", hints=["查看门外显示器"], effects=[{"type": "change_entity_state", "entity_id": "door_monitor", "key": "ghost_seen", "value": True}, {"type": "reveal_information", "information_id": "door_ghost_seen", "scope": "party"}]),

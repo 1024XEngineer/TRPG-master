@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import pathlib
+from types import SimpleNamespace
 from typing import Literal
 
 import pytest
@@ -65,6 +66,7 @@ from app.core.action_plan_turn import (
     _deterministic_adjudication_miss_reason,
     _deterministic_step_adjudication,
     _DeterministicStepAdjudicator,
+    _match_rule_candidate,
     _match_travel_target,
     _normalize_single_travel_decision,
     _project_plan_prerequisite_facts,
@@ -194,6 +196,48 @@ def test_prompt_teaches_the_model_to_use_rule_candidates() -> None:
     assert "rule_candidates" in _SAFE_ADJUDICATION_INSTRUCTIONS
     assert "rule_decision" in _SAFE_ADJUDICATION_INSTRUCTIONS
     assert "option_id" in _SAFE_ADJUDICATION_INSTRUCTIONS
+
+
+def test_prompt_treats_action_families_as_advisory() -> None:
+    """提示词不能把开放动作族重新描述成逐字硬闸。"""
+
+    assert "不要求与最终 `method.family` 逐字相等" in _SAFE_ADJUDICATION_INSTRUCTIONS
+    instructions = current_step_adjudication_instructions()
+    assert "不能仅因动作族词汇不同就放弃" in instructions
+
+
+def test_offline_match_recognizes_surveillance_wording() -> None:
+    """离线兜底至少覆盖 #453 的自然中文观察说法。"""
+
+    from app.core.action_plan_turn import _ACTION_FAMILY_HINTS
+
+    assert "观察周围" in _ACTION_FAMILY_HINTS["surveil"]
+
+
+def test_offline_generic_observe_does_not_tie_with_surveillance() -> None:
+    """通用“观察”不能因 surveil 词表过宽而把两个候选判成歧义。"""
+
+    from app.core.action_plan_turn import _ACTION_FAMILY_HINTS
+
+    # 用最小候选替身覆盖离线匹配器的真实评分路径，避免依赖具体模组夹具。
+    def candidate(rule_id: str, family: str) -> SimpleNamespace:
+        return SimpleNamespace(
+            rule_id=rule_id,
+            action_families=[family],
+            semantic_hints=[],
+            target_kinds=[],
+            target_ids=[],
+            options=[],
+        )
+
+    capabilities = SimpleNamespace(
+        rule_candidates=[candidate("observe_rule", "observe"), candidate("watch_rule", "surveil")]
+    )
+    matched, _ = _match_rule_candidate(capabilities, "观察", None)
+
+    assert matched is not None
+    assert matched.rule_id == "observe_rule"
+    assert "观察" not in _ACTION_FAMILY_HINTS["surveil"]
 
 
 async def test_matched_rule_hands_ownership_to_the_rule() -> None:

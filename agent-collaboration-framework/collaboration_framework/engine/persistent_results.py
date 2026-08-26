@@ -7,6 +7,7 @@ COC7 战斗算法；模型必须通过受控的 ``method.family`` 和 ``persiste
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Literal
 
@@ -27,6 +28,8 @@ from collaboration_framework.contracts import (
 )
 
 from .models import DomainEvent
+
+logger = logging.getLogger(__name__)
 
 
 # 标准键和值是玩家可见状态的唯一白名单，任意模组私有键不会因此被公开。
@@ -99,7 +102,19 @@ def validate_persistent_effects(
     """检查自由裁决成功分支是否完整表达声明的持久结果。"""
 
     intent = effective_persistence_intent(adjudication)
-    policy = _FAMILY_POLICIES.get(adjudication.method.family.strip().lower())
+    family = adjudication.method.family.strip().lower()
+    policy = _FAMILY_POLICIES.get(family)
+    if policy is None:
+        # 动作族是开放字符串；记录未覆盖值，便于发现模型或模组的新词，
+        # 但不把观测升级成新的拒绝条件，保持既有兼容行为。
+        logger.info(
+            "persistent_family_policy_missing",
+            extra={
+                "family": family,
+                "persistence_intent": adjudication.persistence_intent,
+                "persistence_intent_explicit": adjudication.persistence_intent_explicit,
+            },
+        )
     # 新模型显式写 none 不能把明显持久动作降级成普通叙事；旧存量裁决没有
     # explicit 标记，继续按兼容语义读取 none。
     if adjudication.persistence_intent_explicit and policy is not None:

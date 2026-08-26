@@ -253,7 +253,8 @@ change_entity_state）；但不要为了内部写入次数把一个意图拆成�
 不要自己拼效果。判断依据是候选上的这几个字段：
 
 - `semantic_hints`：这条规则想捕捉的说法（例如"观察""用侦查"）；
-- `action_families`：动作大类（observe / search / talk …）；
+- `action_families`：动作大类参考（observe / search / talk …），是开放语义词表，
+  不要求与最终 `method.family` 逐字相等；不能仅因动作族不同就放弃其他范围都匹配的规则；
 - `target_kinds` 与 `target_ids`：这条规则针对的对象，`target_ids` 里的 id 通常就是
   玩家话里指的那个实体；
 - `options[]`：这条规则给出的**候选做法**，每项有一个不透明的 `id`、它的

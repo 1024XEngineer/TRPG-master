@@ -11,7 +11,7 @@ import { useRoomPlayers } from '@/hooks/useRoomPlayers'
 import { usePlayerPortraits } from '@/hooks/usePlayerPortraits'
 import { useRuleset } from '@/hooks/useRuleset'
 import { useHostSpeech } from '@/hooks/useHostSpeech'
-import { useSpeechInput } from '@/hooks/useSpeechInput'
+import { INSECURE_SPEECH_UNAVAILABLE_REASON, useSpeechInput } from '@/hooks/useSpeechInput'
 import { Dice3DStage, supports3DDice, type Dice3DHandle, type DiceRollToken } from '@/features/dice3d'
 import { OnboardingTrigger } from '@/features/onboarding'
 import { CheckWorkflowPanel } from '@/features/adjudication'
@@ -1599,10 +1599,7 @@ export default function RoomPage() {
       pendingTimeAdvance !== null ||
       pendingSceneTransition !== null
     )
-  const showRoomActionBanner =
-    roomActionState !== null &&
-    roomActionState.status !== 'idle' &&
-    (roomActionState.status === 'processing' || waitingForPlayerAction)
+  const showRoomActionBanner = waitingForPlayerAction
   const composerDisabled = suspended || (isActionChannel && roomInfo === null)
   const actionOwnerName = roomActionState?.playerId === playerId
     ? senderName
@@ -1611,6 +1608,11 @@ export default function RoomPage() {
         roomPlayers.find((player) => player.playerId === roomActionState?.playerId)?.nickname,
         '其他调查员',
       )
+  const processingProgressLabel =
+    roomActionState?.status === 'processing'
+      ? `${actionOwnerName}的行动正在处理中`
+      : null
+  const displayedProgressLabel = processingProgressLabel ?? progressLabel
   const mapLocations = mapLocationsFromPlayerView(playerView)
   const visibleNpcs = useMemo(
     () => (playerView?.scene.visible_entities ?? []).filter((entity) => {
@@ -2586,7 +2588,7 @@ export default function RoomPage() {
 
         {/* Typing indicator。第一个片段到达后还没揭示出字的那一瞬间也留着它，
             避免出现一个空气泡。*/}
-        {isActionChannel && (progressLabel !== null || typing || (streamingNarration !== null && streamingNarration.revealed === 0)) && (
+        {isActionChannel && (displayedProgressLabel !== null || typing || (streamingNarration !== null && streamingNarration.revealed === 0)) && (
           <div className="room-play__message room-play__message--narration animate-[msgIn_0.3s_ease]">
             <KeeperAvatar onLongPress={insertHostMention} />
             <div className="room-play__typing">
@@ -2596,9 +2598,9 @@ export default function RoomPage() {
                     style={{ animationDelay: `${i * 0.2}s`, animationDuration: '1.4s' }} />
                 ))}
               </div>
-              {progressLabel && (
+              {displayedProgressLabel && (
                 <span className="text-[11px] text-text-muted">
-                  {progressLabel}
+                  {displayedProgressLabel}
                   {secondaryProgressLabel && (
                     <span className="ml-1.5 text-text-dim">· {secondaryProgressLabel}</span>
                   )}
@@ -2789,17 +2791,10 @@ export default function RoomPage() {
 
       {showRoomActionBanner && roomActionState && (
         <div className="room-play__action-state" role="status" aria-live="polite">
-          <LoaderCircle
-            aria-hidden="true"
-            className={roomActionState.status === 'processing' ? 'animate-spin' : ''}
-          />
+          <LoaderCircle aria-hidden="true" />
           <strong>{actionOwnerName}</strong>
           <span>
-            {roomActionState.status === 'processing'
-              ? '的行动正在处理中'
-              : ownsRoomAction
-                ? '的行动正在等待你操作'
-                : '的行动正在等待其操作'}
+            {ownsRoomAction ? '的行动正在等待你操作' : '的行动正在等待其操作'}
           </span>
         </div>
       )}
@@ -2873,7 +2868,12 @@ export default function RoomPage() {
             )}
           </div>
         )}
-        {(speechInput.status !== 'idle' || speechInput.error) && !suspended && (
+        {(speechInput.status !== 'idle' || speechInput.error) &&
+          !suspended &&
+          !(
+            speechInput.status === 'unsupported' &&
+            speechInput.unavailableReason === INSECURE_SPEECH_UNAVAILABLE_REASON
+          ) && (
           <p
             aria-live="polite"
             className={`pb-1.5 px-1 text-[11px] ${

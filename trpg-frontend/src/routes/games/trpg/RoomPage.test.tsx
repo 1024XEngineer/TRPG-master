@@ -667,10 +667,12 @@ describe('RoomPage conversation history', () => {
       },
     })
 
-    const banners = await screen.findAllByRole('status')
-    expect(banners[0]).toHaveTextContent('赌博庄家')
-    expect(banners[0]).not.toHaveTextContent('nik')
-    expect(banners[0]).toHaveTextContent('的行动正在处理中')
+    expect(await screen.findByText('赌博庄家的行动正在处理中')).toBeInTheDocument()
+    expect(screen.queryByText('守秘人理解玩家意图中')).not.toBeInTheDocument()
+    const banners = screen.getAllByRole('status')
+    expect(banners[0]).not.toHaveTextContent('的行动正在处理中')
+    expect(banners[0]).toHaveTextContent('等待主持')
+    expect(banners[0]).toHaveTextContent('我翻书桌')
     expect(screen.getByText('我翻书桌')).toBeInTheDocument()
     expect(screen.getByPlaceholderText('输入消息…')).not.toBeDisabled()
     fireEvent.click(screen.getByRole('button', { name: '取消' }))
@@ -2402,7 +2404,9 @@ describe('RoomPage conversation history', () => {
     renderRoomPage()
 
     expect(screen.getByRole('button', { name: '语音输入不可用' })).toBeDisabled()
-    expect(screen.getByText('当前页面不是安全连接，请使用 HTTPS 或 localhost 访问')).toBeInTheDocument()
+    expect(
+      screen.queryByText('当前页面不是安全连接，请使用 HTTPS 或 localhost 访问'),
+    ).not.toBeInTheDocument()
     expect(RoomSpeechRecognition.instances).toHaveLength(0)
   })
 
@@ -3053,6 +3057,48 @@ describe('RoomPage conversation history', () => {
     expect(screen.getByText('已知地点（按层级）')).toBeInTheDocument()
     expect(screen.getByText('图书馆')).toBeInTheDocument()
     expect(screen.getAllByText('会客室').length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('replaces keeper-phase copy with the slot owner while an action is processing', async () => {
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    act(() => emitWsMessage({
+      type: 'turn.started',
+      payload: { correlationId: 'slot-1' },
+    }))
+    expect(screen.getByText('守秘人理解玩家意图中')).toBeInTheDocument()
+
+    act(() => emitWsMessage({
+      type: 'room.action.state',
+      payload: {
+        status: 'processing',
+        playerId: 'player-2',
+        actorId: 'actor-2',
+        clientActionId: 'action-slot',
+        startedAt: '2026-08-19T10:00:00Z',
+        revision: '8',
+        queued: [],
+      },
+    }))
+    expect(screen.getByText('赌博庄家的行动正在处理中')).toBeInTheDocument()
+    expect(screen.queryByText('守秘人理解玩家意图中')).not.toBeInTheDocument()
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+
+    act(() => emitWsMessage({
+      type: 'room.action.state',
+      payload: {
+        status: 'processing',
+        playerId: 'player-1',
+        actorId: 'actor-1',
+        clientActionId: 'action-next',
+        startedAt: '2026-08-19T10:01:00Z',
+        revision: '9',
+        queued: [],
+      },
+    }))
+    expect(screen.getByText('陈探员的行动正在处理中')).toBeInTheDocument()
+    expect(screen.queryByText('赌博庄家的行动正在处理中')).not.toBeInTheDocument()
   })
 
   it('keeps keeper progress visible and maps backend phases to player-facing copy', async () => {

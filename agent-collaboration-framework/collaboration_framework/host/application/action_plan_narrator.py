@@ -12,6 +12,7 @@ from collaboration_framework.host.schemas.action_plan import (
 )
 
 from .narration_policy import (
+    narration_atmosphere_rejection_reason,
     narration_subject_rejection_reason,
     narration_text_rejection_reason,
     normalize_narration_text,
@@ -91,6 +92,12 @@ class ActionPlanNarrator:
         )
         if subject_rejection is not None:
             raise ActionPlanNarrationValidationError(subject_rejection)
+        atmosphere_rejection = narration_atmosphere_rejection_reason(
+            output.text,
+            getattr(context, "previous_published_narration", None),
+        )
+        if atmosphere_rejection is not None:
+            raise ActionPlanNarrationValidationError(atmosphere_rejection)
         committed_results = tuple(
             result
             for step in context.completed_steps

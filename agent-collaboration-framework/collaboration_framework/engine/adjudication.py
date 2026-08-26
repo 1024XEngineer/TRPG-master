@@ -216,18 +216,38 @@ def _target_persistent_capability(
     也不替模型决定最终效果。运行时临时实体没有预声明状态键，视为不可写。
     """
 
-    for entity in runtime.module_content.entities:
-        if entity.id == target_id:
-            return entity.kind, frozenset(entity.state)
+    item = runtime.game_state.item_instances.get(target_id)
+    module_entity = next(
+        (
+            entity
+            for entity in runtime.module_content.entities
+            if entity.id == target_id
+            or (item is not None and entity.id == item.definition_id)
+        ),
+        None,
+    )
+    if item is not None:
+        # 物品实例的 state.values 是运行时权威状态；必须与模块初始声明合并，
+        # 否则已被打开/锁定/损坏的物品会被误判为没有状态位而错误降级。
+        state_keys = set(item.state.values)
+        state_keys.update(
+            runtime.game_state.public_entity_state_keys.get(target_id, ())
+        )
+        if module_entity is not None:
+            state_keys.update(module_entity.state)
+        return "object", frozenset(state_keys)
+    if module_entity is not None:
+        return module_entity.kind, frozenset(module_entity.state)
     if target_id in runtime.game_state.runtime_entities:
         payload = runtime.game_state.runtime_entities[target_id]
         kind = payload.get("kind")
         return (kind if kind in {"npc", "object"} else "object"), frozenset()
-    if target_id in runtime.game_state.item_instances:
-        return "object", frozenset()
     if target_id in runtime.game_state.actors:
         return "actor", frozenset(runtime.game_state.actors[target_id].state)
-    if target_id in runtime.canon_location_ids or target_id in runtime.game_state.runtime_locations:
+    if (
+        target_id in runtime.canon_location_ids
+        or target_id in runtime.game_state.runtime_locations
+    ):
         return "location", None
     if target_id in runtime.canon_information_ids:
         return "information", None

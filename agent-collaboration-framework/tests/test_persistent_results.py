@@ -4,6 +4,7 @@
 """
 
 import logging
+from types import SimpleNamespace
 
 from collaboration_framework.contracts import (
     ActionAdjudication,
@@ -12,6 +13,7 @@ from collaboration_framework.contracts import (
     ChangeEntityStateEffect,
     NoAdjudicationCheck,
 )
+from collaboration_framework.engine.adjudication import _target_persistent_capability
 from collaboration_framework.engine.persistent_results import (
     validate_persistent_effects,
 )
@@ -112,3 +114,34 @@ def test_persistent_effect_mismatch_never_marks_generic_fallback() -> None:
     assert result is not None
     assert result.code == "PERSISTENT_EFFECT_MISMATCH"
     assert result.allow_generic_fallback is False
+
+
+def test_item_instance_live_state_is_included_in_capability_snapshot() -> None:
+    """物品实例已写入状态后，后续缺效果裁决仍必须走持久结果闸门。"""
+
+    runtime = SimpleNamespace(
+        module_content=SimpleNamespace(
+            entities=(
+                SimpleNamespace(id="drawer", kind="object", state={"open": False}),
+            )
+        ),
+        game_state=SimpleNamespace(
+            item_instances={
+                "drawer": SimpleNamespace(
+                    definition_id="drawer",
+                    state=SimpleNamespace(values={"open": True}),
+                )
+            },
+            public_entity_state_keys={"drawer": ("open",)},
+            runtime_entities={},
+            actors={},
+            runtime_locations={},
+        ),
+        canon_location_ids=set(),
+        canon_information_ids=set(),
+    )
+
+    kind, state_keys = _target_persistent_capability(runtime, "drawer")
+
+    assert kind == "object"
+    assert "open" in state_keys

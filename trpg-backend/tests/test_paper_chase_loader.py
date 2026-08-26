@@ -23,11 +23,11 @@ async def test_loader_is_idempotent_and_reports_real_content(
 
     assert result.outcome == "unchanged"
     assert result.module_id == BUILTIN_MODULE_ID
-    assert result.version == "3.0.15"
+    assert result.version == "3.0.16"
     assert result.world_ref == "coc-7e"
     assert result.location_count == 12
     assert result.entity_count == 14
-    assert result.information_count == 9
+    assert result.information_count == 10
     assert result.rule_count == 28
     assert result.ending_anchor_count == 4
     assert "result: unchanged" in result.summary_lines()
@@ -48,7 +48,7 @@ async def test_paper_chase_models_caretaker_bottle_as_discoverable_state() -> No
     """
 
     payload = json.loads(loader.PAPER_CHASE_SOURCE_PATH.read_text(encoding="utf-8"))
-    assert payload["version"] == "3.0.15"
+    assert payload["version"] == "3.0.16"
     entities = {entity["id"]: entity for entity in payload["entities"]}
     information = {item["id"]: item for item in payload["information"]}
     rules = {rule["id"]: rule for rule in payload["rules"]}
@@ -77,7 +77,7 @@ def test_paper_chase_keeps_previous_v2_snapshots() -> None:
     """
 
     current = json.loads(loader.PAPER_CHASE_SOURCE_PATH.read_text(encoding="utf-8"))
-    assert current["version"] == "3.0.15"
+    assert current["version"] == "3.0.16"
     assert current["content_schema_version"] == 3
 
     for name, version in (
@@ -223,7 +223,7 @@ async def test_loader_preserves_rooms_pinned_older_version(
 
     result = await loader.load_paper_chase(db_session)
 
-    assert result.version == "3.0.15"
+    assert result.version == "3.0.16"
     pinned = await db_session.get(ModuleVersion, (BUILTIN_MODULE_ID, "3.0.5"))
     assert pinned is not None
     assert pinned.content_json == pinned_content

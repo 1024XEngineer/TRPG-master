@@ -1,7 +1,7 @@
 {
   "content_schema_version": 3,
   "module_id": "paper-chase-zh-coc7",
-  "version": "3.0.15",
+  "version": "3.0.16",
   "world_ref": "coc-7e",
   "background": "时代与地点为美国禁酒令时期的密歇根州阿诺兹堡。调查员受托马斯·金博尔委托，从五本失窃的旧书和叔叔道格拉斯一年前的失踪案入手，走访旧宅、图书馆与公共墓地。叙事应保持安静、克制而带哥特气息，以夜色、旧书、墓园和孤独感作为反复意象；面对异常时不要急于渲染纯粹敌意，应为同情、选择与淡淡哀伤保留空间。任何尚未由线索确认的真相都不得提前告知玩家。",
   "information": [
@@ -114,6 +114,23 @@
       "keeper_content": "道格拉斯失踪前决定加入“我在地下的朋友们”；日记暗示公墓地下有神秘生物居住的隧道网络。",
       "player_content": "最后一条日记说，道格拉斯决定加入“我在地下的朋友们”；零碎记录还暗示公墓下存在隧道网络。",
       "criticality": "essential",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location",
+          "runtime_entity",
+          "public_record"
+        ]
+      }
+    },
+    {
+      "id": "douglas_night_theft",
+      "kind": "clue",
+      "title": "翻窗而出的人影",
+      "keeper_content": "调查员看着那条瘦削的人影拨开书房的窗闩翻进去，片刻之后又翻出来，怀里多了几本书。他落地时几乎没有声音，落下的姿势比人应有的样子更低、更轻。身后那扇上了闩的窗留下一道裂口。此刻他还站在院墙外，没有走远。",
+      "player_content": "你看着那条人影拨开书房的窗翻了进去。过了一会儿，他又从同一扇窗翻出来，怀里夹着几本书。落地时几乎没有声音。他此刻就站在院墙外的空地上，还没有走远。",
+      "criticality": "supporting",
       "recovery": {
         "policy": "adaptive",
         "allowed_source_types": [
@@ -2487,7 +2504,7 @@
               "key": "discovered",
               "value": true
             },
-            "next_step_id": "mark_checked"
+            "next_step_id": "succeed_5"
           },
           {
             "id": "check_luck",
@@ -2509,6 +2526,27 @@
               "failure": "mark_checked",
               "fumble": "mark_checked"
             }
+          },
+          {
+            "id": "succeed_5",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "douglas_night_theft",
+              "scope": "party"
+            },
+            "next_step_id": "succeed_6"
+          },
+          {
+            "id": "succeed_6",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "case_tracker",
+              "key": "books_taken",
+              "value": true
+            },
+            "next_step_id": "mark_checked"
           }
         ]
       }
@@ -2518,9 +2556,6 @@
       "trigger": {
         "kind": "agent_match",
         "scope": {
-          "action_families": [
-            "call_name"
-          ],
           "location_ids": [
             "kimball_grounds"
           ],
@@ -2543,7 +2578,11 @@
         "question": {
           "kind": "method",
           "semantic_hints": [
-            "呼唤墓地中的人影",
+            "喊住他",
+            "叫出道格拉斯的名字",
+            "上去拦住那个人影",
+            "挡在他前面",
+            "冲过去抓住他",
             "墓地中的人影"
           ]
         },
@@ -2551,8 +2590,9 @@
           {
             "id": "proceed",
             "semantic_hints": [
-              "call_name",
-              "墓地中的人影"
+              "喊住他",
+              "上去拦住他",
+              "挡住他的去路"
             ]
           }
         ]
@@ -3560,21 +3600,10 @@
         "branches": [
           {
             "id": "default",
-            "entry_step_id": "take_books"
+            "entry_step_id": "go_home"
           }
         ],
         "steps": [
-          {
-            "id": "take_books",
-            "kind": "effect",
-            "effect": {
-              "type": "change_entity_state",
-              "entity_id": "case_tracker",
-              "key": "books_taken",
-              "value": true
-            },
-            "next_step_id": "go_home"
-          },
           {
             "id": "go_home",
             "kind": "effect",

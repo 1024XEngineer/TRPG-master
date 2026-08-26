@@ -691,16 +691,44 @@ describe('RoomPage conversation history', () => {
       },
     })
 
-    expect(screen.queryByText(/等待主持/)).not.toBeInTheDocument()
     expect(await screen.findByText('赌博庄家的行动正在处理中')).toBeInTheDocument()
     expect(screen.queryByText('守秘人理解玩家意图中')).not.toBeInTheDocument()
     expect(screen.queryByText('守秘人组织语言中')).not.toBeInTheDocument()
-    expect(screen.getByText('已排队')).toBeInTheDocument()
+    const banners = screen.getAllByRole('status')
+    expect(banners[0]).toHaveTextContent('等待主持')
+    expect(banners[0]).toHaveTextContent('我翻书桌')
+    expect(banners[0]).not.toHaveTextContent('的行动正在处理中')
     expect(screen.getByPlaceholderText('输入消息…')).not.toBeDisabled()
     fireEvent.click(screen.getByRole('button', { name: '取消' }))
     expect(mockCancelActionPlan).toHaveBeenCalledWith('player-1', expect.objectContaining({
       clientActionId: 'action-queued',
     }))
+
+    act(() => emitWsMessage({
+      type: 'room.action.state',
+      payload: {
+        status: 'processing',
+        playerId: 'player-1',
+        actorId: 'actor-1',
+        clientActionId: 'action-self',
+        startedAt: '2026-08-19T10:00:30Z',
+        revision: '8',
+        queued: [
+          {
+            playerId: 'player-2',
+            actorId: 'actor-2',
+            clientActionId: 'action-other-queued',
+            recipient: { kind: 'keeper', entityId: null, explicit: true },
+            position: 1,
+            utterance: '我去窗边',
+            acceptedAt: '2026-08-19T10:00:31Z',
+          },
+        ],
+      },
+    }))
+    expect(await screen.findByText('我去窗边')).toBeInTheDocument()
+    expect(screen.getByText(/等待主持/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '取消' })).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '讨论区' }))
     expect(screen.getByPlaceholderText('输入行动…')).not.toBeDisabled()
@@ -3211,7 +3239,8 @@ describe('RoomPage conversation history', () => {
     expect(screen.getByText('赌博庄家的行动正在处理中')).toBeInTheDocument()
     expect(screen.queryByText('守秘人组织语言中')).not.toBeInTheDocument()
     expect(screen.queryByText('守秘人理解玩家意图中')).not.toBeInTheDocument()
-    expect(screen.getByText('已排队')).toBeInTheDocument()
+    expect(screen.getByText(/等待主持/)).toBeInTheDocument()
+    expect(screen.getByText('我要去窗边')).toBeInTheDocument()
   })
 
   it('keeps the slot-owner processing copy through the organizing hold after idle', async () => {

@@ -1597,7 +1597,6 @@ export default function RoomPage() {
     (pendingAdjudication !== null || pendingTimeAdvance !== null || pendingSceneTransition !== null)
   const actionSubmissionBlocked = mustAnswerCurrent
   const queuedActions = roomActionState?.queued ?? []
-  const selfQueuedAction = queuedActions.find((item) => item.playerId === playerId) ?? null
   const showRoomActionBanner =
     roomActionState?.status === 'awaiting_player' && pendingAdjudication !== null
   const composerDisabled = suspended || (isActionChannel && roomInfo === null)
@@ -2814,26 +2813,43 @@ export default function RoomPage() {
           </span>
         </div>
       )}
+      {queuedActions.length > 0 && (
+        <div className="room-play__action-state" role="status" aria-live="polite">
+          <span>等待主持：</span>
+          {queuedActions.map((item) => {
+            const name = displayName(
+              roomPlayers.find((player) => player.playerId === item.playerId)?.characterName,
+              roomPlayers.find((player) => player.playerId === item.playerId)?.nickname,
+              '调查员',
+            )
+            const isSelf = item.playerId === playerId
+            return (
+              <span key={item.clientActionId} className="inline-flex items-center gap-1">
+                <strong>{name}</strong>
+                <span>{item.utterance}</span>
+                {isSelf && playerId && (
+                  <button
+                    type="button"
+                    className="text-[11px] underline"
+                    onClick={() => sdk.roomSocket.cancelActionPlan(playerId, {
+                      clientActionId: item.clientActionId,
+                      requestId: randomActionId(),
+                    })}
+                  >
+                    取消
+                  </button>
+                )}
+              </span>
+            )
+          })}
+        </div>
+      )}
+
       {/* Input area */}
       <div className="room-play__composer">
         {suspended && (
           <p className="text-[11px] text-[#9a6a30] text-center pb-1.5">
             游戏已挂起，恢复后才能继续提交行动
-          </p>
-        )}
-        {isActionChannel && selfQueuedAction && playerId && !suspended && (
-          <p className="text-[11px] text-text-muted text-center pb-1.5">
-            已排队
-            <button
-              type="button"
-              className="ml-1.5 underline"
-              onClick={() => sdk.roomSocket.cancelActionPlan(playerId, {
-                clientActionId: selfQueuedAction.clientActionId,
-                requestId: randomActionId(),
-              })}
-            >
-              取消
-            </button>
           </p>
         )}
         {isActionChannel && actionError && !suspended && (

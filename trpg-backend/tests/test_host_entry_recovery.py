@@ -365,6 +365,97 @@ async def test_failed_direct_response_unblocks_following_queue_item(
 
 
 @pytest.mark.asyncio
+async def test_recover_failed_direct_response_stays_failed_and_writes_no_event(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_router(monkeypatch)
+    room_id, players, views = await _room_views(db_session, 4649)
+    player_id = players[0].id
+    await _enqueue_keeper(
+        db_session,
+        room_id=room_id,
+        player_id=player_id,
+        actor_id=views[0].self_actor.id,
+        client_action_id="greet-dead",
+        utterance="跟邻居打个招呼",
+    )
+
+    async def poison(db, item, view, websocket, **kwargs):  # noqa: ANN001
+        raise RuntimeError("poisoned head")
+
+    failures: list[tuple[str, bool | None]] = []
+    original_failed = ws_controller._send_turn_failed
+
+    async def record_failed(websocket, correlation_id, exc):  # noqa: ANN001
+        failures.append((correlation_id, getattr(exc, "retryable", None)))
+        return await original_failed(websocket, correlation_id, exc)
+
+    monkeypatch.setattr(ws_controller, "_run_direct_host_action", poison)
+    monkeypatch.setattr(ws_controller, "_send_turn_failed", record_failed)
+    await ws_controller._drain_host_action_queue(room_id)
+    db_session.expire_all()
+
+    recovered = await ws_controller._recover_persisted_turn_narration(
+        db_session,
+        None,
+        room_id=room_id,
+        player_id=player_id,
+        client_action_id="greet-dead",
+    )
+    db_session.expire_all()
+    item = await host_action_queue.get_by_client_action(db_session, room_id, "greet-dead")
+    events = await _narration_events(db_session, room_id)
+    assert recovered is True
+    assert item is not None
+    assert item.status == "failed"
+    assert events == []
+    assert ("greet-dead", False) in failures
+
+
+@pytest.mark.asyncio
+async def test_recover_discarded_direct_response_does_not_complete(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_router(monkeypatch)
+    room_id, players, views = await _room_views(db_session, 4650)
+    player_id = players[0].id
+    item, _ = await _enqueue_keeper(
+        db_session,
+        room_id=room_id,
+        player_id=player_id,
+        actor_id=views[0].self_actor.id,
+        client_action_id="greet-discarded",
+        utterance="跟邻居打个招呼",
+    )
+    await host_action_queue.save_execution_route(
+        db_session,
+        item,
+        route="direct_response",
+        text="对方礼貌地点了点头。",
+        provenance="model_direct",
+    )
+    await host_action_queue.discard(db_session, item)
+    db_session.expire_all()
+
+    recovered = await ws_controller._recover_persisted_turn_narration(
+        db_session,
+        None,
+        room_id=room_id,
+        player_id=player_id,
+        client_action_id="greet-discarded",
+    )
+    db_session.expire_all()
+    again = await host_action_queue.get_by_client_action(db_session, room_id, "greet-discarded")
+    events = await _narration_events(db_session, room_id)
+    assert recovered is True
+    assert again is not None
+    assert again.status == "discarded"
+    assert events == []
+
+
+@pytest.mark.asyncio
 async def test_later_direct_response_sees_previous_public_narration(
     db_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,

@@ -198,6 +198,7 @@ def _listener_ids_for_utterance(utterance: str, player_view: PlayerView) -> tupl
 _UNAUTHORIZED_CLOSE_CODE = 4401
 _NOT_FOUND_CLOSE_CODE = 4404
 _OPENING_MESSAGE_ID = "game-opening"
+_HOST_QUEUE_TERMINAL = frozenset({"failed", "cancelled", "discarded"})
 
 _host_entry_router: HostEntryRouter | None = None
 
@@ -876,6 +877,8 @@ async def _run_direct_host_action(
     """Persist and deliver a frozen A1 response without entering ActionPlan."""
 
     await db.refresh(item)
+    if item.status in _HOST_QUEUE_TERMINAL:
+        return
     text = (item.direct_response_text or "").strip()
     if not text:
         raise RuntimeError("direct_response 队列项缺少已校验文本")
@@ -1728,7 +1731,7 @@ async def _send_completed_turn_message(
 
 async def _recover_persisted_turn_narration(
     db: AsyncSession,
-    websocket: WebSocket,
+    websocket: WebSocket | None,
     *,
     room_id: str,
     player_id: str,
@@ -1745,6 +1748,17 @@ async def _recover_persisted_turn_narration(
     ):
         if queued_item.player_id != player_id:
             raise ContractError("持久化 direct response 不属于当前玩家")
+        if queued_item.status in _HOST_QUEUE_TERMINAL:
+            await _send_turn_failed(
+                websocket,
+                client_action_id,
+                TurnExecutionError(
+                    "TURN_INTERNAL_ERROR",
+                    "本次动作处理失败，请稍后重试",
+                    retryable=False,
+                ),
+            )
+            return True
         view = await session_view_application.current_player_view(
             room_id=room_id,
             player_id=player_id,
@@ -1842,7 +1856,7 @@ async def _recover_persisted_turn_narration(
             payload=persisted.model_dump(by_alias=True),
         ).model_dump(by_alias=True),
     )
-    if raw_completion is not None and completion.npc_replies:
+    if websocket is not None and raw_completion is not None and completion.npc_replies:
         await _recover_persisted_turn_followup_dialogue(
             db,
             websocket,

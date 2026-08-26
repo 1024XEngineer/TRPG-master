@@ -59,7 +59,19 @@ from collaboration_framework.contracts.module_v3 import (
 # on the durable RuleAgenda and let something else pick it up. They are one
 # behaviour, not eight, and are registered as such rather than as eight
 # near-identical entries.
-WalkBehavior = Literal["terminal", "produces_effect_and_continues", "suspends"]
+# `schedules_time_task_and_continues` 走的是和 `produces_effect_and_continues`
+# 同一条路：步骤在 walk 里就地产出一件待提交的事，游标继续往下走。它单独成一
+# 个值只是因为待提交的东西不是 `step.effect`，而是步骤自身——目标时间要等到
+# 提交那一刻才解析得出来（相对目标依赖当时的世界时钟）。
+#
+# 两者共用 `RuleWalk.effects` 这一个有序列表，所以「效果 A → 排任务 → 效果 B」
+# 的作者顺序天然保住了；拆成两个列表就得再发明一套合并顺序（#415 §阶段四）。
+WalkBehavior = Literal[
+    "terminal",
+    "produces_effect_and_continues",
+    "schedules_time_task_and_continues",
+    "suspends",
+]
 
 # The Agenda boundary a suspension maps to. `check` is the one kind whose
 # answer is not fixed: it depends on the step's own `initiation_kind`.
@@ -114,8 +126,8 @@ STEP_KINDS: dict[str, RuleStepRegistration] = {
         walk_behavior="suspends",
         agenda_status="awaiting_active_check",
     ),
-    # The six below suspend onto the Agenda and have no worker that resumes
-    # them. Until #398 the last four reported `running`, which is
+    # The four below suspend onto the Agenda and have no worker that resumes
+    # them. Until #398 they reported `running`, which is
     # indistinguishable from "a worker is about to pick this up" — so the
     # Agenda hung with no signal. They fail instead: same absence of an
     # executor, now visible.
@@ -148,15 +160,13 @@ STEP_KINDS: dict[str, RuleStepRegistration] = {
         agenda_status="failed",
         failure_code=STEP_KIND_HAS_NO_EXECUTOR,
     ),
+    # 这两个在 #415 §阶段四 拿到了执行器，所以不再挂在上面那组里：它们就地
+    # 排任务 / 取消任务，然后从 `next_step_id` 继续，不挂起 Agenda。
     "create_time_task": RuleStepRegistration(
-        walk_behavior="suspends",
-        agenda_status="failed",
-        failure_code=STEP_KIND_HAS_NO_EXECUTOR,
+        walk_behavior="schedules_time_task_and_continues",
     ),
     "cancel_time_task": RuleStepRegistration(
-        walk_behavior="suspends",
-        agenda_status="failed",
-        failure_code=STEP_KIND_HAS_NO_EXECUTOR,
+        walk_behavior="schedules_time_task_and_continues",
     ),
 }
 

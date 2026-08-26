@@ -168,9 +168,10 @@ function isValidWorldState(value: unknown): boolean {
   if (value === undefined) return true;
   if (!isRecord(value)) return false;
   return (
+    // 玩家侧拿到措辞与天数；精确小时不再过网（#415 §阶段一）。
+    typeof value.time_label === 'string' &&
     typeof value.day_index === 'number' &&
-    typeof value.hour_of_day === 'number' &&
-    (value.time_of_day === 'day' || value.time_of_day === 'night') &&
+    typeof value.can_advance_time === 'boolean' &&
     typeof value.core_resolved === 'boolean' &&
     typeof value.ending_available === 'boolean' &&
     (value.ending_id === null || typeof value.ending_id === 'string')
@@ -382,11 +383,8 @@ const PAYLOAD_VALIDATORS: {
     typeof p.proposalVersion === 'number' &&
     Number.isInteger(p.proposalVersion) &&
     typeof p.sourceRevision === 'string' &&
-    typeof p.targetPointId === 'string' &&
+    typeof p.targetLabel === 'string' &&
     typeof p.targetDayIndex === 'number' &&
-    Number.isInteger(p.targetDayIndex) &&
-    typeof p.targetHourOfDay === 'number' &&
-    Number.isInteger(p.targetHourOfDay) &&
     typeof p.requesterPlayerId === 'string' &&
     isStringArray(p.requiredPlayerIds) &&
     isStringArray(p.acceptedPlayerIds) &&
@@ -397,10 +395,8 @@ const PAYLOAD_VALIDATORS: {
       p.status === 'rejected' ||
       p.status === 'expired' ||
       p.status === 'stale') &&
+    typeof p.targetLabel === 'string' &&
     typeof p.targetDayIndex === 'number' &&
-    Number.isInteger(p.targetDayIndex) &&
-    typeof p.targetHourOfDay === 'number' &&
-    Number.isInteger(p.targetHourOfDay) &&
     (p.committedRevision === null ||
       p.committedRevision === undefined ||
       typeof p.committedRevision === 'string'),

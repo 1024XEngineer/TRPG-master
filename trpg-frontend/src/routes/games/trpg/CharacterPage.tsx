@@ -915,7 +915,11 @@ export default function CharacterPage() {
 
   /** 首次点击时创建房间草稿，再请求服务端确定本局唯一的幸运值。 */
   const handleLuckRoll = async () => {
-    if (!roomId || luckRolling || luckRollComplete) return
+    if (!roomId) {
+      setLuckError('当前页面没有绑定有效房间，请返回大厅后重新进入角色卡')
+      return
+    }
+    if (luckRolling || luckRollComplete) return
     if (luckDice) {
       setLuckRolling(true)
       setLuckDiceOpen(true)
@@ -938,6 +942,12 @@ export default function CharacterPage() {
       setLuckDiceOpen(true)
     } catch (error) {
       setLuckRolling(false)
+      // 请求失败时清掉所有临时骰子状态，避免 luckDiceOpen 残留导致按钮
+      // 看似可点击但实际一直被 disabled，后续点击也不会重新发请求。
+      setLuckDiceOpen(false)
+      setLuckDice(null)
+      setLuckDiceIndex(0)
+      setLuckAccumulated(0)
       setLuckError(friendlyErrorMessage(error, '幸运掷骰失败，请重试'))
     }
   }

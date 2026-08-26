@@ -365,7 +365,15 @@ const PHASE_LABELS: Record<AgentTurnPhase, string> = {
 
 const ORGANIZING_PHASE_MIN_MS = 600
 
-const TIME_OF_DAY_LABELS = { day: '白天', night: '夜晚' } as const
+/**
+ * 世界时间的天数：day_index 从 0 起算，玩家看到的是「第 1 天」。
+ *
+ * 只格式化天数，不碰小时——小时是模组的叙事特权，玩家侧只拿得到模组声明的
+ * 措辞（#415）。
+ */
+function formatDay(dayIndex: number): string {
+  return `第 ${dayIndex + 1} 天`
+}
 
 /**
  * 3D 掷骰从受理到定格的上限。超过就退回 2D 把这次掷骰补完。
@@ -376,11 +384,6 @@ const TIME_OF_DAY_LABELS = { day: '白天', night: '夜晚' } as const
  * 死锁的兜底，不是性能预算，宁可晚一点也不能误伤。
  */
 const DICE_3D_SETTLE_TIMEOUT_MS = 15000
-
-/** Render the Engine's authoritative discrete world-time point. */
-function formatWorldTime(dayIndex: number, hourOfDay: number): string {
-  return `第 ${dayIndex + 1} 天 ${String(hourOfDay).padStart(2, '0')}:00`
-}
 
 /**
  * PlayerView 的当前资源，按小写 id 索引，供角色卡面板显示活的 HP/SAN/MP/幸运。
@@ -2663,10 +2666,10 @@ export default function RoomPage() {
           <div className="room-play__time-consent-summary">
             <Clock3 aria-hidden="true" strokeWidth={2} />
             <div>
-              <strong>{formatWorldTime(
-                pendingTimeAdvance.targetDayIndex,
-                pendingTimeAdvance.targetHourOfDay,
-              )}</strong>
+              <strong>
+                {pendingTimeAdvance.targetLabel} ·{' '}
+                {formatDay(pendingTimeAdvance.targetDayIndex)}
+              </strong>
               <span>
                 {pendingTimeAdvance.acceptedPlayerIds.length}/
                 {pendingTimeAdvance.requiredPlayerIds.length} 人已确认
@@ -3201,8 +3204,14 @@ export default function RoomPage() {
           </span>
           {playerView?.world && (
             <span className="text-[10px] text-text-dim mt-1">
-              {TIME_OF_DAY_LABELS[playerView.world.time_of_day]} ·{' '}
-              {formatWorldTime(playerView.world.day_index, playerView.world.hour_of_day)}
+              {playerView.world.time_label} · {formatDay(playerView.world.day_index)}
+              {/*
+                时间线走到终点。只据 can_advance_time 判断——按 time_label 去
+                推断等于在玩家侧重新实现一遍终点规则，而权威副本在引擎里
+                （#415 §阶段二）。终点只是时间不再推进，不是游戏结束，所以
+                这里只加一句提示，不禁用任何行动入口。
+              */}
+              {!playerView.world.can_advance_time && ' · 时间不会再推进了'}
             </span>
           )}
           </div>

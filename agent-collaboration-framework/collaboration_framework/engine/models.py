@@ -27,8 +27,10 @@ from collaboration_framework.contracts import (
     PostRollDecisionRequest,
     PostRollOption,
     SubmitAdjudicationRequest,
+    TimeSegment,
     TravelInterrupted,
     ValidationResult,
+    segment_at_hour,
 )
 from collaboration_framework.contracts.adjudication import CheckRoll
 
@@ -53,21 +55,6 @@ class ActorState(ContractModel):
     conditions: tuple[str, ...] = ()
 
 
-DAY_STARTS_HOUR = 6
-NIGHT_STARTS_HOUR = 18
-
-
-def time_of_day_at_hour(hour_of_day: int) -> Literal["day", "night"]:
-    """The single day/night boundary: 06:00–18:00 is day.
-
-    Derived, never stored. Two places used to compute this independently and gave
-    different answers; they only agreed because the v2 fixture opened at midnight
-    (#226).
-    """
-
-    return "day" if DAY_STARTS_HOUR <= hour_of_day < NIGHT_STARTS_HOUR else "night"
-
-
 class WorldTimePoint(ContractModel):
     """An exact hour on the world calendar (#245 §二.2)."""
 
@@ -79,10 +66,6 @@ class WorldTimePoint(ContractModel):
         """Total ordering across days, so "next point" is a plain comparison."""
 
         return self.day_index * 24 + self.hour_of_day
-
-    @property
-    def time_of_day(self) -> Literal["day", "night"]:
-        return time_of_day_at_hour(self.hour_of_day)
 
 
 class WorldTimeState(ContractModel):
@@ -99,17 +82,75 @@ class WorldTimeState(ContractModel):
     The read-side view assembles the full shape from both (S2).
     """
 
-    # 默认落在正午而不是午夜：v2 房间没有 time_policy，起点是任选的，而
-    # time_of_day 现在是推导出来的——午夜会让"没声明时间的房间一开局就是夜里"。
+    # 默认落在正午而不是午夜：v2 房间没有 time_policy，起点是任选的，而没有
+    # 存过时段的房间按小时回退——午夜会让"没声明时间的房间一开局就是夜里"。
     # v3 房间一律由 initial_state.start_time_point_id 覆盖这个默认值。
     current: WorldTimePoint = Field(
         default_factory=lambda: WorldTimePoint(day_index=0, hour_of_day=12)
     )
     current_point_id: str = Field(default="hour_12", min_length=1)
+    # 模组声明的时段，在**推进时**解析完存进来（#415 §阶段一）。
+    #
+    # 谓词签名是 `(args, GameState, actor_id) -> bool`，拿不到
+    # `module_content`，所以模组逐点声明的 `time_segment` 不可能在谓词里
+    # 查表。加宽签名会动整个谓词注册表契约，连带 #401 的 E7 数值谓词；
+    # 存进运行态则与既有的 `current_point_id` 同构。
+    #
+    # 可空是为了既有房间：它们的快照里没有这个字段，读取时按小时回退，
+    # 下一次推进后写入解析值。
+    current_time_segment: TimeSegment | None = None
 
     @property
-    def time_of_day(self) -> Literal["day", "night"]:
-        return self.current.time_of_day
+    def time_segment(self) -> TimeSegment:
+        """当前时段：存过就用存的，没存过按小时回退。"""
+
+        return self.current_time_segment or segment_at_hour(self.current.hour_of_day)
+
+
+class TimePointOccurrence(ContractModel):
+    """时间线上的一次具体到达（#245 §一.5 / #415 §阶段四）。
+
+    默认点每天都会来一次，剧情临时点只来一次。两者用**同一套绝对时间排序**，
+    所以「15:00 的任务插在 12 与 18 之间」不需要任何特殊分支——把临时点混进
+    默认点再按 `absolute_hour` 重排就是了。
+
+    `point_id` 为 None 表示这一刻不对应任何模组声明的点，只由 TimeTask 排出来。
+    那条路径拿不到 `TimePointSpec`，玩家措辞因此回退到 `time_segment` 的缺省值。
+    """
+
+    occurrence_id: str = Field(min_length=1)
+    point_id: str | None = Field(default=None, min_length=1)
+    day_index: int = Field(ge=0)
+    hour_of_day: int = Field(ge=0, le=23)
+    time_segment: TimeSegment
+    origin: Literal["default", "time_task"] = "time_task"
+
+    @property
+    def absolute_hour(self) -> int:
+        return self.day_index * 24 + self.hour_of_day
+
+
+class RuntimeTimeTask(ContractModel):
+    """一个已经排好、等着到期的定时任务（#245 §5）。
+
+    #245 冻结了这个形状，但类一直不存在——只在 `engine/timeline.py` 的注释里
+    被提过一次。任务绑到 occurrence 而不是绑到时刻，因为同日同小时的多个任务
+    共享同一个 occurrence：取消其中一个不该动其他任务，也不该动那个点。
+    """
+
+    task_id: str = Field(min_length=1)
+    task_key: str = Field(min_length=1)
+    rule_id: str = Field(min_length=1)
+    branch_id: str = Field(min_length=1)
+    occurrence_id: str = Field(min_length=1)
+    priority: int = 0
+    visibility: Literal["public", "hidden"] = "public"
+    # `completed` 之后不会再发第二次 `time.task_due`：单次发布靠的是「把状态
+    # 翻成 completed」和「发事件」落在同一次提交里，而不是靠调用方自觉。
+    status: Literal["scheduled", "completed", "cancelled"] = "scheduled"
+    bindings: dict[str, JsonValue] = Field(default_factory=dict)
+    # 取消时记下来的原因码，进审计事件。
+    cancel_reason_code: str | None = Field(default=None, min_length=1)
 
 
 class AgendaSource(ContractModel):
@@ -219,6 +260,10 @@ class GameState(ContractModel):
     party_item_knowledge: dict[str, ItemKnowledge] = Field(default_factory=dict)
     actor_item_knowledge: dict[str, dict[str, ItemKnowledge]] = Field(default_factory=dict)
     rule_agendas: dict[str, RuleAgenda] = Field(default_factory=dict)
+    # 只保存**临时** occurrence：默认点每天都会来，从 module_content 现推就行，
+    # 存一份等于把模组内容复制进房间状态，换版本时必然漂移。
+    time_occurrences: dict[str, TimePointOccurrence] = Field(default_factory=dict)
+    time_tasks: dict[str, RuntimeTimeTask] = Field(default_factory=dict)
     core_resolved: bool = False
     ending_available: bool = False
     ending_resolution: EndingResolution | None = None

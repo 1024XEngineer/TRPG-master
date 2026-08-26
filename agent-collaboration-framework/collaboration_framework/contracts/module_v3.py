@@ -379,10 +379,17 @@ class AgentMatchTriggerSpec(ContractModel):
     required: bool = True
     decision_mode: Literal["selective", "exhaustive_for_scope"] = "selective"
     scope: CandidateScopeSpec = Field(default_factory=CandidateScopeSpec)
-    # `when` was added after existing v3 modules had already been published.
-    # Keep the absent value out of serialized content so those immutable module
-    # versions retain their original normalized payload and content hash.
-    when: ConditionExpr | None = Field(default=None, exclude_if=lambda value: value is None)
+    # scope answers "what kind of action could match"; when answers whether
+    # that authored opportunity exists in the current authoritative state.
+    # Keeping the condition on the trigger lets publication and submission
+    # evaluate the exact same expression instead of trusting a stale menu.
+    # Omit the default from persisted ModuleVersion JSON. Adding this optional
+    # field must not rewrite every existing agent_match as ``"when": null``;
+    # immutable snapshots compare normalized JSON for same-version drift.
+    when: ConditionExpr | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
     question: MatchQuestionSpec
     options: tuple[MatchOptionAuthorSpec, ...] = Field(min_length=1)
     bindings: tuple[BindingSlotSpec, ...] = ()
@@ -480,19 +487,93 @@ class CreateNpcActionOpportunityStep(ContractModel):
     next_step_id: Identifier
 
 
+class TimeTaskTargetSpec(ContractModel):
+    """定时任务在哪一刻到期（#245 §5 / #415 §阶段四）。
+
+    两种写法二选一：
+
+    - `point_id` —— 绑到模组已经声明的默认点上。不必再写小时，它由
+      `TimePointSpec` 唯一确定。
+    - `day_index` + `hour_of_day` —— 剧情临时点，引擎会在两个默认点之间插入
+      一次性 occurrence。
+
+    两个都给或都不给都是错的：前者可能自相矛盾，后者根本没说到期时间。
+    """
+
+    point_id: Identifier | None = None
+    day_index: int | None = Field(default=None, ge=0)
+    hour_of_day: int | None = Field(default=None, ge=0, le=23)
+    # 相对当前时刻还是绝对日历。默认点写法只能用绝对（点本身带着小时），
+    # 临时点两种都行：「三小时后」是相对，「第二天凌晨两点」是绝对。
+    relative: bool = False
+
+    @model_validator(mode="after")
+    def validate_target(self) -> TimeTaskTargetSpec:
+        by_point = self.point_id is not None
+        by_clock = self.hour_of_day is not None
+        if by_point == by_clock:
+            raise ValueError("TimeTaskTarget 必须二选一：point_id 或 hour_of_day")
+        if by_point and (self.day_index is not None or self.relative):
+            raise ValueError(
+                "绑定默认点的 TimeTaskTarget 不能再声明 day_index 或 relative"
+            )
+        if self.relative and self.day_index is not None:
+            # `relative` 说 hour_of_day 是偏移量，`day_index` 属于绝对日历那一
+            # 套。两个一起给就是两种寻址模式并存，而契约没有、也不该有优先级
+            # 规则——到期语义对调度器是歧义的，只能在发布期拒绝。
+            raise ValueError("relative 的 TimeTaskTarget 不能再声明 day_index")
+        if by_clock and not self.relative and self.day_index is None:
+            raise ValueError("绝对时刻的 TimeTaskTarget 必须声明 day_index")
+        return self
+
+
+class TimeTaskSpec(ContractModel):
+    """一次定时任务的作者态声明（#245 §5）。
+
+    `task_key` 不是运行时 id：同一条规则可能为不同的绑定各排一个任务
+    （「每个被跟踪的 NPC 三小时后现身」），运行时 id 由 key + bindings 生成。
+    `cancel_time_task` 也是按 key + bindings 定位的，所以两边必须对得上。
+    """
+
+    task_key: Identifier
+    target: TimeTaskTargetSpec
+    # 同一刻到期的多个任务按 `priority` 再按 task_id 稳定排序，避免同点多任务
+    # 的结算顺序随字典遍历漂移。
+    priority: int = 0
+    # `hidden` 的任务不向玩家暴露它插出来的那个临时点是什么时候、为什么。
+    visibility: Literal["public", "hidden"] = "public"
+    # 到期时从这条规则的哪个分支继续结算。
+    on_due_branch_id: Identifier
+    bindings: dict[str, JsonValue] = Field(default_factory=dict)
+
+
 class CreateTimeTaskStep(ContractModel):
-    """由 #245 所属的 Schema；在这里引用，以便规则可以安排时间任务。"""
+    """Schema owned by #245; referenced here so a rule can schedule one.
+
+    以前这里只有一个 `task_id`，没有目标时间——也就是说这个 step **根本无法
+    实际创建任务**，它在 registry 里被登记成 `step_kind_has_no_executor` 是
+    诚实的。改成携带完整 `TimeTaskSpec`（#415 §阶段四）。
+    """
 
     id: Identifier
     kind: Literal["create_time_task"] = "create_time_task"
-    task_id: Identifier
+    task: TimeTaskSpec
     next_step_id: Identifier
 
 
 class CancelTimeTaskStep(ContractModel):
+    """按 key + bindings 定位并取消，不按运行时 id。
+
+    规则写的时候还不知道运行时 id 长什么样；它知道的是自己当初用哪个
+    `task_key` 和哪组绑定排的任务。
+    """
+
     id: Identifier
     kind: Literal["cancel_time_task"] = "cancel_time_task"
-    task_id: Identifier
+    task_key: Identifier
+    bindings: dict[str, JsonValue] = Field(default_factory=dict)
+    # 取消是有原因的（目标已死、玩家先一步阻止了它），原因要能进审计事件。
+    reason_code: str = Field(min_length=1, max_length=64)
     next_step_id: Identifier
 
 
@@ -655,10 +736,100 @@ class EndingAnchorSpec(ContractModel):
 # --------------------------------------------------------------------------- #
 
 
+# 三件事以前挤在 `time_of_day` 一个值上，这里把它们拆开（#415 §阶段一）：
+#
+# | 层       | 字段                 | 谁写                         | 谁读                        |
+# |----------|----------------------|------------------------------|-----------------------------|
+# | 精确身份 | `id` / `hour_of_day` | 模组                         | 引擎排序、`time_point_is`   |
+# | 规则语义 | `time_segment`       | 模组逐点声明，缺省按小时推导 | 通用规则层 `time_of_day_is` |
+# | 玩家措辞 | `label`              | 模组                         | 仅投影，规则不得读          |
+#
+# `label` 不能替代枚举：它是自由文本，通用规则若匹配「晚上」这个显示字符串，
+# 模组改写成「深夜」就失效，等于把模组的表达习惯塞进通用契约——#401 §1 明令
+# 禁止的方向。枚举也不能替代 `label`：通用 CoC7 规则（夜间侦查减值、只在夜里
+# 出现的生物）必须对所有 CoC 7e 模组成立，它问得出「现在是不是夜里」，问不出
+# 「现在是不是 `h02`」，后者是模组私有 id。
+TimeSegment: TypeAlias = Literal["late_night", "morning", "afternoon", "evening"]
+
+# `time_of_day_is` 的查询值空间。粗粒度别名**只在查询里存在**，不作为运行态
+# 存储值：存 `night` 就再也分不出凌晨和晚上，而那正是本 Issue 要解决的问题。
+TimeOfDayQuery: TypeAlias = Literal[
+    "day", "night", "late_night", "morning", "afternoon", "evening"
+]
+
+DAY_SEGMENTS: frozenset[TimeSegment] = frozenset({"morning", "afternoon"})
+NIGHT_SEGMENTS: frozenset[TimeSegment] = frozenset({"evening", "late_night"})
+
+# 缺省推导表，写成上界序列而不是四个 if：新增段位只需要插一行，边界不会
+# 在两个地方各写一遍。旧的 `time_of_day_at_hour` 硬编码 06–18，声明 05:00
+# 表示「黎明」的模组会被判成 night，这就是它被替换掉的原因。
+_SEGMENT_HOUR_BOUNDS: tuple[tuple[int, TimeSegment], ...] = (
+    (6, "late_night"),
+    (12, "morning"),
+    (18, "afternoon"),
+    (24, "evening"),
+)
+
+_DEFAULT_SEGMENT_LABELS: dict[TimeSegment, str] = {
+    "late_night": "凌晨",
+    "morning": "上午",
+    "afternoon": "下午",
+    "evening": "晚上",
+}
+
+
+def segment_at_hour(hour_of_day: int) -> TimeSegment:
+    """00–05 late_night / 06–11 morning / 12–17 afternoon / 18–23 evening。
+
+    两端都校验。这个函数从公共 contracts 导出，绕过 `TimePointSpec` 直接调用
+    它的消费者不该把非法输入静默归类——只查上界的话 `-1` 会安静地变成凌晨。
+    """
+
+    if not 0 <= hour_of_day <= 23:
+        raise ValueError(f"hour_of_day 必须落在 0–23: {hour_of_day}")
+    for upper_bound, segment in _SEGMENT_HOUR_BOUNDS:
+        if hour_of_day < upper_bound:
+            return segment
+    raise AssertionError("unreachable: 上面的区间已经覆盖 0–23")
+
+
+def default_label_for(segment: TimeSegment) -> str:
+    """没有声明 `label` 的时间点给玩家看什么。"""
+
+    return _DEFAULT_SEGMENT_LABELS[segment]
+
+
+def matches_time_query(segment: TimeSegment, query: object) -> bool:
+    """四段值精确匹配，`day` / `night` 按别名集合匹配。
+
+    追书人既有的 `time_of_day_is night` 因此不经迁移继续成立。
+    """
+
+    if query == "day":
+        return segment in DAY_SEGMENTS
+    if query == "night":
+        return segment in NIGHT_SEGMENTS
+    return segment == query
+
+
 class TimePointSpec(ContractModel):
     id: Identifier
     hour_of_day: int = Field(ge=0, le=23)
     order: int = Field(ge=0)
+    # 规则语义时段，缺省由 `hour_of_day` 推导，模组可逐点覆盖：05:00 声明成
+    # `morning` 之后，通用的 `time_of_day_is day` 就在这一点成立。
+    time_segment: TimeSegment | None = None
+    # 玩家可见短措辞（「黎明」「深夜」）。**规则不得读取**，也不得把剧情正文
+    # 塞进来——长度上限的作用就是让后者在发布期失败，而不是在玩家屏幕上。
+    label: str | None = Field(default=None, min_length=1, max_length=20)
+
+    @property
+    def resolved_segment(self) -> TimeSegment:
+        return self.time_segment or segment_at_hour(self.hour_of_day)
+
+    @property
+    def resolved_label(self) -> str:
+        return self.label or default_label_for(self.resolved_segment)
 
 
 DEFAULT_TIME_POINTS: tuple[TimePointSpec, ...] = (
@@ -669,13 +840,49 @@ DEFAULT_TIME_POINTS: tuple[TimePointSpec, ...] = (
 )
 
 
+class TerminalTimePointSpec(ContractModel):
+    """时间线的最后一刻（#415 §阶段二）。
+
+    终点必须标识时间点的某一次 **occurrence**，不能只给 point id：时间线是个
+    环，`hour_18` 每天都会来一次，「第三天 18:00 结束」和「明天 18:00 结束」
+    是两件事。`day_index` 与运行态一致，开局当天为 0，所以第三天 18:00 写作
+    `{point_id: "hour_18", day_index: 2}`。
+
+    不重复保存 `hour_of_day`：它由 `point_id` 对应的 `TimePointSpec` 唯一确定，
+    两个字段互相矛盾比少一个字段更糟。
+    """
+
+    point_id: Identifier
+    day_index: int = Field(ge=0)
+
+
 class ModuleTimePolicySpec(ContractModel):
-    """离散时间点；时钟在时间点之间跳转，而不是连续滴答推进。"""
+    """Discrete time points; the clock jumps between them, it does not tick.
+
+    时间线是一个**按 `hour_of_day` 升序声明的环**。起点由
+    `initial_state.start_time_point_id` 落在环上任意一点，越过末点时回卷并
+    `day_index + 1`。跨午夜的夜晚因此今天就能表达，不需要按时序声明：
+
+        按小时升序声明 00/02/18/20/22，起点指定 hour_18
+          D0 18:00 → D0 20:00 → D0 22:00 → D1 00:00 → D1 02:00 → D1 18:00
+                                            ^^^^^^ 越过末点回卷，day_index + 1
+
+    下面 `validate_points` 的「`hour_of_day` 必须随 `order` 严格递增」是**声明
+    顺序**约束，不是表达力约束——它保证 `order` 就是环上的位置，别的什么都不
+    保证（#415 §一条需要先澄清的非缺口）。
+
+    `default_points` 是**完整覆盖**，解析侧不得把模组自定义的点与默认四点机械
+    合并：多合出来的点会制造额外推进边界，也会让同一条 night 规则在一天里命中
+    两次（#415 §与解析侧的分界）。
+    """
 
     default_points: tuple[TimePointSpec, ...] = DEFAULT_TIME_POINTS
     storage_precision: Literal["hour"] = "hour"
     progression: Literal["host_controlled_discrete"] = "host_controlled_discrete"
     actions_per_point: Literal["multiple"] = "multiple"
+    # 没声明终点的模组维持现有环形回卷，既有模组不受影响。声明了终点的模组
+    # 走到那一刻之后拒绝继续推进——单夜模组不再"一觉睡到第二天"。
+    terminal_point: TerminalTimePointSpec | None = None
 
     @model_validator(mode="after")
     def validate_points(self) -> ModuleTimePolicySpec:
@@ -689,6 +896,12 @@ class ModuleTimePolicySpec(ContractModel):
         hours = [point.hour_of_day for point in by_order]
         if hours != sorted(hours) or len(hours) != len(set(hours)):
             raise ValueError("TimePoint hour_of_day 必须随 order 严格递增")
+        if self.terminal_point is not None and not any(
+            point.id == self.terminal_point.point_id for point in self.default_points
+        ):
+            raise ValueError(
+                f"terminal_point 引用了不存在的时间点: {self.terminal_point.point_id}"
+            )
         return self
 
 
@@ -776,10 +989,47 @@ class ModuleContentV3(ContractModel):
         _require_unique_ids(self.ending_anchors, "Ending anchor")
         return self
 
+    @model_validator(mode="after")
+    def validate_terminal_point_is_reachable(self) -> ModuleContentV3:
+        """终点必须落在从开局时刻出发的那条 walk 上（#415 §阶段二）。
+
+        只能在根上校验：终点声明在 `time_policy` 里，开局时刻在 `initial_state`
+        里，`ModuleTimePolicySpec` 自己看不到后者。
+
+        环从起点开始走：起点及其之后的点当天到达，起点之前的点要等回卷之后的
+        第二天。所以「第一天 00:00 结束」配上「18:00 开局」是不可达的——那一刻
+        在开局之前，游戏会开在一条已经越过终点的时间线上。
+        """
+
+        terminal = self.time_policy.terminal_point
+        if terminal is None:
+            return self
+
+        points = sorted(self.time_policy.default_points, key=lambda point: point.order)
+        start_id = self.initial_state.start_time_point_id
+        # 与 engine.initialization._world_time_for 同一条回退：声明的起点不在
+        # 点列表里时开在第一个点上。
+        start_index = next(
+            (index for index, point in enumerate(points) if point.id == start_id),
+            0,
+        )
+        terminal_index = next(
+            index for index, point in enumerate(points) if point.id == terminal.point_id
+        )
+        first_reachable_day = 0 if terminal_index >= start_index else 1
+        if terminal.day_index < first_reachable_day:
+            raise ValueError(
+                f"terminal_point 从开局时刻不可达: {terminal.point_id} 最早出现在第 "
+                f"{first_reachable_day} 天，声明的却是第 {terminal.day_index} 天"
+            )
+        return self
+
 
 __all__ = [
+    "DAY_SEGMENTS",
     "DEFAULT_TIME_POINTS",
     "IDENTIFIER_PATTERN",
+    "NIGHT_SEGMENTS",
     "ActorPlacementSpec",
     "AdjudicatedCheckStep",
     "AgentMatchTriggerSpec",
@@ -828,7 +1078,15 @@ __all__ = [
     "RuleStepSpec",
     "RuleTriggerSpec",
     "TargetKind",
+    "TerminalTimePointSpec",
+    "TimeOfDayQuery",
     "TimePointSpec",
+    "TimeSegment",
+    "TimeTaskSpec",
+    "TimeTaskTargetSpec",
     "TravelCostSpec",
     "WorldProfileSpec",
+    "default_label_for",
+    "matches_time_query",
+    "segment_at_hour",
 ]

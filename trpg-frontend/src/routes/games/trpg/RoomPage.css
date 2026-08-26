@@ -873,6 +873,16 @@
   overscroll-behavior: contain;
 }
 
+/* 连续幸运骰使用紧凑固定高度，避免移动端被普通骰子面板撑出大块留白。 */
+.room-play__bottom-panel--sequential-dice {
+  height: 64vh !important;
+  max-height: 64vh !important;
+}
+
+.room-play__bottom-panel--sequential-dice > .room-play__bottom-panel-content {
+  max-height: calc(64vh - 60px) !important;
+}
+
 .room-play__bottom-panel--character-sheet > .room-play__bottom-panel-content {
   max-height: calc(70vh - 7.25rem) !important;
   overscroll-behavior: contain;
@@ -1114,6 +1124,15 @@
   .room-play__bottom-panel--dice > .room-play__bottom-panel-content {
     max-height: calc(76vh - 60px) !important;
     max-height: calc(76dvh - 60px) !important;
+  }
+
+  .room-play__bottom-panel--sequential-dice {
+    height: 64dvh !important;
+    max-height: 64dvh !important;
+  }
+
+  .room-play__bottom-panel--sequential-dice > .room-play__bottom-panel-content {
+    max-height: calc(64dvh - 60px) !important;
   }
 
   .room-play__header {

@@ -133,6 +133,10 @@ def test_migration_upgrades_empty_sqlite_and_round_trips(tmp_path: Path) -> None
         "lease_owner",
         "lease_expires_at",
         "result_event_ids",
+        "execution_route",
+        "direct_response_text",
+        "execution_provenance",
+        "rule_request_json",
     }.issubset(_column_names(database, "host_action_queue"))
     assert "entity_id" in _column_names(database, "module_assets")
     assert {"channel", "actor_id"}.issubset(_column_names(database, "chat_messages"))

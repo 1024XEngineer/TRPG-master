@@ -86,6 +86,7 @@ from app.core.action_plan_turn import (
     ActionPlanTurnResult,
     _matching_visible_entity_ids,
     action_plan_turn_application,
+    build_rule_once_adjudication,
 )
 from app.core.config import get_settings, model_client_retry_policy, secret_value
 from app.core.db import async_session_factory
@@ -93,9 +94,14 @@ from app.core.engine import adjudication_engine_service, legacy_single_action_re
 from app.core.host_entry import (
     DeterministicHostEntryModel,
     HostEntryDecision,
+    HostEntryContext,
     HostEntryRouter,
     HostPublicContextProjector,
     HostPublicHistoryEntry,
+    HostRuleCandidateContext,
+    HostRuleMatchContext,
+    HostRuleOptionContext,
+    HostTargetContext,
 )
 from app.core.turn import (
     ActorResolutionError,
@@ -199,7 +205,6 @@ def _listener_ids_for_utterance(utterance: str, player_view: PlayerView) -> tupl
 _UNAUTHORIZED_CLOSE_CODE = 4401
 _NOT_FOUND_CLOSE_CODE = 4404
 _OPENING_MESSAGE_ID = "game-opening"
-_HOST_QUEUE_TERMINAL = frozenset({"failed", "cancelled", "discarded"})
 
 _host_entry_router: HostEntryRouter | None = None
 
@@ -312,6 +317,72 @@ async def _public_host_history(
     while entries and sum(len(item.text) for item in entries) > max_chars:
         entries.pop(0)
     return tuple(entries)
+
+
+async def _host_entry_context(
+    *,
+    item,
+    view: PlayerView,
+    public: object,
+) -> HostEntryContext:
+    """Attach only the allow-listed Rule Match View to A's public context."""
+
+    player_input = PlayerInput(
+        room_id=item.room_id,
+        player_id=item.player_id,
+        actor_id=item.actor_id,
+        client_action_id=item.client_action_id,
+        utterance=item.utterance,
+    )
+    try:
+        capabilities = await action_plan_turn_application._keeper_capabilities(player_input, view)
+    except Exception:
+        # Rule Match View is an optional enrichment for A. A projection failure
+        # must not break the existing direct-response route.
+        capabilities = None
+    if capabilities is None:
+        return HostEntryContext(public=public, rule_match=None)
+    targets: list[HostTargetContext] = [
+        HostTargetContext(kind="location", id=view.scene.id, name=view.scene.name),
+        HostTargetContext(kind="actor", id=view.self_actor.id, name=view.self_actor.name),
+    ]
+    targets.extend(
+        HostTargetContext(kind="actor", id=actor.id, name=actor.name)
+        for actor in view.scene.visible_actors
+    )
+    targets.extend(
+        HostTargetContext(kind="entity", id=entity.id, name=entity.name)
+        for entity in view.scene.visible_entities
+    )
+    candidates = tuple(
+        HostRuleCandidateContext(
+            rule_id=candidate.rule_id,
+            question_kind=candidate.question_kind,
+            semantic_hints=candidate.semantic_hints,
+            action_families=candidate.action_families,
+            target_kinds=candidate.target_kinds,
+            target_ids=candidate.target_ids,
+            options=tuple(
+                HostRuleOptionContext(
+                    id=option.id,
+                    semantic_hints=option.semantic_hints,
+                    requires_check=option.requires_check,
+                )
+                for option in candidate.options
+            ),
+        )
+        for candidate in capabilities.rule_candidates
+    )
+    return HostEntryContext(
+        public=public,
+        rule_match=HostRuleMatchContext(
+            source_revision=capabilities.revision,
+            actor_id=capabilities.actor_id,
+            skills=tuple(skill.id for skill in view.self_actor.skills),
+            targets=tuple(targets),
+            rule_candidates=candidates,
+        ),
+    )
 
 
 async def _current_room_action_state(
@@ -813,6 +884,37 @@ async def _persist_npc_unavailable(
     await manager.send_to_player(item.room_id, item.player_id, envelope)
 
 
+async def _persist_rule_rejection(db: AsyncSession, item) -> None:
+    """Close a stale/invalid frozen rule request with a player-safe narration."""
+
+    correlation = item.client_action_id
+    event = await room_service.get_correlated_event(db, item.room_id, "narration.push", correlation)
+    if event is None:
+        event = Event(
+            id=str(uuid.uuid4()),
+            room_id=item.room_id,
+            player_id=item.player_id,
+            event_type="narration.push",
+            correlation_id=correlation,
+            visibility="public",
+            actor_id=item.actor_id,
+            payload=NarrationPushPayload(
+                message_id=correlation,
+                text="我暂时无法确认这次行动的规则条件，请换一种方式说明。",
+            ).model_dump(by_alias=True),
+            created_at=datetime.now(UTC),
+        )
+        db.add(event)
+        await db.commit()
+    item.status = "completed"
+    item.lease_owner = None
+    item.lease_expires_at = None
+    item.next_attempt_at = None
+    item.result_event_ids = [event.id]
+    item.updated_at = datetime.now(UTC)
+    await db.commit()
+
+
 async def _run_queued_host_action(
     db: AsyncSession,
     item,
@@ -895,9 +997,6 @@ async def _run_direct_host_action(
 ) -> None:
     """Persist and deliver a frozen A1 response without entering ActionPlan."""
 
-    await db.refresh(item)
-    if item.status in _HOST_QUEUE_TERMINAL:
-        return
     text = (item.direct_response_text or "").strip()
     if not text:
         raise RuntimeError("direct_response 队列项缺少已校验文本")
@@ -1170,7 +1269,7 @@ async def _route_keeper_queue_item(db: AsyncSession, item, view: PlayerView) -> 
             item.room_id,
             exclude_correlation_id=item.client_action_id,
         )
-        context = HostPublicContextProjector(
+        public_context = HostPublicContextProjector(
             max_turns=get_settings().recent_history_max_turns,
             max_chars=get_settings().recent_history_max_chars,
         ).project(
@@ -1178,13 +1277,48 @@ async def _route_keeper_queue_item(db: AsyncSession, item, view: PlayerView) -> 
             current_keeper_text=item.utterance,
             public_history=history,
         )
+        context = await _host_entry_context(item=item, view=view, public=public_context)
         decision, provenance = await _get_host_entry_router().decide(context)
+        rule_request = None
+        if decision.route == "rule_once":
+            player_input = PlayerInput(
+                room_id=item.room_id,
+                player_id=item.player_id,
+                actor_id=item.actor_id,
+                client_action_id=item.client_action_id,
+                utterance=item.utterance,
+            )
+            capabilities = await action_plan_turn_application._keeper_capabilities(
+                player_input, view
+            )
+            if capabilities is None:
+                raise ValueError("RULE_CAPABILITIES_UNAVAILABLE")
+            build_rule_once_adjudication(
+                player_input=player_input,
+                player_view=view,
+                capabilities=capabilities,
+                rule_id=decision.rule_id or "",
+                option_id=decision.option_id or "",
+                target_kind=decision.target_kind,
+                target_id=decision.target_id,
+                summary=decision.summary,
+            )
+            rule_request = {
+                "client_action_id": item.client_action_id,
+                "source_revision": view.revision,
+                "rule_id": decision.rule_id,
+                "option_id": decision.option_id,
+                "target_kind": decision.target_kind,
+                "target_id": decision.target_id,
+                "summary": decision.summary,
+            }
         await host_action_queue_service.save_execution_route(
             db,
             item,
             route=decision.route,
             text=decision.text,
             provenance=provenance,
+            rule_request=rule_request,
         )
         route = decision.route
         await db.refresh(item)
@@ -1204,16 +1338,51 @@ async def _route_keeper_queue_item(db: AsyncSession, item, view: PlayerView) -> 
             clarification_question=item.direct_response_text,
             player_answer=item.continuation_text,
         )
+        context = await _host_entry_context(item=item, view=view, public=context)
         decision, provenance = await _get_host_entry_router().decide(context)
         if decision.route == "needs_clarification":
             decision = HostEntryDecision(route="delegate_to_legacy")
             provenance = "clarify_once_legacy"
+        rule_request = None
+        if decision.route == "rule_once":
+            player_input = PlayerInput(
+                room_id=item.room_id,
+                player_id=item.player_id,
+                actor_id=item.actor_id,
+                client_action_id=item.client_action_id,
+                utterance=item.utterance,
+            )
+            capabilities = await action_plan_turn_application._keeper_capabilities(
+                player_input, view
+            )
+            if capabilities is None:
+                raise ValueError("RULE_CAPABILITIES_UNAVAILABLE")
+            build_rule_once_adjudication(
+                player_input=player_input,
+                player_view=view,
+                capabilities=capabilities,
+                rule_id=decision.rule_id or "",
+                option_id=decision.option_id or "",
+                target_kind=decision.target_kind,
+                target_id=decision.target_id,
+                summary=decision.summary,
+            )
+            rule_request = {
+                "client_action_id": item.client_action_id,
+                "source_revision": view.revision,
+                "rule_id": decision.rule_id,
+                "option_id": decision.option_id,
+                "target_kind": decision.target_kind,
+                "target_id": decision.target_id,
+                "summary": decision.summary,
+            }
         await host_action_queue_service.save_execution_route(
             db,
             item,
             route=decision.route,
             text=decision.text,
             provenance=provenance,
+            rule_request=rule_request,
         )
         route = decision.route
         await db.refresh(item)
@@ -1309,6 +1478,66 @@ async def _drain_host_action_queue(room_id: str) -> None:
                     if route == "direct_response":
                         await _run_direct_host_action(db, item, view, websocket)
                         continue
+                    if route == "rule_once":
+                        request = item.rule_request_json or {}
+                        view = await session_view_application.current_player_view(
+                            room_id=room_id,
+                            player_id=item.player_id,
+                        )
+                        if view.self_actor.id != item.actor_id:
+                            raise ValueError("RULE_ACTOR_MISMATCH")
+                        if request.get("source_revision") != view.revision:
+                            raise ValueError("RULE_SOURCE_REVISION_STALE")
+                        player_input = PlayerInput(
+                            room_id=room_id,
+                            player_id=item.player_id,
+                            actor_id=item.actor_id,
+                            client_action_id=item.client_action_id,
+                            utterance=item.utterance,
+                        )
+                        capabilities = await action_plan_turn_application._keeper_capabilities(
+                            player_input,
+                            view,
+                        )
+                        if capabilities is None:
+                            raise ValueError("RULE_CAPABILITIES_UNAVAILABLE")
+                        adjudication = build_rule_once_adjudication(
+                            player_input=player_input,
+                            player_view=view,
+                            capabilities=capabilities,
+                            rule_id=str(request.get("rule_id") or ""),
+                            option_id=str(request.get("option_id") or ""),
+                            target_kind=request.get("target_kind"),
+                            target_id=request.get("target_id"),
+                            summary=request.get("summary"),
+                        )
+                        result = await action_plan_turn_application.start_rule_once(
+                            room_id=room_id,
+                            player_id=item.player_id,
+                            client_action_id=item.client_action_id,
+                            utterance=item.utterance,
+                            adjudication=adjudication,
+                            on_progress=lambda event, target=websocket: _send_plan_progress(
+                                target,
+                                event,
+                            ),
+                            on_phase=partial(
+                                _send_turn_phase,
+                                websocket,
+                                item.client_action_id,
+                            ),
+                        )
+                        await host_action_queue_service.mark_started(db, item)
+                        await _send_action_plan_result(
+                            db,
+                            websocket,
+                            room_id,
+                            item.player_id,
+                            result,
+                        )
+                        if result.waiting_for_player:
+                            return
+                        continue
                     # delegate_to_legacy intentionally enters the unchanged
                     # ActionPlan application below.
                     interlocutor_id = None
@@ -1347,13 +1576,47 @@ async def _drain_host_action_queue(room_id: str) -> None:
                     if result.waiting_for_player:
                         return
                 except Exception as exc:
-                    await _recover_keeper_queue_failure(
-                        db,
-                        item,
-                        websocket,
-                        exc,
+                    if (
+                        item.recipient_kind == "keeper"
+                        and host_action_queue_service.effective_execution_route(item) == "rule_once"
+                        and (
+                            isinstance(exc, ValueError)
+                            or (
+                                isinstance(exc, TurnExecutionError)
+                                and exc.code.startswith("RULE_")
+                            )
+                        )
+                    ):
+                        await _persist_rule_rejection(db, item)
+                        continue
+                    # A direct response commits its Event and queue completion before
+                    # any socket/broadcast work.  Delivery failures must therefore
+                    # leave the durable result completed so reconnect can replay it.
+                    if (
+                        item.recipient_kind == "keeper"
+                        and host_action_queue_service.effective_execution_route(item)
+                        == "direct_response"
+                        and item.status == "completed"
+                    ):
+                        logger.warning(
+                            "host_direct_response_delivery_failed_after_commit",
+                            room_id=room_id,
+                            client_action_id=item.client_action_id,
+                            error_type=type(exc).__name__,
+                            error_reason=_turn_error_reason(exc),
+                        )
+                        continue
+                    await host_action_queue_service.discard(db, item)
+                    log_turn_failed(
                         room_id=room_id,
+                        stage="队列出队",
+                        code=_map_turn_error(exc)[0],
+                        correlation_id=item.client_action_id,
+                        error_type=type(exc).__name__,
+                        error_reason=_turn_error_reason(exc),
+                        exc=exc,
                     )
+                    await _send_turn_failed(websocket, item.client_action_id, exc)
                 finally:
                     with anyio.CancelScope(shield=True):
                         action_lock_manager.release(room_id, lock_token)
@@ -1905,7 +2168,7 @@ async def _send_completed_turn_message(
 
 async def _recover_persisted_turn_narration(
     db: AsyncSession,
-    websocket: WebSocket | None,
+    websocket: WebSocket,
     *,
     room_id: str,
     player_id: str,
@@ -1953,17 +2216,6 @@ async def _recover_persisted_turn_narration(
     ):
         if queued_item.player_id != player_id:
             raise ContractError("持久化 direct response 不属于当前玩家")
-        if queued_item.status in _HOST_QUEUE_TERMINAL:
-            await _send_turn_failed(
-                websocket,
-                client_action_id,
-                TurnExecutionError(
-                    "TURN_INTERNAL_ERROR",
-                    "本次动作处理失败，请稍后重试",
-                    retryable=False,
-                ),
-            )
-            return True
         view = await session_view_application.current_player_view(
             room_id=room_id,
             player_id=player_id,
@@ -2061,7 +2313,7 @@ async def _recover_persisted_turn_narration(
             payload=persisted.model_dump(by_alias=True),
         ).model_dump(by_alias=True),
     )
-    if websocket is not None and raw_completion is not None and completion.npc_replies:
+    if raw_completion is not None and completion.npc_replies:
         await _recover_persisted_turn_followup_dialogue(
             db,
             websocket,

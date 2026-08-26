@@ -48,6 +48,7 @@ from app.adapters.structured_http import (
 )
 from app.core.host_entry import (
     HostEntryDecision,
+    HostEntryContext,
     HostPublicContext,
     host_entry_decision_schema,
 )
@@ -581,13 +582,19 @@ needs_clarification，text 只问一句简短公开问题。未消解的指代�
 player_answer 已有内容时禁止再次 needs_clarification。
 调查、搜索、物品、线索、案件、秘密、人物背景、说服/威胁/欺骗、移动、时间地点、
 任何成功失败或状态变化，仅在对象和行动已经明确时返回 delegate_to_legacy 且 text 必须为空。
+若 public 之外存在 rule_match，只有玩家
+话语明确对应其中一条 rule_candidates 及一个 option 时才返回 rule_once，并逐字复制 rule_id
+和 option_id；target_kind/target_id 只能从 rule_match.targets 或候选的 target_ids 中选择，
+summary 只能是简短的未确认意图摘要。不能输出任何效果、结果、骰点、状态变化、Event ID、
+Entity ID 或 revision。调查、搜索、物品、线索、案件、秘密、人物背景、说服/威胁/欺骗、
+移动、时间地点、任何成功失败或无法安全匹配的请求，一律返回 delegate_to_legacy 且 text 必须为空。
 不得声称规则结果，不得输出 JSON、字段名、内部标识、ID、revision、协议或未来承诺。
-上下文只包含公开信息。"""
+上下文只包含公开信息和受控候选。"""
 
     def __init__(self, client: StructuredJsonClient) -> None:
         self._client = client
 
-    async def generate(self, context: HostPublicContext) -> dict[str, object]:
+    async def generate(self, context: HostPublicContext | HostEntryContext) -> dict[str, object]:
         raw = await self._client.generate(
             schema_name="trpg_host_entry_decision",
             schema=host_entry_decision_schema(),

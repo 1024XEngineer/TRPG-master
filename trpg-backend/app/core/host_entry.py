@@ -18,7 +18,9 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError,
 
 logger = structlog.get_logger(__name__)
 
-HostEntryRoute = Literal["direct_response", "delegate_to_legacy", "needs_clarification"]
+HostEntryRoute = Literal[
+    "direct_response", "rule_once", "delegate_to_legacy", "needs_clarification"
+]
 HOST_ENTRY_FALLBACK = "我暂时没能准确接住这句话，请重新说明你想做什么。"
 HOST_ENTRY_MAX_TEXT = 1000
 HOST_ENTRY_MAX_HISTORY = 6
@@ -30,6 +32,11 @@ class HostEntryDecision(BaseModel):
 
     route: HostEntryRoute
     text: str | None = Field(default=None, max_length=HOST_ENTRY_MAX_TEXT)
+    rule_id: str | None = Field(default=None, min_length=1, max_length=100)
+    option_id: str | None = Field(default=None, min_length=1, max_length=100)
+    target_kind: Literal["information", "entity", "location", "actor", "world"] | None = None
+    target_id: str | None = Field(default=None, min_length=1, max_length=200)
+    summary: str | None = Field(default=None, max_length=500)
 
     @model_validator(mode="after")
     def validate_route_text(self) -> HostEntryDecision:
@@ -37,8 +44,39 @@ class HostEntryDecision(BaseModel):
             if not isinstance(self.text, str) or not self.text.strip():
                 raise ValueError(f"{self.route} 必须包含非空 text")
             self.text = self.text.strip()
+            if any(
+                value is not None
+                for value in (
+                    self.rule_id,
+                    self.option_id,
+                    self.target_kind,
+                    self.target_id,
+                    self.summary,
+                )
+            ):
+                raise ValueError("direct_response 不得包含 rule_once 字段")
+        elif self.route == "rule_once":
+            if not self.rule_id or not self.option_id:
+                raise ValueError("rule_once 必须包含 rule_id 和 option_id")
+            if self.text not in (None, ""):
+                raise ValueError("rule_once 不得包含 direct_response text")
+            if self.summary is not None:
+                self.summary = self.summary.strip()
+                if not self.summary:
+                    self.summary = None
         elif self.text not in (None, ""):
             raise ValueError("delegate_to_legacy 不得包含 text")
+        if self.route == "delegate_to_legacy" and any(
+            value is not None
+            for value in (
+                self.rule_id,
+                self.option_id,
+                self.target_kind,
+                self.target_id,
+                self.summary,
+            )
+        ):
+            raise ValueError("delegate_to_legacy 不得包含 rule_once 字段")
         return self
 
 
@@ -73,6 +111,60 @@ class HostPublicContext(BaseModel):
     def to_model_payload(self) -> dict[str, object]:
         """Return the exact allow-listed payload sent to a model."""
 
+        return self.model_dump(mode="json")
+
+
+class HostRuleOptionContext(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(min_length=1, max_length=100)
+    semantic_hints: tuple[str, ...] = ()
+    requires_check: bool = True
+
+
+class HostRuleCandidateContext(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    rule_id: str = Field(min_length=1, max_length=100)
+    question_kind: Literal["action_declaration", "method", "intent_relation"]
+    semantic_hints: tuple[str, ...] = ()
+    action_families: tuple[str, ...] = ()
+    target_kinds: tuple[Literal["information", "entity", "location", "actor", "world"], ...] = ()
+    target_ids: tuple[str, ...] = ()
+    options: tuple[HostRuleOptionContext, ...] = ()
+
+
+class HostTargetContext(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["information", "entity", "location", "actor", "world"]
+    id: str = Field(min_length=1, max_length=200)
+    name: str = Field(min_length=1, max_length=200)
+
+
+class HostRuleMatchContext(BaseModel):
+    """Allow-listed rule-match data; never contains Keeper-only content."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source_revision: str = Field(min_length=1, max_length=200)
+    actor_id: str = Field(min_length=1, max_length=200)
+    skills: tuple[str, ...] = ()
+    targets: tuple[HostTargetContext, ...] = ()
+    rule_candidates: tuple[HostRuleCandidateContext, ...] = ()
+
+
+class HostEntryContext(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    public: HostPublicContext
+    rule_match: HostRuleMatchContext | None = None
+
+    @property
+    def current_keeper_text(self) -> str:
+        return self.public.current_keeper_text
+
+    def to_model_payload(self) -> dict[str, object]:
         return self.model_dump(mode="json")
 
 
@@ -183,7 +275,9 @@ class HostPublicContextProjector:
 
 
 class HostEntryModel(Protocol):
-    async def generate(self, context: HostPublicContext) -> Mapping[str, object]: ...
+    async def generate(
+        self, context: HostPublicContext | HostEntryContext
+    ) -> Mapping[str, object]: ...
 
 
 class DeterministicHostEntryModel:
@@ -220,6 +314,13 @@ class HostDirectResponseSafetyPolicy:
         decision = TypeAdapter(HostEntryDecision).validate_python(decision.model_dump())
         if decision.route == "delegate_to_legacy":
             return decision
+        if decision.route == "rule_once":
+            summary = decision.summary or ""
+            if any(token in summary for token in ("```", "{", "}", "<schema", "<json")):
+                raise ValueError("rule_once summary contains structured content")
+            if self._forbidden.search(summary):
+                raise ValueError("rule_once summary contains an authoritative claim")
+            return decision
         text = decision.text or ""
         if not text.strip() or len(text) > HOST_ENTRY_MAX_TEXT:
             raise ValueError("direct response text is empty or too long")
@@ -255,7 +356,9 @@ class HostEntryRouter:
         self.safety_failures = 0
         self.fallbacks = 0
 
-    async def decide(self, context: HostPublicContext) -> tuple[HostEntryDecision, str]:
+    async def decide(
+        self, context: HostPublicContext | HostEntryContext
+    ) -> tuple[HostEntryDecision, str]:
         """Try one structured call plus one complete retry, then clarify safely."""
 
         payload = context.to_model_payload()
@@ -274,6 +377,8 @@ class HostEntryRouter:
                     provenance = "model_direct"
                 elif validated.route == "needs_clarification":
                     provenance = "model_clarify"
+                elif validated.route == "rule_once":
+                    provenance = "rule_once"
                 else:
                     provenance = "legacy_delegate"
                 logger.info("host_entry_decision", route=validated.route, provenance=provenance)
@@ -352,6 +457,11 @@ __all__ = [
     "HostEntryRouter",
     "HostPublicContext",
     "HostPublicContextProjector",
+    "HostEntryContext",
+    "HostRuleMatchContext",
+    "HostRuleCandidateContext",
+    "HostRuleOptionContext",
+    "HostTargetContext",
     "HostPublicHistoryEntry",
     "DeterministicHostEntryModel",
     "host_entry_decision_schema",

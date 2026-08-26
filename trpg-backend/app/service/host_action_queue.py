@@ -131,6 +131,7 @@ async def enqueue(
         own.direct_response_text = None
         own.continuation_text = None
         own.execution_provenance = None
+        own.rule_request_json = None
         own.result_event_ids = []
         own.attempt_count = 0
         own.next_attempt_at = None
@@ -252,31 +253,46 @@ async def save_execution_route(
     db: AsyncSession,
     item: HostActionQueueItem,
     *,
-    route: Literal["direct_response", "delegate_to_legacy", "needs_clarification"],
+    route: Literal["direct_response", "rule_once", "delegate_to_legacy", "needs_clarification"],
     text: str | None,
     provenance: str,
+    rule_request: dict | None = None,
 ) -> None:
     """Durably freeze the A1 decision before executing the selected route."""
 
     item.execution_route = route
     item.direct_response_text = text
     item.execution_provenance = provenance
+    item.rule_request_json = rule_request
     await db.commit()
 
 
 def effective_execution_route(
     item: HostActionQueueItem,
-) -> Literal["direct_response", "delegate_to_legacy", "needs_clarification", "unresolved"]:
+) -> Literal[
+    "direct_response",
+    "rule_once",
+    "delegate_to_legacy",
+    "needs_clarification",
+    "unresolved",
+]:
     """Pre-A migrations left the column NULL; those records belong to legacy."""
 
     if item.execution_route in {
         "direct_response",
+        "rule_once",
         "delegate_to_legacy",
         "needs_clarification",
         "unresolved",
     }:
         return cast(
-            Literal["direct_response", "delegate_to_legacy", "needs_clarification", "unresolved"],
+            Literal[
+                "direct_response",
+                "rule_once",
+                "delegate_to_legacy",
+                "needs_clarification",
+                "unresolved",
+            ],
             item.execution_route,
         )
     return "delegate_to_legacy"

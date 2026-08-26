@@ -206,6 +206,15 @@ def test_prompt_treats_action_families_as_advisory() -> None:
     assert "不能仅因动作族词汇不同就放弃" in instructions
 
 
+def test_prompt_allows_generic_check_when_no_persistent_state_exists() -> None:
+    """无可写状态时，提示词必须要求保留检定并收窄持久意图。"""
+
+    instructions = current_step_adjudication_instructions()
+    assert "PERSISTENT_EFFECT_REQUIRED" in instructions
+    assert "persistence_intent 收窄为" in instructions
+    assert "不能因为没有持久效果而把行动改成澄清" in instructions
+
+
 def test_offline_match_recognizes_surveillance_wording() -> None:
     """离线兜底至少覆盖 #453 的自然中文观察说法。"""
 

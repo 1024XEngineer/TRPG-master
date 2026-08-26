@@ -8,6 +8,7 @@ COC7 战斗算法；模型必须通过受控的 ``method.family`` 和 ``persiste
 from __future__ import annotations
 
 import logging
+from collections.abc import Collection
 from dataclasses import dataclass
 from typing import Literal
 
@@ -53,6 +54,8 @@ class PersistentEffectProblem:
 
     code: Literal["PERSISTENT_EFFECT_REQUIRED", "PERSISTENT_EFFECT_MISMATCH"]
     player_safe_reason: str
+    # 仅供 Host 的一次性语义修复使用；不改变 Engine 对原始裁决的拒绝。
+    allow_generic_fallback: bool = False
 
 
 @dataclass(frozen=True)
@@ -98,8 +101,16 @@ def effective_persistence_intent(adjudication: ActionAdjudication) -> Persistenc
 
 def validate_persistent_effects(
     adjudication: ActionAdjudication,
+    *,
+    target_kind: str | None = None,
+    target_state_keys: Collection[str] | None = None,
 ) -> PersistentEffectProblem | None:
-    """检查自由裁决成功分支是否完整表达声明的持久结果。"""
+    """检查自由裁决成功分支是否完整表达声明的持久结果。
+
+    ``target_kind`` 和 ``target_state_keys`` 是 Engine 内部提供的能力快照，
+    用来识别“模型声明了持久意图，但目标根本没有对应状态位”的可降级场景。
+    它们不进入玩家或模型可见协议，也不会让 Engine 自动改写裁决。
+    """
 
     intent = effective_persistence_intent(adjudication)
     family = adjudication.method.family.strip().lower()
@@ -130,6 +141,12 @@ def validate_persistent_effects(
         return PersistentEffectProblem(
             "PERSISTENT_EFFECT_REQUIRED",
             "该行动需要可提交的持久结果，请补充对应效果",
+            allow_generic_fallback=_generic_fallback_allowed(
+                adjudication,
+                policy=policy,
+                target_kind=target_kind,
+                target_state_keys=target_state_keys,
+            ),
         )
 
     if policy is not None and policy.intent != adjudication.persistence_intent:
@@ -143,6 +160,30 @@ def validate_persistent_effects(
         "PERSISTENT_EFFECT_MISMATCH",
         "持久结果的效果类型、目标或状态值与行动意图不一致",
     )
+
+
+def _generic_fallback_allowed(
+    adjudication: ActionAdjudication,
+    *,
+    policy: _FamilyPolicy | None,
+    target_kind: str | None,
+    target_state_keys: Collection[str] | None,
+) -> bool:
+    """判断是否可以把无效果裁决交给 Host 收窄为普通检定。"""
+
+    if adjudication.persistence_intent not in {"character_state", "object_state"}:
+        return False
+    if adjudication.persistence_intent == "character_state":
+        # 角色状态即使暂时没有公开值，也必须由 NPC/角色的状态能力承载；只有
+        # 把角色动作错误地指向物体（如只有 cut 键的绳索）时才允许收窄。
+        return target_kind is not None and target_kind not in {"npc", "actor"}
+    if target_kind is not None and (
+        adjudication.persistence_intent == "object_state" and target_kind != "object"
+    ):
+        return True
+    if policy is None or policy.state_key is None or target_state_keys is None:
+        return policy is None and target_kind in {"object", "location", "information"}
+    return policy.state_key not in set(target_state_keys)
 
 
 def _has_matching_effect(

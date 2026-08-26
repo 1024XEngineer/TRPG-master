@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Literal, TypeAlias
 
 from pydantic import Field, model_validator
+from pydantic.json_schema import SkipJsonSchema
 
 from .common import ContractError, ContractModel
 
@@ -66,6 +67,8 @@ class ValidationResult(ContractModel):
     fault: ValidationFault | None = None
     player_safe_reason: str = Field(min_length=1, max_length=512)
     affected_effects: tuple[EffectValidationDetail, ...] = ()
+    # 仅供 Host 语义修复使用，不进入任何公开 JSON schema。
+    generic_fallback_allowed: SkipJsonSchema[bool] = False
     evidence_refs: tuple[str, ...] = ()
     classification_coverage: ClassificationCoverage = "complete"
     internal_reason: str | None = Field(default=None, max_length=1024)
@@ -107,6 +110,7 @@ class ValidationResult(ContractModel):
                 )
                 for item in self.affected_effects
             ),
+            generic_fallback_allowed=self.generic_fallback_allowed,
         )
 
 
@@ -119,6 +123,8 @@ class ValidationFeedback(ContractModel):
     fault: ValidationFault | None = None
     player_safe_reason: str = Field(min_length=1, max_length=512)
     affected_effects: tuple[SafeEffectRef, ...] = ()
+    # Engine 已确认目标没有可写状态时，Host 才能收窄为普通行动。
+    generic_fallback_allowed: SkipJsonSchema[bool] = False
 
 
 class AdjudicationValidationError(ContractError):

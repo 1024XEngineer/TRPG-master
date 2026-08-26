@@ -1,7 +1,7 @@
 {
   "content_schema_version": 3,
   "module_id": "paper-chase-zh-coc7",
-  "version": "3.0.13",
+  "version": "3.0.14",
   "world_ref": "coc-7e",
   "background": "时代与地点为美国禁酒令时期的密歇根州阿诺兹堡。调查员受托马斯·金博尔委托，从五本失窃的旧书和叔叔道格拉斯一年前的失踪案入手，走访旧宅、图书馆与公共墓地。叙事应保持安静、克制而带哥特气息，以夜色、旧书、墓园和孤独感作为反复意象；面对异常时不要急于渲染纯粹敌意，应为同情、选择与淡淡哀伤保留空间。任何尚未由线索确认的真相都不得提前告知玩家。",
   "information": [
@@ -230,7 +230,7 @@
         "truth_told": false,
         "corpse_identified": false,
         "left_forever": false,
-        "at_surveillance_point": false
+        "out_tonight": "none"
       },
       "visibility": "public",
       "visibility_conditions": [
@@ -579,7 +579,8 @@
         "investigator_disappeared": false,
         "sent_to_asylum": false,
         "douglas_body_removed": false,
-        "investigation_resolved": false
+        "investigation_resolved": false,
+        "books_taken": false
       },
       "visibility": "keeper",
       "plot_relevance": false
@@ -2363,17 +2364,8 @@
       "trigger": {
         "kind": "agent_match",
         "scope": {
-          "action_families": [
-            "surveil"
-          ],
           "location_ids": [
             "surveillance_point"
-          ],
-          "target_kinds": [
-            "entity"
-          ],
-          "target_ids": [
-            "surveillance_area"
           ]
         },
         "when": {
@@ -2403,14 +2395,26 @@
                 "key": "visit_observed",
                 "value": false
               }
+            },
+            {
+              "op": "predicate",
+              "predicate": "entity_state_is",
+              "args": {
+                "entity_id": "cemetery_figure",
+                "key": "left_forever",
+                "value": false
+              }
             }
           ]
         },
         "question": {
           "kind": "method",
           "semantic_hints": [
-            "监视夜间区域",
-            "夜间监视区域"
+            "守夜",
+            "盯着金博尔宅",
+            "在暗处观察周围",
+            "看看夜里有没有人出现",
+            "监视"
           ]
         },
         "options": [
@@ -2484,8 +2488,8 @@
             "effect": {
               "type": "change_entity_state",
               "entity_id": "cemetery_figure",
-              "key": "at_surveillance_point",
-              "value": true
+              "key": "out_tonight",
+              "value": "observed"
             },
             "next_step_id": "succeed_4"
           },
@@ -2547,8 +2551,8 @@
           "predicate": "entity_state_is",
           "args": {
             "entity_id": "cemetery_figure",
-            "key": "at_surveillance_point",
-            "value": true
+            "key": "out_tonight",
+            "value": "observed"
           }
         },
         "question": {
@@ -2618,8 +2622,8 @@
             "effect": {
               "type": "change_entity_state",
               "entity_id": "cemetery_figure",
-              "key": "at_surveillance_point",
-              "value": false
+              "key": "out_tonight",
+              "value": "none"
             },
             "next_step_id": "finish"
           }
@@ -3206,8 +3210,8 @@
               "op": "predicate",
               "predicate": "entity_state_is",
               "args": {
-                "entity_id": "cemetery_figure",
-                "key": "visit_observed",
+                "entity_id": "case_tracker",
+                "key": "books_taken",
                 "value": true
               }
             },
@@ -3548,31 +3552,22 @@
       }
     },
     {
-      "id": "figure_returns_to_crypt_at_day",
+      "id": "figure_finishes_night_visit",
       "priority": 40,
       "trigger": {
         "kind": "event",
         "event_type": "time.point_entered",
         "when": {
-          "op": "all",
-          "items": [
-            {
-              "op": "predicate",
-              "predicate": "time_of_day_is",
-              "args": {
-                "value": "day"
-              }
-            },
-            {
-              "op": "predicate",
-              "predicate": "entity_state_is",
-              "args": {
-                "entity_id": "cemetery_figure",
-                "key": "at_surveillance_point",
-                "value": true
-              }
+          "op": "not",
+          "item": {
+            "op": "predicate",
+            "predicate": "entity_state_is",
+            "args": {
+              "entity_id": "cemetery_figure",
+              "key": "out_tonight",
+              "value": "none"
             }
-          ]
+          }
         },
         "entry_branch_id": "default"
       },
@@ -3580,28 +3575,39 @@
         "branches": [
           {
             "id": "default",
-            "entry_step_id": "return_to_crypt"
+            "entry_step_id": "take_books"
           }
         ],
         "steps": [
           {
-            "id": "return_to_crypt",
+            "id": "take_books",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "case_tracker",
+              "key": "books_taken",
+              "value": true
+            },
+            "next_step_id": "go_home"
+          },
+          {
+            "id": "go_home",
             "kind": "effect",
             "effect": {
               "type": "move_entity",
               "entity_id": "cemetery_figure",
               "location_id": "crypt"
             },
-            "next_step_id": "clear_away_flag"
+            "next_step_id": "clear"
           },
           {
-            "id": "clear_away_flag",
+            "id": "clear",
             "kind": "effect",
             "effect": {
               "type": "change_entity_state",
               "entity_id": "cemetery_figure",
-              "key": "at_surveillance_point",
-              "value": false
+              "key": "out_tonight",
+              "value": "none"
             },
             "next_step_id": "finish"
           },

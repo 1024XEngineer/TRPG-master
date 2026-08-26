@@ -1167,8 +1167,10 @@ class EventRuleChainingTests(unittest.IsolatedAsyncioTestCase):
         self.content = module()
 
     async def test_a_state_change_fires_the_rule_that_watches_it(self) -> None:
-        # locked_study_window_breaks fires once the visit is observed and the
-        # window is still locked and unbroken.
+        # locked_study_window_breaks fires once he has actually got inside and
+        # taken the books, with the window still locked and unbroken. #451 moved
+        # the trigger off "you saw him": being seen at the watch point and
+        # climbing through the study window happen at different moments.
         store = InMemoryEngineStore()
         store.register_room(
             module_content=self.content,
@@ -1177,7 +1179,7 @@ class EventRuleChainingTests(unittest.IsolatedAsyncioTestCase):
                 scene_id="kimball_study",
                 entities={
                     "study_window": {"locked": True, "broken": False},
-                    "cemetery_figure": {"visit_observed": False},
+                    "case_tracker": {"books_taken": False},
                 },
             ),
         )
@@ -1194,14 +1196,14 @@ class EventRuleChainingTests(unittest.IsolatedAsyncioTestCase):
                     request_id="observe-visit",
                     source_revision=snapshot.revision,
                     actor_id=ACTOR,
-                    summary="看到有人来过",
-                    target=ActionTarget(kind="entity", id="cemetery_figure"),
-                    method=ActionMethod(family="observe", description="看到有人来过"),
+                    summary="确认他取走了书",
+                    target=ActionTarget(kind="entity", id="case_tracker"),
+                    method=ActionMethod(family="observe", description="清点少掉的书"),
                     check=NoAdjudicationCheck(),
                     success_effects=(
                         ChangeEntityStateEffect(
-                            entity_id="cemetery_figure",
-                            key="visit_observed",
+                            entity_id="case_tracker",
+                            key="books_taken",
                             value=True,
                         ),
                     ),

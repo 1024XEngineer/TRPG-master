@@ -22,6 +22,8 @@ from collaboration_framework.contracts import (
     PlayerView,
     ValidationFeedback,
     WorldClockView,
+    default_label_for,
+    segment_at_hour,
 )
 from collaboration_framework.host.schemas.history import RecentTurnContext
 from collaboration_framework.host.schemas.memory import ConversationSummary, MemoryEntry
@@ -168,25 +170,69 @@ class ActionPlanStepRun(ContractModel):
             and self.pending_action_request_id is None
         ):
             raise ValueError("waiting_for_player step 必须记录 pending action request")
-        if (
-            self.status == "awaiting_time_consent"
-            and (
-                self.pending_action_request_id is None
-                or self.adjudication_execution is None
-                or self.adjudication_execution.status != "awaiting_time_consent"
-            )
+        if self.status == "awaiting_time_consent" and (
+            self.pending_action_request_id is None
+            or self.adjudication_execution is None
+            or self.adjudication_execution.status != "awaiting_time_consent"
         ):
             raise ValueError("awaiting_time_consent step 必须绑定待确认时间提案")
-        if (
-            self.status == "awaiting_scene_consent"
-            and (
-                self.adjudication_execution is None
-                or self.adjudication_execution.status != "awaiting_scene_consent"
-                or self.adjudication_execution.scene_transition_proposal_id is None
-            )
+        if self.status == "awaiting_scene_consent" and (
+            self.adjudication_execution is None
+            or self.adjudication_execution.status != "awaiting_scene_consent"
+            or self.adjudication_execution.scene_transition_proposal_id is None
         ):
             raise ValueError("awaiting_scene_consent step 必须绑定待确认场景提案")
         return self
+
+
+def _migrate_persisted_clock(value: object) -> object:
+    """把收窄前存下的时钟快照翻译成 `WorldClockView` 现在的形状（#415）。
+
+    `WorldClockView` 以前是 `{day_index, hour_of_day, time_of_day}`，现在是
+    `{time_label, day_index}`。两者都被 `to_persistence_json_dict()` 原样写进
+    `action_plan_runs.run_json`，而 `ContractModel` 是 `extra="forbid"` 的——
+    发布瞬间处于 active / waiting / awaiting_consent 的计划会在恢复时直接
+    ValidationError，玩家当前行动卡死。
+
+    旧记录里没有 label 可用（那时模组还不能声明），只能由小时推导 canonical
+    segment 的缺省措辞。这与既有房间 `WorldTimeState` 缺 segment 时的回退是
+    同一条：玩家该看到的东西和精确小时无关，回退是安全的。`day_index` 不在
+    收窄范围内，旧记录里存着就照搬。
+    """
+
+    if not isinstance(value, dict) or "time_label" in value:
+        return value
+    hour = value.get("hour_of_day")
+    if not isinstance(hour, int) or isinstance(hour, bool):
+        return value
+    day = value.get("day_index")
+    migrated: JsonObject = {"time_label": default_label_for(segment_at_hour(hour))}
+    # 天数不在收窄范围内，旧记录里存着就照搬，不必由小时推。
+    if isinstance(day, int) and not isinstance(day, bool):
+        migrated["day_index"] = day
+    return migrated
+
+
+def _migrate_persisted_clocks(value: JsonObject) -> JsonObject:
+    """run_json 里两处时钟：开局那一个，以及每个 step 结束时那一个。"""
+
+    migrated = dict(value)
+    if "opening_world_time" in migrated:
+        migrated["opening_world_time"] = _migrate_persisted_clock(
+            migrated["opening_world_time"]
+        )
+    steps = migrated.get("steps")
+    if isinstance(steps, list):
+        migrated["steps"] = [
+            {
+                **step,
+                "world_time_after": _migrate_persisted_clock(step["world_time_after"]),
+            }
+            if isinstance(step, dict) and "world_time_after" in step
+            else step
+            for step in steps
+        ]
+    return migrated
 
 
 class ActionPlanRun(ContractModel):
@@ -239,10 +285,10 @@ class ActionPlanRun(ContractModel):
 
     @classmethod
     def from_persistence_json_dict(cls, value: JsonObject) -> ActionPlanRun:
-        """只在可信存储边界读取内部兼容标记。"""
+        """只在可信存储边界读取内部兼容标记，顺带迁移收窄前的时钟形状。"""
 
         return cls.model_validate(
-            value,
+            _migrate_persisted_clocks(value),
             context={"allow_persistence_intent_explicit_marker": True},
         )
 
@@ -426,6 +472,9 @@ class ActionPlanNarrationContext(ContractModel):
     # Only populated for the bounded second narration attempt; contains no
     # hidden data, just the player-safe requirement the first output missed.
     narration_retry_hint: str | None = Field(default=None, max_length=500)
+    # Latest already-published narration the viewer can see. Player-safe only;
+    # the Narrator must not recopy or paraphrase it as a fresh scene-setting opening.
+    previous_published_narration: str | None = Field(default=None, max_length=2000)
 
     @model_validator(mode="after")
     def validate_narration_scope(self) -> ActionPlanNarrationContext:
@@ -442,7 +491,9 @@ class ActionPlanNarrationContext(ContractModel):
             self.conversation_summary.room_id != self.player_input.room_id
             or self.conversation_summary.player_id != self.player_input.player_id
         ):
-            raise ValueError("ActionPlanNarrationContext conversation_summary 作用域不一致")
+            raise ValueError(
+                "ActionPlanNarrationContext conversation_summary 作用域不一致"
+            )
         evidence = tuple(
             ref for step in self.completed_steps for ref in step.event_refs
         )

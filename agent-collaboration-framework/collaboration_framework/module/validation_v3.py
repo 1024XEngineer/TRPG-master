@@ -354,6 +354,8 @@ def _rule_issues(
         if rule.trigger.when is not None:
             issues.extend(_condition_issues(rule.trigger.when, f"{path}.trigger.when"))
     elif isinstance(rule.trigger, AgentMatchTriggerSpec):
+        if rule.trigger.when is not None:
+            issues.extend(_condition_issues(rule.trigger.when, f"{path}.trigger.when"))
         for index, location_id in enumerate(rule.trigger.scope.location_ids):
             require(
                 location_id,

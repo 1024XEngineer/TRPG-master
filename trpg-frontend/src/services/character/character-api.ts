@@ -95,6 +95,11 @@ export async function fetchCharacter(roomId: string, characterId: string) {
   return sdk.characters.get(roomId, characterId, requireReconnectToken());
 }
 
+/** 为当前房间角色草稿掷一次幸运值；最终结果由后端权威返回。 */
+export async function rollLuckCharacter(roomId: string, characterId: string) {
+  return sdk.characters.rollLuck(roomId, characterId, requireReconnectToken());
+}
+
 export async function quickGenerateCharacter(
   roomId: string,
   characterId: string,

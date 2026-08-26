@@ -144,6 +144,13 @@ def test_action_plan_narration_preserves_completed_travel_before_clarification()
     assert "绝不得说\n该地点没找到" in _ACTION_PLAN_NARRATION_INSTRUCTIONS
 
 
+def test_action_plan_narration_forbids_repeating_previous_atmosphere() -> None:
+    assert "previous_published_narration" in _ACTION_PLAN_NARRATION_INSTRUCTIONS
+    assert "不得用相同或几乎相同的环境开场重铺" in _ACTION_PLAN_NARRATION_INSTRUCTIONS
+    assert "把同一套时间、光线、窗景" in _ACTION_PLAN_NARRATION_INSTRUCTIONS
+    assert "不要再写一整段地点简介" in _ACTION_PLAN_NARRATION_INSTRUCTIONS
+
+
 def load_paper_chase() -> ModuleContentV3:
     examples = (
         ROOT

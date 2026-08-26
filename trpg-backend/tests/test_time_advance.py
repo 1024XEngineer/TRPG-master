@@ -12,17 +12,27 @@ from collaboration_framework.contracts import (
     ActionTarget,
     AdjudicationExecution,
     AdvanceWorldTimeEffect,
+    CreateTimeTaskStep,
+    ModuleContentV3,
     NoAdjudicationCheck,
     SubmitAdjudicationRequest,
+    TimeTaskSpec,
+    TimeTaskTargetSpec,
 )
 from collaboration_framework.contracts.validation import AdjudicationValidationError
 from collaboration_framework.engine import AdjudicationEngineService, GameState
+from collaboration_framework.engine.time_tasks import create_time_task
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dto.ws import TimeAdvancePendingPayload, TimeAdvanceResolvedPayload
 from app.main import app
-from app.models.engine import GameEvent, GameSession, TimeAdvanceProposalRecord
+from app.models.engine import (
+    GameEvent,
+    GameSession,
+    ModuleVersion,
+    TimeAdvanceProposalRecord,
+)
 from app.service import time_advance
 from tests.test_engine_runtime import _start_room
 
@@ -154,6 +164,189 @@ async def test_proposal_creation_is_idempotent_per_room_revision(
                 action_id="time-create-conflict-349",
             ),
         )
+
+
+@pytest.mark.asyncio
+async def test_broadcast_payloads_carry_only_the_module_wording(
+    db_session: AsyncSession,
+) -> None:
+    """确认弹窗不能是玩家侧收窄的漏洞（#415 §阶段一）。
+
+    只删 PlayerView 字段而让弹窗照旧显示「第 3 天 20:00」等于没收窄，所以
+    广播载荷里既不能有精确时刻，也不能有能反推出小时的 point id。精确目标
+    仍留在提案记录上——它是提交校验与断线恢复的依据。
+    """
+
+    room, players, _ = await _start_room(
+        db_session,
+        room_number=3494,
+        player_count=2,
+        prepare_checkpoint=False,
+    )
+    session = await db_session.get(GameSession, room.id)
+    assert session is not None
+    await time_advance.create_from_adjudication(
+        db_session,
+        _request(
+            room_id=room.id,
+            player_id=players[0].id,
+            actor_id="actor_1",
+            revision=session.state_version,
+            action_id="time-label-415",
+        ),
+    )
+
+    record = await time_advance._active_record(db_session, room.id)
+    assert record is not None
+    # 追书人从 hour_12 起步，下一个点是 hour_18，走 evening 的缺省措辞。
+    assert record.target_point_id == "hour_18"
+    assert record.target_hour_of_day == 18
+    assert record.target_label == "晚上"
+
+    pending = time_advance._pending_payload(record).model_dump(by_alias=True)
+    assert pending["targetLabel"] == "晚上"
+    record.status = "approved"
+    resolved = time_advance._resolved_payload(record).model_dump(by_alias=True)
+    assert resolved["targetLabel"] == "晚上"
+
+    assert pending["targetDayIndex"] == 0
+    assert resolved["targetDayIndex"] == 0
+    # 小时与能反推出小时的 point id 仍然不许过网；天数不在收窄范围内。
+    leaked = {"targetPointId", "targetHourOfDay"}
+    assert not leaked & pending.keys()
+    assert not leaked & resolved.keys()
+
+
+@pytest.mark.asyncio
+async def test_terminal_point_refuses_before_any_vote_is_collected(
+    db_session: AsyncSession,
+) -> None:
+    """多人房间在终点根本不该创建提案（#415 §阶段二）。
+
+    让全员投完票才被拒是最难看的一种拒绝方式，所以应用层在建提案**之前**就要
+    执行和 Engine 提交时同一个 `terminal_reached`。
+    """
+
+    room, players, _ = await _start_room(
+        db_session,
+        room_number=3496,
+        player_count=2,
+        prepare_checkpoint=False,
+    )
+    session = await db_session.get(GameSession, room.id)
+    assert session is not None
+    version = await db_session.get(ModuleVersion, (session.module_id, session.module_version))
+    assert version is not None
+    # 追书人从 hour_12 开局；把开局那一刻本身声明成终点，房间一上来就在终点上。
+    content = dict(version.content_json)
+    content["time_policy"] = dict(content["time_policy"]) | {
+        "terminal_point": {"point_id": "hour_12", "day_index": 0}
+    }
+    version.content_json = content
+    await db_session.commit()
+
+    with pytest.raises(time_advance.TimeAdvanceError, match="最后一个时间点"):
+        await time_advance.create_from_adjudication(
+            db_session,
+            _request(
+                room_id=room.id,
+                player_id=players[0].id,
+                actor_id="actor_1",
+                revision=session.state_version,
+                action_id="time-terminal-415",
+            ),
+        )
+
+    assert await time_advance._active_record(db_session, room.id) is None
+
+
+@pytest.mark.asyncio
+async def test_proposal_targets_the_temporary_point_the_engine_would_enter(
+    db_session: AsyncSession,
+) -> None:
+    """多人提案必须和引擎用同一套推进解析（#415）。
+
+    Engine 校验/应用 advance_world_time 时传了 active_occurrences，应用层冻结
+    目标时没传。只要下一跳是定时任务插入的临时点，两边就会算出不同的点：显式
+    to_point_id 被误判「不是下一个点」，省略时存下的 label 与最终提交不一致 ——
+    临时任务在多人房间永远到不了。
+    """
+
+    room, players, _ = await _start_room(
+        db_session,
+        room_number=3497,
+        player_count=2,
+        prepare_checkpoint=False,
+    )
+    session = await db_session.get(GameSession, room.id)
+    assert session is not None
+    version = await db_session.get(ModuleVersion, (session.module_id, session.module_version))
+    assert version is not None
+    module = ModuleContentV3.model_validate(version.content_json)
+
+    # 房间从 hour_12 开局；在 12 与 18 之间排一个 15:00 的任务。
+    state = GameState.model_validate(session.state_json)
+    step = CreateTimeTaskStep(
+        id="schedule",
+        task=TimeTaskSpec(
+            task_key="afternoon_visitor",
+            target=TimeTaskTargetSpec(day_index=0, hour_of_day=15),
+            on_due_branch_id="default",
+        ),
+        next_step_id="finish",
+    )
+    state, task, _ = create_time_task(module, state, step, rule_id="scheduler")
+    session.state_json = state.model_dump(mode="json")
+    await db_session.commit()
+
+    await time_advance.create_from_adjudication(
+        db_session,
+        _request(
+            room_id=room.id,
+            player_id=players[0].id,
+            actor_id="actor_1",
+            revision=session.state_version,
+            action_id="time-temp-point-415",
+        ),
+    )
+
+    record = await time_advance._active_record(db_session, room.id)
+    assert record is not None
+    # 下一跳是 15:00 那个临时点，不是默认的 hour_18。
+    assert record.target_point_id == task.occurrence_id
+    assert record.target_hour_of_day == 15
+    assert record.target_label == "下午"
+
+
+@pytest.mark.asyncio
+async def test_a_proposal_from_before_the_label_column_falls_back_to_the_hour(
+    db_session: AsyncSession,
+) -> None:
+    """迁移前建的提案没有 label，按目标小时回退，不让广播炸掉。"""
+
+    room, players, _ = await _start_room(
+        db_session,
+        room_number=3495,
+        player_count=2,
+        prepare_checkpoint=False,
+    )
+    session = await db_session.get(GameSession, room.id)
+    assert session is not None
+    await time_advance.create_from_adjudication(
+        db_session,
+        _request(
+            room_id=room.id,
+            player_id=players[0].id,
+            actor_id="actor_1",
+            revision=session.state_version,
+            action_id="time-label-fallback-415",
+        ),
+    )
+    record = await time_advance._active_record(db_session, room.id)
+    assert record is not None
+    record.target_label = None
+
+    assert time_advance._pending_payload(record).target_label == "晚上"
 
 
 @pytest.mark.asyncio

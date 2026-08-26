@@ -18,11 +18,11 @@ from collaboration_framework.contracts.module_v3 import (
     NotCondition,
     PredicateCondition,
 )
-from collaboration_framework.registry import check_profiles as check_profile_registry
 from collaboration_framework.module.validation_v3 import (
     _condition_issues,
     validate_module_v3,
 )
+from collaboration_framework.registry import check_profiles as check_profile_registry
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = (
@@ -35,6 +35,20 @@ FIXTURES = (
 
 
 class ConditionIssuesTests(unittest.TestCase):
+    def test_absent_agent_match_when_does_not_rewrite_old_module_json(self) -> None:
+        path = FIXTURES / "银之锁" / "module-content-v3.json"
+        content = ModuleContentV3.model_validate_json(path.read_text(encoding="utf-8"))
+
+        authored = json.loads(path.read_text(encoding="utf-8"))
+        normalized = content.to_json_dict()
+        for authored_rule, normalized_rule in zip(
+            authored["rules"], normalized["rules"], strict=True
+        ):
+            if authored_rule["trigger"]["kind"] != "agent_match":
+                continue
+            self.assertNotIn("when", authored_rule["trigger"])
+            self.assertNotIn("when", normalized_rule["trigger"])
+
     def test_registered_predicate_name_has_no_issue(self) -> None:
         condition = PredicateCondition(predicate="entity_state_is", args={})
         self.assertEqual(_condition_issues(condition, "path"), [])
@@ -73,6 +87,32 @@ class ConditionIssuesTests(unittest.TestCase):
         self.assertEqual(len(issues), 1)
         self.assertEqual(issues[0].code, "MODULE_V3_PREDICATE_UNKNOWN")
         self.assertEqual(issues[0].path, "path.item.items.1.predicate")
+
+    def test_unknown_predicate_on_agent_match_is_rejected_at_publish_time(self) -> None:
+        path = FIXTURES / "追书人" / "module-content-v3.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        rule_index, rule = next(
+            (index, item)
+            for index, item in enumerate(data["rules"])
+            if item["trigger"]["kind"] == "agent_match"
+        )
+        rule["trigger"]["when"] = {
+            "op": "predicate",
+            "predicate": "made_up_predicate",
+            "args": {},
+        }
+
+        report = validate_module_v3(ModuleContentV3.model_validate(data))
+
+        issue = next(
+            item
+            for item in report.errors
+            if item.code == "MODULE_V3_PREDICATE_UNKNOWN"
+        )
+        self.assertEqual(
+            issue.path,
+            f"rules.{rule_index}.trigger.when.predicate",
+        )
 
 
 class ActorBindingValidationTests(unittest.TestCase):

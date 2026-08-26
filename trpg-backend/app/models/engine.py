@@ -140,9 +140,13 @@ class TimeAdvanceProposalRecord(Base):
     # 父行动 ID，最终确认后据此恢复整条原计划，而不是把步骤 ID 当作计划 ID。
     parent_action_id: Mapped[str] = mapped_column(String(200), nullable=False)
     requester_player_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    # 精确目标是提交校验与断线恢复的依据，不进广播载荷（#415 §阶段一）。
     target_point_id: Mapped[str] = mapped_column(String(100), nullable=False)
     target_day_index: Mapped[int] = mapped_column(Integer, nullable=False)
     target_hour_of_day: Mapped[int] = mapped_column(Integer, nullable=False)
+    # 广播出去的那一个字符串。建提案时解析一次存下来，省得每次重连覆盖都要
+    # 把整份 ModuleContentV3 读出来校验一遍。可空是为了迁移前的存量提案。
+    target_label: Mapped[str | None] = mapped_column(String(20), nullable=True)
     required_player_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False)
     accepted_player_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False)
     # 冻结 Agent 已产生的原裁决与应用层等待状态，不在最后一票时重新

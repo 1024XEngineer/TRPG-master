@@ -122,6 +122,7 @@ const { mockRuleset, mockPreviewCharacter, mockCharacterApi } = vi.hoisted(() =>
     quickGenerateCharacter: vi.fn(),
     saveCharacter: vi.fn().mockResolvedValue(undefined),
     completeCharacter: vi.fn().mockResolvedValue(undefined),
+    rollLuckCharacter: vi.fn().mockResolvedValue({ dice: [3, 4, 5], luck: 60 }),
     fetchCharacter: vi.fn().mockResolvedValue({ attributes: {}, skills: {} }),
   }
 
@@ -221,6 +222,15 @@ describe('CharacterPage', () => {
     })
   }
 
+  async function confirmLuckDicePanel() {
+    for (let index = 0; index < 3; index += 1) {
+      fireEvent.click(await screen.findByRole('button', { name: '掷骰' }))
+      fireEvent.click(await screen.findByRole('button', {
+        name: index === 2 ? '确认幸运值' : '继续投骰',
+      }))
+    }
+  }
+
   async function advanceToAttributesAfterOccupationPreview() {
     await waitFor(() => {
       expect(mockPreviewCharacter).toHaveBeenCalledWith(expect.objectContaining({ occupationId: 1 }))
@@ -229,6 +239,20 @@ describe('CharacterPage', () => {
       fireEvent.click(screen.getByRole('button', { name: /下一步/ }))
       expect(screen.getByText('属性分配')).toBeInTheDocument()
     })
+    const luckButton = screen.queryByRole('button', { name: '掷幸运骰' })
+    if (luckButton) {
+      const previewCalls = mockPreviewCharacter.mock.calls.length
+      fireEvent.click(luckButton)
+      await waitFor(() => expect(mockCharacterApi.rollLuckCharacter).toHaveBeenCalledWith('room-1', 'draft-1'))
+      await confirmLuckDicePanel()
+      // 幸运回填会触发一次新的规则预览，等它完成后再继续后续页面操作。
+      await waitFor(() => {
+        expect(mockPreviewCharacter.mock.calls.length).toBeGreaterThan(previewCalls)
+        expect(mockPreviewCharacter).toHaveBeenLastCalledWith(
+          expect.objectContaining({ attributes: expect.objectContaining({ LUCK: 60 }) })
+        )
+      })
+    }
   }
 
   async function advanceToBackgroundStep() {
@@ -254,8 +278,18 @@ describe('CharacterPage', () => {
       fireEvent.click(screen.getByRole('button', { name: /下一步/ }))
       expect(screen.getByText('属性分配')).toBeInTheDocument()
     })
-    fireEvent.click(screen.getByRole('button', { name: /下一步/ }))
-    expect(await screen.findByTestId('occupation-choice-panel')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '掷幸运骰' }))
+    await waitFor(() => expect(mockCharacterApi.rollLuckCharacter).toHaveBeenCalledWith('room-1', 'draft-1'))
+    await confirmLuckDicePanel()
+    await waitFor(() => {
+      expect(mockPreviewCharacter).toHaveBeenLastCalledWith(
+        expect.objectContaining({ attributes: expect.objectContaining({ LUCK: 60 }) })
+      )
+    })
+    await waitFor(() => {
+      fireEvent.click(screen.getByRole('button', { name: /下一步/ }))
+      expect(screen.getByTestId('occupation-choice-panel')).toBeInTheDocument()
+    })
   }
 
   it('switches directly between the four book tabs without requiring sequential progress', () => {

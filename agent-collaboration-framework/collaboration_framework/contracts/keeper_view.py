@@ -106,6 +106,22 @@ class KeeperRuleCandidate(ContractModel):
     options: tuple[KeeperRuleOption, ...] = ()
 
 
+class TimeAdvanceBlockReason(ContractModel):
+    """时间推不动的原因，带稳定 code（#415 §阶段二）。
+
+    以前这里是一个裸字符串，调用方靠 `startswith("time_advance_requires_...")`
+    去解析它。那让内部措辞变成了事实上的契约：改一个字的文案就会静默改掉一个
+    分支的行为。code 是稳定的，`message` 只给人看。
+    """
+
+    code: Literal[
+        "time_advance_requires_party_ready",
+        "terminal_point_reached",
+        "time_next_point_not_found",
+    ]
+    message: str = Field(min_length=1)
+
+
 class KeeperTimeCapability(ContractModel):
     """What one `advance_world_time` effect would do, and whether it may run.
 
@@ -114,6 +130,10 @@ class KeeperTimeCapability(ContractModel):
     is populated instead of hiding the capability, because "you cannot advance
     time here, and here is why" is what lets the Agent say something true to the
     player rather than silently doing nothing.
+
+    走到时间线终点时 `next_point_id` 为 None，`blocked_reason.code` 是
+    `terminal_point_reached`。玩家侧只投影 `can_advance_time`，看不到这里的
+    任何精确时刻。
     """
 
     current_point_id: str = Field(min_length=1)
@@ -121,7 +141,7 @@ class KeeperTimeCapability(ContractModel):
     current_day_index: int = Field(ge=0)
     next_point_id: str | None = Field(default=None, min_length=1)
     ordered_point_ids: tuple[str, ...] = ()
-    blocked_reason: str | None = None
+    blocked_reason: TimeAdvanceBlockReason | None = None
 
 
 class KeeperCapabilityView(ContractModel):

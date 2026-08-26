@@ -2216,16 +2216,42 @@ async def _recover_persisted_turn_narration(
     ):
         if queued_item.player_id != player_id:
             raise ContractError("持久化 direct response 不属于当前玩家")
+        if queued_item.status == "completed":
+            existing = await room_service.get_correlated_event(
+                db,
+                room_id,
+                "narration.push",
+                client_action_id,
+            )
+            if existing is None:
+                return True
+            view = await session_view_application.current_player_view(
+                room_id=room_id,
+                player_id=player_id,
+            )
+            await _run_direct_host_action(
+                db,
+                queued_item,
+                view,
+                websocket,
+                broadcast_state=False,
+            )
+            return True
+        claimed = await host_action_queue_service.claim(
+            db,
+            queued_item,
+            recipient_kind="keeper",
+            lease_seconds=180,
+        )
+        if claimed is None:
+            # An active lease or a terminal non-completed item is owned by
+            # another worker or already settled; never replay it concurrently.
+            return True
+        queued_item = claimed
         view = await session_view_application.current_player_view(
             room_id=room_id,
             player_id=player_id,
         )
-        if queued_item.status != "processing":
-            claimed = await host_action_queue_service.claim(
-                db, queued_item, recipient_kind="keeper", lease_seconds=180
-            )
-            if claimed is not None:
-                queued_item = claimed
         await _run_direct_host_action(
             db,
             queued_item,

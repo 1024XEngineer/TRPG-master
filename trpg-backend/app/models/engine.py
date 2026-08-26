@@ -546,6 +546,10 @@ class HostActionQueueItem(Base):
             "recipient_kind IN ('keeper', 'npc')",
             name="ck_host_action_queue_recipient_kind",
         ),
+        CheckConstraint(
+            "execution_route IN ('unresolved', 'direct_response', 'delegate_to_legacy')",
+            name="ck_host_action_queue_execution_route",
+        ),
         CheckConstraint("attempt_count >= 0", name="ck_host_action_queue_attempt_count"),
         CheckConstraint(
             "(status = 'processing' AND lease_owner IS NOT NULL "
@@ -592,6 +596,11 @@ class HostActionQueueItem(Base):
     recipient_explicit: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="1"
     )
+    execution_route: Mapped[str | None] = mapped_column(
+        String(30), nullable=True, default="unresolved", server_default="unresolved"
+    )
+    direct_response_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    execution_provenance: Mapped[str | None] = mapped_column(String(40), nullable=True)
     position: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="queued")
     attempt_count: Mapped[int] = mapped_column(

@@ -70,19 +70,32 @@ from collaboration_framework.host.schemas import NarrationOutput, reservation_is
 from collaboration_framework.host.schemas.action_plan import ActionPlanNpcReply
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field, ValidationError
-from sqlalchemy import select
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import and_, or_, select
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.websockets import WebSocketState
 
+from app.adapters import (
+    DeepSeekChatCompletionsJsonClient,
+    OpenAIResponsesJsonClient,
+    PromptHostEntryModel,
+    QwenChatCompletionsJsonClient,
+)
 from app.adapters.structured_http import StructuredOutputError, is_transient_model_error
 from app.core.action_plan_turn import (
     ActionPlanTurnResult,
     _matching_visible_entity_ids,
     action_plan_turn_application,
 )
+from app.core.config import get_settings, model_client_retry_policy, secret_value
 from app.core.db import async_session_factory
 from app.core.engine import adjudication_engine_service, legacy_single_action_recovery
+from app.core.host_entry import (
+    DeterministicHostEntryModel,
+    HostEntryRouter,
+    HostPublicContextProjector,
+    HostPublicHistoryEntry,
+)
 from app.core.turn import (
     ActorResolutionError,
     session_view_application,
@@ -150,7 +163,7 @@ from app.models.engine import (
     SceneTransitionProposalRecord,
     TimeAdvanceProposalRecord,
 )
-from app.models.event import Event
+from app.models.event import Event, EventAudience
 from app.models.room import Player
 from app.service import auth as auth_service
 from app.service import chat as chat_service
@@ -185,6 +198,130 @@ def _listener_ids_for_utterance(utterance: str, player_view: PlayerView) -> tupl
 _UNAUTHORIZED_CLOSE_CODE = 4401
 _NOT_FOUND_CLOSE_CODE = 4404
 _OPENING_MESSAGE_ID = "game-opening"
+
+_host_entry_router: HostEntryRouter | None = None
+
+
+def _get_host_entry_router() -> HostEntryRouter:
+    """Build the A1 router lazily so test imports stay offline-safe."""
+
+    global _host_entry_router
+    if _host_entry_router is not None:
+        return _host_entry_router
+    settings = get_settings()
+    if settings.host_model_provider == "fake":
+        model = DeterministicHostEntryModel()
+    else:
+        client_type = {
+            "openai": OpenAIResponsesJsonClient,
+            "qwen": QwenChatCompletionsJsonClient,
+            "deepseek": DeepSeekChatCompletionsJsonClient,
+        }[settings.host_model_provider]
+        if settings.host_model_provider == "openai":
+            api_key, base_url, model_name, timeout = (
+                settings.openai_api_key,
+                settings.openai_base_url,
+                settings.openai_model,
+                settings.openai_timeout_seconds,
+            )
+        elif settings.host_model_provider == "qwen":
+            api_key, base_url, model_name, timeout = (
+                settings.qwen_api_key,
+                settings.qwen_base_url,
+                settings.qwen_model,
+                settings.qwen_timeout_seconds,
+            )
+        else:
+            api_key, base_url, model_name, timeout = (
+                settings.deepseek_api_key,
+                settings.deepseek_base_url,
+                settings.deepseek_model,
+                settings.deepseek_timeout_seconds,
+            )
+        if api_key is None:
+            raise ValueError("Host entry model provider 缺少 API key")
+        model = PromptHostEntryModel(
+            client_type(
+                api_key=secret_value(api_key),
+                base_url=base_url,
+                model=model_name,
+                timeout_seconds=timeout,
+                retry_policy=model_client_retry_policy(settings),
+            )
+        )
+    _host_entry_router = HostEntryRouter(model)
+    return _host_entry_router
+
+
+async def _public_host_history(
+    db: AsyncSession,
+    room_id: str,
+    *,
+    viewer_player_id: str | None = None,
+    exclude_correlation_id: str | None = None,
+    max_turns: int = 6,
+    max_chars: int = 6000,
+) -> tuple[HostPublicHistoryEntry, ...]:
+    visibility_clause = Event.visibility == "public"
+    if viewer_player_id is not None:
+        visibility_clause = or_(
+            visibility_clause,
+            and_(
+                Event.visibility == "scene_scoped",
+                select(EventAudience.event_id)
+                .where(
+                    EventAudience.event_id == Event.id,
+                    EventAudience.player_id == viewer_player_id,
+                )
+                .exists(),
+            ),
+        )
+    rows = await db.scalars(
+        select(Event)
+        .where(
+            Event.room_id == room_id,
+            Event.event_type.in_(
+                ("action.broadcast", "dialogue.player", "dialogue.npc", "narration.push")
+            ),
+            visibility_clause,
+            *(
+                [Event.correlation_id != exclude_correlation_id]
+                if exclude_correlation_id is not None
+                else []
+            ),
+        )
+        .order_by(Event.created_at.desc(), Event.id.desc())
+        .limit(max_turns * 3)
+    )
+    entries: list[HostPublicHistoryEntry] = []
+    for event in reversed(list(rows)):
+        text = None
+        if isinstance(event.payload, dict):
+            text = event.payload.get("text") or event.payload.get("utterance")
+        if not isinstance(text, str) or not text.strip():
+            continue
+        source = cast(
+            Literal[
+                "player_message",
+                "npc_dialogue",
+                "keeper_narration",
+                "direct_response",
+            ],
+            {
+                "action.broadcast": "player_message",
+                "dialogue.player": "player_message",
+                "dialogue.npc": "npc_dialogue",
+                "narration.push": "keeper_narration",
+            }[event.event_type],
+        )
+        speaker = None
+        if isinstance(event.payload, dict):
+            speaker = event.payload.get("speakerName") or event.payload.get("characterName")
+        entries.append(HostPublicHistoryEntry(source=source, speaker=speaker, text=text.strip()))
+    entries = entries[-max_turns:]
+    while entries and sum(len(item.text) for item in entries) > max_chars:
+        entries.pop(0)
+    return tuple(entries)
 
 
 async def _current_room_action_state(
@@ -740,6 +877,102 @@ async def _run_queued_host_action(
             await _send_turn_failed(target_socket, item.client_action_id, exc)
 
 
+async def _run_direct_host_action(
+    db: AsyncSession,
+    item,
+    view: PlayerView,
+    websocket: WebSocket | None,
+    *,
+    broadcast_state: bool = True,
+) -> None:
+    """Persist and deliver a frozen A1 response without entering ActionPlan."""
+
+    text = (item.direct_response_text or "").strip()
+    if not text:
+        raise RuntimeError("direct_response 队列项缺少已校验文本")
+    kind = "clarification" if item.execution_provenance == "fallback_clarification" else "narration"
+    existing = await room_service.get_correlated_event(
+        db, item.room_id, "narration.push", item.client_action_id
+    )
+    recorded = existing is None
+    if existing is None:
+        payload = NarrationPushPayload(message_id=item.client_action_id, text=text).model_dump(
+            by_alias=True
+        )
+        payload[room_service.PERSISTED_TURN_COMPLETION_KEY] = {
+            "kind": kind,
+            "claimed_fact_ids": [],
+            "suggested_actions": [],
+            "npc_reply_count": 0,
+            "npc_replies": [],
+        }
+        try:
+            existing = await room_service.record_event_pending(
+                db,
+                item.room_id,
+                item.player_id,
+                "narration.push",
+                payload,
+                visibility="public",
+                actor_id=item.actor_id,
+                scene_id=view.scene.id,
+                view_revision=view.revision,
+                correlation_id=item.client_action_id,
+            )
+        except IntegrityError:
+            await db.rollback()
+            existing = await room_service.get_correlated_event(
+                db, item.room_id, "narration.push", item.client_action_id
+            )
+            if existing is None:
+                raise
+            recorded = False
+    item.result_event_ids = [existing.id]
+    item.status = "completed"
+    item.lease_owner = None
+    item.lease_expires_at = None
+    item.next_attempt_at = None
+    item.updated_at = datetime.now(UTC)
+    await db.commit()
+
+    narration = NarrationOutput(kind=kind, text=normalize_narration_text(text))
+    await _send_to_player(
+        websocket,
+        {
+            "protocol_version": "1",
+            "message_type": "turn.completed",
+            "correlation_id": item.client_action_id,
+            "payload": {
+                "room_id": item.room_id,
+                "player_id": item.player_id,
+                "actor_id": item.actor_id,
+                "narration": narration.model_dump(mode="json"),
+                "player_view": view.to_json_dict(),
+            },
+        },
+    )
+    await _send_view_updated(websocket, item.player_id, view)
+    if recorded:
+        await _emit_turn_narration(
+            websocket,
+            item.room_id,
+            client_action_id=item.client_action_id,
+            narration=narration,
+        )
+    elif websocket is not None:
+        await _send_to_player(
+            websocket,
+            ServerEnvelope(
+                type="narration.push",
+                payload=NarrationPushPayload(
+                    message_id=item.client_action_id, text=text
+                ).model_dump(by_alias=True),
+            ).model_dump(by_alias=True),
+        )
+    if broadcast_state:
+        await _broadcast_room_action_state_fresh(item.room_id)
+
+
 async def _drain_host_action_queue(room_id: str) -> None:
     async with _host_drain_lock(room_id):
         while True:
@@ -803,12 +1036,51 @@ async def _drain_host_action_queue(room_id: str) -> None:
                     if item.recipient_kind == "npc":
                         await _run_queued_host_action(db, item, view)
                         continue
-                    interlocutor_id = (
-                        item.recipient_entity_id if item.recipient_kind == "npc" else None
+                    # Keeper items use the durable lease shared with NPC items.  A
+                    # decision is frozen before either route executes, so a retry or
+                    # process restart cannot call the router twice.
+                    claimed = await host_action_queue_service.claim(
+                        db,
+                        item,
+                        recipient_kind="keeper",
+                        lease_seconds=180,
                     )
+                    if claimed is None:
+                        return
+                    item = claimed
+                    route = host_action_queue_service.effective_execution_route(item)
+                    if route == "unresolved":
+                        history = await _public_host_history(
+                            db,
+                            room_id,
+                            viewer_player_id=item.player_id,
+                            exclude_correlation_id=item.client_action_id,
+                        )
+                        context = HostPublicContextProjector(
+                            max_turns=get_settings().recent_history_max_turns,
+                            max_chars=get_settings().recent_history_max_chars,
+                        ).project(
+                            view,
+                            current_keeper_text=item.utterance,
+                            public_history=history,
+                        )
+                        decision, provenance = await _get_host_entry_router().decide(context)
+                        await host_action_queue_service.save_execution_route(
+                            db,
+                            item,
+                            route=decision.route,
+                            text=decision.text,
+                            provenance=provenance,
+                        )
+                        route = decision.route
+                        await db.refresh(item)
+                    if route == "direct_response":
+                        await _run_direct_host_action(db, item, view, websocket)
+                        continue
+                    # delegate_to_legacy intentionally enters the unchanged
+                    # ActionPlan application below.
+                    interlocutor_id = None
                     interlocutor_name = None
-                    if interlocutor_id is not None:
-                        interlocutor_name = require_dialogue_npc(view, interlocutor_id).name
                     result = await action_plan_turn_application.start(
                         room_id=room_id,
                         player_id=item.player_id,
@@ -838,6 +1110,23 @@ async def _drain_host_action_queue(room_id: str) -> None:
                     if result.waiting_for_player:
                         return
                 except Exception as exc:
+                    # A direct response commits its Event and queue completion before
+                    # any socket/broadcast work.  Delivery failures must therefore
+                    # leave the durable result completed so reconnect can replay it.
+                    if (
+                        item.recipient_kind == "keeper"
+                        and host_action_queue_service.effective_execution_route(item)
+                        == "direct_response"
+                        and item.status == "completed"
+                    ):
+                        logger.warning(
+                            "host_direct_response_delivery_failed_after_commit",
+                            room_id=room_id,
+                            client_action_id=item.client_action_id,
+                            error_type=type(exc).__name__,
+                            error_reason=_turn_error_reason(exc),
+                        )
+                        continue
                     await host_action_queue_service.discard(db, item)
                     log_turn_failed(
                         room_id=room_id,
@@ -1406,6 +1695,35 @@ async def _recover_persisted_turn_narration(
     player_id: str,
     client_action_id: str,
 ) -> bool:
+    # A1 direct responses have no ActionPlan/Engine record.  Recover from the
+    # queue item's frozen text and correlated public event instead.
+    queued_item = await host_action_queue_service.get_by_client_action(
+        db, room_id, client_action_id
+    )
+    if (
+        queued_item is not None
+        and host_action_queue_service.effective_execution_route(queued_item) == "direct_response"
+    ):
+        if queued_item.player_id != player_id:
+            raise ContractError("持久化 direct response 不属于当前玩家")
+        view = await session_view_application.current_player_view(
+            room_id=room_id,
+            player_id=player_id,
+        )
+        if queued_item.status != "processing":
+            claimed = await host_action_queue_service.claim(
+                db, queued_item, recipient_kind="keeper", lease_seconds=180
+            )
+            if claimed is not None:
+                queued_item = claimed
+        await _run_direct_host_action(
+            db,
+            queued_item,
+            view,
+            websocket,
+            broadcast_state=queued_item.status != "completed",
+        )
+        return True
     active = await action_plan_turn_application.get_plan(room_id, client_action_id)
     existing = await room_service.get_correlated_event(
         db,

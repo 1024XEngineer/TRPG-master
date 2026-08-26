@@ -46,6 +46,11 @@ from app.adapters.structured_http import (
     post_structured_json,
     read_structured_payload,
 )
+from app.core.host_entry import (
+    HostEntryDecision,
+    HostPublicContext,
+    host_entry_decision_schema,
+)
 
 logger = structlog.get_logger()
 
@@ -555,6 +560,29 @@ class PromptHostTurnDecisionModel:
             "主持模型返回了无法解读的结果，本次动作未生效，请重试",
             retryable=True,
         ) from last_error
+
+
+class PromptHostEntryModel:
+    """One structured call for the A1 keeper entry router."""
+
+    _INSTRUCTIONS = """你是桌面角色扮演游戏的主持入口分流器。只返回 schema 要求的 JSON。
+只有明确、低风险、无需检定、不会改变权威状态的普通互动（例如礼貌招呼）才返回
+direct_response，并给出一句简短自然的即时回应。调查、搜索、物品、线索、案件、秘密、
+人物背景、说服/威胁/欺骗、移动、时间地点、任何成功失败或状态变化，以及信息不足的请求，
+一律返回 delegate_to_legacy 且 text 必须为空。不得声称规则结果，不得输出 JSON、字段名、
+内部标识、ID、revision、协议或未来承诺。上下文只包含公开信息。"""
+
+    def __init__(self, client: StructuredJsonClient) -> None:
+        self._client = client
+
+    async def generate(self, context: HostPublicContext) -> dict[str, object]:
+        raw = await self._client.generate(
+            schema_name="trpg_host_entry_decision",
+            schema=host_entry_decision_schema(),
+            instructions=self._INSTRUCTIONS,
+            input_payload=context.to_model_payload(),
+        )
+        return HostEntryDecision.model_validate(raw).model_dump(mode="json")
 
 
 class PromptTurnPlanner:

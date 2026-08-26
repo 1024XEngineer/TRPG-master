@@ -520,11 +520,14 @@ async def roll_luck(
     attributes = dict(character.attributes or {})
     attributes["LUCK"] = luck
     # 用版本条件完成原子写入：两个并发请求最多一个成功，后到者不能覆盖先到结果。
-    result = cast(CursorResult[tuple[()],], await db.execute(
-        update(Character)
-        .where(Character.id == character.id, Character.version == character.version)
-        .values(attributes=attributes, version=character.version + 1)
-    ))
+    result = cast(
+        CursorResult[tuple[()],],
+        await db.execute(
+            update(Character)
+            .where(Character.id == character.id, Character.version == character.version)
+            .values(attributes=attributes, version=character.version + 1)
+        ),
+    )
     if result.rowcount != 1:
         await db.rollback()
         raise RoomConflictError("幸运值已经掷出，不能重复掷骰")

@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from collaboration_framework.contracts import (
+    ContractError,
     ItemAcquisition,
     ItemComponent,
     ItemCustody,
@@ -32,7 +33,7 @@ def create_initial_game_state(
     # Entity's own defaults, so it is merged last.
     for entity_id, overrides in initial.entity_state.items():
         entities.setdefault(entity_id, {}).update(overrides)
-    items = _initial_items(module_content, room_id)
+    items = _initial_items(module_content, room_id, actors)
     carried, carried_knowledge = _initial_carried_equipment(actors, room_id)
     items.update(carried)
     return GameState(
@@ -138,29 +139,31 @@ def _initial_carried_equipment(
 def _initial_items(
     module_content: ModuleContentV3,
     room_id: str,
+    actors: Mapping[str, ActorState],
 ) -> dict[str, ItemInstance]:
     items: dict[str, ItemInstance] = {}
     for entity in module_content.entities:
         if entity.item_component is None:
             continue
-        carried_by = next(
-            (
-                relation.target_id
-                for relation in entity.relations
-                if relation.kind == "carried_by"
-            ),
-            None,
-        )
-        custody = (
-            ItemCustody(kind="actor_inventory", ref_id=carried_by, form="carried")
-            if carried_by is not None
-            else ItemCustody(
+        initial_custody = entity.initial_custody
+        if initial_custody is not None and initial_custody.kind == "starting_actor":
+            # 房间服务按加入顺序生成 actor_1；这里取 mapping 首项，避免把运行期 id 写进模组。
+            starting_actor_id = next(iter(actors), None)
+            if starting_actor_id is None:
+                raise ContractError(
+                    f"实体 {entity.id} 声明 starting_actor，但开局没有调查员"
+                )
+            # Canon unique 物品只产生一个实例，本次不复制给多人房间的每位调查员。
+            custody = ItemCustody(
+                kind="actor_inventory", ref_id=starting_actor_id, form="carried"
+            )
+        else:
+            custody = ItemCustody(
                 kind="location",
                 ref_id=entity.located_in
                 or module_content.initial_state.start_location_id,
                 form="placed",
             )
-        )
         seed_event_id = f"module_seed:{entity.id}"
         items[entity.id] = ItemInstance(
             id=entity.id,

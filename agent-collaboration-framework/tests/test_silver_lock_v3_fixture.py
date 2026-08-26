@@ -6,6 +6,8 @@ import json
 import unittest
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from collaboration_framework.contracts import (
     ActionAdjudication,
     ActionMethod,
@@ -14,6 +16,7 @@ from collaboration_framework.contracts import (
     CancelCheckChoice,
     ChangeEntityStateEffect,
     CheckDecisionRequest,
+    ContractError,
     ModuleContentV3,
     NoAdjudicationCheck,
     PlayerViewScope,
@@ -177,6 +180,62 @@ class SilverLockContentGateTests(unittest.TestCase):
         self.assertEqual(self.content.ending_anchors[0].id, "kill_kidnapper_then_escape")
         self.assertEqual(self.content.ending_anchors[1].id, "escape_after_lock_breaks")
 
+    def test_pencil_knife_declares_starting_actor_custody(self) -> None:
+        pencil_knife = next(
+            entity for entity in self.content.entities if entity.id == "pencil_knife"
+        )
+        self.assertIsNotNone(pencil_knife.initial_custody)
+        assert pencil_knife.initial_custody is not None
+        self.assertEqual(pencil_knife.initial_custody.kind, "starting_actor")
+
+    def test_initial_custody_rejects_unknown_kind(self) -> None:
+        payload = json.loads(FIXTURE.read_text(encoding="utf-8"))
+        next(
+            entity for entity in payload["entities"] if entity["id"] == "pencil_knife"
+        )["initial_custody"]["kind"] = "unknown"
+        with self.assertRaises(ValidationError):
+            ModuleContentV3.model_validate(payload)
+
+
+class SilverLockInitialCustodyTests(unittest.TestCase):
+    """验证开局种子把模组声明的物品放入正确调查员背包。"""
+
+    def test_unique_pencil_knife_is_carried_by_first_actor(self) -> None:
+        content = load_module()
+        actors = {
+            "actor_1": ActorState(
+                player_id="player-1",
+                name="调查员一",
+                source_character_id="character-1",
+                source_character_version=1,
+            ),
+            "actor_2": ActorState(
+                player_id="player-2",
+                name="调查员二",
+                source_character_id="character-2",
+                source_character_version=1,
+            ),
+        }
+        seeded = create_initial_game_state(content, room_id=ROOM, actors=actors)
+
+        pencil_knife = seeded.item_instances["pencil_knife"]
+        self.assertEqual(
+            pencil_knife.custody.model_dump(),
+            {"kind": "actor_inventory", "ref_id": "actor_1", "form": "carried"},
+        )
+        self.assertEqual(
+            sum(item.definition_id == "pencil_knife" for item in seeded.item_instances.values()),
+            1,
+        )
+        self.assertEqual(
+            seeded.item_instances["wall_key"].custody.model_dump(),
+            {"kind": "location", "ref_id": "sealed_room", "form": "placed"},
+        )
+
+    def test_starting_actor_requires_an_actor(self) -> None:
+        with self.assertRaises(ContractError):
+            create_initial_game_state(load_module(), room_id=ROOM, actors={})
+
 
 class SilverLockRuntimeTests(unittest.IsolatedAsyncioTestCase):
     """用真实规则服务与裁决服务执行主线和抓回恢复。"""
@@ -199,6 +258,17 @@ class SilverLockRuntimeTests(unittest.IsolatedAsyncioTestCase):
             PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
         )
         return view.revision
+
+    async def test_carried_pencil_knife_is_not_duplicated_in_scene_projection(self) -> None:
+        """开局随身物品只能出现在背包，不应按静态地点再次投影。"""
+
+        view = await self.rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        self.assertIn("pencil_knife", {item.id for item in view.inventory})
+        self.assertNotIn(
+            "pencil_knife", {entity.id for entity in view.scene.visible_entities}
+        )
 
     async def choose(
         self,

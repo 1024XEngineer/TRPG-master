@@ -168,6 +168,7 @@ from .module_v3 import (
     InformationPresentationSpec,
     InformationRecoverySpec,
     InformationSpecV3,
+    InitialCustodySpec,
     InitialStateSpec,
     InvokeRulesetActionStep,
     KnowledgeGoalSpec,

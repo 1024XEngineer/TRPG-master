@@ -3,7 +3,7 @@
   "source": "银之锁.docx",
   "paragraph_numbering": "解压 word/document.xml 后按非空 w:p 顺序从 1 编号",
   "module_id": "silver-lock",
-  "version": "3.0.1",
+  "version": "3.0.2",
   "locations": {
     "sealed_room": [
       11,

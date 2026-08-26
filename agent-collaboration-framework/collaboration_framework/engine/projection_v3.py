@@ -323,8 +323,18 @@ def _visible_entities(
     projected: list[ProjectionEntity] = []
     for entity in module.entities:
         overrides = state.entities.get(entity.id, {})
-        placed = _optional_text(overrides.get("location_id")) or entity.located_in
-        carried = _optional_text(overrides.get("holder_actor_id"))
+        item = state.item_instances.get(entity.id)
+        if item is not None:
+            # Canon 物品的 ItemCustody 是权威位置，避免同一物品同时出现在背包和场景。
+            if item.custody.kind == "actor_inventory":
+                continue
+            placed = (
+                item.custody.ref_id if item.custody.kind == "location" else None
+            )
+            carried = None
+        else:
+            placed = _optional_text(overrides.get("location_id")) or entity.located_in
+            carried = _optional_text(overrides.get("holder_actor_id"))
         if overrides.get("consumed") is True:
             continue
         if placed != location_id and carried != actor_id:

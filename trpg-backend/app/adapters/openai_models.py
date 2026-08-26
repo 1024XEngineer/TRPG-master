@@ -46,6 +46,11 @@ from app.adapters.structured_http import (
     post_structured_json,
     read_structured_payload,
 )
+from app.core.host_entry import (
+    HostEntryDecision,
+    HostPublicContext,
+    host_entry_decision_schema,
+)
 
 logger = structlog.get_logger()
 
@@ -248,7 +253,8 @@ change_entity_state）；但不要为了内部写入次数把一个意图拆成�
 不要自己拼效果。判断依据是候选上的这几个字段：
 
 - `semantic_hints`：这条规则想捕捉的说法（例如"观察""用侦查"）；
-- `action_families`：动作大类（observe / search / talk …）；
+- `action_families`：动作大类参考（observe / search / talk …），是开放语义词表，
+  不要求与最终 `method.family` 逐字相等；不能仅因动作族不同就放弃其他范围都匹配的规则；
 - `target_kinds` 与 `target_ids`：这条规则针对的对象，`target_ids` 里的 id 通常就是
   玩家话里指的那个实体；
 - `options[]`：这条规则给出的**候选做法**，每项有一个不透明的 `id`、它的
@@ -293,8 +299,8 @@ needs_clarification，才用自然的角色内措辞提出一次最小澄清。c
 确定性记录 required ref。不得以未经证据确认的关键发现替代这些结果。
 text 只能包含自然的角色内叙事，不得把 claimed_evidence_refs、suggested_actions 或其他
 JSON/schema 字段和值重复写入正文。
-如果输入中提供 narration_retry_hint，说明上一版叙事漏报了一个已提交结果；本次必须
-在自然叙事中明确写出该结果，并准确 claim 对应 ref，然后再返回完整 JSON。
+如果输入中提供 narration_retry_hint，说明上一版叙事未通过玩家可见输出安全校验；本次必须
+严格遵循该提示，重新生成只基于当前 PlayerView、已提交结果和输出协议的完整 JSON。
 
 如果当前回合同时需要 NPC 接话，把守秘人的权威结果写进 text，把 NPC 台词写进
 npc_replies。npc_replies 最多 3 条；speaker_id 只能逐字复制当前场景里已可见 NPC
@@ -555,6 +561,29 @@ class PromptHostTurnDecisionModel:
             "主持模型返回了无法解读的结果，本次动作未生效，请重试",
             retryable=True,
         ) from last_error
+
+
+class PromptHostEntryModel:
+    """One structured call for the A1 keeper entry router."""
+
+    _INSTRUCTIONS = """你是桌面角色扮演游戏的主持入口分流器。只返回 schema 要求的 JSON。
+只有明确、低风险、无需检定、不会改变权威状态的普通互动（例如礼貌招呼）才返回
+direct_response，并给出一句简短自然的即时回应。调查、搜索、物品、线索、案件、秘密、
+人物背景、说服/威胁/欺骗、移动、时间地点、任何成功失败或状态变化，以及信息不足的请求，
+一律返回 delegate_to_legacy 且 text 必须为空。不得声称规则结果，不得输出 JSON、字段名、
+内部标识、ID、revision、协议或未来承诺。上下文只包含公开信息。"""
+
+    def __init__(self, client: StructuredJsonClient) -> None:
+        self._client = client
+
+    async def generate(self, context: HostPublicContext) -> dict[str, object]:
+        raw = await self._client.generate(
+            schema_name="trpg_host_entry_decision",
+            schema=host_entry_decision_schema(),
+            instructions=self._INSTRUCTIONS,
+            input_payload=context.to_model_payload(),
+        )
+        return HostEntryDecision.model_validate(raw).model_dump(mode="json")
 
 
 class PromptTurnPlanner:

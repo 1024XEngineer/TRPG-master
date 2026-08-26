@@ -111,8 +111,8 @@ def unsupported_persistent_claim(
                 + 1
             )
             sentence = asserted_text[sentence_start : match.end()]
-            mentioned_ids = {
-                entity.id
+            mentioned_entities = tuple(
+                entity
                 for entity in entities
                 if any(
                     name and name in sentence
@@ -121,14 +121,62 @@ def unsupported_persistent_claim(
                         *getattr(entity, "aliases", ()),
                     )
                 )
-            }
-            has_evidence = any(
-                result.state_key == key
-                and result.state_value == value
-                and (not mentioned_ids or result.target_id in mentioned_ids)
-                for result in committed_results
             )
-            if not has_evidence and player_view is not None:
+            mentioned_ids = {entity.id for entity in mentioned_entities}
+            if key == "posture":
+                character_ids = {
+                    entity.id
+                    for entity in mentioned_entities
+                    if getattr(entity, "kind", "npc") == "npc"
+                }
+                if mentioned_entities and not character_ids:
+                    # “钥匙躺在桌上”描述的是物件位置，不是角色姿态。
+                    continue
+                if character_ids:
+                    mentioned_ids = character_ids
+                elif (
+                    player_view is not None
+                    and entities
+                    and not any(
+                        getattr(entity, "kind", "npc") == "npc" for entity in entities
+                    )
+                ):
+                    # 没有点名实体且场景只有物件时，属于环境描写而非角色姿态。
+                    continue
+            if key == "posture" and player_view is not None and entities and not mentioned_ids:
+                # 无名称指代仍需绑定唯一可见 NPC，不能用任意一条姿态证据背书。
+                candidate_ids = {
+                    entity.id
+                    for entity in entities
+                    if getattr(entity, "kind", "npc") == "npc"
+                }
+                evidence_target_ids = {
+                    result.target_id
+                    for result in committed_results
+                    if result.state_key == key and result.state_value == value
+                }
+                evidence_target_ids.update(
+                    entity.id
+                    for entity in entities
+                    if any(
+                        state.key == key and state.value == value
+                        for state in entity.observable_state
+                    )
+                )
+                has_evidence = (
+                    len(candidate_ids) == 1
+                    and candidate_ids.issubset(evidence_target_ids)
+                )
+            else:
+                has_evidence = any(
+                    result.state_key == key
+                    and result.state_value == value
+                    and (not mentioned_ids or result.target_id in mentioned_ids)
+                    for result in committed_results
+                )
+            if not has_evidence and player_view is not None and not (
+                key == "posture" and entities and not mentioned_ids
+            ):
                 has_evidence = any(
                     state.key == key
                     and state.value == value

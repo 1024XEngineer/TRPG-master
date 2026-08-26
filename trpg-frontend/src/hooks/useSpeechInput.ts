@@ -39,6 +39,9 @@ interface SpeechRecognitionLike {
 
 type SpeechRecognitionCtor = new () => SpeechRecognitionLike
 
+export const INSECURE_SPEECH_UNAVAILABLE_REASON =
+  '当前页面不是安全连接，请使用 HTTPS 或 localhost 访问'
+
 interface SpeechCapability {
   ctor: SpeechRecognitionCtor | null
   unavailableReason: string | null
@@ -53,7 +56,7 @@ function getSpeechCapability(): SpeechCapability {
   if (window.isSecureContext === false) {
     return {
       ctor: null,
-      unavailableReason: '当前页面不是安全连接，请使用 HTTPS 或 localhost 访问',
+      unavailableReason: INSECURE_SPEECH_UNAVAILABLE_REASON,
     }
   }
   const speechWindow = window as unknown as {

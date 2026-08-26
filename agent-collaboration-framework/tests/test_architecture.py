@@ -138,7 +138,7 @@ class ArchitectureTests(unittest.TestCase):
         )
         self.assertTrue(HostAgentContext.model_fields)
         self.assertTrue(Intent.model_fields)
-        self.assertEqual(PROMPT_VERSION, "trpg-host-intent-v5")
+        self.assertEqual(PROMPT_VERSION, "trpg-host-intent-v6")
         self.assertEqual(TURN_PLANNER_PROMPT_VERSION, "trpg-turn-planner-v2")
         planning = turn_planning_instructions(ActionPlanPolicy())
         self.assertIn("公开地点、人物、物件名称或别名", planning)

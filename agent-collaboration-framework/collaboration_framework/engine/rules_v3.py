@@ -432,6 +432,11 @@ def agent_match_scope_admits(
 
     The arguments narrow as the caller knows more: publishing knows only where
     the actor stands, submitting also knows what was aimed at and how.
+
+    ``action_family`` is deliberately advisory. It is an open, model-produced
+    string and therefore cannot safely veto a rule whose structural location and
+    target scope already match.
+    动作族只帮助模型选择候选，地点、目标和状态条件才决定规则能否提交。
     """
 
     trigger = rule.trigger
@@ -444,12 +449,6 @@ def agent_match_scope_admits(
             return False
     scope = trigger.scope
     if scope.location_ids and location_id not in scope.location_ids:
-        return False
-    if (
-        action_family is not None
-        and scope.action_families
-        and action_family not in scope.action_families
-    ):
         return False
     if (
         target_kind is not None

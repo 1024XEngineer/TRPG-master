@@ -356,6 +356,7 @@ def _rule_issues(
     elif isinstance(rule.trigger, AgentMatchTriggerSpec):
         if rule.trigger.when is not None:
             issues.extend(_condition_issues(rule.trigger.when, f"{path}.trigger.when"))
+        issues.extend(_agent_match_hint_issues(rule.trigger, f"{path}.trigger"))
         for index, location_id in enumerate(rule.trigger.scope.location_ids):
             require(
                 location_id,
@@ -401,6 +402,62 @@ def _rule_issues(
     # 声明过的片段。随 `RulePresentationSpec` 一起删除（#288 结案、#398 执行）：
     # 被引用的一侧不存在了，这条检查也就无从谈起。`PresentationStep` 仍在 union
     # 里但依旧不接通，两个已发布模组都没有用过它。
+    return issues
+
+
+def _agent_match_hint_issues(
+    trigger: AgentMatchTriggerSpec,
+    path: str,
+) -> list[ValidationIssue]:
+    """Reject machine identifiers masquerading as semantic Match hints.
+
+    该函数只校验模型看到的规则问题提示词，不改变 action_family 的运行时开放性。
+    ``semantic_hints`` is the model-facing natural-language vocabulary. Family
+    names and option ids remain valid contract fields, but copying them into the
+    hint list makes the published vocabulary less useful and can hide duplicate
+    entries. Comparisons are normalized only for validation; diagnostics retain
+    the authored array index.
+    """
+
+    def normalize(value: str) -> str:
+        return value.strip().casefold()
+
+    families = {normalize(value) for value in trigger.scope.action_families}
+    option_ids = {normalize(option.id) for option in trigger.options}
+    issues: list[ValidationIssue] = []
+    seen: dict[str, int] = {}
+    for index, hint in enumerate(trigger.question.semantic_hints):
+        hint_path = f"{path}.question.semantic_hints.{index}"
+        normalized = normalize(hint)
+        if normalized in families:
+            issues.append(
+                ValidationIssue(
+                    severity="error",
+                    code="MODULE_V3_AGENT_MATCH_HINT_EQUALS_ACTION_FAMILY",
+                    path=hint_path,
+                    message="semantic_hint 不能直接等于 action_family",
+                )
+            )
+        if normalized in option_ids:
+            issues.append(
+                ValidationIssue(
+                    severity="error",
+                    code="MODULE_V3_AGENT_MATCH_HINT_EQUALS_OPTION_ID",
+                    path=hint_path,
+                    message="semantic_hint 不能直接等于 option id",
+                )
+            )
+        if normalized in seen:
+            issues.append(
+                ValidationIssue(
+                    severity="error",
+                    code="MODULE_V3_AGENT_MATCH_HINT_DUPLICATE",
+                    path=hint_path,
+                    message=f"semantic_hint 与第 {seen[normalized]} 项重复",
+                )
+            )
+        else:
+            seen[normalized] = index
     return issues
 
 

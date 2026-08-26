@@ -14,9 +14,10 @@ import copy
 import unittest
 from typing import Any
 
+from pydantic import ValidationError
+
 from collaboration_framework.contracts import ModuleContentV3
 from collaboration_framework.module import validate_module_v3, validate_module_v3_json
-from pydantic import ValidationError
 
 
 def module_payload() -> dict[str, Any]:
@@ -316,6 +317,44 @@ class ReferenceIntegrityTests(unittest.TestCase):
 
 
 class RuleGraphTests(unittest.TestCase):
+    def test_agent_match_hint_equal_to_family_is_rejected(self) -> None:
+        payload = mutate()
+        payload["rules"][0]["trigger"]["question"]["semantic_hints"] = [
+            " Research "
+        ]
+        report = validate_module_v3(payload)
+        self.assertEqual(
+            [issue.code for issue in report.errors],
+            ["MODULE_V3_AGENT_MATCH_HINT_EQUALS_ACTION_FAMILY"],
+        )
+        self.assertEqual(
+            report.errors[0].path,
+            "rules.0.trigger.question.semantic_hints.0",
+        )
+
+    def test_agent_match_hint_equal_to_option_id_is_rejected(self) -> None:
+        payload = mutate()
+        payload["rules"][0]["trigger"]["question"]["semantic_hints"] = [
+            " by_date "
+        ]
+        report = validate_module_v3(payload)
+        self.assertEqual(
+            [issue.code for issue in report.errors],
+            ["MODULE_V3_AGENT_MATCH_HINT_EQUALS_OPTION_ID"],
+        )
+
+    def test_agent_match_duplicate_hints_are_rejected_after_normalization(self) -> None:
+        payload = mutate()
+        payload["rules"][0]["trigger"]["question"]["semantic_hints"] = [
+            "查阅旧报",
+            " 查阅旧报 ",
+        ]
+        report = validate_module_v3(payload)
+        self.assertEqual(
+            [issue.code for issue in report.errors],
+            ["MODULE_V3_AGENT_MATCH_HINT_DUPLICATE"],
+        )
+
     def test_agent_match_option_without_a_branch_is_rejected(self) -> None:
         payload = mutate()
         payload["rules"][0]["trigger"]["options"].append(

@@ -71,18 +71,31 @@ from collaboration_framework.host.schemas.action_plan import ActionPlanNpcReply
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import select
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.websockets import WebSocketState
 
+from app.adapters import (
+    DeepSeekChatCompletionsJsonClient,
+    OpenAIResponsesJsonClient,
+    PromptHostEntryModel,
+    QwenChatCompletionsJsonClient,
+)
 from app.adapters.structured_http import StructuredOutputError, is_transient_model_error
 from app.core.action_plan_turn import (
     ActionPlanTurnResult,
     _matching_visible_entity_ids,
     action_plan_turn_application,
 )
+from app.core.config import get_settings, model_client_retry_policy, secret_value
 from app.core.db import async_session_factory
 from app.core.engine import adjudication_engine_service, legacy_single_action_recovery
+from app.core.host_entry import (
+    DeterministicHostEntryModel,
+    HostEntryRouter,
+    HostPublicContextProjector,
+    HostPublicHistoryEntry,
+)
 from app.core.turn import (
     ActorResolutionError,
     session_view_application,
@@ -185,6 +198,119 @@ def _listener_ids_for_utterance(utterance: str, player_view: PlayerView) -> tupl
 _UNAUTHORIZED_CLOSE_CODE = 4401
 _NOT_FOUND_CLOSE_CODE = 4404
 _OPENING_MESSAGE_ID = "game-opening"
+_HOST_QUEUE_TERMINAL = frozenset({"failed", "cancelled", "discarded"})
+
+_host_entry_router: HostEntryRouter | None = None
+
+
+def _get_host_entry_router() -> HostEntryRouter:
+    """Build the A1 router lazily so test imports stay offline-safe."""
+
+    global _host_entry_router
+    if _host_entry_router is not None:
+        return _host_entry_router
+    settings = get_settings()
+    if settings.host_model_provider == "fake":
+        model = DeterministicHostEntryModel()
+    else:
+        client_type = {
+            "openai": OpenAIResponsesJsonClient,
+            "qwen": QwenChatCompletionsJsonClient,
+            "deepseek": DeepSeekChatCompletionsJsonClient,
+        }[settings.host_model_provider]
+        if settings.host_model_provider == "openai":
+            api_key, base_url, model_name, timeout = (
+                settings.openai_api_key,
+                settings.openai_base_url,
+                settings.openai_model,
+                settings.openai_timeout_seconds,
+            )
+        elif settings.host_model_provider == "qwen":
+            api_key, base_url, model_name, timeout = (
+                settings.qwen_api_key,
+                settings.qwen_base_url,
+                settings.qwen_model,
+                settings.qwen_timeout_seconds,
+            )
+        else:
+            api_key, base_url, model_name, timeout = (
+                settings.deepseek_api_key,
+                settings.deepseek_base_url,
+                settings.deepseek_model,
+                settings.deepseek_timeout_seconds,
+            )
+        if api_key is None:
+            raise ValueError("Host entry model provider 缺少 API key")
+        model = PromptHostEntryModel(
+            client_type(
+                api_key=secret_value(api_key),
+                base_url=base_url,
+                model=model_name,
+                timeout_seconds=timeout,
+                retry_policy=model_client_retry_policy(settings),
+            )
+        )
+    _host_entry_router = HostEntryRouter(model)
+    return _host_entry_router
+
+
+async def _public_host_history(
+    db: AsyncSession,
+    room_id: str,
+    *,
+    exclude_correlation_id: str | None = None,
+    max_turns: int = 6,
+    max_chars: int = 6000,
+) -> tuple[HostPublicHistoryEntry, ...]:
+    rows = await db.scalars(
+        select(Event)
+        .where(
+            Event.room_id == room_id,
+            Event.event_type.in_(
+                ("action.broadcast", "dialogue.player", "dialogue.npc", "narration.push")
+            ),
+            # HostEntry direct responses are always public.  Do not let a
+            # viewer-specific scene_scoped event influence text that will be
+            # broadcast to every player in the room.
+            Event.visibility == "public",
+            *(
+                [Event.correlation_id != exclude_correlation_id]
+                if exclude_correlation_id is not None
+                else []
+            ),
+        )
+        .order_by(Event.created_at.desc(), Event.id.desc())
+        .limit(max_turns * 3)
+    )
+    entries: list[HostPublicHistoryEntry] = []
+    for event in reversed(list(rows)):
+        text = None
+        if isinstance(event.payload, dict):
+            text = event.payload.get("text") or event.payload.get("utterance")
+        if not isinstance(text, str) or not text.strip():
+            continue
+        source = cast(
+            Literal[
+                "player_message",
+                "npc_dialogue",
+                "keeper_narration",
+                "direct_response",
+            ],
+            {
+                "action.broadcast": "player_message",
+                "dialogue.player": "player_message",
+                "dialogue.npc": "npc_dialogue",
+                "narration.push": "keeper_narration",
+            }[event.event_type],
+        )
+        speaker = None
+        if isinstance(event.payload, dict):
+            speaker = event.payload.get("speakerName") or event.payload.get("characterName")
+        entries.append(HostPublicHistoryEntry(source=source, speaker=speaker, text=text.strip()))
+    entries = entries[-max_turns:]
+    while entries and sum(len(item.text) for item in entries) > max_chars:
+        entries.pop(0)
+    return tuple(entries)
 
 
 async def _current_room_action_state(
@@ -740,6 +866,177 @@ async def _run_queued_host_action(
             await _send_turn_failed(target_socket, item.client_action_id, exc)
 
 
+async def _run_direct_host_action(
+    db: AsyncSession,
+    item,
+    view: PlayerView,
+    websocket: WebSocket | None,
+    *,
+    broadcast_state: bool = True,
+) -> None:
+    """Persist and deliver a frozen A1 response without entering ActionPlan."""
+
+    await db.refresh(item)
+    if item.status in _HOST_QUEUE_TERMINAL:
+        return
+    text = (item.direct_response_text or "").strip()
+    if not text:
+        raise RuntimeError("direct_response 队列项缺少已校验文本")
+    kind = "clarification" if item.execution_provenance == "fallback_clarification" else "narration"
+    existing = await room_service.get_correlated_event(
+        db, item.room_id, "narration.push", item.client_action_id
+    )
+    recorded = existing is None
+    if existing is None:
+        payload = NarrationPushPayload(message_id=item.client_action_id, text=text).model_dump(
+            by_alias=True
+        )
+        payload[room_service.PERSISTED_TURN_COMPLETION_KEY] = {
+            "kind": kind,
+            "claimed_fact_ids": [],
+            "suggested_actions": [],
+            "npc_reply_count": 0,
+            "npc_replies": [],
+        }
+        try:
+            existing = await room_service.record_event_pending(
+                db,
+                item.room_id,
+                item.player_id,
+                "narration.push",
+                payload,
+                visibility="public",
+                actor_id=item.actor_id,
+                scene_id=view.scene.id,
+                view_revision=view.revision,
+                correlation_id=item.client_action_id,
+            )
+        except IntegrityError:
+            await db.rollback()
+            existing = await room_service.get_correlated_event(
+                db, item.room_id, "narration.push", item.client_action_id
+            )
+            if existing is None:
+                raise
+            recorded = False
+    item.result_event_ids = [existing.id]
+    item.status = "completed"
+    item.lease_owner = None
+    item.lease_expires_at = None
+    item.next_attempt_at = None
+    item.updated_at = datetime.now(UTC)
+    await db.commit()
+
+    narration = NarrationOutput(kind=kind, text=normalize_narration_text(text))
+    await _send_to_player(
+        websocket,
+        {
+            "protocol_version": "1",
+            "message_type": "turn.completed",
+            "correlation_id": item.client_action_id,
+            "payload": {
+                "room_id": item.room_id,
+                "player_id": item.player_id,
+                "actor_id": item.actor_id,
+                "narration": narration.model_dump(mode="json"),
+                "player_view": view.to_json_dict(),
+            },
+        },
+    )
+    await _send_view_updated(websocket, item.player_id, view)
+    if recorded:
+        await _emit_turn_narration(
+            websocket,
+            item.room_id,
+            client_action_id=item.client_action_id,
+            narration=narration,
+        )
+    elif websocket is not None:
+        await _send_to_player(
+            websocket,
+            ServerEnvelope(
+                type="narration.push",
+                payload=NarrationPushPayload(
+                    message_id=item.client_action_id, text=text
+                ).model_dump(by_alias=True),
+            ).model_dump(by_alias=True),
+        )
+    if broadcast_state:
+        await _broadcast_room_action_state_fresh(item.room_id)
+
+
+async def _recover_keeper_queue_failure(
+    db: AsyncSession,
+    item,
+    websocket: WebSocket | None,
+    exc: Exception,
+    *,
+    room_id: str,
+) -> None:
+    """Keep frozen keeper work retryable; only fail closed after the last attempt.
+
+    Discarding a processing item made the same client_action_id unrecoverable and
+    could drop a route that had already been frozen.  Delivery errors after the
+    event+queue commit must leave the item completed so reconnect can replay.
+    """
+
+    client_action_id = item.client_action_id
+    try:
+        await db.rollback()
+    except SQLAlchemyError:
+        logger.warning(
+            "host_queue_rollback_after_failure",
+            room_id=room_id,
+            client_action_id=client_action_id,
+            error_type=type(exc).__name__,
+            error_reason=_turn_error_reason(exc),
+        )
+    persisted = await host_action_queue_service.get_by_client_action(db, room_id, client_action_id)
+    if persisted is not None:
+        item = persisted
+    route = host_action_queue_service.effective_execution_route(item)
+    if (
+        item.recipient_kind == "keeper"
+        and route == "direct_response"
+        and item.status == "completed"
+    ):
+        logger.warning(
+            "host_direct_response_delivery_failed_after_commit",
+            room_id=room_id,
+            client_action_id=client_action_id,
+            error_type=type(exc).__name__,
+            error_reason=_turn_error_reason(exc),
+        )
+        return
+    if item.recipient_kind == "keeper" and item.status == "processing":
+        if item.attempt_count < 2:
+            await host_action_queue_service.mark_npc_retryable(db, item, delay_seconds=0)
+            return
+        await host_action_queue_service.mark_npc_failed(db, item)
+        log_turn_failed(
+            room_id=room_id,
+            stage="队列出队",
+            code=_map_turn_error(exc)[0],
+            correlation_id=client_action_id,
+            error_type=type(exc).__name__,
+            error_reason=_turn_error_reason(exc),
+            exc=exc,
+        )
+        await _send_turn_failed(websocket, client_action_id, exc)
+        return
+    await host_action_queue_service.discard(db, item)
+    log_turn_failed(
+        room_id=room_id,
+        stage="队列出队",
+        code=_map_turn_error(exc)[0],
+        correlation_id=client_action_id,
+        error_type=type(exc).__name__,
+        error_reason=_turn_error_reason(exc),
+        exc=exc,
+    )
+    await _send_turn_failed(websocket, client_action_id, exc)
+
+
 async def _drain_host_action_queue(room_id: str) -> None:
     async with _host_drain_lock(room_id):
         while True:
@@ -803,12 +1100,50 @@ async def _drain_host_action_queue(room_id: str) -> None:
                     if item.recipient_kind == "npc":
                         await _run_queued_host_action(db, item, view)
                         continue
-                    interlocutor_id = (
-                        item.recipient_entity_id if item.recipient_kind == "npc" else None
+                    # Keeper items use the durable lease shared with NPC items.  A
+                    # decision is frozen before either route executes, so a retry or
+                    # process restart cannot call the router twice.
+                    claimed = await host_action_queue_service.claim(
+                        db,
+                        item,
+                        recipient_kind="keeper",
+                        lease_seconds=180,
                     )
+                    if claimed is None:
+                        return
+                    item = claimed
+                    route = host_action_queue_service.effective_execution_route(item)
+                    if route == "unresolved":
+                        history = await _public_host_history(
+                            db,
+                            room_id,
+                            exclude_correlation_id=item.client_action_id,
+                        )
+                        context = HostPublicContextProjector(
+                            max_turns=get_settings().recent_history_max_turns,
+                            max_chars=get_settings().recent_history_max_chars,
+                        ).project(
+                            view,
+                            current_keeper_text=item.utterance,
+                            public_history=history,
+                        )
+                        decision, provenance = await _get_host_entry_router().decide(context)
+                        await host_action_queue_service.save_execution_route(
+                            db,
+                            item,
+                            route=decision.route,
+                            text=decision.text,
+                            provenance=provenance,
+                        )
+                        route = decision.route
+                        await db.refresh(item)
+                    if route == "direct_response":
+                        await _run_direct_host_action(db, item, view, websocket)
+                        continue
+                    # delegate_to_legacy intentionally enters the unchanged
+                    # ActionPlan application below.
+                    interlocutor_id = None
                     interlocutor_name = None
-                    if interlocutor_id is not None:
-                        interlocutor_name = require_dialogue_npc(view, interlocutor_id).name
                     result = await action_plan_turn_application.start(
                         room_id=room_id,
                         player_id=item.player_id,
@@ -838,17 +1173,13 @@ async def _drain_host_action_queue(room_id: str) -> None:
                     if result.waiting_for_player:
                         return
                 except Exception as exc:
-                    await host_action_queue_service.discard(db, item)
-                    log_turn_failed(
+                    await _recover_keeper_queue_failure(
+                        db,
+                        item,
+                        websocket,
+                        exc,
                         room_id=room_id,
-                        stage="队列出队",
-                        code=_map_turn_error(exc)[0],
-                        correlation_id=item.client_action_id,
-                        error_type=type(exc).__name__,
-                        error_reason=_turn_error_reason(exc),
-                        exc=exc,
                     )
-                    await _send_turn_failed(websocket, item.client_action_id, exc)
                 finally:
                     with anyio.CancelScope(shield=True):
                         action_lock_manager.release(room_id, lock_token)
@@ -1400,12 +1731,52 @@ async def _send_completed_turn_message(
 
 async def _recover_persisted_turn_narration(
     db: AsyncSession,
-    websocket: WebSocket,
+    websocket: WebSocket | None,
     *,
     room_id: str,
     player_id: str,
     client_action_id: str,
 ) -> bool:
+    # A1 direct responses have no ActionPlan/Engine record.  Recover from the
+    # queue item's frozen text and correlated public event instead.
+    queued_item = await host_action_queue_service.get_by_client_action(
+        db, room_id, client_action_id
+    )
+    if (
+        queued_item is not None
+        and host_action_queue_service.effective_execution_route(queued_item) == "direct_response"
+    ):
+        if queued_item.player_id != player_id:
+            raise ContractError("持久化 direct response 不属于当前玩家")
+        if queued_item.status in _HOST_QUEUE_TERMINAL:
+            await _send_turn_failed(
+                websocket,
+                client_action_id,
+                TurnExecutionError(
+                    "TURN_INTERNAL_ERROR",
+                    "本次动作处理失败，请稍后重试",
+                    retryable=False,
+                ),
+            )
+            return True
+        view = await session_view_application.current_player_view(
+            room_id=room_id,
+            player_id=player_id,
+        )
+        if queued_item.status != "processing":
+            claimed = await host_action_queue_service.claim(
+                db, queued_item, recipient_kind="keeper", lease_seconds=180
+            )
+            if claimed is not None:
+                queued_item = claimed
+        await _run_direct_host_action(
+            db,
+            queued_item,
+            view,
+            websocket,
+            broadcast_state=queued_item.status != "completed",
+        )
+        return True
     active = await action_plan_turn_application.get_plan(room_id, client_action_id)
     existing = await room_service.get_correlated_event(
         db,
@@ -1485,7 +1856,7 @@ async def _recover_persisted_turn_narration(
             payload=persisted.model_dump(by_alias=True),
         ).model_dump(by_alias=True),
     )
-    if raw_completion is not None and completion.npc_replies:
+    if websocket is not None and raw_completion is not None and completion.npc_replies:
         await _recover_persisted_turn_followup_dialogue(
             db,
             websocket,

@@ -465,6 +465,96 @@ class PersistentNarrationPolicyTests(unittest.IsolatedAsyncioTestCase):
                     self._context()
                 )
 
+    async def test_allows_object_prone_environment_description(self):
+        """死物使用“躺在/躺着”描述位置时，不应触发角色姿态校验。"""
+        context = self._context()
+        context.player_view.scene.visible_entities = (
+            SimpleNamespace(
+                id="key",
+                name="一把钥匙",
+                aliases=(),
+                kind="object",
+                observable_state=(),
+            ),
+        )
+
+        output = await ActionPlanNarrator(
+            _PersistentNarrationModel("一把钥匙躺在桌上。")
+        ).narrate(context)
+
+        self.assertEqual(output.text, "一把钥匙躺在桌上。")
+
+    async def test_allows_unbound_object_description_without_visible_npc(self):
+        """纯物件场景中未点名实体的环境描写也不应被误判为角色姿态。"""
+        context = self._context()
+        context.player_view.scene.visible_entities = (
+            SimpleNamespace(
+                id="notebook",
+                name="一本笔记",
+                aliases=(),
+                kind="object",
+                observable_state=(),
+            ),
+        )
+
+        output = await ActionPlanNarrator(
+            _PersistentNarrationModel("桌上躺着一本笔记。")
+        ).narrate(context)
+
+        self.assertEqual(output.text, "桌上躺着一本笔记。")
+
+    async def test_rejects_named_npc_prone_without_evidence(self):
+        """点名 NPC 的躺倒描述仍必须有权威姿态证据。"""
+        context = self._context()
+        context.player_view.scene.visible_entities = (
+            SimpleNamespace(
+                id="butler",
+                name="守墓人",
+                aliases=(),
+                kind="npc",
+                observable_state=(),
+            ),
+        )
+
+        with self.assertRaises(ActionPlanNarrationValidationError) as raised:
+            await ActionPlanNarrator(
+                _PersistentNarrationModel("守墓人躺在墓园草地上。")
+            ).narrate(context)
+
+        self.assertEqual(
+            raised.exception.reason,
+            "persistent_claim_without_evidence:posture",
+        )
+
+    async def test_allows_named_npc_prone_with_evidence(self):
+        """点名 NPC 且当前回合已提交姿态结果时允许叙述。"""
+        context = self._context(
+            results=(
+                CommittedResult(
+                    kind="character_state",
+                    target_id="butler",
+                    state_key="posture",
+                    state_value="prone",
+                    event_ref="event-1",
+                ),
+            )
+        )
+        context.player_view.scene.visible_entities = (
+            SimpleNamespace(
+                id="butler",
+                name="守墓人",
+                aliases=(),
+                kind="npc",
+                observable_state=(),
+            ),
+        )
+
+        output = await ActionPlanNarrator(
+            _PersistentNarrationModel("守墓人躺在墓园草地上。")
+        ).narrate(context)
+
+        self.assertEqual(output.text, "守墓人躺在墓园草地上。")
+
     async def test_allows_unprojected_companion_active_presence(self):
         """未进入标准场景投影的随行人物不能被全局在场校验误伤。"""
         output = await ActionPlanNarrator(

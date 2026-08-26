@@ -123,6 +123,16 @@ async def enqueue(
         own.recipient_kind = recipient.kind
         own.recipient_entity_id = recipient.entity_id
         own.recipient_explicit = recipient.explicit
+        # Replacing a queued utterance is a new semantic request at the same FIFO
+        # position.  Never retain a route, generated text, or old result IDs.
+        own.execution_route = "unresolved"
+        own.direct_response_text = None
+        own.execution_provenance = None
+        own.result_event_ids = []
+        own.attempt_count = 0
+        own.next_attempt_at = None
+        own.lease_owner = None
+        own.lease_expires_at = None
         own.updated_at = now
         await db.commit()
         await db.refresh(own)
@@ -224,6 +234,52 @@ async def mark_started(db: AsyncSession, item: HostActionQueueItem) -> None:
     """Keeper 已接管队列项；旧 started 语义在新状态机中对应 completed。"""
 
     item.status = "completed"
+    item.lease_owner = None
+    item.lease_expires_at = None
+    item.next_attempt_at = None
+    item.updated_at = datetime.now(UTC)
+    await db.commit()
+
+
+async def save_execution_route(
+    db: AsyncSession,
+    item: HostActionQueueItem,
+    *,
+    route: Literal["direct_response", "delegate_to_legacy"],
+    text: str | None,
+    provenance: str,
+) -> None:
+    """Durably freeze the A1 decision before executing the selected route."""
+
+    item.execution_route = route
+    item.direct_response_text = text
+    item.execution_provenance = provenance
+    await db.commit()
+
+
+def effective_execution_route(
+    item: HostActionQueueItem,
+) -> Literal["direct_response", "delegate_to_legacy", "unresolved"]:
+    """Pre-A migrations left the column NULL; those records belong to legacy."""
+
+    if item.execution_route in {"direct_response", "delegate_to_legacy", "unresolved"}:
+        return cast(
+            Literal["direct_response", "delegate_to_legacy", "unresolved"],
+            item.execution_route,
+        )
+    return "delegate_to_legacy"
+
+
+async def mark_completed_with_events(
+    db: AsyncSession,
+    item: HostActionQueueItem,
+    event_ids: list[str],
+) -> None:
+    item.result_event_ids = list(event_ids)
+    item.status = "completed"
+    item.lease_owner = None
+    item.lease_expires_at = None
+    item.next_attempt_at = None
     item.updated_at = datetime.now(UTC)
     await db.commit()
 
@@ -234,10 +290,28 @@ async def claim_npc(
     *,
     lease_seconds: int = 180,
 ) -> HostActionQueueItem | None:
-    """用数据库条件更新原子领取 NPC 项，避免并发 drain 重复调用模型。"""
+    """Compatibility wrapper for the generalized atomic claim."""
+    return await claim(
+        db,
+        item,
+        recipient_kind="npc",
+        lease_seconds=lease_seconds,
+    )
+
+
+async def claim(
+    db: AsyncSession,
+    item: HostActionQueueItem,
+    *,
+    recipient_kind: Literal["keeper", "npc"] | None = None,
+    lease_seconds: int = 180,
+) -> HostActionQueueItem | None:
+    """Conditionally claim the FIFO item for either keeper or NPC execution."""
 
     now = datetime.now(UTC)
     owner = str(uuid.uuid4())
+    room_id = item.room_id
+    item_id = item.item_id
     eligible = or_(
         HostActionQueueItem.status == "queued",
         and_(
@@ -255,9 +329,9 @@ async def claim_npc(
     result = await db.execute(
         update(HostActionQueueItem)
         .where(
-            HostActionQueueItem.room_id == item.room_id,
-            HostActionQueueItem.item_id == item.item_id,
-            HostActionQueueItem.recipient_kind == "npc",
+            HostActionQueueItem.room_id == room_id,
+            HostActionQueueItem.item_id == item_id,
+            *([HostActionQueueItem.recipient_kind == recipient_kind] if recipient_kind else []),
             eligible,
         )
         .values(
@@ -269,15 +343,20 @@ async def claim_npc(
             updated_at=now,
         )
         .returning(HostActionQueueItem.item_id)
+        # SQLite round-trips timezone-aware columns as naive UTC.  Evaluating the
+        # WHERE in Python then TypeErrors (aware vs naive) and aborts a valid SQL
+        # claim.  Expire the local row and reload it after commit instead.
+        .execution_options(synchronize_session=False)
     )
     claimed_item_id = result.scalar_one_or_none()
+    db.expire(item)
     await db.commit()
     if claimed_item_id is None:
         return None
     return await db.scalar(
         select(HostActionQueueItem).where(
-            HostActionQueueItem.room_id == item.room_id,
-            HostActionQueueItem.item_id == item.item_id,
+            HostActionQueueItem.room_id == room_id,
+            HostActionQueueItem.item_id == item_id,
             HostActionQueueItem.lease_owner == owner,
         )
     )

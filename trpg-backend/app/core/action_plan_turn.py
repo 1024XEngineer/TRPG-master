@@ -1810,6 +1810,27 @@ class ActionPlanTurnApplication:
                             )
                         }
                     )
+                elif attempt == 0 and exc.reason.startswith("persistent_claim_without_evidence:"):
+                    # 持久状态校验失败时，明确要求模型删除无证据断言，避免原地重试。
+                    context = context.model_copy(
+                        update={
+                            "narration_retry_hint": (
+                                "上一版叙事包含没有权威证据确认的持久状态或物品变化。"
+                                "请删除该断言，只描述当前 PlayerView 和已提交结果能够证明的内容。"
+                            )
+                        }
+                    )
+                elif attempt == 0:
+                    # 其他安全校验失败也必须改变下一次模型输入，而不是重复原请求。
+                    context = context.model_copy(
+                        update={
+                            "narration_retry_hint": (
+                                "上一版叙事未通过玩家可见输出安全校验。请重新生成符合当前"
+                                " PlayerView、已提交结果和输出协议的自然叙事，不得输出内部字段、"
+                                "未经证据确认的事实或不匹配的叙事类型。"
+                            )
+                        }
+                    )
                 if attempt == 1:
                     if (
                         exc.reason == "required_evidence_missing"
@@ -3096,11 +3117,14 @@ def _match_rule_candidate(capabilities, text: str, target_id: str | None):
     return candidate, candidate.options[0] if candidate.options else None
 
 
-# Match View action families are stable contract identifiers. These localized
-# words merely recognize the player's explicit verb; they do not add a rule or
-# reveal module-only facts. Ties still yield no match below.
+# Match View action families are stable contract identifiers. This small local
+# vocabulary is intentionally not exhaustive: these words only recognize a
+# player's explicit verb and never act as a rule admission gate. Ties still
+# yield no match below.
+# 这里的词汇只是离线测试/兜底提示，不是模组动作族的完整注册表。
 _ACTION_FAMILY_HINTS: dict[str, tuple[str, ...]] = {
     "observe": ("仔细观察", "观察", "察看", "查看"),
+    "surveil": ("监视", "观察周围", "留意动静"),
     "search": ("搜索", "搜查", "查找", "找线索", "寻找"),
     "research": ("研究", "查阅", "检索", "翻阅", "查旧报"),
     "social": ("留下好印象", "博取信任", "说服"),

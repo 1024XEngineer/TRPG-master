@@ -1238,16 +1238,16 @@
         "question": {
           "kind": "method",
           "semantic_hints": [
-            "spot-hidden",
-            "spot-hidden"
+            "仔细搜索床铺",
+            "寻找床铺中的隐藏物品"
           ]
         },
         "options": [
           {
             "id": "spot-hidden",
             "semantic_hints": [
-              "spot-hidden",
-              "spot-hidden"
+              "仔细搜索床铺",
+              "寻找床铺中的隐藏物品"
             ]
           }
         ]
@@ -1340,16 +1340,16 @@
         "question": {
           "kind": "method",
           "semantic_hints": [
-            "STR",
-            "STR"
+            "移动床铺",
+            "挪开床铺"
           ]
         },
         "options": [
           {
             "id": "STR",
             "semantic_hints": [
-              "STR",
-              "STR"
+              "移动床铺",
+              "挪开床铺"
             ]
           }
         ]
@@ -2265,16 +2265,16 @@
         "question": {
           "kind": "method",
           "semantic_hints": [
-            "listen",
-            "listen"
+            "倾听衣柜",
+            "仔细听衣柜里的动静"
           ]
         },
         "options": [
           {
             "id": "listen",
             "semantic_hints": [
-              "listen",
-              "listen"
+              "倾听衣柜",
+              "仔细听衣柜里的动静"
             ]
           }
         ]

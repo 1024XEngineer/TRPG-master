@@ -569,6 +569,19 @@ describe('RoomPage conversation history', () => {
 
     expect(await screen.findByText(/晚上 · 第 3 天/)).toBeInTheDocument()
     expect(screen.getByText('1/2 人已确认')).toBeInTheDocument()
+    emitWsMessage({
+      type: 'room.action.state',
+      payload: {
+        status: 'awaiting_player',
+        playerId: 'player-2',
+        actorId: 'actor-2',
+        clientActionId: 'action-349',
+        startedAt: '2026-08-18T20:00:00Z',
+        revision: '8',
+      },
+    })
+    expect(screen.queryByText('的行动正在等待其操作')).not.toBeInTheDocument()
+    expect(screen.queryByText('的行动正在等待你操作')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '同意' }))
     expect(mockRespondToTimeAdvance).toHaveBeenCalledWith('player-1', {
       proposalId: 'time-349',
@@ -629,6 +642,19 @@ describe('RoomPage conversation history', () => {
 
     expect(await screen.findByText(/前往/)).toBeInTheDocument()
     expect(screen.getByText('1/2 人已确认')).toBeInTheDocument()
+    emitWsMessage({
+      type: 'room.action.state',
+      payload: {
+        status: 'awaiting_player',
+        playerId: 'player-2',
+        actorId: 'actor-2',
+        clientActionId: 'action-365',
+        startedAt: '2026-08-20T20:00:00Z',
+        revision: '8',
+      },
+    })
+    expect(screen.queryByText('的行动正在等待其操作')).not.toBeInTheDocument()
+    expect(screen.queryByText('的行动正在等待你操作')).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '同意' }))
     expect(mockRespondToSceneTransition).toHaveBeenCalledWith('player-1', {
       proposalId: 'scene-365',
@@ -665,16 +691,44 @@ describe('RoomPage conversation history', () => {
       },
     })
 
-    const banners = await screen.findAllByRole('status')
-    expect(banners[0]).toHaveTextContent('赌博庄家')
-    expect(banners[0]).not.toHaveTextContent('nik')
-    expect(banners[0]).toHaveTextContent('的行动正在处理中')
-    expect(screen.getByText('我翻书桌')).toBeInTheDocument()
+    expect(await screen.findByText('赌博庄家的行动正在处理中')).toBeInTheDocument()
+    expect(screen.queryByText('守秘人理解玩家意图中')).not.toBeInTheDocument()
+    expect(screen.queryByText('守秘人组织语言中')).not.toBeInTheDocument()
+    const banners = screen.getAllByRole('status')
+    expect(banners[0]).toHaveTextContent('等待主持')
+    expect(banners[0]).toHaveTextContent('我翻书桌')
+    expect(banners[0]).not.toHaveTextContent('的行动正在处理中')
     expect(screen.getByPlaceholderText('输入消息…')).not.toBeDisabled()
     fireEvent.click(screen.getByRole('button', { name: '取消' }))
     expect(mockCancelActionPlan).toHaveBeenCalledWith('player-1', expect.objectContaining({
       clientActionId: 'action-queued',
     }))
+
+    act(() => emitWsMessage({
+      type: 'room.action.state',
+      payload: {
+        status: 'processing',
+        playerId: 'player-1',
+        actorId: 'actor-1',
+        clientActionId: 'action-self',
+        startedAt: '2026-08-19T10:00:30Z',
+        revision: '8',
+        queued: [
+          {
+            playerId: 'player-2',
+            actorId: 'actor-2',
+            clientActionId: 'action-other-queued',
+            recipient: { kind: 'keeper', entityId: null, explicit: true },
+            position: 1,
+            utterance: '我去窗边',
+            acceptedAt: '2026-08-19T10:00:31Z',
+          },
+        ],
+      },
+    }))
+    expect(await screen.findByText('我去窗边')).toBeInTheDocument()
+    expect(screen.getByText(/等待主持/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '取消' })).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '讨论区' }))
     expect(screen.getByPlaceholderText('输入行动…')).not.toBeDisabled()
@@ -2400,7 +2454,9 @@ describe('RoomPage conversation history', () => {
     renderRoomPage()
 
     expect(screen.getByRole('button', { name: '语音输入不可用' })).toBeDisabled()
-    expect(screen.getByText('当前页面不是安全连接，请使用 HTTPS 或 localhost 访问')).toBeInTheDocument()
+    expect(
+      screen.queryByText('当前页面不是安全连接，请使用 HTTPS 或 localhost 访问'),
+    ).not.toBeInTheDocument()
     expect(RoomSpeechRecognition.instances).toHaveLength(0)
   })
 
@@ -3077,6 +3133,153 @@ describe('RoomPage conversation history', () => {
     expect(screen.getByText('已知地点（按层级）')).toBeInTheDocument()
     expect(screen.getByText('图书馆')).toBeInTheDocument()
     expect(screen.getAllByText('会客室').length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('replaces keeper-phase copy with the slot owner while an action is processing', async () => {
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    act(() => emitWsMessage({
+      type: 'turn.started',
+      payload: { correlationId: 'slot-1' },
+    }))
+    expect(screen.getByText('守秘人理解玩家意图中')).toBeInTheDocument()
+
+    act(() => emitWsMessage({
+      type: 'room.action.state',
+      payload: {
+        status: 'processing',
+        playerId: 'player-2',
+        actorId: 'actor-2',
+        clientActionId: 'action-slot',
+        startedAt: '2026-08-19T10:00:00Z',
+        revision: '8',
+        queued: [],
+      },
+    }))
+    expect(screen.getByText('赌博庄家的行动正在处理中')).toBeInTheDocument()
+    expect(screen.queryByText('守秘人理解玩家意图中')).not.toBeInTheDocument()
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+
+    act(() => emitWsMessage({
+      type: 'room.action.state',
+      payload: {
+        status: 'processing',
+        playerId: 'player-1',
+        actorId: 'actor-1',
+        clientActionId: 'action-next',
+        startedAt: '2026-08-19T10:01:00Z',
+        revision: '9',
+        queued: [],
+      },
+    }))
+    expect(screen.getByText('陈探员的行动正在处理中')).toBeInTheDocument()
+    expect(screen.queryByText('赌博庄家的行动正在处理中')).not.toBeInTheDocument()
+
+    act(() => emitWsMessage({
+      type: 'turn.phase_changed',
+      payload: { correlationId: 'action-next', phase: 'generating_narration' },
+    }))
+    expect(screen.getByText('陈探员的行动正在处理中')).toBeInTheDocument()
+    expect(screen.queryByText('守秘人组织语言中')).not.toBeInTheDocument()
+  })
+
+  it('does not replace the slot-owner processing copy when another player queues', async () => {
+    mockSubmitPlannedAction.mockReturnValue(new Promise(() => undefined))
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    act(() => emitWsMessage({
+      type: 'room.action.state',
+      payload: {
+        status: 'processing',
+        playerId: 'player-2',
+        actorId: 'actor-2',
+        clientActionId: 'action-slot',
+        startedAt: '2026-08-19T10:00:00Z',
+        revision: '8',
+        queued: [],
+      },
+    }))
+    expect(screen.getByText('赌博庄家的行动正在处理中')).toBeInTheDocument()
+
+    const actionField = screen.getByPlaceholderText('输入消息…')
+    fireEvent.change(actionField, { target: { value: '@主持人 我要去窗边' } })
+    fireEvent.submit(actionField.closest('form')!)
+    await waitFor(() => expect(mockSubmitPlannedAction).toHaveBeenCalled())
+    expect(screen.getByText('赌博庄家的行动正在处理中')).toBeInTheDocument()
+    expect(screen.queryByText('守秘人理解玩家意图中')).not.toBeInTheDocument()
+
+    act(() => emitWsMessage({
+      type: 'room.action.state',
+      payload: {
+        status: 'processing',
+        playerId: 'player-2',
+        actorId: 'actor-2',
+        clientActionId: 'action-slot',
+        startedAt: '2026-08-19T10:00:00Z',
+        revision: '8',
+        queued: [
+          {
+            playerId: 'player-1',
+            actorId: 'actor-1',
+            clientActionId: 'action-queued',
+            recipient: { kind: 'keeper', entityId: null, explicit: true },
+            position: 1,
+            utterance: '我要去窗边',
+            acceptedAt: '2026-08-19T10:00:01Z',
+          },
+        ],
+      },
+    }))
+    act(() => emitWsMessage({
+      type: 'turn.phase_changed',
+      payload: { correlationId: 'action-slot', phase: 'generating_narration' },
+    }))
+    expect(screen.getByText('赌博庄家的行动正在处理中')).toBeInTheDocument()
+    expect(screen.queryByText('守秘人组织语言中')).not.toBeInTheDocument()
+    expect(screen.queryByText('守秘人理解玩家意图中')).not.toBeInTheDocument()
+    expect(screen.getByText(/等待主持/)).toBeInTheDocument()
+    expect(screen.getByText('我要去窗边')).toBeInTheDocument()
+  })
+
+  it('keeps the slot-owner processing copy through the organizing hold after idle', async () => {
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+    vi.useFakeTimers()
+
+    act(() => emitWsMessage({
+      type: 'room.action.state',
+      payload: {
+        status: 'processing',
+        playerId: 'player-1',
+        actorId: 'actor-1',
+        clientActionId: 'action-hold',
+        startedAt: '2026-08-19T10:00:00Z',
+        revision: '8',
+        queued: [],
+      },
+    }))
+    act(() => emitWsMessage({
+      type: 'turn.phase_changed',
+      payload: { correlationId: 'action-hold', phase: 'generating_narration' },
+    }))
+    expect(screen.getByText('陈探员的行动正在处理中')).toBeInTheDocument()
+    expect(screen.queryByText('守秘人组织语言中')).not.toBeInTheDocument()
+
+    act(() => emitWsMessage({
+      type: 'narration.push',
+      payload: { messageId: 'action-hold', text: '陈探员点了点头。' },
+    }))
+    act(() => emitWsMessage({
+      type: 'room.action.state',
+      payload: { status: 'idle', revision: '9', queued: [] },
+    }))
+    expect(screen.getByText('陈探员的行动正在处理中')).toBeInTheDocument()
+    expect(screen.queryByText('守秘人组织语言中')).not.toBeInTheDocument()
+    act(() => vi.advanceTimersByTime(600))
+    expect(screen.queryByText('陈探员的行动正在处理中')).not.toBeInTheDocument()
+    vi.useRealTimers()
   })
 
   it('keeps keeper progress visible and maps backend phases to player-facing copy', async () => {

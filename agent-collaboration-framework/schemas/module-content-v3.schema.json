@@ -1082,6 +1082,17 @@
           "title": "Relations",
           "type": "array"
         },
+        "initial_custody": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InitialCustodySpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "state": {
           "additionalProperties": {
             "$ref": "#/$defs/JsonValue"
@@ -1479,6 +1490,25 @@
         "player_content"
       ],
       "title": "InformationSpecV3",
+      "type": "object"
+    },
+    "InitialCustodySpec": {
+      "additionalProperties": false,
+      "description": "声明实体在开局种子中的权威持有位置。",
+      "properties": {
+        "kind": {
+          "enum": [
+            "location",
+            "starting_actor"
+          ],
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "InitialCustodySpec",
       "type": "object"
     },
     "InitialStateSpec": {

@@ -75,6 +75,7 @@ def entity(
     visible_when: dict[str, Any] | None = None,
     relations: list[dict[str, str]] | None = None,
     portable: bool = False,
+    initial_custody: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """构造 Canon Entity；可携带物只声明既有实体，不在运行时创造。"""
 
@@ -91,6 +92,8 @@ def entity(
     }
     if relations:
         payload["relations"] = relations
+    if initial_custody is not None:
+        payload["initial_custody"] = initial_custody
     if visible_when is not None:
         payload["visibility_conditions"] = [visible_when]
     if portable:
@@ -282,7 +285,13 @@ def build_module() -> dict[str, Any]:
 
     entities = [
         entity("restraint_rope", "细绳", "捆住调查员手脚的细绳。", state={"cut": False}),
-        entity("pencil_knife", "铅笔刀", "调查员醒来时仍随身带着的小刀。", portable=True),
+        entity(
+            "pencil_knife",
+            "铅笔刀",
+            "调查员醒来时仍随身带着的小刀。",
+            portable=True,
+            initial_custody={"kind": "starting_actor"},
+        ),
         entity("bed", "单人床", "调查员醒来时躺着的床，床角铁皮翘起。", state={"moved": False}),
         entity("sharp_bed_corner", "锋利铁皮", "床角翘起的一片锋利铁皮。", state={"noticed": False}),
         entity("wall_painting", "猫与糖粥的挂画", "墙上的大幅挂画，无法整幅取下。", state={"inspected": False}),
@@ -401,7 +410,7 @@ def build_module() -> dict[str, Any]:
     return {
         "content_schema_version": 3,
         "module_id": "silver-lock",
-        "version": "3.0.1",
+        "version": "3.0.2",
         "world_ref": "coc-7e",
         "background": "当代。单名调查员在昏暗的银色房间醒来，失去近期记忆且手脚被捆。叙事保持幽闭、失忆与超现实谜题交织的基调；芭斯特身份、银之锁原理、绑架者出现条件及抽屉内容在对应线索提交前不得泄露。",
         "information": info,

@@ -213,6 +213,12 @@ class EntityRelationSpec(ContractModel):
     target_id: Identifier
 
 
+class InitialCustodySpec(ContractModel):
+    """声明实体在开局种子中的权威持有位置。"""
+
+    kind: Literal["location", "starting_actor"]
+
+
 class EntitySpecV3(ContractModel):
     """A Canon NPC or object.
 
@@ -230,6 +236,8 @@ class EntitySpecV3(ContractModel):
     description: str = ""
     located_in: Identifier | None = None
     relations: tuple[EntityRelationSpec, ...] = ()
+    # 这是开局种子语义，不等同于普通的 EntityRelation。
+    initial_custody: InitialCustodySpec | None = None
     state: dict[str, JsonValue] = Field(default_factory=dict)
     item_component: ItemComponent | None = None
     visibility: Literal["public", "party", "actor", "keeper"] = "public"
@@ -1076,6 +1084,7 @@ __all__ = [
     "InformationPresentationSpec",
     "InformationRecoverySpec",
     "InformationSpecV3",
+    "InitialCustodySpec",
     "InitialStateSpec",
     "InvokeRulesetActionStep",
     "KnowledgeGoalSpec",

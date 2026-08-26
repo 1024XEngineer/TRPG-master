@@ -151,6 +151,11 @@ def test_action_plan_narration_forbids_repeating_previous_atmosphere() -> None:
     assert "不要再写一整段地点简介" in _ACTION_PLAN_NARRATION_INSTRUCTIONS
 
 
+def test_action_plan_narration_retry_hint_covers_all_safety_rejections() -> None:
+    assert "未通过玩家可见输出安全校验" in _ACTION_PLAN_NARRATION_INSTRUCTIONS
+    assert "只基于当前 PlayerView、已提交结果和输出协议" in _ACTION_PLAN_NARRATION_INSTRUCTIONS
+
+
 def load_paper_chase() -> ModuleContentV3:
     examples = (
         ROOT

@@ -1800,6 +1800,27 @@ class ActionPlanTurnApplication:
                             )
                         }
                     )
+                elif attempt == 0 and exc.reason.startswith("persistent_claim_without_evidence:"):
+                    # 持久状态校验失败时，明确要求模型删除无证据断言，避免原地重试。
+                    context = context.model_copy(
+                        update={
+                            "narration_retry_hint": (
+                                "上一版叙事包含没有权威证据确认的持久状态或物品变化。"
+                                "请删除该断言，只描述当前 PlayerView 和已提交结果能够证明的内容。"
+                            )
+                        }
+                    )
+                elif attempt == 0:
+                    # 其他安全校验失败也必须改变下一次模型输入，而不是重复原请求。
+                    context = context.model_copy(
+                        update={
+                            "narration_retry_hint": (
+                                "上一版叙事未通过玩家可见输出安全校验。请重新生成符合当前"
+                                " PlayerView、已提交结果和输出协议的自然叙事，不得输出内部字段、"
+                                "未经证据确认的事实或不匹配的叙事类型。"
+                            )
+                        }
+                    )
                 if attempt == 1:
                     if (
                         exc.reason == "required_evidence_missing"

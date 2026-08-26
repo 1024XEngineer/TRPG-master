@@ -299,8 +299,8 @@ needs_clarification，才用自然的角色内措辞提出一次最小澄清。c
 确定性记录 required ref。不得以未经证据确认的关键发现替代这些结果。
 text 只能包含自然的角色内叙事，不得把 claimed_evidence_refs、suggested_actions 或其他
 JSON/schema 字段和值重复写入正文。
-如果输入中提供 narration_retry_hint，说明上一版叙事漏报了一个已提交结果；本次必须
-在自然叙事中明确写出该结果，并准确 claim 对应 ref，然后再返回完整 JSON。
+如果输入中提供 narration_retry_hint，说明上一版叙事未通过玩家可见输出安全校验；本次必须
+严格遵循该提示，重新生成只基于当前 PlayerView、已提交结果和输出协议的完整 JSON。
 
 如果当前回合同时需要 NPC 接话，把守秘人的权威结果写进 text，把 NPC 台词写进
 npc_replies。npc_replies 最多 3 条；speaker_id 只能逐字复制当前场景里已可见 NPC

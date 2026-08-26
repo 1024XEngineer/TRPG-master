@@ -61,6 +61,8 @@ def matching_event_rules(
 
     Ordering is `priority DESC, id ASC` — the same stable rule v2 used, so a
     module author's priorities keep meaning what they meant.
+
+    定时任务到期不走这里：排任务本身就是订阅，`task_due_item` 直接投递。
     """
 
     matched = [
@@ -72,6 +74,40 @@ def matching_event_rules(
     ]
     matched.sort(key=lambda rule: (-rule.priority, rule.id))
     return tuple(matched)
+
+
+def task_due_item(module: ModuleContentV3, event: DomainEvent) -> AgendaItem | None:
+    """把一次到期直接投递给排它的那条规则（#415）。
+
+    定时任务不走 trigger 匹配。排任务这个动作**本身就是订阅**：
+    `RuntimeTimeTask` 上记着 rule_id 与 branch_id，那就是「谁关心、从哪继续」的
+    完整答案。按 event_type 广播反而会出两个错——所有监听 `time.task_due` 的
+    规则一起入队（一个任务到期带出另一个任务的剧情后果），而真正排了任务的那条
+    规则如果 trigger 写的是别的事件（通常如此，它得先被什么东西唤醒才会去排
+    任务），反倒收不到自己的到期。
+
+    返回 None 表示这条事件不该进队列：规则或分支在模组换版之后没了。半截执行
+    比不执行更糟，所以宁可不排。
+    """
+
+    if event.type != "time.task_due":
+        return None
+    rule_id = event.payload.get("rule_id")
+    branch_id = event.payload.get("branch_id")
+    if not isinstance(rule_id, str) or not isinstance(branch_id, str):
+        return None
+    rule = next((item for item in module.rules if item.id == rule_id), None)
+    if rule is None or not any(
+        branch.id == branch_id for branch in rule.execution.branches
+    ):
+        return None
+    return AgendaItem(
+        source_event_id=event.event_id,
+        event_sequence=event.sequence,
+        rule_id=rule.id,
+        rule_priority=rule.priority,
+        branch_id=branch_id,
+    )
 
 
 def evaluate_condition(
@@ -162,6 +198,12 @@ def walk_rule_from(rule: RuleSpecV3, step_id: str) -> RuleWalk:
             return walk
         if behavior == "produces_effect_and_continues":
             walk.effects.append(step.effect)
+            cursor = step.next_step_id
+            continue
+        if behavior == "schedules_time_task_and_continues":
+            # 步骤本身进队列，不是它的某个字段：目标时间要等到提交那一刻才
+            # 解析得出来，相对目标依赖当时的世界时钟（#415 §阶段四）。
+            walk.effects.append(step)
             cursor = step.next_step_id
             continue
         # Everything else needs the persisted agenda.
@@ -326,6 +368,7 @@ __all__ = [
     "agenda_item_for_event",
     "agenda_item_key",
     "agenda_status_for_walk",
+    "agent_match_admits",
     "agent_match_scope_admits",
     "create_rule_agenda",
     "effects_after_cancel",
@@ -395,16 +438,55 @@ def agent_match_scope_admits(
     scope = trigger.scope
     if scope.location_ids and location_id not in scope.location_ids:
         return False
-    if action_family is not None and scope.action_families:
-        if action_family not in scope.action_families:
-            return False
-    if target_kind is not None and scope.target_kinds:
-        if target_kind not in scope.target_kinds:
-            return False
-    if target_id is not None and scope.target_ids:
-        if target_id not in scope.target_ids:
-            return False
-    return True
+    if (
+        action_family is not None
+        and scope.action_families
+        and action_family not in scope.action_families
+    ):
+        return False
+    if (
+        target_kind is not None
+        and scope.target_kinds
+        and target_kind not in scope.target_kinds
+    ):
+        return False
+    return not (
+        target_id is not None
+        and scope.target_ids
+        and target_id not in scope.target_ids
+    )
+
+
+def agent_match_admits(
+    rule: RuleSpecV3,
+    *,
+    state: GameState,
+    actor_id: str,
+    location_id: str,
+    action_family: str | None = None,
+    target_kind: str | None = None,
+    target_id: str | None = None,
+) -> bool:
+    """Whether an ``agent_match`` Rule is available in the current state.
+
+    ``scope`` is the structural half of admission; ``when`` is the stateful
+    half. Candidate publication and adjudication submission both call this
+    function so a Rule hidden during the day, or invalidated after publication,
+    cannot be selected by naming its id directly.
+    """
+
+    if not agent_match_scope_admits(
+        rule,
+        location_id=location_id,
+        action_family=action_family,
+        target_kind=target_kind,
+        target_id=target_id,
+    ):
+        return False
+    trigger = rule.trigger
+    if not isinstance(trigger, AgentMatchTriggerSpec):
+        return False
+    return evaluate_condition(trigger.when, state=state, actor_id=actor_id)
 
 
 def pending_check_for(rule: RuleSpecV3, branch_id: str):

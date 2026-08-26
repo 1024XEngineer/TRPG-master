@@ -239,6 +239,7 @@ class ArchitectureTests(unittest.TestCase):
                 "adr-module-parser-architecture.md",
                 "issue-208-action-plan.md",
                 "issue-271-validation.md",
+                "issue-415-time-model.md",
             ],
         )
 

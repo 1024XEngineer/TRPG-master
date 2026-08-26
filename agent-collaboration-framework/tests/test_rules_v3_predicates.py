@@ -102,6 +102,173 @@ class TimeOfDayIsTests(unittest.TestCase):
         condition = predicate("time_of_day_is", value="night")
         self.assertTrue(_evaluate_predicate(condition, state=state, actor_id=ACTOR))
 
+    def test_the_stored_segment_wins_over_the_hour(self) -> None:
+        """05:00 声明成 morning 之后，day 谓词在这一点成立（#415 §阶段一）。
+
+        硬编码 06–18 的旧推导会把它判成 night——这是逐点覆盖要解决的事。
+        """
+
+        state = game_state(
+            world_time=WorldTimeState(
+                current=WorldTimePoint(day_index=0, hour_of_day=5),
+                current_point_id="hour_05",
+                current_time_segment="morning",
+            )
+        )
+
+        self.assertTrue(
+            _evaluate_predicate(
+                predicate("time_of_day_is", value="day"), state=state, actor_id=ACTOR
+            )
+        )
+        self.assertFalse(
+            _evaluate_predicate(
+                predicate("time_of_day_is", value="night"), state=state, actor_id=ACTOR
+            )
+        )
+
+    def test_four_segment_values_separate_two_points_that_are_both_night(self) -> None:
+        """追书人的 `surveillance_available` 布尔闩就是因为这里区分不开才存在的。
+
+        22:00 与 02:00 都读作 night，粗粒度谓词会在两个点各触发一次；四段值
+        让规则说得出「只在凌晨」。
+        """
+
+        evening = game_state(
+            world_time=WorldTimeState(
+                current=WorldTimePoint(day_index=0, hour_of_day=22),
+                current_point_id="hour_22",
+                current_time_segment="evening",
+            )
+        )
+        late_night = game_state(
+            world_time=WorldTimeState(
+                current=WorldTimePoint(day_index=1, hour_of_day=2),
+                current_point_id="hour_02",
+                current_time_segment="late_night",
+            )
+        )
+        query = predicate("time_of_day_is", value="late_night")
+
+        self.assertFalse(_evaluate_predicate(query, state=evening, actor_id=ACTOR))
+        self.assertTrue(_evaluate_predicate(query, state=late_night, actor_id=ACTOR))
+        # 而粗粒度的 night 对两者都成立——既有写法不需要迁移。
+        coarse = predicate("time_of_day_is", value="night")
+        self.assertTrue(_evaluate_predicate(coarse, state=evening, actor_id=ACTOR))
+        self.assertTrue(_evaluate_predicate(coarse, state=late_night, actor_id=ACTOR))
+
+    def test_an_unknown_query_value_reads_false(self) -> None:
+        state = game_state()
+        condition = predicate("time_of_day_is", value="dusk")
+        self.assertFalse(_evaluate_predicate(condition, state=state, actor_id=ACTOR))
+
+
+class TimePointIsTests(unittest.TestCase):
+    """#245 §8 的 CurrentTimePointPredicate（#415 §阶段三）。"""
+
+    def at(self, point_id: str, *, day: int = 0, hour: int = 0) -> GameState:
+        return game_state(
+            world_time=WorldTimeState(
+                current=WorldTimePoint(day_index=day, hour_of_day=hour),
+                current_point_id=point_id,
+            )
+        )
+
+    def test_matches_only_the_exact_declared_point(self) -> None:
+        state = self.at("hour_20", hour=20)
+
+        self.assertTrue(
+            _evaluate_predicate(
+                predicate("time_point_is", value="hour_20"), state=state, actor_id=ACTOR
+            )
+        )
+        # hour_18 与 hour_20 同为 evening，粗粒度谓词分不开，这个谓词分得开。
+        self.assertFalse(
+            _evaluate_predicate(
+                predicate("time_point_is", value="hour_18"), state=state, actor_id=ACTOR
+            )
+        )
+
+    def test_a_missing_or_non_string_value_reads_false(self) -> None:
+        state = self.at("hour_20", hour=20)
+
+        self.assertFalse(
+            _evaluate_predicate(predicate("time_point_is"), state=state, actor_id=ACTOR)
+        )
+        self.assertFalse(
+            _evaluate_predicate(
+                predicate("time_point_is", value=20), state=state, actor_id=ACTOR
+            )
+        )
+
+
+class WorldTimeAtLeastTests(unittest.TestCase):
+    def at(self, *, day: int, hour: int) -> GameState:
+        return game_state(
+            world_time=WorldTimeState(
+                current=WorldTimePoint(day_index=day, hour_of_day=hour),
+                current_point_id="point",
+            )
+        )
+
+    def test_compares_on_the_absolute_hour_across_days(self) -> None:
+        """跨天由 `absolute_hour` 保证：D1 02:00 晚于 D0 18:00。"""
+
+        query = predicate("world_time_at_least", day_index=1, hour_of_day=0)
+
+        self.assertFalse(
+            _evaluate_predicate(query, state=self.at(day=0, hour=18), actor_id=ACTOR)
+        )
+        self.assertTrue(
+            _evaluate_predicate(query, state=self.at(day=1, hour=2), actor_id=ACTOR)
+        )
+
+    def test_the_boundary_moment_itself_counts_as_at_least(self) -> None:
+        query = predicate("world_time_at_least", day_index=1, hour_of_day=2)
+
+        self.assertTrue(
+            _evaluate_predicate(query, state=self.at(day=1, hour=2), actor_id=ACTOR)
+        )
+
+    def test_a_non_integer_bound_reads_false(self) -> None:
+        state = self.at(day=3, hour=12)
+
+        for args in ({"day_index": "1"}, {"hour_of_day": None}, {"day_index": True}):
+            with self.subTest(args=args):
+                self.assertFalse(
+                    _evaluate_predicate(
+                        predicate("world_time_at_least", **args), state=state, actor_id=ACTOR
+                    )
+                )
+
+
+class DaysElapsedAtLeastTests(unittest.TestCase):
+    def on_day(self, day: int) -> GameState:
+        return game_state(
+            world_time=WorldTimeState(
+                current=WorldTimePoint(day_index=day, hour_of_day=12),
+                current_point_id="hour_12",
+            )
+        )
+
+    def test_opening_day_is_zero(self) -> None:
+        """与运行态一致：开局当天是第 0 天，所以「第三天」写作 2。"""
+
+        query = predicate("days_elapsed_at_least", value=2)
+
+        self.assertFalse(_evaluate_predicate(query, state=self.on_day(1), actor_id=ACTOR))
+        self.assertTrue(_evaluate_predicate(query, state=self.on_day(2), actor_id=ACTOR))
+        self.assertTrue(_evaluate_predicate(query, state=self.on_day(5), actor_id=ACTOR))
+
+    def test_a_non_integer_value_reads_false(self) -> None:
+        self.assertFalse(
+            _evaluate_predicate(
+                predicate("days_elapsed_at_least", value="2"),
+                state=self.on_day(5),
+                actor_id=ACTOR,
+            )
+        )
+
 
 class InformationIsTests(unittest.TestCase):
     def test_party_wide_discovered_fact_matches(self) -> None:

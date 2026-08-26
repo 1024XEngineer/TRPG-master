@@ -69,6 +69,7 @@ def _world_time_for(module_content: ModuleContentV3) -> WorldTimeState:
     return WorldTimeState(
         current=WorldTimePoint(day_index=0, hour_of_day=point.hour_of_day),
         current_point_id=point.id,
+        current_time_segment=point.resolved_segment,
     )
 
 

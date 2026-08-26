@@ -19,15 +19,26 @@ from collaboration_framework.contracts import (
     AdjudicationRecovery,
     AdjudicationStatusView,
     AdvanceWorldTimeEffect,
+    ContractError,
     EnterLocationEffect,
     GetAdjudicationStatusRequest,
     ModuleContentV3,
     SubmitAdjudicationRequest,
+    default_label_for,
+    segment_at_hour,
 )
 from collaboration_framework.contracts.validation import AdjudicationValidationError
 from collaboration_framework.engine import AdjudicationEngineService
 from collaboration_framework.engine.models import GameState
-from collaboration_framework.engine.timeline import advanced_to_next
+from collaboration_framework.engine.time_tasks import (
+    active_occurrences,
+    settle_due_tasks,
+)
+from collaboration_framework.engine.timeline import (
+    advanced_to_next,
+    player_time_label,
+    terminal_reached,
+)
 from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -58,6 +69,16 @@ def _aware(value: datetime) -> datetime:
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
+def _target_label(record: TimeAdvanceProposalRecord) -> str:
+    """广播出去的那一个字符串（#415 §阶段一）。
+
+    迁移之前建的提案没有存过 label，按目标小时回退到 canonical segment 的
+    缺省措辞：玩家该看到的东西和精确小时无关，回退比让广播炸掉便宜。
+    """
+
+    return record.target_label or default_label_for(segment_at_hour(record.target_hour_of_day))
+
+
 def _pending_payload(record: TimeAdvanceProposalRecord) -> TimeAdvancePendingPayload:
     """将持久化记录投影成可以在断线后整体覆盖 UI 的快照。"""
 
@@ -65,9 +86,8 @@ def _pending_payload(record: TimeAdvanceProposalRecord) -> TimeAdvancePendingPay
         proposal_id=record.proposal_id,
         proposal_version=record.proposal_version,
         source_revision=str(record.source_revision),
-        target_point_id=record.target_point_id,
+        target_label=_target_label(record),
         target_day_index=record.target_day_index,
-        target_hour_of_day=record.target_hour_of_day,
         requester_player_id=record.requester_player_id,
         required_player_ids=list(record.required_player_ids),
         accepted_player_ids=list(record.accepted_player_ids),
@@ -90,8 +110,8 @@ def _resolved_payload(record: TimeAdvanceProposalRecord) -> TimeAdvanceResolvedP
     return TimeAdvanceResolvedPayload(
         proposal_id=record.proposal_id,
         status=status,
+        target_label=_target_label(record),
         target_day_index=record.target_day_index,
-        target_hour_of_day=record.target_hour_of_day,
         committed_revision=(
             str(record.committed_revision) if record.committed_revision is not None else None
         ),
@@ -257,9 +277,26 @@ async def create_from_adjudication(
     if version is None or version.content_schema_version != 3:
         raise TimeAdvanceError("当前模组没有可推进的离散时间线")
     module = ModuleContentV3.model_validate(version.content_json)
+    # 终点校验必须落在创建提案**之前**：让全员投完票才被拒是最难看的一种拒绝
+    # 方式。Engine 提交时还会再校验一次，两处走的是同一个 `terminal_reached`
+    # （#415 §阶段二）。
+    if terminal_reached(module, state.world_time):
+        raise TimeAdvanceError("故事已经走到最后一个时间点，时间不会再推进了")
+    # 逐跳解析必须与 Engine 走同一套：它在校验和应用 advance_world_time 时都传
+    # 了活动临时点，这里不传就会把「下一跳是定时任务插入的 15:00」算成默认的
+    # 18:00——显式 to_point_id 因此被误判「不是下一个点」，临时任务在多人房间
+    # 永远到不了（#415）。
+    projected = state
     target_time = state.world_time
     for effect in jumps:
-        target_time = advanced_to_next(module, target_time)
+        try:
+            target_time = advanced_to_next(module, target_time, active_occurrences(projected))
+        except ContractError as exc:
+            # 一次裁决里的多跳可能中途撞上终点：前几跳合法，某一跳越界。
+            raise TimeAdvanceError("冻结裁决越过了模组时间线的终点") from exc
+        # 进入这一刻的同时，等在这一刻的任务就到期了，它排出来的临时点也就不再
+        # 是后续跳转的候选。多跳要跟着推演，否则第二跳还会看见已经用掉的点。
+        projected, _ = settle_due_tasks(projected, target_time)
         if effect.to_point_id is not None and effect.to_point_id != target_time.current_point_id:
             raise TimeAdvanceError("冻结裁决的目标不是时间线上的下一个点")
 
@@ -286,6 +323,8 @@ async def create_from_adjudication(
         target_point_id=target_time.current_point_id,
         target_day_index=target_time.current.day_index,
         target_hour_of_day=target_time.current.hour_of_day,
+        # 建提案时解析一次，之后广播路径只读列，不再碰模组快照。
+        target_label=player_time_label(module, target_time),
         required_player_ids=required,
         accepted_player_ids=[request.player_id],
         adjudication_json=adjudication.model_dump(

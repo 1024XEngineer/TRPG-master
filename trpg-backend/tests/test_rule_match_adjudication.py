@@ -165,7 +165,8 @@ async def test_rule_once_builder_uses_only_selected_rule_and_opaque_option() -> 
     context = await _cemetery_context("仔细观察守墓人")
     assert context.keeper_capabilities is not None
     candidate = next(
-        item for item in context.keeper_capabilities.rule_candidates
+        item
+        for item in context.keeper_capabilities.rule_candidates
         if item.rule_id == "observe_caretaker"
     )
     option = next(item for item in candidate.options if item.id == "spot-hidden")

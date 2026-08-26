@@ -1582,8 +1582,7 @@ async def _drain_host_action_queue(room_id: str) -> None:
                         and (
                             isinstance(exc, ValueError)
                             or (
-                                isinstance(exc, TurnExecutionError)
-                                and exc.code.startswith("RULE_")
+                                isinstance(exc, TurnExecutionError) and exc.code.startswith("RULE_")
                             )
                         )
                     ):

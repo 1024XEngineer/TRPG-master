@@ -1893,7 +1893,8 @@ export default function CharacterPage() {
                     同样由 ruleset 驱动，不写死是哪一项——换个规则系统这里自然跟着变。 */}
                 {(ruleset?.attributes ?? []).filter(a => !a.pointBuy).map(attribute => {
                   const helpOpen = attributeHelpKey === attribute.key
-                  const luckReady = typeof attr[attribute.key] === 'number'
+                  // 中途累计值也会写入 attr，但只有三颗骰子都确认后才算完成。
+                  const luckReady = luckRollComplete && typeof attr[attribute.key] === 'number'
                   return (
                     <div key={attribute.key} className="character-create__attribute-row character-create__attribute-row--standalone px-3 py-2.5 bg-panel rounded-md">
                       <div className="character-create__attribute-row-main flex items-center gap-3">
@@ -1935,6 +1936,9 @@ export default function CharacterPage() {
                       </div>
                       {!isTemplateHost && luckRolling && (
                         <p className="mt-2 text-center text-[11px] text-text-muted">请完成幸运骰后继续</p>
+                      )}
+                      {!isTemplateHost && luckDice && !luckRollComplete && (
+                        <p className="mt-2 text-center text-[11px] text-text-muted">已投 {luckDiceIndex}/3 颗 · 当前幸运值：{luckAccumulated * 5}</p>
                       )}
                       {!isTemplateHost && luckRollComplete && (
                         <p className="mt-2 text-center text-[11px] text-text-muted">本局幸运值已确定：{attr[attribute.key] ?? luckAccumulated * 5}</p>

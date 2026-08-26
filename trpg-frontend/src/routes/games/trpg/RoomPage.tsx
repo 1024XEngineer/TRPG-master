@@ -1095,8 +1095,8 @@ export function DiceModal({
       open={open}
       onClose={onClose}
       title={isSequentialMode ? '幸运值投掷' : '骰子检定'}
-      className="room-play__bottom-panel--dice"
-      heightVh={isSequentialMode ? 68 : undefined}
+      className={`room-play__bottom-panel--dice ${isSequentialMode ? 'room-play__bottom-panel--sequential-dice' : ''}`}
+      heightVh={isSequentialMode ? 64 : undefined}
     >
       {!isCheckMode && !isSequentialMode && (
         <div className="flex gap-1.5 mb-3.5">

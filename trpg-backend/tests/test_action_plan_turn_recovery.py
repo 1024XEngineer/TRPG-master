@@ -97,6 +97,7 @@ class _NarrationContextStub:
         self.player_input = SimpleNamespace(
             client_action_id="action-narration-test",
             utterance="",
+            interlocutor_id=None,
         )
         self.player_view = SimpleNamespace(
             scene=SimpleNamespace(visible_entities=()),
@@ -341,6 +342,78 @@ async def test_narration_retries_atmosphere_repeat_with_hint() -> None:
     assert "不得再用午后阳光、夜色、窗景等环境开场重铺" in retry_context.narration_retry_hint
     assert narration.kind == "narration"
     assert "这次行动已经按当前可确认的结果完成" in narration.text
+
+
+@pytest.mark.asyncio
+async def test_narration_retries_persistent_claim_with_actionable_hint() -> None:
+    """持久状态校验失败后，第二次模型调用必须收到删除断言的提示。"""
+    application = object.__new__(ActionPlanTurnApplication)
+    success = SimpleNamespace(kind="narration", text="环境恢复正常。", npc_replies=())
+    narrate = AsyncMock(
+        side_effect=[
+            ActionPlanNarrationValidationError("persistent_claim_without_evidence:posture"),
+            success,
+        ]
+    )
+    application._narrator = SimpleNamespace(narrate=narrate)
+    context = cast(
+        ActionPlanNarrationContext,
+        _NarrationContextStub(
+            NarrationEvidence(
+                ref="evt-1",
+                kind="entity_discovered",
+                subject_id="x",
+                subject_name="公开结果",
+                description="环境恢复正常。",
+                required_in_narration=False,
+            ),
+            "resolved",
+        ),
+    )
+
+    narration = await application._narrate(context)
+
+    assert narration is success
+    assert narrate.await_count == 2
+    retry_hint = narrate.await_args_list[1].args[0].narration_retry_hint
+    assert "没有权威证据确认" in retry_hint
+    assert "只描述当前 PlayerView" in retry_hint
+
+
+@pytest.mark.asyncio
+async def test_narration_retries_unknown_validation_with_generic_hint() -> None:
+    """未单独分类的安全拒绝也不能原样重复第一次模型输入。"""
+    application = object.__new__(ActionPlanTurnApplication)
+    success = SimpleNamespace(kind="narration", text="已按当前结果处理。", npc_replies=())
+    narrate = AsyncMock(
+        side_effect=[
+            ActionPlanNarrationValidationError("evidence_scope"),
+            success,
+        ]
+    )
+    application._narrator = SimpleNamespace(narrate=narrate)
+    context = cast(
+        ActionPlanNarrationContext,
+        _NarrationContextStub(
+            NarrationEvidence(
+                ref="evt-1",
+                kind="entity_discovered",
+                subject_id="x",
+                subject_name="公开结果",
+                description="已按当前结果处理。",
+                required_in_narration=False,
+            ),
+            "resolved",
+        ),
+    )
+
+    narration = await application._narrate(context)
+
+    assert narration is success
+    assert narrate.await_count == 2
+    retry_hint = narrate.await_args_list[1].args[0].narration_retry_hint
+    assert "未通过玩家可见输出安全校验" in retry_hint
+    assert "输出协议" in retry_hint
 
 
 def test_required_evidence_fallback_omits_second_person_description_in_named_actor() -> None:

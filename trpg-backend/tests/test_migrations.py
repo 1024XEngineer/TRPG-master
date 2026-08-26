@@ -1,9 +1,11 @@
 """Issue #89 Alembic 升降级与历史数据保护测试。"""
 
+import json
 import os
 import sqlite3
 import subprocess
 import sys
+from copy import deepcopy
 from pathlib import Path
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
@@ -11,8 +13,8 @@ PREVIOUS_REVISION = "1a02058345ee"
 ENGINE_IDENTITY_PREVIOUS_REVISION = "9c4e7a2b1d6f"
 # PR2 NPC 对话迁移（d1e2f3a4b5c6）接在 PR1 输入路由 head 后面；#398 的检定唯一
 # 约束放宽（b8c9d0e1f2a3）再接在它之后，最后是模组快照的死字段剥离。
-# PR4 新增的记忆投影迁移把这条线和已有的另外一条 head 合并起来。
-HEAD_REVISION = "g8b9c0d1e2f3"
+# 时间点回填与摘要复合游标各自形成分支后，由空迁移重新汇合为单一 head。
+HEAD_REVISION = "h1i2j3k4l5m6"
 
 
 def _run_alembic(database: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -526,6 +528,86 @@ def test_memory_source_time_reconciliation_repairs_stamped_database(tmp_path: Pa
         indexes = {row[1] for row in connection.execute("PRAGMA index_list('memory_entries')")}
     assert source_created_at == ("2026-08-20 12:34:56",)
     assert "ix_memory_entries_room_source_created" in indexes
+
+
+def test_time_point_backfill_makes_old_snapshots_reload_unchanged(
+    tmp_path: Path,
+) -> None:
+    """旧格式模组快照跑完迁移后，加载器必须判定 unchanged（#415）。
+
+    #415 给 TimePointSpec 加了 time_segment / label，给 ModuleTimePolicySpec
+    加了 terminal_point。三个都可选，所以旧快照解析没问题——但内置模组加载器
+    比的是**整份归一化 JSON**，新代码会把这三个字段写成 null，比对不等就抛
+    BuiltinModuleLoadError，后端 lifespan 起不来。
+
+    这条测试守的正是那条升级路径：pytest 平时在临时空库上 create_all，
+    migration job 在全新容器上跑，两者都只覆盖「全新建库」，撞不到这个 bug。
+    """
+
+    from collaboration_framework.contracts import ModuleContentV3
+
+    database = tmp_path / "time-point-backfill.db"
+    _upgrade_or_fail(database, "f7b9c2d4e6a8")
+
+    fixture = (
+        Path(__file__).resolve().parents[2]
+        / "agent-collaboration-framework"
+        / "docs"
+        / "module-parser"
+        / "examples"
+        / "module-content-validation"
+        / "银之锁"
+        / "module-content-v3.json"
+    )
+    fresh = ModuleContentV3.model_validate_json(fixture.read_text(encoding="utf-8"))
+    normalized = fresh.to_json_dict()
+
+    # 造出「扩字段之前」序列化出来的形状：把三个新键摘掉。
+    legacy = deepcopy(normalized)
+    for point in legacy["time_policy"]["default_points"]:
+        del point["time_segment"]
+        del point["label"]
+    del legacy["time_policy"]["terminal_point"]
+    assert legacy != normalized
+
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            """
+            INSERT INTO scenarios (
+                id, module_id, game_system_id, title, version, authors,
+                players_min, players_max, difficulty, status, created_at, updated_at
+            ) VALUES (
+                '90000000-0000-0000-0000-000000000001', 'legacy-time-module',
+                '90000000-0000-0000-0000-000000000002', '旧快照', '1.0.0', '[]',
+                1, 4, 1, 'ready', '2026-08-25 00:00:00', '2026-08-25 00:00:00'
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO module_versions (
+                module_id, version, world_ref, content_schema_version,
+                content_json, created_at
+            ) VALUES (
+                'legacy-time-module', '1.0.0', 'coc-7e', 3, ?,
+                '2026-08-25 00:00:00'
+            )
+            """,
+            (json.dumps(legacy, ensure_ascii=False),),
+        )
+
+    _upgrade_or_fail(database, "head")
+
+    with sqlite3.connect(database) as connection:
+        stored = json.loads(
+            connection.execute(
+                "SELECT content_json FROM module_versions WHERE module_id = 'legacy-time-module'"
+            ).fetchone()[0]
+        )
+
+    # 这就是加载器那一步比较：迁移后必须完全相等，否则 lifespan 抛
+    # BuiltinModuleLoadError。
+    assert stored == normalized
 
 
 def test_summary_cursor_migration_preserves_scene_audience_and_pending_target(

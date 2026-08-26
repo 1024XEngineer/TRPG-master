@@ -75,6 +75,7 @@ from collaboration_framework.contracts import (
     RevealInformationEffect,
     SetEndingAvailabilityEffect,
     SetVisibilityEffect,
+    TimeAdvanceBlockReason,
     TravelInterrupted,
     TravelResolved,
 )
@@ -163,7 +164,9 @@ class EffectServices:
     resolve_location_target: Callable[..., object]
     advanced_to_next: Callable[..., object]
     next_point_after: Callable[..., object]
-    time_advance_block_reason: Callable[..., str | None]
+    active_occurrences: Callable[..., object]
+    settle_due_tasks: Callable[..., object]
+    time_advance_block_reason: Callable[..., TimeAdvanceBlockReason | None]
     is_public_standard_state: Callable[..., bool]
     new_event_id: Callable[[], str] = lambda: f"evt_{uuid4().hex}"
 
@@ -270,6 +273,17 @@ class ApplyContext:
 
 
 @dataclass(frozen=True)
+class ExtraEvent:
+    """随主事件一起提交的附带事件。"""
+
+    event_type: str
+    payload: dict[str, JsonValue] = field(default_factory=dict)
+    # 默认 hidden：附带事件目前只有 `time.task_due`，它是规则管线的信号，
+    # 不是玩家投影。隐藏任务的存在因此不会从事件流里漏出去。
+    visibility: str = "hidden"
+
+
+@dataclass(frozen=True)
 class ApplyResult:
     """A handler's output: the new state, plus what to record about it.
 
@@ -282,6 +296,10 @@ class ApplyResult:
     event_type: str | None = None
     payload: dict[str, JsonValue] = field(default_factory=dict)
     event_id: str | None = None
+    # 一个效果偶尔会产生第二件已经发生的事：进入一个有定时任务等着的时刻，
+    # 同时是「时间到了这一点」和「这些任务到期了」。两件事必须落在同一次提交
+    # 里，否则重试会重发其中一件（#415 §阶段四）。
+    extra_events: tuple[ExtraEvent, ...] = ()
 
 
 EffectValidator = Callable[
@@ -960,18 +978,33 @@ def _validate_advance_world_time(
     runtime: EngineRuntimeSnapshot,
     services: EffectServices,
 ) -> None:
-    blocked = services.time_advance_block_reason(tuple(vocab.actor_ids))
+    world_time = vocab.world_time if vocab.world_time is not None else runtime.game_state.world_time
+    blocked = services.time_advance_block_reason(
+        tuple(vocab.actor_ids),
+        module_content=runtime.module_content,
+        world_time=world_time,
+    )
+    # 终点不是"玩家先处理完就能推"的事项，全员确认的豁免不适用于它。
+    if blocked is not None and blocked.code == "terminal_point_reached":
+        reject(
+            "TIME_ADVANCE_BLOCKED",
+            repairability="hard_reject",
+            fault="agent",
+            player_safe_reason=blocked.message,
+            internal_reason=f"{blocked.code}: {blocked.message}",
+        )
     if blocked is not None and not vocab.allow_party_time_advance:
         reject(
             "TIME_ADVANCE_BLOCKED",
             repairability="requires_player_choice",
             fault="player",
             player_safe_reason="当前存在需要玩家先处理的事项，不能推进时间",
-            internal_reason=blocked,
+            internal_reason=f"{blocked.code}: {blocked.message}",
         )
     target, _ = services.next_point_after(
         runtime.module_content,
-        vocab.world_time if vocab.world_time is not None else runtime.game_state.world_time,
+        world_time,
+        services.active_occurrences(runtime.game_state),
     )
     if effect.to_point_id is not None and effect.to_point_id != target.id:
         reject(
@@ -990,8 +1023,20 @@ def _apply_advance_world_time(
     effect: AdvanceWorldTimeEffect,
     ctx: ApplyContext,
 ) -> ApplyResult:
-    advanced = ctx.services.advanced_to_next(ctx.runtime.module_content, ctx.state.world_time)
+    advanced = ctx.services.advanced_to_next(
+        ctx.runtime.module_content,
+        ctx.state.world_time,
+        # 剧情临时点也是可以进入的时刻：15:00 的任务让下一跳落在 15:00，
+        # 而不是默认的 18:00（#415 §阶段四）。
+        ctx.services.active_occurrences(ctx.state),
+    )
     state = ctx.state.model_copy(update={"world_time": advanced}, deep=True)
+
+    # 进入这一刻的同时，等在这一刻的任务就到期了。把「标记 completed」和
+    # 「发 time.task_due」放进同一个 ApplyResult，单次发布就不依赖调用方自觉：
+    # 重试从已经 completed 的状态重跑，`due_tasks` 返回空，不会再发一次。
+    state, due = ctx.services.settle_due_tasks(state, advanced)
+
     return ApplyResult(
         state=state,
         event_type="time.point_entered",
@@ -999,8 +1044,25 @@ def _apply_advance_world_time(
             "point_id": advanced.current_point_id,
             "day_index": advanced.current.day_index,
             "hour_of_day": advanced.current.hour_of_day,
-            "time_of_day": advanced.time_of_day,
+            # 引擎内部事件，不是玩家投影：精确字段照常保留，只有粗粒度的
+            # `time_of_day` 换成四段 canonical segment（#415 §阶段一）。
+            "time_segment": advanced.time_segment,
         },
+        extra_events=tuple(
+            ExtraEvent(
+                event_type="time.task_due",
+                payload={
+                    "task_id": task.task_id,
+                    "task_key": task.task_key,
+                    "rule_id": task.rule_id,
+                    # Agenda 据此进入作者声明的 on_due 分支，而不是规则的
+                    # 默认入口分支。
+                    "branch_id": task.branch_id,
+                    "bindings": dict(task.bindings),
+                },
+            )
+            for task in due
+        ),
     )
 
 
@@ -1254,6 +1316,7 @@ __all__ = [
     "EFFECTS",
     "ApplyContext",
     "ApplyResult",
+    "ExtraEvent",
     "ClassificationContext",
     "EffectRegistration",
     "EffectServices",

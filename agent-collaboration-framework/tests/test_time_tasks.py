@@ -1,0 +1,1167 @@
+"""定时任务的作者态契约与运行时模型（#245 §5 / #415 §阶段四）。
+
+#245 冻结了这套形状，但 `RuntimeTimeTask` 一直不存在——只在
+`engine/timeline.py` 的注释里被提过一次；`CreateTimeTaskStep` 也只有一个
+`task_id`，没有目标时间，也就是说它根本无法实际创建任务。这里钉住补齐后的
+形状，执行器是下一步的事。
+"""
+
+from __future__ import annotations
+
+import json
+import unittest
+
+from pydantic import ValidationError
+
+from collaboration_framework.contracts import (
+    ActionAdjudication,
+    ActionMethod,
+    ActionTarget,
+    AdvanceWorldTimeEffect,
+    CancelTimeTaskStep,
+    ContractError,
+    CreateTimeTaskStep,
+    ModuleContentV3,
+    NoAdjudicationCheck,
+    RuleSpecV3,
+    SubmitAdjudicationRequest,
+    TerminalTimePointSpec,
+    TimeTaskSpec,
+    TimeTaskTargetSpec,
+)
+from collaboration_framework.engine import (
+    AdjudicationEngineService,
+    InMemoryEngineStore,
+)
+from collaboration_framework.engine.initialization import create_initial_game_state
+from collaboration_framework.engine.models import (
+    EngineRuntimeSnapshot,
+    GameState,
+    RuntimeTimeTask,
+    TimePointOccurrence,
+    WorldTimePoint,
+    WorldTimeState,
+)
+from collaboration_framework.engine.projection_v3 import (
+    keeper_capabilities_v3,
+    project_v3,
+)
+from collaboration_framework.engine.time_tasks import (
+    active_occurrences,
+    cancel_time_task,
+    create_time_task,
+    due_tasks,
+    resolve_target,
+    settle_due_tasks,
+)
+from collaboration_framework.engine.timeline import next_point_after, player_time_label
+from tests.test_projection_v3 import ACTOR, PLAYER, ROOM, game_state, module
+
+
+def task_spec(**overrides) -> TimeTaskSpec:
+    base = {
+        "task_key": "ghoul_arrives",
+        "target": TimeTaskTargetSpec(day_index=0, hour_of_day=15),
+        "on_due_branch_id": "on_due",
+    }
+    return TimeTaskSpec(**(base | overrides))
+
+
+class TimeTaskTargetTests(unittest.TestCase):
+    def test_a_default_point_target_needs_no_hour(self) -> None:
+        """小时由 point_id 对应的 TimePointSpec 唯一确定，写两遍会自相矛盾。"""
+
+        target = TimeTaskTargetSpec(point_id="hour_18")
+
+        self.assertEqual(target.point_id, "hour_18")
+        self.assertIsNone(target.hour_of_day)
+        self.assertFalse(target.relative)
+
+    def test_an_absolute_clock_target_needs_a_day(self) -> None:
+        target = TimeTaskTargetSpec(day_index=1, hour_of_day=2)
+
+        self.assertEqual((target.day_index, target.hour_of_day), (1, 2))
+
+    def test_a_relative_target_is_an_offset_not_a_calendar_moment(self) -> None:
+        """「三小时后」不需要知道今天是第几天。"""
+
+        target = TimeTaskTargetSpec(hour_of_day=3, relative=True)
+
+        self.assertTrue(target.relative)
+        self.assertIsNone(target.day_index)
+
+    def test_neither_or_both_addressing_modes_are_refused(self) -> None:
+        for args in ({}, {"point_id": "hour_18", "hour_of_day": 15}):
+            with (
+                self.subTest(args=args),
+                self.assertRaisesRegex(ValidationError, "二选一"),
+            ):
+                TimeTaskTargetSpec(**args)
+
+    def test_a_default_point_target_may_not_also_carry_a_day(self) -> None:
+        with self.assertRaisesRegex(ValidationError, "不能再声明"):
+            TimeTaskTargetSpec(point_id="hour_18", day_index=1)
+
+    def test_a_relative_target_may_not_also_carry_a_day(self) -> None:
+        """两种寻址模式并存，而契约没有优先级规则——到期语义是歧义的。"""
+
+        with self.assertRaisesRegex(ValidationError, "不能再声明 day_index"):
+            TimeTaskTargetSpec(hour_of_day=3, day_index=1, relative=True)
+
+    def test_an_absolute_target_without_a_day_is_refused(self) -> None:
+        with self.assertRaisesRegex(ValidationError, "必须声明 day_index"):
+            TimeTaskTargetSpec(hour_of_day=15)
+
+
+class TimeTaskStepTests(unittest.TestCase):
+    def test_create_carries_the_whole_task_not_just_an_id(self) -> None:
+        step = CreateTimeTaskStep(
+            id="schedule_ghoul",
+            task=task_spec(priority=10, visibility="hidden"),
+            next_step_id="finish",
+        )
+
+        self.assertEqual(step.task.task_key, "ghoul_arrives")
+        self.assertEqual(step.task.target.hour_of_day, 15)
+        self.assertEqual(step.task.priority, 10)
+        self.assertEqual(step.task.visibility, "hidden")
+
+    def test_cancel_locates_by_key_and_bindings_not_by_runtime_id(self) -> None:
+        """规则写的时候还不知道运行时 id 长什么样。"""
+
+        step = CancelTimeTaskStep(
+            id="call_it_off",
+            task_key="ghoul_arrives",
+            bindings={"entity_id": "cemetery_figure"},
+            reason_code="target_already_dead",
+            next_step_id="finish",
+        )
+
+        self.assertEqual(step.task_key, "ghoul_arrives")
+        self.assertEqual(step.bindings, {"entity_id": "cemetery_figure"})
+        self.assertEqual(step.reason_code, "target_already_dead")
+
+    def test_cancelling_without_a_reason_is_refused(self) -> None:
+        with self.assertRaises(ValidationError):
+            CancelTimeTaskStep(
+                id="call_it_off",
+                task_key="ghoul_arrives",
+                reason_code="",
+                next_step_id="finish",
+            )
+
+
+class RuntimeTimeModelTests(unittest.TestCase):
+    def test_occurrences_order_by_absolute_hour_across_days(self) -> None:
+        """默认点重复 occurrence 与剧情临时 occurrence 用同一套排序。"""
+
+        temporary = TimePointOccurrence(
+            occurrence_id="occ_15",
+            day_index=0,
+            hour_of_day=15,
+            time_segment="afternoon",
+        )
+        next_day = TimePointOccurrence(
+            occurrence_id="occ_d1_02",
+            point_id="hour_02",
+            day_index=1,
+            hour_of_day=2,
+            time_segment="late_night",
+            origin="default",
+        )
+
+        self.assertLess(temporary.absolute_hour, next_day.absolute_hour)
+        # 15:00 落在 12 与 18 之间，这就是临时点该插进去的位置。
+        self.assertLess(12, temporary.hour_of_day)
+        self.assertLess(temporary.hour_of_day, 18)
+
+    def test_a_temporary_occurrence_names_no_module_point(self) -> None:
+        """那条路径拿不到 TimePointSpec，玩家措辞只能回退到 segment 缺省值。"""
+
+        occurrence = TimePointOccurrence(
+            occurrence_id="occ_15",
+            day_index=0,
+            hour_of_day=15,
+            time_segment="afternoon",
+        )
+
+        self.assertIsNone(occurrence.point_id)
+        self.assertEqual(occurrence.origin, "time_task")
+
+    def test_a_task_binds_to_an_occurrence_not_to_a_moment(self) -> None:
+        """同日同小时的多个任务共享一个 occurrence，取消一个不影响其他。"""
+
+        first = RuntimeTimeTask(
+            task_id="task_a",
+            task_key="ghoul_arrives",
+            rule_id="night_watch",
+            branch_id="on_due",
+            occurrence_id="occ_15",
+        )
+        second = RuntimeTimeTask(
+            task_id="task_b",
+            task_key="letter_delivered",
+            rule_id="postman",
+            branch_id="on_due",
+            occurrence_id="occ_15",
+            priority=5,
+        )
+
+        self.assertEqual(first.occurrence_id, second.occurrence_id)
+        self.assertEqual(first.status, "scheduled")
+        # priority 再 task_id 是同点多任务的稳定顺序。
+        first_due = min((second, first), key=lambda item: (item.priority, item.task_id))
+        self.assertEqual(first_due.task_id, "task_a")
+
+    def test_game_state_opens_with_no_tasks_and_no_temporary_points(self) -> None:
+        state = GameState(room_id="room", scene_id="start", actors={}, entities={})
+
+        self.assertEqual(state.time_tasks, {})
+        self.assertEqual(state.time_occurrences, {})
+
+
+class TimeTaskExecutorTests(unittest.TestCase):
+    """排定 / 取消与临时点排序（#415 §阶段四）。"""
+
+    def setUp(self) -> None:
+        # 追书人声明了 00 / 06 / 12 / 18 / 20，房间从 hour_12 开局。
+        self.content = module()
+        self.state = create_initial_game_state(
+            self.content, room_id="room_01", actors={}
+        )
+
+    def create(self, state, target, **overrides):
+        step = CreateTimeTaskStep(
+            id="schedule",
+            task=task_spec(target=target, **overrides),
+            next_step_id="finish",
+        )
+        return create_time_task(self.content, state, step, rule_id="night_watch")
+
+    def test_a_target_between_two_default_points_inserts_a_temporary_one(self) -> None:
+        """15:00 落在 12 与 18 之间，作者没声明过它。"""
+
+        state, task, occurrence = self.create(
+            self.state, TimeTaskTargetSpec(day_index=0, hour_of_day=15)
+        )
+
+        assert occurrence is not None
+        self.assertIsNone(occurrence.point_id)
+        self.assertEqual((occurrence.day_index, occurrence.hour_of_day), (0, 15))
+        self.assertEqual(occurrence.time_segment, "afternoon")
+        self.assertEqual(task.occurrence_id, occurrence.occurrence_id)
+
+        # 下一跳因此不是 18:00，而是插进来的 15:00。
+        target, moment = next_point_after(
+            self.content, state.world_time, active_occurrences(state)
+        )
+        self.assertEqual((moment.day_index, moment.hour_of_day), (0, 15))
+        self.assertEqual(target.id, occurrence.occurrence_id)
+
+    def test_a_target_that_is_already_a_default_point_creates_no_duplicate(
+        self,
+    ) -> None:
+        state, task, occurrence = self.create(
+            self.state, TimeTaskTargetSpec(point_id="hour_18")
+        )
+
+        self.assertIsNone(occurrence)
+        self.assertEqual(state.time_occurrences, {})
+        # 任务照样绑得上：那一刻由默认点本身提供。
+        self.assertEqual(task.status, "scheduled")
+        target, moment = next_point_after(
+            self.content, state.world_time, active_occurrences(state)
+        )
+        self.assertEqual(target.id, "hour_18")
+        self.assertEqual(moment.hour_of_day, 18)
+
+    def test_two_tasks_at_the_same_moment_share_one_occurrence(self) -> None:
+        state, first, created = self.create(
+            self.state, TimeTaskTargetSpec(day_index=0, hour_of_day=15)
+        )
+        state, second, again = self.create(
+            state,
+            TimeTaskTargetSpec(day_index=0, hour_of_day=15),
+            task_key="letter_delivered",
+        )
+
+        assert created is not None
+        self.assertIsNone(again)
+        self.assertEqual(first.occurrence_id, second.occurrence_id)
+        self.assertEqual(len(state.time_occurrences), 1)
+        self.assertEqual(len(due_tasks(state, first.occurrence_id)), 2)
+
+    def test_cancelling_one_task_leaves_the_others_and_their_point_alone(self) -> None:
+        state, first, _ = self.create(
+            self.state, TimeTaskTargetSpec(day_index=0, hour_of_day=15)
+        )
+        state, second, _ = self.create(
+            state,
+            TimeTaskTargetSpec(day_index=0, hour_of_day=15),
+            task_key="letter_delivered",
+        )
+
+        state, cancelled = cancel_time_task(
+            state,
+            CancelTimeTaskStep(
+                id="call_off",
+                task_key="ghoul_arrives",
+                reason_code="target_already_dead",
+                next_step_id="finish",
+            ),
+            rule_id="night_watch",
+        )
+
+        assert cancelled is not None
+        self.assertEqual(cancelled.status, "cancelled")
+        self.assertEqual(cancelled.cancel_reason_code, "target_already_dead")
+        # 点还在，因为 second 还等着。
+        self.assertIn(first.occurrence_id, state.time_occurrences)
+        self.assertEqual(due_tasks(state, first.occurrence_id), (second,))
+
+    def test_the_point_goes_away_once_its_last_task_is_cancelled(self) -> None:
+        state, task, _ = self.create(
+            self.state, TimeTaskTargetSpec(day_index=0, hour_of_day=15)
+        )
+        state, _ = cancel_time_task(
+            state,
+            CancelTimeTaskStep(
+                id="call_off",
+                task_key="ghoul_arrives",
+                reason_code="player_intervened",
+                next_step_id="finish",
+            ),
+            rule_id="night_watch",
+        )
+
+        self.assertEqual(state.time_occurrences, {})
+        # 时间线回到原样：下一跳又是 18:00。
+        target, _ = next_point_after(
+            self.content, state.world_time, active_occurrences(state)
+        )
+        self.assertEqual(target.id, "hour_18")
+        del task
+
+    def test_cancelling_something_that_is_not_scheduled_is_not_an_error(self) -> None:
+        """规则可能在两条路径上都写了取消，先到的那条已经做完了。"""
+
+        state, cancelled = cancel_time_task(
+            self.state,
+            CancelTimeTaskStep(
+                id="call_off",
+                task_key="never_scheduled",
+                reason_code="whatever",
+                next_step_id="finish",
+            ),
+            rule_id="night_watch",
+        )
+
+        self.assertIsNone(cancelled)
+        self.assertEqual(state.time_tasks, {})
+
+    def test_rescheduling_the_same_task_is_idempotent(self) -> None:
+        """id 从 rule + key + bindings 推导，重试不该排出第二个一模一样的任务。"""
+
+        state, first, _ = self.create(
+            self.state, TimeTaskTargetSpec(day_index=0, hour_of_day=15)
+        )
+        state, again, created = self.create(
+            state, TimeTaskTargetSpec(day_index=0, hour_of_day=15)
+        )
+
+        self.assertEqual(first.task_id, again.task_id)
+        self.assertIsNone(created)
+        self.assertEqual(len(state.time_tasks), 1)
+
+    def test_a_relative_target_counts_from_the_current_clock(self) -> None:
+        state, task, occurrence = self.create(
+            self.state, TimeTaskTargetSpec(hour_of_day=3, relative=True)
+        )
+
+        assert occurrence is not None
+        # 从 D0 12:00 起算三小时。
+        self.assertEqual((occurrence.day_index, occurrence.hour_of_day), (0, 15))
+        del state, task
+
+    def test_binding_a_default_point_takes_its_next_arrival_not_a_past_one(
+        self,
+    ) -> None:
+        """「18 点」在 20:00 说出来指的是明天那一次，不是已经过去的今天。"""
+
+        evening = self.state.model_copy(
+            update={
+                "world_time": WorldTimeState(
+                    current=WorldTimePoint(day_index=0, hour_of_day=20),
+                    current_point_id="hour_20",
+                    current_time_segment="evening",
+                )
+            },
+            deep=True,
+        )
+
+        moment = resolve_target(
+            self.content, evening, TimeTaskTargetSpec(point_id="hour_18")
+        )
+
+        self.assertEqual((moment.day_index, moment.hour_of_day), (1, 18))
+
+    def test_a_target_past_the_terminal_point_is_refused_at_creation(self) -> None:
+        """越界任务永远不会到期，留着就是一条静默失效的剧情线。"""
+
+        content = self.content.model_copy(
+            update={
+                "time_policy": self.content.time_policy.model_copy(
+                    update={
+                        "terminal_point": TerminalTimePointSpec(
+                            point_id="hour_20", day_index=0
+                        )
+                    }
+                )
+            },
+            deep=True,
+        )
+        step = CreateTimeTaskStep(
+            id="schedule",
+            task=task_spec(target=TimeTaskTargetSpec(day_index=1, hour_of_day=6)),
+            next_step_id="finish",
+        )
+
+        with self.assertRaisesRegex(ContractError, "invalid_time_task_target"):
+            create_time_task(content, self.state, step, rule_id="night_watch")
+
+    def test_a_target_in_the_past_is_refused_at_creation(self) -> None:
+        """落在过去的任务永远不会到期，留着就是一条静默失效的剧情线。"""
+
+        step = CreateTimeTaskStep(
+            id="schedule",
+            # 房间从 D0 12:00 开局，06:00 已经过去了。
+            task=task_spec(target=TimeTaskTargetSpec(day_index=0, hour_of_day=6)),
+            next_step_id="finish",
+        )
+
+        with self.assertRaisesRegex(ContractError, "invalid_time_task_target"):
+            create_time_task(self.content, self.state, step, rule_id="night_watch")
+
+    def test_a_target_at_the_current_moment_is_refused_too(self) -> None:
+        """「就是现在」不是定时，是重入：排任务那条规则还没走完就回头触发自己。"""
+
+        step = CreateTimeTaskStep(
+            id="schedule",
+            task=task_spec(target=TimeTaskTargetSpec(day_index=0, hour_of_day=12)),
+            next_step_id="finish",
+        )
+
+        with self.assertRaisesRegex(ContractError, "invalid_time_task_target"):
+            create_time_task(self.content, self.state, step, rule_id="night_watch")
+
+    def test_a_relative_target_of_zero_hours_is_refused(self) -> None:
+        step = CreateTimeTaskStep(
+            id="schedule",
+            task=task_spec(target=TimeTaskTargetSpec(hour_of_day=0, relative=True)),
+            next_step_id="finish",
+        )
+
+        with self.assertRaisesRegex(ContractError, "invalid_time_task_target"):
+            create_time_task(self.content, self.state, step, rule_id="night_watch")
+
+    def test_a_target_exactly_on_the_terminal_point_is_allowed(self) -> None:
+        content = self.content.model_copy(
+            update={
+                "time_policy": self.content.time_policy.model_copy(
+                    update={
+                        "terminal_point": TerminalTimePointSpec(
+                            point_id="hour_20", day_index=0
+                        )
+                    }
+                )
+            },
+            deep=True,
+        )
+        step = CreateTimeTaskStep(
+            id="schedule",
+            task=task_spec(target=TimeTaskTargetSpec(point_id="hour_20")),
+            next_step_id="finish",
+        )
+
+        _, task, _ = create_time_task(content, self.state, step, rule_id="night_watch")
+
+        self.assertEqual(task.status, "scheduled")
+
+    def test_due_tasks_are_ordered_by_priority_then_id(self) -> None:
+        """顺序必须稳定，否则断线恢复重放出来的世界和第一次跑出来的不一样。"""
+
+        state, _, _ = self.create(
+            self.state, TimeTaskTargetSpec(day_index=0, hour_of_day=15), priority=9
+        )
+        state, low, _ = self.create(
+            state,
+            TimeTaskTargetSpec(day_index=0, hour_of_day=15),
+            task_key="letter_delivered",
+            priority=1,
+        )
+
+        ordered = due_tasks(state, low.occurrence_id)
+
+        self.assertEqual([item.priority for item in ordered], [1, 9])
+
+
+class TimeTaskThroughARuleTests(unittest.IsolatedAsyncioTestCase):
+    """执行器要真的接在 RuleAgenda 上，不只是能被直接调用（#415 §阶段四）。"""
+
+    def module_with_scheduling_rule(self) -> ModuleContentV3:
+        """给追书人加一条规则：进入 18:00 时排一个 21:00 的任务。
+
+        21:00 不在模组声明的 00/06/12/18/20 里，所以它必须插一个临时点。
+        """
+
+        content = module()
+        rule = RuleSpecV3.model_validate(
+            {
+                "id": "schedule_late_visitor",
+                "priority": 90,
+                "trigger": {
+                    "kind": "event",
+                    "event_type": "time.point_entered",
+                    "when": {
+                        "op": "predicate",
+                        "predicate": "time_point_is",
+                        "args": {"value": "hour_18"},
+                    },
+                    "entry_branch_id": "default",
+                },
+                "execution": {
+                    # on_due 必须是独立分支：指回 `default` 会让到期事件重新走
+                    # 一遍排任务那一步，而那时世界已经在 21:00，新任务的目标
+                    # 不晚于当前时刻，永远不会到期（#415）。
+                    "branches": [
+                        {"id": "default", "entry_step_id": "schedule"},
+                        {"id": "on_due", "entry_step_id": "arrived"},
+                    ],
+                    "steps": [
+                        {
+                            "id": "schedule",
+                            "kind": "create_time_task",
+                            "task": {
+                                "task_key": "late_visitor",
+                                "target": {"day_index": 0, "hour_of_day": 21},
+                                "on_due_branch_id": "on_due",
+                            },
+                            "next_step_id": "finish",
+                        },
+                        {
+                            "id": "arrived",
+                            "kind": "effect",
+                            "effect": {
+                                "type": "change_entity_state",
+                                "entity_id": "case_tracker",
+                                "key": "late_visitor_arrived",
+                                "value": True,
+                            },
+                            "next_step_id": "finish",
+                        },
+                        {"id": "finish", "kind": "finish"},
+                    ],
+                },
+            }
+        )
+        return content.model_copy(update={"rules": (*content.rules, rule)}, deep=True)
+
+    def submit(self, engine, *points, request_id, store=None):
+        # revision 从状态里读，不要写死 "0"：第二次提交时它已经推进过了。
+        revision = (
+            "0" if store is None else str(store.inspect_state(ROOM).event_sequence)
+        )
+        return engine.submit(
+            SubmitAdjudicationRequest(
+                room_id=ROOM,
+                player_id=PLAYER,
+                adjudication=ActionAdjudication(
+                    request_id=request_id,
+                    source_revision=revision,
+                    actor_id=ACTOR,
+                    summary="等到入夜",
+                    target=ActionTarget(kind="location", id="thomas_office"),
+                    method=ActionMethod(family="rest", description="等待"),
+                    check=NoAdjudicationCheck(),
+                    success_effects=tuple(
+                        AdvanceWorldTimeEffect(to_point_id=point) for point in points
+                    ),
+                ),
+            )
+        )
+
+    async def test_a_rule_schedules_a_task_and_keeps_walking(self) -> None:
+        content = self.module_with_scheduling_rule()
+        store = InMemoryEngineStore()
+        store.register_room(module_content=content, initial_state=game_state(content))
+        engine = AdjudicationEngineService(store)
+
+        execution = await self.submit(
+            engine, "hour_18", request_id="wait-until-evening"
+        )
+
+        # 规则跑完了整条链，没有停在「无执行器的挂起点」上。
+        self.assertEqual(execution.status, "resolved")
+        state = store.inspect_state(ROOM)
+
+        scheduled = [
+            task for task in state.time_tasks.values() if task.status == "scheduled"
+        ]
+        self.assertEqual(len(scheduled), 1)
+        self.assertEqual(scheduled[0].task_key, "late_visitor")
+
+        # 21:00 插在 20:00 和次日 00:00 之间。
+        occurrence = state.time_occurrences[scheduled[0].occurrence_id]
+        self.assertEqual((occurrence.day_index, occurrence.hour_of_day), (0, 21))
+        self.assertEqual(occurrence.origin, "time_task")
+
+        scheduled_events = [
+            event
+            for event in store.inspect_domain_events(ROOM)
+            if event.type == "time.task_scheduled"
+        ]
+        self.assertEqual(len(scheduled_events), 1)
+        self.assertTrue(scheduled_events[0].payload["created_occurrence"])
+
+    async def test_the_temporary_point_becomes_the_next_jump(self) -> None:
+        """20:00 之后本该是次日 00:00，21:00 的任务把它挤到后面去。"""
+
+        content = self.module_with_scheduling_rule()
+        store = InMemoryEngineStore()
+        store.register_room(module_content=content, initial_state=game_state(content))
+        engine = AdjudicationEngineService(store)
+
+        await self.submit(engine, "hour_18", "hour_20", request_id="wait-until-eight")
+
+        state = store.inspect_state(ROOM)
+        self.assertEqual(state.world_time.current_point_id, "hour_20")
+
+        _, moment = next_point_after(
+            content, state.world_time, active_occurrences(state)
+        )
+
+        self.assertEqual((moment.day_index, moment.hour_of_day), (0, 21))
+
+    async def test_advancing_actually_enters_the_temporary_point(self) -> None:
+        """临时点必须走通真实的推进路径，不能只在 next_point_after 里存在。
+
+        `advance_world_time` 的 to_point_id 要逐字等于下一跳的 id，而插进来的
+        那一跳的 id 就是 occurrence_id——所以这里也顺带钉住了 Agent 拿到的
+        `next_point_id` 与 Engine 接受的目标是同一个东西。
+        """
+
+        content = self.module_with_scheduling_rule()
+        store = InMemoryEngineStore()
+        store.register_room(module_content=content, initial_state=game_state(content))
+        engine = AdjudicationEngineService(store)
+
+        await self.submit(engine, "hour_18", "hour_20", request_id="wait-until-eight")
+        state = store.inspect_state(ROOM)
+        occurrence_id = next(iter(state.time_occurrences))
+
+        await self.submit(
+            engine, occurrence_id, request_id="wait-a-bit-longer", store=store
+        )
+
+        after = store.inspect_state(ROOM)
+        self.assertEqual(after.world_time.current_point_id, occurrence_id)
+        self.assertEqual(after.world_time.current.hour_of_day, 21)
+        self.assertEqual(after.world_time.current.day_index, 0)
+        # 临时点没有 TimePointSpec，玩家措辞回退到 segment 的缺省值。
+        self.assertEqual(after.world_time.current_time_segment, "evening")
+        self.assertEqual(player_time_label(content, after.world_time), "晚上")
+
+
+class OrderedValidationTests(unittest.IsolatedAsyncioTestCase):
+    """任务步骤之后的效果，要对着任务已经生效的那个世界校验（#415）。"""
+
+    def module_that_schedules_then_advances(self) -> ModuleContentV3:
+        """进入 18:00 时排一个 19:00 的任务，紧接着推进到它。
+
+        19:00 不是默认点。校验若还看着排任务**之前**的状态，就会以为下一跳是
+        默认的 20:00，把这条合法的推进按「不是下一个点」拒掉。
+        """
+
+        content = module()
+        rule = RuleSpecV3.model_validate(
+            {
+                "id": "schedule_then_step_into_it",
+                "priority": 90,
+                "trigger": {
+                    "kind": "event",
+                    "event_type": "time.point_entered",
+                    "when": {
+                        "op": "predicate",
+                        "predicate": "time_point_is",
+                        "args": {"value": "hour_18"},
+                    },
+                    "entry_branch_id": "default",
+                },
+                "execution": {
+                    "branches": [
+                        {"id": "default", "entry_step_id": "schedule"},
+                        {"id": "on_due", "entry_step_id": "arrived"},
+                    ],
+                    "steps": [
+                        {
+                            "id": "schedule",
+                            "kind": "create_time_task",
+                            "task": {
+                                "task_key": "immediate_visitor",
+                                "target": {"day_index": 0, "hour_of_day": 19},
+                                "on_due_branch_id": "on_due",
+                            },
+                            "next_step_id": "step_into_it",
+                        },
+                        {
+                            "id": "step_into_it",
+                            "kind": "effect",
+                            "effect": {
+                                "type": "advance_world_time",
+                                "to_point_id": "occ_d0_h19",
+                            },
+                            "next_step_id": "finish",
+                        },
+                        {
+                            "id": "arrived",
+                            "kind": "effect",
+                            "effect": {
+                                "type": "change_entity_state",
+                                "entity_id": "case_tracker",
+                                "key": "immediate_visitor_arrived",
+                                "value": True,
+                            },
+                            "next_step_id": "finish",
+                        },
+                        {"id": "finish", "kind": "finish"},
+                    ],
+                },
+            }
+        )
+        return content.model_copy(update={"rules": (*content.rules, rule)}, deep=True)
+
+    async def test_an_effect_after_a_task_step_sees_the_task_it_just_created(
+        self,
+    ) -> None:
+        content = self.module_that_schedules_then_advances()
+        store = InMemoryEngineStore()
+        store.register_room(module_content=content, initial_state=game_state(content))
+        engine = AdjudicationEngineService(store)
+
+        await engine.submit(
+            SubmitAdjudicationRequest(
+                room_id=ROOM,
+                player_id=PLAYER,
+                adjudication=ActionAdjudication(
+                    request_id="schedule-then-advance",
+                    source_revision="0",
+                    actor_id=ACTOR,
+                    summary="等到入夜",
+                    target=ActionTarget(kind="location", id="thomas_office"),
+                    method=ActionMethod(family="rest", description="等待"),
+                    check=NoAdjudicationCheck(),
+                    success_effects=(AdvanceWorldTimeEffect(to_point_id="hour_18"),),
+                ),
+            )
+        )
+
+        state = store.inspect_state(ROOM)
+        # 规则里那一跳真的落在了自己刚排出来的临时点上。
+        self.assertEqual(state.world_time.current_point_id, "occ_d0_h19")
+        self.assertEqual(state.world_time.current.hour_of_day, 19)
+        # 而且进入即到期，on_due 分支跑过了。
+        self.assertIs(
+            state.entities["case_tracker"].get("immediate_visitor_arrived"), True
+        )
+
+
+class TaskDueTests(unittest.IsolatedAsyncioTestCase):
+    """到期结算：单次发布、稳定顺序、隐藏边界（#415 §阶段四）。"""
+
+    def module_with_due_rule(self) -> ModuleContentV3:
+        """一条规则：进入 18:00 时排一个 21:00 的隐藏任务，到期走自己的 on_due 分支。
+
+        `on_due_branch_id` 是**排任务那条规则自己的**分支——排任务这个动作本身
+        就是订阅，任务上记的 rule_id + branch_id 已经是「谁关心、从哪继续」的
+        完整答案，不需要另写一条监听 `time.task_due` 的规则。
+
+        另外挂一条也监听 `time.task_due` 的无关规则，用来钉住它**不会**被别人
+        的任务到期唤醒。
+        """
+
+        content = module()
+        scheduler = RuleSpecV3.model_validate(
+            {
+                "id": "schedule_late_visitor",
+                "priority": 90,
+                "trigger": {
+                    "kind": "event",
+                    "event_type": "time.point_entered",
+                    "when": {
+                        "op": "predicate",
+                        "predicate": "time_point_is",
+                        "args": {"value": "hour_18"},
+                    },
+                    "entry_branch_id": "default",
+                },
+                "execution": {
+                    "branches": [
+                        {"id": "default", "entry_step_id": "schedule"},
+                        {"id": "on_due", "entry_step_id": "arrive"},
+                    ],
+                    "steps": [
+                        {
+                            "id": "schedule",
+                            "kind": "create_time_task",
+                            "task": {
+                                "task_key": "late_visitor",
+                                "target": {"day_index": 0, "hour_of_day": 21},
+                                "on_due_branch_id": "on_due",
+                                "visibility": "hidden",
+                            },
+                            "next_step_id": "finish",
+                        },
+                        {
+                            "id": "arrive",
+                            "kind": "effect",
+                            "effect": {
+                                "type": "change_entity_state",
+                                "entity_id": "case_tracker",
+                                "key": "visitor_arrived",
+                                "value": True,
+                            },
+                            "next_step_id": "finish",
+                        },
+                        {"id": "finish", "kind": "finish"},
+                    ],
+                },
+            }
+        )
+        eavesdropper = RuleSpecV3.model_validate(
+            {
+                "id": "unrelated_due_listener",
+                "priority": 50,
+                "trigger": {
+                    "kind": "event",
+                    "event_type": "time.task_due",
+                    "entry_branch_id": "default",
+                },
+                "execution": {
+                    "branches": [{"id": "default", "entry_step_id": "meddle"}],
+                    "steps": [
+                        {
+                            "id": "meddle",
+                            "kind": "effect",
+                            "effect": {
+                                "type": "change_entity_state",
+                                "entity_id": "case_tracker",
+                                "key": "someone_elses_task_fired",
+                                "value": True,
+                            },
+                            "next_step_id": "finish",
+                        },
+                        {"id": "finish", "kind": "finish"},
+                    ],
+                },
+            }
+        )
+        return content.model_copy(
+            update={"rules": (*content.rules, scheduler, eavesdropper)}, deep=True
+        )
+
+    async def walk_to_the_task(self, engine, store):
+        await engine.submit(
+            SubmitAdjudicationRequest(
+                room_id=ROOM,
+                player_id=PLAYER,
+                adjudication=ActionAdjudication(
+                    request_id="wait-until-eight",
+                    source_revision="0",
+                    actor_id=ACTOR,
+                    summary="等到晚上八点",
+                    target=ActionTarget(kind="location", id="thomas_office"),
+                    method=ActionMethod(family="rest", description="等待"),
+                    check=NoAdjudicationCheck(),
+                    success_effects=(
+                        AdvanceWorldTimeEffect(to_point_id="hour_18"),
+                        AdvanceWorldTimeEffect(to_point_id="hour_20"),
+                    ),
+                ),
+            )
+        )
+        state = store.inspect_state(ROOM)
+        occurrence_id = next(iter(state.time_occurrences))
+        await engine.submit(
+            SubmitAdjudicationRequest(
+                room_id=ROOM,
+                player_id=PLAYER,
+                adjudication=ActionAdjudication(
+                    request_id="wait-a-bit-longer",
+                    source_revision=str(state.event_sequence),
+                    actor_id=ACTOR,
+                    summary="再等一会",
+                    target=ActionTarget(kind="location", id="thomas_office"),
+                    method=ActionMethod(family="rest", description="等待"),
+                    check=NoAdjudicationCheck(),
+                    success_effects=(
+                        AdvanceWorldTimeEffect(to_point_id=occurrence_id),
+                    ),
+                ),
+            )
+        )
+        return occurrence_id
+
+    def build(self):
+        content = self.module_with_due_rule()
+        store = InMemoryEngineStore()
+        store.register_room(module_content=content, initial_state=game_state(content))
+        return content, store, AdjudicationEngineService(store)
+
+    async def test_entering_the_point_publishes_task_due_exactly_once(self) -> None:
+        _, store, engine = self.build()
+
+        await self.walk_to_the_task(engine, store)
+
+        due = [
+            event
+            for event in store.inspect_domain_events(ROOM)
+            if event.type == "time.task_due"
+        ]
+        self.assertEqual(len(due), 1)
+        self.assertEqual(due[0].payload["task_key"], "late_visitor")
+
+    async def test_the_task_is_completed_in_the_same_commit_as_its_event(self) -> None:
+        """单次发布靠的是这个：重试从 completed 的状态重跑，没有第二条事件。"""
+
+        _, store, engine = self.build()
+
+        await self.walk_to_the_task(engine, store)
+
+        state = store.inspect_state(ROOM)
+        task = next(iter(state.time_tasks.values()))
+        self.assertEqual(task.status, "completed")
+        # 一次性临时点进入之后就不该再出现在后续排序里。
+        self.assertEqual(state.time_occurrences, {})
+        self.assertEqual(due_tasks(state, task.occurrence_id), ())
+
+    async def test_settling_again_from_the_committed_state_emits_nothing(self) -> None:
+        """恢复 / 重放走的就是这条路：状态已经是终态，结算是空操作。"""
+
+        _, store, engine = self.build()
+        await self.walk_to_the_task(engine, store)
+        state = store.inspect_state(ROOM)
+
+        again, due = settle_due_tasks(state, state.world_time)
+
+        self.assertEqual(due, ())
+        self.assertEqual(again.time_tasks, state.time_tasks)
+
+    async def test_the_due_event_enters_the_branch_the_task_declared(self) -> None:
+        """排任务时走 default 分支，到期走 on_due——同一条规则的两个分支。"""
+
+        _, store, engine = self.build()
+
+        await self.walk_to_the_task(engine, store)
+
+        entities = store.inspect_state(ROOM).entities["case_tracker"]
+        self.assertIs(entities.get("visitor_arrived"), True)
+
+    async def test_a_due_event_never_wakes_someone_elses_due_rule(self) -> None:
+        """一个任务到期不该带出另一条规则的剧情后果。"""
+
+        _, store, engine = self.build()
+
+        await self.walk_to_the_task(engine, store)
+
+        entities = store.inspect_state(ROOM).entities["case_tracker"]
+        self.assertNotIn("someone_elses_task_fired", entities)
+
+    async def test_a_hidden_task_never_reaches_the_player(self) -> None:
+        """隐藏任务的存在、来源与后果都不进玩家侧投影。"""
+
+        content, store, engine = self.build()
+
+        await self.walk_to_the_task(engine, store)
+
+        due = next(
+            event
+            for event in store.inspect_domain_events(ROOM)
+            if event.type == "time.task_due"
+        )
+        self.assertEqual(due.visibility, "hidden")
+
+        state = store.inspect_state(ROOM)
+        runtime = EngineRuntimeSnapshot(
+            module_id=content.module_id,
+            module_version=content.version,
+            module_content=content,
+            game_state=state,
+            revision=str(state.event_sequence),
+        )
+        world = project_v3(runtime, player_id=PLAYER, actor_id=ACTOR).world
+
+        # 玩家只看到按 canonical segment 解析出的安全 label，看不到 21:00、
+        # 看不到任务来源，也看不到临时点的 id。
+        self.assertEqual(world.time_label, "晚上")
+        dumped = json.dumps(world.model_dump(), ensure_ascii=False)
+        for leaked in ("21", "late_visitor", "occ_"):
+            self.assertNotIn(leaked, dumped)
+
+
+class TemporaryPointWalkTests(unittest.IsolatedAsyncioTestCase):
+    """临时点必须能进也能出（#415）。
+
+    之前的测试只跳**进**临时点一次就收工，所以「进去之后还能不能继续」这条
+    从没被验证过——`next_point_after` 开头只在 `default_points` 里查
+    `current_point_id`，临时 id 必然查不到。房间一旦进入 15:00 这类临时点，
+    之后所有 advance_world_time 永久失败。
+    """
+
+    def module_with_scheduling_rule(self) -> ModuleContentV3:
+        content = module()
+        rule = RuleSpecV3.model_validate(
+            {
+                "id": "schedule_afternoon_visitor",
+                "priority": 90,
+                "trigger": {
+                    "kind": "event",
+                    "event_type": "room.opened",
+                    "entry_branch_id": "default",
+                },
+                "execution": {
+                    "branches": [{"id": "default", "entry_step_id": "schedule"}],
+                    "steps": [
+                        {
+                            "id": "schedule",
+                            "kind": "create_time_task",
+                            "task": {
+                                "task_key": "afternoon_visitor",
+                                "target": {"day_index": 0, "hour_of_day": 15},
+                                "on_due_branch_id": "default",
+                            },
+                            "next_step_id": "finish",
+                        },
+                        {"id": "finish", "kind": "finish"},
+                    ],
+                },
+            }
+        )
+        return content.model_copy(update={"rules": (*content.rules, rule)}, deep=True)
+
+    def build_with_task(self):
+        """直接把任务排进初始状态，不依赖任何触发事件。"""
+
+        content = module()
+        state = game_state(content)
+        step = CreateTimeTaskStep(
+            id="schedule",
+            task=task_spec(
+                task_key="afternoon_visitor",
+                target=TimeTaskTargetSpec(day_index=0, hour_of_day=15),
+            ),
+            next_step_id="finish",
+        )
+        state, task, _ = create_time_task(content, state, step, rule_id="scheduler")
+        store = InMemoryEngineStore()
+        store.register_room(module_content=content, initial_state=state)
+        return content, store, AdjudicationEngineService(store), task
+
+    async def advance(self, store, engine, *, to_point_id, tag):
+        revision = str(store.inspect_state(ROOM).event_sequence)
+        return await engine.submit(
+            SubmitAdjudicationRequest(
+                room_id=ROOM,
+                player_id=PLAYER,
+                adjudication=ActionAdjudication(
+                    request_id=f"{tag}-{revision}",
+                    source_revision=revision,
+                    actor_id=ACTOR,
+                    summary="等待",
+                    target=ActionTarget(kind="location", id="thomas_office"),
+                    method=ActionMethod(family="wait", description="等待"),
+                    check=NoAdjudicationCheck(),
+                    success_effects=(AdvanceWorldTimeEffect(to_point_id=to_point_id),),
+                ),
+            )
+        )
+
+    async def test_a_room_can_leave_a_temporary_point_for_the_next_default_one(
+        self,
+    ) -> None:
+        """12:00 →(15:00 任务)→ 15:00 → 18:00。第二跳才是这条测试的重点。"""
+
+        _, store, engine, task = self.build_with_task()
+
+        await self.advance(
+            store, engine, to_point_id=task.occurrence_id, tag="into-temp"
+        )
+        entered = store.inspect_state(ROOM).world_time
+        self.assertEqual(entered.current_point_id, task.occurrence_id)
+        self.assertEqual(entered.current.hour_of_day, 15)
+
+        await self.advance(store, engine, to_point_id="hour_18", tag="out-of-temp")
+
+        left = store.inspect_state(ROOM).world_time
+        self.assertEqual(left.current_point_id, "hour_18")
+        self.assertEqual(left.current.hour_of_day, 18)
+        self.assertEqual(left.current.day_index, 0)
+
+    async def test_the_keeper_still_sees_a_next_point_from_a_temporary_one(
+        self,
+    ) -> None:
+        content, store, engine, task = self.build_with_task()
+        await self.advance(
+            store, engine, to_point_id=task.occurrence_id, tag="into-temp"
+        )
+
+        state = store.inspect_state(ROOM)
+        runtime = EngineRuntimeSnapshot(
+            module_id=content.module_id,
+            module_version=content.version,
+            module_content=content,
+            game_state=state,
+            revision=str(state.event_sequence),
+        )
+        time_capability = keeper_capabilities_v3(runtime, actor_id=ACTOR).time
+
+        assert time_capability is not None
+        self.assertEqual(time_capability.next_point_id, "hour_18")
+        self.assertIsNone(time_capability.blocked_reason)
+
+
+class DueOrderingTests(unittest.TestCase):
+    def test_same_moment_tasks_settle_by_priority_then_id(self) -> None:
+        """顺序稳定，断线恢复重放出来的世界才和第一次跑出来的一样。"""
+
+        content = module()
+        state = create_initial_game_state(content, room_id="room_01", actors={})
+        for key, priority in (("late", 9), ("early", 1), ("middle", 5)):
+            step = CreateTimeTaskStep(
+                id="schedule",
+                task=task_spec(
+                    task_key=key,
+                    target=TimeTaskTargetSpec(day_index=0, hour_of_day=15),
+                    priority=priority,
+                ),
+                next_step_id="finish",
+            )
+            state, _, _ = create_time_task(content, state, step, rule_id="night_watch")
+
+        at_fifteen = state.model_copy(
+            update={
+                "world_time": WorldTimeState(
+                    current=WorldTimePoint(day_index=0, hour_of_day=15),
+                    current_point_id="occ_d0_h15",
+                    current_time_segment="afternoon",
+                )
+            },
+            deep=True,
+        )
+
+        _, due = settle_due_tasks(at_fifteen, at_fifteen.world_time)
+
+        self.assertEqual([task.priority for task in due], [1, 5, 9])
+
+
+if __name__ == "__main__":
+    unittest.main()

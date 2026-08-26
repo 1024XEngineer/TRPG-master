@@ -139,6 +139,40 @@
         "scope": {
           "$ref": "#/$defs/CandidateScopeSpec"
         },
+        "when": {
+          "anyOf": [
+            {
+              "discriminator": {
+                "mapping": {
+                  "all": "#/$defs/AllCondition",
+                  "any": "#/$defs/AnyCondition",
+                  "not": "#/$defs/NotCondition",
+                  "predicate": "#/$defs/PredicateCondition"
+                },
+                "propertyName": "op"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/AllCondition"
+                },
+                {
+                  "$ref": "#/$defs/AnyCondition"
+                },
+                {
+                  "$ref": "#/$defs/NotCondition"
+                },
+                {
+                  "$ref": "#/$defs/PredicateCondition"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "When"
+        },
         "question": {
           "$ref": "#/$defs/MatchQuestionSpec"
         },
@@ -325,6 +359,7 @@
     },
     "CancelTimeTaskStep": {
       "additionalProperties": false,
+      "description": "按 key + bindings 定位并取消，不按运行时 id。\n\n规则写的时候还不知道运行时 id 长什么样；它知道的是自己当初用哪个\n`task_key` 和哪组绑定排的任务。",
       "properties": {
         "id": {
           "maxLength": 100,
@@ -339,11 +374,24 @@
           "title": "Kind",
           "type": "string"
         },
-        "task_id": {
+        "task_key": {
           "maxLength": 100,
           "minLength": 1,
           "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
-          "title": "Task Id",
+          "title": "Task Key",
+          "type": "string"
+        },
+        "bindings": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Bindings",
+          "type": "object"
+        },
+        "reason_code": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Reason Code",
           "type": "string"
         },
         "next_step_id": {
@@ -356,7 +404,8 @@
       },
       "required": [
         "id",
-        "task_id",
+        "task_key",
+        "reason_code",
         "next_step_id"
       ],
       "title": "CancelTimeTaskStep",
@@ -614,7 +663,7 @@
     },
     "CreateTimeTaskStep": {
       "additionalProperties": false,
-      "description": "Schema owned by #245; referenced here so a rule can schedule one.",
+      "description": "Schema owned by #245; referenced here so a rule can schedule one.\n\n以前这里只有一个 `task_id`，没有目标时间——也就是说这个 step **根本无法\n实际创建任务**，它在 registry 里被登记成 `step_kind_has_no_executor` 是\n诚实的。改成携带完整 `TimeTaskSpec`（#415 §阶段四）。",
       "properties": {
         "id": {
           "maxLength": 100,
@@ -629,12 +678,8 @@
           "title": "Kind",
           "type": "string"
         },
-        "task_id": {
-          "maxLength": 100,
-          "minLength": 1,
-          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
-          "title": "Task Id",
-          "type": "string"
+        "task": {
+          "$ref": "#/$defs/TimeTaskSpec"
         },
         "next_step_id": {
           "maxLength": 100,
@@ -646,7 +691,7 @@
       },
       "required": [
         "id",
-        "task_id",
+        "task",
         "next_step_id"
       ],
       "title": "CreateTimeTaskStep",
@@ -2120,29 +2165,37 @@
     },
     "ModuleTimePolicySpec": {
       "additionalProperties": false,
-      "description": "Discrete time points; the clock jumps between them, it does not tick.",
+      "description": "Discrete time points; the clock jumps between them, it does not tick.\n\n时间线是一个**按 `hour_of_day` 升序声明的环**。起点由\n`initial_state.start_time_point_id` 落在环上任意一点，越过末点时回卷并\n`day_index + 1`。跨午夜的夜晚因此今天就能表达，不需要按时序声明：\n\n    按小时升序声明 00/02/18/20/22，起点指定 hour_18\n      D0 18:00 → D0 20:00 → D0 22:00 → D1 00:00 → D1 02:00 → D1 18:00\n                                        ^^^^^^ 越过末点回卷，day_index + 1\n\n下面 `validate_points` 的「`hour_of_day` 必须随 `order` 严格递增」是**声明\n顺序**约束，不是表达力约束——它保证 `order` 就是环上的位置，别的什么都不\n保证（#415 §一条需要先澄清的非缺口）。\n\n`default_points` 是**完整覆盖**，解析侧不得把模组自定义的点与默认四点机械\n合并：多合出来的点会制造额外推进边界，也会让同一条 night 规则在一天里命中\n两次（#415 §与解析侧的分界）。",
       "properties": {
         "default_points": {
           "default": [
             {
               "id": "hour_00",
               "hour_of_day": 0,
-              "order": 0
+              "order": 0,
+              "time_segment": null,
+              "label": null
             },
             {
               "id": "hour_06",
               "hour_of_day": 6,
-              "order": 1
+              "order": 1,
+              "time_segment": null,
+              "label": null
             },
             {
               "id": "hour_12",
               "hour_of_day": 12,
-              "order": 2
+              "order": 2,
+              "time_segment": null,
+              "label": null
             },
             {
               "id": "hour_18",
               "hour_of_day": 18,
-              "order": 3
+              "order": 3,
+              "time_segment": null,
+              "label": null
             }
           ],
           "items": {
@@ -2168,6 +2221,17 @@
           "default": "multiple",
           "title": "Actions Per Point",
           "type": "string"
+        },
+        "terminal_point": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TerminalTimePointSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "title": "ModuleTimePolicySpec",
@@ -2667,6 +2731,30 @@
       "title": "SetVisibilityEffect",
       "type": "object"
     },
+    "TerminalTimePointSpec": {
+      "additionalProperties": false,
+      "description": "时间线的最后一刻（#415 §阶段二）。\n\n终点必须标识时间点的某一次 **occurrence**，不能只给 point id：时间线是个\n环，`hour_18` 每天都会来一次，「第三天 18:00 结束」和「明天 18:00 结束」\n是两件事。`day_index` 与运行态一致，开局当天为 0，所以第三天 18:00 写作\n`{point_id: \"hour_18\", day_index: 2}`。\n\n不重复保存 `hour_of_day`：它由 `point_id` 对应的 `TimePointSpec` 唯一确定，\n两个字段互相矛盾比少一个字段更糟。",
+      "properties": {
+        "point_id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+          "title": "Point Id",
+          "type": "string"
+        },
+        "day_index": {
+          "minimum": 0,
+          "title": "Day Index",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "point_id",
+        "day_index"
+      ],
+      "title": "TerminalTimePointSpec",
+      "type": "object"
+    },
     "TimePointSpec": {
       "additionalProperties": false,
       "properties": {
@@ -2687,6 +2775,38 @@
           "minimum": 0,
           "title": "Order",
           "type": "integer"
+        },
+        "time_segment": {
+          "anyOf": [
+            {
+              "enum": [
+                "late_night",
+                "morning",
+                "afternoon",
+                "evening"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Time Segment"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "maxLength": 20,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Label"
         }
       },
       "required": [
@@ -2695,6 +2815,112 @@
         "order"
       ],
       "title": "TimePointSpec",
+      "type": "object"
+    },
+    "TimeTaskSpec": {
+      "additionalProperties": false,
+      "description": "一次定时任务的作者态声明（#245 §5）。\n\n`task_key` 不是运行时 id：同一条规则可能为不同的绑定各排一个任务\n（「每个被跟踪的 NPC 三小时后现身」），运行时 id 由 key + bindings 生成。\n`cancel_time_task` 也是按 key + bindings 定位的，所以两边必须对得上。",
+      "properties": {
+        "task_key": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+          "title": "Task Key",
+          "type": "string"
+        },
+        "target": {
+          "$ref": "#/$defs/TimeTaskTargetSpec"
+        },
+        "priority": {
+          "default": 0,
+          "title": "Priority",
+          "type": "integer"
+        },
+        "visibility": {
+          "default": "public",
+          "enum": [
+            "public",
+            "hidden"
+          ],
+          "title": "Visibility",
+          "type": "string"
+        },
+        "on_due_branch_id": {
+          "maxLength": 100,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+          "title": "On Due Branch Id",
+          "type": "string"
+        },
+        "bindings": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Bindings",
+          "type": "object"
+        }
+      },
+      "required": [
+        "task_key",
+        "target",
+        "on_due_branch_id"
+      ],
+      "title": "TimeTaskSpec",
+      "type": "object"
+    },
+    "TimeTaskTargetSpec": {
+      "additionalProperties": false,
+      "description": "定时任务在哪一刻到期（#245 §5 / #415 §阶段四）。\n\n两种写法二选一：\n\n- `point_id` —— 绑到模组已经声明的默认点上。不必再写小时，它由\n  `TimePointSpec` 唯一确定。\n- `day_index` + `hour_of_day` —— 剧情临时点，引擎会在两个默认点之间插入\n  一次性 occurrence。\n\n两个都给或都不给都是错的：前者可能自相矛盾，后者根本没说到期时间。",
+      "properties": {
+        "point_id": {
+          "anyOf": [
+            {
+              "maxLength": 100,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Point Id"
+        },
+        "day_index": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Day Index"
+        },
+        "hour_of_day": {
+          "anyOf": [
+            {
+              "maximum": 23,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Hour Of Day"
+        },
+        "relative": {
+          "default": false,
+          "title": "Relative",
+          "type": "boolean"
+        }
+      },
+      "title": "TimeTaskTargetSpec",
       "type": "object"
     },
     "TravelCostSpec": {

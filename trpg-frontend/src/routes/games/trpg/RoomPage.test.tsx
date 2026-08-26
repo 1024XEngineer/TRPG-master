@@ -356,9 +356,9 @@ function playerViewFixture(): AgentPlayerView {
       available_exits: [],
     },
     world: {
+      time_label: '下午',
       day_index: 0,
-      hour_of_day: 12,
-      time_of_day: 'day',
+      can_advance_time: true,
       core_resolved: false,
       ending_available: false,
       ending_id: null,
@@ -558,9 +558,8 @@ describe('RoomPage conversation history', () => {
         proposalId: 'time-349',
         proposalVersion: 3,
         sourceRevision: '8',
-        targetPointId: 'hour_20',
+        targetLabel: '晚上',
         targetDayIndex: 2,
-        targetHourOfDay: 20,
         requesterPlayerId: 'player-2',
         requiredPlayerIds: ['player-1', 'player-2'],
         acceptedPlayerIds: ['player-2'],
@@ -568,7 +567,7 @@ describe('RoomPage conversation history', () => {
       },
     })
 
-    expect(await screen.findByText('第 3 天 20:00')).toBeInTheDocument()
+    expect(await screen.findByText(/晚上 · 第 3 天/)).toBeInTheDocument()
     expect(screen.getByText('1/2 人已确认')).toBeInTheDocument()
     emitWsMessage({
       type: 'room.action.state',
@@ -597,9 +596,8 @@ describe('RoomPage conversation history', () => {
         proposalId: 'time-349',
         proposalVersion: 4,
         sourceRevision: '8',
-        targetPointId: 'hour_20',
+        targetLabel: '晚上',
         targetDayIndex: 2,
-        targetHourOfDay: 20,
         requesterPlayerId: 'player-2',
         requiredPlayerIds: ['player-1', 'player-2'],
         acceptedPlayerIds: ['player-1', 'player-2'],
@@ -613,13 +611,13 @@ describe('RoomPage conversation history', () => {
       payload: {
         proposalId: 'time-349',
         status: 'approved',
+        targetLabel: '晚上',
         targetDayIndex: 2,
-        targetHourOfDay: 20,
         committedRevision: '9',
       },
     })
     await waitFor(() => {
-      expect(screen.queryByText('第 3 天 20:00')).not.toBeInTheDocument()
+      expect(screen.queryByText(/晚上 · 第 3 天/)).not.toBeInTheDocument()
     })
   })
 
@@ -2915,9 +2913,9 @@ describe('RoomPage conversation history', () => {
           playerView: {
             ...playerViewFixture(),
             world: {
+              time_label: '晚上',
               day_index: 1,
-              hour_of_day: 18,
-              time_of_day: 'night',
+              can_advance_time: true,
               core_resolved: true,
               ending_available: true,
               ending_id: null,
@@ -2928,7 +2926,7 @@ describe('RoomPage conversation history', () => {
     )
     fireEvent.click(screen.getByRole('button', { name: '地图' }))
 
-    expect(screen.getByText('夜晚 · 第 2 天 18:00')).toBeInTheDocument()
+    expect(screen.getByText(/晚上 · 第 2 天/)).toBeInTheDocument()
     expect(
       screen.getByText('主线已经收束，可以选择如何收尾'),
     ).toBeInTheDocument()
@@ -2960,9 +2958,9 @@ describe('RoomPage conversation history', () => {
             ...playerViewFixture(),
             revision: '8',
             world: {
+              time_label: '下午',
               day_index: 0,
-              hour_of_day: 12,
-              time_of_day: 'day',
+              can_advance_time: true,
               core_resolved: true,
               ending_available: true,
               ending_id: null,
@@ -2995,7 +2993,33 @@ describe('RoomPage conversation history', () => {
     )
     fireEvent.click(screen.getByRole('button', { name: '地图' }))
 
-    expect(screen.getByText('白天 · 第 1 天 12:00')).toBeInTheDocument()
+    expect(screen.getByText(/下午 · 第 1 天/)).toBeInTheDocument()
+    expect(screen.queryByLabelText('主线进度')).not.toBeInTheDocument()
+  })
+
+  it('marks the timeline as finished from can_advance_time alone', async () => {
+    // 终点判断只能来自引擎投影的这一个布尔。前端按 label 或 point id 推断，
+    // 等于把终点规则实现两遍（#415 §阶段二）。
+    renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    const view = playerViewFixture()
+    act(() =>
+      emitWsMessage({
+        type: 'view.updated',
+        payload: {
+          playerId: 'player-1',
+          playerView: {
+            ...view,
+            world: { ...view.world, time_label: '凌晨', can_advance_time: false },
+          },
+        },
+      }),
+    )
+    fireEvent.click(screen.getByRole('button', { name: '地图' }))
+
+    expect(screen.getByText(/凌晨 · 第 1 天 · 时间不会再推进了/)).toBeInTheDocument()
+    // 终点只停时间，不结束游戏：行动入口照常在。
     expect(screen.queryByLabelText('主线进度')).not.toBeInTheDocument()
   })
 

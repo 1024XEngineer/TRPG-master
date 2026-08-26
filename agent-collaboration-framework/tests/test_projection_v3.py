@@ -38,11 +38,12 @@ from collaboration_framework.contracts import (
     PostRollDecisionRequest,
     PredicateCondition,
     RequiredAdjudicationCheck,
+    RevealInformationEffect,
     RuleDecisionRef,
     SelectCheckChoice,
     SkillCheckCandidate,
-    RevealInformationEffect,
     SubmitAdjudicationRequest,
+    TimeSegment,
 )
 from collaboration_framework.engine import (
     ActorResources,
@@ -53,6 +54,8 @@ from collaboration_framework.engine import (
     InMemoryEngineStore,
     RuleEngineService,
     SequenceDiceSource,
+    WorldTimePoint,
+    WorldTimeState,
 )
 from collaboration_framework.engine.initialization import create_initial_game_state
 from collaboration_framework.engine.navigation import resolve_location_target
@@ -542,9 +545,10 @@ class ProjectionV3Tests(unittest.IsolatedAsyncioTestCase):
 
     async def test_world_block_carries_the_time_point_and_ending_state(self) -> None:
         snapshot = await self.project(game_state(self.content))
-        self.assertEqual(snapshot.world.day_index, 0)
-        self.assertEqual(snapshot.world.hour_of_day, 12)
-        self.assertEqual(snapshot.world.time_of_day, "day")
+        # 玩家只看到模组允许他看到的措辞：12:00 没声明 label，走 afternoon
+        # 的缺省推导。精确的 day_index / hour_of_day 留在权威状态里。
+        self.assertEqual(snapshot.world.time_label, "下午")
+        self.assertEqual(snapshot.scene.time, "下午")
         self.assertFalse(snapshot.world.core_resolved)
         self.assertFalse(snapshot.world.ending_available)
 
@@ -691,6 +695,147 @@ class AdjudicationAgainstV3Tests(unittest.IsolatedAsyncioTestCase):
         )
         return store, AdjudicationEngineService(store), RuleEngineService(store)
 
+    def condition_night_watch_on_night(self) -> None:
+        """Give the real Paper Chase candidate the small engine extension under test."""
+
+        rules = []
+        for rule in self.content.rules:
+            if rule.id != "keep_night_watch":
+                rules.append(rule)
+                continue
+            rules.append(
+                rule.model_copy(
+                    update={
+                        "trigger": rule.trigger.model_copy(
+                            update={
+                                "when": PredicateCondition(
+                                    predicate="time_of_day_is",
+                                    args={"value": "night"},
+                                )
+                            },
+                            deep=True,
+                        )
+                    },
+                    deep=True,
+                )
+            )
+        self.content = self.content.model_copy(update={"rules": tuple(rules)}, deep=True)
+
+    @staticmethod
+    def at_time(point_id: str, hour: int, segment: TimeSegment) -> WorldTimeState:
+        return WorldTimeState(
+            current_point_id=point_id,
+            current=WorldTimePoint(day_index=0, hour_of_day=hour),
+            current_time_segment=segment,
+        )
+
+    async def test_agent_match_when_filters_the_published_candidate(self) -> None:
+        self.condition_night_watch_on_night()
+
+        async def candidates(world_time: WorldTimeState) -> set[str]:
+            _, _, rules = self.build(
+                scene_id="surveillance_point",
+                world_time=world_time,
+            )
+            view = await rules.read_keeper_capabilities(
+                PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+            )
+            return {candidate.rule_id for candidate in view.rule_candidates}
+
+        day = await candidates(self.at_time("hour_06", 6, "morning"))
+        night = await candidates(self.at_time("hour_18", 18, "evening"))
+
+        self.assertNotIn("keep_night_watch", day)
+        self.assertIn("keep_night_watch", night)
+
+    async def test_agent_match_when_is_rechecked_on_submission(self) -> None:
+        """Naming a hidden or stale candidate id cannot bypass its state condition."""
+
+        self.condition_night_watch_on_night()
+        store, engine, rules = self.build(
+            scene_id="surveillance_point",
+            world_time=self.at_time("hour_06", 6, "morning"),
+        )
+        snapshot = await rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+
+        with self.assertRaises(AdjudicationValidationError) as rejected:
+            await engine.submit(
+                SubmitAdjudicationRequest(
+                    room_id=ROOM,
+                    player_id=PLAYER,
+                    adjudication=ActionAdjudication(
+                        request_id="night-watch-during-day",
+                        source_revision=snapshot.revision,
+                        actor_id=ACTOR,
+                        summary="白天点名夜间监视规则",
+                        target=ActionTarget(kind="entity", id="surveillance_area"),
+                        method=ActionMethod(family="surveil", description="监视环境"),
+                        rule_decision=RuleDecisionRef(
+                            rule_id="keep_night_watch",
+                            option_id="luck",
+                        ),
+                        check=NoAdjudicationCheck(),
+                        success_effects=(),
+                        failure_effects=(),
+                    ),
+                )
+            )
+
+        self.assertEqual(rejected.exception.result.code, "RULE_OUT_OF_SCOPE")
+        self.assertEqual(len(store.inspect_domain_events(ROOM)), 0)
+
+    async def test_active_luck_check_reads_the_actor_resource(self) -> None:
+        """Luck is an ActorResource, not a synthetic entry in the skill map."""
+
+        store, engine, rules = self.build(
+            scene_id="surveillance_point",
+            world_time=self.at_time("hour_18", 18, "evening"),
+            entities={
+                "case_tracker": {"night_watch_checked": False},
+                "cemetery_figure": {"visit_observed": False},
+            },
+        )
+        snapshot = await rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        execution = await engine.submit(
+            SubmitAdjudicationRequest(
+                room_id=ROOM,
+                player_id=PLAYER,
+                adjudication=ActionAdjudication(
+                    request_id="night-watch-luck-resource",
+                    source_revision=snapshot.revision,
+                    actor_id=ACTOR,
+                    summary="在夜间监视区域留意动静",
+                    target=ActionTarget(kind="entity", id="surveillance_area"),
+                    method=ActionMethod(family="surveil", description="监视环境"),
+                    rule_decision=RuleDecisionRef(
+                        rule_id="keep_night_watch",
+                        option_id="luck",
+                    ),
+                    check=RequiredAdjudicationCheck(
+                        candidates=(
+                            SkillCheckCandidate(
+                                candidate_id="luck",
+                                skill_id="luck",
+                                difficulty="regular",
+                                method_summary="留守观察",
+                                player_safe_reason="规则要求进行幸运检定",
+                            ),
+                        )
+                    ),
+                ),
+            )
+        )
+
+        pending = execution.pending_decision
+        assert pending is not None
+        self.assertEqual(pending.options[0].display_name, "幸运")
+        self.assertEqual(pending.options[0].target_value, 50)
+        self.assertNotIn("luck", store.inspect_state(ROOM).actors[ACTOR].state["skills"])
+
     async def submit(self, engine, revision, *effects, target=None):
         return await engine.submit(
             SubmitAdjudicationRequest(
@@ -827,8 +972,7 @@ class AdjudicationAgainstV3Tests(unittest.IsolatedAsyncioTestCase):
         snapshot = await rules.read(
             PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
         )
-        self.assertEqual(snapshot.world.hour_of_day, 12)
-        self.assertEqual(snapshot.world.time_of_day, "day")
+        self.assertEqual(snapshot.world.time_label, "下午")
 
         await self.submit(
             engine,
@@ -840,10 +984,10 @@ class AdjudicationAgainstV3Tests(unittest.IsolatedAsyncioTestCase):
         after = await rules.read(
             PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
         )
-        self.assertEqual(after.world.hour_of_day, 20)
-        self.assertEqual(after.world.day_index, 0)
-        self.assertEqual(after.world.time_of_day, "night")
+        self.assertEqual(after.world.time_label, "晚上")
 
+        # 两跳都真的发生过——这一点由权威事件负责证明，不由玩家侧投影负责：
+        # hour_18 与 hour_20 同为 evening，玩家看到的措辞本来就该一样。
         entered = [
             event
             for event in store.inspect_domain_events(ROOM)

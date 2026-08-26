@@ -46,6 +46,11 @@ from app.adapters.structured_http import (
     post_structured_json,
     read_structured_payload,
 )
+from app.core.host_entry import (
+    HostEntryDecision,
+    HostPublicContext,
+    host_entry_decision_schema,
+)
 
 logger = structlog.get_logger()
 
@@ -215,7 +220,9 @@ keeper_capabilities 时，只能使用 enter_location 与 narrative_only。
   每一个的 to_point_id 都是那一跳落到的点（例如 12 点睡到 20 点：先 hour_18，再 hour_20）。
   不要为了凑时间跳过中间的点，也不要用它表示「过了一会儿」——普通行动不推进时间。
   keeper_capabilities.time.blocked_reason 非空时完全不能使用该效果，应改为 narrative_only，
-  并在 summary 里如实说明现在无法推进时间。
+  并在 summary 里如实说明现在无法推进时间。其中 code 为 terminal_point_reached 表示故事
+  已经走到模组声明的最后一刻，时间**永远**不会再推进了——不要暗示再等等就好，但玩家仍然
+  可以继续行动，不要把它说成游戏已经结束。
 - mark_core_resolved：主线目标真的被达成时使用一次。
 - set_ending_availability：主线已经收束、可以开始走结局流程时置 true。
 - commit_terminal_ending 已禁用：终局必须走 EndingDraft 生成、玩家审阅与确认 API，
@@ -338,11 +345,15 @@ outcome=failure 时不得叙述成功后果。若最终 player_view.known_inform
 不能写成取得成功，应如实叙述没有拿走、拿不动或行动未形成可确认的背包变化。叙事中临时出现的
 普通物品只有在裁决阶段已创建为 ItemInstance 并满足上述交叉确认后，才能写成进入背包。
 
-时间在一个回合内会推进，每一步各有自己的时刻：opening_world_time 是回合开始时的世界
-时刻，completed_steps[].world_time_after 是该步骤结束时的世界时刻，player_view.world
-只是最后一步结束后的状态。每一步都必须按它自己的时刻来写，不得把整段都放在终局时刻
-上——白天开始第一步、随后休息到夜里，就要写成行动开始时仍是白天、醒来已是夜晚，绝不能
-把第一步也写成发生在夜里。缺少 world_time_after 时按相邻步骤的时刻推断，不要虚构具体钟点。
+时间在一个回合内会推进，每一步各有自己的时刻：opening_world_time.time_label 是回合开始
+时的措辞，completed_steps[].world_time_after.time_label 是该步骤结束时的措辞，
+player_view.world.time_label 只是最后一步结束后的状态。每一步都必须按它自己的措辞来写，
+不得把整段都放在终局时刻上——「下午」开始第一步、随后休息到「晚上」，就要写成行动开始时
+仍是下午、醒来已是晚上，绝不能把第一步也写成发生在夜里。
+
+time_label 是模组允许玩家看到的**全部**时间信息。只能使用它给的措辞，不得换算、细化或
+虚构任何具体钟点与天数：不写「22:00」，不写「第 1 天」，也不把「晚上」改写成「深夜」。
+缺少 world_time_after 时按相邻步骤的措辞推断。
 
 【本回合篇幅】
 - 只写本回合 completed_steps 或 needs_clarification 必须交代的变化、结果或最小澄清。
@@ -549,6 +560,29 @@ class PromptHostTurnDecisionModel:
             "主持模型返回了无法解读的结果，本次动作未生效，请重试",
             retryable=True,
         ) from last_error
+
+
+class PromptHostEntryModel:
+    """One structured call for the A1 keeper entry router."""
+
+    _INSTRUCTIONS = """你是桌面角色扮演游戏的主持入口分流器。只返回 schema 要求的 JSON。
+只有明确、低风险、无需检定、不会改变权威状态的普通互动（例如礼貌招呼）才返回
+direct_response，并给出一句简短自然的即时回应。调查、搜索、物品、线索、案件、秘密、
+人物背景、说服/威胁/欺骗、移动、时间地点、任何成功失败或状态变化，以及信息不足的请求，
+一律返回 delegate_to_legacy 且 text 必须为空。不得声称规则结果，不得输出 JSON、字段名、
+内部标识、ID、revision、协议或未来承诺。上下文只包含公开信息。"""
+
+    def __init__(self, client: StructuredJsonClient) -> None:
+        self._client = client
+
+    async def generate(self, context: HostPublicContext) -> dict[str, object]:
+        raw = await self._client.generate(
+            schema_name="trpg_host_entry_decision",
+            schema=host_entry_decision_schema(),
+            instructions=self._INSTRUCTIONS,
+            input_payload=context.to_model_payload(),
+        )
+        return HostEntryDecision.model_validate(raw).model_dump(mode="json")
 
 
 class PromptTurnPlanner:

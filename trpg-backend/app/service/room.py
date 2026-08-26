@@ -1004,19 +1004,18 @@ async def record_event(
     动作叙事先通过 ``correlation_id`` 持久化抢占唯一闸门，再允许 WebSocket
     发送。返回 ``False`` 表示同一动作的同类事件已经记录，调用方必须抑制重播。
     """
-    db.add(
-        Event(
-            room_id=room_id,
-            player_id=player_id,
-            event_type=event_type,
-            correlation_id=correlation_id,
-            visibility=visibility,
-            actor_id=actor_id,
-            scene_id=scene_id,
-            view_revision=view_revision,
-            payload=payload,
-        )
+    event = Event(
+        room_id=room_id,
+        player_id=player_id,
+        event_type=event_type,
+        correlation_id=correlation_id,
+        visibility=visibility,
+        actor_id=actor_id,
+        scene_id=scene_id,
+        view_revision=view_revision,
+        payload=payload,
     )
+    db.add(event)
     try:
         await db.commit()
         return True
@@ -1034,6 +1033,42 @@ async def record_event(
         if existing is None:
             raise
         return False
+
+
+async def record_event_pending(
+    db: AsyncSession,
+    room_id: str,
+    player_id: str | None,
+    event_type: str,
+    payload: dict,
+    *,
+    visibility: str,
+    actor_id: str | None,
+    scene_id: str | None,
+    view_revision: str | None,
+    correlation_id: str | None = None,
+) -> Event:
+    """Add an event to the current transaction without committing it.
+
+    A1 uses this to commit the narration event and queue completion atomically.
+    Callers must flush/commit the surrounding transaction and handle uniqueness
+    conflicts when they intentionally race another worker.
+    """
+
+    event = Event(
+        room_id=room_id,
+        player_id=player_id,
+        event_type=event_type,
+        correlation_id=correlation_id,
+        visibility=visibility,
+        actor_id=actor_id,
+        scene_id=scene_id,
+        view_revision=view_revision,
+        payload=payload,
+    )
+    db.add(event)
+    await db.flush()
+    return event
 
 
 async def get_correlated_event(

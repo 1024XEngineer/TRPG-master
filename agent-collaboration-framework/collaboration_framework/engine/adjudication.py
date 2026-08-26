@@ -23,17 +23,17 @@ from collaboration_framework.contracts import (
     AdjudicationRecovery,
     AdjudicationStatusView,
     AdvanceWorldTimeEffect,
-    EnterLocationEffect,
     CheckDecisionRequest,
     CheckRunView,
     CheckStep,
-    RuleCheckSpec,
     ContractError,
+    EnterLocationEffect,
     GetAdjudicationStatusRequest,
     NarrationEvidence,
     PendingCheckOption,
     PostRollDecisionRequest,
     PushOption,
+    RuleCheckSpec,
     SpendResourceOption,
     SubmitAdjudicationRequest,
 )
@@ -71,7 +71,7 @@ from .persistent_results import (
 from .ports import EngineStore
 from .projection_v3 import project_v3
 from .rules_v3 import (
-    agent_match_scope_admits,
+    agent_match_admits,
     create_rule_agenda,
     effects_after_degree,
     entity_state,
@@ -79,6 +79,7 @@ from .rules_v3 import (
     resolve_rule_option,
     walk_rule,
 )
+from .time_tasks import active_occurrences, settle_due_tasks
 from .timeline import advanced_to_next, next_point_after, time_advance_block_reason
 
 logger = logging.getLogger(__name__)
@@ -174,6 +175,8 @@ _EFFECT_SERVICES = effect_registry.EffectServices(
     resolve_location_target=resolve_location_target,
     advanced_to_next=advanced_to_next,
     next_point_after=next_point_after,
+    active_occurrences=active_occurrences,
+    settle_due_tasks=settle_due_tasks,
     time_advance_block_reason=time_advance_block_reason,
     is_public_standard_state=is_public_standard_state,
 )
@@ -1434,8 +1437,10 @@ class AdjudicationEngineService:
             # 存在性不等于「此时此地可用」。候选菜单是按当前场景发布的，提交时
             # 必须用同一个谓词重新绑定：否则模型可以点名另一个地点的规则，把它
             # 的后果带到这里来 —— 范围校验等于交给了模型自觉。
-            if not agent_match_scope_admits(
+            if not agent_match_admits(
                 rule,
+                state=state,
+                actor_id=adjudication.actor_id,
                 location_id=state.scene_id,
                 action_family=adjudication.method.family,
                 target_kind=adjudication.target.kind,
@@ -1533,7 +1538,9 @@ class AdjudicationEngineService:
             effect_registry.absorb_writes(effect, vocabulary)
             if isinstance(effect, AdvanceWorldTimeEffect):
                 vocabulary.world_time = advanced_to_next(
-                    runtime.module_content, vocabulary.world_time
+                    runtime.module_content,
+                    vocabulary.world_time,
+                    active_occurrences(runtime.game_state),
                 )
 
     def _validated_options(
@@ -1567,6 +1574,12 @@ class AdjudicationEngineService:
             value = skills.get(candidate.skill_id)
             if value is None:
                 value = attribute_map.get(candidate.skill_id)
+            # CoC7 幸运是 ActorResources 上会消耗、会持久化的权威资源，不是
+            # skills/attributes 中的一项。作者态主动规则仍用统一的
+            # SkillCheckCandidate 形状表达它；只在解析目标值时接回资源，避免
+            # 《追书人》的幸运检定被误判成角色没有这个“技能”。
+            if value is None and candidate.skill_id == "luck":
+                value = actor.resources.luck
             if (
                 not isinstance(value, int)
                 or isinstance(value, bool)
@@ -1581,7 +1594,11 @@ class AdjudicationEngineService:
                         f"技能候选不属于 Actor 或数值非法: {candidate.skill_id}"
                     ),
                 )
-            label = label_map.get(candidate.skill_id)
+            label = (
+                "幸运"
+                if candidate.skill_id == "luck"
+                else label_map.get(candidate.skill_id)
+            )
             options.append(
                 PendingCheckOption(
                     candidate_id=candidate.candidate_id,
@@ -2450,7 +2467,7 @@ class AdjudicationEngineService:
         )
         if result.event_type is None:
             return result.state, ()
-        return result.state, (
+        emitted = [
             self._event_from_state(
                 result.state,
                 room_id=room_id,
@@ -2460,8 +2477,24 @@ class AdjudicationEngineService:
                 event_type=result.event_type,
                 payload=result.payload,
                 event_id=result.event_id,
-            ),
-        )
+            )
+        ]
+        # 附带事件与主事件同一次提交，序号顺延。`time.task_due` 走这条路：
+        # 到期是「进入这一刻」的一部分，不是它之后的另一次写入。
+        for index, extra in enumerate(result.extra_events, start=1):
+            emitted.append(
+                self._event_from_state(
+                    result.state,
+                    room_id=room_id,
+                    offset=offset + index,
+                    request_id=request_id,
+                    actor_id=actor_id,
+                    event_type=extra.event_type,
+                    payload=extra.payload,
+                    visibility=extra.visibility,
+                )
+            )
+        return result.state, tuple(emitted)
 
     @staticmethod
     def _run_view(check_run: CheckRun):

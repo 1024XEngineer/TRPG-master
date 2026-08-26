@@ -385,6 +385,44 @@ async def test_npc_queue_waiting_head_blocks_later_items_and_schedules_recovery(
 
 
 @pytest.mark.asyncio
+async def test_claim_retryable_failure_after_sqlite_reload(
+    db_session: AsyncSession,
+) -> None:
+    """SQLite 读出的 naive datetime 不能让二次领取在 Python 侧比较崩溃。"""
+
+    room, players, _ = await _start_room(
+        db_session,
+        room_number=3981,
+        player_count=1,
+        prepare_checkpoint=False,
+    )
+    item, _ = await host_action_queue.enqueue(
+        db_session,
+        room_id=room.id,
+        player_id=players[0].id,
+        actor_id="actor-a",
+        client_action_id="retry-reload",
+        utterance="跟邻居打个招呼",
+        recipient=_KEEPER_RECIPIENT,
+    )
+    claimed = await host_action_queue.claim(
+        db_session, item, recipient_kind="keeper", lease_seconds=180
+    )
+    assert claimed is not None
+    await host_action_queue.mark_npc_retryable(db_session, claimed, delay_seconds=0)
+    room_id = room.id
+    db_session.expire_all()
+    head = await host_action_queue.peek_next(db_session, room_id)
+    assert head is not None
+    recovered = await host_action_queue.claim(
+        db_session, head, recipient_kind="keeper", lease_seconds=180
+    )
+    assert recovered is not None
+    assert recovered.status == "processing"
+    assert recovered.attempt_count == 2
+
+
+@pytest.mark.asyncio
 async def test_npc_cancel_before_player_event_persists_nothing(
     db_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,

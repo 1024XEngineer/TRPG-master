@@ -875,6 +875,7 @@ async def _run_direct_host_action(
 ) -> None:
     """Persist and deliver a frozen A1 response without entering ActionPlan."""
 
+    await db.refresh(item)
     text = (item.direct_response_text or "").strip()
     if not text:
         raise RuntimeError("direct_response 队列项缺少已校验文本")
@@ -959,6 +960,78 @@ async def _run_direct_host_action(
         )
     if broadcast_state:
         await _broadcast_room_action_state_fresh(item.room_id)
+
+
+async def _recover_keeper_queue_failure(
+    db: AsyncSession,
+    item,
+    websocket: WebSocket | None,
+    exc: Exception,
+    *,
+    room_id: str,
+) -> None:
+    """Keep frozen keeper work retryable; only fail closed after the last attempt.
+
+    Discarding a processing item made the same client_action_id unrecoverable and
+    could drop a route that had already been frozen.  Delivery errors after the
+    event+queue commit must leave the item completed so reconnect can replay.
+    """
+
+    client_action_id = item.client_action_id
+    try:
+        await db.rollback()
+    except SQLAlchemyError:
+        logger.warning(
+            "host_queue_rollback_after_failure",
+            room_id=room_id,
+            client_action_id=client_action_id,
+            error_type=type(exc).__name__,
+            error_reason=_turn_error_reason(exc),
+        )
+    persisted = await host_action_queue_service.get_by_client_action(db, room_id, client_action_id)
+    if persisted is not None:
+        item = persisted
+    route = host_action_queue_service.effective_execution_route(item)
+    if (
+        item.recipient_kind == "keeper"
+        and route == "direct_response"
+        and item.status == "completed"
+    ):
+        logger.warning(
+            "host_direct_response_delivery_failed_after_commit",
+            room_id=room_id,
+            client_action_id=client_action_id,
+            error_type=type(exc).__name__,
+            error_reason=_turn_error_reason(exc),
+        )
+        return
+    if item.recipient_kind == "keeper" and item.status == "processing":
+        if item.attempt_count < 2:
+            await host_action_queue_service.mark_npc_retryable(db, item, delay_seconds=0)
+            return
+        await host_action_queue_service.mark_npc_failed(db, item)
+        log_turn_failed(
+            room_id=room_id,
+            stage="队列出队",
+            code=_map_turn_error(exc)[0],
+            correlation_id=client_action_id,
+            error_type=type(exc).__name__,
+            error_reason=_turn_error_reason(exc),
+            exc=exc,
+        )
+        await _send_turn_failed(websocket, client_action_id, exc)
+        return
+    await host_action_queue_service.discard(db, item)
+    log_turn_failed(
+        room_id=room_id,
+        stage="队列出队",
+        code=_map_turn_error(exc)[0],
+        correlation_id=client_action_id,
+        error_type=type(exc).__name__,
+        error_reason=_turn_error_reason(exc),
+        exc=exc,
+    )
+    await _send_turn_failed(websocket, client_action_id, exc)
 
 
 async def _drain_host_action_queue(room_id: str) -> None:
@@ -1097,34 +1170,13 @@ async def _drain_host_action_queue(room_id: str) -> None:
                     if result.waiting_for_player:
                         return
                 except Exception as exc:
-                    # A direct response commits its Event and queue completion before
-                    # any socket/broadcast work.  Delivery failures must therefore
-                    # leave the durable result completed so reconnect can replay it.
-                    if (
-                        item.recipient_kind == "keeper"
-                        and host_action_queue_service.effective_execution_route(item)
-                        == "direct_response"
-                        and item.status == "completed"
-                    ):
-                        logger.warning(
-                            "host_direct_response_delivery_failed_after_commit",
-                            room_id=room_id,
-                            client_action_id=item.client_action_id,
-                            error_type=type(exc).__name__,
-                            error_reason=_turn_error_reason(exc),
-                        )
-                        continue
-                    await host_action_queue_service.discard(db, item)
-                    log_turn_failed(
+                    await _recover_keeper_queue_failure(
+                        db,
+                        item,
+                        websocket,
+                        exc,
                         room_id=room_id,
-                        stage="队列出队",
-                        code=_map_turn_error(exc)[0],
-                        correlation_id=item.client_action_id,
-                        error_type=type(exc).__name__,
-                        error_reason=_turn_error_reason(exc),
-                        exc=exc,
                     )
-                    await _send_turn_failed(websocket, item.client_action_id, exc)
                 finally:
                     with anyio.CancelScope(shield=True):
                         action_lock_manager.release(room_id, lock_token)

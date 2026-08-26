@@ -310,6 +310,8 @@ async def claim(
 
     now = datetime.now(UTC)
     owner = str(uuid.uuid4())
+    room_id = item.room_id
+    item_id = item.item_id
     eligible = or_(
         HostActionQueueItem.status == "queued",
         and_(
@@ -327,8 +329,8 @@ async def claim(
     result = await db.execute(
         update(HostActionQueueItem)
         .where(
-            HostActionQueueItem.room_id == item.room_id,
-            HostActionQueueItem.item_id == item.item_id,
+            HostActionQueueItem.room_id == room_id,
+            HostActionQueueItem.item_id == item_id,
             *([HostActionQueueItem.recipient_kind == recipient_kind] if recipient_kind else []),
             eligible,
         )
@@ -341,15 +343,20 @@ async def claim(
             updated_at=now,
         )
         .returning(HostActionQueueItem.item_id)
+        # SQLite round-trips timezone-aware columns as naive UTC.  Evaluating the
+        # WHERE in Python then TypeErrors (aware vs naive) and aborts a valid SQL
+        # claim.  Expire the local row and reload it after commit instead.
+        .execution_options(synchronize_session=False)
     )
     claimed_item_id = result.scalar_one_or_none()
+    db.expire(item)
     await db.commit()
     if claimed_item_id is None:
         return None
     return await db.scalar(
         select(HostActionQueueItem).where(
-            HostActionQueueItem.room_id == item.room_id,
-            HostActionQueueItem.item_id == item.item_id,
+            HostActionQueueItem.room_id == room_id,
+            HostActionQueueItem.item_id == item_id,
             HostActionQueueItem.lease_owner == owner,
         )
     )

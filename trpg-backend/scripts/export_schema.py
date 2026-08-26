@@ -92,6 +92,7 @@ _MODELS: list[type[BaseModel]] = [
     character.CharacterDraftResult,
     character.CharacterRead,
     character.RollAttributesResult,
+    character.RollLuckResult,
     character.QuickGenerateRequest,
     character.QuickGenerateResult,
     character.CharacterTemplateCreateBody,

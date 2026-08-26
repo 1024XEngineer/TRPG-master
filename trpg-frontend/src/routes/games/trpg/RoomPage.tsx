@@ -717,7 +717,7 @@ function BottomPanel({ open, onClose, title, children, heightVh, className = '' 
 // 不再是独立的全屏深色页面。面板现在跟其他面板一样常驻挂载、靠 open 控制
 // 滑入滑出，所以每次重新打开都要把上一次投骰的结果清空，不然会看到上一轮
 // 的结果还留着。
-function DiceModal({
+export function DiceModal({
   open,
   onClose,
   onResult,
@@ -730,6 +730,10 @@ function DiceModal({
   postRollOptions = [],
   luckValue = null,
   onPostRollOption,
+  sequentialTargets,
+  onSequentialRoll,
+  sequentialStartIndex = 0,
+  sequentialAccumulated = 0,
 }: {
   open: boolean
   onClose: () => void
@@ -743,6 +747,13 @@ function DiceModal({
   postRollOptions?: UiCheckRunView['post_roll_options']
   luckValue?: number | null
   onPostRollOption?: (optionId: string, revisedMethod?: string) => void
+  /** 连续骰模式：复用同一骰盘逐颗展示服务端已经确定的目标点数。 */
+  sequentialTargets?: number[]
+  onSequentialRoll?: (value: number, index: number) => void
+  /** 关闭后重新打开时，从当前未完成的骰子继续。 */
+  sequentialStartIndex?: number
+  /** 连续骰模式中已经确认的 d6 点数总和。 */
+  sequentialAccumulated?: number
 }) {
   const [freeDiceType, setFreeDiceType] = useState<DiceType>('d100')
   const [freeResult, setFreeResult] = useState<number | null>(null)
@@ -751,6 +762,7 @@ function DiceModal({
   const [freeTens, setFreeTens] = useState(0)
   const [freeOnes, setFreeOnes] = useState(0)
   const [revisedMethod, setRevisedMethod] = useState('')
+  const [sequentialIndex, setSequentialIndex] = useState(0)
   const submitLockRef = useRef(false)
   const dice3dRef = useRef<Dice3DHandle>(null)
   const rollGenerationRef = useRef(0)
@@ -779,13 +791,17 @@ function DiceModal({
       setFreeShowResult(false)
       setFreeTens(0)
       setFreeOnes(0)
+      setSequentialIndex(sequentialStartIndex)
       submitLockRef.current = false
     }
-  }, [open, checkRequest])
+  }, [open, checkRequest, sequentialStartIndex])
 
   const isCheckMode = Boolean(checkRequest)
+  const isSequentialMode = Boolean(sequentialTargets?.length)
+  const sequentialTarget = isSequentialMode ? sequentialTargets?.[sequentialIndex] ?? null : null
+  const activePresetResult = isSequentialMode ? sequentialTarget : presetResult
   const activeCheckDice = checkRequest ? checkDiceState : null
-  const activeDiceType: DiceType = isCheckMode ? 'd100' : freeDiceType
+  const activeDiceType: DiceType = isCheckMode ? 'd100' : isSequentialMode ? 'd6' : freeDiceType
   const activeResult = isCheckMode ? activeCheckDice?.result ?? null : freeResult
   const activeRolling = isCheckMode ? activeCheckDice?.rolling ?? false : freeRolling
   const activeShowResult = isCheckMode ? activeCheckDice?.showResult ?? false : freeShowResult
@@ -838,7 +854,7 @@ function DiceModal({
   const settle = (value: number, requestId: string | null) => {
     clear3DWatchdog()
     inFlight3DRollRef.current = null
-    const settledValue = presetResult ?? value
+    const settledValue = activePresetResult ?? value
     const { tens, ones } = activeDiceType === 'd100' ? splitD100(settledValue) : { tens: 0, ones: 0 }
     if (requestId !== null) {
       setCheckDiceState((current) => {
@@ -870,8 +886,8 @@ function DiceModal({
   /** 2D 回退掷骰：本地随机 + 固定时长的假动画，与改造前一致。 */
   const roll2D = (requestId: string | null) => {
     let finalResult: number
-    if (presetResult !== null) {
-      finalResult = presetResult
+    if (activePresetResult !== null) {
+      finalResult = activePresetResult
     } else if (activeDiceType === 'd100') {
       const tens = Math.floor(Math.random() * 10)
       const ones = Math.floor(Math.random() * 10)
@@ -938,7 +954,7 @@ function DiceModal({
         roll2D(requestId)
         return
       }
-      if (!stage.roll(token, presetResult ?? undefined)) {
+      if (!stage.roll(token, activePresetResult ?? undefined)) {
         // 舞台在，只是还占着上一次掷骰。掷骰现在一律由玩家点击触发，所以清掉
         // rolling 让按钮重新可用就够了——不要退回 2D，那会把玩家想看的动画
         // 悄悄换成一个直接蹦出来的数字。
@@ -1006,6 +1022,19 @@ function DiceModal({
   const canRoll = !activeRolling && !activeShowResult && activeResult === null && !activeCheckDice?.submitted
 
   const confirmResult = () => {
+    if (isSequentialMode) {
+      if (activeResult === null) return
+      onSequentialRoll?.(activeResult, sequentialIndex)
+      if (sequentialIndex >= (sequentialTargets?.length ?? 1) - 1) {
+        onClose()
+      } else {
+        setSequentialIndex(index => index + 1)
+        setFreeResult(null)
+        setFreeShowResult(false)
+        setFreeRolling(false)
+      }
+      return
+    }
     if (isCheckMode) {
       if (!checkRequest || !activeCheckDice || activeResult === null || !activeSelectedSkillId) return
       if (submitLockRef.current || activeCheckDice.submitted) return
@@ -1163,10 +1192,11 @@ function DiceModal({
     <BottomPanel
       open={open}
       onClose={onClose}
-      title="骰子检定"
-      className="room-play__bottom-panel--dice"
+      title={isSequentialMode ? '幸运值投掷' : '骰子检定'}
+      className={`room-play__bottom-panel--dice ${isSequentialMode ? 'room-play__bottom-panel--sequential-dice' : ''}`}
+      heightVh={isSequentialMode ? 64 : undefined}
     >
-      {!isCheckMode && (
+      {!isCheckMode && !isSequentialMode && (
         <div className="flex gap-1.5 mb-3.5">
           {DICE_OPTIONS.map((opt) => (
             <button
@@ -1227,10 +1257,12 @@ function DiceModal({
 
       <div className="text-center mb-3">
         <span className="text-xs text-brass-dark font-semibold bg-brass/10 px-4 py-1 rounded-full inline-block">
-          {selectedSkill?.name ?? '自由掷骰'}
+          {isSequentialMode ? `幸运值 · 第 ${sequentialIndex + 1}/3 颗` : selectedSkill?.name ?? '自由掷骰'}
         </span>
         <div className="font-mono text-xs text-text-muted mt-1">
-          {activeDiceType === 'd100'
+          {isSequentialMode
+            ? `已投点数：${sequentialAccumulated} · 当前幸运值：${sequentialAccumulated * 5}`
+            : activeDiceType === 'd100'
             ? `目标: ${targetValue} · D% = 十位 + 个位`
             : '自由检定'}
         </div>
@@ -1238,7 +1270,7 @@ function DiceModal({
 
       <div
         data-testid="dice-table"
-        className="rounded-md px-4 pt-5 pb-4 flex flex-col items-center relative overflow-hidden"
+        className={`rounded-md px-4 pt-4 pb-3 flex flex-col items-center relative overflow-hidden ${isSequentialMode ? 'min-h-36' : ''}`}
         style={{
           // 暖调骰盘而不是冷近黑：骰子是亮面树脂材质，深底才有对比；
           // 中心略亮、边缘压暗，配合内阴影读起来像一个打着光的托盘。
@@ -1267,7 +1299,7 @@ function DiceModal({
       </div>
 
       {activeShowResult && activeResult !== null && (
-        <div className="flex flex-col items-center pt-4 gap-3 animate-[fadeIn_0.3s_ease]">
+        <div className="flex flex-col items-center pt-3 gap-2 animate-[fadeIn_0.3s_ease]">
           <div className="text-center">
             {activeDiceType === 'd100' ? (
               <>
@@ -1284,22 +1316,24 @@ function DiceModal({
             ) : (
               <div className="text-[44px] font-bold font-mono text-text-primary">{activeResult}</div>
             )}
-            {verdict && (
+            {!isSequentialMode && verdict && (
               <div className="text-base font-bold mt-1" style={{ color: verdict.color }}>{verdict.label}</div>
             )}
             <div className="text-xs text-text-dim mt-1 font-mono">
-              {activeDiceType === 'd100'
+              {isSequentialMode
+                ? `本次点数：${activeResult} · 确认后累计：${sequentialAccumulated + activeResult}`
+                : activeDiceType === 'd100'
                 ? `${selectedSkill?.name ?? '自由检定'} ${targetValue}% · 需求 ≤${targetValue}`
                 : `${activeDiceType.toUpperCase()} · 自由检定`}
             </div>
-            {presetResult !== null && (
+            {!isSequentialMode && presetResult !== null && (
               <p className="mt-1 text-[11px] text-text-muted">
                 骰点已保存；刷新或重试不会重新投掷
               </p>
             )}
           </div>
 
-          {presetResult !== null && acceptOption ? (
+          {!isSequentialMode && presetResult !== null && acceptOption ? (
             <div className="w-full space-y-2">
               <button
                 type="button"
@@ -1368,7 +1402,9 @@ function DiceModal({
               disabled={isCheckMode && !!activeCheckDice?.submitted}
               className="w-full py-3 rounded-sm bg-brass text-white text-sm font-semibold active:bg-brass-dark active:scale-[0.97] transition-all disabled:opacity-60"
             >
-              确认并发送
+              {isSequentialMode
+                ? sequentialIndex >= (sequentialTargets?.length ?? 1) - 1 ? '确认幸运值' : '继续投骰'
+                : '确认并发送'}
             </button>
           )}
         </div>
@@ -1547,6 +1583,8 @@ export default function RoomPage() {
   const [lastSaved, setLastSaved] = useState<string | null>(() => (notesKey ? localStorage.getItem(notesKey) : null) ? new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const composerInputRef = useRef<HTMLTextAreaElement>(null)
+  const recipientMenuRef = useRef<HTMLDivElement>(null)
+  const mentionButtonRef = useRef<HTMLButtonElement>(null)
   const pendingNarrationActionIdRef = useRef<string | null>(null)
   const organizingPhaseStartedAtRef = useRef<number | null>(null)
   const progressClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -1641,6 +1679,19 @@ export default function RoomPage() {
       setProgressLabel(null)
     }, remaining)
   }, [])
+
+  useEffect(() => {
+    if (!recipientMenuOpen) return
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target
+      if (!(target instanceof Node)) return
+      if (recipientMenuRef.current?.contains(target)) return
+      if (mentionButtonRef.current?.contains(target)) return
+      setRecipientMenuOpen(false)
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    return () => document.removeEventListener('pointerdown', onPointerDown)
+  }, [recipientMenuOpen])
 
   useEffect(
     () => () => {
@@ -2845,8 +2896,10 @@ export default function RoomPage() {
                     : speechInput.error}
           </p>
         )}
+        <div className="room-play__composer-anchor">
         {isActionChannel && recipientMenuOpen && (
           <div
+            ref={recipientMenuRef}
             id="dialogue-recipient-list"
             role="listbox"
             aria-label="选择消息接收者"
@@ -2884,6 +2937,7 @@ export default function RoomPage() {
           )}
           {isActionChannel && (
             <button
+              ref={mentionButtonRef}
               type="button"
               aria-label="选择消息接收者"
               title="选择守秘人或 NPC"
@@ -3012,6 +3066,7 @@ export default function RoomPage() {
             </button>
           )}
         </form>
+        </div>
       </div>
 
       {/* ── Panels ── */}

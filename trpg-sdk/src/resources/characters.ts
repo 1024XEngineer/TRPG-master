@@ -7,6 +7,7 @@ import type {
   QuickGenerateInput,
   QuickGenerateResult,
   RollAttributesResult,
+  RollLuckResult,
   UpdateCharacterInput,
 } from '../types';
 
@@ -181,6 +182,19 @@ export class CharactersResource {
   ): Promise<RollAttributesResult> {
     return this.client.post<RollAttributesResult>(
       `/rooms/${roomId}/characters/${characterId}/roll-attributes`,
+      null,
+      this.authenticated(reconnectToken)
+    );
+  }
+
+  /** POST /api/v1/rooms/{roomId}/characters/{characterId}/roll-luck — 单独掷本局幸运值。 */
+  rollLuck(
+    roomId: string,
+    characterId: string,
+    reconnectToken: string
+  ): Promise<RollLuckResult> {
+    return this.client.post<RollLuckResult>(
+      `/rooms/${roomId}/characters/${characterId}/roll-luck`,
       null,
       this.authenticated(reconnectToken)
     );

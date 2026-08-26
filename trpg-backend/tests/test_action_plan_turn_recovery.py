@@ -317,6 +317,32 @@ async def test_narration_falls_back_to_required_player_safe_evidence() -> None:
     assert "。。" not in narration.text
 
 
+@pytest.mark.asyncio
+async def test_narration_retries_atmosphere_repeat_with_hint() -> None:
+    application = object.__new__(ActionPlanTurnApplication)
+    narrate = AsyncMock(side_effect=ActionPlanNarrationValidationError("atmosphere_repeat"))
+    application._narrator = SimpleNamespace(narrate=narrate)
+    evidence = NarrationEvidence(
+        ref="evt-1",
+        kind="entity_discovered",
+        subject_id="x",
+        subject_name="公开结果",
+        required_in_narration=False,
+    )
+    context = cast(
+        ActionPlanNarrationContext,
+        _NarrationContextStub(evidence, "resolved"),
+    )
+
+    narration = await application._narrate(context)
+
+    assert narrate.await_count == 2
+    retry_context = narrate.await_args_list[1].args[0]
+    assert "不得再用午后阳光、夜色、窗景等环境开场重铺" in retry_context.narration_retry_hint
+    assert narration.kind == "narration"
+    assert "这次行动已经按当前可确认的结果完成" in narration.text
+
+
 def test_required_evidence_fallback_omits_second_person_description_in_named_actor() -> None:
     context = SimpleNamespace(
         addressing_mode="named_actor",

@@ -21,14 +21,25 @@ OUTPUT_DIR = (
     ROOT / "docs" / "module-parser" / "examples" / "module-content-validation" / "幸福蛙蛙村"
 )
 
-SUCCESS_ROUTES = {
-    "critical_success": "success_0",
-    "extreme_success": "success_0",
-    "hard_success": "success_0",
-    "regular_success": "success_0",
-    "failure": "failure_0",
-    "fumble": "failure_0",
-}
+SUCCESS_DEGREES = (
+    "critical_success",
+    "extreme_success",
+    "hard_success",
+    "regular_success",
+)
+
+
+def result_routes(difficulty: str) -> dict[str, str]:
+    """按 COC7 难度把不足等级的成功路由到失败分支。"""
+
+    required_index = {"critical": 1, "extreme": 2, "hard": 3, "regular": 4}[
+        difficulty
+    ]
+    routes = {
+        degree: "success_0" if index < required_index else "failure_0"
+        for index, degree in enumerate(SUCCESS_DEGREES)
+    }
+    return {**routes, "failure": "failure_0", "fumble": "failure_0"}
 
 
 def information(
@@ -85,6 +96,16 @@ def info_is(item_id: str) -> dict[str, Any]:
     }
 
 
+def party_location_is(location_id: str) -> dict[str, Any]:
+    """只在已提交的位置迁移后匹配队伍当前位置。"""
+
+    return {
+        "op": "predicate",
+        "predicate": "party_location_is",
+        "args": {"id": location_id},
+    }
+
+
 def entity(
     entity_id: str,
     name: str,
@@ -130,9 +151,17 @@ def agent_trigger(
     option_id: str,
     hints: list[str],
     when: dict[str, Any] | None = None,
+    question_kind: str = "method",
 ) -> dict[str, Any]:
     """每条玩家行动规则都带明确地点、目标和语义范围。"""
 
+    semantic_hints = list(
+        dict.fromkeys(
+            hint.strip()
+            for hint in hints
+            if hint.strip() and hint.strip() not in {*families, option_id}
+        )
+    )
     trigger = {
         "kind": "agent_match",
         "scope": {
@@ -141,8 +170,8 @@ def agent_trigger(
             "target_kinds": [target_kind],
             "target_ids": [target_id],
         },
-        "question": {"kind": "method", "semantic_hints": hints},
-        "options": [{"id": option_id, "semantic_hints": hints}],
+        "question": {"kind": question_kind, "semantic_hints": semantic_hints},
+        "options": [{"id": option_id, "semantic_hints": semantic_hints}],
     }
     if when is not None:
         trigger["when"] = when
@@ -159,6 +188,9 @@ def effect_rule(
     option_id: str,
     hints: list[str],
     effects: list[dict[str, Any]],
+    when: dict[str, Any] | None = None,
+    priority: int = 0,
+    question_kind: str = "method",
 ) -> dict[str, Any]:
     """构造只提交封闭 ActionEffect 的确定性规则。"""
 
@@ -174,7 +206,7 @@ def effect_rule(
             }
         )
     steps.append({"id": "finish", "kind": "finish"})
-    return {
+    rule = {
         "id": rule_id,
         "trigger": agent_trigger(
             families,
@@ -183,12 +215,17 @@ def effect_rule(
             target_id,
             option_id,
             hints,
+            when,
+            question_kind,
         ),
         "execution": {
             "branches": [{"id": option_id, "entry_step_id": "effect_0"}],
             "steps": steps,
         },
     }
+    if priority:
+        rule["priority"] = priority
+    return rule
 
 
 def check_rule(
@@ -204,6 +241,7 @@ def check_rule(
     failure_effects: list[dict[str, Any]],
     difficulty: str = "regular",
     when: dict[str, Any] | None = None,
+    hints: list[str] | None = None,
 ) -> dict[str, Any]:
     """构造失败仍可重试或获得替代提示的正式 COC7 检定。"""
 
@@ -220,7 +258,7 @@ def check_rule(
                 "allow_luck": True,
                 "allow_push": True,
             },
-            "result_routes": SUCCESS_ROUTES,
+            "result_routes": result_routes(difficulty),
         }
     ]
     for prefix, effects in (
@@ -246,7 +284,7 @@ def check_rule(
             target_kind,
             target_id,
             option_id,
-            [skill_id, *families, *[target_id]],
+            hints or [skill_id, *families, target_id],
             when,
         ),
         "execution": {
@@ -445,10 +483,16 @@ def build_information() -> list[dict[str, Any]]:
             "夜色降临，温柔的声音在耳边询问：“对你而言，什么是幸福？”",
         ),
         information(
+            "messenger_leaves_at_night",
+            "信使深夜离开",
+            "第一夜深夜，幸福信使独自前往池塘为梦境水晶补充能量。",
+            "夜深后，你注意到幸福信使独自离开别墅，朝蛙鸣泉的方向走去。她的行动与白天明显不同。",
+        ),
+        information(
             "night_ritual_seen",
             "池塘边的夜间仪式",
-            "信使从池底取出水晶并注入能量，青蛙如朝圣般面向她。",
-            "你看到信使从池底取出透明水晶注入微光，青蛙全部朝她伏下。",
+            "信使从池底取出水晶并注入能量；仪式结束后，她把水晶放回池底，独自离开蛙鸣泉。青蛙如朝圣般面向她。",
+            "你看到信使从池底取出透明水晶注入微光。仪式结束后，她把水晶重新放回池底，随后独自离开；青蛙始终朝她伏下。",
             criticality="essential",
         ),
         information(
@@ -574,7 +618,12 @@ def build_entities() -> list[dict[str, Any]]:
             "调查员寻找的失踪青年。",
             location="resort_reception",
             kind="npc",
-            state={"released": False, "forced_removal": False, "alive": True},
+            state={
+                "released": False,
+                "under_forced_custody": False,
+                "accompanying_party": False,
+                "alive": True,
+            },
         ),
         entity(
             "staff_door",
@@ -634,7 +683,7 @@ def build_entities() -> list[dict[str, Any]]:
             "梦境水晶",
             "信使从池底取出的透明水晶。",
             location="frog_pond",
-            state={"known": False, "retrieved": False, "destroyed": False},
+            state={"known": False, "retrieved": False, "broken": False},
             visible_when=[state_is("dream_crystal", "known", True)],
         ),
         entity(
@@ -765,38 +814,93 @@ def build_rules() -> list[dict[str, Any]]:
         ),
         effect_rule(
             "force_james_against_his_will",
-            families=["attack", "force", "restrain", "carry", "rescue"],
+            families=["attack", "force", "restrain"],
             locations=["resort_reception", "resort_boundary"],
             target_kind="entity",
             target_id="james",
             option_id="force-james",
             hints=[
-                "强行把詹姆斯带走",
                 "击晕詹姆斯",
                 "用安眠药控制詹姆斯",
-                "违背詹姆斯意愿拖走他",
+                "捆绑詹姆斯",
+                "违背詹姆斯意愿控制他",
             ],
             effects=[
-                set_state("james", "forced_removal", True),
+                set_state("james", "under_forced_custody", True),
                 reveal("james_resists_forced_removal"),
             ],
         ),
         effect_rule(
-            "force_james_out_of_resort",
-            families=["escape", "leave", "travel", "carry", "rescue"],
+            "carry_james_against_his_will",
+            families=["carry", "drag", "force"],
             locations=["resort_reception", "resort_boundary"],
-            target_kind="location",
-            target_id="outside",
-            option_id="force-james-outside",
-            hints=[
-                "击晕詹姆斯后强行带离度假村",
-                "强行把詹姆斯拖出度假村",
-                "用安眠药控制詹姆斯后带离",
-                "违背詹姆斯意愿把他带回家",
-            ],
+            target_kind="entity",
+            target_id="james",
+            option_id="carry-james",
+            hints=["扛起詹姆斯", "拖着詹姆斯", "强行携带詹姆斯"],
             effects=[
+                set_state("james", "under_forced_custody", True),
+                set_state("james", "accompanying_party", True),
+            ],
+        ),
+        effect_rule(
+            "stop_carrying_james",
+            families=["drop", "leave", "abandon"],
+            locations=["resort_reception", "resort_boundary"],
+            target_kind="entity",
+            target_id="james",
+            option_id="stop-carrying-james",
+            hints=["放下詹姆斯", "留下詹姆斯", "放弃携带詹姆斯"],
+            effects=[set_state("james", "accompanying_party", False)],
+        ),
+        effect_rule(
+            "release_james_from_forced_custody",
+            families=["release", "free", "untie"],
+            locations=["resort_reception", "resort_boundary"],
+            target_kind="entity",
+            target_id="james",
+            option_id="release-james",
+            hints=["释放詹姆斯", "给詹姆斯松绑", "解除对詹姆斯的物理控制"],
+            effects=[
+                set_state("james", "under_forced_custody", False),
+                set_state("james", "accompanying_party", False),
+            ],
+        ),
+        effect_rule(
+            "force_james_out_of_resort",
+            families=[
+                "attack",
+                "force",
+                "restrain",
+                "carry",
+                "drag",
+                "escape",
+                "leave",
+                "travel",
+            ],
+            locations=["resort_reception", "resort_boundary"],
+            target_kind="entity",
+            target_id="james",
+            option_id="force-james-out",
+            hints=[
+                "强行把詹姆斯带出去",
+                "把詹姆斯带出度假村",
+                "控制詹姆斯并带离度假村",
+                "无视詹姆斯反抗继续带走他",
+            ],
+            when=state_is("james", "released", False),
+            priority=100,
+            question_kind="intent_relation",
+            effects=[
+                set_state("james", "under_forced_custody", True),
+                set_state("james", "accompanying_party", True),
                 {"type": "enter_location", "location_id": "outside"},
-                set_state("james", "forced_removal", True),
+                {
+                    "type": "move_entity",
+                    "entity_id": "james",
+                    "location_id": "outside",
+                    "holder_actor_id": None,
+                },
                 set_state("james", "alive", False),
                 reveal("james_forced_removal_tragedy"),
                 {"type": "mark_core_resolved"},
@@ -902,6 +1006,47 @@ def build_rules() -> list[dict[str, Any]]:
             ],
         ),
         check_rule(
+            "follow_messenger_to_pond",
+            families=["follow", "trail", "sneak"],
+            locations=[
+                "resort_reception",
+                "guest_room",
+                "dining_kitchen",
+                "staff_area",
+                "storage_room",
+                "messenger_bedroom",
+                "frog_resort",
+            ],
+            target_kind="entity",
+            target_id="messenger",
+            option_id="spot-hidden",
+            skill_id="spot-hidden",
+            hints=[
+                "spot-hidden",
+                "follow",
+                "trail",
+                "sneak",
+                "跟踪",
+                "尾随",
+                "悄悄跟踪",
+                "messenger",
+            ],
+            when={
+                "op": "all",
+                "items": [
+                    state_is("night_ritual", "active", True),
+                    info_is("messenger_leaves_at_night"),
+                ],
+            },
+            success_effects=[
+                {"type": "enter_location", "location_id": "frog_pond"},
+                reveal("night_ritual_seen"),
+                reveal("crystal_is_power_core"),
+                set_state("dream_crystal", "known", True),
+            ],
+            failure_effects=[reveal("night_has_fallen")],
+        ),
+        check_rule(
             "observe_night_ritual",
             families=["observe", "follow", "hide"],
             locations=["frog_pond"],
@@ -909,6 +1054,24 @@ def build_rules() -> list[dict[str, Any]]:
             target_id="night_ritual",
             option_id="spot-hidden",
             skill_id="spot-hidden",
+            when=state_is("night_ritual", "active", True),
+            success_effects=[
+                reveal("night_ritual_seen"),
+                reveal("crystal_is_power_core"),
+                set_state("dream_crystal", "known", True),
+            ],
+            failure_effects=[reveal("night_has_fallen")],
+        ),
+        check_rule(
+            "observe_messenger_at_night_ritual",
+            families=["observe", "watch", "inspect"],
+            locations=["frog_pond"],
+            target_kind="entity",
+            target_id="messenger",
+            option_id="spot-hidden",
+            skill_id="spot-hidden",
+            when=state_is("night_ritual", "active", True),
+            hints=["观察幸福信使", "看信使在做什么", "监视池塘边的信使"],
             success_effects=[
                 reveal("night_ritual_seen"),
                 reveal("crystal_is_power_core"),
@@ -925,8 +1088,28 @@ def build_rules() -> list[dict[str, Any]]:
             option_id="swim",
             skill_id="swim",
             difficulty="hard",
+            when={
+                "op": "all",
+                "items": [
+                    state_is("dream_crystal", "known", True),
+                    state_is("dream_crystal", "retrieved", False),
+                ],
+            },
+            hints=[
+                "潜入池底取出梦境水晶",
+                "跳进蛙鸣泉寻找水晶",
+                "游到水下打捞水晶",
+                "从池底把水晶带到岸边",
+                "潜水取水晶",
+            ],
             success_effects=[
                 set_state("dream_crystal", "retrieved", True),
+                {
+                    "type": "move_entity",
+                    "entity_id": "dream_crystal",
+                    "location_id": "crystal_shore",
+                },
+                {"type": "enter_location", "location_id": "crystal_shore"},
                 reveal("crystal_retrieved"),
             ],
             failure_effects=[reveal("crystal_is_power_core")],
@@ -945,6 +1128,8 @@ def build_rules() -> list[dict[str, Any]]:
                 set_state("messenger", "convinced", True),
                 set_state("resort_state", "victims_released", True),
                 set_state("james", "released", True),
+                set_state("james", "under_forced_custody", False),
+                set_state("james", "accompanying_party", False),
                 reveal("messenger_convinced"),
                 reveal("victims_released"),
                 reveal("james_returns_home"),
@@ -962,10 +1147,12 @@ def build_rules() -> list[dict[str, Any]]:
             option_id="break-crystal",
             hints=["破坏已经带上岸的水晶", "终止美梦核心"],
             effects=[
-                set_state("dream_crystal", "destroyed", True),
+                set_state("dream_crystal", "broken", True),
                 set_state("resort_state", "core_broken", True),
                 set_state("resort_state", "victims_released", True),
                 set_state("james", "released", True),
+                set_state("james", "under_forced_custody", False),
+                set_state("james", "accompanying_party", False),
                 reveal("crystal_destroyed"),
                 reveal("victims_released"),
                 reveal("james_returns_home"),
@@ -1014,6 +1201,39 @@ def build_rules() -> list[dict[str, Any]]:
             effects=[
                 set_state("night_ritual", "active", True),
                 reveal("night_has_fallen"),
+                reveal("messenger_leaves_at_night"),
+            ],
+        )
+    )
+    rules.append(
+        event_rule(
+            "messenger_arrives_at_night_ritual",
+            event_type="travel.resolved",
+            conditions=[state_is("night_ritual", "active", True)],
+            effects=[
+                {
+                    "type": "move_entity",
+                    "entity_id": "messenger",
+                    "location_id": "frog_pond",
+                }
+            ],
+        )
+    )
+    rules.append(
+        event_rule(
+            "night_ritual_ends",
+            event_type="time.point_entered",
+            conditions=[
+                time_of_day_is("day"),
+                state_is("night_ritual", "active", True),
+            ],
+            effects=[
+                set_state("night_ritual", "active", False),
+                {
+                    "type": "move_entity",
+                    "entity_id": "messenger",
+                    "location_id": "resort_reception",
+                },
             ],
         )
     )
@@ -1176,7 +1396,7 @@ def build_module() -> dict[str, Any]:
     return {
         "content_schema_version": 3,
         "module_id": "happy-frog-village",
-        "version": "3.0.0",
+        "version": "3.0.8",
         "world_ref": "coc-7e",
         "background": (
             "默认采用现代城郊。莱恩夫妇委托调查员寻找失踪的儿子詹姆斯，线索指向"
@@ -1462,6 +1682,7 @@ def provenance(module: dict[str, Any]) -> dict[str, Any]:
         "staff_notes_confessions": [301, 302, 303],
         "messenger_origin_notes": [308, 309, 310],
         "night_has_fallen": [280, 281, 282, 312],
+        "messenger_leaves_at_night": [312, 313, 314],
         "night_ritual_seen": [312, 313, 314],
         "crystal_is_power_core": [313, 316, 317, 320, 321, 322, 447],
         "crystal_retrieved": [316, 317, 318, 320, 321, 322],
@@ -1498,6 +1719,9 @@ def provenance(module: dict[str, Any]) -> dict[str, Any]:
         "read_messenger_intent": [140, 144, 146, 148, 149, 151, 152],
         "talk_to_james": [163, 164, 165, 166, 167, 168, 169],
         "force_james_against_his_will": [167, 168, 169],
+        "carry_james_against_his_will": [167, 168, 169],
+        "stop_carrying_james": [167, 168, 169],
+        "release_james_from_forced_custody": [167, 168, 169],
         "force_james_out_of_resort": [171, 172, 173, 174, 175],
         "read_happiness_booklet": [201],
         "inspect_mutating_guest": [203, 204, 278],
@@ -1507,13 +1731,17 @@ def provenance(module: dict[str, Any]) -> dict[str, Any]:
         "infiltrate_staff_area": [301, 302, 303],
         "read_staff_notes": [301, 302, 303],
         "read_messenger_notes": [308, 309, 310],
+        "follow_messenger_to_pond": [312, 313, 314],
         "observe_night_ritual": [312, 313, 314],
+        "observe_messenger_at_night_ritual": [312, 313, 314],
         "retrieve_dream_crystal": [316, 317, 318, 320, 321, 322],
         "persuade_happiness_messenger": [324, 325, 326, 436, 437, 439, 443, 444],
         "destroy_dream_crystal": [447, 448, 449, 450],
         "leave_frog_resort": [424, 425, 431, 432, 433, 434],
         "accept_messengers_happiness": [452, 453, 455, 456],
         "night_ritual_begins": [280, 281, 282, 312],
+        "messenger_arrives_at_night_ritual": [312, 313, 314],
+        "night_ritual_ends": [280, 281, 282, 312],
         "final_debate_becomes_available": [239, 248, 298, 299, 324, 325, 326],
     }
     return {
@@ -1586,6 +1814,7 @@ def review_markdown(module: dict[str, Any], source_map: dict[str, Any]) -> str:
 - 信使笔记与夜间仪式是水晶真相的两条来源；关键失败不会永久关闭主线。
 - 说服、水晶破坏和主动离开分别提交独立 Canon Information，再由 EndingDraft 选择锚点。
 - 强行控制詹姆斯会先提交他的挣扎与呼救；未解除影响便把他带出度假村，会提交原文声明的戒断、自尽和任务失败结局。
+- `force_james_out_of_resort` 将“违背 James 意愿把未解除影响的他带离度假村”作为一个原子意图；命中后一次提交同行迁移、死亡、悲剧信息和结局开放。
 - 接受幸福/成为员工只在玩家明确选择后开放，不自动提交角色永久退役。
 
 ## 明确降级

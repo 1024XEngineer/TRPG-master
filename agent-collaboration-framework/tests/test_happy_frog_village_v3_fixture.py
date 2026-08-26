@@ -16,6 +16,7 @@ from collaboration_framework.contracts import (
     EnterLocationEffect,
     ModuleContentV3,
     NoAdjudicationCheck,
+    PlayerInput,
     PlayerViewScope,
     PostRollDecisionRequest,
     RequiredAdjudicationCheck,
@@ -34,6 +35,14 @@ from collaboration_framework.engine import (
     audit_runtime_capabilities,
 )
 from collaboration_framework.engine.initialization import create_initial_game_state
+from collaboration_framework.host.application import (
+    ActionPlanNarrator,
+    PlayerViewProjector,
+)
+from collaboration_framework.host.schemas import (
+    ActionPlanNarrationContext,
+    CompletedPlanStepSummary,
+)
 from collaboration_framework.module import validate_module_v3
 
 FIXTURE_DIR = (
@@ -48,6 +57,20 @@ FIXTURE = FIXTURE_DIR / "module-content-v3.json"
 ROOM = "happy-frog-room"
 PLAYER = "happy-frog-player"
 ACTOR = "happy-frog-actor"
+
+
+class _StaticNarrationModel:
+    def __init__(self, text: str, evidence_refs: tuple[str, ...]) -> None:
+        self.text = text
+        self.evidence_refs = evidence_refs
+
+    async def generate(self, context):
+        return {
+            "kind": "narration",
+            "text": self.text,
+            "claimed_evidence_refs": self.evidence_refs,
+            "suggested_actions": [],
+        }
 
 
 def load_module() -> ModuleContentV3:
@@ -107,6 +130,15 @@ class HappyFrogContentGateTests(unittest.TestCase):
             self.assertTrue(scope.target_kinds, rule.id)
             self.assertTrue(scope.target_ids, rule.id)
             self.assertTrue(rule.trigger.options, rule.id)
+
+    def test_hard_crystal_retrieval_rejects_regular_success(self) -> None:
+        rule = next(
+            item for item in self.content.rules if item.id == "retrieve_dream_crystal"
+        )
+        check = next(item for item in rule.execution.steps if item.id == "check")
+        self.assertEqual(check.check.difficulty, "hard")
+        self.assertEqual(check.result_routes["hard_success"], "success_0")
+        self.assertEqual(check.result_routes["regular_success"], "failure_0")
 
     def test_every_review_object_has_source_mapping(self) -> None:
         mapping = json.loads(
@@ -309,6 +341,20 @@ class HappyFrogRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_evidence_path_persuades_messenger_and_rescues_james(self) -> None:
         await self.reach_reception()
+        await self.choose(
+            "force_james_against_his_will",
+            "force-james",
+            "restrain",
+            "entity",
+            "james",
+        )
+        await self.choose(
+            "carry_james_against_his_will",
+            "carry-james",
+            "carry",
+            "entity",
+            "james",
+        )
         self.assertIs(self.store.inspect_state(ROOM).entities["final_debate"]["available"], False)
         capabilities = await self.rules.read_keeper_capabilities(
             PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
@@ -354,9 +400,27 @@ class HappyFrogRuntimeTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIs(finished.entities["messenger"]["convinced"], True)
         self.assertIs(finished.entities["james"]["released"], True)
+        self.assertIs(finished.entities["james"]["under_forced_custody"], False)
+        self.assertIs(finished.entities["james"]["accompanying_party"], False)
+        await self.move("outside")
+        self.assertIs(self.store.inspect_state(ROOM).entities["james"]["alive"], True)
 
     async def test_retrieved_crystal_path_breaks_core(self) -> None:
         await self.reach_reception()
+        await self.choose(
+            "force_james_against_his_will",
+            "force-james",
+            "restrain",
+            "entity",
+            "james",
+        )
+        await self.choose(
+            "carry_james_against_his_will",
+            "carry-james",
+            "carry",
+            "entity",
+            "james",
+        )
         await self.choose(
             "infiltrate_staff_area",
             "stealth",
@@ -395,13 +459,68 @@ class HappyFrogRuntimeTests(unittest.IsolatedAsyncioTestCase):
             "dream_crystal",
             check_skill="swim",
         )
-        await self.move("crystal_shore")
-        await self.choose(
+        retrieved = self.store.inspect_state(ROOM)
+        self.assertEqual(retrieved.scene_id, "crystal_shore")
+        self.assertIs(retrieved.entities["dream_crystal"]["retrieved"], True)
+        self.assertEqual(
+            retrieved.entities["dream_crystal"]["location_id"],
+            "crystal_shore",
+        )
+        execution = await self.choose(
             "destroy_dream_crystal",
             "break-crystal",
             "destroy",
             "entity",
             "dream_crystal",
+        )
+
+        broken_result = next(
+            result
+            for result in execution.committed_results
+            if result.target_id == "dream_crystal"
+        )
+        self.assertEqual(broken_result.kind, "object_state")
+        self.assertEqual(broken_result.state_key, "broken")
+        self.assertIs(broken_result.state_value, True)
+
+        player_input = PlayerInput(
+            room_id=ROOM,
+            player_id=PLAYER,
+            actor_id=ACTOR,
+            client_action_id="narrate-broken-dream-crystal",
+            utterance="把水晶狠狠砸碎，去除度假村的力量",
+        )
+        player_view = await PlayerViewProjector(self.rules).project(player_input)
+        narration = await ActionPlanNarrator(
+            _StaticNarrationModel(
+                "水晶碎裂后，覆盖度假村的微光与雾气开始消散。",
+                (broken_result.event_ref,),
+            )
+        ).narrate(
+            ActionPlanNarrationContext(
+                background=player_view.background,
+                player_input=player_input,
+                plan_goal=player_input.utterance,
+                termination_status="resolved",
+                completed_steps=(
+                    CompletedPlanStepSummary(
+                        step_index=0,
+                        semantic_goal=player_input.utterance,
+                        outcome="success",
+                        view_revision=execution.view_revision,
+                        event_refs=execution.public_event_refs,
+                        narration_evidence=execution.narration_evidence,
+                        committed_results=execution.committed_results,
+                    ),
+                ),
+                player_view=player_view,
+                allowed_evidence_refs=execution.public_event_refs,
+                narration_evidence=execution.narration_evidence,
+            )
+        )
+        self.assertEqual(
+            narration.text,
+            "水晶碎裂后，覆盖度假村的微光与雾气开始消散。",
         )
 
         finished = self.store.inspect_state(ROOM)
@@ -411,7 +530,71 @@ class HappyFrogRuntimeTests(unittest.IsolatedAsyncioTestCase):
             {"crystal_destroyed", "victims_released", "james_returns_home"},
             set(finished.discovered_facts),
         )
-        self.assertIs(finished.entities["dream_crystal"]["destroyed"], True)
+        self.assertIs(finished.entities["dream_crystal"]["broken"], True)
+        self.assertIs(finished.entities["james"]["released"], True)
+        self.assertIs(finished.entities["james"]["under_forced_custody"], False)
+        self.assertIs(finished.entities["james"]["accompanying_party"], False)
+
+    async def test_james_forced_custody_carry_and_drop_are_distinct_states(self) -> None:
+        await self.reach_reception()
+        initial = self.store.inspect_state(ROOM).entities["james"]
+        self.assertEqual(
+            initial,
+            {
+                "released": False,
+                "under_forced_custody": False,
+                "accompanying_party": False,
+                "alive": True,
+            },
+        )
+
+        await self.choose(
+            "force_james_against_his_will",
+            "force-james",
+            "restrain",
+            "entity",
+            "james",
+        )
+        restrained = self.store.inspect_state(ROOM).entities["james"]
+        self.assertIs(restrained["under_forced_custody"], True)
+        self.assertIs(restrained["accompanying_party"], False)
+        self.assertIs(restrained["alive"], True)
+        self.assertEqual(self.store.inspect_state(ROOM).scene_id, "resort_reception")
+        self.assertFalse(self.store.inspect_state(ROOM).core_resolved)
+        self.assertFalse(self.store.inspect_state(ROOM).ending_available)
+
+        await self.choose(
+            "carry_james_against_his_will",
+            "carry-james",
+            "carry",
+            "entity",
+            "james",
+        )
+        carried = self.store.inspect_state(ROOM).entities["james"]
+        self.assertIs(carried["under_forced_custody"], True)
+        self.assertIs(carried["accompanying_party"], True)
+
+        await self.choose(
+            "stop_carrying_james",
+            "stop-carrying-james",
+            "drop",
+            "entity",
+            "james",
+        )
+        dropped = self.store.inspect_state(ROOM).entities["james"]
+        self.assertIs(dropped["under_forced_custody"], True)
+        self.assertIs(dropped["accompanying_party"], False)
+
+        await self.choose(
+            "release_james_from_forced_custody",
+            "release-james",
+            "release",
+            "entity",
+            "james",
+        )
+        released_from_custody = self.store.inspect_state(ROOM).entities["james"]
+        self.assertIs(released_from_custody["under_forced_custody"], False)
+        self.assertIs(released_from_custody["accompanying_party"], False)
 
     async def test_early_leave_is_an_explicit_supported_ending(self) -> None:
         await self.reach_reception()
@@ -434,29 +617,20 @@ class HappyFrogRuntimeTests(unittest.IsolatedAsyncioTestCase):
     async def test_forcing_unreleased_james_out_commits_tragic_ending(self) -> None:
         await self.reach_reception()
         await self.choose(
-            "force_james_against_his_will",
-            "force-james",
-            "restrain",
+            "force_james_out_of_resort",
+            "force-james-out",
+            "force",
             "entity",
             "james",
-        )
-        resisting = self.store.inspect_state(ROOM)
-        self.assertIs(resisting.entities["james"]["forced_removal"], True)
-        self.assertIs(resisting.entities["james"]["alive"], True)
-        self.assertIn("james_resists_forced_removal", resisting.discovered_facts)
-
-        await self.choose(
-            "force_james_out_of_resort",
-            "force-james-outside",
-            "carry",
-            "location",
-            "outside",
         )
         finished = self.store.inspect_state(ROOM)
         self.assertEqual(finished.scene_id, "outside")
         self.assertTrue(finished.core_resolved)
         self.assertTrue(finished.ending_available)
         self.assertIs(finished.entities["james"]["released"], False)
+        self.assertIs(finished.entities["james"]["under_forced_custody"], True)
+        self.assertIs(finished.entities["james"]["accompanying_party"], True)
+        self.assertEqual(finished.entities["james"]["location_id"], "outside")
         self.assertIs(finished.entities["james"]["alive"], False)
         self.assertIn("james_forced_removal_tragedy", finished.discovered_facts)
         self.assertNotIn("james_returns_home", finished.discovered_facts)
@@ -497,12 +671,143 @@ class HappyFrogRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(current.world_time.current_point_id, "hour_22")
         self.assertIs(current.entities["night_ritual"]["active"], True)
         self.assertIn("night_has_fallen", current.discovered_facts)
+        self.assertIn("messenger_leaves_at_night", current.discovered_facts)
         entered = [
             event.payload["point_id"]
             for event in self.store.inspect_domain_events(ROOM)
             if event.type == "time.point_entered"
         ]
         self.assertEqual(entered, ["hour_18", "hour_22"])
+
+    async def test_messenger_is_at_pond_when_visited_at_night_and_returns_by_day(self) -> None:
+        await self.reach_reception()
+        await self.advance("hour_18")
+        await self.move("frog_pond")
+
+        at_ritual = self.store.inspect_state(ROOM)
+        self.assertEqual(at_ritual.entities["messenger"]["location_id"], "frog_pond")
+
+        await self.advance("hour_22")
+        await self.advance("hour_08")
+        by_day = self.store.inspect_state(ROOM)
+        self.assertIs(by_day.entities["night_ritual"]["active"], False)
+        self.assertEqual(
+            by_day.entities["messenger"]["location_id"], "resort_reception"
+        )
+
+    async def test_failed_follow_can_recover_by_visiting_and_observing_messenger(self) -> None:
+        await self.reach_reception()
+        await self.advance("hour_18")
+        self.engine = AdjudicationEngineService(
+            self.store,
+            dice=DiceRoller(SequenceDiceSource([99, 5])),
+        )
+
+        failed = await self.choose(
+            "follow_messenger_to_pond",
+            "spot-hidden",
+            "follow",
+            "entity",
+            "messenger",
+            check_skill="spot-hidden",
+        )
+        self.assertEqual(failed.outcome, "failure")
+
+        await self.move("frog_pond")
+        arrived = self.store.inspect_state(ROOM)
+        self.assertEqual(arrived.entities["messenger"]["location_id"], "frog_pond")
+
+        observed = await self.choose(
+            "observe_messenger_at_night_ritual",
+            "spot-hidden",
+            "observe",
+            "entity",
+            "messenger",
+            check_skill="spot-hidden",
+        )
+        self.assertEqual(observed.outcome, "success")
+        current = self.store.inspect_state(ROOM)
+        self.assertIn("night_ritual_seen", current.discovered_facts)
+        self.assertIn("crystal_is_power_core", current.discovered_facts)
+        self.assertIs(current.entities["dream_crystal"]["known"], True)
+
+    async def test_following_messenger_reaches_and_reveals_night_ritual(self) -> None:
+        await self.reach_reception()
+        await self.advance("hour_18")
+        await self.choose(
+            "follow_messenger_to_pond",
+            "spot-hidden",
+            "follow",
+            "entity",
+            "messenger",
+            check_skill="spot-hidden",
+        )
+
+        current = self.store.inspect_state(ROOM)
+        self.assertEqual(current.scene_id, "frog_pond")
+        self.assertIn("messenger_leaves_at_night", current.discovered_facts)
+        self.assertIn("night_ritual_seen", current.discovered_facts)
+        self.assertIn("crystal_is_power_core", current.discovered_facts)
+        self.assertIs(current.entities["dream_crystal"]["known"], True)
+
+    async def test_night_ritual_to_crystal_destruction_lets_james_leave_safely(
+        self,
+    ) -> None:
+        await self.reach_reception()
+        await self.advance("hour_18")
+        await self.choose(
+            "follow_messenger_to_pond",
+            "spot-hidden",
+            "follow",
+            "entity",
+            "messenger",
+            check_skill="spot-hidden",
+        )
+        await self.choose(
+            "retrieve_dream_crystal",
+            "swim",
+            "retrieve",
+            "entity",
+            "dream_crystal",
+            check_skill="swim",
+        )
+
+        retrieved = self.store.inspect_state(ROOM)
+        self.assertEqual(retrieved.scene_id, "crystal_shore")
+        self.assertIs(retrieved.entities["dream_crystal"]["retrieved"], True)
+        self.assertEqual(
+            retrieved.entities["dream_crystal"]["location_id"],
+            "crystal_shore",
+        )
+
+        await self.choose(
+            "destroy_dream_crystal",
+            "break-crystal",
+            "destroy",
+            "entity",
+            "dream_crystal",
+        )
+        resolved = self.store.inspect_state(ROOM)
+        self.assertIs(resolved.entities["dream_crystal"]["broken"], True)
+        self.assertIs(resolved.entities["james"]["released"], True)
+        self.assertIs(resolved.entities["james"]["under_forced_custody"], False)
+        self.assertIs(resolved.entities["james"]["accompanying_party"], False)
+        self.assertIn("james_returns_home", resolved.discovered_facts)
+
+        for location_id in (
+            "frog_pond",
+            "frog_resort",
+            "resort_reception",
+            "frog_resort",
+            "resort_boundary",
+            "outside",
+        ):
+            await self.move(location_id)
+
+        finished = self.store.inspect_state(ROOM)
+        self.assertEqual(finished.scene_id, "outside")
+        self.assertIs(finished.entities["james"]["alive"], True)
+        self.assertNotIn("james_forced_removal_tragedy", finished.discovered_facts)
 
     async def test_multiplayer_start_publishes_only_local_rule_candidates(self) -> None:
         actors = {

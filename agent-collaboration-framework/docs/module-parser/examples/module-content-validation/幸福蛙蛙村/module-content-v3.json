@@ -1,7 +1,7 @@
 {
   "content_schema_version": 3,
   "module_id": "happy-frog-village",
-  "version": "3.0.0",
+  "version": "3.0.8",
   "world_ref": "coc-7e",
   "background": "默认采用现代城郊。莱恩夫妇委托调查员寻找失踪的儿子詹姆斯，线索指向不存在于官方记录的蛙蛙度假村。叙事从温馨田园与整齐笑容逐渐滑向梦境、身体异变和选择权被剥夺的恐怖；信使本体、青蛙来源和水晶弱点只能随权威信息揭示。",
   "information": [
@@ -586,11 +586,40 @@
       }
     },
     {
+      "id": "messenger_leaves_at_night",
+      "kind": "fact",
+      "title": "信使深夜离开",
+      "keeper_content": "第一夜深夜，幸福信使独自前往池塘为梦境水晶补充能量。",
+      "player_content": "夜深后，你注意到幸福信使独自离开别墅，朝蛙鸣泉的方向走去。她的行动与白天明显不同。",
+      "discovery": {
+        "initial": "hidden",
+        "scope": "party"
+      },
+      "audience": {
+        "keeper": true,
+        "player_when_discovered": true
+      },
+      "presentation": {
+        "channels": [
+          "narration"
+        ],
+        "show_in_ui": true
+      },
+      "criticality": "supporting",
+      "recovery": {
+        "policy": "adaptive",
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ]
+      }
+    },
+    {
       "id": "night_ritual_seen",
       "kind": "fact",
       "title": "池塘边的夜间仪式",
-      "keeper_content": "信使从池底取出水晶并注入能量，青蛙如朝圣般面向她。",
-      "player_content": "你看到信使从池底取出透明水晶注入微光，青蛙全部朝她伏下。",
+      "keeper_content": "信使从池底取出水晶并注入能量；仪式结束后，她把水晶放回池底，独自离开蛙鸣泉。青蛙如朝圣般面向她。",
+      "player_content": "你看到信使从池底取出透明水晶注入微光。仪式结束后，她把水晶重新放回池底，随后独自离开；青蛙始终朝她伏下。",
       "discovery": {
         "initial": "hidden",
         "scope": "party"
@@ -1038,7 +1067,8 @@
       "relations": [],
       "state": {
         "released": false,
-        "forced_removal": false,
+        "under_forced_custody": false,
+        "accompanying_party": false,
         "alive": true
       },
       "item_component": null,
@@ -1210,7 +1240,7 @@
       "state": {
         "known": false,
         "retrieved": false,
-        "destroyed": false
+        "broken": false
       },
       "item_component": null,
       "visibility": "public",
@@ -2106,9 +2136,6 @@
         "question": {
           "kind": "method",
           "semantic_hints": [
-            "library-use",
-            "inspect",
-            "research",
             "resort_flyer"
           ]
         },
@@ -2116,9 +2143,6 @@
           {
             "id": "library-use",
             "semantic_hints": [
-              "library-use",
-              "inspect",
-              "research",
               "resort_flyer"
             ]
           }
@@ -2212,9 +2236,6 @@
         "question": {
           "kind": "method",
           "semantic_hints": [
-            "library-use",
-            "research",
-            "search",
             "missing_files"
           ]
         },
@@ -2222,9 +2243,6 @@
           {
             "id": "library-use",
             "semantic_hints": [
-              "library-use",
-              "research",
-              "search",
               "missing_files"
             ]
           }
@@ -2329,10 +2347,6 @@
         "question": {
           "kind": "method",
           "semantic_hints": [
-            "persuade",
-            "ask",
-            "persuade",
-            "talk",
             "villager_accounts"
           ]
         },
@@ -2340,10 +2354,6 @@
           {
             "id": "persuade",
             "semantic_hints": [
-              "persuade",
-              "ask",
-              "persuade",
-              "talk",
               "villager_accounts"
             ]
           }
@@ -2438,10 +2448,6 @@
         "question": {
           "kind": "method",
           "semantic_hints": [
-            "psychoanalysis",
-            "calm",
-            "talk",
-            "analyze",
             "ezra"
           ]
         },
@@ -2449,10 +2455,6 @@
           {
             "id": "psychoanalysis",
             "semantic_hints": [
-              "psychoanalysis",
-              "calm",
-              "talk",
-              "analyze",
               "ezra"
             ]
           }
@@ -2547,10 +2549,6 @@
         "question": {
           "kind": "method",
           "semantic_hints": [
-            "psychology",
-            "observe",
-            "analyze",
-            "talk",
             "messenger"
           ]
         },
@@ -2558,10 +2556,6 @@
           {
             "id": "psychology",
             "semantic_hints": [
-              "psychology",
-              "observe",
-              "analyze",
-              "talk",
               "messenger"
             ]
           }
@@ -2711,9 +2705,7 @@
           "action_families": [
             "attack",
             "force",
-            "restrain",
-            "carry",
-            "rescue"
+            "restrain"
           ],
           "location_ids": [
             "resort_reception",
@@ -2729,20 +2721,20 @@
         "question": {
           "kind": "method",
           "semantic_hints": [
-            "强行把詹姆斯带走",
             "击晕詹姆斯",
             "用安眠药控制詹姆斯",
-            "违背詹姆斯意愿拖走他"
+            "捆绑詹姆斯",
+            "违背詹姆斯意愿控制他"
           ]
         },
         "options": [
           {
             "id": "force-james",
             "semantic_hints": [
-              "强行把詹姆斯带走",
               "击晕詹姆斯",
               "用安眠药控制詹姆斯",
-              "违背詹姆斯意愿拖走他"
+              "捆绑詹姆斯",
+              "违背詹姆斯意愿控制他"
             ]
           }
         ],
@@ -2762,7 +2754,7 @@
             "effect": {
               "type": "change_entity_state",
               "entity_id": "james",
-              "key": "forced_removal",
+              "key": "under_forced_custody",
               "value": true
             },
             "next_step_id": "effect_1"
@@ -2789,7 +2781,7 @@
       }
     },
     {
-      "id": "force_james_out_of_resort",
+      "id": "carry_james_against_his_will",
       "priority": 0,
       "trigger": {
         "kind": "agent_match",
@@ -2797,40 +2789,36 @@
         "decision_mode": "selective",
         "scope": {
           "action_families": [
-            "escape",
-            "leave",
-            "travel",
             "carry",
-            "rescue"
+            "drag",
+            "force"
           ],
           "location_ids": [
             "resort_reception",
             "resort_boundary"
           ],
           "target_kinds": [
-            "location"
+            "entity"
           ],
           "target_ids": [
-            "outside"
+            "james"
           ]
         },
         "question": {
           "kind": "method",
           "semantic_hints": [
-            "击晕詹姆斯后强行带离度假村",
-            "强行把詹姆斯拖出度假村",
-            "用安眠药控制詹姆斯后带离",
-            "违背詹姆斯意愿把他带回家"
+            "扛起詹姆斯",
+            "拖着詹姆斯",
+            "强行携带詹姆斯"
           ]
         },
         "options": [
           {
-            "id": "force-james-outside",
+            "id": "carry-james",
             "semantic_hints": [
-              "击晕詹姆斯后强行带离度假村",
-              "强行把詹姆斯拖出度假村",
-              "用安眠药控制詹姆斯后带离",
-              "违背詹姆斯意愿把他带回家"
+              "扛起詹姆斯",
+              "拖着詹姆斯",
+              "强行携带詹姆斯"
             ]
           }
         ],
@@ -2839,7 +2827,7 @@
       "execution": {
         "branches": [
           {
-            "id": "force-james-outside",
+            "id": "carry-james",
             "entry_step_id": "effect_0"
           }
         ],
@@ -2848,8 +2836,10 @@
             "id": "effect_0",
             "kind": "effect",
             "effect": {
-              "type": "enter_location",
-              "location_id": "outside"
+              "type": "change_entity_state",
+              "entity_id": "james",
+              "key": "under_forced_custody",
+              "value": true
             },
             "next_step_id": "effect_1"
           },
@@ -2859,7 +2849,267 @@
             "effect": {
               "type": "change_entity_state",
               "entity_id": "james",
-              "key": "forced_removal",
+              "key": "accompanying_party",
+              "value": true
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "limits": {
+        "max_chain_depth": 16,
+        "max_steps": 128
+      }
+    },
+    {
+      "id": "stop_carrying_james",
+      "priority": 0,
+      "trigger": {
+        "kind": "agent_match",
+        "required": true,
+        "decision_mode": "selective",
+        "scope": {
+          "action_families": [
+            "drop",
+            "leave",
+            "abandon"
+          ],
+          "location_ids": [
+            "resort_reception",
+            "resort_boundary"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "james"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "放下詹姆斯",
+            "留下詹姆斯",
+            "放弃携带詹姆斯"
+          ]
+        },
+        "options": [
+          {
+            "id": "stop-carrying-james",
+            "semantic_hints": [
+              "放下詹姆斯",
+              "留下詹姆斯",
+              "放弃携带詹姆斯"
+            ]
+          }
+        ],
+        "bindings": []
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "stop-carrying-james",
+            "entry_step_id": "effect_0"
+          }
+        ],
+        "steps": [
+          {
+            "id": "effect_0",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "james",
+              "key": "accompanying_party",
+              "value": false
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "limits": {
+        "max_chain_depth": 16,
+        "max_steps": 128
+      }
+    },
+    {
+      "id": "release_james_from_forced_custody",
+      "priority": 0,
+      "trigger": {
+        "kind": "agent_match",
+        "required": true,
+        "decision_mode": "selective",
+        "scope": {
+          "action_families": [
+            "release",
+            "free",
+            "untie"
+          ],
+          "location_ids": [
+            "resort_reception",
+            "resort_boundary"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "james"
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "释放詹姆斯",
+            "给詹姆斯松绑",
+            "解除对詹姆斯的物理控制"
+          ]
+        },
+        "options": [
+          {
+            "id": "release-james",
+            "semantic_hints": [
+              "释放詹姆斯",
+              "给詹姆斯松绑",
+              "解除对詹姆斯的物理控制"
+            ]
+          }
+        ],
+        "bindings": []
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "release-james",
+            "entry_step_id": "effect_0"
+          }
+        ],
+        "steps": [
+          {
+            "id": "effect_0",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "james",
+              "key": "under_forced_custody",
+              "value": false
+            },
+            "next_step_id": "effect_1"
+          },
+          {
+            "id": "effect_1",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "james",
+              "key": "accompanying_party",
+              "value": false
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "limits": {
+        "max_chain_depth": 16,
+        "max_steps": 128
+      }
+    },
+    {
+      "id": "force_james_out_of_resort",
+      "priority": 100,
+      "trigger": {
+        "kind": "agent_match",
+        "required": true,
+        "decision_mode": "selective",
+        "scope": {
+          "action_families": [
+            "attack",
+            "force",
+            "restrain",
+            "carry",
+            "drag",
+            "escape",
+            "leave",
+            "travel"
+          ],
+          "location_ids": [
+            "resort_reception",
+            "resort_boundary"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "james"
+          ]
+        },
+        "when": {
+          "op": "predicate",
+          "predicate": "entity_state_is",
+          "args": {
+            "entity_id": "james",
+            "key": "released",
+            "value": false
+          }
+        },
+        "question": {
+          "kind": "intent_relation",
+          "semantic_hints": [
+            "强行把詹姆斯带出去",
+            "把詹姆斯带出度假村",
+            "控制詹姆斯并带离度假村",
+            "无视詹姆斯反抗继续带走他"
+          ]
+        },
+        "options": [
+          {
+            "id": "force-james-out",
+            "semantic_hints": [
+              "强行把詹姆斯带出去",
+              "把詹姆斯带出度假村",
+              "控制詹姆斯并带离度假村",
+              "无视詹姆斯反抗继续带走他"
+            ]
+          }
+        ],
+        "bindings": []
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "force-james-out",
+            "entry_step_id": "effect_0"
+          }
+        ],
+        "steps": [
+          {
+            "id": "effect_0",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "james",
+              "key": "under_forced_custody",
+              "value": true
+            },
+            "next_step_id": "effect_1"
+          },
+          {
+            "id": "effect_1",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "james",
+              "key": "accompanying_party",
               "value": true
             },
             "next_step_id": "effect_2"
@@ -2868,10 +3118,8 @@
             "id": "effect_2",
             "kind": "effect",
             "effect": {
-              "type": "change_entity_state",
-              "entity_id": "james",
-              "key": "alive",
-              "value": false
+              "type": "enter_location",
+              "location_id": "outside"
             },
             "next_step_id": "effect_3"
           },
@@ -2879,9 +3127,10 @@
             "id": "effect_3",
             "kind": "effect",
             "effect": {
-              "type": "reveal_information",
-              "information_id": "james_forced_removal_tragedy",
-              "scope": "party"
+              "type": "move_entity",
+              "entity_id": "james",
+              "location_id": "outside",
+              "holder_actor_id": null
             },
             "next_step_id": "effect_4"
           },
@@ -2889,12 +3138,33 @@
             "id": "effect_4",
             "kind": "effect",
             "effect": {
-              "type": "mark_core_resolved"
+              "type": "change_entity_state",
+              "entity_id": "james",
+              "key": "alive",
+              "value": false
             },
             "next_step_id": "effect_5"
           },
           {
             "id": "effect_5",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "james_forced_removal_tragedy",
+              "scope": "party"
+            },
+            "next_step_id": "effect_6"
+          },
+          {
+            "id": "effect_6",
+            "kind": "effect",
+            "effect": {
+              "type": "mark_core_resolved"
+            },
+            "next_step_id": "effect_7"
+          },
+          {
+            "id": "effect_7",
             "kind": "effect",
             "effect": {
               "type": "set_ending_availability",
@@ -3007,9 +3277,6 @@
         "question": {
           "kind": "method",
           "semantic_hints": [
-            "spot-hidden",
-            "inspect",
-            "observe",
             "frog_head_guest"
           ]
         },
@@ -3017,9 +3284,6 @@
           {
             "id": "spot-hidden",
             "semantic_hints": [
-              "spot-hidden",
-              "inspect",
-              "observe",
               "frog_head_guest"
             ]
           }
@@ -3114,10 +3378,6 @@
         "question": {
           "kind": "method",
           "semantic_hints": [
-            "spot-hidden",
-            "inspect",
-            "trace",
-            "ask",
             "kitchen_barrel"
           ]
         },
@@ -3125,10 +3385,6 @@
           {
             "id": "spot-hidden",
             "semantic_hints": [
-              "spot-hidden",
-              "inspect",
-              "trace",
-              "ask",
               "kitchen_barrel"
             ]
           }
@@ -3222,9 +3478,6 @@
         "question": {
           "kind": "method",
           "semantic_hints": [
-            "POW",
-            "drink",
-            "taste",
             "contaminated_water"
           ]
         },
@@ -3232,9 +3485,6 @@
           {
             "id": "POW",
             "semantic_hints": [
-              "POW",
-              "drink",
-              "taste",
               "contaminated_water"
             ]
           }
@@ -3329,10 +3579,6 @@
         "question": {
           "kind": "method",
           "semantic_hints": [
-            "natural-world",
-            "study",
-            "inspect",
-            "listen",
             "dream_frogs"
           ]
         },
@@ -3340,10 +3586,6 @@
           {
             "id": "natural-world",
             "semantic_hints": [
-              "natural-world",
-              "study",
-              "inspect",
-              "listen",
               "dream_frogs"
             ]
           }
@@ -3438,10 +3680,6 @@
         "question": {
           "kind": "method",
           "semantic_hints": [
-            "stealth",
-            "sneak",
-            "enter",
-            "distract",
             "staff_door"
           ]
         },
@@ -3449,10 +3687,6 @@
           {
             "id": "stealth",
             "semantic_hints": [
-              "stealth",
-              "sneak",
-              "enter",
-              "distract",
               "staff_door"
             ]
           }
@@ -3635,9 +3869,6 @@
         "question": {
           "kind": "method",
           "semantic_hints": [
-            "library-use",
-            "read",
-            "research",
             "messenger_notes"
           ]
         },
@@ -3645,9 +3876,6 @@
           {
             "id": "library-use",
             "semantic_hints": [
-              "library-use",
-              "read",
-              "research",
               "messenger_notes"
             ]
           }
@@ -3768,6 +3996,170 @@
       }
     },
     {
+      "id": "follow_messenger_to_pond",
+      "priority": 0,
+      "trigger": {
+        "kind": "agent_match",
+        "required": true,
+        "decision_mode": "selective",
+        "scope": {
+          "action_families": [
+            "follow",
+            "trail",
+            "sneak"
+          ],
+          "location_ids": [
+            "resort_reception",
+            "guest_room",
+            "dining_kitchen",
+            "staff_area",
+            "storage_room",
+            "messenger_bedroom",
+            "frog_resort"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "messenger"
+          ]
+        },
+        "when": {
+          "op": "all",
+          "items": [
+            {
+              "op": "predicate",
+              "predicate": "entity_state_is",
+              "args": {
+                "entity_id": "night_ritual",
+                "key": "active",
+                "value": true
+              }
+            },
+            {
+              "op": "predicate",
+              "predicate": "information_is",
+              "args": {
+                "id": "messenger_leaves_at_night"
+              }
+            }
+          ]
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "跟踪",
+            "尾随",
+            "悄悄跟踪",
+            "messenger"
+          ]
+        },
+        "options": [
+          {
+            "id": "spot-hidden",
+            "semantic_hints": [
+              "跟踪",
+              "尾随",
+              "悄悄跟踪",
+              "messenger"
+            ]
+          }
+        ],
+        "bindings": []
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "spot-hidden",
+            "entry_step_id": "check"
+          }
+        ],
+        "steps": [
+          {
+            "id": "check",
+            "kind": "check",
+            "check": {
+              "profile_id": "coc7.skill",
+              "actor_binding": "actor",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "spot-hidden"
+              },
+              "difficulty": "regular",
+              "allow_luck": true,
+              "allow_push": true
+            },
+            "result_routes": {
+              "critical_success": "success_0",
+              "extreme_success": "success_0",
+              "hard_success": "success_0",
+              "regular_success": "success_0",
+              "failure": "failure_0",
+              "fumble": "failure_0"
+            }
+          },
+          {
+            "id": "success_0",
+            "kind": "effect",
+            "effect": {
+              "type": "enter_location",
+              "location_id": "frog_pond"
+            },
+            "next_step_id": "success_1"
+          },
+          {
+            "id": "success_1",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "night_ritual_seen",
+              "scope": "party"
+            },
+            "next_step_id": "success_2"
+          },
+          {
+            "id": "success_2",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "crystal_is_power_core",
+              "scope": "party"
+            },
+            "next_step_id": "success_3"
+          },
+          {
+            "id": "success_3",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "dream_crystal",
+              "key": "known",
+              "value": true
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "failure_0",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "night_has_fallen",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "limits": {
+        "max_chain_depth": 16,
+        "max_steps": 128
+      }
+    },
+    {
       "id": "observe_night_ritual",
       "priority": 0,
       "trigger": {
@@ -3790,13 +4182,18 @@
             "night_ritual"
           ]
         },
+        "when": {
+          "op": "predicate",
+          "predicate": "entity_state_is",
+          "args": {
+            "entity_id": "night_ritual",
+            "key": "active",
+            "value": true
+          }
+        },
         "question": {
           "kind": "method",
           "semantic_hints": [
-            "spot-hidden",
-            "observe",
-            "follow",
-            "hide",
             "night_ritual"
           ]
         },
@@ -3804,11 +4201,142 @@
           {
             "id": "spot-hidden",
             "semantic_hints": [
-              "spot-hidden",
-              "observe",
-              "follow",
-              "hide",
               "night_ritual"
+            ]
+          }
+        ],
+        "bindings": []
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "spot-hidden",
+            "entry_step_id": "check"
+          }
+        ],
+        "steps": [
+          {
+            "id": "check",
+            "kind": "check",
+            "check": {
+              "profile_id": "coc7.skill",
+              "actor_binding": "actor",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "spot-hidden"
+              },
+              "difficulty": "regular",
+              "allow_luck": true,
+              "allow_push": true
+            },
+            "result_routes": {
+              "critical_success": "success_0",
+              "extreme_success": "success_0",
+              "hard_success": "success_0",
+              "regular_success": "success_0",
+              "failure": "failure_0",
+              "fumble": "failure_0"
+            }
+          },
+          {
+            "id": "success_0",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "night_ritual_seen",
+              "scope": "party"
+            },
+            "next_step_id": "success_1"
+          },
+          {
+            "id": "success_1",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "crystal_is_power_core",
+              "scope": "party"
+            },
+            "next_step_id": "success_2"
+          },
+          {
+            "id": "success_2",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "dream_crystal",
+              "key": "known",
+              "value": true
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "failure_0",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "night_has_fallen",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "limits": {
+        "max_chain_depth": 16,
+        "max_steps": 128
+      }
+    },
+    {
+      "id": "observe_messenger_at_night_ritual",
+      "priority": 0,
+      "trigger": {
+        "kind": "agent_match",
+        "required": true,
+        "decision_mode": "selective",
+        "scope": {
+          "action_families": [
+            "observe",
+            "watch",
+            "inspect"
+          ],
+          "location_ids": [
+            "frog_pond"
+          ],
+          "target_kinds": [
+            "entity"
+          ],
+          "target_ids": [
+            "messenger"
+          ]
+        },
+        "when": {
+          "op": "predicate",
+          "predicate": "entity_state_is",
+          "args": {
+            "entity_id": "night_ritual",
+            "key": "active",
+            "value": true
+          }
+        },
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "观察幸福信使",
+            "看信使在做什么",
+            "监视池塘边的信使"
+          ]
+        },
+        "options": [
+          {
+            "id": "spot-hidden",
+            "semantic_hints": [
+              "观察幸福信使",
+              "看信使在做什么",
+              "监视池塘边的信使"
             ]
           }
         ],
@@ -3920,25 +4448,48 @@
             "dream_crystal"
           ]
         },
+        "when": {
+          "op": "all",
+          "items": [
+            {
+              "op": "predicate",
+              "predicate": "entity_state_is",
+              "args": {
+                "entity_id": "dream_crystal",
+                "key": "known",
+                "value": true
+              }
+            },
+            {
+              "op": "predicate",
+              "predicate": "entity_state_is",
+              "args": {
+                "entity_id": "dream_crystal",
+                "key": "retrieved",
+                "value": false
+              }
+            }
+          ]
+        },
         "question": {
           "kind": "method",
           "semantic_hints": [
-            "swim",
-            "dive",
-            "retrieve",
-            "swim",
-            "dream_crystal"
+            "潜入池底取出梦境水晶",
+            "跳进蛙鸣泉寻找水晶",
+            "游到水下打捞水晶",
+            "从池底把水晶带到岸边",
+            "潜水取水晶"
           ]
         },
         "options": [
           {
             "id": "swim",
             "semantic_hints": [
-              "swim",
-              "dive",
-              "retrieve",
-              "swim",
-              "dream_crystal"
+              "潜入池底取出梦境水晶",
+              "跳进蛙鸣泉寻找水晶",
+              "游到水下打捞水晶",
+              "从池底把水晶带到岸边",
+              "潜水取水晶"
             ]
           }
         ],
@@ -3970,7 +4521,7 @@
               "critical_success": "success_0",
               "extreme_success": "success_0",
               "hard_success": "success_0",
-              "regular_success": "success_0",
+              "regular_success": "failure_0",
               "failure": "failure_0",
               "fumble": "failure_0"
             }
@@ -3988,6 +4539,26 @@
           },
           {
             "id": "success_1",
+            "kind": "effect",
+            "effect": {
+              "type": "move_entity",
+              "entity_id": "dream_crystal",
+              "location_id": "crystal_shore",
+              "holder_actor_id": null
+            },
+            "next_step_id": "success_2"
+          },
+          {
+            "id": "success_2",
+            "kind": "effect",
+            "effect": {
+              "type": "enter_location",
+              "location_id": "crystal_shore"
+            },
+            "next_step_id": "success_3"
+          },
+          {
+            "id": "success_3",
             "kind": "effect",
             "effect": {
               "type": "reveal_information",
@@ -4052,10 +4623,6 @@
         "question": {
           "kind": "method",
           "semantic_hints": [
-            "persuade",
-            "persuade",
-            "debate",
-            "appeal",
             "final_debate"
           ]
         },
@@ -4063,10 +4630,6 @@
           {
             "id": "persuade-with-evidence",
             "semantic_hints": [
-              "persuade",
-              "persuade",
-              "debate",
-              "appeal",
               "final_debate"
             ]
           }
@@ -4099,7 +4662,7 @@
               "critical_success": "success_0",
               "extreme_success": "success_0",
               "hard_success": "success_0",
-              "regular_success": "success_0",
+              "regular_success": "failure_0",
               "failure": "failure_0",
               "fumble": "failure_0"
             }
@@ -4141,9 +4704,10 @@
             "id": "success_3",
             "kind": "effect",
             "effect": {
-              "type": "reveal_information",
-              "information_id": "messenger_convinced",
-              "scope": "party"
+              "type": "change_entity_state",
+              "entity_id": "james",
+              "key": "under_forced_custody",
+              "value": false
             },
             "next_step_id": "success_4"
           },
@@ -4151,9 +4715,10 @@
             "id": "success_4",
             "kind": "effect",
             "effect": {
-              "type": "reveal_information",
-              "information_id": "victims_released",
-              "scope": "party"
+              "type": "change_entity_state",
+              "entity_id": "james",
+              "key": "accompanying_party",
+              "value": false
             },
             "next_step_id": "success_5"
           },
@@ -4162,7 +4727,7 @@
             "kind": "effect",
             "effect": {
               "type": "reveal_information",
-              "information_id": "james_returns_home",
+              "information_id": "messenger_convinced",
               "scope": "party"
             },
             "next_step_id": "success_6"
@@ -4171,12 +4736,32 @@
             "id": "success_6",
             "kind": "effect",
             "effect": {
-              "type": "mark_core_resolved"
+              "type": "reveal_information",
+              "information_id": "victims_released",
+              "scope": "party"
             },
             "next_step_id": "success_7"
           },
           {
             "id": "success_7",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "james_returns_home",
+              "scope": "party"
+            },
+            "next_step_id": "success_8"
+          },
+          {
+            "id": "success_8",
+            "kind": "effect",
+            "effect": {
+              "type": "mark_core_resolved"
+            },
+            "next_step_id": "success_9"
+          },
+          {
+            "id": "success_9",
             "kind": "effect",
             "effect": {
               "type": "set_ending_availability",
@@ -4259,7 +4844,7 @@
             "effect": {
               "type": "change_entity_state",
               "entity_id": "dream_crystal",
-              "key": "destroyed",
+              "key": "broken",
               "value": true
             },
             "next_step_id": "effect_1"
@@ -4301,9 +4886,10 @@
             "id": "effect_4",
             "kind": "effect",
             "effect": {
-              "type": "reveal_information",
-              "information_id": "crystal_destroyed",
-              "scope": "party"
+              "type": "change_entity_state",
+              "entity_id": "james",
+              "key": "under_forced_custody",
+              "value": false
             },
             "next_step_id": "effect_5"
           },
@@ -4311,9 +4897,10 @@
             "id": "effect_5",
             "kind": "effect",
             "effect": {
-              "type": "reveal_information",
-              "information_id": "victims_released",
-              "scope": "party"
+              "type": "change_entity_state",
+              "entity_id": "james",
+              "key": "accompanying_party",
+              "value": false
             },
             "next_step_id": "effect_6"
           },
@@ -4322,7 +4909,7 @@
             "kind": "effect",
             "effect": {
               "type": "reveal_information",
-              "information_id": "james_returns_home",
+              "information_id": "crystal_destroyed",
               "scope": "party"
             },
             "next_step_id": "effect_7"
@@ -4331,12 +4918,32 @@
             "id": "effect_7",
             "kind": "effect",
             "effect": {
-              "type": "mark_core_resolved"
+              "type": "reveal_information",
+              "information_id": "victims_released",
+              "scope": "party"
             },
             "next_step_id": "effect_8"
           },
           {
             "id": "effect_8",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "james_returns_home",
+              "scope": "party"
+            },
+            "next_step_id": "effect_9"
+          },
+          {
+            "id": "effect_9",
+            "kind": "effect",
+            "effect": {
+              "type": "mark_core_resolved"
+            },
+            "next_step_id": "effect_10"
+          },
+          {
+            "id": "effect_10",
             "kind": "effect",
             "effect": {
               "type": "set_ending_availability",
@@ -4595,6 +5202,133 @@
               "information_id": "night_has_fallen",
               "scope": "party"
             },
+            "next_step_id": "effect_2"
+          },
+          {
+            "id": "effect_2",
+            "kind": "effect",
+            "effect": {
+              "type": "reveal_information",
+              "information_id": "messenger_leaves_at_night",
+              "scope": "party"
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "limits": {
+        "max_chain_depth": 16,
+        "max_steps": 128
+      }
+    },
+    {
+      "id": "messenger_arrives_at_night_ritual",
+      "priority": 0,
+      "trigger": {
+        "kind": "event",
+        "event_type": "travel.resolved",
+        "when": {
+          "op": "predicate",
+          "predicate": "entity_state_is",
+          "args": {
+            "entity_id": "night_ritual",
+            "key": "active",
+            "value": true
+          }
+        },
+        "entry_branch_id": "default"
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "default",
+            "entry_step_id": "effect_0"
+          }
+        ],
+        "steps": [
+          {
+            "id": "effect_0",
+            "kind": "effect",
+            "effect": {
+              "type": "move_entity",
+              "entity_id": "messenger",
+              "location_id": "frog_pond",
+              "holder_actor_id": null
+            },
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "limits": {
+        "max_chain_depth": 16,
+        "max_steps": 128
+      }
+    },
+    {
+      "id": "night_ritual_ends",
+      "priority": 0,
+      "trigger": {
+        "kind": "event",
+        "event_type": "time.point_entered",
+        "when": {
+          "op": "all",
+          "items": [
+            {
+              "op": "predicate",
+              "predicate": "time_of_day_is",
+              "args": {
+                "value": "day"
+              }
+            },
+            {
+              "op": "predicate",
+              "predicate": "entity_state_is",
+              "args": {
+                "entity_id": "night_ritual",
+                "key": "active",
+                "value": true
+              }
+            }
+          ]
+        },
+        "entry_branch_id": "default"
+      },
+      "execution": {
+        "branches": [
+          {
+            "id": "default",
+            "entry_step_id": "effect_0"
+          }
+        ],
+        "steps": [
+          {
+            "id": "effect_0",
+            "kind": "effect",
+            "effect": {
+              "type": "change_entity_state",
+              "entity_id": "night_ritual",
+              "key": "active",
+              "value": false
+            },
+            "next_step_id": "effect_1"
+          },
+          {
+            "id": "effect_1",
+            "kind": "effect",
+            "effect": {
+              "type": "move_entity",
+              "entity_id": "messenger",
+              "location_id": "resort_reception",
+              "holder_actor_id": null
+            },
             "next_step_id": "finish"
           },
           {
@@ -4818,26 +5552,35 @@
       {
         "id": "hour_08",
         "hour_of_day": 8,
-        "order": 0
+        "order": 0,
+        "time_segment": null,
+        "label": null
       },
       {
         "id": "hour_12",
         "hour_of_day": 12,
-        "order": 1
+        "order": 1,
+        "time_segment": null,
+        "label": null
       },
       {
         "id": "hour_18",
         "hour_of_day": 18,
-        "order": 2
+        "order": 2,
+        "time_segment": null,
+        "label": null
       },
       {
         "id": "hour_22",
         "hour_of_day": 22,
-        "order": 3
+        "order": 3,
+        "time_segment": null,
+        "label": null
       }
     ],
     "storage_precision": "hour",
     "progression": "host_controlled_discrete",
-    "actions_per_point": "multiple"
+    "actions_per_point": "multiple",
+    "terminal_point": null
   }
 }

@@ -3,7 +3,7 @@
   "source": "模组幸福蛙蛙村.docx",
   "paragraph_numbering": "python-docx Document.paragraphs 0-based index",
   "module_id": "happy-frog-village",
-  "version": "3.0.0",
+  "version": "3.0.8",
   "locations": {
     "lane_manor": [
       47,
@@ -329,6 +329,11 @@
       282,
       312
     ],
+    "messenger_leaves_at_night": [
+      312,
+      313,
+      314
+    ],
     "night_ritual_seen": [
       312,
       313,
@@ -471,6 +476,21 @@
       168,
       169
     ],
+    "carry_james_against_his_will": [
+      167,
+      168,
+      169
+    ],
+    "stop_carrying_james": [
+      167,
+      168,
+      169
+    ],
+    "release_james_from_forced_custody": [
+      167,
+      168,
+      169
+    ],
     "force_james_out_of_resort": [
       171,
       172,
@@ -528,7 +548,17 @@
       309,
       310
     ],
+    "follow_messenger_to_pond": [
+      312,
+      313,
+      314
+    ],
     "observe_night_ritual": [
+      312,
+      313,
+      314
+    ],
+    "observe_messenger_at_night_ritual": [
       312,
       313,
       314
@@ -572,6 +602,17 @@
       456
     ],
     "night_ritual_begins": [
+      280,
+      281,
+      282,
+      312
+    ],
+    "messenger_arrives_at_night_ritual": [
+      312,
+      313,
+      314
+    ],
+    "night_ritual_ends": [
       280,
       281,
       282,

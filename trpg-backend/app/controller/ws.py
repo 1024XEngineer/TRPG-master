@@ -70,7 +70,7 @@ from collaboration_framework.host.schemas import NarrationOutput, reservation_is
 from collaboration_framework.host.schemas.action_plan import ActionPlanNpcReply
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field, ValidationError
-from sqlalchemy import and_, or_, select
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.websockets import WebSocketState
@@ -163,7 +163,7 @@ from app.models.engine import (
     SceneTransitionProposalRecord,
     TimeAdvanceProposalRecord,
 )
-from app.models.event import Event, EventAudience
+from app.models.event import Event
 from app.models.room import Player
 from app.service import auth as auth_service
 from app.service import chat as chat_service
@@ -257,25 +257,10 @@ async def _public_host_history(
     db: AsyncSession,
     room_id: str,
     *,
-    viewer_player_id: str | None = None,
     exclude_correlation_id: str | None = None,
     max_turns: int = 6,
     max_chars: int = 6000,
 ) -> tuple[HostPublicHistoryEntry, ...]:
-    visibility_clause = Event.visibility == "public"
-    if viewer_player_id is not None:
-        visibility_clause = or_(
-            visibility_clause,
-            and_(
-                Event.visibility == "scene_scoped",
-                select(EventAudience.event_id)
-                .where(
-                    EventAudience.event_id == Event.id,
-                    EventAudience.player_id == viewer_player_id,
-                )
-                .exists(),
-            ),
-        )
     rows = await db.scalars(
         select(Event)
         .where(
@@ -283,7 +268,10 @@ async def _public_host_history(
             Event.event_type.in_(
                 ("action.broadcast", "dialogue.player", "dialogue.npc", "narration.push")
             ),
-            visibility_clause,
+            # HostEntry direct responses are always public.  Do not let a
+            # viewer-specific scene_scoped event influence text that will be
+            # broadcast to every player in the room.
+            Event.visibility == "public",
             *(
                 [Event.correlation_id != exclude_correlation_id]
                 if exclude_correlation_id is not None
@@ -1053,7 +1041,6 @@ async def _drain_host_action_queue(room_id: str) -> None:
                         history = await _public_host_history(
                             db,
                             room_id,
-                            viewer_player_id=item.player_id,
                             exclude_correlation_id=item.client_action_id,
                         )
                         context = HostPublicContextProjector(

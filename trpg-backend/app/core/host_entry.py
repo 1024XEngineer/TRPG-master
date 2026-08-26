@@ -152,6 +152,7 @@ class HostPublicContextProjector:
         entries = entries[-self.max_turns :]
         while entries and sum(len(item.text) for item in entries) > self.max_chars:
             entries.pop(0)
+        cleaned_keeper_text = _strip_internal_tokens(current_keeper_text.strip())
         return HostPublicContext(
             public_scene="\n".join(scene_parts)[:1200],
             public_location=location,
@@ -159,9 +160,10 @@ class HostPublicContextProjector:
             visible_characters=characters[:32],
             visible_environment=environment[:64],
             recent_history=tuple(entries),
-            current_keeper_text=(
-                _strip_internal_tokens(current_keeper_text.strip()) or current_keeper_text.strip()
-            ),
+            # An input made entirely of internal tokens must not be restored
+            # from the original text after sanitization.  Keep the contract's
+            # non-empty field with a neutral placeholder instead.
+            current_keeper_text=cleaned_keeper_text or "未提供可用的公开文本",
         )
 
 

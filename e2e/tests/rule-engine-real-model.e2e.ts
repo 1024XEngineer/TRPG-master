@@ -8,8 +8,10 @@
  *
  * 后半截才是本 Issue 修的东西，而它恰恰只在前半截成立时才显形：
  *
- * 1. 一次动作提交多跳时间推进，`enable_night_surveillance` 必须按**进入 18:00
- *    那一刻**的世界匹配，而不是被 06:00 的终态判否（#398 §阶段二）；
+ * 1. 一次动作提交多跳时间推进，`reset_night_watch_during_day` 必须按**进入 06:00
+ *    那一刻**的世界匹配，而不是被终态（又是夜里）判否（#398 §阶段二）；
+ *    ——#451 把模组收敛成昼夜两点后，挂在时间点上的规则只在白天触发，所以这条
+ *    场景由「睡到早晨」反转成「睡过白天、再入夜」，屏障要验证的性质不变；
  * 2. 规则要求的被动理智检定必须真的走到玩家面前（#398 §阶段三）。
  *
  * CI 用的确定性覆盖在 `passive-rule-check.e2e.ts`（被动检定）与
@@ -162,13 +164,13 @@ async function openRoom(prefix: string) {
  * 场景。所以这里换几种说法重试，只要有一轮真的跨过了夜里，就用那一轮断言引擎。
  */
 const SLEEP_UTTERANCES = [
-  '就在这里睡下，一直睡到第二天早晨再起来',
-  '我在办公室里睡觉休息，一直睡到第二天早上六点',
-  '在这里过夜，睡到明天清晨',
+  '就在这里睡下，一直睡到第二天天黑再起来',
+  '我在办公室里睡觉休息，白天也不出门，一直睡到第二天入夜',
+  '在这里躺下过夜，睡过整个白天，到明天晚上再醒',
 ]
 
 test(
-  '#398 真实模型：一次「睡到第二天早晨」跨过夜里，夜间监视点按 18:00 的世界开出',
+  '#398 真实模型：一次「睡到第二天入夜」跨过白天，守夜闩按 06:00 的世界重置',
   { timeout: TEST_TIMEOUT_MS, skip: REAL_MODEL ? false : '需要 E2E_REAL_MODEL=1' },
   async () => {
     const room = await openRoom('issue398-real-sleep')
@@ -177,12 +179,17 @@ test(
       for (const [index, utterance] of SLEEP_UTTERANCES.entries()) {
         patchState(room.roomId, (state) => {
           state.world_time = {
-            current_point_id: 'hour_12',
-            current: { day_index: 0, hour_of_day: 12 },
+            current_point_id: 'hour_18',
+            current: { day_index: 0, hour_of_day: 18 },
           }
+          // 本夜已经守过、且还没目击到人影——白天重置规则的两个前置条件。
           state.entities.case_tracker = {
             ...state.entities.case_tracker,
-            surveillance_available: false,
+            night_watch_checked: true,
+          }
+          state.entities.cemetery_figure = {
+            ...state.entities.cemetery_figure,
+            visit_observed: false,
           }
         })
 
@@ -205,20 +212,20 @@ test(
           `[#398 真实模型] 第 ${index + 1} 次「${utterance}」→`,
           JSON.stringify(now),
         )
-        if (now && (now.day_index > 0 || now.hour_of_day >= 18)) {
+        if (now && now.day_index > 0) {
           advanced = true
           break
         }
       }
 
       const state = readState(room.roomId)
-      const triggers = ruleTriggers(room.roomId, 'enable_night_surveillance')
+      const triggers = ruleTriggers(room.roomId, 'reset_night_watch_during_day')
       console.log(
         '[#398 真实模型] 最终时间:',
         JSON.stringify(state.world_time),
-        '| surveillance_available =',
-        state.entities.case_tracker?.surveillance_available,
-        '| enable_night_surveillance 触发:',
+        '| night_watch_checked =',
+        state.entities.case_tracker?.night_watch_checked,
+        '| reset_night_watch_during_day 触发:',
         JSON.stringify(triggers),
       )
 
@@ -226,24 +233,24 @@ test(
       // 说明这一轮没有构成 #398 的复现场景，问题在 A 侧而不是引擎。
       assert.ok(
         advanced,
-        '三次尝试模型都没有把时间推进到夜里或次日；这一轮不构成 #398 的复现场景',
+        '三次尝试模型都没有把时间推进到次日；这一轮不构成 #398 的复现场景',
       )
       // 后半截才是 #398 修的东西：只要跨过了 18:00，夜间监视点就必须开出来。
       // 修复前这里会是 false——18:00 那条事件被 06:00 的终态判否。
       assert.equal(
-        state.entities.case_tracker?.surveillance_available,
-        true,
-        '跨过夜间时间点后 enable_night_surveillance 必须触发',
+        state.entities.case_tracker?.night_watch_checked,
+        false,
+        '跨过白天那个点后 reset_night_watch_during_day 必须触发',
       )
       assert.ok(triggers.length >= 1)
       assert.equal(triggers[0].sourceType, 'time.point_entered')
       // 载荷从粗粒度 time_of_day 换成四段 canonical segment（#415 §阶段一）；
       // 触发这条规则的点必须是夜里的某一段，具体哪一段取决于模型推到了哪。
       assert.ok(
-        ['evening', 'late_night'].includes(
+        ['morning', 'afternoon'].includes(
           triggers[0].sourcePayload?.time_segment as string,
         ),
-        `触发点不是夜间时段: ${JSON.stringify(triggers[0].sourcePayload)}`,
+        `触发点不是白天时段: ${JSON.stringify(triggers[0].sourcePayload)}`,
       )
     } finally {
       room.host.sdk.roomSocket.disconnect()
@@ -373,6 +380,202 @@ test(
         Object.keys(state.rule_agendas ?? {}).length,
         1,
         '挂起的 Agenda 必须落库，否则无从恢复',
+      )
+    } finally {
+      room.host.sdk.roomSocket.disconnect()
+    }
+  },
+)
+
+/**
+ * #451 真实模型：守夜幸运成功之后，玩家必须真的被告知「看见了人影」，
+ * 并且能顺着这条线喊出道格拉斯。
+ *
+ * 这条链路此前是断的：成功只翻了 `sighted` / `visit_observed` 两个模组私有键，
+ * 而叙事证据白名单不收私有键、强制叙述钩子只认 `discovered`、人影的 `located_in`
+ * 又停在 `crypt`，于是玩家侧什么都没发生——实测那一夜叙事写的是「周围始终是静
+ * 悄悄的」。`call_to_figure` 因此永远没人去点，理智检定也就永远不触发。
+ *
+ * 前半截仍然是 A 侧模型行为（它得把「监视」映射到 `surveil` + `surveillance_area`），
+ * Fake planner 结构上产不出来；后半截才是 #451 修的东西。
+ */
+async function settleChecksFor(
+  room: Awaited<ReturnType<typeof openRoom>>,
+  actionId: string,
+  label: string,
+): Promise<void> {
+  for (let round = 0; round < 4; round += 1) {
+    let observed: ServerToClientEvent
+    try {
+      observed = await waitForEvent(
+        room.host.sdk,
+        (event) =>
+          (event.type === 'adjudication.pending' &&
+            event.payload.correlationId === actionId &&
+            event.payload.status === 'awaiting_skill_choice') ||
+          event.type === 'narration.push',
+        60_000,
+      )
+    } catch {
+      return
+    }
+    // 叙事先到，说明这一步没有检定要结算，本轮到此为止。
+    if (observed.type !== 'adjudication.pending') return
+    const pendingEvent = observed as PendingAdjudicationEvent
+    const decision = pendingEvent.payload.pendingDecision
+    assert.ok(decision)
+    console.log(
+      `[#451 真实模型] ${label} 检定:`,
+      decision.options.map((o) => o.display_name).join(' / '),
+      '| 可取消:', decision.allow_cancel,
+      '| 目标值:', decision.options[0].target_value,
+    )
+    const rolled = waitForEvent(
+      room.host.sdk,
+      (event) =>
+        event.type === 'adjudication.pending' &&
+        event.payload.correlationId === actionId &&
+        event.payload.status === 'awaiting_post_roll_decision',
+    )
+    room.host.sdk.roomSocket.selectAdjudication(room.hostPlayerId, {
+      clientActionId: actionId,
+      requestId: `${actionId}-select-${round}`,
+      sourceRevision: pendingEvent.payload.sourceRevision,
+      decisionId: decision.decision_id,
+      decisionVersion: decision.decision_version,
+      candidateId: decision.options[0].candidate_id,
+    })
+    const rolledEvent = (await rolled) as PendingAdjudicationEvent
+    const checkRun = rolledEvent.payload.checkRun
+    assert.ok(checkRun)
+    console.log(`[#451 真实模型] ${label} 掷出:`, JSON.stringify(checkRun.roll))
+    const accept = (checkRun.post_roll_options ?? []).find(
+      (option) => option.kind === 'accept_result',
+    )
+    assert.ok(accept)
+    room.host.sdk.roomSocket.decidePostRoll(room.hostPlayerId, {
+      clientActionId: actionId,
+      requestId: `${actionId}-accept-${round}`,
+      sourceRevision: rolledEvent.payload.sourceRevision,
+      checkId: checkRun.check_id,
+      checkVersion: checkRun.version,
+      optionId: accept.option_id,
+    })
+  }
+}
+
+// 已知阻塞：真实模型两次都把规则与选项选对（`keep_night_watch` / `luck`），却把
+// `check` 声明成 `{"mode":"none"}`，而候选上的 `requires_check` 明明是 true。引擎
+// 拿到"分支要掷骰、裁决没带检定"时 `return ()`——不提交任何效果，却照样报
+// `action.succeeded`。于是规则静默不触发、叙事写"什么都没发生"、无处报错。
+// 这是模组之外的第三个成因，不属于 #451；待引擎侧改成可修复的显式拒绝后解开 skip。
+const NPC_SIGHTING_BLOCKED =
+  '阻塞：Agent 声明 check=none 时引擎静默吞掉规则，既不掷骰也不提交效果'
+
+test(
+  '#451 真实模型：守夜幸运成功后人影现身，且喊得出道格拉斯',
+  { timeout: TEST_TIMEOUT_MS, skip: NPC_SIGHTING_BLOCKED },
+  async () => {
+    const room = await openRoom('issue451-real-watch')
+    try {
+      patchState(room.roomId, (state) => {
+        state.scene_id = 'surveillance_point'
+        state.world_time = {
+          current_point_id: 'hour_18',
+          current: { day_index: 0, hour_of_day: 18 },
+          current_time_segment: 'evening',
+        }
+        state.entities.case_tracker = {
+          ...state.entities.case_tracker,
+          night_watch_checked: false,
+        }
+        state.entities.cemetery_figure = {
+          ...state.entities.cemetery_figure,
+          visit_observed: false,
+          sighted: false,
+          discovered: false,
+          out_tonight: 'none',
+        }
+        // 幸运拉满：这条用例要验证的是「成功之后发生什么」，不是骰子。
+        const actorId = Object.keys(state.actors)[0]
+        state.actors[actorId].resources = {
+          ...state.actors[actorId].resources,
+          luck: 99,
+        }
+      })
+
+      const watchId = `issue451-watch-${Date.now()}`
+      const watched = waitForEvent(room.host.sdk, (e) => e.type === 'narration.push')
+      room.host.sdk.roomSocket
+        .submitPlannedAction(room.hostPlayerId, {
+          clientActionId: watchId,
+          utterance: '监视周围环境',
+          recipient: EXPLICIT_KEEPER,
+        })
+        .catch(() => {})
+      await settleChecksFor(room, watchId, '守夜幸运')
+      const watchNarration = (await watched) as any
+      const watchText: string = watchNarration.payload?.text ?? ''
+      console.log('[#451 真实模型] 守夜叙事:', watchText)
+
+      const afterWatch = readState(room.roomId)
+      const figure = afterWatch.entities.cemetery_figure ?? {}
+      console.log(
+        '[#451 真实模型] 守夜后人影:',
+        JSON.stringify({
+          location_id: figure.location_id,
+          sighted: figure.sighted,
+          discovered: figure.discovered,
+          out_tonight: figure.out_tonight,
+        }),
+      )
+
+      assert.equal(figure.sighted, true, '守夜幸运成功必须置 sighted')
+      assert.equal(
+        figure.location_id,
+        'surveillance_point',
+        '人影必须被搬到监视点，否则玩家视图里没有可指对象',
+      )
+      assert.equal(figure.discovered, true, 'discovered 是强制叙述钩子唯一认的键')
+      // 引擎侧 required_in_narration=True 会拒掉不提人影的叙事，所以这条是硬的。
+      assert.ok(
+        /人影|夜行者|道格拉斯/.test(watchText),
+        `叙事必须点名人影，实际写的是：${watchText}`,
+      )
+
+      const callId = `issue451-call-${Date.now()}`
+      const called = waitForEvent(room.host.sdk, (e) => e.type === 'narration.push')
+      room.host.sdk.roomSocket
+        .submitPlannedAction(room.hostPlayerId, {
+          clientActionId: callId,
+          utterance: '朝那个墓地中的人影喊出道格拉斯的名字',
+          recipient: EXPLICIT_KEEPER,
+        })
+        .catch(() => {})
+      await settleChecksFor(room, callId, '首次目击理智')
+      const callNarration = (await called) as any
+      console.log('[#451 真实模型] 呼喊叙事:', callNarration.payload?.text ?? '')
+
+      const afterCall = readState(room.roomId)
+      const sightTriggers = ruleTriggers(room.roomId, 'first_sight_of_douglas')
+      console.log(
+        '[#451 真实模型] 呼喊后:',
+        JSON.stringify({
+          true_form_seen: afterCall.entities.cemetery_figure?.true_form_seen,
+          first_ghoul_sight_resolved:
+            afterCall.entities.case_tracker?.first_ghoul_sight_resolved,
+          firstSightTriggers: sightTriggers.length,
+        }),
+      )
+
+      assert.equal(
+        afterCall.entities.cemetery_figure?.true_form_seen,
+        true,
+        'call_to_figure 必须置 true_form_seen',
+      )
+      assert.ok(
+        sightTriggers.length >= 1,
+        'true_form_seen 必须连锁触发 first_sight_of_douglas —— 这就是「遇到道格拉斯」',
       )
     } finally {
       room.host.sdk.roomSocket.disconnect()

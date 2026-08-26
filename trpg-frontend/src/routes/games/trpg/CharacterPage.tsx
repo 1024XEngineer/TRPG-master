@@ -258,6 +258,7 @@ export default function CharacterPage() {
     typeof existingCharacter?.attr.LUCK === 'number'
   )
   const [luckAccumulated, setLuckAccumulated] = useState(0)
+  const [luckDiceIndex, setLuckDiceIndex] = useState(0)
 
   // 职业自选技能按槽位分组保存在表单中；提交时再按槽位顺序压平成 API 的
   // occupationChoiceSkillIds。occupationId 跟选择放在同一份状态里，避免异步
@@ -914,7 +915,12 @@ export default function CharacterPage() {
 
   /** 首次点击时创建房间草稿，再请求服务端确定本局唯一的幸运值。 */
   const handleLuckRoll = async () => {
-    if (!roomId || luckRolling || typeof attr.LUCK === 'number') return
+    if (!roomId || luckRolling || luckRollComplete) return
+    if (luckDice) {
+      setLuckRolling(true)
+      setLuckDiceOpen(true)
+      return
+    }
     setLuckRolling(true)
     setLuckError('')
     try {
@@ -927,6 +933,7 @@ export default function CharacterPage() {
       // 服务端只先返回目标点数；每颗骰子由玩家确认后才把当前累计值写回草稿。
       setLuckDice(result.dice)
       setLuckAccumulated(0)
+      setLuckDiceIndex(0)
       setLuckRollComplete(false)
       setLuckDiceOpen(true)
     } catch (error) {
@@ -1917,12 +1924,12 @@ export default function CharacterPage() {
                             type="button"
                             onClick={handleLuckRoll}
                             disabled={luckRolling || luckDiceOpen || luckReady}
-                            aria-label={luckReady ? '幸运值已确定' : '掷幸运骰'}
-                            title={luckReady ? '幸运值已确定' : '掷幸运骰'}
+                            aria-label={luckReady ? '幸运值已确定' : luckDice ? '继续投幸运骰' : '掷幸运骰'}
+                            title={luckReady ? '幸运值已确定' : luckDice ? '继续投幸运骰' : '掷幸运骰'}
                             className="flex min-h-8 items-center gap-1 rounded-sm border border-brass px-2 text-[11px] font-semibold text-brass-dark transition-colors active:bg-brass/10 disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             <Dices className="h-3.5 w-3.5" />
-                            {luckRolling ? '掷骰中' : luckReady ? '已确定' : '掷骰'}
+                            {luckRolling ? '掷骰中' : luckReady ? '已确定' : luckDice ? '继续投骰' : '掷骰'}
                           </button>
                         )}
                       </div>
@@ -1949,17 +1956,21 @@ export default function CharacterPage() {
                 <DiceModal
                   open={luckDiceOpen}
                   onClose={() => {
-                    // 连续幸运骰必须由玩家逐颗确认，未完成前不允许关闭面板跳过。
-                    if (luckRollComplete) setLuckDiceOpen(false)
+                    // 关闭只收起面板，已确认的点数和当前进度保留，之后可继续。
+                    setLuckDiceOpen(false)
+                    setLuckRolling(false)
                   }}
                   onResult={() => undefined}
                   checkRequest={null}
                   checkDiceState={null}
                   setCheckDiceState={() => undefined}
                   sequentialTargets={luckDice}
+                  sequentialStartIndex={luckDiceIndex}
+                  sequentialAccumulated={luckAccumulated}
                   onSequentialRoll={(value, index) => {
                     const next = luckAccumulated + value
                     setLuckAccumulated(next)
+                    setLuckDiceIndex(index + 1)
                     setAttr(previous => ({ ...previous, LUCK: next * 5 }))
                     if (index === luckDice.length - 1) {
                       setLuckRollComplete(true)

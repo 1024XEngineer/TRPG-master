@@ -259,6 +259,17 @@ class SilverLockRuntimeTests(unittest.IsolatedAsyncioTestCase):
         )
         return view.revision
 
+    async def test_carried_pencil_knife_is_not_duplicated_in_scene_projection(self) -> None:
+        """开局随身物品只能出现在背包，不应按静态地点再次投影。"""
+
+        view = await self.rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        self.assertIn("pencil_knife", {item.id for item in view.inventory})
+        self.assertNotIn(
+            "pencil_knife", {entity.id for entity in view.scene.visible_entities}
+        )
+
     async def choose(
         self,
         rule_id: str,

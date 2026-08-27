@@ -47,6 +47,7 @@ from app.adapters.openai_models import (
     _OPENING_NARRATION_INSTRUCTIONS,
     OpenAIResponsesJsonClient,
     PromptActionPlanStepAdjudicator,
+    PromptHostEntryModel,
     PromptHostTurnDecisionModel,
     PromptTurnPlanner,
 )
@@ -67,6 +68,14 @@ from app.service.character_background import build_character_background_service
 from app.service.portrait_generation import build_portrait_generation_service
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_host_entry_instructions_force_clarification_for_demonstratives() -> None:
+    text = PromptHostEntryModel._INSTRUCTIONS
+    assert "needs_clarification" in text
+    assert "那个" in text
+    assert "不得 delegate_to_legacy" in text
+    assert "不要把这种歧义直接交给旧链" in text
 
 
 def test_action_plan_narration_uses_final_post_roll_outcome() -> None:

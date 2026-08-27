@@ -12,8 +12,11 @@ import re
 from collections.abc import Mapping, Sequence
 from typing import Literal, Protocol
 
+import structlog
 from collaboration_framework.contracts import PlayerView
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, model_validator
+
+logger = structlog.get_logger(__name__)
 
 HostEntryRoute = Literal["direct_response", "delegate_to_legacy", "needs_clarification"]
 HOST_ENTRY_FALLBACK = "我暂时没能准确接住这句话，请重新说明你想做什么。"
@@ -267,12 +270,17 @@ class HostEntryRouter:
                 raw = await self.model.generate(context)
                 decision = HostEntryDecision.model_validate(raw)
                 validated = self.safety_policy.validate(decision)
-                if validated.route == "direct_response":
+                coerced = _coerce_unresolved_demonstrative(context, validated)
+                if coerced.route != validated.route:
+                    provenance = "coerced_clarify"
+                    validated = self.safety_policy.validate(coerced)
+                elif validated.route == "direct_response":
                     provenance = "model_direct"
                 elif validated.route == "needs_clarification":
                     provenance = "model_clarify"
                 else:
                     provenance = "legacy_delegate"
+                logger.info("host_entry_decision", route=validated.route, provenance=provenance)
                 return validated, provenance
             except Exception as exc:
                 last_error = exc
@@ -318,6 +326,20 @@ def _looks_like_legacy_intent(text: str) -> bool:
 def _looks_like_important_ambiguity(text: str) -> bool:
     lowered = text.casefold()
     return any(token in lowered for token in ("那个", "哪一个", "哪本", "哪把"))
+
+
+def _coerce_unresolved_demonstrative(
+    context: HostPublicContext, decision: HostEntryDecision
+) -> HostEntryDecision:
+    """Real models often send 看那个 to ActionPlan, which silently picks a referent."""
+
+    if (context.player_answer or "").strip():
+        return decision
+    if decision.route == "needs_clarification":
+        return decision
+    if not _looks_like_important_ambiguity(context.current_keeper_text):
+        return decision
+    return HostEntryDecision(route="needs_clarification", text="你具体指的是哪一个？")
 
 
 def _looks_like_ordinary_interaction(text: str) -> bool:

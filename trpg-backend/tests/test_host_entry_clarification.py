@@ -257,6 +257,12 @@ async def test_ordinary_greeting_still_skips_clarification(
     assert texts == {"greet": "对方礼貌地点了点头。"}
 
 
+class _AlwaysLegacyHostEntryModel:
+    async def generate(self, context: HostPublicContext) -> dict[str, object]:
+        del context
+        return {"route": "delegate_to_legacy", "text": None}
+
+
 @pytest.mark.asyncio
 async def test_host_entry_router_clarifies_then_refuses_second_ask() -> None:
     router = HostEntryRouter(DeterministicHostEntryModel())
@@ -273,3 +279,39 @@ async def test_host_entry_router_clarifies_then_refuses_second_ask() -> None:
     assert second.route == "direct_response"
     with pytest.raises(ValueError):
         HostEntryDecision(route="needs_clarification", text=None)
+
+
+@pytest.mark.asyncio
+async def test_host_entry_router_coerces_legacy_when_demonstrative_is_unresolved() -> None:
+    router = HostEntryRouter(_AlwaysLegacyHostEntryModel())
+    decision, provenance = await router.decide(HostPublicContext(current_keeper_text="看那个"))
+    assert decision.route == "needs_clarification"
+    assert decision.text == "你具体指的是哪一个？"
+    assert provenance == "coerced_clarify"
+    answered, answered_provenance = await router.decide(
+        HostPublicContext(
+            current_keeper_text="看那个",
+            player_answer="邻居",
+        )
+    )
+    assert answered.route == "delegate_to_legacy"
+    assert answered_provenance == "legacy_delegate"
+
+
+@pytest.mark.asyncio
+async def test_idle_keeper_submit_decision_is_start_not_a_bypass(
+    db_session: AsyncSession,
+) -> None:
+    """空闲房间的 @主持人 必须仍被标成 start，由入口入队后走 Router，不能直接旧链。"""
+
+    room_id, players, _ = await _room_views(db_session, 4766)
+    state = await ws_controller._current_room_action_state(db_session, room_id)
+    decision = await ws_controller._queue_decision_for_submit(
+        db_session,
+        room_id=room_id,
+        player_id=players[0].id,
+        client_action_id="look-idle",
+        state=state,
+        recipient_kind="keeper",
+    )
+    assert decision == "start"

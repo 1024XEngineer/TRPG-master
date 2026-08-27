@@ -1160,6 +1160,73 @@ async def _recover_keeper_queue_failure(
     await _send_turn_failed(websocket, client_action_id, exc)
 
 
+async def _route_keeper_queue_item(db: AsyncSession, item, view: PlayerView) -> str:
+    """Freeze the host-entry route for a claimed keeper queue item."""
+
+    route = host_action_queue_service.effective_execution_route(item)
+    if route == "unresolved":
+        history = await _public_host_history(
+            db,
+            item.room_id,
+            exclude_correlation_id=item.client_action_id,
+        )
+        context = HostPublicContextProjector(
+            max_turns=get_settings().recent_history_max_turns,
+            max_chars=get_settings().recent_history_max_chars,
+        ).project(
+            view,
+            current_keeper_text=item.utterance,
+            public_history=history,
+        )
+        decision, provenance = await _get_host_entry_router().decide(context)
+        await host_action_queue_service.save_execution_route(
+            db,
+            item,
+            route=decision.route,
+            text=decision.text,
+            provenance=provenance,
+        )
+        route = decision.route
+        await db.refresh(item)
+    if route == "needs_clarification" and (item.continuation_text or "").strip():
+        history = await _public_host_history(
+            db,
+            item.room_id,
+            exclude_correlation_id=item.client_action_id,
+        )
+        context = HostPublicContextProjector(
+            max_turns=get_settings().recent_history_max_turns,
+            max_chars=get_settings().recent_history_max_chars,
+        ).project(
+            view,
+            current_keeper_text=item.utterance,
+            public_history=history,
+            clarification_question=item.direct_response_text,
+            player_answer=item.continuation_text,
+        )
+        decision, provenance = await _get_host_entry_router().decide(context)
+        if decision.route == "needs_clarification":
+            decision = HostEntryDecision(route="delegate_to_legacy")
+            provenance = "clarify_once_legacy"
+        await host_action_queue_service.save_execution_route(
+            db,
+            item,
+            route=decision.route,
+            text=decision.text,
+            provenance=provenance,
+        )
+        route = decision.route
+        await db.refresh(item)
+    logger.info(
+        "host_entry_routed",
+        room_id=item.room_id,
+        client_action_id=item.client_action_id,
+        route=route,
+        provenance=item.execution_provenance,
+    )
+    return route
+
+
 async def _drain_host_action_queue(room_id: str) -> None:
     async with _host_drain_lock(room_id):
         while True:
@@ -1235,63 +1302,10 @@ async def _drain_host_action_queue(room_id: str) -> None:
                     if claimed is None:
                         return
                     item = claimed
-                    route = host_action_queue_service.effective_execution_route(item)
-                    if route == "unresolved":
-                        history = await _public_host_history(
-                            db,
-                            room_id,
-                            exclude_correlation_id=item.client_action_id,
-                        )
-                        context = HostPublicContextProjector(
-                            max_turns=get_settings().recent_history_max_turns,
-                            max_chars=get_settings().recent_history_max_chars,
-                        ).project(
-                            view,
-                            current_keeper_text=item.utterance,
-                            public_history=history,
-                        )
-                        decision, provenance = await _get_host_entry_router().decide(context)
-                        await host_action_queue_service.save_execution_route(
-                            db,
-                            item,
-                            route=decision.route,
-                            text=decision.text,
-                            provenance=provenance,
-                        )
-                        route = decision.route
-                        await db.refresh(item)
+                    route = await _route_keeper_queue_item(db, item, view)
                     if route == "needs_clarification":
-                        if not (item.continuation_text or "").strip():
-                            await _run_clarification_prompt(db, item, view, websocket)
-                            return
-                        history = await _public_host_history(
-                            db,
-                            room_id,
-                            exclude_correlation_id=item.client_action_id,
-                        )
-                        context = HostPublicContextProjector(
-                            max_turns=get_settings().recent_history_max_turns,
-                            max_chars=get_settings().recent_history_max_chars,
-                        ).project(
-                            view,
-                            current_keeper_text=item.utterance,
-                            public_history=history,
-                            clarification_question=item.direct_response_text,
-                            player_answer=item.continuation_text,
-                        )
-                        decision, provenance = await _get_host_entry_router().decide(context)
-                        if decision.route == "needs_clarification":
-                            decision = HostEntryDecision(route="delegate_to_legacy")
-                            provenance = "clarify_once_legacy"
-                        await host_action_queue_service.save_execution_route(
-                            db,
-                            item,
-                            route=decision.route,
-                            text=decision.text,
-                            provenance=provenance,
-                        )
-                        route = decision.route
-                        await db.refresh(item)
+                        await _run_clarification_prompt(db, item, view, websocket)
+                        return
                     if route == "direct_response":
                         await _run_direct_host_action(db, item, view, websocket)
                         continue
@@ -3312,6 +3326,7 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 player_view=action_view,
                                 recipient=submit_payload.recipient,
                             )
+                            schedule_host_action_drain(room_id)
                             continue
                         if decision == "reject":
                             await _send_error(
@@ -3340,8 +3355,11 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 player_view=action_view,
                                 recipient=submit_payload.recipient,
                             )
+                            schedule_host_action_drain(room_id)
                             continue
                         try:
+                            queued_item = None
+                            host_turn_failed = False
                             active_plan = await action_plan_turn_application.active_for_room(
                                 room_id
                             )
@@ -3377,11 +3395,63 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                             )
                             turn_started_at = time.monotonic()
                             await _broadcast_room_action_state(db, room_id)
+                            keeper_utterance = submit_payload.utterance
+                            if submit_payload.recipient.kind == "keeper":
+                                await _enqueue_host_action(
+                                    db,
+                                    websocket,
+                                    room_id=room_id,
+                                    player_id=bound_player_id,
+                                    actor_id=action_view.self_actor.id,
+                                    client_action_id=submit_payload.client_action_id,
+                                    utterance=submit_payload.utterance,
+                                    player_view=action_view,
+                                    recipient=submit_payload.recipient,
+                                )
+                                queued_item = await host_action_queue_service.get_by_client_action(
+                                    db,
+                                    room_id,
+                                    submit_payload.client_action_id,
+                                )
+                                if queued_item is not None:
+                                    if queued_item.status == "retryable_failure":
+                                        queued_item.next_attempt_at = datetime.now(UTC)
+                                        await db.commit()
+                                    claimed = await host_action_queue_service.claim(
+                                        db,
+                                        queued_item,
+                                        recipient_kind="keeper",
+                                    )
+                                    if claimed is None:
+                                        raise TurnExecutionError(
+                                            "TURN_INTERNAL_ERROR",
+                                            "主持行动未能开始，请重试",
+                                            retryable=True,
+                                        )
+                                    queued_item = claimed
+                                    route = await _route_keeper_queue_item(
+                                        db, queued_item, action_view
+                                    )
+                                    if route == "needs_clarification":
+                                        await _run_clarification_prompt(
+                                            db, queued_item, action_view, websocket
+                                        )
+                                        continue
+                                    if route == "direct_response":
+                                        await _run_direct_host_action(
+                                            db, queued_item, action_view, websocket
+                                        )
+                                        continue
+                                    continuation = (queued_item.continuation_text or "").strip()
+                                    if continuation:
+                                        keeper_utterance = (
+                                            f"{queued_item.utterance}\n玩家补充：{continuation}"
+                                        )
                             result = await action_plan_turn_application.start(
                                 room_id=room_id,
                                 player_id=bound_player_id,
                                 client_action_id=submit_payload.client_action_id,
-                                utterance=submit_payload.utterance,
+                                utterance=keeper_utterance,
                                 interlocutor_id=(
                                     submit_payload.recipient.entity_id
                                     if submit_payload.recipient.kind == "npc"
@@ -3404,11 +3474,17 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                     websocket,
                                     submit_payload.client_action_id,
                                 ),
-                                on_input_accepted=partial(
-                                    _broadcast_action_utterance,
-                                    db,
+                                on_input_accepted=(
+                                    None
+                                    if queued_item is not None
+                                    else partial(
+                                        _broadcast_action_utterance,
+                                        db,
+                                    )
                                 ),
                             )
+                            if queued_item is not None:
+                                await host_action_queue_service.mark_started(db, queued_item)
                             narration_ready_ms = (
                                 int((time.monotonic() - turn_started_at) * 1000)
                                 if result.narration is not None
@@ -3449,6 +3525,19 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 end_to_end_ms=completed_ms,
                             )
                         except Exception as exc:
+                            host_turn_failed = True
+                            if queued_item is not None and queued_item.status == "processing":
+                                try:
+                                    await host_action_queue_service.mark_npc_retryable(
+                                        db, queued_item, delay_seconds=0
+                                    )
+                                except SQLAlchemyError:
+                                    logger.warning(
+                                        "host_queue_mark_retryable_failed",
+                                        room_id=room_id,
+                                        client_action_id=submit_payload.client_action_id,
+                                        error_type=type(exc).__name__,
+                                    )
                             code, _, _ = _map_turn_error(exc)
                             log_turn_failed(
                                 room_id=room_id,
@@ -3470,7 +3559,8 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                             with anyio.CancelScope(shield=True):
                                 action_lock_manager.release(room_id, lock_token)
                                 await _broadcast_room_action_state_fresh(room_id)
-                            schedule_host_action_drain(room_id)
+                            if not host_turn_failed:
+                                schedule_host_action_drain(room_id)
                     elif event_type == "adjudication.select":
                         choice = AdjudicationChoicePayload.model_validate(raw_payload)
                         if choice.cancel:

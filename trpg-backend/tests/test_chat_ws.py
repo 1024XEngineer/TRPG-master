@@ -31,6 +31,7 @@ from tests.test_ws import (
     complete_character,
     create_room,
     join_as,
+    receive_replayed_opening,
     receive_until,
     register_and_login,
     start_game,
@@ -42,7 +43,7 @@ def sync_client() -> Iterator[TestClient]:
     yield TestClient(app)
 
 
-def _join_ws(ws, player: dict) -> None:
+def _join_ws(ws, player: dict, *, started: bool = False) -> None:
     ws.send_json(
         {
             "type": "room.join",
@@ -51,6 +52,9 @@ def _join_ws(ws, player: dict) -> None:
         }
     )
     assert ws.receive_json()["type"] == "session.bound"
+    if started:
+        ws.receive_json()
+        receive_replayed_opening(ws)
 
 
 def _send_chat(ws, player: dict, text: str, client_message_id: str) -> None:
@@ -176,7 +180,7 @@ def test_multiplayer_action_chat_is_roleplay_and_not_host_event(
     start_game(sync_client, room, token)
 
     with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
-        _join_ws(ws, room)
+        _join_ws(ws, room, started=True)
         ws.send_json(
             {
                 "type": "action.chat.send",
@@ -215,7 +219,7 @@ def test_chat_idempotency_keeps_original_channel_and_actor_shape(
     start_game(sync_client, room, token)
 
     with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
-        _join_ws(ws, room)
+        _join_ws(ws, room, started=True)
         _send_chat(ws, room, "首次落成讨论消息", "shared-id-1")
         first = receive_until(ws, lambda item: item.get("type") == "chat.message")[0]
         ws.send_json(
@@ -243,7 +247,7 @@ def test_single_player_action_chat_is_rejected(sync_client: TestClient) -> None:
     start_game(sync_client, room, token)
 
     with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
-        _join_ws(ws, room)
+        _join_ws(ws, room, started=True)
         ws.send_json(
             {
                 "type": "action.chat.send",
@@ -266,7 +270,7 @@ def test_npc_recipient_bypasses_keeper_processing(sync_client: TestClient) -> No
     start_game(sync_client, room, token)
 
     with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
-        _join_ws(ws, room)
+        _join_ws(ws, room, started=True)
         ws.send_json(
             {
                 "type": "action.plan.submit",
@@ -297,7 +301,7 @@ def test_single_player_accepts_implicit_keeper_recipient(sync_client: TestClient
     start_game(sync_client, room, token)
 
     with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
-        _join_ws(ws, room)
+        _join_ws(ws, room, started=True)
         ws.send_json(
             {
                 "type": "action.plan.submit",
@@ -324,7 +328,7 @@ def test_multiplayer_rejects_implicit_keeper_recipient(sync_client: TestClient) 
     start_game(sync_client, room, token)
 
     with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
-        _join_ws(ws, room)
+        _join_ws(ws, room, started=True)
         ws.send_json(
             {
                 "type": "action.plan.submit",
@@ -356,7 +360,7 @@ def test_action_submit_broadcasts_utterance_then_narration(sync_client: TestClie
     start_game(sync_client, room, token)
 
     with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
-        _join_ws(ws, room)
+        _join_ws(ws, room, started=True)
         _submit_action(ws, room, "我推开吱呀作响的木门")
         echo, _ = receive_until(ws, lambda message: message.get("type") == "action.broadcast")
         narration, _ = receive_until(ws, lambda message: message.get("type") == "narration.push")
@@ -394,7 +398,7 @@ def test_clarification_narration_is_visible_to_other_players(
     action_id = "clarify-public-397"
 
     with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
-        _join_ws(ws, room)
+        _join_ws(ws, room, started=True)
         ws.send_json(
             {
                 "type": "action.plan.submit",

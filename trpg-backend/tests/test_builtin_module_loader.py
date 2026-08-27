@@ -23,6 +23,7 @@ from app.models.room import Room
 from app.service.builtin_module_loader import (
     CONSTANT_DARKNESS_BOX_SPEC,
     HAPPY_FROG_VILLAGE_SPEC,
+    PAPER_CHASE_SPEC,
     SILVER_LOCK_SPEC,
     BuiltinModuleLoadError,
     load_builtin_module,
@@ -62,14 +63,20 @@ async def test_paper_chase_npc_portraits_are_seeded_idempotently(
 
     before = list(
         await db_session.scalars(
-            select(ModuleAsset).where(ModuleAsset.asset_type == "npc_portrait")
+            select(ModuleAsset).where(
+                ModuleAsset.scenario_id == PAPER_CHASE_SPEC.scenario_id,
+                ModuleAsset.asset_type == "npc_portrait",
+            )
         )
     )
     await db_session.commit()
     await load_builtin_modules(db_session)
     after = list(
         await db_session.scalars(
-            select(ModuleAsset).where(ModuleAsset.asset_type == "npc_portrait")
+            select(ModuleAsset).where(
+                ModuleAsset.scenario_id == PAPER_CHASE_SPEC.scenario_id,
+                ModuleAsset.asset_type == "npc_portrait",
+            )
         )
     )
     assert len(before) == len(after) == 5
@@ -79,6 +86,32 @@ async def test_paper_chase_npc_portraits_are_seeded_idempotently(
         "lyla",
         "melodias",
         "hilda",
+    }
+
+
+async def test_happy_frog_village_npc_portraits_are_seeded_idempotently(
+    db_session: AsyncSession,
+) -> None:
+    """《幸福蛙蛙村》发布会写入全部七个 NPC 实体的头像。"""
+
+    query = select(ModuleAsset).where(
+        ModuleAsset.scenario_id == HAPPY_FROG_VILLAGE_SCENARIO_ID,
+        ModuleAsset.asset_type == "npc_portrait",
+    )
+    before = list(await db_session.scalars(query))
+    await db_session.commit()
+    await load_builtin_modules(db_session)
+    after = list(await db_session.scalars(query))
+
+    assert len(before) == len(after) == 7
+    assert {asset.entity_id: asset.url for asset in after} == {
+        "villager_accounts": ("/assets/npc_portraits/happy-frog-village/villager_accounts.webp"),
+        "ezra": "/assets/npc_portraits/happy-frog-village/ezra.webp",
+        "messenger": "/assets/npc_portraits/happy-frog-village/messenger.webp",
+        "emily": "/assets/npc_portraits/happy-frog-village/emily.webp",
+        "james": "/assets/npc_portraits/happy-frog-village/james.webp",
+        "frog_head_guest": ("/assets/npc_portraits/happy-frog-village/frog_head_guest.webp"),
+        "dream_frogs": "/assets/npc_portraits/happy-frog-village/dream_frogs.webp",
     }
 
 

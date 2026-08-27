@@ -16,7 +16,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.dto.game import RulesetRead
 from app.models.content import GameSystem, Scenario
 from app.models.engine import ModuleVersion
-from app.service.npc_portrait_assets import seed_paper_chase_npc_portraits
+from app.service.npc_portrait_assets import (
+    seed_happy_frog_village_npc_portraits,
+    seed_paper_chase_npc_portraits,
+)
 
 MODULE_FIXTURE_ROOT = (
     Path(__file__).resolve().parents[3]
@@ -235,6 +238,8 @@ async def load_builtin_module(
         # 发布内置模组时同步稳定的 NPC 头像映射，头像 URL 不写入对话事件。
         if spec.module_id == PAPER_CHASE_SPEC.module_id:
             await seed_paper_chase_npc_portraits(db, scenario_id=scenario.id)
+        elif spec.module_id == HAPPY_FROG_VILLAGE_SPEC.module_id:
+            await seed_happy_frog_village_npc_portraits(db, scenario_id=scenario.id)
         if _before_commit is not None:
             _before_commit()
 

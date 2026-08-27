@@ -1235,6 +1235,7 @@ async def _recover_keeper_queue_failure(
             await host_action_queue_service.mark_npc_retryable(db, item, delay_seconds=0)
             return
         await host_action_queue_service.mark_npc_failed(db, item)
+        failure = _queue_failure_for_delivery(exc)
         log_turn_failed(
             room_id=room_id,
             stage="队列出队",
@@ -1244,9 +1245,10 @@ async def _recover_keeper_queue_failure(
             error_reason=_turn_error_reason(exc),
             exc=exc,
         )
-        await _send_turn_failed(websocket, client_action_id, exc)
+        await _send_turn_failed(websocket, client_action_id, failure)
         return
     await host_action_queue_service.discard(db, item)
+    failure = _queue_failure_for_delivery(exc)
     log_turn_failed(
         room_id=room_id,
         stage="队列出队",
@@ -1256,7 +1258,14 @@ async def _recover_keeper_queue_failure(
         error_reason=_turn_error_reason(exc),
         exc=exc,
     )
-    await _send_turn_failed(websocket, client_action_id, exc)
+    await _send_turn_failed(websocket, client_action_id, failure)
+
+
+def _queue_failure_for_delivery(exc: Exception) -> Exception:
+    """Give terminal queue failures stable, non-retryable turn metadata."""
+
+    code, public_message, _ = _map_turn_error(exc)
+    return TurnExecutionError(code, public_message, retryable=False)
 
 
 async def _route_keeper_queue_item(db: AsyncSession, item, view: PlayerView) -> str:
@@ -2338,7 +2347,7 @@ async def _recover_persisted_turn_narration(
             payload=persisted.model_dump(by_alias=True),
         ).model_dump(by_alias=True),
     )
-    if raw_completion is not None and completion.npc_replies:
+    if websocket is not None and raw_completion is not None and completion.npc_replies:
         await _recover_persisted_turn_followup_dialogue(
             db,
             websocket,

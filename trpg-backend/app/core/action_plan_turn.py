@@ -1932,6 +1932,24 @@ class ActionPlanTurnApplication:
                             )
                         }
                     )
+                elif attempt == 0 and exc.reason.startswith("persistent_claim_without_evidence"):
+                    context = context.model_copy(
+                        update={
+                            "narration_retry_hint": (
+                                "上一版叙事包含没有权威证据确认的状态断言。"
+                                "请删除该断言，只描述当前 PlayerView 与已提交的公开结果。"
+                            )
+                        }
+                    )
+                elif attempt == 0:
+                    context = context.model_copy(
+                        update={
+                            "narration_retry_hint": (
+                                "上一版叙事未通过玩家可见输出安全校验。"
+                                "请遵循输出协议，只描述当前 PlayerView 与已提交的公开结果。"
+                            )
+                        }
+                    )
                 if attempt == 1:
                     if (
                         exc.reason == "required_evidence_missing"

@@ -202,9 +202,7 @@ async def test_catalog_and_selection_use_constant_darkness_box_publication(
     """第四个预设在目录中展示，且仅 2-3 人房间可钉住其不可变版本。"""
 
     catalog = (await client.get("/api/v1/modules")).json()["data"]
-    module = next(
-        item for item in catalog if item["id"] == CONSTANT_DARKNESS_BOX_MODULE_ID
-    )
+    module = next(item for item in catalog if item["id"] == CONSTANT_DARKNESS_BOX_MODULE_ID)
     assert module["title"] == "常暗之厢"
     assert module["playersMin"] == 2
     assert module["playersMax"] == 3

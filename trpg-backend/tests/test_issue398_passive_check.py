@@ -401,3 +401,60 @@ async def test_two_open_decisions_never_coexist_on_one_action(
         found = await transaction.find_pending_check_by_action(action_id)
     assert found is not None
     assert found.decision_id == second.pending_decision.decision_id
+
+
+async def test_decisions_written_before_the_origin_split_still_load(
+    db_session: AsyncSession,
+    engine_store_factory: Callable[..., SqlAlchemyEngineStore],
+) -> None:
+    """#483 拆开 `RuleCheckOrigin` 之后，部署前落库的检定必须还能读回来。
+
+    出处（rule/branch/step）与恢复游标（agenda/source_event）拆开时，后两个字段
+    从必填变成可选。老行五个字段齐全，新模型照样读得动——这条把 schema version
+    压回 1 走一遍读路径，确认版本检查放行、`resumes_agenda` 仍然为真，也就是被动
+    检定结算后照旧回 Agenda 走 `result_routes`，而不是被当成主动检定。
+    """
+
+    room, players, _ = await _start_room(db_session, room_number=97)
+    room_id, player_id = room.id, players[0].id
+    actor_id = await _arm_first_sight(db_session, room_id)
+
+    store = engine_store_factory()
+    async with store.transaction(room_id) as transaction:
+        runtime = await transaction.load_runtime()
+    execution = await AdjudicationEngineService(store).submit(
+        _see_true_form(room_id, player_id, actor_id, runtime.revision)
+    )
+    pending = execution.pending_decision
+    assert pending is not None
+
+    db_session.expire_all()
+    record = (
+        await db_session.scalars(
+            select(PendingCheckDecisionRecord).where(
+                PendingCheckDecisionRecord.room_id == room_id,
+                PendingCheckDecisionRecord.decision_id == pending.decision_id,
+            )
+        )
+    ).one()
+    # 被动路径写出来的 JSON 本来就是老格式（五个字段齐全），把版本号压回 1 就等价
+    # 于一条部署前的行。
+    origin = dict(record.decision_json["rule_origin"])
+    assert set(origin) == {
+        "agenda_id",
+        "rule_id",
+        "branch_id",
+        "step_id",
+        "source_event_id",
+    }
+    record.decision_schema_version = 1
+    await db_session.commit()
+
+    async with engine_store_factory().transaction(room_id) as transaction:
+        reloaded = await transaction.load_pending_check(pending.decision_id)
+    assert reloaded is not None
+    assert reloaded.rule_origin is not None
+    # 恢复游标还在 —— 被动检定结算后仍旧回 Agenda，不会走主动路径的 _finalize_action。
+    assert reloaded.rule_origin.resumes_agenda is True
+    assert reloaded.rule_origin.agenda_id == origin["agenda_id"]
+    assert reloaded.rule_origin.source_event_id == origin["source_event_id"]

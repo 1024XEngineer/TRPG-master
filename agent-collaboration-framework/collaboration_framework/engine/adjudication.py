@@ -2051,9 +2051,16 @@ class AdjudicationEngineService:
         玩家自己的行动检定：提交 Agent 裁决好的 success/failure 效果。
         规则拥有的被动检定：回到挂起的 Agenda，按 `result_routes` 走它的分支，
         Agent 不再参与后果裁决（#226 §5）。
+
+        判据是「要不要回 Agenda」，不是「有没有出处」（#483）。`agent_match` 提交
+        路径也有出处——它就是靠出处拿到规则声明的技能与难度的——但它没有 Agenda，
+        结算的是父动作。两者曾经共用 `rule_origin is not None` 这一个判断，于是
+        「让主动检定认得自己的规则」和「把主动检定错误地当成被动检定恢复」变成了
+        同一件事。
         """
 
-        if decision.rule_origin is not None:
+        origin = decision.rule_origin
+        if origin is not None and origin.resumes_agenda:
             return self._resume_rule_check(
                 runtime,
                 request_id=request_id,
@@ -2090,7 +2097,7 @@ class AdjudicationEngineService:
         """
 
         origin = decision.rule_origin
-        assert origin is not None
+        assert origin is not None and origin.agenda_id is not None
         state = runtime.game_state.model_copy(deep=True)
         events = [
             *prefix_events,

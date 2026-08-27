@@ -54,6 +54,13 @@ from app.service.module_content_cache import load_module_content
 # 房间一提交奖惩骰决定就炸。读路径按版本升级，写路径一律写当前版本。
 _CHECK_RUN_SCHEMA_VERSION = 2
 _SUPPORTED_CHECK_RUN_VERSIONS = frozenset({1, _CHECK_RUN_SCHEMA_VERSION})
+# #483 把 RuleCheckOrigin 的恢复游标（agenda_id / source_event_id）改成可选，好让
+# agent_match 提交路径也能记住出处。老行五个字段齐全，新模型照样读得动，所以读路径
+# 不需要升级——升版本是为了让**回滚**失败得干净：回滚后的旧代码遇到主动路径写的行
+# （没有 agenda_id）会炸在 pydantic 里，报一句看不出所以然的校验错；写上版本号，它
+# 会先撞上下面这个版本检查，直接说「不支持的 schema version」。
+_PENDING_DECISION_SCHEMA_VERSION = 2
+_SUPPORTED_PENDING_DECISION_VERSIONS = frozenset({1, _PENDING_DECISION_SCHEMA_VERSION})
 _ADJUDICATION_RESULT_SCHEMA_VERSION = 3
 _SUPPORTED_ADJUDICATION_RESULT_VERSIONS = frozenset({1, 2, _ADJUDICATION_RESULT_SCHEMA_VERSION})
 
@@ -934,7 +941,7 @@ class _SqlAlchemyEngineTransaction(EngineTransaction):
     ) -> PendingCheckDecision | None:
         if record is None:
             return None
-        if record.decision_schema_version != 1:
+        if record.decision_schema_version not in _SUPPORTED_PENDING_DECISION_VERSIONS:
             raise ContractError("不支持的 PendingCheckDecision schema version")
         decision = PendingCheckDecision.model_validate(deepcopy(record.decision_json))
         if (
@@ -966,7 +973,7 @@ class _SqlAlchemyEngineTransaction(EngineTransaction):
                     actor_id=decision.actor_id,
                     status=decision.status,
                     decision_version=decision.decision_version,
-                    decision_schema_version=1,
+                    decision_schema_version=_PENDING_DECISION_SCHEMA_VERSION,
                     decision_json=decision.to_json_dict(),
                     created_at=now,
                     updated_at=now,
@@ -975,6 +982,7 @@ class _SqlAlchemyEngineTransaction(EngineTransaction):
             return
         record.status = decision.status
         record.decision_version = decision.decision_version
+        record.decision_schema_version = _PENDING_DECISION_SCHEMA_VERSION
         record.decision_json = decision.to_json_dict()
         record.updated_at = now
 

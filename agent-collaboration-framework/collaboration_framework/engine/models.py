@@ -364,22 +364,51 @@ class DomainEvent(ContractModel):
 
 
 class RuleCheckOrigin(ContractModel):
-    """把一次检定钉回它所属的 Agenda 游标（#398 §阶段三）。
+    """这次检定出自模组的哪条规则、哪个分支、哪一步（#398 §阶段三，#483）。
 
-    被动检定不是玩家发起的，是规则走到 `CheckStep` 时引擎替规则问的。结算之后
-    要恢复的也不是「这次行动的成功/失败效果」，而是**同一条规则的
-    `result_routes` 分支**——所以必须记住是哪个 Agenda、哪条规则、哪个分支、
-    哪一步、由哪个事件触发。
+    出处与恢复游标是两件事，这里的字段分成两半：
+
+    - `rule_id` / `branch_id` / `step_id` 是**出处**，两条入口都有。有了它就能把
+      作者写在 `CheckStep.check` 上的技能、难度、幸运与推动权限找回来，这也是
+      `_rule_check_spec` 唯一关心的部分。
+    - `agenda_id` / `source_event_id` 是**恢复游标**，只有被动检定有。被动检定不是
+      玩家发起的，是规则走到 `CheckStep` 时引擎替规则问的，结算之后要恢复的不是
+      「这次行动的成功/失败效果」，而是同一条规则的 `result_routes` 分支，所以必须
+      记住是哪个 Agenda、由哪个事件触发。
+
+    这两半原本是揉在一起的五个必填字段，于是「有出处」和「要回 Agenda」变成了同一
+    个判断。主动提交路径有出处但没有 Agenda，一旦补上出处就会被 `_settle_check`
+    误当成被动检定路由到 `_resume_rule_check`，按不存在的游标恢复——所以拆开。
 
     不另加恢复令牌：`PendingCheckDecision.decision_version` 已经承担版本与恢复
     职责，再加一个只会多出一个可能不同步的事实源。
     """
 
-    agenda_id: str = Field(min_length=1)
     rule_id: str = Field(min_length=1)
     branch_id: str = Field(min_length=1)
     step_id: str = Field(min_length=1)
-    source_event_id: str = Field(min_length=1)
+    agenda_id: str | None = Field(default=None, min_length=1)
+    source_event_id: str | None = Field(default=None, min_length=1)
+
+    @model_validator(mode="after")
+    def validate_resume_cursor(self) -> RuleCheckOrigin:
+        # 游标要么齐、要么没有。只有一半的话，`_resume_rule_check` 会在半路上
+        # 拿到 None，那种失败离这里很远、很难查。
+        if (self.agenda_id is None) != (self.source_event_id is None):
+            raise ValueError(
+                "RuleCheckOrigin 的 agenda_id 与 source_event_id 必须同时存在或同时缺席"
+            )
+        return self
+
+    @property
+    def resumes_agenda(self) -> bool:
+        """结算之后要不要回到 Agenda 继续走规则的 `result_routes`。
+
+        被动检定为 True，`agent_match` 提交路径为 False——后者结算的是父动作，
+        走 `_finalize_action`。
+        """
+
+        return self.agenda_id is not None
 
 
 class PendingCheckDecision(ContractModel):

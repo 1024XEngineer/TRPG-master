@@ -3389,6 +3389,11 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                     recipient=submit_payload.recipient,
                                 )
                                 continue
+                            resuming_own_plan = (
+                                active_plan is not None
+                                and active_plan.parent_action_id == submit_payload.client_action_id
+                                and active_plan.status not in _OWN_SUPERSEDE_STATUSES
+                            )
                             await _send_turn_event(
                                 websocket,
                                 TurnStarted(correlation_id=submit_payload.client_action_id),
@@ -3396,7 +3401,7 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                             turn_started_at = time.monotonic()
                             await _broadcast_room_action_state(db, room_id)
                             keeper_utterance = submit_payload.utterance
-                            if submit_payload.recipient.kind == "keeper":
+                            if submit_payload.recipient.kind == "keeper" and not resuming_own_plan:
                                 await _enqueue_host_action(
                                     db,
                                     websocket,
@@ -3413,7 +3418,12 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                     room_id,
                                     submit_payload.client_action_id,
                                 )
-                                if queued_item is not None:
+                                if queued_item is not None and queued_item.status in (
+                                    *_HOST_QUEUE_TERMINAL,
+                                    "completed",
+                                ):
+                                    queued_item = None
+                                elif queued_item is not None:
                                     if queued_item.status == "retryable_failure":
                                         queued_item.next_attempt_at = datetime.now(UTC)
                                         await db.commit()
@@ -3423,11 +3433,8 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                         recipient_kind="keeper",
                                     )
                                     if claimed is None:
-                                        raise TurnExecutionError(
-                                            "TURN_INTERNAL_ERROR",
-                                            "主持行动未能开始，请重试",
-                                            retryable=True,
-                                        )
+                                        schedule_host_action_drain(room_id)
+                                        continue
                                     queued_item = claimed
                                     route = await _route_keeper_queue_item(
                                         db, queued_item, action_view
@@ -3476,7 +3483,7 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 ),
                                 on_input_accepted=(
                                     None
-                                    if queued_item is not None
+                                    if queued_item is not None or resuming_own_plan
                                     else partial(
                                         _broadcast_action_utterance,
                                         db,

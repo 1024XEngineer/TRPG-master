@@ -30,6 +30,30 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # SQLite batch rebuild copies live rows into the replacement table.  Pending
+    # clarification values are illegal under the previous CHECKs, so fold them
+    # first the same way earlier queue migrations normalize status.
+    op.execute(
+        sa.text(
+            "UPDATE host_action_queue "
+            "SET utterance = utterance || :prefix || continuation_text "
+            "WHERE continuation_text IS NOT NULL AND trim(continuation_text) != ''"
+        ).bindparams(prefix="\n玩家补充：")
+    )
+    op.execute(
+        sa.text(
+            "UPDATE host_action_queue SET execution_route = 'unresolved' "
+            "WHERE execution_route = 'needs_clarification'"
+        )
+    )
+    op.execute(
+        sa.text(
+            "UPDATE host_action_queue "
+            "SET status = 'queued', lease_owner = NULL, lease_expires_at = NULL, "
+            "next_attempt_at = NULL "
+            "WHERE status = 'needs_clarification'"
+        )
+    )
     with op.batch_alter_table("host_action_queue") as batch_op:
         batch_op.drop_constraint("ck_host_action_queue_execution_route", type_="check")
         batch_op.create_check_constraint(

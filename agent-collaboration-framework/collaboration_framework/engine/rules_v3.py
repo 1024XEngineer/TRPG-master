@@ -420,6 +420,8 @@ def agent_match_scope_admits(
     action_family: str | None = None,
     target_kind: str | None = None,
     target_id: str | None = None,
+    state: GameState | None = None,
+    actor_id: str | None = None,
 ) -> bool:
     """Whether this rule may fire in this situation. Empty scope = unconstrained.
 
@@ -440,6 +442,11 @@ def agent_match_scope_admits(
     trigger = rule.trigger
     if not isinstance(trigger, AgentMatchTriggerSpec):
         return False
+    if trigger.when is not None:
+        if state is None or actor_id is None:
+            return False
+        if not evaluate_condition(trigger.when, state=state, actor_id=actor_id):
+            return False
     scope = trigger.scope
     if scope.location_ids and location_id not in scope.location_ids:
         return False
@@ -480,6 +487,8 @@ def agent_match_admits(
         action_family=action_family,
         target_kind=target_kind,
         target_id=target_id,
+        state=state,
+        actor_id=actor_id,
     ):
         return False
     trigger = rule.trigger

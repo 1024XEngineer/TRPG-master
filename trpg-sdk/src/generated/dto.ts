@@ -903,6 +903,7 @@ export interface KnownLocationView {
   id: string;
   kind: "region" | "site" | "room" | "connector";
   name: string;
+  aliases?: string[];
   description?: string;
   parent_location_id?: string | null;
   region_id?: string | null;

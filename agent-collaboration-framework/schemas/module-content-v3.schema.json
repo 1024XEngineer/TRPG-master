@@ -4,7 +4,7 @@
   "$defs": {
     "ActorPlacementSpec": {
       "additionalProperties": false,
-      "description": "Where investigators start. Actor position is runtime state (#240 §1).",
+      "description": "调查者的起始位置。Actor 位置属于运行时状态（#240 §1）。",
       "properties": {
         "location_id": {
           "maxLength": 100,
@@ -22,7 +22,7 @@
     },
     "AdjudicatedCheckStep": {
       "additionalProperties": false,
-      "description": "Take over the check the Agent already proposed for this action.\n\n`effect_authority=\"rule\"` is the point: the player picked the skill, but the\npublished rule — not the Agent — owns what the result does.",
+      "description": "接管 Agent 已经为本次行动提出的检定。\n\n`effect_authority=\"rule\"` 是关键：玩家选择技能，但检定结果如何产生效果由已发布的\n规则负责，而不是由 Agent 决定。",
       "properties": {
         "id": {
           "maxLength": 100,
@@ -294,7 +294,7 @@
     },
     "AwaitPlayerInputStep": {
       "additionalProperties": false,
-      "description": "Suspend the agenda until the player speaks again (#226 §4).",
+      "description": "暂停议程，直到玩家再次发言（#226 §4）。",
       "properties": {
         "id": {
           "maxLength": 100,
@@ -413,7 +413,7 @@
     },
     "CandidateScopeSpec": {
       "additionalProperties": false,
-      "description": "Which situations may surface this rule as an Agent candidate.\n\n#226 writes this as `scene_ids`; #240 §5 rules that a scene is a narrative\nchapter and is no longer the authoritative actor position, so v3 scopes by\n`location_ids` instead — the same reconciliation that moved\n`RuleMatchContextRefs` onto `actor_location_id` / `target_location_id`.",
+      "description": "哪些情形可以将这条规则呈现为 Agent 候选。\n\n#226 将此字段写作 `scene_ids`；#240 §5 规定 scene 是叙事章节，不再是 Actor 位置的\n权威来源，因此 v3 改用 `location_ids` 限定范围。这也是将 `RuleMatchContextRefs`\n迁移到 `actor_location_id` / `target_location_id` 的同一项协调结果。",
       "properties": {
         "action_families": {
           "default": [],
@@ -616,7 +616,7 @@
     },
     "CreateNpcActionOpportunityStep": {
       "additionalProperties": false,
-      "description": "Positive authorisation for an NPC to act; nothing acts implicitly.",
+      "description": "明确授权 NPC 执行行动；任何行动都不会隐式发生。",
       "properties": {
         "id": {
           "maxLength": 100,
@@ -839,7 +839,7 @@
     },
     "EndingPolicySpec": {
       "additionalProperties": false,
-      "description": "Reaching the core resolution opens the ending; it does not force it.\n\n`allow_continue_after_core_resolution` is the fix for v2's habit of ending\nthe session the moment the main thread closed (#212 §1).",
+      "description": "达到主线解决状态后开放结局，但不会强制立即结束。\n\n`allow_continue_after_core_resolution` 用于修复 v2 在主线闭合的瞬间就结束会话的行为\n（#212 §1）。",
       "properties": {
         "allow_continue_after_core_resolution": {
           "default": true,
@@ -979,7 +979,7 @@
     },
     "EntityRelationSpec": {
       "additionalProperties": false,
-      "description": "A semantic relation only.\n\n`owns` / `carried_by` / `contains` deliberately do not imply custody: an\nitem's authoritative position is `ItemCustody` runtime state, and capacity,\nequipment slots and stacking are explicitly not frozen yet (#212 §8.2).",
+      "description": "仅表示语义关系。\n\n`owns` / `carried_by` / `contains` 有意不表示物品保管关系：物品的权威位置由运行时\n`ItemCustody` 状态决定，容量、装备槽和堆叠规则目前也明确没有冻结（#212 §8.2）。",
       "properties": {
         "kind": {
           "enum": [
@@ -1012,7 +1012,7 @@
     },
     "EntitySpecV3": {
       "additionalProperties": false,
-      "description": "A Canon NPC or object.\n\nRuntime entities the Agent proposes mid-session are not authored here; they\ncarry `origin=\"runtime\"` and live in GameState, and may never shadow a Canon\nid (#212 §8.2).",
+      "description": "一个 Canon 人物或物体。\n\nAgent 在会话中途提出的运行时实体不在这里编写；它们带有 `origin=\"runtime\"`，存放在\nGameState 中，并且永远不能遮蔽 Canon ID（#212 §8.2）。",
       "properties": {
         "id": {
           "maxLength": 100,
@@ -1177,7 +1177,7 @@
     },
     "EventTriggerSpec": {
       "additionalProperties": false,
-      "description": "Matches a committed domain event, never the player's words (#212 §3.3).",
+      "description": "匹配已提交的领域事件，而不是玩家的话语（#212 §3.3）。",
       "properties": {
         "kind": {
           "const": "event",
@@ -1337,7 +1337,7 @@
     },
     "InformationDiscoverySpec": {
       "additionalProperties": false,
-      "description": "Whether the fact starts hidden, and who shares it once discovered.",
+      "description": "事实是否在开局隐藏，以及发现后与谁共享。",
       "properties": {
         "initial": {
           "default": "hidden",
@@ -1390,7 +1390,7 @@
     },
     "InformationRecoverySpec": {
       "additionalProperties": false,
-      "description": "How hard the module insists on *this* route to the fact.\n\n`strict` must honour the declared sources; `adaptive` / `guaranteed` let the\nAgent reach the same Canon Information through a reasonable Runtime source —\na neighbour, a public record, a clerk who looks it up — without ever letting\nit invent a fact that is not already Canon (#212 §4.2, §4.3).",
+      "description": "模组对通过*指定路径*获取事实的要求程度。\n\n`strict` 必须遵守声明的来源；`adaptive` / `guaranteed` 允许 Agent 通过合理的运行时\n来源（邻居、公共记录或代为查询的职员等）获得同一条 Canon 信息，但绝不允许它编造\n不属于 Canon 的事实（#212 §4.2、§4.3）。",
       "properties": {
         "policy": {
           "default": "adaptive",
@@ -1423,7 +1423,7 @@
     },
     "InformationSpecV3": {
       "additionalProperties": false,
-      "description": "One Canon fact, separated from every carrier that can deliver it.",
+      "description": "一条 Canon 事实，与所有可能承载和提供它的对象分离。",
       "properties": {
         "id": {
           "maxLength": 100,
@@ -1513,7 +1513,7 @@
     },
     "InitialStateSpec": {
       "additionalProperties": false,
-      "description": "The opening world snapshot.\n\nProvisional, same reason as `WorldProfileSpec`: only the fields the rest of\nthis contract references are modelled.",
+      "description": "开局时的世界快照。\n\n临时设计，原因与 `WorldProfileSpec` 相同：这里只建模本契约其余部分实际引用的字段。",
       "properties": {
         "start_location_id": {
           "maxLength": 100,
@@ -1723,7 +1723,7 @@
     "JsonValue": {},
     "KnowledgeGoalSpec": {
       "additionalProperties": false,
-      "description": "What the party must end up *knowing*, independent of how they learn it.",
+      "description": "队伍最终必须*知道的内容*，与获取这些内容的路径无关。",
       "properties": {
         "id": {
           "maxLength": 100,
@@ -1767,7 +1767,7 @@
     },
     "LocationEdgeSpec": {
       "additionalProperties": false,
-      "description": "One directed route in the navigation graph.\n\n`access_point_id` is the Entity that gates the edge (a door, a gate). When it\nis set and locked, travel stops at that boundary instead of failing — that is\nwhat lets the player be \"at the study door\" rather than either inside or\nnowhere.",
+      "description": "导航图中的一条有向路径。\n\n`access_point_id` 是控制该路径的 Entity（例如门或闸）。设置该字段且实体处于锁定\n状态时，移动会停在边界处而不是直接失败，这样玩家可以处于“书房门口”，而不是已经\n进入书房或被当作无处可去。",
       "properties": {
         "id": {
           "maxLength": 100,
@@ -1890,7 +1890,7 @@
     },
     "LocationSpecV3": {
       "additionalProperties": false,
-      "description": "A place.\n\n`parent_location_id` drives the UI breadcrumb; reachability is a separate\ngraph (`LocationEdgeSpec`). Conflating the two is what made v2 Scene exits\nunable to express \"standing at the locked study door\" (#212 §7.3, §7.4).",
+      "description": "一个地点。\n\n`parent_location_id` 用于驱动 UI 面包屑；可达性由独立的图（`LocationEdgeSpec`）表示。\nv2 将两者混为一谈，导致 Scene 出口无法表达“站在上锁的书房门口”（#212 §7.3、§7.4）。",
       "properties": {
         "id": {
           "maxLength": 100,
@@ -1933,6 +1933,14 @@
           "default": "",
           "title": "Player Visible Description",
           "type": "string"
+        },
+        "aliases": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Aliases",
+          "type": "array"
         },
         "parent_location_id": {
           "anyOf": [
@@ -2011,7 +2019,7 @@
     },
     "MatchOptionAuthorSpec": {
       "additionalProperties": false,
-      "description": "One opaque choice offered to the Agent.\n\nThe Agent submits `id` and nothing else; the mapping from option to\nconsequence exists only server-side, so a compromised or creative model\ncannot pick an outcome (#226 §1 设计结论).",
+      "description": "提供给 Agent 的一个不透明选项。\n\nAgent 只提交 `id`，不提交其他内容；选项到后果的映射只存在于服务端，因此即使模型\n被操纵或过度发挥，也不能自行选择结果（#226 §1 设计结论）。",
       "properties": {
         "id": {
           "maxLength": 100,
@@ -2066,7 +2074,7 @@
     },
     "ModulePresentation": {
       "additionalProperties": false,
-      "description": "Player-facing publication metadata, separate from keeper context.",
+      "description": "面向玩家的发布元数据，与主持人上下文分离。",
       "properties": {
         "title": {
           "minLength": 1,
@@ -2174,7 +2182,7 @@
     },
     "ModuleStoryPage": {
       "additionalProperties": false,
-      "description": "A player-safe page shown before character creation.",
+      "description": "创建角色前向玩家展示的安全页面。",
       "properties": {
         "title": {
           "default": "",
@@ -2371,7 +2379,7 @@
     },
     "PredicateCondition": {
       "additionalProperties": false,
-      "description": "A registered predicate, never a script.\n\n#226 §1 forbids scripts, database paths and arbitrary event payloads in\nrules; the predicate name must resolve to something the Engine registered.",
+      "description": "已注册的谓词，绝不是脚本。\n\n#226 §1 禁止规则包含脚本、数据库路径和任意事件载荷；谓词名称必须解析到 Engine\n已注册的实现。",
       "properties": {
         "op": {
           "const": "predicate",
@@ -2402,7 +2410,7 @@
     },
     "PresentationStep": {
       "additionalProperties": false,
-      "description": "Hand the Narrator a reference, not prose to copy.",
+      "description": "向叙述器传递引用，而不是让它照抄一段 prose。",
       "properties": {
         "id": {
           "maxLength": 100,
@@ -2472,7 +2480,7 @@
     },
     "RuleCheckSpec": {
       "additionalProperties": false,
-      "description": "A check owned by the rule rather than proposed by the Agent.\n\n`parameters` may only carry fields the named Check Profile registered — the\nrule cannot restate the system's dice algebra (#226 §5).",
+      "description": "由规则负责的检定，而不是由 Agent 提议的检定。\n\n`parameters` 只能携带指定 Check Profile 已注册的字段，规则不能重新定义系统的骰子\n运算规则（#226 §5）。",
       "properties": {
         "profile_id": {
           "maxLength": 100,
@@ -2647,7 +2655,7 @@
     },
     "RuleSpecV3": {
       "additionalProperties": false,
-      "description": "One authored rule.\n\nIts immutable identity is `(module_id, module_version, rule_id)`; a running\nsession pins a ModuleVersion so a republished rule can never change the\nmeaning of an agenda already in flight (#226 §1).",
+      "description": "一条编写好的规则。\n\n它的不可变身份是 `(module_id, module_version, rule_id)`；运行中的会话会固定一个\nModuleVersion，因此重新发布规则也不会改变正在执行的议程含义（#226 §1）。",
       "properties": {
         "id": {
           "maxLength": 100,
@@ -2969,7 +2977,7 @@
     },
     "WorldProfileSpec": {
       "additionalProperties": false,
-      "description": "Setting constraints the Agent must respect when proposing Runtime content.\n\nProvisional: #212 §7.5 only requires that an Agent-proposed inn \"符合\nworld_profile\". Modelled with the minimum needed to judge that, so a later\nissue can extend it without unwinding invented structure.",
+      "description": "Agent 提议运行时内容时必须遵守的设定约束。\n\n临时设计：#212 §7.5 只要求 Agent 提议的客栈“符合 world_profile”。这里按判断该要求\n所需的最小字段建模，后续 issue 可以直接扩展，而无需撤销当前人为引入的结构。",
       "properties": {
         "era": {
           "default": "",
@@ -3009,7 +3017,7 @@
     }
   },
   "additionalProperties": false,
-  "description": "The v3 module file (#212 §3.1).\n\nStructural invariants only live here; cross-collection reference checks\n(does this goal name a real Information? does this edge name a real\nLocation?) belong to the semantic validator, which can report every problem\nat once instead of aborting on the first.",
+  "description": "v3 模组文件（#212 §3.1）。\n\n这里只保存结构不变量；跨集合引用检查（例如目标是否引用真实的 Information、边是否\n引用真实的 Location）属于语义校验器。语义校验器可以一次报告所有问题，而不是遇到\n第一个问题就中止。",
   "properties": {
     "content_schema_version": {
       "const": 3,

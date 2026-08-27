@@ -58,7 +58,19 @@ SILVER_LOCK_SPEC = BuiltinModuleSpec(
     source_path=MODULE_FIXTURE_ROOT / "银之锁" / "module-content-v3.json",
     display_name="银之锁",
 )
-BUILTIN_MODULE_SPECS = (PAPER_CHASE_SPEC, SILVER_LOCK_SPEC)
+HAPPY_FROG_VILLAGE_SPEC = BuiltinModuleSpec(
+    scenario_id="00000000-0000-0000-0000-000000000006",
+    module_id="happy-frog-village",
+    version="3.0.8",
+    world_ref="coc-7e",
+    source_path=MODULE_FIXTURE_ROOT / "幸福蛙蛙村" / "module-content-v3.json",
+    display_name="幸福蛙蛙村",
+)
+BUILTIN_MODULE_SPECS = (
+    PAPER_CHASE_SPEC,
+    SILVER_LOCK_SPEC,
+    HAPPY_FROG_VILLAGE_SPEC,
+)
 
 
 class BuiltinModuleLoadError(RuntimeError):

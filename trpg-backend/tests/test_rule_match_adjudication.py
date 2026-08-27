@@ -85,6 +85,16 @@ FIXTURE = (
     / "追书人"
     / "module-content-v3.json"
 )
+HAPPY_FROG_FIXTURE = (
+    pathlib.Path(__file__).resolve().parents[2]
+    / "agent-collaboration-framework"
+    / "docs"
+    / "module-parser"
+    / "examples"
+    / "module-content-validation"
+    / "幸福蛙蛙村"
+    / "module-content-v3.json"
+)
 
 
 def _content() -> ModuleContentV3:
@@ -144,6 +154,55 @@ async def _cemetery_context(
     )
 
 
+async def _happy_frog_night_context(utterance: str) -> ActionPlanStepContext:
+    content = ModuleContentV3.model_validate_json(HAPPY_FROG_FIXTURE.read_text(encoding="utf-8"))
+    base_state = create_initial_game_state(
+        content,
+        room_id="happy-frog-room",
+        actors={
+            "pc_1": ActorState(
+                player_id="p1",
+                name="调查员",
+                source_character_id="c1",
+                source_character_version=1,
+                state={"skills": {"spot-hidden": 80}},
+            )
+        },
+    )
+    state = base_state.model_copy(
+        update={
+            "scene_id": "resort_reception",
+            "entities": {**base_state.entities, "night_ritual": {"active": True}},
+            "discovered_facts": frozenset({"messenger_leaves_at_night"}),
+        },
+        deep=True,
+    )
+    store = InMemoryEngineStore()
+    store.register_room(module_content=content, initial_state=state)
+    projector = PlayerViewProjector(RuleEngineService(store))
+    player_input = PlayerInput(
+        room_id=state.room_id,
+        player_id="p1",
+        actor_id="pc_1",
+        client_action_id="follow-messenger-cn",
+        utterance=utterance,
+    )
+    view = await projector.project(player_input)
+    return ActionPlanStepContext(
+        player_input=player_input,
+        plan_id="follow-messenger-plan",
+        plan_goal=utterance,
+        step_index=0,
+        step_request_id="follow-messenger-cn-step-0",
+        step=ActionPlanStep(kind="action", semantic_goal=utterance),
+        player_view=view,
+        keeper_capabilities=await projector.keeper_capabilities(
+            player_input,
+            expected_revision=view.revision,
+        ),
+    )
+
+
 def _located(view: PlayerView) -> LocationContextView:
     """v3 投影必然带 location_context；断言它在，顺带把 Optional 收窄掉。"""
 
@@ -160,6 +219,32 @@ async def test_engine_publishes_rule_candidates_where_the_actor_stands() -> None
     assert context.keeper_capabilities is not None
     rule_ids = {candidate.rule_id for candidate in context.keeper_capabilities.rule_candidates}
     assert "observe_caretaker" in rule_ids
+
+
+async def test_chinese_follow_messenger_input_selects_night_ritual_rule() -> None:
+    context = await _happy_frog_night_context("我悄悄跟踪信使")
+
+    adjudication = _deterministic_step_adjudication(context)
+
+    assert adjudication is not None
+    assert adjudication.rule_decision is not None
+    assert adjudication.rule_decision.rule_id == "follow_messenger_to_pond"
+    assert adjudication.rule_decision.option_id == "spot-hidden"
+    assert isinstance(adjudication.check, RequiredAdjudicationCheck)
+    assert adjudication.target == ActionTarget(kind="entity", id="messenger")
+
+
+async def test_forcing_james_out_selects_atomic_tragic_ending_rule() -> None:
+    context = await _happy_frog_night_context("强行把詹姆斯带出去")
+
+    adjudication = _deterministic_step_adjudication(context)
+
+    assert adjudication is not None
+    assert adjudication.rule_decision is not None
+    assert adjudication.rule_decision.rule_id == "force_james_out_of_resort"
+    assert adjudication.rule_decision.option_id == "force-james-out"
+    assert isinstance(adjudication.check, NoAdjudicationCheck)
+    assert adjudication.target == ActionTarget(kind="entity", id="james")
 
 
 async def test_rule_candidates_reach_the_model_payload() -> None:
@@ -523,6 +608,46 @@ async def test_dialogue_miss_reason_does_not_include_player_text() -> None:
     context = await _cemetery_context("询问眼前的人", step_kind="dialogue")
 
     assert _deterministic_adjudication_miss_reason(context) == "dialogue_target_unresolved"
+
+
+@pytest.mark.asyncio
+async def test_travel_alias_targets_real_room_instead_of_matching_region() -> None:
+    """建筑层级名应解析到其入口房间，region 本身不能成为旅行目标。"""
+
+    context = await _cemetery_context("进入别墅", step_kind="travel")
+    template = context.player_view.known_locations[0]
+    villa_region = template.model_copy(
+        update={
+            "id": "resort_villa",
+            "kind": "region",
+            "name": "度假村别墅",
+            "access": "blocked",
+        }
+    )
+    reception = template.model_copy(
+        update={
+            "id": "resort_reception",
+            "kind": "room",
+            "name": "一层接待大厅",
+            "aliases": ("度假村别墅", "别墅", "别墅入口"),
+            "access": "reachable",
+        }
+    )
+    view = context.player_view.model_copy(
+        update={
+            "known_locations": (
+                *context.player_view.known_locations,
+                villa_region,
+                reception,
+            )
+        },
+        deep=True,
+    )
+
+    destination = _match_travel_target(view, "进入别墅")
+
+    assert destination is not None
+    assert destination.id == "resort_reception"
 
 
 @pytest.mark.asyncio

@@ -135,6 +135,11 @@ def _information_is(args: dict[str, JsonValue], state: GameState, actor_id: str)
     )
 
 
+def _party_location_is(args: dict[str, JsonValue], state: GameState, actor_id: str) -> bool:
+    location_id = args.get("id")
+    return isinstance(location_id, str) and state.scene_id == location_id
+
+
 def _core_resolved(args: dict[str, JsonValue], state: GameState, actor_id: str) -> bool:
     return state.core_resolved is bool(args.get("value", True))
 
@@ -146,6 +151,7 @@ PREDICATES: dict[str, PredicateEvaluator] = {
     "world_time_at_least": _world_time_at_least,
     "days_elapsed_at_least": _days_elapsed_at_least,
     "information_is": _information_is,
+    "party_location_is": _party_location_is,
     "core_resolved": _core_resolved,
 }
 

@@ -126,7 +126,10 @@ const {
     dice3dSupported: { value: false },
     dice3dBehavior: { value: 'unsupported' as 'unsupported' | 'manual' },
     dice3dRolls: [] as Array<{ token: string; settle: (value: number) => void }>,
-    roomInfoState: { maxPlayers: 2 as number | null },
+    roomInfoState: {
+      maxPlayers: 2 as number | null,
+      moduleId: 'paper-chase-zh-coc7',
+    },
     emitWsMessage: (event: ServerToClientEvent) => {
       for (const handler of handlers) handler(event)
     },
@@ -267,6 +270,7 @@ vi.mock('@/hooks/useRoomPlayers', () => ({
   useRoomPlayers: () => roomInfoState.maxPlayers === null ? null : ({
     maxPlayers: roomInfoState.maxPlayers,
     phase: 'InGame',
+    moduleId: roomInfoState.moduleId,
     moduleTitle: '追书人',
     players: [
       {
@@ -437,6 +441,7 @@ describe('RoomPage conversation history', () => {
     dice3dBehavior.value = 'unsupported'
     dice3dRolls.length = 0
     roomInfoState.maxPlayers = 2
+    roomInfoState.moduleId = 'paper-chase-zh-coc7'
     Object.defineProperty(window, 'speechSynthesis', { configurable: true, value: undefined })
     Object.defineProperty(window, 'SpeechSynthesisUtterance', { configurable: true, value: undefined })
     Object.defineProperty(window, 'isSecureContext', { configurable: true, value: true })
@@ -2958,6 +2963,28 @@ describe('RoomPage conversation history', () => {
     expect(
       screen.getByText('主线已经收束，可以选择如何收尾'),
     ).toBeInTheDocument()
+  })
+
+  it('does not reuse the happy frog outside image in Silver Lock', async () => {
+    roomInfoState.moduleId = 'silver-lock'
+    const { container } = renderRoomPage()
+    await waitFor(() => expect(mockOnWsMessage).toHaveBeenCalled())
+
+    const view = playerViewFixture()
+    act(() => emitWsMessage({
+      type: 'view.updated',
+      payload: {
+        playerId: 'player-1',
+        playerView: {
+          ...view,
+          scene_id: 'outside',
+          scene: { ...view.scene, id: 'outside', name: '银之锁范围外' },
+        },
+      },
+    }))
+    fireEvent.click(screen.getByRole('button', { name: '地图' }))
+
+    expect(container.querySelector('.room-play__location-image')).not.toBeInTheDocument()
   })
 
   it('reviews a grounded ending draft before confirmation', async () => {

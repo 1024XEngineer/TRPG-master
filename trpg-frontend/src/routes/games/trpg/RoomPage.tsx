@@ -251,27 +251,31 @@ interface MapLocation {
   isCurrent?: boolean
 }
 
-const LOCATION_IMAGE_BY_ID: Record<string, string> = {
-  arnoldsburg_streets: '/assets/rooms/play/location-arnoldsburg-streets.webp',
-  thomas_office: '/assets/rooms/play/location-thomas-office.webp',
-  neighborhood: '/assets/rooms/play/location-neighborhood.webp',
-  cemetery: '/assets/rooms/play/location-cemetery.webp',
-  library: '/assets/rooms/play/location-library.webp',
-  newspaper_office: '/assets/rooms/play/location-newspaper-office.webp',
-  kimball_grounds: '/assets/rooms/play/location-kimball-grounds.webp',
-  kimball_study: '/assets/rooms/play/location-kimball-study.webp',
-  lane_manor: '/assets/locations/happy-frog-village/lane_manor.webp',
-  pretrip_investigation: '/assets/locations/happy-frog-village/pretrip_investigation.webp',
-  forest_road: '/assets/locations/happy-frog-village/forest_road.webp',
-  frog_resort: '/assets/locations/happy-frog-village/frog_resort.webp',
-  resort_reception: '/assets/locations/happy-frog-village/resort_reception.webp',
-  guest_room: '/assets/locations/happy-frog-village/guest_room.webp',
-  dining_kitchen: '/assets/locations/happy-frog-village/dining_kitchen.webp',
-  frog_pond: '/assets/locations/happy-frog-village/frog_pond.webp',
-  crystal_shore: '/assets/locations/happy-frog-village/crystal_shore.webp',
-  staff_area: '/assets/locations/happy-frog-village/staff_area.webp',
-  resort_boundary: '/assets/locations/happy-frog-village/resort_boundary.webp',
-  outside: '/assets/locations/happy-frog-village/outside.webp',
+const LOCATION_IMAGE_BY_MODULE_AND_ID: Record<string, Record<string, string>> = {
+  'paper-chase-zh-coc7': {
+    arnoldsburg_streets: '/assets/rooms/play/location-arnoldsburg-streets.webp',
+    thomas_office: '/assets/rooms/play/location-thomas-office.webp',
+    neighborhood: '/assets/rooms/play/location-neighborhood.webp',
+    cemetery: '/assets/rooms/play/location-cemetery.webp',
+    library: '/assets/rooms/play/location-library.webp',
+    newspaper_office: '/assets/rooms/play/location-newspaper-office.webp',
+    kimball_grounds: '/assets/rooms/play/location-kimball-grounds.webp',
+    kimball_study: '/assets/rooms/play/location-kimball-study.webp',
+  },
+  'happy-frog-village': {
+    lane_manor: '/assets/locations/happy-frog-village/lane_manor.webp',
+    pretrip_investigation: '/assets/locations/happy-frog-village/pretrip_investigation.webp',
+    forest_road: '/assets/locations/happy-frog-village/forest_road.webp',
+    frog_resort: '/assets/locations/happy-frog-village/frog_resort.webp',
+    resort_reception: '/assets/locations/happy-frog-village/resort_reception.webp',
+    guest_room: '/assets/locations/happy-frog-village/guest_room.webp',
+    dining_kitchen: '/assets/locations/happy-frog-village/dining_kitchen.webp',
+    frog_pond: '/assets/locations/happy-frog-village/frog_pond.webp',
+    crystal_shore: '/assets/locations/happy-frog-village/crystal_shore.webp',
+    staff_area: '/assets/locations/happy-frog-village/staff_area.webp',
+    resort_boundary: '/assets/locations/happy-frog-village/resort_boundary.webp',
+    outside: '/assets/locations/happy-frog-village/outside.webp',
+  },
 }
 
 function mapLocationsFromPlayerView(playerView: AgentPlayerView | null): MapLocation[] {
@@ -1655,7 +1659,9 @@ export default function RoomPage() {
     ? mapLocations.find((location) => location.id === pendingSceneTransition.targetSceneId)?.name
       ?? pendingSceneTransition.targetSceneId
     : null
-  const currentLocationImage = playerView ? LOCATION_IMAGE_BY_ID[playerView.scene.id] : undefined
+  const currentLocationImage = playerView && roomInfo?.moduleId
+    ? LOCATION_IMAGE_BY_MODULE_AND_ID[roomInfo.moduleId]?.[playerView.scene.id]
+    : undefined
   const liveResources = liveResourcesOf(playerView)
   const currentHp = resourceValue(playerView, 'hp') ?? character?.derived.hp ?? null
   const currentSan = resourceValue(playerView, 'san') ?? character?.derived.san ?? null

@@ -56,6 +56,12 @@ PAPER_CHASE_ASSET_ROOT = "/assets/npc_portraits/paper-chase-zh-coc7"
 
 HAPPY_FROG_VILLAGE_NPC_PORTRAITS = (
     NpcPortraitSpec(
+        "villager_accounts",
+        "周边村民",
+        "villager_accounts.webp",
+        "现代老林地周边的乡村居民，对林地与共同梦境讳莫如深，方形角色立绘",
+    ),
+    NpcPortraitSpec(
         "ezra",
         "埃兹拉",
         "ezra.webp",
@@ -78,6 +84,18 @@ HAPPY_FROG_VILLAGE_NPC_PORTRAITS = (
         "詹姆斯·莱恩",
         "james.webp",
         "现代年轻男性，沉浸在幸福美梦中，森林度假村背景，方形半身角色立绘",
+    ),
+    NpcPortraitSpec(
+        "frog_head_guest",
+        "宽衣游客",
+        "frog_head_guest.webp",
+        "现代度假村游客，用宽大衣物遮挡身体异样，神情麻木，方形角色立绘",
+    ),
+    NpcPortraitSpec(
+        "dream_frogs",
+        "梦游青蛙",
+        "dream_frogs.webp",
+        "森林池塘边几乎不躲避来人的鲜艳青蛙，梦境般氛围，方形角色立绘",
     ),
 )
 HAPPY_FROG_VILLAGE_ASSET_ROOT = "/assets/npc_portraits/happy-frog-village"

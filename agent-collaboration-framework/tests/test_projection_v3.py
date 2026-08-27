@@ -1795,11 +1795,11 @@ class RuleOwnedCheckTests(unittest.IsolatedAsyncioTestCase):
     async def test_rule_option_publishes_whether_it_rolls_dice(self) -> None:
         """Agent 必须能分辨哪条分支要掷骰，否则只能编一个技能 id 出来。"""
 
-        async def candidates(scene_id: str):
+        async def candidates(scene_id: str, **overrides):
             store = InMemoryEngineStore()
             store.register_room(
                 module_content=self.content,
-                initial_state=game_state(self.content, scene_id=scene_id),
+                initial_state=game_state(self.content, scene_id=scene_id, **overrides),
             )
             view = await RuleEngineService(store).read_keeper_capabilities(
                 PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
@@ -1811,9 +1811,173 @@ class RuleOwnedCheckTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(in_crypt["enter_crypt"].options[0].requires_check)
 
         # 搬石板要掷 STR，而它属于墓地——石板在墓地，不在地穴里。
-        at_cemetery = await candidates("cemetery")
+        at_cemetery = await candidates(
+            "cemetery",
+            entities={"crypt_entrance": {"discovered": True, "slab_moved": False}},
+        )
         self.assertTrue(at_cemetery["move_crypt_slab"].options[0].requires_check)
         self.assertNotIn("move_crypt_slab", in_crypt)
+
+    async def test_move_crypt_slab_requires_discovered_unmoved_entrance(self) -> None:
+        """#474：猜到「石板」不能绕过发现门禁；搬开后不能再发同一规则。"""
+
+        str_check = RequiredAdjudicationCheck(
+            candidates=(
+                SkillCheckCandidate(
+                    candidate_id="STR",
+                    skill_id="STR",
+                    difficulty="regular",
+                    method_summary="用力搬开石板",
+                    player_safe_reason="这是当前可用的做法",
+                ),
+            )
+        )
+
+        async def published(**entities) -> set[str]:
+            store = InMemoryEngineStore()
+            store.register_room(
+                module_content=self.content,
+                initial_state=game_state(
+                    self.content, scene_id="cemetery", entities=entities
+                ),
+            )
+            view = await RuleEngineService(store).read_keeper_capabilities(
+                PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+            )
+            return {item.rule_id for item in view.rule_candidates}
+
+        async def submit_move(*, request_id: str, **entities):
+            store = InMemoryEngineStore()
+            store.register_room(
+                module_content=self.content,
+                initial_state=game_state(
+                    self.content, scene_id="cemetery", entities=entities
+                ),
+            )
+            engine = AdjudicationEngineService(
+                store, dice=DiceRoller(SequenceDiceSource([5]))
+            )
+            rules = RuleEngineService(store)
+            snapshot = await rules.read(
+                PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+            )
+            try:
+                execution = await engine.submit(
+                    SubmitAdjudicationRequest(
+                        room_id=ROOM,
+                        player_id=PLAYER,
+                        adjudication=ActionAdjudication(
+                            request_id=request_id,
+                            source_revision=snapshot.revision,
+                            actor_id=ACTOR,
+                            summary="搬开石板",
+                            target=ActionTarget(kind="entity", id="crypt_entrance"),
+                            method=ActionMethod(family="move", description="搬开石板"),
+                            rule_decision=RuleDecisionRef(
+                                rule_id="move_crypt_slab", option_id="STR"
+                            ),
+                            check=str_check,
+                            success_effects=(),
+                            failure_effects=(),
+                        ),
+                    )
+                )
+            except AdjudicationValidationError as exc:
+                return store, exc
+            return store, execution
+
+        hidden = {"crypt_entrance": {"discovered": False, "slab_moved": False}}
+        ready = {"crypt_entrance": {"discovered": True, "slab_moved": False}}
+        moved = {"crypt_entrance": {"discovered": True, "slab_moved": True}}
+
+        self.assertNotIn("move_crypt_slab", await published(**hidden))
+        self.assertIn("move_crypt_slab", await published(**ready))
+        self.assertNotIn("move_crypt_slab", await published(**moved))
+
+        hidden_store, rejected = await submit_move(request_id="slab-hidden", **hidden)
+        self.assertIsInstance(rejected, AdjudicationValidationError)
+        self.assertEqual(rejected.result.code, "RULE_OUT_OF_SCOPE")
+        self.assertEqual(rejected.result.player_safe_reason, "当前行动不能使用该规则选项")
+        self.assertEqual(len(hidden_store.inspect_domain_events(ROOM)), 0)
+        self.assertIs(
+            hidden_store.inspect_state(ROOM).entities["crypt_entrance"].get("slab_moved"),
+            False,
+        )
+
+        store, admitted = await submit_move(request_id="slab-ready", **ready)
+        self.assertNotIsInstance(admitted, AdjudicationValidationError)
+        pending = admitted.pending_decision
+        assert pending is not None
+        engine = AdjudicationEngineService(
+            store, dice=DiceRoller(SequenceDiceSource([5]))
+        )
+        resolved = await engine.decide(
+            CheckDecisionRequest(
+                request_id="slab-ready:select",
+                room_id=ROOM,
+                player_id=PLAYER,
+                source_revision=admitted.view_revision,
+                decision_id=pending.decision_id,
+                decision_version=pending.decision_version,
+                choice=SelectCheckChoice(candidate_id="STR"),
+            )
+        )
+        check_run = resolved.check_run
+        assert check_run is not None
+        await engine.decide_post_roll(
+            PostRollDecisionRequest(
+                request_id="slab-ready:accept",
+                room_id=ROOM,
+                player_id=PLAYER,
+                source_revision=resolved.view_revision,
+                check_id=check_run.check_id,
+                check_version=check_run.version,
+                option_id="accept-current",
+            )
+        )
+        self.assertIs(
+            store.inspect_state(ROOM).entities["crypt_entrance"]["slab_moved"], True
+        )
+        events_after_success = len(store.inspect_domain_events(ROOM))
+
+        snapshot = await RuleEngineService(store).read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        with self.assertRaises(AdjudicationValidationError) as rejected_again:
+            await AdjudicationEngineService(store).submit(
+                SubmitAdjudicationRequest(
+                    room_id=ROOM,
+                    player_id=PLAYER,
+                    adjudication=ActionAdjudication(
+                        request_id="slab-again",
+                        source_revision=snapshot.revision,
+                        actor_id=ACTOR,
+                        summary="再搬一次石板",
+                        target=ActionTarget(kind="entity", id="crypt_entrance"),
+                        method=ActionMethod(family="move", description="搬开石板"),
+                        rule_decision=RuleDecisionRef(
+                            rule_id="move_crypt_slab", option_id="STR"
+                        ),
+                        check=str_check,
+                        success_effects=(),
+                        failure_effects=(),
+                    ),
+                )
+            )
+        self.assertEqual(rejected_again.exception.result.code, "RULE_OUT_OF_SCOPE")
+        self.assertEqual(len(store.inspect_domain_events(ROOM)), events_after_success)
+        self.assertIs(
+            store.inspect_state(ROOM).entities["crypt_entrance"]["slab_moved"], True
+        )
+
+        moved_store, again = await submit_move(request_id="slab-already-moved", **moved)
+        self.assertIsInstance(again, AdjudicationValidationError)
+        self.assertEqual(again.result.code, "RULE_OUT_OF_SCOPE")
+        self.assertEqual(len(moved_store.inspect_domain_events(ROOM)), 0)
+        self.assertIs(
+            moved_store.inspect_state(ROOM).entities["crypt_entrance"]["slab_moved"],
+            True,
+        )
 
     async def test_rule_decision_from_another_location_is_refused(self) -> None:
         """候选按场景发布，提交也必须按场景复查。

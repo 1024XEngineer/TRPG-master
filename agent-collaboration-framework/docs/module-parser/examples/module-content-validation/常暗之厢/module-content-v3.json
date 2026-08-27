@@ -1,0 +1,5092 @@
+{
+  "background": "2013 年某日深夜，调查员们搭乘前往终点站的末班电车，并在空无一人的 6 号车厢中醒来。列车仍在行驶，窗外没有灯光，手机没有信号；同伴也刚刚从沉睡中醒来，车门上贴着一张尚未阅读的便签。",
+  "content_schema_version": 3,
+  "core_resolution": {
+    "completion": "all",
+    "required_goal_ids": [
+      "resolve_dream_train"
+    ]
+  },
+  "ending_anchors": [
+    {
+      "forbidden_claims": [
+        "未提交的调查员死亡",
+        "未提交的乘务员生还或死亡",
+        "未提交的战斗胜利",
+        "具体 SAN 数值变化"
+      ],
+      "id": "accelerate_true_end",
+      "required_fact_refs": [
+        "ending_accelerate"
+      ],
+      "tone": "relieved"
+    },
+    {
+      "forbidden_claims": [
+        "调查员在现实中死亡",
+        "乘务员永久退场",
+        "战胜循声者",
+        "具体 SAN 数值变化"
+      ],
+      "id": "decelerate_bad_end",
+      "required_fact_refs": [
+        "ending_decelerate"
+      ],
+      "tone": "dreadful"
+    },
+    {
+      "forbidden_claims": [
+        "调查员肉体死亡",
+        "列车获救",
+        "战胜循声者或大嘴",
+        "Runtime 未提交的 SAN 精确归零"
+      ],
+      "id": "consumed_crazy_end",
+      "required_fact_refs": [
+        "ending_consumed"
+      ],
+      "tone": "bleak"
+    }
+  ],
+  "ending_policy": {
+    "allow_continue_after_core_resolution": true,
+    "allow_grounded_variations": true,
+    "facets": [
+      "train_choice",
+      "dream_outcome",
+      "attendant_presence",
+      "investigator_fate"
+    ],
+    "require_no_pending_action": true
+  },
+  "entities": [
+    {
+      "description": "列车与大嘴之间的权威追逐状态。",
+      "id": "train_chase",
+      "kind": "object",
+      "lifecycle": "session",
+      "located_in": "car_7",
+      "name": "梦境列车追逐状态",
+      "player_visible_name": "",
+      "plot_relevance": true,
+      "state": {
+        "active": true,
+        "deadline_reached": false,
+        "outcome": "none"
+      },
+      "visibility": "keeper"
+    },
+    {
+      "description": "保证每类原文恐怖场景只请求一次被动理智检定。",
+      "id": "horror_checks",
+      "kind": "object",
+      "lifecycle": "session",
+      "located_in": "dream_train",
+      "name": "恐怖检定结算标记",
+      "player_visible_name": "",
+      "plot_relevance": true,
+      "state": {
+        "bodies": false,
+        "maw": false
+      },
+      "visibility": "keeper"
+    },
+    {
+      "description": "贴在 6 号车厢前门上的便签。",
+      "id": "warning_note",
+      "kind": "object",
+      "lifecycle": "session",
+      "located_in": "car_6",
+      "name": "车门便签",
+      "player_visible_name": "车门上的便签",
+      "plot_relevance": true,
+      "state": {
+        "back_seen": false,
+        "read": false
+      },
+      "visibility": "public"
+    },
+    {
+      "description": "画在车门旁的列车车厢示意图。",
+      "id": "route_map",
+      "kind": "object",
+      "lifecycle": "session",
+      "located_in": "car_6",
+      "name": "列车示意图",
+      "player_visible_name": "列车示意图",
+      "plot_relevance": true,
+      "state": {
+        "inspected": false
+      },
+      "visibility": "public"
+    },
+    {
+      "description": "6 号车厢后方的车门，门缝里透出血腥味。",
+      "id": "rear_door",
+      "kind": "object",
+      "lifecycle": "session",
+      "located_in": "car_6",
+      "name": "通往 7 号车厢的门",
+      "player_visible_name": "通往 7 号车厢的门",
+      "plot_relevance": true,
+      "state": {
+        "opened": false
+      },
+      "visibility": "public"
+    },
+    {
+      "description": "7 号车厢内散落的血迹和人体残肢。",
+      "id": "rear_car_horror",
+      "kind": "object",
+      "lifecycle": "session",
+      "located_in": "car_7",
+      "name": "7 号车厢残骸",
+      "player_visible_name": "散落的残骸",
+      "plot_relevance": true,
+      "state": {
+        "seen": false
+      },
+      "visibility": "public",
+      "visibility_conditions": [
+        {
+          "args": {
+            "entity_id": "rear_car_horror",
+            "key": "seen",
+            "value": true
+          },
+          "op": "predicate",
+          "predicate": "entity_state_is"
+        }
+      ]
+    },
+    {
+      "description": "从车尾向前吞噬列车、比整列电车更庞大的嘴状存在。",
+      "id": "rear_maw",
+      "kind": "npc",
+      "lifecycle": "session",
+      "located_in": "car_7",
+      "name": "奈亚化身的大嘴",
+      "player_visible_name": "吞噬列车的巨大存在",
+      "plot_relevance": true,
+      "state": {
+        "active": true,
+        "reached_party": false,
+        "revealed": false
+      },
+      "visibility": "public",
+      "visibility_conditions": [
+        {
+          "items": [
+            {
+              "args": {
+                "entity_id": "rear_maw",
+                "key": "revealed",
+                "value": true
+              },
+              "op": "predicate",
+              "predicate": "entity_state_is"
+            },
+            {
+              "args": {
+                "entity_id": "rear_maw",
+                "key": "active",
+                "value": true
+              },
+              "op": "predicate",
+              "predicate": "entity_state_is"
+            }
+          ],
+          "op": "all"
+        }
+      ]
+    },
+    {
+      "description": "5 号车厢里的一张报纸。",
+      "id": "newspaper",
+      "kind": "object",
+      "lifecycle": "session",
+      "located_in": "car_5",
+      "name": "来自次日的报纸",
+      "player_visible_name": "掉在座位下的报纸",
+      "plot_relevance": true,
+      "state": {
+        "date_understood": false,
+        "found": false
+      },
+      "visibility": "public",
+      "visibility_conditions": [
+        {
+          "args": {
+            "entity_id": "newspaper",
+            "key": "found",
+            "value": true
+          },
+          "op": "predicate",
+          "predicate": "entity_state_is"
+        }
+      ]
+    },
+    {
+      "description": "腿部有咬伤、处于休克状态的 30 岁男性乘务员。",
+      "id": "attendant",
+      "kind": "npc",
+      "lifecycle": "session",
+      "located_in": "car_4",
+      "name": "京山人吉",
+      "player_visible_name": "重伤的乘务员",
+      "plot_relevance": true,
+      "state": {
+        "accompanying": false,
+        "allows_acceleration": false,
+        "attack_told": false,
+        "awake": false,
+        "key_location_told": false,
+        "maw_believed": false,
+        "present": true,
+        "sound_weakness_told": false
+      },
+      "visibility": "public",
+      "visibility_conditions": [
+        {
+          "args": {
+            "entity_id": "attendant",
+            "key": "present",
+            "value": true
+          },
+          "op": "predicate",
+          "predicate": "entity_state_is"
+        }
+      ]
+    },
+    {
+      "description": "堆满 3 号车厢、会妨碍奔跑和搜索的行李。",
+      "id": "luggage_pile",
+      "kind": "object",
+      "lifecycle": "session",
+      "located_in": "car_3",
+      "name": "散乱行李",
+      "player_visible_name": "散乱的行李",
+      "plot_relevance": true,
+      "state": {
+        "passage_cleared": false
+      },
+      "visibility": "public"
+    },
+    {
+      "description": "装有驾驶室钥匙和控制面板钥匙的黑色包。",
+      "id": "key_bag",
+      "kind": "object",
+      "lifecycle": "session",
+      "located_in": "car_3",
+      "name": "断带黑包与两把钥匙",
+      "player_visible_name": "背带断掉的黑色包",
+      "plot_relevance": true,
+      "state": {
+        "carried": false,
+        "found": false,
+        "retrieved": false
+      },
+      "visibility": "public",
+      "visibility_conditions": [
+        {
+          "args": {
+            "entity_id": "key_bag",
+            "key": "found",
+            "value": true
+          },
+          "op": "predicate",
+          "predicate": "entity_state_is"
+        }
+      ]
+    },
+    {
+      "description": "从 3 号车厢望向 2 号车厢的门，玻璃后一片漆黑。",
+      "id": "car_2_door",
+      "kind": "object",
+      "lifecycle": "session",
+      "located_in": "car_3",
+      "name": "2 号车厢前门",
+      "player_visible_name": "通往黑暗车厢的门",
+      "plot_relevance": true,
+      "state": {
+        "crossing_resolved": false
+      },
+      "visibility": "public"
+    },
+    {
+      "description": "潜伏在 2 号车厢、没有视力且对声音极其敏感的类人生物。",
+      "id": "clicker_group",
+      "kind": "npc",
+      "lifecycle": "session",
+      "located_in": "car_2",
+      "name": "循声者群",
+      "player_visible_name": "黑暗中的无眼怪物",
+      "plot_relevance": true,
+      "state": {
+        "active": true,
+        "alerted": false,
+        "distracted": false,
+        "noticed": false
+      },
+      "visibility": "public",
+      "visibility_conditions": [
+        {
+          "items": [
+            {
+              "args": {
+                "entity_id": "clicker_group",
+                "key": "noticed",
+                "value": true
+              },
+              "op": "predicate",
+              "predicate": "entity_state_is"
+            },
+            {
+              "args": {
+                "entity_id": "clicker_group",
+                "key": "active",
+                "value": true
+              },
+              "op": "predicate",
+              "predicate": "entity_state_is"
+            }
+          ],
+          "op": "all"
+        }
+      ]
+    },
+    {
+      "description": "先头车厢最前端上锁的驾驶室门。",
+      "id": "cab_door",
+      "kind": "object",
+      "lifecycle": "session",
+      "located_in": "lead_car",
+      "name": "驾驶室门",
+      "player_visible_name": "通往驾驶室的门",
+      "plot_relevance": true,
+      "state": {
+        "opened": false
+      },
+      "visibility": "public"
+    },
+    {
+      "description": "有左右两只拉杆的列车控制面板。",
+      "id": "control_panel",
+      "kind": "object",
+      "lifecycle": "session",
+      "located_in": "driver_cab",
+      "name": "列车控制面板",
+      "player_visible_name": "列车控制面板",
+      "plot_relevance": true,
+      "state": {
+        "inspected": false,
+        "lever": "neutral",
+        "unlocked": false
+      },
+      "visibility": "public"
+    }
+  ],
+  "information": [
+    {
+      "criticality": "supporting",
+      "id": "warning_note_front",
+      "keeper_content": "6 号车厢门上的便签正面写着只能前进、没有退路。",
+      "kind": "fact",
+      "player_content": "便签上写着：“只管前进吧，已经没有退路了。”",
+      "recovery": {
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ],
+        "policy": "adaptive"
+      },
+      "title": "车门上的便签"
+    },
+    {
+      "criticality": "essential",
+      "id": "warning_note_back",
+      "keeper_content": "便签背面明确提示第三个箱子，即 3 号车厢里藏着钥匙。",
+      "kind": "fact",
+      "player_content": "便签背面写着：“第三个箱子里藏着钥匙。”结合车厢编号，这指向 3 号车厢。",
+      "recovery": {
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ],
+        "policy": "strict"
+      },
+      "title": "便签背面的钥匙提示"
+    },
+    {
+      "criticality": "supporting",
+      "id": "route_map_erased",
+      "keeper_content": "门旁示意图中 7 号车厢以后的部分被人蓄意涂掉。",
+      "kind": "fact",
+      "player_content": "门旁的示意图并非自然磨损：7 号车厢之后的部分像是被人故意涂掉了。",
+      "recovery": {
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ],
+        "policy": "adaptive"
+      },
+      "title": "被涂掉的列车图"
+    },
+    {
+      "criticality": "supporting",
+      "id": "rear_car_bodies",
+      "keeper_content": "打开 7 号车厢后会看见不久前被撕裂的人体残肢。",
+      "kind": "fact",
+      "player_content": "7 号车厢里散落着被撕裂的人体残肢，血腥味仍然浓重。",
+      "recovery": {
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ],
+        "policy": "adaptive"
+      },
+      "title": "7 号车厢的残肢"
+    },
+    {
+      "criticality": "supporting",
+      "id": "death_was_recent",
+      "keeper_content": "医学检查确认车厢里的死者死亡时间并不久。",
+      "kind": "fact",
+      "player_content": "医学检查显示，这些人死亡至今并没有多久。",
+      "recovery": {
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ],
+        "policy": "adaptive"
+      },
+      "title": "死亡时间不久"
+    },
+    {
+      "criticality": "supporting",
+      "id": "rear_maw_seen",
+      "keeper_content": "7 号车厢深处的大嘴属于一个比整列电车更巨大的存在；修正版将其设定为奈亚化身。",
+      "kind": "fact",
+      "player_content": "车厢深处有一张巨大得不合常理的嘴正在啃蚀列车；它属于某个比电车还要庞大的存在。",
+      "recovery": {
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ],
+        "policy": "adaptive"
+      },
+      "title": "吞噬车厢的巨大存在"
+    },
+    {
+      "criticality": "supporting",
+      "id": "newspaper_report",
+      "keeper_content": "5 号车厢的报纸报道昨晚本线末班车发生恐怖事件，幸存者全部精神失常。",
+      "kind": "record",
+      "player_content": "报纸报道：昨晚这条线路的末班车发生大规模恐怖事件，幸存乘客因精神极度异常被送医。",
+      "recovery": {
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ],
+        "policy": "adaptive"
+      },
+      "title": "末班车恐怖事件报道"
+    },
+    {
+      "criticality": "essential",
+      "id": "newspaper_from_tomorrow",
+      "keeper_content": "报纸日期是第二天，报道的正是调查员正在经历的事件；修正版据此建立梦境因果。",
+      "kind": "record",
+      "player_content": "这张报纸的日期竟然是第二天，而报道内容正与眼前发生的事情相符。",
+      "recovery": {
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ],
+        "policy": "adaptive"
+      },
+      "title": "来自第二天的报纸"
+    },
+    {
+      "criticality": "supporting",
+      "id": "attendant_attack_account",
+      "keeper_content": "京山人吉称类人的怪物逐个撕咬乘客，他逃跑时腿部被咬伤。",
+      "kind": "testimony",
+      "player_content": "乘务员说，像人一样的怪物突然袭击乘客；他在逃跑时腿部也被咬伤。",
+      "recovery": {
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ],
+        "policy": "adaptive"
+      },
+      "title": "乘务员的袭击经历"
+    },
+    {
+      "criticality": "essential",
+      "id": "clickers_follow_sound",
+      "keeper_content": "乘务员回忆自己甩出的物品撞墙后吸引了怪物，证明循声者极端依赖声音。",
+      "kind": "testimony",
+      "player_content": "乘务员回忆：被咬时，他把手边的东西甩到墙上，撞击声立刻吸引了怪物。它们似乎对声音极其敏感。",
+      "recovery": {
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ],
+        "policy": "guaranteed"
+      },
+      "title": "怪物对声音敏感"
+    },
+    {
+      "criticality": "essential",
+      "id": "key_bag_location",
+      "keeper_content": "乘务员的驾驶室钥匙与控制面板钥匙装在断带黑包里，约掉在 3 号车厢前门附近。",
+      "kind": "testimony",
+      "player_content": "驾驶室钥匙和控制面板钥匙都在一个背带断掉的黑包里；乘务员记得它大约掉在 3 号车厢前门附近。",
+      "recovery": {
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ],
+        "policy": "guaranteed"
+      },
+      "title": "黑色钥匙包的位置"
+    },
+    {
+      "criticality": "essential",
+      "id": "key_bag_retrieved",
+      "keeper_content": "调查员已经取得黑包中的驾驶室钥匙和控制面板钥匙。",
+      "kind": "fact",
+      "player_content": "你已经拿到黑包里的两把钥匙：一把开驾驶室，一把开控制面板。",
+      "recovery": {
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ],
+        "policy": "strict"
+      },
+      "title": "两把钥匙已经取回"
+    },
+    {
+      "criticality": "supporting",
+      "id": "key_search_can_continue",
+      "keeper_content": "侦查失败不关闭唯一钥匙路径；原文允许继续探索，且已知位置提供有利修正。",
+      "kind": "fact",
+      "player_content": "行李太杂乱，这次没找到；调整搜索范围后仍然可以继续找。",
+      "recovery": {
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ],
+        "policy": "adaptive"
+      },
+      "title": "杂乱行李仍可继续搜索"
+    },
+    {
+      "criticality": "supporting",
+      "id": "clickers_alerted",
+      "keeper_content": "潜行失败使循声者注意到调查员，但原文允许用更大的持续声响转移它们。",
+      "kind": "fact",
+      "player_content": "你踩中了地上的残骸，黑暗中的喘息声立刻转向这里；更远、更大的声音仍可能把它们引开。",
+      "recovery": {
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ],
+        "policy": "adaptive"
+      },
+      "title": "脚步声惊动了怪物"
+    },
+    {
+      "criticality": "essential",
+      "id": "clicker_car_crossed",
+      "keeper_content": "调查员以潜行或制造声响通过循声者所在车厢并抵达先头车厢。",
+      "kind": "fact",
+      "player_content": "你们已经越过黑暗中的怪物，抵达先头车厢。",
+      "recovery": {
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ],
+        "policy": "adaptive"
+      },
+      "title": "已经通过 2 号车厢"
+    },
+    {
+      "criticality": "essential",
+      "id": "control_panel_instructions",
+      "keeper_content": "左杆控制刹车与起步；右杆向下加速、向上减速。",
+      "kind": "fact",
+      "player_content": "控制面板上有两只拉杆：左杆控制刹车与起步；右杆向下拉是加速，向上拉是减速。",
+      "recovery": {
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ],
+        "policy": "adaptive"
+      },
+      "title": "列车控制杆的作用"
+    },
+    {
+      "criticality": "supporting",
+      "id": "carry_attempt_can_retry",
+      "keeper_content": "搬运检定失败不会杀死乘务员或关闭主线；可调整姿势后重试，也可把他留在 4 号车厢。",
+      "kind": "fact",
+      "player_content": "乘务员伤得很重，这次没能稳妥背起他；你可以调整姿势再试，或让他留在这里。",
+      "recovery": {
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ],
+        "policy": "adaptive"
+      },
+      "title": "可以调整姿势再搬运"
+    },
+    {
+      "criticality": "supporting",
+      "id": "first_aid_can_retry",
+      "keeper_content": "7 版修正明确要求乘务员只是重伤而非因一次急救失败死亡，主线必须允许继续急救。",
+      "kind": "fact",
+      "player_content": "这次处理没能让乘务员醒来，但他的状况尚未恶化，仍可以调整方法继续急救。",
+      "recovery": {
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ],
+        "policy": "adaptive"
+      },
+      "title": "乘务员仍可继续救治"
+    },
+    {
+      "criticality": "supporting",
+      "id": "attendant_requests_key_custody",
+      "keeper_content": "乘务员找到黑包后希望自己承担责任并保管钥匙；说服失败不会永久关闭再次交涉。",
+      "kind": "testimony",
+      "player_content": "乘务员坚持自己应该保管钥匙，但仍可以继续与他交涉。",
+      "recovery": {
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ],
+        "policy": "adaptive"
+      },
+      "title": "乘务员想保管钥匙"
+    },
+    {
+      "criticality": "essential",
+      "id": "ending_accelerate",
+      "keeper_content": "调查员把列车加速到极致后被白光覆盖，在现实的 6 号车厢醒来并抵达终点站。",
+      "kind": "fact",
+      "player_content": "你把列车加速到极致。刺眼白光过后，你在现实的 6 号车厢醒来；广播正通知终点站已经到达。",
+      "recovery": {
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ],
+        "policy": "adaptive"
+      },
+      "title": "列车加速后的清醒"
+    },
+    {
+      "criticality": "essential",
+      "id": "ending_decelerate",
+      "keeper_content": "调查员减速停车后在梦中被吞噬，随后从电车座位醒来，并发现断带黑包仍在身边。",
+      "kind": "fact",
+      "player_content": "列车减速后，黑暗与咀嚼声吞没了一切。你从电车座位惊醒，断带黑包仍在身边，那段恐惧却挥之不去。",
+      "recovery": {
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ],
+        "policy": "adaptive"
+      },
+      "title": "列车减速后的噩梦余波"
+    },
+    {
+      "criticality": "essential",
+      "id": "ending_consumed",
+      "keeper_content": "到达午夜终点仍未解决列车危机时，大嘴吞没梦境；修正版结局 C 规定调查员在现实中陷入极度疯狂并被送医。",
+      "kind": "fact",
+      "player_content": "午夜到来时，大嘴吞没了残余车厢。现实中的你们在极度恐惧中醒来，随后因持续的疯狂状态被送医。",
+      "recovery": {
+        "allowed_source_types": [
+          "explicit_entity",
+          "explicit_location"
+        ],
+        "policy": "adaptive"
+      },
+      "title": "未能逃离的疯狂结局"
+    }
+  ],
+  "initial_state": {
+    "default_actor_placement": {
+      "location_id": "car_6"
+    },
+    "entity_state": {},
+    "start_location_id": "car_6",
+    "start_time_point_id": "hour_23"
+  },
+  "knowledge_goals": [
+    {
+      "completion": "all",
+      "id": "recover_train_keys",
+      "required_for_core_resolution": false,
+      "target_information_ids": [
+        "key_bag_retrieved"
+      ]
+    },
+    {
+      "completion": "all",
+      "id": "reach_train_controls",
+      "required_for_core_resolution": false,
+      "target_information_ids": [
+        "clicker_car_crossed",
+        "control_panel_instructions"
+      ]
+    },
+    {
+      "completion": "any",
+      "id": "resolve_dream_train",
+      "required_for_core_resolution": true,
+      "target_information_ids": [
+        "ending_accelerate",
+        "ending_decelerate",
+        "ending_consumed"
+      ]
+    }
+  ],
+  "location_edges": [
+    {
+      "access_point_id": "rear_door",
+      "conditions": [
+        {
+          "args": {
+            "entity_id": "rear_door",
+            "key": "opened",
+            "value": true
+          },
+          "op": "predicate",
+          "predicate": "entity_state_is"
+        }
+      ],
+      "from_location_id": "car_6",
+      "id": "car_6_to_car_7",
+      "kind": "private",
+      "to_location_id": "car_7",
+      "traversal": "gated",
+      "visibility": "public"
+    },
+    {
+      "from_location_id": "car_7",
+      "id": "car_7_to_car_6",
+      "kind": "private",
+      "to_location_id": "car_6",
+      "traversal": "automatic",
+      "visibility": "public"
+    },
+    {
+      "from_location_id": "car_6",
+      "id": "car_6_to_car_5",
+      "kind": "private",
+      "to_location_id": "car_5",
+      "traversal": "automatic",
+      "visibility": "public"
+    },
+    {
+      "from_location_id": "car_5",
+      "id": "car_5_to_car_4",
+      "kind": "private",
+      "to_location_id": "car_4",
+      "traversal": "automatic",
+      "visibility": "public"
+    },
+    {
+      "from_location_id": "car_4",
+      "id": "car_4_to_car_3",
+      "kind": "private",
+      "to_location_id": "car_3",
+      "traversal": "automatic",
+      "visibility": "public"
+    },
+    {
+      "access_point_id": "car_2_door",
+      "conditions": [
+        {
+          "args": {
+            "entity_id": "car_2_door",
+            "key": "crossing_resolved",
+            "value": true
+          },
+          "op": "predicate",
+          "predicate": "entity_state_is"
+        }
+      ],
+      "from_location_id": "car_3",
+      "id": "car_3_to_car_2",
+      "kind": "private",
+      "to_location_id": "car_2",
+      "traversal": "gated",
+      "visibility": "public"
+    },
+    {
+      "from_location_id": "car_2",
+      "id": "car_2_to_lead_car",
+      "kind": "private",
+      "to_location_id": "lead_car",
+      "traversal": "automatic",
+      "visibility": "public"
+    },
+    {
+      "access_point_id": "cab_door",
+      "conditions": [
+        {
+          "args": {
+            "entity_id": "cab_door",
+            "key": "opened",
+            "value": true
+          },
+          "op": "predicate",
+          "predicate": "entity_state_is"
+        }
+      ],
+      "from_location_id": "lead_car",
+      "id": "lead_car_to_driver_cab",
+      "kind": "private",
+      "to_location_id": "driver_cab",
+      "traversal": "gated",
+      "visibility": "public"
+    },
+    {
+      "access_point_id": "train_chase",
+      "conditions": [
+        {
+          "args": {
+            "entity_id": "train_chase",
+            "key": "outcome",
+            "value": "accelerate"
+          },
+          "op": "predicate",
+          "predicate": "entity_state_is"
+        }
+      ],
+      "from_location_id": "driver_cab",
+      "id": "driver_cab_to_terminal_after_accelerate",
+      "kind": "concealed",
+      "to_location_id": "terminal_train_car",
+      "traversal": "gated",
+      "visibility": "hidden"
+    },
+    {
+      "access_point_id": "train_chase",
+      "conditions": [
+        {
+          "args": {
+            "entity_id": "train_chase",
+            "key": "outcome",
+            "value": "decelerate"
+          },
+          "op": "predicate",
+          "predicate": "entity_state_is"
+        }
+      ],
+      "from_location_id": "driver_cab",
+      "id": "driver_cab_to_terminal_after_decelerate",
+      "kind": "concealed",
+      "to_location_id": "terminal_train_car",
+      "traversal": "gated",
+      "visibility": "hidden"
+    },
+    {
+      "access_point_id": "train_chase",
+      "conditions": [
+        {
+          "args": {
+            "entity_id": "train_chase",
+            "key": "outcome",
+            "value": "consumed"
+          },
+          "op": "predicate",
+          "predicate": "entity_state_is"
+        }
+      ],
+      "from_location_id": "car_7",
+      "id": "car_7_to_hospital_after_consumption",
+      "kind": "concealed",
+      "to_location_id": "hospital_isolation",
+      "traversal": "gated",
+      "visibility": "hidden"
+    },
+    {
+      "access_point_id": "train_chase",
+      "conditions": [
+        {
+          "args": {
+            "entity_id": "train_chase",
+            "key": "outcome",
+            "value": "consumed"
+          },
+          "op": "predicate",
+          "predicate": "entity_state_is"
+        }
+      ],
+      "from_location_id": "car_6",
+      "id": "car_6_to_hospital_after_consumption",
+      "kind": "concealed",
+      "to_location_id": "hospital_isolation",
+      "traversal": "gated",
+      "visibility": "hidden"
+    },
+    {
+      "access_point_id": "train_chase",
+      "conditions": [
+        {
+          "args": {
+            "entity_id": "train_chase",
+            "key": "outcome",
+            "value": "consumed"
+          },
+          "op": "predicate",
+          "predicate": "entity_state_is"
+        }
+      ],
+      "from_location_id": "car_5",
+      "id": "car_5_to_hospital_after_consumption",
+      "kind": "concealed",
+      "to_location_id": "hospital_isolation",
+      "traversal": "gated",
+      "visibility": "hidden"
+    },
+    {
+      "access_point_id": "train_chase",
+      "conditions": [
+        {
+          "args": {
+            "entity_id": "train_chase",
+            "key": "outcome",
+            "value": "consumed"
+          },
+          "op": "predicate",
+          "predicate": "entity_state_is"
+        }
+      ],
+      "from_location_id": "car_4",
+      "id": "car_4_to_hospital_after_consumption",
+      "kind": "concealed",
+      "to_location_id": "hospital_isolation",
+      "traversal": "gated",
+      "visibility": "hidden"
+    },
+    {
+      "access_point_id": "train_chase",
+      "conditions": [
+        {
+          "args": {
+            "entity_id": "train_chase",
+            "key": "outcome",
+            "value": "consumed"
+          },
+          "op": "predicate",
+          "predicate": "entity_state_is"
+        }
+      ],
+      "from_location_id": "car_3",
+      "id": "car_3_to_hospital_after_consumption",
+      "kind": "concealed",
+      "to_location_id": "hospital_isolation",
+      "traversal": "gated",
+      "visibility": "hidden"
+    },
+    {
+      "access_point_id": "train_chase",
+      "conditions": [
+        {
+          "args": {
+            "entity_id": "train_chase",
+            "key": "outcome",
+            "value": "consumed"
+          },
+          "op": "predicate",
+          "predicate": "entity_state_is"
+        }
+      ],
+      "from_location_id": "car_2",
+      "id": "car_2_to_hospital_after_consumption",
+      "kind": "concealed",
+      "to_location_id": "hospital_isolation",
+      "traversal": "gated",
+      "visibility": "hidden"
+    },
+    {
+      "access_point_id": "train_chase",
+      "conditions": [
+        {
+          "args": {
+            "entity_id": "train_chase",
+            "key": "outcome",
+            "value": "consumed"
+          },
+          "op": "predicate",
+          "predicate": "entity_state_is"
+        }
+      ],
+      "from_location_id": "lead_car",
+      "id": "lead_car_to_hospital_after_consumption",
+      "kind": "concealed",
+      "to_location_id": "hospital_isolation",
+      "traversal": "gated",
+      "visibility": "hidden"
+    },
+    {
+      "access_point_id": "train_chase",
+      "conditions": [
+        {
+          "args": {
+            "entity_id": "train_chase",
+            "key": "outcome",
+            "value": "consumed"
+          },
+          "op": "predicate",
+          "predicate": "entity_state_is"
+        }
+      ],
+      "from_location_id": "driver_cab",
+      "id": "driver_cab_to_hospital_after_consumption",
+      "kind": "concealed",
+      "to_location_id": "hospital_isolation",
+      "traversal": "gated",
+      "visibility": "hidden"
+    }
+  ],
+  "locations": [
+    {
+      "aliases": [
+        "末班电车",
+        "梦境列车",
+        "列车"
+      ],
+      "id": "dream_train",
+      "kind": "region",
+      "lifecycle": "session",
+      "name": "常暗梦境列车",
+      "player_visible_description": "窗外没有街灯，只有像隧道一样的黑暗；列车仍在高速行驶。",
+      "player_visible_name": "仍在行驶的末班电车",
+      "plot_relevance": true
+    },
+    {
+      "aliases": [
+        "第七节车厢",
+        "后方车厢"
+      ],
+      "id": "car_7",
+      "kind": "room",
+      "lifecycle": "session",
+      "name": "7 号车厢",
+      "parent_location_id": "dream_train",
+      "player_visible_description": "血腥味浓重的后部车厢。",
+      "player_visible_name": "7 号车厢",
+      "plot_relevance": true,
+      "region_id": "dream_train"
+    },
+    {
+      "aliases": [
+        "第六节车厢",
+        "开局车厢"
+      ],
+      "id": "car_6",
+      "kind": "room",
+      "lifecycle": "session",
+      "name": "6 号车厢",
+      "parent_location_id": "dream_train",
+      "player_visible_description": "你们醒来的空车厢；前后各有一扇车门。",
+      "player_visible_name": "6 号车厢",
+      "plot_relevance": true,
+      "region_id": "dream_train"
+    },
+    {
+      "aliases": [
+        "第五节车厢"
+      ],
+      "id": "car_5",
+      "kind": "room",
+      "lifecycle": "session",
+      "name": "5 号车厢",
+      "parent_location_id": "dream_train",
+      "player_visible_description": "无人乘坐的普通车厢，座位和地面留下零散杂物。",
+      "player_visible_name": "5 号车厢",
+      "plot_relevance": true,
+      "region_id": "dream_train"
+    },
+    {
+      "aliases": [
+        "第四节车厢"
+      ],
+      "id": "car_4",
+      "kind": "room",
+      "lifecycle": "session",
+      "name": "4 号车厢",
+      "parent_location_id": "dream_train",
+      "player_visible_description": "一名腿部重伤的乘务员倒在地上。",
+      "player_visible_name": "4 号车厢",
+      "plot_relevance": true,
+      "region_id": "dream_train"
+    },
+    {
+      "aliases": [
+        "第三节车厢",
+        "行李车厢"
+      ],
+      "id": "car_3",
+      "kind": "room",
+      "lifecycle": "session",
+      "name": "3 号车厢",
+      "parent_location_id": "dream_train",
+      "player_visible_description": "到处都是散落行李，通道拥挤而杂乱。",
+      "player_visible_name": "3 号车厢",
+      "plot_relevance": true,
+      "region_id": "dream_train"
+    },
+    {
+      "aliases": [
+        "第二节车厢",
+        "黑暗车厢"
+      ],
+      "id": "car_2",
+      "kind": "room",
+      "lifecycle": "session",
+      "name": "2 号车厢",
+      "parent_location_id": "dream_train",
+      "player_visible_description": "没有照明，黑暗里传来非人的喘息声。",
+      "player_visible_name": "漆黑的 2 号车厢",
+      "plot_relevance": true,
+      "region_id": "dream_train"
+    },
+    {
+      "aliases": [
+        "1号车厢",
+        "第一节车厢",
+        "前方车厢"
+      ],
+      "id": "lead_car",
+      "kind": "room",
+      "lifecycle": "session",
+      "name": "先头车厢",
+      "parent_location_id": "dream_train",
+      "player_visible_description": "安静而普通的昏暗车厢，最前方是驾驶室门。",
+      "player_visible_name": "先头车厢",
+      "plot_relevance": true,
+      "region_id": "dream_train"
+    },
+    {
+      "aliases": [
+        "驾驶室",
+        "司机室",
+        "控制室",
+        "驾驶厢"
+      ],
+      "id": "driver_cab",
+      "kind": "room",
+      "lifecycle": "session",
+      "name": "驾驶室",
+      "parent_location_id": "dream_train",
+      "player_visible_description": "驾驶室里有一套上锁的列车控制面板。",
+      "player_visible_name": "驾驶室",
+      "plot_relevance": true,
+      "region_id": "dream_train"
+    },
+    {
+      "id": "reality_after_dream",
+      "kind": "region",
+      "lifecycle": "session",
+      "name": "梦醒后的现实",
+      "player_visible_description": "只有结局事实提交后才会抵达的现实场景。",
+      "player_visible_name": "梦醒后的现实",
+      "plot_relevance": true
+    },
+    {
+      "aliases": [
+        "现实电车",
+        "终点站车厢"
+      ],
+      "id": "terminal_train_car",
+      "kind": "room",
+      "lifecycle": "session",
+      "name": "现实中的终点站列车",
+      "parent_location_id": "reality_after_dream",
+      "player_visible_description": "广播提示终点站已经到达，车外有正常的站台灯光。",
+      "player_visible_name": "抵达终点的电车",
+      "plot_relevance": true,
+      "region_id": "reality_after_dream"
+    },
+    {
+      "aliases": [
+        "精神病院",
+        "隔离病房"
+      ],
+      "id": "hospital_isolation",
+      "kind": "room",
+      "lifecycle": "session",
+      "name": "医院隔离室",
+      "parent_location_id": "reality_after_dream",
+      "player_visible_description": "医生与警察隔着门观察仍处于极度恐惧中的调查员。",
+      "player_visible_name": "医院隔离室",
+      "plot_relevance": true,
+      "region_id": "reality_after_dream"
+    }
+  ],
+  "module_id": "constant-darkness-box-zh-coc7",
+  "presentation": {
+    "authors": [
+      "86式",
+      "lordcj（6版繁体翻译）",
+      "zuo死菌（简体、7版修正）"
+    ],
+    "difficulty": 1,
+    "estimated_duration": "约 1 小时",
+    "name_en": "The Box of Constant Darkness",
+    "player_intro_pages": [
+      {
+        "content": "本模组包含肢解尸体、血腥描写、被追逐与吞噬、精神崩溃及医院隔离情节。请在开始前确认这些内容适合当前参与者。",
+        "title": "内容提示"
+      },
+      {
+        "content": "推荐侦查、急救、话术与潜行。调查员不得携带枪械登车；电子设备仍可使用，但手机处于无服务状态。",
+        "title": "调查员准备"
+      },
+      {
+        "content": "2013 年某日深夜，你们在前往终点站的末班电车上醒来。6 号车厢里没有其他乘客，列车仍在疾驰，窗外一片漆黑，前门上贴着一张便签。",
+        "title": "醒来"
+      }
+    ],
+    "players_max": 3,
+    "players_min": 2,
+    "story_label": "CONSTANT DARKNESS",
+    "subtitle": "驶向终点的末班电车",
+    "synopsis": "末班电车驶入没有灯光的黑暗。调查员必须沿车厢寻找线索与出路，并设法理解这列电车发生了什么。",
+    "tags": [
+      "2013",
+      "末班电车",
+      "追逐",
+      "密闭空间",
+      "CoC 7e"
+    ],
+    "title": "常暗之厢"
+  },
+  "rules": [
+    {
+      "execution": {
+        "branches": [
+          {
+            "entry_step_id": "effect_0",
+            "id": "read-front"
+          }
+        ],
+        "steps": [
+          {
+            "effect": {
+              "entity_id": "warning_note",
+              "key": "read",
+              "type": "change_entity_state",
+              "value": true
+            },
+            "id": "effect_0",
+            "kind": "effect",
+            "next_step_id": "effect_1"
+          },
+          {
+            "effect": {
+              "information_id": "warning_note_front",
+              "scope": "party",
+              "type": "reveal_information"
+            },
+            "id": "effect_1",
+            "kind": "effect",
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "id": "read_warning_note",
+      "priority": 0,
+      "trigger": {
+        "decision_mode": "selective",
+        "kind": "agent_match",
+        "options": [
+          {
+            "id": "read-front",
+            "semantic_hints": [
+              "读门上的便签",
+              "看看便签写了什么",
+              "查看车门纸条"
+            ]
+          }
+        ],
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "读门上的便签",
+            "看看便签写了什么",
+            "查看车门纸条"
+          ]
+        },
+        "required": true,
+        "scope": {
+          "action_families": [
+            "read",
+            "inspect"
+          ],
+          "location_ids": [
+            "car_6"
+          ],
+          "target_ids": [
+            "warning_note"
+          ],
+          "target_kinds": [
+            "entity"
+          ]
+        },
+        "when": {
+          "args": {
+            "entity_id": "warning_note",
+            "key": "read",
+            "value": false
+          },
+          "op": "predicate",
+          "predicate": "entity_state_is"
+        }
+      }
+    },
+    {
+      "execution": {
+        "branches": [
+          {
+            "entry_step_id": "effect_0",
+            "id": "inspect-back"
+          }
+        ],
+        "steps": [
+          {
+            "effect": {
+              "entity_id": "warning_note",
+              "key": "back_seen",
+              "type": "change_entity_state",
+              "value": true
+            },
+            "id": "effect_0",
+            "kind": "effect",
+            "next_step_id": "effect_1"
+          },
+          {
+            "effect": {
+              "information_id": "warning_note_back",
+              "scope": "party",
+              "type": "reveal_information"
+            },
+            "id": "effect_1",
+            "kind": "effect",
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "id": "turn_warning_note_over",
+      "priority": 0,
+      "trigger": {
+        "decision_mode": "selective",
+        "kind": "agent_match",
+        "options": [
+          {
+            "id": "inspect-back",
+            "semantic_hints": [
+              "把便签翻到背面",
+              "撕下便签看看背后",
+              "检查纸条背面",
+              "我把便签撕下来翻到背面看看"
+            ]
+          }
+        ],
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "把便签翻到背面",
+            "撕下便签看看背后",
+            "检查纸条背面",
+            "我把便签撕下来翻到背面看看"
+          ]
+        },
+        "required": true,
+        "scope": {
+          "action_families": [
+            "inspect",
+            "turn-over",
+            "remove"
+          ],
+          "location_ids": [
+            "car_6"
+          ],
+          "target_ids": [
+            "warning_note"
+          ],
+          "target_kinds": [
+            "entity"
+          ]
+        },
+        "when": {
+          "items": [
+            {
+              "args": {
+                "entity_id": "warning_note",
+                "key": "read",
+                "value": true
+              },
+              "op": "predicate",
+              "predicate": "entity_state_is"
+            },
+            {
+              "args": {
+                "entity_id": "warning_note",
+                "key": "back_seen",
+                "value": false
+              },
+              "op": "predicate",
+              "predicate": "entity_state_is"
+            }
+          ],
+          "op": "all"
+        }
+      }
+    },
+    {
+      "execution": {
+        "branches": [
+          {
+            "entry_step_id": "check",
+            "id": "notice-erasure"
+          }
+        ],
+        "steps": [
+          {
+            "check": {
+              "actor_binding": "actor",
+              "allow_luck": true,
+              "allow_push": true,
+              "difficulty": "regular",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "idea"
+              },
+              "profile_id": "coc7.skill"
+            },
+            "id": "check",
+            "kind": "check",
+            "result_routes": {
+              "critical_success": "success_0",
+              "extreme_success": "success_0",
+              "failure": "finish",
+              "fumble": "finish",
+              "hard_success": "success_0",
+              "regular_success": "success_0"
+            }
+          },
+          {
+            "effect": {
+              "entity_id": "route_map",
+              "key": "inspected",
+              "type": "change_entity_state",
+              "value": true
+            },
+            "id": "success_0",
+            "kind": "effect",
+            "next_step_id": "success_1"
+          },
+          {
+            "effect": {
+              "information_id": "route_map_erased",
+              "scope": "party",
+              "type": "reveal_information"
+            },
+            "id": "success_1",
+            "kind": "effect",
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "id": "inspect_route_map",
+      "priority": 0,
+      "trigger": {
+        "decision_mode": "selective",
+        "kind": "agent_match",
+        "options": [
+          {
+            "id": "notice-erasure",
+            "semantic_hints": [
+              "仔细看列车示意图",
+              "检查车厢地图",
+              "看看地图哪里被涂掉"
+            ]
+          }
+        ],
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "仔细看列车示意图",
+            "检查车厢地图",
+            "看看地图哪里被涂掉"
+          ]
+        },
+        "required": true,
+        "scope": {
+          "action_families": [
+            "inspect",
+            "observe"
+          ],
+          "location_ids": [
+            "car_6"
+          ],
+          "target_ids": [
+            "route_map"
+          ],
+          "target_kinds": [
+            "entity"
+          ]
+        },
+        "when": {
+          "args": {
+            "entity_id": "route_map",
+            "key": "inspected",
+            "value": false
+          },
+          "op": "predicate",
+          "predicate": "entity_state_is"
+        }
+      }
+    },
+    {
+      "execution": {
+        "branches": [
+          {
+            "entry_step_id": "effect_0",
+            "id": "open-and-enter"
+          }
+        ],
+        "steps": [
+          {
+            "effect": {
+              "entity_id": "rear_door",
+              "key": "opened",
+              "type": "change_entity_state",
+              "value": true
+            },
+            "id": "effect_0",
+            "kind": "effect",
+            "next_step_id": "effect_1"
+          },
+          {
+            "effect": {
+              "location_id": "car_7",
+              "type": "enter_location"
+            },
+            "id": "effect_1",
+            "kind": "effect",
+            "next_step_id": "effect_2"
+          },
+          {
+            "effect": {
+              "entity_id": "rear_car_horror",
+              "key": "seen",
+              "type": "change_entity_state",
+              "value": true
+            },
+            "id": "effect_2",
+            "kind": "effect",
+            "next_step_id": "effect_3"
+          },
+          {
+            "effect": {
+              "information_id": "rear_car_bodies",
+              "scope": "party",
+              "type": "reveal_information"
+            },
+            "id": "effect_3",
+            "kind": "effect",
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "id": "enter_rear_car",
+      "priority": 0,
+      "trigger": {
+        "decision_mode": "selective",
+        "kind": "agent_match",
+        "options": [
+          {
+            "id": "open-and-enter",
+            "semantic_hints": [
+              "打开后门进入7号车厢",
+              "去后面的7号车厢",
+              "顶着血腥味开门"
+            ]
+          }
+        ],
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "打开后门进入7号车厢",
+            "去后面的7号车厢",
+            "顶着血腥味开门"
+          ]
+        },
+        "required": true,
+        "scope": {
+          "action_families": [
+            "open",
+            "enter",
+            "explore"
+          ],
+          "location_ids": [
+            "car_6"
+          ],
+          "target_ids": [
+            "rear_door"
+          ],
+          "target_kinds": [
+            "entity"
+          ]
+        },
+        "when": {
+          "items": [
+            {
+              "items": [
+                {
+                  "args": {
+                    "entity_id": "train_chase",
+                    "key": "outcome",
+                    "value": "none"
+                  },
+                  "op": "predicate",
+                  "predicate": "entity_state_is"
+                },
+                {
+                  "args": {
+                    "value": false
+                  },
+                  "op": "predicate",
+                  "predicate": "core_resolved"
+                }
+              ],
+              "op": "all"
+            },
+            {
+              "args": {
+                "entity_id": "rear_door",
+                "key": "opened",
+                "value": false
+              },
+              "op": "predicate",
+              "predicate": "entity_state_is"
+            }
+          ],
+          "op": "all"
+        }
+      }
+    },
+    {
+      "execution": {
+        "branches": [
+          {
+            "entry_step_id": "check",
+            "id": "estimate-death-time"
+          }
+        ],
+        "steps": [
+          {
+            "check": {
+              "actor_binding": "actor",
+              "allow_luck": true,
+              "allow_push": true,
+              "difficulty": "regular",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "medicine"
+              },
+              "profile_id": "coc7.skill"
+            },
+            "id": "check",
+            "kind": "check",
+            "result_routes": {
+              "critical_success": "success_0",
+              "extreme_success": "success_0",
+              "failure": "finish",
+              "fumble": "finish",
+              "hard_success": "success_0",
+              "regular_success": "success_0"
+            }
+          },
+          {
+            "effect": {
+              "information_id": "death_was_recent",
+              "scope": "party",
+              "type": "reveal_information"
+            },
+            "id": "success_0",
+            "kind": "effect",
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "id": "examine_rear_car_bodies",
+      "priority": 0,
+      "trigger": {
+        "decision_mode": "selective",
+        "kind": "agent_match",
+        "options": [
+          {
+            "id": "estimate-death-time",
+            "semantic_hints": [
+              "检查残肢的死亡时间",
+              "用医学查看尸体",
+              "判断这些人死了多久"
+            ]
+          }
+        ],
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "检查残肢的死亡时间",
+            "用医学查看尸体",
+            "判断这些人死了多久"
+          ]
+        },
+        "required": true,
+        "scope": {
+          "action_families": [
+            "examine",
+            "medical",
+            "inspect"
+          ],
+          "location_ids": [
+            "car_7"
+          ],
+          "target_ids": [
+            "rear_car_horror"
+          ],
+          "target_kinds": [
+            "entity"
+          ]
+        },
+        "when": {
+          "args": {
+            "entity_id": "rear_car_horror",
+            "key": "seen",
+            "value": true
+          },
+          "op": "predicate",
+          "predicate": "entity_state_is"
+        }
+      }
+    },
+    {
+      "execution": {
+        "branches": [
+          {
+            "entry_step_id": "check",
+            "id": "look-into-darkness"
+          }
+        ],
+        "steps": [
+          {
+            "check": {
+              "actor_binding": "actor",
+              "allow_luck": true,
+              "allow_push": true,
+              "difficulty": "regular",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "spot-hidden"
+              },
+              "profile_id": "coc7.skill"
+            },
+            "id": "check",
+            "kind": "check",
+            "result_routes": {
+              "critical_success": "success_0",
+              "extreme_success": "success_0",
+              "failure": "finish",
+              "fumble": "finish",
+              "hard_success": "success_0",
+              "regular_success": "success_0"
+            }
+          },
+          {
+            "effect": {
+              "entity_id": "rear_maw",
+              "key": "revealed",
+              "type": "change_entity_state",
+              "value": true
+            },
+            "id": "success_0",
+            "kind": "effect",
+            "next_step_id": "success_1"
+          },
+          {
+            "effect": {
+              "information_id": "rear_maw_seen",
+              "scope": "party",
+              "type": "reveal_information"
+            },
+            "id": "success_1",
+            "kind": "effect",
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "id": "spot_rear_maw",
+      "priority": 0,
+      "trigger": {
+        "decision_mode": "selective",
+        "kind": "agent_match",
+        "options": [
+          {
+            "id": "look-into-darkness",
+            "semantic_hints": [
+              "观察7号车厢深处",
+              "看看黑暗里是什么",
+              "寻找吞噬车厢的东西"
+            ]
+          }
+        ],
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "观察7号车厢深处",
+            "看看黑暗里是什么",
+            "寻找吞噬车厢的东西"
+          ]
+        },
+        "required": true,
+        "scope": {
+          "action_families": [
+            "observe",
+            "inspect",
+            "look"
+          ],
+          "location_ids": [
+            "car_7"
+          ],
+          "target_ids": [
+            "car_7"
+          ],
+          "target_kinds": [
+            "location"
+          ]
+        },
+        "when": {
+          "args": {
+            "entity_id": "rear_maw",
+            "key": "revealed",
+            "value": false
+          },
+          "op": "predicate",
+          "predicate": "entity_state_is"
+        }
+      }
+    },
+    {
+      "execution": {
+        "branches": [
+          {
+            "entry_step_id": "check",
+            "id": "find-newspaper"
+          }
+        ],
+        "steps": [
+          {
+            "check": {
+              "actor_binding": "actor",
+              "allow_luck": true,
+              "allow_push": true,
+              "difficulty": "regular",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "spot-hidden"
+              },
+              "profile_id": "coc7.skill"
+            },
+            "id": "check",
+            "kind": "check",
+            "result_routes": {
+              "critical_success": "success_0",
+              "extreme_success": "success_0",
+              "failure": "finish",
+              "fumble": "finish",
+              "hard_success": "success_0",
+              "regular_success": "success_0"
+            }
+          },
+          {
+            "effect": {
+              "entity_id": "newspaper",
+              "key": "found",
+              "type": "change_entity_state",
+              "value": true
+            },
+            "id": "success_0",
+            "kind": "effect",
+            "next_step_id": "success_1"
+          },
+          {
+            "effect": {
+              "information_id": "newspaper_report",
+              "scope": "party",
+              "type": "reveal_information"
+            },
+            "id": "success_1",
+            "kind": "effect",
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "id": "search_newspaper",
+      "priority": 0,
+      "trigger": {
+        "decision_mode": "selective",
+        "kind": "agent_match",
+        "options": [
+          {
+            "id": "find-newspaper",
+            "semantic_hints": [
+              "搜索5号车厢",
+              "找找座位附近的报纸",
+              "仔细查看第五节车厢"
+            ]
+          }
+        ],
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "搜索5号车厢",
+            "找找座位附近的报纸",
+            "仔细查看第五节车厢"
+          ]
+        },
+        "required": true,
+        "scope": {
+          "action_families": [
+            "search",
+            "inspect"
+          ],
+          "location_ids": [
+            "car_5"
+          ],
+          "target_ids": [
+            "car_5"
+          ],
+          "target_kinds": [
+            "location"
+          ]
+        },
+        "when": {
+          "args": {
+            "entity_id": "newspaper",
+            "key": "found",
+            "value": false
+          },
+          "op": "predicate",
+          "predicate": "entity_state_is"
+        }
+      }
+    },
+    {
+      "execution": {
+        "branches": [
+          {
+            "entry_step_id": "check",
+            "id": "compare-date-and-report"
+          }
+        ],
+        "steps": [
+          {
+            "check": {
+              "actor_binding": "actor",
+              "allow_luck": true,
+              "allow_push": true,
+              "difficulty": "regular",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "library-use"
+              },
+              "profile_id": "coc7.skill"
+            },
+            "id": "check",
+            "kind": "check",
+            "result_routes": {
+              "critical_success": "success_0",
+              "extreme_success": "success_0",
+              "failure": "finish",
+              "fumble": "finish",
+              "hard_success": "success_0",
+              "regular_success": "success_0"
+            }
+          },
+          {
+            "effect": {
+              "entity_id": "newspaper",
+              "key": "date_understood",
+              "type": "change_entity_state",
+              "value": true
+            },
+            "id": "success_0",
+            "kind": "effect",
+            "next_step_id": "success_1"
+          },
+          {
+            "effect": {
+              "information_id": "newspaper_from_tomorrow",
+              "scope": "party",
+              "type": "reveal_information"
+            },
+            "id": "success_1",
+            "kind": "effect",
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "id": "analyze_newspaper_date",
+      "priority": 0,
+      "trigger": {
+        "decision_mode": "selective",
+        "kind": "agent_match",
+        "options": [
+          {
+            "id": "compare-date-and-report",
+            "semantic_hints": [
+              "翻看报纸日期",
+              "核对报纸报道和现在",
+              "仔细阅读这张报纸"
+            ]
+          }
+        ],
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "翻看报纸日期",
+            "核对报纸报道和现在",
+            "仔细阅读这张报纸"
+          ]
+        },
+        "required": true,
+        "scope": {
+          "action_families": [
+            "read",
+            "research",
+            "inspect"
+          ],
+          "location_ids": [
+            "car_5"
+          ],
+          "target_ids": [
+            "newspaper"
+          ],
+          "target_kinds": [
+            "entity"
+          ]
+        },
+        "when": {
+          "items": [
+            {
+              "args": {
+                "entity_id": "newspaper",
+                "key": "found",
+                "value": true
+              },
+              "op": "predicate",
+              "predicate": "entity_state_is"
+            },
+            {
+              "args": {
+                "entity_id": "newspaper",
+                "key": "date_understood",
+                "value": false
+              },
+              "op": "predicate",
+              "predicate": "entity_state_is"
+            }
+          ],
+          "op": "all"
+        }
+      }
+    },
+    {
+      "execution": {
+        "branches": [
+          {
+            "entry_step_id": "check",
+            "id": "wake-attendant"
+          }
+        ],
+        "steps": [
+          {
+            "check": {
+              "actor_binding": "actor",
+              "allow_luck": true,
+              "allow_push": true,
+              "difficulty": "regular",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "first-aid"
+              },
+              "profile_id": "coc7.skill"
+            },
+            "id": "check",
+            "kind": "check",
+            "result_routes": {
+              "critical_success": "success_0",
+              "extreme_success": "success_0",
+              "failure": "failure_0",
+              "fumble": "failure_0",
+              "hard_success": "success_0",
+              "regular_success": "success_0"
+            }
+          },
+          {
+            "effect": {
+              "entity_id": "attendant",
+              "key": "awake",
+              "type": "change_entity_state",
+              "value": true
+            },
+            "id": "success_0",
+            "kind": "effect",
+            "next_step_id": "finish"
+          },
+          {
+            "effect": {
+              "information_id": "first_aid_can_retry",
+              "scope": "party",
+              "type": "reveal_information"
+            },
+            "id": "failure_0",
+            "kind": "effect",
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "id": "first_aid_attendant",
+      "priority": 0,
+      "trigger": {
+        "decision_mode": "selective",
+        "kind": "agent_match",
+        "options": [
+          {
+            "id": "wake-attendant",
+            "semantic_hints": [
+              "给重伤乘务员急救",
+              "处理乘务员腿上的伤",
+              "设法让乘务员清醒",
+              "我先给重伤的乘务员做急救"
+            ]
+          }
+        ],
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "给重伤乘务员急救",
+            "处理乘务员腿上的伤",
+            "设法让乘务员清醒",
+            "我先给重伤的乘务员做急救"
+          ]
+        },
+        "required": true,
+        "scope": {
+          "action_families": [
+            "first-aid",
+            "help",
+            "treat"
+          ],
+          "location_ids": [
+            "car_4"
+          ],
+          "target_ids": [
+            "attendant"
+          ],
+          "target_kinds": [
+            "entity"
+          ]
+        },
+        "when": {
+          "items": [
+            {
+              "args": {
+                "entity_id": "attendant",
+                "key": "present",
+                "value": true
+              },
+              "op": "predicate",
+              "predicate": "entity_state_is"
+            },
+            {
+              "args": {
+                "entity_id": "attendant",
+                "key": "awake",
+                "value": false
+              },
+              "op": "predicate",
+              "predicate": "entity_state_is"
+            }
+          ],
+          "op": "all"
+        }
+      }
+    },
+    {
+      "execution": {
+        "branches": [
+          {
+            "entry_step_id": "effect_0",
+            "id": "ask-what-happened"
+          }
+        ],
+        "steps": [
+          {
+            "effect": {
+              "entity_id": "attendant",
+              "key": "attack_told",
+              "type": "change_entity_state",
+              "value": true
+            },
+            "id": "effect_0",
+            "kind": "effect",
+            "next_step_id": "effect_1"
+          },
+          {
+            "effect": {
+              "information_id": "attendant_attack_account",
+              "scope": "party",
+              "type": "reveal_information"
+            },
+            "id": "effect_1",
+            "kind": "effect",
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "id": "ask_attendant_about_attack",
+      "priority": 0,
+      "trigger": {
+        "decision_mode": "selective",
+        "kind": "agent_match",
+        "options": [
+          {
+            "id": "ask-what-happened",
+            "semantic_hints": [
+              "问乘务员发生了什么",
+              "询问他为什么受伤",
+              "让乘务员讲述袭击"
+            ]
+          }
+        ],
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "问乘务员发生了什么",
+            "询问他为什么受伤",
+            "让乘务员讲述袭击"
+          ]
+        },
+        "required": true,
+        "scope": {
+          "action_families": [
+            "ask",
+            "interview",
+            "talk"
+          ],
+          "location_ids": [
+            "car_4"
+          ],
+          "target_ids": [
+            "attendant"
+          ],
+          "target_kinds": [
+            "entity"
+          ]
+        },
+        "when": {
+          "items": [
+            {
+              "args": {
+                "entity_id": "attendant",
+                "key": "awake",
+                "value": true
+              },
+              "op": "predicate",
+              "predicate": "entity_state_is"
+            },
+            {
+              "args": {
+                "entity_id": "attendant",
+                "key": "attack_told",
+                "value": false
+              },
+              "op": "predicate",
+              "predicate": "entity_state_is"
+            }
+          ],
+          "op": "all"
+        }
+      }
+    },
+    {
+      "execution": {
+        "branches": [
+          {
+            "entry_step_id": "effect_0",
+            "id": "ask-attacker-features"
+          }
+        ],
+        "steps": [
+          {
+            "effect": {
+              "entity_id": "attendant",
+              "key": "sound_weakness_told",
+              "type": "change_entity_state",
+              "value": true
+            },
+            "id": "effect_0",
+            "kind": "effect",
+            "next_step_id": "effect_1"
+          },
+          {
+            "effect": {
+              "information_id": "clickers_follow_sound",
+              "scope": "party",
+              "type": "reveal_information"
+            },
+            "id": "effect_1",
+            "kind": "effect",
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "id": "ask_attendant_about_attackers",
+      "priority": 0,
+      "trigger": {
+        "decision_mode": "selective",
+        "kind": "agent_match",
+        "options": [
+          {
+            "id": "ask-attacker-features",
+            "semantic_hints": [
+              "追问袭击者的特征",
+              "问怪物有什么弱点",
+              "让乘务员讲清楚怪物反应"
+            ]
+          }
+        ],
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "追问袭击者的特征",
+            "问怪物有什么弱点",
+            "让乘务员讲清楚怪物反应"
+          ]
+        },
+        "required": true,
+        "scope": {
+          "action_families": [
+            "ask",
+            "question",
+            "talk"
+          ],
+          "location_ids": [
+            "car_4"
+          ],
+          "target_ids": [
+            "attendant"
+          ],
+          "target_kinds": [
+            "entity"
+          ]
+        },
+        "when": {
+          "items": [
+            {
+              "args": {
+                "entity_id": "attendant",
+                "key": "attack_told",
+                "value": true
+              },
+              "op": "predicate",
+              "predicate": "entity_state_is"
+            },
+            {
+              "args": {
+                "entity_id": "attendant",
+                "key": "sound_weakness_told",
+                "value": false
+              },
+              "op": "predicate",
+              "predicate": "entity_state_is"
+            }
+          ],
+          "op": "all"
+        }
+      }
+    },
+    {
+      "execution": {
+        "branches": [
+          {
+            "entry_step_id": "effect_0",
+            "id": "ask-key-location"
+          }
+        ],
+        "steps": [
+          {
+            "effect": {
+              "entity_id": "attendant",
+              "key": "key_location_told",
+              "type": "change_entity_state",
+              "value": true
+            },
+            "id": "effect_0",
+            "kind": "effect",
+            "next_step_id": "effect_1"
+          },
+          {
+            "effect": {
+              "information_id": "key_bag_location",
+              "scope": "party",
+              "type": "reveal_information"
+            },
+            "id": "effect_1",
+            "kind": "effect",
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "id": "ask_attendant_about_keys",
+      "priority": 0,
+      "trigger": {
+        "decision_mode": "selective",
+        "kind": "agent_match",
+        "options": [
+          {
+            "id": "ask-key-location",
+            "semantic_hints": [
+              "问驾驶室钥匙在哪里",
+              "询问黑色包掉在哪里",
+              "追问两把钥匙的位置"
+            ]
+          }
+        ],
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "问驾驶室钥匙在哪里",
+            "询问黑色包掉在哪里",
+            "追问两把钥匙的位置"
+          ]
+        },
+        "required": true,
+        "scope": {
+          "action_families": [
+            "ask",
+            "question",
+            "talk"
+          ],
+          "location_ids": [
+            "car_4"
+          ],
+          "target_ids": [
+            "attendant"
+          ],
+          "target_kinds": [
+            "entity"
+          ]
+        },
+        "when": {
+          "items": [
+            {
+              "args": {
+                "entity_id": "attendant",
+                "key": "awake",
+                "value": true
+              },
+              "op": "predicate",
+              "predicate": "entity_state_is"
+            },
+            {
+              "args": {
+                "entity_id": "attendant",
+                "key": "key_location_told",
+                "value": false
+              },
+              "op": "predicate",
+              "predicate": "entity_state_is"
+            }
+          ],
+          "op": "all"
+        }
+      }
+    },
+    {
+      "execution": {
+        "branches": [
+          {
+            "entry_step_id": "check",
+            "id": "carry-forward"
+          }
+        ],
+        "steps": [
+          {
+            "check": {
+              "actor_binding": "actor",
+              "allow_luck": true,
+              "allow_push": true,
+              "difficulty": "regular",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "STR"
+              },
+              "profile_id": "coc7.skill"
+            },
+            "id": "check",
+            "kind": "check",
+            "result_routes": {
+              "critical_success": "success_0",
+              "extreme_success": "success_0",
+              "failure": "failure_0",
+              "fumble": "failure_0",
+              "hard_success": "success_0",
+              "regular_success": "success_0"
+            }
+          },
+          {
+            "effect": {
+              "entity_id": "attendant",
+              "key": "accompanying",
+              "type": "change_entity_state",
+              "value": true
+            },
+            "id": "success_0",
+            "kind": "effect",
+            "next_step_id": "success_1"
+          },
+          {
+            "effect": {
+              "entity_id": "attendant",
+              "location_id": "car_3",
+              "type": "move_entity"
+            },
+            "id": "success_1",
+            "kind": "effect",
+            "next_step_id": "success_2"
+          },
+          {
+            "effect": {
+              "location_id": "car_3",
+              "type": "enter_location"
+            },
+            "id": "success_2",
+            "kind": "effect",
+            "next_step_id": "success_3"
+          },
+          {
+            "effect": {
+              "entity_id": "key_bag",
+              "key": "found",
+              "type": "change_entity_state",
+              "value": true
+            },
+            "id": "success_3",
+            "kind": "effect",
+            "next_step_id": "success_4"
+          },
+          {
+            "effect": {
+              "information_id": "key_bag_location",
+              "scope": "party",
+              "type": "reveal_information"
+            },
+            "id": "success_4",
+            "kind": "effect",
+            "next_step_id": "finish"
+          },
+          {
+            "effect": {
+              "information_id": "carry_attempt_can_retry",
+              "scope": "party",
+              "type": "reveal_information"
+            },
+            "id": "failure_0",
+            "kind": "effect",
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "id": "carry_attendant_to_car_3",
+      "priority": 0,
+      "trigger": {
+        "decision_mode": "selective",
+        "kind": "agent_match",
+        "options": [
+          {
+            "id": "carry-forward",
+            "semantic_hints": [
+              "背起乘务员去3号车厢",
+              "扶着受伤乘务员继续前进",
+              "把乘务员一起带走"
+            ]
+          }
+        ],
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "背起乘务员去3号车厢",
+            "扶着受伤乘务员继续前进",
+            "把乘务员一起带走"
+          ]
+        },
+        "required": true,
+        "scope": {
+          "action_families": [
+            "carry",
+            "help",
+            "travel"
+          ],
+          "location_ids": [
+            "car_4"
+          ],
+          "target_ids": [
+            "attendant"
+          ],
+          "target_kinds": [
+            "entity"
+          ]
+        },
+        "when": {
+          "items": [
+            {
+              "args": {
+                "entity_id": "attendant",
+                "key": "awake",
+                "value": true
+              },
+              "op": "predicate",
+              "predicate": "entity_state_is"
+            },
+            {
+              "args": {
+                "entity_id": "attendant",
+                "key": "accompanying",
+                "value": false
+              },
+              "op": "predicate",
+              "predicate": "entity_state_is"
+            },
+            {
+              "items": [
+                {
+                  "args": {
+                    "entity_id": "train_chase",
+                    "key": "outcome",
+                    "value": "none"
+                  },
+                  "op": "predicate",
+                  "predicate": "entity_state_is"
+                },
+                {
+                  "args": {
+                    "value": false
+                  },
+                  "op": "predicate",
+                  "predicate": "core_resolved"
+                }
+              ],
+              "op": "all"
+            }
+          ],
+          "op": "all"
+        }
+      }
+    },
+    {
+      "execution": {
+        "branches": [
+          {
+            "entry_step_id": "check",
+            "id": "search-front-door-luggage"
+          }
+        ],
+        "steps": [
+          {
+            "check": {
+              "actor_binding": "actor",
+              "allow_luck": true,
+              "allow_push": true,
+              "difficulty": "regular",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "spot-hidden"
+              },
+              "profile_id": "coc7.skill"
+            },
+            "id": "check",
+            "kind": "check",
+            "result_routes": {
+              "critical_success": "success_0",
+              "extreme_success": "success_0",
+              "failure": "failure_0",
+              "fumble": "failure_0",
+              "hard_success": "success_0",
+              "regular_success": "success_0"
+            }
+          },
+          {
+            "effect": {
+              "entity_id": "key_bag",
+              "key": "found",
+              "type": "change_entity_state",
+              "value": true
+            },
+            "id": "success_0",
+            "kind": "effect",
+            "next_step_id": "success_1"
+          },
+          {
+            "effect": {
+              "entity_id": "key_bag",
+              "key": "retrieved",
+              "type": "change_entity_state",
+              "value": true
+            },
+            "id": "success_1",
+            "kind": "effect",
+            "next_step_id": "success_2"
+          },
+          {
+            "effect": {
+              "entity_id": "key_bag",
+              "key": "carried",
+              "type": "change_entity_state",
+              "value": true
+            },
+            "id": "success_2",
+            "kind": "effect",
+            "next_step_id": "success_3"
+          },
+          {
+            "effect": {
+              "information_id": "key_bag_retrieved",
+              "scope": "party",
+              "type": "reveal_information"
+            },
+            "id": "success_3",
+            "kind": "effect",
+            "next_step_id": "finish"
+          },
+          {
+            "effect": {
+              "information_id": "key_search_can_continue",
+              "scope": "party",
+              "type": "reveal_information"
+            },
+            "id": "failure_0",
+            "kind": "effect",
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "id": "search_key_bag",
+      "priority": 0,
+      "trigger": {
+        "decision_mode": "selective",
+        "kind": "agent_match",
+        "options": [
+          {
+            "id": "search-front-door-luggage",
+            "semantic_hints": [
+              "在3号车厢前门附近找黑包",
+              "翻找散乱行李里的钥匙",
+              "搜索第三节车厢的断带包",
+              "我在3号车厢前门附近翻找那个断带黑包"
+            ]
+          }
+        ],
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "在3号车厢前门附近找黑包",
+            "翻找散乱行李里的钥匙",
+            "搜索第三节车厢的断带包",
+            "我在3号车厢前门附近翻找那个断带黑包"
+          ]
+        },
+        "required": true,
+        "scope": {
+          "action_families": [
+            "search",
+            "inspect"
+          ],
+          "location_ids": [
+            "car_3"
+          ],
+          "target_ids": [
+            "luggage_pile"
+          ],
+          "target_kinds": [
+            "entity"
+          ]
+        },
+        "when": {
+          "items": [
+            {
+              "args": {
+                "entity_id": "key_bag",
+                "key": "retrieved",
+                "value": false
+              },
+              "op": "predicate",
+              "predicate": "entity_state_is"
+            },
+            {
+              "args": {
+                "entity_id": "attendant",
+                "key": "accompanying",
+                "value": false
+              },
+              "op": "predicate",
+              "predicate": "entity_state_is"
+            },
+            {
+              "items": [
+                {
+                  "args": {
+                    "entity_id": "train_chase",
+                    "key": "outcome",
+                    "value": "none"
+                  },
+                  "op": "predicate",
+                  "predicate": "entity_state_is"
+                },
+                {
+                  "args": {
+                    "value": false
+                  },
+                  "op": "predicate",
+                  "predicate": "core_resolved"
+                }
+              ],
+              "op": "all"
+            }
+          ],
+          "op": "all"
+        }
+      }
+    },
+    {
+      "execution": {
+        "branches": [
+          {
+            "entry_step_id": "check",
+            "id": "keep-key-bag"
+          }
+        ],
+        "steps": [
+          {
+            "check": {
+              "actor_binding": "actor",
+              "allow_luck": true,
+              "allow_push": true,
+              "difficulty": "regular",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "persuade"
+              },
+              "profile_id": "coc7.skill"
+            },
+            "id": "check",
+            "kind": "check",
+            "result_routes": {
+              "critical_success": "success_0",
+              "extreme_success": "success_0",
+              "failure": "failure_0",
+              "fumble": "failure_0",
+              "hard_success": "success_0",
+              "regular_success": "success_0"
+            }
+          },
+          {
+            "effect": {
+              "entity_id": "key_bag",
+              "key": "retrieved",
+              "type": "change_entity_state",
+              "value": true
+            },
+            "id": "success_0",
+            "kind": "effect",
+            "next_step_id": "success_1"
+          },
+          {
+            "effect": {
+              "entity_id": "key_bag",
+              "key": "carried",
+              "type": "change_entity_state",
+              "value": true
+            },
+            "id": "success_1",
+            "kind": "effect",
+            "next_step_id": "success_2"
+          },
+          {
+            "effect": {
+              "information_id": "key_bag_retrieved",
+              "scope": "party",
+              "type": "reveal_information"
+            },
+            "id": "success_2",
+            "kind": "effect",
+            "next_step_id": "finish"
+          },
+          {
+            "effect": {
+              "information_id": "attendant_requests_key_custody",
+              "scope": "party",
+              "type": "reveal_information"
+            },
+            "id": "failure_0",
+            "kind": "effect",
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "id": "persuade_attendant_to_hand_over_keys",
+      "priority": 0,
+      "trigger": {
+        "decision_mode": "selective",
+        "kind": "agent_match",
+        "options": [
+          {
+            "id": "keep-key-bag",
+            "semantic_hints": [
+              "说服乘务员把钥匙交给我",
+              "劝他让我保管黑包",
+              "请求自己拿着两把钥匙"
+            ]
+          }
+        ],
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "说服乘务员把钥匙交给我",
+            "劝他让我保管黑包",
+            "请求自己拿着两把钥匙"
+          ]
+        },
+        "required": true,
+        "scope": {
+          "action_families": [
+            "persuade",
+            "talk",
+            "request"
+          ],
+          "location_ids": [
+            "car_3"
+          ],
+          "target_ids": [
+            "attendant"
+          ],
+          "target_kinds": [
+            "entity"
+          ]
+        },
+        "when": {
+          "items": [
+            {
+              "args": {
+                "entity_id": "attendant",
+                "key": "accompanying",
+                "value": true
+              },
+              "op": "predicate",
+              "predicate": "entity_state_is"
+            },
+            {
+              "args": {
+                "entity_id": "key_bag",
+                "key": "found",
+                "value": true
+              },
+              "op": "predicate",
+              "predicate": "entity_state_is"
+            },
+            {
+              "args": {
+                "entity_id": "key_bag",
+                "key": "retrieved",
+                "value": false
+              },
+              "op": "predicate",
+              "predicate": "entity_state_is"
+            },
+            {
+              "items": [
+                {
+                  "args": {
+                    "entity_id": "train_chase",
+                    "key": "outcome",
+                    "value": "none"
+                  },
+                  "op": "predicate",
+                  "predicate": "entity_state_is"
+                },
+                {
+                  "args": {
+                    "value": false
+                  },
+                  "op": "predicate",
+                  "predicate": "core_resolved"
+                }
+              ],
+              "op": "all"
+            }
+          ],
+          "op": "all"
+        }
+      }
+    },
+    {
+      "execution": {
+        "branches": [
+          {
+            "entry_step_id": "check",
+            "id": "watch-dark-car"
+          }
+        ],
+        "steps": [
+          {
+            "check": {
+              "actor_binding": "actor",
+              "allow_luck": true,
+              "allow_push": true,
+              "difficulty": "regular",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "spot-hidden"
+              },
+              "profile_id": "coc7.skill"
+            },
+            "id": "check",
+            "kind": "check",
+            "result_routes": {
+              "critical_success": "success_0",
+              "extreme_success": "success_0",
+              "failure": "finish",
+              "fumble": "finish",
+              "hard_success": "success_0",
+              "regular_success": "success_0"
+            }
+          },
+          {
+            "effect": {
+              "entity_id": "clicker_group",
+              "key": "noticed",
+              "type": "change_entity_state",
+              "value": true
+            },
+            "id": "success_0",
+            "kind": "effect",
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "id": "observe_car_2_through_glass",
+      "priority": 0,
+      "trigger": {
+        "decision_mode": "selective",
+        "kind": "agent_match",
+        "options": [
+          {
+            "id": "watch-dark-car",
+            "semantic_hints": [
+              "透过门玻璃观察2号车厢",
+              "听黑暗里的喘息声",
+              "看看前面有几个怪物"
+            ]
+          }
+        ],
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "透过门玻璃观察2号车厢",
+            "听黑暗里的喘息声",
+            "看看前面有几个怪物"
+          ]
+        },
+        "required": true,
+        "scope": {
+          "action_families": [
+            "observe",
+            "inspect",
+            "listen"
+          ],
+          "location_ids": [
+            "car_3"
+          ],
+          "target_ids": [
+            "car_2_door"
+          ],
+          "target_kinds": [
+            "entity"
+          ]
+        },
+        "when": {
+          "args": {
+            "entity_id": "clicker_group",
+            "key": "noticed",
+            "value": false
+          },
+          "op": "predicate",
+          "predicate": "entity_state_is"
+        }
+      }
+    },
+    {
+      "execution": {
+        "branches": [
+          {
+            "entry_step_id": "check",
+            "id": "move-silently"
+          }
+        ],
+        "steps": [
+          {
+            "check": {
+              "actor_binding": "actor",
+              "allow_luck": true,
+              "allow_push": true,
+              "difficulty": "regular",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "stealth"
+              },
+              "profile_id": "coc7.skill"
+            },
+            "id": "check",
+            "kind": "check",
+            "result_routes": {
+              "critical_success": "success_0",
+              "extreme_success": "success_0",
+              "failure": "failure_0",
+              "fumble": "failure_0",
+              "hard_success": "success_0",
+              "regular_success": "success_0"
+            }
+          },
+          {
+            "effect": {
+              "entity_id": "car_2_door",
+              "key": "crossing_resolved",
+              "type": "change_entity_state",
+              "value": true
+            },
+            "id": "success_0",
+            "kind": "effect",
+            "next_step_id": "success_1"
+          },
+          {
+            "effect": {
+              "location_id": "lead_car",
+              "type": "enter_location"
+            },
+            "id": "success_1",
+            "kind": "effect",
+            "next_step_id": "success_2"
+          },
+          {
+            "effect": {
+              "information_id": "clicker_car_crossed",
+              "scope": "party",
+              "type": "reveal_information"
+            },
+            "id": "success_2",
+            "kind": "effect",
+            "next_step_id": "finish"
+          },
+          {
+            "effect": {
+              "entity_id": "clicker_group",
+              "key": "alerted",
+              "type": "change_entity_state",
+              "value": true
+            },
+            "id": "failure_0",
+            "kind": "effect",
+            "next_step_id": "failure_1"
+          },
+          {
+            "effect": {
+              "information_id": "clickers_alerted",
+              "scope": "party",
+              "type": "reveal_information"
+            },
+            "id": "failure_1",
+            "kind": "effect",
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "id": "sneak_past_clickers",
+      "priority": 0,
+      "trigger": {
+        "decision_mode": "selective",
+        "kind": "agent_match",
+        "options": [
+          {
+            "id": "move-silently",
+            "semantic_hints": [
+              "蹑手蹑脚通过2号车厢",
+              "悄悄绕过循声怪物",
+              "不出声地潜行到先头车厢"
+            ]
+          }
+        ],
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "蹑手蹑脚通过2号车厢",
+            "悄悄绕过循声怪物",
+            "不出声地潜行到先头车厢"
+          ]
+        },
+        "required": true,
+        "scope": {
+          "action_families": [
+            "sneak",
+            "cross",
+            "enter"
+          ],
+          "location_ids": [
+            "car_3"
+          ],
+          "target_ids": [
+            "clicker_group"
+          ],
+          "target_kinds": [
+            "entity"
+          ]
+        },
+        "when": {
+          "items": [
+            {
+              "args": {
+                "entity_id": "car_2_door",
+                "key": "crossing_resolved",
+                "value": false
+              },
+              "op": "predicate",
+              "predicate": "entity_state_is"
+            },
+            {
+              "items": [
+                {
+                  "args": {
+                    "entity_id": "train_chase",
+                    "key": "outcome",
+                    "value": "none"
+                  },
+                  "op": "predicate",
+                  "predicate": "entity_state_is"
+                },
+                {
+                  "args": {
+                    "value": false
+                  },
+                  "op": "predicate",
+                  "predicate": "core_resolved"
+                }
+              ],
+              "op": "all"
+            }
+          ],
+          "op": "all"
+        }
+      }
+    },
+    {
+      "execution": {
+        "branches": [
+          {
+            "entry_step_id": "effect_0",
+            "id": "make-distant-noise"
+          }
+        ],
+        "steps": [
+          {
+            "effect": {
+              "entity_id": "clicker_group",
+              "key": "distracted",
+              "type": "change_entity_state",
+              "value": true
+            },
+            "id": "effect_0",
+            "kind": "effect",
+            "next_step_id": "effect_1"
+          },
+          {
+            "effect": {
+              "entity_id": "clicker_group",
+              "key": "alerted",
+              "type": "change_entity_state",
+              "value": false
+            },
+            "id": "effect_1",
+            "kind": "effect",
+            "next_step_id": "effect_2"
+          },
+          {
+            "effect": {
+              "entity_id": "car_2_door",
+              "key": "crossing_resolved",
+              "type": "change_entity_state",
+              "value": true
+            },
+            "id": "effect_2",
+            "kind": "effect",
+            "next_step_id": "effect_3"
+          },
+          {
+            "effect": {
+              "location_id": "lead_car",
+              "type": "enter_location"
+            },
+            "id": "effect_3",
+            "kind": "effect",
+            "next_step_id": "effect_4"
+          },
+          {
+            "effect": {
+              "information_id": "clicker_car_crossed",
+              "scope": "party",
+              "type": "reveal_information"
+            },
+            "id": "effect_4",
+            "kind": "effect",
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "id": "distract_clickers_and_pass",
+      "priority": 100,
+      "trigger": {
+        "decision_mode": "selective",
+        "kind": "agent_match",
+        "options": [
+          {
+            "id": "make-distant-noise",
+            "semantic_hints": [
+              "把东西扔远制造声音",
+              "用持续声响引开怪物",
+              "趁循声者追声音时通过",
+              "我把东西扔远制造声音，趁怪物被引开时通过"
+            ]
+          }
+        ],
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "把东西扔远制造声音",
+            "用持续声响引开怪物",
+            "趁循声者追声音时通过",
+            "我把东西扔远制造声音，趁怪物被引开时通过"
+          ]
+        },
+        "required": true,
+        "scope": {
+          "action_families": [
+            "distract",
+            "throw",
+            "cross"
+          ],
+          "location_ids": [
+            "car_3"
+          ],
+          "target_ids": [
+            "clicker_group"
+          ],
+          "target_kinds": [
+            "entity"
+          ]
+        },
+        "when": {
+          "items": [
+            {
+              "args": {
+                "entity_id": "car_2_door",
+                "key": "crossing_resolved",
+                "value": false
+              },
+              "op": "predicate",
+              "predicate": "entity_state_is"
+            },
+            {
+              "items": [
+                {
+                  "args": {
+                    "id": "clickers_follow_sound"
+                  },
+                  "op": "predicate",
+                  "predicate": "information_is"
+                },
+                {
+                  "args": {
+                    "entity_id": "clicker_group",
+                    "key": "alerted",
+                    "value": true
+                  },
+                  "op": "predicate",
+                  "predicate": "entity_state_is"
+                }
+              ],
+              "op": "any"
+            },
+            {
+              "items": [
+                {
+                  "args": {
+                    "entity_id": "train_chase",
+                    "key": "outcome",
+                    "value": "none"
+                  },
+                  "op": "predicate",
+                  "predicate": "entity_state_is"
+                },
+                {
+                  "args": {
+                    "value": false
+                  },
+                  "op": "predicate",
+                  "predicate": "core_resolved"
+                }
+              ],
+              "op": "all"
+            }
+          ],
+          "op": "all"
+        }
+      }
+    },
+    {
+      "execution": {
+        "branches": [
+          {
+            "entry_step_id": "effect_0",
+            "id": "use-both-keys"
+          }
+        ],
+        "steps": [
+          {
+            "effect": {
+              "entity_id": "cab_door",
+              "key": "opened",
+              "type": "change_entity_state",
+              "value": true
+            },
+            "id": "effect_0",
+            "kind": "effect",
+            "next_step_id": "effect_1"
+          },
+          {
+            "effect": {
+              "entity_id": "control_panel",
+              "key": "unlocked",
+              "type": "change_entity_state",
+              "value": true
+            },
+            "id": "effect_1",
+            "kind": "effect",
+            "next_step_id": "effect_2"
+          },
+          {
+            "effect": {
+              "location_id": "driver_cab",
+              "type": "enter_location"
+            },
+            "id": "effect_2",
+            "kind": "effect",
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "id": "unlock_cab_and_panel",
+      "priority": 0,
+      "trigger": {
+        "decision_mode": "selective",
+        "kind": "agent_match",
+        "options": [
+          {
+            "id": "use-both-keys",
+            "semantic_hints": [
+              "用两把钥匙打开驾驶室和面板",
+              "开驾驶室门进入控制室",
+              "拿钥匙解锁列车控制台"
+            ]
+          }
+        ],
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "用两把钥匙打开驾驶室和面板",
+            "开驾驶室门进入控制室",
+            "拿钥匙解锁列车控制台"
+          ]
+        },
+        "required": true,
+        "scope": {
+          "action_families": [
+            "unlock",
+            "open",
+            "enter"
+          ],
+          "location_ids": [
+            "lead_car"
+          ],
+          "target_ids": [
+            "cab_door"
+          ],
+          "target_kinds": [
+            "entity"
+          ]
+        },
+        "when": {
+          "items": [
+            {
+              "args": {
+                "entity_id": "key_bag",
+                "key": "retrieved",
+                "value": true
+              },
+              "op": "predicate",
+              "predicate": "entity_state_is"
+            },
+            {
+              "args": {
+                "entity_id": "cab_door",
+                "key": "opened",
+                "value": false
+              },
+              "op": "predicate",
+              "predicate": "entity_state_is"
+            },
+            {
+              "items": [
+                {
+                  "args": {
+                    "entity_id": "train_chase",
+                    "key": "outcome",
+                    "value": "none"
+                  },
+                  "op": "predicate",
+                  "predicate": "entity_state_is"
+                },
+                {
+                  "args": {
+                    "value": false
+                  },
+                  "op": "predicate",
+                  "predicate": "core_resolved"
+                }
+              ],
+              "op": "all"
+            }
+          ],
+          "op": "all"
+        }
+      }
+    },
+    {
+      "execution": {
+        "branches": [
+          {
+            "entry_step_id": "effect_0",
+            "id": "identify-levers"
+          }
+        ],
+        "steps": [
+          {
+            "effect": {
+              "entity_id": "control_panel",
+              "key": "inspected",
+              "type": "change_entity_state",
+              "value": true
+            },
+            "id": "effect_0",
+            "kind": "effect",
+            "next_step_id": "effect_1"
+          },
+          {
+            "effect": {
+              "information_id": "control_panel_instructions",
+              "scope": "party",
+              "type": "reveal_information"
+            },
+            "id": "effect_1",
+            "kind": "effect",
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "id": "inspect_control_panel",
+      "priority": 0,
+      "trigger": {
+        "decision_mode": "selective",
+        "kind": "agent_match",
+        "options": [
+          {
+            "id": "identify-levers",
+            "semantic_hints": [
+              "观察两只控制杆的作用",
+              "弄清列车怎么加速减速",
+              "检查驾驶室控制面板"
+            ]
+          }
+        ],
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "观察两只控制杆的作用",
+            "弄清列车怎么加速减速",
+            "检查驾驶室控制面板"
+          ]
+        },
+        "required": true,
+        "scope": {
+          "action_families": [
+            "inspect",
+            "learn",
+            "operate"
+          ],
+          "location_ids": [
+            "driver_cab"
+          ],
+          "target_ids": [
+            "control_panel"
+          ],
+          "target_kinds": [
+            "entity"
+          ]
+        },
+        "when": {
+          "items": [
+            {
+              "args": {
+                "entity_id": "control_panel",
+                "key": "unlocked",
+                "value": true
+              },
+              "op": "predicate",
+              "predicate": "entity_state_is"
+            },
+            {
+              "args": {
+                "entity_id": "control_panel",
+                "key": "inspected",
+                "value": false
+              },
+              "op": "predicate",
+              "predicate": "entity_state_is"
+            },
+            {
+              "items": [
+                {
+                  "args": {
+                    "entity_id": "train_chase",
+                    "key": "outcome",
+                    "value": "none"
+                  },
+                  "op": "predicate",
+                  "predicate": "entity_state_is"
+                },
+                {
+                  "args": {
+                    "value": false
+                  },
+                  "op": "predicate",
+                  "predicate": "core_resolved"
+                }
+              ],
+              "op": "all"
+            }
+          ],
+          "op": "all"
+        }
+      }
+    },
+    {
+      "execution": {
+        "branches": [
+          {
+            "entry_step_id": "check",
+            "id": "keep-train-moving"
+          }
+        ],
+        "steps": [
+          {
+            "check": {
+              "actor_binding": "actor",
+              "allow_luck": true,
+              "allow_push": true,
+              "difficulty": "regular",
+              "initiation_kind": "active_action",
+              "parameters": {
+                "skill_id": "persuade"
+              },
+              "profile_id": "coc7.skill"
+            },
+            "id": "check",
+            "kind": "check",
+            "result_routes": {
+              "critical_success": "success_0",
+              "extreme_success": "success_0",
+              "failure": "finish",
+              "fumble": "finish",
+              "hard_success": "success_0",
+              "regular_success": "success_0"
+            }
+          },
+          {
+            "effect": {
+              "entity_id": "attendant",
+              "key": "maw_believed",
+              "type": "change_entity_state",
+              "value": true
+            },
+            "id": "success_0",
+            "kind": "effect",
+            "next_step_id": "success_1"
+          },
+          {
+            "effect": {
+              "entity_id": "attendant",
+              "key": "allows_acceleration",
+              "type": "change_entity_state",
+              "value": true
+            },
+            "id": "success_1",
+            "kind": "effect",
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "id": "persuade_attendant_to_allow_acceleration",
+      "priority": 0,
+      "trigger": {
+        "decision_mode": "selective",
+        "kind": "agent_match",
+        "options": [
+          {
+            "id": "keep-train-moving",
+            "semantic_hints": [
+              "说服乘务员不要停车",
+              "劝他相信后面有大嘴",
+              "让乘务员同意继续加速"
+            ]
+          }
+        ],
+        "question": {
+          "kind": "method",
+          "semantic_hints": [
+            "说服乘务员不要停车",
+            "劝他相信后面有大嘴",
+            "让乘务员同意继续加速"
+          ]
+        },
+        "required": true,
+        "scope": {
+          "action_families": [
+            "persuade",
+            "explain",
+            "talk"
+          ],
+          "location_ids": [
+            "driver_cab"
+          ],
+          "target_ids": [
+            "attendant"
+          ],
+          "target_kinds": [
+            "entity"
+          ]
+        },
+        "when": {
+          "items": [
+            {
+              "args": {
+                "entity_id": "attendant",
+                "key": "accompanying",
+                "value": true
+              },
+              "op": "predicate",
+              "predicate": "entity_state_is"
+            },
+            {
+              "args": {
+                "entity_id": "attendant",
+                "key": "allows_acceleration",
+                "value": false
+              },
+              "op": "predicate",
+              "predicate": "entity_state_is"
+            },
+            {
+              "items": [
+                {
+                  "args": {
+                    "entity_id": "train_chase",
+                    "key": "outcome",
+                    "value": "none"
+                  },
+                  "op": "predicate",
+                  "predicate": "entity_state_is"
+                },
+                {
+                  "args": {
+                    "value": false
+                  },
+                  "op": "predicate",
+                  "predicate": "core_resolved"
+                }
+              ],
+              "op": "all"
+            }
+          ],
+          "op": "all"
+        }
+      }
+    },
+    {
+      "execution": {
+        "branches": [
+          {
+            "entry_step_id": "effect_0",
+            "id": "push-throttle-down"
+          }
+        ],
+        "steps": [
+          {
+            "effect": {
+              "entity_id": "control_panel",
+              "key": "lever",
+              "type": "change_entity_state",
+              "value": "accelerate"
+            },
+            "id": "effect_0",
+            "kind": "effect",
+            "next_step_id": "effect_1"
+          },
+          {
+            "effect": {
+              "entity_id": "train_chase",
+              "key": "outcome",
+              "type": "change_entity_state",
+              "value": "accelerate"
+            },
+            "id": "effect_1",
+            "kind": "effect",
+            "next_step_id": "effect_2"
+          },
+          {
+            "effect": {
+              "entity_id": "train_chase",
+              "key": "active",
+              "type": "change_entity_state",
+              "value": false
+            },
+            "id": "effect_2",
+            "kind": "effect",
+            "next_step_id": "effect_3"
+          },
+          {
+            "effect": {
+              "entity_id": "attendant",
+              "key": "present",
+              "type": "change_entity_state",
+              "value": false
+            },
+            "id": "effect_3",
+            "kind": "effect",
+            "next_step_id": "effect_4"
+          },
+          {
+            "effect": {
+              "entity_id": "attendant",
+              "key": "accompanying",
+              "type": "change_entity_state",
+              "value": false
+            },
+            "id": "effect_4",
+            "kind": "effect",
+            "next_step_id": "effect_5"
+          },
+          {
+            "effect": {
+              "entity_id": "clicker_group",
+              "key": "active",
+              "type": "change_entity_state",
+              "value": false
+            },
+            "id": "effect_5",
+            "kind": "effect",
+            "next_step_id": "effect_6"
+          },
+          {
+            "effect": {
+              "entity_id": "rear_maw",
+              "key": "active",
+              "type": "change_entity_state",
+              "value": false
+            },
+            "id": "effect_6",
+            "kind": "effect",
+            "next_step_id": "effect_7"
+          },
+          {
+            "effect": {
+              "entity_id": "key_bag",
+              "location_id": "terminal_train_car",
+              "type": "move_entity"
+            },
+            "id": "effect_7",
+            "kind": "effect",
+            "next_step_id": "effect_8"
+          },
+          {
+            "effect": {
+              "information_id": "ending_accelerate",
+              "scope": "party",
+              "type": "reveal_information"
+            },
+            "id": "effect_8",
+            "kind": "effect",
+            "next_step_id": "effect_9"
+          },
+          {
+            "effect": {
+              "type": "mark_core_resolved"
+            },
+            "id": "effect_9",
+            "kind": "effect",
+            "next_step_id": "effect_10"
+          },
+          {
+            "effect": {
+              "available": true,
+              "type": "set_ending_availability"
+            },
+            "id": "effect_10",
+            "kind": "effect",
+            "next_step_id": "effect_11"
+          },
+          {
+            "effect": {
+              "location_id": "terminal_train_car",
+              "type": "enter_location"
+            },
+            "id": "effect_11",
+            "kind": "effect",
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "id": "accelerate_train",
+      "priority": 200,
+      "trigger": {
+        "decision_mode": "selective",
+        "kind": "agent_match",
+        "options": [
+          {
+            "id": "push-throttle-down",
+            "semantic_hints": [
+              "把右侧油门杆向下拉到底",
+              "让列车全速加速",
+              "不停车继续冲向前方",
+              "我把右边的油门杆向下拉到底，让列车全速加速"
+            ]
+          }
+        ],
+        "question": {
+          "kind": "action_declaration",
+          "semantic_hints": [
+            "把右侧油门杆向下拉到底",
+            "让列车全速加速",
+            "不停车继续冲向前方",
+            "我把右边的油门杆向下拉到底，让列车全速加速"
+          ]
+        },
+        "required": true,
+        "scope": {
+          "action_families": [
+            "accelerate",
+            "operate",
+            "escape"
+          ],
+          "location_ids": [
+            "driver_cab"
+          ],
+          "target_ids": [
+            "control_panel"
+          ],
+          "target_kinds": [
+            "entity"
+          ]
+        },
+        "when": {
+          "items": [
+            {
+              "args": {
+                "entity_id": "key_bag",
+                "key": "retrieved",
+                "value": true
+              },
+              "op": "predicate",
+              "predicate": "entity_state_is"
+            },
+            {
+              "args": {
+                "entity_id": "car_2_door",
+                "key": "crossing_resolved",
+                "value": true
+              },
+              "op": "predicate",
+              "predicate": "entity_state_is"
+            },
+            {
+              "args": {
+                "entity_id": "control_panel",
+                "key": "unlocked",
+                "value": true
+              },
+              "op": "predicate",
+              "predicate": "entity_state_is"
+            },
+            {
+              "args": {
+                "entity_id": "control_panel",
+                "key": "inspected",
+                "value": true
+              },
+              "op": "predicate",
+              "predicate": "entity_state_is"
+            },
+            {
+              "items": [
+                {
+                  "args": {
+                    "entity_id": "attendant",
+                    "key": "accompanying",
+                    "value": false
+                  },
+                  "op": "predicate",
+                  "predicate": "entity_state_is"
+                },
+                {
+                  "args": {
+                    "entity_id": "attendant",
+                    "key": "maw_believed",
+                    "value": true
+                  },
+                  "op": "predicate",
+                  "predicate": "entity_state_is"
+                },
+                {
+                  "args": {
+                    "entity_id": "attendant",
+                    "key": "allows_acceleration",
+                    "value": true
+                  },
+                  "op": "predicate",
+                  "predicate": "entity_state_is"
+                }
+              ],
+              "op": "any"
+            },
+            {
+              "items": [
+                {
+                  "args": {
+                    "entity_id": "train_chase",
+                    "key": "outcome",
+                    "value": "none"
+                  },
+                  "op": "predicate",
+                  "predicate": "entity_state_is"
+                },
+                {
+                  "args": {
+                    "value": false
+                  },
+                  "op": "predicate",
+                  "predicate": "core_resolved"
+                }
+              ],
+              "op": "all"
+            }
+          ],
+          "op": "all"
+        }
+      }
+    },
+    {
+      "execution": {
+        "branches": [
+          {
+            "entry_step_id": "effect_0",
+            "id": "pull-throttle-up"
+          }
+        ],
+        "steps": [
+          {
+            "effect": {
+              "entity_id": "control_panel",
+              "key": "lever",
+              "type": "change_entity_state",
+              "value": "decelerate"
+            },
+            "id": "effect_0",
+            "kind": "effect",
+            "next_step_id": "effect_1"
+          },
+          {
+            "effect": {
+              "entity_id": "train_chase",
+              "key": "outcome",
+              "type": "change_entity_state",
+              "value": "decelerate"
+            },
+            "id": "effect_1",
+            "kind": "effect",
+            "next_step_id": "effect_2"
+          },
+          {
+            "effect": {
+              "entity_id": "train_chase",
+              "key": "active",
+              "type": "change_entity_state",
+              "value": false
+            },
+            "id": "effect_2",
+            "kind": "effect",
+            "next_step_id": "effect_3"
+          },
+          {
+            "effect": {
+              "entity_id": "attendant",
+              "key": "present",
+              "type": "change_entity_state",
+              "value": false
+            },
+            "id": "effect_3",
+            "kind": "effect",
+            "next_step_id": "effect_4"
+          },
+          {
+            "effect": {
+              "entity_id": "attendant",
+              "key": "accompanying",
+              "type": "change_entity_state",
+              "value": false
+            },
+            "id": "effect_4",
+            "kind": "effect",
+            "next_step_id": "effect_5"
+          },
+          {
+            "effect": {
+              "entity_id": "clicker_group",
+              "key": "active",
+              "type": "change_entity_state",
+              "value": false
+            },
+            "id": "effect_5",
+            "kind": "effect",
+            "next_step_id": "effect_6"
+          },
+          {
+            "effect": {
+              "entity_id": "rear_maw",
+              "key": "active",
+              "type": "change_entity_state",
+              "value": false
+            },
+            "id": "effect_6",
+            "kind": "effect",
+            "next_step_id": "effect_7"
+          },
+          {
+            "effect": {
+              "entity_id": "key_bag",
+              "location_id": "terminal_train_car",
+              "type": "move_entity"
+            },
+            "id": "effect_7",
+            "kind": "effect",
+            "next_step_id": "effect_8"
+          },
+          {
+            "effect": {
+              "information_id": "ending_decelerate",
+              "scope": "party",
+              "type": "reveal_information"
+            },
+            "id": "effect_8",
+            "kind": "effect",
+            "next_step_id": "effect_9"
+          },
+          {
+            "effect": {
+              "type": "mark_core_resolved"
+            },
+            "id": "effect_9",
+            "kind": "effect",
+            "next_step_id": "effect_10"
+          },
+          {
+            "effect": {
+              "available": true,
+              "type": "set_ending_availability"
+            },
+            "id": "effect_10",
+            "kind": "effect",
+            "next_step_id": "effect_11"
+          },
+          {
+            "effect": {
+              "location_id": "terminal_train_car",
+              "type": "enter_location"
+            },
+            "id": "effect_11",
+            "kind": "effect",
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "id": "decelerate_train",
+      "priority": 200,
+      "trigger": {
+        "decision_mode": "selective",
+        "kind": "agent_match",
+        "options": [
+          {
+            "id": "pull-throttle-up",
+            "semantic_hints": [
+              "把右侧油门杆向上拉",
+              "让列车减速停车",
+              "听乘务员的把电车停下"
+            ]
+          }
+        ],
+        "question": {
+          "kind": "action_declaration",
+          "semantic_hints": [
+            "把右侧油门杆向上拉",
+            "让列车减速停车",
+            "听乘务员的把电车停下"
+          ]
+        },
+        "required": true,
+        "scope": {
+          "action_families": [
+            "decelerate",
+            "brake",
+            "stop"
+          ],
+          "location_ids": [
+            "driver_cab"
+          ],
+          "target_ids": [
+            "control_panel"
+          ],
+          "target_kinds": [
+            "entity"
+          ]
+        },
+        "when": {
+          "items": [
+            {
+              "args": {
+                "entity_id": "key_bag",
+                "key": "retrieved",
+                "value": true
+              },
+              "op": "predicate",
+              "predicate": "entity_state_is"
+            },
+            {
+              "args": {
+                "entity_id": "car_2_door",
+                "key": "crossing_resolved",
+                "value": true
+              },
+              "op": "predicate",
+              "predicate": "entity_state_is"
+            },
+            {
+              "args": {
+                "entity_id": "control_panel",
+                "key": "unlocked",
+                "value": true
+              },
+              "op": "predicate",
+              "predicate": "entity_state_is"
+            },
+            {
+              "args": {
+                "entity_id": "control_panel",
+                "key": "inspected",
+                "value": true
+              },
+              "op": "predicate",
+              "predicate": "entity_state_is"
+            },
+            {
+              "items": [
+                {
+                  "args": {
+                    "entity_id": "train_chase",
+                    "key": "outcome",
+                    "value": "none"
+                  },
+                  "op": "predicate",
+                  "predicate": "entity_state_is"
+                },
+                {
+                  "args": {
+                    "value": false
+                  },
+                  "op": "predicate",
+                  "predicate": "core_resolved"
+                }
+              ],
+              "op": "all"
+            }
+          ],
+          "op": "all"
+        }
+      }
+    },
+    {
+      "execution": {
+        "branches": [
+          {
+            "entry_step_id": "effect_0",
+            "id": "default"
+          }
+        ],
+        "steps": [
+          {
+            "effect": {
+              "entity_id": "attendant",
+              "location_id": "lead_car",
+              "type": "move_entity"
+            },
+            "id": "effect_0",
+            "kind": "effect",
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "id": "sync_attendant_to_lead_car",
+      "priority": 100,
+      "trigger": {
+        "entry_branch_id": "default",
+        "event_type": "travel.resolved",
+        "kind": "event",
+        "when": {
+          "items": [
+            {
+              "args": {
+                "id": "lead_car"
+              },
+              "op": "predicate",
+              "predicate": "party_location_is"
+            },
+            {
+              "args": {
+                "entity_id": "attendant",
+                "key": "accompanying",
+                "value": true
+              },
+              "op": "predicate",
+              "predicate": "entity_state_is"
+            },
+            {
+              "args": {
+                "entity_id": "attendant",
+                "key": "present",
+                "value": true
+              },
+              "op": "predicate",
+              "predicate": "entity_state_is"
+            }
+          ],
+          "op": "all"
+        }
+      }
+    },
+    {
+      "execution": {
+        "branches": [
+          {
+            "entry_step_id": "effect_0",
+            "id": "default"
+          }
+        ],
+        "steps": [
+          {
+            "effect": {
+              "entity_id": "attendant",
+              "location_id": "driver_cab",
+              "type": "move_entity"
+            },
+            "id": "effect_0",
+            "kind": "effect",
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "id": "sync_attendant_to_driver_cab",
+      "priority": 100,
+      "trigger": {
+        "entry_branch_id": "default",
+        "event_type": "travel.resolved",
+        "kind": "event",
+        "when": {
+          "items": [
+            {
+              "args": {
+                "id": "driver_cab"
+              },
+              "op": "predicate",
+              "predicate": "party_location_is"
+            },
+            {
+              "args": {
+                "entity_id": "attendant",
+                "key": "accompanying",
+                "value": true
+              },
+              "op": "predicate",
+              "predicate": "entity_state_is"
+            },
+            {
+              "args": {
+                "entity_id": "attendant",
+                "key": "present",
+                "value": true
+              },
+              "op": "predicate",
+              "predicate": "entity_state_is"
+            }
+          ],
+          "op": "all"
+        }
+      }
+    },
+    {
+      "execution": {
+        "branches": [
+          {
+            "entry_step_id": "effect_0",
+            "id": "default"
+          }
+        ],
+        "steps": [
+          {
+            "effect": {
+              "entity_id": "key_bag",
+              "location_id": "lead_car",
+              "type": "move_entity"
+            },
+            "id": "effect_0",
+            "kind": "effect",
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "id": "sync_key_bag_to_lead_car",
+      "priority": 90,
+      "trigger": {
+        "entry_branch_id": "default",
+        "event_type": "travel.resolved",
+        "kind": "event",
+        "when": {
+          "items": [
+            {
+              "args": {
+                "id": "lead_car"
+              },
+              "op": "predicate",
+              "predicate": "party_location_is"
+            },
+            {
+              "args": {
+                "entity_id": "key_bag",
+                "key": "retrieved",
+                "value": true
+              },
+              "op": "predicate",
+              "predicate": "entity_state_is"
+            },
+            {
+              "args": {
+                "entity_id": "key_bag",
+                "key": "carried",
+                "value": true
+              },
+              "op": "predicate",
+              "predicate": "entity_state_is"
+            }
+          ],
+          "op": "all"
+        }
+      }
+    },
+    {
+      "execution": {
+        "branches": [
+          {
+            "entry_step_id": "effect_0",
+            "id": "default"
+          }
+        ],
+        "steps": [
+          {
+            "effect": {
+              "entity_id": "key_bag",
+              "location_id": "driver_cab",
+              "type": "move_entity"
+            },
+            "id": "effect_0",
+            "kind": "effect",
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "id": "sync_key_bag_to_driver_cab",
+      "priority": 90,
+      "trigger": {
+        "entry_branch_id": "default",
+        "event_type": "travel.resolved",
+        "kind": "event",
+        "when": {
+          "items": [
+            {
+              "args": {
+                "id": "driver_cab"
+              },
+              "op": "predicate",
+              "predicate": "party_location_is"
+            },
+            {
+              "args": {
+                "entity_id": "key_bag",
+                "key": "retrieved",
+                "value": true
+              },
+              "op": "predicate",
+              "predicate": "entity_state_is"
+            },
+            {
+              "args": {
+                "entity_id": "key_bag",
+                "key": "carried",
+                "value": true
+              },
+              "op": "predicate",
+              "predicate": "entity_state_is"
+            }
+          ],
+          "op": "all"
+        }
+      }
+    },
+    {
+      "execution": {
+        "branches": [
+          {
+            "entry_step_id": "effect_0",
+            "id": "default"
+          }
+        ],
+        "steps": [
+          {
+            "effect": {
+              "entity_id": "train_chase",
+              "key": "deadline_reached",
+              "type": "change_entity_state",
+              "value": true
+            },
+            "id": "effect_0",
+            "kind": "effect",
+            "next_step_id": "effect_1"
+          },
+          {
+            "effect": {
+              "entity_id": "train_chase",
+              "key": "outcome",
+              "type": "change_entity_state",
+              "value": "consumed"
+            },
+            "id": "effect_1",
+            "kind": "effect",
+            "next_step_id": "effect_2"
+          },
+          {
+            "effect": {
+              "entity_id": "train_chase",
+              "key": "active",
+              "type": "change_entity_state",
+              "value": false
+            },
+            "id": "effect_2",
+            "kind": "effect",
+            "next_step_id": "effect_3"
+          },
+          {
+            "effect": {
+              "entity_id": "rear_maw",
+              "key": "reached_party",
+              "type": "change_entity_state",
+              "value": true
+            },
+            "id": "effect_3",
+            "kind": "effect",
+            "next_step_id": "effect_4"
+          },
+          {
+            "effect": {
+              "entity_id": "rear_maw",
+              "key": "active",
+              "type": "change_entity_state",
+              "value": false
+            },
+            "id": "effect_4",
+            "kind": "effect",
+            "next_step_id": "effect_5"
+          },
+          {
+            "effect": {
+              "entity_id": "clicker_group",
+              "key": "active",
+              "type": "change_entity_state",
+              "value": false
+            },
+            "id": "effect_5",
+            "kind": "effect",
+            "next_step_id": "effect_6"
+          },
+          {
+            "effect": {
+              "entity_id": "attendant",
+              "key": "present",
+              "type": "change_entity_state",
+              "value": false
+            },
+            "id": "effect_6",
+            "kind": "effect",
+            "next_step_id": "effect_7"
+          },
+          {
+            "effect": {
+              "entity_id": "attendant",
+              "key": "accompanying",
+              "type": "change_entity_state",
+              "value": false
+            },
+            "id": "effect_7",
+            "kind": "effect",
+            "next_step_id": "effect_8"
+          },
+          {
+            "effect": {
+              "information_id": "ending_consumed",
+              "scope": "party",
+              "type": "reveal_information"
+            },
+            "id": "effect_8",
+            "kind": "effect",
+            "next_step_id": "effect_9"
+          },
+          {
+            "effect": {
+              "type": "mark_core_resolved"
+            },
+            "id": "effect_9",
+            "kind": "effect",
+            "next_step_id": "effect_10"
+          },
+          {
+            "effect": {
+              "available": true,
+              "type": "set_ending_availability"
+            },
+            "id": "effect_10",
+            "kind": "effect",
+            "next_step_id": "effect_11"
+          },
+          {
+            "effect": {
+              "location_id": "hospital_isolation",
+              "type": "enter_location"
+            },
+            "id": "effect_11",
+            "kind": "effect",
+            "next_step_id": "finish"
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "id": "midnight_maw_consumes_train",
+      "priority": 1000,
+      "trigger": {
+        "entry_branch_id": "default",
+        "event_type": "time.point_entered",
+        "kind": "event",
+        "when": {
+          "items": [
+            {
+              "args": {
+                "value": "hour_00"
+              },
+              "op": "predicate",
+              "predicate": "time_point_is"
+            },
+            {
+              "args": {
+                "value": 1
+              },
+              "op": "predicate",
+              "predicate": "days_elapsed_at_least"
+            },
+            {
+              "args": {
+                "entity_id": "train_chase",
+                "key": "outcome",
+                "value": "none"
+              },
+              "op": "predicate",
+              "predicate": "entity_state_is"
+            },
+            {
+              "args": {
+                "value": false
+              },
+              "op": "predicate",
+              "predicate": "core_resolved"
+            }
+          ],
+          "op": "all"
+        }
+      }
+    },
+    {
+      "execution": {
+        "branches": [
+          {
+            "entry_step_id": "mark",
+            "id": "default"
+          }
+        ],
+        "steps": [
+          {
+            "effect": {
+              "entity_id": "horror_checks",
+              "key": "bodies",
+              "type": "change_entity_state",
+              "value": true
+            },
+            "id": "mark",
+            "kind": "effect",
+            "next_step_id": "san"
+          },
+          {
+            "check": {
+              "actor_binding": "actor",
+              "initiation_kind": "passive_rule",
+              "parameters": {
+                "failure_loss": "1d4",
+                "success_loss": "1"
+              },
+              "profile_id": "coc7.sanity"
+            },
+            "id": "san",
+            "kind": "check",
+            "result_routes": {
+              "critical_success": "finish",
+              "extreme_success": "finish",
+              "failure": "finish",
+              "fumble": "finish",
+              "hard_success": "finish",
+              "regular_success": "finish"
+            }
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "id": "rear_car_bodies_sanity",
+      "trigger": {
+        "entry_branch_id": "default",
+        "event_type": "information.revealed",
+        "kind": "event",
+        "when": {
+          "items": [
+            {
+              "args": {
+                "id": "rear_car_bodies"
+              },
+              "op": "predicate",
+              "predicate": "information_is"
+            },
+            {
+              "args": {
+                "entity_id": "horror_checks",
+                "key": "bodies",
+                "value": false
+              },
+              "op": "predicate",
+              "predicate": "entity_state_is"
+            }
+          ],
+          "op": "all"
+        }
+      }
+    },
+    {
+      "execution": {
+        "branches": [
+          {
+            "entry_step_id": "mark",
+            "id": "default"
+          }
+        ],
+        "steps": [
+          {
+            "effect": {
+              "entity_id": "horror_checks",
+              "key": "maw",
+              "type": "change_entity_state",
+              "value": true
+            },
+            "id": "mark",
+            "kind": "effect",
+            "next_step_id": "san"
+          },
+          {
+            "check": {
+              "actor_binding": "actor",
+              "initiation_kind": "passive_rule",
+              "parameters": {
+                "failure_loss": "1d6",
+                "success_loss": "1"
+              },
+              "profile_id": "coc7.sanity"
+            },
+            "id": "san",
+            "kind": "check",
+            "result_routes": {
+              "critical_success": "finish",
+              "extreme_success": "finish",
+              "failure": "finish",
+              "fumble": "finish",
+              "hard_success": "finish",
+              "regular_success": "finish"
+            }
+          },
+          {
+            "id": "finish",
+            "kind": "finish"
+          }
+        ]
+      },
+      "id": "rear_maw_sanity",
+      "trigger": {
+        "entry_branch_id": "default",
+        "event_type": "information.revealed",
+        "kind": "event",
+        "when": {
+          "items": [
+            {
+              "args": {
+                "id": "rear_maw_seen"
+              },
+              "op": "predicate",
+              "predicate": "information_is"
+            },
+            {
+              "args": {
+                "entity_id": "horror_checks",
+                "key": "maw",
+                "value": false
+              },
+              "op": "predicate",
+              "predicate": "entity_state_is"
+            }
+          ],
+          "op": "all"
+        }
+      }
+    }
+  ],
+  "time_policy": {
+    "actions_per_point": "multiple",
+    "default_points": [
+      {
+        "hour_of_day": 0,
+        "id": "hour_00",
+        "label": "午夜终点",
+        "order": 0,
+        "time_segment": "late_night"
+      },
+      {
+        "hour_of_day": 23,
+        "id": "hour_23",
+        "label": "深夜末班车",
+        "order": 1,
+        "time_segment": "evening"
+      }
+    ],
+    "progression": "host_controlled_discrete",
+    "storage_precision": "hour",
+    "terminal_point": {
+      "day_index": 1,
+      "point_id": "hour_00"
+    }
+  },
+  "version": "3.0.0",
+  "world_profile": {
+    "era": "2013 年",
+    "forbidden_content": [
+      "开局泄露共同梦境真相",
+      "提前公开奈亚化身或循声者弱点",
+      "虚构乘务员死亡或生还",
+      "宣称调查员赢得原文未规定的战斗",
+      "伪造 HP、SAN、幸运或技能数值变化",
+      "创造原文不存在的救援和额外结局"
+    ],
+    "region": "日本都市末班电车与超自然梦境",
+    "technology_level": "2013 年民用技术；手机可用但无信号，列车为常规电车",
+    "tone": "密闭、紧迫、血腥而克制的超自然追逐恐怖"
+  },
+  "world_ref": "coc-7e"
+}

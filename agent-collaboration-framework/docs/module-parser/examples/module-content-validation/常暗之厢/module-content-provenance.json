@@ -1,0 +1,296 @@
+{
+  "_comment": "页码从《常暗之箱》（7版规则，简体修正版）PDF 首页起按 1 编号。",
+  "ending_anchors": {
+    "accelerate_true_end": [
+      12,
+      13,
+      14
+    ],
+    "consumed_crazy_end": [
+      11,
+      13,
+      14
+    ],
+    "decelerate_bad_end": [
+      12,
+      13,
+      14
+    ]
+  },
+  "information": {
+    "attendant_attack_account": [
+      5
+    ],
+    "attendant_requests_key_custody": [
+      7
+    ],
+    "carry_attempt_can_retry": [
+      6,
+      15
+    ],
+    "clicker_car_crossed": [
+      10,
+      11,
+      14
+    ],
+    "clickers_alerted": [
+      10,
+      11
+    ],
+    "clickers_follow_sound": [
+      5,
+      6,
+      10,
+      11,
+      15
+    ],
+    "control_panel_instructions": [
+      12
+    ],
+    "death_was_recent": [
+      3
+    ],
+    "ending_accelerate": [
+      12,
+      13,
+      14
+    ],
+    "ending_consumed": [
+      11,
+      13,
+      14
+    ],
+    "ending_decelerate": [
+      12,
+      13,
+      14
+    ],
+    "first_aid_can_retry": [
+      5,
+      15
+    ],
+    "key_bag_location": [
+      6
+    ],
+    "key_bag_retrieved": [
+      6,
+      7,
+      14
+    ],
+    "key_search_can_continue": [
+      7,
+      15
+    ],
+    "newspaper_from_tomorrow": [
+      4
+    ],
+    "newspaper_report": [
+      3,
+      4
+    ],
+    "rear_car_bodies": [
+      3
+    ],
+    "rear_maw_seen": [
+      3,
+      15
+    ],
+    "route_map_erased": [
+      3
+    ],
+    "warning_note_back": [
+      3
+    ],
+    "warning_note_front": [
+      2,
+      3
+    ]
+  },
+  "knowledge_goals": {
+    "reach_train_controls": [
+      10,
+      11,
+      12,
+      14
+    ],
+    "recover_train_keys": [
+      6,
+      7,
+      14
+    ],
+    "resolve_dream_train": [
+      12,
+      13,
+      14
+    ]
+  },
+  "locations": {
+    "car_2": [
+      7,
+      8,
+      10,
+      11
+    ],
+    "car_3": [
+      6,
+      7
+    ],
+    "car_4": [
+      5,
+      6
+    ],
+    "car_5": [
+      3,
+      4
+    ],
+    "car_6": [
+      2,
+      3
+    ],
+    "car_7": [
+      3
+    ],
+    "dream_train": [
+      2,
+      14
+    ],
+    "driver_cab": [
+      12
+    ],
+    "hospital_isolation": [
+      13,
+      14
+    ],
+    "lead_car": [
+      11,
+      12
+    ],
+    "reality_after_dream": [
+      12,
+      13,
+      14
+    ],
+    "terminal_train_car": [
+      12,
+      13
+    ]
+  },
+  "module_id": "constant-darkness-box-zh-coc7",
+  "rules": {
+    "accelerate_train": [
+      12,
+      13
+    ],
+    "analyze_newspaper_date": [
+      4
+    ],
+    "ask_attendant_about_attack": [
+      5
+    ],
+    "ask_attendant_about_attackers": [
+      5,
+      6
+    ],
+    "ask_attendant_about_keys": [
+      6
+    ],
+    "carry_attendant_to_car_3": [
+      6,
+      7
+    ],
+    "decelerate_train": [
+      12,
+      13
+    ],
+    "distract_clickers_and_pass": [
+      10,
+      11,
+      15
+    ],
+    "enter_rear_car": [
+      3
+    ],
+    "examine_rear_car_bodies": [
+      3
+    ],
+    "first_aid_attendant": [
+      5,
+      15
+    ],
+    "inspect_control_panel": [
+      12
+    ],
+    "inspect_route_map": [
+      3
+    ],
+    "midnight_maw_consumes_train": [
+      2,
+      4,
+      11,
+      13,
+      14,
+      16,
+      17
+    ],
+    "observe_car_2_through_glass": [
+      7,
+      8
+    ],
+    "persuade_attendant_to_allow_acceleration": [
+      12
+    ],
+    "persuade_attendant_to_hand_over_keys": [
+      7
+    ],
+    "read_warning_note": [
+      2,
+      3
+    ],
+    "rear_car_bodies_sanity": [
+      3
+    ],
+    "rear_maw_sanity": [
+      3
+    ],
+    "search_key_bag": [
+      7
+    ],
+    "search_newspaper": [
+      3
+    ],
+    "sneak_past_clickers": [
+      10,
+      11
+    ],
+    "spot_rear_maw": [
+      3
+    ],
+    "sync_attendant_to_driver_cab": [
+      6,
+      12
+    ],
+    "sync_attendant_to_lead_car": [
+      6,
+      10,
+      11
+    ],
+    "sync_key_bag_to_driver_cab": [
+      7,
+      12
+    ],
+    "sync_key_bag_to_lead_car": [
+      7,
+      10,
+      11
+    ],
+    "turn_warning_note_over": [
+      3
+    ],
+    "unlock_cab_and_panel": [
+      12
+    ]
+  },
+  "source": "常暗之厢（7版规则，简体修正版）(1).pdf",
+  "source_title": "常暗之箱",
+  "version": "3.0.0"
+}

@@ -38,7 +38,7 @@ import asyncio
 import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
 from functools import partial
 from typing import Literal, cast
@@ -673,7 +673,8 @@ async def _enqueue_host_action(
         for event in events:
             audience = tuple(str(value) for value in event.payload.get("audiencePlayerIds", ()))
             await _broadcast_dialogue_event(db, event, audience)
-    await _broadcast_room_action_state(db, room_id)
+    await anyio.sleep(0)
+    await _broadcast_room_action_state_fresh(room_id)
 
 
 async def _npc_dialogue_audience(
@@ -1677,7 +1678,10 @@ async def _short_db_session() -> AsyncIterator[AsyncSession]:
         yield session
     finally:
         with anyio.CancelScope(shield=True):
-            await session.close()
+            # Cancelled TestClient/WS tasks can leave aiosqlite already
+            # terminated; closing then raises "no active connection".
+            with suppress(SQLAlchemyError):
+                await session.close()
 
 
 def _connection_is_gone(websocket: WebSocket, exc: Exception) -> bool:

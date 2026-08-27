@@ -23,7 +23,7 @@ async def test_loader_is_idempotent_and_reports_real_content(
 
     assert result.outcome == "unchanged"
     assert result.module_id == BUILTIN_MODULE_ID
-    assert result.version == "3.0.8"
+    assert result.version == "3.0.9"
     assert result.world_ref == "coc-7e"
     assert result.location_count == 12
     assert result.entity_count == 14
@@ -48,7 +48,7 @@ async def test_paper_chase_models_caretaker_bottle_as_discoverable_state() -> No
     """
 
     payload = json.loads(loader.PAPER_CHASE_SOURCE_PATH.read_text(encoding="utf-8"))
-    assert payload["version"] == "3.0.8"
+    assert payload["version"] == "3.0.9"
     entities = {entity["id"]: entity for entity in payload["entities"]}
     information = {item["id"]: item for item in payload["information"]}
     rules = {rule["id"]: rule for rule in payload["rules"]}
@@ -68,6 +68,17 @@ async def test_paper_chase_models_caretaker_bottle_as_discoverable_state() -> No
     assert "小酒瓶" in bottle_clue["keeper_content"]
 
 
+def test_paper_chase_move_crypt_slab_requires_discovery_gate() -> None:
+    """#474：搬石板必须先发现入口，且不能对已搬开的石板再发同一规则。"""
+
+    payload = json.loads(loader.PAPER_CHASE_SOURCE_PATH.read_text(encoding="utf-8"))
+    rules = {rule["id"]: rule for rule in payload["rules"]}
+    when = rules["move_crypt_slab"]["trigger"]["when"]
+    assert when["op"] == "all"
+    items = {(item["args"]["key"], item["args"]["value"]) for item in when["items"]}
+    assert items == {("discovered", True), ("slab_moved", False)}
+
+
 def test_paper_chase_keeps_previous_v2_snapshots() -> None:
     """切到 v3 不删旧快照——它们是这次迁移的出处记录。
 
@@ -77,7 +88,7 @@ def test_paper_chase_keeps_previous_v2_snapshots() -> None:
     """
 
     current = json.loads(loader.PAPER_CHASE_SOURCE_PATH.read_text(encoding="utf-8"))
-    assert current["version"] == "3.0.8"
+    assert current["version"] == "3.0.9"
     assert current["content_schema_version"] == 3
 
     for name, version in (
@@ -223,7 +234,7 @@ async def test_loader_preserves_rooms_pinned_older_version(
 
     result = await loader.load_paper_chase(db_session)
 
-    assert result.version == "3.0.8"
+    assert result.version == "3.0.9"
     pinned = await db_session.get(ModuleVersion, (BUILTIN_MODULE_ID, "3.0.5"))
     assert pinned is not None
     assert pinned.content_json == pinned_content

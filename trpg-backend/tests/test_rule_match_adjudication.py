@@ -48,7 +48,7 @@ from collaboration_framework.engine import (
 )
 from collaboration_framework.engine.initialization import create_initial_game_state
 from collaboration_framework.engine.models import ActorState
-from collaboration_framework.engine.projection_v3 import _rule_check_skill_id
+from collaboration_framework.engine.projection_v3 import rule_check_skill_id
 from collaboration_framework.host.application import PlayerViewProjector, TurnExecutionError
 from collaboration_framework.host.prompts.action_plan import (
     current_step_adjudication_instructions,
@@ -237,7 +237,7 @@ def test_rule_check_skill_id_reads_coc7_skill_profile_parameter() -> None:
             "fumble": "done",
         },
     )
-    assert _rule_check_skill_id(step) == "credit-rating"
+    assert rule_check_skill_id(step) == "credit-rating"
 
 
 async def test_rule_once_builder_rejects_unmapped_rule_check_branch() -> None:

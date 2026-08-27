@@ -52,8 +52,10 @@ from app.service.module_content_cache import load_module_content
 # 落库 JSON 的 schema 版本。#310 给 CheckRun / CheckRunView 各加了字段，老行没有
 # 这些键，直接 model_validate 会当场失败——正卡在 awaiting_post_roll_decision 的
 # 房间一提交奖惩骰决定就炸。读路径按版本升级，写路径一律写当前版本。
-_CHECK_RUN_SCHEMA_VERSION = 2
-_SUPPORTED_CHECK_RUN_VERSIONS = frozenset({1, _CHECK_RUN_SCHEMA_VERSION})
+# v3：#483 给 CheckRun 加了 rule_origin（这次掷骰出自哪条规则）。老行没有这个键，
+# 模型里它可空，所以读路径不需要升级；升版本同样是为了让回滚失败得干净。
+_CHECK_RUN_SCHEMA_VERSION = 3
+_SUPPORTED_CHECK_RUN_VERSIONS = frozenset({1, 2, _CHECK_RUN_SCHEMA_VERSION})
 # #483 把 RuleCheckOrigin 的恢复游标（agenda_id / source_event_id）改成可选，好让
 # agent_match 提交路径也能记住出处。老行五个字段齐全，新模型照样读得动，所以读路径
 # 不需要升级——升版本是为了让**回滚**失败得干净：回滚后的旧代码遇到主动路径写的行
@@ -529,11 +531,13 @@ class _SqlAlchemyEngineTransaction(EngineTransaction):
         if record.check_schema_version not in _SUPPORTED_CHECK_RUN_VERSIONS:
             raise ContractError("不支持的 CheckRun schema version")
         payload = deepcopy(record.check_json)
-        if record.check_schema_version < _CHECK_RUN_SCHEMA_VERSION:
+        if record.check_schema_version < 2:
             # v1 行没有 `selected_skill_name`（#310 新增）。老行里根本没存过显示名，
             # 唯一还原得出来的只有 skill_id——这不是「数据没到位就填个假值」，而是
             # 这条记录当年确实只有这一个可用名称。新写入一律带真实显示名。
             payload.setdefault("selected_skill_name", payload.get("selected_skill_id"))
+        # v2 → v3 不需要升级：#483 新增的 `rule_origin` 可空，老行读回来是 None，
+        # 也就是「这次掷骰不知道出自哪条规则」——那正是当时的事实。
         check_run = CheckRun.model_validate(payload)
         if (
             check_run.room_id != record.room_id

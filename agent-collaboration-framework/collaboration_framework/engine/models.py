@@ -387,6 +387,10 @@ class RuleCheckOrigin(ContractModel):
     rule_id: str = Field(min_length=1)
     branch_id: str = Field(min_length=1)
     step_id: str = Field(min_length=1)
+    # 出处是对某一版模组说的。房间的模组版本升级之后，同一个 rule/step id 可能已经
+    # 换了含义，所以把当时那一版一并记下（#483）。老行没有这个键，读回来是 None
+    # ——「不知道是哪一版」比谎称是当前版本诚实。
+    module_version: str | None = Field(default=None, min_length=1)
     agenda_id: str | None = Field(default=None, min_length=1)
     source_event_id: str | None = Field(default=None, min_length=1)
 
@@ -465,6 +469,10 @@ class CheckRun(ContractModel):
     resolution_kind: Literal["initial_roll", "accept_result", "spend_luck", "push"] = "initial_roll"
     luck_spent: int | None = Field(default=None, ge=1)
     adjudication: ActionAdjudication
+    # 这次掷骰出自哪条规则（#483）。此前要判断只能拿 decision_id 回头 load
+    # `PendingCheckDecision`——它会随结算被改写，而 CheckRun 是掷骰当时的事实。
+    # 玩家投影 `CheckRunView` 不带它：出处是服务端私有的。
+    rule_origin: RuleCheckOrigin | None = None
 
 
 WorkflowRequest = SubmitAdjudicationRequest | CheckDecisionRequest | PostRollDecisionRequest

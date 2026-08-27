@@ -986,6 +986,7 @@ class AdjudicationEngineService:
                 post_roll_options=post_options,
                 final_result=None if post_options else roll,
                 adjudication=decision.adjudication,
+                rule_origin=decision.rule_origin,
             )
             rolled_event = self._event(
                 runtime,
@@ -1606,6 +1607,7 @@ class AdjudicationEngineService:
                     rule_id=rule.id,
                     branch_id=branch_id,
                     step_id=check_step.id,
+                    module_version=runtime.module_version,
                 )
                 # 作者规定了掷什么，就必须掷什么（#483）。
                 #
@@ -2494,6 +2496,7 @@ class AdjudicationEngineService:
             options=(option,),
             rule_origin=RuleCheckOrigin(
                 agenda_id=agenda.agenda_id,
+                module_version=runtime.module_version,
                 rule_id=rule.id,
                 branch_id=agenda.current_branch_id or "default",
                 step_id=step.id,

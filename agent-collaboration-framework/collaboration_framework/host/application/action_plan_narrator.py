@@ -57,6 +57,11 @@ class ActionPlanNarrator:
             context.allowed_evidence_refs
         ):
             raise ActionPlanNarrationValidationError("evidence_scope")
+        # 先检查整段文本再判断语气；“可能/或许/据说”同样会把答案送到玩家端。
+        # 禁止词索引由服务端构造且不会进入模型 payload。
+        for term in context.forbidden_disclosure_terms:
+            if term and term.casefold() in output.text.casefold():
+                raise ActionPlanNarrationValidationError("hidden_disclosure")
         required = tuple(
             item for item in context.narration_evidence if item.required_in_narration
         )

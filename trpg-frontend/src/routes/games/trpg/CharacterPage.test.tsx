@@ -751,7 +751,11 @@ describe('CharacterPage', () => {
       residence: '阿卡姆',
       birthplace: '波士顿',
       occupation: '会计师',
-      attributes: Object.fromEntries(mockRuleset.attributes.map(attribute => [attribute.key, 50])),
+      attributes: Object.fromEntries(
+        mockRuleset.attributes
+          .filter(attribute => attribute.key !== 'LUCK')
+          .map(attribute => [attribute.key, 50]),
+      ),
       derivedStats: { HP: 10, SAN: 50, MP: 10 },
       skills: { accounting: 1, stealth: 1 },
       equipment: [],

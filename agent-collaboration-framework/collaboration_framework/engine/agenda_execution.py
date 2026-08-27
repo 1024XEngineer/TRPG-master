@@ -27,9 +27,11 @@ from collaboration_framework.contracts import (
     ActionEffect,
     CancelTimeTaskStep,
     CreateTimeTaskStep,
+    InvokeRulesetActionStep,
     ModuleContentV3,
     RuleSpecV3,
 )
+from collaboration_framework.contracts.validation import AdjudicationValidationError
 
 from .models import (
     AgendaItem,
@@ -55,16 +57,16 @@ def _is_time_task_step(item: object) -> bool:
     return isinstance(item, CreateTimeTaskStep | CancelTimeTaskStep)
 
 
-def _ordered_chunks(effects: list[ActionEffect]) -> list[object]:
+def _ordered_chunks(effects: list[object]) -> list[object]:
     """把有序列表切成「连续效果批」与「单个任务步骤」交替的序列。
 
     保住作者顺序的同时，让每一批效果都对着它真正会被应用时的那个状态校验。
     """
 
     chunks: list[object] = []
-    run: list[ActionEffect] = []
+    run: list[object] = []
     for item in effects:
-        if _is_time_task_step(item):
+        if _is_time_task_step(item) or isinstance(item, InvokeRulesetActionStep):
             if run:
                 chunks.append(run)
                 run = []
@@ -121,6 +123,22 @@ class EffectRunner(Protocol):
         payload: dict,
         visibility: str,
     ) -> DomainEvent: ...
+
+    def validate_ruleset_action(
+        self,
+        runtime: EngineRuntimeSnapshot,
+        step: InvokeRulesetActionStep,
+    ) -> None: ...
+
+    def apply_ruleset_action(
+        self,
+        runtime: EngineRuntimeSnapshot,
+        state: GameState,
+        step: InvokeRulesetActionStep,
+        *,
+        rule_id: str,
+        offset: int,
+    ) -> tuple[GameState, tuple[DomainEvent, ...]]: ...
 
 
 @dataclass(frozen=True)
@@ -379,7 +397,29 @@ class RuleSettlement:
                 visibility="hidden",
             )
         )
-        state = self.commit_effects(state, walk.effects, events, rule_id=rule.id)
+        try:
+            state = self.commit_effects(state, walk.effects, events, rule_id=rule.id)
+        except AdjudicationValidationError as exc:
+            failed_step_id = next(
+                (
+                    item.id
+                    for item in walk.effects
+                    if isinstance(item, InvokeRulesetActionStep)
+                ),
+                walk.suspended_at,
+            )
+            self._set_item(item_index, "failed")
+            self.agenda = self.agenda.model_copy(
+                update={
+                    "status": "failed",
+                    "failure_code": exc.result.code,
+                    "current_rule_id": rule.id,
+                    "current_branch_id": self.queue[item_index].branch_id,
+                    "current_step_id": failed_step_id,
+                }
+            )
+            self.suspended = True
+            return state, False
 
         status = agenda_status_for_walk(rule, walk)
         if status == "stable":
@@ -435,7 +475,21 @@ class RuleSettlement:
             )
             return self._result(state)
         self.agenda = self.agenda.model_copy(update={"step_count": next_step_count})
-        state = self.commit_effects(state, walk.effects, events, rule_id=rule.id)
+        try:
+            state = self.commit_effects(state, walk.effects, events, rule_id=rule.id)
+        except AdjudicationValidationError as exc:
+            self._set_item(item_index, "failed")
+            self.agenda = self.agenda.model_copy(
+                update={
+                    "status": "failed",
+                    "failure_code": exc.result.code,
+                    "current_rule_id": rule.id,
+                    "current_branch_id": self.queue[item_index].branch_id,
+                    "current_step_id": resume_step_id,
+                }
+            )
+            self.suspended = True
+            return self._result(state)
 
         status = agenda_status_for_walk(rule, walk)
         if status == "stable":
@@ -499,7 +553,7 @@ class RuleSettlement:
     def commit_effects(
         self,
         state: GameState,
-        effects: list[ActionEffect],
+        effects: list[object],
         events: list[DomainEvent],
         *,
         rule_id: str,
@@ -514,9 +568,24 @@ class RuleSettlement:
         # 一段连续的效果仍然整批校验，因为校验会在效果之间累积 vocabulary
         # （比如连续两次 advance_world_time 要各自对着前一跳的时钟校验）。
         # 任务步骤是这些批次的分界。
+        # Validate every ruleset operation before the first ordinary effect is
+        # applied. An unknown action must not leave an earlier effect committed.
+        for item in effects:
+            if isinstance(item, InvokeRulesetActionStep):
+                self.runner.validate_ruleset_action(self.runtime, item)
         for chunk in _ordered_chunks(effects):
             if _is_time_task_step(chunk):
                 state = self._commit_time_task(state, chunk, events, rule_id=rule_id)
+                continue
+            if isinstance(chunk, InvokeRulesetActionStep):
+                state, emitted = self.runner.apply_ruleset_action(
+                    self.runtime,
+                    state,
+                    chunk,
+                    rule_id=rule_id,
+                    offset=len(events) + 1,
+                )
+                events.extend(emitted)
                 continue
             rule_runtime = self.runtime.model_copy(
                 update={"game_state": state}, deep=True

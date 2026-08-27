@@ -265,7 +265,7 @@ def module_with_unexecutable_step() -> ModuleContentV3:
         {
             "id": "apply_condition",
             "kind": "invoke_ruleset_action",
-            "action_id": "coc7.apply_condition",
+            "action_id": "coc7.unknown_action",
             "actor_binding": "actor",
             "parameters": {"condition": "unconscious"},
             "next_step_id": "finish",
@@ -509,7 +509,7 @@ class AgendaFailureAuditTests(unittest.IsolatedAsyncioTestCase):
 
         # 此前：execution 报 resolved，Agenda 停在 running 上，无人推进也无信号。
         self.assertEqual(execution.status, "rule_failed")
-        self.assertEqual(execution.rule_failure_code, "step_kind_has_no_executor")
+        self.assertEqual(execution.rule_failure_code, "RULESET_ACTION_NOT_REGISTERED")
         # 动作本身成功了——是它触发的规则链没跑完，两件事分开记。
         self.assertEqual(execution.outcome, "success")
 
@@ -522,7 +522,9 @@ class AgendaFailureAuditTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(failures), 1)
         failure = failures[0]
         self.assertEqual(failure.visibility, "hidden")
-        self.assertEqual(failure.payload["failure_code"], "step_kind_has_no_executor")
+        self.assertEqual(
+            failure.payload["failure_code"], "RULESET_ACTION_NOT_REGISTERED"
+        )
         self.assertEqual(failure.payload["rule_id"], "locked_study_window_breaks")
         self.assertEqual(failure.payload["step_id"], "apply_condition")
         # 失败的 Agenda 不落库，被跳过的规则只能靠 payload 留痕。

@@ -1781,14 +1781,8 @@ class RuleOwnedCheckTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("douglas_true_nature", state.discovered_facts)
         self.assertIn("douglas_confession", state.discovered_facts)
 
-    async def test_branch_suspended_on_an_executor_refuses_half_effects(self) -> None:
-        """停在 invoke_ruleset_action 上的分支不能提交走过的那一半。
-
-        `crypt_stench_on_entry/just_enter` 先要 `coc7.apply_condition` 让调查员
-        昏迷，之后才置位「见过身影」。把「无检定」一律当成「整条链跑完」，就会
-        跳过昏迷直接记下见过身影——世界停在半截状态。这类分支要等 RuleAgenda
-        的恢复侧（R4）落地，现在应当可见地失败。
-        """
+    async def test_branch_executes_registered_ruleset_action(self) -> None:
+        """`coc7.apply_condition` 与后续步骤在同一条 Agenda 中完成。"""
 
         store = InMemoryEngineStore()
         store.register_room(
@@ -1801,31 +1795,30 @@ class RuleOwnedCheckTests(unittest.IsolatedAsyncioTestCase):
             PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
         )
 
-        with self.assertRaises(ContractError):
-            await engine.submit(
-                SubmitAdjudicationRequest(
-                    room_id=ROOM,
-                    player_id=PLAYER,
-                    adjudication=ActionAdjudication(
-                        request_id="stench-1",
-                        source_revision=snapshot.revision,
-                        actor_id=ACTOR,
-                        summary="直接钻进石板下的洞口",
-                        target=ActionTarget(kind="entity", id="crypt_entrance"),
-                        method=ActionMethod(family="enter", description="直接进入"),
-                        rule_decision=RuleDecisionRef(
-                            rule_id="crypt_stench_on_entry", option_id="just_enter"
-                        ),
-                        check=NoAdjudicationCheck(),
-                        success_effects=(),
-                        failure_effects=(),
+        await engine.submit(
+            SubmitAdjudicationRequest(
+                room_id=ROOM,
+                player_id=PLAYER,
+                adjudication=ActionAdjudication(
+                    request_id="stench-1",
+                    source_revision=snapshot.revision,
+                    actor_id=ACTOR,
+                    summary="直接钻进石板下的洞口",
+                    target=ActionTarget(kind="entity", id="crypt_entrance"),
+                    method=ActionMethod(family="enter", description="直接进入"),
+                    rule_decision=RuleDecisionRef(
+                        rule_id="crypt_stench_on_entry", option_id="just_enter"
                     ),
-                )
+                    check=NoAdjudicationCheck(),
+                    success_effects=(),
+                    failure_effects=(),
+                ),
             )
+        )
 
-        # 半截状态尤其不能落库：昏迷没生效，就不该记下「见过身影」。
         state = store.inspect_state(ROOM)
-        self.assertNotIn("sighted", state.entities.get("cemetery_figure", {}))
+        self.assertIn("unconscious_until_night", state.actors[ACTOR].conditions)
+        self.assertTrue(state.entities["cemetery_figure"]["sighted"])
 
     async def test_rule_option_publishes_whether_it_rolls_dice(self) -> None:
         """Agent 必须能分辨哪条分支要掷骰，否则只能编一个技能 id 出来。"""

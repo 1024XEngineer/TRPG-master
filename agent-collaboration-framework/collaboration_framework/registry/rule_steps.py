@@ -151,9 +151,7 @@ STEP_KINDS: dict[str, RuleStepRegistration] = {
         failure_code=STEP_KIND_HAS_NO_EXECUTOR,
     ),
     "invoke_ruleset_action": RuleStepRegistration(
-        walk_behavior="suspends",
-        agenda_status="failed",
-        failure_code=STEP_KIND_HAS_NO_EXECUTOR,
+        walk_behavior="produces_effect_and_continues",
     ),
     "create_npc_action_opportunity": RuleStepRegistration(
         walk_behavior="suspends",

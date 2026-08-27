@@ -35,9 +35,9 @@ from collaboration_framework.contracts.module_v3 import (
     RuleSpecV3,
     RuleStepSpec,
 )
-from collaboration_framework.registry import check_profiles as check_profile_registry
 from collaboration_framework.registry import predicates as predicate_registry
 from collaboration_framework.registry import rule_steps as rule_step_registry
+from collaboration_framework.registry import rulesets as ruleset_registry
 
 from .validation import ValidationIssue, ValidationReport
 
@@ -192,7 +192,9 @@ def _semantic_issues(content: ModuleContentV3) -> list[ValidationIssue]:
 
     # --- rules ------------------------------------------------------------- #
     for index, rule in enumerate(content.rules):
-        issues.extend(_rule_issues(rule, f"rules.{index}", known, require))
+        issues.extend(
+            _rule_issues(rule, f"rules.{index}", known, require, content.world_ref)
+        )
 
     # --- resolution and endings -------------------------------------------- #
     for index, goal_id in enumerate(content.core_resolution.required_goal_ids):
@@ -347,6 +349,7 @@ def _rule_issues(
     path: str,
     known: dict[str, set[str]],
     require,
+    world_ref: str,
 ) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
 
@@ -396,7 +399,7 @@ def _rule_issues(
                 )
             )
         issues.extend(_actor_binding_issues(step, step_path))
-        issues.extend(_check_profile_issues(step, step_path))
+        issues.extend(_check_profile_issues(step, step_path, world_ref))
 
     # 这里曾校验 `presentation` step 的 `presentation_id` 指向 `rule.presentation`
     # 声明过的片段。随 `RulePresentationSpec` 一起删除（#288 结案、#398 执行）：
@@ -488,8 +491,12 @@ def _actor_binding_issues(step: RuleStepSpec, step_path: str) -> list[Validation
     ]
 
 
-def _check_profile_issues(step: RuleStepSpec, step_path: str) -> list[ValidationIssue]:
-    """被动检定的 `profile_id` 必须在 `registry/check_profiles.py` 里注册过。
+def _check_profile_issues(
+    step: RuleStepSpec,
+    step_path: str,
+    world_ref: str,
+) -> list[ValidationIssue]:
+    """被动检定的 `profile_id` 必须在对应 world adapter 里注册过。
 
     只校验 `initiation_kind == "passive_rule"`，这是刻意收窄，不是遗漏。主动检定
     的 `profile_id` 走的是 Agent 候选菜单，压根不经过这张表——两个线上模组的 26
@@ -499,12 +506,12 @@ def _check_profile_issues(step: RuleStepSpec, step_path: str) -> list[Validation
     被动检定不一样：引擎必须自己把 `profile_id` 译成「掷什么、对多少」，译不出来
     就只能在运行时 `settlement.fail("check_profile_unavailable")`——那时效果已经
     提交了一半。同样一件事，发布期说比运行时说好。这也让
-    `check_profiles.is_registered` 有了真实消费者。
+    规则系统 adapter 的 Profile 注册表有了真实消费者。
     """
 
     if not isinstance(step, CheckStep) or step.check.initiation_kind != "passive_rule":
         return []
-    if check_profile_registry.is_registered(step.check.profile_id):
+    if ruleset_registry.check_profile_for(world_ref, step.check.profile_id) is not None:
         return []
     return [
         ValidationIssue(

@@ -54,7 +54,11 @@ from collaboration_framework.engine.time_tasks import (
     resolve_target,
     settle_due_tasks,
 )
-from collaboration_framework.engine.timeline import next_point_after, player_time_label
+from collaboration_framework.engine.timeline import (
+    next_point_after,
+    occurrence_id_for,
+    player_time_label,
+)
 from tests.test_projection_v3 import ACTOR, PLAYER, ROOM, game_state
 from tests.time_fixtures import day_cycle_module as module
 
@@ -1106,6 +1110,55 @@ class TemporaryPointWalkTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(left.current_point_id, "hour_18")
         self.assertEqual(left.current.hour_of_day, 18)
         self.assertEqual(left.current.day_index, 0)
+
+    async def test_parent_barrier_preserves_task_then_advance_order(self) -> None:
+        """A recovered mixed continuation sees the occurrence it just created."""
+
+        content = module()
+        state = game_state(content)
+        runtime = EngineRuntimeSnapshot(
+            module_id=content.module_id,
+            module_version=content.version,
+            module_content=content,
+            game_state=state,
+            revision=str(state.event_sequence),
+        )
+        service = AdjudicationEngineService(InMemoryEngineStore())
+        settlement = service._new_settlement(
+            runtime, request_id="mixed-parent", actor_id=ACTOR
+        )
+        create = CreateTimeTaskStep(
+            id="schedule",
+            task=task_spec(
+                task_key="parent_visitor",
+                target=TimeTaskTargetSpec(day_index=0, hour_of_day=15),
+            ),
+            next_step_id="finish",
+        )
+        effects = (
+            create,
+            AdvanceWorldTimeEffect(
+                to_point_id=occurrence_id_for(
+                    WorldTimePoint(day_index=0, hour_of_day=15)
+                )
+            ),
+        )
+
+        state, result, remaining = service._drive_with_barrier(
+            settlement,
+            state,
+            [],
+            effects,
+            runtime=runtime,
+            request_id="mixed-parent",
+            actor_id=ACTOR,
+        )
+
+        self.assertEqual(result.status, "stable")
+        self.assertEqual(remaining, ())
+        self.assertEqual(state.world_time.current.hour_of_day, 15)
+        task = next(iter(state.time_tasks.values()))
+        self.assertEqual(task.status, "completed")
 
     async def test_the_keeper_still_sees_a_next_point_from_a_temporary_one(
         self,

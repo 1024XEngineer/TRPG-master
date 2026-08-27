@@ -191,7 +191,7 @@ async def test_step_without_executor_commits_an_auditable_failure(
         {
             "id": "apply_condition",
             "kind": "invoke_ruleset_action",
-            "action_id": "coc7.apply_condition",
+            "action_id": "coc7.unknown_action",
             "actor_binding": "actor",
             "parameters": {"condition": "unconscious"},
             "next_step_id": "finish",
@@ -218,7 +218,7 @@ async def test_step_without_executor_commits_an_auditable_failure(
 
     # 此前：execution 报 resolved，Agenda 停在 running 上，无人推进也无任何信号。
     assert execution.status == "rule_failed"
-    assert execution.rule_failure_code == "step_kind_has_no_executor"
+    assert execution.rule_failure_code == "RULESET_ACTION_NOT_REGISTERED"
     # 动作本身成功了——是它触发的规则链没跑完，两件事分开记。
     assert execution.outcome == "success"
 
@@ -238,7 +238,7 @@ async def test_step_without_executor_commits_an_auditable_failure(
     assert len(failures) == 1
     failure = failures[0]
     assert failure.visibility == "hidden"
-    assert failure.payload["failure_code"] == "step_kind_has_no_executor"
+    assert failure.payload["failure_code"] == "RULESET_ACTION_NOT_REGISTERED"
     assert failure.payload["rule_id"] == TRIGGER_RULE
     assert failure.payload["step_id"] == "apply_condition"
     assert failure.event_id in execution.event_refs

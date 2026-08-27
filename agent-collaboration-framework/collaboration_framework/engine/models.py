@@ -5,11 +5,10 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Literal
 
-from pydantic import Field, JsonValue
+from pydantic import Field, JsonValue, model_validator
 
 from collaboration_framework.contracts import (
     ActionAdjudication,
-    ActionEffect,
     ActionRequest,
     ActionResult,
     AdjudicationExecution,
@@ -45,6 +44,31 @@ class ActorResources(ContractModel):
     mythos: int = Field(default=0, ge=0)
 
 
+class ConditionExpiry(ContractModel):
+    """Structured lifecycle target for an expiring Actor condition.
+
+    The reference points at an authored time point or a durable TimeTask; the
+    engine never infers expiry by parsing a condition id.
+    """
+
+    kind: Literal["time_point", "time_task"]
+    reference_id: str = Field(min_length=1)
+
+
+class ActorCondition(ContractModel):
+    """Auditable, authoritative lifecycle record for one applied condition."""
+
+    condition_id: str = Field(min_length=1)
+    source: str = Field(min_length=1)
+    application_reason: str = Field(min_length=1)
+    application_key: str = Field(min_length=1)
+    status: Literal["active", "removed", "consumed"] = "active"
+    expiry: ConditionExpiry | None = None
+    applied_event_id: str | None = Field(default=None, min_length=1)
+    removal_reason: str | None = Field(default=None, min_length=1)
+    removal_event_id: str | None = Field(default=None, min_length=1)
+
+
 class ActorState(ContractModel):
     player_id: str = Field(min_length=1)
     name: str = Field(min_length=1)
@@ -53,6 +77,36 @@ class ActorState(ContractModel):
     state: dict[str, JsonValue] = Field(default_factory=dict)
     resources: ActorResources = Field(default_factory=ActorResources)
     conditions: tuple[str, ...] = ()
+    condition_states: tuple[ActorCondition, ...] = ()
+
+    @model_validator(mode="after")
+    def normalize_conditions(self) -> ActorState:
+        """Read old string-only snapshots while keeping new writes canonical."""
+
+        records = self.condition_states
+        if not records and self.conditions:
+            records = tuple(
+                ActorCondition(
+                    condition_id=value,
+                    source="legacy_snapshot",
+                    application_reason="legacy_snapshot",
+                    application_key=f"legacy:{value}",
+                )
+                for value in dict.fromkeys(self.conditions)
+                if isinstance(value, str) and value.strip()
+            )
+        active_ids = tuple(
+            dict.fromkeys(
+                record.condition_id
+                for record in records
+                if record.status == "active"
+            )
+        )
+        if records != self.condition_states:
+            object.__setattr__(self, "condition_states", records)
+        if active_ids != self.conditions:
+            object.__setattr__(self, "conditions", active_ids)
+        return self
 
 
 class WorldTimePoint(ContractModel):
@@ -183,7 +237,8 @@ class AgendaParentContinuation(ContractModel):
     """
 
     passed: bool
-    remaining_effects: tuple[ActionEffect, ...] = ()
+    # Includes ordinary ActionEffect values and executable rule-step operations.
+    remaining_effects: tuple[object, ...] = ()
     completion_emitted: bool = False
 
 

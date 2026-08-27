@@ -406,7 +406,7 @@ def failing_chain_module() -> ModuleContentV3:
         {
             "id": "no_executor",
             "kind": "invoke_ruleset_action",
-            "action_id": "coc7.apply_condition",
+            "action_id": "coc7.unknown_action",
             "actor_binding": "actor",
             "parameters": {"condition": "unconscious"},
             "next_step_id": "finish",
@@ -468,7 +468,7 @@ class FailedChainDoesNotVetoTheActionTests(unittest.IsolatedAsyncioTestCase):
 
         # 规则链确实断了，而且说得出断在哪。
         self.assertEqual(execution.status, "rule_failed")
-        self.assertEqual(execution.rule_failure_code, "step_kind_has_no_executor")
+        self.assertEqual(execution.rule_failure_code, "RULESET_ACTION_NOT_REGISTERED")
         # 动作本身照常完成——两件事分别由 outcome 与 status 承担。
         self.assertEqual(execution.outcome, "success")
 

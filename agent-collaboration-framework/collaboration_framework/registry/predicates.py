@@ -144,6 +144,19 @@ def _core_resolved(args: dict[str, JsonValue], state: GameState, actor_id: str) 
     return state.core_resolved is bool(args.get("value", True))
 
 
+def _actor_has_condition(args: dict[str, JsonValue], state: GameState, actor_id: str) -> bool:
+    condition_id = args.get("condition_id", args.get("id"))
+    if not isinstance(condition_id, str) or not condition_id.strip():
+        return False
+    actor = state.actors.get(actor_id)
+    if actor is None:
+        return False
+    return any(
+        item.condition_id == condition_id and item.status == "active"
+        for item in actor.condition_states
+    ) or condition_id in actor.conditions
+
+
 PREDICATES: dict[str, PredicateEvaluator] = {
     "entity_state_is": _entity_state_is,
     "time_of_day_is": _time_of_day_is,
@@ -153,6 +166,7 @@ PREDICATES: dict[str, PredicateEvaluator] = {
     "information_is": _information_is,
     "party_location_is": _party_location_is,
     "core_resolved": _core_resolved,
+    "actor_has_condition": _actor_has_condition,
 }
 
 

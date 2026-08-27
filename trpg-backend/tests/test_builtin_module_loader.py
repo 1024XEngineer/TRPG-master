@@ -10,6 +10,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.seed import (
+    BUILTIN_MODULE_ID,
     CONSTANT_DARKNESS_BOX_MODULE_ID,
     CONSTANT_DARKNESS_BOX_SCENARIO_ID,
     HAPPY_FROG_VILLAGE_MODULE_ID,
@@ -188,6 +189,12 @@ async def test_catalog_and_selection_use_silver_lock_publication(
     """目录由 API 返回双模组，单人房间选择后钉住银之锁版本。"""
 
     catalog = (await client.get("/api/v1/modules")).json()["data"]
+    assert [module["id"] for module in catalog[:4]] == [
+        BUILTIN_MODULE_ID,
+        SILVER_LOCK_MODULE_ID,
+        HAPPY_FROG_VILLAGE_MODULE_ID,
+        CONSTANT_DARKNESS_BOX_MODULE_ID,
+    ]
     assert {
         "paper-chase-zh-coc7",
         SILVER_LOCK_MODULE_ID,

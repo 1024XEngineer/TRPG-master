@@ -4969,7 +4969,7 @@
   overflow: hidden;
   color: #2e1a0c;
   background: #1a0e07;
-  font-family: Georgia, 'STKaiti', 'KaiTi', 'Songti SC', 'STSong', serif;
+  font-family: 'Times New Roman', 'STKaiti', 'KaiTi', 'Songti SC', 'STSong', serif;
 }
 
 .scenario-selection-scene button,
@@ -5118,6 +5118,20 @@
   object-position: center;
 }
 
+.scenario-module-card__cover--plain .scenario-module-card__cover-image {
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.scenario-module-card__cover--plain {
+  width: min(88%, 6.25rem);
+}
+
+.scenario-module-card__cover--plain.is-default-cover {
+  width: min(79%, 5.6rem);
+}
+
 .scenario-module-card__cover-frame {
   position: absolute;
   inset: 0;
@@ -5160,7 +5174,7 @@
   color: #edcf91;
   background: #342b36;
   box-shadow: inset 0 1px rgb(255 255 255 / 8%);
-  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif;
+  font-family: 'Times New Roman', 'PingFang SC', serif;
   font-size: clamp(0.48rem, 2.1vw, 0.62rem);
   font-weight: 700;
   line-height: 1;
@@ -5171,7 +5185,7 @@
   margin: 0.22rem 0 0;
   overflow: hidden;
   color: rgb(75 48 27 / 72%);
-  font-family: Georgia, serif;
+  font-family: 'Times New Roman', serif;
   font-size: clamp(0.55rem, 2.5vw, 0.7rem);
   line-height: 1.2;
   text-overflow: ellipsis;
@@ -5202,7 +5216,6 @@
   color: #4a2c14;
   font-size: clamp(0.75rem, 3.3vw, 0.9rem);
   font-weight: 700;
-  transform: translateY(-1rem);
 }
 
 .scenario-module-card__metadata > span {
@@ -5451,7 +5464,7 @@
 .scenario-selection-scene__footer > p {
   margin: 0.25rem 0 0;
   color: #d8ad66;
-  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif;
+  font-family: 'Times New Roman', 'PingFang SC', serif;
   font-size: 0.67rem;
   text-shadow: 0 1px 2px #000;
 }
@@ -5559,7 +5572,7 @@
 
 .scenario-module-detail__identity > span {
   color: #835326;
-  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif;
+  font-family: 'Times New Roman', 'PingFang SC', serif;
   font-size: 0.66rem;
   font-weight: 800;
   letter-spacing: 0.12em;
@@ -5599,7 +5612,7 @@
   border-radius: 0.35rem;
   color: #65411f;
   background: rgb(255 248 225 / 34%);
-  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif;
+  font-family: 'Times New Roman', 'PingFang SC', serif;
   font-size: 0.56rem;
   font-weight: 700;
   white-space: nowrap;

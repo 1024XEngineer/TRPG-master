@@ -266,9 +266,9 @@ export default function ScenarioSelectionPage() {
               <ModuleCover
                 moduleId={pendingImport.id}
                 title={pendingImport.title}
-                className="scenario-module-card__cover"
+                className="scenario-module-card__cover scenario-module-card__cover--plain"
                 imageClassName="scenario-module-card__cover-image"
-                frameClassName="scenario-module-card__cover-frame"
+                framed={false}
               />
               <div className="scenario-module-card__information">
                 <div className="scenario-module-card__heading">
@@ -344,9 +344,9 @@ export default function ScenarioSelectionPage() {
                 <ModuleCover
                   moduleId={module.id}
                   title={module.title}
-                  className="scenario-module-card__cover"
+                  className="scenario-module-card__cover scenario-module-card__cover--plain"
                   imageClassName="scenario-module-card__cover-image"
-                  frameClassName="scenario-module-card__cover-frame"
+                  framed={false}
                 />
                 <div className="scenario-module-card__information">
                   <div className="scenario-module-card__heading">
@@ -426,9 +426,9 @@ export default function ScenarioSelectionPage() {
               <ModuleCover
                 moduleId={detailSummary.id}
                 title={detailSummary.title}
-                className="scenario-module-card__cover"
+                className="scenario-module-card__cover scenario-module-card__cover--plain"
                 imageClassName="scenario-module-card__cover-image"
-                frameClassName="scenario-module-card__cover-frame"
+                framed={false}
               />
               <div className="scenario-module-detail__identity">
                 <span>{detail?.storyLabel || FIXED_TRPG.systemCatalogName}</span>

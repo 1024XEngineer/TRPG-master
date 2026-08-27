@@ -896,7 +896,7 @@ async def list_modules(db: AsyncSession) -> list[ModuleRead]:
         select(Scenario, GameSystem.name)
         .join(GameSystem, GameSystem.id == Scenario.game_system_id)
         .where(Scenario.status == "ready")
-        .order_by(Scenario.title, Scenario.id)
+        .order_by(Scenario.created_at, Scenario.id)
     )
     modules: list[ModuleRead] = []
     for scenario, system_name in result.tuples():

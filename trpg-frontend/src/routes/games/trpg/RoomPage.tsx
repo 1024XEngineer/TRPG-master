@@ -260,6 +260,18 @@ const LOCATION_IMAGE_BY_ID: Record<string, string> = {
   newspaper_office: '/assets/rooms/play/location-newspaper-office.webp',
   kimball_grounds: '/assets/rooms/play/location-kimball-grounds.webp',
   kimball_study: '/assets/rooms/play/location-kimball-study.webp',
+  lane_manor: '/assets/locations/happy-frog-village/lane_manor.webp',
+  pretrip_investigation: '/assets/locations/happy-frog-village/pretrip_investigation.webp',
+  forest_road: '/assets/locations/happy-frog-village/forest_road.webp',
+  frog_resort: '/assets/locations/happy-frog-village/frog_resort.webp',
+  resort_reception: '/assets/locations/happy-frog-village/resort_reception.webp',
+  guest_room: '/assets/locations/happy-frog-village/guest_room.webp',
+  dining_kitchen: '/assets/locations/happy-frog-village/dining_kitchen.webp',
+  frog_pond: '/assets/locations/happy-frog-village/frog_pond.webp',
+  crystal_shore: '/assets/locations/happy-frog-village/crystal_shore.webp',
+  staff_area: '/assets/locations/happy-frog-village/staff_area.webp',
+  resort_boundary: '/assets/locations/happy-frog-village/resort_boundary.webp',
+  outside: '/assets/locations/happy-frog-village/outside.webp',
 }
 
 function mapLocationsFromPlayerView(playerView: AgentPlayerView | null): MapLocation[] {

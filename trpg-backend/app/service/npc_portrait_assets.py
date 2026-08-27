@@ -1,4 +1,4 @@
-"""《追书人》NPC 头像资产清单和幂等导入逻辑。"""
+"""内置模组 NPC 头像资产清单和幂等导入逻辑。"""
 
 from __future__ import annotations
 
@@ -54,11 +54,45 @@ PAPER_CHASE_NPC_PORTRAITS = (
 )
 PAPER_CHASE_ASSET_ROOT = "/assets/npc_portraits/paper-chase-zh-coc7"
 
+HAPPY_FROG_VILLAGE_NPC_PORTRAITS = (
+    NpcPortraitSpec(
+        "ezra",
+        "埃兹拉",
+        "ezra.webp",
+        "现代城郊中年男性推销员，疲惫警觉，手指带淡绿色蹼膜，方形半身角色立绘",
+    ),
+    NpcPortraitSpec(
+        "messenger",
+        "幸福信使",
+        "messenger.webp",
+        "白发绿色斗篷少女，笑容真诚但令人不安，森林度假村背景，方形半身角色立绘",
+    ),
+    NpcPortraitSpec(
+        "emily",
+        "艾米丽",
+        "emily.webp",
+        "现代度假村接待女仆，笑容完美无瑕却僵硬，别墅大厅背景，方形半身角色立绘",
+    ),
+    NpcPortraitSpec(
+        "james",
+        "詹姆斯·莱恩",
+        "james.webp",
+        "现代年轻男性，沉浸在幸福美梦中，森林度假村背景，方形半身角色立绘",
+    ),
+)
+HAPPY_FROG_VILLAGE_ASSET_ROOT = "/assets/npc_portraits/happy-frog-village"
 
-async def seed_paper_chase_npc_portraits(db: AsyncSession, *, scenario_id: str) -> int:
-    """发布内置模组时写入 NPC 头像 URL，重复执行保持幂等。"""
+
+async def _seed_npc_portraits(
+    db: AsyncSession,
+    *,
+    scenario_id: str,
+    specs: tuple[NpcPortraitSpec, ...],
+    asset_root: str,
+) -> int:
+    """写入一组 NPC 头像 URL，重复执行保持幂等。"""
     written = 0
-    for spec in PAPER_CHASE_NPC_PORTRAITS:
+    for spec in specs:
         asset = await db.scalar(
             select(ModuleAsset).where(
                 ModuleAsset.scenario_id == scenario_id,
@@ -66,7 +100,7 @@ async def seed_paper_chase_npc_portraits(db: AsyncSession, *, scenario_id: str) 
                 ModuleAsset.asset_type == "npc_portrait",
             )
         )
-        url = f"{PAPER_CHASE_ASSET_ROOT}/{spec.filename}"
+        url = f"{asset_root}/{spec.filename}"
         if asset is None:
             db.add(
                 ModuleAsset(
@@ -82,3 +116,23 @@ async def seed_paper_chase_npc_portraits(db: AsyncSession, *, scenario_id: str) 
             asset.url, asset.name = url, spec.name
             written += 1
     return written
+
+
+async def seed_paper_chase_npc_portraits(db: AsyncSession, *, scenario_id: str) -> int:
+    """发布《追书人》时写入 NPC 头像。"""
+    return await _seed_npc_portraits(
+        db,
+        scenario_id=scenario_id,
+        specs=PAPER_CHASE_NPC_PORTRAITS,
+        asset_root=PAPER_CHASE_ASSET_ROOT,
+    )
+
+
+async def seed_happy_frog_village_npc_portraits(db: AsyncSession, *, scenario_id: str) -> int:
+    """发布《幸福蛙蛙村》时写入 NPC 头像。"""
+    return await _seed_npc_portraits(
+        db,
+        scenario_id=scenario_id,
+        specs=HAPPY_FROG_VILLAGE_NPC_PORTRAITS,
+        asset_root=HAPPY_FROG_VILLAGE_ASSET_ROOT,
+    )

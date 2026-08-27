@@ -374,9 +374,7 @@ async def test_roll_luck_persists_one_server_authoritative_result(client: AsyncC
     )
     attributes = reread.json()["data"]["attributes"]
     assert attributes["LUCK"] == result["luck"]
-    assert set(attributes) == {
-        "STR", "CON", "DEX", "APP", "POW", "SIZ", "INT", "EDU", "LUCK"
-    }
+    assert set(attributes) == {"STR", "CON", "DEX", "APP", "POW", "SIZ", "INT", "EDU", "LUCK"}
 
     duplicate = await client.post(
         f"{ROOMS_BASE}/{room['roomId']}/characters/{character_id}/roll-luck",
@@ -411,9 +409,7 @@ async def test_roll_luck_preserves_existing_attributes_and_fills_missing(
     )
     attributes = reread.json()["data"]["attributes"]
     assert attributes["STR"] == 85
-    assert set(attributes) == {
-        "STR", "CON", "DEX", "APP", "POW", "SIZ", "INT", "EDU", "LUCK"
-    }
+    assert set(attributes) == {"STR", "CON", "DEX", "APP", "POW", "SIZ", "INT", "EDU", "LUCK"}
 
 
 async def test_complete_character_without_luck_roll_is_rejected(client: AsyncClient) -> None:

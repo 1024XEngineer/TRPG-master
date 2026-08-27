@@ -302,9 +302,7 @@ async def test_roll_luck_repairs_missing_attributes_after_template_seeding(
     )
     attributes = read.json()["data"]["attributes"]
     assert attributes["STR"] == 85
-    assert set(attributes) == {
-        "STR", "CON", "DEX", "APP", "POW", "SIZ", "INT", "EDU", "LUCK"
-    }
+    assert set(attributes) == {"STR", "CON", "DEX", "APP", "POW", "SIZ", "INT", "EDU", "LUCK"}
 
 
 async def test_seeding_a_room_draft_copies_the_template_portrait(

@@ -270,11 +270,7 @@ class HostEntryRouter:
                 raw = await self.model.generate(context)
                 decision = HostEntryDecision.model_validate(raw)
                 validated = self.safety_policy.validate(decision)
-                coerced = _coerce_unresolved_demonstrative(context, validated)
-                if coerced.route != validated.route:
-                    provenance = "coerced_clarify"
-                    validated = self.safety_policy.validate(coerced)
-                elif validated.route == "direct_response":
+                if validated.route == "direct_response":
                     provenance = "model_direct"
                 elif validated.route == "needs_clarification":
                     provenance = "model_clarify"
@@ -326,20 +322,6 @@ def _looks_like_legacy_intent(text: str) -> bool:
 def _looks_like_important_ambiguity(text: str) -> bool:
     lowered = text.casefold()
     return any(token in lowered for token in ("那个", "哪一个", "哪本", "哪把"))
-
-
-def _coerce_unresolved_demonstrative(
-    context: HostPublicContext, decision: HostEntryDecision
-) -> HostEntryDecision:
-    """Real models often send 看那个 to ActionPlan, which silently picks a referent."""
-
-    if (context.player_answer or "").strip():
-        return decision
-    if decision.route == "needs_clarification":
-        return decision
-    if not _looks_like_important_ambiguity(context.current_keeper_text):
-        return decision
-    return HostEntryDecision(route="needs_clarification", text="你具体指的是哪一个？")
 
 
 def _looks_like_ordinary_interaction(text: str) -> bool:

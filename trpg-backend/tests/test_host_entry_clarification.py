@@ -257,12 +257,6 @@ async def test_ordinary_greeting_still_skips_clarification(
     assert texts == {"greet": "对方礼貌地点了点头。"}
 
 
-class _AlwaysLegacyHostEntryModel:
-    async def generate(self, context: HostPublicContext) -> dict[str, object]:
-        del context
-        return {"route": "delegate_to_legacy", "text": None}
-
-
 @pytest.mark.asyncio
 async def test_host_entry_router_clarifies_then_refuses_second_ask() -> None:
     router = HostEntryRouter(DeterministicHostEntryModel())
@@ -279,23 +273,6 @@ async def test_host_entry_router_clarifies_then_refuses_second_ask() -> None:
     assert second.route == "direct_response"
     with pytest.raises(ValueError):
         HostEntryDecision(route="needs_clarification", text=None)
-
-
-@pytest.mark.asyncio
-async def test_host_entry_router_coerces_legacy_when_demonstrative_is_unresolved() -> None:
-    router = HostEntryRouter(_AlwaysLegacyHostEntryModel())
-    decision, provenance = await router.decide(HostPublicContext(current_keeper_text="看那个"))
-    assert decision.route == "needs_clarification"
-    assert decision.text == "你具体指的是哪一个？"
-    assert provenance == "coerced_clarify"
-    answered, answered_provenance = await router.decide(
-        HostPublicContext(
-            current_keeper_text="看那个",
-            player_answer="邻居",
-        )
-    )
-    assert answered.route == "delegate_to_legacy"
-    assert answered_provenance == "legacy_delegate"
 
 
 @pytest.mark.asyncio

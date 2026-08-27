@@ -70,12 +70,12 @@ from app.service.portrait_generation import build_portrait_generation_service
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_host_entry_instructions_force_clarification_for_demonstratives() -> None:
+def test_host_entry_instructions_clarify_when_information_is_insufficient() -> None:
     text = PromptHostEntryModel._INSTRUCTIONS
     assert "needs_clarification" in text
-    assert "那个" in text
-    assert "不得 delegate_to_legacy" in text
-    assert "不要把这种歧义直接交给旧链" in text
+    assert "不足以唯一确定" in text
+    assert "都属于信息不足" in text
+    assert "不要把这种不足直接交给旧链去猜" in text
 
 
 def test_action_plan_narration_uses_final_post_roll_outcome() -> None:

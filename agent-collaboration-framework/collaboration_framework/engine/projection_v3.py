@@ -745,7 +745,7 @@ def _rule_candidates(
                         # 分支里有没有检定步，是 Agent 必须知道的；后果仍然不出服务端。
                         requires_check=(step := pending_check_for(rule, option.id)[0])
                         is not None,
-                        check_skill_id=_rule_check_skill_id(step, module.world_ref),
+                        check_skill_id=rule_check_skill_id(step, module.world_ref),
                     )
                     for option in trigger.options
                 ),
@@ -755,8 +755,13 @@ def _rule_candidates(
     return tuple(candidates)
 
 
-def _rule_check_skill_id(step: object, world_ref: str = "coc-7e") -> str | None:
-    """Resolve the rolled resource without exposing rule execution details."""
+def rule_check_skill_id(step: object, world_ref: str = "coc-7e") -> str | None:
+    """作者在这一步上规定要掷的技能/资源，没规定则 None。
+
+    投影用它把 `check_skill_id` 作为提示发给 Agent；提交期用同一个函数判断 Agent
+    报的候选对不对（#483）。两处必须同源，否则会出现「菜单上写着掷幸运、提交时却
+    按另一套标准判」。
+    """
 
     if not isinstance(step, CheckStep):
         return None

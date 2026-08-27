@@ -72,7 +72,7 @@ from .persistent_results import (
     validate_persistent_effects,
 )
 from .ports import EngineStore
-from .projection_v3 import project_v3
+from .projection_v3 import project_v3, rule_check_skill_id
 from .rules_v3 import (
     agent_match_admits,
     create_rule_agenda,
@@ -1607,6 +1607,32 @@ class AdjudicationEngineService:
                     branch_id=branch_id,
                     step_id=check_step.id,
                 )
+                # 作者规定了掷什么，就必须掷什么（#483）。
+                #
+                # 拒绝而不是静默改写：候选里的 method_summary / player_safe_reason
+                # 是玩家会看到的文字，Agent 是照着自己选的技能写的。把 skill_id 换
+                # 掉、把文案留下，菜单上会出现「使用图书馆使用」配着幸运的目标值。
+                # 拒绝让 Agent 自己把这一组重写一遍，与 #462 的处理一致。
+                declared_skill = rule_check_skill_id(
+                    check_step, runtime.module_content.world_ref
+                )
+                mismatched = [
+                    candidate.skill_id
+                    for candidate in adjudication.check.candidates
+                    if declared_skill is not None
+                    and candidate.skill_id != declared_skill
+                ]
+                if mismatched:
+                    self._reject_validation(
+                        "RULE_CHECK_SKILL_MISMATCH",
+                        repairability="auto_repairable",
+                        fault="agent",
+                        player_safe_reason="这次行动要用规则指定的能力来判定",
+                        internal_reason=(
+                            f"Rule {rule.id} 的分支 {branch_id} 规定掷 {declared_skill}，"
+                            f"裁决却报了 {sorted(set(mismatched))}"
+                        ),
+                    )
         else:
             # 自由行动的完整性必须在创建待检定、掷骰或写入事件之前完成；规则路径
             # 的效果由模组拥有，因此仍允许模型 success_effects 为空。

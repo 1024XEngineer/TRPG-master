@@ -2862,6 +2862,126 @@ class RuleDeclaredCheckPermissionTests(unittest.IsolatedAsyncioTestCase):
         assert pending is not None
         self.assertEqual(pending.options[0].difficulty, "extreme")
 
+    async def submit_with_skill(self, skill_id: str, *, request_id: str):
+        store = InMemoryEngineStore()
+        store.register_room(
+            module_content=module(),
+            initial_state=game_state(module(), scene_id="library"),
+        )
+        engine = AdjudicationEngineService(
+            store, dice=DiceRoller(SequenceDiceSource([50]))
+        )
+        rules = RuleEngineService(store)
+        snapshot = await rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        return store, await engine.submit(
+            SubmitAdjudicationRequest(
+                room_id=ROOM,
+                player_id=PLAYER,
+                adjudication=ActionAdjudication(
+                    request_id=request_id,
+                    source_revision=snapshot.revision,
+                    actor_id=ACTOR,
+                    summary="查阅旧报",
+                    target=ActionTarget(kind="entity", id="newspaper_archive"),
+                    method=ActionMethod(family="research", description="查阅旧报"),
+                    rule_decision=RuleDecisionRef(
+                        rule_id="research_library_archive", option_id="library-use"
+                    ),
+                    check=RequiredAdjudicationCheck(
+                        candidates=(
+                            SkillCheckCandidate(
+                                candidate_id=skill_id,
+                                skill_id=skill_id,
+                                difficulty="regular",
+                                method_summary="翻找",
+                                player_safe_reason="使用该能力",
+                            ),
+                        )
+                    ),
+                ),
+            )
+        )
+
+    async def test_a_candidate_that_is_not_the_declared_skill_is_refused(self) -> None:
+        """作者写了掷什么，Agent 就不能改掷别的（#483）。
+
+        这是《追书人》守夜那个洞的一般形式：作者在 `keep_night_watch/luck` 上写
+        `parameters.skill_id="luck"`，引擎却照 Agent 报的掷侦察，目标值和难度全错，
+        而且不报错。42 条主动检定步全都声明了技能，此前一条都没生效过。
+        """
+
+        with self.assertRaises(AdjudicationValidationError) as rejected:
+            await self.submit_with_skill("spot-hidden", request_id="e5-skill-wrong")
+
+        result = rejected.exception.result
+        self.assertEqual(result.code, "RULE_CHECK_SKILL_MISMATCH")
+        # 与 RULE_OUT_OF_SCOPE / RULE_REQUIRES_CHECK 同级：Agent 的失误，改对就能重来。
+        self.assertEqual(result.repairability, "auto_repairable")
+        self.assertEqual(result.fault, "agent")
+        assert result.internal_reason is not None
+        self.assertIn("library-use", result.internal_reason)
+
+    async def test_the_declared_skill_passes(self) -> None:
+        """报对技能就正常走到掷骰——拒绝必须有出口。"""
+
+        store, execution = await self.submit_with_skill(
+            "library-use", request_id="e5-skill-right"
+        )
+        self.assertEqual(execution.status, "awaiting_skill_choice")
+        assert execution.pending_decision is not None
+        self.assertEqual(execution.pending_decision.options[0].skill_id, "library-use")
+
+    async def test_a_free_check_may_roll_any_skill_the_actor_has(self) -> None:
+        """没有 rule_decision 就没有作者声明，自由裁决照旧自己挑技能。
+
+        E5 收窄的是「规则拥有的检定」。若这条也被卡住，玩家做任何普通行动都得先
+        有一条模组规则才能掷骰——那是 #480 的范围，不是这里。
+        """
+
+        store = InMemoryEngineStore()
+        store.register_room(
+            module_content=module(),
+            initial_state=game_state(module(), scene_id="library"),
+        )
+        engine = AdjudicationEngineService(
+            store, dice=DiceRoller(SequenceDiceSource([50]))
+        )
+        rules = RuleEngineService(store)
+        snapshot = await rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        execution = await engine.submit(
+            SubmitAdjudicationRequest(
+                room_id=ROOM,
+                player_id=PLAYER,
+                adjudication=ActionAdjudication(
+                    request_id="e5-free-skill",
+                    source_revision=snapshot.revision,
+                    actor_id=ACTOR,
+                    summary="随便看看",
+                    target=ActionTarget(kind="location", id="library"),
+                    method=ActionMethod(family="observe", description="随便看看"),
+                    check=RequiredAdjudicationCheck(
+                        candidates=(
+                            SkillCheckCandidate(
+                                candidate_id="spot-hidden",
+                                skill_id="spot-hidden",
+                                difficulty="regular",
+                                method_summary="扫一眼",
+                                player_safe_reason="使用侦查",
+                            ),
+                        )
+                    ),
+                ),
+            )
+        )
+        assert execution.pending_decision is not None
+        self.assertEqual(
+            execution.pending_decision.options[0].skill_id, "spot-hidden"
+        )
+
     async def test_a_free_check_keeps_both_permissions(self) -> None:
         """没有 rule_decision 的自由裁决完全不受影响。
 

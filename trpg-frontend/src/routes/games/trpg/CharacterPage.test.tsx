@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Ruleset } from 'trpg-sdk'
@@ -525,7 +525,11 @@ describe('CharacterPage', () => {
       residence: '阿卡姆',
       birthplace: '波士顿',
       occupation: '记者',
-      attributes: Object.fromEntries(mockRuleset.attributes.map(attribute => [attribute.key, 50])),
+      attributes: Object.fromEntries(
+        mockRuleset.attributes
+          .filter(attribute => attribute.key !== 'LUCK')
+          .map(attribute => [attribute.key, 50]),
+      ),
       derivedStats: { HP: 10, SAN: 50, MP: 10 },
       skills: { charm: 40, climb: 30 },
       occupationChoiceSkillIds: null,
@@ -737,5 +741,42 @@ describe('CharacterPage', () => {
 
     expect(await screen.findByLabelText('思想与信念')).toHaveValue('真相总会留下痕迹')
     expect(screen.getByLabelText('其他')).toHaveValue('来自旧报社')
+  })
+
+  it('hydrates the room draft when a library selection sets the character id', async () => {
+    mockCharacterApi.fetchCharacter.mockResolvedValue({
+      name: '卡库调查员',
+      age: 30,
+      gender: '女',
+      residence: '阿卡姆',
+      birthplace: '波士顿',
+      occupation: '会计师',
+      attributes: Object.fromEntries(
+        mockRuleset.attributes
+          .filter(attribute => attribute.key !== 'LUCK')
+          .map(attribute => [attribute.key, 50]),
+      ),
+      derivedStats: { HP: 10, SAN: 50, MP: 10 },
+      skills: { accounting: 1, stealth: 1 },
+      equipment: [],
+      background: '',
+      notes: '',
+    })
+
+    renderPage()
+    expect(mockCharacterApi.fetchCharacter).not.toHaveBeenCalled()
+
+    act(() => useRoomStore.getState().setCharacterId('library-draft'))
+
+    await waitFor(() => {
+      expect(mockCharacterApi.fetchCharacter).toHaveBeenCalledWith('room-1', 'library-draft')
+      expect(screen.getByPlaceholderText('请输入角色姓名')).toHaveValue('卡库调查员')
+    })
+    expect(mockPreviewCharacter).toHaveBeenCalledWith(expect.objectContaining({
+      attributes: expect.objectContaining({ LUCK: 50 }),
+      occupationId: 1,
+      skills: { accounting: 1, stealth: 1 },
+    }))
+    expect(screen.getByText('待掷')).toBeInTheDocument()
   })
 })

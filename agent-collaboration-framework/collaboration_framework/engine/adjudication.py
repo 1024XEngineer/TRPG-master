@@ -727,7 +727,7 @@ class AdjudicationEngineService:
                         player_safe_reason="房间成员已变化，需要重新确认场景切换",
                     )
                 allow_party_scene_transition = True
-            self._validate_adjudication(
+            rule_check_origin = self._validate_adjudication(
                 runtime,
                 request.adjudication,
                 allow_party_time_advance=allow_party_time_advance,
@@ -803,6 +803,9 @@ class AdjudicationEngineService:
                 status="awaiting_skill_choice",
                 adjudication=request.adjudication,
                 options=options,
+                # 出处让这次检定认得自己的规则，`_rule_check_spec` 因此能取到作者
+                # 声明的权限；游标留空，结算仍旧走父动作的 `_finalize_action`（#483）。
+                rule_origin=rule_check_origin,
             )
             event = self._event(
                 runtime,
@@ -1500,7 +1503,16 @@ class AdjudicationEngineService:
         *,
         allow_party_time_advance: bool = False,
         allow_party_scene_transition: bool = False,
-    ) -> None:
+    ) -> RuleCheckOrigin | None:
+        """校验这次裁决，并把「这次检定出自哪」交还给调用方（#483）。
+
+        返回值只在「规则分支确实要掷骰」时非空。出处必须是服务端事实：这里已经从
+        固定的 ModuleVersion 解析出了权威 `CheckStep`（#462 的双向不变量就是拿它
+        算的），所以由这里返回，而不是让提交路径再解析一遍——两次解析就是两个可能
+        分叉的事实源。
+        """
+
+        rule_check_origin: RuleCheckOrigin | None = None
         state = runtime.game_state
         target = adjudication.target
         if target.kind not in _target_kinds_matching(runtime, target.id):
@@ -1583,6 +1595,14 @@ class AdjudicationEngineService:
                         f"裁决却声明 check.mode={adjudication.check.mode}"
                     ),
                 )
+            if check_step is not None:
+                # 不信 Agent 自报的来源，也不按候选菜单反推：rule/branch/step 三个
+                # id 全部来自刚刚在服务端解析过的那条分支。
+                rule_check_origin = RuleCheckOrigin(
+                    rule_id=rule.id,
+                    branch_id=branch_id,
+                    step_id=check_step.id,
+                )
         else:
             # 自由行动的完整性必须在创建待检定、掷骰或写入事件之前完成；规则路径
             # 的效果由模组拥有，因此仍允许模型 success_effects 为空。
@@ -1627,6 +1647,7 @@ class AdjudicationEngineService:
         )
         if adjudication.check.mode != "none":
             self._validated_options(runtime, adjudication)
+        return rule_check_origin
 
     def _validate_effect_sequence(
         self,

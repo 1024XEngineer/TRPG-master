@@ -482,6 +482,7 @@ async def roll_luck(
         character_service.CharacterNotFoundError,
         room_service.RoomAuthenticationError,
         room_service.RoomAuthorizationError,
+        room_service.RulesetNotConfiguredError,
         room_service.RoomConflictError,
     ) as exc:
         _raise_service_error(exc)

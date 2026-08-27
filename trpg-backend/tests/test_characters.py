@@ -372,13 +372,48 @@ async def test_roll_luck_persists_one_server_authoritative_result(client: AsyncC
     reread = await client.get(
         f"{ROOMS_BASE}/{room['roomId']}/characters/{character_id}", headers=headers
     )
-    assert reread.json()["data"]["attributes"]["LUCK"] == result["luck"]
+    attributes = reread.json()["data"]["attributes"]
+    assert attributes["LUCK"] == result["luck"]
+    assert set(attributes) == {
+        "STR", "CON", "DEX", "APP", "POW", "SIZ", "INT", "EDU", "LUCK"
+    }
 
     duplicate = await client.post(
         f"{ROOMS_BASE}/{room['roomId']}/characters/{character_id}/roll-luck",
         headers=headers,
     )
     assert duplicate.status_code == 409
+
+
+async def test_roll_luck_preserves_existing_attributes_and_fills_missing(
+    client: AsyncClient,
+) -> None:
+    """幸运骰补齐空属性时保留草稿中已有的玩家修改。"""
+    room = await create_room(client)
+    headers = reconnect(room["reconnectToken"])
+    draft = await client.post(f"{ROOMS_BASE}/{room['roomId']}/characters", headers=headers)
+    character_id = draft.json()["data"]["characterId"]
+    payload = {**BUILT_CHARACTER, "attributes": {"STR": 85}}
+    saved = await client.patch(
+        f"{ROOMS_BASE}/{room['roomId']}/characters/{character_id}",
+        json=payload,
+        headers=headers,
+    )
+    assert saved.status_code == 200, saved.text
+
+    rolled = await client.post(
+        f"{ROOMS_BASE}/{room['roomId']}/characters/{character_id}/roll-luck",
+        headers=headers,
+    )
+    assert rolled.status_code == 200, rolled.text
+    reread = await client.get(
+        f"{ROOMS_BASE}/{room['roomId']}/characters/{character_id}", headers=headers
+    )
+    attributes = reread.json()["data"]["attributes"]
+    assert attributes["STR"] == 85
+    assert set(attributes) == {
+        "STR", "CON", "DEX", "APP", "POW", "SIZ", "INT", "EDU", "LUCK"
+    }
 
 
 async def test_complete_character_without_luck_roll_is_rejected(client: AsyncClient) -> None:

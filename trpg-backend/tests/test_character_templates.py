@@ -265,6 +265,48 @@ async def test_seeding_a_room_draft_copies_the_card_and_then_stands_alone(
     assert stored.based_on_template_id == template["templateId"]
 
 
+async def test_roll_luck_repairs_missing_attributes_after_template_seeding(
+    client: AsyncClient,
+) -> None:
+    """卡库缺少部分属性时，幸运骰仍会补齐规则要求的属性键。"""
+    token = await register(client)
+    template = await _create_template(client, token)
+    incomplete_data = {
+        **TEMPLATE_DATA,
+        "attributes": {"STR": 85},
+    }
+    updated = await client.patch(
+        f"{TEMPLATES_BASE}/{template['templateId']}",
+        json={"data": incomplete_data},
+        headers=bearer(token),
+    )
+    assert updated.status_code == 200, updated.text
+
+    room = await create_room(client, token=token)
+    headers = {"X-Reconnect-Token": room["reconnectToken"]}
+    draft = await client.post(
+        f"{ROOMS_BASE}/{room['roomId']}/characters",
+        json={"basedOnTemplateId": template["templateId"]},
+        headers=headers,
+    )
+    assert draft.status_code == 201, draft.text
+    character_id = draft.json()["data"]["characterId"]
+
+    rolled = await client.post(
+        f"{ROOMS_BASE}/{room['roomId']}/characters/{character_id}/roll-luck",
+        headers=headers,
+    )
+    assert rolled.status_code == 200, rolled.text
+    read = await client.get(
+        f"{ROOMS_BASE}/{room['roomId']}/characters/{character_id}", headers=headers
+    )
+    attributes = read.json()["data"]["attributes"]
+    assert attributes["STR"] == 85
+    assert set(attributes) == {
+        "STR", "CON", "DEX", "APP", "POW", "SIZ", "INT", "EDU", "LUCK"
+    }
+
+
 async def test_seeding_a_room_draft_copies_the_template_portrait(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:

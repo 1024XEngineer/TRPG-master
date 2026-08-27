@@ -873,6 +873,24 @@ async def _run_queued_host_action(
             audience_actor_ids=audience_actor_ids,
             output=output,
         )
+        # 保持 SDK 对 submitPlannedAction 的完成通知兼容；真正可见的回复仍只来自 dialogue.npc。
+        connections = manager.player_connections(item.room_id, item.player_id)
+        websocket = connections[0] if connections else None
+        await _send_to_player(
+            websocket,
+            {
+                "protocol_version": "1",
+                "message_type": "turn.completed",
+                "correlation_id": item.client_action_id,
+                "payload": {
+                    "room_id": item.room_id,
+                    "player_id": item.player_id,
+                    "actor_id": item.actor_id,
+                    "narration": {"kind": "narration", "text": "NPC 对话已完成"},
+                    "player_view": view.to_json_dict(),
+                },
+            },
+        )
         for event_id in item.result_event_ids:
             event = await db.get(Event, event_id)
             if event is not None:

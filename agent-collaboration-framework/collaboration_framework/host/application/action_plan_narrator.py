@@ -91,9 +91,6 @@ class ActionPlanNarrator:
             raise ActionPlanNarrationValidationError(rejection)
         if output.npc_replies and _EMBEDDED_DIALOGUE_RE.search(output.text):
             raise ActionPlanNarrationValidationError("npc_dialogue_embedded_in_text")
-        if context.recipient_kind == "keeper" and output.npc_replies:
-            # 守秘人输出不能伪装成 NPC；NPC 台词必须走 dialogue.npc 事件。
-            raise ActionPlanNarrationValidationError("keeper_cannot_speak_as_npc")
         subject_rejection = narration_subject_rejection_reason(
             output.text,
             addressing_mode=getattr(context, "addressing_mode", "second_person"),

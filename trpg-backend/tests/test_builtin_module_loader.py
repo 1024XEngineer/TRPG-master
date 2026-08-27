@@ -1,4 +1,4 @@
-"""验证三个内置模组的发布、目录和选模组行为。"""
+"""验证四个内置模组的发布、目录和选模组行为。"""
 
 from __future__ import annotations
 
@@ -10,6 +10,8 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.seed import (
+    CONSTANT_DARKNESS_BOX_MODULE_ID,
+    CONSTANT_DARKNESS_BOX_SCENARIO_ID,
     HAPPY_FROG_VILLAGE_MODULE_ID,
     HAPPY_FROG_VILLAGE_SCENARIO_ID,
     SILVER_LOCK_MODULE_ID,
@@ -19,6 +21,7 @@ from app.models.content import ModuleAsset, Scenario
 from app.models.engine import ModuleVersion
 from app.models.room import Room
 from app.service.builtin_module_loader import (
+    CONSTANT_DARKNESS_BOX_SPEC,
     HAPPY_FROG_VILLAGE_SPEC,
     SILVER_LOCK_SPEC,
     BuiltinModuleLoadError,
@@ -36,6 +39,7 @@ async def test_all_builtin_modules_load_idempotently(db_session: AsyncSession) -
         ("paper-chase-zh-coc7", "unchanged"),
         (SILVER_LOCK_MODULE_ID, "unchanged"),
         (HAPPY_FROG_VILLAGE_MODULE_ID, "unchanged"),
+        (CONSTANT_DARKNESS_BOX_MODULE_ID, "unchanged"),
     ]
 
     scenario = await db_session.get(Scenario, SILVER_LOCK_SCENARIO_ID)
@@ -216,3 +220,42 @@ async def test_catalog_and_selection_use_happy_frog_village_publication(
     assert room is not None
     assert room.scenario_id == HAPPY_FROG_VILLAGE_SCENARIO_ID
     assert room.module_version == HAPPY_FROG_VILLAGE_SPEC.version
+
+
+async def test_catalog_and_selection_use_constant_darkness_box_publication(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    """第四个预设在目录中展示，且仅 2-3 人房间可钉住其不可变版本。"""
+
+    catalog = (await client.get("/api/v1/modules")).json()["data"]
+    module = next(item for item in catalog if item["id"] == CONSTANT_DARKNESS_BOX_MODULE_ID)
+    assert module["title"] == "常暗之厢"
+    assert module["playersMin"] == 2
+    assert module["playersMax"] == 3
+
+    too_small = await create_room(client, max_players=1)
+    rejected = await client.post(
+        f"{ROOMS_BASE}/{too_small['roomId']}/module",
+        json={
+            "moduleId": CONSTANT_DARKNESS_BOX_MODULE_ID,
+            "attributeGenMethod": "point_buy",
+        },
+        headers=reconnect(too_small["reconnectToken"]),
+    )
+    assert rejected.status_code == 409
+
+    room_data = await create_room(client, max_players=2)
+    accepted = await client.post(
+        f"{ROOMS_BASE}/{room_data['roomId']}/module",
+        json={
+            "moduleId": CONSTANT_DARKNESS_BOX_MODULE_ID,
+            "attributeGenMethod": "point_buy",
+        },
+        headers=reconnect(room_data["reconnectToken"]),
+    )
+    assert accepted.status_code == 200
+    room = await db_session.get(Room, room_data["roomId"])
+    assert room is not None
+    assert room.scenario_id == CONSTANT_DARKNESS_BOX_SCENARIO_ID
+    assert room.module_version == CONSTANT_DARKNESS_BOX_SPEC.version

@@ -1613,7 +1613,10 @@ class RuleOwnedCheckTests(unittest.IsolatedAsyncioTestCase):
                 self.content,
                 scene_id="cemetery",
                 # 石板已被发现，剩下的就是搬开它。
-                entities={"crypt_entrance": {"discovered": True}},
+                entities={
+                    "crypt_entrance": {"discovered": True},
+                    "cemetery_figure": {"willing_to_talk": True},
+                },
             ),
         )
         # STR 检定取 5，稳定成功。
@@ -1978,6 +1981,194 @@ class RuleOwnedCheckTests(unittest.IsolatedAsyncioTestCase):
             moved_store.inspect_state(ROOM).entities["crypt_entrance"]["slab_moved"],
             True,
         )
+
+    async def test_call_to_figure_keeps_douglas_after_sanity_check(self) -> None:
+        """#475：呼喊后的被动理智检定不得把人影立刻送回地穴。"""
+
+        encounter = {
+            "cemetery_figure": {
+                "discovered": True,
+                "true_form_seen": False,
+                "willing_to_talk": False,
+                "out_tonight": "observed",
+                "location_id": "kimball_grounds",
+            },
+            "case_tracker": {"first_ghoul_sight_resolved": False},
+        }
+
+        async def shout(*, request_id: str, rolls: list[int]):
+            store = InMemoryEngineStore()
+            store.register_room(
+                module_content=self.content,
+                initial_state=game_state(
+                    self.content,
+                    scene_id="kimball_grounds",
+                    entities=encounter,
+                    world_time=WorldTimeState(
+                        current=WorldTimePoint(day_index=0, hour_of_day=18),
+                        current_point_id="hour_18",
+                        current_time_segment="evening",
+                    ),
+                ),
+            )
+            engine = AdjudicationEngineService(
+                store, dice=DiceRoller(SequenceDiceSource(rolls))
+            )
+            rules = RuleEngineService(store)
+            snapshot = await rules.read(
+                PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+            )
+            published = {
+                item.rule_id
+                for item in (
+                    await rules.read_keeper_capabilities(
+                        PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+                    )
+                ).rule_candidates
+            }
+            execution = await engine.submit(
+                SubmitAdjudicationRequest(
+                    room_id=ROOM,
+                    player_id=PLAYER,
+                    adjudication=ActionAdjudication(
+                        request_id=request_id,
+                        source_revision=snapshot.revision,
+                        actor_id=ACTOR,
+                        summary="喂你是谁",
+                        target=ActionTarget(kind="entity", id="cemetery_figure"),
+                        method=ActionMethod(family="talk", description="喊住人影"),
+                        rule_decision=RuleDecisionRef(
+                            rule_id="call_to_figure", option_id="proceed"
+                        ),
+                        check=NoAdjudicationCheck(),
+                        success_effects=(),
+                        failure_effects=(),
+                    ),
+                )
+            )
+            return store, engine, rules, published, execution
+
+        async def finish_sanity(store, engine, execution, request_id: str):
+            self.assertEqual(execution.status, "awaiting_skill_choice")
+            pending = execution.pending_decision
+            assert pending is not None
+            self.assertEqual(pending.options[0].display_name, "理智")
+            self.assertFalse(pending.allow_cancel)
+            rolled = await engine.decide(
+                CheckDecisionRequest(
+                    request_id=f"{request_id}:select",
+                    room_id=ROOM,
+                    player_id=PLAYER,
+                    source_revision=execution.view_revision,
+                    decision_id=pending.decision_id,
+                    decision_version=pending.decision_version,
+                    choice=SelectCheckChoice(candidate_id=pending.options[0].candidate_id),
+                )
+            )
+            assert rolled.check_run is not None
+            return await engine.decide_post_roll(
+                PostRollDecisionRequest(
+                    request_id=f"{request_id}:accept",
+                    room_id=ROOM,
+                    player_id=PLAYER,
+                    source_revision=rolled.view_revision,
+                    check_id=rolled.check_run.check_id,
+                    check_version=rolled.check_run.version,
+                    option_id="accept-current",
+                )
+            )
+
+        def still_here(store) -> None:
+            state = store.inspect_state(ROOM)
+            figure = state.entities["cemetery_figure"]
+            self.assertIs(figure["willing_to_talk"], True)
+            self.assertIs(figure["true_form_seen"], True)
+            self.assertEqual(figure.get("out_tonight"), "observed")
+            self.assertNotEqual(figure.get("location_id"), "crypt")
+            self.assertEqual(state.scene_id, "kimball_grounds")
+            self.assertFalse(
+                any(
+                    event.type == "entity.moved"
+                    and event.payload.get("entity_id") == "cemetery_figure"
+                    and event.payload.get("location_id") == "crypt"
+                    for event in store.inspect_domain_events(ROOM)
+                )
+            )
+
+        for roll, expected_outcome in ((5, "success"), (81, "failure")):
+            store, engine, rules, published, execution = await shout(
+                request_id=f"call-figure-{roll}",
+                rolls=[roll],
+            )
+            self.assertIn("call_to_figure", published)
+            self.assertNotIn("talk_to_figure", published)
+            resolved = await finish_sanity(
+                store, engine, execution, f"call-figure-{roll}"
+            )
+            self.assertEqual(resolved.status, "resolved")
+            self.assertEqual(resolved.outcome, expected_outcome)
+            still_here(store)
+            after = {
+                item.rule_id
+                for item in (
+                    await rules.read_keeper_capabilities(
+                        PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+                    )
+                ).rule_candidates
+            }
+            self.assertIn("talk_to_figure", after)
+            snapshot = await rules.read(
+                PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+            )
+            await engine.submit(
+                SubmitAdjudicationRequest(
+                    room_id=ROOM,
+                    player_id=PLAYER,
+                    adjudication=ActionAdjudication(
+                        request_id=f"talk-figure-{roll}",
+                        source_revision=snapshot.revision,
+                        actor_id=ACTOR,
+                        summary="与身影交谈",
+                        target=ActionTarget(kind="entity", id="cemetery_figure"),
+                        method=ActionMethod(family="talk", description="与身影交谈"),
+                        rule_decision=RuleDecisionRef(
+                            rule_id="talk_to_figure", option_id="proceed"
+                        ),
+                        check=NoAdjudicationCheck(),
+                        success_effects=(),
+                        failure_effects=(),
+                    ),
+                )
+            )
+            self.assertTrue(store.inspect_state(ROOM).core_resolved)
+
+        store, engine, rules, _published, execution = await shout(
+            request_id="call-figure-then-dawn",
+            rolls=[5],
+        )
+        await finish_sanity(store, engine, execution, "call-figure-then-dawn")
+        snapshot = await rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        await engine.submit(
+            SubmitAdjudicationRequest(
+                room_id=ROOM,
+                player_id=PLAYER,
+                adjudication=ActionAdjudication(
+                    request_id="wait-until-dawn",
+                    source_revision=snapshot.revision,
+                    actor_id=ACTOR,
+                    summary="等到天亮",
+                    target=ActionTarget(kind="location", id="kimball_grounds"),
+                    method=ActionMethod(family="wait", description="等到天亮"),
+                    check=NoAdjudicationCheck(),
+                    success_effects=(AdvanceWorldTimeEffect(to_point_id="hour_06"),),
+                ),
+            )
+        )
+        figure = store.inspect_state(ROOM).entities["cemetery_figure"]
+        self.assertEqual(figure.get("location_id"), "crypt")
+        self.assertEqual(figure.get("out_tonight"), "none")
 
     async def test_rule_decision_from_another_location_is_refused(self) -> None:
         """候选按场景发布，提交也必须按场景复查。

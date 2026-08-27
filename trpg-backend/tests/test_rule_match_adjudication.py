@@ -27,6 +27,7 @@ from collaboration_framework.contracts import (
     ActionPlanPolicy,
     ActionPlanStep,
     ActionTarget,
+    CheckStep,
     EnsureRuntimeLocationEffect,
     EnterLocationEffect,
     LocationContextView,
@@ -37,6 +38,7 @@ from collaboration_framework.contracts import (
     PlayerInput,
     PlayerView,
     RequiredAdjudicationCheck,
+    RuleCheckSpec,
     SingleActionDecision,
 )
 from collaboration_framework.engine import (
@@ -46,6 +48,7 @@ from collaboration_framework.engine import (
 )
 from collaboration_framework.engine.initialization import create_initial_game_state
 from collaboration_framework.engine.models import ActorState
+from collaboration_framework.engine.projection_v3 import _rule_check_skill_id
 from collaboration_framework.host.application import PlayerViewProjector, TurnExecutionError
 from collaboration_framework.host.prompts.action_plan import (
     current_step_adjudication_instructions,
@@ -185,6 +188,80 @@ async def test_rule_once_builder_uses_only_selected_rule_and_opaque_option() -> 
     assert adjudication.rule_decision.option_id == option.id
     assert adjudication.success_effects == ()
     assert adjudication.failure_effects == ()
+
+
+async def test_rule_once_builder_uses_branch_check_skill_not_option_id() -> None:
+    context = await _cemetery_context("用侦查观察梅洛迪亚斯·杰弗逊")
+    assert context.keeper_capabilities is not None
+    candidate = next(
+        item
+        for item in context.keeper_capabilities.rule_candidates
+        if item.rule_id == "observe_caretaker"
+    )
+    option = next(item for item in candidate.options if item.id == "spot-hidden")
+    # The authored branch id is intentionally opaque here; the rolled resource
+    # comes from the selected CheckStep, not from the option name.
+    option = option.model_copy(update={"id": "observe-branch"})
+    candidate = candidate.model_copy(update={"options": (option,)})
+    capabilities = context.keeper_capabilities.model_copy(update={"rule_candidates": (candidate,)})
+    assert option.check_skill_id == "spot-hidden"
+    adjudication = build_rule_once_adjudication(
+        player_input=context.player_input,
+        player_view=context.player_view,
+        capabilities=capabilities,
+        rule_id=candidate.rule_id,
+        option_id=option.id,
+        target_kind="entity",
+        target_id=candidate.target_ids[0],
+        summary="观察守墓人",
+    )
+    assert adjudication.check.candidates[0].candidate_id == option.id
+    assert adjudication.check.candidates[0].skill_id == option.check_skill_id
+
+
+def test_rule_check_skill_id_reads_coc7_skill_profile_parameter() -> None:
+    step = CheckStep(
+        id="check",
+        check=RuleCheckSpec(
+            profile_id="coc7.skill",
+            actor_binding="actor",
+            initiation_kind="active_action",
+            parameters={"skill_id": "credit-rating"},
+        ),
+        result_routes={
+            "critical_success": "done",
+            "extreme_success": "done",
+            "hard_success": "done",
+            "regular_success": "done",
+            "failure": "done",
+            "fumble": "done",
+        },
+    )
+    assert _rule_check_skill_id(step) == "credit-rating"
+
+
+async def test_rule_once_builder_rejects_unmapped_rule_check_branch() -> None:
+    context = await _cemetery_context("用侦查观察梅洛迪亚斯·杰弗逊")
+    assert context.keeper_capabilities is not None
+    candidate = next(
+        item
+        for item in context.keeper_capabilities.rule_candidates
+        if item.rule_id == "observe_caretaker"
+    )
+    option = next(item for item in candidate.options if item.id == "spot-hidden")
+    option = option.model_copy(update={"check_skill_id": None})
+    candidate = candidate.model_copy(update={"options": (option,)})
+    capabilities = context.keeper_capabilities.model_copy(update={"rule_candidates": (candidate,)})
+    with pytest.raises(ValueError, match="RULE_CHECK_SKILL_UNAVAILABLE"):
+        build_rule_once_adjudication(
+            player_input=context.player_input,
+            player_view=context.player_view,
+            capabilities=capabilities,
+            rule_id=candidate.rule_id,
+            option_id=option.id,
+            target_kind="entity",
+            target_id=candidate.target_ids[0],
+        )
 
 
 async def test_rule_candidates_reach_the_model_payload() -> None:

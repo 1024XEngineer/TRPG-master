@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from collaboration_framework.contracts import (
     AgentMatchTriggerSpec,
+    CheckStep,
     ContractError,
     EntitySpecV3,
     InventoryItemView,
@@ -59,6 +60,7 @@ from .models import EngineRuntimeSnapshot, GameState
 from .navigation import effective_location_knowledge, runtime_location_edges
 from .persistent_results import PUBLIC_STATE_KEYS
 from .rules_v3 import agent_match_admits, evaluate_condition, pending_check_for
+from ..registry import check_profiles as check_profile_registry
 from .time_tasks import active_occurrences
 from .timeline import (
     next_point_after,
@@ -741,7 +743,9 @@ def _rule_candidates(
                         id=option.id,
                         semantic_hints=option.semantic_hints,
                         # 分支里有没有检定步，是 Agent 必须知道的；后果仍然不出服务端。
-                        requires_check=pending_check_for(rule, option.id)[0] is not None,
+                        requires_check=(step := pending_check_for(rule, option.id)[0])
+                        is not None,
+                        check_skill_id=_rule_check_skill_id(step),
                     )
                     for option in trigger.options
                 ),
@@ -749,6 +753,18 @@ def _rule_candidates(
         )
     candidates.sort(key=lambda item: item.rule_id)
     return tuple(candidates)
+
+
+def _rule_check_skill_id(step: object) -> str | None:
+    """Resolve the rolled resource without exposing rule execution details."""
+
+    if not isinstance(step, CheckStep):
+        return None
+    if step.check.profile_id == "coc7.skill":
+        skill_id = step.check.parameters.get("skill_id")
+        return skill_id if isinstance(skill_id, str) and skill_id.strip() else None
+    profile = check_profile_registry.registration_for(step.check.profile_id)
+    return profile.resource if profile is not None else None
 
 
 def keeper_capabilities_v3(

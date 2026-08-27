@@ -3290,15 +3290,20 @@ def build_rule_once_adjudication(
         Literal["information", "entity", "location", "actor", "world"], target_kind
     )
     skill_ids = {item.id for item in player_view.self_actor.skills}
+    attribute_ids = {item.id for item in player_view.self_actor.attributes}
+    resource_ids = {item.id for item in player_view.self_actor.resources}
     check = NoAdjudicationCheck()
     if option.requires_check:
-        if option.id not in skill_ids:
+        check_skill_id = option.check_skill_id
+        if check_skill_id is None:
+            raise ValueError("RULE_CHECK_SKILL_UNAVAILABLE")
+        if check_skill_id not in skill_ids | attribute_ids | resource_ids:
             raise ValueError("RULE_CHECK_SKILL_UNAVAILABLE")
         check = RequiredAdjudicationCheck(
             candidates=(
                 SkillCheckCandidate(
                     candidate_id=option.id,
-                    skill_id=option.id,
+                    skill_id=check_skill_id,
                     difficulty="regular",
                     method_summary=summary or player_input.utterance,
                     player_safe_reason="使用当前规则候选允许的检定方式",

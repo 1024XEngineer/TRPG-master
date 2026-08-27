@@ -85,6 +85,10 @@ class KeeperRuleOption(ContractModel):
     id: str = Field(min_length=1)
     semantic_hints: tuple[str, ...] = ()
     requires_check: bool = True
+    # Server-resolved resource used by the selected branch's CheckStep.  This
+    # is separate from the opaque option id: a branch may be named `proceed`,
+    # `STR`, or any other authored identifier that is not the rolled resource.
+    check_skill_id: str | None = Field(default=None, min_length=1)
 
 
 class KeeperRuleCandidate(ContractModel):
@@ -101,7 +105,9 @@ class KeeperRuleCandidate(ContractModel):
     question_kind: Literal["action_declaration", "method", "intent_relation"]
     semantic_hints: tuple[str, ...] = ()
     action_families: tuple[str, ...] = ()
-    target_kinds: tuple[Literal["information", "entity", "location", "actor", "world"], ...] = ()
+    target_kinds: tuple[
+        Literal["information", "entity", "location", "actor", "world"], ...
+    ] = ()
     target_ids: tuple[str, ...] = ()
     options: tuple[KeeperRuleOption, ...] = ()
 

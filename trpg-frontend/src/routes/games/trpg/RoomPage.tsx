@@ -2517,7 +2517,7 @@ export default function RoomPage() {
           const portraitUrl = msg.playerId ? portraitUrls[msg.playerId] : undefined
 
           return (
-            <div key={i} className={`room-play__message ${isPlayer ? 'room-play__message--self' : ''} ${isNarr ? 'room-play__message--narration' : ''} animate-[msgIn_0.3s_ease]`}>
+            <div key={i} className={`room-play__message ${isPlayer ? 'room-play__message--self' : ''} ${isNarr ? 'room-play__message--narration' : ''} ${isNpc ? 'room-play__message--npc' : ''} animate-[msgIn_0.3s_ease]`}>
               {isNarr ? (
                 <KeeperAvatar onLongPress={insertHostMention} />
               ) : isNpc ? (

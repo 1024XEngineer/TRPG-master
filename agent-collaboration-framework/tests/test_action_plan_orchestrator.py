@@ -31,6 +31,7 @@ from collaboration_framework.contracts import (
     PushAdjudication,
     Repairability,
     RequiredAdjudicationCheck,
+    RuleDecisionRef,
     SelectCheckChoice,
     SingleActionDecision,
     SkillCheckCandidate,
@@ -2587,3 +2588,116 @@ async def test_narrator_rejects_first_person_subject_in_prose() -> None:
         await ActionPlanNarrator(FirstPersonNarrationModel()).narrate(context)
 
     assert raised.value.reason == "subject_ownership"
+
+
+# --------------------------------------------------------------------------- #
+# #462：漏写 check 的那一版必须能沿着修复回路走回掷骰，而不是静默成功。
+# --------------------------------------------------------------------------- #
+
+NEIGHBOUR_SKILL = "fast-talk"
+
+
+def neighbourhood_runtime():
+    """站在邻里、手上有 fast-talk 的房间：`question_neighbors` 在这里可用。"""
+
+    module = ModuleContentV3.model_validate_json(V3_FIXTURE.read_text(encoding="utf-8"))
+    state = GameState(
+        room_id="room_01",
+        scene_id="neighborhood",
+        actors={
+            "pc_1": ActorState(
+                player_id="player_01",
+                name="陈探员",
+                source_character_id="character_v3",
+                source_character_version=1,
+                state={
+                    "skills": {SKILL: 60, NEIGHBOUR_SKILL: 55},
+                    "skill_labels": {SKILL: "侦查", NEIGHBOUR_SKILL: "话术"},
+                },
+            )
+        },
+        entities={},
+    )
+    engine_store = InMemoryEngineStore()
+    engine_store.register_room(module_content=module, initial_state=state)
+    return module, engine_store, PlayerViewProjector(RuleEngineService(engine_store))
+
+
+class MissingCheckAdjudicator:
+    """先犯真实模型犯过的那个错，再照着指引改。
+
+    实测两次都是这样：规则和选项都选对，`check` 却写成 `{"mode":"none"}`。
+    """
+
+    def __init__(self) -> None:
+        self.contexts = []
+
+    async def adjudicate(self, context):
+        self.contexts.append(context)
+        repairing = context.previous_rejection is not None
+        check = (
+            RequiredAdjudicationCheck(
+                candidates=(
+                    SkillCheckCandidate(
+                        candidate_id=NEIGHBOUR_SKILL,
+                        skill_id=NEIGHBOUR_SKILL,
+                        difficulty="regular",
+                        method_summary="搭话套近乎",
+                        player_safe_reason="使用话术",
+                    ),
+                )
+            )
+            if repairing
+            else NoAdjudicationCheck()
+        )
+        return ActionAdjudication(
+            request_id="untrusted",
+            source_revision="untrusted",
+            actor_id="untrusted",
+            summary="跟邻居打听消息",
+            target=ActionTarget(kind="entity", id="lyla"),
+            method=ActionMethod(family="social", description="跟邻居打听消息"),
+            rule_decision=RuleDecisionRef(
+                rule_id="question_neighbors", option_id="fast-talk"
+            ),
+            check=check,
+        )
+
+
+@pytest.mark.asyncio
+async def test_missing_rule_check_is_repaired_back_into_a_roll() -> None:
+    """#462 全链路：拒绝 → 带指引重试 → 语义保持放行 → 真的走到掷骰。
+
+    这条把四处改动串起来测：引擎的 RULE_REQUIRES_CHECK、`to_feedback` 不改写这个
+    码（改写了指引就查不到）、`_REPAIR_HINTS` 的指引跟着拒绝理由回到模型、
+    `_check_is_mechanical` 放行 none → required。少任何一环，这一步都会停成
+    needs_clarification，而不是停在玩家面前的那次检定上。
+    """
+
+    _, engine_store, projector = neighbourhood_runtime()
+    adjudicator = MissingCheckAdjudicator()
+    engine = AdjudicationEngineService(
+        engine_store,
+        dice=DiceRoller(SequenceDiceSource([10])),
+    )
+    service = ActionPlanOrchestrator(
+        store=InMemoryActionPlanRunStore(),
+        adjudicator=adjudicator,
+        executor=engine,
+        player_view_projector=projector,
+    )
+    original = player_input("issue462-parent", "跟邻居打听消息")
+
+    result = await service.start_or_resume(original, plan=plan(1))
+
+    # 修复过一次，而且第二次拿到的是这条错误码和它的指引。
+    assert len(adjudicator.contexts) == 2
+    rejection = adjudicator.contexts[1].previous_rejection
+    assert rejection is not None
+    assert rejection.startswith("RULE_REQUIRES_CHECK: ")
+    assert _REPAIR_HINTS["RULE_REQUIRES_CHECK"] in rejection
+
+    # 停在检定上等玩家，而不是「成功了但什么都没发生」。
+    assert result.run.status == "waiting_for_player"
+    assert result.latest_execution is not None
+    assert result.latest_execution.pending_decision is not None

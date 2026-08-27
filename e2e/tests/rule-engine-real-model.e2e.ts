@@ -465,17 +465,15 @@ async function settleChecksFor(
   }
 }
 
-// 已知阻塞：真实模型两次都把规则与选项选对（`keep_night_watch` / `luck`），却把
-// `check` 声明成 `{"mode":"none"}`，而候选上的 `requires_check` 明明是 true。引擎
-// 拿到"分支要掷骰、裁决没带检定"时 `return ()`——不提交任何效果，却照样报
-// `action.succeeded`。于是规则静默不触发、叙事写"什么都没发生"、无处报错。
-// 这是模组之外的第三个成因，不属于 #451；待引擎侧改成可修复的显式拒绝后解开 skip。
-const NPC_SIGHTING_BLOCKED =
-  '阻塞：Agent 声明 check=none 时引擎静默吞掉规则，既不掷骰也不提交效果'
-
+// 这条用例此前被 #462 堵住：真实模型两次都把规则与选项选对（`keep_night_watch` /
+// `luck`），却把 `check` 声明成 `{"mode":"none"}`，而候选上的 `requires_check` 明明
+// 是 true。引擎拿到"分支要掷骰、裁决没带检定"时 `return ()`——不提交任何效果，却
+// 照样报 `action.succeeded`，于是规则静默不触发、叙事写"什么都没发生"、无处报错。
+// #462 之后引擎改成拒 `RULE_REQUIRES_CHECK`（auto_repairable / fault=agent），模型
+// 拿着 `_REPAIR_HINTS` 的指引补上 check 再提交，所以这条链路重新走得通了。
 test(
   '#451 真实模型：守夜幸运成功后人影现身，且喊得出道格拉斯',
-  { timeout: TEST_TIMEOUT_MS, skip: NPC_SIGHTING_BLOCKED },
+  { timeout: TEST_TIMEOUT_MS, skip: REAL_MODEL ? false : '需要 E2E_REAL_MODEL=1' },
   async () => {
     const room = await openRoom('issue451-real-watch')
     try {

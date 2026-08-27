@@ -521,7 +521,25 @@ def test_same_length_effect_replacement_requires_clarification() -> None:
     assert result.reason_code == "NEW_OR_CHANGED_EFFECT"
 
 
-def _greeting(*, rule: RuleDecisionRef | None) -> ActionAdjudication:
+def _fast_talk_check() -> RequiredAdjudicationCheck:
+    return RequiredAdjudicationCheck(
+        candidates=(
+            SkillCheckCandidate(
+                candidate_id="fast-talk",
+                skill_id="fast-talk",
+                difficulty="regular",
+                method_summary="搭话套近乎",
+                player_safe_reason="使用话术",
+            ),
+        )
+    )
+
+
+def _greeting(
+    *,
+    rule: RuleDecisionRef | None,
+    check=None,
+) -> ActionAdjudication:
     return ActionAdjudication(
         request_id="request",
         source_revision="0",
@@ -529,7 +547,7 @@ def _greeting(*, rule: RuleDecisionRef | None) -> ActionAdjudication:
         summary="跟邻居打个招呼",
         target=ActionTarget(kind="entity", id=TARGET),
         method=ActionMethod(family="social", description="打招呼"),
-        check=NoAdjudicationCheck(),
+        check=check or NoAdjudicationCheck(),
         rule_decision=rule,
     )
 
@@ -678,3 +696,87 @@ def test_nonportable_pickup_can_be_narrowed_to_zero_write_obstruction() -> None:
     )
 
     assert result.status == "narrowed"
+
+
+# --------------------------------------------------------------------------- #
+# #462：引擎拒绝「分支要不要掷骰」与「裁决带不带检定」不一致之后，唯一可自动
+# 接受的修复是把 check 调到与分支一致。放弃 rule_decision 不被禁止，但要问玩家。
+# --------------------------------------------------------------------------- #
+
+_NEIGHBOURS = RuleDecisionRef(rule_id="question_neighbors", option_id="fast-talk")
+
+
+def test_adding_the_required_check_is_a_mechanical_repair() -> None:
+    """#462：补上分支要求的那次检定，是这条错误码下走得通的修复。
+
+    今天任何 `check.mode` 变化都判 CHECK_CHANGED，修复会被卡死在语义保持这一关：
+    模型照着提示补了 `RequiredAdjudicationCheck`，这一步照样停下来问玩家。
+    """
+
+    result = _compare(
+        _greeting(rule=_NEIGHBOURS),
+        _greeting(rule=_NEIGHBOURS, check=_fast_talk_check()),
+        "RULE_REQUIRES_CHECK",
+    )
+
+    assert result.status == "preserved"
+    assert result.reason_code == "MECHANICAL_REPAIR"
+
+
+def test_dropping_a_superfluous_check_is_a_mechanical_repair() -> None:
+    """#462 镜像面：不掷骰的分支，去掉多写的 check 同样是机械修复。"""
+
+    result = _compare(
+        _greeting(rule=_NEIGHBOURS, check=_fast_talk_check()),
+        _greeting(rule=_NEIGHBOURS),
+        "RULE_FORBIDS_CHECK",
+    )
+
+    assert result.status == "preserved"
+    assert result.reason_code == "MECHANICAL_REPAIR"
+
+
+def test_realignment_only_goes_the_direction_the_engine_named() -> None:
+    """引擎说缺检定，修复却把检定去掉了——那不是对齐，是换了件事做。"""
+
+    result = _compare(
+        _greeting(rule=_NEIGHBOURS, check=_fast_talk_check()),
+        _greeting(rule=_NEIGHBOURS),
+        "RULE_REQUIRES_CHECK",
+    )
+
+    assert result.status == "requires_clarification"
+    assert result.reason_code == "CHECK_CHANGED"
+
+
+def test_check_mode_may_not_change_under_an_unrelated_rejection() -> None:
+    """目标不存在跟掷不掷骰无关，这时改 check.mode 是模型在夹带。"""
+
+    result = _compare(
+        _greeting(rule=_NEIGHBOURS),
+        _greeting(rule=_NEIGHBOURS, check=_fast_talk_check()),
+        "TARGET_UNAVAILABLE",
+    )
+
+    assert result.status == "requires_clarification"
+    assert result.reason_code == "CHECK_CHANGED"
+
+
+def test_dropping_the_rule_instead_of_adding_the_check_asks_the_player() -> None:
+    """#462 验收：这里的 `agent_match_admits` 已经通过，规则确实适用。
+
+    与 RULE_OUT_OF_SCOPE 不同——那边规则本就不适用，降级成叙事裁决不多拿任何东西；
+    这边降级会把一个掷骰门控的模组分支交给自由叙事，而 KeeperInformationCapability
+    已经把未发现情报的全文交给了 Agent，叙事侧还没有正向闸门（#446）。所以
+    `_rule_decision_dropped` 保持只认 RULE_OUT_OF_SCOPE，这一步落到
+    RULE_DECISION_CHANGED 上：回合不死，是停下来问玩家。
+    """
+
+    result = _compare(
+        _greeting(rule=_NEIGHBOURS),
+        _greeting(rule=None, check=_fast_talk_check()),
+        "RULE_REQUIRES_CHECK",
+    )
+
+    assert result.status == "requires_clarification"
+    assert result.reason_code == "RULE_DECISION_CHANGED"

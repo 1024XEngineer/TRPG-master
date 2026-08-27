@@ -164,6 +164,14 @@ class HostEntryContext(BaseModel):
     def current_keeper_text(self) -> str:
         return self.public.current_keeper_text
 
+    @property
+    def player_answer(self) -> str | None:
+        return self.public.player_answer
+
+    @property
+    def clarification_question(self) -> str | None:
+        return self.public.clarification_question
+
     def to_model_payload(self) -> dict[str, object]:
         return self.model_dump(mode="json")
 

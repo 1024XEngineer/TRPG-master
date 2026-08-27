@@ -93,8 +93,8 @@ from app.core.db import async_session_factory
 from app.core.engine import adjudication_engine_service, legacy_single_action_recovery
 from app.core.host_entry import (
     DeterministicHostEntryModel,
-    HostEntryDecision,
     HostEntryContext,
+    HostEntryDecision,
     HostEntryRouter,
     HostPublicContextProjector,
     HostPublicHistoryEntry,
@@ -552,6 +552,7 @@ _OWN_WAITING_STATUSES = {
     "awaiting_scene_consent",
 }
 _OWN_SUPERSEDE_STATUSES = {"needs_clarification", "retryable_failure"}
+_HOST_QUEUE_TERMINAL = {"completed", "failed", "cancelled", "discarded"}
 _host_drain_locks: dict[tuple[int, str], asyncio.Lock] = {}
 
 
@@ -1614,17 +1615,13 @@ async def _drain_host_action_queue(room_id: str) -> None:
                             error_reason=_turn_error_reason(exc),
                         )
                         continue
-                    await host_action_queue_service.discard(db, item)
-                    log_turn_failed(
+                    await _recover_keeper_queue_failure(
+                        db,
+                        item,
+                        websocket,
+                        exc,
                         room_id=room_id,
-                        stage="队列出队",
-                        code=_map_turn_error(exc)[0],
-                        correlation_id=item.client_action_id,
-                        error_type=type(exc).__name__,
-                        error_reason=_turn_error_reason(exc),
-                        exc=exc,
                     )
-                    await _send_turn_failed(websocket, item.client_action_id, exc)
                 finally:
                     with anyio.CancelScope(shield=True):
                         action_lock_manager.release(room_id, lock_token)
@@ -2176,7 +2173,7 @@ async def _send_completed_turn_message(
 
 async def _recover_persisted_turn_narration(
     db: AsyncSession,
-    websocket: WebSocket,
+    websocket: WebSocket | None,
     *,
     room_id: str,
     player_id: str,

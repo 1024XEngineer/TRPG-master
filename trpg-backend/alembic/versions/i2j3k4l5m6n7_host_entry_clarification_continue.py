@@ -15,6 +15,7 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     with op.batch_alter_table("host_action_queue") as batch_op:
         batch_op.add_column(sa.Column("continuation_text", sa.Text(), nullable=True))
+        batch_op.add_column(sa.Column("rule_request_json", sa.JSON(), nullable=True))
         batch_op.drop_constraint("ck_host_action_queue_status", type_="check")
         batch_op.create_check_constraint(
             "ck_host_action_queue_status",
@@ -25,7 +26,8 @@ def upgrade() -> None:
         batch_op.create_check_constraint(
             "ck_host_action_queue_execution_route",
             "execution_route IS NULL OR execution_route IN "
-            "('unresolved', 'direct_response', 'delegate_to_legacy', 'needs_clarification')",
+            "('unresolved', 'direct_response', 'rule_once', 'delegate_to_legacy', "
+            "'needs_clarification')",
         )
 
 
@@ -43,7 +45,7 @@ def downgrade() -> None:
     op.execute(
         sa.text(
             "UPDATE host_action_queue SET execution_route = 'unresolved' "
-            "WHERE execution_route = 'needs_clarification'"
+            "WHERE execution_route IN ('needs_clarification', 'rule_once')"
         )
     )
     op.execute(
@@ -67,4 +69,5 @@ def downgrade() -> None:
             "status IN ('queued', 'processing', 'retryable_failure', "
             "'completed', 'failed', 'cancelled', 'discarded')",
         )
+        batch_op.drop_column("rule_request_json")
         batch_op.drop_column("continuation_text")

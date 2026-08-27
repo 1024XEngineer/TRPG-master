@@ -1,6 +1,6 @@
 """Deterministic game-rule execution boundary."""
 
-# ruff: noqa: F401 -- this module intentionally re-exports the public engine API.
+
 
 from .adapters import InMemoryEngineStore
 from .adjudication import AdjudicationEngineService
@@ -9,8 +9,39 @@ from .capabilities import (
     audit_runtime_capabilities,
     require_runtime_capabilities,
 )
+from .conditions import (
+    ConditionMutation,
+    active_conditions,
+    apply_condition,
+    consume_condition,
+    has_active_condition,
+    remove_condition,
+)
 from .dice import DiceRoller, SequenceDiceSource, SystemDiceSource
 from .initialization import create_initial_game_state
+from .models import (
+    ActorCondition,
+    ActorResources,
+    ActorState,
+    AgendaItem,
+    AgendaSource,
+    CheckRun,
+    CompletedAction,
+    CompletedAdjudicationCommand,
+    ConditionExpiry,
+    DomainEvent,
+    EngineExecutionResult,
+    EngineRuntimeSnapshot,
+    GameState,
+    LocationKnowledge,
+    PendingCheckDecision,
+    RuleAgenda,
+    RuntimeTimeTask,
+    StateModifiedEvent,
+    TimePointOccurrence,
+    WorldTimePoint,
+    WorldTimeState,
+)
 from .navigation import effective_location_knowledge, resolve_location_target
 from .persistent_results import (
     CHARACTER_STATE_VALUES,
@@ -19,42 +50,24 @@ from .persistent_results import (
     committed_results_from_events,
     validate_persistent_effects,
 )
-from .models import (
-    AgendaItem,
-    AgendaSource,
-    ActorResources,
-    ActorState,
-    LocationKnowledge,
-    CheckRun,
-    WorldTimePoint,
-    WorldTimeState,
-    CompletedAction,
-    CompletedAdjudicationCommand,
-    DomainEvent,
-    EngineExecutionResult,
-    EngineRuntimeSnapshot,
-    GameState,
-    PendingCheckDecision,
-    RuleAgenda,
-    RuntimeTimeTask,
-    StateModifiedEvent,
-    TimePointOccurrence,
-)
 from .ports import EngineStore, EngineTransaction, RevisionConflictError
 from .service import RuleEngineService
 
 __all__ = [
-    "AgendaItem",
-    "AgendaSource",
-    "CompletedAction",
-    "CompletedAdjudicationCommand",
+    "CHARACTER_STATE_VALUES",
+    "OBJECT_STATE_VALUES",
+    "PUBLIC_STATE_KEYS",
+    "ActorCondition",
     "ActorResources",
     "ActorState",
-    "LocationKnowledge",
     "AdjudicationEngineService",
-    "WorldTimePoint",
-    "WorldTimeState",
+    "AgendaItem",
+    "AgendaSource",
     "CheckRun",
+    "CompletedAction",
+    "CompletedAdjudicationCommand",
+    "ConditionExpiry",
+    "ConditionMutation",
     "DiceRoller",
     "DomainEvent",
     "EngineExecutionResult",
@@ -63,24 +76,29 @@ __all__ = [
     "EngineTransaction",
     "GameState",
     "InMemoryEngineStore",
+    "LocationKnowledge",
     "PendingCheckDecision",
-    "RuleAgenda",
-    "RuntimeTimeTask",
     "RevisionConflictError",
-    "RuntimeCapabilityIssue",
+    "RuleAgenda",
     "RuleEngineService",
+    "RuntimeCapabilityIssue",
+    "RuntimeTimeTask",
     "SequenceDiceSource",
     "StateModifiedEvent",
-    "TimePointOccurrence",
     "SystemDiceSource",
+    "TimePointOccurrence",
+    "WorldTimePoint",
+    "WorldTimeState",
+    "active_conditions",
+    "apply_condition",
     "audit_runtime_capabilities",
+    "committed_results_from_events",
+    "consume_condition",
     "create_initial_game_state",
     "effective_location_knowledge",
+    "has_active_condition",
+    "remove_condition",
     "require_runtime_capabilities",
     "resolve_location_target",
-    "CHARACTER_STATE_VALUES",
-    "OBJECT_STATE_VALUES",
-    "PUBLIC_STATE_KEYS",
-    "committed_results_from_events",
     "validate_persistent_effects",
 ]

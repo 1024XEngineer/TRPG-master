@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Literal, NoReturn
 from uuid import uuid4
 
-from pydantic import JsonValue
+from pydantic import JsonValue, TypeAdapter
 
 from collaboration_framework.contracts import (
     AcceptResultOption,
@@ -23,12 +23,15 @@ from collaboration_framework.contracts import (
     AdjudicationRecovery,
     AdjudicationStatusView,
     AdvanceWorldTimeEffect,
+    CancelTimeTaskStep,
     CheckDecisionRequest,
     CheckRunView,
     CheckStep,
     ContractError,
+    CreateTimeTaskStep,
     EnterLocationEffect,
     GetAdjudicationStatusRequest,
+    InvokeRulesetActionStep,
     NarrationEvidence,
     PendingCheckOption,
     PostRollDecisionRequest,
@@ -142,6 +145,32 @@ class _SettlementRunner:
             state,
             effect,
             room_id=self._room_id,
+            request_id=self._request_id,
+            actor_id=self._actor_id,
+            offset=offset,
+        )
+
+    def validate_ruleset_action(
+        self,
+        runtime: EngineRuntimeSnapshot,
+        step: InvokeRulesetActionStep,
+    ) -> None:
+        self._service._validate_ruleset_action(runtime, step)
+
+    def apply_ruleset_action(
+        self,
+        runtime: EngineRuntimeSnapshot,
+        state: GameState,
+        step: InvokeRulesetActionStep,
+        *,
+        rule_id: str,
+        offset: int,
+    ) -> tuple[GameState, tuple[DomainEvent, ...]]:
+        return self._service._apply_ruleset_action(
+            runtime,
+            state,
+            step,
+            rule_id=rule_id,
             request_id=self._request_id,
             actor_id=self._actor_id,
             offset=offset,
@@ -718,6 +747,7 @@ class AdjudicationEngineService:
                     passed=True,
                     player_id=request.player_id,
                     prefix_events=(),
+                    allow_party_time_advance=allow_party_time_advance,
                     allow_party_scene_transition=allow_party_scene_transition,
                 )
                 new_state, events = final.state, final.events
@@ -1814,7 +1844,7 @@ class AdjudicationEngineService:
         adjudication: ActionAdjudication,
         passed: bool,
         check_run: CheckRun | None,
-    ) -> tuple[ActionEffect, ...]:
+    ) -> tuple[object, ...]:
         """Whose effects commit: the rule's if one owns this action, else the Agent's.
 
         #226 §5 gives a named rule `effect_authority: rule` — the Agent chose the
@@ -1877,6 +1907,7 @@ class AdjudicationEngineService:
         player_id: str,
         prefix_events: tuple[DomainEvent, ...],
         check_run: CheckRun | None = None,
+        allow_party_time_advance: bool = False,
         allow_party_scene_transition: bool = False,
     ) -> ActionFinalization:
         """Commit this action's effects and settle the Rules they triggered.
@@ -1931,6 +1962,8 @@ class AdjudicationEngineService:
             adjudication=adjudication,
             player_id=player_id,
             result=None,
+            allow_party_time_advance=allow_party_time_advance,
+            allow_party_scene_transition=allow_party_scene_transition,
         )
 
     def _settle_check(
@@ -2074,6 +2107,8 @@ class AdjudicationEngineService:
         adjudication: ActionAdjudication,
         player_id: str,
         result: SettlementResult | None,
+        allow_party_time_advance: bool = False,
+        allow_party_scene_transition: bool = False,
     ) -> ActionFinalization:
         """跑完父动作还欠的那部分，再把 Agenda 封存。
 
@@ -2093,6 +2128,8 @@ class AdjudicationEngineService:
                 runtime=runtime,
                 request_id=request_id,
                 actor_id=actor_id,
+                allow_party_time_advance=allow_party_time_advance,
+                allow_party_scene_transition=allow_party_scene_transition,
             )
         if not result.blocked and not completion_emitted:
             state, result = self._complete_parent_action(
@@ -2366,12 +2403,14 @@ class AdjudicationEngineService:
         settlement: RuleSettlement,
         state: GameState,
         events: list[DomainEvent],
-        effects: tuple[ActionEffect, ...],
+        effects: tuple[object, ...],
         *,
         runtime: EngineRuntimeSnapshot,
         request_id: str,
         actor_id: str,
-    ) -> tuple[GameState, SettlementResult, tuple[ActionEffect, ...]]:
+        allow_party_time_advance: bool = False,
+        allow_party_scene_transition: bool = False,
+    ) -> tuple[GameState, SettlementResult, tuple[object, ...]]:
         """执行一个效果 → 提交它的事件 → 立即结算该事件的规则 → 再下一个。
 
         返回停下时的 state、最后一次结算结果，以及**还没执行**的效果。
@@ -2380,6 +2419,14 @@ class AdjudicationEngineService:
         是规则输入，它们的规则也必须在第一个效果之前就位。
         """
 
+        effects = tuple(self._coerce_rule_operation(item) for item in effects)
+        self._validate_mixed_rule_operations(
+            runtime,
+            effects,
+            actor_id=actor_id,
+            allow_party_time_advance=allow_party_time_advance,
+            allow_party_scene_transition=allow_party_scene_transition,
+        )
         result = settlement.advance(state, events)
         if result.blocked:
             return result.state, result, effects
@@ -2400,6 +2447,52 @@ class AdjudicationEngineService:
             if result.blocked:
                 return state, result, effects[index + 1 :]
         return state, result, ()
+
+    @staticmethod
+    def _coerce_rule_operation(item: object) -> object:
+        """Restore typed operations after an Agenda JSON round-trip."""
+
+        if not isinstance(item, dict):
+            return item
+        kind = item.get("kind")
+        if kind == "invoke_ruleset_action":
+            return InvokeRulesetActionStep.model_validate(item)
+        if kind == "create_time_task":
+            return CreateTimeTaskStep.model_validate(item)
+        if kind == "cancel_time_task":
+            return CancelTimeTaskStep.model_validate(item)
+        if "type" in item:
+            return TypeAdapter(ActionEffect).validate_python(item)
+        return item
+
+    def _validate_mixed_rule_operations(
+        self,
+        runtime: EngineRuntimeSnapshot,
+        effects: tuple[object, ...],
+        *,
+        actor_id: str,
+        allow_party_time_advance: bool = False,
+        allow_party_scene_transition: bool = False,
+    ) -> None:
+        """Preflight a mixed rule walk before its first state mutation."""
+
+        ordinary = tuple(
+            item
+            for item in effects
+            if not isinstance(item, (InvokeRulesetActionStep, CreateTimeTaskStep, CancelTimeTaskStep))
+        )
+        if ordinary:
+            self._validate_effect_sequence(
+                runtime,
+                ordinary,
+                allow_party_time_advance=allow_party_time_advance,
+                allow_party_scene_transition=allow_party_scene_transition,
+            )
+        for item in effects:
+            if isinstance(item, InvokeRulesetActionStep):
+                self._validate_ruleset_action(
+                    runtime, item, rule_id="rule_walk", actor_id=actor_id
+                )
 
     def _complete_parent_action(
         self,
@@ -2461,7 +2554,7 @@ class AdjudicationEngineService:
         self,
         state: GameState,
         events: list[DomainEvent],
-        effects: tuple[ActionEffect, ...],
+        effects: tuple[object, ...],
         *,
         runtime: EngineRuntimeSnapshot,
         request_id: str,
@@ -2513,7 +2606,7 @@ class AdjudicationEngineService:
         self,
         runtime: EngineRuntimeSnapshot,
         state: GameState,
-        effect: ActionEffect,
+        effect: ActionEffect | InvokeRulesetActionStep,
         *,
         room_id: str,
         request_id: str,
@@ -2529,6 +2622,16 @@ class AdjudicationEngineService:
         recording one.
         """
 
+        if isinstance(effect, InvokeRulesetActionStep):
+            return self._apply_ruleset_action(
+                runtime,
+                state,
+                effect,
+                rule_id="parent_action",
+                request_id=request_id,
+                actor_id=actor_id,
+                offset=offset,
+            )
         result = effect_registry.apply(
             effect,
             effect_registry.ApplyContext(
@@ -2571,6 +2674,116 @@ class AdjudicationEngineService:
                 )
             )
         return result.state, tuple(emitted)
+
+    @staticmethod
+    def _ruleset_operation_key(
+        runtime: EngineRuntimeSnapshot,
+        step: InvokeRulesetActionStep,
+        *,
+        rule_id: str,
+        actor_id: str,
+    ) -> str:
+        return f"{runtime.module_content.world_ref}:{rule_id}:{step.id}:{actor_id}"
+
+    def _validate_ruleset_action(
+        self,
+        runtime: EngineRuntimeSnapshot,
+        step: InvokeRulesetActionStep,
+        *,
+        rule_id: str = "validation",
+        actor_id: str | None = None,
+    ) -> None:
+        """Check a registered action and its parameters without committing it."""
+
+        action = ruleset_registry.world_action_for(
+            runtime.module_content.world_ref, step.action_id
+        )
+        if action is None or not callable(action):
+            self._reject_validation(
+                "RULESET_ACTION_NOT_REGISTERED",
+                repairability="hard_reject",
+                fault="engine",
+                player_safe_reason="规则引擎无法处理当前规则动作",
+                internal_reason=(
+                    f"{step.action_id!r} is not registered for "
+                    f"world_ref={runtime.module_content.world_ref!r}"
+                ),
+                classification_coverage="rule_effects_excluded",
+            )
+        bound_actor_id = actor_id or next(iter(runtime.game_state.actors), "")
+        context = ruleset_registry.RulesetActionContext(
+            state=runtime.game_state,
+            actor_id=bound_actor_id,
+            actor_binding=step.actor_binding,
+            parameters=step.parameters,
+            request_id="validation",
+            operation_key=self._ruleset_operation_key(
+                runtime, step, rule_id=rule_id, actor_id=bound_actor_id
+            ),
+        )
+        try:
+            action(context)
+        except ruleset_registry.RulesetActionError as exc:
+            self._reject_validation(
+                exc.code,
+                repairability="auto_repairable",
+                fault="engine",
+                player_safe_reason="规则动作参数或目标无效",
+                internal_reason=str(exc),
+                classification_coverage="rule_effects_excluded",
+            )
+        except (ValueError, TypeError) as exc:
+            self._reject_validation(
+                "RULESET_ACTION_INVALID_PARAMETERS",
+                repairability="auto_repairable",
+                fault="engine",
+                player_safe_reason="规则动作参数无效",
+                internal_reason=str(exc),
+                classification_coverage="rule_effects_excluded",
+            )
+
+    def _apply_ruleset_action(
+        self,
+        runtime: EngineRuntimeSnapshot,
+        state: GameState,
+        step: InvokeRulesetActionStep,
+        *,
+        rule_id: str,
+        request_id: str,
+        actor_id: str,
+        offset: int,
+    ) -> tuple[GameState, tuple[DomainEvent, ...]]:
+        self._validate_ruleset_action(
+            runtime, step, rule_id=rule_id, actor_id=actor_id
+        )
+        action = ruleset_registry.require_world_action(
+            runtime.module_content.world_ref, step.action_id
+        )
+        result = action(
+            ruleset_registry.RulesetActionContext(
+                state=state,
+                actor_id=actor_id,
+                actor_binding=step.actor_binding,
+                parameters=step.parameters,
+                request_id=request_id,
+                operation_key=self._ruleset_operation_key(
+                    runtime, step, rule_id=rule_id, actor_id=actor_id
+                ),
+            )
+        )
+        if result.event_type is None:
+            return result.state, ()
+        return result.state, (
+            self._event_from_state(
+                result.state,
+                room_id=runtime.game_state.room_id,
+                offset=offset,
+                request_id=request_id,
+                actor_id=actor_id,
+                event_type=result.event_type,
+                payload=result.payload,
+            ),
+        )
 
     @staticmethod
     def _run_view(check_run: CheckRun):

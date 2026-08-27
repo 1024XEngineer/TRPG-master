@@ -2,8 +2,8 @@
 
 These two phases are registration-and-static-checking only. The tests that
 matter most here are the ones pinning what must *not* have changed:
-`invoke_ruleset_action` still has no executor, and a module using it still
-publishes.
+`invoke_ruleset_action` is executable only when its world action is registered,
+and unknown action ids still fail explicitly at runtime.
 """
 
 from __future__ import annotations
@@ -20,7 +20,6 @@ SUSPENDING_KINDS = {
     "adjudicated_check",
     "presentation",
     "await_player_input",
-    "invoke_ruleset_action",
     "create_npc_action_opportunity",
 }
 
@@ -48,7 +47,10 @@ class RegistryCompletenessTests(unittest.TestCase):
         for kind, registration in rule_step_registry.STEP_KINDS.items():
             behaviors.setdefault(registration.walk_behavior, set()).add(kind)
         self.assertEqual(behaviors["terminal"], {"finish"})
-        self.assertEqual(behaviors["produces_effect_and_continues"], {"effect"})
+        self.assertEqual(
+            behaviors["produces_effect_and_continues"],
+            {"effect", "invoke_ruleset_action"},
+        )
         self.assertEqual(
             behaviors["schedules_time_task_and_continues"], SCHEDULING_KINDS
         )
@@ -91,7 +93,6 @@ class AgendaStatusTests(unittest.TestCase):
         for kind in (
             "presentation",
             "await_player_input",
-            "invoke_ruleset_action",
             "create_npc_action_opportunity",
         ):
             with self.subTest(kind=kind):
@@ -198,14 +199,15 @@ class ActorBindingTests(unittest.TestCase):
 
 
 class WorldActionRegistryTests(unittest.TestCase):
-    def test_the_table_is_empty(self) -> None:
-        """Empty is the correct state, not an unfinished one — see the module
-        docstring. This test exists so that adding a name is a deliberate act
-        that has to update it."""
+    def test_the_table_contains_the_executable_condition_action(self) -> None:
 
-        self.assertEqual(world_action_registry.SUPPORTED_WORLD_ACTIONS, frozenset())
+        self.assertEqual(
+            world_action_registry.SUPPORTED_WORLD_ACTIONS,
+            frozenset({"coc7.apply_condition"}),
+        )
 
     def test_no_action_id_is_currently_executable(self) -> None:
+        self.assertTrue(world_action_registry.is_registered("coc7.apply_condition"))
         for action_id in ("coc7e.sanity_check", "attack", "anything"):
             with self.subTest(action_id=action_id):
                 self.assertFalse(world_action_registry.is_registered(action_id))

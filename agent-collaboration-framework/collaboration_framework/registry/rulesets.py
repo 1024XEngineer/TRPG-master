@@ -10,8 +10,7 @@ This is a static registry shipped with the Engine. It is intentionally not a
 plugin loader and does not import the Engine, persistence, or module content.
 Adding an entry is a claim that the corresponding runtime capability exists;
 the CoC7 adapter therefore registers only the already executable
-``coc7.sanity`` profile in this PR. Outcome handlers and world actions remain
-empty until their executors and recovery paths land in later PRs.
+``coc7.sanity`` profile and the executable ``coc7.apply_condition`` action.
 """
 
 from __future__ import annotations
@@ -26,6 +25,143 @@ from .check_profiles import COC7_CHECK_PROFILES, CheckProfileRegistration
 
 class RulesetRegistryError(LookupError):
     """Raised when a world or a world-owned capability is not registered."""
+
+
+class RulesetActionError(ValueError):
+    """A registered action rejected its parameters or current state."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+@dataclass(frozen=True)
+class RulesetActionContext:
+    state: Any
+    actor_id: str
+    actor_binding: str
+    parameters: Mapping[str, Any]
+    request_id: str
+    operation_key: str
+
+
+@dataclass(frozen=True)
+class RulesetActionResult:
+    state: Any
+    event_type: str | None = None
+    payload: dict[str, Any] = field(default_factory=dict)
+
+
+RulesetAction = Any
+
+
+COC7_CONDITION_IDS: frozenset[str] = frozenset(
+    {
+        "unconscious",
+        "unconscious_until_night",
+        "arrested_during_prohibition",
+        "drowning",
+        "full_frog_transformation",
+        "happiness_vision_skip_one_turn",
+        "james_withdrawal_symptoms",
+        "periodic_happiness_hallucinations",
+        "pond_water_craving",
+        "psychological_dependency",
+        "converted_staff_coordination_bonus_10",
+        "garden_spike_wound",
+        "giant_spider_bite",
+        "injured_foot",
+        "mythos_book_obsession_if_insane",
+        "passage_fall",
+    }
+)
+
+
+def _coc7_apply_condition(context: RulesetActionContext) -> RulesetActionResult:
+    if context.actor_binding != "actor":
+        raise RulesetActionError(
+            "RULESET_ACTION_BINDING_UNSUPPORTED",
+            "coc7.apply_condition 目前只支持 actor binding",
+        )
+    condition_id = context.parameters.get("condition")
+    if not isinstance(condition_id, str) or not condition_id.strip():
+        raise RulesetActionError(
+            "RULESET_ACTION_INVALID_PARAMETERS",
+            "coc7.apply_condition 必须提供非空 condition",
+        )
+    if condition_id not in COC7_CONDITION_IDS:
+        raise RulesetActionError(
+            "RULESET_CONDITION_UNKNOWN",
+            f"未注册的 CoC7 condition: {condition_id}",
+        )
+    reason = context.parameters.get("reason", "ruleset_action")
+    if not isinstance(reason, str) or not reason.strip():
+        raise RulesetActionError(
+            "RULESET_ACTION_INVALID_PARAMETERS",
+            "condition reason 必须是非空字符串",
+        )
+    expiry_value = context.parameters.get("expiry", context.parameters.get("lifecycle_ref"))
+    expiry = None
+    if expiry_value is not None:
+        if not isinstance(expiry_value, dict):
+            raise RulesetActionError(
+                "RULESET_ACTION_INVALID_PARAMETERS",
+                "expiry 必须是结构化对象",
+            )
+        try:
+            kind = expiry_value.get("kind")
+            reference_id = expiry_value.get("reference_id")
+            if kind not in {"time_point", "time_task"} or not isinstance(
+                reference_id, str
+            ) or not reference_id.strip():
+                raise ValueError("invalid expiry")
+            expiry = {"kind": kind, "reference_id": reference_id}
+        except ValueError as exc:
+            raise RulesetActionError(
+                "RULESET_ACTION_INVALID_PARAMETERS",
+                "expiry 必须包含合法的 kind/reference_id",
+            ) from exc
+    actor = context.state.actors.get(context.actor_id)
+    if actor is None:
+        raise RulesetActionError("RULESET_ACTION_TARGET_UNKNOWN", "规则动作目标角色不存在")
+    records = list(actor.condition_states)
+    existing = next(
+        (item for item in records if item.application_key == context.operation_key),
+        None,
+    )
+    if existing is not None or any(
+        item.condition_id == condition_id and item.status == "active" for item in records
+    ):
+        return RulesetActionResult(state=context.state)
+    record = {
+        "condition_id": condition_id,
+        "source": "coc7.apply_condition",
+        "application_reason": reason,
+        "application_key": context.operation_key,
+        "status": "active",
+        "expiry": expiry,
+    }
+    actor_payload = actor.model_dump(mode="python")
+    actor_payload["condition_states"] = [*records, record]
+    actor_payload["conditions"] = list(
+        dict.fromkeys([*(item.condition_id for item in records), condition_id])
+    )
+    updated_actor = actor.__class__.model_validate(actor_payload)
+    actors = dict(context.state.actors)
+    actors[context.actor_id] = updated_actor
+    updated_state = context.state.model_copy(update={"actors": actors}, deep=True)
+    return RulesetActionResult(
+        state=updated_state,
+        event_type="actor.condition_applied",
+        payload={
+            "actor_id": context.actor_id,
+            "condition_id": condition_id,
+            "source": "coc7.apply_condition",
+            "application_reason": reason,
+            "application_key": context.operation_key,
+            "expiry": expiry,
+        },
+    )
 
 
 @dataclass(frozen=True)
@@ -43,7 +179,7 @@ class RulesetAdapter:
         default_factory=dict
     )
     check_outcome_handlers: Mapping[str, Any] = field(default_factory=dict)
-    world_actions: Mapping[str, Any] = field(default_factory=dict)
+    world_actions: Mapping[str, RulesetAction] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.world_ref.strip():
@@ -162,6 +298,7 @@ class RulesetAdapterRegistry:
 COC7_ADAPTER = RulesetAdapter(
     world_ref="coc-7e",
     check_profiles=COC7_CHECK_PROFILES,
+    world_actions={"coc7.apply_condition": _coc7_apply_condition},
 )
 
 DEFAULT_RULESET_REGISTRY = RulesetAdapterRegistry((COC7_ADAPTER,))
@@ -207,8 +344,12 @@ def require_world_action(world_ref: str, action_id: str) -> Any:
 
 __all__ = [
     "COC7_ADAPTER",
+    "COC7_CONDITION_IDS",
     "DEFAULT_RULESET_REGISTRY",
     "RULESET_ADAPTERS",
+    "RulesetActionContext",
+    "RulesetActionError",
+    "RulesetActionResult",
     "RulesetAdapter",
     "RulesetAdapterRegistry",
     "RulesetRegistryError",

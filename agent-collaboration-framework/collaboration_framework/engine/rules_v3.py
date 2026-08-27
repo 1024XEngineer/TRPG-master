@@ -21,6 +21,7 @@ from collaboration_framework.contracts import (
     CheckStep,
     ConditionExpr,
     ContractError,
+    EffectStep,
     EventTriggerSpec,
     ModuleContentV3,
     NotCondition,
@@ -197,7 +198,12 @@ def walk_rule_from(rule: RuleSpecV3, step_id: str) -> RuleWalk:
             walk.completed = True
             return walk
         if behavior == "produces_effect_and_continues":
-            walk.effects.append(step.effect)
+            # `invoke_ruleset_action` is a rule operation, not an Agent effect,
+            # but it shares this ordered stream so event barriers and recovery
+            # preserve the authored sequence.
+            walk.effects.append(
+                step.effect if isinstance(step, EffectStep) else step
+            )
             cursor = step.next_step_id
             continue
         if behavior == "schedules_time_task_and_continues":

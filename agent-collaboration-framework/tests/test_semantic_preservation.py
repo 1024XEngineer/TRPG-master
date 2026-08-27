@@ -10,8 +10,8 @@ from collaboration_framework.contracts import (
     ActionTarget,
     ChangeEntityStateEffect,
     ConsumeEntityEffect,
-    EnterLocationEffect,
     EnsureRuntimeEntityEffect,
+    EnterLocationEffect,
     ModuleContentV3,
     MoveEntityEffect,
     NarrativeOnlyEffect,
@@ -21,6 +21,7 @@ from collaboration_framework.contracts import (
     RuleDecisionRef,
     SkillCheckCandidate,
     ValidationFeedback,
+    VisibleEntity,
 )
 from collaboration_framework.engine import (
     ActorState,
@@ -130,6 +131,100 @@ def test_visible_target_id_correction_is_preserved() -> None:
 
     assert result.status == "preserved"
     assert result.reason_code == "TARGET_ID_CORRECTED"
+
+
+def test_missing_object_state_can_narrow_to_generic_check() -> None:
+    """只有没有角色状态能力的物体目标才可收窄为普通行动。"""
+
+    _, _, projector = runtime()
+    view = asyncio.run(projector.project(player_input(utterance="观察")))
+    rope = VisibleEntity(
+        id="restraint_rope",
+        kind="object",
+        name="细绳",
+        description="捆住双手的细绳",
+    )
+    view = view.model_copy(
+        update={
+            "scene": view.scene.model_copy(
+                update={"visible_entities": (*view.scene.visible_entities, rope)}
+            )
+        },
+        deep=True,
+    )
+    original = ActionAdjudication(
+        request_id="persistent-repair",
+        source_revision="0",
+        actor_id="pc_1",
+        summary="使劲挣脱束缚",
+        target=ActionTarget(kind="entity", id="restraint_rope"),
+        method=ActionMethod(family="restrain", description="使劲挣脱束缚"),
+        persistence_intent="character_state",
+        check=NoAdjudicationCheck(),
+    )
+    repaired = original.model_copy(
+        update={
+            "method": ActionMethod(family="action", description="使劲挣脱束缚"),
+            "persistence_intent": "none",
+        },
+        deep=True,
+    )
+    result = compare_repair_semantics(
+        player_input=player_input(utterance="使劲挣脱束缚"),
+        plan_goal="使劲挣脱束缚",
+        step=ActionPlanStep(kind="action", semantic_goal="使劲挣脱束缚"),
+        original=original,
+        repaired=repaired,
+        validation_feedback=ValidationFeedback(
+            status="rejected",
+            code="PERSISTENT_EFFECT_REQUIRED",
+            repairability="auto_repairable",
+            fault="agent",
+            player_safe_reason="当前候选需要机械修正",
+            generic_fallback_allowed=True,
+        ),
+        player_view=view,
+    )
+
+    assert result.status == "narrowed"
+    assert result.reason_code == "PERSISTENCE_INTENT_NARROWED"
+
+
+def test_npc_persistent_intent_cannot_be_downgraded() -> None:
+    """NPC 的角色状态行动不能借收窄路径绕过持久结果完整性。"""
+
+    _, _, projector = runtime()
+    view = asyncio.run(projector.project(player_input(utterance=f"查看{TARGET_LABEL}")))
+    original = _action(target_id=TARGET, family="knock_out").model_copy(
+        update={"persistence_intent": "character_state"},
+        deep=True,
+    )
+    repaired = original.model_copy(
+        update={
+            "method": ActionMethod(family="action", description=f"查看{TARGET_LABEL}"),
+            "persistence_intent": "none",
+        },
+        deep=True,
+    )
+    result = compare_repair_semantics(
+        player_input=player_input(utterance=f"击晕{TARGET_LABEL}"),
+        plan_goal=f"击晕{TARGET_LABEL}",
+        step=ActionPlanStep(kind="action", semantic_goal=f"击晕{TARGET_LABEL}"),
+        original=original,
+        repaired=repaired,
+        validation_feedback=ValidationFeedback(
+            status="rejected",
+            code="PERSISTENT_EFFECT_REQUIRED",
+            repairability="auto_repairable",
+            fault="agent",
+            player_safe_reason="当前候选需要机械修正",
+            generic_fallback_allowed=False,
+        ),
+        player_view=view,
+    )
+
+    assert result.status == "requires_clarification"
+    assert result.reason_code == "PERSISTENCE_INTENT_CHANGED"
 
 
 def test_target_id_correction_can_update_matching_effect_reference() -> None:

@@ -17,8 +17,8 @@ from collaboration_framework.contracts import (
     AdjudicationValidationError,
     AdvanceWorldTimeEffect,
     CancelActionPlanRequest,
-    CheckDecisionRequest,
     ChangeEntityStateEffect,
+    CheckDecisionRequest,
     ContractError,
     EnterLocationEffect,
     GetAdjudicationStatusRequest,
@@ -478,6 +478,41 @@ class PersistentEmptyAdjudicator(PersistentRepairAdjudicator):
             method=ActionMethod(family="knock_out", description="用撬棍砸晕他"),
             persistence_intent="character_state",
             check=NoAdjudicationCheck(),
+        )
+
+
+class PersistentFallbackAdjudicator(RecordingAdjudicator):
+    """首次声明物体不存在角色状态，重试时收窄为保留检定的普通行动。"""
+
+    async def adjudicate(self, context):
+        self.contexts.append(context)
+        check = RequiredAdjudicationCheck(
+            candidates=(
+                SkillCheckCandidate(
+                    candidate_id=SKILL,
+                    skill_id=SKILL,
+                    difficulty="regular",
+                    method_summary="挣脱束缚",
+                    player_safe_reason="检验能否凭力量挣脱",
+                ),
+            )
+        )
+        return ActionAdjudication(
+            request_id="untrusted",
+            source_revision="untrusted",
+            actor_id="untrusted",
+            summary="使劲挣脱束缚",
+            target=ActionTarget(kind="entity", id="study_window"),
+            method=ActionMethod(
+                family="restrain" if context.previous_rejection is None else "action",
+                description="使劲挣脱束缚",
+            ),
+            persistence_intent=(
+                "character_state" if context.previous_rejection is None else "none"
+            ),
+            check=check,
+            success_effects=(NarrativeOnlyEffect(),),
+            failure_effects=(NarrativeOnlyEffect(),),
         )
 
 
@@ -1290,6 +1325,30 @@ async def test_engine_rejection_is_repaired_once_instead_of_stopping_the_plan() 
     # The repair reuses the frozen step identity; nothing is committed twice.
     assert len({context.step_request_id for context in step_two}) == 1
     assert len(engine_store.inspect_domain_events("room_01")) == 2
+
+
+@pytest.mark.asyncio
+async def test_missing_persistent_state_falls_back_while_preserving_check() -> None:
+    """没有角色状态的物体目标应继续进入原有技能检定，而不是澄清。"""
+
+    service, adjudicator, _, _, _ = orchestrator(
+        adjudicator=PersistentFallbackAdjudicator("world"),
+        start="kimball_study",
+    )
+    result = await service.start_or_resume(
+        player_input(utterance="使劲挣脱束缚"),
+        plan=ActionPlan(
+            goal="使劲挣脱束缚",
+            steps=(ActionPlanStep(kind="action", semantic_goal="使劲挣脱束缚"),),
+        ),
+    )
+
+    assert result.run.status == "waiting_for_player"
+    assert len(adjudicator.contexts) == 2
+    assert result.run.steps[0].repair_attempts == 1
+    assert result.run.steps[0].last_validation_code == "PERSISTENT_EFFECT_REQUIRED"
+    assert result.run.steps[0].adjudication is not None
+    assert result.run.steps[0].adjudication.persistence_intent == "none"
 
 
 @pytest.mark.asyncio

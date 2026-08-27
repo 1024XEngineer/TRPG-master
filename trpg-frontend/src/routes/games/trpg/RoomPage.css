@@ -319,6 +319,15 @@
   letter-spacing: 0.04em;
 }
 
+/* 使用独立的语义颜色区分守秘人和 NPC，避免与玩家发送者混淆。 */
+.room-play__message--narration .room-play__sender {
+  color: #8a5a2b;
+}
+
+.room-play__message--npc .room-play__sender {
+  color: #3f6d70;
+}
+
 .room-play__message--self .room-play__sender {
   margin-right: 0.15rem;
   color: #596744;

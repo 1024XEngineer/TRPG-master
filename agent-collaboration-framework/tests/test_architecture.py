@@ -138,13 +138,15 @@ class ArchitectureTests(unittest.TestCase):
         )
         self.assertTrue(HostAgentContext.model_fields)
         self.assertTrue(Intent.model_fields)
-        self.assertEqual(PROMPT_VERSION, "trpg-host-intent-v6")
+        self.assertEqual(PROMPT_VERSION, "trpg-host-intent-v7")
         self.assertEqual(TURN_PLANNER_PROMPT_VERSION, "trpg-turn-planner-v2")
         planning = turn_planning_instructions(ActionPlanPolicy())
         self.assertIn("公开地点、人物、物件名称或别名", planning)
         self.assertIn("泛化成“眼前的人”", planning)
         self.assertTrue(host_turn_decision_instructions(ActionPlanPolicy()))
-        self.assertTrue(current_step_adjudication_instructions())
+        adjudication_prompt = current_step_adjudication_instructions()
+        self.assertIn("PERSISTENT_EFFECT_REQUIRED", adjudication_prompt)
+        self.assertIn("persistence_intent 收窄为", adjudication_prompt)
 
     def test_engine_does_not_import_host(self) -> None:
         for path in (PACKAGE / "engine").rglob("*.py"):

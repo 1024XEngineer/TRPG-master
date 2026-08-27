@@ -206,6 +206,54 @@ def _target_kinds_matching(
     return frozenset(kind for kind, hit in matches.items() if hit)
 
 
+def _target_persistent_capability(
+    runtime: EngineRuntimeSnapshot,
+    target_id: str,
+) -> tuple[str | None, frozenset[str] | None]:
+    """返回目标的真实类型及模组声明的可写状态键。
+
+    该能力快照只在 Host 处理持久结果拒绝时使用；不把隐藏状态投影给模型，
+    也不替模型决定最终效果。运行时临时实体没有预声明状态键，视为不可写。
+    """
+
+    item = runtime.game_state.item_instances.get(target_id)
+    module_entity = next(
+        (
+            entity
+            for entity in runtime.module_content.entities
+            if entity.id == target_id
+            or (item is not None and entity.id == item.definition_id)
+        ),
+        None,
+    )
+    if item is not None:
+        # 物品实例的 state.values 是运行时权威状态；必须与模块初始声明合并，
+        # 否则已被打开/锁定/损坏的物品会被误判为没有状态位而错误降级。
+        state_keys = set(item.state.values)
+        state_keys.update(
+            runtime.game_state.public_entity_state_keys.get(target_id, ())
+        )
+        if module_entity is not None:
+            state_keys.update(module_entity.state)
+        return "object", frozenset(state_keys)
+    if module_entity is not None:
+        return module_entity.kind, frozenset(module_entity.state)
+    if target_id in runtime.game_state.runtime_entities:
+        payload = runtime.game_state.runtime_entities[target_id]
+        kind = payload.get("kind")
+        return (kind if kind in {"npc", "object"} else "object"), frozenset()
+    if target_id in runtime.game_state.actors:
+        return "actor", frozenset(runtime.game_state.actors[target_id].state)
+    if (
+        target_id in runtime.canon_location_ids
+        or target_id in runtime.game_state.runtime_locations
+    ):
+        return "location", None
+    if target_id in runtime.canon_information_ids:
+        return "information", None
+    return None, None
+
+
 def _normalize_target_kind(
     runtime: EngineRuntimeSnapshot,
     adjudication: ActionAdjudication,
@@ -259,6 +307,7 @@ class AdjudicationEngineService:
         player_safe_reason: str,
         internal_reason: str | None = None,
         classification_coverage: ClassificationCoverage = "partial_validation_failure",
+        generic_fallback_allowed: bool = False,
     ) -> NoReturn:
         raise AdjudicationValidationError(
             ValidationResult(
@@ -267,6 +316,7 @@ class AdjudicationEngineService:
                 repairability=repairability,
                 fault=fault,
                 player_safe_reason=player_safe_reason,
+                generic_fallback_allowed=generic_fallback_allowed,
                 classification_coverage=classification_coverage,
                 internal_reason=internal_reason,
             )
@@ -1463,13 +1513,32 @@ class AdjudicationEngineService:
         else:
             # 自由行动的完整性必须在创建待检定、掷骰或写入事件之前完成；规则路径
             # 的效果由模组拥有，因此仍允许模型 success_effects 为空。
-            persistent_problem = validate_persistent_effects(adjudication)
+            target_kind, target_state_keys = _target_persistent_capability(
+                runtime,
+                adjudication.target.id,
+            )
+            persistent_problem = validate_persistent_effects(
+                adjudication,
+                target_kind=target_kind,
+                target_state_keys=target_state_keys,
+            )
             if persistent_problem is not None:
+                if persistent_problem.allow_generic_fallback:
+                    # 只记录可降级候选；原始裁决仍然拒绝，最终是否收窄由 Host
+                    # 的语义保持检查决定，Engine 不替模型改写意图。
+                    logger.info(
+                        "persistent_effect_generic_fallback_candidate",
+                        extra={
+                            "target_kind": target_kind,
+                            "persistence_intent": adjudication.persistence_intent,
+                        },
+                    )
                 self._reject_validation(
                     persistent_problem.code,
                     repairability="auto_repairable",
                     fault="agent",
                     player_safe_reason=persistent_problem.player_safe_reason,
+                    generic_fallback_allowed=persistent_problem.allow_generic_fallback,
                 )
         self._validate_effect_sequence(
             runtime,

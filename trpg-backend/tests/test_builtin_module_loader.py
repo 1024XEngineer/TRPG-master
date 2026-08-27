@@ -6,7 +6,7 @@ from copy import deepcopy
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.seed import (
@@ -15,7 +15,7 @@ from app.core.seed import (
     SILVER_LOCK_MODULE_ID,
     SILVER_LOCK_SCENARIO_ID,
 )
-from app.models.content import Scenario
+from app.models.content import ModuleAsset, Scenario
 from app.models.engine import ModuleVersion
 from app.models.room import Room
 from app.service.builtin_module_loader import (
@@ -49,6 +49,33 @@ async def test_all_builtin_modules_load_idempotently(db_session: AsyncSession) -
     assert scenario.players_min == scenario.players_max == 1
     assert version is not None
     assert version.content_schema_version == 3
+
+
+async def test_paper_chase_npc_portraits_are_seeded_idempotently(
+    db_session: AsyncSession,
+) -> None:
+    """《追书人》发布会写入五个 NPC 头像，重复发布不增加记录。"""
+
+    before = list(
+        await db_session.scalars(
+            select(ModuleAsset).where(ModuleAsset.asset_type == "npc_portrait")
+        )
+    )
+    await db_session.commit()
+    await load_builtin_modules(db_session)
+    after = list(
+        await db_session.scalars(
+            select(ModuleAsset).where(ModuleAsset.asset_type == "npc_portrait")
+        )
+    )
+    assert len(before) == len(after) == 5
+    assert {asset.entity_id for asset in after} == {
+        "thomas",
+        "cemetery_figure",
+        "lyla",
+        "melodias",
+        "hilda",
+    }
 
 
 async def test_silver_lock_rejects_changed_immutable_version(

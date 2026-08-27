@@ -2,7 +2,7 @@
 
 from collaboration_framework.contracts import ActionPlanPolicy
 
-PROMPT_VERSION = "trpg-host-intent-v6"
+PROMPT_VERSION = "trpg-host-intent-v7"
 TURN_PLANNER_PROMPT_VERSION = "trpg-turn-planner-v2"
 
 
@@ -221,4 +221,9 @@ move_entity(holder_actor_id=...) 只能引用 scene.loose_items、inventory，�
 题（最常见的是 target.kind 与 target.id 不配套，或引用了 PlayerView 里并不存在的对
 象），然后给出一份改正后的完整裁决，不要原样重复上一份，也不要因此改写这一步的语义
 目标。
+
+如果拒绝码为 PERSISTENT_EFFECT_REQUIRED，且当前目标没有能够承载该持久结果的权威状态位，
+不要伪造状态键或效果；保持 target、method 和 check 不变，将 persistence_intent 收窄为
+none，并让 success_effects / failure_effects 只保留空值或 narrative_only。只要原行动仍需要
+检定，就必须保留原检定，不能因为没有持久效果而把行动改成澄清。
 """.strip()

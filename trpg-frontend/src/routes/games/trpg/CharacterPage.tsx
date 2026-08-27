@@ -223,6 +223,9 @@ export default function CharacterPage() {
     (location.state as { fromCharacterReady?: boolean } | null)?.fromCharacterReady
   )
   const characterPageRef = useRef<HTMLDivElement>(null)
+  const roomId = useRoomStore((s) => s.roomId)
+  const characterId = useRoomStore((s) => s.characterId)
+  const setCharacterId = useRoomStore((s) => s.setCharacterId)
 
   // 建卡规则目录（职业/技能/属性）改从后端 GET /systems/{systemId}/ruleset
   // 拿（issue #84 S3），职业网格/技能列表在数据到达前先显示 loading。
@@ -284,8 +287,6 @@ export default function CharacterPage() {
   // 有 characterId 就以后端那份为准覆盖表单，清掉浏览器缓存也照样能继续编辑。
   useEffect(() => {
     if (!ruleset) return
-    const roomId = useRoomStore.getState().roomId
-    const characterId = useRoomStore.getState().characterId
     // 卡库宿主没有房间，也没有 characterId；读的是那张卡库卡，摊平成向导已经
     // 会读的形状后走同一条水合路径（属性 → 权威 preview 反推技能点 → 填表单）。
     const load = templateHostId
@@ -324,7 +325,10 @@ export default function CharacterPage() {
         // 就会把技能点清空覆盖回后端。所以改成先算后填：失败就整体不水合，
         // 退回本地缓存/空白表单，跟"压根没读回来"是同一种一致状态。
         const view = await previewCharacter({
-          attributes: savedAttrs,
+          // 卡库播种会清除上一局的幸运值，但技能点预算和技能基础值都不依赖
+          // LUCK。仅为这次反推提供合法占位值；表单仍使用 savedAttrs，要求玩家
+          // 在本局重新投掷幸运。
+          attributes: { LUCK: 50, ...savedAttrs },
           occupationId: matched?.id ?? null,
           skills: saved.skills ?? {},
           occupationChoiceSkillIds: saved.occupationChoiceSkillIds ?? null,
@@ -402,7 +406,7 @@ export default function CharacterPage() {
         // 读不回来（比如还没建过草稿）就沿用本地缓存/空白表单，不打断建卡。
       })
     return () => { cancelled = true }
-  }, [ruleset, templateHostId])
+  }, [ruleset, templateHostId, roomId, characterId])
 
   // ruleset 到达后，把缺失的属性补上默认值。
   //
@@ -728,8 +732,6 @@ export default function CharacterPage() {
 
   const derived = useMemo(() => normalizeDerivedStats(preview?.derivedStats), [preview])
 
-  const roomId = useRoomStore((s) => s.roomId)
-  const setCharacterId = useRoomStore((s) => s.setCharacterId)
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
   const [validationAttempted, setValidationAttempted] = useState(false)
@@ -1251,8 +1253,6 @@ export default function CharacterPage() {
       const characterId = await createCharacterDraft(roomId, templateId)
       setCharacterId(characterId)
       setLibraryOpen(false)
-      // 房间副本的幸运值已由服务端清除，必须回到向导让玩家手动掷本局幸运骰。
-      navigate(0)
     } catch (err) {
       setLibraryError(
         err instanceof ApiError && err.status === 409

@@ -475,6 +475,8 @@ class ActionPlanNarrationContext(ContractModel):
     # Latest already-published narration the viewer can see. Player-safe only;
     # the Narrator must not recopy or paraphrase it as a fresh scene-setting opening.
     previous_published_narration: str | None = Field(default=None, max_length=2000)
+    # 仅供服务端输出校验使用；该索引被排除在模型 payload 外，避免反向泄漏。
+    forbidden_disclosure_terms: tuple[str, ...] = Field(default=(), exclude=True)
 
     @model_validator(mode="after")
     def validate_narration_scope(self) -> ActionPlanNarrationContext:

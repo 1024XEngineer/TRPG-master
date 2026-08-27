@@ -267,11 +267,11 @@ def test_ending_availability_reaches_the_client_without_direct_confirmation(
     assert opened["phase"] == "playing"
 
 
-def test_planner_receives_keeper_capabilities_but_the_client_never_does(
+def test_planner_does_not_receive_keeper_capabilities_and_client_never_does(
     sync_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The Agent gets the Canon vocabulary; the transport payload must not."""
+    """Issue #426：玩家规划器和客户端都不得接收 Keeper 能力。"""
 
     view, planner = _play_one_action(
         sync_client,
@@ -280,16 +280,7 @@ def test_planner_receives_keeper_capabilities_but_the_client_never_does(
         RevealInformationEffect(information_id=KEEPER_INFORMATION),
     )
 
-    capabilities = planner.contexts[0].keeper_capabilities
-    assert capabilities is not None
-    assert capabilities.revision == planner.contexts[0].player_view.revision
-    assert KEEPER_INFORMATION in {item.id for item in capabilities.information}
-    assert ENDING_ID in {item.id for item in capabilities.endings}
-    # Keeper-only content is what the Agent judges with; anything this turn did
-    # not release must not ride along to the browser in any shape.
-    undisclosed = next(
-        item for item in capabilities.information if item.id == UNDISCLOSED_INFORMATION
-    )
+    # Keeper 能力只允许进入当前步骤的服务端裁决器，不能进入玩家安全 Planner。
+    assert planner.contexts[0].keeper_capabilities is None
     assert "keeper_capabilities" not in view
     assert UNDISCLOSED_INFORMATION not in str(view)
-    assert undisclosed.content not in str(view)

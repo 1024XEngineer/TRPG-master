@@ -8,7 +8,7 @@ import time
 import traceback
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol, cast
 
 import structlog
 from collaboration_framework.contracts import (
@@ -378,6 +378,43 @@ class ActionPlanTurnResult:
             "awaiting_time_consent",
             "awaiting_scene_consent",
         }
+
+
+def _action_plan_disclosure_reason(
+    plan: ActionPlan,
+    *,
+    player_input: PlayerInput,
+    player_view: PlayerView,
+    capabilities: KeeperCapabilityView | None,
+) -> str | None:
+    """在持久化前拒绝把 Keeper 私密词汇写进玩家可见计划。
+
+    规划器只收到 TurnPlanningView，但模型可能回显其它上下文或自行猜测；这里
+    使用公开/隐藏词汇索引做确定性拒绝，不尝试替换文本，以免篡改玩家意图。
+    """
+    if capabilities is None:
+        return None
+    player_text = player_input.utterance.casefold()
+    hidden: set[str] = set()
+    for info in capabilities.information:
+        if not (info.known_by_party or info.known_by_actor):
+            hidden.update(
+                value.casefold() for value in (info.id, info.title, info.summary, info.content)
+            )
+    for entity in capabilities.entities:
+        if not any(item.id == entity.id for item in player_view.scene.visible_entities):
+            hidden.update(value.casefold() for value in (entity.id, entity.name))
+    fields = (
+        plan.goal,
+        *(step.semantic_goal for step in plan.steps),
+        *(step.public_progress_label or "" for step in plan.steps),
+    )
+    for value in fields:
+        text = value.casefold()
+        for secret in hidden:
+            if secret and secret in text and secret not in player_text:
+                return "hidden_keeper_term"
+    return None
 
 
 @dataclass(frozen=True)
@@ -1068,36 +1105,53 @@ class ActionPlanTurnApplication:
             player_input=player_input,
             player_view=view,
         )
-        keeper_memory_context = await self._read_keeper_memory_context(
+        # Planner 只能读取玩家受众安全的历史与记忆；Keeper 级上下文不得进入计划模型。
+        keeper_memory_context = await self._read_memory_context(
             player_input=player_input,
             player_view=view,
         )
         semantic_required, semantic_reason = semantic_planner_required(utterance)
-        use_semantic_planner = (
-            self._semantic_planner is not None
-            and semantic_required
-            and semantic_planner_selected(
-                room_id=room_id,
-                client_action_id=client_action_id,
-                rollout_percent=self._semantic_planner_rollout_percent,
-            )
-        )
-        keeper_capabilities = None
+        # 普通玩家输入统一走安全规划器；Keeper 能力只在后续当前步骤裁决时读取。
+        # semantic_planner_required 仍保留用于多步语义判断和日志，不再是边界开关。
+        use_semantic_planner = self._semantic_planner is not None and semantic_required
+        keeper_capabilities = await self._keeper_capabilities(player_input, view)
         try:
             if use_semantic_planner:
                 assert self._semantic_planner is not None
-                decision: HostTurnDecision = await self._semantic_planner.generate(
-                    TurnPlanningContext(
-                        player_input=player_input,
-                        planning_view=TurnPlanningView.from_player_view(view),
-                        recent_history=recent_history,
-                        memories=keeper_memory_context.entries,
-                        conversation_summary=keeper_memory_context.conversation_summary,
-                        policy=self._orchestrator.policy,
-                    )
+                planning_context = TurnPlanningContext(
+                    player_input=player_input,
+                    planning_view=TurnPlanningView.from_player_view(view),
+                    recent_history=recent_history,
+                    memories=keeper_memory_context.entries,
+                    conversation_summary=keeper_memory_context.conversation_summary,
+                    policy=self._orchestrator.policy,
                 )
+                decision = await self._semantic_planner.generate(planning_context)
+                assert isinstance(decision, ActionPlan)
+                reason = _action_plan_disclosure_reason(
+                    decision,
+                    player_input=player_input,
+                    player_view=view,
+                    capabilities=keeper_capabilities,
+                )
+                if reason is not None:
+                    logger.warning("turn_plan_rejected_for_disclosure", reason=reason)
+                    # 安全边界失败只允许重新调用同一个安全 Planner；绝不回退融合调用。
+                    decision = await self._semantic_planner.generate(planning_context)
+                    reason = _action_plan_disclosure_reason(
+                        decision,
+                        player_input=player_input,
+                        player_view=view,
+                        capabilities=keeper_capabilities,
+                    )
+                    if reason is not None:
+                        return self._planning_failure_clarification(
+                            player_input=player_input,
+                            player_view=view,
+                        )
             else:
-                keeper_capabilities = await self._keeper_capabilities(player_input, view)
+                # 明确的单步请求可走轻量安全生产器；即使保留旧接口，也不向它
+                # 传递 Keeper 能力，因此不会形成 Keeper 与玩家计划的混合上下文。
                 decision = await self._planner.generate(
                     HostAgentContext(
                         player_input=player_input,
@@ -1105,8 +1159,13 @@ class ActionPlanTurnApplication:
                         recent_history=recent_history,
                         memories=keeper_memory_context.entries,
                         conversation_summary=keeper_memory_context.conversation_summary,
-                        # Legacy fusion adjudicates a single action in this call.
-                        keeper_capabilities=keeper_capabilities,
+                        # 仅离线 Fake 的确定性裁决器需要服务端候选元数据来模拟
+                        # 规则效果；生产模型永远收到 None，避免融合 Planner 泄漏。
+                        keeper_capabilities=(
+                            keeper_capabilities
+                            if isinstance(self._planner, DeterministicHostTurnDecisionModel)
+                            else None
+                        ),
                     )
                 )
         except TurnExecutionError as exc:
@@ -1127,7 +1186,6 @@ class ActionPlanTurnApplication:
             )
         if use_semantic_planner:
             latest_view = await self._projector.project(player_input)
-            keeper_capabilities = await self._keeper_capabilities(player_input, latest_view)
             assert isinstance(decision, ActionPlan)
             prerequisite = self._prerequisite_resolver.resolve(
                 plan=decision,
@@ -1701,6 +1759,25 @@ class ActionPlanTurnApplication:
         context: ActionPlanNarrationContext,
     ) -> ActionPlanNarrationOutput:
         addressing_mode, acting_character_name = await self._narration_addressing(context)
+        # Narrator 只拿到公开视图；隐藏词索引留在服务端校验器，不序列化给模型。
+        forbidden_terms: tuple[str, ...] = ()
+        if isinstance(context, ActionPlanNarrationContext):
+            capabilities = await self._keeper_capabilities(
+                context.player_input, context.player_view
+            )
+            if capabilities is not None:
+                public_info_ids = {item.id for item in context.player_view.known_information}
+                public_entity_ids = {item.id for item in context.player_view.scene.visible_entities}
+                terms: set[str] = set()
+                for info in capabilities.information:
+                    if info.id not in public_info_ids and not (
+                        info.known_by_party or info.known_by_actor
+                    ):
+                        terms.update((info.id, info.title, info.summary, info.content))
+                for entity in capabilities.entities:
+                    if entity.id not in public_entity_ids:
+                        terms.update((entity.id, entity.name))
+                forbidden_terms = tuple(term for term in terms if term)
         if isinstance(context, ActionPlanNarrationContext) and hasattr(
             context.player_view, "revision"
         ):
@@ -1734,12 +1811,14 @@ class ActionPlanTurnApplication:
                     player_input=context.player_input,
                     recent_history=recent_history,
                 ),
+                forbidden_disclosure_terms=forbidden_terms,
             )
         elif isinstance(context, ActionPlanNarrationContext):
             context = context.model_copy(
                 update={
                     "addressing_mode": addressing_mode,
                     "acting_character_name": acting_character_name,
+                    "forbidden_disclosure_terms": forbidden_terms,
                 }
             )
         started_at = time.monotonic()
@@ -2296,34 +2375,40 @@ def build_action_plan_turn_application(
         adjudicator = _RuleFirstStepAdjudicator(PromptActionPlanStepAdjudicator(client))
         narration_model = PromptActionPlanNarrationModel(client)
 
+    # 生产回合始终使用玩家安全 Planner；灰度比例仅保留为兼容配置，不再允许
+    # 普通输入落回同时携带 Keeper 能力的旧融合 Planner。
     semantic_planner: TurnPlannerPort | None = None
-    if resolved.turn_planner_rollout_percent > 0:
-        if resolved.turn_planner_provider == "fake":
-            semantic_planner = DeterministicTurnPlanner()
-        else:
-            if planner_client is None:
-                planner_client_types = {
-                    "deepseek": DeepSeekChatCompletionsJsonClient,
-                    "qwen": QwenChatCompletionsJsonClient,
-                    "openai": OpenAIResponsesJsonClient,
-                }
-                provider = resolved.turn_planner_provider
-                if provider not in planner_client_types:
-                    raise ValueError("Semantic Turn Planner provider 未配置")
-                if (
-                    resolved.turn_planner_api_key is None
-                    or resolved.turn_planner_base_url is None
-                    or resolved.turn_planner_model is None
-                ):
-                    raise ValueError("Semantic Turn Planner 模型配置不完整")
-                planner_client = planner_client_types[provider](
-                    api_key=secret_value(resolved.turn_planner_api_key),
-                    base_url=resolved.turn_planner_base_url,
-                    model=resolved.turn_planner_model,
-                    timeout_seconds=resolved.turn_planner_timeout_seconds,
-                    retry_policy=turn_planner_retry_policy(resolved),
-                )
-            semantic_planner = PromptTurnPlanner(planner_client, policy=policy)
+    if resolved.host_model_provider == "fake":
+        # Fake/E2E 保留既有确定性 Host 事件路径；start() 仍会把 Keeper 能力置空。
+        semantic_planner = None
+    elif resolved.turn_planner_provider == "fake":
+        semantic_planner = DeterministicTurnPlanner()
+    else:
+        if planner_client is None and resolved.turn_planner_provider is not None:
+            planner_client_types = {
+                "deepseek": DeepSeekChatCompletionsJsonClient,
+                "qwen": QwenChatCompletionsJsonClient,
+                "openai": OpenAIResponsesJsonClient,
+            }
+            provider = resolved.turn_planner_provider
+            if provider not in planner_client_types:
+                raise ValueError("Semantic Turn Planner provider 未配置")
+            if (
+                resolved.turn_planner_api_key is None
+                or resolved.turn_planner_base_url is None
+                or resolved.turn_planner_model is None
+            ):
+                raise ValueError("Semantic Turn Planner 模型配置不完整")
+            planner_client = planner_client_types[provider](
+                api_key=secret_value(resolved.turn_planner_api_key),
+                base_url=resolved.turn_planner_base_url,
+                model=resolved.turn_planner_model,
+                timeout_seconds=resolved.turn_planner_timeout_seconds,
+                retry_policy=turn_planner_retry_policy(resolved),
+            )
+        if planner_client is None and client is None:
+            raise ValueError("安全 Turn Planner 缺少模型 client")
+        semantic_planner = PromptTurnPlanner(cast(Any, planner_client or client), policy=policy)
 
     plan_store = plan_store or InMemoryActionPlanRunStore()
     projector = PlayerViewProjector(engine)

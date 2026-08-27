@@ -5,6 +5,9 @@ export const DEFAULT_MODULE_COVER = `${MODULE_ASSET_ROOT}/cover-default.webp`
 
 const MODULE_COVERS: Record<string, string> = {
   'paper-chase-zh-coc7': `${MODULE_ASSET_ROOT}/cover-paper-chase.webp`,
+  'silver-lock': `${MODULE_ASSET_ROOT}/cover-silver-lock.webp`,
+  'happy-frog-village': `${MODULE_ASSET_ROOT}/cover-happy-frog-village.webp`,
+  'constant-darkness-box-zh-coc7': `${MODULE_ASSET_ROOT}/cover-constant-darkness-box.webp`,
 }
 
 export function moduleCover(moduleId: string): string {

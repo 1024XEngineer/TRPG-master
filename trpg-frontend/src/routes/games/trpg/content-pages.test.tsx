@@ -145,7 +145,7 @@ describe('content selection pages', () => {
     expect(screen.queryByText(/MS1 骨架联调/)).not.toBeInTheDocument()
   })
 
-  it('renders silver lock as a second API module with default cover and preparation page', async () => {
+  it('renders silver lock as a second API module with its cover and preparation page', async () => {
     vi.mocked(listModules).mockResolvedValue([moduleSummary, silverLockSummary])
     vi.mocked(getModuleDetail).mockResolvedValue(silverLockDetail)
 
@@ -161,7 +161,7 @@ describe('content selection pages', () => {
     expect(screen.getByText('1 人')).toBeInTheDocument()
     expect(screen.getByAltText('银之锁模组封面')).toHaveAttribute(
       'src',
-      '/assets/rooms/scenarios/cover-default.webp',
+      '/assets/rooms/scenarios/cover-silver-lock.webp',
     )
 
     fireEvent.click(screen.getByRole('button', { name: '查看模组 银之锁 详情' }))

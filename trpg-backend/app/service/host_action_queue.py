@@ -66,7 +66,9 @@ async def get_queued_by_client_action(
         select(HostActionQueueItem).where(
             HostActionQueueItem.room_id == room_id,
             HostActionQueueItem.client_action_id == client_action_id,
-            HostActionQueueItem.status.in_(("queued", "processing", "retryable_failure")),
+            HostActionQueueItem.status.in_(
+                ("queued", "processing", "retryable_failure", "needs_clarification")
+            ),
         )
     )
 
@@ -127,6 +129,7 @@ async def enqueue(
         # position.  Never retain a route, generated text, or old result IDs.
         own.execution_route = "unresolved"
         own.direct_response_text = None
+        own.continuation_text = None
         own.execution_provenance = None
         own.result_event_ids = []
         own.attempt_count = 0
@@ -216,12 +219,16 @@ async def peek_next(db: AsyncSession, room_id: str) -> HostActionQueueItem | Non
         select(HostActionQueueItem)
         .where(
             HostActionQueueItem.room_id == room_id,
-            HostActionQueueItem.status.in_(("queued", "processing", "retryable_failure")),
+            HostActionQueueItem.status.in_(
+                ("queued", "processing", "retryable_failure", "needs_clarification")
+            ),
         )
         .order_by(HostActionQueueItem.position.asc())
         .limit(1)
     )
     if item is None:
+        return None
+    if item.status == "needs_clarification":
         return None
     if item.status == "retryable_failure" and _utc(item.next_attempt_at) > now:
         return None
@@ -245,7 +252,7 @@ async def save_execution_route(
     db: AsyncSession,
     item: HostActionQueueItem,
     *,
-    route: Literal["direct_response", "delegate_to_legacy"],
+    route: Literal["direct_response", "delegate_to_legacy", "needs_clarification"],
     text: str | None,
     provenance: str,
 ) -> None:
@@ -259,15 +266,79 @@ async def save_execution_route(
 
 def effective_execution_route(
     item: HostActionQueueItem,
-) -> Literal["direct_response", "delegate_to_legacy", "unresolved"]:
+) -> Literal["direct_response", "delegate_to_legacy", "needs_clarification", "unresolved"]:
     """Pre-A migrations left the column NULL; those records belong to legacy."""
 
-    if item.execution_route in {"direct_response", "delegate_to_legacy", "unresolved"}:
+    if item.execution_route in {
+        "direct_response",
+        "delegate_to_legacy",
+        "needs_clarification",
+        "unresolved",
+    }:
         return cast(
-            Literal["direct_response", "delegate_to_legacy", "unresolved"],
+            Literal["direct_response", "delegate_to_legacy", "needs_clarification", "unresolved"],
             item.execution_route,
         )
     return "delegate_to_legacy"
+
+
+async def get_clarification_wait_for_player(
+    db: AsyncSession,
+    room_id: str,
+    player_id: str,
+) -> HostActionQueueItem | None:
+    return await db.scalar(
+        select(HostActionQueueItem)
+        .where(
+            HostActionQueueItem.room_id == room_id,
+            HostActionQueueItem.player_id == player_id,
+            HostActionQueueItem.recipient_kind == "keeper",
+            HostActionQueueItem.status == "needs_clarification",
+        )
+        .order_by(HostActionQueueItem.position.asc())
+        .limit(1)
+    )
+
+
+async def get_clarification_head(db: AsyncSession, room_id: str) -> HostActionQueueItem | None:
+    return await db.scalar(
+        select(HostActionQueueItem)
+        .where(
+            HostActionQueueItem.room_id == room_id,
+            HostActionQueueItem.status == "needs_clarification",
+        )
+        .order_by(HostActionQueueItem.position.asc())
+        .limit(1)
+    )
+
+
+async def mark_awaiting_clarification(
+    db: AsyncSession,
+    item: HostActionQueueItem,
+    event_ids: list[str],
+) -> None:
+    item.result_event_ids = list(event_ids)
+    item.status = "needs_clarification"
+    item.lease_owner = None
+    item.lease_expires_at = None
+    item.next_attempt_at = None
+    item.updated_at = datetime.now(UTC)
+    await db.commit()
+
+
+async def save_continuation(
+    db: AsyncSession,
+    item: HostActionQueueItem,
+    *,
+    text: str,
+) -> None:
+    item.continuation_text = text.strip()
+    item.status = _QUEUED
+    item.lease_owner = None
+    item.lease_expires_at = None
+    item.next_attempt_at = None
+    item.updated_at = datetime.now(UTC)
+    await db.commit()
 
 
 async def mark_completed_with_events(
@@ -410,7 +481,7 @@ async def discard_player(
             select(HostActionQueueItem).where(
                 HostActionQueueItem.room_id == room_id,
                 HostActionQueueItem.player_id == player_id,
-                HostActionQueueItem.status == _QUEUED,
+                HostActionQueueItem.status.in_((_QUEUED, "needs_clarification")),
             )
         )
     ).all()
@@ -438,7 +509,9 @@ async def recovery_schedule(db: AsyncSession) -> tuple[tuple[str, float], ...]:
         await db.scalars(
             select(HostActionQueueItem)
             .where(
-                HostActionQueueItem.status.in_(("queued", "processing", "retryable_failure")),
+                HostActionQueueItem.status.in_(
+                    ("queued", "processing", "retryable_failure", "needs_clarification")
+                ),
             )
             .order_by(HostActionQueueItem.room_id, HostActionQueueItem.position)
         )
@@ -450,6 +523,8 @@ async def recovery_schedule(db: AsyncSession) -> tuple[tuple[str, float], ...]:
         if item.room_id in seen_rooms:
             continue
         seen_rooms.add(item.room_id)
+        if item.status == "needs_clarification":
+            continue
         ready_at = now
         if item.status == "retryable_failure":
             ready_at = _utc(item.next_attempt_at)

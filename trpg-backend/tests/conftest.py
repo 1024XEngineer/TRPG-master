@@ -28,6 +28,7 @@ from app.controller import ws as ws_controller
 from app.core.action_plan_turn import build_action_plan_turn_application
 from app.core.config import Settings
 from app.core.db import Base, get_db
+from app.core.host_entry import DeterministicHostEntryModel, HostEntryRouter
 from app.core.seed import ensure_seed_content
 from app.core.turn import build_session_view_application
 from app.main import app
@@ -107,6 +108,16 @@ ws_controller.adjudication_engine_service = AdjudicationEngineService(_test_turn
 ws_controller.npc_dialogue_service = build_npc_dialogue_service(  # type: ignore[assignment]
     Settings(host_model_provider="fake")
 )
+ws_controller._host_entry_router = HostEntryRouter(DeterministicHostEntryModel())
+
+
+@pytest.fixture(autouse=True)
+def _offline_host_entry_router() -> Generator[None, None, None]:
+    """WS 入口路由器也必须离线：`_get_host_entry_router()` 会读 `.env` 的真实 provider。"""
+
+    ws_controller._host_entry_router = HostEntryRouter(DeterministicHostEntryModel())
+    yield
+    ws_controller._host_entry_router = HostEntryRouter(DeterministicHostEntryModel())
 
 
 @pytest.fixture(autouse=True)

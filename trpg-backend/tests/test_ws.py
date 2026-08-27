@@ -1486,6 +1486,124 @@ def test_single_action_pending_resumes_through_one_step_plan_run(
     assert "_turnCompletion" not in conversation_narration[0]["payload"]
 
 
+def test_idle_keeper_submit_asks_when_object_is_ambiguous(
+    sync_client: TestClient,
+) -> None:
+    """空闲房间的 @主持人 看那个 必须先追问，不能直接进 ActionPlan。"""
+
+    token = register_and_login(sync_client, "idle_clarify_476")
+    room = create_room(sync_client, token)
+    advance_to_building(sync_client, room)
+    complete_character(sync_client, room["roomId"], room["reconnectToken"])
+    start_game(sync_client, room, token)
+    action_id = "look-that-idle-476"
+
+    with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
+        ws.send_json(
+            {
+                "type": "room.join",
+                "playerId": room["playerId"],
+                "payload": {"reconnectToken": room["reconnectToken"]},
+            }
+        )
+        ws.receive_json()
+        ws.receive_json()
+        receive_replayed_opening(ws)
+        ws.send_json(
+            {
+                "type": "action.plan.submit",
+                "playerId": room["playerId"],
+                "payload": {
+                    "clientActionId": action_id,
+                    "utterance": "看那个",
+                    "recipient": {"kind": "keeper", "entityId": None, "explicit": True},
+                },
+            }
+        )
+        narration, seen = receive_until(
+            ws,
+            lambda message: (
+                message.get("type") == "narration.push"
+                and (message.get("payload") or {}).get("text") == "你具体指的是哪一个？"
+            ),
+            limit=40,
+        )
+
+    assert narration["payload"]["messageId"] == f"{action_id}:clarify"
+    assert all(message.get("message_type") != "turn.completed" for message in seen)
+    assert all(message.get("type") != "plan.completed" for message in seen)
+
+
+def test_pending_keeper_resubmit_does_not_fail_completed_queue_claim(
+    sync_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """检定等待中重交同一 client_action_id 应恢复 pending，不能因队列已完成而关连接。"""
+
+    token = register_and_login(sync_client, "pending_resubmit_476")
+    room = create_room(sync_client, token)
+    advance_to_building(sync_client, room)
+    complete_character(sync_client, room["roomId"], room["reconnectToken"])
+    start_game(sync_client, room, token)
+    monkeypatch.setattr(
+        ws_controller.action_plan_turn_application,
+        "_planner",
+        _WsSingleActionCheckPlanner(),
+    )
+    monkeypatch.setattr(
+        ws_controller.action_plan_turn_application,
+        "_narrator",
+        ActionPlanNarrator(_WsCountingActionPlanNarration()),
+    )
+    action_id = "pending-resubmit-476"
+    payload = {
+        "clientActionId": action_id,
+        "utterance": "仔细检查书架上的文件",
+        "recipient": {"kind": "keeper", "entityId": None, "explicit": True},
+    }
+
+    with sync_client.websocket_connect(f"/ws/{room['roomId']}?token={token}") as ws:
+        ws.send_json(
+            {
+                "type": "room.join",
+                "playerId": room["playerId"],
+                "payload": {"reconnectToken": room["reconnectToken"]},
+            }
+        )
+        ws.receive_json()
+        ws.receive_json()
+        receive_replayed_opening(ws)
+        ws.send_json(
+            {
+                "type": "action.plan.submit",
+                "playerId": room["playerId"],
+                "payload": payload,
+            }
+        )
+        pending, first_seen = receive_until(
+            ws,
+            lambda message: message.get("type") == "adjudication.pending",
+            limit=40,
+        )
+        assert all(message.get("type") != "turn.failed" for message in first_seen)
+        ws.send_json(
+            {
+                "type": "action.plan.submit",
+                "playerId": room["playerId"],
+                "payload": payload,
+            }
+        )
+        resumed, second_seen = receive_until(
+            ws,
+            lambda message: message.get("type") == "adjudication.pending",
+            limit=40,
+        )
+
+    assert pending["payload"]["correlationId"] == action_id
+    assert resumed["payload"]["correlationId"] == action_id
+    assert all(message.get("type") != "turn.failed" for message in second_seen)
+
+
 def test_action_plan_narrator_failure_retries_narration_without_replaying_steps(
     sync_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,

@@ -14,7 +14,7 @@ ENGINE_IDENTITY_PREVIOUS_REVISION = "9c4e7a2b1d6f"
 # PR2 NPC 对话迁移（d1e2f3a4b5c6）接在 PR1 输入路由 head 后面；#398 的检定唯一
 # 约束放宽（b8c9d0e1f2a3）再接在它之后，最后是模组快照的死字段剥离。
 # 时间点回填与摘要复合游标各自形成分支后，由空迁移重新汇合为单一 head。
-HEAD_REVISION = "h1i2j3k4l5m6"
+HEAD_REVISION = "i2j3k4l5m6n7"
 
 
 def _run_alembic(database: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -394,6 +394,65 @@ def test_npc_dialogue_downgrade_keeps_scene_events_private(tmp_path: Path) -> No
             "SELECT visibility FROM events WHERE event_type = 'dialogue.player'",
         ).fetchone()
     assert visibility == ("player_scoped",)
+
+
+def test_host_entry_clarification_downgrade_normalizes_pending_rows(
+    tmp_path: Path,
+) -> None:
+    """回滚时必须先把 needs_clarification 收成旧约束能接受的值。"""
+
+    database = tmp_path / "host-entry-clarify-downgrade.db"
+    _upgrade_or_fail(database, "head")
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            """
+            INSERT INTO host_action_queue (
+                room_id, item_id, client_action_id, player_id, actor_id,
+                utterance, recipient_kind, recipient_entity_id, recipient_explicit,
+                execution_route, continuation_text, position, status,
+                attempt_count, result_event_ids, created_at, updated_at
+            ) VALUES (
+                'room-wait', 'clarify-wait', 'look-that', 'player-1', 'actor-1',
+                '看那个', 'keeper', NULL, 1, 'needs_clarification', NULL, 1,
+                'needs_clarification', 0, '[]',
+                '2026-08-27 00:00:00', '2026-08-27 00:00:00'
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO host_action_queue (
+                room_id, item_id, client_action_id, player_id, actor_id,
+                utterance, recipient_kind, recipient_entity_id, recipient_explicit,
+                execution_route, continuation_text, position, status,
+                attempt_count, result_event_ids, created_at, updated_at
+            ) VALUES (
+                'room-answer', 'clarify-answer', 'look-that-2', 'player-2', 'actor-2',
+                '看那个', 'keeper', NULL, 1, 'needs_clarification', '邻居', 1,
+                'queued', 0, '[]',
+                '2026-08-27 00:00:00', '2026-08-27 00:00:00'
+            )
+            """
+        )
+
+    result = _run_alembic(database, "downgrade", "h1i2j3k4l5m6")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "continuation_text" not in _column_names(database, "host_action_queue")
+    with sqlite3.connect(database) as connection:
+        waiting = connection.execute(
+            """
+            SELECT status, execution_route, utterance
+            FROM host_action_queue WHERE item_id = 'clarify-wait'
+            """
+        ).fetchone()
+        answered = connection.execute(
+            """
+            SELECT status, execution_route, utterance
+            FROM host_action_queue WHERE item_id = 'clarify-answer'
+            """
+        ).fetchone()
+    assert waiting == ("queued", "unresolved", "看那个")
+    assert answered == ("queued", "unresolved", "看那个\n玩家补充：邻居")
 
 
 def test_migration_rejects_duplicate_characters_before_ddl(tmp_path: Path) -> None:

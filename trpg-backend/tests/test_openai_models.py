@@ -47,6 +47,7 @@ from app.adapters.openai_models import (
     _OPENING_NARRATION_INSTRUCTIONS,
     OpenAIResponsesJsonClient,
     PromptActionPlanStepAdjudicator,
+    PromptHostEntryModel,
     PromptHostTurnDecisionModel,
     PromptTurnPlanner,
 )
@@ -67,6 +68,14 @@ from app.service.character_background import build_character_background_service
 from app.service.portrait_generation import build_portrait_generation_service
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_host_entry_instructions_clarify_when_information_is_insufficient() -> None:
+    text = PromptHostEntryModel._INSTRUCTIONS
+    assert "needs_clarification" in text
+    assert "不足以唯一确定" in text
+    assert "都属于信息不足" in text
+    assert "不要把这种不足直接交给旧链去猜" in text
 
 
 def test_action_plan_narration_uses_final_post_roll_outcome() -> None:

@@ -572,10 +572,17 @@ class PromptHostEntryModel:
 
     _INSTRUCTIONS = """你是桌面角色扮演游戏的主持入口分流器。只返回 schema 要求的 JSON。
 只有明确、低风险、无需检定、不会改变权威状态的普通互动（例如礼貌招呼）才返回
-direct_response，并给出一句简短自然的即时回应。调查、搜索、物品、线索、案件、秘密、
-人物背景、说服/威胁/欺骗、移动、时间地点、任何成功失败或状态变化，以及信息不足的请求，
-一律返回 delegate_to_legacy 且 text 必须为空。不得声称规则结果，不得输出 JSON、字段名、
-内部标识、ID、revision、协议或未来承诺。上下文只包含公开信息。"""
+direct_response，并给出一句简短自然的即时回应。
+当公开上下文不足以唯一确定玩家下一步要碰的对象或行动时，返回
+needs_clarification，text 只问一句简短公开问题。未消解的指代（那个/它/哪一个）、
+缺对象、多名可见人物或多件可见物品导致不同选择会造成重要差异，都属于信息不足；
+不要自行指定对象，不要把这种不足直接交给旧链去猜。
+低风险寒暄、对话承接、能从公开上下文唯一推断的省略不要追问。
+player_answer 已有内容时禁止再次 needs_clarification。
+调查、搜索、物品、线索、案件、秘密、人物背景、说服/威胁/欺骗、移动、时间地点、
+任何成功失败或状态变化，仅在对象和行动已经明确时返回 delegate_to_legacy 且 text 必须为空。
+不得声称规则结果，不得输出 JSON、字段名、内部标识、ID、revision、协议或未来承诺。
+上下文只包含公开信息。"""
 
     def __init__(self, client: StructuredJsonClient) -> None:
         self._client = client

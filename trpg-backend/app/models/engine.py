@@ -542,8 +542,8 @@ class HostActionQueueItem(Base):
         ),
         CheckConstraint("position >= 1", name="ck_host_action_queue_position"),
         CheckConstraint(
-            "status IN ('queued', 'processing', 'retryable_failure', 'completed', "
-            "'failed', 'cancelled', 'discarded')",
+            "status IN ('queued', 'processing', 'retryable_failure', "
+            "'needs_clarification', 'completed', 'failed', 'cancelled', 'discarded')",
             name="ck_host_action_queue_status",
         ),
         CheckConstraint(
@@ -551,7 +551,8 @@ class HostActionQueueItem(Base):
             name="ck_host_action_queue_recipient_kind",
         ),
         CheckConstraint(
-            "execution_route IN ('unresolved', 'direct_response', 'delegate_to_legacy')",
+            "execution_route IN ('unresolved', 'direct_response', "
+            "'delegate_to_legacy', 'needs_clarification')",
             name="ck_host_action_queue_execution_route",
         ),
         CheckConstraint("attempt_count >= 0", name="ck_host_action_queue_attempt_count"),
@@ -604,6 +605,7 @@ class HostActionQueueItem(Base):
         String(30), nullable=True, default="unresolved", server_default="unresolved"
     )
     direct_response_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    continuation_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     execution_provenance: Mapped[str | None] = mapped_column(String(40), nullable=True)
     position: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="queued")

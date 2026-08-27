@@ -76,6 +76,23 @@ def compare_repair_semantics(
     if target_result.status == "requires_clarification":
         return target_result
 
+    persistent_downgrade = False
+    if (
+        original.persistence_intent != repaired.persistence_intent
+        and repaired.persistence_intent == "none"
+        and original.persistence_intent in {"character_state", "object_state"}
+    ):
+        # 只有 Engine 确认目标没有相应状态能力、且两条分支都没有领域效果时，
+        # 才允许把持久意图收窄为普通检定；NPC 状态不能走这条路径绕过校验。
+        persistent_downgrade = _is_safe_persistent_downgrade(
+            original,
+            repaired,
+            validation_feedback,
+            player_view,
+        )
+        if not persistent_downgrade:
+            return _clarification("PERSISTENCE_INTENT_CHANGED")
+
     old_target_id = original.target.id
     new_target_id = repaired.target.id
     success = _compare_effect_branch(
@@ -110,6 +127,12 @@ def compare_repair_semantics(
             status="narrowed",
             reason_code="INVALID_EFFECT_REMOVED",
             safe_reason="已移除校验器明确拒绝的无效效果",
+        )
+    if persistent_downgrade:
+        return SemanticPreservationResult(
+            status="narrowed",
+            reason_code="PERSISTENCE_INTENT_NARROWED",
+            safe_reason="目标没有可写持久状态，已保留行动与检定并收窄为普通裁决",
         )
     if target_result.reason_code != "UNCHANGED":
         return target_result
@@ -241,7 +264,7 @@ def _check_explicit_constraints(
     step: ActionPlanStep,
     repaired: ActionAdjudication,
 ) -> SemanticPreservationResult | None:
-    text = _normalize_text(" ".join((player_input.utterance, plan_goal, step.semantic_goal)))
+    text = _normalize_text(f"{player_input.utterance} {plan_goal} {step.semantic_goal}")
     family = _normalize_text(repaired.method.family)
     effects = {effect.type for effect in (*repaired.success_effects, *repaired.failure_effects)}
     if ("不伤害" in text or "不要伤害" in text) and family in {"combat", "attack", "threaten"}:
@@ -349,6 +372,47 @@ def _is_persistent_effect_repair(
     meaningful_before = [item for item in before if item != {"type": "narrative_only"}]
     meaningful_after = [item for item in after if item != {"type": "narrative_only"}]
     return len(meaningful_before) <= 1 and len(meaningful_after) == 1
+
+
+def _is_safe_persistent_downgrade(
+    original: ActionAdjudication,
+    repaired: ActionAdjudication,
+    feedback: ValidationFeedback,
+    player_view: PlayerView,
+) -> bool:
+    """只允许 Engine 标记的无状态目标收窄为普通行动。"""
+
+    if feedback.code != "PERSISTENT_EFFECT_REQUIRED" or not feedback.generic_fallback_allowed:
+        return False
+    if any(
+        effect.type != "narrative_only"
+        for effect in (
+            *original.success_effects,
+            *original.failure_effects,
+            *repaired.success_effects,
+            *repaired.failure_effects,
+        )
+    ):
+        return False
+    target = next(
+        (
+            item
+            for item in player_view.scene.visible_entities
+            if item.id == original.target.id
+        ),
+        None,
+    )
+    if target is None or target.id != repaired.target.id:
+        return False
+    if original.persistence_intent == "character_state":
+        # 物体（例如只有 cut 状态的绳索）没有角色姿态/意识可供写入；NPC
+        # 则始终保留完整性闸门，不能降级掩盖漏报的角色状态。
+        return target.kind == "object"
+    if original.persistence_intent == "object_state":
+        object_state_keys = {"open", "locked", "broken"}
+        visible_keys = {item.key for item in target.observable_state}
+        return target.kind == "object" and not (visible_keys & object_state_keys)
+    return False
 
 
 def _inventory_portability_repair_status(

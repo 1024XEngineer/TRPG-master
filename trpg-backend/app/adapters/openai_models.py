@@ -73,7 +73,11 @@ persistence_intent，但 success_effects/failure_effects 按规则所有权要�
 上述 open/close/lock 等物体动作族只适用于一个已存在的物理实体确实改变
 对应状态的情况。自然语言中同一动词的服务请求、惯用语或抽象含义，不得映射成
 物体 open；若没有单独建模的权威状态，使用 method.family=action、
-persistence_intent=none 和 narrative_only，不要伪造 object_state 效果。
+persistence_intent=none 和 narrative_only，不要伪造 object_state 效果。如果规则引擎返回
+PERSISTENT_EFFECT_REQUIRED，且 PlayerView 中的目标没有能够承载该结果的权威状态位，保持原
+target、method、check 不变，将 persistence_intent 收窄为 none，success_effects 和
+failure_effects 只保留空值或 narrative_only；不得凭空添加状态键，也不得因此丢弃原本应执行
+的力量或技能检定。
 
 **明确旅行地点决策表（高优先级）**：当玩家直接指定了目的地类型时，只能选择：
 

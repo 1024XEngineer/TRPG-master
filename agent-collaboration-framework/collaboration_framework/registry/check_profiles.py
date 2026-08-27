@@ -1,4 +1,4 @@
-"""Check Profiles: what a rule-owned check actually rolls (#226 §5, #398 §阶段三).
+"""CoC7 check profiles: what a rule-owned check actually rolls.
 
 `RuleCheckSpec.profile_id` and `RuleCheckSpec.parameters` have been in the
 contract since v3 and, until this issue, had **zero consumers** outside the
@@ -29,11 +29,17 @@ profile that any published module uses in a passive rule check (追书人 ×2、
 银之锁 ×2), and it is the only one this issue can execute. `coc7.skill` appears
 only on `active_action` steps, which reach the player through the Agent's
 candidate menu and never through this table.
+
+The table is owned by the CoC7 adapter. Runtime dispatch should use
+`registry.rulesets` so profile ids are always resolved in a `world_ref` scope.
+The compatibility helpers below remain for migration-era callers.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+from types import MappingProxyType
 
 from collaboration_framework.contracts.adjudication import CheckDifficulty
 
@@ -56,27 +62,42 @@ class CheckProfileRegistration:
     recognised_parameters: frozenset[str] = field(default_factory=frozenset)
 
 
-CHECK_PROFILES: dict[str, CheckProfileRegistration] = {
-    "coc7.sanity": CheckProfileRegistration(
-        display_name="理智",
-        resource="san",
-        method_summary="眼前的景象直接冲击神智",
-        player_safe_reason="规则要求此刻进行一次理智检定",
-        recognised_parameters=frozenset({"success_loss", "failure_loss", "habit_cap"}),
-    ),
-}
+COC7_CHECK_PROFILES: Mapping[str, CheckProfileRegistration] = MappingProxyType(
+    {
+        "coc7.sanity": CheckProfileRegistration(
+            display_name="理智",
+            resource="san",
+            method_summary="眼前的景象直接冲击神智",
+            player_safe_reason="规则要求此刻进行一次理智检定",
+            recognised_parameters=frozenset(
+                {"success_loss", "failure_loss", "habit_cap"}
+            ),
+        ),
+    }
+)
+
+# Compatibility name for callers that inspect the built-in CoC7 catalogue.
+# New runtime code must use the world-scoped adapter registry.
+CHECK_PROFILES = COC7_CHECK_PROFILES
 
 
-def is_registered(profile_id: str) -> bool:
-    return profile_id in CHECK_PROFILES
+def is_registered(profile_id: str, *, world_ref: str = "coc-7e") -> bool:
+    return world_ref == "coc-7e" and profile_id in COC7_CHECK_PROFILES
 
 
-def registration_for(profile_id: str) -> CheckProfileRegistration | None:
-    return CHECK_PROFILES.get(profile_id)
+def registration_for(
+    profile_id: str,
+    *,
+    world_ref: str = "coc-7e",
+) -> CheckProfileRegistration | None:
+    if world_ref != "coc-7e":
+        return None
+    return COC7_CHECK_PROFILES.get(profile_id)
 
 
 __all__ = [
     "CHECK_PROFILES",
+    "COC7_CHECK_PROFILES",
     "CheckProfileRegistration",
     "is_registered",
     "registration_for",

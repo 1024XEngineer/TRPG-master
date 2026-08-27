@@ -9,9 +9,11 @@ from collaboration_framework.contracts import (
     ContractModel,
     ModuleContentV3,
 )
+from collaboration_framework.registry import rulesets as ruleset_registry
+
+SUPPORTED_WORLD_REFS = ruleset_registry.DEFAULT_RULESET_REGISTRY.world_refs
 
 
-SUPPORTED_WORLD_REFS = frozenset({"coc-7e"})
 class RuntimeCapabilityIssue(ContractModel):
     owner: str = Field(min_length=1)
     capability: str = Field(min_length=1)
@@ -34,7 +36,7 @@ def audit_runtime_capabilities(
     check here at load time is the world ruleset.
     """
 
-    if module_content.world_ref in SUPPORTED_WORLD_REFS:
+    if ruleset_registry.is_registered(module_content.world_ref):
         return ()
     return (
         RuntimeCapabilityIssue(

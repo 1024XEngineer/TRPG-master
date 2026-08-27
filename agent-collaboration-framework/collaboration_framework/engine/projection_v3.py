@@ -56,11 +56,11 @@ from collaboration_framework.contracts import (
     TimeAdvanceBlockReason,
 )
 
+from ..registry import rulesets as ruleset_registry
 from .models import EngineRuntimeSnapshot, GameState
 from .navigation import effective_location_knowledge, runtime_location_edges
 from .persistent_results import PUBLIC_STATE_KEYS
 from .rules_v3 import agent_match_admits, evaluate_condition, pending_check_for
-from ..registry import check_profiles as check_profile_registry
 from .time_tasks import active_occurrences
 from .timeline import (
     next_point_after,
@@ -745,7 +745,7 @@ def _rule_candidates(
                         # 分支里有没有检定步，是 Agent 必须知道的；后果仍然不出服务端。
                         requires_check=(step := pending_check_for(rule, option.id)[0])
                         is not None,
-                        check_skill_id=_rule_check_skill_id(step),
+                        check_skill_id=_rule_check_skill_id(step, module.world_ref),
                     )
                     for option in trigger.options
                 ),
@@ -755,7 +755,7 @@ def _rule_candidates(
     return tuple(candidates)
 
 
-def _rule_check_skill_id(step: object) -> str | None:
+def _rule_check_skill_id(step: object, world_ref: str = "coc-7e") -> str | None:
     """Resolve the rolled resource without exposing rule execution details."""
 
     if not isinstance(step, CheckStep):
@@ -763,7 +763,7 @@ def _rule_check_skill_id(step: object) -> str | None:
     if step.check.profile_id == "coc7.skill":
         skill_id = step.check.parameters.get("skill_id")
         return skill_id if isinstance(skill_id, str) and skill_id.strip() else None
-    profile = check_profile_registry.registration_for(step.check.profile_id)
+    profile = ruleset_registry.check_profile_for(world_ref, step.check.profile_id)
     return profile.resource if profile is not None else None
 
 

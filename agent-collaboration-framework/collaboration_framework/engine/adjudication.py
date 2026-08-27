@@ -46,8 +46,8 @@ from collaboration_framework.contracts.validation import (
     Repairability,
     ValidationResult,
 )
-from collaboration_framework.registry import check_profiles as check_profile_registry
 from collaboration_framework.registry import effects as effect_registry
+from collaboration_framework.registry import rulesets as ruleset_registry
 
 from .agenda_execution import RuleSettlement, SettlementResult
 from .dice import DiceRoller, coc7_success_level, passes_difficulty
@@ -2274,7 +2274,12 @@ class AdjudicationEngineService:
             settlement.fail("rule_check_actor_binding_unsupported")
             return None
 
-        option = self._passive_check_option(state, adjudication.actor_id, step)
+        option = self._passive_check_option(
+            state,
+            adjudication.actor_id,
+            step,
+            world_ref=runtime.module_content.world_ref,
+        )
         if option is None:
             # 停在一个引擎读不出目标值的检定上。此前这类情况会静默挂着；现在
             # 它和其他「引擎做不到」一样显式失败并留痕（#398 §阶段一）。
@@ -2325,6 +2330,8 @@ class AdjudicationEngineService:
         state: GameState,
         actor_id: str,
         step: CheckStep,
+        *,
+        world_ref: str,
     ) -> PendingCheckOption | None:
         """规则自己指定技能，所以菜单只有一条。
 
@@ -2332,7 +2339,10 @@ class AdjudicationEngineService:
         此之前这两个字段除契约、测试与 build 脚本外零消费者。
         """
 
-        profile = check_profile_registry.registration_for(step.check.profile_id)
+        profile = ruleset_registry.check_profile_for(
+            world_ref,
+            step.check.profile_id,
+        )
         if profile is None:
             return None
         actor = state.actors.get(actor_id)

@@ -792,7 +792,11 @@ class AdjudicationEngineService:
                     fault="player",
                     player_safe_reason="该行动已经存在待处理检定",
                 )
-            options = self._validated_options(runtime, request.adjudication)
+            options = self._validated_options(
+                runtime,
+                request.adjudication,
+                rule_check=self._rule_check_spec(runtime, rule_check_origin),
+            )
             decision = PendingCheckDecision(
                 decision_id=self._new_id("check_decision"),
                 room_id=request.room_id,
@@ -955,7 +959,7 @@ class AdjudicationEngineService:
                     player_safe_reason="所选检定方式不在当前可用列表中",
                 )
             roll = self._roll(option.target_value, option.difficulty)
-            rule_check = self._rule_check_spec(runtime, decision)
+            rule_check = self._rule_check_spec(runtime, decision.rule_origin)
             post_options = self._post_roll_options(
                 runtime,
                 actor_id=decision.actor_id,
@@ -1646,7 +1650,11 @@ class AdjudicationEngineService:
             allow_party_scene_transition=allow_party_scene_transition,
         )
         if adjudication.check.mode != "none":
-            self._validated_options(runtime, adjudication)
+            self._validated_options(
+                runtime,
+                adjudication,
+                rule_check=self._rule_check_spec(runtime, rule_check_origin),
+            )
         return rule_check_origin
 
     def _validate_effect_sequence(
@@ -1707,6 +1715,8 @@ class AdjudicationEngineService:
         self,
         runtime: EngineRuntimeSnapshot,
         adjudication: ActionAdjudication,
+        *,
+        rule_check: RuleCheckSpec | None = None,
     ) -> tuple[PendingCheckOption, ...]:
         actor = runtime.game_state.actors[adjudication.actor_id]
         skills = actor.state.get("skills")
@@ -1769,7 +1779,15 @@ class AdjudicationEngineService:
                         else candidate.skill_id
                     ),
                     target_value=value,
-                    difficulty=candidate.difficulty,
+                    # 规则声明的难度是权威的（#483）：作者写「困难」就按困难判，
+                    # 不能被 Agent 的候选降成普通。未声明（None）时沿用候选，
+                    # 与被动路径 `step.check.difficulty or profile.default_difficulty`
+                    # 同一条规矩。
+                    difficulty=(
+                        rule_check.difficulty
+                        if rule_check is not None and rule_check.difficulty is not None
+                        else candidate.difficulty
+                    ),
                     method_summary=candidate.method_summary,
                     player_safe_reason=candidate.player_safe_reason,
                 )
@@ -1861,16 +1879,18 @@ class AdjudicationEngineService:
     @staticmethod
     def _rule_check_spec(
         runtime: EngineRuntimeSnapshot,
-        decision: PendingCheckDecision,
+        origin: RuleCheckOrigin | None,
     ) -> RuleCheckSpec | None:
         """规则拥有的检定回它的 spec；玩家自己发起的检定回 None。
 
-        `rule_origin` 非空即「这是规则拥有的检定」，游标足够把 `CheckStep` 找回
-        来——`_resume_rule_check` 做的是同一件事。`PendingCheckOption` 只带得动
+        出处非空即「这是规则拥有的检定」，`rule_id` + `step_id` 足够把 `CheckStep`
+        找回来——`_resume_rule_check` 做的是同一件事。`PendingCheckOption` 只带得动
         技能与目标值，带不动出处，所以在调用点解析而不是塞进 option。
+
+        取出处而不是取 `PendingCheckDecision`（#483）：提交期要用它算难度时，决策
+        对象还没建出来。
         """
 
-        origin = decision.rule_origin
         if origin is None:
             return None
         rule = next(

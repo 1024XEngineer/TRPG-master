@@ -2741,6 +2741,127 @@ class RuleDeclaredCheckPermissionTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(forbidden, {"accept-current"})
 
+    async def test_declared_difficulty_wins_over_the_agent_candidate(self) -> None:
+        """作者写「困难」就按困难判，不能被 Agent 的候选降成普通（#483）。
+
+        难度不改变玩家看到的「掷什么」，所以这里覆盖而不是拒绝——两个模组里只有 2
+        条主动检定声明了非 regular 难度，为此多一轮修复的噪音大于收益。
+        """
+
+        store = InMemoryEngineStore()
+        store.register_room(
+            module_content=self.module_with_active_check(difficulty="hard"),
+            initial_state=game_state(module(), scene_id="library"),
+        )
+        engine = AdjudicationEngineService(
+            store, dice=DiceRoller(SequenceDiceSource([50]))
+        )
+        rules = RuleEngineService(store)
+        snapshot = await rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        execution = await engine.submit(
+            SubmitAdjudicationRequest(
+                room_id=ROOM,
+                player_id=PLAYER,
+                adjudication=ActionAdjudication(
+                    request_id="e5-difficulty",
+                    source_revision=snapshot.revision,
+                    actor_id=ACTOR,
+                    summary="查阅旧报",
+                    target=ActionTarget(kind="entity", id="newspaper_archive"),
+                    method=ActionMethod(family="research", description="查阅旧报"),
+                    rule_decision=RuleDecisionRef(
+                        rule_id="research_library_archive", option_id="library-use"
+                    ),
+                    check=RequiredAdjudicationCheck(
+                        candidates=(
+                            SkillCheckCandidate(
+                                candidate_id="library-use",
+                                skill_id="library-use",
+                                # Agent 报的是普通难度，规则说困难。
+                                difficulty="regular",
+                                method_summary="按年份检索",
+                                player_safe_reason="使用图书馆使用",
+                            ),
+                        )
+                    ),
+                ),
+            )
+        )
+        pending = execution.pending_decision
+        assert pending is not None
+        self.assertEqual(pending.options[0].difficulty, "hard")
+
+        # 而且要真的按困难判：图书馆使用 70，掷 50 在普通下是成功，困难要 ≤35。
+        rolled = await engine.decide(
+            CheckDecisionRequest(
+                request_id="e5-difficulty:select",
+                room_id=ROOM,
+                player_id=PLAYER,
+                source_revision=execution.view_revision,
+                decision_id=pending.decision_id,
+                decision_version=pending.decision_version,
+                choice=SelectCheckChoice(candidate_id="library-use"),
+            )
+        )
+        assert rolled.check_run is not None
+        self.assertEqual(rolled.check_run.difficulty, "hard")
+        self.assertEqual(rolled.check_run.roll.value, 50)
+        self.assertFalse(rolled.check_run.roll.passed)
+
+    async def test_an_undeclared_difficulty_falls_back_to_the_candidate(self) -> None:
+        """规则没声明难度时沿用 Agent 候选。
+
+        线上 42 条主动检定步**全部**显式写了 `difficulty`，所以这条得把它打成 None
+        才测得到——留着它是因为 `difficulty` 在契约上可选（`module_v3.py:445`），
+        新模组完全可以不写，那时不该把候选难度吃掉。
+        """
+
+        store = InMemoryEngineStore()
+        store.register_room(
+            module_content=self.module_with_active_check(difficulty=None),
+            initial_state=game_state(module(), scene_id="library"),
+        )
+        engine = AdjudicationEngineService(
+            store, dice=DiceRoller(SequenceDiceSource([50]))
+        )
+        rules = RuleEngineService(store)
+        snapshot = await rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        execution = await engine.submit(
+            SubmitAdjudicationRequest(
+                room_id=ROOM,
+                player_id=PLAYER,
+                adjudication=ActionAdjudication(
+                    request_id="e5-difficulty-default",
+                    source_revision=snapshot.revision,
+                    actor_id=ACTOR,
+                    summary="查阅旧报",
+                    target=ActionTarget(kind="entity", id="newspaper_archive"),
+                    method=ActionMethod(family="research", description="查阅旧报"),
+                    rule_decision=RuleDecisionRef(
+                        rule_id="research_library_archive", option_id="library-use"
+                    ),
+                    check=RequiredAdjudicationCheck(
+                        candidates=(
+                            SkillCheckCandidate(
+                                candidate_id="library-use",
+                                skill_id="library-use",
+                                difficulty="extreme",
+                                method_summary="按年份检索",
+                                player_safe_reason="使用图书馆使用",
+                            ),
+                        )
+                    ),
+                ),
+            )
+        )
+        pending = execution.pending_decision
+        assert pending is not None
+        self.assertEqual(pending.options[0].difficulty, "extreme")
+
     async def test_a_free_check_keeps_both_permissions(self) -> None:
         """没有 rule_decision 的自由裁决完全不受影响。
 

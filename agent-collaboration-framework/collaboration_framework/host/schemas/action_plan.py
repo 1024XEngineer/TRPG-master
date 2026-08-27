@@ -460,6 +460,9 @@ class ActionPlanNarrationContext(ContractModel):
     player_view: PlayerView
     addressing_mode: Literal["second_person", "named_actor"] = "second_person"
     acting_character_name: str = ""
+    # 执行身份用于区分守秘人叙事和 NPC 对话；默认值保持旧调用方兼容。
+    recipient_kind: Literal["keeper", "npc"] = "keeper"
+    execution_mode: Literal["dialogue_only", "rule_action"] = "rule_action"
     # 记忆是只读的玩家安全上下文；它不能替代当前 PlayerView 或提交事实。
     memories: tuple[MemoryEntry, ...] = ()
     conversation_summary: ConversationSummary | None = None

@@ -92,6 +92,7 @@ from app.core.db import async_session_factory
 from app.core.engine import adjudication_engine_service, legacy_single_action_recovery
 from app.core.host_entry import (
     DeterministicHostEntryModel,
+    HostEntryDecision,
     HostEntryRouter,
     HostPublicContextProjector,
     HostPublicHistoryEntry,
@@ -397,6 +398,17 @@ async def _current_room_action_state(
             revision=str(session.state_version),
             queued=queued,
         )
+    waiting = await host_action_queue_service.get_clarification_head(db, room_id)
+    if waiting is not None:
+        return RoomActionStatePayload(
+            status="awaiting_player",
+            player_id=waiting.player_id,
+            actor_id=waiting.actor_id,
+            client_action_id=waiting.client_action_id,
+            started_at=waiting.created_at,
+            revision=str(session.state_version),
+            queued=queued,
+        )
     snapshot = action_lock_manager.snapshot(room_id)
     if snapshot is not None:
         return RoomActionStatePayload(
@@ -499,9 +511,16 @@ async def _queue_decision_for_submit(
     player_id: str,
     client_action_id: str,
     state,
+    recipient_kind: str = "keeper",
 ) -> str:
-    """Return start | enqueue | reject for an action.plan.submit."""
+    """Return start | enqueue | reject | continue for an action.plan.submit."""
 
+    if recipient_kind == "keeper":
+        waiting = await host_action_queue_service.get_clarification_wait_for_player(
+            db, room_id, player_id
+        )
+        if waiting is not None:
+            return "continue"
     if state is None or state.status == "idle":
         return "start"
     if state.client_action_id == client_action_id:
@@ -965,6 +984,110 @@ async def _run_direct_host_action(
         await _broadcast_room_action_state_fresh(item.room_id)
 
 
+async def _run_clarification_prompt(
+    db: AsyncSession,
+    item,
+    view: PlayerView,
+    websocket: WebSocket | None,
+) -> None:
+    """Persist one public clarification and wait for the same action to continue."""
+
+    await db.refresh(item)
+    text = (item.direct_response_text or "").strip()
+    if not text:
+        raise RuntimeError("needs_clarification 队列项缺少已校验文本")
+    correlation_id = f"{item.client_action_id}:clarify"
+    existing = await room_service.get_correlated_event(
+        db, item.room_id, "narration.push", correlation_id
+    )
+    recorded = existing is None
+    if existing is None:
+        payload = NarrationPushPayload(message_id=correlation_id, text=text).model_dump(
+            by_alias=True
+        )
+        payload[room_service.PERSISTED_TURN_COMPLETION_KEY] = {
+            "kind": "clarification",
+            "claimed_fact_ids": [],
+            "suggested_actions": [],
+            "npc_reply_count": 0,
+            "npc_replies": [],
+        }
+        try:
+            existing = await room_service.record_event_pending(
+                db,
+                item.room_id,
+                item.player_id,
+                "narration.push",
+                payload,
+                visibility="public",
+                actor_id=item.actor_id,
+                scene_id=view.scene.id,
+                view_revision=view.revision,
+                correlation_id=correlation_id,
+            )
+        except IntegrityError:
+            await db.rollback()
+            existing = await room_service.get_correlated_event(
+                db, item.room_id, "narration.push", correlation_id
+            )
+            if existing is None:
+                raise
+            recorded = False
+    await host_action_queue_service.mark_awaiting_clarification(db, item, [existing.id])
+    narration = NarrationOutput(kind="clarification", text=normalize_narration_text(text))
+    if recorded:
+        await _emit_turn_narration(
+            websocket,
+            item.room_id,
+            client_action_id=correlation_id,
+            narration=narration,
+        )
+    elif websocket is not None:
+        await _send_to_player(
+            websocket,
+            ServerEnvelope(
+                type="narration.push",
+                payload=NarrationPushPayload(message_id=correlation_id, text=text).model_dump(
+                    by_alias=True
+                ),
+            ).model_dump(by_alias=True),
+        )
+    await _broadcast_room_action_state_fresh(item.room_id)
+
+
+async def _continue_host_clarification(
+    db: AsyncSession,
+    websocket: WebSocket | None,
+    *,
+    room_id: str,
+    player_id: str,
+    actor_id: str,
+    client_action_id: str,
+    utterance: str,
+    player_view: PlayerView,
+) -> None:
+    """Bind the player's next keeper utterance to the waiting clarification."""
+
+    item = await host_action_queue_service.get_clarification_wait_for_player(db, room_id, player_id)
+    if item is None:
+        return
+    if not (item.continuation_text or "").strip():
+        await host_action_queue_service.save_continuation(db, item, text=utterance)
+        await _broadcast_action_utterance(
+            db,
+            PlayerInput(
+                room_id=room_id,
+                player_id=player_id,
+                actor_id=actor_id,
+                client_action_id=client_action_id,
+                utterance=utterance,
+            ),
+            player_view,
+        )
+    await _broadcast_room_action_state(db, room_id)
+    schedule_host_action_drain(room_id)
+
+
 async def _recover_keeper_queue_failure(
     db: AsyncSession,
     item,
@@ -1137,6 +1260,38 @@ async def _drain_host_action_queue(room_id: str) -> None:
                         )
                         route = decision.route
                         await db.refresh(item)
+                    if route == "needs_clarification":
+                        if not (item.continuation_text or "").strip():
+                            await _run_clarification_prompt(db, item, view, websocket)
+                            return
+                        history = await _public_host_history(
+                            db,
+                            room_id,
+                            exclude_correlation_id=item.client_action_id,
+                        )
+                        context = HostPublicContextProjector(
+                            max_turns=get_settings().recent_history_max_turns,
+                            max_chars=get_settings().recent_history_max_chars,
+                        ).project(
+                            view,
+                            current_keeper_text=item.utterance,
+                            public_history=history,
+                            clarification_question=item.direct_response_text,
+                            player_answer=item.continuation_text,
+                        )
+                        decision, provenance = await _get_host_entry_router().decide(context)
+                        if decision.route == "needs_clarification":
+                            decision = HostEntryDecision(route="delegate_to_legacy")
+                            provenance = "clarify_once_legacy"
+                        await host_action_queue_service.save_execution_route(
+                            db,
+                            item,
+                            route=decision.route,
+                            text=decision.text,
+                            provenance=provenance,
+                        )
+                        route = decision.route
+                        await db.refresh(item)
                     if route == "direct_response":
                         await _run_direct_host_action(db, item, view, websocket)
                         continue
@@ -1144,11 +1299,16 @@ async def _drain_host_action_queue(room_id: str) -> None:
                     # ActionPlan application below.
                     interlocutor_id = None
                     interlocutor_name = None
+                    continuation = (item.continuation_text or "").strip()
                     result = await action_plan_turn_application.start(
                         room_id=room_id,
                         player_id=item.player_id,
                         client_action_id=item.client_action_id,
-                        utterance=item.utterance,
+                        utterance=(
+                            f"{item.utterance}\n玩家补充：{continuation}"
+                            if continuation
+                            else item.utterance
+                        ),
                         interlocutor_id=interlocutor_id,
                         interlocutor_name=interlocutor_name,
                         on_progress=lambda event, target=websocket: _send_plan_progress(
@@ -1742,6 +1902,37 @@ async def _recover_persisted_turn_narration(
     queued_item = await host_action_queue_service.get_by_client_action(
         db, room_id, client_action_id
     )
+    if (
+        queued_item is not None
+        and host_action_queue_service.effective_execution_route(queued_item)
+        == "needs_clarification"
+    ):
+        if queued_item.player_id != player_id:
+            raise ContractError("持久化 direct response 不属于当前玩家")
+        if queued_item.status in _HOST_QUEUE_TERMINAL:
+            await _send_turn_failed(
+                websocket,
+                client_action_id,
+                TurnExecutionError(
+                    "TURN_INTERNAL_ERROR",
+                    "本次动作处理失败，请稍后重试",
+                    retryable=False,
+                ),
+            )
+            return True
+        waiting_for_answer = (
+            queued_item.status == "needs_clarification"
+            and not (queued_item.continuation_text or "").strip()
+        )
+        if waiting_for_answer:
+            view = await session_view_application.current_player_view(
+                room_id=room_id,
+                player_id=player_id,
+            )
+            await _run_clarification_prompt(db, queued_item, view, websocket)
+            return True
+        schedule_host_action_drain(room_id)
+        return True
     if (
         queued_item is not None
         and host_action_queue_service.effective_execution_route(queued_item) == "direct_response"
@@ -3064,6 +3255,7 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                                 player_id=bound_player_id,
                                 client_action_id=submit_payload.client_action_id,
                                 state=occupancy,
+                                recipient_kind="npc",
                             )
                             if decision == "enqueue":
                                 await _enqueue_host_action(
@@ -3094,7 +3286,20 @@ async def room_socket(websocket: WebSocket, room_id: str, token: str | None = No
                             player_id=bound_player_id,
                             client_action_id=submit_payload.client_action_id,
                             state=occupancy,
+                            recipient_kind="keeper",
                         )
+                        if decision == "continue":
+                            await _continue_host_clarification(
+                                db,
+                                websocket,
+                                room_id=room_id,
+                                player_id=bound_player_id,
+                                actor_id=action_view.self_actor.id,
+                                client_action_id=submit_payload.client_action_id,
+                                utterance=submit_payload.utterance,
+                                player_view=action_view,
+                            )
+                            continue
                         if decision == "enqueue":
                             await _enqueue_host_action(
                                 db,

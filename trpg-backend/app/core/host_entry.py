@@ -15,7 +15,7 @@ from typing import Literal, Protocol
 from collaboration_framework.contracts import PlayerView
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, model_validator
 
-HostEntryRoute = Literal["direct_response", "delegate_to_legacy"]
+HostEntryRoute = Literal["direct_response", "delegate_to_legacy", "needs_clarification"]
 HOST_ENTRY_FALLBACK = "我暂时没能准确接住这句话，请重新说明你想做什么。"
 HOST_ENTRY_MAX_TEXT = 1000
 HOST_ENTRY_MAX_HISTORY = 6
@@ -30,9 +30,9 @@ class HostEntryDecision(BaseModel):
 
     @model_validator(mode="after")
     def validate_route_text(self) -> HostEntryDecision:
-        if self.route == "direct_response":
+        if self.route in {"direct_response", "needs_clarification"}:
             if not isinstance(self.text, str) or not self.text.strip():
-                raise ValueError("direct_response 必须包含非空 text")
+                raise ValueError(f"{self.route} 必须包含非空 text")
             self.text = self.text.strip()
         elif self.text not in (None, ""):
             raise ValueError("delegate_to_legacy 不得包含 text")
@@ -64,6 +64,8 @@ class HostPublicContext(BaseModel):
         default=(), max_length=HOST_ENTRY_MAX_HISTORY
     )
     current_keeper_text: str = Field(min_length=1, max_length=2000)
+    clarification_question: str | None = Field(default=None, max_length=HOST_ENTRY_MAX_TEXT)
+    player_answer: str | None = Field(default=None, max_length=2000)
 
     def to_model_payload(self) -> dict[str, object]:
         """Return the exact allow-listed payload sent to a model."""
@@ -86,6 +88,8 @@ class HostPublicContextProjector:
         *,
         current_keeper_text: str,
         public_history: Sequence[HostPublicHistoryEntry | Mapping[str, object]] = (),
+        clarification_question: str | None = None,
+        player_answer: str | None = None,
     ) -> HostPublicContext:
         scene = player_view.scene
         scene_parts = [
@@ -164,6 +168,14 @@ class HostPublicContextProjector:
             # from the original text after sanitization.  Keep the contract's
             # non-empty field with a neutral placeholder instead.
             current_keeper_text=cleaned_keeper_text or "未提供可用的公开文本",
+            clarification_question=(
+                _strip_internal_tokens(clarification_question).strip() or None
+                if clarification_question
+                else None
+            ),
+            player_answer=(
+                _strip_internal_tokens(player_answer).strip() or None if player_answer else None
+            ),
         )
 
 
@@ -176,6 +188,13 @@ class DeterministicHostEntryModel:
 
     async def generate(self, context: HostPublicContext) -> Mapping[str, object]:
         text = context.current_keeper_text.strip()
+        answer = (context.player_answer or "").strip()
+        if answer:
+            if _looks_like_legacy_intent(answer) or _looks_like_legacy_intent(text):
+                return {"route": "delegate_to_legacy", "text": None}
+            return {"route": "direct_response", "text": "明白了，就按这个来。"}
+        if _looks_like_important_ambiguity(text):
+            return {"route": "needs_clarification", "text": "你具体指的是哪一个？"}
         if _looks_like_ordinary_interaction(text):
             return {"route": "direct_response", "text": "对方礼貌地点了点头。"}
         return {"route": "delegate_to_legacy", "text": None}
@@ -247,9 +266,14 @@ class HostEntryRouter:
             try:
                 raw = await self.model.generate(context)
                 decision = HostEntryDecision.model_validate(raw)
-                return self.safety_policy.validate(
-                    decision
-                ), "model_direct" if decision.route == "direct_response" else "legacy_delegate"
+                validated = self.safety_policy.validate(decision)
+                if validated.route == "direct_response":
+                    provenance = "model_direct"
+                elif validated.route == "needs_clarification":
+                    provenance = "model_clarify"
+                else:
+                    provenance = "legacy_delegate"
+                return validated, provenance
             except Exception as exc:
                 last_error = exc
                 self.safety_failures += 1
@@ -266,29 +290,39 @@ def host_entry_decision_schema() -> dict[str, object]:
     return TypeAdapter(HostEntryDecision).json_schema(mode="serialization")
 
 
+_LEGACY_INTENT_TOKENS = (
+    "搜索",
+    "调查",
+    "检查",
+    "打开",
+    "拿",
+    "取",
+    "前往",
+    "说服",
+    "威胁",
+    "欺骗",
+    "案件",
+    "秘密",
+    "背景",
+    "为什么",
+    "怎么",
+    "是否",
+)
+
+
+def _looks_like_legacy_intent(text: str) -> bool:
+    lowered = text.casefold()
+    return any(token in lowered for token in _LEGACY_INTENT_TOKENS)
+
+
+def _looks_like_important_ambiguity(text: str) -> bool:
+    lowered = text.casefold()
+    return any(token in lowered for token in ("那个", "哪一个", "哪本", "哪把"))
+
+
 def _looks_like_ordinary_interaction(text: str) -> bool:
     lowered = text.casefold()
-    if any(
-        token in lowered
-        for token in (
-            "搜索",
-            "调查",
-            "检查",
-            "打开",
-            "拿",
-            "取",
-            "前往",
-            "说服",
-            "威胁",
-            "欺骗",
-            "案件",
-            "秘密",
-            "背景",
-            "为什么",
-            "怎么",
-            "是否",
-        )
-    ):
+    if _looks_like_legacy_intent(lowered):
         return False
     return any(
         token in lowered

@@ -82,7 +82,12 @@ from .rules_v3 import (
     resolve_rule_option,
     walk_rule,
 )
-from .time_tasks import active_occurrences, settle_due_tasks
+from .time_tasks import (
+    active_occurrences,
+    cancel_time_task,
+    create_time_task,
+    settle_due_tasks,
+)
 from .timeline import advanced_to_next, next_point_after, time_advance_block_reason
 
 logger = logging.getLogger(__name__)
@@ -2474,25 +2479,96 @@ class AdjudicationEngineService:
         allow_party_time_advance: bool = False,
         allow_party_scene_transition: bool = False,
     ) -> None:
-        """Preflight a mixed rule walk before its first state mutation."""
+        """Preflight a mixed operation stream without losing author order.
 
-        ordinary = tuple(
-            item
-            for item in effects
-            if not isinstance(item, (InvokeRulesetActionStep, CreateTimeTaskStep, CancelTimeTaskStep))
-        )
-        if ordinary:
+        Time-task operations change the occurrence vocabulary used by a later
+        ``advance_world_time`` effect. Validate each contiguous ordinary batch
+        against a simulated state, then fold the operation's state write into
+        that simulation before looking at the next batch.
+        """
+
+        simulated_state = runtime.game_state.model_copy(deep=True)
+        ordinary: list[ActionEffect] = []
+
+        def flush_ordinary() -> None:
+            nonlocal simulated_state
+            if not ordinary:
+                return
+            batch_runtime = runtime.model_copy(
+                update={"game_state": simulated_state}, deep=True
+            )
             self._validate_effect_sequence(
-                runtime,
-                ordinary,
+                batch_runtime,
+                tuple(ordinary),
                 allow_party_time_advance=allow_party_time_advance,
                 allow_party_scene_transition=allow_party_scene_transition,
             )
-        for item in effects:
-            if isinstance(item, InvokeRulesetActionStep):
-                self._validate_ruleset_action(
-                    runtime, item, rule_id="rule_walk", actor_id=actor_id
+            for effect in ordinary:
+                result = effect_registry.apply(
+                    effect,
+                    effect_registry.ApplyContext(
+                        runtime=batch_runtime.model_copy(
+                            update={"game_state": simulated_state}, deep=True
+                        ),
+                        state=simulated_state,
+                        services=_EFFECT_SERVICES,
+                        room_id=simulated_state.room_id,
+                        request_id="validation",
+                        actor_id=actor_id,
+                        offset=1,
+                    ),
                 )
+                simulated_state = result.state
+            ordinary.clear()
+
+        for item in effects:
+            if isinstance(item, (CreateTimeTaskStep, CancelTimeTaskStep)):
+                flush_ordinary()
+                if isinstance(item, CreateTimeTaskStep):
+                    simulated_state, _, _ = create_time_task(
+                        runtime.module_content,
+                        simulated_state,
+                        item,
+                        rule_id="parent_action",
+                    )
+                else:
+                    simulated_state, _ = cancel_time_task(
+                        simulated_state,
+                        item,
+                        rule_id="parent_action",
+                    )
+                continue
+            if isinstance(item, InvokeRulesetActionStep):
+                flush_ordinary()
+                action_runtime = runtime.model_copy(
+                    update={"game_state": simulated_state}, deep=True
+                )
+                self._validate_ruleset_action(
+                    action_runtime, item, rule_id="parent_action", actor_id=actor_id
+                )
+                action = ruleset_registry.require_world_action(
+                    action_runtime.module_content.world_ref, item.action_id
+                )
+                simulated_state = action(
+                    ruleset_registry.RulesetActionContext(
+                        state=simulated_state,
+                        actor_id=actor_id,
+                        actor_binding=item.actor_binding,
+                        parameters=item.parameters,
+                        request_id="validation",
+                        operation_key=self._ruleset_operation_key(
+                            action_runtime,
+                            item,
+                            rule_id="parent_action",
+                            actor_id=actor_id,
+                        ),
+                    )
+                ).state
+                continue
+            # The remaining values are the discriminated ``ActionEffect``
+            # variants restored from the parent continuation.
+            ordinary.append(item)  # type: ignore[arg-type]
+        flush_ordinary()
 
     def _complete_parent_action(
         self,
@@ -2606,7 +2682,12 @@ class AdjudicationEngineService:
         self,
         runtime: EngineRuntimeSnapshot,
         state: GameState,
-        effect: ActionEffect | InvokeRulesetActionStep,
+        effect: (
+            ActionEffect
+            | InvokeRulesetActionStep
+            | CreateTimeTaskStep
+            | CancelTimeTaskStep
+        ),
         *,
         room_id: str,
         request_id: str,
@@ -2628,6 +2709,15 @@ class AdjudicationEngineService:
                 state,
                 effect,
                 rule_id="parent_action",
+                request_id=request_id,
+                actor_id=actor_id,
+                offset=offset,
+            )
+        if isinstance(effect, (CreateTimeTaskStep, CancelTimeTaskStep)):
+            return self._apply_time_task_step(
+                runtime,
+                state,
+                effect,
                 request_id=request_id,
                 actor_id=actor_id,
                 offset=offset,
@@ -2674,6 +2764,52 @@ class AdjudicationEngineService:
                 )
             )
         return result.state, tuple(emitted)
+
+    def _apply_time_task_step(
+        self,
+        runtime: EngineRuntimeSnapshot,
+        state: GameState,
+        step: CreateTimeTaskStep | CancelTimeTaskStep,
+        *,
+        request_id: str,
+        actor_id: str,
+        offset: int,
+    ) -> tuple[GameState, tuple[DomainEvent, ...]]:
+        """Execute a recovered time-task operation in the parent barrier."""
+
+        if isinstance(step, CreateTimeTaskStep):
+            state, task, occurrence = create_time_task(
+                runtime.module_content, state, step, rule_id="parent_action"
+            )
+            event_type = "time.task_scheduled"
+            payload = {
+                "task_id": task.task_id,
+                "task_key": task.task_key,
+                "rule_id": task.rule_id,
+                "occurrence_id": task.occurrence_id,
+                "created_occurrence": occurrence is not None,
+            }
+        else:
+            state, cancelled = cancel_time_task(state, step, rule_id="parent_action")
+            event_type = "time.task_cancelled"
+            payload = {
+                "task_key": step.task_key,
+                "rule_id": "parent_action",
+                "reason_code": step.reason_code,
+                "cancelled": cancelled is not None,
+            }
+        return state, (
+            self._event_from_state(
+                state,
+                room_id=runtime.game_state.room_id,
+                offset=offset,
+                request_id=request_id,
+                actor_id=actor_id,
+                event_type=event_type,
+                payload=payload,
+                visibility="hidden",
+            ),
+        )
 
     @staticmethod
     def _ruleset_operation_key(

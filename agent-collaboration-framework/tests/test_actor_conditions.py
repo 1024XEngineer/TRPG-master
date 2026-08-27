@@ -16,7 +16,7 @@ from collaboration_framework.engine.models import (
     ConditionExpiry,
     GameState,
 )
-from collaboration_framework.registry import rulesets
+from collaboration_framework.registry import predicates, rulesets
 
 
 def state() -> GameState:
@@ -129,6 +129,46 @@ class ActorConditionTests(unittest.TestCase):
                 replace(context, parameters={"condition": "unknown"})
             )
         self.assertEqual(raised.exception.code, "RULESET_CONDITION_UNKNOWN")
+
+    def test_coc7_action_rebuilds_only_active_condition_projection(self) -> None:
+        action = rulesets.require_world_action("coc-7e", "coc7.apply_condition")
+        applied = action(
+            rulesets.RulesetActionContext(
+                state=state(),
+                actor_id="actor",
+                actor_binding="actor",
+                parameters={"condition": "unconscious"},
+                request_id="request",
+                operation_key="first",
+            )
+        )
+        removed = remove_condition(
+            applied.state,
+            actor_id="actor",
+            condition_id="unconscious",
+            reason="woke up",
+        )
+        reapplied = action(
+            rulesets.RulesetActionContext(
+                state=removed.state,
+                actor_id="actor",
+                actor_binding="actor",
+                parameters={"condition": "injured_foot"},
+                request_id="request",
+                operation_key="second",
+            )
+        )
+
+        actor = reapplied.state.actors["actor"]
+        self.assertEqual(actor.conditions, ("injured_foot",))
+        self.assertFalse(
+            predicates.evaluate(
+                "actor_has_condition",
+                {"condition_id": "unconscious"},
+                state=reapplied.state,
+                actor_id="actor",
+            )
+        )
 
 
 if __name__ == "__main__":

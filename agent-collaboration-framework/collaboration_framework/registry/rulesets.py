@@ -144,7 +144,12 @@ def _coc7_apply_condition(context: RulesetActionContext) -> RulesetActionResult:
     actor_payload = actor.model_dump(mode="python")
     actor_payload["condition_states"] = [*records, record]
     actor_payload["conditions"] = list(
-        dict.fromkeys([*(item.condition_id for item in records), condition_id])
+        dict.fromkeys(
+            [
+                *(item.condition_id for item in records if item.status == "active"),
+                condition_id,
+            ]
+        )
     )
     updated_actor = actor.__class__.model_validate(actor_payload)
     actors = dict(context.state.actors)

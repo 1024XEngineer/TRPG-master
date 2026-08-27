@@ -65,10 +65,19 @@ HAPPY_FROG_VILLAGE_SPEC = BuiltinModuleSpec(
     source_path=MODULE_FIXTURE_ROOT / "幸福蛙蛙村" / "module-content-v3.json",
     display_name="幸福蛙蛙村",
 )
+CONSTANT_DARKNESS_BOX_SPEC = BuiltinModuleSpec(
+    scenario_id="00000000-0000-0000-0000-000000000007",
+    module_id="constant-darkness-box-zh-coc7",
+    version="3.0.0",
+    world_ref="coc-7e",
+    source_path=MODULE_FIXTURE_ROOT / "常暗之厢" / "module-content-v3.json",
+    display_name="常暗之厢",
+)
 BUILTIN_MODULE_SPECS = (
     PAPER_CHASE_SPEC,
     SILVER_LOCK_SPEC,
     HAPPY_FROG_VILLAGE_SPEC,
+    CONSTANT_DARKNESS_BOX_SPEC,
 )
 
 

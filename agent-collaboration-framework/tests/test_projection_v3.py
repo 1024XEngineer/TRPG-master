@@ -60,7 +60,11 @@ from collaboration_framework.engine import (
 )
 from collaboration_framework.engine.initialization import create_initial_game_state
 from collaboration_framework.engine.navigation import resolve_location_target
-from collaboration_framework.engine.projection_v3 import location_breadcrumbs
+from collaboration_framework.registry import check_profiles as check_profile_registry
+from collaboration_framework.engine.projection_v3 import (
+    location_breadcrumbs,
+    rule_check_skill_id,
+)
 from collaboration_framework.engine.rules_v3 import (
     evaluate_condition,
     pending_check_for,
@@ -2980,6 +2984,108 @@ class RuleDeclaredCheckPermissionTests(unittest.IsolatedAsyncioTestCase):
         assert execution.pending_decision is not None
         self.assertEqual(
             execution.pending_decision.options[0].skill_id, "spot-hidden"
+        )
+
+    async def test_only_skill_id_is_consumed_from_parameters(self) -> None:
+        """参数按所有者分层：E5 只消费「掷什么」，不碰 CoC7 的后果语义（#483）。
+
+        `success_loss` / `failure_loss` / `habit_cap` 是 `coc7.sanity` 的结果语义，
+        归 #486 / #487。它们出现在主动检定步上时，E5 原样保留、不解释，也不因为
+        「不认得」就报错——`recognised_parameters` 的注释写明了这条区分：「规则写错
+        了」该在发布期拒绝，「引擎还没做到」不该。
+
+        这条测的是：多写这些键不改变这次掷骰的任何东西。
+        """
+
+        module_content = self.module_with_active_check(
+            parameters={
+                "skill_id": "library-use",
+                "success_loss": "1",
+                "failure_loss": "1d6",
+                "habit_cap": "5",
+            }
+        )
+        step = next(
+            item
+            for item in next(
+                rule
+                for rule in module_content.rules
+                if rule.id == "research_library_archive"
+            ).execution.steps
+            if item.id == "check_library-use"
+        )
+        # 只认 skill_id，其余三个键连读都不读。
+        self.assertEqual(rule_check_skill_id(step), "library-use")
+
+        store = InMemoryEngineStore()
+        store.register_room(
+            module_content=module_content,
+            initial_state=game_state(module(), scene_id="library"),
+        )
+        engine = AdjudicationEngineService(
+            store, dice=DiceRoller(SequenceDiceSource([50]))
+        )
+        rules = RuleEngineService(store)
+        snapshot = await rules.read(
+            PlayerViewScope(room_id=ROOM, player_id=PLAYER, actor_id=ACTOR)
+        )
+        execution = await engine.submit(
+            SubmitAdjudicationRequest(
+                room_id=ROOM,
+                player_id=PLAYER,
+                adjudication=ActionAdjudication(
+                    request_id="e5-parameter-ownership",
+                    source_revision=snapshot.revision,
+                    actor_id=ACTOR,
+                    summary="查阅旧报",
+                    target=ActionTarget(kind="entity", id="newspaper_archive"),
+                    method=ActionMethod(family="research", description="查阅旧报"),
+                    rule_decision=RuleDecisionRef(
+                        rule_id="research_library_archive", option_id="library-use"
+                    ),
+                    check=RequiredAdjudicationCheck(
+                        candidates=(
+                            SkillCheckCandidate(
+                                candidate_id="library-use",
+                                skill_id="library-use",
+                                difficulty="regular",
+                                method_summary="按年份检索",
+                                player_safe_reason="使用图书馆使用",
+                            ),
+                        )
+                    ),
+                ),
+            )
+        )
+        pending = execution.pending_decision
+        assert pending is not None
+        # 提交照常通过，掷的还是图书馆使用 70，SAN 一点没动。
+        self.assertEqual(pending.options[0].skill_id, "library-use")
+        self.assertEqual(pending.options[0].target_value, 70)
+        self.assertEqual(
+            store.inspect_state(ROOM).actors[ACTOR].resources.san, 55
+        )
+
+    def test_the_profile_table_stays_out_of_the_active_path(self) -> None:
+        """`coc7.skill` 故意不注册，本 Issue 也不给它注册。
+
+        这张表自己的规矩是「登记一个名字等于宣称引擎能执行它，必须和执行器同一次
+        改动落地」。`coc7.skill` 没有固定的 `resource`——目标值来自
+        `actor.state["skills"][skill_id]`，不是 `ActorResources` 上某个字段——所以
+        `_passive_check_option` 执行不了它。注册它会让发布期校验开始放行引擎跑不动
+        的 `passive_rule` 步，把一个发布期就能拦住的错误推迟到运行时。
+
+        主动检定的目标值走 `_validated_options`，从来不经过这张表。
+        """
+
+        self.assertFalse(check_profile_registry.is_registered("coc7.skill"))
+        self.assertFalse(check_profile_registry.is_registered("coc7.luck"))
+        sanity = check_profile_registry.registration_for("coc7.sanity")
+        assert sanity is not None
+        # 后果语义仍归 coc7.sanity，E5 不接手。
+        self.assertEqual(
+            sanity.recognised_parameters,
+            frozenset({"success_loss", "failure_loss", "habit_cap"}),
         )
 
     async def test_a_free_check_keeps_both_permissions(self) -> None:

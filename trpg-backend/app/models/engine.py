@@ -551,7 +551,7 @@ class HostActionQueueItem(Base):
             name="ck_host_action_queue_recipient_kind",
         ),
         CheckConstraint(
-            "execution_route IN ('unresolved', 'direct_response', "
+            "execution_route IN ('unresolved', 'direct_response', 'rule_once', "
             "'delegate_to_legacy', 'needs_clarification')",
             name="ck_host_action_queue_execution_route",
         ),
@@ -607,6 +607,7 @@ class HostActionQueueItem(Base):
     direct_response_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     continuation_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     execution_provenance: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    rule_request_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     position: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="queued")
     attempt_count: Mapped[int] = mapped_column(

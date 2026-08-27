@@ -734,6 +734,19 @@
           "default": true,
           "title": "Requires Check",
           "type": "boolean"
+        },
+        "check_skill_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Check Skill Id"
         }
       },
       "required": [

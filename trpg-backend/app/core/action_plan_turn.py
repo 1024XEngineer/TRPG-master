@@ -772,21 +772,11 @@ def _match_travel_target(view: PlayerView, text: str) -> _TravelTarget | None:
         match_text = text[arrival_marker + 1 :]
     matches: list[tuple[tuple[int, int], str, _TravelTarget]] = []
     for location in view.known_locations:
-        # Region nodes are containment breadcrumbs, not actor destinations.
-        # Letting their labels compete with a real entrance produces a false
-        # blocked target such as "度假村别墅" instead of its reception room.
-        if location.kind == "region":
-            continue
         if location.existence != "known" or location.localization != "located":
             continue
         score = _best_travel_label_score(
             match_text,
-            (
-                location.name,
-                location.id,
-                *location.aliases,
-                *_ambient_venue_aliases(location.id),
-            ),
+            (location.name, location.id, *_ambient_venue_aliases(location.id)),
         )
         if score is not None:
             matches.append((score, location.id, _TravelTarget(location.id, location.name)))
@@ -1235,6 +1225,59 @@ class ActionPlanTurnApplication:
             player_input,
             result,
             on_phase=on_phase,
+        )
+
+    async def start_rule_once(
+        self,
+        *,
+        room_id: str,
+        player_id: str,
+        client_action_id: str,
+        utterance: str,
+        adjudication: ActionAdjudication,
+        on_progress: Callable[[object], Awaitable[None]] | None = None,
+        on_phase: TurnPhaseObserver | None = None,
+    ) -> ActionPlanTurnResult:
+        """Execute a pre-validated single rule adjudication without replanning."""
+
+        await _emit_phase(on_phase, "reading_player_view")
+        actor_id = await self._resolve_actor_id(room_id, player_id)
+        if adjudication.actor_id != actor_id:
+            raise TurnExecutionError(
+                "RULE_ACTOR_MISMATCH",
+                "规则请求不属于当前角色",
+                retryable=False,
+            )
+        player_input = PlayerInput(
+            room_id=room_id,
+            player_id=player_id,
+            actor_id=actor_id,
+            client_action_id=client_action_id,
+            utterance=utterance,
+        )
+        existing = await self._orchestrator.get_run(room_id, client_action_id)
+        if existing is not None:
+            advanced = await self._orchestrator.start_or_resume(
+                player_input,
+                plan=None,
+                on_progress=on_progress,
+            )
+        else:
+            plan = ActionPlan(
+                goal=utterance,
+                steps=(ActionPlanStep(kind="action", semantic_goal=adjudication.summary),),
+            )
+            advanced = await self._orchestrator.start_or_resume(
+                player_input,
+                plan=plan,
+                initial_adjudication=adjudication,
+                on_progress=on_progress,
+            )
+        return await self._finish_plan_with_phases(
+            player_input,
+            advanced,
+            on_phase=on_phase,
+            verify_fingerprint=existing is None,
         )
 
     @staticmethod
@@ -1889,24 +1932,21 @@ class ActionPlanTurnApplication:
                             )
                         }
                     )
-                elif attempt == 0 and exc.reason.startswith("persistent_claim_without_evidence:"):
-                    # 持久状态校验失败时，明确要求模型删除无证据断言，避免原地重试。
+                elif attempt == 0 and exc.reason.startswith("persistent_claim_without_evidence"):
                     context = context.model_copy(
                         update={
                             "narration_retry_hint": (
-                                "上一版叙事包含没有权威证据确认的持久状态或物品变化。"
-                                "请删除该断言，只描述当前 PlayerView 和已提交结果能够证明的内容。"
+                                "上一版叙事包含没有权威证据确认的状态断言。"
+                                "请删除该断言，只描述当前 PlayerView 与已提交的公开结果。"
                             )
                         }
                     )
                 elif attempt == 0:
-                    # 其他安全校验失败也必须改变下一次模型输入，而不是重复原请求。
                     context = context.model_copy(
                         update={
                             "narration_retry_hint": (
-                                "上一版叙事未通过玩家可见输出安全校验。请重新生成符合当前"
-                                " PlayerView、已提交结果和输出协议的自然叙事，不得输出内部字段、"
-                                "未经证据确认的事实或不匹配的叙事类型。"
+                                "上一版叙事未通过玩家可见输出安全校验。"
+                                "请遵循输出协议，只描述当前 PlayerView 与已提交的公开结果。"
                             )
                         }
                     )
@@ -3202,14 +3242,115 @@ def _match_rule_candidate(capabilities, text: str, target_id: str | None):
     return candidate, candidate.options[0] if candidate.options else None
 
 
-# Match View action families are stable contract identifiers. This small local
-# vocabulary is intentionally not exhaustive: these words only recognize a
-# player's explicit verb and never act as a rule admission gate. Ties still
-# yield no match below.
-# 这里的词汇只是离线测试/兜底提示，不是模组动作族的完整注册表。
+def build_rule_once_adjudication(
+    *,
+    player_input: PlayerInput,
+    player_view: PlayerView,
+    capabilities: KeeperCapabilityView,
+    rule_id: str,
+    option_id: str,
+    target_kind: str | None = None,
+    target_id: str | None = None,
+    summary: str | None = None,
+) -> ActionAdjudication:
+    """Build one rule-owned adjudication from explicit opaque references."""
+
+    if capabilities.revision != player_view.revision:
+        raise ValueError("RULE_SOURCE_REVISION_STALE")
+    if capabilities.actor_id != player_input.actor_id:
+        raise ValueError("RULE_ACTOR_MISMATCH")
+    candidate = next(
+        (item for item in capabilities.rule_candidates if item.rule_id == rule_id),
+        None,
+    )
+    if candidate is None:
+        raise ValueError("RULE_CANDIDATE_UNAVAILABLE")
+    option = next((item for item in candidate.options if item.id == option_id), None)
+    if option is None:
+        raise ValueError("RULE_OPTION_UNAVAILABLE")
+    allowed_kinds = tuple(candidate.target_kinds)
+    if target_kind is None:
+        target_kind = (
+            allowed_kinds[0]
+            if len(allowed_kinds) == 1
+            else "entity"
+            if candidate.target_ids
+            else "location"
+        )
+    if allowed_kinds and target_kind not in allowed_kinds:
+        raise ValueError("RULE_TARGET_KIND_UNAVAILABLE")
+    if target_id is None:
+        if len(candidate.target_ids) == 1:
+            target_id = candidate.target_ids[0]
+        elif target_kind == "location":
+            target_id = player_view.scene.id
+        else:
+            raise ValueError("RULE_TARGET_REQUIRED")
+    if candidate.target_ids and target_id not in candidate.target_ids:
+        raise ValueError("RULE_TARGET_UNAVAILABLE")
+    visible_targets: set[tuple[str, str]] = {
+        ("location", player_view.scene.id),
+        ("actor", player_view.self_actor.id),
+    }
+    visible_targets.update(("location", item.id) for item in player_view.known_locations)
+    visible_targets.update(
+        ("location", item.destination.scene_id)
+        for item in player_view.scene.available_exits
+        if item.destination is not None
+    )
+    visible_targets.update(("entity", item.id) for item in player_view.scene.visible_entities)
+    visible_targets.update(("entity", item.id) for item in player_view.scene.loose_items)
+    visible_targets.update(("entity", item.id) for item in player_view.inventory)
+    visible_targets.update(("actor", item.id) for item in player_view.scene.visible_actors)
+    if not candidate.target_ids and (target_kind, target_id) not in visible_targets:
+        raise ValueError("RULE_TARGET_NOT_VISIBLE")
+    resolved_target_kind = cast(
+        Literal["information", "entity", "location", "actor", "world"], target_kind
+    )
+    skill_ids = {item.id for item in player_view.self_actor.skills}
+    attribute_ids = {item.id for item in player_view.self_actor.attributes}
+    resource_ids = {item.id for item in player_view.self_actor.resources}
+    check = NoAdjudicationCheck()
+    if option.requires_check:
+        check_skill_id = option.check_skill_id
+        if check_skill_id is None:
+            raise ValueError("RULE_CHECK_SKILL_UNAVAILABLE")
+        if check_skill_id not in skill_ids | attribute_ids | resource_ids:
+            raise ValueError("RULE_CHECK_SKILL_UNAVAILABLE")
+        check = RequiredAdjudicationCheck(
+            candidates=(
+                SkillCheckCandidate(
+                    candidate_id=option.id,
+                    skill_id=check_skill_id,
+                    difficulty="regular",
+                    method_summary=summary or player_input.utterance,
+                    player_safe_reason="使用当前规则候选允许的检定方式",
+                ),
+            )
+        )
+    description = (summary or player_input.utterance).strip()[:500]
+    return ActionAdjudication(
+        request_id=player_input.client_action_id,
+        source_revision=player_view.revision,
+        actor_id=player_input.actor_id,
+        summary=description,
+        target=ActionTarget(kind=resolved_target_kind, id=target_id),
+        method=ActionMethod(
+            family=candidate.action_families[0] if candidate.action_families else "action",
+            description=description,
+        ),
+        check=check,
+        rule_decision=RuleDecisionRef(rule_id=rule_id, option_id=option_id),
+        success_effects=(),
+        failure_effects=(),
+    )
+
+
+# Match View action families are stable contract identifiers. These localized
+# words merely recognize the player's explicit verb; they do not add a rule or
+# reveal module-only facts. Ties still yield no match below.
 _ACTION_FAMILY_HINTS: dict[str, tuple[str, ...]] = {
     "observe": ("仔细观察", "观察", "察看", "查看"),
-    "surveil": ("监视", "观察周围", "留意动静"),
     "search": ("搜索", "搜查", "查找", "找线索", "寻找"),
     "research": ("研究", "查阅", "检索", "翻阅", "查旧报"),
     "social": ("留下好印象", "博取信任", "说服"),
@@ -3225,6 +3366,7 @@ __all__ = [
     "DeterministicHostTurnDecisionModel",
     "HostTurnDecisionModel",
     "build_action_plan_turn_application",
+    "build_rule_once_adjudication",
 ]
 
 

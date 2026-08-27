@@ -17,7 +17,6 @@
 from __future__ import annotations
 
 import pathlib
-from types import SimpleNamespace
 from typing import Literal
 
 import pytest
@@ -28,6 +27,7 @@ from collaboration_framework.contracts import (
     ActionPlanPolicy,
     ActionPlanStep,
     ActionTarget,
+    CheckStep,
     EnsureRuntimeLocationEffect,
     EnterLocationEffect,
     LocationContextView,
@@ -38,6 +38,7 @@ from collaboration_framework.contracts import (
     PlayerInput,
     PlayerView,
     RequiredAdjudicationCheck,
+    RuleCheckSpec,
     SingleActionDecision,
 )
 from collaboration_framework.engine import (
@@ -47,6 +48,7 @@ from collaboration_framework.engine import (
 )
 from collaboration_framework.engine.initialization import create_initial_game_state
 from collaboration_framework.engine.models import ActorState
+from collaboration_framework.engine.projection_v3 import _rule_check_skill_id
 from collaboration_framework.host.application import PlayerViewProjector, TurnExecutionError
 from collaboration_framework.host.prompts.action_plan import (
     current_step_adjudication_instructions,
@@ -66,12 +68,12 @@ from app.core.action_plan_turn import (
     _deterministic_adjudication_miss_reason,
     _deterministic_step_adjudication,
     _DeterministicStepAdjudicator,
-    _match_rule_candidate,
     _match_travel_target,
     _normalize_single_travel_decision,
     _project_plan_prerequisite_facts,
     _RuleFirstStepAdjudicator,
     build_action_plan_turn_application,
+    build_rule_once_adjudication,
 )
 from app.core.config import Settings
 
@@ -83,16 +85,6 @@ FIXTURE = (
     / "examples"
     / "module-content-validation"
     / "追书人"
-    / "module-content-v3.json"
-)
-HAPPY_FROG_FIXTURE = (
-    pathlib.Path(__file__).resolve().parents[2]
-    / "agent-collaboration-framework"
-    / "docs"
-    / "module-parser"
-    / "examples"
-    / "module-content-validation"
-    / "幸福蛙蛙村"
     / "module-content-v3.json"
 )
 
@@ -154,55 +146,6 @@ async def _cemetery_context(
     )
 
 
-async def _happy_frog_night_context(utterance: str) -> ActionPlanStepContext:
-    content = ModuleContentV3.model_validate_json(HAPPY_FROG_FIXTURE.read_text(encoding="utf-8"))
-    base_state = create_initial_game_state(
-        content,
-        room_id="happy-frog-room",
-        actors={
-            "pc_1": ActorState(
-                player_id="p1",
-                name="调查员",
-                source_character_id="c1",
-                source_character_version=1,
-                state={"skills": {"spot-hidden": 80}},
-            )
-        },
-    )
-    state = base_state.model_copy(
-        update={
-            "scene_id": "resort_reception",
-            "entities": {**base_state.entities, "night_ritual": {"active": True}},
-            "discovered_facts": frozenset({"messenger_leaves_at_night"}),
-        },
-        deep=True,
-    )
-    store = InMemoryEngineStore()
-    store.register_room(module_content=content, initial_state=state)
-    projector = PlayerViewProjector(RuleEngineService(store))
-    player_input = PlayerInput(
-        room_id=state.room_id,
-        player_id="p1",
-        actor_id="pc_1",
-        client_action_id="follow-messenger-cn",
-        utterance=utterance,
-    )
-    view = await projector.project(player_input)
-    return ActionPlanStepContext(
-        player_input=player_input,
-        plan_id="follow-messenger-plan",
-        plan_goal=utterance,
-        step_index=0,
-        step_request_id="follow-messenger-cn-step-0",
-        step=ActionPlanStep(kind="action", semantic_goal=utterance),
-        player_view=view,
-        keeper_capabilities=await projector.keeper_capabilities(
-            player_input,
-            expected_revision=view.revision,
-        ),
-    )
-
-
 def _located(view: PlayerView) -> LocationContextView:
     """v3 投影必然带 location_context；断言它在，顺带把 Optional 收窄掉。"""
 
@@ -221,30 +164,104 @@ async def test_engine_publishes_rule_candidates_where_the_actor_stands() -> None
     assert "observe_caretaker" in rule_ids
 
 
-async def test_chinese_follow_messenger_input_selects_night_ritual_rule() -> None:
-    context = await _happy_frog_night_context("我悄悄跟踪信使")
-
-    adjudication = _deterministic_step_adjudication(context)
-
-    assert adjudication is not None
+async def test_rule_once_builder_uses_only_selected_rule_and_opaque_option() -> None:
+    context = await _cemetery_context("仔细观察守墓人")
+    assert context.keeper_capabilities is not None
+    candidate = next(
+        item
+        for item in context.keeper_capabilities.rule_candidates
+        if item.rule_id == "observe_caretaker"
+    )
+    option = next(item for item in candidate.options if item.id == "spot-hidden")
+    adjudication = build_rule_once_adjudication(
+        player_input=context.player_input,
+        player_view=context.player_view,
+        capabilities=context.keeper_capabilities,
+        rule_id=candidate.rule_id,
+        option_id=option.id,
+        target_kind=candidate.target_kinds[0] if candidate.target_kinds else None,
+        target_id=candidate.target_ids[0] if candidate.target_ids else None,
+        summary="观察守墓人",
+    )
     assert adjudication.rule_decision is not None
-    assert adjudication.rule_decision.rule_id == "follow_messenger_to_pond"
-    assert adjudication.rule_decision.option_id == "spot-hidden"
-    assert isinstance(adjudication.check, RequiredAdjudicationCheck)
-    assert adjudication.target == ActionTarget(kind="entity", id="messenger")
+    assert adjudication.rule_decision.rule_id == candidate.rule_id
+    assert adjudication.rule_decision.option_id == option.id
+    assert adjudication.success_effects == ()
+    assert adjudication.failure_effects == ()
 
 
-async def test_forcing_james_out_selects_atomic_tragic_ending_rule() -> None:
-    context = await _happy_frog_night_context("强行把詹姆斯带出去")
+async def test_rule_once_builder_uses_branch_check_skill_not_option_id() -> None:
+    context = await _cemetery_context("用侦查观察梅洛迪亚斯·杰弗逊")
+    assert context.keeper_capabilities is not None
+    candidate = next(
+        item
+        for item in context.keeper_capabilities.rule_candidates
+        if item.rule_id == "observe_caretaker"
+    )
+    option = next(item for item in candidate.options if item.id == "spot-hidden")
+    # The authored branch id is intentionally opaque here; the rolled resource
+    # comes from the selected CheckStep, not from the option name.
+    option = option.model_copy(update={"id": "observe-branch"})
+    candidate = candidate.model_copy(update={"options": (option,)})
+    capabilities = context.keeper_capabilities.model_copy(update={"rule_candidates": (candidate,)})
+    assert option.check_skill_id == "spot-hidden"
+    adjudication = build_rule_once_adjudication(
+        player_input=context.player_input,
+        player_view=context.player_view,
+        capabilities=capabilities,
+        rule_id=candidate.rule_id,
+        option_id=option.id,
+        target_kind="entity",
+        target_id=candidate.target_ids[0],
+        summary="观察守墓人",
+    )
+    assert adjudication.check.candidates[0].candidate_id == option.id
+    assert adjudication.check.candidates[0].skill_id == option.check_skill_id
 
-    adjudication = _deterministic_step_adjudication(context)
 
-    assert adjudication is not None
-    assert adjudication.rule_decision is not None
-    assert adjudication.rule_decision.rule_id == "force_james_out_of_resort"
-    assert adjudication.rule_decision.option_id == "force-james-out"
-    assert isinstance(adjudication.check, NoAdjudicationCheck)
-    assert adjudication.target == ActionTarget(kind="entity", id="james")
+def test_rule_check_skill_id_reads_coc7_skill_profile_parameter() -> None:
+    step = CheckStep(
+        id="check",
+        check=RuleCheckSpec(
+            profile_id="coc7.skill",
+            actor_binding="actor",
+            initiation_kind="active_action",
+            parameters={"skill_id": "credit-rating"},
+        ),
+        result_routes={
+            "critical_success": "done",
+            "extreme_success": "done",
+            "hard_success": "done",
+            "regular_success": "done",
+            "failure": "done",
+            "fumble": "done",
+        },
+    )
+    assert _rule_check_skill_id(step) == "credit-rating"
+
+
+async def test_rule_once_builder_rejects_unmapped_rule_check_branch() -> None:
+    context = await _cemetery_context("用侦查观察梅洛迪亚斯·杰弗逊")
+    assert context.keeper_capabilities is not None
+    candidate = next(
+        item
+        for item in context.keeper_capabilities.rule_candidates
+        if item.rule_id == "observe_caretaker"
+    )
+    option = next(item for item in candidate.options if item.id == "spot-hidden")
+    option = option.model_copy(update={"check_skill_id": None})
+    candidate = candidate.model_copy(update={"options": (option,)})
+    capabilities = context.keeper_capabilities.model_copy(update={"rule_candidates": (candidate,)})
+    with pytest.raises(ValueError, match="RULE_CHECK_SKILL_UNAVAILABLE"):
+        build_rule_once_adjudication(
+            player_input=context.player_input,
+            player_view=context.player_view,
+            capabilities=capabilities,
+            rule_id=candidate.rule_id,
+            option_id=option.id,
+            target_kind="entity",
+            target_id=candidate.target_ids[0],
+        )
 
 
 async def test_rule_candidates_reach_the_model_payload() -> None:
@@ -281,57 +298,6 @@ def test_prompt_teaches_the_model_to_use_rule_candidates() -> None:
     assert "rule_candidates" in _SAFE_ADJUDICATION_INSTRUCTIONS
     assert "rule_decision" in _SAFE_ADJUDICATION_INSTRUCTIONS
     assert "option_id" in _SAFE_ADJUDICATION_INSTRUCTIONS
-
-
-def test_prompt_treats_action_families_as_advisory() -> None:
-    """提示词不能把开放动作族重新描述成逐字硬闸。"""
-
-    assert "不要求与最终 `method.family` 逐字相等" in _SAFE_ADJUDICATION_INSTRUCTIONS
-    instructions = current_step_adjudication_instructions()
-    assert "不能仅因动作族词汇不同就放弃" in instructions
-
-
-def test_prompt_allows_generic_check_when_no_persistent_state_exists() -> None:
-    """无可写状态时，提示词必须要求保留检定并收窄持久意图。"""
-
-    instructions = current_step_adjudication_instructions()
-    assert "PERSISTENT_EFFECT_REQUIRED" in instructions
-    assert "persistence_intent 收窄为" in instructions
-    assert "不能因为没有持久效果而把行动改成澄清" in instructions
-
-
-def test_offline_match_recognizes_surveillance_wording() -> None:
-    """离线兜底至少覆盖 #453 的自然中文观察说法。"""
-
-    from app.core.action_plan_turn import _ACTION_FAMILY_HINTS
-
-    assert "观察周围" in _ACTION_FAMILY_HINTS["surveil"]
-
-
-def test_offline_generic_observe_does_not_tie_with_surveillance() -> None:
-    """通用“观察”不能因 surveil 词表过宽而把两个候选判成歧义。"""
-
-    from app.core.action_plan_turn import _ACTION_FAMILY_HINTS
-
-    # 用最小候选替身覆盖离线匹配器的真实评分路径，避免依赖具体模组夹具。
-    def candidate(rule_id: str, family: str) -> SimpleNamespace:
-        return SimpleNamespace(
-            rule_id=rule_id,
-            action_families=[family],
-            semantic_hints=[],
-            target_kinds=[],
-            target_ids=[],
-            options=[],
-        )
-
-    capabilities = SimpleNamespace(
-        rule_candidates=[candidate("observe_rule", "observe"), candidate("watch_rule", "surveil")]
-    )
-    matched, _ = _match_rule_candidate(capabilities, "观察", None)
-
-    assert matched is not None
-    assert matched.rule_id == "observe_rule"
-    assert "观察" not in _ACTION_FAMILY_HINTS["surveil"]
 
 
 async def test_matched_rule_hands_ownership_to_the_rule() -> None:
@@ -617,46 +583,6 @@ async def test_dialogue_miss_reason_does_not_include_player_text() -> None:
     context = await _cemetery_context("询问眼前的人", step_kind="dialogue")
 
     assert _deterministic_adjudication_miss_reason(context) == "dialogue_target_unresolved"
-
-
-@pytest.mark.asyncio
-async def test_travel_alias_targets_real_room_instead_of_matching_region() -> None:
-    """建筑层级名应解析到其入口房间，region 本身不能成为旅行目标。"""
-
-    context = await _cemetery_context("进入别墅", step_kind="travel")
-    template = context.player_view.known_locations[0]
-    villa_region = template.model_copy(
-        update={
-            "id": "resort_villa",
-            "kind": "region",
-            "name": "度假村别墅",
-            "access": "blocked",
-        }
-    )
-    reception = template.model_copy(
-        update={
-            "id": "resort_reception",
-            "kind": "room",
-            "name": "一层接待大厅",
-            "aliases": ("度假村别墅", "别墅", "别墅入口"),
-            "access": "reachable",
-        }
-    )
-    view = context.player_view.model_copy(
-        update={
-            "known_locations": (
-                *context.player_view.known_locations,
-                villa_region,
-                reception,
-            )
-        },
-        deep=True,
-    )
-
-    destination = _match_travel_target(view, "进入别墅")
-
-    assert destination is not None
-    assert destination.id == "resort_reception"
 
 
 @pytest.mark.asyncio

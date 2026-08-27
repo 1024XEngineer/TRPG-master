@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.controller import ws as ws_controller
 from app.core.host_entry import (
     DeterministicHostEntryModel,
+    HostEntryContext,
     HostEntryRouter,
     HostPublicContext,
 )
@@ -33,9 +34,9 @@ class _RecordingHostEntryModel:
         self.contexts: list[HostPublicContext] = []
         self._inner = DeterministicHostEntryModel()
 
-    async def generate(self, context: HostPublicContext) -> Mapping[str, object]:
+    async def generate(self, context: HostPublicContext | HostEntryContext) -> Mapping[str, object]:
         self.calls += 1
-        self.contexts.append(context)
+        self.contexts.append(context.public if isinstance(context, HostEntryContext) else context)
         return await self._inner.generate(context)
 
 
